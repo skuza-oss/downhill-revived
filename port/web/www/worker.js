@@ -80,8 +80,8 @@ async function start(m) {
     threaded ? WebAssembly.compileStreaming(fetch('build/gqueue.wasm')) : null, threaded ? WebAssembly.compileStreaming(fetch('build/vu.wasm')) : null]);
   const disc = discSource(m);
   say(`disc: ${(disc.size / 2 ** 30).toFixed(2)} GiB`);
-  const keys = new Uint8Array(m.input, 0, 256), pads = new Int32Array(m.input, 256, 16);
-  const mouse = new Int32Array(m.input, 320, 16);  // main.js: HostMouse, then [12] riding
+  const keys = new Uint8Array(m.input, 0, 256), pads = new Int32Array(m.input, 256, 32);  // main.js: players 1-4
+  const mouse = new Int32Array(m.input, 384, 16);  // main.js: HostMouse, then [12] riding
   const ring = { head: new Int32Array(m.audio, 0, 2), data: new Int16Array(m.audio, 8), frames: (m.audio.byteLength - 8) / 4 };
 
   const vfs = await createVfs(say);
@@ -144,10 +144,14 @@ async function start(m) {
   const yieldTask = () => new Promise(r => { wake = r; channel.port2.postMessage(0); });
   let period = 1000 / 59.94, due = performance.now(), shown = 0, lastReport = performance.now(), lastField = 0;
   let riding = 0, held = new Int8Array(KEYS.length);
+  // host_pad_device: player `port` (0-3; played by hand the game opens four pads on a multitap,
+  // pad.c) as hle.h's HostPad. connected: a gamepad for that player, player 1 always (the keyboard).
   function pad(port, out) {
-    const o = span(out, 18); o.fill(0); o[2] = o[3] = o[4] = o[5] = 128;
+    const o = span(out, 19); o.fill(0); o[2] = o[3] = o[4] = o[5] = 128;
     let buttons = 0; const p = pads.subarray(port * 8, port * 8 + 8);
-    if (Atomics.load(p, 0)) { buttons = Atomics.load(p, 1); for (let i = 0; i < 4; i++) o[2 + i] = Atomics.load(p, 2 + i); }
+    const connected = p.length > 0 && Atomics.load(p, 0) !== 0;
+    if (connected) { buttons = Atomics.load(p, 1); for (let i = 0; i < 4; i++) o[2 + i] = Atomics.load(p, 2 + i); }
+    o[18] = connected || port === 0 ? 1 : 0;
     if (port === 0) {
       riding = dv.getInt32(0x0829E290, true) !== 0;
       Atomics.store(mouse, 12, riding ? 1 : 0);  // the page hides the cursor while riding

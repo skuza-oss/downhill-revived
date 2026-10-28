@@ -8,11 +8,12 @@ const params = new URLSearchParams(location.search);
 const addLog = text => { log.textContent += text + '\n'; log.scrollTop = log.scrollHeight; };
 
 if (!crossOriginIsolated) status.textContent = 'This page needs cross-origin isolation: start it with port/web/serve.mjs.';
-const input = new SharedArrayBuffer(256 + 16 * 4 + 16 * 4);
-const keys = new Uint8Array(input, 0, 256), pads = new Int32Array(input, 256, 16);
+const input = new SharedArrayBuffer(256 + 32 * 4 + 16 * 4);
+// pads: players 1-4, 8 ints each (played by hand the game opens four pads on a multitap, pad.c).
+const keys = new Uint8Array(input, 0, 256), pads = new Int32Array(input, 256, 32);
 // The mouse: host_api.h's HostMouse (x, y as 65536ths of the picture, buttons held, seen, moves,
 // presses of the left, right and middle buttons, wheel steps), then [12] riding (the worker's).
-const mouse = new Int32Array(input, 320, 16);
+const mouse = new Int32Array(input, 384, 16);
 const audio = new SharedArrayBuffer(8 + 48000 / 4 * 4);  // 0.25 s of 48 kHz stereo
 
 // KeyboardEvent.code -> the Windows virtual-key code keyboard.c's table uses (US places).
@@ -31,8 +32,8 @@ addEventListener('blur', () => keys.fill(0));
 // Standard-mapping gamepads -> PS2 buttons (libpad bits) and sticks (0..255, 128 centred).
 const GP = [16384, 8192, 32768, 4096, 1024, 2048, 256, 512, 1, 8, 2, 4, 16, 64, 128, 32];
 function pollPads() {
-  const list = [...(navigator.getGamepads?.() || [])].filter(p => p && p.mapping === 'standard').slice(0, 2);
-  for (let port = 0; port < 2; port++) {
+  const list = [...(navigator.getGamepads?.() || [])].filter(p => p && p.mapping === 'standard').slice(0, 4);
+  for (let port = 0; port < 4; port++) {
     const p = list[port], o = port * 8;
     if (!p) { Atomics.store(pads, o, 0); continue; }
     let b = 0; p.buttons.forEach((x, i) => { if (x.pressed && GP[i]) b |= GP[i]; });
