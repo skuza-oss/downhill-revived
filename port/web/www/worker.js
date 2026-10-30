@@ -72,9 +72,9 @@ async function start(m) {
   if (typeof WebAssembly.Suspending !== 'function') throw Error('this browser has no JSPI (WebAssembly.Suspending); use Chrome or Edge 137 or later');
   const t0 = performance.now();
   const fetchBytes = async url => { const r = await fetch(url); if (!r.ok) throw Error(`${url}: ${r.status}`); return r.arrayBuffer(); };
-  const [coreBytes, graphicsBytes, metadata, netBytes] = await Promise.all([
+  const [coreBytes, graphicsBytes, metadata, netBytes, discModule] = await Promise.all([
     fetchBytes('build/dhd_core.wasm'), fetchBytes('build/graphics.wasm'), fetch('build/imports.json').then(r => r.json()),
-    fetchBytes('build/dhd_net.wasm')]);
+    fetchBytes('build/dhd_net.wasm'), WebAssembly.compileStreaming(fetch('build/dhd_disc.wasm'))]);
   // The threaded build's core defines a shared memory; its graphics imports link to gqueue.wasm.
   const threaded = definesSharedMemory(coreBytes);
   if (threaded) shareSafeDecoding();
@@ -221,6 +221,7 @@ async function start(m) {
     await startWorker('graphics.js', 'graphics', { module: graphicsModule, canvas: m.canvas }, [m.canvas]);
     await startWorker('vu.js', 'VU', { module: vuModule }, []);
   }
+  let discJob = null;  // the disc check's job: { answer } (host_service_disc_check_*)
   let soundFrames = 0;  // stereo frames the game wrote (the status line's seconds of sound)
   const impl = {
     host_getenv: a => env[str(a)] ? intern(env[str(a)]) : 0,
@@ -274,9 +275,18 @@ async function start(m) {
     host_dir_next: (id, out) => { const d = dirs.get(id); if (!d || ++d.at >= d.list.length) return 0; entry(d.list[d.at], out); return 1; },
     host_dir_close: id => { dirs.delete(id); },
     host_service_host_disc_ready: () => 0, host_service_host_skip_movies: () => 1,
-    // The online disc check (host_sdl.c's dhd_disc job): not in the browser yet, so the check can't
-    // start and ONLINE says so; ?env.DHD_NET_ISO_SHA256 gives a files hash for tests.
-    host_service_disc_check_start: () => 0, host_service_disc_check_poll: () => -1,
+    // The online disc check (host_sdl.c's dhd_disc job): dhd_disc.wasm in a worker of its own
+    // (disc_worker.js), as natively on a thread; poll answers as dhd_disc_check does.
+    host_service_disc_check_start: iso => { if (discJob || str(iso) !== env.DHD_ISO) return 0;
+      const job = discJob = { answer: null }, w = new Worker('disc_worker.js', { type: 'module' });
+      w.onmessage = e => { job.answer = e.data; w.terminate(); };
+      w.onerror = e => { job.answer = { code: -1, digest: '', note: e.message }; w.terminate(); };
+      w.postMessage({ file: m.file, isoUrl: m.isoUrl, wasm: discModule }); return 1; },
+    host_service_disc_check_poll: (digest, note, size) => { if (!discJob) return -1; const a = discJob.answer; if (!a) return 0;
+      discJob = null;
+      if (a.digest) span(digest, 32).set(a.digest.match(/../g).map(h => parseInt(h, 16)));
+      if (size > 0) { const b = new TextEncoder().encode(a.note).subarray(0, size - 1), o = span(note, b.length + 1); o.set(b); o[b.length] = 0; }
+      return a.code; },
     host_service_host_pad_device: (port, a) => pad(port, a),
     // host_api.h's HostMouse, 36 bytes, from the page (main.js)
     host_service_mouse_state: out => { const o = span(out, 36);

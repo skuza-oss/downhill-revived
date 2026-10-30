@@ -59,10 +59,13 @@ browser. The page now pushes typed characters into a ring in the shared input bu
 
 ## The disc check
 
-Online needs the disc's game-files hash (`dhd_disc`, finding 098). Its browser build is separate
-work (finding 122). Until it is wired in, the check can't start in the browser, and ONLINE says
-so. `?env.DHD_NET_ISO_SHA256=` gives the hash for tests, as `DHD_NET_ISO_SHA256` does for the
-native tools.
+Online needs the disc's game-files hash (`dhd_disc`, finding 098), built for the browser in
+finding 122 (`www/disc.js` over `build/web/dhd_disc.wasm`). Reading the USA disc's files takes
+about 17 s, so it runs in a worker of its own (`www/disc_worker.js`), as the native game runs it
+on a thread. The game worker polls it as `host_service_disc_check_poll`, with dhd_disc_check's
+answers. A hash is kept in this browser (IndexedDB, by the file's name, size and last change), as
+iso-check.txt keeps it natively, and is then answered as code 2. On the user's USA disc the
+browser module gives the native value, c8c17bca...3476 (finding 122).
 
 ## Builds must match
 
