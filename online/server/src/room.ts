@@ -3,6 +3,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { LISTING_REFRESH_MS, type LobbyEntry } from "./lobbies";
 import {
+  CHAT_BURST,
+  CHAT_WINDOW_MS,
   CLOSE_CODES,
   COUNTDOWN_MS,
   DEFAULT_MAX_PLAYERS,
@@ -23,6 +25,7 @@ import {
   RTT_SAMPLES,
   START_LEAD_MS,
   type ErrorCode,
+  chatText,
   clientVersionOf,
   isOutdated,
   isByte,
@@ -111,6 +114,8 @@ export class Room extends DurableObject<Env> {
   // Race relay state, rebuilt from `state.race` after a wake-up.
   private raceSockets: (WebSocket | null)[] = [];
   private slotOf = new Map<WebSocket, number>();
+  /** When each member's recent chat messages went out (CHAT_BURST in CHAT_WINDOW_MS). */
+  private chatTimes = new Map<number, number[]>();
   /** When each slot last sent a frame (RACE_SILENT_MS); a wake-up starts every slot afresh. */
   private heardAt: number[] = [];
 
@@ -238,6 +243,18 @@ export class Room extends DurableObject<Env> {
         this.rebuildRace();
         this.broadcast({ type: "ended" });
         return this.changed();
+      case "chat": {
+        // In the room and in a race alike: everyone in the room gets it, the sender too.
+        const text = chatText(m.text);
+        if (text === null) return this.error(ws, "bad_value", "A chat message is 1-120 characters.");
+        const now = Date.now();
+        const recent = (this.chatTimes.get(me.id) ?? []).filter((t) => now - t < CHAT_WINDOW_MS);
+        if (recent.length >= CHAT_BURST) return this.error(ws, "slow_down", "Too many messages: wait a moment.");
+        recent.push(now);
+        this.chatTimes.set(me.id, recent);
+        this.broadcast({ type: "chat", memberId: me.id, name: me.name, text, at: now });
+        return;
+      }
       case "leave":
         await this.leave(me.id, "leave");
         try {
@@ -607,6 +624,7 @@ export class Room extends DurableObject<Env> {
     const ws = this.sockets.get(memberId);
     this.sockets.delete(memberId);
     this.rtts.delete(memberId);
+    this.chatTimes.delete(memberId);
     this.firstRtts.delete(memberId);
     if (ws) {
       // Forget the socket so a late close event doesn't count twice.

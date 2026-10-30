@@ -92,6 +92,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"kick","member":3}                          // host only
 {"type":"start"}                                    // host only; at least 2 members, all (host included) ready
 {"type":"pong","s":1734000000123}                   // echo of a server ping, see below
+{"type":"chat","text":"gg"}                         // anyone, in the room or a race (finding 124)
 {"type":"ping","t":12345.6}                          // optional client-side ping; the server answers "pong"
 {"type":"end"}                                       // host only: race over, back to the lobby
 ```
@@ -133,6 +134,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 // A racer left or dropped. The host's game hands their rider to its AI.
 {"type":"left","slot":1,"memberId":2,"reason":"disconnect"}   // or "leave"/"kicked"/"timeout"
+{"type":"chat","memberId":2,"name":"Bo","text":"gg","at":1734000000123}  // to everyone, the sender too
 
 // Host ended the race; the room is a lobby again (ready flags cleared).
 {"type":"ended"}
@@ -183,6 +185,14 @@ Each PC races at its player's frame rate (60-240 fps). A snapshot (payload versi
 with the sender's race time in ms since GO, not its frame or tick count, about 20 a second at any
 rate; the receiver puts it on its own race clock (finding 114). Finish times in EVENT frames stay
 in race ticks (1/60 s of game time), the same at every rate. The server reads none of this.
+
+### Chat
+
+Any member sends `chat` in the room or during a race; the server sends it to every member, the
+sender included, with the member's id and name and the server time. The text is cleaned first
+(control characters become spaces, runs of spaces one, trimmed) and must then be 1-120 UTF-16
+units, else `bad_value`. A member may send 5 in 10 s, else `slow_down`. Older clients ignore
+the message type. Nothing is kept: a player who joins later sees only what comes after.
 
 ### Leaving
 

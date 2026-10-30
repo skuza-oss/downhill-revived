@@ -21,6 +21,19 @@ export const COUNTDOWN_MS = 5_000;
     is still there; after it, the server drops them as the client drops a silent server
     (port/net/client.c SILENT_MS). */
 export const RACE_SILENT_MS = 10_000;
+/** Text chat (finding 124): a message's length after trimming, in UTF-16 units, and how many a
+    member may send in CHAT_WINDOW_MS. */
+export const CHAT_MAX = 120;
+export const CHAT_BURST = 5;
+export const CHAT_WINDOW_MS = 10_000;
+
+/** A chat message as the room shows it: control characters gone, runs of spaces one, trimmed.
+    null when nothing is left or it is too long. */
+export function chatText(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim();
+  return t.length >= 1 && t.length <= CHAT_MAX ? t : null;
+}
 export const FEATURE_COUNTDOWN = "countdown";
 export const RTT_SAMPLES = 5;
 
@@ -46,7 +59,7 @@ export const CLOSE_CODES = {
   hello_timeout: 4008,
   client_outdated: 4009,
 } as const;
-export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
+export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value" | "slow_down";
 
 // ---- The client version gate ----
 

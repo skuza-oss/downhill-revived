@@ -127,6 +127,30 @@ describe("lobby", () => {
     expect((await host.json("error")).code).toBe("bad_value");
   });
 
+  it("sends a chat message to everyone in the room, the sender too", async () => {
+    const { host, code } = await Client.host("Ann");
+    const bo = await Client.join(code, "Bo");
+    bo.sendJson({ type: "chat", text: "  hi\u0007 all \n " });
+    for (const c of [host, bo]) {
+      const m = await c.json("chat");
+      expect(m).toMatchObject({ name: "Bo", text: "hi all" });
+      expect(m.memberId).toBeTypeOf("number");
+      expect(m.at).toBeTypeOf("number");
+    }
+    host.sendJson({ type: "chat", text: " \u0000 " });
+    expect((await host.json("error")).code).toBe("bad_value");
+    host.sendJson({ type: "chat", text: "x".repeat(121) });
+    expect((await host.json("error")).code).toBe("bad_value");
+  });
+
+  it("limits chat to 5 messages in 10 s", async () => {
+    const { host, code } = await Client.host("Ann");
+    const bo = await Client.join(code, "Bo");
+    for (let i = 0; i < 6; i++) bo.sendJson({ type: "chat", text: `m${i}` });
+    for (let i = 0; i < 5; i++) expect((await host.json("chat")).text).toBe(`m${i}`);
+    expect((await bo.json("error")).code).toBe("slow_down");
+  });
+
   it("does not start with the host alone", async () => {
     const { host } = await Client.host("H");
     host.sendJson({ type: "ready", ready: true });
@@ -327,6 +351,12 @@ describe("race relay", () => {
     // The others keep relaying to each other.
     clients[2].ws.send(new Uint8Array([5, 0, 44]).buffer);
     expect((await clients[0].binary())[1]).toBe(2);
+  });
+
+  it("relays chat during a race", async () => {
+    const { clients } = await startedRace(2);
+    clients[1].sendJson({ type: "chat", text: "gg" });
+    expect(await clients[0].json("chat")).toMatchObject({ name: "P1", text: "gg" });
   });
 
   it("drops a racer who goes silent without a close", async () => {
