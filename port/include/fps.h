@@ -27,6 +27,9 @@ double port_fps_behind(void);            /* game time owed to wall time above 60
 
 /* The game clock (00238A68/00238C00/00238D98) at high rates. */
 void port_clock_reset(void);
+void port_fps_changed(void);      /* PC SETTINGS > Frame Rate: at once above 60, else at the next screen */
+void port_fps_clock_start(void);  /* the frame clock's start (patched func_00238A68) */
+int port_fps_pending(void);       /* a change waits for the next screen */
 void port_clock_wait(int *out);
 void port_clock_step(void);
 

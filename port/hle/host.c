@@ -894,13 +894,24 @@ void host_console_init(void)
 /* The DualShock 2's motors (pad.c, scePadSetActDirect): the small one on or off, the large one
    0-255. A pad gets them as its high- and low-frequency motors (every pad with motors, gamepad.c),
    unless DHD_VIBRATION=0 (dhd.ini "vibration", the PC settings page). Output only: nothing comes
-   back into the game. */
+   back into the game. PAD_PREVIEW in port: PC SETTINGS' buzz when Vibration is turned on, which
+   wins over the game's own motor values for PREVIEW_S (the game may keep sending its zeros). */
 void host_pad_vibrate(int port, int light, int heavy)
 {
+    enum { PAD_PREVIEW = 0x10 };
+    static const double PREVIEW_S = 0.3;
     static int last[4] = {-1, -1, -1, -1};
+    static double preview_until[4];
     const char *setting = getenv("DHD_VIBRATION");
     if (setting && !atoi(setting)) light = heavy = 0;
     int key = (light ? 256 : 0) | (heavy & 255);
+    if (port & PAD_PREVIEW) {
+        port &= ~PAD_PREVIEW;
+        if (port < 0 || port > 3) return;
+        preview_until[port] = host_wall_seconds() + PREVIEW_S;
+        last[port] = -1;
+    } else if (port >= 0 && port <= 3 && host_wall_seconds() < preview_until[port])
+        return;
     if (port < 0 || port > 3 || key == last[port]) return;
     last[port] = key;
     if (gamepad_start()) gamepad_vibrate(port, light, heavy);

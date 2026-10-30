@@ -44,7 +44,7 @@ def add(patches):
 
     # Reset must take place after the original initializer too.
     edit('00238A68', '*(volatile int *)0x10000800 = 0;',
-         '*(volatile int *)0x10000800 = 0;\n    if (port_fps_high()) port_clock_reset();')
+         '*(volatile int *)0x10000800 = 0;\n    port_fps_clock_start();\n    if (port_fps_high()) port_clock_reset();')
     edit('00238C00', 'extern int func_00243CE8(int);',
          'extern int func_00243CE8(int);\nextern void rate_audit_update(void);')
     entry('00238C00', 'func_00238C00',

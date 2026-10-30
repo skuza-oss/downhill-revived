@@ -55,7 +55,7 @@ static Row rows[ROWS] = {
     {"Vibration:", "vibration", 1},
     {"Texture Pack:", "textures", 0},  /* port/gs/texpack.c */
     {"Font:", "font", 0},  /* port/gs/font_sharp.c */
-    {"Frame Rate:", "fps", 0},
+    {"Frame Rate:", "fps", 1},  /* fps.c: at once above 60, else at the next screen */
     {"V-Sync:", "vsync", 0},  /* no tearing (port/gs/gpu_rust.c) */
     {"Unlock All:", "unlock_all", 1},  /* port_unlock_all */
 };
@@ -180,6 +180,11 @@ static void format(Row *r)
 }
 
 /* Saves the row's choice and, for a live row, applies it. */
+/* Turning Vibration on gives player 1's pad a short buzz, so the player feels what it does: the
+   motors' run in fields, stopped by page_update (the rumble itself lasts up to 1 s, gamepad.c). */
+enum { BUZZ_FIELDS = 18, PAD_PREVIEW = 0x10 };  /* player 1, as host_pad_vibrate's preview */
+static int buzz;
+
 static void commit(Row *r, int apply)
 {
     const SettingChoice *c = &r->choices[r->selected];
@@ -193,7 +198,12 @@ static void commit(Row *r, int apply)
     r->running = r->selected;
     if (r == &rows[DISPLAY] || r == &rows[SIZE]) host_service_gs_window_apply();
     else if (r == &rows[SHAPE] || r == &rows[SCALING]) host_service_gs_present_options_apply();
-    else if (r == &rows[VIBRATION]) host_service_host_pad_vibrate(0, 0, 0);
+    else if (r == &rows[RATE]) port_fps_changed();
+    else if (r == &rows[VIBRATION]) {
+        int on = strcmp(c->value, "0") != 0;
+        host_service_host_pad_vibrate(on ? PAD_PREVIEW : 0, on, on ? 160 : 0);
+        buzz = on ? BUZZ_FIELDS : 0;
+    }
 }
 
 static void change(int index, int step)
@@ -228,11 +238,13 @@ static void page_build(MenuPage *p)
 static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
 {
     const Row *r = row_at(cursor);
+    if (buzz && --buzz == 0) host_service_host_pad_vibrate(PAD_PREVIEW, 0, 0);
     p->footer = NULL;
     if (r && locked(r)) {
         snprintf(footer, sizeof footer, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
         p->footer = footer;
     } else if (r && r->selected != r->running) p->footer = restart_footer;
+    else if (r == &rows[RATE] && port_fps_pending()) p->footer = "Applies from the next screen";
     else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->footer = "No pack: see texture_pack in dhd.ini";
 }
 

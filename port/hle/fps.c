@@ -98,20 +98,54 @@ int port_fps_max(void)
     }
     return most;
 }
+/* DHD_FPS (dhd.ini "fps", PC SETTINGS > Frame Rate): 60 to port_fps_max, or the monitor's. */
+static int fps_setting(void)
+{
+    const char *s = host_getenv("DHD_FPS");
+    int n = s ? atoi(s) : 60;
+    if (s && !dhd_stricmp(s, "monitor")) {
+        n = host_display_hz();
+        if (!n) n = 60;
+    }
+    if (n < 60) n = 60;
+    if (n > port_fps_max()) n = port_fps_max();
+    return n;
+}
 int port_fps(void)
 {
     if (!requested) {
-        const char *s = host_getenv("DHD_FPS");
-        requested = s ? atoi(s) : 60;
-        if (s && !dhd_stricmp(s, "monitor")) {
-            requested = host_display_hz();
-            if (!requested) requested = 60;
-        }
-        if (requested < 60) requested = 60;
-        if (requested > port_fps_max()) requested = port_fps_max();
+        requested = fps_setting();
         hle_log("fps: requested %d real steps/s\n", requested);
     }
     return requested;
+}
+
+/* PC SETTINGS changed the rate while the game runs. Between rates above 60 it applies at once:
+   the step is the only thing that changes (stored animation times keep their 1/1024-field unit).
+   To or from 60 that unit changes too, so it waits for the frame clock's next start (patched
+   func_00238A68: a new screen or race), where every clock begins again. */
+static int pending;
+void port_fps_changed(void)
+{
+    int next = fps_setting();
+    port_fps();
+    pending = 0;
+    if (next == requested) return;
+    if (next > 60 && requested > 60) {
+        requested = next;
+        port_clock_reset();
+        hle_log("fps: now %d real steps/s\n", requested);
+    } else {
+        pending = next;
+        hle_log("fps: %d real steps/s from the next screen\n", next);
+    }
+}
+int port_fps_pending(void) { return pending != 0; }
+void port_fps_clock_start(void)
+{
+    if (!pending) return;
+    requested = pending, pending = 0;
+    hle_log("fps: now %d real steps/s\n", requested);
 }
 int port_fps_high(void) { return port_fps() > 60; }
 double port_frame_period(void) { int n = port_fps(); return n == 60 ? 1001.0 / 60000.0 : 1.0 / n; }
