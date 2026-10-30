@@ -1,4 +1,4 @@
-# 125: Text chat in the race room and the race
+# 125: Text chat in the race room and the race; name tags
 
 Players asked to talk in a room without a second app. The server side came first (commit
 d5b5622, `docs/online-protocol.md` § Chat): a member sends `{"type":"chat","text"}`, everyone in
@@ -87,3 +87,21 @@ The game's font draws button glyphs for bytes 0x80 and up, so a line is shown in
   chat goes live with the next deployment. **Deploy the server before releasing this client**:
   a server without chat takes the line as an unknown type, answers `bad_message` and closes the
   socket (4000), which the client reads as a refusal and leaves the room.
+
+## Name tags (online.c hle_online_names)
+
+The other players' names over their riders were all one size and white from 1 to 150 units
+away, so riders far down the hill covered the track with names. Now:
+
+- **Distance**: as before up to 45 units (`NAME_NEAR`); beyond, the tag shrinks to 70 % and
+  fades to nothing at 150 (`NAME_FAR`, the old cut-off), its black edge with it. The size goes
+  through func_0020FB80 before the width is measured, so the on-screen bounds check (the HUD rule
+  that a tag is drawn whole or not at all) still holds.
+- **Colour**: each racer's tag has a colour by race slot (8 pastels at the PS2's 0-128 scale),
+  the same on every PC, so a player is known at a glance.
+- **Away**: a racer whose connection dropped while the server holds its slot (finding 126,
+  `NetLobby.racers_away`, read with the `left` check every 15 fields) reads `NAME - AWAY`, grey
+  and at half strength, until it is back or has left.
+
+No ping marker: a racer's ping is not known during a race (the room's `rttMs` stop with the
+lobby pings). Checked with `clang -fsyntax-only` only; not seen on screen.

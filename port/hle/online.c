@@ -331,6 +331,8 @@ static struct {
     int end_held, end_done;     /* the race-end countdown, held for the results */
     int no_bots;                /* the room's computer riders off (its "laps" option 1) */
     int cheats;                 /* the room's cheat codes on (option 2; off: hle_cheat_code) */
+    unsigned away;              /* bit s: racer s lost its connection, the server holds its slot
+                                   (NetLobby.racers_away, finding 126); its name tag says so */
     /* the host's next race after the results (EVENT_REMATCH): 1 TRY AGAIN, 2 NEW LEVEL on
        rematch_track; rematch_fields: 1/60 s fields (not frames) since this PC began choosing it */
     int rematch_want, rematch_track, rematch_fields;
@@ -993,6 +995,7 @@ static void check_left(void)
 {
     NetLobby lobby;
     host_service_net_get_lobby(GADDR(&lobby));
+    on.away = lobby.racers_away;
     for (int j = 0; j < on.nslots; j++) {
         int gone = j != on.local_slot && (lobby.racer[j].left || lobby.offline);
         if (!gone || on.gone[j]) continue;
@@ -1103,8 +1106,15 @@ void func_0020F9F0(int pen, int view, int x, int y, const char *text);
    scene node with a lower offset for a label just above the head. Puppets update
    that same node through func_0012DDC0.
    Draw while the local rider's race text is built, then restore pen 0 and its
-   queued colour so later HUD text keeps its own size, alignment and colour. */
-enum { NAME_FAR = 150 };
+   queued colour so later HUD text keeps its own size, alignment and colour.
+   A tag is the player's colour (by race slot, the same on every PC), full size and opaque up
+   to NAME_NEAR, then smaller and fainter to nothing at NAME_FAR, so the riders far down the
+   hill don't cover the track with names. A player whose connection dropped (the server holds
+   the slot) reads "NAME - AWAY", grey, until it is back or has left. */
+enum { NAME_NEAR = 45, NAME_FAR = 150, NAME_SMALLEST = 70 /* % at NAME_FAR */ };
+static const uint8_t name_colour[NET_MAX_SLOTS][3] = {
+    {80, 112, 128}, {128, 96, 48}, {88, 128, 80}, {128, 84, 116},
+    {128, 120, 64}, {64, 124, 128}, {108, 88, 128}, {128, 76, 68}};
 int func_0020F860(int pen, const char *text);  /* text width in sixteenths */
 extern float port_fov_x;  /* widescreen.c: glyph width scale, 1 when off */
 void hle_online_names(void *rider, int view)
@@ -1136,16 +1146,26 @@ void hle_online_names(void *rider, int view)
         /* Text normally stays inside the middle 4:3 area. Undo that mapping for
            this world anchor, while keeping the glyphs themselves in proportion. */
         int x = (int)(w / 2 + (local_x - w / 2) / port_fov_x), y = (int)local_y - 16;
-        func_0020FB80(0, 320, 240, -102, -24);
-        int half_width = (func_0020F860(0, on.name[global]) + 31) / 32;
+        /* nearer than NAME_NEAR as it was; beyond, smaller and fainter */
+        float far = base[2] <= NAME_NEAR ? 0 : (base[2] - NAME_NEAR) / (float)(NAME_FAR - NAME_NEAR);
+        int size = 100 - (int)((100 - NAME_SMALLEST) * far), alpha = (int)(128 * (1 - far));
+        int away = global < 32 && on.away >> global & 1;
+        if (away) alpha /= 2;
+        if (alpha < 8) continue;
+        char label[48];
+        snprintf(label, sizeof label, away ? "%s - AWAY" : "%s", on.name[global]);
+        func_0020FB80(0, 320 * size / 100, 240 * size / 100, -102 * size / 100, -24 * size / 100);
+        int half_width = (func_0020F860(0, label) + 31) / 32;
         if (local_x - half_width * port_fov_x < 1 || local_x + half_width * port_fov_x >= w - 1 || y < 1) continue;
-        func_0020F518(0, 0, 0, 0, 128);
-        func_0020F9F0(0, view, x - 1, y, on.name[global]);
-        func_0020F9F0(0, view, x + 1, y, on.name[global]);
-        func_0020F9F0(0, view, x, y - 1, on.name[global]);
-        func_0020F9F0(0, view, x, y + 1, on.name[global]);
-        func_0020F518(0, 128, 128, 128, 128);
-        func_0020F9F0(0, view, x, y, on.name[global]);
+        const uint8_t *c = name_colour[global % NET_MAX_SLOTS];
+        func_0020F518(0, 0, 0, 0, alpha);
+        func_0020F9F0(0, view, x - 1, y, label);
+        func_0020F9F0(0, view, x + 1, y, label);
+        func_0020F9F0(0, view, x, y - 1, label);
+        func_0020F9F0(0, view, x, y + 1, label);
+        if (away) func_0020F518(0, 96, 96, 96, alpha);
+        else func_0020F518(0, c[0], c[1], c[2], alpha);
+        func_0020F9F0(0, view, x, y, label);
         drawn = 1;
     }
     memcpy(pen, kept, sizeof kept);
