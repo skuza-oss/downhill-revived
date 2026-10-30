@@ -643,7 +643,7 @@ typedef struct {
     int in;            /* in the room (not reconnecting) */
     int self;          /* this PC's member, -1 none */
     int own_ready, own_choosing;
-    int ready, can_start, host;
+    int ready, reconnecting, can_start, host;
 } RoomNow;
 
 static RoomNow room_now(void)
@@ -656,10 +656,12 @@ static RoomNow room_now(void)
     for (int i = 0; i < l->nmembers; i++) {
         const NetMember *m = &l->member[i];
         r.ready += m->ready;
+        r.reconnecting += (l->members_reconnecting >> i) & 1;  /* a slot the server holds for a dropped player */
         if (m->id != l->member_id) continue;
         r.self = i, r.own_ready = m->ready, r.own_choosing = m->choosing;
     }
-    r.can_start = r.host && l->nmembers >= 2 && r.ready == l->nmembers;
+    /* The server refuses a start while a slot is held (finding 126): say so here too. */
+    r.can_start = r.host && l->nmembers >= 2 && !r.reconnecting && r.ready == l->nmembers;
     return r;
 }
 
@@ -1085,8 +1087,10 @@ static void draw_card(int i)
         return;
     }
     const NetMember *m = &l->member[i];
+    int reconnecting = (l->members_reconnecting >> i) & 1;
     box(x, y, CARD_W, CARD_H, 90);
-    rect(x, y + 1, 3, CARD_H - 2, m->ready ? green : (const int[]){0x2B, 0x29, 0x44}, 128);
+    /* red stripe: a dropped player the server is holding the slot for (finding 126) */
+    rect(x, y + 1, 3, CARD_H - 2, reconnecting ? red : m->ready ? green : (const int[]){0x2B, 0x29, 0x44}, 128);
     put(MENU_CENTRE, x + 13, y + 7, (char[]){(char)('1' + i), 0}, menu_style(st_row, 120, -1, 0, 0));
     /* the name, with Host and You beside it */
     snprintf(line, sizeof line, "%.12s", m->name);
@@ -1096,9 +1100,9 @@ static void draw_card(int i)
     const char *who = m->id == l->host_id && m->id == l->member_id ? "HOST - YOU" : m->id == l->host_id ? "HOST"
                     : m->id == l->member_id ? "YOU" : NULL;
     if (who) put(MENU_LEFT, x + 26 + menu_text_width(line, &name) * 640 / vw + 7, y + 5, who, menu_style(st_on, 70, -1, 0, 0));
-    /* what they are doing: choosing, ready, not ready */
-    const char *tag = m->choosing ? "CHOOSING..." : m->ready ? "READY" : "NOT READY";
-    const int *c = m->choosing ? NULL : m->ready ? green : amber;
+    /* what they are doing: reconnecting, choosing, ready, not ready */
+    const char *tag = reconnecting ? "RECONNECTING..." : m->choosing ? "CHOOSING..." : m->ready ? "READY" : "NOT READY";
+    const int *c = reconnecting ? red : m->choosing ? NULL : m->ready ? green : amber;
     MenuStyle ts = c ? tint(st_row, 85, c) : menu_style(st_on, 85, -1, 0, 0);
     put(MENU_RIGHT, x + CARD_W - 7, y + 4, tag, ts);
     /* the rider below the name, the delay below the state */
@@ -1138,7 +1142,9 @@ static void draw_bar(const RoomNow *r)
     else if (l->countdown_ms >= 0) draw_bar_cell(RF_START, 2, "START NOW", NULL, r, 0);
     else if (r->can_start) draw_bar_cell(RF_START, 2, "START THE RACE", NULL, r, 0);
     else {
-        if (l->nmembers < 2) snprintf(why, sizeof why, "NEED 2 PLAYERS");
+        /* A held slot stops the start (finding 126): say that before the ready count. */
+        if (r->reconnecting) snprintf(why, sizeof why, "%d RECONNECTING", r->reconnecting);
+        else if (l->nmembers < 2) snprintf(why, sizeof why, "NEED 2 PLAYERS");
         else snprintf(why, sizeof why, "%d NOT READY", l->nmembers - r->ready);
         draw_bar_cell(RF_START, 2, "START", why, r, 0);
     }
@@ -1157,7 +1163,9 @@ static void draw_status(const RoomNow *r)
         else if (!l->member[i].ready) waiting++, who = who < 0 ? i : who;
     }
     if (status[0]) snprintf(line, sizeof line, "%s", status);
-    else if (!r->in) snprintf(line, sizeof line, "CONNECTING TO THE SERVER...");
+    else if (!r->in)
+        snprintf(line, sizeof line, "%s",
+                 room.state == NET_RECONNECTING ? "RECONNECTING TO THE SERVER..." : "CONNECTING TO THE SERVER...");
     else if (l->countdown_ms >= 0) snprintf(line, sizeof line, "EVERYONE IS READY: UNREADY TO STOP"), c = green;
     else if (!selected) snprintf(line, sizeof line, "CHOOSE YOUR RIDER FIRST");
     else if (l->nmembers < 2) snprintf(line, sizeof line, "WAITING FOR PLAYERS: SHARE THE CODE %s", l->code);

@@ -22,6 +22,12 @@ typedef struct {
     NetTransport tr;
     int connected, leaving;
     char name[100], version[64], iso[65];
+    /* The server's secret for a reconnect (hello.reconnectToken, finding 126): kept while a lobby
+       drop reconnects into the same slot, sent in the hello of the next connection. Empty until a
+       welcome carries one, and cleared again by a welcome without one (a server without the
+       feature). */
+    char reconnect_token[80];
+    double dropped_at;  /* when a race's connection dropped (net_now_ms), 0 when connected */
     NetLobby lobby;
     int racing;
     /* what to repeat after a lobby reconnect */
@@ -47,8 +53,11 @@ void client_free(NetClient *c);
 void client_connected(NetClient *c, const NetTransport *tr);
 void client_on_text(NetClient *c, const char *text, size_t n);
 void client_on_binary(NetClient *c, const uint8_t *data, size_t n);
-/* The connection ended. Returns 1 when it should rejoin the room by its code (a lobby drop). */
+/* The connection ended. Returns 1 when it should rejoin the room by its code: a lobby drop, or a
+   race drop the server offered a rejoin for (a reconnect token, finding 126). */
 int client_on_closed(NetClient *c, int code, const char *reason);
+/* The transport stopped trying to reconnect: a race goes on offline, a lobby has failed. */
+void client_give_up(NetClient *c);
 /* Every few ms from a network thread: pings. Returns 1 when the server has been silent too long
    and the connection should be dropped. */
 int client_tick(NetClient *c);

@@ -333,6 +333,17 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   countdown and the client already did; a server test that lost its snapshot frame is fixed.
   Not deployed yet. Finding 120: a racer silent for 10 s is dropped (`"timeout"`), and host handover
   mid-race has a server test.
+- 2026-10-31 (finding 126): rejoin after a drop. A client that lists the `reconnect` feature gets a
+  secret token in its `welcome`; a drop holds its slot for 20 s, in the lobby (`reconnecting` in
+  `room`) or in a race (`away` to everyone at once, `back` on rejoin, `left` when the time runs
+  out). The client rejoins by the room's code with the token instead of going offline; `NetLobby`
+  gains `members_reconnecting`, `racers_away` and `rejoining` at its end. Older clients are
+  untouched (no token: `left` at once). Server and loopback tests; not deployed, the race HUD's
+  notice is still to do.
+- 2026-10-31 (finding 127): time-trial boards and ghosts on the server, HTTP on the same Worker
+  (`POST /v1/times`, `GET /v1/times`, `GET /v1/ghost`), one SQLite Durable Object per track and
+  lap count (migration `v2`). Version gate, name and time rules, size caps, a per-address rate
+  limit. Times are not verified. No game side yet (recording a ghost needs the replay data).
 - Text chat (finding 125): the room's chat over the race room (L1 or Y; typing, or quick lines
   for a pad), Y in a race for a line, the pause menu's L1/R1/L2/R2 quick lines, the last lines
   at the left of the view. Client, loopback and browser client checked; not yet seen in the game.

@@ -13,6 +13,9 @@
 #include <SDL3/SDL_timer.h>
 
 enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000 };
+/* How long a race drop keeps trying to rejoin: the server holds the slot RECONNECT_WINDOW_MS (20 s,
+   online/server/src/protocol.ts); past that it answers room_started anyway. */
+enum { REJOIN_MS = 22000 };
 
 double net_now_ms(void) { return (double)SDL_GetTicksNS() / 1e6; }
 
@@ -77,7 +80,7 @@ void client_free(NetClient *c)
 
 void client_connected(NetClient *c, const NetTransport *tr)
 {
-    char name[200];
+    char name[200], token[128] = "";
     SDL_LockMutex(c->lock);
     c->tr = *tr;
     c->connected = 1;
@@ -85,9 +88,16 @@ void client_connected(NetClient *c, const NetTransport *tr)
     json_escape(name, sizeof name, c->name);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
     /* features: this client shows the race room's countdown (the server runs one only when
-       everyone's does) */
+       everyone's does) and can reconnect (the server then issues a token and holds the member's
+       slot a moment; finding 126) */
+    /* reconnectToken: after a drop (lobby or race), the secret the last welcome carried, so the
+       server puts this PC back in its own slot instead of making it a new member. Absent on the
+       first connection, and on a room that never sent one (an older server). */
+    if (c->reconnect_token[0] && c->lobby.state == NET_RECONNECTING)
+        snprintf(token, sizeof token, ",\"reconnectToken\":\"%s\"", c->reconnect_token);
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\"]}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso, name);
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"reconnect\"]%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
+        name, token);
     if (c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
     changed(c);
@@ -119,6 +129,7 @@ static void read_room(NetClient *c, const char *t)
     }
     n = json_count(t, "members");
     l->nmembers = n < 0 ? 0 : n > NET_MAX_SLOTS ? NET_MAX_SLOTS : n;
+    l->members_reconnecting = 0;
     for (i = 0; i < l->nmembers; i++) {
         NetMember *m = &l->member[i];
         char path[32];
@@ -136,6 +147,12 @@ static void read_room(NetClient *c, const char *t)
         if (json_int(t, FIELD("rttMs"), &v))
             m->rtt_ms = (int)v;
         json_bool(t, FIELD("choosing"), &m->choosing);
+        {
+            int reconnecting = 0;
+            json_bool(t, FIELD("reconnecting"), &reconnecting);
+            if (reconnecting)
+                l->members_reconnecting |= 1u << i;
+        }
 #undef FIELD
     }
 }
@@ -184,6 +201,8 @@ static void read_start(NetClient *c, const char *t)
         l->start_at = net_now_ms() / 1000.0;
     c->racing = 1;
     l->offline = 0;
+    l->racers_away = 0;
+    l->rejoining = 0;
     l->started = 1;
     l->state = NET_RACING;
 }
@@ -266,10 +285,30 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         json_bool(text, "host", &c->lobby.is_host);
         if (c->lobby.is_host)
             c->lobby.host_id = c->lobby.member_id;
+        /* the server's secret for a reconnect (finding 126): kept for the next hello. A welcome
+           without one clears it, so a server without the feature never sees a stale token. */
+        c->reconnect_token[0] = 0;
+        json_string(text, "reconnectToken", c->reconnect_token, sizeof c->reconnect_token);
         if (json_number(text, "serverTime", &server_time) && !c->have_offset)
             c->clock_offset = server_time - net_now_ms();
-        c->lobby.state = NET_LOBBY;
         c->lobby.error_code[0] = c->lobby.error[0] = 0;
+        c->dropped_at = 0;
+        if (c->racing && json_int(text, "slot", &v) && v == c->lobby.local_slot) {
+            /* back in our race slot (finding 126): frames go out again, nothing to repeat */
+            c->lobby.rejoining = 0;
+            c->lobby.state = NET_RACING;
+            changed(c);
+            SDL_UnlockMutex(c->lock);
+            return;
+        }
+        if (c->racing) {  /* we came back to the room, but the race ended meanwhile: as "ended" */
+            c->racing = 0;
+            c->ready = 0;
+            c->lobby.started = 0;
+            c->lobby.rejoining = 0;
+            c->lobby.racers_away = 0;
+        }
+        c->lobby.state = NET_LOBBY;
         if (c->choosing)  /* after a reconnect: still on the rider screen */
             say(c, "{\"type\":\"pick\",\"choosing\":true}");
         else if (c->picked)  /* what we had chosen */
@@ -286,9 +325,18 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         changed(c);
     } else if (!strcmp(type, "left") && json_int(text, "slot", &v) && v >= 0 && v < NET_MAX_SLOTS) {
         c->lobby.racer[v].left = 1;
+        c->lobby.racers_away &= ~(1u << v);
+        changed(c);
+    } else if (!strcmp(type, "away") && json_int(text, "slot", &v) && v >= 0 && v < NET_MAX_SLOTS) {
+        /* the racer's connection dropped; the server holds its slot for a rejoin (finding 126) */
+        c->lobby.racers_away |= 1u << v;
+        changed(c);
+    } else if (!strcmp(type, "back") && json_int(text, "slot", &v) && v >= 0 && v < NET_MAX_SLOTS) {
+        c->lobby.racers_away &= ~(1u << v);
         changed(c);
     } else if (!strcmp(type, "ended")) {
         c->racing = 0;
+        c->lobby.racers_away = 0;
         c->ready = 0;
         c->lobby.started = 0;
         c->lobby.state = NET_LOBBY;
@@ -327,17 +375,37 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
     SDL_UnlockMutex(c->lock);
 }
 
+/* A race that can't rejoin goes on without the server: the others hand our rider to the host's
+   AI, and here the race goes on without them (online.c). */
+static void race_offline(NetClient *c)
+{
+    c->lobby.offline = 1;
+    c->lobby.rejoining = 0;
+    c->lobby.state = NET_FAILED;
+}
+
 int client_on_closed(NetClient *c, int code, const char *reason)
 {
     int rejoin = 0;
+    double now = net_now_ms();
     SDL_LockMutex(c->lock);
     c->connected = 0;
-    if (c->racing) {
-        /* No reconnect during a race (protocol 1): the others hand our rider to the host's AI,
-           and here the race goes on without them (online.c). */
-        c->lobby.offline = 1;
+    if (c->racing && !c->lobby.offline) {
+        /* A drop mid-race rejoins the same slot when the server gave us a token (finding 126) and
+           holds it: not after a refusal (4000s: the token was refused or the slot has gone), nor
+           past its window. Without a token (an older server) the race goes offline, as before. */
+        if (!c->dropped_at)
+            c->dropped_at = now;
+        if (!c->leaving && c->reconnect_token[0] && c->lobby.code[0] && !(code >= 4000 && code < 4100) &&
+            now - c->dropped_at < REJOIN_MS) {
+            c->lobby.state = NET_RECONNECTING;
+            c->lobby.rejoining = 1;
+            rejoin = 1;
+        } else
+            race_offline(c);
+    } else if (c->racing)
         c->lobby.state = NET_FAILED;
-    } else if (c->leaving)
+    else if (c->leaving)
         c->lobby.state = NET_IDLE;
     else if (code >= 4000 && code < 4100)  /* refused */
         c->lobby.state = NET_FAILED;
@@ -352,6 +420,19 @@ int client_on_closed(NetClient *c, int code, const char *reason)
     changed(c);
     SDL_UnlockMutex(c->lock);
     return rejoin;
+}
+
+void client_give_up(NetClient *c)
+{
+    SDL_LockMutex(c->lock);
+    if (c->racing)
+        race_offline(c);
+    else if (c->lobby.state == NET_RECONNECTING)
+        c->lobby.state = NET_FAILED;
+    if (!c->lobby.error[0] && c->lobby.state == NET_FAILED)
+        snprintf(c->lobby.error, sizeof c->lobby.error, "lost the connection to the server");
+    changed(c);
+    SDL_UnlockMutex(c->lock);
 }
 
 int client_tick(NetClient *c)

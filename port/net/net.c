@@ -44,8 +44,12 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
 {
     NetLobby lobby;
     (void)ctx;
-    if (!client_on_closed(&client, code, reason) || attempt >= REJOIN_ATTEMPTS)
+    if (!client_on_closed(&client, code, reason))
         return NULL;
+    if (attempt >= REJOIN_ATTEMPTS) {  /* (a race's rejoin also stops at client.c's REJOIN_MS) */
+        client_give_up(&client);
+        return NULL;
+    }
     client_lobby(&client, &lobby);
     snprintf(next_url, sizeof next_url, "%s/v1/rooms/%s", base, lobby.code);
     return next_url;
