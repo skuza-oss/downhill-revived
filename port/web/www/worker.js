@@ -21,6 +21,7 @@
 // queue and passes the GS's part on to the GS worker. Each vsync queues the picture; graphics.js
 // shows it and leaves its numbers for the status line here.
 import { createVfs } from './vfs.js';
+import { createNet } from './net.js';
 import { thunks } from './thunks.js';
 import { createSettings, BROWSER_PC_SETTINGS, RENDERER_LIVE } from './settings.js';
 import { startRenderer, renderImports, definesSharedMemory, shareSafeDecoding, Q, QI, STAT, ENV_SCRATCH } from './graphics_common.js';
@@ -71,8 +72,9 @@ async function start(m) {
   if (typeof WebAssembly.Suspending !== 'function') throw Error('this browser has no JSPI (WebAssembly.Suspending); use Chrome or Edge 137 or later');
   const t0 = performance.now();
   const fetchBytes = async url => { const r = await fetch(url); if (!r.ok) throw Error(`${url}: ${r.status}`); return r.arrayBuffer(); };
-  const [coreBytes, graphicsBytes, metadata] = await Promise.all([
-    fetchBytes('build/dhd_core.wasm'), fetchBytes('build/graphics.wasm'), fetch('build/imports.json').then(r => r.json())]);
+  const [coreBytes, graphicsBytes, metadata, netBytes] = await Promise.all([
+    fetchBytes('build/dhd_core.wasm'), fetchBytes('build/graphics.wasm'), fetch('build/imports.json').then(r => r.json()),
+    fetchBytes('build/dhd_net.wasm')]);
   // The threaded build's core defines a shared memory; its graphics imports link to gqueue.wasm.
   const threaded = definesSharedMemory(coreBytes);
   if (threaded) shareSafeDecoding();
@@ -82,6 +84,7 @@ async function start(m) {
   say(`disc: ${(disc.size / 2 ** 30).toFixed(2)} GiB`);
   const keys = new Uint8Array(m.input, 0, 256), pads = new Int32Array(m.input, 256, 32);  // main.js: players 1-4
   const mouse = new Int32Array(m.input, 384, 16);  // main.js: HostMouse, then [12] riding
+  const typed = new Int32Array(m.input, 448, 2 + 64);  // main.js: typed characters, written/read counts then a ring
   const ring = { head: new Int32Array(m.audio, 0, 2), data: new Int16Array(m.audio, 8), frames: (m.audio.byteLength - 8) / 4 };
 
   const vfs = await createVfs(say);
@@ -106,6 +109,9 @@ async function start(m) {
     DHD_RENDER: 'native', DHD_SETTINGS: 'dhd.ini', ...(threaded ? { DHD_GRAPHICS_ORDERED: '1' } : {}),
     ...BROWSER_PC_SETTINGS, ...(m.env || {}) };
   const settings = await createSettings(env, say);
+  // The client reaches the game's memory through these: an address is folded as span() folds it.
+  const net = await createNet(netBytes, { bytes: (a, n) => span(a, n), strlen: a => { if (bytes.buffer !== memory.buffer) refresh();
+    const at = fold(a); return bytes.indexOf(0, at) - at; } }, say);
   let core, graphics, queue, memory, bytes, dv, arena = 0x07000000, current = 65, csr = 0x1f80, field = 0;
   const strings = new Map(), files = new Map(), fibers = new Map(); let nextFile = 1, nextDir = 1; const dirs = new Map();
   const refresh = () => { bytes = new Uint8Array(memory.buffer); dv = new DataView(memory.buffer); };
@@ -144,6 +150,23 @@ async function start(m) {
   const yieldTask = () => new Promise(r => { wake = r; channel.port2.postMessage(0); });
   let period = 1000 / 59.94, due = performance.now(), shown = 0, lastReport = performance.now(), lastField = 0;
   let riding = 0, held = new Int8Array(KEYS.length);
+  // The game's text fields (port/hle/text_input.c's rules): while one is open the typing keys are its
+  // (the arrows still move the pad picker), and a key typed there presses nothing until let go.
+  const ARROWS = new Set([0x25, 0x26, 0x27, 0x28]), blocked = new Uint8Array(256);
+  let textActive = false;
+  const typedClear = () => Atomics.store(typed, 1, Atomics.load(typed, 0));
+  function textEdit(at, capacity, allowedAt) {
+    const allowed = str(allowedAt), out = span(at, capacity); let n = out.indexOf(0); if (n < 0) n = capacity - 1;
+    const add = c => { if (c >= 97 && c <= 122) c -= 32;
+      if (c > 0 && c < 128 && allowed.includes(String.fromCharCode(c)) && n + 1 < capacity) { out[n++] = c; out[n] = 0; } };
+    for (let r = Atomics.load(typed, 1), w = Atomics.load(typed, 0); r < w; r++) {
+      const c = Atomics.load(typed, 2 + (r & 63)); Atomics.store(typed, 1, r + 1);
+      if (c === 13 || c === 10) return 1;
+      if (c === 27) return -1;
+      if (c === 8) { if (n) out[--n] = 0; } else add(c);
+    }
+    return 0;
+  }
   // host_pad_device: player `port` (0-3; played by hand the game opens four pads on a multitap,
   // pad.c) as hle.h's HostPad. connected: a gamepad for that player, player 1 always (the keyboard).
   function pad(port, out) {
@@ -156,7 +179,9 @@ async function start(m) {
       riding = dv.getInt32(0x0829E290, true) !== 0;
       Atomics.store(mouse, 12, riding ? 1 : 0);  // the page hides the cursor while riding
       const dir = [0, 0, 0];
-      KEYS.forEach((k, i) => { if (!Atomics.load(keys, k[0])) { held[i] = 0; return; }
+      KEYS.forEach((k, i) => { if (!Atomics.load(keys, k[0])) { held[i] = 0; blocked[k[0]] = 0; return; }
+        if (textActive && !ARROWS.has(k[0])) blocked[k[0]] = 1;
+        if (blocked[k[0]]) return;  // typed into a field: no pad press until it is let go
         if (!held[i]) held[i] = riding ? 2 : 1;
         if (held[i] === 2 && k[3]) dir[k[3]] += k[4]; else buttons |= held[i] === 2 ? k[2] : k[1]; });
       if (dir[1]) o[4] = dir[1] < 0 ? 0 : 255;  // left stick x, full deflection while riding
@@ -249,6 +274,9 @@ async function start(m) {
     host_dir_next: (id, out) => { const d = dirs.get(id); if (!d || ++d.at >= d.list.length) return 0; entry(d.list[d.at], out); return 1; },
     host_dir_close: id => { dirs.delete(id); },
     host_service_host_disc_ready: () => 0, host_service_host_skip_movies: () => 1,
+    // The online disc check (host_sdl.c's dhd_disc job): not in the browser yet, so the check can't
+    // start and ONLINE says so; ?env.DHD_NET_ISO_SHA256 gives a files hash for tests.
+    host_service_disc_check_start: () => 0, host_service_disc_check_poll: () => -1,
     host_service_host_pad_device: (port, a) => pad(port, a),
     // host_api.h's HostMouse, 36 bytes, from the page (main.js)
     host_service_mouse_state: out => { const o = span(out, 36);
@@ -261,6 +289,13 @@ async function start(m) {
     host_service_movie_update: () => 0, host_service_movie_playing: () => 0,
     host_service_host_poll_dump: () => 0,
     host_service_graphics_threaded: () => 1, host_service_texpack_available: () => 0,
+    host_service_text_input_begin: () => { textActive = true; typedClear(); },
+    host_service_text_input_end: () => { if (textActive) for (const k of KEYS) if (!ARROWS.has(k[0]) && Atomics.load(keys, k[0])) blocked[k[0]] = 1;
+      textActive = false; typedClear(); },
+    host_service_text_input_edit: (at, capacity, allowed) => textEdit(at, capacity, allowed),
+    host_service_clipboard_set: at => { post('clipboard', { text: str(at) }); return 1; },  // the page writes it (main.js)
+    // Online (net.js: port/net's client as dhd_net.wasm under the worker's WebSocket and fetch).
+    ...net,
     host_pacing_period: () => 1 / 60,
     host_pacing_config: p => { period = p * 1000; },
     host_sound_write: (a, frames) => {
@@ -309,10 +344,10 @@ host_service_host_init host_service_host_console_init host_service_host_settings
 host_service_movie_prepare host_service_movie_start host_service_movie_audio host_service_graphics_wait host_service_graphics_shutdown
 host_service_gs_pump_messages host_service_gs_window_title host_service_gs_native_view
 host_service_gs_window_apply host_service_gs_present_options_apply host_service_gs_window_close
-host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence
-host_service_net_get_lobby host_service_clipboard_set`.split(/\s+/);
+host_service_host_backtrace host_service_presence
+`.split(/\s+/);
   for (const n of noops) impl[n] ??= () => {};
-  for (const n of ['host_service_net_racing', 'host_service_net_seconds', 'host_service_net_server_ms', 'host_heartbeat_eip', 'host_service_launcher_open']) impl[n] = () => 0;
+  for (const n of ['host_heartbeat_eip', 'host_service_launcher_open']) impl[n] = () => 0;
 
   const graphicsExports = new Set(WebAssembly.Module.exports(graphicsModule).map(e => e.name));
   const linkedExports = threaded ? new Set(WebAssembly.Module.exports(queueModule).map(e => e.name)) : graphicsExports;

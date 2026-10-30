@@ -14,7 +14,8 @@ const routes = [['/build/', path.join(root, 'build/web')], ['/', path.join(root,
 // /build/renderer/: the Rust renderer's two files (port/web/build_renderer.py).
 // gqueue.wasm, vu.wasm: the threaded build's core side of the graphics queue and its VU worker (build.py --threads).
 // dhd_settings.wasm: dhd.ini's rules for settings.js, on the page and in the game worker (build.py).
-const allowed = { '/build/': /^(dhd_core\.wasm|graphics\.wasm|gqueue\.wasm|vu\.wasm|dhd_settings\.wasm|imports\.json|renderer\/dhd_render\.js|renderer\/dhd_render_bg\.wasm)$/, '/': /^[\w.-]+$/ };
+// dhd_net.wasm: the online client for net.js (build_net.py); dhd_disc.wasm: the online disc check.
+const allowed = { '/build/': /^(dhd_core\.wasm|graphics\.wasm|gqueue\.wasm|vu\.wasm|dhd_settings\.wasm|dhd_net\.wasm|dhd_disc\.wasm|imports\.json|renderer\/dhd_render\.js|renderer\/dhd_render_bg\.wasm)$/, '/': /^[\w.-]+$/ };
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm',
   '.json': 'application/json' };
 const server = http.createServer((req, res) => {

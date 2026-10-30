@@ -9,12 +9,17 @@ const addLog = text => { log.textContent += text + '\n'; log.scrollTop = log.scr
 
 if (!crossOriginIsolated)  // on the start card too: the status line is in the menu
   status.textContent = document.querySelector('.note').textContent = 'This page needs cross-origin isolation: start it with port/web/serve.mjs.';
-const input = new SharedArrayBuffer(256 + 32 * 4 + 16 * 4);
+const input = new SharedArrayBuffer(256 + 32 * 4 + 16 * 4 + 4 * (2 + 64));
 // pads: players 1-4, 8 ints each (played by hand the game opens four pads on a multitap, pad.c).
 const keys = new Uint8Array(input, 0, 256), pads = new Int32Array(input, 256, 32);
 // The mouse: host_api.h's HostMouse (x, y as 65536ths of the picture, buttons held, seen, moves,
 // presses of the left, right and middle buttons, wheel steps), then [12] riding (the worker's).
 const mouse = new Int32Array(input, 384, 16);
+// Typed characters for the game's text fields (the join code, the rider name; text_input.c's rules
+// in worker.js): [0] written, [1] read, then a ring of 64 code points.
+const typed = new Int32Array(input, 448, 2 + 64);
+function type(c) { const w = Atomics.load(typed, 0); if (w - Atomics.load(typed, 1) >= 64) return;
+  Atomics.store(typed, 2 + (w & 63), c); Atomics.store(typed, 0, w + 1); }
 const audio = new SharedArrayBuffer(8 + 48000 / 4 * 4);  // 0.25 s of 48 kHz stereo
 
 // KeyboardEvent.code -> the Windows virtual-key code keyboard.c's table uses (US places).
@@ -27,10 +32,16 @@ function vk(code) {
 let running = false;
 addEventListener('keydown', e => {
   if (e.code === 'Backquote' && running && !e.repeat) { e.preventDefault(); toggleMenu(); return; }  // not a game key (vk: 0)
+  if (running && !e.altKey && !e.ctrlKey && !e.metaKey) {  // the worker keeps these only while a field is open
+    const c = e.key.length === 1 ? e.key.codePointAt(0) : { Enter: 13, Backspace: 8, Escape: 27 }[e.key];
+    if (c) type(c);
+  }
   const k = vk(e.code); if (!k || !running || e.altKey || e.ctrlKey || e.metaKey) return;
   Atomics.store(keys, k, 1); e.preventDefault(); });
 addEventListener('keyup', e => { const k = vk(e.code); if (k) Atomics.store(keys, k, 0); });
 addEventListener('blur', () => keys.fill(0));
+// Ctrl+V into a field: the pasted text, as text_input.c takes the clipboard's.
+addEventListener('paste', e => { const t = e.clipboardData?.getData('text') || ''; if (running) for (const ch of t.slice(0, 64)) type(ch.codePointAt(0)); });
 
 // Standard-mapping gamepads -> PS2 buttons (libpad bits) and sticks (0..255, 128 centred).
 const GP = [16384, 8192, 32768, 4096, 1024, 2048, 256, 512, 1, 8, 2, 4, 16, 64, 128, 32];
@@ -142,6 +153,7 @@ async function start(source) {
     else if (m.type === 'error') { addLog('ERROR ' + m.text); status.textContent = 'stopped: ' + m.text.split('\n')[0];
       openLog(); }
     else if (m.type === 'running') status.textContent = 'running';
+    else if (m.type === 'clipboard') navigator.clipboard?.writeText(m.text).catch(e => addLog(`clipboard: ${e.message}`));
     else if (m.type === 'exit') status.textContent = `game exited (${m.status})`;
     else if (m.type === 'status') { status.textContent = `field ${m.field}  ${m.fps.toFixed(1)} fields/s  picture ${m.size}  draws ${m.draws}  batches ${m.dispatches}  readbacks ${m.reads}  sound ${m.sound} s${m.riding ? '  riding' : ''}`;
       document.title = `DHD ${m.fps.toFixed(1)} fps (field ${m.field})`; window.dhdStatus = m; (window.dhdHistory ??= []).push([m.field, +m.fps.toFixed(2), m.draws]); }
