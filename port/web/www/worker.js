@@ -312,7 +312,7 @@ host_service_gs_window_apply host_service_gs_present_options_apply host_service_
 host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence
 host_service_net_get_lobby host_service_clipboard_set`.split(/\s+/);
   for (const n of noops) impl[n] ??= () => {};
-  for (const n of ['host_service_net_racing', 'host_service_net_seconds', 'host_service_net_server_ms', 'host_heartbeat_eip', 'host_service_launcher_open']) impl[n] = () => 0;
+  for (const n of ['host_service_net_racing', 'host_service_net_seconds', 'host_service_net_server_ms', 'host_heartbeat_eip', 'host_service_launcher_open', 'host_service_presence_join']) impl[n] = () => 0;
 
   const graphicsExports = new Set(WebAssembly.Module.exports(graphicsModule).map(e => e.name));
   const linkedExports = threaded ? new Set(WebAssembly.Module.exports(queueModule).map(e => e.name)) : graphicsExports;

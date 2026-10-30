@@ -215,9 +215,10 @@ Discord's party size ("Room K7M2QX (3 of 6)"), or an online race, through Discor
 (`dhd_presence` in the Rust library, no SDK; the core sends its state through
 `host_service_presence`; refreshed every minute so a restarted Discord gets it back), or through
 Discord's Social SDK when its library (`discord_partner_sdk.dll`, Discord's, never committed) sits
-beside the game. Ask to Join is designed, with its presence half and the SDK's join callback
-written, but off (finding 121: the game can't take a join yet; shipping the SDK is a licence
-decision). Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
+beside the game. Ask to Join goes through the SDK: a friend's join opens ONLINE from the title and
+joins the room's code, on the official server only (finding 121; written, not run in the game).
+Releases ship the DLL only with `package_release.py --discord-sdk`, off by default: shipping
+Discord's closed SDK with the GPL game is a licence decision not made yet. Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
 race room) share one centred layer in the game's popup style (`menu_page.c`), and the mouse works
 in them and in the game's own popups: hover selects, left click X, right click back, the wheel
 scrolls or changes values (finding 092; the shell's own menus are not bridged yet).

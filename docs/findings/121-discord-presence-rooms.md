@@ -6,6 +6,9 @@ time that starts again with each run. A Discord that was restarted gets the pres
 waiting for the game's state to change. Ask to Join is designed and its presence half written, but
 switched off (below). On 2026-10-31 the presence also learnt to go through Discord's Social SDK
 when the SDK's library sits next to the game (the user's choice); without it, the IPC as before.
+Later that day Ask to Join was turned on through the SDK, and the game takes the join on the title
+(not run in the game). The release ships the DLL only with `package_release.py --discord-sdk`,
+which is off by default: a licence decision not made yet.
 
 ## What it showed before (finding 106)
 
@@ -62,7 +65,7 @@ start, or started later: one log line and a try every 30 s. Nothing blocks the g
 only posts to a channel, and the pipe's blocking reads and writes stay on the `discord` thread. The
 one wait is the 0.5 s limit at exit.
 
-## Ask to Join: designed, presence half written, off
+## Ask to Join: the design (the state of 2026-10-31 is in "The game takes the join" below)
 
 Discord's fields (sources below): `secrets.join` is "Secret for joining a party". Ask to Join needs
 a non-empty `party.id`, a `party.size` with room left, and a non-empty join secret. When a friend
@@ -150,26 +153,55 @@ Version used: DiscordSocialSdk-1.10.19337 (the developer portal's download, 781 
   through `dhd_presence_take_join` (C, in dhd_presence.h). The Join button shows on desktop only
   (`SetSupportedPlatforms(Desktop)`).
 
-### Still for the game (point 2), not written
+### The game takes the join (points 2 and 3, written 2026-10-31, not run)
 
-- A core import, e.g. `host_service_presence_join(uint32_t out)` → `dhd_presence_take_join` (the
-  native host), 0 in the browser's two no-op lists. It is one more import in `build_wasm.py` and
-  `gen_host64_imports.py` (span: 8 bytes).
-- `online_menu.c`: `port_online_resume` also answers 1 when a join waits, which opens ONLINE from
-  the title as after a closed room. `port_online_menu` (or `page_update` on HOME) then calls
-  `enter_room(0, code)`, the JOIN WITH A CODE path, with its own `not_ready` refusals. In a race or
-  another menu, the join waits for the title.
-- Point 3, the server: take the join only when `server()` is the official one, or accept "no such
-  room".
+- **A core import**, `host_service_presence_join(uint32_t out)` (host_api.h): the native host hands
+  it to `dhd_presence_take_join` with the core's 8-byte buffer (host.c). The browser's two no-op
+  lists answer 0 (`www/worker.js`, `run_headless.mjs`), and `gen_host64_imports.py` checks the
+  8-byte span. The core gains one import, so it must be rebuilt (`build_wasm.py`) with the host.
+- **online_menu.c**: on the main menu `port_online_resume` takes a waiting join (`take_join`) and
+  answers 1. That opens ONLINE, as after a closed room, and `port_online_menu` joins the code
+  through `enter_room(0, code)`, the JOIN WITH A CODE path with its own `not_ready` refusals. In a
+  race or another page the join waits for the title. Point 3: a code is taken only when `server()`
+  is the official `wss://dhd.skuza.app`; otherwise one log line, and it is dropped.
+- **`ASK_TO_JOIN` is on.** Only the Social SDK can receive a join, so the plain IPC drops the secret
+  (`worker::for_ipc`). Its presence stays as before (the party and its id, both buttons, no secret).
+  So a game without the SDK's DLL shows no Join button.
+- **The party id is never the secret.** Discord refused an activity whose secret matched its party
+  id ("secrets cannot match the party id", code 5005, tried live 2026-10-31). `party_id()` is always
+  this session's token now.
+- Tests: `the_join_reaches_only_the_sdk`, `the_presence_is_harmless_without_discord`, and the
+  updated `the_join_secret`.
+- **Not run in the game**: the title opening ONLINE by itself, the join, the refusal off the
+  official server, and Discord starting the game for a join (`RegisterLaunchCommand`, the quoted
+  dhd.exe path). This needs `build_wasm.py` and `build_host64.py`, the DLL beside dhd.exe, and two
+  Discord accounts.
+
+### Packaging: the DLL only with `--discord-sdk`, off by default
+
+`port/tools/discord_sdk.py`, as `dxc.py` does for dxcompiler.dll: the SDK's archive is pinned by
+version and SHA-256 (`DiscordSocialSdk-1.10.19337.zip`, `d7840975...62045`) and so is the DLL
+(`f9953495...ab8ee`). It is taken from a cache outside the tree (%DHD_DISCORD_SDK_CACHE%, else
+DHD_DEVCACHES/discord-social-sdk, else build/downloads/discord-social-sdk); `<cache>/1.10.19337/`
+holds the zip. It cannot download: Discord's portal needs a sign-in, so a missing archive stops
+it with where to get it.
+
+`package_release.py --discord-sdk` (Windows only) puts the pinned `discord_partner_sdk.dll` beside
+dhd.exe. Like dxcompiler.dll it is checked by its SHA-256 instead of the byte scans, and the SDK's
+`License-Notices.txt` is appended to THIRD-PARTY-NOTICES.txt. **Without the option the package is as
+before** (no DLL, no SDK notices), so a release presents the IPC presence with no Join button.
+
+**Why off by default.** The user asked to ship the DLL. The SDK is Discord's closed binary, though,
+and the game is GPL-3.0-or-later, so whether a release may carry it is a licence decision for the
+project's copyright holders. That decision isn't made. By commit count most of the code is
+`skuza-oss`'s (122 commits on this branch against 6), so a GPL section 7 additional permission for
+the Discord SDK would be theirs to grant, not one contributor's. Nothing here changes LICENSE.
 
 ### What the user must decide or do
 
-- **The licence.** The SDK is Discord's closed binary under Discord's developer terms; the game is
-  GPL-3.0-or-later. The code here only loads it when present, and nothing of Discord's is in the
-  repository (`.gitignore` now names its files). Shipping the DLL in the release zip next to a GPL
-  executable is the copyright holders' call: for example a GPL section 7 additional permission for
-  the Discord SDK, or the player downloading it. `package_release.py` was not changed; it doesn't
-  copy the DLL.
+- **The licence**, above: grant (or get) a GPL section 7 additional permission for the Discord Social
+  SDK from the copyright holders, then build releases with `--discord-sdk`; or leave the DLL to
+  players who want it (put beside dhd.exe, it is used).
 - **The developer portal**: the Social SDK enabled for the application (its Getting Started form).
   Rich Presence through the SDK worked here without it, as far as this one try shows. The `logo`
   art asset is also missing: Discord's answer to `SET_ACTIVITY` (IPC, 2026-10-31) echoed
@@ -229,6 +261,10 @@ Not done:
 - `presence/Cargo.toml`, `port/render/Cargo.lock`: libloading =0.8.9 (one lock line).
 - `.gitignore`: the SDK's files.
 - `presence/src/tests.rs`: 12 tests (8 before), and 2 by hand against a running Discord.
+- Later on 2026-10-31: `ASK_TO_JOIN` on, `party_id()` without the secret, `worker::for_ipc`;
+  `host_service_presence_join` (host_api.h, host.c, `gen_host64_imports.py`, the browser's no-op
+  lists); `online_menu.c`'s `take_join`, `port_online_resume`, `port_online_menu`;
+  `port/tools/discord_sdk.py` (new); `package_release.py --discord-sdk`; tests.rs at 14.
 
 ## Checks (2026-10-30)
 
@@ -251,6 +287,14 @@ Not done:
     `"state":"Room K7M2QX"`, `"details":"Online room: Alpine MX"`, both buttons, the start time, and
     no `large_image` (the missing asset); passed.
   The profile itself was not looked at.
+- Later on 2026-10-31: `cargo test` (as above): 14 passed, 0 failed, 2 ignored, no warnings.
+  `clang -fsyntax-only -Wall -Wextra` on `online_menu.c` and `presence.c`: clean, and
+  `host_service_presence_join` against the headers in a scratch file: clean. `discord_sdk.py`:
+  unpacks and checks the pinned DLL from the cache; with an empty cache it stops with where to get
+  the archive. `package_release.layout()` called with dummy executables (no build): Windows without
+  `--discord-sdk` has the same six files as before and no SDK notices; with it, the DLL and the
+  notices; Linux with the flag, no DLL (`main` refuses the flag off Windows). `package_release.py`
+  itself was not run.
 - **Not run:** clippy (not installed for the 1.97.1 toolchain here); `build_wasm.py`,
   `build_host64.py`, `package_release.py` (kept off this machine while another build ran). The core
   must be rebuilt with the host because the struct grew. No game run and no Discord: so the rider

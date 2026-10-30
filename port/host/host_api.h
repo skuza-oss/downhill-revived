@@ -312,5 +312,9 @@ typedef struct {
     char track[24], room[8];
 } HostPresence;  /* 56 bytes */
 void host_service_presence(uint32_t state);
+/* A friend's join from Discord (the Social SDK, finding 121): the room's code, NUL-terminated, into
+   `out` (a guest span of 8 bytes or more), taken -- at most once. 1 when there was one (see
+   presence/src/lib.rs's `joined`). The browser and Android leave `out` and return 0. */
+int host_service_presence_join(uint32_t out);
 
 #endif

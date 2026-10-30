@@ -2,10 +2,11 @@
 //!
 //! The game core works out the state (port/hle/presence.c) and sends it through
 //! `host_service_presence` when it changes; port/hle/host.c hands it here (`c.rs`). A thread of its
-//! own (`worker.rs`) talks to Discord's local IPC through the discord-rich-presence crate: a named
-//! pipe on Windows, a Unix socket on macOS and Linux. No Discord SDK. Discord running or not, the
-//! player sees nothing of it but their profile: no error box, one log line at most while Discord
-//! isn't there, a quiet retry every 30 s.
+//! own (`worker.rs`) talks to Discord: the plain local IPC through the discord-rich-presence crate
+//! (a named pipe on Windows, a Unix socket on macOS and Linux), or Discord's Social SDK when its
+//! library sits beside the game (`sdk.rs`, finding 121). Discord running or not, the player sees
+//! nothing of it but their profile: no error box, one log line at most while Discord isn't there, a
+//! quiet retry every 30 s.
 //!
 //! This file is the part without Discord: the state, the two lines, the party's size and the
 //! elapsed time Discord shows for it (`payload`), and the pacing (`Pacer`: only a change is sent, at
@@ -38,10 +39,12 @@ pub const RETRY: Duration = Duration::from_secs(30);
 /// failed write, and the presence comes back once it is there (RETRY).
 pub const REFRESH: Duration = Duration::from_secs(60);
 
-/// Ask to Join (finding 121): a public room's join secret, which puts a Join button on the profile.
-/// Off: the game can't take a join from Discord yet (nothing reads Discord's ACTIVITY_JOIN), and a
-/// button that does nothing is worse than none.
-pub const ASK_TO_JOIN: bool = false;
+/// Ask to Join (finding 121): a public room's join secret, which puts a Join button on the
+/// profile. On: the game now takes a join (port/hle/online_menu.c reads it through
+/// `host_service_presence_join` and opens ONLINE's JOIN WITH A CODE), and only the Social SDK can
+/// receive one (worker.rs's `run_sdk`; the plain IPC can't SUBSCRIBE to ACTIVITY_JOIN, so it drops
+/// the secret, finding 121).
+pub const ASK_TO_JOIN: bool = true;
 /// What a join secret starts with: its format, for the game that takes it.
 pub const JOIN_PREFIX: &str = "dhd-room-1:";
 /// A join code's letters and length (the server's, port/hle/online_menu.c's code_letters).
@@ -158,14 +161,13 @@ pub fn join_secret(s: &State) -> Option<String> {
 }
 
 /// The party's id Discord asks for with a party size (2 to 128 characters, else it refuses the
-/// update): the join secret when there is one, otherwise this session's own random token, which
-/// says nothing of the room (a private room's code must not leave the core).
-pub fn party_id(join: Option<&str>) -> String {
+/// update): this session's own random token, which says nothing of the room (a private room's code
+/// must not leave the core). It must NOT be the join secret: Discord refuses an activity whose
+/// `secrets` match its `party.id` ("secrets cannot match the party id", code 5005, tried live
+/// 2026-10-31). The secret goes in `secrets.join`, a field of its own.
+pub fn party_id() -> String {
     use std::hash::{BuildHasher, Hasher};
     static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    if let Some(join) = join {
-        return join.to_string();
-    }
     TOKEN
         .get_or_init(|| {
             // RandomState's keys are random per process

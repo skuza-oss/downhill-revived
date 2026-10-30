@@ -58,18 +58,24 @@ fn public_and_private_rooms() {
     assert_eq!((p.details.as_str(), p.state.as_deref()), ("Online room: Alpine MX", Some("Room K7M2QX")));
     assert_eq!(p.party, Some([3, 6]));
     assert_eq!(json(&p)["party"]["size"], serde_json::json!([3, 6]));
-    // Discord refuses a party size without an id of 2 to 128 characters: this session's token, the
-    // same for every update, and nothing of the room's
+    // Discord refuses a party size without an id of 2 to 128 characters: this session's own token,
+    // the same for every update and nothing of the room's (finding 121: it must not be the join
+    // secret either, which Discord refuses -- code 5005).
     let id = json(&p)["party"]["id"].as_str().unwrap().to_string();
     assert!(id.starts_with("dhd-") && id.len() == 20, "{id}");
     assert!(!id.contains("K7M2QX"));
-    assert_eq!(party_id(None), id);
+    assert_eq!(party_id(), id);
+    assert_ne!(id, join_secret(&public).unwrap());
     // a private room comes without its code: the riders, and the code nowhere in the activity
     let private = State { room: String::new(), ..public.clone() };
     assert_eq!(lines(&private), pair("Online room: Alpine MX", Some("Private room")));
-    let text = json(&payload(&private, 0).unwrap()).to_string();
+    let private_json = json(&payload(&private, 0).unwrap());
+    let text = private_json.to_string();
     assert!(!text.contains("K7M2QX"), "{text}");
     assert!(text.contains("[3,6]"), "{text}");
+    // even with Ask to Join on, a private room's code (empty here) never reaches its party id
+    let private_id = private_json["party"]["id"].as_str().unwrap();
+    assert!(private_id.starts_with("dhd-") && private_id.len() == 20, "{private_id}");
     // the room's track not known: the kind alone
     assert_eq!(lines(&State { track: String::new(), ..private.clone() }), pair("Online room", Some("Private room")));
     // the room's size not known yet: no party
@@ -91,17 +97,56 @@ fn the_join_secret() {
     assert_eq!(join_secret(&room("K7M2QX", 6, 6)), None);
     assert_eq!(join_secret(&room("", 3, 6)), None);
     assert_eq!(join_secret(&State { room: "K7M2QX".into(), ..state(Kind::OnlineRace, "BC", 2, 4) }), None);
-    // off until the game can take a join (ASK_TO_JOIN): no secret and no party id is sent
+    // with Ask to Join on (finding 121), a joinable room carries the secret; a build with it off
+    // sends neither the secret nor a party id
     let p = payload(&room("K7M2QX", 3, 6), 0).unwrap();
     assert_eq!(p.join.is_some(), ASK_TO_JOIN);
     if !ASK_TO_JOIN {
         assert!(json(&p).get("secrets").is_none());
         assert!(!json(&p)["party"]["id"].as_str().unwrap().contains("K7M2QX"));
     }
-    // with a secret, the activity carries it with the party's id (what Ask to Join needs)
-    let joinable = Payload { join: Some("dhd-room-1:K7M2QX".into()), ..p };
-    assert_eq!(json(&joinable)["secrets"], serde_json::json!({"join": "dhd-room-1:K7M2QX"}));
-    assert_eq!(json(&joinable)["party"], serde_json::json!({"id": "dhd-room-1:K7M2QX", "size": [3, 6]}));
+    // with a secret, the activity carries it (secrets.join) with the party's size and this session's
+    // own id -- never the secret itself: Discord refuses an id matching the secret (code 5005)
+    let joinable = Payload { join: Some("dhd-room-1:K7M2QX".into()), ..p.clone() };
+    let j = json(&joinable);
+    assert_eq!(j["secrets"], serde_json::json!({"join": "dhd-room-1:K7M2QX"}));
+    assert_eq!(j["party"]["size"], serde_json::json!([3, 6]));
+    assert_ne!(j["party"]["id"], "dhd-room-1:K7M2QX");
+    assert_eq!(j["party"]["id"], json(&p)["party"]["id"]);
+}
+
+#[test]
+fn the_presence_is_harmless_without_discord() {
+    // The switch off, or unset (the tools' runs: the built-in value is off): the C entry point the
+    // host calls starts nothing, so a PC with no Discord is unaffected however the game is built.
+    assert_eq!(unsafe { c::dhd_presence_start(std::ptr::null(), None) }, 0);
+    let off = std::ffi::CString::new("off").unwrap();
+    assert_eq!(unsafe { c::dhd_presence_start(off.as_ptr(), None) }, 0);
+    // The Social SDK is only ever a library beside the game (sdk.rs), loaded at run time: nothing
+    // links against it, and one that isn't there is an Err (the worker keeps to the IPC), never a
+    // build or start failure (finding 121).
+    assert!(sdk::library_path().is_some(), "the SDK's path is named, not required");
+    assert!(sdk::Client::load(std::path::Path::new("no-such-discord-sdk.dll"), false, None).is_err());
+}
+
+#[test]
+fn the_join_reaches_only_the_sdk() {
+    // a joinable public room: the SDK path (payload) carries the secret (secrets.join), with a party
+    // id that is this session's own token, distinct from the secret (Discord refuses code 5005)
+    let p = payload(&room("K7M2QX", 3, 6), 0).unwrap();
+    assert!(p.join.is_some());
+    assert_eq!(json(&p)["secrets"], serde_json::json!({"join": "dhd-room-1:K7M2QX"}));
+    assert_ne!(json(&p)["party"]["id"], "dhd-room-1:K7M2QX");
+    // the plain IPC drops it: no secret, this session's own party id, both buttons (finding 121)
+    let ipc = worker::for_ipc(Some(p)).unwrap();
+    assert_eq!(ipc.join, None);
+    let ipc_json = json(&ipc);
+    assert!(ipc_json.get("secrets").is_none(), "{ipc_json}");
+    assert!(!ipc_json["party"]["id"].as_str().unwrap().contains("K7M2QX"), "{ipc_json}");
+    assert_eq!(ipc_json["party"]["size"], serde_json::json!([3, 6]));
+    assert_eq!(ipc_json["buttons"], json(&payload(&room("K7M2QX", 3, 6), 0).unwrap())["buttons"]);
+    // clearing (None) and a race go through unchanged
+    assert_eq!(worker::for_ipc(None), None);
 }
 
 #[test]

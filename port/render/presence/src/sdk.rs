@@ -374,7 +374,7 @@ impl Client {
             if p.party.is_some() || p.join.is_some() {
                 let mut party = Obj::new();
                 (a.party_init)(&mut party);
-                (a.party_set_id)(&mut party, DString::of(&party_id(p.join.as_deref())));
+                (a.party_set_id)(&mut party, DString::of(&party_id()));
                 if let Some([n, max]) = p.party {
                     (a.party_set_current_size)(&mut party, n);
                     (a.party_set_max_size)(&mut party, max);

@@ -1221,6 +1221,15 @@ void host_service_presence(uint32_t a0)
     dhd_presence_set(p->kind, track, p->place, p->riders, p->rider, room, p->members, p->max_members);
 }
 
+/* A friend's join from Discord (finding 121): the SDK's callback left the room's code in
+   dhd_presence (port/render/presence/src/lib.rs); the core (online_menu.c's port_online_resume)
+   takes it here and opens ONLINE's JOIN WITH A CODE. `out` is the core's 8-byte buffer; nothing is
+   written and 0 comes back when no join waits (the off setting, the IPC, the browser, Android). */
+int host_service_presence_join(uint32_t a0)
+{
+    return dhd_presence_take_join((char *)GUEST(a0), 8);
+}
+
 
 /* Wall-clock pacing is shared by the EE producer and native presenter. */
 #define WORK_SAMPLES 300
