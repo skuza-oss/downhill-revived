@@ -21,7 +21,7 @@ export const COUNTDOWN_MS = 5_000;
     is still there; after it, the server drops them as the client drops a silent server
     (port/net/client.c SILENT_MS). */
 export const RACE_SILENT_MS = 10_000;
-/** Text chat (finding 124): a message's length after trimming, in UTF-16 units, and how many a
+/** Text chat (finding 125): a message's length after trimming, in UTF-16 units, and how many a
     member may send in CHAT_WINDOW_MS. */
 export const CHAT_MAX = 120;
 export const CHAT_BURST = 5;

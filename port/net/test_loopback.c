@@ -33,6 +33,7 @@ typedef struct {
     /* the race */
     int drop_at_ms;
     int sent, got[PLAYERS], out_of_order;
+    int said;                  /* chat lines the relay took from this player */
 } Player;
 
 static Player players[PLAYERS];
@@ -140,6 +141,21 @@ static void relay_text(Player *p, const char *text)
     } else if (!strcmp(type, "ping") && json_number(text, "t", &t)) {
         snprintf(reply, sizeof reply, "{\"type\":\"pong\",\"t\":%.3f,\"serverTime\":%.0f}", t, (double)time(NULL) * 1000);
         text_to(p, p, reply);
+    } else if (!strcmp(type, "chat")) {
+        /* the server's rules (src/room.ts): 1-120 characters, 5 a player, then slow_down */
+        char said[512], escaped[1024], line[1200];
+        int i;
+        CHECK(json_string(text, "text", said, sizeof said) && said[0] && strlen(said) <= NET_CHAT_MAX);
+        CHECK(said[0] != ' ' && said[strlen(said) - 1] != ' ');
+        if (++p->said > 5) {
+            text_to(p, p, "{\"type\":\"error\",\"code\":\"slow_down\",\"message\":\"Too many messages: wait a moment.\"}");
+            return;
+        }
+        json_escape(escaped, sizeof escaped, said);
+        snprintf(line, sizeof line, "{\"type\":\"chat\",\"memberId\":%d,\"name\":\"P%d\",\"text\":\"%s\",\"at\":%d}",
+                 p->member, p->index, escaped, 1000 + p->said);
+        for (i = 0; i < PLAYERS; i++)
+            text_to(&players[i], p, line);
     } else if (!strcmp(type, "pong") || !strcmp(type, "leave"))
         ;
     else {
@@ -269,6 +285,53 @@ static DWORD WINAPI game(void *arg)
     return 0;
 }
 
+/* Chat in the room: a line from each player reaches everyone in order, the sender too; a line is
+   trimmed, and cut to NET_CHAT_MAX bytes between UTF-8 characters; the sixth line in a row is
+   refused (slow_down), which only its sender sees, as a note in its own chat. */
+static void chat(void)
+{
+    char line[200], want[16];
+    NetChat ch;
+    double until;
+    int i, k;
+    CHECK(!client_chat(&players[0].client, "  \t "));
+    for (i = 0; i < PLAYERS; i++) {
+        snprintf(line, sizeof line, "  hi from P%d\t ", i);
+        CHECK(client_chat(&players[i].client, line));
+    }
+    /* 119 bytes, then a two-byte character across the limit: it goes whole or not at all */
+    memset(line, 'x', 119);
+    snprintf(line + 119, sizeof line - 119, "\xC3\xA9 and more");
+    CHECK(client_chat(&players[1].client, line));
+    for (k = 0; k < 5; k++)
+        CHECK(client_chat(&players[2].client, "gg"));  /* its sixth line: refused */
+    until = net_now_ms() + 3000;
+    do {
+        Sleep(10);
+        client_get_chat(&players[3].client, &ch);
+    } while (ch.seq < 9 && net_now_ms() < until);
+    for (i = 0; i < PLAYERS; i++) {
+        client_get_chat(&players[i].client, &ch);
+        CHECK(ch.seq == (i == 2 ? 10u : 9u) && ch.count == NET_CHAT_LINES);
+        /* the oldest line went: the ring has lines 2..9 (player 2: 3..9 and its note) */
+        if (i == 2) {
+            CHECK(ch.line[NET_CHAT_LINES - 1].member_id == -1 && strstr(ch.line[NET_CHAT_LINES - 1].text, "wait"));
+            continue;
+        }
+        for (k = 0; k < 3; k++) {  /* lines 2..4: players 1-3's hellos */
+            snprintf(want, sizeof want, "hi from P%d", k + 1);
+            CHECK(!strcmp(ch.line[k].text, want) && ch.line[k].member_id == players[k + 1].member);
+            CHECK(ch.line[k].seq == (unsigned)k + 2 && !strcmp(ch.line[k].name, ch.line[k].text + 8));
+        }
+        CHECK(strlen(ch.line[3].text) == 119 && ch.line[3].text[118] == 'x');
+        CHECK(!strcmp(ch.line[4].text, "gg") && ch.line[4].at == 1002);
+        CHECK(ch.line[7].member_id == players[2].member);
+    }
+    printf("  chat: %u lines, slow_down after five\n", ch.seq);
+}
+
+static const int *lan_latency;  /* chat() runs in that round */
+
 static void run(const char *name, const int latency[PLAYERS], int dropper)
 {
     int i;
@@ -302,6 +365,8 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
     } while ((lobby.nmembers < PLAYERS || !lobby.member[PLAYERS - 1].ready) && net_now_ms() < until);
     CHECK(lobby.state == NET_LOBBY && lobby.is_host && lobby.nmembers == PLAYERS);
     CHECK(lobby.member[2].rider == 3 && lobby.member[3].bike == 1 && lobby.member[1].rtt_ms == latency[1] * 2);
+    if (dropper < 0 && latency == lan_latency)
+        chat();
     client_start(&players[0].client);
     until = net_now_ms() + 3000;
     for (i = 0; i < PLAYERS; i++) {
@@ -355,6 +420,7 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
 int main(void)
 {
     static const int lan[PLAYERS] = {2, 3, 2, 4}, wan[PLAYERS] = {10, 25, 45, 70};
+    lan_latency = lan;
     timeBeginPeriod(1);
     InitializeCriticalSection(&relay);
     run("four players, close", lan, -1);

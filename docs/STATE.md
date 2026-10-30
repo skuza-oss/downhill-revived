@@ -333,5 +333,9 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   countdown and the client already did; a server test that lost its snapshot frame is fixed.
   Not deployed yet. Finding 120: a racer silent for 10 s is dropped (`"timeout"`), and host handover
   mid-race has a server test.
+- Text chat (finding 125): the room's chat over the race room (L1 or Y; typing, or quick lines
+  for a pad), Y in a race for a line, the pause menu's L1/R1/L2/R2 quick lines, the last lines
+  at the left of the view. Client, loopback and browser client checked; not yet seen in the game.
+  The server must be deployed before a client with chat ships.
 - Tests: `port/net/build_tests.py` (unit and loopback), the server's own tests (`npm test`),
   `port/tools/online_race.py` (two local games through a relay, optionally `nettool` bots).

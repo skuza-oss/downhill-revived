@@ -210,6 +210,8 @@ double host_service_net_server_ms(void);
 int host_service_net_send_frame(int a0, uint32_t a1, uint32_t a2);
 int host_service_net_receive_frame(uint32_t a0, uint32_t a1);
 int host_service_net_list_lobbies(uint32_t a0, int a1);
+int host_service_net_send_chat(uint32_t text);  /* a chat line (finding 125): 1 sent */
+void host_service_net_get_chat(uint32_t out);   /* the last lines, a NetChat */
 
 /* ---- async host services: blocking work on a host thread (online_menu.c) ----
    Only results cross to the game thread, as guest-address buffers. The module
@@ -293,6 +295,9 @@ void host_service_mouse_state(uint32_t out);
 void host_service_text_input_begin(void);
 void host_service_text_input_end(void);
 int host_service_text_input_edit(uint32_t a0, int a1, uint32_t a2);
+/* 1 while a key is held that types `key` (an upper-case letter or a digit, as keyboard.c's
+   codes), the window has the keyboard and no text field is open: the online chat's Y. */
+int host_service_key_held(int key);
 int host_service_clipboard_set(uint32_t text);  /* 1 when the text is on the clipboard */
 void host_service_movie_start(uint32_t name, uint32_t lsn, uint32_t size, int audio, int found);
 int host_service_movie_update(int keep);

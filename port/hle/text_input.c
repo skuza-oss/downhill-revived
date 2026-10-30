@@ -97,6 +97,10 @@ int text_input_edit(char *buffer, int capacity, const char *allowed)
 void host_service_text_input_begin(void) { text_input_begin(); }
 void host_service_text_input_end(void) { text_input_end(); }
 int host_service_text_input_edit(uint32_t a0, int a1, uint32_t a2) { return text_input_edit((char *)GUEST(a0), a1, (const char *)GUEST(a2)); }
+int host_service_key_held(int key)
+{
+    return key > 0 && key < 256 && keyboard_focused() && !text_input_active() && keyboard_is_down((unsigned)key);
+}
 /* The race room's join code, for a chat elsewhere. */
 int host_service_clipboard_set(uint32_t text)
 {

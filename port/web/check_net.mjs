@@ -2,7 +2,8 @@
 // has the browser's WebSocket and fetch: two players against a relay (by default a local
 // `wrangler dev` in online/server), the way the game drives net.js. The host creates a room, the
 // guest joins it by its code, both ready, the host starts, and each sends a STATE frame the other
-// must receive; then the public list is read and both leave.
+// must receive; then the public list is read and both leave. In the room the guest says a chat line
+// both must get.
 //   node port/web/check_net.mjs [ws://127.0.0.1:8787]
 import { readFileSync } from 'node:fs';
 import { createNet } from './www/net.js';
@@ -38,6 +39,17 @@ if (guest.net.host_service_net_join_room(guest.put(room.code)) !== 0) fail('join
 await until('the guest in the room', () => guest.lobby().state === 2 && guest.lobby().members === 2);
 await until('the host sees two', () => host.lobby().members === 2);
 console.log('both in the room: 2 members');
+// Chat (finding 125): a line from the guest reaches both, the sender too, as net.h's NetChat
+// (u32 seq, i32 count, then lines of u32 seq, i32 memberId, name[32], text[128], f64 at).
+const chatAt = 0xA000, readChat = p => { p.net.host_service_net_get_chat(chatAt); const dv = new DataView(p.ram.buffer), n = dv.getInt32(chatAt + 4, true);
+  const text = at => new TextDecoder().decode(p.ram.subarray(at, p.ram.indexOf(0, at)));
+  return [...Array(n)].map((_, i) => { const at = chatAt + 8 + 176 * i; return { member: dv.getInt32(at + 4, true), name: text(at + 8), text: text(at + 40) }; }); };
+if (guest.net.host_service_net_send_chat(guest.put('  READY?  ')) !== 1) fail('send_chat');
+for (const [p, label] of [[host, 'host'], [guest, 'guest']]) {
+  const lines = await until(`the chat line for the ${label}`, () => { const l = readChat(p); return l.length ? l : null; });
+  if (lines[0].name !== 'GuestB' || lines[0].text !== 'READY?') fail(`${label} chat ${JSON.stringify(lines)}`);
+  console.log(`${label} chat: ${lines[0].name}: ${lines[0].text}`);
+}
 host.net.host_service_net_pick(-1, 1, 0); guest.net.host_service_net_pick(-1, 3, 0);
 host.net.host_service_net_set_ready(1); guest.net.host_service_net_set_ready(1);
 await sleep(500);

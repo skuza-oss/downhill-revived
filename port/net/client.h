@@ -36,6 +36,7 @@ typedef struct {
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];
     unsigned relayed_head, relayed_count;
+    NetChat chat;  /* the last lines said (net.h) */
 } NetClient;
 
 double net_now_ms(void);  /* a monotonic clock */
@@ -60,6 +61,8 @@ void client_start(NetClient *c);
 void client_end(NetClient *c);
 void client_leave(NetClient *c);  /* says so before the transport closes */
 void client_lobby(NetClient *c, NetLobby *out);
+int client_chat(NetClient *c, const char *text);  /* 1 sent */
+void client_get_chat(NetClient *c, NetChat *out);
 
 int client_send_frame(NetClient *c, int type, const void *payload, size_t n);
 int client_receive_frame(NetClient *c, uint8_t *out, size_t max);

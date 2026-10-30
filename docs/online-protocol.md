@@ -92,7 +92,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"kick","member":3}                          // host only
 {"type":"start"}                                    // host only; at least 2 members, all (host included) ready
 {"type":"pong","s":1734000000123}                   // echo of a server ping, see below
-{"type":"chat","text":"gg"}                         // anyone, in the room or a race (finding 124)
+{"type":"chat","text":"gg"}                         // anyone, in the room or a race (finding 125)
 {"type":"ping","t":12345.6}                          // optional client-side ping; the server answers "pong"
 {"type":"end"}                                       // host only: race over, back to the lobby
 ```

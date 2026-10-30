@@ -303,6 +303,8 @@ async function start(m) {
     host_service_text_input_end: () => { if (textActive) for (const k of KEYS) if (!ARROWS.has(k[0]) && Atomics.load(keys, k[0])) blocked[k[0]] = 1;
       textActive = false; typedClear(); },
     host_service_text_input_edit: (at, capacity, allowed) => textEdit(at, capacity, allowed),
+    // The online chat's Y (text_input.c): held, outside a text field. main.js keeps keys by place.
+    host_service_key_held: k => +(k > 0 && k < 256 && !textActive && Atomics.load(keys, k) !== 0),
     host_service_clipboard_set: at => { post('clipboard', { text: str(at) }); return 1; },  // the page writes it (main.js)
     // Online (net.js: port/net's client as dhd_net.wasm under the worker's WebSocket and fetch).
     ...net,

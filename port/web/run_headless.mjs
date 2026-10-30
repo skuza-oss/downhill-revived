@@ -141,7 +141,7 @@ host_service_gs_vsync host_service_gs_pump_messages host_service_gs_window_title
 host_service_gs_window_apply host_service_gs_present_options_apply host_service_gs_window_close
 host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence`.split(/\s+/);
 for(const n of noops)impl[n]=()=>{};
-for(const n of ['host_service_net_racing','host_service_net_seconds','host_service_net_server_ms','host_heartbeat_eip','host_service_launcher_open'])impl[n]=()=>0;
+for(const n of ['host_service_key_held','host_service_net_racing','host_service_net_seconds','host_service_net_server_ms','host_heartbeat_eip','host_service_launcher_open'])impl[n]=()=>0;
 const metadata=JSON.parse(fs.readFileSync(option('--imports',path.join(root,'build/web/imports.json'))));
 const coreBytes=fs.readFileSync(modulePath),threaded=definesSharedMemory(coreBytes);
 // As www/worker.js: the threaded core skips the waits that only order queued graphics work

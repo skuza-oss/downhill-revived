@@ -208,6 +208,38 @@ static void add_rtt(NetClient *c, double rtt)
     c->lobby.ping_ms = (int)(sorted[n / 2] + 0.5f);
 }
 
+/* A line for the chat ring: the oldest goes when it is full. */
+static void chat_add(NetClient *c, int member_id, const char *name, const char *text, double at)
+{
+    NetChat *ch = &c->chat;
+    NetChatLine *line;
+    if (ch->count == NET_CHAT_LINES)
+        memmove(ch->line, ch->line + 1, sizeof ch->line[0] * (NET_CHAT_LINES - 1));
+    else
+        ch->count++;
+    line = &ch->line[ch->count - 1];
+    memset(line, 0, sizeof *line);
+    line->seq = ++ch->seq;
+    line->member_id = member_id;
+    copy(line->name, sizeof line->name, name);
+    copy(line->text, sizeof line->text, text);
+    line->at = at;
+}
+
+static void read_chat(NetClient *c, const char *t)
+{
+    char name[NET_CHAT_NAME], text[NET_CHAT_TEXT];
+    long long v;
+    double at;
+    name[0] = 0;
+    if (!json_string(t, "text", text, sizeof text) || !text[0])
+        return;
+    json_string(t, "name", name, sizeof name);
+    if (!json_number(t, "at", &at))
+        at = net_now_ms() + c->clock_offset;
+    chat_add(c, json_int(t, "memberId", &v) ? (int)v : -1, name, text, at);
+}
+
 void client_on_text(NetClient *c, const char *text, size_t n)
 {
     char type[24];
@@ -261,9 +293,15 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         c->lobby.started = 0;
         c->lobby.state = NET_LOBBY;
         changed(c);
+    } else if (!strcmp(type, "chat")) {
+        read_chat(c, text);
+        changed(c);
     } else if (!strcmp(type, "error")) {
         json_string(text, "code", c->lobby.error_code, sizeof c->lobby.error_code);
         json_string(text, "message", c->lobby.error, sizeof c->lobby.error);
+        if (!strcmp(c->lobby.error_code, "slow_down"))  /* a chat line too many: say so in the chat */
+            chat_add(c, -1, "", c->lobby.error[0] ? c->lobby.error : "Too many messages: wait a moment.",
+                     net_now_ms() + c->clock_offset);
         changed(c);
     }
     SDL_UnlockMutex(c->lock);
@@ -425,6 +463,45 @@ void client_lobby(NetClient *c, NetLobby *out)
         double left = c->countdown_ends - (net_now_ms() + c->clock_offset);
         out->countdown_ms = left > 0 ? (int)left : 0;
     }
+    SDL_UnlockMutex(c->lock);
+}
+
+int client_chat(NetClient *c, const char *text)
+{
+    char line[NET_CHAT_MAX + 1], escaped[6 * NET_CHAT_MAX + 1];
+    size_t n = 0, i;
+    int sent = 0;
+    /* what the server would make of it: control characters as spaces, trimmed; at most
+       NET_CHAT_MAX bytes, not cutting a UTF-8 character */
+    while (*text == ' ' || (*text > 0 && *text < 0x20))
+        text++;
+    for (i = 0; text[i] && n < NET_CHAT_MAX; i++)
+        line[n++] = (unsigned char)text[i] < 0x20 || text[i] == 0x7F ? ' ' : text[i];
+    if ((text[i] & 0xC0) == 0x80) {  /* cut inside a character: drop the part that fitted */
+        while (n && (line[n - 1] & 0xC0) == 0x80)
+            n--;
+        if (n)
+            n--;
+    }
+    while (n && line[n - 1] == ' ')
+        n--;
+    line[n] = 0;
+    if (!n)
+        return 0;
+    json_escape(escaped, sizeof escaped, line);
+    SDL_LockMutex(c->lock);
+    if (c->connected) {
+        say(c, "{\"type\":\"chat\",\"text\":\"%s\"}", escaped);
+        sent = 1;
+    }
+    SDL_UnlockMutex(c->lock);
+    return sent;
+}
+
+void client_get_chat(NetClient *c, NetChat *out)
+{
+    SDL_LockMutex(c->lock);
+    *out = c->chat;
     SDL_UnlockMutex(c->lock);
 }
 
