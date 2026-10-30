@@ -3,194 +3,101 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Play in the browser | Downhill Revived</title>
+<title>Downhill Revived</title>
 <meta name="description" content="Play Downhill Revived, the PC port of Downhill Domination, in Chrome or Edge from your own USA disc image. Experimental.">
-<meta name="theme-color" content="#1b1530">
+<meta name="theme-color" content="#000000">
 <link rel="icon" href="/favicon.ico" sizes="32x32">
-<link rel="icon" href="/assets/icon-192.png" type="image/png" sizes="192x192">
 <style>
-  /* The site's look (downhill-revived.pages.dev, assets/site.css): its colours, Archivo (the site's
-     /assets/fonts; elsewhere the fallbacks), the top bar, the skewed gold button and the sunset. */
-  @font-face { font-family: "Archivo"; font-style: normal; font-weight: 100 900; font-stretch: 62% 125%;
-    font-display: swap; src: url("/assets/fonts/archivo-latin.woff2") format("woff2"); }
-  @font-face { font-family: "Archivo"; font-style: italic; font-weight: 100 900; font-stretch: 62% 125%;
-    font-display: swap; src: url("/assets/fonts/archivo-italic-latin.woff2") format("woff2"); }
-
-  /* --ar: the picture's shape (main.js sets 16 / 9 with widescreen); --chrome: the bars' height. */
-  :root { --ar: 16 / 9; --chrome: 150px;
-    --night: #1b1530; --deep: #140f25; --dusk: #2e2248; --haze: #8a4a82; --ember: #f07c3a; --gold: #ffc65a;
-    --snow: #f5eff8; --lilac: #bcaed4; --line: rgba(188, 174, 212, .22);
-    --font: "Archivo", "Arial Narrow", system-ui, sans-serif; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  /* The game is the page: the canvas fills the window, letterboxed at the picture's shape (the
+     canvas's own width and height; main.js's point() maps the pointer through the same bars). */
+  :root { --gold: #ffc65a; --ink: #f5eff8; --dim: #bcaed4; --panel: rgba(16, 12, 30, .92); --line: rgba(188, 174, 212, .25);
+    --font: system-ui, "Segoe UI", sans-serif; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   *, *::before, *::after { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body { display: flex; flex-direction: column; overflow: hidden; color: var(--snow); background: var(--night);
-    font: 1rem/1.5 var(--font); isolation: isolate; }
-  a { color: var(--gold); text-underline-offset: .2em; }
-  :focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; border-radius: 2px; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink); font: 15px/1.45 var(--font); }
+  #screen { position: fixed; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; outline: none; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
-  /* The evening behind the page (the site's /assets/img/evening, made for it; elsewhere plain night),
-     dimmed so the frame stays the focus. */
-  .backdrop { position: fixed; inset: 0; z-index: -1; pointer-events: none;
-    background: linear-gradient(rgba(27, 21, 48, .3), rgba(27, 21, 48, .3)),
-      url("/assets/img/evening-1916.webp") center bottom / cover no-repeat, var(--night); }
-
-  /* Top bar: the site's. */
-  .bar { flex: none; height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-    padding: 0 clamp(1rem, 3vw, 2.5rem); }
-  .mark { display: inline-flex; align-items: center; gap: .55rem; color: var(--snow); text-decoration: none;
-    font-style: italic; font-weight: 900; font-stretch: 125%; text-transform: uppercase; font-size: .95rem; white-space: nowrap; }
-  .mark svg { width: 2rem; color: var(--gold); }
-  .mark em { font-style: italic; color: var(--lilac); font-weight: 700; font-stretch: 100%; text-transform: none;
-    font-size: .85rem; padding-left: .6rem; margin-left: .1rem; border-left: 1px solid var(--line); }
-  .bar nav { display: flex; gap: clamp(.9rem, 2vw, 1.8rem); font-size: .95rem; font-stretch: 87%; font-weight: 600; }
-  .bar nav a { color: var(--snow); text-decoration: none; opacity: .88; white-space: nowrap; }
-  .bar nav a:hover { opacity: 1; text-decoration: underline; }
-  @media (max-width: 720px) { .nav-hide, .mark em { display: none; } }
-
-  /* The picture, as large as the window allows at its shape. */
-  main { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  .stage, .tools { width: min(calc(100vw - 2 * clamp(1rem, 3vw, 2.5rem)), calc((100vh - var(--chrome)) * var(--ar))); }
-  .stage { position: relative; aspect-ratio: var(--ar); container-type: size; overflow: hidden; border-radius: 4px;
-    background: #000; box-shadow: 0 0 0 1px var(--line), 10px 10px 0 var(--deep), 0 30px 80px rgba(0, 0, 0, .5); }
-  #screen { width: 100%; height: 100%; display: block; background: #000; outline: none; }
-
-  /* Before Start: a plain dark panel in the frame (the evening is the page's backdrop) and one
-     centred column on it: the title, a large target for the disc, Start. Sizes follow the frame (cqh). */
-  .setup { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    overflow: hidden; padding: 4cqh 6cqw; text-align: center; isolation: isolate;
-    background: radial-gradient(90% 70% at 50% 0%, #30224f 0%, #1f1838 55%, #18122b 100%); }
+  /* Before Start: one card in the middle. */
+  .setup { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+    background: radial-gradient(80% 70% at 50% 30%, #241a40, #0b0816 70%); }
   body.running .setup { display: none; }
-    background: radial-gradient(circle, #fff4cf 0, #ffe09a 30%, #ffc76a 40%, rgba(255, 170, 90, .38) 42%, rgba(255, 150, 80, .12) 58%, rgba(255, 140, 70, 0) 70%); }
-  .pick { width: min(40rem, 64cqw); display: flex; flex-direction: column; align-items: center; }
-  .pick h1 { margin: 0 0 3.4cqh; font-style: italic; font-weight: 900; font-stretch: 125%; text-transform: uppercase;
-    font-size: clamp(1.6rem, 10cqh, 4.6rem); line-height: .9; letter-spacing: -.02em; }
-  .drop { position: relative; display: flex; flex-direction: column; align-items: center; gap: .9cqh; width: 100%;
-    padding: 6cqh 1.5rem 5.5cqh; cursor: pointer; border-radius: 6px; background: rgba(27, 21, 48, .66);
-    border: 3px dashed rgba(245, 239, 248, .45); transition: border-color .15s, background .15s; }
-  .drop:hover, body.dragging .drop { border-color: var(--gold); background: rgba(27, 21, 48, .84); }
-  .drop:has(#disc:not(:empty)) { border-style: solid; border-color: var(--gold); }
-  .drop svg { width: clamp(2.2rem, 11cqh, 4.6rem); color: var(--gold); margin-bottom: 1cqh; }
-  .drop strong { font-style: italic; font-weight: 900; font-stretch: 118%; font-size: clamp(1rem, 4.8cqh, 1.75rem); line-height: 1.1; }
-  .drop small { color: var(--lilac); font-size: clamp(.75rem, 2.8cqh, 1rem); }
-  #disc { max-width: 100%; color: var(--gold); font-weight: 700; font-size: clamp(.75rem, 2.8cqh, 1rem);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card { width: min(26rem, 100%); display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+  .card h1 { margin: 0 0 4px; font-size: 1.6rem; font-style: italic; font-weight: 900; letter-spacing: .02em; text-transform: uppercase; }
+  .drop { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 16px; cursor: pointer;
+    border: 2px dashed rgba(245, 239, 248, .4); border-radius: 8px; background: rgba(255, 255, 255, .03); transition: border-color .15s; }
+  .drop:hover, body.dragging .drop, .drop:has(#disc:not(:empty)) { border-color: var(--gold); }
+  .drop small { color: var(--dim); }
+  #disc { max-width: 100%; color: var(--gold); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #disc:empty { display: none; }
   #iso { position: absolute; width: 1px; height: 1px; opacity: 0; }
-  #start { margin-top: 4.4cqh; }
-  .note { margin: 3.6cqh 0 0; color: #f8e6ee; font-size: clamp(.68rem, 2.4cqh, .9rem); }
+  #start { width: 100%; padding: 12px; border: 0; border-radius: 8px; background: var(--gold); color: #140f25;
+    font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+  #start:disabled { cursor: default; background: #3b2f55; color: #9d90b8; }
+  .note { margin: 0; color: var(--dim); font-size: .82rem; }
 
-  /* The site's button: gold, skewed, a hard shadow. */
-  .btn { flex: none; border: 0; cursor: pointer; padding: 2.3cqh 2.2rem; background: var(--gold); color: var(--night);
-    font: 900 italic clamp(.9rem, 3.6cqh, 1.3rem)/1 var(--font); font-stretch: 118%; text-transform: uppercase;
-    transform: skewX(-12deg); box-shadow: 6px 6px 0 var(--night); transition: transform .15s ease, box-shadow .15s ease, opacity .15s; }
-  .btn span { display: inline-block; transform: skewX(12deg); }
-  .btn:hover:not(:disabled) { transform: skewX(-12deg) translate(-2px, -2px); box-shadow: 8px 8px 0 var(--night); }
-  .btn:active:not(:disabled) { transform: skewX(-12deg) translate(3px, 3px); box-shadow: 2px 2px 0 var(--night); }
-  .btn:disabled { cursor: default; background: #3b2f55; color: #9d90b8; box-shadow: 6px 6px 0 rgba(10, 7, 20, .5); }
-  @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
-
-  /* Under the picture: the game's status, then the panels' buttons. */
-  .tools { flex: none; min-height: 62px; display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: 6px 0 4px; }
-  #status { flex: 1; min-width: 0; display: flex; align-items: center; gap: .55rem; font: .78rem var(--mono); color: var(--lilac);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #status::before { content: ""; flex: none; width: 8px; height: 8px; transform: skewX(-12deg); background: var(--gold); }
-  .ghost { flex: none; cursor: pointer; padding: .42rem 1rem; color: var(--snow); background: rgba(46, 34, 72, .55);
-    border: 1px solid var(--line); font: 800 italic .8rem/1 var(--font); font-stretch: 112%; text-transform: uppercase;
-    letter-spacing: .02em; transform: skewX(-12deg); transition: background .15s, border-color .15s; }
-  .ghost span { display: inline-block; transform: skewX(12deg); }
-  .ghost:hover { background: var(--dusk); border-color: rgba(255, 198, 90, .6); }
-
-  /* Panels over the page: controls and the log. */
-  .panel { position: fixed; z-index: 5; right: clamp(1rem, 3vw, 2.5rem); bottom: 70px; width: min(26rem, calc(100vw - 2rem));
-    max-height: calc(100vh - 150px); overflow: auto; padding: 1.2rem 1.4rem 1.3rem; border-radius: 4px; color: var(--lilac);
-    background: rgba(27, 21, 48, .97); border: 1px solid var(--line); box-shadow: 8px 8px 0 var(--deep), 0 20px 60px rgba(0, 0, 0, .5); }
-  .panel[hidden] { display: none; }
-  .panel h2 { position: relative; margin: 0 0 1rem; padding-top: .8rem; color: var(--snow); font-style: italic; font-weight: 900;
-    font-stretch: 125%; font-size: 1.15rem; text-transform: uppercase; line-height: 1; }
-  .panel h2::before { content: ""; position: absolute; left: 0; top: 0; width: 2.6rem; height: 3px;
-    background: linear-gradient(90deg, var(--ember), var(--gold)); transform: skewX(-24deg); transform-origin: left; }
-  .keys { display: grid; grid-template-columns: auto 1fr; gap: .4rem 1rem; align-items: center; font-size: .9rem; }
-  kbd { font: .74rem var(--mono); color: var(--snow); padding: .12rem .42rem; border-radius: 3px; white-space: nowrap;
-    background: rgba(188, 174, 212, .12); border: 1px solid var(--line); border-bottom-width: 2px; }
-  .panel p { margin: 0; font-size: .88rem; }
-  .panel .more { margin-top: 1rem; }
-  #log { margin: 0; font: .72rem/1.45 var(--mono); color: var(--lilac); white-space: pre-wrap; word-break: break-word; }
+  /* While playing: only the game. ` (Backquote, not a game key) opens the menu; a hint says so at
+     the start and when the menu closes. */
+  .hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 6px 12px; border-radius: 6px;
+    background: var(--panel); color: var(--dim); font-size: .8rem; pointer-events: none; opacity: 0; transition: opacity .4s; }
+  .hint.show { opacity: 1; }
+  kbd { font: .78rem var(--mono); color: var(--ink); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); background: rgba(255, 255, 255, .06); }
+  .menu { position: fixed; top: 16px; right: 16px; width: min(24rem, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto;
+    display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-radius: 10px; background: var(--panel);
+    border: 1px solid var(--line); box-shadow: 0 16px 50px rgba(0, 0, 0, .6); }
+  .menu[hidden], .menu [hidden] { display: none; }
+  #status { font: .75rem var(--mono); color: var(--dim); overflow-wrap: anywhere; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .row button { flex: 1; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, .06); }
+  .row button:hover, .row button[aria-pressed="true"] { border-color: var(--gold); }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; align-items: center; font-size: .85rem; color: var(--dim); }
+  .menu p { margin: 0; font-size: .82rem; color: var(--dim); }
+  #log { margin: 0; max-height: 40vh; overflow: auto; font: .7rem/1.4 var(--mono); color: var(--dim); white-space: pre-wrap; word-break: break-word; }
   #log:empty::before { content: "Nothing yet."; opacity: .7; }
-
-  /* Small or short windows: before Start the column flows at its own height and the page scrolls. */
-  @media (max-width: 760px), (max-height: 520px) {
-    body:not(.running) { overflow-y: auto; }
-    body:not(.running) main { justify-content: flex-start; padding: .25rem 0 1rem; }
-    body:not(.running) .stage { aspect-ratio: auto; container-type: normal; }
-    body:not(.running) #screen { display: none; }
-    .setup { position: relative; inset: auto; padding: 2rem 1.2rem 9rem; }
-    .pick { width: 100%; }
-    .pick h1 { font-size: clamp(2.2rem, 12vw, 3.4rem); margin-bottom: 1.2rem; }
-    .drop { padding: 1.8rem 1rem; gap: .3rem; } .drop svg { width: 2.8rem; } .drop strong { font-size: 1.25rem; }
-    .drop small, #disc, .note { font-size: .9rem; }
-    #start { margin-top: 1.6rem; padding: 1rem 2.4rem; font-size: 1.1rem; } .note { margin-top: 1.4rem; }
-    #status { flex-basis: 100%; }
-  }
 </style>
 </head>
 <body>
-<div class="backdrop" aria-hidden="true"></div>
+<canvas id="screen" width="1280" height="960" tabindex="0" aria-label="The game"></canvas>
 
-<header class="bar">
-  <a class="mark" href="/" aria-label="Downhill Revived, home">
-    <svg viewBox="0 0 40 32" aria-hidden="true"><path d="M2 30 L15 6 L20 13 L25 8 L38 30 Z" fill="currentColor"/><path d="M15 6 L20 13 L13 30" fill="none" stroke="#1b1530" stroke-width="2.4"/></svg>
-    <span>Downhill Revived</span><em>in the browser</em>
-  </a>
-  <nav aria-label="Site">
-    <a class="nav-hide" href="/#play">How to play</a>
-    <a href="https://github.com/skuza-oss/downhill-revived/releases/latest">Download<span class="nav-hide"> for Windows</span></a>
-    <a class="nav-hide" href="https://github.com/skuza-oss/downhill-revived">GitHub</a>
-  </nav>
-</header>
-
-<main>
-  <div class="stage">
-    <canvas id="screen" width="1280" height="960" tabindex="0" aria-label="The game"></canvas>
-    <div class="setup">
-      <div class="pick">
-        <h1>Drop in</h1>
-        <label class="drop" for="iso">
-          <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="24" cy="24" r="6" fill="none" stroke="currentColor" stroke-width="3"/><path d="M24 9 A15 15 0 0 1 39 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".55"/></svg>
-          <strong>Drop your .iso here</strong>
-          <small>or click to choose it</small>
-          <span id="disc"></span>
-        </label>
-        <input type="file" id="iso" accept=".iso,.bin,.img">
-        <button id="start" class="btn" disabled><span>Start</span></button>
-        <p class="note">USA disc (SCUS-97177) &middot; Chrome or Edge &middot; nothing is uploaded</p>
-      </div>
-    </div>
+<div class="setup">
+  <div class="card">
+    <h1>Downhill Revived</h1>
+    <label class="drop" for="iso">
+      <strong>Drop your .iso here</strong>
+      <small>or click to choose it</small>
+      <span id="disc"></span>
+    </label>
+    <input type="file" id="iso" accept=".iso,.bin,.img">
+    <button id="start" disabled>Start</button>
+    <p class="note">USA disc (SCUS-97177) &middot; Chrome or Edge &middot; nothing is uploaded &middot; <kbd>`</kbd> menu in game</p>
   </div>
-
-  <div class="tools">
-    <div id="status">Ready</div>
-    <button id="controlsButton" class="ghost" type="button"><span>Controls</span></button>
-    <button id="logButton" class="ghost" type="button"><span>Log</span></button>
-    <button id="fullscreen" class="ghost" type="button" title="Or double-click the picture"><span>Fullscreen</span></button>
-  </div>
-</main>
-
-<div class="panel" id="controls" hidden>
-  <h2>Controls</h2>
-  <div class="keys">
-    <span><kbd>&larr;</kbd> <kbd>&uarr;</kbd> <kbd>&rarr;</kbd> <kbd>&darr;</kbd></span><span>Steer, menus</span>
-    <span><kbd>X</kbd> <kbd>Space</kbd></span><span>Cross</span>
-    <span><kbd>C</kbd></span><span>Circle</span>
-    <span><kbd>Z</kbd></span><span>Square</span>
-    <span><kbd>S</kbd></span><span>Triangle</span>
-    <span><kbd>A</kbd> <kbd>D</kbd></span><span>L1 / R1</span>
-    <span><kbd>Q</kbd> <kbd>E</kbd></span><span>L2 / R2</span>
-    <span><kbd>Enter</kbd></span><span>Start</span>
-    <span><kbd>Tab</kbd></span><span>Select</span>
-  </div>
-  <p class="more">Mouse and gamepads work too. Settings: OPTIONS &gt; PC SETTINGS.</p>
 </div>
-<div class="panel" id="logPanel" hidden><h2>Log</h2><pre id="log"></pre></div>
+
+<div class="hint" id="hint">Press <kbd>`</kbd> for the menu &middot; double-click for fullscreen</div>
+
+<div class="menu" id="menu" hidden>
+  <div id="status">Ready</div>
+  <div class="row">
+    <button id="fullscreen" type="button">Fullscreen</button>
+    <button id="controlsButton" type="button" aria-pressed="false">Controls</button>
+    <button id="logButton" type="button" aria-pressed="false">Log</button>
+  </div>
+  <div id="controls" hidden>
+    <div class="keys">
+      <span><kbd>&larr;</kbd> <kbd>&uarr;</kbd> <kbd>&rarr;</kbd> <kbd>&darr;</kbd></span><span>Steer, menus</span>
+      <span><kbd>X</kbd> <kbd>Space</kbd></span><span>Cross</span>
+      <span><kbd>C</kbd></span><span>Circle</span>
+      <span><kbd>Z</kbd></span><span>Square</span>
+      <span><kbd>S</kbd></span><span>Triangle</span>
+      <span><kbd>A</kbd> <kbd>D</kbd></span><span>L1 / R1</span>
+      <span><kbd>Q</kbd> <kbd>E</kbd></span><span>L2 / R2</span>
+      <span><kbd>Enter</kbd></span><span>Start</span>
+      <span><kbd>Tab</kbd></span><span>Select</span>
+    </div>
+    <p>Mouse and gamepads work too. Settings: OPTIONS &gt; PC SETTINGS.</p>
+  </div>
+  <pre id="log" hidden></pre>
+</div>
 
 <script type="module" src="main.js"></script>
 </body>

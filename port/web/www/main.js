@@ -7,7 +7,8 @@ const status = $('status'), log = $('log'), canvas = $('screen');
 const params = new URLSearchParams(location.search);
 const addLog = text => { log.textContent += text + '\n'; log.scrollTop = log.scrollHeight; };
 
-if (!crossOriginIsolated) status.textContent = 'This page needs cross-origin isolation: start it with port/web/serve.mjs.';
+if (!crossOriginIsolated)  // on the start card too: the status line is in the menu
+  status.textContent = document.querySelector('.note').textContent = 'This page needs cross-origin isolation: start it with port/web/serve.mjs.';
 const input = new SharedArrayBuffer(256 + 32 * 4 + 16 * 4);
 // pads: players 1-4, 8 ints each (played by hand the game opens four pads on a multitap, pad.c).
 const keys = new Uint8Array(input, 0, 256), pads = new Int32Array(input, 256, 32);
@@ -24,7 +25,9 @@ function vk(code) {
   const m = /^Key([A-Z])$/.exec(code); return m ? m[1].charCodeAt(0) : 0;
 }
 let running = false;
-addEventListener('keydown', e => { const k = vk(e.code); if (!k || !running || e.altKey || e.ctrlKey || e.metaKey) return;
+addEventListener('keydown', e => {
+  if (e.code === 'Backquote' && running && !e.repeat) { e.preventDefault(); toggleMenu(); return; }  // not a game key (vk: 0)
+  const k = vk(e.code); if (!k || !running || e.altKey || e.ctrlKey || e.metaKey) return;
   Atomics.store(keys, k, 1); e.preventDefault(); });
 addEventListener('keyup', e => { const k = vk(e.code); if (k) Atomics.store(keys, k, 0); });
 addEventListener('blur', () => keys.fill(0));
@@ -73,20 +76,25 @@ function cursor() {
   if (canvas.style.cursor !== 'none' && (performance.now() - lastMove > 3000 || Atomics.load(mouse, 12))) canvas.style.cursor = 'none';
 }
 
-// Fullscreen: a double click on the picture or the Fullscreen button (PC SETTINGS has no Display
-// row in the browser).
+// Fullscreen: a double click on the picture or the menu's button (PC SETTINGS has no Display row in
+// the browser). The whole page goes fullscreen, so the menu still opens over the game there.
 const fullscreen = () => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  else canvas.requestFullscreen?.().catch(e => addLog(`fullscreen: ${e.message}`)); };
+  else document.documentElement.requestFullscreen?.().catch(e => addLog(`fullscreen: ${e.message}`)); };
 canvas.ondblclick = fullscreen;
 $('fullscreen').onclick = () => { fullscreen(); canvas.focus(); };
 
-// The Controls and Log buttons under the picture open their panels; a click elsewhere closes them.
-const panels = { controlsButton: $('controls'), logButton: $('logPanel') };
-for (const [id, panel] of Object.entries(panels))
-  $(id).onclick = e => { e.stopPropagation(); const open = panel.hidden;
-    Object.values(panels).forEach(p => { p.hidden = true; }); panel.hidden = !open; };
-Object.values(panels).forEach(p => p.addEventListener('pointerdown', e => e.stopPropagation()));
-addEventListener('pointerdown', () => Object.values(panels).forEach(p => { p.hidden = true; }));
+// The menu (`, Backquote): the status line, then Controls and the Log, each shown
+// by its button. A click on the game closes it; the hint shows for a few seconds at the start.
+const menu = $('menu'), hint = $('hint');
+let hintTimer;
+function showHint(ms = 4000) { hint.classList.add('show'); clearTimeout(hintTimer); hintTimer = setTimeout(() => hint.classList.remove('show'), ms); }
+function toggleMenu(open = menu.hidden) { menu.hidden = !open; if (open) hint.classList.remove('show'); else canvas.focus(); }
+for (const [id, section] of [['controlsButton', $('controls')], ['logButton', log]])
+  $(id).onclick = () => { section.hidden = !section.hidden; $(id).setAttribute('aria-pressed', String(!section.hidden));
+    if (!section.hidden && section === log) log.scrollTop = log.scrollHeight; };
+menu.addEventListener('pointerdown', e => e.stopPropagation());
+canvas.addEventListener('pointerdown', () => { if (!menu.hidden) toggleMenu(false); });
+const openLog = () => { toggleMenu(true); log.hidden = false; $('logButton').setAttribute('aria-pressed', 'true'); };
 
 // The display's refresh rate (PC SETTINGS > Frame Rate > Monitor: the worker's host_display_hz):
 // the median of 30 frame intervals; 60 when the page gets no frames within a second (hidden).
@@ -107,14 +115,12 @@ function refreshHz() {
 
 // The canvas's shape (PC SETTINGS > Widescreen, from the stored settings): 16:9 with widescreen
 // (the picture's "wide", host_monitor_aspect's 16:9), else the PS2's 4:3: DHD_WIDESCREEN as the game
-// will have it (?env., else the stored settings', else the player's default; settings.js).
-// Also at page load, so the frame around the picture has its shape before Start.
+// will have it (?env., else the stored settings', else the player's default; settings.js). The
+// canvas's width and height carry it; index.html letterboxes the canvas at that shape.
 async function shape(env) {
   const start = await startSettings(env).catch(() => null);
   start?.db?.close();
-  const wide = (parseInt(env.DHD_WIDESCREEN ?? start?.vars.DHD_WIDESCREEN ?? '0') || 0) !== 0;
-  document.documentElement.style.setProperty('--ar', wide ? '16 / 9' : '4 / 3');  // index.html's stage
-  return wide;
+  return (parseInt(env.DHD_WIDESCREEN ?? start?.vars.DHD_WIDESCREEN ?? '0') || 0) !== 0;
 }
 
 async function start(source) {
@@ -134,7 +140,7 @@ async function start(source) {
   worker.onmessage = e => { const m = e.data;
     if (m.type === 'log') addLog(m.text);
     else if (m.type === 'error') { addLog('ERROR ' + m.text); status.textContent = 'stopped: ' + m.text.split('\n')[0];
-      $('logPanel').hidden = false; }
+      openLog(); }
     else if (m.type === 'running') status.textContent = 'running';
     else if (m.type === 'exit') status.textContent = `game exited (${m.status})`;
     else if (m.type === 'status') { status.textContent = `field ${m.field}  ${m.fps.toFixed(1)} fields/s  picture ${m.size}  draws ${m.draws}  batches ${m.dispatches}  readbacks ${m.reads}  sound ${m.sound} s${m.riding ? '  riding' : ''}`;
@@ -142,7 +148,7 @@ async function start(source) {
   };
   worker.onerror = e => addLog('worker error: ' + e.message);
   worker.postMessage({ type: 'start', ...source, canvas: offscreen, input, audio, displayHz: await hz }, [offscreen]);
-  canvas.focus();
+  canvas.focus(); showHint();
   pollPads();
 }
 
