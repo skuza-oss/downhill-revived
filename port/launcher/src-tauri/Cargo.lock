@@ -696,6 +696,7 @@ dependencies = [
 name = "dhd_disc"
 version = "1.0.0"
 dependencies = [
+ "getrandom 0.2.17",
  "ring",
 ]
 
