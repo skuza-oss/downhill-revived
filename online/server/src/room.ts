@@ -19,6 +19,7 @@ import {
   PING_INTERVAL_MS,
   PING_MAX_PAYLOAD,
   PROTOCOL,
+  RACE_SILENT_MS,
   RTT_SAMPLES,
   START_LEAD_MS,
   type ErrorCode,
@@ -110,6 +111,8 @@ export class Room extends DurableObject<Env> {
   // Race relay state, rebuilt from `state.race` after a wake-up.
   private raceSockets: (WebSocket | null)[] = [];
   private slotOf = new Map<WebSocket, number>();
+  /** When each slot last sent a frame (RACE_SILENT_MS); a wake-up starts every slot afresh. */
+  private heardAt: number[] = [];
 
   private listedKey: string | null = null;
   private listedAt = 0;
@@ -278,6 +281,10 @@ export class Room extends DurableObject<Env> {
       if (this.countdownReady(st)) await this.startRace(st, "");
       else st.countdownEndsAt = null;
     }
+    if (st.race) {
+      await this.dropSilent(now);
+      if (!this.state) return;  // the last racer went: the room is gone
+    }
     if (st.members.length === 0) {
       if (pending === 0 && now - st.createdAt > UNUSED_ROOM_MS) return this.destroy();
     } else if (!st.race) {
@@ -314,6 +321,7 @@ export class Room extends DurableObject<Env> {
     }
     const n = data.byteLength;
     if (n < 2 || n > MAX_BINARY_BYTES) return;
+    this.heardAt[slot] = Date.now();
     const b = new Uint8Array(data);
     b[1] = slot;
     switch (b[0]) {
@@ -356,6 +364,7 @@ export class Room extends DurableObject<Env> {
     this.slotOf.clear();
     if (!race) {
       this.raceSockets = [];
+      this.heardAt = [];  // the next race's slots start afresh
       return;
     }
     this.raceSockets = race.slots.map((id, slot) => {
@@ -363,6 +372,30 @@ export class Room extends DurableObject<Env> {
       if (ws) this.slotOf.set(ws, slot);
       return ws;
     });
+    const now = Date.now();
+    this.heardAt = race.slots.map((_, slot) => this.heardAt[slot] ?? now);
+  }
+
+  private raceSilentMs(): number {
+    const v = Number((this.env as unknown as Record<string, unknown>).RACE_SILENT_MS);
+    return Number.isFinite(v) && v > 0 ? v : RACE_SILENT_MS;
+  }
+
+  /** Racers whose socket went quiet without a close (a lost connection the platform hasn't noticed
+      yet) leave as if it had closed: the others hand their rider to the host's AI. */
+  private async dropSilent(now: number): Promise<void> {
+    const race = this.state?.race;
+    if (!race) return;
+    const limit = this.raceSilentMs();
+    const silent = race.slots.filter((_, slot) => this.raceSockets[slot] && now - (this.heardAt[slot] ?? now) > limit);
+    for (const id of silent) {
+      const ws = this.sockets.get(id);
+      await this.leave(id, "timeout");
+      if (ws)
+        try {
+          ws.close(1001, "timeout");
+        } catch {}
+    }
   }
 
   // ---- Lobby ----
@@ -487,6 +520,8 @@ export class Room extends DurableObject<Env> {
 
   private async onStart(ws: WebSocket, st: RoomState): Promise<void> {
     if (st.race) return this.error(ws, "room_started", "The race is already running.");
+    // As the countdown and the client's Start: a race needs two members.
+    if (st.members.length < 2) return this.error(ws, "not_ready", "Need 2 players to start.");
     const waiting = st.members.filter((x) => !x.ready);
     if (waiting.length)
       return this.error(ws, "not_ready", `Not ready: ${waiting.map((x) => x.name).join(", ")}.`);
@@ -533,6 +568,7 @@ export class Room extends DurableObject<Env> {
       seed: st.seed ?? randomSeed(),
       startAt: now + START_LEAD_MS,
     };
+    this.heardAt = [];  // a new race: every racer starts heard now
     this.rebuildRace();
     await this.save();
     const race = st.race;
@@ -562,7 +598,7 @@ export class Room extends DurableObject<Env> {
   }
 
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
-  private async leave(memberId: number, reason: "disconnect" | "leave" | "kicked"): Promise<void> {
+  private async leave(memberId: number, reason: "disconnect" | "leave" | "kicked" | "timeout"): Promise<void> {
     const st = this.state;
     if (!st) return;
     const i = st.members.findIndex((x) => x.id === memberId);

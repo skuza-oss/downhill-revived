@@ -326,5 +326,9 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   files differ is turned away on ONLINE with lines saying why and what to do, and dhd.log has both
   hashes and the first different file (finding 098). dhd.log's first line names the release and
   the build.
+- 2026-10-30 (finding 118): the server's `start` refuses a room of one (`not_ready`), as the
+  countdown and the client already did; a server test that lost its snapshot frame is fixed.
+  Not deployed yet. Finding 120: a racer silent for 10 s is dropped (`"timeout"`), and host handover
+  mid-race has a server test.
 - Tests: `port/net/build_tests.py` (unit and loopback), the server's own tests (`npm test`),
   `port/tools/online_race.py` (two local games through a relay, optionally `nettool` bots).

@@ -117,13 +117,25 @@ describe("lobby", () => {
     expect((await bo.json("error")).code).toBe("not_host");
     bo.sendJson({ type: "pick", rider: 7, bike: 2 });
     host.sendJson({ type: "settings", track: 5, laps: 3, seed: 1234 });
-    host.sendJson({ type: "settings", track: 999 });
-    expect((await host.json("error")).code).toBe("bad_value");
+    // The snapshot first: waiting for the error would discard it (json() skips other frames).
     const r = JSON.parse(
       (await host.next((f) => typeof f === "string" && JSON.parse(f).settings?.track === 5 && JSON.parse(f).members?.[1]?.rider === 7)) as string,
     );
     expect(r.settings).toEqual({ track: 5, laps: 3, seed: 1234 });
     expect(r.members[1]).toMatchObject({ rider: 7, bike: 2 });
+    host.sendJson({ type: "settings", track: 999 });
+    expect((await host.json("error")).code).toBe("bad_value");
+  });
+
+  it("does not start with the host alone", async () => {
+    const { host } = await Client.host("H");
+    host.sendJson({ type: "ready", ready: true });
+    await host.next((f) => typeof f === "string" && JSON.parse(f).members?.[0]?.ready);
+    host.sendJson({ type: "start" });
+    expect((await host.json("error")).code).toBe("not_ready");
+    host.sendJson({ type: "settings", track: 3 });
+    const r = JSON.parse((await host.next((f) => typeof f === "string" && JSON.parse(f).settings?.track === 3)) as string);
+    expect(r.started).toBe(false);
   });
 
   it("starts only when everyone is ready, assigning slots host first", async () => {
@@ -315,6 +327,36 @@ describe("race relay", () => {
     // The others keep relaying to each other.
     clients[2].ws.send(new Uint8Array([5, 0, 44]).buffer);
     expect((await clients[0].binary())[1]).toBe(2);
+  });
+
+  it("drops a racer who goes silent without a close", async () => {
+    // vitest.config.ts: RACE_SILENT_MS 1000 here (10 s by default).
+    const { clients, code } = await startedRace(3);
+    const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+    await wait(600);
+    for (const i of [0, 1]) clients[i].ws.send(new Uint8Array([3, 0]).buffer);  // race pings
+    for (const i of [0, 1]) await clients[i].binary();
+    await wait(600);
+    await runDurableObjectAlarm(env.ROOM.get(env.ROOM.idFromName(code)));
+    for (const i of [0, 1]) expect(await clients[i].json("left")).toMatchObject({ slot: 2, reason: "timeout" });
+    expect(await clients[2].closed()).toBe(1001);
+    // The two who were heard keep racing.
+    clients[1].ws.send(new Uint8Array([5, 0, 8]).buffer);
+    expect([...(await clients[0].binary())]).toEqual([5, 1, 8]);
+  });
+
+  it("hands the host to the next racer when the host leaves mid-race", async () => {
+    const { clients } = await startedRace(3);
+    clients[0].ws.close(1000);
+    expect(await clients[1].json("left")).toMatchObject({ slot: 0, reason: "disconnect" });
+    const room = await clients[1].json("room");
+    expect(room.members.find((m: any) => m.id === room.hostId).name).toBe("P1");  // slot 1, the next to join
+    clients[2].ws.send(new Uint8Array([5, 0, 9]).buffer);
+    expect([...(await clients[1].binary())]).toEqual([5, 2, 9]);
+    clients[2].sendJson({ type: "end" });
+    expect((await clients[2].json("error")).code).toBe("not_host");
+    clients[1].sendJson({ type: "end" });
+    await Promise.all([clients[1].json("ended"), clients[2].json("ended")]);
   });
 
   it("keeps relaying after the room is evicted with hibernated sockets", async () => {

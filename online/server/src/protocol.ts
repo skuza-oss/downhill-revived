@@ -17,6 +17,10 @@ export const START_LEAD_MS = 3_000;
  * the "countdown" feature run it; older clients start by the host's `start` alone.
  */
 export const COUNTDOWN_MS = 5_000;
+/** A racer heard from (any frame; the client pings every 500 ms in a race) no later than this ago
+    is still there; after it, the server drops them as the client drops a silent server
+    (port/net/client.c SILENT_MS). */
+export const RACE_SILENT_MS = 10_000;
 export const FEATURE_COUNTDOWN = "countdown";
 export const RTT_SAMPLES = 5;
 

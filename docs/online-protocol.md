@@ -68,7 +68,8 @@ refusal carries both versions:
 0.1.0 knows no `client_outdated`: like any refusal it shows `message` on the ONLINE screen.
 0.2.0 and later show the same text and add an **Update Now** row (finding 054).
 
-Non-fatal errors (a non-host sending a host command, a `start` while someone is not ready)
+Non-fatal errors (a non-host sending a host command, a `start` while someone is not ready or
+the host is alone: `not_ready`)
 use the same `error` frame **without** a close; the client just shows `message`.
 
 ## Lobby (JSON text frames)
@@ -89,7 +90,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 {"type":"ready","ready":true}
 {"type":"kick","member":3}                          // host only
-{"type":"start"}                                    // host only; everyone (host included) must be ready
+{"type":"start"}                                    // host only; at least 2 members, all (host included) ready
 {"type":"pong","s":1734000000123}                   // echo of a server ping, see below
 {"type":"ping","t":12345.6}                          // optional client-side ping; the server answers "pong"
 {"type":"end"}                                       // host only: race over, back to the lobby
@@ -131,7 +132,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
  "serverTime":1734000005000,"startAt":1734000008000}
 
 // A racer left or dropped. The host's game hands their rider to its AI.
-{"type":"left","slot":1,"memberId":2,"reason":"disconnect"}   // or "leave"/"kicked"
+{"type":"left","slot":1,"memberId":2,"reason":"disconnect"}   // or "leave"/"kicked"/"timeout"
 
 // Host ended the race; the room is a lobby again (ready flags cleared).
 {"type":"ended"}
@@ -189,6 +190,11 @@ A racer leaves by closing the socket (or sends `{"type":"leave"}` first, which o
 `reason`). The server broadcasts `left`; every frame the racer sent before reached the others
 first (same socket, ordered). The host's game hands the rider to its AI and sends it as its
 own from then on.
+
+A racer the server has not heard from for 10 s (`RACE_SILENT_MS`: no STATE, EVENT or PING frame;
+clients ping every 500 ms while racing) leaves the same way with `reason` `"timeout"`, and the
+server closes its socket (1001). That covers a lost connection that never closed, the case the
+client already covers the other way round (it drops a server silent for 10 s). Finding 120.
 
 ### Race room rules (finding 115)
 
