@@ -551,6 +551,27 @@ PATCHES['unsorted/001EB1D8.cpp'] += [
      '                                            : ((u128)0x5355 << 64) | (u128)0x4F49564552505F53UL);\n'
      '}\n\nextern "C" {\ntypedef struct { char bytes[48]; } LocalItems__w1;'),
 ]
+# PC SETTINGS from the race's pause menu too (finding 050's piece D): a raw-string row above QUIT,
+# so the rows online.c steers by number (NEW LEVEL 3, RE-START 4) stay where they are. A raw
+# string's row has type 0 (func_0018D8A8), which no text id of this menu uses, so the accept
+# (vtable D_00285040 slot 7) knows it by that and opens the page over the menu as OPTIONS opens.
+PATCHES.setdefault('unsorted/0015E238.c', []).extend([
+    ('text', 'extern void func_001B5AF0(Manager *,int,int),func_0018E638(Menu *,int,void **);\n',
+     'extern void func_001B5AF0(Manager *,int,int),func_0018E638(Menu *,int,void **);\n'
+     'extern void func_0018E408(void *menu, const char *text, int enabled);\n'
+     'extern const char port_pause_pc_settings_label[];\n'),
+    ('text', ' func_0018E3A8((struct SharedMenu *)(void *)(menu),0x1a,&D_0029DE68,1);',
+     ' func_0018E408(menu,port_pause_pc_settings_label,1);\n'
+     ' func_0018E3A8((struct SharedMenu *)(void *)(menu),0x1a,&D_0029DE68,1);'),
+])
+PATCHES.setdefault('unsorted/0015E448.cpp', []).extend([
+    ('text', 'void func_0015E448(Menu *obj,int index) {\n',
+     'extern "C" void port_pc_settings_push(void);\n'
+     'void func_0015E448(Menu *obj,int index) {\n'),
+    ('text', '  if (obj->slots[index].Is(0x1A)) {',
+     '  if (obj->slots[index].Is(0)) { port_pc_settings_push(); return; }\n'
+     '  if (obj->slots[index].Is(0x1A)) {'),
+])
 # The VIDEO CLIPS popup's update (vtable D_00288540 slot 5): on the EE it calls the base update
 # func_0018E830 with the menu still in $a0, though the source names no argument. Natively the
 # menu was dropped and OPTIONS > VIDEO CLIPS crashed (as func_00202760 below).

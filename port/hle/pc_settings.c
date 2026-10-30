@@ -250,8 +250,7 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
 static void page_left(MenuPage *p, int index) { (void)p; change(index, -1); }
 static void page_right(MenuPage *p, int index) { (void)p; change(index, 1); }
 
-/* OPTIONS, item 9 (patched func_001F0160): run the page until it closes. */
-void port_pc_settings(void)
+static void open_page(void)
 {
     page.title = "PC SETTINGS";
     page.build = page_build;
@@ -271,7 +270,22 @@ void port_pc_settings(void)
         loaded = 1;
     }
     for (int i = 0; i < ROWS; i++) rows[i].opened = rows[i].selected;
+}
+
+/* OPTIONS, item 9 (patched func_001F0160): run the page until it closes. */
+void port_pc_settings(void)
+{
+    open_page();
     menu_page_run(&page);
+}
+
+/* The race's pause menu (patched func_0015E238 and func_0015E448): the page opens over it, as
+   its OPTIONS does, and closing goes back to it. */
+const char port_pause_pc_settings_label[] = "PC SETTINGS";
+void port_pc_settings_push(void)
+{
+    open_page();
+    menu_page_push(&page);
 }
 
 /* OPTIONS' rows (patched func_001F0160): row 9 is this page; the game's table has an unused

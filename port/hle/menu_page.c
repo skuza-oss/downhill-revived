@@ -28,6 +28,7 @@ void func_0018DC20(void *menu);       /* base update: cursor, drawing */
 void func_0018E468(void *menu);       /* close (back) */
 void func_00190688(void *manager);    /* close (accept) */
 void func_00190108(void *manager, void *menu);  /* run modally */
+void func_00190660(void *manager, void *menu);  /* open over the running popup (a sub-page) */
 void func_001B5AF0(void *manager, int a, int b);
 void func_0023D650(int view, int *width, int *height);
 int func_0018D860(void *item);        /* an item's text: its string, else its id's */
@@ -161,7 +162,7 @@ static void slot_right(void *menu, int index)  /* slot 10 */
 
 /* ---- the page's calls ---- */
 
-void menu_page_run(MenuPage *p)
+static void prepare(MenuPage *p)
 {
     p->armed = 0;
     if (!p->constructed) {
@@ -177,7 +178,20 @@ void menu_page_run(MenuPage *p)
         p->constructed = 1;
     } else
         menu_page_rebuild(p);  /* the rows as they are now, should the game keep the old ones */
+}
+
+void menu_page_run(MenuPage *p)
+{
+    prepare(p);
     func_00190108(D_003F52D0, p->menu);
+}
+
+/* From a popup the manager is running (the race's pause menu): pushed as func_0015E448 opens
+   OPTIONS, so the manager's own loop runs the page and Cross or Triangle goes back to it. */
+void menu_page_push(MenuPage *p)
+{
+    prepare(p);
+    func_00190660(D_003F52D0, p->menu);
 }
 
 void menu_page_close(MenuPage *p) { (void)p; func_00190688(D_003F52D0); }

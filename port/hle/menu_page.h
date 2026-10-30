@@ -59,6 +59,7 @@ struct MenuPage {
 } __attribute__((aligned(16)));  /* the game stores a u128 at +0x490 with aligned SSE moves */
 
 void menu_page_run(MenuPage *p);       /* modally, until it closes */
+void menu_page_push(MenuPage *p);      /* over the popup that is open, as its sub-pages open */
 void menu_page_close(MenuPage *p);     /* as the game closes a page on Cross */
 void menu_page_cancel(MenuPage *p);    /* as it closes one on Triangle */
 int menu_page_row(MenuPage *p, const char *text, int enabled);  /* text: kept, not copied */
