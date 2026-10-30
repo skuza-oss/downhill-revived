@@ -101,6 +101,35 @@ does nothing would be worse than none, and these points are open:
 Turning it on means finishing 1 to 4, flipping `ASK_TO_JOIN`, and trying it with two Discord
 accounts.
 
+### The Discord Social SDK (looked at 2026-10-31)
+
+Discord's current SDK for games ("a C++ library that Discord distributes and would be integrated and
+shipped with the game itself") does the same through its own calls:
+- `Client::SetActivityJoinCallback` hands the game the join secret. Discord holds a join for 180 s
+  when it has to start the game first, so the callback is registered before `Client::Connect`.
+- `Client::RegisterLaunchCommand` registers the command Discord runs to start the game, on each
+  machine at startup (point 4).
+- "You must set up your rich presence Activity with party information and a join secret to send
+  game invites": the party size and join secret written here.
+- Invites need no OAuth account link (provisional accounts work), and no approval step is mentioned
+  for them. That makes point 5's approval doubt smaller, though for the plain IPC used here it is
+  still untried.
+
+It is not used here, for three reasons:
+- It is a closed binary from Discord, and the game is GPL-3.0-or-later. AGENTS.md admits only code
+  under a compatible licence, and this one has no linking exception.
+- Finding 106 chose plain IPC, with no SDK, for every desktop platform.
+- What the game needs from it (the join event and the launch command) can be written over the same
+  IPC, as discord-rpc did: points 1 and 4.
+
+So the plan above stands; the SDK's documentation confirms its order (the launch registration at
+startup, the join taken before or right after connecting, a held join that can wait for the game to
+load).
+
+Sources: https://discord.com/developers/docs/social-sdk/index.html (overview),
+https://docs.discord.com/developers/discord-social-sdk/development-guides/managing-game-invites
+(invites, the join callback, the launch command, provisional accounts).
+
 Not done:
 - **The room's own state** (waiting, the countdown to the start): `NetLobby.countdown_ms` has it, but
   the countdown lasts seconds while updates are 15 s apart.
