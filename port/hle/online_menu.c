@@ -68,6 +68,8 @@ void port_chat_show(char *out, int size, const char *name, const char *text, int
 enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 4 };
 
 enum { HOME, LIST, NAME, CODE, ROOM };
+/* ONLINE's rows */
+enum { HOME_NAME, HOME_QUICK, HOME_LIST, HOME_CREATE_PUBLIC, HOME_CREATE_PRIVATE, HOME_JOIN, HOME_UPDATE };
 /* The room's rows */
 /* The room's options, carried in the server's "laps" setting (Downhill Domination has no laps):
    every PC builds the same race from them (online.c hle_online_ai_count, hle_cheat_code). Cheat
@@ -407,6 +409,58 @@ static const char *const *disc_shown;  /* the disc_note HOME's rows have */
 
 static void room_open(void);
 
+/* Quick Race (finding 128): one choice that joins an open public room of this build, the one
+   with the most players (it starts soonest), else creates a public room and waits there. Only
+   the client: the public list (/v1/lobbies) has every room that has not started and has space.
+   quick: 1 reading the list, 2 joining the room it chose (if that room filled or started
+   meanwhile, a public room is created instead). */
+static int quick;
+static void enter_room(int create, const char *code);
+static void start_list(void);
+
+static void quick_begin(void)
+{
+    const char *why = not_ready();
+    if (why) {
+        snprintf(status, sizeof status, "%s", why);
+        return;
+    }
+    quick = 1;
+    start_list();
+    snprintf(status, sizeof status, "Looking for a race...");
+    hle_log("online menu: quick race: reading the public list\n");
+}
+
+/* The list came: the best room to join, else a room of our own. */
+static void quick_choose(void)
+{
+    int best = -1;
+    for (int i = 0; list_count > 0 && i < list_count; i++) {
+        const NetLobbyInfo *l = &list[i];
+        if (strcmp(l->version, version) || l->players >= l->max_players || !l->code[0]) continue;
+        if (best < 0 || l->players > list[best].players) best = i;
+    }
+    if (best >= 0) {
+        hle_log("online menu: quick race: joining %s (%d/%d)\n", list[best].code, list[best].players, list[best].max_players);
+        quick = 2;
+        enter_room(0, list[best].code);
+        if (!connecting) quick = 0;
+    } else {
+        hle_log("online menu: quick race: no open room of this version%s; creating a public one\n",
+                list_count < 0 ? " (the list didn't come)" : "");
+        quick = 0;
+        enter_room(2, NULL);
+    }
+}
+
+/* The room it chose was gone or full by the time we came: a room of our own. */
+static int quick_retry(const NetLobby *l)
+{
+    return quick == 2 && (!strcmp(l->error_code, "room_full") || !strcmp(l->error_code, "room_started") ||
+                          !strcmp(l->error_code, "room_not_found"));
+}
+
+
 static void go(int to)
 {
     host_service_text_input_end();
@@ -459,6 +513,7 @@ static void page_build(MenuPage *p)
         p->title = "ONLINE";
         snprintf(text[0], ROW_TEXT, "Name:  %s", name);
         menu_page_row(p, text[0], 1);
+        menu_page_row(p, "Quick Race", 1);
         menu_page_row(p, "Public Races", 1);
         menu_page_row(p, "Create A Public Race", 1);
         menu_page_row(p, "Create A Private Race", 1);
@@ -519,7 +574,7 @@ static void refused(const NetLobby *l)
     host_service_net_leave();
     reset_selection();
     connecting = 0;
-    if (too_old) home_row = 5;
+    if (too_old) home_row = HOME_UPDATE;
 }
 
 /* In the room: the host's settings, then this member's first (not ready) state, once each. */
@@ -547,7 +602,14 @@ static void connect_poll(MenuPage *p)
     static NetLobby l;
     host_service_net_get_lobby(GADDR(&l));
     if (l.state == NET_FAILED || l.state == NET_IDLE) {
+        int retry = quick_retry(&l);
         refused(&l);
+        quick = 0;
+        if (retry) {
+            hle_log("online menu: quick race: that room was taken; creating a public one\n");
+            enter_room(2, NULL);
+            return;
+        }
         if (outdated && screen == HOME) menu_page_rebuild_at(p, home_row);
         return;
     }
@@ -557,6 +619,7 @@ static void connect_poll(MenuPage *p)
         if (tracks[k].index == l.track) room_track = k;
     room_options = l.laps;
     connecting = 0;
+    quick = 0;
     status[0] = 0;
     unlock_all();
     choosing = 1;
@@ -1481,13 +1544,18 @@ static void page_update(MenuPage *p, int cursor)
         p->footer = status[0] ? status : NULL;
         return;
     }
+    if (quick == 1) {  /* Quick Race: the list's answer */
+        if (list_state == 2) quick_choose();
+        p->footer = status[0] ? status : NULL;
+        return;
+    }
     switch (screen) {
     case HOME:
         if (disc_note() != disc_shown) {  /* the check has ended: its lines under the rows */
             menu_page_rebuild_at(p, cursor);
             break;
         }
-        if (!status[0] && (cursor >= 2 || disc_shown) && not_ready()) p->footer = not_ready();
+        if (!status[0] && (cursor >= HOME_QUICK || disc_shown) && not_ready()) p->footer = not_ready();
         break;
     case LIST:
         if (list_state == 2 && !list_shown) menu_page_rebuild(p);  /* the answer came: the rows again */
@@ -1511,28 +1579,31 @@ static void page_update(MenuPage *p, int cursor)
 
 static void page_accept(MenuPage *p, int row)
 {
-    if (connecting) return;  /* Triangle gives up; nothing else meanwhile */
+    if (connecting || quick) return;  /* Triangle gives up; nothing else meanwhile */
     status[0] = 0;
     switch (screen) {
     case HOME:
         home_row = row;
-        if (row == 0) {
+        if (row == HOME_NAME) {
             snprintf(entry, sizeof entry, "%s", name);
             entry_pick = 0;
             go(NAME);
-        } else if (row == 1) {
+        } else if (row == HOME_QUICK) {
+            if (!server()) snprintf(status, sizeof status, "No server: set server = ... in dhd.ini");
+            else quick_begin();
+        } else if (row == HOME_LIST) {
             if (!server()) snprintf(status, sizeof status, "No server: set server = ... in dhd.ini");
             else {
                 start_list();
                 go(LIST);
             }
-        } else if (row == 2 || row == 3)
-            enter_room(row == 2 ? 2 : 1, NULL);
-        else if (row == 4) {
+        } else if (row == HOME_CREATE_PUBLIC || row == HOME_CREATE_PRIVATE)
+            enter_room(row == HOME_CREATE_PUBLIC ? 2 : 1, NULL);
+        else if (row == HOME_JOIN) {
             entry[0] = 0;
             entry_pick = 0;
             go(CODE);
-        } else if (row == 5 && outdated) {
+        } else if (row == HOME_UPDATE && outdated) {
             hle_log("online menu: Update Now\n");
             host_service_update_request();  /* ends the game; the launcher updates it */
         }
@@ -1572,11 +1643,11 @@ static void page_accept(MenuPage *p, int row)
 
 static void page_back(MenuPage *p)
 {
-    if (connecting) {
+    if (connecting || quick) {
         hle_log("online menu: connecting given up\n");
         host_service_net_leave();
         reset_selection();
-        connecting = 0;
+        connecting = quick = 0;
         status[0] = 0;
         return;
     }
@@ -1642,7 +1713,7 @@ int port_online_menu(void)
     }
     race = 0;
     in_shell = 0;
-    connecting = 0;
+    connecting = quick = 0;
     run_page();
     if (!race) { host_service_net_leave(); reset_selection(); connecting = 0; }
     return race;
