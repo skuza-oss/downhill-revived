@@ -15,8 +15,9 @@
 /* The game's state (findings 040, 094): the shell's menu (9 the race screen: the load, the flight
    over the track, the race and its results); the race phase (5 the flight, 1 the countdown, 2-4 the
    race: the places are worked out from 2, the countdown has every rider 1st); the setup block
-   D_004B25A0 (+0x10C the mode, 10 the title's attract demo; +0x110 1 for the career's races; +0x2A0
-   the track); the loaded level's name; the riders D_002AF2C0 (the player's first, +0x798C its
+   D_004B25A0 (+0x10C the mode, 10 the title's attract demo; +0x110 1 for the career's races; +0x290
+   the first player's rider id, 0x20 * (index + 1), as the menus leave it; +0x2A0 the track); the
+   loaded level's name; the riders D_002AF2C0 (the player's first, +0x798C its
    place, 1 first) and their count. */
 enum { MENU = 0x29DED8, PHASE = 0x43F348, SETUP = 0x4B25A0, LEVEL_NAME = 0x4BD4DC, RIDERS = 0x2AF2C0,
        PLACE = RIDERS + 0x798C, RIDER_COUNT = RIDERS + 0x501A8 };
@@ -39,8 +40,12 @@ static void state(HostPresence *p)
         snprintf(p->track, sizeof p->track, "%.23s", name ? name : (const char *)EE_PTR(LEVEL_NAME));
         int phase = EE32(PHASE);
         if (phase >= 2 && phase < FLYBY_PHASE) p->place = EE32(PLACE), p->riders = EE32(RIDER_COUNT);
+        int rider = EE32(SETUP + 0x290);
+        if (rider % 0x20 == 0 && rider >= 0x20 && rider <= 0x200) p->rider = rider / 0x20;
     } else if (in_room) {
         p->kind = PRESENCE_ROOM;
+        const char *name = port_track_name(lobby.track);
+        if (name) snprintf(p->track, sizeof p->track, "%.23s", name);
         /* a private room's code stays here: only a public room's leaves the core */
         if (lobby.is_public) snprintf(p->room, sizeof p->room, "%.7s", lobby.code);
         p->members = lobby.nmembers, p->max_members = lobby.max_players;

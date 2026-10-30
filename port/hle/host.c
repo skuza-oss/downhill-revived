@@ -1218,7 +1218,7 @@ void host_service_presence(uint32_t a0)
     char track[sizeof p->track + 1], room[sizeof p->room + 1];
     snprintf(track, sizeof track, "%.*s", (int)sizeof p->track, p->track);
     snprintf(room, sizeof room, "%.*s", (int)sizeof p->room, p->room);
-    dhd_presence_set(p->kind, track, p->place, p->riders, room, p->members, p->max_members);
+    dhd_presence_set(p->kind, track, p->place, p->riders, p->rider, room, p->members, p->max_members);
 }
 
 

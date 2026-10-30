@@ -300,17 +300,17 @@ int host_service_movie_update(int keep);
 void host_service_movie_prepare(void);
 
 /* Discord Rich Presence (port/render/presence, finding 106): what the player is doing, sent by the
-   core (port/hle/presence.c) when it changes. kind: PRESENCE_*; a race's track as the game names
-   it, the player's place (1 first, 0 not known) and the riders; an online room's join code (empty
-   for a private room: its code never leaves the core), its players and size. Strings
-   NUL-terminated. The host shows it on Discord when the discord setting is on (the browser and
+   core (port/hle/presence.c) when it changes. kind: PRESENCE_*; a race's (or a room's) track as the
+   game names it, the player's place (1 first, 0 not known), the riders and the player's rider (the
+   game's rider index + 1, 0 not known); an online room's join code (empty for a private room: its
+   code never leaves the core), its players and size. Strings NUL-terminated. The host shows it on Discord when the discord setting is on (the browser and
    Android: nothing). */
 enum { PRESENCE_NONE, PRESENCE_MENUS, PRESENCE_RACE, PRESENCE_CAREER, PRESENCE_ROOM, PRESENCE_ONLINE_RACE,
        PRESENCE_MOVIE };
 typedef struct {
-    int32_t kind, place, riders, members, max_members;
+    int32_t kind, place, riders, members, max_members, rider;
     char track[24], room[8];
-} HostPresence;  /* 52 bytes */
+} HostPresence;  /* 56 bytes */
 void host_service_presence(uint32_t state);
 
 #endif

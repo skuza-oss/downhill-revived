@@ -208,10 +208,13 @@ webpki-roots, the game's rule. dhd.ini has one implementation, the Rust crate `d
 saves serve the game (through the Rust static library; PC SETTINGS through a generated table), the
 launcher and the browser (the crate's own small wasm module, `build/web/dhd_settings.wasm`;
 `settings.js` keeps only IndexedDB and what the browser can't offer; finding 102). The rider
-name's rule is the crate's too (the launcher, and the online menu through the same table). Discord Rich Presence (finding
-106, setting `discord`, on by default): the profile shows the menus, the race with its track and
-place, the career, an online room or race, through Discord's local IPC (`dhd_presence` in the Rust
-library, no SDK; the core sends its state through `host_service_presence`). Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
+name's rule is the crate's too (the launcher, and the online menu through the same table). Discord Rich Presence (findings
+106, 121, setting `discord`, on by default): the profile shows the menus, the race with its track,
+rider and place (its time starting again on TRY AGAIN), the career, an online room with its track and
+Discord's party size ("Room K7M2QX (3 of 6)"), or an online race, through Discord's local IPC
+(`dhd_presence` in the Rust library, no SDK; the core sends its state through
+`host_service_presence`; refreshed every minute so a restarted Discord gets it back). Ask to Join is
+designed and its presence half written but off (finding 121: the game can't take a join yet). Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
 race room) share one centred layer in the game's popup style (`menu_page.c`), and the mouse works
 in them and in the game's own popups: hover selects, left click X, right click back, the wheel
 scrolls or changes values (finding 092; the shell's own menus are not bridged yet).

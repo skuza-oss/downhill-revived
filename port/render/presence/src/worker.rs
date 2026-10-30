@@ -2,7 +2,7 @@
 //! plainly), so the game never waits on them: the game's calls only post a message.
 
 use crate::{payload, Clock, Due, Kind, Pacer, Payload, State, APP_ID, BUTTONS, LOGO, LOGO_TEXT, RETRY};
-use discord_rich_presence::activity::{Activity, Assets, Button, Timestamps};
+use discord_rich_presence::activity::{Activity, Assets, Button, Party, Secrets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -54,7 +54,8 @@ fn unix_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-/// The activity Discord gets for `p`: its two lines, the elapsed time, the logo and the buttons.
+/// The activity Discord gets for `p`: its two lines, the elapsed time, the logo and the buttons; a
+/// room's party size, and its join secret (with the party's id, which Ask to Join needs) when set.
 pub fn activity(p: &Payload) -> Activity<'_> {
     let mut a = Activity::new()
         .details(p.details.as_str())
@@ -63,6 +64,17 @@ pub fn activity(p: &Payload) -> Activity<'_> {
         .buttons(BUTTONS.iter().map(|(label, url)| Button::new(*label, *url)).collect());
     if let Some(state) = &p.state {
         a = a.state(state.as_str());
+    }
+    if p.party.is_some() || p.join.is_some() {
+        let mut party = Party::new();
+        if let Some(size) = p.party {
+            party = party.size(size);
+        }
+        if let Some(join) = &p.join {
+            party = party.id(join.as_str());
+            a = a.secrets(Secrets::new().join(join.as_str()));
+        }
+        a = a.party(party);
     }
     a
 }
@@ -85,8 +97,9 @@ fn connect() -> Option<DiscordIpcClient> {
 }
 
 fn describe(p: &Payload) -> String {
+    let party = p.party.map(|[n, max]| format!(", {n} of {max}")).unwrap_or_default();
     match &p.state {
-        Some(state) => format!("{} ({})", p.details, state),
+        Some(state) => format!("{} ({}{party})", p.details, state),
         None => p.details.clone(),
     }
 }

@@ -54,6 +54,7 @@ pub unsafe extern "C" fn dhd_presence_set(
     track: *const c_char,
     place: c_int,
     riders: c_int,
+    rider: c_int,
     room: *const c_char,
     members: c_int,
     max_members: c_int,
@@ -65,6 +66,7 @@ pub unsafe extern "C" fn dhd_presence_set(
         track: unsafe { text(track) }.to_string(),
         place: count(place),
         riders: count(riders),
+        rider: count(rider),
         // SAFETY: the caller's contract.
         room: unsafe { text(room) }.to_string(),
         members: count(members),
