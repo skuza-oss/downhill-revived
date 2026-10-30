@@ -340,5 +340,9 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   gains `members_reconnecting`, `racers_away` and `rejoining` at its end. Older clients are
   untouched (no token: `left` at once). Server and loopback tests; not deployed, the race HUD's
   notice is still to do.
+- 2026-10-31 (finding 127): time-trial boards and ghosts on the server, HTTP on the same Worker
+  (`POST /v1/times`, `GET /v1/times`, `GET /v1/ghost`), one SQLite Durable Object per track and
+  lap count (migration `v2`). Version gate, name and time rules, size caps, a per-address rate
+  limit. Times are not verified. No game side yet (recording a ghost needs the replay data).
 - Tests: `port/net/build_tests.py` (unit and loopback), the server's own tests (`npm test`),
   `port/tools/online_race.py` (two local games through a relay, optionally `nettool` bots).

@@ -24,6 +24,9 @@ host.
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
 | GET | `/v1/health` | `{"ok":true,"protocol":1,"minVersion":"0.1.0"}` |
+| POST | `/v1/times` | Post a time-trial time and ghost (below, finding 127). |
+| GET | `/v1/times?track=N&laps=L&limit=20` | A track's best times. |
+| GET | `/v1/ghost?track=N&laps=L&rank=1` | The ghost of one of them. |
 
 Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
 upper-case what the user types and reject characters outside that alphabet.
@@ -293,6 +296,38 @@ never a member id.
 
 Only public rooms that have not started and have a free slot are listed. Clients should
 show only rooms whose `version` matches their own.
+
+## Time-trial boards (finding 127)
+
+HTTP on the same host, JSON in and out, `Access-Control-Allow-Origin: *` on every answer
+(`OPTIONS` answers the preflight). One board per `track` and `laps` (bytes, the game's indices;
+`laps` 0 or omitted = the track's default). **Times are not verified**: anyone can post any
+plausible time under any name. Treat a board as a list of claims.
+
+```jsonc
+// POST /v1/times
+{"version":"dhd-port 0.8.0 1a2b3c4d5e6f7a8b","clientVersion":"0.8.0","isoSha256":"<64 lowercase hex>",
+ "track":3,"laps":0,"name":"Ann","timeMs":61234,"ghost":"<base64, optional>"}
+// 200: rank of this name's best on the board (0: below the kept rows); best: this post improved it
+{"ok":true,"track":3,"laps":0,"rank":4,"best":true,"timeMs":61234}
+
+// GET /v1/times?track=3&limit=20   (limit 1-100, default 20)
+{"track":3,"laps":0,"times":[{"rank":1,"name":"Bo","timeMs":59870,"at":1734000000000,"ghost":true}]}
+
+// GET /v1/ghost?track=3&rank=1     (rank default 1; 404 when that rank has no ghost)
+{"track":3,"laps":0,"rank":1,"name":"Bo","timeMs":59870,"ghost":"<base64>"}
+```
+
+- One entry per name (compared case-insensitively): a post replaces it only when faster. Ties go
+  to the earlier post. A board keeps 1000 names; the best 100 keep their ghost.
+- `clientVersion` is required and gated by `MIN_VERSION` as in `hello` (403
+  `{"error":"client_outdated","minVersion","clientVersion"}`). `version` 1-64 characters,
+  `isoSha256` 64 lowercase hex, `name` as in `hello` and without control characters, `timeMs` a
+  whole number from 10 000 to 1 800 000, `ghost` standard base64 of at most 131 072 bytes (the
+  body at most 180 KiB, else 413 `too_large`).
+- Errors: `{"error","message"}` with 400 (`bad_request`, `bad_time`), 403, 404 (`not_found`), 405,
+  413 or 429 (`slow_down`: more than 6 posts from one address to one board in 10 minutes).
+- The server keeps no addresses: the rate limit counts a hash of `cf-connecting-ip`.
 
 ## Limits
 
