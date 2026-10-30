@@ -110,6 +110,19 @@ their own variable or option says:
 | [Binaryen](https://github.com/WebAssembly/binaryen) 133 (browser build) | `binaryen/binaryen-version_133` | |
 | DirectX Shader Compiler (downloaded and checked by `port/tools/dxc.py`) | `dxc` | `DHD_DXC_CACHE` |
 
+What a fresh setup also needs (2026-10-30, finding 119):
+
+- The whole wasi-sdk, not only its sysroot: `abi_check.py` (run by `test_runtime.py`), `testprog.py`
+  and the browser build's `postlink.py` run its `bin/clang`, and the browser build relies on that
+  clang's wasm32 default target.
+- SIMDe newer than its v0.8.2 release, which uses `_Float16` on wasm32 (clang refuses it there;
+  fixed by SIMDe commit 28ab7b41c3, 2025-09-19). A `master` checkout works.
+- For the browser build, `wasm-bindgen-cli` at the version `port/render/Cargo.lock` pins (now
+  0.2.129): `cargo install wasm-bindgen-cli --version 0.2.129 --locked`.
+- A rustup default toolchain (`rustup default 1.97.1`): the launcher (`port/launcher`) has no
+  toolchain file of its own. Fetch its crates once too (`cargo fetch --locked` in
+  `port/launcher/src-tauri`).
+
 The Rust toolchain comes from `rustup` (`port/render/rust-toolchain.toml` pins it); cargo's
 output goes under `DHD_DEVCACHES/dhd-cargo`, compiled objects are cached in
 `DHD_DEVCACHES/dhd-objcache` (`DHD_OBJCACHE_DIR`). LLVM is found on PATH or in scoop's default

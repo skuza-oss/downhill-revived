@@ -117,7 +117,8 @@ MEMBERS = (NET, SETTINGS, PRESENCE, DISC)
 GS = ROOT / 'port' / 'gs'
 WGSL = ('raster.wgsl', 'present.wgsl', 'native.wgsl', 'native_dual.wgsl')
 CARGO_TARGETS = Path(os.environ.get('DHD_CARGO_DIR') or
-                     ('DHD_DEVCACHES/dhd-cargo' if os.name == 'nt' else Path.home() / '.cache' / 'dhd-cargo'))
+                     (Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches') / 'dhd-cargo' if os.name == 'nt'
+                      else Path.home() / '.cache' / 'dhd-cargo'))
 SEED = CARGO_TARGETS / 'seed'
 WEB_OUT = ROOT / 'build' / 'web' / 'renderer'
 RENDER_CRATE = 'dhd_render'
