@@ -8,6 +8,7 @@
     python port/tools/rustgs.py build --target x86_64-unknown-linux-gnu [--profile ...] # Linux x64
     python3 port/tools/rustgs.py build --target aarch64-apple-darwin [--profile ...]    # macOS, on a Mac
     python port/tools/rustgs.py build --target wasm32-unknown-unknown --crate dhd_settings  # the browser's dhd.ini module
+    python port/tools/rustgs.py build --target wasm32-unknown-unknown --crate dhd_disc      # the browser's disc check
     python port/tools/rustgs.py test  --target x86_64-pc-windows-msvc [--features ...] -- --test device_smoke [filter]
     python port/tools/rustgs.py run   --target x86_64-pc-windows-msvc --bin optrace_replay -- <args>
     python port/tools/rustgs.py check --target aarch64-apple-darwin                    # cargo check (any target)
@@ -30,6 +31,15 @@ build/web/dhd_settings.wasm. Its gates: the crate has no dependencies at all (`c
 include pre-check, the dep-info inputs and check_rust_lib on the module. Its cargo target dir is
 <target dir>/dhd_settings (its flags differ from the renderer's wasm build, which would otherwise
 rebuild after it); no seed. The natively built game links the crate through dhd_render (`native`).
+
+`--crate dhd_disc` (wasm32 only; finding 122): the disc image's online check (port/render/disc) the
+same way, the browser's disc module: build/web/dhd_disc.wasm, its own memory, its one import the
+page's read (env.dhd_disc_read). Its gates: its graph (`cargo tree -e normal,build`) holds only
+DISC_WASM_GRAPH's crates, ring exactly at DISC_RING, none of naga / wgpu-core / wgpu-hal (and no
+wasm-bindgen: no JS glue); then the same include pre-check, dep-info inputs and check_rust_lib.
+ring's C is built by LLVM's clang for the target (no sysroot: ring's own -nostdlibinc mode for
+wasm32) with LLVM's ar and -g0 (ring asks for -g3, whose DWARF would name the registry); clang's
+version is in the cache key. Target dir <target dir>/dhd_disc.
 
 What every cargo call gets
 --------------------------
@@ -87,7 +97,7 @@ DHD_OBJCACHE=0 turns the cache off (every build a miss).
 
 Outputs: native: <target_dir>/rustgs/<triple>/<profile>/<features>/dhd_render.lib (Android:
 libdhd_render.a); wasm:
-build/web/renderer/; dhd_settings: build/web/dhd_settings.wasm. `--report FILE` writes {lib, sha256, cache, key, rustflags, target_dir, glue,
+build/web/renderer/; dhd_settings: build/web/dhd_settings.wasm; dhd_disc: build/web/dhd_disc.wasm. `--report FILE` writes {lib, sha256, cache, key, rustflags, target_dir, glue,
 native_static_libs, triple, profile, features, versions}.
 """
 import argparse
@@ -123,8 +133,14 @@ SEED = CARGO_TARGETS / 'seed'
 WEB_OUT = ROOT / 'build' / 'web' / 'renderer'
 RENDER_CRATE = 'dhd_render'
 SETTINGS_CRATE = 'dhd_settings'   # --crate: the browser's dhd.ini module (wasm32 only)
-CRATES = (RENDER_CRATE, SETTINGS_CRATE)
-SETTINGS_WEB_OUT = ROOT / 'build' / 'web'   # dhd_settings.wasm
+DISC_CRATE = 'dhd_disc'   # --crate: the browser's disc check module (wasm32 only)
+MODULE_CRATES = (SETTINGS_CRATE, DISC_CRATE)   # the browser's own small modules: build_module
+CRATES = (RENDER_CRATE, *MODULE_CRATES)
+SETTINGS_WEB_OUT = ROOT / 'build' / 'web'   # dhd_settings.wasm, dhd_disc.wasm
+# dhd_disc's browser graph (normal and build dependencies): ring (SHA-256) and what it needs, nothing
+# else; ring at the crate's pin.
+DISC_WASM_GRAPH = ('dhd_disc', 'ring', 'getrandom', 'cfg-if', 'untrusted', 'cc', 'find-msvc-tools', 'shlex')
+DISC_RING = '0.17.14'
 X64 = 'x86_64-pc-windows-msvc'
 WASM = 'wasm32-unknown-unknown'
 ANDROID = 'aarch64-linux-android'  # build_host64.py --target android-arm64 (finding 091)
@@ -195,7 +211,7 @@ def rustflags(triple, crate=RENDER_CRATE):
     for var, name in (('CARGO_HOME', 'cargo'), ('RUSTUP_HOME', 'rustup')):
         for s in spellings(home(var)):
             flags.append('--remap-path-prefix=%s=%s' % (s, name))
-    if triple == WASM and crate == RENDER_CRATE:   # dhd_settings keeps its own memory
+    if triple == WASM and crate == RENDER_CRATE:   # dhd_settings and dhd_disc keep their own memory
         flags += ['-Clink-arg=' + a for a in WASM_LINK_ARGS]
     return flags
 
@@ -716,20 +732,62 @@ def settings_gate(env):
     return {SETTINGS_CRATE: [m.group(1)]}
 
 
-def build_settings(profile='release', no_cache=False):
-    """The browser's dhd.ini module (--crate dhd_settings): build/web/dhd_settings.wasm; the report."""
+def disc_gate(env):
+    """dhd_disc's graph for the browser: DISC_WASM_GRAPH's crates only, ring at DISC_RING."""
+    cmd = ['cargo', 'tree', '--locked', '--offline', '-e', 'normal,build', '-p', DISC_CRATE, '--target', WASM,
+           '--prefix', 'none']
+    r = subprocess.run(cmd, cwd=str(RENDER), env=env, capture_output=True, text=True, errors='replace')
+    if r.returncode:
+        refuse('dependency gate: `%s` failed: %s' % (' '.join(cmd), (r.stderr or r.stdout).strip()[-800:]))
+    found = {}
+    for line in r.stdout.splitlines():
+        m = re.match(r'^(\S+) v(\S+)', line.strip())
+        if m:
+            found.setdefault(m.group(1), set()).add(m.group(2))
+    found = {n: sorted(v) for n, v in sorted(found.items())}
+    absent = [n for n in (*WASM_ABSENT, 'wasm-bindgen', 'js-sys') if n in found]
+    if absent:
+        refuse('version gate: the browser\'s disc module must hold no %s' % ', '.join(absent))
+    other = [n for n in found if n not in DISC_WASM_GRAPH]
+    if other:
+        refuse('dependency gate: %s may depend on %s only, its graph also holds %s' % (
+            DISC_CRATE, ', '.join(DISC_WASM_GRAPH[1:]), ', '.join(other)))
+    if DISC_CRATE not in found or found.get('ring') != [DISC_RING]:
+        refuse('version gate: ring resolves to %s, the pin is exactly %s' % (
+            ', '.join(found.get('ring') or ['nothing']), DISC_RING))
+    return found
+
+
+def disc_c_tools():
+    """ring's C for the browser: LLVM's clang and ar (ring builds wasm32 without a sysroot), -g0."""
+    ext = '.exe' if os.name == 'nt' else ''
+    llvm = Path(shutil.which('clang') or Path.home() / 'scoop/apps/llvm/current/bin/clang.exe').parent
+    if not (llvm / ('clang' + ext)).is_file() or not (llvm / ('llvm-ar' + ext)).is_file():
+        refuse('no LLVM clang and llvm-ar (on PATH) for ring\'s C in the browser\'s disc module')
+    var = WASM.replace('-', '_')
+    return {'CC_' + var: str(llvm / ('clang' + ext)), 'AR_' + var: str(llvm / ('llvm-ar' + ext)), 'CFLAGS_' + var: '-g0'}
+
+
+def build_module(crate, profile='release', no_cache=False):
+    """One of the browser's own small modules (MODULE_CRATES: dhd_settings, dhd_disc), a cdylib with
+    its own memory and no wasm-bindgen: build/web/<crate>.wasm; the report."""
     env = common(WASM, profile)
-    tdir = target_dir() / SETTINGS_CRATE
-    flags = rustflags(WASM, SETTINGS_CRATE)
+    tdir = target_dir() / crate
+    flags = rustflags(WASM, crate)
     env['CARGO_TARGET_DIR'] = str(tdir)
     env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(flags)
     include_precheck()
-    versions = settings_gate(env)
     tools = [('rustc', tool_version(['rustc', '-vV'], env)), ('cargo', tool_version(['cargo', '-V'], env))]
-    key = cache_key(WASM, profile, [], flags, versions, tools, SETTINGS_CRATE)
-    name = SETTINGS_CRATE + '.wasm'
+    if crate == DISC_CRATE:
+        versions = disc_gate(env)
+        env.update(disc_c_tools())
+        tools.append(('clang', tool_version([env['CC_' + WASM.replace('-', '_')], '--version'], env)))
+    else:
+        versions = settings_gate(env)
+    key = cache_key(WASM, profile, [], flags, versions, tools, crate)
+    name = crate + '.wasm'
     out = SETTINGS_WEB_OUT / name
-    rep = {'triple': WASM, 'crate': SETTINGS_CRATE, 'profile': profile, 'features': [], 'key': key, 'rustflags': flags,
+    rep = {'triple': WASM, 'crate': crate, 'profile': profile, 'features': [], 'key': key, 'rustflags': flags,
            'target_dir': str(tdir), 'versions': versions, 'glue': [], 'native_static_libs': []}
     tdir.mkdir(parents=True, exist_ok=True)
     hit = None if no_cache else cache_fetch(key, SETTINGS_WEB_OUT)
@@ -737,13 +795,13 @@ def build_settings(profile='release', no_cache=False):
         rep.update(cache='hit', lib=str(hit[name]), sha256=check_rust_lib.sha256(hit[name]))
         log('cache hit %s -> %s' % (key[:16], rep['lib']))
         return rep
-    cmd = ['cargo', 'rustc', '-p', SETTINGS_CRATE, '--lib', '--crate-type', 'cdylib', *cargo_args(WASM, profile)]
+    cmd = ['cargo', 'rustc', '-p', crate, '--lib', '--crate-type', 'cdylib', *cargo_args(WASM, profile)]
     r = run_cargo(cmd, env)
     sys.stdout.write(r.stdout[-8000:] if r.returncode else '')
     if r.returncode:
         raise SystemExit('rustgs: cargo failed (exit %d)' % r.returncode)
     built = tdir / WASM / profile
-    inputs_gate(built / (SETTINGS_CRATE + '.d'))
+    inputs_gate(built / (crate + '.d'))
     sysroot = Path(tool_version(['rustc', '--print', 'sysroot'], env).strip()) / 'lib' / 'rustlib' / WASM / 'lib'
     SETTINGS_WEB_OUT.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(built / name, out)
@@ -766,11 +824,11 @@ def build(triple, features=(), profile='release', no_cache=False, crate=RENDER_C
         refuse('--target %s builds on a Mac (ring compiles its C against the macOS SDK); `check` runs here' % MAC)
     if crate not in CRATES:
         refuse('--crate %s: one of %s' % (crate, ', '.join(CRATES)))
-    if crate == SETTINGS_CRATE:
+    if crate in MODULE_CRATES:
         if triple != WASM or features:
             refuse('--crate %s: the browser\'s module only (--target %s, no features); the game links it '
-                   'through %s' % (SETTINGS_CRATE, WASM, RENDER_CRATE))
-        return build_settings(profile, no_cache)
+                   'through %s' % (crate, WASM, RENDER_CRATE))
+        return build_module(crate, profile, no_cache)
     env = common(triple, profile)
     flags = rustflags(triple)
     include_precheck()

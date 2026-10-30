@@ -17,6 +17,8 @@ present), and none in a one-worker build.
 dhd.ini's rules (www/settings.js) are the crate dhd_settings (port/render/settings), built on its own
 by `rustgs.py build --target wasm32-unknown-unknown --crate dhd_settings` into build/web/dhd_settings.wasm
 (its own memory, none of the game's: check_web_layout.py's rule P1; finding 102), then wasm-opt -Oz.
+The online disc check (www/disc.js) is the crate dhd_disc (port/render/disc), built the same way into
+build/web/dhd_disc.wasm (its own memory, its one import the worker's read: rule P2; finding 122).
 Input stays untouched; all derived modules, metadata and scratch stay in build/web.
 No proprietary input or generated module belongs in a commit.
 """
@@ -27,6 +29,16 @@ DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'build/web'
 BINARYEN=(DEVCACHES / 'binaryen/binaryen-version_133/bin/wasm-opt.exe')
+def rust_module(crate,profile,opt,run):
+    """build/web/<crate>.wasm, one of the browser's own small Rust modules (dhd_settings, dhd_disc):
+    rustgs.py builds it there, then wasm-opt -Oz unless opt is false. Its path."""
+    out=OUT/(crate+'.wasm')
+    run(sys.executable,ROOT/'port/tools/rustgs.py','build','--target','wasm32-unknown-unknown','--crate',crate,'--profile',profile)
+    if opt:
+        tmp=OUT/(crate+'-optimized.wasm')
+        run(BINARYEN,out,'-Oz','--all-features','--disable-compact-imports','-o',tmp)
+        out.write_bytes(tmp.read_bytes());tmp.unlink()
+    return out
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('input',type=Path,nargs='?',default=ROOT/'build/wasm/dhd_core.wasm',
@@ -47,12 +59,8 @@ def main():
     # first: a Rust failure stops the build before the long core pass
     from build_renderer import build as build_renderer,SERVED,RENDERER
     renderer=build_renderer(a.renderer_profile,not a.no_opt,OUT)
-    settings=OUT/'dhd_settings.wasm'
-    run(sys.executable,ROOT/'port/tools/rustgs.py','build','--target','wasm32-unknown-unknown','--crate','dhd_settings','--profile',a.renderer_profile)
-    if not a.no_opt:
-        tmp=OUT/'dhd_settings-optimized.wasm'
-        run(BINARYEN,settings,'-Oz','--all-features','--disable-compact-imports','-o',tmp)
-        settings.write_bytes(tmp.read_bytes());tmp.unlink()
+    settings=rust_module('dhd_settings',a.renderer_profile,not a.no_opt,run)
+    disc=rust_module('dhd_disc',a.renderer_profile,not a.no_opt,run)
     run(sys.executable,ROOT/'port/web/postlink.py',source,OUT/'core-web-raw.wasm',*(['--debug-memory'] if a.debug_memory else []),*(['--legacy-memory'] if a.legacy_memory else []),*(['--no-inline-memory'] if a.no_inline_memory else []))
     run(sys.executable,ROOT/'port/web/build_graphics.py',*(['--debug-memory'] if a.debug_memory else []),*(['--legacy-memory'] if a.legacy_memory else []),*(['--exact-float'] if a.exact_float else []),*(['--threads'] if a.threads else []))
     if not a.threads:(OUT/'gqueue.wasm').unlink(missing_ok=True)  # a stale one would make check_web_layout treat the build as threaded
@@ -74,7 +82,7 @@ def main():
             dst.write_bytes(tmp.read_bytes())
         elif src!=dst:dst.write_bytes(src.read_bytes())
     generate(OUT/'dhd_core.wasm',OUT/'imports.json')
-    files=[source,OUT/'dhd_core.wasm',OUT/'graphics.wasm']+([OUT/'gqueue.wasm',OUT/'vu.wasm'] if a.threads else [])+[RENDERER/n for n in SERVED]+[settings]
+    files=[source,OUT/'dhd_core.wasm',OUT/'graphics.wasm']+([OUT/'gqueue.wasm',OUT/'vu.wasm'] if a.threads else [])+[RENDERER/n for n in SERVED]+[settings,disc]
     manifest={'input':str(source),'optimized':not a.no_opt,'renderer':'rust','threads':a.threads,
               'sha256':{str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in files},'renderer_sizes':renderer['sizes']}
     (OUT/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

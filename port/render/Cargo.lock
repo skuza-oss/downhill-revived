@@ -208,6 +208,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 name = "dhd_disc"
 version = "1.0.0"
 dependencies = [
+ "getrandom 0.2.17",
  "ring",
 ]
 

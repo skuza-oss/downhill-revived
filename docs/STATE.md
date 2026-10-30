@@ -108,6 +108,9 @@ it unchanged (finding 088, CL3).
   wasm32-unknown-unknown --crate dhd_settings`, by build.py; its own memory: layout rule P1);
   `node port/web/check_settings.mjs [--iso PATH]` runs the crate's corpus and the game's settings
   page through it in headless Chrome against the native results (finding 102).
+  The online disc check is `dhd_disc` built the same way (`--crate dhd_disc`, build/web/dhd_disc.wasm,
+  `www/disc.js`; layout rule P2): the native game's hash for the same image, checked by
+  `node port/web/check_disc.mjs [--iso PATH]` (finding 122; not yet wired into worker.js).
 - macOS arm64 (`--target macos-arm64`, on a Mac with Xcode's tools; macOS 11 and later): the POSIX
   host with SDL3 static (Cocoa, Core Audio) and the Rust library (Metal, rustgs.py on the Mac).
   `package_release.py --platform mac` makes `Downhill Revived.app` (ad-hoc signed) in the -mac-experimental.zip.
