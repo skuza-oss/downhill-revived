@@ -57,6 +57,14 @@ typedef struct {
     /* Everyone is ready: the race starts by itself in this many ms (the server's countdown),
        -1 when none runs. Worked out as the copy is made (net_get_lobby). */
     int countdown_ms;
+    /* Rejoining (finding 126). New fields go here, at the end: the game, the x64 host and the
+       browser's net module (port/web/www/net.js copies web_net_lobby_size() bytes) all copy this
+       struct as it is, so the fields above keep their offsets. */
+    unsigned members_reconnecting;  /* bit i: member[i] dropped; the server holds its lobby slot */
+    unsigned racers_away;      /* bit s: racer s dropped mid-race ("away"); the server holds its slot
+                                  until it comes "back" or has "left". Its rider is not driven meanwhile. */
+    int rejoining;             /* this PC lost the race's connection and is rejoining its slot: frames
+                                  are not sent; offline is set only if that fails */
 } NetLobby;
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */

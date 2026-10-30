@@ -333,5 +333,12 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   countdown and the client already did; a server test that lost its snapshot frame is fixed.
   Not deployed yet. Finding 120: a racer silent for 10 s is dropped (`"timeout"`), and host handover
   mid-race has a server test.
+- 2026-10-31 (finding 126): rejoin after a drop. A client that lists the `reconnect` feature gets a
+  secret token in its `welcome`; a drop holds its slot for 20 s, in the lobby (`reconnecting` in
+  `room`) or in a race (`away` to everyone at once, `back` on rejoin, `left` when the time runs
+  out). The client rejoins by the room's code with the token instead of going offline; `NetLobby`
+  gains `members_reconnecting`, `racers_away` and `rejoining` at its end. Older clients are
+  untouched (no token: `left` at once). Server and loopback tests; not deployed, the race HUD's
+  notice is still to do.
 - Tests: `port/net/build_tests.py` (unit and loopback), the server's own tests (`npm test`),
   `port/tools/online_race.py` (two local games through a relay, optionally `nettool` bots).

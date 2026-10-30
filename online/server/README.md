@@ -79,7 +79,11 @@ removing a class later needs a new migration entry, not an edit of `v1`.
 
 ## Limits and what is not there yet
 
-- No reconnect: a dropped racer becomes the host's AI rider for the rest of the race.
-- No authentication or rate limiting beyond the protocol checks (version, ISO hash, sizes).
+- Rejoin: a client that sent the `reconnect` feature keeps its slot, in the lobby or a race, for
+  20 s after a drop and comes back with the token its `welcome` carried; the others see `away`,
+  then `back` or `left` (`docs/online-protocol.md`, finding 126). Older clients' racers become
+  the host's AI at once, as before.
+- No authentication or rate limiting beyond the protocol checks (version, ISO hash, sizes, the
+  rejoin token, which is unguessable and room-bound).
 - The server does not check the ISO hash against the known US ISO; the client must refuse
   other regions, and the server only makes everyone match the host.

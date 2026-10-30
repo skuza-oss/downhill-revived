@@ -533,7 +533,11 @@ static void barrier(void)
                   : lobby.nmembers < 2 ? "waiting for players to join"
                   : !all_ready ? "waiting for everyone to be ready"
                                : "press START (or Enter) to begin");
-        } else
+        } else if (lobby.state == NET_RECONNECTING)
+            /* the socket dropped and the net client is reconnecting into the same slot (finding
+               126): keep waiting, the server holds it a moment */
+            title("Downhill Revived online - room %s - reconnecting...", lobby.code);
+        else
             title("Downhill Revived online - connecting...");
         if (lobby.state == NET_LOBBY && lobby.is_host) pressed_start();
         host_service_gs_pump_messages();
