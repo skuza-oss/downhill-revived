@@ -45,6 +45,12 @@ The Windows zip holds one folder, DownhillRevived-<version>, with:
                            crates' own licence files (rust_notices)
   dxcompiler.dll           Microsoft's DirectX Shader Compiler, x64, unchanged (port/tools/dxc.py):
                            the renderer compiles its Direct3D 12 shaders with it (finding 084 §14)
+  discord_partner_sdk.dll  only with --discord-sdk (off by default): Discord's Social SDK, x64, unchanged
+                           (port/tools/discord_sdk.py, finding 121); the Discord Rich Presence goes
+                           through it when it is there (port/render/presence/src/sdk.rs), the plain IPC
+                           otherwise. Its License-Notices.txt is appended to THIRD-PARTY-NOTICES.txt.
+                           Off by default: shipping Discord's closed SDK with a GPL-3.0-or-later game is
+                           a licence decision for the project's copyright holders, not made yet
 
 The package is refused if:
   - port/ or src/ has uncommitted changes to tracked files (a release is built from committed source);
@@ -106,6 +112,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_launcher  # noqa: E402
+import discord_sdk  # noqa: E402
 import dxc  # noqa: E402
 import scan_retail  # noqa: E402
 
@@ -144,7 +151,7 @@ FORBIDDEN = [b'\\Users\\', b'/Users/'] + [
 # SDL_windows.c's list of USB vibration device paths: SDL's own text, not a builder's folder.
 SDL_OWN_PATHS = ('C:/Windows/USB_Vibration', 'C:/Windows/USB Vibration')
 # Windows' own DLLs: dhd.exe may import nothing else (no DLL is shipped beside it to be imported;
-# dxcompiler.dll is loaded by the renderer, not imported).
+# dxcompiler.dll is loaded by the renderer and discord_partner_sdk.dll by the presence, not imported).
 SYSTEM_DLL = re.compile(r'^(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|ws2_32|winmm|winhttp|'
                         r'comdlg32|dxgi|api-ms-win-.*|ext-ms-.*|ucrtbase|onecoreuap|'
                         r'bcrypt|imm32|version|setupapi|cfgmgr32|combase|uxtheme|dwmapi|hid|hidapi|'
@@ -621,14 +628,21 @@ def mac_info_plist(version):
     }, sort_keys=True)
 
 
-def layout(platform, version, launcher, game, notices):
-    """{path in the zip: content}, in the zip's order, and the paths of the game and the launcher."""
+def layout(platform, version, launcher, game, notices, discord=False):
+    """{path in the zip: content}, in the zip's order, and the paths of the game and the launcher.
+    discord (--discord-sdk, Windows only): ship the Discord Social SDK's DLL beside the game."""
     text = crlf if platform.key == 'win' else lf
+    discord = discord and platform.key == 'win'
+    # with the Discord Social SDK's DLL: the open-source notices of what is inside it too
+    sdk_notices = b''
+    if discord:
+        sdk_notices = (b'\n\nThe Discord Social SDK (discord_partner_sdk.dll) holds this open-source software, '
+                       b'as its own License-Notices.txt lists it:\n\n' + discord_sdk.notices().rstrip())
     texts = {
         'README.txt': text(RELEASE / 'README.txt'),
         'LICENSE.txt': text(ROOT / 'LICENSE'),
         'THIRD-PARTY-NOTICES.txt': text((RELEASE / 'THIRD-PARTY-NOTICES.txt').read_bytes().rstrip() + b'\n\n'
-                                        + notices.encode('utf-8')),
+                                        + notices.encode('utf-8') + sdk_notices),
     }
     if platform.key == 'mac':
         contents = launcher_conf()['productName'] + '.app/Contents/'
@@ -643,6 +657,8 @@ def layout(platform, version, launcher, game, notices):
     files.update({folder + n: t for n, t in texts.items()})
     if platform.key == 'win':
         files[folder + 'dxcompiler.dll'] = dxc.dll('x64').read_bytes()
+        if discord:
+            files[folder + discord_sdk.DLL_NAME] = discord_sdk.dll('x64').read_bytes()
     return files, folder + platform.game, folder + platform.launcher
 
 
@@ -692,6 +708,9 @@ def main():
                     'bytes the retail scan may find in it')
     ap.add_argument('--sdl-lib', type=Path, help='x64 SDL3 static library (default: sdl3.py\'s x64 build)')
     ap.add_argument('--sdl-include', type=Path, help='its include directory (with --sdl-lib)')
+    ap.add_argument('--discord-sdk', action='store_true',
+                    help="Windows: ship Discord's Social SDK (discord_partner_sdk.dll, port/tools/discord_sdk.py) "
+                         "beside dhd.exe. Off by default: a licence decision not made yet (finding 121)")
     ap.add_argument('--jobs', type=int, default=2)
     ap.add_argument('--version', help="must equal port/include/version.h's DHD_VERSION (the default)")
     ap.add_argument('--out', type=Path, help='default build/release/DownhillRevived-<version>-<platform>.zip')
@@ -787,12 +806,15 @@ def main():
     if found:
         sys.exit('%s is not fit to publish:\n  %s' % (launcher, '\n  '.join(found)))
 
-    files, game_path, launcher_path = layout(platform, a.version, launcher_data, data, notices)
+    if a.discord_sdk and platform.key != 'win':
+        sys.exit('--discord-sdk: the Windows package only')
+    files, game_path, launcher_path = layout(platform, a.version, launcher_data, data, notices, a.discord_sdk)
     executables = {game_path, launcher_path}
     # Static libraries linked in: their bytes may match the ELF by chance (game_data_runs).
     linked = {game_path: rust_libs, launcher_path: build_launcher.native_libraries(launcher)}
     # Third-party binaries: the publisher's exact bytes (see the module's doc).
     third_party = {p: dxc.DLL_SHA256['x64'] for p in files if p.endswith('/dxcompiler.dll')}
+    third_party.update({p: discord_sdk.DLL_SHA256['x64'] for p in files if p.endswith('/' + discord_sdk.DLL_NAME)})
     elf = a.elf.read_bytes()
     for path, content in files.items():
         file_name = path.rsplit('/', 1)[-1]

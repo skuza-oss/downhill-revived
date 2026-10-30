@@ -211,10 +211,17 @@ webpki-roots, the game's rule. dhd.ini has one implementation, the Rust crate `d
 saves serve the game (through the Rust static library; PC SETTINGS through a generated table), the
 launcher and the browser (the crate's own small wasm module, `build/web/dhd_settings.wasm`;
 `settings.js` keeps only IndexedDB and what the browser can't offer; finding 102). The rider
-name's rule is the crate's too (the launcher, and the online menu through the same table). Discord Rich Presence (finding
-106, setting `discord`, on by default): the profile shows the menus, the race with its track and
-place, the career, an online room or race, through Discord's local IPC (`dhd_presence` in the Rust
-library, no SDK; the core sends its state through `host_service_presence`). Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
+name's rule is the crate's too (the launcher, and the online menu through the same table). Discord Rich Presence (findings
+106, 121, setting `discord`, on by default): the profile shows the menus, the race with its track,
+rider and place (its time starting again on TRY AGAIN), the career, an online room with its track and
+Discord's party size ("Room K7M2QX (3 of 6)"), or an online race, through Discord's local IPC
+(`dhd_presence` in the Rust library, no SDK; the core sends its state through
+`host_service_presence`; refreshed every minute so a restarted Discord gets it back), or through
+Discord's Social SDK when its library (`discord_partner_sdk.dll`, Discord's, never committed) sits
+beside the game. Ask to Join goes through the SDK: a friend's join opens ONLINE from the title and
+joins the room's code, on the official server only (finding 121; written, not run in the game).
+Releases ship the DLL only with `package_release.py --discord-sdk`, off by default: shipping
+Discord's closed SDK with the GPL game is a licence decision not made yet. Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
 race room) share one centred layer in the game's popup style (`menu_page.c`), and the mouse works
 in them and in the game's own popups: hover selects, left click X, right click back, the wheel
 scrolls or changes values (finding 092; the shell's own menus are not bridged yet).

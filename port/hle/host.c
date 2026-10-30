@@ -1229,7 +1229,16 @@ void host_service_presence(uint32_t a0)
     char track[sizeof p->track + 1], room[sizeof p->room + 1];
     snprintf(track, sizeof track, "%.*s", (int)sizeof p->track, p->track);
     snprintf(room, sizeof room, "%.*s", (int)sizeof p->room, p->room);
-    dhd_presence_set(p->kind, track, p->place, p->riders, room, p->members, p->max_members);
+    dhd_presence_set(p->kind, track, p->place, p->riders, p->rider, room, p->members, p->max_members);
+}
+
+/* A friend's join from Discord (finding 121): the SDK's callback left the room's code in
+   dhd_presence (port/render/presence/src/lib.rs); the core (online_menu.c's port_online_resume)
+   takes it here and opens ONLINE's JOIN WITH A CODE. `out` is the core's 8-byte buffer; nothing is
+   written and 0 comes back when no join waits (the off setting, the IPC, the browser, Android). */
+int host_service_presence_join(uint32_t a0)
+{
+    return dhd_presence_take_join((char *)GUEST(a0), 8);
 }
 
 

@@ -56,6 +56,10 @@ static int room_closed;  /* the race room was left this frame: nothing more to d
 static int in_shell, room_pending, hold_rider, resume_home;
 /* connecting: Create or Join was chosen; the page waits for the server's room (connect_poll). */
 static int connecting;
+/* A friend's join from Discord (finding 121): the SDK's callback leaves the room's code in
+   dhd_presence; the title takes it once (take_join) into join_code, and ONLINE joins it as JOIN
+   WITH A CODE does. Empty when none waits. */
+static char join_code[CODE_LENGTH + 1];
 static int chosen_rider, chosen_bike, ready_track, ready_options;
 static int chosen_spot;  /* the chosen rider's place on the rider screen's carousel (D_004C6910), 0 none */
 static int public_room, room_settings_sent, room_ready_sent, room_track = 0, room_options;
@@ -199,6 +203,29 @@ static const char *server(void)
 {
     const char *s = getenv("DHD_NET_SERVER");
     return s && *s ? s : NULL;
+}
+
+/* The official public race server (port/render/settings' table's built-in value). A join code means
+   something only on the server that made it, and the presence names no server (it must not), so a
+   code is taken only on the official one -- otherwise the player would only get "no such room"
+   (finding 121, point 3). */
+static const char official_server[] = "wss://dhd.skuza.app";
+
+/* A friend's join from Discord, taken once (finding 121): the room's code into join_code; 1 when one
+   was waiting. dhd_presence has one only through the Social SDK (the plain IPC cannot receive a join)
+   and only for a public room with a free place; the crate already checks the code's letters. */
+static int take_join(void)
+{
+    char code[CODE_LENGTH + 1];
+    if (!host_service_presence_join(GADDR(code))) return 0;  /* drains the one waiting, if any */
+    if (strlen(code) != CODE_LENGTH) return 0;  /* the crate's check, and the buffer's end */
+    if (!server() || strcmp(server(), official_server)) {
+        hle_log("online menu: a join from Discord, but not on the official server; ignored\n");
+        return 0;
+    }
+    snprintf(join_code, sizeof join_code, "%s", code);
+    hle_log("online menu: a join from Discord: room %s\n", join_code);
+    return 1;
 }
 
 /* ---- the disc image's check ---- */
@@ -1424,6 +1451,14 @@ int port_online_menu(void)
     race = 0;
     in_shell = 0;
     connecting = 0;
+    /* A friend's join from Discord (finding 121): port_online_resume took the code and opened this
+       page; join it as JOIN WITH A CODE does, with its own not_ready refusals. */
+    if (join_code[0]) {
+        char code[CODE_LENGTH + 1];
+        snprintf(code, sizeof code, "%s", join_code);
+        join_code[0] = 0;
+        enter_room(0, code);
+    }
     run_page();
     if (!race) { host_service_net_leave(); reset_selection(); connecting = 0; }
     return race;
@@ -1434,7 +1469,10 @@ int port_online_menu(void)
 int port_online_resume(void)
 {
     void *animation = (void *)(uintptr_t)(0x08000000u + 0x4C6370);
-    if (!resume_home) return 0;
+    /* A friend's join from Discord (finding 121): taking it opens ONLINE this frame (the patch puts
+       the cursor on the ONLINE row and confirms), where port_online_menu joins the code. A race or
+       another page is not the main menu, so the join waits on the title until then. */
+    if (!resume_home) return take_join();
     func_00203590(animation, 0x2330, 0, 1);
     float t = func_00203C28(animation);
     return t <= 0.0f || t >= 1.0f;
