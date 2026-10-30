@@ -1,7 +1,11 @@
 //! The thread that talks to Discord. Its calls block (the pipe or socket is read and written
 //! plainly), so the game never waits on them: the game's calls only post a message.
+//!
+//! With the Social SDK's library beside the game (sdk.rs, finding 121) the thread goes through it
+//! (`run_sdk`); without it, Discord's local IPC through discord-rich-presence (`run`). Both keep the
+//! same state, lines, pacing and log.
 
-use crate::{payload, Clock, Due, Kind, Pacer, Payload, State, APP_ID, BUTTONS, LOGO, LOGO_TEXT, RETRY};
+use crate::{party_id, payload, sdk, Clock, Due, Kind, Pacer, Payload, State, APP_ID, ASK_TO_JOIN, BUTTONS, LOGO, LOGO_TEXT, RETRY};
 use discord_rich_presence::activity::{Activity, Assets, Button, Party, Secrets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -24,13 +28,32 @@ pub struct Worker {
 /// Discord clears it when the connection closes.
 const STOP_WAIT: Duration = Duration::from_millis(500);
 
+/// How often the SDK's callbacks run while it is used.
+const TICK: Duration = Duration::from_millis(100);
+
 /// Starts the thread. Nothing is sent before the first `set`.
 pub fn start(log: Log) -> Option<Worker> {
     let (to, from) = channel();
     std::thread::Builder::new()
         .name("discord".into())
-        .stack_size(256 * 1024)
-        .spawn(move || run(from, log))
+        .stack_size(1024 * 1024)  // the SDK's calls run on it too
+        .spawn(move || match sdk::library_path().filter(|p| p.is_file()) {
+            None => run(from, log),
+            Some(path) => {
+                // the command Discord starts the game with for a join (only with ASK_TO_JOIN)
+                let launch = std::env::current_exe().ok().map(|exe| format!("\"{}\"", exe.display()));
+                match sdk::Client::load(&path, ASK_TO_JOIN, launch.as_deref()) {
+                    Ok(client) => {
+                        log("discord: through the Social SDK");
+                        run_sdk(from, log, client)
+                    }
+                    Err(why) => {
+                        log(&format!("discord: the Social SDK didn't load ({why}); through the IPC"));
+                        run(from, log)
+                    }
+                }
+            }
+        })
         .ok()
         .map(|_| Worker { to })
 }
@@ -55,7 +78,7 @@ fn unix_ms() -> i64 {
 }
 
 /// The activity Discord gets for `p`: its two lines, the elapsed time, the logo and the buttons; a
-/// room's party size, and its join secret (with the party's id, which Ask to Join needs) when set.
+/// room's party (its size and id, which Discord asks for with a size) and its join secret when set.
 pub fn activity(p: &Payload) -> Activity<'_> {
     let mut a = Activity::new()
         .details(p.details.as_str())
@@ -66,12 +89,11 @@ pub fn activity(p: &Payload) -> Activity<'_> {
         a = a.state(state.as_str());
     }
     if p.party.is_some() || p.join.is_some() {
-        let mut party = Party::new();
+        let mut party = Party::new().id(party_id(p.join.as_deref()));
         if let Some(size) = p.party {
             party = party.size(size);
         }
         if let Some(join) = &p.join {
-            party = party.id(join.as_str());
             a = a.secrets(Secrets::new().join(join.as_str()));
         }
         a = a.party(party);
@@ -101,6 +123,89 @@ fn describe(p: &Payload) -> String {
     match &p.state {
         Some(state) => format!("{} ({}{party})", p.details, state),
         None => p.details.clone(),
+    }
+}
+
+/// The presence through the Social SDK. Its updates are answered in callbacks (`run_callbacks`,
+/// every TICK): a refused one counts as a lost connection, tried again after RETRY.
+fn run_sdk(from: Receiver<Message>, log: Log, mut sdk: sdk::Client) {
+    let mut clock = Clock::new(unix_ms());
+    let mut pacer = Pacer::default();
+    let mut next_try = Instant::now();
+    // the update waiting for its answer: its kind and when it went (an answer that never comes
+    // frees it after RETRY)
+    let mut waiting: Option<(Kind, Instant)> = None;
+    let mut kind = Kind::None;
+    let mut logged_kind: Option<Kind> = None;
+    let mut failing = false;
+    loop {
+        match from.recv_timeout(TICK) {
+            Ok(Message::Set(s)) => {
+                let start = clock.start(&s, unix_ms());
+                kind = s.kind;
+                pacer.want(payload(&s, start));
+            }
+            Ok(Message::Stop(done)) => {
+                if pacer.shown().is_some() {
+                    sdk.set(None);
+                    // the clear has no answer: a few rounds of callbacks let it go out
+                    for _ in 0..4 {
+                        sdk.run_callbacks();
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    log("discord: presence cleared");
+                }
+                drop(sdk);
+                let _ = done.send(());
+                return;
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return,
+        }
+        sdk.run_callbacks();
+        let events = sdk.take_events();
+        for line in &events.lines {
+            log(&format!("discord: sdk: {line}"));
+        }
+        if let Some(secret) = events.join {
+            crate::joined(&secret, &log);
+        }
+        let now = Instant::now();
+        if let (Some(outcome), Some((k, _))) = (events.update, waiting) {
+            waiting = None;
+            match outcome {
+                Ok(()) => {
+                    failing = false;
+                    if logged_kind != Some(k) {
+                        if let Some(p) = pacer.shown() {
+                            log(&format!("discord: presence set: {}", describe(p)));
+                        }
+                        logged_kind = Some(k);
+                    }
+                }
+                Err(why) => {
+                    pacer.lost();
+                    next_try = now + RETRY;
+                    logged_kind = None;
+                    if !failing {
+                        log(&format!("discord: the presence wasn't set ({why}); it waits for Discord (a try every 30 s)"));
+                        failing = true;
+                    }
+                }
+            }
+        }
+        if waiting.is_some_and(|(_, at)| now >= at + RETRY) {
+            waiting = None;
+        }
+        if waiting.is_some() || now < next_try {
+            continue;
+        }
+        if let Due::Send(p) = pacer.due(now) {
+            sdk.set(p.as_ref());
+            // a clear has no answer
+            waiting = p.is_some().then_some((kind, now));
+            pacer.sent(p, now);
+        }
     }
 }
 

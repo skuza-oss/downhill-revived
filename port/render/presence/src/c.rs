@@ -77,6 +77,25 @@ pub unsafe extern "C" fn dhd_presence_set(
     }
 }
 
+/// A friend's join from Discord (the Social SDK, with ASK_TO_JOIN): its room code, NUL-terminated,
+/// into `out` (`size` bytes, 8 or more), taken. 1 when there was one; 0 otherwise.
+///
+/// # Safety
+/// `out` is NULL or `size` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dhd_presence_take_join(out: *mut c_char, size: c_int) -> c_int {
+    if out.is_null() || (size as usize) < crate::CODE_LENGTH + 1 {
+        return 0;
+    }
+    let Some(code) = crate::take_join() else { return 0 };
+    // SAFETY: the caller's contract; the code is CODE_LENGTH ASCII letters (join_code).
+    unsafe {
+        std::ptr::copy_nonoverlapping(code.as_ptr() as *const c_char, out, code.len());
+        *out.add(code.len()) = 0;
+    }
+    1
+}
+
 /// Clears the presence and closes the connection: at exit, at most half a second.
 #[no_mangle]
 pub extern "C" fn dhd_presence_stop() {

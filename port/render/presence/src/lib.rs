@@ -12,9 +12,11 @@
 //! most one update per 15 s, which is about what Discord allows; what is shown goes again every
 //! minute, which is how a Discord restarted since is noticed) (finding 121).
 
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 mod c;
+pub mod sdk;
 mod worker;
 
 pub use worker::{start, Worker};
@@ -42,6 +44,9 @@ pub const REFRESH: Duration = Duration::from_secs(60);
 pub const ASK_TO_JOIN: bool = false;
 /// What a join secret starts with: its format, for the game that takes it.
 pub const JOIN_PREFIX: &str = "dhd-room-1:";
+/// A join code's letters and length (the server's, port/hle/online_menu.c's code_letters).
+pub const CODE_LETTERS: &str = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+pub const CODE_LENGTH: usize = 6;
 
 /// The game's riders by index (port/hle/online.c's rider_name).
 pub const RIDERS: [&str; 16] = [
@@ -150,6 +155,50 @@ pub fn rider_name(rider: u32) -> Option<&'static str> {
 /// (a private room comes without its code, a full one can't be joined).
 pub fn join_secret(s: &State) -> Option<String> {
     (s.kind == Kind::Room && !s.room.is_empty() && s.members < s.max_members).then(|| format!("{JOIN_PREFIX}{}", s.room))
+}
+
+/// The party's id Discord asks for with a party size (2 to 128 characters, else it refuses the
+/// update): the join secret when there is one, otherwise this session's own random token, which
+/// says nothing of the room (a private room's code must not leave the core).
+pub fn party_id(join: Option<&str>) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(join) = join {
+        return join.to_string();
+    }
+    TOKEN
+        .get_or_init(|| {
+            // RandomState's keys are random per process
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u32(std::process::id());
+            format!("dhd-{:016x}", h.finish())
+        })
+        .clone()
+}
+
+/// The room's code in a join secret Discord handed over; None for anything this game didn't make.
+pub fn join_code(secret: &str) -> Option<&str> {
+    let code = secret.strip_prefix(JOIN_PREFIX)?;
+    (code.len() == CODE_LENGTH && code.chars().all(|c| CODE_LETTERS.contains(c))).then_some(code)
+}
+
+/// A friend's join from Discord, until the game takes it (`take_join`).
+static JOIN: Mutex<Option<String>> = Mutex::new(None);
+
+/// Discord handed over `secret` (the SDK's join callback): its code waits for the game.
+pub fn joined(secret: &str, log: &dyn Fn(&str)) {
+    match join_code(secret) {
+        Some(code) => {
+            log("discord: a join from Discord; it waits for the ONLINE page");
+            *JOIN.lock().unwrap_or_else(|e| e.into_inner()) = Some(code.to_string());
+        }
+        None => log("discord: a join from Discord with a secret this game didn't make; ignored"),
+    }
+}
+
+/// The join code waiting from Discord, taken (at most once).
+pub fn take_join() -> Option<String> {
+    JOIN.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
 /// The two lines for `s`, its elapsed time counted from `start`. None: nothing to show.

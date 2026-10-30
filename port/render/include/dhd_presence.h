@@ -23,6 +23,10 @@ int dhd_presence_start(const char *setting, DhdPresenceLog log);
 void dhd_presence_set(int kind, const char *track, int place, int riders, int rider, const char *room,
                       int members, int max_members);
 
+/* A friend's join from Discord (the Social SDK, finding 121; off while ASK_TO_JOIN is): the room's
+   code, NUL-terminated, into out (size bytes, 8 or more), taken. 1 when there was one. */
+int dhd_presence_take_join(char *out, int size);
+
 /* Clears the presence and closes the connection (at exit), waiting at most half a second. */
 void dhd_presence_stop(void);
 

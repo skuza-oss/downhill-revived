@@ -1,10 +1,11 @@
-# 121: Discord Rich Presence: rooms with their size, the rider, TRY AGAIN, a restarted Discord
+# 121: Discord Rich Presence: rooms with their size, the rider, TRY AGAIN, the Social SDK
 
 2026-10-30, branch `discord-presence` (from 0.7.3). Follows finding 106. A friend looking at the
 player's profile now sees a room's track and how full it is, the rider in a race, and an elapsed
 time that starts again with each run. A Discord that was restarted gets the presence back without
 waiting for the game's state to change. Ask to Join is designed and its presence half written, but
-switched off (below).
+switched off (below). On 2026-10-31 the presence also learnt to go through Discord's Social SDK
+when the SDK's library sits next to the game (the user's choice); without it, the IPC as before.
 
 ## What it showed before (finding 106)
 
@@ -35,8 +36,11 @@ write; and the room's size was plain text, not Discord's party field.
 
 - **The party size.** The room's players and size go in Discord's `party.size` ([current, maximum]).
   Discord's client prints it after the second line as "(3 of 6)". The count is held between 1 and
-  the size, so a size of 0 (not known yet) sends no party. No `party.id` is sent: Discord needs one
-  only for joining, and a private room's code must not be used for it.
+  the size, so a size of 0 (not known yet) sends no party. Discord refuses a size without an id
+  (tried 2026-10-31: `Field "party.id": String length is out of range. Must be between 2 and 128`).
+  A private room's code must not be the id, so a room's party id is this session's own random token
+  (`party_id`: `dhd-` and 16 hex digits from std's randomly keyed hasher), the same for every update
+  and nothing of the room's. With Ask to Join it is the join secret.
 - **The room's track** is `lobby.track` through `port_track_name`, the same table the race uses.
   A track missing from that table leaves "Online room".
 - **The rider** is the setup block's +0x290, the first player's rider id, 0x20 × (index + 1), as the
@@ -73,6 +77,8 @@ carries the secret and `activity` sends it as `secrets.join`, with the same stri
 `ASK_TO_JOIN` is `false`, so neither field is sent today (a test checks this). A Join button that
 does nothing would be worse than none, and these points are open:
 
+Points 1 and 4 are answered by the Social SDK (below) when its library is present; 2, 3 and 5 stand.
+
 1. **Reading Discord's events.** The worker reads the pipe only right after its own writes, through
    the crate's blocking `recv`. A join can arrive at any time, so the worker needs a way to wait on
    the pipe and the game's channel together. Options: `PeekNamedPipe` on Windows and a
@@ -98,13 +104,13 @@ does nothing would be worse than none, and these points are open:
    buttons cannot be used together (the profile would lose "Get Downhill Revived" and "Join the
    Discord"). Neither was tried here.
 
-Turning it on means finishing 1 to 4, flipping `ASK_TO_JOIN`, and trying it with two Discord
-accounts.
+Turning it on means finishing 2 and 3, shipping the SDK's library, flipping `ASK_TO_JOIN`, and trying
+it with two Discord accounts.
 
-### The Discord Social SDK (looked at 2026-10-31)
+## The Discord Social SDK (2026-10-31)
 
-Discord's current SDK for games ("a C++ library that Discord distributes and would be integrated and
-shipped with the game itself") does the same through its own calls:
+The user chose the SDK. Its documentation says ("a C++ library that Discord distributes and would be
+integrated and shipped with the game itself"):
 - `Client::SetActivityJoinCallback` hands the game the join secret. Discord holds a join for 180 s
   when it has to start the game first, so the callback is registered before `Client::Connect`.
 - `Client::RegisterLaunchCommand` registers the command Discord runs to start the game, on each
@@ -112,23 +118,72 @@ shipped with the game itself") does the same through its own calls:
 - "You must set up your rich presence Activity with party information and a join secret to send
   game invites": the party size and join secret written here.
 - Invites need no OAuth account link (provisional accounts work), and no approval step is mentioned
-  for them. That makes point 5's approval doubt smaller, though for the plain IPC used here it is
-  still untried.
+  for them. That makes point 5's approval doubt smaller.
+- "Rich Presence can be set without authentication": without `Client::Connect` the SDK talks to the
+  running Discord client. No sign-in, as with the IPC.
 
-It is not used here, for three reasons:
-- It is a closed binary from Discord, and the game is GPL-3.0-or-later. AGENTS.md admits only code
-  under a compatible licence, and this one has no linking exception.
-- Finding 106 chose plain IPC, with no SDK, for every desktop platform.
-- What the game needs from it (the join event and the launch command) can be written over the same
-  IPC, as discord-rpc did: points 1 and 4.
+Version used: DiscordSocialSdk-1.10.19337 (the developer portal's download, 781 MB zip; Windows x64
+`bin/release/discord_partner_sdk.dll` 9,882,040 bytes, `cdiscord.h`, `discordpp.h`,
+`License-Notices.txt`).
 
-So the plan above stands; the SDK's documentation confirms its order (the launch registration at
-startup, the join taken before or right after connecting, a held join that can wait for the game to
-load).
+### How it is used (`presence/src/sdk.rs`)
+
+- **Loaded at run time** with libloading (0.8.9, already in the library through wgpu-hal), from the
+  executable's own folder only: `discord_partner_sdk.dll`, `libdiscord_partner_sdk.so` or
+  `libdiscord_partner_sdk.dylib`. Not the working folder or PATH. Nothing links against it, so the
+  builds need no SDK. A game without the file behaves as before (the IPC). A file that doesn't load
+  is logged once (`discord: the Social SDK didn't load (...); through the IPC`), and the IPC is used.
+- **The C API** (cdiscord.h), not the C++ wrapper: every object is one opaque pointer (`_Init`,
+  `_Drop`); setters copy the strings they get; a string or `ClientResult` handed to a callback
+  belongs to the callback (`Discord_Free`, `_Drop`), as discordpp.h's wrappers do. The callbacks'
+  user data carries the functions they need, so there is no global state. 43 functions are looked
+  up; a missing one fails the load.
+- **The worker** (`run_sdk`): the same state, lines, pacing (15 s, the 60 s refresh) and log lines as
+  the IPC loop. `Discord_RunCallbacks` runs every 100 ms on the presence's thread, and every SDK call
+  is made there. An update is answered in its callback; a refused one counts as a lost connection
+  and goes again after 30 s, logged once with the SDK's message. At exit the presence is cleared
+  within the 0.5 s limit. The SDK's own warnings and errors reach dhd.log, at most 20 a session
+  (`discord: sdk: ...`). The thread's stack is 1 MB now (256 KB before), since the SDK runs on it.
+- **Joins** (only with `ASK_TO_JOIN`): `SetActivityJoinCallback` before anything is sent, and
+  `RegisterLaunchCommand` with the running executable's path, quoted. A secret is checked
+  (`join_code`: `dhd-room-1:` and 6 code letters), and its code waits until the game takes it
+  through `dhd_presence_take_join` (C, in dhd_presence.h). The Join button shows on desktop only
+  (`SetSupportedPlatforms(Desktop)`).
+
+### Still for the game (point 2), not written
+
+- A core import, e.g. `host_service_presence_join(uint32_t out)` → `dhd_presence_take_join` (the
+  native host), 0 in the browser's two no-op lists. It is one more import in `build_wasm.py` and
+  `gen_host64_imports.py` (span: 8 bytes).
+- `online_menu.c`: `port_online_resume` also answers 1 when a join waits, which opens ONLINE from
+  the title as after a closed room. `port_online_menu` (or `page_update` on HOME) then calls
+  `enter_room(0, code)`, the JOIN WITH A CODE path, with its own `not_ready` refusals. In a race or
+  another menu, the join waits for the title.
+- Point 3, the server: take the join only when `server()` is the official one, or accept "no such
+  room".
+
+### What the user must decide or do
+
+- **The licence.** The SDK is Discord's closed binary under Discord's developer terms; the game is
+  GPL-3.0-or-later. The code here only loads it when present, and nothing of Discord's is in the
+  repository (`.gitignore` now names its files). Shipping the DLL in the release zip next to a GPL
+  executable is the copyright holders' call: for example a GPL section 7 additional permission for
+  the Discord SDK, or the player downloading it. `package_release.py` was not changed; it doesn't
+  copy the DLL.
+- **The developer portal**: the Social SDK enabled for the application (its Getting Started form).
+  Rich Presence through the SDK worked here without it, as far as this one try shows. The `logo`
+  art asset is also missing: Discord's answer to `SET_ACTIVITY` (IPC, 2026-10-31) echoed
+  `large_text` but no `large_image`, which it gives back for an asset it knows. So the profile has
+  shown no picture since finding 106; the user needs to upload an asset named `logo` under Rich
+  Presence > Art Assets.
 
 Sources: https://discord.com/developers/docs/social-sdk/index.html (overview),
 https://docs.discord.com/developers/discord-social-sdk/development-guides/managing-game-invites
-(invites, the join callback, the launch command, provisional accounts).
+(invites, the join callback, the launch command, provisional accounts),
+https://docs.discord.com/developers/discord-social-sdk/development-guides/setting-rich-presence
+(presence without authentication, timestamps, buttons),
+https://docs.discord.com/developers/discord-social-sdk/getting-started/using-c++ (the files, the C
+API under the C++ wrapper, RunCallbacks), and the SDK's own `cdiscord.h` and `discordpp.h`.
 
 Not done:
 - **The room's own state** (waiting, the countdown to the start): `NetLobby.countdown_ms` has it, but
@@ -166,8 +221,14 @@ Not done:
   through `dhd_presence_set`.
 - `presence/src/lib.rs`: `RIDERS`, `rider_name`, `join_secret`, `ASK_TO_JOIN`, `REFRESH`; the
   `Payload` party and join; the new room and race lines; the clock's runs; the pacer's refresh.
-- `presence/src/worker.rs`: `party` and `secrets` in the activity; the party in the log line.
-- `presence/src/tests.rs`: 11 tests (8 before).
+- `presence/src/worker.rs`: `party` (with its id) and `secrets` in the activity; the party in the log
+  line; `run_sdk`, chosen at start when the SDK's library is beside the game.
+- `presence/src/sdk.rs` (new): the Social SDK through its C API, loaded at run time.
+- `presence/src/lib.rs`, `c.rs`, `dhd_presence.h`: `party_id`, `join_code`, `joined`, `take_join`,
+  `dhd_presence_take_join`.
+- `presence/Cargo.toml`, `port/render/Cargo.lock`: libloading =0.8.9 (one lock line).
+- `.gitignore`: the SDK's files.
+- `presence/src/tests.rs`: 12 tests (8 before), and 2 by hand against a running Discord.
 
 ## Checks (2026-10-30)
 
@@ -180,6 +241,16 @@ Not done:
 - `clang -fsyntax-only -Wall -Wextra` on `port/hle/presence.c`: clean. The changed
   `host_service_presence` compiled against the real `host_api.h` and `dhd_presence.h`, with
   `_Static_assert(sizeof(HostPresence) == 56)`, in a scratch file (host.c itself needs SDL's headers).
+- 2026-10-31, with the SDK: 12 passed, 0 failed, 2 ignored (the live ones). `cargo check` for
+  `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` and `aarch64-linux-android`: clean. Against the
+  Discord running on this PC (`\\.\pipe\discord-ipc-0`), each showing a public room for 5 s and then
+  clearing it:
+  - `the_sdk_against_discord` (SDK 1.10.19337's DLL, from outside the repository): the first try was refused for
+    the missing party id (above); after `party_id`: `update: Some(Ok(()))`, passed;
+  - `the_ipc_against_discord`: Discord's answer had `"party":{"id":"dhd-199393b983dbf5ad","size":[3,6]}`,
+    `"state":"Room K7M2QX"`, `"details":"Online room: Alpine MX"`, both buttons, the start time, and
+    no `large_image` (the missing asset); passed.
+  The profile itself was not looked at.
 - **Not run:** clippy (not installed for the 1.97.1 toolchain here); `build_wasm.py`,
   `build_host64.py`, `package_release.py` (kept off this machine while another build ran). The core
   must be rebuilt with the host because the struct grew. No game run and no Discord: so the rider

@@ -213,8 +213,11 @@ name's rule is the crate's too (the launcher, and the online menu through the sa
 rider and place (its time starting again on TRY AGAIN), the career, an online room with its track and
 Discord's party size ("Room K7M2QX (3 of 6)"), or an online race, through Discord's local IPC
 (`dhd_presence` in the Rust library, no SDK; the core sends its state through
-`host_service_presence`; refreshed every minute so a restarted Discord gets it back). Ask to Join is
-designed and its presence half written but off (finding 121: the game can't take a join yet). Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
+`host_service_presence`; refreshed every minute so a restarted Discord gets it back), or through
+Discord's Social SDK when its library (`discord_partner_sdk.dll`, Discord's, never committed) sits
+beside the game. Ask to Join is designed, with its presence half and the SDK's join callback
+written, but off (finding 121: the game can't take a join yet; shipping the SDK is a licence
+decision). Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
 race room) share one centred layer in the game's popup style (`menu_page.c`), and the mouse works
 in them and in the game's own popups: hover selects, left click X, right click back, the wheel
 scrolls or changes values (finding 092; the shell's own menus are not bridged yet).

@@ -227,6 +227,7 @@ version = "1.0.0"
 dependencies = [
  "dhd_settings",
  "discord-rich-presence",
+ "libloading",
  "serde_json",
 ]
 

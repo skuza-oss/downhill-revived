@@ -57,7 +57,13 @@ fn public_and_private_rooms() {
     let p = payload(&public, 0).unwrap();
     assert_eq!((p.details.as_str(), p.state.as_deref()), ("Online room: Alpine MX", Some("Room K7M2QX")));
     assert_eq!(p.party, Some([3, 6]));
-    assert_eq!(json(&p)["party"], serde_json::json!({"size": [3, 6]}));
+    assert_eq!(json(&p)["party"]["size"], serde_json::json!([3, 6]));
+    // Discord refuses a party size without an id of 2 to 128 characters: this session's token, the
+    // same for every update, and nothing of the room's
+    let id = json(&p)["party"]["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("dhd-") && id.len() == 20, "{id}");
+    assert!(!id.contains("K7M2QX"));
+    assert_eq!(party_id(None), id);
     // a private room comes without its code: the riders, and the code nowhere in the activity
     let private = State { room: String::new(), ..public.clone() };
     assert_eq!(lines(&private), pair("Online room: Alpine MX", Some("Private room")));
@@ -90,7 +96,7 @@ fn the_join_secret() {
     assert_eq!(p.join.is_some(), ASK_TO_JOIN);
     if !ASK_TO_JOIN {
         assert!(json(&p).get("secrets").is_none());
-        assert!(json(&p)["party"].get("id").is_none());
+        assert!(!json(&p)["party"]["id"].as_str().unwrap().contains("K7M2QX"));
     }
     // with a secret, the activity carries it with the party's id (what Ask to Join needs)
     let joinable = Payload { join: Some("dhd-room-1:K7M2QX".into()), ..p };
@@ -234,4 +240,84 @@ fn the_activity_discord_gets() {
     // no second line: no state key at all (Discord refuses an empty one)
     let menus = Payload { details: "In menus".into(), ..Payload::default() };
     assert!(serde_json::to_value(worker::activity(&menus)).unwrap().get("state").is_none());
+}
+
+#[test]
+fn a_join_from_discord() {
+    // only this game's secrets, with a code the server could have made
+    assert_eq!(join_code("dhd-room-1:K7M2QX"), Some("K7M2QX"));
+    assert_eq!(join_code("dhd-room-1:K7M2Q"), None);
+    assert_eq!(join_code("dhd-room-1:K7M2QXX"), None);
+    assert_eq!(join_code("dhd-room-1:K7M2Q1"), None, "1 is not a code letter");
+    assert_eq!(join_code("dhd-room-1:k7m2qx"), None);
+    assert_eq!(join_code("dhd-room-2:K7M2QX"), None);
+    assert_eq!(join_code("K7M2QX"), None);
+    assert_eq!(join_code(&join_secret(&room("K7M2QX", 3, 6)).unwrap()), Some("K7M2QX"));
+    // the code waits for the game, which takes it once
+    let lines = std::cell::RefCell::new(Vec::new());
+    let log = |line: &str| lines.borrow_mut().push(line.to_string());
+    joined("something else", &log);
+    assert_eq!(take_join(), None);
+    joined("dhd-room-1:K7M2QX", &log);
+    assert_eq!(take_join().as_deref(), Some("K7M2QX"));
+    assert_eq!(take_join(), None);
+    assert_eq!(lines.borrow().len(), 2);
+    // the C side: too small a buffer takes nothing
+    joined("dhd-room-1:ABC234", &log);
+    let mut out = [0 as std::ffi::c_char; 8];
+    assert_eq!(unsafe { c::dhd_presence_take_join(out.as_mut_ptr(), 6) }, 0);
+    assert_eq!(unsafe { c::dhd_presence_take_join(out.as_mut_ptr(), 8) }, 1);
+    assert_eq!(unsafe { std::ffi::CStr::from_ptr(out.as_ptr()) }.to_str(), Ok("ABC234"));
+    assert_eq!(unsafe { c::dhd_presence_take_join(out.as_mut_ptr(), 8) }, 0);
+}
+
+/// Against the real SDK and a running Discord, by hand (finding 121):
+/// DHD_DISCORD_SDK_TEST=<path of discord_partner_sdk.dll> cargo test -p dhd_presence -- --ignored --nocapture
+/// Shows a room for a few seconds on this PC's Discord profile, then clears it.
+#[test]
+#[ignore]
+fn the_sdk_against_discord() {
+    let path = std::env::var("DHD_DISCORD_SDK_TEST").expect("DHD_DISCORD_SDK_TEST: the SDK library's path");
+    let mut sdk = sdk::Client::load(std::path::Path::new(&path), false, None).expect("the SDK loads");
+    let p = payload(&State { rider: 1, ..room("K7M2QX", 3, 6) }, 1_700_000_000_000).unwrap();
+    sdk.set(Some(&p));
+    let mut outcome = None;
+    for _ in 0..100 {
+        sdk.run_callbacks();
+        let e = sdk.take_events();
+        for line in e.lines {
+            println!("sdk: {line}");
+        }
+        if e.update.is_some() {
+            outcome = e.update;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    println!("update: {outcome:?}");
+    std::thread::sleep(Duration::from_secs(5));
+    sdk.set(None);
+    for _ in 0..10 {
+        sdk.run_callbacks();
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(outcome, Some(Ok(())));
+}
+
+/// The same through the plain IPC (no SDK), by hand: cargo test -p dhd_presence -- --ignored --nocapture
+#[test]
+#[ignore]
+fn the_ipc_against_discord() {
+    use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
+    let mut client = DiscordIpcClient::new(APP_ID);
+    client.connect().expect("Discord is running");
+    let p = payload(&room("K7M2QX", 3, 6), 1_700_000_000_000).unwrap();
+    client.set_activity(worker::activity(&p)).unwrap();
+    let (_, answer) = client.recv().unwrap();
+    println!("answer: {answer}");
+    std::thread::sleep(Duration::from_secs(5));
+    client.clear_activity().unwrap();
+    let _ = client.recv();
+    let _ = client.close();
+    assert_ne!(answer["evt"], "ERROR", "{answer}");
 }
