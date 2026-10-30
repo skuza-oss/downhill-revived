@@ -460,6 +460,46 @@ static int quick_retry(const NetLobby *l)
                           !strcmp(l->error_code, "room_not_found"));
 }
 
+/* ---- DHD_NET_ROOM=CODE (finding 128): a link's or a launcher's room ----
+   Read once at the start. The main menu opens ONLINE by itself (port_online_resume) and ONLINE
+   joins that room as soon as the disc's check allows. (DHD_NET_JOIN is the tools' scripted
+   flow in online.c, which skips the menus: a different thing.) */
+static char join_code[CODE_LENGTH + 1];
+static int join_state;  /* 0 not read, 1 open ONLINE, 2 join from ONLINE, 3 done or none */
+
+static void join_read(void)
+{
+    if (join_state) return;
+    const char *v = getenv("DHD_NET_ROOM");
+    int n = 0;
+    join_state = 3;
+    if (!v || !*v) return;
+    for (; v[n] && n < CODE_LENGTH + 1; n++) {
+        char up = (char)(v[n] >= 'a' && v[n] <= 'z' ? v[n] - 32 : v[n]);
+        if (n == CODE_LENGTH || !strchr(code_letters, up)) break;
+        join_code[n] = up;
+    }
+    join_code[n < CODE_LENGTH ? 0 : CODE_LENGTH] = 0;
+    if (n != CODE_LENGTH || v[n]) {
+        hle_log("online menu: DHD_NET_ROOM=%s can't be a join code (6 letters and digits)\n", v);
+        return;
+    }
+    join_state = 1;
+    hle_log("online menu: DHD_NET_ROOM: room %s, joined from ONLINE\n", join_code);
+}
+
+/* On ONLINE, each frame: join that room once the disc's check has an answer. */
+static void join_poll(void)
+{
+    if (join_state != 2 || connecting) return;
+    if (iso_state <= 1) {
+        snprintf(status, sizeof status, "Joining room %s: checking the disc first...", join_code);
+        return;
+    }
+    join_state = 3;
+    status[0] = 0;
+    enter_room(0, join_code);
+}
 
 static void go(int to)
 {
@@ -1549,6 +1589,7 @@ static void page_update(MenuPage *p, int cursor)
         p->footer = status[0] ? status : NULL;
         return;
     }
+    if (screen == HOME) join_poll(), p->footer = status[0] ? status : NULL;
     switch (screen) {
     case HOME:
         if (disc_note() != disc_shown) {  /* the check has ended: its lines under the rows */
@@ -1648,6 +1689,7 @@ static void page_back(MenuPage *p)
         host_service_net_leave();
         reset_selection();
         connecting = quick = 0;
+        if (join_state == 2) join_state = 3;
         status[0] = 0;
         return;
     }
@@ -1714,6 +1756,8 @@ int port_online_menu(void)
     race = 0;
     in_shell = 0;
     connecting = quick = 0;
+    join_read();
+    if (join_state == 1) join_state = 2;  /* DHD_NET_ROOM, ONLINE chosen by hand first */
     run_page();
     if (!race) { host_service_net_leave(); reset_selection(); connecting = 0; }
     return race;
@@ -1724,10 +1768,13 @@ int port_online_menu(void)
 int port_online_resume(void)
 {
     void *animation = (void *)(uintptr_t)(0x08000000u + 0x4C6370);
-    if (!resume_home) return 0;
+    join_read();
+    if (!resume_home && join_state != 1) return 0;
     func_00203590(animation, 0x2330, 0, 1);
     float t = func_00203C28(animation);
-    return t <= 0.0f || t >= 1.0f;
+    if (!(t <= 0.0f || t >= 1.0f)) return 0;
+    if (join_state == 1) join_state = 2;  /* DHD_NET_ROOM: ONLINE joins it (join_poll) */
+    return 1;
 }
 
 /* The main menu's labels (patched func_001ED5B8): its table has three; the fourth is ONLINE. */

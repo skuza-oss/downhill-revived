@@ -153,7 +153,9 @@ async function start(source) {
     else if (m.type === 'error') { addLog('ERROR ' + m.text); status.textContent = 'stopped: ' + m.text.split('\n')[0];
       openLog(); }
     else if (m.type === 'running') status.textContent = 'running';
-    else if (m.type === 'clipboard') navigator.clipboard?.writeText(m.text).catch(e => addLog(`clipboard: ${e.message}`));
+    else if (m.type === 'clipboard') { navigator.clipboard?.writeText(m.text).catch(e => addLog(`clipboard: ${e.message}`));
+      if (JOIN_CODE.test(m.text)) invite(m.text); }  // the player copied their room's code (Circle)
+    else if (m.type === 'room') invite(m.code, m.inRoom);
     else if (m.type === 'exit') status.textContent = `game exited (${m.status})`;
     else if (m.type === 'status') { status.textContent = `field ${m.field}  ${m.fps.toFixed(1)} fields/s  picture ${m.size}  draws ${m.draws}  batches ${m.dispatches}  readbacks ${m.reads}  sound ${m.sound} s${m.riding ? '  riding' : ''}`;
       document.title = `DHD ${m.fps.toFixed(1)} fps (field ${m.field})`; window.dhdStatus = m; (window.dhdHistory ??= []).push([m.field, +m.fps.toFixed(2), m.draws]); }
@@ -173,10 +175,29 @@ addEventListener('drop', e => { e.preventDefault(); document.body.classList.remo
   if (running || !e.dataTransfer?.files.length) return;
   $('iso').files = e.dataTransfer.files; $('iso').onchange(); });
 $('start').onclick = () => start({ file: $('iso').files[0], env });
+// An invite (finding 128): index.html?room=K7M2QX opens ONLINE after Start and joins that room
+// (DHD_NET_ROOM, port/hle/online_menu.c). The menu's "Copy invite link" makes such a link for the
+// room the player is in: a public room's code comes with the game's presence (worker.js), a
+// private room's only once the player has copied it in the room (Circle), as the game keeps it.
+const JOIN_CODE = /^[2-9A-HJKMNP-Z]{6}$/;
+let inviteCode = '';
+function invite(code, inRoom = true) {
+  if (code) inviteCode = code; else if (!inRoom) inviteCode = '';
+  $('invite').hidden = !inviteCode;
+}
+$('invite').onclick = () => {
+  const link = `${location.origin}${location.pathname}?room=${inviteCode}`;
+  navigator.clipboard?.writeText(link).then(() => { $('invite').textContent = 'Invite link copied'; },
+    e => addLog(`clipboard: ${e.message}`));
+  setTimeout(() => { $('invite').textContent = 'Copy invite link'; }, 1500);
+};
 // Test hook: serve.mjs --iso <path> serves that file as /test-iso to localhost only, and
 // ?iso=test starts with it at once (headless checks; the ISO never leaves the machine).
 // ?env.NAME=value sets a DHD_* variable for the game (tests: DHD_NAV, DHD_RACE_PAD scripts).
 const env = Object.fromEntries([...params].filter(([k]) => k.startsWith('env.')).map(([k, v]) => [k.slice(4), v]));
+const room = (params.get('room') || '').toUpperCase();
+if (JOIN_CODE.test(room) && !('DHD_NET_ROOM' in env)) env.DHD_NET_ROOM = room;
+else if (room) addLog(`?room=${room}: not a join code (6 letters and digits)`);
 // Tests read and save no settings unless they name them (?env.DHD_SETTINGS=<name>), as the tools'
 // DHD_SETTINGS=none natively.
 if (params.get('iso') === 'test') start({ isoUrl: '/test-iso', env: { DHD_SETTINGS: 'none', ...env } });

@@ -351,5 +351,7 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   racer's colour and say AWAY for a dropped racer (finding 125).
 - Quick Race on ONLINE (finding 128): joins the fullest open public room of the same build, else
   creates a public room and waits; not yet tried in the game.
+  `DHD_NET_ROOM=CODE` opens ONLINE and joins that room; in the browser `?room=CODE`, and the
+  page menu's Copy invite link (finding 128).
 - Tests: `port/net/build_tests.py` (unit and loopback), the server's own tests (`npm test`),
   `port/tools/online_race.py` (two local games through a relay, optionally `nettool` bots).

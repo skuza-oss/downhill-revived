@@ -22,8 +22,43 @@ the client changed: no new message, no server change.
 ONLINE's rows have names now (`HOME_NAME` ... `HOME_UPDATE`) in place of their numbers, since
 the new row moves the ones below it.
 
+## Joining a room from a link: DHD_NET_ROOM
+
+`DHD_NET_ROOM=K7M2QX` in the game's environment, read once at the start (online_menu.c
+`join_read`; lower case is taken, anything but a join code is logged and ignored):
+
+- The main menu opens ONLINE by itself, through the same hook that reopens it after a room
+  closes (`port_online_resume`, once the title's camera has settled), or ONLINE is chosen by hand
+  first; either way ONLINE then joins that room.
+- The join waits for the disc's online check (the footer: "Joining room K7M2QX: checking the
+  disc first..."), then goes as Join With A Code does, with the same refusals on ONLINE (a full
+  or started room, a different build). Triangle gives it up. It is tried once.
+
+The name `DHD_NET_JOIN` was already taken: it is the tools' scripted flow in online.c
+(`online_race.py`, nettool tests), which skips the menus and makes the race by itself.
+
+### In the browser
+
+`index.html?room=K7M2QX` puts `DHD_NET_ROOM` into the game's environment (`main.js`, next to
+the `?env.NAME` variables, which win if both name it): the player picks their ISO, presses
+Start, and the game goes to ONLINE and into the room. A `?room=` that is not a join code is said
+in the log and ignored.
+
+The page's menu (`) has **Copy invite link** while the player is in a room: the page's address
+with `?room=CODE`. The code reaches the page two ways, neither new to the game:
+
+- a public room's code comes with the game's presence (`host_service_presence`, finding 106),
+  which the worker now reads instead of ignoring it, and passes on as a `room` message only when
+  it changes;
+- a private room's code never leaves the core by itself (presence.c's rule), so the page only
+  learns it when the player copies it in the room (Circle, the existing `clipboard` message).
+
+Leaving the room's presence (menus, a race offline) hides the button again.
+
 ## Checks
 
 - `clang -fsyntax-only` (wasm32-wasip1, the module's flags) on online_menu.c: no new warnings.
-- Not built or run in the game (the core is the main session's build). To try: two games on a
-  local server, the first Quick Race creates a public room, the second's joins it.
+- `node --check` on main.js and worker.js.
+- Not built or run in the game or the browser page (`build_wasm.py`, `web/build.py` are the main
+  session's). To try: two games on a local server, the first Quick Race creates a public room,
+  the second's joins it; then `index.html?room=<code>` in a second browser.

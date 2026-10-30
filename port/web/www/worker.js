@@ -154,6 +154,7 @@ async function start(m) {
   // (the arrows still move the pad picker), and a key typed there presses nothing until let go.
   const ARROWS = new Set([0x25, 0x26, 0x27, 0x28]), blocked = new Uint8Array(256);
   let textActive = false;
+  let presenceRoom = '', presenceIn = false;  // the last room told to the page (host_service_presence)
   const typedClear = () => Atomics.store(typed, 1, Atomics.load(typed, 0));
   function textEdit(at, capacity, allowedAt) {
     const allowed = str(allowedAt), out = span(at, capacity); let n = out.indexOf(0); if (n < 0) n = capacity - 1;
@@ -306,6 +307,12 @@ async function start(m) {
     // The online chat's Y (text_input.c): held, outside a text field. main.js keeps keys by place.
     host_service_key_held: k => +(k > 0 && k < 256 && !textActive && Atomics.load(keys, k) !== 0),
     host_service_clipboard_set: at => { post('clipboard', { text: str(at) }); return 1; },  // the page writes it (main.js)
+    // host_api.h's HostPresence (kind, place, riders, members, max_members, track[24], room[8]):
+    // only the room goes to the page, for its invite link (main.js); a private room's code is
+    // empty there, as everywhere outside the core. Sent when it changes.
+    host_service_presence: at => { if (bytes.buffer !== memory.buffer) refresh();
+      const kind = dv.getInt32(at, true), inRoom = kind === 4 || kind === 5, code = inRoom ? str(at + 44) : '';
+      if (code !== presenceRoom || inRoom !== presenceIn) { presenceRoom = code; presenceIn = inRoom; post('room', { code, inRoom }); } },
     // Online (net.js: port/net's client as dhd_net.wasm under the worker's WebSocket and fetch).
     ...net,
     host_pacing_period: () => 1 / 60,
