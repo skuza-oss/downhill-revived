@@ -107,6 +107,18 @@ pub const SETTINGS: &[Setting] = &[
                                c("240", "240 fps"), c("monitor", "Monitor")], "60", "60"),
     switch("vsync", "DHD_VSYNC", SWITCH, "1", "0"),
     switch("perf_counter", "DHD_PERF_COUNTER", SWITCH, "0", "0"),
+    // Voice chat in a race (port/host/voice.c, port/hle/online.c, finding 131): on or off; push to
+    // talk (voice_key held, a letter) or an open microphone; the others' level and this
+    // microphone's; the hearing range in metres; the bitrate in bits a second; the microphone
+    // (empty: the system's default; else the first recording device whose name holds it).
+    switch("voice", "DHD_VOICE", SWITCH, "1", "1"),
+    choice("voice_mode", "DHD_VOICE_MODE", &[c("ptt", "Push to Talk"), c("open", "Open Mic")], "ptt", "ptt"),
+    choice("voice_volume", "DHD_VOICE_VOLUME", &[c("0", "0%"), c("20", "20%"), c("40", "40%"), c("60", "60%"), c("80", "80%"), c("100", "100%")], "100", "100"),
+    choice("voice_mic", "DHD_VOICE_MIC", &[c("50", "50%"), c("75", "75%"), c("100", "100%"), c("150", "150%"), c("200", "200%")], "100", "100"),
+    choice("voice_range", "DHD_VOICE_RANGE", &[c("25", "25 m"), c("50", "50 m"), c("100", "100 m"), c("200", "200 m")], "50", "50"),
+    choice("voice_bitrate", "DHD_VOICE_BITRATE", &[c("8000", "8 kbps"), c("16000", "16 kbps"), c("24000", "24 kbps"), c("32000", "32 kbps"), c("48000", "48 kbps"), c("64000", "64 kbps")], "24000", "24000"),
+    text("voice_key", "DHD_VOICE_KEY"),
+    text("voice_device", "DHD_VOICE_DEVICE"),
     switch("unlock_all", "DHD_UNLOCK_ALL", SWITCH, "0", "0"),
     text("memory_card", "DHD_MEMCARD"),
     text("sound_latency_ms", "DHD_SND_LATENCY_MS"),

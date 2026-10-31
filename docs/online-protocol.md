@@ -210,6 +210,17 @@ with the sender's race time in ms since GO, not its frame or tick count, about 2
 rate; the receiver puts it on its own race clock (finding 114). Finish times in EVENT frames stay
 in race ticks (1/60 s of game time), the same at every rate. The server reads none of this.
 
+EVENT payloads start `[version 2, kind]`. A client drops a kind it doesn't know (older clients
+take kind 1, a hit, alone), so new kinds need no server change. Two carry what the room can't on a
+server without the `chat` message (the official one), in the race only:
+
+| Kind | Payload after `[2, kind]` | Use |
+|---|---|---|
+| 10 `EVENT_CHAT` | u8 length (1-120), the text | A race chat line (finding 125). The name shown is the stamped `slot`'s, never sent. At most 5 in 10 s a sender: more are dropped on both sides. The sender shows its own line (no echo). |
+| 11 `EVENT_VOICE` | u16 sequence, an Opus packet (at most 400 bytes) | 20 ms of voice (finding 131): 48 kHz mono, VOIP, 8-64 kbps. The receiver orders by sequence, conceals a gap, drops late, repeated, oversized or flooding frames (over 60 a second), and decides by its own copy of the riders' positions who is heard (proximity, groups). The server relays it to the whole race. |
+
+(Kind 9 is reserved for the taunts branch's `EVENT_TAUNT`.)
+
 ### Chat
 
 Any member sends `chat` in the room or during a race; the server sends it to every member, the

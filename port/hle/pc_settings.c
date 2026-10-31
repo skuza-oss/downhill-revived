@@ -32,7 +32,7 @@ void gs_window_apply(void);           /* port/gs/present.c */
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
-enum { ROWS = 14, MAX_CHOICES = 16 };
+enum { ROWS = 18, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -45,7 +45,8 @@ typedef struct {
     int selected, running, opened;    /* choice indexes; -1: a value not in the list */
 } Row;
 
-enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, TEXTURES, FONT, RATE, VSYNC, COUNTER, UNLOCK };
+enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, TEXTURES, FONT, RATE, VSYNC, COUNTER,
+       VOICE, VOICE_MODE, VOICE_VOLUME, VOICE_RANGE, UNLOCK };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 1},  /* the native renderer's DHD_SCALE, at once (finding 124) */
     {"Display:", "window", 1},
@@ -60,6 +61,11 @@ static Row rows[ROWS] = {
     {"Frame Rate:", "fps", 1},  /* fps.c: at once above 60, else at the next screen */
     {"V-Sync:", "vsync", 1},  /* no tearing (port/gs/gpu_rust.c), at once (finding 124) */
     {"FPS & Ping:", "perf_counter", 1},
+    /* voice chat (port/host/voice.c reads them each second, online.c the range: at once; finding 131) */
+    {"Voice Chat:", "voice", 1},
+    {"Voice Mode:", "voice_mode", 1},
+    {"Voice Volume:", "voice_volume", 1},
+    {"Voice Range:", "voice_range", 1},
     {"Unlock All:", "unlock_all", 1},  /* port_unlock_all */
 };
 static char monitor_size[24];
@@ -257,6 +263,9 @@ static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
     } else if (r && r->selected != r->running) p->footer = restart_footer;
     else if (r == &rows[RATE] && port_fps_pending()) p->footer = "Applies from the next screen";
     else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->footer = "No pack: see texture_pack in dhd.ini";
+    else if (r == &rows[VOICE] || r == &rows[VOICE_MODE])
+        p->footer = "In a race: hold V to talk (voice_key in dhd.ini); /MUTE NAME in chat";
+    else if (r == &rows[VOICE_RANGE]) p->footer = "How far away other riders are heard";
 }
 
 static void page_back(MenuPage *p)  /* Triangle: the values the page opened with, close */

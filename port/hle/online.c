@@ -31,8 +31,10 @@
 #include "../net/net.h"
 #include "../include/version.h"
 #include "../include/fps.h"
+#include "voice_rules.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -272,7 +274,8 @@ enum {
     EVENT_FINISH = 6, EVENT_RESULTS = 7,  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
     /* 9: the taunts branch's EVENT_TAUNT. 10: [length, text]: a race chat line (finding 125), so chat
        works on a server without a chat message; older clients drop it (puppet.c takes EVENT_HIT alone) */
-    EVENT_CHAT = 10
+    EVENT_CHAT = 10,
+    EVENT_VOICE = 11 /* [sequence 16 bits, Opus]: voice chat (finding 131, port/host/voice.c's VOICE_EVENT) */
 };
 enum { SNAPSHOT_TICKS = 3 };  /* a snapshot every 3 race ticks: 20 a second at any frame rate */
 enum { NRIDERS = 10, START_LEAD_MS = 1500 };
@@ -605,6 +608,8 @@ static void go_skew(int player)
 static void read_finish(int global, int time);
 static void read_results(const uint8_t *in, int n);
 static void race_chat_heard(int sender, const uint8_t *in, int n);
+static int voice_command(const char *text);
+static void voice_step(void);
 
 /* The relayed frames: snapshots to the puppets, events (a hit, the start, a finish, the results). */
 static void receive_frames(void)
@@ -653,6 +658,10 @@ static void receive_frames(void)
             break;
         case EVENT_CHAT:
             race_chat_heard(sender, e, n - 2);
+            break;
+        case EVENT_VOICE:   /* to the host's decoder, as the slot the server stamped */
+            if (sender < on.nslots && sender != on.local_slot && !on.gone[sender])
+                host_service_voice_frame(sender, GADDR(e), n - 2);
             break;
         default:  /* EVENT_HIT */
             hle_puppet_event(sender, e, n - 2);
@@ -936,11 +945,13 @@ static const char *rider_label(int global, char *out, int size);
 int hle_online_watch_hud(void) { return online_mode() && from_menu && on.end_held && on.watched; }
 
 static void race_chat_draw(int view);
+static void voice_draw(int view);
 
 void hle_online_hud(int view)
 {
     if (online_mode()) {
         race_chat_draw(view);
+        voice_draw(view);
         race_banner(view);
     }
     if (online_mode() && from_menu && on.end_held && on.watch_slot) {
@@ -1366,7 +1377,8 @@ void hle_online_names(void *rider, int view)
         if (away) alpha /= 2;
         if (alpha < 8) continue;
         char label[48];
-        snprintf(label, sizeof label, away ? "%s - AWAY" : "%s", on.name[global]);
+        int talking = host_service_voice_state(VOICE_STATE_TALKING, global);  /* voice chat (finding 131) */
+        snprintf(label, sizeof label, away ? "%s - AWAY" : talking ? "%s - TALKING" : "%s", on.name[global]);
         func_0020FB80(0, 320 * size / 100, 240 * size / 100, -102 * size / 100, -24 * size / 100);
         int half_width = (func_0020F860(0, label) + 31) / 32;
         if (local_x - half_width * port_fov_x < 1 || local_x + half_width * port_fov_x >= w - 1 || y < 1) continue;
@@ -1445,6 +1457,7 @@ static int chat_allowed(int slot)
    server's chat message. 1 when it went. */
 static int race_chat_say(const char *text)
 {
+    if (voice_command(text)) return 1;
     if (!on.started || !host_service_net_racing()) return host_service_net_send_chat(GADDR(text));
     if (!chat_allowed(NET_MAX_SLOTS)) {
         race_chat_add("", "TOO MANY LINES: WAIT A MOMENT", -1, 0);
@@ -1585,6 +1598,124 @@ static void race_chat_draw(int view)
     func_0020F420(0, view);  /* pen 0's own colour again, for the HUD's text after this */
 }
 
+/* ---- voice chat (finding 131, port/host/voice.c) ----
+   The host captures, encodes, sends, decodes and mixes; here each frame decides who is heard and
+   how, from this PC's view of the race (the server relays a race's frames to all of it: it can't
+   choose by distance, as it has no positions):
+   - racers hear racers within the voice range (VOICE_RANGE_M, DHD_VOICE_RANGE metres; a race's
+     world is about UNITS_PER_METRE units a metre: a rider at 38 mph moves about 91 units a second),
+     full near (a third of the range), quieter to VOICE_EDGE at the range; one heard stays heard
+     until VOICE_HYSTERESIS times the range, so a voice at the edge doesn't cut in and out;
+   - finished players (watching the rest) hear each other at full level, wherever they are, and
+     neither group hears the other;
+   - a player who left, or this PC's own voice, is never heard;
+   - the pan is the side of this player's view the speaker is on (behind it, the middle).
+   "/MUTE NAME" and "/UNMUTE NAME" in chat mute a player for this PC (race_chat_say). */
+enum { VOICE_RANGE_M = 50 };
+static struct { int heard[NET_MAX_SLOTS], active; } voice;
+
+static float voice_range_units(void)
+{
+    static HleEnv range_env;
+    const char *v = hle_env(&range_env, "DHD_VOICE_RANGE");
+    int m = v && *v ? atoi(v) : VOICE_RANGE_M;
+    if (m < 5) m = 5;
+    if (m > 1000) m = 1000;
+    return m * VOICE_UNITS_PER_METRE;
+}
+
+static void voice_step(void)
+{
+    int racing = online_mode() && on.started && EE32(MENU) == LOAD_MENU && on.setup_done;
+    if (!racing) {
+        if (voice.active) host_service_voice_drop(-1), memset(&voice, 0, sizeof voice);
+        return;
+    }
+    voice.active = 1;
+    float range = voice_range_units();
+    uintptr_t mine = (uint32_t)*(int32_t *)(RIDER(0) + 0x792C);
+    int me_done = on.local_slot >= 0 && on.local_slot < NRIDERS && on.finish[on.local_slot] >= 0;
+    int cx, cy, w, h;
+    func_0023D618(0, &cx, &cy);
+    func_0023D650(0, &w, &h);
+    for (int g = 0; g < on.nslots && g < NET_MAX_SLOTS; g++) {
+        float gain = 0, pan = 0;
+        int slot = hle_puppet_local(g);
+        int done = g < NRIDERS && on.finish[g] >= 0, group = voice_group(me_done, done);
+        if (g == on.local_slot || on.gone[g] || slot <= 0 || slot >= hle_online_race_riders() || !group) {
+            voice.heard[g] = 0;
+        } else if (group == 2) {   /* the finished: one group, no distance */
+            voice.heard[g] = 1, gain = 1;
+        } else {
+            uintptr_t theirs = (uint32_t)*(int32_t *)(RIDER(slot) + 0x792C);
+            if (theirs && mine) {
+                float at[4] __attribute__((aligned(16))), me[4], screen[4] __attribute__((aligned(16)));
+                memcpy(at, (void *)(theirs + 0x10), sizeof at);
+                memcpy(me, (void *)(mine + 0x10), sizeof me);
+                float dx = at[0] - me[0], dy = at[1] - me[1], dz = at[2] - me[2], d2 = dx * dx + dy * dy + dz * dz;
+                voice.heard[g] = voice_in_range(d2, range, voice.heard[g]);   /* squared: no root to decide */
+                if (voice.heard[g]) {
+                    gain = voice_gain(sqrtf(d2), range);   /* in the hysteresis band: as at the edge */
+                    func_00222D48(0, at, screen);
+                    if (screen[2] >= 1 && w > 0) {
+                        pan = (screen[0] - cx) / (w / 2.0f);
+                        pan = (pan < -1 ? -1 : pan > 1 ? 1 : pan) * 0.8f;
+                    }
+                }
+            } else voice.heard[g] = 0;
+        }
+        host_service_voice_place(g, (int)(gain * 1000), (int)(pan * 1000));
+    }
+}
+
+/* a starts with b, in any case */
+static int starts_with(const char *a, const char *b)
+{
+    for (; *b; a++, b++)
+        if (toupper((unsigned char)*a) != toupper((unsigned char)*b)) return 0;
+    return 1;
+}
+
+/* "/MUTE NAME" or "/UNMUTE NAME" (any case, a name's start is enough): 1 when the line was one. */
+static int voice_command(const char *text)
+{
+    int mute = starts_with(text, "/MUTE "), unmute = starts_with(text, "/UNMUTE ");
+    if (!mute && !unmute) return 0;
+    const char *who = text + (mute ? 6 : 8);
+    char note[NET_CHAT_TEXT];
+    for (int g = 0; g < on.nslots && g < NET_MAX_SLOTS; g++)
+        if (g != on.local_slot && on.name[g][0] && *who && starts_with(on.name[g], who)) {
+            host_service_voice_mute(g, mute);
+            snprintf(note, sizeof note, "%s %s", on.name[g], mute ? "MUTED" : "UNMUTED");
+            race_chat_add("", note, -1, 0);
+            return 1;
+        }
+    snprintf(note, sizeof note, "NO PLAYER %s", who);
+    race_chat_add("", note, -1, 0);
+    return 1;
+}
+
+/* The microphone in this player's view: MIC while it sends, NO MICROPHONE when the talk key finds
+   none, at the top left under the race's own HUD text. */
+static void voice_draw(int view)
+{
+    if (!host_service_voice_state(VOICE_STATE_ENABLED, 0) || !voice.active) return;
+    int sending = host_service_voice_state(VOICE_STATE_TRANSMITTING, 0);
+    int failed = host_service_voice_state(VOICE_STATE_MIC, 0) < 0 &&
+                 host_service_key_held(host_service_voice_state(VOICE_STATE_KEY, 0));
+    if (!sending && !failed) return;
+    int w, h;
+    func_0023D650(view, &w, &h);
+    if (w <= 0 || h <= 0) w = 512, h = 224;
+    char saved[0x20];
+    memcpy(saved, D_004F3570, sizeof saved);
+    func_0020FB80(0, 205, 154, -73, -26);
+    if (sending) race_chat_line(view, 24, h * 64 / 224, "MIC", 64, 128, 64, 128);
+    else race_chat_line(view, 24, h * 64 / 224, "NO MICROPHONE", 128, 64, 64, 128);
+    memcpy(D_004F3570, saved, sizeof saved);
+    func_0020F420(0, view);
+}
+
 /* ---- cheat codes (finding 117) ----
    func_001E6F58, the human rider's pad reader at rider +0x1420, matches the last presses against
    the code table (D_00272448) and leaves the code's number (1-26) at rider +0x1E3C for one frame;
@@ -1719,6 +1850,7 @@ static void back_to_room(void)
 
 static void race_left(void)
 {
+    host_service_voice_drop(-1);   /* the race's voices go with it */
     int leave = leaving_room || !from_menu;
     leaving_room = 0;
     quit_on_pause = 0;  /* left by the player's own row first: not the next race's first pause */
@@ -1860,6 +1992,7 @@ void pads_begin_field(void)
     }
     if (on.started) state_sync();
     race_chat_step();
+    voice_step();
     if (on.started && EE32(MENU) != LOAD_MENU) race_left();
 }
 

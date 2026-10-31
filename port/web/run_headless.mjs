@@ -140,7 +140,7 @@ host_service_controls_apply
 host_service_movie_prepare host_service_movie_start host_service_movie_audio host_service_graphics_wait host_service_graphics_shutdown
 host_service_gs_vsync host_service_gs_pump_messages host_service_gs_window_title host_service_gs_native_view
 host_service_gs_window_apply host_service_gs_present_options_apply host_service_gs_window_close
-host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence`.split(/\s+/);
+host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence host_service_voice_frame host_service_voice_place host_service_voice_mute host_service_voice_drop host_service_voice_state`.split(/\s+/);
 for(const n of noops)impl[n]=()=>{};
 for(const n of ['host_service_key_held','host_service_net_racing','host_service_net_seconds','host_service_net_server_ms','host_heartbeat_eip','host_service_launcher_open','host_service_presence_join'])impl[n]=()=>0;
 const metadata=JSON.parse(fs.readFileSync(option('--imports',path.join(root,'build/web/imports.json'))));

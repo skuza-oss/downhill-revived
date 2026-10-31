@@ -120,6 +120,10 @@ def host_tests():
     # host_pad_vibrate's preview gate (finding 124): the game's own motor values must not cancel PC
     # SETTINGS' buzz, and switching Vibration off stops at once. Pure logic, no device.
     run('pad-preview', [HLE / 'test_pad_preview.c'])
+    # voice chat (finding 131): voice.c with the real libopus, the jitter queue, mix and rules
+    if testprog.WINDOWS:
+        import test_voice
+        test_voice.main()
 
 
 def main():

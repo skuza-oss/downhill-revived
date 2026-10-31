@@ -272,6 +272,12 @@ def main():
     try:
         # SDL3 and the Rust library first: their checks are quick to fail, the module's C is not
         sdl_lib, sdl_include, sdl_libs = sdl(t, a)
+        # libopus, the voice chat's codec (port/tools/opus.py, finding 131): win-x64 for now; other
+        # targets build port/host/voice.c without it (no voice)
+        opus_lib = opus_include = None
+        if t.windows:
+            import opus
+            opus_lib, opus_include = opus.build()
         report = rust_library(t, work)
         if a.fake:
             wasm = work / 'fake.wasm'
@@ -375,6 +381,8 @@ def main():
                 extra += ['-Dmain=dhd_launcher_main']  # SDL_main (android_main.c) calls it
             if 'libmpeg2/' in rel:
                 extra += ['-I'+str(ROOT/'port/third_party/libmpeg2')]
+            if rel.endswith('host/voice.c') and opus_include:
+                extra += ['-I'+str(Path(opus_include).resolve()), '-DDHD_VOICE=1']
             obj = objdir/(rel.replace('/', '_') + suffix)
             cmd = common + extra + (['/c', source, '/Fo'+str(obj)] if t.windows else [source, '-o', obj])
             # the shared object cache (objcache.py); this output folder is a token
@@ -412,6 +420,8 @@ def main():
                     'dxgi.lib','ole32.lib','shell32.lib','advapi32.lib',
                     'winmm.lib','ws2_32.lib','uuid.lib']
             libs += [str(sdl_lib)] + [x for x in sdl_libs if x not in libs]
+            if opus_lib:
+                libs += [str(Path(opus_lib).resolve())]
             # rustc's list: import libs and /defaultlib:libcmt, which /MT already names; raw-dylib
             # imports (d3d12, dxgi, ...) need no lib. dxguid.lib: gpu_rust.c's IID_IDXGIFactory1 and
             # IID_IDXGIDevice

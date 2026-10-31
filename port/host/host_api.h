@@ -150,6 +150,18 @@ void host_service_gs_capture_request(uint32_t name);
 /* ---- sound output ---- */
 /* The mixer's output format: 48000 Hz, stereo, 16-bit PCM, interleaved. */
 #define HOST_SOUND_RATE 48000
+/* Voice chat (finding 131, port/host/voice.c; port/hle/online.c decides who hears whom): a voice
+   frame from a race slot (the EVENT payload, from its version byte; the slot the server stamped),
+   where each slot is heard (gain and pan in thousandths, 0 gain not heard), a slot muted by this
+   player, a slot's (or, -1, every slot's) waiting packets dropped, and the state for the HUD. */
+enum { VOICE_STATE_ENABLED, VOICE_STATE_TRANSMITTING, VOICE_STATE_MIC /* 1 open, 0 not yet, -1 failed */,
+       VOICE_STATE_LEVEL /* the microphone's peak, 0..1000 */, VOICE_STATE_TALKING /* slot heard lately */,
+       VOICE_STATE_MUTED, VOICE_STATE_KEY /* the push-to-talk key's letter */ };
+void host_service_voice_frame(int slot, uint32_t data, int n);
+void host_service_voice_place(int slot, int gain_permille, int pan_permille);
+void host_service_voice_mute(int slot, int on);
+void host_service_voice_drop(int slot);
+int host_service_voice_state(int field, int slot);
 
 /* Opens the output device once, from the game thread at the first sound tick. Nothing happens
    with DHD_SND_OFF set; the mixer runs either way. */

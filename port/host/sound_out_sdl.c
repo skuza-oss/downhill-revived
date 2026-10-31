@@ -36,6 +36,7 @@
 #include <string.h>
 #include <SDL3/SDL.h>
 #include "host_api.h"
+#include "voice.h"
 #include "../hle/hle.h"
 
 #define SND_RATE HOST_SOUND_RATE
@@ -342,6 +343,7 @@ static void SDLCALL host_callback(void *unused, SDL_AudioStream *stream, int add
         made = need;
     }
     host_frames += made;
+    voice_mix(buf, (int)made);   /* the other players' voices over the game's output (voice.c) */
     SDL_PutAudioStreamData(stream, buf, (int)(made * 4));
 }
 
@@ -375,6 +377,7 @@ static void host_start(void)
             hle_log("989snd: no SDL audio device (%s)\n", SDL_GetError());
         return;
     }
+    voice_open();   /* the voice chat's thread: the microphone, the encoder (voice.c) */
     SDL_ResumeAudioStreamDevice(stream);
     {
         SDL_AudioSpec device;
