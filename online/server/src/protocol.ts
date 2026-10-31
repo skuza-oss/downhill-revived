@@ -189,6 +189,17 @@ export function isByte(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 255;
 }
 
+/**
+ * A player name as a storage key: FNV-1a hex of the trimmed name. The leaderboard keeps one best
+ * per name, so the same rider cannot flood a board with rows under one name.
+ */
+export function nameKey(name: string): string {
+  let h = 0x811c9dc5;
+  const s = name.trim();
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16);
+}
+
 export function isU32(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 0xffff_ffff;
 }

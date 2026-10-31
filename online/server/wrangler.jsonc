@@ -9,7 +9,8 @@
   // The oldest game release that may play online ("X.Y.Z"). Older clients are refused with
   // "A new version is available. Update to play online." Raise it to each new release once that
   // release is published; a self-hosted server can keep an older one.
-  "vars": { "MIN_VERSION": "0.7.3" },
+  // LEADERBOARD_SUBMIT_MAX: how many leaderboard submissions one client may make per minute.
+  "vars": { "MIN_VERSION": "0.7.3", "LEADERBOARD_SUBMIT_MAX": "30" },
   // The official server's address (port/hle/host.c OFFICIAL_SERVER).
   "routes": [{ "pattern": "dhd.skuza.app", "custom_domain": true }],
   // Usage stats (src/room.ts stat): joins and races, no addresses or names. Optional.
@@ -19,11 +20,14 @@
       { "name": "ROOM", "class_name": "Room" },
       { "name": "LOBBIES", "class_name": "LobbyIndex" },
       // Time-trial boards and ghosts, one per track and lap count (src/times.ts, finding 127).
-      { "name": "TIMES", "class_name": "TrackTimes" }
+      { "name": "TIMES", "class_name": "TrackTimes" },
+      // The leaderboards worktree's boards (src/leaderboard.ts).
+      { "name": "LEADERBOARDS", "class_name": "Leaderboard" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Room", "LobbyIndex"] },
-    { "tag": "v2", "new_sqlite_classes": ["TrackTimes"] }
+    { "tag": "v2", "new_sqlite_classes": ["TrackTimes"] },
+    { "tag": "v3", "new_sqlite_classes": ["Leaderboard"] }
   ]
 }
