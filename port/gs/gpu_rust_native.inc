@@ -94,6 +94,57 @@ static void native_present(Native *n)
     }
 }
 
+/* PC SETTINGS > Resolution while the game runs (DHD_SCALE changed; finding 124): the upscaled
+   surfaces (the frame and Z buffers, native_surface_resources' rule) start over at the new scale,
+   as the browser's native_rescale does (gpu_rust_web_native.inc). Rust drops each texture (calling
+   dhdr_native_surface with the other kind starts a surface over; the next picture asks for the
+   right kind again, at the new scale, as it asks for every surface) and the pages they owned come
+   from GS memory again at the next claim, as for a new surface. What only the GPU had drawn there
+   is lost: the game draws its frame again every field, so at most one picture shows the CPU's copy.
+   The exact backend answering the game's reads stays at 1x. */
+static void native_rescale(Native *n)
+{
+    const char *scale = getenv("DHD_SCALE");
+    unsigned setting = 2;
+    if (scale && (!native_stricmp(scale, "window") || !native_stricmp(scale, "match"))) setting = 0;
+    else if (scale && atoi(scale) >= 1) setting = (unsigned)atoi(scale);
+    if (setting > n->scale_limit) setting = n->scale_limit;   /* native_scale_hold's */
+    if (setting == n->scale_setting) return;
+    unsigned count = (unsigned)n->surface_count;
+    uint8_t dropped[NATIVE_SURFACES] = {0};
+    for (unsigned i = 0; i < count; i++) {
+        NativeSurface *s = &n->surfaces[i];
+        if (s->bw < NATIVE_SCALED_BW) continue;   /* 1x at every scale */
+        if (s->texture) {
+            uint32_t size[2];
+            dhdr_native_surface(n->r, i, 1, 64, 64, !s->depth, size);
+        }
+        s->scale = 0; s->size[0] = s->size[1] = 0;
+        s->texture = s->srv = 0;
+        dropped[i] = 1;
+    }
+    for (unsigned page = 0; page < 512; page++) {
+        if (n->owner[page] >= 0 && dropped[n->owner[page]]) n->owner[page] = -1;
+        if (n->top_owner[page] >= 0 && dropped[n->top_owner[page]]) n->top_owner[page] = -1;
+    }
+    n->scale_setting = setting;
+    n->scale = 0;   /* native_picture: the setting, or the window's match */
+    if (setting) fprintf(stderr, "gs native: resolution scale now %u (DHD_SCALE)\n", setting);
+    else fprintf(stderr, "gs native: resolution scale now matching the window (DHD_SCALE)\n");
+}
+
+/* present.c (PC SETTINGS > Resolution): DHD_SCALE read again. The EE thread, so the render thread
+   is held off (context_lock) while the surfaces are dropped; its next picture makes them again
+   (native_prepare_surfaces), at the new scale. */
+void gs_native_scale_apply(Gs *g)
+{
+    Native *n = ((NativeExact *)g->backend)->native;
+    if (!n) return;
+    native_mutex_lock(&n->context_lock);
+    native_rescale(n);
+    native_mutex_unlock(&n->context_lock);
+}
+
 /* A new surface (gs_gpu_surface_reset; context lock held): presents again, configured afresh. */
 static void native_surface_reset(Native *n)
 {

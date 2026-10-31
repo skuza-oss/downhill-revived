@@ -82,6 +82,7 @@ typedef struct Rust {
     struct Native *native;
     int clip_on, clip[4];
     GsWindow window;
+    uint32_t present_flags;       /* the flags the surface was made with (vsync, gs_gpu_surface) */
 } Rust;
 
 /* ---- the device ops (gpu_exact.inc's op_* seam): op_write, op_copy, op_batch, op_record,
@@ -346,9 +347,20 @@ _Static_assert(GS_WINDOW_WIN32 == DHDR_WINDOW_WIN32 && GS_WINDOW_XLIB == DHDR_WI
                GS_WINDOW_WAYLAND == DHDR_WINDOW_WAYLAND && GS_WINDOW_ANDROID == DHDR_WINDOW_ANDROID &&
                GS_WINDOW_METAL_LAYER == DHDR_WINDOW_METAL_LAYER, "gpu.h's window kinds are dhd_render.h's");
 
+/* The surface's present flags. V-Sync (dhd.ini "vsync", PC SETTINGS): no tearing, without waiting
+   where the display allows it (Mailbox, else Fifo; present/surface.rs). Off: pictures go out at
+   once and may tear. DHD_TEARING=0 is the older name for it. Fifo as well when the native renderer
+   waits for vsync (DHD_INTERP). */
+static uint32_t present_flags(const Rust *p)
+{
+    const char *tearing = getenv("DHD_TEARING"), *vsync = getenv("DHD_VSYNC");
+    uint32_t flags = (vsync && atoi(vsync)) || (tearing && !atoi(tearing)) ? DHDR_PRESENT_NO_TEARING : 0;
+    if (p->native && native_waits_for_vsync(p->native)) flags |= DHDR_PRESENT_VSYNC;
+    return flags;
+}
+
 /* A surface on the window (present.c's SDL window: its HWND, X11 or Wayland window, ANativeWindow
-   or CAMetalLayer): frame latency 1, Immediate unless DHD_TEARING=0, else Mailbox, else Fifo; Fifo
-   when the native renderer waits for vsync. */
+   or CAMetalLayer): frame latency 1, the present flags above. */
 int gs_gpu_surface(Gs *g, const GsWindow *window)
 {
     Rust *p = g->backend;
@@ -359,18 +371,26 @@ int gs_gpu_surface(Gs *g, const GsWindow *window)
     w.kind = window->kind;
     w.a = window->a;
     w.b = window->b;
-    /* V-Sync (dhd.ini "vsync", PC SETTINGS): no tearing, without waiting where the display allows
-       it (Mailbox, else Fifo; present/surface.rs). Off: pictures go out at once and may tear.
-       DHD_TEARING=0 is the older name for it. */
-    const char *tearing = getenv("DHD_TEARING"), *vsync = getenv("DHD_VSYNC");
-    uint32_t flags = (vsync && atoi(vsync)) || (tearing && !atoi(tearing)) ? DHDR_PRESENT_NO_TEARING : 0;
-    if (p->native && native_waits_for_vsync(p->native)) flags |= DHDR_PRESENT_VSYNC;
+    uint32_t flags = present_flags(p);
+    p->present_flags = flags;
     p->surface = dhdr_surface_create(&w, flags);
     if (!p->surface) memset(&p->window, 0, sizeof p->window);
     if (p->surface && getenv("DHD_PROFILE"))
         fprintf(stderr, "gs: WebGPU surface (dhd_render), present flags %u, usage %u\n", flags,
                 dhdr_surface_usage(p->surface));
     return p->surface != NULL;
+}
+
+/* PC SETTINGS > V-Sync while the game runs (finding 124): DHD_VSYNC read again and, when the
+   present mode changed, the swap chain remade in it, as on a new window (gs_gpu_surface_reset).
+   The next present configures it. EE thread, between fields. */
+void gs_gpu_vsync_apply(Gs *g)
+{
+    Rust *p = g->backend;
+    if (!p || !p->surface) return;
+    if (present_flags(p) == p->present_flags) return;
+    GsWindow window = p->window;  /* gs_gpu_surface_reset clears p->window before gs_gpu_surface reads it */
+    gs_gpu_surface_reset(g, &window);
 }
 
 /* The surface again on a new window, or none (window NULL): the OS took the old one (Android: the

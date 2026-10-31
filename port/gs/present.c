@@ -385,10 +385,16 @@ void gs_window_apply(void)
     resize_pending = 1;
 }
 
-/* The picture's filter and shape changed (DHD_PRESENT_FILTER, DHD_ASPECT): native renderer only. */
+/* The PC settings page changed something the native renderer follows while the game runs:
+   DHD_PRESENT_FILTER and DHD_ASPECT (the present options), DHD_SCALE (the resolution, whose
+   upscaled surfaces are made over) and DHD_VSYNC (the swap chain's present mode). Native renderer
+   only: the exact one has none of them, its picture is the PS2's. */
 void gs_present_options_apply(void)
 {
-    if (sdl_window && gs_gpu_native(&gs)) gs_native_present_options(&gs);
+    if (!sdl_window || !gs_gpu_native(&gs)) return;
+    gs_native_present_options(&gs);
+    gs_native_scale_apply(&gs);
+    gs_gpu_vsync_apply(&gs);
 }
 
 /* The picture to save: the native renderer's own (upscaled with DHD_SCALE, so its size), else

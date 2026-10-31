@@ -55,6 +55,9 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
 void gs_native_bench(Gs *g, int end);  /* DHD_BENCH window start (0) and end (1) */
 void gs_native_lock(Gs *g, int lock);  /* the render thread's lock (EE thread) */
 void gs_native_present_options(Gs *g);  /* DHD_PRESENT_FILTER and DHD_ASPECT read again */
+void gs_native_scale_apply(Gs *g);  /* DHD_SCALE read again: the upscaled surfaces made over (finding 124) */
+/* DHD_VSYNC read again: the window's swap chain remade in the new present mode (finding 124). */
+void gs_gpu_vsync_apply(Gs *g);
 /* The last field's picture at the renderer's resolution (DHD_SCALE), owned by the renderer. */
 uint32_t *gs_native_picture(Gs *g, unsigned *width, unsigned *height);
 /* The field being recorded shows this RGBA picture instead of the display circuit's (a movie,

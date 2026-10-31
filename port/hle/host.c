@@ -7,6 +7,7 @@
 #include "hle.h"
 #include "timer.h"
 #include "state_trace.h"
+#include "pad_preview.h"
 #include "../include/version.h"
 #include "../runtime/sha256.h"
 
@@ -893,17 +894,22 @@ void host_console_init(void)
 
 /* The DualShock 2's motors (pad.c, scePadSetActDirect): the small one on or off, the large one
    0-255. A pad gets them as its high- and low-frequency motors (every pad with motors, gamepad.c),
-   unless DHD_VIBRATION=0 (dhd.ini "vibration", the PC settings page). Output only: nothing comes
+   unless DHD_VIBRATION=0 (dhd.ini "vibration", the PC settings page). The game asks for them every
+   field, zeros included, so PC SETTINGS' buzz when Vibration is switched on travels as
+   PAD_PREVIEW_BIT | player and wins for its window (pad_preview.h). Output only: nothing comes
    back into the game. */
 void host_pad_vibrate(int port, int light, int heavy)
 {
-    static int last[4] = {-1, -1, -1, -1};
+    static PadPreview pads[4] = {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}};
     const char *setting = getenv("DHD_VIBRATION");
-    if (setting && !atoi(setting)) light = heavy = 0;
-    int key = (light ? 256 : 0) | (heavy & 255);
-    if (port < 0 || port > 3 || key == last[port]) return;
-    last[port] = key;
-    if (gamepad_start()) gamepad_vibrate(port, light, heavy);
+    int on = !(setting && !atoi(setting));            /* DHD_VIBRATION=0: the player turned it off */
+    int preview = (port & PAD_PREVIEW_BIT) != 0;      /* PC SETTINGS' buzz (pc_settings.c) */
+    port &= ~PAD_PREVIEW_BIT;
+    if (port < 0 || port > 3) return;
+    int out_light = 0, out_heavy = 0;
+    if (!pad_preview_step(&pads[port], light, heavy, on, preview, host_wall_seconds(), &out_light, &out_heavy))
+        return;
+    if (gamepad_start()) gamepad_vibrate(port, out_light, out_heavy);
 }
 
 /* The game's controls are in riding mode (D_0029E290, func_00220550): keyboard.c moves the left
