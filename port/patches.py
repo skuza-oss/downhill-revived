@@ -649,6 +649,8 @@ import patches_fps
 patches_fps.add(PATCHES)
 import patches_unlock  # PC SETTINGS Unlock All: the unlock readers (finding 095)
 patches_unlock.add(PATCHES)
+import patches_trackbar  # names beside the track bar's dots (finding 129)
+patches_trackbar.add(PATCHES)
 
 # Online's retail preview flow (finding 065). These hooks return immediately offline.
 _ONLINE_SELECT_BEGIN = r"""

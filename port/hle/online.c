@@ -1172,6 +1172,16 @@ void hle_online_names(void *rider, int view)
     for (int i = 0; drawn && i < 4; i++) func_0020F420(0, i);
 }
 
+/* The track bar's name tags (trackbar.c): the online name of the player who rides race slot
+   (0: this PC's), NULL for a computer rider, a player who left, or offline. */
+const char *hle_online_slot_name(int slot)
+{
+    if (!online_mode() || !on.setup_done) return NULL;
+    int global = hle_puppet_global(slot);
+    if (global < 0 || global >= on.nslots || on.gone[global] || !on.name[global][0]) return NULL;
+    return on.name[global];
+}
+
 /* ---- text chat in the race (finding 125) ----
    On the race screen Y opens a line to type (Enter says it, Esc closes; the controller keeps
    riding meanwhile, and text_input.c keeps the typed keys from the pad), and in the pause menu

@@ -75,7 +75,7 @@ MODULE_UNITS = [
     'hle/iop.c', 'hle/mc.c', 'hle/dma.c', 'hle/graphics.c', 'hle/pad.c', 'hle/menu_page.c',
     'hle/pc_settings.c', 'hle/widescreen.c', 'hle/exit_menu.c', 'hle/puppet.c', 'hle/online.c',
     'hle/online_menu.c', 'hle/autopad.c', 'hle/state_trace.c', 'hle/rate_audit.c', 'hle/sound.c', 'hle/game_options.c',
-    'hle/fps.c', 'hle/keyboard.c', 'hle/vif0.c', 'hle/presence.c', 'runtime/wasi_adapter.c',
+    'hle/fps.c', 'hle/keyboard.c', 'hle/trackbar.c', 'hle/vif0.c', 'hle/presence.c', 'runtime/wasi_adapter.c',
 ]
 MIRROR_DIRS = ['runtime', 'hle', 'include', 'host', 'gs', 'net']
 
