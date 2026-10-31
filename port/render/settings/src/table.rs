@@ -106,6 +106,7 @@ pub const SETTINGS: &[Setting] = &[
     choice("fps", "DHD_FPS", &[c("60", "60 fps"), c("120", "120 fps"), c("144", "144 fps"), c("165", "165 fps"),
                                c("240", "240 fps"), c("monitor", "Monitor")], "60", "60"),
     switch("vsync", "DHD_VSYNC", SWITCH, "1", "0"),
+    switch("perf_counter", "DHD_PERF_COUNTER", SWITCH, "0", "0"),
     switch("unlock_all", "DHD_UNLOCK_ALL", SWITCH, "0", "0"),
     text("memory_card", "DHD_MEMCARD"),
     text("sound_latency_ms", "DHD_SND_LATENCY_MS"),

@@ -20,8 +20,8 @@
 // its graphics threads (a graphics wait, or a call that returns GS state). The VU worker runs that
 // queue and passes the GS's part on to the GS worker. Each vsync queues the picture; graphics.js
 // shows it and leaves its numbers for the status line here.
-import { createVfs } from './vfs.js';
 import { createNet } from './net.js';
+import { createVfs } from './vfs.js';
 import { thunks } from './thunks.js';
 import { createSettings, BROWSER_PC_SETTINGS, RENDERER_LIVE } from './settings.js';
 import { startRenderer, renderImports, definesSharedMemory, shareSafeDecoding, Q, QI, STAT, ENV_SCRATCH } from './graphics_common.js';
@@ -356,6 +356,7 @@ async function start(m) {
       if (due > now + 1) await new Promise(r => setTimeout(r, due - now)); else await yieldTask();
     }),
   };
+  Object.assign(impl, createNet({span, str}));
   const noops = `host_sleep_ms host_wait_wall host_dpi_aware host_callbacks_drain host_frame_registers host_frame_video host_capture_name
 host_pacing_wait host_pacing_handoff host_pacing_input host_callback_heartbeat
 host_sound_open host_sound_reset host_sound_tick host_sound_log_stack snd_host_bench

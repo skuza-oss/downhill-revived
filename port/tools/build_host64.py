@@ -1,6 +1,7 @@
 """Build the game for one platform: the wasm2c module, the native host and the Rust renderer.
 
-    python port/tools/build_host64.py build/wasm/dhd_core.wasm                   # win-x64: dhd64.exe
+    python port/tools/build.py                                                   # the core and the game, in order
+    python port/tools/build_host64.py [build/wasm/dhd_core.wasm]                 # win-x64: dhd64.exe
     python3 port/tools/build_host64.py --target linux-x64 MODULE                 # Linux or WSL: dhd64 (ELF)
     python3 port/tools/build_host64.py --target macos-arm64 MODULE               # a Mac: dhd64 (Mach-O)
     python port/tools/build_host64.py --target android-arm64 MODULE --jobs 2     # libmain.so (finding 091)
@@ -223,6 +224,13 @@ def main():
                      help='optimize with this profile (llvm-profdata merge of the .profraw files)')
     a = p.parse_args()
     t = TARGETS[a.target]
+    if not a.fiber_test and not a.fake and not a.module:
+        # no module named: build_wasm.py's output (port/tools/build.py builds both in order)
+        default = ROOT / 'build' / 'wasm' / 'dhd_core.wasm'
+        if not default.exists():
+            p.error('no module given and no %s: run port/tools/build.py (the core, then the game)'
+                    % default.relative_to(ROOT))
+        a.module = [default]
     if not a.fiber_test and bool(a.module) == a.fake:
         p.error('provide --fake or one .wasm / a set of wasm2c .c files')
     if a.fake and not t.windows:

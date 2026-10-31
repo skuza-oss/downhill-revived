@@ -10,7 +10,7 @@ describe("lobby", () => {
     const bo = await Client.connect(`/v1/rooms/${code.toLowerCase()}`);
     bo.hello("Bo");
     const welcome = await bo.json("welcome");
-    expect(welcome).toMatchObject({ code, host: false, protocol: 1 });
+    expect(welcome).toMatchObject({ code, host: false, protocol: 2 });
     const room = await host.next((f) => typeof f === "string" && JSON.parse(f).members?.length === 2);
     const r = JSON.parse(room as string);
     expect(r.members.map((m: any) => m.name)).toEqual(["Ann", "Bo"]);
@@ -66,7 +66,7 @@ describe("lobby", () => {
   it("refuses clients older than MIN_VERSION with a readable reason, hosts and joiners alike", async () => {
     // A 0.1.0 hello: no clientVersion, version is the exe hash. MIN_VERSION is 0.2.0 here.
     const old = await Client.connect("/v1/rooms/new");
-    old.sendJson({ type: "hello", protocol: 1, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
+    old.sendJson({ type: "hello", protocol: 2, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
     const err = await old.json("error");
     expect(err).toMatchObject({
       code: "client_outdated",
@@ -93,7 +93,7 @@ describe("lobby", () => {
 
   it("names the minimum version in health and the lobby list", async () => {
     const health = await (await exports.default.fetch("https://dhd.test/v1/health")).json<any>();
-    expect(health).toMatchObject({ ok: true, protocol: 1, minVersion: "0.2.0" });
+    expect(health).toMatchObject({ ok: true, protocol: 2, minVersion: "0.2.0" });
     const list = await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>();
     expect(list.minVersion).toBe("0.2.0");
   });
@@ -248,7 +248,8 @@ describe("race room", () => {
     a.sendJson({ type: "pick", rider: 9, choosing: false });
     a.sendJson({ type: "ready", ready: true });
     const r = await snap(host, (r) => r.members[1]?.ready);
-    expect(r.members[1]).toMatchObject({ rider: 9, choosing: false });
+    expect(r.members[1]).toMatchObject({ rider: 9 });
+    expect(r.members[1].choosing ?? false).toBe(false);
   });
 
   it("counts down once everyone is ready and starts the race by itself", async () => {
@@ -309,7 +310,7 @@ describe("public lobby list", () => {
     await host.next((f) => typeof f === "string" && JSON.parse(f).public === true);
     const list = async () => (await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>()).lobbies;
     await expect.poll(list).toContainEqual(
-      expect.objectContaining({ code, roomName: "Open race", track: 4, players: 1, maxPlayers: 4, hostName: "Lister" }),
+      expect.objectContaining({ code, roomName: "Open race", track: 4, players: 1, maxPlayers: 10, hostName: "Lister" }),
     );
     host.sendJson({ type: "settings", public: false });
     await expect.poll(async () => (await list()).map((l: any) => l.code)).not.toContain(code);
@@ -696,7 +697,7 @@ describe("rejoin a race (finding 126)", () => {
 
 describe("worker routes", () => {
   it("health and 404", async () => {
-    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 1, minVersion: "0.2.0" });
+    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 2, minVersion: "0.2.0" });
     expect((await exports.default.fetch("https://dhd.test/nope")).status).toBe(404);
     expect((await exports.default.fetch("https://dhd.test/v1/rooms/new")).status).toBe(426);
   });

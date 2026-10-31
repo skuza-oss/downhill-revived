@@ -332,6 +332,13 @@ PATCHES = {
         ('text', 'void func_00155E78(Obj *self,int kind) {',
          'extern "C" int hle_puppet_crash(char *);\nvoid func_00155E78(Obj *self,int kind) {'),
         ('text', ' char *rider=self->x0;\n', ' char *rider=self->x0;\n if(hle_puppet_crash(rider)) return;\n')],
+    # The bottle in hand (attack move at rider +0x5F40): its start (func_00153C70) takes a bottle
+    # only when the move's test, asked again there, picks the throw; the update then moves it to
+    # the hand. A puppet enters the attack state when its snapshot says so, after the press its
+    # pad showed is gone: no bottle, and the update wrote through NULL (guest 0x10, finding 121).
+    # A rider of this PC always has one there, so the check changes nothing for it.
+    'unsorted/00153A30.c': [
+        ('text', ' if(D_0029C658 && obj->x2c==-1) {', ' if(D_0029C658 && obj->x2c==-1 && obj->x28) {')],
     # Online (port/hle/online.c, finding 047): each PC's own rider starts where the host has that
     # player; the puppets wear their players' riders and bikes (set after the AI riders are
     # chosen); the race ends on the results of every PC, not 8 s after this PC's rider finished.
@@ -649,6 +656,8 @@ import patches_fps
 patches_fps.add(PATCHES)
 import patches_unlock  # PC SETTINGS Unlock All: the unlock readers (finding 095)
 patches_unlock.add(PATCHES)
+import patches_online_flow  # the race's pause menu in an online room (finding 118)
+patches_online_flow.add(PATCHES)
 
 # Online's retail preview flow (finding 065). These hooks return immediately offline.
 _ONLINE_SELECT_BEGIN = r"""
@@ -792,25 +801,6 @@ PATCHES['unsorted/001EB1D8.cpp'] += [
         ('void func_001F5EE8__c34(int index,int row,int col,int x,int y,int z,int target)', 2, 'index', '(unsigned long)(unsigned)z'))
 ]
 
-# Online restart lifecycle: hooks at accepted retail actions and actual race initialization.
-# Offline these helpers return without touching EE state.
-PATCHES['unsorted/0015C990.c'] = PATCHES.get('unsorted/0015C990.c', []) + [
-    ('text', 'void func_0015C990(void) {',
-     'extern void hle_online_restart(void);\nvoid func_0015C990(void) {\n    hle_online_restart();'),
-]
-PATCHES['unsorted/0015CC90.c'] = PATCHES.get('unsorted/0015CC90.c', []) + [
-    ('text', 'void func_0015CC90(struct Obj *obj, int wanted) {',
-     'extern void hle_online_restart(void);\nvoid func_0015CC90(struct Obj *obj, int wanted) {'),
-    ('text', '        D_004B25A0.x2a0 = selected;',
-     '        D_004B25A0.x2a0 = selected;\n        hle_online_restart();\n        selected = D_004B25A0.x2a0;'),
-]
-PATCHES['unsorted/0019EA38.c'] = PATCHES.get('unsorted/0019EA38.c', []) + [
-    ('text', 'void func_0019EA38(Obj *obj,int reset,int mode) {',
-     'extern void hle_online_restart_ready(void);\nvoid func_0019EA38(Obj *obj,int reset,int mode) {'),
-    ('text', 'func_00176E40(manager->x150,0); }\n}',
-     'func_00176E40(manager->x150,0); }\n hle_online_restart_ready();\n}'),
-]
-
 # Online, the countdown's timer holds until every PC may start (port/hle/online.c, start_step), the
 # game drawing meanwhile, and the HUD says who it waits for.
 PATCHES['unsorted/0019EE98.c'] = PATCHES.get('unsorted/0019EE98.c', []) + [
@@ -821,7 +811,7 @@ PATCHES['unsorted/0019EE98.c'] = PATCHES.get('unsorted/0019EE98.c', []) + [
 ]
 PATCHES['unsorted/00176ED8.c'] = PATCHES.get('unsorted/00176ED8.c', []) + [
     ('text', 'void func_00176ED8(Obj *obj)\n{',
-     'extern void hle_online_hud(int view);\nvoid func_00176ED8(Obj *obj)\n{\n    hle_online_hud(obj->player);'),
+     'extern void hle_online_hud(int view);\nextern int hle_online_watch_hud(void);\nextern void func_00176E40(Obj *, int);\nvoid func_00176ED8(Obj *obj)\n{\n    hle_online_hud(obj->player);\n    if (hle_online_watch_hud()) { func_00176E40(obj, 0); return; }'),
 ]
 
 # WaitForRender's spin enters the kernel and sends a queued render chain the VIF1 interrupt
@@ -833,3 +823,15 @@ PATCHES['unsorted/001B4618.c'] = PATCHES.get('unsorted/001B4618.c', []) + [
 
 # wasm32: size_t is unsigned long there and unsigned int on i686 (the same type as the game's).
 PATCHES['unsorted/00235488.cpp'] = [('text', 'operator new[](unsigned int size)', 'operator new[](__SIZE_TYPE__ size)')]
+
+# Room spectating: one camera override, shared with DHD_PUPPET_CAMERA.
+PATCHES['unsorted/00148BE8.c'] = PATCHES.get('unsorted/00148BE8.c', []) + [
+    ('text', 'void func_00148BE8(Object *s,int arg1) {',
+     'extern void hle_online_watch_camera(void *);\nvoid func_00148BE8(Object *s,int arg1) {\n hle_online_watch_camera(s);'),
+]
+
+# The pause menu runs outside the race loop; its builder marks it paused until re-entry.
+PATCHES['unsorted/001B40A0.c'] = PATCHES.get('unsorted/001B40A0.c', []) + [
+    ('text', 'int func_001B40A0(Obj *arg0)\n{',
+     'extern void hle_online_watch_resume(void);\nint func_001B40A0(Obj *arg0)\n{\n    hle_online_watch_resume();'),
+]

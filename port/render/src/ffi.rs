@@ -401,11 +401,20 @@ pub unsafe extern "C" fn dhdr_present_exact(s: *mut DhdrSurface, x: *mut DhdrExa
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn dhdr_surface_counter(s: *mut DhdrSurface, enabled: i32, ping: i32, seconds: f64) {
+    const E: &str = "dhdr_surface_counter";
+    let _g = Guard::enter(E);
+    // SAFETY: the caller owns a live surface, as for surface_present.
+    unsafe { surface(s, E) }.with(E, |s| s.counter.update(enabled != 0, ping, seconds));
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn dhdr_surface_present(s: *mut DhdrSurface) {
     const E: &str = "dhdr_surface_present";
     let _g = Guard::enter(E);
     // SAFETY: as surface().
     unsafe { surface(s, E) }.with(E, |s| {
+        s.draw_counter();
         // The present test-hook point: the frame, read back before it is presented.
         #[cfg(feature = "test-hooks")]
         if s.usage() & DHDR_SURFACE_COPY_SRC != 0 {

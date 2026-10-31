@@ -1,9 +1,9 @@
 // Wire protocol constants and pure helpers. The specification is docs/online-protocol.md.
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 
-export const MAX_MEMBERS = 8;
-export const DEFAULT_MAX_PLAYERS = 4;
+export const MAX_MEMBERS = 10;
+export const DEFAULT_MAX_PLAYERS = 10;
 export const MAX_TEXT_BYTES = 4096;
 /** A STATE frame carries all of a player's riders (port/net/net.h NET_FRAME_MAX). */
 export const MAX_BINARY_BYTES = 3072;

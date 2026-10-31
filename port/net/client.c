@@ -96,7 +96,7 @@ void client_connected(NetClient *c, const NetTransport *tr)
     if (c->reconnect_token[0] && c->lobby.state == NET_RECONNECTING)
         snprintf(token, sizeof token, ",\"reconnectToken\":\"%s\"", c->reconnect_token);
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"reconnect\"]%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"reconnect\"]%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
         name, token);
     if (c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
@@ -127,6 +127,49 @@ static void read_room(NetClient *c, const char *t)
         double ends;
         c->countdown_ends = json_number(t, "countdownEndsAt", &ends) ? ends : 0;
     }
+    l->phase[0] = l->last_event[0] = 0;
+    json_string(t, "phase", l->phase, sizeof l->phase);
+    json_string(t, "lastEvent", l->last_event, sizeof l->last_event);
+#define TIME(key, field) l->field = json_number(t, key, &l->field) ? l->field : 0
+    TIME("raceStartedAt", race_started_at); TIME("finishEndsAt", finish_ends_at);
+    TIME("nextRaceAt", next_race_at); TIME("countdownEndsAt", countdown_ends_at);
+    TIME("serverTime", server_time);
+#undef TIME
+    json_bool(t, "waitingForRider", &l->waiting_for_rider);
+    json_bool(t, "rulesPending", &l->rules_pending);
+    l->finish_window = json_int(t, "rules.finishWindow", &v) ? (int)v : 60;
+    {
+        char choice[16];
+        json_string(t, "rules.nextRace", choice, sizeof choice);
+        l->next_race = !strcmp(choice, "host");
+        json_string(t, "rules.then", choice, sizeof choice);
+        l->then = !strcmp(choice, "same") ? 0 : !strcmp(choice, "random") ? 2 : 1;
+    }
+    l->rotation_count = json_count(t, "rotation");
+    if (l->rotation_count < 0) l->rotation_count = 0;
+    if (l->rotation_count > 64) l->rotation_count = 64;
+    for (i = 0; i < l->rotation_count; i++) {
+        char path[32];
+        snprintf(path, sizeof path, "rotation[%d]", i);
+        l->rotation[i] = json_int(t, path, &v) ? (unsigned char)v : 0;
+    }
+    l->last_race_id = json_int(t, "lastRace.id", &v) ? (int)v : 0;
+    l->last_race_track = json_int(t, "lastRace.track", &v) ? (int)v : 0;
+    n = json_count(t, "lastRace.entrants");
+    l->nresults = n < 0 ? 0 : n > NET_MAX_SLOTS ? NET_MAX_SLOTS : n;
+    for (i = 0; i < l->nresults; i++) {
+        NetResult *r = &l->result[i];
+        char path[64];
+        memset(r, 0, sizeof *r);
+#define RESULT(key) (snprintf(path, sizeof path, "lastRace.entrants[%d]." key, i), path)
+        r->id = json_int(t, RESULT("id"), &v) ? (int)v : 0;
+        r->rider = json_int(t, RESULT("rider"), &v) ? (int)v : 0;
+        r->place = json_int(t, RESULT("place"), &v) ? (int)v : 0;
+        r->ticks = json_int(t, RESULT("ticks"), &v) ? v : -1;
+        json_string(t, RESULT("name"), r->name, sizeof r->name);
+        json_string(t, RESULT("dnfReason"), r->dnf_reason, sizeof r->dnf_reason);
+#undef RESULT
+    }
     n = json_count(t, "members");
     l->nmembers = n < 0 ? 0 : n > NET_MAX_SLOTS ? NET_MAX_SLOTS : n;
     l->members_reconnecting = 0;
@@ -153,8 +196,19 @@ static void read_room(NetClient *c, const char *t)
             if (reconnecting)
                 l->members_reconnecting |= 1u << i;
         }
+        json_bool(t, FIELD("inRace"), &m->in_race);
+        json_string(t, FIELD("raceState"), m->race_state, sizeof m->race_state);
+        json_string(t, FIELD("dnfReason"), m->dnf_reason, sizeof m->dnf_reason);
+        m->finish_ticks = json_int(t, FIELD("finishTicks"), &v) ? v : -1;
+        m->place = json_int(t, FIELD("place"), &v) ? (int)v : 0;
+        if (m->id == l->member_id) c->ready = m->ready;
+
 #undef FIELD
     }
+    for (i = 0; i < l->nmembers; i++)
+        if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
+            c->racing = 0; l->state = NET_LOBBY; l->started = 0; c->relayed_head = c->relayed_count = 0;
+        }
 }
 
 static void read_start(NetClient *c, const char *t)
@@ -199,6 +253,7 @@ static void read_start(NetClient *c, const char *t)
         l->start_at = (start_at - c->clock_offset) / 1000.0;
     } else
         l->start_at = net_now_ms() / 1000.0;
+    c->relayed_head = c->relayed_count = 0;
     c->racing = 1;
     l->offline = 0;
     l->racers_away = 0;
@@ -341,7 +396,6 @@ void client_on_text(NetClient *c, const char *text, size_t n)
     } else if (!strcmp(type, "ended")) {
         c->racing = 0;
         c->lobby.racers_away = 0;
-        c->ready = 0;
         c->lobby.started = 0;
         c->lobby.state = NET_LOBBY;
         changed(c);
@@ -527,6 +581,54 @@ void client_end(NetClient *c)
 {
     SDL_LockMutex(c->lock);
     say(c, "{\"type\":\"end\"}");
+    SDL_UnlockMutex(c->lock);
+}
+
+void client_finish(NetClient *c, unsigned ticks, int place)
+{
+    SDL_LockMutex(c->lock);
+    say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d}", ticks, place);
+    SDL_UnlockMutex(c->lock);
+}
+
+/* This PC left its race for the room: out of it at once, before the server's next snapshot says
+   so, so the room never reads the race it left as one to join. */
+void client_back(NetClient *c)
+{
+    SDL_LockMutex(c->lock);
+    say(c, "{\"type\":\"back\"}");
+    c->racing = 0;
+    c->relayed_head = c->relayed_count = 0;
+    c->lobby.started = 0;
+    if (c->lobby.state == NET_RACING) c->lobby.state = NET_LOBBY;
+    changed(c);
+    SDL_UnlockMutex(c->lock);
+}
+
+void client_rules(NetClient *c, int finish_window, int next_race, int then)
+{
+    static const char *next[] = {"auto", "host"};
+    static const char *tracks[] = {"same", "next", "random"};
+    if ((finish_window != 0 && finish_window != 30 && finish_window != 60 && finish_window != 120) ||
+        next_race < 0 || next_race > 1 || then < 0 || then > 2) return;
+    SDL_LockMutex(c->lock);
+    say(c, "{\"type\":\"settings\",\"finishWindow\":%d,\"nextRace\":\"%s\",\"then\":\"%s\"}",
+        finish_window, next[next_race], tracks[then]);
+    SDL_UnlockMutex(c->lock);
+}
+
+void client_rotation(NetClient *c, const unsigned char *ids, int count)
+{
+    char text[768];
+    int i, n;
+    if (count < 0 || count > 64 || (count && !ids)) return;
+    n = snprintf(text, sizeof text, "{\"type\":\"settings\",\"rotation\":[");
+    for (i = 0; i < count; i++) n += snprintf(text + n, sizeof text - n, "%s%u", i ? "," : "", ids[i] & 31);
+    n += snprintf(text + n, sizeof text - n, "],\"trackLimits\":[");
+    for (i = 0; i < count; i++) n += snprintf(text + n, sizeof text - n, "%s%u", i ? "," : "", 10 - 2 * (ids[i] >> 5));
+    snprintf(text + n, sizeof text - n, "]}");
+    SDL_LockMutex(c->lock);
+    say(c, "%s", text);
     SDL_UnlockMutex(c->lock);
 }
 

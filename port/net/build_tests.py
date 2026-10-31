@@ -16,11 +16,17 @@ PROGRAMS = {  # name: (sources, libraries, run in the tests, SDL3)
     'test_json': (['json.c', 'test_json.c'], '', True, False),
     'test_loopback': (CLIENT + ['test_loopback.c'], 'winmm.lib', True, True),
     'test_join': (['join.c', 'test_join.c'], '', True, False),
+    'test_session': (CLIENT + ['test_session.c'], 'winmm.lib', True, True),
     'nettool': (CLIENT + ['net.c', 'join.c', 'nettool.c'], 'winmm.lib user32.lib ' + RUST, False, True),
 }
 
 
 def rust_libs():
+    # A C-only wire test may reuse an existing renderer archive (no Rust sources change).
+    prebuilt = os.environ.get('DHD_NET_TEST_RUST_LIB')
+    if prebuilt:
+        import check_rust_lib
+        return ' '.join(['"%s"' % prebuilt] + sorted(check_rust_lib.allowed_native_libs()))
     import rustgs
     try:
         report = rustgs.build(rustgs.X64)

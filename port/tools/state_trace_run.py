@@ -31,7 +31,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import owned_process  # noqa: E402
 
-DEFAULT_ISO = ''
+# the test tools' disc image: DHD_TEST_ISO (the game itself never reads it; DHD_ISO would override
+# dhd.ini in every game started from that environment, the player's own included)
+DEFAULT_ISO = os.environ.get('DHD_TEST_ISO', '')
 WINDOWS_EXE = 'build/host64-exe/dhd64.exe'  # build_host64.py's default output
 LINUX_EXE = 'build/host64-linux/dhd64'
 LINUX_ISO = os.environ.get('DHD_LINUX_ISO', '')  # the disc image as the Linux side sees it

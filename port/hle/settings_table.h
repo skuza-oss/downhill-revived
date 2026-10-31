@@ -22,6 +22,7 @@ static const SettingChoice setting_choices_textures[] = {{"off", "OFF"}, {"on", 
 static const SettingChoice setting_choices_font[] = {{"original", "Original"}, {"sharp", "Sharp"}};
 static const SettingChoice setting_choices_fps[] = {{"60", "60 fps"}, {"120", "120 fps"}, {"144", "144 fps"}, {"165", "165 fps"}, {"240", "240 fps"}, {"monitor", "Monitor"}};
 static const SettingChoice setting_choices_vsync[] = {{"0", "OFF"}, {"1", "ON"}};
+static const SettingChoice setting_choices_perf_counter[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_unlock_all[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_auto_update[] = {{"ask", "Ask"}, {"on", "Automatic"}, {"off", "Off"}};
 static const SettingChoice setting_choices_discord[] = {{"off", "OFF"}, {"on", "ON"}};
@@ -40,6 +41,7 @@ static const SettingInfo setting_table[] = {
     {"font", "DHD_FONT", "sharp", setting_choices_font, 2},
     {"fps", "DHD_FPS", "60", setting_choices_fps, 6},
     {"vsync", "DHD_VSYNC", "0", setting_choices_vsync, 2},
+    {"perf_counter", "DHD_PERF_COUNTER", "0", setting_choices_perf_counter, 2},
     {"unlock_all", "DHD_UNLOCK_ALL", "0", setting_choices_unlock_all, 2},
     {"auto_update", "", "ask", setting_choices_auto_update, 3},
     {"discord", "DHD_DISCORD", "off", setting_choices_discord, 2},

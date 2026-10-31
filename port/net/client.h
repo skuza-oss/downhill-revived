@@ -8,7 +8,7 @@
 
 #include "net.h"
 
-enum { NET_PROTOCOL = 1 };
+enum { NET_PROTOCOL = 2 };
 
 typedef struct {
     void *ctx;
@@ -69,6 +69,10 @@ void client_ready(NetClient *c, int ready);
 void client_kick(NetClient *c, int member);
 void client_start(NetClient *c);
 void client_end(NetClient *c);
+void client_finish(NetClient *c, unsigned ticks, int place);
+void client_back(NetClient *c);
+void client_rules(NetClient *c, int finish_window, int next_race, int then);
+void client_rotation(NetClient *c, const unsigned char *ids, int count);
 void client_leave(NetClient *c);  /* says so before the transport closes */
 void client_lobby(NetClient *c, NetLobby *out);
 int client_chat(NetClient *c, const char *text);  /* 1 sent */

@@ -13,7 +13,7 @@ const DB = 'downhill-revived-settings', STORE = 'ini';
 
 // The browser's OPTIONS > PC SETTINGS (pc_settings.c's DHD_PC_SETTINGS_* variables):
 // - ROWS, the rows shown: Resolution (DHD_SCALE: 1x to DHD_SCALE_MAX, the reactor's NATIVE_SCALE_MAX,
-//   or Window, the canvas's match), Scaling, Widescreen, Font and Frame Rate. Display, window size,
+//   or Window, the canvas's match), Scaling, Widescreen, Font, Frame Rate and FPS & Ping. Display, window size,
 //   picture shape (the canvas has one shape: 16:9 with widescreen, else 4:3, main.js), texture
 //   packs, skip movies (the browser never plays them) and vibration (no rumble here) are left out.
 // - LIVE, the rows that apply at once here besides the core's live ones: Resolution (the reactor's
@@ -21,7 +21,7 @@ const DB = 'downhill-revived-settings', STORE = 'ini';
 // - RESTART, the footer of the others (Widescreen, Font, Frame Rate): the page loaded again.
 // - FPS_MAX: the browser's Frame Rate list and Monitor stop at 144 (the core's own cap is 240).
 export const BROWSER_PC_SETTINGS = {
-  DHD_PC_SETTINGS_ROWS: 'DHD_SCALE,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_FONT,DHD_FPS',
+  DHD_PC_SETTINGS_ROWS: 'DHD_SCALE,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_FONT,DHD_FPS,DHD_PERF_COUNTER',
   DHD_PC_SETTINGS_LIVE: 'DHD_SCALE',
   DHD_PC_SETTINGS_RESTART: '* Applies when the page is loaded again',
   DHD_SCALE_MAX: '8',
@@ -34,7 +34,7 @@ export const BROWSER_PC_SETTINGS = {
 export const BROWSER_WITHOUT = new Set(['DHD_WINDOW', 'DHD_WINDOW_WIDTH', 'DHD_WINDOW_HEIGHT', 'DHD_MONITOR', 'DHD_ASPECT',
   'DHD_VSYNC', 'DHD_VIBRATION', 'DHD_TEXTURES', 'DHD_TEXTURE_PACK', 'DHD_TEXTURE_CACHE_MB', 'DHD_DISCORD', 'DHD_UPDATE_URL']);
 // The variables the reactor follows while the game runs (gpu_rust_web.c's web_env_changed).
-export const RENDERER_LIVE = new Set(['DHD_SCALE', 'DHD_PRESENT_FILTER', 'DHD_ASPECT']);
+export const RENDERER_LIVE = new Set(['DHD_SCALE', 'DHD_PRESENT_FILTER', 'DHD_ASPECT', 'DHD_PERF_COUNTER']);
 
 // ---- the crate (port/render/settings/src/web.rs: arguments in buffers it allocates, each result
 // in its memory until the next call)

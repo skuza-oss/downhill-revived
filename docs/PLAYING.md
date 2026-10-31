@@ -42,11 +42,14 @@ What works today:
 - **The mouse in the menus**: hovering selects, a left click is X, a right click goes back and
   the wheel scrolls a list or changes a value.
 - **EXIT GAME** in the main menu.
-- **Online races** for 2 to 4 players (experimental): an ONLINE entry in the main menu, a list of
+- **Online races** for 2 to 10 players (experimental): an ONLINE entry in the main menu, a list of
   public races, private races joined with a 6-character code, and a race room where the host
-  picks the track, on the project's official server (see [Online](#online)). After the
-  results the host's TRY AGAIN or NEW LEVEL takes everyone to the next race; QUIT leaves the
-  room.
+  picks the track and the rules, on the project's official server (see [Online](#online)). The
+  room stays open between races. Each track takes as many riders as the game gives it (10, 8
+  or 6, shown in the track picker); when more players are ready than the track takes, the race
+  moves to the next track that fits. After your finish the camera follows the riders still
+  racing (Left/Right change rider) until the race closes; BACK TO THE ROOM in the pause menu
+  leaves earlier.
 - **Memory card saves**, stored as plain files beside the game.
 - **Controllers**: Xbox pads, DualSense, DualShock 4, Switch Pro, 8BitDo and most other USB or
   Bluetooth pads (through SDL3 and its controller database), with vibration where the pad has
@@ -60,8 +63,8 @@ Known gaps:
 
 - Movies are shown 4:3 in widescreen, as on the PS2.
 - The 2-4 player split screens have not been checked in widescreen.
-- Online races have been tested with two games and two scripted players, not yet with four
-  people on four PCs.
+- Online races have been tested with two games (PC and Mac) and up to nine scripted players, not
+  yet with ten people on ten PCs.
 - The browser version (experimental) at <https://downhill-revived.pages.dev/play/> needs Chrome or
   Edge 137 or later and a fast PC; online races are off there. It reads your `.iso` in place in
   the browser and uploads nothing. Its source is `port/web`.

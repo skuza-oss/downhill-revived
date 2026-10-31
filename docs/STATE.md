@@ -313,7 +313,7 @@ Shipped since 0.1.0; the original plan is `docs/ONLINE-PLAN.md` (historical). Th
 findings 039-047, 053-054, 065 and 072 and in this file's history.
 - Server: `online/server/` (Cloudflare Workers + Durable Objects) at `wss://dhd.skuza.app`, the
   game's built-in default (dhd.ini `server =` or `DHD_NET_SERVER` override it). Lobbies, join
-  codes, the public list, the race relay (4 players per room by default), desync reports, usage stats
+  codes, the public list, the race relay (10 players per room by default), desync reports, usage stats
   in Workers Analytics Engine. `MIN_VERSION` (`wrangler.jsonc`, now 0.7.0) turns older clients
   away with "update to play online". Protocol: `docs/online-protocol.md`. Steps:
   `online/server/README.md`.

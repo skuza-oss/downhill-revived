@@ -98,6 +98,7 @@ pub mod exact {
 /// Presentation: a surface on the window (Win32 HWND natively, the OffscreenCanvas in the
 /// browser) and present.wgsl's pass for exact frames.
 pub mod present {
+    pub mod counter;
     pub mod pipe;
     pub mod surface;
 }

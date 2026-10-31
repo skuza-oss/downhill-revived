@@ -18,6 +18,7 @@ const TABS = [
     { key: 'DHD_ASPECT', label: 'Aspect', hint: 'Wide fits your monitor\'s shape; 16:9 is always 16:9', type: 'seg' },
     { key: 'DHD_PRESENT_FILTER', label: 'Scaling', type: 'seg' },
     { key: 'fps', label: 'Frame rate', hint: 'Game steps a second, offline and online.', type: 'select' },
+    { key: 'perf_counter', label: 'FPS & Ping', hint: 'Show presented frames per second and online ping.', type: 'switch' },
     { key: 'vsync', label: 'V-Sync', hint: 'No tearing', type: 'switch' },
     { key: 'textures', label: 'Texture pack', hint: 'Uses the installed PCSX2 texture pack', type: 'switch',
       when: () => state.texturePack, offHint: 'No pack found. README.txt says where one goes.' },

@@ -150,7 +150,7 @@ static int native_show(Native *n, DhdrSurface *surface, unsigned w, unsigned h)
     int drawn = native_present_draw(n, surface, w, h, resize);
     n->aspect = aspect;
     if (drawn <= 0) return 0;
-    dhdr_surface_present(surface);
+    counter_present(surface);
     native_note_presented(n);
     return 1;
 }

@@ -5,9 +5,9 @@
      Triangle (BACK) puts the values the page opened with back and closes, as AUDIO / OTHER does.
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
    window size, resolution, picture shape, scaling, skip movies (the startup movies), vibration,
-   V-Sync, the frame rate (above 60 at once, else at the next screen) and unlock all apply at once
-   (finding 124); widescreen, the texture pack and the font at the next start ("*" and the footer
-   say so). A setting the environment
+   V-Sync, the frame rate (above 60 at once, else at the next screen), unlock all and FPS & Ping
+   apply at once (finding 124); widescreen, the texture pack and the font at the next start ("*"
+   and the footer say so). A setting the environment
    sets (DHD_*) is shown but can't be changed here. Nothing here writes game state: the page
    lives in host memory and the settings in dhd.ini, never in the memory card's save.
    A host that can do only some of the rows says which in DHD_PC_SETTINGS_ROWS, a comma list of
@@ -32,7 +32,7 @@ void gs_window_apply(void);           /* port/gs/present.c */
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
-enum { ROWS = 13, MAX_CHOICES = 16 };
+enum { ROWS = 14, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -45,7 +45,7 @@ typedef struct {
     int selected, running, opened;    /* choice indexes; -1: a value not in the list */
 } Row;
 
-enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, TEXTURES, FONT, RATE, VSYNC, UNLOCK };
+enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, TEXTURES, FONT, RATE, VSYNC, COUNTER, UNLOCK };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 1},  /* the native renderer's DHD_SCALE, at once (finding 124) */
     {"Display:", "window", 1},
@@ -59,6 +59,7 @@ static Row rows[ROWS] = {
     {"Font:", "font", 0},  /* port/gs/font_sharp.c */
     {"Frame Rate:", "fps", 1},  /* fps.c: at once above 60, else at the next screen */
     {"V-Sync:", "vsync", 1},  /* no tearing (port/gs/gpu_rust.c), at once (finding 124) */
+    {"FPS & Ping:", "perf_counter", 1},
     {"Unlock All:", "unlock_all", 1},  /* port_unlock_all */
 };
 static char monitor_size[24];
@@ -202,8 +203,9 @@ static void commit(Row *r, int apply)
     if (!apply) return;
     r->running = r->selected;
     if (r == &rows[DISPLAY] || r == &rows[SIZE]) host_service_gs_window_apply();
-    else if (r == &rows[RESOLUTION] || r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[VSYNC])
-        host_service_gs_present_options_apply();  /* DHD_SCALE, DHD_ASPECT, DHD_PRESENT_FILTER, DHD_VSYNC read again */
+    else if (r == &rows[RESOLUTION] || r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[VSYNC] ||
+             r == &rows[COUNTER])
+        host_service_gs_present_options_apply();  /* DHD_SCALE, DHD_ASPECT, DHD_PRESENT_FILTER, DHD_VSYNC, the counter */
     else if (r == &rows[RATE]) port_fps_changed();
     else if (r == &rows[VIBRATION]) {
         int on = strcmp(c->value, "0") != 0;

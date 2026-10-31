@@ -51,7 +51,7 @@ export class Client {
   }
 
   hello(name: string, extra: object = {}): void {
-    this.sendJson({ type: "hello", protocol: 1, version: VERSION, clientVersion: CLIENT_VERSION, isoSha256: ISO, name, ...extra });
+    this.sendJson({ type: "hello", protocol: 2, version: VERSION, clientVersion: CLIENT_VERSION, isoSha256: ISO, name, ...extra });
   }
 
   sendJson(obj: object): void {

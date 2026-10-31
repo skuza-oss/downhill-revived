@@ -1534,10 +1534,10 @@ void host_pacing_wait(void)
            (key to present 90 ms on the title at 144 Hz, 25 ms without it). The picture handed now
            is shown after them, so the grid follows that once and the queue is gone. Only while the
            presenter is presenting (a minimised window presents nothing), and only a queue a few
-           pictures long: after a long gap (a load, or an online race's shared pacing, until
-           rematch_reset) the picture handed when the grid started again from now still carried the
-           due from before it, and the gap read as a queue of that many pictures, so the game slept
-           as long again (issue #22: about 54 s before each online rematch, 14 s after a load). */
+           pictures long: after a long gap (a load, or the wait at an online race's start) the
+           picture handed when the grid started again from now still carried the due from before
+           it, and the gap read as a queue of that many pictures, so the game slept as long again
+           (issue #22: about 54 s before an online race, 14 s after a load). */
         double behind = floor((shown - last_due) / period + 0.5);
         if (last_at + behind * spacing > shown) shown = last_at + behind * spacing;
     }

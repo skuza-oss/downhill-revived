@@ -49,7 +49,7 @@ double port_field_seconds(int counter);  /* fps.c */
 #define RACE_PHASE (*(volatile int32_t *)0x0843F348)  /* on the race screen: 1 countdown, 2-4 race */
 #define MENU (*(volatile int32_t *)0x0829DED8)        /* 9: the race screen */
 #define RACING (MENU == 9 && RACE_PHASE >= 2 && RACE_PHASE <= 4)  /* func_0016B5A8 */
-#define CAMERA0_RIDER (*(uint8_t *volatile *)0x0837ED14)  /* D_0037EA60[0] +0x2B4 */
+
 
 #define FIELD(r, off, type) (*(type *)((r) + (off)))
 #define PAD_AT 0x1174    /* virtual pad (+0xFE0) +0x194: this tick's 25 actions, last tick's, timers */
@@ -87,7 +87,7 @@ typedef struct Snapshot {
     uint32_t pad[PAD_WORDS];
 } Snapshot;
 
-enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 8 };
+enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
 /* Wire format version 3: rider ids are global (a human's lobby slot, an AI rider's slot), the
    snapshot carries the checkpoints passed and the attack power-ups (version 2), and its clock is
    the sender's race time in ms, not its ticks (finding 114). STATE_FIXED: the payload before the
@@ -112,7 +112,7 @@ extern void func_00155E78(void *crash, int kind);    /* start a crash */
 extern void func_0012E940(void *self, int kind, void *direction, void *other);  /* other hits self */
 
 static struct {
-    int init, from, rate, camera, play_slot;  /* camera: the slot player 0's camera follows, 0 none */
+    int init, from, rate, play_slot;
     double delay;            /* seconds */
     int allow;               /* the puppet code itself starts this crash / applies this hit */
     FILE *record, *trace;
@@ -138,7 +138,7 @@ static void setup(void)
     pp.from = (s = getenv("DHD_PUPPET_FROM")) ? atoi(s) : 0;
     pp.rate = (s = getenv("DHD_PUPPET_RATE")) && atoi(s) > 0 ? atoi(s) : 3;
     pp.delay = ((s = getenv("DHD_PUPPET_DELAY")) ? atoi(s) : 100) / 1000.0;
-    pp.camera = (s = getenv("DHD_PUPPET_CAMERA")) && *s == '1' ? (s = getenv("DHD_PUPPET_SLOT")) ? atoi(s) : 1 : 0;
+
     pp.play_slot = -1;
     if ((s = getenv("DHD_PUPPET_RECORD")) && *s && !(pp.record = fopen(s, "wb")))
         fprintf(stderr, "puppet: cannot write %s\n", s);
@@ -281,7 +281,7 @@ int hle_puppet_physics(uint8_t *r)
     int slot = slot_of(r);
     if (!puppet(r) || !wanted(slot, &s)) return 0;
     Puppet *p = &pp.p[slot];
-    if (pp.camera && slot == pp.camera) CAMERA0_RIDER = r;
+
     /* While it crashes the bike and the thrown body are their own bodies (+0x6420, +0x4EF0), run
        here from the crash's start; writing the rider's body would fight them. The game's physics
        runs the crash to its respawn. */
@@ -377,9 +377,9 @@ void hle_puppet_online(int local, int nslots, int host)
     fprintf(stderr, "\n");
 }
 
-/* The next online race in the same room (online.c rematch_reset), and again at its start: what the
-   puppets had is of the race before (its clock started again). */
-void hle_puppet_rematch(void)
+/* An online race's start (online.c start_step): what the puppets had is from before it (its clock
+   starts now). */
+void hle_puppet_start(void)
 {
     for (int i = 1; i < NRIDERS; i++) {
         Puppet *p = &pp.p[i];

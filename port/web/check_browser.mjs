@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { startChrome, connect } from './cdp.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2), option = (n, f) => { const i = args.indexOf(n); return i < 0 ? f : args[i + 1]; };
-const iso = option('--iso', process.env.DHD_ISO || '');
+const iso = option('--iso', process.env.DHD_ISO || process.env.DHD_TEST_ISO || '');
 const field = Number(option('--field', 600)), seconds = Number(option('--seconds', 600));
 const out = path.resolve(option('--out', path.join(root, 'build/web/browser.png'))), port = Number(option('--port', 8193));
 const query = option('--query', '');

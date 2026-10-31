@@ -7,6 +7,11 @@ export const LISTING_REFRESH_MS = 30_000;
 const LISTING_TTL_MS = 90_000;
 
 export interface LobbyEntry {
+  phase?: string;
+  raceStartedAt?: number | null;
+  finishEndsAt?: number | null;
+  nextRaceAt?: number | null;
+  full?: boolean;
   code: string;
   roomName: string;
   version: string;
@@ -39,6 +44,6 @@ export class LobbyIndex extends DurableObject<Env> {
       else out.push(entry);
     }
     if (stale.length) await this.ctx.storage.delete(stale);
-    return out;
+    return out.sort((a,b) => b.players - a.players);
   }
 }

@@ -210,6 +210,10 @@ def module_units(out, run, wasm2c, wasm=None, sources=(), num_outputs=1):
         source = source.resolve()
         if source.suffix != '.c':
             raise ValueError('module units must be .c files')
+        if re.fullmatch(r'core_\d+\.c', source.name) and not (source.parent / 'core-impl.h').exists():
+            # split parts declare each other's functions in core-impl.h; one left in out by an
+            # older build would compile against the wrong module
+            raise ValueError('%s: no core-impl.h beside it (split units need their own)' % source)
         for header in source.parent.glob('*.h'):
             if header.resolve() != (out / header.name).resolve():
                 shutil.copyfile(header, out / header.name)

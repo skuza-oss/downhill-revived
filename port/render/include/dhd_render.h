@@ -157,6 +157,8 @@ DHDR_FN(dhdr_surface_usage)   uint32_t dhdr_surface_usage(const DhdrSurface *s);
 DHDR_FN(dhdr_present_exact)   int dhdr_present_exact(DhdrSurface *s, DhdrExact *x, const uint32_t *pixels,
                                                      uint32_t w, uint32_t h, uint32_t window_w, uint32_t window_h);
 /* Presents the texture the last call that returned 1 drew (SurfaceTexture::present). */
+/* Live presenter overlay; ping < 0 hides the online line, seconds is monotonic wall time. */
+DHDR_FN(dhdr_surface_counter) void dhdr_surface_counter(DhdrSurface *s, int enabled, int ping, double seconds);
 DHDR_FN(dhdr_surface_present) void dhdr_surface_present(DhdrSurface *s);
 
 /* ---------------- native renderer, GPU half ----------------

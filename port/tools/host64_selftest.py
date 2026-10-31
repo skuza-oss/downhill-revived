@@ -41,6 +41,11 @@ def main():
     wasi = a.wasi or (Path('/opt/wasi-sdk') if linux else WIN_WASI)
     out = a.out.resolve(); out.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    if ON_WINDOWS and os.environ.get('DHD_SCRATCH'):
+        # the compilers' temporary files go to the scratch folder, not the system drive's temp
+        scratch = Path(os.environ['DHD_SCRATCH']) / 'host64-selftest'
+        scratch.mkdir(parents=True, exist_ok=True)
+        env.update(TEMP=str(scratch), TMP=str(scratch))
     exe_suffix = '.exe' if linux is False else ''
     def run(args):
         print(' '.join(map(str, args)), flush=True)

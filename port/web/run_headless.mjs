@@ -33,7 +33,7 @@ if(args.includes('--game-speed')){let at=0,tick=0,updates=0;gameSpeed=()=>{if(by
   updates++;if(!playing){at=0;return;}if(!at){at=now;tick=t;updates=0;return;}
   if(now-at>=2000){console.error(`game speed: ${((t-tick)*1000/(now-at)).toFixed(1)} race ticks/s, ${(updates*1000/(now-at)).toFixed(1)} updates/s`);at=now;tick=t;updates=0;}};}
 fs.mkdirSync(path.dirname(prefix),{recursive:true});
-const env={DHD_ISO:option('--iso',process.env.DHD_ISO||''),
+const env={DHD_ISO:option('--iso',process.env.DHD_ISO||process.env.DHD_TEST_ISO||''),
   DHD_HEADLESS:'1',DHD_FRAME_CLOCK:'1',DHD_SKIP_MOVIES:'1',DHD_MEMCARD:'0',DHD_SND_OFF:'1',
   DHD_RENDER:'native',DHD_SETTINGS:'none',DHD_STATE_TRACE:prefix,DHD_STATE_STOP:String(fields),
   DHD_STATE_EXE:crypto.createHash('sha256').update(fs.readFileSync(modulePath)).digest('hex'),

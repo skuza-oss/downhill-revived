@@ -3,7 +3,12 @@
 These rules apply to everyone who changes this repository, people and AI agents alike.
 
 Read `docs/STATE.md` first: it says where each part of the project stands. Findings go in
-`docs/findings/NNN-*.md`; update `docs/STATE.md` when a step is done.
+`docs/findings/NNN-*.md`; update `docs/STATE.md` when a step is done. `docs/BUILDING.md` sets up a
+build, `docs/TESTING.md` lists the test tools and their setup variables.
+
+Local-only notes (not in the repository, may be absent): if `docs/private/STATE-ops.md` and
+`docs/LEAD.md` exist in your checkout, read them too. Keep run logs, machine setup and account
+details there, never in tracked files.
 
 ## Rules
 
@@ -15,8 +20,21 @@ Read `docs/STATE.md` first: it says where each part of the project stands. Findi
 - Never commit a key or other secret, or a server address other than the official server
   (`wss://dhd.skuza.app`, the game's default). Any other server lives
   only in a player's `dhd.ini` or the `DHD_NET_SERVER` environment variable.
+- Never commit a path of your own machine (drive letters, home folders, LAN addresses): tools
+  find toolchains, scratch space and the test disc through the variables in `docs/TESTING.md`.
 - Readable code is the goal: real names, structs and types once understood.
 - Port changes go in `port/` and apply at build time; `src/` must keep matching.
+- History on `main` is never rewritten. One clear commit per change; a release is its version
+  commit (the last one), tagged `vX.Y.Z`.
+
+## Online races are state sync, never lockstep
+
+Each player's game runs its own one-player race. It sends snapshots of the riders it runs (about
+20 a second), and the other players are puppet riders moved from them. Hits travel as events, and
+each game times its own finish (`port/hle/online.c`, `port/hle/puppet.c`, finding 044). Peers need
+neither the same frame rate nor identical floats. Input lockstep was the first design and was
+dropped on 2026-10-16; older findings (039-042, 049) that mention it describe that dropped
+design.
 
 ## Research
 

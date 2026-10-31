@@ -73,6 +73,9 @@ pub struct Surface {
     width: u32,
     height: u32,
     pipe: PresentPipe,
+    pub counter: super::counter::Counter,
+    #[cfg(feature = "native")]
+    capture: super::counter::Capture,
     own: Option<Own>,
 }
 
@@ -217,7 +220,8 @@ impl Surface {
         };
         // COPY_SRC lets the test hook read the presented texture back; not needed otherwise.
         let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC);
-        Ok(Surface { gpu, frame: None, surface, usage, present_mode, alpha_mode, format, width: 0, height: 0, pipe, own: None })
+        Ok(Surface { gpu, frame: None, surface, usage, present_mode, alpha_mode, format, width: 0, height: 0, pipe, own: None, counter: super::counter::Counter::default(),
+            #[cfg(feature = "native")] capture: super::counter::Capture::default() })
     }
 
     /// `DHDR_SURFACE_COPY_SRC` when the frames can be copied from.
@@ -379,6 +383,15 @@ impl Surface {
         self.pipe.draw(gpu, &mut encoder, &source.0, &target, [source.1, source.2, self.width, self.height]);
         gpu.queue.submit([encoder.finish()]);
         1
+    }
+
+    pub fn draw_counter(&mut self) {
+        if let Some(frame) = self.frame.as_ref() {
+            let target = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.counter.draw(self.gpu, &target, self.format, self.width, self.height);
+            #[cfg(feature = "native")]
+            if self.usage.contains(wgpu::TextureUsages::COPY_SRC) { self.capture.frame(self.gpu, &frame.texture); }
+        }
     }
 
     /// `dhdr_surface_present`: presents the frame the last call that returned 1 drew.

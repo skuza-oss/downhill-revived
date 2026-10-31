@@ -17,7 +17,8 @@ game program byte for byte, built for the PC with the PS2 hardware replaced by n
 - A launcher with the settings, updates, release notes and the public online races.
 - A native renderer (Direct3D 12, Vulkan or Metal), 60 fps or more (up to 240) with even frame
   pacing, 1x to 8x resolution, Hor+ widescreen at any shape, windowed, borderless or fullscreen.
-- Online races for 2 to 4 players (experimental), public or private with a code.
+- Online races for 2 to 10 players (experimental), public or private with a code; after your
+  finish you watch the others ride to the line.
 - PC SETTINGS in the game's own OPTIONS menu, a sharp font, Unlock All, the movies, memory card
   saves, PCSX2 texture packs, mouse in the menus, Discord Rich Presence.
 - Controllers (Xbox, DualSense, DualShock 4, Switch Pro, 8BitDo and most others) and full

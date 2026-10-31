@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Census of the host side of the port for 64-bit Windows (x86_64-pc-windows-msvc).
 
-The host side is what runs natively in the 64-bit build (docs/findings/075-portable-core.md,
+The host side is what runs natively in the 64-bit build (docs/findings/081-portable-core.md,
 "Phase 2 plan"): port/host/*, the host layer in port/hle (host.c, graphics_queue.c, gs_queue.inc,
 vif.c's VIF1/VU1 part, the VU1 runtime in vu0_interp.c), port/gs/*, the device and OS files
 (gamepad, keyboard, text input, movie + libmpeg2, launcher link, fps), and port/net/*.

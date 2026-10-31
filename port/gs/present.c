@@ -190,7 +190,8 @@ static void monitor_size(WindowSpec *s)
 static void window_measure(void)
 {
     int w = 0, h = 0;
-    if (sdl_window && !(SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MINIMIZED))
+    /* Tool captures need the final presenter even while the window stays minimised. */
+    if (sdl_window && (!(SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MINIMIZED) || getenv("DHD_CAPTURE_PRESENTED")))
         SDL_GetWindowSizeInPixels(sdl_window, &w, &h);
     SDL_SetAtomicInt(&drawable, (w > 0 ? w : 0) << 16 | (h > 0 ? h : 0));
 }
@@ -387,10 +388,13 @@ void gs_window_apply(void)
 
 /* The PC settings page changed something the native renderer follows while the game runs:
    DHD_PRESENT_FILTER and DHD_ASPECT (the present options), DHD_SCALE (the resolution, whose
-   upscaled surfaces are made over) and DHD_VSYNC (the swap chain's present mode). Native renderer
-   only: the exact one has none of them, its picture is the PS2's. */
+   upscaled surfaces are made over) and DHD_VSYNC (the swap chain's present mode); and the FPS & PING
+   counter (gs_gpu_counter_apply). The rest is native renderer only: the exact one has none of them,
+   its picture is the PS2's. */
+void gs_gpu_counter_apply(void);  /* port/gs/gpu_rust.c */
 void gs_present_options_apply(void)
 {
+    gs_gpu_counter_apply();
     if (!sdl_window || !gs_gpu_native(&gs)) return;
     gs_native_present_options(&gs);
     gs_native_scale_apply(&gs);

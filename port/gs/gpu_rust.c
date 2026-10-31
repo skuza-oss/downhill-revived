@@ -34,11 +34,39 @@
 #include <windows.h>
 #include <dxgi.h>
 #endif
+#include <SDL3/SDL_atomic.h>
 #include <SDL3/SDL_timer.h>  /* the performance counter */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "dhd_render.h"   /* -Iport/render/include */
+
+#ifndef DHD_GS_TEST_BUILD
+#include "../net/net.h"
+#endif
+
+/* PC SETTINGS' FPS & Ping (DHD_PERF_COUNTER, finding 120): read at the first picture and again
+   when the page changes it (gs_present_options_apply, on the game thread that sets it), not for
+   every picture: getenv scans the whole environment (finding 090 SP14). -1: not read yet. */
+static SDL_AtomicInt counter_on = {-1};
+
+void gs_gpu_counter_apply(void)
+{
+    const char *v = getenv("DHD_PERF_COUNTER");
+    SDL_SetAtomicInt(&counter_on, v && atoi(v) != 0);
+}
+
+static void counter_present(DhdrSurface *surface)
+{
+    if (SDL_GetAtomicInt(&counter_on) < 0) gs_gpu_counter_apply();
+    int enabled = SDL_GetAtomicInt(&counter_on), ping = -1;
+#ifndef DHD_GS_TEST_BUILD
+    if (enabled) ping = net_ping_ms();
+#endif
+    dhdr_surface_counter(surface, enabled, ping,
+                         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency());
+    dhdr_surface_present(surface);
+}
 
 /* Rust's log lines (one UTF-8 line, no newline), from any thread: stderr, which is dhd.log in the
    game (host.c; hle_log writes there too), flushed so a line before an abort is kept. Written with
@@ -426,7 +454,7 @@ int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned heigh
     int r = dhdr_present_exact(p->surface, p->x, pixels, width, height, window_width, window_height);
     if (r < 0) return 0;
     if (pixels) p->e.display_valid = 1;
-    if (r == 1) dhdr_surface_present(p->surface);
+    if (r == 1) counter_present(p->surface);
     return 1;
 }
 

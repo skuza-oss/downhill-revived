@@ -83,7 +83,7 @@ static void native_present(Native *n)
     if (!n->interp) pacing_present(n->present_due, n->present_began);  /* holds the picture to its due time */
     native_rstat_add(RSTAT_PACE, rs);
     rs = native_rstat_start();
-    dhdr_surface_present(p->surface);
+    counter_present(p->surface);
     native_rstat_add(RSTAT_SHOW, rs);
     native_note_presented(n);
     if (spikes) {

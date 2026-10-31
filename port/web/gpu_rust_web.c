@@ -31,12 +31,29 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wasi/libc-environ.h>
+#include <time.h>
 #include "dhd_render.h"   /* -Iport/render/include */
 #include "../gs/gpu_exact.inc"
 
 /* The reactor's own JSPI import: suspends until the read in flight has mapped. 1 = mapped, 0 = failed
    (never rejects; with nothing in flight it is 1 at once). */
 __attribute__((import_module("env"), import_name("web_gpu_await"))) int32_t web_gpu_await(void);
+
+/* PC SETTINGS' FPS & Ping (DHD_PERF_COUNTER): read at the first picture and when the page sets
+   it (web_env_changed), not for every picture. The browser shows no ping yet. -1: not read. */
+static int counter_on = -1;
+
+static void counter_present(DhdrSurface *surface)
+{
+    struct timespec now;
+    if (counter_on < 0) {
+        const char *v = getenv("DHD_PERF_COUNTER");
+        counter_on = v && atoi(v) != 0;
+    }
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    dhdr_surface_counter(surface, counter_on, -1, now.tv_sec + now.tv_nsec * 1e-9);
+    dhdr_surface_present(surface);
+}
 
 /* The raster key passed to dhdr_exact_create; worker.js passes the same one to dhdr_web_init. */
 #define WEB_RASTER_FLAGS (DHDR_RASTER_EARLY_DEPTH | DHDR_RASTER_ADDRESS_SHIFT | DHDR_RASTER_EXCLUSIVE_WORD_STORE)
@@ -139,9 +156,10 @@ __attribute__((export_name("web_display"))) uint32_t web_display(void)
     if (!web) return 0;
     int changed = env_changed;
     env_changed = 0;
+    if (changed) __wasilibc_deinitialize_environ(), counter_on = -1;
     if (web->native) {
         /* the present options before this picture, a new scale after it (native_rescale) */
-        if (changed) { __wasilibc_deinitialize_environ(); web_native_present_options(g); }
+        if (changed) web_native_present_options(g);
         /* the field is drawn now (NATIVE_INLINE) and shown by the web_present that follows */
         width = 640; height = 448;
         web_native_movie(g, NULL, 0, 0);
@@ -172,7 +190,7 @@ __attribute__((export_name("web_present"))) int web_present(uint32_t canvas_w, u
         p->surface = NULL;
         return 0;
     }
-    if (r == 1) dhdr_surface_present(p->surface);
+    if (r == 1) counter_present(p->surface);
     return r;
 }
 

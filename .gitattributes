@@ -12,3 +12,13 @@
 *.txt text eol=lf
 *.json text eol=lf
 *.wgsl text eol=lf
+*.md text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.jsonc text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.wat text eol=lf

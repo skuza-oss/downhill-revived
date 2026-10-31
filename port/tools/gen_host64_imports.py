@@ -288,6 +288,7 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
             'host_service_graphics_feed': [(1,'host64_bridge_array_bytes((int32_t)a2,4)')],
             'host_service_net_get_lobby': [(0,'sizeof(NetLobby)')],
             'host_service_net_get_chat': [(0,'sizeof(NetChat)')],
+            'host_service_net_rotation': [(0,'host64_bridge_array_bytes((int32_t)a1,1)')],
             'host_service_net_set_room': [(0,'28')],
             'host_service_net_send_frame': [(1,'a2')],
             'host_service_net_receive_frame': [(0,'a1')],

@@ -8,7 +8,6 @@ each puppet, hits, finishes and results.
 
     python port/tools/online_race.py [--seconds 420] [--out DIR] [--capture g+600,g+1200]
                                      [--bots N --replay FILE] [--kill-guest-at SECONDS]
-                                     [--next again|new]
 
 Needs DHD_ISO, DHD_NET_SERVER (the official wss://dhd.skuza.app or
 your own; never write any other deployed address into a tracked file) and the
@@ -27,7 +26,7 @@ PEDAL = '0:400:cross'
 PUNCHES = ','.join(f'{1 + k * 0.5:.1f}:0.15:{"square" if k % 2 == 0 else "circle"}' for k in range(80))
 HOST_PAD = PEDAL
 GUEST_PAD = PEDAL + ',' + PUNCHES
-KEEP = ('went at', 'countdown starts', 'chose', 'accepted', 'next race', 'race is over', 'stale', 'rides', 'hit kind', 'finished', 'result', 'left', 'AI now',
+KEEP = ('went at', 'countdown starts', 'race is over', 'back to the room', 'rides', 'hit kind', 'finished', 'result', 'left', 'AI now',
         'starts at grid', 'Online play stopped', 'crash kind', 'has loaded')
 
 
@@ -132,9 +131,6 @@ def main():
     ap.add_argument('--kill-guest-at', type=float, help='stop the guest this many seconds after GO')
     ap.add_argument('--stop-if', default=os.path.join(ROOT, 'build', 'port', 'BENCH.lock'),
                     help='stop everything as soon as this file exists (the benchmark lock)')
-    ap.add_argument('--next', choices=('again', 'new'),
-                    help='after the results the host picks TRY AGAIN or NEW LEVEL (DHD_NET_HOST_NEXT); '
-                         'the run then waits for both games to start the next race')
     ap.add_argument('--minimized', action='store_true', help='both games start minimised (the PC stays usable)')
     ap.add_argument('--a', action='append', default=[], help='extra NAME=VALUE for the host game')
     ap.add_argument('--b', action='append', default=[], help='extra NAME=VALUE for the joining game')
@@ -167,8 +163,7 @@ def main():
 
     players = 2 + a.bots
     with owned:
-        host_next = {'DHD_NET_HOST_NEXT': a.next} if a.next else {}
-        da = game('A', HOST_PAD, {**host_next, 'DHD_NET_CREATE': '1', 'DHD_NET_NAME': 'Host', 'DHD_NET_PLAYERS': str(players),
+        da = game('A', HOST_PAD, {'DHD_NET_CREATE': '1', 'DHD_NET_NAME': 'Host', 'DHD_NET_PLAYERS': str(players),
                                   'DHD_NET_TRACK': a.track, 'DHD_NET_RIDER': '4', **dict(x.split('=', 1) for x in a.a)})
         m = wait_line([da / 'stderr.log'], r'online: room (\w+) \(host\)', 120, procs, a.stop_if)[0]
         if not m:
@@ -200,11 +195,6 @@ def main():
         time.sleep(6)
         if not all(done):
             print('not every game got the results')
-        elif a.next:
-            again = wait_line(logs, r'countdown starts[\s\S]*countdown starts', 180, procs, a.stop_if)
-            print('next race: ' + ', '.join(f'{d.name} {"started" if m else "did NOT start"}'
-                                            for d, m in zip((da, db), again)))
-            time.sleep(10)
     ok = True
     for d in dirs:
         text = (d / 'stderr.log').read_text(errors='replace') if (d / 'stderr.log').exists() else ''

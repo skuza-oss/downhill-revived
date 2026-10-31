@@ -204,7 +204,7 @@ describe("leaderboard submissions", () => {
   it("lists a board and bounds the query", async () => {
     await post(body({ track: 5, laps: 1, name: "One", timeMs: 8000, replay: b64(ghost({ track: 5, laps: 1, seed: 1234, clocks: clocks(8000) })) }));
     const list = await (await get("track=5&laps=1&mode=tt")).json<any>();
-    expect(list).toMatchObject({ protocol: 1, track: 5, laps: 1, mode: "tt" });
+    expect(list).toMatchObject({ protocol: 2, track: 5, laps: 1, mode: "tt" });
     expect(list.entries.map((e: any) => e.name)).toEqual(["One"]);
 
     expect((await get("track=5&laps=1&mode=tt&limit=999")).status).toBe(400);

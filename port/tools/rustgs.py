@@ -126,9 +126,9 @@ DISC = RENDER / 'disc'   # dhd_disc, the disc image's online check, linked into 
 MEMBERS = (NET, SETTINGS, PRESENCE, DISC)
 GS = ROOT / 'port' / 'gs'
 WGSL = ('raster.wgsl', 'present.wgsl', 'native.wgsl', 'native_dual.wgsl')
+DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  # downloaded tools and caches
 CARGO_TARGETS = Path(os.environ.get('DHD_CARGO_DIR') or
-                     (Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches') / 'dhd-cargo' if os.name == 'nt'
-                      else Path.home() / '.cache' / 'dhd-cargo'))
+                     (DEVCACHES / 'dhd-cargo' if os.name == 'nt' else Path.home() / '.cache' / 'dhd-cargo'))
 SEED = CARGO_TARGETS / 'seed'
 WEB_OUT = ROOT / 'build' / 'web' / 'renderer'
 RENDER_CRATE = 'dhd_render'
@@ -696,8 +696,10 @@ def common(triple, profile):
             triple, ' and '.join(TARGETS)))
     if profile not in PROFILES:
         refuse('--profile %s: one of %s' % (profile, ', '.join(PROFILES)))
-    if os.path.splitdrive(str(ROOT))[0].upper() == 'C:':
-        refuse('the worktree %s is on C:' % ROOT)
+    # A C: worktree is safe when its build folder is junctioned to the work drive.
+    # Cargo's own target/cache locations are checked separately.
+    if os.path.splitdrive(str(ROOT))[0].upper() == 'C:' and (ROOT / 'build').resolve().drive.upper() == 'C:':
+        refuse('the worktree %s needs its build folder off C: (a junction is fine)' % ROOT)
     return cargo_env(triple)
 
 

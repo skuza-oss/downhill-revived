@@ -888,6 +888,13 @@ def main():
         commit[:9]))
     if platform.key == 'win':
         print('  imports (all Windows DLLs): %s' % ', '.join(imported_dlls(exe)))
+        # dhd.log's crash stacks are rvas into this exe: its link map names them (crash_stack.py)
+        link_map = exe.with_name('dhd64.map')
+        if link_map.exists():
+            shutil.copyfile(link_map, out.with_suffix('.map'))
+            print('  link map %s (keep it: crash_stack.py reads players\' crash stacks with it)' % out.with_suffix('.map'))
+        else:
+            print('  note: no %s; players\' crash stacks of this build can\'t be read' % link_map)
     else:
         print('  libraries (all %s\'s own): %s' % (platform.name, ', '.join(needed_libraries(exe, platform.kind))))
     if platform.key == 'linux':
