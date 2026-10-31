@@ -15,7 +15,8 @@ PROGRAMS = {  # name: (sources, libraries, run in the tests, SDL3)
     'test_hash': (['hash.c', 'test_hash.c', 'test_guest.c'], '', True, False),
     'test_json': (['json.c', 'test_json.c'], '', True, False),
     'test_loopback': (CLIENT + ['test_loopback.c'], 'winmm.lib', True, True),
-    'nettool': (CLIENT + ['net.c', 'nettool.c'], 'winmm.lib user32.lib ' + RUST, False, True),
+    'test_join': (['join.c', 'test_join.c'], '', True, False),
+    'nettool': (CLIENT + ['net.c', 'join.c', 'nettool.c'], 'winmm.lib user32.lib ' + RUST, False, True),
 }
 
 

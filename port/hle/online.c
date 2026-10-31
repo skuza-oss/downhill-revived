@@ -418,7 +418,8 @@ static void connect_lobby(void)
     build_version(version, sizeof version);
     host_service_net_init(GADDR(server), GADDR(name && *name ? name : "Rider"), GADDR(version), GADDR(iso));
     if (join && *join) {
-        if (host_service_net_join_room(GADDR(join)) < 0) fail("that join code can't be one (6 letters and digits).");
+        /* DHD_NET_JOIN: a bare code, or a whole join link (net_join_room takes the code out). */
+        if (host_service_net_join_room(GADDR(join)) < 0) fail("that join value holds no code (a code or a link).");
     } else
         host_service_net_create_room();
     fprintf(stderr, "online: %s, version %s\n", join && *join ? "joining" : "creating a room", version);

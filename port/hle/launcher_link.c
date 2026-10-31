@@ -24,7 +24,7 @@
 static int automated(void)
 {
     static const char *const tools[] = {"DHD_NAV", "DHD_AUTOPAD_FRAMES", "DHD_RACE_SYNC", "DHD_RACE_PAD",
-                                        "DHD_NET_CREATE", "DHD_NET_JOIN", "DHD_HEADLESS"};
+                                        "DHD_NET_CREATE", "DHD_NET_JOIN", "DHD_HEADLESS", "DHD_NET_ROOM"};
     for (unsigned i = 0; i < sizeof tools / sizeof *tools; i++)
         if (getenv(tools[i])) return 1;
     return 0;

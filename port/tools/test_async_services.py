@@ -290,7 +290,7 @@ def main():
     import sdl3
     sdl_lib, sdl_include = sdl3.build()
     sources = [harness, ROOT / 'port/host/host_sdl.c', ROOT / 'port/net/net.c', ROOT / 'port/net/client.c', ROOT / 'port/net/json.c',
-               ROOT / 'port/net/hash.c']
+               ROOT / 'port/net/join.c', ROOT / 'port/net/hash.c']
     # the WebSocket/HTTP client (ws.h), dhd_net, and the disc check, dhd_disc: inside the Rust
     # library rustgs.py builds
     import rustgs

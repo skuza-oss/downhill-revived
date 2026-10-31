@@ -15,7 +15,7 @@ DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'build/web'
 WASI=DEVCACHES/'wasi-sdk/wasi-sdk-34.0-x86_64-windows'
-SOURCES=[ROOT/'port/net'/n for n in ('client.c','json.c','net.c')]+[ROOT/'port/web/net/net_web.c']
+SOURCES=[ROOT/'port/net'/n for n in ('client.c','json.c','join.c','net.c')]+[ROOT/'port/web/net/net_web.c']
 EXPORTS=['host_service_net_'+n for n in ('init','create_room','join_room','leave','get_lobby','pick','set_ready','start_race',
          'racing','seconds','server_ms','send_frame','receive_frame','list_lobbies','set_room',
          'send_chat','get_chat')]+['web_net_lobby_size','web_net_info_size','web_net_chat_size','malloc','free']

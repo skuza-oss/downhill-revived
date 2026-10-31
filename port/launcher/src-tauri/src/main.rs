@@ -5,6 +5,7 @@
 
 mod disc;
 mod game;
+mod join;
 mod update;
 
 use serde::Serialize;
@@ -30,6 +31,9 @@ struct App {
     starting: AtomicBool,
     /// The newest online check of the disc image (check_disc): an older one still hashing stops.
     disc_check: AtomicU64,
+    /// The room a link (command line or the dhd:// scheme) asked to join (finding 125): passed to
+    /// the game in DHD_NET_ROOM at the next PLAY, then taken so it joins it once.
+    join: Mutex<Option<String>>,
 }
 
 #[derive(Serialize)]
@@ -235,7 +239,8 @@ fn play(handle: AppHandle, app: State<App>) -> Result<(), String> {
     if slot.is_some() {
         return Ok(());
     }
-    let child = app.place.start().map_err(|e| format!("can't start {}: {e}", game::GAME_EXE))?;
+    let join = app.join.lock().unwrap().take();  /* a link's room joins once */
+    let child = app.place.start_with_join(join.as_deref()).map_err(|e| format!("can't start {}: {e}", game::GAME_EXE))?;
     *slot = Some(child);
     app.starting.store(true, Ordering::Relaxed);
     let h = handle.clone();
@@ -454,15 +459,35 @@ fn main() {
     let place = game::Place::find();
     update::clean_up(&place);
     let _ = dhd_settings::create(&place.settings());
+    /* A link on the command line (or passed by the registered dhd:// scheme on Windows) names a
+       room to join: the game gets its code in DHD_NET_ROOM when PLAY starts it (finding 125). */
+    let join_code = join::code_from_args(std::env::args());
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|_app| {
             #[cfg(unix)]
             quit_signals::install(_app.handle().clone());
+            /* Register dhd:// so a shared scheme link opens this launcher (finding 125). Best
+               effort and off the main thread; macOS and Linux need the packaging to declare it. */
+            #[cfg(windows)]
+            {
+                let exe = std::env::current_exe().ok();
+                std::thread::spawn(move || {
+                    if let Some(exe) = exe {
+                        join::register_scheme(&exe);
+                    }
+                });
+            }
             Ok(())
         })
-        .manage(App { place, game: Mutex::new(None), starting: AtomicBool::new(false), disc_check: AtomicU64::new(0) })
+        .manage(App {
+            place,
+            game: Mutex::new(None),
+            starting: AtomicBool::new(false),
+            disc_check: AtomicU64::new(0),
+            join: Mutex::new(join_code),
+        })
         .on_window_event(|window, event| {
             // The game's window took the focus: it is up.
             if let tauri::WindowEvent::Focused(false) = event {
