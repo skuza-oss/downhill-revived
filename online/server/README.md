@@ -10,6 +10,7 @@ is `docs/ONLINE-PLAN.md`.
 | `src/room.ts` | `Room` Durable Object, one per join code: lobby, start, race relay, leave handling. |
 | `src/lobbies.ts` | `LobbyIndex` Durable Object (a single global one): the public lobby list. |
 | `src/protocol.ts` | Constants, join codes, the version gate. |
+| `src/times.ts` | `TrackTimes` Durable Object, one per track and lap count: time-trial boards and ghosts (`/v1/times`, `/v1/ghost`, finding 127). |
 | `test/` | Vitest suite, run inside the Workers runtime (`@cloudflare/vitest-plugin`). |
 | `tools/loadtest.mjs` | Simulated race (STATE frames, 20 a second per player) against a running server; reports relay latency. |
 
@@ -74,12 +75,19 @@ counts as 0.1.0. Raise it after a release is published, so players update, and d
 Live logs: `npx wrangler tail`. Redeploying disconnects every open room (Durable Objects
 restart on a new version), so don't deploy during races.
 
-The Durable Object classes are created by the `v1` migration in `wrangler.jsonc`. Renaming or
+The Durable Object classes are created by the `v1` migration in `wrangler.jsonc`, and
+`TrackTimes` by `v2`. Renaming or
 removing a class later needs a new migration entry, not an edit of `v1`.
 
 ## Limits and what is not there yet
 
-- No reconnect: a dropped racer becomes the host's AI rider for the rest of the race.
-- No authentication or rate limiting beyond the protocol checks (version, ISO hash, sizes).
+- Rejoin: a client that sent the `reconnect` feature keeps its slot, in the lobby or a race, for
+  20 s after a drop and comes back with the token its `welcome` carried; the others see `away`,
+  then `back` or `left` (`docs/online-protocol.md`, finding 126). Older clients' racers become
+  the host's AI at once, as before.
+- No authentication or rate limiting beyond the protocol checks (version, ISO hash, sizes, the
+  rejoin token, which is unguessable and room-bound).
+- Time-trial times are not verified: anyone can post a plausible fake (finding 127 says what
+  checking them would take).
 - The server does not check the ISO hash against the known US ISO; the client must refuse
   other regions, and the server only makes everyone match the host.

@@ -35,9 +35,41 @@ static const struct { int index; const char *name; } riders[] = {
 
 static const char code_letters[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";  /* the server's join codes */
 static const char name_letters[] = SETTING_NAME_LETTERS;
+
+/* ---- text chat's shared pieces (finding 125; the room here, the race in online.c) ----
+   What can be typed, and shown: the game's font draws its button glyphs for bytes 0x80 and up,
+   so a line from the server (UTF-8, any case) is shown in capitals, as the game's own text is,
+   and a character outside these as '?'. */
+const char port_chat_letters[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?'-:/";
+/* Said with a pad, no keyboard needed: in the room's chat (left/right, Cross) and in a race's
+   pause menu (L1, R1, L2, R2). */
+const char *const port_chat_presets[PORT_CHAT_PRESETS] = {"GG", "READY?", "NICE!", "ONE MORE?"};
+
+void port_chat_clean(char *out, int size, const char *in)
+{
+    int n = 0;
+    for (const unsigned char *c = (const unsigned char *)in; *c && n < size - 1; c++) {
+        if ((*c & 0xC0) == 0x80) continue;  /* the rest of a UTF-8 character: one '?' for it */
+        char up = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
+        out[n++] = *c < 0x80 && strchr(port_chat_letters, up) ? up : '?';
+    }
+    out[n] = 0;
+}
+
+/* A chat line as shown: "NAME: TEXT", or the client's own note alone (member -1). */
+void port_chat_show(char *out, int size, const char *name, const char *text, int member_id)
+{
+    char who[NET_CHAT_NAME], said[NET_CHAT_TEXT];
+    port_chat_clean(who, sizeof who, name);
+    port_chat_clean(said, sizeof said, text);
+    if (member_id < 0 || !who[0]) snprintf(out, size, "%s", said);
+    else snprintf(out, size, "%.12s: %s", who, said);
+}
 enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 4 };
 
 enum { HOME, LIST, NAME, CODE, ROOM };
+/* ONLINE's rows */
+enum { HOME_NAME, HOME_QUICK, HOME_LIST, HOME_CREATE_PUBLIC, HOME_CREATE_PRIVATE, HOME_JOIN, HOME_UPDATE };
 /* The room's rows */
 /* The room's options, carried in the server's "laps" setting (Downhill Domination has no laps):
    every PC builds the same race from them (online.c hle_online_ai_count, hle_cheat_code). Cheat
@@ -404,6 +436,98 @@ static const char *const *disc_shown;  /* the disc_note HOME's rows have */
 
 static void room_open(void);
 
+/* Quick Race (finding 128): one choice that joins an open public room of this build, the one
+   with the most players (it starts soonest), else creates a public room and waits there. Only
+   the client: the public list (/v1/lobbies) has every room that has not started and has space.
+   quick: 1 reading the list, 2 joining the room it chose (if that room filled or started
+   meanwhile, a public room is created instead). */
+static int quick;
+static void enter_room(int create, const char *code);
+static void start_list(void);
+
+static void quick_begin(void)
+{
+    const char *why = not_ready();
+    if (why) {
+        snprintf(status, sizeof status, "%s", why);
+        return;
+    }
+    quick = 1;
+    start_list();
+    snprintf(status, sizeof status, "Looking for a race...");
+    hle_log("online menu: quick race: reading the public list\n");
+}
+
+/* The list came: the best room to join, else a room of our own. */
+static void quick_choose(void)
+{
+    int best = -1;
+    for (int i = 0; list_count > 0 && i < list_count; i++) {
+        const NetLobbyInfo *l = &list[i];
+        if (strcmp(l->version, version) || l->players >= l->max_players || !l->code[0]) continue;
+        if (best < 0 || l->players > list[best].players) best = i;
+    }
+    if (best >= 0) {
+        hle_log("online menu: quick race: joining %s (%d/%d)\n", list[best].code, list[best].players, list[best].max_players);
+        quick = 2;
+        enter_room(0, list[best].code);
+        if (!connecting) quick = 0;
+    } else {
+        hle_log("online menu: quick race: no open room of this version%s; creating a public one\n",
+                list_count < 0 ? " (the list didn't come)" : "");
+        quick = 0;
+        enter_room(2, NULL);
+    }
+}
+
+/* The room it chose was gone or full by the time we came: a room of our own. */
+static int quick_retry(const NetLobby *l)
+{
+    return quick == 2 && (!strcmp(l->error_code, "room_full") || !strcmp(l->error_code, "room_started") ||
+                          !strcmp(l->error_code, "room_not_found"));
+}
+
+/* ---- DHD_NET_ROOM=CODE (finding 128): a link's or a launcher's room ----
+   Read once at the start. The main menu opens ONLINE by itself (port_online_resume) and ONLINE
+   joins that room as soon as the disc's check allows. (DHD_NET_JOIN is the tools' scripted
+   flow in online.c, which skips the menus: a different thing.) */
+static char link_code[CODE_LENGTH + 1];
+static int join_state;  /* 0 not read, 1 open ONLINE, 2 join from ONLINE, 3 done or none */
+
+static void join_read(void)
+{
+    if (join_state) return;
+    const char *v = getenv("DHD_NET_ROOM");
+    int n = 0;
+    join_state = 3;
+    if (!v || !*v) return;
+    for (; v[n] && n < CODE_LENGTH + 1; n++) {
+        char up = (char)(v[n] >= 'a' && v[n] <= 'z' ? v[n] - 32 : v[n]);
+        if (n == CODE_LENGTH || !strchr(code_letters, up)) break;
+        link_code[n] = up;
+    }
+    link_code[n < CODE_LENGTH ? 0 : CODE_LENGTH] = 0;
+    if (n != CODE_LENGTH || v[n]) {
+        hle_log("online menu: DHD_NET_ROOM=%s can't be a join code (6 letters and digits)\n", v);
+        return;
+    }
+    join_state = 1;
+    hle_log("online menu: DHD_NET_ROOM: room %s, joined from ONLINE\n", link_code);
+}
+
+/* On ONLINE, each frame: join that room once the disc's check has an answer. */
+static void join_poll(void)
+{
+    if (join_state != 2 || connecting) return;
+    if (iso_state <= 1) {
+        snprintf(status, sizeof status, "Joining room %s: checking the disc first...", link_code);
+        return;
+    }
+    join_state = 3;
+    status[0] = 0;
+    enter_room(0, link_code);
+}
+
 static void go(int to)
 {
     host_service_text_input_end();
@@ -456,6 +580,7 @@ static void page_build(MenuPage *p)
         p->title = "ONLINE";
         snprintf(text[0], ROW_TEXT, "Name:  %s", name);
         menu_page_row(p, text[0], 1);
+        menu_page_row(p, "Quick Race", 1);
         menu_page_row(p, "Public Races", 1);
         menu_page_row(p, "Create A Public Race", 1);
         menu_page_row(p, "Create A Private Race", 1);
@@ -516,7 +641,7 @@ static void refused(const NetLobby *l)
     host_service_net_leave();
     reset_selection();
     connecting = 0;
-    if (too_old) home_row = 5;
+    if (too_old) home_row = HOME_UPDATE;
 }
 
 /* In the room: the host's settings, then this member's first (not ready) state, once each. */
@@ -544,7 +669,14 @@ static void connect_poll(MenuPage *p)
     static NetLobby l;
     host_service_net_get_lobby(GADDR(&l));
     if (l.state == NET_FAILED || l.state == NET_IDLE) {
+        int retry = quick_retry(&l);
         refused(&l);
+        quick = 0;
+        if (retry) {
+            hle_log("online menu: quick race: that room was taken; creating a public one\n");
+            enter_room(2, NULL);
+            return;
+        }
         if (outdated && screen == HOME) menu_page_rebuild_at(p, home_row);
         return;
     }
@@ -554,6 +686,7 @@ static void connect_poll(MenuPage *p)
         if (tracks[k].index == l.track) room_track = k;
     room_options = l.laps;
     connecting = 0;
+    quick = 0;
     status[0] = 0;
     unlock_all();
     choosing = 1;
@@ -616,6 +749,15 @@ static char seen_name[NET_MAX_SLOTS][16];
 static double ready_heard[NET_MAX_SLOTS];     /* per card: the last ready sound (no spam) */
 static int countdown_shown = -1;
 static char title_text[32], footer_text[96];
+/* The room's chat (finding 125): L1 or Y opens it over the room; typing goes to its line (Enter
+   says it, Esc closes), and a pad says one of the quick lines (left/right, Cross). Closed, a line
+   from someone else shows as a note at the top, and the CHAT tag counts what is unread. */
+enum { CHAT_ROWS = 9, CHAT_ROW_TEXT = 80, CHAT_KEY = 'Y' };
+static NetChat chat;                          /* this frame's copy */
+static int chat_open, chat_preset, chat_unread, chat_key_held, chat_seen_valid;
+static unsigned chat_seen;                    /* the newest line noted */
+static char chat_entry[NET_CHAT_MAX + 1];
+static Hit chat_hit, chat_preset_hits[PORT_CHAT_PRESETS], chat_back;
 
 /* The buttons held on both pads. A pad's word can read all ones for one field as a press starts
    (its entry is 0 before the next read, func_00220230): -1 then, so that field changes nothing. */
@@ -631,7 +773,7 @@ typedef struct {
     int in;            /* in the room (not reconnecting) */
     int self;          /* this PC's member, -1 none */
     int own_ready, own_choosing;
-    int ready, can_start, host;
+    int ready, reconnecting, can_start, host;
 } RoomNow;
 
 static RoomNow room_now(void)
@@ -644,10 +786,12 @@ static RoomNow room_now(void)
     for (int i = 0; i < l->nmembers; i++) {
         const NetMember *m = &l->member[i];
         r.ready += m->ready;
+        r.reconnecting += (l->members_reconnecting >> i) & 1;  /* a slot the server holds for a dropped player */
         if (m->id != l->member_id) continue;
         r.self = i, r.own_ready = m->ready, r.own_choosing = m->choosing;
     }
-    r.can_start = r.host && l->nmembers >= 2 && r.ready == l->nmembers;
+    /* The server refuses a start while a slot is held (finding 126): say so here too. */
+    r.can_start = r.host && l->nmembers >= 2 && !r.reconnecting && r.ready == l->nmembers;
     return r;
 }
 
@@ -781,6 +925,62 @@ static void move(int dx, int dy, const RoomNow *r)
     if (rf != was) menu_page_sound(dx > 0 || dy > 0);
 }
 
+/* ---- the room's chat ---- */
+
+static void note(const char *text, const int *colour);
+
+static void chat_begin(void)
+{
+    chat_open = 1, chat_unread = 0, chat_entry[0] = 0;
+    host_service_text_input_begin();
+    menu_play("S_SELECT");
+}
+
+static void chat_close(int sound)
+{
+    if (!chat_open) return;
+    chat_open = 0;
+    host_service_text_input_end();
+    if (sound) menu_play("S_BACK");
+}
+
+static void chat_say(const char *text)
+{
+    int sent = host_service_net_send_chat(GADDR(text));
+    menu_play(sent ? "S_SELECT" : "S_CANCEL");
+}
+
+/* Every frame: the lines that came, and the keyboard's line while the chat is open. */
+static void chat_update(void)
+{
+    host_service_net_get_chat(GADDR(&chat));
+    if (!chat_seen_valid) chat_seen = chat.seq, chat_seen_valid = 1;  /* said before this page opened */
+    for (int i = 0; i < chat.count; i++) {
+        const NetChatLine *line = &chat.line[i];
+        if (line->seq <= chat_seen || chat_open || line->member_id == room.member_id) continue;
+        char shown[48];
+        port_chat_show(shown, sizeof shown, line->name, line->text, line->member_id);
+        note(shown, line->member_id < 0 ? red : NULL);
+        if (line->member_id >= 0) chat_unread++, menu_play("S_NEXT");
+    }
+    chat_seen = chat.seq;
+    int key = host_service_key_held(CHAT_KEY);
+    if (key && !chat_key_held && !chat_open && !track_list && !leave_ask && room_now().in) chat_begin();
+    chat_key_held = key;
+    if (!chat_open) return;
+    int action = host_service_text_input_edit(GADDR(chat_entry), sizeof chat_entry, GADDR(port_chat_letters));
+    if (action < 0) chat_close(1);
+    else if (action > 0 && chat_entry[0]) chat_say(chat_entry), chat_entry[0] = 0;
+}
+
+/* A pad in the open chat: left/right choose a quick line, Cross says it, Triangle or L1 closes. */
+static void chat_input(int pressed, int dx)
+{
+    if (dx) chat_preset = (chat_preset + dx + PORT_CHAT_PRESETS) % PORT_CHAT_PRESETS, menu_page_sound(dx > 0);
+    if (pressed & PAD_CROSS) chat_say(port_chat_presets[chat_preset]);
+    else if (pressed & (PAD_TRIANGLE | PAD_L1)) chat_close(1);
+}
+
 static void room_input(MenuPage *p, const RoomNow *r)
 {
     int held = pads_held();
@@ -793,6 +993,10 @@ static void room_input(MenuPage *p, const RoomNow *r)
         repeat_buttons = dirs, repeat_frames = 0;
     if (!p->armed) return;
     int dx = pressed & PAD_LEFT ? -1 : pressed & PAD_RIGHT ? 1 : 0, dy = pressed & PAD_UP ? -1 : pressed & PAD_DOWN ? 1 : 0;
+    if (chat_open) {
+        chat_input(pressed, dx);
+        return;
+    }
     if (leave_ask) {
         if (dy) leave_choice ^= 1, menu_page_sound(dy > 0);
         if (pressed & PAD_CROSS) {
@@ -816,6 +1020,7 @@ static void room_input(MenuPage *p, const RoomNow *r)
     else if (pressed & (PAD_SQUARE | PAD_START)) toggle_ready(r);
     else if (pressed & PAD_CIRCLE) copy_code();
     else if (pressed & PAD_TRIANGLE) open_leave(r, "Triangle");
+    else if (pressed & PAD_L1 && r->in) chat_begin();
 }
 
 static int inside(const Hit *h, int x, int y) { return h->w > 0 && x >= h->x && x < h->x + h->w && y >= h->y && y < h->y + h->h; }
@@ -826,6 +1031,20 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
 {
     RoomNow r = room_now();
     if (!p->armed) return;
+    if (chat_open) {
+        for (int i = 0; i < PORT_CHAT_PRESETS; i++)
+            if (inside(&chat_preset_hits[i], x, y)) {
+                if (moved && chat_preset != i) chat_preset = i, menu_page_sound(1);
+                if (left) chat_preset = i, chat_say(port_chat_presets[i]);
+            }
+        if (left && inside(&chat_back, x, y)) chat_close(1);
+        if (wheel) chat_input(0, wheel > 0 ? -1 : 1);
+        return;
+    }
+    if (left && inside(&chat_hit, x, y) && r.in) {
+        chat_begin();
+        return;
+    }
     if (leave_ask) {
         for (int i = 0; i < 2; i++)
             if (inside(&leave_hits[i], x, y)) {
@@ -998,8 +1217,10 @@ static void draw_card(int i)
         return;
     }
     const NetMember *m = &l->member[i];
+    int reconnecting = (l->members_reconnecting >> i) & 1;
     box(x, y, CARD_W, CARD_H, 90);
-    rect(x, y + 1, 3, CARD_H - 2, m->ready ? green : (const int[]){0x2B, 0x29, 0x44}, 128);
+    /* red stripe: a dropped player the server is holding the slot for (finding 126) */
+    rect(x, y + 1, 3, CARD_H - 2, reconnecting ? red : m->ready ? green : (const int[]){0x2B, 0x29, 0x44}, 128);
     put(MENU_CENTRE, x + 13, y + 7, (char[]){(char)('1' + i), 0}, menu_style(st_row, 120, -1, 0, 0));
     /* the name, with Host and You beside it */
     snprintf(line, sizeof line, "%.12s", m->name);
@@ -1009,9 +1230,9 @@ static void draw_card(int i)
     const char *who = m->id == l->host_id && m->id == l->member_id ? "HOST - YOU" : m->id == l->host_id ? "HOST"
                     : m->id == l->member_id ? "YOU" : NULL;
     if (who) put(MENU_LEFT, x + 26 + menu_text_width(line, &name) * 640 / vw + 7, y + 5, who, menu_style(st_on, 70, -1, 0, 0));
-    /* what they are doing: choosing, ready, not ready */
-    const char *tag = m->choosing ? "CHOOSING..." : m->ready ? "READY" : "NOT READY";
-    const int *c = m->choosing ? NULL : m->ready ? green : amber;
+    /* what they are doing: reconnecting, choosing, ready, not ready */
+    const char *tag = reconnecting ? "RECONNECTING..." : m->choosing ? "CHOOSING..." : m->ready ? "READY" : "NOT READY";
+    const int *c = reconnecting ? red : m->choosing ? NULL : m->ready ? green : amber;
     MenuStyle ts = c ? tint(st_row, 85, c) : menu_style(st_on, 85, -1, 0, 0);
     put(MENU_RIGHT, x + CARD_W - 7, y + 4, tag, ts);
     /* the rider below the name, the delay below the state */
@@ -1051,7 +1272,9 @@ static void draw_bar(const RoomNow *r)
     else if (l->countdown_ms >= 0) draw_bar_cell(RF_START, 2, "START NOW", NULL, r, 0);
     else if (r->can_start) draw_bar_cell(RF_START, 2, "START THE RACE", NULL, r, 0);
     else {
-        if (l->nmembers < 2) snprintf(why, sizeof why, "NEED 2 PLAYERS");
+        /* A held slot stops the start (finding 126): say that before the ready count. */
+        if (r->reconnecting) snprintf(why, sizeof why, "%d RECONNECTING", r->reconnecting);
+        else if (l->nmembers < 2) snprintf(why, sizeof why, "NEED 2 PLAYERS");
         else snprintf(why, sizeof why, "%d NOT READY", l->nmembers - r->ready);
         draw_bar_cell(RF_START, 2, "START", why, r, 0);
     }
@@ -1070,7 +1293,9 @@ static void draw_status(const RoomNow *r)
         else if (!l->member[i].ready) waiting++, who = who < 0 ? i : who;
     }
     if (status[0]) snprintf(line, sizeof line, "%s", status);
-    else if (!r->in) snprintf(line, sizeof line, "CONNECTING TO THE SERVER...");
+    else if (!r->in)
+        snprintf(line, sizeof line, "%s",
+                 room.state == NET_RECONNECTING ? "RECONNECTING TO THE SERVER..." : "CONNECTING TO THE SERVER...");
     else if (l->countdown_ms >= 0) snprintf(line, sizeof line, "EVERYONE IS READY: UNREADY TO STOP"), c = green;
     else if (!selected) snprintf(line, sizeof line, "CHOOSE YOUR RIDER FIRST");
     else if (l->nmembers < 2) snprintf(line, sizeof line, "WAITING FOR PLAYERS: SHARE THE CODE %s", l->code);
@@ -1129,6 +1354,92 @@ static void draw_leave(const RoomNow *r)
     }
 }
 
+/* A chat line in rows of at most w (the layout's units), broken between words (a word longer
+   than a row is cut); at most max rows. Returns the rows written. */
+static int chat_wrap(const char *text, const MenuStyle *s, int w, char rows[][CHAT_ROW_TEXT], int max)
+{
+    int n = 0;
+    const char *at = text;
+    while (*at && n < max) {
+        int len = 0, fit = 0;
+        char probe[CHAT_ROW_TEXT];
+        while (at[len] && len < CHAT_ROW_TEXT - 1) {  /* the longest start that fits */
+            memcpy(probe, at, len + 1), probe[len + 1] = 0;
+            if (menu_text_width(probe, s) * 640 / vw > w) break;
+            len++;
+            if (!at[len] || at[len] == ' ') fit = len;  /* ends a word */
+        }
+        if (!fit || !at[len]) fit = len;
+        if (!fit) fit = 1;
+        memcpy(rows[n], at, fit), rows[n][fit] = 0;
+        n++;
+        at += fit;
+        while (*at == ' ') at++;
+    }
+    return n;
+}
+
+/* The chat over the room, drawn alone as the track list is: the last lines, newest at the
+   bottom; the line being typed; the quick lines for a pad. */
+static void draw_chat(void)
+{
+    static char rows[CHAT_ROWS][CHAT_ROW_TEXT];
+    static int row_member[CHAT_ROWS];
+    const NetLobby *l = &room;
+    MenuStyle s = menu_style(st_row, 80, -1, 0, 0);
+    int n = 0;
+    rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
+    box(36, 22, 568, 180, 110);
+    put(MENU_CENTRE, 320, 28, "ROOM CHAT", menu_style(st_row, 115, -1, 0, 0));
+    /* the newest lines that fit, wrapped; older ones above */
+    for (int i = chat.count - 1; i >= 0 && n < CHAT_ROWS; i--) {
+        char shown[NET_CHAT_NAME + NET_CHAT_TEXT + 4], wrapped[3][CHAT_ROW_TEXT];
+        const NetChatLine *line = &chat.line[i];
+        port_chat_show(shown, sizeof shown, line->name, line->text, line->member_id);
+        int k = chat_wrap(shown, &s, 536, wrapped, 3);
+        if (n + k > CHAT_ROWS) break;
+        memmove(rows[k], rows[0], sizeof rows[0] * n);
+        memmove(row_member + k, row_member, sizeof row_member[0] * n);
+        for (int j = 0; j < k; j++) memcpy(rows[j], wrapped[j], CHAT_ROW_TEXT), row_member[j] = line->member_id;
+        n += k;
+    }
+    if (!n) put(MENU_CENTRE, 320, 90, "NOTHING SAID YET: SAY HELLO", menu_style(st_off, 85, -1, 0, 0));
+    for (int i = 0; i < n; i++) {
+        int m = row_member[i];
+        MenuStyle rs = m < 0 ? tint(st_row, 80, red) : m == l->member_id ? menu_style(st_on, 80, -1, 0, 0) : s;
+        put(MENU_LEFT, 52, 44 + (CHAT_ROWS - n + i) * 11, rows[i], rs);
+    }
+    /* the line being typed: a long one shows its end */
+    char typed[NET_CHAT_MAX + 8];
+    snprintf(typed, sizeof typed, "SAY: %s_", chat_entry);
+    rect(48, 145, 544, 13, (const int[]){0, 0, 0}, 70);
+    MenuStyle ts = fit(typed, st_on, 100, 536);
+    int over = menu_text_width(typed, &ts) * 640 / vw > 536;
+    put(over ? MENU_RIGHT : MENU_LEFT, over ? 588 : 52, 147, typed, ts);
+    /* the quick lines */
+    for (int i = 0; i < PORT_CHAT_PRESETS; i++) {
+        int w = 536 / PORT_CHAT_PRESETS, x = 52 + i * w, on = i == chat_preset;
+        if (on) bar(x + 4, 164, w - 8, 12);
+        put(MENU_CENTRE, x + w / 2, 165, port_chat_presets[i], on ? st_on : st_row);
+        hit(&chat_preset_hits[i], x, 162, w, 16);
+    }
+    put(MENU_CENTRE, 320, 184, "BACK", menu_style(st_row, 85, -1, 0, 0));
+    hit(&chat_back, 270, 181, 100, 14);
+}
+
+/* The chat's tag at the top left: how to open it, and how many lines are unread. */
+static void draw_chat_tag(void)
+{
+    char tag[24];
+    if (chat_unread) snprintf(tag, sizeof tag, "L1 / Y  CHAT (%d)", chat_unread > 9 ? 9 : chat_unread);
+    else snprintf(tag, sizeof tag, "L1 / Y  CHAT");
+    MenuStyle s = chat_unread ? tint(st_row, 75, green) : menu_style(st_off, 75, -1, 0, 0);
+    int w = menu_text_width(tag, &s) * 640 / vw + 14;
+    box(8, 3, w, 11, 90);
+    put(MENU_LEFT, 15, 5, tag, s);
+    hit(&chat_hit, 8, 3, w, 11);
+}
+
 /* The title and the footer, which the game draws: before its update. */
 static void room_texts(MenuPage *p)
 {
@@ -1138,7 +1449,10 @@ static void room_texts(MenuPage *p)
         p->title = title_text;
     } else
         p->title = "RACE ROOM";
-    if (leave_ask)
+    if (chat_open)
+        snprintf(footer_text, sizeof footer_text, GLYPH_LEFT GLYPH_RIGHT " PICK   " GLYPH_CROSS " SAY IT   TYPE + ENTER   "
+                 GLYPH_TRIANGLE " / ESC BACK");
+    else if (leave_ask)
         snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " CHOOSE   " GLYPH_TRIANGLE " STAY");
     else if (track_list)
         snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " CHOOSE   " GLYPH_TRIANGLE " BACK");
@@ -1164,6 +1478,7 @@ static void room_draw(MenuPage *p)
     st_off = menu_page_style(p, MENU_STYLE_OFF);
     menu_draw_begin();
     memset(hits, 0, sizeof hits);
+    memset(&chat_hit, 0, sizeof chat_hit);
     /* the countdown: under the title counting, a bar runs out */
     if (l->countdown_ms >= 0) {
         rect(L_X, 33, BAR_W, 2, (const int[]){0, 0, 0}, 128);
@@ -1171,8 +1486,9 @@ static void room_draw(MenuPage *p)
     }
     /* The game draws all text over every box: a list or a question over the room would show the
        room's text through it, so it is drawn alone. */
-    if (track_list || leave_ask) {
-        if (track_list) draw_track_list();
+    if (track_list || leave_ask || chat_open) {
+        if (chat_open) draw_chat();
+        else if (track_list) draw_track_list();
         else draw_leave(r);
         return;
     }
@@ -1189,6 +1505,7 @@ static void room_draw(MenuPage *p)
     draw_bar(r);
     draw_status(r);
     draw_toasts();
+    draw_chat_tag();
 }
 
 static void room_countdown_sounds(void)
@@ -1205,6 +1522,7 @@ static void room_open(void)
 {
     rf = rf_bar = selected ? RF_READY : RF_RIDER;
     track_list = leave_ask = room_closed = 0;
+    chat_open = chat_unread = chat_seen_valid = 0, chat_key_held = 1;  /* a Y held as the room opens waits */
     room_buttons = 0xFFFF, repeat_buttons = repeat_frames = 0;
     seen_count = -1, countdown_shown = -1;
     memset(toast, 0, sizeof toast);
@@ -1219,6 +1537,7 @@ static void room_update(MenuPage *p)
     NetLobby *l = &room;
     host_service_net_get_lobby(GADDR(l));
     if (l->state == NET_FAILED || l->state == NET_IDLE) {
+        chat_close(0);
         refused(l);
         if (in_shell) {  /* the rider screen's Back, then ONLINE again with the reason */
             race = 0;
@@ -1238,6 +1557,7 @@ static void room_update(MenuPage *p)
         hle_log("online menu: room %s: the race starts\n", l->code);
         race = 1;
         track_list = leave_ask = 0;
+        chat_close(0);
         hle_online_selected_ride(chosen_rider, chosen_outfit, chosen_cycle);
         hle_online_from_menu();
         menu_page_close(p);
@@ -1247,6 +1567,7 @@ static void room_update(MenuPage *p)
     /* Wait for the server to acknowledge unready before handing input to the picker.
        If a start won the race, the earlier started branch loads the committed selection. */
     if (in && selection_requested && !r.own_ready) {
+        chat_close(0);
         selection_requested = 0;
         choosing = 1;
         unlock_all();
@@ -1265,6 +1586,7 @@ static void room_update(MenuPage *p)
     if (r.own_ready && (ready_track != l->track || ready_options != l->laps)) host_service_net_set_ready(0);
     room_news();
     room_countdown_sounds();
+    chat_update();
     room_input(p, &r);
     if (!room_closed) room_texts(p);
 }
@@ -1289,13 +1611,19 @@ static void page_update(MenuPage *p, int cursor)
         p->footer = status[0] ? status : NULL;
         return;
     }
+    if (quick == 1) {  /* Quick Race: the list's answer */
+        if (list_state == 2) quick_choose();
+        p->footer = status[0] ? status : NULL;
+        return;
+    }
+    if (screen == HOME) join_poll(), p->footer = status[0] ? status : NULL;
     switch (screen) {
     case HOME:
         if (disc_note() != disc_shown) {  /* the check has ended: its lines under the rows */
             menu_page_rebuild_at(p, cursor);
             break;
         }
-        if (!status[0] && (cursor >= 2 || disc_shown) && not_ready()) p->footer = not_ready();
+        if (!status[0] && (cursor >= HOME_QUICK || disc_shown) && not_ready()) p->footer = not_ready();
         break;
     case LIST:
         if (list_state == 2 && !list_shown) menu_page_rebuild(p);  /* the answer came: the rows again */
@@ -1319,28 +1647,31 @@ static void page_update(MenuPage *p, int cursor)
 
 static void page_accept(MenuPage *p, int row)
 {
-    if (connecting) return;  /* Triangle gives up; nothing else meanwhile */
+    if (connecting || quick) return;  /* Triangle gives up; nothing else meanwhile */
     status[0] = 0;
     switch (screen) {
     case HOME:
         home_row = row;
-        if (row == 0) {
+        if (row == HOME_NAME) {
             snprintf(entry, sizeof entry, "%s", name);
             entry_pick = 0;
             go(NAME);
-        } else if (row == 1) {
+        } else if (row == HOME_QUICK) {
+            if (!server()) snprintf(status, sizeof status, "No server: set server = ... in dhd.ini");
+            else quick_begin();
+        } else if (row == HOME_LIST) {
             if (!server()) snprintf(status, sizeof status, "No server: set server = ... in dhd.ini");
             else {
                 start_list();
                 go(LIST);
             }
-        } else if (row == 2 || row == 3)
-            enter_room(row == 2 ? 2 : 1, NULL);
-        else if (row == 4) {
+        } else if (row == HOME_CREATE_PUBLIC || row == HOME_CREATE_PRIVATE)
+            enter_room(row == HOME_CREATE_PUBLIC ? 2 : 1, NULL);
+        else if (row == HOME_JOIN) {
             entry[0] = 0;
             entry_pick = 0;
             go(CODE);
-        } else if (row == 5 && outdated) {
+        } else if (row == HOME_UPDATE && outdated) {
             hle_log("online menu: Update Now\n");
             host_service_update_request();  /* ends the game; the launcher updates it */
         }
@@ -1380,11 +1711,12 @@ static void page_accept(MenuPage *p, int row)
 
 static void page_back(MenuPage *p)
 {
-    if (connecting) {
+    if (connecting || quick) {
         hle_log("online menu: connecting given up\n");
         host_service_net_leave();
         reset_selection();
-        connecting = 0;
+        connecting = quick = 0;
+        if (join_state == 2) join_state = 3;
         status[0] = 0;
         return;
     }
@@ -1450,7 +1782,9 @@ int port_online_menu(void)
     }
     race = 0;
     in_shell = 0;
-    connecting = 0;
+    connecting = quick = 0;
+    join_read();
+    if (join_state == 1) join_state = 2;  /* DHD_NET_ROOM, ONLINE chosen by hand first */
     /* A friend's join from Discord (finding 121): port_online_resume took the code and opened this
        page; join it as JOIN WITH A CODE does, with its own not_ready refusals. */
     if (join_code[0]) {
@@ -1469,13 +1803,17 @@ int port_online_menu(void)
 int port_online_resume(void)
 {
     void *animation = (void *)(uintptr_t)(0x08000000u + 0x4C6370);
-    /* A friend's join from Discord (finding 121): taking it opens ONLINE this frame (the patch puts
-       the cursor on the ONLINE row and confirms), where port_online_menu joins the code. A race or
-       another page is not the main menu, so the join waits on the title until then. */
-    if (!resume_home) return take_join();
+    /* A link's room (DHD_NET_ROOM) opens ONLINE once the camera is back on the title, as a closed
+       room's return does. A friend's join from Discord (finding 121) opens it this frame (the patch
+       puts the cursor on the ONLINE row and confirms), where port_online_menu joins the code; a race
+       or another page is not the main menu, so that join waits on the title until then. */
+    join_read();
+    if (!resume_home && join_state != 1) return take_join();
     func_00203590(animation, 0x2330, 0, 1);
     float t = func_00203C28(animation);
-    return t <= 0.0f || t >= 1.0f;
+    if (!(t <= 0.0f || t >= 1.0f)) return 0;
+    if (join_state == 1) join_state = 2;  /* DHD_NET_ROOM: ONLINE joins it (join_poll) */
+    return 1;
 }
 
 /* The main menu's labels (patched func_001ED5B8): its table has three; the fourth is ONLINE. */

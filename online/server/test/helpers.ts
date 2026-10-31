@@ -32,17 +32,21 @@ export class Client {
   }
 
   /** Creates a room as host; returns the client and the room code. */
-  static async host(name = "Host"): Promise<{ host: Client; code: string }> {
+  /** The welcome this client got (its member id, its reconnect token if it asked for one). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  welcome: any = null;
+
+  static async host(name = "Host", extra: object = {}): Promise<{ host: Client; code: string }> {
     const host = await Client.connect("/v1/rooms/new");
-    host.hello(name);
-    const welcome = await host.json("welcome");
+    host.hello(name, extra);
+    const welcome = (host.welcome = await host.json("welcome"));
     return { host, code: welcome.code };
   }
 
-  static async join(code: string, name: string): Promise<Client> {
+  static async join(code: string, name: string, extra: object = {}): Promise<Client> {
     const c = await Client.connect(`/v1/rooms/${code}`);
-    c.hello(name);
-    await c.json("welcome");
+    c.hello(name, extra);
+    c.welcome = await c.json("welcome");
     return c;
   }
 
@@ -103,11 +107,15 @@ export class Client {
   }
 }
 
-/** Host plus `n - 1` joiners, all ready, race started. Returns clients by slot. */
-export async function startedRace(n: number): Promise<{ clients: Client[]; code: string; starts: any[] }> {
-  const { host, code } = await Client.host("P0");
+/** Host plus `n - 1` joiners, all ready, race started. Returns clients by slot. `extra(i)` adds to
+    player i's hello (features). */
+export async function startedRace(
+  n: number,
+  extra: (i: number) => object = () => ({}),
+): Promise<{ clients: Client[]; code: string; starts: any[] }> {
+  const { host, code } = await Client.host("P0", extra(0));
   const clients = [host];
-  for (let i = 1; i < n; i++) clients.push(await Client.join(code, `P${i}`));
+  for (let i = 1; i < n; i++) clients.push(await Client.join(code, `P${i}`, extra(i)));
   for (const c of clients) c.sendJson({ type: "ready", ready: true });
   // Wait until the host has seen everyone ready.
   await host.next((f) => typeof f === "string" && JSON.parse(f).type === "room" && JSON.parse(f).members.every((m: any) => m.ready) && JSON.parse(f).members.length === n);

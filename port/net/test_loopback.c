@@ -1,7 +1,7 @@
 /* Four players in one process: client.c over a fake transport, through a fake relay that does
    what online/server does (docs/online-protocol.md): welcome and room snapshots, slots at start,
    STATE and EVENT relayed with the slot byte overwritten, PING answered, left when a socket
-   closes. Each player has its own one-way latency; delivery keeps each socket's order. Each
+   closes, or away and back when a racer with a reconnect token drops and rejoins (finding 126). Each player has its own one-way latency; delivery keeps each socket's order. Each
    player's game thread sends numbered STATE frames for a while, as online.c does about 20 times
    a second, and checks that every other player's frames arrive whole and in order. */
 #include "client.h"
@@ -31,13 +31,24 @@ typedef struct {
     HANDLE thread, game;
     volatile LONG stop;
     /* the race */
-    int drop_at_ms;
+    int drop_at_ms, rejoin_after_ms;  /* rejoin: away, then back in its slot after this long */
+    double dropped_at;
+    int away, saw_away, dropped;
     int sent, got[PLAYERS], out_of_order;
+    int said;                  /* chat lines the relay took from this player */
 } Player;
 
 static Player players[PLAYERS];
 static CRITICAL_SECTION relay;
 static int next_member, host_member, started;
+
+static void token_of(const Player *p, char *out)  /* the reconnect token the relay gave p */
+{
+    int i;
+    for (i = 0; i < 64; i++)
+        out[i] = "0123456789abcdef"[(p->index * 7 + i) & 15];
+    out[64] = 0;
+}
 
 static void deliver(Player *to, const Player *from, int binary, const void *data, size_t n)
 {
@@ -110,15 +121,34 @@ static void relay_text(Player *p, const char *text)
     double t;
     json_string(text, "type", type, sizeof type);
     if (!strcmp(type, "hello")) {
-        char name[64], iso[80];
+        char name[64], iso[80], token[80], want[80];
+        int i;
         CHECK(json_int(text, "protocol", &v) && v == NET_PROTOCOL);
         CHECK(json_string(text, "isoSha256", iso, sizeof iso) && strlen(iso) == 64);
         CHECK(json_string(text, "name", name, sizeof name) && name[0] == 'P');
+        CHECK(strstr(text, "\"reconnect\"") != NULL);  /* in features */
+        token_of(p, want);
+        if (json_string(text, "reconnectToken", token, sizeof token)) {
+            /* a rejoin: the right token, into the held slot, and everyone hears back */
+            CHECK(started && p->away && !strcmp(token, want));
+            p->open = 1, p->away = 0;
+            snprintf(reply, sizeof reply, "{\"type\":\"welcome\",\"protocol\":1,\"code\":\"TEST22\",\"memberId\":%d,"
+                     "\"host\":%s,\"serverTime\":1,\"reconnectToken\":\"%s\",\"slot\":%d}", p->member,
+                     p->member == host_member ? "true" : "false", want, p->slot);
+            text_to(p, p, reply);
+            snprintf(reply, sizeof reply, "{\"type\":\"back\",\"slot\":%d,\"memberId\":%d}", p->slot, p->member);
+            for (i = 0; i < PLAYERS; i++)
+                text_to(&players[i], p, reply);
+            return;
+        }
         p->member = next_member++;
         if (host_member < 0)
             host_member = p->member;
+        /* a token only for the player that will rejoin: the others drop as before */
         snprintf(reply, sizeof reply, "{\"type\":\"welcome\",\"protocol\":1,\"code\":\"TEST22\",\"memberId\":%d,"
-                 "\"host\":%s,\"serverTime\":1}", p->member, p->member == host_member ? "true" : "false");
+                 "\"host\":%s,\"serverTime\":1%s%s%s}", p->member, p->member == host_member ? "true" : "false",
+                 p->rejoin_after_ms ? ",\"reconnectToken\":\"" : "", p->rejoin_after_ms ? want : "",
+                 p->rejoin_after_ms ? "\"" : "");
         text_to(p, p, reply);
         send_room();
     } else if (!strcmp(type, "ready") && json_bool(text, "ready", &p->ready))
@@ -140,6 +170,21 @@ static void relay_text(Player *p, const char *text)
     } else if (!strcmp(type, "ping") && json_number(text, "t", &t)) {
         snprintf(reply, sizeof reply, "{\"type\":\"pong\",\"t\":%.3f,\"serverTime\":%.0f}", t, (double)time(NULL) * 1000);
         text_to(p, p, reply);
+    } else if (!strcmp(type, "chat")) {
+        /* the server's rules (src/room.ts): 1-120 characters, 5 a player, then slow_down */
+        char said[512], escaped[1024], line[1200];
+        int i;
+        CHECK(json_string(text, "text", said, sizeof said) && said[0] && strlen(said) <= NET_CHAT_MAX);
+        CHECK(said[0] != ' ' && said[strlen(said) - 1] != ' ');
+        if (++p->said > 5) {
+            text_to(p, p, "{\"type\":\"error\",\"code\":\"slow_down\",\"message\":\"Too many messages: wait a moment.\"}");
+            return;
+        }
+        json_escape(escaped, sizeof escaped, said);
+        snprintf(line, sizeof line, "{\"type\":\"chat\",\"memberId\":%d,\"name\":\"P%d\",\"text\":\"%s\",\"at\":%d}",
+                 p->member, p->index, escaped, 1000 + p->said);
+        for (i = 0; i < PLAYERS; i++)
+            text_to(&players[i], p, line);
     } else if (!strcmp(type, "pong") || !strcmp(type, "leave"))
         ;
     else {
@@ -185,20 +230,37 @@ static void tr_binary(void *ctx, const void *data, size_t n)
     LeaveCriticalSection(&relay);
 }
 
-/* The socket closes: the others hear left, after every frame already relayed. */
+/* The socket closes: the others hear left, after every frame already relayed; or away, when the
+   player can rejoin (it had a token). */
 static void drop(Player *p)
 {
     char text[160];
-    int i;
+    int i, rejoin;
     EnterCriticalSection(&relay);
     p->open = 0;
-    snprintf(text, sizeof text, "{\"type\":\"left\",\"slot\":%d,\"memberId\":%d,\"reason\":\"disconnect\"}",
-             p->slot, p->member);
+    p->away = p->rejoin_after_ms > 0;
+    if (p->away)
+        snprintf(text, sizeof text, "{\"type\":\"away\",\"slot\":%d,\"memberId\":%d}", p->slot, p->member);
+    else
+        snprintf(text, sizeof text, "{\"type\":\"left\",\"slot\":%d,\"memberId\":%d,\"reason\":\"disconnect\"}",
+                 p->slot, p->member);
     for (i = 0; i < PLAYERS; i++)
         if (players[i].open)
             text_to(&players[i], p, text);
     LeaveCriticalSection(&relay);
-    client_on_closed(&p->client, 1006, "dropped");
+    rejoin = client_on_closed(&p->client, 1006, "dropped");
+    CHECK(rejoin == p->away);  /* with a token the client wants to come back */
+    p->dropped = 1;
+    p->dropped_at = net_now_ms();
+}
+
+/* The transport is back (as ws.h reconnects): hello with the token, back in the same slot. */
+static void reconnect(Player *p)
+{
+    NetTransport tr;
+    tr.ctx = p, tr.send_text = tr_text, tr.send_binary = tr_binary;
+    p->dropped_at = 0;
+    client_connected(&p->client, &tr);
 }
 
 /* The network thread: deliveries when due, and ticks. */
@@ -243,8 +305,20 @@ static DWORD WINAPI game(void *arg)
     for (i = 0; i < PLAYERS; i++)
         last[i] = -1;
     while (net_now_ms() < start + RACE_MS + 500) {  /* (and half a second for the last frames) */
-        if (p->drop_at_ms && net_now_ms() >= start + p->drop_at_ms && p->open)
+        if (p->drop_at_ms && net_now_ms() >= start + p->drop_at_ms && !p->dropped)
             drop(p);
+        if (p->dropped_at && p->rejoin_after_ms && net_now_ms() >= p->dropped_at + p->rejoin_after_ms) {
+            NetLobby l;
+            client_lobby(&p->client, &l);
+            CHECK(l.state == NET_RECONNECTING && l.rejoining && !l.offline);
+            reconnect(p);
+        }
+        {
+            NetLobby l;
+            client_lobby(&p->client, &l);
+            if (l.racers_away)
+                p->saw_away = 1;
+        }
         if (net_now_ms() >= next && net_now_ms() < start + RACE_MS && p->open) {
             uint8_t payload[64];
             memset(payload, p->index, sizeof payload);
@@ -269,7 +343,54 @@ static DWORD WINAPI game(void *arg)
     return 0;
 }
 
-static void run(const char *name, const int latency[PLAYERS], int dropper)
+/* Chat in the room: a line from each player reaches everyone in order, the sender too; a line is
+   trimmed, and cut to NET_CHAT_MAX bytes between UTF-8 characters; the sixth line in a row is
+   refused (slow_down), which only its sender sees, as a note in its own chat. */
+static void chat(void)
+{
+    char line[200], want[16];
+    NetChat ch;
+    double until;
+    int i, k;
+    CHECK(!client_chat(&players[0].client, "  \t "));
+    for (i = 0; i < PLAYERS; i++) {
+        snprintf(line, sizeof line, "  hi from P%d\t ", i);
+        CHECK(client_chat(&players[i].client, line));
+    }
+    /* 119 bytes, then a two-byte character across the limit: it goes whole or not at all */
+    memset(line, 'x', 119);
+    snprintf(line + 119, sizeof line - 119, "\xC3\xA9 and more");
+    CHECK(client_chat(&players[1].client, line));
+    for (k = 0; k < 5; k++)
+        CHECK(client_chat(&players[2].client, "gg"));  /* its sixth line: refused */
+    until = net_now_ms() + 3000;
+    do {
+        Sleep(10);
+        client_get_chat(&players[3].client, &ch);
+    } while (ch.seq < 9 && net_now_ms() < until);
+    for (i = 0; i < PLAYERS; i++) {
+        client_get_chat(&players[i].client, &ch);
+        CHECK(ch.seq == (i == 2 ? 10u : 9u) && ch.count == NET_CHAT_LINES);
+        /* the oldest line went: the ring has lines 2..9 (player 2: 3..9 and its note) */
+        if (i == 2) {
+            CHECK(ch.line[NET_CHAT_LINES - 1].member_id == -1 && strstr(ch.line[NET_CHAT_LINES - 1].text, "wait"));
+            continue;
+        }
+        for (k = 0; k < 3; k++) {  /* lines 2..4: players 1-3's hellos */
+            snprintf(want, sizeof want, "hi from P%d", k + 1);
+            CHECK(!strcmp(ch.line[k].text, want) && ch.line[k].member_id == players[k + 1].member);
+            CHECK(ch.line[k].seq == (unsigned)k + 2 && !strcmp(ch.line[k].name, ch.line[k].text + 8));
+        }
+        CHECK(strlen(ch.line[3].text) == 119 && ch.line[3].text[118] == 'x');
+        CHECK(!strcmp(ch.line[4].text, "gg") && ch.line[4].at == 1002);
+        CHECK(ch.line[7].member_id == players[2].member);
+    }
+    printf("  chat: %u lines, slow_down after five\n", ch.seq);
+}
+
+static const int *lan_latency;  /* chat() runs in that round */
+
+static void run(const char *name, const int latency[PLAYERS], int dropper, int rejoin)
 {
     int i;
     NetTransport tr;
@@ -283,6 +404,7 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
         char who[8];
         snprintf(who, sizeof who, "P%d", i);
         p->index = i, p->latency_ms = latency[i], p->member = -1, p->open = 1;
+        p->rejoin_after_ms = i == dropper ? rejoin : 0;
         client_init(&p->client, who, "test", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         p->thread = CreateThread(NULL, 0, network, p, 0, NULL);
     }
@@ -302,6 +424,8 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
     } while ((lobby.nmembers < PLAYERS || !lobby.member[PLAYERS - 1].ready) && net_now_ms() < until);
     CHECK(lobby.state == NET_LOBBY && lobby.is_host && lobby.nmembers == PLAYERS);
     CHECK(lobby.member[2].rider == 3 && lobby.member[3].bike == 1 && lobby.member[1].rtt_ms == latency[1] * 2);
+    if (dropper < 0 && latency == lan_latency)
+        chat();
     client_start(&players[0].client);
     until = net_now_ms() + 3000;
     for (i = 0; i < PLAYERS; i++) {
@@ -327,6 +451,17 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
         client_lobby(&p->client, &lobby);
         printf("  player %d: sent %d, got %d %d %d %d, ping %d ms%s\n", i, p->sent, p->got[0], p->got[1], p->got[2],
                p->got[3], lobby.ping_ms, lobby.offline ? ", offline" : "");
+        if (i == dropper && rejoin) {
+            /* back in its race, relaying both ways, with one gap per sender (what they sent while
+               it was away never reached it) */
+            CHECK(!lobby.offline && lobby.state == NET_RACING && !lobby.rejoining);
+            CHECK(p->out_of_order <= PLAYERS - 1);
+            CHECK(p->sent >= (RACE_MS - rejoin) / FRAME_MS - 4);
+            for (j = 0; j < PLAYERS; j++)
+                if (j != i)
+                    CHECK(p->got[j] > 0 && p->got[j] < players[j].sent);
+            continue;
+        }
         CHECK(!p->out_of_order);
         if (i == dropper) {
             CHECK(lobby.offline && lobby.state == NET_FAILED);
@@ -338,7 +473,9 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
         for (j = 0; j < PLAYERS; j++)
             if (j != i)
                 CHECK(p->got[j] == players[j].sent);  /* everything the others sent, the dropper's too */
-        if (dropper >= 0)
+        if (dropper >= 0 && rejoin)  /* away, then back: never left */
+            CHECK(p->saw_away && !lobby.racer[dropper].left && !lobby.racers_away);
+        else if (dropper >= 0)
             CHECK(lobby.racer[dropper].left);
     }
     for (i = 0; i < PLAYERS; i++) {
@@ -355,11 +492,13 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
 int main(void)
 {
     static const int lan[PLAYERS] = {2, 3, 2, 4}, wan[PLAYERS] = {10, 25, 45, 70};
+    lan_latency = lan;
     timeBeginPeriod(1);
     InitializeCriticalSection(&relay);
-    run("four players, close", lan, -1);
-    run("four players, 10-70 ms away", wan, -1);
-    run("a player drops halfway", wan, 3);
+    run("four players, close", lan, -1, 0);
+    run("four players, 10-70 ms away", wan, -1, 0);
+    run("a player drops halfway", wan, 3, 0);
+    run("a player drops halfway and rejoins its slot", wan, 2, 600);
     timeEndPeriod(1);
     if (failures) {
         printf("test_loopback: %d failures\n", failures);

@@ -21,7 +21,7 @@ export const COUNTDOWN_MS = 5_000;
     is still there; after it, the server drops them as the client drops a silent server
     (port/net/client.c SILENT_MS). */
 export const RACE_SILENT_MS = 10_000;
-/** Text chat (finding 124): a message's length after trimming, in UTF-16 units, and how many a
+/** Text chat (finding 125): a message's length after trimming, in UTF-16 units, and how many a
     member may send in CHAT_WINDOW_MS. */
 export const CHAT_MAX = 120;
 export const CHAT_BURST = 5;
@@ -36,6 +36,43 @@ export function chatText(v: unknown): string | null {
 }
 export const FEATURE_COUNTDOWN = "countdown";
 export const RTT_SAMPLES = 5;
+
+// ---- reconnect (finding 126) ----
+/**
+ * A member whose socket closes without a `leave` is a dropped connection: the room may hold its
+ * slot (id, name, rider/bike, ready, host role) this long for it to come back with the secret
+ * token its `welcome` carried. Only a member whose `hello` listed FEATURE_RECONNECT gets one; any
+ * other member is removed at once, exactly as before, so older clients are untouched.
+ * Overridable with the environment variable RECONNECT_WINDOW_MS (as COUNTDOWN_MS and
+ * RACE_SILENT_MS are); the tests use a short one.
+ */
+export const RECONNECT_WINDOW_MS = 20_000;
+/** The hello feature a client sends when it can reconnect and will keep the token. */
+export const FEATURE_RECONNECT = "reconnect";
+/** The reconnect token: 32 random bytes as lowercase hex (64 characters). */
+export const RECONNECT_TOKEN_HEX = 64;
+
+/** A fresh, unguessable reconnect token (crypto random). */
+export function reconnectToken(): string {
+  const bytes = new Uint8Array(RECONNECT_TOKEN_HEX / 2);
+  crypto.getRandomValues(bytes);
+  let token = "";
+  for (const b of bytes) token += b.toString(16).padStart(2, "0");
+  return token;
+}
+
+/** True when a `hello.reconnectToken` has the right shape before it is looked up. */
+export function isReconnectToken(v: unknown): v is string {
+  return typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+}
+
+/** Compares two equal-length tokens without an early exit (both are isReconnectToken-checked). */
+export function tokensEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 // Binary race frames. (Types 1 and 2 were the first design's INPUT and HASH, input lockstep, which
 // the game no longer uses; the server drops them.)

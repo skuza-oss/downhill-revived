@@ -25,6 +25,7 @@
      finished, and every PC's results screen waits for it. A player who leaves becomes the host's
      AI rider (findings 044, 047). */
 #include "hle.h"
+#include "menu_page.h"
 #include "../gs/present.h"
 #include "../net/net.h"
 #include "../include/version.h"
@@ -330,6 +331,8 @@ static struct {
     int end_held, end_done;     /* the race-end countdown, held for the results */
     int no_bots;                /* the room's computer riders off (its "laps" option 1) */
     int cheats;                 /* the room's cheat codes on (option 2; off: hle_cheat_code) */
+    unsigned away;              /* bit s: racer s lost its connection, the server holds its slot
+                                   (NetLobby.racers_away, finding 126); its name tag says so */
     /* the host's next race after the results (EVENT_REMATCH): 1 TRY AGAIN, 2 NEW LEVEL on
        rematch_track; rematch_fields: 1/60 s fields (not frames) since this PC began choosing it */
     int rematch_want, rematch_track, rematch_fields;
@@ -533,7 +536,11 @@ static void barrier(void)
                   : lobby.nmembers < 2 ? "waiting for players to join"
                   : !all_ready ? "waiting for everyone to be ready"
                                : "press START (or Enter) to begin");
-        } else
+        } else if (lobby.state == NET_RECONNECTING)
+            /* the socket dropped and the net client is reconnecting into the same slot (finding
+               126): keep waiting, the server holds it a moment */
+            title("Downhill Revived online - room %s - reconnecting...", lobby.code);
+        else
             title("Downhill Revived online - connecting...");
         if (lobby.state == NET_LOBBY && lobby.is_host) pressed_start();
         host_service_gs_pump_messages();
@@ -846,9 +853,13 @@ void func_0020F588(int view, int unused, int r, int g, int b, int a);
 void func_0020FB80(int font, int x, int y, int width, int height);
 void func_0020F9F0(int font, int view, int x, int y, const char *text);
 
+static void race_chat_draw(int view);
+
 void hle_online_hud(int view)
 {
-    if (!online_mode() || on.started || !on.start_entered || !on.start_missing) return;
+    if (!online_mode()) return;
+    race_chat_draw(view);
+    if (on.started || !on.start_entered || !on.start_missing) return;
     char text[64], name[32];
     if (on.start_missing > 1) snprintf(text, sizeof text, "WAITING FOR THE OTHERS...");
     else {
@@ -984,6 +995,7 @@ static void check_left(void)
 {
     NetLobby lobby;
     host_service_net_get_lobby(GADDR(&lobby));
+    on.away = lobby.racers_away;
     for (int j = 0; j < on.nslots; j++) {
         int gone = j != on.local_slot && (lobby.racer[j].left || lobby.offline);
         if (!gone || on.gone[j]) continue;
@@ -1094,8 +1106,15 @@ void func_0020F9F0(int pen, int view, int x, int y, const char *text);
    scene node with a lower offset for a label just above the head. Puppets update
    that same node through func_0012DDC0.
    Draw while the local rider's race text is built, then restore pen 0 and its
-   queued colour so later HUD text keeps its own size, alignment and colour. */
-enum { NAME_FAR = 150 };
+   queued colour so later HUD text keeps its own size, alignment and colour.
+   A tag is the player's colour (by race slot, the same on every PC), full size and opaque up
+   to NAME_NEAR, then smaller and fainter to nothing at NAME_FAR, so the riders far down the
+   hill don't cover the track with names. A player whose connection dropped (the server holds
+   the slot) reads "NAME - AWAY", grey, until it is back or has left. */
+enum { NAME_NEAR = 45, NAME_FAR = 150, NAME_SMALLEST = 70 /* % at NAME_FAR */ };
+static const uint8_t name_colour[NET_MAX_SLOTS][3] = {
+    {80, 112, 128}, {128, 96, 48}, {88, 128, 80}, {128, 84, 116},
+    {128, 120, 64}, {64, 124, 128}, {108, 88, 128}, {128, 76, 68}};
 int func_0020F860(int pen, const char *text);  /* text width in sixteenths */
 extern float port_fov_x;  /* widescreen.c: glyph width scale, 1 when off */
 void hle_online_names(void *rider, int view)
@@ -1127,20 +1146,157 @@ void hle_online_names(void *rider, int view)
         /* Text normally stays inside the middle 4:3 area. Undo that mapping for
            this world anchor, while keeping the glyphs themselves in proportion. */
         int x = (int)(w / 2 + (local_x - w / 2) / port_fov_x), y = (int)local_y - 16;
-        func_0020FB80(0, 320, 240, -102, -24);
-        int half_width = (func_0020F860(0, on.name[global]) + 31) / 32;
+        /* nearer than NAME_NEAR as it was; beyond, smaller and fainter */
+        float far = base[2] <= NAME_NEAR ? 0 : (base[2] - NAME_NEAR) / (float)(NAME_FAR - NAME_NEAR);
+        int size = 100 - (int)((100 - NAME_SMALLEST) * far), alpha = (int)(128 * (1 - far));
+        int away = global < 32 && on.away >> global & 1;
+        if (away) alpha /= 2;
+        if (alpha < 8) continue;
+        char label[48];
+        snprintf(label, sizeof label, away ? "%s - AWAY" : "%s", on.name[global]);
+        func_0020FB80(0, 320 * size / 100, 240 * size / 100, -102 * size / 100, -24 * size / 100);
+        int half_width = (func_0020F860(0, label) + 31) / 32;
         if (local_x - half_width * port_fov_x < 1 || local_x + half_width * port_fov_x >= w - 1 || y < 1) continue;
-        func_0020F518(0, 0, 0, 0, 128);
-        func_0020F9F0(0, view, x - 1, y, on.name[global]);
-        func_0020F9F0(0, view, x + 1, y, on.name[global]);
-        func_0020F9F0(0, view, x, y - 1, on.name[global]);
-        func_0020F9F0(0, view, x, y + 1, on.name[global]);
-        func_0020F518(0, 128, 128, 128, 128);
-        func_0020F9F0(0, view, x, y, on.name[global]);
+        const uint8_t *c = name_colour[global % NET_MAX_SLOTS];
+        func_0020F518(0, 0, 0, 0, alpha);
+        func_0020F9F0(0, view, x - 1, y, label);
+        func_0020F9F0(0, view, x + 1, y, label);
+        func_0020F9F0(0, view, x, y - 1, label);
+        func_0020F9F0(0, view, x, y + 1, label);
+        if (away) func_0020F518(0, 96, 96, 96, alpha);
+        else func_0020F518(0, c[0], c[1], c[2], alpha);
+        func_0020F9F0(0, view, x, y, label);
         drawn = 1;
     }
     memcpy(pen, kept, sizeof kept);
     for (int i = 0; drawn && i < 4; i++) func_0020F420(0, i);
+}
+
+/* ---- text chat in the race (finding 125) ----
+   On the race screen Y opens a line to type (Enter says it, Esc closes; the controller keeps
+   riding meanwhile, and text_input.c keeps the typed keys from the pad), and in the pause menu
+   L1, R1, L2 and R2 say the quick lines (port_chat_presets) without a keyboard. The last lines
+   said show at the left of this player's view for a few seconds, fading, in the HUD's font as
+   hle_online_hud's own prompt is drawn. */
+enum { RACE_CHAT_SHOWN = 5, RACE_CHAT_SECONDS = 8, RACE_CHAT_KEY = 'Y', RACE_CHAT_TEXT = 56 };
+enum { QUICK_CHAT = PAD_L1 | PAD_R1 | PAD_L2 | PAD_R2 };
+static struct {
+    unsigned seen;          /* the newest chat line taken */
+    int seen_valid, key_held, typing, quick_held;
+    char entry[NET_CHAT_MAX + 1];
+    struct { char text[RACE_CHAT_TEXT]; int own, note; double until; } shown[RACE_CHAT_SHOWN];  /* oldest first */
+} race_chat;
+static int menu_open(int menu);
+void func_0020F9A8(int pen, int view, int x, int y, const char *text);  /* left-aligned */
+
+static void race_chat_close(void)
+{
+    if (!race_chat.typing) return;
+    race_chat.typing = 0;
+    host_service_text_input_end();
+}
+
+/* Every field online: the lines that came, and the line being typed. */
+static void race_chat_step(void)
+{
+    static NetChat lines;
+    static NetLobby lobby;
+    if (EE32(MENU) != LOAD_MENU || !on.setup_done) {
+        race_chat_close();
+        return;
+    }
+    host_service_net_get_chat(GADDR(&lines));
+    if (!race_chat.seen_valid) race_chat.seen = lines.seq, race_chat.seen_valid = 1;  /* the room's are old */
+    if (lines.seq != race_chat.seen) {
+        host_service_net_get_lobby(GADDR(&lobby));
+        for (int i = 0; i < lines.count; i++) {
+            const NetChatLine *line = &lines.line[i];
+            if (line->seq <= race_chat.seen) continue;
+            memmove(race_chat.shown, race_chat.shown + 1, sizeof race_chat.shown[0] * (RACE_CHAT_SHOWN - 1));
+            char shown[NET_CHAT_NAME + NET_CHAT_TEXT + 4];
+            port_chat_show(shown, sizeof shown, line->name, line->text, line->member_id);
+            if (strlen(shown) >= RACE_CHAT_TEXT) memcpy(shown + RACE_CHAT_TEXT - 3, "..", 3);
+            snprintf(race_chat.shown[RACE_CHAT_SHOWN - 1].text, RACE_CHAT_TEXT, "%s", shown);
+            race_chat.shown[RACE_CHAT_SHOWN - 1].own = line->member_id == lobby.member_id;
+            race_chat.shown[RACE_CHAT_SHOWN - 1].note = line->member_id < 0;
+            race_chat.shown[RACE_CHAT_SHOWN - 1].until = host_wall_seconds() + RACE_CHAT_SECONDS;
+        }
+        race_chat.seen = lines.seq;
+    }
+    int key = host_service_key_held(RACE_CHAT_KEY);
+    if (key && !race_chat.key_held && !race_chat.typing) {
+        race_chat.typing = 1, race_chat.entry[0] = 0;
+        host_service_text_input_begin();
+    }
+    race_chat.key_held = key;
+    if (!race_chat.typing) return;
+    int action = host_service_text_input_edit(GADDR(race_chat.entry), sizeof race_chat.entry, GADDR(port_chat_letters));
+    if (action > 0 && race_chat.entry[0]) host_service_net_send_chat(GADDR(race_chat.entry));
+    if (action) race_chat_close();
+}
+
+/* In the pause menu the shoulder buttons say the quick lines; they do nothing else there. */
+static void race_chat_quick(HostPad *out)
+{
+    static const uint16_t buttons[PORT_CHAT_PRESETS] = {PAD_L1, PAD_R1, PAD_L2, PAD_R2};
+    int held = out->buttons & QUICK_CHAT, pressed = held & ~race_chat.quick_held;
+    race_chat.quick_held = held;  /* held as the menu opens (a trick): not a press */
+    if (!menu_open(PAUSE_MENU)) return;
+    for (int i = 0; i < PORT_CHAT_PRESETS; i++)
+        if (pressed & buttons[i] && host_service_net_send_chat(GADDR(port_chat_presets[i]))) menu_play("S_SELECT");
+    out->buttons &= ~QUICK_CHAT;
+}
+
+/* One line with a black edge, as the names over the riders are drawn. */
+static void race_chat_line(int view, int x, int y, const char *text, int r, int g, int b, int a)
+{
+    func_0020F588(view, 0, 0, 0, 0, a);
+    func_0020F9A8(0, view, x - 1, y, text);
+    func_0020F9A8(0, view, x + 1, y, text);
+    func_0020F9A8(0, view, x, y - 1, text);
+    func_0020F9A8(0, view, x, y + 1, text);
+    func_0020F588(view, 0, r, g, b, a);
+    func_0020F9A8(0, view, x, y, text);
+}
+
+/* The last lines at the left of this player's view (the local rider's), mid-height, clear of
+   the HUD's corners; the line being typed under them; in the pause menu the quick lines. */
+static void race_chat_draw(int view)
+{
+    if (EE32(MENU) != LOAD_MENU || !on.setup_done || view != *(int32_t *)(RIDER(0) + 0x7988)) return;
+    double now = host_wall_seconds();
+    int pause = menu_open(PAUSE_MENU), alive = 0, w, h;
+    for (int i = 0; i < RACE_CHAT_SHOWN; i++) alive |= race_chat.shown[i].until > now;
+    if (!alive && !race_chat.typing && !pause) return;
+    func_0023D650(view, &w, &h);
+    if (w <= 0 || h <= 0) w = 512, h = 224;
+    char saved[0x20];
+    memcpy(saved, D_004F3570, sizeof saved);
+    func_0020FB80(0, 205, 154, -73, -26);  /* the HUD prompt's size (hle_online_hud), 80 % */
+    int x = 24, step = h * 11 / 224, y = h * 78 / 224;
+    for (int i = 0; i < RACE_CHAT_SHOWN; i++, y += step) {
+        double left = race_chat.shown[i].until - now;
+        if (left <= 0) continue;
+        int a = left < 1 ? (int)(128 * left) : 128;
+        if (race_chat.shown[i].note) race_chat_line(view, x, y, race_chat.shown[i].text, 128, 64, 64, a);
+        else if (race_chat.shown[i].own) race_chat_line(view, x, y, race_chat.shown[i].text, 128, 120, 64, a);
+        else race_chat_line(view, x, y, race_chat.shown[i].text, 128, 128, 128, a);
+    }
+    if (race_chat.typing) {
+        char typed[NET_CHAT_MAX + 8];
+        size_t n = strlen(race_chat.entry);
+        /* a long line shows its end */
+        snprintf(typed, sizeof typed, "SAY: %s_", n > 44 ? race_chat.entry + n - 44 : race_chat.entry);
+        race_chat_line(view, x, y + step / 2, typed, 128, 120, 64, 128);
+        race_chat_line(view, x, y + step / 2 + step, "ENTER SAY   ESC CANCEL", 96, 96, 96, 128);
+    } else if (pause) {
+        char quick[96];
+        snprintf(quick, sizeof quick, "CHAT:  L1 %s   R1 %s   L2 %s   R2 %s", port_chat_presets[0], port_chat_presets[1],
+                 port_chat_presets[2], port_chat_presets[3]);
+        race_chat_line(view, x, h * 200 / 224, quick, 128, 128, 128, 128);
+    }
+    memcpy(D_004F3570, saved, sizeof saved);
+    func_0020F420(0, view);  /* pen 0's own colour again, for the HUD's text after this */
 }
 
 /* ---- cheat codes (finding 117) ----
@@ -1435,6 +1591,8 @@ static void race_over(void)
     set_env("DHD_NAV", saved_nav);  /* "" unsets it */
     set_env("DHD_RACE_SEED", saved_seed);
     memset(&on, 0, sizeof on);
+    race_chat_close();
+    memset(&race_chat, 0, sizeof race_chat);
     online = 0, from_menu = 0, connected = 0;
     selected_ride = 0;
     host_service_gs_window_title(GADDR("Downhill Revived"));
@@ -1495,6 +1653,7 @@ void pads_begin_field(void)
         RaceSetup s = {on.rematch_track, {-1, -1, -1, -1}};
         write_setup(&s);
     }
+    race_chat_step();
     if (rematch_step()) { race_over(); return; }
     if (on.started && EE32(MENU) != LOAD_MENU) race_over();
 }
@@ -1514,6 +1673,7 @@ void pads_read(int player, HostPad *out)
             host_service_host_pad_device(0, GADDR(out));
             menu_mouse_merge(0, out);  /* the pause menu by mouse, under the same rules */
             guest_pad(out);
+            race_chat_quick(out);
             /* no pause while the countdown waits for the others: it would hold this PC's GO */
             if (hle_online_countdown_hold(EE32(PHASE))) out->buttons &= ~PAD_START;
         }

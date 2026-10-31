@@ -272,7 +272,7 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
             'host_service_host_setting_locked': (0,),
             'host_service_gs_window_title': (0,),
             'host_service_movie_start': (0,), 'host_service_text_input_edit': (2,),
-            'host_service_net_init': (0,1,2,3), 'host_service_net_join_room': (0,),
+            'host_service_net_init': (0,1,2,3), 'host_service_net_join_room': (0,), 'host_service_net_send_chat': (0,),
             'host_service_gs_capture_request': (0,),
             'host_service_disc_check_start': (0,1), 'host_service_clipboard_set': (0,),
         }
@@ -287,6 +287,7 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
             'host_service_vif_feed': [(1,'host64_bridge_array_bytes((int32_t)a2,4)')],
             'host_service_graphics_feed': [(1,'host64_bridge_array_bytes((int32_t)a2,4)')],
             'host_service_net_get_lobby': [(0,'sizeof(NetLobby)')],
+            'host_service_net_get_chat': [(0,'sizeof(NetChat)')],
             'host_service_net_set_room': [(0,'28')],
             'host_service_net_send_frame': [(1,'a2')],
             'host_service_net_receive_frame': [(0,'a1')],

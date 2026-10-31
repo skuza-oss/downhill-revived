@@ -78,8 +78,8 @@ export async function createNet(bytes, guest, say) {
 
   x = (await WebAssembly.instantiate(bytes, { env, wasi_snapshot_preview1: wasi })).instance.exports;
   x._initialize?.();
-  const LOBBY = x.web_net_lobby_size(), INFO = x.web_net_info_size(), FRAME_MAX = 3072, LIST_MAX = 64;
-  const scratch = x.malloc(Math.max(LOBBY, INFO * LIST_MAX, FRAME_MAX, 64));
+  const LOBBY = x.web_net_lobby_size(), INFO = x.web_net_info_size(), CHAT = x.web_net_chat_size(), FRAME_MAX = 3072, LIST_MAX = 64;
+  const scratch = x.malloc(Math.max(LOBBY, INFO * LIST_MAX, CHAT, FRAME_MAX, 64));
   const copyIn = (at, n) => { const p = x.malloc(n); mem().set(guest.bytes(at, n), p); return p; };
   const stringIn = at => { const s = guest.bytes(at, guest.strlen(at) + 1); const p = x.malloc(s.length); mem().set(s, p); return p; };
   const withStrings = (addrs, f) => { const ps = addrs.map(a => a ? stringIn(a) : 0); try { return f(...ps); } finally { ps.forEach(p => p && x.free(p)); } };
@@ -94,6 +94,9 @@ export async function createNet(bytes, guest, say) {
     host_service_net_join_room: a => withStrings([a], x.host_service_net_join_room),
     host_service_net_leave: () => x.host_service_net_leave(),
     host_service_net_get_lobby: out => { x.host_service_net_get_lobby(scratch); guest.bytes(out, LOBBY).set(mem().subarray(scratch, scratch + LOBBY)); },
+    // Text chat (finding 125): a line out, and the last lines (a NetChat) copied back.
+    host_service_net_send_chat: a => withStrings([a], x.host_service_net_send_chat),
+    host_service_net_get_chat: out => { x.host_service_net_get_chat(scratch); guest.bytes(out, CHAT).set(mem().subarray(scratch, scratch + CHAT)); },
     host_service_net_pick: (m, r, b) => x.host_service_net_pick(m, r, b),
     host_service_net_set_ready: r => x.host_service_net_set_ready(r),
     host_service_net_start_race: () => x.host_service_net_start_race(),

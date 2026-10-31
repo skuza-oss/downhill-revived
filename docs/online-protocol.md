@@ -24,6 +24,9 @@ host.
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
 | GET | `/v1/health` | `{"ok":true,"protocol":1,"minVersion":"0.1.0"}` |
+| POST | `/v1/times` | Post a time-trial time and ghost (below, finding 127). |
+| GET | `/v1/times?track=N&laps=L&limit=20` | A track's best times. |
+| GET | `/v1/ghost?track=N&laps=L&rank=1` | The ghost of one of them. |
 
 Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
 upper-case what the user types and reject characters outside that alphabet.
@@ -79,7 +82,12 @@ use the same `error` frame **without** a close; the client just shows `message`.
 ```jsonc
 // First message, required. name: 1-24 characters.
 {"type":"hello","protocol":1,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
- "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
+ "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown","reconnect"]}  // features: optional
+
+// Rejoining after a drop: the token the last welcome carried goes in the hello (finding 126).
+{"type":"hello","protocol":1,"version":"dhd-port 0.7.4 1a2b3c4d5e6f7a8b","clientVersion":"0.7.4",
+ "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown","reconnect"],
+ "reconnectToken":"<64 lowercase hex>"}
 
 // Host only. Every field optional; omitted fields keep their value.
 {"type":"settings","track":3,"laps":2,"seed":12345,"public":true,"maxPlayers":4,"roomName":"Friday race"}
@@ -92,7 +100,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"kick","member":3}                          // host only
 {"type":"start"}                                    // host only; at least 2 members, all (host included) ready
 {"type":"pong","s":1734000000123}                   // echo of a server ping, see below
-{"type":"chat","text":"gg"}                         // anyone, in the room or a race (finding 124)
+{"type":"chat","text":"gg"}                         // anyone, in the room or a race (finding 125)
 {"type":"ping","t":12345.6}                          // optional client-side ping; the server answers "pong"
 {"type":"end"}                                       // host only: race over, back to the lobby
 ```
@@ -104,13 +112,22 @@ use the same `error` frame **without** a close; the client just shows `message`.
 - `public`: listed in `/v1/lobbies` while not started and not full. Default `false`
   (private, join code only).
 - `features`: what the client understands beyond version 1. `"countdown"`: the room may start
-  the race by itself (below).
+  the race by itself (below). `"reconnect"`: the client can come back after a dropped socket, so
+  the server gives it a token and holds its slot, in the lobby or a race, for 20 s (below). A
+  hello without it (every release up to 0.7.3) gets no token and no held slot: its member is
+  removed the moment the socket goes, exactly as before.
+- `reconnectToken`: only in the hello that rejoins after a drop. The 64 hex digits the last
+  `welcome` carried; the server re-attaches the sender to that member's held slot. Absent, the
+  wrong shape, wrong or expired, it is ignored and the connection is a normal join.
 
 ### Server → client
 
 ```jsonc
-// Answer to hello: who you are in this room.
-{"type":"welcome","protocol":1,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000}
+// Answer to hello: who you are in this room. reconnectToken is there only when the hello listed
+// the "reconnect" feature (finding 126): keep it and send it in a later hello to come back.
+{"type":"welcome","protocol":1,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
+ "reconnectToken":"1f9c8a3d5b7e0246c9d1f3a4b5c6d7e8f9a0b1c2d3e4f5061728394a5b6c7d8e"}
+// The welcome of a rejoin into a running race also names the race slot: "slot":1.
 
 // Full room snapshot. Sent after every change and every ~2 s with fresh ping numbers.
 {"type":"room","code":"K7QX2M","hostId":0,"roomName":"Friday race","public":true,"maxPlayers":4,
@@ -132,6 +149,11 @@ use the same `error` frame **without** a close; the client just shows `message`.
             {"slot":1,"memberId":2,"name":"Bo","rider":0,"bike":0}],
  "serverTime":1734000005000,"startAt":1734000008000}
 
+// A racer that can rejoin dropped: its slot is held, its rider is not being driven (finding 126).
+{"type":"away","slot":1,"memberId":2}
+// ...and it rejoined its slot: its frames come again. Older clients ignore both.
+{"type":"back","slot":1,"memberId":2}
+
 // A racer left or dropped. The host's game hands their rider to its AI.
 {"type":"left","slot":1,"memberId":2,"reason":"disconnect"}   // or "leave"/"kicked"/"timeout"
 {"type":"chat","memberId":2,"name":"Bo","text":"gg","at":1734000000123}  // to everyone, the sender too
@@ -144,7 +166,9 @@ use the same `error` frame **without** a close; the client just shows `message`.
   (`0..N-1`) exist only in a race: the server assigns them at `start` in join order (host
   first). All race frames use slots.
 - Lobby members who leave just disappear from the next `room`. If the host leaves, the
-  longest-present member becomes host.
+  longest-present member becomes host. A member whose socket drops unexpectedly and whose hello
+  listed `"reconnect"` stays in `members` with `"reconnecting":true` for ~20 s instead
+  (`Rejoining after a drop`, below).
 - `startAt` is server time (ms since the Unix epoch), about 3 s after `start`. Clients map it
   to local time with the offset from `ping`/`pong` (`offset ≈ serverTime - (tSend + rtt/2)`).
   The game itself starts every PC's countdown together on the server's clock once all have
@@ -199,12 +223,14 @@ the message type. Nothing is kept: a player who joins later sees only what comes
 A racer leaves by closing the socket (or sends `{"type":"leave"}` first, which only changes
 `reason`). The server broadcasts `left`; every frame the racer sent before reached the others
 first (same socket, ordered). The host's game hands the rider to its AI and sends it as its
-own from then on.
+own from then on. A racer whose hello listed `"reconnect"` and whose socket drops (no `leave`) is
+`away` first and `left` only if it does not rejoin within 20 s (`Rejoining after a drop`, below).
 
 A racer the server has not heard from for 10 s (`RACE_SILENT_MS`: no STATE, EVENT or PING frame;
-clients ping every 500 ms while racing) leaves the same way with `reason` `"timeout"`, and the
-server closes its socket (1001). That covers a lost connection that never closed, the case the
-client already covers the other way round (it drops a server silent for 10 s). Finding 120.
+clients ping every 500 ms while racing) leaves the same way with `reason` `"timeout"` (or is
+`away`, as a drop, when it can rejoin), and the server closes its socket (1001). That covers a
+lost connection that never closed, the case the client already covers the other way round (it
+drops a server silent for 10 s). Finding 120.
 
 ### Race room rules (finding 115)
 
@@ -221,6 +247,43 @@ The server keeps what everyone has to agree on:
   breaks the rule clears it. `start` still starts at once. Clients show the time left with
   `serverTime` as the clock offset. Older clients never get a countdown: the host starts.
 
+## Rejoining after a drop (finding 126)
+
+A socket that closes or errors without a `leave` (lost Wi-Fi, a NAT timeout), or a racer silent
+for `RACE_SILENT_MS`, is a dropped connection. A client that put `"reconnect"` in its hello got a
+secret `reconnectToken` in its own `welcome`; for such a member the room holds the slot for
+`RECONNECT_WINDOW_MS` (20 s) instead of removing it:
+
+- **In the lobby** the member stays in `room.members` with `"reconnecting":true`, keeping its id,
+  name, rider and bike, ready flag and host role. No race starts while a slot is held (`start`
+  answers `not_ready`; the countdown waits).
+- **In a race** every member gets `away` `{"slot","memberId"}` at once: the rider is not being
+  driven. Frames to the slot are dropped meanwhile (the relay keeps nothing, so hits meant for it
+  are lost). The slot is not `left`.
+
+The client comes back on `/v1/rooms/<CODE>` with `reconnectToken` in its hello:
+
+- **The right token within the window** (and the host's `version` and ISO, as any join):
+  the socket is re-attached to the same member. The `welcome` carries a **fresh** token (the one
+  that came back is spent) and, in a race, `"slot"`. Everyone, the rejoiner too, gets `back`
+  `{"slot","memberId"}`, and relaying resumes both ways. A racing client whose welcome has no
+  `slot` is in the lobby: the race ended while it was away.
+- **A missing, malformed, wrong, spent or expired token** is no token: an ordinary join (a new
+  member in the lobby; `room_started` during a race). A token never matches a member that is still
+  connected.
+- **The window runs out:** the member is removed as by a leave (`reason` `"timeout"`): `left` in a
+  race, so the host's AI takes the rider, and the host role moves on if it was the host's.
+
+A `leave` message or a kick removes the member at once, token or not. A member whose hello did not
+list `"reconnect"` (every release up to 0.7.3) gets no token and is removed the moment its socket
+goes, exactly as before: holding its slot would only delay the AI. Older clients ignore `away`,
+`back`, `welcome.reconnectToken`, `welcome.slot` and `room.members[].reconnecting`; while a racer
+is away they show its puppet frozen, then moving again after `back`. `PROTOCOL` stays 1.
+
+The token is 32 random bytes as 64 lowercase hex digits, sent only to its member, kept and checked
+only in the room that issued it (compared in constant time). The client sends only the token,
+never a member id.
+
 ## Lobby list
 
 `GET /v1/lobbies` → `200 application/json`:
@@ -234,13 +297,47 @@ The server keeps what everyone has to agree on:
 Only public rooms that have not started and have a free slot are listed. Clients should
 show only rooms whose `version` matches their own.
 
+## Time-trial boards (finding 127)
+
+HTTP on the same host, JSON in and out, `Access-Control-Allow-Origin: *` on every answer
+(`OPTIONS` answers the preflight). One board per `track` and `laps` (bytes, the game's indices;
+`laps` 0 or omitted = the track's default). **Times are not verified**: anyone can post any
+plausible time under any name. Treat a board as a list of claims.
+
+```jsonc
+// POST /v1/times
+{"version":"dhd-port 0.8.0 1a2b3c4d5e6f7a8b","clientVersion":"0.8.0","isoSha256":"<64 lowercase hex>",
+ "track":3,"laps":0,"name":"Ann","timeMs":61234,"ghost":"<base64, optional>"}
+// 200: rank of this name's best on the board (0: below the kept rows); best: this post improved it
+{"ok":true,"track":3,"laps":0,"rank":4,"best":true,"timeMs":61234}
+
+// GET /v1/times?track=3&limit=20   (limit 1-100, default 20)
+{"track":3,"laps":0,"times":[{"rank":1,"name":"Bo","timeMs":59870,"at":1734000000000,"ghost":true}]}
+
+// GET /v1/ghost?track=3&rank=1     (rank default 1; 404 when that rank has no ghost)
+{"track":3,"laps":0,"rank":1,"name":"Bo","timeMs":59870,"ghost":"<base64>"}
+```
+
+- One entry per name (compared case-insensitively): a post replaces it only when faster. Ties go
+  to the earlier post. A board keeps 1000 names; the best 100 keep their ghost.
+- `clientVersion` is required and gated by `MIN_VERSION` as in `hello` (403
+  `{"error":"client_outdated","minVersion","clientVersion"}`). `version` 1-64 characters,
+  `isoSha256` 64 lowercase hex, `name` as in `hello` and without control characters, `timeMs` a
+  whole number from 10 000 to 1 800 000, `ghost` standard base64 of at most 131 072 bytes (the
+  body at most 180 KiB, else 413 `too_large`).
+- Errors: `{"error","message"}` with 400 (`bad_request`, `bad_time`), 403, 404 (`not_found`), 405,
+  413 or 429 (`slow_down`: more than 6 posts from one address to one board in 10 minutes).
+- The server keeps no addresses: the rate limit counts a hash of `cf-connecting-ip`.
+
 ## Limits
 
 - One room holds at most 8 members.
 - Text frames: at most 4 KB. Binary frames: at most 3072 bytes (a STATE frame carries all of a
   player's riders).
 - A room with no members is deleted.
-- No reconnect in version 1: a dropped racer is handed to AI for the rest of the race.
+- A dropped member that sent `"reconnect"` may come back into its slot, lobby or race, for 20 s
+  (`Rejoining after a drop`, finding 126); after that, or for older clients at once, a dropped
+  racer is handed to AI for the rest of the race.
 
 ## Retail preview flow (finding 065)
 

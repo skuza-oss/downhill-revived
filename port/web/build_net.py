@@ -17,7 +17,8 @@ OUT=ROOT/'build/web'
 WASI=DEVCACHES/'wasi-sdk/wasi-sdk-34.0-x86_64-windows'
 SOURCES=[ROOT/'port/net'/n for n in ('client.c','json.c','net.c')]+[ROOT/'port/web/net/net_web.c']
 EXPORTS=['host_service_net_'+n for n in ('init','create_room','join_room','leave','get_lobby','pick','set_ready','start_race',
-         'racing','seconds','server_ms','send_frame','receive_frame','list_lobbies','set_room')]+['web_net_lobby_size','web_net_info_size','malloc','free']
+         'racing','seconds','server_ms','send_frame','receive_frame','list_lobbies','set_room',
+         'send_chat','get_chat')]+['web_net_lobby_size','web_net_info_size','web_net_chat_size','malloc','free']
 def build(out=OUT/'dhd_net.wasm'):
     out.parent.mkdir(parents=True,exist_ok=True)
     cmd=[str(WASI/'bin/clang'),'--target=wasm32-wasip1','--sysroot='+str(WASI/'share/wasi-sysroot'),'-mexec-model=reactor','-O2',

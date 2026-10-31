@@ -9,6 +9,7 @@ import {
   COUNTDOWN_MS,
   DEFAULT_MAX_PLAYERS,
   FEATURE_COUNTDOWN,
+  FEATURE_RECONNECT,
   FRAME_PING,
   FRAME_PONG,
   FRAME_STATE,
@@ -22,17 +23,21 @@ import {
   PING_MAX_PAYLOAD,
   PROTOCOL,
   RACE_SILENT_MS,
+  RECONNECT_WINDOW_MS,
   RTT_SAMPLES,
   START_LEAD_MS,
   type ErrorCode,
   chatText,
   clientVersionOf,
+  isReconnectToken,
   isOutdated,
   isByte,
   isU32,
   measuredRtt,
   minVersionOf,
   randomSeed,
+  reconnectToken,
+  tokensEqual,
 } from "./protocol";
 
 /** A claimed room nobody joined is dropped after this long. */
@@ -48,6 +53,14 @@ interface Member {
   choosing?: boolean;
   /** The hello listed the "countdown" feature (COUNTDOWN_MS). */
   countdown?: boolean;
+  /** False while the socket is gone and the slot is held for a reconnect (RECONNECT_WINDOW_MS).
+      A member stored before this feature has no field; undefined counts as connected. */
+  online?: boolean;
+  /** The secret a reconnect must present. Only a member whose hello listed the "reconnect"
+      feature has one; without it the slot is never held (older clients behave as before). */
+  token?: string;
+  /** When the socket went; the reconnect window runs from here. */
+  detachedAt?: number;
 }
 
 interface Race {
@@ -129,6 +142,27 @@ export class Room extends DurableObject<Env> {
       for (const ws of ctx.getWebSockets()) {
         const info = ws.deserializeAttachment() as SocketInfo | null;
         if (info?.memberId != null) this.sockets.set(info.memberId, ws);
+      }
+      // A member whose socket the platform dropped while this object slept is not here: treat it
+      // as a drop (finding 126) so it can reconnect or runs out, instead of lingering in the room
+      // forever. A member stored before this feature has no `online` field and counts as
+      // connected.
+      if (this.state) {
+        let held = false;
+        for (const m of this.state.members) {
+          if (m.online !== false && !this.sockets.has(m.id)) {
+            m.online = false;
+            m.detachedAt = m.detachedAt ?? Date.now();
+            held = true;
+            const slot = this.state.race?.slots.indexOf(m.id) ?? -1;
+            if (slot >= 0 && !this.state.race!.left.includes(slot))
+              this.broadcast({ type: "away", slot, memberId: m.id });
+          }
+        }
+        if (held) {
+          await this.save();
+          await this.armExpiry();
+        }
       }
       // After a wake-up mid-race the last relayed fields are unknown (see leave()).
       this.rebuildRace();
@@ -298,6 +332,9 @@ export class Room extends DurableObject<Env> {
       if (this.countdownReady(st)) await this.startRace(st, "");
       else st.countdownEndsAt = null;
     }
+    // A held slot whose reconnect window has run out becomes a normal one (finding 126).
+    await this.expireDetached(now);
+    if (!this.state) return;  // the last member went: the room is gone
     if (st.race) {
       await this.dropSilent(now);
       if (!this.state) return;  // the last racer went: the room is gone
@@ -313,10 +350,13 @@ export class Room extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(this.nextAlarm(st, now));
   }
 
-  /** The next ping, or the countdown's end if that is sooner. */
+  /** The next ping, the countdown's end or a held slot's expiry, whichever is sooner. */
   private nextAlarm(st: RoomState, now: number): number {
-    const ping = now + PING_INTERVAL_MS;
-    return st.countdownEndsAt != null && !st.race ? Math.min(ping, Math.max(now, st.countdownEndsAt)) : ping;
+    let next = now + PING_INTERVAL_MS;
+    if (st.countdownEndsAt != null && !st.race) next = Math.min(next, Math.max(now, st.countdownEndsAt));
+    const expiry = this.earliestExpiry();
+    if (expiry !== null) next = Math.min(next, Math.max(now, expiry));
+    return next;
   }
 
   // ---- Race relay (hot path: no awaits, no allocation beyond the frame) ----
@@ -407,7 +447,10 @@ export class Room extends DurableObject<Env> {
     const silent = race.slots.filter((_, slot) => this.raceSockets[slot] && now - (this.heardAt[slot] ?? now) > limit);
     for (const id of silent) {
       const ws = this.sockets.get(id);
-      await this.leave(id, "timeout");
+      const me = this.state?.members.find((x) => x.id === id);
+      // A member that can rejoin is held (`away`), as if its socket had closed (finding 126).
+      if (ws && me?.token && this.state) await this.detach(this.state, me, ws, ws.deserializeAttachment() as SocketInfo);
+      else await this.leave(id, "timeout");
       if (ws)
         try {
           ws.close(1001, "timeout");
@@ -436,6 +479,55 @@ export class Room extends DurableObject<Env> {
       return this.refuse(ws, "bad_message", "hello.name must be 1-24 characters.");
 
     const st = this.state;
+    const features = Array.isArray(m.features) ? m.features : [];
+
+    // A dropped client that declared the "reconnect" feature comes back with the secret token its
+    // welcome carried (finding 126). Re-attach it to the slot held for it; a missing, wrong or
+    // expired token finds nothing and falls through to the normal join below, so it can never
+    // impersonate the member or take over a member that is still connected.
+    const token = m.reconnectToken;
+    if (st && isReconnectToken(token)) {
+      const held = this.findReconnect(token);
+      if (held) {
+        if (version !== st.version)
+          return this.refuse(ws, "version_mismatch", `The host runs "${st.version}", you run "${version}".`);
+        if (iso !== st.isoSha256)
+          return this.refuse(ws, "iso_mismatch", "Your game ISO does not match the host's.");
+        const fresh = reconnectToken();  // rotate: the token that came back is spent
+        held.online = true;
+        held.detachedAt = undefined;
+        held.token = fresh;
+        info.memberId = held.id;
+        ws.serializeAttachment(info);
+        this.sockets.set(held.id, ws);
+        this.rtts.delete(held.id);
+        this.firstRtts.delete(held.id);
+        // Back in a race: the same race slot, relayed both ways again from now on (finding 126).
+        const slot = st.race ? st.race.slots.indexOf(held.id) : -1;
+        if (slot >= 0) {
+          this.raceSockets[slot] = ws;
+          this.slotOf.set(ws, slot);
+          this.heardAt[slot] = Date.now();
+        }
+        this.stat(["reconnect", clientVersion, info.country ?? "", nameHash(held.name), slot >= 0 ? "race" : ""], [st.members.length]);
+        this.send(ws, {
+          type: "welcome",
+          protocol: PROTOCOL,
+          code: st.code,
+          memberId: held.id,
+          host: st.hostId === held.id,
+          serverTime: Date.now(),
+          reconnectToken: fresh,
+          // Still racing in this slot. Without it the race the client left has ended meanwhile.
+          ...(slot >= 0 ? { slot } : {}),
+        });
+        if (slot >= 0) this.broadcast({ type: "back", slot, memberId: held.id });
+        else this.send(ws, { type: "ping", s: Date.now() });
+        await this.changed();
+        return;
+      }
+    }
+
     const asHost = info.create && st !== null && st.version === null && st.members.length === 0;
     if (!st || (!asHost && st.version === null))
       return this.refuse(ws, "room_not_found", "No room has this code.");
@@ -452,7 +544,7 @@ export class Room extends DurableObject<Env> {
       st.roomName = `${name}'s room`;
     }
 
-    const features = Array.isArray(m.features) ? m.features : [];
+    const supportsReconnect = features.includes(FEATURE_RECONNECT);
     const member: Member = {
       id: st.nextMemberId++,
       name,
@@ -460,6 +552,9 @@ export class Room extends DurableObject<Env> {
       rider: 0,
       bike: 0,
       countdown: features.includes(FEATURE_COUNTDOWN),
+      // Only a client that can reconnect gets a token (and so a held slot); every older client
+      // keeps the old behavior: removed the moment its socket goes.
+      token: supportsReconnect ? reconnectToken() : undefined,
     };
     st.members.push(member);
     if (asHost) st.hostId = member.id;
@@ -474,6 +569,7 @@ export class Room extends DurableObject<Env> {
       memberId: member.id,
       host: asHost,
       serverTime: Date.now(),
+      ...(member.token ? { reconnectToken: member.token } : {}),
     });
     // First ping right away so the lobby shows a delay quickly.
     this.send(ws, { type: "ping", s: Date.now() });
@@ -537,6 +633,9 @@ export class Room extends DurableObject<Env> {
 
   private async onStart(ws: WebSocket, st: RoomState): Promise<void> {
     if (st.race) return this.error(ws, "room_started", "The race is already running.");
+    // A held slot can't race: its client isn't here to receive `start` (finding 126).
+    if (st.members.some((x) => x.online === false))
+      return this.error(ws, "not_ready", "A player is reconnecting.");
     // As the countdown and the client's Start: a race needs two members.
     if (st.members.length < 2) return this.error(ws, "not_ready", "Need 2 players to start.");
     const waiting = st.members.filter((x) => !x.ready);
@@ -551,7 +650,8 @@ export class Room extends DurableObject<Env> {
     return (
       !st.race &&
       st.members.length >= 2 &&
-      st.members.every((x) => x.ready && !x.choosing && x.countdown)
+      // A held slot blocks the countdown: its client isn't here to start (finding 126).
+      st.members.every((x) => x.ready && !x.choosing && x.countdown && x.online !== false)
     );
   }
 
@@ -611,7 +711,113 @@ export class Room extends DurableObject<Env> {
 
   private async dropSocket(ws: WebSocket): Promise<void> {
     const info = ws.deserializeAttachment() as SocketInfo | null;
-    if (info?.memberId != null) await this.leave(info.memberId, "disconnect");
+    if (info?.memberId == null) return;
+    const st = this.state;
+    const me = st?.members.find((x) => x.id === info.memberId);
+    if (!st || !me) return;
+    // Only the member's current socket may detach it (a late event from an old one must not).
+    if (this.sockets.get(me.id) !== ws) return;
+    if (me.token && this.canHold(st, me)) return this.detach(st, me, ws, info);
+    await this.leave(info.memberId, "disconnect");
+  }
+
+  /** A member that can come back keeps its slot: in the lobby always, in a race while its slot is
+      still racing (finding 126). */
+  private canHold(st: RoomState, me: Member): boolean {
+    if (!st.race) return true;
+    const slot = st.race.slots.indexOf(me.id);
+    return slot >= 0 && !st.race.left.includes(slot);
+  }
+
+  /** Holds a dropped member's slot (id, name, rider/bike, ready, host role; in a race its race
+      slot) for RECONNECT_WINDOW_MS. The others see it as reconnecting in the lobby, and in a race
+      get `away` at once: its rider is not being driven. `left` follows if the window runs out. */
+  private async detach(st: RoomState, me: Member, ws: WebSocket, info: SocketInfo): Promise<void> {
+    me.online = false;
+    me.detachedAt = Date.now();
+    this.sockets.delete(me.id);
+    this.rtts.delete(me.id);
+    this.chatTimes.delete(me.id);
+    this.firstRtts.delete(me.id);
+    ws.serializeAttachment({ ...info, memberId: null, gone: true });
+    this.slotOf.delete(ws);
+    this.stat(["detach", st.race ? "race" : "", info.country ?? "", nameHash(me.name)], [st.members.length]);
+    const race = st.race;
+    if (race) {
+      const slot = race.slots.indexOf(me.id);
+      if (slot >= 0) {
+        this.raceSockets[slot] = null;
+        this.broadcast({ type: "away", slot, memberId: me.id });
+      }
+    }
+    // Persist the held slot, arm its expiry, drop any countdown it blocks, tell everyone.
+    await this.changed();
+  }
+
+  /** The reconnect window (RECONNECT_WINDOW_MS), overridable through the environment as
+      COUNTDOWN_MS and RACE_SILENT_MS are. */
+  private reconnectWindowMs(): number {
+    const v = Number((this.env as unknown as Record<string, unknown>).RECONNECT_WINDOW_MS);
+    return Number.isFinite(v) && v > 0 ? v : RECONNECT_WINDOW_MS;
+  }
+
+  /** The detached member a token belongs to, within its window; null when none matches. A member
+      that is still connected is never returned, so a token can't take over a live slot (finding
+      126). The room is per code, so a token only ever fits the room that issued it. */
+  private findReconnect(token: string): Member | null {
+    const st = this.state;
+    if (!st) return null;
+    const now = Date.now();
+    const window = this.reconnectWindowMs();
+    for (const x of st.members) {
+      if (
+        x.online === false &&
+        x.token !== undefined &&
+        x.detachedAt !== undefined &&
+        now - x.detachedAt <= window &&
+        this.canHold(st, x) &&
+        tokensEqual(x.token, token)
+      )
+        return x;
+    }
+    return null;
+  }
+
+  /** When the earliest held slot runs out, or null when none is held. */
+  private earliestExpiry(): number | null {
+    const st = this.state;
+    if (!st) return null;
+    const window = this.reconnectWindowMs();
+    let when: number | null = null;
+    for (const x of st.members) {
+      if (x.online === false && x.detachedAt !== undefined) {
+        const e = x.detachedAt + window;
+        if (when === null || e < when) when = e;
+      }
+    }
+    return when;
+  }
+
+  /** Makes sure the alarm wakes the room when the earliest held slot runs out. */
+  private async armExpiry(): Promise<void> {
+    const when = this.earliestExpiry();
+    if (when === null) return;
+    const at = await this.ctx.storage.getAlarm();
+    if (at === null || at > when) await this.ctx.storage.setAlarm(when);
+  }
+
+  /** Removes every member whose reconnect window has run out: the slot is a normal one again. */
+  private async expireDetached(now: number): Promise<void> {
+    const st = this.state;
+    if (!st) return;
+    const window = this.reconnectWindowMs();
+    const expired = st.members.filter(
+      (m) => m.online === false && m.detachedAt !== undefined && now - m.detachedAt >= window,
+    );
+    for (const x of expired) {
+      await this.leave(x.id, "timeout");
+      if (!this.state) return;
+    }
   }
 
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
@@ -667,6 +873,7 @@ export class Room extends DurableObject<Env> {
       const at = await this.ctx.storage.getAlarm();
       if (at === null || at > st.countdownEndsAt!) await this.ctx.storage.setAlarm(st.countdownEndsAt!);
     }
+    if (st) await this.armExpiry();  // a held slot runs out even if nothing else happens
     await this.save();
     this.broadcastRoom();
     this.updateListing();
@@ -697,6 +904,9 @@ export class Room extends DurableObject<Env> {
         bike: x.bike,
         rttMs: this.rttOf(x.id),
         choosing: x.choosing ?? false,
+        // A held slot: its client dropped and may still come back (finding 126). Older clients
+        // ignore the field; new ones show the slot as reconnecting.
+        ...(x.online === false ? { reconnecting: true } : {}),
       })),
     };
   }

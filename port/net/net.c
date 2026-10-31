@@ -44,8 +44,12 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
 {
     NetLobby lobby;
     (void)ctx;
-    if (!client_on_closed(&client, code, reason) || attempt >= REJOIN_ATTEMPTS)
+    if (!client_on_closed(&client, code, reason))
         return NULL;
+    if (attempt >= REJOIN_ATTEMPTS) {  /* (a race's rejoin also stops at client.c's REJOIN_MS) */
+        client_give_up(&client);
+        return NULL;
+    }
     client_lobby(&client, &lobby);
     snprintf(next_url, sizeof next_url, "%s/v1/rooms/%s", base, lobby.code);
     return next_url;
@@ -165,6 +169,17 @@ void net_kick(int member) { client_kick(&client, member); }
 void net_start_race(void) { client_start(&client); }
 void net_end_race(void) { client_end(&client); }
 
+int net_send_chat(const char *text) { return inited && client_chat(&client, text); }
+
+void net_get_chat(NetChat *out)
+{
+    if (!inited) {
+        memset(out, 0, sizeof *out);
+        return;
+    }
+    client_get_chat(&client, out);
+}
+
 void net_get_lobby(NetLobby *out)
 {
     if (!inited) {
@@ -226,6 +241,8 @@ double host_service_net_server_ms(void) { return net_server_ms(); }
 int host_service_net_send_frame(int a0, uint32_t a1, uint32_t a2) { return net_send_frame(a0, (const void *)GUEST(a1), a2); }
 int host_service_net_receive_frame(uint32_t a0, uint32_t a1) { return net_receive_frame((uint8_t *)GUEST(a0), a1); }
 int host_service_net_list_lobbies(uint32_t a0, int a1) { return net_list_lobbies((NetLobbyInfo *)GUEST(a0), a1); }
+int host_service_net_send_chat(uint32_t a0) { return net_send_chat((const char *)GUEST(a0)); }
+void host_service_net_get_chat(uint32_t a0) { net_get_chat((NetChat *)GUEST(a0)); }
 
 void host_service_net_set_room(uint32_t address) {
     const uint32_t *in=GUEST(address);

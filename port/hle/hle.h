@@ -206,6 +206,13 @@ int pads_online(void);      /* an online race: started with DHD_NET_* or from th
 void hle_online_from_menu(void);            /* the ONLINE menu's room started its race */
 int hle_online_race_riders(void);           /* riders in the online race (10 offline) */
 void port_online_relock(void);              /* online_menu.c: the player's own unlocks again */
+/* online_menu.c: text chat's shared pieces (finding 125): what a chat line may have, the pad's
+   quick-chat lines, and a line from the server as the game's font can show it. */
+enum { PORT_CHAT_PRESETS = 4 };
+extern const char port_chat_letters[];
+extern const char *const port_chat_presets[PORT_CHAT_PRESETS];
+void port_chat_clean(char *out, int size, const char *in);
+void port_chat_show(char *out, int size, const char *name, const char *text, int member_id);
 extern int hle_mc_hold;                     /* mc.c: card writes held (online, all unlocked) */
 void hle_online_version(char *out, size_t size);  /* the build's identity for the lobby */
 void kernel_pace_slip(double seconds);      /* kernel.c: the frame clock waited this long */
