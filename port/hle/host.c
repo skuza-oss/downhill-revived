@@ -1429,10 +1429,15 @@ void host_pacing_wait(void)
             /* A slow stretch (a phone that can't hold 60): no frame waits for the last picture to
                be shown. That wait (start = shown, below) put the EE's frame and the render
                thread's picture in series, 25 ms a field on a T612-class phone where they overlap
-               in 18 (finding 127). Fields still start at least a period apart (pace()'s rule), and
-               the presenter keeps the pictures a field apart. */
-            double now = host_wall_seconds(), start = frame_began + period;
-            if (frame_began && start > now && start < now + period) host_wait_wall(start);
+               in 18 (finding 127). Fields keep pace()'s grid instead: each starts a period after
+               the last one's place on it, so fields that come in quick repay a slow one, and the
+               grid starts again from now only once it is more than two periods behind. The
+               presenter keeps the pictures a field apart. */
+            static double base;
+            static uint64_t fields;
+            double now = host_wall_seconds(), start = base + (double)++fields * period;
+            if (!base || now > start + 2 * period) base = now, fields = 0;
+            else if (start > now) host_wait_wall(start);
             jit_due = frame_began = host_wall_seconds();  /* shown as soon as it is ready */
             return;
         }
