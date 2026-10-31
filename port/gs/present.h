@@ -3,7 +3,8 @@
 #include "gs.h"
 void gs_vsync(void);
 void gs_window_apply(void);           /* DHD_WINDOW / _WIDTH / _HEIGHT changed: apply now (EE thread) */
-void gs_present_options_apply(void);  /* DHD_PRESENT_FILTER / DHD_ASPECT changed */
+void gs_present_options_apply(void);  /* the native renderer's live options changed: DHD_PRESENT_FILTER,
+                                         DHD_ASPECT, DHD_SCALE or DHD_VSYNC (EE thread) */
 extern volatile uint32_t gs_presented_frames;
 /* Online races (port/hle/online.c): the window's title shows the lobby (UTF-8; the main thread
    sets it at its next pass), and a wait for the other players keeps the window responsive. */

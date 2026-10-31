@@ -4,20 +4,22 @@
    - left/right change the row under the cursor; Cross (SELECT) keeps the changes and closes,
      Triangle (BACK) puts the values the page opened with back and closes, as AUDIO / OTHER does.
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
-   window size, picture shape, scaling, skip movies (the startup movies), vibration and unlock all
-   apply at once; resolution, widescreen, the texture pack, the font, the frame rate and V-Sync at
-   the next start ("*" and the footer say so). A setting the environment
+   window size, resolution, picture shape, scaling, skip movies (the startup movies), vibration,
+   V-Sync, the frame rate (above 60 at once, else at the next screen) and unlock all apply at once
+   (finding 124); widescreen, the texture pack and the font at the next start ("*" and the footer
+   say so). A setting the environment
    sets (DHD_*) is shown but can't be changed here. Nothing here writes game state: the page
    lives in host memory and the settings in dhd.ini, never in the memory card's save.
    A host that can do only some of the rows says which in DHD_PC_SETTINGS_ROWS, a comma list of
    the rows' variables; unset, every row is shown. A host that applies more rows at once than the
    ones marked live below lists their variables in DHD_PC_SETTINGS_LIVE (the row then sets its
    variable at once and the host follows it), and DHD_PC_SETTINGS_RESTART replaces the footer of
-   a row that waits for the next start. The browser sets all three (port/web/www/settings.js);
-   x64 sets none of them, so its page is as described above. */
+   a row that waits for the next start. The browser sets all three (port/web/www/settings.js) and
+   lists DHD_SCALE live, which the x64 page now marks live itself; x64 sets none of them. */
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "menu_page.h"
+#include "pad_preview.h"
 #include "../include/fps.h"
 
 #include <stdio.h>
@@ -45,7 +47,7 @@ typedef struct {
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, TEXTURES, FONT, RATE, VSYNC, UNLOCK };
 static Row rows[ROWS] = {
-    {"Resolution:", "scale", 0},
+    {"Resolution:", "scale", 1},  /* the native renderer's DHD_SCALE, at once (finding 124) */
     {"Display:", "window", 1},
     {"Window Size:", "size", 1},  /* width and height */
     {"Picture:", "DHD_ASPECT", 1},
@@ -56,7 +58,7 @@ static Row rows[ROWS] = {
     {"Texture Pack:", "textures", 0},  /* port/gs/texpack.c */
     {"Font:", "font", 0},  /* port/gs/font_sharp.c */
     {"Frame Rate:", "fps", 1},  /* fps.c: at once above 60, else at the next screen */
-    {"V-Sync:", "vsync", 0},  /* no tearing (port/gs/gpu_rust.c) */
+    {"V-Sync:", "vsync", 1},  /* no tearing (port/gs/gpu_rust.c), at once (finding 124) */
     {"Unlock All:", "unlock_all", 1},  /* port_unlock_all */
 };
 static char monitor_size[24];
@@ -180,9 +182,9 @@ static void format(Row *r)
 }
 
 /* Saves the row's choice and, for a live row, applies it. */
-/* Turning Vibration on gives player 1's pad a short buzz, so the player feels what it does: the
-   motors' run in fields, stopped by page_update (the rumble itself lasts up to 1 s, gamepad.c). */
-enum { BUZZ_FIELDS = 18, PAD_PREVIEW = 0x10 };  /* player 1, as host_pad_vibrate's preview */
+/* Switching Vibration on gives player 1's pad a short buzz, so the player feels what it does
+   (pad_preview.h): page_update stops it PAD_PREVIEW_FIELDS fields later, and the preview's own
+   window ends it either way; switching it off stops at once. */
 static int buzz;
 
 static void commit(Row *r, int apply)
@@ -197,12 +199,13 @@ static void commit(Row *r, int apply)
     if (!apply) return;
     r->running = r->selected;
     if (r == &rows[DISPLAY] || r == &rows[SIZE]) host_service_gs_window_apply();
-    else if (r == &rows[SHAPE] || r == &rows[SCALING]) host_service_gs_present_options_apply();
+    else if (r == &rows[RESOLUTION] || r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[VSYNC])
+        host_service_gs_present_options_apply();  /* DHD_SCALE, DHD_ASPECT, DHD_PRESENT_FILTER, DHD_VSYNC read again */
     else if (r == &rows[RATE]) port_fps_changed();
     else if (r == &rows[VIBRATION]) {
         int on = strcmp(c->value, "0") != 0;
-        host_service_host_pad_vibrate(on ? PAD_PREVIEW : 0, on, on ? 160 : 0);
-        buzz = on ? BUZZ_FIELDS : 0;
+        host_service_host_pad_vibrate(PAD_PREVIEW_BIT, on, on ? 160 : 0);
+        buzz = on ? PAD_PREVIEW_FIELDS : 0;
     }
 }
 
@@ -238,7 +241,7 @@ static void page_build(MenuPage *p)
 static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
 {
     const Row *r = row_at(cursor);
-    if (buzz && --buzz == 0) host_service_host_pad_vibrate(PAD_PREVIEW, 0, 0);
+    if (buzz && --buzz == 0) host_service_host_pad_vibrate(PAD_PREVIEW_BIT, 0, 0);  /* the buzz is over */
     p->footer = NULL;
     if (r && locked(r)) {
         snprintf(footer, sizeof footer, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
