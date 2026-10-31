@@ -31,6 +31,7 @@ void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
 enum { ROWS = 13, MAX_CHOICES = 16 };
+enum { CONTROLS_ROW = ROWS };  /* the button row "Controls..." (finding 124) */
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -217,12 +218,15 @@ static void change(int index, int step)
 
 /* ---- the page ---- */
 
+void port_controls_menu(void);  /* controls_menu.c: the rebindable controls (finding 124) */
+
 static void page_build(MenuPage *p)
 {
     for (int i = 0; i < shown_count; i++) {
         menu_page_value(p, rows[shown[i]].label, "", 1);
         format(&rows[shown[i]]);
     }
+    menu_page_row(p, "Controls...", 1);  /* Cross opens the CONTROLS hub (page_accept) */
 }
 
 static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
@@ -250,12 +254,23 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
 static void page_left(MenuPage *p, int index) { (void)p; change(index, -1); }
 static void page_right(MenuPage *p, int index) { (void)p; change(index, 1); }
 
+/* Cross: on "Controls..." the CONTROLS hub over this page (finding 124), else keep and close. */
+static void page_accept(MenuPage *p, int row)
+{
+    if (row == CONTROLS_ROW) {
+        port_controls_menu();
+        menu_page_rebuild_at(p, CONTROLS_ROW);
+        return;
+    }
+    menu_page_close(p);
+}
+
 static void open_page(void)
 {
     page.title = "PC SETTINGS";
     page.build = page_build;
     page.update = page_update;
-    page.accept = NULL;  /* Cross: keep, close */
+    page.accept = page_accept;  /* Cross: keep and close, or open CONTROLS on its row */
     page.back = page_back;
     page.left = page_left;
     page.right = page_right;

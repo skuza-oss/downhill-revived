@@ -5,7 +5,8 @@ import testprog
 
 def main():
     hle = testprog.ROOT / 'port/hle'
-    exe = testprog.host('text-input', [hle / 'text_input.c', hle / 'keyboard.c', hle / 'test_text_input.c'], sdl=True, low=True)
+    exe = testprog.host('text-input', [hle / 'text_input.c', hle / 'keyboard.c', hle / 'controls.c',
+                                       hle / 'test_text_input.c'], sdl=True, low=True)
     testprog.run(exe)
 
 

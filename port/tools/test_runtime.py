@@ -86,7 +86,7 @@ def guest_tests():
     run('member-abi', [member_test])
     run('autopad', [HLE / 'autopad.c', HLE / 'test_autopad.c'])
     run('game-options', [HLE / 'game_options.c', HLE / 'test_game_options.c'])
-    run('keyboard', [HLE / 'keyboard.c', HLE / 'test_keyboard.c'])  # layout and steering ramp (finding 059)
+    run('keyboard', [HLE / 'keyboard.c', HLE / 'controls.c', HLE / 'test_keyboard.c'])  # layout and steering ramp (finding 059)
     run('sif', [HLE / 'sif.c', HLE / 'test_sif.c'])
     run('timer', [HLE / 'timer.c', HLE / 'test_timer.c'])
     run('sound', [HLE / 'sound.c', HLE / 'test_sound.c'], defines=['SND_NO_HOST'])
@@ -115,8 +115,8 @@ def host_tests():
         env={'DHD_MTVU': '1'})
     # SDL3 starts and enumerates the controllers (none needed): gamepad.c's smoke test, with the
     # SDL thread (host/sdl_host.c), the keyboard and the text field it feeds (W11)
-    run('gamepad', [HLE / 'gamepad.c', HLE / 'keyboard.c', HLE / 'text_input.c', ROOT / 'port/host/sdl_host.c',
-                    HLE / 'test_gamepad.c'], sdl=True, low=True)
+    run('gamepad', [HLE / 'gamepad.c', HLE / 'keyboard.c', HLE / 'controls.c', HLE / 'text_input.c',
+                    ROOT / 'port/host/sdl_host.c', HLE / 'test_gamepad.c'], sdl=True, low=True)
 
 
 def main():

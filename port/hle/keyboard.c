@@ -18,7 +18,8 @@
    A key keeps the meaning it had when it went down until it is let go: Esc pressed while riding
    stays START while the pause menu opens, so the menu doesn't see a Triangle and close again.
 
-   Layout (keys are Windows virtual-key codes):
+   Layout (the default controls; every one of them is rebindable from the CONTROLS page, controls.c
+   / controls_menu.c, finding 124 — the keys it reads are the bound ones):
      arrows     d-pad in menus; steer / lean while riding (left stick, ramped)
      Space, X   Cross     confirm; pedal (twice: sprint)
      S          Triangle  back; brake (tweak a trick in the air)
@@ -33,6 +34,7 @@
      W          R3        sprint
      F          L3        powerslide */
 #include "hle.h"
+#include "controls.h"
 #include "../include/fps.h"
 
 #include <math.h>
@@ -42,28 +44,6 @@
 
 enum { VK_BACK_ = 0x08, VK_TAB_ = 0x09, VK_RETURN_ = 0x0D, VK_ESCAPE_ = 0x1B, VK_SPACE_ = 0x20,
        VK_LEFT_ = 0x25, VK_UP_ = 0x26, VK_RIGHT_ = 0x27, VK_DOWN_ = 0x28 };
-enum { NO_AXIS, LEFT_X, LEFT_Y };
-
-typedef struct {
-    uint8_t key;
-    uint16_t menu, riding;  /* the button in menus and while riding */
-    uint8_t axis;           /* while riding: the left stick axis it moves instead, */
-    int8_t dir;             /* -1 left/up, 1 right/down */
-} Key;
-
-static const Key keys[] = {
-    {VK_LEFT_, PAD_LEFT, 0, LEFT_X, -1},   {VK_RIGHT_, PAD_RIGHT, 0, LEFT_X, 1},
-    {VK_UP_, PAD_UP, 0, LEFT_Y, -1},       {VK_DOWN_, PAD_DOWN, 0, LEFT_Y, 1},
-    {VK_SPACE_, PAD_CROSS, PAD_CROSS},     {'X', PAD_CROSS, PAD_CROSS},
-    {'S', PAD_TRIANGLE, PAD_TRIANGLE},     {VK_BACK_, PAD_TRIANGLE, PAD_TRIANGLE},
-    {VK_ESCAPE_, PAD_TRIANGLE, PAD_START}, {VK_RETURN_, PAD_START, PAD_START},
-    {VK_TAB_, PAD_SELECT, PAD_SELECT},     {'Z', PAD_SQUARE, PAD_SQUARE},
-    {'C', PAD_CIRCLE, PAD_CIRCLE},         {'A', PAD_L1, PAD_L1},
-    {'D', PAD_R1, PAD_R1},                 {'Q', PAD_L2, PAD_L2},
-    {'E', PAD_R2, PAD_R2},                 {'W', PAD_R3, PAD_R3},
-    {'F', PAD_L3, PAD_L3},
-};
-enum { KEYS = sizeof keys / sizeof *keys };
 
 #define RAMP_SECONDS 0.1
 #if defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__)
@@ -74,16 +54,21 @@ enum { KEYS = sizeof keys / sizeof *keys };
 #endif
 
 static struct {
-    int8_t held[KEYS];      /* 0 up, 1 down as in menus, 2 down as while riding */
-    int8_t dir[3];          /* each stick axis: the direction the arrows last gave it, */
-    double since[3];        /* from when (its ramp starts there) */
+    int8_t held[CONTROL_KEY_MAX];  /* 0 up, 1 down as in menus, 2 down as while riding */
+    int8_t dir[5];                 /* each stick axis: the direction the controls last gave it, */
+    double since[5];               /* from when (its ramp starts there) */
 } state;
 
 const uint8_t *keyboard_keys(int *count)
 {
-    static uint8_t list[KEYS];
-    for (int i = 0; i < KEYS; i++) list[i] = keys[i].key;
-    *count = KEYS;
+    static uint8_t list[CONTROL_KEY_MAX];
+    int n = 0, total = control_key_count();
+    if (total > CONTROL_KEY_MAX) total = CONTROL_KEY_MAX;
+    for (int i = 0; i < total; i++) {
+        unsigned vk = control_key_vk(i);
+        if (vk) list[n++] = (uint8_t)vk;
+    }
+    *count = n;
     return list;
 }
 
@@ -172,24 +157,28 @@ static uint8_t ramp_raw(double fraction, int dir)
 }
 
 /* Merges the keys that are down into `out` (a controller's state, or a neutral pad): buttons and
-   pressures add, the left stick follows the arrows while riding. */
+   pressures add, the left stick follows the steering controls while riding. The controls and the
+   keys they are bound to are controls.c's (the defaults are the layout above). */
 void keyboard_pad(const uint8_t down[256], int riding, double now, HostPad *out)
 {
     static const uint16_t pressure_order[12] = {PAD_RIGHT, PAD_LEFT, PAD_UP, PAD_DOWN, PAD_TRIANGLE, PAD_CIRCLE,
                                                 PAD_CROSS, PAD_SQUARE, PAD_L1, PAD_R1, PAD_L2, PAD_R2};
     uint16_t buttons = 0;
-    int dir[3] = {0};
-    for (int i = 0; i < KEYS; i++) {
-        const Key *k = &keys[i];
-        if (!down[k->key]) {
+    int dir[5] = {0};
+    int total = control_key_count();
+    if (total > CONTROL_KEY_MAX) total = CONTROL_KEY_MAX;
+    for (int i = 0; i < total; i++) {
+        unsigned vk = control_key_vk(i);
+        if (!vk || !down[vk & 0xFF]) {
             state.held[i] = 0;
             continue;
         }
         if (!state.held[i]) state.held[i] = riding ? 2 : 1;
-        if (state.held[i] == 2 && k->axis) dir[k->axis] += k->dir;
-        else buttons |= state.held[i] == 2 ? k->riding : k->menu;
+        unsigned axis = control_key_axis(i);
+        if (state.held[i] == 2 && axis) dir[axis] += control_key_dir(i);
+        else buttons |= state.held[i] == 2 ? control_key_riding(i) : control_key_menu(i);
     }
-    for (int axis = LEFT_X; axis <= LEFT_Y; axis++) {
+    for (int axis = CONTROL_AXIS_LEFT_X; axis <= CONTROL_AXIS_LEFT_Y; axis++) {
         if (dir[axis] != state.dir[axis]) {  /* pressed, let go or turned: the ramp starts again */
             state.dir[axis] = (int8_t)dir[axis];
             state.since[axis] = now;
@@ -198,7 +187,7 @@ void keyboard_pad(const uint8_t down[256], int riding, double now, HostPad *out)
         double fraction = (now - state.since[axis] + FIELD_SECONDS) / RAMP_SECONDS;
         if (fraction > 1) fraction = 1;
         uint8_t raw = ramp_raw(fraction, dir[axis]);
-        if (axis == LEFT_X) out->left_x = raw;
+        if (axis == CONTROL_AXIS_LEFT_X) out->left_x = raw;
         else out->left_y = raw;
     }
     out->buttons |= buttons;

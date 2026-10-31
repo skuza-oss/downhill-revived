@@ -10,12 +10,16 @@
    Buttons by position, as on a DualShock 2: the bottom face button is Cross, right Circle, left
    Square, top Triangle, whatever the labels (a Switch Pro's B is Cross). Back/Share/Create is
    SELECT, Start/Options/+ is START, the triggers are L2/R2 (with their pressure).
+   Which SDL button, trigger or axis drives each control is controls.c's (finding 124): the defaults
+   are the layout above, and the CONTROLS page rebinds them. The mapping is read afresh each pass,
+   so a rebind takes effect on the next one.
    A pad SDL knows as a joystick but has no gamepad mapping for gets a default one: hat 0 the
    d-pad, axes 0/1 the left stick, 2/3 the right stick, buttons 0-3 Cross Circle Square
    Triangle, 4/5 L1/R1, 6/7 L2/R2, 8 SELECT, 9 START, 10/11 L3/R3. gamecontrollerdb.txt beside
    dhd.exe (SDL's format) adds or corrects mappings; so does SDL_GAMECONTROLLERCONFIG.
    DHD_SDL=0: no pads (the keyboard still plays). */
 #include "hle.h"
+#include "controls.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -50,27 +54,78 @@ static uint8_t axis_byte(Sint16 v)
 
 static uint8_t trigger_byte(Sint16 v) { return (uint8_t)(v <= 0 ? 0 : v >> 7); }
 
+/* The SDL button a source is; SDL_GAMEPAD_BUTTON_INVALID when it isn't one. */
+static SDL_GamepadButton sdl_button_of(unsigned source)
+{
+    switch (source) {
+    case PADSRC_SOUTH: return SDL_GAMEPAD_BUTTON_SOUTH;
+    case PADSRC_EAST: return SDL_GAMEPAD_BUTTON_EAST;
+    case PADSRC_WEST: return SDL_GAMEPAD_BUTTON_WEST;
+    case PADSRC_NORTH: return SDL_GAMEPAD_BUTTON_NORTH;
+    case PADSRC_BACK: return SDL_GAMEPAD_BUTTON_BACK;
+    case PADSRC_START: return SDL_GAMEPAD_BUTTON_START;
+    case PADSRC_LEFT_SHOULDER: return SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+    case PADSRC_RIGHT_SHOULDER: return SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+    case PADSRC_L3: return SDL_GAMEPAD_BUTTON_LEFT_STICK;
+    case PADSRC_R3: return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+    case PADSRC_DPAD_UP: return SDL_GAMEPAD_BUTTON_DPAD_UP;
+    case PADSRC_DPAD_DOWN: return SDL_GAMEPAD_BUTTON_DPAD_DOWN;
+    case PADSRC_DPAD_LEFT: return SDL_GAMEPAD_BUTTON_DPAD_LEFT;
+    case PADSRC_DPAD_RIGHT: return SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
+    default: return SDL_GAMEPAD_BUTTON_INVALID;
+    }
+}
+
+/* The SDL axis a source is (a trigger or a stick); SDL_GAMEPAD_AXIS_INVALID when it isn't one. */
+static SDL_GamepadAxis sdl_axis_of(unsigned source)
+{
+    switch (source) {
+    case PADSRC_LEFT_TRIGGER: return SDL_GAMEPAD_AXIS_LEFT_TRIGGER;
+    case PADSRC_RIGHT_TRIGGER: return SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    case PADSRC_LEFT_X: return SDL_GAMEPAD_AXIS_LEFTX;
+    case PADSRC_LEFT_Y: return SDL_GAMEPAD_AXIS_LEFTY;
+    case PADSRC_RIGHT_X: return SDL_GAMEPAD_AXIS_RIGHTX;
+    case PADSRC_RIGHT_Y: return SDL_GAMEPAD_AXIS_RIGHTY;
+    default: return SDL_GAMEPAD_AXIS_INVALID;
+    }
+}
+
+/* The controls' bound sources (controls.c, finding 124) into `out`: a button control is a button
+   or a trigger, a stick control is an axis. */
 static void read_gamepad(SDL_Gamepad *g, HostPad *out)
 {
-    static const struct { SDL_GamepadButton b; uint16_t button; } map[] = {
-        {SDL_GAMEPAD_BUTTON_SOUTH, PAD_CROSS}, {SDL_GAMEPAD_BUTTON_EAST, PAD_CIRCLE},
-        {SDL_GAMEPAD_BUTTON_WEST, PAD_SQUARE}, {SDL_GAMEPAD_BUTTON_NORTH, PAD_TRIANGLE},
-        {SDL_GAMEPAD_BUTTON_BACK, PAD_SELECT}, {SDL_GAMEPAD_BUTTON_START, PAD_START},
-        {SDL_GAMEPAD_BUTTON_LEFT_STICK, PAD_L3}, {SDL_GAMEPAD_BUTTON_RIGHT_STICK, PAD_R3},
-        {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, PAD_L1}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PAD_R1},
-        {SDL_GAMEPAD_BUTTON_DPAD_UP, PAD_UP}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, PAD_DOWN},
-        {SDL_GAMEPAD_BUTTON_DPAD_LEFT, PAD_LEFT}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, PAD_RIGHT},
-    };
-    for (size_t i = 0; i < sizeof map / sizeof *map; i++)
-        if (SDL_GetGamepadButton(g, map[i].b)) out->buttons |= map[i].button;
-    uint8_t l2 = trigger_byte(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
-    uint8_t r2 = trigger_byte(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
-    if (l2 > 30) out->buttons |= PAD_L2;
-    if (r2 > 30) out->buttons |= PAD_R2;
-    out->left_x = axis_byte(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX));
-    out->left_y = axis_byte(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
-    out->right_x = axis_byte(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTX));
-    out->right_y = axis_byte(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY));
+    uint8_t l2 = 0, r2 = 0;
+    int total = control_pad_count();
+    if (total > CONTROL_PAD_MAX) total = CONTROL_PAD_MAX;
+    for (int i = 0; i < total; i++) {
+        unsigned source = control_pad_source(i);
+        uint8_t value = 0;
+        if (!source) continue;
+        if (control_pad_axis(i)) {
+            SDL_GamepadAxis a = sdl_axis_of(source);
+            uint8_t v = a == SDL_GAMEPAD_AXIS_INVALID ? 128 : axis_byte(SDL_GetGamepadAxis(g, a));
+            switch (control_pad_axis(i)) {
+            case CONTROL_AXIS_LEFT_X: out->left_x = v; break;
+            case CONTROL_AXIS_LEFT_Y: out->left_y = v; break;
+            case CONTROL_AXIS_RIGHT_X: out->right_x = v; break;
+            case CONTROL_AXIS_RIGHT_Y: out->right_y = v; break;
+            default: break;
+            }
+            continue;
+        }
+        if (source == PADSRC_LEFT_TRIGGER || source == PADSRC_RIGHT_TRIGGER) {
+            value = trigger_byte(SDL_GetGamepadAxis(g, sdl_axis_of(source)));
+            if (value > 30) out->buttons |= (uint16_t)control_pad_button(i);
+        } else {
+            SDL_GamepadButton b = sdl_button_of(source);
+            if (b != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(g, b)) {
+                out->buttons |= (uint16_t)control_pad_button(i);
+                value = 255;
+            }
+        }
+        if (control_pad_button(i) == PAD_L2) l2 = value;
+        else if (control_pad_button(i) == PAD_R2) r2 = value;
+    }
     for (int i = 0; i < 12; i++)
         out->pressure[i] = pressure_order[i] == PAD_L2 ? l2 : pressure_order[i] == PAD_R2 ? r2
                          : out->buttons & pressure_order[i] ? 255 : 0;

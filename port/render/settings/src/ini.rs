@@ -168,13 +168,29 @@ impl Ini {
         }
     }
 
-    /// Keys of lines that aren't settings or DHD_* variables (the game logs them).
+    /// Keys of lines that aren't settings or DHD_* variables (the game logs them). A control
+    /// profile's key (`bindings_<name>`, finding 124) is one the game manages, not a mistake.
     pub fn unknown_keys(&self) -> Vec<String> {
         self.lines()
             .into_iter()
             .filter_map(|l| entry(self.content(l)).map(|(k, _)| text(k)))
-            .filter(|k| table::find(k).is_none() && !k.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("DHD_")))
+            .filter(|k| table::find(k).is_none() && !k.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("DHD_"))
+                    && !k.get(..9).is_some_and(|p| p.eq_ignore_ascii_case("bindings_")))
             .collect()
+    }
+
+    /// Keys of the lines whose key starts with `prefix` (without case), in the file's order, each
+    /// once: the control profiles (`bindings_...`) the game reads (finding 124).
+    pub fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for (k, _) in self.entries() {
+            if k.get(..prefix.len()).is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+                && !out.iter().any(|e| e.eq_ignore_ascii_case(&k))
+            {
+                out.push(k);
+            }
+        }
+        out
     }
 
     /// Every line's key and value, in order (values as written, empty ones included).

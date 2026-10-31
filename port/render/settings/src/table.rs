@@ -118,6 +118,13 @@ pub const SETTINGS: &[Setting] = &[
     // Discord Rich Presence (port/render/presence): the game shows what is played on the player's
     // Discord profile. Off without dhd.ini, so the tools' runs never reach the PC's Discord.
     switch("discord", "DHD_DISCORD", TOGGLE, "on", "off"),
+    // The rebindable controls (finding 124). `controls` names the active profile (empty: the
+    // default one); its bindings live under `bindings` (default profile) or `bindings_<name>`,
+    // whose text port/hle/controls.c reads. The rest are the Android on-screen controls.
+    text("controls", "DHD_CONTROLS"),
+    text("bindings", "DHD_BINDINGS"),
+    Setting { default: "1", builtin: "1", ..text("touch", "DHD_TOUCH") },
+    Setting { default: "default", builtin: "default", ..text("touch_layout", "DHD_TOUCH_LAYOUT") },
     // The game's own options (finding 064), read after its boot and each game-data load.
     text("game_options", ""),
 ];
