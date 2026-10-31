@@ -517,6 +517,7 @@ export class Room extends DurableObject<Env> {
           memberId: held.id,
           host: st.hostId === held.id,
           serverTime: Date.now(),
+          chat: true,  // this server takes chat (an older one closes on it)
           reconnectToken: fresh,
           // Still racing in this slot. Without it the race the client left has ended meanwhile.
           ...(slot >= 0 ? { slot } : {}),
@@ -569,6 +570,7 @@ export class Room extends DurableObject<Env> {
       memberId: member.id,
       host: asHost,
       serverTime: Date.now(),
+      chat: true,  // this server takes chat (an older one closes on it)
       ...(member.token ? { reconnectToken: member.token } : {}),
     });
     // First ping right away so the lobby shows a delay quickly.

@@ -27,6 +27,7 @@ typedef struct {
        welcome carries one, and cleared again by a welcome without one (a server without the
        feature). */
     char reconnect_token[80];
+    int server_chat;  /* the welcome said the server takes chat (an older one closes on it) */
     double dropped_at;  /* when a race's connection dropped (net_now_ms), 0 when connected */
     NetLobby lobby;
     int racing;

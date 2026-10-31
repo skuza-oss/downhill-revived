@@ -133,7 +133,7 @@ static void relay_text(Player *p, const char *text)
             CHECK(started && p->away && !strcmp(token, want));
             p->open = 1, p->away = 0;
             snprintf(reply, sizeof reply, "{\"type\":\"welcome\",\"protocol\":1,\"code\":\"TEST22\",\"memberId\":%d,"
-                     "\"host\":%s,\"serverTime\":1,\"reconnectToken\":\"%s\",\"slot\":%d}", p->member,
+                     "\"host\":%s,\"serverTime\":1,\"chat\":true,\"reconnectToken\":\"%s\",\"slot\":%d}", p->member,
                      p->member == host_member ? "true" : "false", want, p->slot);
             text_to(p, p, reply);
             snprintf(reply, sizeof reply, "{\"type\":\"back\",\"slot\":%d,\"memberId\":%d}", p->slot, p->member);
@@ -146,7 +146,7 @@ static void relay_text(Player *p, const char *text)
             host_member = p->member;
         /* a token only for the player that will rejoin: the others drop as before */
         snprintf(reply, sizeof reply, "{\"type\":\"welcome\",\"protocol\":1,\"code\":\"TEST22\",\"memberId\":%d,"
-                 "\"host\":%s,\"serverTime\":1%s%s%s}", p->member, p->member == host_member ? "true" : "false",
+                 "\"host\":%s,\"serverTime\":1,\"chat\":true%s%s%s}", p->member, p->member == host_member ? "true" : "false",
                  p->rejoin_after_ms ? ",\"reconnectToken\":\"" : "", p->rejoin_after_ms ? want : "",
                  p->rejoin_after_ms ? "\"" : "");
         text_to(p, p, reply);

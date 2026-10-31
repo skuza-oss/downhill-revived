@@ -127,6 +127,12 @@ describe("lobby", () => {
     expect((await host.json("error")).code).toBe("bad_value");
   });
 
+  it("says in the welcome that it takes chat", async () => {
+    const c = await Client.connect("/v1/rooms/new");
+    c.hello("Ann");
+    expect((await c.json("welcome")).chat).toBe(true);
+  });
+
   it("sends a chat message to everyone in the room, the sender too", async () => {
     const { host, code } = await Client.host("Ann");
     const bo = await Client.join(code, "Bo");

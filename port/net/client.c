@@ -289,6 +289,10 @@ void client_on_text(NetClient *c, const char *text, size_t n)
            without one clears it, so a server without the feature never sees a stale token. */
         c->reconnect_token[0] = 0;
         json_string(text, "reconnectToken", c->reconnect_token, sizeof c->reconnect_token);
+        /* chat only where the server says it takes it: an older server answers a chat message
+           with bad_message and closes the socket */
+        c->server_chat = 0;
+        json_bool(text, "chat", &c->server_chat);
         if (json_number(text, "serverTime", &server_time) && !c->have_offset)
             c->clock_offset = server_time - net_now_ms();
         c->lobby.error_code[0] = c->lobby.error[0] = 0;
@@ -571,7 +575,9 @@ int client_chat(NetClient *c, const char *text)
         return 0;
     json_escape(escaped, sizeof escaped, line);
     SDL_LockMutex(c->lock);
-    if (c->connected) {
+    if (c->connected && !c->server_chat)
+        chat_add(c, -1, "", "Chat isn't on this server yet.", net_now_ms() + c->clock_offset), changed(c);
+    else if (c->connected) {
         say(c, "{\"type\":\"chat\",\"text\":\"%s\"}", escaped);
         sent = 1;
     }
