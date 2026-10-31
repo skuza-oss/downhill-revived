@@ -269,7 +269,10 @@ extern void func_001B45F8(void *timer, int kind, int ticks);  /* the race-end co
    port/hle/puppet.c's. */
 enum {
     EVENT_VERSION = 2, EVENT_HIT = 1, EVENT_LOADED = 2, EVENT_SETUP = 3, EVENT_START = 4, EVENT_GO = 5,
-    EVENT_FINISH = 6, EVENT_RESULTS = 7  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
+    EVENT_FINISH = 6, EVENT_RESULTS = 7,  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
+    /* 9: the taunts branch's EVENT_TAUNT. 10: [length, text]: a race chat line (finding 125), so chat
+       works on a server without a chat message; older clients drop it (puppet.c takes EVENT_HIT alone) */
+    EVENT_CHAT = 10
 };
 enum { SNAPSHOT_TICKS = 3 };  /* a snapshot every 3 race ticks: 20 a second at any frame rate */
 enum { NRIDERS = 10, START_LEAD_MS = 1500 };
@@ -601,6 +604,7 @@ static void go_skew(int player)
 
 static void read_finish(int global, int time);
 static void read_results(const uint8_t *in, int n);
+static void race_chat_heard(int sender, const uint8_t *in, int n);
 
 /* The relayed frames: snapshots to the puppets, events (a hit, the start, a finish, the results). */
 static void receive_frames(void)
@@ -646,6 +650,9 @@ static void receive_frames(void)
             break;
         case EVENT_RESULTS:
             if (sender == on.host_slot) read_results(e, n - 2);
+            break;
+        case EVENT_CHAT:
+            race_chat_heard(sender, e, n - 2);
             break;
         default:  /* EVENT_HIT */
             hle_puppet_event(sender, e, n - 2);
@@ -1383,9 +1390,17 @@ void hle_online_names(void *rider, int view)
    riding meanwhile, and text_input.c keeps the typed keys from the pad), and in the pause menu
    L1, R1, L2 and R2 say the quick lines (port_chat_presets) without a keyboard. The last lines
    said show at the left of this player's view for a few seconds, fading, in the HUD's font as
-   hle_online_hud's own prompt is drawn. */
+   hle_online_hud's own prompt is drawn.
+
+   A race's lines travel as EVENT_CHAT frames, which every server relays to the race as they are
+   (the official one has no chat message of its own), with the sender's slot the server stamps
+   in the frame: the name shown is that slot's, never one the frame claims. The server does not
+   send a frame back to its sender, so this PC shows its own line as it sends it. At most
+   CHAT_BURST lines each CHAT_WINDOW seconds a player, sent or taken. Outside a race (the room)
+   lines go by the server's chat message, where it has one. */
 enum { RACE_CHAT_SHOWN = 5, RACE_CHAT_SECONDS = 8, RACE_CHAT_KEY = 'Y', RACE_CHAT_TEXT = 56 };
 enum { QUICK_CHAT = PAD_L1 | PAD_R1 | PAD_L2 | PAD_R2 };
+enum { CHAT_BURST = 5, CHAT_WINDOW = 10 };
 static struct {
     unsigned seen;          /* the newest chat line taken */
     int seen_valid, key_held, typing, quick_held;
@@ -1400,6 +1415,65 @@ static int menu_open(int menu)
     return EE32(RIDING_WORD) == 0 && EE32(OPEN_MENU) == (int32_t)(uintptr_t)EE_PTR(menu);
 }
 void func_0020F9A8(int pen, int view, int x, int y, const char *text);  /* left-aligned */
+
+/* A line at the bottom of the shown ones, the oldest gone. */
+static void race_chat_add(const char *name, const char *text, int member, int own)
+{
+    char shown[NET_CHAT_NAME + NET_CHAT_TEXT + 4];
+    memmove(race_chat.shown, race_chat.shown + 1, sizeof race_chat.shown[0] * (RACE_CHAT_SHOWN - 1));
+    port_chat_show(shown, sizeof shown, name, text, member);
+    if (strlen(shown) >= RACE_CHAT_TEXT) memcpy(shown + RACE_CHAT_TEXT - 3, "..", 3);
+    snprintf(race_chat.shown[RACE_CHAT_SHOWN - 1].text, RACE_CHAT_TEXT, "%s", shown);
+    race_chat.shown[RACE_CHAT_SHOWN - 1].own = own;
+    race_chat.shown[RACE_CHAT_SHOWN - 1].note = member < 0;
+    race_chat.shown[RACE_CHAT_SHOWN - 1].until = host_wall_seconds() + RACE_CHAT_SECONDS;
+}
+
+/* 1 when slot (NET_MAX_SLOTS: this PC) may say one more line now: CHAT_BURST in CHAT_WINDOW s. */
+static int chat_allowed(int slot)
+{
+    static double said[NET_MAX_SLOTS + 1][CHAT_BURST];
+    double now = host_wall_seconds(), *t = said[slot], *oldest = t;
+    for (int i = 1; i < CHAT_BURST; i++)
+        if (t[i] < *oldest) oldest = &t[i];
+    if (*oldest && now - *oldest < CHAT_WINDOW) return 0;
+    *oldest = now;
+    return 1;
+}
+
+/* This PC's line: in a race to the race as an EVENT_CHAT (shown here at once), else by the
+   server's chat message. 1 when it went. */
+static int race_chat_say(const char *text)
+{
+    if (!on.started || !host_service_net_racing()) return host_service_net_send_chat(GADDR(text));
+    if (!chat_allowed(NET_MAX_SLOTS)) {
+        race_chat_add("", "TOO MANY LINES: WAIT A MOMENT", -1, 0);
+        return 0;
+    }
+    uint8_t e[3 + NET_CHAT_MAX] = {EVENT_VERSION, EVENT_CHAT};
+    int n = (int)strlen(text);
+    if (n > NET_CHAT_MAX) n = NET_CHAT_MAX;
+    e[2] = (uint8_t)n;
+    memcpy(e + 3, text, (size_t)n);
+    send_event(e, 3 + n);
+    race_chat_add(on.local_slot >= 0 && on.local_slot < NET_MAX_SLOTS ? on.name[on.local_slot] : "", text, 0, 1);
+    return 1;
+}
+
+/* Another player's line (EVENT_CHAT): the name is the slot's the server stamped; the text is
+   cleaned to the game font's letters when shown (port_chat_show). */
+static void race_chat_heard(int sender, const uint8_t *in, int n)
+{
+    char text[NET_CHAT_MAX + 1];
+    if (n < 3 || sender < 0 || sender >= on.nslots || sender == on.local_slot) return;
+    int len = in[2];
+    if (len < 1 || len > NET_CHAT_MAX || len > n - 3) return;   /* malformed: dropped */
+    if (!chat_allowed(sender)) return;                          /* a flood: the extra lines dropped */
+    memcpy(text, in + 3, (size_t)len);
+    text[len] = 0;
+    race_chat_add(on.name[sender], text, sender, 0);
+    fprintf(stderr, "online: chat from player %d (%s): %s\n", sender, on.name[sender], text);
+}
 
 static void race_chat_close(void)
 {
@@ -1443,7 +1517,7 @@ static void race_chat_step(void)
     race_chat.key_held = key;
     if (!race_chat.typing) return;
     int action = host_service_text_input_edit(GADDR(race_chat.entry), sizeof race_chat.entry, GADDR(port_chat_letters));
-    if (action > 0 && race_chat.entry[0]) host_service_net_send_chat(GADDR(race_chat.entry));
+    if (action > 0 && race_chat.entry[0]) race_chat_say(race_chat.entry);
     if (action) race_chat_close();
 }
 
@@ -1455,7 +1529,7 @@ static void race_chat_quick(HostPad *out)
     race_chat.quick_held = held;  /* held as the menu opens (a trick): not a press */
     if (!menu_open(PAUSE_MENU)) return;
     for (int i = 0; i < PORT_CHAT_PRESETS; i++)
-        if (pressed & buttons[i] && host_service_net_send_chat(GADDR(port_chat_presets[i]))) menu_play("S_SELECT");
+        if (pressed & buttons[i] && race_chat_say(port_chat_presets[i])) menu_play("S_SELECT");
     out->buttons &= ~QUICK_CHAT;
 }
 
