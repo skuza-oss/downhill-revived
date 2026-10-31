@@ -1425,6 +1425,17 @@ void host_pacing_wait(void)
             else if (w > worst) worst = w;
         }
         if (longer * 10 <= n) work = worst / 1000.0 + 0.0015;
+        else {
+            /* A slow stretch (a phone that can't hold 60): no frame waits for the last picture to
+               be shown. That wait (start = shown, below) put the EE's frame and the render
+               thread's picture in series, 25 ms a field on a T612-class phone where they overlap
+               in 18 (finding 127). Fields still start at least a period apart (pace()'s rule), and
+               the presenter keeps the pictures a field apart. */
+            double now = host_wall_seconds(), start = frame_began + period;
+            if (frame_began && start > now && start < now + period) host_wait_wall(start);
+            jit_due = frame_began = host_wall_seconds();  /* shown as soon as it is ready */
+            return;
+        }
     }
     double now = host_wall_seconds(), shown = jit_due;
     /* The presenter moved the grid if the picture handed now, or the one before it, was late. Its
