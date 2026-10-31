@@ -450,6 +450,31 @@ void gs_vblank(Gs *g)
     g->privileged[GS_CSR / 16] ^= 0x2000;
 }
 
+/* gs_write for the registers a PACKED vertex writes every time (RGBAQ, ST, UV, XYZF2/3, XYZ2/3):
+   the same stores, inline and without gs_write's switches. None of them is a state register, so
+   state_version does not move. On the throttled phone of finding 127 these writes were most of
+   the GS thread's 27 % in gs_write. */
+static inline void vertex_write(Gs *g, unsigned reg, uint64_t value)
+{
+    g->reg[reg] = value;
+    switch (reg) {
+    case GS_RGBAQ:
+        g->vertex.rgba = (uint32_t)value;
+        { uint32_t q = (uint32_t)(value >> 32); memcpy(&g->vertex.q, &q, 4); }
+        break;
+    case GS_ST: memcpy(&g->vertex.s, &value, 8); break;
+    case GS_UV: g->vertex.u = field(value, 0, 0x3FFF); g->vertex.v = field(value, 16, 0x3FFF); break;
+    default:  /* XYZF2, XYZ2, XYZF3, XYZ3 */
+        g->vertex.x = field(value, 0, 65535); g->vertex.y = field(value, 16, 65535);
+        g->vertex.z = (uint32_t)(value >> 32);
+        if (reg == GS_XYZF2 || reg == GS_XYZF3) {
+            g->vertex.z &= 0xFFFFFF; g->vertex.fog = (unsigned)(value >> 56);
+        }
+        vertex_kick(g, reg == GS_XYZF3 || reg == GS_XYZ3);
+        break;
+    }
+}
+
 static void packed(Gs *g, GsPath *p, unsigned reg, const uint32_t *w)
 {
     uint64_t value = w[0] | (uint64_t)w[1] << 32;
@@ -471,7 +496,8 @@ static void packed(Gs *g, GsPath *p, unsigned reg, const uint32_t *w)
     case 14: reg = w[2] & 127; break;
     case 11: case 15: return;
     }
-    gs_write(g, reg, value);
+    if ((reg >= GS_RGBAQ && reg <= GS_XYZ2) || reg == GS_XYZF3 || reg == GS_XYZ3) vertex_write(g, reg, value);
+    else gs_write(g, reg, value);
 }
 
 static void gif_qword(Gs *g, unsigned path, GsPath *p)
