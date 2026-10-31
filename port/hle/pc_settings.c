@@ -33,7 +33,6 @@ void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
 enum { ROWS = 13, MAX_CHOICES = 16 };
-enum { CONTROLS_ROW = ROWS };  /* the button row "Controls..." (finding 124) */
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -137,6 +136,9 @@ static void choose_rows(void)
         if (live && listed(live, rows[i].env)) rows[i].live = 1;
     }
 }
+
+/* The button row "Controls..." (finding 124): after the rows this host shows. */
+static int controls_row(void) { return shown_count; }
 
 static Row *row_at(int index) { return index >= 0 && index < shown_count ? &rows[shown[index]] : NULL; }
 
@@ -272,9 +274,9 @@ static void page_right(MenuPage *p, int index) { (void)p; change(index, 1); }
 /* Cross: on "Controls..." the CONTROLS hub over this page (finding 124), else keep and close. */
 static void page_accept(MenuPage *p, int row)
 {
-    if (row == CONTROLS_ROW) {
+    if (row == controls_row()) {
         port_controls_menu();
-        menu_page_rebuild_at(p, CONTROLS_ROW);
+        menu_page_rebuild_at(p, controls_row());
         return;
     }
     menu_page_close(p);
