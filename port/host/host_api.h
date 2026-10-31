@@ -175,6 +175,9 @@ int host_service_host_poll_dump(void);
 void host_service_host_settings_load(void);
 int host_service_host_setting_save(uint32_t a0, uint32_t a1);
 int host_service_host_setting_locked(uint32_t a0);
+/* The controls' bindings changed (controls_menu.c, finding 124): the host re-reads the active
+   profile's dhd.ini key and applies it to the keyboard and the controllers. */
+void host_service_controls_apply(void);
 void host_service_host_pad_device(int a0, uint32_t a1);
 void host_service_host_pad_vibrate(int a0, int a1, int a2);
 void host_service_graphics_feed(int a0, uint32_t a1, uint32_t a2);

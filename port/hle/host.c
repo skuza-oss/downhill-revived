@@ -51,6 +51,7 @@
 #include "../host/host_os.h"
 #include "../render/include/dhd_settings.h"  /* dhd.ini (port/render/settings) */
 #include "../render/include/dhd_presence.h"  /* Discord Rich Presence (port/render/presence) */
+#include "controls.h"                        /* the rebindable controls (finding 124) */
 
 #include <SDL3/SDL.h>
 
@@ -936,13 +937,18 @@ static void keyboard_merge(HostPad *out)
     keyboard_pad(down, riding_controls(), host_seconds(), out);
 }
 
-/* Player `port`'s controller (SDL, gamepad.c), and for player 1 the keyboard as well, merged. */
+/* Player `port`'s controller (SDL, gamepad.c), and for player 1 the keyboard as well, merged. On
+   Android the on-screen controls (touch.c) are a third source for player 1, while riding only (in
+   the menus a touch is the mouse, finding 092). */
 void host_pad_device(int port, HostPad *out)
 {
     memset(out, 0, sizeof *out);
     out->right_x = out->right_y = out->left_x = out->left_y = 128;
     int connected = gamepad_start() && gamepad_read(port, out);
     if (port == 0) keyboard_merge(out);
+#ifdef __ANDROID__
+    if (port == 0) touch_merge(riding_controls(), out);
+#endif
     out->connected = (uint8_t)(connected || port == 0);  /* player 1 always has the keyboard */
 }
 
@@ -989,6 +995,7 @@ int host_setting_locked(const char *name)
 
 static const char *settings_get(const char *name) { return getenv(name); }
 static void settings_unknown(const char *key) { hle_log("settings: unknown key %s\n", key); }
+static void host_controls_load(void);  /* the controls' bindings, below */
 
 /* The settings into the log as one line, "settings: FPS=240 SCALE=8 ...", without paths (they
    may hold the player's name); those the environment set (over dhd.ini) after "| from the environment:". */
@@ -1026,6 +1033,66 @@ void host_settings_load(void)
         at += n + (at[n] == ',');
     }
     hle_log("settings:%s\n", *settings_seen ? settings_seen : " (none)");
+    host_controls_load();
+}
+
+/* ---- the rebindable controls (finding 124, controls.h/controls.c) ----
+   The keyboard's and the controllers' bindings come from dhd.ini's active profile: the "controls"
+   setting names the profile (empty or "default"), whose bindings live under "bindings" for the
+   default profile, else "bindings_<name>". They go into controls.c (which keyboard.c and gamepad.c
+   read) and published as DHD_CONTROLS_ACTIVE, so the core's CONTROLS page (controls_menu.c) shows
+   what is in force; the profile names it may cycle go to DHD_CONTROLS_PROFILES. host_controls_load
+   runs at the start and whenever the page applies a change (host_service_controls_apply). */
+static void host_controls_publish(void)
+{
+    char text[CONTROL_TEXT];
+    if (controls_format(text, sizeof text) < 0) text[0] = 0;
+    host_putenv_s("DHD_CONTROLS_ACTIVE", text);  /* what the core's CONTROLS page shows */
+}
+
+/* "default", then every "bindings_<name>" key dhd.ini holds, in the order they appear. */
+static void host_controls_profiles(void)
+{
+    char path[HOST_PATH_MAX], keys[512], list[768];
+    settings_path(path, sizeof path);
+    snprintf(list, sizeof list, "default");
+    if (dhd_settings_keys(path, "bindings_", keys, sizeof keys)) {
+        for (char *k = keys; *k;) {
+            char *end = strchr(k, ',');
+            if (end) *end = 0;
+            if (!strncmp(k, "bindings_", 9) && k[9] && strcmp(k + 9, "default") &&
+                strlen(list) + strlen(k + 9) + 1 < sizeof list) {
+                strcat(list, ",");
+                strcat(list, k + 9);
+            }
+            if (!end) break;
+            k = end + 1;
+        }
+    }
+    host_putenv_s("DHD_CONTROLS_PROFILES", list);
+}
+
+static void host_controls_load(void)
+{
+    char path[HOST_PATH_MAX], key[80], text[CONTROL_TEXT];
+    settings_path(path, sizeof path);
+    control_profile_key(getenv("DHD_CONTROLS"), key, sizeof key);
+    text[0] = 0;
+    if (!strcmp(key, "bindings")) {
+        /* the default profile: DHD_BINDINGS set in the environment wins over the "bindings" line */
+        const char *env = host_setting_locked("DHD_BINDINGS") ? getenv("DHD_BINDINGS") : NULL;
+        if (env && *env) snprintf(text, sizeof text, "%s", env);
+        else dhd_settings_read(path, "bindings", text, sizeof text);
+    } else
+        dhd_settings_read(path, key, text, sizeof text);  /* a named profile's own key */
+    controls_default();
+    if (text[0]) controls_parse(text);
+    host_controls_publish();
+    host_controls_profiles();
+#ifdef __ANDROID__
+    touch_reset();                              /* DHD_TOUCH / DHD_TOUCH_LAYOUT may have changed */
+    host_putenv_s("DHD_TOUCH_AVAILABLE", "1");  /* the CONTROLS page shows its touch rows */
+#endif
 }
 
 /* One dhd.ini line (the others kept). Nonzero when saved. */
@@ -1208,6 +1275,9 @@ int host_service_host_poll_dump(void) { return atomic_exchange(&dump_pending, 0)
 void host_service_host_settings_load(void) { host_settings_load(); }
 int host_service_host_setting_save(uint32_t a0, uint32_t a1) { return host_setting_save((const char *)GUEST(a0), (const char *)GUEST(a1)); }
 int host_service_host_setting_locked(uint32_t a0) { return host_setting_locked((const char *)GUEST(a0)); }
+/* The core's CONTROLS page changed a binding (it saved it to the active profile's dhd.ini key and
+   set DHD_CONTROLS): read the profile again and apply it (finding 124). */
+void host_service_controls_apply(void) { host_controls_load(); }
 void host_service_host_pad_device(int a0, uint32_t a1) { host_pad_device(a0, (HostPad *)GUEST(a1)); }
 void host_service_host_pad_vibrate(int a0, int a1, int a2) { host_pad_vibrate(a0, a1, a2); }
 

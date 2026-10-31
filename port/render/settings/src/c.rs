@@ -98,3 +98,34 @@ pub unsafe extern "C" fn dhd_settings_read(path: *const c_char, key: *const c_ch
     }
     1
 }
+
+/// The keys dhd.ini at `path` holds whose key starts with `prefix` (without case), joined by
+/// commas, into `out` (`size` bytes, NUL-terminated, cut if longer). 1 when it found one: the
+/// control profiles (`bindings_<name>`) the game lists (finding 124).
+///
+/// # Safety
+/// `path` and `prefix` are NUL-terminated strings; `out` has room for `size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dhd_settings_keys(path: *const c_char, prefix: *const c_char, out: *mut c_char, size: usize) -> c_int {
+    // SAFETY: the caller's contract.
+    let (Some(path), Some(prefix)) = (unsafe { text(path) }, unsafe { text(prefix) }) else {
+        return 0;
+    };
+    let Some(keys) = crate::read(Path::new(path)).map(|ini| ini.keys_with_prefix(prefix)) else {
+        return 0;
+    };
+    if keys.is_empty() {
+        return 0;
+    }
+    let joined = keys.join(",");
+    if !out.is_null() && size > 0 {
+        let bytes = joined.as_bytes();
+        let n = bytes.len().min(size - 1);
+        // SAFETY: out has size bytes; n + 1 <= size.
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out.cast::<u8>(), n);
+            *out.add(n) = 0;
+        }
+    }
+    1
+}

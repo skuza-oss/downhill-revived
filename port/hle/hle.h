@@ -137,6 +137,13 @@ int sdl_host_main(int (*game)(void *), void *arg);
 int sdl_host_start(void);
 int sdl_host_run(void (*fn)(void *), void *arg);
 
+/* touch.c (Android only, finding 124): the on-screen controls. sdl_host.c hands it SDL's finger
+   events; host_pad_device asks it for player 1's state (while riding). touch_reset: DHD_TOUCH or
+   DHD_TOUCH_LAYOUT changed (host_controls_load), read them again. */
+void touch_merge(int riding, HostPad *out);
+void touch_event(const void *sdl_event);
+void touch_reset(void);
+
 /* ---- kernel.c ---- */
 enum { INTC_GS = 0, INTC_VBLANK_START = 2, INTC_VBLANK_END = 3, INTC_TIMER0 = 9 };
 

@@ -598,6 +598,20 @@ void gs_picture_rect(int left, int top, int right, int bottom, int w, int h)
     MOUSE_UNLOCK();
 }
 
+/* The picture's rect in the window (pixels) and the window's pixel size, as gs_picture_rect last
+   set them: touch.c (Android) maps its finger positions into the picture with this, so its layout
+   holds whatever the bars beside the picture or the scale. 0 when the renderer hasn't reported one
+   yet. */
+int gs_picture_rect_get(int *left, int *top, int *right, int *bottom, int *w, int *h)
+{
+    MOUSE_LOCK();
+    int ok = mouse.right > mouse.left && mouse.bottom > mouse.top && mouse.w > 0 && mouse.h > 0;
+    *left = mouse.left, *top = mouse.top, *right = mouse.right, *bottom = mouse.bottom;
+    *w = mouse.w, *h = mouse.h;
+    MOUSE_UNLOCK();
+    return ok;
+}
+
 /* The pointer as fractions of the picture (65536 its width / height); lock held. */
 static void mouse_place(void)
 {

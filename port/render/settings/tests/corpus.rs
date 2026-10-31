@@ -126,6 +126,39 @@ fn unknown_lines() {
 }
 
 #[test]
+fn control_profiles() {
+    // A control profile (finding 124): "controls" names the active one, "bindings" is the default
+    // profile's text, "bindings_<name>" the named ones. Those keys are the game's own, not unknown.
+    let text = "controls = fast\nbindings = key.accelerate=space,pad.south=south\n\
+                bindings_fast = key.accelerate=x\nbindings_fast = key.accelerate=y\nfoo = bar\n";
+    let ini = Ini::parse(text.as_bytes());
+    assert_eq!(ini.value("bindings"), "key.accelerate=space,pad.south=south");
+    assert_eq!(ini.value("controls"), "fast");
+    assert_eq!(ini.keys_with_prefix("bindings_"), vec!["bindings_fast".to_string()]);
+    assert!(ini.keys_with_prefix("nope").is_empty());
+    assert_eq!(ini.unknown_keys(), vec!["foo".to_string()]);
+    // The game's save of one profile's key keeps every other line (the other duplicate goes).
+    let after = saved(text.as_bytes(), "bindings_fast", "key.brake=q");
+    let mut want = text.to_string();
+    let first = want.find("bindings_fast = key.accelerate=x").unwrap();
+    want.replace_range(first..first + "bindings_fast = key.accelerate=x".len(), "bindings_fast = key.brake=q");
+    let second = want.find("bindings_fast = key.accelerate=y\n").unwrap();
+    want.replace_range(second..second + "bindings_fast = key.accelerate=y\n".len(), "");
+    assert_eq!(after, want.as_bytes());
+    assert_eq!(Ini::parse(&after).keys_with_prefix("bindings_"), vec!["bindings_fast".to_string()]);
+    // A dhd.ini without a profile: the default one only, and no profile keys.
+    let plain = Ini::parse(b"scale = 3\n");
+    assert!(plain.keys_with_prefix("bindings_").is_empty());
+    assert_eq!(environment(Some(&plain), |_| false).unknown, Vec::<String>::new());
+    // controls/bindings/touch come to the game as variables (their player defaults apply, so
+    // DHD_CONTROLS and DHD_BINDINGS stay unset until a file has them).
+    let env: BTreeMap<_, _> = environment(Some(&plain), |_| false).vars.into_iter().collect();
+    assert!(!env.contains_key("DHD_CONTROLS") && !env.contains_key("DHD_BINDINGS"));
+    assert_eq!(env["DHD_TOUCH"], "1");
+    assert_eq!(env["DHD_TOUCH_LAYOUT"], "default");
+}
+
+#[test]
 fn saves_keep_every_other_line() {
     // CRLF, a byte order mark, text that isn't UTF-8, no final line ending: all kept.
     let mut text = b"\xEF\xBB\xBF; Downhill Revived\r\n; caf\xE9 (CP1252)\r\n[video]\r\nScale = 2 ; two\r\n\r\n".to_vec();
