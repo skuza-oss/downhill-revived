@@ -76,6 +76,7 @@ MODULE_UNITS = [
     'hle/pc_settings.c', 'hle/widescreen.c', 'hle/exit_menu.c', 'hle/puppet.c', 'hle/online.c',
     'hle/online_menu.c', 'hle/autopad.c', 'hle/state_trace.c', 'hle/rate_audit.c', 'hle/sound.c', 'hle/game_options.c',
     'hle/fps.c', 'hle/keyboard.c', 'hle/vif0.c', 'hle/presence.c', 'runtime/wasi_adapter.c',
+    'net/join.c',   /* online_menu.c builds the room's share link and reads a pasted one */
 ]
 MIRROR_DIRS = ['runtime', 'hle', 'include', 'host', 'gs', 'net']
 

@@ -323,6 +323,12 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   new level and rematch flows (finding 072). Create/Join waits on ONLINE, then the rider screen
   once and the room over it, with no bounce and no second title flight (finding 092); the shop's
   bike/jersey pages are still skipped online.
+- Join by link (finding 125, 2026-10-30): the RACE ROOM shows and copies the shareable link
+  `<server>/join/<CODE>` (Circle, or a click on the code; the code stays shown) and the CODE field
+  takes a pasted link as well as a code — `port/net/join.{c,h}` takes the code out of either, the
+  one rule the game and the launcher share. The launcher turns a `dhd://join/<CODE>` or a
+  command-line link into `DHD_JOIN`, which the ONLINE page joins by itself (select ONLINE once).
+  Join codes and the public list are unchanged; no protocol change.
 - The disc: online needs the USA disc's game files (the hash of every ISO 9660 file's path, size
   and contents, `dhd_disc` in port/render/disc, shared by the game and the launcher; redump
   30393's files), so a good dump that differs only outside the files is taken. An image whose

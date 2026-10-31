@@ -75,7 +75,7 @@ typedef struct {
    server refuses players whose version differs from the host's). iso_sha256: 64 lowercase hex. */
 void net_init(const char *base_url, const char *name, const char *version, const char *iso_sha256);
 int net_create_room(void);
-int net_join_room(const char *code);   /* -1 when the code can't be one */
+int net_join_room(const char *code);   /* a code or a join link (join.h); -1 when neither holds one */
 void net_leave(void);
 /* Public lobbies (blocking HTTP GET); returns how many, -1 on error. */
 int net_list_lobbies(NetLobbyInfo *out, int max);

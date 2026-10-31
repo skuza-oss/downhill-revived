@@ -59,7 +59,7 @@ HOST_UNITS = [
     'port/gs/texpack.c', 'port/gs/font_sharp.c', 'port/gs/capture.c', 'port/gs/replay.c',
     'port/hle/gamepad.c', 'port/hle/keyboard.c', 'port/hle/text_input.c', 'port/hle/movie.c',
     'port/hle/launcher_link.c', 'port/hle/fps.c',
-    'port/net/client.c', 'port/net/hash.c', 'port/net/json.c', 'port/net/net.c',
+    'port/net/client.c', 'port/net/hash.c', 'port/net/json.c', 'port/net/join.c', 'port/net/net.c',
 ] + ['port/third_party/libmpeg2/%s.c' % n for n in (
     'alloc', 'cpu_accel', 'cpu_state', 'decode', 'header', 'idct', 'motion_comp', 'slice')]
 # port/hle/gs_queue.inc is included by graphics_queue.c; port/gs/gpu_exact.inc, gpu_rust_native.inc

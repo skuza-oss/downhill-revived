@@ -70,11 +70,20 @@ impl Place {
     }
 
     pub fn start(&self) -> std::io::Result<Child> {
+        self.start_with_join(None)
+    }
+
+    /// The same, with the join-by-link code in `DHD_JOIN` (finding 125) when the launcher was
+    /// started from a link; the game's ONLINE page joins that room without the player typing it.
+    pub fn start_with_join(&self, join: Option<&str>) -> std::io::Result<Child> {
         let mut cmd = Command::new(self.exe());
         cmd.current_dir(&self.data)
             .env("DHD_LAUNCHER", "1")
             .env("DHD_SETTINGS", self.settings())
             .env("DHD_DATA_DIR", &self.data);
+        if let Some(code) = join {
+            cmd.env("DHD_JOIN", code);
+        }
         if std::env::var_os("DHD_MEMCARD_DIR").is_none() {
             cmd.env("DHD_MEMCARD_DIR", self.data.join("saves"));
         }

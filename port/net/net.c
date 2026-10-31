@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "client.h"
+#include "join.h"
 #include "json.h"
 #include "ws.h"
 
@@ -103,15 +104,12 @@ int net_create_room(void)
     return connect_to("/v1/rooms/new");
 }
 
+/* code: a join code, or a whole join link (join.h takes the code out of either, so a link pasted
+   in-game or a DHD_JOIN/DHD_NET_JOIN value reaches the same room path). */
 int net_join_room(const char *code)
 {
-    static const char alphabet[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    char path[32], up[8];
-    int i;
-    for (i = 0; code[i] && i < 7; i++)
-        up[i] = (char)toupper((unsigned char)code[i]);
-    up[i] = 0;
-    if (i != 6 || strspn(up, alphabet) != 6)
+    char path[32], up[JOIN_CODE_LENGTH + 2];
+    if (!join_code_from_text(up, sizeof up, code))
         return -1;
     snprintf(path, sizeof path, "/v1/rooms/%s", up);
     return connect_to(path);

@@ -9,6 +9,7 @@
 #include "menu_page.h"
 #include "text_input.h"
 #include "settings_table.h"  /* the rider name's rule (dhd_settings, port/render/settings) */
+#include "../net/join.h"     /* the join code out of a link, and the shareable link for a code */
 #include "../net/net.h"
 
 #include <stdio.h>
@@ -34,6 +35,10 @@ static const struct { int index; const char *name; } riders[] = {
 #define COUNT(a) ((int)(sizeof a / sizeof *a))
 
 static const char code_letters[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";  /* the server's join codes */
+/* Typed or pasted into the CODE field: a bare code, or a whole join link (join_code_from_text
+   takes the code out of either). A URL's own characters are allowed too, so Ctrl+V keeps a link;
+   the on-screen picker below still offers the code alphabet only. */
+static const char code_input_letters[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:/._-?#=&%+@~";
 static const char name_letters[] = SETTING_NAME_LETTERS;
 enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 4 };
 
@@ -371,7 +376,10 @@ static const char *const *disc_note(void)
 /* ---- the screens ---- */
 
 static int entry_pick;           /* the letter on offer */
-static char entry[16];
+static char entry[200];          /* a name, a code, or a pasted join link */
+/* DHD_JOIN=code|link (the launcher's, from a dhd:// or /join/<code> link): the room to join at
+   once when ONLINE opens, "" when none. */
+static char join_pending[JOIN_CODE_LENGTH + 1];
 static int home_row;  /* HOME's row last chosen: the cursor goes back to it */
 static const char *const *disc_shown;  /* the disc_note HOME's rows have */
 
@@ -432,7 +440,7 @@ static void page_build(MenuPage *p)
         menu_page_row(p, "Public Races", 1);
         menu_page_row(p, "Create A Public Race", 1);
         menu_page_row(p, "Create A Private Race", 1);
-        menu_page_row(p, "Join With A Code", 1);
+        menu_page_row(p, "Join With A Code Or Link", 1);
         if (outdated) menu_page_row(p, "Update Now", 1);
         disc_shown = disc_note();
         for (const char *const *line = disc_shown; line && *line; line++) menu_page_text(p, *line);
@@ -472,7 +480,13 @@ static void entry_text(void)
     const char *letters = screen == NAME ? name_letters : code_letters;
     int max = screen == NAME ? NAME_MAX : CODE_LENGTH;
     char shown = letters[entry_pick] == ' ' ? '-' : letters[entry_pick];
-    if ((int)strlen(entry) < max)
+    size_t n = strlen(entry);
+    if (screen == CODE && (int)n > CODE_LENGTH) {  /* a pasted link: show its end, where the code is */
+        const char *tail = n > 30 ? entry + (n - 30) : entry;
+        snprintf(text[0], ROW_TEXT, "Link:  %s%s", n > 30 ? "..." : "", tail);
+        return;
+    }
+    if ((int)n < max)
         snprintf(text[0], ROW_TEXT, "%s  %s[%c]", screen == NAME ? "Name:" : "Code:", entry, shown);
     else
         snprintf(text[0], ROW_TEXT, "%s  %s", screen == NAME ? "Name:" : "Code:", entry);
@@ -687,9 +701,30 @@ static void toggle_ready(const RoomNow *r)
     }
 }
 
-static void copy_code(void)
+/* The shareable link for the room's code (join.h): <server>/join/<CODE>, built from the relay's
+   host (dhd.ini's server, DHD_NET_SERVER) so a friend on another server shares that server's link.
+   "" while the room has no code or no server is known. */
+static const char *room_link(void)
 {
-    copied_ok = room.code[0] && host_service_clipboard_set(GADDR(room.code));
+    static char link[200];
+    if (!room.code[0] || !join_link(link, sizeof link, server(), room.code)) link[0] = 0;
+    return link;
+}
+
+/* The link without its scheme, for the narrow room panel; "" when there is none. */
+static const char *room_link_short(void)
+{
+    const char *link = room_link(), *scheme = strstr(link, "://");
+    return scheme ? scheme + 3 : link;
+}
+
+/* Circle (or a click on the code) puts the shareable link on the clipboard; a room whose link
+   can't be built (no server) falls back to its plain code. */
+static void copy_link(void)
+{
+    const char *link = room_link();
+    copied_ok = (link[0] ? host_service_clipboard_set(GADDR(link))
+                         : room.code[0] && host_service_clipboard_set(GADDR(room.code))) != 0;
     copied_at = host_seconds();
     menu_play(copied_ok ? "S_SELECT" : "S_CANCEL");
 }
@@ -787,7 +822,7 @@ static void room_input(MenuPage *p, const RoomNow *r)
     else if (dx || dy) move(dx, dy, r);
     if (pressed & PAD_CROSS) activate(p, rf, r);
     else if (pressed & (PAD_SQUARE | PAD_START)) toggle_ready(r);
-    else if (pressed & PAD_CIRCLE) copy_code();
+    else if (pressed & PAD_CIRCLE) copy_link();
     else if (pressed & PAD_TRIANGLE) open_leave(r, "Triangle");
 }
 
@@ -822,7 +857,7 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
         return;
     }
     if (left && inside(&code_hit, x, y)) {
-        copy_code();
+        copy_link();
         return;
     }
     for (int f = 0; f < RF_COUNT; f++) {
@@ -940,13 +975,18 @@ static void draw_left(const RoomNow *r)
     draw_setting(RF_BOTS, TOP + 39, "COMPUTER RIDERS", l->laps & ROOM_NO_BOTS ? "OFF" : "ON", r);
     draw_setting(RF_CHEATS, TOP + 52, "CHEATS", l->laps & ROOM_CHEATS ? "ON" : "OFF", r);
     draw_setting(RF_PUBLIC, TOP + 65, "ROOM", l->is_public ? "PUBLIC" : "PRIVATE", r);
-    rect(L_X + 8, TOP + 78, L_W - 16, 1, (const int[]){0, 0, 0}, 128);
-    /* the join code; Circle (or a click) copies it */
+    rect(L_X + 8, TOP + 76, L_W - 16, 1, (const int[]){0, 0, 0}, 128);
+    /* the join code, and under it the link to a room a friend can be given; Circle (or a click)
+       copies the link (the code alone when no server link can be built) */
     int copied = copied_at > 0 && host_seconds() - copied_at < 1.5;
-    put(MENU_CENTRE, cx, TOP + 82, copied ? (copied_ok ? "COPIED" : "COPY FAILED") : "JOIN CODE",
-         !copied ? menu_style(st_off, 80, -1, 0, 0) : copied_ok ? tint(st_row, 80, green) : tint(st_row, 80, red));
-    put(MENU_CENTRE, cx, TOP + 93, l->code[0] ? l->code : "------", menu_style(st_on, 150, -1, 0, 0));
-    hit(&code_hit, L_X, TOP + 80, L_W, 34);
+    put(MENU_CENTRE, cx, TOP + 78, copied ? (copied_ok ? "COPIED" : "COPY FAILED") : "JOIN CODE",
+         !copied ? menu_style(st_off, 70, -1, 0, 0) : copied_ok ? tint(st_row, 70, green) : tint(st_row, 70, red));
+    put(MENU_CENTRE, cx, TOP + 88, l->code[0] ? l->code : "------", menu_style(st_on, 125, -1, 0, 0));
+    {
+        const char *share = room_link_short();
+        put(MENU_CENTRE, cx, TOP + 102, share, fit(share, menu_style(st_off, 60, -1, 0, 0), 60, L_W - 12));
+    }
+    hit(&code_hit, L_X, TOP + 77, L_W, 33);
 }
 
 static void draw_bars(int x, int y, int rtt)
@@ -1046,6 +1086,8 @@ static void draw_status(const RoomNow *r)
     else if (!r->in) snprintf(line, sizeof line, "CONNECTING TO THE SERVER...");
     else if (l->countdown_ms >= 0) snprintf(line, sizeof line, "EVERYONE IS READY: UNREADY TO STOP"), c = green;
     else if (!selected) snprintf(line, sizeof line, "CHOOSE YOUR RIDER FIRST");
+    else if (l->nmembers < 2 && room_link_short()[0])
+        snprintf(line, sizeof line, "WAITING FOR PLAYERS: SHARE THE LINK %s", room_link_short());
     else if (l->nmembers < 2) snprintf(line, sizeof line, "WAITING FOR PLAYERS: SHARE THE CODE %s", l->code);
     else if (!r->own_ready) snprintf(line, sizeof line, "PRESS READY WHEN YOU LIKE YOUR RIDER");
     else if (waiting + choosing_n == 1 && who >= 0)
@@ -1119,7 +1161,7 @@ static void room_texts(MenuPage *p)
         snprintf(footer_text, sizeof footer_text, GLYPH_LEFT GLYPH_RIGHT " TRACK   " GLYPH_CROSS " ALL TRACKS   " GLYPH_SQUARE
                  " READY   " GLYPH_TRIANGLE " LEAVE");
     else
-        snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " SELECT   " GLYPH_SQUARE " READY   " GLYPH_CIRCLE " COPY CODE   "
+        snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " SELECT   " GLYPH_SQUARE " READY   " GLYPH_CIRCLE " COPY LINK   "
                  GLYPH_TRIANGLE " LEAVE");
     p->footer = footer_text;
 }
@@ -1262,6 +1304,22 @@ static void page_update(MenuPage *p, int cursor)
         p->footer = status[0] ? status : NULL;
         return;
     }
+    /* DHD_JOIN (the launcher's link): join as soon as the rest of ONLINE would allow it, without
+       the player typing anything. The disc-image check holds it back; once that has decided and
+       still refuses, its reason is shown and the request is dropped. */
+    if (join_pending[0]) {
+        const char *why = not_ready();
+        if (!why) {
+            char code[JOIN_CODE_LENGTH + 1];
+            snprintf(code, sizeof code, "%s", join_pending);
+            join_pending[0] = 0;
+            status[0] = 0;
+            enter_room(0, code);
+            p->footer = status[0] ? status : NULL;
+            return;
+        }
+        if (iso_state != 1) join_pending[0] = 0, p->footer = why;
+    }
     switch (screen) {
     case HOME:
         if (disc_note() != disc_shown) {  /* the check has ended: its lines under the rows */
@@ -1276,13 +1334,17 @@ static void page_update(MenuPage *p, int cursor)
     case NAME:
     case CODE:
         {
-            int action = host_service_text_input_edit(GADDR(entry), (screen == NAME ? NAME_MAX : CODE_LENGTH) + 1, GADDR(screen == NAME ? name_letters : code_letters));
+            /* CODE takes a whole pasted link, so it gets the entry buffer's room and a link's
+               characters; a bare six-letter code still types and pastes as before. */
+            int cap = screen == NAME ? NAME_MAX + 1 : (int)sizeof entry;
+            int action = host_service_text_input_edit(GADDR(entry), cap, GADDR(screen == NAME ? name_letters : code_input_letters));
             if (action < 0) { go(HOME); return; }
             if (action > 0) { page_accept(p, 1); return; }
         }
         entry_text();
         if (!status[0])
-            p->footer = screen == CODE ? "TYPE/CTRL+V - ENTER JOIN - ESC BACK" : "TYPE OR PAD - ENTER DONE - ESC CANCEL";
+            p->footer = screen == CODE ? "TYPE OR CTRL+V A CODE OR LINK - ENTER JOIN - ESC BACK"
+                                       : "TYPE OR PAD - ENTER DONE - ESC CANCEL";
         break;
     case ROOM:
         room_update(p);
@@ -1340,10 +1402,15 @@ static void page_accept(MenuPage *p, int row)
                 save("name", "DHD_NET_NAME", name);
             }
             go(HOME);
-        } else if ((int)n == CODE_LENGTH)
-            enter_room(0, entry);
-        else
-            snprintf(status, sizeof status, "A code has %d letters and digits", CODE_LENGTH);
+        } else {
+            /* Join: a bare code, or a whole link pasted in (join_code_from_text takes the code
+               out of "https://host/join/K7QX2M" and the like). */
+            char code[JOIN_CODE_LENGTH + 1];
+            if (join_code_from_text(code, sizeof code, entry))
+                enter_room(0, code);
+            else
+                snprintf(status, sizeof status, "A code has %d letters and digits; a link works too", CODE_LENGTH);
+        }
         break;
     }
     case ROOM:  /* the room reads the pads itself (room_input) */
@@ -1420,6 +1487,22 @@ int port_online_menu(void)
     if (!resumed) {
         home_row = 0;
         status[0] = 0;  /* a room that closed leaves its reason for HOME */
+        join_pending[0] = 0;
+        /* DHD_JOIN: the launcher's join-by-link (its dhd:// scheme or command line). Join the
+           room once the disc-image check has finished; taken once, the variable is cleared so
+           reopening ONLINE later is the ordinary page. */
+        const char *join = getenv("DHD_JOIN");
+        if (join && *join) {
+            char code[JOIN_CODE_LENGTH + 1];
+            if (join_code_from_text(code, sizeof code, join)) {
+                snprintf(join_pending, sizeof join_pending, "%s", code);
+                snprintf(status, sizeof status, "Joining room %s...", code);
+            } else
+                snprintf(status, sizeof status, "That link has no join code");
+            host_putenv_s("DHD_JOIN", "");
+            hle_env_changed();
+            hle_log("online menu: DHD_JOIN %s -> %s\n", join, join_pending[0] ? join_pending : "no join code");
+        }
     }
     race = 0;
     in_shell = 0;
