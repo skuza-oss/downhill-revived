@@ -124,6 +124,8 @@ pub struct Objects {
     pub grow_pipe: wgpu::RenderPipeline,
     /// `native_scanout` (scanout layout)
     pub scanout_pipe: wgpu::ComputePipeline,
+    /// Bounded GS scanout: reciprocal remainder and duplicated-row reuse.
+    pub scanout_fast_pipe: wgpu::ComputePipeline,
     /// `native_convert` (convert layout)
     pub convert_pipe: wgpu::ComputePipeline,
     /// The inverse table (`inverse_table`), 32768 bytes, Storage | CopyDst, written at creation.
@@ -517,6 +519,7 @@ impl Objects {
         let present_rgba = fullscreen_pipeline(gpu, &main, &draw_layout, "present_pixel", rgba);
         let grow_pipe = fullscreen_pipeline(gpu, &main, &grow_pipeline_layout, "native_grow_depth", None);
         let scanout_pipe = compute_pipeline(gpu, &main, &scanout_pipeline_layout, "native_scanout");
+        let scanout_fast_pipe = compute_pipeline(gpu, &main, &scanout_pipeline_layout, "native_scanout_fast");
         let convert_pipe = compute_pipeline(gpu, &main, &convert_pipeline_layout, "native_convert");
 
         let table = inverse_table();
@@ -553,6 +556,7 @@ impl Objects {
             present_bgra: std::sync::OnceLock::new(),
             grow_pipe,
             scanout_pipe,
+            scanout_fast_pipe,
             convert_pipe,
             inverse,
         }

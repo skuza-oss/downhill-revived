@@ -137,3 +137,37 @@ against a replay executable built from the pre-change renderer; do not compare s
 Shader arithmetic reference: the [WGSL specification](https://www.w3.org/TR/WGSL/).
 No external shader code was copied. Arithmetic shortcuts must preserve integer/float conversions,
 large wrapped coordinates, bilinear interpolation and blend rounding.
+
+## Retained: bounded integer scanout and repeated-row reuse
+
+The second-largest high-scale pass was scanout (6.131 ms at 8x uncapped). For scale 1–8 and
+display dimensions at most 32768, use a separate compute entry point. The original pipeline is
+retained for other inputs. No format, blend, filter or pass-order change is involved.
+
+The original coordinate is `((origin + at/S) & 2047)*S + at%S`. This equals
+`(masked_origin*S + at) % (2048*S)`. Its dividend is below 65536: masked origin contributes at
+most 2047*8 and a valid invocation at most 32767. Use `ceil(65536/divisor)`, a multiply/shift,
+and one integer quotient correction. The reciprocal overestimates the quotient by at most one
+on that domain. All 524,288 dividend/scale combinations match ordinary integer remainder.
+For the interlaced mapping, two output rows read exactly the same texel; one invocation now
+loads it once and writes both rows, guarding an odd final row. Other row mappings stay intact.
+
+Research: [Labor of Division, Episode I](https://ridiculousfish.com/blog/posts/labor-of-division-episode-i.html)
+for reciprocal division and error bounds, plus WGSL's integer semantics. Implementation and the
+bounded-domain derivation are original; no external code was copied.
+
+| 4x DX12, uncapped | FPS | 1% low | GPU ms | Draw ms | Scanout ms |
+|---|---:|---:|---:|---:|---:|
+| Preserved baseline | 49.77 | 20.51 | 19.108 | 17.286 | 1.380 |
+| Fast scanout | 52.06 | 36.77 | 18.239 | 17.067 | 0.718 |
+
+FPS improves 4.6%, total GPU time falls 4.6%, scanout time falls 47.9%. Correctness checks:
+host GS (zero failures), full `test_gs_wgpu.py` (PASS), synthetic presented transfers (33 pictures,
+zero RGB/VRAM differences between dual/fallback), 12 oracle replay items at 1x/2x/4x identical,
+all four before/after replay items at 8x byte-identical, and all three native init unit tests
+(including the browser WGSL shift transformation) pass. No game/core code changed.
+
+The second draw shortcut used only a uniform E=1 branch and preserved the integer/float round
+trip for large coordinates. It also passed all pixel gates but measured 45.96 fps / 21.037 ms
+at 4x uncapped, worse than the preserved baseline. It is rejected too. Neither shortcut remains
+in the retained scanout change.

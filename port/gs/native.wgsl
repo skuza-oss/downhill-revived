@@ -181,6 +181,31 @@ fn native_scanout(@builtin(global_invocation_id) tid: vec3<u32>) {
     textureStore(screen, tid.xy, vec4<f32>(load_rgba(native_source, vec2<i32>(xy)).rgb, 1.0));
 }
 
+// Equivalent GS wrap for bounded display sizes (scanout.rs). The original map
+// ((origin + at/S) & 2047)*S + at%S is (origin*S + at) % (2048*S).
+// With dividend < 65536, the rounded-up 16-bit reciprocal needs at most one
+// quotient correction. All arithmetic stays integer, including non-power-of-two scales.
+@compute @workgroup_size(8, 8, 1)
+fn native_scanout_fast(@builtin(global_invocation_id) tid: vec3<u32>) {
+    let a = display_state.a;
+    let b = display_state.b;
+    let c = display_state.c;
+    let doubled = b.w == 1u;
+    let y = tid.y << select(0u, 1u, doubled);
+    if (tid.x >= b.y || y >= b.z) { return; }
+    let at = vec2<u32>(tid.x, y >> b.w);
+    let dividend = (vec2<u32>(a.w, b.x) & vec2<u32>(2047u)) * c.x + at;
+    var q = (dividend * c.z) >> vec2<u32>(16u);
+    q -= select(vec2<u32>(0u), vec2<u32>(1u), q * c.y > dividend);
+    let xy = dividend - q * c.y;
+    let color = vec4<f32>(load_rgba(native_source, vec2<i32>(xy)).rgb, 1.0);
+    textureStore(screen, vec2<u32>(tid.x, y), color);
+    // The interlaced scanout maps both output rows to the same input texel.
+    if (doubled && y + 1u < b.z) {
+        textureStore(screen, vec2<u32>(tid.x, y + 1u), color);
+    }
+}
+
 // A rectangle of one surface into another of a different scale (raster.hlsl native_blit), and a
 // page of uploaded alpha bits (native_upload_alpha): the full-screen triangle, cut by the viewport.
 struct Blit { map: vec4<f32>, }

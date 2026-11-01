@@ -715,7 +715,8 @@ impl Native {
             return false;
         };
         let Some(view) = self.surface_view(p.display_surface as usize) else { return false };
-        let o = ScanoutObjects { pipeline: &self.objects.scanout_pipe, layout: &self.objects.scanout_layout };
+        let o = ScanoutObjects { pipeline: &self.objects.scanout_pipe,
+            fast_pipeline: &self.objects.scanout_fast_pipe, layout: &self.objects.scanout_layout };
         let encoder = self.pass.encoder(gpu);
         pass_trace::event("compute-scanout", p.display_surface as i32, -1);
         self.display.scanout(gpu, encoder, &mut self.arenas, &o, &view, info.scale, &p.display)

@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 /// The scanout's native objects (init.rs's scanout_pipe and scanout_layout).
 pub struct ScanoutObjects<'a> {
     pub pipeline: &'a wgpu::ComputePipeline,
+    pub fast_pipeline: &'a wgpu::ComputePipeline,
     pub layout: &'a wgpu::BindGroupLayout,
 }
 
@@ -165,6 +166,15 @@ impl Display {
         if !self.display_size(gpu, d[5], d[6]) {
             return false;
         }
+        // Masked GS origins contribute at most 2047*8; an invocation contributes
+        // at most 32767. Thus the fast shader's dividend is below 65536.
+        // ceil(65536 / divisor) overestimates its quotient by at most one;
+        // one integer correction gives the exact remainder without GPU division.
+        let fast = (1..=8).contains(&scale) && d[5] <= 32768 && d[6] <= 32768;
+        if fast {
+            d[9] = 2048 * scale;
+            d[10] = 65536u32.div_ceil(d[9]);
+        }
         let Some(t) = &self.target else { return false };
         let offset = arenas.constants(struct_bytes(&d));
         if self.group.as_ref().is_none_or(|(view, generation, _)| view != source || *generation != self.generation) {
@@ -183,10 +193,11 @@ impl Display {
         let times = gputimes::slot(gpu, gputimes::SCANOUT);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None, timestamp_writes: times.as_ref().map(gputimes::Slot::compute) });
-        pass.set_pipeline(o.pipeline);
+        pass.set_pipeline(if fast { o.fast_pipeline } else { o.pipeline });
         pass.set_bind_group(0, uniforms, &[offset]);
         pass.set_bind_group(1, group, &[]);
-        pass.dispatch_workgroups(d[5].div_ceil(8), d[6].div_ceil(8), 1);
+        let rows = if fast && d[7] == 1 { d[6].div_ceil(2) } else { d[6] };
+        pass.dispatch_workgroups(d[5].div_ceil(8), rows.div_ceil(8), 1);
         true
     }
 }
