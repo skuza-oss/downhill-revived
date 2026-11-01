@@ -32,6 +32,7 @@
 #include "../hle/hle.h"
 #include "../hle/text_input.h"
 #include "../net/net.h"
+#include "../net/client.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -42,7 +43,7 @@
 #include <opus.h>
 
 enum { RATE = 48000, FRAME = 960, SLOTS = NET_MAX_SLOTS, VOICE_QUEUE = 16, PLC_MAX = 3,
-       START_DEPTH = 2, FLOOD_PER_SECOND = 60, RETRY_MS = 4000 };
+       DEPTH_MIN = 3, DEPTH_MAX = 8, FLOOD_PER_SECOND = 60, RETRY_MS = 4000 };
 
 /* ---- the settings (dhd.ini through DHD_*; read again every second, so PC SETTINGS is live) ---- */
 
@@ -216,11 +217,13 @@ static struct Speaker {
     /* the device thread's own */
     OpusDecoder *decoder;
     int playing, next, misses;
+    int depth;                  /* packets waiting before a talk spurt starts: grows after a stall */
     int16_t pcm[FRAME];
     int pcm_at, pcm_have;
     float left, right;          /* the gains now, moving toward the target */
 } speakers[SLOTS];
 static SDL_AtomicInt target_gain[SLOTS], target_pan[SLOTS], muted[SLOTS];  /* the game's, x1000 */
+static SDL_AtomicInt speak_level[SLOTS];   /* the loudness of what a slot is saying now, 0..1000 */
 
 /* sequence a is before b (16-bit wraparound) */
 static int before(uint16_t a, uint16_t b) { return (int16_t)(a - b) < 0; }
@@ -283,6 +286,7 @@ void host_service_voice_drop(int slot)
         SDL_UnlockSpinlock(&speakers[i].lock);
         SDL_SetAtomicInt(&target_gain[i], 0);
         SDL_SetAtomicInt(&heard_at[i], 0);
+        SDL_SetAtomicInt(&speak_level[i], 0);
     }
 }
 
@@ -298,6 +302,7 @@ int host_service_voice_state(int field, int slot)
                (Uint32)SDL_GetTicks() - (Uint32)SDL_GetAtomicInt(&heard_at[slot]) < 300 && !SDL_GetAtomicInt(&muted[slot]);
     case VOICE_STATE_MUTED: return slot >= 0 && slot < SLOTS && SDL_GetAtomicInt(&muted[slot]);
     case VOICE_STATE_KEY: return cfg.key;
+    case VOICE_STATE_SPEAK_LEVEL: return slot >= 0 && slot < SLOTS ? SDL_GetAtomicInt(&speak_level[slot]) : 0;
     }
     return 0;
 }
@@ -309,7 +314,8 @@ static int next_frame(struct Speaker *s)
     Packet p;
     int have = 0;
     SDL_LockSpinlock(&s->lock);
-    if (!s->playing && s->queued >= START_DEPTH) s->playing = 1, s->next = s->queue[0].sequence, s->misses = 0;
+    if (!s->depth) s->depth = DEPTH_MIN;
+    if (!s->playing && s->queued >= s->depth) s->playing = 1, s->next = s->queue[0].sequence, s->misses = 0;
     while (s->playing && s->queued && before(s->queue[0].sequence, (uint16_t)s->next)) {   /* late: gone */
         memmove(s->queue, s->queue + 1, sizeof s->queue[0] * (s->queued - 1));
         s->queued--;
@@ -326,10 +332,20 @@ static int next_frame(struct Speaker *s)
     int n;
     if (have) n = opus_decode(s->decoder, p.data, p.bytes, s->pcm, FRAME, 0), s->misses = 0, s->played++;
     else if (waiting && s->misses < PLC_MAX) n = opus_decode(s->decoder, NULL, 0, s->pcm, FRAME, 0), s->misses++;
-    else { s->playing = 0; return 0; }   /* nothing more: silence until the next start */
+    else {   /* nothing more: silence until the next start; a stall in the middle of a spurt (the
+                queue ran dry while its sender goes on) makes the next start wait for one more */
+        if (s->played && !waiting && s->depth < DEPTH_MAX && (Uint32)SDL_GetTicks() - (Uint32)SDL_GetAtomicInt(&heard_at[(int)(s - speakers)]) < 100)
+            s->depth++;
+        s->playing = 0;
+        SDL_SetAtomicInt(&speak_level[(int)(s - speakers)], 0);
+        return 0;
+    }
     s->next = (uint16_t)(s->next + 1);
     if (n <= 0) return 0;
     s->pcm_at = 0, s->pcm_have = n;
+    int peak = 0;
+    for (int i = 0; i < n; i++) if (abs(s->pcm[i]) > peak) peak = abs(s->pcm[i]);
+    SDL_SetAtomicInt(&speak_level[(int)(s - speakers)], peak * 1000 / 32768);
     return 1;
 }
 
@@ -365,6 +381,7 @@ void voice_open(void)
     static int opened;
     if (opened++) return;
     read_settings();
+    net_voice_hook = voice_receive;   /* frames come straight from the connection's thread */
     SDL_Thread *t = SDL_CreateThread(voice_thread, "dhd voice", NULL);
     if (t) SDL_DetachThread(t);
     else hle_log("voice: can't start its thread (%s)\n", SDL_GetError());

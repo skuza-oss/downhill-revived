@@ -54,6 +54,15 @@ void client_free(NetClient *c);
 void client_connected(NetClient *c, const NetTransport *tr);
 void client_on_text(NetClient *c, const char *text, size_t n);
 void client_on_binary(NetClient *c, const uint8_t *data, size_t n);
+
+/* Voice chat (finding 131, port/host/voice.c): a race's voice EVENT frames ([type, slot, version,
+   NET_VOICE_KIND, ...]) go to this hook the moment they arrive, on the connection's thread, and
+   are not queued: the queue below is read once a game frame, which would hand voice over in
+   bursts after every stall, and 50 voice frames a second a talker would push the race's
+   snapshots out of it. payload starts at the version byte, as the game reads an EVENT. NULL:
+   voice frames queue like any other EVENT (the game ignores the kind). */
+enum { NET_VOICE_VERSION = 2, NET_VOICE_KIND = 11 };
+extern void (*net_voice_hook)(int slot, const uint8_t *payload, int n);
 /* The connection ended. Returns 1 when it should rejoin the room by its code: a lobby drop, or a
    race drop the server offered a rejoin for (a reconnect token, finding 126). */
 int client_on_closed(NetClient *c, int code, const char *reason);

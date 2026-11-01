@@ -413,8 +413,20 @@ void client_on_text(NetClient *c, const char *text, size_t n)
     SDL_UnlockMutex(c->lock);
 }
 
+void (*net_voice_hook)(int slot, const uint8_t *payload, int n);
+
 void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
 {
+    if (net_voice_hook && n >= 4 && n <= NET_FRAME_MAX && data[0] == NET_FRAME_EVENT && data[2] == NET_VOICE_VERSION &&
+        data[3] == NET_VOICE_KIND) {
+        int racing;
+        SDL_LockMutex(c->lock);
+        c->last_rx = net_now_ms();
+        racing = c->racing;
+        SDL_UnlockMutex(c->lock);
+        if (racing) net_voice_hook(data[1], data + 2, (int)n - 2);   /* outside the lock: its own queues */
+        return;
+    }
     SDL_LockMutex(c->lock);
     c->last_rx = net_now_ms();
     if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG) {

@@ -156,7 +156,8 @@ void host_service_gs_capture_request(uint32_t name);
    player, a slot's (or, -1, every slot's) waiting packets dropped, and the state for the HUD. */
 enum { VOICE_STATE_ENABLED, VOICE_STATE_TRANSMITTING, VOICE_STATE_MIC /* 1 open, 0 not yet, -1 failed */,
        VOICE_STATE_LEVEL /* the microphone's peak, 0..1000 */, VOICE_STATE_TALKING /* slot heard lately */,
-       VOICE_STATE_MUTED, VOICE_STATE_KEY /* the push-to-talk key's letter */ };
+       VOICE_STATE_MUTED, VOICE_STATE_KEY /* the push-to-talk key's letter */,
+       VOICE_STATE_SPEAK_LEVEL /* the loudness of what a slot is saying now, 0..1000 */ };
 void host_service_voice_frame(int slot, uint32_t data, int n);
 void host_service_voice_place(int slot, int gain_permille, int pan_permille);
 void host_service_voice_mute(int slot, int on);

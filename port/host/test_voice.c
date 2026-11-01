@@ -27,6 +27,7 @@ int keyboard_is_down(unsigned typed) { (void)typed; return 0; }
 int text_input_active(void) { return 0; }
 int net_racing(void) { return 0; }
 int net_send_frame(int type, const void *payload, size_t n) { (void)type, (void)payload, (void)n; return 1; }
+void (*net_voice_hook)(int slot, const uint8_t *payload, int n);
 
 enum { RATE = 48000, FRAME = 960 };
 static OpusEncoder *encoder;
