@@ -33,6 +33,9 @@ import {
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
+/** The game's room options ride in `laps` (port/hle/online_menu.c ROOM_NO_BOTS 1, ROOM_CHEATS 2);
+    only cheats on or off makes another kind of race (finding 128). */
+const LAPS_CHEATS = 2;
 
 interface Member {
   id: number;
@@ -68,6 +71,8 @@ interface RoomState {
   nextExplicit?: boolean;
   rotation?: number[];
   trackLimits?: number[];
+  /** Rotation tracks the host may pick but NEXT and RANDOM never choose (an arena, MOSH). */
+  pickOnly?: number[];
   grid?: number[];
   gridRules?: Rules;
   nextRaceAt?: number | null;
@@ -547,6 +552,8 @@ export class Room extends DurableObject<Env> {
           m.trackLimits.length !== (m.rotation as number[]).length ||
           !m.trackLimits.every(x => x === 6 || x === 8 || x === 10) ||
           !m.trackLimits.includes(10))) return bad("trackLimits");
+      if (m.pickOnly !== undefined && (m.rotation === undefined || !Array.isArray(m.pickOnly) ||
+          !m.pickOnly.every(x => (m.rotation as number[]).includes(x)))) return bad("pickOnly");
       if (m.finishWindow !== undefined) st.rules!.finishWindow = m.finishWindow as number;
       if (m.then !== undefined) st.rules!.then = m.then as Rules["then"];
       if (m.nextRace !== undefined) { st.rules!.nextRace = m.nextRace as Rules["nextRace"]; st.nextExplicit = true; }
@@ -554,14 +561,25 @@ export class Room extends DurableObject<Env> {
       if (m.rotation !== undefined) {
         st.rotation = m.rotation as number[];
         st.trackLimits = m.trackLimits as number[];
+        st.pickOnly = (m.pickOnly as number[] | undefined) ?? [];
       }
       if (m.track !== undefined && m.track !== st.track && st.nextRaceAt != null)
         st.nextRaceAt = Math.max(st.nextRaceAt, Date.now() + 15_000);
     }
-    // A new track or new options make a different race: everyone readies again for it.
-    if ((m.track !== undefined && m.track !== st.track) || (m.laps !== undefined && m.laps !== st.laps))
+    // Ready means "count me in for the next race", not "I agree to these settings": a new track or
+    // computer riders on or off keep it. Cheats on or off make another kind of race, so everyone
+    // outside the running race readies again for it (finding 128).
+    if (m.laps !== undefined && (((m.laps as number) ^ st.laps) & LAPS_CHEATS))
       for (const x of st.members) if (!st.session || !this.inRace(st, x.id)) x.ready = false;
+    const newTrack = m.track !== undefined && m.track !== st.track;
     if (m.track !== undefined) st.track = m.track as number;
+    // A new track during the start countdown: the countdown runs again in full, so the ready
+    // players see the change (session rooms lock their grid again, which checks the new
+    // track's limit).
+    if (newTrack && !st.race && st.countdownEndsAt != null) {
+      if (st.session && st.grid) this.lockGrid(st);
+      else if (!st.session) st.countdownEndsAt = Date.now() + this.countdownMs();
+    }
     if (m.laps !== undefined) st.laps = m.laps as number;
     if (m.seed !== undefined) st.seed = m.seed as number | null;
     if (m.public !== undefined) st.public = m.public as boolean;
@@ -747,7 +765,7 @@ export class Room extends DurableObject<Env> {
     const rotation = st.rotation ?? [];
     const at = rotation.indexOf(st.track);
     const ordered = [...rotation.slice(at + 1), ...rotation.slice(0, at + 1)];
-    return ordered.filter(track => this.trackLimit(st, track) >= count);
+    return ordered.filter(track => !st.pickOnly?.includes(track) && this.trackLimit(st, track) >= count);
   }
 
   private lockGrid(st: RoomState): void {

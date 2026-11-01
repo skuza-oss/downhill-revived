@@ -193,8 +193,11 @@ own from then on.
 ### Race room rules (finding 115)
 
 The server keeps what everyone has to agree on:
-- **Ready is for what you saw.** A changed `track` or `laps` unreadies everyone (`public` and
-  `roomName` don't).
+- **Ready is "count me in for the next race"** (finding 128). A changed `track` keeps it, and so
+  do `laps` changes that leave its cheats bit (2, the game's ROOM_CHEATS) as it was (computer
+  riders on/off is bit 1). Cheats on or off unreadies everyone outside the running race: it is
+  another kind of race. `public` and `roomName` never unready. Before finding 128 any `track` or
+  `laps` change unreadied everyone.
 - **Riders can be shared.** Two or more members may pick the same rider and all be ready
   (issue #17).
 - **Choosing** (`pick` with `"choosing":true`): the member is on the rider screen; it is
@@ -259,6 +262,7 @@ The host sends `settings` with any of the old fields and these optional fields:
 | then | "same", "next", "random" | next |
 | rotation | Array of 0–64 byte track ids | empty |
 | trackLimits | Parallel array of 6, 8 or 10; sent with rotation; includes a ten-rider entry | unset |
+| pickOnly | Track ids from this message's rotation that NEXT and RANDOM never choose (an arena: MOSH); sent with rotation | empty |
 
 The nextRace default follows public until nextRace is explicitly set.
 The client sends the game's track list and limits once. Until then the rotation
@@ -330,8 +334,11 @@ All-ready cannot bypass this intermission.
 
 ### Changes and migration
 
-Track or laps changes unready members outside the running race.
+A cheats change (laps bit 2) unreadies members outside the running race; track and other laps
+changes keep Ready (finding 128).
 A track change during intermission gives at least 15 seconds before nextRaceAt.
+A track change during the start countdown locks the grid again: the countdown runs in full from
+then, and the new track's limit is checked as at any grid lock.
 The host can change settings during a race after finishing or returning.
 FinishWindow, nextRace and then are copied when the grid locks. Changes during
 countdown or racing alter the next race's settings. rulesPending compares these
@@ -438,7 +445,8 @@ ID in its low five bits and (10 - limit) / 2 in its high bits. Native and browse
 hosts decode this into the two JSON arrays. Snapshot rotation IDs are plain IDs.
 
 NEXT walks forward through the rotation; RANDOM draws from fitting entries other
-than the current track when possible. Both skip entries smaller than membership.
+than the current track when possible. Neither chooses a `pickOnly` entry (the host can still pick
+it; its limit counts as any other's). Both skip entries smaller than membership.
 SAME preserves the selection. At grid lock, if the ready grid exceeds the selected
 track's limit, the next fitting rotation entry is selected without dropping anyone.
 `lastEvent` is `track_switch:<old id>:<limit>:<new id>`; the game translates IDs

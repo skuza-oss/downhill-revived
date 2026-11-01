@@ -223,7 +223,7 @@ describe("session rooms",()=>{
     h.sendJson({type:"settings",track:9});
     const bumped=await snap(h,r=>r.settings.track===9);
     expect(bumped.nextRaceAt-bumped.serverTime).toBeGreaterThanOrEqual(14990);
-    expect(bumped.members.every((m:any)=>!m.ready)).toBe(true);
+    expect(bumped.members.map((m:any)=>m.ready)).toEqual([true,false]);  // a new track keeps Ready (finding 128)
     cs[1].sendJson({type:"ready",ready:true}); await snap(h,r=>r.members[1].ready);
     await due(code,"nextRaceAt");
     await snap(h,r=>r.phase==="starting");
@@ -275,6 +275,99 @@ describe("session rooms",()=>{
     await start(h,cs,code);
     for(let i=0;i<10;i++)cs[i].sendJson({type:"finish",ticks:600+i,place:i+1});
     expect((await snap(h,r=>r.lastRace)).settings.track).toBe(12);
+  });
+  // Finding 128: Ready means "count me in for the next race".
+  const readies=(r:any)=>r.members.map((m:any)=>m.ready);
+  const allReady=async(h:Client,cs:Client[])=>{for(const c of cs)c.sendJson({type:"ready",ready:true}); return snap(h,r=>r.members.every((m:any)=>m.ready));};
+  it("keeps Ready across track, NEXT/RANDOM picks and computer riders; cheats and choosing clear it",async()=>{
+    const {h,cs}=await setup(3);
+    h.sendJson({type:"settings",nextRace:"host"}); await snap(h,r=>r.rules.nextRace==="host");
+    cs[1].sendJson({type:"ready",ready:true}); cs[2].sendJson({type:"ready",ready:true});
+    await snap(h,r=>r.members[1].ready&&r.members[2].ready);
+    h.sendJson({type:"settings",track:5});
+    expect(readies(await snap(h,r=>r.settings.track===5))).toEqual([false,true,true]);
+    h.sendJson({type:"settings",laps:1});  // computer riders off
+    expect(readies(await snap(h,r=>r.settings.laps===1))).toEqual([false,true,true]);
+    h.sendJson({type:"settings",laps:0});  // and on again
+    expect(readies(await snap(h,r=>r.settings.laps===0))).toEqual([false,true,true]);
+    h.sendJson({type:"settings",laps:2});  // cheats on
+    expect(readies(await snap(h,r=>r.settings.laps===2))).toEqual([false,false,false]);
+    cs[1].sendJson({type:"ready",ready:true}); cs[2].sendJson({type:"ready",ready:true});
+    await snap(h,r=>r.members[1].ready&&r.members[2].ready);
+    h.sendJson({type:"settings",laps:3});  // computer riders off, cheats still on
+    expect(readies(await snap(h,r=>r.settings.laps===3))).toEqual([false,true,true]);
+    h.sendJson({type:"settings",laps:1});  // cheats off
+    expect(readies(await snap(h,r=>r.settings.laps===1))).toEqual([false,false,false]);
+    cs[1].sendJson({type:"ready",ready:true}); await snap(h,r=>r.members[1].ready);
+    cs[1].sendJson({type:"pick",choosing:true});
+    expect(readies(await snap(h,r=>r.members[1].choosing))).toEqual([false,false,false]);
+  });
+  it("race end, retiring to the room and the host's END spend Ready",async()=>{
+    const {h,cs,code}=await setup(3);
+    h.sendJson({type:"settings",nextRace:"host"}); await snap(h,r=>r.rules.nextRace==="host");
+    await start(h,cs,code);
+    cs[1].sendJson({type:"back"});  // retires to the room
+    expect(readies(await snap(h,r=>!r.members[1].inRace))).toEqual([true,false,true]);
+    h.sendJson({type:"finish",ticks:600,place:1}); cs[2].sendJson({type:"finish",ticks:700,place:2});
+    expect(readies(await snap(h,r=>!!r.lastRace))).toEqual([false,false,false]);  // the race ended for those who raced
+    await start(h,cs,code);
+    h.sendJson({type:"end"});
+    expect((await h.json("ended")).reason).toBe("void");
+    expect(readies(await snap(h,r=>r.phase==="open"))).toEqual([false,false,false]);
+    const late=await Client.join(code,"Late");  // joining: not ready
+    expect((await snap(late,r=>r.members.length===4)).members[3].ready).toBe(false);
+  });
+  it("a track change during the countdown keeps the grid and runs the countdown again",async()=>{
+    const {h,cs,code}=await setup(3);
+    h.sendJson({type:"settings",rotation:[0,9,12],trackLimits:[10,6,10]}); await snap(h,r=>r.rotation.length===3);
+    expect((await allReady(h,cs)).phase).toBe("starting");
+    await edit(code,st=>st.countdownEndsAt=Date.now()+60_000);  // held: the test's countdown is 300 ms
+    h.sendJson({type:"settings",track:12});
+    const r=await snap(h,r=>r.settings.track===12);
+    expect(r.phase).toBe("starting");
+    expect(readies(r)).toEqual([true,true,true]);
+    expect(r.countdownEndsAt-r.serverTime).toBeGreaterThan(200);  // a full countdown from now again
+    expect(r.countdownEndsAt-r.serverTime).toBeLessThanOrEqual(300);
+    await due(code,"countdownEndsAt");
+    expect((await h.json("start")).track).toBe(12);
+  });
+  it("a too-small track chosen during the countdown switches to the next fitting one",async()=>{
+    const {h,cs,code}=await setup(8);
+    h.sendJson({type:"settings",track:0,rotation:[0,9,12],trackLimits:[10,6,10]}); await snap(h,r=>r.rotation.length===3);
+    expect((await allReady(h,cs)).phase).toBe("starting");
+    await edit(code,st=>st.countdownEndsAt=Date.now()+60_000);
+    h.sendJson({type:"settings",track:9});
+    const r=await snap(h,r=>r.lastEvent==="track_switch:9:6:12");
+    expect([r.settings.track,r.phase,readies(r).every(Boolean)]).toEqual([12,"starting",true]);
+  });
+  for(const then of ["next","random"]) it(then+" never chooses a pick-only track (MOSH), which keeps its limit",async()=>{
+    const {h,cs,code}=await setup(2);
+    h.sendJson({type:"settings",track:0,then,nextRace:"host",rotation:[0,23,2],trackLimits:[10,6,10],pickOnly:[23]});
+    await snap(h,r=>r.rules.then===then);
+    for(let race=0;race<4;race++){
+      await start(h,cs,code);
+      for(const c of cs)c.sendJson({type:"finish",ticks:600,place:1});
+      const r=await snap(h,r=>r.lastRace?.id===race+1);
+      expect(r.settings.track).not.toBe(23);
+    }
+    h.sendJson({type:"settings",track:23}); await snap(h,r=>r.settings.track===23);
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)),async(room:any)=>{
+      expect(room.trackLimit(room.state,23)).toBe(6);
+      expect(room.fittingRotation(room.state,2)).toEqual([2,0]);
+    });
+  });
+  it("pickOnly must name rotation tracks and comes with a rotation",async()=>{
+    const {h,code}=await setup(1);
+    for(const m of [{pickOnly:[23]},{rotation:[0,2],trackLimits:[10,10],pickOnly:[23]},{rotation:[0,2],trackLimits:[10,10],pickOnly:"23"}]) {
+      h.sendJson({type:"settings",...m});
+      expect((await h.json("error")).code).toBe("bad_value");
+    }
+    h.sendJson({type:"settings",rotation:[0,23],trackLimits:[10,6],pickOnly:[23]});
+    await snap(h,r=>r.rotation.length===2);
+    h.sendJson({type:"settings",rotation:[0,23],trackLimits:[10,6]});  // a 0.7.6 client: no pickOnly, MOSH in the rotation
+    await snap(h,r=>r.rotation.length===2);
+    const st:any=await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)),async(room:any)=>room.state);
+    expect(st.pickOnly).toEqual([]);
   });
   it("keeps ten results within ten places when the reported places lag",async()=>{
     const {h,cs,code}=await setup(10); await start(h,cs,code);

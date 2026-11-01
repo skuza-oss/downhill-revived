@@ -166,7 +166,7 @@ describe("race room", () => {
   const snap = async (c: Client, pred: (r: any) => boolean) => JSON.parse((await c.next((f) => room(f) && pred(JSON.parse(f as string)))) as string);
   const countdown = { features: ["countdown"] };
 
-  it("unreadies everyone when the track or options change, not when the room goes public", async () => {
+  it("keeps Ready across a new track, computer riders and going public; cheats unready everyone", async () => {
     const { host, code } = await Client.host("H");
     const a = await Client.join(code, "A");
     host.sendJson({ type: "ready", ready: true });
@@ -175,11 +175,11 @@ describe("race room", () => {
     host.sendJson({ type: "settings", public: true });
     expect((await snap(host, (r) => r.public)).members.every((m: any) => m.ready)).toBe(true);
     host.sendJson({ type: "settings", track: 3 });
-    expect((await snap(host, (r) => r.settings.track === 3)).members.some((m: any) => m.ready)).toBe(false);
-    a.sendJson({ type: "ready", ready: true });
-    await snap(host, (r) => r.members[1]?.ready);
-    host.sendJson({ type: "settings", laps: 1 });
-    expect((await snap(host, (r) => r.settings.laps === 1)).members[1].ready).toBe(false);
+    expect((await snap(host, (r) => r.settings.track === 3)).members.every((m: any) => m.ready)).toBe(true);
+    host.sendJson({ type: "settings", laps: 1 });  // ROOM_NO_BOTS
+    expect((await snap(host, (r) => r.settings.laps === 1)).members.every((m: any) => m.ready)).toBe(true);
+    host.sendJson({ type: "settings", laps: 3 });  // ROOM_CHEATS on
+    expect((await snap(host, (r) => r.settings.laps === 3)).members.some((m: any) => m.ready)).toBe(false);
   });
 
   it("lets two players ride the same rider, both ready (issue #17)", async () => {
