@@ -313,11 +313,15 @@ fields/s (one run each). Windows only built and run; no lines in the browser.
 
 2026-11-01 (finding 130): Windows `DHD_WGPU_ADAPTER=integrated|discrete` selects hardware through
 DXGI's power/performance preference order, with the player default unchanged. The Ryzen 5 7600
-iGPU baseline holds about 60 fps at 3x; requested higher scales can be clamped by the dedicated
-VRAM guard, so `DHD_SCALE_MEMORY_MB` supplies a logged developer estimate for UMA measurements.
+iGPU holds the nominal 60 fps target at 4x, up from baseline 3x. The dedicated-VRAM guard can
+clamp high requests; `DHD_SCALE_MEMORY_MB` supplies a logged developer estimate for UMA measurements.
 Exact bounded integer scanout, duplicated-row reuse and power-of-two texture pipeline specialisation
-reduce 4x uncapped FXC GPU time from 18.81 to 11.73 ms (50.52 to 78.48 fps). Renderer/host GS tests, fixed-stream pixel comparisons and the
-boot trace pass. Finding 130 contains the paced/unlocked matrix, Vulkan checks and limitations.
+reduce 4x uncapped FXC GPU time from 18.81 to 11.73 ms (50.52 to 78.48 fps, fresh controls).
+The full matrix's true 8x improves from 13.79 to 22.19 fps, GPU 71.80 to 43.81 ms; 5x/6x/8x
+remain below 60. Final Vulkan is slower at 2x and effectively tied at 8x. Renderer/host GS tests,
+oracle replays, strict fixed-stream 8x comparisons on both GPUs/APIs and boot traces pass.
+Finding 130 contains the final paced/unlocked tables, 1% lows and pass splits; wall-time stalls
+remain, and the RTX-connected monitor's transport cost is not isolated. Player defaults unchanged.
 
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
