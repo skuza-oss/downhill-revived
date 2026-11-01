@@ -116,7 +116,19 @@ static int native_read_wait(void) { return 1; }
 static int native_init(Gs *g, Rust *exact)
 {
     double start;
-    Native *n = native_create_rust(exact, device.memory, &start);   /* the scale limit with the card's memory */
+    uint64_t scale_memory = device.memory;
+    /* Developer measurements on UMA: dedicated VRAM alone understates usable shared RAM.
+       Override only the scale guard; texture packs retain their ordinary budget. */
+    const char *memory_mb = getenv("DHD_SCALE_MEMORY_MB");
+    if (memory_mb) {
+        char *end;
+        unsigned long long mb = strtoull(memory_mb, &end, 10);
+        if (end != memory_mb && !*end && mb > 0 && mb <= 65536) {
+            scale_memory = (uint64_t)mb << 20;
+            fprintf(stderr, "gs: scale memory budget override %llu MiB (DHD_SCALE_MEMORY_MB)\n", mb);
+        } else fprintf(stderr, "gs: invalid DHD_SCALE_MEMORY_MB; using adapter memory\n");
+    }
+    Native *n = native_create_rust(exact, scale_memory, &start);
     if (!n) return 0;
     /* A texture pack (dhd.ini texture_pack, textures): its default budget is half the card's memory. */
     n->texpack = texpack_open(&n->replace, device.memory);

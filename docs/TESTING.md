@@ -142,3 +142,10 @@ The same selected PCI IDs apply with `DHD_WGPU_BACKEND=vulkan`.
 When the display is connected to another adapter, presentation includes a cross-adapter copy.
 Keep the display and window configuration fixed across comparisons and report this limitation;
 GPU pass timestamps do not measure all compositor/copy costs.
+
+`DHD_SCALE_MEMORY_MB=N` overrides only the native resolution guard's memory estimate for
+controlled developer measurements (1–65536 MiB). Integrated GPUs can expose very little dedicated
+VRAM while using shared RAM; their normal dedicated-memory guard may clamp requested 6x/8x to
+4x. Check `perf: render` for the actual scale. Choose a budget the machine can supply, keep it
+constant across runs, and inspect the logged override. This does not alter player defaults,
+texture-pack budgets or the device's texture-size limit.

@@ -43,3 +43,21 @@ installed driver's adapter key: no `meta.json` exists for it. The available gold
 driver key. This is a validation limitation, not a passing golden comparison; no gate is weakened.
 The replay CLI also compares a resolved output path against an unresolved build junction;
 calling its existing build/clear/replay functions directly avoids that path-only CLI refusal.
+
+## Measuring actual high scales
+
+The first requested 6x run was invalid as a 6x result: its log explicitly clamped it to 4x.
+The dedicated-VRAM guard underestimates usable shared memory on this integrated GPU. Added
+`DHD_SCALE_MEMORY_MB`, a logged developer override for only that guard, with player defaults and
+texture-pack budgets unchanged. High-scale measurements use 4096 MiB. This does not allocate that
+amount or bypass texture-size limits. Verify actual scale in `perf: render`, not the requested setting.
+The clamped run is retained only as a diagnostic and excluded from the matrix.
+Build and the repeated renderer suite pass. The 600-field boot trace with the override matches.
+
+Refreshed the native replay golden from the frozen oracle executable, verified against its
+manifest SHA-256, on the current driver. The two recorded fields' pictures are byte-identical.
+Created fresh metadata for this native replay group from those oracle outputs, with current
+adapter/driver pins and hashes for all four items. The unmodified `gs_golden.py compare
+replay-native` reports four items compared, metadata count four, identical, VERDICT PASS.
+The old installed golden is preserved. This resolves the native golden validation limitation above;
+it does not re-record unrelated golden groups.
