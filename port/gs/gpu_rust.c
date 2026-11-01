@@ -32,7 +32,7 @@
 #include "gpu.h"
 #ifdef _WIN32
 #include <windows.h>
-#include <dxgi.h>
+#include <dxgi1_6.h>
 #endif
 #include <SDL3/SDL_atomic.h>
 #include <SDL3/SDL_timer.h>  /* the performance counter */
@@ -175,6 +175,24 @@ static int op_draw_skipped(const Gs *g)
 static struct { int made; uint32_t flags, vendor_id, device_id; uint64_t memory, driver_version; } device;
 
 #ifdef _WIN32
+/* DXGI orders hardware by power/performance; keep EnumAdapters1 for the default. */
+static int dxgi_preferred(int integrated, DXGI_ADAPTER_DESC1 *desc)
+{
+    IDXGIFactory6 *factory = NULL;
+    IDXGIAdapter1 *adapter = NULL;
+    int found = 0;
+    if (FAILED(CreateDXGIFactory1(&IID_IDXGIFactory6, (void **)&factory))) return 0;
+    for (UINT i = 0; SUCCEEDED(IDXGIFactory6_EnumAdapterByGpuPreference(factory, i,
+             integrated ? DXGI_GPU_PREFERENCE_MINIMUM_POWER : DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+             &IID_IDXGIAdapter1, (void **)&adapter)); i++) {
+        found = SUCCEEDED(IDXGIAdapter1_GetDesc1(adapter, desc)) && !(desc->Flags & DXGI_ADAPTER_FLAG_SOFTWARE);
+        IDXGIAdapter1_Release(adapter);
+        if (found) break;
+    }
+    IDXGIFactory6_Release(factory);
+    return found;
+}
+
 /* A DXGI adapter's description and UMD version: the first adapter (Windows' default, the game's
    GPU) when vendor is 0, else the one with these PCI ids. 0 when there is none. */
 static int dxgi_adapter(unsigned vendor, unsigned id, DXGI_ADAPTER_DESC1 *desc, uint64_t *umd)
@@ -233,6 +251,16 @@ static int device_init(void)
     DXGI_ADAPTER_DESC1 desc;
     uint64_t umd;
     int known = dxgi_adapter(0, 0, &desc, &umd);
+    int preferred = choice && (!strcmp(choice, "integrated") || !strcmp(choice, "discrete"));
+    if (preferred) {
+        if (!dxgi_preferred(!strcmp(choice, "integrated"), &desc)) {
+            fprintf(stderr, "gs: adapter preference %s unavailable\n", choice);
+            return 0;
+        }
+        d.vendor_id = desc.VendorId; d.device_id = desc.DeviceId;
+        fprintf(stderr, "gs: GPU preference %s (DXGI %s, PCI %04x:%04x)\n", choice,
+                !strcmp(choice, "integrated") ? "minimum power" : "high performance", d.vendor_id, d.device_id);
+    }
     if (choice ? !strcmp(choice, "fallback") : known && desc.VendorId == 0x1414 && desc.DeviceId == 0x8C)
         d.flags |= DHDR_DEV_FALLBACK;
     else if (!choice && known) { d.vendor_id = desc.VendorId; d.device_id = desc.DeviceId; }

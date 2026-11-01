@@ -128,3 +128,17 @@ with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=nativ
   a `freeze:` line counts as a failure.
 - **Never wait for a process by matching its command line in a loop whose own command line
   contains the same text.**
+
+## Windows GPU selection for renderer measurements
+
+Leave `DHD_WGPU_ADAPTER` unset for the existing player default (DXGI's first adapter).
+`DHD_WGPU_ADAPTER=integrated` selects the first hardware adapter in DXGI's minimum-power
+order; `discrete` uses its high-performance order. These are preferences: on a machine with
+only one hardware GPU both can select it. The log records the preference and PCI IDs, then
+`gs: GPUs` identifies the device actually used. If preference enumeration is unavailable the
+explicit request fails rather than silently measuring the default GPU. `fallback` still selects WARP.
+The same selected PCI IDs apply with `DHD_WGPU_BACKEND=vulkan`.
+
+When the display is connected to another adapter, presentation includes a cross-adapter copy.
+Keep the display and window configuration fixed across comparisons and report this limitation;
+GPU pass timestamps do not measure all compositor/copy costs.
