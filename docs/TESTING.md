@@ -101,6 +101,7 @@ Pictures:
 | `DHD_RACE_CAPTURE=c+120` | a capture at a race clock moment (`DHD_RACE_CAPTURE_WINDOW`, `_FROM`, `_INTERVAL`) |
 | `DHD_CAPTURE_PRESENTED=PREFIX` | PNGs of the presented picture, also while minimised |
 | `DHD_PERF_COUNTER=1` | the FPS & PING counter |
+| `DHD_PERF_LOG=0` | no `perf:` lines in dhd.log (on by default, finding 129) and none of their counting |
 
 Plain settings for runs: `DHD_SKIP_MOVIES=1`, `DHD_SND_OFF=1`, `DHD_SETTINGS=none`, `DHD_MEMCARD=0|1`
 with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=native`,

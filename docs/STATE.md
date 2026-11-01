@@ -301,6 +301,16 @@ long). A `port/patches.py` patch clears them in `func_00226D08`; with stale pool
 PERU state trace of the fixed build equals the unfixed build's clean run from the constructor on.
 Opt-in VU1 diagnostics: `DHD_VU_CAPTURE_FAILURE`, `DHD_VU_CAPTURE_ENTRY`, `DHD_VU_CAPTURE_EE`.
 
+2026-11-01 (finding 129): every player's dhd.log says how fast the game ran and what held it back
+(`port/gs/perf_log.c`, on by default, `DHD_PERF_LOG=0` off): at start the GPUs with their kind and
+the one used, the present mode, and a `perf: render` line (scale, picture and window size, rate,
+pacing, V-Sync, refresh, GPU timer); every 30 s of race or menus in front, and per kind at exit, a
+`perf:` line with fps against the requested, 1% low, frames over 1.2x the budget, each thread's
+CPU and busy ms per field, the render thread's wait in the present, the GPU's ms per frame (one
+frame in 8 timed by DHD_GPU_TIMES' queries) and `limit=gpu|cpu:<thread>|vsync|none`. The graphics
+queue's wait counters now count by default. Boot state trace unchanged; 1x uncapped 243.3 -> 241.1
+fields/s (one run each). Windows only built and run; no lines in the browser.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
