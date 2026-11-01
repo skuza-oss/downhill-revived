@@ -29,6 +29,7 @@ static const SettingChoice setting_choices_voice_volume[] = {{"0", "0%"}, {"20",
 static const SettingChoice setting_choices_voice_mic[] = {{"50", "50%"}, {"75", "75%"}, {"100", "100%"}, {"150", "150%"}, {"200", "200%"}};
 static const SettingChoice setting_choices_voice_range[] = {{"25", "25 m"}, {"50", "50 m"}, {"100", "100 m"}, {"200", "200 m"}};
 static const SettingChoice setting_choices_voice_bitrate[] = {{"8000", "8 kbps"}, {"16000", "16 kbps"}, {"24000", "24 kbps"}, {"32000", "32 kbps"}, {"48000", "48 kbps"}, {"64000", "64 kbps"}};
+static const SettingChoice setting_choices_keep_ready[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_unlock_all[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_auto_update[] = {{"ask", "Ask"}, {"on", "Automatic"}, {"off", "Off"}};
 static const SettingChoice setting_choices_discord[] = {{"off", "OFF"}, {"on", "ON"}};
@@ -54,6 +55,7 @@ static const SettingInfo setting_table[] = {
     {"voice_mic", "DHD_VOICE_MIC", "100", setting_choices_voice_mic, 5},
     {"voice_range", "DHD_VOICE_RANGE", "50", setting_choices_voice_range, 4},
     {"voice_bitrate", "DHD_VOICE_BITRATE", "24000", setting_choices_voice_bitrate, 6},
+    {"keep_ready", "DHD_KEEP_READY", "1", setting_choices_keep_ready, 2},
     {"unlock_all", "DHD_UNLOCK_ALL", "0", setting_choices_unlock_all, 2},
     {"auto_update", "", "ask", setting_choices_auto_update, 3},
     {"discord", "DHD_DISCORD", "off", setting_choices_discord, 2},

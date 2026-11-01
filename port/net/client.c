@@ -104,11 +104,21 @@ void client_connected(NetClient *c, const NetTransport *tr)
     SDL_UnlockMutex(c->lock);
 }
 
+/* keep_ready (dhd.ini, built in on): a player who was ready stays ready when the host changes the
+   track or the laps. The server clears every ready flag on such a change (room.ts "settings"), so
+   the client says ready again by itself; no server change. Off: ready again by hand, as before. */
+static int keep_ready(void)
+{
+    const char *v = getenv("DHD_KEEP_READY");
+    return !v || !*v || strcmp(v, "0") != 0;
+}
+
 static void read_room(NetClient *c, const char *t)
 {
     NetLobby *l = &c->lobby;
     long long v;
     int i, n;
+    const int was_ready = c->ready, old_track = l->track, old_laps = l->laps;
     json_string(t, "code", l->code, sizeof l->code);
     if (json_int(t, "hostId", &v))
         l->host_id = (int)v;
@@ -209,6 +219,14 @@ static void read_room(NetClient *c, const char *t)
         if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
             c->racing = 0; l->state = NET_LOBBY; l->started = 0; c->relayed_head = c->relayed_count = 0;
         }
+    /* Unready only because the host picked another track or lap count: ready again. Not while
+       racing or on the rider screen (the server would refuse it), and not if this player unreadied
+       (c->ready is then already 0, so was_ready is too). */
+    if (was_ready && !c->ready && !c->racing && !c->choosing && (l->track != old_track || l->laps != old_laps) &&
+        keep_ready()) {
+        c->ready = 1;
+        say(c, "{\"type\":\"ready\",\"ready\":true}");
+    }
 }
 
 static void read_start(NetClient *c, const char *t)

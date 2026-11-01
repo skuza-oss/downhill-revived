@@ -17,6 +17,7 @@ PROGRAMS = {  # name: (sources, libraries, run in the tests, SDL3)
     'test_loopback': (CLIENT + ['test_loopback.c'], 'winmm.lib', True, True),
     'test_join': (['join.c', 'test_join.c'], '', True, False),
     'test_session': (CLIENT + ['test_session.c'], 'winmm.lib', True, True),
+    'test_keep_ready': (CLIENT + ['test_keep_ready.c'], 'winmm.lib', True, True),
     'nettool': (CLIENT + ['net.c', 'join.c', 'nettool.c'], 'winmm.lib user32.lib ' + RUST, False, True),
 }
 

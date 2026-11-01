@@ -1,0 +1,70 @@
+/* keep_ready (client.c): a ready player whose ready the server cleared because the host changed
+   the track or the laps says ready again by itself; one who unreadied, or who is on the rider
+   screen, doesn't; DHD_KEEP_READY=0 turns it off. No server or game data. */
+#include "client.h"
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static char sent[4096];
+static int nsent;
+static void text(void *ctx, const char *s) { (void)ctx; snprintf(sent, sizeof sent, "%s", s); nsent++; }
+static void binary(void *ctx, const void *s, size_t n) { (void)ctx; (void)s; (void)n; }
+
+static void room(NetClient *c, int track, int laps, int ready)
+{
+    char t[512];
+    snprintf(t, sizeof t, "{\"type\":\"room\",\"hostId\":1,\"settings\":{\"track\":%d,\"laps\":%d},"
+             "\"members\":[{\"id\":1,\"name\":\"Host\",\"ready\":false},{\"id\":2,\"name\":\"Me\",\"ready\":%s}]}",
+             track, laps, ready ? "true" : "false");
+    client_on_text(c, t, strlen(t));
+}
+
+static int readied_by_itself(void) { return !strcmp(sent, "{\"type\":\"ready\",\"ready\":true}"); }
+
+int main(void)
+{
+    NetClient c;
+    NetTransport t;
+    const char *welcome = "{\"type\":\"welcome\",\"memberId\":2,\"code\":\"TEST22\",\"serverTime\":1000}";
+    client_init(&c, "Me", "test", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    memset(&t, 0, sizeof t); t.send_text = text; t.send_binary = binary;
+    client_connected(&c, &t);
+    client_on_text(&c, welcome, strlen(welcome));
+    room(&c, 3, 2, 0);
+
+    /* ready, then the host picks another track: the server clears it, the client readies again */
+    client_ready(&c, 1); room(&c, 3, 2, 1);
+    nsent = 0; room(&c, 5, 2, 0);
+    assert(nsent == 1 && readied_by_itself() && c.ready);
+    room(&c, 5, 2, 1);
+    /* another lap count: the same */
+    nsent = 0; room(&c, 5, 3, 0);
+    assert(nsent == 1 && readied_by_itself() && c.ready);
+    room(&c, 5, 3, 1);
+    /* unready with the track unchanged (the player's own, or a race's end): nothing sent */
+    nsent = 0; room(&c, 5, 3, 0);
+    assert(nsent == 0 && !c.ready);
+    /* not ready before the change: stays not ready */
+    nsent = 0; room(&c, 7, 3, 0);
+    assert(nsent == 0 && !c.ready);
+    /* on the rider screen: not readied (the server would refuse it) */
+    client_ready(&c, 1); room(&c, 7, 3, 1);
+    client_pick(&c, -1, -1, 0);
+    nsent = 0; room(&c, 8, 3, 0);
+    assert(nsent == 0 && !c.ready);
+    /* turned off in dhd.ini */
+    client_pick(&c, -1, 2, 1);
+    client_ready(&c, 1); room(&c, 8, 3, 1);
+#ifdef _WIN32
+    _putenv("DHD_KEEP_READY=0");
+#else
+    setenv("DHD_KEEP_READY", "0", 1);
+#endif
+    nsent = 0; room(&c, 9, 3, 0);
+    assert(nsent == 0 && !c.ready);
+    client_free(&c);
+    puts("test_keep_ready: ok");
+    return 0;
+}

@@ -387,6 +387,8 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   riders' positions; NAME - TALKING on the name tags, /MUTE NAME, four live PC SETTINGS rows.
   Windows only (libopus built for win-x64). `port/tools/test_voice.py`: 21 of 21.
 - Rider names beside the race's track bar dots (finding 129).
+- A ready player stays ready when the host changes the track or laps: the client readies again
+  by itself (`keep_ready`, built-in on; finding 132, no server change).
 - Quick Race on ONLINE (finding 128): joins the fullest open public room of the same build, else
   creates a public room and waits; not yet tried in the game.
   `DHD_NET_ROOM=CODE` opens ONLINE and joins that room; in the browser `?room=CODE`, and the
