@@ -9,7 +9,7 @@
 //!   equal; 5-7 = always);
 //! - variant 0 plain, 1 dual (dual-source module and factors), 2 RGB with A = 128
 //!   (`native_pixel_blend`), 3 alpha only (no blend state).
-//! Bit 25 is private to the renderer: specialise decoded unit-scale textures.
+//! Bits 25..28 are private: a power-of-two source scale (S=E), or zero for generic.
 //! The GS key's blend, depth and variant fields remain unchanged.
 //!
 //! The D3D11 numbers map to wgpu through EXPLICIT tables, never casts: the C path casts the
@@ -29,7 +29,7 @@ pub const VARIANT_PLAIN: u32 = 0;
 pub const VARIANT_DUAL: u32 = 1;
 pub const VARIANT_RGB_A128: u32 = 2;
 pub const VARIANT_ALPHA_ONLY: u32 = 3;
-pub const UNIT_TEXEL: u32 = 1 << 25;
+pub const TEXEL_SCALE_SHIFT: u32 = 25;
 
 /// What a key's pipeline is built with (the parts the key decides).
 #[derive(Clone, Debug, PartialEq)]
@@ -190,10 +190,12 @@ fn build(gpu: &Gpu, objects: &Objects, key: u32, d: &PipelineDesc) -> Result<wgp
         attributes: &VERTEX_ATTRIBUTES,
     };
     let targets = [Some(d.color.clone())];
-    let mut fragment_options = crate::native::init::compilation_options();
-    if key & UNIT_TEXEL != 0 {
-        fragment_options.constants = &[("native_unit_texel", 1.0)];
-    }
+    let texel_scale = key >> TEXEL_SCALE_SHIFT & 15;
+    let constants = [("native_texel_scale", texel_scale as f64)];
+    let fragment_options = wgpu::PipelineCompilationOptions {
+        constants: if texel_scale == 0 { &[] } else { &constants },
+        zero_initialize_workgroup_memory: crate::native::init::compilation_options().zero_initialize_workgroup_memory,
+    };
     Ok(gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("native draw"),
         layout: Some(&objects.draw_layout),

@@ -39,7 +39,7 @@ use crate::device::Gpu;
 use crate::native::arenas::Arenas;
 use crate::native::convert::{ConvertObjects, ConvertSource};
 use crate::native::scanout::ScanoutObjects;
-use crate::native::pipelines::{gputimes, UNIT_TEXEL, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
+use crate::native::pipelines::{gputimes, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
 use crate::native::shared::NativeShared;
 use crate::native::surfaces::Kit;
 use crate::native::{Native, Picture};
@@ -621,9 +621,13 @@ impl Native {
             }
             let scissor = [left as u32, top as u32, (right - left) as u32, (bottom - top) as u32];
             self.pass.set_state(tw, th, scissor, uses_constant(k.blend_key).then_some(k.blend_fix));
-            // Ordinary decoded texels at S=E=1; texture-pack sampler draws stay generic.
-            let unit_texel = constants.flags & (1 | 2048) == 1 && constants.scale & 0x00ff_ff00 == 0x0001_0100;
-            self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, unit_texel,
+            // Specialise decoded textures and scaled surface reads only when both
+            // scale factors match and their division is an exact binary shift.
+            let source_scale = constants.scale >> 8 & 255;
+            let resolution = constants.scale >> 16 & 255;
+            let texel_scale = if constants.flags & (1 | 2048) == 1 && source_scale == resolution
+                && source_scale <= 8 && source_scale.is_power_of_two() { source_scale } else { 0 };
+            self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale,
                              offset, &v.uniforms, &group);
             self.pass.drawn.draws += 1;
             // Conservative even for masked/empty writes: a false invalidation costs
@@ -734,13 +738,13 @@ impl Native {
     /// an equal Z lost); without, the same test on the unchanged Z buffer.
     #[allow(clippy::too_many_arguments)]
     fn draw_passes(&mut self, k: &DhdrCommand, vertices: &[DhdrVertex], indices: Option<&[u32]>, has_depth: bool,
-                   retained_depth: bool, unit_texel: bool, offset: u32, uniforms: &wgpu::BindGroup, group: &wgpu::BindGroup) {
+                   retained_depth: bool, texel_scale: u32, offset: u32, uniforms: &wgpu::BindGroup, group: &wgpu::BindGroup) {
         let gpu = self.gpu;
         let (blend_key, mask, dk) = (k.blend_key, k.color_mask as u32, k.depth_key as u32);
         let (src, dst) = (blend_key >> 1 & 31, blend_key >> 6 & 31);
         let uses_as = blend_key & 1 != 0 && (src == BLEND_SA || src == BLEND_ISA || dst == BLEND_SA || dst == BLEND_ISA);
         let depth = if has_depth { 16 | if dk & 4 != 0 { 8 } else { 0 } | (dk & 3) } else if retained_depth { 17 } else { 0 };
-        let texel_key = if unit_texel { UNIT_TEXEL } else { 0 };
+        let texel_key = texel_scale << TEXEL_SCALE_SHIFT;
         let base = blend_key | depth << 18 | texel_key;
         self.pass.set_groups(uniforms, offset, group);
         if !uses_as || (self.objects.dual && self.objects.dual_module.is_some()) {

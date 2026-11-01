@@ -208,3 +208,29 @@ match exactly; all four before/after items at 8x match on Vulkan and separately 
 Six CPU pipeline-key tests, three shader transformation tests and host GS tests pass.
 The recent original/scanout control was repeated on an idle PC; the fresh controls above
 supersede the earlier 49.77/52.06 fps pair for evaluating the scanout gain.
+
+
+## Retained: specialise power-of-two scaled surface reads
+
+Extend the same pipeline constant to S=E in {1,2,4,8}, covering scaled render-target reads as
+well as decoded unit textures. Unequal pairs, non-power-of-two scales and replacement sampler
+draws stay generic. Only exact binary divisors are specialised; all original expressions remain.
+The private key uses bits 25..28. Across resolution changes it can retain at most five variants
+per original key (generic plus four scale values), rather than specialising arbitrary flags.
+
+| 4x DX12 uncapped | FPS | 1% low | GPU ms | Draw ms | Scanout ms |
+|---|---:|---:|---:|---:|---:|
+| Unit only / FXC | 68.88 | 28.27 | 13.836 | 12.074 | 1.148 |
+| Power-of-two surface reads / FXC | 78.48 | 54.84 | 11.732 | 10.587 | 0.691 |
+| Unit only / DXC | 68.45 | 46.55 | 14.140 | 12.224 | 1.166 |
+| Power-of-two surface reads / DXC | 72.61 | 51.30 | 12.778 | 11.593 | 0.730 |
+
+This stage adds 13.9% throughput / 15.2% less GPU time on FXC, and 6.1% / 9.6% on DXC.
+All three retained changes together reduce 4x GPU time by 37.6% on FXC and 34.2% on DXC
+against the fresh original controls. These are single-run comparisons, not precision clock-normalised
+microbenchmarks. No filter approximation or precision reduction is used.
+
+Checks repeated for this stage: renderer suite, 33 presented synthetic pictures, seven replacement
+stress pictures, all 12 C-oracle items at 1x/2x/4x, strict four-item before/after 8x comparisons on
+Vulkan and DX12/DXC, six pipeline-key tests, three native shader transformation tests and host GS
+all pass. This is the last renderer change in this round; the final matrix below measures this build.

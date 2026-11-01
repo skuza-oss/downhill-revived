@@ -315,8 +315,8 @@ fields/s (one run each). Windows only built and run; no lines in the browser.
 DXGI's power/performance preference order, with the player default unchanged. The Ryzen 5 7600
 iGPU baseline holds about 60 fps at 3x; requested higher scales can be clamped by the dedicated
 VRAM guard, so `DHD_SCALE_MEMORY_MB` supplies a logged developer estimate for UMA measurements.
-Exact bounded integer scanout, duplicated-row reuse and unit-texture pipeline specialisation
-reduce 4x uncapped FXC GPU time from 18.81 to 13.84 ms (50.52 to 68.88 fps). Renderer/host GS tests, fixed-stream pixel comparisons and the
+Exact bounded integer scanout, duplicated-row reuse and power-of-two texture pipeline specialisation
+reduce 4x uncapped FXC GPU time from 18.81 to 11.73 ms (50.52 to 78.48 fps). Renderer/host GS tests, fixed-stream pixel comparisons and the
 boot trace pass. Finding 130 contains the paced/unlocked matrix, Vulkan checks and limitations.
 
 ### Open

@@ -14,9 +14,9 @@
 // alpha (SrcAlpha factors), then native_pixel writes the alpha channel alone, unblended, on the
 // pixels the first draw wrote (gpu_wgpu_native.inc, native_draw_passes).
 
-// Set only for draw pipelines whose uploaded constants have S=E=1.
+// Set only when uploaded S=E is a power of two, at most eight.
 // This lets the compiler fold the original arithmetic without a runtime branch.
-override native_unit_texel: u32 = 0u;
+override native_texel_scale: u32 = 0u;
 
 struct Native {
     target_size: vec2<f32>, flags: u32, atst: u32,
@@ -72,8 +72,8 @@ fn wrap_coordinate(c: i32, mode: u32, size: u32, low: u32, high: u32) -> u32 {
 }
 
 fn texel(c: vec2<i32>) -> vec4<f32> {
-    let S = select(nat.scale >> 8u & 255u, 1u, native_unit_texel != 0u);
-    let E = select(nat.scale >> 16u & 255u, 1u, native_unit_texel != 0u);
+    let S = select(nat.scale >> 8u & 255u, native_texel_scale, native_texel_scale != 0u);
+    let E = select(nat.scale >> 16u & 255u, native_texel_scale, native_texel_scale != 0u);
     let step = S / E;
     let whole = vec2<i32>(floor(vec2<f32>(c) / f32(E)));
     let sub = c - whole * i32(E);
@@ -105,7 +105,7 @@ fn shade(i: Varyings, uv_in: vec2<f32>, across: vec2<f32>, down: vec2<f32>) -> v
         if ((nat.flags & 2048u) != 0u) { t = replacement(uv, across, down); }
         else {
             let T = nat.scale & 255u;
-            let E = select(nat.scale >> 16u & 255u, 1u, native_unit_texel != 0u);
+            let E = select(nat.scale >> 16u & 255u, native_texel_scale, native_texel_scale != 0u);
             if ((nat.flags & 1024u) != 0u && T > 1u && E == 1u) {
                 let corner = floor(i.position.xy / f32(T)) * f32(T) - i.position.xy;
                 uv += across * corner.x + down * corner.y;
