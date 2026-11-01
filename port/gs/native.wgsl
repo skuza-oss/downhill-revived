@@ -18,6 +18,21 @@
 // This lets the compiler fold the original arithmetic without a runtime branch.
 override native_texel_scale: u32 = 0u;
 
+// A draw pipeline specialised for its draw's state (pipelines.rs, `spec`): the fragment stage
+// takes parts of the state from these bits instead of the uniform: with bit 31 the flags (bits
+// 0-11), with bit 30 the CLAMP modes (bits 12-13 U, 14-15 V), with bit 29 the alpha test (bits
+// 16-18); bit 19 when every texel the draw reads is inside its texture (a decoded texture of
+// exactly tex_size, CLAMP repeat or clamp, unit scale), so load_rgba's bounds test always passes.
+// Paths the draw never takes compile away; the arithmetic of the paths it takes is the same.
+// Zero: the generic pipeline, all from the uniform.
+override native_spec: u32 = 0u;
+fn draw_flags() -> u32 { return select(nat.flags, native_spec & 4095u, (native_spec & 0x80000000u) != 0u); }
+fn wrap_mode() -> vec2<u32> {
+    return select(nat.wrap.xy, vec2<u32>(native_spec >> 12u & 3u, native_spec >> 14u & 3u), (native_spec & 0x40000000u) != 0u);
+}
+fn alpha_test() -> u32 { return select(nat.atst, native_spec >> 16u & 7u, (native_spec & 0x20000000u) != 0u); }
+fn texels_inside() -> bool { return (native_spec & 0x80000u) != 0u; }
+
 struct Native {
     target_size: vec2<f32>, flags: u32, atst: u32,
     aref: u32, alpha_scale: f32, texa_alpha: f32, scale: u32,
@@ -77,11 +92,16 @@ fn texel(c: vec2<i32>) -> vec4<f32> {
     let step = S / E;
     let whole = vec2<i32>(floor(vec2<f32>(c) / f32(E)));
     let sub = c - whole * i32(E);
-    let at = vec2<u32>(wrap_coordinate(whole.x, nat.wrap.x, nat.tex_size.x, nat.region.x, nat.region.y),
-                       wrap_coordinate(whole.y, nat.wrap.y, nat.tex_size.y, nat.region.z, nat.region.w));
+    let wrap = wrap_mode();
+    let at = vec2<u32>(wrap_coordinate(whole.x, wrap.x, nat.tex_size.x, nat.region.x, nat.region.y),
+                       wrap_coordinate(whole.y, wrap.y, nat.tex_size.y, nat.region.z, nat.region.w));
     let xy = (nat.tex_offset + vec2<i32>(at)) * i32(S) + sub * i32(step) + i32(step / 2u);
-    var t = load_rgba(native_texture, xy);
-    t = vec4<f32>(t.rgb * 255.0, select(t.a * nat.alpha_scale, nat.texa_alpha, (nat.flags & 256u) != 0u));
+    var t: vec4<f32>;
+    if (texels_inside()) { t = textureLoad(native_texture, xy, 0); } else { t = load_rgba(native_texture, xy); }
+    // GS units. A loaded unorm8 times 255 is exactly the byte (f32(v / 255) * 255 rounds to v for
+    // every v); round() keeps it so when a compiler fuses that product into a later add (as the
+    // bilinear mix's), where the exact product, v +- 8e-6, would reach a floor() (finding 131).
+    t = vec4<f32>(round(t.rgb * 255.0), select(round(t.a * nat.alpha_scale), nat.texa_alpha, (draw_flags() & 256u) != 0u));
     return t;
 }
 
@@ -90,28 +110,30 @@ fn replacement(uv_in: vec2<f32>, across: vec2<f32>, down: vec2<f32>) -> vec4<f32
     let size = vec2<f32>(textureDimensions(native_texture));
     let gs_size = vec2<f32>(nat.tex_size);
     let half_texel = gs_size / size * 0.5;
-    if (nat.wrap.x == 2u) { uv.x = clamp(uv.x, f32(nat.region.x) + half_texel.x, f32(nat.region.y) + 1.0 - half_texel.x); }
-    if (nat.wrap.y == 2u) { uv.y = clamp(uv.y, f32(nat.region.z) + half_texel.y, f32(nat.region.w) + 1.0 - half_texel.y); }
+    let wrap = wrap_mode();
+    if (wrap.x == 2u) { uv.x = clamp(uv.x, f32(nat.region.x) + half_texel.x, f32(nat.region.y) + 1.0 - half_texel.x); }
+    if (wrap.y == 2u) { uv.y = clamp(uv.y, f32(nat.region.z) + half_texel.y, f32(nat.region.w) + 1.0 - half_texel.y); }
     var t = textureSampleGrad(native_texture, native_replace_sampler, uv / gs_size, across / gs_size, down / gs_size);
     return vec4<f32>(t.rgb * 255.0, t.a * nat.alpha_scale);
 }
 
 // The pixel's colour in GS units (raster.hlsl native_pixel, before its outputs); discards as it does.
 fn shade(i: Varyings, uv_in: vec2<f32>, across: vec2<f32>, down: vec2<f32>) -> vec4<f32> {
+    let flags = draw_flags();
     var color = i.color;
     var uv = uv_in;
-    if ((nat.flags & 1u) != 0u) {
+    if ((flags & 1u) != 0u) {
         var t: vec4<f32>;
-        if ((nat.flags & 2048u) != 0u) { t = replacement(uv, across, down); }
+        if ((flags & 2048u) != 0u) { t = replacement(uv, across, down); }
         else {
             let T = nat.scale & 255u;
             let E = select(nat.scale >> 16u & 255u, native_texel_scale, native_texel_scale != 0u);
-            if ((nat.flags & 1024u) != 0u && T > 1u && E == 1u) {
+            if ((flags & 1024u) != 0u && T > 1u && E == 1u) {
                 let corner = floor(i.position.xy / f32(T)) * f32(T) - i.position.xy;
                 uv += across * corner.x + down * corner.y;
             }
             uv *= f32(E);
-            if ((nat.flags & 32u) != 0u) {
+            if ((flags & 32u) != 0u) {
                 uv -= 0.5;
                 let b = vec2<i32>(floor(uv));
                 let f = uv - floor(uv);
@@ -119,27 +141,27 @@ fn shade(i: Varyings, uv_in: vec2<f32>, across: vec2<f32>, down: vec2<f32>) -> v
                         mix(texel(b + vec2<i32>(0, 1)), texel(b + vec2<i32>(1, 1)), f.x), f.y);
             } else { t = texel(vec2<i32>(floor(uv))); }
         }
-        let tfx = (nat.flags >> 2u) & 3u;
+        let tfx = (flags >> 2u) & 3u;
         var rgb = select(min(floor(t.rgb * color.rgb / 128.0), vec3<f32>(255.0)), t.rgb, tfx == 1u);
         if (tfx >= 2u) { rgb = min(rgb + color.a, vec3<f32>(255.0)); }
         var a = color.a;
-        if ((nat.flags & 2u) != 0u) {
+        if ((flags & 2u) != 0u) {
             if (tfx == 0u) { a = min(floor(t.a * color.a / 128.0), 255.0); }
             else if (tfx == 2u) { a = min(t.a + color.a, 255.0); }
             else { a = t.a; }
         }
         color = vec4<f32>(rgb, a);
     }
-    if ((nat.flags & 16u) != 0u) { color = vec4<f32>(floor(mix(nat.fog.rgb, color.rgb, i.stqf.w)), color.a); }
-    if ((nat.flags & 64u) != 0u) {
+    if ((flags & 16u) != 0u) { color = vec4<f32>(floor(mix(nat.fog.rgb, color.rgb, i.stqf.w)), color.a); }
+    if ((flags & 64u) != 0u) {
         let a = u32(color.a);
         let r = nat.aref;
-        let t = nat.atst;
+        let t = alpha_test();
         let passed = t == 1u || (t == 2u && a < r) || (t == 3u && a <= r) || (t == 4u && a == r) ||
                      (t == 5u && a >= r) || (t == 6u && a > r) || (t == 7u && a != r);
-        if (passed == ((nat.flags & 128u) != 0u)) { discard; }
+        if (passed == ((flags & 128u) != 0u)) { discard; }
     }
-    if ((nat.flags & 512u) != 0u) { color = vec4<f32>(floor(color.rgb * color.a / 128.0), color.a); }
+    if ((flags & 512u) != 0u) { color = vec4<f32>(floor(color.rgb * color.a / 128.0), color.a); }
     return color;
 }
 

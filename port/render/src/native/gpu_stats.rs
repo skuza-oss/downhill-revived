@@ -9,9 +9,10 @@
 //!
 //! A kind is the draw's shader path (its `flags`: textured, TFX, fog, bilinear, alpha test, its
 //! failing-pixel pass, premultiply, sprite, replacement), its texel scale, its pipeline variant, its
-//! depth state and whether it blends. Needs PIPELINE_STATISTICS_QUERY and
-//! TIMESTAMP_QUERY_INSIDE_PASSES (device.rs asks for them only with the variable); without them it
-//! logs once and does nothing. Off (the variable unset): one cached branch per draw.
+//! depth state, whether it blends and whether it writes the alpha channel. Needs
+//! TIMESTAMP_QUERY_INSIDE_PASSES (and PIPELINE_STATISTICS_QUERY for the pixels; device.rs asks for
+//! them only with the variable); without the timestamps it logs once and does nothing. Off (the
+//! variable unset): one cached branch per draw.
 #![cfg(not(target_arch = "wasm32"))]
 use crate::device::Gpu;
 use std::collections::{HashMap, HashSet};
@@ -41,9 +42,10 @@ pub fn request(offered: wgpu::Features) -> wgpu::Features {
 }
 
 /// A draw's kind (see the module): the shader path bits of `flags`, the texel scale, the variant,
-/// the pipeline's depth field and blending.
-pub fn class(flags: u32, texel_scale: u32, variant: u32, depth: u32, blend: bool) -> u32 {
+/// the pipeline's depth field, blending and whether it writes the alpha channel.
+pub fn class(flags: u32, texel_scale: u32, variant: u32, depth: u32, blend: bool, alpha: bool) -> u32 {
     (flags & 0xEFD) | (texel_scale & 15) << 12 | (variant & 3) << 16 | (depth & 31) << 18 | (blend as u32) << 23
+        | (alpha as u32) << 24
 }
 
 fn describe(c: u32) -> String {
@@ -71,6 +73,7 @@ fn describe(c: u32) -> String {
         s += " z:none";
     }
     if c >> 23 & 1 != 0 { s += " blend"; }
+    if c >> 24 & 1 != 0 { s += " writes-A"; }
     s
 }
 
@@ -93,7 +96,7 @@ pub struct Stats {
     dropped: u64,
     passes: u64,
     switches: u64,
-    keys: HashSet<u32>,
+    keys: HashSet<u64>,
     distinct: u64,
     sampled: u32,
     acc: HashMap<u32, Acc>,
@@ -157,7 +160,7 @@ impl Stats {
         }
     }
 
-    pub fn pipeline(&mut self, key: u32) {
+    pub fn pipeline(&mut self, key: u64) {
         if self.active {
             self.switches += 1;
             self.keys.insert(key);

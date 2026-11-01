@@ -586,7 +586,7 @@ impl Native {
         let objects = Objects::create(gpu, flags & DHDR_NATIVE_DUAL != 0)?;
         let mut pipelines = Pipelines::new();
         for key in probe_keys(objects.dual) {
-            pipelines.get(gpu, &objects, key)?;
+            pipelines.get(gpu, &objects, key as u64)?;
         }
         let mut n = Native {
             gpu,

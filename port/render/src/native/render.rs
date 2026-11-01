@@ -39,7 +39,7 @@ use crate::device::Gpu;
 use crate::native::arenas::Arenas;
 use crate::native::convert::{ConvertObjects, ConvertSource};
 use crate::native::scanout::ScanoutObjects;
-use crate::native::pipelines::{gputimes, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
+use crate::native::pipelines::{gputimes, SPEC_SHIFT, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
 use crate::native::shared::NativeShared;
 use crate::native::surfaces::Kit;
 use crate::native::{Native, Picture};
@@ -67,12 +67,12 @@ pub struct Pass {
     /// The open pass's target and Z surface (-1: none); -2 when no pass is open.
     target: i32,
     depth: i32,
-    /// The key of the pipeline set in the open pass (native_set_pipeline's pass_pipe).
-    pipe: Option<u32>,
+    /// The cache key of the pipeline set in the open pass (native_set_pipeline's pass_pipe).
+    pipe: Option<u64>,
     /// The picture's counts (shown and the display size are filled at the end).
     drawn: DhdrPictureResult,
     /// Keys whose pipeline failed, reported once.
-    failed: HashSet<u32>,
+    failed: HashSet<u64>,
     /// What the open pass has set, so a draw sets only what changed (in the browser each WebGPU
     /// call is a call out to JavaScript; the blend constant builds a JS object). WebGPU keeps
     /// all of these for the rest of the pass, across pipeline changes. Cleared with the pass.
@@ -268,27 +268,29 @@ impl Pass {
 
     /// native_set_pipeline in the open pass: false (reported once per key) when the key has no
     /// pipeline; the draw is then skipped.
-    fn set_pipeline(&mut self, gpu: &Gpu, n: &mut crate::native::pipelines::Pipelines,
-                    objects: &crate::native::init::Objects, key: u32) -> bool {
+    fn set_pipeline(&mut self, gpu: &'static Gpu, n: &mut crate::native::pipelines::Pipelines,
+                    objects: &crate::native::init::Objects, key: u64) -> bool {
         if self.pipe == Some(key) {
             return true;
         }
-        match n.get(gpu, objects, key) {
-            Ok(pipe) => {
+        // The specialised pipeline, or the generic one while it is being built (the same picture).
+        match n.get_special(gpu, objects, key) {
+            Ok((given, _)) if self.pipe == Some(given) => true,
+            Ok((given, pipe)) => {
                 self.flush();
                 if let Some(pass) = self.pass.as_mut() {
                     pass.set_pipeline(pipe);
                     #[cfg(not(target_arch = "wasm32"))]
-                    crate::native::pipelines::pipelog::bind(key);
+                    crate::native::pipelines::pipelog::bind(key as u32);
                     #[cfg(not(target_arch = "wasm32"))]
-                    self.stats.pipeline(key);
+                    self.stats.pipeline(given);
                 }
-                self.pipe = Some(key);
+                self.pipe = Some(given);
                 true
             }
             Err(e) => {
                 if self.failed.insert(key) {
-                    crate::host::log(&format!("gs native: draw pipeline {key:07X}: {e}"));
+                    crate::host::log(&format!("gs native: draw pipeline {key:X}: {e}"));
                 }
                 false
             }
@@ -557,6 +559,8 @@ impl Native {
             let mut big_s: u32 = 1;
             // Untextured, or a surface without a texture: zeros.
             let mut group = Some(v.shared.dummy_group.clone());
+            // A decoded texture's size, when that is what the draw reads (`spec`'s `inside`).
+            let mut decoded: Option<(u32, u32)> = None;
             if k.texture_surface >= 0 {
                 let ts = k.texture_surface as usize;
                 if let Some(s) = surface(p, k.texture_surface) {
@@ -576,6 +580,8 @@ impl Native {
                 group = Some(r.group(index as usize).clone());
             } else if let Some(t) = p.texture(i) {
                 group = Some(t.group(0).clone());
+                let (w, h, _) = t.size();
+                decoded = Some((w, h));
             } else if k.convert >= 0 {
                 // Again for each run of draws: the surface may have changed since.
                 if k.convert as i32 != last_convert {
@@ -650,7 +656,19 @@ impl Native {
             let resolution = constants.scale >> 16 & 255;
             let texel_scale = if constants.flags & (1 | 2048) == 1 && source_scale == resolution
                 && source_scale <= 8 && source_scale.is_power_of_two() { source_scale } else { 0 };
-            self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale,
+            let spec = if crate::native::pipelines::spec_enabled() {
+                // Every texel inside: a decoded texture of exactly tex_size read at unit scale from
+                // offset 0 with CLAMP repeat (tex_size is a power of two) or clamp, so each wrapped
+                // coordinate is in [0, tex_size) and load_rgba's test always passes.
+                let c = &constants;
+                let inside = decoded == Some((c.tex_size[0], c.tex_size[1])) && texel_scale == 1
+                    && c.tex_offset == [0, 0] && c.wrap[0] <= 1 && c.wrap[1] <= 1
+                    && c.tex_size[0].is_power_of_two() && c.tex_size[1].is_power_of_two();
+                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, inside)
+            } else {
+                0
+            };
+            self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale, spec,
                              offset, &v.uniforms, &group);
             self.pass.drawn.draws += 1;
             // Conservative even for masked/empty writes: a false invalidation costs
@@ -761,7 +779,8 @@ impl Native {
     /// an equal Z lost); without, the same test on the unchanged Z buffer.
     #[allow(clippy::too_many_arguments)]
     fn draw_passes(&mut self, k: &DhdrCommand, vertices: &[DhdrVertex], indices: Option<&[u32]>, has_depth: bool,
-                   retained_depth: bool, texel_scale: u32, offset: u32, uniforms: &wgpu::BindGroup, group: &wgpu::BindGroup) {
+                   retained_depth: bool, texel_scale: u32, spec: u32, offset: u32, uniforms: &wgpu::BindGroup,
+                   group: &wgpu::BindGroup) {
         let gpu = self.gpu;
         let (blend_key, mask, dk) = (k.blend_key, k.color_mask as u32, k.depth_key as u32);
         let (src, dst) = (blend_key >> 1 & 31, blend_key >> 6 & 31);
@@ -769,22 +788,24 @@ impl Native {
         let depth = if has_depth { 16 | if dk & 4 != 0 { 8 } else { 0 } | (dk & 3) } else if retained_depth { 17 } else { 0 };
         let texel_key = texel_scale << TEXEL_SCALE_SHIFT;
         let base = blend_key | depth << 18 | texel_key;
+        let special = (spec as u64) << SPEC_SHIFT;
         self.pass.set_groups(uniforms, offset, group);
         let flags = k.constants.flags;
         let blends = blend_key & 1 != 0;
         if !uses_as || (self.objects.dual && self.objects.dual_module.is_some()) {
             let variant = if uses_as { VARIANT_DUAL } else { VARIANT_PLAIN };
-            self.pass.class = stats_class(flags, texel_scale, variant, depth, blends);
-            if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects, base | mask << 14 | variant << 23) {
+            self.pass.class = stats_class(flags, texel_scale, variant, depth, blends, mask & 8 != 0);
+            if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
+                                      (base | mask << 14 | variant << 23) as u64 | special) {
                 self.pass.draw(k.first, k.count);
             }
             return;
         }
         if mask & 7 != 0
             && self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
-                                      base | (mask & 7) << 14 | VARIANT_RGB_A128 << 23)
+                                      (base | (mask & 7) << 14 | VARIANT_RGB_A128 << 23) as u64 | special)
         {
-            self.pass.class = stats_class(flags, texel_scale, VARIANT_RGB_A128, depth, blends);
+            self.pass.class = stats_class(flags, texel_scale, VARIANT_RGB_A128, depth, blends, false);
             self.pass.draw(k.first, k.count);
         }
         if mask & 8 == 0 {
@@ -805,20 +826,20 @@ impl Native {
             }
         }
         if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
-                                  8 << 14 | second << 18 | VARIANT_ALPHA_ONLY << 23 | texel_key) {
-            self.pass.class = stats_class(flags, texel_scale, VARIANT_ALPHA_ONLY, second, false);
+                                  (8 << 14 | second << 18 | VARIANT_ALPHA_ONLY << 23 | texel_key) as u64 | special) {
+            self.pass.class = stats_class(flags, texel_scale, VARIANT_ALPHA_ONLY, second, false, true);
             self.pass.draw(first, k.count);
         }
     }
 }
 
 /// A draw's DHD_GPU_STATS kind (`gpu_stats::class`; 0 in the browser, which has no statistics).
-fn stats_class(flags: u32, texel_scale: u32, variant: u32, depth: u32, blend: bool) -> u32 {
+fn stats_class(flags: u32, texel_scale: u32, variant: u32, depth: u32, blend: bool, alpha: bool) -> u32 {
     #[cfg(not(target_arch = "wasm32"))]
-    return crate::native::gpu_stats::class(flags, texel_scale, variant, depth, blend);
+    return crate::native::gpu_stats::class(flags, texel_scale, variant, depth, blend, alpha);
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (flags, texel_scale, variant, depth, blend);
+        let _ = (flags, texel_scale, variant, depth, blend, alpha);
         0
     }
 }
