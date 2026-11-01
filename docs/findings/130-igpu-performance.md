@@ -66,6 +66,8 @@ it does not re-record unrelated golden groups.
 
 Ryzen 5 7600, AMD Radeon Graphics (PCI 1002:164e), RTX 3070 (10de:2484), 32 GB installed RAM.
 Hidden 960x720 window, native renderer, 4:3, V-Sync off in both modes, 60 requested for paced runs.
+DX12 developer builds here use FXC (no dxcompiler.dll beside these executables). Packaged builds
+select DXC when that DLL is present; a separate DXC control is kept apart from this matrix.
 Uncapped uses `DHD_FRAME_CLOCK=1`. Sound is off; the harness has its own memory card.
 The 4096 MiB developer scale guard is needed for actual 6x/8x. All runs reached GO at field 3214.
 The window contains 1620 fields, GO+180 < field <= GO+1800. FPS is 1000 / mean wall ms;
@@ -98,7 +100,7 @@ GPU pass split, uncapped:
 | integrated / vulkan | 2 | 4.719 | 0.000 | 0.082 | 0.297 | 0.220 |
 | integrated / vulkan | 8 | 59.515 | 0.000 | 0.066 | 5.292 | 1.312 |
 
-Vulkan on this iGPU is 16.5% slower in throughput at 2x (GPU time almost unchanged),
+Vulkan on this iGPU is 16.4% slower in throughput at 2x (GPU time almost unchanged),
 but 7.6% faster at 8x. The selected AMD adapter and Vulkan backend are confirmed in both logs.
 No conclusion about other GPUs or old drivers follows from these two points.
 
@@ -171,3 +173,38 @@ The second draw shortcut used only a uniform E=1 branch and preserved the intege
 trip for large coordinates. It also passed all pixel gates but measured 45.96 fps / 21.037 ms
 at 4x uncapped, worse than the preserved baseline. It is rejected too. Neither shortcut remains
 in the retained scanout change.
+
+
+## Retained: specialise decoded unit-scale texture coordinates
+
+The draw loop knows the final uploaded S/E scale pair. For ordinary decoded textures with
+S=E=1, use a pipeline override to make those values compile-time constants. The original
+coordinate, wrapping, bilinear, fog and blend expressions remain intact; there is no runtime
+shortcut branch. Replacement sampler draws and other scale pairs retain the generic pipeline.
+An internal key bit distinguishes the variants (at most two pipelines per original key).
+
+API reference: [wgpu pipeline compilation options](https://wgpu.rs/doc/wgpu/struct.PipelineCompilationOptions.html).
+No external code was copied.
+
+Fresh idle-PC controls and the specialised renderer, 4x DX12 uncapped:
+
+| Build / compiler | FPS | 1% low | GPU ms | Draw ms | Scanout ms |
+|---|---:|---:|---:|---:|---:|
+| Original / FXC | 50.52 | 36.26 | 18.812 | 17.004 | 1.356 |
+| Scanout only / FXC | 51.80 | 35.51 | 18.278 | 17.093 | 0.733 |
+| Scanout + unit texels / FXC | 68.88 | 28.27 | 13.836 | 12.074 | 1.148 |
+| Original / DXC | 50.26 | 38.18 | 19.416 | 16.624 | 2.062 |
+| Scanout + unit texels / DXC | 68.45 | 46.55 | 14.140 | 12.224 | 1.166 |
+
+Versus scanout-only FXC, throughput rises 33.0% and total GPU time falls 24.3%.
+Against the original DXC control, throughput rises 36.2% and GPU time falls 27.2%.
+Per-pass clocks/durations can move even for an unchanged pass; these gains refer to total frame
+GPU time and throughput. The 1% low does not improve uniformly and is reported without a claim
+that all stutters are fixed.
+
+Checks: full GPU/depth/present suite PASS; 33 synthetic presented pictures and seven stress
+pictures have zero RGB/VRAM differences between dual/fallback; 12 C-oracle items at 1x/2x/4x
+match exactly; all four before/after items at 8x match on Vulkan and separately DX12/DXC.
+Six CPU pipeline-key tests, three shader transformation tests and host GS tests pass.
+The recent original/scanout control was repeated on an idle PC; the fresh controls above
+supersede the earlier 49.77/52.06 fps pair for evaluating the scanout gain.

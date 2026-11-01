@@ -311,6 +311,14 @@ frame in 8 timed by DHD_GPU_TIMES' queries) and `limit=gpu|cpu:<thread>|vsync|no
 queue's wait counters now count by default. Boot state trace unchanged; 1x uncapped 243.3 -> 241.1
 fields/s (one run each). Windows only built and run; no lines in the browser.
 
+2026-11-01 (finding 130): Windows `DHD_WGPU_ADAPTER=integrated|discrete` selects hardware through
+DXGI's power/performance preference order, with the player default unchanged. The Ryzen 5 7600
+iGPU baseline holds about 60 fps at 3x; requested higher scales can be clamped by the dedicated
+VRAM guard, so `DHD_SCALE_MEMORY_MB` supplies a logged developer estimate for UMA measurements.
+Exact bounded integer scanout, duplicated-row reuse and unit-texture pipeline specialisation
+reduce 4x uncapped FXC GPU time from 18.81 to 13.84 ms (50.52 to 68.88 fps). Renderer/host GS tests, fixed-stream pixel comparisons and the
+boot trace pass. Finding 130 contains the paced/unlocked matrix, Vulkan checks and limitations.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
