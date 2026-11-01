@@ -106,3 +106,34 @@ The monitor stays connected to the RTX. These rates include the hidden-desktop p
 pass timestamps exclude work outside the native passes. This setup cannot isolate the cost of
 cross-adapter transport or fully reproduce a visible desktop compositor. Repeat with the monitor
 on the motherboard to measure that difference.
+
+## Boundary and rejected draw experiment
+
+Baseline 3x: paced **59.93 fps**, 1% low **54.63**, GPU **11.649 ms**; uncapped **80.04 fps**,
+1% low **54.73**, GPU **11.748 ms**. Highest measured scale holding the 60-class paced target
+before optimization is **3x** (4x is about 51 fps).
+
+A bounded E=1 texture-coordinate shortcut removed float conversion/division and sub-texel work
+for small coordinates, retaining the original path outside that range. It passed the renderer
+suite, host GS tests, all 33 synthetic presented pictures (dual/fallback: no RGB or VRAM
+differences), the frozen C oracle at 1x/2x/4x (12 items), and a strict before/after 8x replay
+(four byte-identical items). It was nevertheless rejected on performance:
+
+| 4x DX12, uncapped | FPS | GPU ms | Draw ms | Scanout ms |
+|---|---:|---:|---:|---:|
+| Original matrix | 49.70 | 18.996 | 17.120 | 1.416 |
+| Bounded shortcut | 45.07 | 21.334 | 18.597 | 2.087 |
+| Preserved baseline repeated afterward | 49.77 | 19.108 | 17.286 | 1.380 |
+
+The repeated baseline settles the doubtful comparison: the shortcut regresses the measured
+frame and is not retained. An unchanged pass also moved, so per-pass duration alone must not be
+interpreted as an instruction-count measurement.
+
+The frozen C oracle itself supports at most 4x. An attempted 8x oracle recording was detected as
+a clamped 4x image by the unchanged golden checker (size mismatch), excluded, and preserved as a
+diagnostic. Correct oracle goldens now cover 1x, 2x and 4x. At 8x, compare the same recorded stream
+against a replay executable built from the pre-change renderer; do not compare separate game runs.
+
+Shader arithmetic reference: the [WGSL specification](https://www.w3.org/TR/WGSL/).
+No external shader code was copied. Arithmetic shortcuts must preserve integer/float conversions,
+large wrapped coordinates, bilinear interpolation and blend rounding.
