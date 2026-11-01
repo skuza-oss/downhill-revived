@@ -223,6 +223,10 @@ mod native {
         if crate::native::pipelines::gputimes::wanted() || crate::native::pipelines::gputimes::perf_on() {
             features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
+        // DHD_GPU_STATS (diagnostics: native/gpu_stats.rs), where the adapter has all of them.
+        if crate::native::gpu_stats::wanted() {
+            features |= crate::native::gpu_stats::request(adapter.features());
+        }
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: None,
             required_features: features | timers,

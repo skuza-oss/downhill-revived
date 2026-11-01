@@ -81,8 +81,12 @@ pub struct Pass {
     /// the same bytes binds that offset again instead of a new copy (the arena is written once,
     /// at the submit, and nothing in it is overwritten during the picture).
     constants: Option<(DhdrNativeConstants, u32)>,
-    /// A draw not issued yet (first vertex, count): see `draw`.
-    pending: Option<(u32, u32)>,
+    /// A draw not issued yet (first vertex, count, its DHD_GPU_STATS kind): see `draw`.
+    pending: Option<(u32, u32, u32)>,
+    /// The next draw's DHD_GPU_STATS kind (`gpu_stats::class`).
+    class: u32,
+    #[cfg(not(target_arch = "wasm32"))]
+    stats: crate::native::gpu_stats::Stats,
     /// The picture is indexed (`dhdr_native_picture_indexed`): a draw's first and count are
     /// indices into the index buffer, which every draw pass binds.
     indexed: bool,
@@ -118,6 +122,9 @@ impl Pass {
             state: PassState::default(),
             constants: None,
             pending: None,
+            class: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            stats: crate::native::gpu_stats::Stats::new(),
             indexed: false,
         }
     }
@@ -254,6 +261,8 @@ impl Pass {
         self.depth = depth;
         self.pipe = None;
         rstat::pass();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.stats.pass();
         pass_trace::event("draw-begin:load/store", target, depth);
     }
 
@@ -271,6 +280,8 @@ impl Pass {
                     pass.set_pipeline(pipe);
                     #[cfg(not(target_arch = "wasm32"))]
                     crate::native::pipelines::pipelog::bind(key);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.stats.pipeline(key);
                 }
                 self.pipe = Some(key);
                 true
@@ -294,27 +305,31 @@ impl Pass {
             return;
         }
         if first.checked_add(count).is_some() {
-            if let Some((f, c)) = self.pending.as_mut() {
+            if let Some((f, c, k)) = self.pending.as_mut() {
                 // whole triangles only, so no vertex of one draw joins a triangle of the other
-                if c.is_multiple_of(3) && f.checked_add(*c) == Some(first) {
+                if c.is_multiple_of(3) && f.checked_add(*c) == Some(first) && *k == self.class {
                     *c += count;
                     return;
                 }
             }
         }
         self.flush();
-        self.pending = Some((first, count));
+        self.pending = Some((first, count, self.class));
     }
 
     /// Issues the pending draw, if any.
     fn flush(&mut self) {
-        if let Some((first, count)) = self.pending.take() {
+        if let Some((first, count, _class)) = self.pending.take() {
             if let Some(pass) = self.pass.as_mut() {
+                #[cfg(not(target_arch = "wasm32"))]
+                let q = self.stats.draw_begin(pass, _class);
                 if self.indexed {
                     pass.draw_indexed(first..first.saturating_add(count), 0, 0..1);
                 } else {
                     pass.draw(first..first.saturating_add(count), 0..1);
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                self.stats.draw_end(pass, q);
             }
         }
     }
@@ -336,6 +351,10 @@ impl Pass {
         #[cfg(not(target_arch = "wasm32"))]
         crate::native::pipelines::pipelog::submit();
         let t = rstat::T::new();
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut encoder = encoder;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.stats.resolve(&mut encoder);
         let commands = encoder.finish();
         t.add(rstat::FINISH);
         #[cfg(not(target_arch = "wasm32"))]
@@ -347,6 +366,8 @@ impl Pass {
         let t = rstat::T::new();
         gpu.queue.submit([commands]);
         t.add(rstat::QSUB);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.stats.collect(gpu);
         self.timing.map();
     }
 }
@@ -394,6 +415,8 @@ impl Native {
         let whole = rstat::T::new();
         let gpu = self.gpu;
         gputimes::picture_begin(gpu);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.pass.stats.picture_begin(gpu);
         let shared = NativeShared::get(gpu)?;
         let t = rstat::T::new();
         self.arenas.reserve(Some((gpu, &self.objects.uniform_layout)), p.commands, p.vertices.len() as u32)?;
@@ -747,8 +770,11 @@ impl Native {
         let texel_key = texel_scale << TEXEL_SCALE_SHIFT;
         let base = blend_key | depth << 18 | texel_key;
         self.pass.set_groups(uniforms, offset, group);
+        let flags = k.constants.flags;
+        let blends = blend_key & 1 != 0;
         if !uses_as || (self.objects.dual && self.objects.dual_module.is_some()) {
             let variant = if uses_as { VARIANT_DUAL } else { VARIANT_PLAIN };
+            self.pass.class = stats_class(flags, texel_scale, variant, depth, blends);
             if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects, base | mask << 14 | variant << 23) {
                 self.pass.draw(k.first, k.count);
             }
@@ -758,6 +784,7 @@ impl Native {
             && self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
                                       base | (mask & 7) << 14 | VARIANT_RGB_A128 << 23)
         {
+            self.pass.class = stats_class(flags, texel_scale, VARIANT_RGB_A128, depth, blends);
             self.pass.draw(k.first, k.count);
         }
         if mask & 8 == 0 {
@@ -779,8 +806,20 @@ impl Native {
         }
         if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
                                   8 << 14 | second << 18 | VARIANT_ALPHA_ONLY << 23 | texel_key) {
+            self.pass.class = stats_class(flags, texel_scale, VARIANT_ALPHA_ONLY, second, false);
             self.pass.draw(first, k.count);
         }
+    }
+}
+
+/// A draw's DHD_GPU_STATS kind (`gpu_stats::class`; 0 in the browser, which has no statistics).
+fn stats_class(flags: u32, texel_scale: u32, variant: u32, depth: u32, blend: bool) -> u32 {
+    #[cfg(not(target_arch = "wasm32"))]
+    return crate::native::gpu_stats::class(flags, texel_scale, variant, depth, blend);
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (flags, texel_scale, variant, depth, blend);
+        0
     }
 }
 

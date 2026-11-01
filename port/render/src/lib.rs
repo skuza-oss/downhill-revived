@@ -109,6 +109,8 @@ pub mod present {
 pub mod native {
     pub mod arenas;
     pub mod convert;
+    #[cfg(not(target_arch = "wasm32"))]
+    pub mod gpu_stats;
     pub mod init;
     pub mod pipelines;
     pub mod present;
