@@ -17,8 +17,10 @@ Code: `port/hle/trackbar.c` (`hle_trackbar`, called from `func_00176ED8` right a
 `func_00222D48` and draws the rider's name just to its right with the HUD font, in the same
 style as `hle_online_names` (pen `0x4F3570` saved and restored, `func_0023D618`/`func_0023D650`
 for the view centre/size, `func_0020FB80` glyph scale, `func_0020F860` width, `func_0020F9F0`
-centred text with a black edge). This PC's name is red, the other riders' green; offline
-non-local riders read "CPU".
+centred text with a black edge). This PC's name is red, the other riders' green; offline the
+view's own rider reads "YOU", the other split-screen players (race slots below the number of
+views, one per view, as `func_00179338`'s handles have them) "P1".."P4", and the computer riders
+"CPU".
 
 ## Where this stopped / what is left
 

@@ -7,7 +7,8 @@
  * handle[1] = the marker object whose +0x10 (x/y/z) is the dot's world point.
  *
  * hle_trackbar runs right after func_00179338 (port/patches_trackbar.py). Online the dots' names
- * are the real players' (hle_online_slot_name); offline they read "YOU" (this PC) and "CPU".
+ * are the real players' (hle_online_slot_name); offline they read "YOU" (this view's rider),
+ * P1..P4 (the other split-screen players) and "CPU".
  * This PC's name and dot read red, every other rider's green. */
 #include "hle.h"
 #include <string.h>
@@ -74,9 +75,11 @@ void hle_trackbar(void *hud_ptr)
     int nriders = EE32(0x2AF2C0 + 0x501A8);            /* riders in the race */
     if (nriders <= 0 || nriders > TB_RIDERS) nriders = TB_RIDERS;
 
-    int dump = 0;
+    /* DHD_TB_DUMP: the handles, owners and markers, every 600th call (finding 129: to find the
+       dot's colour); read through the cache, not looked up on every call of this per-field hook */
+    static HleEnv dump_env;
     static int calls;
-    if (host_getenv("DHD_TB_DUMP") && calls++ % 600 == 150) dump = 1;
+    int dump = hle_env(&dump_env, "DHD_TB_DUMP") && calls++ % 600 == 150;
     uint8_t *pen = EE_PTR(0x4F3570), kept[0x20];
     int cx, cy, w, h, drawn = 0;
     func_0023D618(view, &cx, &cy);
@@ -123,8 +126,15 @@ void hle_trackbar(void *hud_ptr)
         }
 
         if (!have_dot) continue;
+        /* offline: this view's rider, the other split-screen players (slots 0..players-1, one
+           per view, as handle_offset has them), the computer riders */
+        char player[4];
         const char *name = hle_online_slot_name(slot);
-        if (!name || !name[0]) name = is_local ? "YOU" : "CPU";
+        if (!name || !name[0]) {
+            if (is_local) name = "YOU";
+            else if (slot < players) { snprintf(player, sizeof player, "P%d", slot + 1); name = player; }
+            else name = "CPU";
+        }
         int half = (func_0020F860(0, name) + 31) / 32;
         int tx = dotx + 8 + half, ty = doty;   /* centred text: left edge at dotx + 8 */
         if (tx - half * port_fov_x < 1 || tx + half * port_fov_x >= w - 1 || ty < 4 || ty >= h - 4)
