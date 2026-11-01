@@ -597,6 +597,7 @@ void host_thread_name(const char *name)
 #ifdef __ANDROID__
     { void android_perf_thread(const char *name); android_perf_thread(name); }  /* port/host/android_perf.c */
 #endif
+    { void perf_thread(const char *name); perf_thread(name); }  /* port/gs/perf_log.c: its waits */
     int at = atomic_fetch_add(&named_count, 1);
     if (at >= NAMED_THREADS) return;
 #ifdef _WIN32

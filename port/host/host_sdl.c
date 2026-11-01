@@ -17,6 +17,8 @@
 #include "../render/include/dhd_disc.h"  /* the disc image's online check (port/render/disc) */
 
 #include <SDL3/SDL.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,13 +113,20 @@ void host_sleep_ms(unsigned ms) { SDL_Delay(ms); }
 /* Until a host_wall_seconds time: a sleep to a millisecond before it (SDL_DelayNS: a
    high-resolution waitable timer on Windows, one per thread, which woke up to 0.85 ms late,
    finding 052; nanosleep on POSIX; macOS: host_os_sleep_ns), then a pause-instruction spin. SDL_DelayPrecise ends with a
-   short sleep of its own instead: 0.6 ms late at worst against 0.006 here (2026-10-27, 200 waits). */
+   short sleep of its own instead: 0.6 ms late at worst against 0.006 here (2026-10-27, 200 waits).
+   A thread with a wait sink (host_wait_sink: port/gs/perf_log.c's game and render threads) adds the
+   time it waited there, in nanoseconds: pacing is waiting, not work (finding 129). */
+static _Thread_local _Atomic uint64_t *wait_sink;
+void host_wait_sink(_Atomic uint64_t *nanoseconds) { wait_sink = nanoseconds; }
+
 void host_wait_wall(double seconds)
 {
-    double left = seconds - host_wall_seconds();
+    double start = host_wall_seconds(), now = start, left = seconds - start;
     if (left > 0.001) host_os_sleep_ns((Uint64)((left - 0.001) * 1e9));
-    while (host_wall_seconds() < seconds)
+    while ((now = host_wall_seconds()) < seconds)
         SDL_CPUPauseInstruction();
+    if (wait_sink && now > start)
+        atomic_fetch_add_explicit(wait_sink, (uint64_t)((now - start) * 1e9), memory_order_relaxed);
 }
 
 /* ---- threads: a fire-and-forget job (online_menu.c, the async services) ---- */

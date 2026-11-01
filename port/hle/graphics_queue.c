@@ -253,7 +253,7 @@ void graphics_wait(void)
     graphics_gs_wait();
     tl_add(TL_EE_GS, gs_start);
 #endif
-    if (start) tl_site(__builtin_return_address(0), pending, tl_now() - start);
+    if (start && timeline_enabled()) tl_site(__builtin_return_address(0), pending, tl_now() - start);
 }
 
 void graphics_shutdown(void)
@@ -411,7 +411,7 @@ void graphics_vblank(void)
     int pending = (int32_t)(position(&marks_done) - target) < 0;
     wait_mark(target);
     tl_add(TL_EE_GS, start);
-    if (start) tl_site(__builtin_return_address(0), pending, tl_now() - start);
+    if (start && timeline_enabled()) tl_site(__builtin_return_address(0), pending, tl_now() - start);
     vblank_mark = graphics_mark(MARK_VBLANK, NULL, 0);
 }
 

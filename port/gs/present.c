@@ -20,6 +20,7 @@
 #include "../hle/hle.h"
 #include "../include/guest.h"
 #include "../hle/text_input.h"
+#include "perf_log.h"
 
 static uint32_t pixels[1024 * 1024];
 static int initialized, disabled, resize_pending;
@@ -194,6 +195,17 @@ static void window_measure(void)
     if (sdl_window && (!(SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MINIMIZED) || getenv("DHD_CAPTURE_PRESENTED")))
         SDL_GetWindowSizeInPixels(sdl_window, &w, &h);
     SDL_SetAtomicInt(&drawable, (w > 0 ? w : 0) << 16 | (h > 0 ? h : 0));
+    /* perf_log's lines count play with the window in front: the focus, shown and not minimised
+       (DHD_TEST_INPUT: a test desktop's window never has the focus, so shown is enough), and the
+       refresh of the display it is on. */
+    if (!sdl_window) return;
+    static int test_input = -1;
+    if (test_input < 0) test_input = getenv("DHD_TEST_INPUT") != NULL;
+    SDL_WindowFlags flags = SDL_GetWindowFlags(sdl_window);
+    int front = !(flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN | SDL_WINDOW_OCCLUDED)) &&
+                (test_input || (flags & SDL_WINDOW_INPUT_FOCUS));
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(sdl_window));
+    perf_window(front, mode ? mode->refresh_rate : 0);
 }
 
 /* SDL's window events as SDL sends them (on Windows inside a modal drag or resize too, which the
@@ -867,6 +879,7 @@ void gs_vsync(void)
         profile_start = host_wall_seconds();
     }
     bench_vsync();
+    perf_field(*(volatile int32_t *)GUEST(0x0829E290) != 0);  /* a race ridden (D_0029E290), or the menus */
     gs_pump_messages();  /* first: the close button ends the game even with no renderer */
     if (disabled) return;
     if (app_background || surface_dropped) app_background_wait();

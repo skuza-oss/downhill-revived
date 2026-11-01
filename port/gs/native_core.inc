@@ -46,6 +46,7 @@
 #include "texpack.h"
 #include "font_sharp.h"
 #include "native_frontend.h"
+#include "perf_log.h"        /* the perf: lines' waits (finding 129; empty in the browser) */
 
 double host_wall_seconds(void); /* port/hle/host.c */
 
@@ -2353,7 +2354,7 @@ static void native_zread_after(Native *n)
    loop, or with NATIVE_INLINE the field's own vsync (the field is already pending, so no wait). */
 static int native_render_next(Native *n)
 {
-    double rs_wait = native_rstat_start();
+    double rs_wait = native_rstat_start(), waited = perf_log_on() ? host_wall_seconds() : 0;
     native_mutex_lock(&n->queue_lock);
     NATIVE_WAIT(n, !n->pending_count && !n->quit);
     if (n->quit) { native_mutex_unlock(&n->queue_lock); return 0; }
@@ -2363,6 +2364,7 @@ static int native_render_next(Native *n)
     native_cond_broadcast(&n->queue_changed);
     native_mutex_unlock(&n->queue_lock);
     native_rstat_add(RSTAT_WAIT, rs_wait);
+    if (waited) perf_wait_self(host_wall_seconds() - waited);  /* waiting for the next field: not work */
     /* The frame from here (the field handed over) to the last Z copy: the render thread's work. */
     double rs_frame = native_rstat_start();
     static int spikes = -1;
@@ -2516,8 +2518,12 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
 #endif
     /* One field waits for the render thread; with DHD_INTERP two, so the EE never waits for a
        display refresh. */
+    /* The GS worker (or the game thread) waiting here waits for the render thread: perf_log's
+       busy time leaves it out (two clock reads, only when it waits). */
+    double handoff = (n->pending_count >= (n->interp ? 2u : 1u) || !n->free_count) && perf_log_on() ? host_wall_seconds() : 0;
     while (n->pending_count >= (n->interp ? 2u : 1u)) native_cond_wait(&n->queue_changed, &n->queue_lock);
     while (!n->free_count) native_cond_wait(&n->queue_changed, &n->queue_lock);
+    if (handoff) perf_wait_self(host_wall_seconds() - handoff);
     n->pending[n->pending_count++] = f;
     n->handed = f->field;
     n->recording = n->free_frames[--n->free_count];

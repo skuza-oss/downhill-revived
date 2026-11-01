@@ -39,6 +39,32 @@ static int timeline_enabled(void)
 
 static int64_t tl_now(void) { return (int64_t)SDL_GetPerformanceCounter(); }
 
+/* The waits themselves are counted by default too (one performance-counter read at each end of
+   a wait, nothing in the loops): port/gs/perf_log.c's perf: lines take the busy time of the game,
+   vu and gs threads from them (graphics_wait_seconds; finding 129). DHD_PERF_LOG=0 without
+   DHD_TIMELINE counts nothing. The per-field rows and the call sites stay DHD_TIMELINE's. */
+static int tl_count_on = -1;
+static int tl_counting(void)
+{
+    if (tl_count_on < 0) {
+        const char *s = getenv("DHD_PERF_LOG");
+        tl_count_on = timeline_enabled() || !s || strcmp(s, "0") != 0;
+    }
+    return tl_count_on;
+}
+
+/* The game's (EE: VU, GS, a full VU ring), vu's (idle, a full GS ring) and gs's (idle) waits so
+   far, in seconds. */
+void graphics_wait_seconds(double out[3])
+{
+    double f = (double)SDL_GetPerformanceFrequency();
+    int64_t t[TL_COUNT];
+    for (unsigned i = 0; i < TL_COUNT; i++) t[i] = atomic_load_explicit(&tl_ticks[i], memory_order_relaxed);
+    out[0] = (double)(t[TL_EE_VU] + t[TL_EE_GS] + t[TL_EE_FULL]) / f;
+    out[1] = (double)(t[TL_VU_IDLE] + t[TL_VU_FULL]) / f;
+    out[2] = (double)t[TL_GS_IDLE] / f;
+}
+
 /* Each counter has one writing thread; the atomic add keeps the 64-bit value whole for the EE's
    reads on a 32-bit host. */
 static void tl_add(unsigned which, int64_t start)
@@ -46,7 +72,7 @@ static void tl_add(unsigned which, int64_t start)
     if (start) atomic_fetch_add_explicit(&tl_ticks[which], tl_now() - start, memory_order_relaxed);
 }
 
-static int64_t tl_begin(void) { return timeline_enabled() ? tl_now() : 0; }
+static int64_t tl_begin(void) { return tl_counting() ? tl_now() : 0; }
 
 static void tl_site(void *site, int pending, int64_t ticks)
 {

@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dhd_render.h"   /* -Iport/render/include */
+#include "perf_log.h"     /* the perf: lines (finding 129) */
 
 #ifndef DHD_GS_TEST_BUILD
 #include "../net/net.h"
@@ -66,6 +67,7 @@ static void counter_present(DhdrSurface *surface)
     dhdr_surface_counter(surface, enabled, ping,
                          (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency());
     dhdr_surface_present(surface);
+    perf_presented();  /* every picture shown, by either renderer */
 }
 
 /* Rust's log lines (one UTF-8 line, no newline), from any thread: stderr, which is dhd.log in the
@@ -434,7 +436,11 @@ int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned heigh
     int r = dhdr_present_exact(p->surface, p->x, pixels, width, height, window_width, window_height);
     if (r < 0) return 0;
     if (pixels) p->e.display_valid = 1;
-    if (r == 1) counter_present(p->surface);
+    if (r == 1) {
+        perf_render_size(pixels ? "exact (a movie or the CPU scanout)" : "exact", 1, width, height, window_width,
+                         window_height, 0, 0);
+        counter_present(p->surface);
+    }
     return 1;
 }
 
