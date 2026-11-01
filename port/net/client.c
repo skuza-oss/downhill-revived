@@ -105,8 +105,10 @@ void client_connected(NetClient *c, const NetTransport *tr)
 }
 
 /* keep_ready (dhd.ini, built in on): a player who was ready stays ready when the host changes the
-   track or the laps. The server clears every ready flag on such a change (room.ts "settings"), so
-   the client says ready again by itself; no server change. Off: ready again by hand, as before. */
+   track. The server clears every ready flag on such a change (room.ts "settings"), so the client
+   says ready again by itself; no server change. Only the track: the room's options (computer
+   riders off, CHEATS; finding 117) travel in "laps", and a player should agree to those again by
+   hand. Off: ready again by hand, as before. */
 static int keep_ready(void)
 {
     const char *v = getenv("DHD_KEEP_READY");
@@ -219,10 +221,11 @@ static void read_room(NetClient *c, const char *t)
         if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
             c->racing = 0; l->state = NET_LOBBY; l->started = 0; c->relayed_head = c->relayed_count = 0;
         }
-    /* Unready only because the host picked another track or lap count: ready again. Not while
-       racing or on the rider screen (the server would refuse it), and not if this player unreadied
-       (c->ready is then already 0, so was_ready is too). */
-    if (was_ready && !c->ready && !c->racing && !c->choosing && (l->track != old_track || l->laps != old_laps) &&
+    /* Unready only because the host picked another track: ready again. Not when the laps (the
+       room's options) changed with it, not while racing or on the rider screen (the server would
+       refuse it), and not if this player unreadied (c->ready is then already 0, so was_ready is
+       too). */
+    if (was_ready && !c->ready && !c->racing && !c->choosing && l->track != old_track && l->laps == old_laps &&
         keep_ready()) {
         c->ready = 1;
         say(c, "{\"type\":\"ready\",\"ready\":true}");

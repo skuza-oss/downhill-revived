@@ -1,6 +1,7 @@
 /* keep_ready (client.c): a ready player whose ready the server cleared because the host changed
-   the track or the laps says ready again by itself; one who unreadied, or who is on the rider
-   screen, doesn't; DHD_KEEP_READY=0 turns it off. No server or game data. */
+   the track says ready again by itself; a change of the laps field (the room's options: computer
+   riders, CHEATS), an own unready and the rider screen don't; DHD_KEEP_READY=0 turns it off. No
+   server or game data. */
 #include "client.h"
 #include <assert.h>
 #include <stdio.h>
@@ -39,12 +40,16 @@ int main(void)
     nsent = 0; room(&c, 5, 2, 0);
     assert(nsent == 1 && readied_by_itself() && c.ready);
     room(&c, 5, 2, 1);
-    /* another lap count: the same */
-    nsent = 0; room(&c, 5, 3, 0);
-    assert(nsent == 1 && readied_by_itself() && c.ready);
-    room(&c, 5, 3, 1);
+    /* the laps field changed (CHEATS on, say, finding 117): ready again by hand */
+    nsent = 0; room(&c, 5, 6, 0);
+    assert(nsent == 0 && !c.ready);
+    /* the track and the options at once: by hand too */
+    client_ready(&c, 1); room(&c, 5, 6, 1);
+    nsent = 0; room(&c, 6, 3, 0);
+    assert(nsent == 0 && !c.ready);
     /* unready with the track unchanged (the player's own, or a race's end): nothing sent */
-    nsent = 0; room(&c, 5, 3, 0);
+    client_ready(&c, 1); room(&c, 6, 3, 1);
+    nsent = 0; room(&c, 6, 3, 0);
     assert(nsent == 0 && !c.ready);
     /* not ready before the change: stays not ready */
     nsent = 0; room(&c, 7, 3, 0);

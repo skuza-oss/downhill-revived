@@ -119,7 +119,7 @@ pub const SETTINGS: &[Setting] = &[
     choice("voice_bitrate", "DHD_VOICE_BITRATE", &[c("8000", "8 kbps"), c("16000", "16 kbps"), c("24000", "24 kbps"), c("32000", "32 kbps"), c("48000", "48 kbps"), c("64000", "64 kbps")], "24000", "24000"),
     text("voice_key", "DHD_VOICE_KEY"),
     text("voice_device", "DHD_VOICE_DEVICE"),
-    // Online: stay ready when the host changes the track or the laps (port/net/client.c keep_ready).
+    // Online: stay ready when the host changes the track (port/net/client.c keep_ready).
     switch("keep_ready", "DHD_KEEP_READY", SWITCH, "1", "1"),
     switch("unlock_all", "DHD_UNLOCK_ALL", SWITCH, "0", "0"),
     text("memory_card", "DHD_MEMCARD"),
