@@ -93,8 +93,8 @@ SDL 3.4.18 (https://libsdl.org), zlib License
   3. This notice may not be removed or altered from any source distribution.
 
 libopus 1.5.2 (https://opus-codec.org), BSD-3-Clause
-  The voice chat's codec (port/host/voice.c), linked into dhd.exe unchanged (port/tools/opus.py
-  builds xiph.org's release source). Its COPYING:
+  The voice chat's codec (port/host/voice.c), linked into dhd.exe and the browser build's
+  dhd_net.wasm unchanged (port/tools/opus.py builds xiph.org's release source). Its COPYING:
 
   Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic,
                       Jean-Marc Valin, Timothy B. Terriberry,

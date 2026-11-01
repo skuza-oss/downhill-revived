@@ -385,7 +385,9 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
 - Voice chat in a race (finding 131): push-to-talk (V) or an open microphone, Opus over
   `EVENT_VOICE` frames (no server change), heard by distance and side from this PC's copy of the
   riders' positions; NAME - TALKING on the name tags, /MUTE NAME, four live PC SETTINGS rows.
-  Windows only (libopus built for win-x64). `port/tools/test_voice.py`: 21 of 21.
+  Windows and the browser (libopus for win-x64, and for wasm32 in `dhd_net.wasm` with the page's
+  microphone worklet). `port/tools/test_voice.py`: 21 of 21; `port/web/check_net.mjs` hears a
+  browser client's voice through upstream's 0.7.6 server unchanged.
 - Rider names beside the race's track bar dots (finding 129).
 - A ready player stays ready when the host changes the track (not the options): the client readies again
   by itself (`keep_ready`, built-in on; finding 132, no server change).

@@ -21,6 +21,10 @@ const typed = new Int32Array(input, 448, 2 + 64);
 function type(c) { const w = Atomics.load(typed, 0); if (w - Atomics.load(typed, 1) >= 64) return;
   Atomics.store(typed, 2 + (w & 63), c); Atomics.store(typed, 0, w + 1); }
 const audio = new SharedArrayBuffer(8 + 48000 / 4 * 4);  // 0.25 s of 48 kHz stereo
+// Voice chat's microphone (finding 131): audio.js's dhd-mic writes 48 kHz mono here, [write, read]
+// then 1 s of samples; the worker's voice chat (net.js) reads it 20 ms at a time.
+const mic = new SharedArrayBuffer(8 + 48000 * 2);
+let soundContext = null, micOpen = null;  // the page's AudioContext; the microphone while it is open
 
 // KeyboardEvent.code -> the Windows virtual-key code keyboard.c's table uses (US places).
 function vk(code) {
@@ -143,6 +147,7 @@ async function start(source) {
     await context.audioWorklet.addModule('audio.js');
     new AudioWorkletNode(context, 'dhd-ring', { outputChannelCount: [2], processorOptions: { ring: audio } }).connect(context.destination);
     context.resume();
+    soundContext = context;
   } catch (e) { addLog(`no sound: ${e}`); }
   // After the sound, which needs the Start click; read again at each start, as the game reads it.
   if (await shape(source.env ?? {})) { canvas.width = 1708; canvas.height = 960; }
@@ -156,14 +161,37 @@ async function start(source) {
     else if (m.type === 'clipboard') { navigator.clipboard?.writeText(m.text).catch(e => addLog(`clipboard: ${e.message}`));
       if (JOIN_CODE.test(m.text)) invite(m.text); }  // the player copied their room's code (Circle)
     else if (m.type === 'room') invite(m.code, m.inRoom);
+    else if (m.type === 'mic') microphone(m.on).then(state => worker.postMessage({ type: 'mic-state', state }));
     else if (m.type === 'exit') status.textContent = `game exited (${m.status})`;
     else if (m.type === 'status') { status.textContent = `field ${m.field}  ${m.fps.toFixed(1)} fields/s  picture ${m.size}  draws ${m.draws}  batches ${m.dispatches}  readbacks ${m.reads}  sound ${m.sound} s${m.riding ? '  riding' : ''}`;
       document.title = `DHD ${m.fps.toFixed(1)} fps (field ${m.field})`; window.dhdStatus = m; (window.dhdHistory ??= []).push([m.field, +m.fps.toFixed(2), m.draws]); }
   };
   worker.onerror = e => addLog('worker error: ' + e.message);
-  worker.postMessage({ type: 'start', ...source, canvas: offscreen, input, audio, displayHz: await hz }, [offscreen]);
+  worker.postMessage({ type: 'start', ...source, canvas: offscreen, input, audio, mic, displayHz: await hz }, [offscreen]);
   canvas.focus(); showHint();
   pollPads();
+}
+
+// Voice chat's microphone: opened when the game wants it (voice on, in a race; net.js), closed when
+// it stops. The browser asks the player the first time. Its echo cancellation and noise
+// suppression are on, so an open microphone doesn't send the game's own sound back. The answer:
+// 1 open, -1 refused or none (the game shows NO MICROPHONE when the talk key is pressed).
+async function microphone(on) {
+  if (!on) { if (micOpen) { micOpen.stream.getTracks().forEach(t => t.stop()); micOpen.node.disconnect(); micOpen = null;
+    addLog('voice: microphone closed'); } return 0; }
+  if (micOpen) return 1;
+  if (!soundContext || !navigator.mediaDevices?.getUserMedia) return -1;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true,
+      noiseSuppression: true, autoGainControl: true } });
+    const node = new AudioWorkletNode(soundContext, 'dhd-mic', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+      processorOptions: { ring: mic } });
+    const silent = soundContext.createGain(); silent.gain.value = 0;  // keeps the node running, heard by no one
+    soundContext.createMediaStreamSource(stream).connect(node); node.connect(silent).connect(soundContext.destination);
+    micOpen = { stream, node };
+    addLog(`voice: microphone ${stream.getAudioTracks()[0]?.label || '(default)'}`);
+    return 1;
+  } catch (e) { addLog(`voice: no microphone (${e.message})`); return -1; }
 }
 
 $('iso').onchange = () => { const file = $('iso').files[0];

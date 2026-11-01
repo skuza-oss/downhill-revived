@@ -31,7 +31,7 @@ about 5.6/112 m.)
 
 - **The codec**: libopus 1.5.2 (BSD-3-Clause), xiph.org's release source pinned by SHA-256 and built
   as a static library by `port/tools/opus.py` the way `sdl3.py` builds SDL3; linked into dhd.exe on
-  win-x64 (`build_host64.py`). Other targets build `voice.c` without it (no voice yet). The notice
+  win-x64 (`build_host64.py`) and into the browser's network module (below). The other native targets build `voice.c` without it (no voice yet). The notice
   is in `port/release/THIRD-PARTY-NOTICES.txt`.
 - **Sending** (`port/host/voice.c`, its own thread): SDL3's recording device (the default, or the
   first whose name holds `voice_device`), 48 kHz mono, 20 ms frames, Opus VOIP at `voice_bitrate`
@@ -61,6 +61,37 @@ about 5.6/112 m.)
   `voice_bitrate` (8000-64000), `voice_key` (a letter), `voice_device`. PC SETTINGS has Voice Chat,
   Voice Mode, Voice Volume and Voice Range, live (the voice thread reads them every second).
 
+## In the browser
+
+The game core is the same in the browser, so `online.c` already decides who is heard and calls
+`host_service_voice_*` there; they were no-ops in `worker.js`. Now:
+
+- **The module.** `port/web/build_net.py` builds `voice.c` (`DHD_VOICE_WEB`) and libopus into the
+  browser's network module, `dhd_net.wasm`, beside the client it already holds. libopus is the
+  same pinned source, compiled for wasm32 by wasi-sdk's clang from its own source lists
+  (`opus.py` `wasm_objects`; wasi-sdk has no archiver, so the objects go into the link). The
+  module grows to about 600 KB. The client's `net_voice_hook` works there as natively: voice
+  frames go from the socket to `voice.c`, not through the per-frame queue.
+- **What voice.c asks of the host** comes from the worker (`port/web/net/voice_web.c`): the
+  settings from the worker's live environment (`web_getenv`, so PC SETTINGS applies at once), the
+  push-to-talk key as `host_service_key_held` reads it (`web_key_held`; none while a text field is
+  open), and the log through the module's stderr. `port/web/net/SDL3/SDL.h` gives voice.c the few
+  SDL calls it uses there: one thread, so plain atomics and no-op spinlocks.
+- **The microphone** is the page's: only a page can call `getUserMedia`. `net.js` asks every
+  10 ms whether the game wants it (`voice_web_wanted`: voice on, in a race) and tells the page
+  (`mic`); `main.js` opens it with the browser's echo cancellation, noise suppression and gain
+  control, through `audio.js`'s `dhd-mic` worklet on the page's 48 kHz AudioContext, which writes
+  16-bit mono into a SharedArrayBuffer ring (1 s). `net.js` hands each 960 samples to
+  `voice_web_capture`, which does what the native thread does with them (`capture_frame`: the
+  level, the gate or the key, Opus, `net_send_frame`). The page's answer (`mic-state`: 1 open, -1
+  refused or none) is the HUD's NO MICROPHONE. The microphone closes when the race ends.
+- **Hearing**: `host_sound_write` mixes the voices into the game's sound (`voice_mix`) before it
+  goes to the output ring, where the native output does it.
+- **PC SETTINGS** in the browser shows Voice Chat, Voice Mode, Voice Volume and Voice Range,
+  live (`settings.js`).
+- `net.js` also gives the module the worker's environment (WASI `environ`), so `keep_ready`
+  (finding 132) reads dhd.ini there too.
+
 ## Checked
 
 - `port/tools/test_voice.py` (in `test_runtime.py`'s host tests on Windows): voice.c with the real
@@ -70,11 +101,17 @@ about 5.6/112 m.)
   range, out of range, the hysteresis band, the levels, the groups.
 - `DHD_VOICE_TONE=Hz` sends a tone instead of the microphone, and receivers log each slot's
   packets taken and played every 5 s, for two-game tests (`online_race.py --a/--b`).
+- Browser: `node port/web/check_net.mjs ws://...` (two clients through `net.js` and
+  `dhd_net.wasm`): in a race the host's microphone ring carries a 440 Hz tone (open mic) and the
+  guest hears it in its mix (RMS 2974) with the host's slot talking. It passes against upstream's
+  0.7.6 server unchanged (`wrangler dev` on `skuza-oss/downhill-revived` main, which has no chat
+  message: the room's chat line stays local with "Chat isn't on this server yet.") and against
+  this branch's server (the room's chat reaches both).
 
 ## Open
 
 - No voice in the lobby, and no server-side choice of recipients: both need a server change.
-- Windows only for now (libopus built for win-x64); the browser has none.
+- Windows and the browser; macOS, Linux and Android build without libopus yet.
 - Per-player volume (only mute), a talking marker on the room's member cards, and controller
   push-to-talk (every DualShock 2 button is the game's) are not done.
 - A microphone's permission prompt is the system's (SDL3); a refusal shows as NO MICROPHONE.

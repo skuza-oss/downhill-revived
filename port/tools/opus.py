@@ -7,8 +7,9 @@ libopus's release source once (pinned version, SHA-256 checked against xiph.org'
 nothing else is accepted), unpacks it under build/port/opus and builds a static library with CMake
 and Ninja for 64-bit Windows (x86_64-pc-windows-msvc, clang, the static C runtime that dhd64.exe
 uses), as sdl3.py builds SDL3. The download is kept in build/downloads, so a rebuild needs no
-network. libopus is BSD-3-Clause (port/release/THIRD-PARTY-NOTICES.txt). Other targets have no
-voice chat yet (voice.c builds without it)."""
+network. libopus is BSD-3-Clause (port/release/THIRD-PARTY-NOTICES.txt). wasm_objects() builds the
+same source for the browser's network module (port/web/build_net.py). The other native targets have
+no voice chat yet (voice.c builds without it)."""
 import os
 import shutil
 import subprocess
@@ -92,6 +93,53 @@ def build(target=sdl3.X64_TARGET):
         lib = found[0]
     stamp.write_text(recipe)
     return lib, include
+
+
+def wasm_objects(clang, sysroot):
+    """libopus for the browser's network module (port/web/build_net.py): the same pinned source,
+    its own source lists (celt_sources.mk, silk_sources.mk, opus_sources.mk: the float build, no
+    intrinsics, none of the deep-learning extras) compiled by wasi-sdk's clang for wasm32-wasip1.
+    wasi-sdk has no archiver, so this returns the object files (and the include directory) for the
+    module's link, compiled once per version under build/port/opus/<version>-wasm32."""
+    base = OUT / ('%s-wasm32' % VERSION)
+    include = base / 'src' / ('opus-%s' % VERSION) / 'include'
+    objdir = base / 'obj'
+    stamp = base / 'built.txt'
+    recipe = 'wasm32 ' + str(clang)
+    if stamp.exists() and stamp.read_text() == recipe:
+        return sorted(objdir.glob('*.o')), include
+    tarball = fetch()
+    if base.exists():
+        shutil.rmtree(base)
+    (base / 'src').mkdir(parents=True)
+    with tarfile.open(tarball) as t:
+        t.extractall(base / 'src', filter='data')
+    src = base / 'src' / ('opus-%s' % VERSION)
+    lists = {}
+    for mk in ('celt_sources.mk', 'silk_sources.mk', 'opus_sources.mk'):
+        name = None
+        for line in (src / mk).read_text().splitlines():
+            if '=' in line and not line.startswith(('\t', ' ')):
+                name, _, line = line.partition('=')
+                name = name.strip()
+                lists[name] = []
+            if name:
+                lists[name] += [w for w in line.replace('\\', ' ').split() if w.endswith('.c')]
+            if not line.rstrip().endswith('\\'):
+                name = None
+    files = []
+    for key in ('CELT_SOURCES', 'SILK_SOURCES', 'SILK_SOURCES_FLOAT', 'OPUS_SOURCES', 'OPUS_SOURCES_FLOAT'):
+        files += lists[key]
+    objdir.mkdir()
+    flags = ['--target=wasm32-wasip1', '--sysroot=' + str(sysroot), '-O2', '-DOPUS_BUILD', '-DVAR_ARRAYS',
+             '-DHAVE_LRINTF', '-DHAVE_LRINT', '-DNDEBUG', '-w'] + ['-I' + str(src / d) for d in ('include', 'celt', 'silk', 'silk/float', '.')]
+    for f in files:
+        out = objdir / (f.replace('/', '_')[:-2] + '.o')
+        p = subprocess.run([str(clang), *flags, '-c', str(src / f), '-o', str(out)], capture_output=True, text=True)
+        if p.returncode:
+            sys.exit('opus (wasm32): %s failed:\n%s' % (f, (p.stdout + p.stderr)[-4000:]))
+    stamp.write_text(recipe)
+    return sorted(objdir.glob('*.o')), include
 
 
 if __name__ == '__main__':

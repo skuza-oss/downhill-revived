@@ -25,6 +25,11 @@
    prove the path end to end (online_race.py); each slot's packets taken and played are logged
    every 5 s ("voice: slot N: ...").
 
+   The browser (DHD_VOICE_WEB, port/web/build_net.py) builds this file into its network module
+   with libopus: the hearing side is the same, and in place of the SDL recording thread the page's
+   microphone worklet hands 20 ms at a time to voice_web_capture (port/web/net/voice_web.c,
+   www/net.js), which sends it as the thread does (capture_frame).
+
    Nothing here touches game state. Built only when libopus is (port/tools/opus.py: DHD_VOICE);
    elsewhere every call does nothing. */
 #include "voice.h"
@@ -79,8 +84,67 @@ static void read_settings(void)
 static SDL_AtomicInt transmitting, mic_state, level;   /* level: the microphone's peak, 0..1000 */
 static SDL_AtomicInt heard_at[SLOTS];                   /* SDL_GetTicks of a slot's last packet */
 
-/* ---- sending: the voice thread ---- */
+/* ---- sending: 20 ms of microphone (or tone) at a time, from one thread (the voice thread, or the
+   browser's worker) ---- */
 
+static OpusEncoder *encoder;
+static int encoder_bitrate, gate_hold;
+static uint16_t sequence;
+
+static int encoder_ready(void)
+{
+    if (!encoder) {
+        int error = 0;
+        encoder = opus_encoder_create(RATE, 1, OPUS_APPLICATION_VOIP, &error);
+        if (!encoder) { hle_log("voice: no Opus encoder (%d)\n", error); return 0; }
+        encoder_bitrate = 0;
+    }
+    if (encoder_bitrate != cfg.bitrate) {
+        encoder_bitrate = cfg.bitrate;
+        opus_encoder_ctl(encoder, OPUS_SET_BITRATE(encoder_bitrate));
+    }
+    return 1;
+}
+
+static void send_pcm(const int16_t *pcm)
+{
+    uint8_t frame[VOICE_HEADER + VOICE_PACKET_MAX];
+    int bytes = opus_encode(encoder, pcm, FRAME, frame + VOICE_HEADER, VOICE_PACKET_MAX);
+    if (bytes <= 0) return;
+    frame[0] = VOICE_EVENT_VERSION, frame[1] = VOICE_EVENT;
+    frame[2] = (uint8_t)sequence, frame[3] = (uint8_t)(sequence >> 8);
+    sequence++;
+    net_send_frame(NET_FRAME_EVENT, frame, (size_t)(VOICE_HEADER + bytes));
+}
+
+static int talk_key_held(void)
+{
+    return keyboard_focused() && keyboard_is_down((unsigned)cfg.key) && !text_input_active();
+}
+
+/* One microphone frame (FRAME samples): its level for the HUD, then sent while the key is held
+   (or, open mic, while it passes the gate). */
+static void capture_frame(int16_t *pcm)
+{
+    int peak = 0;
+    for (int i = 0; i < FRAME; i++) {
+        int s = pcm[i] * cfg.mic_volume / 100;
+        s = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
+        pcm[i] = (int16_t)s;
+        if (abs(s) > peak) peak = abs(s);
+    }
+    SDL_SetAtomicInt(&level, peak * 1000 / 32768);
+    int talk;
+    if (cfg.open_mic) {   /* a gate: above about -40 dBFS, held a quarter second after */
+        if (peak > 330) gate_hold = 12;
+        talk = gate_hold > 0;
+        if (gate_hold > 0) gate_hold--;
+    } else talk = talk_key_held();
+    SDL_SetAtomicInt(&transmitting, talk);
+    if (talk && encoder_ready()) send_pcm(pcm);
+}
+
+#if !DHD_VOICE_WEB
 static SDL_AudioStream *open_microphone(void)
 {
     SDL_AudioSpec spec = {SDL_AUDIO_S16, 1, RATE};
@@ -105,19 +169,11 @@ static SDL_AudioStream *open_microphone(void)
     return s;
 }
 
-static int talk_key_held(void)
-{
-    return keyboard_focused() && keyboard_is_down((unsigned)cfg.key) && !text_input_active();
-}
-
 static int voice_thread(void *unused)
 {
     SDL_AudioStream *mic = NULL;
-    OpusEncoder *encoder = NULL;
     int16_t pcm[FRAME];
-    uint8_t frame[VOICE_HEADER + VOICE_PACKET_MAX];
-    int have = 0, bitrate = 0, gate_hold = 0;
-    uint16_t sequence = 0;
+    int have = 0;
     Uint64 next_settings = 0, retry_at = 0;
     (void)unused;
     for (;;) {
@@ -134,19 +190,9 @@ static int voice_thread(void *unused)
         if (cfg.tone) {   /* tests: a tone in place of the microphone, sent at the microphone's pace */
             static double phase;
             for (int i = 0; i < FRAME; i++, phase += 2 * 3.14159265358979 * cfg.tone / RATE) pcm[i] = (int16_t)(8000 * sin(phase));
-            if (!encoder) {
-                int error = 0;
-                encoder = opus_encoder_create(RATE, 1, OPUS_APPLICATION_VOIP, &error);
-                if (!encoder) { SDL_Delay(1000); continue; }
-            }
-            int bytes = opus_encode(encoder, pcm, FRAME, frame + VOICE_HEADER, VOICE_PACKET_MAX);
+            if (!encoder_ready()) { SDL_Delay(1000); continue; }
             SDL_SetAtomicInt(&transmitting, 1);
-            if (bytes > 0) {
-                frame[0] = VOICE_EVENT_VERSION, frame[1] = VOICE_EVENT;
-                frame[2] = (uint8_t)sequence, frame[3] = (uint8_t)(sequence >> 8);
-                sequence++;
-                net_send_frame(NET_FRAME_EVENT, frame, (size_t)(VOICE_HEADER + bytes));
-            }
+            send_pcm(pcm);
             SDL_Delay(20);
             continue;
         }
@@ -156,15 +202,7 @@ static int voice_thread(void *unused)
             if (!mic) retry_at = now + RETRY_MS;
             have = 0;
         }
-        if (!encoder) {
-            int error = 0;
-            encoder = opus_encoder_create(RATE, 1, OPUS_APPLICATION_VOIP, &error);
-            if (!encoder) { hle_log("voice: no Opus encoder (%d)\n", error); SDL_Delay(1000); continue; }
-        }
-        if (bitrate != cfg.bitrate) {
-            bitrate = cfg.bitrate;
-            opus_encoder_ctl(encoder, OPUS_SET_BITRATE(bitrate));
-        }
+        if (!encoder_ready()) { SDL_Delay(1000); continue; }
         if (!mic) { SDL_Delay(20); continue; }
         int got = SDL_GetAudioStreamData(mic, pcm + have, (FRAME - have) * 2);
         if (got < 0) {   /* the device went away: let go, try again later */
@@ -178,31 +216,34 @@ static int voice_thread(void *unused)
         have += got / 2;
         if (have < FRAME) { SDL_Delay(5); continue; }
         have = 0;
-        int peak = 0;
-        for (int i = 0; i < FRAME; i++) {
-            int s = pcm[i] * cfg.mic_volume / 100;
-            s = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
-            pcm[i] = (int16_t)s;
-            if (abs(s) > peak) peak = abs(s);
-        }
-        SDL_SetAtomicInt(&level, peak * 1000 / 32768);
-        int talk;
-        if (cfg.open_mic) {   /* a gate: above about -40 dBFS, held a quarter second after */
-            if (peak > 330) gate_hold = 12;
-            talk = gate_hold > 0;
-            if (gate_hold > 0) gate_hold--;
-        } else talk = talk_key_held();
-        SDL_SetAtomicInt(&transmitting, talk);
-        if (!talk) continue;
-        int bytes = opus_encode(encoder, pcm, FRAME, frame + VOICE_HEADER, VOICE_PACKET_MAX);
-        if (bytes <= 0) continue;
-        frame[0] = VOICE_EVENT_VERSION, frame[1] = VOICE_EVENT;
-        frame[2] = (uint8_t)sequence, frame[3] = (uint8_t)(sequence >> 8);
-        sequence++;
-        net_send_frame(NET_FRAME_EVENT, frame, (size_t)(VOICE_HEADER + bytes));
+        capture_frame(pcm);
     }
     return 0;
 }
+#else
+/* The browser (www/net.js): is the microphone wanted now (voice on, in a race)? The page opens
+   it while this says so, and closes it when it stops. Also reads the settings again each second,
+   as the voice thread does. */
+int voice_web_wanted(void)
+{
+    static Uint64 next_settings;
+    Uint64 now = SDL_GetTicks();
+    if (now >= next_settings) read_settings(), next_settings = now + 1000;
+    int want = cfg.enabled && net_racing();
+    if (!want) SDL_SetAtomicInt(&transmitting, 0);
+    return want;
+}
+
+/* The page's answer: 1 the microphone is open, -1 refused or none (NO MICROPHONE). */
+void voice_web_mic(int state) { SDL_SetAtomicInt(&mic_state, state); }
+
+/* 20 ms (FRAME samples, 48 kHz mono) from the page's microphone worklet. */
+void voice_web_capture(int16_t *pcm, int n)
+{
+    if (n != FRAME || !voice_web_wanted()) return;
+    capture_frame(pcm);
+}
+#endif
 
 /* ---- hearing: the queues (filled by the game thread) and the device thread's playback ---- */
 
@@ -382,9 +423,11 @@ void voice_open(void)
     if (opened++) return;
     read_settings();
     net_voice_hook = voice_receive;   /* frames come straight from the connection's thread */
+#if !DHD_VOICE_WEB
     SDL_Thread *t = SDL_CreateThread(voice_thread, "dhd voice", NULL);
     if (t) SDL_DetachThread(t);
     else hle_log("voice: can't start its thread (%s)\n", SDL_GetError());
+#endif
 }
 
 #else   /* no libopus on this target: no voice */

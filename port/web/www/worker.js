@@ -28,7 +28,9 @@ import { startRenderer, renderImports, definesSharedMemory, shareSafeDecoding, Q
 
 const post = (type, data) => postMessage({ type, ...data });
 const say = text => post('log', { text });
-onmessage = e => { if (e.data.type === 'start') start(e.data).catch(err => { post('error', { text: String(err?.stack || err) }); }); };
+let micAnswer = () => {};  // the page's microphone answer (main.js), to voice chat once it is up
+onmessage = e => { if (e.data.type === 'start') start(e.data).catch(err => { post('error', { text: String(err?.stack || err) }); });
+  else if (e.data.type === 'mic-state') micAnswer(e.data.state); };
 
 // ---- the disc: 1 MiB blocks, a few kept ----
 function discSource(m) {
@@ -110,8 +112,13 @@ async function start(m) {
     ...BROWSER_PC_SETTINGS, ...(m.env || {}) };
   const settings = await createSettings(env, say);
   // The client reaches the game's memory through these: an address is folded as span() folds it.
+  // Voice chat (finding 131): the settings live, the push-to-talk key as host_service_key_held reads
+  // it, the page's microphone ring (main.js) and the page told when the game wants it.
   const net = await createNet(netBytes, { bytes: (a, n) => span(a, n), strlen: a => { if (bytes.buffer !== memory.buffer) refresh();
-    const at = fold(a); return bytes.indexOf(0, at) - at; } }, say);
+    const at = fold(a); return bytes.indexOf(0, at) - at; } }, say,
+    { env, keyHeld: k => k > 0 && k < 256 && !textActive && Atomics.load(keys, k) !== 0, mic: m.mic || null,
+      wantMic: on => post('mic', { on }) });
+  micAnswer = state => net.voiceMic(state);
   let core, graphics, queue, memory, bytes, dv, arena = 0x07000000, current = 65, csr = 0x1f80, field = 0;
   const strings = new Map(), files = new Map(), fibers = new Map(); let nextFile = 1, nextDir = 1; const dirs = new Map();
   const refresh = () => { bytes = new Uint8Array(memory.buffer); dv = new DataView(memory.buffer); };
@@ -320,6 +327,7 @@ async function start(m) {
     host_sound_write: (a, frames) => {
       soundFrames += frames;
       const src = new Int16Array(span(a, frames * 4).slice().buffer), h = ring.head, cap = ring.frames;
+      net.voiceMix(src);  // the others' voices (voice chat), as natively in the output
       const w = Atomics.load(h, 0), r = Atomics.load(h, 1), free = cap - 1 - ((w - r + cap) % cap);
       const n = Math.min(frames, free);
       for (let i = 0; i < n; i++) { const at = ((w + i) % cap) * 2; ring.data[at] = src[i * 2]; ring.data[at + 1] = src[i * 2 + 1]; }
@@ -356,7 +364,6 @@ async function start(m) {
       if (due > now + 1) await new Promise(r => setTimeout(r, due - now)); else await yieldTask();
     }),
   };
-  Object.assign(impl, createNet({span, str}));
   const noops = `host_sleep_ms host_wait_wall host_dpi_aware host_callbacks_drain host_frame_registers host_frame_video host_capture_name
 host_pacing_wait host_pacing_handoff host_pacing_input host_callback_heartbeat
 host_sound_open host_sound_reset host_sound_tick host_sound_log_stack snd_host_bench
@@ -365,7 +372,7 @@ host_service_controls_apply
 host_service_movie_prepare host_service_movie_start host_service_movie_audio host_service_graphics_wait host_service_graphics_shutdown
 host_service_gs_pump_messages host_service_gs_window_title host_service_gs_native_view
 host_service_gs_window_apply host_service_gs_present_options_apply host_service_gs_window_close
-host_service_host_backtrace host_service_presence host_service_voice_frame host_service_voice_place host_service_voice_mute host_service_voice_drop host_service_voice_state
+host_service_host_backtrace host_service_presence
 `.split(/\s+/);
   for (const n of noops) impl[n] ??= () => {};
   for (const n of ['host_heartbeat_eip', 'host_service_launcher_open', 'host_service_presence_join']) impl[n] = () => 0;
