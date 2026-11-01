@@ -40,8 +40,9 @@ Why Inno Setup and not Tauri's NSIS bundler:
   moving it means overriding its template.
 - The uninstaller has to remove what later updates put in the folder (a newer release's files,
   `*.old`) while keeping the player's files. Inno's `[Code]` section does that in a few lines
-  (`RemoveUpdateLeftovers`: every plain file at the top except the update.rs KEEP names; folders
-  are the player's and stay). Tauri's uninstaller deletes the files it logged, plus an optional
+  (`RemoveUpdateLeftovers`: the files update.rs's `copy_release` listed in `update-files.txt` as it
+  copied them, and `*.old`; nothing else, since the directory page lets the player install into a
+  folder that holds other files (a shared Games folder, say); folders are the player's and stay). Tauri's uninstaller deletes the files it logged, plus an optional
   "delete app data" step we must never take.
 - The script compiles the folder package_release has already checked, byte for byte. Tauri's
   bundler would run its own build/bundle step around the launcher and download its NSIS and plugins

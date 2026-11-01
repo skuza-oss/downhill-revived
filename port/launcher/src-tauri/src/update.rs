@@ -15,8 +15,10 @@
 //!   (latest.json's "linux-appimage" entry, or the release's DownhillRevived-*-linux*.AppImage
 //!   asset); the running image is renamed NAME.AppImage.old and the new file moved in.
 //! A copy the Windows installer put in place (game.rs INSTALLED_MARKER) updates as a folder install,
-//! then its Apps & features entry gets the new version. clean_up deletes the .old files and
-//! dhd-update/ at the next start.
+//! then its Apps & features entry gets the new version. A folder install also lists every file it
+//! put in the game folder in UPDATE_FILES there, which the Windows uninstaller reads to remove them
+//! (port/release/installer/windows.iss) without touching anything else in that folder. clean_up
+//! deletes the .old files and dhd-update/ at the next start.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -30,6 +32,8 @@ use crate::game::Place;
 pub const OFFICIAL_SOURCE: &str = "https://api.github.com/repos/skuza-oss/downhill-revived/releases/latest";
 pub const RELEASES_PAGE: &str = "https://github.com/skuza-oss/downhill-revived/releases/latest";
 const WORK_DIR: &str = "dhd-update";
+/// In the game folder: the names of the files updates put there, one a line (windows.iss reads it).
+const UPDATE_FILES: &str = "update-files.txt";
 /// Never replaced by an update: the player's own files.
 const KEEP: [&str; 4] = ["dhd.ini", "dhd.log", "iso-check.txt", "launcher.log"];
 /// This build's name in release assets (DownhillRevived-<version>-<PLATFORM>.zip, or
@@ -283,15 +287,34 @@ fn release_folder(unpacked: &Path, inner: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| "the update holds no game".to_string())
 }
 
+fn read_update_files(game_dir: &Path) -> Vec<String> {
+    fs::read_to_string(game_dir.join(UPDATE_FILES))
+        .map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+        .unwrap_or_default()
+}
+
+fn write_update_files(game_dir: &Path, names: &[String]) -> std::io::Result<()> {
+    let mut text = names.join("\r\n");
+    text.push_str("\r\n");
+    fs::write(game_dir.join(UPDATE_FILES), text)
+}
+
 /// A folder install: the release's plain files over the game's.
 fn copy_release(unpacked: &Path, game_dir: &Path) -> Result<(), String> {
     let folder = release_folder(unpacked, Path::new(""))?;
     let mut failed = Vec::new();
+    let mut listed = read_update_files(game_dir);
     for entry in fs::read_dir(&folder).map_err(|e| e.to_string())?.flatten() {
         let src = entry.path();
         let name = entry.file_name();
         if !src.is_file() || KEEP.iter().any(|k| name.eq_ignore_ascii_case(k)) {
             continue;
+        }
+        let plain = name.to_string_lossy().into_owned();
+        if !listed.iter().any(|n| n.eq_ignore_ascii_case(&plain)) {
+            listed.push(plain);
+            // listed before it's copied: a file half-written by a failed update still goes
+            let _ = write_update_files(game_dir, &listed);
         }
         let dst = game_dir.join(&name);
         if fs::copy(&src, &dst).is_ok() {
@@ -589,6 +612,12 @@ mod tests {
         assert_eq!(fs::read_to_string(game.join("README.txt")).unwrap(), "new readme");
         assert_eq!(fs::read_to_string(game.join("dhd.ini")).unwrap(), "name = SKUZA\n");
         assert!(!game.join(WORK_DIR).exists());
+        // the files it copied are listed for the Windows uninstaller, the player's dhd.ini isn't
+        let mut listed = read_update_files(&game);
+        listed.sort();
+        let mut want = vec![GAME_EXE.to_string(), "README.txt".to_string()];
+        want.sort();
+        assert_eq!(listed, want);
         fs::remove_dir_all(&game).unwrap();
     }
 
