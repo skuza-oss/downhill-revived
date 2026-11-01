@@ -61,3 +61,48 @@ adapter/driver pins and hashes for all four items. The unmodified `gs_golden.py 
 replay-native` reports four items compared, metadata count four, identical, VERDICT PASS.
 The old installed golden is preserved. This resolves the native golden validation limitation above;
 it does not re-record unrelated golden groups.
+
+## Baseline (unmodified renderer)
+
+Ryzen 5 7600, AMD Radeon Graphics (PCI 1002:164e), RTX 3070 (10de:2484), 32 GB installed RAM.
+Hidden 960x720 window, native renderer, 4:3, V-Sync off in both modes, 60 requested for paced runs.
+Uncapped uses `DHD_FRAME_CLOCK=1`. Sound is off; the harness has its own memory card.
+The 4096 MiB developer scale guard is needed for actual 6x/8x. All runs reached GO at field 3214.
+The window contains 1620 fields, GO+180 < field <= GO+1800. FPS is 1000 / mean wall ms;
+1% low is 1000 / the mean of the 17 slowest fields. GPU figures average complete 60-frame
+timestamp blocks inside that window. Units are ms/frame. Every recorded point is one valid run.
+
+| GPU / API | Scale | FPS paced | 1% low | GPU ms paced | FPS uncapped | 1% low | GPU ms uncapped |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| integrated / dx12 | 1 | 59.93 | 51.47 | 2.644 | 262.98 | 114.02 | 2.322 |
+| integrated / dx12 | 2 | 59.61 | 36.76 | 5.992 | 173.46 | 110.71 | 5.368 |
+| integrated / dx12 | 4 | 50.85 | 15.77 | 18.741 | 49.70 | 35.77 | 18.996 |
+| integrated / dx12 | 6 | 19.97 | 9.04 | 49.259 | 23.97 | 12.03 | 40.458 |
+| integrated / dx12 | 8 | 13.93 | 8.66 | 71.077 | 13.79 | 9.14 | 71.796 |
+| discrete / dx12 | 1 | 59.93 | 55.58 | 1.087 | 290.55 | 155.94 | 0.372 |
+| discrete / dx12 | 8 | 59.73 | 39.27 | 4.838 | 291.29 | 159.35 | 2.428 |
+| integrated / vulkan | 2 | ? | ? | ? | 144.94 | 111.83 | 5.316 |
+| integrated / vulkan | 8 | ? | ? | ? | 14.84 | 10.68 | 66.185 |
+
+GPU pass split, uncapped:
+
+| GPU / API | Scale | Draw | Surface | Convert | Scanout | Present |
+|---|---:|---:|---:|---:|---:|---:|
+| integrated / dx12 | 1 | 1.988 | 0.000 | 0.071 | 0.059 | 0.205 |
+| integrated / dx12 | 2 | 4.869 | 0.000 | 0.054 | 0.281 | 0.165 |
+| integrated / dx12 | 4 | 17.120 | 0.000 | 0.066 | 1.416 | 0.394 |
+| integrated / dx12 | 6 | 36.563 | 0.000 | 0.065 | 3.135 | 0.695 |
+| integrated / dx12 | 8 | 64.357 | 0.000 | 0.066 | 6.131 | 1.243 |
+| discrete / dx12 | 1 | 0.213 | 0.000 | 0.105 | 0.029 | 0.025 |
+| discrete / dx12 | 8 | 2.043 | 0.000 | 0.064 | 0.259 | 0.063 |
+| integrated / vulkan | 2 | 4.719 | 0.000 | 0.082 | 0.297 | 0.220 |
+| integrated / vulkan | 8 | 59.515 | 0.000 | 0.066 | 5.292 | 1.312 |
+
+Vulkan on this iGPU is 16.5% slower in throughput at 2x (GPU time almost unchanged),
+but 7.6% faster at 8x. The selected AMD adapter and Vulkan backend are confirmed in both logs.
+No conclusion about other GPUs or old drivers follows from these two points.
+
+The monitor stays connected to the RTX. These rates include the hidden-desktop presentation path;
+pass timestamps exclude work outside the native passes. This setup cannot isolate the cost of
+cross-adapter transport or fully reproduce a visible desktop compositor. Repeat with the monitor
+on the motherboard to measure that difference.
