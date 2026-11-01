@@ -125,6 +125,10 @@ fn handle(value: u64, what: &str) -> Result<std::ptr::NonNull<std::ffi::c_void>,
     std::ptr::NonNull::new(value as usize as *mut std::ffi::c_void).ok_or_else(|| format!("NULL {what}"))
 }
 
+/// The last surface's present mode for `dhdr_perf_read` (finding 129): 0 none yet, 1 immediate,
+/// 2 mailbox, 3 fifo, 4 fifo-relaxed.
+pub static PRESENT_MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
 impl Surface {
     pub const KINDS: &'static [u32] = PLATFORM_KINDS;
 
@@ -213,6 +217,16 @@ impl Surface {
         } else {
             wgpu::PresentMode::Fifo
         };
+        PRESENT_MODE.store(match present_mode {
+            wgpu::PresentMode::Immediate => 1,
+            wgpu::PresentMode::Mailbox => 2,
+            wgpu::PresentMode::Fifo => 3,
+            wgpu::PresentMode::FifoRelaxed => 4,
+            _ => 0,
+        }, std::sync::atomic::Ordering::Relaxed);
+        crate::host::log(&format!("gs: present mode {present_mode:?} (V-Sync {}; the surface offers {:?})",
+                                  if present_flags & (DHDR_PRESENT_VSYNC | DHDR_PRESENT_NO_TEARING) != 0 { "on" } else { "off" },
+                                  caps.present_modes));
         let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) || caps.alpha_modes.is_empty() {
             wgpu::CompositeAlphaMode::Opaque
         } else {

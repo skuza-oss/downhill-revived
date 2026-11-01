@@ -321,6 +321,11 @@ impl Drop for SpikeTimer {
 /// present) with the passes a frame of each, and the frame's span (its first pass's start to its
 /// last pass's end). Without the variable, or on an adapter without timestamps, every pass gets
 /// None: no queries at all.
+///
+/// The light part runs for every player (finding 129, DHD_PERF_LOG=0 turns it off): one frame in
+/// `SAMPLE` is timed the same way, with no log line; its totals (frames timed, the passes' GPU
+/// nanoseconds, the spans) are what `dhdr_perf_read` gives port/gs/perf_log.c for its perf: lines.
+/// A picture never presented (a minimised window) has its queries dropped at the next picture.
 pub(crate) mod gputimes {
     #[cfg(target_arch = "wasm32")]
     use crate::device::Gpu;
@@ -351,6 +356,26 @@ pub(crate) mod gputimes {
         std::env::var_os("DHD_GPU_TIMES").is_some()
     }
 
+    /// Whether the perf: lines are on (DHD_PERF_LOG unset or not 0; device.rs then asks for
+    /// timestamp queries too, where the adapter has them).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn perf_on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("DHD_PERF_LOG").map_or(true, |v| v != "0"))
+    }
+
+    /// The timer's state for `dhdr_perf_read`: 0 off (not asked for, or no native picture yet), 1
+    /// on, 2 the adapter has no timestamp queries.
+    pub static STATE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+    /// Frames timed, their passes' GPU nanoseconds and their spans' nanoseconds, so far.
+    pub fn totals() -> (u64, u64, u64) {
+        #[cfg(not(target_arch = "wasm32"))]
+        return timed::totals();
+        #[cfg(target_arch = "wasm32")]
+        (0, 0, 0)
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub fn slot(_gpu: &Gpu, _kind: u8) -> Option<Slot> {
         None
@@ -359,6 +384,8 @@ pub(crate) mod gputimes {
     pub fn end_frame(_gpu: &Gpu, _encoder: &mut wgpu::CommandEncoder) {}
     #[cfg(target_arch = "wasm32")]
     pub fn submitted(_gpu: &Gpu) {}
+    #[cfg(target_arch = "wasm32")]
+    pub fn picture_begin(_gpu: &Gpu) {}
 
     #[cfg(not(target_arch = "wasm32"))]
     pub use timed::*;
@@ -375,6 +402,8 @@ pub(crate) mod gputimes {
         const QUERIES: u32 = 1024;
         /// Frames in flight; when the next set is still being read, a frame goes untimed.
         const SETS: usize = 3;
+        /// Without DHD_GPU_TIMES (the perf: lines' light part): one frame timed in this many.
+        const SAMPLE: u64 = 8;
 
         struct Set {
             queries: wgpu::QuerySet,
@@ -398,19 +427,34 @@ pub(crate) mod gputimes {
             passes: [u64; 5],
             span: f64,
             untimed: u64,
+            /// DHD_GPU_TIMES: every frame timed and the log line; else one in SAMPLE, no line.
+            every_frame: bool,
+            /// Whether this frame is timed (decided after the last present).
+            sampling: bool,
+            frame: u64,
+            /// A present since the last picture began (else that picture was never shown).
+            presented: bool,
+            total_frames: u64,
+            total_ns: f64,
+            total_span: f64,
         }
 
         static TIMES: OnceLock<Option<Mutex<Times>>> = OnceLock::new();
 
         fn times(gpu: &Gpu) -> Option<&'static Mutex<Times>> {
             TIMES.get_or_init(|| {
-                if !super::wanted() {
+                let every_frame = super::wanted();
+                if !every_frame && !super::perf_on() {
                     return None;
                 }
                 if !gpu.device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
-                    crate::host::log("gpu_times: this adapter has no timestamp queries (DHD_GPU_TIMES ignored)");
+                    if every_frame {
+                        crate::host::log("gpu_times: this adapter has no timestamp queries (DHD_GPU_TIMES ignored)");
+                    }
+                    super::STATE.store(2, std::sync::atomic::Ordering::Relaxed);
                     return None;
                 }
+                super::STATE.store(1, std::sync::atomic::Ordering::Relaxed);
                 let every = std::env::var("DHD_GPU_TIMES").ok().and_then(|v| v.parse().ok()).filter(|&n| n > 0)
                     .unwrap_or(600);
                 let buffer = |label, usage| gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -424,9 +468,13 @@ pub(crate) mod gputimes {
                     resolved: 0,
                     map: None,
                 }).collect();
-                crate::host::log(&format!("gpu_times: GPU time by pass kind every {every} frames (DHD_GPU_TIMES)"));
+                if every_frame {
+                    crate::host::log(&format!("gpu_times: GPU time by pass kind every {every} frames (DHD_GPU_TIMES)"));
+                }
                 Some(Mutex::new(Times { sets, current: 0, every, period: gpu.queue.get_timestamp_period() as f64,
-                                        frames: 0, ns: [0.0; 5], passes: [0; 5], span: 0.0, untimed: 0 }))
+                                        frames: 0, ns: [0.0; 5], passes: [0; 5], span: 0.0, untimed: 0, every_frame,
+                                        sampling: true, frame: 0, presented: true, total_frames: 0, total_ns: 0.0,
+                                        total_span: 0.0 }))
             }).as_ref()
         }
 
@@ -441,9 +489,41 @@ pub(crate) mod gputimes {
             set.map.is_none().then_some(set)
         }
 
+        /// The totals so far (`super::totals`); zeros before the first picture.
+        pub fn totals() -> (u64, u64, u64) {
+            match TIMES.get() {
+                Some(Some(t)) => {
+                    let t = lock(t);
+                    (t.total_frames, t.total_ns as u64, t.total_span as u64)
+                }
+                _ => (0, 0, 0),
+            }
+        }
+
+        /// At a picture's start (render.rs): when the last picture was never presented, its
+        /// queries are dropped, and this frame goes untimed (its earlier passes went with them).
+        pub fn picture_begin(gpu: &Gpu) {
+            let Some(t) = times(gpu) else { return };
+            let mut t = lock(t);
+            if !t.presented {
+                if let Some(set) = open(&mut t) {
+                    if set.resolved == 0 {
+                        set.kinds.clear();
+                    }
+                }
+                if !t.every_frame {
+                    t.sampling = false;
+                }
+            }
+            t.presented = false;
+        }
+
         /// The queries of a pass of `kind`, or None (timing off, the set full or still being read).
         pub fn slot(gpu: &Gpu, kind: u8) -> Option<Slot> {
             let mut t = lock(times(gpu)?);
+            if !t.sampling {
+                return None;
+            }
             let slot = open(&mut t).filter(|s| s.kinds.len() as u32 * 2 + 2 <= QUERIES).map(|set| {
                 let index = set.kinds.len() as u32 * 2;
                 set.kinds.push(kind);
@@ -461,7 +541,16 @@ pub(crate) mod gputimes {
         /// (`submitted` maps them after the submit).
         pub fn end_frame(gpu: &Gpu, encoder: &mut wgpu::CommandEncoder) {
             let Some(t) = times(gpu) else { return };
-            collect(gpu, t);
+            let (sampling, reading) = {
+                let t = lock(t);
+                (t.sampling, t.sets.iter().any(|s| s.map.is_some()))
+            };
+            if sampling || reading {
+                collect(gpu, t);
+            }
+            if !sampling {
+                return;
+            }
             let mut t = lock(t);
             let Some(set) = open(&mut t) else { return };
             let used = set.kinds.len() as u32 * 2;
@@ -476,6 +565,13 @@ pub(crate) mod gputimes {
         pub fn submitted(gpu: &Gpu) {
             let Some(t) = times(gpu) else { return };
             let mut t = lock(t);
+            t.presented = true;
+            t.frame += 1;
+            let sampled = t.sampling;
+            t.sampling = t.every_frame || t.frame % SAMPLE == 0;
+            if !sampled {
+                return;
+            }
             let Some(set) = open(&mut t) else { return };
             if set.resolved == 0 {
                 return;
@@ -521,10 +617,21 @@ pub(crate) mod gputimes {
                 }
                 if last > first {
                     t.span += (last - first) as f64 * period;
+                    t.total_span += (last - first) as f64 * period;
                 }
                 t.frames += 1;
+                if passes.iter().any(|&p| p > 0) {
+                    t.total_frames += 1;
+                    t.total_ns += ns.iter().sum::<f64>();
+                }
             }
-            if t.frames >= t.every {
+            if !t.every_frame {
+                t.frames = 0;
+                t.ns = [0.0; 5];
+                t.passes = [0; 5];
+                t.span = 0.0;
+                t.untimed = 0;
+            } else if t.frames >= t.every {
                 let f = t.frames as f64;
                 let total: f64 = t.ns.iter().sum();
                 let parts: Vec<String> = (0..5)

@@ -195,6 +195,7 @@ mod native {
         // The driver in the log, for bug reports: many draw faults are one driver's.
         crate::host::log(format!("gs: GPU {} on {:?}, driver {} {}", info.name, info.backend, info.driver,
                                  info.driver_info).trim_end());
+        log_adapters(&instance, backends, &info);
         // DHD_RSTAT (finding 108): whether the adapter offers GPU timers at all. The 120 field/s
         // round had to estimate GPU time from the render thread's blocked submits because nothing
         // asks for them; this says whether a later round could measure it directly.
@@ -217,8 +218,9 @@ mod native {
             timers
         } else { wgpu::Features::empty() };
         let mut features = if dual { wgpu::Features::DUAL_SOURCE_BLENDING } else { wgpu::Features::empty() };
-        // DHD_GPU_TIMES (diagnostics: native/pipelines.rs's gputimes) only.
-        if crate::native::pipelines::gputimes::wanted() {
+        // DHD_GPU_TIMES (diagnostics: native/pipelines.rs's gputimes), and the perf: lines' GPU time
+        // (finding 129), where the adapter has timestamp queries.
+        if crate::native::pipelines::gputimes::wanted() || crate::native::pipelines::gputimes::perf_on() {
             features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -234,6 +236,26 @@ mod native {
         crate::guard::install_error_handler(&device);
         let render_pipelines = pollster::block_on(render_probe(&device).pop()).is_none();
         Ok(Gpu::from_parts(instance, adapter, device, queue, o.clone(), render_pipelines))
+    }
+
+    /// Every adapter of these backends, of what kind, and the one the game runs on (finding 129):
+    /// on a laptop with two GPUs, whether the game took the integrated one.
+    fn log_adapters(instance: &wgpu::Instance, backends: wgpu::Backends, picked: &wgpu::AdapterInfo) {
+        let all: Vec<wgpu::AdapterInfo> =
+            pollster::block_on(instance.enumerate_adapters(backends)).iter().map(|a| a.get_info()).collect();
+        let list: Vec<String> = all.iter().map(|i| format!("{} ({})", i.name, kind_name(i.device_type))).collect();
+        let discrete = all.iter().any(|i| i.device_type == wgpu::DeviceType::DiscreteGpu);
+        let hint = if discrete && picked.device_type != wgpu::DeviceType::DiscreteGpu {
+            if cfg!(windows) {
+                "; a discrete GPU is there but not used (Windows Settings > System > Display > Graphics: the game, High performance)"
+            } else {
+                "; a discrete GPU is there but not used"
+            }
+        } else {
+            ""
+        };
+        crate::host::log(&format!("gs: GPUs: {}; the game runs on {} ({}){hint}", list.join(", "), picked.name,
+                                  kind_name(picked.device_type)));
     }
 
     /// Whether DXC was asked for and the adapter is WARP (a software DX12 adapter: CPU type, or
@@ -316,6 +338,50 @@ pub fn gpu() -> Option<&'static Gpu> {
 /// The adapter's name ("" before init).
 pub fn adapter_name() -> &'static CStr {
     GPU.get().map_or(c"", |g| g.name.as_c_str())
+}
+
+/// An adapter's kind as the perf: lines say it.
+fn kind_name(t: wgpu::DeviceType) -> &'static str {
+    match t {
+        wgpu::DeviceType::IntegratedGpu => "integrated",
+        wgpu::DeviceType::DiscreteGpu => "discrete",
+        wgpu::DeviceType::VirtualGpu => "virtual",
+        wgpu::DeviceType::Cpu => "cpu (software)",
+        wgpu::DeviceType::Other => "other",
+    }
+}
+
+/// `dhdr_perf_read` (`dhd_render_ext.h`, finding 129): up to `count` values into `out`: [0] the GPU
+/// timer (0 off, 1 on, 2 the adapter has none), [1] frames timed, [2] their GPU nanoseconds (the
+/// passes' sum), [3] their spans' nanoseconds, [4] the last surface's present mode (0 none, 1
+/// immediate, 2 mailbox, 3 fifo, 4 fifo-relaxed), [5] the adapter's kind (0 other, 1 integrated, 2
+/// discrete, 3 virtual, 4 cpu). Returns how many it wrote.
+#[no_mangle]
+pub extern "C" fn dhdr_perf_read(out: *mut u64, count: u32) -> u32 {
+    let _g = crate::guard::Guard::enter("dhdr_perf_read");
+    if out.is_null() {
+        return 0;
+    }
+    let (frames, ns, span) = crate::native::pipelines::gputimes::totals();
+    let kind = GPU.get().map_or(0, |g| match g.info.device_type {
+        wgpu::DeviceType::Other => 0,
+        wgpu::DeviceType::IntegratedGpu => 1,
+        wgpu::DeviceType::DiscreteGpu => 2,
+        wgpu::DeviceType::VirtualGpu => 3,
+        wgpu::DeviceType::Cpu => 4,
+    });
+    let values = [
+        crate::native::pipelines::gputimes::STATE.load(Ordering::Relaxed) as u64,
+        frames,
+        ns,
+        span,
+        crate::present::surface::PRESENT_MODE.load(Ordering::Relaxed) as u64,
+        kind,
+    ];
+    let n = (count as usize).min(values.len());
+    // SAFETY: the caller gives room for `count` values.
+    unsafe { std::ptr::copy_nonoverlapping(values.as_ptr(), out, n) };
+    n as u32
 }
 
 /// `DHDR_FEAT_*` (0 before init).

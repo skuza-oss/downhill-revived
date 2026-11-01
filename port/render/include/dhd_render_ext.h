@@ -4,7 +4,7 @@
    DHDR_FN declarations of both headers.
 
    SP10 (docs/findings/090-speed.md): an indexed native picture. Finding 109: the device's largest
-   texture. */
+   texture. Finding 129: the perf: lines' GPU counters. */
 #ifndef DHD_RENDER_EXT_H
 #define DHD_RENDER_EXT_H
 
@@ -27,6 +27,14 @@ DHDR_FN(dhdr_native_picture_indexed) int dhdr_native_picture_indexed(DhdrNative 
    with the adapter's own), 0 before init. The native renderer's scale limit
    (port/gs/gpu_rust_shared.inc, native_scale_hold). */
 DHDR_FN(dhdr_device_max_texture) uint32_t dhdr_device_max_texture(void);
+
+/* port/gs/perf_log.c's perf: lines (finding 129): up to count values into out: [0] the GPU timer (0
+   off, 1 on, 2 the adapter has no timestamp queries), [1] frames timed so far (the native renderer
+   times one frame in 8), [2] their GPU nanoseconds (the sum of their passes), [3] their spans'
+   nanoseconds (first pass's start to last pass's end), [4] the last surface's present mode (0 none,
+   1 immediate, 2 mailbox, 3 fifo, 4 fifo-relaxed), [5] the adapter's kind (0 other, 1 integrated,
+   2 discrete, 3 virtual, 4 cpu). Returns how many it wrote. Any thread. */
+DHDR_FN(dhdr_perf_read) uint32_t dhdr_perf_read(uint64_t *out, uint32_t count);
 
 #ifdef __cplusplus
 }

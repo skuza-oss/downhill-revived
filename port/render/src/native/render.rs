@@ -393,6 +393,7 @@ impl Native {
         let _spike = crate::native::pipelines::SpikeTimer::new("picture", 0);
         let whole = rstat::T::new();
         let gpu = self.gpu;
+        gputimes::picture_begin(gpu);
         let shared = NativeShared::get(gpu)?;
         let t = rstat::T::new();
         self.arenas.reserve(Some((gpu, &self.objects.uniform_layout)), p.commands, p.vertices.len() as u32)?;
