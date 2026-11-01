@@ -37,7 +37,12 @@ int main(void)
     client_back(&c); assert(!strcmp(sent,"{\"type\":\"back\"}"));
     client_rules(&c,60,1,2); assert(strstr(sent,"\"nextRace\":\"host\"") && strstr(sent,"\"then\":\"random\""));
     client_rotation(&c,rotation,3); assert(strstr(sent,"[1,3,5]"));
-    assert(strstr(sent,"\"trackLimits\":[10,8,6]"));
+    assert(strstr(sent,"\"trackLimits\":[10,8,6]") && strstr(sent,"\"pickOnly\":[]"));
+    {   /* bit 7: pick-only (MOSH, finding 128); the limit class stays in bits 5-6 */
+        unsigned char arena[] = {0, 23 | 64 | 128, 2};
+        client_rotation(&c,arena,3);
+        assert(strstr(sent,"\"rotation\":[0,23,2]") && strstr(sent,"\"trackLimits\":[10,6,10]") && strstr(sent,"\"pickOnly\":[23]"));
+    }
     char ten[4096];
     int at = snprintf(ten, sizeof ten, "{\"type\":\"room\",\"members\":[");
     for (int i = 0; i < 10; i++) at += snprintf(ten + at, sizeof ten - at,

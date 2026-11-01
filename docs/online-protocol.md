@@ -441,7 +441,8 @@ message. Limits are 6, 8 or 10. At least one entry must take ten riders. Clients
 derive these from the retail track classifier, not a server track table. The
 configured rotation remains in room snapshots; limits are kept by the server.
 The native rotation import still takes up to 64 bytes: each byte stores a track
-ID in its low five bits and (10 - limit) / 2 in its high bits. Native and browser
+ID in its low five bits, (10 - limit) / 2 in bits 5-6, and bit 7 set for a pick-only track
+(sent in `pickOnly`). Native and browser
 hosts decode this into the two JSON arrays. Snapshot rotation IDs are plain IDs.
 
 NEXT walks forward through the rotation; RANDOM draws from fitting entries other

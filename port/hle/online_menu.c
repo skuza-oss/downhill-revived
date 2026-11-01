@@ -26,12 +26,16 @@ static const struct { int index; const char *name; } tracks[] = {
     {0, "ALPINE"}, {1, "MOAB"}, {2, "JUNGLE"}, {3, "PERU"}, {4, "PERU TDH"}, {5, "GLACIER"},
     {6, "ALPINE MX"}, {7, "MOAB MX"}, {8, "JUNGLE MX"}, {9, "PERU MX"}, {10, "JUNGLE TD"},
     {11, "AUBER ST"}, {12, "FUJI"}, {13, "MOAB TDH"}, {14, "GLACIER X"}, {15, "AUBER MX"},
-    {16, "AUBER STD"}, {19, "BC"}, {20, "CITY"}, {22, "GLACIER T"}, {23, "MOSH"}, {24, "ALPINE T"},
+    {16, "AUBER STD"}, {19, "BC"}, {20, "CITY"}, {22, "GLACIER T"}, {23, "MOSH PIT (ARENA)"}, {24, "ALPINE T"},
     {25, "BC TDX"}};
 static const struct { int index; const char *name; } riders[] = {
     {0, "COSMO"}, {1, "MAI"}, {2, "AJAX"}, {3, "JONNIE"}, {4, "KALOLO"}, {5, "T-BAG"}, {8, "DRUD"},
     {10, "RAKEL"}, {13, "JEN"}, {14, "WOODY"}};
 #define COUNT(a) ((int)(sizeof a / sizeof *a))
+/* MOSH (23) is the Mosh Pit arena, where riders knock each other around: not a race. The host can
+   pick it from the track list, but NEXT / RANDOM after a race (the server's pickOnly) and Left /
+   Right on the room's track never land on it (finding 128). */
+static int arena(int track) { return track == 23; }
 
 static const char code_letters[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";  /* the server's join codes */
 static const char name_letters[] = SETTING_NAME_LETTERS;
@@ -547,9 +551,18 @@ static void room_sync(const NetLobby *l)
     if (l->is_host && !rotation_sent) {
         /* the tracks in the list's order: the room's Then rule (next / random) walks them */
         static unsigned char ids[COUNT(tracks)];
-        for (int k = 0; k < COUNT(tracks); k++) ids[k] = (unsigned char)(tracks[k].index | ((10 - track_limit(tracks[k].index)) / 2 << 5));
+        for (int k = 0; k < COUNT(tracks); k++)
+            ids[k] = (unsigned char)(tracks[k].index | ((10 - track_limit(tracks[k].index)) / 2 << 5) | (arena(tracks[k].index) ? 0x80 : 0));
         host_service_net_rotation(GADDR(ids), COUNT(tracks));
         rotation_sent = 1;
+        hle_log("online menu: the room's track list: %d tracks, MOSH PIT pick-only\n", COUNT(tracks));
+        /* tests (DHD_NET_SCRIPTED with DHD_NET_TEST_THEN=same|next|random): the host's Then rule */
+        const char *test_then = getenv("DHD_NET_SCRIPTED") ? getenv("DHD_NET_TEST_THEN") : NULL;
+        if (test_then) {
+            int then = !strcmp(test_then, "same") ? 0 : !strcmp(test_then, "random") ? 2 : 1;
+            host_service_net_rules(l->finish_window, l->next_race, then);
+            hle_log("online menu: room rules for the test: then %s\n", test_then);
+        }
     }
     if (!room_ready_sent) {
         hle_log("online menu: room %s%s, version %s\n", l->code, l->is_host ? " (host)" : "", version);
@@ -790,7 +803,7 @@ static void send_settings(int track, int options, int is_public)
 static void change_setting(int f, int by)
 {
     if (f == RF_TRACK) {
-        room_track = (room_track + by + COUNT(tracks)) % COUNT(tracks);
+        do room_track = (room_track + by + COUNT(tracks)) % COUNT(tracks); while (arena(tracks[room_track].index));
         send_settings(tracks[room_track].index, -1, -1);
     } else if (f == RF_BOTS)
         send_settings(-1, room_options = room.laps ^ ROOM_NO_BOTS, -1);
@@ -1312,7 +1325,7 @@ static void draw_track_list(void)
         if (on) bar(x + 2, y, 128, 12);
         char label[48];
         snprintf(label, sizeof label, "%s - %d", tracks[i].name, track_limit(tracks[i].index));
-        put(MENU_CENTRE, x + 66, y + 1, label, on ? st_on : i == room_track ? menu_style(st_on, 100, -1, 0, 0) : st_row);
+        put(MENU_CENTRE, x + 66, y + 1, label, fit(label, on || i == room_track ? st_on : st_row, 100, 126));
         if (i == room_track) rect(x + 30, y + 12, 72, 1, (const int[]){0xC0, 0xB8, 0x40}, 128);  /* the current one */
         hit(&track_hits[i], x, y - 2, 132, 18);
     }

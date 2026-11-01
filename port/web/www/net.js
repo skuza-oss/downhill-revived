@@ -89,7 +89,7 @@ export function createNet({span, str}) {
     host_service_net_finish:(ticks,place)=>send({type:'finish',ticks:ticks>>>0,place}),
     host_service_net_back:()=>{send({type:'back'});state=2;frames=[];const m=me();if(m)m.inRace=false;seq++;},
     host_service_net_rules:(finishWindow,nextRace,then)=>send({type:'settings',finishWindow,nextRace:['auto','host'][nextRace],then:['same','next','random'][then]}),
-    host_service_net_rotation:(a,n)=>{if(n>=0&&n<=64)send({type:'settings',rotation:[...span(a,n)].map(x=>x&31),trackLimits:[...span(a,n)].map(x=>10-2*(x>>5))});},
+    host_service_net_rotation:(a,n)=>{if(n>=0&&n<=64)send({type:'settings',rotation:[...span(a,n)].map(x=>x&31),trackLimits:[...span(a,n)].map(x=>10-2*(x>>5&3)),pickOnly:[...span(a,n)].filter(x=>x&128).map(x=>x&31)});},
     host_service_net_set_room:a=>{
       const b=span(a,28),d=new DataView(b.buffer,b.byteOffset,b.byteLength),m={type:'settings'};
       ['track','laps','public','maxPlayers'].forEach((k,i)=>{const v=d.getInt32(i*4,true);if(v>=0)m[k]=k==='public'?!!v:v;});

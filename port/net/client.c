@@ -496,13 +496,17 @@ void client_rules(NetClient *c, int finish_window, int next_race, int then)
 
 void client_rotation(NetClient *c, const unsigned char *ids, int count)
 {
-    char text[768];
-    int i, n;
+    char text[1024];
+    int i, n, first;
     if (count < 0 || count > 64 || (count && !ids)) return;
     n = snprintf(text, sizeof text, "{\"type\":\"settings\",\"rotation\":[");
     for (i = 0; i < count; i++) n += snprintf(text + n, sizeof text - n, "%s%u", i ? "," : "", ids[i] & 31);
     n += snprintf(text + n, sizeof text - n, "],\"trackLimits\":[");
-    for (i = 0; i < count; i++) n += snprintf(text + n, sizeof text - n, "%s%u", i ? "," : "", 10 - 2 * (ids[i] >> 5));
+    for (i = 0; i < count; i++) n += snprintf(text + n, sizeof text - n, "%s%u", i ? "," : "", 10 - 2 * (ids[i] >> 5 & 3));
+    /* bit 7: a track the host can pick that NEXT / RANDOM never choose (the server's pickOnly) */
+    n += snprintf(text + n, sizeof text - n, "],\"pickOnly\":[");
+    for (i = 0, first = 1; i < count; i++)
+        if (ids[i] & 0x80) n += snprintf(text + n, sizeof text - n, "%s%u", first ? "" : ",", ids[i] & 31), first = 0;
     snprintf(text + n, sizeof text - n, "]}");
     SDL_LockMutex(c->lock);
     say(c, "%s", text);
