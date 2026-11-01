@@ -9,6 +9,10 @@
 //! - else the game's folder when it is a plain folder the player can write to (the zips, portable
 //!   as always);
 //! - else (a read-only folder such as Program Files) the system's folder for app data too.
+//! One exception: the installer put over a portable copy (a zip unpacked in the folder the player
+//! then chose on its directory page) leaves that copy's dhd.ini and saves/ in the install folder.
+//! While the app data folder has neither, the game folder stays the data folder, so the player's
+//! settings, memory card and time played are still theirs (nothing is moved or copied).
 //! The game is started with that folder in DHD_SETTINGS, DHD_MEMCARD_DIR and DHD_DATA_DIR (dhd.log,
 //! iso-check.txt), and with DHD_LAUNCHER=1, so it doesn't open the launcher again
 //! (port/hle/launcher_link.c). The online menu's Update Now ends it with UPDATE_EXIT_CODE, and the
@@ -52,6 +56,11 @@ pub struct Place {
     pub installed: bool,
 }
 
+/// The player's own files a data folder holds: a dhd.ini or a saves/ folder (memory card, time played).
+fn has_player_files(dir: &Path) -> bool {
+    dir.join("dhd.ini").is_file() || dir.join("saves").is_dir()
+}
+
 impl Place {
     pub fn find() -> Place {
         let game = std::env::var_os("DHD_GAME_DIR").map(PathBuf::from).unwrap_or_else(|| {
@@ -70,6 +79,8 @@ impl Place {
         let bundle = app_bundle(&game);
         let installed = game.join(INSTALLED_MARKER).is_file();
         let data = match app_data {
+            Some(d) if installed && bundle.is_none() && appimage.is_none() && !has_player_files(&d)
+                && has_player_files(&game) && writable(&game) => game.clone(),
             Some(d) if bundle.is_some() || appimage.is_some() || installed || !writable(&game) => d,
             _ => game.clone(),
         };
@@ -254,6 +265,17 @@ mod tests {
         fs::write(folder.join(INSTALLED_MARKER), "installed").unwrap();
         let p = Place::at(folder.clone(), Some(app_data.clone()), None);
         assert_eq!((p.data, p.installed), (app_data.clone(), true));
+        // installed over a portable copy whose dhd.ini is still there: that copy's folder, while
+        // app data holds none of the player's files
+        let _ = fs::remove_dir_all(&app_data);
+        fs::write(folder.join("dhd.ini"), "name = SKUZA\n").unwrap();
+        let p = Place::at(folder.clone(), Some(app_data.clone()), None);
+        assert_eq!((p.data, p.installed), (folder.clone(), true));
+        // ...and app data once it has them
+        fs::create_dir_all(app_data.join("saves")).unwrap();
+        let p = Place::at(folder.clone(), Some(app_data.clone()), None);
+        assert_eq!(p.data, app_data);
+        fs::remove_file(folder.join("dhd.ini")).unwrap();
         // an app bundle: never written to
         let macos = root.join("Downhill Revived.app").join("Contents").join("MacOS");
         fs::create_dir_all(&macos).unwrap();
