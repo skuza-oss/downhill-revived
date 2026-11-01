@@ -12,6 +12,11 @@ const args = Object.fromEntries(
 );
 const BASE = (args.url ?? "ws://127.0.0.1:8787").replace(/\/$/, "");
 const PLAYERS = Number(args.players ?? 4);
+// The server starts a race only with two or more members (room.ts onStart, finding 118).
+if (!Number.isInteger(PLAYERS) || PLAYERS < 2) {
+  console.error("--players must be 2 or more: the server starts a race only with two members");
+  process.exit(2);
+}
 const SECONDS = Number(args.seconds ?? 10);
 const BYTES = Math.max(8, Math.min(3072, Number(args.bytes ?? 600)));
 const RATE = 20; // STATE frames a second, as the game sends
@@ -109,7 +114,7 @@ async function main() {
   const health = await (await fetch(BASE.replace(/^ws/, "http") + "/v1/health")).json();
   console.log(`server ${BASE}: protocol ${health.protocol}, minimum version ${health.minVersion}`);
   // The version gate: play as the oldest release the server allows.
-  const hello = (name) => ({ type: "hello", protocol: 1, version: VERSION, clientVersion: health.minVersion, isoSha256: ISO, name });
+  const hello = (name) => ({ type: "hello", protocol: health.protocol ?? 2, version: VERSION, clientVersion: health.minVersion, isoSha256: ISO, name });
 
   const players = [];
   const host = new Player("P0");
