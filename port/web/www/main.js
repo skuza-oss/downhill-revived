@@ -196,8 +196,19 @@ async function start(source) {
 // it stops. The browser asks the player the first time. Its echo cancellation and noise
 // suppression are on, so an open microphone doesn't send the game's own sound back. The answer:
 // 1 open, -1 refused or none (the game shows NO MICROPHONE when the talk key is pressed).
+// Requests run one after another (micQueue): one that came while getUserMedia waited (the
+// permission prompt, a device change) acts only after it, and a request already overtaken by a
+// later one is skipped, so a stream that opens after the game stopped wanting it is closed again
+// and two never write the ring at once.
 let micChanged = () => {};
-async function microphone(on, device = '') {
+let micQueue = Promise.resolve(), micWanted = 0;
+function microphone(on, device = '') {
+  const mine = ++micWanted;
+  const answer = micQueue.then(() => mine === micWanted ? openMicrophone(on, device) : (micOpen ? 1 : 0));
+  micQueue = answer.catch(() => {});
+  return answer;
+}
+async function openMicrophone(on, device) {
   if (!on || (micOpen && micOpen.device !== device)) {   // off, or SETTINGS > Microphone chose another
     if (micOpen) { micOpen.stream.getTracks().forEach(t => t.stop()); micOpen.node.disconnect(); micOpen = null;
       addLog('voice: microphone closed'); }
