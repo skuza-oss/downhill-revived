@@ -1,6 +1,7 @@
 /* keep_ready (client.c): a ready player whose ready the server cleared because the host changed
    the track says ready again by itself; a change of the laps field (the room's options: computer
-   riders, CHEATS), an own unready and the rider screen don't; DHD_KEEP_READY=0 turns it off. No
+   riders, CHEATS), a race's end (a session room's rotation), an own unready and the rider screen
+   don't; DHD_KEEP_READY=0 turns it off. No
    server or game data. */
 #include "client.h"
 #include <assert.h>
@@ -13,12 +14,15 @@ static int nsent;
 static void text(void *ctx, const char *s) { (void)ctx; snprintf(sent, sizeof sent, "%s", s); nsent++; }
 static void binary(void *ctx, const void *s, size_t n) { (void)ctx; (void)s; (void)n; }
 
+static int last_race;  /* the room's lastRace.id: the server sends it in every room message once set */
+
 static void room(NetClient *c, int track, int laps, int ready)
 {
     char t[512];
     snprintf(t, sizeof t, "{\"type\":\"room\",\"hostId\":1,\"settings\":{\"track\":%d,\"laps\":%d},"
+             "\"lastRace\":{\"id\":%d},"
              "\"members\":[{\"id\":1,\"name\":\"Host\",\"ready\":false},{\"id\":2,\"name\":\"Me\",\"ready\":%s}]}",
-             track, laps, ready ? "true" : "false");
+             track, laps, last_race, ready ? "true" : "false");
     client_on_text(c, t, strlen(t));
 }
 
@@ -37,6 +41,16 @@ int main(void)
 
     /* ready, then the host picks another track: the server clears it, the client readies again */
     client_ready(&c, 1); room(&c, 3, 2, 1);
+    nsent = 0; room(&c, 5, 2, 0);
+    assert(nsent == 1 && readied_by_itself() && c.ready);
+    room(&c, 5, 2, 1);
+    /* a race ended in a session room and the rotation moved to its next track: the server spent
+       the ready (room.ts closeRace), it stays spent */
+    last_race = 1;
+    nsent = 0; room(&c, 4, 2, 0);
+    assert(nsent == 0 && !c.ready);
+    /* ready by hand for that one, then the host picks another track: readied again */
+    client_ready(&c, 1); room(&c, 4, 2, 1);
     nsent = 0; room(&c, 5, 2, 0);
     assert(nsent == 1 && readied_by_itself() && c.ready);
     room(&c, 5, 2, 1);

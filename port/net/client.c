@@ -120,7 +120,8 @@ static void read_room(NetClient *c, const char *t)
     NetLobby *l = &c->lobby;
     long long v;
     int i, n;
-    const int was_ready = c->ready, old_track = l->track, old_laps = l->laps;
+    const int was_ready = c->ready, was_racing = c->racing, old_track = l->track, old_laps = l->laps;
+    const int old_last_race = l->last_race_id;
     json_string(t, "code", l->code, sizeof l->code);
     if (json_int(t, "hostId", &v))
         l->host_id = (int)v;
@@ -224,9 +225,11 @@ static void read_room(NetClient *c, const char *t)
     /* Unready only because the host picked another track: ready again. Not when the laps (the
        room's options) changed with it, not while racing or on the rider screen (the server would
        refuse it), and not if this player unreadied (c->ready is then already 0, so was_ready is
-       too). */
-    if (was_ready && !c->ready && !c->racing && !c->choosing && l->track != old_track && l->laps == old_laps &&
-        keep_ready()) {
+       too). Not when a race just ended either: a session room's rotation moves to its next track
+       then and the server spends every racer's Ready on purpose (room.ts closeRace), so readying
+       again would sign this player up for a race they never agreed to. */
+    if (was_ready && !c->ready && !was_racing && !c->racing && !c->choosing && l->track != old_track &&
+        l->laps == old_laps && l->last_race_id == old_last_race && keep_ready()) {
         c->ready = 1;
         say(c, "{\"type\":\"ready\",\"ready\":true}");
     }
