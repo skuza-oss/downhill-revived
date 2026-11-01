@@ -40,9 +40,23 @@ Why Inno Setup and not Tauri's NSIS bundler:
   moving it means overriding its template.
 - The uninstaller has to remove what later updates put in the folder (a newer release's files,
   `*.old`) while keeping the player's files. Inno's `[Code]` section does that in a few lines
-  (`RemoveUpdateLeftovers`: every plain file at the top except the update.rs KEEP names; folders
-  are the player's and stay). Tauri's uninstaller deletes the files it logged, plus an optional
+  (`RemoveUpdateLeftovers`). Tauri's uninstaller deletes the files it logged, plus an optional
   "delete app data" step we must never take.
+- **Fixed after 0.7.6** (found by ekansh28, PR 28): 0.7.6's `RemoveUpdateLeftovers` deleted every
+  plain file at the top of the install folder except the player's four, and the directory page takes
+  any folder, so an install into a folder that held other files (Downloads, a games folder) would have
+  deleted them on uninstall. Since 0.7.7 the launcher lists every file an update copies in
+  `update-files.txt` (update.rs `UPDATE_LIST`), and the uninstaller deletes only those, the `.old`
+  copies of the game's files, and the list; clean_up deletes only those `.old` copies too. A name in
+  the list with a path in it is ignored. The directory page also refuses a folder that holds files but
+  no Downhill Revived and proposes a "Downhill Revived" folder inside it (a silent install with
+  `/DIR=` goes into that folder). An install made by the 0.7.6 setup keeps its uninstaller until the
+  player runs a newer setup over it: Inno replaces `unins000.exe` then, a launcher update doesn't.
+  Checked with a copy of the setup under its own app id: a silent install into a folder holding a
+  player's file went into the subfolder and its uninstall left the file; an install that later got a
+  player's files and folders, an update's `newlib.dll` (listed), its `.old` and a `.old` launcher lost
+  exactly the game's files, and planted paths in the list (`..\escape.txt`, `C:\Windows\win.ini`)
+  were ignored.
 - The script compiles the folder package_release has already checked, byte for byte. Tauri's
   bundler would run its own build/bundle step around the launcher and download its NSIS and plugins
   into the user's cache on the system drive.

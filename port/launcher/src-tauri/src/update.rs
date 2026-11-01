@@ -15,8 +15,11 @@
 //!   (latest.json's "linux-appimage" entry, or the release's DownhillRevived-*-linux*.AppImage
 //!   asset); the running image is renamed NAME.AppImage.old and the new file moved in.
 //! A copy the Windows installer put in place (game.rs INSTALLED_MARKER) updates as a folder install,
-//! then its Apps & features entry gets the new version. clean_up deletes the .old files and
-//! dhd-update/ at the next start.
+//! then its Apps & features entry gets the new version. A folder install also lists every file an
+//! update copied in UPDATE_LIST, so the Windows uninstaller (port/release/installer/windows.iss) and
+//! clean_up touch only the game's own files: a player may have put the game in a folder that holds
+//! other files. clean_up deletes the .old copies of the game's files and dhd-update/ at the next
+//! start.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,6 +35,9 @@ pub const RELEASES_PAGE: &str = "https://github.com/skuza-oss/downhill-revived/r
 const WORK_DIR: &str = "dhd-update";
 /// Never replaced by an update: the player's own files.
 const KEEP: [&str; 4] = ["dhd.ini", "dhd.log", "iso-check.txt", "launcher.log"];
+/// In a folder install: the names of the files updates copied in, one a line (the uninstaller reads
+/// it; windows.iss UpdateList).
+pub const UPDATE_LIST: &str = "update-files.txt";
 /// This build's name in release assets (DownhillRevived-<version>-<PLATFORM>.zip, or
 /// -<PLATFORM>-experimental.zip while the platform is experimental) and in latest.json's platforms.
 pub const PLATFORM: &str = if cfg!(windows) {
@@ -283,10 +289,11 @@ fn release_folder(unpacked: &Path, inner: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| "the update holds no game".to_string())
 }
 
-/// A folder install: the release's plain files over the game's.
+/// A folder install: the release's plain files over the game's, their names added to UPDATE_LIST.
 fn copy_release(unpacked: &Path, game_dir: &Path) -> Result<(), String> {
     let folder = release_folder(unpacked, Path::new(""))?;
     let mut failed = Vec::new();
+    let mut names = update_list(game_dir);
     for entry in fs::read_dir(&folder).map_err(|e| e.to_string())?.flatten() {
         let src = entry.path();
         let name = entry.file_name();
@@ -294,6 +301,10 @@ fn copy_release(unpacked: &Path, game_dir: &Path) -> Result<(), String> {
             continue;
         }
         let dst = game_dir.join(&name);
+        let listed = name.to_string_lossy().into_owned();
+        if !names.contains(&listed) {
+            names.push(listed);
+        }
         if fs::copy(&src, &dst).is_ok() {
             continue;
         }
@@ -304,6 +315,8 @@ fn copy_release(unpacked: &Path, game_dir: &Path) -> Result<(), String> {
             failed.push(name.to_string_lossy().into_owned());
         }
     }
+    names.sort();
+    let _ = fs::write(game_dir.join(UPDATE_LIST), names.join("\n") + "\n");
     if failed.is_empty() {
         Ok(())
     } else {
@@ -396,7 +409,30 @@ fn old_name(p: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// What the last update left behind: *.old files, the old app bundle or AppImage and dhd-update/.
+/// UPDATE_LIST's names in dir (none when there is no list): plain names only, never a path.
+fn update_list(dir: &Path) -> Vec<String> {
+    fs::read_to_string(dir.join(UPDATE_LIST))
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && !n.contains(['/', '\\', ':']) && *n != "." && *n != "..")
+        .map(String::from)
+        .collect()
+}
+
+/// The game's own files in a folder install whose NAME.old an update may leave: UPDATE_LIST's,
+/// the launcher's and the game's (an update by a launcher from before UPDATE_LIST listed nothing).
+fn own_files(dir: &Path) -> Vec<String> {
+    let mut names = update_list(dir);
+    names.push(crate::game::GAME_EXE.to_string());
+    if let Some(exe) = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())) {
+        names.push(exe);
+    }
+    names
+}
+
+/// What the last update left behind: the .old copies of the game's files, the old app bundle or
+/// AppImage and dhd-update/. Another *.old in the folder isn't the game's and stays.
 pub fn clean_up(place: &Place) {
     let _ = fs::remove_dir_all(place.data.join(WORK_DIR));
     if let Some(app) = &place.bundle {
@@ -405,11 +441,10 @@ pub fn clean_up(place: &Place) {
     if let Some(image) = &place.appimage {
         let _ = fs::remove_file(old_name(image));
     }
-    if let Ok(dir) = fs::read_dir(&place.game) {
-        for e in dir.flatten() {
-            if e.file_name().to_string_lossy().ends_with(".old") && e.path().is_file() {
-                let _ = fs::remove_file(e.path());
-            }
+    for name in own_files(&place.game) {
+        let old = place.game.join(format!("{name}.old"));
+        if old.is_file() {
+            let _ = fs::remove_file(old);
         }
     }
 }
@@ -589,6 +624,31 @@ mod tests {
         assert_eq!(fs::read_to_string(game.join("README.txt")).unwrap(), "new readme");
         assert_eq!(fs::read_to_string(game.join("dhd.ini")).unwrap(), "name = SKUZA\n");
         assert!(!game.join(WORK_DIR).exists());
+        // the update's files are listed for the uninstaller; the player's dhd.ini is not
+        let mut want = vec!["README.txt".to_string(), GAME_EXE.to_string()];
+        want.sort();
+        assert_eq!(update_list(&game), want);
+        fs::remove_dir_all(&game).unwrap();
+    }
+
+    /// clean_up deletes the .old copies of the game's files only: a folder the player chose may hold
+    /// other *.old files.
+    #[test]
+    fn clean_up_keeps_other_old_files() {
+        use crate::game::GAME_EXE;
+        let game = std::env::temp_dir().join(format!("dhd-launcher-cleanup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&game);
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join(UPDATE_LIST), "newlib.dll\n../escape.txt\n").unwrap();
+        for f in [format!("{GAME_EXE}.old"), "newlib.dll.old".into(), "notes.txt.old".into()] {
+            fs::write(game.join(f), "x").unwrap();
+        }
+        let place = Place { game: game.clone(), data: game.clone(), bundle: None, appimage: None, installed: false };
+        clean_up(&place);
+        assert!(!game.join(format!("{GAME_EXE}.old")).exists());
+        assert!(!game.join("newlib.dll.old").exists());
+        assert!(game.join("notes.txt.old").exists(), "a file that isn't the game's stays");
+        assert_eq!(update_list(&game), vec!["newlib.dll".to_string()], "a listed path is ignored");
         fs::remove_dir_all(&game).unwrap();
     }
 

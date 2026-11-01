@@ -13,9 +13,12 @@
 ; from the release zips (update.rs). Start menu and desktop shortcuts, an Apps & features entry (its
 ; key is game.rs UNINSTALL_KEY: the AppId below + "_is1") and an uninstaller.
 ;
-; The uninstaller removes what it installed and what updates put in the folder since (newer files,
-; *.old), and never the player's files: those are in %APPDATA%\Downhill Revived, which it doesn't
-; touch, and a dhd.ini, log or folder found in the install folder is left there too.
+; The uninstaller removes what it installed and what updates put in the folder since: the files the
+; launcher lists in update-files.txt (update.rs UPDATE_LIST) and the .old copies of the game's files.
+; Nothing else: a player may have chosen a folder that holds other files. The player's files are in
+; %APPDATA%\Downhill Revived, which it doesn't touch, and a dhd.ini, log or folder found in the
+; install folder is left there too. The directory page refuses a folder that already holds files
+; but no Downhill Revived, and offers a "Downhill Revived" folder inside it instead.
 
 #ifndef AppVersion
   #error AppVersion must be defined (package_release.py)
@@ -80,25 +83,85 @@ begin
   Result := (N = 'dhd.ini') or (N = 'dhd.log') or (N = 'iso-check.txt') or (N = 'launcher.log');
 end;
 
-// After the logged files are gone: the files updates added to the install folder (a newer release's
-// files, *.old) go too. Only plain files at the top: a folder there (saves\, textures\) is the
-// player's, and stays, with the install folder around it.
+// A name from update-files.txt that may be deleted: a plain file name, never a path or a player's file.
+function IsGameFileName(const Name: String): Boolean;
+begin
+  Result := (Name <> '') and (Name <> '.') and (Name <> '..') and (Pos('\', Name) = 0) and
+            (Pos('/', Name) = 0) and (Pos(':', Name) = 0) and not IsPlayerFile(Name);
+end;
+
+// Name and its .old copy, when they are plain files.
+procedure DeleteGameFile(const Dir, Name: String);
+begin
+  if not IsGameFileName(Name) then exit;
+  if FileExists(AddBackslash(Dir) + Name) then DeleteFile(AddBackslash(Dir) + Name);
+  if FileExists(AddBackslash(Dir) + Name + '.old') then DeleteFile(AddBackslash(Dir) + Name + '.old');
+end;
+
+// After the logged files are gone: what updates added (update-files.txt, update.rs UPDATE_LIST) and
+// the .old copies of the game's files go too, then the list. Any other file or folder in the install
+// folder (saves\, textures\, a player's own files) stays, with the install folder around it.
 procedure RemoveUpdateLeftovers(const Dir: String);
+var
+  Names: TArrayOfString;
+  I: Integer;
+begin
+  if LoadStringsFromFile(AddBackslash(Dir) + 'update-files.txt', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+      DeleteGameFile(Dir, Trim(Names[I]));
+  // the files this setup installed (their own .old copies: the launcher renames a file in use)
+  DeleteGameFile(Dir, 'DownhillRevived.exe');
+  DeleteGameFile(Dir, 'dhd.exe');
+  DeleteGameFile(Dir, 'dxcompiler.dll');
+  DeleteGameFile(Dir, 'update-files.txt');
+  RemoveDir(Dir);  // only when empty
+end;
+
+// The directory page: a folder that already holds files, none of them Downhill Revived's, isn't used
+// as it is (the uninstaller keeps other files, but a game folder of its own is tidier): the setup
+// proposes a "Downhill Revived" folder inside it and stays on the page.
+function FolderHoldsOtherFiles(const Dir: String): Boolean;
 var
   Found: TFindRec;
 begin
+  Result := False;
+  if not DirExists(Dir) or FileExists(AddBackslash(Dir) + 'DownhillRevived.exe') then exit;
   if FindFirst(AddBackslash(Dir) + '*', Found) then
   begin
     try
       repeat
-        if (Found.Attributes and FILE_ATTRIBUTE_DIRECTORY = 0) and not IsPlayerFile(Found.Name) then
-          DeleteFile(AddBackslash(Dir) + Found.Name);
+        if (Found.Name <> '.') and (Found.Name <> '..') then
+        begin
+          Result := True;
+          exit;
+        end;
       until not FindNext(Found);
     finally
       FindClose(Found);
     end;
   end;
-  RemoveDir(Dir);  // only when empty
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Dir: String;
+begin
+  Result := True;
+  if CurPageID <> wpSelectDir then exit;
+  Dir := RemoveBackslashUnlessRoot(WizardForm.DirEdit.Text);
+  if FolderHoldsOtherFiles(Dir) then
+  begin
+    WizardForm.DirEdit.Text := AddBackslash(Dir) + 'Downhill Revived';
+    // a silent install (/DIR=) goes on into the new folder; the wizard shows it and stays on the page
+    if WizardSilent then
+      Log('The folder holds other files: installing into ' + WizardForm.DirEdit.Text)
+    else
+    begin
+      MsgBox('That folder already holds other files. Downhill Revived gets a folder of its own inside it:' + #13#10#13#10 +
+             WizardForm.DirEdit.Text, mbInformation, MB_OK);
+      Result := False;
+    end;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
