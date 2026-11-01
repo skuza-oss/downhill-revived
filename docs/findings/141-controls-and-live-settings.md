@@ -30,7 +30,14 @@ VU1 loop), so they are written up here.
 - Vibration: turning it on buzzes player 1's pad (`pad_preview.h`). The game sends motor values
   every field, zeros included, so the preview wins over them for a moment, then the game's apply
   again; turning it off stops at once.
-- Widescreen and the voice rows apply at once too (STATE.md, 2026-11-01; finding 131).
+- Widescreen and the voice rows apply at once too (STATE.md, 2026-11-01; finding 131). Every row
+  that decides the widescreen shape (Widescreen, Display, Window Size and Picture, whose
+  `DHD_ASPECT` ratio `wanted_aspect` reads) runs `port_widescreen_apply` and then presents again
+  (`pc_settings.c` `widescreen_apply`). On the native PC builds the renderer takes the shape from
+  what the module published at the last vblank (`host_widescreen_aspect` in `host.c`, published by
+  `kernel.c`), so `widescreen_apply` publishes it again first (`host_frame_video`); without that the
+  new field of view was shown in the old shape until something else re-presented. The browser
+  reads `DHD_WIDESCREEN_ASPECT`, which `port_widescreen_apply` sets.
 
 ## Touch regions (Android)
 

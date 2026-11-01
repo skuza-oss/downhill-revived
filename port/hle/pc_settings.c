@@ -223,6 +223,21 @@ static void format(Row *r)
    window ends it either way; switching it off stops at once. */
 static int buzz;
 
+/* Widescreen and the picture's shape again (widescreen.c), then the picture. On the native PC
+   builds the renderer reads the shape the module published at the last vblank
+   (host_widescreen_aspect in host.c, kernel.c): it's published again here first, so this apply sees
+   the new one, not the old. The browser reads DHD_WIDESCREEN_ASPECT, already set. */
+static void widescreen_apply(void)
+{
+    void port_widescreen_apply(void);
+    port_widescreen_apply();
+#if defined(__wasm__)
+    extern int host_widescreen_flat_limit(void);
+    host_frame_video(host_widescreen_aspect(), host_widescreen_flat_limit());
+#endif
+    host_service_gs_present_options_apply();
+}
+
 static void commit(Row *r, int apply)
 {
     const SettingChoice *c = &r->choices[r->selected];
@@ -234,19 +249,13 @@ static void commit(Row *r, int apply)
     if (apply) hle_env_changed();
     if (!apply) return;
     r->running = r->selected;
-    if (r == &rows[WIDESCREEN]) {   /* the game's views and the picture's shape (widescreen.c) */
-        void port_widescreen_apply(void);
-        port_widescreen_apply();
-        host_service_gs_present_options_apply();
-    } else if (r == &rows[DISPLAY] || r == &rows[SIZE]) {
+    if (r == &rows[WIDESCREEN] || r == &rows[SHAPE]) widescreen_apply();  /* DHD_ASPECT names its shape too */
+    else if (r == &rows[DISPLAY] || r == &rows[SIZE]) {
         host_service_gs_window_apply();
-        void port_widescreen_apply(void);
-        port_widescreen_apply();   /* widescreen takes the window's (or the monitor's) shape */
-        host_service_gs_present_options_apply();
+        widescreen_apply();   /* widescreen takes the window's (or the monitor's) shape */
     }
-    else if (r == &rows[RESOLUTION] || r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[VSYNC] ||
-             r == &rows[COUNTER])
-        host_service_gs_present_options_apply();  /* DHD_SCALE, DHD_ASPECT, DHD_PRESENT_FILTER, DHD_VSYNC, the counter */
+    else if (r == &rows[RESOLUTION] || r == &rows[SCALING] || r == &rows[VSYNC] || r == &rows[COUNTER])
+        host_service_gs_present_options_apply();  /* DHD_SCALE, DHD_PRESENT_FILTER, DHD_VSYNC, the counter */
     else if (r == &rows[RATE]) port_fps_changed();
     else if (r == &rows[VIBRATION]) {
         int on = strcmp(c->value, "0") != 0;
