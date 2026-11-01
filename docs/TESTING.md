@@ -87,6 +87,7 @@ Online:
 | `DHD_NET_TEST_FINISH=S` | this PC's rider finishes at race second S |
 | `DHD_NET_TEST_TRACK=N` | (with SCRIPTED) a host's room starts on game track N |
 | `DHD_NET_TEST_THEN=same\|next\|random` | (with SCRIPTED) a host's room's Then rule (the track after each race) |
+| `DHD_NET_TEST_SHOP=1` | (with SCRIPTED) the shop waits for the pads; without it a scripted run presses START there at once |
 | `DHD_NET_TEST_SKIP=S` | presses START S seconds into each flight over the track, as a player skipping it |
 | `DHD_NET_AFTER_RACE` | (with SCRIPTED) the menu script after a race |
 | `DHD_ONLINE_MENU_TRACE=1` | logs every online menu page and its rows |

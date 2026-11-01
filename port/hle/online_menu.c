@@ -1,10 +1,10 @@
 /* Online rooms in the game's popup style (menu_page.c), with physical keyboard text entry.
    The flow (finding 092): Create or Join waits on the ONLINE page until the server has the player
-   in the room; then the game's own rider screen, once, and its ride to the shop, whose exit
-   (port_online_shell, menu 18) opens the RACE ROOM over the rider screen (the rider on its
-   stand, Change Rider to choose again); the host starts; loading; the race. The shop's own pages
-   (bike, jersey, colour) are skipped as since finding 065's rework: see finding 092. The host chooses the track and starts when everyone is ready. The
-   existing online.c setup event carries each complete preview choice. */
+   in the room; then the game's own rider screen, once, its ride to the shop and the shop's own
+   pages (BIKES / JERSEYS / BIKE COLOR, finding 128), whose START (port_online_shop_commit) keeps
+   the choice and opens the RACE ROOM over the rider screen (the rider on its stand, Change Rider
+   to choose again); the host starts; loading; the race. The host chooses the track and starts
+   when everyone is ready. The existing online.c setup event carries each complete choice. */
 #include "hle.h"
 #include "menu_page.h"
 #include "text_input.h"
@@ -58,6 +58,8 @@ static int room_closed;  /* the race room was left this frame: nothing more to d
    while the camera flies to the rider screen it opens over; hold_rider until the press that
    closed it is released; resume_home: back on the title, ONLINE opens again. */
 static int in_shell, room_pending, hold_rider, resume_home;
+/* shop_done: the shop's START kept the choice (port_online_shop_commit); its Back path is running */
+static int shop_done;
 /* connecting: Create or Join was chosen; the page waits for the server's room (connect_poll). */
 static int connecting;
 static int chosen_rider, chosen_bike;
@@ -66,7 +68,7 @@ static int public_room, room_settings_sent, room_ready_sent, room_track = 0, roo
 extern int func_00182290(int track);
 static int track_limit(int track) { int kind = func_00182290(track); return kind == 2 ? 10 : kind == 1 ? 8 : 6; }
 static int rotation_sent;  /* the host's track list for the room's Then rule, once a room */
-static int32_t chosen_outfit[3], chosen_cycle[3];
+static int32_t chosen_outfit[3], chosen_cycle[3], chosen_colour;  /* colour: SETUP+0x254, the BIKE COLOR page's */
 #define SHELL_WORD(a) (*(int32_t *)(uintptr_t)(0x08000000u + (a)))
 #define SETUP_WORD(offset) SHELL_WORD(0x4B25A0 + (offset))
 void port_online_choose_begin(int flight);
@@ -91,12 +93,10 @@ void func_0023C8D8(int mode, int view);
 void func_0023D898(int view, float *distance, float *aspect);
 void func_0023D8D8(int view, float distance, float aspect);
 float func_00203C28(void *animation);
-void func_001F79D8(int level, int frames);  /* the shell's screen fade */
-extern int D_00275CB0[];  /* each rider's camera take out of the shop (func_001F1500) */
 int func_00220230(int port);  /* the buttons held on a pad */
 static float shell_distance, shell_aspect;
 static int offline_mode, offline_submode, offline_players;
-void hle_online_selected_ride(int rider, const int32_t *outfit, const int32_t *bike);
+void hle_online_selected_ride(int rider, const int32_t *outfit, const int32_t *bike, int colour);
 
 /* SharedMenu can change a one-view shell's render mode in place; the stock popup
    manager only restores its view descriptor when it began with multiple views. */
@@ -177,6 +177,14 @@ static void unlock_all(void)
     hle_mc_hold = unlocked = 1;
     hle_log("online menu: everything unlocked while online\n");
 }
+
+/* Every bike online (finding 128): the shop's BIKES page lists the save's bike garage (frame,
+   fork, wheels of each bike; profile +0x11C68, a new save has 3), not the unlock bits. While
+   online the garage's readers answer from PC SETTINGS Unlock All's list (patches_unlock.py,
+   port_unlock_list): the save's bikes, then the 41 preset bikes the retail unlock-all code adds
+   (D_0026DEA0: the entry and bonus bikes and every pro's), and online the single race's stock bike
+   17 4 0 too (issue 18's default). Nothing is written to the save. */
+int port_online_bikes(void) { return unlocked; }
 
 /* Back to offline play: the player's own unlocks again. */
 void port_online_relock(void)
@@ -1523,7 +1531,7 @@ static void room_update(MenuPage *p)
         hle_log("online menu: room %s: the race starts\n", l->code);
         race = 1;
         track_list = leave_ask = rules_open = 0;
-        hle_online_selected_ride(chosen_rider, chosen_outfit, chosen_cycle);
+        hle_online_selected_ride(chosen_rider, chosen_outfit, chosen_cycle, chosen_colour);
         hle_online_from_menu();
         menu_page_close(p);
         return;
@@ -1764,7 +1772,7 @@ int port_online_menu(void)
         status[0] = 0;  /* a room that closed leaves its reason for HOME */
     }
     race = 0;
-    in_shell = 0;
+    in_shell = shop_done = 0;
     connecting = 0;
     run_page();
     if (!race) { host_service_net_leave(); reset_selection(); connecting = 0; }
@@ -1788,6 +1796,8 @@ int port_main_label(const int *table, int index)
     return index < 3 ? table[index] : (int)(uintptr_t)"ONLINE";
 }
 
+/* The choice as the setup block has it: after the shop's START (retail's func_0013A170 commits
+   the bike there), or at GET READY. */
 static void keep_selection(void)
 {
     chosen_rider = SETUP_WORD(0x290);
@@ -1797,18 +1807,62 @@ static void keep_selection(void)
         chosen_outfit[i] = SETUP_WORD(0x1B8 + 4 * i);
         chosen_cycle[i] = SETUP_WORD(0x11C + 4 * i);
     }
+    chosen_colour = SETUP_WORD(0x254);  /* func_0013A170 commits the BIKE COLOR page's cursor there */
     selected = 1;
     host_service_net_pick(-1, chosen_rider / 32, chosen_bike);
     host_service_net_set_ready(0);
-    hle_log("online menu: selection rider %d (carousel place %d, player %d), outfit %d %d %d, bike %d %d %d\n",
+    hle_log("online menu: selection rider %d (carousel place %d, player %d), outfit %d %d %d, bike %d %d %d, colour %d\n",
             chosen_rider, chosen_spot, SHELL_WORD(0x29DF68), chosen_outfit[0], chosen_outfit[1], chosen_outfit[2],
-            chosen_cycle[0], chosen_cycle[1], chosen_cycle[2]);
+            chosen_cycle[0], chosen_cycle[1], chosen_cycle[2], chosen_colour);
+}
+
+/* The shop's START online (patched func_0013BA60, right after retail's own commit, func_0013A170,
+   and func_00140C38): the bike, jersey and bike colour the player chose are in the setup block now.
+   Keep them, and 1: the shop then leaves as its Back does (the shell's own way back to the rider
+   screen, camera included), not to the level chooser; port_online_shell opens the room. Finding
+   092 section 3 read the bike too early (before this commit); here it is retail's committed one. */
+int port_online_shop_commit(void)
+{
+    if (!choosing) return 0;
+    keep_selection();
+    hle_log("online menu: the shop's choice kept\n");
+    shop_done = 1;
+    return 1;
+}
+
+/* Scripted test runs (DHD_NET_SCRIPTED) press nothing in the shop: its START on its first frame,
+   so they go on to the room as before. DHD_NET_TEST_SHOP=1 leaves the shop to the pads. */
+int port_online_shop_auto(void)
+{
+    static int automatic = -1;
+    if (automatic < 0) automatic = getenv("DHD_NET_SCRIPTED") && !getenv("DHD_NET_TEST_SHOP");
+    return choosing && automatic;
+}
+
+void hle_online_default_bike(int rider, int32_t bike[3]);
+
+/* The ride to the shop (menu 18), once, before the shop opens (func_001F1500 runs it when the
+   camera arrives): the setup's bike, where the shop's BIKES page starts online (patched
+   func_00139BF8: func_0013A270 finds it in the list), is this rider's last choice, else the
+   rider's default (a pro's own bike, the others the stock one, issue 18): START without a change
+   keeps it. */
+static void shop_prepare(void)
+{
+    int32_t bike[3];
+    int rider = SETUP_WORD(0x290);
+    if (selected && chosen_rider == rider) memcpy(bike, chosen_cycle, sizeof bike);
+    else hle_online_default_bike(rider, bike);
+    for (int k = 0; k < 3; k++) SETUP_WORD(0x11C + 4 * k) = bike[k];
+    hle_log("online menu: the shop opens on bike %d %d %d (rider %d)\n", bike[0], bike[1], bike[2], rider);
 }
 
 /* The shell's frame, before its menu runs; 1 skips that menu this frame. Only online selection
    enters here. The room is a page over the rider screen (menu 3):
-   - GET READY (menu 9) keeps the choice and flies the camera back to the rider screen, as the
-     main menu's SINGLE PLAYER does, instead of loading a race before everyone is ready;
+   - the shop's START (port_online_shop_commit) keeps the choice; its Back path back on the shell,
+     the rider screen's Back cleanup and the camera to the rider's stand, as below;
+   - GET READY (menu 9), which the shop no longer reaches online, keeps the choice and flies the
+     camera back to the rider screen, as the main menu's SINGLE PLAYER does, instead of loading a
+     race before everyone is ready;
    - the rider screen's Back (Triangle) opens the room instead of leaving for the title;
    - Change Selection closes the room on the rider screen itself;
    - leaving the room (or losing it) takes the rider screen's own Back to the title, where the
@@ -1828,18 +1882,16 @@ int port_online_shell(void)
     NetLobby connection;
     host_service_net_get_lobby(GADDR(&connection));
     int lost = connection.state == NET_FAILED || connection.state == NET_IDLE;
-    if (menu == 18) {
-        /* The shop's START: when its camera has flown out, retail goes on to the level chooser,
-           which sets up the race's loading (func_00139BF8) and takes the camera. The choice is
-           complete here: keep it and leave as the rider screen's Back does; the room (with the
-           host's track) opens over the rider screen. */
-        void *animation = (void *)(uintptr_t)(0x08000000u + 0x4C6370);
-        int rider_index = SHELL_WORD(0x4C6910 + 4 * SHELL_WORD(0x29DF68));
-        func_00203590(animation, 0x2330, 0, D_00275CB0[rider_index]);
-        if (func_00203C28(animation) < 1.0f) return 0;
-        if (!lost) keep_selection();
+    static int shop_prepared;
+    if (menu != 18) shop_prepared = 0;
+    else if (!shop_prepared && !lost) shop_prepared = 1, shop_prepare();
+    if (shop_done && menu != 18) {
+        /* The shop has closed by its Back path (func_00139BF8's cancel, func_001F1500's way back):
+           leave as the rider screen's Back does; the room (with the host's track) opens over the
+           rider screen, on the player's rider. */
+        hle_log("online menu: the shop closed (menu %d): back to the room\n", menu);
+        shop_done = 0;
         selection_end();
-        func_001F79D8(0, 0x3C);  /* the shop's exit faded to black; the level chooser fades back */
         return 1;  /* the main menu next frame: the flight to the rider screen below */
     }
     if (room_pending && (menu == 15 || menu == 0)) room_pending = 0;  /* backed out meanwhile */

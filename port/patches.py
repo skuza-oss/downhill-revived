@@ -761,6 +761,37 @@ PATCHES['unsorted/001EB1D8.cpp'] += [
      '    if (D_0029DF87__c8)'),
 ]
 
+# Online the shop's own pages run (finding 128): its START commits the bike as retail does
+# (func_0013A170), then online it leaves as the shop's Back does from its header (func_0013C970:
+# the exit page D_00362490, which fades out and closes the popup as cancelled, so func_00139BF8 and
+# func_001F1500 take the shell and its camera back to the rider screen) instead of opening the
+# level chooser; port_online_shell opens the room there. Scripted test runs press
+# START on the shop's first frame (port_online_shop_auto). Both return 0 offline.
+PATCHES['unsorted/0013BA60.cpp'] = PATCHES.get('unsorted/0013BA60.cpp', []) + [
+    ('text', 'extern void func_0013A170();\n',
+     'extern void func_0013A170();\n'
+     'extern "C" int port_online_shop_auto(void);\n'
+     'extern "C" int port_online_shop_commit(void);\n'
+     'extern char D_00362490[];\n'),
+    ('text', '  if(!p->x524 && func_00190D60(input,8,p->x45C)) {\n'
+             '   int other=0, game;\n'
+             '   func_0013A170(); func_00140C38(D_0036B730);\n',
+     '  if(!p->x524 && (func_00190D60(input,8,p->x45C) || port_online_shop_auto())) {\n'
+     '   int other=0, game;\n'
+     '   func_0013A170(); func_00140C38(D_0036B730);\n'
+     '   if(port_online_shop_commit()) { func_001C57A8(D_004B2A90,(u128)0x5443454C45535F53UL); func_00190660(&D_003F52D0,D_00362490); return; }\n'),
+]
+
+# Online the shop's BIKES page starts on the setup's bike (the player's last choice, else the
+# rider's default: online_menu.c shop_prepare), as the career's shop does (func_0013A270), not on
+# the list's first: a pro who changes nothing keeps the pro's own bike (finding 128).
+PATCHES['unsorted/00139BF8.c'] = PATCHES.get('unsorted/00139BF8.c', []) + [
+    ('text', '        func_0013CDB0(&D_00365800);\n    }\n',
+     '        func_0013CDB0(&D_00365800);\n        if (port_online_single_race()) func_0013A270();\n    }\n'),
+    ('text', 'extern void func_0013A270(void);\n',
+     'extern void func_0013A270(void);\nextern int port_online_single_race(void);\n'),
+]
+
 # The stock level chooser accepts the host's track only; guests retain the same shop exit.
 PATCHES['unsorted/001F8920.c'] = PATCHES.get('unsorted/001F8920.c', []) + [
     ('text', 'void func_001F8920(struct Race *race)\n{',

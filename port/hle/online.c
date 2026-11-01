@@ -48,9 +48,10 @@ static int race_running(void) { return EE32(PHASE) >= 2 && EE32(PHASE) <= 4; }
 
 static int npads = -1, online = -1;
 static int selected_ride;
-static int32_t selected_rider, selected_outfit[3], selected_bike[3];
-void hle_online_selected_ride(int rider, const int32_t *outfit, const int32_t *bike)
+static int32_t selected_rider, selected_outfit[3], selected_bike[3], selected_colour;
+void hle_online_selected_ride(int rider, const int32_t *outfit, const int32_t *bike, int colour)
 {
+    selected_colour = colour;
     selected_ride = 1;
     selected_rider = rider;
     memcpy(selected_outfit, outfit, sizeof selected_outfit);
@@ -261,7 +262,7 @@ int hle_puppet_lag(char *out, int size);
 int hle_puppet_hits_taken(void);
 int hle_puppet_global(int slot), hle_puppet_local(int global), hle_puppet_owned(int slot);
 void hle_puppet_start(void);
-extern int func_001FA7C0(int bike);                       /* a bike's sound kind */
+extern int func_001FA7C0(int frame);                      /* a frame's own colour (the shop's first BIKE COLOR) */
 extern void func_001B45F8(void *timer, int kind, int ticks);  /* the race-end countdown */
 
 /* EVENT payloads (finding 047): byte 0 the version, byte 1 the type. Type 1 (a hit) is
@@ -290,10 +291,11 @@ static const char *const rider_name[16] = {
 static const int regular[10] = {0, 1, 2, 3, 4, 5, 8, 10, 13, 14};
 
 /* What a player rides, as their PC's setup block has it after the menus: rider id (+0x290),
-   rider/outfit (+0x1B8, 3 words), bike (+0x11C, 3 words). */
+   rider/outfit (+0x1B8, 3 words), bike (+0x11C, 3 words: frame, fork, wheels), bike colour (+0x254,
+   the shop's BIKE COLOR; finding 128). colour -1: not sent (an EVENT_SETUP of 30 bytes). */
 typedef struct {
     int have;
-    int32_t rider, outfit[3], bike[3];
+    int32_t rider, outfit[3], bike[3], colour;
 } Ride;
 
 static struct {
@@ -619,9 +621,10 @@ static void receive_frames(void)
                 Ride *r = &on.ride[sender];
                 r->rider = get32(e + 2);
                 for (int k = 0; k < 3; k++) r->outfit[k] = get32(e + 6 + 4 * k), r->bike[k] = get32(e + 18 + 4 * k);
+                r->colour = n - 2 >= 34 ? (int32_t)get32(e + 30) : -1;
                 r->have = 1;
-                fprintf(stderr, "online: player %d rides %X (%d %d %d), bike %d %d %d\n", sender, r->rider,
-                        r->outfit[0], r->outfit[1], r->outfit[2], r->bike[0], r->bike[1], r->bike[2]);
+                fprintf(stderr, "online: player %d rides %X (%d %d %d), bike %d %d %d, colour %d\n", sender, r->rider,
+                        r->outfit[0], r->outfit[1], r->outfit[2], r->bike[0], r->bike[1], r->bike[2], r->colour);
             }
             break;
         case EVENT_START:
@@ -647,11 +650,15 @@ static void receive_frames(void)
 
 /* ---- the riders: who wears what ---- */
 
-/* A rider's bike online (issue #18): the room skips the shop, which would write it, so the setup
-   holds a stale one, and a pro rider on it rides a mix of two bikes. The five pros get theirs from
-   the game's own single-race rule (func_001B7C08, three words); the others the stock bike, 17 4 0,
-   as func_001B99B8 gives them. */
+/* A rider's bike online when the player's own choice isn't known (issue #18): a computer rider,
+   a player whose ride never came, a race started without the room's shop (scripted tests). A setup
+   the shop didn't write holds a stale bike, and a pro rider on it rides a mix of two bikes. The
+   five pros get theirs from the game's own single-race rule (func_001B7C08, three words); the
+   others the stock bike, 17 4 0, as func_001B99B8 gives them. Players choose their own in the
+   shop's pages since finding 128 (online_menu.c port_online_shop_commit). */
 extern void func_001B7C08(void *obj, int rider, int slot);
+static void default_bike(int rider, int32_t bike[3]);
+void hle_online_default_bike(int rider, int32_t bike[3]) { default_bike(rider, bike); }  /* online_menu.c */
 static void default_bike(int rider, int32_t bike[3])
 {
     if (rider == 0xE0 || rider == 0x100 || rider == 0x140 || rider == 0x180 || rider == 0x1A0) {
@@ -668,14 +675,16 @@ static void default_bike(int rider, int32_t bike[3])
    rides, and waits for theirs (at most 30 s). */
 static void exchange_rides(void)
 {
-    uint8_t e[30] = {EVENT_VERSION, EVENT_SETUP};
+    uint8_t e[34] = {EVENT_VERSION, EVENT_SETUP};  /* 34 since finding 128: the colour last */
     Ride *own = &on.ride[on.local_slot];
     double entered = host_wall_seconds();
     own->rider = EE32(SETUP + 0x290);
     for (int k = 0; k < 3; k++) own->outfit[k] = EE32(SETUP + 0x1B8 + 4 * k), own->bike[k] = EE32(SETUP + 0x11C + 4 * k);
+    own->colour = EE32(SETUP + 0x254);
     own->have = 1;
     put32(e + 2, own->rider);
     for (int k = 0; k < 3; k++) put32(e + 6 + 4 * k, own->outfit[k]), put32(e + 18 + 4 * k, own->bike[k]);
+    put32(e + 30, own->colour);
     send_event(e, sizeof e);
     for (;;) {
         NetLobby lobby;
@@ -726,13 +735,14 @@ void hle_online_riders(void *game)
     for (int i = 0; i < 16; i++) *(int32_t *)(g + 0x2A8 + 4 * i) = -1;
     *(int32_t *)(g + 0x2A8 + 4 * ((*(int32_t *)(g + 0x290) / 32 - 1) & 15)) = 0;
     for (int slot = 1; slot < NRIDERS && slot <= *(int32_t *)(g + 0x28C); slot++) {
-        int k = slot - 1, global = hle_puppet_global(slot), id, outfit[3] = {0, 0, 0}, bike[3];
+        int k = slot - 1, global = hle_puppet_global(slot), id, outfit[3] = {0, 0, 0}, bike[3], colour = -1;
         if (global < on.nslots) {
             const Ride *r = &on.ride[global];
             id = r->have ? r->rider : 0x20 * (on.pick[global] + 1);
             for (int w = 0; w < 3; w++) outfit[w] = r->have ? r->outfit[w] : 0;
             if (r->have) for (int w = 0; w < 3; w++) bike[w] = r->bike[w];
             else default_bike(id, bike);
+            if (r->have) colour = r->colour;
         } else {
             for (int tries = 0; tries < 10 && used[regular[next]]; tries++) next = (next + 1) % 10;
             id = 0x20 * (regular[next] + 1);
@@ -745,14 +755,17 @@ void hle_online_riders(void *game)
             *(int32_t *)(g + 0x1E8 + 12 * k + 4 * w) = outfit[w];
             *(int32_t *)(g + 0x14C + 12 * k + 4 * w) = bike[w];
         }
-        *(int32_t *)(g + 0x264 + 4 * k) = func_001FA7C0(bike[0]);
+        /* the bike colour (+0x254 per rider: the shop's BIKE COLOR); without one, the frame's own */
+        if (colour < 0) colour = func_001FA7C0(bike[0]);
+        *(int32_t *)(g + 0x264 + 4 * k) = colour;
         /* +0x2A8 is per rider: the slot riding it, -1 if none. The AI choice (func_001B74E8) and
            the rider screens only ask whether it is free, so a puppet on the human's rider leaves
            the human's entry */
         int32_t *kind = (int32_t *)(g + 0x2A8 + 4 * ((id / 32 - 1) & 15));
         if (*kind == -1) *kind = 4;
-        fprintf(stderr, "online: slot %d (%s %d) rides %s, bike %d %d %d\n", slot, global < on.nslots ? "player" : "AI",
-                global, rider_name[(id / 32 - 1) & 15], bike[0], bike[1], bike[2]);
+        fprintf(stderr, "online: slot %d (%s %d) rides %s, outfit %d %d %d, bike %d %d %d, colour %d%s\n", slot,
+                global < on.nslots ? "player" : "AI", global, rider_name[(id / 32 - 1) & 15], outfit[0], outfit[1], outfit[2],
+                bike[0], bike[1], bike[2], colour, global < on.nslots ? on.ride[global].have ? " (the player's choice)" : " (default)" : "");
     }
 }
 
@@ -1598,11 +1611,15 @@ void pads_begin_field(void)
             /* the outfit's first word is the rider (as write_setup and hle_online_riders have it): the
                selection can leave the rider screen's first rider there, who would then ride */
             EE32(SETUP + 0x1B8) = selected_rider / 32 - 1;
-        }
-        {
+            EE32(SETUP + 0x254) = selected_colour;
+            fprintf(stderr, "online: this PC rides %X, outfit %d %d %d, bike %d %d %d, colour %d (the shop's choice)\n",
+                    selected_rider, EE32(SETUP + 0x1B8), selected_outfit[1], selected_outfit[2], selected_bike[0],
+                    selected_bike[1], selected_bike[2], selected_colour);
+        } else {
             int32_t bike[3];
             default_bike(EE32(SETUP + 0x290), bike);
             for (int k = 0; k < 3; k++) EE32(SETUP + 0x11C + 4 * k) = bike[k];
+            EE32(SETUP + 0x254) = func_001FA7C0(bike[0]);  /* the frame's own colour, as the puppets get */
         }
         exchange_rides();
         on.setup_done = 1;

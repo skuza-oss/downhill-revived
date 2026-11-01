@@ -9,6 +9,7 @@ recorded. Finding 095 lists each field and its readers.
 The tracks (+0x12114, func_00193F38) are patched in patches.py next to its accessor."""
 
 DECL = 'extern int port_unlock_all(void);\n'
+ONLINE = 'extern int port_online_bikes(void);\n'  # online: every bike in the garage too (finding 128)
 DECL_CPP = 'extern "C" int port_unlock_all(void);\n'
 
 
@@ -26,7 +27,8 @@ def _sub(patches, unit, pairs):
 # and func_001F9BF0 (count); with the option on both answer from a list of the port's own,
 # the save's bikes first and then the missing presets, as the cheat would order them, up to its
 # 63 (func_001953B8). Additions (shop, pro riders, career) still go to the real list
-# through func_001F9C78.
+# through func_001F9C78. Online rooms (port_online_bikes, finding 128) use the same list, with the
+# single race's stock bike 17 4 0 after the save's own: online's default for the ten riders.
 _LIST = r'''
 typedef struct PortBike { int x0, x4, x8; } PortBike;
 extern PortBike D_0026DEA0[];
@@ -39,8 +41,10 @@ int port_unlock_list(char *real, char **items)
     if (count > 63) count = 63;
     if (count < 0) count = 0;
     for (i = 0; i < count; i++) port_unlock_bikes[i] = have[i];
-    for (i = 0; i < D_0029C3D4 && count < 63; i++) {
-        PortBike *p = &D_0026DEA0[i];
+    for (i = -1; i < D_0029C3D4 && count < 63; i++) {
+        static PortBike stock = {0x11, 4, 0};
+        PortBike *p = i < 0 ? &stock : &D_0026DEA0[i];
+        if (i < 0 && !port_online_bikes()) continue;
         for (j = 0; j < count; j++)
             if (port_unlock_bikes[j].x0 == p->x0 && port_unlock_bikes[j].x4 == p->x4 &&
                 port_unlock_bikes[j].x8 == p->x8) break;
@@ -85,17 +89,17 @@ def add(patches):
     # Bike garage list (above).
     _sub(patches, 'unsorted/001F9B98.c', [
         ('char *func_001F9B98(struct Obj *arg0) {',
-         DECL + _LIST + 'char *func_001F9B98(struct Obj *arg0) {'),
+         DECL + ONLINE + _LIST + 'char *func_001F9B98(struct Obj *arg0) {'),
         ('    return arg0->x0;\n}',
-         '    if (port_unlock_all()) {\n        char *items;\n'
+         '    if (port_unlock_all() || port_online_bikes()) {\n        char *items;\n'
          '        port_unlock_list(arg0->x0, &items);\n        return items;\n    }\n'
          '    return arg0->x0;\n}')])
     _sub(patches, 'unsorted/001F9BF0.c', [
         ('unsigned int func_001F9BF0(struct Ref *ref) {',
-         DECL + 'extern int port_unlock_list(char *real, char **items);\n'
+         DECL + ONLINE + 'extern int port_unlock_list(char *real, char **items);\n'
          'unsigned int func_001F9BF0(struct Ref *ref) {'),
         ('    return ref->x0->x4A4;\n}',
-         '    if (port_unlock_all()) {\n        char *items;\n'
+         '    if (port_unlock_all() || port_online_bikes()) {\n        char *items;\n'
          '        return port_unlock_list((char *)ref->x0, &items);\n    }\n'
          '    return ref->x0->x4A4;\n}')])
 
