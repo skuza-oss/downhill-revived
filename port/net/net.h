@@ -77,7 +77,7 @@ typedef struct {
     unsigned char rotation[64];
     int last_race_id, last_race_track, nresults;
     NetResult result[NET_MAX_SLOTS];
-    /* Rejoining (finding 126). New fields go here, at the end: the game, the x64 host and the
+    /* Rejoining (finding 140). New fields go here, at the end: the game, the x64 host and the
        browser's net module (port/web/www/net.js copies web_net_lobby_size() bytes) all copy this
        struct as it is, so the fields above keep their offsets. */
     unsigned members_reconnecting;  /* bit i: member[i] dropped; the server holds its lobby slot */
@@ -129,7 +129,7 @@ double net_seconds(void);                          /* the clock start_at uses */
 double net_server_ms(void);
 int net_ping_ms(void);                             /* in a room, else -1 */
 
-/* ---- text chat (finding 125) ----
+/* ---- text chat (finding 139) ----
    Anyone in the room or a race says a line (1-120 characters once the server has cleaned it; 5
    in 10 s); everyone gets it, the sender too. The client keeps the last NET_CHAT_LINES, oldest
    first, and adds the server's slow_down refusal as a line of its own (member_id -1). Nothing is

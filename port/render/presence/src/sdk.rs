@@ -1,4 +1,4 @@
-//! The Discord Social SDK (finding 121), when its library sits next to the game: the presence goes
+//! The Discord Social SDK (finding 136), when its library sits next to the game: the presence goes
 //! through it, and with ASK_TO_JOIN it hands over a friend's join from Discord. Without the library
 //! the worker keeps to the plain IPC (worker.rs), as before.
 //!

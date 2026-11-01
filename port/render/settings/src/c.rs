@@ -101,7 +101,7 @@ pub unsafe extern "C" fn dhd_settings_read(path: *const c_char, key: *const c_ch
 
 /// The keys dhd.ini at `path` holds whose key starts with `prefix` (without case), joined by
 /// commas, into `out` (`size` bytes, NUL-terminated, cut if longer). 1 when it found one: the
-/// control profiles (`bindings_<name>`) the game lists (finding 124).
+/// control profiles (`bindings_<name>`) the game lists (finding 141).
 ///
 /// # Safety
 /// `path` and `prefix` are NUL-terminated strings; `out` has room for `size` bytes.

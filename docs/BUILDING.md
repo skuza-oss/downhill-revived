@@ -110,7 +110,7 @@ their own variable or option says:
 | [Binaryen](https://github.com/WebAssembly/binaryen) 133 (browser build) | `binaryen/binaryen-version_133` | |
 | DirectX Shader Compiler (downloaded and checked by `port/tools/dxc.py`) | `dxc` | `DHD_DXC_CACHE` |
 
-What a fresh setup also needs (2026-10-30, finding 119):
+What a fresh setup also needs (2026-10-30, finding 134):
 
 - The whole wasi-sdk, not only its sysroot: `abi_check.py` (run by `test_runtime.py`), `testprog.py`
   and the browser build's `postlink.py` run its `bin/clang`, and the browser build relies on that

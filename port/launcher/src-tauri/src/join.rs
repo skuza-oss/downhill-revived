@@ -1,4 +1,4 @@
-//! Join by link (docs/online-protocol.md join codes; finding 125).
+//! Join by link (docs/online-protocol.md join codes; finding 128).
 //!
 //! A room is shared as `https://<host>/join/<CODE>` — or the launcher's own `dhd://join/<CODE>`
 //! scheme. The launcher is started with a link or a code (from the registered URL scheme on

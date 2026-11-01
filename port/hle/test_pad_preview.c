@@ -1,4 +1,4 @@
-/* host_pad_vibrate's preview gate (port/hle/pad_preview.h, finding 124). The game asks for the
+/* host_pad_vibrate's preview gate (port/hle/pad_preview.h, finding 141). The game asks for the
    motor values every field (zeros included while nothing vibrates), so a preview must win for its
    window and a switch to off must stop at once. Pure logic, no SDL, no game.
        test_pad_preview            (port/tools/test_pad_preview.py builds and runs it) */

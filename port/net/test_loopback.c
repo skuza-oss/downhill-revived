@@ -1,7 +1,7 @@
 /* Four players in one process: client.c over a fake transport, through a fake relay that does
    what online/server does (docs/online-protocol.md): welcome and room snapshots, slots at start,
    STATE and EVENT relayed with the slot byte overwritten, PING answered, left when a socket
-   closes, or away and back when a racer with a reconnect token drops and rejoins (finding 126). Each player has its own one-way latency; delivery keeps each socket's order. Each
+   closes, or away and back when a racer with a reconnect token drops and rejoins (finding 140). Each player has its own one-way latency; delivery keeps each socket's order. Each
    player's game thread sends numbered STATE frames for a while, as online.c does about 20 times
    a second, and checks that every other player's frames arrive whole and in order. */
 #include "client.h"

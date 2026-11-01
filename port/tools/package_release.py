@@ -46,7 +46,7 @@ The Windows zip holds one folder, DownhillRevived-<version>, with:
   dxcompiler.dll           Microsoft's DirectX Shader Compiler, x64, unchanged (port/tools/dxc.py):
                            the renderer compiles its Direct3D 12 shaders with it (finding 084 §14)
   discord_partner_sdk.dll  only with --discord-sdk (off by default): Discord's Social SDK, x64, unchanged
-                           (port/tools/discord_sdk.py, finding 121); the Discord Rich Presence goes
+                           (port/tools/discord_sdk.py, finding 136); the Discord Rich Presence goes
                            through it when it is there (port/render/presence/src/sdk.rs), the plain IPC
                            otherwise. Its License-Notices.txt is appended to THIRD-PARTY-NOTICES.txt.
                            Off by default: shipping Discord's closed SDK with a GPL-3.0-or-later game is
@@ -727,7 +727,7 @@ def main():
     ap.add_argument('--sdl-include', type=Path, help='its include directory (with --sdl-lib)')
     ap.add_argument('--discord-sdk', action='store_true',
                     help="Windows: ship Discord's Social SDK (discord_partner_sdk.dll, port/tools/discord_sdk.py) "
-                         "beside dhd.exe. Off by default: a licence decision not made yet (finding 121)")
+                         "beside dhd.exe. Off by default: a licence decision not made yet (finding 136)")
     ap.add_argument('--jobs', type=int, default=2)
     ap.add_argument('--version', help="must equal port/include/version.h's DHD_VERSION (the default)")
     ap.add_argument('--out', type=Path, help='default build/release/DownhillRevived-<version>-<platform>.zip')

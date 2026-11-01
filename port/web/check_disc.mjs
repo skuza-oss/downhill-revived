@@ -1,4 +1,4 @@
-// The browser's disc check against the native game's (finding 122): build/web/dhd_disc.wasm (rustgs.py
+// The browser's disc check against the native game's (finding 137): build/web/dhd_disc.wasm (rustgs.py
 // build --target wasm32-unknown-unknown --crate dhd_disc) through www/disc.js, in node, over small
 // synthetic ISO 9660 images made here (no game data): the layout of the crate's own test images
 // (port/render/disc/src/lib.rs tests::image), and the hash written out from its definition (each

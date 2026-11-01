@@ -156,7 +156,7 @@ static void dispatch(const SDL_Event *e)
         gamepad_device(PADDEV_REMAPPED, (unsigned)e->gdevice.which);
         break;
 #ifdef __ANDROID__
-    /* The on-screen controls (touch.c, finding 124): SDL's finger events, kept apart from the
+    /* The on-screen controls (touch.c, finding 141): SDL's finger events, kept apart from the
        mouse path below, which only ever sees one finger. */
     case SDL_EVENT_FINGER_DOWN:
     case SDL_EVENT_FINGER_MOTION:

@@ -1,4 +1,4 @@
-//! The browser's interface (port/web/www/disc.js, finding 122): the crate built on its own as a small
+//! The browser's interface (port/web/www/disc.js, finding 137): the crate built on its own as a small
 //! wasm module (`rustgs.py build --target wasm32-unknown-unknown --crate dhd_disc`, then
 //! build/web/dhd_disc.wasm), so a browser player's disc gives the same game files hash as the
 //! native game's for the same image: online rooms compare it.

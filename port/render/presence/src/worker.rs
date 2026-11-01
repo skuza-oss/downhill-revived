@@ -1,10 +1,10 @@
 //! The thread that talks to Discord. Its calls block (the pipe or socket is read and written
 //! plainly), so the game never waits on them: the game's calls only post a message.
 //!
-//! With the Social SDK's library beside the game (sdk.rs, finding 121) the thread goes through it
+//! With the Social SDK's library beside the game (sdk.rs, finding 136) the thread goes through it
 //! (`run_sdk`); without it, Discord's local IPC through discord-rich-presence (`run`). Both keep the
 //! same state, lines, pacing and log. Ask to Join needs the SDK (only it can receive a join), so the
-//! IPC drops the secret (`for_ipc`, finding 121).
+//! IPC drops the secret (`for_ipc`, finding 136).
 
 use crate::{party_id, payload, sdk, Clock, Due, Kind, Pacer, Payload, State, APP_ID, ASK_TO_JOIN, BUTTONS, LOGO, LOGO_TEXT, RETRY};
 use discord_rich_presence::activity::{Activity, Assets, Button, Party, Secrets, Timestamps};
@@ -90,7 +90,7 @@ pub fn activity(p: &Payload) -> Activity<'_> {
         a = a.state(state.as_str());
     }
     if p.party.is_some() || p.join.is_some() {
-        // the id is this session's own token: Discord refuses it matching the join secret (finding 121)
+        // the id is this session's own token: Discord refuses it matching the join secret (finding 136)
         let mut party = Party::new().id(party_id());
         if let Some(size) = p.party {
             party = party.size(size);
@@ -122,8 +122,8 @@ fn connect() -> Option<DiscordIpcClient> {
 
 /// What the plain IPC shows (worker's `run`): a join secret is dropped. Discord's local IPC hands
 /// a join over as `ACTIVITY_JOIN`, which only arrives after the game subscribed, and this worker
-/// reads the pipe only right after its own writes (finding 121, point 1). A Join button it could
-/// not be told about would be worse than none, so the IPC keeps the state as it was (finding 121):
+/// reads the pipe only right after its own writes (finding 136, point 1). A Join button it could
+/// not be told about would be worse than none, so the IPC keeps the state as it was (finding 136):
 /// the party size with this session's own id, no secrets, both buttons.
 pub fn for_ipc(mut p: Option<Payload>) -> Option<Payload> {
     if let Some(p) = p.as_mut() {
@@ -255,7 +255,7 @@ fn run(from: Receiver<Message>, log: Log) {
             Some(Message::Set(s)) => {
                 let start = clock.start(&s, unix_ms());
                 kind = s.kind;
-                pacer.want(for_ipc(payload(&s, start)));  // the IPC can't receive a join (finding 121)
+                pacer.want(for_ipc(payload(&s, start)));  // the IPC can't receive a join (finding 136)
             }
             Some(Message::Stop(done)) => {
                 if let Some(c) = client.as_mut() {

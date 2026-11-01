@@ -12,7 +12,7 @@ included, as it stands.
 - In a race the server relays binary STATE and EVENT frames to the race as they are and stamps the
   real sender's slot in byte 1 (`room.ts` `relay`). The official server has no chat message and
   drops JSON types it doesn't know by closing the socket; in the lobby it relays no binary frames.
-- So voice (and race chat, finding 125) travel as new EVENT kinds: `EVENT_CHAT` (10) and
+- So voice (and race chat, finding 139) travel as new EVENT kinds: `EVENT_CHAT` (10) and
   `EVENT_VOICE` (11), `docs/online-protocol.md`. The sender is the stamped slot (it can't be faked);
   a frame never leaves its race. Older clients drop the kinds.
 - The server has no positions, so it can't choose recipients by distance. Each receiver decides

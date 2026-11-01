@@ -126,7 +126,7 @@ impl Place {
         self.start_with_join(None)
     }
 
-    /// The same, with the join-by-link code in `DHD_NET_ROOM` (finding 125) when the launcher was
+    /// The same, with the join-by-link code in `DHD_NET_ROOM` (finding 128) when the launcher was
     /// started from a link: the game opens ONLINE by itself and joins that room (online_menu.c's
     /// join_read), as a browser's `?room=` does.
     pub fn start_with_join(&self, join: Option<&str>) -> std::io::Result<Child> {

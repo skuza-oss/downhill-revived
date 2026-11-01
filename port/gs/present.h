@@ -19,7 +19,7 @@ void gs_window_tick(void);
 /* Where the renderer last showed the picture in its w x h window: [left, right) x [top, bottom). */
 void gs_picture_rect(int left, int top, int right, int bottom, int w, int h);
 /* That rect again with the window's pixel size, for a host that maps its own input into the
-   picture (touch.c, finding 124). 0 when the renderer hasn't reported one yet. */
+   picture (touch.c, finding 141). 0 when the renderer hasn't reported one yet. */
 int gs_picture_rect_get(int *left, int *top, int *right, int *bottom, int *w, int *h);
 /* The native renderer shows player gs_native_view's quarter of a 3-4 player split screen,
    scaled to the window (1-4; 0: the whole picture). online.c sets it during races. */

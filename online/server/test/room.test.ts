@@ -425,7 +425,7 @@ describe("race relay", () => {
   });
 });
 
-describe("reconnect in the lobby (finding 126)", () => {
+describe("reconnect in the lobby (finding 140)", () => {
   const room = (f: unknown) => typeof f === "string" && JSON.parse(f).type === "room";
   const reconnect = { features: ["reconnect"] };
   const TOKEN = /^[0-9a-f]{64}$/;
@@ -578,7 +578,7 @@ describe("reconnect in the lobby (finding 126)", () => {
   });
 });
 
-describe("rejoin a race (finding 126)", () => {
+describe("rejoin a race (finding 140)", () => {
   const reconnect = { features: ["countdown", "reconnect"] };
   const all = () => reconnect;
   const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));

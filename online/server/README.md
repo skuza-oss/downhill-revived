@@ -83,7 +83,7 @@ removing a class later needs a new migration entry, not an edit of `v1`.
 
 - Rejoin: a client that sent the `reconnect` feature keeps its slot, in the lobby or a race, for
   20 s after a drop and comes back with the token its `welcome` carried; the others see `away`,
-  then `back` or `left` (`docs/online-protocol.md`, finding 126). Older clients' racers become
+  then `back` or `left` (`docs/online-protocol.md`, finding 140). Older clients' racers become
   the host's AI at once, as before.
 - No authentication or rate limiting beyond the protocol checks (version, ISO hash, sizes, the
   rejoin token, which is unguessable and room-bound).

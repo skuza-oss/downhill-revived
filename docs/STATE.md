@@ -110,7 +110,7 @@ it unchanged (finding 088, CL3).
   page through it in headless Chrome against the native results (finding 102).
   The online disc check is `dhd_disc` built the same way (`--crate dhd_disc`, build/web/dhd_disc.wasm,
   `www/disc.js`; layout rule P2): the native game's hash for the same image, checked by
-  `node port/web/check_disc.mjs [--iso PATH]` (finding 122; not yet wired into worker.js).
+  `node port/web/check_disc.mjs [--iso PATH]` (finding 137; not yet wired into worker.js).
 - macOS arm64 (`--target macos-arm64`, on a Mac with Xcode's tools; macOS 11 and later): the POSIX
   host with SDL3 static (Cocoa, Core Audio) and the Rust library (Metal, rustgs.py on the Mac).
   `package_release.py --platform mac` makes `Downhill Revived.app` (ad-hoc signed) in the -mac-experimental.zip.
@@ -222,7 +222,7 @@ Discord's party size ("Room K7M2QX (3 of 6)"), or an online race, through Discor
 `host_service_presence`; refreshed every minute so a restarted Discord gets it back), or through
 Discord's Social SDK when its library (`discord_partner_sdk.dll`, Discord's, never committed) sits
 beside the game. Ask to Join goes through the SDK: a friend's join opens ONLINE from the title and
-joins the room's code, on the official server only (finding 121; written, not run in the game).
+joins the room's code, on the official server only (finding 136; written, not run in the game).
 Releases ship the DLL only with `package_release.py --discord-sdk`, off by default: shipping
 Discord's closed SDK with the GPL game is a licence decision not made yet. Online races: below. The port's own pages (PC SETTINGS, the exit question, ONLINE and the
 race room) share one centred layer in the game's popup style (`menu_page.c`), and the mouse works
@@ -348,7 +348,7 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   new level and rematch flows (finding 072). Create/Join waits on ONLINE, then the rider screen
   once and the room over it, with no bounce and no second title flight (finding 092); the shop's
   bike/jersey pages are still skipped online.
-- Join by link (finding 125, 2026-10-30): the RACE ROOM shows and copies the shareable link
+- Join by link (finding 128, 2026-10-30): the RACE ROOM shows and copies the shareable link
   `<server>/join/<CODE>` (Circle, or a click on the code; the code stays shown) and the CODE field
   takes a pasted link as well as a code — `port/net/join.{c,h}` takes the code out of either, the
   one rule the game and the launcher share. The launcher turns a `dhd://join/<CODE>` or a
@@ -360,11 +360,11 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   files differ is turned away on ONLINE with lines saying why and what to do, and dhd.log has both
   hashes and the first different file (finding 098). dhd.log's first line names the release and
   the build.
-- 2026-10-30 (finding 118): the server's `start` refuses a room of one (`not_ready`), as the
+- 2026-10-30 (finding 133): the server's `start` refuses a room of one (`not_ready`), as the
   countdown and the client already did; a server test that lost its snapshot frame is fixed.
-  Not deployed yet. Finding 120: a racer silent for 10 s is dropped (`"timeout"`), and host handover
+  Not deployed yet. Finding 135: a racer silent for 10 s is dropped (`"timeout"`), and host handover
   mid-race has a server test.
-- 2026-10-31 (finding 126): rejoin after a drop. A client that lists the `reconnect` feature gets a
+- 2026-10-31 (finding 140): rejoin after a drop. A client that lists the `reconnect` feature gets a
   secret token in its `welcome`; a drop holds its slot for 20 s, in the lobby (`reconnecting` in
   `room`) or in a race (`away` to everyone at once, `back` on rejoin, `left` when the time runs
   out). The client rejoins by the room's code with the token instead of going offline; `NetLobby`
@@ -375,13 +375,13 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   (`POST /v1/times`, `GET /v1/times`, `GET /v1/ghost`), one SQLite Durable Object per track and
   lap count (migration `v2`). Version gate, name and time rules, size caps, a per-address rate
   limit. Times are not verified. No game side yet (recording a ghost needs the replay data).
-- Text chat (finding 125): the room's chat over the race room (L1 or Y; typing, or quick lines
+- Text chat (finding 139): the room's chat over the race room (L1 or Y; typing, or quick lines
   for a pad), Y in a race for a line, the pause menu's L1/R1/L2/R2 quick lines, the last lines
   at the left of the view. Client, loopback and browser client checked; not yet seen in the game.
   In a race the lines travel as `EVENT_CHAT` frames, which every server relays as they are, the
   official one included; the room's chat is sent only after a welcome with `"chat": true` (a
   server with the `chat` message), else the line stays local. Name tags fade and shrink with
-  distance, have each racer's colour and say AWAY for a dropped racer (finding 125).
+  distance, have each racer's colour and say AWAY for a dropped racer (finding 139).
 - Voice chat in a race (finding 131): push-to-talk (V) or an open microphone, Opus over
   `EVENT_VOICE` frames (no server change), heard by distance and side from this PC's copy of the
   riders' positions; NAME - TALKING on the name tags, /MUTE NAME, four live PC SETTINGS rows.
@@ -389,6 +389,8 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   microphone worklet). `port/tools/test_voice.py`: 21 of 21; `port/web/check_net.mjs` hears a
   browser client's voice through upstream's 0.7.6 server unchanged.
 - Rider names beside the race's track bar dots (finding 129).
+- 2026-11-01: this line's findings that reused upstream's numbers (118-126) are 133-140, and the
+  controls and live settings, cited as "finding 124" without a file, are finding 141.
 - 2026-11-01: OPTIONS > PC SETTINGS is OPTIONS > SETTINGS (the game, the pause menu, the browser,
   the launcher). Widescreen applies at once (`widescreen.c` `port_widescreen_apply`: the data
   words, the views on screen through func_0023D898/func_0023D8D8, the picture's shape), on the PC

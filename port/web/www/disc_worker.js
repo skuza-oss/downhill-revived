@@ -1,4 +1,4 @@
-// The online disc check's own worker (finding 123): disc.js (dhd_disc, finding 122) reads the whole
+// The online disc check's own worker (finding 138): disc.js (dhd_disc, finding 137) reads the whole
 // image's game files, about 17 s for the USA disc, so it runs here, apart from the game worker, as
 // host_sdl.c runs it on a thread of its own. The answer is kept in this browser (IndexedDB), by the
 // file's name, size and last change, as the native game keeps iso-check.txt: then it is code 2,

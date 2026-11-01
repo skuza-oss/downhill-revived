@@ -84,7 +84,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"hello","protocol":2,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown","reconnect"]}  // features: optional
 
-// Rejoining after a drop: the token the last welcome carried goes in the hello (finding 126).
+// Rejoining after a drop: the token the last welcome carried goes in the hello (finding 140).
 {"type":"hello","protocol":2,"version":"dhd-port 0.7.5 1a2b3c4d5e6f7a8b","clientVersion":"0.7.5",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown","reconnect"],
  "reconnectToken":"<64 lowercase hex>"}
@@ -100,7 +100,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"kick","member":3}                          // host only
 {"type":"start"}                                    // host only; at least 2 members, all (host included) ready
 {"type":"pong","s":1734000000123}                   // echo of a server ping, see below
-{"type":"chat","text":"gg"}                         // anyone, in the room or a race (finding 125)
+{"type":"chat","text":"gg"}                         // anyone, in the room or a race (finding 139)
 {"type":"ping","t":12345.6}                          // optional client-side ping; the server answers "pong"
 {"type":"end"}                                       // host only: race over, back to the lobby
 ```
@@ -124,7 +124,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 ```jsonc
 // Answer to hello: who you are in this room. reconnectToken is there only when the hello listed
-// the "reconnect" feature (finding 126): keep it and send it in a later hello to come back.
+// the "reconnect" feature (finding 140): keep it and send it in a later hello to come back.
 {"type":"welcome","protocol":2,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
  "reconnectToken":"1f9c8a3d5b7e0246c9d1f3a4b5c6d7e8f9a0b1c2d3e4f5061728394a5b6c7d8e"}
 // The welcome of a rejoin into a running race also names the race slot: "slot":1.
@@ -149,7 +149,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
             {"slot":1,"memberId":2,"name":"Bo","rider":0,"bike":0}],
  "serverTime":1734000005000,"startAt":1734000008000}
 
-// A racer that can rejoin dropped: its slot is held, its rider is not being driven (finding 126).
+// A racer that can rejoin dropped: its slot is held, its rider is not being driven (finding 140).
 {"type":"away","slot":1,"memberId":2}
 // ...and it rejoined its slot: its frames come again. Older clients ignore both.
 {"type":"back","slot":1,"memberId":2}
@@ -216,7 +216,7 @@ server without the `chat` message (the official one), in the race only:
 
 | Kind | Payload after `[2, kind]` | Use |
 |---|---|---|
-| 10 `EVENT_CHAT` | u8 length (1-120), the text | A race chat line (finding 125). The name shown is the stamped `slot`'s, never sent. At most 5 in 10 s a sender: more are dropped on both sides. The sender shows its own line (no echo). |
+| 10 `EVENT_CHAT` | u8 length (1-120), the text | A race chat line (finding 139). The name shown is the stamped `slot`'s, never sent. At most 5 in 10 s a sender: more are dropped on both sides. The sender shows its own line (no echo). |
 | 11 `EVENT_VOICE` | u16 sequence, an Opus packet (at most 400 bytes) | 20 ms of voice (finding 131): 48 kHz mono, VOIP, 8-64 kbps. The receiver orders by sequence, conceals a gap, drops late, repeated, oversized or flooding frames (over 60 a second), and decides by its own copy of the riders' positions who is heard (proximity, groups). The server relays it to the whole race. |
 
 (Kind 9 is reserved for the taunts branch's `EVENT_TAUNT`.)
@@ -241,7 +241,7 @@ A racer the server has not heard from for 10 s (`RACE_SILENT_MS`: no STATE, EVEN
 clients ping every 500 ms while racing) leaves the same way with `reason` `"timeout"` (or is
 `away`, as a drop, when it can rejoin), and the server closes its socket (1001). That covers a
 lost connection that never closed, the case the client already covers the other way round (it
-drops a server silent for 10 s). Finding 120.
+drops a server silent for 10 s). Finding 135.
 
 ### Race room rules (finding 115)
 
@@ -258,7 +258,7 @@ The server keeps what everyone has to agree on:
   breaks the rule clears it. `start` still starts at once. Clients show the time left with
   `serverTime` as the clock offset. Older clients never get a countdown: the host starts.
 
-## Rejoining after a drop (finding 126)
+## Rejoining after a drop (finding 140)
 
 A socket that closes or errors without a `leave` (lost Wi-Fi, a NAT timeout), or a racer silent
 for `RACE_SILENT_MS`, is a dropped connection. A client that put `"reconnect"` in its hello got a
@@ -347,7 +347,7 @@ plausible time under any name. Treat a board as a list of claims.
   player's riders).
 - A room with no members is deleted.
 - A dropped member that sent `"reconnect"` may come back into its slot, lobby or race, for 20 s
-  (`Rejoining after a drop`, finding 126); after that, or for older clients at once, a dropped
+  (`Rejoining after a drop`, finding 140); after that, or for older clients at once, a dropped
   racer is handed to AI for the rest of the race.
 - A server restart (a deploy) drops every socket with no close event. A lobby client says
   hello again under the same name and gets its member back (id, host, rider, Ready); members

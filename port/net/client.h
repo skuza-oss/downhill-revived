@@ -22,7 +22,7 @@ typedef struct {
     NetTransport tr;
     int connected, leaving;
     char name[100], version[64], iso[65];
-    /* The server's secret for a reconnect (hello.reconnectToken, finding 126): kept while a lobby
+    /* The server's secret for a reconnect (hello.reconnectToken, finding 140): kept while a lobby
        drop reconnects into the same slot, sent in the hello of the next connection. Empty until a
        welcome carries one, and cleared again by a welcome without one (a server without the
        feature). */
@@ -64,7 +64,7 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n);
 enum { NET_VOICE_VERSION = 2, NET_VOICE_KIND = 11 };
 extern void (*net_voice_hook)(int slot, const uint8_t *payload, int n);
 /* The connection ended. Returns 1 when it should rejoin the room by its code: a lobby drop, or a
-   race drop the server offered a rejoin for (a reconnect token, finding 126). */
+   race drop the server offered a rejoin for (a reconnect token, finding 140). */
 int client_on_closed(NetClient *c, int code, const char *reason);
 /* The transport stopped trying to reconnect: a race goes on offline, a lobby has failed. */
 void client_give_up(NetClient *c);

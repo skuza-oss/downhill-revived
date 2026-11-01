@@ -21,7 +21,7 @@ export const COUNTDOWN_MS = 5_000;
     is still there; after it, the server drops them as the client drops a silent server
     (port/net/client.c SILENT_MS). */
 export const RACE_SILENT_MS = 10_000;
-/** Text chat (finding 125): a message's length after trimming, in UTF-16 units, and how many a
+/** Text chat (finding 139): a message's length after trimming, in UTF-16 units, and how many a
     member may send in CHAT_WINDOW_MS. */
 export const CHAT_MAX = 120;
 export const CHAT_BURST = 5;
@@ -37,7 +37,7 @@ export function chatText(v: unknown): string | null {
 export const FEATURE_COUNTDOWN = "countdown";
 export const RTT_SAMPLES = 5;
 
-// ---- reconnect (finding 126) ----
+// ---- reconnect (finding 140) ----
 /**
  * A member whose socket closes without a `leave` is a dropped connection: the room may hold its
  * slot (id, name, rider/bike, ready, host role) this long for it to come back with the secret

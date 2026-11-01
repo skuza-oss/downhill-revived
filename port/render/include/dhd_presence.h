@@ -1,5 +1,5 @@
 /* Discord Rich Presence: the C interface of the Rust crate dhd_presence (port/render/presence,
-   linked into dhd_render's static library, findings 106, 121). What the player is doing shows on
+   linked into dhd_render's static library, findings 106, 136). What the player is doing shows on
    their Discord profile, through Discord's local IPC (no SDK); the crate's own thread connects,
    sends only changes (at most one per 15 s; the same again after a minute, to notice a Discord that
    went away), retries every 30 s while Discord isn't running, and logs a line at most. The game's host (port/hle/host.c, host_service_presence) calls it. Strings are
@@ -23,7 +23,7 @@ int dhd_presence_start(const char *setting, DhdPresenceLog log);
 void dhd_presence_set(int kind, const char *track, int place, int riders, int rider, const char *room,
                       int members, int max_members);
 
-/* A friend's join from Discord (the Social SDK, finding 121): the room's code, NUL-terminated,
+/* A friend's join from Discord (the Social SDK, finding 136): the room's code, NUL-terminated,
    into out (size bytes, the crate wants 7 or more), taken -- at most once. 1 when there was one. The
    core takes it (port/hle/host.c's host_service_presence_join, online_menu.c) and only on the
    official server; a plain-IPC presence never has one. */

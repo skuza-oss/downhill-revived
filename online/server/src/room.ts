@@ -169,7 +169,7 @@ export class Room extends DurableObject<Env> {
         if (info?.memberId != null) this.sockets.set(info.memberId, ws);
       }
       // A member whose socket the platform dropped while this object slept is not here: treat it
-      // as a drop (finding 126) so it can reconnect or runs out, instead of lingering in the room
+      // as a drop (finding 140) so it can reconnect or runs out, instead of lingering in the room
       // forever. A member stored before this feature has no `online` field and counts as
       // connected.
       if (this.state) {
@@ -398,7 +398,7 @@ export class Room extends DurableObject<Env> {
       if (st.session ? !!st.grid?.length : this.countdownReady(st)) await this.startRace(st, "");
       else st.countdownEndsAt = null;
     }
-    // A held slot whose reconnect window has run out becomes a normal one (finding 126).
+    // A held slot whose reconnect window has run out becomes a normal one (finding 140).
     await this.expireDetached(now);
     if (!this.state) return;  // the last member went: the room is gone
     if (st.race) {
@@ -420,7 +420,7 @@ export class Room extends DurableObject<Env> {
   private nextAlarm(st: RoomState, now: number): number {
     let next = now + PING_INTERVAL_MS;
     // A session room wakes for its countdown, its next race and the finish window; an older room
-    // for its countdown before the race. Both for a held slot's expiry (finding 126).
+    // for its countdown before the race. Both for a held slot's expiry (finding 140).
     const times = st.session ? [st.countdownEndsAt, st.nextRaceAt, st.race?.finishEndsAt]
       : [st.countdownEndsAt != null && !st.race ? st.countdownEndsAt : null];
     times.push(this.earliestExpiry());
@@ -518,7 +518,7 @@ export class Room extends DurableObject<Env> {
     for (const id of silent) {
       const ws = this.sockets.get(id);
       const me = this.state?.members.find((x) => x.id === id);
-      // A member that can rejoin is held (`away`), as if its socket had closed (finding 126).
+      // A member that can rejoin is held (`away`), as if its socket had closed (finding 140).
       if (ws && me?.token && this.state) await this.detach(this.state, me, ws, ws.deserializeAttachment() as SocketInfo);
       else await this.leave(id, "timeout");
       if (ws)
@@ -554,7 +554,7 @@ export class Room extends DurableObject<Env> {
     const features = Array.isArray(m.features) ? m.features : [];
 
     // A dropped client that declared the "reconnect" feature comes back with the secret token its
-    // welcome carried (finding 126). Re-attach it to the slot held for it; a missing, wrong or
+    // welcome carried (finding 140). Re-attach it to the slot held for it; a missing, wrong or
     // expired token finds nothing and falls through to the normal join below, so it can never
     // impersonate the member or take over a member that is still connected.
     const token = m.reconnectToken;
@@ -574,7 +574,7 @@ export class Room extends DurableObject<Env> {
         this.sockets.set(held.id, ws);
         this.rtts.delete(held.id);
         this.firstRtts.delete(held.id);
-        // Back in a race: the same race slot, relayed both ways again from now on (finding 126).
+        // Back in a race: the same race slot, relayed both ways again from now on (finding 140).
         const slot = st.race ? st.race.slots.indexOf(held.id) : -1;
         if (slot >= 0) {
           this.raceSockets[slot] = ws;
@@ -738,7 +738,7 @@ export class Room extends DurableObject<Env> {
 
   private async onStart(ws: WebSocket, st: RoomState): Promise<void> {
     if (st.race) return this.error(ws, "room_started", "The race is already running.");
-    // A held slot can't race: its client isn't here to receive `start` (finding 126).
+    // A held slot can't race: its client isn't here to receive `start` (finding 140).
     if (st.members.some((x) => x.online === false))
       return this.error(ws, "not_ready", "A player is reconnecting.");
     if (st.session) {
@@ -760,7 +760,7 @@ export class Room extends DurableObject<Env> {
     return (
       !st.race &&
       st.members.length >= 2 &&
-      // A held slot blocks the countdown: its client isn't here to start (finding 126).
+      // A held slot blocks the countdown: its client isn't here to start (finding 140).
       st.members.every((x) => x.ready && !x.choosing && x.countdown && x.online !== false)
     );
   }
@@ -848,7 +848,7 @@ export class Room extends DurableObject<Env> {
   }
 
   /** A member that can come back keeps its slot: in the lobby always, in a race while its slot is
-      still racing (finding 126). */
+      still racing (finding 140). */
   private canHold(st: RoomState, me: Member): boolean {
     if (!st.race) return true;
     const slot = st.race.slots.indexOf(me.id);
@@ -1141,7 +1141,7 @@ export class Room extends DurableObject<Env> {
         ...(x.bike ? {bike: x.bike} : {}),
         rttMs: this.rttOf(x.id),
         ...(x.choosing ? {choosing: true} : {}),
-        // A held slot: its client dropped and may still come back (finding 126). Older clients
+        // A held slot: its client dropped and may still come back (finding 140). Older clients
         // ignore the field; new ones show the slot as reconnecting.
         ...(x.online === false ? { reconnecting: true } : {}),
       })),

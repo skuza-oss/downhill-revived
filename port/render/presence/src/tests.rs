@@ -59,7 +59,7 @@ fn public_and_private_rooms() {
     assert_eq!(p.party, Some([3, 6]));
     assert_eq!(json(&p)["party"]["size"], serde_json::json!([3, 6]));
     // Discord refuses a party size without an id of 2 to 128 characters: this session's own token,
-    // the same for every update and nothing of the room's (finding 121: it must not be the join
+    // the same for every update and nothing of the room's (finding 136: it must not be the join
     // secret either, which Discord refuses -- code 5005).
     let id = json(&p)["party"]["id"].as_str().unwrap().to_string();
     assert!(id.starts_with("dhd-") && id.len() == 20, "{id}");
@@ -97,7 +97,7 @@ fn the_join_secret() {
     assert_eq!(join_secret(&room("K7M2QX", 6, 6)), None);
     assert_eq!(join_secret(&room("", 3, 6)), None);
     assert_eq!(join_secret(&State { room: "K7M2QX".into(), ..state(Kind::OnlineRace, "BC", 2, 4) }), None);
-    // with Ask to Join on (finding 121), a joinable room carries the secret; a build with it off
+    // with Ask to Join on (finding 136), a joinable room carries the secret; a build with it off
     // sends neither the secret nor a party id
     let p = payload(&room("K7M2QX", 3, 6), 0).unwrap();
     assert_eq!(p.join.is_some(), ASK_TO_JOIN);
@@ -124,7 +124,7 @@ fn the_presence_is_harmless_without_discord() {
     assert_eq!(unsafe { c::dhd_presence_start(off.as_ptr(), None) }, 0);
     // The Social SDK is only ever a library beside the game (sdk.rs), loaded at run time: nothing
     // links against it, and one that isn't there is an Err (the worker keeps to the IPC), never a
-    // build or start failure (finding 121).
+    // build or start failure (finding 136).
     assert!(sdk::library_path().is_some(), "the SDK's path is named, not required");
     assert!(sdk::Client::load(std::path::Path::new("no-such-discord-sdk.dll"), false, None).is_err());
 }
@@ -137,7 +137,7 @@ fn the_join_reaches_only_the_sdk() {
     assert!(p.join.is_some());
     assert_eq!(json(&p)["secrets"], serde_json::json!({"join": "dhd-room-1:K7M2QX"}));
     assert_ne!(json(&p)["party"]["id"], "dhd-room-1:K7M2QX");
-    // the plain IPC drops it: no secret, this session's own party id, both buttons (finding 121)
+    // the plain IPC drops it: no secret, this session's own party id, both buttons (finding 136)
     let ipc = worker::for_ipc(Some(p)).unwrap();
     assert_eq!(ipc.join, None);
     let ipc_json = json(&ipc);
@@ -316,7 +316,7 @@ fn a_join_from_discord() {
     assert_eq!(unsafe { c::dhd_presence_take_join(out.as_mut_ptr(), 8) }, 0);
 }
 
-/// Against the real SDK and a running Discord, by hand (finding 121):
+/// Against the real SDK and a running Discord, by hand (finding 136):
 /// DHD_DISCORD_SDK_TEST=<path of discord_partner_sdk.dll> cargo test -p dhd_presence -- --ignored --nocapture
 /// Shows a room for a few seconds on this PC's Discord profile, then clears it.
 #[test]

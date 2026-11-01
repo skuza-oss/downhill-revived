@@ -409,7 +409,7 @@ int gs_gpu_surface(Gs *g, const GsWindow *window)
     return p->surface != NULL;
 }
 
-/* PC SETTINGS > V-Sync while the game runs (finding 124): DHD_VSYNC read again and, when the
+/* PC SETTINGS > V-Sync while the game runs (finding 141): DHD_VSYNC read again and, when the
    present mode changed, the swap chain remade in it, as on a new window (gs_gpu_surface_reset).
    The next present configures it. EE thread, between fields. */
 void gs_gpu_vsync_apply(Gs *g)

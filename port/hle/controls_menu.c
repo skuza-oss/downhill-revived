@@ -1,5 +1,5 @@
 /* CONTROLS: the page that rebinds the keyboard and the gamepad and keeps control profiles
-   (finding 124), in the game's own popup style (menu_page.c). OPTIONS > PC SETTINGS opens it (its
+   (finding 141), in the game's own popup style (menu_page.c). OPTIONS > PC SETTINGS opens it (its
    "Controls..." row); it pushes the hub over PC SETTINGS and the Keyboard / Gamepad pages over the
    hub, as the game's own sub-pages open.
 
@@ -10,7 +10,7 @@
    DHD_CONTROLS_ACTIVE. So the keyboard and the controllers follow at once, without a restart.
 
    Touch Controls / Touch Layout are shown only where the on-screen controls are (Android,
-   DHD_TOUCH_AVAILABLE). The layout is not drawn during play yet (finding 124, Open). */
+   DHD_TOUCH_AVAILABLE). The layout is not drawn during play yet (finding 141, Open). */
 #include "hle.h"
 #include "menu_page.h"
 #include "controls.h"

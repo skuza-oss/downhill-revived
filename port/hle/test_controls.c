@@ -1,4 +1,4 @@
-/* controls.c (finding 124): the defaults are the shipped layout, the bindings text round-trips, a
+/* controls.c (finding 141): the defaults are the shipped layout, the bindings text round-trips, a
    rebind and an unbind are read back, the catalogs map names to keys and SDL sources both ways, an
    invalid text is skipped, and a profile's dhd.ini key is named the way host.c looks it up.
    Built and run by port/tools/test_controls.py. */

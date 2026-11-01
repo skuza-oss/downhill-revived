@@ -1,4 +1,4 @@
-# 123: Online in the browser
+# 138: Online in the browser
 
 The browser build had no online: every `host_service_net_*` service was a stub (`worker.js`), so
 ONLINE could never connect. The browser now plays on the same server as the native builds
@@ -60,12 +60,12 @@ browser. The page now pushes typed characters into a ring in the shared input bu
 ## The disc check
 
 Online needs the disc's game-files hash (`dhd_disc`, finding 098), built for the browser in
-finding 122 (`www/disc.js` over `build/web/dhd_disc.wasm`). Reading the USA disc's files takes
+finding 137 (`www/disc.js` over `build/web/dhd_disc.wasm`). Reading the USA disc's files takes
 about 17 s, so it runs in a worker of its own (`www/disc_worker.js`), as the native game runs it
 on a thread. The game worker polls it as `host_service_disc_check_poll`, with dhd_disc_check's
 answers. A hash is kept in this browser (IndexedDB, by the file's name, size and last change), as
 iso-check.txt keeps it natively, and is then answered as code 2. On the user's USA disc the
-browser module gives the native value, c8c17bca...3476 (finding 122).
+browser module gives the native value, c8c17bca...3476 (finding 137).
 
 ## Builds must match
 

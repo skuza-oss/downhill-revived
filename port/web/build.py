@@ -19,7 +19,7 @@ dhd.ini's rules (www/settings.js) are the crate dhd_settings (port/render/settin
 by `rustgs.py build --target wasm32-unknown-unknown --crate dhd_settings` into build/web/dhd_settings.wasm
 (its own memory, none of the game's: check_web_layout.py's rule P1; finding 102), then wasm-opt -Oz.
 The online disc check (www/disc.js) is the crate dhd_disc (port/render/disc), built the same way into
-build/web/dhd_disc.wasm (its own memory, its one import the worker's read: rule P2; finding 122).
+build/web/dhd_disc.wasm (its own memory, its one import the worker's read: rule P2; finding 137).
 Input stays untouched; all derived modules, metadata and scratch stay in build/web.
 No proprietary input or generated module belongs in a commit.
 """
@@ -62,7 +62,7 @@ def main():
     renderer=build_renderer(a.renderer_profile,not a.no_opt,OUT)
     settings=rust_module('dhd_settings',a.renderer_profile,not a.no_opt,run)
     disc=rust_module('dhd_disc',a.renderer_profile,not a.no_opt,run)
-    # online: port/net's client, its own module (build_net.py, finding 123)
+    # online: port/net's client, its own module (build_net.py, finding 138)
     from build_net import build as build_net
     net=build_net(OUT/'dhd_net.wasm')
     run(sys.executable,ROOT/'port/web/postlink.py',source,OUT/'core-web-raw.wasm',*(['--debug-memory'] if a.debug_memory else []),*(['--legacy-memory'] if a.legacy_memory else []),*(['--no-inline-memory'] if a.no_inline_memory else []))

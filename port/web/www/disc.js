@@ -1,4 +1,4 @@
-// The disc image's online check in the browser (finding 122): the native game's own, the crate
+// The disc image's online check in the browser (finding 137): the native game's own, the crate
 // dhd_disc (port/render/disc, finding 098), built on its own as build/web/dhd_disc.wasm
 // (port/render/disc/src/web.rs; its own memory, apart from the game's). It hashes the game files of
 // the ISO 9660 file system, so a browser player's disc gives the native game's value for the same

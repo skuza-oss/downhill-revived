@@ -1,5 +1,5 @@
 /* Tests of join.c: the join code out of a link or a code, and the shareable link for a code
-   (docs/online-protocol.md, join codes; finding 125). */
+   (docs/online-protocol.md, join codes; finding 128). */
 #include "join.h"
 
 #include <stdio.h>

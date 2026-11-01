@@ -1,4 +1,4 @@
-/* PC SETTINGS' vibration preview (finding 124), shared by port/hle/host.c (host_pad_vibrate, the
+/* PC SETTINGS' vibration preview (finding 141), shared by port/hle/host.c (host_pad_vibrate, the
    pads' motors) and port/hle/pc_settings.c (the Vibration row's buzz).
 
    The game asks for the motor values every field, zeros included while nothing vibrates

@@ -1,4 +1,4 @@
-# 121: Discord Rich Presence: rooms with their size, the rider, TRY AGAIN, the Social SDK
+# 136: Discord Rich Presence: rooms with their size, the rider, TRY AGAIN, the Social SDK
 
 2026-10-30, branch `discord-presence` (from 0.7.3). Follows finding 106. A friend looking at the
 player's profile now sees a room's track and how full it is, the rider in a race, and an elapsed

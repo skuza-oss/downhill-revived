@@ -169,7 +169,7 @@ impl Ini {
     }
 
     /// Keys of lines that aren't settings or DHD_* variables (the game logs them). A control
-    /// profile's key (`bindings_<name>`, finding 124) is one the game manages, not a mistake.
+    /// profile's key (`bindings_<name>`, finding 141) is one the game manages, not a mistake.
     pub fn unknown_keys(&self) -> Vec<String> {
         self.lines()
             .into_iter()
@@ -180,7 +180,7 @@ impl Ini {
     }
 
     /// Keys of the lines whose key starts with `prefix` (without case), in the file's order, each
-    /// once: the control profiles (`bindings_...`) the game reads (finding 124).
+    /// once: the control profiles (`bindings_...`) the game reads (finding 141).
     pub fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for (k, _) in self.entries() {

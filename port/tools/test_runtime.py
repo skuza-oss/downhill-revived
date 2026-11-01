@@ -117,7 +117,7 @@ def host_tests():
     # SDL thread (host/sdl_host.c), the keyboard and the text field it feeds (W11)
     run('gamepad', [HLE / 'gamepad.c', HLE / 'keyboard.c', HLE / 'controls.c', HLE / 'text_input.c',
                     ROOT / 'port/host/sdl_host.c', HLE / 'test_gamepad.c'], sdl=True, low=True)
-    # host_pad_vibrate's preview gate (finding 124): the game's own motor values must not cancel PC
+    # host_pad_vibrate's preview gate (finding 141): the game's own motor values must not cancel PC
     # SETTINGS' buzz, and switching Vibration off stops at once. Pure logic, no device.
     run('pad-preview', [HLE / 'test_pad_preview.c'])
     # voice chat (finding 131): voice.c with the real libopus, the jitter queue, mix and rules

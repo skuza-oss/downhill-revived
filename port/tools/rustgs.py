@@ -32,7 +32,7 @@ include pre-check, the dep-info inputs and check_rust_lib on the module. Its car
 <target dir>/dhd_settings (its flags differ from the renderer's wasm build, which would otherwise
 rebuild after it); no seed. The natively built game links the crate through dhd_render (`native`).
 
-`--crate dhd_disc` (wasm32 only; finding 122): the disc image's online check (port/render/disc) the
+`--crate dhd_disc` (wasm32 only; finding 137): the disc image's online check (port/render/disc) the
 same way, the browser's disc module: build/web/dhd_disc.wasm, its own memory, its one import the
 page's read (env.dhd_disc_read). Its gates: its graph (`cargo tree -e normal,build`) holds only
 DISC_WASM_GRAPH's crates, ring exactly at DISC_RING, none of naga / wgpu-core / wgpu-hal (and no

@@ -13,7 +13,7 @@
 //!   value (port/hle/online_menu.c us_files_sha256; tests/constant.rs keeps the two the same).
 //! - The launcher (port/launcher) uses it as a Rust crate, before the game starts.
 //! - The browser (port/web/www/disc.js) loads it as a small wasm module of its own in the game
-//!   worker (`web`, built by rustgs.py with `--crate dhd_disc`; finding 122): the same hash over the
+//!   worker (`web`, built by rustgs.py with `--crate dhd_disc`; finding 137): the same hash over the
 //!   player's file, read through the page, without iso-check.txt.
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -409,7 +409,7 @@ mod tests {
         }
         let files = files_of(&img).unwrap();
         assert_eq!(files.sha256, sha256(&want));
-        // the value port/web/check_disc.mjs wants of the browser's module for this image (finding 122)
+        // the value port/web/check_disc.mjs wants of the browser's module for this image (finding 137)
         assert_eq!(files.hex(), "0932bcbc0f752445101cdd1452fd03f6ff592d06c9e7d28cb2dbfd27d7864106");
         assert_eq!(files.count, 3);
         assert_eq!(files.first_other.as_deref(), Some("A.BIN"));

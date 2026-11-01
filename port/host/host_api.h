@@ -191,7 +191,7 @@ int host_service_host_poll_dump(void);
 void host_service_host_settings_load(void);
 int host_service_host_setting_save(uint32_t a0, uint32_t a1);
 int host_service_host_setting_locked(uint32_t a0);
-/* The controls' bindings changed (controls_menu.c, finding 124): the host re-reads the active
+/* The controls' bindings changed (controls_menu.c, finding 141): the host re-reads the active
    profile's dhd.ini key and applies it to the keyboard and the controllers. */
 void host_service_controls_apply(void);
 void host_service_host_pad_device(int a0, uint32_t a1);
@@ -234,7 +234,7 @@ double host_service_net_server_ms(void);
 int host_service_net_send_frame(int a0, uint32_t a1, uint32_t a2);
 int host_service_net_receive_frame(uint32_t a0, uint32_t a1);
 int host_service_net_list_lobbies(uint32_t a0, int a1);
-int host_service_net_send_chat(uint32_t text);  /* a chat line (finding 125): 1 sent */
+int host_service_net_send_chat(uint32_t text);  /* a chat line (finding 139): 1 sent */
 void host_service_net_get_chat(uint32_t out);   /* the last lines, a NetChat */
 
 /* ---- async host services: blocking work on a host thread (online_menu.c) ----
@@ -341,7 +341,7 @@ typedef struct {
     char track[24], room[8];
 } HostPresence;  /* 56 bytes */
 void host_service_presence(uint32_t state);
-/* A friend's join from Discord (the Social SDK, finding 121): the room's code, NUL-terminated, into
+/* A friend's join from Discord (the Social SDK, finding 136): the room's code, NUL-terminated, into
    `out` (a guest span of 8 bytes or more), taken -- at most once. 1 when there was one (see
    presence/src/lib.rs's `joined`). The browser and Android leave `out` and return 0. */
 int host_service_presence_join(uint32_t out);

@@ -139,7 +139,7 @@ own iso-check.txt reader and writer. Now one crate, `dhd_disc` in the renderer's
 - the online menu runs in the game core (wasm, no Rust): it keeps only a copy of the USA value,
   and `tests/constant.rs` fails while the two differ;
 - the browser build has no online races (no network services in `worker.js`; its disc isn't a
-  file the host can open), so it has nothing to check. (Later: finding 122 builds the crate for the browser too.)
+  file the host can open), so it has nothing to check. (Later: finding 137 builds the crate for the browser too.)
 
 C in the core was the other option, but the launcher would then need a C build of its own and the
 core can't read files on a thread. A Rust crate costs nothing new: SHA-256 comes from `ring`, which

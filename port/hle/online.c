@@ -272,7 +272,7 @@ extern void func_001B45F8(void *timer, int kind, int ticks);  /* the race-end co
 enum {
     EVENT_VERSION = 2, EVENT_HIT = 1, EVENT_LOADED = 2, EVENT_SETUP = 3, EVENT_START = 4, EVENT_GO = 5,
     EVENT_FINISH = 6, EVENT_RESULTS = 7,  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
-    /* 9: the taunts branch's EVENT_TAUNT. 10: [length, text]: a race chat line (finding 125), so chat
+    /* 9: the taunts branch's EVENT_TAUNT. 10: [length, text]: a race chat line (finding 139), so chat
        works on a server without a chat message; older clients drop it (puppet.c takes EVENT_HIT alone) */
     EVENT_CHAT = 10,
     EVENT_VOICE = 11 /* [sequence 16 bits, Opus]: voice chat (finding 131, port/host/voice.c's VOICE_EVENT) */
@@ -342,7 +342,7 @@ static struct {
     int no_bots;                /* the room's computer riders off (its "laps" option 1) */
     int cheats;                 /* the room's cheat codes on (option 2; off: hle_cheat_code) */
     unsigned away;              /* bit s: racer s lost its connection, the server holds its slot
-                                   (NetLobby.racers_away, finding 126); its name tag says so */
+                                   (NetLobby.racers_away, finding 140); its name tag says so */
     double end_done_at;
     double end_held_at;
 } on;
@@ -1407,7 +1407,7 @@ const char *hle_online_slot_name(int slot)
     return on.name[global];
 }
 
-/* ---- text chat in the race (finding 125) ----
+/* ---- text chat in the race (finding 139) ----
    On the race screen Y opens a line to type (Enter says it, Esc closes; the controller keeps
    riding meanwhile, and text_input.c keeps the typed keys from the pad), and in the pause menu
    L1, R1, L2 and R2 say the quick lines (port_chat_presets) without a keyboard. The last lines

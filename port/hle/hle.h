@@ -137,7 +137,7 @@ int sdl_host_main(int (*game)(void *), void *arg);
 int sdl_host_start(void);
 int sdl_host_run(void (*fn)(void *), void *arg);
 
-/* touch.c (Android only, finding 124): the on-screen controls. sdl_host.c hands it SDL's finger
+/* touch.c (Android only, finding 141): the on-screen controls. sdl_host.c hands it SDL's finger
    events; host_pad_device asks it for player 1's state (while riding). touch_reset: DHD_TOUCH or
    DHD_TOUCH_LAYOUT changed (host_controls_load), read them again. */
 void touch_merge(int riding, HostPad *out);
@@ -213,7 +213,7 @@ int pads_online(void);      /* an online race: started with DHD_NET_* or from th
 void hle_online_from_menu(void);            /* the ONLINE menu's room started its race */
 int hle_online_race_riders(void);           /* riders in the online race (10 offline) */
 void port_online_relock(void);              /* online_menu.c: the player's own unlocks again */
-/* online_menu.c: text chat's shared pieces (finding 125): what a chat line may have, the pad's
+/* online_menu.c: text chat's shared pieces (finding 139): what a chat line may have, the pad's
    quick-chat lines, and a line from the server as the game's font can show it. */
 enum { PORT_CHAT_PRESETS = 4 };
 extern const char port_chat_letters[];

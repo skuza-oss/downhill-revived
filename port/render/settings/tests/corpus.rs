@@ -127,7 +127,7 @@ fn unknown_lines() {
 
 #[test]
 fn control_profiles() {
-    // A control profile (finding 124): "controls" names the active one, "bindings" is the default
+    // A control profile (finding 141): "controls" names the active one, "bindings" is the default
     // profile's text, "bindings_<name>" the named ones. Those keys are the game's own, not unknown.
     let text = "controls = fast\nbindings = key.accelerate=space,pad.south=south\n\
                 bindings_fast = key.accelerate=x\nbindings_fast = key.accelerate=y\nfoo = bar\n";

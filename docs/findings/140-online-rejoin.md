@@ -1,4 +1,4 @@
-# 126: Rejoin after a drop: the lobby slot and the race slot
+# 140: Rejoin after a drop: the lobby slot and the race slot
 
 Branch `server-rejoin`, 2026-10-31. Server: `online/server/src/room.ts`, `src/protocol.ts`,
 `test/room.test.ts`, `test/helpers.ts`, `vitest.config.ts`. Client: `port/net/client.c`,
@@ -10,7 +10,7 @@ a drop".
 
 - Server: a closed or errored socket went straight to `leave(memberId, "disconnect")`. The member
   was removed at once; in a race its slot went to `race.left` and everyone got `left`, so the
-  host's AI took the rider (finding 047). A racer silent for 10 s left the same way (finding 120).
+  host's AI took the rider (finding 047). A racer silent for 10 s left the same way (finding 135).
 - Client: a lobby drop reconnected by the room's code up to 5 times, as a **new** member (new id;
   the client re-sent its pick and ready). A race drop set `offline` and `NET_FAILED`, and
   `check_left` (`online.c`) then ran every rider on this PC for the rest of the race. The
@@ -28,7 +28,7 @@ The check is constant-time (`tokensEqual`), and the room is per join code, so a 
 the room and the member that got it. The client sends only the token, never an id.
 
 **A drop holds the slot for `RECONNECT_WINDOW_MS` (20 s).** `dropSocket` (close or error) and
-`dropSilent` (finding 120's 10 s silence) call `detach` instead of `leave` for a member with a
+`dropSilent` (finding 135's 10 s silence) call `detach` instead of `leave` for a member with a
 token, in the lobby or in a race whose slot is still racing:
 
 - lobby: the member stays in `room.members` with `"reconnecting":true` and keeps its id, name,
@@ -69,7 +69,7 @@ and `back` as unknown messages and `reconnecting` as an unknown member field, an
 (their puppets extrapolate 12 ticks and freeze). EVENT frames (hits) meant for its PC are lost;
 the relay keeps nothing. If the host is the one away, its AI riders freeze too, and host-only
 commands (`end`) wait until it comes back or `left` hands the host on. All of this is what
-finding 120 already accepted for 10 s of silence.
+finding 135 already accepted for 10 s of silence.
 
 ## The client
 
@@ -109,7 +109,7 @@ host is the one away.
 ## Tests
 
 `cd online/server; npx vitest run`: 50 of 50 (3 runs in a row). New in
-`describe("rejoin a race (finding 126)")`:
+`describe("rejoin a race (finding 140)")`:
 
 1. `holds a dropped racer's slot: away at once, back on rejoin, relayed both ways`: `away` to the
    two others; the others' frames still flow; the token brings back the same member id with
@@ -119,13 +119,13 @@ host is the one away.
    `room_started` and close 4005, the right token with another build `version_mismatch`; the
    right one still works.
 3. `sends left when the grace period ends without a rejoin; the token is spent`.
-4. `holds a silent racer that can rejoin instead of dropping it`: finding 120's silence gives
+4. `holds a silent racer that can rejoin instead of dropping it`: finding 135's silence gives
    `away` and a 1001 close, and the token still rejoins.
 5. `tells a racer who comes back after the race ended that it is in the lobby`: no `slot`.
 6. `leaves an older client's drop as it was: left at once, no away`.
 7. `hands a racer who sends leave to AI at once, token or not`.
 
-Plus the five lobby cases (`describe("reconnect in the lobby (finding 126)")`): the held slot
+Plus the five lobby cases (`describe("reconnect in the lobby (finding 140)")`): the held slot
 comes back with its state; wrong or absent tokens are new joins; a live member's token takes over
 nothing; the window's end frees the slot; the host role survives and `start` is refused while a
 slot is held. `vitest.config.ts` sets `RECONNECT_WINDOW_MS` to 300 ms. `npm run typecheck` passes.

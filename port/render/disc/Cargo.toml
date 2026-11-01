@@ -4,7 +4,7 @@
 # feature: the game has one Rust static library) and a path dependency of port/launcher. Its one
 # dependency, ring (SHA-256), is the one rustls already brings to both, so neither lock grows.
 # The browser's module (src/web.rs; rustgs.py build --target wasm32-unknown-unknown --crate dhd_disc,
-# finding 122) is the same crate built on its own.
+# finding 137) is the same crate built on its own.
 [package]
 name = "dhd_disc"
 version = "1.0.0"

@@ -1,4 +1,4 @@
-/* Rebindable controls (finding 124): which keyboard key and which gamepad button or axis drive
+/* Rebindable controls (finding 141): which keyboard key and which gamepad button or axis drive
    each of the game's controls, and the profile text dhd.ini keeps.
 
    Two tables, one per device, since the port reads them in different places:

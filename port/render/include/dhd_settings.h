@@ -33,7 +33,7 @@ int dhd_settings_read(const char *path, const char *key, char *out, size_t size)
 
 /* The keys dhd.ini at path holds whose key starts with prefix (without case), joined by commas,
    into out (size bytes, cut to fit). 1 when it found one. The game lists the control profiles with
-   it: "bindings_" (finding 124). */
+   it: "bindings_" (finding 141). */
 int dhd_settings_keys(const char *path, const char *prefix, char *out, size_t size);
 
 #ifdef __cplusplus

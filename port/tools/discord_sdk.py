@@ -1,4 +1,4 @@
-"""The Discord Social SDK's library for the Windows package (finding 121): SHA-256 check, unpack.
+"""The Discord Social SDK's library for the Windows package (finding 136): SHA-256 check, unpack.
 
     python port/tools/discord_sdk.py        prints the x64 DLL (for the package beside dhd.exe)
 

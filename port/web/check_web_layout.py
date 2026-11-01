@@ -12,7 +12,7 @@ the settings and disc modules, which must keep their own.
   dhd_settings.wasm             dhd.ini's crate for the page and the game worker (port/web/www/
                                 settings.js, finding 102): its own memory, apart from the game's
   dhd_disc.wasm                 the online disc check for the game worker (port/web/www/disc.js,
-                                finding 122): its own memory; it imports only the worker's read
+                                finding 137): its own memory; it imports only the worker's read
 
 All of them must be there (the JS renderer and its renderer-less builds are gone: cleanup CL5,
 finding 088; --require-renderer is accepted for old callers).

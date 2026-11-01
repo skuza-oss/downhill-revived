@@ -1,4 +1,4 @@
-# 120: The server drops a racer who goes silent; host handover mid-race is tested
+# 135: The server drops a racer who goes silent; host handover mid-race is tested
 
 ## A connection that dies without closing
 

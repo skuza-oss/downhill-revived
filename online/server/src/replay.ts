@@ -13,7 +13,7 @@
 //   - the replay must agree with the submitted track, lap count, seed and finish time.
 // It does NOT prove the rider rode the track, that no trainer/cheat produced the snapshots, or that
 // the time was earned fairly. That needs a deterministic server-side replay of the race, which is
-// future work; this is the honest limit of the current check. See docs/findings/125-*.md.
+// future work; this is the honest limit of the current check. See docs/findings/127-time-trial-boards.md.
 
 export const GHOST_MAGIC = "DDGHOST1";
 export const GHOST_VERSION = 1;

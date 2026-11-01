@@ -1,4 +1,4 @@
-# 125: Text chat in the race room and the race; name tags
+# 139: Text chat in the race room and the race; name tags
 
 Players asked to talk in a room without a second app. The server side came first (commit
 d5b5622, `docs/online-protocol.md` § Chat): a member sends `{"type":"chat","text"}`, everyone in
@@ -99,7 +99,7 @@ away, so riders far down the hill covered the track with names. Now:
   that a tag is drawn whole or not at all) still holds.
 - **Colour**: each racer's tag has a colour by race slot (8 pastels at the PS2's 0-128 scale),
   the same on every PC, so a player is known at a glance.
-- **Away**: a racer whose connection dropped while the server holds its slot (finding 126,
+- **Away**: a racer whose connection dropped while the server holds its slot (finding 140,
   `NetLobby.racers_away`, read with the `left` check every 15 fields) reads `NAME - AWAY`, grey
   and at half strength, until it is back or has left.
 

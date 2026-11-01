@@ -6,7 +6,7 @@
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
    window size, resolution, picture shape, scaling, skip movies (the startup movies), vibration,
    V-Sync, the frame rate (above 60 at once, else at the next screen), unlock all, FPS & Ping,
-   widescreen (port_widescreen_apply) and the voice rows apply at once (finding 124); the texture
+   widescreen (port_widescreen_apply) and the voice rows apply at once (finding 141); the texture
    pack and the font at the next start ("*" and the footer say so). A setting the environment
    sets (DHD_*) is shown but can't be changed here. Nothing here writes game state: the page
    lives in host memory and the settings in dhd.ini, never in the memory card's save.
@@ -48,7 +48,7 @@ typedef struct {
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, TEXTURES, FONT, RATE, VSYNC, COUNTER,
        VOICE, VOICE_MODE, MIC, MIC_VOLUME, VOICE_VOLUME, VOICE_RANGE, UNLOCK };
 static Row rows[ROWS] = {
-    {"Resolution:", "scale", 1},  /* the native renderer's DHD_SCALE, at once (finding 124) */
+    {"Resolution:", "scale", 1},  /* the native renderer's DHD_SCALE, at once (finding 141) */
     {"Display:", "window", 1},
     {"Window Size:", "size", 1},  /* width and height */
     {"Picture:", "DHD_ASPECT", 1},
@@ -59,7 +59,7 @@ static Row rows[ROWS] = {
     {"Texture Pack:", "textures", 0},  /* port/gs/texpack.c */
     {"Font:", "font", 0},  /* port/gs/font_sharp.c */
     {"Frame Rate:", "fps", 1},  /* fps.c: at once above 60, else at the next screen */
-    {"V-Sync:", "vsync", 1},  /* no tearing (port/gs/gpu_rust.c), at once (finding 124) */
+    {"V-Sync:", "vsync", 1},  /* no tearing (port/gs/gpu_rust.c), at once (finding 141) */
     {"FPS & Ping:", "perf_counter", 1},
     /* voice chat (port/host/voice.c reads them each second, online.c the range: at once; finding 131) */
     {"Voice Chat:", "voice", 1},
@@ -170,7 +170,7 @@ static void choose_rows(void)
     }
 }
 
-/* The button row "Controls..." (finding 124): after the rows this host shows. */
+/* The button row "Controls..." (finding 141): after the rows this host shows. */
 static int controls_row(void) { return shown_count; }
 
 static Row *row_at(int index) { return index >= 0 && index < shown_count ? &rows[shown[index]] : NULL; }
@@ -274,7 +274,7 @@ static void change(int index, int step)
 
 /* ---- the page ---- */
 
-void port_controls_menu(void);  /* controls_menu.c: the rebindable controls (finding 124) */
+void port_controls_menu(void);  /* controls_menu.c: the rebindable controls (finding 141) */
 
 static void page_build(MenuPage *p)
 {
@@ -317,7 +317,7 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
 static void page_left(MenuPage *p, int index) { (void)p; change(index, -1); }
 static void page_right(MenuPage *p, int index) { (void)p; change(index, 1); }
 
-/* Cross: on "Controls..." the CONTROLS hub over this page (finding 124), else keep and close. */
+/* Cross: on "Controls..." the CONTROLS hub over this page (finding 141), else keep and close. */
 static void page_accept(MenuPage *p, int row)
 {
     if (row == controls_row()) {

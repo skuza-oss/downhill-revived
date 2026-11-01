@@ -1,4 +1,4 @@
-/* Rebindable controls (controls.h, finding 124). Compiled into the game core (for the CONTROLS
+/* Rebindable controls (controls.h, finding 141). Compiled into the game core (for the CONTROLS
    page and the DHD_KEYS scripts) and into the native host (keyboard.c, gamepad.c and host.c), so
    it uses no host API and no SDL: an SDL source is only a number and a name here. */
 #include "controls.h"

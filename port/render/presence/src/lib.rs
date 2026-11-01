@@ -4,14 +4,14 @@
 //! `host_service_presence` when it changes; port/hle/host.c hands it here (`c.rs`). A thread of its
 //! own (`worker.rs`) talks to Discord: the plain local IPC through the discord-rich-presence crate
 //! (a named pipe on Windows, a Unix socket on macOS and Linux), or Discord's Social SDK when its
-//! library sits beside the game (`sdk.rs`, finding 121). Discord running or not, the player sees
+//! library sits beside the game (`sdk.rs`, finding 136). Discord running or not, the player sees
 //! nothing of it but their profile: no error box, one log line at most while Discord isn't there, a
 //! quiet retry every 30 s.
 //!
 //! This file is the part without Discord: the state, the two lines, the party's size and the
 //! elapsed time Discord shows for it (`payload`), and the pacing (`Pacer`: only a change is sent, at
 //! most one update per 15 s, which is about what Discord allows; what is shown goes again every
-//! minute, which is how a Discord restarted since is noticed) (finding 121).
+//! minute, which is how a Discord restarted since is noticed) (finding 136).
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -39,11 +39,11 @@ pub const RETRY: Duration = Duration::from_secs(30);
 /// failed write, and the presence comes back once it is there (RETRY).
 pub const REFRESH: Duration = Duration::from_secs(60);
 
-/// Ask to Join (finding 121): a public room's join secret, which puts a Join button on the
+/// Ask to Join (finding 136): a public room's join secret, which puts a Join button on the
 /// profile. On: the game now takes a join (port/hle/online_menu.c reads it through
 /// `host_service_presence_join` and opens ONLINE's JOIN WITH A CODE), and only the Social SDK can
 /// receive one (worker.rs's `run_sdk`; the plain IPC can't SUBSCRIBE to ACTIVITY_JOIN, so it drops
-/// the secret, finding 121).
+/// the secret, finding 136).
 pub const ASK_TO_JOIN: bool = true;
 /// What a join secret starts with: its format, for the game that takes it.
 pub const JOIN_PREFIX: &str = "dhd-room-1:";

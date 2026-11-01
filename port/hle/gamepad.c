@@ -10,7 +10,7 @@
    Buttons by position, as on a DualShock 2: the bottom face button is Cross, right Circle, left
    Square, top Triangle, whatever the labels (a Switch Pro's B is Cross). Back/Share/Create is
    SELECT, Start/Options/+ is START, the triggers are L2/R2 (with their pressure).
-   Which SDL button, trigger or axis drives each control is controls.c's (finding 124): the defaults
+   Which SDL button, trigger or axis drives each control is controls.c's (finding 141): the defaults
    are the layout above, and the CONTROLS page rebinds them. The mapping is read afresh each pass,
    so a rebind takes effect on the next one.
    A pad SDL knows as a joystick but has no gamepad mapping for gets a default one: hat 0 the
@@ -90,7 +90,7 @@ static SDL_GamepadAxis sdl_axis_of(unsigned source)
     }
 }
 
-/* The controls' bound sources (controls.c, finding 124) into `out`: a button control is a button
+/* The controls' bound sources (controls.c, finding 141) into `out`: a button control is a button
    or a trigger, a stick control is an axis. */
 static void read_gamepad(SDL_Gamepad *g, HostPad *out)
 {

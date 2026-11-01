@@ -1,4 +1,4 @@
-/* The on-screen touch controls for Android (finding 124). Android had no touch input at all: a
+/* The on-screen touch controls for Android (finding 141). Android had no touch input at all: a
    gamepad or a keyboard was needed (finding 091). This file turns touches into player 1's pad,
    through the same path as a controller (host_pad_device, host.c): a left stick for steering and
    leaning, and buttons for the riding controls.
@@ -16,7 +16,7 @@
 
    The buttons are not drawn yet: a touch is invisible but the regions are known and shown in the
    CONTROLS page's preview. Drawing the overlay during play needs the Rust renderer (or a hooked HUD
-   draw), which is next work (finding 124, Open). */
+   draw), which is next work (finding 141, Open). */
 #include "hle.h"
 #include "controls.h"
 #include "../gs/present.h"

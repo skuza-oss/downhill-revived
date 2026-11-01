@@ -19,7 +19,7 @@
    stays START while the pause menu opens, so the menu doesn't see a Triangle and close again.
 
    Layout (the default controls; every one of them is rebindable from the CONTROLS page, controls.c
-   / controls_menu.c, finding 124 — the keys it reads are the bound ones):
+   / controls_menu.c, finding 141 — the keys it reads are the bound ones):
      arrows     d-pad in menus; steer / lean while riding (left stick, ramped)
      Space, X   Cross     confirm; pedal (twice: sprint)
      S          Triangle  back; brake (tweak a trick in the air)

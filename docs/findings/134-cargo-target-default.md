@@ -1,4 +1,4 @@
-# 119: rustgs.py's cargo target folder without DHD_CARGO_DIR
+# 134: rustgs.py's cargo target folder without DHD_CARGO_DIR
 
 BUILDING.md says cargo's output goes under `DHD_DEVCACHES/dhd-cargo`. On Windows, `rustgs.py`
 spelled that default as the literal string `'DHD_DEVCACHES/dhd-cargo'`, not the variable's value.

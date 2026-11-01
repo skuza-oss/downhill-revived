@@ -94,7 +94,7 @@ static void native_present(Native *n)
     }
 }
 
-/* PC SETTINGS > Resolution while the game runs (DHD_SCALE changed; finding 124): the upscaled
+/* PC SETTINGS > Resolution while the game runs (DHD_SCALE changed; finding 141): the upscaled
    surfaces (the frame and Z buffers, native_surface_resources' rule) start over at the new scale,
    as the browser's native_rescale does (gpu_rust_web_native.inc). Rust drops each texture (calling
    dhdr_native_surface with the other kind starts a surface over; the next picture asks for the

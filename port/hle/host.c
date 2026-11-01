@@ -51,7 +51,7 @@
 #include "../host/host_os.h"
 #include "../render/include/dhd_settings.h"  /* dhd.ini (port/render/settings) */
 #include "../render/include/dhd_presence.h"  /* Discord Rich Presence (port/render/presence) */
-#include "controls.h"                        /* the rebindable controls (finding 124) */
+#include "controls.h"                        /* the rebindable controls (finding 141) */
 
 #include <SDL3/SDL.h>
 
@@ -1036,7 +1036,7 @@ void host_settings_load(void)
     host_controls_load();
 }
 
-/* ---- the rebindable controls (finding 124, controls.h/controls.c) ----
+/* ---- the rebindable controls (finding 141, controls.h/controls.c) ----
    The keyboard's and the controllers' bindings come from dhd.ini's active profile: the "controls"
    setting names the profile (empty or "default"), whose bindings live under "bindings" for the
    default profile, else "bindings_<name>". They go into controls.c (which keyboard.c and gamepad.c
@@ -1276,7 +1276,7 @@ void host_service_host_settings_load(void) { host_settings_load(); }
 int host_service_host_setting_save(uint32_t a0, uint32_t a1) { return host_setting_save((const char *)GUEST(a0), (const char *)GUEST(a1)); }
 int host_service_host_setting_locked(uint32_t a0) { return host_setting_locked((const char *)GUEST(a0)); }
 /* The core's CONTROLS page changed a binding (it saved it to the active profile's dhd.ini key and
-   set DHD_CONTROLS): read the profile again and apply it (finding 124). */
+   set DHD_CONTROLS): read the profile again and apply it (finding 141). */
 void host_service_controls_apply(void) { host_controls_load(); }
 void host_service_host_pad_device(int a0, uint32_t a1) { host_pad_device(a0, (HostPad *)GUEST(a1)); }
 void host_service_host_pad_vibrate(int a0, int a1, int a2) { host_pad_vibrate(a0, a1, a2); }
@@ -1297,7 +1297,7 @@ void host_service_presence(uint32_t a0)
     dhd_presence_set(p->kind, track, p->place, p->riders, p->rider, room, p->members, p->max_members);
 }
 
-/* A friend's join from Discord (finding 121): the SDK's callback left the room's code in
+/* A friend's join from Discord (finding 136): the SDK's callback left the room's code in
    dhd_presence (port/render/presence/src/lib.rs); the core (online_menu.c's port_online_resume)
    takes it here and opens ONLINE's JOIN WITH A CODE. `out` is the core's 8-byte buffer; nothing is
    written and 0 comes back when no join waits (the off setting, the IPC, the browser, Android). */

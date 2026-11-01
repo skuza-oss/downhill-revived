@@ -12,7 +12,7 @@ const args = Object.fromEntries(
 );
 const BASE = (args.url ?? "ws://127.0.0.1:8787").replace(/\/$/, "");
 const PLAYERS = Number(args.players ?? 4);
-// The server starts a race only with two or more members (room.ts onStart, finding 118).
+// The server starts a race only with two or more members (room.ts onStart, finding 133).
 if (!Number.isInteger(PLAYERS) || PLAYERS < 2) {
   console.error("--players must be 2 or more: the server starts a race only with two members");
   process.exit(2);

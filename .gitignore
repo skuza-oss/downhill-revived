@@ -82,7 +82,7 @@ docs/private/
 # Rust build output (cargo)
 port/render/**/target/
 
-# The Discord Social SDK (finding 121): Discord's, never committed
+# The Discord Social SDK (finding 136): Discord's, never committed
 discord_partner_sdk*
 libdiscord_partner_sdk*
 discord_krisp*
