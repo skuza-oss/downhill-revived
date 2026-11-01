@@ -10,6 +10,7 @@ the VU microcode come from the player's disc at start (port/hle/host.c, finding 
 holds only the translated code.
 usage: python port/tools/scan_retail.py FILE [--elf iso/SCUS_971.77] [--window 64]"""
 import argparse
+import functools
 import sys
 from pathlib import Path
 
@@ -44,9 +45,11 @@ PUBLIC = [
     (0x299535, 71, "DEFLATE's distance base table (RFC 1951; 1, 2, 3, 4, 5, 7 ... 24577 as 16-bit words, "
                    "60 bytes at 0x299538) of the game's zlib; the png crate's inflater (texture packs, "
                    "finding 057) has the same table"),
-    (0x281D44, 76, "the hexadecimal digits '0123456789abcdef' (the start of the game's C library digit string "
-                   "at 0x281D80, ...xyz for base 36) with the 60 bytes of zero fill before them; serde_json "
-                   "(dhd_presence, finding 106) carries the same digits after zero padding in the Linux build"),
+    (0x281D44, 105, "the game's C library digit string '0123456789abcdefghijklmnopqrstuvwxyz' (at 0x281D80, for "
+                    "every base up to 36) with the 60 bytes of zero fill before it and the 9 after; serde_json "
+                    "(dhd_presence, finding 106) carries the hexadecimal digits after zero padding in the Linux "
+                    "build, and the Linux AppImage's WebKitGTK and Kerberos libraries (finding 125) the whole "
+                    "string between zeros"),
 ]
 
 
@@ -76,8 +79,10 @@ def counting(w):
     return False
 
 
+@functools.lru_cache(maxsize=4)
 def windows(elf, size):
-    """{hash: [elf offsets]} of the ELF's informative windows (step 1)."""
+    """{hash: [elf offsets]} of the ELF's informative windows (step 1); built once per ELF (a package
+    scans hundreds of files against the same one: the AppImage's libraries)."""
     out = {}
     for i in range(len(elf) - size + 1):
         w = elf[i:i + size]

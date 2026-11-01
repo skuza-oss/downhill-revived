@@ -125,8 +125,10 @@ it unchanged (finding 088, CL3).
 - Android arm64 (finding 091): `build_host64.py --target android-arm64` makes `libmain.so` (wasm2c core, the
   POSIX host on arm64, the Rust renderer on Vulkan, SDL3 as `libSDL3.so`) and
   `port/android/build_apk.py` a debug-signed APK with Gradle (no Android Studio). On the Mi 11i:
-  title, menus and a race draw right, background/foreground works, about 25 fields/s in a race
-  (60 is the goal: speed work next). Gamepad or keyboard only (no touch). Online uses the same
+  title, menus and a race draw right, background/foreground works; the first race measurement was
+  about 25 fields/s, and findings 107/112 brought it to 115 fields/s at 1x uncapped (93 at 2x), so
+  60 is reachable there at 1x. A low-end Unisoc T612 phone (Realme, finding 126) does 36-40
+  fields/s at 1x and 14 at 2x and cannot hold 60. Gamepad or keyboard only (no touch). Online uses the same
   Rust client as Windows (`dhd_net`, below; not yet tried on the phone).
 - Retired (finding 088): the 32-bit i686 build (`link.py`, `build_clean.py`, the x87/FP-trap
   runtime), the Direct3D 11 renderer, the C wgpu-native renderer and the browser's JS renderer.
@@ -203,9 +205,10 @@ offline simulation steps at higher rates, finding 067), texture packs in PCSX2's
 font (finding 058), movies, vibration, EXIT GAME. The launcher (`port/launcher`, finding 093)
 holds the settings, the rider name and the updates on every platform; the game has no updater
 or start window of its own (2026-10-27). It decides the one data folder for the player's files
-(the game's folder when it is a plain writable folder, else the system's app-data folder; passed
+(the system's app-data folder for an installed copy: the Windows setup's `installed.txt`, an app
+bundle, an AppImage; else the game's folder when it is a plain writable folder, else app data; passed
 as `DHD_SETTINGS`, `DHD_MEMCARD_DIR` and `DHD_DATA_DIR`), updates from per-platform assets in
-`latest.json` (a macOS update swaps the whole .app), and checks HTTPS with rustls and bundled
+`latest.json` (a macOS update swaps the whole .app, an AppImage the whole file), and checks HTTPS with rustls and bundled
 webpki-roots, the game's rule. dhd.ini has one implementation, the Rust crate `dhd_settings`
 (`port/render/settings`, finding 101): its keys, defaults, choices, reading rules and line-keeping
 saves serve the game (through the Rust static library; PC SETTINGS through a generated table), the
@@ -253,6 +256,13 @@ Bump `port/include/version.h`, `build_wasm.py`, `package_release.py`, publish th
 section 6; finding 088, CL3). macOS and Linux (finding 093, Release): `package_release.py
 --platform mac|linux --game PATH` on that machine (the mac zip is signed there), then
 `--merge` its `latest.json` into the Windows one; publish every zip with the one `latest.json`.
+Installers (finding 125, after 0.7.5): the same runs also make each platform's installer from the
+checked files (`port/tools/installers.py`; `--no-installer` skips it): the per-user Windows setup
+(`-win-setup.exe`, Inno Setup 7 via `innosetup.py`, `port/release/installer/windows.iss`), the
+macOS DMG (on the Mac) and the Linux AppImage (`-linux-experimental.AppImage`, Tauri's bundle with
+WebKitGTK inside; its `linux-appimage` entry goes into latest.json and `--merge` carries it).
+Publish them next to the zips; installed copies keep the player's files in the system's app-data
+folder and update from the zips (the AppImage from its own entry). None is code-signed.
 Since 0.7.0 the mac and linux zips are `-mac-experimental.zip` and `-linux-experimental.zip`
 (finding 093, "0.7.0": built and checked on all three, published 2026-10-28; Linux is linked on
 Ubuntu 22.04 and runs on glibc 2.35 and later, which `package_release.py` checks).
@@ -288,6 +298,14 @@ Measured words, attribution and the audit's false positives are in the FPS1 sect
 (0.6.4 died at the menu after 30-60 s, 0xC0000409): each frame waits for the previous frame's
 GPU work (`Exact::frame_end`), and an out-of-memory device error now ends with a log line, an
 error box and exit code 1. 5 minutes minimised through menus and a race: memory flat.
+
+2026-10-31 (finding 124): PERU no longer logs "vu1: microprogram at 0x1F50 didn't end" (0.7.4,
+0.7.5: about a million interpreted VU1 steps in a frame after earlier races). The weather object's
+four per-view batch records were never initialised, so a zero-density emitter left an old particle
+float there, which the microprogram read as thousands of particles (PCSX2 runs the same input as
+long). A `port/patches.py` patch clears them in `func_00226D08`; with stale pool data seeded, a
+PERU state trace of the fixed build equals the unfixed build's clean run from the constructor on.
+Opt-in VU1 diagnostics: `DHD_VU_CAPTURE_FAILURE`, `DHD_VU_CAPTURE_ENTRY`, `DHD_VU_CAPTURE_EE`.
 
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;

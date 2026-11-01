@@ -205,7 +205,8 @@ async fn check_update(app: State<'_, App>) -> Result<UpdateCheck, String> {
     let source = Some(effective(&app.place, "update_url"))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| update::OFFICIAL_SOURCE.into());
-    let release = tauri::async_runtime::spawn_blocking(move || update::latest(&source))
+    let platform = update::platform(&app.place);
+    let release = tauri::async_runtime::spawn_blocking(move || update::latest(&source, platform))
         .await
         .map_err(|e| e.to_string())??;
     let newer = release.as_ref().is_some_and(|r| update::newer(&r.version, VERSION));
@@ -227,8 +228,7 @@ async fn install_update(handle: AppHandle, release: update::Release) -> Result<(
     })
     .await
     .map_err(|e| e.to_string())??;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    std::process::Command::new(exe).spawn().map_err(|e| format!("updated, but can't restart: {e}"))?;
+    handle.state::<App>().place.relaunch().map_err(|e| format!("updated, but can't restart: {e}"))?;
     handle.exit(0);
     Ok(())
 }

@@ -29,16 +29,21 @@ The full list and the known gaps: [docs/PLAYING.md](docs/PLAYING.md).
 
 ## Getting started
 
-1. Download `DownhillRevived-<version>-win.zip` from the
-   [Releases](https://github.com/skuza-oss/downhill-revived/releases/latest) page and unzip it
-   into a folder you can write to (not Program Files).
-2. Run `DownhillRevived.exe` and press PLAY.
+1. Download the installer `DownhillRevived-<version>-win-setup.exe` from the
+   [Releases](https://github.com/skuza-oss/downhill-revived/releases/latest) page and run it (no
+   administrator rights needed). It isn't code-signed, so SmartScreen may ask: **More info** >
+   **Run anyway**. Or take `DownhillRevived-<version>-win.zip` and unzip it into a folder you can
+   write to (not Program Files) for a portable copy.
+2. Start Downhill Revived and press PLAY.
 3. The first time, choose your `.iso` of the **USA disc (SCUS-97177)**. It is checked and
    remembered.
 
-Mac and Linux (experimental): take the `-mac-experimental` or `-linux-experimental` zip instead;
-its `README.txt` has the details. You need Windows 10/11 64-bit (or an Apple silicon Mac, or Linux
-with glibc 2.35+ and Vulkan) and a Direct3D 12 or Vulkan graphics card.
+Mac and Linux (experimental): the `-mac-experimental.dmg` (drag the app to Applications) or the
+`-linux-experimental.AppImage` (one file, with the launcher's libraries inside; Steam Deck too),
+or their zips. None of the downloads is signed by a developer certificate:
+[docs/PLAYING.md](docs/PLAYING.md#installing) says how to allow them and where your files go. You
+need Windows 10/11 64-bit (or an Apple silicon Mac, or Linux with glibc 2.35+ and Vulkan) and a
+Direct3D 12 or Vulkan graphics card.
 
 ## Legal notice
 

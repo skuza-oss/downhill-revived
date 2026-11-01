@@ -10,7 +10,7 @@
   // "A new version is available. Update to play online." Raise it to each new release once that
   // release is published; a self-hosted server can keep an older one.
   // LEADERBOARD_SUBMIT_MAX: how many leaderboard submissions one client may make per minute.
-  "vars": { "MIN_VERSION": "0.7.5", "LEADERBOARD_SUBMIT_MAX": "30" },
+  "vars": { "MIN_VERSION": "0.7.6", "LEADERBOARD_SUBMIT_MAX": "30" },
   // The official server's address (port/hle/host.c OFFICIAL_SERVER).
   "routes": [{ "pattern": "dhd.skuza.app", "custom_domain": true }],
   // Usage stats (src/room.ts stat): joins and races, no addresses or names. Optional.

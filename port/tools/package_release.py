@@ -114,6 +114,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_launcher  # noqa: E402
 import discord_sdk  # noqa: E402
 import dxc  # noqa: E402
+import installers  # noqa: E402
 import scan_retail  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -235,9 +236,25 @@ def server_strings(settings):
     return out
 
 
+HOST_CHARS = frozenset(b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-')
+
+
+# WORKERS_HOST's own domain part: searched alone, then walked back over the host's characters
+WORKERS_SUFFIX = re.compile(rb'workers\.dev')
+
+
 def other_hosts(text):
-    """workers.dev hosts in text other than the official server."""
-    return sorted({m.group(0).lower() for m in WORKERS_HOST.finditer(text)} - {OFFICIAL_HOST})
+    """The hosts WORKERS_HOST matches in text, other than the official server: each WORKERS_SUFFIX
+    with the run of host characters before it. Found from the suffix backwards, so the time is
+    linear: the regex alone retries every start of a long run of letters and digits, which took
+    tens of minutes on the AppImage's bundled libraries."""
+    lowered, found = text.lower(), set()
+    for m in WORKERS_SUFFIX.finditer(lowered):
+        start = m.start()
+        while start > 0 and text[start - 1] in HOST_CHARS:
+            start -= 1
+        found.add(lowered[start:m.end()])
+    return sorted(found - {OFFICIAL_HOST})
 
 
 def code_ranges(data):
@@ -720,6 +737,7 @@ def main():
                     help="only add these latest.json files' platforms (same version) to the one beside --out")
     ap.add_argument('--settings', type=Path, help="a dhd.ini whose server line must not be in the package")
     ap.add_argument('--elf', type=Path, default=ROOT / 'iso' / 'SCUS_971.77', help='your retail ELF, for the game-data scan')
+    ap.add_argument('--no-installer', action='store_true', help='only the zip: no Windows installer, AppImage or DMG')
     a = ap.parse_args()
     platform = PLATFORMS[a.platform]
     version = header_version()
@@ -810,13 +828,15 @@ def main():
         sys.exit('--discord-sdk: the Windows package only')
     files, game_path, launcher_path = layout(platform, a.version, launcher_data, data, notices, a.discord_sdk)
     executables = {game_path, launcher_path}
+    # Files only the installer adds (Windows: installed.txt), checked as the package's own are.
+    extra = installers.extra_files(platform.key)
     # Static libraries linked in: their bytes may match the ELF by chance (game_data_runs).
     linked = {game_path: rust_libs, launcher_path: build_launcher.native_libraries(launcher)}
     # Third-party binaries: the publisher's exact bytes (see the module's doc).
     third_party = {p: dxc.DLL_SHA256['x64'] for p in files if p.endswith('/dxcompiler.dll')}
     third_party.update({p: discord_sdk.DLL_SHA256['x64'] for p in files if p.endswith('/' + discord_sdk.DLL_NAME)})
     elf = a.elf.read_bytes()
-    for path, content in files.items():
+    for path, content in list(files.items()) + list(extra.items()):
         file_name = path.rsplit('/', 1)[-1]
         if GAME_DATA.search(file_name):
             sys.exit('%s looks like game data; not packaged' % file_name)
@@ -901,6 +921,17 @@ def main():
         for label, path in ((platform.game, exe), (platform.launcher, launcher)):
             print('  %s needs %s' % (label, ', '.join('%s_%s' % (n, '.'.join(map(str, max(v))))
                                                      for n, v in sorted(symbol_versions(path).items()))))
+    # The installer for a first install (finding 125): the same checked files (installers.py)
+    if not a.no_installer:
+        if platform.key == 'mac' and not signed:
+            print('note: no DMG: the app is not signed (a DMG is made on a Mac)')
+        else:
+            made = installers.make(platform, a.version, files, extra, stage, out, executables,
+                                   server_strings(a.settings), elf, linked, manifest_path if signed else None,
+                                   zip_url.rsplit('/', 1)[0], page)
+            for path in made:
+                print('  installer %s (%d KB) sha256 %s' % (path, path.stat().st_size // 1024,
+                                                            hashlib.sha256(path.read_bytes()).hexdigest()))
     return 0
 
 

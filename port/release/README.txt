@@ -10,22 +10,32 @@ What you need
 - Windows 10 or 11 (64-bit), a graphics card with Direct3D 12 or Vulkan. Without one the game
   draws with Windows' software renderer (WARP), slowly.
   Or a Mac with Apple Silicon (M1 or later) on macOS 11 or later, or Linux on a 64-bit PC with
-  Vulkan and WebKitGTK 4.1 for the launcher (libwebkit2gtk-4.1-0, already there with GNOME).
+  Vulkan and glibc 2.35 or later (the AppImage carries the launcher's WebKitGTK; the zip needs
+  WebKitGTK 4.1 from your distribution: libwebkit2gtk-4.1-0, already there with GNOME).
   The Mac and Linux builds are experimental: they may have problems the Windows build doesn't.
   Please report them with your dhd.log.
 - Your own dump of the Downhill Domination USA disc (SCUS-97177) as an .iso file. Other regions
   and modified images are refused.
 
 How to play
-1. Unzip this folder anywhere you can write to (not Program Files).
-   macOS: unzip and move Downhill Revived to Applications. The first time it is blocked (it is
-   not from an identified developer): open System Settings > Privacy & Security, click Open
-   Anyway next to Downhill Revived, and confirm. Your settings, saves and log are in
-   ~/Library/Application Support/Downhill Revived.
-   Linux: unzip anywhere you can write to and run DownhillRevived.
-2. Run DownhillRevived.exe, the launcher (dhd.exe opens it too). It keeps the game up to date
-   and holds the settings, your rider name for online races, the patch notes and a link to the
-   Discord server. Press PLAY.
+1. Install it, or unzip it. No download is signed by a developer certificate (the project has
+   none), so the system asks once:
+   Windows installer (DownhillRevived-<version>-win-setup.exe): installs for your user, without
+   admin rights, into %LOCALAPPDATA%\Programs\Downhill Revived, with Start menu and
+   desktop shortcuts. SmartScreen may say it doesn't recognise the app: More info > Run anyway.
+   Uninstall it from Settings > Apps > Installed apps.
+   Windows zip: unzip this folder anywhere you can write to (not Program Files). It is portable:
+   your files stay in it.
+   macOS: open the .dmg and drag Downhill Revived to Applications (or unzip the zip and move it
+   there), and start it from Applications. The first time it is blocked (it is not from an
+   identified developer): open System Settings > Privacy & Security, click Open Anyway next to
+   Downhill Revived, and confirm.
+   Linux: make the .AppImage executable (chmod +x) and run it; on a Steam Deck, add it to Steam
+   as a non-Steam game for Game Mode. Or unzip the zip anywhere you can write to and run
+   DownhillRevived.
+2. Run Downhill Revived (DownhillRevived.exe in the zip), the launcher (dhd.exe opens it too).
+   It keeps the game up to date and holds the settings, your rider name for online races, the
+   patch notes and a link to the Discord server. Press PLAY.
 3. The first time, the launcher asks for your disc image (Choose disc): choose your .iso. It is
    checked and remembered in dhd.ini; you are only asked again if the file moves or changes.
    The launcher's Settings > Game can change it later.
@@ -69,8 +79,8 @@ the PS2 does. A texture pack that replaces the font wins over both.
 Texture packs (upscale mods)
 Texture replacement packs made for PCSX2 work unchanged (PNG files named by PCSX2's texture
 hash). Packs are made by their authors and are not part of this game; get one yourself. Either
-- put the pack's files in a folder textures\SCUS-97177\replacements beside dhd.ini (the
-  folder of your settings and saves; on Windows that is normally the game's folder), or
+- put the pack's files in a folder textures\SCUS-97177\replacements beside dhd.ini (your
+  data folder, below), or
 - name the pack's folder in dhd.ini (its full path), e.g. the one PCSX2 uses:
     texture_pack = <Documents>\PCSX2\textures\SCUS-97177\replacements
 OPTIONS > PC SETTINGS > Texture Pack turns it off or on (at the next start); in dhd.ini that is
@@ -78,7 +88,12 @@ OPTIONS > PC SETTINGS > Texture Pack turns it off or on (at the next start); in 
 so the game's own texture can show for a moment first. texture_cache_mb = N sets how much
 graphics memory they may use (default: half the card's, at most 2048).
 
-Files the game writes beside dhd.exe
+Your files
+The game keeps them in one data folder: the zip's own folder, or for an installed copy
+  Windows   %APPDATA%\Downhill Revived
+  macOS     ~/Library/Application Support/Downhill Revived
+  Linux     ~/.local/share/downhill-revived (the AppImage)
+An update or uninstall never deletes them.
 - dhd.ini       your settings, one "key = value" per line.
 - saves\card1\  memory card 1: your saves. Copy this folder to back them up.
 - dhd.log       messages from the last run. Attach it when you report a problem.
@@ -88,7 +103,8 @@ The launcher looks for a newer version when it opens and shows Update in its foo
 downloads it, checks it and puts it in place. Without a network you can still play. An update
 replaces the files of the release only: dhd.ini and saves\ are never touched. You can also update
 by hand: copy the files of a newer version over your folder (a release holds no dhd.ini and no
-saves, so yours are kept).
+saves, so yours are kept). Installed copies update themselves the same way; the AppImage replaces
+itself with the new release's AppImage.
 In dhd.ini:
     auto_update = ask    ask before updating (the default); on: update without asking;
                          off: never look

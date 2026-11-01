@@ -257,7 +257,7 @@ def build_vu(gs_cmd):
     # vif.c's DHD_VU_SUSPECT watch reads the GS's draw counter, which is in the other worker
     v=(OUT/'vif.c').read_text()
     for a,b in (('uint64_t suspects = watch ? gs.suspect_draws : 0;','uint64_t suspects = 0; watch = 0; /* threaded: the GS is in its own worker */'),
-                ('if (watch && gs.suspect_draws != suspects) save_suspect();','(void)suspects;')):
+                ('if (watch && gs.suspect_draws != suspects) save_suspect("DHD_VU_SUSPECT", "suspect");','(void)suspects;')):
         if a not in v:sys.exit('build_graphics: vif.c has no %r any more'%a)
         v=v.replace(a,b)
     (OUT/'vif_vu.c').write_text(v)

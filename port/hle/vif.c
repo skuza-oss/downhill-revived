@@ -113,13 +113,18 @@ static void capture_micro(unsigned addr, unsigned top, unsigned itop)
 {
     static unsigned seen[128], count;
     static const char *dir;
+    static const char *entry;
+    static int capture_ee;
     static int initialized;
     static double after;
     if (!initialized) {
         initialized = 1; dir = getenv("DHD_VU_CAPTURE");
+        entry = getenv("DHD_VU_CAPTURE_ENTRY");
+        capture_ee = getenv("DHD_VU_CAPTURE_EE") != NULL;
         const char *at = getenv("DHD_VU_CAPTURE_AT"); after = at ? atof(at) : 0;
     }
     if (!dir || count == 128 || host_seconds() < after) return;
+    if (entry && addr != (unsigned)strtoul(entry, NULL, 16)) return;
     unsigned hash = 2166136261u;
     for (unsigned i = 0; i < 0x4000; i++) hash = (hash ^ vu1.vu0_code[i]) * 16777619u;
     unsigned key = hash ^ addr;
@@ -133,6 +138,13 @@ static void capture_micro(unsigned addr, unsigned top, unsigned itop)
     fwrite(header, sizeof header, 1, f); fwrite(&vu1, sizeof vu1, 1, f);
     fwrite(vu1.vu0_code, 0x4000, 1, f); fwrite(vu1.vu0_mem, 0x4000, 1, f);
     fclose(f);
+    /* Optional upstream context for finding the EE packet/object that supplied
+       this input. Like the VU capture, this contains retail data, not source. */
+    if (capture_ee) {
+        snprintf(path, sizeof path, "%s/vu1-%08X-%04X.ee.bin", dir, hash, addr);
+        f = fopen(path, "wb");
+        if (f) { fwrite(GUEST(PS2_RAM_BASE), 0x2000000, 1, f); fclose(f); }
+    }
 }
 
 /* DHD_VU_SEQ=dir: every VU1 run from DHD_VU_SEQ_AT seconds (game clock) for DHD_VU_SEQ_KICKS
@@ -178,13 +190,13 @@ static void capture_sequence(unsigned addr, unsigned top, unsigned itop)
    flagged (DHD_GS_TRACE_FOGGED), so the exact failing invocation can be replayed. */
 static struct { unsigned header[4]; ps2_cpu cpu; uint8_t code[0x4000], mem[0x4000]; } suspect;
 
-static void save_suspect(void)
+static void save_suspect(const char *variable, const char *label)
 {
     static unsigned saved;
     char path[1024];
-    const char *dir = getenv("DHD_VU_SUSPECT");
+    const char *dir = getenv(variable);
     if (!dir || saved == 16) return;
-    snprintf(path, sizeof path, "%s/suspect-%02u-%04X.bin", dir, saved++, suspect.header[0]);
+    snprintf(path, sizeof path, "%s/%s-%02u-%04X.bin", dir, label, saved++, suspect.header[0]);
     FILE *f = fopen(path, "wb");
     if (!f) return;
     fwrite(suspect.header, sizeof suspect.header, 1, f); fwrite(&suspect.cpu, sizeof suspect.cpu, 1, f);
@@ -261,10 +273,15 @@ static void run_micro(Vif *v, uint32_t addr)
     capture_micro(addr, v->top, v->itop);
     capture_representative(addr, v->top, v->itop);
     capture_sequence(addr, v->top, v->itop);
-    static int watch = -1;
-    if (watch < 0) watch = getenv("DHD_VU_SUSPECT") != NULL;
+    /* Capture the input, before VU stores destroy it, only when requested.
+       The oracle accepts this same header/register/code/data format. */
+    static int watch = -1, capture_failure;
+    if (watch < 0) {
+        watch = getenv("DHD_VU_SUSPECT") != NULL;
+        capture_failure = getenv("DHD_VU_CAPTURE_FAILURE") != NULL;
+    }
     uint64_t suspects = watch ? gs.suspect_draws : 0;
-    if (watch) {
+    if (watch || capture_failure) {
         suspect.header[0] = addr; suspect.header[1] = v->top; suspect.header[2] = v->itop;
         suspect.header[3] = sizeof vu1; suspect.cpu = vu1;
         memcpy(suspect.code, vu1.vu0_code, 0x4000); memcpy(suspect.mem, vu1.vu0_mem, 0x4000);
@@ -273,10 +290,12 @@ static void run_micro(Vif *v, uint32_t addr)
     unsigned profile_overlay = 0;
     if (profile_start) profile_overlay = !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x265C10), 32) ? 1 :
                                        !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
-    if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL))
+    if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {
         hle_log("vif1: microprogram at 0x%X failed\n", addr);
+        if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed");
+    }
     if (profile_start) vu_profile_end(profile_start, profile_overlay, graphics_provenance.program, addr, (v->code >> 24 & 0x7f) == MSCNT);
-    if (watch && gs.suspect_draws != suspects) save_suspect();
+    if (watch && gs.suspect_draws != suspects) save_suspect("DHD_VU_SUSPECT", "suspect");
     v->tpc = vu1.vu0_ctrl[10] / 8;
 #endif
 }

@@ -50,7 +50,7 @@ What works today:
   moves to the next track that fits. After your finish the camera follows the riders still
   racing (Left/Right change rider) until the race closes; BACK TO THE ROOM in the pause menu
   leaves earlier.
-- **Memory card saves**, stored as plain files beside the game.
+- **Memory card saves**, stored as plain files in your data folder (see [Installing](#installing)).
 - **Controllers**: Xbox pads, DualSense, DualShock 4, Switch Pro, 8BitDo and most other USB or
   Bluetooth pads (through SDL3 and its controller database), with vibration where the pad has
   motors. Buttons go by position, as on a PlayStation pad. The 2-4 player modes use every
@@ -72,40 +72,75 @@ Known gaps:
 
 ## Installing
 
-1. Download `DownhillRevived-<version>-win.zip` from the [Releases](https://github.com/skuza-oss/downhill-revived/releases) page and
-   unzip it into a folder you can write to (not Program Files). It holds `DownhillRevived.exe`
-   (the launcher), `dhd.exe` (the game), `dxcompiler.dll` (Microsoft's shader compiler),
-   `README.txt`, `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt`; nothing else is needed.
-2. Run `DownhillRevived.exe` (`dhd.exe` opens it too) and press PLAY.
-3. The first time, choose your disc image: your `.iso` of the USA disc. It is checked and
-   remembered in `dhd.ini`; you won't be asked again unless the file moves or changes.
+Each release has an installer and a zip for every system, on the
+[Releases](https://github.com/skuza-oss/downhill-revived/releases) page. Both hold the same game
+and update themselves the same way; take the installer unless you want a portable folder.
 
-Mac and Linux (experimental): download `DownhillRevived-<version>-mac-experimental.zip` or
-`-linux-experimental.zip` instead. On a Mac, move Downhill Revived to Applications and allow it
-once under System Settings > Privacy & Security (Open Anyway); on Linux, unzip it anywhere you
-can write to and run `DownhillRevived`. The `README.txt` in the zip has the details.
+**Windows: installer** (`DownhillRevived-<version>-win-setup.exe`). It installs for your Windows
+user only, without administrator rights, into `%LOCALAPPDATA%\Programs\Downhill Revived`, with a
+Start menu shortcut, a desktop shortcut (optional) and an entry in Settings > Apps > Installed
+apps to uninstall it. The installer isn't signed with a code-signing certificate (the project
+has none), so Windows SmartScreen may say it doesn't recognise the app: click **More info**, then
+**Run anyway**. Your settings, saves and log go to `%APPDATA%\Downhill Revived`.
+
+**Windows: zip** (`DownhillRevived-<version>-win.zip`), portable: unzip it into a folder you can
+write to (not Program Files). It holds `DownhillRevived.exe` (the launcher), `dhd.exe` (the game),
+`dxcompiler.dll` (Microsoft's shader compiler), `README.txt`, `LICENSE.txt` and
+`THIRD-PARTY-NOTICES.txt`; nothing else is needed. Your settings, saves and log stay in that
+folder.
+
+**Mac** (experimental, Apple silicon, macOS 11 or later): open
+`DownhillRevived-<version>-mac-experimental.dmg` and drag Downhill Revived to Applications (the zip
+holds the same app). It is signed ad hoc, not by an identified developer, so the first start is
+blocked: open System Settings > Privacy & Security, click **Open Anyway** next to Downhill Revived
+and confirm. Start it from Applications, not from the disk image, or it can't update itself. Your
+files go to `~/Library/Application Support/Downhill Revived`.
+
+**Linux** (experimental, 64-bit PC with Vulkan, glibc 2.35 or later; Steam Deck too):
+`DownhillRevived-<version>-linux-experimental.AppImage` is one file with everything the launcher
+needs inside (its window library, WebKitGTK, which a Steam Deck lacks). Make it executable
+(Properties > Permissions, or `chmod +x`) and run it; on a Steam Deck in Game Mode, add it to Steam
+as a non-Steam game from Desktop Mode. Your files go to `~/.local/share/downhill-revived` (or
+`$XDG_DATA_HOME/downhill-revived`). The zip (`-linux-experimental.zip`) stays a portable folder
+and needs WebKitGTK 4.1 from your distribution (`libwebkit2gtk-4.1-0`, already there with GNOME).
+Neither is signed.
+
+Then:
+
+1. Start Downhill Revived (`DownhillRevived.exe` in the zip; `dhd.exe` opens it too) and press PLAY.
+2. The first time, choose your disc image: your `.iso` of the USA disc. It is checked and
+   remembered in `dhd.ini`; you won't be asked again unless the file moves or changes.
 
 To start the game without the launcher, turn off Settings > Game > Open the launcher first in the
 launcher (or put `launcher = off` in `dhd.ini`); `dhd.exe` then starts the game straight away.
 
-Files the game keeps beside `dhd.exe`:
+Files the game keeps in your data folder (the zip's folder, or the folder named above for an
+installed copy):
 
 | File | What |
 |---|---|
 | `dhd.ini` | Your settings, one `key = value` per line. The game adds your disc image; the PC SETTINGS page (OPTIONS) writes the rest. |
 | `saves\card1\` | Memory card 1, made at the first save. Copy this folder to back up your saves. |
 | `dhd.log` | Messages from the last run. Attach it when you report a problem. |
-| `dhd.exe.old` | The previous version, for a moment after an update; the next start deletes it. |
+
+Moving from the zip to the installer: copy `dhd.ini` and `saves\` from the zip's folder into
+`%APPDATA%\Downhill Revived` (start the installed game once first, so the folder exists).
+
+**Uninstalling.** Windows: Settings > Apps > Installed apps > Downhill Revived > Uninstall. It
+removes the game and everything updates put in its folder, and never your settings, saves or log
+in `%APPDATA%\Downhill Revived`: delete that folder yourself if you want them gone. Mac: drag the
+app to the Bin. Linux: delete the AppImage. Your files stay in the data folder on both.
 
 ### Updates
 
 The launcher looks for a newer release when it opens and shows **Update** when there is one; it
 downloads the release, checks its SHA-256, puts it in place and opens again (`auto_update = on`
-installs without asking). Without the launcher the game itself asks at start: **Update now** or
-**Later**. Without a network the game just starts. An update replaces `dhd.exe`, the launcher and
-the other files of the release (the text files, `dxcompiler.dll`), never `dhd.ini` or `saves\`. You can also
-update by hand: copy the files of a newer release over your folder (a release holds no `dhd.ini`
-and no saves, so yours are kept). Online races need the newest version; an older one is offered
+installs without asking). Without a network the game just starts. An update replaces `dhd.exe`,
+the launcher and the other files of the release (the text files, `dxcompiler.dll`), never `dhd.ini`
+or `saves\`. Installed copies update the same way, from the same release files (the AppImage
+replaces itself with the release's new AppImage); the installers are only needed once. You can
+also update a zip copy by hand: copy the files of a newer release over your folder (a release
+holds no `dhd.ini` and no saves, so yours are kept). Online races need the newest version; an older one is offered
 Update Now in the ONLINE menu.
 
 ### Controls
@@ -153,13 +188,13 @@ An empty `server =` line means the official server.
 
 Texture replacement packs made for PCSX2 work unchanged. Packs are made by their authors and are
 not part of this project. Either put the pack's files in `textures\SCUS-97177\replacements`
-beside `dhd.exe`, or name the pack's folder on the `texture_pack =` line of `dhd.ini` (for
+beside `dhd.ini` (your data folder, see [Installing](#installing)), or name the pack's folder on the `texture_pack =` line of `dhd.ini` (for
 example PCSX2's own `textures\SCUS-97177\replacements` folder in your Documents). PC SETTINGS >
 Texture Pack turns it off or on at the next start.
 
 ### Settings
 
-`dhd.ini` beside `dhd.exe` holds `key = value` lines; the game writes it, with comments, at the
+`dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
 first start. The PC SETTINGS page writes most of them for you.
 
 | Key | Default | What |
@@ -172,7 +207,7 @@ first start. The PC SETTINGS page writes most of them for you.
 | `DHD_ASPECT` | `wide` | the picture's shape: `wide`, `4:3`, `16:9`, `stretch` or `pixels` |
 | `skip_movies` | `1` | `1` skips the movies, `0` plays them |
 | `vibration` | on | `0` turns rumble off |
-| `texture_pack` | (empty) | a texture pack's folder; empty: `textures\SCUS-97177\replacements` beside `dhd.exe` |
+| `texture_pack` | (empty) | a texture pack's folder; empty: `textures\SCUS-97177\replacements` beside `dhd.ini` |
 | `textures` | `on` | `off` draws the game's own textures |
 | `texture_cache_mb` | half the card's memory, at most 2048 | graphics memory for replacements |
 | `auto_update` | `ask` | `ask`, `on` (update without asking) or `off` (never look) |

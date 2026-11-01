@@ -329,6 +329,43 @@ Microsoft C runtime and Windows SDK import libraries
   DXGI, the Windows Imaging Component for PNG files, and for the controllers XInput,
   DirectInput, Windows.Gaming.Input, SetupAPI and HID), all part of Windows.
 
+The installers (only their programs: the game's files inside are the ones above)
+  Windows: DownhillRevived-<version>-win-setup.exe is made with Inno Setup 7
+  (https://jrsoftware.org/isinfo.php), and its setup and uninstall programs are Inno Setup's,
+  unmodified:
+
+  Inno Setup License
+
+  Copyright (C) 1997-2026 Jordan Russell. All rights reserved.
+  Portions Copyright (C) 2000-2026 Martijn Laan. All rights reserved.
+
+  This software is provided "as-is," without any express or implied warranty. In no event shall
+  the author be held liable for any damages arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose, including commercial
+  applications, and to alter and redistribute it, provided that the following conditions are met:
+
+  1. All redistributions of source code files must retain all copyright notices that are currently
+     in place, and this list of conditions without modification.
+
+  2. All redistributions in binary form must retain all occurrences of the above copyright notice
+     and web site addresses that are currently in place (for example, in the About boxes).
+
+  3. The origin of this software must not be misrepresented; you must not claim that you wrote
+     the original software. If you use this software to distribute a product, an acknowledgment
+     in the product documentation would be appreciated but is not required.
+
+  4. Modified versions in source or binary form must be plainly marked as such, and must not
+     be misrepresented as being the original software.
+
+  Linux: DownhillRevived-<version>-linux-experimental.AppImage starts through the AppImage
+  runtime and AppRun of the AppImage project's linuxdeploy tools (https://github.com/linuxdeploy,
+  https://github.com/AppImage, MIT License), and carries the launcher's WebKitGTK and GTK and the
+  libraries they need, unmodified from Ubuntu 22.04's packages, each under its own licence (LGPL,
+  MIT, BSD and others). Inside the AppImage, usr/share/doc/downhill-revived/BUNDLED-LIBRARIES.txt
+  lists every one with its Ubuntu package, version and source package, and
+  usr/share/doc/<package>/copyright holds each package's copyright and licence text.
+
 The game itself
   Downhill Domination and its code, data, names and trademarks belong to their owners. They are
   not part of this package and are not covered by its licence: dhd.exe reads them at run time

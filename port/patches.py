@@ -429,6 +429,15 @@ PATCHES['unsorted/00235F38.c'] = [('text', 'if (fabsf(step) < minStep) {', 'if (
 # in 32-bit address arithmetic (EE, i686). wasm32 folds the index into the store's unsigned offset,
 # which never wraps: the 64-bit build wrote 4 GiB past p and crashed late in races; write p[-1].
 PATCHES['unsorted/00224CC8.c'] = [('text', '((float *)p)[0x3fffffff]=', '((float *)p)[-1]=')]
+# Weather objects reuse the particle pool's inline packet storage. Their first
+# four position records carry per-view integer batch counts, not particle ages.
+# The retail constructor initializes only the following history records, and
+# 001E0480 leaves the count untouched at zero density. Old particle floats can
+# consequently become thousands of VU1 iterations before the first batch is
+# published (finding 124). Start every view empty; a nonzero update writes the
+# complete position/count record before it can be drawn.
+PATCHES['unsorted/00226D08.c'] = [('text', '    obj->x2830=cursor+0x40;',
+    '    obj->x2830=cursor+0x40;\n    __builtin_memset(obj->x2830, 0, 4 * 16);')]
 # The career finish text (func_0017A678) sprintfs "%d MORE CREDITS REQUIRED TO ADVANCE" into a 32-byte
 # stack buffer when the race did not advance the career (issue #8, finding 094): with two digits that
 # is 36 bytes. On the EE the overrun hits dead bytes of the frame above. In the wasm core buf is in the
