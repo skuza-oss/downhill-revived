@@ -190,13 +190,16 @@ static void capture_sequence(unsigned addr, unsigned top, unsigned itop)
    flagged (DHD_GS_TRACE_FOGGED), so the exact failing invocation can be replayed. */
 static struct { unsigned header[4]; ps2_cpu cpu; uint8_t code[0x4000], mem[0x4000]; } suspect;
 
-static void save_suspect(const char *variable, const char *label)
+/* Each kind of capture (DHD_VU_SUSPECT, DHD_VU_CAPTURE_FAILURE) keeps its own 16. */
+enum { SUSPECT_CAPTURES = 16 };
+static unsigned saved_suspects, saved_failures;
+
+static void save_suspect(const char *variable, const char *label, unsigned *saved)
 {
-    static unsigned saved;
     char path[1024];
     const char *dir = getenv(variable);
-    if (!dir || saved == 16) return;
-    snprintf(path, sizeof path, "%s/%s-%02u-%04X.bin", dir, label, saved++, suspect.header[0]);
+    if (!dir || *saved >= SUSPECT_CAPTURES) return;
+    snprintf(path, sizeof path, "%s/%s-%02u-%04X.bin", dir, label, (*saved)++, suspect.header[0]);
     FILE *f = fopen(path, "wb");
     if (!f) return;
     fwrite(suspect.header, sizeof suspect.header, 1, f); fwrite(&suspect.cpu, sizeof suspect.cpu, 1, f);
@@ -281,7 +284,8 @@ static void run_micro(Vif *v, uint32_t addr)
         capture_failure = getenv("DHD_VU_CAPTURE_FAILURE") != NULL;
     }
     uint64_t suspects = watch ? gs.suspect_draws : 0;
-    if (watch || capture_failure) {
+    /* the snapshot only while one of them can still save it */
+    if ((watch && saved_suspects < SUSPECT_CAPTURES) || (capture_failure && saved_failures < SUSPECT_CAPTURES)) {
         suspect.header[0] = addr; suspect.header[1] = v->top; suspect.header[2] = v->itop;
         suspect.header[3] = sizeof vu1; suspect.cpu = vu1;
         memcpy(suspect.code, vu1.vu0_code, 0x4000); memcpy(suspect.mem, vu1.vu0_mem, 0x4000);
@@ -292,10 +296,10 @@ static void run_micro(Vif *v, uint32_t addr)
                                        !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
     if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {
         hle_log("vif1: microprogram at 0x%X failed\n", addr);
-        if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed");
+        if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed", &saved_failures);
     }
     if (profile_start) vu_profile_end(profile_start, profile_overlay, graphics_provenance.program, addr, (v->code >> 24 & 0x7f) == MSCNT);
-    if (watch && gs.suspect_draws != suspects) save_suspect("DHD_VU_SUSPECT", "suspect");
+    if (watch && gs.suspect_draws != suspects) save_suspect("DHD_VU_SUSPECT", "suspect", &saved_suspects);
     v->tpc = vu1.vu0_ctrl[10] / 8;
 #endif
 }
