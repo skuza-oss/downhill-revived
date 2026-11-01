@@ -642,6 +642,7 @@ static double ready_heard[NET_MAX_SLOTS];     /* per card: the last ready sound 
 static int countdown_shown = -1;
 static char seen_race[NET_MAX_SLOTS][12];     /* per card: its race state last seen (news) */
 static int seen_host = -1;
+static int seen_track = -1;                   /* the room's track last seen (TRACK CHANGED) */
 static char seen_event[32];                   /* the server's last notice seen (start_cancelled) */
 static char title_text[32], footer_text[96];
 
@@ -776,9 +777,13 @@ static const char *track_name(int index)
 
 /* ---- what the buttons do ---- */
 
+static int sent_track = -1;  /* the track this PC chose last: its own change isn't news */
+static double sent_at;
+
 static void send_settings(int track, int options, int is_public)
 {
     NetRoomSettings s = {track, options, is_public, -1, -1, NULL};
+    if (track >= 0) sent_track = track, sent_at = host_seconds();
     host_service_net_set_room(GADDR(&s));
 }
 
@@ -993,13 +998,15 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
 /* ---- news: who came, went or got ready, with a sound (each card's ready sound at most every
    3 s, so toggling Ready can't spam the room) and a note at the top for a moment ---- */
 
-static void note(const char *text, const int *colour)
+static void note_for(const char *text, const int *colour, double seconds)
 {
     memmove(toast, toast + 1, sizeof toast[0] * (TOASTS - 1));
     snprintf(toast[TOASTS - 1].text, sizeof toast[0].text, "%s", text);
     toast[TOASTS - 1].colour = colour;
-    toast[TOASTS - 1].until = host_seconds() + 3.4;
+    toast[TOASTS - 1].until = host_seconds() + seconds;
 }
+
+static void note(const char *text, const int *colour) { note_for(text, colour, 3.4); }
 
 static void room_news(void)
 {
@@ -1040,10 +1047,19 @@ static void room_news(void)
                          l->member[i].name);
                 note(line, NULL);
             }
-    int from, limit, to;
+    int from, limit, to, switched = 0;
     if (strcmp(seen_event, l->last_event) && sscanf(l->last_event, "track_switch:%d:%d:%d", &from, &limit, &to) == 3) {
         snprintf(line, sizeof line, "%s TAKES %d: RACING %s", track_name(from), limit, track_name(to));
         note(line, amber);
+        hle_log("online menu: %s\n", line);
+        switched = 1;
+    }
+    /* Ready stays when the track changes (finding 128): the ready players hear and read it. Not
+       this PC's own choice, nor the grid's switch just above. */
+    if (seen_track >= 0 && l->track != seen_track && !switched && !(l->track == sent_track && now - sent_at < 10)) {
+        snprintf(line, sizeof line, "TRACK CHANGED: %s", track_name(l->track));
+        note_for(line, amber, 5.0);
+        menu_play("S_NEXT");
         hle_log("online menu: %s\n", line);
     }
     if (!strcmp(l->last_event, "start_cancelled") && strcmp(seen_event, l->last_event))
@@ -1060,6 +1076,7 @@ static void room_news(void)
 keep:
     seen_count = l->nmembers;
     seen_host = l->host_id;
+    seen_track = l->track;
     snprintf(seen_event, sizeof seen_event, "%s", l->last_event);
     for (int j = 0; j < l->nmembers; j++) {
         seen_id[j] = l->member[j].id, seen_ready[j] = l->member[j].ready;
@@ -1458,7 +1475,7 @@ static void room_open(void)
 {
     rf = rf_bar = selected ? RF_READY : RF_RIDER;
     track_list = leave_ask = rules_open = room_closed = 0;
-    seen_host = -1;
+    seen_host = seen_track = -1;
     memset(seen_race, 0, sizeof seen_race);
     room_buttons = 0xFFFF, repeat_buttons = repeat_frames = 0;
     seen_count = -1, countdown_shown = -1;
