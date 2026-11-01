@@ -232,18 +232,24 @@ static int voice_thread(void *unused)
     return 0;
 }
 
+/* The recording device at index, for SETTINGS > Microphone (pc_settings.c mic_choices, which
+   asks for 0, 1, 2... until there's none). The devices are listed once, when index 0 is asked for,
+   and the later indices read that same list: one enumeration per page open, and a device plugged
+   in or out meanwhile can't shift the indices under the loop. */
 int host_service_voice_device(int index, uint32_t at, int size)
 {
+    static SDL_AudioDeviceID *ids;
+    static int count;
     char *out = (char *)GUEST(at);
-    int count = 0, found = 0;
-    SDL_AudioDeviceID *ids = SDL_GetAudioRecordingDevices(&count);
-    if (ids && index >= 0 && index < count && size > 0) {
-        const char *name = SDL_GetAudioDeviceName(ids[index]);
-        snprintf(out, (size_t)size, "%s", name ? name : "");
-        found = 1;
+    if (index == 0 || !ids) {
+        SDL_free(ids);
+        count = 0;
+        ids = SDL_GetAudioRecordingDevices(&count);
     }
-    SDL_free(ids);
-    return found;
+    if (!ids || index < 0 || index >= count || size <= 0) return 0;
+    const char *name = SDL_GetAudioDeviceName(ids[index]);
+    snprintf(out, (size_t)size, "%s", name ? name : "");
+    return 1;
 }
 #else
 /* The browser (www/net.js): is the microphone wanted now (voice on, in a race)? The page opens
