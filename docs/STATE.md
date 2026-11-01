@@ -289,6 +289,10 @@ Measured words, attribution and the audit's false positives are in the FPS1 sect
 GPU work (`Exact::frame_end`), and an out-of-memory device error now ends with a log line, an
 error box and exit code 1. 5 minutes minimised through menus and a race: memory flat.
 
+2026-11-01 (finding 128): online rooms keep Ready across track changes (TRACK CHANGED line), MOSH
+only by the host's pick, and the shop's bike, jersey and bike-colour pages online (issue 18).
+Server tests 64/64; two local games on hidden desktops: each saw the other's choice in its log.
+
 2026-10-31 (finding 124): PERU no longer logs "vu1: microprogram at 0x1F50 didn't end" (0.7.4,
 0.7.5: about a million interpreted VU1 steps in a frame after earlier races). The weather object's
 four per-view batch records were never initialised, so a zero-density emitter left an old particle
@@ -336,8 +340,12 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   results are shared (finding 047); a player who leaves becomes an AI rider.
 - In the game's own menus: name and code entry, public list, rider picker (finding 065); restart,
   new level and rematch flows (finding 072). Create/Join waits on ONLINE, then the rider screen
-  once and the room over it, with no bounce and no second title flight (finding 092); the shop's
-  bike/jersey pages are still skipped online.
+  once and the room over it, with no bounce and no second title flight (finding 092); then the
+  shop's own BIKES / JERSEYS / BIKE COLOR pages, every bike and jersey offered, each player's
+  choice (bike colour too) worn by their puppet on the other PCs (finding 128).
+- The room (finding 128): Ready means "count me in for the next race": a new track or computer
+  riders on/off keep it, cheats on/off clear it; ready players see TRACK CHANGED. MOSH PIT (the
+  arena) only comes when the host picks it (the server's pickOnly; NEXT / RANDOM skip it).
 - The disc: online needs the USA disc's game files (the hash of every ISO 9660 file's path, size
   and contents, `dhd_disc` in port/render/disc, shared by the game and the launcher; redump
   30393's files), so a good dump that differs only outside the files is taken. An image whose
