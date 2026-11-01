@@ -107,8 +107,13 @@ use the same `error` frame **without** a close; the client just shows `message`.
 ### Server → client
 
 ```jsonc
-// Answer to hello: who you are in this room.
-{"type":"welcome","protocol":2,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000}
+// Answer to hello: who you are in this room, and where you and the room are (Region, below).
+{"type":"welcome","protocol":2,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
+ "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU"}
+
+// Where the room runs and each member's country: after every join and when the room learns its
+// colo (Region, below).
+{"type":"where","region":"EU","colo":"FRA","members":[{"id":0,"country":"PL"},{"id":2,"country":"DE"}]}
 
 // Full room snapshot. Sent after every change and every ~2 s with fresh ping numbers.
 {"type":"room","code":"K7QX2M","hostId":0,"roomName":"Friday race","public":true,"maxPlayers":10,
@@ -213,10 +218,12 @@ The server keeps what everyone has to agree on:
 `GET /v1/lobbies` → `200 application/json`:
 
 ```json
-{"protocol":2,"minVersion":"0.1.0","lobbies":[
+{"protocol":2,"minVersion":"0.1.0","region":"EU","lobbies":[
   {"code":"K7QX2M","roomName":"Friday race","version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","track":3,
-   "players":2,"maxPlayers":10,"hostName":"Ann"}]}
+   "players":2,"maxPlayers":10,"hostName":"Ann","region":"EU","colo":"FRA","createdIn":"EU"}]}
 ```
+
+`region` at the top is the asker's own; the list comes in their region's order (Region, below).
 
 Only public rooms that have not started and have a free slot are listed. Clients should
 show only rooms whose `version` matches their own.
@@ -458,3 +465,34 @@ Room snapshots omit `choosing` when false and `bike` when zero. Receivers use th
 defaults. This saves repeated fields while retaining all ten members and last results
 within the 4096-byte UTF-8 frame budget. The room draws two columns of five cards,
 including ping, readiness, race state and results. The fourth room rule sets capacity.
+
+## Region (finding 135)
+
+A room is a Durable Object, and it runs where it was created. `/v1/rooms/new` creates it with a
+location hint from the creator's continent and country as Cloudflare's geolocation places them
+(`request.cf`; never the IP), not from the Cloudflare location their ISP happens to reach:
+Europe `weur` (the Atlantic side: GB, IE, FR, ES, PT, the Benelux...) or `eeur` (the rest),
+North America `wnam` or `enam` (longitude -100, else the state or province), South America `sam`,
+Asia `apac-ne` (JP, KR, TW, HK, CN, MN), `apac-se` (SG, MY, ID, TH, VN, PH...), the Middle East
+`me`, the rest `apac`, Oceania `oc`, Africa `afr`. Cloudflare places `sam`, `afr` and `me` rooms
+in the nearest region that hosts Durable Objects. Joining by code passes no hint (the room exists).
+
+The room learns the Cloudflare location it runs in (a `colo` such as `FRA`) by reading
+`https://cloudflare.com/cdn-cgi/trace` once (`request.cf.colo` inside the object is the client's
+edge, not the object's); rooms made before this learn it on their next hello. Its region, the
+short name players see, is that colo's (`EU`, `NA`, `ASIA`, `OC`) when the colo is in the
+server's table of Durable Object locations, else the hint's (`EU`, `NA`, `SA`, `ASIA`, `OC`, `AF`,
+`ME`); `""` when neither is known (a local `wrangler dev` without Cloudflare data).
+
+- `welcome` adds `edgeColo` (the Cloudflare location this connection reached), `country` and
+  `continent` (Cloudflare's, `""` unknown), `roomColo` and `roomRegion` (`""` until the room's
+  trace has answered; a `where` follows then).
+- `where` (new message type) carries the room's `region` and `colo` and every member's `country`.
+  It is apart from `room` so room snapshots stay within their 4096 bytes for ten members.
+- `/v1/lobbies` adds the asker's `region`, and per room `region`, `colo` and `createdIn` (the
+  creator's region). Rooms made in the asker's region come first, then rooms that run in it, then
+  the rest, each part busiest first. Releases up to 0.7.6 read the first eight rooms, and their
+  Quick Race joins the first one with room, so they prefer a near room too.
+
+Every field and the message type are additions: clients that don't know them ignore them (the
+native client reads by key, the browser copies known keys), so `MIN_VERSION` stays as it is.

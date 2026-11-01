@@ -19,6 +19,11 @@ export interface LobbyEntry {
   players: number;
   maxPlayers: number;
   hostName: string;
+  /** Where the room runs ("EU", "NA", "ASIA"...; "" unknown) and its Cloudflare location, and the
+      region of the player who made it (src/region.ts, finding 135). */
+  region?: string;
+  colo?: string;
+  createdIn?: string;
 }
 
 interface Stored extends LobbyEntry {

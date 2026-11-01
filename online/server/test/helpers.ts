@@ -24,8 +24,9 @@ export class Client {
     });
   }
 
-  static async connect(path: string): Promise<Client> {
-    const res = await exports.default.fetch(`https://dhd.test${path}`, { headers: { Upgrade: "websocket" } });
+  /** cf: what Cloudflare would say of the connection (request.cf: colo, country, continent...). */
+  static async connect(path: string, cf?: Record<string, unknown>): Promise<Client> {
+    const res = await exports.default.fetch(`https://dhd.test${path}`, { headers: { Upgrade: "websocket" }, ...(cf ? { cf } : {}) });
     if (res.status !== 101 || !res.webSocket) throw new Error(`upgrade failed: ${res.status}`);
     res.webSocket.accept();
     return new Client(res.webSocket);

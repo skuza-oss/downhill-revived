@@ -30,6 +30,7 @@ import {
   minVersionOf,
   randomSeed,
 } from "./protocol";
+import { placeOf, roomRegion, traceColo } from "./region";
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -47,6 +48,8 @@ interface Member {
   choosing?: boolean;
   /** The hello listed the "countdown" feature (COUNTDOWN_MS). */
   countdown?: boolean;
+  /** Two-letter country of their connection as Cloudflare sees it ("" unknown), shown to the room. */
+  country?: string;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -96,10 +99,27 @@ interface RoomState {
   /** Everyone is ready: the race starts by itself at this server time (COUNTDOWN_MS); null when
       no countdown runs. */
   countdownEndsAt?: number | null;
+  /** Where the room was made and where it runs (finding 135): the location hint, the creator's
+      region and edge, and the Cloudflare location the object itself runs in (its trace). */
+  origin?: RoomOrigin;
+  colo?: string;
   /** In join order, so members[0] has been here longest. */
   members: Member[];
   race: Race | null;
 }
+
+/** Where a room was made (src/index.ts, finding 135). */
+export interface RoomOrigin {
+  /** The Durable Object location hint it was made with ("" none). */
+  hint: string;
+  /** The creator's region (src/region.ts regionOfPlace). */
+  createdIn: string;
+  /** The Cloudflare location the creator reached. */
+  createdFrom: string;
+}
+
+/** The Cloudflare trace a room reads to learn where it runs; COLO_PROBE overrides it ("off": none). */
+const COLO_PROBE_URL = "https://cloudflare.com/cdn-cgi/trace";
 
 /** Kept on each socket across hibernation. */
 interface SocketInfo {
@@ -108,8 +128,12 @@ interface SocketInfo {
   create: boolean;
   /** Left or refused; only its close is still to come. */
   gone?: boolean;
-  /** Two-letter country of the connection (Cloudflare's), for the usage stats only. */
+  /** Two-letter country of the connection (Cloudflare's): the usage stats, the player's own
+      welcome and the room's member list (no address). */
   country?: string;
+  /** The connection's continent and the Cloudflare location it reached (the welcome). */
+  continent?: string;
+  colo?: string;
 }
 
 /** FNV-1a: a player name becomes a number, so the stats can count players without names. */
@@ -143,6 +167,8 @@ export class Room extends DurableObject<Env> {
   /** This instance's start. Members then without a socket are a restart's ghosts (see onHello);
       those not back within HELLO_TIMEOUT_MS leave as disconnects (alarm). */
   private readonly startedAt = Date.now();
+  /** This instance asked the trace where it runs (once). */
+  private probed = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -158,7 +184,7 @@ export class Room extends DurableObject<Env> {
   }
 
   /** Called by the Worker for a fresh code. False if the code is in use. */
-  async claim(code: string): Promise<boolean> {
+  async claim(code: string, origin?: RoomOrigin): Promise<boolean> {
     if (this.state) return false;
     const now = Date.now();
     this.state = {
@@ -176,10 +202,40 @@ export class Room extends DurableObject<Env> {
       seed: null,
       members: [],
       race: null,
+      ...(origin ? { origin } : {}),
     };
     await this.save();
     await this.ctx.storage.setAlarm(now + PING_INTERVAL_MS);
+    this.probeColo();
     return true;
+  }
+
+  /** Learns the Cloudflare location this object runs in, once per room (rooms made before this
+      code learn it on their next hello): request.cf.colo here is the client's edge, so the object
+      reads a Cloudflare trace, whose colo is where its own requests leave from. In the background;
+      the room shows its region as soon as the answer comes. */
+  private probeColo(): void {
+    if (this.probed || !this.state || this.state.colo) return;
+    this.probed = true;
+    const configured = (this.env as unknown as Record<string, unknown>).COLO_PROBE;
+    const url = typeof configured === "string" ? configured : COLO_PROBE_URL;
+    if (!url || url === "off") return;
+    this.ctx.waitUntil((async () => {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        const colo = traceColo(await r.text());
+        if (!colo || !this.state || this.state.colo) return;
+        this.state.colo = colo;
+        await this.save();
+        this.broadcastWhere();
+        this.updateListing();
+      } catch {}
+    })());
+  }
+
+  /** Where the room runs, for players: "EU", "NA", "ASIA"... ("" unknown). */
+  private region(st: RoomState): string {
+    return roomRegion(st.colo, st.origin?.hint);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -187,11 +243,14 @@ export class Room extends DurableObject<Env> {
       return new Response("Expected a WebSocket upgrade", { status: 426 });
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server);
+    const place = placeOf(request);
     const info: SocketInfo = {
       memberId: null,
       connectedAt: Date.now(),
       create: request.headers.get("x-dhd-create") === "1",
-      country: (request.cf?.country as string | undefined) ?? request.headers.get("cf-ipcountry") ?? "",
+      country: place.country ?? "",
+      continent: place.continent ?? "",
+      colo: place.colo ?? "",
     };
     server.serializeAttachment(info);
     if ((await this.ctx.storage.getAlarm()) === null)
@@ -496,6 +555,7 @@ export class Room extends DurableObject<Env> {
       bike: 0,
       countdown: features.includes(FEATURE_COUNTDOWN),
     };
+    member.country = info.country ?? "";
     if (!ghost) st.members.push(member);
     if (asHost) st.hostId = member.id;
     info.memberId = member.id;
@@ -510,10 +570,21 @@ export class Room extends DurableObject<Env> {
       memberId: member.id,
       host: st.hostId === member.id,
       serverTime: Date.now(),
+      // Where this connection and the room are (finding 135; older clients ignore these): the
+      // Cloudflare location the player reached, their country and continent as Cloudflare places
+      // them, and where the room runs ("" while the room's trace hasn't answered: the room
+      // messages carry it then).
+      edgeColo: info.colo ?? "",
+      country: info.country ?? "",
+      continent: info.continent ?? "",
+      roomColo: st.colo ?? "",
+      roomRegion: this.region(st),
     });
+    this.probeColo();
     // First ping right away so the lobby shows a delay quickly.
     this.send(ws, { type: "ping", s: Date.now() });
     await this.changed();
+    this.broadcastWhere();
   }
 
   private onPong(memberId: number, s: unknown): void {
@@ -903,6 +974,20 @@ export class Room extends DurableObject<Env> {
     if (this.state) this.broadcast(this.snapshot(this.state));
   }
 
+  /** Where the room runs and each member's country (finding 135), apart from the room snapshot:
+      that one stays within its 4 KB for ten members, and this changes only on a join or when the
+      room learns its colo. Older clients ignore the type. */
+  private broadcastWhere(): void {
+    const st = this.state;
+    if (!st) return;
+    this.broadcast({
+      type: "where",
+      region: this.region(st),
+      colo: st.colo ?? "",
+      members: st.members.map((x) => ({ id: x.id, country: x.country ?? "" })),
+    });
+  }
+
   /** Keeps this room's entry in the public lobby list current. */
   private updateListing(refresh = false, forceRemove = false): void {
     const st = this.state;
@@ -919,6 +1004,9 @@ export class Room extends DurableObject<Env> {
         players: st.members.length,
         maxPlayers: st.maxPlayers,
         hostName: st.members.find((x) => x.id === st.hostId)?.name ?? "",
+        region: this.region(st),
+        colo: st.colo ?? "",
+        createdIn: st.origin?.createdIn ?? "",
       };
     }
     const key = entry ? JSON.stringify(entry) : null;

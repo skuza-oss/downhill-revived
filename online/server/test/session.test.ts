@@ -381,7 +381,9 @@ describe("session rooms",()=>{
     await snap(h,r=>r.public);
     for(let i=1;i<10;i++)cs.push(await Client.join(code,"\u0800".repeat(24)));
     await snap(h,r=>r.members.length===10);
-    await edit(code, st=>{st.members[0].name="\u0800".repeat(24);st.version="v".repeat(64);});
+    // every member with a country and the room with a colo and hint (finding 135): still within 4 KB
+    await edit(code, st=>{st.members[0].name="\u0800".repeat(24);st.version="v".repeat(64);
+      for (const m of st.members) m.country="PL"; st.colo="FRA"; st.origin={hint:"apac-ne",createdIn:"ASIA",createdFrom:"WAW"};});
     await start(h,cs,code);
     const list=async()=> (await (await exports.default.fetch(new Request("https://dhd.skuza.app/v1/lobbies"))).json<any>()).lobbies;
     await expect.poll(list).toContainEqual(expect.objectContaining({code,phase:"racing",full:true,players:10}));
