@@ -378,8 +378,15 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
 - Text chat (finding 125): the room's chat over the race room (L1 or Y; typing, or quick lines
   for a pad), Y in a race for a line, the pause menu's L1/R1/L2/R2 quick lines, the last lines
   at the left of the view. Client, loopback and browser client checked; not yet seen in the game.
-  The server must be deployed before a client with chat ships. Name tags fade and shrink with distance, have each
-  racer's colour and say AWAY for a dropped racer (finding 125).
+  In a race the lines travel as `EVENT_CHAT` frames, which every server relays as they are, the
+  official one included; the room's chat is sent only after a welcome with `"chat": true` (a
+  server with the `chat` message), else the line stays local. Name tags fade and shrink with
+  distance, have each racer's colour and say AWAY for a dropped racer (finding 125).
+- Voice chat in a race (finding 131): push-to-talk (V) or an open microphone, Opus over
+  `EVENT_VOICE` frames (no server change), heard by distance and side from this PC's copy of the
+  riders' positions; NAME - TALKING on the name tags, /MUTE NAME, four live PC SETTINGS rows.
+  Windows only (libopus built for win-x64). `port/tools/test_voice.py`: 21 of 21.
+- Rider names beside the race's track bar dots (finding 129).
 - Quick Race on ONLINE (finding 128): joins the fullest open public room of the same build, else
   creates a public room and waits; not yet tried in the game.
   `DHD_NET_ROOM=CODE` opens ONLINE and joins that room; in the browser `?room=CODE`, and the
