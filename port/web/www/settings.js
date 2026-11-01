@@ -22,8 +22,9 @@ const DB = 'downhill-revived-settings', STORE = 'ini';
 // - FPS_MAX: the browser's Frame Rate list and Monitor stop at 144 (the core's own cap is 240).
 export const BROWSER_PC_SETTINGS = {
   // Voice chat's rows (finding 131): net.js's voice chat reads them again every second, so they apply at once.
-  DHD_PC_SETTINGS_ROWS: 'DHD_SCALE,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_FONT,DHD_FPS,DHD_PERF_COUNTER,DHD_VOICE,DHD_VOICE_MODE,DHD_VOICE_VOLUME,DHD_VOICE_RANGE',
-  DHD_PC_SETTINGS_LIVE: 'DHD_SCALE,DHD_VOICE,DHD_VOICE_MODE,DHD_VOICE_VOLUME,DHD_VOICE_RANGE',
+  // Widescreen applies at once too (port/hle/widescreen.c port_widescreen_apply; the canvas has the monitor's shape).
+  DHD_PC_SETTINGS_ROWS: 'DHD_SCALE,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_FONT,DHD_FPS,DHD_PERF_COUNTER,DHD_VOICE,DHD_VOICE_MODE,DHD_VOICE_DEVICE,DHD_VOICE_MIC,DHD_VOICE_VOLUME,DHD_VOICE_RANGE',
+  DHD_PC_SETTINGS_LIVE: 'DHD_SCALE,DHD_WIDESCREEN,DHD_VOICE,DHD_VOICE_MODE,DHD_VOICE_DEVICE,DHD_VOICE_MIC,DHD_VOICE_VOLUME,DHD_VOICE_RANGE',
   DHD_PC_SETTINGS_RESTART: '* Applies when the page is loaded again',
   DHD_SCALE_MAX: '8',
   DHD_FPS_MAX: '144',
@@ -35,7 +36,7 @@ export const BROWSER_PC_SETTINGS = {
 export const BROWSER_WITHOUT = new Set(['DHD_WINDOW', 'DHD_WINDOW_WIDTH', 'DHD_WINDOW_HEIGHT', 'DHD_MONITOR', 'DHD_ASPECT',
   'DHD_VSYNC', 'DHD_VIBRATION', 'DHD_TEXTURES', 'DHD_TEXTURE_PACK', 'DHD_TEXTURE_CACHE_MB', 'DHD_DISCORD', 'DHD_UPDATE_URL']);
 // The variables the reactor follows while the game runs (gpu_rust_web.c's web_env_changed).
-export const RENDERER_LIVE = new Set(['DHD_SCALE', 'DHD_PRESENT_FILTER', 'DHD_ASPECT', 'DHD_PERF_COUNTER']);
+export const RENDERER_LIVE = new Set(['DHD_SCALE', 'DHD_PRESENT_FILTER', 'DHD_ASPECT', 'DHD_WIDESCREEN_ASPECT', 'DHD_PERF_COUNTER']);
 
 // ---- the crate (port/render/settings/src/web.rs: arguments in buffers it allocates, each result
 // in its memory until the next call)

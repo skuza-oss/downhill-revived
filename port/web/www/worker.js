@@ -29,8 +29,10 @@ import { startRenderer, renderImports, definesSharedMemory, shareSafeDecoding, Q
 const post = (type, data) => postMessage({ type, ...data });
 const say = text => post('log', { text });
 let micAnswer = () => {};  // the page's microphone answer (main.js), to voice chat once it is up
+let micNames = [];         // the page's recording devices (SETTINGS > Microphone)
 onmessage = e => { if (e.data.type === 'start') start(e.data).catch(err => { post('error', { text: String(err?.stack || err) }); });
-  else if (e.data.type === 'mic-state') micAnswer(e.data.state); };
+  else if (e.data.type === 'mic-state') micAnswer(e.data.state);
+  else if (e.data.type === 'mic-devices') micNames = e.data.names || []; };
 
 // ---- the disc: 1 MiB blocks, a few kept ----
 function discSource(m) {
@@ -107,7 +109,9 @@ async function start(m) {
   // PC that can't keep 144 runs fewer, longer updates at the game's own speed, not slow motion;
   // host_wall_seconds is then the real clock (performance.now). ?env.DHD_FPS_WALL= turns it off
   // (the virtual clock, field / 60, as run_headless.mjs's deterministic runs keep).
-  const env = { DHD_ISO: '/disc.iso', DHD_HEADLESS: '1', DHD_FRAME_CLOCK: '1', DHD_FPS_WALL: '1', DHD_SKIP_MOVIES: '1',
+  // DHD_WINDOW=borderless: the page is the game's whole screen, so widescreen takes the monitor's shape
+  // (host_monitor_aspect: the page's screen), not a 896x672 window's 4:3 (port/hle/widescreen.c).
+  const env = { DHD_ISO: '/disc.iso', DHD_HEADLESS: '1', DHD_FRAME_CLOCK: '1', DHD_FPS_WALL: '1', DHD_SKIP_MOVIES: '1', DHD_WINDOW: 'borderless',
     DHD_RENDER: 'native', DHD_SETTINGS: 'dhd.ini', ...(threaded ? { DHD_GRAPHICS_ORDERED: '1' } : {}),
     ...BROWSER_PC_SETTINGS, ...(m.env || {}) };
   const settings = await createSettings(env, say);
@@ -117,7 +121,8 @@ async function start(m) {
   const net = await createNet(netBytes, { bytes: (a, n) => span(a, n), strlen: a => { if (bytes.buffer !== memory.buffer) refresh();
     const at = fold(a); return bytes.indexOf(0, at) - at; } }, say,
     { env, keyHeld: k => k > 0 && k < 256 && !textActive && Atomics.load(keys, k) !== 0, mic: m.mic || null,
-      wantMic: on => post('mic', { on }) });
+      wantMic: (on, device) => post('mic', { on, device }) });
+  micNames = m.micNames || [];
   micAnswer = state => net.voiceMic(state);
   let core, graphics, queue, memory, bytes, dv, arena = 0x07000000, current = 65, csr = 0x1f80, field = 0;
   const strings = new Map(), files = new Map(), fibers = new Map(); let nextFile = 1, nextDir = 1; const dirs = new Map();
@@ -202,8 +207,16 @@ async function start(m) {
   // in order with the graphics calls (the reactor reads DHD_RENDER, DHD_SCALE, ... from its own).
   // A variable the renderer follows while the game runs (RENDERER_LIVE: PC SETTINGS > Resolution,
   // Scaling) tells the reactor, here or in graphics.js, which applies it at the next vsync.
+  // The picture's shape for the page's pointer (main.js pictureShape): as the renderer reads it
+  // (native_aspect_options): "wide" is widescreen's shape, or 4:3 without it.
+  function pictureShape() {
+    const ratio = v => { const m = /^(\d+(?:\.\d+)?)[:x](\d+(?:\.\d+)?)$/.exec(v || ''); return m && +m[2] ? +m[1] / +m[2] : 0; };
+    const a = env.DHD_ASPECT;
+    return a === 'wide' ? ratio(env.DHD_WIDESCREEN_ASPECT) || 4 / 3 : ratio(a) || 4 / 3;
+  }
   function setEnv(name, value) {
     env[name] = value;
+    if (name === 'DHD_ASPECT' || name === 'DHD_WIDESCREEN_ASPECT') post('picture', { shape: pictureShape() });
     if (!threaded && graphics && RENDERER_LIVE.has(name)) graphics.web_env_changed();
     if (!threaded || !queue) return;
     const b = new TextEncoder().encode(`${name}=${value}`);
@@ -238,7 +251,10 @@ async function start(m) {
     host_last_error: () => 0, host_exit: code => { throw new Exit(code); },
     host_error_box: (a, b) => { throw Error(`${str(a)}: ${str(b)}`); },
     host_exe_path: (a, n) => { const b = new TextEncoder().encode('/dhd.js\0'); span(a, n).set(b.subarray(0, n)); return Math.min(n - 1, b.length - 1); },
-    host_display_hz: () => m.displayHz || 60, host_monitor_aspect: () => 16 / 9,
+    host_display_hz: () => m.displayHz || 60, host_monitor_aspect: () => m.monitorShape || 16 / 9,
+    // SETTINGS > Microphone: the page's devices by name (main.js)
+    host_service_voice_device: (i, out, size) => { const name = micNames[i]; if (name === undefined || size <= 0) return 0;
+      const b = new TextEncoder().encode(name).subarray(0, size - 1), o = span(out, b.length + 1); o.set(b); o[b.length] = 0; return 1; },
     host_wall_seconds: env.DHD_FPS_WALL === '1' ? () => performance.now() / 1000 : () => field / 60, host_cycles: () => 0n,
     host_fp_csr: getCsr, host_fp_set_csr: setCsr, host_fp_mode: x => { setCsr(x ? 0xffc0 : 0x1f80); },
     host_frame_context: f => { field = Number(f); if (threaded) queue.web_q_frame(f); else graphics.web_frame(f); },

@@ -389,6 +389,13 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   microphone worklet). `port/tools/test_voice.py`: 21 of 21; `port/web/check_net.mjs` hears a
   browser client's voice through upstream's 0.7.6 server unchanged.
 - Rider names beside the race's track bar dots (finding 129).
+- 2026-11-01: OPTIONS > PC SETTINGS is OPTIONS > SETTINGS (the game, the pause menu, the browser,
+  the launcher). Widescreen applies at once (`widescreen.c` `port_widescreen_apply`: the data
+  words, the views on screen through func_0023D898/func_0023D8D8, the picture's shape), on the PC
+  and in the browser, where it had never come on (no `DHD_WINDOW`, so a 896x672 window's 4:3 was
+  taken: the worker now sets `borderless` and the page's screen shape is the monitor's). The
+  browser's canvas has the monitor's shape, so fullscreen fills it. SETTINGS has Microphone and
+  Mic Volume (finding 131).
 - A ready player stays ready when the host changes the track (not the options): the client readies again
   by itself (`keep_ready`, built-in on; finding 132, no server change).
 - Quick Race on ONLINE (finding 128): joins the fullest open public room of the same build, else

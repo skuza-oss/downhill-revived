@@ -18,7 +18,12 @@
 
    DHD_WIDESCREEN (dhd.ini widescreen): 0 off; 1 the display's shape (the monitor's, or the
    window size's when windowed), unless DHD_ASPECT names a ratio, which is then used; or W:H.
-   This changes EE memory and what the game culls, so the game-state gates run without it. */
+   This changes EE memory and what the game culls, so the game-state gates run without it.
+
+   SETTINGS > Widescreen applies at once (port_widescreen_apply): the data words go from the old
+   shape to the new one, the 3D views already set up are set up again with the new field of view
+   (as the game itself changes one, func_0023D898 then func_0023D8D8), and the picture's shape
+   (DHD_WIDESCREEN_ASPECT) follows; the 2D code reads port_fov_x every time. */
 #include "hle.h"
 #include "widescreen_flat.h"
 
@@ -62,16 +67,17 @@ static double ratio(const char *v)
 }
 
 /* The shape the game is shown in: what DHD_WIDESCREEN names, else DHD_ASPECT's ratio, else the
-   window size's (windowed) or the monitor's. 0: widescreen off. */
+   window size's (windowed) or the monitor's. 0: widescreen off. host_getenv: the value now (the
+   browser's live settings), as getenv natively. */
 static double wanted_aspect(void)
 {
-    const char *on = getenv("DHD_WIDESCREEN");
+    const char *on = host_getenv("DHD_WIDESCREEN");
     double named = ratio(on);
     if (named) return named;
     if (!on || !atoi(on)) return 0;
-    if ((named = ratio(getenv("DHD_ASPECT")))) return named;
-    const char *mode = getenv("DHD_WINDOW");
-    const char *w = getenv("DHD_WINDOW_WIDTH"), *h = getenv("DHD_WINDOW_HEIGHT");
+    if ((named = ratio(host_getenv("DHD_ASPECT")))) return named;
+    const char *mode = host_getenv("DHD_WINDOW");
+    const char *w = host_getenv("DHD_WINDOW_WIDTH"), *h = host_getenv("DHD_WINDOW_HEIGHT");
     /* "monitor" (dhd.ini's default window size): the monitor's size, which present.c reads later */
     int monitor_sized = (w && !strcmp(w, "monitor")) || (h && !strcmp(h, "monitor"));
     if ((!mode || !strcmp(mode, "windowed")) && !monitor_sized) {
@@ -84,12 +90,10 @@ static double wanted_aspect(void)
 static uint32_t float_bits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 static float bits_float(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 
-void host_widescreen_init(void)
-{
-    /* PS2 address, retail word, 1 for an X (times s) or 0 for a Y factor (divided by s). The view
-       table D_0027ECC0 (0xC0 bytes a view: X at +0, Y at +0x20) for 1P, 2P both ways, 4P and
-       paused; the menu's Y; three tree sprite widths. */
-    static const uint32_t words[][3] = {
+/* PS2 address, retail word, 1 for an X (times s) or 0 for a Y factor (divided by s). The view
+   table D_0027ECC0 (0xC0 bytes a view: X at +0, Y at +0x20) for 1P, 2P both ways, 4P and
+   paused; the menu's Y; three tree sprite widths. */
+static const uint32_t words[][3] = {
         {0x27ECC0, 0x438A8000, 1}, {0x27ECE0, 0x3F15551D, 0},  /* paused X, 1P Y */
         {0x27ED80, 0x438A8000, 1}, {0x27EDA0, 0x3F155550, 0},  /* 2P horizontal */
         {0x27EE40, 0x438A8000, 1}, {0x27EE60, 0x3F155550, 0},
@@ -102,7 +106,10 @@ void host_widescreen_init(void)
         {0x27F380, 0x43520000, 1}, {0x27F3A0, 0x3EF0A3D7, 0},
         {0x26C5C0, 0x438A8000, 1}, {0x26C700, 0x438A8000, 1},  /* trees */
         {0x26C758, 0x438A8000, 1},
-    };
+};
+
+void host_widescreen_init(void)
+{
     host_display_aware();
     double want = wanted_aspect();
     if (want < 4.0 / 3.0 + 0.01) return;  /* off, or a 4:3 (or narrower) display */
@@ -126,6 +133,43 @@ void host_widescreen_init(void)
     }
     hle_log("widescreen: aspect %.4f (s %.4f), %u of %u data words\n", aspect, port_fov_x, changed,
             (unsigned)(sizeof words / sizeof *words));
+}
+
+void func_0023D898(int view, float *x, float *y);    /* a view's field of view and Y factor */
+void func_0023D8D8(int view, float x, float y);      /* a view set up with them */
+
+/* SETTINGS > Widescreen while the game runs: from the shape now to the one the settings ask for. */
+void port_widescreen_apply(void)
+{
+    double want = wanted_aspect();
+    int on = want >= 4.0 / 3.0 + 0.01;
+    if (want > 4.0) want = 4.0;
+    float before = port_fov_x, after = on ? (float)(4.0 / 3.0 / want) : 1.0f;
+    unsigned changed = 0;
+    for (unsigned i = 0; i < sizeof words / sizeof *words; i++) {   /* only words still as set */
+        uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + words[i][0]);
+        float v = bits_float(words[i][1]);
+        uint32_t now = before == 1.0f ? words[i][1] : float_bits(words[i][2] ? v * before : v / before);
+        if (*at != now) continue;
+        *at = after == 1.0f ? words[i][1] : float_bits(words[i][2] ? v * after : v / after);
+        changed++;
+    }
+    port_fov_x = after;
+    widescreen = on;
+    aspect = on ? want : 4.0 / 3.0;
+    /* the views on screen now: their X field of view times after / before, Y factor the inverse */
+    for (int view = 0; view < 4 && after != before; view++) {
+        WsEntry *e = &D_0075A9D0[view];
+        if (!e->view || !e->camera || e->mode == 10) continue;
+        float x, y;
+        func_0023D898(view, &x, &y);
+        if (x > 0 && y > 0) func_0023D8D8(view, x * after / before, y * before / after);
+    }
+    char text[32] = "";
+    if (on) snprintf(text, sizeof text, "%d:1000", (int)(aspect * 1000 + 0.5));
+    host_putenv_s("DHD_WIDESCREEN_ASPECT", text);
+    hle_env_changed();
+    hle_log("widescreen: now %s (aspect %.4f, s %.4f), %u data words\n", on ? "on" : "off", aspect, port_fov_x, changed);
 }
 
 /* The bike shop builds its HUD and shadow at run time: when the shop's block is set up (the

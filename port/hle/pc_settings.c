@@ -5,9 +5,9 @@
      Triangle (BACK) puts the values the page opened with back and closes, as AUDIO / OTHER does.
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
    window size, resolution, picture shape, scaling, skip movies (the startup movies), vibration,
-   V-Sync, the frame rate (above 60 at once, else at the next screen), unlock all and FPS & Ping
-   apply at once (finding 124); widescreen, the texture pack and the font at the next start ("*"
-   and the footer say so). A setting the environment
+   V-Sync, the frame rate (above 60 at once, else at the next screen), unlock all, FPS & Ping,
+   widescreen (port_widescreen_apply) and the voice rows apply at once (finding 124); the texture
+   pack and the font at the next start ("*" and the footer say so). A setting the environment
    sets (DHD_*) is shown but can't be changed here. Nothing here writes game state: the page
    lives in host memory and the settings in dhd.ini, never in the memory card's save.
    A host that can do only some of the rows says which in DHD_PC_SETTINGS_ROWS, a comma list of
@@ -32,7 +32,7 @@ void gs_window_apply(void);           /* port/gs/present.c */
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
-enum { ROWS = 18, MAX_CHOICES = 16 };
+enum { ROWS = 20, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -46,14 +46,14 @@ typedef struct {
 } Row;
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, TEXTURES, FONT, RATE, VSYNC, COUNTER,
-       VOICE, VOICE_MODE, VOICE_VOLUME, VOICE_RANGE, UNLOCK };
+       VOICE, VOICE_MODE, MIC, MIC_VOLUME, VOICE_VOLUME, VOICE_RANGE, UNLOCK };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 1},  /* the native renderer's DHD_SCALE, at once (finding 124) */
     {"Display:", "window", 1},
     {"Window Size:", "size", 1},  /* width and height */
     {"Picture:", "DHD_ASPECT", 1},
     {"Scaling:", "DHD_PRESENT_FILTER", 1},
-    {"Widescreen:", "widescreen", 0},
+    {"Widescreen:", "widescreen", 1},  /* port_widescreen_apply, at once */
     {"Skip Movies:", "skip_movies", 1},  /* the startup movies */
     {"Vibration:", "vibration", 1},
     {"Texture Pack:", "textures", 0},  /* port/gs/texpack.c */
@@ -64,6 +64,8 @@ static Row rows[ROWS] = {
     /* voice chat (port/host/voice.c reads them each second, online.c the range: at once; finding 131) */
     {"Voice Chat:", "voice", 1},
     {"Voice Mode:", "voice_mode", 1},
+    {"Microphone:", "voice_device", 1},  /* the host's recording devices (host_service_voice_device) */
+    {"Mic Volume:", "voice_mic", 1},
     {"Voice Volume:", "voice_volume", 1},
     {"Voice Range:", "voice_range", 1},
     {"Unlock All:", "unlock_all", 1},  /* port_unlock_all */
@@ -82,6 +84,30 @@ int port_unlock_all(void)
 }
 
 static int loaded;
+
+/* Microphone's list: Default (the system's, "") and the host's recording devices by name, asked
+   again each time the page opens (one may have been plugged in). A label is cut to fit the row
+   and keeps to the font's letters; the value is the whole name, which voice.c looks for. */
+static char mic_names[MAX_CHOICES][96], mic_labels[MAX_CHOICES][24];
+static void mic_choices(void)
+{
+    Row *r = &rows[MIC];
+    r->env = "DHD_VOICE_DEVICE";
+    r->builtin = "";
+    r->choices[0] = (SettingChoice){"", "Default"};
+    r->count = 1;
+    for (int i = 0; r->count < MAX_CHOICES; i++) {
+        char *name = mic_names[r->count], *label = mic_labels[r->count];
+        if (!host_service_voice_device(i, GADDR(name), (int)sizeof mic_names[0])) break;
+        if (!*name) continue;
+        size_t n = 0;
+        for (const char *c = name; *c && n < sizeof mic_labels[0] - 1; c++)
+            label[n++] = (unsigned char)*c >= 32 && (unsigned char)*c < 127 ? *c : '?';
+        label[n] = 0;
+        if (strlen(name) >= sizeof mic_labels[0]) label[n - 1] = label[n - 2] = '.';
+        r->choices[r->count++] = (SettingChoice){name, label};
+    }
+}
 
 /* Each row's list: the setting's choices, but Resolution up to what the renderer draws
    (DHD_SCALE_MAX, which the Rust native renderer sets: 8, or less on a card with little memory; 4
@@ -208,7 +234,16 @@ static void commit(Row *r, int apply)
     if (apply) hle_env_changed();
     if (!apply) return;
     r->running = r->selected;
-    if (r == &rows[DISPLAY] || r == &rows[SIZE]) host_service_gs_window_apply();
+    if (r == &rows[WIDESCREEN]) {   /* the game's views and the picture's shape (widescreen.c) */
+        void port_widescreen_apply(void);
+        port_widescreen_apply();
+        host_service_gs_present_options_apply();
+    } else if (r == &rows[DISPLAY] || r == &rows[SIZE]) {
+        host_service_gs_window_apply();
+        void port_widescreen_apply(void);
+        port_widescreen_apply();   /* widescreen takes the window's (or the monitor's) shape */
+        host_service_gs_present_options_apply();
+    }
     else if (r == &rows[RESOLUTION] || r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[VSYNC] ||
              r == &rows[COUNTER])
         host_service_gs_present_options_apply();  /* DHD_SCALE, DHD_ASPECT, DHD_PRESENT_FILTER, DHD_VSYNC, the counter */
@@ -227,14 +262,12 @@ static void change(int index, int step)
     if (locked(r)) return;
     r->selected = r->selected < 0 ? (step > 0 ? 0 : r->count - 1) : (r->selected + step + r->count) % r->count;
     menu_page_sound(step > 0);
-    commit(r, r->live);
-    /* Widescreen brings its picture shape (the monitor's, "wide"); saved for the next start,
-       when the wider view comes, not shown stretched now. */
+    /* Widescreen brings its picture shape (the monitor's, "wide"), at once with it. */
     if (r == &rows[WIDESCREEN] && !locked(&rows[SHAPE])) {
         rows[SHAPE].selected = find(&rows[SHAPE], r->selected ? "wide" : "4:3");
-        commit(&rows[SHAPE], 0);
-        format(&rows[SHAPE]);
+        if (rows[SHAPE].selected >= 0) commit(&rows[SHAPE], 1), format(&rows[SHAPE]);
     }
+    commit(r, r->live);
     format(r);
     hle_log("pc settings: %s %s\n", r->label, r->choices[r->selected].value);
 }
@@ -266,6 +299,8 @@ static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
     else if (r == &rows[VOICE] || r == &rows[VOICE_MODE])
         p->footer = "In a race: hold V to talk (voice_key in dhd.ini); /MUTE NAME in chat";
     else if (r == &rows[VOICE_RANGE]) p->footer = "How far away other riders are heard";
+    else if (r == &rows[MIC]) p->footer = r->count > 1 ? "The microphone voice chat uses" : "Others show once a microphone is allowed";
+    else if (r == &rows[MIC_VOLUME]) p->footer = "How loud your microphone is sent";
 }
 
 static void page_back(MenuPage *p)  /* Triangle: the values the page opened with, close */
@@ -295,22 +330,27 @@ static void page_accept(MenuPage *p, int row)
 
 static void open_page(void)
 {
-    page.title = "PC SETTINGS";
+    page.title = "SETTINGS";
     page.build = page_build;
     page.update = page_update;
     page.accept = page_accept;  /* Cross: keep and close, or open CONTROLS on its row */
     page.back = page_back;
     page.left = page_left;
     page.right = page_right;
+    char value[96];
     if (!loaded) {  /* what runs now; restart rows keep their pending choice across visits */
-        char value[32];
         choices_build();
+        mic_choices();
         choose_rows();
         for (int i = 0; i < ROWS; i++) {
             current(&rows[i], value, sizeof value);
             rows[i].selected = rows[i].running = find(&rows[i], value);
         }
         loaded = 1;
+    } else {  /* the microphones as they are now */
+        mic_choices();
+        current(&rows[MIC], value, sizeof value);
+        rows[MIC].selected = rows[MIC].running = find(&rows[MIC], value);
     }
     for (int i = 0; i < ROWS; i++) rows[i].opened = rows[i].selected;
 }
@@ -324,7 +364,7 @@ void port_pc_settings(void)
 
 /* The race's pause menu (patched func_0015E238 and func_0015E448): the page opens over it, as
    its OPTIONS does, and closing goes back to it. */
-const char port_pause_pc_settings_label[] = "PC SETTINGS";
+const char port_pause_pc_settings_label[] = "SETTINGS";
 void port_pc_settings_push(void)
 {
     open_page();
@@ -335,5 +375,5 @@ void port_pc_settings_push(void)
    "UNLOCK RIDERS/BIKES(test)" there, which stays as it is. */
 char *port_options_label(char *label, int index)
 {
-    return index == 9 ? (char *)"PC SETTINGS" : label;
+    return index == 9 ? (char *)"SETTINGS" : label;
 }

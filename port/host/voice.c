@@ -63,6 +63,9 @@ static struct {
     int enabled, open_mic, key, bitrate, mic_volume, volume, tone;
     char device[128];
 } cfg;
+#if !DHD_VOICE_WEB
+static char device_open[128];   /* cfg.device when the microphone was opened (a new choice reopens it) */
+#endif
 
 static void read_settings(void)
 {
@@ -164,6 +167,7 @@ static SDL_AudioStream *open_microphone(void)
         return NULL;
     }
     SDL_ResumeAudioStreamDevice(s);
+    snprintf(device_open, sizeof device_open, "%s", cfg.device);
     hle_log("voice: microphone %s\n", SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(s)) ?
             SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(s)) : "(default)");
     return s;
@@ -203,6 +207,13 @@ static int voice_thread(void *unused)
             have = 0;
         }
         if (!encoder_ready()) { SDL_Delay(1000); continue; }
+        if (mic && strcmp(device_open, cfg.device)) {   /* SETTINGS > Microphone: another one */
+            SDL_DestroyAudioStream(mic);
+            mic = NULL;
+            retry_at = 0;
+            hle_log("voice: microphone changed\n");
+            continue;
+        }
         if (!mic) { SDL_Delay(20); continue; }
         int got = SDL_GetAudioStreamData(mic, pcm + have, (FRAME - have) * 2);
         if (got < 0) {   /* the device went away: let go, try again later */
@@ -219,6 +230,20 @@ static int voice_thread(void *unused)
         capture_frame(pcm);
     }
     return 0;
+}
+
+int host_service_voice_device(int index, uint32_t at, int size)
+{
+    char *out = (char *)GUEST(at);
+    int count = 0, found = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioRecordingDevices(&count);
+    if (ids && index >= 0 && index < count && size > 0) {
+        const char *name = SDL_GetAudioDeviceName(ids[index]);
+        snprintf(out, (size_t)size, "%s", name ? name : "");
+        found = 1;
+    }
+    SDL_free(ids);
+    return found;
 }
 #else
 /* The browser (www/net.js): is the microphone wanted now (voice on, in a race)? The page opens
@@ -440,4 +465,5 @@ void host_service_voice_place(int slot, int gain, int pan) { (void)slot, (void)g
 void host_service_voice_mute(int slot, int on) { (void)slot, (void)on; }
 void host_service_voice_drop(int slot) { (void)slot; }
 int host_service_voice_state(int field, int slot) { (void)field, (void)slot; return 0; }
+int host_service_voice_device(int index, uint32_t out, int size) { (void)index, (void)out, (void)size; return 0; }
 #endif

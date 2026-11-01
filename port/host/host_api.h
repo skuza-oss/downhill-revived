@@ -163,6 +163,9 @@ void host_service_voice_place(int slot, int gain_permille, int pan_permille);
 void host_service_voice_mute(int slot, int on);
 void host_service_voice_drop(int slot);
 int host_service_voice_state(int field, int slot);
+/* SETTINGS > Microphone: the name of recording device `index` (0 first) into out (size bytes); 0
+   when there is no such device. voice_device (DHD_VOICE_DEVICE) picks one by its name. */
+int host_service_voice_device(int index, uint32_t out, int size);
 
 /* Opens the output device once, from the game thread at the first sound tick. Nothing happens
    with DHD_SND_OFF set; the mixer runs either way. */

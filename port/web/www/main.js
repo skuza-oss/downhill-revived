@@ -69,10 +69,14 @@ function pollPads() {
 // fraction of the picture (the canvas keeps the picture's shape; fullscreen letterboxes it), and
 // counters the worker reads once a field. The cursor hides after 3 idle seconds and while riding.
 let lastMove = -1e9, wheelRest = 0;
+// The canvas has the monitor's shape and the picture sits in it at its own (pictureShape, which the
+// worker says whenever SETTINGS > Widescreen changes it): the pointer goes through both.
+let pictureShape = 4 / 3;
 function point(e) {
-  const r = canvas.getBoundingClientRect(), shape = canvas.width / canvas.height;
+  const r = canvas.getBoundingClientRect(), outer = canvas.width / canvas.height;
   let w = r.width, h = r.height;
-  if (w / h > shape) w = h * shape; else h = w / shape;
+  if (w / h > outer) w = h * outer; else h = w / outer;
+  if (w / h > pictureShape) w = h * pictureShape; else h = w / pictureShape;
   Atomics.store(mouse, 0, Math.round((e.clientX - r.left - (r.width - w) / 2) / w * 65536));
   Atomics.store(mouse, 1, Math.round((e.clientY - r.top - (r.height - h) / 2) / h * 65536));
   Atomics.store(mouse, 3, 1); lastMove = performance.now(); canvas.style.cursor = '';
@@ -138,6 +142,13 @@ async function shape(env) {
   return (parseInt(env.DHD_WIDESCREEN ?? start?.vars.DHD_WIDESCREEN ?? '0') || 0) !== 0;
 }
 
+const screenShape = () => { const s = (screen.width || 16) / (screen.height || 9); return Math.min(4, Math.max(4 / 3, s)); };
+// SETTINGS > Microphone (finding 131): the page's recording devices by name, for the game's list;
+// names come once the browser has allowed a microphone. A choice is found again by its name.
+async function micNames() {
+  try { return (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput' && d.label && d.deviceId !== 'default')
+    .map(d => d.label); } catch { return []; }
+}
 async function start(source) {
   $('start').disabled = true; $('iso').disabled = true; running = true;
   document.body.classList.add('running'); status.textContent = 'starting';
@@ -150,7 +161,11 @@ async function start(source) {
     soundContext = context;
   } catch (e) { addLog(`no sound: ${e}`); }
   // After the sound, which needs the Start click; read again at each start, as the game reads it.
-  if (await shape(source.env ?? {})) { canvas.width = 1708; canvas.height = 960; }
+  // The canvas takes the monitor's shape, so fullscreen fills it whatever the picture's shape: the
+  // renderer fits the picture in it (pillars for 4:3, none for widescreen at the monitor's shape),
+  // and SETTINGS > Widescreen changes the picture at once with no canvas to resize.
+  canvas.width = Math.round(960 * screenShape()); canvas.height = 960;
+  pictureShape = await shape(source.env ?? {}) ? screenShape() : 4 / 3;
   const worker = new Worker('worker.js', { type: 'module' });
   const offscreen = canvas.transferControlToOffscreen();
   worker.onmessage = e => { const m = e.data;
@@ -161,13 +176,18 @@ async function start(source) {
     else if (m.type === 'clipboard') { navigator.clipboard?.writeText(m.text).catch(e => addLog(`clipboard: ${e.message}`));
       if (JOIN_CODE.test(m.text)) invite(m.text); }  // the player copied their room's code (Circle)
     else if (m.type === 'room') invite(m.code, m.inRoom);
-    else if (m.type === 'mic') microphone(m.on).then(state => worker.postMessage({ type: 'mic-state', state }));
+    else if (m.type === 'mic') microphone(m.on, m.device).then(state => worker.postMessage({ type: 'mic-state', state }));
+    else if (m.type === 'picture') pictureShape = m.shape || 4 / 3;
     else if (m.type === 'exit') status.textContent = `game exited (${m.status})`;
     else if (m.type === 'status') { status.textContent = `field ${m.field}  ${m.fps.toFixed(1)} fields/s  picture ${m.size}  draws ${m.draws}  batches ${m.dispatches}  readbacks ${m.reads}  sound ${m.sound} s${m.riding ? '  riding' : ''}`;
       document.title = `DHD ${m.fps.toFixed(1)} fps (field ${m.field})`; window.dhdStatus = m; (window.dhdHistory ??= []).push([m.field, +m.fps.toFixed(2), m.draws]); }
   };
   worker.onerror = e => addLog('worker error: ' + e.message);
-  worker.postMessage({ type: 'start', ...source, canvas: offscreen, input, audio, mic, displayHz: await hz }, [offscreen]);
+  worker.postMessage({ type: 'start', ...source, canvas: offscreen, input, audio, mic, displayHz: await hz,
+    monitorShape: screenShape(), micNames: await micNames() }, [offscreen]);
+  const sendNames = async () => worker.postMessage({ type: 'mic-devices', names: await micNames() });
+  navigator.mediaDevices?.addEventListener?.('devicechange', sendNames);
+  micChanged = sendNames;
   canvas.focus(); showHint();
   pollPads();
 }
@@ -176,20 +196,27 @@ async function start(source) {
 // it stops. The browser asks the player the first time. Its echo cancellation and noise
 // suppression are on, so an open microphone doesn't send the game's own sound back. The answer:
 // 1 open, -1 refused or none (the game shows NO MICROPHONE when the talk key is pressed).
-async function microphone(on) {
-  if (!on) { if (micOpen) { micOpen.stream.getTracks().forEach(t => t.stop()); micOpen.node.disconnect(); micOpen = null;
-    addLog('voice: microphone closed'); } return 0; }
+let micChanged = () => {};
+async function microphone(on, device = '') {
+  if (!on || (micOpen && micOpen.device !== device)) {   // off, or SETTINGS > Microphone chose another
+    if (micOpen) { micOpen.stream.getTracks().forEach(t => t.stop()); micOpen.node.disconnect(); micOpen = null;
+      addLog('voice: microphone closed'); }
+    if (!on) return 0;
+  }
   if (micOpen) return 1;
   if (!soundContext || !navigator.mediaDevices?.getUserMedia) return -1;
   try {
+    const want = device.toLowerCase(), chosen = want ? (await navigator.mediaDevices.enumerateDevices())
+      .find(d => d.kind === 'audioinput' && d.label.toLowerCase().includes(want)) : null;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true,
-      noiseSuppression: true, autoGainControl: true } });
+      noiseSuppression: true, autoGainControl: true, ...(chosen ? { deviceId: { exact: chosen.deviceId } } : {}) } });
     const node = new AudioWorkletNode(soundContext, 'dhd-mic', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
       processorOptions: { ring: mic } });
     const silent = soundContext.createGain(); silent.gain.value = 0;  // keeps the node running, heard by no one
     soundContext.createMediaStreamSource(stream).connect(node); node.connect(silent).connect(soundContext.destination);
-    micOpen = { stream, node };
+    micOpen = { stream, node, device };
     addLog(`voice: microphone ${stream.getAudioTracks()[0]?.label || '(default)'}`);
+    micChanged();  // the names are there now that one is allowed
     return 1;
   } catch (e) { addLog(`voice: no microphone (${e.message})`); return -1; }
 }

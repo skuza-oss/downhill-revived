@@ -56,6 +56,11 @@ about 5.6/112 m.)
 - **On screen**: a rider talking shows `NAME - TALKING` on their name tag; this player sees `MIC`
   while sending, `NO MICROPHONE` when the key finds none.
 - **Mute**: `/MUTE NAME` and `/UNMUTE NAME` in race chat (a name's start is enough), for this PC.
+- **SETTINGS > Microphone and Mic Volume** (2026-11-01): Microphone lists Default and the host's
+  recording devices by name (`host_service_voice_device`: SDL3's on the PC, the page's
+  `enumerateDevices` in the browser, whose names come once a microphone is allowed), asked again
+  each time the page opens; a new choice reopens the open microphone at once (voice.c on the PC,
+  main.js in the browser). Mic Volume is `voice_mic`.
 - **Settings** (dhd.ini, `table.rs`): `voice` (1), `voice_mode` (ptt/open), `voice_volume` (100),
   `voice_mic` (100, the microphone's level, 50-200 %), `voice_range` (25/50/100/200 m),
   `voice_bitrate` (8000-64000), `voice_key` (a letter), `voice_device`. PC SETTINGS has Voice Chat,

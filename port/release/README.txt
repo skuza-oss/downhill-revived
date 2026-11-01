@@ -67,13 +67,13 @@ places (e.g. Square is the key left of X, wherever its label says Z, W or Y).
 The game's own controls screen (OPTIONS > CONTROLS) and its trick lists name the PlayStation
 buttons; the keys above stand for them.
 
-Settings: OPTIONS > PC SETTINGS in the game's menu (resolution, display mode, window size,
+Settings: OPTIONS > SETTINGS in the game's menu (resolution, display mode, window size,
 picture shape, scaling, widescreen, skip movies, vibration, texture pack, font). Changes are
 saved to dhd.ini at once.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game
-starts; nothing is saved. "font = original" (PC SETTINGS > Font, at the next start) draws it as
+starts; nothing is saved. "font = original" (SETTINGS > Font, at the next start) draws it as
 the PS2 does. A texture pack that replaces the font wins over both.
 
 Texture packs (upscale mods)
@@ -83,7 +83,7 @@ hash). Packs are made by their authors and are not part of this game; get one yo
   data folder, below), or
 - name the pack's folder in dhd.ini (its full path), e.g. the one PCSX2 uses:
     texture_pack = <Documents>\PCSX2\textures\SCUS-97177\replacements
-OPTIONS > PC SETTINGS > Texture Pack turns it off or on (at the next start); in dhd.ini that is
+OPTIONS > SETTINGS > Texture Pack turns it off or on (at the next start); in dhd.ini that is
 "textures = off" or "on". Replacements load in the background the first time a texture shows,
 so the game's own texture can show for a moment first. texture_cache_mb = N sets how much
 graphics memory they may use (default: half the card's, at most 2048).
