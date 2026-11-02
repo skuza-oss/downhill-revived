@@ -322,7 +322,7 @@ typedef struct {
 } HostPresence;  /* 52 bytes */
 void host_service_presence(uint32_t state);
 
-/* The touch controls (finding 138; port/host/touch_host.c, port/hle/touch.c): the core's side
+/* The touch controls (finding 139; port/host/touch_host.c, port/hle/touch.c): the core's side
    (pad.c) once a field. In: what the overlay reads from the game (the race HUD hook, the rider's
    air flag) and the clocks; a TOUCH_COMMAND_* from the TOUCH CONTROLS pages. Out: where the HUD
    goes (0 the game's place, 1 moved for the right hand, 2 for the left), the online panel's Leave

@@ -1,4 +1,4 @@
-/* The touch controls' game side (finding 138), once a field from pad_vsync: what the overlay
+/* The touch controls' game side (finding 139), once a field from pad_vsync: what the overlay
    reads from the game, handed to the host's touch_host.c (host_service_touch_field, HostTouch):
    - the rider's "in the air" flag: player 1's rider (D_002AF2C0, slot 0) +0x4564, the rigid body's
      (+0x40C0) airborne age, a short that func_00135A30 counts up every frame in the air and resets

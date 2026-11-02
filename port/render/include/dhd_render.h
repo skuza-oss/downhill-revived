@@ -159,7 +159,7 @@ DHDR_FN(dhdr_present_exact)   int dhdr_present_exact(DhdrSurface *s, DhdrExact *
 /* Presents the texture the last call that returned 1 drew (SurfaceTexture::present). */
 /* Live presenter overlay; ping < 0 hides the online line, seconds is monotonic wall time. */
 DHDR_FN(dhdr_surface_counter) void dhdr_surface_counter(DhdrSurface *s, int enabled, int ping, double seconds);
-/* The touch controls' overlay (finding 138) for the next pictures: count shapes of 16 floats each
+/* The touch controls' overlay (finding 139) for the next pictures: count shapes of 16 floats each
    (kind, x, y, a, b, c, d, 0, fill r g b a, line r g b a; port/hle/touch.h's TouchShape in mm and
    colours 0..1) on a screen width_mm x height_mm; count 0 hides it. The data is copied. */
 DHDR_FN(dhdr_surface_touch) void dhdr_surface_touch(DhdrSurface *s, const float *items, uint32_t count, float width_mm, float height_mm);

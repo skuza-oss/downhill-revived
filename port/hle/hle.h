@@ -131,7 +131,7 @@ enum { PAD_KIND_NONE = 0, PAD_KIND_PLAYSTATION = 1, PAD_KIND_XBOX = 2, PAD_KIND_
 int gamepad_kind_of(int type, int south_label);  /* PAD_KIND_* of an SDL_GamepadType and its bottom button's label */
 int gamepad_kind(int player);  /* that player's controller's PAD_KIND_* (NONE without one) */
 enum { PADDEV_ADDED = 1, PADDEV_REMOVED, PADDEV_REMAPPED };
-/* port/host/touch_host.c: the touch controls (finding 138). The SDL thread passes its events
+/* port/host/touch_host.c: the touch controls (finding 139). The SDL thread passes its events
    (1: the event is the touch controls', not passed on) and calls the tick every pass; host_pad_device
    merges player 1's touches. */
 union SDL_Event;
@@ -214,7 +214,7 @@ int pads_live(void);        /* played by hand: no DHD_PADS, script or DHD_NET_*;
 int pads_multitap(void);    /* 3-4 pads: a multitap on port 0, player i in slot i */
 void pads_begin_field(void);                /* each vsync, before the pads are read */
 void pads_read(int player, HostPad *out);   /* player i's controller for this field */
-/* touch_field.c: the touch controls' game side once a field (finding 138); the TOUCH CONTROLS
+/* touch_field.c: the touch controls' game side once a field (finding 139); the TOUCH CONTROLS
    pages' commands (TOUCH_COMMAND_*, host_api.h); widescreen.c's HUD hook state. */
 void touch_field(void);
 void touch_command(int command);

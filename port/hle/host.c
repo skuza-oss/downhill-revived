@@ -948,7 +948,7 @@ void host_pad_device(int port, HostPad *out)
     }
     int connected = gamepad_start() && gamepad_read(port, out);
     if (port == 0) keyboard_merge(out);
-    if (port == 0) touch_host_merge(out);  /* the touch controls (touch_host.c, finding 138) */
+    if (port == 0) touch_host_merge(out);  /* the touch controls (touch_host.c, finding 139) */
     out->connected = (uint8_t)(connected || port == 0);  /* player 1 always has the keyboard */
 }
 

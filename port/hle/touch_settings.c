@@ -1,4 +1,4 @@
-/* TOUCH CONTROLS (finding 138): three screens of the settings page (pc_settings.c's page, which
+/* TOUCH CONTROLS (finding 139): three screens of the settings page (pc_settings.c's page, which
    PC SETTINGS opens with its Touch Controls row when the host has touch: DHD_TOUCH), in the game's
    own popup style (menu_page.c). Each change is saved to dhd.ini at once (touch_* keys) and the
    host's touch controls follow it (TOUCH_COMMAND_SETTINGS); Edit Layout opens the overlay's editor

@@ -1,4 +1,4 @@
-/* On-screen touch controls (finding 138): the platform-neutral part. Touches in, PS2 pad input
+/* On-screen touch controls (finding 139): the platform-neutral part. Touches in, PS2 pad input
    and an overlay's shapes out; no SDL, no OS, no game memory. The host (port/host/touch_host.c)
    feeds it the touches, the screen's size in mm and the two things read from the game (the
    rider's air flag and whether the race HUD is drawn, HostTouch in host_api.h), calls
@@ -78,7 +78,7 @@ typedef struct {
 /* What the game says each field (port/hle/pad.c through HostTouch, host_api.h). */
 typedef struct {
     int race_hud;        /* the race HUD was drawn (the HUD hook): the race is on screen */
-    int air;             /* player 1's rider is in the air (rider +0x4564, finding 138) */
+    int air;             /* player 1's rider is in the air (rider +0x4564, finding 139) */
     int online;          /* an online race (no pause: the panel) */
     int clock_moving;    /* the race clock advanced since the last field */
     int pause_row[3];    /* the game's pause menu: RESUME, RE-START, QUIT's rows (-1: none) */

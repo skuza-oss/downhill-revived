@@ -1,4 +1,4 @@
-# 138: touch controls for phones
+# 139: touch controls for phones
 
 Status: branch `feat/touch-controls` (from `main` 0330eab, 0.7.7). Built for Windows x64 and
 Android arm64; unit tests pass; not yet run in the game (the lead's checks are at the end). No

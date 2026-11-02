@@ -118,7 +118,7 @@ pub const SETTINGS: &[Setting] = &[
     switch("vsync", "DHD_VSYNC", SWITCH, "1", "0"),
     switch("perf_counter", "DHD_PERF_COUNTER", SWITCH, "0", "0"),
     switch("unlock_all", "DHD_UNLOCK_ALL", SWITCH, "0", "0"),
-    // The touch controls on phones (finding 138, port/hle/touch.c; the TOUCH CONTROLS pages): the
+    // The touch controls on phones (finding 139, port/hle/touch.c; the TOUCH CONTROLS pages): the
     // preset, the hand (left mirrors the controls and the HUD), stick or tilt steering, the size (auto:
     // the screen height's rule, 100% at most) and the opacity, the steering stick (floating or fixed)
     // and its range, the trick stick's size, the trick labels, the attacks (flick off PEDAL or
