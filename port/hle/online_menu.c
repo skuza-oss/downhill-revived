@@ -1125,6 +1125,21 @@ static MenuStyle fit(const char *t, MenuStyle s, int percent, int w)
     return f;
 }
 
+/* Whether t fits w at fit's smallest size or above (menu_text_width measures as capitals). */
+static int fits(const char *t, MenuStyle s, int percent, int w)
+{
+    MenuStyle f = fit(t, s, percent, w);
+    return menu_text_width(t, &f) <= X(w);
+}
+
+/* The first of the texts (a NULL ends them) that fits w; the last one if none does. */
+static const char *first_fit(const char *const *texts, MenuStyle s, int percent, int w)
+{
+    int i = 0;
+    while (texts[i + 1] && !fits(texts[i], s, percent, w)) i++;
+    return texts[i];
+}
+
 static void draw_setting(int f, int y, const char *label, const char *value, const RoomNow *r)
 {
     char line[64];
@@ -1527,13 +1542,24 @@ static void room_draw(MenuPage *p)
             snprintf(head, sizeof head, "%d FINISHED - %d RACING", r->finished, r->riding);
             put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, tint(st_row, 80, blue));
         } else {
-            if (l->last_race_id) snprintf(head, sizeof head, "LAST RACE - %s", track_name(l->last_race_track));
-            else snprintf(head, sizeof head, "PLAYERS %d/%d", l->nmembers, l->max_players);
-            if (l->room_region[0])  /* where the room runs (finding 135) */
-                snprintf(head + strlen(head), sizeof head - strlen(head), " - %s SERVER", l->room_region);
-            put(MENU_LEFT, CARD_X + 3, TOP + 1, head, menu_style(st_row, 80, -1, 0, 0));
+            /* the ready count on the right; on the left the longest form that fits beside it */
+            MenuStyle st = menu_style(st_row, 80, -1, 0, 0);
             snprintf(head, sizeof head, "%d/%d READY", r->ready, l->nmembers);
-            put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, all ? tint(st_row, 80, green) : menu_style(st_row, 80, -1, 0, 0));
+            put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, all ? tint(st_row, 80, green) : st);
+            int room_w = CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10;
+            char forms[4][64];
+            const char *what = l->last_race_id ? track_name(l->last_race_track) : NULL, *region = l->room_region;
+            char players[16];
+            snprintf(players, sizeof players, "PLAYERS %d/%d", l->nmembers, l->max_players);
+            /* where the room runs (finding 135): "- EU SERVER", then "- EU", then left out */
+            snprintf(forms[0], 64, "%s%s%s%s%s", what ? "LAST RACE - " : "", what ? what : players,
+                     region[0] ? " - " : "", region, region[0] ? " SERVER" : "");
+            snprintf(forms[1], 64, "%s%s%s%s", what ? "LAST RACE - " : "", what ? what : players, region[0] ? " - " : "", region);
+            snprintf(forms[2], 64, "%s%s%s", what ? what : players, region[0] ? " - " : "", region);
+            snprintf(forms[3], 64, "%s", what ? what : players);
+            const char *const texts[] = {forms[0], forms[1], forms[2], forms[3], NULL};
+            const char *left = first_fit(texts, st, 80, room_w);
+            put(MENU_LEFT, CARD_X + 3, TOP + 1, left, fit(left, st_row, 80, room_w));
         }
     }
     for (int i = 0; i < MEMBER_ROWS; i++) draw_card(i);
