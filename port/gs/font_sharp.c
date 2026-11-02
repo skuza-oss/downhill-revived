@@ -41,6 +41,13 @@ int font_sharp_on(void)
     return on;
 }
 
+static int (*icons_style)(void);
+static FontSharpPaint *icons_paint;
+
+void font_sharp_icons(int (*style)(void), FontSharpPaint *paint) { icons_style = style, icons_paint = paint; }
+int font_sharp_icon_style(void) { return icons_style ? icons_style() : 0; }
+int font_sharp_active(void) { return font_sharp_on() || font_sharp_icon_style(); }
+
 int font_sharp_match(uint64_t tex0)
 {
     /* TBP, TBW, PSM, TW, TH, CBP, CPSM and CSM: where the texture and its palette are, not how
@@ -192,8 +199,17 @@ static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned 
     }
     uint8_t *big = calloc(1, total);
     if (!big) { free(src); return NULL; }
-    sharpen(src, w, h, f, solid, big);
+    if (font_sharp_on()) sharpen(src, w, h, f, solid, big);
+    else  /* only for the button icons: the font as it is, each texel f x f */
+        for (unsigned Y = 0; Y < H; Y++)
+            for (unsigned X = 0; X < W; X++) {
+                uint32_t p = pixels[(Y / f) * w + X / f];
+                uint8_t *o = big + ((size_t)Y * W + X) * 4;
+                o[0] = p & 255, o[1] = p >> 8 & 255, o[2] = p >> 16 & 255, o[3] = p >> 24 & 255;
+            }
     free(src);
+    int style = font_sharp_icon_style();
+    if (style && icons_paint) icons_paint(big, f, pixels, w, h, solid, style);
     uint8_t *level = big;
     unsigned lw = W, lh = H;
     for (unsigned i = 0; i + 1 < levels; i++) {

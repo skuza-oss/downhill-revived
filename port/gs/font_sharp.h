@@ -17,4 +17,16 @@ int font_sharp_match(uint64_t tex0);
    nothing. One device per process. */
 void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h, uint64_t key);
 
+/* The button icons (button_icons.c, finding 134; native builds only): style says which icons the
+   menus' atlas gets now (0 the game's own), paint puts them into the copy. Without them (the
+   browser) the copy is the font's alone. */
+typedef void FontSharpPaint(uint8_t *big, unsigned f, const uint32_t *pixels, unsigned w, unsigned h, unsigned solid,
+                            int style);
+void font_sharp_icons(int (*style)(void), FontSharpPaint *paint);
+int font_sharp_icon_style(void);  /* 0 without icons */
+
+/* A copy is made: the sharp font, or other icons than the game's (the copy then keeps the font as
+   it is, only bigger). */
+int font_sharp_active(void);
+
 #endif

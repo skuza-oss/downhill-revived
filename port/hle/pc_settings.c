@@ -5,8 +5,9 @@
      Triangle (BACK) puts the values the page opened with back and closes, as AUDIO / OTHER does.
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
    window size, picture shape, scaling, skip movies (the startup movies), vibration, the sticks'
-   dead zone, unlock all and FPS & Ping apply at once; resolution, widescreen, the texture pack,
-   the font, the frame rate and V-Sync at the next start ("*" and the footer say so). A setting the environment sets (DHD_*) is shown but can't be changed here.
+   dead zone, the button symbols, unlock all and FPS & Ping apply at once; resolution,
+   widescreen, the texture pack, the font, the frame rate and V-Sync at the next start ("*" and
+   the footer say so). A setting the environment sets (DHD_*) is shown but can't be changed here.
    Nothing here writes game state: the page lives in host memory and the settings in dhd.ini,
    never in the memory card's save.
    A host that can do only some of the rows says which in DHD_PC_SETTINGS_ROWS, a comma list of
@@ -30,7 +31,7 @@ void gs_window_apply(void);           /* port/gs/present.c */
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
-enum { ROWS = 15, MAX_CHOICES = 16 };
+enum { ROWS = 16, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -43,7 +44,7 @@ typedef struct {
     int selected, running, opened;    /* choice indexes; -1: a value not in the list */
 } Row;
 
-enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, TEXTURES, FONT, RATE,
+enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, PROMPTS, TEXTURES, FONT, RATE,
        VSYNC, COUNTER, UNLOCK };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 0},
@@ -55,6 +56,7 @@ static Row rows[ROWS] = {
     {"Skip Movies:", "skip_movies", 1},  /* the startup movies */
     {"Vibration:", "vibration", 1},
     {"Dead Zone:", "stick_dead_zone", 1},  /* the sticks' (stick.h; host.c follows it each field) */
+    {"Button Icons:", "prompts", 1},  /* prompts.c */
     {"Texture Pack:", "textures", 0},  /* port/gs/texpack.c */
     {"Font:", "font", 0},  /* port/gs/font_sharp.c */
     {"Frame Rate:", "fps", 0},

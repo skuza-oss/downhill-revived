@@ -19,6 +19,7 @@ static const SettingChoice setting_choices_renderer[] = {{"native", "Native"}, {
 static const SettingChoice setting_choices_skip_movies[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_vibration[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_stick_dead_zone[] = {{"game", "Game (36%)"}, {"5", "5%"}, {"10", "10%"}, {"15", "15%"}, {"20", "20%"}, {"25", "25%"}, {"30", "30%"}, {"40", "40%"}, {"50", "50%"}};
+static const SettingChoice setting_choices_prompts[] = {{"auto", "Auto"}, {"playstation", "PlayStation"}, {"xbox", "Xbox"}, {"nintendo", "Nintendo"}};
 static const SettingChoice setting_choices_textures[] = {{"off", "OFF"}, {"on", "ON"}};
 static const SettingChoice setting_choices_font[] = {{"original", "Original"}, {"sharp", "Sharp"}};
 static const SettingChoice setting_choices_fps[] = {{"60", "60 fps"}, {"120", "120 fps"}, {"144", "144 fps"}, {"165", "165 fps"}, {"240", "240 fps"}, {"monitor", "Monitor"}};
@@ -39,6 +40,7 @@ static const SettingInfo setting_table[] = {
     {"skip_movies", "DHD_SKIP_MOVIES", "0", setting_choices_skip_movies, 2},
     {"vibration", "DHD_VIBRATION", "1", setting_choices_vibration, 2},
     {"stick_dead_zone", "DHD_STICK_DEAD_ZONE", "game", setting_choices_stick_dead_zone, 9},
+    {"prompts", "DHD_PROMPTS", "playstation", setting_choices_prompts, 4},
     {"textures", "DHD_TEXTURES", "on", setting_choices_textures, 2},
     {"font", "DHD_FONT", "sharp", setting_choices_font, 2},
     {"fps", "DHD_FPS", "60", setting_choices_fps, 6},

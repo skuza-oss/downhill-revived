@@ -126,6 +126,10 @@ int gamepad_start(void);
 int gamepad_read(int player, HostPad *out);  /* 0: no controller for that player */
 void gamepad_vibrate(int player, int light, int heavy);
 void gamepad_dead_zone(int dead);  /* stick.h: STICK_GAME or a percentage */
+/* What a controller's buttons are labelled: for the button icons (port/gs/button_icons.c). */
+enum { PAD_KIND_NONE = 0, PAD_KIND_PLAYSTATION = 1, PAD_KIND_XBOX = 2, PAD_KIND_NINTENDO = 3 };
+int gamepad_kind_of(int type, int south_label);  /* PAD_KIND_* of an SDL_GamepadType and its bottom button's label */
+int gamepad_kind(int player);  /* that player's controller's PAD_KIND_* (NONE without one) */
 enum { PADDEV_ADDED = 1, PADDEV_REMOVED, PADDEV_REMAPPED };
 /* sdl_host.c's SDL thread: the pads' start (1 if up), a device change, and every pass. */
 int gamepad_thread_start(void);

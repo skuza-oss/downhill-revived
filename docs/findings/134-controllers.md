@@ -99,40 +99,54 @@ strings use 0xA0 for INFO/CHANGE/PREVIEW, 0xAB for ADD/MODIFY/Switch Camera, 0xB
 dhd.ini) keep PlayStation. Auto follows player 1's controller: gamepad.c tells each pad's kind
 from `SDL_GetGamepadType` (PS3/4/5, Xbox 360/One, Switch Pro and Joy-Cons), else from the label
 SDL gives the bottom face button (A: Xbox, B: Nintendo, Cross: PlayStation), which covers a Steam
-Deck and SDL's standard pads (`gamepad_kind_of`); it reaches the core in `HostPad.kind` (a new
-byte; the browser's worker fills 20 bytes now, kind 0) and pad.c passes player 1's to prompts.c
-each field. A keyboard or no pad keeps the PS2's icons. PC SETTINGS > Button Icons (applies at
+Deck and SDL's standard pads (`gamepad_kind_of`); host.c reads player 1's (`gamepad_kind`) each
+field. A keyboard or no pad keeps the PS2's icons. PC SETTINGS > Button Icons (applies at
 once) and the launcher's Controls tab. The browser hides both new PC SETTINGS rows (its
 `DHD_PC_SETTINGS_ROWS` doesn't list them).
 
 ### Drawing
-`port/hle/prompts.c`, called after each glyph through a patch of `func_0020FDB0`
-(`port/patches_prompts.py`, after widescreen's patches, so the sprite is where widescreen put it).
-With Xbox or Nintendo icons, the icon's sprite is taken back out of the text packet and our own
-symbol drawn in its place:
-- a face button: a dark disc as the game's icons have (a 20-segment triangle fan with a 1.5-pixel
-  fringe whose alpha falls to 0, so the edge is smooth at any resolution; round on screen in
-  widescreen too) and the letter on it from the game's own font, in the text's colour. By
-  position, as the pads are read: Cross = A (Xbox) / B (Nintendo), Circle = B / A, Square = X /
-  Y, Triangle = Y / X;
-- a shoulder or trigger: the letters alone, as the game writes L1: LB, LT, RB, RT (L, ZL, R, ZR).
-No icon image is used or added: the disc is geometry made in code and the letters are the game's
-text. The packet stays in the game's own shape (prompts.c: the glyph tag closed with its count,
-our tags, then a colour tag like func_0020F420's with state 1, which its next colour change
-rewrites); without 2 KB left in the view's 32 KB buffer the game's icon stays. With PlayStation
-icons the hook returns at its first test.
+The icons are the project's own art: twelve 128x128 PNGs in `port/res/buttons/` (A, B, X, Y, LB,
+RB, LT, RT, L, R, ZL, ZR; neutral grey on dark discs and rounded boxes, made for the project with an
+image generator, no brand logos or colours; docs/CREDITS.md says so). `build_host64.py` embeds
+them (`button_icons.inc`, as it does the window icon) and `port/gs/button_icons.c` decodes them
+with the Rust library's PNG decoder the first time they are needed.
 
-Seen on this PC before the process change (hidden desktop, scale 2, captures in build/ only):
-the title's PRESS (A) TO START and the main menu's (A) SELECT (Y) BACK, (B) SELECT (X) BACK with
-Nintendo, the PS2's own icons with PlayStation; the d-pad's PREV/NEXT arrows unchanged. The first
-version had Circle and Square the wrong way round (from the strings alone); the atlas settled it.
+They reach the GS without VRAM of their own (so the free GS blocks finding 132 found in the shell
+menus, 0x38E0-0x3F80, are not used, and races and the pause menu, which that census didn't cover,
+need nothing either): the renderer already draws the menus' atlas from a
+copy it makes in memory (`font_sharp.c`, finding 058: the sharp font, twice the atlas's size, with
+mipmaps, drawn as a replacement texture). `button_icons_paint` paints the chosen icons into that
+copy over the PS2 icon cells: each fitted, its own shape kept, into the box the game's icon fills
+in its cell (an area average of the 128-pixel art, 4x4 taps a texel), so it has the game's size and
+place in every string, and its brightest grey is the game's symbol colour, so the text's colour
+modulates it as it does the game's icons. By position, as the pads are read: Cross = A (Xbox) / B
+(Nintendo), Circle = B / A, Square = X / Y, Triangle = Y / X; L1, L2, R1, R2 = LB, LT, RB, RT / L, ZL,
+R, ZR; the d-pad arrows stay. With `font = original` and icons chosen, a copy is made anyway (the
+font as it is, each texel 2x2, plus the icons). The style is chosen on the game thread each field
+(host.c: the setting and player 1's controller's kind from gamepad.c) and mixed into the menus'
+font texture's key (`native_core.inc`), so a change (PC SETTINGS, plugging in another pad) makes a
+new copy. Nothing is written to GS memory or game memory: the game and its state see the PS2's
+icons; the exact renderer (the reference path, `renderer = exact`) and the browser draw the PS2's
+icons. Sharpness: the copy has 64 texels a cell (the font copy's 2x, its memory cap); at 1x-4x the
+icons are drawn from mipmaps, at 8x magnified about 2x with the copy's filtering, like the text.
+
+The first version of this lane drew letter discs as geometry in the game's text packet (a patch of
+`func_0020FDB0` calling `port/hle/prompts.c`); the drawn icons replace it, and the core is
+unchanged again (HostPad, pad.c, the patches and the browser worker as in next/0.7.7).
+
+Seen on this PC (hidden desktop, Xbox icons, scale 2, one run): the title's PRESS (A) TO START
+and the main menu's (A) SELECT (Y) BACK with the project's icons at the game's icons' place and
+size. They looked dimmer than the game's own icons there (the art's light grey was taken as 255);
+the art's brightest grey is now the game's symbol colour (not seen after that change). Before the
+art, the geometry version showed the same strings. The atlas settled which cell is which (Circle and Square are not in
+the strings' order).
 
 ### Checks done
 - Builds (core and dhd64.exe), `cargo test -p dhd_settings` (the new keys, settings_table.h and
   web_corpus.json regenerated), launcher `cargo test` (17 pass), `test_gamepad mapping`,
   `node --check` of the launcher's scripts and the browser worker.
-- Boot state trace with default settings: 600 of 600 fields equal to next/0.7.7's (the build
-  before the last prompts.c tweak, which only draws with Xbox/Nintendo icons).
+- Boot state trace with default settings: 600 of 600 fields equal to next/0.7.7's (with the
+  geometry version; the drawn icons change no core code at all).
 - The core module cache cherry-picked from next/0.7.7 (b6ef0b0) hashed only tracked files, so a
   change to a new, not yet added source hit a stale module: fixed in this branch (its key takes
   untracked files git doesn't ignore).
@@ -140,7 +154,8 @@ version had Circle and Square the wrong way round (from the strings alone); the 
 ## Checks for the merged build (the lead)
 Use `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=0`, `DHD_LAUNCHER=1`, `DHD_MEMCARD=1` with an empty
 `DHD_MEMCARD_DIR`, scale 2.
-1. **Icons per pad type.** `DHD_PROMPTS=xbox`, then `nintendo`, then `playstation`:
+1. **Icons per pad type** (the drawn icons, grey letters on dark discs, LB/RB etc. on dark rounded
+   boxes; they take the text's tint, yellow on a highlighted row). `DHD_PROMPTS=xbox`, then `nintendo`, then `playstation`:
    - title: "PRESS (A) TO START" (Nintendo "(B)"; PlayStation the PS2's cross icon);
    - main menu footer: "(A) SELECT (Y) BACK" / "(B) SELECT (X) BACK" / cross and triangle; the
      left "PREV/NEXT" arrows unchanged in all three;

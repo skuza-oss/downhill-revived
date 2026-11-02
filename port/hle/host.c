@@ -8,6 +8,7 @@
 #include "timer.h"
 #include "state_trace.h"
 #include "stick.h"
+#include "../gs/button_icons.h"
 #include "../include/version.h"
 #include "../runtime/sha256.h"
 
@@ -939,6 +940,12 @@ void host_pad_device(int port, HostPad *out)
     out->right_x = out->right_y = out->left_x = out->left_y = 128;
     /* the sticks' dead zone (stick.h), followed here on the game thread, where PC SETTINGS sets it */
     if (port == 0 && gamepad_start()) gamepad_dead_zone(stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")));
+    /* the button icons (dhd.ini prompts, PC SETTINGS > Button Icons): auto follows player 1's pad */
+    if (port == 0) {
+        int kind = gamepad_start() ? gamepad_kind(0) : PAD_KIND_NONE;
+        button_icons_choose(getenv("DHD_PROMPTS"), kind == PAD_KIND_XBOX ? BUTTON_ICONS_XBOX
+                                                   : kind == PAD_KIND_NINTENDO ? BUTTON_ICONS_NINTENDO : BUTTON_ICONS_GAME);
+    }
     int connected = gamepad_start() && gamepad_read(port, out);
     if (port == 0) keyboard_merge(out);
     out->connected = (uint8_t)(connected || port == 0);  /* player 1 always has the keyboard */

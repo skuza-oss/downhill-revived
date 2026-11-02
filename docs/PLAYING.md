@@ -28,8 +28,8 @@ What works today:
 - **The movies play**: the intro, the attract loop and OPTIONS > VIDEO CLIPS, decoded with
   libmpeg2 from your disc. Skip Movies in PC SETTINGS (on in a new install) skips them.
 - **PC SETTINGS in the game's own OPTIONS menu**: resolution, display mode, window size, picture
-  shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone, texture pack and
-  font, drawn with the
+  shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone, the button icons
+  (PlayStation, Xbox or Nintendo, or the controller's), texture pack and font, drawn with the
   game's own menus and font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
   each picture without tearing.
 - **Unlock All** (PC SETTINGS, off by default): every track, rider, bike and shop item reads as
@@ -165,6 +165,11 @@ A controller works out of the box. The buttons go by position, as on a PlayStati
 bottom = Cross, right = Circle, left = Square, top = Triangle. A pad SDL doesn't know can be added
 with a line in SDL's format in `gamecontrollerdb.txt` beside `dhd.exe`.
 
+- **Button icons** (PC SETTINGS > Button Icons, the launcher's Settings > Controls): the game shows
+  the buttons of your controller. Auto follows player 1's controller: Xbox pads (and a Steam Deck)
+  get A, B, X, Y and LB, RB, LT, RT, Switch pads B, A, Y, X and L, R, ZL, ZR (by position, so the
+  bottom button is always the one the game means), PlayStation pads and the keyboard the game's
+  own symbols. Or choose PlayStation, Xbox or Nintendo.
 - **Stick dead zone** (PC SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before
   the rider responds. Game is the PS2's own, about 36% of the travel; a smaller one steers sooner,
   a larger one ignores a worn stick that drifts. The whole travel past it is used, so full lock is
@@ -229,6 +234,7 @@ first start. The PC SETTINGS page writes most of them for you.
 | `skip_movies` | `1` | `1` skips the movies, `0` plays them |
 | `vibration` | on | `0` turns rumble off |
 | `stick_dead_zone` | `game` | the sticks' dead zone: `game` (the PS2's own, about 36%) or a percentage such as `10` |
+| `prompts` | `auto` | the button icons: `auto` (the controller's), `playstation`, `xbox` or `nintendo` |
 | `texture_pack` | (empty) | a texture pack's folder; empty: `textures\SCUS-97177\replacements` beside `dhd.ini` |
 | `textures` | `on` | `off` draws the game's own textures |
 | `texture_cache_mb` | half the card's memory, at most 2048 | graphics memory for replacements |

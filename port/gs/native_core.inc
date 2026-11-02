@@ -628,7 +628,7 @@ static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w,
             pixels[y * w + x] = indexed ? palette[v & 255] : gs_color(v, psm, g->reg[GS_TEXA]);
         }
     /* The text engine's font, made sharp for high resolutions (dhd.ini font, finding 058). */
-    int sharp = indexed && n->replace_on && font_sharp_on() && font_sharp_match(tex0);
+    int sharp = indexed && n->replace_on && font_sharp_active() && font_sharp_match(tex0);
     int made = native_texture_create(n, victim, pixels, w, h, sharp, key);
     free(pixels);
     if (!made) return NULL;
@@ -761,6 +761,8 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
     uint32_t pages[16] = {0};
     gs_mark_pages(pages, psm, tbp, tbw ? tbw : 1, 0, 0, w - 1, h - 1);
     uint64_t key = native_mix(native_mix(tex0 & 0x7FFFFFFFFFFull, (uint64_t)w << 32 | h), psm == GS_PSMCT24 || psm_wide(psm) ? g->reg[GS_TEXA] : 0);
+    /* the menus' font: its copy has the button icons chosen now (button_icons.c) */
+    if (psm == GS_PSMT4HL) key = native_mix(key, (uint64_t)font_sharp_icon_style());
     unsigned gpu_pages = 0, gpu_page = 0;
     /* Visit set pages in the same ascending order as the key's original scan.
        Most textures touch only a handful of the 512 GS pages. */
@@ -777,7 +779,7 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
     if (gpu_pages) {
         /* The menus' font lives in a depth buffer's top bytes; the sharp one is drawn from the
            CPU copy, which holds the font as the game uploaded it. */
-        if (n->replace_on && font_sharp_on() && font_sharp_match(tex0)) {
+        if (n->replace_on && font_sharp_active() && font_sharp_match(tex0)) {
             c->texture = native_decode(n, g, tex0, w, h, key);
             if (c->texture && c->texture->sharp) native_replace(n, g, ctxt, c);
             if (c->replacement) return;

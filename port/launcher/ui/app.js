@@ -40,6 +40,7 @@ const TABS = [
   ['Controls', [
     { key: 'stick_dead_zone', label: 'Stick dead zone', hint: "How far a stick moves before the rider responds. Game is the PS2's own.", type: 'select' },
     { type: 'sticks' },
+    { key: 'prompts', label: 'Button icons', hint: 'The buttons the game shows. Auto follows your controller.', type: 'seg' },
     { key: 'vibration', label: 'Vibration', type: 'switch' },
   ]],
   ['Online', [

@@ -16,7 +16,8 @@
    dhd.exe (SDL's format) adds or corrects mappings; so does SDL_GAMECONTROLLERCONFIG.
    DHD_SDL=0: no pads (the keyboard still plays).
    The sticks go through the dead zone the player chose (stick.h, dhd.ini stick_dead_zone; finding
-   134). */
+   134), and each pad says which kind it is (PlayStation, Xbox, Nintendo) for the button icons
+   (port/gs/button_icons.c). */
 #include "hle.h"
 #include "stick.h"
 
@@ -38,6 +39,7 @@ typedef struct {
 static Slot slots[SLOTS];       /* SDL thread only */
 static HostPad latest[SLOTS];   /* under lock */
 static int present[SLOTS];      /* under lock */
+static SDL_AtomicInt kinds[SLOTS];  /* each slot's PAD_KIND_* (gamepad_kind) */
 static SDL_Mutex *lock;         /* made by gamepad_thread_start */
 static SDL_AtomicInt want_light[SLOTS], want_heavy[SLOTS];
 static SDL_AtomicInt running;   /* 1 once the pads are up, -1 if they couldn't start */
@@ -96,6 +98,29 @@ static void read_joystick(SDL_Joystick *j, HostPad *out)
     for (int i = 0; i < 12; i++) out->pressure[i] = out->buttons & pressure_order[i] ? 255 : 0;
 }
 
+/* What its buttons say: the kind SDL knows it as, else the bottom face button's label (a Steam
+   Deck or another pad SDL calls standard says A); a pad with neither keeps the PS2's symbols. */
+int gamepad_kind_of(int type, int south_label)
+{
+    switch (type) {
+    case SDL_GAMEPAD_TYPE_PS3: case SDL_GAMEPAD_TYPE_PS4: case SDL_GAMEPAD_TYPE_PS5:
+        return PAD_KIND_PLAYSTATION;
+    case SDL_GAMEPAD_TYPE_XBOX360: case SDL_GAMEPAD_TYPE_XBOXONE:
+        return PAD_KIND_XBOX;
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO: case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT: case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        return PAD_KIND_NINTENDO;
+    default:
+        break;
+    }
+    switch (south_label) {
+    case SDL_GAMEPAD_BUTTON_LABEL_A: return PAD_KIND_XBOX;
+    case SDL_GAMEPAD_BUTTON_LABEL_B: return PAD_KIND_NINTENDO;
+    case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return PAD_KIND_PLAYSTATION;
+    default: return PAD_KIND_NONE;
+    }
+}
+
 static int slot_of(SDL_JoystickID id)
 {
     for (int i = 0; i < SLOTS; i++)
@@ -113,6 +138,8 @@ static void attach(SDL_JoystickID id)
         if (!(s->gamepad = SDL_OpenGamepad(id))) return;
         name = SDL_GetGamepadName(s->gamepad);
         how = SDL_GetGamepadStringForType(SDL_GetGamepadType(s->gamepad));
+        SDL_SetAtomicInt(&kinds[i], gamepad_kind_of(SDL_GetGamepadType(s->gamepad),
+                                                    SDL_GetGamepadButtonLabel(s->gamepad, SDL_GAMEPAD_BUTTON_SOUTH)));
     } else {
         if (!(s->joystick = SDL_OpenJoystick(id))) return;
         name = SDL_GetJoystickName(s->joystick);
@@ -136,6 +163,7 @@ static void detach(SDL_JoystickID id)
     if (slots[i].joystick) SDL_CloseJoystick(slots[i].joystick);
     memset(&slots[i], 0, sizeof slots[i]);
     present[i] = 0;
+    SDL_SetAtomicInt(&kinds[i], PAD_KIND_NONE);
     SDL_UnlockMutex(lock);
     fprintf(stderr, "controller: player %d disconnected\n", i + 1);
 }
@@ -263,6 +291,11 @@ int gamepad_read(int player, HostPad *out)
     if (ok) *out = latest[player];
     SDL_UnlockMutex(lock);
     return ok;
+}
+
+int gamepad_kind(int player)
+{
+    return player >= 0 && player < SLOTS ? SDL_GetAtomicInt(&kinds[player]) : PAD_KIND_NONE;
 }
 
 /* The sticks' dead zone from now on (stick.h: STICK_GAME or a percentage); host.c follows

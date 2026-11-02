@@ -57,6 +57,10 @@ other USB or Bluetooth pads (through SDL3 and its controller database), with vib
 pad has motors. The buttons go by position, as on a PlayStation pad: bottom = Cross, right =
 Circle, left = Square, top = Triangle. A pad SDL doesn't know can be added with a line in SDL's
 format in gamecontrollerdb.txt beside dhd.exe.
+Button icons (PC SETTINGS > Button Icons, the launcher's Settings > Controls): Auto shows the
+buttons of player 1's controller: A B X Y and LB RB LT RT on Xbox pads and a Steam Deck, B A Y X
+and L R ZL ZR on Switch pads, the game's own symbols on PlayStation pads and the keyboard. Or
+choose PlayStation, Xbox or Nintendo.
 Stick dead zone (PC SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before the
 rider responds. Game is the PS2's own (about 36% of the travel); smaller steers sooner, larger
 ignores a drifting stick. The launcher's Controls tab shows your stick and what the rider gets.
@@ -82,8 +86,8 @@ The game's own controls screen (OPTIONS > CONTROLS) and its trick lists name the
 buttons; the keys above stand for them.
 
 Settings: OPTIONS > PC SETTINGS in the game's menu (resolution, display mode, window size,
-picture shape, scaling, widescreen, skip movies, vibration, dead zone, texture pack, font).
-Changes are
+picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, texture
+pack, font). Changes are
 saved to dhd.ini at once.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the

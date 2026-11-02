@@ -1,9 +1,10 @@
 /* gamepad.c smoke test (finding 059): SDL3 starts, enumerates the controllers that are plugged in
    and maps each to a pad, without the game. With no controller it only shows that SDL runs.
        test_gamepad [seconds]    also prints each player's state while it changes
-       test_gamepad mapping      stick values as SDL reports them through the dead zone
-                                 (stick.h): small ones ignored, large ones passed, the whole
-                                 travel used (finding 134)
+       test_gamepad mapping      gamepad.c's reading of what SDL reports (no pad needed): each
+                                 kind of pad's button symbols, and stick values through the
+                                 dead zone (stick.h): small ones ignored, large ones passed,
+                                 the whole travel used (finding 134)
    Built by port/tools/test_runtime.py (run there for 0 seconds and with mapping). */
 #include "hle.h"
 #include "stick.h"
@@ -63,10 +64,26 @@ static void check(int ok, const char *what, int got, int want)
     printf("%s %s: %d (want %d)\n", ok ? "ok  " : "FAIL", what, got, want);
 }
 
-/* What gamepad.c does with a stick value SDL reports: the dead zone (stick.h). The SDL build has
-   no virtual joysticks (sdl3.py), so the values are given here, as SDL hands them to gamepad.c. */
+/* What gamepad.c does with what SDL reports: each pad's kind (the button symbols, prompts.c) and a
+   stick value through the dead zone (stick.h). The SDL build has no virtual joysticks (sdl3.py),
+   so the values are given here, as SDL hands them to gamepad.c. */
 static int run_mapping(void)
 {
+    static const struct { const char *name; int type, label, want; } kinds[] = {
+        {"Xbox 360", SDL_GAMEPAD_TYPE_XBOX360, SDL_GAMEPAD_BUTTON_LABEL_A, PAD_KIND_XBOX},
+        {"Xbox One", SDL_GAMEPAD_TYPE_XBOXONE, SDL_GAMEPAD_BUTTON_LABEL_A, PAD_KIND_XBOX},
+        {"DualShock 4", SDL_GAMEPAD_TYPE_PS4, SDL_GAMEPAD_BUTTON_LABEL_CROSS, PAD_KIND_PLAYSTATION},
+        {"DualSense", SDL_GAMEPAD_TYPE_PS5, SDL_GAMEPAD_BUTTON_LABEL_CROSS, PAD_KIND_PLAYSTATION},
+        {"Switch Pro", SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, SDL_GAMEPAD_BUTTON_LABEL_B, PAD_KIND_NINTENDO},
+        {"Joy-Con pair", SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR, SDL_GAMEPAD_BUTTON_LABEL_B, PAD_KIND_NINTENDO},
+        {"standard, A at the bottom (Steam Deck)", SDL_GAMEPAD_TYPE_STANDARD, SDL_GAMEPAD_BUTTON_LABEL_A, PAD_KIND_XBOX},
+        {"standard, B at the bottom", SDL_GAMEPAD_TYPE_STANDARD, SDL_GAMEPAD_BUTTON_LABEL_B, PAD_KIND_NINTENDO},
+        {"unknown labels", SDL_GAMEPAD_TYPE_UNKNOWN, SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN, PAD_KIND_NONE},
+    };
+    for (size_t i = 0; i < sizeof kinds / sizeof *kinds; i++) {
+        int got = gamepad_kind_of(kinds[i].type, kinds[i].label);
+        check(got == kinds[i].want, kinds[i].name, got, kinds[i].want);
+    }
     /* SDL's value, the dead zone (STICK_GAME or %), and the byte the game must get */
     static const struct { int v, dead, want; } cases[] = {
         {0, STICK_GAME, 128}, {5000, STICK_GAME, 147}, {-5000, STICK_GAME, 108}, {32767, STICK_GAME, 255},

@@ -388,6 +388,12 @@ def main():
         # the window's icon where the program carries none of its own (present.c's window_icon)
         icon = (ROOT/'port/res/icon.png').read_bytes()
         (work/'dhd_icon.inc').write_text('static const unsigned char dhd_icon_png[] = {%s};\n' % ','.join(map(str, icon)))
+        # the button icons (button_icons.c, finding 134): port/res/buttons/*.png's bytes, by name
+        pngs = sorted((ROOT/'port/res/buttons').glob('*.png'))
+        inc = [f'static const unsigned char button_png_{p.stem}[] = {{{",".join(map(str, p.read_bytes()))}}};' for p in pngs]
+        inc.append('static const struct { const char *name; const unsigned char *png; unsigned size; } button_pngs[] = {')
+        inc += [f'    {{"{p.stem}", button_png_{p.stem}, sizeof button_png_{p.stem}}},' for p in pngs]
+        (work/'button_icons.inc').write_text('\n'.join(inc + ['};', '']))
         if a.host_library:
             library = a.host_library.resolve()
             if not library.exists():

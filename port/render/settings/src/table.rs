@@ -101,6 +101,10 @@ pub const SETTINGS: &[Setting] = &[
     choice("stick_dead_zone", "DHD_STICK_DEAD_ZONE", &[c("game", "Game (36%)"), c("5", "5%"), c("10", "10%"), c("15", "15%"),
                                                        c("20", "20%"), c("25", "25%"), c("30", "30%"), c("40", "40%"),
                                                        c("50", "50%")], "game", "game"),
+    // The button symbols the game shows (finding 134, port/hle/prompts.c): auto = the connected
+    // controller's kind (player 1's; the PS2's own without one). The tools' runs keep the PS2's.
+    choice("prompts", "DHD_PROMPTS", &[c("auto", "Auto"), c("playstation", "PlayStation"), c("xbox", "Xbox"),
+                                       c("nintendo", "Nintendo")], "auto", "playstation"),
     // A PCSX2 texture pack: texture_pack its folder (empty: textures/SCUS-97177/replacements in the
     // folder of dhd.ini and the saves, else beside the game), textures = off the game's own textures.
     switch("textures", "DHD_TEXTURES", TOGGLE, "on", "on"),

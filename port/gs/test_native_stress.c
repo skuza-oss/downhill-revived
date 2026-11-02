@@ -38,6 +38,8 @@ void *texpack_view(TexPackEntry *e,uint64_t f) {(void)e; (void)f; return NULL;}
 void texpack_field(uint64_t f) {(void)f;}
 void texpack_report(void) {}
 int font_sharp_on(void) {return 0;}
+int font_sharp_active(void) {return 0;}
+int font_sharp_icon_style(void) {return 0;}
 int font_sharp_match(uint64_t t) {(void)t; return 0;}
 void *font_sharp_view(const ReplaceDevice *d,const uint32_t *p,unsigned w,unsigned h,uint64_t k)
 {(void)d; (void)p; (void)w; (void)h; (void)k; return NULL;}
