@@ -362,8 +362,15 @@ def add(patches):
           '    if (port_delta_clock()) { port_replay_frame(arg0); return; }')
     entry('0019EE98', 'func_0019EE98',
           '    if (port_delta_clock()) port_replay_race_phase(race->state);')
-    entry('00138E08', 'func_00138E08',
-          '    if (port_delta_clock()) return; /* ghosts disabled on the delta-time clock */')
+    # The time trial's ghost (mode 18) samples its rider every D_0029C3C4 (8) fields of race
+    # clock and draws the best run between its samples. A two-field step past the mark keeps
+    # its extra field (retail starts the count again from 0), so a race second holds the same
+    # samples at every rate; the drawing takes the part of a field the clock is past too.
+    edit('00138E08', 'obj->x316ec = 0;',
+         'obj->x316ec = port_delta_clock() ? obj->x316ec - D_0029C3C4 : 0;')
+    edit('00138E08', 'func_00138868(obj,(float)obj->x316ec/(float)D_0029C3C4);',
+         'func_00138868(obj,(port_delta_clock() ? port_counter_fields(obj->x316ec) : (float)obj->x316ec)'
+         '/(float)D_0029C3C4);')
     edit('0020CDF0', 'p->rise*(float)dt', 'p->rise*(port_delta_clock() ? port_step() : (float)dt)')
     edit('0020CDF0', 'p->fall*(float)dt', 'p->fall*(port_delta_clock() ? port_step() : (float)dt)')
     edit('00154058', 'obj->x30.z -= fvar;',
