@@ -339,6 +339,16 @@ the rest is samples shared with rider sounds); Mt. Midoule FR -25.03 PCSX2, -24.
 changes only the PCM column; with the limits the race trace's RAM also differs, in the sound queue
 and handle words only (the game keeps the refused plays' replies).
 
+2026-11-02 (finding 135): rooms are made near their creator and everyone can see where they are.
+`/v1/rooms/new` gives the room's Durable Object a location hint from the creator's continent and
+country (`online/server/src/region.ts`), the room learns its own colo from a Cloudflare trace, the
+welcome and a new `where` message say where the player and the room are, and the public list
+carries each room's region in the asker's region's order (0.7.6's Quick Race then prefers a near
+room too). dhd.log gets `net:` lines: on joining (this PC's Cloudflare location, country, the
+room's location), every 30 s in a room or race and on leaving (own ping median and worst, every
+other player's ping and country). The list rows and the room's header show the region
+(`PLAYERS 2/10 - EU SERVER`). Server tests 71/71; two games on hidden desktops logged every line.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
@@ -364,7 +374,9 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
 - Server: `online/server/` (Cloudflare Workers + Durable Objects) at `wss://dhd.skuza.app`, the
   game's built-in default (dhd.ini `server =` or `DHD_NET_SERVER` override it). Lobbies, join
   codes, the public list, the race relay (10 players per room by default), desync reports, usage stats
-  in Workers Analytics Engine. `MIN_VERSION` (`wrangler.jsonc`, now 0.7.0) turns older clients
+  in Workers Analytics Engine. New rooms take a location hint from their creator's region, and
+  the welcome, a `where` message and the list say where rooms and players are (finding 135).
+  `MIN_VERSION` (`wrangler.jsonc`, now 0.7.0) turns older clients
   away with "update to play online". Protocol: `docs/online-protocol.md`. Steps:
   `online/server/README.md`.
 - Client: `port/net/` (lobby client, hashes; `net.h`) over `port/net/ws.h`, the WebSocket and HTTPS
