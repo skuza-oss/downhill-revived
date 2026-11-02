@@ -604,6 +604,37 @@ static void test_grain_timing(void)
     snd_test_reset();
 }
 
+/* An END grain (type 24) stops its sound as retail 0x5A60 -> 0xFE04 does: a looping tone before it
+   is keyed off and released, instead of looping on after the program ends (finding 133). */
+static void test_end_grain_keys_off(void)
+{
+    uint8_t image[2048], request[48] = {0}, nib[28] = {1};
+    int16_t pcm[2 * 2000];
+    uint32_t h, bank;
+    int with_end, i, loud;
+    for (with_end = 0; with_end < 2; with_end++) {
+        build_bank(image);
+        block(image + TEST_WAVE, 0x00, 7, nib);   /* one block: loop start, repeat, end */
+        image[0x18 + 0x3C + 4] = 2;               /* sound 0: the tone, then grain 1 */
+        put32(image + 0x18 + 0x54 + 40, with_end ? 24 : 0);
+        put32(image + 0x18 + 0x54 + 40 + 4, 3);   /* three 240-Hz ticks after the tone */
+        snd_test_reset(); bank = snd_test_add_bank(image, TEST_BANK_SIZE);
+        put32(request, bank); put32(request + 8, 1024);
+        memcpy(request + 16, "TEST_ONE", 8);
+        h = rpc(0x5C, request, 48); CHECK(h != 0);
+        snd_test_render(pcm, 400);
+        CHECK(snd_test_active_voices() == 1);     /* looping before the END grain */
+        for (i = 0; i < 20; i++) snd_test_render(pcm, 2000);
+        for (i = loud = 0; i < 4000; i++) loud |= pcm[i] != 0;
+        if (with_end) {
+            CHECK(snd_test_active_voices() == 0 && !loud);   /* released and silent */
+            CHECK(rpc(0x19, &h, 4) == 0);                     /* the sound is over */
+        } else
+            CHECK(snd_test_active_voices() == 1 && loud);    /* a program end alone keeps it */
+    }
+    snd_test_reset();
+}
+
 static void test_grain_random_replay(void)
 {
     uint8_t image[2048], request[48] = {0};
@@ -1090,6 +1121,7 @@ int main(void)
     test_loop_and_clipping();
     test_volume_commands();
     test_grain_timing();
+    test_end_grain_keys_off();
     test_grain_random_replay();
     test_reverb();
     test_queued_streams();

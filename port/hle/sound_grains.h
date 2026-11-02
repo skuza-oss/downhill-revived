@@ -226,6 +226,20 @@ static void handler_stop(SoundHandler *h)
         if (handlers[i].used && handlers[i].parent == h->handle) handler_stop(&handlers[i]);
 }
 
+/* An END grain (type 24). Its retail handler (IOP 0x5A60) returns -1, so the program dispatcher
+   (0x6A94) answers "done" and the 240-Hz update loop (0x1021C) stops the handler with 0xFE04(h, 0, 0):
+   its own voices are keyed off into their release (0x19B18), and it leaves its parent/child chain
+   without stopping the children, which go on as sounds of their own. Without the key-off a looping
+   tone before END (E_TREE_WHOOSH's wind, the flywheels) never stops (finding 133). */
+static void handler_end(SoundHandler *h)
+{
+    int i;
+    h->done = 1;
+    handler_keyoff(h, 0);
+    for (i = 0; i < 128; i++)
+        if (handlers[i].used && handlers[i].parent == h->handle) handlers[i].parent = 0;
+}
+
 static void handler_pause(SoundHandler *h, int pause)
 {
     int i;
@@ -318,7 +332,7 @@ static void handler_run(SoundHandler *h)
         case 23:
             for (i = pc + 1; i < h->sound->ngrains; i++) if (rd32(handler_grain(h, i)) == 22) { next = i + 1; break; }
             break;
-        case 24: h->done = 1; break;
+        case 24: handler_end(h); break;
         case 25: case 39: {
             uint32_t choice_slot = (h->sound->grain_off + pc * 40 - 0x18 - rd32(h->bank->bank.data + 0x38)) / 40;
             int previous = choice_slot < 4096 ? h->bank->grain_choice[choice_slot] : INT16_MIN, pick;
