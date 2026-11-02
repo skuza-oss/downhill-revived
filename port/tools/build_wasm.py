@@ -1204,16 +1204,25 @@ CORE_CACHE_DIRS = ['vu1aot']
 # tracked files that can't change the module (everything else in the checkout counts)
 NOT_CORE = ('docs/', 'online/', '.github/', 'port/launcher/', 'port/render/', 'port/web/', 'port/android/',
             'port/release/')
+# where a new, not yet added file can change the module (the sources, the mirrored port folders, the tools)
+CORE_NEW_FILES = ('src/', 'include/', 'port/runtime/', 'port/hle/', 'port/include/', 'port/host/', 'port/gs/',
+                  'port/net/', 'port/tools/', 'port/patches')
+# the environment the build reads (the tools' folders are in the key by their resolved paths)
+CORE_ENV = ('DHD_VUTEXT', 'WASI_SYSROOT', 'SIMDE_DIR', 'WABT_DIR')
 
 
 def core_inputs_key():
     """A hash of everything the module is built from: the checkout's files (tracked, and new ones
     git doesn't ignore yet, with their working-tree content) except NOT_CORE and Markdown, the
-    generated asm/ and assets/, the tools' versions and the environment that points at inputs."""
-    h = hashlib.sha256(b'dhd-module-cache 1\n')
-    tracked = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=ROOT,
-                             capture_output=True).stdout.decode('utf-8', 'replace')
-    names = {n for n in tracked.split('\0') if n and not n.startswith(NOT_CORE) and not n.endswith('.md')}
+    generated asm/ and assets/, the tools' versions and the environment that points at inputs. New
+    files count only in the folders the module is built from (CORE_NEW_FILES), so a checkout's own
+    scratch files don't change the key; nor do the run-time DHD_ variables (only CORE_ENV)."""
+    h = hashlib.sha256(b'dhd-module-cache 2\n')
+    def git_files(*args):
+        out = subprocess.run(['git', 'ls-files', '-z'] + list(args), cwd=ROOT, capture_output=True).stdout
+        return [n for n in out.decode('utf-8', 'replace').split('\0') if n]
+    names = {n for n in git_files('--cached') if not n.startswith(NOT_CORE) and not n.endswith('.md')}
+    names |= {n for n in git_files('--others', '--exclude-standard') if n.startswith(CORE_NEW_FILES)}
     for d in ('asm', 'assets'):
         for p in glob.glob(os.path.join(ROOT, d, '**', '*'), recursive=True):
             if os.path.isfile(p):
@@ -1222,9 +1231,8 @@ def core_inputs_key():
         p = os.path.join(ROOT, n)
         if os.path.isfile(p):
             h.update(n.encode() + b'\0' + hashlib.sha256(open(p, 'rb').read()).digest())
-    for k in sorted(os.environ):
-        if k.startswith('DHD_') and k not in ('DHD_MODULE_CACHE',) or k in ('WASI_SYSROOT', 'SIMDE_DIR', 'WABT_DIR'):
-            h.update(('%s=%s\n' % (k, os.environ[k])).encode())
+    for k in CORE_ENV:
+        h.update(('%s=%s\n' % (k, os.environ.get(k, ''))).encode())
     h.update(('%s|%s|%s\n' % (WASI, SIMDE, WABT)).encode())
     h.update(run(['clang', '--version']).stdout.encode())
     return h.hexdigest()
