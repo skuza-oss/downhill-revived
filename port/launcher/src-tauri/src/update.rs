@@ -442,8 +442,10 @@ pub fn clean_up(place: &Place) {
         let _ = fs::remove_file(old_name(image));
     }
     for name in own_files(&place.game) {
+        // only beside a new copy: when an update's copy failed after the rename, NAME.old is the
+        // last copy of the file and stays (the next update replaces it)
         let old = place.game.join(format!("{name}.old"));
-        if old.is_file() {
+        if old.is_file() && place.game.join(&name).is_file() {
             let _ = fs::remove_file(old);
         }
     }
@@ -639,16 +641,18 @@ mod tests {
         let game = std::env::temp_dir().join(format!("dhd-launcher-cleanup-{}", std::process::id()));
         let _ = fs::remove_dir_all(&game);
         fs::create_dir_all(&game).unwrap();
-        fs::write(game.join(UPDATE_LIST), "newlib.dll\n../escape.txt\n").unwrap();
-        for f in [format!("{GAME_EXE}.old"), "newlib.dll.old".into(), "notes.txt.old".into()] {
+        fs::write(game.join(UPDATE_LIST), "newlib.dll\nother.dll\n../escape.txt\n").unwrap();
+        for f in [format!("{GAME_EXE}.old"), GAME_EXE.into(), "newlib.dll.old".into(), "newlib.dll".into(),
+                  "other.dll.old".into(), "notes.txt.old".into()] {
             fs::write(game.join(f), "x").unwrap();
         }
         let place = Place { game: game.clone(), data: game.clone(), bundle: None, appimage: None, installed: false };
         clean_up(&place);
         assert!(!game.join(format!("{GAME_EXE}.old")).exists());
         assert!(!game.join("newlib.dll.old").exists());
+        assert!(game.join("other.dll.old").exists(), "a .old with no new copy beside it is the last copy and stays");
         assert!(game.join("notes.txt.old").exists(), "a file that isn't the game's stays");
-        assert_eq!(update_list(&game), vec!["newlib.dll".to_string()], "a listed path is ignored");
+        assert_eq!(update_list(&game), vec!["newlib.dll".to_string(), "other.dll".to_string()], "a listed path is ignored");
         fs::remove_dir_all(&game).unwrap();
     }
 
