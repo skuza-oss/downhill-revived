@@ -16,7 +16,8 @@
    The settings are the touch_* keys of dhd.ini (DHD_TOUCH_* variables, the TOUCH CONTROLS pages);
    for the checks only: DHD_TOUCH_HUD=game keeps the game's HUD (the fallback layout), and
    DHD_TOUCH_AIR_WAIT=ms sets the air layout's wait (150, or 33 if check 6 finds the flag steady);
-   DHD_TOUCH_LOG=1 logs every touch (mm), the screen's insets and each change of the buttons sent. */
+   DHD_TOUCH_LOG=1 logs every touch (mm), the screen's insets and each change of the buttons sent
+   (2: every move as well). */
 #include "host_api.h"
 #include "../hle/hle.h"
 #include "../hle/touch.h"
@@ -64,7 +65,7 @@ static double trace_race_ms;   /* the race clock the trace prints */
 static int trace_on(void)
 {
     static int on = -1;
-    if (on < 0) { const char *v = getenv("DHD_TOUCH_LOG"); on = v && atoi(v) ? 1 : 0; }
+    if (on < 0) { const char *v = getenv("DHD_TOUCH_LOG"); on = v ? atoi(v) : 0; }   /* 2: the moves too */
     return on;
 }
 
@@ -377,7 +378,7 @@ void host_service_touch_field(uint32_t address)
     for (int i = 0; i < n; i++) {
         const Event *e = &events[i];
         float x = e->x * sc.width, y = e->y * sc.height;
-        if (trace_on() && e->kind != EV_MOVE) {
+        if (trace_on() > (e->kind == EV_MOVE)) {
             static const char *const kinds[] = {"down", "move", "up", "cancel", "back", "pad used", "pad lost"};
             fprintf(stderr, "touch log: %s %lld at %.1f,%.1f mm (%.0f ms) race %.0f ms hud %d air %d\n", kinds[e->kind], e->id, x, y,
                     e->ms, h->race_ms, h->race_hud, h->air);
