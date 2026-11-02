@@ -112,8 +112,23 @@ Then:
 2. The first time, choose your disc image: your `.iso` of the USA disc. It is checked and
    remembered in `dhd.ini`; you won't be asked again unless the file moves or changes.
 
-To start the game without the launcher, turn off Settings > Game > Open the launcher first in the
-launcher (or put `launcher = off` in `dhd.ini`); `dhd.exe` then starts the game straight away.
+**Starting straight into the game** (a Steam shortcut, a desktop shortcut): start the launcher with
+`--play`. The game starts at once with your saved settings, without the launcher's window, and
+the launcher closes when the game does (play time is still counted). The window opens instead
+when something needs you: no disc image chosen yet, a disc image the game can't use, or Update
+Now in the ONLINE menu. Updates follow `auto_update`: the check runs while you play, so the start
+never waits for it; with `on` a newer release is installed after you quit, with `ask` the window
+offers it the next time it opens.
+
+- Windows: `DownhillRevived.exe --play` (a shortcut's Target, or Steam's launch options).
+- Linux and Steam Deck: `DownhillRevived-<version>-linux-experimental.AppImage --play`.
+- Mac: `open -a "Downhill Revived" --args --play`, or
+  `"/Applications/Downhill Revived.app/Contents/MacOS/DownhillRevived" --play`.
+
+Steam (a Steam Deck in Game Mode too): in Desktop Mode open Steam, Games > Add a Non-Steam Game to
+My Library, pick the AppImage (or `DownhillRevived.exe` on Windows), then in the new entry's
+Properties > Launch Options write `--play`. Choose your disc image once in the launcher (start it
+without `--play`) before playing from Steam. `dhd.exe` started on its own still opens the launcher.
 
 Files the game keeps in your data folder (the zip's folder, or the folder named above for an
 installed copy):
@@ -224,7 +239,6 @@ first start. The PC SETTINGS page writes most of them for you.
 | `vsync` | `1` | `1` shows each picture without tearing, `0` sends it at once (may tear) |
 | `unlock_all` | `0` | `1`: everything reads as unlocked, without changing the save |
 | `name` | (empty) | your rider name in online races |
-| `launcher` | on | `off`: `dhd.exe` starts the game without opening the launcher |
 
 Each key has a `DHD_*` environment variable (`scale` is `DHD_SCALE`, `server` is
 `DHD_NET_SERVER`; see [docs/BUILDING.md](BUILDING.md)), which wins over the file.

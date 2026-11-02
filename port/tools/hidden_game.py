@@ -71,7 +71,7 @@ def test_iso():
 
 
 class Game:
-    def __init__(self, exe, out, env=None, name='check', scale=1, shot_window='960x720', interval=0.5, timed=False):
+    def __init__(self, exe, out, env=None, name='check', scale=1, shot_window='960x720', interval=0.5, timed=False, args=()):
         self.out = Path(out); self.out.mkdir(parents=True, exist_ok=True)
         self.shots = self.out / 'raw'; self.shots.mkdir(exist_ok=True)
         for f in self.shots.glob('*.bmp'): f.unlink()
@@ -94,7 +94,8 @@ class Game:
             si.flags = 0x100; si.stdout = log; si.stderr = log
             pi = _ProcessInfo()
             block = ''.join(f'{k}={v}\0' for k, v in sorted(e.items(), key=lambda kv: kv[0].upper())) + '\0'
-            ok = k32.CreateProcessW(str(exe), ctypes.create_unicode_buffer(f'"{exe}"'), None, None, True,
+            line = ' '.join([f'"{exe}"', *args])  # args: e.g. the launcher's --play (it starts the game itself)
+            ok = k32.CreateProcessW(str(exe), ctypes.create_unicode_buffer(line), None, None, True,
                                     0x400 | 0x08000000, ctypes.create_unicode_buffer(block, len(block)),
                                     str(Path(exe).parent), ctypes.byref(si), ctypes.byref(pi))
             k32.CloseHandle(log)

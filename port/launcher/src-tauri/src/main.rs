@@ -368,6 +368,59 @@ fn open_link(handle: AppHandle, url: String) -> Result<(), String> {
     handle.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// `--play` (finding 134; a Steam shortcut's launch option, a desktop shortcut): the game starts at
+/// once with the saved settings, without the window, and the launcher ends when the game does; play
+/// time is counted as from PLAY. The game is started as PLAY starts it (Place::start), so it gets
+/// the same data folder, dhd.ini and saves. The window opens instead when the game can't start from
+/// here: no game beside the launcher, no disc image chosen yet or one the game would refuse, or the
+/// game ended asking for an update (the online menu's Update Now: the window offers it).
+/// Updates: per auto_update, a check runs on a thread while the game plays, so the start never
+/// waits for the network; with "on" a newer release is installed after the game ends (the next
+/// start is the new version), with "ask" the next time the window opens offers it, with "off" no
+/// check. Returns the place back when the window should open.
+fn play_at_once(place: game::Place) -> Option<game::Place> {
+    if !place.exe().is_file() {
+        return Some(place);
+    }
+    let iso = dhd_settings::read(&place.settings()).unwrap_or_default().written("iso").filter(|s| !s.is_empty());
+    if iso.is_none_or(|p| disc::problem(std::path::Path::new(&p)).is_some()) {
+        return Some(place);
+    }
+    let Ok(mut child) = place.start() else { return Some(place) };
+    let auto = effective(&place, "auto_update");
+    let check = (auto != "off").then(|| {
+        let source = Some(effective(&place, "update_url"))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| update::OFFICIAL_SOURCE.into());
+        let platform = update::platform(&place);
+        std::thread::spawn(move || update::latest(&source, platform))
+    });
+    let mut since = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break Some(s),
+            Ok(None) => {}
+            Err(_) => break None,
+        }
+        std::thread::sleep(Duration::from_millis(400));
+        if since.elapsed() >= Duration::from_secs(60) {
+            add_played(&place, &mut since);
+        }
+    };
+    add_played(&place, &mut since);
+    if status.and_then(game::exit_code) == Some(game::UPDATE_EXIT_CODE) {
+        return Some(place);
+    }
+    if auto == "on" {
+        if let Some(Ok(Ok(Some(release)))) = check.map(|c| c.join()) {
+            if update::newer(&release.version, VERSION) {
+                let _ = update::install(&release, &place, |_, _| {});
+            }
+        }
+    }
+    None
+}
+
 /// SIGTERM and SIGINT (`kill`, a logout, Ctrl+C in a terminal) end the launcher as closing its
 /// window does, with 128 + the signal as its exit code (143, 130), as a shell reports a process the
 /// signal killed: the same on every Unix, whatever the windowing toolkit does with them. A handler
@@ -459,6 +512,14 @@ fn main() {
     let place = game::Place::find();
     update::clean_up(&place);
     let _ = dhd_settings::create(&place.settings());
+    let place = if std::env::args().skip(1).any(|a| a == "--play") {
+        match play_at_once(place) {
+            Some(place) => place,
+            None => return,
+        }
+    } else {
+        place
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

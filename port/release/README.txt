@@ -40,6 +40,17 @@ How to play
    checked and remembered in dhd.ini; you are only asked again if the file moves or changes.
    The launcher's Settings > Game can change it later.
 
+Straight into the game (Steam, a shortcut): start the launcher with --play, e.g.
+DownhillRevived.exe --play, or the AppImage with --play. The game starts at once with your saved
+settings and the launcher closes with it. The launcher's window opens instead when it needs you
+(no disc image chosen yet, a disc image the game can't use, Update Now in the ONLINE menu).
+Updates follow auto_update: the check runs while you play; "on" installs a newer release after
+you quit, "ask" offers it the next time the window opens.
+Steam (a Steam Deck in Game Mode too): in Desktop Mode, Steam > Games > Add a Non-Steam Game to My
+Library, pick the AppImage (Windows: DownhillRevived.exe), then Properties > Launch Options:
+--play. Choose your disc image in the launcher once first.
+macOS: open -a "Downhill Revived" --args --play
+
 Controls
 A controller works out of the box: Xbox pads, DualSense, DualShock 4, Switch Pro, 8BitDo and most
 other USB or Bluetooth pads (through SDL3 and its controller database), with vibration where the
