@@ -223,5 +223,8 @@ if __name__=='__main__':
     compiler=str(DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-x86_64-windows/bin/clang.exe')
     helper=out/'memory.wasm'
     builtins=next(Path(compiler).parents[1].glob('lib/clang/*/lib/wasm32-unknown-wasi/libclang_rt.builtins.a'))
-    subprocess.run([compiler,'-O2','-msimd128','-mbulk-memory','-ffp-contract=off','-nostdlib','-Wl,--no-entry','-Wl,--export-all','-Wl,--import-memory',*[str(Path(__file__).with_name(n+'.c')) for n in ('memory','float','double')],str(builtins),'-o',str(helper)],check=True,env=dict(os.environ,TEMP=str(out),TMP=str(out)))
+    import objcache  # the helper module through the object cache (objcache.py, "Whole modules")
+    env=dict(os.environ,TEMP=str(out),TMP=str(out))
+    cmd=[compiler,'-O2','-msimd128','-mbulk-memory','-ffp-contract=off','-nostdlib','-Wl,--no-entry','-Wl,--export-all','-Wl,--import-memory',*[str(Path(__file__).with_name(n+'.c')) for n in ('memory','float','double')],str(builtins),'-o',str(helper)]
+    if objcache.compile(cmd,helper,lambda c:subprocess.run(c,env=env),extra=objcache.toolchain(compiler),env=env).returncode:sys.exit('postlink: %s: build failed'%helper)
     rewrite(a.input,a.output,helper,not a.no_float,not a.legacy_memory,a.debug_memory,inline_memory=not a.no_inline_memory)

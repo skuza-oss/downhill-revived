@@ -10,6 +10,11 @@ is no partial match. The worktree root (and a caller's other build folders) are 
 in the key, so worktrees share entries; an object whose bytes name one of those folders is never
 stored (it would carry another checkout's path).
 
+Whole modules: the browser build (port/web) compiles and links each of its wasm modules in one
+clang call; such a call goes through compile() as it is, the preprocessed text of all its sources
+standing for the sources, and toolchain() adding the linker, the sysroot's libraries and the
+compiler runtime to the key. Its entry is the linked module.
+
 Entries: DIR/<2 hex>/<sha256>.o, written to a temp file and renamed, so a parallel reader sees a
 whole object or none. A hit is copied, not hardlinked: build_wasm.py renames symbols in place
 in its objects. Compiler messages (warnings) are not stored: a hit prints none.
@@ -86,8 +91,8 @@ def preprocess_command(cmd, out):
         if skip:
             skip -= 1
             continue
-        if arg in ('-c', '/c', '-S', '-emit-llvm') or arg.startswith('/Fo'):
-            continue
+        if arg in ('-c', '/c', '-S', '-emit-llvm') or arg.startswith(('/Fo', '-mexec-model=')):
+            continue  # -mexec-model: the link's start file only (wasm), and an error with -E
         if arg == '-Xclang' and i + 1 < len(cmd) and str(cmd[i + 1]) == '-disable-llvm-passes':
             skip = 1
             continue
@@ -313,6 +318,25 @@ def source_key(cmd, out, extra=(), roots=(), cwd=None, env=None):
     if mk:
         _write_manifest(mk, k, p.stdout, cmd, cwd, folders)
     return k
+
+
+def toolchain(compiler):
+    """Extra key input for a command that also links (clang ... -o module.wasm): every file of the
+    compiler's toolchain by name, size and mtime (the linker beside it, the sysroot's libraries
+    and start files, the compiler runtime). The link's own flags are in the command already."""
+    top = os.path.dirname(os.path.dirname(os.path.realpath(shutil.which(str(compiler)) or str(compiler))))
+    h = hashlib.sha256()
+    for sub in ('bin', 'lib', os.path.join('share', 'wasi-sysroot', 'lib')):
+        for d, dirs, names in os.walk(os.path.join(top, sub)):
+            dirs.sort()
+            for n in sorted(names):
+                try:
+                    st = os.stat(os.path.join(d, n))
+                except OSError:
+                    continue
+                h.update(b'%s\0%d\0%d\n' % (os.path.relpath(os.path.join(d, n), top).encode('utf-8', 'replace'),
+                                             st.st_size, st.st_mtime_ns))
+    return ['toolchain ' + h.hexdigest()]
 
 
 def compile(cmd, out, run, extra=(), roots=(), cwd=None, env=None, hit=None):

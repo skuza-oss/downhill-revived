@@ -75,6 +75,15 @@ def check_imports(wasm):
 WASI=(DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-x86_64-windows')
 OUT=ROOT/'build/web'; OUT.mkdir(parents=True,exist_ok=True)
 env=dict(os.environ,TEMP=str(OUT),TMP=str(OUT))
+import objcache
+def clang(cmd,out,**kw):
+    """One module's compile-and-link call through the object cache (objcache.py, "Whole modules"):
+    a module built from the same command, preprocessed sources and toolchain is copied instead.
+    A hit returns returncode 0 and no compiler messages; DHD_OBJCACHE=0 always runs the command."""
+    check=kw.pop('check',False)
+    r=objcache.compile(cmd,out,lambda c:subprocess.run(c,env=env,**kw),extra=objcache.toolchain(cmd[0]),env=env)
+    if check and r.returncode:raise subprocess.CalledProcessError(r.returncode,cmd)
+    return r
 # Only the VIF host-side selector changes. Never define _WIN64 on wasm32:
 # guest.h would then expect a native 64-bit guest_base.
 vif=(ROOT/'port/hle/vif.c').read_text().replace('_WIN64','DHD_WEB_HOST')
@@ -180,7 +189,7 @@ if THREADS:
           '-Wl,--global-base=%d'%0x07A10000,'-Wl,-z,stack-size=65536',
           '-Wl,--initial-memory=%d'%0x07B00000,'-Wl,--max-memory=2147483648',
           str(ROOT/'port/web/web_queue.c'),str(OUT/'gqueue_calls.c'),'-o',str(OUT/'gqueue.wasm')]
-    r=subprocess.run(qcmd,env=env,capture_output=True,text=True)
+    r=clang(qcmd,OUT/'gqueue.wasm',capture_output=True,text=True)
     print(r.stdout+r.stderr)
     if r.returncode:sys.exit('build_graphics: gqueue.wasm: link failed')
     sys.path.insert(0,str(ROOT/'port/web'))
@@ -240,7 +249,7 @@ VU += [str(OUT/'vif.c'),str(OUT/'vu0_interp.c')]
 if not THREADS:cmd += VU
 cmd += ['-o',str(OUT/'graphics-raw.wasm')]
 (OUT/'graphics-command.json').write_text(json.dumps(cmd,indent=2))
-r=subprocess.run(cmd,env=env,capture_output=True,text=True)
+r=clang(cmd,OUT/'graphics-raw.wasm',capture_output=True,text=True)
 (OUT/'graphics-build.log').write_text(r.stdout+r.stderr)
 print(r.stdout+r.stderr)
 if r.returncode:sys.exit(r.returncode)
@@ -271,7 +280,7 @@ def build_vu(gs_cmd):
     vcmd+=[str(ROOT/'port/web/host_graphics.c'),str(OUT/'web_exports_vu.c'),str(ROOT/'port/web/web_queue.c')]
     vcmd+=[x if x!=str(OUT/'vif.c') else str(OUT/'vif_vu.c') for x in VU]+['-o',str(OUT/'vu-raw.wasm')]
     (OUT/'vu-command.json').write_text(json.dumps(vcmd,indent=2))
-    r=subprocess.run(vcmd,env=env,capture_output=True,text=True)
+    r=clang(vcmd,OUT/'vu-raw.wasm',capture_output=True,text=True)
     (OUT/'vu-build.log').write_text(r.stdout+r.stderr)
     print(r.stdout+r.stderr)
     if r.returncode:sys.exit('build_graphics: vu.wasm: link failed')
@@ -282,9 +291,9 @@ def build_vu(gs_cmd):
     if bad:sys.exit('build_graphics: vu.wasm imports %s (undefined in the VU worker\'s module?)'%bad)
     helper=OUT/'memory-vu.wasm'
     builtins=next(WASI.glob('lib/clang/*/lib/wasm32-unknown-wasi/libclang_rt.builtins.a'))
-    subprocess.run([str(WASI/'bin/clang.exe'),'-O2','-msimd128','-mbulk-memory','-ffp-contract=off','-nostdlib','-Wl,--no-entry',
-                    '-Wl,--export-all','-Wl,--import-memory','-DWEB_CSR_AT=%#xu'%csr,
-                    *[str(ROOT/'port/web'/(n+'.c')) for n in ('memory','float','double')],str(builtins),'-o',str(helper)],check=True,env=env)
+    clang([str(WASI/'bin/clang.exe'),'-O2','-msimd128','-mbulk-memory','-ffp-contract=off','-nostdlib','-Wl,--no-entry',
+           '-Wl,--export-all','-Wl,--import-memory','-DWEB_CSR_AT=%#xu'%csr,
+           *[str(ROOT/'port/web'/(n+'.c')) for n in ('memory','float','double')],str(builtins),'-o',str(helper)],helper,check=True)
     from postlink import rewrite
     rewrite(OUT/'vu-raw.wasm',OUT/'vu.wasm',helper,float_ops=EXACT_FLOAT,memory=False,
             fast_memory='--legacy-memory' not in sys.argv,debug_memory='--debug-memory' in sys.argv,helper_stack=stack)
@@ -300,9 +309,9 @@ if THREADS:
     csr,stack=(int(re.search(r'#define %s (0x[0-9A-Fa-f]+)u'%n,text).group(1),16) for n in ('WEB_Q_REACTOR_CSR','WEB_Q_REACTOR_HELPER_STACK'))
     helper=OUT/'memory-graphics.wasm'
     builtins=next(WASI.glob('lib/clang/*/lib/wasm32-unknown-wasi/libclang_rt.builtins.a'))
-    subprocess.run([str(WASI/'bin/clang.exe'),'-O2','-msimd128','-mbulk-memory','-ffp-contract=off','-nostdlib','-Wl,--no-entry',
-                    '-Wl,--export-all','-Wl,--import-memory','-DWEB_CSR_AT=%#xu'%csr,
-                    *[str(ROOT/'port/web'/(n+'.c')) for n in ('memory','float','double')],str(builtins),'-o',str(helper)],check=True,env=env)
+    clang([str(WASI/'bin/clang.exe'),'-O2','-msimd128','-mbulk-memory','-ffp-contract=off','-nostdlib','-Wl,--no-entry',
+           '-Wl,--export-all','-Wl,--import-memory','-DWEB_CSR_AT=%#xu'%csr,
+           *[str(ROOT/'port/web'/(n+'.c')) for n in ('memory','float','double')],str(builtins),'-o',str(helper)],helper,check=True)
 rewrite(OUT/'graphics-raw.wasm',OUT/'graphics.wasm',helper,float_ops=EXACT_FLOAT,memory='--guarded-memory' in sys.argv,
         fast_memory='--legacy-memory' not in sys.argv,debug_memory='--debug-memory' in sys.argv,helper_stack=stack)
 if THREADS:

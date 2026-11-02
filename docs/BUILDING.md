@@ -112,7 +112,10 @@ their own variable or option says:
 
 The Rust toolchain comes from `rustup` (`port/render/rust-toolchain.toml` pins it); cargo's
 output goes under `DHD_DEVCACHES/dhd-cargo`, compiled objects are cached in
-`DHD_DEVCACHES/dhd-objcache` (`DHD_OBJCACHE_DIR`), and finished core modules in
+`DHD_DEVCACHES/dhd-objcache` (`DHD_OBJCACHE_DIR`; `DHD_OBJCACHE=0` turns it off), the browser
+build's linked wasm modules there too (each module's one compile-and-link clang call, keyed by the
+command, its preprocessed sources and the wasi-sdk's files: the VU worker's module alone takes 20 to 60
+minutes to compile), and finished core modules in
 `DHD_DEVCACHES/dhd-modulecache`: `build_wasm.py` hashes everything the module is built from (the
 checkout's files except docs, the online server and the launcher, renderer, browser, Android and
 release folders; `asm/` and `assets/`; the tools' versions) and, when a module of that hash was
