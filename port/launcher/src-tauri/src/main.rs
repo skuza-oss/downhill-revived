@@ -412,6 +412,16 @@ fn play_at_once(place: game::Place) -> Option<game::Place> {
     if status.and_then(game::exit_code) == Some(game::UPDATE_EXIT_CODE) {
         return Some(place);
     }
+    // with "on", a newer release found while the game ran installs now; a check that hasn't
+    // answered within 15 s is left (the next start checks again): a stalled network must not keep
+    // a windowless launcher running after the game, which Steam would show as still playing
+    let wait_until = Instant::now() + Duration::from_secs(15);
+    let check = check.filter(|c| {
+        while !c.is_finished() && Instant::now() < wait_until {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        c.is_finished()
+    });
     if auto == "on" {
         if let Some(Ok(Ok(Some(release)))) = check.map(|c| c.join()) {
             if update::newer(&release.version, VERSION) {
