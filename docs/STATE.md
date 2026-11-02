@@ -327,6 +327,18 @@ oracle replays, strict fixed-stream 8x comparisons on both GPUs/APIs and boot tr
 Finding 130 contains the final paced/unlocked tables, 1% lows and pass splits; wall-time stalls
 remain, and the RTX-connected monitor's transport cost is not isolated. Player defaults unchanged.
 
+2026-11-02 (finding 133, issue #19): Mt. Liddellroch's ambience is no longer too loud. 989snd's END
+grain (type 24) stops its sound and releases its voices (retail IOP 0x5A60 -> 0xFE04); the port only
+ended the program, so `E_TREE_WHOOSH`'s wind loop, started at every tree passed, never stopped (35
+copies at once a minute into the race; PCSX2: 5). Sound records' solo flag and instance limits
+(byte +5, flags 8/0x10/0x20; 0x4A34, 0xF34C, 0x10038) now apply as in retail. Against a PCSX2
+recording of the same race (a capture hook in the comparison adapter): Liddellroch FR race 0-60 s
+-24.71 dBFS PCSX2, -22.54 before, -25.18 after; ambient voice power +13.3 dB -> +3.4 dB (most of
+the rest is samples shared with rider sounds); Mt. Midoule FR -25.03 PCSX2, -24.77 before, -25.02.
+`DHD_SND_VOICE_TRACE` dumps each sounding voice for such comparisons. State traces: the END fix
+changes only the PCM column; with the limits the race trace's RAM also differs, in the sound queue
+and handle words only (the game keeps the refused plays' replies).
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
