@@ -404,6 +404,34 @@ static void test_restart_clock(void)
     field();
 }
 
+/* The trick-stick hint: it holds the game until a push, and when the hold ends without one (5 s)
+   the hint goes too. */
+static void test_trick_hint(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    TouchSettings set = *touch_settings(t);
+    set.hints_shown = ~0u & ~(unsigned)TOUCH_HINT_TRICK;
+    touch_configure(t, &set, NULL);
+    game.air = 1;
+    wait_ms(250);   /* the air layout, before the hint (400 ms) */
+    TouchShape shapes[TOUCH_SHAPES];
+    int no_hint = touch_shapes(t, shapes, TOUCH_SHAPES);
+    wait_ms(350);
+    fields(4);
+    CHECK(touch_freeze(t));
+    CHECK(touch_shapes(t, shapes, TOUCH_SHAPES) > no_hint);
+    /* the game is held: its clocks stand still */
+    game.clock_moving = 0;
+    double held = now;
+    while (touch_freeze(t) && now - held < 6000) { now += 1000.0 / 60; touch_update(t, &game, now); }
+    CHECK(!touch_freeze(t));
+    game.clock_moving = 1;
+    field();
+    CHECK(touch_shapes(t, shapes, TOUCH_SHAPES) == no_hint);   /* its box, text and ring went */
+    game.air = 0;
+    fields(2);
+}
+
 static void test_classic_resume(void)
 {
     uint16_t edges[16];
@@ -609,6 +637,7 @@ int main(void)
     test_sprint_guards();
     test_pause();
     test_restart_clock();
+    test_trick_hint();
     test_classic_resume();
     test_trick_stick();
     test_online_panel();

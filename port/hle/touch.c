@@ -1543,6 +1543,9 @@ static void hints_step(Touch *t)
     double race = g->race_ms;
     if (t->race_new) { t->last_hop_race = race; t->slide_far_since = 0; t->race_new = 0; }
     if (t->hint && t->hint != TOUCH_HINT_TRICK && t->now > t->hint_until) t->hint = 0;
+    /* the trick-stick hint goes with its hold when no push ended it (5 s, the landing), and with
+       the air layout; a push ends it in touch_update */
+    if (t->hint == TOUCH_HINT_TRICK && !t->freeze && !t->freeze_at && (t->now > t->hint_until || !t->air_layout)) t->hint = 0;
     unsigned shown = t->set.hints_shown;
     #define SHOW(h, ms) do { t->hint = (h); t->hint_until = t->now + (ms); t->set.hints_shown |= (h); t->saved = 1; } while (0)
     if (t->hint) {
