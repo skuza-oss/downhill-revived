@@ -95,6 +95,12 @@ pub const SETTINGS: &[Setting] = &[
     Setting { other: "exact", ..choice("renderer", "DHD_RENDER", &[c("native", "Native"), c("exact", "Exact")], "native", "exact") },
     switch("skip_movies", "DHD_SKIP_MOVIES", SWITCH, "1", "0"),
     switch("vibration", "DHD_VIBRATION", SWITCH, "1", "1"),
+    // The sticks' dead zone (finding 134, port/hle/stick.h): game = the game's own (about 36%, as the
+    // PS2 always had it); a percentage moves where steering, leaning and the right stick start, with
+    // the whole travel past it used. Another number (dhd.ini) is a percentage too.
+    choice("stick_dead_zone", "DHD_STICK_DEAD_ZONE", &[c("game", "Game (36%)"), c("5", "5%"), c("10", "10%"), c("15", "15%"),
+                                                       c("20", "20%"), c("25", "25%"), c("30", "30%"), c("40", "40%"),
+                                                       c("50", "50%")], "game", "game"),
     // A PCSX2 texture pack: texture_pack its folder (empty: textures/SCUS-97177/replacements in the
     // folder of dhd.ini and the saves, else beside the game), textures = off the game's own textures.
     switch("textures", "DHD_TEXTURES", TOGGLE, "on", "on"),

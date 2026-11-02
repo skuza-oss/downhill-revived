@@ -20,7 +20,7 @@ function focusable() {
   });
 }
 const area = (e) => e.closest('.rail, .main, .foot');
-const rowsOf = () => [$('tabs'), ...$('rows').querySelectorAll('.row:not(.off)')];
+const rowsOf = () => [$('tabs'), ...$('rows').querySelectorAll('.row:not(.off):not(.sticks-row)')];
 
 // A settings row's control: the chosen choice of a segmented one, else the first.
 function rowControl(row) {
@@ -112,9 +112,11 @@ function poll(now) {
   const pads = [...navigator.getGamepads()].filter(Boolean);
   if (!pads.length) { polling = false; return; }
   const down = new Set();
+  // while the stick picture is shown (stick.js), the stick only moves it; the d-pad still moves
+  const sticksShown = !!document.querySelector('canvas.sticks');
   for (const p of pads) {
     p.buttons.forEach((b, i) => { if (b.pressed) down.add(i); });
-    const [x = 0, y = 0] = p.axes;
+    const [x = 0, y = 0] = sticksShown ? [] : p.axes;
     if (y < -STICK) down.add(PAD.UP);
     if (y > STICK) down.add(PAD.DOWN);
     if (x < -STICK) down.add(PAD.LEFT);

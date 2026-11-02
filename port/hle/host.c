@@ -7,6 +7,7 @@
 #include "hle.h"
 #include "timer.h"
 #include "state_trace.h"
+#include "stick.h"
 #include "../include/version.h"
 #include "../runtime/sha256.h"
 
@@ -936,6 +937,8 @@ void host_pad_device(int port, HostPad *out)
 {
     memset(out, 0, sizeof *out);
     out->right_x = out->right_y = out->left_x = out->left_y = 128;
+    /* the sticks' dead zone (stick.h), followed here on the game thread, where PC SETTINGS sets it */
+    if (port == 0 && gamepad_start()) gamepad_dead_zone(stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")));
     int connected = gamepad_start() && gamepad_read(port, out);
     if (port == 0) keyboard_merge(out);
     out->connected = (uint8_t)(connected || port == 0);  /* player 1 always has the keyboard */

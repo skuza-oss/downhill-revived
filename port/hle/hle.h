@@ -125,6 +125,7 @@ enum { VKEY_SHIFT = 0x10, VKEY_CONTROL = 0x11, VKEY_MENU = 0x12, VKEY_LWIN = 0x5
 int gamepad_start(void);
 int gamepad_read(int player, HostPad *out);  /* 0: no controller for that player */
 void gamepad_vibrate(int player, int light, int heavy);
+void gamepad_dead_zone(int dead);  /* stick.h: STICK_GAME or a percentage */
 enum { PADDEV_ADDED = 1, PADDEV_REMOVED, PADDEV_REMAPPED };
 /* sdl_host.c's SDL thread: the pads' start (1 if up), a device change, and every pass. */
 int gamepad_thread_start(void);

@@ -34,9 +34,13 @@ const TABS = [
   ['Game', [
     { key: 'iso', label: 'Disc image', type: 'disc' },
     { key: 'skip_movies', label: 'Skip intro movies', type: 'switch' },
-    { key: 'vibration', label: 'Vibration', type: 'switch' },
     { key: 'unlock_all', label: 'Unlock All', hint: 'Every track, rider, bike and shop item; your save is not changed', type: 'switch' },
     { key: 'auto_update', label: 'Updates', hint: 'Online races need the newest version', type: 'seg' },
+  ]],
+  ['Controls', [
+    { key: 'stick_dead_zone', label: 'Stick dead zone', hint: "How far a stick moves before the rider responds. Game is the PS2's own.", type: 'select' },
+    { type: 'sticks' },
+    { key: 'vibration', label: 'Vibration', type: 'switch' },
   ]],
   ['Online', [
     { key: 'name', label: 'Rider name', hint: () => `Shown over your rider in online races. ${state.schema.name.rule.hint}`, type: 'name' },
@@ -45,7 +49,7 @@ const TABS = [
   ]],
 ];
 const GAME_TAB = 2;
-const ONLINE_TAB = 3;
+const ONLINE_TAB = 4;
 const OFFLINE_ONLY = "Offline only: this disc image's game files are different from the USA disc's (SCUS-97177): a bad or modified dump. Make a new dump or choose another image.";
 
 const state = {
@@ -306,6 +310,10 @@ function renderTabs() {
 
 function renderRows() {
   const rows = TABS[state.tab][1].map((row) => {
+    if (row.type === 'sticks') {  // stick.js: the dead zone, live from the controller
+      const { canvas, note } = stickIndicator(() => get('stick_dead_zone'));
+      return el('div', { class: 'row sticks-row' }, el('div', { class: 'l' }, note), canvas);
+    }
     const off = row.when ? !row.when() : false;
     let hint = off ? row.offHint : typeof row.hint === 'function' ? row.hint() : row.hint;
     let title = null;
@@ -328,7 +336,7 @@ async function resetTab() {
   const [name, rows] = TABS[state.tab];
   try {
     // a text row is emptied (its default, the official server, stays the game's to name)
-    for (const row of rows) if (row.type !== 'disc' && row.type !== 'name') await write(row.key, row.type === 'text' ? '' : state.schema[row.key].default);
+    for (const row of rows) if (row.key && row.type !== 'disc' && row.type !== 'name') await write(row.key, row.type === 'text' ? '' : state.schema[row.key].default);
     flash(`${name} is back to the defaults`);
   } catch (e) {
     fail(String(e));

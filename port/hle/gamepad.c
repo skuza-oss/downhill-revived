@@ -14,8 +14,11 @@
    d-pad, axes 0/1 the left stick, 2/3 the right stick, buttons 0-3 Cross Circle Square
    Triangle, 4/5 L1/R1, 6/7 L2/R2, 8 SELECT, 9 START, 10/11 L3/R3. gamecontrollerdb.txt beside
    dhd.exe (SDL's format) adds or corrects mappings; so does SDL_GAMECONTROLLERCONFIG.
-   DHD_SDL=0: no pads (the keyboard still plays). */
+   DHD_SDL=0: no pads (the keyboard still plays).
+   The sticks go through the dead zone the player chose (stick.h, dhd.ini stick_dead_zone; finding
+   134). */
 #include "hle.h"
+#include "stick.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -38,15 +41,12 @@ static int present[SLOTS];      /* under lock */
 static SDL_Mutex *lock;         /* made by gamepad_thread_start */
 static SDL_AtomicInt want_light[SLOTS], want_heavy[SLOTS];
 static SDL_AtomicInt running;   /* 1 once the pads are up, -1 if they couldn't start */
+static SDL_AtomicInt dead_zone; /* stick.h's: STICK_GAME, or a percentage (gamepad_dead_zone) */
 
 static const uint16_t pressure_order[12] = {PAD_RIGHT, PAD_LEFT, PAD_UP, PAD_DOWN, PAD_TRIANGLE, PAD_CIRCLE,
                                             PAD_CROSS, PAD_SQUARE, PAD_L1, PAD_R1, PAD_L2, PAD_R2};
 
-static uint8_t axis_byte(Sint16 v)
-{
-    int x = (v >> 8) + 128;
-    return (uint8_t)(x < 0 ? 0 : x > 255 ? 255 : x);
-}
+static uint8_t axis_byte(Sint16 v) { return stick_byte(v, SDL_GetAtomicInt(&dead_zone)); }
 
 static uint8_t trigger_byte(Sint16 v) { return (uint8_t)(v <= 0 ? 0 : v >> 7); }
 
@@ -180,6 +180,7 @@ int gamepad_thread_start(void)
         return 0;
     }
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");  /* the window may not have the focus */
+    gamepad_dead_zone(stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")));
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "controller: SDL didn't start (%s); no controllers (the keyboard still plays)\n", SDL_GetError());
         SDL_SetAtomicInt(&running, -1);
@@ -262,6 +263,13 @@ int gamepad_read(int player, HostPad *out)
     if (ok) *out = latest[player];
     SDL_UnlockMutex(lock);
     return ok;
+}
+
+/* The sticks' dead zone from now on (stick.h: STICK_GAME or a percentage); host.c follows
+   DHD_STICK_DEAD_ZONE, which PC SETTINGS changes while the game runs. */
+void gamepad_dead_zone(int dead)
+{
+    SDL_SetAtomicInt(&dead_zone, dead);
 }
 
 void gamepad_vibrate(int player, int light, int heavy)

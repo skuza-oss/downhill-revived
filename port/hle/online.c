@@ -89,7 +89,7 @@ int pads_live(void)
     if (live < 0) {
         static const char *const scripted[] = {"DHD_PADS", "DHD_NAV", "DHD_AUTOPAD", "DHD_AUTOPAD_FRAMES",
                                                "DHD_RACE_PAD", "DHD_RACE_PAD1", "DHD_RACE_PAD2",
-                                               "DHD_RACE_PAD3", "DHD_RACE_SYNC", "DHD_KEYS"};
+                                               "DHD_RACE_PAD3", "DHD_RACE_SYNC", "DHD_KEYS", "DHD_STICKS"};
         live = !online_mode();
         for (size_t i = 0; i < sizeof scripted / sizeof *scripted; i++)
             if (getenv(scripted[i])) live = 0;

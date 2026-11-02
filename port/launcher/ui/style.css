@@ -143,6 +143,10 @@ button.fact:hover { color: var(--snow); }
 .text-in:focus { border-color: var(--ember); }
 .text-in::placeholder { color: var(--dim); }
 .text-in.upper { text-transform: uppercase; width: 180px; }
+/* the Controls tab's live stick picture (stick.js) */
+.sticks-row { align-items: flex-start; padding: 12px 0; }
+.sticks-row .l small { margin-top: 0; max-width: 34ch; }
+canvas.sticks { flex: none; }
 
 .notes .md { margin-top: 14px; max-width: 72ch; font-size: 14px; line-height: 1.6; color: var(--lilac); user-select: text; }
 .md h2, .md h3 { color: var(--snow); font-size: 16px; font-weight: 800; margin: 20px 0 6px; }
