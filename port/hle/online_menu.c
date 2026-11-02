@@ -1163,7 +1163,6 @@ static void draw_setting(int f, int y, const char *label, const char *value, con
 static void draw_left(const RoomNow *r)
 {
     const NetLobby *l = &room;
-    char line[48];
     box(L_X, TOP, L_W, MID_H, 90);
     /* the track: a big name; the host changes it here (left/right) or from the list (Cross) */
     int cx = L_X + L_W / 2, on = rf == RF_TRACK && !track_list && !leave_ask;
@@ -1187,9 +1186,17 @@ static void draw_left(const RoomNow *r)
     if (on) bar(L_X + 6, TOP + 77, L_W - 12, 11);
     put(MENU_CENTRE, cx, TOP + 78, "ROOM RULES", on ? st_on : st_row);
     /* short: the left column is narrow beside two columns of cards (AUTO is always 30 s) */
-    snprintf(line, sizeof line, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST STARTS" : "AUTO",
-             then_name(l->then), l->rules_pending ? " *" : "");
-    put(MENU_CENTRE, cx, TOP + 89, line, fit(line, st_off, 70, L_W - 12));
+    /* the longest form that fits the panel: "HOST STARTS" -> "HOST", then "NEXT TRACK" -> "NEXT" */
+    char forms[3][48];
+    const char *pending = l->rules_pending ? " *" : "", *then_short = l->then == 0 ? "SAME" : l->then == 2 ? "RANDOM" : "NEXT";
+    snprintf(forms[0], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST STARTS" : "AUTO",
+             then_name(l->then), pending);
+    snprintf(forms[1], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST" : "AUTO",
+             then_name(l->then), pending);
+    snprintf(forms[2], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST" : "AUTO", then_short, pending);
+    const char *const texts[] = {forms[0], forms[1], forms[2], NULL};
+    const char *rules = first_fit(texts, st_off, 70, L_W - 16);
+    put(MENU_CENTRE, cx, TOP + 89, rules, fit(rules, st_off, 70, L_W - 16));
     hit(&hits[RF_RULES], L_X, TOP + 75, L_W, 24);
     rect(L_X + 8, TOP + 99, L_W - 16, 1, (const int[]){0, 0, 0}, 128);
     /* the join code; Circle (or a click) copies it */
