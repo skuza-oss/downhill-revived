@@ -10,7 +10,8 @@
    - the texture packs: a decoded texture's replacement is its pack's (texpack_view), else its
      sharp font; their memory budget is half the device's dedicated memory (DXGI's
      DedicatedVideoMemory, gpu_rust.c's device.memory), or 1 GB when it is unknown; the scale
-     limit counts the same memory (native_scale_hold), DHD_SCALE_MAX publishes it (and
+     limit counts the same memory, plus half the shared memory on an integrated GPU (under 1 GiB
+     dedicated; native_scale_hold), DHD_SCALE_MAX publishes it (and
      DHD_SCALE_MAX_REASON why), host_service_gs_scale the scale in use;
    - the window: its size (gpu_rust.c's window_size: the GsWindow's own function) for
      DHD_SCALE=window (native_window_height) and for each present, pacing (pacing_present,
@@ -123,8 +124,18 @@ static int native_init(Gs *g, Rust *exact)
 {
     double start;
     uint64_t scale_memory = device.memory;
-    /* Developer measurements on UMA: dedicated VRAM alone understates usable shared RAM.
-       Override only the scale guard; texture packs retain their ordinary budget. */
+    /* An integrated GPU (under 1 GiB of dedicated memory, with shared system memory: DXGI's
+       SharedSystemMemory) draws its frame and Z buffers in shared memory: the scale's budget counts
+       half of that too, so it isn't held to the small dedicated slice (a Ryzen iGPU with 512 MiB
+       dedicated ran 8x well). Texture packs keep their budget. */
+    if (device.memory && device.memory < (1ull << 30) && device.shared) {
+        scale_memory = device.memory + device.shared / 2;
+        fprintf(stderr, "gs: integrated GPU: the resolution scale's memory counts shared memory too (%llu MiB dedicated, "
+                "half of %llu MiB shared)\n", (unsigned long long)(device.memory >> 20),
+                (unsigned long long)(device.shared >> 20));
+    }
+    /* Developer measurements: DHD_SCALE_MEMORY_MB overrides only the scale guard; texture packs
+       retain their ordinary budget. */
     const char *memory_mb = getenv("DHD_SCALE_MEMORY_MB");
     if (memory_mb) {
         char *end;

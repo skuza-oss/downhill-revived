@@ -129,3 +129,15 @@ Done in this lane (before the 2026-11-02 change of process):
 - The limit's rule itself is unchanged (half of the reported dedicated memory, never under 4):
   shared-memory GPUs report little dedicated memory, and finding 130 measured true 6x/8x on this
   iGPU with the override, below 60 fps anyway. Raising the budget for UMA GPUs is a separate change.
+
+## Integrated GPUs count shared memory (0.7.7)
+
+The budget above was half the adapter's dedicated memory, which on an integrated GPU is only the
+small slice the firmware reserves (485 MiB on a Ryzen 5 7600's Radeon), so 6x and 8x were refused
+though such a GPU draws its frame and Z buffers in shared system memory and ran 8x without trouble
+(finding 130's measurements with DHD_SCALE_MEMORY_MB). An adapter with under 1 GiB dedicated and
+some shared memory (DXGI's SharedSystemMemory) now counts dedicated plus half of shared for the
+scale (texture packs keep their budget). On the Ryzen: `gs: integrated GPU: the resolution scale's
+memory counts shared memory too (485 MiB dedicated, half of 15915 MiB shared)` and `resolution scale
+8x: 8x asked, this GPU allows up to 8x`. Dedicated GPUs are unchanged. How fast a scale runs is the
+player's choice; dhd.log's perf: lines say it.

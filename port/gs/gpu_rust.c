@@ -172,7 +172,7 @@ static int op_draw_skipped(const Gs *g)
 /* The process's one device (the first dhdr_device_init that succeeded): its options, for the
    optrace header (op_adapter), and DXGI's view of its adapter: the dedicated memory (the texture
    pack's and the resolution scale's budget, gpu_rust_native.inc) and the user-mode driver version. */
-static struct { int made; uint32_t flags, vendor_id, device_id; uint64_t memory, driver_version; } device;
+static struct { int made; uint32_t flags, vendor_id, device_id; uint64_t memory, shared, driver_version; } device;
 
 #ifdef _WIN32
 /* DXGI orders hardware by power/performance; keep EnumAdapters1 for the default. */
@@ -278,7 +278,7 @@ static int device_init(void)
     if (d.flags & DHDR_DEV_FALLBACK) { device.vendor_id = 0x1414; device.device_id = 0x8C; }
     else { device.vendor_id = d.vendor_id; device.device_id = d.device_id; }
     if (device.vendor_id && dxgi_adapter(device.vendor_id, device.device_id, &desc, &device.driver_version))
-        device.memory = (uint64_t)desc.DedicatedVideoMemory;
+        device.memory = (uint64_t)desc.DedicatedVideoMemory, device.shared = (uint64_t)desc.SharedSystemMemory;
 #endif
     fprintf(stderr, "gs: renderer %s on %s\n", dhdr_version(), dhdr_adapter_name());
     fflush(stderr);
