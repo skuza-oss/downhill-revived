@@ -1333,18 +1333,26 @@ static void draw_status(const RoomNow *r)
     put(MENU_CENTRE, 320, STATUS_Y, line, fit(line, c ? tint(st_row, 100, c) : st_row, 100, 600));
 }
 
+/* The notes, newest first, top right in three rows. The middle row is beside the title (the
+   game draws it, centred at TITLE_Y: about 17.5 units a letter, so 9 each side plus a gap), so a
+   note goes there only if it fits beside it; otherwise into the next free row. */
 static void draw_toasts(void)
 {
     double now = host_seconds();
-    int y = 3;
+    static const int row_y[3] = {3, 16, 29};
+    int used[3] = {0, 0, 0};
+    int beside = 632 - 14 - (320 + (int)strlen(title_text) * 9 + 6);
     for (int i = TOASTS - 1; i >= 0; i--) {
         if (toast[i].until <= now) continue;
         MenuStyle s = toast[i].colour ? tint(st_row, 75, toast[i].colour) : menu_style(st_on, 75, -1, 0, 0);
-        s = fit(toast[i].text, s, 100, 610);
+        int row = 0;
+        while (row < 3 && (used[row] || (row == 1 && !fits(toast[i].text, s, 100, beside)))) row++;
+        if (row == 3) continue;  /* no room now: it shows when a row is free, while it lasts */
+        used[row] = 1;
+        s = fit(toast[i].text, s, 100, row == 1 ? beside : 610);
         int w = menu_text_width(toast[i].text, &s) * 640 / vw + 14;
-        box(632 - w, y, w, 11, 90);
-        put(MENU_RIGHT, 625, y + 2, toast[i].text, s);
-        y += 13;
+        box(632 - w, row_y[row], w, 11, 90);
+        put(MENU_RIGHT, 625, row_y[row] + 2, toast[i].text, s);
     }
 }
 
