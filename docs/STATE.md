@@ -360,6 +360,16 @@ reads the last run's line from dhd.log and says the same under Resolution (`Your
 allows up to 4x; 8x runs at 4x`, choices `8x (runs at 4x)`). The cap's rule is unchanged. Boot
 state trace unchanged.
 
+2026-11-02 (finding 134, issues #20 and #27): controllers. A stick dead zone setting
+(`stick_dead_zone`: Game, the PS2's own, about 36% of the travel, by default; or 5-50%, the travel
+past it spread over the bytes that steer in proportion, `port/hle/stick.h`), in PC SETTINGS and a
+new Controls tab in the launcher with a live picture of the controller's sticks and what the rider
+gets. Button icons (`prompts`: Auto from player 1's controller, PlayStation, Xbox, Nintendo): the
+game's face-button icons drawn as our own dark discs with the letter in the game's font, L1/R1/L2/R2
+as LB/RB/LT/RT (L/R/ZL/ZR), at draw time in the text packet (`port/hle/prompts.c`). `DownhillRevived
+--play` starts the game at once without the launcher's window (Steam shortcuts, the Steam Deck).
+Boot state trace with default settings equal to next/0.7.7's.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
