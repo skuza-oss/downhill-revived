@@ -1577,20 +1577,27 @@ static void room_draw(MenuPage *p)
             MenuStyle st = menu_style(st_row, 80, -1, 0, 0);
             snprintf(head, sizeof head, "%d/%d READY", r->ready, l->nmembers);
             put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, all ? tint(st_row, 80, green) : st);
-            /* the left text's room, less a tenth: mixed-case track names draw up to a tenth wider
-               than menu_text_width measures them (as capitals) */
-            int room_w = (CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10) * 9 / 10;
+            /* the left text's room, less a quarter: mixed-case track names draw wider than
+               menu_text_width measures them (as capitals); a tenth was not enough (finding 132) */
+            int room_w = (CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10) * 3 / 4;
             char forms[4][64];
             const char *what = l->last_race_id ? track_name(l->last_race_track) : NULL, *region = l->room_region;
             char players[16];
             snprintf(players, sizeof players, "PLAYERS %d/%d", l->nmembers, l->max_players);
-            /* where the room runs (finding 135): "- EU SERVER", then "- EU", then left out */
-            snprintf(forms[0], 64, "%s%s%s%s%s", what ? "LAST RACE - " : "", what ? what : players,
-                     region[0] ? " - " : "", region, region[0] ? " SERVER" : "");
-            snprintf(forms[1], 64, "%s%s%s%s", what ? "LAST RACE - " : "", what ? what : players, region[0] ? " - " : "", region);
-            snprintf(forms[2], 64, "%s%s%s", what ? what : players, region[0] ? " - " : "", region);
-            snprintf(forms[3], 64, "%s", what ? what : players);
-            const char *const texts[] = {forms[0], forms[1], forms[2], forms[3], NULL};
+            /* before a race: the players and where the room runs (finding 135), "- EU SERVER", then
+               "- EU", then left out; after a race: the last race's track only (the region is in the
+               list and was in this header before the race) */
+            if (what) {
+                snprintf(forms[0], 64, "LAST RACE - %s", what);
+                snprintf(forms[1], 64, "%s", what);
+                forms[2][0] = forms[3][0] = 0;
+            } else {
+                snprintf(forms[0], 64, "%s%s%s%s", players, region[0] ? " - " : "", region, region[0] ? " SERVER" : "");
+                snprintf(forms[1], 64, "%s%s%s", players, region[0] ? " - " : "", region);
+                snprintf(forms[2], 64, "%s", players);
+                forms[3][0] = 0;
+            }
+            const char *const texts[] = {forms[0], forms[1], forms[2][0] ? forms[2] : NULL, forms[3][0] ? forms[3] : NULL, NULL};
             const char *left = first_fit(texts, st, 80, room_w);
             put(MENU_LEFT, CARD_X + 3, TOP + 1, left, fit(left, st_row, 80, room_w));
         }
