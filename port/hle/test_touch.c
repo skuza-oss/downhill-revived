@@ -462,6 +462,26 @@ static void test_editor_bar(void)
                     CHECK(fabsf(bx - cx) >= half_w[b] + cr || fabsf(by - cy) >= 4.5f + cr);   /* no overlap */
                 }
             }
+            /* a drop in open space stays (Thumb zones: BRAKE 6 mm up, clear of the flick lanes;
+               Classic: L3 10 mm inward); onto PEDAL / ✕ it snaps back */
+            int moved = preset ? TC_L3 : TC_BRAKE;
+            float bx, by, br, nx, ny;
+            touch_control(t, moved, &bx, &by, &br);
+            float mx = preset ? (left ? -10.0f : 10.0f) : 0, my = preset ? 0 : -6.0f;
+            touch_down(t, 8, bx, by, now);
+            slide(8, bx, by, bx + mx, by + my, 100);
+            touch_up(t, 8, bx + mx, by + my, now);
+            field();
+            touch_control(t, moved, &nx, &ny, &br);
+            CHECK(fabsf(nx - (bx + mx)) < 0.2f && fabsf(ny - (by + my)) < 0.2f);
+            float px, py, pr;
+            touch_control(t, preset ? TC_CROSS : TC_PEDAL, &px, &py, &pr);
+            touch_down(t, 8, nx, ny, now);
+            slide(8, nx, ny, px, py, 100);
+            touch_up(t, 8, px, py, now);
+            field();
+            touch_control(t, moved, &bx, &by, &br);
+            CHECK(fabsf(bx - nx) < 0.2f && fabsf(by - ny) < 0.2f);
             float dx, dy;
             touch_target(t, TOUCH_TARGET_EDITOR, 5, &dx, &dy);   /* DONE */
             touch_down(t, 9, dx, dy, now);
