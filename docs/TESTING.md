@@ -50,6 +50,7 @@ after a version change before a live check.
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool |
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
 
 A typical in-game check:
 
@@ -123,6 +124,9 @@ Pictures:
 | `DHD_CAPTURE_PRESENTED=PREFIX` | PNGs of the presented picture, also while minimised |
 | `DHD_PERF_COUNTER=1` | the FPS & PING counter |
 | `DHD_PERF_LOG=0` | no `perf:` lines in dhd.log (on by default, finding 129) and none of their counting |
+
+Sound evidence: `DHD_SND_WAV=path` (the final mix), `DHD_SND_VOICE_TRACE=path` (each sounding voice
+every 800 samples), `DHD_SND_GAIN_TRACE`, `DHD_SND_REPORT`, `DHD_SND_TRACE=1` (sound.h).
 
 Plain settings for runs: `DHD_SKIP_MOVIES=1`, `DHD_SND_OFF=1`, `DHD_SETTINGS=none`, `DHD_MEMCARD=0|1`
 with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=native`,
