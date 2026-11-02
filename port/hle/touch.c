@@ -1621,6 +1621,13 @@ void touch_update(Touch *t, const TouchGame *game, double now)
     if (t->freeze_at && (int32_t)(game->vsync - t->freeze_at) >= 0) {
         t->freeze_at = 0;
         if (t->hint == TOUCH_HINT_TRICK && game->air) t->freeze = 1, t->freeze_since = now;
+        else if (t->hint == TOUCH_HINT_TRICK) {
+            /* landed before the hold began (a hop just over 400 ms): the tip was barely on screen,
+               so it waits for a longer air */
+            t->hint = 0;
+            t->set.hints_shown &= ~(unsigned)TOUCH_HINT_TRICK;
+            t->saved = 1;
+        }
     }
     if (t->freeze) {
         int pushed = t->trick.on && t->trick.held;

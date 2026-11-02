@@ -412,6 +412,14 @@ static void test_trick_hint(void)
     TouchSettings set = *touch_settings(t);
     set.hints_shown = ~0u & ~(unsigned)TOUCH_HINT_TRICK;
     touch_configure(t, &set, NULL);
+    /* a hop just over 400 ms: the rider lands before the hold begins; the hint waits for later */
+    game.air = 1;
+    wait_ms(435);   /* the hint came at 400 ms; its hold would begin 3 fields later */
+    game.air = 0;
+    fields(4);
+    CHECK(!touch_freeze(t));
+    CHECK(!(touch_settings(t)->hints_shown & TOUCH_HINT_TRICK));
+    fields(10);
     game.air = 1;
     wait_ms(250);   /* the air layout, before the hint (400 ms) */
     TouchShape shapes[TOUCH_SHAPES];
