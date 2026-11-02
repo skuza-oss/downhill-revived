@@ -36,13 +36,14 @@ def main():
     last.add_argument('--package', action='store_true', help='the release zip for this platform')
     last.add_argument('--web', action='store_true', help='the browser build')
     p.add_argument('--target', help="build_host64.py's target (default its own: win-x64)")
+    p.add_argument('-j', '--jobs', type=int, help='parallel core and native compiles')
     p.add_argument('--no-core', action='store_true', help='reuse build/wasm/dhd_core.wasm as it is')
     a = p.parse_args(argv)
     if (a.package or a.web) and a.target:
         p.error('--target is for the native game (package_release.py takes --platform after --)')
     py = sys.executable
     if not a.no_core:
-        step('core', [py, TOOLS / 'build_wasm.py'])
+        step('core', [py, TOOLS / 'build_wasm.py', *(['-j', str(a.jobs)] if a.jobs else [])])
     elif not WASM.exists():
         sys.exit(f'build.py: --no-core, but there is no {WASM.relative_to(ROOT)}')
     if a.package:
@@ -50,7 +51,7 @@ def main():
     elif a.web:
         step('web', [py, ROOT / 'port' / 'web' / 'build.py', *rest])
     else:
-        step('game', [py, TOOLS / 'build_host64.py', WASM, *(['--target', a.target] if a.target else []), *rest])
+        step('game', [py, TOOLS / 'build_host64.py', WASM, *(['--target', a.target] if a.target else []), *(['--jobs', str(a.jobs)] if a.jobs else []), *rest])
 
 
 if __name__ == '__main__':
