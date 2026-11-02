@@ -195,3 +195,43 @@ Then the touch build itself (PC with the mouse, then the phone):
 22. No touch, no change: without `DHD_TOUCH_MOUSE` on the PC, the race state trace equals main's
     (`port/tools/state_trace_run.py`, the shared reference build): touch_field only reads, and the
     HUD hooks return their input with the touch controls off.
+
+## Phone test (Mi 11i)
+
+Run on 2026-11-02 on the Mi 11i (Android 13, 2400 x 1080, 394.7 dpi, gesture navigation), the
+debug APK of this branch, offline races on Mt. Midoule FR (Cosmo) and one online race against a
+nettool bot through `port/tools/local_server.py` (`adb reverse tcp:8787`). Touches were sent by
+the device panel's tap and long press and, for two fingers and exact timing, by root `sendevent`
+and a small evdev writer on the touch panel (`fts_ts`), with a uinput gamepad for check 20 (test
+tools only, not in the repo). Menus were driven with keys where the touch path was not under test.
+`DHD_TOUCH_LOG=1` (2: every move as well) traces each touch in mm, the air flag and every change
+of the buttons and stick sent, which is how the checks below were read.
+
+The screen reads 154.4 x 69.6 mm; PEDAL is 23 mm wide (the editor's readout); the cutout is the
+left 5.1 mm band (80 px) and nothing sits in it; the gesture insets the activity reports in
+immersive mode are 0 0 0 0 at the sides and bottom (top 5.2 mm). The moved HUD needs no tuning:
+the speedometer and arrows sit at the top left clear of the camera and Pause buttons, the track
+bar and place stay at the left edge clear of the steering ring; Hand Left puts them top right and
+the track bar right. The defaults of `DHD_TOUCH_HUD_SHIFT` stay.
+
+| Check | Result |
+|---|---|
+| 11 Overlay with the race HUD, menus by tapping | pass after a fix: the overlay shows in the countdown and race, hides in menus and paused game menus. Menus took no first tap after a start or a race (the menus' mouse used it as its baseline): fixed, the touchscreen is the mouse from the start |
+| 12 Steering | pass: drag steers (stick x 155-250, y 61/209 for ↑/↓), the centre follows past 12 mm |
+| 13 PEDAL, sprint and its guards | pass: hold sends ✕; double tap: the second ✕ 117-135 ms late inside the window; after HOP the second ✕ waits for the window (284 ms); ✕, BRAKE, ✕ sprints. A HOP, BRAKE or SLIDE tap shorter than a field, or one inside the air layout's 150 ms wait, sent nothing: fixed |
+| 14 Flicks | pass: a fast swipe left sends ◻ (c000), right ○ (6000) with ✕ held; a slow or 50° swipe sends none |
+| 15 Air, trick stick | pass for the push (R1+R2, label CAN CAN), past the edge (△ added, 5a00) and the hint's hold; roll and signature only in the unit tests. The trick-stick hint stayed on screen after its hold ended without a push, covered the stick's ring, and a 450 ms hop used it up: three fixes |
+| 16 Pause | pass after two fixes: Resume, Restart → Yes, Quit → No / Yes, Controls, Bail out (YOU BAILED!), Back; PEDAL held through the pause waits out the window. Restart left a held PEDAL sending nothing in the new race (race-ms times not moved back): fixed. After Quit → No the game's cursor is on RESUME, not QUIT, so the next Resume opened OPTIONS: fixed. The Controls page's longest line ran to the panel's edge: fixed |
+| 17 Online | pass: the panel opens over the live race (Close / Bail out / Leave race), Leave race needs a second tap within 3 s and returns to the room as DNF GAVE UP |
+| 18 Classic pad | pass: bars L2 / L1+L2 / L1 / R1 / R2, ✕ sliding onto ◻ (c000), L3, R3, SELECT, START opens the pause panel. SELECT and START labels touched their box rims: fixed |
+| 19 Settings | pass after a fix: TOUCH CONTROLS 1/3-3/3 by tapping, each change in dhd.ini at once (`touch settings:` lines), Hand Left mirrors controls and HUD, Opacity, Edit Layout drag and Done saves `touch_edits`, a drop in a flick lane snaps back, the Air tab shows the trick stick. The editor's bar lay over the camera and Pause buttons: fixed (it now sits beside them) |
+| 20 Controller | pass: a pad press hides the overlay and the HUD goes back, a touch brings it back sending nothing, unplugging mid-race pauses (each pad event is logged twice: SDL sends a gamepad and a joystick event; harmless) |
+| 21 Phone only | pass: vibration TICK, DOUBLE_CLICK on a trick-stick add, HEAVY_CLICK on △; Tilt turns the gravity sensor on, locks the screen side and steers on the ground (blended in over 100 ms at landing); a swipe in from the left edge is the system's Back, not the stick; the hint holds the game and the race goes on at normal speed. Not checked: tilt direction by hand (the phone lay still) and Set Tilt Centre |
+
+Frame rate, rough: one race spot (Classic, rider stuck), 60 fps setting at 2x: 55.3-55.6 fps
+with the overlay, 56.1-56.6 with it hidden by a key press; GPU 3.49-3.53 ms a frame both ways;
+the race is `limit=cpu:vu` there. No measurable cost.
+
+Left open: the overlay's labels have a thin dark edge and are harder to read over bright sky;
+Set Tilt Centre and the tilt direction need a hand on the phone; the trick roll (Nac Nac) and
+the signature were not done on the phone.
