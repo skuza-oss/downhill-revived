@@ -1,5 +1,6 @@
 // Worker entry: routes lobby-list requests to the LobbyIndex and WebSockets to a Room by code.
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
+import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
 
 export { Room } from "./room";
@@ -18,6 +19,14 @@ export default {
     // minVersion: the oldest client release the server lets play (MIN_VERSION, wrangler.jsonc).
     const minVersion = minVersionOf(env.MIN_VERSION);
     if (path === "/v1/health") return json({ ok: true, protocol: PROTOCOL, minVersion });
+
+    // The newest release's latest.json, the launcher's backup when GitHub's API can't be reached
+    // (src/latest.ts, finding 138).
+    if (path === "/v1/latest") {
+      if (request.method !== "GET") return json({ error: "GET only" }, 405);
+      const cacheKey = new URL("/v1/latest/kept", request.url).toString();
+      return latestResponse({ fetchUpstream: upstreamFetch, store: edgeStore(cacheKey), now: Date.now });
+    }
 
     if (path === "/v1/lobbies") {
       if (request.method !== "GET") return json({ error: "GET only" }, 405);

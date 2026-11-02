@@ -24,6 +24,7 @@ host.
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
 | GET | `/v1/health` | `{"ok":true,"protocol":2,"minVersion":"0.1.0"}` |
+| GET | `/v1/latest` | The newest release's `latest.json` (the launcher's backup update check; below). |
 
 Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
 upper-case what the user types and reject characters outside that alphabet.
@@ -231,6 +232,30 @@ shows no count without one (finding 135).
 
 Only public rooms that have not started and have a free slot are listed. Clients should
 show only rooms whose `version` matches their own.
+
+## Latest release (launcher backup)
+
+`GET /v1/latest` → `200 application/json`: the newest GitHub release's `latest.json`, as
+`port/tools/package_release.py` writes it, reduced to what the launcher reads (finding 138):
+
+```json
+{"name":"Downhill Revived","version":"0.7.7",
+ "url":"https://github.com/skuza-oss/downhill-revived/releases/download/v0.7.7/DownhillRevived-0.7.7-win.zip",
+ "sha256":"<64 hex>","size":31457280,"page":"https://github.com/skuza-oss/downhill-revived/releases/tag/v0.7.7",
+ "platforms":{"win":{"url":"...","sha256":"<64 hex>","size":31457280},"mac":{...},"linux":{...},"linux-appimage":{...}}}
+```
+
+The launcher asks it only when GitHub's releases API fails. The worker fetches
+`https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json` itself, serves
+that copy for 5 minutes, and keeps the last good copy (this isolate's, and 30 days in the edge cache of
+each Cloudflare location) for when GitHub fails: such an answer has the header `X-DHD-Stale` (why the
+newer copy couldn't be had); `X-DHD-Fetched-At` says when the copy was fetched. A copy is served only
+when `version` is `MAJOR.MINOR.PATCH`, `platforms` names at least one platform, and every `url` (the top
+level's too) is an `https://` release asset of this repository (`github.com/skuza-oss/downhill-revived/releases/download/...`,
+or GitHub's asset hosts `objects.githubusercontent.com`, `release-assets.githubusercontent.com`) with a
+64-hex `sha256`. No release notes. With no usable answer from GitHub and no copy kept: `503` (GitHub
+unreachable or HTTP error) or `502` (its `latest.json` refused),
+`{"error":"The newest release's info can't be had right now: ...","detail":"<what GitHub did>"}`.
 
 ## Limits
 

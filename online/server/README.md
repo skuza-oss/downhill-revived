@@ -6,7 +6,8 @@ is `docs/ONLINE-PLAN.md`.
 
 | File | What |
 |---|---|
-| `src/index.ts` | Worker entry: routes `/v1/lobbies`, `/v1/health` and room WebSockets. |
+| `src/index.ts` | Worker entry: routes `/v1/lobbies`, `/v1/health`, `/v1/latest` and room WebSockets. |
+| `src/latest.ts` | `/v1/latest`: the newest release's `latest.json`, fetched from GitHub, checked and kept; the launcher's backup update check (finding 138). |
 | `src/room.ts` | `Room` Durable Object, one per join code: lobby, start, race relay, leave handling. |
 | `src/lobbies.ts` | `LobbyIndex` Durable Object (a single global one): the public lobby list. |
 | `src/protocol.ts` | Constants, join codes, the version gate. |
