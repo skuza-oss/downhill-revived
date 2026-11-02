@@ -865,7 +865,7 @@ static void leave_race(void)
     func_001B45F8(EE_PTR(0x4B1F40), 2, 0);
 }
 
-/* The touch controls' online panel, Leave race (touch_field.c, finding 139): out of this race as
+/* The touch controls' online panel, Leave race (touch_field.c, finding 141): out of this race as
    BACK TO THE ROOM's Yes is (a race outside a room: as QUIT), without the question (the panel's
    own second tap confirmed it). */
 void port_online_touch_leave(void)

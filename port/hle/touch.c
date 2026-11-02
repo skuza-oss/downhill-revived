@@ -1,4 +1,4 @@
-/* On-screen touch controls (finding 139; the design is the reviewed spec it describes): the
+/* On-screen touch controls (finding 141; the design is the reviewed spec it describes): the
    platform-neutral part, see touch.h. Everything here is the player's touches and time; the game
    is read only through TouchGame (the air flag and the race HUD hook, plus the clocks).
 

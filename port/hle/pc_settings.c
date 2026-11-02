@@ -17,7 +17,7 @@
    a row that waits for the next start. The browser sets all three (port/web/www/settings.js);
    x64 sets none of them, so its page is as described above.
    With touch (the host sets DHD_TOUCH: android, or mouse for a desktop test) the page ends with a
-   Touch Controls row whose three screens are touch_settings.c's (finding 139); on Android the
+   Touch Controls row whose three screens are touch_settings.c's (finding 141); on Android the
    page is called SETTINGS. */
 #include "hle.h"
 #include "../runtime/portable.h"

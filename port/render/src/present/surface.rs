@@ -75,7 +75,7 @@ pub struct Surface {
     height: u32,
     pipe: PresentPipe,
     pub counter: super::counter::Counter,
-    /// The touch controls (finding 139): drawn over the picture, under nothing.
+    /// The touch controls (finding 141): drawn over the picture, under nothing.
     pub touch: super::touch::TouchOverlay,
     #[cfg(feature = "native")]
     capture: super::counter::Capture,

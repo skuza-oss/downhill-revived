@@ -1,4 +1,4 @@
-/* The touch controls on Android (finding 139; port/host/touch_host.c): what only the activity
+/* The touch controls on Android (finding 141; port/host/touch_host.c): what only the activity
    knows, through JNI on the SDL thread (DhdActivity.java): the screen's density and the system
    gesture and cutout insets, the phone's vibrator, and its roll for tilt steering (the gravity
    sensor, with the screen locked to its landscape side while tilt is on). */

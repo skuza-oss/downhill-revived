@@ -1,4 +1,4 @@
-/* The touch controls' host side (finding 139): SDL's touch events to port/hle/touch.c, the game's
+/* The touch controls' host side (finding 141): SDL's touch events to port/hle/touch.c, the game's
    two reads in (HostTouch, host_service_touch_field once a field from pad.c), player 1's pad and
    the renderer's overlay out.
 

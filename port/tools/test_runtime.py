@@ -121,7 +121,7 @@ def host_tests():
     testprog.run(gamepad)
     testprog.run(gamepad, 'mapping')
     # the touch controls' rules: scaling, flick lanes, sprint and resume guards, the trick stick,
-    # the pause rows' steps (finding 139)
+    # the pause rows' steps (finding 141)
     run('touch', [HLE / 'touch.c', HLE / 'test_touch.c'])
 
 

@@ -130,7 +130,7 @@ it unchanged (finding 088, CL3).
   puts the phone back), with render scale ~2x/~5-6x standing in for the Mali's 1x/2x. On that
   profile two pacing changes and a GS fast path took 1x paced 60 from 39.6 to 55.0 fields/s
   (median field 16.65 ms); finding 127 has the breakdown and what is left for 60. A gamepad or the
-  keyboard, or the touch controls (finding 139, branch `feat/touch-controls`; built and unit-tested,
+  keyboard, or the touch controls (finding 141, branch `feat/touch-controls`; built and unit-tested,
   in-game checks pending): Thumb zones (floating stick, PEDAL with flick attacks, HOP / BRAKE / SLIDE,
   a trick stick in the air) and Classic pad, every touch plain pad input; the rules in
   `port/hle/touch.c`, drawn by the Rust renderer's overlay, the settings on SETTINGS > Touch Controls;

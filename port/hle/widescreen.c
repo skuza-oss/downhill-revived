@@ -197,7 +197,7 @@ int port_ws_hud_point(int view, int ref, int x)
     return a + scaled((x - a) * port_fov_x);
 }
 
-/* ---- the touch controls' HUD (finding 139, touch_field.c) ----
+/* ---- the touch controls' HUD (finding 141, touch_field.c) ----
    The HUD's own calls are the hook: each says the race HUD is drawn (touch_hud_seen), and while
    the touch controls are on (touch_hud_place) the speedometer and the energy arrows above it, the
    cluster in the bottom-right corner where the right thumb works, move to the top corner: the

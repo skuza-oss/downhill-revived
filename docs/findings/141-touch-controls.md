@@ -1,4 +1,4 @@
-# 139: touch controls for phones
+# 141: touch controls for phones
 
 Status: branch `feat/touch-controls` (from `main` 0330eab, 0.7.7). Built for Windows x64 and
 Android arm64; unit tests pass; not yet run in the game (the lead's checks are at the end). No
@@ -23,7 +23,7 @@ left.
 | Settings keys | `port/render/settings/src/table.rs` (`touch_*`; `settings_table.h` and the browser corpus regenerated) |
 | The overlay's drawing | `port/render/src/present/touch.rs` (`dhdr_surface_touch`), font `present/font8x8.rs` |
 | Leave race online | `online.c` `port_online_touch_leave` (as BACK TO THE ROOM's Yes, without the question) |
-| No catch-up after the hint's hold | `fps.c` `port_fps_forget_stall` |
+| No catch-up after the hint's hold | `fps.c` `port_clock_rebase` (main's, finding 139) |
 
 ## The two game reads
 
@@ -106,7 +106,7 @@ last), so a tap is sent as the right number of ↓ steps (finding 050 lists the 
   Cross steps forward).
 - **Hints**: tip boxes in the overlay, each once (dhd.ini `touch_hints`), never online. The
   trick-stick hint holds the game in `touch_field.c` (the VBLANK waits, three VBLANKs after the tip
-  appears so the pictures showing it are on screen; nothing is presented during the hold) until the first push, a lift, PEDAL, Back or 5 s; afterwards `port_fps_forget_stall`
+  appears so the pictures showing it are on screen; nothing is presented during the hold) until the first push, a lift, PEDAL, Back or 5 s; afterwards `port_clock_rebase`
   makes sure no game time is caught up (above 60 fps the wall clock would otherwise repay up to
   half a second).
 - **Touch on a desktop** (`DHD_TOUCH_MOUSE=1`): the left mouse button is one finger, for the

@@ -1,4 +1,4 @@
-/* touch.c: the touch controls' rules (finding 139): scaling, the flick lanes, the sprint and
+/* touch.c: the touch controls' rules (finding 141): scaling, the flick lanes, the sprint and
    resume guards, the trick stick and the pause rows' ↓ + ✕ sequences. Built and run by
    port/tools/test_runtime.py (a host program). */
 #include "touch.h"

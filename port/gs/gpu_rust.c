@@ -68,7 +68,7 @@ static void counter_present(DhdrSurface *surface)
     dhdr_surface_counter(surface, enabled, ping,
                          (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency());
 #ifndef DHD_GS_TEST_BUILD
-    {   /* the touch controls over the picture (port/host/touch_host.c, finding 139) */
+    {   /* the touch controls over the picture (port/host/touch_host.c, finding 141) */
         static float shapes[512 * 16];
         float width_mm = 0, height_mm = 0;
         int n = touch_host_overlay(shapes, 512, &width_mm, &height_mm);

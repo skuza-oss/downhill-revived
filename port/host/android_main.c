@@ -147,7 +147,7 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
         if (__llvm_profile_set_filename) __llvm_profile_set_filename(profile);
     }
     /* SETTINGS without the window rows (a phone has one screen), which makes room for Touch
-       Controls (finding 139; the popup holds 16 rows) */
+       Controls (finding 141; the popup holds 16 rows) */
     setenv("DHD_PC_SETTINGS_ROWS", "DHD_SCALE,DHD_ASPECT,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_SKIP_MOVIES,DHD_VIBRATION,"
            "DHD_STICK_DEAD_ZONE,DHD_PROMPTS,DHD_TEXTURES,DHD_FONT,DHD_FPS,DHD_VSYNC,DHD_PERF_COUNTER,DHD_UNLOCK_ALL", 0);
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");

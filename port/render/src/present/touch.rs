@@ -1,4 +1,4 @@
-//! The touch controls' overlay (finding 139), drawn after the game picture in surface pixels,
+//! The touch controls' overlay (finding 141), drawn after the game picture in surface pixels,
 //! like the performance counter. C (port/hle/touch.c) lays the controls out in mm and hands over
 //! a list of shapes each picture (`dhdr_surface_touch`); here each is one instanced quad whose
 //! fragment shader draws it as a signed distance (discs with a two-tone rim, rings, rounded
