@@ -24,6 +24,7 @@ typedef void FontSharpPaint(uint8_t *big, unsigned f, const uint32_t *pixels, un
                             int style);
 void font_sharp_icons(int (*style)(void), FontSharpPaint *paint);
 int font_sharp_icon_style(void);  /* 0 without icons */
+int font_sharp_icon_style_latch(void);  /* the same, kept for the copy being made (its key and paint) */
 
 /* A copy is made: the sharp font, or other icons than the game's (the copy then keeps the font as
    it is, only bigger). */

@@ -762,7 +762,7 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
     gs_mark_pages(pages, psm, tbp, tbw ? tbw : 1, 0, 0, w - 1, h - 1);
     uint64_t key = native_mix(native_mix(tex0 & 0x7FFFFFFFFFFull, (uint64_t)w << 32 | h), psm == GS_PSMCT24 || psm_wide(psm) ? g->reg[GS_TEXA] : 0);
     /* the menus' font: its copy has the button icons chosen now (button_icons.c) */
-    if (psm == GS_PSMT4HL) key = native_mix(key, (uint64_t)font_sharp_icon_style());
+    if (psm == GS_PSMT4HL) key = native_mix(key, (uint64_t)font_sharp_icon_style_latch());
     unsigned gpu_pages = 0, gpu_page = 0;
     /* Visit set pages in the same ascending order as the key's original scan.
        Most textures touch only a handful of the 512 GS pages. */

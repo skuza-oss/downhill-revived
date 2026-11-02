@@ -46,6 +46,10 @@ static FontSharpPaint *icons_paint;
 
 void font_sharp_icons(int (*style)(void), FontSharpPaint *paint) { icons_style = style, icons_paint = paint; }
 int font_sharp_icon_style(void) { return icons_style ? icons_style() : 0; }
+/* The style the font copy being made is keyed with (native_core.inc reads it once, for the key;
+   the paint below uses the same, so a setting changing in between can't mismatch them). */
+static int latched_style = -1;
+int font_sharp_icon_style_latch(void) { return latched_style = font_sharp_icon_style(); }
 int font_sharp_active(void) { return font_sharp_on() || font_sharp_icon_style(); }
 
 int font_sharp_match(uint64_t tex0)
@@ -208,7 +212,7 @@ static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned 
                 o[0] = p & 255, o[1] = p >> 8 & 255, o[2] = p >> 16 & 255, o[3] = p >> 24 & 255;
             }
     free(src);
-    int style = font_sharp_icon_style();
+    int style = latched_style >= 0 ? latched_style : font_sharp_icon_style();
     if (style && icons_paint) icons_paint(big, f, pixels, w, h, solid, style);
     uint8_t *level = big;
     unsigned lw = W, lh = H;

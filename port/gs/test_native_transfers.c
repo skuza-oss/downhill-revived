@@ -33,6 +33,7 @@ void texpack_report(void) {}
 int font_sharp_on(void) {return 0;}
 int font_sharp_active(void) {return 0;}
 int font_sharp_icon_style(void) {return 0;}
+int font_sharp_icon_style_latch(void) {return 0;}
 int font_sharp_match(uint64_t t) {return 0;}
 void *font_sharp_view(const ReplaceDevice *d,const uint32_t *p,unsigned w,unsigned h,uint64_t k) {(void)d; (void)p; (void)w; (void)h; (void)k; return NULL;}
 #include <stdio.h>
