@@ -1168,10 +1168,16 @@ static void draw_left(const RoomNow *r)
     /* the track: a big name; the host changes it here (left/right) or from the list (Cross) */
     int cx = L_X + L_W / 2, on = rf == RF_TRACK && !track_list && !leave_ask;
     put(MENU_CENTRE, cx, TOP + 6, "TRACK", menu_style(st_off, 80, -1, 0, 0));
-    snprintf(line, sizeof line, r->host ? "< %s >" : "%s", track_name(l->track));
     if (on) bar(L_X + 6, TOP + 17, L_W - 12, 14);
-    /* retail's width leaves out the letter spacing: aim 14 short so long event names stay inside */
-    put(MENU_CENTRE, cx, TOP + 18, line, fit(line, on ? st_on : st_row, 125, L_W - 30));
+    /* the host's arrows at the highlight's ends; the name fitted between them with a gap (mixed
+       case draws up to a tenth wider than the capitals measure) */
+    const char *track = track_name(l->track);
+    MenuStyle ts = fit(track, on ? st_on : st_row, 125, r->host ? L_W - 62 : L_W - 24);
+    put(MENU_CENTRE, cx, TOP + 18, track, ts);
+    if (r->host) {
+        put(MENU_LEFT, L_X + 10, TOP + 18, "<", ts);
+        put(MENU_RIGHT, L_X + L_W - 10, TOP + 18, ">", ts);
+    }
     hit(&hits[RF_TRACK], L_X, TOP + 14, L_W, 20);
     draw_setting(RF_BOTS, TOP + 39, "COMPUTER RIDERS", l->laps & ROOM_NO_BOTS ? "OFF" : "ON", r);
     draw_setting(RF_CHEATS, TOP + 52, "CHEATS", l->laps & ROOM_CHEATS ? "ON" : "OFF", r);
