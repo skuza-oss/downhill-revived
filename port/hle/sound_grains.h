@@ -12,6 +12,7 @@ typedef struct {
 
 typedef struct {
     int used, paused, done, pc, delay, depth;
+    int stopped; /* stopped (0xFE04): retail frees it at once, so it no longer counts as an instance */
     int volume, pan, pmod, pbend, original_volume;
     int lfo_volume, lfo_pan, lfo_pmod, lfo_bend;
     int auto_pan_from, auto_pan_to, auto_pan_tick, auto_pan_time;
@@ -220,7 +221,7 @@ static void handler_keyoff(SoundHandler *h, int kill)
 static void handler_stop(SoundHandler *h)
 {
     int i;
-    h->done = 1; h->paused = 0; handler_keyoff(h, 0);
+    h->done = 1; h->stopped = 1; h->paused = 0; handler_keyoff(h, 0);
     for (i = 0; i < SND_VOICES; i++) if (voices[i].owner == h->handle) voices[i].paused = 0;
     for (i = 0; i < 128; i++)
         if (handlers[i].used && handlers[i].parent == h->handle) handler_stop(&handlers[i]);
@@ -234,7 +235,7 @@ static void handler_stop(SoundHandler *h)
 static void handler_end(SoundHandler *h)
 {
     int i;
-    h->done = 1;
+    h->done = 1; h->stopped = 1;
     handler_keyoff(h, 0);
     for (i = 0; i < 128; i++)
         if (handlers[i].used && handlers[i].parent == h->handle) handlers[i].parent = 0;
@@ -397,6 +398,36 @@ static void handler_run(SoundHandler *h)
     if (!h->done && h->delay <= 0) { h->delay = 1; snd_grain_unsupported[45]++; }
 }
 
+/* Whether a new copy of `sound` at application volume `volume` may start, as retail's start
+   (IOP 0x4A34) decides before it allocates the handler. A solo sound (flag 2, 0x10038) first stops
+   every copy already playing. With flag 8 (0xF488 -> 0xF34C) at most instance_limit copies live:
+   at the limit the weakest is stopped for the new one if flag 0x10 is set and it is quieter, or
+   if flag 0x20 is set (the oldest), else the new play is refused. A victim is stopped with its
+   children (0xFE04(h, 1, 0)). The port has no branch grain, so a handler's sound is its first. */
+static int handler_admit(const SndBankSound *sound, int volume)
+{
+    SoundHandler *weakest = NULL;
+    int i, count = 0;
+    if (sound->flags & 2)
+        for (i = 0; i < 128; i++)
+            if (handlers[i].used && !handlers[i].stopped && handlers[i].sound == sound) handler_stop(&handlers[i]);
+    if (!(sound->flags & 8)) return 1;
+    if (sound->instance_limit <= 0) return 0;
+    for (i = 0; i < 128; i++) {
+        SoundHandler *h = &handlers[i];
+        if (!h->used || h->stopped || h->sound != sound) continue;
+        count++;
+        if (!weakest || ((sound->flags & 0x10) && h->volume < weakest->volume) ||
+            ((sound->flags & 0x20) && h->created_at < weakest->created_at)) weakest = h;
+    }
+    if (count < sound->instance_limit) return 1;
+    if (weakest && (((sound->flags & 0x10) && weakest->volume < volume) || (sound->flags & 0x20))) {
+        handler_stop(weakest);
+        return 1;
+    }
+    return 0;
+}
+
 static SoundHandler *handler_start(BankSlot *bank, const SndBankSound *sound,
                                     int volume, int pan, int pmod, int bend,
                                     SoundHandler *parent, int original_volume, int original_pan)
@@ -404,6 +435,7 @@ static SoundHandler *handler_start(BankSlot *bank, const SndBankSound *sound,
     SoundHandler *h = NULL;
     int i;
     if (!sound->ngrains || (parent && parent->depth >= 8)) return NULL;
+    if (!handler_admit(sound, application_volume(1024, volume))) return NULL;
     for (i = 0; i < 128; i++) if (!handlers[i].used) { h = &handlers[i]; break; }
     if (!h) return NULL;
     memset(h, 0, sizeof *h); h->used = 1;

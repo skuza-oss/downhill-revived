@@ -635,6 +635,54 @@ static void test_end_grain_keys_off(void)
     snd_test_reset();
 }
 
+/* Instance limits and solo sounds, as retail 0x4A34/0xF34C/0x10038 apply them (finding 133). */
+static uint32_t play_looping(uint8_t *image, int flags, int limit, int volume, int first)
+{
+    uint8_t request[48] = {0}, nib[28] = {1};
+    static uint32_t bank;
+    if (first) {
+        build_bank(image);
+        block(image + TEST_WAVE, 0x00, 7, nib);
+        image[0x18 + 0x3C + 5] = (uint8_t)limit;
+        put16(image + 0x18 + 0x3C + 6, (uint16_t)flags);
+        snd_test_reset(); bank = snd_test_add_bank(image, TEST_BANK_SIZE);
+    }
+    put32(request, bank); put32(request + 8, (uint32_t)volume);
+    memcpy(request + 16, "TEST_ONE", 8);
+    return rpc(0x5C, request, 48);
+}
+
+static void test_instance_limits(void)
+{
+    uint8_t image[2048];
+    int16_t pcm[2 * 2000];
+    uint32_t a, b;
+    int i;
+    /* flag 8, limit 1, no steal rule: a second copy is refused while the first plays */
+    a = play_looping(image, 8 | 1, 1, 1024, 1); CHECK(a != 0);
+    b = play_looping(image, 8 | 1, 1, 1024, 0); CHECK(b == 0);
+    snd_test_render(pcm, 400); CHECK(snd_test_active_voices() == 1 && rpc(0x19, &a, 4) == a);
+    /* without flag 8 the limit byte does nothing */
+    a = play_looping(image, 1, 1, 1024, 1); b = play_looping(image, 1, 1, 1024, 0);
+    snd_test_render(pcm, 400); CHECK(a && b && snd_test_active_voices() == 2);
+    /* flag 0x10: a louder new copy takes the quieter one's place; a quieter one is refused */
+    a = play_looping(image, 0x18 | 1, 1, 300, 1); CHECK(a != 0);
+    b = play_looping(image, 0x18 | 1, 1, 200, 0); CHECK(b == 0);
+    b = play_looping(image, 0x18 | 1, 1, 900, 0); CHECK(b != 0);
+    for (i = 0; i < 10; i++) snd_test_render(pcm, 2000);
+    CHECK(snd_test_active_voices() == 1 && rpc(0x19, &a, 4) == 0 && rpc(0x19, &b, 4) == b);
+    /* flag 0x20: the oldest copy goes */
+    a = play_looping(image, 0x28 | 1, 1, 1024, 1); snd_test_render(pcm, 400);
+    b = play_looping(image, 0x28 | 1, 1, 1024, 0); CHECK(a && b);
+    for (i = 0; i < 10; i++) snd_test_render(pcm, 2000);
+    CHECK(snd_test_active_voices() == 1 && rpc(0x19, &b, 4) == b);
+    /* solo (flag 2): a new copy stops the playing one */
+    a = play_looping(image, 2 | 1, 0, 1024, 1); b = play_looping(image, 2 | 1, 0, 1024, 0);
+    for (i = 0; i < 10; i++) snd_test_render(pcm, 2000);
+    CHECK(a && b && snd_test_active_voices() == 1 && rpc(0x19, &a, 4) == 0);
+    snd_test_reset();
+}
+
 static void test_grain_random_replay(void)
 {
     uint8_t image[2048], request[48] = {0};
@@ -1122,6 +1170,7 @@ int main(void)
     test_volume_commands();
     test_grain_timing();
     test_end_grain_keys_off();
+    test_instance_limits();
     test_grain_random_replay();
     test_reverb();
     test_queued_streams();

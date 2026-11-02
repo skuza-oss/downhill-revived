@@ -283,7 +283,8 @@ int snd_bank_parse(SndBank *bank, const uint8_t *data, uint32_t size)
         uint32_t go = rd32(p + 8);
         int k;
         sound->index = i; sound->volume = (int8_t)p[0]; sound->group = p[1];
-        sound->pan = (int16_t)rd16(p + 2); sound->ngrains = p[4]; sound->flags = rd16(p + 6);
+        sound->pan = (int16_t)rd16(p + 2); sound->ngrains = p[4];
+        sound->instance_limit = (int8_t)p[5]; sound->flags = rd16(p + 6);
         if (!sound->ngrains) continue; /* retail empty sounds carry a -40 offset */
         if (go > meta_size - first_grain ||
             !region(first_grain + go, (uint32_t)sound->ngrains * 40, meta_size)) return 0;

@@ -81,7 +81,8 @@ typedef struct {
     int index;
     uint32_t grain_off;
     int volume, group, pan, ngrains;
-    uint16_t flags;
+    int instance_limit;  /* record byte +5: live copies allowed when flags has 8 (finding 133) */
+    uint16_t flags;      /* 1 loop, 2 solo, 8 instance limit, 0x10 steal the quietest, 0x20 the oldest */
 } SndBankSound;
 
 typedef struct {
