@@ -21,8 +21,11 @@
    with a log line, keeping the old texture. */
 #define NATIVE_SCALE_MAX 8u
 #define NATIVE_SURFACE_MAX 2048u
+/* Phones stop at 6x: on a Snapdragon 888 (Mi 11i) 0.7.7 draws the bench race at 93 fields/s at 4x
+   and 33 at 8x, so 7x and 8x only make a phone slow and hot. */
+#define NATIVE_PHONE_SCALE_MAX 6u
 /* What holds a device's scale limit below NATIVE_SCALE_MAX (Native scale_reason). */
-enum { NATIVE_SCALE_FREE, NATIVE_SCALE_MEMORY, NATIVE_SCALE_TEXTURE };
+enum { NATIVE_SCALE_FREE, NATIVE_SCALE_MEMORY, NATIVE_SCALE_TEXTURE, NATIVE_SCALE_PHONE };
 
 #ifndef NATIVE_GPU_SIDE
 #define NATIVE_GPU_SIDE
@@ -174,6 +177,8 @@ static void native_scale_report(Native *n, unsigned wanted, const char *window)
                  (unsigned long long)(n->scale_memory >> 21), (unsigned long long)(n->scale_memory >> 20));
     } else if (n->scale_reason == NATIVE_SCALE_TEXTURE)
         snprintf(why, sizeof why, " (largest texture: %u pixels a side)", (unsigned)dhdr_device_max_texture());
+    else if (n->scale_reason == NATIVE_SCALE_PHONE)
+        snprintf(why, sizeof why, " (phones: up to %ux)", NATIVE_PHONE_SCALE_MAX);
     fprintf(stderr, "gs native: resolution scale %ux%s: %s, this GPU allows up to %ux%s\n", n->scale,
             n->scale < wanted ? ", capped" : "", asked, n->scale_limit, why);
 }
@@ -304,6 +309,9 @@ static void native_scale_hold(Native *n, uint64_t memory)
     unsigned limit = NATIVE_SCALE_MAX, texture = dhdr_device_max_texture() / NATIVE_SURFACE_MAX;
     n->scale_reason = NATIVE_SCALE_FREE;
     if (texture && texture < limit) limit = texture, n->scale_reason = NATIVE_SCALE_TEXTURE;
+#ifdef __ANDROID__
+    if (limit > NATIVE_PHONE_SCALE_MAX) limit = NATIVE_PHONE_SCALE_MAX, n->scale_reason = NATIVE_SCALE_PHONE;
+#endif
     while (memory && limit > 4 && (uint64_t)limit * limit * NATIVE_SCALED_BYTES > memory / 2)
         limit--, n->scale_reason = NATIVE_SCALE_MEMORY;
     n->scale_limit = limit;

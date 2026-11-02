@@ -157,9 +157,11 @@ static int native_init(Gs *g, Rust *exact)
     char most[4];
     snprintf(most, sizeof most, "%u", n->scale_limit);
     host_putenv_s("DHD_SCALE_MAX", most);
-    /* and why it is less than 8: "memory" (graphics memory) or "texture" (the largest texture) */
+    /* and why it is less than 8: "memory" (graphics memory), "texture" (the largest texture) or
+       "phone" (NATIVE_PHONE_SCALE_MAX) */
     host_putenv_s("DHD_SCALE_MAX_REASON", n->scale_reason == NATIVE_SCALE_MEMORY ? "memory" :
-                  n->scale_reason == NATIVE_SCALE_TEXTURE ? "texture" : "");
+                  n->scale_reason == NATIVE_SCALE_TEXTURE ? "texture" :
+                  n->scale_reason == NATIVE_SCALE_PHONE ? "phone" : "");
     fprintf(stderr, "gs native: WebGPU shaders and pipelines built in %.2f s\n", host_wall_seconds() - start);
     native_install(g, exact, n, "WebGPU");
     fprintf(stderr, "gs native: GS blending %s\n", n->dual ? "with dual-source blending" :

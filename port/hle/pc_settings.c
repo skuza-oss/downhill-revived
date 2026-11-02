@@ -85,6 +85,7 @@ static int loaded;
    footer says "This GPU's" and the rest), else NULL. */
 static int scale_limit;
 static const char *scale_why;
+static int scale_phone;  /* the limit is the phones' (DHD_SCALE_MAX_REASON "phone") */
 
 /* Each row's list: the setting's choices, but Resolution with every scale when the native renderer
    says what it draws (scale_limit: the ones over it are marked, not hidden: the limit follows the
@@ -98,7 +99,9 @@ static void choices_build(void)
     const char *why = host_getenv("DHD_SCALE_MAX_REASON");
     scale_limit = most && atoi(most) > 0 ? atoi(most) : 0;
     scale_why = why && !strcmp(why, "memory") ? "GPU memory" : why && !strcmp(why, "texture") ? "GPU texture size" : NULL;
-    int max_scale = scale_limit ? 99 : 4, w = 0, h = 0;
+    /* a phone's limit (NATIVE_PHONE_SCALE_MAX) is the same on every phone: the scales over it aren't offered */
+    scale_phone = why && !strcmp(why, "phone");
+    int max_scale = scale_phone ? scale_limit : scale_limit ? 99 : 4, w = 0, h = 0;
     if (mode && sscanf(mode, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) snprintf(monitor_size, sizeof monitor_size, "%dx%d", w, h);
     for (int i = 0; i < ROWS; i++) {
         Row *r = &rows[i];
@@ -271,7 +274,8 @@ static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
     } else if (r && r->selected != r->running) p->footer = restart_footer;
     else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->footer = "No pack: see texture_pack in dhd.ini";
     else if (r == &rows[RESOLUTION] && scale_limit && scale_limit < 8) {
-        if (scale_why) snprintf(footer, sizeof footer, "This GPU's %s allows up to %dx", scale_why + 4, scale_limit);
+        if (scale_phone) snprintf(footer, sizeof footer, "Phones go up to %dx", scale_limit);
+        else if (scale_why) snprintf(footer, sizeof footer, "This GPU's %s allows up to %dx", scale_why + 4, scale_limit);
         else snprintf(footer, sizeof footer, "This GPU allows up to %dx", scale_limit);
         p->footer = footer;
     }
