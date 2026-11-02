@@ -199,6 +199,43 @@ class Game:
         print('shot', dst, flush=True)
         return dst
 
+    def print_window(self, label):
+        """Capture this hidden game's client with PrintWindow; never touches the input desktop."""
+        from PIL import Image
+        gdi = ctypes.WinDLL('gdi32', use_last_error=True)
+        for name in ('CreateCompatibleDC', 'CreateCompatibleBitmap', 'SelectObject'):
+            getattr(gdi, name).restype = w.HANDLE
+        u32.GetDC.restype = w.HANDLE
+        u32.GetDC.argtypes = [w.HWND]
+        gdi.CreateCompatibleDC.argtypes = [w.HANDLE]
+        gdi.CreateCompatibleBitmap.argtypes = [w.HANDLE, ctypes.c_int, ctypes.c_int]
+        gdi.SelectObject.argtypes = [w.HANDLE, w.HANDLE]
+        gdi.DeleteObject.argtypes = [w.HANDLE]
+        gdi.DeleteDC.argtypes = [w.HANDLE]
+        u32.ReleaseDC.argtypes = [w.HWND, w.HANDLE]
+        u32.PrintWindow.argtypes = [w.HWND, w.HANDLE, w.UINT]
+        gdi.GetDIBits.argtypes = [w.HANDLE, w.HANDLE, w.UINT, w.UINT, ctypes.c_void_p, ctypes.c_void_p, w.UINT]
+        width, height = self.client()
+        dc = u32.GetDC(self.hwnd); memory = gdi.CreateCompatibleDC(dc)
+        bitmap = gdi.CreateCompatibleBitmap(dc, width, height)
+        old = gdi.SelectObject(memory, bitmap)
+        try:
+            if not u32.PrintWindow(self.hwnd, memory, 3):
+                raise RuntimeError('PrintWindow failed for hidden game')
+            info = ctypes.create_string_buffer(40)
+            import struct
+            struct.pack_into('<IiiHHIIiiII', info, 0, 40, width, -height, 1, 32, 0, width * height * 4, 0, 0, 0, 0)
+            pixels = ctypes.create_string_buffer(width * height * 4)
+            gdi.SelectObject(memory, old)
+            if not gdi.GetDIBits(memory, bitmap, 0, height, pixels, info, 0):
+                raise RuntimeError('GetDIBits failed for hidden game')
+            path = self.out / (label + '.png')
+            Image.frombytes('RGB', (width, height), pixels.raw, 'raw', 'BGRX').save(path)
+            return path
+        finally:
+            gdi.SelectObject(memory, old)
+            gdi.DeleteObject(bitmap); gdi.DeleteDC(memory); u32.ReleaseDC(self.hwnd, dc)
+
     def stop(self):
         if self.alive():
             k32.TerminateProcess(self.pi.process, 1); k32.WaitForSingleObject(self.pi.process, 10000)

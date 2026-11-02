@@ -43,7 +43,7 @@ after a version change before a live check.
 |---|---|
 | `port/tools/local_server.py -- CMD` | the room server of this checkout on a free port for CMD's length (sets `DHD_NET_SERVER`); fresh state each run; stops workerd too |
 | `port/tools/live_game.py OUT --script FILE` | a game on a hidden desktop run by commands (keys, waits, shots, nettool bots) |
-| `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots) |
+| `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots, PrintWindow captures) |
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots |

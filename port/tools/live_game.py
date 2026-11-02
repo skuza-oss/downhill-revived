@@ -13,6 +13,7 @@ one's default in the game. Lines:
     hold NAME SECONDS    hold a key down (riding: X pedals)
     sleep S
     wait REGEX [S]       until game.log matches (default 120 s; _ stands for a space)
+    printwindow LABEL    PrintWindow capture of this hidden game as OUT/LABEL.png
     shot LABEL           newest capture as OUT/LABEL.png
     bot NAME ARGS...     nettool ARGS... join <this game's room code>, log OUT/bot-NAME.log
     quit
@@ -84,6 +85,8 @@ def main():
                 return True
         elif c == 'shot':
             g.shot(words[1], settle=0.6)
+        elif c == 'printwindow':
+            g.print_window(words[1])
         elif c == 'bot':
             m = re.findall(r'online menu: room (\w{6}).*?, version (.+)', g.log())
             if not m:
