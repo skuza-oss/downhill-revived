@@ -831,8 +831,32 @@ int graphics_ordered;  /* hle.h */
    compares function-table indices the game keeps in RAM. */
 static int vsync_deferred, csr_exact;
 
+/* DHD_SLOW_FRAME=MS[,JITTER] (tests, finding 139): a slow PC on a fast one. Each game frame lasts
+   at least MS milliseconds, give or take up to JITTER (uniform, a fixed random sequence), spent
+   busy on the EE thread at its VBLANK, so a race runs at a chosen frame rate with uneven frames. */
+static void slow_frame(void)
+{
+    static int init;
+    static double ms, jitter, last;
+    static uint32_t seed = 0x139u;
+    if (!init) {
+        init = 1;
+        const char *s = host_getenv("DHD_SLOW_FRAME"), *comma = s ? strchr(s, ',') : NULL;
+        if (s) ms = strtod(s, NULL), jitter = comma ? strtod(comma + 1, NULL) : 0;
+        if (ms > 0) hle_log("slow frame: each frame at least %.2f ms, +-%.2f ms (DHD_SLOW_FRAME)\n", ms, jitter);
+    }
+    if (!(ms > 0)) return;
+    seed = seed * 1664525u + 1013904223u;
+    double want = (ms + jitter * ((double)(seed >> 8) / (1 << 23) - 1)) / 1000;
+    while (host_wall_seconds() - last < want)
+        ;
+    last = host_wall_seconds();
+}
+
 static void vsync(void)
 {
+    slow_frame();
+    port_clock_observe();
     int fresh = paced && jit_on();
     if (paced && !fresh) pace();
     host_pacing_handoff(fresh);

@@ -22,6 +22,7 @@ int host_display_hz(void) { return 0; }  /* DHD_FPS=monitor is not checked here 
 void func_00155E78(void *p,int kind) { (void)p;recoveries++;recovery_kind=kind; }
 int func_0012D300(void *p) { (void)p;return 0; }
 float func_0012DF48(void *p) { (void)p;return (float)braking; }
+uint64_t snd_test_position(void) { return 0; }
 int main(int argc,char **argv)
 {
     int n=atoi(argv[1]);

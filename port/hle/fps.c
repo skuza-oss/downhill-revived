@@ -339,6 +339,57 @@ void port_ragdoll_step(void *points, int count, int stride, float damping)
     }
 }
 
+/* dhd.log's "clock:" line (finding 139), after every 30 s of race with the race clock running
+   (on with the perf: lines, DHD_PERF_LOG): the race clock's seconds against wall seconds (the game
+   speed), the slowest and fastest whole second of it (a fast-forward shows as a fastest second
+   above 1), the smallest and largest game step in fields (D_0029E400, the seconds a step), and the
+   sound the mixer rendered against wall time. Frames on which the race clock did not move (a
+   pause) count for neither. Read-only. */
+void port_clock_observe(void)
+{
+    extern uint64_t snd_test_position(void);
+    static int on = -1;
+    static double last_wall, last_game, wall, game, second_wall, second_game, slowest, fastest, sound;
+    static float least, most;
+    static uint32_t last_samples;
+    if (on < 0) {
+        const char *s = host_getenv("DHD_PERF_LOG");
+        on = !s || strcmp(s, "0") != 0;
+    }
+    int race_phase = *(int *)GUEST(0x0843F348);
+    if (!on || *(int *)GUEST(0x0829DED8) != 9 || race_phase < 2 || race_phase > 4) {
+        last_wall = 0;
+        return;
+    }
+    double now = host_wall_seconds(), clock = port_field_seconds(*(int *)GUEST(0x0843EEC8));
+    uint32_t samples = (uint32_t)snd_test_position();
+    float step = D_0029E400 * 60;
+    if (!last_wall || clock < last_game) {
+        last_wall = now, last_game = clock, last_samples = samples;
+        return;
+    }
+    if (clock > last_game) {
+        double dt = now - last_wall, dg = clock - last_game;
+        if (!game) slowest = 1e9, fastest = 0, least = 1e9f, most = 0;
+        wall += dt, game += dg, second_wall += dt, second_game += dg;
+        sound += (uint32_t)(samples - last_samples) / 48000.0;
+        if (step < least) least = step;
+        if (step > most) most = step;
+        if (second_wall >= 1) {
+            double speed = second_game / second_wall;
+            if (speed < slowest) slowest = speed;
+            if (speed > fastest) fastest = speed;
+            second_wall = second_game = 0;
+        }
+        if (wall >= 30) {
+            hle_log("clock: race %.0f s game x%.3f (seconds x%.3f-x%.3f), steps %.2f-%.2f fields, sound x%.3f\n",
+                    wall, game / wall, slowest, fastest, least, most, sound / wall);
+            wall = game = sound = 0;
+        }
+    }
+    last_wall = now, last_game = clock, last_samples = samples;
+}
+
 /* DHD_FPS_TRACE=path: read-only race observer for port/tools/test_fps_race.py. One row per
    rider per race tick, plus every real update through tick 360 in path.steps.csv (the first
    update carrying a tick comes earlier at high rates). DHD_FPS_STOP=N ends the game at tick N.

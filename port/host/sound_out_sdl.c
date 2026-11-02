@@ -375,6 +375,10 @@ static void host_start(void)
             hle_log("989snd: no SDL audio device (%s)\n", SDL_GetError());
         return;
     }
+    /* DHD_SND_MUTE=1 (tests, finding 139): the device runs and the counters count, but it plays
+       silence, so a check on the hidden desktop measures the queue without sound in the room. */
+    if (getenv("DHD_SND_MUTE") && atoi(getenv("DHD_SND_MUTE")))
+        SDL_SetAudioStreamGain(stream, 0.0f);
     SDL_ResumeAudioStreamDevice(stream);
     {
         SDL_AudioSpec device;

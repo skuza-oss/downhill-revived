@@ -43,6 +43,9 @@ void port_ragdoll_step(void *points, int count, int stride, float damping);
 void port_fps_force_window(void *body, int clear);
 void port_fps_contact_recovery(void *body);
 
+/* dhd.log's clock: lines (every VBLANK; finding 139): game time against wall time in a race. */
+void port_clock_observe(void);
+
 /* DHD_FPS_TRACE race observer (port/tools/test_fps_race.py). */
 void port_fps_race_step(void);
 void port_fps_observe(void);
