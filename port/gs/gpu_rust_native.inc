@@ -124,11 +124,14 @@ static int native_init(Gs *g, Rust *exact)
 {
     double start;
     uint64_t scale_memory = device.memory;
-    /* An integrated GPU (under 1 GiB of dedicated memory, with shared system memory: DXGI's
-       SharedSystemMemory) draws its frame and Z buffers in shared memory: the scale's budget counts
-       half of that too, so it isn't held to the small dedicated slice (a Ryzen iGPU with 512 MiB
-       dedicated ran 8x well). Texture packs keep their budget. */
-    if (device.memory && device.memory < (1ull << 30) && device.shared) {
+    /* An integrated GPU (wgpu's adapter kind, dhdr_perf_read's word 5: 1) draws its frame and Z
+       buffers in shared system memory (DXGI's SharedSystemMemory): the scale's budget counts half
+       of that too, so it isn't held to the small dedicated slice (a Ryzen iGPU with 512 MiB
+       dedicated ran 8x well). A discrete card keeps its dedicated memory only, however small;
+       texture packs keep their budget. */
+    uint64_t gpu_info[6] = {0};
+    dhdr_perf_read(gpu_info, 6);
+    if (gpu_info[5] == 1 && device.memory && device.shared) {
         scale_memory = device.memory + device.shared / 2;
         fprintf(stderr, "gs: integrated GPU: the resolution scale's memory counts shared memory too (%llu MiB dedicated, "
                 "half of %llu MiB shared)\n", (unsigned long long)(device.memory >> 20),
