@@ -220,7 +220,8 @@ int port_replay_race(void *recorder)
     if (rec->playing) {
         port_clock_grid(GRID_PLAY);
         if (rec->index >= RECORDED(rec)) {
-            hle_log("replay: the end of the recording, %d samples\n", rec->index);
+            if (!((int *)D_004B1F40)[1])  /* once: the race loop is not ending yet */
+                hle_log("replay: the end of the recording, %d samples\n", rec->index);
             func_001AA0F0();
             func_001B45F8(D_004B1F40, 6, 0);  /* End of Recorded Replay */
             return 0;
