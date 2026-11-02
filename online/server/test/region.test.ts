@@ -83,6 +83,16 @@ describe("location hints", () => {
 const POLAND = { colo: "WAW", country: "PL", continent: "EU", longitude: "21.0" };
 const OHIO = { colo: "ORD", country: "US", continent: "NA", regionCode: "OH", longitude: "-83.0" };
 
+describe("the public list's clock", () => {
+  it("carries the server's time, so a client in no room can count a race's times", async () => {
+    const before = Date.now();
+    const r = await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>();
+    expect(typeof r.now).toBe("number");
+    expect(r.now).toBeGreaterThanOrEqual(before);
+    expect(r.now).toBeLessThanOrEqual(Date.now());
+  });
+});
+
 describe("rooms and their region", () => {
   it("never tell anyone another member's country, only their region", async () => {
     const host = await Client.connect("/v1/rooms/new", POLAND);

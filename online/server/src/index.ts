@@ -24,7 +24,10 @@ export default {
       // region: the asker's, as Cloudflare places them; their region's rooms come first (finding 135).
       const region = regionOfPlace(placeOf(request));
       const lobbies = sortForRegion(await env.LOBBIES.get(env.LOBBIES.idFromName("global")).list(), region);
-      return json({ protocol: PROTOCOL, minVersion, region, lobbies });
+      // now: the server's clock (ms since the Unix epoch). A client in no room yet has no clock
+      // offset from a room's pings; without this its list counted "ENDS IN" from the epoch (0.7.6
+      // showed ENDS IN 29893031:32; finding 135).
+      return json({ protocol: PROTOCOL, minVersion, region, now: Date.now(), lobbies });
     }
 
     const m = path.match(/^\/v1\/rooms\/([^/]+)$/);

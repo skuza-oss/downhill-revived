@@ -99,6 +99,8 @@ typedef struct {
     double race_started_at, finish_ends_at, next_race_at;
     int full;
     char region[8], colo[8];   /* where the room runs ("EU"...; finding 135), "" unknown */
+    int timed;                 /* the times above can be counted against net_server_ms(): the list
+                                  came with the server's "now", or a room's pings set the clock */
 } NetLobbyInfo;
 
 /* base_url: "wss://host" or "ws://127.0.0.1:8787". version: the build's version string (the

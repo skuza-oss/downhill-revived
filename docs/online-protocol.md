@@ -218,12 +218,16 @@ The server keeps what everyone has to agree on:
 `GET /v1/lobbies` → `200 application/json`:
 
 ```json
-{"protocol":2,"minVersion":"0.1.0","region":"EU","lobbies":[
+{"protocol":2,"minVersion":"0.1.0","region":"EU","now":1734000000000,"lobbies":[
   {"code":"K7QX2M","roomName":"Friday race","version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","track":3,
    "players":2,"maxPlayers":10,"hostName":"Ann","region":"EU","colo":"FRA","createdIn":"EU"}]}
 ```
 
 `region` at the top is the asker's own; the list comes in their region's order (Region, below).
+`now` is the server's clock (ms since the Unix epoch): the list's `raceStartedAt`,
+`finishEndsAt` and `nextRaceAt` are on that clock, and a client in no room has no offset to it
+from a room's pings. It sets its offset from `now` (half the request's round-trip late at most) and
+shows no count without one (finding 135).
 
 Only public rooms that have not started and have a free slot are listed. Clients should
 show only rooms whose `version` matches their own.

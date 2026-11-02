@@ -1,5 +1,6 @@
 /* Session wire parsing and serializers without a server or game data. */
 #include "client.h"
+#include "lobby_row.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -88,6 +89,48 @@ int main(void)
         client_on_text(&c,welcome,strlen(welcome));
         client_lobby(&c,&l);
         assert(!l.edge_colo[0] && !l.country[0] && !l.room_region[0]);
+        client_free(&c);
+    }
+    {   /* the public list in no room (finding 135): its "now" sets the clock, so a racing room's
+           ENDS IN counts from the server's time; 0.7.6 counted from the epoch (ENDS IN 29893031:32).
+           Without "now" (an older server) and no room, the row shows no time at all. */
+        char body[1024], now_text[24];
+        NetLobbyInfo rows[4];
+        double now = 1793570000000.0;
+        snprintf(body, sizeof body, "{\"protocol\":2,\"now\":%.0f,\"lobbies\":["
+                 "{\"code\":\"ABC234\",\"roomName\":\"HEINRICHPY\",\"players\":6,\"maxPlayers\":10,\"phase\":\"racing\","
+                 "\"raceStartedAt\":%.0f,\"finishEndsAt\":%.0f,\"region\":\"EU\"},"
+                 "{\"code\":\"DEF567\",\"players\":2,\"maxPlayers\":10,\"phase\":\"intermission\",\"nextRaceAt\":%.0f},"
+                 "{\"code\":\"GHJ892\",\"players\":3,\"maxPlayers\":10,\"phase\":\"racing\",\"raceStartedAt\":%.0f}]}",
+                 now, now - 65000, now + 42000, now + 20000, now - 125000);
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert(!c.clock_known);
+        assert(client_read_lobbies(&c, body, net_now_ms(), net_now_ms(), rows, 4) == 3);
+        assert(c.clock_known && rows[0].timed && !strcmp(rows[0].region, "EU"));
+        net_lobby_now(&rows[0], net_now_ms() + c.clock_offset, now_text, sizeof now_text);
+        printf("list in no room: %s %s; ", rows[0].room_name, now_text);
+        assert(!strcmp(now_text, "ENDS IN 0:42") || !strcmp(now_text, "ENDS IN 0:41"));
+        net_lobby_now(&rows[1], net_now_ms() + c.clock_offset, now_text, sizeof now_text);
+        printf("%s; ", now_text);
+        assert(!strncmp(now_text, "NEXT IN 0:", 10));
+        net_lobby_now(&rows[2], net_now_ms() + c.clock_offset, now_text, sizeof now_text);
+        printf("%s\n", now_text);
+        assert(!strcmp(now_text, "RACING 2:05") || !strcmp(now_text, "RACING 2:04"));
+        client_free(&c);
+        /* an older server's list (no "now"), no room: no clock, no times */
+        snprintf(body, sizeof body, "{\"protocol\":2,\"lobbies\":[{\"code\":\"ABC234\",\"phase\":\"racing\","
+                 "\"raceStartedAt\":%.0f,\"finishEndsAt\":%.0f},{\"code\":\"DEF567\",\"phase\":\"intermission\",\"nextRaceAt\":%.0f}]}",
+                 now - 65000, now + 42000, now + 20000);
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert(client_read_lobbies(&c, body, net_now_ms(), net_now_ms(), rows, 4) == 2 && !rows[0].timed);
+        net_lobby_now(&rows[0], net_now_ms() + c.clock_offset, now_text, sizeof now_text);
+        assert(!strcmp(now_text, "RACING"));
+        net_lobby_now(&rows[1], net_now_ms() + c.clock_offset, now_text, sizeof now_text);
+        assert(!strcmp(now_text, "NEXT RACE"));
+        /* even marked timed, an epoch-sized difference never shows */
+        rows[0].timed = 1;
+        net_lobby_now(&rows[0], net_now_ms(), now_text, sizeof now_text);
+        assert(!strcmp(now_text, "RACING"));
         client_free(&c);
     }
     puts("test_session: session and ten-player checks passed");

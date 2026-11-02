@@ -10,6 +10,7 @@
 #include "text_input.h"
 #include "settings_table.h"  /* the rider name's rule (dhd_settings, port/render/settings) */
 #include "../net/net.h"
+#include "../net/lobby_row.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -427,17 +428,7 @@ static void list_row(int i)
         if (tracks[k].index == l->track) track = tracks[k].name;
     if (strcmp(l->version, version)) snprintf(now, sizeof now, "OTHER VERSION");
     else if (l->full || l->players >= l->max_players) snprintf(now, sizeof now, "FULL");
-    else if (!strcmp(l->phase, "racing") && l->finish_ends_at > t) {
-        int left = (int)((l->finish_ends_at - t + 999) / 1000);
-        snprintf(now, sizeof now, "ENDS IN %d:%02d", left / 60, left % 60);
-    } else if (!strcmp(l->phase, "racing")) {
-        int so_far = l->race_started_at && t > l->race_started_at ? (int)((t - l->race_started_at) / 1000) : 0;
-        snprintf(now, sizeof now, "RACING %d:%02d", so_far / 60, so_far % 60);
-    } else if (!strcmp(l->phase, "intermission") && l->next_race_at > t) {
-        int left = (int)((l->next_race_at - t + 999) / 1000);
-        snprintf(now, sizeof now, "NEXT IN %d:%02d", left / 60, left % 60);
-    } else if (!strcmp(l->phase, "starting")) snprintf(now, sizeof now, "STARTING");
-    else snprintf(now, sizeof now, "OPEN");
+    else net_lobby_now(l, t, now, sizeof now);  /* counted only on a known server clock (finding 135) */
     /* where the room runs (EU, NA, ASIA...; finding 135): a far room shows before joining it */
     snprintf(text[i], ROW_TEXT, "%.14s  %s%s%d/%d  %s  %s", l->room_name[0] ? l->room_name : l->host_name,
              l->region, l->region[0] ? "  " : "", l->players, l->max_players, track, now);

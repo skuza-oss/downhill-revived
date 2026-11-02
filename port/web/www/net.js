@@ -4,7 +4,7 @@ import { layout } from './net_layout.js';
 export function createNet({span, str}) {
   let base = 'wss://dhd.skuza.app', name = '', version = '', iso = '', ws;
   let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {};
-  let frames = [], list = [], listing = false, listError = false, timer;
+  let frames = [], list = [], listing = false, listError = false, timer, clockKnown = false;
   let error = '', errorCode = '';
   const send = m => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)); };
   const now = () => performance.now();
@@ -108,7 +108,13 @@ export function createNet({span, str}) {
     host_service_net_receive_frame:(a,n)=>{const f=frames.shift();if(!f||f.length>n)return 0;span(a,f.length).set(f);return f.length;},
     host_service_net_list_lobbies_start:()=>{
       if(listing)return 0;listing=true;listError=false;
-      fetch(base.replace(/^ws/,'http')+'/v1/lobbies').then(r=>r.json()).then(r=>list=r.lobbies).catch(()=>listError=true).finally(()=>listing=false);
+      // the list's "now" sets the clock when no room's pings have, so its times count from the server's (finding 135)
+      const sent=now();
+      fetch(base.replace(/^ws/,'http')+'/v1/lobbies').then(r=>r.json()).then(r=>{
+        const inRoom=state===2||state===3;
+        if(r.now>0&&!inRoom){offset=r.now-(sent+now())/2;clockKnown=true;}
+        list=r.lobbies.map(x=>({...x,timed:clockKnown||inRoom?1:0}));
+      }).catch(()=>listError=true).finally(()=>listing=false);
       return 1;
     },
     host_service_net_list_lobbies_poll:(a,n)=>listing?-2:listError?-1:writeList(a,n),

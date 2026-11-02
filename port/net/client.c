@@ -336,7 +336,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         add_rtt(c, rtt);
         if (json_number(text, "serverTime", &server_time) &&
             (!c->have_offset || rtt <= c->lobby.ping_ms))
-            c->clock_offset = server_time - (t + rtt / 2), c->have_offset = 1;
+            c->clock_offset = server_time - (t + rtt / 2), c->have_offset = c->clock_known = 1;
         changed(c);
     } else if (!strcmp(type, "welcome")) {
         NetLobby *l = &c->lobby;
@@ -348,7 +348,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         if (c->lobby.is_host)
             c->lobby.host_id = c->lobby.member_id;
         if (json_number(text, "serverTime", &server_time) && !c->have_offset)
-            c->clock_offset = server_time - net_now_ms();
+            c->clock_offset = server_time - net_now_ms(), c->clock_known = 1;
         c->lobby.state = NET_LOBBY;
         c->lobby.error_code[0] = c->lobby.error[0] = 0;
         if (c->choosing)  /* after a reconnect: still on the rider screen */
@@ -667,6 +667,48 @@ void client_lobby(NetClient *c, NetLobby *out)
         out->countdown_ms = left > 0 ? (int)left : 0;
     }
     SDL_UnlockMutex(c->lock);
+}
+
+int client_read_lobbies(NetClient *c, const char *body, double sent, double got, NetLobbyInfo *out, int max)
+{
+    char path[48];
+    double now;
+    int i, n = json_count(body, "lobbies"), timed;
+    if (n < 0)
+        return -1;
+    if (n > max)
+        n = max;
+    /* The list's times are the server's clock. In no room yet the offset to it is unknown (0.7.6
+       counted from the epoch: ENDS IN 29893031:32); the answer's "now" gives it, half the fetch's
+       round-trip late at most. A room's pings measure it better and are kept. */
+    SDL_LockMutex(c->lock);
+    if (json_number(body, "now", &now) && now > 0 && !c->have_offset)
+        c->clock_offset = now - (sent + got) / 2, c->clock_known = 1;
+    timed = c->clock_known;
+    SDL_UnlockMutex(c->lock);
+    for (i = 0; i < n; i++) {
+        NetLobbyInfo *l = &out[i];
+        long long v;
+        memset(l, 0, sizeof *l);
+#define FIELD(key) (snprintf(path, sizeof path, "lobbies[%d]." key, i), path)
+        json_string(body, FIELD("code"), l->code, sizeof l->code);
+        json_string(body, FIELD("roomName"), l->room_name, sizeof l->room_name);
+        json_string(body, FIELD("version"), l->version, sizeof l->version);
+        json_string(body, FIELD("hostName"), l->host_name, sizeof l->host_name);
+        l->track = json_int(body, FIELD("track"), &v) ? (int)v : 0;
+        l->players = json_int(body, FIELD("players"), &v) ? (int)v : 0;
+        l->max_players = json_int(body, FIELD("maxPlayers"), &v) ? (int)v : 0;
+        json_string(body, FIELD("phase"), l->phase, sizeof l->phase);
+        json_bool(body, FIELD("full"), &l->full);
+        json_number(body, FIELD("raceStartedAt"), &l->race_started_at);
+        json_number(body, FIELD("finishEndsAt"), &l->finish_ends_at);
+        json_number(body, FIELD("nextRaceAt"), &l->next_race_at);
+        json_string(body, FIELD("region"), l->region, sizeof l->region);  /* finding 135 */
+        json_string(body, FIELD("colo"), l->colo, sizeof l->colo);
+        l->timed = timed;
+#undef FIELD
+    }
+    return n;
 }
 
 int client_send_frame(NetClient *c, int type, const void *payload, size_t n)

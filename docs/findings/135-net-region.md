@@ -73,7 +73,7 @@ the game writes `net:` lines in dhd.log; the game shows each room's region.
 0.7.6 players prefer near rooms the day the server is deployed. The new game keeps "first joinable"
 and logs the chosen room's region.
 
-Tests (`npm test`): 72, the 64 old ones unchanged plus `test/region.test.ts`:
+Tests (`npm test`): 73, the 64 old ones unchanged plus `test/region.test.ts` (the list's `now` too):
 - the hint mapping (24 places);
 - regions and the colo table;
 - reading a trace;
@@ -152,18 +152,48 @@ beside it, with room to spare. A third short run, with the guest opening Public 
 Quick Race, shows the row `HOSTA  AF  1/10  ALPINE  OPEN`. The page widens to fit its rows, so the
 longest rows were not tried: a 14-letter name, `ASIA`, a long track and `ENDS IN 1:00`.
 
+## The public list's times in no room
+
+A player's 0.7.6 screenshot of PUBLIC RACES showed `HEINRICHPY 6/10 CITY ENDS IN 29893031:32`.
+The row counts `finishEndsAt` (server epoch ms) down from `net_server_ms()`, which is
+`net_now_ms()` plus the client's clock offset. On the list page there is no room yet, so no ping
+had set the offset: the difference was about the Unix epoch in minutes. `NEXT IN` (`nextRaceAt`)
+and the `RACING m:ss` time so far had the same fault.
+
+- **Server**: `GET /v1/lobbies` adds `now`, the server's clock in ms (test: within the request's
+  time).
+- **Client**: `client_read_lobbies` (`port/net/client.c`; it replaces the parsing in `net.c` and
+  runs under the API lock) sets the clock offset to `now - (sent + got) / 2` when no room's pong has
+  given a better one. Each row gets `timed` (`NetLobbyInfo`, appended) when the clock is known: the
+  list's `now`, or a room's welcome or pong. The browser does the same in `net.js`.
+- **The row text**: moved to `port/net/lobby_row.h` (`net_lobby_now`), shared by the menu and the
+  net tests. A time is shown only on a `timed` row and only when it is under an hour. Otherwise the
+  row says `RACING` or `NEXT RACE` with no time, so an older server's list (no `now`) or a bad
+  clock can't show a wild number.
+- **Net test** (`test_session`): a list with `now`, read with no room joined, gives
+  `HEINRICHPY ENDS IN 0:42`, `NEXT IN 0:20` and `RACING 2:05`. Without `now` it gives `RACING` and
+  `NEXT RACE`. An epoch-sized difference never shows, even marked timed.
+- **In the game** (one capture, taken before the lead's new process stopped game runs): a game in
+  no room opened Public Races while a public room raced, its finish window running (the host
+  riding, a nettool bot finished at 5 s). The row read `HEINRICHPY  AF  2/10  ALPINE  ENDS IN 0:31`.
+
+**0.7.6 clients keep the wrong number until they update.** They ignore `now`, and the server can't
+correct the times for them without changing what `finishEndsAt` means, which the room page and the
+race also read.
+
 ## Checks
 
-- `online/server`: `npm test` 71/71.
+- `online/server`: `npm test` 73/73.
 - `port/net/build_tests.py`: test_hash, test_json, test_loopback and test_session pass, and
   nettool builds. test_session adds the welcome's fields, the `where` regions kept across `room`
   snapshots, the leave line and an older server's welcome.
 - `node --test port/web/check_net.mjs`: passes.
-- The game (`build_wasm.py -j 4`, `build.py --no-core`). Two games on hidden desktops
+- `gen_net_layout.py --check`: four targets pass.
+- The game (`build_wasm.py`, `build.py --no-core`; compiled after every change). Two games on hidden desktops
   (`hidden_game.Game`, a scratch driver: `local_server.py`, `DHD_NET_SCRIPTED`, field-timed pads as
   in `cross_race.py`, `DHD_LAUNCHER=1`, `DHD_MEMCARD=1` with empty folders). The host made a public
   room, the guest took Quick Race into it, both stayed about 100 s without readying, then each left
-  by Triangle > Leave. The lines above are from that run.
+  by Triangle > Leave. The lines above are from that run (the last one after the region change).
 - 0.7.6 against the new server: see "0.7.6 clients" below.
 
 ## 0.7.6 clients
@@ -190,6 +220,36 @@ drops unknown types, and the browser copies known keys only. What needs the new 
 - the region in the list rows and the room header;
 - the region in the quick race log line.
 
+## Checks the lead still has to run (merged build)
+
+From 2026-11-02 03:40 lanes run no game checks; these are for the merged build. A local server
+(`port/tools/local_server.py`) is enough for 1-4.
+
+1. **Log lines, two games** (any track; nobody needs to race). Game A: ONLINE > Create A Public
+   Race, pick a rider, stay in the room. Game B: ONLINE > Quick Race. Stay about 70 s, then press
+   Triangle in the room, Down to LEAVE, Cross, on both. In each dhd.log look for:
+   - `net: in room XXXXXX ...: this PC reached Cloudflare <colo> from <own country> (<continent>); the room runs in ...`
+   - `net: room XXXXXX runs in <colo> (<region>)` (a moment after; once per room)
+   - `net: room XXXXXX, last 30 s: ping N ms median, M worst (K pings); players: <name> (host, <REGION>) N ms`.
+     The other player shows as a region (EU, NA, AF...), **never a two-letter country**.
+   - `net: left room XXXXXX after m:ss; last N s: ...`
+   - B's `online menu: quick race: room XXXXXX (1/10, open, region <REGION>)`.
+2. **Room header**: in A's room the card header above the players reads `PLAYERS 2/10 - <REGION>
+   SERVER`, with `1/2 READY` on the right and not overlapping.
+3. **Public Races row and its clock**: race in A's public room (A readies; a second player or a
+   nettool bot with `--pick 3 --players 2 --ready-after 3 --finish-after 5` readies and finishes
+   early, so the finish window runs while A still rides). On a third game in no room, ONLINE >
+   Public Races. The row reads `<name>  <REGION>  2/10  <track>  ENDS IN 0:ss`, counting down
+   sanely, never a 7-digit number. Before anyone finishes it reads `RACING m:ss`; between races,
+   `NEXT IN m:ss`.
+4. **0.7.6 on the new server**: two 0.7.6 games (Create A Public Race / Quick Race) still create,
+   join and leave with no errors. Their list rows still show the old wrong times (expected, see
+   above).
+5. **After deploying** (only the real server can show these): from a European connection, Create A
+   Private Race, then check the `net:` lines say `the room runs in <European colo> (EU)`, and that
+   `/v1/lobbies` shows the room with `region` EU. If possible, repeat over a VPN in another
+   continent and check its room lands there. `MIN_VERSION` stays 0.7.6.
+
 ## What only the deployed server can show
 
 - Whether `locationHint` moves rooms as intended. Hints are best effort, and local `wrangler dev`
@@ -203,7 +263,6 @@ drops unknown types, and the browser copies known keys only. What needs the new 
 ## Not done
 
 - Rows at their longest in Public Races were not photographed (see above).
-
 - No in-game choice of region and no automatic move of a far room; the player sees the region and
   chooses.
 - The race's live results header has no region.

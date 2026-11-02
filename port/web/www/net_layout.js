@@ -369,6 +369,10 @@ export const layout = {
     "colo": [
       340,
       8
+    ],
+    "timed": [
+      348,
+      4
     ]
   }
 };

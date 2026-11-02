@@ -29,7 +29,8 @@ typedef struct {
     double countdown_ends;  /* the server's countdown end, server ms; 0 none */
     /* pings and the server clock */
     double next_ping, last_rx, clock_offset;  /* offset: server ms - local ms */
-    int have_offset;
+    int have_offset;   /* the offset is from a pong (the best measure) */
+    int clock_known;   /* the offset is set at all: a pong, a welcome or the public list's "now" */
     float rtt[5];
     int nrtt;
     /* dhd.log's net: lines (finding 135): every member's region from the server's "where" (by
@@ -73,6 +74,10 @@ void client_rules(NetClient *c, int finish_window, int next_race, int then);
 void client_rotation(NetClient *c, const unsigned char *ids, int count);
 void client_leave(NetClient *c);  /* says so before the transport closes */
 void client_lobby(NetClient *c, NetLobby *out);
+/* The public list's answer (GET /v1/lobbies) into out, fetched between local times sent and got
+   (net_now_ms). Its "now" sets the server clock when no room's pings have (finding 135). Returns
+   the rooms, -1 when the text isn't a list. */
+int client_read_lobbies(NetClient *c, const char *body, double sent, double got, NetLobbyInfo *out, int max);
 
 int client_send_frame(NetClient *c, int type, const void *payload, size_t n);
 int client_receive_frame(NetClient *c, uint8_t *out, size_t max);

@@ -134,34 +134,19 @@ void net_leave(void)
 int net_list_lobbies(NetLobbyInfo *out, int max)
 {
     static char body[64 * 1024];
-    char url[300], path[48];
-    int i, n;
-    snprintf(url, sizeof url, "%s/v1/lobbies", base);
-    if (!base[0] || http_get(url, body, sizeof body) < 0 || (n = json_count(body, "lobbies")) < 0)
+    char url[300];
+    double sent, got;
+    int n;
+    if (!base[0] || !inited)
         return -1;
-    if (n > max)
-        n = max;
-    for (i = 0; i < n; i++) {
-        NetLobbyInfo *l = &out[i];
-        long long v;
-        memset(l, 0, sizeof *l);
-#define FIELD(key) (snprintf(path, sizeof path, "lobbies[%d]." key, i), path)
-        json_string(body, FIELD("code"), l->code, sizeof l->code);
-        json_string(body, FIELD("roomName"), l->room_name, sizeof l->room_name);
-        json_string(body, FIELD("version"), l->version, sizeof l->version);
-        json_string(body, FIELD("hostName"), l->host_name, sizeof l->host_name);
-        l->track = json_int(body, FIELD("track"), &v) ? (int)v : 0;
-        l->players = json_int(body, FIELD("players"), &v) ? (int)v : 0;
-        l->max_players = json_int(body, FIELD("maxPlayers"), &v) ? (int)v : 0;
-        json_string(body, FIELD("phase"), l->phase, sizeof l->phase);
-        json_bool(body, FIELD("full"), &l->full);
-        json_number(body, FIELD("raceStartedAt"), &l->race_started_at);
-        json_number(body, FIELD("finishEndsAt"), &l->finish_ends_at);
-        json_number(body, FIELD("nextRaceAt"), &l->next_race_at);
-        json_string(body, FIELD("region"), l->region, sizeof l->region);  /* finding 135 */
-        json_string(body, FIELD("colo"), l->colo, sizeof l->colo);
-#undef FIELD
-    }
+    snprintf(url, sizeof url, "%s/v1/lobbies", base);
+    sent = net_now_ms();
+    if (http_get(url, body, sizeof body) < 0)
+        return -1;
+    got = net_now_ms();
+    SDL_LockMutex(api);  /* not while connect_to makes the client again */
+    n = client_read_lobbies(&client, body, sent, got, out, max);
+    SDL_UnlockMutex(api);
     return n;
 }
 
