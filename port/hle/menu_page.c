@@ -343,7 +343,7 @@ void menu_draw_rect(int x, int y, int w, int h, int r, int g, int b, int a)
    shell's texture bins can reach 0x3B9F (their end, word 0xEE7F0) and small render targets start
    at 0x3F80, so this keeps 3 pages below it and 12 above. The pixels go to the GS from the core's
    own memory (PATH3, host_service_graphics_feed) once per new picture, never through the game's
-   heap; the draw takes two of the popups' rectangle packets. 16-bit because a 32-bit 256 x 256
+   heap; the draw takes three of the popups' rectangle packets. 16-bit because a 32-bit 256 x 256
    footprint (32 pages) would reach 0x3F80. */
 enum { PIC_TBP = 0x3C00, PIC_HEADER = 6, PIC_BYTES = MENU_PICTURE_W * MENU_PICTURE_H * 2 };
 static const uint16_t *uploaded;       /* the picture now in VRAM; NULL: upload before drawing */
@@ -371,7 +371,7 @@ static void menu_preview_field(void)
 
 void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture)
 {
-    if (!picture || !rect_packets || rects_used + 2 > DRAW_RECTS || w <= 0 || h <= 0) return;
+    if (!picture || !rect_packets || rects_used + 3 > DRAW_RECTS || w <= 0 || h <= 0) return;
     picture_idle = 0;
     if (picture != uploaded) {
         static int logged;
@@ -384,9 +384,10 @@ void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture)
     func_0023D618(view, &cx, &cy);
     func_0023D650(view, &vw, &vh);
     int left = cx - (vw >> 1) + x, top = cy - (vh >> 1) + y;
-    uint64_t *a = rect_packets[rects_used++], *b = rect_packets[rects_used++], *q;
+    uint64_t *a = rect_packets[rects_used++], *b = rect_packets[rects_used++], *c = rect_packets[rects_used++], *q;
     memset(a, 0, sizeof *rect_packets);
     memset(b, 0, sizeof *rect_packets);
+    memset(c, 0, sizeof *rect_packets);
     q = a + 2;  /* TEXFLUSH; TEX0: the picture, DECAL; TEX1: bilinear (the text packets set their own) */
     q[0] = 3 | 1ull << 60, q[1] = 0xE, q += 2;
     q[0] = 0, q[1] = 0x3F, q += 2;
@@ -394,15 +395,28 @@ void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture)
     q[0] = 0x60, q[1] = 0x14, q += 2;
     a[0] = (uint64_t)(((q - a) / 2) | 0x60000000), a[1] = 0;
     func_002103D8(D_00513B00, view, a);
-    q = b + 2;  /* a textured sprite, UV half a texel inside so bilinear stays in the 160 lines */
-    q[0] = 1 | 0x8000 | 1ull << 46 | 0x116ull << 47 | 5ull << 60, q[1] = 0x53531, q += 2;
+    /* Two triangles (a strip), not a sprite: the native renderer draws upscaled sprites (flag 1024)
+       sampling each GS pixel once, as at 1x, so a sprite's picture stays blocky at 2x-8x; a
+       triangle's UV runs across every rendered pixel, so bilinear works at any scale. Same
+       rectangle and texels at 1x. UV half a texel inside so bilinear stays in the 160 lines. */
+    const uint64_t u0 = 8, v0 = 8, u1 = MENU_PICTURE_W * 16 - 8, v1 = MENU_PICTURE_H * 16 - 8;
+    q = b + 2;  /* top left, top right */
+    q[0] = 1 | 1ull << 46 | 0x114ull << 47 | 5ull << 60, q[1] = 0x53531, q += 2;
     func_002105A0(D_00513B00, q, 128, 128, 128, 128), q += 2;
-    q[0] = 8 | (uint64_t)8 << 32, q += 2;
+    q[0] = u0 | v0 << 32, q += 2;
     func_00210578(D_00513B00, q, left, top), q += 2;
-    q[0] = (MENU_PICTURE_W * 16 - 8) | (uint64_t)(MENU_PICTURE_H * 16 - 8) << 32, q += 2;
-    func_00210578(D_00513B00, q, left + w, top + h), q += 2;
+    q[0] = u1 | v0 << 32, q += 2;
+    func_00210578(D_00513B00, q, left + w, top), q += 2;
     b[0] = (uint64_t)(((q - b) / 2) | 0x60000000), b[1] = 0;
     func_002103D8(D_00513B00, view, b);
+    q = c + 2;  /* bottom left, bottom right: the strip goes on */
+    q[0] = 2 | 0x8000 | 2ull << 60, q[1] = 0x53, q += 2;
+    q[0] = u0 | v1 << 32, q += 2;
+    func_00210578(D_00513B00, q, left, top + h), q += 2;
+    q[0] = u1 | v1 << 32, q += 2;
+    func_00210578(D_00513B00, q, left + w, top + h), q += 2;
+    c[0] = (uint64_t)(((q - c) / 2) | 0x60000000), c[1] = 0;
+    func_002103D8(D_00513B00, view, c);
 }
 
 void menu_draw_bar(int x, int y, int w, int h) { func_0018F9C0(0, x, y, w, h); }
