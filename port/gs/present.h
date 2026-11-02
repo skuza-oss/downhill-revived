@@ -14,6 +14,9 @@ void gs_window_event(unsigned type);  /* the SDL thread's window events (sdl_hos
 /* The mouse (finding 092): the SDL thread's mouse events (an SDL_Event *); each pass of its loop
    the window's title and cursor (shown while the mouse moves, hidden when idle or riding). */
 void gs_mouse_event(const void *event);
+/* A touchscreen is the mouse from the start (touch_host.c): the menus' first reading (which only
+   sets the baseline) then comes before the first tap, so that tap counts. */
+void gs_mouse_touchscreen(void);
 void gs_window_tick(void);
 /* Where the renderer last showed the picture in its w x h window: [left, right) x [top, bottom). */
 void gs_picture_rect(int left, int top, int right, int bottom, int w, int h);

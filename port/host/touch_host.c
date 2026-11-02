@@ -20,6 +20,7 @@
 #include "host_api.h"
 #include "../hle/hle.h"
 #include "../hle/touch.h"
+#include "../gs/present.h"
 
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -76,6 +77,7 @@ static int touch_on(void)
         lock = SDL_CreateMutex();
 #ifdef __ANDROID__
         available = 1;
+        gs_mouse_touchscreen();   /* else the menus' first reading takes the first tap as its baseline */
 #else
         const char *mouse = getenv("DHD_TOUCH_MOUSE");
         available = mouse && atoi(mouse) ? 2 : 0;

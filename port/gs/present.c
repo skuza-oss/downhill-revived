@@ -686,6 +686,13 @@ void gs_mouse_event(const void *event)
     MOUSE_UNLOCK();
 }
 
+void gs_mouse_touchscreen(void)
+{
+    MOUSE_LOCK();
+    mouse.state.seen = 1;   /* no move: the cursor stays hidden */
+    MOUSE_UNLOCK();
+}
+
 /* SDL thread, every pass of its loop: a new title (gs_window_title); text input while a text
    field is open; the cursor shows for 3 s after the mouse was used, never while a race is ridden
    (the game's controls in riding mode, D_0029E290). */
