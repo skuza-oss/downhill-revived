@@ -351,6 +351,15 @@ other player's ping and region; another player's country is never sent). The lis
 epoch before a room is joined (0.7.6 showed ENDS IN 29893031:32): the list carries the server's
 `now`. Server tests 73/73; two games on hidden desktops logged every line.
 
+2026-11-02 (finding 136): the resolution scale the GPU allows is no longer hidden. dhd.log has
+one line with the scale in use, `capped` when it is under the one asked, the limit and its reason
+with the figures (`resolution scale 4x, capped: 8x asked, this GPU allows up to 4x (graphics
+memory: ...)`), Match window too. PC SETTINGS offers every scale and marks the ones over the
+limit (`8x (running 4x: GPU memory)`, footer `This GPU's memory allows up to 4x`); the launcher
+reads the last run's line from dhd.log and says the same under Resolution (`Your GPU's memory
+allows up to 4x; 8x runs at 4x`, choices `8x (runs at 4x)`). The cap's rule is unchanged. Boot
+state trace unchanged.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
