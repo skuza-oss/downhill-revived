@@ -201,8 +201,8 @@ it unchanged (finding 088, CL3).
 
 ### What players get
 PC SETTINGS in the game's options, saved to dhd.ini (finding 064): resolution and scale,
-borderless/windowed, Hor+ widescreen with the HUD anchored (finding 056), frame rate (60, or real
-offline simulation steps at higher rates, finding 067), texture packs in PCSX2's format (finding 057), the sharp
+borderless/windowed, Hor+ widescreen with the HUD anchored (finding 056), frame rate (a cap: the
+game steps by the real time since the last frame at every rate, findings 067, 139), texture packs in PCSX2's format (finding 057), the sharp
 font (finding 058), movies, vibration, EXIT GAME. The launcher (`port/launcher`, finding 093)
 holds the settings, the rider name and the updates on every platform; the game has no updater
 or start window of its own (2026-10-27). It decides the one data folder for the player's files
@@ -236,7 +236,9 @@ scrolls or changes values (finding 092; the shell's own menus are not bridged ye
   and `harness_negative.py` (its negative controls).
 - Game state: per-field state traces (`port/hle/state_trace.c`, `state_trace_run.py`,
   `state_diff.py`, `trace_columns.py`; `codeptrs_guard.py`), the wasm offset scan
-  (`wasm_offset_scan.py`, run by `build_wasm.py`), `test_fps_race.py` for high rates.
+  (`wasm_offset_scan.py`, run by `build_wasm.py`), `test_fps_race.py` for high rates,
+  `rate_drift.py` (the race at 30-240 steps a second against 60) and `slow_race.py` (a slow PC
+  made with `DHD_SLOW_FRAME`: game speed, bursts and sound; finding 139).
 - Retail comparisons with PCSX2 (`compare_pcsx2.py`, `race_compare.py`, finding 024), online race
   runs (`online_race.py`), timing (`bench_race.py`,
   `sample_profile.py`); crash and trap reports name RVAs with `host64_rva.py`. The tools start the
@@ -410,6 +412,21 @@ connection; try again in an hour.", "Couldn't reach GitHub or the backup server 
 timed out)...", "Update failed: the download couldn't reach GitHub (...)"). The full errors go to
 the new `launcher.log`. Server tests 88/88, launcher tests 27 pass. The endpoint needs a server
 deploy.
+
+2026-11-02 (finding 139): one delta-time game clock. Every paced frame, at every frame rate (60
+included) and online, the game steps by the real time since the last frame, between one step at
+the selected rate and two fields, smoothed so the steps add up to wall time; no debt, no
+fast-forward. It replaces the fixed 1/60 step at 60 (slow motion below 60 fps), the one-field cap
+above 60 with its repaid debt (the speed ramps), the online extra fields and `DHD_PACE=wall`. The
+mixer gets wall time, so the sound keeps its speed too. Slow PC made on the RTX desktop
+(`DHD_SLOW_FRAME`): at 45 fps the game went from x0.75 to x0.999 at FPS 60 and 120, the worst
+second at 85 fps from x0.87-x1.13 to x0.97-x1.04, the sound's time-stretching from 57 to 5-6 s a
+minute. Two-field steps broke 12 of finding 067's per-frame counters (the post-race countdown never
+ended, the action lock stuck, ...) and made riders "airborne" on every bump (at 30 steps a second
+nobody finished the scripted race): fixed. The race at 30-144 steps a second now finishes with no
+trend against 60 (player -7..+6%, AI mean -0.5..+4.1%: the race's own chaos, finding 067).
+Deterministic runs keep the original clock: the state trace is unchanged. V-Sync keeps three swapchain buffers, so a missed refresh no longer halves 120 to 60.
+Ghosts/replays stay off on the delta-time clock, now at 60 too (open).
 
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
