@@ -242,6 +242,15 @@ show only rooms whose `version` matches their own.
 - A server restart (a deploy) drops every socket with no close event. A lobby client says
   hello again under the same name and gets its member back (id, host, rider, Ready); members
   not back within the hello timeout leave as disconnects.
+- Rejoin after a drop (finding 137). A hello takes back the member of its name that has no
+  socket, or whose socket has sent nothing for 4 s (clients send something every second: their
+  pings, the room's pongs). If a member of that name still speaks, the hello waits until that
+  socket has been quiet 4 s, then decides; one still speaking means another player of the same
+  name, who joins as a new member. The old socket of a member taken back is closed (1000,
+  `replaced`). A socket that ends without a close frame (1006) outside its race keeps its member
+  20 s for the rejoin (it doesn't race meanwhile); a member whose socket sends nothing for 20 s
+  leaves as a disconnect and the socket is closed (1001, `silent`). A clean close (1000) or a
+  drop during the member's race leaves at once.
 
 ## Retail preview flow (finding 065)
 

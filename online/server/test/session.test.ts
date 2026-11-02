@@ -379,7 +379,8 @@ describe("session rooms",()=>{
     const {h,cs,code}=await setup(1);
     h.sendJson({type:"settings",public:true,maxPlayers:10,roomName:"\u0800".repeat(32),rotation:Array.from({length:64},(_,i)=>i),trackLimits:Array(64).fill(10)});
     await snap(h,r=>r.public);
-    for(let i=1;i<10;i++)cs.push(await Client.join(code,"\u0800".repeat(24)));
+    // names of the same size, each its own (a silent member's name again is its rejoin, finding 137)
+    for(let i=1;i<10;i++)cs.push(await Client.join(code,"\u0800".repeat(23)+String.fromCharCode(0x0800+i)));
     await snap(h,r=>r.members.length===10);
     // every member with a region and the room with a colo and hint (finding 135): still within 4 KB
     await edit(code, st=>{st.members[0].name="\u0800".repeat(24);st.version="v".repeat(64);

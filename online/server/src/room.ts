@@ -38,6 +38,19 @@ const UNUSED_ROOM_MS = 60_000;
     only cheats on or off makes another kind of race (finding 128). */
 const LAPS_CHEATS = 2;
 
+// A player's rejoin (finding 137). The game's hello names no member, only the player, so a hello
+// under a member's name is that member coming back when the member's own socket has gone quiet:
+// a game in a room sends something every second (its pings; the room's pongs), so a socket quiet
+// this long is one the game has given up. A hello while it still speaks waits until it has been
+// quiet this long, then decides. REJOIN_QUIET_MS in the environment overrides it (the tests).
+const REJOIN_QUIET_MS = 4_000;
+/** A member whose connection dropped without a close from the game (1006) stays this long for
+    its rejoin; a member whose socket has said nothing for this long is dropped. */
+const REJOIN_GRACE_MS = 20_000;
+/** Close code and reason for the old socket of a member taken back by a rejoin: an ordinary
+    close, so a game that wasn't gone after all rejoins (as a new member, if it still speaks). */
+const REPLACED_CLOSE = 1000;
+
 interface Member {
   id: number;
   name: string;
@@ -51,6 +64,9 @@ interface Member {
   /** Their region as Cloudflare places them ("EU", "NA"...; "" unknown), shown to the room. Never
       their country: rooms are public and players post their logs (finding 135). */
   region?: string;
+  /** Their connection dropped (no close from the game) at this time: kept REJOIN_GRACE_MS for the
+      game's rejoin, without a socket (finding 137). */
+  awaySince?: number;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -172,6 +188,11 @@ export class Room extends DurableObject<Env> {
   private readonly startedAt = Date.now();
   /** This instance asked the trace where it runs (once). */
   private probed = false;
+  /** When each socket last sent anything. Memory only: a socket not here (a wake-up) counts from
+      the instance's start. */
+  private heard = new WeakMap<WebSocket, number>();
+  /** Sockets whose hello waits for a same-named member's socket to go quiet (onHello). */
+  private helloWaiting = new Set<WebSocket>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -265,6 +286,8 @@ export class Room extends DurableObject<Env> {
   // ---- WebSocket events ----
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
+    this.heard.set(ws, Date.now());
+    if (this.helloWaiting.has(ws)) return;
     if (typeof msg !== "string") {
       this.relay(ws, msg);
       return;
@@ -365,15 +388,17 @@ export class Room extends DurableObject<Env> {
     }
   }
 
-  async webSocketClose(ws: WebSocket): Promise<void> {
-    await this.dropSocket(ws);
+  async webSocketClose(ws: WebSocket, code: number, _reason?: string, wasClean?: boolean): Promise<void> {
+    // 1006: the connection ended without a close frame (the game's network dropped, or it gave a
+    // silent connection up): it may come back. A game that leaves sends "leave" first.
+    await this.dropSocket(ws, code === 1006 || wasClean === false);
     try {
       ws.close(1000);
     } catch {}
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
-    await this.dropSocket(ws);
+    await this.dropSocket(ws, true);
   }
 
   async alarm(): Promise<void> {
@@ -382,13 +407,29 @@ export class Room extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       const info = ws.deserializeAttachment() as SocketInfo | null;
       if (info && info.memberId === null && !info.gone) {
-        if (now - info.connectedAt > HELLO_TIMEOUT_MS)
+        if (now - info.connectedAt > HELLO_TIMEOUT_MS && !this.helloWaiting.has(ws))
           this.close(ws, "hello_timeout", "No hello received.");
         else pending++;
       }
     }
-    if (this.state && now - this.startedAt > HELLO_TIMEOUT_MS)
-      for (const x of [...this.state.members]) if (!this.sockets.has(x.id)) await this.leave(x.id, "disconnect");
+    if (this.state)
+      for (const x of [...this.state.members]) {
+        const ws = this.sockets.get(x.id);
+        if (ws) {
+          // Dead connections: no message (a game sends one every second) for REJOIN_GRACE_MS. The
+          // close event of a connection that died on the way may come minutes later, or never.
+          if (now - this.heardAt(ws) > REJOIN_GRACE_MS) {
+            await this.leave(x.id, "disconnect");
+            try {
+              ws.close(1001, "silent");
+            } catch {}
+          }
+        } else if (now > (x.awaySince != null ? x.awaySince + REJOIN_GRACE_MS : this.startedAt + HELLO_TIMEOUT_MS)) {
+          // Not back in time: after a drop (awaySince), or after a restart (a deploy drops every
+          // socket and no close event comes: members without a socket at the start are ghosts).
+          await this.leave(x.id, "disconnect");
+        }
+      }
     const st = this.state;
     if (!st) {
       if (pending) await this.ctx.storage.setAlarm(now + PING_INTERVAL_MS);
@@ -504,7 +545,32 @@ export class Room extends DurableObject<Env> {
 
   // ---- Lobby ----
 
-  private async onHello(ws: WebSocket, info: SocketInfo, m: Msg): Promise<void> {
+  private heardAt(ws: WebSocket): number {
+    return this.heard.get(ws) ?? this.startedAt;
+  }
+
+  private rejoinQuietMs(): number {
+    const v = Number((this.env as unknown as Record<string, unknown>).REJOIN_QUIET_MS);
+    return Number.isFinite(v) && v >= 0 ? v : REJOIN_QUIET_MS;
+  }
+
+  /** The member a hello under `name` takes back, if any (finding 137): one without a socket (its
+      connection dropped, or the room restarted), else one whose socket has gone quiet. `wait`: the
+      time to wait before a same-named member's socket counts as quiet (0: none to wait for). */
+  private rejoinOf(st: RoomState, name: string, now: number): { member?: Member; wait: number } {
+    const named = st.members.filter((x) => x.name === name);
+    const away = named.find((x) => !this.sockets.has(x.id));
+    if (away) return { member: away, wait: 0 };
+    let wait = Infinity;
+    for (const x of named) {
+      const quiet = now - this.heardAt(this.sockets.get(x.id)!);
+      if (quiet >= this.rejoinQuietMs()) return { member: x, wait: 0 };
+      wait = Math.min(wait, this.rejoinQuietMs() - quiet);
+    }
+    return { wait: named.length ? wait : 0 };
+  }
+
+  private async onHello(ws: WebSocket, info: SocketInfo, m: Msg, waited = false): Promise<void> {
     if (m.protocol !== PROTOCOL)
       return this.refuse(ws, "protocol_mismatch", `This server speaks protocol ${PROTOCOL}; update the game.`);
     // The version gate: releases older than MIN_VERSION (wrangler.jsonc) may not play.
@@ -528,15 +594,28 @@ export class Room extends DurableObject<Env> {
     const asHost = info.create && st !== null && st.version === null && st.members.length === 0;
     if (!st || (!asHost && st.version === null))
       return this.refuse(ws, "room_not_found", "No room has this code.");
-    // Back after a restart (a deploy drops every socket and no close event comes): a member left
-    // without a socket under this name is theirs again, host, rider and Ready included.
-    const ghost = asHost ? undefined : st.members.find((x) => x.name === name && !this.sockets.has(x.id));
+    // A player back under their name (their connection dropped, or a restart dropped every socket)
+    // gets their member again: id, host, rider, Ready and race place included (finding 137).
+    const now = Date.now();
+    const rejoin = asHost ? { wait: 0 } : this.rejoinOf(st, name, now);
+    const ghost = rejoin.member;
     if (!asHost) {
       if (st.race && !st.session) return this.refuse(ws, "room_started", "The race has already started.");
       if (version !== st.version)
         return this.refuse(ws, "version_mismatch", `The host runs "${st.version}", you run "${version}".`);
       if (iso !== st.isoSha256)
         return this.refuse(ws, "iso_mismatch", "Your game ISO does not match the host's.");
+      if (!ghost && rejoin.wait > 0 && !waited) {
+        // A member of this name still speaks, or did just now: the high-ping rejoin, whose old
+        // socket the room hasn't seen end yet, or another player of the same name. Wait until it
+        // has been quiet long enough, then decide again (messages on this socket wait too).
+        this.helloWaiting.add(ws);
+        await new Promise((resolve) => setTimeout(resolve, rejoin.wait));
+        if (!this.helloWaiting.delete(ws)) return;  // this socket closed meanwhile
+        const again = ws.deserializeAttachment() as SocketInfo;
+        if (again.gone || again.memberId !== null) return;
+        return this.onHello(ws, again, m, true);
+      }
       if (!ghost && st.members.length >= st.maxPlayers) {
         // counted: how often players find a room full (are bigger rooms wanted?)
         this.stat(["full", clientVersion, info.country ?? ""], [st.members.length, st.maxPlayers]);
@@ -562,11 +641,32 @@ export class Room extends DurableObject<Env> {
     member.region = info.region ?? "";
     if (!ghost) st.members.push(member);
     if (asHost) st.hostId = member.id;
+    if (ghost) {
+      delete ghost.awaySince;
+      ghost.countdown = features.includes(FEATURE_COUNTDOWN);
+      // The old socket is quiet and may not close for minutes: forget it, so its late close
+      // doesn't remove the member, and close it.
+      const old = this.sockets.get(ghost.id);
+      if (old && old !== ws) {
+        old.serializeAttachment({ ...(old.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
+        this.slotOf.delete(old);
+        try {
+          old.close(REPLACED_CLOSE, "replaced");
+        } catch {}
+      }
+      this.rtts.delete(ghost.id);
+      this.firstRtts.delete(ghost.id);
+      // A game never rejoins during its race (it races on alone, port/net/client.c): a member
+      // still in the race is out of it now.
+      if (st.session && this.inRace(st, ghost.id)) this.retire(st, ghost.id, "left");
+    }
     info.memberId = member.id;
     ws.serializeAttachment(info);
     this.sockets.set(member.id, ws);
-    if (ghost) this.rebuildRace();
-    else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
+    if (ghost) {
+      this.rebuildRace();
+      if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
+    } else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
     this.send(ws, {
       type: "welcome",
       protocol: PROTOCOL,
@@ -737,7 +837,8 @@ export class Room extends DurableObject<Env> {
     st.countdownEndsAt = null;
 
     // Host first, then join order.
-    const racers = st.members.filter(x => !st.session || st.grid?.includes(x.id)).sort((a, b) => Number(b.id === st.hostId) - Number(a.id === st.hostId));
+    // Members away after a drop (finding 137) don't race: their game isn't here to start.
+    const racers = st.members.filter(x => this.sockets.has(x.id) && (!st.session || st.grid?.includes(x.id))).sort((a, b) => Number(b.id === st.hostId) - Number(a.id === st.hostId));
     const now = Date.now();
     st.race = {
       ...(st.session ? {rules: {...st.gridRules!}, results: racers.map(x => ({id:x.id, name:x.name, rider:x.rider, place:0}))} : {}),
@@ -772,9 +873,25 @@ export class Room extends DurableObject<Env> {
     this.updateListing();
   }
 
-  private async dropSocket(ws: WebSocket): Promise<void> {
+  /** A socket ended. `dropped`: without a close from the game, which may rejoin: outside a race
+      the member stays REJOIN_GRACE_MS without a socket (finding 137); in it, or after a refusal,
+      the member leaves now. */
+  private async dropSocket(ws: WebSocket, dropped = false): Promise<void> {
+    this.helloWaiting.delete(ws);
     const info = ws.deserializeAttachment() as SocketInfo | null;
-    if (info?.memberId != null) await this.leave(info.memberId, "disconnect");
+    const id = info?.memberId;
+    if (id == null) return;
+    const st = this.state;
+    const member = st?.members.find((x) => x.id === id);
+    if (!dropped || !st || !member || this.inRace(st, id) || this.sockets.get(id) !== ws)
+      return this.leave(id, "disconnect");
+    member.awaySince = Date.now();
+    this.sockets.delete(id);
+    this.rtts.delete(id);
+    this.firstRtts.delete(id);
+    ws.serializeAttachment({ ...info, memberId: null, gone: true });
+    this.slotOf.delete(ws);
+    await this.changed();
   }
 
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
@@ -844,7 +961,7 @@ export class Room extends DurableObject<Env> {
   }
 
   private lockGrid(st: RoomState): void {
-    st.grid = st.members.filter(x => x.ready && !x.choosing).map(x => x.id);
+    st.grid = st.members.filter(x => x.ready && !x.choosing && this.sockets.has(x.id)).map(x => x.id);
     st.gridRules = {...st.rules!};
     st.nextRaceAt = null; st.waitingForRider = false; st.lastEvent = null;
     if (this.trackLimit(st, st.track) < st.grid.length) {

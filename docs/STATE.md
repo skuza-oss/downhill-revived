@@ -391,6 +391,14 @@ agree draws some pixels one step differently on DX12 than before (none on Vulkan
 a menu picture's pixels at 4x, about 0.003% of race pixels). The AMD iGPU varies a few pixels from
 run to run (also before; no application race found, finding 131 lists the checks).
 
+2026-11-02 (finding 137, issue #30): no more clones in online rooms. A game whose connection
+dropped rejoins with the same hello; the server gave a member back by name only when that member
+had no socket, but with a dead connection its old socket stays open on the server for minutes, so
+the rejoin became a second member (and a host's rights stayed with the dead copy). Now a hello
+takes back the same-named member whose socket has been quiet 4 s (waiting up to that when it spoke
+just before), a 1006 drop outside a race keeps the member 20 s for its rejoin, and a socket silent
+20 s is dropped. Server only: deploying it fixes 0.7.7. Server tests 81/81.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
