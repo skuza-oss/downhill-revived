@@ -622,6 +622,9 @@ static void receive_frames(void)
                 r->rider = get32(e + 2);
                 for (int k = 0; k < 3; k++) r->outfit[k] = get32(e + 6 + 4 * k), r->bike[k] = get32(e + 18 + 4 * k);
                 r->colour = n - 2 >= 34 ? (int32_t)get32(e + 30) : -1;
+                /* a peer's word is not trusted: a colour outside the BIKE COLOR page's cursor range
+                   takes the frame's own (-1), so a bad value can't index the game's tables */
+                if (r->colour < -1 || r->colour > 15) r->colour = -1;
                 r->have = 1;
                 fprintf(stderr, "online: player %d rides %X (%d %d %d), bike %d %d %d, colour %d\n", sender, r->rider,
                         r->outfit[0], r->outfit[1], r->outfit[2], r->bike[0], r->bike[1], r->bike[2], r->colour);
