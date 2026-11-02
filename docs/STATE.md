@@ -399,6 +399,18 @@ takes back the same-named member whose socket has been quiet 4 s (waiting up to 
 just before), a 1006 drop outside a race keeps the member 20 s for its rejoin, and a socket silent
 20 s is dropped. Server only: deploying it fixes 0.7.7. Server tests 81/81.
 
+2026-11-02 (finding 138): the launcher's update check has a backup. When GitHub's releases API fails
+(no connection to api.github.com, its 60-an-hour limit, 5xx, a bad answer), the launcher asks the
+online server's new `GET /v1/latest`. That endpoint serves the newest release's `latest.json`,
+fetched from GitHub's release download, kept fresh for 5 minutes, with the last good copy kept for
+when GitHub fails, and checked to name only this repository's release assets. No release step.
+A player's own `update_url` works as before, without a backup. The bottom bar now says what went
+wrong in one line ("No internet connection.", "GitHub is limiting update checks from your
+connection; try again in an hour.", "Couldn't reach GitHub or the backup server (your connection
+timed out)...", "Update failed: the download couldn't reach GitHub (...)"). The full errors go to
+the new `launcher.log`. Server tests 88/88, launcher tests 27 pass. The endpoint needs a server
+deploy.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
