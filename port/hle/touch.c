@@ -222,8 +222,10 @@ struct Touch {
     int hint;                  /* TOUCH_HINT_* on screen now */
     double hint_until, hint_race_start, last_hop_race, slide_far_since;
     int freeze, trick_hint_repeat;
+    uint32_t freeze_at;        /* the hold starts at this VBLANK, once pictures with the tip are shown (0: none) */
     double freeze_since;
     int race_new;
+    int race_was_on;           /* the race was on screen at the last update */
 };
 
 static const uint16_t SECTOR_BUTTONS[8] = {
@@ -1539,8 +1541,10 @@ static void hints_step(Touch *t)
     else if (!(shown & TOUCH_HINT_SLIDE) && t->slide_far_since > 0 && t->now - t->slide_far_since > 1000) SHOW(TOUCH_HINT_SLIDE, 4000);
     else if (!(shown & TOUCH_HINT_TRICK) && t->air_layout && g->air && race - t->air_since >= 400 && !t->trick.held) {
         SHOW(TOUCH_HINT_TRICK, 5000);
-        t->freeze = 1;   /* the port stops advancing frames until the first push */
-        t->freeze_since = t->now;
+        /* the port stops advancing frames until the first push: a few VBLANKs later, so the pictures
+           with the tip are on screen while it holds */
+        t->freeze_at = g->vsync + 3;
+        if (!t->freeze_at) t->freeze_at = 1;
         t->trick_hint_repeat = 1;
     } else if (t->trick_hint_repeat == 2 && t->trick.on) {   /* the thumb was still on the stick at touchdown: once more */
         t->trick_hint_repeat = 3;
@@ -1555,14 +1559,15 @@ static void hints_step(Touch *t)
 void touch_update(Touch *t, const TouchGame *game, double now)
 {
     t->now = now;
-    int was_on = race_on_screen(t);
+    int was_on = t->race_was_on;
     t->game = *game;
     t->have_game = 1;
     if (game->race_hud) {
         if (!was_on) t->race_new = 1;
         t->hud_seen = now;
     }
-    if (was_on && !race_on_screen(t) && t->pause == PAUSE_NONE) {   /* the race is gone */
+    t->race_was_on = race_on_screen(t);
+    if (was_on && !t->race_was_on && t->pause == PAUSE_NONE) {   /* the race is gone */
         drop_race_touches(t);
         t->panel_open = 0;
         t->hold_cross_until = 0;
@@ -1571,6 +1576,10 @@ void touch_update(Touch *t, const TouchGame *game, double now)
     seq_advance(t);
     for (int i = 0; i < 16; i++)
         if (t->pulse_buttons[i] && (int32_t)(game->vsync - t->pulse_until[i]) >= 0) t->pulse_buttons[i] = 0;
+    if (t->freeze_at && (int32_t)(game->vsync - t->freeze_at) >= 0) {
+        t->freeze_at = 0;
+        if (t->hint == TOUCH_HINT_TRICK && game->air) t->freeze = 1, t->freeze_since = now;
+    }
     if (t->freeze) {
         int pushed = t->trick.on && t->trick.held;
         if (pushed || now - t->freeze_since > 5000 || !game->air || !race_on_screen(t)) t->freeze = 0;
@@ -1955,7 +1964,7 @@ static void draw_hint(const Touch *t, Draw *d)
     case TOUCH_HINT_HOP: line1 = "LIFT, THEN HOLD HOP TO CROUCH"; line2 = "LET GO TO JUMP"; ring = TC_HOP; break;
     case TOUCH_HINT_SPRINT: line1 = "DOUBLE-TAP AND HOLD PEDAL"; line2 = "TO SPRINT"; ring = TC_PEDAL; break;
     case TOUCH_HINT_SLIDE: line1 = "HOLD SLIDE FOR A POWERSLIDE"; line2 = "WHILE THE LEFT THUMB STEERS"; ring = TC_SLIDE; break;
-    case TOUCH_HINT_TRICK: line1 = "PUSH A DIRECTION FOR A TRICK"; line2 = t->freeze ? "LET GO BEFORE YOU LAND - THE GAME WAITS FOR YOU" : "LET GO BEFORE YOU LAND"; ring = TC_TRICK; break;
+    case TOUCH_HINT_TRICK: line1 = "PUSH A DIRECTION FOR A TRICK"; line2 = t->freeze || t->freeze_at ? "LET GO BEFORE YOU LAND - THE GAME WAITS FOR YOU" : "LET GO BEFORE YOU LAND"; ring = TC_TRICK; break;
     default: return;
     }
     float W = t->screen.width;
@@ -1964,7 +1973,7 @@ static void draw_hint(const Touch *t, Draw *d)
     put(d, TS_RECT, x, y, w, 6.5f, 2.0f, 0, rgba(10, 14, 18, 0.94f), rgba(255, 255, 255, 0.35f));
     text(d, x, y - 2.2f, 3.0f, 0, line1, rgba(255, 255, 255, 1));
     text(d, x, y + 2.6f, 2.2f, 0, line2, rgba(255, 255, 255, 0.7f));
-    if (t->freeze) text(d, W * 0.42f, 3.5f, 2.2f, 0, "PAUSED FOR THE HINT", rgba(255, 255, 255, 0.8f));
+    if (t->freeze || t->freeze_at) text(d, W * 0.42f, 3.5f, 2.2f, 0, "PAUSED FOR THE HINT", rgba(255, 255, 255, 0.8f));
     if (ring >= 0 && t->ctl[ring].on) {
         const Ctl *k = &t->ctl[ring];
         float r = ring == TC_TRICK ? 15.5f * trick_scale(t) : k->r;

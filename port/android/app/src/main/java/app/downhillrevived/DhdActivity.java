@@ -104,7 +104,7 @@ public class DhdActivity extends SDLActivity {
                     tiltListener = new SensorEventListener() {
                         @Override public void onSensorChanged(SensorEvent e) {
                             float x = e.values[0], y = e.values[1], sx, sy;
-                            int rotation = getWindowManager().getDefaultDisplay().getRotation();
+                            int rotation = getDisplay().getRotation();
                             if (rotation == Surface.ROTATION_90) { sx = -y; sy = x; }
                             else if (rotation == Surface.ROTATION_270) { sx = y; sy = -x; }
                             else if (rotation == Surface.ROTATION_180) { sx = -x; sy = -y; }
