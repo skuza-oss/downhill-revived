@@ -1207,11 +1207,12 @@ NOT_CORE = ('docs/', 'online/', '.github/', 'port/launcher/', 'port/render/', 'p
 
 
 def core_inputs_key():
-    """A hash of everything the module is built from: the checkout's files (tracked, with their
-    working-tree content) except NOT_CORE and Markdown, the generated asm/ and assets/, the tools'
-    versions and the environment that points at inputs."""
+    """A hash of everything the module is built from: the checkout's files (tracked, and new ones
+    git doesn't ignore yet, with their working-tree content) except NOT_CORE and Markdown, the
+    generated asm/ and assets/, the tools' versions and the environment that points at inputs."""
     h = hashlib.sha256(b'dhd-module-cache 1\n')
-    tracked = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True).stdout.decode('utf-8', 'replace')
+    tracked = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=ROOT,
+                             capture_output=True).stdout.decode('utf-8', 'replace')
     names = {n for n in tracked.split('\0') if n and not n.startswith(NOT_CORE) and not n.endswith('.md')}
     for d in ('asm', 'assets'):
         for p in glob.glob(os.path.join(ROOT, d, '**', '*'), recursive=True):
