@@ -1900,8 +1900,13 @@ static void draw_panel_rows(const Touch *t, Draw *d)
             "PAST THE EDGE: STYLED TRICK",
             "SIGNATURE: LEFT, THEN RIGHT THROUGH THE MIDDLE, OUT",
             "(NEEDS A FULL TRICK METER)", "", "TAP TO GO BACK"};
-        for (unsigned i = 0; i < sizeof lines / sizeof *lines; i++)
-            text(d, W / 2, H * 0.12f + i * 4.4f, i ? 2.2f : 3.6f, 0, lines[i], i ? white : green);
+        float fit = W * 0.66f - 6.0f;   /* the panel's width less its margins */
+        for (unsigned i = 0; i < sizeof lines / sizeof *lines; i++) {
+            size_t n = strlen(lines[i]);
+            float h = i ? 2.2f : 3.6f;
+            if (n && 0.9f * h * (float)n > fit) h = fit / (0.9f * (float)n);   /* a long line shrinks to fit */
+            text(d, W / 2, H * 0.12f + i * 4.4f, h, 0, lines[i], i ? white : green);
+        }
         return;
     }
     if (t->pause == PAUSE_CONFIRM) {
