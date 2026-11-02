@@ -11,10 +11,11 @@ const $ = (id) => document.getElementById(id);
 // The settings pages: the rows of OPTIONS > PC SETTINGS plus the dhd.ini lines players change. Each
 // setting's choices (value and label) and default are the game's (dhd_settings, port/render/settings,
 // through settings_schema); a switch's are off then on. A row with `when` is greyed out, with
-// `offHint`, while that doesn't hold. A hint may be a function (drawn with the schema).
+// `offHint`, while that doesn't hold. A hint may be a function (drawn with the schema); a select's
+// `option` gives a choice's words (value, label).
 const TABS = [
   ['Graphics', [
-    { key: 'scale', label: 'Resolution', hint: 'How sharp the 3D picture is drawn. 1x is the PS2\'s own.', type: 'select' },
+    { key: 'scale', label: 'Resolution', hint: () => scaleHint(), type: 'select', option: (v, t) => scaleOption(v, t) },
     { key: 'DHD_ASPECT', label: 'Aspect', hint: 'Wide fits your monitor\'s shape; 16:9 is always 16:9', type: 'seg' },
     { key: 'DHD_PRESENT_FILTER', label: 'Scaling', type: 'seg' },
     { key: 'fps', label: 'Frame rate', hint: 'Game steps a second, offline and online.', type: 'select' },
@@ -50,6 +51,7 @@ const OFFLINE_ONLY = "Offline only: this disc image's game files are different f
 const state = {
   version: '', settings: {}, schema: {}, gameFound: true, running: false, tab: 0, update: null, check: 'idle', checkError: '',
   discProblem: null, texturePack: false,
+  scale: null,        // the last run's resolution scale (dhd.log): { used, asked, limit, reason }; null: no run said yet
   online: null,       // the disc's online check: { path, checking, done, total }, { path, usa } or { path, error }
   server: null,       // null: not asked yet; 'down'; or { races, riders, min_version }
   error: null,        // { text, fix: { label, icon, onclick } }: stays in the footer until dismissed
@@ -226,6 +228,29 @@ function newer(a, b) {
 
 // ---------- settings ----------
 
+// Resolution's hint and choices with what the last run found (state.scale, src-tauri/src/scale.rs):
+// the scales over this GPU's limit stay, marked, and the hint says what the chosen one runs at.
+const SCALE_HINT = 'How sharp the 3D picture is drawn. 1x is the PS2\'s own.';
+
+function scaleAllows(r, first) {
+  const what = r.reason === 'memory' ? 'GPU\'s memory' : r.reason === 'texture' ? 'GPU\'s largest texture' : 'GPU';
+  return `${first ? 'Your' : 'your'} ${what} allows up to ${r.limit}x`;
+}
+
+function scaleHint() {
+  const r = state.scale, value = get('scale'), asked = Number(value);
+  if (!r) return SCALE_HINT;
+  if (asked > r.limit) return `${scaleAllows(r, true)}; ${asked}x runs at ${r.limit}x`;
+  if (value === 'window' && r.asked === 'window')
+    return `Match window ran at ${r.used}x last time${r.limit < 8 ? `; ${scaleAllows(r, false)}` : ''}`;
+  return r.limit < 8 ? scaleAllows(r, true) : SCALE_HINT;
+}
+
+function scaleOption(value, label) {
+  const r = state.scale;
+  return r && Number(value) > r.limit ? `${label} (runs at ${r.limit}x)` : label;
+}
+
 function control(row, off) {
   const value = get(row.key);
   const label = (text) => `${row.label}: ${text}`;
@@ -238,10 +263,11 @@ function control(row, off) {
           onclick: () => save(row.key, v, label(t)).then(renderRows),
         }, t)));
     case 'select': {
+      const words = row.option || ((v, t) => t);
       const s = el('select', { 'aria-label': row.label, disabled: off, onchange: (e) => {
         const opt = choices(row.key).find(([v]) => v === e.target.value);
-        save(row.key, e.target.value, label(opt[1]));
-      } }, choices(row.key).map(([v, t]) => el('option', { value: v, selected: v === value }, t)));
+        save(row.key, e.target.value, label(opt[1])).then(() => { if (typeof row.hint === 'function') renderRows(); });
+      } }, choices(row.key).map(([v, t]) => el('option', { value: v, selected: v === value }, words(v, t))));
       return el('div', { class: 'select' }, s, icon('i-down'));
     }
     case 'switch': {
@@ -623,6 +649,7 @@ async function start() {
   state.discProblem = snap.disc_problem;
   state.texturePack = snap.texture_pack;
   state.played = snap.played;
+  state.scale = snap.scale;
 
   document.querySelectorAll('[data-page]').forEach((b) => b.addEventListener('click', () => show(b.dataset.page)));
   $('win-min').onclick = () => appWindow.minimize();
@@ -671,6 +698,8 @@ async function start() {
     state.confirmClose = false;
     state.played = e.payload.played;
     renderPlayed();
+    // what this run's dhd.log says about the resolution scale (the GPU may have changed)
+    invoke('snapshot').then((snap) => { state.scale = snap.scale; if (!$('page-settings').hidden) renderRows(); });
     renderFooter();
     checkServer();
     if (e.payload.wants_update) checkUpdate().then(() => { if (state.check === 'available') installUpdate(); });

@@ -5,6 +5,7 @@
 
 mod disc;
 mod game;
+mod scale;
 mod update;
 
 use serde::Serialize;
@@ -45,6 +46,9 @@ struct Snapshot {
     texture_pack: bool,
     /// Seconds played in all (saves/playtime.txt).
     played: u64,
+    /// The resolution scale the last run drew at and how far its GPU goes (dhd.log); None when no
+    /// run has said yet.
+    scale: Option<scale::ScaleReport>,
 }
 
 /// A setting as the settings tabs offer it (dhd_settings' table): its default and its choices as
@@ -148,6 +152,7 @@ fn snapshot(app: State<App>) -> Snapshot {
         game_found: app.place.exe().is_file(),
         running: app.game.lock().unwrap().is_some(),
         played: played(&app.place),
+        scale: scale::last_run(&app.place.data.join("dhd.log")),
         settings,
     }
 }
