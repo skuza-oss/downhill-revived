@@ -124,6 +124,11 @@ pub struct Objects {
     present_rgba: wgpu::RenderPipeline,
     /// the same into BGRA8, made at the first present on a surface without RGBA8 (Apple's)
     present_bgra: std::sync::OnceLock<wgpu::RenderPipeline>,
+    /// Widescreen's fill beside a 4:3 picture (present.rs): `present_shrink` (draw layout) into
+    /// the small RGBA8 texture, and `present_fill` into RGBA8 or BGRA8; made at the first filled picture
+    fill_shrink: std::sync::OnceLock<wgpu::RenderPipeline>,
+    fill_rgba: std::sync::OnceLock<wgpu::RenderPipeline>,
+    fill_bgra: std::sync::OnceLock<wgpu::RenderPipeline>,
     /// `native_grow_depth` (grow layout; depth only, writes Depth32Float with Always)
     pub grow_pipe: wgpu::RenderPipeline,
     /// `native_scanout` (scanout layout)
@@ -458,6 +463,15 @@ impl Objects {
         self.present_bgra.get_or_init(|| fullscreen_pipeline(gpu, &self.module, &self.draw_layout, "present_pixel", Some(format)))
     }
 
+    /// The fill's pipelines (present.rs): `present_shrink` into the small RGBA8 texture, and
+    /// `present_fill` into a target of `format` (as `present_pipe`).
+    pub fn fill_pipes(&self, gpu: &Gpu, format: wgpu::TextureFormat) -> (&wgpu::RenderPipeline, &wgpu::RenderPipeline) {
+        let make = |entry: &str, format| fullscreen_pipeline(gpu, &self.module, &self.draw_layout, entry, Some(format));
+        let shrink = self.fill_shrink.get_or_init(|| make("present_shrink", wgpu::TextureFormat::Rgba8Unorm));
+        let fill = if format == wgpu::TextureFormat::Rgba8Unorm { &self.fill_rgba } else { &self.fill_bgra };
+        (shrink, fill.get_or_init(|| make("present_fill", format)))
+    }
+
     fn build(gpu: &Gpu, dual: bool) -> Objects {
         use crate::shaders::{NATIVE, NATIVE_DUAL};
         use wgpu::ShaderStages as S;
@@ -563,6 +577,9 @@ impl Objects {
             upload_pipe,
             present_rgba,
             present_bgra: std::sync::OnceLock::new(),
+            fill_shrink: std::sync::OnceLock::new(),
+            fill_rgba: std::sync::OnceLock::new(),
+            fill_bgra: std::sync::OnceLock::new(),
             grow_pipe,
             scanout_pipe,
             scanout_fast_pipe,

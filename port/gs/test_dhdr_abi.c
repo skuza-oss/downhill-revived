@@ -46,7 +46,7 @@
         F(DhdrPictureResult, copy_px) F(DhdrPictureResult, imports) F(DhdrPictureResult, import_px) \
         F(DhdrPictureResult, two_pass_draws) \
     S(DhdrPresentRect) F(DhdrPresentRect, rect) F(DhdrPresentRect, cut) F(DhdrPresentRect, window_w) \
-        F(DhdrPresentRect, window_h) F(DhdrPresentRect, resize) F(DhdrPresentRect, pad) \
+        F(DhdrPresentRect, window_h) F(DhdrPresentRect, resize) F(DhdrPresentRect, fill) \
     C(DHDR_ABI_VERSION) \
     C(DHDR_DEV_VULKAN) C(DHDR_DEV_FXC) C(DHDR_DEV_DEBUG) C(DHDR_DEV_VALIDATION) C(DHDR_DEV_FALLBACK) \
     C(DHDR_DEV_NO_DUAL_SOURCE) \

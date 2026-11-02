@@ -246,7 +246,9 @@ typedef struct DhdrPresentRect {
     float rect[4];                   /* present.wgsl's rectangle, as native_present_rect makes it */
     int32_t cut[4];                  /* scissor in window pixels: left, top, right, bottom */
     uint32_t window_w, window_h;     /* the client area; 0 x 0 = minimised: nothing is drawn */
-    uint32_t resize, pad;            /* resize: reconfigure even when the size is unchanged */
+    uint32_t resize;                 /* reconfigure even when the size is unchanged */
+    uint32_t fill;                   /* nonzero: the window around cut gets the picture blurred and
+                                        darkened (widescreen's 4:3 pictures, finding 140) */
 } DhdrPresentRect;
 enum { DHDR_NATIVE_DUAL = 1, DHDR_NATIVE_POINT_FILTER = 2 };   /* create: DUAL = may use dual-source
                                                                   blending; options: POINT_FILTER */

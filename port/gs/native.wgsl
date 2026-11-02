@@ -540,13 +540,50 @@ fn native_convert(@builtin(global_invocation_id) tid: vec3<u32>) {
 // filtered. The viewport is the whole surface (WebGPU keeps viewports inside the attachment), so
 // the picture's rectangle (x, y, width, height in window pixels; twice as large and shifted for
 // DHD_VIEW) maps each pixel centre to its uv here; the scissor cuts it to the picture.
-struct Present { rect: vec4<f32>, }
+// Widescreen fills the window's sides beside a 4:3 picture (a loading card, a movie; finding 140)
+// with the same picture blurred and darkened: present_shrink first boils the picture's content
+// (source: its uv rectangle, a movie's rows only) down to a small texture, then present_fill draws
+// that over the whole window, the content's rectangle scaled to cover it (cover, window pixels),
+// before present_pixel draws the sharp picture in the middle.
+struct Present { rect: vec4<f32>, cover: vec4<f32>, source: vec4<f32>, }
 @group(0) @binding(0) var<uniform> present: Present;
 @group(1) @binding(0) var present_source: texture_2d<f32>;
 @group(1) @binding(1) var present_sampler: sampler;
+
+// The small texture's size (present.rs FILL_SIZE) and how dark the fill is.
+const FILL_SIZE: vec2<f32> = vec2<f32>(64.0, 48.0);
+const FILL_SHADE: f32 = 0.45;
 
 @fragment
 fn present_pixel(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = (position.xy - present.rect.xy) / present.rect.zw;
     return vec4<f32>(textureSampleLevel(present_source, present_sampler, uv, 0.0).rgb, 1.0);
+}
+
+// A texel of the small texture: the mean of 4 x 4 filtered samples spread over its part of the
+// content.
+@fragment
+fn present_shrink(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    var sum = vec3<f32>(0.0);
+    for (var j = 0; j < 4; j++) {
+        for (var i = 0; i < 4; i++) {
+            let at = (floor(position.xy) + (vec2<f32>(f32(i), f32(j)) + 0.5) / 4.0) / FILL_SIZE;
+            sum += textureSampleLevel(present_source, present_sampler, present.source.xy + at * present.source.zw, 0.0).rgb;
+        }
+    }
+    return vec4<f32>(sum / 16.0, 1.0);
+}
+
+// The fill: the small texture under a 3 x 3 tent of filtered samples 1.5 texels apart, darkened.
+@fragment
+fn present_fill(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let uv = (position.xy - present.cover.xy) / present.cover.zw;
+    var sum = vec3<f32>(0.0);
+    for (var j = -1; j <= 1; j++) {
+        for (var i = -1; i <= 1; i++) {
+            let weight = f32((2 - abs(i)) * (2 - abs(j)));
+            sum += weight * textureSampleLevel(present_source, present_sampler, uv + vec2<f32>(f32(i), f32(j)) * 1.5 / FILL_SIZE, 0.0).rgb;
+        }
+    }
+    return vec4<f32>(sum / 16.0 * FILL_SHADE, 1.0);
 }

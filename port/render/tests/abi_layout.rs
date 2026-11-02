@@ -58,7 +58,7 @@ fn all() -> Vec<(&'static str, usize, usize, Vec<Field>)> {
                                     self_copies: u64, self_copy_px: u64, copies: u64, copy_px: u64, imports: u64,
                                     import_px: u64, two_pass_draws: u64 }),
         fields!(DhdrPresentRect { rect: [f32; 4], cut: [i32; 4], window_w: u32, window_h: u32, resize: u32,
-                                  pad: u32 }),
+                                  fill: u32 }),
     ]
 }
 

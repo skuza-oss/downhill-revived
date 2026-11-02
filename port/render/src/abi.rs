@@ -314,7 +314,9 @@ pub struct DhdrPresentRect {
     pub window_w: u32,
     pub window_h: u32,
     pub resize: u32,
-    pub pad: u32,
+    /// Nonzero: fill the window around `cut` with the picture blurred and darkened (widescreen's
+    /// 4:3 pictures, finding 140).
+    pub fill: u32,
 }
 
 // ---------------- function signatures ----------------
@@ -444,5 +446,5 @@ layout!(DhdrPictureResult, size 80, align 8, {
     self_copy_px @ 32, copies @ 40, copy_px @ 48, imports @ 56, import_px @ 64, two_pass_draws @ 72,
 });
 layout!(DhdrPresentRect, size 48, align 4, {
-    rect @ 0, cut @ 16, window_w @ 32, window_h @ 36, resize @ 40, pad @ 44,
+    rect @ 0, cut @ 16, window_w @ 32, window_h @ 36, resize @ 40, fill @ 44,
 });
