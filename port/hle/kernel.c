@@ -724,45 +724,44 @@ void kernel_intc_write(uint32_t value)
     *(volatile uint32_t *)(uintptr_t)PS2_INTC_STAT = intc_stat;
 }
 
-/* Normal play runs the virtual frame clock (one game frame per field, as in the PCSX2
-   comparisons) and holds each field to its own wall deadline at 59.94 Hz: never faster. A port
-   that falls behind moves the deadlines instead of catching up, so it never skips or doubles a
-   field and the game's delta stays 1. DHD_FRAME_CLOCK=1 runs unpaced, DHD_PACE=wall lets wall
-   time drive the fields (the game then measures slow frames as 2 or 3 fields). */
+/* Normal play runs the virtual frame clock (one game frame per VBLANK, as in the PCSX2
+   comparisons) and holds each frame to its own wall deadline at the selected rate (59.94 Hz at
+   60): never faster. A port that falls behind moves the deadlines instead of catching up. The
+   game's step is the wall time since the last frame (fps.c, the delta-time clock, finding 139),
+   so a slow frame moves the game as far as the time it took (up to two fields), and the game
+   keeps real time down to 30 frames a second. DHD_FRAME_CLOCK=1 runs unpaced, with a fixed step
+   (deterministic runs). */
 static int paced;
-/* fps.c's wall-clock steps above 60 (port_fps_wall_mode): normal paced play, or a host that paces
-   the fields itself on the frame clock and says so with DHD_FPS_WALL=1 (the browser's worker.js,
-   which then gives host_wall_seconds real time). Deterministic runs (DHD_FRAME_CLOCK=1 alone)
-   keep the nominal step. */
+/* fps.c's wall-clock steps (port_clock_wall): normal paced play, or a host that paces the frames
+   itself on the frame clock and says so with DHD_FPS_WALL=1 (the browser's worker.js, which then
+   gives host_wall_seconds real time). Deterministic runs (DHD_FRAME_CLOCK=1 alone) keep the
+   nominal step. */
 static int wall_steps;
 static double pace_base;
 
-/* An online race waited `seconds` for the other players: the following fields keep their spacing
+/* An online race waited `seconds` for the other players: the following frames keep their spacing
    from the end of the wait instead of catching up (finding 042: a PC that started a little early
-   otherwise waits about one field on every field). */
+   otherwise waits about one field on every field), and the wait is no game time (no step
+   covers it). */
 void kernel_pace_slip(double seconds)
 {
     if (pace_base) pace_base += seconds;
-    port_fps_wall_mode(wall_steps);  /* above 60: the wait is no stall for the steps to repay */
+    port_clock_rebase();
 }
 
-/* An online race keeps every PC's fields on the clock they share from the synced start
-   (kernel_pace_shared): a PC that fell behind (a hitch, a stall, a PC too slow for the race) does
-   not start again from now. It runs without waiting, and while it is still more than a field late
-   each game frame gets two fields (the game measures the frame so and moves everything twice as
-   far, as on a PS2 that drops a frame), until it is back on time; the race clock counts both.
-   Three fields a frame lost race-clock time against the other PCs (finding 047), so two at most.
-   Above 60 the steps themselves follow wall time (fps.c's wall mode, online without the offline
-   half-second cap) and catch up so, so those frames are paced as offline ones (finding 114). */
-static int pace_shared, extras;  /* extras: fields given since the game last waited */
-static uint64_t frame_waits, extra_wait;  /* the game's vsync waits (intc_read); the one extras counts from */
-unsigned kernel_pace_extra_fields, kernel_pace_late_ms;  /* for the online log: extra fields given, how late */
+/* An online race from its agreed start (kernel_pace_shared). Each PC times its own race (finding
+   044): a PC that fell behind (a hitch, a stall, a PC too slow for the race) catches up through
+   its steps, which online keep all the wall time the two-field cap leaves over and give it back
+   when the frames are quicker (fps.c, finding 114), so its race clock stays true to wall time.
+   The frames are paced as offline ones, without just-in-time frames (jit_on). */
+static int pace_shared;
+unsigned kernel_pace_late_ms;  /* for the online log: game time owed to wall time */
 
 void kernel_pace_shared(int on)
 {
     if (on && !pace_shared) pace_base = 0;  /* from this field */
     pace_shared = on;
-    port_fps_wall_mode(wall_steps);  /* above 60: from this step (the start's wait is no stall) */
+    port_clock_rebase();  /* from this step (the start's wait is no game time) */
 }
 
 static void pace(void)
@@ -770,20 +769,10 @@ static void pace(void)
     double base = pace_base;
     static uint64_t fields;
     const double period = port_frame_period();
-    const int shared = pace_shared && !port_fps_high();
     double now = host_wall_seconds(), due = base + (double)++fields * period;
-    if (pace_shared && !shared) kernel_pace_late_ms = (unsigned)(port_fps_behind() * 1000);
-    if (!base || (!shared && now > due + 2 * period)) {  /* the first field, or behind: start again from now */
+    if (pace_shared) kernel_pace_late_ms = (unsigned)(port_fps_behind() * 1000);
+    if (!base || now > due + 2 * period) {  /* the first field, or behind: start again from now */
         pace_base = now, fields = 0;
-        return;
-    }
-    if (shared) kernel_pace_late_ms = now > due ? (unsigned)((now - due) * 1000) : 0;
-    if (shared && now > due + period) {
-        if (extra_wait != frame_waits) extra_wait = frame_waits, extras = 0;
-        if (!extras && ee_frame_clock_enabled()) {
-            extras++, kernel_pace_extra_fields++;
-            ee_frame_clock_advance(next_vsync);  /* the next field is due now: delivered before the game waits again */
-        }
         return;
     }
     host_wait_wall(due);
@@ -882,10 +871,10 @@ static void vsync(void)
     pad_vsync();  /* padman updates the controllers once a frame */
     if (!fresh) host_pacing_input();
     host_widescreen_vsync();
-    /* Mixer/SPU time stays at the NTSC field rate, independently of real
-       offline simulation frames and of the VBLANKs per frame (port_vblank_seconds).
-       Preserve the exact original call at 60. */
-    if (!port_fps_high()) sound_tick();
+    /* On the delta-time clock the mixer/SPU time is wall time at the NTSC field rate,
+       independently of the frames and of the VBLANKs per frame (port_vblank_seconds): the sound
+       plays at its speed whenever the game does. The original clock keeps its call per VBLANK. */
+    if (!port_delta_clock()) sound_tick();
     else {
         static double audio_time;
         audio_time += port_vblank_seconds();
@@ -936,7 +925,7 @@ static int deliver(void)
         load_registers(&rpc_saved);
     }
     if (now >= next_vsync) {
-        uint64_t cycles = port_fps_high() ? (uint64_t)(BUS_HZ / port_fps()) : VSYNC_CYCLES;
+        uint64_t cycles = port_fps() == 60 ? VSYNC_CYCLES : (uint64_t)(BUS_HZ / port_fps());
         next_vsync += cycles;
         if (next_vsync < now)  /* fell far behind (a debugger stop): don't replay the frames */
             next_vsync = now + cycles;
@@ -1000,7 +989,6 @@ static void intc_read(void)
         return;
     if (intc_stat & 1u << INTC_VBLANK_START)
         return;
-    frame_waits++;
     wait_until(next_event());
 #if defined(__wasm__)
     uint32_t registers[5]={ps2.gpr[29].w[0],ps2.gpr[31].w[0],ps2.gpr[4].w[0],ps2.gpr[5].w[0],ps2.gpr[2].w[0]};
@@ -1091,13 +1079,12 @@ int Deci2Call(int call, void *arg) { (void)call, (void)arg; return -1; }
 /* ---- startup and the idle loop ---- */
 void kernel_init(void)
 {
-    const char *frame_clock = host_getenv("DHD_FRAME_CLOCK"), *pacing = host_getenv("DHD_PACE");
-    const int unpaced = frame_clock && !strcmp(frame_clock, "1"), wall = pacing && !strcmp(pacing, "wall");
-    ee_frame_clock_reset(unpaced || !wall);
-    paced = !unpaced && !wall;
+    const char *frame_clock = host_getenv("DHD_FRAME_CLOCK");
+    ee_frame_clock_reset(1);
+    paced = !(frame_clock && !strcmp(frame_clock, "1"));
     const char *fps_wall = host_getenv("DHD_FPS_WALL");
     wall_steps = paced || (fps_wall && atoi(fps_wall) == 1);
-    port_fps_wall_mode(wall_steps);
+    port_clock_wall(wall_steps);
     host_service_host_init();
     host_service_gs_reset();
     state_trace_init();  /* after gs_reset, which clears the GS struct; no-op unless DHD_STATE_TRACE */

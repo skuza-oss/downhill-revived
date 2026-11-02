@@ -9,7 +9,7 @@ int D_0027EC68[4];
 float D_0027EC78[4],D_0027EC9C[1],D_0075A690[4],D_0075A6A0[4];
 Key D_0027EC88[4]={{0,0},{1,.1f},{.4f,.3f},{0,1}};
 static int hz;
-int port_fps_high(void) { return hz>60; }
+int port_delta_clock(void) { return hz>60; }
 float port_step(void) { return 60.0f/hz; }
 int func_00238F60(void) { return 1; }
 void func_00239778(int);

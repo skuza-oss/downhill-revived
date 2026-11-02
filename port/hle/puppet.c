@@ -20,9 +20,9 @@
    Snapshots arrive about 20 a second. Each puppet keeps the last few and shows the remote rider
    DELAY behind the newest it has (interpolated between the two around that moment, a short
    extrapolation when one is late); the remote clock is estimated from the arrivals. Every PC
-   runs at its own frame rate (60-240), so the clocks here are race time in seconds, not ticks:
-   a tick (the race clock's field) is 1001/60000 s at 60 and 1/60 s above, and above 60 a step
-   is part of one (port_field_seconds, finding 114).
+   runs at its own frame rate (30-240), so the clocks here are race time in seconds, not ticks:
+   a tick (the race clock's field) is 1/60 s, and a step may be part of one or up to two of them
+   (port_field_seconds, findings 114, 139).
 
    Tests, one PC:
    DHD_PUPPET_RECORD=file   each race step, a snapshot of rider DHD_PUPPET_FROM (default 0)

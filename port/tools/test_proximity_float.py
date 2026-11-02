@@ -22,7 +22,7 @@ def main():
 #include <assert.h>
 #include <stdio.h>
 static float ps2_fmul(float a,float b){return ps2_float_mul(a,b);}
-static int port_fps_high(void){return 0;}  /* the 60 path */
+static int port_delta_clock(void){return 0;}  /* the 60 path */
 static int port_whole_step(void){return 1;}
 '''+code+r'''
 Game D_004B25A0; State D_002AF2C0; float D_0029C168[]={3.4028234663852886e38f};

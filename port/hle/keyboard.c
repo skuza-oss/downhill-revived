@@ -70,7 +70,7 @@ enum { KEYS = sizeof keys / sizeof *keys };
 /* Native devices consume the module's published rate, never call game logic. */
 #define FIELD_SECONDS (host_pacing_period() < 1.0/60 ? host_pacing_period() : 1.0/60)
 #else
-#define FIELD_SECONDS (port_fps_high() ? port_frame_period() : 1.0 / 60)
+#define FIELD_SECONDS (port_delta_clock() ? port_frame_period() : 1.0 / 60)
 #endif
 
 static struct {

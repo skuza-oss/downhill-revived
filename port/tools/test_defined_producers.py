@@ -85,7 +85,7 @@ void func_00231D48(void *o,const void *p) {abort();}
 int func_00238F60(void){return 1;}
 /* the frame-rate hooks of the patched units (port/hle/fps.c) at 60 fields/s, the retail rate:
    no high-rate path, the retail decay, no force window */
-int port_fps_high(void){return 0;}
+int port_delta_clock(void){return 0;}
 float port_decay(float factor){return factor;}
 float port_air_age(void *body,int current){abort();}
 void port_fps_force_window(void *body,int clear){}

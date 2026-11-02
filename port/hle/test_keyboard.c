@@ -148,5 +148,5 @@ int main(void)
     return 0;
 }
 /* Standalone keyboard tests retain the original 60-Hz input interval. */
-int port_fps_high(void) { return input_rate>60; }
+int port_delta_clock(void) { return input_rate>60; }
 double port_frame_period(void) { return 1.0/input_rate; }

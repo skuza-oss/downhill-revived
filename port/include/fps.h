@@ -3,14 +3,16 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Simulation clock (port/hle/fps.c, finding 067). 60 retains the original NTSC path and
-   arithmetic; online races run at the selected rate too (finding 114). */
-int port_fps(void);
+/* The game clock (port/hle/fps.c, findings 067, 114, 139): paced play steps by the real time
+   since the last frame (at most two fields) at every rate, offline and online; a deterministic
+   run at 60 keeps the original NTSC path and arithmetic. */
+int port_fps(void);      /* the selected rate, 30 to port_fps_max */
 int port_fps_max(void);  /* 240, or DHD_FPS_MAX when lower */
-int port_fps_high(void);
-void port_fps_wall_mode(int enabled);
+int port_delta_clock(void);           /* the delta-time clock's code paths are on */
+void port_clock_wall(int enabled);    /* paced: steps follow the wall clock (kernel_init) */
+void port_clock_rebase(void);         /* a wait that is no game time: the next step starts from now */
 double port_frame_period(void);
-double port_vblank_seconds(void);  /* the mixer's time for one VBLANK above 60 */
+double port_vblank_seconds(void);  /* the mixer's time for one VBLANK on the delta-time clock */
 int port_input_stamp(int legacy_field);
 
 /* Elapsed time of this real update, and its conversions of per-field constants. */
@@ -23,19 +25,19 @@ void port_particle_rotation(float *cosine,float *sine);
 int port_particle_dead(float age,float life_per_field);
 float port_counter_fields(int counter);
 double port_field_seconds(int counter);  /* a field counter as seconds, part of a field too */
-double port_fps_behind(void);            /* game time owed to wall time above 60, seconds */
+double port_fps_behind(void);            /* game time owed to wall time (online catch-up), seconds */
 
-/* The game clock (00238A68/00238C00/00238D98) at high rates. */
+/* The game clock (00238A68/00238C00/00238D98) on the delta-time clock. */
 void port_clock_reset(void);
 void port_clock_wait(int *out);
 void port_clock_step(void);
 
-/* Animation timestamps in 1/1024-field units at high rates. */
+/* Animation timestamps in 1/1024-field units on the delta-time clock. */
 int port_animation_step(void);
 float port_animation_fields(float ticks);
 int port_animation_scale(void);
 
-/* Rider physics at high rates. */
+/* Rider physics on the delta-time clock. */
 int port_air_tick(void *body, int previous);
 int port_air_first(void *body, int current);
 float port_air_age(void *body, int current);

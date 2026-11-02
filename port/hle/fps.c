@@ -1,4 +1,5 @@
-/* Real steps above 60, offline and online; never synthesized pictures. See findings 067, 114. */
+/* The game clock: one delta-time clock at every frame rate, offline and online, never synthesized
+   pictures (findings 049, 067, 114, 139). */
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "../include/fps.h"
@@ -14,8 +15,8 @@ extern float D_0029E3FC, D_0029E400;
 extern int func_00243CE8(int);
 static int requested;
 static double phase, anim_phase;
-static double step_fields, previous_wall, wall_error;
-static int wall_mode;
+static double step_fields, previous_wall, owed;
+static int wall_mode, delta = -1;
 static unsigned clock_serial;
 /* Online, from the countdown to the finish (race screen, race phase 1-4). */
 static int online_race(void)
@@ -24,60 +25,81 @@ static int online_race(void)
     return pads_online() && *(int *)GUEST(0x0829DED8)==9 && race_phase>=1 && race_phase<=4;
 }
 
-/* The selected rate limits pictures. Only paced updates (offline and online) track wall
-   time; deterministic/unpaced diagnostics keep the original rational clock.
-   Spread clock error over eight updates instead of feeding frame jitter to
-   physics. Retaining the residual makes this a time-conserving filter. */
+/* The step's limit: two fields (1/30 s), the original's own (func_00238D98 clamps its step to 1..2
+   fields). Below 30 frames a second the game runs slower than real time; the cap keeps every
+   system (physics, the ragdoll, particles, timers) inside the steps it was made for. */
+#define MOST_FIELDS 2.0
+
+/* Paced play (kernel_init: normal play, or the browser's DHD_FPS_WALL=1) steps the game by the
+   real time since the last frame, at every selected rate (finding 139). Deterministic runs
+   (DHD_FRAME_CLOCK=1: the state trace, race comparisons, benches) keep the rational clock, 60/N
+   fields a step. */
 static double vblank_wall, vblank_debt;
-void port_fps_wall_mode(int enabled) { wall_mode=enabled; previous_wall=0; wall_error=0; vblank_wall=0; vblank_debt=0; }
+void port_clock_wall(int enabled) { wall_mode=enabled; delta=-1; port_clock_rebase(); }
+/* A wait that is no game time (a lobby, an online start): the next step starts from now. */
+void port_clock_rebase(void) { previous_wall=0; owed=0; vblank_wall=0; vblank_debt=0; }
+/* The delta-time clock's code paths (finding 067's fractional steps) are on: paced play at any
+   rate, any rate but 60, or DHD_STEP_CLOCK=1 (a deterministic run of those paths at 60, for the
+   rate drift check). Only a deterministic run at 60 keeps the original arithmetic, exactly. */
+int port_delta_clock(void)
+{
+    if (delta < 0) {
+        const char *s = host_getenv("DHD_STEP_CLOCK");
+        delta = wall_mode || port_fps() != 60 || (s && atoi(s) == 1);
+    }
+    return delta;
+}
+
+/* This frame's step in fields. The wall time owed to the game (`owed`) gains the time since the
+   last frame and gives half of it as the step: an exponential average of the frame times, so
+   frame-time jitter reaches the physics at a third of its size (an alternating 9/17 ms comes out
+   as 11.7/14.3 ms) and a hitch is spread over the next few frames instead of one leap. It
+   conserves time: the steps add up to the wall time, less what is still owed (about a frame). No
+   debt is kept beyond that, so there is no fast-forward: what the two-field cap leaves over
+   (frames slower than 1/30 s, a stall, a window drag) is dropped offline, and the game runs that
+   much slower. An online race keeps it and gives it back at up to two fields a step once the
+   frames are quicker, so this rider's race clock stays where the other players see it (finding
+   114). A step is never shorter than one at the selected rate, 60/N fields. */
 static double clock_interval(void)
 {
-    const double nominal=60.0/port_fps();
-    double result=nominal;
-    if (wall_mode && port_fps_high()) {
-        double now=host_wall_seconds();
-        if (previous_wall) {
-            double elapsed=(now-previous_wall)*60;
-            /* Retain late-frame debt even when this step hits the 1/60 cap.
-               A later faster stretch repays it without an oversized step. */
-            if (elapsed>=0 && isfinite(elapsed)) wall_error+=elapsed-nominal;
-            /* A stall (a hidden browser tab, a window drag) is not repaid in full offline: at
-               most half a second of game time is caught up, at up to one field per update. An
-               online race repays all of it, as the 60 path's extra fields do (kernel.c pace):
-               the others see this rider where its own race clock is (finding 114). */
-            if (wall_error>30 && !online_race()) wall_error=30;
-            result=nominal+wall_error/8;
-            if (result<nominal) result=nominal;
-            if (result>1) result=1;
-            wall_error-=result-nominal;
-        }
+    const double least=60.0/port_fps();
+    if (!wall_mode) return least;
+    double now=host_wall_seconds();
+    if (!previous_wall) {
         previous_wall=now;
-    } else {
-        previous_wall=0;
-        wall_error=0;
+        return least;
     }
-    return result;
+    double elapsed=(now-previous_wall)*60;
+    previous_wall=now;
+    if (!(elapsed>=0) || !isfinite(elapsed)) elapsed=least;
+    owed+=elapsed;
+    double step=owed*0.5;
+    if (step<least) step=least;
+    if (step>MOST_FIELDS) step=MOST_FIELDS;
+    owed-=step;
+    if (owed>step && !online_race()) owed=step;  /* only the cap leaves more than a step */
+    if (owed<-MOST_FIELDS) owed=-MOST_FIELDS;    /* frames quicker than the rate: at most 2 fields ahead */
+    return step;
 }
-/* The mixer's time for one VBLANK above 60 (kernel.c vsync; finding 113). The frame clock
-   delivers a VBLANK every BUS_HZ/N cycles, 1024 per kernel boundary (timer.c), and a frame
-   crosses about 400 boundaries: above about 360 one update spans several VBLANKs (at 960 three
-   in the menus, two in a race). The update's step charged on each VBLANK ran the sound that many
-   times too fast.
-   Paced, a VBLANK is the wall time since the previous one, at most a field each. A hitch is
+/* The mixer's time for one VBLANK on the delta-time clock (kernel.c vsync; finding 113). The frame
+   clock delivers a VBLANK every BUS_HZ/N cycles, 1024 per kernel boundary (timer.c), and a frame
+   crosses about 400 boundaries: above about 360 one update spans several VBLANKs. Charging the
+   update's step on each VBLANK ran the sound that many times too fast.
+   Paced, a VBLANK is the wall time since the previous one, at most two fields each (the game
+   clock's own cap: below 30 frames a second sound and game slow down together). A hitch is
    caught up (the device played on from its cushion meanwhile), but only by 0.1 s: a longer
    stall already played as a gap, and more would only overfill the output queue, which skips it
-   (port/host/sound_out_win32.c; boot otherwise skipped 0.45 s). Unpaced, it is the virtual
-   field, 1/N s, which equals the nominal step that was charged before. */
+   (port/host/sound_out_sdl.c). Unpaced, it is the virtual field, 1/N s. */
 double port_vblank_seconds(void)
 {
-    const double nominal=1.0/port_fps(), field=1.0/60;
+    const double nominal=1.0/port_fps(), most=MOST_FIELDS/60;
     if (!wall_mode) return nominal;
     double now=host_wall_seconds();
     if (vblank_wall && now>=vblank_wall && isfinite(now-vblank_wall)) vblank_debt+=now-vblank_wall;
     else vblank_debt+=nominal;
     vblank_wall=now;
     if (vblank_debt>0.1) vblank_debt=0.1;
-    double result=vblank_debt<field ? vblank_debt : field;
+    double result=vblank_debt<most ? vblank_debt : most;
     vblank_debt-=result;
     return result;
 }
@@ -98,6 +120,8 @@ int port_fps_max(void)
     }
     return most;
 }
+/* The selected rate: the most steps (and pictures) a second, 30 to port_fps_max (the settings
+   offer 60 and up; 30-59 for tests and a hand-written dhd.ini). */
 int port_fps(void)
 {
     if (!requested) {
@@ -107,18 +131,17 @@ int port_fps(void)
             requested = host_display_hz();
             if (!requested) requested = 60;
         }
-        if (requested < 60) requested = 60;
+        if (requested < 30) requested = 30;
         if (requested > port_fps_max()) requested = port_fps_max();
-        hle_log("fps: requested %d real steps/s\n", requested);
+        hle_log("fps: requested %d steps/s at most\n", requested);
     }
     return requested;
 }
-int port_fps_high(void) { return port_fps() > 60; }
 double port_frame_period(void) { int n = port_fps(); return n == 60 ? 1001.0 / 60000.0 : 1.0 / n; }
-float port_step(void) { return port_fps_high() ? (float)(step_fields ? step_fields : 60.0/port_fps()) : (float)D_0029E3D0; }
-int port_whole_step(void) { return port_fps_high() ? whole : D_0029E3D0; }
-float port_decay(float f) { return port_fps_high() ? powf(f, port_step()) : f; }
-float port_blend(float r) { return port_fps_high() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,(wall_mode ? step_fields : 60.0/port_fps()))) : r; }
+float port_step(void) { return port_delta_clock() ? (float)(step_fields ? step_fields : 60.0/port_fps()) : (float)D_0029E3D0; }
+int port_whole_step(void) { return port_delta_clock() ? whole : D_0029E3D0; }
+float port_decay(float f) { return port_delta_clock() ? powf(f, port_step()) : f; }
+float port_blend(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,(wall_mode ? step_fields : 60.0/port_fps()))) : r; }
 float port_particle_sum(float q) {
     /* Evaluate the geometric sum in double: float cancellation near q=1
        otherwise makes gently damped particles move systematically too far. */
@@ -161,7 +184,7 @@ void port_clock_reset(void)
     whole = 0;
     step_fields=60.0/port_fps();
     previous_wall=0;
-    wall_error=0;
+    owed=0;
     reset_body_clocks();
     port_clock_step();
 }
@@ -189,17 +212,17 @@ void port_clock_step(void)
     *(volatile int *)GUEST(0x10000800)=0;
     D_0029E3E8=D_0029E3E0;
 }
-/* Stored animation timestamps retain their four-byte integer layout. At high
-   rates only, their unit is 1/1024 field; all consumers convert elapsed values. */
+/* Stored animation timestamps retain their four-byte integer layout. On the delta-time clock
+   their unit is 1/1024 field; all consumers convert elapsed values. */
 int port_animation_step(void)
 {
     if (port_animation_scale() == 1) return D_0029E3D0;
-    anim_phase += wall_mode && port_fps_high() ? step_fields*1024*port_fps() : 60 * 1024;
+    anim_phase += wall_mode ? step_fields*1024*port_fps() : 60 * 1024;
     int ticks = (int)(anim_phase / port_fps());
     anim_phase -= ticks*port_fps();
     return ticks;
 }
-int port_animation_scale(void) { port_fps(); return requested > 60 ? 1024 : 1; }
+int port_animation_scale(void) { return port_delta_clock() ? 1024 : 1; }
 float port_animation_fields(float t) { return port_animation_scale() > 1 ? t * (1.0f/1024) : t; }
 
 /* Per-body fractional airborne age; no layout changes to retail short x4A4.
@@ -247,7 +270,7 @@ float port_air_age(void *body, int current) { return current ? air_for(body)->ag
    or direct position/velocity writes. */
 void port_fps_contact_recovery(void *body)
 {
-    if (!port_fps_high()) return;
+    if (!port_delta_clock()) return;
     unsigned char *b=body,*r=*(unsigned char **)(b+0x158);
     Air *a=air_for(body);
     int slot=*(int *)(r+0x797C),race_phase=*(int *)GUEST(0x0843F348);
@@ -281,7 +304,7 @@ void port_fps_contact_recovery(void *body)
    preceding integration interval, not the following field. */
 void port_fps_force_window(void *body,int clear)
 {
-    if (!port_fps_high()) return;
+    if (!port_delta_clock()) return;
     Air *a=air_for(body);
     int field=D_0029E3D8-(phase==0);
     if (clear) {
@@ -292,16 +315,17 @@ void port_fps_force_window(void *body,int clear)
         for (int i=0;i<8;i++) force[i]=(i==3 || i==7) ? 1.0f : 0.0f;
     }
 }
-float port_counter_fields(int counter) { return port_fps_high() ? counter+(float)phase/port_fps() : (float)counter; }
+float port_counter_fields(int counter) { return port_delta_clock() ? counter+(float)phase/port_fps() : (float)counter; }
 /* A whole-field counter the game advanced this update (the race clock), in seconds: a field is
-   1001/60000 s at 60 (the NTSC grid the frames keep) and 1/60 s above (wall-clock steps), plus
-   the part of a field the high-rate clock is past it. Online snapshots carry this (finding 114). */
+   1/60 s on the delta-time clock (wall-clock steps), plus the part of a field the clock is past
+   it, and 1001/60000 s on the original clock (a deterministic run at 60, the NTSC grid). Online
+   snapshots carry this (finding 114). */
 double port_field_seconds(int counter)
 {
-    return port_fps_high() ? (counter+phase/port_fps())/60.0 : counter*(1001.0/60000.0);
+    return port_delta_clock() ? (counter+phase/port_fps())/60.0 : counter*(1001.0/60000.0);
 }
-/* Game time still owed to wall time above 60 (a stall being caught up), in seconds. */
-double port_fps_behind(void) { return wall_mode && port_fps_high() && wall_error>0 ? wall_error/60.0 : 0; }
+/* Game time still owed to wall time (an online race catching up), in seconds. */
+double port_fps_behind(void) { return wall_mode && owed>0 ? owed/60.0 : 0; }
 
 /* prev comes from the preceding real animation/simulation step, including at
    crash entry (001B1C20). Its displacement already has the selected step's
@@ -392,7 +416,8 @@ void port_clock_observe(void)
 
 /* DHD_FPS_TRACE=path: read-only race observer for port/tools/test_fps_race.py. One row per
    rider per race tick, plus every real update through tick 360 in path.steps.csv (the first
-   update carrying a tick comes earlier at high rates). DHD_FPS_STOP=N ends the game at tick N.
+   update carrying a tick comes earlier at high rates). DHD_FPS_STOP=N ends the game at tick N; the
+   game also ends when the race does (port/tools/rate_drift.py).
    Raw offsets are shared with puppet.c and rider.h. The CSVs hold game-derived state. */
 void port_fps_observe(void)
 {

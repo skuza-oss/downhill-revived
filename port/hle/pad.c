@@ -252,5 +252,5 @@ void rpc_pad_ext(int fno, void *send, int ssize, void *recv, int rsize)
 int port_input_stamp(int legacy_field)
 {
     extern unsigned int D_0029E10C;
-    return port_fps_high() ? (int)D_0029E10C : legacy_field;
+    return port_delta_clock() ? (int)D_0029E10C : legacy_field;
 }

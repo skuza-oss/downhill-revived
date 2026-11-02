@@ -1278,10 +1278,10 @@ static void state_sync(void)
             title("Downhill Revived online - room %s - player %d of %d - ping %d ms%s%s", on.code, on.local_slot + 1,
                   on.nslots, lobby.ping_ms, lobby.offline ? " - offline" : "",
                   on.end_held ? " - finished, waiting for the others" : "");
-        extern unsigned kernel_pace_extra_fields, kernel_pace_late_ms;
-        fprintf(stderr, "online: race clock %d (%d fps), %u snapshots sent, %u received, hits taken %d, %u ms late, %u "
-                "extra fields, lag (ms):%s\n", clock, port_fps(), on.sent, on.received, hle_puppet_hits_taken(),
-                kernel_pace_late_ms, kernel_pace_extra_fields, lag);
+        extern unsigned kernel_pace_late_ms;
+        fprintf(stderr, "online: race clock %d (%d fps), %u snapshots sent, %u received, hits taken %d, %u ms late, "
+                "lag (ms):%s\n", clock, port_fps(), on.sent, on.received, hle_puppet_hits_taken(),
+                kernel_pace_late_ms, lag);
         if (on.end_held) fprintf(stderr, "online: watching: %u owned AI snapshots sent, phase %d\n", on.ai_sent, EE32(PHASE));
         static double last_ping;
         if (last_title - last_ping >= 10) last_ping = last_title, log_pings(&lobby);

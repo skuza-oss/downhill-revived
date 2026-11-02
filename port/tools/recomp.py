@@ -953,9 +953,9 @@ def translate(name, recompiled, sigs):
         # coefficients, not the surrounding type-specific VU operations.
         if name == 'func_0022B708':
             if addr == 0x0022B730:
-                L.append('if (port_fps_high()) FPR(20)=port_step();')
+                L.append('if (port_delta_clock()) FPR(20)=port_step();')
             if addr == 0x0022B834:
-                L.append('if (port_fps_high()) {')
+                L.append('if (port_delta_clock()) {')
                 # The branch's delay slot stores the signed size slope. The
                 # high-rate jump bypasses that slot, so materialize it first.
                 L.append('MF32(ADDR(29,0x2C))=FPR(0);')
@@ -968,27 +968,27 @@ def translate(name, recompiled, sigs):
                     L.append('MF32(ADDR(29,0x%X))*=port_step();' % offset)
                 L.append('goto L_0022B898; }')
             if addr == 0x0022B938:
-                L.append('if (port_fps_high()) { GPR(2)=S32(UW(3)-port_whole_step()); goto L_fps_delay; }')
+                L.append('if (port_delta_clock()) { GPR(2)=S32(UW(3)-port_whole_step()); goto L_fps_delay; }')
             if addr == 0x0022B93C:
                 L.append('L_fps_delay:;')
         # This asm-only blend path shares the animation clock too.
         if name == 'func_00204F38' and addr == 0x00204F84:
             L.append('if (port_animation_scale()>1) FPR(20)=port_animation_fields(FPR(20));')
         if name == 'func_0023E288' and addr == 0x0023E3CC:
-            L.append('if (port_fps_high()) FPR(20)=port_step();')
+            L.append('if (port_delta_clock()) FPR(20)=port_step();')
         if name == 'func_0023E288' and addr == 0x0023E680:
-            L.append('if (port_fps_high()) FPR(0)=port_decay(FPR(0));')
+            L.append('if (port_delta_clock()) FPR(0)=port_decay(FPR(0));')
         if name == 'func_0022B258' and addr == 0x0022B2B4:
-            L.append('if (port_fps_high()) { FPR(2)=port_step(); GPR(22)=1; }')
+            L.append('if (port_delta_clock()) { FPR(2)=port_step(); GPR(22)=1; }')
         if name == 'func_0022B258' and addr == 0x0022B29C:
-            L.append('if (port_fps_high()) GPR(3)=S32(UW(3)+1-port_whole_step());')
+            L.append('if (port_delta_clock()) GPR(3)=S32(UW(3)+1-port_whole_step());')
         if name == 'func_0022B258' and addr == 0x0022B350:
-            L.append('if (port_fps_high()) fcc=port_particle_dead(FPR(0),MF32(ADDR(9,12)));')
+            L.append('if (port_delta_clock()) fcc=port_particle_dead(FPR(0),MF32(ADDR(9,12)));')
         if name == 'func_0022B258' and addr == 0x0022B3D4:
             # These particles store normalized lifetime in position.w.
             # Scaling gravity/phase alone leaves the full velocity (including
             # age) added once per frame, shortening the pickup by N/60.
-            L.append('if (port_fps_high()) { ps2_q128 saved=ps2.vf[15]; float h=port_step();')
+            L.append('if (port_delta_clock()) { ps2_q128 saved=ps2.vf[15]; float h=port_step();')
             L.append('port_particle_rotation(&ps2.vf[16].f[0],&ps2.vf[17].f[0]);')
             L.append('for (int k=0;k<4;k++) ps2.vf[15].f[k]=ps2_float_mul(saved.f[k],h);')
             fn.insn(op,a,text(op,a))

@@ -1,7 +1,9 @@
 """Port-only real-step corrections. Retail sources/checks remain untouched.
 
-Every edit is guarded at runtime; 60 takes the pre-unlock arithmetic. Timestamp
-storage stays integer: high-rate animation timestamps use 1/1024-field units.
+Every edit is guarded at runtime by port_delta_clock(): the delta-time clock (paced play at
+every rate, finding 139) takes these paths; only a deterministic run at 60 takes the original
+arithmetic. Timestamp storage stays integer: on the delta-time clock animation timestamps use
+1/1024-field units.
 """
 from pathlib import Path
 import re
@@ -27,30 +29,30 @@ def add(patches):
     patches.setdefault('unsorted/001909A8.c', []).append(('re',
         (r'func_00238F48\(\)',2),'port_input_stamp(func_00238F48())'))
     edit('0021F8E0','int next=n-1;',
-         'int next=n-(port_fps_high() ? port_whole_step() : 1);')
+         'int next=n-(port_delta_clock() ? port_whole_step() : 1);')
     edit('0021F8E0','++D_00660D60[k]',
-         '(D_00660D60[k]+=port_fps_high() ? port_whole_step() : 1)')
+         '(D_00660D60[k]+=port_delta_clock() ? port_whole_step() : 1)')
     edit('0017EB00','obj->counts[index]--;',
-         'obj->counts[index]-=port_fps_high() ? port_whole_step() : 1;')
+         'obj->counts[index]-=port_delta_clock() ? port_whole_step() : 1;')
     edit('0017E440','else obj->x3EC++;',
-         'else obj->x3EC+=port_fps_high() ? port_whole_step() : 1;')
+         'else obj->x3EC+=port_delta_clock() ? port_whole_step() : 1;')
 
     # RIDER SELECTED and the shop flight gate their skip on elapsed 60 Hz
     # fields, not updates: a skip before the camera blend ends gets reset.
     # From n0buholic (PR #13).
     for suffix in ('__c62', '__c16'):
         edit('001EB1D8', 'D_0029DF70%s++;' % suffix,
-             'D_0029DF70%s += port_fps_high() ? port_whole_step() : 1;' % suffix)
+             'D_0029DF70%s += port_delta_clock() ? port_whole_step() : 1;' % suffix)
 
     # Reset must take place after the original initializer too.
     edit('00238A68', '*(volatile int *)0x10000800 = 0;',
-         '*(volatile int *)0x10000800 = 0;\n    if (port_fps_high()) port_clock_reset();')
+         '*(volatile int *)0x10000800 = 0;\n    if (port_delta_clock()) port_clock_reset();')
     edit('00238C00', 'extern int func_00243CE8(int);',
          'extern int func_00243CE8(int);\nextern void rate_audit_update(void);')
     entry('00238C00', 'func_00238C00',
-          '    rate_audit_update();\n    if (port_fps_high()) { port_clock_wait(result); return 1; }')
+          '    rate_audit_update();\n    if (port_delta_clock()) { port_clock_wait(result); return 1; }')
     entry('00238D98', 'func_00238D98',
-          '    if (port_fps_high()) { port_clock_step(); return; }')
+          '    if (port_delta_clock()) { port_clock_step(); return; }')
     entry('0011A100', 'func_0011A100','    port_fps_race_step();')
     edit('00135A30','func_0012DDC0(o->x158);',
          'func_0012DDC0(o->x158); port_fps_contact_recovery(o);')
@@ -60,9 +62,9 @@ def add(patches):
     # field schedules, not integration work. A held slot must not run its
     # queries repeatedly on the intervening fractional updates.
     edit('0011A100', '++race->x501B4',
-         '(race->x501B4 += port_fps_high() ? port_whole_step() : 1)')
+         '(race->x501B4 += port_delta_clock() ? port_whole_step() : 1)')
     edit('0011A100', '--race->x501C0',
-         '(race->x501C0 -= port_fps_high() ? port_whole_step() : 1)')
+         '(race->x501C0 -= port_delta_clock() ? port_whole_step() : 1)')
 
     # FPS1 (rate audit): two per-update counters that are time in disguise.
     # D_0029DBAC is the particle/effects frame clock: the dust, snow and spray waves
@@ -70,18 +72,18 @@ def add(patches):
     # (0022E3D0) read it as a 60 Hz frame count, so at 240 they ran four times too
     # fast. Whole fields keep the retail 60 Hz phase and the 60 arithmetic identical.
     edit('00228BE8', 'D_0029DBAC += 1;',
-         'D_0029DBAC += port_fps_high() ? port_whole_step() : 1;')
+         'D_0029DBAC += port_delta_clock() ? port_whole_step() : 1;')
     # obj->x60C is the sound/skat queue owner's age; func_001BC250 returns it as
     # milliseconds with *1000/60, so per-update counting at 240 reports 4x the time.
     edit('001BBF30', 'obj->x60C++;',
-         'obj->x60C += port_fps_high() ? port_whole_step() : 1;')
+         'obj->x60C += port_delta_clock() ? port_whole_step() : 1;')
     for unit,expression in (
             ('0010EC80','*(int *)(obj->x0 + 0x797C) == D_002AF2C0.x501B4'),
             ('0010F0D8','obj->x0->x797C == D_002AF2C0.x501B4'),
             ('0010FB00','world->x797C==D_002AF2C0.x501B4')):
-        edit(unit,expression,'((!port_fps_high() || port_whole_step()) && ('+expression+'))')
+        edit(unit,expression,'((!port_delta_clock() || port_whole_step()) && ('+expression+'))')
     edit('00112360','o->x0->x797C != D_002AF2C0.x501B4',
-         '(port_fps_high() && !port_whole_step()) || o->x0->x797C != D_002AF2C0.x501B4')
+         '(port_delta_clock() && !port_whole_step()) || o->x0->x797C != D_002AF2C0.x501B4')
     # The track's creatures (func_00125E38, type 6: ids 0x1018-0x1022) pick their mode once a
     # field. When the player has finished and stopped (speed < 0.1), one more than 12.2 units
     # from the rider (xD8 > 150, squared) turns to walk to a point 3 units ahead of it (mode 2),
@@ -93,15 +95,15 @@ def add(patches):
     # 2 s after the finish (online, where the race then waits for the others). Picks stay on
     # whole fields: the chain is as deep as in retail.
     edit('00125E38', '        rider = D_0043EEC0[0];\n        if (rider != 0',
-         '        rider = D_0043EEC0[0];\n        if (port_fps_high() && !port_whole_step()) {\n'
+         '        rider = D_0043EEC0[0];\n        if (port_delta_clock() && !port_whole_step()) {\n'
          '        } else if (rider != 0')
     # Failed trick selections can be retried immediately: the cooldown is
     # zero until a choice succeeds. Polling that RNG on fractional updates
     # raises the probability of starting a trick and shifts later AI rolls.
     entry('00110870','func_00110870',
-          '    if (port_fps_high() && !port_whole_step()) return;')
+          '    if (port_delta_clock() && !port_whole_step()) return;')
     edit('0010C940','else if(func_00222BD8(0,1))',
-         'else if(port_fps_high() && !port_whole_step()) return;\n else if(func_00222BD8(0,1))')
+         'else if(port_delta_clock() && !port_whole_step()) return;\n else if(func_00222BD8(0,1))')
 
     for unit in ('00136790', '00136B40', '00136C20', '00136F80'):
         path = next(root.glob(unit + '.*'))
@@ -109,7 +111,7 @@ def add(patches):
         # Do not rewrite the accessor declaration.
         calls = list(re.finditer(r'func_00238F38\(\)', text))
         assert len(calls) == 1, (unit, len(calls))
-        edit(unit, 'func_00238F38()', '(port_fps_high() ? 60.0f : func_00238F38())')
+        edit(unit, 'func_00238F38()', '(port_delta_clock() ? 60.0f : func_00238F38())')
     edit('00136038', 'SCALE(o->x70,o->x70,0.9f);',
          'SCALE(o->x70,o->x70,port_decay(0.9f)); port_fps_force_window(o,0);')
     # 00231CC0 applies these tire vectors directly to linear/angular impulse,
@@ -117,96 +119,96 @@ def add(patches):
     # give N/60 times the friction per second. Scale the cap, not the
     # unconstrained collision impulse needed to cancel relative motion.
     edit('00132CE0','pos = &a->x50;',
-         'if (port_fps_high()) friction*=port_step();\n    pos = &a->x50;')
+         'if (port_delta_clock()) friction*=port_step();\n    pos = &a->x50;')
     edit('00161B10','bike->x434 > D_0029C7D0',
-         'bike->x434 > (port_fps_high() ? D_0029C7D0*port_step() : D_0029C7D0)')
+         'bike->x434 > (port_delta_clock() ? D_0029C7D0*port_step() : D_0029C7D0)')
     # Sliding tire modes bypass the Coulomb cap above: these are sustained
     # per-contact linear/angular impulses, not impact restitution.
     edit('0016AFC0','VecScale(out, &sum, D_0029C864);',
-         'VecScale(out, &sum, port_fps_high() ? D_0029C864*port_step() : D_0029C864);')
+         'VecScale(out, &sum, port_delta_clock() ? D_0029C864*port_step() : D_0029C864);')
     edit('0016ABC8','scale=func_0016AD98(D_0026EBE8,obj->xC);',
-         'scale=func_0016AD98(D_0026EBE8,obj->xC); if (port_fps_high()) scale*=port_step();')
+         'scale=func_0016AD98(D_0026EBE8,obj->xC); if (port_delta_clock()) scale*=port_step();')
     edit('0016ACE8','"f"(-func_0016AD98(D_0026EC18, obj->xC))',
-         '"f"(-func_0016AD98(D_0026EC18, obj->xC)*(port_fps_high() ? port_step() : 1.0f))')
+         '"f"(-func_0016AD98(D_0026EC18, obj->xC)*(port_delta_clock() ? port_step() : 1.0f))')
     edit('00136F80','n = obj->x158->x7B00 - 1;',
-         'n = obj->x158->x7B00 - (port_fps_high() ? port_whole_step() : 1);')
+         'n = obj->x158->x7B00 - (port_delta_clock() ? port_whole_step() : 1);')
     # The yaw/pitch velocities are applied with dt downstream (00137C78/E68),
     # but their acceleration and release were still per-update constants.
     edit('00137950', 'float step = accel * input;',
-         'float step = accel * input; if (port_fps_high()) step*=port_step();')
+         'float step = accel * input; if (port_delta_clock()) step*=port_step();')
     edit('00137950', 'float next = vel * decay;', 'float next = vel * port_decay(decay);')
     edit('00137B70', 'obj->x454 * pitchInput * scale',
-         'obj->x454 * pitchInput * scale * (port_fps_high() ? port_step() : 1.0f)')
+         'obj->x454 * pitchInput * scale * (port_delta_clock() ? port_step() : 1.0f)')
     edit('00137B70', 'obj->x240 * obj->x470', 'obj->x240 * port_decay(obj->x470)')
     edit('00137300', 'VecScale(specialDir, specialDir, D_0029C3B0);',
          'VecScale(specialDir, specialDir, port_decay(D_0029C3B0));')
     edit('00137300', 'specialScale = specialOne - D_0029C3B0;',
          'specialScale = specialOne - port_decay(D_0029C3B0);')
     edit('00137300', 'dir = &obj->x270;',
-         'if (port_fps_high()) scale=port_decay(scale);\n    dir = &obj->x270;')
+         'if (port_delta_clock()) scale=port_decay(scale);\n    dir = &obj->x270;')
     edit('001AF5E8', 'amount = amount * 0.05f + old * 0.95f;',
-         'amount = port_fps_high() ? old+(amount-old)*port_blend(0.05f) : amount * 0.05f + old * 0.95f;')
+         'amount = port_delta_clock() ? old+(amount-old)*port_blend(0.05f) : amount * 0.05f + old * 0.95f;')
     # Remaining manual object/UI motion found outside the accessor callers.
     for unit,expression in [('001926E0','obj->x8->xA0+=0.015f;'),
                             ('001926E0','obj->x8->xA8+=0.003f;'),
                             ('0017C168','(*item)->x4c += 0.05f;')]:
         value=expression.rstrip(';').split('+=')[1].strip()
-        edit(unit,expression,expression.replace(value,'(port_fps_high() ? '+value+'*port_step() : '+value+')'))
-    edit('001926E0','v.v[1]=speed;', 'v.v[1]=port_fps_high() ? speed*port_step() : speed;')
+        edit(unit,expression,expression.replace(value,'(port_delta_clock() ? '+value+'*port_step() : '+value+')'))
+    edit('001926E0','v.v[1]=speed;', 'v.v[1]=port_delta_clock() ? speed*port_step() : speed;')
     edit('0017C130','child->x10 += obj->x1288;',
-         'child->x10 += port_fps_high() ? obj->x1288*port_step() : obj->x1288;')
-    edit('0017C130','obj->x1314--;','obj->x1314-=port_fps_high() ? port_whole_step() : 1;')
-    edit('0017C168','--obj->x1318','(obj->x1318-=port_fps_high() ? port_whole_step() : 1)')
+         'child->x10 += port_delta_clock() ? obj->x1288*port_step() : obj->x1288;')
+    edit('0017C130','obj->x1314--;','obj->x1314-=port_delta_clock() ? port_whole_step() : 1;')
+    edit('0017C168','--obj->x1318','(obj->x1318-=port_delta_clock() ? port_whole_step() : 1)')
     edit('0016FC00','obj->x224 += 0.03f;',
-         'obj->x224 += port_fps_high() ? 0.03f*port_step() : 0.03f;')
+         'obj->x224 += port_delta_clock() ? 0.03f*port_step() : 0.03f;')
     edit('0016FC00','diff < obj->x224',
-         'diff < (port_fps_high() ? obj->x224*port_step() : obj->x224)')
+         'diff < (port_delta_clock() ? obj->x224*port_step() : obj->x224)')
     edit('0016FC00','obj->x1F0->x10.z -= obj->x224;',
-         'obj->x1F0->x10.z -= port_fps_high() ? obj->x224*port_step() : obj->x224;')
+         'obj->x1F0->x10.z -= port_delta_clock() ? obj->x224*port_step() : obj->x224;')
     edit('00142940','w = length * 0.9992f + D_0029DD3C * 1.2f - obj->pos[2] * -0.008f / length;',
-         'w = port_fps_high() ? length*port_decay(0.9992f)+(D_0029DD3C*1.2f-obj->pos[2]*-0.008f/length)*(port_particle_sum(0.9992f)/0.9992f) : length * 0.9992f + D_0029DD3C * 1.2f - obj->pos[2] * -0.008f / length;')
-    edit('001B0410','obj->x20++;','obj->x20+=port_fps_high() ? port_whole_step() : 1;')
+         'w = port_delta_clock() ? length*port_decay(0.9992f)+(D_0029DD3C*1.2f-obj->pos[2]*-0.008f/length)*(port_particle_sum(0.9992f)/0.9992f) : length * 0.9992f + D_0029DD3C * 1.2f - obj->pos[2] * -0.008f / length;')
+    edit('001B0410','obj->x20++;','obj->x20+=port_delta_clock() ? port_whole_step() : 1;')
     for unit,expression in [('001B4688','--obj->x8'),('001B4718','--obj->timer')]:
-        edit(unit,expression,'('+expression[2:]+'-=port_fps_high() ? port_whole_step() : 1)')
+        edit(unit,expression,'('+expression[2:]+'-=port_delta_clock() ? port_whole_step() : 1)')
     edit('001B4900','D_00437340.x508--;',
-         'D_00437340.x508-=port_fps_high() ? port_whole_step() : 1;')
+         'D_00437340.x508-=port_delta_clock() ? port_whole_step() : 1;')
     for field in ('x14','x18'):
         edit('001634E0','drain += gauge->'+field+';',
-             'drain += port_fps_high() ? gauge->'+field+'*port_step() : gauge->'+field+';')
+             'drain += port_delta_clock() ? gauge->'+field+'*port_step() : gauge->'+field+';')
     # Despite its provisional decomp name "dt", component +2110 is 1.0
     # in both 60 and 144 live state, not seconds/fields per real step.
     # Recovery and base depletion therefore need the same time conversion.
     edit('001634E0','gauge->fill * gauge->x24 * gauge->x28 * gauge->game->dt',
-         'gauge->fill * gauge->x24 * gauge->x28 * gauge->game->dt * (port_fps_high() ? port_step() : 1.0f)')
+         'gauge->fill * gauge->x24 * gauge->x28 * gauge->game->dt * (port_delta_clock() ? port_step() : 1.0f)')
     edit('001634E0','gauge->drain * gauge->game->dt;',
-         'gauge->drain * gauge->game->dt * (port_fps_high() ? port_step() : 1.0f);')
+         'gauge->drain * gauge->game->dt * (port_delta_clock() ? port_step() : 1.0f);')
     for unit,expression in [('001737F0','obj->xC->pos.z += 0.5f;'),
                             ('00173CB0','obj->xC->pos[2]+=0.5f;'),
                             ('00173CB0','obj->xC->pos[2]-=0.5f;')]:
-        edit(unit,expression,expression.replace('0.5f','(port_fps_high() ? 0.5f*port_step() : 0.5f)'))
+        edit(unit,expression,expression.replace('0.5f','(port_delta_clock() ? 0.5f*port_step() : 0.5f)'))
     # All seven retail callers apply a partial delta quaternion every update
     # (camera attitude / ground-following actors). This is the shared nlerp
     # toward identity, rather than a one-shot asset-space quaternion scale.
     edit('00223578','{\n\n    __asm__ volatile ("lqc2 $vf11, 0(%0)"',
-         '{\n    if (port_fps_high()) scale=port_blend(scale);\n    __asm__ volatile ("lqc2 $vf11, 0(%0)"')
+         '{\n    if (port_delta_clock()) scale=port_blend(scale);\n    __asm__ volatile ("lqc2 $vf11, 0(%0)"')
     edit('00165B90','obj->x1A8++',
-         '(port_fps_high() ? (obj->x1A8+=port_whole_step())-port_whole_step() : obj->x1A8++)')
+         '(port_delta_clock() ? (obj->x1A8+=port_whole_step())-port_whole_step() : obj->x1A8++)')
     edit('00148F60','progress = obj->x2F0 + obj->x2F4;',
-         'progress = obj->x2F0 + (port_fps_high() ? obj->x2F4*port_step() : obj->x2F4);')
+         'progress = obj->x2F0 + (port_delta_clock() ? obj->x2F4*port_step() : obj->x2F4);')
     edit('00148F60','obj->x2F0 += obj->x2F4;',
-         'obj->x2F0 += port_fps_high() ? obj->x2F4*port_step() : obj->x2F4;')
+         'obj->x2F0 += port_delta_clock() ? obj->x2F4*port_step() : obj->x2F4;')
     patches['unsorted/00148F60.cpp'].append(('re',(r'obj->x2F0 -= obj->x2F8',2),
-        'obj->x2F0 -= port_fps_high() ? obj->x2F8*port_step() : obj->x2F8'))
+        'obj->x2F0 -= port_delta_clock() ? obj->x2F8*port_step() : obj->x2F8'))
     patches['unsorted/00148F60.cpp'].append(('re',(r'obj->xA4 \* obj->x300',3),
-        '(obj->xA4 * obj->x300 * (port_fps_high() ? port_step() : 1.0f))'))
+        '(obj->xA4 * obj->x300 * (port_delta_clock() ? port_step() : 1.0f))'))
     # Two held directions, one release decay.
     patches.setdefault('unsorted/00138658.cpp', []).append(
-        ('re', (r'rate\*0\.03f', 2), 'rate*(port_fps_high() ? 0.03f*port_step() : 0.03f)'))
+        ('re', (r'rate\*0\.03f', 2), 'rate*(port_delta_clock() ? 0.03f*port_step() : 0.03f)'))
     edit('00138658', 'o->x488*=0.95f;', 'o->x488*=port_decay(0.95f);')
     edit('00135A30', '++o->x4A4;',
-         'if (port_fps_high()) o->x4A4=port_air_tick(o,o->x4A4); else ++o->x4A4;')
+         'if (port_delta_clock()) o->x4A4=port_air_tick(o,o->x4A4); else ++o->x4A4;')
     edit('00135A30', 'if (o->x4A4 == 1)',
-         'if (port_fps_high() ? port_air_first(o,o->x4A4) : o->x4A4 == 1)')
+         'if (port_delta_clock() ? port_air_first(o,o->x4A4) : o->x4A4 == 1)')
     edit('00135A30', 'o->x48C *= D_0029C30C;', 'o->x48C *= port_decay(D_0029C30C);')
     for unit, expression, body in [('00136038','(float)o->x4a4','o'),
                                     ('00138658','(float)o->x4A4','o'),
@@ -214,18 +216,18 @@ def add(patches):
         path=next(root.glob(unit+'.*'))
         count=path.read_text().count(expression)
         patches.setdefault('unsorted/'+path.name,[]).append(('re',(re.escape(expression),count),
-            '(port_fps_high() ? port_air_age(%s,%s) : %s)' %
+            '(port_delta_clock() ? port_air_age(%s,%s) : %s)' %
             (body,expression.removeprefix('(float)'),expression)))
     edit('00148F60', 'angle=(float)obj->x364*0.017453294f;',
          'angle=port_counter_fields(obj->x364)*0.017453294f;')
     # The pedal kick is a per-update impulse: spread it over the real steps.
     edit('00136790', 'len=strength*D_0029C31C;',
-         'len=strength*D_0029C31C; if (port_fps_high()) len*=port_step();')
-    edit('0012F6A0', '--obj->x7A74', '(obj->x7A74 -= port_fps_high() ? port_whole_step() : 1)')
+         'len=strength*D_0029C31C; if (port_delta_clock()) len*=port_step();')
+    edit('0012F6A0', '--obj->x7A74', '(obj->x7A74 -= port_delta_clock() ? port_whole_step() : 1)')
     edit('0012F5D0', 'obj->x7a3c += speed;',
-         'obj->x7a3c += port_fps_high() ? speed*port_step() : speed;')
+         'obj->x7a3c += port_delta_clock() ? speed*port_step() : speed;')
     edit('001AD2B8', 'ctrl->x34 += 0.05f;',
-         'ctrl->x34 += port_fps_high() ? 0.05f*port_step() : 0.05f;')
+         'ctrl->x34 += port_delta_clock() ? 0.05f*port_step() : 0.05f;')
     for unit in ('001AD2B8', '00157950', '00239778', '002398C0'):
         path = next(root.glob(unit + '.*'))
         text = path.read_text()
@@ -233,15 +235,15 @@ def add(patches):
         for line in text.splitlines():
             if 'func_00238F60()' in line and not line.lstrip().startswith('extern'):
                 edit(unit, line, line.replace('func_00238F60()',
-                     '(port_fps_high() ? port_step() : (float)func_00238F60())'))
+                     '(port_delta_clock() ? port_step() : (float)func_00238F60())'))
     for unit, args in [('00235EA8', ('rate', 'minimum')), ('00235F38', ('rate', 'minStep'))]:
         entry(unit, 'func_'+unit,
-              '    if (port_fps_high()) { %s=port_blend(%s); %s*=port_step(); }' % (args[0],args[0],args[1]))
+              '    if (port_delta_clock()) { %s=port_blend(%s); %s*=port_step(); }' % (args[0],args[0],args[1]))
     # Raw helpers now do the correction once; avoid the rate-aware helper
     # correcting it a second time, while keeping its original 30/60 paths.
     for unit, callee in [('00236088','00235EA8'),('00236130','00235F38')]:
         entry(unit, 'func_'+unit,
-              '    if (port_fps_high()) return func_%s(fparg0,fparg1,fparg2,fparg3);' % callee)
+              '    if (port_delta_clock()) return func_%s(fparg0,fparg1,fparg2,fparg3);' % callee)
 
     # True fractional animation evaluation without changing any retail layout.
     for unit in ('00202D78', '002065C0'):
@@ -259,7 +261,7 @@ def add(patches):
     edit('00206440', 'frame = D_0029E160;', 'frame = D_0029E160 / port_animation_scale();')
     # Execute all skeleton updates at high rates (the original scheduler skips
     # expensive animation updates by field period for distant models).
-    edit('00206440', 'int apply = state == current;', 'int apply = port_fps_high() || state == current;')
+    edit('00206440', 'int apply = state == current;', 'int apply = port_delta_clock() || state == current;')
     # Existing EE-float patch in patches.py runs first.
     edit('00208708', 'ps2_fdiv((float)(func_00202DA8() - obj->startTick), (float)obj->duration)',
          'ps2_fdiv(port_animation_fields((float)(func_00202DA8() - obj->startTick)), (float)obj->duration)')
@@ -269,7 +271,7 @@ def add(patches):
     edit('00236C60', 'extern unsigned int func_00238F48(void);',
          'extern unsigned int func_00238F48(void);\nextern unsigned int func_00263AC8(void *);')
     edit('00236C60', 'if (now >= timer->due)',
-         'if (now >= timer->due || (port_fps_high() && timer->callback == func_00263AC8))')
+         'if (now >= timer->due || (port_delta_clock() && timer->callback == func_00263AC8))')
     # Two per-field callbacks also queue a 2D draw for the frame, in lists the game empties
     # every frame (func_002102A8): the screen fade (func_001F7840, started by func_001F79D8:
     # the title's fade-in, menu changes, the bike shop) and the training hint box
@@ -317,10 +319,10 @@ def add(patches):
          '}')
     edit('00236C60', '    now = func_00238F48();\n',
          '    now = func_00238F48();\n'
-         '    int port_between = port_fps_high() && now == port_timer_now;\n'
+         '    int port_between = port_delta_clock() && now == port_timer_now;\n'
          '    port_timer_now = now;\n')
     edit('00236C60', '            if (timer->context != 0) {\n',
-         '            unsigned int *port_before = port_fps_high() && !port_fade_callback ? port_list_end() : 0;\n'
+         '            unsigned int *port_before = port_delta_clock() && !port_fade_callback ? port_list_end() : 0;\n'
          '            if (timer->context != 0) {\n')
     edit('00236C60', '                timer->due = ((TimerCallbackNoArg)timer->callback)();\n            }\n',
          '                timer->due = ((TimerCallbackNoArg)timer->callback)();\n            }\n'
@@ -347,67 +349,67 @@ def add(patches):
          '    port_hint_field = (unsigned int)func_00238F48();\n'
          'port_draw:\n'
          '    func_0023D650(0, &width, &height);\n    half = width / 2;')
-    # Disable recording and playback above 60: skipping the recorder alone
+    # Disable recording and playback on the delta-time clock: skipping the recorder alone
     # would leave its caller incrementing count over uninitialized samples.
     entry('001A8DE8', 'func_001A8DE8',
-          '    if (port_fps_high()) return 1;')
+          '    if (port_delta_clock()) return 1;')
     entry('00138E08', 'func_00138E08',
-          '    if (port_fps_high()) return; /* high-rate ghosts disabled */')
-    edit('0020CDF0', 'p->rise*(float)dt', 'p->rise*(port_fps_high() ? port_step() : (float)dt)')
-    edit('0020CDF0', 'p->fall*(float)dt', 'p->fall*(port_fps_high() ? port_step() : (float)dt)')
+          '    if (port_delta_clock()) return; /* ghosts disabled on the delta-time clock */')
+    edit('0020CDF0', 'p->rise*(float)dt', 'p->rise*(port_delta_clock() ? port_step() : (float)dt)')
+    edit('0020CDF0', 'p->fall*(float)dt', 'p->fall*(port_delta_clock() ? port_step() : (float)dt)')
     edit('00154058', 'obj->x30.z -= fvar;',
-         'obj->x30.z -= port_fps_high() ? fvar*port_step()*port_step() : fvar;')
-    edit('0021F210', 'func_00238F30() == 0x3C', '(port_fps_high() || func_00238F30() == 0x3C)')
+         'obj->x30.z -= port_delta_clock() ? fvar*port_step()*port_step() : fvar;')
+    edit('0021F210', 'func_00238F30() == 0x3C', '(port_delta_clock() || func_00238F30() == 0x3C)')
     entry('00239A80', 'func_00239CE0',
-          '    if (port_fps_high()) { port_ragdoll_step(sys->particles,sys->count,sizeof(Particle),D_0029DC74); return; }')
+          '    if (port_delta_clock()) { port_ragdoll_step(sys->particles,sys->count,sizeof(Particle),D_0029DC74); return; }')
     edit('00239A80', 'scale = -(dist * 0.99f);', 'scale = -(dist * port_blend(0.99f));')
     patches['unsorted/00239A80.c'].append(('re',(r'D_0029DC84 \* 0\.5f',2),'port_blend(D_0029DC84) * 0.5f'))
     for field in ('xDD8','xDD0','xDE4'):
         edit('001A4F70', 'obj->%s++;' % field,
-             'obj->%s+=port_fps_high() ? port_whole_step() : 1;' % field)
+             'obj->%s+=port_delta_clock() ? port_whole_step() : 1;' % field)
     edit('001A4F70', 'obj->xDF8 = VLength(&normal);',
-         'obj->xDF8 = VLength(&normal); if (port_fps_high()) obj->xDF8/=port_step();')
+         'obj->xDF8 = VLength(&normal); if (port_delta_clock()) obj->xDF8/=port_step();')
     edit('001A4F70', 'Scale__c4(&lateral, &lateral, D_0029D34C);',
          'Scale__c4(&lateral, &lateral, port_decay(D_0029D34C));')
     for constant in ('D_0029D3A8','D_0029D3AC'):
         edit('001A4F70', '"f"(%s)' % constant,
-             '"f"(port_fps_high() ? %s*port_step()*port_step() : %s)' % (constant,constant))
+             '"f"(port_delta_clock() ? %s*port_step()*port_step() : %s)' % (constant,constant))
     edit('00161B10', 'VSCALE(delta,&delta,1.0f/count);',
-         'VSCALE(delta,&delta,1.0f/(port_fps_high() ? port_step() : (float)count));')
+         'VSCALE(delta,&delta,1.0f/(port_delta_clock() ? port_step() : (float)count));')
     edit('00161B10', '} else effect->x2724--;',
-         '} else effect->x2724-=port_fps_high() ? port_whole_step() : 1;')
+         '} else effect->x2724-=port_delta_clock() ? port_whole_step() : 1;')
     # Further source audit: timers next to code which never queried the clock.
     # Allocation counts, loop cursors, item counts and RNG search indexes are
     # deliberately not included in this table.
     for unit, field in [('001100D0','obj->x3BC'),('001103B0','obj->x3BC'),
                          ('0012CF68','obj->x7bc8'),('00155208','p->xB4')]:
-        edit(unit, field+'++;', field+'+=port_fps_high() ? port_whole_step() : 1;')
+        edit(unit, field+'++;', field+'+=port_delta_clock() ? port_whole_step() : 1;')
     for unit, field in [('0012CF68','obj->x7bc0'),('00155380','obj->timer'),
                          ('00142508','obj->timer'),('001425E0','o->x64'),
                          ('00147BD8','obj->timer'),('0012AD60','obj->x180'),
                          ('0013DF28','obj->xCE0'),('00161B10','effect->x27F8'),
                          ('0011FF38','o->x25E')]:
-        edit(unit, field+'--;', field+'-=port_fps_high() ? port_whole_step() : 1;')
+        edit(unit, field+'--;', field+'-=port_delta_clock() ? port_whole_step() : 1;')
     for unit,field in [('001207F8','obj->x262'),('0015B018','obj->x1E8'),
                         ('001517D0','obj->xA3C')]:
-        edit(unit, '--'+field, '('+field+'-=port_fps_high() ? port_whole_step() : 1)')
+        edit(unit, '--'+field, '('+field+'-=port_delta_clock() ? port_whole_step() : 1)')
     edit('00161B10', 'if (++effect->x276E == 0x79)',
-         'if ((!port_fps_high() || port_whole_step()) && (effect->x276E+=port_fps_high() ? port_whole_step() : 1) == 0x79)')
-    edit('00154058', 'obj->x2C++;', 'obj->x2C+=port_fps_high() ? port_whole_step() : 1;')
+         'if ((!port_delta_clock() || port_whole_step()) && (effect->x276E+=port_delta_clock() ? port_whole_step() : 1) == 0x79)')
+    edit('00154058', 'obj->x2C++;', 'obj->x2C+=port_delta_clock() ? port_whole_step() : 1;')
     edit('001425E0', '(target-value)*0.125f', '(target-value)*port_blend(0.125f)')
     edit('00147BD8', 'obj->phase += obj->step;',
-         'obj->phase += port_fps_high() ? obj->step*port_step() : obj->step;')
+         'obj->phase += port_delta_clock() ? obj->step*port_step() : obj->step;')
     for sign in ('+','-'):
         edit('00147BD8', 'obj->amount'+sign+'0.01f',
-             'obj->amount'+sign+'(port_fps_high() ? 0.01f*port_step() : 0.01f)')
+             'obj->amount'+sign+'(port_delta_clock() ? 0.01f*port_step() : 0.01f)')
     # Keep integer lifetime storage and special asm ABIs; make all floating
     # motion/emission calculations fractional at the producer entry points.
-    edit('00228BE8', 'pt.f[3] = count;', 'pt.f[3] = port_fps_high() ? port_step() : (float)count;')
+    edit('00228BE8', 'pt.f[3] = count;', 'pt.f[3] = port_delta_clock() ? port_step() : (float)count;')
     edit('00228BE8', 'invCount = 1.0f / (float)count;',
-         'invCount = 1.0f / (port_fps_high() ? port_step() : (float)count);')
+         'invCount = 1.0f / (port_delta_clock() ? port_step() : (float)count);')
     edit('00228BE8', 'obj->x2768 += obj->x272C / (minSize + sizeRange * (baseAlpha + spread * 0.5f));',
-         'obj->x2768 += obj->x272C * (port_fps_high() ? port_step() : 1.0f) / (minSize + sizeRange * (baseAlpha + spread * 0.5f));')
-    edit('00228BE8', 'left=*life-1;', 'left=*life-(port_fps_high() ? port_whole_step() : 1);')
+         'obj->x2768 += obj->x272C * (port_delta_clock() ? port_step() : 1.0f) / (minSize + sizeRange * (baseAlpha + spread * 0.5f));')
+    edit('00228BE8', 'left=*life-1;', 'left=*life-(port_delta_clock() ? port_whole_step() : 1);')
     # The specialized float-step particle path already receives f20 from the
     # generated dispatcher. Convert its frame damping to fractional decay.
     edit('00228BE8', 'values[3]=1.0f-obj->x2778;', 'values[3]=port_decay(1.0f-obj->x2778);')
@@ -419,22 +421,22 @@ def add(patches):
     # (x40/(x70*60)), added on every call of the rider's sound update (001C8380).
     for lane, slopes in (('x58', 's->x4C+s->x50'), ('x54', 's->x44+s->x48')):
         edit('001C5040', 'value=s->%s+(%s);' % (lane, slopes),
-             'value=s->%s+(port_fps_high() ? (%s)*port_step() : (%s));' % (lane, slopes, slopes))
+             'value=s->%s+(port_delta_clock() ? (%s)*port_step() : (%s));' % (lane, slopes, slopes))
     # Particle rise after half the burst's life (0022A168, called from 0022B708 once per update):
     # x2630.x134 is 0x2764, the life per field, which 0022B708 already advances by f20.
     edit('00228BE8', 'v = obj->x2630.x68 + obj->x2630.x134 * 60.0f;',
-         'v = obj->x2630.x68 + obj->x2630.x134 * (port_fps_high() ? 60.0f*port_step() : 60.0f);')
+         'v = obj->x2630.x68 + obj->x2630.x134 * (port_delta_clock() ? 60.0f*port_step() : 60.0f);')
     # The human rider's trick button sequencer (001E6970: chord window x724 > 2, trick after
     # x720 > 3 quiet fields) and the HUD's code sequencer (001E6F58: x8 > 2, x4 > 20): field
     # counters, compared with field budgets. The samples stay per update.
     for unit, fields in (('001E6970', ('x724', 'x720')), ('001E6F58', ('x8', 'x4'))):
         for field in fields:
             patches.setdefault('unsorted/%s.c' % unit, []).append(('re', (r'obj->%s\+\+' % field, 2),
-                'obj->%s+=port_fps_high() ? port_whole_step() : 1' % field))
+                'obj->%s+=port_delta_clock() ? port_whole_step() : 1' % field))
     # OPTIONS volume sliders (0015E750): one step per field while a direction is held.
     for button in ('0x20', '0x80'):
         edit('0015E750', '    if ((buttons & %s) || func_002209A8(' % button,
-             '    if ((!port_fps_high() || port_whole_step()) && ((buttons & %s) || func_002209A8(' % button)
+             '    if ((!port_delta_clock() || port_whole_step()) && ((buttons & %s) || func_002209A8(' % button)
         edit('0015E750', 'func_002209A8(%s, func_002205A0(D_003F52D0.x130))) {' % button,
              'func_002209A8(%s, func_002205A0(D_003F52D0.x130)))) {' % button)
     # HUD timers counted per draw: trick banner (x12BC, 120 fields) and score popup (x12C4,
@@ -444,21 +446,21 @@ def add(patches):
     # (x1308) in 0017B3C0; mode 10's 240-field banner cycle (x1324) and the item list's
     # 300-field timer (x1310) in 00176ED8, whose 60-field event (0017C638) fires once.
     patches.setdefault('unsorted/00178730.c', []).append(('re', (r'obj->x12BC\+\+', 2),
-        'obj->x12BC+=port_fps_high() ? port_whole_step() : 1'))
-    edit('00178730', 'obj->x12C4++;', 'obj->x12C4+=port_fps_high() ? port_whole_step() : 1;')
+        'obj->x12BC+=port_delta_clock() ? port_whole_step() : 1'))
+    edit('00178730', 'obj->x12C4++;', 'obj->x12C4+=port_delta_clock() ? port_whole_step() : 1;')
     edit('00179A60', '        obj->x132C--;',
-         '        if (port_fps_high()) { obj->x132C -= port_whole_step(); if (obj->x132C < 0) obj->x132C = 0; }\n'
+         '        if (port_delta_clock()) { obj->x132C -= port_whole_step(); if (obj->x132C < 0) obj->x132C = 0; }\n'
          '        else obj->x132C--;')
     for field in ('x135D', 'x135E'):
         edit('00179A60', 'obj->%s += 2;' % field,
-             'if (!port_fps_high() || port_whole_step()) obj->%s += 2;' % field)
-    entry('0017A1B0', 'func_0017A1B0', ' if (port_fps_high() && !port_whole_step()) return;')
-    edit('0017B3C0', 'obj->x12F0--;', 'obj->x12F0-=port_fps_high() ? port_whole_step() : 1;')
-    edit('0017B3C0', 'obj->x1308++;', 'obj->x1308+=port_fps_high() ? port_whole_step() : 1;')
+             'if (!port_delta_clock() || port_whole_step()) obj->%s += 2;' % field)
+    entry('0017A1B0', 'func_0017A1B0', ' if (port_delta_clock() && !port_whole_step()) return;')
+    edit('0017B3C0', 'obj->x12F0--;', 'obj->x12F0-=port_delta_clock() ? port_whole_step() : 1;')
+    edit('0017B3C0', 'obj->x1308++;', 'obj->x1308+=port_delta_clock() ? port_whole_step() : 1;')
     for field in ('x1324', 'x1310'):
         edit('00176ED8', '--obj->%s;' % field,
-             'obj->%s-=port_fps_high() ? port_whole_step() : 1;' % field)
-    edit('0017C638', 'if (state==60) {', 'if (state==60 && (!port_fps_high() || port_whole_step())) {')
+             'obj->%s-=port_delta_clock() ? port_whole_step() : 1;' % field)
+    edit('0017C638', 'if (state==60) {', 'if (state==60 && (!port_delta_clock() || port_whole_step())) {')
     # NPC event rolls consume RNG only on whole fields. Preserve their original
     # probability and RNG draw frequency, rather than doubling ambient events.
     for path in root.glob('*.*'):
@@ -467,4 +469,4 @@ def add(patches):
         count=len(re.findall(pattern,text))
         if count:
             patches.setdefault('unsorted/'+path.name, []).append(('re',(pattern,count),
-                '( (!port_fps_high() || port_whole_step()) && func_00222BD8(0,100)==42 )'))
+                '( (!port_delta_clock() || port_whole_step()) && func_00222BD8(0,100)==42 )'))

@@ -99,8 +99,9 @@ async function start(m) {
   // renderer's picture instead (checks).
   // DHD_GRAPHICS_ORDERED (threaded; port/hle/hle.h): the core skips the waits that only order queued
   // graphics work, which the workers run in order anyway; ?env.DHD_GRAPHICS_ORDERED= keeps them.
-  // DHD_FPS_WALL=1 (port/hle/kernel.c): above 60 the game's step follows real time, as on x64, so a
-  // PC that can't keep 144 runs fewer, longer updates at the game's own speed, not slow motion;
+  // DHD_FPS_WALL=1 (port/hle/kernel.c): at every rate the game's step follows real time (at most two
+  // fields), as on x64, so a PC that can't keep up runs fewer, longer updates at the game's own
+  // speed down to 30 a second, not slow motion (finding 139);
   // host_wall_seconds is then the real clock (performance.now). ?env.DHD_FPS_WALL= turns it off
   // (the virtual clock, field / 60, as run_headless.mjs's deterministic runs keep).
   const env = { DHD_ISO: '/disc.iso', DHD_HEADLESS: '1', DHD_FRAME_CLOCK: '1', DHD_FPS_WALL: '1', DHD_SKIP_MOVIES: '1',
@@ -139,8 +140,8 @@ async function start(m) {
   // vsync): 1/59.94 s, or 1/DHD_FPS above 60 (PC SETTINGS > Frame Rate; Monitor is the display's
   // refresh, which the page measured: m.displayHz). Every field yields to the event loop so the
   // canvas shows the picture (OffscreenCanvas commits when the worker's task ends). The core runs
-  // on its frame clock here; at 60 a PC that can't keep up runs the game slower, above 60 the
-  // update's step grows with real time (DHD_FPS_WALL), as on x64.
+  // on its frame clock here; a PC that can't keep up gets longer steps that follow real time
+  // (DHD_FPS_WALL), as on x64.
   const channel = new MessageChannel(); let wake = null; channel.port1.onmessage = () => { const w = wake; wake = null; w?.(); };
   const yieldTask = () => new Promise(r => { wake = r; channel.port2.postMessage(0); });
   let period = 1000 / 59.94, due = performance.now(), shown = 0, lastReport = performance.now(), lastField = 0;

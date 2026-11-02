@@ -12,7 +12,7 @@ static int rate,field,whole,physical,raw,reads,action_reads;
 unsigned char D_0029E2A8[8]={1};
 int D_00660D80[8];
 unsigned char D_003F52D0[0x134];
-int port_fps_high(void) { return rate>60; }
+int port_delta_clock(void) { return rate>60; }
 int port_whole_step(void) { return whole; }
 double host_wall_seconds(void) { return 0; }
 int func_00238F48(void) { return field; }
