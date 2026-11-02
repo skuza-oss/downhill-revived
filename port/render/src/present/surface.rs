@@ -7,7 +7,8 @@
 //! Wayland's window, Android's ANativeWindow, Apple's CAMetalLayer), in RGBA8Unorm, else BGRA8Unorm
 //! (`surface_format`: whichever the surface offers first in that order; Apple's CAMetalLayer has no
 //! RGBA8), the present pipelines drawing into that format; present mode Immediate > Mailbox > Fifo (`DHDR_PRESENT_NO_TEARING`: no Immediate;
-//! `DHDR_PRESENT_VSYNC`: Fifo); desired maximum frame latency 1; alpha Opaque; usage
+//! `DHDR_PRESENT_VSYNC`: Fifo); desired maximum frame latency 1 with Immediate, 2 with V-Sync
+//! (`frame_latency`); alpha Opaque; usage
 //! RENDER_ATTACHMENT, plus COPY_SRC when the surface offers it (`DHDR_SURFACE_COPY_SRC`, for the
 //! test hook). Configured to the window's size, reconfigured when it changes or the frame is
 //! Outdated / Lost (once; a second Outdated / Lost fails, as C's wgpu_present); Timeout and
@@ -257,9 +258,7 @@ impl Surface {
         (self.width, self.height)
     }
 
-    /// DHD_FRAME_LATENCY (1-3, default 1): pictures the swapchain may hold. 1 has the least input
-    /// delay, but each acquire then waits until the compositor (G-Sync, overlays) has released the
-    /// last picture; 2 or 3 give the render thread room when that release is late (stutter tests).
+    /// The frame latency: pictures the swapchain may hold (`frame_latency`).
     fn configure(&mut self, width: u32, height: u32) {
         let max = self.gpu.device.limits().max_texture_dimension_2d;
         let (width, height) = (width.min(max), height.min(max));
@@ -269,7 +268,7 @@ impl Surface {
             width,
             height,
             present_mode: self.present_mode,
-            desired_maximum_frame_latency: frame_latency(),
+            desired_maximum_frame_latency: frame_latency(self.present_mode),
             alpha_mode: self.alpha_mode,
             view_formats: vec![],
         });
@@ -416,10 +415,19 @@ impl Surface {
     }
 }
 
-/// DHD_FRAME_LATENCY, read once (Surface::configure).
-fn frame_latency() -> u32 {
-    static LATENCY: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *LATENCY.get_or_init(|| {
-        std::env::var("DHD_FRAME_LATENCY").ok().and_then(|s| s.trim().parse::<u32>().ok()).map_or(1, |n| n.clamp(1, 3))
-    })
+/// Pictures the swapchain may hold (Surface::configure): DHD_FRAME_LATENCY (1-3, read once), else
+/// 1 with Immediate (V-Sync off: the least input delay) and 2 when the present waits for the display
+/// (Mailbox or Fifo: V-Sync on; finding 139). A latency of 1 makes two buffers: one on the display,
+/// one drawn. A picture that misses a refresh then holds the next acquire until the refresh after
+/// it, so a game that can't keep the display's rate falls to half of it (85 fps on a 120 Hz screen
+/// showed 60), with Mailbox too (DXGI's flip model, Vulkan, Metal's drawables alike). With 2 (three
+/// buffers) Mailbox shows the newest picture at each refresh and Fifo queues one, and the game runs
+/// at its own rate. 1 still has the least delay where the compositor releases late (G-Sync,
+/// overlays: 2 or 3 give the render thread room there; stutter tests).
+fn frame_latency(mode: wgpu::PresentMode) -> u32 {
+    static LATENCY: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    let set = *LATENCY.get_or_init(|| {
+        std::env::var("DHD_FRAME_LATENCY").ok().and_then(|s| s.trim().parse::<u32>().ok()).map(|n| n.clamp(1, 3))
+    });
+    set.unwrap_or(if mode == wgpu::PresentMode::Immediate { 1 } else { 2 })
 }
