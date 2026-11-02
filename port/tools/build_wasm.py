@@ -1217,7 +1217,7 @@ def core_inputs_key():
     generated asm/ and assets/, the tools' versions and the environment that points at inputs. New
     files count only in the folders the module is built from (CORE_NEW_FILES), so a checkout's own
     scratch files don't change the key; nor do the run-time DHD_ variables (only CORE_ENV)."""
-    h = hashlib.sha256(b'dhd-module-cache 2\n')
+    h = hashlib.sha256(b'dhd-module-cache 3\n')
     def git_files(*args):
         out = subprocess.run(['git', 'ls-files', '-z'] + list(args), cwd=ROOT, capture_output=True).stdout
         return [n for n in out.decode('utf-8', 'replace').split('\0') if n]
@@ -1230,7 +1230,8 @@ def core_inputs_key():
     for n in sorted(names):
         p = os.path.join(ROOT, n)
         if os.path.isfile(p):
-            h.update(n.encode() + b'\0' + hashlib.sha256(open(p, 'rb').read()).digest())
+            # line endings as git stores them: checkouts differ (core.autocrlf), the module doesn't
+            h.update(n.encode() + b'\0' + hashlib.sha256(open(p, 'rb').read().replace(b'\r\n', b'\n')).digest())
     for k in CORE_ENV:
         h.update(('%s=%s\n' % (k, os.environ.get(k, ''))).encode())
     h.update(('%s|%s|%s\n' % (WASI, SIMDE, WABT)).encode())
