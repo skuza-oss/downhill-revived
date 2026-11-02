@@ -18,6 +18,7 @@ static uint64_t snd_gain_energy[3][2];
 static int snd_gain_peak[3], snd_gain_frames, snd_gain_voices, snd_gain_streams;
 static int snd_gain_voice_max, snd_gain_lfo_min, snd_gain_lfo_max;
 static int snd_gain_duck_min = 65536, snd_gain_duck_max;
+static FILE *snd_voice_trace; /* DHD_SND_VOICE_TRACE: snd_debug_voices() */
 
 /* A report is rewritten in place: the module's files have no rename (wasi_adapter.c), so a
    reader can see one half written. */
@@ -119,6 +120,12 @@ static void snd_debug_start(void)
             if (snd_gain_events) fprintf(snd_gain_events, "sample,command,length,payload_words_hex\n");
         }
     }
+    path = getenv("DHD_SND_VOICE_TRACE");
+    if (path && *path) {
+        snd_voice_trace = fopen(path, "w");
+        if (snd_voice_trace)
+            fprintf(snd_voice_trace, "sample,voice,core,sound,group,wave_offset,pitch,envx,phase,adsr1,adsr2,vol_l,vol_r,dry,wet,tone_flags\n");
+    }
     path = getenv("DHD_SND_WAV");
     if (!path || !*path) return;
     snd_wav = fopen(path, "wb+");
@@ -193,7 +200,8 @@ static void snd_debug_reset(void)
     if (snd_wav) fclose(snd_wav);
     if (snd_gain) fclose(snd_gain);
     if (snd_gain_events) fclose(snd_gain_events);
-    snd_gain = snd_gain_events = NULL;
+    if (snd_voice_trace) fclose(snd_voice_trace);
+    snd_gain = snd_gain_events = snd_voice_trace = NULL;
     memset(snd_gain_energy, 0, sizeof snd_gain_energy);
     memset(snd_gain_peak, 0, sizeof snd_gain_peak);
     snd_gain_frames = snd_gain_voices = snd_gain_streams = snd_gain_voice_max = 0;

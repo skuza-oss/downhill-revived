@@ -13,7 +13,9 @@
    Evidence: DHD_SND_WAV=path writes the final 48000 Hz stereo 16-bit mix,
    before the output ring can drop samples. DHD_SND_REPORT=path writes command
    counts (calls, unimplemented dispatches, unsupported sub-operations). Both
-   are refreshed at game ticks, including with DHD_SND_OFF=1. Use ignored
+   are refreshed at game ticks, including with DHD_SND_OFF=1. DHD_SND_VOICE_TRACE=path
+   writes every sounding voice's sound, wave offset, pitch, envelope and volumes every
+   800 samples (finding 133, for comparing with PCSX2's SPU2 voices). Use ignored
    build/ paths: a game WAV contains proprietary audio. */
 #ifndef SOUND_H
 #define SOUND_H
