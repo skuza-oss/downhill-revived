@@ -207,7 +207,9 @@ it unchanged (finding 088, CL3).
 
 ### What players get
 PC SETTINGS in the game's options, saved to dhd.ini (finding 064): resolution and scale,
-borderless/windowed, Hor+ widescreen with the HUD anchored (finding 056), frame rate (a cap: the
+borderless/windowed, Hor+ widescreen with the HUD anchored (finding 056) and no 4:3 screens
+left: loading cards and movies fill the window with their own picture blurred at the sides
+(finding 140), frame rate (a cap: the
 game steps by the real time since the last frame at every rate, findings 067, 139), texture packs in PCSX2's format (finding 057), the sharp
 font (finding 058), movies, vibration, EXIT GAME. The launcher (`port/launcher`, finding 093)
 holds the settings, the rider name and the updates on every platform; the game has no updater

@@ -73,6 +73,11 @@ resolution and the monitor's shape is measured in pixels.
 
 ### Full-screen 2D pictures
 
+Since finding 140 these screens and the movies fill the window: the picture's sides are filled with
+the picture itself, blurred and darkened, and the game draws a card's text unmapped (card mode),
+so it keeps its shape. Finding 140 also shows the goggles before a level wide again, and has the
+current rule. What follows is this round's version.
+
 Some screens are full-screen 2D pictures made for 4:3:
 - the memory card warning;
 - the publisher cards;
