@@ -129,7 +129,13 @@ it unchanged (finding 088, CL3).
   makes the rooted Mi 11i match it at 1x paced 60 (39.6 fields/s, same thread split; `--restore`
   puts the phone back), with render scale ~2x/~5-6x standing in for the Mali's 1x/2x. On that
   profile two pacing changes and a GS fast path took 1x paced 60 from 39.6 to 55.0 fields/s
-  (median field 16.65 ms); finding 127 has the breakdown and what is left for 60. Gamepad or keyboard only (no touch). Online uses the same
+  (median field 16.65 ms); finding 127 has the breakdown and what is left for 60. A gamepad or the
+  keyboard, or the touch controls (finding 138, branch `feat/touch-controls`; built and unit-tested,
+  in-game checks pending): Thumb zones (floating stick, PEDAL with flick attacks, HOP / BRAKE / SLIDE,
+  a trick stick in the air) and Classic pad, every touch plain pad input; the rules in
+  `port/hle/touch.c`, drawn by the Rust renderer's overlay, the settings on SETTINGS > Touch Controls;
+  the game is read for the rider's air flag and the race HUD hook only. `DHD_TOUCH_MOUSE=1` makes the
+  mouse a finger on a PC. Online uses the same
   Rust client as Windows (`dhd_net`, below; not yet tried on the phone).
 - Retired (finding 088): the 32-bit i686 build (`link.py`, `build_clean.py`, the x87/FP-trap
   runtime), the Direct3D 11 renderer, the C wgpu-native renderer and the browser's JS renderer.

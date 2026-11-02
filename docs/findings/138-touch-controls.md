@@ -1,0 +1,197 @@
+# 138: touch controls for phones
+
+Status: branch `feat/touch-controls` (from `main` 0330eab, 0.7.7). Built for Windows x64 and
+Android arm64; unit tests pass; not yet run in the game (the lead's checks are at the end). No
+change to `src/`.
+
+The design is the reviewed touch-controls spec (round 14: two presets, Thumb zones and Classic
+pad, tilt as a setting, every touch plain PS2 pad input, no assists). This finding says what was
+built from it, where, the two game reads, the choices made where the spec left room, and what is
+left.
+
+## What was built
+
+| Piece | Where |
+|---|---|
+| The rules: layout and scaling, the steering stick, PEDAL (✕ with the hold-back, the sprint guards, the flick-lift hold), flick attacks, HOP / BRAKE / SLIDE, camera with the bail guard, Pause, the air layout and the trick stick, Classic pad (shoulder bars with the both-press middle, + spots, ✕ slide-on, L3/R3, SELECT/START), tilt, Hand (mirror), size / opacity, the pause rows as ↓ / ↑ steps then ✕, Controls and Bail out, the online panel (Close / Bail out / Leave race with tap-again arming), the resume guard, hiding for a controller, Android Back, vibration, trick labels, hints, the layout editor, and the overlay's shapes | `port/hle/touch.c`, `touch.h` (platform-neutral: no SDL, no OS, no game memory) |
+| Unit tests: scaling, flick lanes, sprint and resume guards, the trick stick (push, roll through the centre, overshoot before the gate, first-latch travel and the 12° hysteresis, landing, signature, the air wait), pause-row sequencing, Classic slide-on and bars, the online panel, the layout text | `port/hle/test_touch.c` (`test_runtime.py` runs it as `touch`) |
+| SDL glue: finger events, the desktop's mouse as a finger, Back, controller use and loss, the screen in mm, settings in and out of dhd.ini, the overlay's hand-off, player 1's pad merge | `port/host/touch_host.c` |
+| Android: density, the system gesture insets and the cutout (JNI), the vibrator, tilt (gravity sensor, screen locked to its side while tilt is on) | `port/host/android_touch.c`, `DhdActivity.java` |
+| The game side once a field: the air flag, the HUD hook, the race clock, the pause menu's rows, Leave race, the hint's hold | `port/hle/touch_field.c` (core), `pad.c` calls it |
+| The HUD hook and move | `port/hle/widescreen.c` (`port_ws_hud_offset`, `port_hud_text_c/_l`, `touch_hud_move`) |
+| TOUCH CONTROLS 1/3-3/3 in the game's popup style | `port/hle/touch_settings.c`, from PC SETTINGS' new Touch Controls row (`pc_settings.c`); the page is SETTINGS on Android |
+| Settings keys | `port/render/settings/src/table.rs` (`touch_*`; `settings_table.h` and the browser corpus regenerated) |
+| The overlay's drawing | `port/render/src/present/touch.rs` (`dhdr_surface_touch`), font `present/font8x8.rs` |
+| Leave race online | `online.c` `port_online_touch_leave` (as BACK TO THE ROOM's Yes, without the question) |
+| No catch-up after the hint's hold | `fps.c` `port_fps_forget_stall` |
+
+## The two game reads
+
+1. **The rider's air flag**: player 1's rider is slot 0 of `D_002AF2C0` (10 riders, 0x7BD0
+   each, as `puppet.c` and `online.c` have it). Its rigid body is at +0x40C0 and the body's
+   +0x4A4 is the airborne age, a short that `func_00135A30` counts up every frame in the air and
+   resets on contact (finding 049, "Airborne frame counter"; finding 090 names it rider
+   +0x4564). Above 60 fps `port_air_tick` (finding 067) keeps it, so the flag is
+   `*(int16_t *)(rider0 + 0x4564) != 0`, read on the race screen only (`D_0029DED8` = 9, phase
+   `D_0043F348` 1-4). Read in `touch_field.c`.
+2. **The HUD hook**: the race HUD is drawn by the HUD's own code: its 3D pieces (speedometer,
+   track bar, place) through `func_00176930`, which `patches_widescreen.py` already routes through
+   `port_ws_hud_offset`, and its text through `port_hud_text_c` / `port_hud_text_l` (units listed
+   in `HUD_TEXT`). Each call now sets `touch_hud_seen`; on the race screen that is "the race HUD
+   is drawn", which is when the overlay shows, when "mid-race" applies and when hint timers run.
+   The same calls move the HUD while the touch controls are on (`touch_hud_place`): pieces whose
+   place in the 4:3 view is in the bottom-right cluster (u > 2/3, v > 0.62: the speedometer below
+   v = 0.755, the energy arrows above it) move to the top-left corner for the right hand (the
+   arrows beside the speedometer), or straight up to the top-right for the left hand, where the
+   left side's pieces mirror across. 3D pieces move in camera space (their 4:3 place from the
+   view's focal length, the height three quarters of the width), text in the view's pixels;
+   widescreen's anchoring then applies as before. The shifts come from the spec's pictures; they
+   are a guess until check 7, so `DHD_TOUCH_HUD_SHIFT="su,sv,au,av"` (fractions of the view:
+   the speedometer's and the arrows' shifts for the right hand, default `-0.75,-0.75,-0.65,-0.67`)
+   tunes them without a build. `DHD_TOUCH_HUD=game` leaves the HUD alone and uses the spec's
+   fallback layout (PEDAL at 80 % / 62 %, HOP, BRAKE, SLIDE above it).
+
+Besides the two reads, `touch_field.c` passes the race clock (`D_0043EEC8`, fields since GO, as
+ms through `port_field_seconds`; it stops while paused, so every window counts race fields, never
+frames: findings 049, 067, 114) and whether it moved, and the offline pause menu's rows. The rows
+are the spec's "pause popup hook" class of read (a menu read): `func_0015E238`'s own conditions,
+re-evaluated from `D_004B25A0` (+0x10C, +0x110, +0x288) and the save's `D_004225A0` +0x12199 /
++0x1219F, give the row of RESUME (always 0), RE-START (0x22; none in mode 17) and QUIT (0x1A,
+last), so a tap is sent as the right number of ↓ steps (finding 050 lists the rows).
+
+## Decisions
+
+- **Drawing: the Rust renderer's host overlay**, next to the FPS & Ping counter (`present/`):
+  drawn after the game picture in surface pixels, so it is crisp at any resolution scale, never
+  touches GS memory or game state, and costs one instanced draw. The shapes are signed distances
+  (two-tone rims readable on snow, as the spec asks), so no textures or assets are needed; text
+  uses the public-domain font8x8 table the counter already cited, now shared by both
+  (`font8x8.rs`). The C side passes floats (16 a shape) rather than a struct, so the frozen ABI
+  layouts (`abi.rs`) are untouched. Drawing through the game's own font was not chosen: it would
+  need GS memory and game-time draws, and the overlay must show while the game is held for a hint.
+- **The rules are one platform-neutral C module** (touch.c), host side, fed in mm and ms. The SDL
+  thread only queues events; the game thread drains them once a field, so the module is
+  single-threaded and the tests drive it exactly as the game does.
+- **Two clocks**: motion (settle 70 ms, gate 60 ms, △ +33 ms, hold-back 120 ms, flick speed) in
+  wall ms of the touch events; the game's windows (✕ double-tap 30 fields, SELECT twice 30
+  fields, the flick-lift hold, the resume guard, the air wait) in race time, which stops while
+  paused and during the hint's hold. Presses the game must see (3 fields) count the game's
+  VBLANKs scaled to the frame rate, so they work in menus and paused too.
+- **The SELECT double-press window** is taken as 30 fields like ✕'s (the spec asks check 3 to
+  measure it); one constant in touch.c.
+- **Pause rows**: the overlay draws its own PAUSED panel (the spec's picture) over the game's
+  menu; Resume / Restart race / Quit race are sent as ↓/↑ steps from where the overlay last left
+  the cursor, then ✕; Restart and Quit then show the game's question as an overlay No / Yes:
+  No sends △, Yes sends ↓ + ✕ (assumes the question opens on No: check 10). Pause on the panel
+  is Resume. Back on the rows is Resume, on the question No.
+- **The menu-open chain**: the overlay's own START; if the race clock was running, the menu
+  counts as open once the clock stops, and if it is still running 0.5 s later START was ignored
+  and the race touches work again. If the clock moves again while the panel shows (a controller
+  closed the menu), the race resumes with the resume guard.
+- **Synthesized mouse**: SDL turns touches into mouse events too. While the overlay shows they
+  are dropped (the game's popups would take them as clicks); in the menus they stay, so the menus
+  (finding 092) take taps as before.
+- **Leave race** is not a pad input: it calls the same path as the room's BACK TO THE ROOM Yes
+  (`leave_race`), since a press sequence through the online pause menu and its question would
+  depend on unread menu state.
+- **Android Back**: a race pauses (offline) or opens the panel (online); in menus it is △ (it
+  did nothing before, as `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` keeps it from closing the game).
+- **Tilt**: full lock at 40° (strength 0 %) to 10° (100 %), 25° at the default 50 %; on the
+  ground only (the stick's left/right is ignored there), blended over 100 ms at take-off and
+  landing. Set Tilt Centre stores the current roll.
+- **Settings**: 3 screens of the PC SETTINGS page (the game's popups need rows of one page:
+  `menu_page_rebuild`), every change saved at once. On Android the page is SETTINGS and drops the
+  Display and Window Size rows (one screen; the popup holds 16 rows). The 9 mm half-split value
+  targets of the spec are the menus' existing mouse layer (a click on the value's arrows steps it;
+  Cross steps forward).
+- **Hints**: tip boxes in the overlay, each once (dhd.ini `touch_hints`), never online. The
+  trick-stick hint holds the game in `touch_field.c` (the VBLANK waits, three VBLANKs after the tip
+  appears so the pictures showing it are on screen; nothing is presented during the hold) until the first push, a lift, PEDAL, Back or 5 s; afterwards `port_fps_forget_stall`
+  makes sure no game time is caught up (above 60 fps the wall clock would otherwise repay up to
+  half a second).
+- **Touch on a desktop** (`DHD_TOUCH_MOUSE=1`): the left mouse button is one finger, for the
+  lead's checks and development; `DHD_TOUCH_SCREEN_MM=154.5x69.5` makes the window the Mi 11i.
+
+## Stubbed or left out
+
+- The left-handed fallback layout's notch in the steering area (only with `DHD_TOUCH_HUD=game` and
+  Hand Left): not built; the spec calls it rare.
+- "Holding repeats" on the settings rows: the menus' own left/right repeat applies to pads and
+  keys; a held tap does not repeat.
+- Trick labels show the name in the 8x8 font with `*` for ★ (the font has no star).
+- The lanes and touch areas are not drawn in the race (the spec's red wedges are explanatory);
+  the editor enforces them.
+- Rolling and styled tricks' hints "in later races": only the first trick-stick hint and its
+  repeat are built.
+- Menu taps in the game's own menus beyond what finding 092's mouse layer already does are, as the
+  spec says, a design of their own.
+
+## Checks for the lead
+
+Builds: `python port/tools/build.py -j 6` (Windows), `python port/android/build_apk.py --wasm
+build/wasm/dhd_core.wasm` (APK). On the PC every check below can run with the mouse as a finger:
+`DHD_TOUCH_MOUSE=1 DHD_TOUCH_SCREEN_MM=154.5x69.5 DHD_SCALE=2 DHD_WIDESCREEN=1` (a 20:9 window, e.g.
+`DHD_WINDOW_WIDTH=1540 DHD_WINDOW_HEIGHT=693`), started by hand or with `hidden_game.Game(..., env=...)`
+and its `move` / `click`; the phone with the APK. dhd.log has `touch: ...` lines (layout, screen in
+mm, saves, the hint's hold) and `touch settings: ...` for each change.
+
+The spec's own game checks first (the PC build with scripted input answers them; no touch needed:
+`DHD_RACE_PAD=start:length:button,...` in a race, `DHD_RACE_SYNC=1`, as finding 134's checks):
+1. Shoulder chord window: `DHD_RACE_PAD` pressing L1 then R2 30, 70, 150, 250 ms apart in one air:
+   one Nac Nac or two tricks? Only a window covering 150-250 ms lets the 70 ms settle shrink (touch.c
+   `SETTLE_MS`).
+2. △ added during a held trick: R1+R2 held, △ 100 ms later: styled Can Can?
+3. The ✕ double-tap and SELECT double-press windows: ✕ press-release-press at 25, 30, 35 fields
+   at 60 and 144 fps (`DHD_FPS=144`): sprint up to 30 fields (finding 049)? From the release or the
+   press; does a long first hold count; do they run while paused? SELECT twice at 20/30/40 fields
+   (touch.c `SELECT_FIELDS`, `DOUBLE_TAP_FIELDS`). Does the Resume row's ✕ reach the race's
+   double-tap check?
+4. Does the game print trick names? (If so, `touch_labels` defaults to off.)
+5. ✕ held in the air, at the countdown, during an R2 crouch, a powerslide (L3) and braking (✕ + △):
+   harmless? Does ✕ still pedal during R2 / L3? Do ◻ / ○ act in the air?
+6. The air flag over bumps and on rails: log `rider+0x4564` each field (or watch the overlay switch);
+   steady means `DHD_TOUCH_AIR_WAIT=33`.
+7. The HUD move: race with `DHD_TOUCH_MOUSE=1` (the HUD moves while the overlay shows): the
+   speedometer and arrows at the top left, nothing else moved; Hand Left (`DHD_TOUCH_HAND=left`):
+   top right, the track bar on the right. Tune with `DHD_TOUCH_HUD_SHIFT`; if it can't look right,
+   `DHD_TOUCH_HUD=game` (fallback layout).
+8. R2 alone in the air (and near a rail), L1+R1+R2 and L2+R1+R2 in the air; is R3 used?
+9. The signature: all four shoulders then △ 33 ms later with a full meter; all four without △ or
+   without the meter.
+10. The pause menu: rows and the cursor's start row (`touch_field.c pause_rows` assumes
+    func_0015E238's order and row 0); wrap; is START ignored at the countdown, in a crash, after the
+    finish; does the race HUD stop drawing while paused; do Restart and Quit ask (and does the
+    question open on No: the overlay's Yes sends ↓ + ✕); does △ close the pause menu (Back on the
+    rows sends Resume's ✕ instead).
+
+Then the touch build itself (PC with the mouse, then the phone):
+11. A race, Thumb zones: the overlay appears with the race HUD (also in the countdown) and goes
+    with it; menus get taps as before (PC SETTINGS by tapping).
+12. Steering: a drag in the left area steers and leans; past 12 mm the stick's centre follows; ↑ tap
+    stoppie, ↓ manual.
+13. PEDAL hold pedals; double tap and hold sprints (the second ✕ ~120 ms late); after a HOP tap a
+    quick PEDAL double-tap does **not** sprint; ✕, BRAKE, ✕ does.
+14. Flicks: a fast swipe left/right off PEDAL hits ◻ / ○ (attack power-up) while pedalling; slow or
+    steep swipes don't; Attacks = Buttons shows ◻ / ○ buttons and no flicks.
+15. Air: 150 ms after take-off the trick stick replaces HOP/BRAKE/SLIDE; push → and hold = Can Can
+    (label CAN CAN), past the edge = styled (`*`); a roll ↖ centre ↘ = Nac Nac; ← then → through the
+    middle then out with a full meter = the signature; landing with the thumb down bails as on a pad.
+16. Pause (button and Android Back): the PAUSED panel; Resume resumes and a PEDAL held through the
+    pause doesn't sprint; Restart race → the question → Yes restarts; Quit race → No returns; Controls
+    shows the page; Bail out bails.
+17. Online (`port/tools/local_server.py` room race): Pause opens Close / Bail out / Leave race over the
+    live race; Leave race needs a second tap within 3 s and returns to the room (DNF); no hints.
+18. Classic pad (`touch_preset = classic`): bars (middle = both), + spots, ✕ sliding onto ◻ adds ◻
+    without a second ✕, L3/R3, SELECT/START (START = pause).
+19. Settings: TOUCH CONTROLS pages 1-3 change dhd.ini at once; Hand Left mirrors the controls (◻ stays
+    left of PEDAL) and the HUD; Size and Opacity; Edit Layout drags controls (a drop too close or into
+    a flick lane snaps back), Air tab moves the trick stick's faint ring, Done saves `touch_edits`.
+20. A controller: a button press hides the overlay (and the HUD goes back); a touch brings it back
+    without pressing anything; unplugging it mid-race (offline) pauses.
+21. Phone only: vibration ticks (press, double on a trick-stick add, strong on △); Tilt steers on the
+    ground and locks the screen side, Set Tilt Centre; gesture strips: a drag starting at the screen's
+    edge opens Back/home, not the stick; the hint for the trick stick holds the game until a push and
+    the race goes on at normal speed after.
+22. No touch, no change: without `DHD_TOUCH_MOUSE` on the PC, the race state trace equals main's
+    (`port/tools/state_trace_run.py`, the shared reference build): touch_field only reads, and the
+    HUD hooks return their input with the touch controls off.
