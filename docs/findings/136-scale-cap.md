@@ -78,7 +78,10 @@ Without a limit the hint stays the old one (and a window run says what it ran at
 
 ## Checks
 
-- Built (core and Windows game, `-j 4`/`-j 6`); the browser build (`build.py --web --no-core`).
+Done in this lane (before the 2026-11-02 change of process):
+
+- Built (core and Windows game, `-j 4`/`-j 6`). The browser build (`build.py --web --no-core`) was
+  stopped after 70 minutes in one clang compile, unfinished: the browser side is not built.
 - Hidden desktop, `DHD_WGPU_ADAPTER=integrated` (the log: `the game runs on AMD Radeon(TM) Graphics
   (integrated); a discrete GPU is there but not used`), an isolated dhd.ini with `scale = 8`, then
   `scale = window` (960x720 window): the lines above; the row and footer captured in
@@ -92,6 +95,32 @@ Without a limit the hint stays the old one (and a window run says what it ran at
   `DHD_PERF_COUNTER`, the FPS & Ping row of fe950ad): re-blessed in its own commit.
 - State trace `boot`: all 600 rows equal to the `next/0.7.7` reference build's (and to this
   branch's own unchanged build).
+
+## Checks still for the lead (merged build)
+
+1. Browser build (`python port/tools/build.py --web`): it compiles `gpu_rust_web_native.inc`
+   (`n->scale_asked` in `native_rescale`) and loads the core with the new import
+   `host_service_gs_scale` (answered 0 in `worker.js` and `run_headless.mjs`). A missing stub would
+   show as an instantiate error naming that import.
+2. Windows game, integrated GPU only (`DHD_WGPU_ADAPTER=integrated`), an isolated dhd.ini with
+   `scale = 8`, `discord = off` (and `widescreen = 0`, `DHD_ASPECT = 4:3` for the same picture as
+   here), env `DHD_SCALE` unset (else the row is locked "Set by DHD_SCALE"):
+   - dhd.log: `gs: resolution scale 8 asked (DHD_SCALE)`, then
+     `gs native: resolution scale 4x, capped: 8x asked, this GPU allows up to 4x (graphics memory: ...)`,
+     and `perf: render native scale=4`; `gs: GPUs` says the game runs on the AMD iGPU.
+   - Keys from the title: X (title), Down, Down, X (OPTIONS), Up (to the last row, PC SETTINGS), X.
+     Resolution row: `8x (running 4x: GPU memory)`, footer `This GPU's memory allows up to 4x`.
+     Left once: `7x (runs at 4x: GPU memory) *`, footer `* Applies when the game starts again`;
+     the row must stay inside the panel. Left three more: `4x *`. (Triangle puts 8 back.)
+3. The same with `scale = window` in a 960x720 window: the log line `resolution scale 2x: window
+   asked (720 lines, picture 448), this GPU allows up to 4x (...)`, the row `Match window (2x)`.
+4. The RTX (default adapter) with `scale = 8`: `resolution scale 8x: 8x asked, this GPU allows up
+   to 8x`, the row a plain `8x`, the default footer legend.
+5. Launcher after run 2 (its data folder's dhd.log has that line): Settings > Graphics >
+   Resolution's hint `Your GPU's memory allows up to 4x; 8x runs at 4x`, the list's `5x`-`8x` with
+   `(runs at 4x)`; choosing 4x changes the hint to `Your GPU's memory allows up to 4x`. A data
+   folder without dhd.log: the old hint, plain choices.
+6. State traces boot and race against the shared next/0.7.7 reference build (boot already matched here).
 
 ## Not done
 
