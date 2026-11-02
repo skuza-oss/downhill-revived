@@ -60,6 +60,12 @@ int port_delta_clock(void)
    much slower. An online race keeps it and gives it back at up to two fields a step once the
    frames are quicker, so this rider's race clock stays where the other players see it (finding
    114). A step is never shorter than one at the selected rate, 60/N fields. */
+static void clock_spend(double step, double keep)
+{
+    owed-=step;
+    if (owed>keep && !online_race()) owed=keep;  /* only the cap leaves more than a step */
+    if (owed<-MOST_FIELDS) owed=-MOST_FIELDS;    /* frames quicker than the rate: at most 2 fields ahead */
+}
 static double clock_interval(void)
 {
     const double least=60.0/port_fps();
@@ -76,10 +82,28 @@ static double clock_interval(void)
     double step=owed*0.5;
     if (step<least) step=least;
     if (step>MOST_FIELDS) step=MOST_FIELDS;
-    owed-=step;
-    if (owed>step && !online_race()) owed=step;  /* only the cap leaves more than a step */
-    if (owed<-MOST_FIELDS) owed=-MOST_FIELDS;    /* frames quicker than the rate: at most 2 fields ahead */
+    clock_spend(step,step);
     return step;
+}
+/* A step the race keeps for the rest of a field (the field grid, below): the wall time still
+   counts against it, and what it leaves is owed to the next chosen step (up to two fields: a
+   held step is shorter than the frames when they slow down). */
+static void clock_hold(double step)
+{
+    if (!wall_mode) return;
+    double now=host_wall_seconds();
+    double elapsed=previous_wall ? (now-previous_wall)*60 : step;
+    previous_wall=now;
+    if (!(elapsed>=0) || !isfinite(elapsed)) elapsed=step;
+    owed+=elapsed;
+    clock_spend(step,MOST_FIELDS);
+}
+/* Steps that are no wall time (the grid's whole fields, a replay's recorded ones): the wall
+   clock starts again from this frame. */
+static void clock_rest(void)
+{
+    if (wall_mode) previous_wall=host_wall_seconds();
+    owed=0;
 }
 /* The mixer's time for one VBLANK on the delta-time clock (kernel.c vsync; finding 113). The frame
    clock delivers a VBLANK every BUS_HZ/N cycles, 1024 per kernel boundary (timer.c), and a frame
@@ -109,6 +133,90 @@ static uint64_t race_steps;  /* real race updates, for DHD_FPS_TRACE */
 static void reset_body_clocks(void);
 void port_fps_race_step(void) { race_steps++; }
 
+/* The field grid of an offline race (finding 141; port/hle/replay.c says why). The race asks for
+   it every update (port_clock_grid), and the next step follows it:
+   GRID_WHOLE   from the load to GO: one field a step, pictures every 1/60 s;
+   GRID_RECORD  from GO: the step is chosen when a field ends, as a code in 1/120 field, and kept
+                until the next field ends; the wall time not stepped stays owed (time conserved);
+   GRID_PLAY    a replay: each step is the recorded code (port_clock_force), and the pictures
+                follow it.
+   The part of a field run and the animation subticks are counted in integer 1/120 fields, so the
+   same codes give the same whole fields and subticks at any selected rate. A frame without a race
+   update (menus) is off the grid; a pause calls no wait and changes nothing. */
+#define CODE_FIELD 120
+#define CODE_MOST 240  /* two fields */
+static int grid, grid_asked, grid_seen;
+static int grid_code=CODE_FIELD, grid_phase, grid_phase_before, grid_anim, grid_ended;
+
+void port_clock_grid(int mode) { grid_asked=mode; grid_seen=1; }
+int port_clock_recording(void) { return grid==GRID_RECORD; }
+int port_clock_code(void) { return grid_code; }
+
+/* A step in fields as a code: the nearest 1/120 field, no shorter than a step at the selected
+   rate and no longer than two fields. */
+static int step_code(double fields)
+{
+    int code=(int)floor(fields*CODE_FIELD+0.5), least=(int)ceil(CODE_FIELD*60.0/port_fps()-1e-9);
+    return code<least ? least : code>CODE_MOST ? CODE_MOST : code;
+}
+static void grid_advance(int code)
+{
+    grid_code=code;
+    step_fields=(double)code/CODE_FIELD;
+    grid_phase_before=grid_phase;
+    grid_phase+=code;
+    whole=grid_phase/CODE_FIELD;
+    grid_phase-=whole*CODE_FIELD;
+    phase=grid_phase*(double)port_fps()/CODE_FIELD;
+    grid_ended=whole>0;
+}
+static void grid_enter(int mode)
+{
+    if (mode==grid) return;
+    if (!grid) {
+        /* a race starts on a field, with the subticks and the bodies' clocks from zero, the same
+           in the race and in its replay */
+        grid_phase=grid_anim=0;
+        reset_body_clocks();
+    } else if (!mode) {
+        phase=grid_phase*(double)port_fps()/CODE_FIELD;
+        anim_phase=grid_anim*(double)port_fps()/CODE_FIELD;
+    }
+    if (mode==GRID_RECORD) grid_ended=1;  /* the first step from GO is chosen */
+    grid=mode;
+}
+/* This update's step on the grid (port_clock_wait). */
+static void grid_wait(void)
+{
+    int code=grid_code;
+    if (grid==GRID_WHOLE) {
+        code=CODE_FIELD;
+        clock_rest();
+    } else if (grid==GRID_PLAY) {
+        clock_rest();  /* the recorded step comes before the update (port_clock_force) */
+    } else if (grid_ended) {
+        double step=clock_interval();
+        code=step_code(step);
+        if (wall_mode) owed+=step-(double)code/CODE_FIELD;  /* the rounding stays owed */
+    } else {
+        clock_hold((double)code/CODE_FIELD);
+    }
+    grid_advance(code);
+}
+/* A replay's step: the code in the last sample played (func_001A9640's place, between the wait
+   and the step). A step byte of 1 or 2 is the original's whole fields (a recording made on the
+   original clock: it does not play the same on this one, and stops at its first check). */
+void port_clock_force(int code)
+{
+    if (grid!=GRID_PLAY) return;
+    if (code>=1 && code<=2) code*=CODE_FIELD;
+    else if (code<CODE_FIELD/4 || code>CODE_MOST) code=CODE_FIELD;
+    D_0029E3D8-=whole;
+    grid_phase=grid_phase_before;
+    grid_advance(code);
+    D_0029E3D8+=whole;
+}
+
 /* The highest selectable rate: 240, or DHD_FPS_MAX when lower (the browser keeps 144). At 240 an
    update is 256 animation subticks (port_animation_step); keep the cap far below 1024. */
 int port_fps_max(void)
@@ -137,7 +245,15 @@ int port_fps(void)
     }
     return requested;
 }
-double port_frame_period(void) { int n = port_fps(); return n == 60 ? 1001.0 / 60000.0 : 1.0 / n; }
+/* The time a picture is held: one at the selected rate (59.94 Hz at 60), a field on the grid
+   before GO, a recorded step in a replay. */
+double port_frame_period(void)
+{
+    if (grid == GRID_WHOLE) return 1.0 / 60;
+    if (grid == GRID_PLAY) return grid_code / (60.0 * CODE_FIELD);
+    int n = port_fps();
+    return n == 60 ? 1001.0 / 60000.0 : 1.0 / n;
+}
 float port_step(void) { return port_delta_clock() ? (float)(step_fields ? step_fields : 60.0/port_fps()) : (float)D_0029E3D0; }
 int port_whole_step(void) { return port_delta_clock() ? whole : D_0029E3D0; }
 /* A per-field countdown that retail took one off a frame and tests for 0: down by this update's
@@ -148,11 +264,11 @@ int port_count_down(int value) { int w = port_whole_step(); return value > 0 && 
    update with no whole field must not count it again.) */
 int port_count_reached(int value, int mark) { return value >= mark && value - port_whole_step() < mark; }
 float port_decay(float f) { return port_delta_clock() ? powf(f, port_step()) : f; }
-float port_blend(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,(wall_mode ? step_fields : 60.0/port_fps()))) : r; }
+float port_blend(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,(wall_mode || grid ? step_fields : 60.0/port_fps()))) : r; }
 float port_particle_sum(float q) {
     /* Evaluate the geometric sum in double: float cancellation near q=1
        otherwise makes gently damped particles move systematically too far. */
-    return q == 1.0f ? port_step() : (float)((double)q*(1.0-pow((double)q,(wall_mode ? step_fields : 60.0/port_fps())))/(1.0-q));
+    return q == 1.0f ? port_step() : (float)((double)q*(1.0-pow((double)q,(wall_mode || grid ? step_fields : 60.0/port_fps())))/(1.0-q));
 }
 void port_particle_rotation(float *c,float *s)
 {
@@ -192,6 +308,7 @@ void port_clock_reset(void)
     step_fields=60.0/port_fps();
     previous_wall=0;
     owed=0;
+    grid=grid_seen=0;
     reset_body_clocks();
     port_clock_step();
 }
@@ -201,19 +318,26 @@ void port_clock_wait(int *out)
     *(volatile int *)GUEST(0x10000800)=0;
     int result = func_00243CE8(0);
     if (out) *out = result == 0;
-    step_fields=clock_interval();
     clock_serial++;
-    phase += wall_mode ? step_fields*port_fps() : 60;
-    whole = (int)(phase / port_fps());
-    phase -= whole*port_fps();
+    grid_enter(grid_seen ? grid_asked : GRID_OFF);
+    grid_seen=0;
+    if (grid) {
+        grid_wait();
+    } else {
+        step_fields=clock_interval();
+        phase += wall_mode ? step_fields*port_fps() : 60;
+        whole = (int)(phase / port_fps());
+        phase -= whole*port_fps();
+    }
     D_0029E3D8 += whole;
 }
 void port_clock_step(void)
 {
     D_0029E3D0 = whole;
-    D_0029E3D4 = wall_mode ? (int)(60.0/step_fields) : port_fps();
-    D_0029E3FC = wall_mode ? (float)(60.0/step_fields) : (float)port_fps();
-    D_0029E400 = wall_mode ? (float)(step_fields/60.0) : 1.0f / port_fps();
+    int stepped = wall_mode || grid;  /* the step is this update's own, not 60/N */
+    D_0029E3D4 = stepped ? (int)(60.0/step_fields) : port_fps();
+    D_0029E3FC = stepped ? (float)(60.0/step_fields) : (float)port_fps();
+    D_0029E400 = stepped ? (float)(step_fields/60.0) : 1.0f / port_fps();
     D_0029E3DC = D_0029E3D8;
     D_0029E3E0 += *(volatile int *)GUEST(0x10000800);
     *(volatile int *)GUEST(0x10000800)=0;
@@ -224,6 +348,12 @@ void port_clock_step(void)
 int port_animation_step(void)
 {
     if (port_animation_scale() == 1) return D_0029E3D0;
+    if (grid) {
+        grid_anim += grid_code*1024;
+        int ticks = grid_anim / CODE_FIELD;
+        grid_anim -= ticks*CODE_FIELD;
+        return ticks;
+    }
     anim_phase += wall_mode ? step_fields*1024*port_fps() : 60 * 1024;
     int ticks = (int)(anim_phase / port_fps());
     anim_phase -= ticks*port_fps();

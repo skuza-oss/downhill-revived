@@ -34,6 +34,16 @@ void port_clock_reset(void);
 void port_clock_wait(int *out);
 void port_clock_step(void);
 
+/* The field grid of an offline race and its replay (finding 141, port/hle/replay.c). */
+enum { GRID_OFF, GRID_WHOLE, GRID_RECORD, GRID_PLAY };
+void port_clock_grid(int mode);     /* the race asks for the next step's grid, every update */
+int port_clock_recording(void);     /* the step is a recorded race's (GRID_RECORD) */
+int port_clock_code(void);          /* this update's step in 1/120 field */
+void port_clock_force(int code);    /* a replay: this update's step is the recorded code */
+void port_replay_race_phase(int phase);
+int port_replay_race(void *recorder);
+void port_replay_frame(void *recorder);
+
 /* Animation timestamps in 1/1024-field units on the delta-time clock. */
 int port_animation_step(void);
 float port_animation_fields(float ticks);

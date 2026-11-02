@@ -351,10 +351,17 @@ def add(patches):
          '    port_hint_field = (unsigned int)func_00238F48();\n'
          'port_draw:\n'
          '    func_0023D650(0, &width, &height);\n    half = width / 2;')
-    # Disable recording and playback on the delta-time clock: skipping the recorder alone
-    # would leave its caller incrementing count over uninitialized samples.
+    # Race replays on the delta-time clock (finding 141, port/hle/replay.c): the recorder keeps
+    # one sample per field of race clock and a replay plays them with the recorded steps (the
+    # race's field grid, fps.c). 0019EE98 asks for one-field steps from the race load to GO;
+    # 001A9640, between the clock's wait and its step, stores or forces the step; the attract
+    # demo's camera cuts and its two minutes count fields.
     entry('001A8DE8', 'func_001A8DE8',
-          '    if (port_delta_clock()) return 1;')
+          '    if (port_delta_clock()) return port_replay_race(obj);')
+    entry('001A9640', 'func_001A9640',
+          '    if (port_delta_clock()) { port_replay_frame(arg0); return; }')
+    entry('0019EE98', 'func_0019EE98',
+          '    if (port_delta_clock()) port_replay_race_phase(race->state);')
     entry('00138E08', 'func_00138E08',
           '    if (port_delta_clock()) return; /* ghosts disabled on the delta-time clock */')
     edit('0020CDF0', 'p->rise*(float)dt', 'p->rise*(port_delta_clock() ? port_step() : (float)dt)')
