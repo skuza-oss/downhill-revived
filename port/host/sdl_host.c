@@ -118,6 +118,7 @@ static void text_event(const SDL_TextInputEvent *t)
 
 static void dispatch(const SDL_Event *e)
 {
+    if (touch_host_event(e)) return;  /* the touch controls' (touch_host.c): Back, a touch's mouse in a race */
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
@@ -234,6 +235,7 @@ int sdl_host_main(int (*game)(void *), void *arg)
         for (int got = SDL_WaitEventTimeout(&e, 4); got; got = SDL_PollEvent(&e)) dispatch(&e);
 #endif
         gamepad_thread_update();
+        touch_host_tick();
         gs_window_tick();
     }
     int code = 0;

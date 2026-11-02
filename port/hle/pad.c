@@ -121,6 +121,7 @@ void pad_vsync(void)
 {
     int port, slot;
     menu_mouse_field();  /* the mouse in the menus: the presses it makes this field */
+    touch_field();       /* the touch controls (touch_field.c): before the pads are read */
     pads_begin_field();
     presence_field();
     for (port = 0; port < 2; port++)

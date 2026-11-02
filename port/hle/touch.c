@@ -356,6 +356,16 @@ static void lay_out(Touch *t, int hud_moved)
         k->hw = w / 2 * scale, k->hh = h / 2 * scale;
         if (c == TC_TRICK) k->r = st->trick_size / 2.0f * e->size;
     }
+    /* the camera cutout (read at run time) is kept clear: a control over it moves inward */
+    const TouchScreen *sc = &t->screen;
+    if (sc->cut_x1 > sc->cut_x0 && sc->cut_y1 > sc->cut_y0)
+        for (int c = 0; c < TC_COUNT; c++) {
+            Ctl *k = &t->ctl[c];
+            float rx = k->box ? k->hw : k->r, ry = k->box ? k->hh : k->r;
+            if (!k->on || k->x + rx < sc->cut_x0 || k->x - rx > sc->cut_x1 || k->y + ry < sc->cut_y0 || k->y - ry > sc->cut_y1) continue;
+            if (sc->cut_x1 < W / 2) k->x = sc->cut_x1 + rx + 1;
+            else k->x = sc->cut_x0 - rx - 1;
+        }
     /* the steering area: 60 mm from the left strip, 3 mm short of the midline and of the right
        cluster's touch areas; Classic's to 44% of the width, below the L bar */
     float left = t->screen.strip_left, x1 = left + 60, top = 0;
@@ -755,7 +765,9 @@ int touch_visible(const Touch *t)
     return race_on_screen(t) && !t->hidden_by_pad;
 }
 
-int touch_owns_touches(const Touch *t) { return touch_visible(t) || t->hidden_by_pad; }
+/* The overlay's touches: while it shows, and in a race it hid for a controller (the touch that
+   brings it back); in the menus a touch is the menus' (their mouse). */
+int touch_owns_touches(const Touch *t) { return touch_visible(t) || (t->hidden_by_pad && race_on_screen(t)); }
 
 int touch_hud_mode(const Touch *t)
 {
@@ -1260,7 +1272,7 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
     if (t->hidden_by_pad) {   /* the touch that brings the overlay back is never sent */
         t->hidden_by_pad = 0;
         f->job = JOB_IGNORED;
-        return;
+        if (race_on_screen(t)) return;
     }
     if (t->editor) { editor_down(t, f); return; }
     if (!touch_visible(t)) { f->job = JOB_IGNORED; return; }

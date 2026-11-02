@@ -1,15 +1,33 @@
 // Downhill Revived on Android (finding 091): SDL's activity, which loads libSDL3.so and libmain.so
 // (the game, port/tools/build_host64.py --target android-arm64) and runs SDL_main (port/host/android_main.c) on its
-// own thread. Here only what the game asks of the activity before that: the screen's shape.
+// own thread. Here only what the game asks of the activity: the screen's shape before that, and for
+// the touch controls (finding 138, port/host/android_touch.c, called from SDL's thread): the
+// screen's density and its gesture and cutout insets, the vibrator, and the phone's roll for tilt
+// steering.
 package app.downhillrevived;
 
+import android.content.pm.ActivityInfo;
+import android.graphics.Insets;
 import android.graphics.Rect;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.DisplayCutout;
+import android.view.Surface;
+import android.view.WindowInsets;
 
 import org.libsdl.app.SDLActivity;
 
 public class DhdActivity extends SDLActivity {
+    private volatile float roll = Float.NaN;
+    private SensorEventListener tiltListener;
+
     @Override
     protected String[] getLibraries() {
         return new String[] { "SDL3", "main" };
@@ -27,5 +45,90 @@ public class DhdActivity extends SDLActivity {
         } catch (Throwable e) {  // the libraries didn't load: SDLActivity shows why
             Log.w("DownhillRevived", "no screen shape: " + e);
         }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (tiltListener != null) ((SensorManager) getSystemService(SENSOR_SERVICE)).unregisterListener(tiltListener);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (tiltListener != null) registerTilt();
+    }
+
+    /** The touch controls' screen: xdpi and ydpi times 1000, the system gesture insets (left, top,
+     *  right, bottom) and the cutout's safe insets, in pixels. */
+    public int[] touchScreen() {
+        int[] r = new int[10];
+        DisplayMetrics m = getResources().getDisplayMetrics();
+        r[0] = Math.round(m.xdpi * 1000);
+        r[1] = Math.round(m.ydpi * 1000);
+        try {
+            WindowInsets in = getWindow().getDecorView().getRootWindowInsets();
+            if (in != null) {
+                Insets g = in.getInsets(WindowInsets.Type.systemGestures());
+                r[2] = g.left; r[3] = g.top; r[4] = g.right; r[5] = g.bottom;
+                DisplayCutout c = in.getDisplayCutout();
+                if (c != null) {
+                    r[6] = c.getSafeInsetLeft(); r[7] = c.getSafeInsetTop(); r[8] = c.getSafeInsetRight(); r[9] = c.getSafeInsetBottom();
+                }
+            }
+        } catch (Throwable e) {
+            Log.w("DownhillRevived", "no window insets: " + e);
+        }
+        return r;
+    }
+
+    /** A tick (1), a double tick (2) or a strong tick (3) on the phone's vibrator. */
+    public void touchBuzz(int kind) {
+        Vibrator v = getSystemService(Vibrator.class);
+        if (v == null || !v.hasVibrator()) return;
+        int effect = kind == 3 ? VibrationEffect.EFFECT_HEAVY_CLICK : kind == 2 ? VibrationEffect.EFFECT_DOUBLE_CLICK : VibrationEffect.EFFECT_TICK;
+        v.vibrate(VibrationEffect.createPredefined(effect));
+    }
+
+    /** The phone's roll in degrees (turned right positive, 0 held level in landscape), NaN until known. */
+    public float touchTilt() {
+        return roll;
+    }
+
+    /** Tilt steering on or off: the gravity sensor, and the screen kept on its current landscape side. */
+    public void touchTiltOn(final boolean on) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                SensorManager sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
+                if (on && tiltListener == null) {
+                    tiltListener = new SensorEventListener() {
+                        @Override public void onSensorChanged(SensorEvent e) {
+                            float x = e.values[0], y = e.values[1], sx, sy;
+                            int rotation = getWindowManager().getDefaultDisplay().getRotation();
+                            if (rotation == Surface.ROTATION_90) { sx = -y; sy = x; }
+                            else if (rotation == Surface.ROTATION_270) { sx = y; sy = -x; }
+                            else if (rotation == Surface.ROTATION_180) { sx = -x; sy = -y; }
+                            else { sx = x; sy = y; }
+                            roll = (float) Math.toDegrees(Math.atan2(-sx, sy));
+                        }
+                        @Override public void onAccuracyChanged(Sensor s, int accuracy) {}
+                    };
+                    registerTilt();
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LOCKED);
+                } else if (!on && tiltListener != null) {
+                    sensors.unregisterListener(tiltListener);
+                    tiltListener = null;
+                    roll = Float.NaN;
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                }
+            }
+        });
+    }
+
+    private void registerTilt() {
+        SensorManager sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
+        Sensor s = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY);
+        if (s == null) s = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        if (s != null) sensors.registerListener(tiltListener, s, SensorManager.SENSOR_DELAY_GAME);
     }
 }

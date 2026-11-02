@@ -15,7 +15,10 @@
    ones marked live below lists their variables in DHD_PC_SETTINGS_LIVE (the row then sets its
    variable at once and the host follows it), and DHD_PC_SETTINGS_RESTART replaces the footer of
    a row that waits for the next start. The browser sets all three (port/web/www/settings.js);
-   x64 sets none of them, so its page is as described above. */
+   x64 sets none of them, so its page is as described above.
+   With touch (the host sets DHD_TOUCH: android, or mouse for a desktop test) the page ends with a
+   Touch Controls row whose three screens are touch_settings.c's (finding 138); on Android the
+   page is called SETTINGS. */
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "menu_page.h"
@@ -28,6 +31,12 @@
 #include "settings_table.h"  /* the settings' choices: generated from port/render/settings */
 
 void gs_window_apply(void);           /* port/gs/present.c */
+/* touch_settings.c: the TOUCH CONTROLS screens 1-3 of this page */
+const char *touch_settings_title(int page);
+void touch_settings_build(MenuPage *p, int page);
+void touch_settings_update(MenuPage *p, int page, int cursor);
+void touch_settings_change(MenuPage *p, int page, int row, int step);
+int touch_settings_accept(MenuPage *p, int page, int row);
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
@@ -182,6 +191,15 @@ static int locked(const Row *r)
 }
 
 static MenuPage page;
+static int screen;         /* 0 the PC settings, 1-3 TOUCH CONTROLS */
+static int touch_row = -1; /* the Touch Controls row, -1 without touch */
+
+static const char *page_title(void)
+{
+    const char *touch = host_getenv("DHD_TOUCH");
+    if (screen) return touch_settings_title(screen);
+    return touch && !strcmp(touch, "android") ? "SETTINGS" : "PC SETTINGS";
+}
 
 /* Resolution's value as the GPU draws it (scale_limit, host_service_gs_scale), after its label:
    a scale over the limit "8x (running 4x: GPU memory)" while it runs, "(runs at 4x: ...)"
@@ -258,14 +276,19 @@ static void change(int index, int step)
 
 static void page_build(MenuPage *p)
 {
+    p->title = page_title();
+    if (screen) { touch_settings_build(p, screen); return; }
     for (int i = 0; i < shown_count; i++) {
         menu_page_value(p, rows[shown[i]].label, "", 1);
         format(&rows[shown[i]]);
     }
+    const char *touch = host_getenv("DHD_TOUCH");
+    touch_row = touch && *touch ? menu_page_row(p, "Touch Controls", 1) : -1;
 }
 
 static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
 {
+    if (screen) { touch_settings_update(p, screen, cursor); return; }
     const Row *r = row_at(cursor);
     p->footer = NULL;
     if (r && locked(r)) {
@@ -283,6 +306,12 @@ static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
 
 static void page_back(MenuPage *p)  /* Triangle: the values the page opened with, close */
 {
+    if (screen) {  /* TOUCH CONTROLS saves as it goes: back to the PC settings, on its row */
+        screen = 0;
+        menu_play("S_BACK");
+        menu_page_rebuild_at(p, touch_row >= 0 ? touch_row : 0);
+        return;
+    }
     for (int i = 0; i < ROWS; i++) {
         Row *r = &rows[i];
         if (r->selected == r->opened || r->opened < 0) continue;
@@ -292,16 +321,29 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
     menu_page_cancel(p);
 }
 
-static void page_left(MenuPage *p, int index) { (void)p; change(index, -1); }
-static void page_right(MenuPage *p, int index) { (void)p; change(index, 1); }
+static void page_left(MenuPage *p, int index) { if (screen) touch_settings_change(p, screen, index, -1); else change(index, -1); }
+static void page_right(MenuPage *p, int index) { if (screen) touch_settings_change(p, screen, index, 1); else change(index, 1); }
+
+/* Cross: keep and close; on Touch Controls (and inside it) the touch screens. */
+static void page_accept(MenuPage *p, int index)
+{
+    if (!screen && (touch_row < 0 || index != touch_row)) { menu_page_close(p); return; }
+    int next = screen ? touch_settings_accept(p, screen, index) : 1;
+    if (!screen) menu_play("S_SELECT");
+    if (next == screen) return;
+    int back_to_row = next == 0 && touch_row >= 0 ? touch_row : 0;
+    screen = next;
+    menu_page_rebuild_at(p, back_to_row);
+}
 
 /* OPTIONS, item 9 (patched func_001F0160): run the page until it closes. */
 void port_pc_settings(void)
 {
-    page.title = "PC SETTINGS";
+    screen = 0;
+    page.title = page_title();
     page.build = page_build;
     page.update = page_update;
-    page.accept = NULL;  /* Cross: keep, close */
+    page.accept = page_accept;  /* Cross: keep, close (Touch Controls: its screens) */
     page.back = page_back;
     page.left = page_left;
     page.right = page_right;

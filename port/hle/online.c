@@ -865,6 +865,17 @@ static void leave_race(void)
     func_001B45F8(EE_PTR(0x4B1F40), 2, 0);
 }
 
+/* The touch controls' online panel, Leave race (touch_field.c, finding 138): out of this race as
+   BACK TO THE ROOM's Yes is (a race outside a room: as QUIT), without the question (the panel's
+   own second tap confirmed it). */
+void port_online_touch_leave(void)
+{
+    if (!online_mode() || !on.started || on.end_done) return;
+    fprintf(stderr, "online: touch panel: leave the race\n");
+    on.end_done = 1, on.end_done_at = host_wall_seconds();
+    leave_race();
+}
+
 /* A race started outside a room (DHD_NET_CREATE / DHD_NET_JOIN, the tests' races): the host
    publishes the order once every human has finished or left, or this long after the first. */
 enum { RESULTS_WAIT = 60 };

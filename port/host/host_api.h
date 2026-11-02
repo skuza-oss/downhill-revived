@@ -322,4 +322,28 @@ typedef struct {
 } HostPresence;  /* 52 bytes */
 void host_service_presence(uint32_t state);
 
+/* The touch controls (finding 138; port/host/touch_host.c, port/hle/touch.c): the core's side
+   (pad.c) once a field. In: what the overlay reads from the game (the race HUD hook, the rider's
+   air flag) and the clocks; a TOUCH_COMMAND_* from the TOUCH CONTROLS pages. Out: where the HUD
+   goes (0 the game's place, 1 moved for the right hand, 2 for the left), the online panel's Leave
+   race, and the trick-stick hint's hold (the core waits while it is set). A host without touch
+   leaves the outputs as they are (0). */
+enum { TOUCH_COMMAND_NONE, TOUCH_COMMAND_SETTINGS, TOUCH_COMMAND_EDIT, TOUCH_COMMAND_HINTS, TOUCH_COMMAND_TILT_CENTRE };
+typedef struct {
+    double race_ms;        /* race time, ms (1/60 s fields; stops while paused) */
+    int32_t race_hud;      /* the race HUD was drawn since the last call, on the race screen */
+    int32_t air;           /* player 1's rider is in the air */
+    int32_t online;        /* an online race */
+    int32_t clock_moving;  /* the race clock advanced since the last call */
+    int32_t pause_row[3];  /* the offline pause menu's rows of RESUME, RE-START and QUIT (-1: none) */
+    int32_t fps;           /* VBLANKs a second */
+    uint32_t vsync;        /* VBLANKs so far */
+    int32_t command;       /* TOUCH_COMMAND_* */
+    int32_t hud_mode;      /* out */
+    int32_t leave_race;    /* out */
+    int32_t freeze;        /* out */
+    int32_t reserved;
+} HostTouch;  /* 64 bytes */
+void host_service_touch_field(uint32_t state);
+
 #endif

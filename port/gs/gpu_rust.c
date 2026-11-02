@@ -44,6 +44,7 @@
 
 #ifndef DHD_GS_TEST_BUILD
 #include "../net/net.h"
+int touch_host_overlay(float *items, int max, float *width_mm, float *height_mm);  /* port/host/touch_host.c */
 #endif
 
 /* PC SETTINGS' FPS & Ping (DHD_PERF_COUNTER, finding 120): read at the first picture and again
@@ -66,6 +67,14 @@ static void counter_present(DhdrSurface *surface)
 #endif
     dhdr_surface_counter(surface, enabled, ping,
                          (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency());
+#ifndef DHD_GS_TEST_BUILD
+    {   /* the touch controls over the picture (port/host/touch_host.c, finding 138) */
+        static float shapes[512 * 16];
+        float width_mm = 0, height_mm = 0;
+        int n = touch_host_overlay(shapes, 512, &width_mm, &height_mm);
+        dhdr_surface_touch(surface, shapes, (uint32_t)n, width_mm, height_mm);
+    }
+#endif
     dhdr_surface_present(surface);
     perf_presented();  /* every picture shown, by either renderer */
 }

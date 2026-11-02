@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Downhill Revived on Android (finding 091). After SDL's android-project template (SDL 3.4.18):
-     one landscape activity over SDL's SDLActivity, gamepads (Bluetooth or USB), no touch controls. -->
+     one landscape activity over SDL's SDLActivity, gamepads (Bluetooth or USB) and the touch controls (finding 138). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:installLocation="internalOnly">
 

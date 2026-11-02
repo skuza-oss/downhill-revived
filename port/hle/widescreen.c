@@ -197,15 +197,52 @@ int port_ws_hud_point(int view, int ref, int x)
     return a + scaled((x - a) * port_fov_x);
 }
 
+/* ---- the touch controls' HUD (finding 138, touch_field.c) ----
+   The HUD's own calls are the hook: each says the race HUD is drawn (touch_hud_seen), and while
+   the touch controls are on (touch_hud_place) the speedometer and the energy arrows above it, the
+   cluster in the bottom-right corner where the right thumb works, move to the top corner: the
+   left one for the right hand (the arrows beside the speedometer), the right one for the left
+   hand, where the left side's pieces (the track bar, the place) also move across. Places are
+   fractions of the 4:3 view (u across from the left, v down from the top); widescreen then
+   anchors each piece to its new side as before. DHD_TOUCH_HUD_SHIFT="su,sv,au,av" overrides the
+   right hand's shifts of the speedometer and the arrows (check 7 tunes them). */
+static void touch_hud_move(float u, float v, float *du, float *dv)
+{
+    static HleEnv env;
+    static const char *read;
+    static float shift[4] = {-0.75f, -0.75f, -0.65f, -0.67f};
+    const char *text = hle_env(&env, "DHD_TOUCH_HUD_SHIFT");
+    if (text != read) {
+        read = text;
+        float s[4];
+        if (text && sscanf(text, "%f,%f,%f,%f", &s[0], &s[1], &s[2], &s[3]) == 4) memcpy(shift, s, sizeof shift);
+    }
+    *du = *dv = 0;
+    if (u > 2.0f / 3 && v > 0.62f) {   /* the bottom-right cluster: the arrows above 0.755, the speedometer below */
+        int arrows = v < 0.755f;
+        *dv = arrows ? shift[3] : shift[1];
+        if (touch_hud_place == 1) *du = arrows ? shift[2] : shift[0];
+        else *du = arrows ? -0.21f : 0;   /* left hand: stays right, the arrows to its left */
+    } else if (touch_hud_place == 2 && u < 1.0f / 3) *du = 1 - 2 * u;   /* left hand: the left side mirrors */
+}
+
 /* The HUD's 3D pieces: local is the offset from the camera (x right, y forward, z up) that
    func_00176930 places a piece at. A piece in a side third moves out with that side: by the
    width the view gained at its depth. */
 void port_ws_hud_offset(int view, float *local)
 {
-    if (!widescreen || view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
+    touch_hud_seen = 1;
+    if (view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
     const WsView *v = D_0075A9D0[view].view;
     float depth = local[1], focal = v->x0, half = v->width * 0.5f;
     if (depth <= 0 || focal <= 0 || half <= 0) return;
+    if (touch_hud_place) {   /* the piece's place in the 4:3 view; its height is three quarters of its width */
+        float span = depth * half / (focal / port_fov_x), du, dv;
+        touch_hud_move((local[0] / span + 1) * 0.5f, (1 - local[2] / (span * 0.75f)) * 0.5f, &du, &dv);
+        local[0] += du * 2 * span;
+        local[2] -= dv * 2 * span * 0.75f;
+    }
+    if (!widescreen) return;
     /* where it is across the 4:3 view, -1 left side .. 1 right side */
     float u = local[0] * (focal / port_fov_x) / (depth * half);
     if (fabsf(u) <= 1.0f / 3) return;
@@ -245,9 +282,24 @@ int port_ws_glyph_x(int w, int pen)
 /* A glyph's width, 1/16 pixels. */
 int port_ws_glyph_w(int width) { return port_ws_size(width); }
 
+/* A HUD string's point (x, y in the view's pixels) as the touch controls' HUD has it. */
+static void touch_hud_text(int view, int *x, int *y)
+{
+    touch_hud_seen = 1;
+    int w, h;
+    if (!touch_hud_place || view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
+    func_0023D650(view, &w, &h);
+    if (w <= 0 || h <= 0) return;
+    float du, dv;
+    touch_hud_move((float)*x / w, (float)*y / h, &du, &dv);
+    *x += scaled(du * w);
+    *y += scaled(dv * h);
+}
+
 /* The HUD's text calls (port/patches_widescreen.py renames them in its units). */
 void port_hud_text_c(int font, int view, int x, int y, const char *text)
 {
+    touch_hud_text(view, &x, &y);
     hud_text = 1;
     func_0020F9F0(font, view, x, y, text);
     hud_text = 0;
@@ -255,6 +307,7 @@ void port_hud_text_c(int font, int view, int x, int y, const char *text)
 
 void port_hud_text_l(int font, int view, int x, int y, const char *text)
 {
+    touch_hud_text(view, &x, &y);
     hud_text = 1;
     func_0020F9A8(font, view, x, y, text);
     hud_text = 0;

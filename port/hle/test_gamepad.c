@@ -18,6 +18,8 @@ void host_thread_name(const char *name) { (void)name; }
 void gs_window_event(unsigned type) { (void)type; }  /* present.c's: this test has no window */
 void gs_mouse_event(const void *event) { (void)event; }
 void gs_window_tick(void) {}
+int touch_host_event(const union SDL_Event *e) { (void)e; return 0; }  /* touch_host.c's: no touch here */
+void touch_host_tick(void) {}
 double host_pacing_period(void) { return 1.0 / 60; }  /* host.c's, for keyboard.c's field timing */
 
 /* the game thread's side, as the game's: SDL's own loop runs on the main thread (sdl_host_main) */

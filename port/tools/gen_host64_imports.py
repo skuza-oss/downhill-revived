@@ -282,6 +282,7 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
             'host_service_host_pad_device': [(1,'sizeof(HostPad)')],
             'host_service_mouse_state': [(0,'sizeof(HostMouse)')],
             'host_service_presence': [(0,'sizeof(HostPresence)')],
+            'host_service_touch_field': [(0,'sizeof(HostTouch)')],
             'host_service_movie_audio': [(0,'host64_bridge_array_bytes((int32_t)a1,8)')],
             'host_service_vif_feed': [(1,'host64_bridge_array_bytes((int32_t)a2,4)')],
             'host_service_graphics_feed': [(1,'host64_bridge_array_bytes((int32_t)a2,4)')],

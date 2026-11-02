@@ -312,7 +312,7 @@ host_service_host_init host_service_host_console_init host_service_host_settings
 host_service_movie_prepare host_service_movie_start host_service_movie_audio host_service_graphics_wait host_service_graphics_shutdown
 host_service_gs_pump_messages host_service_gs_window_title host_service_gs_native_view
 host_service_gs_window_apply host_service_gs_present_options_apply host_service_gs_window_close
-host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence
+host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence host_service_touch_field
 host_service_net_get_lobby host_service_clipboard_set`.split(/\s+/);
   for (const n of noops) impl[n] ??= () => {};
   for (const n of ['host_heartbeat_eip', 'host_service_launcher_open']) impl[n] = () => 0;
