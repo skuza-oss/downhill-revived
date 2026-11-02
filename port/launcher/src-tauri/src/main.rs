@@ -382,7 +382,8 @@ fn play_at_once(place: game::Place) -> Option<game::Place> {
     if !place.exe().is_file() {
         return Some(place);
     }
-    let iso = dhd_settings::read(&place.settings()).unwrap_or_default().written("iso").filter(|s| !s.is_empty());
+    // the disc the game will use: DHD_ISO before dhd.ini's iso, as the game takes it
+    let iso = Some(effective(&place, "iso")).filter(|s| !s.is_empty());
     if iso.is_none_or(|p| disc::problem(std::path::Path::new(&p)).is_some()) {
         return Some(place);
     }
