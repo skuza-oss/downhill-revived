@@ -429,8 +429,9 @@ void movie_audio(int32_t *mix, int frames)
 }
 
 /* The picture to present now (PICTURE_WIDTH x PICTURE_HEIGHT RGBA, the movie centred on black),
-   or NULL without a movie. Game thread, once a field. */
-const uint32_t *movie_picture(unsigned *width, unsigned *height)
+   or NULL without a movie; rows: the picture's rows the movie fills, in its middle (all of them
+   until its first picture is decoded). Game thread, once a field. */
+const uint32_t *movie_picture(unsigned *width, unsigned *height, unsigned *rows)
 {
     if (!M.active || !M.picture) return NULL;
     SDL_LockMutex(M.lock);
@@ -449,6 +450,7 @@ const uint32_t *movie_picture(unsigned *width, unsigned *height)
     SDL_UnlockMutex(M.lock);
     *width = PICTURE_WIDTH;
     *height = PICTURE_HEIGHT;
+    *rows = M.height > 0 ? (unsigned)M.height : PICTURE_HEIGHT;
     return M.picture;
 }
 

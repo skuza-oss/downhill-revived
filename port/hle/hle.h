@@ -70,6 +70,7 @@ void host_pad_vibrate(int port, int light, int heavy);  /* the DualShock 2's mot
 void host_widescreen_init(void);  /* DHD_WIDESCREEN: Hor+ field of view, any aspect (widescreen.c) */
 void host_widescreen_vsync(void); /* its live-memory part, once a field */
 double host_widescreen_aspect(void);  /* the widescreen picture's width / height; 0 when off */
+void widescreen_card_mode(int on);   /* the next field's 2D is for a card: unmapped (widescreen.c) */
 void host_display_aware(void);    /* the process sees real pixels (DPI aware), before any window */
 double host_seconds(void);    /* the game clock in seconds: virtual under DHD_FRAME_CLOCK (kernel.c) */
 /* Just-in-time frames (kernel.c): the picture handed on at this VBLANK, when to show it (0: at

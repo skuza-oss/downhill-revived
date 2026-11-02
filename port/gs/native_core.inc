@@ -140,6 +140,7 @@ typedef struct {
     uint32_t display[12];
     uint32_t *movie;                 /* a movie's picture shown instead (gs_native_movie), when movie_on */
     unsigned movie_width, movie_height, movie_capacity;
+    unsigned movie_rows;             /* the rows of the movie's picture the movie fills, in its middle */
     int movie_on;
     uint64_t field;
     double time;                     /* host wall seconds at vsync */
@@ -150,6 +151,7 @@ typedef struct {
     unsigned pair_capacity;
     unsigned path1;                  /* primitives VU1 drew (PATH1): 0 in a field of 2D only */
     unsigned flat_limit;             /* loading state at handoff, never read from the render thread */
+    int card_2d;                     /* the game drew its 2D unmapped, for a 4:3 card (host_widescreen_card_drawn) */
 } NativeFrame;
 
 /* Primitives that write Z buffer memory, for the exact probe answer: Z writes (zbp) and colour
@@ -272,6 +274,8 @@ typedef struct Native {
     float aspect;  /* the picture's shape in the window (DHD_ASPECT): width/height, 0 stretched, -1 its pixels */
     float wide;    /* widescreen's shape, or 0: fields of 2D only (loading screens) are shown 4:3 */
     unsigned flat_fields;            /* full-screen 2D fields in a row, up to the one shown */
+    int card_shown;                  /* the last picture is a card: shown 4:3, the sides filled */
+    unsigned movie_rows;             /* the shown picture is a movie in these rows of its middle; 0: not a movie */
     /* DHD_SCALE: wide surfaces (frame and Z buffers) are drawn this many times larger; 0 until
        "match window" has seen the window. Narrow ones (the shadow and its blur) stay at 1x. */
     unsigned scale_setting, scale;
@@ -1872,10 +1876,29 @@ void pacing_present(double due, double began);
    and countdown views never use a primitive-count heuristic. */
 #define NATIVE_FLAT_FIELDS 8
 int host_widescreen_flat_limit(void);  /* port/hle/widescreen.c */
+int host_widescreen_card_drawn(void);  /* port/hle/host.c: the field's 2D was drawn for a card */
+
+/* Widescreen shows a full-screen 2D picture (a card) at 4:3 and a movie at its own shape (finding
+   140): the sides of the window are filled with the picture blurred and darkened (present.rs). */
+static int native_wide_43(const Native *n)
+{
+    return n->wide && (n->card_shown || n->movie_rows);
+}
+
+/* Whether the game should draw its next field's 2D for a card: unmapped, as at 4:3 (widescreen.c's
+   card mode, asked through host_frame_video each vsync). The render thread's answer after its last
+   picture: NATIVE_FLAT_FIELDS fields of 2D only in a row. */
+static volatile int native_card_now;
+int gs_native_card(void) { return native_card_now; }
+
+/* The picture's size in a window of w x h, keeping its shape: DHD_ASPECT's; 4:3 for a card in
+   widescreen and for a movie when the shape is wider (a movie is a 4:3 picture, whatever shape the
+   game has). */
 static void native_viewport(const Native *n, unsigned w, unsigned h, float *vw, float *vh)
 {
     float aspect = n->aspect < 0 ? (float)n->display_width / n->display_height : n->aspect;
-    if (n->wide && n->flat_fields >= NATIVE_FLAT_FIELDS && (aspect > 4.0f / 3 || aspect == 0)) aspect = 4.0f / 3;
+    if (native_wide_43(n) && (aspect > 4.0f / 3 || aspect == 0)) aspect = 4.0f / 3;
+    if (n->movie_rows && aspect > 4.0f / 3) aspect = 4.0f / 3;
     *vw = (float)w, *vh = (float)h;
     if (aspect > 0) {
         if (*vw > *vh * aspect) *vw = floorf(*vh * aspect + 0.5f);
@@ -1903,11 +1926,27 @@ static void native_prepare_surfaces(Native *n, const NativeFrame *f)
     for (unsigned i = 0; i < surfaces; i++) native_surface_resources(n, &n->surfaces[i], want[i]);
 }
 
-/* After a picture's scanout: whether it is a field of 2D only (widescreen shows those 4:3). */
+/* After a picture's scanout: whether it is a field of 2D only. After NATIVE_FLAT_FIELDS of them in a
+   row the game draws its 2D for a card (native_card_now, widescreen.c), and a field of 2D only drawn
+   that way is a card: shown 4:3 with its sides filled, its text in its shape. So the picture and its
+   text switch together, at the first field the game drew for the card, and back at the first field
+   with 3D. The browser's core can't ask (its host_frame_video is a stub; its text stays mapped):
+   there a card is shown 4:3 after NATIVE_FLAT_FIELDS, as before. Each switch is logged with the
+   field's VU1 primitives and the limit of its menu state. */
 static void native_note_flat(Native *n, const NativeFrame *f)
 {
     int flat = !f->path1 || (n->wide && f->path1 < f->flat_limit);
     n->flat_fields = flat ? n->flat_fields + 1 : 0;
+    native_card_now = n->wide && n->flat_fields >= NATIVE_FLAT_FIELDS;
+#ifdef NATIVE_NO_CARD_MODE
+    int card = native_card_now;
+#else
+    int card = n->wide && flat && f->card_2d;
+#endif
+    if (card != n->card_shown)
+        fprintf(stderr, "gs native: field %llu: %s (VU1 primitives %u, limit %u)\n", (unsigned long long)f->field,
+                card ? "a card, shown 4:3 and filled" : "the full width again", f->path1, f->flat_limit);
+    n->card_shown = card;
 }
 
 /* After a present: the counts and the time between presents. */
@@ -1924,19 +1963,34 @@ static void native_note_presented(Native *n)
    shape, and DHD_VIEW's quarter (present.h gs_native_view): one quarter of the 3-4 player split
    screen (presets 6-9) fills the picture: the whole is drawn twice as large, shifted and cut to
    the picture; every view is still drawn and the game is unchanged (finding 041). cut: the
-   picture's rectangle in the window, [left, right) x [top, bottom). */
-static void native_present_rect(const Native *n, unsigned w, unsigned h, float viewport[4], NativeRect *cut)
+   picture's rectangle in the window, [left, right) x [top, bottom).
+   In widescreen a movie shows only its rows (the 640 x 368 movie in the middle of the 640 x 448
+   picture, finding 055), at their own shape (about 1.62:1), as large as the window takes. Returns
+   1 when the window's sides around cut are to be filled (present.rs): widescreen's 4:3 pictures. */
+static int native_present_rect(const Native *n, unsigned w, unsigned h, float viewport[4], NativeRect *cut)
 {
     float vw, vh;
+    int view = gs_native_view - 1, quarter = view >= 0 && view < 4;
     native_viewport(n, w, h, &vw, &vh);
+    float top, height;   /* the cut's rows: the picture's, or the movie's */
+    if (n->wide && n->movie_rows && n->movie_rows < n->display_height && !quarter) {
+        float part = (float)n->movie_rows / n->display_height, shape = 4.0f / 3 / part;  /* the movie's own */
+        float mw = (float)w, mh = (float)h;
+        if (mw > mh * shape) mw = floorf(mh * shape + 0.5f);
+        else mh = floorf(mw / shape + 0.5f);
+        vw = mw, vh = mh / part;
+        top = floorf((h - mh) / 2), height = mh;
+    } else {
+        top = floorf((h - vh) / 2), height = vh;
+    }
     viewport[0] = floorf((w - vw) / 2); viewport[1] = floorf((h - vh) / 2); viewport[2] = vw; viewport[3] = vh;
-    cut->left = (int)viewport[0]; cut->top = (int)viewport[1];
-    cut->right = (int)(viewport[0] + vw); cut->bottom = (int)(viewport[1] + vh);
-    int view = gs_native_view - 1;
-    if (view >= 0 && view < 4) {
+    cut->left = (int)viewport[0]; cut->top = (int)top;
+    cut->right = (int)(viewport[0] + vw); cut->bottom = (int)(top + height);
+    if (quarter) {
         viewport[0] -= (view & 1) * vw, viewport[1] -= (view >> 1) * vh;
         viewport[2] *= 2, viewport[3] *= 2;
     }
+    return native_wide_43(n) && !quarter;
 }
 
 static void native_recycle(NativeFrame *f)
@@ -2443,11 +2497,11 @@ void gs_native_vsync(Gs *g, unsigned *width, unsigned *height, int resize)
 {
     double due, began;
     pacing_handed(&due, &began);
-    gs_native_vsync_handed(g, width, height, resize, due, began, host_widescreen_flat_limit());
+    gs_native_vsync_handed(g, width, height, resize, due, began, host_widescreen_flat_limit(), host_widescreen_card_drawn());
 }
 
 void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize, double due, double began,
-                            int flat_limit)
+                            int flat_limit, int card_2d)
 {
     FILE *trace = native_field_trace("registers");
     if (trace) {
@@ -2494,6 +2548,7 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
     } else n->stats.display_missing++;
     memcpy(f->display, packed, sizeof packed);
     f->flat_limit = (unsigned)flat_limit;
+    f->card_2d = card_2d;
     f->field = ++n->field;
     if (n->texpack) texpack_field(n->field);
     f->time = host_wall_seconds();
@@ -2586,22 +2641,22 @@ static uint32_t *native_window_picture(Native *n, unsigned *width, unsigned *hei
         if (!grown) return n->picture;
         out = grown, out_size = (size_t)w * h;
     }
-    float vw, vh;
-    native_viewport(n, w, h, &vw, &vh);
-    int x0 = (int)floorf((w - vw) / 2), y0 = (int)floorf((h - vh) / 2);
+    float rect[4];
+    NativeRect cut;
+    native_present_rect(n, w, h, rect, &cut);   /* widescreen's fill beside a 4:3 picture is left black here */
     for (unsigned y = 0; y < h; y++)
         for (unsigned x = 0; x < w; x++) {
-            int px = (int)x - x0, py = (int)y - y0;
+            int px = (int)x - (int)rect[0], py = (int)y - (int)rect[1];
             uint32_t c = 0xFF000000u;
-            if (px >= 0 && py >= 0 && px < (int)vw && py < (int)vh)
-                c = n->picture[(unsigned)(py * (float)*height / vh) * *width + (unsigned)(px * (float)*width / vw)];
+            if ((int)x >= cut.left && (int)y >= cut.top && (int)x < cut.right && (int)y < cut.bottom)
+                c = n->picture[(unsigned)(py * (float)*height / rect[3]) * *width + (unsigned)(px * (float)*width / rect[2])];
             out[y * w + x] = c;
         }
     *width = w, *height = h;
     return out;
 }
 
-void gs_native_movie(Gs *g, const uint32_t *rgba, unsigned width, unsigned height)
+void gs_native_movie(Gs *g, const uint32_t *rgba, unsigned width, unsigned height, unsigned rows)
 {
     NativeFrame *f = ((NativeExact *)g->backend)->native->recording;
     f->movie_on = 0;
@@ -2612,7 +2667,7 @@ void gs_native_movie(Gs *g, const uint32_t *rgba, unsigned width, unsigned heigh
         f->movie = grown, f->movie_capacity = width * height;
     }
     memcpy(f->movie, rgba, (size_t)width * height * 4);
-    f->movie_width = width, f->movie_height = height, f->movie_on = 1;
+    f->movie_width = width, f->movie_height = height, f->movie_rows = rows, f->movie_on = 1;
 }
 
 uint32_t *gs_native_picture(Gs *g, unsigned *width, unsigned *height)

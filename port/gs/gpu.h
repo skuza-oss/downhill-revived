@@ -48,18 +48,20 @@ extern volatile int gs_native_view;
 /* DHD_RENDER=native: a render thread draws and presents each field (gpu_rust_native.inc). */
 int gs_gpu_native(const Gs *g);
 void gs_native_vsync(Gs *g, unsigned *width, unsigned *height, int resize);
-/* The same with the pacing times (pacing_handed) and flat limit taken at the game's vsync, for a
-   picture the GS worker hands on later (present.c, deferred vsync). */
+/* The same with the pacing times (pacing_handed), flat limit and card mode (the field's 2D drawn for
+   a card, host_widescreen_card_drawn) taken at the game's vsync, for a picture the GS worker hands
+   on later (present.c, deferred vsync). */
 void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize, double due, double began,
-                            int flat_limit);
+                            int flat_limit, int card_2d);
 void gs_native_bench(Gs *g, int end);  /* DHD_BENCH window start (0) and end (1) */
 void gs_native_lock(Gs *g, int lock);  /* the render thread's lock (EE thread) */
 void gs_native_present_options(Gs *g);  /* DHD_PRESENT_FILTER and DHD_ASPECT read again */
 /* The last field's picture at the renderer's resolution (DHD_SCALE), owned by the renderer. */
 uint32_t *gs_native_picture(Gs *g, unsigned *width, unsigned *height);
 /* The field being recorded shows this RGBA picture instead of the display circuit's (a movie,
-   port/hle/movie.c), or the circuit again with NULL. Game thread, before gs_native_vsync. */
-void gs_native_movie(Gs *g, const uint32_t *rgba, unsigned width, unsigned height);
+   port/hle/movie.c; the movie fills its middle rows), or the circuit again with NULL. Game thread,
+   before gs_native_vsync. */
+void gs_native_movie(Gs *g, const uint32_t *rgba, unsigned width, unsigned height, unsigned rows);
 #ifdef DHD_GS_TEST_BUILD
 /* Diagnostic only: coherent raw GPU image, including unpredicted writes.
    Unlike g->sync this never filters pages or merges into g->vram. */

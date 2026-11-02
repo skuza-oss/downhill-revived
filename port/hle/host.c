@@ -1582,7 +1582,19 @@ static double published_aspect;
 static int published_flat_limit;
 double host_widescreen_aspect(void) { return published_aspect; }
 int host_widescreen_flat_limit(void) { return published_flat_limit; }
-void host_frame_video(double aspect, int flat_limit) { published_aspect=aspect; published_flat_limit=flat_limit; }
+/* Widescreen's card mode (finding 140): the renderer's answer (gs_native_card) at one vsync is how
+   the game draws the next field's 2D; card_drawn is the mode of the field being handed to the
+   renderer now (present.c), which shows it 4:3 only when the game drew it so. */
+int gs_native_card(void);  /* port/gs/native_core.inc; 0 without the native renderer */
+static int card_next, card_drawn;
+int host_widescreen_card_drawn(void) { return card_drawn; }
+int host_frame_video(double aspect, int flat_limit)
+{
+    published_aspect=aspect; published_flat_limit=flat_limit;
+    card_drawn=card_next;
+    card_next=aspect>0 && gs_native_card();
+    return card_next;
+}
 
 /* Guest-address-only module services. */
 #include "../host/host_api.h"

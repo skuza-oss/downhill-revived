@@ -276,7 +276,10 @@ double host_pacing_period(void);
 int host_vu1_snapshot(uint32_t address);
 void host_vu1_file(uint32_t address);
 
-void host_frame_video(double aspect, int flat_limit);
+/* Once a vsync, from the core: widescreen's shape and card limit (host_widescreen_aspect,
+   host_widescreen_flat_limit). Returns 1 when the next field's 2D is to be drawn for a card,
+   unmapped (widescreen.c's card mode, finding 140). */
+int host_frame_video(double aspect, int flat_limit);
 
 void host_service_host_backtrace(void);
 int host_service_host_game_options_read(uint32_t a0, uint32_t a1);

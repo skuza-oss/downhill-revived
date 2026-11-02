@@ -31,6 +31,22 @@ float port_fov_x = 1.0f;  /* s: 1, or (4/3) / aspect */
 
 static int widescreen;
 static double aspect = 4.0 / 3.0;
+/* Card mode (finding 140): the renderer shows the full-screen 2D pictures (loading cards, the
+   memory card warning) at 4:3, so the game's 2D in them is drawn as at 4:3, unmapped. The host says
+   at each vsync (host_frame_video) whether the next field is drawn for a card. */
+static int card_2d;
+static int card_setup;  /* the loading card is being drawn (port_card_setup) */
+
+void widescreen_card_mode(int on) { card_2d = on; }
+
+/* The loading card's setup (func_00182D78, port/patches_widescreen.py): it draws the card and its
+   text ("Single Event", the track; "Bike Shop") for eight frames, and the loading thread then sends
+   the same packets again until the level is loaded. The card is shown 4:3, so its 2D is drawn as
+   at 4:3, unmapped; card mode, which follows the picture, would come too late for it. */
+void port_card_setup(int on) { card_setup = on; }
+
+/* The 2D draw code's X is mapped: widescreen, and not a card. */
+static int map_2d(void) { return widescreen && !card_2d && !card_setup; }
 
 /* The game's views (func_0023D650, func_0023D8D8): an entry per view, its View first the focal
    length in pixels (x0, the X field of view, already times s) and the size in pixels. */
@@ -163,7 +179,7 @@ static int scaled(double v) { return (int)floor(v + 0.5); }
 int port_ws_point(int x)
 {
     int cx, w;
-    if (!widescreen || !view_size(0, &cx, &w) || abs(x - cx) * 2 >= w) return x;
+    if (!map_2d() || !view_size(0, &cx, &w) || abs(x - cx) * 2 >= w) return x;
     return cx + scaled((x - cx) * port_fov_x);
 }
 
@@ -176,7 +192,7 @@ void port_ws_span(int *x, int *w)
 }
 
 /* A width (or height-free size) of a 2D thing, so it keeps its shape. */
-int port_ws_size(int w) { return widescreen ? scaled(w * port_fov_x) : w; }
+int port_ws_size(int w) { return map_2d() ? scaled(w * port_fov_x) : w; }
 
 /* The side a HUD element at x (GS pixels) belongs to, in GS pixels: the left or right side of
    the view, or its centre. */
@@ -192,7 +208,7 @@ static int anchor(int view, int x)
    side as it was (anchor). */
 int port_ws_hud_point(int view, int ref, int x)
 {
-    if (!widescreen) return x;
+    if (!map_2d()) return x;
     int a = anchor(view, ref);
     return a + scaled((x - a) * port_fov_x);
 }
@@ -262,7 +278,7 @@ void port_ws_text_begin(int view, int ref)
 {
     int cx, w;
     text_open = 0;
-    if (!widescreen || !view_size(view, &cx, &w)) return;
+    if (!map_2d() || !view_size(view, &cx, &w)) return;
     int w16 = w * 16;
     text_anchor = w16 / 2;
     if (hud_text) text_anchor = ref < w16 / 3 ? 0 : ref > w16 * 2 / 3 ? w16 : w16 / 2;
@@ -274,7 +290,7 @@ void port_ws_text_end(void) { text_open = 0; }
 /* A glyph's left side (pen, 1/16 pixels from the view's left side) in a view w pixels wide. */
 int port_ws_glyph_x(int w, int pen)
 {
-    if (!widescreen) return pen;
+    if (!map_2d()) return pen;
     int a = text_open ? text_anchor : w * 8;
     return a + scaled((pen - a) * port_fov_x);
 }

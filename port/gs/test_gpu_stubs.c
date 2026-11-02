@@ -21,6 +21,7 @@ void host_putenv_s(const char *name, const char *value) {_putenv_s(name, value);
 void pacing_handed(double *d,double *b) {*d=*b=0;}
 void pacing_present(double d,double b) {(void)d;(void)b;}
 int host_widescreen_flat_limit(void) {return 1000;}
+int host_widescreen_card_drawn(void) {return 0;}
 double host_widescreen_aspect(void) {return 16.0/9;}
 int texpack_open(const ReplaceDevice *d,uint64_t m) {(void)d; (void)m; return 0;}
 int texpack_available(void) {return 0;}

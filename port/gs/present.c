@@ -821,8 +821,9 @@ static void bench_vsync(void)
     if (quit && !strcmp(quit, "1")) host_exit(0);
 }
 
-const uint32_t *movie_picture(unsigned *width, unsigned *height);  /* port/hle/movie.c */
+const uint32_t *movie_picture(unsigned *width, unsigned *height, unsigned *rows);  /* port/hle/movie.c */
 int host_widescreen_flat_limit(void);  /* port/hle/host.c */
+int host_widescreen_card_drawn(void);
 
 /* The graphics didn't start. The game would go on with no window (heard, never seen): instead a
    message says why and the game ends. Tools that want no window set DHD_HEADLESS and never get here. */
@@ -856,7 +857,7 @@ static void present_registers(const uint64_t *mmio)
 typedef struct {
     uint64_t mmio[15];
     double due, began;  /* pacing_handed */
-    int32_t resize, flat_limit;
+    int32_t resize, flat_limit, card_2d;
 } PresentMark;
 
 /* The GS owner, once the drawing queued before the picture has run. */
@@ -866,8 +867,8 @@ static void present_marked(const void *payload)
     unsigned width, height;
     memcpy(&m, payload, sizeof m);
     present_registers(m.mmio);
-    gs_native_movie(&gs, NULL, 0, 0);
-    gs_native_vsync_handed(&gs, &width, &height, m.resize, m.due, m.began, m.flat_limit);
+    gs_native_movie(&gs, NULL, 0, 0, 0);
+    gs_native_vsync_handed(&gs, &width, &height, m.resize, m.due, m.began, m.flat_limit, m.card_2d);
 }
 
 void gs_vsync(void)
@@ -896,8 +897,8 @@ void gs_vsync(void)
     uint64_t mmio[15];
     for (unsigned addr = 0; addr <= 0xE0; addr += 16) mmio[addr / 16] = *(volatile uint64_t *)GUEST(0x12000000 + addr);
     /* While a movie plays (port/hle/movie.c, finding 055) its picture is shown instead. */
-    unsigned movie_width, movie_height;
-    const uint32_t *movie = movie_picture(&movie_width, &movie_height);
+    unsigned movie_width, movie_height, movie_rows;
+    const uint32_t *movie = movie_picture(&movie_width, &movie_height, &movie_rows);
     /* Deferred vsync: the GS worker hands the native picture on after the drawing queued before it;
        the game thread goes on. A movie or the exact renderer waits for the drawing here instead.
        (Capture and DHD_PROFILE turn deferral off: they read the GS below.) */
@@ -907,6 +908,7 @@ void gs_vsync(void)
             memcpy(m.mmio, mmio, sizeof m.mmio);
             pacing_handed(&m.due, &m.began);
             m.resize = resize_pending, m.flat_limit = host_widescreen_flat_limit();
+            m.card_2d = host_widescreen_card_drawn();
             resize_pending = 0;
             graphics_present_marked = present_marked;
             graphics_present(&m, sizeof m);
@@ -919,7 +921,7 @@ void gs_vsync(void)
     int gpu_frame = 1;
     if (gs_gpu_native(&gs)) {
         /* The native renderer's thread draws and presents; capture waits for its picture. */
-        gs_native_movie(&gs, movie, movie_width, movie_height);
+        gs_native_movie(&gs, movie, movie_width, movie_height, movie_rows);
         gs_native_vsync(&gs, &width, &height, resize_pending);
         resize_pending = 0;
     } else {

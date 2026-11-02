@@ -34,8 +34,7 @@
 typedef Web NativeExact;
 
 #define NATIVE_GPU_SIDE \
-    int present_pending;               /* a picture was drawn; web_present shows it */ \
-    float present_aspect;              /* the shape to show it in (a movie's 4:3) */
+    int present_pending;               /* a picture was drawn; web_present shows it */
 
 /* The browser has one view. */
 volatile int gs_native_view;
@@ -59,6 +58,9 @@ double host_widescreen_aspect(void)
     return v && sscanf(v, "%u:%u", &a, &b) == 2 && a && b ? (double)a / b : 0;
 }
 int host_widescreen_flat_limit(void) { return widescreen_flat_limit(); }
+/* The browser's core keeps its 2D mapped (its host_frame_video is a stub): cards as before. */
+int host_widescreen_card_drawn(void) { return 0; }
+#define NATIVE_NO_CARD_MODE 1
 
 #define NATIVE_WINDOW "canvas"
 #define gs_gpu_native web_native
@@ -135,7 +137,6 @@ static void native_present(Native *n)
 {
     if (n->present_failed) return;
     n->present_pending = 1;
-    n->present_aspect = n->aspect;
 }
 
 /* The picture native_present marked onto the canvas surface, configured to w x h: as
@@ -147,10 +148,7 @@ static int native_show(Native *n, DhdrSurface *surface, unsigned w, unsigned h)
     n->present_pending = 0;
     int resize = w != canvas_width || h != canvas_height;
     canvas_width = w; canvas_height = h;
-    float aspect = n->aspect;
-    n->aspect = n->present_aspect;
     int drawn = native_present_draw(n, surface, w, h, resize);
-    n->aspect = aspect;
     if (drawn <= 0) return 0;
     counter_present(surface);
     native_note_presented(n);

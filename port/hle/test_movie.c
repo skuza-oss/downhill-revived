@@ -18,7 +18,7 @@ int movie_open(const char *iso, uint32_t lsn, uint32_t size, int audio, const ch
 void movie_close(void);
 int movie_over(void);
 void movie_audio(int32_t *mix, int frames);
-const uint32_t *movie_picture(unsigned *width, unsigned *height);
+const uint32_t *movie_picture(unsigned *width, unsigned *height, unsigned *rows);
 int movie_test_ready(void);
 
 void hle_log(const char *fmt, ...)
@@ -75,8 +75,8 @@ int main(int argc, char **argv)
             fwrite(&s, 2, 1, wav);
         }
         rendered += due; samples += (uint32_t)due;
-        unsigned w, h;
-        const uint32_t *p = movie_picture(&w, &h);
+        unsigned w, h, rows;
+        const uint32_t *p = movie_picture(&w, &h, &rows);
         uint32_t hash = 2166136261u;
         for (unsigned i = 0; i < w * h; i += 97) hash = (hash ^ p[i]) * 16777619u;
         if (hash != last_hash) changes++, last_hash = hash;

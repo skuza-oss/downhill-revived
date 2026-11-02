@@ -24,6 +24,13 @@ def add(PATCHES):
         if left:
             more(unit, ('re', (r'\bfunc_0020F9A8\b', left), 'port_hud_text_l'))
 
+    # The loading card's setup (the card and its text, drawn for eight frames, then sent again by
+    # the loading thread): its 2D unmapped, as the card is shown 4:3 (finding 140).
+    more('00182D78.c',
+         ('text', 'extern void func_0014DE90(Entry *);', 'extern void func_0014DE90(Entry *);\nextern void port_card_setup(int);'),
+         ('text', '    on = 1;\n    func_00238B20();', '    on = 1;\n    port_card_setup(1);\n    func_00238B20();'),
+         ('text', '    func_0025AF98(2);\n}', '    func_0025AF98(2);\n    port_card_setup(0);\n}'))
+
     # The HUD's 3D pieces, placed in front of the camera: a piece at a side moves out with it.
     more('00176930.c',
          ('text', 'extern Game D_004B25A0;', 'extern Game D_004B25A0;\nextern void port_ws_hud_offset(int, float *);'),

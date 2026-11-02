@@ -28,6 +28,7 @@ void host_putenv_s(const char *name, const char *value) {_putenv_s(name, value);
 void pacing_handed(double *d,double *b) {*d=*b=0;}
 void pacing_present(double d,double b) {(void)d;(void)b;}
 int host_widescreen_flat_limit(void) {return 1000;}
+int host_widescreen_card_drawn(void) {return 0;}
 double host_widescreen_aspect(void) {return 16.0/9;}
 /* The renderer's ReplaceDevice (native_init calls texpack_open with it): kept for the churn thread. */
 static const ReplaceDevice *replace_device;

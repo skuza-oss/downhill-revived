@@ -162,7 +162,7 @@ __attribute__((export_name("web_display"))) uint32_t web_display(void)
         if (changed) web_native_present_options(g);
         /* the field is drawn now (NATIVE_INLINE) and shown by the web_present that follows */
         width = 640; height = 448;
-        web_native_movie(g, NULL, 0, 0);
+        web_native_movie(g, NULL, 0, 0, 0);
         web_native_vsync(g, &width, &height, 0);
         if (changed) native_rescale(web->native);
         return web->native->present_pending ? width << 16 | height : 0;

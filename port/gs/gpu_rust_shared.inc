@@ -229,10 +229,8 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
                 (unsigned long long)r.import_px);
     }
     if (shown) {
-        float aspect = n->aspect;  /* a movie is a 4:3 picture, whatever shape the game has */
-        if (f->movie_on && aspect > 4.0f / 3) n->aspect = 4.0f / 3;
+        n->movie_rows = f->movie_on ? f->movie_rows : 0;   /* native_present_rect's shape */
         native_present(n);
-        n->aspect = aspect;
     }
     if (spikes) {   /* the render thread's picture by part: surfaces, snapshot, draw, present */
         double end = host_wall_seconds();
@@ -244,7 +242,8 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
 }
 
 /* The displayed picture onto surface, configured to w x h (the window or the canvas): drawn in the
-   rectangle that keeps its shape (native_present_rect at n->aspect), resize when the size changed.
+   rectangle that keeps its shape (native_present_rect), the sides filled for widescreen's 4:3
+   pictures, resize when the size changed.
    dhdr_native_present's answer: 1 drawn (the caller presents it), 0 skipped (no picture yet,
    timeout), -1 failed (then present_failed: no more presents). */
 static int native_present_draw(Native *n, DhdrSurface *surface, unsigned w, unsigned h, int resize)
@@ -252,7 +251,7 @@ static int native_present_draw(Native *n, DhdrSurface *surface, unsigned w, unsi
     DhdrPresentRect r;
     memset(&r, 0, sizeof r);
     NativeRect cut;
-    native_present_rect(n, w, h, r.rect, &cut);
+    r.fill = (uint32_t)native_present_rect(n, w, h, r.rect, &cut);
     r.cut[0] = cut.left < 0 ? 0 : cut.left;
     r.cut[1] = cut.top < 0 ? 0 : cut.top;
     r.cut[2] = cut.right > (int)w ? (int)w : cut.right;

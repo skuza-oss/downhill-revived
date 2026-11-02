@@ -889,7 +889,7 @@ static void vsync(void)
     if (!graphics_ordered) host_service_graphics_wait();
 #if defined(__wasm__)
     extern int host_widescreen_flat_limit(void);
-    host_frame_video(host_widescreen_aspect(),host_widescreen_flat_limit());
+    widescreen_card_mode(host_frame_video(host_widescreen_aspect(),host_widescreen_flat_limit()));
     static HleEnv screenshot_env;
     const char *capture_prefix=hle_env(&screenshot_env,"DHD_SCREENSHOT");
     if (capture_prefix && host_getenv("DHD_RACE_SYNC")) {
