@@ -153,6 +153,53 @@ static void test_flick(void)
     touch_up(t, 2, x, y, now);
 }
 
+/* A tap shorter than a field (down and up between two of the game's reads) still reaches the pad. */
+static void test_quick_tap(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float x, y;
+    at(TC_HOP, &x, &y);
+    touch_down(t, 1, x, y, now);
+    touch_up(t, 1, x, y, now + 5);
+    CHECK(buttons() & PAD_R2);
+    fields(3);
+    CHECK(!(buttons() & PAD_R2));
+    /* a held tap is not lengthened */
+    touch_down(t, 2, x, y, now);
+    field();
+    CHECK(buttons() & PAD_R2);
+    touch_up(t, 2, x, y, now);
+    CHECK(!(buttons() & PAD_R2));
+}
+
+/* A HOP tap that begins and ends in the air layout's wait (the flag came, the layout is still the
+   ground's) is a short HOP press; one held into the air layout becomes the trick stick. */
+static void test_air_wait_tap(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float x, y;
+    at(TC_HOP, &x, &y);
+    game.air = 1;
+    field();
+    touch_down(t, 1, x, y, now);
+    fields(4);
+    CHECK(!(buttons() & PAD_R2));   /* nothing while it waits */
+    touch_up(t, 1, x, y, now);
+    CHECK(buttons() & PAD_R2);
+    fields(3);
+    CHECK(!(buttons() & PAD_R2));
+    game.air = 0;
+    fields(2);
+    game.air = 1;
+    field();
+    touch_down(t, 2, x, y, now);
+    wait_ms(200);                   /* the layout came: the trick stick, which sends nothing unmoved */
+    touch_up(t, 2, x, y, now);
+    CHECK(!(buttons() & PAD_R2));
+    game.air = 0;
+    fields(2);
+}
+
 static void test_sprint_guards(void)
 {
     float x, y, r;
@@ -529,6 +576,8 @@ int main(void)
 {
     test_scaling();
     test_flick();
+    test_quick_tap();
+    test_air_wait_tap();
     test_sprint_guards();
     test_pause();
     test_classic_resume();

@@ -154,6 +154,7 @@ typedef struct {
     float grab_dx, grab_dy;    /* editor: finger to control centre */
     int target;                /* panel / editor: the button under the touch-down */
     double started_race;       /* race ms at touch-down */
+    int fields;                /* fields the finger was down for (0: down and up between two) */
 } Finger;
 
 typedef struct {
@@ -1364,6 +1365,19 @@ void touch_up(Touch *t, long long id, float x, float y, double now)
         } else if (t->panel_open && f->target >= 0 && panel_button_at(t, x, y) == f->target) panel_tapped(t, f->target);
     } else if (f->job == JOB_EDIT) editor_up(t, f);
     else if (f->job == JOB_TRICK && t->freeze && !t->trick.held) t->freeze = 0;   /* a lift without a push */
+    else if (f->job == JOB_AIR_WAIT && !paused(t)) {
+        /* a tap that ended in the air layout's wait: the ground layout was still on screen, so it
+           was that button's (the flag also comes over bumps); a short press */
+        static const int ground[] = {TC_HOP, TC_BRAKE, TC_SLIDE};
+        int c = control_at(t, f->x0, f->y0, ground, 3);
+        if (c >= 0) pulse(t, c == TC_HOP ? PAD_R2 : c == TC_BRAKE ? PAD_TRIANGLE : PAD_L3, PRESS_FIELDS);
+        if (c == TC_HOP) t->last_hop_race = race_ms(t);
+    } else if (f->job == JOB_BUTTON && f->sent && !f->fields && !paused(t)) {
+        /* a tap shorter than a field never reached the pad: the game still sees it (✕ and SELECT
+           keep their windows' bookkeeping, so not those) */
+        uint16_t b = (uint16_t)(f->buttons & ~(PAD_CROSS | PAD_SELECT));
+        if (b) pulse(t, b, PRESS_FIELDS);
+    }
     end_finger_job(t, f);
     f->used = 0;
 }
@@ -1574,6 +1588,8 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         t->hint = 0;
     }
     seq_advance(t);
+    for (int i = 0; i < TOUCH_FINGERS; i++)
+        if (t->f[i].used) t->f[i].fields++;
     for (int i = 0; i < 16; i++)
         if (t->pulse_buttons[i] && (int32_t)(game->vsync - t->pulse_until[i]) >= 0) t->pulse_buttons[i] = 0;
     if (t->freeze_at && (int32_t)(game->vsync - t->freeze_at) >= 0) {
