@@ -669,6 +669,8 @@ static int countdown_shown = -1;
 static char seen_race[NET_MAX_SLOTS][12];     /* per card: its race state last seen (news) */
 static int seen_host = -1;
 static int seen_track = -1;                   /* the room's track last seen (TRACK CHANGED) */
+static int raced_track = -1;                  /* the track this PC's race was on, and its room: */
+static char raced_code[8];                    /* back from it, a change made meanwhile is news */
 static char seen_event[32];                   /* the server's last notice seen (start_cancelled) */
 static char title_text[32], footer_text[96];
 
@@ -1033,8 +1035,16 @@ static void room_news(void)
     if (l->state != NET_LOBBY) return;
     double now = host_seconds();
     char line[48];
-    if (seen_count < 0) {  /* the room as it was when this page opened: nothing new yet */
+    if (seen_count < 0) {  /* the room as it was when this page opened: nothing new yet, */
         seen_count = l->nmembers;
+        /* except a track changed during this PC's race (the Then rule, the host's pick) */
+        if (raced_track >= 0 && !strcmp(raced_code, l->code) && l->track != raced_track) {
+            snprintf(line, sizeof line, "TRACK CHANGED: %s", track_name(l->track));
+            note_for(line, amber, 5.0);
+            menu_play("S_NEXT");
+            hle_log("online menu: %s (during the race)\n", line);
+        }
+        raced_track = -1;
         goto keep;
     }
     for (int i = 0; i < l->nmembers; i++) {
@@ -1616,6 +1626,8 @@ static void room_update(MenuPage *p)
     if (l->started || l->state == NET_RACING) {
         hle_log("online menu: room %s: the race starts\n", l->code);
         race = 1;
+        raced_track = l->track;
+        snprintf(raced_code, sizeof raced_code, "%s", l->code);
         track_list = leave_ask = rules_open = 0;
         hle_online_selected_ride(chosen_rider, chosen_outfit, chosen_cycle, chosen_colour);
         hle_online_from_menu();
