@@ -1570,9 +1570,31 @@ static void hints_step(Touch *t)
     else t->slide_far_since = 0;
 }
 
+/* The race clock went back (Restart race, a new race): every time kept in race ms moves with it,
+   so the windows and the presses waiting on them keep what they had left (a press the resume
+   guard holds back would otherwise wait for the old race's time). */
+static void race_clock_back(Touch *t, double delta)
+{
+    #define SHIFT(v) do { if ((v) > -1e8) (v) += delta; } while (0)
+    SHIFT(t->cross_released);
+    SHIFT(t->select_released);
+    SHIFT(t->last_hop_race);
+    SHIFT(t->air_since);
+    SHIFT(t->hint_race_start);
+    if (t->hold_cross_until > 0) t->hold_cross_until = fmax(t->hold_cross_until + delta, 1);
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        Finger *f = &t->f[i];
+        if (!f->used) continue;
+        SHIFT(f->started_race);
+        if (f->due_race > 0) f->due_race = fmax(f->due_race + delta, 1);
+    }
+    #undef SHIFT
+}
+
 void touch_update(Touch *t, const TouchGame *game, double now)
 {
     t->now = now;
+    if (t->have_game && game->race_ms < t->game.race_ms) race_clock_back(t, game->race_ms - t->game.race_ms);
     int was_on = t->race_was_on;
     t->game = *game;
     t->have_game = 1;

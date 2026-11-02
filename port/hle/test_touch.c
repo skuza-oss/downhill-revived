@@ -376,6 +376,34 @@ static void test_pause(void)
     field();
 }
 
+/* Restart race: the resume guard set by the old race's clock does not hold PEDAL back in the new
+   race (the clock went back to 0). */
+static void test_restart_clock(void)
+{
+    float x, y;
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    game.race_ms = 60000;
+    field();
+    touch_back(t, now);   /* pause */
+    record(NULL, 0, 8);
+    game.clock_moving = 0;
+    fields(3);
+    touch_back(t, now);   /* Resume: its ✕ counts as a release the overlay made, at 60 s */
+    record(NULL, 0, 20);
+    game.clock_moving = 1;
+    fields(2);
+    game.race_ms = 0, game.clock_moving = 0;   /* the race restarts: the countdown */
+    fields(30);
+    game.clock_moving = 1;
+    wait_ms(2000);
+    at(TC_PEDAL, &x, &y);
+    touch_down(t, 1, x, y, now);
+    field();
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 1, x, y, now);
+    field();
+}
+
 static void test_classic_resume(void)
 {
     uint16_t edges[16];
@@ -580,6 +608,7 @@ int main(void)
     test_air_wait_tap();
     test_sprint_guards();
     test_pause();
+    test_restart_clock();
     test_classic_resume();
     test_trick_stick();
     test_online_panel();
