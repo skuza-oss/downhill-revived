@@ -440,6 +440,38 @@ static void test_trick_hint(void)
     fields(2);
 }
 
+/* The layout editor's buttons sit beside the camera and Pause buttons, never on them (both
+   presets, both hands, the Mi 11i's screen), and DONE closes the editor. */
+static void test_editor_bar(void)
+{
+    for (int preset = 0; preset < 2; preset++)
+        for (int left = 0; left < 2; left++) {
+            start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+            TouchSettings set = *touch_settings(t);
+            set.left_handed = left;
+            touch_configure(t, &set, NULL);
+            touch_open_editor(t);
+            field();
+            for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
+                float cx, cy, cr;
+                CHECK(touch_control(t, c, &cx, &cy, &cr));
+                static const float half_w[6] = {9, 7, 5, 5, 8, 8};   /* GROUND AIR - + RESET DONE */
+                for (int b = 0; b < 6; b++) {
+                    float bx, by;
+                    CHECK(touch_target(t, TOUCH_TARGET_EDITOR, b, &bx, &by));
+                    CHECK(fabsf(bx - cx) >= half_w[b] + cr || fabsf(by - cy) >= 4.5f + cr);   /* no overlap */
+                }
+            }
+            float dx, dy;
+            touch_target(t, TOUCH_TARGET_EDITOR, 5, &dx, &dy);   /* DONE */
+            touch_down(t, 9, dx, dy, now);
+            touch_up(t, 9, dx, dy, now);
+            field();
+            TouchSettings saved;
+            CHECK(touch_take_saved(t, &saved));   /* DONE closed the editor and saved the layout */
+        }
+}
+
 static void test_classic_resume(void)
 {
     uint16_t edges[16];
@@ -645,6 +677,7 @@ int main(void)
     test_sprint_guards();
     test_pause();
     test_restart_clock();
+    test_editor_bar();
     test_trick_hint();
     test_classic_resume();
     test_trick_stick();

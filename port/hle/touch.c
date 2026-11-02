@@ -866,13 +866,35 @@ static Box panel_box(const Touch *t, int b)
     return r;
 }
 
+/* The editor's buttons, in the top buttons' row (their default places: the editor moves them):
+   GROUND and AIR on one side of them, - + RESET DONE on the wider side; b = EDIT_BUTTONS is the
+   size readout's place, under GROUND and AIR. A screen too narrow for that gets one row below. */
 static Box editor_box(const Touch *t, int b)
 {
-    float w[EDIT_BUTTONS] = {18, 14, 10, 10, 16, 16};
+    static const float w[EDIT_BUTTONS] = {18, 14, 10, 10, 16, 16};
+    float W = t->screen.width;
+    Place cam, pau;
+    place_of(t->set.preset, TC_CAMERA, t->set.attacks, 1, &cam);
+    place_of(t->set.preset, TC_PAUSE, t->set.attacks, 1, &pau);
+    float hw = cam.w * REF_W / 200, y = cam.py * REF_H / 100, hh = cam.h * REF_H / 200;
+    float a0 = mirror_x(t, cam.px * REF_W / 100), a1 = mirror_x(t, pau.px * REF_W / 100);
+    float span0 = fminf(a0, a1) - hw - 2, span1 = fmaxf(a0, a1) + hw + 2;   /* the top buttons, a 2 mm margin */
+    float group_a = w[EDIT_GROUND] + 2 + w[EDIT_AIR], group_b = w[EDIT_MINUS] + w[EDIT_PLUS] + w[EDIT_RESET] + w[EDIT_DONE] + 6;
+    float left_room = span0 - 2, right_room = W - 2 - span1;
+    int b_right = right_room >= left_room;
+    if ((b_right ? right_room : left_room) >= group_b && (b_right ? left_room : right_room) >= group_a) {
+        float ax = b_right ? span0 - group_a : span1, bx = b_right ? span1 : span0 - group_b;
+        if (b == EDIT_BUTTONS) return (Box){ax + group_a / 2, y + hh + 3.0f, group_a / 2, 1.5f};
+        if (b <= EDIT_AIR) return (Box){ax + (b == EDIT_GROUND ? w[0] / 2 : w[0] + 2 + w[1] / 2), y, w[b] / 2, hh};
+        float x = bx;
+        for (int i = EDIT_MINUS; i < b; i++) x += w[i] + 2;
+        return (Box){x + w[b] / 2, y, w[b] / 2, hh};
+    }
     float total = 0;
     for (int i = 0; i < EDIT_BUTTONS; i++) total += w[i] + 2;
     total += 28;   /* the size readout */
-    float x = (t->screen.width - total) / 2;
+    float x = (W - total) / 2;
+    if (b == EDIT_BUTTONS) b = EDIT_AIR;   /* the readout: the caller puts it beside AIR */
     for (int i = 0; i < b; i++) x += w[i] + 2 + (i == EDIT_AIR ? 28 : 0);
     return (Box){x + w[b] / 2, t->screen.height * 0.16f, w[b] / 2, 4.5f};
 }
@@ -2002,8 +2024,9 @@ static void draw_editor(const Touch *t, Draw *d)
         char info[48];
         float size = (k->box ? fmaxf(k->hw, k->hh) : k->r) * 2;
         snprintf(info, sizeof info, "%s %.0f MM", control_labels[t->edit_selected], size);
-        Box a = editor_box(t, EDIT_AIR);
-        text(d, a.x + a.hw + 15, a.y, 2.2f, 0, info, rgba(255, 209, 102, 1));
+        Box a = editor_box(t, EDIT_BUTTONS);
+        if (a.hh > 2) a = editor_box(t, EDIT_AIR), a.x += a.hw + 15;   /* one row: beside AIR */
+        text(d, a.x, a.y, 2.2f, 0, info, rgba(255, 209, 102, 1));
     }
 }
 
