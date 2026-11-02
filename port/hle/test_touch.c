@@ -352,10 +352,10 @@ static void test_pause(void)
     touch_back(t, now);   /* Back on the question: △ (No), back to the rows */
     n = record(edges, 32, 20);
     CHECK(n == 1 && edges[0] == PAD_TRIANGLE);
-    /* Resume: the cursor is on RE-START now (row 4): four ↑ then ✕ */
+    /* Resume: the question's No put the game's cursor back on RESUME, so ✕ alone */
     touch_back(t, now);   /* Back on the rows: Resume */
     n = record(edges, 32, 60);
-    CHECK(n == 5 && edges[0] == PAD_UP && edges[3] == PAD_UP && edges[4] == PAD_CROSS);
+    CHECK(n == 1 && edges[0] == PAD_CROSS);
     game.clock_moving = 1;
     /* resume guard: PEDAL still down waits for the double-tap window */
     field();

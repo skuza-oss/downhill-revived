@@ -918,6 +918,7 @@ static void pause_row_tapped(Touch *t, int row)
         } else if (row == CONFIRM_NO) {
             seq_add(t, PAD_TRIANGLE);
             t->pause = PAUSE_OPEN;
+            t->menu_cursor = 0;      /* the game rebuilds its menu with the cursor on RESUME (phone test) */
         }
         return;
     }
