@@ -2,7 +2,8 @@
 window, with pictures from the game's own captures. For checks that need the real menus and keys
 while someone works on the same PC: nothing appears on screen and nothing takes the focus.
 
-    g = hidden_game.Game(exe, out, env={...}, name='my-check')   # takes game_lock, starts the game
+    g = hidden_game.Game(exe, out, env={...}, name='my-check')   # takes game_lock (untimed; timed=True when
+                                                                 # it measures), starts the game
     g.window(); hidden_game.to_main(g)                           # to the main menu
     g.keys('down', 'down', 'x'); g.shot('online-menu')           # OUT/online-menu.png
     g.stop()                                                     # only this game; frees the lock
@@ -70,7 +71,7 @@ def test_iso():
 
 
 class Game:
-    def __init__(self, exe, out, env=None, name='check', scale=1, shot_window='960x720', interval=0.5):
+    def __init__(self, exe, out, env=None, name='check', scale=1, shot_window='960x720', interval=0.5, timed=False):
         self.out = Path(out); self.out.mkdir(parents=True, exist_ok=True)
         self.shots = self.out / 'raw'; self.shots.mkdir(exist_ok=True)
         for f in self.shots.glob('*.bmp'): f.unlink()
@@ -83,7 +84,7 @@ class Game:
         if shot_window: e['DHD_SCREENSHOT_WINDOW'] = shot_window
         e.update(env or {})
         e = {k: v for k, v in e.items() if v != '<unset>'}
-        game_lock.acquire(name)
+        game_lock.acquire(name, timed=timed)
         try:
             self.desk_name = f'{name}-{os.getpid()}'
             self.desk = u32.CreateDesktopW(self.desk_name, None, None, 0, 0x10000000, None)

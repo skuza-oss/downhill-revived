@@ -29,6 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import game_lock  # noqa: E402
 import owned_process  # noqa: E402
 
 # the test tools' disc image: DHD_TEST_ISO (the game itself never reads it; DHD_ISO would override
@@ -167,7 +168,7 @@ def main():
     log_path = out_dir / (args.name + '.log')
     print(f'{args.scenario}: {fields} fields, exe {exe} (sha256 {sha[:16]}...), log {log_path}')
     start = time.monotonic()
-    with open(log_path, 'wb') as log:
+    with game_lock.held('state_trace ' + args.name), open(log_path, 'wb') as log:  # untimed: the virtual clock
         process = owned_process.run([str(exe)], timeout=args.timeout, cwd=str(out_dir), env=env, stdout=log,
                                     stderr=subprocess.STDOUT)
     status = 'timeout' if process.timed_out else 'ok'

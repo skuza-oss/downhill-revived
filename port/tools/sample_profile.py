@@ -24,6 +24,7 @@ from ctypes import wintypes
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import game_lock
 import owned_process
 
 k32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -244,6 +245,7 @@ def main():
             for item in a.env:
                 k, _, v = item.partition('='); env[k] = v
             a.out.parent.mkdir(parents=True, exist_ok=True)
+            owned.enter_context(game_lock.held('sample_profile', timed=True))  # samples and timing: the PC to itself
             log = owned.enter_context(open(str(a.out) + '.log', 'wb'))
             proc = owned.enter_context(owned_process.start([str(a.run.resolve())], cwd=str(a.out.parent.resolve()),
                                                            env=env, stdout=log, stderr=subprocess.STDOUT,

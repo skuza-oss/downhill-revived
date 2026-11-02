@@ -14,6 +14,7 @@ profile). Tools read them; the game reads none of them.
 | `DHD_MODULE_CACHE` | `0`: build the core module even when `DHD_DEVCACHES/dhd-modulecache` holds one built from the same inputs (BUILDING.md) |
 | `DHD_BUILD_SLOTS` | at most this many core or host builds at once on the machine (several worktrees); unset: no limit |
 | `DHD_SCRATCH` | scratch folder for test runs, server state and temporary files (default the system temp) |
+| `DHD_GAME_SLOTS` | at most this many untimed game checks at once on the PC (the game lock, below); default 1 |
 | `DHD_TEST_ISO` | your Downhill Domination (USA) disc image, for the test tools |
 
 Never set `DHD_ISO` for your user: the game reads it, and it overrides dhd.ini in every game
@@ -43,7 +44,7 @@ after a version change before a live check.
 | `port/tools/local_server.py -- CMD` | the room server of this checkout on a free port for CMD's length (sets `DHD_NET_SERVER`); fresh state each run; stops workerd too |
 | `port/tools/live_game.py OUT --script FILE` | a game on a hidden desktop run by commands (keys, waits, shots, nettool bots) |
 | `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots) |
-| `port/tools/game_lock.py` | the one-game-at-a-time lock every timed or watched run takes; frees itself when its holder is gone |
+| `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool |
@@ -61,6 +62,24 @@ with check1.txt like
     wait back_to_the_room_after 400
     shot room
     quit
+
+## The game lock
+
+Every tool that starts the game for a check takes `port/tools/game_lock.py`'s lock, so lanes on one
+PC don't disturb each other's runs:
+
+- **Untimed** checks (nothing measured: captures, logic, online tests): `hidden_game.py` and so
+  `live_game.py`, `state_trace_run.py` and `rate_audit.py` (virtual clock, deterministic),
+  `online_race.py` (one place for its two games). Up to `DHD_GAME_SLOTS` of them run at once
+  (default 1: one game at a time).
+- **Timed** runs (fps, frame times, CPU or GPU time): `bench_race.py`, `stutter_race.py`,
+  `sample_profile.py --run`, and `hidden_game.Game(..., timed=True)`. A timed run has the PC to
+  itself: it waits until every untimed check is done, and no new one starts while it waits or runs.
+  Timed runs queue for each other.
+- A holder that crashes or is killed frees its place at once (operating-system file locks in
+  `DHD_SCRATCH/dhd-workers/game-slots`). `python port/tools/game_lock.py` lists the holders.
+- Set `DHD_GAME_SLOTS` once for your user, the same for every lane: each holder counts against its
+  own value. `port/tools/test_game_lock.py` tests the rules.
 
 ## Switches the game reads for tests
 

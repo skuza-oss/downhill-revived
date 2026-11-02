@@ -17,6 +17,7 @@ import argparse, contextlib, hashlib, os, re, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import game_lock
 import owned_process
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -162,6 +163,7 @@ def main():
         return d
 
     players = 2 + a.bots
+    owned.enter_context(game_lock.held('online_race'))  # untimed: one place for its two games
     with owned:
         da = game('A', HOST_PAD, {'DHD_NET_CREATE': '1', 'DHD_NET_NAME': 'Host', 'DHD_NET_PLAYERS': str(players),
                                   'DHD_NET_TRACK': a.track, 'DHD_NET_RIDER': '4', **dict(x.split('=', 1) for x in a.a)})

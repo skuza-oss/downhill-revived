@@ -26,6 +26,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compare_pcsx2 as compare
+import game_lock
 import owned_process
 import race_compare as race
 from state_trace_run import DEFAULT_ISO
@@ -135,6 +136,12 @@ def main():
     def name(label, scene, mode):  # the summary key: the label alone for a single scene and mode
         return label if len(cases) == 1 else f'{label} {scene} {mode}'
     results = {name(label, *case): [] for case in cases for label, _, _ in candidates}
+    with game_lock.held('bench_race', timed=True):  # the PC to itself for every run (game_lock.py)
+        run_all(args, candidates, cases, name, results)
+    summarize(args, candidates, cases, name, results)
+
+
+def run_all(args, candidates, cases, name, results):
     for run in range(args.runs):
         for scene, mode in cases:
             for label, exe, extra in candidates:
@@ -151,6 +158,9 @@ def main():
                        f'queue p1/p50 {result["snd_queue_p1_ms"]:.0f}/{result["snd_queue_p50_ms"]:.0f} ms, '
                        f'game tick p99 {result["tick_p99_ms"]:.1f} max {result["tick_max_ms"]:.1f} ms'
                        if 'snd_underruns' in result else ''), flush=True)
+
+
+def summarize(args, candidates, cases, name, results):
     summary = {}
     for scene, mode in cases:
         first = None

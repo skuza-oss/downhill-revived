@@ -21,6 +21,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import game_lock
 import owned_process
 import race_compare as race
 
@@ -62,7 +63,8 @@ def main():
     samples = focused = 0
     # The game closes its window (WM_CLOSE, so the logs flush) when it is stopped: after --seconds,
     # or on an error or Ctrl+C here.
-    with open(out / 'dhd.log', 'wb') as log, open(out / 'presentmon.out', 'wb') as monitor_log, \
+    with game_lock.held('stutter_race', timed=True), \
+            open(out / 'dhd.log', 'wb') as log, open(out / 'presentmon.out', 'wb') as monitor_log, \
             owned_process.start([str(args.exe)], cwd=args.exe.parent, env=env, stdout=log, stderr=subprocess.STDOUT,
                                 close=owned_process.Owned.close_windows, grace=20) as game, \
             owned_process.start([str(PRESENTMON), '--output_file', str(out / 'presentmon.csv'), '--no_console_stats',
