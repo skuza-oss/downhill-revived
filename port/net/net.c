@@ -158,6 +158,8 @@ int net_list_lobbies(NetLobbyInfo *out, int max)
         json_number(body, FIELD("raceStartedAt"), &l->race_started_at);
         json_number(body, FIELD("finishEndsAt"), &l->finish_ends_at);
         json_number(body, FIELD("nextRaceAt"), &l->next_race_at);
+        json_string(body, FIELD("region"), l->region, sizeof l->region);  /* finding 135 */
+        json_string(body, FIELD("colo"), l->colo, sizeof l->colo);
 #undef FIELD
     }
     return n;

@@ -438,8 +438,9 @@ static void list_row(int i)
         snprintf(now, sizeof now, "NEXT IN %d:%02d", left / 60, left % 60);
     } else if (!strcmp(l->phase, "starting")) snprintf(now, sizeof now, "STARTING");
     else snprintf(now, sizeof now, "OPEN");
-    snprintf(text[i], ROW_TEXT, "%.14s  %d/%d  %s  %s", l->room_name[0] ? l->room_name : l->host_name,
-             l->players, l->max_players, track, now);
+    /* where the room runs (EU, NA, ASIA...; finding 135): a far room shows before joining it */
+    snprintf(text[i], ROW_TEXT, "%.14s  %s%s%d/%d  %s  %s", l->room_name[0] ? l->room_name : l->host_name,
+             l->region, l->region[0] ? "  " : "", l->players, l->max_players, track, now);
 }
 
 static void enter_room(int create, const char *code)
@@ -1462,7 +1463,7 @@ static void room_draw(MenuPage *p)
     }
     draw_left(r);
     {
-        char head[40];
+        char head[64];
         int all = l->nmembers >= 2 && r->ready == l->nmembers;
         if (r->racing) {
             put(MENU_LEFT, CARD_X + 3, TOP + 1, "RACE RESULTS - LIVE", menu_style(st_row, 80, -1, 0, 0));
@@ -1471,6 +1472,8 @@ static void room_draw(MenuPage *p)
         } else {
             if (l->last_race_id) snprintf(head, sizeof head, "LAST RACE - %s", track_name(l->last_race_track));
             else snprintf(head, sizeof head, "PLAYERS %d/%d", l->nmembers, l->max_players);
+            if (l->room_region[0])  /* where the room runs (finding 135) */
+                snprintf(head + strlen(head), sizeof head - strlen(head), " - %s SERVER", l->room_region);
             put(MENU_LEFT, CARD_X + 3, TOP + 1, head, menu_style(st_row, 80, -1, 0, 0));
             snprintf(head, sizeof head, "%d/%d READY", r->ready, l->nmembers);
             put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, all ? tint(st_row, 80, green) : menu_style(st_row, 80, -1, 0, 0));
@@ -1608,8 +1611,8 @@ static void page_update(MenuPage *p, int cursor)
             list_shown = 1;
             for (int i = 0; i < list_count; i++)
                 if (list_joinable(&list[i])) {
-                    hle_log("online menu: quick race: room %s (%d/%d, %s)\n", list[i].code, list[i].players,
-                            list[i].max_players, list[i].phase);
+                    hle_log("online menu: quick race: room %s (%d/%d, %s, region %s)\n", list[i].code, list[i].players,
+                            list[i].max_players, list[i].phase, list[i].region[0] ? list[i].region : "unknown");
                     enter_room(0, list[i].code);
                     return;
                 }

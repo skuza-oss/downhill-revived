@@ -151,8 +151,8 @@ int main(int argc, char **argv)
         int n = net_list_lobbies(info, 32);
         printf("%d public lobbies\n", n);
         for (i = 0; i < n; i++)
-            printf("  %s  %s  %d/%d  %s\n", info[i].code, info[i].room_name, info[i].players, info[i].max_players,
-                   info[i].version);
+            printf("  %s  %s  %d/%d  %s  %s %s\n", info[i].code, info[i].room_name, info[i].players, info[i].max_players,
+                   info[i].version, info[i].region[0] ? info[i].region : "-", info[i].colo[0] ? info[i].colo : "-");
         return n < 0;
     }
     if (!strcmp(mode, "host") ? net_create_room() : net_join_room(code)) {
