@@ -116,6 +116,11 @@ int main(void)
         net_lobby_now(&rows[2], net_now_ms() + c.clock_offset, now_text, sizeof now_text);
         printf("%s\n", now_text);
         assert(!strcmp(now_text, "RACING 2:05") || !strcmp(now_text, "RACING 2:04"));
+        /* the finish window over (the list older than that): the server closed the race, so the
+           row says what comes next, not the race's clock (0.7.7 showed RACING 1:06) */
+        net_lobby_now(&rows[0], net_now_ms() + c.clock_offset + 50000, now_text, sizeof now_text);
+        printf("window over: %s\n", now_text);
+        assert(!strcmp(now_text, "NEXT RACE"));
         client_free(&c);
         /* an older server's list (no "now"), no room: no clock, no times */
         snprintf(body, sizeof body, "{\"protocol\":2,\"lobbies\":[{\"code\":\"ABC234\",\"phase\":\"racing\","
