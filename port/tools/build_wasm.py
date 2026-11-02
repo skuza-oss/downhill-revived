@@ -878,7 +878,32 @@ def wasm_link_once(objs, out, allow_all, host_syms):
 
 
 def wasm_objdump(path, *flags):
-    return run([os.path.join(WABT, 'bin', 'wasm-objdump')] + list(flags) + [path]).stdout
+    """wasm-objdump's output. A run that hasn't ended after OBJDUMP_TIMEOUT seconds is killed and
+    tried again: on Windows it can hang at start with no CPU used (a file scanner holding the new
+    object), which stalled whole builds for most of an hour."""
+    cmd = [os.path.join(WABT, 'bin', 'wasm-objdump')] + list(flags) + [path]
+    for attempt in range(OBJDUMP_TRIES):
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             encoding='utf-8', errors='replace')
+        try:
+            out, err = p.communicate(timeout=OBJDUMP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            try:
+                p.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass  # a process that can't even be killed is left behind; the retry doesn't wait for it
+            print('wasm-objdump: no answer in %d s on %s, try %d of %d'
+                  % (OBJDUMP_TIMEOUT, os.path.basename(path), attempt + 1, OBJDUMP_TRIES), flush=True)
+            continue
+        if p.returncode == 0:
+            return out
+        print('wasm-objdump: exit %d on %s, try %d of %d: %s'
+              % (p.returncode, os.path.basename(path), attempt + 1, OBJDUMP_TRIES, err.strip()[:200]), flush=True)
+    sys.exit('wasm-objdump failed %d times on %s' % (OBJDUMP_TRIES, path))
+
+
+OBJDUMP_TIMEOUT, OBJDUMP_TRIES = 120, 3
 
 
 def show_failures(records, what, names=None):
@@ -1165,11 +1190,106 @@ def abi_stage_core(objs, rc_objs, failed_units, max_workers=8):
             'left': len(left), 'table': table}
 
 
+# ---- the core cache: a finished module reused when none of its inputs changed -----------------
+# Every checkout (worktrees too) builds the same module from the same inputs again and again (a
+# reference build, a change to docs or to the Rust renderer); the object cache saves the compiles
+# but not the rest (about 10 minutes). DHD_MODULE_CACHE=0 turns it off.
+CORE_CACHE = DEVCACHES / 'dhd-modulecache'
+CORE_CACHE_KEEP = 12
+# what a hit puts back in build/wasm: the module and the files later steps and tools read
+CORE_CACHE_FILES = ['dhd_core.wasm', 'dhd.map', 'census.json', 'link.txt', 'postlink.json', 'offset_scan.json',
+                    'host_api.syms', 'abi_thunks.tsv', 'recompiled.txt', 'recompiled-with-c.txt',
+                    'ps2asm_aot.inc', 'vu0_aot.inc', 'vu0_native_words.inc']
+CORE_CACHE_DIRS = ['vu1aot']
+# tracked files that can't change the module (everything else in the checkout counts)
+NOT_CORE = ('docs/', 'online/', '.github/', 'port/launcher/', 'port/render/', 'port/web/', 'port/android/',
+            'port/release/')
+
+
+def core_inputs_key():
+    """A hash of everything the module is built from: the checkout's files (tracked, with their
+    working-tree content) except NOT_CORE and Markdown, the generated asm/ and assets/, the tools'
+    versions and the environment that points at inputs."""
+    h = hashlib.sha256(b'dhd-module-cache 1\n')
+    tracked = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True).stdout.decode('utf-8', 'replace')
+    names = {n for n in tracked.split('\0') if n and not n.startswith(NOT_CORE) and not n.endswith('.md')}
+    for d in ('asm', 'assets'):
+        for p in glob.glob(os.path.join(ROOT, d, '**', '*'), recursive=True):
+            if os.path.isfile(p):
+                names.add(os.path.relpath(p, ROOT).replace(os.sep, '/'))
+    for n in sorted(names):
+        p = os.path.join(ROOT, n)
+        if os.path.isfile(p):
+            h.update(n.encode() + b'\0' + hashlib.sha256(open(p, 'rb').read()).digest())
+    for k in sorted(os.environ):
+        if k.startswith('DHD_') and k not in ('DHD_MODULE_CACHE',) or k in ('WASI_SYSROOT', 'SIMDE_DIR', 'WABT_DIR'):
+            h.update(('%s=%s\n' % (k, os.environ[k])).encode())
+    h.update(('%s|%s|%s\n' % (WASI, SIMDE, WABT)).encode())
+    h.update(run(['clang', '--version']).stdout.encode())
+    return h.hexdigest()
+
+
+def core_cache_get(key):
+    entry = CORE_CACHE / key
+    if os.environ.get('DHD_MODULE_CACHE') == '0' or not (entry / 'dhd_core.wasm').is_file():
+        return False
+    os.makedirs(OUT, exist_ok=True)
+    for f in CORE_CACHE_FILES:
+        if (entry / f).is_file():
+            shutil.copy2(entry / f, os.path.join(OUT, f))
+    for d in CORE_CACHE_DIRS:
+        if (entry / d).is_dir():
+            shutil.rmtree(os.path.join(OUT, d), ignore_errors=True)
+            shutil.copytree(entry / d, os.path.join(OUT, d))
+    os.utime(entry)
+    image = open(WASM, 'rb').read()
+    print('core cache: hit %s, %s (%d bytes, sha256 %s); the intermediate files in build/wasm are not '
+          'refreshed (DHD_MODULE_CACHE=0 for a full build)' % (key[:16], WASM, len(image), hashlib.sha256(image).hexdigest()),
+          flush=True)
+    return True
+
+
+def core_cache_put(key):
+    if os.environ.get('DHD_MODULE_CACHE') == '0':
+        return
+    try:
+        tmp = CORE_CACHE / (key + '.tmp%d' % os.getpid())
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(tmp)
+        for f in CORE_CACHE_FILES:
+            if os.path.isfile(os.path.join(OUT, f)):
+                shutil.copy2(os.path.join(OUT, f), tmp / f)
+        for d in CORE_CACHE_DIRS:
+            if os.path.isdir(os.path.join(OUT, d)):
+                shutil.copytree(os.path.join(OUT, d), tmp / d)
+        if (CORE_CACHE / key).exists():
+            shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            os.replace(tmp, CORE_CACHE / key)
+        entries = sorted((p for p in CORE_CACHE.iterdir() if p.is_dir() and '.tmp' not in p.name),
+                         key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in entries[CORE_CACHE_KEEP:]:
+            shutil.rmtree(old, ignore_errors=True)
+        print('core cache: stored %s' % key[:16], flush=True)
+    except OSError as e:
+        print('core cache: not stored (%s)' % e, flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-j', type=int, default=8)
     a = ap.parse_args()
     t0 = time.time()
+    key = core_inputs_key()
+    if core_cache_get(key):
+        print('done in %.0f s' % (time.time() - t0))
+        return
+    import build_slots
+    with build_slots.slot('build_wasm'):
+        build(a, t0, key)
+
+
+def build(a, t0, key):
     for d in (OUT, SHIM, OBJ):
         os.makedirs(d, exist_ok=True)
     shim_headers()
@@ -1417,6 +1537,7 @@ def main():
     print('module: %s, %d imports; census in %s' % (WASM, len(imports), os.path.join(OUT, 'census.json')))
     for k, v in sorted(owners.items(), key=lambda kv: -len(kv[1])):
         print('%6d  %s   e.g. %s' % (len(v), k, ', '.join(v[:5])))
+    core_cache_put(key)
     print('done in %.0f s' % (time.time() - t0))
 
 

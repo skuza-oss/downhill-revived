@@ -112,7 +112,15 @@ their own variable or option says:
 
 The Rust toolchain comes from `rustup` (`port/render/rust-toolchain.toml` pins it); cargo's
 output goes under `DHD_DEVCACHES/dhd-cargo`, compiled objects are cached in
-`DHD_DEVCACHES/dhd-objcache` (`DHD_OBJCACHE_DIR`). LLVM is found on PATH or in scoop's default
+`DHD_DEVCACHES/dhd-objcache` (`DHD_OBJCACHE_DIR`), and finished core modules in
+`DHD_DEVCACHES/dhd-modulecache`: `build_wasm.py` hashes everything the module is built from (the
+checkout's files except docs, the online server and the launcher, renderer, browser, Android and
+release folders; `asm/` and `assets/`; the tools' versions) and, when a module of that hash was
+built before in any checkout, copies it back in seconds instead of building it again
+(`DHD_MODULE_CACHE=0` turns this off; the intermediate files in `build/wasm` are then not
+refreshed). Several checkouts building at once can take turns: with `DHD_BUILD_SLOTS=N`, at most N
+`build_wasm.py` or `build_host64.py` runs build at the same time on the machine, the others wait
+(`build_slots.py`). LLVM is found on PATH or in scoop's default
 place (`~/scoop/apps/llvm/current/bin`). `build_host64.py` names the Visual Studio and Windows SDK
 folders it uses (MSVC 14.51, SDK 10.0.26100.0) at its top.
 

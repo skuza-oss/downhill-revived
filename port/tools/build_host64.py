@@ -482,4 +482,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import build_slots
+    with build_slots.slot('build_host64'):
+        main()

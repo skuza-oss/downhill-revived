@@ -11,6 +11,8 @@ profile). Tools read them; the game reads none of them.
 | Variable | What |
 |---|---|
 | `DHD_DEVCACHES` | downloaded toolchains and caches: wasi-sdk, WABT, SIMDe, binaryen, the object and cargo caches (default `~/DevCaches`) |
+| `DHD_MODULE_CACHE` | `0`: build the core module even when `DHD_DEVCACHES/dhd-modulecache` holds one built from the same inputs (BUILDING.md) |
+| `DHD_BUILD_SLOTS` | at most this many core or host builds at once on the machine (several worktrees); unset: no limit |
 | `DHD_SCRATCH` | scratch folder for test runs, server state and temporary files (default the system temp) |
 | `DHD_TEST_ISO` | your Downhill Domination (USA) disc image, for the test tools |
 
