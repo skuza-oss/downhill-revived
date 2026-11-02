@@ -58,11 +58,11 @@ int main(void)
     assert(l.nslots == 10 && l.local_slot == 9 && l.racer[9].member_id == 9);
     client_free(&c);
     {   /* where this PC and the room are (finding 135): the welcome's fields, the where message's
-           countries kept across room snapshots, and the net: lines on stderr */
+           regions kept across room snapshots, and the net: lines on stderr */
         const char *located = "{\"type\":\"welcome\",\"memberId\":1,\"host\":false,\"code\":\"WHERE2\",\"serverTime\":1000,"
             "\"edgeColo\":\"WAW\",\"country\":\"PL\",\"continent\":\"EU\",\"roomColo\":\"\",\"roomRegion\":\"EU\"}";
         const char *where = "{\"type\":\"where\",\"region\":\"EU\",\"colo\":\"FRA\","
-            "\"members\":[{\"id\":0,\"country\":\"DE\"},{\"id\":1,\"country\":\"PL\"},{\"id\":2,\"country\":\"\"}]}";
+            "\"members\":[{\"id\":0,\"region\":\"EU\"},{\"id\":1,\"region\":\"EU\"},{\"id\":2,\"region\":\"ASIA\"}]}";
         const char *members = "{\"type\":\"room\",\"hostId\":0,\"members\":[{\"id\":0,\"name\":\"ANNA\",\"rttMs\":31},"
             "{\"id\":1,\"name\":\"Test\",\"rttMs\":40},{\"id\":2,\"name\":\"BOB\",\"rttMs\":null}]}";
         const char *pong = "{\"type\":\"pong\",\"t\":0}";
@@ -77,7 +77,7 @@ int main(void)
         client_on_text(&c,pong,strlen(pong));
         client_lobby(&c,&l);
         assert(!strcmp(l.room_colo,"FRA") && l.nmembers == 3);
-        assert(!strcmp(l.member[0].country,"DE") && !strcmp(l.member[1].country,"PL") && !l.member[2].country[0]);
+        assert(!strcmp(l.member[0].region,"EU") && !strcmp(l.member[1].region,"EU") && !strcmp(l.member[2].region,"ASIA"));
         assert(c.window_count == 1 && c.joined_at > 0);
         client_leave(&c);  /* net: left room WHERE2 ... */
         assert(c.joined_at == 0 && c.window_count == 0);

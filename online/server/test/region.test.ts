@@ -84,7 +84,41 @@ const POLAND = { colo: "WAW", country: "PL", continent: "EU", longitude: "21.0" 
 const OHIO = { colo: "ORD", country: "US", continent: "NA", regionCode: "OH", longitude: "-83.0" };
 
 describe("rooms and their region", () => {
-  it("tell a player where they connect and where the room runs; members show their country", async () => {
+  it("never tell anyone another member's country, only their region", async () => {
+    const host = await Client.connect("/v1/rooms/new", POLAND);
+    host.hello("Pole", { features: ["session", "countdown"] });
+    const { code } = await host.json("welcome");
+    host.sendJson({ type: "settings", public: true });
+    const guest = await Client.connect(`/v1/rooms/${code}`, OHIO);
+    guest.hello("Yank");
+    const welcome = await guest.json("welcome");
+    expect(welcome.country).toBe("US");  // their own, to them alone
+    // everything each one receives after the join until the two-member "where" and a room with both
+    const seen = async (c: Client) => {
+      const texts: string[] = [];
+      let where = false, room = false;
+      while (!(where && room)) {
+        const f = await c.next((f) => typeof f === "string");
+        texts.push(f as string);
+        const m = JSON.parse(f as string);
+        if (m.type === "where" && m.members.length === 2) where = true;
+        if (m.type === "room" && m.members.length === 2) room = true;
+      }
+      return texts;
+    };
+    for (const [c, other] of [[host, "US"], [guest, "PL"]] as const) {
+      for (const text of await seen(c)) {
+        const m = JSON.parse(text);
+        if (m.type === "welcome") continue;
+        expect(text, m.type).not.toContain('"country"');
+        expect(text, m.type).not.toContain(`"${other}"`);
+      }
+    }
+    const list = await (await exports.default.fetch("https://dhd.test/v1/lobbies", { cf: OHIO })).text();
+    expect(list).not.toContain('"country"');
+  });
+
+  it("tell a player where they connect and where the room runs; members show their region", async () => {
     const host = await Client.connect("/v1/rooms/new", POLAND);
     host.hello("Pole", { features: ["session", "countdown"] });
     const welcome = await host.json("welcome");
@@ -93,7 +127,7 @@ describe("rooms and their region", () => {
     guest.hello("Yank");
     expect(await guest.json("welcome")).toMatchObject({ edgeColo: "ORD", country: "US", continent: "NA", roomRegion: "EU" });
     const where = JSON.parse(await host.next((f) => typeof f === "string" && JSON.parse(f).type === "where" && JSON.parse(f).members.length === 2) as string);
-    expect(where).toEqual({ type: "where", region: "EU", colo: "", members: [{ id: 0, country: "PL" }, { id: 1, country: "US" }] });
+    expect(where).toEqual({ type: "where", region: "EU", colo: "", members: [{ id: 0, region: "EU" }, { id: 1, region: "NA" }] });
     // the hint and the creator are kept with the room
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(welcome.code)), async (r: any) => {
       expect(r.state.origin).toEqual({ hint: "eeur", createdIn: "EU", createdFrom: "WAW" });

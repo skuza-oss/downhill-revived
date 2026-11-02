@@ -111,9 +111,9 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"welcome","protocol":2,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
  "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU"}
 
-// Where the room runs and each member's country: after every join and when the room learns its
-// colo (Region, below).
-{"type":"where","region":"EU","colo":"FRA","members":[{"id":0,"country":"PL"},{"id":2,"country":"DE"}]}
+// Where the room runs and each member's region (never their country): after every join and when
+// the room learns its colo (Region, below).
+{"type":"where","region":"EU","colo":"FRA","members":[{"id":0,"region":"EU"},{"id":2,"region":"NA"}]}
 
 // Full room snapshot. Sent after every change and every ~2 s with fresh ping numbers.
 {"type":"room","code":"K7QX2M","hostId":0,"roomName":"Friday race","public":true,"maxPlayers":10,
@@ -484,11 +484,13 @@ short name players see, is that colo's (`EU`, `NA`, `ASIA`, `OC`) when the colo 
 server's table of Durable Object locations, else the hint's (`EU`, `NA`, `SA`, `ASIA`, `OC`, `AF`,
 `ME`); `""` when neither is known (a local `wrangler dev` without Cloudflare data).
 
-- `welcome` adds `edgeColo` (the Cloudflare location this connection reached), `country` and
-  `continent` (Cloudflare's, `""` unknown), `roomColo` and `roomRegion` (`""` until the room's
+- `welcome` adds `edgeColo` (the Cloudflare location this connection reached), the player's own
+  `country` and `continent` (Cloudflare's, `""` unknown; sent to that player only), `roomColo` and `roomRegion` (`""` until the room's
   trace has answered; a `where` follows then).
-- `where` (new message type) carries the room's `region` and `colo` and every member's `country`.
-  It is apart from `room` so room snapshots stay within their 4096 bytes for ten members.
+- `where` (new message type) carries the room's `region` and `colo` and every member's `region`
+  (the same set as above, from their continent; `""` unknown). It is apart from `room` so room
+  snapshots stay within their 4096 bytes for ten members. No message tells a player another
+  player's country: rooms are public and players post their logs.
 - `/v1/lobbies` adds the asker's `region`, and per room `region`, `colo` and `createdIn` (the
   creator's region). Rooms made in the asker's region come first, then rooms that run in it, then
   the rest, each part busiest first. Releases up to 0.7.6 read the first eight rooms, and their

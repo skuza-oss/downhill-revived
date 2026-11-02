@@ -185,7 +185,7 @@ static void read_room(NetClient *c, const char *t)
         m->finish_ticks = json_int(t, FIELD("finishTicks"), &v) ? v : -1;
         m->place = json_int(t, FIELD("place"), &v) ? (int)v : 0;
         for (int k = 0; k < c->where_count; k++)
-            if (c->where_id[k] == m->id) memcpy(m->country, c->where_country[k], sizeof m->country);
+            if (c->where_id[k] == m->id) memcpy(m->region, c->where_region[k], sizeof m->region);
         if (m->id == l->member_id) c->ready = m->ready;
 
 #undef FIELD
@@ -299,8 +299,8 @@ static void window_stats(NetClient *c, char *out, size_t cap)
         int host = m->id == l->host_id;
         char tag[16] = "", rtt[16] = "?";
         if (m->id == l->member_id) continue;
-        if (host || m->country[0])
-            snprintf(tag, sizeof tag, " (%s%s%s)", host ? "host" : "", host && m->country[0] ? ", " : "", m->country);
+        if (host || m->region[0])
+            snprintf(tag, sizeof tag, " (%s%s%s)", host ? "host" : "", host && m->region[0] ? ", " : "", m->region);
         if (m->rtt_ms >= 0) snprintf(rtt, sizeof rtt, "%d", m->rtt_ms);
         n += snprintf(out + n, cap - n, "%s %s%s %s ms", others++ ? "," : "; players:", m->name, tag, rtt);
         if (n >= (int)cap) n = (int)cap - 1;
@@ -384,7 +384,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         }
         changed(c);
     } else if (!strcmp(type, "where")) {
-        /* the room's location and every member's country (finding 135) */
+        /* the room's location and every member's region, never their country (finding 135) */
         NetLobby *l = &c->lobby;
         char path[32];
         int n = json_count(text, "members");
@@ -396,14 +396,14 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             snprintf(path, sizeof path, "members[%d].id", i);
             if (!json_int(text, path, &v)) continue;
             c->where_id[k] = (int)v;
-            snprintf(path, sizeof path, "members[%d].country", i);
-            c->where_country[k][0] = 0;
-            json_string(text, path, c->where_country[k], sizeof c->where_country[k]);
+            snprintf(path, sizeof path, "members[%d].region", i);
+            c->where_region[k][0] = 0;
+            json_string(text, path, c->where_region[k], sizeof c->where_region[k]);
             c->where_count++;
         }
         for (int i = 0; i < l->nmembers; i++)
             for (int k = 0; k < c->where_count; k++)
-                if (c->where_id[k] == l->member[i].id) memcpy(l->member[i].country, c->where_country[k], sizeof l->member[i].country);
+                if (c->where_id[k] == l->member[i].id) memcpy(l->member[i].region, c->where_region[k], sizeof l->member[i].region);
         if (c->joined_at && l->room_colo[0] && strcmp(l->room_colo, c->logged_colo)) {
             char room[48];
             room_place(l, room, sizeof room);

@@ -346,8 +346,8 @@ welcome and a new `where` message say where the player and the room are, and the
 carries each room's region in the asker's region's order (0.7.6's Quick Race then prefers a near
 room too). dhd.log gets `net:` lines: on joining (this PC's Cloudflare location, country, the
 room's location), every 30 s in a room or race and on leaving (own ping median and worst, every
-other player's ping and country). The list rows and the room's header show the region
-(`PLAYERS 2/10 - EU SERVER`). Server tests 71/71; two games on hidden desktops logged every line.
+other player's ping and region; another player's country is never sent). The list rows and the room's header show the region
+(`PLAYERS 2/10 - EU SERVER`). Server tests 72/72; two games on hidden desktops logged every line.
 
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;

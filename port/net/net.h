@@ -29,7 +29,8 @@ typedef struct {
     char race_state[12], dnf_reason[16];
     long long finish_ticks;     /* -1 when absent */
     int place;
-    char country[4];           /* their connection's country as Cloudflare sees it, "" unknown */
+    char region[8];            /* their region as Cloudflare places them ("EU"...), "" unknown;
+                                  never their country (finding 135) */
 } NetMember;
 
 typedef struct {

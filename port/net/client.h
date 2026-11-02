@@ -32,10 +32,10 @@ typedef struct {
     int have_offset;
     float rtt[5];
     int nrtt;
-    /* dhd.log's net: lines (finding 135): every member's country from the server's "where" (by
+    /* dhd.log's net: lines (finding 135): every member's region from the server's "where" (by
        member id), and this PC's round-trips since the last line */
     int where_count, where_id[NET_MAX_SLOTS];
-    char where_country[NET_MAX_SLOTS][4];
+    char where_region[NET_MAX_SLOTS][8];
     float window[NET_RTT_WINDOW];
     int window_n, window_count;
     float window_worst;

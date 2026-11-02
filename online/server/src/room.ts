@@ -30,7 +30,7 @@ import {
   minVersionOf,
   randomSeed,
 } from "./protocol";
-import { placeOf, roomRegion, traceColo } from "./region";
+import { placeOf, regionOfPlace, roomRegion, traceColo } from "./region";
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -48,8 +48,9 @@ interface Member {
   choosing?: boolean;
   /** The hello listed the "countdown" feature (COUNTDOWN_MS). */
   countdown?: boolean;
-  /** Two-letter country of their connection as Cloudflare sees it ("" unknown), shown to the room. */
-  country?: string;
+  /** Their region as Cloudflare places them ("EU", "NA"...; "" unknown), shown to the room. Never
+      their country: rooms are public and players post their logs (finding 135). */
+  region?: string;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -128,11 +129,13 @@ interface SocketInfo {
   create: boolean;
   /** Left or refused; only its close is still to come. */
   gone?: boolean;
-  /** Two-letter country of the connection (Cloudflare's): the usage stats, the player's own
-      welcome and the room's member list (no address). */
+  /** Two-letter country of the connection (Cloudflare's): the usage stats and the player's own
+      welcome only, never sent to anyone else (no address either). */
   country?: string;
-  /** The connection's continent and the Cloudflare location it reached (the welcome). */
+  /** The connection's continent and the Cloudflare location it reached (the welcome), and its
+      region (src/region.ts regionOfPlace): what the other members see. */
   continent?: string;
+  region?: string;
   colo?: string;
 }
 
@@ -250,6 +253,7 @@ export class Room extends DurableObject<Env> {
       create: request.headers.get("x-dhd-create") === "1",
       country: place.country ?? "",
       continent: place.continent ?? "",
+      region: regionOfPlace(place),
       colo: place.colo ?? "",
     };
     server.serializeAttachment(info);
@@ -555,7 +559,7 @@ export class Room extends DurableObject<Env> {
       bike: 0,
       countdown: features.includes(FEATURE_COUNTDOWN),
     };
-    member.country = info.country ?? "";
+    member.region = info.region ?? "";
     if (!ghost) st.members.push(member);
     if (asHost) st.hostId = member.id;
     info.memberId = member.id;
@@ -571,8 +575,8 @@ export class Room extends DurableObject<Env> {
       host: st.hostId === member.id,
       serverTime: Date.now(),
       // Where this connection and the room are (finding 135; older clients ignore these): the
-      // Cloudflare location the player reached, their country and continent as Cloudflare places
-      // them, and where the room runs ("" while the room's trace hasn't answered: the room
+      // Cloudflare location the player reached, their own country and continent as Cloudflare
+      // places them (only to them), and where the room runs ("" while the room's trace hasn't answered: the room
       // messages carry it then).
       edgeColo: info.colo ?? "",
       country: info.country ?? "",
@@ -974,9 +978,9 @@ export class Room extends DurableObject<Env> {
     if (this.state) this.broadcast(this.snapshot(this.state));
   }
 
-  /** Where the room runs and each member's country (finding 135), apart from the room snapshot:
-      that one stays within its 4 KB for ten members, and this changes only on a join or when the
-      room learns its colo. Older clients ignore the type. */
+  /** Where the room runs and each member's region, never their country (finding 135). Apart from
+      the room snapshot: that one stays within its 4 KB for ten members, and this changes only on a
+      join or when the room learns its colo. Older clients ignore the type. */
   private broadcastWhere(): void {
     const st = this.state;
     if (!st) return;
@@ -984,7 +988,7 @@ export class Room extends DurableObject<Env> {
       type: "where",
       region: this.region(st),
       colo: st.colo ?? "",
-      members: st.members.map((x) => ({ id: x.id, country: x.country ?? "" })),
+      members: st.members.map((x) => ({ id: x.id, region: x.region ?? "" })),
     });
   }
 

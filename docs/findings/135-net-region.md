@@ -51,13 +51,18 @@ the game writes `net:` lines in dhd.log; the game shows each room's region.
   and `""` when neither is known.
 - **New wire data** (docs/online-protocol.md, "Region"). Everything is additive, so `MIN_VERSION`
   stays 0.7.6:
-  - `welcome` gets `edgeColo`, `country`, `continent`, `roomColo` and `roomRegion`.
-  - A new message `where` carries `{region, colo, members: [{id, country}]}`. It is sent after
-    every join and when the room learns its colo. It is a separate message because adding the
-    countries to `room` snapshots made the ten-player worst case 4223 bytes, over the protocol's
+  - `welcome` gets `edgeColo`, the player's own `country` and `continent`, `roomColo` and
+    `roomRegion`.
+  - A new message `where` carries `{region, colo, members: [{id, region}]}`. It is sent after
+    every join and when the room learns its colo. It is a separate message because adding a field
+    per member to `room` snapshots made the ten-player worst case 4223 bytes, over the protocol's
     4096 (session test "snapshot stays below 4KB"). Room snapshots are unchanged.
   - `/v1/lobbies` gets the asker's `region`, and each room gets `region`, `colo` and `createdIn`.
-  - Only countries and continents are sent, never an address. The stats already kept the country.
+  - **Nobody learns another player's country** (the lead's review): rooms are public and players
+    post their logs on GitHub. Other members are shown only by their region (`regionOfPlace`, the
+    same `EU NA SA ASIA OC AF ME` as the list). A player's own country goes only into their own
+    welcome and their own log. No address is ever sent. The usage stats keep the country as before,
+    server side only.
 - **The list's order.** Rooms made in the asker's region come first, then rooms that run in it,
   then the rest, each part busiest first. "Made in" comes first because the hint puts the asker's
   rooms where it puts everyone else's from that region: a Brazilian's rooms run in North America
@@ -68,16 +73,18 @@ the game writes `net:` lines in dhd.log; the game shows each room's region.
 0.7.6 players prefer near rooms the day the server is deployed. The new game keeps "first joinable"
 and logs the chosen room's region.
 
-Tests (`npm test`): 71, the 64 old ones unchanged plus `test/region.test.ts`:
+Tests (`npm test`): 72, the 64 old ones unchanged plus `test/region.test.ts`:
 - the hint mapping (24 places);
 - regions and the colo table;
 - reading a trace;
 - the list order;
 - welcome and `where` fields with a fake `request.cf` (Poland host, Ohio guest);
+- no message either one receives (other than their own welcome), and not the public list, carries
+  a `country` key or the other's country code;
 - a room whose colo is set to FRA shows EU even with a `wnam`-style creator;
 - the list served to Poland and to Ohio in opposite orders.
 
-The 4 KB session test now runs with every member's country, a colo and a hint stored, and still
+The 4 KB session test now runs with every member's region, a colo and a hint stored, and still
 passes, because they are not in `room`.
 
 ## dhd.log: the `net:` lines
@@ -87,28 +94,32 @@ and nettool). Nothing is written per frame. A line is formatted under the client
 after it is released, because dhd.log is a pipe.
 
 - **On joining** (each welcome; `back in` after a lobby reconnect): the Cloudflare location this
-  PC reached, its country and continent, and where the room runs. An older server's welcome has no
+  PC reached, its own country and continent, and where the room runs. An older server's welcome has no
   `edgeColo`, and the line says so.
 - **When the room's colo becomes known** (a `where` with a new colo): one line.
 - **Every 30 s in a room or race** (`NET_LOG_MS`; the network thread's tick): the median and worst
   of this PC's own pings since the last line, and how many. These are all its pings: 1 s apart in
   the room, 0.5 s in a race. Then every other player's ping as the server measures it, with host
-  and country.
+  and region (never their country).
 - **On leaving** (`net_leave`): how long this PC was in the room, and the last window. **On a
   drop**: the close code, whether it rejoins, and the last window.
 
 Examples from the check below (a local server: `wrangler dev` gives a real Cloudflare `cf`, and
 this PC's came out as MRS / DZ; the room's trace answered ORN):
 
-    net: in room S2J22A (host): this PC reached Cloudflare MRS from DZ (AF); the room runs in AF (location not known yet)
-    net: room S2J22A runs in ORN (AF)
-    net: room S2J22A, last 30 s: ping 1 ms median, 1 worst (30 pings); players: GUESTB (DZ) 8 ms
-    net: left room S2J22A after 3:08; last 8 s: ping 2 ms median, 10 worst (8 pings); no other players
+    net: in room G5GWM3 (host): this PC reached Cloudflare MRS from DZ (AF); the room runs in AF (location not known yet)
+    net: room G5GWM3 runs in ORN (AF)
+    net: room G5GWM3, last 30 s: ping 1 ms median, 1 worst (30 pings); players: GUESTB (AF) 9 ms
+    net: left room G5GWM3 after 1:51; last 21 s: ping 1 ms median, 1 worst (21 pings); players: GUESTB (AF) 8 ms
 
-    online menu: quick race: room S2J22A (1/10, open, region AF)
-    net: in room S2J22A: this PC reached Cloudflare MRS from DZ (AF); the room runs in ORN (AF)
-    net: room S2J22A, last 30 s: ping 1 ms median, 8 worst (29 pings); players: HOSTA (host, DZ) 8 ms
-    net: left room S2J22A after 1:38; last 8 s: ping 1 ms median, 1 worst (8 pings); players: HOSTA (host, DZ) 8 ms
+    online menu: quick race: room G5GWM3 (1/10, open, region AF)
+    net: in room G5GWM3: this PC reached Cloudflare MRS from DZ (AF); the room runs in ORN (AF)
+    net: room G5GWM3, last 30 s: ping 1 ms median, 3 worst (29 pings); players: HOSTA (host, AF) 9 ms
+    net: left room G5GWM3 after 1:21; last 21 s: ping 1 ms median, 1 worst (21 pings); no other players
+
+The country in "from DZ" is this PC's own and appears only in its own log; the other player shows
+as their region (`AF`). An earlier run of this branch, before the review, logged `GUESTB (DZ)`
+there.
 
 From the loopback test, a drop and an older server:
 
@@ -120,7 +131,7 @@ On the deployed server the European player's report would read something like
 show the 300 ms and who else had it.
 
 The structs shared by the core and the host get fields appended:
-- `NetMember.country`;
+- `NetMember.region`;
 - `NetLobby.edge_colo`, `country`, `continent`, `room_colo` and `room_region`;
 - `NetLobbyInfo.region` and `colo`.
 
@@ -145,7 +156,7 @@ longest rows were not tried: a 14-letter name, `ASIA`, a long track and `ENDS IN
 
 - `online/server`: `npm test` 71/71.
 - `port/net/build_tests.py`: test_hash, test_json, test_loopback and test_session pass, and
-  nettool builds. test_session adds the welcome's fields, the `where` countries kept across `room`
+  nettool builds. test_session adds the welcome's fields, the `where` regions kept across `room`
   snapshots, the leave line and an older server's welcome.
 - `node --test port/web/check_net.mjs`: passes.
 - The game (`build_wasm.py -j 4`, `build.py --no-core`). Two games on hidden desktops
