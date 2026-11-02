@@ -129,7 +129,7 @@ const impl={
   host_service_host_game_options_read:()=>0,host_service_host_setting_locked:()=>0,
   host_service_host_setting_save:()=>0,host_service_movie_update:()=>0,host_service_movie_playing:()=>0,
   host_service_host_poll_dump:()=>0,
-  host_service_graphics_threaded:()=>1,host_service_texpack_available:()=>0,
+  host_service_graphics_threaded:()=>1,host_service_texpack_available:()=>0,host_service_gs_scale:()=>0,
   host_pacing_period:()=>1/60,
 };
 const noops=`host_sleep_ms host_wait_wall host_dpi_aware host_callbacks_drain host_frame_registers host_frame_video host_capture_name

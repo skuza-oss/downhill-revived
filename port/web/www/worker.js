@@ -261,7 +261,7 @@ async function start(m) {
     host_service_host_setting_save: (k, v) => settings.save(str(k), str(v)),
     host_service_movie_update: () => 0, host_service_movie_playing: () => 0,
     host_service_host_poll_dump: () => 0,
-    host_service_graphics_threaded: () => 1, host_service_texpack_available: () => 0,
+    host_service_graphics_threaded: () => 1, host_service_texpack_available: () => 0, host_service_gs_scale: () => 0,
     host_pacing_period: () => 1 / 60,
     host_pacing_config: p => { period = p * 1000; },
     host_sound_write: (a, frames) => {

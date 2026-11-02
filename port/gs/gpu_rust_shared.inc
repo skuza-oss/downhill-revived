@@ -21,6 +21,8 @@
    with a log line, keeping the old texture. */
 #define NATIVE_SCALE_MAX 8u
 #define NATIVE_SURFACE_MAX 2048u
+/* What holds a device's scale limit below NATIVE_SCALE_MAX (Native scale_reason). */
+enum { NATIVE_SCALE_FREE, NATIVE_SCALE_MEMORY, NATIVE_SCALE_TEXTURE };
 
 #ifndef NATIVE_GPU_SIDE
 #define NATIVE_GPU_SIDE
@@ -40,6 +42,9 @@ typedef DhdrTexture *NativeView;   /* a replacement: a texture pack's or the sha
     int dual;                          /* asked for dual-source blending */ \
     int present_failed;                /* dhdr_native_present failed: no more presents */ \
     unsigned scale_limit;              /* the largest scale this device takes (native_scale_hold) */ \
+    unsigned scale_asked;              /* DHD_SCALE before that limit (0: the window's match) */ \
+    int scale_reason;                  /* NATIVE_SCALE_*: what holds the limit below NATIVE_SCALE_MAX */ \
+    uint64_t scale_memory;             /* the memory native_scale_hold counted (bytes; 0: unknown) */ \
     NATIVE_GPU_SIDE
 
 #include "native_core.inc"
@@ -133,14 +138,44 @@ static int native_surface_resources(Native *n, NativeSurface *s, const unsigned 
 /* The height the picture is shown at: the window's (x64) or the canvas's (browser). Per side. */
 static unsigned native_window_height(Native *n);
 
-/* DHD_SCALE=window: the smallest scale whose picture is as tall as the window, up to the limit. */
-static unsigned native_match_window(Native *n, const NativeFrame *f)
+/* DHD_SCALE=window: the smallest scale whose picture is as tall as the window, up to the limit;
+   *wanted that scale without the limit, words the window's and the picture's heights. */
+static unsigned native_match_window(Native *n, const NativeFrame *f, unsigned *wanted, char *words, size_t size)
 {
     unsigned height = native_window_height(n);
     unsigned lines = f->display_surface >= 0 && f->display[6] ? f->display[6] : 448, scale = 1;
-    while (scale < n->scale_limit && scale * lines < height) scale++;
-    fprintf(stderr, "gs native: resolution scale %u (%s %u lines, picture %u)\n", scale, NATIVE_WINDOW, height, lines);
-    return scale;
+    while (scale < NATIVE_SCALE_MAX && scale * lines < height) scale++;
+    *wanted = scale;
+    snprintf(words, size, " (%u lines, picture %u)", height, lines);
+    return scale < n->scale_limit ? scale : n->scale_limit;
+}
+
+#define NATIVE_SCALED_BYTES (16ull << 20)   /* native_scale_hold's */
+
+/* The scale the pictures are drawn at ([0]) and the one asked for ([1]: DHD_SCALE's, or the window's
+   match before the limit), from the first picture on (0 before), for the PC SETTINGS page (x64:
+   host_service_gs_scale). Written by the render thread, read by the game's. */
+static volatile unsigned native_scale_now[2];
+
+/* dhd.log's line for the scale the pictures are drawn at, once native_picture knows it: the scale,
+   ", capped" when it is less than the one asked for (wanted), what was asked (DHD_SCALE's number or
+   the window's match), what this device allows and why. Once a run (the browser: again after each
+   change of the setting). The launcher reads it from the last run's dhd.log to say what the GPU
+   allows (port/launcher/src-tauri/src/scale.rs): keep its words. */
+static void native_scale_report(Native *n, unsigned wanted, const char *window)
+{
+    char asked[64], why[192] = "";
+    if (n->scale_asked) snprintf(asked, sizeof asked, "%ux asked", n->scale_asked);
+    else snprintf(asked, sizeof asked, "%s asked%s", NATIVE_WINDOW, window);
+    if (n->scale_reason == NATIVE_SCALE_MEMORY) {
+        unsigned over = wanted > n->scale_limit ? wanted : n->scale_limit + 1;
+        snprintf(why, sizeof why, " (graphics memory: %ux needs %llu MiB, over the %llu MiB budget, half of the %llu MiB the GPU has)",
+                 over, (unsigned long long)((uint64_t)over * over * NATIVE_SCALED_BYTES >> 20),
+                 (unsigned long long)(n->scale_memory >> 21), (unsigned long long)(n->scale_memory >> 20));
+    } else if (n->scale_reason == NATIVE_SCALE_TEXTURE)
+        snprintf(why, sizeof why, " (largest texture: %u pixels a side)", (unsigned)dhdr_device_max_texture());
+    fprintf(stderr, "gs native: resolution scale %ux%s: %s, this GPU allows up to %ux%s\n", n->scale,
+            n->scale < wanted ? ", capped" : "", asked, n->scale_limit, why);
 }
 
 /* One picture: the field's commands (with these vertices) drawn and scanned out, then
@@ -150,7 +185,14 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
     static int spikes = -1;
     if (spikes < 0) spikes = getenv("DHD_SPIKES") != NULL;
     double start = n->trace_pictures || spikes ? host_wall_seconds() : 0;
-    if (!n->scale) n->scale = n->scale_setting ? n->scale_setting : native_match_window(n, f);
+    if (!n->scale) {
+        unsigned wanted = n->scale_asked;
+        char window[48] = "";
+        n->scale = n->scale_setting ? n->scale_setting : native_match_window(n, f, &wanted, window, sizeof window);
+        native_scale_report(n, wanted, window);
+        native_scale_now[1] = wanted;
+        native_scale_now[0] = n->scale;
+    }
     double rs = native_rstat_start();
     native_prepare_surfaces(n, f);
     double prepared = spikes ? host_wall_seconds() : 0;
@@ -250,24 +292,24 @@ static void native_present_options(Native *n)
 
 /* ---- creation ---- */
 
-/* The largest scale this device takes (n->scale_limit), and DHD_SCALE held to it: every surface
-   (up to NATIVE_SURFACE_MAX GS pixels a side) fits in the device's largest texture
-   (dhdr_device_max_texture), and the upscaled ones (the frame and Z buffers, about
-   NATIVE_SCALED_BYTES at 1x, growing with the scale squared) in at most half of memory, the
-   dedicated graphics memory (x64: DXGI's DedicatedVideoMemory, as the texture pack's budget; 0 when
-   unknown, as in the browser). Memory never takes it below 4, as before. */
-#define NATIVE_SCALED_BYTES (16ull << 20)
+/* The largest scale this device takes (n->scale_limit, and why: n->scale_reason), and DHD_SCALE
+   held to it (n->scale_asked keeps the setting): every surface (up to NATIVE_SURFACE_MAX GS pixels
+   a side) fits in the device's largest texture (dhdr_device_max_texture), and the upscaled ones
+   (the frame and Z buffers, about NATIVE_SCALED_BYTES at 1x, growing with the scale squared) in at
+   most half of memory, the dedicated graphics memory (x64: DXGI's DedicatedVideoMemory, as the
+   texture pack's budget; 0 when unknown, as in the browser). Memory never takes it below 4, as
+   before. native_scale_report says it all in dhd.log at the first picture. */
 static void native_scale_hold(Native *n, uint64_t memory)
 {
     unsigned limit = NATIVE_SCALE_MAX, texture = dhdr_device_max_texture() / NATIVE_SURFACE_MAX;
-    if (texture && texture < limit) limit = texture;
-    while (memory && limit > 4 && (uint64_t)limit * limit * NATIVE_SCALED_BYTES > memory / 2) limit--;
+    n->scale_reason = NATIVE_SCALE_FREE;
+    if (texture && texture < limit) limit = texture, n->scale_reason = NATIVE_SCALE_TEXTURE;
+    while (memory && limit > 4 && (uint64_t)limit * limit * NATIVE_SCALED_BYTES > memory / 2)
+        limit--, n->scale_reason = NATIVE_SCALE_MEMORY;
     n->scale_limit = limit;
-    if (n->scale_setting > limit) {
-        fprintf(stderr, "gs native: resolution scale %u is more than this graphics device takes; %u\n",
-                n->scale_setting, limit);
-        n->scale_setting = limit;
-    }
+    n->scale_memory = memory;
+    n->scale_asked = n->scale_setting;
+    if (n->scale_setting > limit) n->scale_setting = limit;
 }
 
 /* native_init's common half: the Native over exact, the dual-source choice (DHD_WGPU_DUAL_SOURCE=0

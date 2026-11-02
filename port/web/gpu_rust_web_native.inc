@@ -103,6 +103,8 @@ static void native_rescale(Native *n)
     unsigned setting = 2;
     if (scale && (!native_stricmp(scale, "window") || !native_stricmp(scale, "match"))) setting = 0;
     else if (scale && atoi(scale) >= 1) setting = (unsigned)atoi(scale);
+    if (setting > NATIVE_SCALE_MAX) setting = NATIVE_SCALE_MAX;   /* native_create's */
+    n->scale_asked = setting;                                     /* for native_scale_report */
     if (setting > n->scale_limit) setting = n->scale_limit;   /* native_scale_hold's */
     if (setting == n->scale_setting) return;
     unsigned count = (unsigned)n->surface_count;

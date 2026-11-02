@@ -2808,8 +2808,9 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
     atexit(native_exit_report);
     fprintf(stderr, "gs: native renderer (DHD_RENDER=native); exact GS only for the Z probe\n");
     fprintf(stderr, "gs: native renderer on %s\n", api);
-    if (n->scale_setting) fprintf(stderr, "gs: resolution scale %u (DHD_SCALE)\n", n->scale_setting);
-    else fprintf(stderr, "gs: resolution scale matching the window (DHD_SCALE)\n");
+    /* what was asked (the scale in use: "gs native: resolution scale" at the first picture) */
+    if (n->scale_asked) fprintf(stderr, "gs: resolution scale %u asked (DHD_SCALE)\n", n->scale_asked);
+    else fprintf(stderr, "gs: resolution scale matching the window asked (DHD_SCALE)\n");
     if (n->interp)
         fprintf(stderr, "gs: interpolated frames (DHD_INTERP=1), paced by %s\n", n->interp_hz ? "DHD_INTERP_HZ" : "vsync");
 }

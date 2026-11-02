@@ -75,15 +75,26 @@ int port_unlock_all(void)
 
 static int loaded;
 
-/* Each row's list: the setting's choices, but Resolution up to what the renderer draws
-   (DHD_SCALE_MAX, which the Rust native renderer sets: 8, or less on a card with little memory; 4
-   on the others) and Frame Rate up to port_fps_max (240; the browser sets DHD_FPS_MAX 144), each
-   then Window or Monitor; Window Size with the monitor's own size (DHD_MONITOR_MODE, present.c) in
-   place of "monitor" when it isn't one of them. */
+/* The largest scale the renderer draws on this GPU: DHD_SCALE_MAX, which the Rust native renderer
+   sets (8, or less on a GPU with little memory or small textures); 0 without it (the exact
+   renderer). scale_why: what holds it below 8 (DHD_SCALE_MAX_REASON) in the row's words ("GPU ..."; the
+   footer says "This GPU's" and the rest), else NULL. */
+static int scale_limit;
+static const char *scale_why;
+
+/* Each row's list: the setting's choices, but Resolution with every scale when the native renderer
+   says what it draws (scale_limit: the ones over it are marked, not hidden: the limit follows the
+   memory the system reports for this GPU now) and up to 4 without it, and Frame Rate up to
+   port_fps_max (240; the browser sets DHD_FPS_MAX 144), each then Window or Monitor; Window Size
+   with the monitor's own size (DHD_MONITOR_MODE, present.c) in place of "monitor" when it isn't one
+   of them. */
 static void choices_build(void)
 {
     const char *most = host_getenv("DHD_SCALE_MAX"), *mode = host_getenv("DHD_MONITOR_MODE");
-    int max_scale = most && atoi(most) > 4 ? atoi(most) : 4, w = 0, h = 0;
+    const char *why = host_getenv("DHD_SCALE_MAX_REASON");
+    scale_limit = most && atoi(most) > 0 ? atoi(most) : 0;
+    scale_why = why && !strcmp(why, "memory") ? "GPU memory" : why && !strcmp(why, "texture") ? "GPU texture size" : NULL;
+    int max_scale = scale_limit ? 99 : 4, w = 0, h = 0;
     if (mode && sscanf(mode, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) snprintf(monitor_size, sizeof monitor_size, "%dx%d", w, h);
     for (int i = 0; i < ROWS; i++) {
         Row *r = &rows[i];
@@ -165,17 +176,37 @@ static int locked(const Row *r)
 
 static MenuPage page;
 
+/* Resolution's value as the GPU draws it (scale_limit, host_service_gs_scale), after its label:
+   a scale over the limit "8x (running 4x: GPU memory)" while it runs, "(runs at 4x: ...)"
+   while it waits for the next start; the window's match with the scale it runs at, "(3x)", or
+   "(4x: GPU memory)" when the limit holds it. */
+static void scale_note(const Row *r, char *value, size_t size)
+{
+    if (r->selected < 0 || !scale_limit) return;
+    const char *choice = r->choices[r->selected].value;
+    int asked = atoi(choice), used = host_service_gs_scale(0), running = r->selected == r->running;
+    char why[24] = "";
+    if (scale_why) snprintf(why, sizeof why, ": %s", scale_why);
+    size_t at = strlen(value);
+    if (asked > scale_limit)
+        snprintf(value + at, size - at, running ? " (running %dx%s)" : " (runs at %dx%s)",
+                 running && used ? used : scale_limit, why);
+    else if (!asked && running && used)
+        snprintf(value + at, size - at, " (%dx%s)", used, host_service_gs_scale(1) > used ? why : "");
+}
+
 /* A row on the page: "Label:  < Value >", "*" after it while it waits for the next start; no
    arrows when the environment sets it. */
 static void format(Row *r)
 {
-    char value[40];
+    char value[48];
     int index = -1;
     for (int i = 0; i < shown_count; i++)
         if (&rows[shown[i]] == r) index = i;
     if (index < 0) return;
     if (r->selected >= 0) snprintf(value, sizeof value, "%s", r->choices[r->selected].label);
     else current(r, value, sizeof value);
+    if (r == &rows[RESOLUTION]) scale_note(r, value, sizeof value);
     if (r->selected != r->running) strncat(value, " *", sizeof value - strlen(value) - 1);
     menu_page_value_set(&page, index, r->label, value, !locked(r));
 }
@@ -235,6 +266,11 @@ static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
         p->footer = footer;
     } else if (r && r->selected != r->running) p->footer = restart_footer;
     else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->footer = "No pack: see texture_pack in dhd.ini";
+    else if (r == &rows[RESOLUTION] && scale_limit && scale_limit < 8) {
+        if (scale_why) snprintf(footer, sizeof footer, "This GPU's %s allows up to %dx", scale_why + 4, scale_limit);
+        else snprintf(footer, sizeof footer, "This GPU allows up to %dx", scale_limit);
+        p->footer = footer;
+    }
 }
 
 static void page_back(MenuPage *p)  /* Triangle: the values the page opened with, close */

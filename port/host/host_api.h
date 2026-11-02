@@ -196,6 +196,10 @@ void host_service_gs_native_view(int view);  /* gs/present.c's gs_native_view (o
 void host_service_gs_window_apply(void);
 void host_service_gs_present_options_apply(void);
 void host_service_gs_window_close(void);
+/* The resolution scale the pictures are drawn at (asked 0), or the one asked for (asked 1:
+   DHD_SCALE's, or DHD_SCALE=window's match before the device's limit); 0 before the first
+   picture and without the native renderer (gs/gpu_rust_native.inc; PC SETTINGS shows it). */
+int host_service_gs_scale(int asked);
 void host_service_net_init(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3);
 int host_service_net_create_room(void);
 int host_service_net_join_room(uint32_t a0);

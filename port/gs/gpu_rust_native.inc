@@ -10,7 +10,8 @@
    - the texture packs: a decoded texture's replacement is its pack's (texpack_view), else its
      sharp font; their memory budget is half the device's dedicated memory (DXGI's
      DedicatedVideoMemory, gpu_rust.c's device.memory), or 1 GB when it is unknown; the scale
-     limit counts the same memory (native_scale_hold), and DHD_SCALE_MAX publishes it;
+     limit counts the same memory (native_scale_hold), DHD_SCALE_MAX publishes it (and
+     DHD_SCALE_MAX_REASON why), host_service_gs_scale the scale in use;
    - the window: its size (gpu_rust.c's window_size: the GsWindow's own function) for
      DHD_SCALE=window (native_window_height) and for each present, pacing (pacing_present,
      not under DHD_INTERP), dhdr_surface_present and the present counts.
@@ -109,6 +110,11 @@ static void native_surface_reset(Native *n)
 /* The display read: dhdr_native_read_finish waits for the map itself. */
 static int native_read_wait(void) { return 1; }
 
+/* PC SETTINGS' Resolution row (port/hle/pc_settings.c): the scale the pictures are drawn at
+   (asked 0) or the one asked for (asked 1: DHD_SCALE's, or the window's match before the limit),
+   native_scale_now's; 0 before the first picture and without this renderer. */
+int host_service_gs_scale(int asked) { return (int)native_scale_now[asked ? 1 : 0]; }
+
 /* ---- creation (EE thread, from rust_init) ---- */
 
 /* 1: the native renderer is installed on g (native_install ran); 0: unavailable, g keeps the exact
@@ -137,6 +143,9 @@ static int native_init(Gs *g, Rust *exact)
     char most[4];
     snprintf(most, sizeof most, "%u", n->scale_limit);
     host_putenv_s("DHD_SCALE_MAX", most);
+    /* and why it is less than 8: "memory" (graphics memory) or "texture" (the largest texture) */
+    host_putenv_s("DHD_SCALE_MAX_REASON", n->scale_reason == NATIVE_SCALE_MEMORY ? "memory" :
+                  n->scale_reason == NATIVE_SCALE_TEXTURE ? "texture" : "");
     fprintf(stderr, "gs native: WebGPU shaders and pipelines built in %.2f s\n", host_wall_seconds() - start);
     native_install(g, exact, n, "WebGPU");
     fprintf(stderr, "gs native: GS blending %s\n", n->dual ? "with dual-source blending" :
