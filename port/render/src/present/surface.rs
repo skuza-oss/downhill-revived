@@ -75,6 +75,8 @@ pub struct Surface {
     height: u32,
     pipe: PresentPipe,
     pub counter: super::counter::Counter,
+    /// The touch controls (finding 138): drawn over the picture, under nothing.
+    pub touch: super::touch::TouchOverlay,
     #[cfg(feature = "native")]
     capture: super::counter::Capture,
     own: Option<Own>,
@@ -235,7 +237,7 @@ impl Surface {
         };
         // COPY_SRC lets the test hook read the presented texture back; not needed otherwise.
         let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC);
-        Ok(Surface { gpu, frame: None, surface, usage, present_mode, alpha_mode, format, width: 0, height: 0, pipe, own: None, counter: super::counter::Counter::default(),
+        Ok(Surface { gpu, frame: None, surface, usage, present_mode, alpha_mode, format, width: 0, height: 0, pipe, own: None, counter: super::counter::Counter::default(), touch: super::touch::TouchOverlay::default(),
             #[cfg(feature = "native")] capture: super::counter::Capture::default() })
     }
 
@@ -398,9 +400,11 @@ impl Surface {
         1
     }
 
-    pub fn draw_counter(&mut self) {
+    /// The host overlays over the picture: the touch controls, then the performance counter.
+    pub fn draw_overlays(&mut self) {
         if let Some(frame) = self.frame.as_ref() {
             let target = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.touch.draw(self.gpu, &target, self.format, self.width, self.height);
             self.counter.draw(self.gpu, &target, self.format, self.width, self.height);
             #[cfg(feature = "native")]
             if self.usage.contains(wgpu::TextureUsages::COPY_SRC) { self.capture.frame(self.gpu, &frame.texture); }

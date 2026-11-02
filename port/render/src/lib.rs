@@ -99,8 +99,10 @@ pub mod exact {
 /// browser) and present.wgsl's pass for exact frames.
 pub mod present {
     pub mod counter;
+    pub mod font8x8;
     pub mod pipe;
     pub mod surface;
+    pub mod touch;
 }
 
 /// The native renderer's GPU half (once the retired C path's gpu_wgpu_native.inc, last at

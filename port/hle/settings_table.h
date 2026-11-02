@@ -26,6 +26,19 @@ static const SettingChoice setting_choices_fps[] = {{"60", "60 fps"}, {"120", "1
 static const SettingChoice setting_choices_vsync[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_perf_counter[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_unlock_all[] = {{"0", "OFF"}, {"1", "ON"}};
+static const SettingChoice setting_choices_touch_preset[] = {{"thumb", "Thumb zones"}, {"classic", "Classic pad"}};
+static const SettingChoice setting_choices_touch_hand[] = {{"right", "Right"}, {"left", "Left"}};
+static const SettingChoice setting_choices_touch_steer[] = {{"stick", "Stick"}, {"tilt", "Tilt"}};
+static const SettingChoice setting_choices_touch_size[] = {{"auto", "Auto"}, {"70", "70%"}, {"75", "75%"}, {"80", "80%"}, {"85", "85%"}, {"90", "90%"}, {"95", "95%"}, {"100", "100%"}, {"105", "105%"}};
+static const SettingChoice setting_choices_touch_opacity[] = {{"25", "25%"}, {"30", "30%"}, {"35", "35%"}, {"40", "40%"}, {"45", "45%"}, {"50", "50%"}, {"55", "55%"}, {"60", "60%"}, {"65", "65%"}, {"70", "70%"}, {"75", "75%"}, {"80", "80%"}, {"85", "85%"}, {"90", "90%"}, {"95", "95%"}, {"100", "100%"}};
+static const SettingChoice setting_choices_touch_stick[] = {{"floating", "Floating"}, {"fixed", "Fixed"}};
+static const SettingChoice setting_choices_touch_stick_range[] = {{"8", "8 mm"}, {"10", "10 mm"}, {"12", "12 mm"}, {"14", "14 mm"}, {"16", "16 mm"}, {"18", "18 mm"}, {"20", "20 mm"}};
+static const SettingChoice setting_choices_touch_trick_stick[] = {{"25", "25 mm"}, {"28", "28 mm"}, {"31", "31 mm"}, {"34", "34 mm"}, {"37", "37 mm"}};
+static const SettingChoice setting_choices_touch_labels[] = {{"auto", "Auto"}, {"always", "Always"}, {"off", "Off"}};
+static const SettingChoice setting_choices_touch_attacks[] = {{"flick", "Flick"}, {"buttons", "Buttons"}};
+static const SettingChoice setting_choices_touch_vibration[] = {{"0", "Off"}, {"1", "On"}};
+static const SettingChoice setting_choices_touch_with_pad[] = {{"hide", "Hide"}, {"show", "Show"}};
+static const SettingChoice setting_choices_touch_tilt_strength[] = {{"0", "0%"}, {"10", "10%"}, {"20", "20%"}, {"30", "30%"}, {"40", "40%"}, {"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}};
 static const SettingChoice setting_choices_auto_update[] = {{"ask", "Ask"}, {"on", "Automatic"}, {"off", "Off"}};
 static const SettingChoice setting_choices_discord[] = {{"off", "OFF"}, {"on", "ON"}};
 
@@ -47,6 +60,19 @@ static const SettingInfo setting_table[] = {
     {"vsync", "DHD_VSYNC", "0", setting_choices_vsync, 2},
     {"perf_counter", "DHD_PERF_COUNTER", "0", setting_choices_perf_counter, 2},
     {"unlock_all", "DHD_UNLOCK_ALL", "0", setting_choices_unlock_all, 2},
+    {"touch_preset", "DHD_TOUCH_PRESET", "thumb", setting_choices_touch_preset, 2},
+    {"touch_hand", "DHD_TOUCH_HAND", "right", setting_choices_touch_hand, 2},
+    {"touch_steer", "DHD_TOUCH_STEER", "stick", setting_choices_touch_steer, 2},
+    {"touch_size", "DHD_TOUCH_SIZE", "auto", setting_choices_touch_size, 9},
+    {"touch_opacity", "DHD_TOUCH_OPACITY", "60", setting_choices_touch_opacity, 16},
+    {"touch_stick", "DHD_TOUCH_STICK", "floating", setting_choices_touch_stick, 2},
+    {"touch_stick_range", "DHD_TOUCH_STICK_RANGE", "12", setting_choices_touch_stick_range, 7},
+    {"touch_trick_stick", "DHD_TOUCH_TRICK_STICK", "31", setting_choices_touch_trick_stick, 5},
+    {"touch_labels", "DHD_TOUCH_LABELS", "auto", setting_choices_touch_labels, 3},
+    {"touch_attacks", "DHD_TOUCH_ATTACKS", "flick", setting_choices_touch_attacks, 2},
+    {"touch_vibration", "DHD_TOUCH_VIBRATION", "1", setting_choices_touch_vibration, 2},
+    {"touch_with_pad", "DHD_TOUCH_WITH_PAD", "hide", setting_choices_touch_with_pad, 2},
+    {"touch_tilt_strength", "DHD_TOUCH_TILT_STRENGTH", "50", setting_choices_touch_tilt_strength, 11},
     {"auto_update", "", "ask", setting_choices_auto_update, 3},
     {"discord", "DHD_DISCORD", "off", setting_choices_discord, 2},
 };

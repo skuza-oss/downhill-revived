@@ -409,12 +409,23 @@ pub unsafe extern "C" fn dhdr_surface_counter(s: *mut DhdrSurface, enabled: i32,
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn dhdr_surface_touch(s: *mut DhdrSurface, items: *const f32, count: u32, width_mm: f32, height_mm: f32) {
+    const E: &str = "dhdr_surface_touch";
+    let _g = Guard::enter(E);
+    let floats = count as usize * crate::present::touch::ITEM_FLOATS;
+    // SAFETY: the caller passes `count` shapes of ITEM_FLOATS floats each (or none).
+    let items: &[f32] = if items.is_null() || count == 0 { &[] } else { unsafe { std::slice::from_raw_parts(items, floats) } };
+    // SAFETY: as surface_present.
+    unsafe { surface(s, E) }.with(E, |s| s.touch.set(items, width_mm, height_mm));
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn dhdr_surface_present(s: *mut DhdrSurface) {
     const E: &str = "dhdr_surface_present";
     let _g = Guard::enter(E);
     // SAFETY: as surface().
     unsafe { surface(s, E) }.with(E, |s| {
-        s.draw_counter();
+        s.draw_overlays();
         // The present test-hook point: the frame, read back before it is presented.
         #[cfg(feature = "test-hooks")]
         if s.usage() & DHDR_SURFACE_COPY_SRC != 0 {
