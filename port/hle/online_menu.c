@@ -1577,7 +1577,9 @@ static void room_draw(MenuPage *p)
             MenuStyle st = menu_style(st_row, 80, -1, 0, 0);
             snprintf(head, sizeof head, "%d/%d READY", r->ready, l->nmembers);
             put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, all ? tint(st_row, 80, green) : st);
-            int room_w = CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10;
+            /* the left text's room, less a tenth: mixed-case track names draw up to a tenth wider
+               than menu_text_width measures them (as capitals) */
+            int room_w = (CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10) * 9 / 10;
             char forms[4][64];
             const char *what = l->last_race_id ? track_name(l->last_race_track) : NULL, *region = l->room_region;
             char players[16];
