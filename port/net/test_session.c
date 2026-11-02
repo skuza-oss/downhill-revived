@@ -57,6 +57,39 @@ int main(void)
     client_on_text(&c,ten,strlen(ten)); client_lobby(&c,&l);
     assert(l.nslots == 10 && l.local_slot == 9 && l.racer[9].member_id == 9);
     client_free(&c);
+    {   /* where this PC and the room are (finding 135): the welcome's fields, the where message's
+           countries kept across room snapshots, and the net: lines on stderr */
+        const char *located = "{\"type\":\"welcome\",\"memberId\":1,\"host\":false,\"code\":\"WHERE2\",\"serverTime\":1000,"
+            "\"edgeColo\":\"WAW\",\"country\":\"PL\",\"continent\":\"EU\",\"roomColo\":\"\",\"roomRegion\":\"EU\"}";
+        const char *where = "{\"type\":\"where\",\"region\":\"EU\",\"colo\":\"FRA\","
+            "\"members\":[{\"id\":0,\"country\":\"DE\"},{\"id\":1,\"country\":\"PL\"},{\"id\":2,\"country\":\"\"}]}";
+        const char *members = "{\"type\":\"room\",\"hostId\":0,\"members\":[{\"id\":0,\"name\":\"ANNA\",\"rttMs\":31},"
+            "{\"id\":1,\"name\":\"Test\",\"rttMs\":40},{\"id\":2,\"name\":\"BOB\",\"rttMs\":null}]}";
+        const char *pong = "{\"type\":\"pong\",\"t\":0}";
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,located,strlen(located));
+        client_lobby(&c,&l);
+        assert(!strcmp(l.edge_colo,"WAW") && !strcmp(l.country,"PL") && !strcmp(l.continent,"EU"));
+        assert(!l.room_colo[0] && !strcmp(l.room_region,"EU"));
+        client_on_text(&c,where,strlen(where));
+        client_on_text(&c,members,strlen(members));
+        client_on_text(&c,pong,strlen(pong));
+        client_lobby(&c,&l);
+        assert(!strcmp(l.room_colo,"FRA") && l.nmembers == 3);
+        assert(!strcmp(l.member[0].country,"DE") && !strcmp(l.member[1].country,"PL") && !l.member[2].country[0]);
+        assert(c.window_count == 1 && c.joined_at > 0);
+        client_leave(&c);  /* net: left room WHERE2 ... */
+        assert(c.joined_at == 0 && c.window_count == 0);
+        client_free(&c);
+        /* an older server: no locations, all empty */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,welcome,strlen(welcome));
+        client_lobby(&c,&l);
+        assert(!l.edge_colo[0] && !l.country[0] && !l.room_region[0]);
+        client_free(&c);
+    }
     puts("test_session: session and ten-player checks passed");
     return 0;
 }

@@ -28,6 +28,12 @@ test('browser session messages and shared snapshots',()=>{
   assert.equal(dv.getFloat64(1024+layout.NetLobby.next_race_at[0],true),31000);
   assert.equal(dv.getInt32(1024+layout.NetLobby.state[0],true),2);
   assert.equal(dv.getBigInt64(1024+layout.NetLobby.member[0]+layout.NetMember.finish_ticks[0],true),360n);
+  // where the room runs and the members' countries (finding 135)
+  recv({type:'where',region:'EU',colo:'FRA',members:[{id:7,country:'PL'}]});
+  api.host_service_net_get_lobby(1024);
+  assert.equal(str(1024+layout.NetLobby.room_region[0]),'EU');
+  assert.equal(str(1024+layout.NetLobby.room_colo[0]),'FRA');
+  assert.equal(str(1024+layout.NetLobby.member[0]+layout.NetMember.country[0]),'PL');
   api.host_service_net_finish(600,4);assert.deepEqual(socket.sent.at(-1),{type:'finish',ticks:600,place:4});
   api.host_service_net_back();assert.deepEqual(socket.sent.at(-1),{type:'back'});
   api.host_service_net_rules(60,1,2);assert.equal(socket.sent.at(-1).then,'random');

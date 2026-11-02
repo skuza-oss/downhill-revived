@@ -29,6 +29,7 @@ typedef struct {
     char race_state[12], dnf_reason[16];
     long long finish_ticks;     /* -1 when absent */
     int place;
+    char country[4];           /* their connection's country as Cloudflare sees it, "" unknown */
 } NetMember;
 
 typedef struct {
@@ -77,6 +78,10 @@ typedef struct {
     unsigned char rotation[64];
     int last_race_id, last_race_track, nresults;
     NetResult result[NET_MAX_SLOTS];
+    /* Where this PC and the room are (finding 135), "" unknown or an older server: the Cloudflare
+       location this connection reached, this PC's country and continent as Cloudflare sees them,
+       the location the room runs in and its region ("EU", "NA", "ASIA"...). */
+    char edge_colo[8], country[4], continent[4], room_colo[8], room_region[8];
 } NetLobby;
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */
@@ -92,6 +97,7 @@ typedef struct {
     char phase[16];
     double race_started_at, finish_ends_at, next_race_at;
     int full;
+    char region[8], colo[8];   /* where the room runs ("EU"...; finding 135), "" unknown */
 } NetLobbyInfo;
 
 /* base_url: "wss://host" or "ws://127.0.0.1:8787". version: the build's version string (the

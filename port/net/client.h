@@ -8,7 +8,7 @@
 
 #include "net.h"
 
-enum { NET_PROTOCOL = 2 };
+enum { NET_PROTOCOL = 2, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
 
 typedef struct {
     void *ctx;
@@ -32,6 +32,15 @@ typedef struct {
     int have_offset;
     float rtt[5];
     int nrtt;
+    /* dhd.log's net: lines (finding 135): every member's country from the server's "where" (by
+       member id), and this PC's round-trips since the last line */
+    int where_count, where_id[NET_MAX_SLOTS];
+    char where_country[NET_MAX_SLOTS][4];
+    float window[NET_RTT_WINDOW];
+    int window_n, window_count;
+    float window_worst;
+    double window_start, next_log, joined_at;  /* joined_at 0: not in a room (nothing to log) */
+    char logged_colo[8];  /* the room location the log has named */
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];

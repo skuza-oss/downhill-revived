@@ -184,6 +184,8 @@ static void read_room(NetClient *c, const char *t)
         json_string(t, FIELD("dnfReason"), m->dnf_reason, sizeof m->dnf_reason);
         m->finish_ticks = json_int(t, FIELD("finishTicks"), &v) ? v : -1;
         m->place = json_int(t, FIELD("place"), &v) ? (int)v : 0;
+        for (int k = 0; k < c->where_count; k++)
+            if (c->where_id[k] == m->id) memcpy(m->country, c->where_country[k], sizeof m->country);
         if (m->id == l->member_id) c->ready = m->ready;
 
 #undef FIELD
@@ -261,11 +263,65 @@ static void add_rtt(NetClient *c, double rtt)
             sorted[j] = sorted[j - 1], sorted[j - 1] = x;
         }
     c->lobby.ping_ms = (int)(sorted[n / 2] + 0.5f);
+    if (c->window_n < NET_RTT_WINDOW) c->window[c->window_n++] = (float)rtt;
+    if (!c->window_count++ || rtt > c->window_worst) c->window_worst = (float)rtt;
+}
+
+/* ---- dhd.log's net: lines (finding 135) ----
+   One line on joining (where this PC and the room are), one when the room's location becomes
+   known, one every NET_LOG_MS in a room or race and one on leaving: this PC's round-trips since
+   the last line and every other player's as the server measures them. Nothing per frame. The lines
+   are made with the lock held and printed after it is released (the log is a pipe). */
+
+/* "last 30 s: ping 34 ms median, 51 worst (30 pings); players: ANNA (host, PL) 36 ms", and a new
+   window from now. */
+static void window_stats(NetClient *c, char *out, size_t cap)
+{
+    const NetLobby *l = &c->lobby;
+    double now = net_now_ms();
+    float sorted[NET_RTT_WINDOW];
+    int n = snprintf(out, cap, "last %.0f s: ", (now - c->window_start) / 1000), others = 0;
+    if (c->window_n) {
+        int k = c->window_n;
+        memcpy(sorted, c->window, k * sizeof sorted[0]);
+        for (int i = 1; i < k; i++)
+            for (int j = i; j > 0 && sorted[j] < sorted[j - 1]; j--) {
+                float x = sorted[j];
+                sorted[j] = sorted[j - 1], sorted[j - 1] = x;
+            }
+        n += snprintf(out + n, cap - n, "ping %d ms median, %d worst (%d ping%s)",
+                      (int)((k % 2 ? sorted[k / 2] : (sorted[k / 2 - 1] + sorted[k / 2]) / 2) + 0.5f),
+                      (int)(c->window_worst + 0.5f), c->window_count, c->window_count == 1 ? "" : "s");
+    } else
+        n += snprintf(out + n, cap - n, "no pings");
+    for (int i = 0; i < l->nmembers && n < (int)cap - 64; i++) {
+        const NetMember *m = &l->member[i];
+        int host = m->id == l->host_id;
+        char tag[16] = "", rtt[16] = "?";
+        if (m->id == l->member_id) continue;
+        if (host || m->country[0])
+            snprintf(tag, sizeof tag, " (%s%s%s)", host ? "host" : "", host && m->country[0] ? ", " : "", m->country);
+        if (m->rtt_ms >= 0) snprintf(rtt, sizeof rtt, "%d", m->rtt_ms);
+        n += snprintf(out + n, cap - n, "%s %s%s %s ms", others++ ? "," : "; players:", m->name, tag, rtt);
+        if (n >= (int)cap) n = (int)cap - 1;
+    }
+    if (!others && n < (int)cap - 16) snprintf(out + n, cap - n, "; no other players");
+    c->window_n = c->window_count = 0;
+    c->window_worst = 0;
+    c->window_start = now;
+}
+
+/* "where the room runs" for the log: "FRA (EU)", "EU (location not known yet)" or "?" */
+static void room_place(const NetLobby *l, char *out, size_t cap)
+{
+    if (l->room_colo[0]) snprintf(out, cap, "%s (%s)", l->room_colo, l->room_region[0] ? l->room_region : "region unknown");
+    else if (l->room_region[0]) snprintf(out, cap, "%s (location not known yet)", l->room_region);
+    else snprintf(out, cap, "an unknown location");
 }
 
 void client_on_text(NetClient *c, const char *text, size_t n)
 {
-    char type[24];
+    char type[24], line[1024] = "";
     long long v;
     double t, server_time;
     (void)n;
@@ -283,6 +339,8 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             c->clock_offset = server_time - (t + rtt / 2), c->have_offset = 1;
         changed(c);
     } else if (!strcmp(type, "welcome")) {
+        NetLobby *l = &c->lobby;
+        int located;
         json_string(text, "code", c->lobby.code, sizeof c->lobby.code);
         if (json_int(text, "memberId", &v))
             c->lobby.member_id = (int)v;
@@ -299,6 +357,59 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             say(c, "{\"type\":\"pick\",\"rider\":%d,\"bike\":%d}", c->rider, c->bike);
         if (c->ready)
             say(c, "{\"type\":\"ready\",\"ready\":true}");
+        /* where this PC and the room are (finding 135; an older server sends none) */
+        l->edge_colo[0] = l->country[0] = l->continent[0] = l->room_colo[0] = l->room_region[0] = 0;
+        located = json_string(text, "edgeColo", l->edge_colo, sizeof l->edge_colo);
+        json_string(text, "country", l->country, sizeof l->country);
+        json_string(text, "continent", l->continent, sizeof l->continent);
+        json_string(text, "roomColo", l->room_colo, sizeof l->room_colo);
+        json_string(text, "roomRegion", l->room_region, sizeof l->room_region);
+        {
+            double now = net_now_ms();
+            int n = snprintf(line, sizeof line, "net: %s room %s%s: ", c->joined_at ? "back in" : "in", l->code,
+                             l->is_host ? " (host)" : "");
+            if (!c->joined_at) c->joined_at = now;
+            c->window_n = c->window_count = 0, c->window_worst = 0, c->window_start = now;
+            c->next_log = now + NET_LOG_MS;
+            if (!located)
+                snprintf(line + n, sizeof line - n, "the server sent no locations (an older server)");
+            else {
+                char room[48];
+                room_place(l, room, sizeof room);
+                snprintf(line + n, sizeof line - n, "this PC reached Cloudflare %s%s%s%s%s%s; the room runs in %s",
+                         l->edge_colo[0] ? l->edge_colo : "?", l->country[0] ? " from " : "", l->country,
+                         l->continent[0] ? " (" : "", l->continent, l->continent[0] ? ")" : "", room);
+            }
+            snprintf(c->logged_colo, sizeof c->logged_colo, "%s", l->room_colo);
+        }
+        changed(c);
+    } else if (!strcmp(type, "where")) {
+        /* the room's location and every member's country (finding 135) */
+        NetLobby *l = &c->lobby;
+        char path[32];
+        int n = json_count(text, "members");
+        json_string(text, "region", l->room_region, sizeof l->room_region);
+        json_string(text, "colo", l->room_colo, sizeof l->room_colo);
+        c->where_count = 0;
+        for (int i = 0; i < n && c->where_count < NET_MAX_SLOTS; i++) {
+            int k = c->where_count;
+            snprintf(path, sizeof path, "members[%d].id", i);
+            if (!json_int(text, path, &v)) continue;
+            c->where_id[k] = (int)v;
+            snprintf(path, sizeof path, "members[%d].country", i);
+            c->where_country[k][0] = 0;
+            json_string(text, path, c->where_country[k], sizeof c->where_country[k]);
+            c->where_count++;
+        }
+        for (int i = 0; i < l->nmembers; i++)
+            for (int k = 0; k < c->where_count; k++)
+                if (c->where_id[k] == l->member[i].id) memcpy(l->member[i].country, c->where_country[k], sizeof l->member[i].country);
+        if (c->joined_at && l->room_colo[0] && strcmp(l->room_colo, c->logged_colo)) {
+            char room[48];
+            room_place(l, room, sizeof room);
+            snprintf(line, sizeof line, "net: room %s runs in %s", l->code, room);
+            snprintf(c->logged_colo, sizeof c->logged_colo, "%s", l->room_colo);
+        }
         changed(c);
     } else if (!strcmp(type, "room")) {
         read_room(c, text);
@@ -321,6 +432,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         changed(c);
     }
     SDL_UnlockMutex(c->lock);
+    if (line[0]) fprintf(stderr, "%s\n", line);
 }
 
 void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
@@ -346,6 +458,7 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
 int client_on_closed(NetClient *c, int code, const char *reason)
 {
     int rejoin = 0;
+    char line[1024] = "";
     SDL_LockMutex(c->lock);
     c->connected = 0;
     if (c->racing) {
@@ -365,8 +478,15 @@ int client_on_closed(NetClient *c, int code, const char *reason)
     if (!c->lobby.error[0] && c->lobby.state == NET_FAILED)
         snprintf(c->lobby.error, sizeof c->lobby.error, "connection closed (%d%s%s)", code,
                  reason && *reason ? ": " : "", reason ? reason : "");
+    if (c->joined_at && !c->leaving) {  /* a drop: the last window, and whether it comes back */
+        int n = snprintf(line, sizeof line, "net: room %s: connection closed (%d)%s; ", c->lobby.code, code,
+                         rejoin ? ", rejoining" : "");
+        window_stats(c, line + n, sizeof line - n);
+        if (!rejoin) c->joined_at = 0;
+    }
     changed(c);
     SDL_UnlockMutex(c->lock);
+    if (line[0]) fprintf(stderr, "%s\n", line);
     return rejoin;
 }
 
@@ -374,6 +494,7 @@ int client_tick(NetClient *c)
 {
     double now = net_now_ms();
     int dead = 0;
+    char line[1024] = "";
     SDL_LockMutex(c->lock);
     if (c->connected) {
         if (now >= c->next_ping) {
@@ -389,8 +510,14 @@ int client_tick(NetClient *c)
             }
         }
         dead = now - c->last_rx > SILENT_MS;
+        if (c->joined_at && (c->lobby.state == NET_LOBBY || c->lobby.state == NET_RACING) && now >= c->next_log) {
+            int n = snprintf(line, sizeof line, "net: room %s%s, ", c->lobby.code, c->racing ? " (racing)" : "");
+            window_stats(c, line + n, sizeof line - n);
+            c->next_log = now + NET_LOG_MS;
+        }
     }
     SDL_UnlockMutex(c->lock);
+    if (line[0]) fprintf(stderr, "%s\n", line);
     return dead;
 }
 
@@ -515,11 +642,19 @@ void client_rotation(NetClient *c, const unsigned char *ids, int count)
 
 void client_leave(NetClient *c)
 {
+    char line[1024] = "";
     SDL_LockMutex(c->lock);
     c->leaving = 1;
     if (c->racing)
         say(c, "{\"type\":\"leave\"}");
+    if (c->joined_at) {
+        int s = (int)((net_now_ms() - c->joined_at) / 1000);
+        int n = snprintf(line, sizeof line, "net: left room %s after %d:%02d; ", c->lobby.code, s / 60, s % 60);
+        window_stats(c, line + n, sizeof line - n);
+        c->joined_at = 0;
+    }
     SDL_UnlockMutex(c->lock);
+    if (line[0]) fprintf(stderr, "%s\n", line);
 }
 
 void client_lobby(NetClient *c, NetLobby *out)

@@ -49,6 +49,10 @@ export const layout = {
     "place": [
       168,
       4
+    ],
+    "country": [
+      172,
+      4
     ]
   },
   "NetRacer": {
@@ -106,7 +110,7 @@ export const layout = {
     ]
   },
   "NetLobby": {
-    "size": 4952,
+    "size": 4984,
     "state": [
       0,
       4
@@ -286,10 +290,30 @@ export const layout = {
     "result": [
       3592,
       1360
+    ],
+    "edge_colo": [
+      4952,
+      8
+    ],
+    "country": [
+      4960,
+      4
+    ],
+    "continent": [
+      4964,
+      4
+    ],
+    "room_colo": [
+      4968,
+      8
+    ],
+    "room_region": [
+      4976,
+      8
     ]
   },
   "NetLobbyInfo": {
-    "size": 336,
+    "size": 352,
     "code": [
       0,
       8
@@ -337,6 +361,14 @@ export const layout = {
     "full": [
       328,
       4
+    ],
+    "region": [
+      332,
+      8
+    ],
+    "colo": [
+      340,
+      8
     ]
   }
 };

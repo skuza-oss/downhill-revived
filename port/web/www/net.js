@@ -3,7 +3,7 @@ import { layout } from './net_layout.js';
 
 export function createNet({span, str}) {
   let base = 'wss://dhd.skuza.app', name = '', version = '', iso = '', ws;
-  let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0;
+  let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {};
   let frames = [], list = [], listing = false, listError = false, timer;
   let error = '', errorCode = '';
   const send = m => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)); };
@@ -11,7 +11,7 @@ export function createNet({span, str}) {
   const serverMs = () => now() + offset;
   const me = () => room.members?.find(x => x.id === member);
   function connect(path) {
-    ws?.close(); clearInterval(timer); state = 1; room = {}; start = {}; frames = [];
+    ws?.close(); clearInterval(timer); state = 1; room = {}; start = {}; frames = []; welcome = {}; where = {};
     ws = new WebSocket(base + path); ws.binaryType = 'arraybuffer';
     const socket = ws;
     ws.onopen = () => {
@@ -25,7 +25,8 @@ export function createNet({span, str}) {
       const m = JSON.parse(e.data);
       if(m.type==='ping') send({type:'pong',s:m.s});
       if(m.type==='pong' && m.t !== undefined) offset=m.serverTime-(now()+m.t)/2;
-      if(m.type==='welcome') {member=m.memberId;state=2;room.code=m.code;offset=m.serverTime-now();}
+      if(m.type==='welcome') {member=m.memberId;state=2;room.code=m.code;offset=m.serverTime-now();welcome=m;}
+      if(m.type==='where') where=m;  // the room's region and the members' countries (finding 135)
       if(m.type==='room') {room=m;if(!me()?.inRace && m.phase)state=2;}
       if(m.type==='start') {start=m;state=3;frames=[];}
       if(m.type==='left' && start.players?.[m.slot])start.players[m.slot].left=1;
@@ -63,9 +64,12 @@ export function createNet({span, str}) {
       finish_ends_at:room.finishEndsAt,next_race_at:room.nextRaceAt,countdown_ends_at:room.countdownEndsAt,
       server_time:room.serverTime,waiting_for_rider:!!room.waitingForRider,rules_pending:!!room.rulesPending,
       finish_window:rules.finishWindow??60,next_race:rules.nextRace==='host',then:rules.then==='same'?0:rules.then==='random'?2:1,
-      rotation_count:room.rotation?.length||0,last_race_id:room.lastRace?.id||0,last_race_track:room.lastRace?.track||0,nresults:results.length});
+      rotation_count:room.rotation?.length||0,last_race_id:room.lastRace?.id||0,last_race_track:room.lastRace?.track||0,nresults:results.length,
+      edge_colo:welcome.edgeColo||'',country:welcome.country||'',continent:welcome.continent||'',
+      room_colo:where.colo??welcome.roomColo??'',room_region:where.region??welcome.roomRegion??''});
     members.slice(0,10).forEach((m,i)=>write('NetMember',a+layout.NetLobby.member[0]+i*layout.NetMember.size,
-      {...m,rtt_ms:m.rttMs??-1,in_race:!!m.inRace,race_state:m.raceState||'',dnf_reason:m.dnfReason||'',finish_ticks:BigInt(m.finishTicks??-1)}));
+      {...m,rtt_ms:m.rttMs??-1,in_race:!!m.inRace,race_state:m.raceState||'',dnf_reason:m.dnfReason||'',finish_ticks:BigInt(m.finishTicks??-1),
+        country:where.members?.find(x=>x.id===m.id)?.country||''}));
     (start.players||[]).slice(0,10).forEach((m,i)=>write('NetRacer',a+layout.NetLobby.racer[0]+i*layout.NetRacer.size,{...m,member_id:m.memberId}));
     results.slice(0,10).forEach((m,i)=>write('NetResult',a+layout.NetLobby.result[0]+i*layout.NetResult.size,{...m,dnf_reason:m.dnfReason||'',ticks:BigInt(m.ticks??-1)}));
     span(a+layout.NetLobby.rotation[0],64).set((room.rotation||[]).slice(0,64));
