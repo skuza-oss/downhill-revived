@@ -20,6 +20,13 @@
 //! clean_up touch only the game's own files: a player may have put the game in a folder that holds
 //! other files. clean_up deletes the .old copies of the game's files and dhd-update/ at the next
 //! start.
+//!
+//! When the official source fails (no connection to api.github.com, its limit of 60 checks an hour
+//! per address, an error or an unusable answer), the check asks BACKUP_SOURCE, the online server's
+//! copy of the newest release's latest.json (online/server/src/latest.ts, finding 138); its answer
+//! has no release notes. A player's own update_url has no backup. A failed check or download says
+//! what went wrong in one plain line (check_failed_message, download_failed_message); the technical
+//! error goes to launcher.log.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,6 +39,11 @@ use crate::game::Place;
 
 pub const OFFICIAL_SOURCE: &str = "https://api.github.com/repos/skuza-oss/downhill-revived/releases/latest";
 pub const RELEASES_PAGE: &str = "https://github.com/skuza-oss/downhill-revived/releases/latest";
+/// The online server's copy of the newest release's latest.json (GET /v1/latest), asked when the
+/// official source fails.
+pub const BACKUP_SOURCE: &str = "https://dhd.skuza.app/v1/latest";
+/// What a backup answer may download: this repository's release assets only.
+const RELEASE_DOWNLOADS: &str = "https://github.com/skuza-oss/downhill-revived/releases/download/";
 const WORK_DIR: &str = "dhd-update";
 /// Never replaced by an update: the player's own files.
 const KEEP: [&str; 4] = ["dhd.ini", "dhd.log", "iso-check.txt", "launcher.log"];
@@ -69,7 +81,7 @@ fn platform_asset(name: &str, platform: &str) -> bool {
         && [format!("-{key}.{ext}"), format!("-{key}-experimental.{ext}")].iter().any(|end| name.ends_with(end.as_str()))
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Release {
     pub version: String,
@@ -91,14 +103,128 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
+/// What kind of thing went wrong on the network, for the player's message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// The address couldn't be looked up, or the network is down or unreachable.
+    Offline,
+    TimedOut,
+    Refused,
+    /// The connection was reset or closed halfway.
+    Cut,
+    /// No secure connection (a certificate or TLS error: often a proxy or filter in the way).
+    Tls,
+    /// HTTP 429, or GitHub's 403 with its limit used up.
+    RateLimited,
+    /// Another HTTP error status.
+    Http(u16),
+    /// An answer that isn't JSON or doesn't name a usable release.
+    BadAnswer,
+    Other,
+}
+
+/// A failed request: its kind and the technical error (for launcher.log).
+#[derive(Debug)]
+pub struct NetError {
+    pub failure: Failure,
+    pub detail: String,
+}
+
+impl NetError {
+    fn bad(detail: String) -> Self {
+        NetError { failure: Failure::BadAnswer, detail }
+    }
+}
+
+impl std::fmt::Display for NetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}: {}", self.failure, self.detail)
+    }
+}
+
+impl From<String> for NetError {
+    fn from(detail: String) -> Self {
+        NetError::bad(detail)
+    }
+}
+
+/// An HTTP error status: a rate limit (429; GitHub's 403 with x-ratelimit-remaining 0, or with
+/// retry-after for its secondary limits) or another error.
+pub fn status_failure(code: u16, ratelimit_remaining: Option<&str>, retry_after: bool) -> Failure {
+    match code {
+        429 => Failure::RateLimited,
+        403 if ratelimit_remaining.map(str::trim) == Some("0") || retry_after => Failure::RateLimited,
+        _ => Failure::Http(code),
+    }
+}
+
+/// A connection error: ureq's kind, the io::ErrorKind under it (when there is one) and its text.
+pub fn transport_failure(kind: ureq::ErrorKind, io: Option<std::io::ErrorKind>, text: &str) -> Failure {
+    use std::io::ErrorKind as Io;
+    let text = text.to_ascii_lowercase();
+    match io {
+        Some(Io::TimedOut | Io::WouldBlock) => return Failure::TimedOut,
+        Some(Io::NetworkUnreachable | Io::HostUnreachable | Io::NetworkDown | Io::AddrNotAvailable) => return Failure::Offline,
+        Some(Io::ConnectionRefused) => return Failure::Refused,
+        _ => {}
+    }
+    if ["certificate", "tls", "handshake"].iter().any(|w| text.contains(w)) {
+        return Failure::Tls;
+    }
+    match (kind, io) {
+        (ureq::ErrorKind::Dns, _) => Failure::Offline,
+        (_, Some(Io::ConnectionReset | Io::ConnectionAborted | Io::UnexpectedEof | Io::BrokenPipe)) => Failure::Cut,
+        (ureq::ErrorKind::TooManyRedirects | ureq::ErrorKind::BadStatus | ureq::ErrorKind::BadHeader, _) => Failure::BadAnswer,
+        _ if text.contains("timed out") => Failure::TimedOut,
+        _ => Failure::Other,
+    }
+}
+
+/// The io::ErrorKind somewhere under err, if any.
+fn io_kind(err: &(dyn std::error::Error + 'static)) -> Option<std::io::ErrorKind> {
+    let mut e = Some(err);
+    while let Some(x) = e {
+        if let Some(io) = x.downcast_ref::<std::io::Error>() {
+            return Some(io.kind());
+        }
+        e = x.source();
+    }
+    None
+}
+
+fn classify(e: &ureq::Error) -> Failure {
+    match e {
+        ureq::Error::Status(code, resp) => {
+            status_failure(*code, resp.header("x-ratelimit-remaining"), resp.header("retry-after").is_some())
+        }
+        ureq::Error::Transport(t) => {
+            let io = std::error::Error::source(t).and_then(io_kind);
+            transport_failure(t.kind(), io, &t.to_string())
+        }
+    }
+}
+
+/// An error reading a body: a timeout, a cut connection, or else what was read isn't usable.
+fn read_failure(e: &std::io::Error) -> Failure {
+    match transport_failure(ureq::ErrorKind::Io, Some(e.kind()), &e.to_string()) {
+        Failure::Other => Failure::BadAnswer,
+        f => f,
+    }
+}
+
+pub fn fetch_json(url: &str) -> Result<serde_json::Value, NetError> {
+    let resp = agent().get(url).set("Accept", "application/json").call().map_err(|e| NetError {
+        failure: classify(&e),
+        detail: format!("{url}: {e}"),
+    })?;
+    resp.into_json().map_err(|e| NetError {
+        failure: read_failure(&e),
+        detail: format!("{url} didn't answer with JSON: {e}"),
+    })
+}
+
 pub fn get_json(url: &str) -> Result<serde_json::Value, String> {
-    agent()
-        .get(url)
-        .set("Accept", "application/json")
-        .call()
-        .map_err(|e| format!("{url}: {e}"))?
-        .into_json()
-        .map_err(|e| format!("{url} didn't answer with JSON: {e}"))
+    fetch_json(url).map_err(|e| e.detail)
 }
 
 /// url relative to the manifest at base.
@@ -160,12 +286,140 @@ pub fn newer(candidate: &str, current: &str) -> bool {
 /// The newest release the source names for platform (platform()); None when it has no build for
 /// it, which is no update rather than a failed check (from n0buholic, PR #13). A source that can't
 /// be reached or gives an unusable answer is an error.
-pub fn latest(source: &str, platform: &str) -> Result<Option<Release>, String> {
-    release_from(source, &get_json(source)?, platform)
+pub fn latest(source: &str, platform: &str) -> Result<Option<Release>, NetError> {
+    release_from(source, &fetch_json(source)?, platform)
+}
+
+/// A check's answer; note says where it came from when the official source failed (launcher.log).
+#[derive(Debug)]
+pub struct Checked {
+    pub release: Option<Release>,
+    pub note: Option<String>,
+}
+
+/// A failed check: the line for the player and the technical errors (launcher.log).
+#[derive(Debug)]
+pub struct CheckError {
+    pub say: String,
+    pub detail: String,
+}
+
+/// The newest release for platform: from own (dhd.ini's update_url) when the player set one, else
+/// from the official source, else from BACKUP_SOURCE. version: this copy's, for the message.
+pub fn check(own: Option<&str>, platform: &str, version: &str) -> Result<Checked, CheckError> {
+    check_from(own, OFFICIAL_SOURCE, BACKUP_SOURCE, platform, version)
+}
+
+fn check_from(own: Option<&str>, official: &str, backup: &str, platform: &str, version: &str) -> Result<Checked, CheckError> {
+    if let Some(own) = own.filter(|s| !s.is_empty()) {
+        return latest(own, platform).map(|release| Checked { release, note: None }).map_err(|e| CheckError {
+            say: check_failed_message(e.failure, None, version),
+            detail: format!("update check: {}", e.detail),
+        });
+    }
+    let first = match latest(official, platform) {
+        Ok(release) => return Ok(Checked { release, note: None }),
+        Err(e) => e,
+    };
+    match latest(backup, platform).and_then(|r| from_backup(backup, r)) {
+        Ok(release) => Ok(Checked {
+            note: Some(format!(
+                "update check: GitHub failed ({:?}: {}); the backup {backup} answered {}",
+                first.failure,
+                first.detail,
+                release.as_ref().map_or("no build for this platform", |r| r.version.as_str())
+            )),
+            release,
+        }),
+        Err(second) => Err(CheckError {
+            say: check_failed_message(first.failure, Some(second.failure), version),
+            detail: format!(
+                "update check: GitHub failed ({:?}: {}); the backup failed too ({:?}: {})",
+                first.failure, first.detail, second.failure, second.detail
+            ),
+        }),
+    }
+}
+
+/// A backup answer downloads only this repository's release assets; its page, when it names none,
+/// is the releases page.
+fn from_backup(backup: &str, r: Option<Release>) -> Result<Option<Release>, NetError> {
+    let Some(mut r) = r else { return Ok(None) };
+    if !r.url.starts_with(RELEASE_DOWNLOADS) {
+        return Err(NetError::bad(format!("the backup {backup} named a download outside the releases: {}", r.url)));
+    }
+    if r.page == backup {
+        r.page = RELEASES_PAGE.into();
+    }
+    Ok(Some(r))
+}
+
+/// Why a request failed, in words that fit inside the player's message.
+/// them: what was asked ("them": GitHub and the backup, "it": one server).
+fn reason(f: Failure, them: &str) -> String {
+    match f {
+        Failure::Offline => format!("your network couldn't find {them}"),
+        Failure::TimedOut => "your connection timed out".into(),
+        Failure::Refused => "the connection was refused".into(),
+        Failure::Cut => "the connection was cut".into(),
+        Failure::Tls => "a secure connection couldn't be made".into(),
+        Failure::RateLimited => "too many checks from your connection".into(),
+        Failure::Http(code) if code >= 500 => format!("a server error, HTTP {code}"),
+        Failure::Http(code) => format!("the request was refused, HTTP {code}"),
+        Failure::BadAnswer => "the answer wasn't usable".into(),
+        Failure::Other => "a network error".into(),
+    }
+}
+
+/// Which of two failures says more to the player: the connection's own trouble before a server's.
+fn rank(f: Failure) -> u8 {
+    match f {
+        Failure::Offline => 0,
+        Failure::TimedOut => 1,
+        Failure::Tls => 2,
+        Failure::Refused => 3,
+        Failure::Cut => 4,
+        Failure::Http(_) => 5,
+        Failure::BadAnswer => 6,
+        Failure::RateLimited => 7,
+        Failure::Other => 8,
+    }
+}
+
+/// The bottom bar's line for a failed check: official is how GitHub failed (or the player's own
+/// source), backup how the backup failed (None: the player's own source, which has no backup).
+pub fn check_failed_message(official: Failure, backup: Option<Failure>, version: &str) -> String {
+    let play = format!("You can still play {version}.");
+    match backup {
+        None => match official {
+            Failure::Offline => format!("No internet connection. {play}"),
+            Failure::RateLimited => format!("Your update source is limiting checks; try again later. {play}"),
+            f => format!("Couldn't reach your update source ({}). {play}", reason(f, "it")),
+        },
+        Some(Failure::Offline) if official == Failure::Offline => format!("No internet connection. {play}"),
+        Some(_) if official == Failure::RateLimited => {
+            "GitHub is limiting update checks from your connection; try again in an hour.".into()
+        }
+        Some(b) => {
+            let f = if rank(b) < rank(official) { b } else { official };
+            format!("Couldn't reach GitHub or the backup server ({}). {play}", reason(f, "them"))
+        }
+    }
+}
+
+/// The bottom bar's line for a download that failed on the network.
+pub fn download_failed_message(f: Failure, url: &str) -> String {
+    let host = url.split("://").nth(1).and_then(|r| r.split(['/', ':']).next()).unwrap_or("");
+    let github = host == "github.com" || host.ends_with(".githubusercontent.com");
+    let site = if github { "GitHub" } else { "the download server" };
+    match f {
+        Failure::RateLimited => format!("Update failed: {site} is limiting downloads from your connection; try again later."),
+        f => format!("Update failed: the download couldn't reach {site} ({}).", reason(f, "it")),
+    }
 }
 
 /// latest() for the source's answer.
-fn release_from(source: &str, body: &serde_json::Value, platform: &str) -> Result<Option<Release>, String> {
+fn release_from(source: &str, body: &serde_json::Value, platform: &str) -> Result<Option<Release>, NetError> {
     let r = match body.get("assets").and_then(|a| a.as_array()) {
         None => read_manifest(body, source, platform)?,
         Some(assets) => {
@@ -180,10 +434,10 @@ fn release_from(source: &str, body: &serde_json::Value, platform: &str) -> Resul
                 }
             }
             let r = if let Some(m) = manifest {
-                read_manifest(&get_json(&m)?, &m, platform)?
+                read_manifest(&fetch_json(&m)?, &m, platform)?
             } else if let Some(z) = zip {
                 if !text(&z, "digest").starts_with("sha256:") {
-                    return Err(format!("the newest release at {source} has a {platform} build without a digest"));
+                    return Err(format!("the newest release at {source} has a {platform} build without a digest").into());
                 }
                 Some(Release {
                     version: text(body, "tag_name").trim_start_matches(['v', 'V']).to_string(),
@@ -206,10 +460,10 @@ fn release_from(source: &str, body: &serde_json::Value, platform: &str) -> Resul
     let Some(mut r) = r else { return Ok(None) };
     let hex = r.sha256.len() == 64 && r.sha256.bytes().all(|c| c.is_ascii_hexdigit());
     if parse_version(&r.version).is_none() || !hex || !(r.url.starts_with("https://") || r.url.starts_with("http://")) {
-        return Err(format!("the update source {source} gave an unusable answer (version \"{}\")", r.version));
+        return Err(format!("the update source {source} gave an unusable answer (version \"{}\")", r.version).into());
     }
     if r.page.is_empty() {
-        r.page = if source == OFFICIAL_SOURCE { RELEASES_PAGE.into() } else { source.into() };
+        r.page = if source == OFFICIAL_SOURCE || source == BACKUP_SOURCE { RELEASES_PAGE.into() } else { source.into() };
     }
     Ok(Some(r))
 }
@@ -217,22 +471,26 @@ fn release_from(source: &str, body: &serde_json::Value, platform: &str) -> Resul
 /// Downloads r's update to dhd-update/ in the data folder, calling progress(done, total) as it
 /// goes, checks it and puts the release in place; an error names what went wrong or what wasn't
 /// replaced.
-pub fn install(r: &Release, place: &Place, progress: impl FnMut(u64, u64)) -> Result<(), String> {
+pub fn install(r: &Release, place: &Place, progress: impl FnMut(u64, u64)) -> Result<(), Problem> {
     let work = place.data.join(WORK_DIR);
     let _ = fs::remove_dir_all(&work);
-    let made = fs::create_dir_all(&work).map_err(|e| format!("can't make {}: {e} (is the folder read-only?)", work.display()));
-    let done = match &place.appimage {
-        Some(image) => made
-            .and_then(|_| download(r, &work.join(format!("DownhillRevived-{}.AppImage", r.version)), progress))
-            .and_then(|new| replace_file(&new, image)),
-        None => made
-            .and_then(|_| download(r, &work.join(format!("DownhillRevived-{}.zip", r.version)), progress))
-            .and_then(|zip| unpack(&zip, &work))
-            .and_then(|unpacked| match &place.bundle {
-                Some(app) => replace_bundle(&unpacked, app),
-                None => copy_release(&unpacked, &place.game),
-            }),
-    };
+    let done = (|| -> Result<(), Problem> {
+        fs::create_dir_all(&work).map_err(|e| format!("can't make {}: {e} (is the folder read-only?)", work.display()))?;
+        match &place.appimage {
+            Some(image) => {
+                let new = download(r, &work.join(format!("DownhillRevived-{}.AppImage", r.version)), progress)?;
+                Ok(replace_file(&new, image)?)
+            }
+            None => {
+                let zip = download(r, &work.join(format!("DownhillRevived-{}.zip", r.version)), progress)?;
+                let unpacked = unpack(&zip, &work)?;
+                Ok(match &place.bundle {
+                    Some(app) => replace_bundle(&unpacked, app),
+                    None => copy_release(&unpacked, &place.game),
+                }?)
+            }
+        }
+    })();
     let _ = fs::remove_dir_all(&work);
     if done.is_ok() && place.installed {
         note_installed_version(&r.version);
@@ -240,11 +498,37 @@ pub fn install(r: &Release, place: &Place, progress: impl FnMut(u64, u64)) -> Re
     done
 }
 
+/// A failed update: the line for the player and the technical error (launcher.log).
+#[derive(Debug)]
+pub struct Problem {
+    pub say: String,
+    pub detail: String,
+}
+
+impl From<String> for Problem {
+    /// A plain error that already says what went wrong (a folder that can't be written, a file
+    /// that couldn't be replaced).
+    fn from(detail: String) -> Self {
+        Problem { say: format!("Update failed: {detail}"), detail }
+    }
+}
+
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+/// A download that failed on the network.
+fn download_problem(url: &str, failure: Failure, error: impl std::fmt::Display) -> Problem {
+    Problem { say: download_failed_message(failure, url), detail: format!("download {url}: {error}") }
+}
+
 /// r's file downloaded to path and its SHA-256 checked; path.
-fn download(r: &Release, path: &Path, mut progress: impl FnMut(u64, u64)) -> Result<PathBuf, String> {
+fn download(r: &Release, path: &Path, mut progress: impl FnMut(u64, u64)) -> Result<PathBuf, Problem> {
     let zip_path = path.to_path_buf();
 
-    let resp = agent().get(&r.url).call().map_err(|e| format!("download failed: {e}"))?;
+    let resp = agent().get(&r.url).call().map_err(|e| download_problem(&r.url, classify(&e), &e))?;
     let total = resp.header("Content-Length").and_then(|s| s.parse().ok()).unwrap_or(r.size);
     let mut reader = resp.into_reader();
     let mut file = fs::File::create(&zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
@@ -252,7 +536,13 @@ fn download(r: &Release, path: &Path, mut progress: impl FnMut(u64, u64)) -> Res
     let mut buf = vec![0u8; 256 * 1024];
     let mut done = 0u64;
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("download failed: {e}"))?;
+        let n = reader.read(&mut buf).map_err(|e| {
+            let failure = match transport_failure(ureq::ErrorKind::Io, Some(e.kind()), &e.to_string()) {
+                Failure::Other => Failure::Cut,
+                f => f,
+            };
+            download_problem(&r.url, failure, &e)
+        })?;
         if n == 0 {
             break;
         }
@@ -264,7 +554,10 @@ fn download(r: &Release, path: &Path, mut progress: impl FnMut(u64, u64)) -> Res
     drop(file);
     let got: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
     if got != r.sha256 {
-        return Err(format!("the download is damaged (SHA-256 {got}, expected {})", r.sha256));
+        return Err(Problem {
+            say: "Update failed: the download arrived damaged; try again.".into(),
+            detail: format!("download {}: the file is damaged (SHA-256 {got}, expected {})", r.url, r.sha256),
+        });
     }
     Ok(zip_path)
 }
@@ -454,6 +747,179 @@ pub fn clean_up(place: &Place) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A local HTTP server answering each path with (status, extra headers, body), for as many
+    /// requests as it gets; its base address.
+    fn serve_routes(routes: Vec<(&'static str, u16, &'static str, String)>) -> String {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in server.incoming().flatten() {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() {
+                    continue;
+                }
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).unwrap_or(0) <= 2 {
+                        break;
+                    }
+                }
+                let path = line.split(' ').nth(1).unwrap_or("").to_string();
+                let (status, headers, body) = routes
+                    .iter()
+                    .find(|r| r.0 == path)
+                    .map(|r| (r.1, r.2, r.3.clone()))
+                    .unwrap_or((404, "", "not found".into()));
+                let mut s = stream;
+                let _ = write!(s, "HTTP/1.1 {status} X\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        base
+    }
+
+    /// An address nothing listens on: connecting is refused.
+    fn closed_address() -> String {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let a = l.local_addr().unwrap();
+        drop(l);
+        format!("http://{a}")
+    }
+
+    /// latest.json as the backup serves it: this platform's zip as a release asset.
+    fn backup_manifest(version: &str, url: &str) -> String {
+        serde_json::json!({"version": version, "page": format!("https://github.com/skuza-oss/downhill-revived/releases/tag/v{version}"),
+            "platforms": {PLATFORM: {"url": url, "sha256": "ab".repeat(32), "size": 7}}})
+        .to_string()
+    }
+
+    fn asset(version: &str) -> String {
+        format!("{RELEASE_DOWNLOADS}v{version}/DownhillRevived-{version}-{PLATFORM}.zip")
+    }
+
+    /// GitHub's API fails in each way (limit, server error, bad JSON, refused): the backup answers,
+    /// without notes; GitHub answering is never followed by the backup.
+    #[test]
+    fn falls_back_to_the_backup() {
+        let backup = serve_routes(vec![("/v1/latest", 200, "", backup_manifest("9.9.8", &asset("9.9.8")))]);
+        let backup = format!("{backup}/v1/latest");
+        let github = serve_routes(vec![
+            ("/limited", 403, "x-ratelimit-remaining: 0\r\n", "{\"message\":\"API rate limit exceeded\"}".into()),
+            ("/busy", 429, "", "slow down".into()),
+            ("/down", 503, "", "unavailable".into()),
+            ("/html", 200, "", "<html>captive portal</html>".into()),
+            ("/ok", 200, "", backup_manifest("9.9.9", &asset("9.9.9"))),
+        ]);
+        for path in ["/limited", "/busy", "/down", "/html"] {
+            let c = check_from(None, &format!("{github}{path}"), &backup, PLATFORM, "0.7.6").unwrap();
+            let r = c.release.unwrap();
+            assert_eq!((r.version.as_str(), r.notes.as_str()), ("9.9.8", ""), "{path}");
+            assert!(r.page.ends_with("/tag/v9.9.8"));
+            assert!(c.note.unwrap().contains("backup"), "{path}");
+        }
+        let c = check_from(None, &closed_address(), &backup, PLATFORM, "0.7.6").unwrap();
+        assert_eq!(c.release.unwrap().version, "9.9.8");
+
+        let c = check_from(None, &format!("{github}/ok"), &closed_address(), PLATFORM, "0.7.6").unwrap();
+        assert_eq!((c.release.unwrap().version.as_str(), c.note), ("9.9.9", None));
+    }
+
+    /// The player's own update_url has no backup: it fails on its own, with its own message.
+    #[test]
+    fn own_source_has_no_backup() {
+        let backup = serve_routes(vec![("/v1/latest", 200, "", backup_manifest("9.9.8", &asset("9.9.8")))]);
+        let own = serve_routes(vec![("/latest.json", 200, "", backup_manifest("1.2.3", "https://example.com/mine.zip"))]);
+        let c = check_from(Some(&format!("{own}/latest.json")), "unused", &format!("{backup}/v1/latest"), PLATFORM, "0.7.6").unwrap();
+        assert_eq!(c.release.unwrap().url, "https://example.com/mine.zip");
+        let e = check_from(Some(&closed_address()), "unused", &format!("{backup}/v1/latest"), PLATFORM, "0.7.6").unwrap_err();
+        assert_eq!(e.say, "Couldn't reach your update source (the connection was refused). You can still play 0.7.6.");
+    }
+
+    /// Both fail: one line that says why, both errors in the detail; a rate-limited GitHub says so; a
+    /// backup naming a download outside the releases is refused.
+    #[test]
+    fn both_fail() {
+        let github = serve_routes(vec![
+            ("/limited", 403, "x-ratelimit-remaining: 0\r\n", "{}".into()),
+            ("/forbidden", 403, "", "{}".into()),
+            ("/down", 502, "", "bad gateway".into()),
+        ]);
+        let bad_backup = serve_routes(vec![("/v1/latest", 200, "", backup_manifest("9.9.8", "https://example.com/evil.zip"))]);
+        let e = check_from(None, &format!("{github}/limited"), &closed_address(), PLATFORM, "0.7.6").unwrap_err();
+        assert_eq!(e.say, "GitHub is limiting update checks from your connection; try again in an hour.");
+        assert!(e.detail.contains("RateLimited") && e.detail.contains("Refused"), "{}", e.detail);
+        let e = check_from(None, &format!("{github}/forbidden"), &closed_address(), PLATFORM, "0.7.6").unwrap_err();
+        assert_eq!(e.say, "Couldn't reach GitHub or the backup server (the connection was refused). You can still play 0.7.6.");
+        let e = check_from(None, &format!("{github}/down"), &format!("{bad_backup}/v1/latest"), PLATFORM, "0.7.6").unwrap_err();
+        assert_eq!(e.say, "Couldn't reach GitHub or the backup server (a server error, HTTP 502). You can still play 0.7.6.");
+        assert!(e.detail.contains("outside the releases"), "{}", e.detail);
+    }
+
+    /// Error kinds to plain words.
+    #[test]
+    fn classifies_failures() {
+        use std::io::ErrorKind as Io;
+        use ureq::ErrorKind as K;
+        assert_eq!(status_failure(429, None, false), Failure::RateLimited);
+        assert_eq!(status_failure(403, Some("0"), false), Failure::RateLimited);
+        assert_eq!(status_failure(403, None, true), Failure::RateLimited);
+        assert_eq!(status_failure(403, Some("12"), false), Failure::Http(403));
+        assert_eq!(status_failure(500, None, false), Failure::Http(500));
+        assert_eq!(transport_failure(K::Dns, None, "Dns Failed: resolve dns name 'api.github.com:443': No such host is known."), Failure::Offline);
+        assert_eq!(transport_failure(K::ConnectionFailed, Some(Io::TimedOut), "Connection Failed: Connect error: connection timed out"), Failure::TimedOut);
+        assert_eq!(transport_failure(K::Io, Some(Io::WouldBlock), "Network Error: timed out reading response"), Failure::TimedOut);
+        assert_eq!(transport_failure(K::ConnectionFailed, Some(Io::NetworkUnreachable), "Connect error"), Failure::Offline);
+        assert_eq!(transport_failure(K::ConnectionFailed, Some(Io::ConnectionRefused), "Connect error"), Failure::Refused);
+        assert_eq!(transport_failure(K::Io, Some(Io::ConnectionReset), "Network Error: connection reset"), Failure::Cut);
+        assert_eq!(transport_failure(K::Io, Some(Io::InvalidData), "Network Error: invalid peer certificate: UnknownIssuer"), Failure::Tls);
+        assert_eq!(transport_failure(K::TooManyRedirects, None, "Too Many Redirects"), Failure::BadAnswer);
+        assert_eq!(transport_failure(K::Io, Some(Io::Other), "Network Error: something"), Failure::Other);
+    }
+
+    /// The bottom bar's lines: short, one each, saying what went wrong.
+    #[test]
+    fn messages() {
+        use Failure::*;
+        let v = "0.7.6";
+        assert_eq!(check_failed_message(Offline, Some(Offline), v), "No internet connection. You can still play 0.7.6.");
+        assert_eq!(check_failed_message(TimedOut, Some(TimedOut), v),
+                   "Couldn't reach GitHub or the backup server (your connection timed out). You can still play 0.7.6.");
+        assert_eq!(check_failed_message(Http(503), Some(TimedOut), v),
+                   "Couldn't reach GitHub or the backup server (your connection timed out). You can still play 0.7.6.");
+        assert_eq!(check_failed_message(Offline, Some(TimedOut), v),
+                   "Couldn't reach GitHub or the backup server (your network couldn't find them). You can still play 0.7.6.");
+        assert_eq!(check_failed_message(Tls, Some(Tls), v),
+                   "Couldn't reach GitHub or the backup server (a secure connection couldn't be made). You can still play 0.7.6.");
+        assert_eq!(check_failed_message(RateLimited, Some(Http(503)), v),
+                   "GitHub is limiting update checks from your connection; try again in an hour.");
+        assert_eq!(check_failed_message(Offline, None, v), "No internet connection. You can still play 0.7.6.");
+        assert_eq!(check_failed_message(BadAnswer, None, v),
+                   "Couldn't reach your update source (the answer wasn't usable). You can still play 0.7.6.");
+        let zip = asset("0.7.7");
+        assert_eq!(download_failed_message(TimedOut, &zip), "Update failed: the download couldn't reach GitHub (your connection timed out).");
+        assert_eq!(download_failed_message(Offline, "https://release-assets.githubusercontent.com/x"),
+                   "Update failed: the download couldn't reach GitHub (your network couldn't find it).");
+        assert_eq!(download_failed_message(Http(404), "https://example.com/z.zip"),
+                   "Update failed: the download couldn't reach the download server (the request was refused, HTTP 404).");
+        assert_eq!(download_failed_message(RateLimited, &zip),
+                   "Update failed: GitHub is limiting downloads from your connection; try again later.");
+    }
+
+    /// A download that can't connect says so in words; the technical error stays in the detail.
+    #[test]
+    fn download_failure_in_words() {
+        let r = Release { version: "9.9.9".into(), url: format!("{}/z.zip", closed_address()), sha256: "ab".repeat(32), ..Default::default() };
+        let dir = std::env::temp_dir().join(format!("dhd-launcher-download-fail-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let place = Place { game: dir.clone(), data: dir.clone(), bundle: None, appimage: None, installed: false };
+        let e = install(&r, &place, |_, _| ()).unwrap_err();
+        assert_eq!(e.say, "Update failed: the download couldn't reach the download server (the connection was refused).");
+        assert!(e.detail.contains("z.zip"), "{}", e.detail);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn versions() {

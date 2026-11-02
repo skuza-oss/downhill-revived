@@ -38,6 +38,7 @@ pub const INSTALLED_MARKER: &str = "installed.txt";
 /// windows.iss): the launcher keeps its DisplayVersion current after an update.
 pub const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{930C9A04-B028-4A3A-8027-E06E5D50C889}_is1";
 
+#[derive(Clone)]
 pub struct Place {
     /// The launcher's and the game's folder: DHD_GAME_DIR (development), else the launcher's own.
     pub game: PathBuf,

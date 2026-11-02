@@ -458,9 +458,14 @@ function markdown(text) {
 
 function renderNotes() {
   const r = state.update?.release;
-  if (!r?.notes) return;
+  if (!r) return;
   $('notes-title').textContent = `What's new in ${r.version}`;
-  $('notes-body').innerHTML = markdown(playerNotes(r.notes));
+  if (r.notes) {
+    $('notes-body').innerHTML = markdown(playerNotes(r.notes));
+  } else {
+    // the answer came from the backup server, which has no notes (finding 138)
+    $('notes-body').replaceChildren(el('p', { class: 'muted' }, `The patch notes for ${r.version} couldn't be loaded here. Read them on GitHub.`));
+  }
 }
 
 // ---------- footer ----------
@@ -542,7 +547,8 @@ function renderFooter() {
         setPrimary(playNow);
         break;
       case 'failed':
-        status('bad', 'i-alert', `Couldn't check for updates. You can still play ${state.version}.`);
+        // the launcher's line says what went wrong (update.rs check_failed_message; launcher.log has the rest)
+        status('bad', 'i-alert', state.checkError || `Couldn't check for updates. You can still play ${state.version}.`);
         setSecondary([icon('i-retry'), 'Retry'], checkUpdate);
         setPrimary(playNow);
         break;
@@ -557,7 +563,8 @@ function renderFooter() {
       case 'installing':
         return; // drawn by the progress events
       case 'install-failed':
-        status('bad', 'i-alert', `Update failed: ${state.checkError}`);
+        // "Update failed: ..." from the launcher (update.rs download_failed_message for the network)
+        status('bad', 'i-alert', state.checkError || 'Update failed.');
         setSecondary([icon('i-retry'), 'Try again'], installUpdate);
         setPrimary(playNow);
         break;

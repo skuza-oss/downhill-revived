@@ -5,6 +5,7 @@
 
 mod disc;
 mod game;
+mod log;
 mod scale;
 mod update;
 
@@ -201,13 +202,29 @@ fn effective(place: &game::Place, key: &str) -> String {
     dhd_settings::read(&place.settings()).unwrap_or_default().effective(key, |n| std::env::var(n).ok())
 }
 
+/// The update check (update::check): dhd.ini's update_url when the player set one, else GitHub,
+/// else the online server's backup. A failure is the bottom bar's one line; launcher.log gets the
+/// technical errors, and a note when the backup answered.
+fn check_for_update(place: &game::Place) -> Result<Option<update::Release>, String> {
+    let own = effective(place, "update_url");
+    match update::check(Some(own.as_str()), update::platform(place), VERSION) {
+        Ok(checked) => {
+            if let Some(note) = checked.note {
+                log::line(&place.data, &note);
+            }
+            Ok(checked.release)
+        }
+        Err(e) => {
+            log::line(&place.data, &e.detail);
+            Err(e.say)
+        }
+    }
+}
+
 #[tauri::command]
-async fn check_update(app: State<'_, App>) -> Result<UpdateCheck, String> {
-    let source = Some(effective(&app.place, "update_url"))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| update::OFFICIAL_SOURCE.into());
-    let platform = update::platform(&app.place);
-    let release = tauri::async_runtime::spawn_blocking(move || update::latest(&source, platform))
+async fn check_update(handle: AppHandle) -> Result<UpdateCheck, String> {
+    let h = handle.clone();
+    let release = tauri::async_runtime::spawn_blocking(move || check_for_update(&h.state::<App>().place))
         .await
         .map_err(|e| e.to_string())??;
     let newer = release.as_ref().is_some_and(|r| update::newer(&r.version, VERSION));
@@ -220,11 +237,16 @@ async fn install_update(handle: AppHandle, release: update::Release) -> Result<(
     let h = handle.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut last = 0u64;
-        update::install(&release, &h.state::<App>().place, |done, total| {
+        let place = &h.state::<App>().place;
+        update::install(&release, place, |done, total| {
             if done - last >= 256 * 1024 || done == total {
                 last = done;
                 let _ = h.emit("update-progress", Progress { done, total });
             }
+        })
+        .map_err(|e| {
+            log::line(&place.data, &format!("update to {} failed: {}", release.version, e.detail));
+            e.say
         })
     })
     .await
@@ -390,11 +412,8 @@ fn play_at_once(place: game::Place) -> Option<game::Place> {
     let Ok(mut child) = place.start() else { return Some(place) };
     let auto = effective(&place, "auto_update");
     let check = (auto != "off").then(|| {
-        let source = Some(effective(&place, "update_url"))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| update::OFFICIAL_SOURCE.into());
-        let platform = update::platform(&place);
-        std::thread::spawn(move || update::latest(&source, platform))
+        let place = place.clone();
+        std::thread::spawn(move || check_for_update(&place))
     });
     let mut since = Instant::now();
     let status = loop {
@@ -425,7 +444,9 @@ fn play_at_once(place: game::Place) -> Option<game::Place> {
     if auto == "on" {
         if let Some(Ok(Ok(Some(release)))) = check.map(|c| c.join()) {
             if update::newer(&release.version, VERSION) {
-                let _ = update::install(&release, &place, |_, _| {});
+                if let Err(e) = update::install(&release, &place, |_, _| {}) {
+                    log::line(&place.data, &format!("update to {} failed: {}", release.version, e.detail));
+                }
             }
         }
     }
