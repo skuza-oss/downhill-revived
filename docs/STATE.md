@@ -297,6 +297,12 @@ error box and exit code 1. 5 minutes minimised through menus and a race: memory 
 only by the host's pick, and the shop's bike, jersey and bike-colour pages online (issue 18).
 Server tests 64/64; two local games on hidden desktops: each saw the other's choice in its log.
 
+2026-11-02 (finding 132): the online room names tracks as the game does (retail's event names
+read from the player's data image, e.g. "Mt. Midoule FR", "Mosh Pit (Arena)") everywhere it
+shows one, and the track picker shows the selected track's loading-page picture, read from the
+player's disc at run time (nothing in the repository; no generated art needed). Checked on the
+hidden desktop: all 23 picker views, a race afterwards; the lead's checks are in the finding.
+
 2026-10-31 (finding 124): PERU no longer logs "vu1: microprogram at 0x1F50 didn't end" (0.7.4,
 0.7.5: about a million interpreted VU1 steps in a frame after earlier races). The weather object's
 four per-view batch records were never initialised, so a zero-density emitter left an old particle
