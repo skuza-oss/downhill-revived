@@ -261,6 +261,19 @@ int main(int argc,char **argv)
     port_particle_rotation(&c,&s);
     for(int i=0;i<n;i++) { float a=x*c-y*s;y=x*s+y*c;x=a; }
     assert(fabsf(x-cosf(6))<.0001f && fabsf(y-sinf(6))<.0001f);
+    /* Two-field steps (finding 139): a countdown stops at 0 instead of jumping past it, and an
+       up-counter reaches an exact mark once, on the update that passes it. */
+    {
+        int down=21,up=0,reached=0,negative=0;
+        for (int i=0;i<n*3;i++) {
+            port_clock_wait(NULL);port_clock_step();
+            if (down>0) down=port_count_down(down);
+            negative|=down<0;
+            up+=port_whole_step();
+            reached+=port_count_reached(up,0x79);
+        }
+        assert(down==0 && !negative && up==180 && reached==1);
+    }
     int scale=port_animation_scale();
     online=1;
     assert(port_fps()==n && port_delta_clock()); /* online keeps the selected rate (finding 114) */

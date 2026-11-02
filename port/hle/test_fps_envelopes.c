@@ -8,8 +8,8 @@ typedef struct Key { float value,time; } Key;
 int D_0027EC68[4];
 float D_0027EC78[4],D_0027EC9C[1],D_0075A690[4],D_0075A6A0[4];
 Key D_0027EC88[4]={{0,0},{1,.1f},{.4f,.3f},{0,1}};
-static int hz;
-int port_delta_clock(void) { return hz>60; }
+static int hz,delta;
+int port_delta_clock(void) { return delta; }
 float port_step(void) { return 60.0f/hz; }
 int func_00238F60(void) { return 1; }
 void func_00239778(int);
@@ -18,8 +18,11 @@ void func_002398C0(unsigned int);
 int main(void)
 {
     double reference_end=0,reference_decay=0;
-    for (int trial=0;trial<3;trial++) {
-        hz=trial==0 ? 60 : trial==1 ? 120 : 144;
+    /* 60 on the original clock (the reference), then the delta-time clock at 60, at 30 and 45
+       (two and 1.33 fields a step) and above (finding 139) */
+    static const int rates[]={60,60,30,45,120,144};
+    for (int trial=0;trial<6;trial++) {
+        hz=rates[trial];delta=trial>0;
         memset(D_0027EC68,0,sizeof D_0027EC68);
         memset(D_0075A690,0,sizeof D_0075A690);
         D_0027EC78[0]=1;
@@ -41,9 +44,10 @@ int main(void)
         /* The original integer-field curve itself rounds event boundaries to
            a legacy field. Keep that bound explicit instead of claiming PCM
            or substep-exact camera equivalence. */
-        assert(fabs(end-reference_end)<=1.0/60+.000001);
-        assert(fabs(decay-reference_decay)<=1.0/60+.000001);
-        printf("%d: envelope %.9f s (keys %.9f %.9f %.9f), decay %.9f s\n",hz,end,
+        double bound=1.0/60+(hz<60 ? 1.0/hz : 0);  /* below 60 a step is longer than a field */
+        assert(fabs(end-reference_end)<=bound+.000001);
+        assert(fabs(decay-reference_decay)<=bound+.000001);
+        printf("%d%s: envelope %.9f s (keys %.9f %.9f %.9f), decay %.9f s\n",hz,delta ? "" : " original",end,
             (double)changes[0]/hz,(double)changes[1]/hz,(double)changes[2]/hz,decay);
     }
     return 0;

@@ -23,6 +23,8 @@ float port_blend(float rate);
 float port_particle_sum(float factor);
 void port_particle_rotation(float *cosine,float *sine);
 int port_particle_dead(float age,float life_per_field);
+int port_count_down(int value);            /* a countdown by whole fields, stopping at 0 */
+int port_count_reached(int value, int mark); /* an up-counter reached mark in this update */
 float port_counter_fields(int counter);
 double port_field_seconds(int counter);  /* a field counter as seconds, part of a field too */
 double port_fps_behind(void);            /* game time owed to wall time (online catch-up), seconds */

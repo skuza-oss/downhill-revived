@@ -29,11 +29,11 @@ def add(patches):
     patches.setdefault('unsorted/001909A8.c', []).append(('re',
         (r'func_00238F48\(\)',2),'port_input_stamp(func_00238F48())'))
     edit('0021F8E0','int next=n-1;',
-         'int next=n-(port_delta_clock() ? port_whole_step() : 1);')
+         'int next=port_delta_clock() ? port_count_down(n) : n-1;')
     edit('0021F8E0','++D_00660D60[k]',
          '(D_00660D60[k]+=port_delta_clock() ? port_whole_step() : 1)')
     edit('0017EB00','obj->counts[index]--;',
-         'obj->counts[index]-=port_delta_clock() ? port_whole_step() : 1;')
+         'obj->counts[index]=port_delta_clock() ? port_count_down(obj->counts[index]) : obj->counts[index]-1;')
     edit('0017E440','else obj->x3EC++;',
          'else obj->x3EC+=port_delta_clock() ? port_whole_step() : 1;')
 
@@ -61,8 +61,10 @@ def add(patches):
     # AI's rotating expensive-query slot and seven-second leader refresh are
     # field schedules, not integration work. A held slot must not run its
     # queries repeatedly on the intervening fractional updates.
+    # The rotating slot moves one rider per update that ends a field (as retail moves it once a
+    # frame): a two-field step moving it by two would skip every other rider (finding 139).
     edit('0011A100', '++race->x501B4',
-         '(race->x501B4 += port_delta_clock() ? port_whole_step() : 1)')
+         '(race->x501B4 += port_delta_clock() ? port_whole_step()>0 : 1)')
     edit('0011A100', '--race->x501C0',
          '(race->x501C0 -= port_delta_clock() ? port_whole_step() : 1)')
 
@@ -158,7 +160,7 @@ def add(patches):
     edit('0017C130','child->x10 += obj->x1288;',
          'child->x10 += port_delta_clock() ? obj->x1288*port_step() : obj->x1288;')
     edit('0017C130','obj->x1314--;','obj->x1314-=port_delta_clock() ? port_whole_step() : 1;')
-    edit('0017C168','--obj->x1318','(obj->x1318-=port_delta_clock() ? port_whole_step() : 1)')
+    edit('0017C168','--obj->x1318','(obj->x1318=port_delta_clock() ? port_count_down(obj->x1318) : obj->x1318-1)')
     edit('0016FC00','obj->x224 += 0.03f;',
          'obj->x224 += port_delta_clock() ? 0.03f*port_step() : 0.03f;')
     edit('0016FC00','diff < obj->x224',
@@ -171,7 +173,7 @@ def add(patches):
     for unit,expression in [('001B4688','--obj->x8'),('001B4718','--obj->timer')]:
         edit(unit,expression,'('+expression[2:]+'-=port_delta_clock() ? port_whole_step() : 1)')
     edit('001B4900','D_00437340.x508--;',
-         'D_00437340.x508-=port_delta_clock() ? port_whole_step() : 1;')
+         'D_00437340.x508=port_delta_clock() ? port_count_down(D_00437340.x508) : D_00437340.x508-1;')
     for field in ('x14','x18'):
         edit('001634E0','drain += gauge->'+field+';',
              'drain += port_delta_clock() ? gauge->'+field+'*port_step() : gauge->'+field+';')
@@ -377,8 +379,10 @@ def add(patches):
     edit('00161B10', 'VSCALE(delta,&delta,1.0f/count);',
          'VSCALE(delta,&delta,1.0f/(port_delta_clock() ? port_step() : (float)count));')
     edit('00161B10', '} else effect->x2724--;',
-         '} else effect->x2724-=port_delta_clock() ? port_whole_step() : 1;')
-    # Further source audit: timers next to code which never queried the clock.
+         '} else effect->x2724=port_delta_clock() ? port_count_down(effect->x2724) : effect->x2724-1;')
+    # Further source audit: timers next to code which never queried the clock. Countdowns
+    # stop at 0 (port_count_down): retail took one off a frame and several test for exactly 0,
+    # which a two-field step would jump over (finding 139).
     # Allocation counts, loop cursors, item counts and RNG search indexes are
     # deliberately not included in this table.
     for unit, field in [('001100D0','obj->x3BC'),('001103B0','obj->x3BC'),
@@ -389,12 +393,13 @@ def add(patches):
                          ('00147BD8','obj->timer'),('0012AD60','obj->x180'),
                          ('0013DF28','obj->xCE0'),('00161B10','effect->x27F8'),
                          ('0011FF38','o->x25E')]:
-        edit(unit, field+'--;', field+'-=port_delta_clock() ? port_whole_step() : 1;')
+        edit(unit, field+'--;', field+'=port_delta_clock() ? port_count_down('+field+') : '+field+'-1;')
     for unit,field in [('001207F8','obj->x262'),('0015B018','obj->x1E8'),
                         ('001517D0','obj->xA3C')]:
-        edit(unit, '--'+field, '('+field+'-=port_delta_clock() ? port_whole_step() : 1)')
+        edit(unit, '--'+field, '('+field+'=port_delta_clock() ? port_count_down('+field+') : '+field+'-1)')
     edit('00161B10', 'if (++effect->x276E == 0x79)',
-         'if ((!port_delta_clock() || port_whole_step()) && (effect->x276E+=port_delta_clock() ? port_whole_step() : 1) == 0x79)')
+         'if (port_delta_clock() ? port_count_reached(effect->x276E+=port_whole_step(),0x79) : ++effect->x276E == 0x79)')
+    edit('00161B10', 'if (effect->x276E == 0xF0) {', 'if (port_delta_clock() ? port_count_reached(effect->x276E,0xF0) : effect->x276E == 0xF0) {')
     edit('00154058', 'obj->x2C++;', 'obj->x2C+=port_delta_clock() ? port_whole_step() : 1;')
     edit('001425E0', '(target-value)*0.125f', '(target-value)*port_blend(0.125f)')
     edit('00147BD8', 'obj->phase += obj->step;',
@@ -460,7 +465,7 @@ def add(patches):
     for field in ('x1324', 'x1310'):
         edit('00176ED8', '--obj->%s;' % field,
              'obj->%s-=port_delta_clock() ? port_whole_step() : 1;' % field)
-    edit('0017C638', 'if (state==60) {', 'if (state==60 && (!port_delta_clock() || port_whole_step())) {')
+    edit('0017C638', 'if (state==60) {', 'if (port_delta_clock() ? state>=60 && state-port_whole_step()<60 : state==60) {')
     # NPC event rolls consume RNG only on whole fields. Preserve their original
     # probability and RNG draw frequency, rather than doubling ambient events.
     for path in root.glob('*.*'):

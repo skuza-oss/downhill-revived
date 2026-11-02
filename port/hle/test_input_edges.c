@@ -12,8 +12,10 @@ static int rate,field,whole,physical,raw,reads,action_reads;
 unsigned char D_0029E2A8[8]={1};
 int D_00660D80[8];
 unsigned char D_003F52D0[0x134];
-int port_delta_clock(void) { return rate>60; }
+static int variable;  /* paced steps that follow a jittery wall clock (finding 139) */
+int port_delta_clock(void) { return rate!=60 || variable; }
 int port_whole_step(void) { return whole; }
+int port_count_down(int v) { return v > 0 && v < whole ? 0 : v - whole; }  /* fps.c's */
 double host_wall_seconds(void) { return 0; }
 int func_00238F48(void) { return field; }
 void func_0021F8E0(void) { raw=physical; if (!raw) D_00660D80[0]=0; reads++; }
@@ -37,6 +39,7 @@ void func_0017EB88(void *o,int i,int v) { action_reads++; }
 void func_0017EDE8(void *o,int i,int v) { abort(); }
 int main(int argc,char **argv) {
     rate=atoi(argv[1]);
+    variable=argc>2;
     union { uint64_t align; unsigned char b[0xC8]; } manager={0};
     unsigned *m=(unsigned *)manager.b;
     unsigned masks[14]={16,64,128,32,16384,4096,8192,32768,8,1,2048,512,1024,256};
@@ -45,9 +48,9 @@ int main(int argc,char **argv) {
     double elapsed_fields=0;
     for (int i=1;i<=rate*2;i++) {
         D_0029E10C=i;kernel_vsync_count=i;
-        if (argc>2 && rate>60) {
+        if (variable) {
             double h=60.0/rate+((i/17)%2 ? .15 : 0);
-            elapsed_fields+=h>1 ? 1 : h;field=(int)elapsed_fields;
+            elapsed_fields+=h>2 ? 2 : h;field=(int)elapsed_fields;
         } else field=i*60/rate;
         whole=field-oldfield;oldfield=field;
         physical=((i>=rate/4 && i<rate/2) || (i>=rate && i<rate+rate/4))?64:0;
@@ -64,8 +67,8 @@ int main(int argc,char **argv) {
     printf("%d%s: %d edges for 2 presses, %d held updates, %d polls\n",rate,argc>2 ? " variable steps" : "",edges,held,reads);
     assert(edges==2);
     assert(held==rate/2);
-    if (rate>60) assert(reads==rate*2);
-    assert(port_input_stamp(123)==(rate>60 ? (int)D_0029E10C : 123));
+    if (port_delta_clock()) assert(reads==rate*2);
+    assert(port_input_stamp(123)==(port_delta_clock() ? (int)D_0029E10C : 123));
     union { uint64_t align; unsigned char b[0x440]; } action={0};
     int *lock=(int *)(action.b+0x388);
     lock[5]=20;oldfield=0;
@@ -78,18 +81,19 @@ int main(int argc,char **argv) {
     assert(field==20 && lock[5]==0);
     func_0017EB00(action.b,5,0);assert(action_reads==1);
     printf("%d: action lock remains 20 legacy fields (%d updates)\n",rate,updates);
-    if (argc>2 && rate>60) {
+    if (variable) {
         lock[5]=20;action_reads=0;oldfield=field=0;elapsed_fields=0;
         int i=0;
         while (field<20) {
             double h=60.0/rate+((++i/7)%2 ? .15 : 0);
-            elapsed_fields+=h>1 ? 1 : h;field=(int)elapsed_fields;
+            elapsed_fields+=h>2 ? 2 : h;field=(int)elapsed_fields;
             whole=field-oldfield;oldfield=field;
             func_0017EB00(action.b,5,0);
-            assert(lock[5]==20-field && !action_reads);
+            /* a two-field step from 1 stops at 0, never below it (finding 139) */
+            assert(lock[5]==(field<20 ? 20-field : 0) && !action_reads);
         }
         func_0017EB00(action.b,5,0);assert(action_reads==1);
-        printf("%d: variable-step action lock expires at exactly 20 fields (%d updates)\n",rate,i);
+        printf("%d: variable-step action lock expires after 20 fields (%d updates, %d fields)\n",rate,i,field);
     }
     return 0;
 }

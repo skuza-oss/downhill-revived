@@ -140,6 +140,13 @@ int port_fps(void)
 double port_frame_period(void) { int n = port_fps(); return n == 60 ? 1001.0 / 60000.0 : 1.0 / n; }
 float port_step(void) { return port_delta_clock() ? (float)(step_fields ? step_fields : 60.0/port_fps()) : (float)D_0029E3D0; }
 int port_whole_step(void) { return port_delta_clock() ? whole : D_0029E3D0; }
+/* A per-field countdown that retail took one off a frame and tests for 0: down by this update's
+   whole fields (0 to 2), stopping at 0, so a two-field step cannot jump over it (finding 139). */
+int port_count_down(int value) { int w = port_whole_step(); return value > 0 && value < w ? 0 : value - w; }
+/* An up-counter just advanced by this update's whole fields: has it reached `mark` in this
+   update? (Retail compared it with == once a frame; a two-field step can jump over it, and an
+   update with no whole field must not count it again.) */
+int port_count_reached(int value, int mark) { return value >= mark && value - port_whole_step() < mark; }
 float port_decay(float f) { return port_delta_clock() ? powf(f, port_step()) : f; }
 float port_blend(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,(wall_mode ? step_fields : 60.0/port_fps()))) : r; }
 float port_particle_sum(float q) {
