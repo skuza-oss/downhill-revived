@@ -374,14 +374,15 @@ void port_ragdoll_step(void *points, int count, int stride, float damping)
    (on with the perf: lines, DHD_PERF_LOG): the race clock's seconds against wall seconds (the game
    speed), the slowest and fastest whole second of it (a fast-forward shows as a fastest second
    above 1), the smallest and largest game step in fields (D_0029E400, the seconds a step), and the
-   sound the mixer rendered against wall time. Frames on which the race clock did not move (a
-   pause) count for neither. Read-only. */
+   sound the mixer rendered against wall time. Measured between the frames on which the race
+   clock's whole fields moved; a stretch over a quarter second without a move (a pause, the wait
+   after the finish) counts for neither. Read-only. */
 void port_clock_observe(void)
 {
     extern uint64_t snd_test_position(void);
-    static int on = -1;
-    static double last_wall, last_game, wall, game, second_wall, second_game, slowest, fastest, sound;
-    static float least, most;
+    static int on = -1, last_ticks;
+    static double last_wall, wall, game, second_wall, second_game, slowest, fastest, sound;
+    static float least = 1e9f, most;
     static uint32_t last_samples;
     if (on < 0) {
         const char *s = host_getenv("DHD_PERF_LOG");
@@ -392,20 +393,21 @@ void port_clock_observe(void)
         last_wall = 0;
         return;
     }
-    double now = host_wall_seconds(), clock = port_field_seconds(*(int *)GUEST(0x0843EEC8));
+    double now = host_wall_seconds();
+    int ticks = *(int *)GUEST(0x0843EEC8);
     uint32_t samples = (uint32_t)snd_test_position();
     float step = D_0029E400 * 60;
-    if (!last_wall || clock < last_game) {
-        last_wall = now, last_game = clock, last_samples = samples;
+    if (!last_wall || ticks < last_ticks || (ticks == last_ticks && now - last_wall > 0.25)) {
+        last_wall = now, last_ticks = ticks, last_samples = samples;
         return;
     }
-    if (clock > last_game) {
-        double dt = now - last_wall, dg = clock - last_game;
-        if (!game) slowest = 1e9, fastest = 0, least = 1e9f, most = 0;
+    if (step < least) least = step;
+    if (step > most) most = step;
+    if (ticks > last_ticks) {
+        double dt = now - last_wall, dg = (ticks - last_ticks) * (port_delta_clock() ? 1.0 / 60 : 1001.0 / 60000);
+        if (!game) slowest = 1e9, fastest = 0;
         wall += dt, game += dg, second_wall += dt, second_game += dg;
         sound += (uint32_t)(samples - last_samples) / 48000.0;
-        if (step < least) least = step;
-        if (step > most) most = step;
         if (second_wall >= 1) {
             double speed = second_game / second_wall;
             if (speed < slowest) slowest = speed;
@@ -416,9 +418,10 @@ void port_clock_observe(void)
             hle_log("clock: race %.0f s game x%.3f (seconds x%.3f-x%.3f), steps %.2f-%.2f fields, sound x%.3f\n",
                     wall, game / wall, slowest, fastest, least, most, sound / wall);
             wall = game = sound = 0;
+            least = 1e9f, most = 0;
         }
+        last_wall = now, last_ticks = ticks, last_samples = samples;
     }
-    last_wall = now, last_game = clock, last_samples = samples;
 }
 
 /* DHD_FPS_TRACE=path: read-only race observer for port/tools/test_fps_race.py. One row per
@@ -444,8 +447,22 @@ void port_fps_observe(void)
             fprintf(steps_out,"tick,hz,slot,frame,x,y,z,speed\n");
         }
     }
-    if (!out || *(int *)GUEST(0x0829DED8)!=9 || *(int *)GUEST(0x0843F348)<2 || *(int *)GUEST(0x0843F348)>4) return;
+    static int raced, still;
+    if (!out) return;
     int tick=*(int *)GUEST(0x0843EEC8);
+    /* The race is over (rate_drift.py: the finish times are in) when its screen or phase ends, or
+       when its clock stops (every rider in, the results wait) for 3600 updates (15 s at 240). */
+    if ((raced && (tick==last ? ++still : (still=0))>3600) ||
+        *(int *)GUEST(0x0829DED8)!=9 || *(int *)GUEST(0x0843F348)<2 || *(int *)GUEST(0x0843F348)>4) {
+        if (raced) {
+            fclose(out);
+            fclose(steps_out);
+            out=NULL;
+            host_exit(0);
+        }
+        return;
+    }
+    raced=1;
     if (tick<=360) {
         for (int i=0;i<10;i++) {
             unsigned char *r=(unsigned char *)GUEST(0x082AF2C0+i*0x7BD0);
