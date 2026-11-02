@@ -259,7 +259,11 @@ int port_air_tick(void *body, int previous)
     Air *a=air_for(body);
     if (!previous) a->age=0;
     a->first = !previous;
-    a->age += port_step();
+    /* The take-off happened somewhere in this step: its first step counts at most one field, as
+       retail's first airborne frame counts 1 at any step. A whole two-field step (30 a second)
+       otherwise made every bump "airborne" at once (00138560: x4A4 > 1), and riders crashed every
+       few seconds (finding 139). */
+    a->age += previous ? port_step() : fminf(port_step(), 1.0f);
     /* Integer consumers are elapsed-field timers: ceil made >1 true at
        1.25 fields at 144 Hz, while the original first becomes true at 2.
        Keep a nonzero sentinel until the first complete field so contact and

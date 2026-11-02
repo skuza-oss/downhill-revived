@@ -200,8 +200,9 @@ int main(int argc,char **argv)
         if ((double)i*60/n>2.01) assert(airborne>1);
     }
     airborne=port_air_tick(&body,0);
-    /* the fields elapsed since take-off, at least 1: a two-field step (30) counts 2 at once */
-    assert(airborne==(port_step()>=2 ? 2 : 1) && port_air_first(&body,airborne));
+    /* the take-off step counts at most one field, as retail's first airborne frame (finding 139) */
+    assert(airborne==1 && port_air_first(&body,airborne));
+    if (port_step()>1) assert(port_air_tick(&body,airborne)==(int)(1+port_step()));
     const float life_rates[]={.013f,.1f,1.0f/120,.037f};
     for (int i=0;i<4;i++) {
         float age=0;int legacy_fields=1,updates=0;
