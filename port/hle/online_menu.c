@@ -23,12 +23,25 @@ static const char us_files_sha256[] = "c8c17bcae383daf9f2feadc7f6d7476c43d659ab8
 
 /* The tracks with a 2-4 player level (online.c mp_level) and the riders every save has
    (online.c regular): the game's indexes and names, as the online launcher lists them. */
-static const struct { int index; const char *name; } tracks[] = {
-    {0, "ALPINE"}, {1, "MOAB"}, {2, "JUNGLE"}, {3, "PERU"}, {4, "PERU TDH"}, {5, "GLACIER"},
-    {6, "ALPINE MX"}, {7, "MOAB MX"}, {8, "JUNGLE MX"}, {9, "PERU MX"}, {10, "JUNGLE TD"},
-    {11, "AUBER ST"}, {12, "FUJI"}, {13, "MOAB TDH"}, {14, "GLACIER X"}, {15, "AUBER MX"},
-    {16, "AUBER STD"}, {19, "BC"}, {20, "CITY"}, {22, "GLACIER T"}, {23, "MOSH PIT (ARENA)"}, {24, "ALPINE T"},
-    {25, "BC TDX"}};
+/* Retail's full event names (also used by its Single Event and records pages).
+   Read from the player's data image; omit country, keep FR/MX/TD suffixes intact. */
+extern const char *D_0026EFE8[];
+static const struct { int index; } tracks[] = {
+    {0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12},
+    {13}, {14}, {15}, {16}, {19}, {20}, {22}, {23}, {24}, {25}};
+static const char *track_name(int index)
+{
+    static char names[26][64];
+    if (index < 0 || index > 25) return "?";
+    if (!names[index][0]) {
+        const char *full = D_0026EFE8[index], *country = strchr(full, ',');
+        const char *mode = strrchr(full, ' ');
+        if (country && mode && mode > country)
+            snprintf(names[index], sizeof names[index], "%.*s%s", (int)(country - full), full, mode);
+        else snprintf(names[index], sizeof names[index], index == 23 ? "%s (Arena)" : "%s", full);
+    }
+    return names[index];
+}
 static const struct { int index; const char *name; } riders[] = {
     {0, "COSMO"}, {1, "MAI"}, {2, "AJAX"}, {3, "JONNIE"}, {4, "KALOLO"}, {5, "T-BAG"}, {8, "DRUD"},
     {10, "RAKEL"}, {13, "JEN"}, {14, "WOODY"}};
@@ -425,7 +438,7 @@ static void list_row(int i)
     char now[24];
     double t = host_service_net_server_ms();
     for (int k = 0; k < COUNT(tracks); k++)
-        if (tracks[k].index == l->track) track = tracks[k].name;
+        if (tracks[k].index == l->track) track = track_name(tracks[k].index);
     if (strcmp(l->version, version)) snprintf(now, sizeof now, "OTHER VERSION");
     else if (l->full || l->players >= l->max_players) snprintf(now, sizeof now, "FULL");
     else net_lobby_now(l, t, now, sizeof now);  /* counted only on a known server clock (finding 135) */
@@ -631,7 +644,7 @@ static void leave_room(MenuPage *p)
 
 enum { RF_TRACK, RF_BOTS, RF_CHEATS, RF_PUBLIC, RF_RULES, RF_RIDER, RF_READY, RF_START, RF_LEAVE, RF_COUNT };
 enum { RULE_WINDOW, RULE_NEXT, RULE_THEN, RULE_PLAYERS, RULES };
-enum { TOASTS = 3, TRACK_COLUMNS = 4 };
+enum { TOASTS = 3, TRACK_COLUMNS = 2 };
 /* The layout, in the popup view's 640 x 224 (menu_draw_size) */
 enum { L_X = 48, L_W = 166, TOP = 40, CARD_X = 224, CARD_W = 368, CARD_Y = 52, CARD_H = 11, CARD_GAP = 0,
        MID_H = 117, BAR_Y = 164, BAR_H = 18, BAR_X = 48, BAR_W = 544, STATUS_Y = 189, TITLE_Y = 14 };
@@ -779,13 +792,6 @@ static int seconds_to(double at)
 {
     double ms = at > 0 ? at - host_service_net_server_ms() : 0;
     return ms > 0 ? (int)((ms + 999) / 1000) : 0;
-}
-
-static const char *track_name(int index)
-{
-    for (int k = 0; k < COUNT(tracks); k++)
-        if (tracks[k].index == index) return tracks[k].name;
-    return "?";
 }
 
 /* ---- what the buttons do ---- */
@@ -1139,7 +1145,8 @@ static void draw_left(const RoomNow *r)
     put(MENU_CENTRE, cx, TOP + 6, "TRACK", menu_style(st_off, 80, -1, 0, 0));
     snprintf(line, sizeof line, r->host ? "< %s >" : "%s", track_name(l->track));
     if (on) bar(L_X + 6, TOP + 17, L_W - 12, 14);
-    put(MENU_CENTRE, cx, TOP + 18, line, fit(line, on ? st_on : st_row, 125, L_W - 16));
+    /* retail's width leaves out the letter spacing: aim 14 short so long event names stay inside */
+    put(MENU_CENTRE, cx, TOP + 18, line, fit(line, on ? st_on : st_row, 125, L_W - 30));
     hit(&hits[RF_TRACK], L_X, TOP + 14, L_W, 20);
     draw_setting(RF_BOTS, TOP + 39, "COMPUTER RIDERS", l->laps & ROOM_NO_BOTS ? "OFF" : "ON", r);
     draw_setting(RF_CHEATS, TOP + 52, "CHEATS", l->laps & ROOM_CHEATS ? "ON" : "OFF", r);
@@ -1308,6 +1315,7 @@ static void draw_toasts(void)
     for (int i = TOASTS - 1; i >= 0; i--) {
         if (toast[i].until <= now) continue;
         MenuStyle s = toast[i].colour ? tint(st_row, 75, toast[i].colour) : menu_style(st_on, 75, -1, 0, 0);
+        s = fit(toast[i].text, s, 100, 610);
         int w = menu_text_width(toast[i].text, &s) * 640 / vw + 14;
         box(632 - w, y, w, 11, 90);
         put(MENU_RIGHT, 625, y + 2, toast[i].text, s);
@@ -1315,22 +1323,80 @@ static void draw_toasts(void)
     }
 }
 
+/* Loading-page landscape from the player's disc, not a repository asset. TEX has
+   the 512-square indexed image; RTX has its 16-square CSM1 palette. Use the upper
+   340 lines after rotating the loading mesh's upside-down UVs, excluding its cutout.
+   Cache the ten destinations; variants retain their event name beside the picture. */
+static const uint16_t *track_preview(int track)
+{
+    static const char *const pages[] = {"LALPSE", "LMOASE", "LJUNSE", "LPERSE", "LGLASE", "LAUBSE", "LFUJSE", "LBCSE", "LCITSE", "LMOSHSE"};
+    static const unsigned char destination[26] = {0,1,2,3,3,4,0,1,2,3,2,5,6,1,4,5,5,8,8,7,8,8,4,9,0,7};
+    static uint16_t *pictures[10];
+    static int attempted[10];
+    int d = destination[track];
+    if (!attempted[d]) {
+        attempted[d] = 1;
+        unsigned char *tex = malloc(264192), *rtx = malloc(133120);
+        char path[64]; uint32_t sector, size;
+        int ok = tex && rtx;
+        snprintf(path, sizeof path, "LOADBAR/%s.TEX", pages[d]);
+        ok = ok && cdvd_find(path, &sector, &size) && size == 262512 && cdvd_read(sector, (size + 2047) / 2048, tex);
+        snprintf(path, sizeof path, "LOADBAR/%s.RTX", pages[d]);
+        ok = ok && cdvd_find(path, &sector, &size) && size == (d == 9 ? 1136 : 132336) && cdvd_read(sector, (size + 2047) / 2048, rtx);
+        if (ok) {
+            /* 256 x 160 for the picture's bilinear texture: each pixel the mean of its 2 x 2-3
+               source pixels, then 5 bits a channel with a 4 x 4 ordered dither (PSMCT16) */
+            static const unsigned char bayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+            enum { W = MENU_PICTURE_W, H = MENU_PICTURE_H };
+            pictures[d] = menu_picture_new();
+            if (pictures[d]) for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+                unsigned sum[3] = {0, 0, 0}, n = 0, pixel = 0x8000;
+                for (int sy = y * 340 / H; sy < (y + 1) * 340 / H; sy++) for (int sx = x * 512 / W; sx < (x + 1) * 512 / W; sx++, n++) {
+                    unsigned k = tex[0x170 + (511 - sy - (d == 9 ? 80 : 0)) * 512 + 511 - sx];
+                    k = (k & ~24u) | ((k & 8) << 1) | ((k & 16) >> 1);
+                    for (int c = 0; c < 3; c++) sum[c] += rtx[(d == 9 ? 0x10 : 0x60) + k * 4 + c];
+                }
+                for (int c = 0; c < 3; c++) {
+                    unsigned v = (sum[c] + n / 2) / n + bayer[y & 3][x & 3] / 2;
+                    pixel |= (v > 255 ? 31 : v >> 3) << (5 * c);
+                }
+                pictures[d][y * W + x] = (uint16_t)pixel;
+            }
+        }
+        hle_log("online menu: preview %s %s\n", pages[d], pictures[d] ? "loaded from disc" : "unavailable");
+        free(tex); free(rtx);
+    }
+    return pictures[d];
+}
+
 static void draw_track_list(void)
 {
     rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
     box(36, 24, 568, 176, 110);
     put(MENU_CENTRE, 320, 30, "CHOOSE A TRACK", menu_style(st_row, 115, -1, 0, 0));
+    /* Two columns of names; the rider limit goes beside the picture, so each name has room. */
     for (int i = 0; i < COUNT(tracks); i++) {
-        int x = 52 + (i % TRACK_COLUMNS) * 134, y = 48 + (i / TRACK_COLUMNS) * 20, on = i == track_cursor;
-        if (on) bar(x + 2, y, 128, 12);
-        char label[48];
-        snprintf(label, sizeof label, "%s - %d", tracks[i].name, track_limit(tracks[i].index));
-        put(MENU_CENTRE, x + 66, y + 1, label, fit(label, on || i == room_track ? st_on : st_row, 100, 126));
-        if (i == room_track) rect(x + 30, y + 12, 72, 1, (const int[]){0xC0, 0xB8, 0x40}, 128);  /* the current one */
-        hit(&track_hits[i], x, y - 2, 132, 18);
+        int x = 44 + (i % TRACK_COLUMNS) * 192, y = 46 + (i / TRACK_COLUMNS) * 11, on = i == track_cursor;
+        const char *name = track_name(tracks[i].index);
+        MenuStyle s = fit(name, on || i == room_track ? st_on : st_row, 90, 178);
+        if (on) bar(x + 2, y - 1, 186, 10);
+        put(MENU_CENTRE, x + 95, y, name, s);
+        if (i == room_track) {  /* the current one: underlined under its name's own width, below the letters */
+            int u = menu_text_width(name, &s) * 640 / vw;
+            rect(x + 95 - u / 2, y + 10, u, 1, (const int[]){0xC0, 0xB8, 0x40}, 128);
+        }
+        hit(&track_hits[i], x, y - 1, 190, 11);
     }
-    put(MENU_CENTRE, 320, 178, "BACK", st_row);
-    hit(&track_back, 270, 175, 100, 14);
+    int at = tracks[track_cursor].index;
+    char limit[32];
+    snprintf(limit, sizeof limit, "UP TO %d RIDERS", track_limit(at));
+    const uint16_t *picture = track_preview(at);
+    box(430, 58, 164, 100, 110);
+    if (picture) menu_draw_picture(438 * vw / 640, 66 * vh / 224, 148 * vw / 640, 49 * vh / 224, picture);
+    put(MENU_CENTRE, 512, 124, track_name(at), fit(track_name(at), st_on, 95, 150));
+    put(MENU_CENTRE, 512, 139, limit, fit(limit, st_row, 80, 150));
+    put(MENU_CENTRE, 320, 184, "BACK", st_row);
+    hit(&track_back, 270, 181, 100, 14);
 }
 
 static void draw_rules(const RoomNow *r)
@@ -1979,6 +2045,6 @@ int port_online_single_race(void) { return choosing; }
 const char *port_track_name(int index)
 {
     for (int k = 0; k < COUNT(tracks); k++)
-        if (tracks[k].index == index) return tracks[k].name;
+        if (tracks[k].index == index) return track_name(tracks[k].index);
     return NULL;
 }

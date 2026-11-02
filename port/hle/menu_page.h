@@ -91,6 +91,11 @@ void menu_draw_size(int *width, int *height);  /* the popup view's size */
 void menu_draw_begin(void);            /* each frame, before the first box */
 void menu_draw_box(int x, int y, int w, int h, int level);  /* level 90: the popups' own */
 void menu_draw_rect(int x, int y, int w, int h, int r, int g, int b, int a);  /* a < 128: blended */
+enum { MENU_PICTURE_W = 256, MENU_PICTURE_H = 160 };
+/* A picture for menu_draw_picture: MENU_PICTURE_W x _H PSMCT16 pixels (5:5:5, bit 15 set) in the
+   core's memory, its GS upload in front of it; NULL when out of memory. Kept, never freed. */
+uint16_t *menu_picture_new(void);
+void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture);  /* bilinear, one sprite */
 void menu_draw_bar(int x, int y, int w, int h);  /* the cursor's bar */
 void menu_draw_text(int align, int x, int y, const char *text, const MenuStyle *s);
 int menu_text_width(const char *text, const MenuStyle *s);

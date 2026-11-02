@@ -336,6 +336,75 @@ void menu_draw_rect(int x, int y, int w, int h, int r, int g, int b, int a)
     func_002103D8(D_00513B00, view, start);
 }
 
+/* The track picker's picture (finding 132): one bilinear sprite of a 256 x 160 PSMCT16 texture
+   at GS blocks 0x3C00-0x3E00 (TBW 4; its 256-line footprint is 16 pages). A census of every TEX0,
+   CLUT, FRAME, ZBUF and upload address the GS saw from boot through the main and online menus,
+   the shop, the rider screen, the room and the picker found 0x38E0-0x3F80 never touched; the
+   shell's texture bins can reach 0x3B9F (their end, word 0xEE7F0) and small render targets start
+   at 0x3F80, so this keeps 3 pages below it and 12 above. The pixels go to the GS from the core's
+   own memory (PATH3, host_service_graphics_feed) once per new picture, never through the game's
+   heap; the draw takes two of the popups' rectangle packets. 16-bit because a 32-bit 256 x 256
+   footprint (32 pages) would reach 0x3F80. */
+enum { PIC_TBP = 0x3C00, PIC_HEADER = 6, PIC_BYTES = MENU_PICTURE_W * MENU_PICTURE_H * 2 };
+static const uint16_t *uploaded;       /* the picture now in VRAM; NULL: upload before drawing */
+static unsigned picture_idle;
+
+uint16_t *menu_picture_new(void)
+{
+    unsigned char *raw = malloc(PIC_HEADER * 16 + PIC_BYTES + 15);
+    if (!raw) return NULL;
+    uint64_t *h = (uint64_t *)(((uintptr_t)raw + 15) & ~(uintptr_t)15);
+    h[0] = 4 | 1ull << 60, h[1] = 0xE;                                   /* A+D, 4 registers */
+    h[2] = (uint64_t)PIC_TBP << 32 | 4ull << 48 | 2ull << 56, h[3] = 0x50;  /* BITBLTBUF: PSMCT16, DBW 4 */
+    h[4] = 0, h[5] = 0x51;                                               /* TRXPOS 0, 0 */
+    h[6] = MENU_PICTURE_W | (uint64_t)MENU_PICTURE_H << 32, h[7] = 0x52;  /* TRXREG */
+    h[8] = 0, h[9] = 0x53;                                               /* TRXDIR: host to local */
+    h[10] = (PIC_BYTES / 16) | 0x8000 | 2ull << 58, h[11] = 0;           /* IMAGE, EOP */
+    return (uint16_t *)(h + 12);
+}
+
+/* Once a field: a picture not drawn for 8 fields is uploaded again next time (the picker reopened). */
+static void menu_preview_field(void)
+{
+    if (uploaded && ++picture_idle > 8) uploaded = NULL;
+}
+
+void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture)
+{
+    if (!picture || !rect_packets || rects_used + 2 > DRAW_RECTS || w <= 0 || h <= 0) return;
+    picture_idle = 0;
+    if (picture != uploaded) {
+        static int logged;
+        if (!logged++) hle_log("menu: track picture: %d bytes to GS blocks %X-%X from the core's memory, per new picture\n",
+                               PIC_BYTES, PIC_TBP, PIC_TBP + 512);
+        host_service_graphics_feed(2, GADDR((const uint64_t *)picture - PIC_HEADER * 2), (PIC_HEADER * 16 + PIC_BYTES) / 4);
+        uploaded = picture;
+    }
+    int view = draw_view(), cx, cy, vw, vh;
+    func_0023D618(view, &cx, &cy);
+    func_0023D650(view, &vw, &vh);
+    int left = cx - (vw >> 1) + x, top = cy - (vh >> 1) + y;
+    uint64_t *a = rect_packets[rects_used++], *b = rect_packets[rects_used++], *q;
+    memset(a, 0, sizeof *rect_packets);
+    memset(b, 0, sizeof *rect_packets);
+    q = a + 2;  /* TEXFLUSH; TEX0: the picture, DECAL; TEX1: bilinear (the text packets set their own) */
+    q[0] = 3 | 1ull << 60, q[1] = 0xE, q += 2;
+    q[0] = 0, q[1] = 0x3F, q += 2;
+    q[0] = PIC_TBP | 4u << 14 | 2u << 20 | 8ull << 26 | 8ull << 30 | 1ull << 35, q[1] = 0x06, q += 2;
+    q[0] = 0x60, q[1] = 0x14, q += 2;
+    a[0] = (uint64_t)(((q - a) / 2) | 0x60000000), a[1] = 0;
+    func_002103D8(D_00513B00, view, a);
+    q = b + 2;  /* a textured sprite, UV half a texel inside so bilinear stays in the 160 lines */
+    q[0] = 1 | 0x8000 | 1ull << 46 | 0x116ull << 47 | 5ull << 60, q[1] = 0x53531, q += 2;
+    func_002105A0(D_00513B00, q, 128, 128, 128, 128), q += 2;
+    q[0] = 8 | (uint64_t)8 << 32, q += 2;
+    func_00210578(D_00513B00, q, left, top), q += 2;
+    q[0] = (MENU_PICTURE_W * 16 - 8) | (uint64_t)(MENU_PICTURE_H * 16 - 8) << 32, q += 2;
+    func_00210578(D_00513B00, q, left + w, top + h), q += 2;
+    b[0] = (uint64_t)(((q - b) / 2) | 0x60000000), b[1] = 0;
+    func_002103D8(D_00513B00, view, b);
+}
+
 void menu_draw_bar(int x, int y, int w, int h) { func_0018F9C0(0, x, y, w, h); }
 
 void menu_draw_text(int align, int x, int y, const char *text, const MenuStyle *s)
@@ -348,13 +417,18 @@ void menu_draw_text(int align, int x, int y, const char *text, const MenuStyle *
     else func_0020F9F0(0, view, x, y, text);
 }
 
+/* Retail's width routine knows the capitals only (its menus write in capitals); lowercase draws
+   as small capitals, so measuring the capitals gives an upper bound for mixed-case names. */
 int menu_text_width(const char *text, const MenuStyle *s)
 {
-    char saved[0x20];
+    char saved[0x20], upper[160];
+    size_t n = 0;
+    for (; text[n] && n < sizeof upper - 1; n++) upper[n] = text[n] >= 'a' && text[n] <= 'z' ? (char)(text[n] - 32) : text[n];
+    upper[n] = 0;
     memcpy(saved, D_004F3570, sizeof saved);
     func_0020FB80(0, s->size[0], s->size[1], s->size[2], s->size[3]);
     *(int *)(D_004F3570 + 0x1C) = 0;
-    int width = func_0020F860(0, text) >> 4;
+    int width = func_0020F860(0, upper) >> 4;
     memcpy(D_004F3570, saved, sizeof saved);
     return width;
 }
@@ -841,6 +915,7 @@ static void trace_screens(void)
 void menu_mouse_field(void)
 {
     fields++;
+    menu_preview_field();  /* the track picture: uploaded again after a pause */
     if (shell_trace < 0) shell_trace = getenv("DHD_MOUSE_TRACE") != NULL;
     if (queued && ++press_field >= 2 * PRESS_FIELDS) {  /* this press is done: the next one */
         memmove(queue, queue + 1, (size_t)(queued - 1) * sizeof *queue);
