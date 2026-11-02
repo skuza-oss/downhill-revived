@@ -9,7 +9,9 @@
 //!   equal; 5-7 = always);
 //! - variant 0 plain, 1 dual (dual-source module and factors), 2 RGB with A = 128
 //!   (`native_pixel_blend`), 3 alpha only (no blend state).
-//! Bits 25..28 are private: a power-of-two source scale (S=E), or zero for generic.
+//! Bits 25..28 are private: a power-of-two source scale (S=E), or zero for generic. Bit 29
+//! (`TEXELS`): the draw reads a decoded texture's R32Uint texels (the `_u` entry points and the
+//! texels layout).
 //! The GS key's blend, depth and variant fields remain unchanged. The cache's key is 64 bits: this
 //! key, and above it (`SPEC_SHIFT`) the fragment stage's specialisation, `spec` (native.wgsl's
 //! `native_spec`; zero for the generic shader).
@@ -32,6 +34,8 @@ pub const VARIANT_DUAL: u32 = 1;
 pub const VARIANT_RGB_A128: u32 = 2;
 pub const VARIANT_ALPHA_ONLY: u32 = 3;
 pub const TEXEL_SCALE_SHIFT: u32 = 25;
+/// The draw reads a decoded texture's texels (native.wgsl's `_u` entry points).
+pub const TEXELS: u32 = 1 << 29;
 /// Where a cache key holds the draw's fragment specialisation (`spec`).
 pub const SPEC_SHIFT: u32 = 32;
 
@@ -238,12 +242,13 @@ struct Sources {
     module: wgpu::ShaderModule,
     dual_module: Option<wgpu::ShaderModule>,
     layout: wgpu::PipelineLayout,
+    texels_layout: wgpu::PipelineLayout,
 }
 
 impl Sources {
     fn of(objects: &Objects) -> Sources {
         Sources { module: objects.module.clone(), dual_module: objects.dual_module.clone(),
-                  layout: objects.draw_layout.clone() }
+                  layout: objects.draw_layout.clone(), texels_layout: objects.texels_draw_layout.clone() }
     }
 }
 
@@ -251,6 +256,13 @@ impl Sources {
 fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wgpu::RenderPipeline, String> {
     let key = full as u32;
     let spec = (full >> SPEC_SHIFT) as u32;
+    let texels = key & TEXELS != 0;
+    let entry = match (d.entry, texels) {
+        ("native_pixel", true) => "native_pixel_u",
+        ("native_pixel_blend", true) => "native_pixel_blend_u",
+        ("native_pixel_dual", true) => "native_pixel_dual_u",
+        (e, _) => e,
+    };
     let fragment_module = if d.dual_module {
         objects
             .dual_module
@@ -279,7 +291,7 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
     };
     Ok(gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("native draw"),
-        layout: Some(&objects.layout),
+        layout: Some(if texels { &objects.texels_layout } else { &objects.layout }),
         vertex: wgpu::VertexState {
             module: &objects.module,
             entry_point: Some("native_vertex"),
@@ -295,7 +307,7 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
         fragment: Some(wgpu::FragmentState {
             module: fragment_module,
-            entry_point: Some(d.entry),
+            entry_point: Some(entry),
             compilation_options: fragment_options,
             targets: &targets,
         }),

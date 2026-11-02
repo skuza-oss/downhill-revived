@@ -2,7 +2,8 @@
 //!
 //! As the retired `gpu_wgpu_native.inc`'s native_texture_create / native_replace_create (last at
 //! render/rust 3882d5576): a decoded texture is
-//! w x h RGBA8 with one bind group (the nearest sampler); a replacement (texture pack, sharp font)
+//! w x h R32Uint, each texel its RGBA8 bytes (finding 131: read as integers, a 2 x 2 footprint in
+//! one gather), with one bind group (shared.rs's texels layout, the nearest sampler); a replacement (texture pack, sharp font)
 //! has `levels` mip levels, each level's rows after the previous level's (sides halved, down to 1;
 //! `mip_bytes`), and eight bind groups (one per replacement sampler, `NativeShared::replace`).
 //! Immutable after creation, shared through `Arc` (the handle is `Arc::into_raw`, lib.rs
@@ -41,10 +42,10 @@ impl Tex {
         let shared = NativeShared::get(gpu)?;
         let bytes: &[u8] = cast_bytes(&rgba[..count]);
         scoped(gpu, "native texture", || {
-            let texture = new_texture(gpu, w, h, 1, "native texture");
+            let texture = new_texture(gpu, w, h, 1, wgpu::TextureFormat::R32Uint, "native texture");
             write_level(gpu, &texture, 0, bytes, w, h);
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let group = shared.group(gpu, &view, &shared.nearest, "native texture");
+            let group = shared.texels_group(gpu, &view, "native texture");
             Tex { texture, view, groups: Box::new([group]), w, h, levels: 1 }
         })
     }
@@ -60,7 +61,7 @@ impl Tex {
         }
         let shared = NativeShared::get(gpu)?;
         scoped(gpu, "native replacement", || {
-            let texture = new_texture(gpu, w, h, levels, "native replacement");
+            let texture = new_texture(gpu, w, h, levels, wgpu::TextureFormat::Rgba8Unorm, "native replacement");
             let (mut at, mut lw, mut lh) = (0usize, w, h);
             for level in 0..levels {
                 let n = lw as usize * lh as usize * 4;
@@ -118,14 +119,14 @@ fn cast_bytes(p: &[u32]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(p.as_ptr() as *const u8, std::mem::size_of_val(p)) }
 }
 
-fn new_texture(gpu: &Gpu, w: u32, h: u32, levels: u32, label: &str) -> wgpu::Texture {
+fn new_texture(gpu: &Gpu, w: u32, h: u32, levels: u32, format: wgpu::TextureFormat, label: &str) -> wgpu::Texture {
     gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         mip_level_count: levels,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })

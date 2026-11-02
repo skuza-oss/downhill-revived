@@ -33,8 +33,9 @@ pub struct ConvertObjects<'a> {
     /// The draw texture layout and its nearest sampler (native_texture_group).
     pub texture_layout: &'a wgpu::BindGroupLayout,
     pub nearest: &'a wgpu::Sampler,
-    /// Bound where a slot has no colour (or no depth) surface.
+    /// Bound where a slot has no colour (or no depth) surface, and where there is no base.
     pub dummy_view: &'a wgpu::TextureView,
+    pub dummy_texels_view: &'a wgpu::TextureView,
     pub dummy_depth_view: &'a wgpu::TextureView,
 }
 
@@ -153,7 +154,7 @@ impl Converts {
                     size: wgpu::BufferSize::new(INVERSE_WORDS as u64 * 4),
                 }),
             },
-            wgpu::BindGroupEntry { binding: 1, resource: tv(base.unwrap_or(o.dummy_view)) },
+            wgpu::BindGroupEntry { binding: 1, resource: tv(base.unwrap_or(o.dummy_texels_view)) },
             wgpu::BindGroupEntry { binding: 2, resource: tv(colour[0]) },
             wgpu::BindGroupEntry { binding: 3, resource: tv(colour[1]) },
             wgpu::BindGroupEntry { binding: 4, resource: tv(colour[2]) },

@@ -39,7 +39,7 @@ use crate::device::Gpu;
 use crate::native::arenas::Arenas;
 use crate::native::convert::{ConvertObjects, ConvertSource};
 use crate::native::scanout::ScanoutObjects;
-use crate::native::pipelines::{gputimes, SPEC_SHIFT, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
+use crate::native::pipelines::{gputimes, SPEC_SHIFT, TEXELS, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
 use crate::native::shared::NativeShared;
 use crate::native::surfaces::Kit;
 use crate::native::{Native, Picture};
@@ -663,7 +663,9 @@ impl Native {
             } else {
                 0
             };
-            self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale, spec,
+            // A decoded texture is R32Uint texels: the `_u` entry points read it (pipelines.rs TEXELS).
+            let texels = if decoded.is_some() { TEXELS } else { 0 };
+            self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale | texels, spec,
                              offset, &v.uniforms, &group);
             self.pass.drawn.draws += 1;
             // Conservative even for masked/empty writes: a false invalidation costs
@@ -739,6 +741,7 @@ impl Native {
             texture_layout: &shared.texture_layout,
             nearest: &shared.nearest,
             dummy_view: &shared.dummy_view,
+            dummy_texels_view: &shared.dummy_texels_view,
             dummy_depth_view: &shared.dummy_depth_view,
         };
         self.pass.end_reason("conversion");
@@ -781,7 +784,9 @@ impl Native {
         let (src, dst) = (blend_key >> 1 & 31, blend_key >> 6 & 31);
         let uses_as = blend_key & 1 != 0 && (src == BLEND_SA || src == BLEND_ISA || dst == BLEND_SA || dst == BLEND_ISA);
         let depth = if has_depth { 16 | if dk & 4 != 0 { 8 } else { 0 } | (dk & 3) } else if retained_depth { 17 } else { 0 };
-        let texel_key = texel_scale << TEXEL_SCALE_SHIFT;
+        // texel_scale carries TEXELS (bit 29) above the scale itself.
+        let texel_key = (texel_scale & 15) << TEXEL_SCALE_SHIFT | texel_scale & TEXELS;
+        let texel_scale = texel_scale & 15;
         let base = blend_key | depth << 18 | texel_key;
         let special = (spec as u64) << SPEC_SHIFT;
         self.pass.set_groups(uniforms, offset, group);

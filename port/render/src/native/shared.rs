@@ -15,6 +15,9 @@ pub struct NativeShared {
     /// Native.wgsl group 1: binding 0 a filterable float texture, binding 1 a filtering sampler
     /// (fragment stage).
     pub texture_layout: wgpu::BindGroupLayout,
+    /// Group 1 of the `_u` entry points (decoded textures, finding 131): binding 0 an R32Uint
+    /// texture, binding 1 a non-filtering sampler (the gathers').
+    pub texels_layout: wgpu::BindGroupLayout,
     /// Clamped, nearest everywhere (decoded textures, the dummy group).
     pub nearest: wgpu::Sampler,
     /// The replacement samplers, indexed bilinear | U clamped << 1 | V clamped << 2 (as
@@ -24,6 +27,9 @@ pub struct NativeShared {
     /// 1 x 1 RGBA8 ("native none"), never written (zeros).
     pub dummy: wgpu::Texture,
     pub dummy_view: wgpu::TextureView,
+    /// 1 x 1 R32Uint ("native no texels"), never written (zeros): a conversion without a base.
+    pub dummy_texels: wgpu::Texture,
+    pub dummy_texels_view: wgpu::TextureView,
     /// 1 x 1 Depth32Float ("native no z"), never written (zeros).
     pub dummy_depth: wgpu::Texture,
     pub dummy_depth_view: wgpu::TextureView,
@@ -65,6 +71,10 @@ impl NativeShared {
                     count: None,
                 },
             ],
+        });
+        let texels_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("native texels layout"),
+            entries: &texels_entries(),
         });
         let nearest = d.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("native nearest"),
@@ -112,16 +122,46 @@ impl NativeShared {
         };
         let dummy = one(wgpu::TextureFormat::Rgba8Unorm, "native none");
         let dummy_depth = one(wgpu::TextureFormat::Depth32Float, "native no z");
+        let dummy_texels = one(wgpu::TextureFormat::R32Uint, "native no texels");
+        let dummy_texels_view = dummy_texels.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_view = dummy.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_depth_view = dummy_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_group = texture_group(gpu, &texture_layout, &dummy_view, &nearest, "native none");
-        NativeShared { texture_layout, nearest, replace, dummy, dummy_view, dummy_depth, dummy_depth_view, dummy_group }
+        NativeShared { texture_layout, texels_layout, nearest, replace, dummy, dummy_view, dummy_texels, dummy_texels_view,
+                       dummy_depth, dummy_depth_view, dummy_group }
     }
 
     /// A group of `layout`-shape for `view` with `sampler` (native.wgsl group 1).
     pub fn group(&self, gpu: &Gpu, view: &wgpu::TextureView, sampler: &wgpu::Sampler, label: &str) -> wgpu::BindGroup {
         texture_group(gpu, &self.texture_layout, view, sampler, label)
     }
+
+    /// A decoded texture's group (texels layout: its R32Uint view and the nearest sampler).
+    pub fn texels_group(&self, gpu: &Gpu, view: &wgpu::TextureView, label: &str) -> wgpu::BindGroup {
+        texture_group(gpu, &self.texels_layout, view, &self.nearest, label)
+    }
+}
+
+/// The texels layout's entries (shared.rs's and init.rs's, equal so wgpu-core pools them).
+pub fn texels_entries() -> [wgpu::BindGroupLayoutEntry; 2] {
+    [
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Uint,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        },
+    ]
 }
 
 fn texture_group(

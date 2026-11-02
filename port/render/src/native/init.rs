@@ -93,17 +93,21 @@ pub struct Objects {
     pub uniform_layout: wgpu::BindGroupLayout,
     /// The draw's group 1: binding 0 a filterable 2D texture, binding 1 a filtering sampler.
     pub texture_layout: wgpu::BindGroupLayout,
+    /// The `_u` draws' group 1 (shared.rs's texels layout): an R32Uint texture, a non-filtering sampler.
+    pub texels_layout: wgpu::BindGroupLayout,
     /// The blit's group 1: two unfilterable 2D textures (source, previous).
     pub blit_layout: wgpu::BindGroupLayout,
     /// Scanout's group 1: an unfilterable 2D texture and a write-only RGBA8 storage texture.
     pub scanout_layout: wgpu::BindGroupLayout,
-    /// Conversion's group 1: 0 the inverse table (read-only storage), 1-5 unfilterable textures,
+    /// Conversion's group 1: 0 the inverse table (read-only storage), 1 the base (R32Uint), 2-5 unfilterable textures,
     /// 6-9 depth textures, 10 a write-only RGBA8 storage texture.
     pub convert_layout: wgpu::BindGroupLayout,
     /// Depth growth's group 1: a depth texture.
     pub grow_layout: wgpu::BindGroupLayout,
     /// (uniform, texture): draws and the present pass.
     pub draw_layout: wgpu::PipelineLayout,
+    /// (uniform, texels): draws from a decoded texture (`_u` entry points).
+    pub texels_draw_layout: wgpu::PipelineLayout,
     /// (uniform, blit)
     pub blit_pipeline_layout: wgpu::PipelineLayout,
     /// (uniform, scanout)
@@ -484,6 +488,7 @@ impl Objects {
                 count: None,
             },
         ]);
+        let texels_layout = layout(gpu, &crate::native::shared::texels_entries());
         let blit_layout = layout(gpu, &[texture_entry(0, S::FRAGMENT, unfilterable), texture_entry(1, S::FRAGMENT, unfilterable)]);
         let scanout_layout = layout(gpu, &[texture_entry(0, S::COMPUTE, unfilterable), storage_texture_entry(1)]);
         let mut convert = Vec::with_capacity(11);
@@ -497,7 +502,8 @@ impl Objects {
             },
             count: None,
         });
-        for i in 1..6 {
+        convert.push(texture_entry(1, S::COMPUTE, T::Uint)); // the base: a decoded texture's texels
+        for i in 2..6 {
             convert.push(texture_entry(i, S::COMPUTE, unfilterable));
         }
         for i in 6..10 {
@@ -508,6 +514,7 @@ impl Objects {
         let grow_layout = layout(gpu, &[texture_entry(0, S::FRAGMENT, T::Depth)]);
 
         let draw_layout = pipeline_layout(gpu, &uniform_layout, &texture_layout);
+        let texels_draw_layout = pipeline_layout(gpu, &uniform_layout, &texels_layout);
         let blit_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &blit_layout);
         let scanout_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &scanout_layout);
         let convert_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &convert_layout);
@@ -541,11 +548,13 @@ impl Objects {
             dual_module,
             uniform_layout,
             texture_layout,
+            texels_layout,
             blit_layout,
             scanout_layout,
             convert_layout,
             grow_layout,
             draw_layout,
+            texels_draw_layout,
             blit_pipeline_layout,
             scanout_pipeline_layout,
             convert_pipeline_layout,
