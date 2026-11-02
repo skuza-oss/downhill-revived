@@ -15,7 +15,8 @@
 
    The settings are the touch_* keys of dhd.ini (DHD_TOUCH_* variables, the TOUCH CONTROLS pages);
    for the checks only: DHD_TOUCH_HUD=game keeps the game's HUD (the fallback layout), and
-   DHD_TOUCH_AIR_WAIT=ms sets the air layout's wait (150, or 33 if check 6 finds the flag steady). */
+   DHD_TOUCH_AIR_WAIT=ms sets the air layout's wait (150, or 33 if check 6 finds the flag steady);
+   DHD_TOUCH_LOG=1 logs every touch (mm), the screen's insets and each change of the buttons sent. */
 #include "host_api.h"
 #include "../hle/hle.h"
 #include "../hle/touch.h"
@@ -55,6 +56,16 @@ static int published_count;
 static float published_w, published_h;
 
 static double ms_now(void) { return (double)SDL_GetTicksNS() / 1e6; }
+
+static double trace_race_ms;   /* the race clock the trace prints */
+
+/* DHD_TOUCH_LOG=1: the checks' trace in dhd.log. */
+static int trace_on(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *v = getenv("DHD_TOUCH_LOG"); on = v && atoi(v) ? 1 : 0; }
+    return on;
+}
 
 static SDL_InitState started;
 
@@ -114,6 +125,11 @@ static void screen_update(SDL_Window *window)
 #endif
     SDL_LockMutex(lock);
     if (!screen_known || memcmp(&s, &screen, sizeof s)) {
+#ifdef __ANDROID__
+        if (trace_on())
+            fprintf(stderr, "touch log: screen %dx%d px, dpi %.1f x %.1f, gesture insets %d %d %d %d, cutout %d %d %d %d px\n",
+                    w, h, xdpi, ydpi, in[0], in[1], in[2], in[3], in[4], in[5], in[6], in[7]);
+#endif
         screen = s;
         screen_known = 2;   /* changed: the game thread lays out again */
     }
@@ -294,10 +310,12 @@ static void configure(int log)
     SDL_UnlockMutex(lock);
     touch_configure(touch, &s, known ? &sc : NULL);
     SDL_SetAtomicInt(&tilt_wanted, s.tilt);
-    if (log)
-        fprintf(stderr, "touch: %s, %s hand, %s, size %s, screen %.1f x %.1f mm (strips %.1f %.1f %.1f mm)\n",
+    if (log && known)   /* before the window's size is known there is nothing to say */
+        fprintf(stderr, "touch: %s, %s hand, %s, size %s, screen %.1f x %.1f mm (strips l %.1f t %.1f r %.1f b %.1f mm, "
+                "cutout x %.1f-%.1f mm)\n",
                 s.preset == TOUCH_CLASSIC ? "classic pad" : "thumb zones", s.left_handed ? "left" : "right",
-                s.tilt ? "tilt" : "stick", s.size ? "set" : "auto", sc.width, sc.height, sc.strip_left, sc.strip_right, sc.strip_bottom);
+                s.tilt ? "tilt" : "stick", s.size ? "set" : "auto", sc.width, sc.height, sc.strip_left, sc.strip_top,
+                sc.strip_right, sc.strip_bottom, sc.cut_x0, sc.cut_x1);
 }
 
 static void publish(void)
@@ -357,6 +375,11 @@ void host_service_touch_field(uint32_t address)
     for (int i = 0; i < n; i++) {
         const Event *e = &events[i];
         float x = e->x * sc.width, y = e->y * sc.height;
+        if (trace_on() && e->kind != EV_MOVE) {
+            static const char *const kinds[] = {"down", "move", "up", "cancel", "back", "pad used", "pad lost"};
+            fprintf(stderr, "touch log: %s %lld at %.1f,%.1f mm (%.0f ms) race %.0f ms hud %d air %d\n", kinds[e->kind], e->id, x, y,
+                    e->ms, h->race_ms, h->race_hud, h->air);
+        }
         switch (e->kind) {
         case EV_DOWN: touch_down(touch, e->id, x, y, e->ms); break;
         case EV_MOVE: touch_move(touch, e->id, x, y, e->ms); break;
@@ -373,6 +396,12 @@ void host_service_touch_field(uint32_t address)
     g.race_hud = h->race_hud, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
     for (int i = 0; i < 3; i++) g.pause_row[i] = h->pause_row[i];
     g.race_ms = h->race_ms, g.vsync = h->vsync, g.fps = h->fps;
+    trace_race_ms = h->race_ms;
+    static int trace_air = -1;
+    if (trace_on() && h->air != trace_air) {
+        if (h->race_hud) fprintf(stderr, "touch log: air %d (%.0f ms) race %.0f ms\n", h->air, ms_now(), h->race_ms);
+        trace_air = h->air;
+    }
     touch_update(touch, &g, ms_now());
     int buzz = touch_take_buzz(touch);
     if (buzz) SDL_SetAtomicInt(&want_buzz, buzz);
@@ -400,6 +429,16 @@ void touch_host_merge(HostPad *out)
             if (buttons & order[i]) out->pressure[i] = 255;
     }
     out->left_x = lx, out->left_y = ly, out->right_x = rx, out->right_y = ry;
+    static uint16_t last_buttons;
+    static int last_visible = -1, last_lx = 128, last_ly = 128;
+    int visible = touch_visible(touch);
+    if (trace_on() && (buttons != last_buttons || visible != last_visible || abs(lx - last_lx) >= 8 || abs(ly - last_ly) >= 8 ||
+                       (lx == 128) != (last_lx == 128) || (ly == 128) != (last_ly == 128))) {
+        fprintf(stderr, "touch log: sent %04x stick %d,%d visible %d (%.0f ms) race %.0f ms\n", buttons, lx, ly, visible,
+                ms_now(), trace_race_ms);
+        last_lx = lx, last_ly = ly;
+    }
+    last_buttons = buttons, last_visible = visible;
 }
 
 /* The presenting thread: a copy of the shapes for this picture, 16 floats each (at most max);
