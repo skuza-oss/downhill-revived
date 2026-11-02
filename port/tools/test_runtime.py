@@ -120,6 +120,9 @@ def host_tests():
                                         ROOT / 'port/host/sdl_host.c', HLE / 'test_gamepad.c'], sdl=True, low=True)
     testprog.run(gamepad)
     testprog.run(gamepad, 'mapping')
+    # the touch controls' rules: scaling, flick lanes, sprint and resume guards, the trick stick,
+    # the pause rows' steps (finding 138)
+    run('touch', [HLE / 'touch.c', HLE / 'test_touch.c'])
 
 
 def main():

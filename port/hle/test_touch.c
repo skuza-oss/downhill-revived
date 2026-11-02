@@ -1,0 +1,542 @@
+/* touch.c: the touch controls' rules (finding 138): scaling, the flick lanes, the sprint and
+   resume guards, the trick stick and the pause rows' ↓ + ✕ sequences. Built and run by
+   port/tools/test_runtime.py (a host program). */
+#include "touch.h"
+#include "hle.h"
+
+#include <assert.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+static Touch *t;
+static TouchGame game;
+static double now;
+static int failures;
+
+#define CHECK(cond) do { if (!(cond)) { fprintf(stderr, "test_touch:%d: %s\n", __LINE__, #cond); failures++; } } while (0)
+
+static void start(int preset, int attacks)
+{
+    if (t) touch_free(t);
+    t = touch_new();
+    TouchSettings s;
+    touch_settings_default(&s);
+    s.preset = preset;
+    s.attacks = attacks;
+    s.vibration = 0;
+    s.hints_shown = ~0u;   /* no hints in these tests */
+    TouchScreen screen = {154.5f, 69.5f, 0, 0, 0, 0, 0, 0, 0, 0};
+    touch_configure(t, &s, &screen);
+    memset(&game, 0, sizeof game);
+    game.race_hud = 1;
+    game.clock_moving = 1;
+    game.fps = 60;
+    game.race_ms = 10000;
+    game.pause_row[0] = 0, game.pause_row[1] = 4, game.pause_row[2] = 6;
+    now = 100000;
+    touch_update(t, &game, now);
+}
+
+/* One field: the clocks advance (the race clock only while it runs). */
+static void field(void)
+{
+    now += 1000.0 / 60;
+    game.vsync++;
+    if (game.clock_moving) game.race_ms += 1000.0 / 60;
+    touch_update(t, &game, now);
+}
+static void fields(int n) { while (n-- > 0) field(); }
+static void wait_ms(double ms) { double end = now + ms; while (now + 0.001 < end) field(); }
+
+static uint16_t buttons(void)
+{
+    uint16_t b = 0;
+    uint8_t lx = 128, ly = 128, rx = 128, ry = 128;
+    touch_pad(t, &b, &lx, &ly, &rx, &ry);
+    return b;
+}
+
+static void at(int control, float *x, float *y)
+{
+    float r;
+    assert(touch_control(t, control, x, y, &r));
+}
+
+static void tap(long long id, int control)
+{
+    float x, y;
+    at(control, &x, &y);
+    touch_down(t, id, x, y, now);
+    field();
+    touch_up(t, id, x, y, now);
+    field();
+}
+
+/* A finger moved from (x0,y0) to (x1,y1) in `ms`, one sample a field. */
+static void slide(long long id, float x0, float y0, float x1, float y1, double ms)
+{
+    int n = (int)(ms / (1000.0 / 60));
+    if (n < 1) n = 1;
+    for (int i = 1; i <= n; i++) {
+        now += ms / n;
+        touch_move(t, id, x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, now);
+        game.vsync++;
+        if (game.clock_moving) game.race_ms += ms / n;
+        touch_update(t, &game, now);
+    }
+}
+
+static void test_scaling(void)
+{
+    CHECK(fabsf(touch_height_scale(69.5f, TOUCH_THUMB_ZONES) - 1.0278f) < 0.001f);   /* 103% on the Mi 11i */
+    CHECK(fabsf(touch_height_scale(62.0f, TOUCH_THUMB_ZONES) - 0.8889f) < 0.001f);   /* 89% on a 62 mm screen */
+    CHECK(fabsf(touch_button_scale(0.8889f) - 0.8667f) < 0.001f);                    /* buttons 87% */
+    CHECK(fabsf(touch_button_scale(0.70f) - 0.64f) < 0.001f);                        /* Size 70%: buttons 64% */
+    CHECK(touch_height_scale(62.0f, TOUCH_CLASSIC) >= 1.0f);                         /* Classic needs only 62 mm */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float x, y, r;
+    touch_control(t, TC_PEDAL, &x, &y, &r);
+    CHECK(fabsf(x - 131.3f) < 0.2f && fabsf(y - 49.3f) < 0.2f && fabsf(r - 11.6f) < 0.2f);   /* PEDAL 23 mm */
+    touch_control(t, TC_HOP, &x, &y, &r);
+    CHECK(fabsf((69.5f - y + r) - 54.0f) < 0.6f);   /* HOP's top 54 mm up */
+    /* a short screen: everything scales about the bottom-right corner, gaps stay >= 3 mm */
+    TouchSettings s = *touch_settings(t);
+    TouchScreen small = {120.0f, 62.0f, 0, 0, 0, 0, 0, 0, 0, 0};
+    touch_configure(t, &s, &small);
+    float px, py, pr, hx, hy, hr, bx, by, br;
+    touch_control(t, TC_PEDAL, &px, &py, &pr);
+    touch_control(t, TC_HOP, &hx, &hy, &hr);
+    touch_control(t, TC_BRAKE, &bx, &by, &br);
+    CHECK(fabsf(pr * 2 - 23.175f * 0.8667f) < 0.2f);
+    CHECK(hypotf(px - hx, py - hy) - pr - hr >= 3.0f);
+    CHECK(hypotf(px - bx, py - by) - pr - br >= 3.0f);
+    CHECK(hy - hr >= 0);
+}
+
+static void test_flick(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float x, y, r;
+    touch_control(t, TC_PEDAL, &x, &y, &r);
+    touch_down(t, 1, x, y, now);
+    field();
+    CHECK(buttons() & PAD_CROSS);
+    /* a fast flick left, inside the lane: ◻ for 3 fields while ✕ stays held */
+    slide(1, x, y, x - r - 10, y + 2, 60);
+    CHECK((buttons() & (PAD_SQUARE | PAD_CROSS)) == (PAD_SQUARE | PAD_CROSS));
+    fields(4);
+    CHECK(!(buttons() & PAD_SQUARE) && (buttons() & PAD_CROSS));
+    /* no second attack until the thumb is back inside the rim */
+    slide(1, x - r - 10, y + 2, x - r - 20, y, 60);
+    CHECK(!(buttons() & PAD_SQUARE));
+    slide(1, x - r - 20, y, x, y, 100);
+    slide(1, x, y, x + r + 10, y, 50);
+    CHECK(buttons() & PAD_CIRCLE);   /* right lane: ○ */
+    slide(1, x + r + 10, y, x, y, 100);
+    fields(4);
+    /* slow: no attack; outside the ±30° lane: none */
+    slide(1, x, y, x - r - 8, y, 600);
+    CHECK(!(buttons() & PAD_SQUARE));
+    slide(1, x - r - 8, y, x, y, 100);
+    slide(1, x, y, x - (r + 8) * 0.7f, y - (r + 8) * 0.7f, 40);   /* 45° up: no lane */
+    CHECK(!(buttons() & (PAD_SQUARE | PAD_CIRCLE)));
+    touch_up(t, 1, x, y, now);
+    field();
+    /* Buttons mode: no flicks */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_BUTTONS);
+    touch_control(t, TC_PEDAL, &x, &y, &r);
+    touch_down(t, 2, x, y, now);
+    field();
+    slide(2, x, y, x - r - 10, y, 50);
+    CHECK(!(buttons() & PAD_SQUARE));
+    touch_up(t, 2, x, y, now);
+}
+
+static void test_sprint_guards(void)
+{
+    float x, y, r;
+    /* a real second tap is held back up to 120 ms, then sent inside the window: a sprint */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    tap(1, TC_PEDAL);
+    at(TC_PEDAL, &x, &y);
+    touch_down(t, 2, x, y, now);
+    field();
+    CHECK(!(buttons() & PAD_CROSS));
+    wait_ms(125);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 2, x, y, now);
+    fields(40);
+    /* the held-back tap that flicks: no ✕ until it lifts */
+    tap(3, TC_PEDAL);
+    touch_control(t, TC_PEDAL, &x, &y, &r);
+    touch_down(t, 4, x, y, now);
+    slide(4, x, y, x - r - 10, y, 50);
+    CHECK((buttons() & PAD_SQUARE) && !(buttons() & PAD_CROSS));
+    slide(4, x - r - 10, y, x, y, 200);
+    CHECK(!(buttons() & PAD_CROSS));
+    touch_up(t, 4, x, y, now);
+    fields(40);
+    /* after HOP was opened and released since ✕ went up, a PEDAL touch inside the window waits
+       for the window to close */
+    tap(5, TC_PEDAL);
+    tap(6, TC_HOP);
+    at(TC_PEDAL, &x, &y);
+    touch_down(t, 7, x, y, now);
+    wait_ms(200);
+    CHECK(!(buttons() & PAD_CROSS));
+    wait_ms(400);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 7, x, y, now);
+    fields(40);
+    /* BRAKE doesn't count: ✕, △, ✕ still sprints (after the hold-back) */
+    tap(8, TC_PEDAL);
+    tap(9, TC_BRAKE);
+    touch_down(t, 10, x, y, now);
+    wait_ms(130);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 10, x, y, now);
+    fields(40);
+    /* claw grip: HOP held by another finger from before ✕ went up doesn't count */
+    float hx, hy;
+    at(TC_HOP, &hx, &hy);
+    touch_down(t, 11, x, y, now);
+    field();
+    touch_down(t, 12, hx, hy, now);
+    field();
+    touch_up(t, 11, x, y, now);
+    field();
+    touch_up(t, 12, hx, hy, now);
+    field();
+    touch_down(t, 13, x, y, now);
+    wait_ms(130);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 13, x, y, now);
+    fields(40);
+    /* after a flick that lifts, ✕ stays held until the window closes, and the next PEDAL touch
+       continues the same press (no release, so no sprint) */
+    touch_control(t, TC_PEDAL, &x, &y, &r);
+    touch_down(t, 14, x, y, now);
+    field();
+    slide(14, x, y, x - r - 10, y, 50);
+    touch_up(t, 14, x - r - 10, y, now);
+    field();
+    CHECK(buttons() & PAD_CROSS);
+    wait_ms(200);
+    touch_down(t, 15, x, y, now);
+    field();
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 15, x, y, now);
+    field();
+    CHECK(!(buttons() & PAD_CROSS));
+    /* a flick-lift with no PEDAL touch: the overlay lets ✕ up after the window; a PEDAL touch in
+       the next window then waits (an overlay-made release never sprints) */
+    fields(40);
+    touch_down(t, 16, x, y, now);
+    field();
+    slide(16, x, y, x - r - 10, y, 50);
+    touch_up(t, 16, x - r - 10, y, now);
+    wait_ms(520);
+    CHECK(!(buttons() & PAD_CROSS));
+    touch_down(t, 17, x, y, now);
+    wait_ms(200);
+    CHECK(!(buttons() & PAD_CROSS));
+    wait_ms(400);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 17, x, y, now);
+    fields(40);
+    /* windows count race time: the clock stopped (countdown), the window doesn't run out */
+    tap(19, TC_PEDAL);
+    tap(18, TC_HOP);
+    game.clock_moving = 0;
+    touch_down(t, 20, x, y, now);
+    wait_ms(1000);
+    CHECK(!(buttons() & PAD_CROSS));
+    game.clock_moving = 1;
+    wait_ms(520);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 20, x, y, now);
+}
+
+/* The vsync-timed presses the pause rows send: the presses as a list of button edges. */
+static int record(uint16_t *edges, int max, int nfields)
+{
+    int n = 0;
+    uint16_t before = buttons();
+    for (int i = 0; i < nfields; i++) {
+        field();
+        uint16_t b = buttons();
+        uint16_t pressed = (uint16_t)(b & ~before);
+        if (pressed && n < max) edges[n++] = pressed;
+        before = b;
+    }
+    return n;
+}
+
+static void test_pause(void)
+{
+    uint16_t edges[32];
+    float x, y;
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    /* PEDAL held through the pause */
+    at(TC_PEDAL, &x, &y);
+    touch_down(t, 1, x, y, now);
+    field();
+    CHECK(buttons() & PAD_CROSS);
+    touch_back(t, now);   /* Android Back pauses: START */
+    int n = record(edges, 32, 8);
+    CHECK(n == 1 && edges[0] == PAD_START);
+    game.clock_moving = 0;   /* the menu is open: the race clock stops */
+    fields(3);
+    CHECK(!(buttons() & PAD_CROSS));   /* race touches send nothing */
+    /* Restart race (row 4 in the game's menu): four ↓, then ✕ */
+    touch_down(t, 2, 154.5f / 2, 0, now);   /* outside the rows: nothing */
+    touch_up(t, 2, 154.5f / 2, 0, now);
+    n = record(edges, 32, 4);
+    CHECK(n == 0);
+    /* Restart race: the game's row 4, so four ↓ then ✕; the question opens */
+    float rx, ry;
+    CHECK(touch_target(t, TOUCH_TARGET_PAUSE, 1, &rx, &ry));
+    touch_down(t, 3, rx, ry, now);
+    touch_up(t, 3, rx, ry, now);
+    n = record(edges, 32, 60);
+    CHECK(n == 5 && edges[0] == PAD_DOWN && edges[3] == PAD_DOWN && edges[4] == PAD_CROSS);
+    /* the question: Yes is ↓ then ✕ */
+    touch_back(t, now);   /* Back on the question: △ (No), back to the rows */
+    n = record(edges, 32, 20);
+    CHECK(n == 1 && edges[0] == PAD_TRIANGLE);
+    /* Resume: the cursor is on RE-START now (row 4): four ↑ then ✕ */
+    touch_back(t, now);   /* Back on the rows: Resume */
+    n = record(edges, 32, 60);
+    CHECK(n == 5 && edges[0] == PAD_UP && edges[3] == PAD_UP && edges[4] == PAD_CROSS);
+    game.clock_moving = 1;
+    /* resume guard: PEDAL still down waits for the double-tap window */
+    field();
+    CHECK(!(buttons() & PAD_CROSS));
+    wait_ms(520);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 1, x, y, now);
+    field();
+    /* START ignored (the clock keeps moving): race touches work again after 0.5 s */
+    touch_back(t, now);
+    record(edges, 32, 10);
+    wait_ms(600);
+    at(TC_HOP, &x, &y);
+    touch_down(t, 4, x, y, now);
+    field();
+    CHECK(buttons() & PAD_R2);
+    touch_up(t, 4, x, y, now);
+    field();
+}
+
+static void test_classic_resume(void)
+{
+    uint16_t edges[16];
+    float x, y;
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    /* Classic sends ✕ as it is: a double tap is a double tap */
+    tap(1, TC_CROSS);
+    at(TC_CROSS, &x, &y);
+    touch_down(t, 2, x, y, now);
+    field();
+    CHECK(buttons() & PAD_CROSS);
+    /* ✕ slides onto the + spot: ◻ added, ✕ stays */
+    float px, py;
+    at(TC_PLUS_LEFT, &px, &py);
+    touch_move(t, 2, px, py, now);
+    field();
+    CHECK((buttons() & (PAD_CROSS | PAD_SQUARE)) == (PAD_CROSS | PAD_SQUARE));
+    touch_move(t, 2, x, y, now);
+    field();
+    CHECK((buttons() & (PAD_CROSS | PAD_SQUARE)) == PAD_CROSS);
+    /* the resume guard applies to Classic's ✕ too */
+    touch_back(t, now);
+    record(edges, 16, 8);
+    game.clock_moving = 0;
+    fields(3);
+    touch_back(t, now);   /* Resume */
+    record(edges, 16, 12);
+    game.clock_moving = 1;
+    field();
+    CHECK(!(buttons() & PAD_CROSS));
+    wait_ms(520);
+    CHECK(buttons() & PAD_CROSS);
+    touch_up(t, 2, x, y, now);
+    /* the shoulder bar's middle presses both */
+    float bx, by, br;
+    touch_control(t, TC_LBAR, &bx, &by, &br);
+    touch_down(t, 3, bx, by, now);
+    field();
+    CHECK((buttons() & (PAD_L1 | PAD_L2)) == (PAD_L1 | PAD_L2));
+    touch_up(t, 3, bx, by, now);
+}
+
+/* The air: the stick opens at a touch in the right half once the air layout is up. */
+static void take_off(void)
+{
+    game.air = 1;
+    wait_ms(160);   /* the air layout: 150 ms after the flag */
+}
+
+static uint16_t shoulders(void) { return buttons() & (PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2 | PAD_TRIANGLE); }
+
+static void test_trick_stick(void)
+{
+    const float cx = 100, cy = 35;
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    /* push →, hold: Can Can (R1+R2) once the thumb settles for 70 ms */
+    take_off();
+    touch_down(t, 1, cx, cy, now);
+    slide(1, cx, cy, cx + 10, cy, 50);
+    CHECK(shoulders() == 0);   /* moving: nothing sent */
+    wait_ms(90);
+    CHECK(shoulders() == (PAD_R1 | PAD_R2));
+    /* past the edge: △ after the gate (60 ms after the latch) + 33 ms */
+    slide(1, cx + 10, cy, cx + 16, cy, 20);
+    wait_ms(60);
+    CHECK(shoulders() == (PAD_R1 | PAD_R2 | PAD_TRIANGLE));
+    touch_up(t, 1, cx + 16, cy, now);
+    field();
+    CHECK(shoulders() == 0);
+    game.air = 0;
+    fields(2);
+
+    /* roll through the centre: ↖, back through the middle (missing it), ↘ in one movement: L1 + R2 */
+    take_off();
+    touch_down(t, 2, cx, cy, now);
+    slide(2, cx, cy, cx - 7.5f, cy - 7.5f, 50);      /* ↖ at 10.6 mm */
+    slide(2, cx - 7.5f, cy - 7.5f, cx + 1.5f, cy - 1, 40);   /* back through the middle, off centre */
+    slide(2, cx + 1.5f, cy - 1, cx + 8, cy + 8, 40);  /* out to ↘ */
+    wait_ms(90);
+    CHECK(shoulders() == (PAD_L1 | PAD_R2));
+    touch_up(t, 2, cx + 8, cy + 8, now);
+    game.air = 0;
+    fields(2);
+
+    /* a fast overshoot past 14 mm before the gate sends nothing and can come back in */
+    take_off();
+    touch_down(t, 3, cx, cy, now);
+    slide(3, cx, cy, cx, cy - 16, 30);   /* ↑ past the edge in 30 ms */
+    slide(3, cx, cy - 16, cx, cy - 10, 16);   /* back in before the gate */
+    CHECK(shoulders() == 0);
+    wait_ms(90);
+    CHECK(shoulders() == (PAD_L1 | PAD_R1));   /* Superman, no △ */
+    touch_up(t, 3, cx, cy - 10, now);
+    game.air = 0;
+    fields(2);
+
+    /* the first latch needs 4 mm of travel; a sector neighbour needs 12° past the edge */
+    take_off();
+    touch_down(t, 4, cx, cy, now);
+    slide(4, cx, cy, cx + 9, cy, 30);                  /* → */
+    float a = (22.5f + 6) * 3.14159265f / 180;            /* 6° into ↗: not yet */
+    slide(4, cx + 9, cy, cx + 9 * cosf(a), cy - 9 * sinf(a), 30);
+    wait_ms(90);
+    CHECK(shoulders() == (PAD_R1 | PAD_R2));
+    touch_up(t, 4, cx, cy, now);
+    game.air = 0;
+    fields(2);
+
+    /* landing sends what is held at once, and it stays until the lift */
+    take_off();
+    touch_down(t, 5, cx, cy, now);
+    slide(5, cx, cy, cx - 10, cy, 30);   /* ← moving */
+    game.air = 0;
+    field();
+    CHECK(shoulders() == (PAD_L1 | PAD_L2));
+    fields(10);
+    CHECK(shoulders() == (PAD_L1 | PAD_L2));
+    touch_up(t, 5, cx - 10, cy, now);
+    field();
+    CHECK(shoulders() == 0);
+
+    /* signature: ← then → through the middle, then out: all four + △ */
+    take_off();
+    touch_down(t, 6, cx, cy, now);
+    slide(6, cx, cy, cx - 9, cy, 40);
+    slide(6, cx - 9, cy, cx, cy, 40);
+    slide(6, cx, cy, cx + 16, cy, 50);
+    wait_ms(120);
+    CHECK(shoulders() == (PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2 | PAD_TRIANGLE));
+    touch_up(t, 6, cx + 16, cy, now);
+    game.air = 0;
+    fields(2);
+
+    /* a touch in the air wait becomes the stick when the layout comes, its movement counting */
+    game.air = 1;
+    field();
+    touch_down(t, 7, cx, cy, now);
+    slide(7, cx, cy, cx, cy + 9, 40);   /* ↓ inside the wait */
+    wait_ms(200);
+    CHECK(shoulders() == (PAD_L2 | PAD_R2));   /* Bar Kneel */
+    touch_up(t, 7, cx, cy + 9, now);
+    game.air = 0;
+    fields(2);
+
+    /* the sector table */
+    CHECK(touch_sector_buttons(2) == (PAD_L1 | PAD_R1) && touch_sector_buttons(3) == PAD_L1 && touch_sector_buttons(7) == PAD_R2);
+    CHECK(!strcmp(touch_trick_name(PAD_L1 | PAD_L2 | PAD_R1), "CLIFF HANGER"));
+}
+
+static void test_online_panel(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    game.online = 1;
+    field();
+    tap(1, TC_PAUSE);   /* online: the panel, no START */
+    CHECK(!(buttons() & PAD_START));
+    /* Leave race: the first tap arms it, the second leaves */
+    TouchShape shapes[TOUCH_SHAPES];
+    int n = touch_shapes(t, shapes, TOUCH_SHAPES);
+    CHECK(n > 0);
+    float lx, ly;
+    CHECK(touch_target(t, TOUCH_TARGET_PANEL, 2, &lx, &ly));
+    int left = 0;
+    for (int i = 1; i <= 2; i++) {
+        touch_down(t, 2, lx, ly, now);
+        touch_up(t, 2, lx, ly, now);
+        field();
+        if (touch_take_ask(t) == TOUCH_ASK_LEAVE_RACE && !left) left = i;
+    }
+    /* Bail out online: SELECT twice, no START */
+    tap(3, TC_PAUSE);
+    float bx, by;
+    touch_target(t, TOUCH_TARGET_PANEL, 1, &bx, &by);
+    touch_down(t, 4, bx, by, now);
+    touch_up(t, 4, bx, by, now);
+    uint16_t edges[8];
+    int n2 = record(edges, 8, 20);
+    CHECK(n2 == 2 && edges[0] == PAD_SELECT && edges[1] == PAD_SELECT);
+    CHECK(left == 2);   /* never on the first tap */
+}
+
+static void test_layout_text(void)
+{
+    TouchSettings s, back;
+    touch_settings_default(&s);
+    s.edit[0][TC_PEDAL] = (TouchEdit){-3.5f, 2, 1.1f};
+    s.edit[1][TC_CROSS] = (TouchEdit){1, -1, 0.9f};
+    char text[1024];
+    touch_layout_format(&s, text, sizeof text);
+    touch_settings_default(&back);
+    touch_layout_parse(&back, text);
+    CHECK(fabsf(back.edit[0][TC_PEDAL].dx + 3.5f) < 0.01f && fabsf(back.edit[0][TC_PEDAL].size - 1.1f) < 0.01f);
+    CHECK(fabsf(back.edit[1][TC_CROSS].dy + 1) < 0.01f);
+    CHECK(back.edit[0][TC_HOP].size == 1);
+}
+
+int main(void)
+{
+    test_scaling();
+    test_flick();
+    test_sprint_guards();
+    test_pause();
+    test_classic_resume();
+    test_trick_stick();
+    test_online_panel();
+    test_layout_text();
+    touch_free(t);
+    if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
+    printf("test_touch: all passed\n");
+    return 0;
+}
