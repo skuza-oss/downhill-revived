@@ -363,10 +363,12 @@ uint16_t *menu_picture_new(void)
     return (uint16_t *)(h + 12);
 }
 
-/* Once a field: a picture not drawn for 8 fields is uploaded again next time (the picker reopened). */
+/* Once a field: a picture not drawn in the last field is uploaded again next time (the picker
+   reopened): its GS blocks are free only while the shell runs (finding 132's census), so a race or
+   anything else in between may have used them. */
 static void menu_preview_field(void)
 {
-    if (uploaded && ++picture_idle > 8) uploaded = NULL;
+    if (uploaded && ++picture_idle > 1) uploaded = NULL;
 }
 
 void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture)
