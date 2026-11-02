@@ -21,17 +21,17 @@ override native_texel_scale: u32 = 0u;
 // A draw pipeline specialised for its draw's state (pipelines.rs, `spec`): the fragment stage
 // takes parts of the state from these bits instead of the uniform: with bit 31 the flags (bits
 // 0-11), with bit 30 the CLAMP modes (bits 12-13 U, 14-15 V), with bit 29 the alpha test (bits
-// 16-18); bit 19 when every texel the draw reads is inside its texture (a decoded texture of
-// exactly tex_size, CLAMP repeat or clamp, unit scale), so load_rgba's bounds test always passes.
-// Paths the draw never takes compile away; the arithmetic of the paths it takes is the same.
-// Zero: the generic pipeline, all from the uniform.
+// 16-18); bit 19 when the texture is exactly tex_size (a decoded texture), so load_texel's bounds
+// test takes the uniform's size instead of asking the texture. Paths the draw never takes compile
+// away; the arithmetic of the paths it takes is the same. Zero: the generic pipeline, all from
+// the uniform.
 override native_spec: u32 = 0u;
 fn draw_flags() -> u32 { return select(nat.flags, native_spec & 4095u, (native_spec & 0x80000000u) != 0u); }
 fn wrap_mode() -> vec2<u32> {
     return select(nat.wrap.xy, vec2<u32>(native_spec >> 12u & 3u, native_spec >> 14u & 3u), (native_spec & 0x40000000u) != 0u);
 }
+fn texture_sized() -> bool { return (native_spec & 0x80000u) != 0u; }
 fn alpha_test() -> u32 { return select(nat.atst, native_spec >> 16u & 7u, (native_spec & 0x20000000u) != 0u); }
-fn texels_inside() -> bool { return (native_spec & 0x80000u) != 0u; }
 
 struct Native {
     target_size: vec2<f32>, flags: u32, atst: u32,
@@ -49,6 +49,16 @@ fn load_rgba(t: texture_2d<f32>, xy: vec2<i32>) -> vec4<f32> {
     let size = vec2<i32>(textureDimensions(t));
     if (any(xy < vec2<i32>(0)) || any(xy >= size)) { return vec4<f32>(0.0); }
     return textureLoad(t, xy, 0);
+}
+// load_rgba(native_texture, xy) without a branch: the load always reads a texel inside the
+// texture (xy clamped) and the select gives 0 outside, so a bilinear's four loads can be issued
+// together instead of each waiting behind its own test (finding 131). Exactly tex_size
+// (texture_sized()): the uniform's size, not the texture's.
+fn load_texel(xy: vec2<i32>) -> vec4<f32> {
+    var size: vec2<i32>;
+    if (texture_sized()) { size = vec2<i32>(nat.tex_size); } else { size = vec2<i32>(textureDimensions(native_texture)); }
+    let v = textureLoad(native_texture, clamp(xy, vec2<i32>(0), size - 1), 0);
+    return select(vec4<f32>(0.0), v, all(xy >= vec2<i32>(0)) && all(xy < size));
 }
 fn load_depth(t: texture_depth_2d, xy: vec2<i32>) -> f32 {
     let size = vec2<i32>(textureDimensions(t));
@@ -96,8 +106,7 @@ fn texel(c: vec2<i32>) -> vec4<f32> {
     let at = vec2<u32>(wrap_coordinate(whole.x, wrap.x, nat.tex_size.x, nat.region.x, nat.region.y),
                        wrap_coordinate(whole.y, wrap.y, nat.tex_size.y, nat.region.z, nat.region.w));
     let xy = (nat.tex_offset + vec2<i32>(at)) * i32(S) + sub * i32(step) + i32(step / 2u);
-    var t: vec4<f32>;
-    if (texels_inside()) { t = textureLoad(native_texture, xy, 0); } else { t = load_rgba(native_texture, xy); }
+    var t = load_texel(xy);
     // GS units. A loaded unorm8 times 255 is exactly the byte (f32(v / 255) * 255 rounds to v for
     // every v); round() keeps it so when a compiler fuses that product into a later add (as the
     // bilinear mix's), where the exact product, v +- 8e-6, would reach a floor() (finding 131).

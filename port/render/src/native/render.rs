@@ -559,7 +559,7 @@ impl Native {
             let mut big_s: u32 = 1;
             // Untextured, or a surface without a texture: zeros.
             let mut group = Some(v.shared.dummy_group.clone());
-            // A decoded texture's size, when that is what the draw reads (`spec`'s `inside`).
+            // A decoded texture's size, when that is what the draw reads (`spec`'s `sized`).
             let mut decoded: Option<(u32, u32)> = None;
             if k.texture_surface >= 0 {
                 let ts = k.texture_surface as usize;
@@ -657,14 +657,9 @@ impl Native {
             let texel_scale = if constants.flags & (1 | 2048) == 1 && source_scale == resolution
                 && source_scale <= 8 && source_scale.is_power_of_two() { source_scale } else { 0 };
             let spec = if crate::native::pipelines::spec_enabled() {
-                // Every texel inside: a decoded texture of exactly tex_size read at unit scale from
-                // offset 0 with CLAMP repeat (tex_size is a power of two) or clamp, so each wrapped
-                // coordinate is in [0, tex_size) and load_rgba's test always passes.
                 let c = &constants;
-                let inside = decoded == Some((c.tex_size[0], c.tex_size[1])) && texel_scale == 1
-                    && c.tex_offset == [0, 0] && c.wrap[0] <= 1 && c.wrap[1] <= 1
-                    && c.tex_size[0].is_power_of_two() && c.tex_size[1].is_power_of_two();
-                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, inside)
+                let sized = decoded == Some((c.tex_size[0], c.tex_size[1]));
+                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, sized)
             } else {
                 0
             };

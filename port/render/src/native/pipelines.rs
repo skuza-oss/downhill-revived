@@ -67,12 +67,12 @@ pub fn spec_enabled() -> bool {
     spec_mode() != SpecMode::Off
 }
 
-/// The fragment specialisation of a draw (native.wgsl's `native_spec`): bit 31, the shader path
-/// bits of `flags` (0-11), the CLAMP modes (12-15), the alpha test (16-18) and `inside` (bit 19:
-/// every texel read is inside the texture). Bits a draw's path never reads are left zero, so draws
-/// that differ only there share a pipeline: an untextured draw has no texture state, a draw without
-/// the alpha test no test.
-pub fn spec(flags: u32, wrap: [u32; 2], atst: u32, inside: bool) -> u32 {
+/// The fragment specialisation of a draw (native.wgsl's `native_spec`): the shader path bits of
+/// `flags` (0-11), the CLAMP modes (12-15) and the alpha test (16-18), each with its given bit
+/// (31, 30, 29), and `sized` (bit 19: the texture is exactly tex_size). Bits a draw's path never
+/// reads are left zero, so draws that differ only there share a pipeline: an untextured draw has
+/// no texture state, a draw without the alpha test no test.
+pub fn spec(flags: u32, wrap: [u32; 2], atst: u32, sized: bool) -> u32 {
     let textured = flags & 1 != 0;
     let mut f = flags & 0xFFF;
     if !textured {
@@ -81,7 +81,7 @@ pub fn spec(flags: u32, wrap: [u32; 2], atst: u32, inside: bool) -> u32 {
     // Each part with its "given" bit (31 flags, 30 CLAMP modes, 29 alpha test).
     let mut bits = 1 << 31 | 1 << 30 | 1 << 29 | f;
     if textured {
-        bits |= (wrap[0] & 3) << 12 | (wrap[1] & 3) << 14 | (inside as u32) << 19;
+        bits |= (wrap[0] & 3) << 12 | (wrap[1] & 3) << 14 | (sized as u32) << 19;
     }
     if f & 64 != 0 {
         bits |= (atst & 7) << 16;
@@ -855,10 +855,10 @@ mod tests {
     #[test]
     fn spec_keeps_what_the_path_reads() {
         let given = 1 << 31 | 1 << 30 | 1 << 29;
-        // Untextured: no texture bits, CLAMP modes or inside; fog, the alpha test and premultiply stay.
+        // Untextured: no texture bits, CLAMP modes or size; fog, the alpha test and premultiply stay.
         assert_eq!(spec(2 | 4 | 32 | 256 | 1024 | 2048, [3, 2], 5, true), given);
         assert_eq!(spec(16 | 64 | 128 | 512 | 32, [1, 1], 6, true), given | 16 | 64 | 128 | 512 | 6 << 16);
-        // Textured: every flag bit, the CLAMP modes and inside; the test only with the alpha test on.
+        // Textured: every flag bit, the CLAMP modes and the size; the test only with the alpha test on.
         assert_eq!(spec(1 | 32 | 16, [2, 3], 5, false), given | 1 | 32 | 16 | 2 << 12 | 3 << 14);
         assert_eq!(spec(1 | 64, [0, 1], 7, true), given | 1 | 64 | 1 << 14 | 7 << 16 | 1 << 19);
         // Upper flag bits are not the shader's.
