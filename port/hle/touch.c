@@ -1745,7 +1745,10 @@ static void box_button(Draw *d, float x, float y, float hw, float hh, int presse
 {
     uint32_t fill = pressed ? rgba(166, 227, 154, 0.55f * alpha) : rgba(10, 14, 18, 0.7f * alpha);
     put(d, TS_RECT, x, y, hw, hh, fminf(hw, hh) * 0.44f, 0, fill, rgba(255, 255, 255, 0.85f * alpha));
-    if (label && *label) text(d, x, y, th, 0, label, rgba(255, 255, 255, alpha));
+    if (label && *label) {
+        float fit = (2 * hw - 1.6f) / (0.9f * (float)strlen(label));   /* inside the rim, with a margin */
+        text(d, x, y, fminf(th, fit), 0, label, rgba(255, 255, 255, alpha));
+    }
 }
 
 static int pressed_control(const Touch *t, int c)
