@@ -1234,6 +1234,15 @@ def core_inputs_key():
             h.update(n.encode() + b'\0' + hashlib.sha256(open(p, 'rb').read().replace(b'\r\n', b'\n')).digest())
     for k in CORE_ENV:
         h.update(('%s=%s\n' % (k, os.environ.get(k, ''))).encode())
+    # the inputs outside the checkout by their content, not only their place: an external
+    # DHD_VUTEXT (vu1_aot.py reads it), SIMDe's headers, the WASI sysroot's headers and libraries
+    vutext = os.environ.get('DHD_VUTEXT')
+    if vutext and os.path.isfile(vutext):
+        h.update(b'vutext\0' + hashlib.sha256(open(vutext, 'rb').read()).digest())
+    for base, patterns in ((SIMDE, ('**/*.h',)), (WASI, ('include/**/*.h', 'lib/**/*.a'))):
+        for pattern in patterns:
+            for p in sorted(glob.glob(os.path.join(base, pattern), recursive=True)):
+                h.update(os.path.relpath(p, base).encode() + b'\0' + hashlib.sha256(open(p, 'rb').read()).digest())
     h.update(('%s|%s|%s\n' % (WASI, SIMDE, WABT)).encode())
     h.update(run(['clang', '--version']).stdout.encode())
     return h.hexdigest()
