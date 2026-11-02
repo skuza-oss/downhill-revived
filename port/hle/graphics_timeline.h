@@ -189,6 +189,7 @@ void graphics_timeline(int phase, unsigned field, double wall_seconds)
     fflush(stderr);
 }
 #else
+static int timeline_enabled(void) { return 0; }
 static int64_t tl_now(void) { return 0; }
 static int64_t tl_begin(void) { return 0; }
 static void tl_add(unsigned which, int64_t start) { (void)which, (void)start; }
