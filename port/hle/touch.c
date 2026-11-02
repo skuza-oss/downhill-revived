@@ -2017,18 +2017,32 @@ static void draw_hint(const Touch *t, Draw *d)
     case TOUCH_HINT_TRICK: line1 = "PUSH A DIRECTION FOR A TRICK"; line2 = t->freeze || t->freeze_at ? "LET GO BEFORE YOU LAND - THE GAME WAITS FOR YOU" : "LET GO BEFORE YOU LAND"; ring = TC_TRICK; break;
     default: return;
     }
-    float W = t->screen.width;
-    float w = fmaxf(strlen(line1) * 2.7f, strlen(line2) * 2.0f) / 2 + 4;
+    float W = t->screen.width, h1 = 3.0f, h2 = 2.2f;
+    float text_w = fmaxf(strlen(line1) * 0.9f * h1, strlen(line2) * 0.9f * h2);
+    float w = text_w / 2 + 4;
     float x = W * 0.42f, y = t->screen.height * 0.3f;
-    put(d, TS_RECT, x, y, w, 6.5f, 2.0f, 0, rgba(10, 14, 18, 0.94f), rgba(255, 255, 255, 0.35f));
-    text(d, x, y - 2.2f, 3.0f, 0, line1, rgba(255, 255, 255, 1));
-    text(d, x, y + 2.6f, 2.2f, 0, line2, rgba(255, 255, 255, 0.7f));
-    if (t->freeze || t->freeze_at) text(d, W * 0.42f, 3.5f, 2.2f, 0, "PAUSED FOR THE HINT", rgba(255, 255, 255, 0.8f));
-    if (ring >= 0 && t->ctl[ring].on) {
+    float rx = 0, ry = 0, rr = 0;
+    int ringed = ring >= 0 && t->ctl[ring].on;
+    if (ringed) {
         const Ctl *k = &t->ctl[ring];
-        float r = ring == TC_TRICK ? 15.5f * trick_scale(t) : k->r;
-        put(d, TS_RING, k->x, k->y, r + 1.5f, 0.9f, 0, 0, 0, rgba(166, 227, 154, 0.9f));
+        rx = k->x, ry = k->y, rr = (ring == TC_TRICK ? 15.5f * trick_scale(t) : k->r) + 1.5f;
+        if (fabsf(x - rx) < w + rr && fabsf(y - ry) < 6.5f + rr) {
+            /* the box would cover the ring it points at (the trick stick's, on the Mi 11i): it goes
+               beside the ring, toward the middle, its text shrunk to the room there */
+            float room = rx > W / 2 ? rx - rr - 4 : W - (rx + rr) - 4;
+            if (2 * w > room && text_w > 0) {
+                float f = fmaxf(room - 8, 10) / text_w;
+                h1 *= f, h2 *= f, w = room / 2;
+            }
+            x = rx > W / 2 ? rx - rr - 2 - w : rx + rr + 2 + w;
+        }
     }
+    put(d, TS_RECT, x, y, w, 6.5f, 2.0f, 0, rgba(10, 14, 18, 0.94f), rgba(255, 255, 255, 0.35f));
+    text(d, x, y - 2.2f, h1, 0, line1, rgba(255, 255, 255, 1));
+    text(d, x, y + 2.6f, h2, 0, line2, rgba(255, 255, 255, 0.7f));
+    /* under the box: the top's camera and Pause buttons stay clear */
+    if (t->freeze || t->freeze_at) text(d, x, y + 6.5f + 2.8f, 2.2f, 0, "PAUSED FOR THE HINT", rgba(255, 255, 255, 0.8f));
+    if (ringed) put(d, TS_RING, rx, ry, rr, 0.9f, 0, 0, 0, rgba(166, 227, 154, 0.9f));
 }
 
 int touch_shapes(const Touch *t, TouchShape *out, int max)
