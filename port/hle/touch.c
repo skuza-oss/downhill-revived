@@ -66,8 +66,8 @@ static int place_of(int preset, int control, int attacks, int hud_moved, Place *
     if (control == TC_STICK) return preset == TOUCH_CLASSIC ? P(AT_BL, SHAPE_ROUND, 17, 68, 15, 0) : P(AT_BL, SHAPE_ROUND, 21, 66, 15, 0);
     if (preset == TOUCH_CLASSIC) {
         switch (control) {
-        case TC_CAMERA: return P(AT_TL, SHAPE_BOX, 30, 8, 7, 11.5f);        /* SELECT */
-        case TC_PAUSE: return P(AT_TL, SHAPE_BOX, 41, 8, 7, 11.5f);         /* START */
+        case TC_CAMERA: return P(AT_TL, SHAPE_BOX, 23, 8, 7, 11.5f);        /* SELECT */
+        case TC_PAUSE: return P(AT_TL, SHAPE_BOX, 32, 8, 7, 11.5f);         /* START */
         case TC_LBAR: return P(AT_BL, SHAPE_BOX, 22, 37, 20, 12.5f);
         case TC_RBAR: return P(AT_BR, SHAPE_BOX, 80, 37, 20, 12.5f);
         case TC_L3: return P(AT_BL, SHAPE_ROUND, 29.5f, 85, 5.6f, 0);
@@ -81,9 +81,11 @@ static int place_of(int preset, int control, int attacks, int hud_moved, Place *
         default: return 0;
         }
     }
+    /* The top buttons end left of 36 %: the game centres its messages at the top ("YOU BAILED!",
+       "FAILED TO LAND TRICK", the trick names), from about 36 % across on a 20:9 screen. */
     switch (control) {
-    case TC_CAMERA: return P(AT_TL, SHAPE_BOX, 32, 8, 5.2f, 11.5f);
-    case TC_PAUSE: return P(AT_TL, SHAPE_BOX, 41, 8, 5.2f, 11.5f);
+    case TC_CAMERA: return P(AT_TL, SHAPE_BOX, 22.5f, 8, 5.2f, 11.5f);
+    case TC_PAUSE: return P(AT_TL, SHAPE_BOX, 30, 8, 5.2f, 11.5f);
     case TC_TRICK: return P(AT_BR, SHAPE_ROUND, 70, 50, 20.1f, 0);         /* 31 mm */
     default: break;
     }
@@ -867,7 +869,8 @@ static Box panel_box(const Touch *t, int b)
 }
 
 /* The editor's buttons, in the top buttons' row (their default places: the editor moves them):
-   GROUND and AIR on one side of them, - + RESET DONE on the wider side; b = EDIT_BUTTONS is the
+   GROUND and AIR on one side of them, - + RESET DONE on the wider side (both groups there, GROUND
+   and AIR first, when the other side is too narrow); b = EDIT_BUTTONS is the
    size readout's place, under GROUND and AIR. A screen too narrow for that gets one row below. */
 static Box editor_box(const Touch *t, int b)
 {
@@ -882,8 +885,14 @@ static Box editor_box(const Touch *t, int b)
     float group_a = w[EDIT_GROUND] + 2 + w[EDIT_AIR], group_b = w[EDIT_MINUS] + w[EDIT_PLUS] + w[EDIT_RESET] + w[EDIT_DONE] + 6;
     float left_room = span0 - 2, right_room = W - 2 - span1;
     int b_right = right_room >= left_room;
-    if ((b_right ? right_room : left_room) >= group_b && (b_right ? left_room : right_room) >= group_a) {
-        float ax = b_right ? span0 - group_a : span1, bx = b_right ? span1 : span0 - group_b;
+    float wide = b_right ? right_room : left_room, narrow = b_right ? left_room : right_room;
+    int split = wide >= group_b && narrow >= group_a;
+    int together = !split && wide >= group_a + 2 + group_b;   /* both groups on the wide side */
+    if (split || together) {
+        float ax, bx;
+        if (split) ax = b_right ? span0 - group_a : span1, bx = b_right ? span1 : span0 - group_b;
+        else if (b_right) ax = span1, bx = span1 + group_a + 2;
+        else bx = span0 - group_b, ax = bx - 2 - group_a;
         if (b == EDIT_BUTTONS) return (Box){ax + group_a / 2, y + hh + 3.0f, group_a / 2, 1.5f};
         if (b <= EDIT_AIR) return (Box){ax + (b == EDIT_GROUND ? w[0] / 2 : w[0] + 2 + w[1] / 2), y, w[b] / 2, hh};
         float x = bx;

@@ -235,3 +235,10 @@ the race is `limit=cpu:vu` there. No measurable cost.
 Left open: the overlay's labels have a thin dark edge and are harder to read over bright sky;
 Set Tilt Centre and the tilt direction need a hand on the phone; the trick roll (Nac Nac) and
 the signature were not done on the phone.
+
+### After the phone test: the top buttons moved left
+
+The phone's screenshots showed Pause (41 %) over the game's own messages centred at the top ("YOU
+BAILED!", "FAILED TO LAND TRICK", trick names), which start at about 36 % across on a 20:9 screen.
+Thumb zones' camera and Pause are now at 22.5 % and 30 %, Classic's SELECT and START at 23 % and
+32 %: both end before 36 %, right of the moved speedometer and PUNCH bar.
