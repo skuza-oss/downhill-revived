@@ -376,6 +376,21 @@ as LB/RB/LT/RT (L/R/ZL/ZR), at draw time in the text packet (`port/hle/prompts.c
 --play` starts the game at once without the launcher's window (Steam shortcuts, the Steam Deck).
 Boot state trace with default settings equal to next/0.7.7's.
 
+2026-11-02 (finding 131): the native renderer's draw pass from first principles. A diagnostic,
+`DHD_GPU_STATS`, gives GPU time and pixels shaded per kind of draw: a race frame shades about four
+screens of pixels, two of them one blended terrain kind, at three times the cost per pixel of a
+plain fill. Each draw now gets a pipeline specialised for its state (built on a worker thread; the
+generic one draws until it is ready), texel bounds tests stay but cost what they must, and decoded
+textures are R32Uint texels read by one gather per bilinear footprint. The Ryzen 5 7600 iGPU now
+holds 60 fps paced at 5x (was 4x); GPU time per frame is 22-24% lower at every scale (4x uncapped
+76.5 -> 102.6 fps, 12.02 -> 9.11 ms; 8x 21.5 -> 28.0 fps, 45.13 -> 35.30 ms; DXC alike). The RTX at
+8x is unchanged (CPU-bound; GPU 1.92 -> 1.68 ms). Oracle goldens, the replay matrix on both GPUs
+and APIs, `test_gs_wgpu.py` and the native-transfer tests pass; VRAM is identical everywhere. One
+picture change remains for a decision: a `round()` that makes the generic and specialised shaders
+agree draws some pixels one step differently on DX12 than before (none on Vulkan; DXC up to 0.6% of
+a menu picture's pixels at 4x, about 0.003% of race pixels). The AMD iGPU varies a few pixels from
+run to run (also before; no application race found, finding 131 lists the checks).
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
