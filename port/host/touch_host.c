@@ -398,8 +398,9 @@ void host_service_touch_field(uint32_t address)
     g.race_ms = h->race_ms, g.vsync = h->vsync, g.fps = h->fps;
     trace_race_ms = h->race_ms;
     static int trace_air = -1;
-    if (trace_on() && h->air != trace_air) {
-        if (h->race_hud) fprintf(stderr, "touch log: air %d (%.0f ms) race %.0f ms\n", h->air, ms_now(), h->race_ms);
+    if (trace_on() && !h->race_hud) trace_air = -1;   /* each race starts with a line */
+    else if (trace_on() && h->air != trace_air) {
+        fprintf(stderr, "touch log: air %d (%.0f ms) race %.0f ms\n", h->air, ms_now(), h->race_ms);
         trace_air = h->air;
     }
     touch_update(touch, &g, ms_now());
