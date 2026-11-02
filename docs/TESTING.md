@@ -50,6 +50,7 @@ after a version change before a live check.
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool |
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 141) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
 
 A typical in-game check:
@@ -94,6 +95,7 @@ Menus and riding:
 | `DHD_AUTOPAD` | button script by seconds |
 | `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...` |
 | `DHD_RACE_SYNC=1` | race scripts run on the race clock |
+| `DHD_REPLAY_TEST=S` | at race second S the race's replay starts, as REPLAY in the results does; `DHD_REPLAY_TRACE=path`: the riders' positions each field (finding 141) |
 | `DHD_FRAME_CLOCK=1` | the game clock from field counts, not the wall clock (repeatable runs) |
 | `DHD_HEADLESS=1` | no message boxes (a bad disc only logs), and no launcher (Linux smoke runs) |
 
