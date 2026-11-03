@@ -76,3 +76,19 @@ Server tests: 3 files, 51 tests pass. Hidden-desktop room races against two nett
 
 An earlier build hid the HUD from the finish itself, so the finish place never showed. The HUD now
 hides only once the camera has left this PC's rider (`on.watched`).
+
+## Two fixes after 0.7.8 (player reports)
+
+- **The watched player's camera distance stayed for the next race.** View 0's camera distance
+  (`D_004225A0 +0x12220`, its blend at +0x12230, per view) is read when a race starts
+  (`func_00148860`). `func_0014CC38` changes it from the camera buttons of the view's *rider*, and
+  `func_0014DAA8` stores the result. Watching a puppet, the other player's camera presses changed
+  this PC's setting. `watch_cut` now saves the setting when the camera first leaves this PC's
+  rider, and `watch_zoom_restore` puts it back when the race ends for this PC (`race_over`,
+  `back_to_room`). While watching, the view still follows the watched player's camera changes.
+- **The screen stayed orange after switching riders.** Players saw it when the watched rider
+  crashed while holding Quick Mount. The game's own rider switch, `func_001487D8`, never leaves a
+  rider that is crashing: crash flag +0x4098 bit 2, or crash state +0x4ECC at +0x6320 / +0x62E0.
+  The crash's camera and screen effects end with the crash. The spectate cut skipped that check.
+  It now waits for the crash to end, at most 5 s of wall time (a departed rider's crash
+  never ends).

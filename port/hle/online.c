@@ -334,6 +334,8 @@ static struct {
     int watch_slot, watch_paused, watch_direction;
     int watched;                /* the camera has left this PC's rider: its HUD stays hidden */
     double watch_finished_at;
+    int saved_zoom, saved_zoom_rate; /* this PC's camera setting before watching (watch_cut) */
+    double cut_wait_at;         /* a cut waits while the watched rider crashes (since then) */
     unsigned ai_sent;
     int last_race_id;
     double leave_at;
@@ -1100,11 +1102,26 @@ extern void func_00148860(void *);
 
 void hle_online_watch_resume(void) { on.watch_paused = on.watch_direction = 0; }
 
+/* View 0's camera setting (distance, D_004225A0 +0x12220, and its blend +0x12230, for the next
+   race too): func_0014CC38 changes it from the view's rider's own camera buttons, so watching a
+   player who changes theirs changed this PC's (func_0014DAA8 stores it). Saved when the camera
+   first leaves this PC's rider, put back when the race ends for this PC. */
+#define VIEW0_ZOOM (0x4225A0 + 0x12220)
+#define VIEW0_ZOOM_RATE (0x4225A0 + 0x12230)
+
+static void watch_zoom_restore(void)
+{
+    if (!on.watched) return;
+    EE32(VIEW0_ZOOM) = on.saved_zoom;
+    EE32(VIEW0_ZOOM_RATE) = on.saved_zoom_rate;
+}
+
 static void watch_cut(int slot)
 {
     if (slot == on.watch_slot) return;
     on.watch_slot = slot;
     on.watch_finished_at = 0;
+    if (slot && !on.watched) on.saved_zoom = EE32(VIEW0_ZOOM), on.saved_zoom_rate = EE32(VIEW0_ZOOM_RATE);
     if (slot) on.watched = 1;
     char name[48];
     fprintf(stderr, "online: watching %s (slot %d)\n",
@@ -1124,7 +1141,20 @@ void hle_online_watch_camera(void *camera)
     if (camera != EE_PTR(0x37EA60) || slot < 0 || slot >= hle_online_race_riders()) return;
     if (!slot && !(from_menu && on.end_held)) return;
     if (on.watch_paused || EE32(0x398C40 + 0x5BE4)) return; /* the race loop's pause state */
-    int cut = *(uint8_t **)((char *)camera + 0x2B4) != RIDER(slot);
+    uint8_t *old = *(uint8_t **)((char *)camera + 0x2B4);
+    int cut = old != RIDER(slot);
+    /* The game's own rider switch (func_001487D8) never leaves a rider while it crashes (crash
+       flag +0x4098 bit 2, or the crash states +0x6320 / +0x62E0): the crash's camera and screen
+       effects end only with it. Leaving one then (a crash with Quick Mount held) left the
+       screen orange. The cut waits for the crash to end, at most CUT_WAIT seconds. */
+    enum { CUT_WAIT = 5 };
+    if (cut && old && ((old[0x4098] >> 2 & 1) || *(uint8_t **)(old + 0x4ECC) == old + 0x6320
+                       || *(uint8_t **)(old + 0x4ECC) == old + 0x62E0)) {
+        double now = host_wall_seconds();
+        if (!on.cut_wait_at) on.cut_wait_at = now;
+        if (now - on.cut_wait_at < CUT_WAIT) return;
+    }
+    on.cut_wait_at = 0;
     *(uint8_t **)((char *)camera + 0x2B4) = RIDER(slot);
     if (cut) fprintf(stderr, "online: camera cut slot %d, mode %d -> 1\n", slot, EE32(0x37EA60 + 0x2B8));
     if (cut || EE32(0x37EA60 + 0x2B8) != 1) {
@@ -1480,6 +1510,7 @@ static void race_over(void)
     kernel_pace_shared(0);
     set_env("DHD_NAV", saved_nav);  /* "" unsets it */
     set_env("DHD_RACE_SEED", saved_seed);
+    watch_zoom_restore();
     memset(&on, 0, sizeof on);
     online = 0, from_menu = 0, connected = 0;
     selected_ride = 0;
@@ -1502,6 +1533,7 @@ static void back_to_room(void)
     kernel_pace_shared(0);
     set_env("DHD_NAV", saved_nav);
     set_env("DHD_RACE_SEED", saved_seed);
+    watch_zoom_restore();
     memset(&on, 0, sizeof on);
     online = 0, from_menu = 0, connected = 0;
     selected_ride = 0;
