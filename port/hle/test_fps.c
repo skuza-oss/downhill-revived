@@ -2,6 +2,7 @@
    snapshots. Compiled with the production host clock and math helpers. */
 #include "../include/fps.h"
 #include "../host/host_api.h"
+#include "pace_grid.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -23,8 +24,49 @@ void func_00155E78(void *p,int kind) { (void)p;recoveries++;recovery_kind=kind; 
 int func_0012D300(void *p) { (void)p;return 0; }
 float func_0012DF48(void *p) { (void)p;return (float)braking; }
 uint64_t snd_test_position(void) { return 0; }
+/* The paced frames' grid (pace_grid.h: pace() and the slow stretch), on a fake clock: frames take
+   `work` seconds and wait for their due time. A change of period (load to GO, a replay's codes)
+   waits at most one new period; the grid it had is kept, not restarted. */
+static double grid_frames(PaceGrid *grid,double *now,double period,int frames,double work,double *longest)
+{
+    double due=0;
+    for (int i=0;i<frames;i++) {
+        due=pace_grid_next(grid,*now,period);
+        if (due-*now>*longest) *longest=due-*now;
+        if (due>*now) *now=due;
+        *now+=work;
+    }
+    return due;
+}
+static void pace_grid_checks(void)
+{
+    PaceGrid grid={0};
+    double now=10,longest=0;
+    grid_frames(&grid,&now,1.0/144,1000,.002,&longest);
+    longest=0;
+    grid_frames(&grid,&now,1.0/60,1,.002,&longest);
+    assert(longest<=1.0/60+1e-9);  /* was 1000 x (1/60 - 1/144) = 9.7 s */
+    grid_frames(&grid,&now,1.0/60,100,.002,&longest);
+    /* a replay: 200 frames at code 120, then 150 (1/7200 s each) */
+    longest=0;
+    grid_frames(&grid,&now,120/7200.0,200,.002,&longest);
+    grid_frames(&grid,&now,150/7200.0,50,.002,&longest);
+    assert(longest<=150/7200.0+1e-9);  /* was 0.83 s */
+    /* a shorter period keeps the grid: the next frame is due one new period on, not a restart */
+    double before=grid_frames(&grid,&now,1.0/60,10,.002,&longest);
+    double after=grid_frames(&grid,&now,1.0/144,1,.002,&longest);
+    assert(after && fabs(after-before-1.0/144)<1e-9);
+    /* quick frames repay a slow one on the grid; more than two periods behind starts again */
+    before=grid_frames(&grid,&now,1.0/60,1,.002,&longest);
+    now+=1.5/60;
+    after=grid_frames(&grid,&now,1.0/60,1,.002,&longest);
+    assert(fabs(after-before-1.0/60)<1e-9);
+    now+=3.0/60;
+    assert(pace_grid_next(&grid,now,1.0/60)==0 && grid.base==now);
+}
 int main(int argc,char **argv)
 {
+    pace_grid_checks();
     int n=atoi(argv[1]);
     /* the core's guest memory: the registers at 0x10000000, PS2 RAM at 0x08000000 */
     host_putenv_s("DHD_FPS",argv[1]);  /* the host environment port_fps reads */

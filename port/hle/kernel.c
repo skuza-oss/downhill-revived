@@ -12,6 +12,7 @@
 #include "timer.h"
 #include "state_trace.h"
 #include "../include/fps.h"
+#include "pace_grid.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -737,7 +738,7 @@ static int paced;
    gives host_wall_seconds real time). Deterministic runs (DHD_FRAME_CLOCK=1 alone) keep the
    nominal step. */
 static int wall_steps;
-static double pace_base;
+static PaceGrid pace_grid;
 
 /* An online race waited `seconds` for the other players: the following frames keep their spacing
    from the end of the wait instead of catching up (finding 042: a PC that started a little early
@@ -745,7 +746,7 @@ static double pace_base;
    covers it). */
 void kernel_pace_slip(double seconds)
 {
-    if (pace_base) pace_base += seconds;
+    if (pace_grid.base) pace_grid.base += seconds;
     port_clock_rebase();
 }
 
@@ -759,23 +760,16 @@ unsigned kernel_pace_late_ms;  /* for the online log: game time owed to wall tim
 
 void kernel_pace_shared(int on)
 {
-    if (on && !pace_shared) pace_base = 0;  /* from this field */
+    if (on && !pace_shared) pace_grid.base = 0;  /* from this field */
     pace_shared = on;
     port_clock_rebase();  /* from this step (the start's wait is no game time) */
 }
 
 static void pace(void)
 {
-    double base = pace_base;
-    static uint64_t fields;
-    const double period = port_frame_period();
-    double now = host_wall_seconds(), due = base + (double)++fields * period;
+    double due = pace_grid_next(&pace_grid, host_wall_seconds(), port_frame_period());
     if (pace_shared) kernel_pace_late_ms = (unsigned)(port_fps_behind() * 1000);
-    if (!base || now > due + 2 * period) {  /* the first field, or behind: start again from now */
-        pace_base = now, fields = 0;
-        return;
-    }
-    host_wait_wall(due);
+    if (due) host_wait_wall(due);  /* 0: the first field, or behind: the grid starts again from now */
 }
 
 /* Just-in-time frames (round 38, finding 052; DHD_LATENCY=0 turns them off). One VBLANK both

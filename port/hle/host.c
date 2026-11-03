@@ -7,6 +7,7 @@
 #include "hle.h"
 #include "timer.h"
 #include "state_trace.h"
+#include "pace_grid.h"
 #include "stick.h"
 #include "../gs/button_icons.h"
 #include "../include/version.h"
@@ -1442,13 +1443,12 @@ void host_pacing_wait(void)
                thread's picture in series, 25 ms a field on a T612-class phone where they overlap
                in 18 (finding 127). Fields keep pace()'s grid instead: each starts a period after
                the last one's place on it, so fields that come in quick repay a slow one, and the
-               grid starts again from now only once it is more than two periods behind. The
+               grid starts again from now only once it is more than two periods behind
+               (pace_grid.h: a change of period keeps the frames before on their own). The
                presenter keeps the pictures a field apart. */
-            static double base;
-            static uint64_t fields;
-            double now = host_wall_seconds(), start = base + (double)++fields * period;
-            if (!base || now > start + 2 * period) base = now, fields = 0;
-            else if (start > now) host_wait_wall(start);
+            static PaceGrid slow;
+            double now = host_wall_seconds(), start = pace_grid_next(&slow, now, period);
+            if (start > now) host_wait_wall(start);
             jit_due = frame_began = host_wall_seconds();  /* shown as soon as it is ready */
             return;
         }

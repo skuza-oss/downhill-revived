@@ -139,6 +139,20 @@ here and traced as the reference (not `next077-ref`); this branch's race 5000 fi
 fields: **all rows match**, on the build before the last code commit and again on the branch
 head (`0efac73`'s code).
 
+## The pacing grid when the period changes (review, 2026-11-03)
+
+`port_frame_period()` is no longer a constant of the session: 1/60 from the load to GO, each
+recorded step in a replay, 1/N otherwise. The two pacing grids (`kernel.c` `pace()`, used online
+and with `DHD_LATENCY=0` or `DHD_INTERP`, and `host_pacing_wait`'s slow stretch, a PC or phone
+missing the rate on more than one frame in ten) set each frame's due time to
+`base + frames x period` with the current period, so a longer period moved the due time by every
+frame since the grid's start: 1000 frames at 144 then the load's 1/60 waited 9.7 s, 200 replay
+frames at code 120 then 150 waited 0.83 s. Both now use `port/hle/pace_grid.h`, which re-anchors
+the grid at the last frame's place when the period changes (the frames before keep the period
+they had). `test_fps.py` checks it on a fake clock: no wait longer than one new period at either
+change, a shorter period keeps the grid, quick frames still repay a slow one, and more than two
+periods behind still starts again.
+
 ## Limits and open
 
 - **Replays recorded on the original clock** (by the PS2, or by the port up to 0.7.7, whose
