@@ -13,7 +13,8 @@
 
     <!-- Controller rumble -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- The online menu (its server list) -->
+    <!-- The update notice (port/host/android_update.c, finding 143): once a day it asks the online
+         server, then GitHub, whether a newer release has an APK. Phones have no online play yet. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application android:label="@string/app_name"
