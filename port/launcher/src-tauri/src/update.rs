@@ -399,6 +399,9 @@ fn rank(f: Failure) -> u8 {
 
 /// The bottom bar's line for a failed check: official is how GitHub failed (or the player's own
 /// source), backup how the backup failed (None: the player's own source, which has no backup).
+/// What the player can act on comes first: no connection at all, then their connection's trouble
+/// (the backup unreachable says more than GitHub's "limit", which a captive portal or filter can
+/// answer too), then GitHub's limit when the backup did answer, then the rest.
 pub fn check_failed_message(official: Failure, backup: Option<Failure>, version: &str) -> String {
     let play = format!("You can still play {version}.");
     match backup {
@@ -408,8 +411,8 @@ pub fn check_failed_message(official: Failure, backup: Option<Failure>, version:
             f => format!("Couldn't reach your update source ({}). {play}", reason(f, "it")),
         },
         Some(Failure::Offline) if official == Failure::Offline => format!("No internet connection. {play}"),
-        Some(_) if official == Failure::RateLimited => {
-            "GitHub is limiting update checks from your connection; try again in an hour.".into()
+        Some(b) if official == Failure::RateLimited && !matches!(b, Failure::Offline | Failure::TimedOut) => {
+            format!("GitHub is limiting update checks from your connection; try again in an hour. {play}")
         }
         Some(b) => {
             let f = if rank(b) < rank(official) { b } else { official };
@@ -860,7 +863,7 @@ mod tests {
         ]);
         let bad_backup = serve_routes(vec![("/v1/latest", 200, "", backup_manifest("9.9.8", "https://example.com/evil.zip"))]);
         let e = check_from(None, &format!("{github}/limited"), &closed_address(), PLATFORM, "0.7.6").unwrap_err();
-        assert_eq!(e.say, "GitHub is limiting update checks from your connection; try again in an hour.");
+        assert_eq!(e.say, "GitHub is limiting update checks from your connection; try again in an hour. You can still play 0.7.6.");
         assert!(e.detail.contains("RateLimited") && e.detail.contains("Refused"), "{}", e.detail);
         let e = check_from(None, &format!("{github}/forbidden"), &closed_address(), PLATFORM, "0.7.6").unwrap_err();
         assert_eq!(e.say, "Couldn't reach GitHub or the backup server (the connection was refused). You can still play 0.7.6.");
@@ -925,7 +928,13 @@ mod tests {
         assert_eq!(check_failed_message(Tls, Some(Tls), v),
                    "Couldn't reach GitHub or the backup server (a secure connection couldn't be made). You can still play 0.7.6.");
         assert_eq!(check_failed_message(RateLimited, Some(Http(503)), v),
-                   "GitHub is limiting update checks from your connection; try again in an hour.");
+                   "GitHub is limiting update checks from your connection; try again in an hour. You can still play 0.7.6.");
+        // GitHub's "limit" (a captive portal can answer like it) and no way to the backup: the
+        // connection is the trouble, not GitHub's hourly limit
+        assert_eq!(check_failed_message(RateLimited, Some(Offline), v),
+                   "Couldn't reach GitHub or the backup server (your network couldn't find them). You can still play 0.7.6.");
+        assert_eq!(check_failed_message(RateLimited, Some(TimedOut), v),
+                   "Couldn't reach GitHub or the backup server (your connection timed out). You can still play 0.7.6.");
         assert_eq!(check_failed_message(Offline, None, v), "No internet connection. You can still play 0.7.6.");
         assert_eq!(check_failed_message(BadAnswer, None, v),
                    "Couldn't reach your update source (the answer wasn't usable). You can still play 0.7.6.");

@@ -107,13 +107,23 @@ offline (DNS, network unreachable or down), timed out, refused, cut (reset or cl
 
 Update check, both GitHub and the backup failed:
 - both offline: "No internet connection. You can still play 0.7.6."
-- GitHub rate limited: "GitHub is limiting update checks from your connection; try again in an hour."
+- GitHub rate limited and the backup answered (an HTTP error, a bad answer, refused, cut...):
+  "GitHub is limiting update checks from your connection; try again in an hour. You can still play
+  0.7.6."
 - otherwise: "Couldn't reach GitHub or the backup server (REASON). You can still play 0.7.6.". The
   REASON is taken from whichever failure says more about the connection (offline, timeout, TLS,
   refused, cut before a server's error): "your connection timed out", "your network couldn't find
   them", "a secure connection couldn't be made", "the connection was refused", "the connection was
   cut", "a server error, HTTP 503", "the request was refused, HTTP 404", "the answer wasn't usable",
   "a network error".
+
+The order is what the player can act on (2026-11-03, review Muse #8). Before, GitHub's rate limit
+won over everything, so GitHub "limiting" plus a backup that was offline or timed out told the
+player to wait an hour, without "You can still play", when they had no connection. A 403 with
+`x-ratelimit-remaining: 0` can come from a captive portal or filter too. Now a backup that is
+offline or timed out gives the "Couldn't reach" line ("your network couldn't find them", "your
+connection timed out"), and the limit line, which now ends with "You can still play" like the
+others, is for a backup that did answer.
 
 The player's own source: "No internet connection. ..." / "Your update source is limiting checks;
 try again later. ..." / "Couldn't reach your update source (REASON). You can still play 0.7.6."
