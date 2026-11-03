@@ -12,6 +12,9 @@
      flicks; it waits for the window to close when the overlay itself let ✕ up, or HOP, SLIDE or
      the trick stick was opened and released since ✕ went up, or the race just resumed.
    - Camera (SELECT): a second press inside the game's SELECT double-press window (bail) waits.
+   - A press the game hasn't read yet when its finger lifts (down and up between two pad reads, a
+     stall, a held-back or waiting press) still goes, for PRESS_FIELDS; a later press of the same
+     buttons waits for its release, so a double tap stays two presses (the windows above apply).
    - The air layout comes air_wait_ms after the air flag; the trick stick's zones, latches and
      its one sending rule (settle, past the edge once the gate is open, landing).
    - Paused: race touches send nothing; the pause rows are ↓ / ↑ steps then ✕, sent as presses
@@ -160,7 +163,11 @@ typedef struct {
     float grab_dx, grab_dy;    /* editor: finger to control centre */
     int target;                /* panel / editor: the button under the touch-down */
     double started_race;       /* race ms at touch-down */
-    int fields;                /* fields the finger was down for (0: down and up between two) */
+    unsigned order;            /* touch-downs so far at its own: older fingers have smaller ones */
+    int shown;                 /* its press was in the pad output of a field (the game read it) */
+    int lifted;                /* lifted before the game read its press: kept until it has (finger_of skips it) */
+    uint32_t lift_until;       /* lifted and shown: the VBLANK its press ends */
+    int after_lift;            /* waits for an older lifted press of the same buttons to be let up first */
 } Finger;
 
 typedef struct {
@@ -203,7 +210,8 @@ struct Touch {
     int select_was_down;
     /* timed presses */
     uint16_t pulse_buttons[16];
-    uint32_t pulse_until[16];
+    uint32_t pulse_until[16];  /* the VBLANK it ends, once it went out */
+    int pulse_fields[16];      /* its length, until it went out (then 0) */
     Step seq[48];
     int seq_len, seq_at;
     uint32_t seq_step_until;
@@ -234,6 +242,7 @@ struct Touch {
     double freeze_since;
     int race_new;
     int race_was_on;           /* the race was on screen at the last update */
+    unsigned downs;            /* touch-downs so far (Finger.order) */
 };
 
 static const uint16_t SECTOR_BUTTONS[8] = {
@@ -458,12 +467,14 @@ static void buzz(Touch *t, int kind)
     if (t->set.vibration && kind > t->buzz) t->buzz = kind;
 }
 
+/* A press of `fields` fields, counted from the first pad read that has it (an event handled after
+   a stall, with the VBLANKs of the stall already gone, still gets all of them). */
 static void pulse(Touch *t, uint16_t buttons, int fields)
 {
     for (int i = 0; i < 16; i++)
         if (!t->pulse_buttons[i]) {
             t->pulse_buttons[i] = buttons;
-            t->pulse_until[i] = t->game.vsync + press_vsyncs(t, fields);
+            t->pulse_fields[i] = fields;
             return;
         }
 }
@@ -503,7 +514,7 @@ static void seq_advance(Touch *t)
 static Finger *finger_of(Touch *t, long long id)
 {
     for (int i = 0; i < TOUCH_FINGERS; i++)
-        if (t->f[i].used && t->f[i].id == id) return &t->f[i];
+        if (t->f[i].used && !t->f[i].lifted && t->f[i].id == id) return &t->f[i];
     return NULL;
 }
 
@@ -580,12 +591,54 @@ static void select_press_begins(Touch *t, Finger *f)
     }
 }
 
+/* When a button press (PEDAL or a button) may go out: ✕ and SELECT by their windows' rules, the
+   rest at once. */
+static void press_rule(Touch *t, Finger *f)
+{
+    if (f->buttons & PAD_CROSS) cross_press_begins(t, f, f->job != JOB_PEDAL);
+    else if (f->buttons & PAD_SELECT) select_press_begins(t, f);
+    else f->sent = 1, f->due_now = 0, f->due_race = 0;
+}
+
+/* An older press of some of the same buttons lifted before the game let it up: this one would
+   merge with it (one press, no double tap), so it waits. */
+static int lifted_before(const Touch *t, const Finger *f)
+{
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        const Finger *g = &t->f[i];
+        if (g != f && g->used && g->lifted && (g->buttons & f->buttons) && g->order < f->order) return 1;
+    }
+    return 0;
+}
+
+/* A new press (route_thumb, route_classic): after an older lifted one of its buttons, or by its rule. */
+static void press_begins(Touch *t, Finger *f)
+{
+    if (lifted_before(t, f)) {
+        f->after_lift = 1;
+        f->sent = 0, f->due_now = 0, f->due_race = 0;
+        return;
+    }
+    press_rule(t, f);
+}
+
+/* A press the game hasn't read yet, its finger lifting: 1 when it still goes (the finger is kept,
+   lifted, until it has gone for PRESS_FIELDS); 0 when there is nothing to send (a held-back PEDAL
+   that flicked: the flick was its attack). A press held back to see whether it flicks didn't:
+   it goes now. A guarded one, or one waiting for an earlier tap's release, goes when it would have. */
+static int press_lifts(Touch *t, Finger *f)
+{
+    if (f->job == JOB_PEDAL && f->flicked && !f->sent) return 0;
+    if (f->due_now) f->due_now = 0, f->due_race = 0;
+    return 1;
+}
+
 /* Held-back and guarded presses whose time came. */
 static void due_presses(Touch *t)
 {
     for (int i = 0; i < TOUCH_FINGERS; i++) {
         Finger *f = &t->f[i];
-        if (!f->used || f->sent || !f->buttons) continue;
+        if (!f->used || f->sent || !f->buttons || f->after_lift) continue;
         if (f->job == JOB_PEDAL && f->flicked) continue;   /* a flick: no ✕ until it lifts */
         int now_due = f->due_now > 0 && t->now >= f->due_now;
         int race_due = f->due_race > 0 && race_ms(t) >= f->due_race;
@@ -799,6 +852,7 @@ static void drop_race_touches(Touch *t)
         if (t->f[i].used) {
             end_finger_job(t, &t->f[i]);
             t->f[i].job = JOB_IGNORED;
+            if (t->f[i].lifted) t->f[i].used = 0;
         }
 }
 
@@ -814,11 +868,11 @@ static void race_resumes(Touch *t)
     t->hold_cross_until = 0;
     for (int i = 0; i < TOUCH_FINGERS; i++) {
         Finger *f = &t->f[i];
-        if (!f->used) continue;
-        if (f->job == JOB_PEDAL || (f->job == JOB_BUTTON && (f->buttons & PAD_CROSS))) cross_press_begins(t, f, f->job != JOB_PEDAL);
-        else if (f->job == JOB_BUTTON && f->control == TC_CAMERA) select_press_begins(t, f);
-        else if (f->job == JOB_BUTTON) f->sent = 1;
-        else if (f->job == JOB_TRICK || f->job == JOB_AIR_WAIT || f->job == JOB_PANEL) f->job = JOB_IGNORED;
+        if (!f->used || f->lifted) continue;   /* a lifted press was the race's before the pause (it ended there) */
+        if (f->job == JOB_PEDAL || f->job == JOB_BUTTON) {
+            f->after_lift = 0, f->shown = 0;
+            press_rule(t, f);
+        } else if (f->job == JOB_TRICK || f->job == JOB_AIR_WAIT || f->job == JOB_PANEL) f->job = JOB_IGNORED;
     }
     if (t->trick.on) trick_close(t);
 }
@@ -1194,7 +1248,7 @@ static void route_thumb(Touch *t, Finger *f)
         f->control = TC_PEDAL;
         f->buttons = PAD_CROSS;
         f->flick_armed = 1;
-        cross_press_begins(t, f, 0);
+        press_begins(t, f);
         if (f->sent) buzz(t, TOUCH_BUZZ_TICK);
         return;
     }
@@ -1203,8 +1257,7 @@ static void route_thumb(Touch *t, Finger *f)
         f->control = c;
         if (c == TC_PAUSE) { f->buttons = 0; pause_pressed(t); return; }
         f->buttons = c == TC_CAMERA ? PAD_SELECT : c == TC_SQUARE ? PAD_SQUARE : PAD_CIRCLE;
-        if (c == TC_CAMERA) select_press_begins(t, f);
-        else f->sent = 1;
+        press_begins(t, f);
         buzz(t, TOUCH_BUZZ_TICK);
         return;
     }
@@ -1221,7 +1274,7 @@ static void route_thumb(Touch *t, Finger *f)
         f->job = JOB_BUTTON;
         f->control = c;
         f->buttons = c == TC_HOP ? PAD_R2 : c == TC_BRAKE ? PAD_TRIANGLE : PAD_L3;
-        f->sent = 1;
+        press_begins(t, f);
         if (c == TC_HOP) t->last_hop_race = race_ms(t);
         buzz(t, TOUCH_BUZZ_TICK);
         return;
@@ -1274,8 +1327,7 @@ static void route_classic(Touch *t, Finger *f)
         f->job = JOB_BUTTON;
         f->control = face;
         f->buttons = b;
-        if (b & PAD_CROSS) cross_press_begins(t, f, 1);
-        else f->sent = 1;
+        press_begins(t, f);
         buzz(t, TOUCH_BUZZ_TICK);
         return;
     }
@@ -1284,8 +1336,7 @@ static void route_classic(Touch *t, Finger *f)
         f->control = c;
         if (c == TC_PAUSE) { f->buttons = 0; pause_pressed(t); return; }
         f->buttons = c == TC_CAMERA ? PAD_SELECT : c == TC_L3 ? PAD_L3 : c == TC_R3 ? PAD_R3 : bar_buttons(t, c, x);
-        if (c == TC_CAMERA) select_press_begins(t, f);
-        else f->sent = 1;
+        press_begins(t, f);
         buzz(t, TOUCH_BUZZ_TICK);
         return;
     }
@@ -1313,6 +1364,7 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
     if (!f) return;
     memset(f, 0, sizeof *f);
     f->used = 1, f->id = id;
+    f->order = ++t->downs;
     f->x0 = f->x = x, f->y0 = f->y = y, f->t0 = now;
     f->control = -1;
     f->target = -1;
@@ -1418,11 +1470,12 @@ void touch_up(Touch *t, long long id, float x, float y, double now)
         int c = control_at(t, f->x0, f->y0, ground, 3);
         if (c >= 0) pulse(t, c == TC_HOP ? PAD_R2 : c == TC_BRAKE ? PAD_TRIANGLE : PAD_L3, PRESS_FIELDS);
         if (c == TC_HOP) t->last_hop_race = race_ms(t);
-    } else if (f->job == JOB_BUTTON && f->sent && !f->fields && !paused(t)) {
-        /* a tap shorter than a field never reached the pad: the game still sees it (✕ and SELECT
-           keep their windows' bookkeeping, so not those) */
-        uint16_t b = (uint16_t)(f->buttons & ~(PAD_CROSS | PAD_SELECT));
-        if (b) pulse(t, b, PRESS_FIELDS);
+    } else if ((f->job == JOB_BUTTON || f->job == JOB_PEDAL) && f->buttons && !f->shown && !paused(t) && press_lifts(t, f)) {
+        /* the game hasn't read this press yet (a tap between two reads, a stall, a held-back or
+           waiting press): the finger stays, lifted, and its press goes as a short one; its release
+           then comes in a field of its own, so ✕'s and SELECT's windows count what the game saw */
+        f->lifted = 1;
+        return;
     }
     end_finger_job(t, f);
     f->used = 0;
@@ -1758,6 +1811,29 @@ static void race_clock_back(Touch *t, double delta)
     #undef SHIFT
 }
 
+/* Each update, first: presses waiting for an older lifted press of their buttons start once that
+   one is gone (its release was in the last field's pad), by their own rule; then the lifted
+   presses that were in PRESS_FIELDS pad reads end (or at once while paused: the pause took them). */
+static void lifted_presses_step(Touch *t)
+{
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        Finger *f = &t->f[i];
+        if (!f->used || !f->after_lift || lifted_before(t, f)) continue;
+        f->after_lift = 0;
+        press_rule(t, f);
+        if (f->lifted && !press_lifts(t, f)) { end_finger_job(t, f); f->used = 0; continue; }
+        if (f->sent) buzz(t, TOUCH_BUZZ_TICK);
+    }
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        Finger *f = &t->f[i];
+        if (!f->used || !f->lifted || f->after_lift) continue;
+        if (paused(t) || (f->shown && (int32_t)(t->game.vsync - f->lift_until) >= 0)) {
+            end_finger_job(t, f);
+            f->used = 0;
+        }
+    }
+}
+
 void touch_update(Touch *t, const TouchGame *game, double now)
 {
     t->now = now;
@@ -1770,6 +1846,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         t->hud_seen = now;
     }
     t->race_was_on = race_on_screen(t);
+    lifted_presses_step(t);
     if (was_on && !t->race_was_on && t->pause == PAUSE_NONE) {   /* the race is gone */
         drop_race_touches(t);
         t->panel_open = 0;
@@ -1777,10 +1854,8 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         t->hint = 0;
     }
     seq_advance(t);
-    for (int i = 0; i < TOUCH_FINGERS; i++)
-        if (t->f[i].used) t->f[i].fields++;
     for (int i = 0; i < 16; i++)
-        if (t->pulse_buttons[i] && (int32_t)(game->vsync - t->pulse_until[i]) >= 0) t->pulse_buttons[i] = 0;
+        if (t->pulse_buttons[i] && !t->pulse_fields[i] && (int32_t)(game->vsync - t->pulse_until[i]) >= 0) t->pulse_buttons[i] = 0;
     if (t->freeze_at && (int32_t)(game->vsync - t->freeze_at) >= 0) {
         t->freeze_at = 0;
         if (t->hint == TOUCH_HINT_TRICK && game->air) t->freeze = 1, t->freeze_since = now;
@@ -1808,6 +1883,20 @@ void touch_update(Touch *t, const TouchGame *game, double now)
     cross_track(t);
     tilt_step(t);
     hints_step(t);
+    /* the pad read after this update has these presses: a lifted one lasts PRESS_FIELDS from now,
+       a pulse its fields */
+    if (!paused(t) && touch_visible(t))
+        for (int i = 0; i < TOUCH_FINGERS; i++) {
+            Finger *f = &t->f[i];
+            if (!f->used || !f->sent || f->shown) continue;
+            f->shown = 1;
+            if (f->lifted) f->lift_until = game->vsync + press_vsyncs(t, PRESS_FIELDS);
+        }
+    for (int i = 0; i < 16; i++)
+        if (t->pulse_buttons[i] && t->pulse_fields[i]) {
+            t->pulse_until[i] = game->vsync + press_vsyncs(t, t->pulse_fields[i]);
+            t->pulse_fields[i] = 0;
+        }
     if (t->label[0] && now > t->label_until && t->set.labels != TOUCH_LABELS_ALWAYS) t->label[0] = 0;
 }
 

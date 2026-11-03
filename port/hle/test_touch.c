@@ -162,14 +162,129 @@ static void test_quick_tap(void)
     touch_down(t, 1, x, y, now);
     touch_up(t, 1, x, y, now + 5);
     CHECK(buttons() & PAD_R2);
-    fields(3);
-    CHECK(!(buttons() & PAD_R2));
+    int held = 0;
+    for (int i = 0; i < 10; i++) { field(); held += (buttons() & PAD_R2) != 0; }
+    CHECK(held == 3);   /* in the next three pad reads (PRESS_FIELDS), then up */
     /* a held tap is not lengthened */
     touch_down(t, 2, x, y, now);
     field();
     CHECK(buttons() & PAD_R2);
     touch_up(t, 2, x, y, now);
     CHECK(!(buttons() & PAD_R2));
+}
+
+/* The fields (from 0) at which `button` went down in the next n fields' pad reads; their count. */
+static int presses(uint16_t button, int n, int *at_field, int max)
+{
+    int count = 0, was = 0;
+    for (int i = 0; i < n; i++) {
+        field();
+        int down = (buttons() & button) != 0;
+        if (down && !was && count < max) at_field[count++] = i;
+        else if (down && !was) count++;
+        was = down;
+    }
+    return count;
+}
+
+static void drain(TouchQueue *q);
+
+/* A stall of the game thread: ms pass, the VBLANKs go on, no update (no pad read) in between. */
+static void stall(double ms)
+{
+    now += ms;
+    game.vsync += (uint32_t)(ms / (1000.0 / 60));
+    game.race_ms += ms;
+}
+
+/* Taps the game never read before their lift (down and up drained before the next pad read: a
+   quick tap, a stall) still reach the game: PEDAL, Classic's ✕, the camera's SELECT (Sol's round-2
+   #2), and a double tap stays two presses with a release between them. */
+static void test_unread_taps(void)
+{
+    static TouchQueue q;
+    int at_field[4];
+    float x, y;
+    for (int classic = 0; classic < 2; classic++) {
+        int cross = classic ? TC_CROSS : TC_PEDAL;
+        /* one quick tap: ✕ for PRESS_FIELDS, then up */
+        start(classic ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        at(cross, &x, &y);
+        touch_down(t, 1, x, y, now);
+        touch_up(t, 1, x, y, now + 5);
+        CHECK(presses(PAD_CROSS, 10, at_field, 4) == 1 && at_field[0] == 0);
+        CHECK(!(buttons() & PAD_CROSS));
+        /* the camera */
+        fields(40);
+        at(TC_CAMERA, &x, &y);
+        touch_down(t, 2, x, y, now);
+        touch_up(t, 2, x, y, now + 5);
+        CHECK(presses(PAD_SELECT, 10, at_field, 4) == 1 && at_field[0] == 0);
+        /* a tap queued during a 100 ms stall (70 ms long), as the host drains it */
+        fields(40);
+        at(cross, &x, &y);
+        memset(&q, 0, sizeof q);
+        touch_queue_push(&q, TOUCH_EV_DOWN, 3, x, y, now + 10);
+        touch_queue_push(&q, TOUCH_EV_UP, 3, x, y, now + 80);
+        stall(100);
+        drain(&q);
+        CHECK(presses(PAD_CROSS, 10, at_field, 4) == 1 && at_field[0] == 0);
+        /* a double tap inside one stall: two presses, a release between, inside the game's
+           double-tap window (a sprint) */
+        fields(40);
+        memset(&q, 0, sizeof q);
+        touch_queue_push(&q, TOUCH_EV_DOWN, 4, x, y, now + 10);
+        touch_queue_push(&q, TOUCH_EV_UP, 4, x, y, now + 60);
+        touch_queue_push(&q, TOUCH_EV_DOWN, 4, x, y, now + 110);   /* the same finger id again */
+        touch_queue_push(&q, TOUCH_EV_UP, 4, x, y, now + 160);
+        stall(200);
+        drain(&q);
+        CHECK(presses(PAD_CROSS, 40, at_field, 4) == 2 && at_field[1] - at_field[0] >= 2 && at_field[1] - at_field[0] < 30);
+        CHECK(!(buttons() & PAD_CROSS));
+        /* the camera twice in one stall: two SELECTs, the second after the game's bail window */
+        fields(40);
+        at(TC_CAMERA, &x, &y);
+        memset(&q, 0, sizeof q);
+        touch_queue_push(&q, TOUCH_EV_DOWN, 5, x, y, now + 10);
+        touch_queue_push(&q, TOUCH_EV_UP, 5, x, y, now + 60);
+        touch_queue_push(&q, TOUCH_EV_DOWN, 6, x, y, now + 110);
+        touch_queue_push(&q, TOUCH_EV_UP, 6, x, y, now + 160);
+        stall(200);
+        drain(&q);
+        CHECK(presses(PAD_SELECT, 60, at_field, 4) == 2 && at_field[1] - at_field[0] >= 30);
+        /* a first tap lost in a stall no longer spoils the double tap that follows it */
+        fields(40);
+        at(cross, &x, &y);
+        memset(&q, 0, sizeof q);
+        touch_queue_push(&q, TOUCH_EV_DOWN, 7, x, y, now + 10);
+        touch_queue_push(&q, TOUCH_EV_UP, 7, x, y, now + 60);
+        stall(100);
+        drain(&q);
+        CHECK(presses(PAD_CROSS, 5, at_field, 4) == 1);   /* the first tap went */
+        touch_down(t, 8, x, y, now);   /* held: the second tap, inside the window it opened */
+        CHECK(presses(PAD_CROSS, 20, at_field, 4) == 1);
+        CHECK(classic ? at_field[0] == 0 : at_field[0] >= 6);   /* Thumb zones holds a real second tap back (120 ms) */
+        touch_up(t, 8, x, y, now);
+        field();
+    }
+    /* Thumb zones: a second tap held back to see whether it flicks, lifted before its 120 ms
+       without a flick: a real second tap, it goes (a sprint); one that flicked sends no ✕ */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    tap(1, TC_PEDAL);
+    at(TC_PEDAL, &x, &y);
+    touch_down(t, 2, x, y, now);
+    fields(4);
+    CHECK(!(buttons() & PAD_CROSS));
+    touch_up(t, 2, x, y, now);
+    CHECK(presses(PAD_CROSS, 10, at_field, 4) == 1 && at_field[0] == 0);
+    fields(40);
+    float r;
+    tap(3, TC_PEDAL);
+    touch_control(t, TC_PEDAL, &x, &y, &r);
+    touch_down(t, 4, x, y, now);
+    slide(4, x, y, x - r - 10, y, 50);   /* the flick: ◻ */
+    touch_up(t, 4, x - r - 10, y, now);
+    CHECK(presses(PAD_CROSS, 10, at_field, 4) == 0);
 }
 
 /* A HOP tap that begins and ends in the air layout's wait (the flag came, the layout is still the
@@ -186,8 +301,9 @@ static void test_air_wait_tap(void)
     CHECK(!(buttons() & PAD_R2));   /* nothing while it waits */
     touch_up(t, 1, x, y, now);
     CHECK(buttons() & PAD_R2);
-    fields(3);
-    CHECK(!(buttons() & PAD_R2));
+    int held = 0;
+    for (int i = 0; i < 6; i++) { field(); held += (buttons() & PAD_R2) != 0; }
+    CHECK(held == 3);   /* three pad reads */
     game.air = 0;
     fields(2);
     game.air = 1;
@@ -792,8 +908,10 @@ static void test_queue(void)
     touch_queue_push(&q, TOUCH_EV_UP, 1, x, y, now + 300);
     CHECK(q.count < TOUCH_QUEUE && q.ev[q.count - 1].kind == TOUCH_EV_UP && q.merged > 0 && !q.cancelled);
     drain(&q);
-    fields(2);
-    CHECK(!(buttons() & PAD_CROSS));
+    field();
+    CHECK(buttons() & PAD_CROSS);      /* the game never read it: it goes as a short press */
+    fields(3);
+    CHECK(!(buttons() & PAD_CROSS));   /* and ends, not stuck */
     /* a finger's merged moves end where it was: the stick as if every move had come */
     start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
     memset(&q, 0, sizeof q);
@@ -955,6 +1073,7 @@ int main(void)
     test_scaling();
     test_flick();
     test_quick_tap();
+    test_unread_taps();
     test_air_wait_tap();
     test_sprint_guards();
     test_pause();

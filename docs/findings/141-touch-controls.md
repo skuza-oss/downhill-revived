@@ -354,6 +354,34 @@ MIUI and the legend taps need the phones.
 
 ### Second review round (2026-11-03)
 
+- **A tap the game never read was lost for PEDAL, Classic's ✕ and the camera** (Sol 2). The host
+  hands the rules every queued event before the field's pad read, so a tap whose down and up
+  both came since the last read (a quick tap, or any tap during a stall of the game thread) ended
+  before any read saw it. The first round's fallback pulsed such a tap for HOP, BRAKE, SLIDE and
+  the like, but left out ✕ and SELECT (their double-press windows) and PEDAL, so those taps
+  vanished, and a lost first PEDAL tap also lost the sprint of the double tap after it. Now any
+  button press (PEDAL or a button) the game hasn't read when its finger lifts stays, its finger
+  kept as *lifted* (no longer found by its id, so the same finger id can press again) until the
+  press has been in PRESS_FIELDS pad reads, then lets go in a field of its own: `cross_track`
+  sees that release, so the ✕ and SELECT windows count what the game saw. A newer press of the
+  same buttons waits for that release (`after_lift`) and then starts by its own rule (`press_rule`,
+  the rule a new touch gets): two PEDAL or ✕ taps in one stall are two presses with a one-field
+  release between them, inside the double-tap window, so a sprint, as a double tap without the
+  stall; two camera taps in one stall are two SELECTs, the second after the bail window (the
+  existing camera rule). A held-back second PEDAL tap (Thumb zones, flicks on) that lifts before
+  its 120 ms without flicking now goes too (it was dropped: a quick second tap didn't sprint); one
+  that flicked still sends no ✕. A guarded press that lifts goes when its window closes, as a held
+  one would have. The pulses (flick attacks, the air wait's HOP tap) now count their fields from
+  the first pad read that has them, not from the last field's VBLANK: after a stall of 3 fields
+  or more a pulse made from its events was cleared before any read, and without a stall it lasted
+  2 reads, not PRESS_FIELDS' 3. `test_unread_taps` (both presets): PEDAL / ✕ and camera quick
+  taps, a tap queued in a 100 ms stall, a double tap in one stall (same finger id: two ✕ presses,
+  a release between, under 30 fields apart), two camera taps in one stall (the second ≥ 30
+  fields later), a first tap lost to a stall then a held second tap (Thumb zones holds it back:
+  the window opened), the held-back second tap lifted early (goes) and flicked (no ✕).
+  `test_quick_tap` and `test_air_wait_tap` now count three pad reads. Phone check for the lead:
+  a quick PEDAL double tap (both taps short) sprints; check 13's "quick PEDAL double-tap after
+  HOP does not sprint" still holds (the second tap waits for the window, then goes once).
 - **A controller answering the pause question left the overlay on it** (Sol 1). `pause_step`
   noticed a race the controller resumed only from the rows (`PAUSE_OPEN`, `PAUSE_CONTROLS`), not
   from the question (`PAUSE_CONFIRM`), and any pause state kept the overlay drawn and owning the
