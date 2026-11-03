@@ -1,9 +1,17 @@
 // Downhill Revived's APK (finding 091). The native libraries are prebuilt by
 // port/tools/build_host64.py --target android-arm64 and copied into src/main/jniLibs by port/android/build_apk.py,
 // which also adds SDL's Java sources (org.libsdl.app) and the icons; Gradle only packages and signs.
+//
+// Two build types: debug (debuggable, the debug key ANDROID_USER_HOME holds) for development, and
+// release (not debuggable, no R8: SDL's Java is reached from C through JNI by name, finding 143)
+// signed with the release key, named only by the environment (build_apk.py --release checks them):
+// DHD_ANDROID_KEYSTORE (the keystore file), DHD_ANDROID_KEYSTORE_PASS, DHD_ANDROID_KEY_ALIAS and
+// DHD_ANDROID_KEY_PASS. The key is kept by the maintainer, outside the repository.
 plugins {
     id 'com.android.application'
 }
+
+def releaseKeystore = System.getenv('DHD_ANDROID_KEYSTORE')
 
 android {
     namespace = "app.downhillrevived"
@@ -22,13 +30,30 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    signingConfigs {
+        release {
+            if (releaseKeystore) {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv('DHD_ANDROID_KEYSTORE_PASS')
+                keyAlias = System.getenv('DHD_ANDROID_KEY_ALIAS')
+                keyPassword = System.getenv('DHD_ANDROID_KEY_PASS')
+                // scheme v3 (Android 9 and later; it allows a key rotation later on). With it AGP leaves
+                // out v2 at minSdk 30; without it AGP signs v2 only (finding 143)
+                enableV3Signing = true
+            }
+        }
+    }
     buildTypes {
         debug {
             debuggable = true
             jniDebuggable = true
         }
         release {
+            debuggable = false
+            jniDebuggable = false
             minifyEnabled = false
+            shrinkResources = false
+            signingConfig = releaseKeystore ? signingConfigs.release : null
         }
     }
     packaging {
