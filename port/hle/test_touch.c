@@ -374,6 +374,21 @@ static void test_pause(void)
     CHECK(buttons() & PAD_R2);
     touch_up(t, 4, x, y, now);
     field();
+    /* Back while the presses opening the question still go: ignored, the overlay stays on the
+       question (the game has not seen it yet), and the next Back answers No */
+    touch_back(t, now);
+    record(edges, 32, 8);
+    game.clock_moving = 0;
+    fields(3);
+    touch_down(t, 5, rx, ry, now);   /* Restart race */
+    touch_up(t, 5, rx, ry, now);
+    field();
+    touch_back(t, now);   /* within the ↓ ↓ ↓ ↓ ✕ (the first ↓ went in that field) */
+    n = record(edges, 32, 60);
+    CHECK(n == 4 && edges[0] == PAD_DOWN && edges[3] == PAD_CROSS);   /* no △ */
+    touch_back(t, now);
+    n = record(edges, 32, 20);
+    CHECK(n == 1 && edges[0] == PAD_TRIANGLE);
 }
 
 /* Restart race: the resume guard set by the old race's clock does not hold PEDAL back in the new

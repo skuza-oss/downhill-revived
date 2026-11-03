@@ -299,3 +299,12 @@ with a unit test in `test_touch.c`.
   ends its old job first (`touch_down` calls `end_finger_job`): before, the stick stayed deflected.
   Tests: `test_queue` (the stuck ✕, merged moves give the same stick as every move, one pad-used,
   the cancel with Back kept, the re-down).
+- **Back on the pause question could leave the overlay and the game on different menus** (Muse).
+  `touch_back` answered the Restart / Quit question with No and then set the overlay to the pause
+  rows even when No had not been sent (a tap or Back is ignored while the presses that opened the
+  question still go, about 100 ms). The game kept the question while the overlay showed the rows,
+  so the next tap sent a row's presses into the question. Back now leaves that to
+  `pause_row_tapped`, which moves the overlay on only when it queues the △; a Back inside that
+  window does nothing and the next one answers No. (Back on the Controls page is the overlay's own
+  and still returns at once.) Test: in `test_pause`, Back during the ↓ ↓ ↓ ↓ ✕ sends no △, the
+  next Back sends one.

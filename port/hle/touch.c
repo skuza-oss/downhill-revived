@@ -1428,7 +1428,10 @@ void touch_back(Touch *t, double now)
     t->now = now;
     if (t->freeze) { t->freeze = 0; return; }
     if (t->editor) { t->editor = 0; t->saved = 1; return; }
-    if (t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM) { pause_row_tapped(t, CONFIRM_NO); t->pause = PAUSE_OPEN; return; }
+    if (t->pause == PAUSE_CONTROLS) { t->pause = PAUSE_OPEN; return; }   /* the overlay's own page */
+    /* the question's No; while the presses that opened it still go, nothing (as a tap): the game
+       has not shown it yet, so the overlay stays on it and the next Back answers */
+    if (t->pause == PAUSE_CONFIRM) { pause_row_tapped(t, CONFIRM_NO); return; }
     if (t->pause == PAUSE_OPEN) { pause_row_tapped(t, ROW_RESUME); return; }
     if (t->pause == PAUSE_ASKED) return;
     if (race_on_screen(t)) { pause_pressed(t); return; }
