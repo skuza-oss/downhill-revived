@@ -1293,7 +1293,8 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
 {
     t->now = now;
     Finger *f = finger_of(t, id);
-    if (!f)
+    if (f) end_finger_job(t, f);   /* its up never came: what it held (the stick, a press) ends first */
+    else
         for (int i = 0; i < TOUCH_FINGERS && !f; i++)
             if (!t->f[i].used) f = &t->f[i];
     if (!f) return;
@@ -1452,6 +1453,88 @@ void touch_pad_lost(Touch *t, double now)
 }
 
 void touch_tilt(Touch *t, float degrees) { t->tilt_deg = degrees; }
+
+/* ---------------------------------------------------------------- the host's queue */
+
+static int finger_event(int kind) { return kind == TOUCH_EV_DOWN || kind == TOUCH_EV_MOVE || kind == TOUCH_EV_UP; }
+
+/* A finger's moves in a row (none of its other events, and no cancel, between them): only the
+   last stays, so the finger still ends up where it was. */
+static void queue_merge_moves(TouchQueue *q)
+{
+    int kept = 0;
+    for (int i = 0; i < q->count; i++) {
+        const TouchEvent *e = &q->ev[i];
+        int later = 0;
+        if (e->kind == TOUCH_EV_MOVE)
+            for (int j = i + 1; j < q->count; j++) {
+                const TouchEvent *n = &q->ev[j];
+                if (n->kind == TOUCH_EV_CANCEL) break;
+                if (n->id != e->id || !finger_event(n->kind)) continue;
+                later = n->kind == TOUCH_EV_MOVE;
+                break;
+            }
+        if (later) q->merged++;
+        else q->ev[kept++] = *e;
+    }
+    q->count = kept;
+}
+
+/* The last resort, the queue full without a move to merge: every finger is let go (the player
+   lifts and touches again); the Backs and controller losses stay, then the new event. */
+static void queue_cancel_fingers(TouchQueue *q, const TouchEvent *e)
+{
+    int n = 0;
+    TouchEvent cancel = {TOUCH_EV_CANCEL, -1, 0, 0, q->count ? q->ev[0].ms : e->ms};
+    TouchEvent keep[TOUCH_QUEUE];
+    for (int i = 0; i < q->count && n < TOUCH_QUEUE - 2; i++)
+        if (q->ev[i].kind == TOUCH_EV_BACK || q->ev[i].kind == TOUCH_EV_PAD_LOST) keep[n++] = q->ev[i];
+    q->ev[0] = cancel;
+    memcpy(q->ev + 1, keep, sizeof *keep * (size_t)n);
+    q->count = 1 + n;
+    if (e->kind != TOUCH_EV_UP && e->kind != TOUCH_EV_CANCEL) q->ev[q->count++] = *e;   /* its finger's down is gone */
+    q->cancelled++;
+}
+
+void touch_queue_push(TouchQueue *q, int kind, long long id, float x, float y, double ms)
+{
+    TouchEvent e = {kind, id, x, y, ms};
+    if (kind == TOUCH_EV_PAD_USED)   /* still hidden by an earlier one (only a down or Back changes that): the same */
+        for (int i = q->count - 1; i >= 0; i--) {
+            int k = q->ev[i].kind;
+            if (k == TOUCH_EV_PAD_USED) return;
+            if (k != TOUCH_EV_MOVE && k != TOUCH_EV_UP) break;
+        }
+    int soft = kind == TOUCH_EV_MOVE || kind == TOUCH_EV_PAD_USED;
+    int room = soft ? TOUCH_QUEUE - TOUCH_QUEUE_RESERVE : TOUCH_QUEUE;
+    if (q->count >= room) queue_merge_moves(q);
+    if (q->count < room) { q->ev[q->count++] = e; return; }
+    if (kind == TOUCH_EV_MOVE) {   /* the finger's last queued move takes the new place */
+        for (int i = q->count - 1; i >= 0; i--) {
+            TouchEvent *o = &q->ev[i];
+            if (o->kind == TOUCH_EV_CANCEL) break;
+            if (o->id != id || !finger_event(o->kind)) continue;
+            if (o->kind == TOUCH_EV_MOVE) { o->x = x, o->y = y, o->ms = ms; q->merged++; }
+            break;
+        }
+        return;   /* else it goes: the finger's up says where it ended */
+    }
+    if (soft) return;   /* a controller's use: the next one hides */
+    queue_cancel_fingers(q, &e);
+}
+
+void touch_event(Touch *t, const TouchEvent *e, float x, float y)
+{
+    switch (e->kind) {
+    case TOUCH_EV_DOWN: touch_down(t, e->id, x, y, e->ms); break;
+    case TOUCH_EV_MOVE: touch_move(t, e->id, x, y, e->ms); break;
+    case TOUCH_EV_UP: touch_up(t, e->id, x, y, e->ms); break;
+    case TOUCH_EV_CANCEL: touch_cancel_all(t, e->ms); break;
+    case TOUCH_EV_BACK: touch_back(t, e->ms); break;
+    case TOUCH_EV_PAD_USED: touch_pad_used(t, e->ms); break;
+    case TOUCH_EV_PAD_LOST: touch_pad_lost(t, e->ms); break;
+    }
+}
 
 /* ---------------------------------------------------------------- the field */
 

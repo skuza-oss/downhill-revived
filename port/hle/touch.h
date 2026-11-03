@@ -129,6 +129,23 @@ void touch_pad_lost(Touch *t, double now);     /* the controller went away mid-r
 void touch_tilt(Touch *t, float degrees);      /* the phone's roll (tilt steering) */
 void touch_open_editor(Touch *t);              /* TOUCH CONTROLS > Edit layout */
 
+/* The host's queue between its input thread and the game's field (no lock here: the host holds
+   its own). It never loses what ends a press: a finger's moves are merged (the latest kept) once
+   the moves have filled their part, so ups, cancels, Back and a controller's loss always find a
+   place; if even that part fills (a long stall full of taps), the queue becomes one cancel of
+   every finger, with the Backs and controller losses kept after it. */
+enum { TOUCH_EV_DOWN, TOUCH_EV_MOVE, TOUCH_EV_UP, TOUCH_EV_CANCEL, TOUCH_EV_BACK, TOUCH_EV_PAD_USED, TOUCH_EV_PAD_LOST };
+typedef struct { int kind; long long id; float x, y; double ms; } TouchEvent;   /* x, y: the host's units */
+enum { TOUCH_QUEUE = 256, TOUCH_QUEUE_RESERVE = 32 };   /* the last RESERVE places: never moves or controller use */
+typedef struct {
+    TouchEvent ev[TOUCH_QUEUE];
+    int count;
+    int merged, cancelled;   /* moves merged, queues turned into a cancel (since the host last looked) */
+} TouchQueue;
+void touch_queue_push(TouchQueue *q, int kind, long long id, float x, float y, double ms);
+/* One queued event into the rules (x, y in mm). */
+void touch_event(Touch *t, const TouchEvent *e, float x, float y);
+
 /* Once per pad read: the game's state, then the pad. */
 void touch_update(Touch *t, const TouchGame *game, double now);
 /* The pad input the touches make now (merged into player 1's: buttons or-ed, sticks where moved). */

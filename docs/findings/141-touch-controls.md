@@ -285,3 +285,17 @@ with a unit test in `test_touch.c`.
   with `%31[a-z.]`, which stops at the digit of `l3` / `r3`, so their edits were written to
   `touch_edits` and dropped on the next read. The name now takes digits too; the round-trip test
   checks every control of both presets, L3 and R3 included.
+- **A full touch queue dropped ups and cancels, leaving a press or the stick held** (all three
+  reviews; Sol's repro: a down on ✕, 255 moves and the up during a stall left ✕ held after the
+  lift). The queue between the SDL thread and the field is now `TouchQueue` in `touch.c`
+  (`touch_queue_push`, `touch_event`; `touch_host.c` only locks around it). Moves and controller
+  use may fill only the first 224 places; then a finger's moves in a row are merged into its last
+  one, so the finger still ends where it was, and the last 32 places are for downs, ups, cancels,
+  Back and a controller's loss. A controller held at full tilt queues one "pad used", not one per
+  axis event (only a down, Back or a controller's loss changes what a second one would do). If a
+  stall fills even the reserve with taps, the queue becomes one cancel of every finger (the player
+  lifts and touches again) with the Backs and controller losses kept after it; `dhd.log` says
+  `touch: the touch queue filled ...`. And a finger id that goes down again without its up now
+  ends its old job first (`touch_down` calls `end_finger_job`): before, the stick stayed deflected.
+  Tests: `test_queue` (the stuck ✕, merged moves give the same stick as every move, one pad-used,
+  the cancel with Back kept, the re-down).

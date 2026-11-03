@@ -673,6 +673,87 @@ static void test_online_panel(void)
     CHECK(left == 2);   /* never on the first tap */
 }
 
+static uint8_t stick_x(void)
+{
+    uint16_t b = 0;
+    uint8_t lx = 128, ly = 128, rx = 128, ry = 128;
+    touch_pad(t, &b, &lx, &ly, &rx, &ry);
+    return lx;
+}
+
+/* The host's drain: every queued event into the rules (the queue holds mm here), then emptied. */
+static void drain(TouchQueue *q)
+{
+    for (int i = 0; i < q->count; i++) touch_event(t, &q->ev[i], q->ev[i].x, q->ev[i].y);
+    q->count = 0;
+}
+
+static void test_queue(void)
+{
+    static TouchQueue q;
+    float x, y;
+    /* a press held through a stall: its moves fill the queue, the lift still arrives (Sol's repro) */
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    at(TC_CROSS, &x, &y);
+    memset(&q, 0, sizeof q);
+    touch_queue_push(&q, TOUCH_EV_DOWN, 1, x, y, now);
+    for (int i = 0; i < 1000; i++) touch_queue_push(&q, TOUCH_EV_MOVE, 1, x, y, now + 1 + i * 0.25);
+    touch_queue_push(&q, TOUCH_EV_UP, 1, x, y, now + 300);
+    CHECK(q.count < TOUCH_QUEUE && q.ev[q.count - 1].kind == TOUCH_EV_UP && q.merged > 0 && !q.cancelled);
+    drain(&q);
+    fields(2);
+    CHECK(!(buttons() & PAD_CROSS));
+    /* a finger's merged moves end where it was: the stick as if every move had come */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    memset(&q, 0, sizeof q);
+    touch_queue_push(&q, TOUCH_EV_DOWN, 1, 30, 45, now);
+    for (int i = 1; i <= 600; i++) touch_queue_push(&q, TOUCH_EV_MOVE, 1, 30 + i * 0.01f, 45, now + i * 0.25);
+    touch_queue_push(&q, TOUCH_EV_DOWN, 2, 100, 20, now + 200);   /* another finger in between */
+    for (int i = 1; i <= 600; i++) touch_queue_push(&q, TOUCH_EV_MOVE, 1, 36 - i * 0.002f, 45, now + 200 + i * 0.25);
+    CHECK(q.count <= TOUCH_QUEUE - TOUCH_QUEUE_RESERVE && !q.cancelled);
+    CHECK(q.ev[q.count - 1].kind == TOUCH_EV_MOVE && fabsf(q.ev[q.count - 1].x - (36 - 600 * 0.002f)) < 0.001f);
+    drain(&q);
+    field();
+    uint8_t merged_x = stick_x();
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_down(t, 1, 30, 45, now);
+    touch_move(t, 1, 36, 45, now + 150);
+    touch_move(t, 1, 36 - 600 * 0.002f, 45, now + 350);
+    field();
+    CHECK(merged_x > 128 && merged_x == stick_x());
+    /* a controller held at full tilt: one hide, not a queue of them */
+    memset(&q, 0, sizeof q);
+    for (int i = 0; i < 1000; i++) touch_queue_push(&q, TOUCH_EV_PAD_USED, 0, 0, 0, now + i);
+    CHECK(q.count == 1);
+    /* the last resort: a stall full of taps fills even the reserve; every finger is let go, Back stays */
+    for (int back = 0; back < 2; back++) {
+        start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+        at(TC_CROSS, &x, &y);
+        memset(&q, 0, sizeof q);
+        touch_queue_push(&q, TOUCH_EV_DOWN, 1, x, y, now);
+        if (back) touch_queue_push(&q, TOUCH_EV_BACK, 0, 0, 0, now + 1);
+        for (int i = 0; i < 200; i++) {
+            touch_queue_push(&q, TOUCH_EV_DOWN, 2, 77, 30, now + 2 + i);
+            touch_queue_push(&q, TOUCH_EV_UP, 2, 77, 30, now + 2.5 + i);
+        }
+        touch_queue_push(&q, TOUCH_EV_UP, 1, x, y, now + 300);
+        CHECK(q.cancelled == 1 && q.ev[0].kind == TOUCH_EV_CANCEL && q.ev[1].kind == (back ? TOUCH_EV_BACK : TOUCH_EV_DOWN));
+        if (back) continue;   /* Back pauses: the rest is the stuck-press check */
+        drain(&q);
+        fields(2);
+        CHECK(!(buttons() & PAD_CROSS));
+    }
+    /* a finger id down again without its up: what it held ends first */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_down(t, 1, 30, 45, now);
+    touch_move(t, 1, 40, 45, now + 50);
+    field();
+    CHECK(stick_x() > 200);
+    touch_down(t, 1, 100, 20, now);   /* elsewhere, no stick */
+    field();
+    CHECK(stick_x() == 128);
+}
+
 static void test_layout_text(void)
 {
     TouchSettings s, back;
@@ -709,6 +790,7 @@ int main(void)
     test_trick_stick();
     test_online_panel();
     test_layout_text();
+    test_queue();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");

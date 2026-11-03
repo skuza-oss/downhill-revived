@@ -37,13 +37,11 @@ int android_touch_tilt(float *degrees);
 void android_touch_tilt_on(int on);
 #endif
 
-enum { EV_DOWN, EV_MOVE, EV_UP, EV_CANCEL, EV_BACK, EV_PAD_USED, EV_PAD_LOST };
-typedef struct { int kind; long long id; float x, y; double ms; } Event;   /* x, y: 0..1 of the window */
-enum { QUEUE = 256 };
+enum { EV_DOWN = TOUCH_EV_DOWN, EV_MOVE = TOUCH_EV_MOVE, EV_UP = TOUCH_EV_UP, EV_CANCEL = TOUCH_EV_CANCEL,
+       EV_BACK = TOUCH_EV_BACK, EV_PAD_USED = TOUCH_EV_PAD_USED, EV_PAD_LOST = TOUCH_EV_PAD_LOST };
 
 static SDL_Mutex *lock;
-static Event queue[QUEUE];
-static int queued;
+static TouchQueue queue;              /* under lock; x, y: 0..1 of the window */
 static int available = -1;            /* touch is on here: 1 Android, 2 the mouse */
 static SDL_AtomicInt owns;            /* the overlay takes the touches (no menu mouse from them) */
 static SDL_AtomicInt want_buzz;       /* TOUCH_BUZZ_* for the SDL thread */
@@ -92,7 +90,7 @@ static void push(int kind, long long id, float x, float y, double ms)
 {
     if (!lock) return;
     SDL_LockMutex(lock);
-    if (queued < QUEUE) queue[queued++] = (Event){kind, id, x, y, ms};
+    touch_queue_push(&queue, kind, id, x, y, ms);   /* full: moves merge, never an up (touch.h) */
     SDL_UnlockMutex(lock);
 }
 
@@ -367,31 +365,26 @@ void host_service_touch_field(uint32_t address)
         configure(0);
     }
     /* the touches so far, in order */
-    Event events[QUEUE];
-    int n;
+    static TouchEvent events[TOUCH_QUEUE];
+    int n, merged, cancelled;
     SDL_LockMutex(lock);
-    n = queued;
-    memcpy(events, queue, sizeof *events * (size_t)n);
-    queued = 0;
+    n = queue.count;
+    memcpy(events, queue.ev, sizeof *events * (size_t)n);
+    merged = queue.merged, cancelled = queue.cancelled;
+    queue.count = queue.merged = queue.cancelled = 0;
     TouchScreen sc = screen;
     SDL_UnlockMutex(lock);
+    if (cancelled) fprintf(stderr, "touch: the touch queue filled while the game waited; every finger was let go\n");
+    else if (merged && trace_on()) fprintf(stderr, "touch log: the queue filled; %d moves merged\n", merged);
     for (int i = 0; i < n; i++) {
-        const Event *e = &events[i];
+        const TouchEvent *e = &events[i];
         float x = e->x * sc.width, y = e->y * sc.height;
         if (trace_on() > (e->kind == EV_MOVE)) {
             static const char *const kinds[] = {"down", "move", "up", "cancel", "back", "pad used", "pad lost"};
             fprintf(stderr, "touch log: %s %lld at %.1f,%.1f mm (%.0f ms) race %.0f ms hud %d air %d\n", kinds[e->kind], e->id, x, y,
                     e->ms, h->race_ms, h->race_hud, h->air);
         }
-        switch (e->kind) {
-        case EV_DOWN: touch_down(touch, e->id, x, y, e->ms); break;
-        case EV_MOVE: touch_move(touch, e->id, x, y, e->ms); break;
-        case EV_UP: touch_up(touch, e->id, x, y, e->ms); break;
-        case EV_CANCEL: touch_cancel_all(touch, e->ms); break;
-        case EV_BACK: touch_back(touch, e->ms); break;
-        case EV_PAD_USED: touch_pad_used(touch, e->ms); break;
-        case EV_PAD_LOST: touch_pad_lost(touch, e->ms); break;
-        }
+        touch_event(touch, e, x, y);
     }
     touch_tilt(touch, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
     TouchGame g;
