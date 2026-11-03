@@ -76,16 +76,27 @@ static void footer(MenuPage *p)
 
 /* The rows start at 0x54 under the title (0x40), 10 apart, and the footer sits at 0xCC. A long
    page (PC SETTINGS: 13 rows) would run its last rows into the footer, so the title and the rows
-   move up together until the last row ends a gap above it. */
-enum { ROW_Y = 0x54, ROW_STEP = 10, TITLE_ABOVE = 0x14, FOOTER_Y = 0xCC, FOOTER_GAP = 16, TITLE_MIN = 0x10 };
+   move up together until the last row ends a gap above it.
+   A page with hints (p->hints) draws them on a line of their own HINT_ABOVE the footer, so the
+   legend under them stays; its last row ends a row above that line. Its title may go up to
+   TITLE_MIN_HINTS, and a page that still doesn't fit (PC SETTINGS' 16 rows and Touch Controls)
+   draws its rows closer together. */
+enum { ROW_Y = 0x54, ROW_STEP = 10, TITLE_ABOVE = 0x14, FOOTER_Y = 0xCC, FOOTER_GAP = 16, TITLE_MIN = 0x10,
+       HINT_ABOVE = 11, TITLE_MIN_HINTS = 0x0C };
 
 static void rows(MenuPage *p)
 {
     MENU(p, X_COUNT, int) = 0;
     p->build(p);
-    int n = menu_page_rows(p), y = ROW_Y;
-    if (n > 0 && y + (n - 1) * ROW_STEP > FOOTER_Y - FOOTER_GAP) y = FOOTER_Y - FOOTER_GAP - (n - 1) * ROW_STEP;
-    if (y < TITLE_MIN + TITLE_ABOVE) y = TITLE_MIN + TITLE_ABOVE;
+    int n = menu_page_rows(p), y = ROW_Y, step = ROW_STEP;
+    int last = p->hints ? FOOTER_Y - HINT_ABOVE - ROW_STEP : FOOTER_Y - FOOTER_GAP;
+    int top = (p->hints ? TITLE_MIN_HINTS : TITLE_MIN) + TITLE_ABOVE;
+    if (n > 0 && y + (n - 1) * step > last) y = last - (n - 1) * step;
+    if (y < top) {
+        y = top;
+        if (p->hints && n > 1 && y + (n - 1) * step > last) step = (last - y) / (n - 1);
+    }
+    MENU(p, X_ROW_STEP, int) = step;
     MENU(p, X_ROW_Y, int) = y;
     MENU(p, X_TITLE, Item).y = (short)(y - TITLE_ABOVE);
 }
@@ -128,6 +139,10 @@ static void slot_update(void *menu)  /* slot 5, as func_0015E750: the page, then
     set_text(&MENU(p, X_TITLE, Item), 1, p->title);
     footer(p);
     func_0018DC20(menu);
+    if (p->hint && *p->hint) {  /* its own line above the legend, in the legend's style */
+        MenuStyle s = menu_page_style(p, MENU_STYLE_OFF);
+        menu_draw_text(MENU_CENTRE, MENU(p, X_FOOTER, Item).x, FOOTER_Y - HINT_ABOVE, p->hint, &s);
+    }
     if (p->draw) p->draw(p);
 }
 
@@ -583,11 +598,12 @@ static int row_enabled(void *menu, int row)
 /* The button of our page's legend ("<- PREV -> NEXT /\ BACK X SELECT", the footer when the page
    has no text of its own) under the pointer, 0 none: each word with the button symbol before it,
    measured in the footer's style as drawn (centred at its x). On a phone that is the only way to
-   say SELECT, as nothing else on the screen is a button. */
+   say SELECT, as nothing else on the screen is a button. PREV and NEXT follow their arrows, left
+   and right: a value row's previous and next value (a row without a value ignores them). */
 static uint16_t page_legend_button(void *menu, int view)
 {
     static const struct { const char *word; uint16_t button; } words[] = {
-        {"PREV", PAD_UP}, {"NEXT", PAD_DOWN}, {"BACK", PAD_TRIANGLE}, {"SELECT", PAD_CROSS}};
+        {"PREV", PAD_LEFT}, {"NEXT", PAD_RIGHT}, {"BACK", PAD_TRIANGLE}, {"SELECT", PAD_CROSS}};
     Item *foot = &AT(menu, X_FOOTER, Item);
     int mx, my;
     if (foot->id != TEXT_PREV_NEXT || foot->string || !pointer(view, &mx, &my)) return 0;

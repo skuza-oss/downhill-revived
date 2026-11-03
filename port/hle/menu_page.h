@@ -11,7 +11,10 @@
    - menu_page_value: a value picker, "Label:  < Value >"; left/right change it (and Cross, as
      the page decides); arrows 0: shown without them (it can't be changed);
    - menu_page_text: a line to read, never selected.
-   The footer (p->footer) says what to do; NULL shows the game's PREV / NEXT / BACK / SELECT legend.
+   The footer (p->footer) says what to do; NULL shows the game's PREV / NEXT / BACK / SELECT legend
+   (a tap or click on a word presses its button). A hint about the row under the cursor goes in
+   p->hint, a line of its own above the footer, so the legend stays (on a phone it is the only
+   SELECT and BACK); a page with hints sets p->hints, and its rows leave that line free.
 
    The mouse (menu_mouse_*, below; any of the game's popups gets the same): the row under the
    pointer is selected when the mouse moves, a left click is Cross (on a value picker: its arrows,
@@ -39,6 +42,8 @@ struct MenuPage {
     int constructed;
     const char *title;
     const char *footer;        /* NULL: the game's PREV / NEXT / BACK / SELECT legend */
+    const char *hint;          /* NULL: none; else a line above the footer (set in update) */
+    int hints;                 /* the page shows hints: its rows keep their line free */
     void (*build)(MenuPage *); /* add the rows (menu_page_row ...); also after menu_page_rebuild */
     void (*update)(MenuPage *, int cursor);  /* every frame, before the game's update */
     void (*accept)(MenuPage *, int row);     /* Cross */

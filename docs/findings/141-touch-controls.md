@@ -327,3 +327,20 @@ with a unit test in `test_touch.c`.
   systemBars, shown for a moment by a swipe, as `SetupActivity.hideBars`) after a configuration
   change and when the window gets its focus back, now and once more after the new layout, only while
   SDL's full screen is on (`mFullscreenModeActive`); both overrides call SDLActivity's first.
+- **The legend's PREV / NEXT pressed up / down, and a row's hint hid the legend** (Opus; the lead
+  saw it on the phone). On our pages (`menu_page.c`, text 0xA6) the legend reads "◂ PREV ▸ NEXT
+  △ BACK ✕ SELECT" with left and right arrows (a PC SETTINGS capture shows them; the game's own
+  shell screens draw ▴ ▾ there, but those are not our pages), and left / right is what changes a
+  value, so a tap on PREV / NEXT now presses ← / → (`page_legend_button`). On a row without a value
+  every page ignores them (PC SETTINGS' `change` finds no row, TOUCH CONTROLS' buttons have no key,
+  the online pages step only the name / code entry). And a row's hint ("Phones go up to 6x",
+  "* Applies when the game starts again", "Thumb zones only", ...) used to be the footer, which
+  replaced the legend, so on a phone that row had no SELECT or BACK to tap. A page now has
+  `p->hint` beside `p->footer`: the hint is drawn on a line of its own 11 units above the legend, in
+  the legend's style, and the legend stays (`p->footer` stays for pages whose footer is their own
+  legend, as the online room's). A page that shows hints sets `p->hints` (PC SETTINGS, and so its
+  TOUCH CONTROLS screens); its last row then ends one row step above the hint line, its title may
+  go up to 0x0C instead of 0x10, and a page that still doesn't fit draws its rows closer: on x64
+  PC SETTINGS' 16 rows keep their 10-unit step (the title 4 units higher), with Touch Controls
+  (17 rows, `DHD_TOUCH_MOUSE=1`) the step is 9; the phone's shorter page is unchanged. Checked by
+  hidden-desktop captures of PC SETTINGS (`live_game.py`, before and after).

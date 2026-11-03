@@ -9,13 +9,14 @@
    window size, picture shape, scaling, skip movies (the startup movies), vibration, the sticks'
    dead zone, the button symbols, unlock all and FPS & Ping apply at once; resolution,
    widescreen, the texture pack, the font, the frame rate and V-Sync at the next start ("*" and
-   the footer say so). A setting the environment sets (DHD_*) is shown but can't be changed here.
+   the row's hint, a line above the legend, say so). A setting the environment sets (DHD_*) is
+   shown but can't be changed here.
    Nothing here writes game state: the page lives in host memory and the settings in dhd.ini,
    never in the memory card's save.
    A host that can do only some of the rows says which in DHD_PC_SETTINGS_ROWS, a comma list of
    the rows' variables; unset, every row is shown. A host that applies more rows at once than the
    ones marked live below lists their variables in DHD_PC_SETTINGS_LIVE (the row then sets its
-   variable at once and the host follows it), and DHD_PC_SETTINGS_RESTART replaces the footer of
+   variable at once and the host follows it), and DHD_PC_SETTINGS_RESTART replaces the hint of
    a row that waits for the next start. The browser sets all three (port/web/www/settings.js);
    x64 sets none of them, so its page is as described above.
    With touch (the host sets DHD_TOUCH: android, or mouse for a desktop test) the page ends with a
@@ -93,7 +94,7 @@ static int loaded;
 /* The largest scale the renderer draws on this GPU: DHD_SCALE_MAX, which the Rust native renderer
    sets (8, or less on a GPU with little memory or small textures); 0 without it (the exact
    renderer). scale_why: what holds it below 8 (DHD_SCALE_MAX_REASON) in the row's words ("GPU ..."; the
-   footer says "This GPU's" and the rest), else NULL. */
+   hint says "This GPU's" and the rest), else NULL. */
 static int scale_limit;
 static const char *scale_why;
 static int scale_phone;  /* the limit is the phones' (DHD_SCALE_MAX_REASON "phone") */
@@ -138,8 +139,8 @@ static void choices_build(void)
         }
     }
 }
-static char footer[64];
-static const char *restart_footer = "* Applies when the game starts again";
+static char hint[64];
+static const char *restart_hint = "* Applies when the game starts again";
 static int shown[ROWS], shown_count;  /* the page's rows: indexes into rows[] */
 
 /* Whether env is one of list's comma-separated names. */
@@ -157,7 +158,7 @@ static void choose_rows(void)
 {
     const char *list = host_getenv("DHD_PC_SETTINGS_ROWS"), *live = host_getenv("DHD_PC_SETTINGS_LIVE");
     const char *restart = host_getenv("DHD_PC_SETTINGS_RESTART");
-    if (restart && *restart) restart_footer = restart;
+    if (restart && *restart) restart_hint = restart;
     shown_count = 0;
     for (int i = 0; i < ROWS; i++) {
         if (!list || listed(list, rows[i].env)) shown[shown_count++] = i;
@@ -288,21 +289,21 @@ static void page_build(MenuPage *p)
     touch_row = touch && *touch ? menu_page_row(p, "Touch Controls", 1) : -1;
 }
 
-static void page_update(MenuPage *p, int cursor)  /* the footer for the row */
+static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the legend stays) */
 {
     if (screen) { touch_settings_update(p, screen, cursor); return; }
     const Row *r = row_at(cursor);
-    p->footer = NULL;
+    p->hint = NULL;
     if (r && locked(r)) {
-        snprintf(footer, sizeof footer, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
-        p->footer = footer;
-    } else if (r && r->selected != r->running) p->footer = restart_footer;
-    else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->footer = "No pack: see texture_pack in dhd.ini";
+        snprintf(hint, sizeof hint, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
+        p->hint = hint;
+    } else if (r && r->selected != r->running) p->hint = restart_hint;
+    else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->hint = "No pack: see texture_pack in dhd.ini";
     else if (r == &rows[RESOLUTION] && scale_limit && scale_limit < 8) {
-        if (scale_phone) snprintf(footer, sizeof footer, "Phones go up to %dx", scale_limit);
-        else if (scale_why) snprintf(footer, sizeof footer, "This GPU's %s allows up to %dx", scale_why + 4, scale_limit);
-        else snprintf(footer, sizeof footer, "This GPU allows up to %dx", scale_limit);
-        p->footer = footer;
+        if (scale_phone) snprintf(hint, sizeof hint, "Phones go up to %dx", scale_limit);
+        else if (scale_why) snprintf(hint, sizeof hint, "This GPU's %s allows up to %dx", scale_why + 4, scale_limit);
+        else snprintf(hint, sizeof hint, "This GPU allows up to %dx", scale_limit);
+        p->hint = hint;
     }
 }
 
@@ -353,6 +354,7 @@ void port_pc_settings(void)
     page.title = page_title();
     page.build = page_build;
     page.update = page_update;
+    page.hints = 1;   /* the row's hint above the legend (menu_page.h) */
     page.accept = page_accept;  /* Cross: keep, close (Touch Controls: its screens) */
     page.back = page_back;
     page.left = page_left;
