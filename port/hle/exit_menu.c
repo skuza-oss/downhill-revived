@@ -11,6 +11,7 @@
 
 void gs_window_close(void);  /* port/gs/present.c */
 int port_main_label(const int *table, int index);  /* online_menu.c: rows 0-3 */
+int port_main_choice(int shown);                   /* online_menu.c: the row a shown row is */
 
 static MenuPage page;
 static int quit;
@@ -42,8 +43,9 @@ void port_exit_menu(void)
     }
 }
 
-/* The main menu's row labels: the game's three, ONLINE (online_menu.c), EXIT GAME. */
+/* The main menu's row labels: the game's three, ONLINE (online_menu.c, when offered), EXIT GAME. */
 int port_exit_label(const int *table, int index)
 {
+    index = port_main_choice(index);
     return index == 4 ? (int)(uintptr_t)"EXIT GAME" : port_main_label(table, index);
 }

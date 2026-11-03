@@ -1,7 +1,13 @@
 // Browser network host services. Struct offsets come from the shared C header.
 import { layout } from './net_layout.js';
 
-export function createNet({span, str}) {
+// Online play is not offered in the browser (finding 143): the page's CSP blocks the race server's
+// socket, so it never worked here. The core asks host_service_net_offered and shows no ONLINE row;
+// the connections below refuse whatever asks. The same switch is off on Android (port/net/net.c).
+// online: true only in check_net.mjs, which tests the session code for when it comes back.
+const ONLINE_OFFERED = false;
+
+export function createNet({span, str, online = ONLINE_OFFERED}) {
   let base = 'wss://dhd.skuza.app', name = '', version = '', iso = '', ws;
   let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {};
   let frames = [], list = [], listing = false, listError = false, timer, clockKnown = false;
@@ -11,6 +17,7 @@ export function createNet({span, str}) {
   const serverMs = () => now() + offset;
   const me = () => room.members?.find(x => x.id === member);
   function connect(path) {
+    if (!online) { state = 5; error = 'Online play is not offered in the browser.'; seq++; return -1; }
     ws?.close(); clearInterval(timer); state = 1; room = {}; start = {}; frames = []; welcome = {}; where = {};
     ws = new WebSocket(base + path); ws.binaryType = 'arraybuffer';
     const socket = ws;
@@ -82,6 +89,7 @@ export function createNet({span, str}) {
   }
   const api = {
     host_service_net_init:(a,b,c,d)=>{base=a?str(a):base;name=str(b);version=str(c);iso=str(d);},
+    host_service_net_offered:()=>online?1:0,
     host_service_net_create_room:()=>connect('/v1/rooms/new'),
     host_service_net_join_room:a=>connect('/v1/rooms/'+str(a)),
     host_service_net_leave:()=>{send({type:'leave'});ws?.close();ws=null;clearInterval(timer);state=0;},
@@ -107,7 +115,7 @@ export function createNet({span, str}) {
       if(state!==3||n>3070)return 0;const f=new Uint8Array(n+2);f[0]=type;f.set(span(a,n),2);ws.send(f);return 1;},
     host_service_net_receive_frame:(a,n)=>{const f=frames.shift();if(!f||f.length>n)return 0;span(a,f.length).set(f);return f.length;},
     host_service_net_list_lobbies_start:()=>{
-      if(listing)return 0;listing=true;listError=false;
+      if(listing||!online)return 0;listing=true;listError=false;
       // the list's "now" sets the clock when no room's pings have, so its times count from the server's (finding 135)
       const sent=now();
       fetch(base.replace(/^ws/,'http')+'/v1/lobbies').then(r=>r.json()).then(r=>{

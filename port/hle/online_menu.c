@@ -1924,6 +1924,20 @@ int port_main_label(const int *table, int index)
     return index < 3 ? table[index] : (int)(uintptr_t)"ONLINE";
 }
 
+/* The main menu's rows as shown: the game's three, ONLINE, EXIT GAME (exit_menu.c). A build
+   without online play (Android and the browser: host_service_net_offered, finding 143) shows no
+   ONLINE row, so its fourth row is EXIT GAME; port_main_choice turns a shown row into the row the
+   patched menu acts on. */
+int port_main_rows(void)
+{
+    return host_service_net_offered() ? 5 : 4;
+}
+
+int port_main_choice(int shown)
+{
+    return shown >= 3 && !host_service_net_offered() ? shown + 1 : shown;
+}
+
 /* The choice as the setup block has it: after the shop's START (retail's func_0013A170 commits
    the bike there), or at GET READY. */
 static void keep_selection(void)

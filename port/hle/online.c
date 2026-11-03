@@ -62,8 +62,13 @@ static int from_menu;  /* the ONLINE menu (online_menu.c) made the connection an
 
 static int online_mode(void)
 {
-    if (online < 0)
+    if (online < 0) {
         online = getenv("DHD_NET_CREATE") != NULL || getenv("DHD_NET_JOIN") != NULL;
+        if (online && !host_service_net_offered()) {  /* Android and the browser: no online yet */
+            fprintf(stderr, "online: DHD_NET_CREATE / DHD_NET_JOIN ignored: this build offers no online play\n");
+            online = 0;
+        }
+    }
     return online;
 }
 

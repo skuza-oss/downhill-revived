@@ -14,6 +14,16 @@
 
 enum { REJOIN_ATTEMPTS = 5 };
 
+/* Online play is not offered on phones yet (finding 143): their speed and the touch controls come
+   first. Android builds refuse every connection here, whatever asks (the menu, DHD_NET_*, a
+   dhd.ini server), and the core hides ONLINE (host_service_net_offered). */
+#ifdef __ANDROID__
+#define NET_OFFERED 0
+#else
+#define NET_OFFERED 1
+#endif
+#define NET_NOT_OFFERED "online play comes to phones later"
+
 static NetClient client;
 static WsConn *conn;
 static int inited;
@@ -85,6 +95,12 @@ static int connect_to(const char *path)
     SDL_LockMutex(api);
     client_free(&client);
     client_init(&client, name, version, iso);
+    if (!NET_OFFERED) {
+        client.lobby.state = NET_FAILED;
+        snprintf(client.lobby.error, sizeof client.lobby.error, NET_NOT_OFFERED);
+        SDL_UnlockMutex(api);
+        return -1;
+    }
     if (!base[0]) {
         client.lobby.state = NET_FAILED;
         snprintf(client.lobby.error, sizeof client.lobby.error, "no server: set DHD_NET_SERVER");
@@ -137,7 +153,7 @@ int net_list_lobbies(NetLobbyInfo *out, int max)
     char url[300];
     double sent, got;
     int n;
-    if (!base[0] || !inited)
+    if (!NET_OFFERED || !base[0] || !inited)
         return -1;
     snprintf(url, sizeof url, "%s/v1/lobbies", base);
     sent = net_now_ms();
@@ -217,6 +233,7 @@ int net_receive_frame(uint8_t *out, size_t max)
 #include "../host/host_api.h"
 #include "../include/guest.h"
 void host_service_net_init(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) { net_init((const char *)GUEST(a0), (const char *)GUEST(a1), (const char *)GUEST(a2), (const char *)GUEST(a3)); }
+int host_service_net_offered(void) { return NET_OFFERED; }
 int host_service_net_create_room(void) { return net_create_room(); }
 int host_service_net_join_room(uint32_t a0) { return net_join_room((const char *)GUEST(a0)); }
 void host_service_net_leave(void) { net_leave(); }

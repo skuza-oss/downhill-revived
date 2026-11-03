@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createNet } from './www/net.js';
 import { layout } from './www/net_layout.js';
+test('no online in the browser: not offered, and nothing connects (finding 143)',()=>{
+  const bytes=new Uint8Array(4096),span=(a,n)=>bytes.subarray(a,a+n);
+  const str=a=>new TextDecoder().decode(bytes.subarray(a,bytes.indexOf(0,a)));
+  let made=0;
+  globalThis.WebSocket=class {constructor(){made++;}};
+  const api=createNet({span,str});
+  assert.equal(api.host_service_net_offered(),0);
+  assert.equal(api.host_service_net_create_room(),-1);
+  assert.equal(api.host_service_net_join_room(0),-1);
+  assert.equal(api.host_service_net_list_lobbies_start(8),0);
+  assert.equal(made,0);
+});
 test('browser session messages and shared snapshots',()=>{
   const memory=new ArrayBuffer(32768),bytes=new Uint8Array(memory),dv=new DataView(memory);
   const span=(a,n)=>bytes.subarray(a,a+n);
@@ -14,7 +26,7 @@ test('browser session messages and shared snapshots',()=>{
     send(m){this.sent.push(typeof m==='string'?JSON.parse(m):m);}
     close(){}
   };
-  const api=createNet({span,str});
+  const api=createNet({span,str,online:true});
   api.host_service_net_init(0,put(1,'Test'),put(20,'0.7.4'),put(40,'a'.repeat(64)));
   api.host_service_net_create_room();socket.onopen();
   assert.deepEqual(socket.sent[0].features,['countdown','session']);
