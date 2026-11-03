@@ -412,3 +412,8 @@ MIUI and the legend taps need the phones.
   still drops it (the finger's up says where it ended). `test_queue`: Muse's repro (127 taps of
   another finger, then a stick down and its first move: kept, the stick past 200), and the
   completely full queue (another finger's stroke gives its move's place, its up stays).
+- **A failed tilt-sensor ask was retried every SDL pass** (Muse N2). When
+  `android_touch_tilt_on` answered -1 (the activity not ready, or the Java call failing), the
+  next pass (about every 4 ms) asked again, each a JNI call and a posted UI-thread task. A failed
+  ask now waits 250 ms before the next; a successful one is not delayed. Android only: compiled by
+  the debug APK build, not run.

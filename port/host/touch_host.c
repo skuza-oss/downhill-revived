@@ -224,12 +224,13 @@ void touch_host_tick(void)
     if (buzz) SDL_SetAtomicInt(&want_buzz, 0);
 #ifdef __ANDROID__
     static int tilt_was = -1;   /* the first pass asks whether there is a sensor */
-    static double insets_at;
+    static double insets_at, tilt_retry_at;
     int tilt = SDL_GetAtomicInt(&tilt_wanted);
-    if (tilt != tilt_was) {
+    if (tilt != tilt_was && ms_now() >= tilt_retry_at) {
         SDL_SetAtomicInt(&tilt_known, 0);   /* the next reading is the new sensor's */
         int sensor = android_touch_tilt_on(tilt);
         if (sensor >= 0) SDL_SetAtomicInt(&tilt_sensor, sensor), tilt_was = tilt;
+        else tilt_retry_at = ms_now() + 250;   /* not asked (no activity yet): again in a moment, not every pass */
     }
     float deg;
     if (tilt && android_touch_tilt(&deg)) {
