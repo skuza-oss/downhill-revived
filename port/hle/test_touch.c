@@ -391,6 +391,82 @@ static void test_pause(void)
     CHECK(n == 1 && edges[0] == PAD_TRIANGLE);
 }
 
+/* The overlay's pause rows opened Restart race's question; a controller answers it (Sol's round-2
+   #1). The overlay hands the menu over at once (hidden, nothing sent, touches not taken as rows),
+   and gives the race controls back when the race goes on: after Yes when the restarted race's
+   clock runs, after No when the controller resumes. */
+static int pedal_works(void)
+{
+    float x, y;
+    touch_down(t, 90, 10, 60, now);   /* the touch that brings the overlay back (the controller hid it) */
+    touch_up(t, 90, 10, 60, now);
+    field();
+    at(TC_PEDAL, &x, &y);
+    touch_down(t, 91, x, y, now);
+    wait_ms(520);   /* the resume guard */
+    int works = touch_visible(t) && (buttons() & PAD_CROSS);
+    touch_up(t, 91, x, y, now);
+    field();
+    return works;
+}
+
+static void test_pause_controller(void)
+{
+    uint16_t edges[32];
+    TouchShape shapes[TOUCH_SHAPES];
+    for (int yes = 0; yes < 2; yes++) {
+        start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        touch_back(t, now);   /* pause */
+        record(edges, 32, 8);
+        game.clock_moving = 0;
+        fields(3);
+        float rx, ry;
+        touch_target(t, TOUCH_TARGET_PAUSE, 1, &rx, &ry);   /* Restart race: ↓ ↓ ↓ ↓ ✕, the question */
+        touch_down(t, 1, rx, ry, now);
+        touch_up(t, 1, rx, ry, now);
+        record(edges, 32, 60);
+        CHECK(touch_visible(t));
+        touch_pad_used(t, now);   /* the controller answers */
+        field();
+        CHECK(!touch_visible(t) && touch_shapes(t, shapes, TOUCH_SHAPES) == 0);
+        float cx, cy;
+        touch_target(t, TOUCH_TARGET_CONFIRM, 1, &cx, &cy);
+        touch_down(t, 2, cx, cy, now);   /* a tap where Yes was: no row, no press */
+        touch_up(t, 2, cx, cy, now);
+        CHECK(record(edges, 32, 20) == 0);
+        if (yes) {   /* Yes: the race restarts (the countdown, the clock back to 0), then runs */
+            game.race_ms = 0;
+            fields(30);
+            game.clock_moving = 1;
+            field();
+        } else {     /* No: the game's menu again, the clock still stopped; Back is the menu's △ */
+            fields(30);
+            CHECK(!touch_visible(t) && !buttons());
+            touch_back(t, now);
+            CHECK(record(edges, 32, 20) == 1 && edges[0] == PAD_TRIANGLE);
+            game.clock_moving = 1;   /* the controller resumes */
+            field();
+        }
+        CHECK(pedal_works());
+    }
+    /* a controller used while the rows' presses still go: they stop (the controller's now) */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_back(t, now);
+    record(edges, 32, 8);
+    game.clock_moving = 0;
+    fields(3);
+    float rx, ry;
+    touch_target(t, TOUCH_TARGET_PAUSE, 1, &rx, &ry);
+    touch_down(t, 1, rx, ry, now);
+    touch_up(t, 1, rx, ry, now);
+    CHECK(record(edges, 32, 4) == 1 && edges[0] == PAD_DOWN);
+    touch_pad_used(t, now);
+    CHECK(record(edges, 32, 60) == 0);
+    game.clock_moving = 1;
+    field();
+    CHECK(pedal_works());
+}
+
 /* Restart race: the resume guard set by the old race's clock does not hold PEDAL back in the new
    race (the clock went back to 0). */
 static void test_restart_clock(void)
@@ -882,6 +958,7 @@ int main(void)
     test_air_wait_tap();
     test_sprint_guards();
     test_pause();
+    test_pause_controller();
     test_restart_clock();
     test_editor_bar();
     test_trick_hint();

@@ -354,6 +354,19 @@ MIUI and the legend taps need the phones.
 
 ### Second review round (2026-11-03)
 
+- **A controller answering the pause question left the overlay on it** (Sol 1). `pause_step`
+  noticed a race the controller resumed only from the rows (`PAUSE_OPEN`, `PAUSE_CONTROLS`), not
+  from the question (`PAUSE_CONFIRM`), and any pause state kept the overlay drawn and owning the
+  touches, so after a controller's Yes the restarted race's touches went to the question's
+  buttons; after its No the overlay still showed the question while the game showed its menu.
+  Now a controller used while the overlay's rows, Controls page or question are up takes the
+  game's menu over (`PAUSE_PAD`): the overlay's own presses stop, it hides and takes no touch as a
+  row (it can't know where the controller left the game's menu), Back there is the menu's △; and
+  the race clock running again ends every pause state (Yes: when the restarted race runs; No:
+  when the controller resumes). The rows come back with the next pause. `test_pause_controller`:
+  Restart race's question answered Yes and No by a controller (hidden at once, a tap where Yes was
+  sends nothing, Back is △, PEDAL works again after the race goes on), and a controller used
+  while the rows' ↓ presses still go (they stop). It fails on the code before.
 - **Stick = Fixed steered only after the thumb moved** (Sol 3). Both presets gave a new steering
   touch the stick and its centre and returned; the deflection was computed only by a move, so a
   thumb that landed 8 mm right of a fixed stick's centre and stayed still sent a centred stick until

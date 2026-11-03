@@ -15,7 +15,8 @@
    - The air layout comes air_wait_ms after the air flag; the trick stick's zones, latches and
      its one sending rule (settle, past the edge once the gate is open, landing).
    - Paused: race touches send nothing; the pause rows are ↓ / ↑ steps then ✕, sent as presses
-     the game sees (whole fields of its VBLANKs). */
+     the game sees (whole fields of its VBLANKs). A controller used on the pause menu takes it
+     over (PAUSE_PAD); the race clock moving again ends any pause state. */
 #include "touch.h"
 #include "hle.h"
 
@@ -134,7 +135,10 @@ float touch_button_scale(float s) { return 1.2f * s - 0.2f; }
 /* ---------------------------------------------------------------- the state */
 
 enum { JOB_NONE, JOB_STICK, JOB_BUTTON, JOB_PEDAL, JOB_TRICK, JOB_AIR_WAIT, JOB_PANEL, JOB_EDIT, JOB_IGNORED };
-enum { PAUSE_NONE, PAUSE_ASKED, PAUSE_OPEN, PAUSE_CONTROLS, PAUSE_CONFIRM };
+/* PAUSE_PAD: a controller took over the game's pause menu (or its question) from the rows: the
+   overlay no longer knows where the game's menu is, so it hides and leaves the menu to the
+   controller until the race goes on. */
+enum { PAUSE_NONE, PAUSE_ASKED, PAUSE_OPEN, PAUSE_CONTROLS, PAUSE_CONFIRM, PAUSE_PAD };
 enum { ROW_RESUME, ROW_RESTART, ROW_QUIT, ROW_CONTROLS, ROW_BAIL, PAUSE_ROWS, PAUSE_BUTTON = 100 };
 enum { PANEL_CLOSE, PANEL_BAIL, PANEL_LEAVE, PANEL_BUTTONS };
 enum { CONFIRM_NO, CONFIRM_YES };
@@ -767,6 +771,7 @@ static int race_on_screen(const Touch *t) { return t->hud_seen > 0 && t->now - t
 int touch_visible(const Touch *t)
 {
     if (t->editor) return 1;
+    if (t->pause == PAUSE_PAD) return 0;   /* the controller has the game's menu */
     if (t->pause != PAUSE_NONE) return 1;
     return race_on_screen(t) && !t->hidden_by_pad;
 }
@@ -1442,6 +1447,7 @@ void touch_back(Touch *t, double now)
     if (t->pause == PAUSE_CONFIRM) { pause_row_tapped(t, CONFIRM_NO); return; }
     if (t->pause == PAUSE_OPEN) { pause_row_tapped(t, ROW_RESUME); return; }
     if (t->pause == PAUSE_ASKED) return;
+    if (t->pause == PAUSE_PAD) { if (!seq_busy(t)) seq_add(t, PAD_TRIANGLE); return; }   /* the menu's back, as in menus */
     if (race_on_screen(t)) { pause_pressed(t); return; }
     if (!seq_busy(t)) seq_add(t, PAD_TRIANGLE);   /* in menus Back is △ */
 }
@@ -1449,6 +1455,12 @@ void touch_back(Touch *t, double now)
 void touch_pad_used(Touch *t, double now)
 {
     t->now = now;
+    if (t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM) {
+        /* the controller works the game's menu from here (moves its cursor, answers the question):
+           the rows would no longer say where the game is, and the overlay's own presses stop */
+        t->pause = PAUSE_PAD;
+        seq_reset(t);
+    }
     if (t->set.show_with_pad || t->hidden_by_pad || t->editor) return;
     t->hidden_by_pad = 1;
     drop_race_touches(t);
@@ -1668,8 +1680,8 @@ static void pause_step(Touch *t)
         /* the menu is open once the race clock stops (its own START when it wasn't moving) */
         if (!t->pause_from_moving || !g->clock_moving) t->pause = PAUSE_OPEN;
         else if (t->now - t->pause_asked_at > 500) race_resumes(t);   /* START was ignored */
-    } else if ((t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS) && g->clock_moving && !seq_busy(t)) {
-        race_resumes(t);   /* closed some other way (a controller) */
+    } else if (t->pause != PAUSE_NONE && t->pause != PAUSE_ASKED && g->clock_moving && !seq_busy(t)) {
+        race_resumes(t);   /* closed some other way (a controller resumed, restarted, answered the question) */
     }
     if (g->online && t->pause != PAUSE_NONE) race_resumes(t);
     if (!g->online) t->panel_open = 0;
