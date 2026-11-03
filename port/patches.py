@@ -349,6 +349,13 @@ PATCHES = {
          '        hle_puppet_start_point(D_0043EEC0, p);\n        if (func_001A0498(D_0043EEC0, &start.pos, start.matrix)) {'),
         ('text', 'u128 *v = func_001177F8(D_0029EA20, I(0x7978));',
          'u128 *v = func_001177F8(D_0029EA20, hle_puppet_grid(p, I(0x7978)));')],
+    # Shared online track pickups; retail effect and respawn code stay intact offline.
+    'unsorted/00196590.c': [
+        ('text', 'void func_00196590(Obj *obj, Rider *rider) {',
+         'extern int hle_online_pickup_allowed(void *);\nextern void hle_online_pickup_taken(void *, void *);\n'
+         'void func_00196590(Obj *obj, Rider *rider) {\n    if (!hle_online_pickup_allowed(rider)) return;'),
+        ('text', '    obj->x8->x4 = 0;',
+         '    obj->x8->x4 = 0;\n    hle_online_pickup_taken(obj, rider);')],
     # Online: no random start swap of the human (port/hle/puppet.c hle_puppet_keep_grid), so every
     # PC has the same grid and no two riders share a gate.
     'unsorted/0011AEC0.c': [

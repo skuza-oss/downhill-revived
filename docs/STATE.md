@@ -534,6 +534,8 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   snapshots (`port/hle/puppet.c`, finding 044). Each player sends all its riders in one message.
   Grid, rider/bike looks, the countdown on the server's clock, hits between humans, finishes and
   results are shared (finding 047); a player who leaves becomes an AI rider.
+  Track pickups are shared too (finding 144): only an owned rider collects;
+  its event hides the pickup everywhere and the retail respawn timer runs locally.
 - In the game's own menus: name and code entry, public list, rider picker (finding 065); restart,
   new level and rematch flows (finding 072). Create/Join waits on ONLINE, then the rider screen
   once and the room over it, with no bounce and no second title flight (finding 092); then the

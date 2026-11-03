@@ -127,7 +127,7 @@ breaking such an object could hit it. r5 ran with the fix and didn't crash.
   (8, 3, 0), so every run had the same bike; other bikes are untested.
 - **Power-ups**: the attack kind and bottles travel; no run collected one (the scripted lines
   punch with the starting punch), so a puppet's kick or throw wasn't seen. Pickups on the
-  track are each PC's own.
+  track are each PC's own. This limitation is superseded by finding 144 (shared pickup events).
 - **Bots** replay one recorded line, all on the same path; they test the protocol, not riding.
 - **4 PCs**: not tried on 4 real PCs yet.
 

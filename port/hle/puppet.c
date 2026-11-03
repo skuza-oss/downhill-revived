@@ -640,3 +640,5 @@ void hle_puppet_field(void)
         if (s->clock % pp.rate == 0 && s->clock != pp.file_fed) feed(pp.play_slot, s), pp.file_fed = s->clock;
     }
 }
+
+int hle_puppet_owner(int global) { return global >= 0 && global < NRIDERS ? owner_of(to_local(global)) : -1; }

@@ -274,7 +274,7 @@ extern void func_001B45F8(void *timer, int kind, int ticks);  /* the race-end co
    port/hle/puppet.c's. */
 enum {
     EVENT_VERSION = 2, EVENT_HIT = 1, EVENT_LOADED = 2, EVENT_SETUP = 3, EVENT_START = 4, EVENT_GO = 5,
-    EVENT_FINISH = 6, EVENT_RESULTS = 7  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
+    EVENT_FINISH = 6, EVENT_RESULTS = 7, EVENT_PICKUP = 9  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
 };
 enum { SNAPSHOT_TICKS = 3 };  /* a snapshot every 3 race ticks: 20 a second at any frame rate */
 enum { NRIDERS = 10, START_LEAD_MS = 1500 };
@@ -582,6 +582,58 @@ static void send_event(const void *payload, int n)
 static void put32(uint8_t *o, int32_t v) { memcpy(o, &v, 4); }
 static int32_t get32(const uint8_t *i) { int32_t v; memcpy(&v, i, 4); return v; }
 
+/* Pickup pool: retail allocates 150 entries in level-file order (001961D8).
+   Only the index travels, never a pointer. Type, track and exact spawn xyz guard it. */
+#include "online_pickup.h"
+int hle_puppet_owner(int global);
+#define PICKUP_POOL 0x4348F0
+#define PICKUP_COUNT EE32(PICKUP_POOL + 0xC00)
+static uint8_t *pickup_entry(int id) { return EE_PTR(PICKUP_POOL + 0x18 + id * 20); }
+static uint8_t *pickup_node(uint8_t *p) { return *(uint8_t **)(p + 8); }
+
+int hle_online_pickup_allowed(void *rider)
+{
+    if (!online_mode() || !on.started) return 1;
+    for (int i = 0; i < hle_online_race_riders(); i++)
+        if (rider == RIDER(i)) return hle_puppet_owned(i);
+    return 0;
+}
+
+void hle_online_pickup_taken(void *pickup, void *rider)
+{
+    if (!online_mode() || !on.started || EE32(MENU) != LOAD_MENU || !race_running()) return;
+    for (int id = 0; id < PICKUP_COUNT && id < 150; id++) {
+        uint8_t *p = pickup_entry(id);
+        if (p != pickup) continue;
+        for (int slot = 0; slot < hle_online_race_riders(); slot++) {
+            if (rider != RIDER(slot) || !hle_puppet_owned(slot)) continue;
+            uint8_t e[PICKUP_EVENT_SIZE];
+            pickup_encode(e, id, hle_puppet_global(slot), *(int32_t *)(p + 4),
+                          EE32(SETUP + 0x2A0), pickup_node(p) + 0x10);
+            if (host_service_net_send_frame(NET_FRAME_EVENT, GADDR(e), sizeof e))
+                fprintf(stderr, "online: pickup %d taken by slot %d (sent)\n", id, hle_puppet_global(slot));
+        }
+        return;
+    }
+}
+
+static void receive_pickup(int sender, const uint8_t *e, int n)
+{
+    if (!on.started || EE32(MENU) != LOAD_MENU || !race_running() ||
+        n != PICKUP_EVENT_SIZE || e[2] >= PICKUP_COUNT || e[2] >= 150 ||
+        e[3] >= hle_online_race_riders() || hle_puppet_owner(e[3]) != sender) return;
+    uint8_t *p = pickup_entry(e[2]), *node = pickup_node(p);
+    if (!node || !pickup_matches(e, n, PICKUP_COUNT, *(int32_t *)(p + 4),
+                                 EE32(SETUP + 0x2A0), node + 0x10) ||
+        !*(int32_t *)node || !node[4]) return;
+    /* Same taken state as 00196590, without any rider reward. 00196888 waits
+       for this collector to leave a 10-unit radius, then runs the retail timer. */
+    *(void **)(p + 12) = RIDER(hle_puppet_local(e[3]));
+    *(int32_t *)(p + 16) = EE32(PICKUP_POOL + 0xBE8 + 4 * e[4]);
+    node[4] = 0;
+    fprintf(stderr, "online: pickup %d taken by slot %d (event from player %d)\n", e[2], e[3], sender);
+}
+
 /* DHD_NET_RECORD=file: tests, this PC's rider's snapshots as sent (a 2-byte length, then the
    payload), for nettool --replay's bots. Keep it under build/ or a temp folder. */
 static void record(const uint8_t *payload, int n)
@@ -620,6 +672,9 @@ static void receive_frames(void)
         }
         if (frame[0] != NET_FRAME_EVENT || n < 4 || e[0] != EVENT_VERSION || sender >= NET_MAX_SLOTS) continue;
         switch (e[1]) {
+        case EVENT_PICKUP:
+            receive_pickup(sender, e, n - 2);
+            break;
         case EVENT_LOADED:
             if (!on.loaded[sender]++) fprintf(stderr, "online: player %d has loaded (at %.1f s)\n", sender, host_wall_seconds());
             break;
