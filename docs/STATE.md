@@ -412,6 +412,10 @@ the rejoin became a second member (and a host's rights stayed with the dead copy
 takes back the same-named member whose socket has been quiet 4 s (waiting up to that when it spoke
 just before), a 1006 drop outside a race keeps the member 20 s for its rejoin, and a socket silent
 20 s is dropped. Server only: deploying it fixes 0.7.7. Server tests 81/81.
+2026-11-03 (review fix): the name rule let any player with the same name take a member over, host
+included. Now the server sends each member a random rejoin token in its welcome, the game sends it
+back in its rejoin's hello, and only the token takes a member back (at once, no 4 s wait); a
+same-name hello without it is a new member. Needs the next release's client and MIN_VERSION.
 
 2026-11-02 (finding 138): the launcher's update check has a backup. When GitHub's releases API fails
 (no connection to api.github.com, its 60-an-hour limit, 5xx, a bad answer), the launcher asks the

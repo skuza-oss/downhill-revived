@@ -22,6 +22,9 @@ typedef struct {
     NetTransport tr;
     int connected, leaving;
     char name[100], version[64], iso[65];
+    /* this room's rejoin token from the welcome (hex; "" none yet): a rejoin's hello sends it back
+       to get the member again (finding 137). client_init clears it for each new room. */
+    char rejoin_token[65];
     NetLobby lobby;
     int racing;
     /* what to repeat after a lobby reconnect */

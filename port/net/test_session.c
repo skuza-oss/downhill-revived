@@ -138,6 +138,29 @@ int main(void)
         assert(!strcmp(now_text, "RACING"));
         client_free(&c);
     }
+    {   /* the rejoin token (finding 137): kept from the welcome, sent back by the rejoin's hello,
+           gone for the next room; a token that isn't hex never goes back into JSON */
+        const char *tokened = "{\"type\":\"welcome\",\"memberId\":3,\"code\":\"BACK22\",\"serverTime\":1000,"
+            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\"}";
+        const char *odd = "{\"type\":\"welcome\",\"memberId\":3,\"code\":\"BACK22\",\"serverTime\":1000,"
+            "\"rejoinToken\":\"ab\\\",\\\"x\"}";
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"rejoinToken"));
+        client_on_text(&c,tokened,strlen(tokened));
+        assert(client_on_closed(&c,1006,"") == 1);  /* a drop in the room: rejoin */
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"type\":\"hello\"") && strstr(sent,",\"rejoinToken\":\"0123456789abcdef0123456789abcdef\"}"));
+        client_free(&c);
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);  /* the next room: no token from the last one */
+        assert(!strstr(sent,"rejoinToken"));
+        client_on_text(&c,odd,strlen(odd));
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"rejoinToken"));
+        client_free(&c);
+    }
     puts("test_session: session and ten-player checks passed");
     return 0;
 }

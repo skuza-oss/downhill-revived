@@ -156,7 +156,7 @@ describe("session rooms",()=>{
     cs[1].sendJson({type:"back"});
     expect((await snap(h,r=>r.lastRace)).members.map((m:any)=>m.ready)).toEqual([true,false]);
   });
-  it("after a restart, a player back under their name gets their member again; the rest leave",async()=>{
+  it("after a restart, a player back with their token gets their member again; the rest leave",async()=>{
     const {h,cs,code}=await setup(4);
     cs[1].sendJson({type:"ready",ready:true}); await snap(h,r=>r.members[1].ready);
     // a restart: every socket gone, no close events
@@ -164,9 +164,9 @@ describe("session rooms",()=>{
       for (const ws of ctx.getWebSockets()) ws.serializeAttachment({...ws.deserializeAttachment(), memberId:null, gone:true});
       room.sockets.clear();
     });
-    const back=await Client.connect(`/v1/rooms/${code}`); back.hello("Host",{features:["session","countdown"]});
+    const back=await Client.connect(`/v1/rooms/${code}`); back.hello("Host",{features:["session","countdown"],rejoinToken:h.welcome.rejoinToken});
     expect(await back.json("welcome")).toMatchObject({memberId:0,host:true});
-    const p1=await Client.connect(`/v1/rooms/${code}`); p1.hello("P1",{features:["session","countdown"]});
+    const p1=await Client.connect(`/v1/rooms/${code}`); p1.hello("P1",{features:["session","countdown"],rejoinToken:cs[1].welcome.rejoinToken});
     expect((await p1.json("welcome")).memberId).toBe(1);
     expect((await snap(back,r=>r.members.length===4)).members[1].ready).toBe(true);
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room:any) => { room.startedAt=Date.now()-60_000; });

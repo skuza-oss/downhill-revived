@@ -12,6 +12,9 @@ export class Client {
   private inbox: Frame[] = [];
   private waiter: (() => void) | null = null;
   closeCode: number | null = null;
+  /** The last welcome read (json("welcome")): its rejoinToken is what the game's rejoin sends. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  welcome: any = null;
 
   constructor(readonly ws: WebSocket) {
     ws.addEventListener("message", (e) => {
@@ -80,7 +83,9 @@ export class Client {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async json(type: string): Promise<any> {
     const f = await this.next((f) => typeof f === "string" && JSON.parse(f).type === type);
-    return JSON.parse(f as string);
+    const m = JSON.parse(f as string);
+    if (type === "welcome") this.welcome = m;
+    return m;
   }
 
   async binary(): Promise<Uint8Array> {

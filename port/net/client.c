@@ -77,17 +77,21 @@ void client_free(NetClient *c)
 
 void client_connected(NetClient *c, const NetTransport *tr)
 {
-    char name[200];
+    char name[200], token[96] = "";
     SDL_LockMutex(c->lock);
     c->tr = *tr;
     c->connected = 1;
     c->last_rx = c->next_ping = net_now_ms();
     json_escape(name, sizeof name, c->name);
+    /* a rejoin: the room's token takes our member back, host rights included (finding 137) */
+    if (c->rejoin_token[0])
+        snprintf(token, sizeof token, ",\"rejoinToken\":\"%s\"", c->rejoin_token);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
     /* features: this client shows the race room's countdown (the server runs one only when
        everyone's does) */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\"]}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso, name);
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\"]%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
+        name, token);
     if (c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
     changed(c);
@@ -347,6 +351,12 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         json_bool(text, "host", &c->lobby.is_host);
         if (c->lobby.is_host)
             c->lobby.host_id = c->lobby.member_id;
+        {   /* kept for a rejoin's hello; only hex goes back into JSON */
+            char token[sizeof c->rejoin_token] = "";
+            if (json_string(text, "rejoinToken", token, sizeof token) && token[0] &&
+                strspn(token, "0123456789abcdef") == strlen(token))
+                memcpy(c->rejoin_token, token, sizeof token);
+        }
         if (json_number(text, "serverTime", &server_time) && !c->have_offset)
             c->clock_offset = server_time - net_now_ms(), c->clock_known = 1;
         c->lobby.state = NET_LOBBY;

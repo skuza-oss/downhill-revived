@@ -38,18 +38,20 @@ const UNUSED_ROOM_MS = 60_000;
     only cheats on or off makes another kind of race (finding 128). */
 const LAPS_CHEATS = 2;
 
-// A player's rejoin (finding 137). The game's hello names no member, only the player, so a hello
-// under a member's name is that member coming back when the member's own socket has gone quiet:
-// a game in a room sends something every second (its pings; the room's pongs), so a socket quiet
-// this long is one the game has given up. A hello while it still speaks waits until it has been
-// quiet this long, then decides. REJOIN_QUIET_MS in the environment overrides it (the tests).
-const REJOIN_QUIET_MS = 4_000;
 /** A member whose connection dropped without a close from the game (1006) stays this long for
     its rejoin; a member whose socket has said nothing for this long is dropped. */
 const REJOIN_GRACE_MS = 20_000;
 /** Close code and reason for the old socket of a member taken back by a rejoin: an ordinary
-    close, so a game that wasn't gone after all rejoins (as a new member, if it still speaks). */
+    close. Only the game holding the member's rejoin token takes it back, and that game has already
+    given the old socket up. */
 const REPLACED_CLOSE = 1000;
+
+/** A member's rejoin token (finding 137): 16 random bytes in hex, sent only to that member's game
+    in its welcome. Its rejoin hello sends it back and gets the member again; nothing else does. */
+function rejoinToken(): string {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
 
 interface Member {
   id: number;
@@ -67,6 +69,9 @@ interface Member {
   /** Their connection dropped (no close from the game) at this time: kept REJOIN_GRACE_MS for the
       game's rejoin, without a socket (finding 137). */
   awaySince?: number;
+  /** The rejoin token (rejoinToken): only a hello with it takes this member back. Members made
+      before tokens have none; their games (older releases) are below MIN_VERSION. */
+  token?: string;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -183,16 +188,14 @@ export class Room extends DurableObject<Env> {
 
   private listedKey: string | null = null;
   private listedAt = 0;
-  /** This instance's start. Members then without a socket are a restart's ghosts (see onHello);
-      those not back within HELLO_TIMEOUT_MS leave as disconnects (alarm). */
+  /** This instance's start. Members then without a socket are a restart's ghosts, kept for their
+      token's rejoin (onHello); those not back within HELLO_TIMEOUT_MS leave as disconnects (alarm). */
   private readonly startedAt = Date.now();
   /** This instance asked the trace where it runs (once). */
   private probed = false;
   /** When each socket last sent anything. Memory only: a socket not here (a wake-up) counts from
       the instance's start. */
   private heard = new WeakMap<WebSocket, number>();
-  /** Sockets whose hello waits for a same-named member's socket to go quiet (onHello). */
-  private helloWaiting = new Set<WebSocket>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -287,7 +290,6 @@ export class Room extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
     this.heard.set(ws, Date.now());
-    if (this.helloWaiting.has(ws)) return;
     if (typeof msg !== "string") {
       this.relay(ws, msg);
       return;
@@ -407,7 +409,7 @@ export class Room extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       const info = ws.deserializeAttachment() as SocketInfo | null;
       if (info && info.memberId === null && !info.gone) {
-        if (now - info.connectedAt > HELLO_TIMEOUT_MS && !this.helloWaiting.has(ws))
+        if (now - info.connectedAt > HELLO_TIMEOUT_MS)
           this.close(ws, "hello_timeout", "No hello received.");
         else pending++;
       }
@@ -549,28 +551,15 @@ export class Room extends DurableObject<Env> {
     return this.heard.get(ws) ?? this.startedAt;
   }
 
-  private rejoinQuietMs(): number {
-    const v = Number((this.env as unknown as Record<string, unknown>).REJOIN_QUIET_MS);
-    return Number.isFinite(v) && v >= 0 ? v : REJOIN_QUIET_MS;
+  /** The member a rejoin hello takes back (finding 137): the one whose token it sends, at once,
+      whether the member's old socket has closed yet or not. A name alone takes nobody back: a
+      hello under a member's name without its token is another player, who joins as a new member. */
+  private rejoinOf(st: RoomState, token: unknown): Member | undefined {
+    if (typeof token !== "string" || token.length === 0) return undefined;
+    return st.members.find((x) => x.token === token);
   }
 
-  /** The member a hello under `name` takes back, if any (finding 137): one without a socket (its
-      connection dropped, or the room restarted), else one whose socket has gone quiet. `wait`: the
-      time to wait before a same-named member's socket counts as quiet (0: none to wait for). */
-  private rejoinOf(st: RoomState, name: string, now: number): { member?: Member; wait: number } {
-    const named = st.members.filter((x) => x.name === name);
-    const away = named.find((x) => !this.sockets.has(x.id));
-    if (away) return { member: away, wait: 0 };
-    let wait = Infinity;
-    for (const x of named) {
-      const quiet = now - this.heardAt(this.sockets.get(x.id)!);
-      if (quiet >= this.rejoinQuietMs()) return { member: x, wait: 0 };
-      wait = Math.min(wait, this.rejoinQuietMs() - quiet);
-    }
-    return { wait: named.length ? wait : 0 };
-  }
-
-  private async onHello(ws: WebSocket, info: SocketInfo, m: Msg, waited = false): Promise<void> {
+  private async onHello(ws: WebSocket, info: SocketInfo, m: Msg): Promise<void> {
     if (m.protocol !== PROTOCOL)
       return this.refuse(ws, "protocol_mismatch", `This server speaks protocol ${PROTOCOL}; update the game.`);
     // The version gate: releases older than MIN_VERSION (wrangler.jsonc) may not play.
@@ -594,28 +583,15 @@ export class Room extends DurableObject<Env> {
     const asHost = info.create && st !== null && st.version === null && st.members.length === 0;
     if (!st || (!asHost && st.version === null))
       return this.refuse(ws, "room_not_found", "No room has this code.");
-    // A player back under their name (their connection dropped, or a restart dropped every socket)
-    // gets their member again: id, host, rider, Ready and race place included (finding 137).
-    const now = Date.now();
-    const rejoin = asHost ? { wait: 0 } : this.rejoinOf(st, name, now);
-    const ghost = rejoin.member;
+    // A game back with its member's token (its connection dropped, or a restart dropped every
+    // socket) gets its member again: id, host, rider, Ready and race place included (finding 137).
+    const ghost = asHost ? undefined : this.rejoinOf(st, m.rejoinToken);
     if (!asHost) {
       if (st.race && !st.session) return this.refuse(ws, "room_started", "The race has already started.");
       if (version !== st.version)
         return this.refuse(ws, "version_mismatch", `The host runs "${st.version}", you run "${version}".`);
       if (iso !== st.isoSha256)
         return this.refuse(ws, "iso_mismatch", "Your game ISO does not match the host's.");
-      if (!ghost && rejoin.wait > 0 && !waited) {
-        // A member of this name still speaks, or did just now: the high-ping rejoin, whose old
-        // socket the room hasn't seen end yet, or another player of the same name. Wait until it
-        // has been quiet long enough, then decide again (messages on this socket wait too).
-        this.helloWaiting.add(ws);
-        await new Promise((resolve) => setTimeout(resolve, rejoin.wait));
-        if (!this.helloWaiting.delete(ws)) return;  // this socket closed meanwhile
-        const again = ws.deserializeAttachment() as SocketInfo;
-        if (again.gone || again.memberId !== null) return;
-        return this.onHello(ws, again, m, true);
-      }
       if (!ghost && st.members.length >= st.maxPlayers) {
         // counted: how often players find a room full (are bigger rooms wanted?)
         this.stat(["full", clientVersion, info.country ?? ""], [st.members.length, st.maxPlayers]);
@@ -637,6 +613,7 @@ export class Room extends DurableObject<Env> {
       rider: 0,
       bike: 0,
       countdown: features.includes(FEATURE_COUNTDOWN),
+      token: rejoinToken(),
     };
     member.region = info.region ?? "";
     if (!ghost) st.members.push(member);
@@ -644,8 +621,8 @@ export class Room extends DurableObject<Env> {
     if (ghost) {
       delete ghost.awaySince;
       ghost.countdown = features.includes(FEATURE_COUNTDOWN);
-      // The old socket is quiet and may not close for minutes: forget it, so its late close
-      // doesn't remove the member, and close it.
+      // The old socket may not close for minutes (a dead path the room hasn't seen end yet):
+      // forget it, so its late close doesn't remove the member, and close it.
       const old = this.sockets.get(ghost.id);
       if (old && old !== ws) {
         old.serializeAttachment({ ...(old.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
@@ -683,6 +660,8 @@ export class Room extends DurableObject<Env> {
       continent: info.continent ?? "",
       roomColo: st.colo ?? "",
       roomRegion: this.region(st),
+      // Only this game gets it; its rejoin hello sends it back (finding 137).
+      rejoinToken: member.token,
     });
     this.probeColo();
     // First ping right away so the lobby shows a delay quickly.
@@ -877,7 +856,6 @@ export class Room extends DurableObject<Env> {
       the member stays REJOIN_GRACE_MS without a socket (finding 137); in it, or after a refusal,
       the member leaves now. */
   private async dropSocket(ws: WebSocket, dropped = false): Promise<void> {
-    this.helloWaiting.delete(ws);
     const info = ws.deserializeAttachment() as SocketInfo | null;
     const id = info?.memberId;
     if (id == null) return;

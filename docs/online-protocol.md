@@ -80,6 +80,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // First message, required. name: 1-24 characters.
 {"type":"hello","protocol":2,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
+// A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>"
 
 // Host only. Every field optional; omitted fields keep their value.
 {"type":"settings","track":3,"laps":2,"seed":12345,"public":true,"maxPlayers":10,"roomName":"Friday race"}
@@ -110,7 +111,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
 ```jsonc
 // Answer to hello: who you are in this room, and where you and the room are (Region, below).
 {"type":"welcome","protocol":2,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
- "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU"}
+ "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU",
+ "rejoinToken":"<32 hex>"}  // this member's rejoin token: only this client gets it (Limits, below)
 
 // Where the room runs and each member's region (never their country): after every join and when
 // the room learns its colo (Region, below).
@@ -264,18 +266,19 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
   player's riders).
 - A room with no members is deleted.
 - No reconnect in version 1: a dropped racer is handed to AI for the rest of the race.
-- A server restart (a deploy) drops every socket with no close event. A lobby client says
-  hello again under the same name and gets its member back (id, host, rider, Ready); members
-  not back within the hello timeout leave as disconnects.
-- Rejoin after a drop (finding 137). A hello takes back the member of its name that has no
-  socket, or whose socket has sent nothing for 4 s (clients send something every second: their
-  pings, the room's pongs). If a member of that name still speaks, the hello waits until that
-  socket has been quiet 4 s, then decides; one still speaking means another player of the same
-  name, who joins as a new member. The old socket of a member taken back is closed (1000,
-  `replaced`). A socket that ends without a close frame (1006) outside its race keeps its member
-  20 s for the rejoin (it doesn't race meanwhile); a member whose socket sends nothing for 20 s
-  leaves as a disconnect and the socket is closed (1001, `silent`). A clean close (1000) or a
-  drop during the member's race leaves at once.
+- Rejoin (finding 137). Each member has a random rejoin token, sent only in its own `welcome`
+  (never in `room` or anywhere else). A client keeps it for that room, and when its connection
+  drops it says hello again with `"rejoinToken"`: the member with that token is taken back at
+  once (id, host, rider, Ready), whether its old socket has closed yet or not; the old socket is
+  closed (1000, `replaced`). A name alone takes no member back: a hello without a token, or with
+  one no member has, joins as a new member, as any player whose name is already in the room does
+  (names are not unique). A socket that ends without a close frame (1006) outside its race keeps
+  its member 20 s for the rejoin (it doesn't race meanwhile); a member whose socket sends nothing
+  for 20 s leaves as a disconnect and the socket is closed (1001, `silent`). A clean close (1000)
+  or a drop during the member's race leaves at once.
+- A server restart (a deploy) drops every socket with no close event. A lobby client says hello
+  again with its token and gets its member back; members not back within the hello timeout leave
+  as disconnects.
 
 ## Retail preview flow (finding 065)
 

@@ -47,6 +47,8 @@ came back, so a dead member stayed until Cloudflare closed its socket.
 
 ## Fix (server)
 
+(Point 1's match by name was replaced on 2026-11-03 by a rejoin token: see "Rejoin token" below.)
+
 1. **A rejoin takes the member back while the old socket is still open.** The room notes when each
    socket last sent anything (`heard`, in memory; a socket not in it counts from the instance's
    start). A live game always sends: in a room, a ping every second and a pong to each of the
@@ -89,6 +91,9 @@ over a 5000 ms path (backoff plus about four round trips). A dead copy now disap
 
 ## Which version needs what
 
+(As first shipped. Since the rejoin token below, a rejoin needs the release with the token, and the
+name rule is gone.)
+
 - **0.7.7 players are fixed by deploying the server alone.** They already rejoin with the same
   hello, and the server now recognises it. No game update is needed, and the protocol and its
   messages are unchanged (a new close reason, `replaced`, uses close code 1000).
@@ -98,9 +103,58 @@ over a 5000 ms path (backoff plus about four round trips). A dead copy now disap
   doesn't happen with live games. It isn't needed for this issue. If it is wanted later, the
   server can accept it next to the name rule, so 0.7.7 keeps working.
 
+## Rejoin token (2026-11-03, review fix)
+
+The name rule above let anyone take a member over by name, host rights included (review of
+v0.7.7..main, Muse #1 and Opus #13). Names are shown to the whole room and in shared logs. A member
+away after a 1006 drop went to the first hello under its name at once; a connected member whose
+socket was quiet for 4 s (exactly the bufferbloated path this finding is about) went after the
+wait. The real player's rejoin then came back as a new member without host rights, and the theft
+looked like an ordinary reconnect.
+
+Branch `fix/review-server`. The member is now matched by a token, not by name:
+
+- The server gives every new member a random token (16 bytes, 32 hex digits;
+  `crypto.getRandomValues`) and sends it in that member's `welcome` only. It is kept in the room's
+  state (so it survives a restart) and never appears in `room`, `where`, the lobby list or a log.
+- The game keeps it for that room (`port/net/client.c`: `NetClient.rejoin_token`, set from the
+  welcome, cleared by `client_init` for each new room; only hex is kept, so nothing else goes back
+  into JSON) and adds `"rejoinToken"` to the hello of a rejoin.
+- A hello whose token belongs to a member takes that member back **at once**, whether its old
+  socket has closed or still speaks: only the game holding the token can send it, and that game
+  has given its old socket up. The rest is as before: the member keeps id, host, rider, bike and
+  Ready, the old socket is forgotten and closed with 1000 `replaced`, a member still in its race
+  is retired from it.
+- A hello without a token, or with one no member has, is a new member: the existing rule for a
+  name already in the room (names stay non-unique). The name no longer takes anything back.
+
+Gone with the name rule: `REJOIN_QUIET_MS`, the hello's wait for a quiet socket (`helloWaiting`)
+and its timeout exception. That wait also dropped any message the waiting socket sent while its
+comment said they waited (Opus #12); the code and the comment are both gone. What stays: the 20 s
+grace for a 1006 drop, the restart ghosts (now taken back by token too), and dropping a socket
+silent 20 s, which still uses `heard`.
+
+No fallback for releases without tokens: the release that carries this client raises
+`MIN_VERSION` (its core id changes anyway), so a 0.7.7 game is refused before its hello is
+matched. Members created by an older server have no token and can't be taken back; their games
+are below `MIN_VERSION` after the deploy. The browser build has no online play (finding 143) and
+never rejoins, so `port/web/www/net.js` is unchanged.
+
+Tests: `online/server/test/rejoin.test.ts` now has 12 cases. The rejoins of the first cases send
+the welcome's token. New: tokens are 32 hex digits, differ per member and are absent from the room
+snapshot; a token takes the member back at once (under 250 ms) while the old socket still pings
+every 50 ms, and that socket is closed (1000); a same-name hello without a token is a new member
+(id 2) even when the member's socket has been quiet 10 s, and the first socket stays open; a wrong
+token is a new member, and the real token still gets member 1 back after it; an away host can't
+be taken over by name (the impostor is member 2, not host, and its `settings` gets `not_host`),
+and the host's token gets the host back. The restart case in `session.test.ts` rejoins with the
+tokens. The test `Client` (`test/helpers.ts`) keeps its last welcome. Server tests 92/92, `npm run typecheck`
+passes. `port/net/test_session.c` checks the client: no token in a first hello, the welcome's
+token in the rejoin's hello, none in the next room's hello, and a non-hex token never sent.
+
 ## Tests
 
-`online/server/test/rejoin.test.ts` (new, 8 cases):
+`online/server/test/rejoin.test.ts` (new, 8 cases; see the rejoin token above for today's 12):
 
 - a player back before their old socket closed gets member 1 back, with Ready, rider and bike. The
   old socket is closed (1000), and a late 1006 close of it afterwards changes nothing;
