@@ -48,6 +48,8 @@ after a version change before a live check.
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool |
+| `port/android/test_disc_image.py [ISO]` | the Android first start's disc rules (the check, a complete copy) on a plain JVM, synthetic images (finding 143) |
+| `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |

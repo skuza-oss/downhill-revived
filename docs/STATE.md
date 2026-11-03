@@ -462,6 +462,12 @@ then GitHub's latest.json; the HTTPS client follows redirects now) and shows one
 the release page; nothing is downloaded. Online play is offered on Windows, macOS and Linux only:
 one host switch (`host_service_net_offered`) hides ONLINE and refuses every connection on Android
 and in the browser. Desktop state traces unchanged.
+Review fixes (finding 143, "Review fixes"): the first start checks and copies on a worker thread
+(a cloud document no longer freezes the screen; a streamed document is copied first, then
+checked), a short copy fails (the source's size, else the ISO volume's), each copy owns its
+temporary file; the release check takes only the release key's certificate
+(`--new-signing-key` for a deliberate change); a stale server answer no longer hides a newer
+GitHub release from the update notice.
 
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;

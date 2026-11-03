@@ -26,7 +26,8 @@ lead added two things on the way: no online play on phones yet, and none in the 
 - The debug mode is as before (`downhill-revived-<version>-debug.apk`, the debug key).
 
 After the build `check_release` refuses the APK unless: `apksigner verify --print-certs` passes
-with one signer that is not the Android debug certificate and scheme v2 or v3; `aapt dump badging` shows
+with one signer, the release key's certificate below (`RELEASE_CERT_SHA256`; review fixes), and
+scheme v2 or v3; `aapt dump badging` shows
 package `app.downhillrevived` with the versionCode and versionName of `version.h`, no
 `application-debuggable`, and `native-code: 'arm64-v8a'` only. The APK is then
 `build/android/DownhillRevived-<version>-android-experimental.apk` (the release assets' naming).
@@ -97,7 +98,8 @@ launcher. Added, Android only (the desktop builds keep the launcher):
   installed. dhd.log gets `update:` lines.
 
 On Android dhd.ini is not reachable for a player and the phone's SETTINGS page has no
-auto_update row, so in practice the check is always on there; `auto_update = off` is for tests.
+auto_update row, so in practice the check is always on there; `auto_update = off` is for tests
+(why there is no row: "Review fixes" below).
 
 ## 4. No online play on phones or in the browser (lead's decision)
 
@@ -157,7 +159,7 @@ The desktop state traces are unchanged (below).
 - The release itself: after the version bump, `package_release.py --platform android` with the
   key's variables, then publish the APK, `latest.json` and `SHA256SUMS`; paste
   `port/release/ANDROID-NOTES.md` into the release page.
-- The phone's SETTINGS has no row for the update notice (see section 3).
+- The phone's SETTINGS has no row for the update notice (section 3; why: "Review fixes", 4).
 
 ## The first start's screen (2026-11-03)
 
@@ -179,3 +181,121 @@ launcher activity, in the launcher's colours (`port/launcher/ui/style.css`):
 for a start without this screen (a USB controller starting `DhdActivity` directly). Checked on a
 Redmi 9 (Helio G80, Android 11): the screen, the cutout filled, the release APK signed with the
 release key.
+
+## Review fixes (2026-11-03)
+
+Branch `fix/review-android` (T3 names it `t3/fix/review-android`), from local main 60ba1c2. Three
+reviews of v0.7.7..HEAD (Muse, Opus, Sol); each finding below was confirmed in the code first.
+
+### 1. The first start's copy (Opus 10, 11; Sol 1, 5, 6)
+
+All real. `SetupActivity` opened the document and read it on the UI thread (a cloud provider that
+downloads the file in `openFileDescriptor` froze the screen into "app isn't responding"); its
+positional reads refused a document a provider streams through a pipe or socket (allowed by
+`ContentResolver.openFileDescriptor` and `DocumentsProvider.openDocument`); a copy that ended early
+counted as done (`done` was never compared with the size, and the check reads only the first
+sectors), so "Delete it and play" could delete the only complete copy; and every copy used the same
+`SCUS-97177.iso.part`, so an old copy's clean-up could delete a new copy's file. Now:
+
+- **One copy job per pick** (`SetupActivity.Copy`), on its own thread: it opens the document, asks
+  the provider for its size when the descriptor has none (`OpenableColumns.SIZE`), checks it, checks
+  the room, copies and checks the copy. The screen shows "Checking the file..." (an indeterminate
+  bar; "a file on a cloud drive is downloaded first") from the moment the picker returns, then the
+  copy's progress. The UI thread only draws; asking whether the original can be deleted (a provider
+  query) is the job's, and deleting it runs on a thread of its own while the game starts.
+- **A streamed document** (`getStatSize()` is -1 for anything but a regular file) is copied first,
+  from the one descriptor, and only the local copy is checked. A regular file is still checked
+  before copying (a wrong disc is refused without a 2.5 GB copy); if its positional reads fail
+  anyway, it is copied and its copy checked.
+- **A short copy fails** (`DiscImage.completeness`): with the size from the file itself (stat) the
+  copy must be exactly that long; with the provider's `SIZE` it must be at least that long (the
+  provider's word, so a longer copy is not refused on it); and in every case the copy must hold the
+  whole ISO 9660 volume, the primary volume descriptor's volume space size (offset 80) times its
+  logical block size (offset 128). So a stream with no size that ends early fails too. The retail
+  disc's volume is exactly its file length (2,530,869,248 bytes = 1,235,776 x 2048, checked on the
+  real image). "Delete it and play" is only ever offered after the complete copy passed both checks
+  and was renamed into place.
+- **Each job owns its temporary file**: `SCUS-97177.iso.<time>-<n>.part`, a name no other job has,
+  registered while the job runs. Only that job renames or deletes it. `cancel()` (the screen's
+  `onDestroy`, or a new pick) and the job's last check before the rename take the same lock, so a
+  cancelled job can never publish; it checks cancellation again before validating and shows
+  nothing once cancelled (`post` drops the screens of a job that is no longer the screen's). A new
+  screen deletes left-over `.part` files (and the older name) except those of jobs still running.
+- **configChanges**: the setup activity now has DhdActivity's (`layoutDirection`, `locale`,
+  `grammaticalGender`, `fontScale`, `fontWeightAdjustment`, ...) plus `density`, `mcc` and `mnc`, so
+  a font-size, language, display or SIM change during the copy keeps the activity and its copy.
+- The rules (the disc check, the volume size, the completeness rule, the copy loop) moved to
+  `DiscImage.java`, which uses no Android API, so a plain JVM runs them:
+  `python port/android/test_disc_image.py [ISO]` (javac and java from `JAVA_HOME`, out to
+  `build/android/disc-image-test`; no Gradle, no junit). `port/android/test/DiscImageTest.java`
+  builds synthetic images: the right disc passes with an exact, a provider or no size; no volume,
+  another serial and no BOOT2 are named; the reviewer's case (49,152 of 131,072 bytes, the metadata
+  sectors intact) fails with a known size, with the provider's size and with none; a copy longer
+  than an exact size and a dump shorter than its own volume fail; the copy loop's count, a cut
+  stream, cancelling before the next block and the progress steps. With an ISO (or `DHD_TEST_ISO`)
+  it also checks the real image. All pass.
+
+### 2. The release check pins the release certificate (Muse 3, Opus 6)
+
+Real: any non-debug signer passed. `build_apk.py` now has `RELEASE_CERT_SHA256` (the certificate
+in section 1, public) and `check_release` fails on any other signer, naming both digests.
+`--new-signing-key` (in `build_apk.py` and `package_release.py`, which passes it on and calls the
+same `check_release`) lets a deliberate key change through, never the debug key, and prints a
+note; the constant then changes with the release that starts using the new key. `build_apk.py
+--check APK` runs the check alone on a built APK. Checked: the published 0.7.7 release APK passes;
+a copy of it re-signed with a throwaway RSA key (made for the test, `CN=Not The Release Key`) fails
+("signed by certificate SHA-256 f636bd53..., not the release key d7613ee0...") and passes only with
+`--new-signing-key`, with the note; this branch's debug APK fails ("signed with a debug key",
+its certificate 1df527f6... not the release key, "debuggable"), with `--new-signing-key` too.
+
+### 3. The update notice asks GitHub when the server names nothing newer (Muse 6)
+
+Real: `android_update.c` stopped at the first source that answered, and the server keeps serving
+its last good latest.json while it can't reach GitHub (`X-DHD-Stale`), so a stale copy could hide
+a release for as long as it stayed stale. `update_find` (`port/net/update_check.c`) asks the
+sources in order until one names a newer release: GitHub is asked whenever the server doesn't
+answer or answers with nothing newer (stale or not: the header needs no reading). The check is
+once a day, so the second request costs little. `update_from_manifest` now takes the Android
+entry's url only under `https://github.com/skuza-oss/downhill-revived/releases/download/` (the
+launcher's `from_backup` rule) with no quote, space or backslash in it. `test_update_check` covers
+the url rule (another host, another owner, a tag page, the bare prefix, GitHub's asset hosts) and
+the order (a newer server answer means GitHub is not asked; a stale, broken or absent one means it
+is, and its newer release counts). All pass.
+
+### 4. Comments, and the update notice's row (Opus 17, 16)
+
+The manifest's INTERNET comment said "the online menu"; it is the update notice now (phones have
+no online play). An "Update Notice" row on the phone's SETTINGS does not fit cleanly, so it is not
+added: the row list is the shared core's (`port/hle/pc_settings.c`), whose rows are found by their
+environment variable, and `auto_update` has none (it is the launcher's setting: Ask / Automatic /
+Off, where Automatic means installing, which a phone can't); the PC page already has 16 rows, the
+popup's most, so the row would also need hiding everywhere but Android; and it would change the
+core (a new core id, state traces). The notice is one line once a day that goes away by itself
+after 15 s and never downloads, so on phones it stays always on, as section 3 says. If players ask
+to turn it off, the clean way is a host-side switch on the notice itself (a long press: "don't
+tell me again", writing `auto_update = off`), not a SETTINGS row.
+
+### How the fixes were checked
+
+- `python port/android/build_apk.py --wasm build/wasm/dhd_core.wasm` (debug): libmain.so with the
+  new `android_update.c` and `update_check.c`, then Gradle, `BUILD SUCCESSFUL`, no warnings in
+  the log; `downhill-revived-0.7.7-debug.apk` (30.4 MB) holds `DiscImage` and
+  `SetupActivity$Copy` (classes2.dex). Not installed on a phone (the lead's checks, below).
+- `build_apk.py --check` on the published 0.7.7 release APK (the real key): PASS; on the debug
+  APK and the throwaway-key copy: refused, as in 2.
+- `port/net/build_tests.py test_update_check test_json`: pass. `port/android/test_disc_image.py`
+  with `DHD_TEST_ISO`: all pass, the real image's volume equal to its length.
+- The core is not touched (no state trace needed): the changes are Java, the Android host's
+  `android_update.c`, `port/net/update_check.c` (Android only, and the net tests) and the
+  Python tools.
+
+### Checks the lead still runs (phones)
+
+- First start with no copy (clear the app's storage): pick the .iso from Download. "Checking the
+  file..." shows at once, then the copy's bar; at the end "Ready to ride" with Delete / Keep, and
+  the game starts. logcat (tag `DownhillRevived`): `disc image copied: 2530869248 bytes, checked`.
+- The same from a cloud drive (Google Drive) if one has the image: the screen stays responsive on
+  "Checking the file..." while it downloads (no ANR dialog).
+- During the copy, change the system font size: the copy goes on (the screen is not restarted).
+- During the copy, press Home and swipe the app away, then start it again: the intro shows, and
+  the app's files folder (`adb shell run-as app.downhillrevived ls files`) has no `.part` left.
