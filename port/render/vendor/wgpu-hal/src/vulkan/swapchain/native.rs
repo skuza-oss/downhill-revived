@@ -115,6 +115,18 @@ impl Surface for NativeSurface {
             }
         };
 
+        // Downhill Revived: on Android the loader answers vkGetPhysicalDeviceSurfaceFormatsKHR by
+        // asking gralloc (AHardwareBuffer_isSupported) about its optional formats, and Qualcomm's
+        // gralloc on some phones (Adreno 710, driver 0615.73, Android 14) then leaves its
+        // BufferManager lock held: the next query (wgpu-core asks again in configure) or the
+        // swapchain's buffers wait on it forever, a black screen. The loader always lists these
+        // two first without asking gralloc; the renderer draws RGBA8Unorm.
+        #[cfg(target_os = "android")]
+        let raw_surface_formats = alloc::vec![
+            vk::SurfaceFormatKHR { format: vk::Format::R8G8B8A8_UNORM, color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR },
+            vk::SurfaceFormatKHR { format: vk::Format::R8G8B8A8_SRGB, color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR },
+        ];
+        #[cfg(not(target_os = "android"))]
         let raw_surface_formats = {
             profiling::scope!("vkGetPhysicalDeviceSurfaceFormatsKHR");
             match unsafe {

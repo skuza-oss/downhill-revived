@@ -146,6 +146,8 @@ it unchanged (finding 088, CL3).
   mouse a finger on a PC. No online play on phones yet (finding 143: no ONLINE row, every
   connection refused). The release APK (`build_apk.py --release`, signed with the release key the
   `DHD_ANDROID_*` variables name) and the once-a-day update notice: finding 143.
+  The surface's formats on Android are fixed (RGBA8, no format query): Qualcomm's gralloc on an
+  Adreno 710 phone hung the render thread in that query, a black screen (finding 145).
 - Retired (finding 088): the 32-bit i686 build (`link.py`, `build_clean.py`, the x87/FP-trap
   runtime), the Direct3D 11 renderer, the C wgpu-native renderer and the browser's JS renderer.
   No D3D11 fallback.
