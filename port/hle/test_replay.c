@@ -22,7 +22,7 @@
 int D_0029E3D0=1,D_0029E3D4=60,D_0029E3D8,D_0029E3DC;
 int D_0029E3E0,D_0029E3E8;
 float D_0029E3FC=60,D_0029E400=1.0f/60;
-char D_004B1F40[16], D_0028E888[16];
+char D_004B1F40[16], D_0028E888[16], D_004F3570[0x20];
 int pads_online(void) { return 0; }
 int func_00243CE8(int ignored) { (void)ignored; return 0; }
 void hle_log(const char *fmt,...) { (void)fmt; }
@@ -52,7 +52,8 @@ void func_0015C920(void) {}
 void func_001B45F8(void *menu, int which, int flag) { (void)menu;(void)which;(void)flag; stopped++; }
 void func_0020F588(void *u, int i, int r, int g, int b, int a) { (void)u;(void)i;(void)r;(void)g;(void)b;(void)a; }
 void func_0020FB80(int i, int x, int y, int w, int h) { (void)i;(void)x;(void)y;(void)w;(void)h; }
-void func_0020F9F0(int i, int f, int x, int y, int t) { (void)i;(void)f;(void)x;(void)y;(void)t; }
+static int notices;  /* the legacy recording's line, drawn */
+void func_0020F9F0(int i, int f, int x, int y, int t) { (void)i;(void)f;(void)x;(void)t; notices+=y==150; }
 
 #define PLAYER_Z (*(float *)GUEST(0x09400018))
 /* func_001A8EF0, retail: the sample at count, a two-field frame's step in the previous one, the
@@ -201,6 +202,18 @@ int main(int argc,char **argv)
     assert(rec->index==fields);               /* one sample per field */
     printf("%d%s: replayed at %d (frames of other lengths): %d updates, %d samples, every step, input and z check the same\n",
            n,wall ? " paced" : "",other,played,rec->index);
+    /* A recording made on the original clock (the PS2's, 0.7.7's: step bytes 1 and 2) is not
+       played: the countdown shows why, and it ends at GO, once, with no update played. */
+    {
+        uint8_t steps[3601];
+        for (int i=0;i<recorded;i++) steps[i]=SAMPLE(rec,i)->step, SAMPLE(rec,i)->step=i%7 ? 1 : 2;
+        notices=0;
+        int legacy_played=race(rec,1,0,1,&seconds);
+        assert(stopped==1 && legacy_played==0 && notices>0);
+        for (int i=0;i<recorded;i++) SAMPLE(rec,i)->step=steps[i];
+        printf("%d%s: a recording on the original clock ends at GO, its line shown %d times in the countdown\n",
+               n,wall ? " paced" : "",notices);
+    }
     requested=n;
     rec->playing=0, rec->mode=3;
 

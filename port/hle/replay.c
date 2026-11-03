@@ -28,9 +28,15 @@
      same step in the race and its replay.
 
    Online races record nothing (state sync, finding 044): the recorder stays off there, as before.
-   A deterministic run at 60 (the original arithmetic) takes the original functions. */
+   A deterministic run at 60 (the original arithmetic) takes the original functions.
+
+   A recording made on the original clock (the PS2's, or the port's up to 0.7.7, whose paced 60
+   was the original arithmetic) has step bytes of 1 and 2. This clock's arithmetic is not the
+   original's, so it would leave the race and stop at its first z check, about a second in, with
+   only "End of Recorded Replay". It is not played: its countdown says why, and it ends at GO. */
 #include "hle.h"
 #include "../include/fps.h"
+#include <string.h>
 
 extern int pads_online(void);
 extern int D_0029E3D0;
@@ -85,6 +91,7 @@ extern void func_0020FB80(int index, int x, int y, int width, int height);
 extern void func_0020F9F0(int index, int font, int x, int y, int text);
 extern char D_004B1F40[];  /* the race's menu: which 6 is the replay menu */
 extern char D_0028E888[];  /* "Replay" (the text shown as a replay starts) */
+extern char D_004F3570[];  /* the fonts: 0x20 bytes each (func_0020FB80 sets font 0's size) */
 
 /* The player's z, the position the recorder keeps every 60 samples (D_002AF2C0 + 0x50130: the
    human rider; +0x792C its body node; +0x10 the node's position). */
@@ -152,11 +159,46 @@ static int play(Recorder *rec, int fields)
     return 1;
 }
 
+/* The replay being started was recorded on the original clock: a step byte of 1 or 2, where this
+   clock writes codes of 30 and up (checked once a replay, from its first update). */
+static int legacy = -1;
+static int replaying_legacy(const Recorder *rec)
+{
+    if (!rec->playing) {
+        legacy = -1;
+        return 0;
+    }
+    if (legacy < 0) {
+        int count = RECORDED(rec), i;
+        legacy = 0;
+        for (i = 0; i < count && i < MOST_SAMPLES && !legacy; i++)
+            legacy = SAMPLE(rec, i)->step == 1 || SAMPLE(rec, i)->step == 2;
+        if (legacy)
+            hle_log("replay: recorded on the original clock (the PS2, or 0.7.7 and earlier: step bytes 1 and "
+                    "2), which this clock can't repeat; it ends at GO (finding 142)\n");
+    }
+    return legacy;
+}
+static void legacy_notice(void)
+{
+    static const char *const lines[] = {"REPLAY FROM AN OLDER VERSION", "IT CANNOT PLAY IN THIS ONE"};
+    char saved[0x20];
+    int i;
+    memcpy(saved, D_004F3570, sizeof saved);
+    for (i = 0; i < 2; i++) {
+        func_0020F588(0, 0, 128, 128, 128, 128);
+        func_0020FB80(0, 256, 192, -91, -32);
+        func_0020F9F0(0, 0, 256, 150 + 16 * i, (int)GADDR(lines[i]));
+    }
+    memcpy(D_004F3570, saved, sizeof saved);
+}
+
 /* The race start (func_0019EE98, every frame of the race screen, before its phase changes):
    from the load to GO every step is one field. Phases 2-4 are func_001A8DE8's. */
 void port_replay_race_phase(int phase)
 {
     int offline = !pads_online() && GAME_MODE != ATTRACT_DEMO;
+    if (phase == 5) legacy = -1;  /* a race loads: check the next replay again */
     port_clock_grid(offline && (phase == 5 || phase == 1) ? GRID_WHOLE : GRID_OFF);
 }
 
@@ -199,8 +241,11 @@ int port_replay_race(void *recorder)
     int phase = RACE_PHASE, fields = D_0029E3D0, i;
     test_init();
     if (trace && fields && phase >= 2 && phase <= 4 && GAME_MODE != ATTRACT_DEMO) trace_riders(rec);
-    if (phase < 2 || phase > 4)
-        return 1;  /* before GO: the race start's grid (port_replay_race_phase) */
+    if (phase < 2 || phase > 4) {
+        /* before GO: the race start's grid (port_replay_race_phase) */
+        if (phase == 1 && !pads_online() && GAME_MODE != ATTRACT_DEMO && replaying_legacy(rec)) legacy_notice();
+        return 1;
+    }
     if (pads_online()) {
         port_clock_grid(GRID_OFF);
         return 1;
@@ -219,6 +264,11 @@ int port_replay_race(void *recorder)
     }
     if (rec->playing) {
         port_clock_grid(GRID_PLAY);
+        if (replaying_legacy(rec)) {
+            func_001AA0F0();
+            func_001B45F8(D_004B1F40, 6, 0);  /* End of Recorded Replay, at GO */
+            return 0;
+        }
         if (rec->index >= RECORDED(rec)) {
             if (!((int *)D_004B1F40)[1])  /* once: the race loop is not ending yet */
                 hle_log("replay: the end of the recording, %d samples\n", rec->index);
@@ -229,6 +279,7 @@ int port_replay_race(void *recorder)
         return play(rec, fields);
     }
     port_clock_grid(GRID_RECORD);
+    replaying_legacy(rec);  /* not a replay */
     record(rec, fields);
     return 1;
 }

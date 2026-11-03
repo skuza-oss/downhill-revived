@@ -142,12 +142,24 @@ head (`0efac73`'s code).
 ## Limits and open
 
 - **Replays recorded on the original clock** (by the PS2, or by the port up to 0.7.7, whose
-  paced 60 was the original arithmetic) carry step bytes 1 and 2. They play their inputs at those
-  whole-field steps on the delta-time clock, but its arithmetic is not the original's (finding
-  139: "60" and "60d" differ), so they leave the race and stop at an early check. They play as
-  before only in a deterministic run at 60 (`DHD_FRAME_CLOCK=1`). Replays saved by this build
-  play on any later build with the same clock arithmetic: a change to the delta-time physics
-  breaks saved replays, as any change to the simulation would.
+  paced 60 was the original arithmetic) carry step bytes 1 and 2. Played on the delta-time clock
+  at those whole-field steps they leave the race, because its arithmetic is not the original's
+  (finding 139: "60" and "60d" differ), and the game's z check stopped them about a second in
+  with only "End of Recorded Replay" (review, 2026-11-03). Now `replay.c` recognises such a
+  recording when its replay starts (any step byte of 1 or 2: this clock writes codes of 30 and
+  up), writes it to dhd.log, shows "REPLAY FROM AN OLDER VERSION / IT CANNOT PLAY IN THIS ONE"
+  over the countdown, and ends the replay at GO with the game's replay menu, without playing
+  inputs that can only diverge. `test_replay.py` checks it at every rate on both clocks: the line
+  shows through the countdown, the replay stops once, at GO, with no update played.
+  Playing them on the original arithmetic instead (the deterministic run at 60 still does,
+  `DHD_FRAME_CLOCK=1`) was rejected for now: it means switching the whole clock mode at the
+  replay's race reset and back after it, and the delta-time clock's state does not convert both
+  ways: animation timestamps are 1/1024 field on it and 1 field on the original (stored in
+  objects outside the race too), the picture pacing and the VBLANK clock follow the selected
+  rate, and the original clock exists only at 60. A wrong conversion breaks the game well beyond
+  old replays, so it waits for a design of its own.
+  Replays saved by this build play on any later build with the same clock arithmetic: a change
+  to the delta-time physics breaks saved replays, as any change to the simulation would.
 - **Input at 60 a second in races**: the price of exact replays at high rates (above). Not felt
   in a test here (no computer use); worth a player's word at 144+.
 - **Countdown at 60 pictures a second**: from the load to GO the pictures follow the one-field
