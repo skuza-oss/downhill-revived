@@ -52,17 +52,11 @@ The codebase is based on the work of **[skuza-oss](https://github.com/skuza-oss/
 
 ## Download
 
-**Latest iOS release:** [v0.7.9 Beta (build 70902)](https://github.com/ribeirogustav/downhill-revived-ios/releases/tag/ios-v0.7.9)
+**First iOS release: v0.7.9 (build 70902).** The supplied release artifact is:
 
-<p align="center">
-  <a href="https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa">
-    <img src="https://img.shields.io/badge/Download_IPA-v0.7.9_Beta-2ea44f?style=for-the-badge&logo=apple&logoColor=white" alt="Download IPA v0.7.9 Beta" />
-  </a>
-</p>
+`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
 
-- ⬇️ **Direct IPA Download:** [`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa) (20.2 MB)
-- 📋 **Checksums:** [`SHA256SUMS`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/SHA256SUMS)
-- 📦 **All Releases:** [GitHub Releases page](https://github.com/ribeirogustav/downhill-revived-ios/releases)
+Download this build from the **[repository's Releases section](https://github.com/ribeirogustav/downhill-revived-ios/releases)**.
 
 **This IPA is unsigned. It cannot be installed directly on an ordinary iPhone/iPad as-is.** Developers may sign a build with an appropriate Apple team and provisioning profile. Instructions: **[Installation and signing](docs/INSTALLATION.md)**.
 

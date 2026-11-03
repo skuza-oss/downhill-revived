@@ -52,17 +52,11 @@ Todo o trabalho original de recriação, descompilação e port para computadore
 
 ## Download
 
-**Versão mais recente para iOS:** [v0.7.9 Beta (build 70902)](https://github.com/ribeirogustav/downhill-revived-ios/releases/tag/ios-v0.7.9)
+**Primeira versão para iOS: v0.7.9 (build 70902).** O arquivo da versão é:
 
-<p align="center">
-  <a href="https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa">
-    <img src="https://img.shields.io/badge/Baixar_IPA-v0.7.9_Beta-2ea44f?style=for-the-badge&logo=apple&logoColor=white" alt="Baixar IPA v0.7.9 Beta" />
-  </a>
-</p>
+`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
 
-- ⬇️ **Download direto do IPA:** [`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa) (20.2 MB)
-- 📋 **Hashes e integridade:** [`SHA256SUMS`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/SHA256SUMS)
-- 📦 **Todas as versões:** [Página de Releases no GitHub](https://github.com/ribeirogustav/downhill-revived-ios/releases)
+Baixe a versão na página de **[Releases deste repositório](https://github.com/ribeirogustav/downhill-revived-ios/releases)**.
 
 **Atenção: esse IPA não está assinado digitalmente e não pode ser instalado diretamente em um iPhone comum.** Para instalar, é necessário assinar o aplicativo com credenciais e provisionamento Apple válidos. Leia [instalação e assinatura](docs/INSTALACAO.pt-BR.md).
 
