@@ -83,11 +83,29 @@ int main(void)
         "https://github.com/skuza-oss/downhill-revived/releases/download/",
         "https://objects.githubusercontent.com/github-production-release-asset/x.apk",
         "https://github.com/skuza-oss/downhill-revived/releases/download/v0.9.0/x y.apk",
+        "https://github.com/skuza-oss/downhill-revived/releases/download/../../../attacker/x.apk",
+        "https://github.com/skuza-oss/downhill-revived/releases/download/%2E%2e/x.apk",
+        "https://github.com/skuza-oss/downhill-revived/releases/download/v0.9.0\\\\..\\\\x.apk",
     };
     for (size_t i = 0; i < sizeof bad_urls / sizeof *bad_urls; i++) {
         char json[512];
         snprintf(json, sizeof json, "{\"version\":\"0.9.0\",\"platforms\":{\"android\":{\"url\":\"%s\"}}}", bad_urls[i]);
         CHECK(!update_from_manifest(json, "android", "0.7.7", version, sizeof version, page, sizeof page));
+    }
+    /* a page that starts as the repository's but resolves outside it in a browser (a dot segment,
+       plain or percent-encoded, or a backslash, read as a slash): the releases page instead */
+    static const char *const outside_pages[] = {
+        "https://github.com/skuza-oss/downhill-revived/../../attacker/fake/releases/latest",
+        "https://github.com/skuza-oss/downhill-revived/%2e%2e/%2E%2E/attacker/fake",
+        "https://github.com/skuza-oss/downhill-revived/.%2e/attacker",
+        "https://github.com/skuza-oss/downhill-revived/releases\\\\..\\\\..\\\\attacker",
+    };
+    for (size_t i = 0; i < sizeof outside_pages / sizeof *outside_pages; i++) {
+        char json[512];
+        snprintf(json, sizeof json, "{\"version\":\"0.9.0\",\"page\":\"%s\",\"platforms\":{\"android\":{\"url\":"
+                 "\"https://github.com/skuza-oss/downhill-revived/releases/download/v0.9.0/x.apk\"}}}", outside_pages[i]);
+        CHECK(update_from_manifest(json, "android", "0.7.7", version, sizeof version, page, sizeof page));
+        CHECK(!strcmp(page, UPDATE_RELEASES_PAGE));
     }
 
     /* the sources in order: the server first, GitHub whenever the server names nothing newer */

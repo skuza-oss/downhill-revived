@@ -303,3 +303,21 @@ tell me again", writing `auto_update = off`), not a SETTINGS row.
 - During the copy, change the system font size: the copy goes on (the screen is not restarted).
 - During the copy, press Home and swipe the app away, then start it again: the intro shows, and
   the app's files folder (`adb shell run-as app.downhillrevived ls files`) has no `.part` left.
+
+## Second review round (2026-11-03)
+
+### 1. The update page can't leave the repository by dot segments (Sol 4, Muse F2)
+
+Real: the page rule was "starts with `https://github.com/skuza-oss/downhill-revived/`" in
+`update_check.c`, in `DhdActivity.updateNotice` and in the server's `latest.ts`, so
+`https://github.com/skuza-oss/downhill-revived/../../attacker/fake/releases/latest` (or with
+`%2e%2e`) passed all three, and a browser resolves it to `https://github.com/attacker/...`. The
+launcher's `under()` (update.rs) already refused those. Now all four use that rule: after the
+repository's address no `..`, no `%2e` in any case and no backslash (browsers read it as a slash);
+the C and Java checks also refuse spaces, quotes and angle brackets. `update_check.c`'s `under()`
+checks the APK url the same way; a page that fails becomes the releases page
+(`UPDATE_RELEASES_PAGE`; in Java `UpdatePage.safe`, a small class without Android so a plain JVM
+tests it); the server drops it. Tests: `test_update_check` (pages with `../`, `%2e%2e`, `.%2e`,
+backslashes become the releases page; APK urls with them are refused), `UpdatePageTest.java` (run
+by `test_disc_image.py` with the disc tests), the server's `latest.test.ts` (also that `new URL`
+really resolves the first example to the other repository).

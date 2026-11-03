@@ -130,8 +130,20 @@ export function checkManifest(v: unknown): Manifest {
   if (typeof m.name === "string" && m.name.length <= 64) out.name = m.name;
   // the top level names the Windows zip (what 0.6.x launchers read), when there is one
   if (m.url !== undefined || m.sha256 !== undefined) Object.assign(out, entryOf(m, "the top level"));
-  if (typeof m.page === "string" && m.page.startsWith("https://github.com/skuza-oss/downhill-revived/")) out.page = m.page;
+  if (isRepositoryPage(m.page)) out.page = m.page as string;
   return out;
+}
+
+const REPOSITORY = "https://github.com/skuza-oss/downhill-revived/";
+
+/** A page of this repository the update notice may open: the repository's address, then nothing a
+    browser could resolve outside it (no dot segment, plain or percent-encoded, and no backslash,
+    which browsers read as a slash). The same rule as the launcher's (update.rs under()) and the
+    game's (port/net/update_check.c). */
+export function isRepositoryPage(value: unknown): boolean {
+  if (typeof value !== "string" || !value.startsWith(REPOSITORY)) return false;
+  const rest = value.slice(REPOSITORY.length).toLowerCase();
+  return !rest.includes("..") && !rest.includes("%2e") && !rest.includes("\\");
 }
 
 /** GitHub's latest.json, checked; throws what went wrong (said in the 502/503 answer). */

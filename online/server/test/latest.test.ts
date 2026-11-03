@@ -1,7 +1,7 @@
 // GET /v1/latest: the launcher's backup of the newest release's latest.json (src/latest.ts, finding 138).
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FRESH_MS, UPSTREAM, checkManifest, isReleaseAssetUrl, latestResponse, type Kept, type Store } from "../src/latest";
+import { FRESH_MS, UPSTREAM, checkManifest, isReleaseAssetUrl, isRepositoryPage, latestResponse, type Kept, type Store } from "../src/latest";
 
 const DL = "https://github.com/skuza-oss/downhill-revived/releases/download/v0.7.7/";
 const sha = (c: string) => c.repeat(64);
@@ -168,6 +168,26 @@ describe("GET /v1/latest", () => {
     const m = checkManifest({ ...manifest(), extra: "x", page: "https://example.com/" });
     expect(m).not.toHaveProperty("extra");
     expect(m).not.toHaveProperty("page");
+  });
+
+  it("drops a page that leaves the repository through dot segments or backslashes", () => {
+    const repo = "https://github.com/skuza-oss/downhill-revived/";
+    for (const page of [
+      `${repo}../../attacker/fake/releases/latest`,
+      `${repo}%2e%2e/%2E%2E/attacker/fake`,
+      `${repo}.%2e/attacker`,
+      `${repo}releases/..\\..\\attacker`,
+      `${repo}releases\\tag`,
+    ]) {
+      expect(isRepositoryPage(page)).toBe(false);
+      expect(checkManifest({ ...manifest(), page })).not.toHaveProperty("page");
+    }
+    // where that page would have gone
+    expect(new URL(`${repo}../../attacker/fake/releases/latest`).href).toBe("https://github.com/attacker/fake/releases/latest");
+    expect(isRepositoryPage(`${repo}releases/tag/v0.7.8`)).toBe(true);
+    expect(isRepositoryPage(`${repo}releases/latest`)).toBe(true);
+    expect(isRepositoryPage("https://github.com/skuza-oss/downhill-revived-fork/")).toBe(false);
+    expect(isRepositoryPage(42)).toBe(false);
   });
 
   describe("through the worker", () => {

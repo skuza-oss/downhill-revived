@@ -44,7 +44,10 @@ Windows `url`/`sha256`/`size` (what 0.6.x launchers read), `page` and `platforms
   (review Opus #14).
   Every `sha256` must be 64 hex digits (served in lower case), and `size`, when given, a byte
   count. The answer keeps only those fields plus `name`, and `page` only when it is on this
-  repository. Anything else is dropped.
+  repository (`isRepositoryPage`: the repository's address, then no dot segment, plain or `%2e`,
+  and no backslash; until the second review round, 2026-11-03, a page starting with the address
+  passed, so `.../downhill-revived/../../someone/else` went through and a browser opened another
+  repository). Anything else is dropped.
 - Only version info passes through the server. The download URLs are GitHub's release asset URLs,
   and nothing big is served or stored. **No release step is needed:** a published release reaches
   every location within 5 minutes.

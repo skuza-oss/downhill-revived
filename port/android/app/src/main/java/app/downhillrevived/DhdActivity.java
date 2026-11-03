@@ -38,8 +38,6 @@ import android.widget.TextView;
 import org.libsdl.app.SDLActivity;
 
 public class DhdActivity extends SDLActivity {
-    /** Pages the update notice may open: this repository's (android_update.c checks it too). */
-    private static final String RELEASES = "https://github.com/skuza-oss/downhill-revived/";
     /** How long the update notice stays. */
     private static final int NOTICE_MS = 15000;
 
@@ -198,10 +196,11 @@ public class DhdActivity extends SDLActivity {
     }
 
     /** The update notice: "Downhill Revived VERSION is out - tap for the download page" at the top of
-     *  the screen for NOTICE_MS; a tap opens page in the browser. Called once, from the update
+     *  the screen for NOTICE_MS; a tap opens the page in the browser (the releases page unless
+     *  asked is one of this repository's). Called once, from the update
      *  check's thread. */
-    public void updateNotice(final String version, final String page) {
-        if (page == null || !page.startsWith(RELEASES)) return;
+    public void updateNotice(final String version, final String asked) {
+        final String page = UpdatePage.safe(asked);   /* this repository's pages only (update_check.c checks it too) */
         runOnUiThread(new Runnable() {
             @Override public void run() {
                 final TextView notice = new TextView(DhdActivity.this);

@@ -52,6 +52,21 @@ int update_newer(const char *candidate, const char *current)
     return 0;
 }
 
+/* An address that starts with prefix and has nothing after it that could take a browser or a
+   download out of it: no dot segment, plain or percent-encoded (%2e, any case), no backslash
+   (browsers read it as a slash), no space, quote or angle bracket. The launcher's rule (update.rs
+   under()), and the server's (latest.ts isRepositoryPage). */
+static int under(const char *address, const char *prefix, size_t prefix_size)
+{
+    size_t n = prefix_size - 1;
+    if (strncmp(address, prefix, n) || strpbrk(address, " \"'<>\\") || strstr(address + n, ".."))
+        return 0;
+    for (const char *s = address + n; *s; s++)
+        if (s[0] == '%' && s[1] == '2' && (s[2] == 'e' || s[2] == 'E'))
+            return 0;
+    return 1;
+}
+
 int update_from_manifest(const char *json, const char *platform, const char *current,
                          char *version, size_t version_size, char *page, size_t page_size)
 {
@@ -61,11 +76,10 @@ int update_from_manifest(const char *json, const char *platform, const char *cur
     if (!json_string(json, "version", version, version_size) || !update_newer(version, current))
         return 0;
     snprintf(path, sizeof path, "platforms.%s.url", platform);
-    if (!json_string(json, path, url, sizeof url) || strncmp(url, release_assets, sizeof release_assets - 1) ||
-        !url[sizeof release_assets - 1] || strpbrk(url, " \"'<>\\"))
+    if (!json_string(json, path, url, sizeof url) || !under(url, release_assets, sizeof release_assets) ||
+        !url[sizeof release_assets - 1])
         return 0;
-    if (!json_string(json, "page", page, page_size) || strncmp(page, repository, sizeof repository - 1) ||
-        strpbrk(page, " \"'<>\\"))
+    if (!json_string(json, "page", page, page_size) || !under(page, repository, sizeof repository))
         snprintf(page, page_size, "%s", UPDATE_RELEASES_PAGE);
     return 1;
 }
