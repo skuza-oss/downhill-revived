@@ -317,7 +317,7 @@ with a unit test in `test_touch.c`.
   thread's first pass); the host puts that in `DHD_TOUCH_TILT_SENSOR` (a desktop: 0) and logs once
   `touch: tilt steering is on, but this device has no gravity or accelerometer sensor` when tilt is
   wanted without one. TOUCH CONTROLS' Steer With then stays on Stick (Tilt is refused, an old
-  `touch_steer = tilt` can still be changed back) and its footer reads "No tilt sensor on this
+  `touch_steer = tilt` can still be changed back) and its hint reads "No tilt sensor on this
   device". Set Tilt Centre without a reading changes nothing and says so in `dhd.log`. Test:
   `test_tilt` (no reading: the stick steers; a reading takes over; gone again: the stick).
 - **The status bar stayed over the game after tilt's rotation** (lead, Redmi 9, MIUI, Android 11:
@@ -344,3 +344,10 @@ with a unit test in `test_touch.c`.
   PC SETTINGS' 16 rows keep their 10-unit step (the title 4 units higher), with Touch Controls
   (17 rows, `DHD_TOUCH_MOUSE=1`) the step is 9; the phone's shorter page is unchanged. Checked by
   hidden-desktop captures of PC SETTINGS (`live_game.py`, before and after).
+
+Checks for these fixes: `test_touch` (all passed; each new test fails on the code before its fix),
+`test_runtime.py` (exit 0), and the state trace (`state_trace_run.py` boot and race, the current
+`state_trace_codeptrs.txt`) of this branch against a build of 60ba1c2: boot 600 and race 5000 rows
+match. The Android-only code was compiled (NDK clang for `android_touch.c` and `touch_host.c`'s
+Android half, javac for `DhdActivity.java`), not run: the tilt sensor's absence, the status bar on
+MIUI and the legend taps need the phones.

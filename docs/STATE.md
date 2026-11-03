@@ -134,7 +134,10 @@ it unchanged (finding 088, CL3).
   in-game checks pending): Thumb zones (floating stick, PEDAL with flick attacks, HOP / BRAKE / SLIDE,
   a trick stick in the air) and Classic pad, every touch plain pad input; the rules in
   `port/hle/touch.c`, drawn by the Rust renderer's overlay, the settings on SETTINGS > Touch Controls;
-  the game is read for the rider's air flag and the race HUD hook only. `DHD_TOUCH_MOUSE=1` makes the
+  the game is read for the rider's air flag and the race HUD hook only. The v0.7.7..main review's
+  touch findings are fixed (finding 141, "Review fixes"): the touch queue never loses a lift, L3 /
+  R3 edits load back, Back on the pause question, tilt without a sensor keeps the stick, the
+  legend's PREV / NEXT and the row hints on their own line, the status bar after tilt's rotation. `DHD_TOUCH_MOUSE=1` makes the
   mouse a finger on a PC. No online play on phones yet (finding 143: no ONLINE row, every
   connection refused). The release APK (`build_apk.py --release`, signed with the release key the
   `DHD_ANDROID_*` variables name) and the once-a-day update notice: finding 143.
