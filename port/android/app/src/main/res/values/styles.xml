@@ -4,4 +4,11 @@
     <style name="AppTheme" parent="android:Theme.NoTitleBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>
     </style>
+    <!-- The first start's screen (SetupActivity): the launcher's ground colour behind it -->
+    <style name="SetupTheme" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/ground</item>
+        <item name="android:colorAccent">@color/ember</item>
+        <!-- the ground colour under a camera cutout too -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
 </resources>

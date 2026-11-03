@@ -158,3 +158,24 @@ The desktop state traces are unchanged (below).
   key's variables, then publish the APK, `latest.json` and `SHA256SUMS`; paste
   `port/release/ANDROID-NOTES.md` into the release page.
 - The phone's SETTINGS has no row for the update notice (see section 3).
+
+## The first start's screen (2026-11-03)
+
+The disc image used to be asked for with SDL's message box (`SDL_ShowSimpleMessageBox`), which on
+Android draws the platform's oldest dialog style, then copied with nothing on the screen for a
+minute or two, and a phone without room failed only at the end. `SetupActivity.java` is now the
+launcher activity, in the launcher's colours (`port/launcher/ui/style.css`):
+
+- with the copy (`files/SCUS-97177.iso`) present it starts the game at once;
+- otherwise it shows the free space and asks for the .iso through Android's document picker;
+- it checks the chosen file before copying (an ISO 9660 volume whose SYSTEM.CNF boots
+  SCUS_971.77, as host.c's `disc_problem`; another disc is named by its BOOT2 serial) and that
+  the phone has room for it plus 128 MB, with Try again / Choose another file when it hasn't;
+- it copies with a progress bar (through a .part file, checked again, then renamed), and offers to
+  delete the chosen original when its document provider allows it (Download does), so the
+  2.5 GB isn't kept twice.
+
+`android_main.c` still checks the copy (and the core the game's data), and keeps its own picker
+for a start without this screen (a USB controller starting `DhdActivity` directly). Checked on a
+Redmi 9 (Helio G80, Android 11): the screen, the cutout filled, the release APK signed with the
+release key.

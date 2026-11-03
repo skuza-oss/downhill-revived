@@ -8,9 +8,11 @@
    - the app's files folder (internal storage, SDL_GetAndroidInternalStoragePath) stands for the
      folder of dhd.exe: host_exe_path names dhd64 there, so dhd.ini, saves, dhd.log and the disc
      image's copy live there;
-   - the disc image: SCUS-97177.iso in that folder. On the first start (or when the copy is not the
-     game) the player picks the .iso once through Android's document picker (SDL's file dialog) and
-     it is copied there (the content URI is read once; Android gives no path to it);
+   - the disc image: SCUS-97177.iso in that folder. The first start's screen (port/android's
+     SetupActivity.java, finding 143) asks for the player's .iso, checks it and the room for it, and
+     copies it there before the game starts. Here it is checked again; when it is missing or not the
+     game (a start without that screen), the player picks it through Android's document picker
+     (SDL's file dialog) and it is copied here (the content URI is read once; Android gives no path);
    - a new dhd.ini names the copy (iso); the player defaults (the native renderer at 2x,
      widescreen, movies skipped) come from host.c as on Windows;
    - the update notice: once a day at most (not with auto_update = off) a thread asks whether a
