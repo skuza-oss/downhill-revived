@@ -135,6 +135,25 @@ It needs the Android SDK (`ANDROID_HOME`, platform android-35), an NDK (r29 test
 (`JAVA_HOME`), the Rust target `aarch64-linux-android`, and `GRADLE_USER_HOME` and
 `ANDROID_USER_HOME` set (Gradle and the debug key). No Android Studio. Details and status: finding 091.
 
+The release APK (finding 143): `python port/android/build_apk.py --release --wasm build/wasm/dhd_core.wasm`
+builds the release build type (not debuggable, no R8), signed with the release key, which only
+the environment names:
+
+| Variable | What |
+|---|---|
+| `DHD_ANDROID_KEYSTORE` | the keystore file (outside the checkout) |
+| `DHD_ANDROID_KEYSTORE_PASS` | its password |
+| `DHD_ANDROID_KEY_ALIAS` | the key's alias |
+| `DHD_ANDROID_KEY_PASS` | the key's password |
+
+The key is kept by the maintainer, outside the repository; never commit a key or a password. Every
+release must be signed with the same key: Android installs an update only over an APK of the same
+signer, so a phone with a debug-signed build has to uninstall it first (which deletes the app's
+files: the disc copy, dhd.ini and the saves). The APK is checked (`apksigner verify`, `aapt dump
+badging`: not debuggable, the version, arm64-v8a only) and written as
+`build/android/DownhillRevived-<version>-android-experimental.apk`. versionCode is
+MAJOR * 10000 + MINOR * 100 + PATCH (0.7.7: 707), so it grows with every release.
+
 ### macOS (Apple silicon) and Linux (x64)
 
 Each is built on its own machine with the same script, `build_host64.py --target macos-arm64` or
@@ -192,6 +211,14 @@ than the official server's, and any file that names another server. Every packag
 scanned for runs of 64 bytes or more of your `iso/SCUS_971.77` (`port/tools/scan_retail.py`);
 any run outside the short list of string literals and tables that the decompiled source itself
 holds stops the package. `--wasm PATH` packages another core; the docstring has the rest.
+
+    python port/tools/package_release.py --platform android   # with the DHD_ANDROID_* variables set
+
+builds the release APK (above) with `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` inside, checks it
+and every file in it as the zips are checked, and puts it in `build/release/` as
+`DownhillRevived-<version>-android-experimental.apk` with an `android` entry in `latest.json`.
+Every run also writes `build/release/SHA256SUMS` (each release file and `latest.json`, as
+`sha256sum` prints them); `--sums` writes it again after other machines' files are copied in.
 
 ### Tests
 
@@ -275,6 +302,11 @@ A dhd.ini without a key gets the player defaults (`port/hle/host.c`, `player_def
 native renderer, scale 2, borderless at the monitor's resolution, widescreen 1, movies skipped. With no dhd.ini at all (the test
 tools set `DHD_SETTINGS=none`) none of them apply. Tools that drive the game (`DHD_NAV`,
 `DHD_RACE_SYNC`, ...) never run the updater.
+
+Online play is not a setting: the host decides whether it is offered (`host_service_net_offered`,
+finding 143). The Windows, macOS and Linux builds offer it; the Android build and the browser
+don't (no ONLINE row, and `server`, `DHD_NET_*` or anything else can't start a session there).
+On Android `auto_update = off` also turns off the once-a-day update notice.
 
 ## Releases
 

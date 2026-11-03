@@ -135,8 +135,9 @@ it unchanged (finding 088, CL3).
   a trick stick in the air) and Classic pad, every touch plain pad input; the rules in
   `port/hle/touch.c`, drawn by the Rust renderer's overlay, the settings on SETTINGS > Touch Controls;
   the game is read for the rider's air flag and the race HUD hook only. `DHD_TOUCH_MOUSE=1` makes the
-  mouse a finger on a PC. Online uses the same
-  Rust client as Windows (`dhd_net`, below; not yet tried on the phone).
+  mouse a finger on a PC. No online play on phones yet (finding 143: no ONLINE row, every
+  connection refused). The release APK (`build_apk.py --release`, signed with the release key the
+  `DHD_ANDROID_*` variables name) and the once-a-day update notice: finding 143.
 - Retired (finding 088): the 32-bit i686 build (`link.py`, `build_clean.py`, the x87/FP-trap
   runtime), the Direct3D 11 renderer, the C wgpu-native renderer and the browser's JS renderer.
   No D3D11 fallback.
@@ -267,6 +268,9 @@ macOS DMG (on the Mac) and the Linux AppImage (`-linux-experimental.AppImage`, T
 WebKitGTK inside; its `linux-appimage` entry goes into latest.json and `--merge` carries it).
 Publish them next to the zips; installed copies keep the player's files in the system's app-data
 folder and update from the zips (the AppImage from its own entry). None is code-signed.
+Android (finding 143): `package_release.py --platform android` with the release key's
+`DHD_ANDROID_*` variables builds, checks and adds the `-android-experimental.apk` (latest.json's
+`android` entry); every run writes `SHA256SUMS`. The release page gets `port/release/ANDROID-NOTES.md`.
 Since 0.7.0 the mac and linux zips are `-mac-experimental.zip` and `-linux-experimental.zip`
 (finding 093, "0.7.0": built and checked on all three, published 2026-10-28; Linux is linked on
 Ubuntu 22.04 and runs on glibc 2.35 and later, which `package_release.py` checks).
@@ -448,6 +452,17 @@ camera cuts and two-minute end count fields; the ghost samples every 8 fields at
 State trace unchanged. Replays saved on the original clock (PS2, port up to 0.7.7) do not play on
 the delta-time clock (open).
 
+2026-11-03 (finding 143): the next release can ship an experimental Android APK. `build_apk.py
+--release` builds it not debuggable, without R8, signed with a release key the environment names
+(RSA 4096, certificate SHA-256 D7:61:3E:E0:...:AE:1B, kept by the maintainer outside the
+repository) and checks it with apksigner and aapt; `package_release.py --platform android` puts it
+in the release folder with the licence texts inside, a `latest.json` `android` entry and
+`SHA256SUMS`. A phone has no launcher, so the game checks once a day (the server's `/v1/latest`,
+then GitHub's latest.json; the HTTPS client follows redirects now) and shows one line, tap to open
+the release page; nothing is downloaded. Online play is offered on Windows, macOS and Linux only:
+one host switch (`host_service_net_offered`) hides ONLINE and refuses every connection on Android
+and in the browser. Desktop state traces unchanged.
+
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
   the game's worker is CPU-bound.
@@ -478,6 +493,8 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   `MIN_VERSION` (`wrangler.jsonc`, now 0.7.0) turns older clients
   away with "update to play online". Protocol: `docs/online-protocol.md`. Steps:
   `online/server/README.md`.
+- Offered on Windows, macOS and Linux; not on Android or in the browser (finding 143: the host's
+  `host_service_net_offered`, no ONLINE row there).
 - Client: `port/net/` (lobby client, hashes; `net.h`) over `port/net/ws.h`, the WebSocket and HTTPS
   client of every native build: the Rust crate `dhd_net` (`port/render/net`, tungstenite over rustls
   on ring, Mozilla's roots bundled by webpki-roots; no OS certificate store, no proxy), linked into
