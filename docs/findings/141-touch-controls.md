@@ -242,3 +242,36 @@ The phone's screenshots showed Pause (41 %) over the game's own messages centred
 BAILED!", "FAILED TO LAND TRICK", trick names), which start at about 36 % across on a 20:9 screen.
 Thumb zones' camera and Pause are now at 22.5 % and 30 %, Classic's SELECT and START at 23 % and
 32 %: both end before 36 %, right of the moved speedometer and PUNCH bar.
+
+### Check 22: the state trace after the merge, and its one difference
+
+On local `main` e5b2b17 the race trace (`state_trace_run.py race`, defaults, no touch) differed
+from 01f8d2b's from field 1453 (the race load ends: screen 9, phase 0 to 5) to the end, boot
+matched. Over all 5000 fields only `ram` (and so `combined`) differed; scratch, hw, cpu, vu0, the
+GS stream, registers and VRAM, sound and the code section were equal in every row. At field 1453
+the raw EE dumps differ in 2453 words, each by exactly +1, and all but ten of them are words the
+trace already lists as code pointers (`state_trace_codeptrs.txt`, the data image's fixups): the
+dumped `code.tsv` gives the same function identity at offset 0 for every one in both builds. The
+ten others are rider slot k of `D_002AF2C0` +0x4578 (0x002B3838 + k x 0x7BD0): the same callback
+(identity 8E5595E4, also at the listed 0x0029C394) that the game stores into each rider at the
+race load, 0x12906 in 01f8d2b and 0x12907 in e5b2b17.
+
+Cause: in this build a code address is an index into the wasm function table, which holds every
+function whose address is taken. The touch controls added one: PC SETTINGS' Cross handler
+`page_accept` (`pc_settings.c`; the page had `accept = NULL` before, and Cross on the Touch
+Controls row now opens its screens). It sits at table index 74611, so every later index moved up
+by one (the indices up to 74037 are unchanged, the ones from 74644 on all +1). Nothing that runs
+changed: `touch_field()`, the HUD hooks and `host_service_touch_field` (which returns at once
+without touch) leave the game alone. A bisecting build that turned parts of `touch_field()` off
+was not needed in the end; the dumps' code identities answered it.
+
+The fix is the trace's, as `state_trace_codeptrs.txt` asks ("add the words that a diff shows
+storing a code address at run time"): the ten rider words are listed, so they are hashed by
+identity like the other callbacks. Changing the game code to avoid the table entry would only hide
+it until the next callback anywhere in the module.
+
+Result (the existing exes, with the new list): 01f8d2b and e5b2b17
+match row for row, race 5000 fields and boot 600. `test_runtime.py` passes (`test_touch: all
+passed`). Note: a reference trace made with the old list (e.g. the lanes' shared next/0.7.7 reference)
+hashes these ten words raw, so a trace with the new list differs from it at 1453 in ram and code
+even for the same exe: run the reference again with the new list before comparing.
