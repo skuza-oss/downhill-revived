@@ -767,6 +767,40 @@ static void test_queue(void)
     touch_down(t, 1, 100, 20, now);   /* elsewhere, no stick */
     field();
     CHECK(stick_x() == 128);
+    /* a thumb pressed in a stall whose queue is past the moves' part: its first move (none of its
+       own to merge into) is kept, so held still it steers (Muse's round-2 F1) */
+    for (int full = 0; full < 2; full++) {
+        start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        memset(&q, 0, sizeof q);
+        if (full) {   /* every place taken, a stroke of another finger among them: its move goes, its up stays */
+            touch_queue_push(&q, TOUCH_EV_DOWN, 3, 100, 20, now);
+            touch_queue_push(&q, TOUCH_EV_MOVE, 3, 101, 20, now + 0.1);
+            for (int i = 0; i < 126; i++) {
+                touch_queue_push(&q, TOUCH_EV_DOWN, 2, 77, 30, now + 1 + i);
+                touch_queue_push(&q, TOUCH_EV_UP, 2, 77, 30, now + 1.5 + i);
+            }
+            touch_queue_push(&q, TOUCH_EV_UP, 3, 101, 20, now + 150);
+        } else
+            for (int i = 0; i < 127; i++) {
+                touch_queue_push(&q, TOUCH_EV_DOWN, 2, 77, 30, now + i);
+                touch_queue_push(&q, TOUCH_EV_UP, 2, 77, 30, now + i + 0.5);
+            }
+        touch_queue_push(&q, TOUCH_EV_DOWN, 1, 30, 45, now + 200);   /* the thumb on the stick */
+        CHECK(q.count == (full ? TOUCH_QUEUE : TOUCH_QUEUE - 1) && !q.cancelled);
+        touch_queue_push(&q, TOUCH_EV_MOVE, 1, 40, 45, now + 201);   /* its first move: full right */
+        touch_queue_push(&q, TOUCH_EV_MOVE, 1, 41, 45, now + 202);   /* the next one rewrites it */
+        int moves = 0, last_x = 0;
+        for (int i = 0; i < q.count; i++)
+            if (q.ev[i].kind == TOUCH_EV_MOVE) moves++, last_x = (int)q.ev[i].x;
+        CHECK(moves == 1 && last_x == 41 && !q.cancelled && q.count <= TOUCH_QUEUE);
+        CHECK(q.ev[q.count - 1].kind == TOUCH_EV_MOVE);
+        if (full) CHECK(q.ev[q.count - 3].kind == TOUCH_EV_UP && q.ev[q.count - 3].id == 3);
+        drain(&q);
+        field();
+        CHECK(stick_x() > 200);
+        touch_up(t, 1, 41, 45, now);
+        field();
+    }
 }
 
 /* Tilt steering: until the sensor answers (or with none) the stick steers on the ground. */

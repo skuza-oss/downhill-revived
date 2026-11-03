@@ -133,11 +133,13 @@ void touch_open_editor(Touch *t);              /* TOUCH CONTROLS > Edit layout *
 /* The host's queue between its input thread and the game's field (no lock here: the host holds
    its own). It never loses what ends a press: a finger's moves are merged (the latest kept) once
    the moves have filled their part, so ups, cancels, Back and a controller's loss always find a
-   place; if even that part fills (a long stall full of taps), the queue becomes one cancel of
-   every finger, with the Backs and controller losses kept after it. */
+   place; a finger with no queued move keeps its latest one (a reserve place if need be: a thumb
+   pressed in a stall and held still must still steer); if even that part fills (a long stall
+   full of taps), the queue becomes one cancel of every finger, with the Backs and controller
+   losses kept after it. */
 enum { TOUCH_EV_DOWN, TOUCH_EV_MOVE, TOUCH_EV_UP, TOUCH_EV_CANCEL, TOUCH_EV_BACK, TOUCH_EV_PAD_USED, TOUCH_EV_PAD_LOST };
 typedef struct { int kind; long long id; float x, y; double ms; } TouchEvent;   /* x, y: the host's units */
-enum { TOUCH_QUEUE = 256, TOUCH_QUEUE_RESERVE = 32 };   /* the last RESERVE places: never moves or controller use */
+enum { TOUCH_QUEUE = 256, TOUCH_QUEUE_RESERVE = 32 };   /* the last RESERVE places: no controller use, a move only as its finger's one queued move */
 typedef struct {
     TouchEvent ev[TOUCH_QUEUE];
     int count;

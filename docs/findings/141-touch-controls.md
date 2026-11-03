@@ -361,3 +361,13 @@ MIUI and the legend taps need the phones.
   (`stick_follow`); the floating stick still centres under the thumb, so it starts neutral.
   `test_fixed_stick`: both presets, fixed and floating, an off-centre touch held still for 10
   fields (fixed: 212 at once; floating: 128).
+- **A finger's first move could still be lost to a full queue** (Muse F1). Past the moves' part
+  of the queue a move only rewrote its finger's last queued move; a finger that pressed during the
+  stall had none (its down was its latest event), so its first move was dropped, and a thumb then
+  held still on the stick never steered until it moved again. Now such a move stays: a queued move
+  whose finger lifts or presses again later in the queue gives its place (`queue_drop_old_move`:
+  that up or down says where the finger went), else it takes a reserve place; the finger's next
+  moves rewrite it, so a finger holds at most one reserve place. A queue full of presses alone
+  still drops it (the finger's up says where it ended). `test_queue`: Muse's repro (127 taps of
+  another finger, then a stick down and its first move: kept, the stick past 200), and the
+  completely full queue (another finger's stroke gives its move's place, its up stays).

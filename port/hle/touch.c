@@ -1491,6 +1491,27 @@ static void queue_merge_moves(TouchQueue *q)
     q->count = kept;
 }
 
+/* The oldest queued move whose finger lifts or presses again later in the queue (before any
+   cancel) goes: that up or down says where the finger was. 1 when one went. */
+static int queue_drop_old_move(TouchQueue *q)
+{
+    for (int i = 0; i < q->count; i++) {
+        const TouchEvent *e = &q->ev[i];
+        if (e->kind != TOUCH_EV_MOVE) continue;
+        for (int j = i + 1; j < q->count; j++) {
+            const TouchEvent *n = &q->ev[j];
+            if (n->kind == TOUCH_EV_CANCEL) break;
+            if (n->id != e->id || !finger_event(n->kind)) continue;
+            if (n->kind == TOUCH_EV_MOVE) break;   /* not after merging; keep it */
+            memmove(q->ev + i, q->ev + i + 1, sizeof *q->ev * (size_t)(q->count - i - 1));
+            q->count--;
+            q->merged++;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The last resort, the queue full without a move to merge: every finger is let go (the player
    lifts and touches again); the Backs and controller losses stay, then the new event. */
 static void queue_cancel_fingers(TouchQueue *q, const TouchEvent *e)
@@ -1525,10 +1546,14 @@ void touch_queue_push(TouchQueue *q, int kind, long long id, float x, float y, d
             TouchEvent *o = &q->ev[i];
             if (o->kind == TOUCH_EV_CANCEL) break;
             if (o->id != id || !finger_event(o->kind)) continue;
-            if (o->kind == TOUCH_EV_MOVE) { o->x = x, o->y = y, o->ms = ms; q->merged++; }
+            if (o->kind == TOUCH_EV_MOVE) { o->x = x, o->y = y, o->ms = ms; q->merged++; return; }
             break;
         }
-        return;   /* else it goes: the finger's up says where it ended */
+        /* none (the finger pressed in the stall and this is its first move): it stays, or a thumb
+           held still would never steer. A move its finger's later up or down makes old gives its
+           place, else it takes one of the reserve (once a finger: its next moves rewrite it) */
+        if (queue_drop_old_move(q) || q->count < TOUCH_QUEUE) q->ev[q->count++] = e;
+        return;   /* the queue is all presses: the finger's up still says where it ended */
     }
     if (soft) return;   /* a controller's use: the next one hides */
     queue_cancel_fingers(q, &e);
