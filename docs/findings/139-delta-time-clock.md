@@ -132,7 +132,10 @@ The counters that two whole fields broke (retail took one off a frame, and tests
   event: jumped over. (Review, 2026-11-03: its `x1310 == 1` flag clear too, which the first fix
   missed: from 2 a two-field step never calls it at 1. Both marks now fire when the update
   covers them, and the copy into `x1318` is the last value covered, not 61; `test_fps.py`
-  checks it at every rate.)
+  checks it at every rate. Second round, Muse N1: `x1310` itself came off as `-= whole`, so a
+  two-field step from 1 stored -1 where retail, whose per-field call is inside `x1310 > 0`,
+  rests at 0; no reader told them apart (all test `> 0`), but on the delta-time clock it now
+  counts down with `port_count_down`, stopping at 0; the original clock keeps `--x1310`.)
 - `0011A100` the AI's rotating query slot (`x501B4`): moved by two, every other rider was never
   queried.
 - `00135A30` the airborne age (`x4A4`, `port_air_tick`): the take-off step counted the whole two

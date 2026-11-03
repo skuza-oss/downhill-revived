@@ -498,9 +498,11 @@ def add(patches):
     entry('0017A1B0', 'func_0017A1B0', ' if (port_delta_clock() && !port_whole_step()) return;')
     edit('0017B3C0', 'obj->x12F0--;', 'obj->x12F0-=port_delta_clock() ? port_whole_step() : 1;')
     edit('0017B3C0', 'obj->x1308++;', 'obj->x1308+=port_delta_clock() ? port_whole_step() : 1;')
-    for field in ('x1324', 'x1310'):
-        edit('00176ED8', '--obj->%s;' % field,
-             'obj->%s-=port_delta_clock() ? port_whole_step() : 1;' % field)
+    edit('00176ED8', '--obj->x1324;', 'obj->x1324-=port_delta_clock() ? port_whole_step() : 1;')
+    # x1310 counts down only while > 0 (retail's per-field call is inside that test), so a
+    # two-field step from 1 rests at 0 as retail's two fields do, never at -1.
+    edit('00176ED8', '--obj->x1310;',
+         'if (port_delta_clock()) obj->x1310=port_count_down(obj->x1310); else --obj->x1310;')
     # 0017C638 runs before 00176ED8 takes this update's whole fields off x1310, so an update
     # covers the values x1310 down to x1310-whole+1: its marks (== 1 clears the item flag, == 60
     # starts x1318) are reached when one of those is the mark. x1318 then holds the last value
