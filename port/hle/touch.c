@@ -291,7 +291,7 @@ void touch_layout_parse(TouchSettings *s, const char *text)
         char name[32];
         float dx, dy, size;
         int n = 0;
-        if (sscanf(text, " %31[a-z.]=%f,%f,%f%n", name, &dx, &dy, &size, &n) == 4 && n > 0) {
+        if (sscanf(text, " %31[a-z0-9.]=%f,%f,%f%n", name, &dx, &dy, &size, &n) == 4 && n > 0) {   /* digits: l3, r3 */
             int p = !strncmp(name, "classic.", 8) ? 1 : !strncmp(name, "thumb.", 6) ? 0 : -1;
             const char *control = p == 1 ? name + 8 : name + 6;
             for (int c = 0; p >= 0 && c < TC_COUNT; c++)

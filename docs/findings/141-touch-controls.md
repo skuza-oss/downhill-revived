@@ -275,3 +275,13 @@ match row for row, race 5000 fields and boot 600. `test_runtime.py` passes (`tes
 passed`). Note: a reference trace made with the old list (e.g. the lanes' shared next/0.7.7 reference)
 hashes these ten words raw, so a trace with the new list differs from it at 1453 in ram and code
 even for the same exe: run the reference again with the new list before comparing.
+
+### Review fixes (2026-11-03)
+
+The three reviews of v0.7.7..main (Muse, Opus, Sol) found these in the touch code; each is fixed
+with a unit test in `test_touch.c`.
+
+- **L3 / R3 layout edits came back as defaults.** `touch_layout_parse` read the control's name
+  with `%31[a-z.]`, which stops at the digit of `l3` / `r3`, so their edits were written to
+  `touch_edits` and dropped on the next read. The name now takes digits too; the round-trip test
+  checks every control of both presets, L3 and R3 included.

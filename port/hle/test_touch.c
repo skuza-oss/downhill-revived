@@ -679,6 +679,8 @@ static void test_layout_text(void)
     touch_settings_default(&s);
     s.edit[0][TC_PEDAL] = (TouchEdit){-3.5f, 2, 1.1f};
     s.edit[1][TC_CROSS] = (TouchEdit){1, -1, 0.9f};
+    s.edit[1][TC_L3] = (TouchEdit){2, 3, 1.1f};    /* names with a digit */
+    s.edit[1][TC_R3] = (TouchEdit){-2, -3, 0.9f};
     char text[1024];
     touch_layout_format(&s, text, sizeof text);
     touch_settings_default(&back);
@@ -686,6 +688,10 @@ static void test_layout_text(void)
     CHECK(fabsf(back.edit[0][TC_PEDAL].dx + 3.5f) < 0.01f && fabsf(back.edit[0][TC_PEDAL].size - 1.1f) < 0.01f);
     CHECK(fabsf(back.edit[1][TC_CROSS].dy + 1) < 0.01f);
     CHECK(back.edit[0][TC_HOP].size == 1);
+    for (int c = 0; c < TC_COUNT; c++)   /* every control comes back as saved */
+        for (int p = 0; p < 2; p++)
+            CHECK(fabsf(back.edit[p][c].dx - s.edit[p][c].dx) < 0.01f && fabsf(back.edit[p][c].dy - s.edit[p][c].dy) < 0.01f &&
+                  fabsf(back.edit[p][c].size - s.edit[p][c].size) < 0.01f);
 }
 
 int main(void)
