@@ -124,7 +124,7 @@ pub const SETTINGS: &[Setting] = &[
     // and its range, the trick stick's size, the trick labels, the attacks (flick off PEDAL or
     // buttons), vibration, whether a controller hides the overlay, tilt's strength and centre (degrees),
     // the hints already shown (a number) and the layout editor's changes.
-    choice("touch_preset", "DHD_TOUCH_PRESET", &[c("thumb", "Thumb zones"), c("classic", "Classic pad")], "thumb", "thumb"),
+    choice("touch_preset", "DHD_TOUCH_PRESET", &[c("thumb", "Thumb zones"), c("classic", "Classic pad")], "classic", "classic"),  // the full pad by default
     choice("touch_hand", "DHD_TOUCH_HAND", &[c("right", "Right"), c("left", "Left")], "right", "right"),
     choice("touch_steer", "DHD_TOUCH_STEER", &[c("stick", "Stick"), c("tilt", "Tilt")], "stick", "stick"),
     choice("touch_size", "DHD_TOUCH_SIZE", &[c("auto", "Auto"), c("70", "70%"), c("75", "75%"), c("80", "80%"), c("85", "85%"),

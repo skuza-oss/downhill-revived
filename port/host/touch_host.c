@@ -261,7 +261,7 @@ static void settings_read(TouchSettings *s)
     static const char *const stick[] = {"floating", "fixed"}, *const labels[] = {"auto", "always", "off"};
     static const char *const attacks[] = {"flick", "buttons"}, *const pad[] = {"hide", "show"}, *const hud[] = {"game", "move"};
     touch_settings_default(s);
-    s->preset = env_choice("DHD_TOUCH_PRESET", preset, 2, TOUCH_THUMB_ZONES);
+    s->preset = env_choice("DHD_TOUCH_PRESET", preset, 2, TOUCH_CLASSIC);  /* the full pad by default */
     s->left_handed = env_choice("DHD_TOUCH_HAND", hand, 2, 0);
     s->tilt = env_choice("DHD_TOUCH_STEER", steer, 2, 0);
     const char *size = getenv("DHD_TOUCH_SIZE");

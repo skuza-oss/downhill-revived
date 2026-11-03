@@ -60,7 +60,7 @@ static const SettingInfo setting_table[] = {
     {"vsync", "DHD_VSYNC", "0", setting_choices_vsync, 2},
     {"perf_counter", "DHD_PERF_COUNTER", "0", setting_choices_perf_counter, 2},
     {"unlock_all", "DHD_UNLOCK_ALL", "0", setting_choices_unlock_all, 2},
-    {"touch_preset", "DHD_TOUCH_PRESET", "thumb", setting_choices_touch_preset, 2},
+    {"touch_preset", "DHD_TOUCH_PRESET", "classic", setting_choices_touch_preset, 2},
     {"touch_hand", "DHD_TOUCH_HAND", "right", setting_choices_touch_hand, 2},
     {"touch_steer", "DHD_TOUCH_STEER", "stick", setting_choices_touch_steer, 2},
     {"touch_size", "DHD_TOUCH_SIZE", "auto", setting_choices_touch_size, 9},
