@@ -34,7 +34,7 @@ void port_clock_reset(void);
 void port_clock_wait(int *out);
 void port_clock_step(void);
 
-/* The field grid of an offline race and its replay (finding 141, port/hle/replay.c). */
+/* The field grid of an offline race and its replay (finding 142, port/hle/replay.c). */
 enum { GRID_OFF, GRID_WHOLE, GRID_RECORD, GRID_PLAY };
 void port_clock_grid(int mode);     /* the race asks for the next step's grid, every update */
 int port_clock_recording(void);     /* the step is a recorded race's (GRID_RECORD) */

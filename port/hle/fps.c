@@ -133,7 +133,7 @@ static uint64_t race_steps;  /* real race updates, for DHD_FPS_TRACE */
 static void reset_body_clocks(void);
 void port_fps_race_step(void) { race_steps++; }
 
-/* The field grid of an offline race (finding 141; port/hle/replay.c says why). The race asks for
+/* The field grid of an offline race (finding 142; port/hle/replay.c says why). The race asks for
    it every update (port_clock_grid), and the next step follows it:
    GRID_WHOLE   from the load to GO: one field a step, pictures every 1/60 s;
    GRID_RECORD  from GO: the step is chosen when a field ends, as a code in 1/120 field, and kept

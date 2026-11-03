@@ -1,4 +1,4 @@
-"""A race and its replay, headless (finding 141): the state trace's race route (first track, seed
+"""A race and its replay, headless (finding 142): the state trace's race route (first track, seed
 81257, the race-clock pad), its replay started at race second S as REPLAY in the race results
 starts it (DHD_REPLAY_TEST, port/hle/replay.c), and every rider's position at each field of race
 clock in both (DHD_REPLAY_TRACE). The replay passes when it plays to the end of the recording

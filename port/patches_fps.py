@@ -351,7 +351,7 @@ def add(patches):
          '    port_hint_field = (unsigned int)func_00238F48();\n'
          'port_draw:\n'
          '    func_0023D650(0, &width, &height);\n    half = width / 2;')
-    # Race replays on the delta-time clock (finding 141, port/hle/replay.c): the recorder keeps
+    # Race replays on the delta-time clock (finding 142, port/hle/replay.c): the recorder keeps
     # one sample per field of race clock and a replay plays them with the recorded steps (the
     # race's field grid, fps.c). 0019EE98 asks for one-field steps from the race load to GO;
     # 001A9640, between the clock's wait and its step, stores or forces the step; the attract

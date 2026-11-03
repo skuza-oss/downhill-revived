@@ -434,7 +434,19 @@ ended, the action lock stuck, ...) and made riders "airborne" on every bump (at 
 nobody finished the scripted race): fixed. The race at 30-144 steps a second now finishes with no
 trend against 60 (player -7..+6%, AI mean -0.5..+4.1%: the race's own chaos, finding 067).
 Deterministic runs keep the original clock: the state trace is unchanged. V-Sync keeps three swapchain buffers, so a missed refresh no longer halves 120 to 60.
-Ghosts/replays stay off on the delta-time clock, now at 60 too (open).
+Ghosts/replays stay off on the delta-time clock, now at 60 too (finding 142 brings them back).
+
+2026-11-03 (finding 142): race replays, the attract demo and the time trial's ghost work again on
+the delta-time clock, at every rate. The recorder is an input recording the replay re-simulates
+and checks (the player's z every 60 samples), so an offline race now runs on a field grid: one
+sample per field of race clock (60 a race second at every rate, the format and the seven-minute
+buffer unchanged), the step chosen when a field ends as a code in 1/120 field in the sample's
+step byte, the pad read when a field ends, one-field steps from the load to GO; a replay forces
+the recorded codes and paces its pictures by them. Headless race + replay (`replay_check.py`):
+exact for all ten riders at 45 (frame clock) and paced 144 with uneven frames. The attract demo's
+camera cuts and two-minute end count fields; the ghost samples every 8 fields at every rate.
+State trace unchanged. Replays saved on the original clock (PS2, port up to 0.7.7) do not play on
+the delta-time clock (open).
 
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;

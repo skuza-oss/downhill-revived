@@ -1,4 +1,4 @@
-/* Race replays and the attract demo on the delta-time clock (finding 141).
+/* Race replays and the attract demo on the delta-time clock (finding 142).
 
    The race recorder (D_0043F9F0, func_001A8DE8 every race update, func_001A9640 between the
    clock's wait and its step) is an input recording: from GO it keeps pad 0 (buttons and the four
@@ -160,7 +160,7 @@ void port_replay_race_phase(int phase)
     port_clock_grid(offline && (phase == 5 || phase == 1) ? GRID_WHOLE : GRID_OFF);
 }
 
-/* Test switches (finding 141's headless check):
+/* Test switches (finding 142's headless check):
    DHD_REPLAY_TEST=S   at race second S of a recorded race its replay starts, as REPLAY in the
                        race results does (func_0015C920, between two frames);
    DHD_REPLAY_TRACE=P  every rider's position at each field of race clock, in the race and in its
