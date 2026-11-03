@@ -2,7 +2,9 @@
    func_001F0160), a page in the game's own popup menu style (menu_page.c, finding 050) as its
    AUDIO / OTHER page is; up/down, the cursor, the font, the panel and the sounds are the game's:
    - left/right change the row under the cursor; Cross (SELECT) keeps the changes and closes,
-     Triangle (BACK) puts the values the page opened with back and closes, as AUDIO / OTHER does.
+     Triangle (BACK) puts the values the page opened with back and closes, as AUDIO / OTHER does
+     (on Android Back keeps them, as a phone's Back does); a click or tap on the legend's ✕ SELECT
+     or △ BACK presses it (menu_page.c).
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
    window size, picture shape, scaling, skip movies (the startup movies), vibration, the sticks'
    dead zone, the button symbols, unlock all and FPS & Ping apply at once; resolution,
@@ -310,6 +312,14 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
         screen = 0;
         menu_play("S_BACK");
         menu_page_rebuild_at(p, touch_row >= 0 ? touch_row : 0);
+        return;
+    }
+    /* A phone's Back (and △) leaves SETTINGS as its other screens do: with what was chosen, which
+       is already saved (every change is). Putting the opened values back is the PC's △, where
+       ✕ SELECT is the way to keep them. */
+    const char *touch = host_getenv("DHD_TOUCH");
+    if (touch && !strcmp(touch, "android")) {
+        menu_page_close(p);
         return;
     }
     for (int i = 0; i < ROWS; i++) {

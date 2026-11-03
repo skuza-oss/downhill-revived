@@ -580,6 +580,34 @@ static int row_enabled(void *menu, int row)
     return ((Item *)((char *)menu + X_ITEMS))[row].enabled != 0;
 }
 
+/* The button of our page's legend ("<- PREV -> NEXT /\ BACK X SELECT", the footer when the page
+   has no text of its own) under the pointer, 0 none: each word with the button symbol before it,
+   measured in the footer's style as drawn (centred at its x). On a phone that is the only way to
+   say SELECT, as nothing else on the screen is a button. */
+static uint16_t page_legend_button(void *menu, int view)
+{
+    static const struct { const char *word; uint16_t button; } words[] = {
+        {"PREV", PAD_UP}, {"NEXT", PAD_DOWN}, {"BACK", PAD_TRIANGLE}, {"SELECT", PAD_CROSS}};
+    Item *foot = &AT(menu, X_FOOTER, Item);
+    int mx, my;
+    if (foot->id != TEXT_PREV_NEXT || foot->string || !pointer(view, &mx, &my)) return 0;
+    if (my < foot->y - 6 || my > foot->y + 16) return 0;
+    const char *text = (const char *)(uintptr_t)(uint32_t)func_0018D860(foot);
+    if (!text) return 0;
+    int length = (int)strnlen(text, MENU_PAGE_TEXT), width = measure(menu, X_STYLE + 8, text, length);
+    int start = foot->x - width / 2;
+    if (mx < start - 8 || mx > start + width + 8) return 0;
+    uint16_t best = 0;
+    int best_end = 1 << 30;
+    for (unsigned i = 0; i < sizeof words / sizeof *words; i++) {  /* the first word ending right of the pointer */
+        const char *at = strstr(text, words[i].word);
+        if (!at) continue;
+        int end = start + measure(menu, X_STYLE + 8, text, (int)(at - text) + (int)strlen(words[i].word));
+        if (mx <= end + 4 && end < best_end) best = words[i].button, best_end = end;
+    }
+    return best;
+}
+
 /* The open popup and the mouse's news this field: hover, clicks, wheel. */
 static void popup_mouse(void *menu, int view, int moved, int left, int right, int wheel)
 {
@@ -597,6 +625,9 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
     if (left && row >= 0 && row_enabled(menu, row)) {
         AT(menu, X_CURSOR, int) = row;
         press(value_row ? (left_arrow ? PAD_LEFT : PAD_RIGHT) : PAD_CROSS);
+    } else if (left && row < 0 && p) {  /* our pages' legend */
+        uint16_t b = page_legend_button(menu, view);
+        if (b) press(b);
     }
     if (right) press(PAD_TRIANGLE);
     int cursor = AT(menu, X_CURSOR, int);
