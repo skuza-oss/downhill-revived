@@ -130,7 +130,10 @@ public class DhdActivity extends SDLActivity {
                         @Override public void onAccuracyChanged(Sensor s, int accuracy) {}
                     };
                     registerTilt();
-                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LOCKED);
+                    // kept on its landscape side (LOCKED would keep a portrait screen when the game
+                    // starts from a portrait home screen: the picture then stays in a strip)
+                    setRequestedOrientation(getDisplay().getRotation() == Surface.ROTATION_270
+                            ? ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
                 } else if (!on && tiltListener != null) {
                     sensors.unregisterListener(tiltListener);
                     tiltListener = null;
