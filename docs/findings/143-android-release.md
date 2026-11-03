@@ -321,3 +321,14 @@ tests it); the server drops it. Tests: `test_update_check` (pages with `../`, `%
 backslashes become the releases page; APK urls with them are refused), `UpdatePageTest.java` (run
 by `test_disc_image.py` with the disc tests), the server's `latest.test.ts` (also that `new URL`
 really resolves the first example to the other repository).
+
+### 2. `build_apk.py --check` refuses a wrong package in words (Muse F3)
+
+Real: `check_release` formatted the package mismatch with `%d %s` over the version, which
+`--check` passes as `None`, so an APK of another package (or with no package line), the case the
+check is for, ended in a `TypeError` traceback instead of the refusal. The line now names the
+version only when there is one (`package line '...', not app.downhillrevived`). New
+`port/android/test_build_apk.py` runs `check_release` and `check_only` with apksigner and aapt
+replaced by canned answers: the release APK passes with and without a version; another package
+and a missing package line are refused in one line on both paths; `--check` exits with "not fit
+to publish"; a version mismatch is refused. It fails (the `TypeError`) on the old code.

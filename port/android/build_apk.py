@@ -139,7 +139,8 @@ def check_release(apk, name, code, new_signing_key=False):
     package = re.search(r"package: name='([^']*)' versionCode='(\d+)' versionName='([^']*)'", badging)
     facts['badging'] = package.group(0) if package else ''
     if not package or package.group(1) != PACKAGE or (name is not None and package.groups() != (PACKAGE, str(code), name)):
-        problems.append('package line %r, not %s %d %s' % (facts['badging'], PACKAGE, code, name))
+        wanted = PACKAGE if name is None else '%s %d %s' % (PACKAGE, code, name)   # --check: no version to compare
+        problems.append('package line %r, not %s' % (facts['badging'], wanted))
     native = re.search(r'native-code: (.*)', badging)
     facts['native_code'] = native.group(1).strip() if native else ''
     if facts['native_code'] != "'arm64-v8a'":
