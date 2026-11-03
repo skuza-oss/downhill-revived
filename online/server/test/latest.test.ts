@@ -97,6 +97,7 @@ describe("GET /v1/latest", () => {
       ["other repo", { ...manifest(), platforms: { win: { url: "https://github.com/someone/else/releases/download/v1/x.zip", sha256: sha("a") } } }],
       ["short sha", { ...manifest(), platforms: { win: { url: `${DL}x.zip`, sha256: "abc" } } }],
       ["bad top-level url", { ...manifest(), url: "https://example.com/x.zip" }],
+      ["asset host", { ...manifest(), platforms: { win: { url: "https://objects.githubusercontent.com/github-production-release-asset/1/2", sha256: sha("a") } } }],
     ];
     for (const [what, body] of bad) {
       const fetchUpstream = async () => new Response(typeof body === "string" ? body : JSON.stringify(body));
@@ -112,10 +113,41 @@ describe("GET /v1/latest", () => {
     }
   });
 
-  it("takes only GitHub release asset addresses", () => {
+  it("refuses a body over 64 KB without reading it all", async () => {
+    let pulled = 0;
+    const endless = () => new ReadableStream<Uint8Array>({
+      pull(c) { pulled += 4096; c.enqueue(new Uint8Array(4096).fill(0x20)); },
+    });
+    // Content-Length says too much: refused before any byte is read
+    const declared = await latestResponse({
+      fetchUpstream: async () => new Response(endless(), { headers: { "Content-Length": String(500 * 1024 * 1024) } }),
+      store: memoryStore(),
+      now: () => T0,
+    });
+    expect(declared.status).toBe(502);
+    expect(((await declared.json()) as any).detail).toMatch(/too big/);
+    expect(pulled).toBeLessThanOrEqual(4096 * 2);  // what the stream may queue on its own
+    // no Content-Length: read as a stream, given up just past the limit
+    pulled = 0;
+    const streamed = await latestResponse({ fetchUpstream: async () => new Response(endless()), store: memoryStore(), now: () => T0 });
+    expect(streamed.status).toBe(502);
+    expect(((await streamed.json()) as any).detail).toMatch(/too big/);
+    expect(pulled).toBeGreaterThan(64 * 1024);
+    expect(pulled).toBeLessThan(64 * 1024 + 4096 * 4);
+    // exactly at the limit still passes the size check (then fails as JSON here: all spaces)
+    const full = await latestResponse({
+      fetchUpstream: async () => new Response(new Uint8Array(64 * 1024).fill(0x20)), store: memoryStore(), now: () => T0,
+    });
+    expect(((await full.json()) as any).detail).toMatch(/not JSON/);
+  });
+
+  it("takes only this repository's release download addresses on github.com", () => {
     expect(isReleaseAssetUrl(`${DL}DownhillRevived-0.7.7-win.zip`)).toBe(true);
-    expect(isReleaseAssetUrl("https://objects.githubusercontent.com/github-production-release-asset/1/2")).toBe(true);
-    expect(isReleaseAssetUrl("https://release-assets.githubusercontent.com/github-production-release-asset/1/2")).toBe(true);
+    // GitHub's asset hosts serve every repository's assets: never named in a manifest
+    expect(isReleaseAssetUrl("https://objects.githubusercontent.com/github-production-release-asset/1/2")).toBe(false);
+    expect(isReleaseAssetUrl("https://release-assets.githubusercontent.com/github-production-release-asset/1/2")).toBe(false);
+    expect(isReleaseAssetUrl("https://github.com/skuza-oss/downhill-revived/releases/download/../../../someone/else/x")).toBe(false);
+    expect(isReleaseAssetUrl("https://github.com/skuza-oss/downhill-revived/releases/tag/v0.7.7")).toBe(false);
     expect(isReleaseAssetUrl("https://github.com.evil.example/skuza-oss/downhill-revived/releases/download/x")).toBe(false);
     expect(isReleaseAssetUrl("https://user@github.com/skuza-oss/downhill-revived/releases/download/x")).toBe(false);
     expect(isReleaseAssetUrl("https://github.com:8443/skuza-oss/downhill-revived/releases/download/x")).toBe(false);

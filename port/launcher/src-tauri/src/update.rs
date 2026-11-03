@@ -42,6 +42,8 @@ pub const RELEASES_PAGE: &str = "https://github.com/skuza-oss/downhill-revived/r
 /// The online server's copy of the newest release's latest.json (GET /v1/latest), asked when the
 /// official source fails.
 pub const BACKUP_SOURCE: &str = "https://dhd.skuza.app/v1/latest";
+/// The repository's address: a backup answer's page must be under it.
+const REPOSITORY: &str = "https://github.com/skuza-oss/downhill-revived/";
 /// What a backup answer may download: this repository's release assets only.
 const RELEASE_DOWNLOADS: &str = "https://github.com/skuza-oss/downhill-revived/releases/download/";
 const WORK_DIR: &str = "dhd-update";
@@ -341,14 +343,23 @@ fn check_from(own: Option<&str>, official: &str, backup: &str, platform: &str, v
     }
 }
 
-/// A backup answer downloads only this repository's release assets; its page, when it names none,
-/// is the releases page.
+/// The address is under prefix and can't climb out of it: no dot segments, plain or
+/// percent-encoded, and no backslashes (which URL parsers read as slashes).
+fn under(address: &str, prefix: &str) -> bool {
+    address.strip_prefix(prefix).is_some_and(|rest| {
+        let rest = rest.to_ascii_lowercase();
+        !rest.contains("..") && !rest.contains("%2e") && !rest.contains('\\')
+    })
+}
+
+/// A backup answer downloads only this repository's release assets, and the page it opens in the
+/// browser is the repository's: another page (or none) becomes the releases page.
 fn from_backup(backup: &str, r: Option<Release>) -> Result<Option<Release>, NetError> {
     let Some(mut r) = r else { return Ok(None) };
-    if !r.url.starts_with(RELEASE_DOWNLOADS) {
+    if !under(&r.url, RELEASE_DOWNLOADS) {
         return Err(NetError::bad(format!("the backup {backup} named a download outside the releases: {}", r.url)));
     }
-    if r.page == backup {
+    if !under(&r.page, REPOSITORY) {
         r.page = RELEASES_PAGE.into();
     }
     Ok(Some(r))
@@ -856,6 +867,26 @@ mod tests {
         let e = check_from(None, &format!("{github}/down"), &format!("{bad_backup}/v1/latest"), PLATFORM, "0.7.6").unwrap_err();
         assert_eq!(e.say, "Couldn't reach GitHub or the backup server (a server error, HTTP 502). You can still play 0.7.6.");
         assert!(e.detail.contains("outside the releases"), "{}", e.detail);
+    }
+
+    /// A backup's page opens in the browser: only one under the repository's address is kept. Its
+    /// download must stay in this repository's releases, with no dot segments to climb out.
+    #[test]
+    fn backup_page_and_download() {
+        let r = |url: &str, page: &str| {
+            Some(Release { version: "9.9.9".into(), url: url.into(), sha256: "ab".repeat(32), page: page.into(), ..Default::default() })
+        };
+        let zip = asset("9.9.9");
+        let tag = "https://github.com/skuza-oss/downhill-revived/releases/tag/v9.9.9";
+        assert_eq!(from_backup("b", r(&zip, tag)).unwrap().unwrap().page, tag);
+        for page in ["https://evil.example/", "https://github.com/someone/else/releases", "https://github.com/skuza-oss/downhill-revived.evil/",
+                     "https://github.com/skuza-oss/downhill-revived/../../someone", "http://github.com/skuza-oss/downhill-revived/", "", "b"] {
+            assert_eq!(from_backup("b", r(&zip, page)).unwrap().unwrap().page, RELEASES_PAGE, "{page}");
+        }
+        for url in [format!("{RELEASE_DOWNLOADS}../../../someone/else/releases/download/v1/x.zip"), format!("{RELEASE_DOWNLOADS}%2E%2E/x.zip"),
+                    format!("{RELEASE_DOWNLOADS}v1\\..\\x.zip"), "https://objects.githubusercontent.com/x".into()] {
+            assert!(from_backup("b", r(&url, tag)).is_err(), "{url}");
+        }
     }
 
     /// Error kinds to plain words.

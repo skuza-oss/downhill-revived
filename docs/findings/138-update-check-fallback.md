@@ -22,7 +22,9 @@ Windows `url`/`sha256`/`size` (what 0.6.x launchers read), `page` and `platforms
   follows the redirects to GitHub's asset host. That is a plain download from github.com, not the
   API, so the API's 60-an-hour limit doesn't apply, and Cloudflare reaches GitHub fine. It has a
   10 s timeout, the body is read as bytes (GitHub serves the asset as `application/octet-stream`),
-  and anything over 64 KB is refused.
+  and anything over 64 KB is refused: at once when its `Content-Length` says so, else read as a
+  stream that is cancelled as soon as it passes 64 KB (`readCapped`; until 2026-11-03 the whole
+  body was buffered first, review Muse #9).
 - **Caching.** A copy is served for 5 minutes (`FRESH_MS`) before GitHub is asked again. The last
   good copy is kept in two places: in the isolate's memory, and in the edge cache of each Cloudflare
   location (`caches.default`, key `/v1/latest/kept` on the server's own host, `max-age` 30 days).
@@ -34,9 +36,12 @@ Windows `url`/`sha256`/`size` (what 0.6.x launchers read), `page` and `platforms
   now: ...", "detail": "<what GitHub did>"}`.
 - **Validation.** A manifest is served only when `version` is `MAJOR.MINOR.PATCH` (a leading `v`
   is allowed) and `platforms` names at least one platform (keys `[a-z0-9-]`, up to 32 characters).
-  Every `url`, the top level's included, must be `https://` with no user, password or port, either
-  on `github.com` under `/skuza-oss/downhill-revived/releases/download/` or on GitHub's
-  release-asset hosts (`objects.githubusercontent.com`, `release-assets.githubusercontent.com`).
+  Every `url`, the top level's included, must be `https://` with no user, password or port, on
+  `github.com` under `/skuza-oss/downhill-revived/releases/download/` (after URL normalisation, so
+  `..` can't leave it), as `package_release.py` writes them. GitHub's release-asset hosts
+  (`objects.githubusercontent.com`, `release-assets.githubusercontent.com`) were accepted until
+  2026-11-03, but they serve every repository's assets, and the launcher refused them anyway
+  (review Opus #14).
   Every `sha256` must be 64 hex digits (served in lower case), and `size`, when given, a byte
   count. The answer keeps only those fields plus `name`, and `page` only when it is on this
   repository. Anything else is dropped.
@@ -57,8 +62,10 @@ Choices made here:
 Tests (`test/latest.test.ts`, GitHub's fetch mocked): a good answer (and fresh/old copies, a new
 release picked up), GitHub down with a kept copy (timeout, 429, 502), GitHub down with none (503
 JSON), a bad manifest refused (not JSON, bad version, no platforms, http, another host, another
-repository, short sha256, bad top-level url: 502 with no copy, the kept copy served with one),
-the address rule, and the route through the worker (GET, 405 for POST).
+repository, short sha256, bad top-level url, an asset-host url: 502 with no copy, the kept copy
+served with one), the address rule (asset hosts and `..` refused), the size cap (a 500 MB
+`Content-Length` refused before the body is read; an endless body without one given up just past
+64 KB; exactly 64 KB passes the size check), and the route through the worker (GET, 405 for POST).
 
 ## 2. The launcher: fallback, plain messages, launcher.log
 
@@ -72,7 +79,11 @@ the address rule, and the route through the worker (GET, 405 for POST).
    names no usable release): `BACKUP_SOURCE` = `https://dhd.skuza.app/v1/latest`. Its answer is
    read with the same `read_manifest`. The launcher also refuses a backup answer whose download is
    not under `https://github.com/skuza-oss/downhill-revived/releases/download/`, as a second check
-   after the server's. The download's SHA-256 is checked as always.
+   after the server's. The download's SHA-256 is checked as always. Since 2026-11-03 (review Opus
+   #14) the backup's `page`, which the Patch notes link opens in the browser, is kept only when it
+   is under `https://github.com/skuza-oss/downhill-revived/`; anything else becomes the releases
+   page. Neither address may hold a dot segment (`..`, also as `%2e`) or a backslash, so neither
+   can climb out of the repository (`from_backup`, `under`).
 
 A backup answer has no notes and no publish date. The home page then shows "Ready to ride"
 instead of "New in X" (as before when notes were empty), and the Patch notes page says "The patch
@@ -130,7 +141,9 @@ Past 256 KB the oldest half is dropped. It gets:
 Tests (`cargo test`, a local HTTP server as the existing tests use): falls back on 403 with the
 limit used up, 429, 503, a non-JSON answer and a refused connection, and never when GitHub answers;
 the own source has no backup; both failing gives the expected line and both errors in the detail;
-a backup naming a download elsewhere is refused; the classification table; every message; a
+a backup naming a download elsewhere is refused; the backup's page kept only under the repository
+and its download refused with `..`, `%2E%2E`, a backslash or an asset host
+(`backup_page_and_download`); the classification table; every message; a
 download that can't connect says so in words; the log's date and trimming.
 
 Not done here: no launcher window or game was run (by the brief), and the endpoint isn't deployed

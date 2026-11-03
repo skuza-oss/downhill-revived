@@ -17,9 +17,9 @@ export const KEEP_SECONDS = 30 * 24 * 3600;
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_SIZE = 4 * 1024 ** 3;
+/** Where this repository's release assets are: the only download URLs a manifest may name (what
+    package_release.py writes; the launcher checks the same prefix, update.rs RELEASE_DOWNLOADS). */
 const REPO_DOWNLOADS = "/skuza-oss/downhill-revived/releases/download/";
-/** Hosts GitHub serves release assets from (github.com's download URL redirects there). */
-const ASSET_HOSTS = ["objects.githubusercontent.com", "release-assets.githubusercontent.com"];
 
 export interface Entry {
   url?: string;
@@ -53,7 +53,8 @@ export interface Deps {
   now: () => number;
 }
 
-/** A release asset address the launcher may download: https, GitHub, this repository's releases. */
+/** A release asset address the launcher may download: https://github.com/ and this repository's
+    releases, nothing else (not GitHub's asset hosts, which serve every repository's assets). */
 export function isReleaseAssetUrl(value: unknown): boolean {
   if (typeof value !== "string") return false;
   let u: URL;
@@ -63,8 +64,38 @@ export function isReleaseAssetUrl(value: unknown): boolean {
     return false;
   }
   if (u.protocol !== "https:" || u.username || u.password || u.port) return false;
-  if (u.hostname === "github.com") return u.pathname.startsWith(REPO_DOWNLOADS);
-  return ASSET_HOSTS.includes(u.hostname);
+  return u.hostname === "github.com" && u.pathname.startsWith(REPO_DOWNLOADS);
+}
+
+/** The body's bytes, at most `max`: refused by its Content-Length when that says more, else read
+    as a stream and cancelled as soon as it passes `max`. Null when it is too big. */
+async function readCapped(res: Response, max: number): Promise<Uint8Array | null> {
+  const declared = Number(res.headers.get("Content-Length"));
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel();
+    return null;
+  }
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
 }
 
 function entryOf(v: unknown, where: string): Entry {
@@ -115,9 +146,15 @@ async function fetchManifest(deps: Deps): Promise<Manifest> {
     await res.body?.cancel();
     throw new UpstreamError(`GitHub answered HTTP ${res.status}`, 503);
   }
-  // a release asset comes as application/octet-stream: read as bytes, then decoded
-  const bytes = await res.arrayBuffer();
-  if (bytes.byteLength > MAX_MANIFEST_BYTES) throw new UpstreamError("GitHub's latest.json is too big", 502);
+  // a release asset comes as application/octet-stream: read as bytes (never more than the limit),
+  // then decoded
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await readCapped(res, MAX_MANIFEST_BYTES);
+  } catch (e) {
+    throw new UpstreamError(`GitHub's answer broke off (${e instanceof Error ? e.message : String(e)})`, 503);
+  }
+  if (!bytes) throw new UpstreamError("GitHub's latest.json is too big", 502);
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));

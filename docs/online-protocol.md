@@ -253,9 +253,9 @@ that copy for 5 minutes, and keeps the last good copy (this isolate's, and 30 da
 each Cloudflare location) for when GitHub fails: such an answer has the header `X-DHD-Stale` (why the
 newer copy couldn't be had); `X-DHD-Fetched-At` says when the copy was fetched. A copy is served only
 when `version` is `MAJOR.MINOR.PATCH`, `platforms` names at least one platform, and every `url` (the top
-level's too) is an `https://` release asset of this repository (`github.com/skuza-oss/downhill-revived/releases/download/...`,
-or GitHub's asset hosts `objects.githubusercontent.com`, `release-assets.githubusercontent.com`) with a
-64-hex `sha256`. No release notes. With no usable answer from GitHub and no copy kept: `503` (GitHub
+level's too) is an `https://` release asset of this repository (`github.com/skuza-oss/downhill-revived/releases/download/...`
+only) with a 64-hex `sha256`; `page` is kept only under `https://github.com/skuza-oss/downhill-revived/`.
+GitHub's `latest.json` is read with a 64 KB cap (its `Content-Length`, else the stream). No release notes. With no usable answer from GitHub and no copy kept: `503` (GitHub
 unreachable or HTTP error) or `502` (its `latest.json` refused),
 `{"error":"The newest release's info can't be had right now: ...","detail":"<what GitHub did>"}`.
 
