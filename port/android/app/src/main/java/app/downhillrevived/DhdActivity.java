@@ -3,12 +3,17 @@
 // own thread. Here only what the game asks of the activity: the screen's shape before that, and for
 // the touch controls (finding 141, port/host/android_touch.c, called from SDL's thread): the
 // screen's density and its gesture and cutout insets, the vibrator, and the phone's roll for tilt
-// steering.
+// steering; and the update notice (finding 143, port/host/android_update.c): one line over the game
+// when a newer release has an APK, which opens the release's page in the browser.
 package app.downhillrevived;
 
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Rect;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -18,13 +23,24 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.DisplayCutout;
+import android.view.Gravity;
 import android.view.Surface;
+import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import org.libsdl.app.SDLActivity;
 
 public class DhdActivity extends SDLActivity {
+    /** Pages the update notice may open: this repository's (android_update.c checks it too). */
+    private static final String RELEASES = "https://github.com/skuza-oss/downhill-revived/";
+    /** How long the update notice stays. */
+    private static final int NOTICE_MS = 15000;
+
     private volatile float roll = Float.NaN;
     private SensorEventListener tiltListener;
 
@@ -130,5 +146,53 @@ public class DhdActivity extends SDLActivity {
         Sensor s = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY);
         if (s == null) s = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         if (s != null) sensors.registerListener(tiltListener, s, SensorManager.SENSOR_DELAY_GAME);
+    }
+
+    /** The update notice: "Downhill Revived VERSION is out - tap for the download page" at the top of
+     *  the screen for NOTICE_MS; a tap opens page in the browser. Called once, from the update
+     *  check's thread. */
+    public void updateNotice(final String version, final String page) {
+        if (page == null || !page.startsWith(RELEASES)) return;
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                final TextView notice = new TextView(DhdActivity.this);
+                notice.setText("Downhill Revived " + version + " is out - tap for the download page");
+                notice.setTextColor(Color.WHITE);
+                notice.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                notice.setSingleLine(true);
+                int pad = dp(10);
+                notice.setPadding(2 * pad, pad, 2 * pad, pad);
+                GradientDrawable back = new GradientDrawable();
+                back.setColor(0xE0202020);
+                back.setCornerRadius(dp(8));
+                notice.setBackground(back);
+                FrameLayout.LayoutParams where = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                where.topMargin = dp(12);
+                final Runnable remove = new Runnable() {
+                    @Override public void run() {
+                        ViewGroup parent = (ViewGroup) notice.getParent();
+                        if (parent != null) parent.removeView(notice);
+                    }
+                };
+                notice.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        remove.run();
+                        try {
+                            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(page)));
+                        } catch (Throwable e) {
+                            Log.w("DownhillRevived", "no browser for " + page + ": " + e);
+                        }
+                    }
+                });
+                addContentView(notice, where);
+                notice.postDelayed(remove, NOTICE_MS);
+            }
+        });
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }

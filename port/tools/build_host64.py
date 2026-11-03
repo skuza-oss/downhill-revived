@@ -94,7 +94,8 @@ TARGETS = {t.key: t for t in (
 # Off Windows: the POSIX host instead of the Win32 one
 POSIX_UNITS = {'port/host/host_win32.c': 'port/host/host_posix.c'}
 WINDOWS_ONLY = ('port/gs/replay.c',)  # Win32 calls (GS replay)
-ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c']
+ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c',
+                 'port/host/android_update.c', 'port/net/update_check.c']
 # Android: only SDL's entry leaves the library; everything else may be garbage-collected
 # (--gc-sections), as /opt:ref does for dhd64.exe.
 ANDROID_EXPORTS = '{\n  global: SDL_main;\n  local: *;\n};\n'

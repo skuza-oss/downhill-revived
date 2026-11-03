@@ -1,0 +1,108 @@
+/* The update notice on Android (finding 143). A phone has no launcher to update the game, so at
+   start the game itself asks whether a newer release with an Android build is out, and says so in
+   one line over the game (DhdActivity.updateNotice) that opens the release's page in the browser
+   when tapped. Nothing is downloaded or installed: the player installs the new APK as the first.
+
+   - At most once a day (update-check.txt in the app's files folder holds when the last check
+     started), never when dhd.ini says auto_update = off.
+   - On a thread of its own, so the start never waits: the online server's copy of the newest
+     latest.json first (GET /v1/latest, online/server/src/latest.ts), GitHub's release asset
+     (latest.json, through its redirect) when that fails. The launcher asks GitHub's API first
+     (update.rs); a phone network shares one address among many, and the API allows an address 60
+     checks an hour, so the phone starts with the server. Each GET gives up after
+     the HTTPS client's timeouts (5 s to connect, 10 s without data); offline, the game just plays.
+   - The rules (the version compare, the manifest, the day) are port/net/update_check.c's. */
+#include <SDL3/SDL.h>
+#include <jni.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "../include/version.h"
+#include "../net/update_check.h"
+#include "../net/ws.h"
+#include "../render/include/dhd_settings.h"
+
+/* latest.json's key for the APK (package_release.py --platform android). */
+#define PLATFORM "android"
+static const char *const sources[] = {
+    "https://dhd.skuza.app/v1/latest",
+    "https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json",
+};
+
+static char ini[1200], stamp[1200];
+
+static long long last_check(void)
+{
+    long long when = 0;
+    FILE *f = fopen(stamp, "r");
+    if (f) {
+        if (fscanf(f, "%lld", &when) != 1) when = 0;
+        fclose(f);
+    }
+    return when;
+}
+
+static void note_check(long long now)
+{
+    FILE *f = fopen(stamp, "w");
+    if (f) {
+        fprintf(f, "%lld\n", now);
+        fclose(f);
+    }
+}
+
+/* DhdActivity.updateNotice(version, page), on the UI thread there. */
+static void show_notice(const char *version, const char *page)
+{
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject activity = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!activity) return;
+    jclass cls = (*env)->GetObjectClass(env, activity);
+    jmethodID m = cls ? (*env)->GetMethodID(env, cls, "updateNotice", "(Ljava/lang/String;Ljava/lang/String;)V") : NULL;
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); m = NULL; }
+    if (m) {
+        jstring v = (*env)->NewStringUTF(env, version), p = (*env)->NewStringUTF(env, page);
+        if (v && p) (*env)->CallVoidMethod(env, activity, m, v, p);
+        if (v) (*env)->DeleteLocalRef(env, v);
+        if (p) (*env)->DeleteLocalRef(env, p);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, activity);
+}
+
+static int SDLCALL check(void *unused)
+{
+    static char body[64 * 1024];
+    char version[32], page[512];
+    (void)unused;
+    for (size_t i = 0; i < sizeof sources / sizeof *sources; i++) {
+        if (http_get(sources[i], body, sizeof body) < 0) {
+            fprintf(stderr, "update: %s didn't answer\n", sources[i]);
+            continue;
+        }
+        if (update_from_manifest(body, PLATFORM, DHD_VERSION, version, sizeof version, page, sizeof page)) {
+            fprintf(stderr, "update: %s is out (this is %s): %s\n", version, DHD_VERSION, page);
+            show_notice(version, page);
+        } else {
+            fprintf(stderr, "update: no newer Android release than %s\n", DHD_VERSION);
+        }
+        return 0;
+    }
+    return 0;
+}
+
+void android_update_start(const char *files)
+{
+    char auto_update[16] = "";
+    long long now = (long long)time(NULL);
+    snprintf(ini, sizeof ini, "%sdhd.ini", files);
+    snprintf(stamp, sizeof stamp, "%supdate-check.txt", files);
+    dhd_settings_read(ini, "auto_update", auto_update, sizeof auto_update);
+    if (!update_due(auto_update, now, last_check())) return;
+    note_check(now);
+    SDL_Thread *t = SDL_CreateThread(check, "update check", NULL);
+    if (t) SDL_DetachThread(t);
+}

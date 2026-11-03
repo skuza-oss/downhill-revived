@@ -11,9 +11,11 @@
    - the disc image: SCUS-97177.iso in that folder. On the first start (or when the copy is not the
      game) the player picks the .iso once through Android's document picker (SDL's file dialog) and
      it is copied there (the content URI is read once; Android gives no path to it);
-   - a new dhd.ini names the copy (iso) and turns the updater off (an APK is updated by reinstalling
-     it); the player defaults (the native renderer at 2x, widescreen, movies skipped) come from
-     host.c as on Windows;
+   - a new dhd.ini names the copy (iso); the player defaults (the native renderer at 2x,
+     widescreen, movies skipped) come from host.c as on Windows;
+   - the update notice: once a day at most (not with auto_update = off) a thread asks whether a
+     newer release has an APK and says so over the game (android_update.c, finding 143). An APK is
+     updated by installing the new one; nothing is downloaded here;
    - SDL hints: landscape only, the Back button kept from closing the game.
    The game ends with exit() (the close of the activity, gs_pump_messages, on the game's thread);
    SDL_main never returns to a second start in the same process. */
@@ -31,6 +33,7 @@
 
 int dhd_launcher_main(int argc, char **argv);   /* launcher.c's main */
 void host_console_init(void);                   /* host.c: the log */
+void android_update_start(const char *files);   /* android_update.c: the update notice */
 const char *host_disc_check(const char *path);  /* host.c: NULL when path is the game */
 
 static char files[1024];      /* the app's files folder, with a trailing slash */
@@ -159,6 +162,7 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
         exit(0);
     }
     settings_start(disc);
+    android_update_start(files);
     char *args[] = {exe, NULL};
     (void)argc; (void)argv;
     int code = dhd_launcher_main(1, args);
