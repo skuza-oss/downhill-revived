@@ -52,13 +52,12 @@ The codebase is based on the work of **[skuza-oss](https://github.com/skuza-oss/
 
 ## Download
 
-**First iOS release: v0.7.9 (build 70902).** The supplied release artifact is:
+- [Download the latest release](https://github.com/ribeirogustav/downhill-revived-ios/releases)
+- Current version: `0.7.9 (Beta)`
+- Asset: `DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
+- Target: iOS 17.0+ (ARM64 / Metal)
 
-`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
-
-Download this build from the **[repository's Releases section](https://github.com/ribeirogustav/downhill-revived-ios/releases)**.
-
-**This IPA is unsigned. It cannot be installed directly on an ordinary iPhone/iPad as-is.** Developers may sign a build with an appropriate Apple team and provisioning profile. Instructions: **[Installation and signing](docs/INSTALLATION.md)**.
+This IPA is unsigned. It cannot be installed directly on an ordinary iPhone/iPad as-is. Developers may sign a build with an appropriate Apple team and provisioning profile. Instructions: [Installation and signing](docs/INSTALLATION.md).
 
 **SHA-256 of the unsigned IPA:**
 
