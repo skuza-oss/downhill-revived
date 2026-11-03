@@ -417,3 +417,10 @@ MIUI and the legend taps need the phones.
   next pass (about every 4 ms) asked again, each a JNI call and a posted UI-thread task. A failed
   ask now waits 250 ms before the next; a successful one is not delayed. Android only: compiled by
   the debug APK build, not run.
+
+Checks for the second round: `test_touch` (all passed; each new test fails on the code before its
+fix), `test_fps.py` at every rate, `test_runtime.py` (exit 0), and the state trace (boot and race,
+the current `state_trace_codeptrs.txt`) of this branch against a build of b25cbb2: boot 600 and
+race 5000 rows match. The debug APK builds (`build_apk.py --wasm`: libmain.so with the Android
+`touch_host.c`, then Gradle, BUILD SUCCESSFUL). Not run on a phone: the controller hand-over,
+quick taps and tilt need the lead's phone checks.

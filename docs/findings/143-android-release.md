@@ -332,3 +332,7 @@ version only when there is one (`package line '...', not app.downhillrevived`). 
 replaced by canned answers: the release APK passes with and without a version; another package
 and a missing package line are refused in one line on both paths; `--check` exits with "not fit
 to publish"; a version mismatch is refused. It fails (the `TypeError`) on the old code.
+
+Checks for the second round: `port/net/build_tests.py test_update_check`, `test_disc_image.py`
+(both JVM tests, the real disc too), `test_build_apk.py`, the server's `npm test` (94 passed) and
+`npm run typecheck`, and the debug APK built with the new `UpdatePage` (Gradle, BUILD SUCCESSFUL).

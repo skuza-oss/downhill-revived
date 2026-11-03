@@ -137,7 +137,12 @@ it unchanged (finding 088, CL3).
   the game is read for the rider's air flag and the race HUD hook only. The v0.7.7..main review's
   touch findings are fixed (finding 141, "Review fixes"): the touch queue never loses a lift, L3 /
   R3 edits load back, Back on the pause question, tilt without a sensor keeps the stick, the
-  legend's PREV / NEXT and the row hints on their own line, the status bar after tilt's rotation. `DHD_TOUCH_MOUSE=1` makes the
+  legend's PREV / NEXT and the row hints on their own line, the status bar after tilt's rotation.
+  The second round's too (finding 141, "Second review round"): a controller on the pause menu
+  takes it over (the overlay no longer sticks on Restart / Quit's question), a tap the game never
+  read (quick, or in a stall) still goes and a double tap stays two presses (PEDAL, ✕, camera),
+  a fixed stick steers from the touch-down, a full queue keeps a finger's first move, a failed
+  tilt-sensor ask backs off. `DHD_TOUCH_MOUSE=1` makes the
   mouse a finger on a PC. No online play on phones yet (finding 143: no ONLINE row, every
   connection refused). The release APK (`build_apk.py --release`, signed with the release key the
   `DHD_ANDROID_*` variables name) and the once-a-day update notice: finding 143.
@@ -483,7 +488,10 @@ Review fixes (finding 143, "Review fixes"): the first start checks and copies on
 checked), a short copy fails (the source's size, else the ISO volume's), each copy owns its
 temporary file; the release check takes only the release key's certificate
 (`--new-signing-key` for a deliberate change); a stale server answer no longer hides a newer
-GitHub release from the update notice.
+GitHub release from the update notice. Second round (finding 143): the update page can't leave
+the repository by dot segments or backslashes (game, phone, server; the launcher's rule), and
+`build_apk.py --check` refuses a wrong package in words. Finding 139: the item list's timer rests
+at 0, not -1, on a two-field step.
 
 ### Open
 - Browser speed: about 25-30 fields/s on the title, 17-25 in a race before finding 087's work;
