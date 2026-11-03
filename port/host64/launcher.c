@@ -37,6 +37,10 @@ void host64_trap(wasm_rt_trap_t code) {
     dprintf(STDERR_FILENO,"host64 trap: %s (EE fiber %d, wasm depth %u)\n",
             wasm_rt_strerror(code),host64_fiber_id(),wasm_rt_call_stack_depth);
     backtrace_symbols_fd(frames,n,STDERR_FILENO);
+    {
+        void host_log_drain(void) __attribute__((weak));
+        if (host_log_drain) host_log_drain();
+    }
     _exit(0x7700u+(unsigned)code);
 #endif
     for (;;) {}

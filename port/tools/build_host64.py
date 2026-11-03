@@ -71,12 +71,19 @@ class Target:
         self.key, self.rust, self.out, self.exe, self.jobs, self.outputs = key, rust, out, exe, jobs, outputs
         self.fiber = fiber  # the fiber switch's adapter, port/host64/fiber_<fiber>.c (the CPU and its ABI)
         self.flags, self.wabt, self.simde = list(flags), Path(os.environ.get('WABT_DIR') or wabt), simde
-        self.windows, self.android, self.mac = key == 'win-x64', key == 'android-arm64', key == 'macos-arm64'
+        self.windows, self.android, self.mac, self.ios = key == 'win-x64', key == 'android-arm64', key == 'macos-arm64', key == 'ios-arm64'
         self.posix = not self.windows
 
 
 MAC_MIN = '11.0'  # the first macOS on Apple silicon (package_release.py's LSMinimumSystemVersion)
+IOS_MIN = '17.0'  # iOS deployment target (iPhone 17 Pro Max support)
 ANDROID_API = 30  # sdl3.ANDROID_API: Android 11
+IOS_SYSROOT = ''
+try:
+    IOS_SYSROOT = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
+except Exception:
+    pass
+
 TARGETS = {t.key: t for t in (
     Target('win-x64', 'x86_64-pc-windows-msvc', 'build/host64-exe', 'dhd64.exe', 'win64'),
     Target('linux-x64', 'x86_64-unknown-linux-gnu', 'build/host64-linux', 'dhd64', 'sysv64',
@@ -85,6 +92,10 @@ TARGETS = {t.key: t for t in (
     Target('macos-arm64', 'aarch64-apple-darwin', 'build/host64-macos', 'dhd64', 'arm64', jobs=4,
            flags=['-arch', 'arm64', '-mmacosx-version-min=' + MAC_MIN, '-mcpu=apple-m1'],
            wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
+    # iOS arm64 target for iPhone (iPhone 17 Pro Max / A19 Pro; -mcpu=apple-m1 floor as macOS)
+    Target('ios-arm64', 'aarch64-apple-ios', 'build/host64-ios', 'libdhd_ios.a', 'arm64', jobs=4,
+           flags=(['-isysroot', IOS_SYSROOT] if IOS_SYSROOT else []) + ['-arch', 'arm64', '-miphoneos-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
+           wabt=Path.home() / 'DevCaches/wabt/wabt-1.0.42', simde=Path.home() / 'DevCaches/simde-src'),
     # -march=armv8.2-a: the Snapdragon 888's cores and every arm64 phone since 2018; tuned for its
     # Cortex-X1 and A78s (finding 091)
     Target('android-arm64', 'aarch64-linux-android', 'build/android', 'libmain.so', 'arm64', jobs=2, outputs=8,
@@ -96,6 +107,7 @@ POSIX_UNITS = {'port/host/host_win32.c': 'port/host/host_posix.c'}
 WINDOWS_ONLY = ('port/gs/replay.c',)  # Win32 calls (GS replay)
 ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c',
                  'port/host/android_update.c', 'port/net/update_check.c']
+IOS_UNITS = []
 # Android: only SDL's entry leaves the library; everything else may be garbage-collected
 # (--gc-sections), as /opt:ref does for dhd64.exe.
 ANDROID_EXPORTS = '{\n  global: SDL_main;\n  local: *;\n};\n'
@@ -104,7 +116,7 @@ ANDROID_EXPORTS = '{\n  global: SDL_main;\n  local: *;\n};\n'
 def host_units(t):
     if t.windows:
         return list(HOST_UNITS)
-    return [POSIX_UNITS.get(u, u) for u in HOST_UNITS if u not in WINDOWS_ONLY] + (ANDROID_UNITS if t.android else [])
+    return [POSIX_UNITS.get(u, u) for u in HOST_UNITS if u not in WINDOWS_ONLY] + (ANDROID_UNITS if t.android else []) + (IOS_UNITS if t.ios else [])
 
 
 def glue(t):
@@ -179,6 +191,9 @@ def sdl(t, a):
     if t.android:
         lib, include, _java = sdl3.android_build()
         return lib, include, []
+    if t.ios:
+        lib, include, libs = sdl3.ios_build()
+        return lib, include, libs
     if a.sdl_lib and not a.sdl_include:
         raise ValueError('--sdl-lib needs --sdl-include')
     if t.windows:
@@ -267,7 +282,11 @@ def main():
         if not cc.exists():
             p.error('no NDK clang at %s' % cc)
     elif t.posix:
-        ndk, tools, cc, ar = None, None, 'clang', 'ar'
+        ndk, tools = None, None
+        if (t.mac or t.ios) and sys.platform == 'darwin':
+            cc, ar = '/usr/bin/clang', '/usr/bin/ar'
+        else:
+            cc, ar = 'clang', 'ar'
     if a.fiber_test:
         return fiber_test(t, a, None if t.windows else cc, wabt, work, env)
     try:
@@ -323,8 +342,9 @@ def main():
         # guest address and ends the process, as the trap did. WABT's own fault-to-trap handler stays
         # off (WASM_RT_SKIP_SIGNAL_RECOVERY): ours handle faults. Traps can come from any EE fiber:
         # report and end (launcher.c).
+        memcheck = ['-DWASM_RT_MEMCHECK_BOUNDS_CHECK=1', '-DWASM_RT_SKIP_BOUNDS_CHECKS=1'] if t.ios else ['-DWASM_RT_MEMCHECK_GUARD_PAGES=1']
         defines = ['-DWASM_RT_STACK_DEPTH_COUNT=1', '-DWASM_RT_MAX_CALL_STACK_DEPTH=512', '-DWASM_RT_THREAD_LOCAL=',
-                   '-DWASM_RT_MEMCHECK_GUARD_PAGES=1', '-DWASM_RT_SKIP_SIGNAL_RECOVERY=1']
+                   *memcheck, '-DWASM_RT_SKIP_SIGNAL_RECOVERY=1']
         defines += ['-DHOST64_FAKE_MODULE=1'] if a.fake else ['-DWASM_RT_TRAP_HANDLER=host64_trap']
         includes = ['-I'+str(work), '-I'+str(wabt/'include'), '-I'+str(rt), '-I'+str(SOURCE),
                     '-I'+str(ROOT/'port/runtime'), '-I'+str(ROOT/'port/include'), '-I'+str(ROOT/'port/host'),
@@ -372,8 +392,8 @@ def main():
                 extra += ['-DPS2_VU_AOT']
             if rel.endswith('gs/gpu_rust.c'):
                 extra += ['-I'+str(ROOT/'port/render/include')]  # dhd_render.h
-            if rel.endswith('host64/launcher.c') and t.android:
-                extra += ['-Dmain=dhd_launcher_main']  # SDL_main (android_main.c) calls it
+            if rel.endswith('host64/launcher.c') and (t.android or t.ios):
+                extra += ['-Dmain=dhd_launcher_main' if t.android else '-Dmain=dhd_main']
             if 'libmpeg2/' in rel:
                 extra += ['-I'+str(ROOT/'port/third_party/libmpeg2')]
             obj = objdir/(rel.replace('/', '_') + suffix)
@@ -461,6 +481,10 @@ def main():
             run([cc, *t.flags[:3], *pgo_flags[:1], '-Wl,-dead_strip', '-Wl,-S', *objects, library, report['lib'], sdl_lib,
                  *[w for x in sdl_libs for w in x.split()], *[w for x in rust_libs for w in x.split()],
                  '-o', exe], timeout=900)
+        elif t.ios:
+            # Bundle all objects, host library, Rust renderer and SDL3 into one static archive for iOS
+            cmd = ['libtool', '-static', '-o', str(exe), *objects, library, report['lib'], sdl_lib]
+            run(cmd, timeout=900)
         else:
             # LLVM's lld: GNU ld on a tree under /mnt (WSL's 9p) took minutes, past the timeout;
             # lld links the same objects there in about 2 s

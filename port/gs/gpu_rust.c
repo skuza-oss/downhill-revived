@@ -30,6 +30,13 @@
    phone's app goes to the background and back (finding 091). */
 #define COBJMACROS
 #include "gpu.h"
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#define DHD_IOS_RENDER 1
+#include "../ios/render/metal_bridge.h"
+#endif
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <dxgi1_6.h>
@@ -51,6 +58,15 @@ int touch_host_overlay(float *items, int max, float *width_mm, float *height_mm)
    when the page changes it (gs_present_options_apply, on the game thread that sets it), not for
    every picture: getenv scans the whole environment (finding 090 SP14). -1: not read yet. */
 static SDL_AtomicInt counter_on = {-1};
+
+static int platform_present_active(void)
+{
+#ifdef __APPLE__
+    bool ios_game_is_active(void) __attribute__((weak));
+    if (ios_game_is_active) return ios_game_is_active();
+#endif
+    return 1;
+}
 
 void gs_gpu_counter_apply(void)
 {
@@ -76,6 +92,12 @@ static void counter_present(DhdrSurface *surface)
     }
 #endif
     dhdr_surface_present(surface);
+#ifdef __APPLE__
+    /* The SwiftUI launcher samples presented-frame intervals, not the configured cap. */
+    void ios_perf_record_present(double seconds) __attribute__((weak));
+    if (ios_perf_record_present)
+        ios_perf_record_present((double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency());
+#endif
     perf_presented();  /* every picture shown, by either renderer */
 }
 
@@ -465,6 +487,7 @@ int gs_gpu_surface_reset(Gs *g, const GsWindow *window)
 int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned height,
                    unsigned window_width, unsigned window_height)
 {
+    if (!platform_present_active()) return 1; /* skipped, not a device failure */
     Rust *p = g->backend;
     if (!p || !p->surface) return 0;
     submit_all(&p->e); /* the scanout, before the picture is replaced or shown */

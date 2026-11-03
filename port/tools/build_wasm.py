@@ -55,10 +55,33 @@ OBJ = os.path.join(OUT, 'obj')
 RECOMP_OUT = os.path.join(OUT, 'recomp')
 DATA_OUT = os.path.join(OUT, 'data')
 SHIM = os.path.join(OUT, 'shim')                # SSE/intrinsic headers over SIMDe, the wasm ee_native_float.h
-WASI = os.environ.get('WASI_SYSROOT', str(DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-x86_64-windows/share/wasi-sysroot'))
+def _find_wasi():
+    if 'WASI_SYSROOT' in os.environ:
+        return os.environ['WASI_SYSROOT']
+    for cand in [
+        DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-x86_64-macos/share/wasi-sysroot',
+        DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-arm64-macos/share/wasi-sysroot',
+        DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-x86_64-windows/share/wasi-sysroot',
+    ]:
+        if cand.exists():
+            return str(cand)
+    cands = sorted(DEVCACHES.glob('wasi-sdk/*/share/wasi-sysroot'))
+    if cands:
+        return str(cands[-1])
+    return str(DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-x86_64-windows/share/wasi-sysroot')
+
+WASI = _find_wasi()
 SIMDE = os.environ.get('SIMDE_DIR', str(DEVCACHES / 'simde-src'))
 WABT = os.environ.get('WABT_DIR', str(DEVCACHES / 'wabt/wabt-1.0.42'))
 WASM = os.path.join(OUT, 'dhd_core.wasm')
+
+if not shutil.which('llvm-nm'):
+    for p in [Path(WASI).parents[1] / 'bin', DEVCACHES / 'wabt/wabt-1.0.42/bin']:
+        if p.is_dir() and str(p) not in os.environ.get('PATH', ''):
+            os.environ['PATH'] = str(p) + os.pathsep + os.environ.get('PATH', '')
+
+if sys.platform == 'darwin':
+    os.environ.setdefault('DHD_X86_CLANG', '/usr/bin/clang')
 
 # The module's own memory: above the scratchpad (0x70000000), see build/audit/w5-wasm-module.md 3.
 STACK_BASE = 0x70100000
@@ -438,7 +461,8 @@ def image_stage(wanted):
     aliases = {}
     for m in re.finditer(r'/alternatename:(\w+)=(\w+)', symbols_s):
         aliases[m.group(1)] = m.group(2)
-    p = run(['clang', '--target=i686-pc-windows-itanium', '-c', paths[0], '-o', paths[0] + '.o'])
+    # DHD_X86_CLANG: a clang with the x86 backend, for when clang on PATH is wasm-only (wasi-sdk's, on a Mac)
+    p = run([os.environ.get('DHD_X86_CLANG', 'clang'), '--target=i686-pc-windows-itanium', '-c', paths[0], '-o', paths[0] + '.o'])
     if p.returncode:
         sys.exit(p.stderr)
     image_obj = paths[0] + '.o'

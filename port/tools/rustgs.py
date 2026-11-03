@@ -130,8 +130,9 @@ WASM = 'wasm32-unknown-unknown'
 ANDROID = 'aarch64-linux-android'  # build_host64.py --target android-arm64 (finding 091)
 LINUX = 'x86_64-unknown-linux-gnu'  # build_host64.py --target linux-x64 (here, or cross-built for WSL)
 MAC = 'aarch64-apple-darwin'      # build_host64.py --target macos-arm64, on a Mac
-TARGETS = (X64, WASM, ANDROID, LINUX, MAC)   # i686 is retired
-ARCHIVE_TARGETS = (ANDROID, LINUX, MAC)   # libdhd_render.a
+IOS = 'aarch64-apple-ios'        # build_host64.py --target ios-arm64, on a Mac / Xcode
+TARGETS = (X64, WASM, ANDROID, LINUX, MAC, IOS)   # i686 is retired
+ARCHIVE_TARGETS = (ANDROID, LINUX, MAC, IOS)   # libdhd_render.a
 CHECK_TARGETS = TARGETS
 PROFILES = ('release', 'fixloop')
 FEATURES = ('test-hooks',)       # what a caller may add; native / web are rustgs's own
@@ -239,10 +240,14 @@ def c_tools(triple):
         # target dir; cc puts these flags last, so they win
         return {'CC_' + var: str(bin_dir / 'clang.exe'), 'AR_' + var: str(bin_dir / 'llvm-ar.exe'),
                 'CFLAGS_' + var: '-g0'}
-    if triple in (LINUX, MAC) and os.name != 'nt':
+    if triple in (LINUX, MAC, IOS) and os.name != 'nt':
         # the machine's own compiler (cc finds it; Apple's through xcrun, with the SDK ring needs),
         # without debug info: ring asks for -g3, whose DWARF names the registry and the target dir
-        return {'CFLAGS_' + var: '-g0'}
+        env = {'CFLAGS_' + var: '-g0'}
+        if sys.platform == 'darwin' and triple in (MAC, IOS):
+            env['CC_' + var] = '/usr/bin/clang'
+            env['AR_' + var] = '/usr/bin/ar'
+        return env
     if triple == LINUX:
         # cross-built on Windows: LLVM's clang for the target, freestanding (no Linux headers here:
         # ring's C has a mode for that), without debug info (ring asks for -g3)

@@ -24,7 +24,9 @@
 #include "../hle/text_input.h"
 #include "../gs/present.h"
 
+#define SDL_MAIN_HANDLED
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -203,6 +205,7 @@ int sdl_host_main(int (*game)(void *), void *arg)
     host_thread_name("sdl");
     main_thread = SDL_GetCurrentThreadID();
     slot_lock = SDL_CreateMutex();
+    SDL_SetMainReady();
     int events = SDL_Init(SDL_INIT_EVENTS);
     if (events) wake_event = SDL_RegisterEvents(1);
     else fprintf(stderr, "sdl: no event queue (%s)\n", SDL_GetError());

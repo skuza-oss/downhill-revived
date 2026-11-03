@@ -1,5 +1,65 @@
 # State
 
+## iOS on 0.7.9 and AirPlay
+
+Finding 151 merges the official v0.7.9 release, presents the launcher on
+AirPlay and HDMI displays, and starts the TV session at 3x internal scale.
+Build 70901. Xcode, AirPlay and physical display checks remain pending.
+
+## iOS startup, menu and Wide gameplay
+
+Finding 150 adds optional automatic start, repositions the touch controls,
+and applies in-game graphics from an explicit draft. The inventory's 16:9 cap
+ends with the modal, and 4:3 cards are gated to loading states on iOS.
+Build 70803. Xcode and device checks remain pending.
+
+## iOS localization
+
+Finding 149 adds eight launcher localizations selected by iOS, with English
+as the development language. Build 70802. Portable checks validate the
+resource copy, matching keys and format arguments. Xcode and device checks
+remain pending.
+
+## iOS on 0.7.8
+
+Finding 148 merges the official v0.7.8 tag with the iOS port. The new
+replay clock and widescreen loading/movie presentation work alongside the
+existing iOS display and touch paths. Internal resolution offers up to 6x.
+Build 70801. Xcode and device checks remain pending.
+
+## iOS widescreen, TV cadence and live graphics
+
+Finding 147 rebuilds live projections within the initialized view table,
+limits the inventory to 16:9 and corrects three additional VU1 sprite widths.
+The TV uses 16:9 with an automatic 60/120 FPS target and a 1x starting scale.
+The game menu exposes live graphics settings. Build 70704. The 22 portable
+tests pass. Xcode and physical iPhone and TV verification remain pending.
+
+## iOS TV and touch refinements
+
+Finding 146 adds dedicated external-display scenes (including iOS 27 accessory
+registration), automatic output aspect/FOV changes, a prelaunch 1080p TV limit
+toggle, last-input touch/gamepad visibility, a four-second menu timeout and native
+immediate touch handling with short-tap retention. Build 70703. All 22 portable
+tests pass; Xcode compilation, physical HDMI and on-device latency remain pending.
+
+## iOS stability review 2
+
+Finding 145 corrects SwiftUI scene lifecycle wiring, neutral/invalid analog input,
+input release, coherent drawable dimensions, guarded disc replacement, selected-team
+Xcode signing and atomic IPA packaging. The local build identifies as 70702.
+18 portable tests pass, including the 22 clock rate/mode cases from review 1.
+Swift/Objective-C, Rust iOS, real signing and device validation remain pending.
+
+## iOS performance review 1
+
+The supplied iOS v0.7.7 port has the coordinated upstream delta-time clock
+(`01f8d2b`, finding 139), corrected presentation latency, a 1x/60 baseline,
+bounded presentation resolution, measured submission intervals and a build
+pipeline that rebuilds the core before packaging. See `docs/findings/144-ios-performance-review.md` and
+`LEIA-ME-iOS-MELHORIAS.md`. Portable checks pass; Xcode compilation and device
+performance/lifecycle validation are still pending. No measured iPhone gain yet.
+
 Goal: readable, **matching** C/C++ decompilation of Downhill Domination (PS2, USA `SCUS_971.77`):
 source that rebuilds the retail executable byte for byte. Later it can serve as the base for a PC
 port. PCSX2 is the behavioural reference.
@@ -552,3 +612,7 @@ findings 039-047, 053-054, 065 and 072 and in this file's history.
   the build.
 - Tests: `port/net/build_tests.py` (unit and loopback), the server's own tests (`npm test`),
   `port/tools/online_race.py` (two local games through a relay, optionally `nettool` bots).
+
+## Platforms
+
+- **iOS** (finding 138): Native ARM64 iOS port (iPhone 17 Pro Max / A19 Pro, iOS 17.0+), based on the official v0.7.9 release. Metal rendering (`wgpu`), multitouch & gamepad input, landscape rotation persistence, Apple Silicon tuned (`-mcpu=apple-m1`, P-core QoS priority), sandboxed Documents storage.

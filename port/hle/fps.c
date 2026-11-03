@@ -14,6 +14,7 @@ extern int D_0029E3E0,D_0029E3E8;
 extern float D_0029E3FC, D_0029E400;
 extern int func_00243CE8(int);
 static int requested;
+static int display_auto;
 static double phase, anim_phase;
 static double step_fields, previous_wall, owed;
 static int wall_mode, delta = -1;
@@ -234,8 +235,9 @@ int port_fps(void)
 {
     if (!requested) {
         const char *s = host_getenv("DHD_FPS");
+        display_auto = host_getenv("DHD_IOS_DISPLAY_AUTO") != NULL;
         requested = s ? atoi(s) : 60;
-        if (s && !dhd_stricmp(s, "monitor")) {
+        if (display_auto || (s && !dhd_stricmp(s, "monitor"))) {
             requested = host_display_hz();
             if (!requested) requested = 60;
         }
@@ -245,6 +247,24 @@ int port_fps(void)
     }
     return requested;
 }
+/* At a VBLANK boundary, carry fractional fields and animation ticks into the new rate. */
+int port_fps_update_display(void)
+{
+    int previous = port_fps();
+    if (!display_auto) return 0;
+    int rate = host_display_hz();
+    if (rate != 60 && rate != 120) return 0;
+    if (rate > port_fps_max()) rate = port_fps_max();
+    if (rate == previous) return 0;
+    double ratio = (double)rate / previous;
+    phase *= ratio;
+    anim_phase *= ratio;
+    requested = rate;
+    delta = -1;
+    hle_log("fps: display target changed to %d steps/s\n", requested);
+    return 1;
+}
+
 /* The time a picture is held: one at the selected rate (59.94 Hz at 60), a field on the grid
    before GO, a recorded step in a replay. */
 double port_frame_period(void)

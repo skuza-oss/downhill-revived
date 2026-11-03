@@ -57,6 +57,14 @@ unsigned host_exe_path(char *out, unsigned size)
     int k = snprintf(out, size, "%s", android_exe_path());
     return k > 0 && (unsigned)k < size ? (unsigned)k : 0;
 #elif defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+    const char *ios_documents_dir(void) __attribute__((weak));
+    if (ios_documents_dir) {
+        int k = snprintf(out, size, "%sdhd64", ios_documents_dir());
+        return k > 0 && (unsigned)k < size ? (unsigned)k : 0;
+    }
+#endif
     char given[4096], real[PATH_MAX];
     uint32_t length = sizeof given;
     int k = _NSGetExecutablePath(given, &length) == 0 && realpath(given, real)

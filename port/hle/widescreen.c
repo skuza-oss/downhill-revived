@@ -21,6 +21,7 @@
    This changes EE memory and what the game culls, so the game-state gates run without it. */
 #include "hle.h"
 #include "widescreen_flat.h"
+#include "widescreen_sprites.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -52,7 +53,27 @@ static int map_2d(void) { return widescreen && !card_2d && !card_setup; }
    length in pixels (x0, the X field of view, already times s) and the size in pixels. */
 typedef struct { float x0; unsigned short width, height; } WsView;
 typedef struct { void *camera; WsView *view; int mode; char pad[8]; } WsEntry;
-extern WsEntry D_0075A9D0[32];
+/* Six slots are initialized by func_0023D6C8; the matrices follow the table. */
+enum { WS_VIEW_COUNT = 6 };
+extern WsEntry D_0075A9D0[WS_VIEW_COUNT];
+extern unsigned char D_0029C470;  /* inventory modal, set by func_00139BF8 */
+extern int D_0029E454; /* active view */
+void func_0023D898(int view, float *focal, float *vertical);
+void func_0023D8D8(int view, float focal, float vertical);
+void func_0023CB00(int view);
+static int rebuilding_projection;
+
+float port_ws_menu_focal(float focal)
+{
+    return !rebuilding_projection && focal == 688.0f ? focal * port_fov_x : focal;
+}
+
+void port_ws_set_focal(int view, float focal, float vertical)
+{
+    rebuilding_projection = 1;
+    func_0023D8D8(view, focal * port_fov_x, vertical);
+    rebuilding_projection = 0;
+}
 void func_0023D618(int view, int *x, int *y);   /* the view's centre in GS pixels */
 void func_0023D650(int view, int *width, int *height);
 void func_0020F9F0(int font, int view, int x, int y, const char *text);  /* centred text */
@@ -73,7 +94,8 @@ static double ratio(const char *v)
 {
     double w, h;
     char sep;
-    if (!v || sscanf(v, "%lf%c%lf", &w, &sep, &h) != 3 || (sep != ':' && sep != 'x') || w <= 0 || h <= 0) return 0;
+    if (!v || sscanf(v, "%lf%c%lf", &w, &sep, &h) != 3 ||
+        (sep != ':' && sep != 'x') || !isfinite(w) || !isfinite(h) || w <= 0 || h <= 0) return 0;
     return w / h;
 }
 
@@ -100,11 +122,11 @@ static double wanted_aspect(void)
 static uint32_t float_bits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 static float bits_float(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 
-void host_widescreen_init(void)
+static void apply_aspect(double want)
 {
     /* PS2 address, retail word, 1 for an X (times s) or 0 for a Y factor (divided by s). The view
        table D_0027ECC0 (0xC0 bytes a view: X at +0, Y at +0x20) for 1P, 2P both ways, 4P and
-       paused; the menu's Y; three tree sprite widths. */
+       paused; and the menu's Y. */
     static const uint32_t words[][3] = {
         {0x27ECC0, 0x438A8000, 1}, {0x27ECE0, 0x3F15551D, 0},  /* paused X, 1P Y */
         {0x27ED80, 0x438A8000, 1}, {0x27EDA0, 0x3F155550, 0},  /* 2P horizontal */
@@ -116,49 +138,135 @@ void host_widescreen_init(void)
         {0x27F200, 0x43520000, 1}, {0x27F220, 0x3EF0A3D7, 0},
         {0x27F2C0, 0x43520000, 1}, {0x27F2E0, 0x3EF0A3D7, 0},
         {0x27F380, 0x43520000, 1}, {0x27F3A0, 0x3EF0A3D7, 0},
-        {0x26C5C0, 0x438A8000, 1}, {0x26C700, 0x438A8000, 1},  /* trees */
-        {0x26C758, 0x438A8000, 1},
     };
-    host_display_aware();
-    double want = wanted_aspect();
-    if (want < 4.0 / 3.0 + 0.01) return;  /* off, or a 4:3 (or narrower) display */
-    if (want > 4.0) want = 4.0;
-    widescreen = 1;
-    aspect = want;
-    port_fov_x = (float)(4.0 / 3.0 / aspect);
+    float previous = port_fov_x;
+    widescreen = want >= 4.0 / 3.0 + 0.01;
+    aspect = widescreen ? fmin(want, 4.0) : 4.0 / 3.0;
+    port_fov_x = widescreen ? (float)(4.0 / 3.0 / aspect) : 1.0f;
     /* The picture's shape follows (DHD_ASPECT "wide", the default with widescreen on). */
-    char text[32];
-    snprintf(text, sizeof text, "%d:1000", (int)(aspect * 1000 + 0.5));
-    host_putenv_s("DHD_WIDESCREEN_ASPECT", text);
-    const char *shape = getenv("DHD_ASPECT");
-    if (!shape || !*shape) host_putenv_s("DHD_ASPECT", "wide");
-    hle_env_changed();
+    if (!getenv("DHD_IOS_DISPLAY_AUTO")) {
+        char text[32];
+        snprintf(text, sizeof text, "%d:1000", (int)(aspect * 1000 + 0.5));
+        host_putenv_s("DHD_WIDESCREEN_ASPECT", text);
+        const char *shape = getenv("DHD_ASPECT");
+        if (!shape || !*shape) host_putenv_s("DHD_ASPECT", "wide");
+        hle_env_changed();
+    }
     unsigned changed = 0;
     for (unsigned i = 0; i < sizeof words / sizeof *words; i++) {
         uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + words[i][0]);
         float v = bits_float(words[i][1]);
-        if (*at == words[i][1]) { *at = float_bits(words[i][2] ? v * port_fov_x : v / port_fov_x); changed++; }
+        uint32_t expected = float_bits(words[i][2] ? v * previous : v / previous);
+        if (*at == expected) { *at = float_bits(words[i][2] ? v * port_fov_x : v / port_fov_x); changed++; }
         else hle_log("widescreen: %06X holds %08X, not %08X; left\n", words[i][0], *at, words[i][1]);
+    }
+    for (unsigned i = 0; i < sizeof ws_sprite_widths / sizeof *ws_sprite_widths; i++) {
+        uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + ws_sprite_widths[i].ee);
+        if (at[0] == float_bits(277.0f * previous) && at[1] == ws_sprite_widths[i].upper)
+            at[0] = float_bits(277.0f * port_fov_x);
     }
     hle_log("widescreen: aspect %.4f (s %.4f), %u of %u data words\n", aspect, port_fov_x, changed,
             (unsigned)(sizeof words / sizeof *words));
 }
 
-/* The bike shop builds its HUD and shadow at run time: when the shop's block is set up (the
-   halfword at 0xA095D0 reads 2), widen the HUD bars and the shadow, as the patch's conditional
-   lines do (for 16:9: 1.33, 1.33 and -111). Writing 0xA095D0 itself ends the condition. The
-   shadow word is -95.886 in retail (C2BFC5EA, logged in round 40) and -111 in the 16:9 patch;
-   other shapes take the line through those two points in 1/s. The game writes the bars back each
-   field, as on PCSX2, whose patch is applied every field too. */
+static int ios_display_auto;
+static double last_output_aspect;
+
+static double ios_wanted_aspect(void)
+{
+    double output = host_monitor_aspect();  /* -1: explicit Stretch */
+    /* The shell can still be in state 18 outside the inventory itself. */
+    if (D_0029C470 && output > 16.0 / 9.0) return 16.0 / 9.0;
+    return output;
+}
+
+void host_widescreen_init(void)
+{
+    host_display_aware();
+    ios_display_auto = getenv("DHD_IOS_DISPLAY_AUTO") != NULL;
+    last_output_aspect = ios_display_auto ? ios_wanted_aspect() : wanted_aspect();
+    if (last_output_aspect >= 4.0 / 3.0 + .01) apply_aspect(last_output_aspect);
+}
+
+/* Rebuild the per-view projections and combined camera matrices together. Snapshot first:
+   different slots can share a descriptor, and apply_aspect edits some descriptors in place. */
+static void update_ios_projection(double next)
+{
+    float target = next >= 4.0 / 3.0 + .01 ? (float)(4.0 / 3.0 / fmin(next, 4.0)) : 1.0f;
+    if (target == port_fov_x) return;
+    float focal[WS_VIEW_COUNT] = {0}, vertical[WS_VIEW_COUNT];
+    float previous = port_fov_x;
+    int active_view = D_0029E454;
+    for (int i = 0; i < WS_VIEW_COUNT; i++) {
+        const WsEntry *entry = &D_0075A9D0[i];
+        if (!entry->camera || !entry->view || entry->mode == 10 ||
+            !isfinite(entry->view->x0) || entry->view->x0 <= 0) continue;
+        func_0023D898(i, &focal[i], &vertical[i]);
+        if (!isfinite(vertical[i]) || vertical[i] <= 0) focal[i] = 0;
+    }
+    apply_aspect(next);
+    float change = port_fov_x / previous;
+    rebuilding_projection = 1;
+    /* Rebuild the active slot last so shared camera values describe that view. */
+    for (int i = 0; i <= WS_VIEW_COUNT; i++) {
+        if (i == active_view) continue;
+        int slot = i == WS_VIEW_COUNT ? active_view : i;
+        if (slot >= 0 && slot < WS_VIEW_COUNT && focal[slot] > 0) {
+            func_0023D8D8(slot, focal[slot] * change, vertical[slot] / change);
+            func_0023CB00(slot);
+        }
+    }
+    rebuilding_projection = 0;
+    D_0029E454 = active_view;
+}
+
+static void update_ios_aspect(void)
+{
+    double next = ios_wanted_aspect();
+    if (isfinite(next) && (next > 0 || next == -1) &&
+        fabs(next - last_output_aspect) > .002) {
+        /* Previously queued VIF uploads may still be reading the EE microcode. */
+        host_service_graphics_wait();
+        last_output_aspect = next;
+        update_ios_projection(next);
+    }
+}
+
+/* Apply the cap before the inventory constructs its first camera. */
+void port_ws_inventory_enter(void)
+{
+    if (ios_display_auto) update_ios_aspect();
+}
+
+/* The retail inventory reinitializes its bars; the 16:9 patch also widens its shadow. */
 void host_widescreen_vsync(void)
 {
-    if (!widescreen || *(volatile uint16_t *)(uintptr_t)(PS2_RAM_BASE + 0xA095D0) != 2) return;
+    if (ios_display_auto) update_ios_aspect();
+
     volatile uint32_t *top = (volatile uint32_t *)(uintptr_t)(PS2_RAM_BASE + 0xA095D0);
     volatile uint32_t *bottom = (volatile uint32_t *)(uintptr_t)(PS2_RAM_BASE + 0xA09610);
     volatile uint32_t *shadow = (volatile uint32_t *)(uintptr_t)(PS2_RAM_BASE + 0xA60038);
-    *top = float_bits(1.0f / port_fov_x);     /* top HUD width */
-    *bottom = float_bits(1.0f / port_fov_x);  /* bottom HUD width */
-    *shadow = float_bits(-95.886f - (111.0f - 95.886f) * 3.0f * (1.0f / port_fov_x - 1.0f));  /* shadow width */
+    static uint32_t applied_top, applied_bottom, applied_shadow;
+    int fresh = (*top & 0xffff) == 2;
+    int owned = applied_top && *top == applied_top && *bottom == applied_bottom && *shadow == applied_shadow;
+
+    if (ios_display_auto && !widescreen && D_0029C470 && owned) {
+        *top = *bottom = 0x3f800002;
+        *shadow = 0xc2bfc5ea;
+        applied_top = 0;
+        return;
+    }
+    if (!widescreen || (!fresh && !(ios_display_auto && D_0029C470 && owned))) return;
+    float inverse = 1.0f / port_fov_x;
+    *top = applied_top = float_bits(inverse);
+    *bottom = applied_bottom = float_bits(inverse);
+    *shadow = applied_shadow = float_bits(-95.886f - (111.0f - 95.886f) * 3.0f * (inverse - 1.0f));
+}
+
+/* The iOS presenter distinguishes explicit Stretch from 4:3 with the same retail projection. */
+double host_widescreen_frame_aspect(void)
+{
+    return ios_display_auto && last_output_aspect == -1 ? -1 : host_widescreen_aspect();
 }
 
 /* ---- the 2D draw code's X (port/patches_widescreen.py) ---- */
@@ -166,7 +274,7 @@ void host_widescreen_vsync(void)
 static int view_size(int view, int *cx, int *w)
 {
     int cy, h;
-    if (view < 0 || view >= 32 || !D_0075A9D0[view].view) return 0;
+    if (view < 0 || view >= WS_VIEW_COUNT || !D_0075A9D0[view].view) return 0;
     func_0023D618(view, cx, &cy);
     func_0023D650(view, w, &h);
     return *w > 0;
@@ -248,7 +356,7 @@ static void touch_hud_move(float u, float v, float *du, float *dv)
 void port_ws_hud_offset(int view, float *local)
 {
     touch_hud_seen = 1;
-    if (view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
+    if (view < 0 || view >= WS_VIEW_COUNT || !D_0075A9D0[view].view) return;
     const WsView *v = D_0075A9D0[view].view;
     float depth = local[1], focal = v->x0, half = v->width * 0.5f;
     if (depth <= 0 || focal <= 0 || half <= 0) return;
