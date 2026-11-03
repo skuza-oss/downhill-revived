@@ -122,6 +122,16 @@ describe("GET /v1/latest", () => {
     expect(isReleaseAssetUrl("DownhillRevived-0.7.7-win.zip")).toBe(false);
   });
 
+  it("serves the Android APK's entry like the others (finding 143)", () => {
+    const m = manifest();
+    const android = { url: `${DL}DownhillRevived-0.7.7-android-experimental.apk`, sha256: sha("e"), size: 5 };
+    (m.platforms as Record<string, unknown>).android = android;
+    const checked = checkManifest(m);
+    expect(checked.platforms.android).toEqual(android);
+    expect(Object.keys(checked.platforms).sort()).toEqual(["android", "linux", "linux-appimage", "mac", "win"]);
+    expect(checked.page).toBe("https://github.com/skuza-oss/downhill-revived/releases/tag/v0.7.7");
+  });
+
   it("drops fields the launcher doesn't read", () => {
     const m = checkManifest({ ...manifest(), extra: "x", page: "https://example.com/" });
     expect(m).not.toHaveProperty("extra");
