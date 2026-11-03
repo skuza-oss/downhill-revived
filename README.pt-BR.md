@@ -52,13 +52,19 @@ Todo o trabalho original de recriação, descompilação e port para computadore
 
 ## Download
 
-**Primeira versão para iOS: v0.7.9 (build 70902).** Arquivo disponível para a publicação:
+**Versão mais recente para iOS:** [v0.7.9 Beta (build 70902)](https://github.com/ribeirogustav/downhill-revived-ios/releases/tag/ios-v0.7.9)
 
-`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
+<p align="center">
+  <a href="https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa">
+    <img src="https://img.shields.io/badge/Baixar_IPA-v0.7.9_Beta-2ea44f?style=for-the-badge&logo=apple&logoColor=white" alt="Baixar IPA v0.7.9 Beta" />
+  </a>
+</p>
+
+- ⬇️ **Download direto do IPA:** [`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa) (20.2 MB)
+- 📋 **Hashes e integridade:** [`SHA256SUMS`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/SHA256SUMS)
+- 📦 **Todas as versões:** [Página de Releases no GitHub](https://github.com/ribeirogustav/downhill-revived-ios/releases)
 
 **Atenção: esse IPA não está assinado digitalmente e não pode ser instalado diretamente em um iPhone comum.** Para instalar, é necessário assinar o aplicativo com credenciais e provisionamento Apple válidos. Leia [instalação e assinatura](docs/INSTALACAO.pt-BR.md).
-
-Após criar a primeira versão, os arquivos estarão em [Releases deste repositório](https://github.com/ribeirogustav/downhill-revived-ios/releases).
 
 **SHA-256 do IPA não assinado:**
 
@@ -95,17 +101,15 @@ Veja o [guia de instalação completo](docs/INSTALACAO.pt-BR.md).
 
 ## Imagens e gameplay
 
-### Vídeo de gameplay
+### Demonstração de gameplay
 
 <p align="center">
-  <video src="assets/gameplay.mp4" controls="controls" width="100%" style="max-width: 720px;">
-    Seu navegador não suporta reprodução direta de vídeo.
-  </video>
+  <img src="assets/gameplay-preview.webp" width="640" alt="Demonstração do Gameplay no iOS" />
 </p>
 
 <p align="center">
-  🎬 <em>Demonstração capturada em um iPhone 7 Plus real rodando o motor Metal nativo a 30/120 FPS.</em><br>
-  <a href="assets/gameplay.mp4"><strong>Assistir / Baixar vídeo de gameplay (assets/gameplay.mp4)</strong></a>
+  🎬 <em>Capturado diretamente em um iPhone 7 Plus rodando o motor Metal nativo a 30/120 FPS.</em><br>
+  <a href="https://github.com/ribeirogustav/downhill-revived-ios/raw/main/assets/gameplay.mp4"><strong>▶️ Baixar / Assistir clipe completo de 60s (assets/gameplay.mp4)</strong></a>
 </p>
 
 ### Capturas de tela (dispositivo real)

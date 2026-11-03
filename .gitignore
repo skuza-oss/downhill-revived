@@ -21,6 +21,7 @@ asm/
 assets/
 !assets/cover.webp
 !assets/gameplay.mp4
+!assets/gameplay-preview.webp
 !assets/screenshots/
 !assets/screenshots/**
 expected/

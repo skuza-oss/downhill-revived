@@ -52,13 +52,19 @@ The codebase is based on the work of **[skuza-oss](https://github.com/skuza-oss/
 
 ## Download
 
-**First iOS release: v0.7.9 (build 70902).** The supplied release artifact is:
+**Latest iOS release:** [v0.7.9 Beta (build 70902)](https://github.com/ribeirogustav/downhill-revived-ios/releases/tag/ios-v0.7.9)
 
-`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
+<p align="center">
+  <a href="https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa">
+    <img src="https://img.shields.io/badge/Download_IPA-v0.7.9_Beta-2ea44f?style=for-the-badge&logo=apple&logoColor=white" alt="Download IPA v0.7.9 Beta" />
+  </a>
+</p>
+
+- ⬇️ **Direct IPA Download:** [`DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa) (20.2 MB)
+- 📋 **Checksums:** [`SHA256SUMS`](https://github.com/ribeirogustav/downhill-revived-ios/releases/download/ios-v0.7.9/SHA256SUMS)
+- 📦 **All Releases:** [GitHub Releases page](https://github.com/ribeirogustav/downhill-revived-ios/releases)
 
 **This IPA is unsigned. It cannot be installed directly on an ordinary iPhone/iPad as-is.** Developers may sign a build with an appropriate Apple team and provisioning profile. Instructions: **[Installation and signing](docs/INSTALLATION.md)**.
-
-Once a release is published, its files will appear in the [repository's Releases section](https://github.com/ribeirogustav/downhill-revived-ios/releases).
 
 **SHA-256 of the unsigned IPA:**
 
@@ -95,17 +101,15 @@ Read the full [installation guide](docs/INSTALLATION.md).
 
 ## Screenshots and gameplay
 
-### Gameplay video
+### Gameplay preview
 
 <p align="center">
-  <video src="assets/gameplay.mp4" controls="controls" width="100%" style="max-width: 720px;">
-    Your browser does not support video playback.
-  </video>
+  <img src="assets/gameplay-preview.webp" width="640" alt="Downhill Revived iOS Gameplay Preview" />
 </p>
 
 <p align="center">
   🎬 <em>Captured on a physical iPhone 7 Plus running native Metal at 30/120 FPS.</em><br>
-  <a href="assets/gameplay.mp4"><strong>Watch / Download gameplay clip (assets/gameplay.mp4)</strong></a>
+  <a href="https://github.com/ribeirogustav/downhill-revived-ios/raw/main/assets/gameplay.mp4"><strong>▶️ Download / Watch full 60s gameplay clip (assets/gameplay.mp4)</strong></a>
 </p>
 
 ### On-device screenshots
