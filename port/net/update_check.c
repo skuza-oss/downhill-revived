@@ -9,6 +9,9 @@
 
 /* Release pages the notice may open: this repository's. */
 static const char repository[] = "https://github.com/skuza-oss/downhill-revived/";
+/* The platform's download: one of this repository's release assets (the launcher's from_backup,
+   update.rs, takes only these too). */
+static const char release_assets[] = "https://github.com/skuza-oss/downhill-revived/releases/download/";
 
 int update_parse_version(const char *text, unsigned out[3])
 {
@@ -58,12 +61,25 @@ int update_from_manifest(const char *json, const char *platform, const char *cur
     if (!json_string(json, "version", version, version_size) || !update_newer(version, current))
         return 0;
     snprintf(path, sizeof path, "platforms.%s.url", platform);
-    if (!json_string(json, path, url, sizeof url) || strncmp(url, "https://", 8))
+    if (!json_string(json, path, url, sizeof url) || strncmp(url, release_assets, sizeof release_assets - 1) ||
+        !url[sizeof release_assets - 1] || strpbrk(url, " \"'<>\\"))
         return 0;
     if (!json_string(json, "page", page, page_size) || strncmp(page, repository, sizeof repository - 1) ||
         strpbrk(page, " \"'<>\\"))
         snprintf(page, page_size, "%s", UPDATE_RELEASES_PAGE);
     return 1;
+}
+
+int update_find(update_fetch fetch, void *context, const char *const *sources, size_t count,
+                const char *platform, const char *current,
+                char *version, size_t version_size, char *page, size_t page_size)
+{
+    for (size_t i = 0; i < count; i++) {
+        const char *body = fetch(context, sources[i]);
+        if (body && update_from_manifest(body, platform, current, version, version_size, page, page_size))
+            return (int)i + 1;
+    }
+    return 0;
 }
 
 int update_due(const char *auto_update, long long now, long long last)

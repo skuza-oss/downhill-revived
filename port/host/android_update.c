@@ -6,10 +6,13 @@
    - At most once a day (update-check.txt in the app's files folder holds when the last check
      started), never when dhd.ini says auto_update = off.
    - On a thread of its own, so the start never waits: the online server's copy of the newest
-     latest.json first (GET /v1/latest, online/server/src/latest.ts), GitHub's release asset
-     (latest.json, through its redirect) when that fails. The launcher asks GitHub's API first
-     (update.rs); a phone network shares one address among many, and the API allows an address 60
-     checks an hour, so the phone starts with the server. Each GET gives up after
+     latest.json first (GET /v1/latest, online/server/src/latest.ts), then GitHub's release asset
+     (latest.json, through its redirect) whenever the server names no newer release: when it
+     doesn't answer, and also when its answer is older or stale (it keeps its last good copy
+     while it can't reach GitHub), so a stale copy never hides a release (update_find). The
+     launcher asks GitHub's API first (update.rs); a phone network shares one address among many,
+     and the API allows an address 60 checks an hour, so the phone starts with the server; the
+     second request is once a day at most. Each GET gives up after
      the HTTPS client's timeouts (5 s to connect, 10 s without data); offline, the game just plays.
    - The rules (the version compare, the manifest, the day) are port/net/update_check.c's. */
 #include <SDL3/SDL.h>
@@ -73,23 +76,29 @@ static void show_notice(const char *version, const char *page)
     (*env)->DeleteLocalRef(env, activity);
 }
 
-static int SDLCALL check(void *unused)
+/* update_find's fetch: one GET, logged when it fails. */
+static const char *fetch(void *context, const char *url)
 {
     static char body[64 * 1024];
+    (void)context;
+    if (http_get(url, body, sizeof body) < 0) {
+        fprintf(stderr, "update: %s didn't answer\n", url);
+        return NULL;
+    }
+    return body;
+}
+
+static int SDLCALL check(void *unused)
+{
     char version[32], page[512];
     (void)unused;
-    for (size_t i = 0; i < sizeof sources / sizeof *sources; i++) {
-        if (http_get(sources[i], body, sizeof body) < 0) {
-            fprintf(stderr, "update: %s didn't answer\n", sources[i]);
-            continue;
-        }
-        if (update_from_manifest(body, PLATFORM, DHD_VERSION, version, sizeof version, page, sizeof page)) {
-            fprintf(stderr, "update: %s is out (this is %s): %s\n", version, DHD_VERSION, page);
-            show_notice(version, page);
-        } else {
-            fprintf(stderr, "update: no newer Android release than %s\n", DHD_VERSION);
-        }
-        return 0;
+    int from = update_find(fetch, NULL, sources, sizeof sources / sizeof *sources, PLATFORM, DHD_VERSION,
+                           version, sizeof version, page, sizeof page);
+    if (from) {
+        fprintf(stderr, "update: %s is out (this is %s, said %s): %s\n", version, DHD_VERSION, sources[from - 1], page);
+        show_notice(version, page);
+    } else {
+        fprintf(stderr, "update: no newer Android release than %s\n", DHD_VERSION);
     }
     return 0;
 }
