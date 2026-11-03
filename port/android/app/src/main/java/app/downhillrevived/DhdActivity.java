@@ -9,6 +9,7 @@ package app.downhillrevived;
 
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Rect;
@@ -30,6 +31,7 @@ import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -73,6 +75,40 @@ public class DhdActivity extends SDLActivity {
     protected void onResume() {
         super.onResume();
         if (tiltListener != null) registerTilt();
+    }
+
+    // SDL hides the system bars once, when the game goes full screen. A rotation the activity asks
+    // for itself (tilt steering keeps the screen on its landscape side, touchTiltOn) can bring the
+    // status bar back on some phones (MIUI on a Redmi 9): hide them again after a rotation and when
+    // the window gets its focus back, as SetupActivity does.
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        rehideBars();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) rehideBars();
+    }
+
+    /** The system bars hidden again (a swipe shows them for a moment), now and once the new layout
+     *  is done; only while the game is full screen (SDL's own flag). */
+    private void rehideBars() {
+        if (!mFullscreenModeActive) return;
+        hideBars();
+        View decor = getWindow().getDecorView();
+        decor.post(new Runnable() {
+            @Override public void run() { if (mFullscreenModeActive) hideBars(); }
+        });
+    }
+
+    private void hideBars() {
+        WindowInsetsController c = getWindow().getInsetsController();
+        if (c == null) return;
+        c.hide(WindowInsets.Type.systemBars());
+        c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
     }
 
     /** The touch controls' screen: xdpi and ydpi times 1000, the system gesture insets (left, top,

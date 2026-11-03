@@ -320,3 +320,10 @@ with a unit test in `test_touch.c`.
   `touch_steer = tilt` can still be changed back) and its footer reads "No tilt sensor on this
   device". Set Tilt Centre without a reading changes nothing and says so in `dhd.log`. Test:
   `test_tilt` (no reading: the stick steers; a reading takes over; gone again: the stick).
+- **The status bar stayed over the game after tilt's rotation** (lead, Redmi 9, MIUI, Android 11:
+  tilt on, the game started from a portrait home screen). `touchTiltOn` asks for LANDSCAPE /
+  REVERSE_LANDSCAPE, the screen turns, and MIUI brings the status bar back; SDL hides the bars only
+  when the game goes full screen. `DhdActivity` now hides them again (WindowInsetsController,
+  systemBars, shown for a moment by a swipe, as `SetupActivity.hideBars`) after a configuration
+  change and when the window gets its focus back, now and once more after the new layout, only while
+  SDL's full screen is on (`mFullscreenModeActive`); both overrides call SDLActivity's first.
