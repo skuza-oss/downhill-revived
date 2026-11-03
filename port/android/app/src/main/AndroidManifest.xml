@@ -25,12 +25,15 @@
         android:enableOnBackInvokedCallback="false"
         android:hardwareAccelerated="true">
 
-        <!-- The first start: the disc image (SetupActivity.java, finding 143), then the game -->
+        <!-- The first start: the disc image (SetupActivity.java, finding 143), then the game. Its
+             configChanges are DhdActivity's and density, mcc and mnc: a font size, language, display
+             or SIM change during the copy keeps the activity (and so the copy) instead of making it
+             again. -->
         <activity android:name=".SetupActivity"
             android:label="@string/app_name"
             android:theme="@style/SetupTheme"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|density|mcc|mnc|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

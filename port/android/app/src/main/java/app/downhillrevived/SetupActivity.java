@@ -1,15 +1,20 @@
 // Downhill Revived on Android: the first start (finding 143). The app's launcher activity: when the
 // copy of the disc image is in the app's files folder it starts the game (DhdActivity) at once;
 // otherwise it asks for the player's Downhill Domination (USA) disc image (Android's document
-// picker), checks it before copying (an ISO 9660 volume whose SYSTEM.CNF boots SCUS_971.77, as
-// host.c's disc_problem does) and that the phone has room for it, copies it with a progress bar,
-// offers to delete the original (the copy is the one the game reads), then starts the game.
+// picker), checks it before copying when the document is a file (an ISO 9660 volume whose
+// SYSTEM.CNF boots SCUS_971.77, as host.c's disc_problem does) and that the phone has room for it,
+// copies it with a progress bar, checks the copy (the same, and complete: DiscImage), offers to
+// delete the original (the copy is the one the game reads), then starts the game.
+// Everything that may block (opening the document, which a cloud provider may download first, its
+// reads, the copy) runs on a copy job's thread (Copy); the UI thread only shows the screens. Each
+// job writes its own temporary file and only it renames or deletes that file.
 // android_main.c checks the copy again (and the game's data, in the core), and keeps its own picker
 // for a start without this screen (a controller plugged in starts DhdActivity directly).
 // Its look follows the launcher's (port/launcher/ui/style.css): the same colours, 8 dp corners.
 package app.downhillrevived;
 
 import android.app.Activity;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -21,6 +26,7 @@ import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.os.StatFs;
 import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -36,16 +42,13 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class SetupActivity extends Activity {
     private static final String TAG = "DownhillRevived";
@@ -54,7 +57,11 @@ public class SetupActivity extends Activity {
     private static final int PICK = 1;
     /** Room kept free besides the copy (saves, dhd.log, the texture cache). */
     private static final long MARGIN = 128L << 20;
-    private static final int SECTOR = 2048;
+    /** The temporary files of the copy jobs running in this process (Copy.temp's names): a new
+     *  screen's clean-up leaves them alone. Guarded by JOBS, as each job's last steps are. */
+    private static final Object JOBS = new Object();
+    private static final Set<String> running = new HashSet<>();
+    private static final AtomicLong jobs = new AtomicLong();
 
     // the launcher's colours
     private static final int GROUND = 0xFF1A1430, RAISE = 0xFF241C3E, EMBER = 0xFFF07C3A, INK_ON_EMBER = 0xFF2A1206,
@@ -63,6 +70,8 @@ public class SetupActivity extends Activity {
     private LinearLayout card;
     private Uri chosen;
     private volatile boolean leaving;
+    /** The copy job this screen shows, null before the first; only its posts reach the screen. */
+    private volatile Copy job;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,7 +80,7 @@ public class SetupActivity extends Activity {
             startGame();
             return;
         }
-        new File(getFilesDir(), DISC_NAME + ".part").delete();  // a copy cut short
+        removeStaleCopies();
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(GROUND);
         card = new LinearLayout(this);
@@ -92,7 +101,9 @@ public class SetupActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        leaving = true;  // a copy in progress stops and removes its .part
+        leaving = true;
+        Copy copy = job;
+        if (copy != null) copy.cancel();  // it stops and removes its own temporary file
         super.onDestroy();
     }
 
@@ -133,24 +144,39 @@ public class SetupActivity extends Activity {
     private TextView progressText;
     private ProgressBar progressBar;
 
+    private void showChecking() {
+        card.removeAllViews();
+        progressBar = null;
+        progressText = null;
+        title("Checking the file\u2026");
+        bar(true);
+        text("A file on a cloud drive is downloaded first: this can take a few minutes.", DIM, 14);
+    }
+
     private void showCopying(long size) {
         card.removeAllViews();
         title("Copying the disc image");
+        bar(size <= 0);
+        progressText = text("", LILAC, 15);
+        text("Keep the app open: this takes a minute or two.", DIM, 14);
+    }
+
+    private void bar(boolean indeterminate) {
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(1000);
-        progressBar.setIndeterminate(size <= 0);
+        progressBar.setIndeterminate(indeterminate);
         progressBar.setProgressTintList(ColorStateList.valueOf(EMBER));
         progressBar.setProgressBackgroundTintList(ColorStateList.valueOf(LINE));
         progressBar.setIndeterminateTintList(ColorStateList.valueOf(EMBER));
         LinearLayout.LayoutParams bar = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10));
         bar.topMargin = dp(18);
         card.addView(progressBar, bar);
-        progressText = text("", LILAC, 15);
-        text("Keep the app open: this takes a minute or two.", DIM, 14);
     }
 
-    private void showDone(final Uri original, long size) {
-        if (original == null || !deletable(original)) {
+    /** After the copy is complete, checked and in place: offers to delete the original when its
+     *  provider allows it (deletable, asked on the copy's thread). */
+    private void showDone(final Uri original, long size, boolean deletable) {
+        if (original == null || !deletable) {
             startGame();
             return;
         }
@@ -160,11 +186,16 @@ public class SetupActivity extends Activity {
                 + ": delete it to get that space back?", LILAC, 16);
         buttons(primary("Delete it and play", new View.OnClickListener() {
             @Override public void onClick(View v) {
-                try {
-                    DocumentsContract.deleteDocument(getContentResolver(), original);
-                } catch (Throwable e) {
-                    Log.w(TAG, "the original couldn't be deleted: " + e);
-                }
+                final ContentResolver resolver = getContentResolver();
+                new Thread(new Runnable() {  // the provider's work, off the UI thread; the game starts meanwhile
+                    @Override public void run() {
+                        try {
+                            DocumentsContract.deleteDocument(resolver, original);
+                        } catch (Throwable e) {
+                            Log.w(TAG, "the original couldn't be deleted: " + e);
+                        }
+                    }
+                }, "disc delete").start();
                 startGame();
             }
         }), secondary("Keep it and play", new View.OnClickListener() {
@@ -194,134 +225,187 @@ public class SetupActivity extends Activity {
         use(chosen);
     }
 
-    /** Checks the chosen file and the room for it, then copies it. */
+    /** Checks the chosen file and the room for it, then copies it: all on a new copy job's thread
+     *  (the one before, if any, is cancelled). */
     private void use(final Uri uri) {
-        long size;
-        String problem;
-        try (ParcelFileDescriptor fd = getContentResolver().openFileDescriptor(uri, "r")) {
-            size = fd.getStatSize();
-            problem = checkDisc(new FileInputStream(fd.getFileDescriptor()).getChannel());
-        } catch (Throwable e) {
-            showIntro("The file can't be opened (" + e.getMessage() + ").");
-            return;
-        }
-        if (problem != null) {
-            showIntro(problem);
-            return;
-        }
-        long free = freeBytes();
-        if (size > 0 && size + MARGIN > free) {
-            showNoRoom(size + MARGIN, free);
-            return;
-        }
-        copy(uri, size);
+        Copy before = job;
+        if (before != null) before.cancel();
+        Copy copy = new Copy(uri);
+        job = copy;
+        showChecking();
+        new Thread(copy, "disc copy").start();
     }
 
-    private void copy(final Uri uri, final long size) {
-        showCopying(size);
-        new Thread(new Runnable() {
-            @Override public void run() {
-                File part = new File(getFilesDir(), DISC_NAME + ".part"), disc = new File(getFilesDir(), DISC_NAME);
-                String problem = null;
-                long done = 0, shown = 0;
-                try (InputStream in = getContentResolver().openInputStream(uri); FileOutputStream out = new FileOutputStream(part)) {
-                    byte[] block = new byte[1 << 20];
-                    for (int n; (n = in.read(block)) > 0; ) {
-                        if (leaving) throw new IOException("the app was closed");
-                        out.write(block, 0, n);
-                        done += n;
-                        if (done - shown >= (16L << 20)) progress(shown = done, size);
+    /** Deletes the temporary files of copies cut short (the app closed or killed during one, the
+     *  name of an older version's, SCUS-97177.iso.part, too), but none a running job writes. */
+    private void removeStaleCopies() {
+        File[] files = getFilesDir().listFiles();
+        if (files == null) return;
+        synchronized (JOBS) {
+            for (File f : files) {
+                String name = f.getName();
+                if (name.startsWith(DISC_NAME + ".") && name.endsWith(".part") && !running.contains(name)) f.delete();
+            }
+        }
+    }
+
+    /** One pick's check and copy, on its own thread. It owns temp (a name no other job has) and is
+     *  the only one to rename or delete it; once cancelled (the screen went away, or another pick
+     *  replaced it) it neither publishes the copy nor shows anything, and removes temp. */
+    private final class Copy implements Runnable {
+        final Uri uri;
+        final File temp;
+        private volatile boolean cancelled;
+
+        Copy(Uri uri) {
+            this.uri = uri;
+            temp = new File(getFilesDir(), DISC_NAME + "." + Long.toHexString(System.currentTimeMillis()) + "-"
+                    + jobs.incrementAndGet() + ".part");
+        }
+
+        /** After this returns the job can't publish (publish checks under the same lock). */
+        void cancel() {
+            synchronized (JOBS) {
+                cancelled = true;
+            }
+        }
+
+        @Override public void run() {
+            synchronized (JOBS) {
+                running.add(temp.getName());
+            }
+            try {
+                work();
+            } catch (Throwable e) {
+                Log.w(TAG, "disc copy: " + e);
+                showProblem("The copy failed (" + e.getMessage() + ").");
+            } finally {
+                temp.delete();  // its own file only; gone already once renamed
+                synchronized (JOBS) {
+                    running.remove(temp.getName());
+                }
+            }
+        }
+
+        private void work() throws IOException {
+            ParcelFileDescriptor fd;
+            try {
+                fd = getContentResolver().openFileDescriptor(uri, "r");
+                if (fd == null) throw new IOException("the provider gave no file");
+            } catch (Throwable e) {
+                showProblem("The file can't be opened (" + e.getMessage() + ").");
+                return;
+            }
+            try (ParcelFileDescriptor.AutoCloseInputStream in = new ParcelFileDescriptor.AutoCloseInputStream(fd)) {
+                // a regular file has its size and can be read anywhere; a pipe or socket (a provider
+                // streaming the document) has no size here and reads once, in order: its copy is
+                // checked instead, with the size the provider gives (OpenableColumns.SIZE) if any
+                long stat = fd.getStatSize();
+                boolean exact = stat > 0;
+                long size = exact ? stat : documentSize();
+                if (exact) {
+                    String problem = null;
+                    try {
+                        problem = DiscImage.check(in.getChannel());  // positional reads: the stream stays at 0
+                    } catch (IOException e) {
+                        Log.i(TAG, "the file can't be checked before copying (" + e + "); its copy is checked");
                     }
+                    if (problem != null) {
+                        showProblem(problem);
+                        return;
+                    }
+                }
+                if (cancelled) return;
+                final long free = freeBytes();
+                if (size > 0 && size + MARGIN > free) {
+                    final long need = size + MARGIN;
+                    post(new Runnable() {
+                        @Override public void run() { showNoRoom(need, free); }
+                    });
+                    return;
+                }
+                final long total = size;
+                post(new Runnable() {
+                    @Override public void run() { showCopying(total); }
+                });
+                long done;
+                try (FileOutputStream out = new FileOutputStream(temp)) {
+                    done = DiscImage.copy(in, out, () -> cancelled, soFar -> progress(Copy.this, soFar, total));
                     out.getFD().sync();
                 } catch (Throwable e) {
-                    problem = freeBytes() < (64L << 20) ? "The phone ran out of space while copying." : "The copy failed (" + e.getMessage() + ").";
+                    if (!cancelled)
+                        showProblem(freeBytes() < (64L << 20) ? "The phone ran out of space while copying."
+                                : "The copy failed (" + e.getMessage() + ").");
+                    return;
                 }
-                if (problem == null) {  // the copy itself, checked again (a file with no size given ends here)
-                    try (RandomAccessFile f = new RandomAccessFile(part, "r")) {
-                        problem = checkDisc(f.getChannel());
-                    } catch (Throwable e) {
-                        problem = "The copy can't be read (" + e.getMessage() + ").";
-                    }
+                if (cancelled) return;
+                String problem;  // the copy itself: the same disc, and complete
+                try (RandomAccessFile f = new RandomAccessFile(temp, "r")) {
+                    problem = DiscImage.check(f.getChannel());
+                    if (problem == null) problem = DiscImage.completeness(done, size, exact, DiscImage.volumeBytes(f.getChannel()));
+                } catch (Throwable e) {
+                    problem = "The copy can't be read (" + e.getMessage() + ").";
                 }
-                if (problem == null && !part.renameTo(disc)) problem = "The copy can't be stored.";
-                if (problem != null) part.delete();
-                final String why = problem;
-                final long total = done;
-                if (leaving) return;
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        if (why != null) showIntro(why);
-                        else showDone(uri, total);
-                    }
+                if (problem != null) {
+                    Log.w(TAG, "disc copy: " + problem + " (" + done + " bytes, size " + size + (exact ? "" : " from the provider") + ")");
+                    showProblem(problem);
+                    return;
+                }
+                File disc = new File(getFilesDir(), DISC_NAME);
+                synchronized (JOBS) {  // cancel() can't slip in between this check and the rename
+                    if (cancelled) return;
+                    if (!disc.isFile() && !temp.renameTo(disc)) problem = "The copy can't be stored.";
+                }
+                if (problem != null) {
+                    showProblem(problem);
+                    return;
+                }
+                Log.i(TAG, "disc image copied: " + done + " bytes, checked");
+                final boolean deletable = deletable(uri);
+                final long copied = done;
+                post(new Runnable() {
+                    @Override public void run() { showDone(uri, copied, deletable); }
                 });
             }
-        }, "disc copy").start();
+        }
+
+        /** The document's size as its provider gives it (OpenableColumns.SIZE), 0 when it doesn't. */
+        private long documentSize() {
+            try (Cursor c = getContentResolver().query(uri, new String[] { OpenableColumns.SIZE }, null, null, null)) {
+                return c != null && c.moveToFirst() && !c.isNull(0) ? Math.max(0, c.getLong(0)) : 0;
+            } catch (Throwable e) {
+                return 0;
+            }
+        }
+
+        private void showProblem(final String problem) {
+            post(new Runnable() {
+                @Override public void run() { showIntro(problem); }
+            });
+        }
+
+        /** screen on the UI thread, if this job is still the one shown. */
+        private void post(final Runnable screen) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    if (job == Copy.this && !cancelled && !leaving) screen.run();
+                }
+            });
+        }
     }
 
-    private void progress(final long done, final long size) {
+    private void progress(final Copy copy, final long done, final long size) {
         runOnUiThread(new Runnable() {
             @Override public void run() {
-                if (progressBar == null) return;
+                if (job != copy || leaving || progressBar == null || progressText == null) return;
                 if (size > 0) {
-                    progressBar.setProgress((int) (done * 1000 / size));
-                    progressText.setText(gb(done) + " of " + gb(size) + "  \u00B7  " + (done * 100 / size) + "%");
+                    progressBar.setProgress((int) (Math.min(done, size) * 1000 / size));
+                    progressText.setText(gb(done) + " of " + gb(size) + "  \u00B7  " + (Math.min(done, size) * 100 / size) + "%");
                 } else {
                     progressText.setText(gb(done));
                 }
             }
         });
-    }
-
-    /** Whether file is Downhill Domination (USA): null if it is, else why not (host.c's
-     *  disc_problem without the game-data check, which the core makes). */
-    static String checkDisc(FileChannel file) throws IOException {
-        ByteBuffer sector = ByteBuffer.allocate(SECTOR).order(ByteOrder.LITTLE_ENDIAN);
-        if (!read(file, 16, sector) || sector.get(0) != 1 || !ascii(sector, 1, 5).equals("CD001"))
-            return "That file isn't a disc image (no ISO 9660 volume in it).";
-        // the primary volume descriptor's root directory record (at 156): extent at +2, size at +10
-        long dir = sector.getInt(156 + 2) & 0xFFFFFFFFL, dirSize = sector.getInt(156 + 10) & 0xFFFFFFFFL;
-        long cnf = 0, cnfSize = 0;
-        for (long off = 0; off < dirSize && off < 16 * SECTOR && cnf == 0; off += SECTOR) {
-            if (!read(file, dir + off / SECTOR, sector)) break;
-            for (int i = 0; i + 33 < SECTOR && sector.get(i) != 0; i += sector.get(i) & 0xFF) {
-                int nameLength = sector.get(i + 32) & 0xFF;
-                if (nameLength >= 10 && i + 33 + nameLength <= SECTOR
-                        && ascii(sector, i + 33, 10).equalsIgnoreCase("SYSTEM.CNF")
-                        && (nameLength == 10 || sector.get(i + 33 + 10) == ';')) {
-                    cnf = sector.getInt(i + 2) & 0xFFFFFFFFL;
-                    cnfSize = sector.getInt(i + 10) & 0xFFFFFFFFL;
-                    break;
-                }
-            }
-        }
-        if (cnf == 0 || !read(file, cnf, sector)) return "That file has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.";
-        String text = ascii(sector, 0, (int) Math.min(cnfSize, SECTOR));
-        if (text.contains("SCUS_971.77")) return null;
-        int boot = text.indexOf("BOOT2");
-        String id = "";
-        if (boot >= 0) {
-            String line = text.substring(boot).split("[\r\n]")[0];
-            int start = Math.max(line.lastIndexOf('\\'), line.lastIndexOf(':')) + 1, end = line.indexOf(';', start);
-            id = line.substring(start, end > start ? end : line.length()).trim();
-        }
-        return id.isEmpty() ? "That PlayStation 2 disc isn't Downhill Domination (USA), SCUS-97177."
-                : "That disc is " + id + ", not Downhill Domination (USA), SCUS-97177.";
-    }
-
-    private static boolean read(FileChannel file, long lsn, ByteBuffer sector) throws IOException {
-        sector.clear();
-        long at = lsn * SECTOR;
-        while (sector.hasRemaining()) {
-            int n = file.read(sector, at + sector.position());
-            if (n <= 0) return false;
-        }
-        return true;
-    }
-
-    private static String ascii(ByteBuffer b, int at, int length) {
-        byte[] bytes = new byte[length];
-        for (int i = 0; i < length; i++) bytes[i] = b.get(at + i);
-        return new String(bytes, StandardCharsets.ISO_8859_1);
     }
 
     private boolean deletable(Uri uri) {
