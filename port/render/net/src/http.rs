@@ -33,20 +33,72 @@ pub fn get(url: &str) -> Result<Vec<u8>, String> {
     Err("too many redirects".into())
 }
 
-/// Where a redirect from `from` to `location` (absolute, or a path on the same host) goes. A secure
-/// address is never left for a plain one.
+/// A URL's scheme, lower-cased (schemes are case-insensitive), and what follows its ':'.
+fn split_scheme(url: &str) -> Option<(String, &str)> {
+    let (scheme, rest) = url.split_once(':')?;
+    let mut chars = scheme.chars();
+    let valid = chars.next()?.is_ascii_alphabetic() && chars.all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+    valid.then(|| (scheme.to_ascii_lowercase(), rest))
+}
+
+/// A path with its "." and ".." segments resolved (RFC 3986 5.2.4); it starts with '/'.
+fn remove_dot_segments(path: &str) -> String {
+    let segments: Vec<&str> = path.split('/').skip(1).collect();
+    let mut out: Vec<&str> = Vec::new();
+    for (i, segment) in segments.iter().enumerate() {
+        let last = i + 1 == segments.len();
+        match *segment {
+            "." => {}
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s),
+        }
+        if last && (*segment == "." || *segment == "..") {
+            out.push("");  // "a/b/.." names the folder: a/
+        }
+    }
+    format!("/{}", out.join("/"))
+}
+
+/// Where a redirect from `from` to `location` goes (RFC 9110 10.2.2): an absolute http(s) address
+/// (its scheme in any case), a path on the same host, or a path relative to `from`'s folder. A
+/// secure address is never left for a plain one; another host without a scheme ("//host/...") is
+/// refused.
 fn redirect_target(from: &str, location: &str) -> Result<String, String> {
-    let secure = from.starts_with("https://") || from.starts_with("wss://");
-    let target = if location.starts_with("https://") || location.starts_with("http://") {
-        location.to_string()
-    } else if location.starts_with('/') && !location.starts_with("//") {
-        let scheme_end = from.find("://").ok_or("bad URL")? + 3;
-        let host_end = from[scheme_end..].find('/').map_or(from.len(), |i| scheme_end + i);
-        format!("{}{location}", &from[..host_end])
-    } else {
-        return Err(format!("unusable redirect to {location}"));
+    let unusable = || format!("unusable redirect to {location}");
+    let (from_scheme, from_rest) = split_scheme(from).filter(|(_, r)| r.starts_with("//")).ok_or("bad URL")?;
+    let secure = from_scheme == "https" || from_scheme == "wss";
+    let location = location.trim();
+    let location = location.split('#').next().unwrap_or_default();  // a fragment is never sent
+    let (target_scheme, target) = match split_scheme(location) {
+        Some((scheme, rest)) => {
+            if !(scheme == "https" || scheme == "http") || !rest.starts_with("//") {
+                return Err(unusable());
+            }
+            let target = format!("{scheme}:{rest}");
+            (scheme, target)
+        }
+        None if location.starts_with("//") => return Err(unusable()),
+        None => {
+            let host_end = from_rest[2..].find(['/', '?', '#']).map_or(from_rest.len(), |i| i + 2);
+            let from_path = from_rest[host_end..].split(['?', '#']).next().unwrap_or_default();
+            let (path, query) = location.split_at(location.find('?').unwrap_or(location.len()));
+            let joined = if path.starts_with('/') {
+                path.to_string()
+            } else if path.is_empty() {
+                // only a query: the same path
+                if from_path.is_empty() { "/".to_string() } else { from_path.to_string() }
+            } else {
+                // relative to from's folder (up to its last '/')
+                let folder = from_path.rfind('/').map_or("/", |i| &from_path[..=i]);
+                format!("{folder}{path}")
+            };
+            let target = format!("{from_scheme}:{}{}{query}", &from_rest[..host_end], remove_dot_segments(&joined));
+            (from_scheme.clone(), target)
+        }
     };
-    if secure && !target.starts_with("https://") {
+    if secure && target_scheme != "https" && target_scheme != "wss" {
         return Err(format!("redirect from https to {target} refused"));
     }
     Ok(target)
@@ -148,6 +200,31 @@ mod tests {
         assert_eq!(redirect_target("http://localhost:8787/a", "/b").unwrap(), "http://localhost:8787/b");
         assert!(redirect_target(from, "http://example.org/latest.json").is_err());
         assert!(redirect_target(from, "//example.org/latest.json").is_err());
-        assert!(redirect_target(from, "latest.json").is_err());
+    }
+
+    /// RFC 9110 lets Location be relative to the request's address, and schemes are case-insensitive.
+    #[test]
+    fn relative_and_case_insensitive_redirects() {
+        let from = "https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json?x=1";
+        let base = "https://github.com/skuza-oss/downhill-revived/releases";
+        assert_eq!(redirect_target(from, "latest2.json").unwrap(), format!("{base}/latest/download/latest2.json"));
+        assert_eq!(redirect_target(from, "./a/b.json?y=2#frag").unwrap(), format!("{base}/latest/download/a/b.json?y=2"));
+        assert_eq!(redirect_target(from, "../../download/v1.0.0/latest.json").unwrap(), format!("{base}/download/v1.0.0/latest.json"));
+        assert_eq!(redirect_target(from, "..").unwrap(), format!("{base}/latest/"));
+        assert_eq!(redirect_target(from, "/a/./b/../c").unwrap(), "https://github.com/a/c");
+        assert_eq!(redirect_target(from, "/../../x").unwrap(), "https://github.com/x");
+        assert_eq!(redirect_target(from, "?page=2").unwrap(), format!("{base}/latest/download/latest.json?page=2"));
+        assert_eq!(redirect_target("http://localhost:8787", "b").unwrap(), "http://localhost:8787/b");
+        assert_eq!(redirect_target("http://localhost:8787?q", "b").unwrap(), "http://localhost:8787/b");
+        assert_eq!(redirect_target("wss://dhd.test/v1/a", "b").unwrap(), "wss://dhd.test/v1/b");
+        // the scheme in any case: lower-cased; never from https to http, whatever its case
+        assert_eq!(redirect_target(from, "HTTPS://Example.org/x").unwrap(), "https://Example.org/x");
+        assert_eq!(redirect_target("HTTP://localhost:8787/a/b", "c").unwrap(), "http://localhost:8787/a/c");
+        assert!(redirect_target(from, "HTTP://example.org/latest.json").is_err());
+        assert!(redirect_target("HTTPS://github.com/a", "Http://github.com/b").is_err());
+        // other schemes, and a scheme without "//", are refused
+        assert!(redirect_target(from, "ftp://example.org/x").is_err());
+        assert!(redirect_target(from, "javascript:alert(1)").is_err());
+        assert!(redirect_target(from, "https:latest.json").is_err());
     }
 }

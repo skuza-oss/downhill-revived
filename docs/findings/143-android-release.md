@@ -86,7 +86,11 @@ launcher. Added, Android only (the desktop builds keep the launcher):
   requests an hour, so the phone starts with the server. The HTTPS client is the game's own
   (`http_get`, `dhd_net`): 5 s to connect, 10 s without data, so an offline phone gives up quietly.
   The client now follows redirects (at most five, never from https to http), which GitHub's
-  download address needs.
+  download address needs. Since 2026-11-03 (review Muse #12) it takes every Location RFC 9110
+  allows: absolute (the scheme in any case, `HTTPS://` too), a path on the host, or a path relative
+  to the request's folder (`latest.json`, `../latest.json`, `?page=2`), dot segments resolved;
+  before, a relative Location or an upper-case scheme failed as "unusable redirect". Still refused:
+  https to http in any case, other schemes, and another host without a scheme (`//host/...`).
 - The rules are `port/net/update_check.c`: versions compared as `update.rs` compares them (three
   numbers, an optional `v`); a release counts only when it is newer and has a
   `platforms.android` entry with an https url; the page shown is the manifest's when it is this
