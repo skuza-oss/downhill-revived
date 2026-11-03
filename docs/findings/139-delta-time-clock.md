@@ -129,7 +129,10 @@ The counters that two whole fields broke (retail took one off a frame, and tests
 - `0021F8E0` the input repeat (`next <= 0` calls the handler): below 0 it called it every frame.
 - `00161B10` the trail counter's marks `== 0x79` / `== 0xF0` (also counted again on updates
   with no whole field above 60, now fixed too) and `0017C638` the item list's `state == 60`
-  event: jumped over.
+  event: jumped over. (Review, 2026-11-03: its `x1310 == 1` flag clear too, which the first fix
+  missed: from 2 a two-field step never calls it at 1. Both marks now fire when the update
+  covers them, and the copy into `x1318` is the last value covered, not 61; `test_fps.py`
+  checks it at every rate.)
 - `0011A100` the AI's rotating query slot (`x501B4`): moved by two, every other rider was never
   queried.
 - `00135A30` the airborne age (`x4A4`, `port_air_tick`): the take-off step counted the whole two

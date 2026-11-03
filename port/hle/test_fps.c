@@ -298,6 +298,21 @@ int main(int argc,char **argv)
         }
         assert(down==0 && !negative && up==180 && reached==1);
     }
+    /* The item list's 300-field timer (00176ED8 x1310, patches_fps.py): 0017C638 runs before the
+       update's whole fields come off it, clears the flag at 1 and starts x1318 at 60, each once
+       at any step; x1318 then keeps retail's relation to x1310 (one more after the update). */
+    {
+        int timer=300,copy=0,cleared=0,marks=0;
+        while (timer>0) {
+            port_clock_wait(NULL);port_clock_step();
+            if (port_count_reached(timer,1)) cleared++;
+            if (copy>0) copy=port_count_down(copy);
+            if (port_count_reached(timer,60)) { marks++; copy=timer-port_whole_step()+1; }
+            timer-=port_whole_step();
+            if (marks && timer>0) assert(copy==timer+1);
+        }
+        assert(cleared==1 && marks==1);
+    }
     int scale=port_animation_scale();
     online=1;
     assert(port_fps()==n && port_delta_clock()); /* online keeps the selected rate (finding 114) */

@@ -501,7 +501,15 @@ def add(patches):
     for field in ('x1324', 'x1310'):
         edit('00176ED8', '--obj->%s;' % field,
              'obj->%s-=port_delta_clock() ? port_whole_step() : 1;' % field)
-    edit('0017C638', 'if (state==60) {', 'if (port_delta_clock() ? state>=60 && state-port_whole_step()<60 : state==60) {')
+    # 0017C638 runs before 00176ED8 takes this update's whole fields off x1310, so an update
+    # covers the values x1310 down to x1310-whole+1: its marks (== 1 clears the item flag, == 60
+    # starts x1318) are reached when one of those is the mark. x1318 then holds the last value
+    # covered, as retail's copy of 60 counted down with x1310 for the fields after it.
+    edit('0017C638', 'if (*(int *)(obj+0x1310)==1)',
+         'if (port_delta_clock() ? port_count_reached(*(int *)(obj+0x1310),1) : *(int *)(obj+0x1310)==1)')
+    edit('0017C638', 'if (state==60) {', 'if (port_delta_clock() ? port_count_reached(state,60) : state==60) {')
+    edit('0017C638', '*(int *)(obj+0x1318)=state;',
+         '*(int *)(obj+0x1318)=port_delta_clock() ? state-port_whole_step()+1 : state;')
     # NPC event rolls consume RNG only on whole fields. Preserve their original
     # probability and RNG draw frequency, rather than doubling ambient events.
     for path in root.glob('*.*'):
