@@ -111,12 +111,15 @@ public class DhdActivity extends SDLActivity {
         return roll;
     }
 
-    /** Tilt steering on or off: the gravity sensor, and the screen kept on its current landscape side. */
-    public void touchTiltOn(final boolean on) {
+    /** Tilt steering on or off: the gravity sensor, and the screen kept on its current landscape side.
+     *  Returns whether the phone has a tilt sensor (gravity, else the accelerometer); without one
+     *  nothing changes (the game's stick keeps steering). Called from the SDL thread. */
+    public boolean touchTiltOn(final boolean on) {
+        final boolean sensor = tiltSensor() != null;
         runOnUiThread(new Runnable() {
             @Override public void run() {
                 SensorManager sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
-                if (on && tiltListener == null) {
+                if (on && tiltListener == null && sensor) {
                     tiltListener = new SensorEventListener() {
                         @Override public void onSensorChanged(SensorEvent e) {
                             float x = e.values[0], y = e.values[1], sx, sy;
@@ -142,13 +145,20 @@ public class DhdActivity extends SDLActivity {
                 }
             }
         });
+        return sensor;
+    }
+
+    /** The sensor tilt steering reads: gravity, else the accelerometer; null without either. */
+    private Sensor tiltSensor() {
+        SensorManager sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
+        if (sensors == null) return null;
+        Sensor s = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY);
+        return s != null ? s : sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
     }
 
     private void registerTilt() {
-        SensorManager sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
-        Sensor s = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY);
-        if (s == null) s = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        if (s != null) sensors.registerListener(tiltListener, s, SensorManager.SENSOR_DELAY_GAME);
+        Sensor s = tiltSensor();
+        if (s != null) ((SensorManager) getSystemService(SENSOR_SERVICE)).registerListener(tiltListener, s, SensorManager.SENSOR_DELAY_GAME);
     }
 
     /** The update notice: "Downhill Revived VERSION is out - tap for the download page" at the top of

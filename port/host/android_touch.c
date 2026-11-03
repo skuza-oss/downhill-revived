@@ -60,7 +60,8 @@ void android_touch_buzz(int kind)
     end(env, activity);
 }
 
-/* DhdActivity.touchTilt(): the roll in degrees (turned right positive); 0 before the sensor answers. */
+/* DhdActivity.touchTilt(): the roll in degrees (turned right positive); 0 (no reading) before the
+   sensor answers, or with none. */
 int android_touch_tilt(float *degrees)
 {
     JNIEnv *env;
@@ -74,13 +75,16 @@ int android_touch_tilt(float *degrees)
     return 1;
 }
 
-/* DhdActivity.touchTiltOn(on): the sensor, and the screen locked to its side while on. */
-void android_touch_tilt_on(int on)
+/* DhdActivity.touchTiltOn(on): the sensor, and the screen locked to its side while on. Returns 1
+   when the phone has a tilt sensor (gravity or accelerometer), 0 when not, -1 if it could not ask. */
+int android_touch_tilt_on(int on)
 {
     JNIEnv *env;
     jobject activity;
-    if (!begin(&env, &activity)) return;
-    jmethodID m = method(env, activity, "touchTiltOn", "(Z)V");
-    if (m) (*env)->CallVoidMethod(env, activity, m, (jboolean)(on != 0));
+    if (!begin(&env, &activity)) return -1;
+    jmethodID m = method(env, activity, "touchTiltOn", "(Z)Z");
+    int sensor = m ? (*env)->CallBooleanMethod(env, activity, m, (jboolean)(on != 0)) != JNI_FALSE : -1;
+    if ((*env)->ExceptionCheck(env)) sensor = -1;
     end(env, activity);
+    return sensor;
 }

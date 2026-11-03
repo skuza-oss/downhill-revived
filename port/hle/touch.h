@@ -126,7 +126,8 @@ void touch_cancel_all(Touch *t, double now);   /* the window lost the touches (f
 void touch_back(Touch *t, double now);         /* Android's Back */
 void touch_pad_used(Touch *t, double now);     /* a controller or the keyboard moved: hide (setting) */
 void touch_pad_lost(Touch *t, double now);     /* the controller went away mid-race: show, pause offline */
-void touch_tilt(Touch *t, float degrees);      /* the phone's roll (tilt steering) */
+/* The phone's roll (tilt steering); known 0: no reading yet, or no sensor (the stick keeps steering). */
+void touch_tilt(Touch *t, int known, float degrees);
 void touch_open_editor(Touch *t);              /* TOUCH CONTROLS > Edit layout */
 
 /* The host's queue between its input thread and the game's field (no lock here: the host holds

@@ -8,7 +8,9 @@
            Classic pad); Prev, More, Back.
    Page 3: Vibration, With A Controller, Show Hints Again, Tilt Strength and Set Tilt Centre (alive
            with tilt steering); Prev, Back.
-   Left / right (and the mouse's or a tap's arrows) change a value; Cross steps it forward. */
+   Left / right (and the mouse's or a tap's arrows) change a value; Cross steps it forward.
+   Without a tilt sensor (the host's DHD_TOUCH_TILT_SENSOR=0) Steer With stays on Stick and its
+   footer says so. */
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "menu_page.h"
@@ -67,6 +69,13 @@ static int is(const char *key, const char *value)
     return info && !dhd_stricmp(info->choices[current(info)].value, value);
 }
 
+/* The host found no tilt sensor (DHD_TOUCH_TILT_SENSOR=0): Steer With refuses Tilt. */
+static int no_tilt_sensor(void)
+{
+    const char *v = host_getenv("DHD_TOUCH_TILT_SENSOR");
+    return v && !strcmp(v, "0");
+}
+
 static int dimmed(const Line *l)
 {
     return (l->dim == DIM_CLASSIC && is("touch_preset", "classic")) || (l->dim == DIM_NO_TILT && !is("touch_steer", "tilt"));
@@ -117,7 +126,8 @@ void touch_settings_update(MenuPage *p, int page, int cursor)
     if (!note && cursor >= 0 && cursor < MENU_PAGE_ROWS && row_line[cursor] >= 0) {
         const Line *l = &lines[0][0] + row_line[cursor];
         if (l->dim == DIM_CLASSIC && dimmed(l)) p->footer = "Thumb zones only";
-        else if (l->dim == DIM_NO_TILT && dimmed(l)) p->footer = "With Steer With: Tilt";
+        else if (l->dim == DIM_NO_TILT && dimmed(l)) p->footer = no_tilt_sensor() ? "No tilt sensor on this device" : "With Steer With: Tilt";
+        else if (l->key && !strcmp(l->key, "touch_steer") && no_tilt_sensor()) p->footer = "No tilt sensor on this device";
     }
 }
 
@@ -131,6 +141,7 @@ void touch_settings_change(MenuPage *p, int page, int row, int step)
     if (!info || dimmed(l) || host_service_host_setting_locked(GADDR(info->env))) return;
     int i = (current(info) + step + info->count) % info->count;
     const char *value = info->choices[i].value;
+    if (!strcmp(info->key, "touch_steer") && !strcmp(value, "tilt") && no_tilt_sensor()) return;   /* the row's footer says why */
     host_service_host_setting_save(GADDR(info->key), GADDR(value));
     host_putenv_s(info->env, value);
     hle_env_changed();

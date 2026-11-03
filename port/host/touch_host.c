@@ -34,7 +34,7 @@
 int android_touch_screen(float *xdpi, float *ydpi, int insets[8]);   /* gesture insets l t r b, cutout l t r b (px) */
 void android_touch_buzz(int kind);
 int android_touch_tilt(float *degrees);
-void android_touch_tilt_on(int on);
+int android_touch_tilt_on(int on);   /* 1 the phone has a tilt sensor, 0 none, -1 not asked */
 #endif
 
 enum { EV_DOWN = TOUCH_EV_DOWN, EV_MOVE = TOUCH_EV_MOVE, EV_UP = TOUCH_EV_UP, EV_CANCEL = TOUCH_EV_CANCEL,
@@ -47,6 +47,8 @@ static SDL_AtomicInt owns;            /* the overlay takes the touches (no menu 
 static SDL_AtomicInt want_buzz;       /* TOUCH_BUZZ_* for the SDL thread */
 static SDL_AtomicInt tilt_wanted;     /* tilt steering is on */
 static SDL_AtomicInt tilt_milli;      /* the phone's roll, millidegrees */
+static SDL_AtomicInt tilt_known;      /* tilt_milli is a reading since tilt went on */
+static SDL_AtomicInt tilt_sensor;     /* 1 a tilt sensor, 0 none, -1 not known yet */
 static TouchScreen screen;            /* under lock */
 static int screen_known;
 
@@ -77,9 +79,11 @@ static int touch_on(void)
 #ifdef __ANDROID__
         available = 1;
         gs_mouse_touchscreen();   /* else the menus' first reading takes the first tap as its baseline */
+        SDL_SetAtomicInt(&tilt_sensor, -1);   /* the first tick asks */
 #else
         const char *mouse = getenv("DHD_TOUCH_MOUSE");
         available = mouse && atoi(mouse) ? 2 : 0;
+        SDL_SetAtomicInt(&tilt_sensor, 0);    /* a desktop has none */
 #endif
         SDL_SetInitialized(&started, true);
     }
@@ -219,12 +223,19 @@ void touch_host_tick(void)
     int buzz = SDL_GetAtomicInt(&want_buzz);
     if (buzz) SDL_SetAtomicInt(&want_buzz, 0);
 #ifdef __ANDROID__
-    static int tilt_was;
+    static int tilt_was = -1;   /* the first pass asks whether there is a sensor */
     static double insets_at;
     int tilt = SDL_GetAtomicInt(&tilt_wanted);
-    if (tilt != tilt_was) { android_touch_tilt_on(tilt); tilt_was = tilt; }
+    if (tilt != tilt_was) {
+        SDL_SetAtomicInt(&tilt_known, 0);   /* the next reading is the new sensor's */
+        int sensor = android_touch_tilt_on(tilt);
+        if (sensor >= 0) SDL_SetAtomicInt(&tilt_sensor, sensor), tilt_was = tilt;
+    }
     float deg;
-    if (tilt && android_touch_tilt(&deg)) SDL_SetAtomicInt(&tilt_milli, (int)(deg * 1000));
+    if (tilt && android_touch_tilt(&deg)) {
+        SDL_SetAtomicInt(&tilt_milli, (int)(deg * 1000));
+        SDL_SetAtomicInt(&tilt_known, 1);
+    }
     if (buzz) android_touch_buzz(buzz);
     if (last_window && ms_now() - insets_at > 2000) {   /* the gesture insets change with the navigation mode */
         insets_at = ms_now();
@@ -338,6 +349,23 @@ static void publish(void)
     SDL_UnlockMutex(lock);
 }
 
+/* Whether the device has a tilt sensor, for TOUCH CONTROLS (DHD_TOUCH_TILT_SENSOR: the Steer With
+   row refuses Tilt without one), and once in dhd.log when tilt is wanted but there is none (the
+   stick keeps steering). */
+static void tilt_sensor_note(void)
+{
+    static int told = -2, logged;
+    int sensor = SDL_GetAtomicInt(&tilt_sensor);
+    if (sensor != told && sensor >= 0) {
+        host_putenv_s("DHD_TOUCH_TILT_SENSOR", sensor ? "1" : "0");
+        told = sensor;
+    }
+    if (sensor == 0 && SDL_GetAtomicInt(&tilt_wanted) && !logged) {
+        fprintf(stderr, "touch: tilt steering is on, but this device has no gravity or accelerometer sensor: the stick steers\n");
+        logged = 1;
+    }
+}
+
 /* pad.c, once a field: the game's two reads in; the HUD's place, Leave race and the hint's hold out. */
 void host_service_touch_field(uint32_t address)
 {
@@ -358,7 +386,9 @@ void host_service_touch_field(uint32_t address)
         save("touch_hints", "DHD_TOUCH_HINTS", "0");
         configure(0);
     }
-    if (h->command == TOUCH_COMMAND_TILT_CENTRE) {
+    if (h->command == TOUCH_COMMAND_TILT_CENTRE && !SDL_GetAtomicInt(&tilt_known)) {
+        fprintf(stderr, "touch: no tilt reading yet; the tilt centre is not changed\n");
+    } else if (h->command == TOUCH_COMMAND_TILT_CENTRE) {
         char v[32];
         snprintf(v, sizeof v, "%.1f", SDL_GetAtomicInt(&tilt_milli) / 1000.0);
         save("touch_tilt_centre", "DHD_TOUCH_TILT_CENTRE", v);
@@ -386,7 +416,9 @@ void host_service_touch_field(uint32_t address)
         }
         touch_event(touch, e, x, y);
     }
-    touch_tilt(touch, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
+    tilt_sensor_note();
+    int known = SDL_GetAtomicInt(&tilt_known) && SDL_GetAtomicInt(&tilt_wanted);
+    touch_tilt(touch, known, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
     TouchGame g;
     memset(&g, 0, sizeof g);
     g.race_hud = h->race_hud, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;

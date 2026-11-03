@@ -308,3 +308,15 @@ with a unit test in `test_touch.c`.
   window does nothing and the next one answers No. (Back on the Controls page is the overlay's own
   and still returns at once.) Test: in `test_pause`, Back during the ↓ ↓ ↓ ↓ ✕ sends no △, the
   next Back sends one.
+- **Tilt steering with no sensor (or before its first reading) left no steering on the ground**
+  (Muse, Opus). `tilt_step` blended the stick's left/right out on the ground whatever the sensor
+  said, so with no gravity or accelerometer sensor the rider went straight. Now the host passes
+  whether a reading has come since tilt went on (`touch_tilt(t, known, degrees)`; `touch_host.c`'s
+  `tilt_known`), and until then the stick steers. `DhdActivity.touchTiltOn` returns whether the
+  phone has a tilt sensor (and does nothing without one; `android_touch_tilt_on` asks it on the SDL
+  thread's first pass); the host puts that in `DHD_TOUCH_TILT_SENSOR` (a desktop: 0) and logs once
+  `touch: tilt steering is on, but this device has no gravity or accelerometer sensor` when tilt is
+  wanted without one. TOUCH CONTROLS' Steer With then stays on Stick (Tilt is refused, an old
+  `touch_steer = tilt` can still be changed back) and its footer reads "No tilt sensor on this
+  device". Set Tilt Centre without a reading changes nothing and says so in `dhd.log`. Test:
+  `test_tilt` (no reading: the stick steers; a reading takes over; gone again: the stick).

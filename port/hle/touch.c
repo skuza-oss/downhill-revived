@@ -208,6 +208,7 @@ struct Touch {
     int stick_finger;
     float stick_cx, stick_cy, stick_dx, stick_dy;   /* deflection -1..1 */
     float tilt_deg, tilt_mix;                         /* tilt steering, and its blend in (0..1) */
+    int tilt_known;                                   /* a reading has come (none: the stick steers) */
     double tilt_mix_at;
     /* pause, panel */
     int pause, menu_cursor, confirm_row, pause_from_moving;
@@ -1455,7 +1456,7 @@ void touch_pad_lost(Touch *t, double now)
     if (!t->game.online && t->pause == PAUSE_NONE) pause_open(t);   /* the menu-open chain starts with its own START */
 }
 
-void touch_tilt(Touch *t, float degrees) { t->tilt_deg = degrees; }
+void touch_tilt(Touch *t, int known, float degrees) { t->tilt_known = known; t->tilt_deg = known ? degrees : 0; }
 
 /* ---------------------------------------------------------------- the host's queue */
 
@@ -1645,7 +1646,8 @@ static void pause_step(Touch *t)
 
 static void tilt_step(Touch *t)
 {
-    float want = t->set.tilt && !t->game.air ? 1.0f : 0.0f;   /* tilt steers on the ground */
+    /* tilt steers on the ground, once the sensor has answered (none, or not yet: the stick) */
+    float want = t->set.tilt && t->tilt_known && !t->game.air ? 1.0f : 0.0f;
     double dt = t->tilt_mix_at > 0 ? t->now - t->tilt_mix_at : 0;
     t->tilt_mix_at = t->now;
     float step = (float)(dt / 100.0);   /* the hand-over blends over 100 ms */

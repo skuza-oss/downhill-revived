@@ -769,6 +769,30 @@ static void test_queue(void)
     CHECK(stick_x() == 128);
 }
 
+/* Tilt steering: until the sensor answers (or with none) the stick steers on the ground. */
+static void test_tilt(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    TouchSettings s = *touch_settings(t);
+    s.tilt = 1;
+    s.tilt_strength = 50;   /* full turn at 25° */
+    TouchScreen screen = {154.5f, 69.5f, 0, 0, 0, 0, 0, 0, 0, 0};
+    touch_configure(t, &s, &screen);
+    touch_tilt(t, 0, 0);   /* no reading yet */
+    touch_down(t, 1, 30, 45, now);
+    touch_move(t, 1, 36, 45, now);   /* half right */
+    wait_ms(300);
+    CHECK(stick_x() > 170 && stick_x() < 200);
+    touch_tilt(t, 1, -25);   /* the sensor: full left; it takes over from the stick on the ground */
+    wait_ms(300);
+    CHECK(stick_x() <= 2);
+    touch_tilt(t, 0, 0);   /* gone again (tilt turned off and on): the stick */
+    wait_ms(300);
+    CHECK(stick_x() > 170 && stick_x() < 200);
+    touch_up(t, 1, 36, 45, now);
+    field();
+}
+
 static void test_layout_text(void)
 {
     TouchSettings s, back;
@@ -806,6 +830,7 @@ int main(void)
     test_online_panel();
     test_layout_text();
     test_queue();
+    test_tilt();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");
