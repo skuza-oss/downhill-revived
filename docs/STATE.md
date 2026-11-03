@@ -457,7 +457,16 @@ the recorded codes and paces its pictures by them. Headless race + replay (`repl
 exact for all ten riders at 45 (frame clock) and paced 144 with uneven frames. The attract demo's
 camera cuts and two-minute end count fields; the ghost samples every 8 fields at every rate.
 State trace unchanged. Replays saved on the original clock (PS2, port up to 0.7.7) do not play on
-the delta-time clock (open).
+the delta-time clock: since the review fixes they say so over the countdown and end at GO.
+
+2026-11-03 (review fixes, findings 139 and 142): about twenty units read the integer steps a
+second as their time step (1/rate: the rigid-body integrator, the contact solver); the delta-time
+clock truncated it, 59 at paced 60, so bodies moved 1.2-1.6 % too far online, in the menus and in
+the attract demo. They now read the exact step (`port_step_seconds` / `port_step_rate`). The
+pacing grids (`pace()`, the slow stretch) re-anchor when the frame period changes (a 9.7 s wait
+at the load after 144 fps, 0.8 s on a replay's step change). The item list timer's flag clear
+and 60 mark fire on two-field steps. Old-clock replays explain themselves. The headless browser
+runner answers the touch service.
 
 2026-11-03 (finding 143): the next release can ship an experimental Android APK. `build_apk.py
 --release` builds it not debuggable, without R8, signed with a release key the environment names

@@ -265,6 +265,15 @@ readers' time step equal to `D_0029E400` within 0.1 % on every step, and an inte
 at 60 (it was 59). No `rate_drift.py` row: that check runs the rational clock, whose rate is
 exact.
 
+The original path has to keep the division in the unit: a first version returned
+`1.0f / (float)D_0029E3D4` from `fps.c` on that path, and the state trace's race left main's at
+field 3214. The game's float code runs in the EE's rounding mode (toward zero), the port's own
+code to nearest, so `fps.c`'s 1/60 is 0x3C888889 where retail's is 0x3C888888. With
+`(port_delta_clock() ? port_step_seconds() : <retail expression>)` in the unit, the race (5000
+fields) and boot (600) traces match a build of 60ba1c2 row for row, and `replay_check.py` passes
+at 45 (frame clock, 27010 rider positions) and paced 144 with `--slow 9,4` (35980), every
+coordinate equal.
+
 ## Checks
 
 - State trace (`state_trace_run.py`, deterministic, the original clock): race 5000 fields
