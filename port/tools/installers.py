@@ -114,7 +114,10 @@ def windows_setup(version, files, extra, out_dir, servers, elf):
     for text, kind in ((data, 'ASCII'), (p.utf16_strings(data), 'UTF-16')):
         problems += ['%s absolute path %r (not one of Inno Setup\'s own)' % (kind, m.group(0)[:120].decode('ascii', 'replace'))
                      for m in p.ABSOLUTE.finditer(text) if m.group(0) not in own
-                     and not (kind == 'ASCII' and p.chance_bytes(text, m))]  # the compressed payload's bytes
+                     and not (kind == 'ASCII' and (p.chance_bytes(text, m) or len(m.group(0)) < 16))]
+    # ASCII: the compressed payload's bytes spell short drive paths by chance, even ones ending in a
+    # NUL (a six-byte one in 0.7.9's setup); its files were scanned uncompressed above and Inno Setup's own program
+    # is pinned, so only a long match (a real folder path) counts.
     if problems:
         setup.unlink()
         sys.exit('%s is not fit to publish:\n  %s' % (setup.name, '\n  '.join(problems[:30])))
