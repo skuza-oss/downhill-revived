@@ -335,7 +335,9 @@ void port_clock_step(void)
 {
     D_0029E3D0 = whole;
     int stepped = wall_mode || grid;  /* the step is this update's own, not 60/N */
-    D_0029E3D4 = stepped ? (int)(60.0/step_fields) : port_fps();
+    /* The integer rate is rounded: truncated, the 1.001-field steps of paced 60 made it 59. Its
+       readers that take a time step read the exact one (port_step_seconds, port_step_rate). */
+    D_0029E3D4 = stepped ? (int)lround(60.0/step_fields) : port_fps();
     D_0029E3FC = stepped ? (float)(60.0/step_fields) : (float)port_fps();
     D_0029E400 = stepped ? (float)(step_fields/60.0) : 1.0f / port_fps();
     D_0029E3DC = D_0029E3D8;
@@ -343,6 +345,16 @@ void port_clock_step(void)
     *(volatile int *)GUEST(0x10000800)=0;
     D_0029E3E8=D_0029E3E0;
 }
+/* The steps a second (func_00238F30, D_0029E3D4) as about twenty units read it: as 1/rate, the
+   seconds of this step (the rigid-body integrator 002327B0, the contact solver, 00209248's
+   callers), or as a rate. Retail's rate is exact, 60 or 30. On the delta-time clock the step is
+   any length, and an integer rate is off by up to half a step a second (truncated it was 1.2-1.6 %
+   too long at paced 60): there they read the exact step (patches_fps.py). The original path keeps
+   retail's expression in the unit itself: the game's float code rounds toward zero (the EE's
+   mode), so a 1/60 computed here would not be retail's 1/60. */
+float port_step_seconds(void) { return D_0029E400; }
+float port_step_rate(void) { return D_0029E3FC; }
+
 /* Stored animation timestamps retain their four-byte integer layout. On the delta-time clock
    their unit is 1/1024 field; all consumers convert elapsed values. */
 int port_animation_step(void)

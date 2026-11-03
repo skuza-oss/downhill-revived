@@ -10,11 +10,17 @@ def main():
     sys.path.insert(0,str(ROOT/'port'));import patches
     text=(ROOT/'src/unsorted/00131998.cpp').read_text()
     for kind,old,new in patches.PATCHES['unsorted/00131998.cpp']:
-        assert kind=='text' and text.count(old)==1;text=text.replace(old,new)
+        if kind=='re':
+            text,count=re.subn(old[0],new,text);assert count==old[1]
+        else:
+            assert kind=='text' and text.count(old)==1;text=text.replace(old,new)
     expression=re.search(r'step = (Min\(remaining,.*?\));',text)[1]
     out=ROOT/'build/port/runtime/rider-step';out.mkdir(parents=True,exist_ok=True)
     source=out/'fixture.c';source.write_text('#include "ps2float.h"\n#include <xmmintrin.h>\n#include <assert.h>\n#include <stdio.h>\n'
         'static int rate=30;static int func_00238F30(void){return rate;}\n'
+        'static int port_delta_clock(void){return 0;}\n'  # the original path
+        'static float port_step_rate(void){return 0;}\n'
+        'static float port_step_seconds(void){return 0;}\n'
         'static float ps2_fdiv(float a,float b){return ps2_float_div(a,b);}\n'
         'static float Min(float a,float b){return a<b?a:b;}\n'
         'static float substep(float remaining,float speed){return '+expression+';}\n'+r'''

@@ -376,6 +376,28 @@ def add(patches):
     edit('00154058', 'obj->x30.z -= fvar;',
          'obj->x30.z -= port_delta_clock() ? fvar*port_step()*port_step() : fvar;')
     edit('0021F210', 'func_00238F30() == 0x3C', '(port_delta_clock() || func_00238F30() == 0x3C)')
+    # Every other reader of the steps a second (func_00238F30) takes a time step from it: 1/rate
+    # (the rigid-body integrator 002327B0, the contact solver, 00209248's callers) or the rate
+    # itself. On the delta-time clock they read the exact step, not the integer rate
+    # (port_step_seconds / port_step_rate; fps.c says why). The original path keeps retail's own
+    # expression in the unit (its float division rounds as the EE's does).
+    # The rate reads first (each is a "(float)func_00238F30()" not after "1.0f /"), then the 1/rate
+    # ones, so neither patch matches the retail expression the other keeps.
+    seconds = r'1\.0f\s*/\s*(?:\(float\)\s*)?func_00238F30\(\)'
+    rate = r'(?<!1\.0f / )(?<!1\.0f/)\(float\)func_00238F30\(\)'
+    readers = 0
+    for path in sorted(root.glob('*.*')):
+        if path.stem in ('00238F30', '0021F210'):
+            continue
+        text = path.read_text()
+        for pattern, value in ((rate, 'port_step_rate'), (seconds, 'port_step_seconds')):
+            count = len(re.findall(pattern, text))
+            if count:
+                readers += count
+                patches.setdefault('unsorted/' + path.name, []).append(
+                    ('re', (pattern, count), r'(port_delta_clock() ? %s() : \g<0>)' % value))
+        assert len(re.findall(r'func_00238F30\(\)', text)) == len(re.findall(seconds, text)) + len(re.findall(rate, text)), path
+    assert readers == 22, readers  # a new reader needs a look: is it a time step?
     entry('00239A80', 'func_00239CE0',
           '    if (port_delta_clock()) { port_ragdoll_step(sys->particles,sys->count,sizeof(Particle),D_0029DC74); return; }')
     edit('00239A80', 'scale = -(dist * 0.99f);', 'scale = -(dist * port_blend(0.99f));')

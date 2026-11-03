@@ -237,6 +237,31 @@ game units (114 measured 0.010 / 0.048 / 0.57 between two PCs at 60 and 144). Hi
 events with the race time and the finish is the local race clock's (finding 044), so neither
 depends on the step. Not run: a two-PC race with a slow peer.
 
+## The steps a second as a time step (review, 2026-11-03)
+
+About twenty units take their time step from the integer steps a second (`func_00238F30`,
+`D_0029E3D4`) as `1/rate`: the rigid-body integrator `002327B0` (through `001460D0`), the contact
+solver (`00131998`, `00133DE0`), `00209248`'s callers (`00147F40`, `00148560`, `0016F198`,
+`0016FC00`, `00210868`, `00148F60`) and `00157BE8`, `001DCE58`, `00165E68`, `001AB418`,
+`00154058`, `001457A8`, `00180A10`; `00145E80`, `00170278` and `00131998`'s angular step read the
+rate itself. Retail's rate is exact (60, or 30 on a two-field frame). The delta-time clock set it
+to `(int)(60/step)`, truncated: paced 60 holds pictures 1001/60000 s, so the step is about 1.001
+fields and the rate was 59 on nearly every step, a time step 1.6 % longer than the step itself
+(the review's probe: 1.2 % over a run at 60, 0.4 % at 144). Bodies moved that much too far per
+unit of speed wherever the clock is not on the offline race's field grid (whose codes give exact
+rates): online races, the attract demo, the menus.
+
+Now every reader but `0021F210`'s `== 60` test (already off on this clock) reads the exact step
+on the delta-time clock: `patches_fps.py` rewrites `1.0f / (float)func_00238F30()` as
+`port_step_seconds()` (`D_0029E400`) and the other reads as `port_step_rate()` (`D_0029E3FC`),
+22 reads in 18 units, found by a search of every unit (the asm-only callers are the same
+functions). On the original path both return retail's own expressions. `D_0029E3D4` itself is
+now rounded, for any integer reader. `test_fps.py` checks it at every rate on the paced clock:
+3000 frames paced on the selected period, each 10-200 us late as `pace()` leaves them, give the
+readers' time step equal to `D_0029E400` within 0.1 % on every step, and an integer rate of 60
+at 60 (it was 59). No `rate_drift.py` row: that check runs the rational clock, whose rate is
+exact.
+
 ## Checks
 
 - State trace (`state_trace_run.py`, deterministic, the original clock): race 5000 fields

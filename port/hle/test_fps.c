@@ -158,6 +158,28 @@ int main(int argc,char **argv)
             }
             assert(fabs(audio-(k ? .1 : stall))<1e-9);
         }
+        /* The rate's readers (1/func_00238F30: the integrator, the contact solver) take this
+           step's own seconds: frames paced on the selected period (59.94 Hz at 60), each 10-200 us
+           late as pace() leaves them. The integer rate, truncated, was 59 at 60 (1.6 % too long a
+           step); rounded it is the rate. */
+        {
+            const double period=n==60 ? 1001.0/60000 : 1.0/n;
+            double read=0,stepped=0;
+            unsigned seed=12345;
+            port_clock_rebase();
+            for (int i=0;i<3000;i++) {
+                seed=seed*1103515245u+12345u;
+                fake_wall+=period+(10+(seed>>16)%191)*1e-6;
+                port_clock_wait(NULL);port_clock_step();
+                assert(fabs(port_step_seconds()/D_0029E400-1)<.001);
+                assert(fabs(1/port_step_rate()/D_0029E400-1)<.001);
+                assert(D_0029E3D4==(int)lround(1/D_0029E400));
+                if (i>=10) read+=port_step_seconds(),stepped+=D_0029E400;
+            }
+            assert(fabs(read/stepped-1)<.001);
+            if (n==60) assert(D_0029E3D4==60);
+            printf("%d: paced rate readers: dt / step %.6f, integer rate %d\n",n,read/stepped,D_0029E3D4);
+        }
         /* A lobby or start wait (kernel_pace_slip/shared) is no game time at all. */
         fake_wall+=10;port_clock_rebase();
         port_clock_wait(NULL);port_clock_step();
@@ -241,6 +263,7 @@ int main(int argc,char **argv)
         ticks+=port_whole_step();animation+=port_animation_step();
         /* Constant thrust: mass cancels, 30 units/s², not per-step impulse. */
         velocity+=30.0f*D_0029E400;
+        assert(port_step_seconds()==D_0029E400 && port_step_rate()==D_0029E3FC);
         damped*=port_decay(.99f);
         blend+=(1-blend)*port_blend(.01f);
     }

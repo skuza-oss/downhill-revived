@@ -18,6 +18,8 @@ int port_input_stamp(int legacy_field);
 /* Elapsed time of this real update, and its conversions of per-field constants. */
 float port_step(void);
 int port_whole_step(void);
+float port_step_seconds(void);  /* the delta-time clock's exact 1/func_00238F30(): this step's seconds */
+float port_step_rate(void);     /* the delta-time clock's exact (float)func_00238F30() */
 float port_decay(float factor);
 float port_blend(float rate);
 float port_particle_sum(float factor);
