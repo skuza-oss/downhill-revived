@@ -375,5 +375,7 @@ void port_pc_settings(void)
    "UNLOCK RIDERS/BIKES(test)" there, which stays as it is. */
 char *port_options_label(char *label, int index)
 {
-    return index == 9 ? (char *)"PC SETTINGS" : label;
+    if (index != 9) return label;
+    const char *touch = host_getenv("DHD_TOUCH");  /* the page's own name (page_title): SETTINGS on a phone */
+    return (char *)(touch && !strcmp(touch, "android") ? "SETTINGS" : "PC SETTINGS");
 }
