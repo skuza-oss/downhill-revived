@@ -25,7 +25,7 @@ This release introduces an independent, native ARM64 iOS fork of [Downhill Reviv
 
 Asset: `DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
 
-**This IPA is UNSIGNED. It is NOT installable directly on a regular iPhone or iPad.** Sign/build it appropriately with your Apple development team. See [`docs/BUILD_IPA_WITH_AI.md`](https://github.com/ribeirogustav/downhill-revived/blob/main/docs/BUILD_IPA_WITH_AI.md) and [`docs/INSTALLATION.md`](https://github.com/ribeirogustav/downhill-revived/blob/main/docs/INSTALLATION.md) in the repository.
+**This IPA is UNSIGNED. It is NOT installable directly on a regular iPhone or iPad.** Sign/build it appropriately with your Apple development team. See [`docs/BUILD_IPA_WITH_AI.md`](https://github.com/ribeirogustav/downhill-revived-ios/blob/main/docs/BUILD_IPA_WITH_AI.md) and [`docs/INSTALLATION.md`](https://github.com/ribeirogustav/downhill-revived-ios/blob/main/docs/INSTALLATION.md) in the repository.
 
 **SHA-256:**
 
