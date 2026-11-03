@@ -43,7 +43,8 @@ name; never in the repository) or takes a ready one (--apk), and puts it in the 
 DownhillRevived-<version>-android-experimental.apk, with latest.json's "android" entry (the game's
 update notice reads it, port/host/android_update.c; launchers ignore the key). The APK carries
 LICENSE.txt and THIRD-PARTY-NOTICES.txt (with the Rust crates linked into libmain.so) as assets.
-Checked: build_apk.check_release (signature, not debuggable, version, arm64-v8a only), every file in
+Checked: build_apk.check_release (one signer, the release certificate build_apk.RELEASE_CERT_SHA256
+unless --new-signing-key, not debuggable, version, arm64-v8a only), every file in
 it as the zips' are (game data names and bytes, servers, local paths), libmain.so's version and
 its absolute paths and servers as the game's.
 
@@ -746,14 +747,14 @@ def android_release(a, platform, out, manifest_path, page):
         (texts / 'THIRD-PARTY-NOTICES.txt').write_bytes(lf((RELEASE / 'THIRD-PARTY-NOTICES.txt').read_bytes().rstrip()
                                                           + b'\n\n' + notices.encode('utf-8')))
         cmd = [sys.executable, str(ROOT / 'port' / 'android' / 'build_apk.py'), '--release', '--wasm', str(a.wasm.resolve()),
-               '--jobs', str(a.jobs), '--assets', str(texts)]
+               '--jobs', str(a.jobs), '--assets', str(texts)] + (['--new-signing-key'] if a.new_signing_key else [])
         print('building: ' + ' '.join(cmd), flush=True)
         if subprocess.run(cmd).returncode:
             sys.exit('build_apk.py --release failed')
         apk = build_apk.OUT / build_apk.release_apk_name(name)
     if not apk.is_file():
         sys.exit('%s: no such APK' % apk)
-    problems, facts = build_apk.check_release(apk, name, code)
+    problems, facts = build_apk.check_release(apk, name, code, a.new_signing_key)
     elf = a.elf.read_bytes()
     rsp = build_apk.OUT / 'work' / 'link.rsp'   # build_host64.py's: the Rust library linked into libmain.so
     rust_libs = [Path(x.strip().strip('"')) for x in rsp.read_text(encoding='utf-8').splitlines()
@@ -798,6 +799,8 @@ def android_release(a, platform, out, manifest_path, page):
     print('%s (%d KB) sha256 %s' % (out, out.stat().st_size // 1024, apk_hash))
     print('  %s; signed by %s, certificate SHA-256 %s (schemes %s); native code %s; not debuggable'
           % (facts['badging'], facts['signer_dn'], facts['signer_sha256'], ' '.join(facts['schemes']), facts['native_code']))
+    if facts['new_signer']:
+        print(build_apk.NEW_SIGNER_NOTE % facts['signer_sha256'])
     print('  %s: version %s, %s; platforms %s' % (manifest_path, a.version, url, ', '.join(done)))
     print('  %s: %s' % (out.parent / 'SHA256SUMS', ', '.join(sums)))
     return 0
@@ -844,6 +847,8 @@ def main():
     ap.add_argument('--elf', type=Path, default=ROOT / 'iso' / 'SCUS_971.77', help='your retail ELF, for the game-data scan')
     ap.add_argument('--no-installer', action='store_true', help='only the zip: no Windows installer, AppImage or DMG')
     ap.add_argument('--apk', type=Path, help='android: a ready build_apk.py --release APK (default: build it)')
+    ap.add_argument('--new-signing-key', action='store_true',
+                    help='android: a deliberate key change: accept a signer other than build_apk.RELEASE_CERT_SHA256')
     ap.add_argument('--sums', action='store_true', help='only write SHA256SUMS again in the release folder')
     a = ap.parse_args()
     platform = PLATFORMS[a.platform]
