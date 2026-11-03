@@ -152,6 +152,22 @@ tokens. The test `Client` (`test/helpers.ts`) keeps its last welcome. Server tes
 passes. `port/net/test_session.c` checks the client: no token in a first hello, the welcome's
 token in the rejoin's hello, none in the next room's hello, and a non-hex token never sent.
 
+A live rejoin on one PC: this checkout's server (`port/tools/local_server.py`), two `nettool`
+players (host ACE, guest BOB), the host's connection through a small TCP proxy (a scratch script,
+not committed). At 5 s the proxy reset the host's connection on the game's side and kept its
+server-side socket open and silent: the dead path of issue #30. The host's game logged `connection
+closed (1006), rejoining`, then `back in room X3A2ET (host)` over a second connection. It was member
+0 and host again, its list showed only BOB (no clone), and the race started with two slots (host
+slot 0, guest slot 1). The game core is unchanged (the token lives in `port/net/client.c`, a host
+file): `dhd_core.wasm` is byte-identical to 60ba1c2's, and the deterministic state trace at 60 of
+this branch's `dhd64.exe` matches a 60ba1c2 build's row for row (boot 600, race 5000).
+
+For the lead: the release that ships this must raise `MIN_VERSION` (a 0.7.7 game's hello has no
+token, so after the deploy its rejoins come back as new members, the old clones), and the server
+deploy goes with it. A real check: in an online room, pull the host PC's network cable for about
+5 s and plug it back in. `dhd.log` should show `net: back in room CODE (host)`, and the other
+players' lists should hold that player once, still host.
+
 ## Tests
 
 `online/server/test/rejoin.test.ts` (new, 8 cases; see the rejoin token above for today's 12):
