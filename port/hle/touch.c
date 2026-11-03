@@ -1162,6 +1162,19 @@ static void end_finger_job(Touch *t, Finger *f)
     f->sent = 0;
 }
 
+static void stick_follow(Touch *t, Finger *f);
+
+/* A touch takes the steering stick: a floating stick centres under it (no deflection yet), a fixed
+   one deflects at once by where it landed (a thumb held still off-centre steers without a move). */
+static void stick_begins(Touch *t, Finger *f)
+{
+    f->job = JOB_STICK;
+    t->stick_finger = (int)(f - t->f);
+    if (t->set.stick_fixed) t->stick_cx = t->ctl[TC_STICK].x, t->stick_cy = t->ctl[TC_STICK].y;
+    else t->stick_cx = f->x0, t->stick_cy = f->y0;
+    stick_follow(t, f);
+}
+
 /* Where a new touch goes, Thumb zones. */
 static void route_thumb(Touch *t, Finger *f)
 {
@@ -1209,10 +1222,7 @@ static void route_thumb(Touch *t, Finger *f)
         return;
     }
     if (in_rect(x, y, t->steer_x0, t->steer_y0, t->steer_x1, t->steer_y1) && !in_strip(t, x, y) && t->stick_finger < 0) {
-        f->job = JOB_STICK;
-        t->stick_finger = (int)(f - t->f);
-        if (t->set.stick_fixed) t->stick_cx = t->ctl[TC_STICK].x, t->stick_cy = t->ctl[TC_STICK].y;
-        else t->stick_cx = x, t->stick_cy = y;
+        stick_begins(t, f);
         return;
     }
     f->job = JOB_IGNORED;
@@ -1275,10 +1285,7 @@ static void route_classic(Touch *t, Finger *f)
         return;
     }
     if (in_rect(x, y, t->steer_x0, t->steer_y0, t->steer_x1, t->steer_y1) && !in_strip(t, x, y) && t->stick_finger < 0) {
-        f->job = JOB_STICK;
-        t->stick_finger = (int)(f - t->f);
-        if (t->set.stick_fixed) t->stick_cx = t->ctl[TC_STICK].x, t->stick_cy = t->ctl[TC_STICK].y;
-        else t->stick_cx = x, t->stick_cy = y;
+        stick_begins(t, f);
         return;
     }
     f->job = JOB_IGNORED;

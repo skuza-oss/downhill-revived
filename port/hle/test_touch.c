@@ -793,6 +793,32 @@ static void test_tilt(void)
     field();
 }
 
+/* Stick = Fixed: a thumb that lands off the stick's centre steers at once, held still (no move);
+   a floating stick centres under the thumb, so it starts neutral (Sol's round-2 #3). */
+static void test_fixed_stick(void)
+{
+    for (int preset = 0; preset < 2; preset++)
+        for (int fixed = 0; fixed < 2; fixed++) {
+            start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+            TouchSettings s = *touch_settings(t);
+            s.stick_fixed = fixed;   /* range 12 mm */
+            touch_configure(t, &s, NULL);
+            float x, y;
+            at(TC_STICK, &x, &y);
+            touch_down(t, 1, x + 8, y, now);   /* 8 mm right of the centre */
+            fields(10);
+            if (fixed) CHECK(stick_x() == 212);   /* 128 + 8 / 12 * 127 */
+            else CHECK(stick_x() == 128);
+            touch_move(t, 1, x + 8, y, now);   /* the same place again: no change */
+            field();
+            if (fixed) CHECK(stick_x() == 212);
+            else CHECK(stick_x() == 128);
+            touch_up(t, 1, x + 8, y, now);
+            field();
+            CHECK(stick_x() == 128);
+        }
+}
+
 static void test_layout_text(void)
 {
     TouchSettings s, back;
@@ -829,6 +855,7 @@ int main(void)
     test_trick_stick();
     test_online_panel();
     test_layout_text();
+    test_fixed_stick();
     test_queue();
     test_tilt();
     touch_free(t);

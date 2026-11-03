@@ -351,3 +351,13 @@ Checks for these fixes: `test_touch` (all passed; each new test fails on the cod
 match. The Android-only code was compiled (NDK clang for `android_touch.c` and `touch_host.c`'s
 Android half, javac for `DhdActivity.java`), not run: the tilt sensor's absence, the status bar on
 MIUI and the legend taps need the phones.
+
+### Second review round (2026-11-03)
+
+- **Stick = Fixed steered only after the thumb moved** (Sol 3). Both presets gave a new steering
+  touch the stick and its centre and returned; the deflection was computed only by a move, so a
+  thumb that landed 8 mm right of a fixed stick's centre and stayed still sent a centred stick until
+  the touchscreen reported a move. `stick_begins` (both presets) now computes it on the touch-down
+  (`stick_follow`); the floating stick still centres under the thumb, so it starts neutral.
+  `test_fixed_stick`: both presets, fixed and floating, an off-centre touch held still for 10
+  fields (fixed: 212 at once; floating: 128).
