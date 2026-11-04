@@ -328,6 +328,10 @@ impl Native {
                 pass.set_scissor_rect(x, y, sw, sh);
                 pass.draw(0..3, 0..1);
             }
+            // The touch controls over the picture, in this pass (dhdr_surface_present's overlays
+            // then skip them; C hands their shapes over before this call).
+            let format = surface.format();
+            surface.touch.draw_in_pass(gpu, &mut pass, format, w, h);
         }
         #[cfg(not(target_arch = "wasm32"))]
         let _spike = crate::native::pipelines::SpikeTimer::new("present_submit", 0);

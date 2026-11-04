@@ -69,6 +69,7 @@ static void native_present(Native *n)
     static int spikes = -1;
     if (spikes < 0) spikes = getenv("DHD_SPIKES") != NULL;
     double start = spikes ? host_wall_seconds() : 0;
+    touch_present(p->surface);  /* drawn in the present pass */
     double rs = native_rstat_start(), inside = perf_log_on() ? host_wall_seconds() : 0;
     int drawn = native_present_draw(n, p->surface, w, h, n->resize != 0);
     native_rstat_add(RSTAT_PRESENT, rs);
@@ -89,7 +90,7 @@ static void native_present(Native *n)
     native_rstat_add(RSTAT_PACE, rs);
     rs = native_rstat_start();
     inside = perf_log_on() ? host_wall_seconds() : 0;
-    counter_present(p->surface);
+    counter_present(p->surface, 1);
     if (inside) perf_present_wait(host_wall_seconds() - inside);  /* the present call itself */
     native_rstat_add(RSTAT_SHOW, rs);
     native_note_presented(n);

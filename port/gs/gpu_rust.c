@@ -58,7 +58,23 @@ void gs_gpu_counter_apply(void)
     SDL_SetAtomicInt(&counter_on, v && atoi(v) != 0);
 }
 
-static void counter_present(DhdrSurface *surface)
+/* The touch controls over the picture (port/host/touch_host.c, finding 141): their shapes for the
+   next picture. The native renderer draws them in its present pass (finding 146), so it hands
+   them over before dhdr_native_present; the exact one draws them in dhdr_surface_present. */
+static void touch_present(DhdrSurface *surface)
+{
+#ifndef DHD_GS_TEST_BUILD
+    static float shapes[512 * 16];
+    float width_mm = 0, height_mm = 0;
+    int n = touch_host_overlay(shapes, 512, &width_mm, &height_mm);
+    dhdr_surface_touch(surface, shapes, (uint32_t)n, width_mm, height_mm);
+#else
+    (void)surface;
+#endif
+}
+
+/* touched: touch_present ran for this picture already (the native renderer's). */
+static void counter_present(DhdrSurface *surface, int touched)
 {
     if (SDL_GetAtomicInt(&counter_on) < 0) gs_gpu_counter_apply();
     int enabled = SDL_GetAtomicInt(&counter_on), ping = -1;
@@ -67,14 +83,7 @@ static void counter_present(DhdrSurface *surface)
 #endif
     dhdr_surface_counter(surface, enabled, ping,
                          (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency());
-#ifndef DHD_GS_TEST_BUILD
-    {   /* the touch controls over the picture (port/host/touch_host.c, finding 141) */
-        static float shapes[512 * 16];
-        float width_mm = 0, height_mm = 0;
-        int n = touch_host_overlay(shapes, 512, &width_mm, &height_mm);
-        dhdr_surface_touch(surface, shapes, (uint32_t)n, width_mm, height_mm);
-    }
-#endif
+    if (!touched) touch_present(surface);
     dhdr_surface_present(surface);
     perf_presented();  /* every picture shown, by either renderer */
 }
@@ -476,7 +485,7 @@ int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned heigh
     if (r == 1) {
         perf_render_size(pixels ? "exact (a movie or the CPU scanout)" : "exact", 1, width, height, window_width,
                          window_height, 0, 0);
-        counter_present(p->surface);
+        counter_present(p->surface, 0);
     }
     return 1;
 }
