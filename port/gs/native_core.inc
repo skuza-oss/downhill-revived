@@ -208,6 +208,14 @@ typedef struct Native {
     float uv_scale[2];                /* FST: reciprocal GS texture dimensions, including 1/16 */
     float vertex_fog[256];            /* same rounded fog/255 values, shared by all vertices */
     int vertex_fog_ready, field_trace_on;
+    /* The last triangle's vertices as native_set converted them (each with its own colour), and
+       their pixels: a strip or fan shares two with the next triangle (finding 146). Good while
+       conv_ok == conv_serial (native_state moves conv_serial) and for the same offset and FST. */
+    GsVertex conv_gs[3];
+    NativeVertex conv[3];
+    int conv_px[3], conv_py[3], conv_fst;
+    uint64_t conv_offset;
+    unsigned conv_serial, conv_ok;
     /* Draws are indexed (dhdr_native_picture_indexed): a vertex a strip or fan shares with the
        previous triangle, and a quad's shared corners, are stored once. Off with DHD_INTERP (its
        mix pairs and moves vertices by their recorded order) and with DHD_NATIVE_INDEXED=0. */
@@ -849,6 +857,7 @@ static void native_state(Native *n, Gs *g, unsigned prim, unsigned ctxt)
         for (unsigned i = 0; i < 256; i++) n->vertex_fog[i] = (float)i / 255.0f;
         n->vertex_fog_ready = 1;
     }
+    n->conv_serial++;  /* zmax, zscale and uv_scale may change below */
     NativeCommand *c = &n->current;
     uint64_t frame = g->reg[GS_FRAME_1 + ctxt], zbuf = g->reg[GS_ZBUF_1 + ctxt], test = g->reg[GS_TEST_1 + ctxt];
     uint64_t scissor = g->reg[GS_SCISSOR_1 + ctxt];
@@ -1146,17 +1155,43 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
         offset -= UINT64_C(8) << 32;
     int fst = prim >> 8 & 1, flat = !(prim >> 3 & 1);
     float x[3], y[3];
+    int px[3], py[3];
     int left = n->box[0], top = n->box[1], right = n->box[2], bottom = n->box[3];
+    /* A triangle's vertices are converted here. A strip's first two are the last triangle's last
+       two, a fan's its first and last: those take the last triangle's conversion when their
+       registers are the same bytes (native_set is a function of them, the offset, FST and the
+       state's scales), so most strip vertices are converted once, not three times. */
+    int triangle = type >= 3 && type <= 5 && count == 3;
+    NativeVertex t[3];
+    unsigned reused = 0;
+    if (triangle && (type == 4 || type == 5) && n->conv_ok == n->conv_serial && n->conv_offset == offset &&
+        n->conv_fst == fst) {
+        unsigned first = type == 4 ? 1 : 0;
+        if (!memcmp(&v[0], &n->conv_gs[first], sizeof *v))
+            t[0] = n->conv[first], px[0] = n->conv_px[first], py[0] = n->conv_py[first], reused |= 1;
+        if (!memcmp(&v[1], &n->conv_gs[2], sizeof *v))
+            t[1] = n->conv[2], px[1] = n->conv_px[2], py[1] = n->conv_py[2], reused |= 2;
+    }
+    /* * 0.0625f: the same value as / 16.0f (a power of two), without a divide a vertex (finding 146) */
     for (unsigned i = 0; i < count; i++) {
-        x[i] = (float)((int)v[i].x - (int)(offset & 65535)) / 16.0f + 0.5f;
-        y[i] = (float)((int)v[i].y - (int)(offset >> 32 & 65535)) / 16.0f + 0.5f;
-        int px = (int)x[i], py = (int)y[i];
-        if (px - 1 < left) left = px - 1;
-        if (py - 1 < top) top = py - 1;
-        if (px + 1 > right) right = px + 1;
-        if (py + 1 > bottom) bottom = py + 1;
+        if (!(reused >> i & 1)) {
+            x[i] = (float)((int)v[i].x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+            y[i] = (float)((int)v[i].y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+            px[i] = (int)x[i], py[i] = (int)y[i];
+            if (triangle) native_set(&t[i], &v[i], &v[i], n, fst, x[i], y[i]);
+        }
+        if (px[i] - 1 < left) left = px[i] - 1;
+        if (py[i] - 1 < top) top = py[i] - 1;
+        if (px[i] + 1 > right) right = px[i] + 1;
+        if (py[i] + 1 > bottom) bottom = py[i] + 1;
     }
     n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
+    if (triangle) {
+        memcpy(n->conv_gs, v, sizeof n->conv_gs); memcpy(n->conv, t, sizeof n->conv);
+        memcpy(n->conv_px, px, sizeof n->conv_px); memcpy(n->conv_py, py, sizeof n->conv_py);
+        n->conv_offset = offset; n->conv_fst = fst; n->conv_ok = n->conv_serial;
+        if (flat) t[0].rgba = t[1].rgba = t[2].rgba;   /* flat: the last vertex's colour */
+    }
     const GsVertex *last = &v[count - 1];
     native_reserve(f, 6);
     if (n->indexed) native_reserve_indices(f, 6);
@@ -1174,13 +1209,10 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
         }
     }
     NativeVertex *o = &f->vertices[f->vertex_count];
-    if (type >= 3 && type <= 5 && count == 3) {
-        if (n->indexed) {
-            NativeVertex t[3];
-            for (unsigned i = 0; i < 3; i++) native_set(&t[i], &v[i], flat ? last : &v[i], n, fst, x[i], y[i]);
-            native_triangle_indexed(f, type, t);
-        } else {
-            for (unsigned i = 0; i < 3; i++) native_set(&o[i], &v[i], flat ? last : &v[i], n, fst, x[i], y[i]);
+    if (triangle) {
+        if (n->indexed) native_triangle_indexed(f, type, t);
+        else {
+            memcpy(o, t, sizeof t);
             f->vertex_count += 3;
         }
     } else if (type == 6 && count == 2) {
