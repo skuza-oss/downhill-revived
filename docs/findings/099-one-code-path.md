@@ -1,5 +1,9 @@
 # 099: one code path for Windows, macOS, Linux and Android
 
+Status: current
+Supersedes: parts of 022, 059, 065, 082
+Checked: 2026-11-04
+
 2026-10-27, branch `desk/integrate`: six lanes (sync, host, audio, net, present, release) each moved
 part of the port onto shared code, and this merge puts them together with `fix/online-player-report`
 (finding 098). The aim: as little platform code as possible, and no old path kept beside a new one.

@@ -1,6 +1,15 @@
 # Round 31: resolution scale for the native renderer
 
-Status: committed. `DHD_SCALE` (dhd.ini `scale`, launcher "Resolution (native)") draws the
+Status: partly superseded by 086 (scale 1x-4x, file names, the gate tool)
+Checked: 2026-11-04
+
+Now: the scale goes from 1x to 8x plus "Match window" (finding 086 S1, the `scale` row of
+`port/render/settings/src/table.rs`, default 2x), the renderer is the Rust one
+(`port/gs/native_core.inc`, finding 085), the GPU's memory can cap the scale and says so (findings
+130, 136), and the gate tool is gone (state traces, finding 081). The rules below for which
+surfaces scale and how coordinates map still hold.
+
+`DHD_SCALE` (dhd.ini `scale`, launcher "Resolution (native)") draws the
 native renderer (`DHD_RENDER=native`, port/gs/gpu_native.inc) at 1x (the PS2's 512 x 448), 2x,
 3x, 4x, or "window" (the smallest of those whose picture is at least as tall as the window).
 Default 2x (it costs nothing measurable; see "Checks"). Game state does not depend on it: `port/tools/gate_native_renderer.py` passes at 1x,

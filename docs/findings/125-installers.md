@@ -1,5 +1,8 @@
 # 125: Installers for the first install (Windows setup, macOS DMG, Linux AppImage)
 
+Status: current
+Checked: 2026-11-04
+
 Players asked for something that installs like other games, and a player could not get the Linux
 zip running on a Steam Deck. From the release after 0.7.5 every platform has an installer next to
 its zip. The installers are only for the first install: the launcher keeps updating from the

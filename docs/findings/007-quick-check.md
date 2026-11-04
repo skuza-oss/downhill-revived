@@ -1,5 +1,8 @@
 # 007 — Quick check before the full trial build
 
+Status: current
+Checked: 2026-11-04
+
 Date: 2026-10-03.
 
 ## The quick check (tools/quick_check.py, try_func's default)

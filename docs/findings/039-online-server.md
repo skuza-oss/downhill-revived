@@ -1,6 +1,16 @@
 # 039: Online server (lobbies and the race relay)
 
-**Superseded for races:** input lockstep was dropped on 2026-10-16; races use state sync
+Status: partly superseded by 044 (INPUT/HASH lockstep relay, input delay, iso SHA-256)
+Checked: 2026-11-04
+
+Do not add input delay, INPUT or HASH frames, or any tick agreement between PCs: races are state
+sync (finding 044), and the relay forwards STATE (5) and EVENT (6) frames
+(`docs/online-protocol.md`). Still true: the Worker + Durable Object rooms, the public list, the
+hibernation and "no awaits on the relay path" rules. Changed since: rooms hold 10 (finding 123),
+the disc check is a hash of the disc's game files (finding 098), rooms live across races
+(finding 119), rejoins use a token (finding 137).
+
+Input lockstep was dropped on 2026-10-16; races use state sync
 (findings 041, 044). The lobby and relay here are still what runs.
 
 2026-10-16. Code in `online/server/`, protocol in `docs/online-protocol.md`, plan in

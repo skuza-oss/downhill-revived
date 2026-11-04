@@ -1,11 +1,13 @@
-# Simulation and rendering at different rates (history)
+# Simulation and rendering at different rates
 
-**History only:** a 2026-10-15 investigation of drawing extra, interpolated pictures between 60 Hz
+Status: rejected
+
+A 2026-10-15 investigation of drawing extra, interpolated pictures between 60 Hz
 game fields (render-only replays of the engine's draw calls) on the 32-bit build. Never shipped.
 The user rejected in-between pictures (finding 049). High frame rates came instead from real game
 steps: the frame-rate unlock (finding 067) and the delta-time clock (finding 139, `port/hle/fps.c`,
-`port/hle/kernel.c`). The separate `DHD_INTERP` presentation (finding 038) still exists but is off
-by default and off online.
+`port/hle/kernel.c`). The separate `DHD_INTERP` presentation (finding 038) still exists as a
+developer variable, off by default and not offered to players.
 
 ## Why render-only extra frames are hard in this engine (still true)
 - `func_00215B68` (prepare) and `func_002161B8` (finish), in `src/unsorted/00215B68.c`, are not
@@ -29,4 +31,4 @@ by default and off online.
 - Many batch builds of the render-only path ran 600 display changes at 49-59 fps (best 59.27);
   120 was never reached, and visual correctness was never reviewed.
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/036-high-refresh-gameplay.md`

@@ -1,5 +1,8 @@
 # 148: The race start was a serial chain: the flare's Z read made the game wait for VU1
 
+Status: current
+Checked: 2026-11-04
+
 2026-11-04, from local main `dd40407`. Target: 60 fps throughout races on the rooted Mi 11i
 throttled to finding 127's low-end profile (`phone_throttle.py --apply t612 --big-max 1209600
 --little-max 1497600`), at render scale 2x and 4x. Every speed run unlocked (`DHD_FPS=240`,

@@ -1,5 +1,7 @@
 # Data fixup audit and reference refresh (round 46)
 
+Status: history
+
 ## Scope and reproducible inventory
 
 `port/tools/audit_data_fixups.py` assembles the converter's image, checks every

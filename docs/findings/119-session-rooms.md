@@ -1,5 +1,8 @@
 # Session rooms (0.7.4)
 
+Status: current
+Checked: 2026-11-04
+
 Session rooms keep the WebSocket room alive across races. The creator's hello
 feature selects the new state machine; old rooms retain their previous behavior.
 Grid membership, finish records, timers, running rule copies and last results

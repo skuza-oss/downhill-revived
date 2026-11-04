@@ -1,6 +1,8 @@
-# Round 26: waits and broad native performance (history)
+# Round 26: waits and broad native performance
 
-**History only:** a 2026-10-15 round on the retired 32-bit D3D11 build (RTX 3070): paced race
+Status: history
+
+A 2026-10-15 round on the retired 32-bit D3D11 build (RTX 3070): paced race
 47.0 → 47.8 fps, late race still ~44 fps, 60 not reached. The D3D11 renderer, its flip-model
 present and the i686 compiler options are gone (finding 088); speed work continued in findings
 032, 066, 089, 090. One fix here is still in the port: the Huffman table bytes (below).
@@ -32,4 +34,4 @@ entry and clears the union before each leaf; layout and child pointers unchanged
 An intermittent menu picture difference with 12,540 texture uploads at field 600 (387 in a good
 run) pointed at texture-submission state, not timing; no cause was found in this round.
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/031-broad-native-performance.md`

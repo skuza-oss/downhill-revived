@@ -1,6 +1,9 @@
 # Round 40: texture replacement packs (upscale mods) in PCSX2's format
 
-Status: committed. The native renderer (`DHD_RENDER=native`) loads PCSX2 texture replacement
+Status: current
+Checked: 2026-11-04
+
+The native renderer (`DHD_RENDER=native`) loads PCSX2 texture replacement
 packs unchanged: a folder of PNGs named by PCSX2's texture hash (in PCSX2,
 `textures\SCUS-97177\replacements`). Code: `port/gs/texpack.c` (names, index, loaders, budget),
 `port/gs/gpu_native.inc` (`native_replace`, the sampler states), `port/gs/raster.hlsl`

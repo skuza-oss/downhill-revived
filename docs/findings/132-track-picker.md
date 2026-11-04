@@ -1,5 +1,9 @@
 # 132: Track picker names and disc previews
 
+Status: current
+Supersedes: parts of 115, 116
+Checked: 2026-11-04
+
 Branch `feat/track-picker`, based on unpublished `next/0.7.7`. No version change.
 
 ## Names

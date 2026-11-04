@@ -1,5 +1,8 @@
 # 106: Discord Rich Presence
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-28, branch `desk/discord` (from `desk/settings`). The player's Discord profile shows what
 they play: the menus, a race with its track and place, the career, an online room or race, a movie,
 with the time since the race (or the session) began, the project's logo and two buttons. One

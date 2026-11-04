@@ -1,5 +1,8 @@
 # 121: Online crash when a remote rider throws a bottle
 
+Status: current
+Checked: 2026-11-04
+
 Two players sent the dhd.log of a 0.7.3 crash in an online race (2026-10-30). One PC hosted
 (one puppet: the guest, 60 fps). The other was a guest in another room (nine puppets: the host
 and eight computer riders, 100 fps). They had different CPUs and GPUs and raced on different

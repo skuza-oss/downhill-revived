@@ -1,5 +1,8 @@
 # Visual sweep corrections (round 51)
 
+Status: current
+Checked: 2026-11-04
+
 Implementation branch `fix/sweep-visuals`, based on release 0.2.4 (`bc68ef08`). The scope is finding
 063's loading card, Fog Editor slider, and Japan loading mosaic, in that order.
 

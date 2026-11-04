@@ -1,6 +1,8 @@
-# Hardware coverage bridge (round 28, history)
+# Opt-in hardware coverage bridge
 
-**History only:** a 2026-10-15 D3D11 bridge that let hardware rasterization generate the pixels
+Status: history
+
+A 2026-10-15 D3D11 bridge that let hardware rasterization generate the pixels
 of the round-27 compute shader's exact pixel function (finding 033's first stage). Default-on
 then (`DHD_GS_HARDWARE`, explicit `0` for compute). Retired with Direct3D 11 (finding 088): the
 Rust renderer's exact and native front ends replaced it (findings 084-086).
@@ -28,4 +30,4 @@ Rust renderer's exact and native front ends replaced it (findings 084-086).
   live). An FXC trap found on the way: the preprocessor treated a negative macro sentinel as
   unsigned and picked the wrong branch (fixed with an explicit `defined` guard).
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/035-hardware-raster-bridge.md`

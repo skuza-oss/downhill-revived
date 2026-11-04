@@ -1,5 +1,8 @@
 # 010 — Some engine code was built with SCE ee-gcc 2.9; -fno-opt-stack files
 
+Status: current
+Checked: 2026-11-04
+
 Date: 2026-10-09.
 
 ## SCE ee-gcc 2.9 file at 0x201030

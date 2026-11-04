@@ -1,5 +1,9 @@
 # 085: The Rust (wgpu) GS renderer: spike report
 
+Status: current
+Supersedes: parts of 084
+Checked: 2026-11-04
+
 2026-10-25, branch `render/rust` (spike S, combined from the parallel parts S-native, S-web and
 S-present, then S5 and S6). The plan and its task list are kept outside the repository. Its section
 2 defines the spike, and this report answers it. Everything here is synthetic: test programs and

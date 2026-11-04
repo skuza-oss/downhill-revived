@@ -1,5 +1,14 @@
 # 050: PC settings and online screens in the game's own menus (research), first-start disc prompt
 
+Status: partly superseded by 093 (the first-start disc prompt, Launcher.ps1)
+Checked: 2026-11-04
+
+The front-end research (one loop, screens, SharedMenu popups, text and font, the hooks) is
+current, and the PC SETTINGS page and ONLINE screens were built from it (findings 064, 065, 092;
+`port/hle/pc_settings.c`, `menu_page.c`, `online_menu.c`). The first-start disc prompt is gone:
+the launcher picks the disc (Android: its document picker), and the game has no disc dialog
+(findings 093, 099). `Launcher.ps1` is gone too (the launcher is `port/launcher`, finding 093).
+
 Round 35. The user wants the PC settings (today in port/launcher/Launcher.ps1) and, later, online
 lobbies to look native: part of the game's own front end, with its font, layout, sounds and pad
 navigation. This finding records how the front end works in the decomp and what host-side hooks
@@ -183,7 +192,7 @@ race (D), where opening a game popup would pause or change the game's own state.
 3. Then E/G, with F/H once the online client API is fixed.
 4. D last, or as the overlay.
 
-## First-start disc prompt (implemented this round)
+## First-start disc prompt (implemented this round; removed, see the note at the top)
 `host_disc_ready` (port/hle/host.c), called by `main` (port/hle/boot.c) before the relaunch, so
 only the first of the two dhd.exe processes asks.
 - **When it asks:** dhd.ini has no `iso`, or the file is gone, or it isn't Downhill Domination

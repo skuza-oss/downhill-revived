@@ -1,6 +1,9 @@
 # Round 34: where a race field's CPU time goes, and the first fixes
 
-Status: committed (round 34). Goal: more game fields per second and lower worst-case fields on the CPU
+Status: current
+Checked: 2026-11-04
+
+Round 34. Goal: more game fields per second and lower worst-case fields on the CPU
 (Ryzen 5 7600, RTX 3070), game state exact. All numbers are `DHD_RENDER=native`, uncapped frame
 clock, the bench race (`port/tools/bench_race.py`), fields 3000-9100, on an idle PC with the game
 window focused, one game at a time (`build/port/r30/benchlock.sh`).

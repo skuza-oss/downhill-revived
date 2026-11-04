@@ -1,5 +1,8 @@
 # 083: Direct wasm core in Node (first web-route proof)
 
+Status: partly superseded by 087 (the i686 core link, the JS renderer)
+Checked: 2026-11-04
+
 The core now runs directly in Node 24.21.0 with JSPI, without wasm2c, a browser, window, sound
 device, or an ISO copy. The existing host GS/VIF1/VU1 C runs in a second wasm reactor sharing the
 core's WebAssembly.Memory.

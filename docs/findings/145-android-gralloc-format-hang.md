@@ -1,5 +1,8 @@
 # 145: Android black screen on an Adreno 710 (the gralloc lock in the surface format query)
 
+Status: current
+Checked: 2026-11-04
+
 ## The report
 
 A player's Redmi Note 13 Pro 5G (Snapdragon 7s Gen 2, SM7435, Adreno 710, Qualcomm Vulkan driver

@@ -1,5 +1,8 @@
 # 097: the lens flare's Z probe caused the race stutter (issue #2)
 
+Status: current
+Checked: 2026-11-04
+
 ## The stutter
 
 Players saw frame drops and hitches in races (issue #2), on fast PCs too. Automated races at a

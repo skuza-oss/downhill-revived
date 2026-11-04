@@ -1,6 +1,8 @@
 # 027 - Real-time speed: round 19 (2026-10-15)
 
-**History only:** the 32-bit D3D11 build's first speed round, from about 15-19 fps to a steady
+Status: history
+
+The 32-bit D3D11 build's first speed round, from about 15-19 fps to a steady
 24.5 fps paced race (29.5 in menu 33) on an RTX 3070. Its numbers, its pacing rule and its open
 crash are all replaced: the crash is fixed (finding 028), pacing is the delta-time clock (finding
 139, `port/hle/kernel.c` `pace`, `port/hle/fps.c`), and speed is findings 066, 089 and 090.
@@ -33,4 +35,4 @@ the frame's GPU time add to its CPU time.
 Race EE dumps at GO+0/+2/+12/+16 must equal the round's first build, except host pointers and dead
 native stack frames (the state-trace tools of findings 081/082 now do this per field).
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/027-real-time-speed.md`

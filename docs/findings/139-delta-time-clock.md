@@ -1,5 +1,9 @@
 # 139: one delta-time game clock
 
+Status: current
+Supersedes: parts of 049, 052, 067
+Checked: 2026-11-04
+
 Branch `feat/delta-time-clock` (from main at 0.7.7 + findings 137/138), 2026-11-02.
 
 ## The report

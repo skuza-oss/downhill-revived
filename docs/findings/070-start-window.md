@@ -1,6 +1,8 @@
-# 070: the start window and the shader cache (history)
+# 070: the start window and the shader cache
 
-**History only:** 0.2.x (October 2026), 32-bit Windows build. Both parts are gone: the start
+Status: history
+
+0.2.x (October 2026), 32-bit Windows build. Both parts are gone: the start
 window was removed on 2026-10-27, when the launcher (`port/launcher`, finding 093) became the
 start screen on every platform, and the shader cache went with the D3D11 renderer (finding 088).
 The Rust renderer compiles its pipelines through wgpu (DX12 shaders with the pinned DXC, finding
@@ -20,4 +22,4 @@ steps on the development PC, idle:
 Show something within a second of a start and say what the slow step is. The launcher does that
 now; if shader compile time ever grows again, measure it with `port/tools/shader_compile_time.py`.
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/070-start-window.md`

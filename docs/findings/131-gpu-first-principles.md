@@ -1,5 +1,8 @@
 # 131: The draw pass from first principles: where an iGPU frame's time goes, and what is left
 
+Status: current
+Checked: 2026-11-04
+
 2026-11-01/02. Result: the iGPU holds 60 fps at 5x (was 4x); at every scale its GPU time per frame
 is 22-24% lower (4x 12.02 -> 9.11 ms, 8x 45.13 -> 35.30 ms uncapped), with the game unchanged and
 the picture unchanged except for one-step rounding on DX12 (section "The DX12 picture change").

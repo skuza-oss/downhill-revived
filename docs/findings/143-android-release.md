@@ -1,5 +1,9 @@
 # 143: the Android APK as a release asset (release key, update notice, no online on phones)
 
+Status: current
+Supersedes: parts of 091
+Checked: 2026-11-04
+
 Branch `feat/android-release` (from local main baa24d5), 2026-11-03. (Number 143: 142 is the
 delta-time replays; no branch used a higher one.)
 

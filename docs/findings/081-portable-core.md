@@ -1,6 +1,10 @@
 # 081: A portable 64-bit core (plan)
 
-Status: phase 0 (audit) and phase 1 (state trace) done; phase 2 next. Branch `port/portable-core`.
+Status: partly superseded by 088 (the phase status; the 32-bit description is the then-state)
+Checked: 2026-11-04
+
+Written during phase 1 (2026-10-24, branch `port/portable-core`). Every phase is done since: the
+64-bit build is the only build and shipped as 0.4.0 (finding 088).
 
 ## The problem
 

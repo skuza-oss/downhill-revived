@@ -1,5 +1,8 @@
 # 109: Vulkan framebuffer reuse across encoder resets
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-28, branch `perf/fbcache`, based on `prof/android-pcsx2` and `perf/phone120-measure`
 (`f50127553`). Number checked against main and every local perf/* branch before reservation; 102 was
 the highest existing finding.

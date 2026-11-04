@@ -1,5 +1,8 @@
 # 126: Android bench, 2026-10-31 — the low-end phone (Realme RMX3930, Unisoc T612)
 
+Status: current
+Checked: 2026-11-04
+
 A test round run by a sub-agent: benchmark the game on the phone on the end of the USB cable, with
 finding 108's measurement method. The phone turned out **not** to be the Mi 11i of findings
 107/108/110/112 but a Realme RMX3930 (Unisoc T612, Mali-G57, Android 14) — the low-end target the

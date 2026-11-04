@@ -1,6 +1,9 @@
 # 013: the game's `Abs` is a volatile `abs.s` asm helper
 
-Status: accepted by the user 2026-10-11; `tools/source_rules.py` allows exactly this form.
+Status: current
+Checked: 2026-11-04
+
+Accepted by the user 2026-10-11; `tools/source_rules.py` allows exactly this form.
 
 ```c
 static inline float Abs(float x)

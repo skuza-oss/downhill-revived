@@ -1,6 +1,8 @@
-# Frame critical path investigation (round 27, history)
+# Frame critical path investigation
 
-**History only:** a 2026-10-15 round on the retired 32-bit build's compute rasterizer (an HLSL
+Status: history
+
+A 2026-10-15 round on the retired 32-bit build's compute rasterizer (an HLSL
 compute shader over swizzled GS memory, D3D11). It took the late race from 44.98 to 62.9 fps
 uncapped and 59.93 paced on the RTX 3070. That renderer is gone; the Rust renderer (findings 085,
 088) carries its shader rules into WGSL (`port/gs/raster.wgsl`, finding 084). Finding 033 is the
@@ -28,4 +30,4 @@ copies keep atomics.
   buffer): undefined native producer bytes, fixed in finding 034, not excluded.
 - 120 fps would need both raster and geometry (VIF ~13 ms CPU a field then) cut; see 033, 037.
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/032-frame-critical-path.md`

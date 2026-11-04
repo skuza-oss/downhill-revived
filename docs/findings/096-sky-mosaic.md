@@ -1,5 +1,8 @@
 # 096: Sky mosaic from high jumps (issue #2), native renderer
 
+Status: current
+Checked: 2026-11-04
+
 Public issue #2 (0.6.0, RTX 3070, scale 3 at 1080 lines, Smooth): "When jumping from high cliffs,
 the sky textures become blurry", on the first career race (Italy freeride, track 0). The player's
 pictures show the sky broken into rectangular blocks of different sizes and brightness. It happens

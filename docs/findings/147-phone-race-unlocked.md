@@ -1,5 +1,8 @@
 # 147: Unlocked phone measurements must reach the race
 
+Status: current
+Checked: 2026-11-04
+
 2026-11-04, from main 418e5f4. Target: 60 displayed fps in races at 2x and
 4x on finding 127's frozen low-end profile. Investigation and experiments below.
 

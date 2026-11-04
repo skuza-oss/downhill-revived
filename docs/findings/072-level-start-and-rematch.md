@@ -1,5 +1,8 @@
 # Level starts, online restarts and widescreen (2026-10-18)
 
+Status: current
+Checked: 2026-11-04
+
 ## Flyby input and race phase
 
 Both host and guest switched to physical input only after the countdown or a previous start. Phase 5

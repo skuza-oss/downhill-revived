@@ -1,4 +1,7 @@
-﻿# 116: Track thumbnails for the race room (research, not built)
+# 116: Track thumbnails for the race room (research, not built)
+
+Status: partly superseded by 132 ("not built": 132 built it)
+Checked: 2026-11-04
 
 The race room's mock-up had a small picture of the track (finding 115). The room shows the
 track name in large type instead. This is what the game has that could serve as the picture,

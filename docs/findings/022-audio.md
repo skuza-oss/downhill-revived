@@ -1,5 +1,15 @@
 # 022 — Audio: 989snd on libsd, native on the PC
 
+Status: partly superseded by 099 (WASAPI output; the open lists of the rounds)
+Checked: 2026-11-04
+
+The protocol, data and mixer rules are current (`port/hle/sound.c`). Changed since: the host
+output is SDL3's audio stream on every platform (`port/host/sound_out_sdl.c`, finding 099; WASAPI
+and `link.py` are gone); the mixer gets wall time on the delta-time clock, so its sample count per
+VBLANK follows real time rather than a fixed 4004/5 (finding 139, `port/hle/fps.c`); 989snd's END
+grain, solo flags and instance limits now apply (finding 133). The "open" lists of each round
+below were worked through in the later rounds of this finding.
+
 Date: 2026-10-13. The PC build had no sound: `port/hle/iop.c` acknowledged the
 sound driver's RPCs. This finding records what the game's sound system is and
 the native replacement in `port/hle/sound.c`.
@@ -93,7 +103,7 @@ with `ole32.lib`):
 - **Streams:** `.VAG` images load whole and decode as game time advances them
   (the stream engine is covered by tests; which queued/direct command starts
   a disc stream is still to be identified — see below).
-- **Host output:** WASAPI shared mode (plain C, COM) on a worker thread
+- **Host output (then):** WASAPI shared mode (plain C, COM) on a worker thread
   draining a half-second ring. `DHD_SND_OFF=1` disables it (headless/tests);
   with no audio device the thread exits and the game runs silently.
 
@@ -101,7 +111,8 @@ with `ole32.lib`):
 
 Audio never influences game state. `sound_tick()` runs once per vsync and
 renders exactly `48000·1001/60000 = 4004/5` samples per frame from the vsync
-count (integer Bresenham, no host clock). Voice handles, bank handles, stream
+count (integer Bresenham, no host clock). (Still so on the original clock that deterministic
+runs keep; on the delta-time clock the mixer's time per VBLANK is wall time, finding 139.) Voice handles, bank handles, stream
 positions and every reply word are functions of that count only. The WASAPI
 thread only drains; if the host falls behind, rendered samples are dropped
 from the ring *after* game-visible state advanced, and underruns play

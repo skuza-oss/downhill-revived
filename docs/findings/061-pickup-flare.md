@@ -1,5 +1,8 @@
 # Pickup flare investigation (round 45)
 
+Status: current
+Checked: 2026-11-04
+
 ## Reproduction, before the fix
 
 Baseline: clean build `00c53232`, current main's round-44 renderer. Local evidence is

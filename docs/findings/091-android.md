@@ -1,5 +1,8 @@
 # 091: Android arm64 build (task AND1)
 
+Status: partly superseded by 143 (the known gaps (touch, online, release key) and first speeds)
+Checked: 2026-11-04
+
 Branch `rr/AND1` (from `e7bd97212`, main `4755df0af` merged in). **It runs on the Mi 11i (M2012K11G,
 Android 13): title, menus and a race draw correctly, at about 24-25 fields/s in a race** (see
 "Device results").

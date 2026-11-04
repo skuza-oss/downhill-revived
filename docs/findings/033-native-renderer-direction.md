@@ -1,6 +1,8 @@
-# Native renderer direction (history)
+# Native renderer direction
 
-**History only:** the 2026-10-15 decision to move from the round-27 compute rasterizer (finding
+Status: history
+
+The 2026-10-15 decision to move from the round-27 compute rasterizer (finding
 032) to hardware rasterization, Windows first on Direct3D 11. Built as the D3D11 hardware bridge
 (finding 035), then the D3D11 native renderer (finding 038); all D3D11 code is retired. Today:
 the Rust wgpu renderer with an exact front end (`port/gs/gpu_exact.inc`) and a native, upscaled
@@ -29,4 +31,4 @@ one (`port/gs/native_core.inc`, the default), findings 084, 085, 088.
   (`test_hw_coverage`, removed with D3D11). ROV order protects overlapping screen pixels only,
   not different pixels aliasing one VRAM word: alias checks stay.
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/033-native-renderer-direction.md`

@@ -1,9 +1,16 @@
 # Online four-player race: what the game already does, and what the port must add
 
-**Superseded:** the lockstep split-screen plan below was dropped on 2026-10-16; races use state
-sync, one-player races with puppet riders (findings 041, 044).
+Status: partly superseded by 044 (the lockstep split-screen race plan)
+Checked: 2026-11-04
 
-Status: research only (2026-10-16). Nothing here was run: another worker was benchmarking on
+Do not build online races as one shared split-screen race with the same inputs on every PC
+(lockstep): that plan was dropped on 2026-10-16. Each PC runs a one-player race with puppet
+riders (finding 044). Still true, and cited by the code: the multitap and pad mapping (now
+implemented: `port/hle/iop.c` `rpc_mtap`, `port/hle/pad.c`, local split screen with 3-4 pads),
+the rider world `D_002AF2C0`, the setup block `D_004B25A0`, the seed, and the split-screen
+differences; sections 6-7 (lockstep hazards, rollback) and the integration recipe are history.
+
+Research only (2026-10-16). Nothing here was run: another worker was benchmarking on
 this PC. Every claim cites the US (SCUS_971.77) code; experiments that need a run are written
 out in "Experiments for the game-side worker". Plan: `docs/ONLINE-PLAN.md`.
 

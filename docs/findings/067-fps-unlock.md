@@ -1,5 +1,8 @@
 # 067 - Real offline simulation steps (experimental; equivalence not established)
 
+Status: partly superseded by 139 (the fixed 60 clock, the 144 cap and debt, online forced to 60, replays off)
+Checked: 2026-11-04
+
 Nothing is published or merged.
 
 Cleanup 0.2.5: the measurement scripts, probes, traces and rejected trials named below were removed

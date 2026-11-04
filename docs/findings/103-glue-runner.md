@@ -1,5 +1,8 @@
 # 103: one copy of the GS glue's decisions, one process runner for the test tools
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-27, branch `desk/glue-runner` (from `desk/integrate`): two follow-ups of the architecture
 review after finding 099. The aim, as there: one implementation of each decision, the old copies
 deleted.

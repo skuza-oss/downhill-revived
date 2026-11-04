@@ -1,10 +1,19 @@
 # 020 — PC runtime: memory, kernel, IOP, DMA and VU0 (boot, disc, input step)
 
-The PC build (`build/port/link/dhd.exe`) runs the game's own `main` on a native replacement of
+Status: partly superseded by 088 (the 32-bit memory map, relaunch, Windows fibers, the then-missing parts)
+Checked: 2026-11-04
+
+Now: the core is a wasm32 module on a 64-bit host (finding 082): guest RAM and its mirrors are
+`port/host64/guest_memory*.c` (no relaunch, no fixed host addresses), PS2 threads are the shared
+fiber module `port/host64/fiber.c` (finding 099), pads come through SDL3 (finding 059), and the
+memory card, multitap, sound and renderer all exist (findings 040, 022, 021, 085). The SIF, CDVD,
+IOP file, DMA, VIF, VU0 and C++ vtable rules below still hold.
+
+The PC build (then `build/port/link/dhd.exe`, today `dhd64.exe`) runs the game's own `main` on a native replacement of
 the PS2 system (`port/hle/`) and the emulated register file of the asm runtime
 (`port/runtime/`). This finding records how each part works and why.
 
-## Memory
+## Memory (the 32-bit build's map; retired, see the note above)
 
 - PS2 RAM (32 MB) is one shared memory block, mapped at host `0x08000000` (cached), and at
   `0x28000000` and `0x38000000` for the game's uncached (`| 0x20000000`) and uncached-accelerated
@@ -32,7 +41,7 @@ the PS2 system (`port/hle/`) and the emulated register file of the asm runtime
 
 ## Kernel, threads, IOP
 
-- `kernel.c`: PS2 threads are Windows fibers. One runs at a time, and switches happen where the
+- `kernel.c`: PS2 threads are fibers (then Windows fibers; now `port/host64/fiber.c`). One runs at a time, and switches happen where the
   PS2 kernel makes them: blocking, a higher priority thread becoming ready, an interrupt
   handler. Interrupts (VBLANK, DMAC) are delivered at kernel entries. `boot.c` does crt0's work
   and calls `main`.
@@ -49,7 +58,7 @@ the PS2 system (`port/hle/`) and the emulated register file of the asm runtime
     one result word per command, framed by `0xFFFFFFFF`.
   - Command `0x38` is a disc read `{lsn, sectors, EE address}`. It clears the busy word
     `D_004CD380[0]` and puts the error in `[4]`. The game loads most files through it.
-  - Other sound commands are acknowledged (no audio yet).
+  - Other sound commands were acknowledged then (no audio yet; now `sound.c`, finding 022).
 - The game's debug prints (empty functions in retail) go to the log with `DHD_LOG=1`
   (`patches.py DEBUG_PRINT`, `host_safe_vprint` checks each `%s` pointer).
 
@@ -58,7 +67,8 @@ the PS2 system (`port/hle/`) and the emulated register file of the asm runtime
 - `dma.c`: at each kernel entry, channels with `CHCR.STR` set are run and ended (STR cleared,
   then the DMAC interrupt). Scratchpad channels copy. VIF0/VIF1 transfers are walked in normal or
   source-chain mode (cnt/next/ref/refs/refe/call/ret/end, TTE sends each tag's upper half), and
-  the words go to `vif.c`. GIF transfers are dropped until the renderer exists.
+  the words go to `vif.c`. GIF transfers were dropped until the renderer existed (now PATH3 to
+  `port/gs`, finding 021).
   `sceGsSyncPath` (`func_002433A8`) is native.
 - `vif.c`: VIF codes. MPG loads micro memory. UNPACK fills VU data memory, with the CL/WL
   cycles, the mask, the row/column registers and the offset/difference modes. MSCAL/MSCNT start
@@ -128,5 +138,6 @@ State on 2026-10-13:
   and runs its first scene setup with VU0.
 - It keeps running its first screen (no crash in 28 s); kind-3 register passing is fixed in `src`
   (58 sites, still matching).
-- Controllers: `pad.c` (padman servers, pad area refreshed each vsync from XInput or the keyboard).
-- Not written yet: memory card, multitap, sound, and VU1/GS (the renderer).
+- Controllers: `pad.c` (padman servers, pad area refreshed each vsync; then XInput or the
+  keyboard, now SDL3 and the keyboard, finding 059).
+- Not written yet then: memory card, multitap, sound, and VU1/GS (the renderer). All exist now.

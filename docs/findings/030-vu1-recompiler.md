@@ -1,5 +1,9 @@
 # 030 - Round 22: VU1 recompiler experiments (2026-10-15)
 
+Status: current
+Supersedes: parts of 029
+Checked: 2026-11-04
+
 Continuation of finding 029. Starting commits: 9cc58bf8 (MTVU default),
 a087f597 (zero name buffer), e714d282 (whole-register vector moves).
 The acceptance threshold is at least 3% faster in the 32-capture replay bench,

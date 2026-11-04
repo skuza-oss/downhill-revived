@@ -1,5 +1,8 @@
 # 115: The race room, laid out (layout B)
 
+Status: partly superseded by 132 (no track thumbnails)
+Checked: 2026-11-04
+
 A player asked for three things in the online room: READY in green, a sound when someone
 joins or gets ready, and no way to spam Ready. The room was a column of menu rows. This work
 replaces it with a screen laid out as the HTML mock-up the players chose (layout B), still in

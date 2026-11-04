@@ -1,5 +1,8 @@
 # 004 — How ps2eeas addresses small data
 
+Status: current
+Checked: 2026-11-04
+
 Date: 2026-10-01.
 
 ## ps2eeas small-data addressing (corrects finding 003's `.extern` hoist)

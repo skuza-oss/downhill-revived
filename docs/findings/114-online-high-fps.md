@@ -1,5 +1,8 @@
 # 114: online races at the player's frame rate
 
+Status: current
+Checked: 2026-11-04
+
 Branch `feat/online-high-fps` (from `release/0.7.1`), 2026-10-28. Online races used to be forced to
 60 (`port/hle/fps.c`: `return pads_online() ? 60 : requested;`) as a safety default. Online is state
 sync (findings 041, 044, 047): each PC runs its own one-player race and nothing has to stay in step

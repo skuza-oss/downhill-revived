@@ -1,7 +1,11 @@
 # 058: the game's font drawn sharp at high resolutions
 
-Round 42. Code: `port/gs/font_sharp.c`, its hooks in `port/gs/gpu_native.inc`
-(`native_decode`, `native_replace`, `native_texture`), dhd.ini `font` (`port/hle/host.c`),
+Status: current
+Checked: 2026-11-04
+
+Round 42. Code: `port/gs/font_sharp.c`, its hooks in the native front end (then
+`port/gs/gpu_native.inc`, now `native_core.inc` and `gpu_rust_shared.inc`: `native_decode`,
+`native_replace`, `native_texture`), dhd.ini `font` (then `port/hle/host.c`, now `dhd_settings`),
 PC SETTINGS > Font (`port/hle/pc_settings.c`).
 
 ## The problem

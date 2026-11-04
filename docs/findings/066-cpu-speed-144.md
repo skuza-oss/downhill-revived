@@ -1,5 +1,8 @@
 # 066 — CPU speed toward 144 real steps/s
 
+Status: partly superseded by 090 (VU0 AOT opt-in; the i686 build)
+Checked: 2026-11-04
+
 Pure host performance work; the simulation clock and matching `src/` are unchanged. The real
 simulation-rate work is separate.
 

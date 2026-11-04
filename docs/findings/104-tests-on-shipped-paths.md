@@ -1,5 +1,8 @@
 # 104: test programs on the shipped paths
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-28. The port's test programs used to compile for 32-bit Windows (pctarget.py's
 i686-pc-windows-itanium, build.py's objects, clang-cl -m32), years after players stopped running
 that build (finding 088). They now run their code where the game runs it.

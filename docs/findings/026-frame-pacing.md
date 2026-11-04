@@ -1,5 +1,8 @@
 # 026 - Frame pacing: the vblank wait and the virtual clock (2026-10-14)
 
+Status: current
+Checked: 2026-11-04
+
 The port (under `DHD_FRAME_CLOCK=1`, the deterministic virtual clock of finding 024) stepped
 the race at delta 2 (30 fps, dt 1/30) where PCSX2 steps at delta 1 (60 fps). From GO+1 on,
 the game state diverged. This finding records the retail measurement, the cause and the fix.

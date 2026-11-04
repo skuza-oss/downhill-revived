@@ -1,5 +1,8 @@
 # 084: The wgpu renderer — moving the GS from D3D11 to WebGPU
 
+Status: partly superseded by 085 (the C wgpu-native backend (gpu_wgpu.c))
+Checked: 2026-11-04
+
 This is the design document for phase 5 of finding 081 ("the platforms: wgpu renderer, Linux, web,
 Android, iOS"). It inventories what the PS2 GS renderer asks of D3D11, maps every use onto webgpu.h,
 decides how `raster.hlsl` becomes WGSL, pins the wgpu-native version and its build/link story,

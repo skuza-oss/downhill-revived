@@ -1,6 +1,8 @@
-# Native geometry CPU investigation toward 120 fps (history)
+# Native geometry CPU investigation toward 120 fps
 
-**History only:** 2026-10-15 candidates on the 32-bit build to cut VU1 geometry CPU time, all
+Status: rejected
+
+2026-10-15 candidates on the 32-bit build to cut VU1 geometry CPU time, all
 compile-time opt-in and default off, none accepted. The 64-bit build's VU1 work replaced them:
 AOT blocks and native kernels (`port/tools/vu1_aot.py`, `vu1_native_clip.py`,
 `port/runtime/vu1_native_*.h`), findings 046, 066 and 090 (VU1R, OP3).
@@ -23,4 +25,4 @@ and 2.61 ms a field, B0078/1CB0 0.71, B1638/1040 0.61, B17E0/1040 0.54: the firs
 - The clipping program touches 28 of VF1..VF31 (VF18/19/25 absent): a union-based spill
   elimination would save little.
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/037-native-geometry-120fps.md`

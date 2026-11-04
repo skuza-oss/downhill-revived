@@ -1,7 +1,10 @@
 # 141: touch controls for phones
 
-Status: branch `feat/touch-controls` (from `main` 0330eab, 0.7.7). Built for Windows x64 and
-Android arm64; unit tests pass; not yet run in the game (the lead's checks are at the end). No
+Status: current
+Checked: 2026-11-04
+
+Branch `feat/touch-controls` (from `main` 0330eab, 0.7.7), merged into main and run on the Mi 11i
+(section "Phone test (Mi 11i)"). Built for Windows x64 and Android arm64; unit tests pass. No
 change to `src/`.
 
 The design is the reviewed touch-controls spec (round 14: two presets, Thumb zones and Classic

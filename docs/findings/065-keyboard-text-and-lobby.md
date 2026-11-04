@@ -1,4 +1,7 @@
-﻿# 065: Keyboard text entry and online selection flow
+# 065: Keyboard text entry and online selection flow
+
+Status: partly superseded by 099 (the WM_CHAR text path)
+Checked: 2026-11-04
 
 2026-10-18. Implementation and final clean-build/default-gate acceptance complete.
 All game-derived captures stay local in ignored `build/port/r65/`.

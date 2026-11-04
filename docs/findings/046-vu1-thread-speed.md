@@ -1,6 +1,9 @@
 # Round 32: VU1 thread speed (native 07F0 kernel, VIF stream unpack)
 
-Status: committed. Goal: headroom for 120/144 Hz and no slow-downs in heavy scenes, with
+Status: current
+Checked: 2026-11-04
+
+Goal: headroom for 120/144 Hz and no slow-downs in heavy scenes, with
 game state and VU1 output exact. All numbers are `DHD_RENDER=native`, uncapped frame clock,
 the bench race (`port/tools/bench_race.py`).
 
@@ -103,7 +106,8 @@ taken while another build used the CPU is discarded.
 
 ## Next
 
-- EE/VU overlap: the game thread waits half its time for the pipeline at the frame-end
+- EE/VU overlap (tried in finding 048 and reverted; shipped later as deferred vsync, finding 090
+  HO1): the game thread waits half its time for the pipeline at the frame-end
   `sceGsSyncPath` and at vsync. Packets are already copied into the ring, so the game's
   buffers are free at once; what needs the drain is presentation, the VBLANK handler's GS
   state (CSR FIELD, display latch) and readbacks. Queuing the vsync work as a ring marker

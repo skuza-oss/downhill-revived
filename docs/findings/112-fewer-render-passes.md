@@ -1,5 +1,8 @@
 # 112: Fewer native render passes
 
+Status: current
+Checked: 2026-11-04
+
 Branch `perf/fewer-passes`, based on `5beba4d3e`. Source mirror, builds, caches, APKs, traces and
 captures stay on F:; none are committed. No proprietary input was changed.
 

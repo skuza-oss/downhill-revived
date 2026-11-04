@@ -1,5 +1,8 @@
 # 012: C idioms that steer SN ee-gcc 2.95.3 (from sibling PS2 decomps)
 
+Status: current
+Checked: 2026-11-04
+
 Our compiler (SN BUILD 1.36) is the one used by OpenRAC's Ratchet & Clank decomps. Their notes
 list C-level levers for the near misses that register-allocation and scheduling leave behind.
 Condensed and paraphrased here; see the sources for their examples.

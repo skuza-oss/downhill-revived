@@ -1,5 +1,8 @@
 # 100 — Other releases: what supporting the European disc (and others) would take
 
+Status: current
+Checked: 2026-11-04
+
 ## In short (for players)
 
 - **Only the USA disc works:** *Downhill Domination*, SCUS-97177. Dump your own disc to an ISO

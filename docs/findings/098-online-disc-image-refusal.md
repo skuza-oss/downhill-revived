@@ -1,5 +1,8 @@
 # 098: a player couldn't create a public room (the disc image), and the log said nothing
 
+Status: current
+Checked: 2026-11-04
+
 A player on 0.6.4 or older reported that they couldn't create a public room or play online. They
 fixed it themselves by choosing another disc image. Their dhd.log (1281 bytes) ended with `options:
 restored ...` and had no `online menu:` line at all.

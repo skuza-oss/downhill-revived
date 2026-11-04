@@ -1,5 +1,9 @@
 # 118: The 0.7.4 online flow in the game: room rules, back to the room, quick race
 
+Status: current
+Supersedes: parts of 047
+Checked: 2026-11-04
+
 0.7.3's rooms raced once and then offered a rematch from the results screen. In 0.7.4 a room
 lives on between races (the server side is finding 119, the wire is "Session rooms (0.7.4)" in
 `docs/online-protocol.md`). This finding is the game's side: the race room, the race's pause

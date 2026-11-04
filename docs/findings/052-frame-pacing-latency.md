@@ -1,5 +1,18 @@
 # 052 — Frame pacing and input latency (round 38)
 
+Status: partly superseded by 139 (the fixed 59.94 Hz grid at 60; D3D11 present details)
+Checked: 2026-11-04
+
+Still true: just-in-time frames (the EE waits until `next_due - work`, then re-reads the pad;
+`DHD_LATENCY=0` gives the old order, `port/hle/kernel.c`) and the precise wait
+(`host_wait_wall`). Changed: the grid is the selected rate's, and every frame steps by the real
+time since the last (the delta-time clock, finding 139), not a fixed 59.94 Hz field; the DXGI
+flip-model, waitable-object and `ALLOW_TEARING` details describe the retired D3D11 present
+(finding 088) — the Rust renderer presents through wgpu, `DHD_TEARING` still reads there
+(`port/gs/gpu_rust.c`); the precise wait is one shared `host_wait_wall` (`port/host/host_sdl.c`:
+a sleep to 1 ms before the deadline, a high-resolution timer on Windows, nanosleep on POSIX, then
+a pause-instruction spin; finding 099).
+
 Goal: a flat 16.68 ms present line on a 144 Hz G-SYNC monitor with the game at 59.94 pictures
 a second, and the youngest pad state the game can use, without changing the simulation.
 
@@ -35,7 +48,7 @@ CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)` to 1 ms before the deadline (fallback `t
 and `Sleep`), then a `YieldProcessor` spin on QueryPerformanceCounter. The timer woke up to
 0.85 ms late here, hence the 1 ms spin. Deadlines are absolute (`next = prev + period`).
 
-Presentation (present.c, gpu_native.inc):
+Presentation then (present.c, gpu_native.inc; D3D11, retired):
 - FLIP_DISCARD with `DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT`, plus `ALLOW_TEARING`
   when `IDXGIFactory5::CheckFeatureSupport` says yes (`DHD_TEARING=0` turns it off).
 - `IDXGISwapChain2::SetMaximumFrameLatency(1)` and the waitable object, waited on before drawing

@@ -1,6 +1,9 @@
 # 134: controllers: stick dead zone, button icons, starting without the launcher
 
-Status: branch `feat/controllers` (from `next/0.7.7`). Issues #20 (a dead-zone setting with a
+Status: current
+Checked: 2026-11-04
+
+Branch `feat/controllers` (from `next/0.7.7`), merged for 0.7.7. Issues #20 (a dead-zone setting with a
 visual indicator) and #27 (a Steam Deck shortcut without the launcher; Xbox button prompts).
 No change to `src/`. The in-game checks left for the merged build are listed at the end.
 

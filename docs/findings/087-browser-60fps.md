@@ -1,5 +1,9 @@
 # 087: Browser speed toward 60 fps
 
+Status: current
+Supersedes: parts of 083
+Checked: 2026-11-04
+
 2026-10-25, branch `render/rust`. Shared context: the browser runs at about 25-30 fields/s on the
 title and 17-25 in a race (finding 086 W1, W4); the game worker is CPU-bound. One section per task.
 

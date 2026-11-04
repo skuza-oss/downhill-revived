@@ -1,5 +1,8 @@
 # Assigned-function validation and shared build serialization
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-06
 
 ## Byte identity alone does not establish decompilation

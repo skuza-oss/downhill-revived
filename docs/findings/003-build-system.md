@@ -1,5 +1,8 @@
 # 003 — Build system: retail image from asm + C, byte-identical
 
+Status: current
+Checked: 2026-11-04
+
 ## Result
 `python tools/configure.py && python -m ninja` rebuilds SCUS_971.77's loaded image and
 `tools/check_image.py` reports MATCH: entry point and every allocated section (.text .vutext

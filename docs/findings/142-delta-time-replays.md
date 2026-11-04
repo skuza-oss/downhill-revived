@@ -1,5 +1,8 @@
 # 142: race replays, the attract demo and the ghost on the delta-time clock
 
+Status: current
+Checked: 2026-11-04
+
 Branch `feat/delta-replays` (from main 01f8d2b, finding 139's delta-time clock), 2026-11-02.
 (Number 142: 140 is widescreen everywhere, 141 the touch controls.)
 

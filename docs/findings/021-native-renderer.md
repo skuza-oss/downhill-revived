@@ -1,5 +1,15 @@
 # 021 - Native renderer
 
+Status: partly superseded by 088 (the D3D11 window and present, i686/x87 details)
+Checked: 2026-11-04
+
+The GS core (the first section: `port/gs/` memory, registers, GIF parsers, CLUT) and the many
+game/ABI fixes below are current. The renderer parts are the retired 32-bit build's: Win32 + D3D11
+presentation, `gpu.c` / `raster.hlsl` compute rasterisation, x87 diagnostics. Today the Rust wgpu
+renderer draws (`port/gs/gpu_rust.c`, `port/render`; findings 085, 088), the window is SDL3's
+(`port/gs/present.c`, finding 099), and the shaders are WGSL (`port/gs/raster.wgsl`, finding 084).
+Read those sections as the round log they are.
+
 ## GS core (2026-10-13)
 
 `port/gs/` owns 4 MB of GS local memory, general and privileged register state,
@@ -19,8 +29,8 @@ Primitive assembly retains strip/fan vertices across packets; a draw callback
 receives completed primitives. CLUT loads obey CLD/CBP0/CBP1, CSM1/CSM2, CSA,
 TEXCLUT and TEX2 masked updates. Palettes are snapshots, not live VRAM views.
 Privileged register helpers implement CSR acknowledgement and GS reset;
-the host still maps the game's MMIO stores directly, so display registers will
-be sampled at presentation rather than intercepted per store.
+the host still maps the game's MMIO stores directly, so display registers are
+sampled at presentation rather than intercepted per store.
 
 Reference sources (PCSX2, GPL-3.0+, PCSX2 Dev Team):
 - https://github.com/PCSX2/pcsx2/blob/master/pcsx2/GS/GSLocalMemory.h
@@ -36,7 +46,7 @@ page stride and VRAM wrapping), read/write preservation, fragmented GIF packets,
 Existing 462 template checks and 6,000 bitwise VU0 comparisons pass, as do the
 GS tests. No proprietary packets, assets or dumps are included in these tests.
 
-## Presentation plumbing
+## Presentation plumbing (D3D11, retired)
 
 `present.c` creates a Win32 window and D3D11 swap chain (hardware, then WARP if
 unavailable). Each kernel vsync samples the privileged display registers and
@@ -92,9 +102,10 @@ bit-exact validation of all 32 retail entry points. Only overlay B's first-scree
 path has live input coverage so far. A PCSX2 VU/GS trace corpus for the remaining
 entries is still needed; synchronous XGKICK does not model GIF arbitration or
 writes overlapping an in-flight kick. The existing host-float arithmetic also
-needs edge-case comparisons against PS2 arithmetic before lockstep claims.
+needs edge-case comparisons against PS2 arithmetic before lockstep claims (lockstep was later
+dropped for state sync, finding 044).
 
-## GPU rasterisation
+## GPU rasterisation (D3D11 compute, retired; the WGSL port is finding 084)
 
 `gpu.c` and `raster.hlsl` use D3D11 compute shaders at native GS coordinates.
 A dispatch handles one completed point, line, triangle, strip/fan triangle or

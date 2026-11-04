@@ -1,5 +1,8 @@
 # 144: Shared online track pickups
 
+Status: current
+Checked: 2026-11-04
+
 ## Retail lifecycle
 
 The pickup pool is `D_004348F0`: 150 twenty-byte entries at +0x18,

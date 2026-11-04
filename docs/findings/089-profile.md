@@ -1,5 +1,8 @@
 # 089: Where the time goes (x64 and browser, race)
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-25, branch `rr/PR1` (from `render/rust` 200241e37). A profile only. No game code was
 changed. Two throw-away x64 variants were built outside the repo to measure one candidate (see
 "Experiment" below).

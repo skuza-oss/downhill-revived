@@ -1,5 +1,8 @@
 # 094: Crash after a Super Career finish that does not advance (issue #8)
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-27. Public issue #8: "The game always crashed whenever I didn't finish in first place in
 Super Career mode". No log was attached. Reproduced on 0.5.0 (`284ad39a3`, exe sha256 `e3f017f4…`)
 and on main (`067fb5061`). Fixed by a port patch.

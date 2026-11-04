@@ -1,5 +1,9 @@
 # 093: the player launcher (DownhillRevived.exe)
 
+Status: current
+Supersedes: parts of 050, 054
+Checked: 2026-11-04
+
 Players needed one place for settings, the rider name, updates and the Discord server, on every
 platform the game reaches. `port/launcher` is that window. It opens before the game and starts it.
 

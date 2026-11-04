@@ -1,5 +1,9 @@
 # 101: dhd.ini, one implementation (dhd_settings)
 
+Status: current
+Supersedes: parts of 056
+Checked: 2026-11-04
+
 2026-10-27, branch `desk/settings` (from `desk/integrate`). dhd.ini was parsed, defaulted and saved
 by three separate readers: C in the game (`port/hle/host.c`'s settings code, with the choices in
 `pc_settings.c`), Rust in the launcher (`port/launcher/src-tauri/src/ini.rs`, its choices and

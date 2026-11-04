@@ -1,5 +1,9 @@
 # 140: Widescreen everywhere: no 4:3 screens left
 
+Status: current
+Supersedes: parts of 055
+Checked: 2026-11-04
+
 In widescreen, 3D, the HUD and the menus already filled the screen (findings 043 and 056). The
 full-screen 2D pictures and the movies were still pillarboxed at 4:3 with black bars. Players on
 16:9 monitors and 20:9 phones saw those bars at every boot and every race load. Now every screen

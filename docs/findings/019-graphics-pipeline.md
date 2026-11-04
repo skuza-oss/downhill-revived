@@ -1,5 +1,15 @@
 # 019 — Graphics pipeline: engine draw paths and VU1 microprograms
 
+Status: partly superseded by 090 (one native routine per VU1 entry; meshes as vertex shaders)
+Checked: 2026-11-04
+
+The engine paths, `.vutext` contents and entry points are current. Of the
+recommended design, the GS layer exists (`port/gs/`, Rust renderer, findings 021, 085); VU1 runs
+compiled blocks (`port/tools/vu1_aot.py`) plus a few native kernels (`vu1_native_clip.py`,
+`port/runtime/vu1_native_*.h`; findings 030, 066, 090), not one native routine per entry; the GPU
+fast paths of step 3 (meshes as vertex shaders) were not built. The game does read GS memory back:
+the lens flare's Z probe (findings 028, 097, 148).
+
 Study for the native PC renderer (plan step 7). Sources: our decompiled engine (US
 `SCUS_971.77`), our disassembly of `.vutext` (`port/tools/vudis.py`) and PCSX2's source as the
 hardware reference (paths below).
@@ -136,4 +146,6 @@ GIF packets out to the GS.
   index; per-program study).
 - What `func_0019C868`/`func_001EB1D8` send over PATH3 (game-side 2D, likely the HUD or the
   poster maker).
-- Whether the game reads the frame buffer back to the EE (none found so far).
+- Whether the game reads the frame buffer back to the EE (none found so far). Answered later:
+  yes, a small Z rectangle every race frame for the lens flare (`sceGsExecStoreImage`,
+  findings 027, 028).

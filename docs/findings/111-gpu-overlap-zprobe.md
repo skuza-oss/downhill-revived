@@ -1,5 +1,8 @@
 # 111: GPU submission overlap and same-field native Z probes
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-28. Branch `perf/gpuoverlap`, based on `prof/android-pcsx2` and `perf/phone120-measure`
 (`f50127553`). No wgpu-hal or framebuffer-cache changes. Number checked against main and every
 local/remote perf branch: 103 is the framebuffer-cache lane, 104 is reserved, 105 was free.

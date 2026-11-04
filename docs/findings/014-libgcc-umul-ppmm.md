@@ -1,6 +1,9 @@
 # 014: libgcc's `umul_ppmm` is longlong.h inline asm
 
-Status: decided 2026-10-12; `tools/source_rules.py` allows exactly this form.
+Status: current
+Checked: 2026-11-04
+
+Decided 2026-10-12; `tools/source_rules.py` allows exactly this form.
 
 ```c
 #define umul_ppmm(w1, w0, u, v) \

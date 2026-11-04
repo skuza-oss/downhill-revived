@@ -1,5 +1,8 @@
 # 082: Independent wasm2c x64 core host runtime
 
+Status: partly superseded by 099 ("unproven" status, per-OS build scripts)
+Checked: 2026-11-04
+
 The runtime supplies aliased linear memory, fixed guest stack fibers with wasm SP/call-depth saves,
 and EE/IEEE FP switching. Real-game equivalence and whole-core speed parity remain unproven.
 

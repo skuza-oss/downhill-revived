@@ -1,5 +1,8 @@
 # 120: The FPS & Ping counter
 
+Status: current
+Checked: 2026-11-04
+
 `perf_counter` / `DHD_PERF_COUNTER` defaults to OFF. PC SETTINGS has a live
 `FPS & Ping:` OFF/ON row beside V-Sync; the launcher exposes it too. The shared
 settings crate supplies defaults, INI/environment handling and choices for every

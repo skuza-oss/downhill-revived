@@ -1,6 +1,8 @@
-# 017 — PC data conversion and link census (history)
+# 017 — PC data conversion and link census
 
-**History only:** plan steps 3-4 of finding 015, 2026-10-12/13. The 32-bit (i686) link and its
+Status: history
+
+Plan steps 3-4 of finding 015, 2026-10-12/13. The 32-bit (i686) link and its
 census are retired (finding 088, `v0.3.1` is the last 32-bit release; `port/tools/link.py` is
 gone). The data conversion survives, rebuilt for the wasm32 core: `port/tools/data.py` now writes
 one x86 assembler block the runtime copies into emulated PS2 RAM (see its header; findings 081,
@@ -43,4 +45,4 @@ one x86 assembler block the runtime copies into emulated PS2 RAM (see its header
   Itanium ABI (mingw/MSVC thiscall would break C callers and the function tables). All moot after
   the 64-bit move (findings 082, 088).
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/017-pc-data-and-link-census.md`

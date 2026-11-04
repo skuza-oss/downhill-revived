@@ -1,6 +1,8 @@
-# 025: PCSX2's GS as the port's renderer (research, not built)
+# 025: PCSX2's GS as the port's renderer (research)
 
-**History only:** a 2026-10-14 proposal to replace the port's own GS renderer with PCSX2's GS
+Status: rejected
+
+A 2026-10-14 proposal to replace the port's own GS renderer with PCSX2's GS
 behind `DHD_GS=pcsx2|native`. Not built. Decision: the port keeps its own renderer (today the Rust
 wgpu renderer, findings 085, 088); PCSX2's GS is the **referee**: it replays the port's own GS
 captures and is compared against (`compare_pcsx2.py --mode gs-replay`, finding 024).
@@ -30,4 +32,4 @@ captures and is compared against (`compare_pcsx2.py --mode gs-replay`, finding 0
 - **(c) Move the port to 64-bit:** judged the largest change then; it was done later for other
   reasons (findings 081, 082, 088), with the port's own renderer.
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/025-pcsx2-gs-backend.md`

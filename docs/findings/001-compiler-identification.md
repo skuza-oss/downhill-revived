@@ -1,9 +1,11 @@
-# 001 — Compiler identification (history)
+# 001 — Compiler identification (superseded)
 
-**History only:** the first search for the game's compiler (2026-09). Resolved in finding 002:
+Status: superseded by 002
+
+The first search for the game's compiler (2026-09). Resolved in finding 002:
 SN ProDG 3.01 (cc1 "2.95.3 SN BUILD 1.36" + SN `ps2eeas`), `-O2 -G8 -fopt-stack`.
 
-## What it measured (still true)
+## Still true
 - Retail ELF: stripped (no `.symtab`, no DWARF), `.text` 0x159bc0 bytes at 0x10a000, entry 0x10a008;
   `.gcc_except_table` (GNU toolchain, C++ with exceptions); `.vutext`/`.DVP.overlay.*` (VU
   microcode); library tags `PsIIlib* 2700` (SCE SDK 2.7.0).
@@ -27,4 +29,4 @@ SN ProDG 3.01 (cc1 "2.95.3 SN BUILD 1.36" + SN `ps2eeas`), `-O2 -G8 -fopt-stack`
   `/mnt/*`, so they run from a copy on the Linux side (`tools/sncc.py` still does this for the
   `-sce29` files of finding 010).
 
-Full original text: git history of this file (before commit 860ab6b).
+Full text: `git show 860ab6b:docs/findings/001-compiler-identification.md`
