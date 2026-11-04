@@ -53,3 +53,15 @@ vkGetPhysicalDeviceSurfaceFormatsKHR isn't called. The loader's query asks grall
 (AHardwareBuffer_isSupported) about its optional formats, and Qualcomm's gralloc on an Adreno 710
 phone (driver 0615.73, Android 14) then left its BufferManager lock held: the next query hung the
 render thread for good.
+
+## Swapchain image views kept across frames (finding 149)
+
+`create_texture_view` on a swapchain image (`Texture::surface_image`, set by
+`swapchain/native.rs`'s acquire) returns the view made for that image and description before
+(`DeviceShared::surface_views`), with its view identity, so the present pass's framebuffer key
+repeats and the framebuffer cache above finds it. Before, every acquire made a new view, so every
+frame created a framebuffer: on the throttled Mi 11i's Adreno each `vkCreateFramebuffer` allocates
+GPU memory (`kgsl_ioctl_gpuobj_alloc`, whose address search walks the process's allocations), 16 %
+of the render thread. `destroy_texture_view` leaves such a view alone (`surface_cached`); the
+swapchain's `release_resources` destroys its images' kept views and their framebuffer entries after
+its device wait, and `DeviceShared`'s drop destroys any left.

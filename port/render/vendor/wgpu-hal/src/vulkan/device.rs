@@ -424,6 +424,7 @@ impl super::Device {
             format: desc.format,
             copy_size: desc.copy_extent(),
             identity,
+            surface_image: false,
         }
     }
 
@@ -1146,20 +1147,41 @@ impl crate::Device for super::Device {
             NonZeroU32::new(subresource_range.layer_count).expect("Unexpected zero layer count");
 
         let mut image_view_info;
-        if self.shared.private_caps.image_view_usage && !desc.usage.is_empty() {
+        let usage = self.shared.private_caps.image_view_usage && !desc.usage.is_empty();
+        if usage {
             image_view_info =
                 vk::ImageViewUsageCreateInfo::default().usage(conv::map_texture_usage(desc.usage));
             vk_info = vk_info.push_next(&mut image_view_info);
         }
 
-        let raw = unsafe { self.shared.raw.create_image_view(&vk_info, None) }
-            .map_err(super::map_host_device_oom_and_ioca_err)?;
-
-        if let Some(label) = desc.label {
-            unsafe { self.shared.set_object_name(raw, label) };
-        }
-
-        let identity = self.shared.texture_view_identity_factory.next();
+        // Downhill Revived: a swapchain image gets the view made for it before (the same
+        // description), so the present pass's framebuffer is the cached one, not a new
+        // framebuffer every frame (finding 149: Adreno allocates GPU memory for each).
+        let surface_key = texture.surface_image.then(|| super::SurfaceViewKey {
+            image: texture.raw,
+            format: raw_format,
+            view_type: conv::map_view_dimension(desc.dimension),
+            aspect: subresource_range.aspect_mask,
+            mips: (subresource_range.base_mip_level, subresource_range.level_count),
+            layers: (subresource_range.base_array_layer, subresource_range.layer_count),
+            usage: if usage { conv::map_texture_usage(desc.usage) } else { vk::ImageUsageFlags::empty() },
+        });
+        let kept = surface_key.as_ref().and_then(|k| self.shared.surface_views.lock().get(k).copied());
+        let (raw, identity) = match kept {
+            Some(view) => view,
+            None => {
+                let raw = unsafe { self.shared.raw.create_image_view(&vk_info, None) }
+                    .map_err(super::map_host_device_oom_and_ioca_err)?;
+                if let Some(label) = desc.label {
+                    unsafe { self.shared.set_object_name(raw, label) };
+                }
+                let identity = self.shared.texture_view_identity_factory.next();
+                if let Some(k) = surface_key.clone() {
+                    self.shared.surface_views.lock().insert(k, (raw, identity));
+                }
+                (raw, identity)
+            }
+        };
 
         self.counters.texture_views.add(1);
 
@@ -1173,12 +1195,16 @@ impl crate::Device for super::Device {
             dimension: desc.dimension,
             texture_identity: texture.identity,
             view_identity: identity,
+            surface_cached: surface_key.is_some(),
         })
     }
     unsafe fn destroy_texture_view(&self, view: super::TextureView) {
-        // Downhill Revived: remove lookup entries before VkImageView handles can be recycled.
-        self.shared.invalidate_framebuffers(view.view_identity);
-        unsafe { self.shared.raw.destroy_image_view(view.raw, None) };
+        // Downhill Revived: a swapchain image's kept view lives until its swapchain's release.
+        if !view.surface_cached {
+            // Downhill Revived: remove lookup entries before VkImageView handles can be recycled.
+            self.shared.invalidate_framebuffers(view.view_identity);
+            unsafe { self.shared.raw.destroy_image_view(view.raw, None) };
+        }
 
         self.counters.texture_views.sub(1);
     }

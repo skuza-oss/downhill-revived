@@ -2747,6 +2747,8 @@ impl super::Adapter {
             render_passes: Mutex::new(Default::default()),
             // Downhill Revived: shared, bounded framebuffer reuse across encoder resets.
             framebuffers: Mutex::new(Default::default()),
+            // Downhill Revived: swapchain images' views kept across frames.
+            surface_views: Mutex::new(Default::default()),
             sampler_cache: Mutex::new(super::sampler::SamplerCache::new(
                 self.private_caps.maximum_samplers,
             )),

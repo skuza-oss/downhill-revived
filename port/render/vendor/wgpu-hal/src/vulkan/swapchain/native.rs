@@ -366,6 +366,9 @@ impl Swapchain for NativeSwapchain {
 
         unsafe { device.shared.raw.destroy_fence(self.fence, None) }
 
+        // Downhill Revived: the views kept for this swapchain's images (after the wait above).
+        device.shared.forget_surface_views(&self.images);
+
         // We cannot take this by value, as the function returns `self`.
         for semaphore in self.acquire_semaphores.drain(..) {
             let arc_removed = Arc::into_inner(semaphore).expect(
@@ -518,6 +521,7 @@ impl Swapchain for NativeSwapchain {
                     depth: 1,
                 },
                 identity,
+                surface_image: true,
             },
             metadata: Box::new(NativeSurfaceTextureMetadata {
                 acquire_semaphores: acquire_semaphore_arc,
