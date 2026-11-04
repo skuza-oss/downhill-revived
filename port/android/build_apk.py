@@ -212,6 +212,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--wasm', type=Path, help='rebuild the libraries from this module first')
     ap.add_argument('--jobs', type=int, default=2)
+    ap.add_argument('--line-tables', action='store_true',
+                    help="libmain.debug.so with line tables (build_host64's --debug, for simpleperf); code unchanged")
     ap.add_argument('--offline', action='store_true', help="Gradle from GRADLE_USER_HOME's cache only")
     ap.add_argument('--release', action='store_true', help='the release APK, signed with the key DHD_ANDROID_* name')
     ap.add_argument('--new-signing-key', action='store_true',
@@ -233,7 +235,7 @@ def main():
     wasm = a.wasm or (ROOT / 'build' / 'wasm' / 'dhd_core.wasm')
     if a.wasm or not all(p.exists() for p in libs):
         r = subprocess.run([sys.executable, str(ROOT / 'port' / 'tools' / 'build_host64.py'), '--target', 'android-arm64',
-                            str(wasm), '--jobs', str(a.jobs)])
+                            str(wasm), '--jobs', str(a.jobs)] + (['--debug'] if a.line_tables else []))
         if r.returncode:
             sys.exit('build_apk: build_host64.py --target android-arm64 failed')
     project(libs + a.extra_lib, a.assets)
