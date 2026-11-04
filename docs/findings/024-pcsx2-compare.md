@@ -1,6 +1,6 @@
 # 024 - Automatic PCSX2 rendering comparisons
 
-Status: partly superseded by 088 (i686 build steps (build_compare_port.py, link.py))
+Status: partly superseded by 088 (i686 build steps, build_compare_port.py and link.py)
 Checked: 2026-11-04
 
 The method (the race clock as the sync point, the pinned race seed, NAV, game-state dumps) is

@@ -1,6 +1,6 @@
 # 091: Android arm64 build (task AND1)
 
-Status: partly superseded by 143 (the known gaps (touch, online, release key) and first speeds)
+Status: partly superseded by 143 (the known gaps: touch, online, release key; the first speeds)
 Checked: 2026-11-04
 
 The design (arm64 host, Rust renderer on Vulkan, SDL3, Gradle without Android Studio) is
