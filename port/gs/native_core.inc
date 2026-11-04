@@ -208,12 +208,13 @@ typedef struct Native {
     float uv_scale[2];                /* FST: reciprocal GS texture dimensions, including 1/16 */
     float vertex_fog[256];            /* same rounded fog/255 values, shared by all vertices */
     int vertex_fog_ready, field_trace_on;
-    /* The last triangle's vertices as native_set converted them (each with its own colour), and
-       their pixels: a strip or fan shares two with the next triangle (finding 146). Good while
-       conv_ok == conv_serial (native_state moves conv_serial) and for the same offset and FST. */
-    GsVertex conv_gs[3];
-    NativeVertex conv[3];
-    int conv_px[3], conv_py[3], conv_fst;
+    /* Two of the last triangle's vertices as native_set converted them (each with its own
+       colour): the ones a next strip (its second and third) or fan (its first and third) triangle
+       shares (finding 146). Good while conv_ok == conv_serial (native_state moves conv_serial)
+       and for the same offset and FST. */
+    GsVertex conv_gs[2];
+    NativeVertex conv[2];
+    int conv_fst;
     uint64_t conv_offset;
     unsigned conv_serial, conv_ok;
     /* Draws are indexed (dhdr_native_picture_indexed): a vertex a strip or fan shares with the
@@ -1166,11 +1167,8 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
     unsigned reused = 0;
     if (triangle && (type == 4 || type == 5) && n->conv_ok == n->conv_serial && n->conv_offset == offset &&
         n->conv_fst == fst) {
-        unsigned first = type == 4 ? 1 : 0;
-        if (!memcmp(&v[0], &n->conv_gs[first], sizeof *v))
-            t[0] = n->conv[first], px[0] = n->conv_px[first], py[0] = n->conv_py[first], reused |= 1;
-        if (!memcmp(&v[1], &n->conv_gs[2], sizeof *v))
-            t[1] = n->conv[2], px[1] = n->conv_px[2], py[1] = n->conv_py[2], reused |= 2;
+        if (!memcmp(&v[0], &n->conv_gs[0], sizeof *v)) t[0] = n->conv[0], reused |= 1;
+        if (!memcmp(&v[1], &n->conv_gs[1], sizeof *v)) t[1] = n->conv[1], reused |= 2;
     }
     /* * 0.0625f: the same value as / 16.0f (a power of two), without a divide a vertex (finding 146) */
     for (unsigned i = 0; i < count; i++) {
@@ -1179,7 +1177,7 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
             y[i] = (float)((int)v[i].y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
             px[i] = (int)x[i], py[i] = (int)y[i];
             if (triangle) native_set(&t[i], &v[i], &v[i], n, fst, x[i], y[i]);
-        }
+        } else px[i] = (int)t[i].x, py[i] = (int)t[i].y;   /* native_set keeps x and y */
         if (px[i] - 1 < left) left = px[i] - 1;
         if (py[i] - 1 < top) top = py[i] - 1;
         if (px[i] + 1 > right) right = px[i] + 1;
@@ -1187,8 +1185,9 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
     }
     n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
     if (triangle) {
-        memcpy(n->conv_gs, v, sizeof n->conv_gs); memcpy(n->conv, t, sizeof n->conv);
-        memcpy(n->conv_px, px, sizeof n->conv_px); memcpy(n->conv_py, py, sizeof n->conv_py);
+        unsigned shared = type == 5 ? 0 : 1;   /* a fan keeps its first vertex, a strip its second */
+        n->conv_gs[0] = v[shared]; n->conv[0] = t[shared];
+        n->conv_gs[1] = v[2]; n->conv[1] = t[2];
         n->conv_offset = offset; n->conv_fst = fst; n->conv_ok = n->conv_serial;
         if (flat) t[0].rgba = t[1].rgba = t[2].rgba;   /* flat: the last vertex's colour */
     }
