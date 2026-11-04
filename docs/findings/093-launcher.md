@@ -287,7 +287,9 @@ current Arch only. The published one is built on Ubuntu 22.04 and runs on glibc 
   development packages, Rust 1.97.1 through rustup, Node.js 24.21, WABT 1.0.42 built from source,
   Python 3.14 (uv). docs/BUILDING.md.
 
-## Open
+## Open (as written for 0.6.x; since then the launcher ran on the M1 and Linux and 0.7.0 shipped
+for all three, finding 099 and "0.7.0" above; dhd.log is written on every platform and the
+texture-pack folder follows `DHD_DATA_DIR`, `docs/STATE.md`)
 
 - **macOS and Linux need a run.** The launcher, its updater and the packages are ready; the
   game builds for them come from build_host64. Not yet seen on a real Mac: Gatekeeper's Open

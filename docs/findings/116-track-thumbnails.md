@@ -3,6 +3,9 @@
 Status: partly superseded by 132 ("not built": 132 built it)
 Checked: 2026-11-04
 
+Built later from this research: finding 132 reads each track's loading-page picture from the
+player's disc and shows it in the room's track picker.
+
 The race room's mock-up had a small picture of the track (finding 115). The room shows the
 track name in large type instead. This is what the game has that could serve as the picture,
 and what it would cost to use it.

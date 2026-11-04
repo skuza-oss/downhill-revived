@@ -109,3 +109,4 @@ dhdr_exact_submit: Out of Memory` (`GraphicsCommandList::close`, 0x8007000E) and
 the base build does the same, with 18 GB of RAM and 6.8 GB of graphics memory free. With
 `DHD_RENDER=native` the same start runs on (40 s, 2,100 fields). A minimised exact renderer presents
 nothing; what it submits may then never be freed. 
+(Fixed in finding 105.)

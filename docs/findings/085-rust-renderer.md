@@ -10,9 +10,10 @@ S-present, then S5 and S6). The plan and its task list are kept outside the repo
 hand-built data, no game data. The one exception is the boot state trace of S1, which runs the game
 as the repo's harness always does.
 
-- Only x64 Windows and the browser move to Rust.
-- The i686 build stays frozen on today's renderer (D2 = option (c)). S2, the i686 parts of S1 and
-  every i686 check were skipped on purpose.
+- Only x64 Windows and the browser move to Rust (then; since finding 099 every target draws
+  with it).
+- The i686 build stays frozen on today's renderer (D2 = option (c)); it was retired soon after
+  (finding 088). S2, the i686 parts of S1 and every i686 check were skipped on purpose.
 - `gpu_exact.inc` and `native_core.inc` stay shared C. Only the GPU code moves to Rust.
 
 **Verdict: pass for x64 and the browser.** No stop criterion was hit. The one item left open in the

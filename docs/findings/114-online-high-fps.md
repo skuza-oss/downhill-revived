@@ -165,7 +165,8 @@ creature comes in range and is held still, with that creature's 150 lowered to 4
 stops in the switching band. Without the fix at 240: the same trap, 101 deep after about 1 s.
 With it at 240: 32 deep, no trap, results on both. At 60: 34 deep.
 
-## Open
+## Open (as written; since finding 139 every rate runs one delta-time clock, the race at 30-144
+steps a second finishes with no trend against 60, and a 60 PC's clock follows wall time too)
 
 - High-rate physics equivalence is still open (finding 067: a full-pedal race finished in
   392.5 / 432.7 / 402.4 s at 60 / 120 / 144 in round 52). Online, each PC's finish time is its own
