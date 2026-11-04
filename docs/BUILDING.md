@@ -91,8 +91,9 @@ into `build/host64-exe/`.
 (`port/hle/game_data.c`); the executable keeps only the words the port changes in them
 (pointers and code addresses, `port/tools/data.py`).
 
-To run a build, copy `dhd.exe` (with `dxcompiler.dll`) to a folder of its own and start it. It
-asks for your `.iso` the first time. `DHD_ISO=<path to iso>` in the environment skips the question.
+To run a build, copy `dhd.exe` (with `dxcompiler.dll`) to a folder of its own and start it with
+the disc image named: `iso = <path>` in its `dhd.ini` or `DHD_ISO=<path>` in the environment. The
+game has no disc dialog of its own; for players the launcher picks the disc (finding 093).
 
 ### Tools outside the checkout
 
