@@ -18,8 +18,11 @@ pub struct NativeShared {
     /// Group 1 of the `_u` entry points (decoded textures, finding 131): binding 0 an R32Uint
     /// texture, binding 1 a non-filtering sampler (the gathers').
     pub texels_layout: wgpu::BindGroupLayout,
-    /// Clamped, nearest everywhere (decoded textures, the dummy group).
+    /// Clamped, nearest everywhere (surfaces, conversions' inputs, the dummy group).
     pub nearest: wgpu::Sampler,
+    /// Repeating, nearest everywhere: the texels groups' (native.wgsl's gathers, whose footprint
+    /// wraps as CLAMP repeat does; textureLoad ignores samplers).
+    pub repeat: wgpu::Sampler,
     /// The replacement samplers, indexed bilinear | U clamped << 1 | V clamped << 2 (as
     /// gpu_native.inc's): trilinear minification, linear magnification and 16x anisotropy when
     /// bilinear, point magnification otherwise; clamped or repeating coordinates.
@@ -90,6 +93,20 @@ impl NativeShared {
             anisotropy_clamp: 1,
             border_color: None,
         });
+        let repeat = d.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("native texels repeat"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 32.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
         let replace = std::array::from_fn(|i| {
             let address = |clamped: bool| if clamped { wgpu::AddressMode::ClampToEdge } else { wgpu::AddressMode::Repeat };
             let bilinear = i & 1 != 0;
@@ -127,7 +144,7 @@ impl NativeShared {
         let dummy_view = dummy.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_depth_view = dummy_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_group = texture_group(gpu, &texture_layout, &dummy_view, &nearest, "native none");
-        NativeShared { texture_layout, texels_layout, nearest, replace, dummy, dummy_view, dummy_texels, dummy_texels_view,
+        NativeShared { texture_layout, texels_layout, nearest, repeat, replace, dummy, dummy_view, dummy_texels, dummy_texels_view,
                        dummy_depth, dummy_depth_view, dummy_group }
     }
 
@@ -136,9 +153,9 @@ impl NativeShared {
         texture_group(gpu, &self.texture_layout, view, sampler, label)
     }
 
-    /// A decoded texture's group (texels layout: its R32Uint view and the nearest sampler).
+    /// A decoded texture's group (texels layout: its R32Uint view and the repeating sampler).
     pub fn texels_group(&self, gpu: &Gpu, view: &wgpu::TextureView, label: &str) -> wgpu::BindGroup {
-        texture_group(gpu, &self.texels_layout, view, &self.nearest, label)
+        texture_group(gpu, &self.texels_layout, view, &self.repeat, label)
     }
 }
 

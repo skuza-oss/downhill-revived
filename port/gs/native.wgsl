@@ -147,28 +147,35 @@ fn texel_u(c: vec2<i32>) -> vec4<f32> {
     return texel_bytes(load_texels(texel_xy(c)));
 }
 
-// Bilinear over GS texels b .. b + 1 with weights f. When the texture is exactly tex_size at
-// offset 0 and unit scale, CLAMP repeat or clamp (so the wrapped coordinates are its texels) and
-// the four are neighbours in it (no wrap or clamp between them), one gather reads them all: its
-// coordinate is their shared corner, (at + 1) / tex_size, exact (tex_size is a power of two), so
-// the hardware's footprint is exactly at .. at + 1; else four loads, as texel_u. Same texels, same
-// mix.
+// Bilinear over GS texels b .. b + 1 with weights f. When the texture is exactly tex_size (a power
+// of two) at offset 0 and unit scale, CLAMP repeat or clamp (so the wrapped coordinates are its
+// texels), one gather reads the four texels the wrap gives, at .. next on each axis: the texels
+// sampler repeats, so a gather at corner c (c / tex_size, exact) reads texels c - 1 and c mod the
+// size. Repeat: c = at + 1, whose footprint is at and (at + 1) mod size, the wrap's next. Clamp: c
+// = b + 1 inside; left of the texture both texels are texel 0 (c = 1, the left one taken twice),
+// right of it both are the last (c = size - 1, the right one twice). So every pixel of such a draw
+// takes the gather (no wave runs both paths); else four loads, as texel_u. Same texels, same mix.
 fn bilinear_u(b: vec2<i32>, f: vec2<f32>) -> vec4<f32> {
     let wrap = wrap_mode();
     let E = select(nat.scale >> 16u & 255u, native_texel_scale, native_texel_scale != 0u);
     let S = select(nat.scale >> 8u & 255u, native_texel_scale, native_texel_scale != 0u);
     if (texture_sized() && all(wrap <= vec2<u32>(1u)) && all(nat.tex_offset == vec2<i32>(0)) && S == 1u && E == 1u) {
-        let size = nat.tex_size;
-        let at = vec2<u32>(wrap_coordinate(b.x, wrap.x, size.x, nat.region.x, nat.region.y),
-                           wrap_coordinate(b.y, wrap.y, size.y, nat.region.z, nat.region.w));
-        let next = vec2<u32>(wrap_coordinate(b.x + 1, wrap.x, size.x, nat.region.x, nat.region.y),
-                             wrap_coordinate(b.y + 1, wrap.y, size.y, nat.region.z, nat.region.w));
-        if (all(next == at + vec2<u32>(1u))) {
-            // x: (at.x, at.y + 1), y: (at.x + 1, at.y + 1), z: (at.x + 1, at.y), w: (at.x, at.y)
-            let g = textureGather(0, native_texels, native_texel_sampler, (vec2<f32>(at) + 1.0) / vec2<f32>(size));
-            return mix(mix(texel_bytes(g.w), texel_bytes(g.z), f.x),
-                       mix(texel_bytes(g.x), texel_bytes(g.y), f.x), f.y);
-        }
+        let size = vec2<i32>(nat.tex_size);
+        let clamped = wrap == vec2<u32>(1u);
+        let low = clamped & (b < vec2<i32>(0));
+        let high = clamped & (b >= size - 1) & !low;
+        let repeat_corner = vec2<i32>(vec2<u32>(b) & (nat.tex_size - 1u)) + 1;
+        let clamp_corner = select(select(b + 1, size - 1, high), vec2<i32>(1), low);
+        let corner = select(repeat_corner, clamp_corner, clamped);
+        // x: (c.x - 1, c.y), y: (c.x, c.y), z: (c.x, c.y - 1), w: (c.x - 1, c.y - 1)
+        let g = textureGather(0, native_texels, native_texel_sampler, vec2<f32>(corner) / vec2<f32>(size));
+        var t00 = g.w; var t10 = g.z; var t01 = g.x; var t11 = g.y;
+        if (low.x) { t10 = t00; t11 = t01; }
+        if (high.x) { t00 = t10; t01 = t11; }
+        if (low.y) { t01 = t00; t11 = t10; }
+        if (high.y) { t00 = t01; t10 = t11; }
+        return mix(mix(texel_bytes(t00), texel_bytes(t10), f.x),
+                   mix(texel_bytes(t01), texel_bytes(t11), f.x), f.y);
     }
     return mix(mix(texel_u(b), texel_u(b + vec2<i32>(1, 0)), f.x),
                mix(texel_u(b + vec2<i32>(0, 1)), texel_u(b + vec2<i32>(1, 1)), f.x), f.y);
@@ -415,7 +422,9 @@ struct Convert {
 @group(1) @binding(7) var convert_depth1: texture_depth_2d;
 @group(1) @binding(8) var convert_depth2: texture_depth_2d;
 @group(1) @binding(9) var convert_depth3: texture_depth_2d;
-@group(1) @binding(10) var native_converted: texture_storage_2d<rgba8unorm, write>;
+// A converted texture's texels: each its RGBA bytes, as a decoded texture's (read by the `_u`
+// entry points).
+@group(1) @binding(10) var native_converted: texture_storage_2d<r32uint, write>;
 
 fn bits_per_pixel(psm: u32) -> u32 {
     if (psm == 1u || psm == 49u) { return 24u; }
@@ -497,10 +506,8 @@ fn native_convert(@builtin(global_invocation_id) tid: vec3<u32>) {
     let page = (word >> 11u) & 511u;
     let source = (convert.pages[page >> 4u][(page >> 2u) & 3u] >> ((page & 3u) * 8u)) & 255u;
     if (source == 0u) {
-        // The bytes as unorm8 again: v / 255 is stored as v.
-        let w = load_u(convert_base, vec2<i32>(tid.xy));
-        textureStore(native_converted, tid.xy, vec4<f32>(f32(w & 255u), f32(w >> 8u & 255u),
-                                                         f32(w >> 16u & 255u), f32(w >> 24u)) / 255.0);
+        // The base texture's texel as it is.
+        textureStore(native_converted, tid.xy, vec4<u32>(load_u(convert_base, vec2<i32>(tid.xy)), 0u, 0u, 0u));
         return;
     }
     let s = convert.slot[source - 1u];
@@ -532,8 +539,7 @@ fn native_convert(@builtin(global_invocation_id) tid: vec3<u32>) {
     } else if ((psm & 7u) == 1u) {
         rgba = (value & 0xFFFFFFu) | select((texa & 255u) << 24u, 0u, (texa & 0x8000u) != 0u && (value & 0xFFFFFFu) == 0u);
     }
-    textureStore(native_converted, tid.xy, vec4<f32>(f32(rgba & 255u), f32(rgba >> 8u & 255u),
-                                                     f32(rgba >> 16u & 255u), f32(rgba >> 24u)) / 255.0);
+    textureStore(native_converted, tid.xy, vec4<u32>(rgba, 0u, 0u, 0u));
 }
 
 // Presentation (native_present): the scanned-out picture into the window's surface texture,
