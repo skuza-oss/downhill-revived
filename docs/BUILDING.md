@@ -224,7 +224,8 @@ Every run also writes `build/release/SHA256SUMS` (each release file and `latest.
 
 `python port/tools/test_runtime.py` builds and runs the runtime and HLE tests, among them
 `test_keyboard` (keyboard layout and steering ramp) and `test_gamepad` (SDL starts and lists the
-controllers; none needed). These small test programs are still 32-bit Windows builds.
+controllers; none needed). Test programs run where the game runs their code: the core's C as wasm32
+guest programs through wasm2c, the host's on the 64-bit host (`port/tools/testprog.py`, finding 104).
 
 The renderer's tests run the Rust renderer in x64: `python port/tools/test_gs_wgpu.py`
 (test_gpu, test_depth, test_present) and `python port/tools/gs_golden.py compare KIND` (replay
@@ -313,3 +314,25 @@ On Android `auto_update = off` also turns off the once-a-day update notice.
 `port/include/version.h` holds the version, the only place it is written. `package_release.py`
 names the zip after it and writes `build/release/latest.json` beside it (version, the release
 asset URL, the zip's SHA-256 and size) for the updater; publish both as release assets.
+
+### Release steps
+
+Bump `port/include/version.h`, `build_wasm.py`, `package_release.py`, publish the zip and
+`latest.json` as `v<version>`, then raise `MIN_VERSION` in
+`online/server/wrangler.jsonc` and deploy when older versions should stop racing (finding 054,
+section 6; finding 088, CL3). macOS and Linux (finding 093, Release): `package_release.py
+--platform mac|linux --game PATH` on that machine (the mac zip is signed there), then
+`--merge` its `latest.json` into the Windows one; publish every zip with the one `latest.json`.
+Installers (finding 125, after 0.7.5): the same runs also make each platform's installer from the
+checked files (`port/tools/installers.py`; `--no-installer` skips it): the per-user Windows setup
+(`-win-setup.exe`, Inno Setup 7 via `innosetup.py`, `port/release/installer/windows.iss`), the
+macOS DMG (on the Mac) and the Linux AppImage (`-linux-experimental.AppImage`, Tauri's bundle with
+WebKitGTK inside; its `linux-appimage` entry goes into latest.json and `--merge` carries it).
+Publish them next to the zips; installed copies keep the player's files in the system's app-data
+folder and update from the zips (the AppImage from its own entry). None is code-signed.
+Android (finding 143): `package_release.py --platform android` with the release key's
+`DHD_ANDROID_*` variables builds, checks and adds the `-android-experimental.apk` (latest.json's
+`android` entry); every run writes `SHA256SUMS`. The release page gets `port/release/ANDROID-NOTES.md`.
+Since 0.7.0 the mac and linux zips are `-mac-experimental.zip` and `-linux-experimental.zip`
+(finding 093, "0.7.0": built and checked on all three, published 2026-10-28; Linux is linked on
+Ubuntu 22.04 and runs on glibc 2.35 and later, which `package_release.py` checks).
