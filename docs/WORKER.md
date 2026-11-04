@@ -255,6 +255,10 @@ NOTES starting `vu0-no-helper-form:`, so a reviewer can check it for hand-writte
 - Editing `tools/`, `config/`, `asm/`, `include/`, `src/`, or compiler flags. If you think a
   flag or tool is wrong, say so in the report.
 - Claiming a match from your own reading of the asm. Only `try_func.py`'s output counts.
+- Putting game data (asm, bytes or text copied from the disc or the executable beyond what the
+  decompiled function needs), a key or other secret, a server address other than
+  `wss://dhd.skuza.app`, or a path of your own machine (drive letters, home folders, LAN
+  addresses) into any file you write. The repository's rules are in `AGENTS.md`.
 
 `try_func.py` checks these rules before compiling (`tools/source_rules.py`): `REJECTED` (your
 function still `INCLUDE_ASM`, register pinning) is never a match, and a `WARNING` about inline

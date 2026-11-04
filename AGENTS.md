@@ -74,6 +74,7 @@ before you change files in an area, read that area's AGENTS.md yourself.
 | The Rust library: renderer, settings, net, disc, presence (`port/render/`) | `port/render/AGENTS.md` |
 | The Android app and APK (`port/android/`) | `port/android/AGENTS.md` |
 | The online server (`online/server/`) | `online/server/AGENTS.md`, `docs/online-protocol.md` |
+| A new finding, a lane, a release, decomp workers | the skills in `.claude/skills/` (new-finding, lane-merge, release, decompile-function); the worker agent `.claude/agents/decomp-worker.md` |
 
 ## Research
 
