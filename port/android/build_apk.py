@@ -214,6 +214,10 @@ def main():
     ap.add_argument('--jobs', type=int, default=2)
     ap.add_argument('--line-tables', action='store_true',
                     help="libmain.debug.so with line tables (build_host64's --debug, for simpleperf); code unchanged")
+    pgo = ap.add_mutually_exclusive_group()
+    pgo.add_argument('--pgo-generate', action='store_true',
+                     help="build_host64's: an instrumented build; a run writes files/dhd-<pid>.profraw at its exit")
+    pgo.add_argument('--pgo-use', type=Path, metavar='PROFDATA', help="build_host64's: optimise with this merged profile")
     ap.add_argument('--offline', action='store_true', help="Gradle from GRADLE_USER_HOME's cache only")
     ap.add_argument('--release', action='store_true', help='the release APK, signed with the key DHD_ANDROID_* name')
     ap.add_argument('--new-signing-key', action='store_true',
@@ -235,7 +239,9 @@ def main():
     wasm = a.wasm or (ROOT / 'build' / 'wasm' / 'dhd_core.wasm')
     if a.wasm or not all(p.exists() for p in libs):
         r = subprocess.run([sys.executable, str(ROOT / 'port' / 'tools' / 'build_host64.py'), '--target', 'android-arm64',
-                            str(wasm), '--jobs', str(a.jobs)] + (['--debug'] if a.line_tables else []))
+                            str(wasm), '--jobs', str(a.jobs)] + (['--debug'] if a.line_tables else []) +
+                           (['--pgo-generate'] if a.pgo_generate else []) +
+                           (['--pgo-use', str(a.pgo_use.resolve())] if a.pgo_use else []))
         if r.returncode:
             sys.exit('build_apk: build_host64.py --target android-arm64 failed')
     project(libs + a.extra_lib, a.assets)
