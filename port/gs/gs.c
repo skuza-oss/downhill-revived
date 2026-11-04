@@ -475,23 +475,45 @@ static inline void vertex_write(Gs *g, unsigned reg, uint64_t value)
     }
 }
 
-static void packed(Gs *g, GsPath *p, unsigned reg, const uint32_t *w)
+/* One PACKED qword. The registers a vertex writes every time (RGBAQ, ST, UV, XYZF2/3, XYZ2/3) are
+   stored here directly, as vertex_write would store them (finding 146: one switch a qword, not
+   two); A+D and the rest go through vertex_write or gs_write as before. */
+static inline __attribute__((always_inline)) void packed(Gs *g, GsPath *p, unsigned reg, const uint32_t *w)
 {
     uint64_t value = w[0] | (uint64_t)w[1] << 32;
     switch (reg) {
-    case 1: value = (w[0] & 255) | (w[1] & 255) << 8 | (w[2] & 255) << 16 |
-                   (w[3] & 255) << 24 | (uint64_t)p->q << 32; break;
-    case 2: p->q = w[2]; break;
-    case 3: value = (w[0] & 0x3FFF) | (uint64_t)(w[1] & 0x3FFF) << 16; break;
-    case 4: case 12:
-        value = (w[0] & 65535) | (uint64_t)(w[1] & 65535) << 16 |
-                (uint64_t)(w[2] >> 4 & 0xFFFFFF) << 32 | (uint64_t)(w[3] >> 4 & 255) << 56;
-        if (w[3] & 0x8000) reg = 12;
-        break;
-    case 5: case 13:
-        value = (w[0] & 65535) | (uint64_t)(w[1] & 65535) << 16 | (uint64_t)w[2] << 32;
-        if (w[3] & 0x8000) reg = 13;
-        break;
+    case 1: {
+        uint32_t rgba = (w[0] & 255) | (w[1] & 255) << 8 | (w[2] & 255) << 16 | (w[3] & 255) << 24;
+        g->reg[GS_RGBAQ] = rgba | (uint64_t)p->q << 32;
+        g->vertex.rgba = rgba;
+        memcpy(&g->vertex.q, &p->q, 4);
+        return;
+    }
+    case 2:
+        p->q = w[2];
+        g->reg[GS_ST] = value;
+        memcpy(&g->vertex.s, &value, 8);
+        return;
+    case 3:
+        g->vertex.u = w[0] & 0x3FFF; g->vertex.v = w[1] & 0x3FFF;
+        g->reg[GS_UV] = g->vertex.u | (uint64_t)g->vertex.v << 16;
+        return;
+    case 4: case 12: {
+        uint32_t x = w[0] & 65535, y = w[1] & 65535, z = w[2] >> 4 & 0xFFFFFF, fog = w[3] >> 4 & 255;
+        unsigned xyz = w[3] & 0x8000 ? GS_XYZF3 : reg;
+        g->reg[xyz] = x | (uint64_t)y << 16 | (uint64_t)z << 32 | (uint64_t)fog << 56;
+        g->vertex.x = x; g->vertex.y = y; g->vertex.z = z; g->vertex.fog = fog;
+        vertex_kick(g, xyz == GS_XYZF3);
+        return;
+    }
+    case 5: case 13: {
+        uint32_t x = w[0] & 65535, y = w[1] & 65535;
+        unsigned xyz = w[3] & 0x8000 ? GS_XYZ3 : reg;
+        g->reg[xyz] = x | (uint64_t)y << 16 | (uint64_t)w[2] << 32;
+        g->vertex.x = x; g->vertex.y = y; g->vertex.z = w[2];
+        vertex_kick(g, xyz == GS_XYZ3);
+        return;
+    }
     case 10: value = (uint64_t)(w[3] >> 4 & 255) << 56; break;
     case 14: reg = w[2] & 127; break;
     case 11: case 15: return;
@@ -544,6 +566,22 @@ void gs_feed(Gs *g, unsigned path, const uint32_t *words, size_t count)
             memcpy(p->words, words + i + (run - 1) * 4, sizeof p->words);
             p->left -= (uint32_t)run;
             i += run * 4;
+        } else if (bulk && !p->have && count - i >= 4 && p->left && p->mode == 0 && !g->record_transfer) {
+            /* PACKED data: the run of whole qwords at once, each register as gif_qword would
+               write it, read in place, with the tag's counters in locals. The path keeps the
+               last qword, as it would. */
+            size_t avail = (count - i) / 4, done = 0;
+            uint32_t left = p->left, reg = p->reg, nreg = p->nreg;
+            uint64_t regs = p->regs;
+            const uint32_t *w = words + i;
+            do {
+                packed(g, p, (unsigned)(regs >> (reg * 4)) & 15, w);
+                w += 4;
+                if (++reg == nreg) { reg = 0; left--; }
+            } while (++done < avail && left);
+            memcpy(p->words, w - 4, sizeof p->words);
+            p->left = left; p->reg = reg;
+            i += done * 4;
         } else if (bulk && !p->have && count - i >= 4) {
             memcpy(p->words, words + i, sizeof p->words);
             p->have = 4;  /* the transfer callback observes a completed qword */
