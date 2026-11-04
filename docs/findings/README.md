@@ -180,6 +180,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 147 | [Unlocked phone measurements must reach the race](147-phone-race-unlocked.md) | current |  |
 | 148 | [The race start was a serial chain: the flare's Z read made the game wait for VU1](148-phone-race-start.md) | current |  |
 | 149 | [The throttled phone at 4x: one gather per bilinear texel footprint; the render thread's...](149-phone-gpu-texels-and-render-thread.md) | current |  |
+| 150 | [Native macOS launcher window controls](150-macos-launcher-window-controls.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

@@ -656,6 +656,8 @@ async function play() {
 
 async function start() {
   const snap = await invoke('snapshot');
+  // macOS supplies real window buttons over the title bar's drag region.
+  document.querySelector('.win-ctl').hidden = snap.native_window_controls;
   state.schema = Object.fromEntries((await invoke('settings_schema')).map((s) => [s.key, s]));
   $('rider-input').maxLength = state.schema.name.rule.max;
   state.version = snap.version;

@@ -45,7 +45,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - **Browser:** `port/web/build.py build/wasm/dhd_core.wasm` (findings 083, 087).
 - **Android:** `port/android/build_apk.py` (debug, `--release` with the release key named by the
   `DHD_ANDROID_*` variables; findings 091, 143).
-- **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093).
+- **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093;
+  native window buttons on macOS, finding 150).
 - **Releases:** `port/tools/package_release.py` builds, checks and packages each platform
   (`docs/BUILDING.md`, "Releases"; the `release` skill).
 - Retired, do not bring back: the 32-bit i686 build, the Direct3D 11 renderer, the C wgpu-native
