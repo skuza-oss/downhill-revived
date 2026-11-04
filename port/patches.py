@@ -417,9 +417,9 @@ PATCHES['unsorted/0016B8C8.cpp'] = [('text', 'int func_00238F10(void);', 'int fu
 # the PCSX2 widescreen patch for this disc changes them (finding 043). The view table and tree
 # widths are data, changed at boot.
 PATCHES['unsorted/001A8A48.c'] = [('text', 'func_0023D8D8(0, 277.0f, y);', 'func_0023D8D8(0, 277.0f * port_fov_x, y);')]
-PATCHES['unsorted/001F84A8.c'] = [('text', 'func_0023D8D8(0, f, b);', 'func_0023D8D8(0, f * port_fov_x, b);')]
+PATCHES['unsorted/001F84A8.c'] = [('text', 'func_0023D8D8(0, f, b);', 'port_ws_set_focal(0, f, b);')]
 # 688 is the title (func_001B6708, recompiled from asm) and shell menus' X field of view.
-PATCHES['unsorted/0023D8D8.c'] = [('text', '    view->x0 = dist;', '    if (dist == 688.0f) dist *= port_fov_x;\n    view->x0 = dist;')]
+PATCHES['unsorted/0023D8D8.c'] = [('text', '    view->x0 = dist;', '    dist = port_ws_menu_focal(dist);\n    view->x0 = dist;')]
 # func_00202760 passes its fourth argument (a3, the callers' result buffer such as &D_0029E168)
 # through to func_00247D28, which reads it; the source names only three, which matches retail only
 # because a3 is never touched. Natively the pointer was dropped and the memory card code read stack
@@ -793,6 +793,12 @@ PATCHES['unsorted/0013BA60.cpp'] = PATCHES.get('unsorted/0013BA60.cpp', []) + [
 # rider's default: online_menu.c shop_prepare), as the career's shop does (func_0013A270), not on
 # the list's first: a pro who changes nothing keeps the pro's own bike (finding 128).
 PATCHES['unsorted/00139BF8.c'] = PATCHES.get('unsorted/00139BF8.c', []) + [
+    ('text', '    D_0029C470 = 1;', '    D_0029C470 = 1;\n    port_ws_inventory_enter();'),
+    ('text', 'extern unsigned char D_0029C470;',
+     'extern unsigned char D_0029C470;\nextern void port_ws_inventory_enter(void);'),
+    # Publish the inventory's final projection before building the combined camera matrices.
+    ('text', 'func_0023C8D8(5,0);func_0023CB00(0);\n func_0023D898(0,&coords[0],&coords[1]);InitSize(0,coords[1]);',
+     'func_0023C8D8(5,0);\n func_0023D898(0,&coords[0],&coords[1]);InitSize(0,coords[1]);func_0023CB00(0);'),
     ('text', '        func_0013CDB0(&D_00365800);\n    }\n',
      '        func_0013CDB0(&D_00365800);\n        if (port_online_single_race()) func_0013A270();\n    }\n'),
     ('text', 'extern void func_0013A270(void);\n',

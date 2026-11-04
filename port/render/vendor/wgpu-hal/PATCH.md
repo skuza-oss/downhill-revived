@@ -1,7 +1,7 @@
 # Downhill Revived Vulkan framebuffer cache
 
 This is the crates.io `wgpu-hal` **29.0.3** source, under its original MIT OR
-Apache-2.0 licence (LICENSE.MIT and LICENSE.APACHE). Other backends are unchanged.
+Apache-2.0 licence (LICENSE.MIT and LICENSE.APACHE).
 Local changes are marked `Downhill Revived` in the four Vulkan source files.
 
 The device shares at most 256 framebuffer lookup entries across command encoders.
@@ -44,3 +44,12 @@ This patch is a local implementation, not an upstream backport.
 
 The parent Cargo.toml patches only this crate; the lock removes only its registry
 source/checksum. rustgs includes all vendor files in its object-cache key.
+
+## iOS drawable timeout
+
+The Metal surface retains CAMetalLayer's drawable timeout on iOS. The upstream
+override disabled it, allowing nextDrawable to wait indefinitely if presentation
+stops while the app becomes inactive. Other Apple targets retain their previous
+behavior. This is a bounded-wait guard, not a guarantee of lifecycle correctness;
+device validation is required. Primary reference:
+https://developer.apple.com/documentation/quartzcore/cametallayer/allowsnextdrawabletimeout

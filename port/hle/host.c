@@ -34,6 +34,7 @@
 #include <android/log.h>
 #endif
 #ifdef __APPLE__
+#include <TargetConditionals.h>
 #include <mach/mach.h>  /* thread_info: the bench's thread times */
 #endif
 #include <errno.h>
@@ -592,6 +593,8 @@ void host_thread_name(const char *name)
     if (MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, 64)) SetThreadDescription(GetCurrentThread(), wide);
 #elif defined(__APPLE__)
     pthread_setname_np(name);  /* the calling thread's own */
+    if (!strcmp(name, "game") || !strcmp(name, "vu") || !strcmp(name, "gs") || !strcmp(name, "native"))
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 #else
     /* Linux and Android: the main thread's name is the process's own (ps, top, pgrep, a desktop's
        system monitor), so that thread keeps "dhd" (a crash report then says thread dhd) */
@@ -949,7 +952,12 @@ void host_pad_device(int port, HostPad *out)
     }
     int connected = gamepad_start() && gamepad_read(port, out);
     if (port == 0) keyboard_merge(out);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    void touch_pad_merge(HostPad *out) __attribute__((weak));
+    if (port == 0 && touch_pad_merge) touch_pad_merge(out);
+#else
     if (port == 0) touch_host_merge(out);  /* the touch controls (touch_host.c, finding 141) */
+#endif
     out->connected = (uint8_t)(connected || port == 0);  /* player 1 always has the keyboard */
 }
 
@@ -1590,9 +1598,21 @@ static int card_next, card_drawn;
 int host_widescreen_card_drawn(void) { return card_drawn; }
 int host_frame_video(double aspect, int flat_limit)
 {
-    published_aspect=aspect; published_flat_limit=flat_limit;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    if (aspect != published_aspect) {
+        void vif1_update_widescreen_sprites(double previous);
+        graphics_wait();
+        vif1_update_widescreen_sprites(published_aspect);
+    }
+#endif
+    published_aspect = aspect;
+    published_flat_limit = flat_limit;
     card_drawn=card_next;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    card_next=aspect>0 && flat_limit>0 && gs_native_card();
+#else
     card_next=aspect>0 && gs_native_card();
+#endif
     return card_next;
 }
 

@@ -15,10 +15,15 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include "wasm-rt.h"
 #include "core_host.h"  /* guest_base, for the fault bounds check */
 #include "guest_memory_os.h"
 
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#define GUEST_SIZE 0x80010000ull
+#else
 #define GUEST_SIZE 0x200000000ull
+#endif
 #define RAM_SIZE 0x2000000ull
 
 static int ram_fd=-1;
@@ -27,13 +32,28 @@ static struct sigaction old_segv, old_bus;
 static int installed;
 
 void os_fail(const char *what) {
-    fprintf(stderr,"host64 memory: %s (%d: %s)\n",what,errno,strerror(errno)); abort();
+    fprintf(stderr,"host64 memory: %s (%d: %s)\n",what,errno,strerror(errno));
+    {
+        void host_log_drain(void) __attribute__((weak));
+        if (host_log_drain) host_log_drain();
+    }
+    abort();
 }
 uintptr_t os_reserve(void) {
 #ifdef __APPLE__  /* no memfd: a POSIX shared memory object, unlinked at once */
     char name[32]; snprintf(name,sizeof name,"/dhd-guest-ram-%d",(int)getpid());
     ram_fd=shm_open(name,O_RDWR|O_CREAT|O_EXCL,0600);
-    if (ram_fd>=0) shm_unlink(name);
+    if (ram_fd>=0) {
+        shm_unlink(name);
+    } else {
+        /* Fallback for iOS sandbox where shm_open may be restricted */
+        char path[512];
+        const char *tmp = getenv("TMPDIR");
+        if (!tmp) tmp = "/tmp";
+        snprintf(path, sizeof path, "%s/dhd-guest-ram-%d", tmp, (int)getpid());
+        ram_fd = open(path, O_RDWR|O_CREAT|O_EXCL, 0600);
+        if (ram_fd >= 0) unlink(path);
+    }
 #else
     ram_fd=memfd_create("dhd-guest-ram",MFD_CLOEXEC);
 #endif

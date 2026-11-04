@@ -28,11 +28,19 @@ const char *host_getenv(const char *name) { return getenv(name); }
 
 typedef struct { const char *title, *message; } ErrorBox;
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 static void show_error_box(void *box)
 {
     const ErrorBox *b = box;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    (void)b;
+#else
     if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, b->title, b->message, NULL))
         fprintf(stderr, "(no error box: %s)\n", SDL_GetError());
+#endif
 }
 
 /* The log carries it too; tool runs (DHD_HEADLESS) never wait on a box. The box is shown on the
@@ -67,11 +75,21 @@ typedef struct {
 static void display_read(void *out)
 {
     DisplayFacts *d = out;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    void ios_metal_get_drawable_size(int *out_w, int *out_h) __attribute__((weak));
+    bool ios_metal_has_promotion_support(void) __attribute__((weak));
+    int w = 0, h = 0;
+    if (ios_metal_get_drawable_size) ios_metal_get_drawable_size(&w, &h);
+    d->hz = (ios_metal_has_promotion_support && ios_metal_has_promotion_support()) ? 120 : 60;
+    if (w > 0 && h > 0) d->aspect = (double)w / (double)h;
+    else d->aspect = 16.0 / 9.0;
+#else
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) return;
     const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
     if (!m) return;
     d->hz = (int)m->refresh_rate;  /* the whole hertz below, as the mode's own number was (143 at 143.86) */
     if (m->w > 0 && m->h > 0) d->aspect = (double)m->w / m->h;
+#endif
 }
 
 static DisplayFacts display_facts(void)
@@ -81,12 +99,24 @@ static DisplayFacts display_facts(void)
     return d;
 }
 
-int host_display_hz(void) { return display_facts().hz; }
+int host_display_hz(void)
+{
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    int ios_metal_effective_fps(void);
+    return ios_metal_effective_fps();
+#else
+    return display_facts().hz;
+#endif
+}
 
 /* DHD_MONITOR_ASPECT where the starter knows better (Android's activity: the long side over the
    short), else the primary display's shape; 16 / 9 when unknown. */
 double host_monitor_aspect(void)
 {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    double ios_metal_game_aspect(void);
+    return ios_metal_game_aspect();
+#endif
     const char *named = getenv("DHD_MONITOR_ASPECT");
     if (named && atof(named) >= 1.0 && atof(named) < 4.0) return atof(named);
     double aspect = display_facts().aspect;

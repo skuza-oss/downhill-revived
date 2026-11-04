@@ -61,6 +61,7 @@ static int native_waits_for_vsync(Native *n)
    present.c's window), in the rectangle that keeps its shape. */
 static void native_present(Native *n)
 {
+    if (!platform_present_active()) return;
     Rust *p = n->exact;
     if (!p->surface || !p->window.size || n->present_failed) return;
     unsigned w, h;
@@ -157,11 +158,9 @@ static int native_init(Gs *g, Rust *exact)
     char most[4];
     snprintf(most, sizeof most, "%u", n->scale_limit);
     host_putenv_s("DHD_SCALE_MAX", most);
-    /* and why it is less than 8: "memory" (graphics memory), "texture" (the largest texture) or
-       "phone" (NATIVE_PHONE_SCALE_MAX) */
+    /* and why it is less than 8: "memory" (graphics memory) or "texture" (the largest texture) */
     host_putenv_s("DHD_SCALE_MAX_REASON", n->scale_reason == NATIVE_SCALE_MEMORY ? "memory" :
-                  n->scale_reason == NATIVE_SCALE_TEXTURE ? "texture" :
-                  n->scale_reason == NATIVE_SCALE_PHONE ? "phone" : "");
+                  n->scale_reason == NATIVE_SCALE_TEXTURE ? "texture" : "");
     fprintf(stderr, "gs native: WebGPU shaders and pipelines built in %.2f s\n", host_wall_seconds() - start);
     native_install(g, exact, n, "WebGPU");
     fprintf(stderr, "gs native: GS blending %s\n", n->dual ? "with dual-source blending" :

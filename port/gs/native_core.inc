@@ -150,6 +150,7 @@ typedef struct {
     int32_t *pair;                   /* DHD_INTERP: each segment's partner in the older field, or -1 */
     unsigned pair_capacity;
     unsigned path1;                  /* primitives VU1 drew (PATH1): 0 in a field of 2D only */
+    double output_aspect;             /* aspect of the game picture at handoff */
     unsigned flat_limit;             /* loading state at handoff, never read from the render thread */
     int card_2d;                     /* the game drew its 2D unmapped, for a 4:3 card (host_widescreen_card_drawn) */
 } NativeFrame;
@@ -196,6 +197,9 @@ typedef struct {
 typedef struct Native {
     NativeExactCache exact_state;
     NativeExact *exact;
+#ifdef DHD_IOS_RENDER
+    int point_filter;
+#endif
     NativeMutex context_lock;          /* the render thread's device work, against the EE thread's */
     /* recording (GS worker) */
     NativeFrame frames[NATIVE_FRAMES];
@@ -322,6 +326,9 @@ static NativeView native_replacement_view(Native *n, NativeTexture *t);
 /* The surface's texture at its scale and at least want[] GS pixels, keeping what it holds. */
 static int native_surface_resources(Native *n, NativeSurface *s, const unsigned want[2]);
 /* One picture: the field's commands with these vertices, scanned out and presented. */
+#ifdef DHD_IOS_RENDER
+static void native_set_scale(Native *n, unsigned setting);
+#endif
 static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertices, float t);
 static void native_present(Native *n);  /* the last scanned-out picture again */
 /* The displayed picture (display_width x display_height) into pixels; 0 when there is none. */
@@ -1875,6 +1882,7 @@ void pacing_present(double due, double began);
    goggles transition has more geometry than the later tiled card. Race, results
    and countdown views never use a primitive-count heuristic. */
 #define NATIVE_FLAT_FIELDS 8
+double host_widescreen_aspect(void);
 int host_widescreen_flat_limit(void);  /* port/hle/widescreen.c */
 int host_widescreen_card_drawn(void);  /* port/hle/host.c: the field's 2D was drawn for a card */
 
@@ -1935,7 +1943,12 @@ static void native_prepare_surfaces(Native *n, const NativeFrame *f)
    field's VU1 primitives and the limit of its menu state. */
 static void native_note_flat(Native *n, const NativeFrame *f)
 {
+#ifdef DHD_IOS_RENDER
+    /* A field with no new PATH1 packets can still show the previous 3D race picture. */
+    int flat = f->flat_limit > 0 && f->path1 < f->flat_limit;
+#else
     int flat = !f->path1 || (n->wide && f->path1 < f->flat_limit);
+#endif
     n->flat_fields = flat ? n->flat_fields + 1 : 0;
     native_card_now = n->wide && n->flat_fields >= NATIVE_FLAT_FIELDS;
 #ifdef NATIVE_NO_CARD_MODE
@@ -2497,11 +2510,12 @@ void gs_native_vsync(Gs *g, unsigned *width, unsigned *height, int resize)
 {
     double due, began;
     pacing_handed(&due, &began);
-    gs_native_vsync_handed(g, width, height, resize, due, began, host_widescreen_flat_limit(), host_widescreen_card_drawn());
+    gs_native_vsync_handed(g, width, height, resize, due, began, host_widescreen_flat_limit(), host_widescreen_card_drawn(),
+                           host_widescreen_aspect());
 }
 
 void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize, double due, double began,
-                            int flat_limit, int card_2d)
+                            int flat_limit, int card_2d, double output_aspect)
 {
     FILE *trace = native_field_trace("registers");
     if (trace) {
@@ -2548,6 +2562,7 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
     } else n->stats.display_missing++;
     memcpy(f->display, packed, sizeof packed);
     f->flat_limit = (unsigned)flat_limit;
+    f->output_aspect = output_aspect;
     f->card_2d = card_2d;
     f->field = ++n->field;
     if (n->texpack) texpack_field(n->field);
@@ -2588,6 +2603,19 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
     native_mutex_unlock(&n->queue_lock);
 #ifdef NATIVE_INLINE
     native_render_next(n);  /* no render thread: the field is drawn now */
+#endif
+#ifdef DHD_IOS_RENDER
+    unsigned scale = (unsigned)ios_metal_render_scale();
+    unsigned supported = scale > n->scale_limit ? n->scale_limit : scale;
+    if (supported != n->scale_setting) {
+        /* The GS owner is between fields. Drain queued pictures before dropping their surfaces. */
+        native_mutex_lock(&n->queue_lock);
+        while (n->rendered < n->handed) native_cond_wait(&n->queue_changed, &n->queue_lock);
+        native_mutex_unlock(&n->queue_lock);
+        native_mutex_lock(&n->context_lock);
+        native_set_scale(n, scale);
+        native_mutex_unlock(&n->context_lock);
+    }
 #endif
     /* The probe log keeps this field and the previous one. */
     NativeLog spare = n->logs[0];
@@ -2770,6 +2798,7 @@ static void native_aspect_options(Native *n)
     unsigned aw = 4, ah = 3;
     double host_widescreen_aspect(void);
     n->wide = (float)host_widescreen_aspect();
+    /* iOS's game-thread widescreen update follows the active output, including hotplug. */
     if (aspect && !strcmp(aspect, "wide")) n->aspect = n->wide ? n->wide : 4.0f / 3;
     else if (aspect && !strcmp(aspect, "stretch")) n->aspect = 0;
     else if (aspect && !strcmp(aspect, "pixels")) n->aspect = -1;

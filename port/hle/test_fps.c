@@ -19,7 +19,8 @@ int func_00243CE8(int ignored) { (void)ignored; waits++; return 0; }
 void hle_log(const char *fmt,...) { (void)fmt; }
 static double fake_wall=1;
 double host_wall_seconds(void) { return fake_wall; }
-int host_display_hz(void) { return 0; }  /* DHD_FPS=monitor is not checked here */
+static int display_rate;
+int host_display_hz(void) { return display_rate; }
 void func_00155E78(void *p,int kind) { (void)p;recoveries++;recovery_kind=kind; }
 int func_0012D300(void *p) { (void)p;return 0; }
 float func_0012DF48(void *p) { (void)p;return (float)braking; }
@@ -70,6 +71,38 @@ int main(int argc,char **argv)
     int n=atoi(argv[1]);
     /* the core's guest memory: the registers at 0x10000000, PS2 RAM at 0x08000000 */
     host_putenv_s("DHD_FPS",argv[1]);  /* the host environment port_fps reads */
+    if (argc>2 && !strcmp(argv[2],"display")) {
+        display_rate=120;
+        host_putenv_s("DHD_IOS_DISPLAY_AUTO","1");
+        assert(port_fps()==120);
+        port_clock_wall(1);
+        port_clock_reset();
+        D_0029E3D8=0;
+        port_clock_wait(NULL);  /* half a field */
+        assert(port_whole_step()==0);
+        display_rate=60;
+        assert(port_fps_update_display() && port_fps()==60);
+        assert(!port_fps_update_display());
+        fake_wall+=1.0/60;
+        port_clock_wait(NULL);  /* 1.5 cumulative fields */
+        display_rate=120;
+        assert(port_fps_update_display() && port_fps()==120);
+        fake_wall+=1.0/120;
+        port_clock_wait(NULL);  /* exactly two fields */
+        assert(D_0029E3D8==2 && port_whole_step()==1);
+        port_clock_grid(GRID_WHOLE);
+        port_clock_wait(NULL);
+        display_rate=60;
+        assert(port_fps_update_display() && port_frame_period()==1.0/60);
+        port_clock_grid(GRID_PLAY);
+        port_clock_wait(NULL);
+        port_clock_force(90);
+        double replay_period=port_frame_period();
+        assert(fabs(replay_period-0.0125)<1e-9);
+        display_rate=120;
+        assert(port_fps_update_display() && port_frame_period()==replay_period);
+        return 0;
+    }
     assert(port_fps()==n);
     int wall=argc>2 && !strcmp(argv[2],"wall");
     if(n==60 && !wall) {

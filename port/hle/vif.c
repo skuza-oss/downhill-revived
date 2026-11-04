@@ -54,6 +54,35 @@ static uint8_t *micro(int unit) {
     return unit ? (uint8_t *)GUEST(VU1_MICRO) : ps2.vu0_code;
 #endif
 }
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#include "widescreen_sprites.h"
+
+/* host_frame_video calls this with the graphics queues drained on an aspect change.
+   The active package might already have been uploaded, or VU1 might hold an unrelated one. */
+void vif1_update_widescreen_sprites(double previous)
+{
+    float focal = previous > 0 ? (float)(4.0 / 3.0 / previous) : 1.0f;
+    float width = 277.0f * focal;
+    uint32_t expected;
+    memcpy(&expected, &width, sizeof expected);
+    uint32_t *code = (uint32_t *)micro(1);
+    int changed = 0;
+    for (unsigned i = 0; i < sizeof ws_sprite_widths / sizeof *ws_sprite_widths; i++) {
+        const uint32_t *source = GUEST(0x08000000u + ws_sprite_widths[i].ee);
+        uint32_t *instruction = code + ws_sprite_widths[i].vu / 4;
+        if (instruction[0] == expected && instruction[0] != source[0] &&
+            instruction[1] == ws_sprite_widths[i].upper && instruction[1] == source[1]) {
+            instruction[0] = source[0];
+            changed = 1;
+        }
+    }
+    if (changed) ps2_vu1_code_version++;
+}
+#endif
+#endif
+
 static uint32_t *data_mem(int unit) {
 #if defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__)
     if (unit!=1) abort();

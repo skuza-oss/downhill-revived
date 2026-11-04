@@ -19,6 +19,11 @@ bios/
 # generated from your own executable by tools/split.py
 asm/
 assets/
+!assets/cover.webp
+!assets/gameplay.mp4
+!assets/gameplay-preview.webp
+!assets/screenshots/
+!assets/screenshots/**
 expected/
 
 # --- Build outputs ---------------------------------------------------------------------
@@ -81,3 +86,7 @@ docs/private/
 
 # Rust build output (cargo)
 port/render/**/target/
+
+# iOS release binaries (attached to GitHub Releases)
+*.ipa
+

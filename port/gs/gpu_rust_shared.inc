@@ -21,8 +21,7 @@
    with a log line, keeping the old texture. */
 #define NATIVE_SCALE_MAX 8u
 #define NATIVE_SURFACE_MAX 2048u
-/* Phones stop at 6x: on a Snapdragon 888 (Mi 11i) 0.7.7 draws the bench race at 93 fields/s at 4x
-   and 33 at 8x, so 7x and 8x only make a phone slow and hot. */
+/* Bound the cost of scaled render targets on phones. */
 #define NATIVE_PHONE_SCALE_MAX 6u
 /* What holds a device's scale limit below NATIVE_SCALE_MAX (Native scale_reason). */
 enum { NATIVE_SCALE_FREE, NATIVE_SCALE_MEMORY, NATIVE_SCALE_TEXTURE, NATIVE_SCALE_PHONE };
@@ -121,6 +120,38 @@ static void native_texture_release(NativeTexture *t)
     t->gpu = NULL; t->sharp = NULL;
 }
 
+#if defined(NATIVE_INLINE) || defined(DHD_IOS_RENDER)
+/* Between fields, recreate scaled color/depth surfaces and let the next claim import GS
+   memory. Effects held only in GPU textures can disappear for the first field after a change.
+   The caller must have finished rendering all fields already handed over. */
+static void native_set_scale(Native *n, unsigned setting)
+{
+    if (setting > NATIVE_SCALE_MAX) setting = NATIVE_SCALE_MAX;
+    n->scale_asked = setting;
+    if (setting > n->scale_limit) setting = n->scale_limit;
+    if (setting == n->scale_setting) return;
+    unsigned count = (unsigned)n->surface_count;
+    uint8_t dropped[NATIVE_SURFACES] = {0};
+    for (unsigned i = 0; i < count; i++) {
+        NativeSurface *s = &n->surfaces[i];
+        if (s->bw < NATIVE_SCALED_BW) continue;   /* 1x at every scale */
+        if (s->texture) {
+            uint32_t size[2];
+            dhdr_native_surface(n->r, i, 1, 64, 64, !s->depth, size);
+        }
+        s->scale = 0; s->size[0] = s->size[1] = 0;
+        s->texture = s->srv = 0;
+        dropped[i] = 1;
+    }
+    for (unsigned page = 0; page < 512; page++) {
+        if (n->owner[page] >= 0 && dropped[n->owner[page]]) n->owner[page] = -1;
+        if (n->top_owner[page] >= 0 && dropped[n->top_owner[page]]) n->top_owner[page] = -1;
+    }
+    n->scale_setting = setting;
+    n->scale = 0;   /* native_picture: the setting, or the canvas's match */
+}
+#endif
+
 /* ---- the picture (x64: render thread, context lock held) ---- */
 
 /* The surface's texture at its scale and at least want[] GS pixels, keeping what it holds (Rust
@@ -190,6 +221,15 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
     static int spikes = -1;
     if (spikes < 0) spikes = getenv("DHD_SPIKES") != NULL;
     double start = n->trace_pictures || spikes ? host_wall_seconds() : 0;
+#ifdef DHD_IOS_RENDER
+    n->wide = f->output_aspect > 0 ? (float)f->output_aspect : 0;
+    n->aspect = f->output_aspect < 0 ? 0 : n->wide ? n->wide : 4.0f / 3;
+    int point = ios_metal_point_filter();
+    if (n->point_filter != point) {
+        dhdr_native_options(n->r, point ? DHDR_NATIVE_POINT_FILTER : 0);
+        n->point_filter = point;
+    }
+#endif
     if (!n->scale) {
         unsigned wanted = n->scale_asked;
         char window[48] = "";
@@ -289,8 +329,13 @@ static int native_read_display(Native *n, uint32_t *pixels)
 /* DHD_PRESENT_FILTER=point keeps the picture's pixels sharp; linear by default. Then DHD_ASPECT. */
 static void native_present_options(Native *n)
 {
+#ifdef DHD_IOS_RENDER
+    int point = n->point_filter = ios_metal_point_filter();
+#else
     const char *present_filter = getenv("DHD_PRESENT_FILTER");
-    dhdr_native_options(n->r, present_filter && !strcmp(present_filter, "point") ? DHDR_NATIVE_POINT_FILTER : 0);
+    int point = present_filter && !strcmp(present_filter, "point");
+#endif
+    dhdr_native_options(n->r, point ? DHDR_NATIVE_POINT_FILTER : 0);
     native_aspect_options(n);
 }
 
@@ -308,7 +353,7 @@ static void native_scale_hold(Native *n, uint64_t memory)
     unsigned limit = NATIVE_SCALE_MAX, texture = dhdr_device_max_texture() / NATIVE_SURFACE_MAX;
     n->scale_reason = NATIVE_SCALE_FREE;
     if (texture && texture < limit) limit = texture, n->scale_reason = NATIVE_SCALE_TEXTURE;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(DHD_IOS_RENDER)
     if (limit > NATIVE_PHONE_SCALE_MAX) limit = NATIVE_PHONE_SCALE_MAX, n->scale_reason = NATIVE_SCALE_PHONE;
 #endif
     while (memory && limit > 4 && (uint64_t)limit * limit * NATIVE_SCALED_BYTES > memory / 2)
