@@ -244,8 +244,15 @@ impl Native {
                 let count = (w * h) as usize;
                 if out.len() >= count {
                     let data = s.read.slice(..(count * 4) as u64).get_mapped_range();
-                    for (i, word) in out[..count].iter_mut().enumerate() {
-                        *word = u32::from_le_bytes([data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]]);
+                    // One copy of the mapped bytes (wide loads), then each word from its little-endian
+                    // bytes: four byte loads a word from the mapped memory cost ~0.4 ms a
+                    // picture on the throttled phone (finding 146).
+                    let words = &mut out[..count];
+                    // SAFETY: the u32s' bytes, as many as `words` holds, all of them written here.
+                    unsafe { std::slice::from_raw_parts_mut(words.as_mut_ptr().cast::<u8>(), count * 4) }
+                        .copy_from_slice(&data[..count * 4]);
+                    for word in words.iter_mut() {
+                        *word = u32::from_le(*word);
                     }
                     *rect = s.rect;
                     *tag = s.tag;
