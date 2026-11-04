@@ -337,3 +337,5 @@ Android (finding 143): `package_release.py --platform android` with the release 
 Since 0.7.0 the mac and linux zips are `-mac-experimental.zip` and `-linux-experimental.zip`
 (finding 093, "0.7.0": built and checked on all three, published 2026-10-28; Linux is linked on
 Ubuntu 22.04 and runs on glibc 2.35 and later, which `package_release.py` checks).
+
+Before the version commit, run the doc-gardening checklist (`docs/RELEASE-CHECKLIST.md`).
