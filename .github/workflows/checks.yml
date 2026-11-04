@@ -1,0 +1,20 @@
+# The public never-commit rules and the docs linter on every push and pull request.
+# The same checks run locally as the pre-commit hook (python tools/hooks/install.py).
+name: checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tree-and-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: never-commit rules (game data, secrets, servers, machine paths)
+        run: python tools/check_tree.py
+      - name: docs linter (findings, citations, paths)
+        run: python tools/check_docs.py

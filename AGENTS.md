@@ -25,6 +25,10 @@ logs, machine setup and account details there, never in tracked files.
 - History on `main` is never rewritten. One clear commit per change; a release is its version
   commit (the last one), tagged `vX.Y.Z`.
 
+The never-commit rules are also checked mechanically: `tools/check_tree.py` and
+`tools/check_docs.py`, run by the pre-commit hook (install once per clone:
+`python tools/hooks/install.py`) and by CI (`.github/workflows/checks.yml`).
+
 ## Done means
 
 One entry point: `python tools/check.py <tier>` (one line per step, logs in `build/check/`).

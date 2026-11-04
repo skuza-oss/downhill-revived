@@ -2,7 +2,7 @@
 """One entry point for the checks, in tiers. Each step prints one line (OK/FAIL, seconds, log);
 its full output goes to build/check/<tier>-<step>.log.
 
-    python tools/check.py docs       # the docs linter (seconds)
+    python tools/check.py docs       # docs linter + never-commit check of the tree (seconds)
     python tools/check.py quick      # docs, then the game core (module cache) and the unit tests
     python tools/check.py port       # quick, then the native game, the renderer and network tests
     python tools/check.py matching   # the retail image: configure, build, byte-for-byte check
@@ -22,7 +22,8 @@ NPM = 'npm.cmd' if os.name == 'nt' else 'npm'
 
 def steps(tier, jobs):
     j = ['-j', str(jobs)] if jobs else []
-    docs = [('check_docs', [PY, 'tools/check_docs.py', '--quiet'], ROOT)]
+    docs = [('check_docs', [PY, 'tools/check_docs.py', '--quiet'], ROOT),
+            ('check_tree', [PY, 'tools/check_tree.py'], ROOT)]
     quick = docs + [('build_wasm', [PY, 'port/tools/build_wasm.py'] + j, ROOT),
                     ('test_runtime', [PY, 'port/tools/test_runtime.py'], ROOT)]
     port = quick + [('build_game', [PY, 'port/tools/build.py', '--no-core'] + j, ROOT),
