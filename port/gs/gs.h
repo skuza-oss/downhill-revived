@@ -5,6 +5,20 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifndef PS2_NO_AUTO_INIT
+/* The build zero-fills every local (-ftrivial-auto-var-init=zero: the game reads some before
+   writing them, finding 081). A port local every read of which follows a write can skip that
+   fill where it costs (finding 148). */
+#if defined(__has_attribute)
+#if __has_attribute(uninitialized)
+#define PS2_NO_AUTO_INIT __attribute__((uninitialized))
+#endif
+#endif
+#ifndef PS2_NO_AUTO_INIT
+#define PS2_NO_AUTO_INIT
+#endif
+#endif
+
 enum { GS_VRAM_SIZE = 4 * 1024 * 1024 };
 enum {
     GS_PSMCT32 = 0, GS_PSMCT24 = 1, GS_PSMCT16 = 2, GS_PSMCT16S = 10,

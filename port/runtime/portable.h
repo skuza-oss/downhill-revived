@@ -44,4 +44,18 @@
 #define PS2_OPAQUE_M128(v) do { volatile __typeof__(v) ps2_opaque_ = (v); (v) = ps2_opaque_; } while (0)
 #endif
 
+#ifndef PS2_NO_AUTO_INIT
+/* The build zero-fills every local (-ftrivial-auto-var-init=zero: the game reads some before
+   writing them, finding 081). A port local every read of which follows a write can skip that
+   fill where it costs (finding 148). */
+#if defined(__has_attribute)
+#if __has_attribute(uninitialized)
+#define PS2_NO_AUTO_INIT __attribute__((uninitialized))
+#endif
+#endif
+#ifndef PS2_NO_AUTO_INIT
+#define PS2_NO_AUTO_INIT
+#endif
+#endif
+
 #endif

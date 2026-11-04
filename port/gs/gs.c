@@ -84,7 +84,7 @@ static void load_clut(Gs *g, uint64_t tex)
         } else g->clut_memo.valid = 0;
         /* CSM1: the entries are distinct, so only the number of changed ones matters for
            state_version; counted without a branch per entry. */
-        uint16_t low[256], high[256];
+        uint16_t low[256] PS2_NO_AUTO_INIT, high[256] PS2_NO_AUTO_INIT;  /* written for every entry read */
         unsigned first = 0, changed = 0;
         if (cpsm & 2) {
             for (i = 0; i < count; i++) {
@@ -560,8 +560,9 @@ static int strip_regs(uint64_t regs, unsigned nreg)
 static void packed_strip(Gs *g, GsPath *p, uint64_t regs, unsigned nreg, const uint32_t *w, size_t loops)
 {
     enum { BATCH = 256 };
-    GsVertex list[BATCH + 2];
-    uint8_t drawn[BATCH];
+    /* 10 KB a call, thousands of calls a field: entries are written before they are read */
+    GsVertex list[BATCH + 2] PS2_NO_AUTO_INIT;
+    uint8_t drawn[BATCH] PS2_NO_AUTO_INIT;
     unsigned m = g->vertex_count, xyz = (unsigned)(regs >> ((nreg - 1) * 4)) & 15;
     int kicked = 0;   /* the last vertex made a triangle */
     memcpy(list, g->vertices, m * sizeof *list);
