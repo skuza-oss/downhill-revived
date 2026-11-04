@@ -164,17 +164,46 @@ static void wait_retired(uint32_t at) { idle_wait(&consumed, at, &waiting, retir
 /* Markers (finding 090 HO1): a VBLANK or a picture queued in order with the packets, run by the
    thread that owns the GS once everything sent before it has run there. Unit 3 in this ring, then
    GS_PATH_MARK in the GS ring. Words: sequence number, kind, payload. */
-enum { UNIT_MARK = 3, MARK_VBLANK = 0, MARK_PRESENT = 1, MARK_WORDS = 64 };
+enum { UNIT_MARK = 3, MARK_VBLANK = 0, MARK_PRESENT = 1, MARK_STORE = 2, MARK_WORDS = 64 };
 static uint32_t marks_sent, vblank_mark, present_mark;  /* EE */
+static uint32_t csr_mark;                               /* EE: the last marker that changes the CSR */
 QUEUE_COUNTER(marks_done);                              /* the GS owner: the last marker run */
-static volatile uint64_t vblank_csr;  /* CSR after the last VBLANK marker; read after its mark */
+/* CSR after the last VBLANK or store marker run; read after csr_mark */
+static volatile uint64_t marked_csr;
 void (*graphics_present_marked)(const void *payload);  /* present.c */
+
+/* Queued store-image reads (host_service_gs_store_image, finding 148). The EE fills a slot and
+   queues its marker; the GS owner reads the GS into the slot when the marker runs (in order with
+   the drawing, where the EE used to wait for both workers to go idle); the EE copies the bytes to
+   guest RAM at the read's first access (host_service_gs_store_settle). */
+enum { STORE_SLOTS = 16, STORE_BYTES = 16384 };
+static struct { uint32_t destination, bytes, mark; int ok; uint8_t data[STORE_BYTES]; } stores[STORE_SLOTS];
+static unsigned stores_sent, stores_settled;  /* EE */
+
+static void run_store(unsigned slot)
+{
+    /* What sceGsExecStoreImage does after its waits: defer the read (staged in order with the
+       draws) and settle it at once into the slot, or read it now; then consume FINISH. */
+    uint8_t *data = stores[slot].data;
+    uint32_t bytes = stores[slot].bytes;
+    size_t got = gs_defer_read_image(&gs, data, bytes);
+    if (got == bytes) gs_settle_reads(&gs);
+    else {
+        if (gs_reads_pending(&gs)) gs_settle_reads(&gs);
+        got = gs_read_image(&gs, data, bytes);
+    }
+    stores[slot].ok = got == bytes;
+    gs_priv_write(&gs, GS_CSR, 2);
+}
 
 static void run_mark(const uint32_t *words)
 {
     if (words[1] == MARK_VBLANK) {
         gs_vblank(&gs);
-        vblank_csr = gs_priv_read(&gs, GS_CSR);
+        marked_csr = gs_priv_read(&gs, GS_CSR);
+    } else if (words[1] == MARK_STORE) {
+        run_store(words[2]);
+        marked_csr = gs_priv_read(&gs, GS_CSR);
     } else if (graphics_present_marked) graphics_present_marked(words + 2);
     atomic_exchange(&marks_done, words[0]);
 }
@@ -425,7 +454,7 @@ void graphics_vblank(void)
     wait_mark(target);
     tl_add(TL_EE_GS, start);
     if (start && timeline_enabled()) tl_site(__builtin_return_address(0), pending, tl_now() - start);
-    vblank_mark = graphics_mark(MARK_VBLANK, NULL, 0);
+    csr_mark = vblank_mark = graphics_mark(MARK_VBLANK, NULL, 0);
 }
 
 /* present.c's gs_vsync: the picture, run by graphics_present_marked in order with the drawing. */
@@ -440,8 +469,9 @@ void graphics_present(const void *payload, unsigned bytes)
 #include "../include/guest.h"
 void host_service_graphics_feed(int a0, uint32_t a1, uint32_t a2) { graphics_feed(a0, a1, a2); }
 #if !defined(GRAPHICS_QUEUE_TEST) || defined(GS_QUEUE_TEST)
-/* The game's CSR page (0x12001000) after a deferred VBLANK: exact but for SIGNAL and FINISH until
-   the game's next wait, which puts the CSR the VBLANK left there (kernel.c). */
+/* The game's CSR page (0x12001000) after a deferred VBLANK or a queued store-image read: exact
+   but for SIGNAL and FINISH until the game's next wait, which puts the CSR the last of them left
+   there (kernel.c). */
 static int csr_provisional;
 
 void host_service_graphics_wait(void)
@@ -449,8 +479,49 @@ void host_service_graphics_wait(void)
     graphics_wait();
     if (!csr_provisional) return;
     csr_provisional = 0;
-    wait_mark(vblank_mark);
-    *(volatile uint64_t *)GUEST(0x12001000) = vblank_csr;
+    wait_mark(csr_mark);
+    *(volatile uint64_t *)GUEST(0x12001000) = marked_csr;
+}
+
+/* sceGsExecStoreImage (graphics.c, finding 148) queued: its store packet (28 words at guest
+   `packet`), the read of `bytes` to guest `destination` and the VIF1 word that unmasks PATH3, in
+   order behind the drawing. 0 when it cannot be (no workers or deferred VBLANKs, too big, every
+   slot waiting): nothing is queued, and the caller waits and reads as before. */
+uint32_t host_service_gs_store_image(uint32_t packet, uint32_t destination, uint32_t bytes)
+{
+    if (!worker || !graphics_deferred() || !bytes || bytes > STORE_BYTES || stores_sent - stores_settled == STORE_SLOTS)
+        return 0;
+    unsigned slot = stores_sent % STORE_SLOTS;
+    stores[slot].destination = destination;
+    stores[slot].bytes = bytes;
+    stores[slot].ok = 0;
+    uint32_t payload[1] = {slot};
+    feed_words(1, GUEST(packet), 28);
+    csr_mark = stores[slot].mark = graphics_mark(MARK_STORE, payload, sizeof payload);
+    stores_sent++;
+    static const uint32_t unmask = 0x06000000;  /* MSKPATH3 0 */
+    feed_words(1, &unmask, 1);
+    /* The marker consumes the packet's FINISH (a CSR FINISH write); the rest as the page has it. */
+    *(volatile uint64_t *)GUEST(0x12001000) &= ~(uint64_t)2;
+    csr_provisional = 1;
+    return 1;
+}
+
+/* The queued reads' bytes to guest RAM, once the last one has run (its pages are writable again). */
+void host_service_gs_store_settle(void)
+{
+    if (stores_sent == stores_settled) return;
+    int64_t start = tl_begin();
+    uint32_t last = stores[(stores_sent - 1) % STORE_SLOTS].mark;
+    int pending = (int32_t)(position(&marks_done) - last) < 0;
+    wait_mark(last);
+    tl_add(TL_EE_GS, start);
+    if (start && timeline_enabled()) tl_site(__builtin_return_address(0), pending, tl_now() - start);
+    for (; stores_settled != stores_sent; stores_settled++) {
+        unsigned slot = stores_settled % STORE_SLOTS;
+        if (stores[slot].ok) memcpy(GUEST(stores[slot].destination), stores[slot].data, stores[slot].bytes);
+        else hle_log("graphics: a queued store-image read of %u bytes failed\n", stores[slot].bytes);
+    }
 }
 
 /* 2: threaded with deferred vsyncs (graphics_deferred) */
@@ -466,5 +537,8 @@ void host_service_graphics_vblank(void)
 #else
 void host_service_graphics_wait(void) { graphics_wait(); }
 int host_service_graphics_threaded(void) { return graphics_threaded(); }
+uint32_t host_service_gs_store_image(uint32_t packet, uint32_t destination, uint32_t bytes)
+{ (void)packet; (void)destination; (void)bytes; return 0; }
+void host_service_gs_store_settle(void) {}
 #endif
 void host_service_graphics_shutdown(void) { graphics_shutdown(); }

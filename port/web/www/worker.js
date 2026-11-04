@@ -263,6 +263,8 @@ async function start(m) {
     host_service_movie_update: () => 0, host_service_movie_playing: () => 0,
     host_service_host_poll_dump: () => 0,
     host_service_graphics_threaded: () => 1, host_service_texpack_available: () => 0, host_service_gs_scale: () => 0,
+    // The browser keeps the waiting store-image read (graphics.c): nothing is ever queued to settle.
+    host_service_gs_store_image: () => 0, host_service_gs_store_settle: () => {},
     host_pacing_period: () => 1 / 60,
     host_pacing_config: p => { period = p * 1000; },
     host_sound_write: (a, frames) => {

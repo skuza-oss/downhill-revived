@@ -250,6 +250,11 @@ uint64_t host_service_gs_priv_read(unsigned a0);
 void host_service_gs_priv_write(unsigned a0, uint64_t a1);
 uint32_t host_service_gs_read_image(uint32_t a0, uint32_t a1);
 uint32_t host_service_gs_defer_read_image(uint32_t a0, uint32_t a1);
+/* sceGsExecStoreImage queued behind the drawing (graphics_queue.c, finding 148): its 28-word
+   packet, the read to destination and the unmask. 1 if queued, 0 if nothing was and the caller
+   must wait and read; settle writes the queued reads' bytes. */
+uint32_t host_service_gs_store_image(uint32_t packet, uint32_t destination, uint32_t bytes);
+void host_service_gs_store_settle(void);
 uint64_t host_service_gs_register(unsigned reg);
 void host_service_net_set_room(uint32_t address);
 uint64_t host_service_net_hash_ranges(uint32_t address, int count);

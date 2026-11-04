@@ -297,6 +297,7 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
             'host_service_net_hash_ranges': [(0,'host64_bridge_array_bytes((int32_t)a1,8)')],
             'host_service_gs_read_image': [(0,'a1')],
             'host_service_gs_defer_read_image': [(0,'a1')],
+            'host_service_gs_store_image': [(0,'112'),(1,'a2')],
             'host_service_gs_snapshot': [(0,'a1')],
             'host_service_gs_trace_pop': [(0,'host_service_gs_trace_size()')],
             'host_frame_registers': [(0,'20')], 'host_console_write': [(0,'a1')],
