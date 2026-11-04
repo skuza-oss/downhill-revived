@@ -556,7 +556,9 @@ static int strip_regs(uint64_t regs, unsigned nreg)
 /* loops whole loops of such a tag while PRIM is a triangle strip: each register as packed()
    writes it, and each vertex kicked as vertex_kick would (the counters, ADC skips, the strip's
    parity and its last vertices), with the triangles handed to draw_strip in batches instead of
-   one draw call each. */
+   one draw call each. The vertex, Q and RGBAQ/ST/UV live in locals for the loop (nothing reads
+   them in it: draw_strip takes the list) and are stored once after it, as the last writes left
+   them. */
 static void packed_strip(Gs *g, GsPath *p, uint64_t regs, unsigned nreg, const uint32_t *w, size_t loops)
 {
     enum { BATCH = 256 };
@@ -565,25 +567,52 @@ static void packed_strip(Gs *g, GsPath *p, uint64_t regs, unsigned nreg, const u
     uint8_t drawn[BATCH] PS2_NO_AUTO_INIT;
     unsigned m = g->vertex_count, xyz = (unsigned)(regs >> ((nreg - 1) * 4)) & 15;
     int kicked = 0;   /* the last vertex made a triangle */
+    GsVertex v = g->vertex;
+    uint32_t q = p->q;
+    uint64_t rgbaq = 0, st = 0, uv = 0, xyz_value;
+    unsigned written = 0;   /* 1 RGBAQ, 2 ST, 4 UV */
+    unsigned order[3], n = nreg - 1;
+    for (unsigned r = 0; r < n; r++) order[r] = (unsigned)(regs >> (r * 4)) & 15;
     memcpy(list, g->vertices, m * sizeof *list);
     for (size_t k = 0; k < loops; k++) {
-        for (unsigned r = 0; r + 1 < nreg; r++, w += 4) packed(g, p, (unsigned)(regs >> (r * 4)) & 15, w);
+        for (unsigned r = 0; r < n; r++, w += 4) {
+            switch (order[r]) {
+            case 1:
+                v.rgba = (w[0] & 255) | (w[1] & 255) << 8 | (w[2] & 255) << 16 | (w[3] & 255) << 24;
+                rgbaq = v.rgba | (uint64_t)q << 32;
+                memcpy(&v.q, &q, 4);
+                written |= 1;
+                break;
+            case 2:
+                q = w[2];
+                st = w[0] | (uint64_t)w[1] << 32;
+                memcpy(&v.s, &st, 8);
+                written |= 2;
+                break;
+            default:  /* 3, UV (strip_regs) */
+                v.u = w[0] & 0x3FFF; v.v = w[1] & 0x3FFF;
+                uv = v.u | (uint64_t)v.v << 16;
+                written |= 4;
+                break;
+            }
+        }
         uint32_t x = w[0] & 65535, y = w[1] & 65535;
         unsigned reg;
         if (xyz == GS_XYZF2 || xyz == GS_XYZF3) {
             uint32_t z = w[2] >> 4 & 0xFFFFFF, fog = w[3] >> 4 & 255;
             reg = w[3] & 0x8000 ? GS_XYZF3 : xyz;
-            g->reg[reg] = x | (uint64_t)y << 16 | (uint64_t)z << 32 | (uint64_t)fog << 56;
-            g->vertex.x = x; g->vertex.y = y; g->vertex.z = z; g->vertex.fog = fog;
+            xyz_value = x | (uint64_t)y << 16 | (uint64_t)z << 32 | (uint64_t)fog << 56;
+            v.x = x; v.y = y; v.z = z; v.fog = fog;
         } else {
             reg = w[3] & 0x8000 ? GS_XYZ3 : xyz;
-            g->reg[reg] = x | (uint64_t)y << 16 | (uint64_t)w[2] << 32;
-            g->vertex.x = x; g->vertex.y = y; g->vertex.z = w[2];
+            xyz_value = x | (uint64_t)y << 16 | (uint64_t)w[2] << 32;
+            v.x = x; v.y = y; v.z = w[2];
         }
+        g->reg[reg] = xyz_value;
         w += 4;
         int skip = reg == GS_XYZF3 || reg == GS_XYZ3;
         if (skip) g->adc_skips++;
-        list[m++] = g->vertex;
+        list[m++] = v;
         kicked = m >= 3;
         if (kicked) {   /* vertex_kick: the window was full, a triangle */
             g->kicks++;
@@ -596,6 +625,11 @@ static void packed_strip(Gs *g, GsPath *p, uint64_t regs, unsigned nreg, const u
             list[0] = list[m - 2]; list[1] = list[m - 1]; m = 2;
         }
     }
+    g->vertex = v;
+    p->q = q;
+    if (written & 1) g->reg[GS_RGBAQ] = rgbaq;
+    if (written & 2) g->reg[GS_ST] = st;
+    if (written & 4) g->reg[GS_UV] = uv;
     if (m >= 3) g->draw_strip(g, GS_PRIM_TRISTRIP, list, m, drawn);
     /* The window vertex_kick leaves: the last two after a kick (its third slot holds the last one
        kicked), else the vertices so far. */
