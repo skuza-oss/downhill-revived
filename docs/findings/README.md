@@ -14,7 +14,7 @@ Read this index first. Every finding has one `Status:` line under its title:
 `Checked:` is the day the finding was last compared with the code. History-only findings were
 slimmed to a summary; each ends with the `git show` command for its full text. The table at the
 bottom is generated: `python tools/findings_index.py` (and `tools/check_docs.py` fails when it is
-out of date). New findings: take the next free number on the lane's first commit
+out of date). New findings: copy `TEMPLATE.md` to the next free number on the lane's first commit
 (`.claude/skills/new-finding`).
 
 ## Where to start, by area

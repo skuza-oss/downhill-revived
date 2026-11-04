@@ -56,7 +56,9 @@ change needs them or someone asks.
 | Keep the original game's feel: no gameplay additions; QoL and online features are welcome | 2026-10-31 | | add custom music, taunts, assists or handling changes |
 | No online play on Android or in the browser yet: the host does not offer it | 2026-11-03 | 143 | enable ONLINE there without a decision |
 
-Findings carry a `Status:` line; only `current` findings and the still-true parts of `partly
+A lane's plan is its finding: copy `docs/findings/TEMPLATE.md` on the lane's first commit
+(`Status: in progress`, which reserves the number) and keep its Progress, Decisions and Surprises
+current; at the merge it becomes `current`. Findings carry a `Status:` line; only `current` findings and the still-true parts of `partly
 superseded` ones describe the code. Older findings that mention lockstep (039-042, 049) describe
 the dropped design.
 
