@@ -3,7 +3,7 @@
 Status: in progress
 
 Branch `<kind>/<name>` from `main` <short sha>, started YYYY-MM-DD. This file is the lane's plan
-while it runs and its finding when it merges (`.claude/skills/new-finding`). Copy it to
+while it runs and its finding when it merges. Copy it to
 `docs/findings/NNN-short-name.md` on the lane's first commit: that reserves the number. Someone
 who has only this file and the git log must be able to pick the lane up.
 

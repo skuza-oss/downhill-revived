@@ -75,17 +75,8 @@ saves/
 
 # --- Local notes and editor/agent settings ---------------------------------------------
 docs/private/
-.claude/*
-# the shared agent setup is tracked; local settings and other agents stay ignored
-!.claude/agents/
-.claude/agents/*
-!.claude/agents/decomp-worker.md
-!.claude/skills/
-.claude/skills/*
-!.claude/skills/decompile-function/
-!.claude/skills/new-finding/
-!.claude/skills/lane-merge/
-!.claude/skills/release/
+.claude/
+.agents/
 .vscode/
 .idea/
 
