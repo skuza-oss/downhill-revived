@@ -1931,8 +1931,6 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
             f->index_count += 3;
             last = k;
             recorded++;
-            n->conv_gs[0] = list[k + 1]; n->conv[0] = c[b];
-            n->conv_gs[1] = list[k + 2]; n->conv[1] = c[d];
             continue;
         }
         NativeVertex t[3] = {c[a], c[b], c[d]};
@@ -1944,9 +1942,18 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
             f->vertex_count += 3;
         }
         recorded++;
-        /* native_record's conversion cache after this triangle: its second and third vertex */
-        n->conv_gs[0] = list[k + 1]; n->conv[0] = c[b];
-        n->conv_gs[1] = list[k + 2]; n->conv[1] = c[d];
+    }
+    /* native_record's conversion cache after the last triangle recorded: its second and third
+       vertex (nothing in the loop reads it, so it is set once; c[] may have moved on since, and
+       native_set gives the same bytes again) */
+    if (last != UINT32_MAX) {
+        for (unsigned j = 0; j < 2; j++) {
+            const GsVertex *v = &list[last + 1 + j];
+            float x = (float)((int)v->x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+            float y = (float)((int)v->y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+            n->conv_gs[j] = *v;
+            native_set(&n->conv[j], v, v, n, fst, x, y);
+        }
     }
     n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
     if (g->source_path == 1) f->path1 += recorded;
