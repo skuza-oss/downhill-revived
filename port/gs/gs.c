@@ -68,6 +68,20 @@ static void load_clut(Gs *g, uint64_t tex)
     }
     start = (csa & ((cpsm & 2) ? 31 : 15)) * 16;
     if (!csm) {
+        /* The same source words into the same entries as the last load, with no other load
+           since: every entry already holds its value (none changes, nothing counts). The
+           source is one contiguous run from cbp: 1 KB (CT32, 256 entries), 512 bytes (CT16, 256)
+           or 64 bytes (16 entries). */
+        unsigned bytes = (cpsm & 2) ? (count == 256 ? 512 : 64) : count * 4, base = (cbp * 256) & (GS_VRAM_SIZE - 1);
+        const uint8_t *source = (const uint8_t *)g->vram + base;
+        if (base + bytes <= GS_VRAM_SIZE) {
+            if (g->clut_memo.valid && g->clut_memo.cbp == cbp && g->clut_memo.cpsm == cpsm &&
+                g->clut_memo.count == count && g->clut_memo.start == start && !memcmp(g->clut_memo.source, source, bytes))
+                return;
+            g->clut_memo.valid = 1; g->clut_memo.cbp = cbp; g->clut_memo.cpsm = cpsm;
+            g->clut_memo.count = count; g->clut_memo.start = start; g->clut_memo.bytes = bytes;
+            memcpy(g->clut_memo.source, source, bytes);
+        } else g->clut_memo.valid = 0;
         /* CSM1: the entries are distinct, so only the number of changed ones matters for
            state_version; counted without a branch per entry. */
         uint16_t low[256], high[256];
@@ -96,8 +110,10 @@ static void load_clut(Gs *g, uint64_t tex)
             }
         }
         g->state_version += changed;
+        g->clut_writes += changed;
         return;
     }
+    g->clut_memo.valid = 0;
     for (i = 0; i < count; i++) {
         unsigned dst = start + i, value;
         if (csm) {
@@ -116,10 +132,10 @@ static void load_clut(Gs *g, uint64_t tex)
             } else src = t32[i];
             value = g->vram[(cbp * 64 + src) & (GS_VRAM_SIZE / 4 - 1)];
         }
-        if (g->clut[dst & 511] != (uint16_t)value) g->state_version++;
+        if (g->clut[dst & 511] != (uint16_t)value) g->state_version++, g->clut_writes++;
         g->clut[dst & 511] = (uint16_t)value;
         if (!(cpsm & 2)) {
-            if (g->clut[(dst + 256) & 511] != (uint16_t)(value >> 16)) g->state_version++;
+            if (g->clut[(dst + 256) & 511] != (uint16_t)(value >> 16)) g->state_version++, g->clut_writes++;
             g->clut[(dst + 256) & 511] = (uint16_t)(value >> 16);
         }
     }

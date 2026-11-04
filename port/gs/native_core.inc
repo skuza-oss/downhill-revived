@@ -213,6 +213,7 @@ typedef struct Native {
        shares (finding 146). Good while conv_ok == conv_serial (native_state moves conv_serial)
        and for the same offset and FST. */
     GsVertex conv_gs[2];
+    struct { int valid; unsigned entries; uint64_t writes, clut_key, texa, digest; } palette_memo;  /* native_texture */
     NativeVertex conv[2];
     int conv_fst;
     uint64_t conv_offset;
@@ -786,8 +787,18 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
             if (native_owner(n, g, p) >= 0 && !gpu_pages++) gpu_page = p;
         }
     if (psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH) {
+        /* The converted entries (gs_palette) depend on the CLUT's entries, CPSM, CSA and TEXA
+           only: their digest is kept until one of those changes (finding 148). */
         unsigned entries = psm == GS_PSMT8 || psm == GS_PSMT8H ? 256 : 16;
-        for (unsigned i = 0; i < entries; i++) key = native_mix(key, gs_palette(g, tex0, i));
+        uint64_t clut_key = (tex0 >> 51 & 15) | (tex0 >> 56 & 31) << 4, texa = g->reg[GS_TEXA];   /* CPSM, CSA */
+        if (!n->palette_memo.valid || n->palette_memo.writes != g->clut_writes || n->palette_memo.clut_key != clut_key ||
+            n->palette_memo.texa != texa || n->palette_memo.entries != entries) {
+            uint64_t digest = entries;
+            for (unsigned i = 0; i < entries; i++) digest = native_mix(digest, gs_palette(g, tex0, i));
+            n->palette_memo.valid = 1; n->palette_memo.writes = g->clut_writes; n->palette_memo.clut_key = clut_key;
+            n->palette_memo.texa = texa; n->palette_memo.entries = entries; n->palette_memo.digest = digest;
+        }
+        key = native_mix(key, n->palette_memo.digest);
     }
     if (gpu_pages) {
         /* The menus' font lives in a depth buffer's top bytes; the sharp one is drawn from the
@@ -1875,7 +1886,7 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
         cx[k % 3] = (int)x, cy[k % 3] = (int)y;
         native_set(&c[k % 3], &list[k], &list[k], n, fst, x, y);
     }
-    unsigned recorded = 0;
+    unsigned recorded = 0, last = UINT32_MAX;   /* last: the latest triangle recorded in this loop */
     for (unsigned k = i + 1; k < end; k++) {
         unsigned a = k % 3, b = (k + 1) % 3, d = (k + 2) % 3;
         float x = (float)((int)list[k + 2].x - (int)(offset & 65535)) * 0.0625f + 0.5f;
@@ -1891,8 +1902,23 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
             if (cx[w[j]] + 1 > right) right = cx[w[j]] + 1;
             if (cy[w[j]] + 1 > bottom) bottom = cy[w[j]] + 1;
         }
+        if (n->indexed && !flat && last == k - 1) {
+            /* Its first two vertices are the bytes of the previous triangle's last two (the same
+               converted c[], unchanged without flat colour): native_triangle_indexed would find
+               them equal and reuse both indices, then store the third. */
+            uint32_t *o = f->indices + f->index_count;
+            o[0] = o[-2]; o[1] = o[-1]; o[2] = f->vertex_count;
+            f->vertices[f->vertex_count++] = c[d];
+            f->index_count += 3;
+            last = k;
+            recorded++;
+            n->conv_gs[0] = list[k + 1]; n->conv[0] = c[b];
+            n->conv_gs[1] = list[k + 2]; n->conv[1] = c[d];
+            continue;
+        }
         NativeVertex t[3] = {c[a], c[b], c[d]};
         if (flat) t[0].rgba = t[1].rgba = t[2].rgba;   /* flat: the last vertex's colour */
+        last = k;
         if (n->indexed) native_triangle_indexed(f, type, t);
         else {
             memcpy(&f->vertices[f->vertex_count], t, sizeof t);

@@ -84,6 +84,11 @@ struct Gs {
        same draws, in the same order, with the same GS state but for the vertex registers, which
        already hold the strip's last values. */
     void (*draw_strip)(Gs *gs, unsigned prim, const GsVertex *list, unsigned count, const uint8_t *drawn);
+    /* load_clut's last CSM1 load (finding 148): its source bytes, where they came from and which
+       entries they filled; valid while no other load has written the CLUT. clut_writes counts
+       every change of the CLUT's entries (host palette caches). Not PS2 state. */
+    struct { uint32_t valid, cbp, cpsm, count, start, bytes; uint32_t source[256]; } clut_memo;
+    uint64_t clut_writes;
 };
 extern Gs gs;
 
