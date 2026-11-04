@@ -32,7 +32,7 @@ NOT_HERE = {
 
 # Findings a running lane still owns, without a Status line yet: the index shows this status; the
 # lane adds the line itself (check_docs.py warns until then).
-LANE_OWNED = {'149': 'current'}
+LANE_OWNED = {}
 
 
 def findings():

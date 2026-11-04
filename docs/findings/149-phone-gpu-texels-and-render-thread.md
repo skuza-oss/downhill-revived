@@ -1,5 +1,8 @@
 # 149: The throttled phone at 4x: one gather per bilinear texel footprint; the render thread's framebuffer a frame
 
+Status: current
+Checked: 2026-11-04
+
 2026-11-04, from local main `f0f5c2e` (finding 148's head). Target: 60 fps throughout races on the
 rooted Mi 11i throttled to finding 127's low-end profile (`phone_throttle.py --apply t612 --big-max
 1209600 --little-max 1497600`), at render scale 2x and 4x. Every speed run unlocked (`DHD_FPS=240`,
