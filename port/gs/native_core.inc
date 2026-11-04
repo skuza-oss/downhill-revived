@@ -213,7 +213,9 @@ typedef struct Native {
        shares (finding 146). Good while conv_ok == conv_serial (native_state moves conv_serial)
        and for the same offset and FST. */
     GsVertex conv_gs[2];
-    struct { int valid; unsigned entries; uint64_t writes, clut_key, texa, digest; } palette_memo;  /* native_texture */
+    /* native_palette: the 256 entries gs_palette converts for the last CPSM/CSA/TEXA, valid while
+       the CLUT's entries stay (clut_writes); digest16/256 mix the first 16 or all of them. */
+    struct { int valid, full; uint64_t writes, clut_key, texa, digest16, digest256; uint32_t entry[256]; } palette_memo;
     NativeVertex conv[2];
     int conv_fst;
     uint64_t conv_offset;
@@ -614,6 +616,29 @@ static uint64_t native_page_hash(Native *n, const Gs *g, unsigned page)
     return n->page_hash[page];
 }
 
+/* The palette of tex0 as gs_palette gives it, entry by entry (finding 148): the converted entries
+   depend on the CLUT's entries, CPSM, CSA and TEXA only, so they are kept until one changes. */
+static const uint32_t *native_palette(Native *n, const Gs *g, uint64_t tex0, int full)
+{
+    uint64_t clut_key = (tex0 >> 51 & 15) | (tex0 >> 56 & 31) << 4, texa = g->reg[GS_TEXA];   /* CPSM, CSA */
+    if (!n->palette_memo.valid || n->palette_memo.writes != g->clut_writes || n->palette_memo.clut_key != clut_key ||
+        n->palette_memo.texa != texa) {
+        uint64_t digest = 16;
+        for (unsigned i = 0; i < 16; i++) digest = native_mix(digest, n->palette_memo.entry[i] = gs_palette(g, tex0, i));
+        n->palette_memo.digest16 = digest;
+        n->palette_memo.valid = 1; n->palette_memo.full = 0; n->palette_memo.writes = g->clut_writes;
+        n->palette_memo.clut_key = clut_key; n->palette_memo.texa = texa;
+    }
+    if (full && !n->palette_memo.full) {  /* the other 240, for 8-bit textures (full: all 256 needed) */
+        uint64_t digest = 256;
+        for (unsigned i = 0; i < 16; i++) digest = native_mix(digest, n->palette_memo.entry[i]);
+        for (unsigned i = 16; i < 256; i++) digest = native_mix(digest, n->palette_memo.entry[i] = gs_palette(g, tex0, i));
+        n->palette_memo.digest256 = digest;
+        n->palette_memo.full = 1;
+    }
+    return n->palette_memo.entry;
+}
+
 static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w, unsigned h, uint64_t key)
 {
     unsigned slot = (unsigned)(key % NATIVE_TEXTURES);
@@ -634,7 +659,7 @@ static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w,
     uint32_t *pixels = malloc((size_t)w * h * 4), palette[256];
     if (!pixels) return NULL;
     int indexed = psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH;
-    if (indexed) for (unsigned i = 0; i < 256; i++) palette[i] = gs_palette(g, tex0, i);
+    if (indexed) memcpy(palette, native_palette(n, g, tex0, 1), sizeof palette);
     if (!tbw) tbw = 1;
     for (unsigned y = 0; y < h; y++)
         for (unsigned x = 0; x < w; x++) {
@@ -713,7 +738,7 @@ static int native_convert_texture(Native *n, Gs *g, uint64_t tex0, unsigned w, u
     v->constants.size[0] = w; v->constants.size[1] = h;
     v->constants.size[2] = (uint32_t)texa; v->constants.size[3] = (uint32_t)(texa >> 32);
     if (gs_bits_per_pixel(psm) <= 8)
-        for (unsigned i = 0; i < 256; i++) v->constants.palette[i] = gs_palette(g, tex0, i);
+        memcpy(v->constants.palette, native_palette(n, g, tex0, 1), sizeof v->constants.palette);
     if (n->texlog)
         for (unsigned i = 0; i < slots; i++) {
             const NativeSurface *s = &n->surfaces[v->surface[i]];
@@ -787,18 +812,10 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
             if (native_owner(n, g, p) >= 0 && !gpu_pages++) gpu_page = p;
         }
     if (psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH) {
-        /* The converted entries (gs_palette) depend on the CLUT's entries, CPSM, CSA and TEXA
-           only: their digest is kept until one of those changes (finding 148). */
-        unsigned entries = psm == GS_PSMT8 || psm == GS_PSMT8H ? 256 : 16;
-        uint64_t clut_key = (tex0 >> 51 & 15) | (tex0 >> 56 & 31) << 4, texa = g->reg[GS_TEXA];   /* CPSM, CSA */
-        if (!n->palette_memo.valid || n->palette_memo.writes != g->clut_writes || n->palette_memo.clut_key != clut_key ||
-            n->palette_memo.texa != texa || n->palette_memo.entries != entries) {
-            uint64_t digest = entries;
-            for (unsigned i = 0; i < entries; i++) digest = native_mix(digest, gs_palette(g, tex0, i));
-            n->palette_memo.valid = 1; n->palette_memo.writes = g->clut_writes; n->palette_memo.clut_key = clut_key;
-            n->palette_memo.texa = texa; n->palette_memo.entries = entries; n->palette_memo.digest = digest;
-        }
-        key = native_mix(key, n->palette_memo.digest);
+        /* the digest of the 16 or 256 converted entries (native_palette, finding 148) */
+        int full = psm == GS_PSMT8 || psm == GS_PSMT8H;
+        native_palette(n, g, tex0, full);
+        key = native_mix(key, full ? n->palette_memo.digest256 : n->palette_memo.digest16);
     }
     if (gpu_pages) {
         /* The menus' font lives in a depth buffer's top bytes; the sharp one is drawn from the
@@ -1895,8 +1912,10 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
         native_set(&c[d], &list[k + 2], &list[k + 2], n, fst, x, y);
         if (!drawn[k]) continue;
         if (n->exact_probe) native_exact(n, g, type, &list[k], 3, prim, ctxt);
+        /* The box grows by each vertex's pixel +-1; after the triangle just before, its first two
+           are in it already (the box only grows), so only the new one can move it. */
         const unsigned w[3] = {a, b, d};
-        for (unsigned j = 0; j < 3; j++) {
+        for (unsigned j = last == k - 1 ? 2 : 0; j < 3; j++) {
             if (cx[w[j]] - 1 < left) left = cx[w[j]] - 1;
             if (cy[w[j]] - 1 < top) top = cy[w[j]] - 1;
             if (cx[w[j]] + 1 > right) right = cx[w[j]] + 1;
