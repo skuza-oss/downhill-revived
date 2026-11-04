@@ -1,4 +1,4 @@
-/* What the module's C needs from its compiler and C library, in one place (docs/findings/075-portable-core.md,
+/* What the module's C needs from its compiler and C library, in one place (docs/findings/081-portable-core.md,
    phase 2 and 3). The module is the 32-bit Windows build today and wasm32 later. Each macro here
    expands to exactly the code the Windows build had before, so the i686 build is unchanged. */
 #ifndef DHD_PORTABLE_H

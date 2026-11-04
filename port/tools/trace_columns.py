@@ -1,4 +1,4 @@
-"""Compare two state traces column by column (finding 075): the first differing field of each
+"""Compare two state traces column by column (finding 081): the first differing field of each
 section, and PASS when every section outside --ignore matches in every row.
 
     python port/tools/trace_columns.py A.tsv B.tsv [--ignore ram,cpu]

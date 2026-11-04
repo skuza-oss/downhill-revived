@@ -1,11 +1,11 @@
-"""PC build, wasm32 stage: the portable game core as one wasm module (finding 075, phase 3).
+"""PC build, wasm32 stage: the portable game core as one wasm module (finding 081, phase 3).
 
 Writes build/wasm/dhd_core.wasm from
   - every game unit (src/**), transformed (port/tools/transform.py, port/patches.py) with an empty
     label prefix (wasm C symbols carry none, so the asm labels must not either);
   - the recompiled asm-only functions (port/tools/recomp.py), found by a fixed point over the
     objects' undefined names;
-  - the module-side port files (finding 075, phase 2): runtime and hle, compiled from a mirror of
+  - the module-side port files (finding 081, phase 2): runtime and hle, compiled from a mirror of
     port/ in which the data declarations are numbers (below) and RETAIL labels have no prefix;
   - the game data's fixups (data.py), as a table of {PS2 address, value} pairs; code addresses
     are table indices, data addresses numbers.
@@ -67,7 +67,7 @@ DATA_BASE = STACK_BASE + STACK_SIZE
 INITIAL_MEMORY = 0x70E00000   # covers data+bss (0x705B1220 in run 24) and the scratchpad below it
 MAX_MEMORY = 0x80000000
 
-# finding 075, phase 2: the module side (port/runtime, port/hle)
+# finding 081, phase 2: the module side (port/runtime, port/hle)
 MODULE_UNITS = [
     'runtime/ps2asm.c', 'runtime/vu0_micro.c', 'runtime/vu0_interp.c', 'runtime/recomp.c',
     'runtime/libc_shims.c', 'runtime/memory.c',

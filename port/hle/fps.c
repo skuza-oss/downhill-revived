@@ -105,7 +105,7 @@ static void clock_rest(void)
     if (wall_mode) previous_wall=host_wall_seconds();
     owed=0;
 }
-/* The mixer's time for one VBLANK on the delta-time clock (kernel.c vsync; finding 113). The frame
+/* The mixer's time for one VBLANK on the delta-time clock (kernel.c vsync; finding 139). The frame
    clock delivers a VBLANK every BUS_HZ/N cycles, 1024 per kernel boundary (timer.c), and a frame
    crosses about 400 boundaries: above about 360 one update spans several VBLANKs. Charging the
    update's step on each VBLANK ran the sound that many times too fast.

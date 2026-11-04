@@ -178,7 +178,7 @@ int main(int argc,char **argv)
             else if (n>30) assert(fabs(game-wall)<2.0/60);                /* online: caught up */
         }
         online=0;
-        /* The mixer's VBLANK time (finding 113): two VBLANKs per update, both at its end, add up
+        /* The mixer's VBLANK time (finding 139): two VBLANKs per update, both at its end, add up
            to wall time, not twice it; a 50-ms hitch is repaid in full at two fields per VBLANK, a
            2-s stall by 0.1 s. */
         port_clock_rebase();

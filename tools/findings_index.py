@@ -21,7 +21,8 @@ README = os.path.join(FINDINGS, 'README.md')
 BEGIN, END = '<!-- index:begin -->', '<!-- index:end -->'
 STATUS = re.compile(r'^Status: (current|history|rejected|in progress|superseded by (\d{3})'
                     r'|partly superseded by (\d{3}) \(([^()]+)\))$')
-# Numbers the code cites that have no file of their own (kept here so citations resolve).
+# Numbers that were cited without a file of their own (the comments now cite the real number; the
+# rows stay so an old citation in a branch or in history still resolves).
 NOT_HERE = {
     '075': ('see 081', 'the portable-core plan was numbered 075 on its branch and merged as 081'),
     '113': ('see 139', 'the delta-time clock work was numbered 113 on its branch; the mixer\'s '
@@ -84,7 +85,7 @@ def table():
     # resolve links to later files once all names are known
     rows = [re.sub(r'\]\((\d{3})\)', lambda m: f']({have.get(m.group(1), m.group(1))})', r) for r in rows]
     for n, (see, why) in NOT_HERE.items():
-        rows.append(f'| {n} | no file: {why} | cited by code | {see} |')
+        rows.append(f'| {n} | no file: {why} | renumbered | {see} |')
     return '\n'.join(rows)
 
 

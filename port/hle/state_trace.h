@@ -1,4 +1,4 @@
-/* Per-field state trace (build/audit/h4-state-trace.md section 7; plan finding 075, phase 1).
+/* Per-field state trace (build/audit/h4-state-trace.md section 7; plan finding 081, phase 1).
    Off unless DHD_STATE_TRACE=<prefix> is set; then one row per game field goes to <prefix>.tsv.
    Every call below returns at once when the trace is off. */
 #ifndef DHD_STATE_TRACE_H

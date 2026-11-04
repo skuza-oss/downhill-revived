@@ -1,4 +1,4 @@
-/* The host interface of the port (finding 075, phase 2): the OS services the module side uses,
+/* The host interface of the port (finding 081, phase 2): the OS services the module side uses,
    the game's code and runtime and the PS2 system's own code (port/runtime, port/hle). The module
    is wasm32 later and the host is native, so nothing here names a host type. Guest addresses are
    uint32_t; handles are small integers, 0 is "none"; the one host object the module keeps is the
