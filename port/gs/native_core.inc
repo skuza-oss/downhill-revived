@@ -1121,6 +1121,21 @@ static FILE *native_field_trace(const char *kind)
     return *kind == 'd' ? draws : registers;
 }
 
+/* The draw offset native_record converts with. The game alternates OFY by 8/16 of a framebuffer
+   line in INT+FFMD mode. Scanout line-doubles to progressive output; retaining that field
+   displacement makes the whole scene bob, and sprite rounding can turn it into a full line.
+   Remove only the half-line component on screen-sized targets, before rounding. Small offscreen
+   targets (shadows/blur) keep their own coordinates. This local offset never reaches the exact
+   GS rasterizer, probe replay or EE readbacks. */
+static uint64_t native_offset(const Gs *g, unsigned ctxt)
+{
+    uint64_t offset = g->reg[GS_XYOFFSET_1 + ctxt];
+    if ((offset >> 32 & 15) == 8 && (g->privileged[GS_SMODE2 / 16] & 3) == 3 &&
+        (g->reg[GS_FRAME_1 + ctxt] >> 16 & 63) >= 8)
+        offset -= UINT64_C(8) << 32;
+    return offset;
+}
+
 static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, unsigned count, unsigned prim, unsigned ctxt)
 {
     FILE *trace = n->field_trace_on ? native_field_trace("draws") : NULL;
@@ -1144,16 +1159,7 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
     }
     if (n->skip) return;
     NativeFrame *f = n->recording;
-    uint64_t offset = g->reg[GS_XYOFFSET_1 + ctxt];
-    /* The game alternates OFY by 8/16 of a framebuffer line in INT+FFMD mode.
-       Scanout line-doubles to progressive output; retaining that field displacement
-       makes the whole scene bob, and sprite rounding can turn it into a full line.
-       Remove only the half-line component on screen-sized targets, before rounding.
-       Small offscreen targets (shadows/blur) keep their own coordinates. This local
-       offset never reaches the exact GS rasterizer, probe replay or EE readbacks. */
-    if ((offset >> 32 & 15) == 8 && (g->privileged[GS_SMODE2 / 16] & 3) == 3 &&
-        (g->reg[GS_FRAME_1 + ctxt] >> 16 & 63) >= 8)
-        offset -= UINT64_C(8) << 32;
+    uint64_t offset = native_offset(g, ctxt);
     int fst = prim >> 8 & 1, flat = !(prim >> 3 & 1);
     float x[3], y[3];
     int px[3], py[3];
@@ -1827,6 +1833,80 @@ static void native_draw(Gs *g, unsigned type, const GsVertex *v, unsigned count)
     native_exact(n, g, type, v, count, prim, ctxt);
     native_record(n, g, type, v, count, prim, ctxt);
     n->stats.draws++;
+}
+
+/* gs.c's strips (draw_strip, finding 146): the drawn triangles of list, as native_draw would draw
+   each in turn. The first goes through native_draw (it may change the state). The state then
+   holds for the rest (gs.c writes only vertex registers in a strip; native_exact without the
+   exact probe only notes the Z buffer's width, the same for each, and with it runs for each
+   triangle before its record, as in native_draw), so each later vertex is converted once and
+   each triangle recorded as native_record records it: the same box, vertices, indices, counts
+   and conversion cache. With a per-primitive diagnostic (the field trace, interpolation's
+   segments) or a state that draws nothing, every triangle goes through native_draw. */
+static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsigned count, const uint8_t *drawn)
+{
+    NativeExact *gpu = g->backend;
+    Native *n = gpu->native;
+    unsigned end = count - 2, i = 0;   /* triangle k is list[k..k+2], k < end */
+    while (i < end && !drawn[i]) i++;
+    if (i == end) return;
+    native_draw(g, type, &list[i], 3);
+    unsigned prim = (unsigned)((g->reg[GS_PRIM] & 7) |
+                    ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
+    unsigned ctxt = prim >> 9 & 1;
+    if (n->interp || n->field_trace_on || n->skip || !n->current_valid ||
+        n->state_version != g->state_version || n->state_ctxt != ctxt || n->state_prim != prim ||
+        ((prim & 16) && n->written != g->pixels_written) || type != 4) {
+        for (i++; i < end; i++) if (drawn[i]) native_draw(g, type, &list[i], 3);
+        return;
+    }
+    NativeFrame *f = n->recording;
+    uint64_t offset = native_offset(g, ctxt);
+    int fst = prim >> 8 & 1, flat = !(prim >> 3 & 1);
+    int left = n->box[0], top = n->box[1], right = n->box[2], bottom = n->box[3];
+    native_reserve(f, 3 * (end - i));
+    if (n->indexed) native_reserve_indices(f, 3 * (end - i));
+    /* the window of converted vertices: c[k % 3] is list[k]'s, with its pixel */
+    NativeVertex c[3];
+    int cx[3], cy[3];
+    for (unsigned k = i + 1; k < i + 3; k++) {
+        float x = (float)((int)list[k].x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+        float y = (float)((int)list[k].y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+        cx[k % 3] = (int)x, cy[k % 3] = (int)y;
+        native_set(&c[k % 3], &list[k], &list[k], n, fst, x, y);
+    }
+    unsigned recorded = 0;
+    for (unsigned k = i + 1; k < end; k++) {
+        unsigned a = k % 3, b = (k + 1) % 3, d = (k + 2) % 3;
+        float x = (float)((int)list[k + 2].x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+        float y = (float)((int)list[k + 2].y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+        cx[d] = (int)x, cy[d] = (int)y;
+        native_set(&c[d], &list[k + 2], &list[k + 2], n, fst, x, y);
+        if (!drawn[k]) continue;
+        if (n->exact_probe) native_exact(n, g, type, &list[k], 3, prim, ctxt);
+        const unsigned w[3] = {a, b, d};
+        for (unsigned j = 0; j < 3; j++) {
+            if (cx[w[j]] - 1 < left) left = cx[w[j]] - 1;
+            if (cy[w[j]] - 1 < top) top = cy[w[j]] - 1;
+            if (cx[w[j]] + 1 > right) right = cx[w[j]] + 1;
+            if (cy[w[j]] + 1 > bottom) bottom = cy[w[j]] + 1;
+        }
+        NativeVertex t[3] = {c[a], c[b], c[d]};
+        if (flat) t[0].rgba = t[1].rgba = t[2].rgba;   /* flat: the last vertex's colour */
+        if (n->indexed) native_triangle_indexed(f, type, t);
+        else {
+            memcpy(&f->vertices[f->vertex_count], t, sizeof t);
+            f->vertex_count += 3;
+        }
+        recorded++;
+        /* native_record's conversion cache after this triangle: its second and third vertex */
+        n->conv_gs[0] = list[k + 1]; n->conv[0] = c[b];
+        n->conv_gs[1] = list[k + 2]; n->conv[1] = c[d];
+    }
+    n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
+    if (g->source_path == 1) f->path1 += recorded;
+    n->stats.primitives += recorded;
+    n->stats.draws += recorded;
 }
 
 /* A host upload must not become the starting content of an earlier pending draw. */
@@ -2867,6 +2947,7 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
     exact->clip_on = 1;
     exact->e.upload_lazily = 1;  /* the probe's draws need only the uploaded pages they touch */
     g->draw = native_draw;
+    g->draw_strip = native_draw_strip;
     g->local_copy = native_local_copy;
     g->flush_draw = native_flush_draw;
     g->write_high = native_write_high;

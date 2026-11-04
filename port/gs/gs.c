@@ -522,6 +522,75 @@ static inline __attribute__((always_inline)) void packed(Gs *g, GsPath *p, unsig
     else gs_write(g, reg, value);
 }
 
+enum { GS_PRIM_TRISTRIP = 4 };
+
+/* A PACKED tag's register list that gs_feed can run as a strip (finding 146): RGBAQ, ST and UV
+   in any order, then one XYZF2/XYZ2/XYZF3/XYZ3 last, so each loop is one vertex. */
+static int strip_regs(uint64_t regs, unsigned nreg)
+{
+    unsigned xyz = (unsigned)(regs >> ((nreg - 1) * 4)) & 15;
+    if (xyz != 4 && xyz != 5 && xyz != 12 && xyz != 13) return 0;
+    for (unsigned r = 0; r + 1 < nreg; r++) {
+        unsigned reg = (unsigned)(regs >> (r * 4)) & 15;
+        if (reg < 1 || reg > 3) return 0;
+    }
+    return 1;
+}
+
+/* loops whole loops of such a tag while PRIM is a triangle strip: each register as packed()
+   writes it, and each vertex kicked as vertex_kick would (the counters, ADC skips, the strip's
+   parity and its last vertices), with the triangles handed to draw_strip in batches instead of
+   one draw call each. */
+static void packed_strip(Gs *g, GsPath *p, uint64_t regs, unsigned nreg, const uint32_t *w, size_t loops)
+{
+    enum { BATCH = 256 };
+    GsVertex list[BATCH + 2];
+    uint8_t drawn[BATCH];
+    unsigned m = g->vertex_count, xyz = (unsigned)(regs >> ((nreg - 1) * 4)) & 15;
+    int kicked = 0;   /* the last vertex made a triangle */
+    memcpy(list, g->vertices, m * sizeof *list);
+    for (size_t k = 0; k < loops; k++) {
+        for (unsigned r = 0; r + 1 < nreg; r++, w += 4) packed(g, p, (unsigned)(regs >> (r * 4)) & 15, w);
+        uint32_t x = w[0] & 65535, y = w[1] & 65535;
+        unsigned reg;
+        if (xyz == GS_XYZF2 || xyz == GS_XYZF3) {
+            uint32_t z = w[2] >> 4 & 0xFFFFFF, fog = w[3] >> 4 & 255;
+            reg = w[3] & 0x8000 ? GS_XYZF3 : xyz;
+            g->reg[reg] = x | (uint64_t)y << 16 | (uint64_t)z << 32 | (uint64_t)fog << 56;
+            g->vertex.x = x; g->vertex.y = y; g->vertex.z = z; g->vertex.fog = fog;
+        } else {
+            reg = w[3] & 0x8000 ? GS_XYZ3 : xyz;
+            g->reg[reg] = x | (uint64_t)y << 16 | (uint64_t)w[2] << 32;
+            g->vertex.x = x; g->vertex.y = y; g->vertex.z = w[2];
+        }
+        w += 4;
+        int skip = reg == GS_XYZF3 || reg == GS_XYZ3;
+        if (skip) g->adc_skips++;
+        list[m++] = g->vertex;
+        kicked = m >= 3;
+        if (kicked) {   /* vertex_kick: the window was full, a triangle */
+            g->kicks++;
+            drawn[m - 3] = (uint8_t)!skip;
+            if (!skip) g->vram_epoch++;
+            g->strip_parity ^= 1;
+        }
+        if (m == BATCH + 2) {
+            g->draw_strip(g, GS_PRIM_TRISTRIP, list, m, drawn);
+            list[0] = list[m - 2]; list[1] = list[m - 1]; m = 2;
+        }
+    }
+    if (m >= 3) g->draw_strip(g, GS_PRIM_TRISTRIP, list, m, drawn);
+    /* The window vertex_kick leaves: the last two after a kick (its third slot holds the last one
+       kicked), else the vertices so far. */
+    if (kicked) {
+        g->vertices[0] = list[m - 2]; g->vertices[1] = g->vertices[2] = list[m - 1];
+        g->vertex_count = 2;
+    } else {
+        memcpy(g->vertices, list, m * sizeof *list);
+        g->vertex_count = m;
+    }
+}
+
 static void gif_qword(Gs *g, unsigned path, GsPath *p)
 {
     uint32_t *w = p->words;
@@ -574,11 +643,21 @@ void gs_feed(Gs *g, unsigned path, const uint32_t *words, size_t count)
             uint32_t left = p->left, reg = p->reg, nreg = p->nreg;
             uint64_t regs = p->regs;
             const uint32_t *w = words + i;
-            do {
+            int strips = g->draw_strip && g->draw && strip_regs(regs, nreg);
+            while (done < avail && left) {
+                if (strips && !reg && (g->reg[GS_PRIM] & 7) == GS_PRIM_TRISTRIP) {
+                    size_t loops = (avail - done) / nreg;
+                    if (loops > left) loops = left;
+                    if (loops) {   /* whole vertices of a strip at once */
+                        packed_strip(g, p, regs, nreg, w, loops);
+                        w += loops * nreg * 4; done += loops * nreg; left -= (uint32_t)loops;
+                        continue;
+                    }
+                }
                 packed(g, p, (unsigned)(regs >> (reg * 4)) & 15, w);
-                w += 4;
+                w += 4; done++;
                 if (++reg == nreg) { reg = 0; left--; }
-            } while (++done < avail && left);
+            }
             memcpy(p->words, w - 4, sizeof p->words);
             p->left = left; p->reg = reg;
             i += done * 4;
