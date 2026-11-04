@@ -1,5 +1,7 @@
 # State
 
+2026-11-04 (finding 147): unlocked phone window 3400-5800 at FPS=240 ends before GO (6321); actual race slow intervals are ~31.5 fps without PGO at 2x/4x, 36.1 with PGO at 4x. Matrix-clamp hoisting passed correctness but gained nothing and was rejected; 60 fps is not reached.
+
 Goal: readable, **matching** C/C++ decompilation of Downhill Domination (PS2, USA `SCUS_971.77`):
 source that rebuilds the retail executable byte for byte. Later it can serve as the base for a PC
 port. PCSX2 is the behavioural reference.
