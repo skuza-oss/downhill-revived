@@ -22,3 +22,5 @@
 *.html text eol=lf
 *.css text eol=lf
 *.wat text eol=lf
+*.yml text eol=lf
+tools/hooks/* text eol=lf
