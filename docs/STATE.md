@@ -437,6 +437,10 @@ timed out)...", "Update failed: the download couldn't reach GitHub (...)"). The 
 the new `launcher.log`. Server tests 88/88, launcher tests 27 pass. The endpoint needs a server
 deploy.
 
+2026-11-03 (finding 145): the launcher uses native macOS window controls over its title bar;
+the HTML minimize and close buttons are hidden on Mac. Windows and Linux retain their existing
+custom controls. The platform choice is compiled into the launcher.
+
 2026-11-02 (finding 139): one delta-time game clock. Every paced frame, at every frame rate (60
 included) and online, the game steps by the real time since the last frame, between one step at
 the selected rate and two fields, smoothed so the steps add up to wall time; no debt, no
