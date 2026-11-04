@@ -1,5 +1,7 @@
 # State
 
+2026-11-04 (finding 149): on the throttled phone a bilinear's texel footprint is one gather everywhere (conversions too) and the alpha test runs before the colour (4x GPU -2.1 ms a frame), the GS and render threads stay on the little cores when there are only two big ones, a swapchain view is kept instead of a new framebuffer every frame (render thread -3.1 ms), and two GS loops store less; 2x race 55.2 -> 59.5 fps at the race start (61.6 with PGO: 60 held throughout with PGO), window 66.1 -> 70.1; 4x race start 43.2 -> 45.9 (GPU-bound), the rest 57.6-63.2 (was 51.5-56.4), window 55.4 -> 62.1.
+
 2026-11-04 (finding 148): the slow race interval is the race start, where the flare's Z read made the game wait for VU1 every frame; queued behind the drawing, plus three GS/fill changes, the throttled phone's race start went 31.5 -> 55.8 fps at 2x (58.8 with PGO) and 31.4 -> 42.9 at 4x (GPU-bound); 2x holds 60 except the race start, 4x does not.
 
 2026-11-04 (finding 147): unlocked phone window 3400-5800 at FPS=240 ends before GO (6321); actual race slow intervals are ~31.5 fps without PGO at 2x/4x, 36.1 with PGO at 4x. Matrix-clamp hoisting passed correctness but gained nothing and was rejected; 60 fps is not reached.
