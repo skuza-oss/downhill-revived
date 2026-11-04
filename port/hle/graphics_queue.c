@@ -51,6 +51,7 @@ static int initialized;
 static int adaptive_waits;
 static int spike_waits;
 static double spin_seconds = -1;  /* DHD_SPIN_US, read at the first long wait (idle_wait) */
+static _Thread_local double spin_end, spin_returned;  /* this thread's wait's spin, and its last return */
 
 /* Reads only acquire ownership published by the other side. A locked RMW here
    unnecessarily takes exclusive ownership of its cache line on every poll.
@@ -79,6 +80,9 @@ static void idle_wait(_Atomic uint32_t *p, uint32_t at, _Atomic uint32_t *flag, 
     unsigned limit = budget ? (adaptive_waits ? *budget : 4096) : 512;
     for (unsigned spin = 0; spin < limit; spin++) {
         if (position(p) != at) {
+#if !defined(GRAPHICS_QUEUE_TEST) || defined(GS_QUEUE_TEST)
+            if (!budget && spin_seconds > 0) spin_returned = host_wall_seconds();
+#endif
             if (budget && adaptive_waits) {
                 unsigned next = spin * 2 + 128;
                 *budget = next < 4096 ? next : 4096;
@@ -92,7 +96,10 @@ static void idle_wait(_Atomic uint32_t *p, uint32_t at, _Atomic uint32_t *flag, 
     }
     /* DHD_SPIN_US (finding 091 AND2): the producer's waits (retired/full, the game thread's) spin
        that long before sleeping, so a phone's governor sees a busy core and keeps its clock up.
-       Android's default 3000 (+4% race fields/s on the Mi 11i, p99 down); elsewhere 0. */
+       Android's default 3000 (+4% race fields/s on the Mi 11i, p99 down); elsewhere 0.
+       That long once per wait (finding 146): the callers wait in a loop, and the other side wakes
+       them at every packet it retires, so a call that comes straight after one that returned
+       (within 50 us) goes on with that wait's spin instead of starting another 3 ms. */
 #if !defined(GRAPHICS_QUEUE_TEST) || defined(GS_QUEUE_TEST)
     if (!budget && spin_seconds) {
         if (spin_seconds < 0) {
@@ -103,15 +110,18 @@ static void idle_wait(_Atomic uint32_t *p, uint32_t at, _Atomic uint32_t *flag, 
             spin_seconds = us ? atof(us) * 1e-6 : 0;
 #endif
         }
-        for (double end = spin_seconds > 0 ? host_wall_seconds() + spin_seconds : 0; end;) {
+        double now = host_wall_seconds();
+        if (spin_seconds > 0 && now - spin_returned > 50e-6) spin_end = now + spin_seconds;
+        while (spin_seconds > 0 && now < spin_end) {
             for (unsigned spin = 0; spin < 256; spin++) {
                 if (position(p) != at) {
+                    spin_returned = host_wall_seconds();
                     tl_add(TL_EE_SPIN + 2 * tl_role, spin_start);
                     return;
                 }
                 cpu_pause();
             }
-            if (host_wall_seconds() >= end) break;
+            now = host_wall_seconds();
         }
     }
 #endif
@@ -140,6 +150,9 @@ static void idle_wait(_Atomic uint32_t *p, uint32_t at, _Atomic uint32_t *flag, 
 #endif
     }
     atomic_fetch_sub(flag, 1);
+#if !defined(GRAPHICS_QUEUE_TEST) || defined(GS_QUEUE_TEST)
+    if (!budget && spin_seconds > 0) spin_returned = host_wall_seconds();
+#endif
 }
 
 /* Retired-side waits share one auto-reset event; the short timeout covers two waiters. */
