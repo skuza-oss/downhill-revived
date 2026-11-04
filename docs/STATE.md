@@ -116,7 +116,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 ## Checks and tools
 
-- Docs: `python tools/check_docs.py` (findings, citations, paths, machine paths).
+- One entry point: `python tools/check.py docs|quick|port|matching|server` (root AGENTS.md,
+  "Done means"). Docs alone: `python tools/check_docs.py`.
 - Unit tests: `python port/tools/test_runtime.py` (after `build_wasm.py`); test programs run where
   the game runs their code (finding 104). Renderer: `test_gs_wgpu.py`, replay goldens recorded
   locally (`gs_golden.py`), `test_native_transfers.py`. Game state: per-field state traces

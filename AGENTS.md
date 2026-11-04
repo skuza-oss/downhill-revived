@@ -25,6 +25,22 @@ logs, machine setup and account details there, never in tracked files.
 - History on `main` is never rewritten. One clear commit per change; a release is its version
   commit (the last one), tagged `vX.Y.Z`.
 
+## Done means
+
+One entry point: `python tools/check.py <tier>` (one line per step, logs in `build/check/`).
+
+| Change | Run before you hand it back |
+|---|---|
+| Docs, findings, AGENTS.md files | `check.py docs` |
+| A matching function or anything in `src/`, `include/`, `config/`, `tools/` | `check.py matching` (and `try_func.py` printed MATCH) |
+| Port code that compiles into the core or the host (`port/hle`, `port/runtime`, `port/gs`, patches) | `check.py quick`; `check.py port` when the host, renderer or network side changed |
+| Anything that can change game state | the above, plus a boot and a race state trace against the base build (`docs/TESTING.md`) |
+| The online server | `check.py server` |
+| A release | the release checklist and `package_release.py`'s own checks |
+
+The quick tier is compile plus unit tests: game runs, picture checks and benchmarks only when a
+change needs them or someone asks.
+
 ## Current decisions (they override anything older)
 
 | Decision | Since | Finding | Do not |
