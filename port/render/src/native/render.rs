@@ -664,7 +664,7 @@ impl Native {
                 // Powers of two (as the GS's): the gather's corner / size is then exact.
                 let sized = decoded == Some((c.tex_size[0], c.tex_size[1]))
                     && c.tex_size[0].is_power_of_two() && c.tex_size[1].is_power_of_two();
-                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, sized)
+                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, sized, c.alpha_scale == 255.0)
             } else {
                 0
             };

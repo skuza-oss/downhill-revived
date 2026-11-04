@@ -22,7 +22,8 @@ override native_texel_scale: u32 = 0u;
 // takes parts of the state from these bits instead of the uniform: with bit 31 the flags (bits
 // 0-11), with bit 30 the CLAMP modes (bits 12-13 U, 14-15 V), with bit 29 the alpha test (bits
 // 16-18); bit 19 when the texture is exactly tex_size (a decoded texture), so load_texel's bounds
-// test takes the uniform's size instead of asking the texture. Paths the draw never takes compile
+// test takes the uniform's size instead of asking the texture; bit 20 when a textured draw's
+// alpha_scale is 255 (every one native_core.inc makes), so a texel's alpha is its byte. Paths the draw never takes compile
 // away; the arithmetic of the paths it takes is the same. Zero: the generic pipeline, all from
 // the uniform.
 override native_spec: u32 = 0u;
@@ -32,6 +33,7 @@ fn wrap_mode() -> vec2<u32> {
 }
 fn texture_sized() -> bool { return (native_spec & 0x80000u) != 0u; }
 fn alpha_test() -> u32 { return select(nat.atst, native_spec >> 16u & 7u, (native_spec & 0x20000000u) != 0u); }
+fn unit_alpha() -> bool { return (native_spec & 0x100000u) != 0u; }
 
 struct Native {
     target_size: vec2<f32>, flags: u32, atst: u32,
@@ -138,7 +140,7 @@ fn texel(c: vec2<i32>) -> vec4<f32> {
 // byte; its alpha times alpha_scale / 255, which is 255 for every textured draw, native_core.inc).
 fn texel_bytes(w: u32) -> vec4<f32> {
     let a = f32(w >> 24u);
-    let alpha = select(round(a / 255.0 * nat.alpha_scale), a, nat.alpha_scale == 255.0);
+    let alpha = select(select(round(a / 255.0 * nat.alpha_scale), a, nat.alpha_scale == 255.0), a, unit_alpha());
     return vec4<f32>(f32(w & 255u), f32(w >> 8u & 255u), f32(w >> 16u & 255u),
                      select(alpha, nat.texa_alpha, (draw_flags() & 256u) != 0u));
 }
@@ -241,33 +243,35 @@ fn fetch_u(i: Varyings, uv_in: vec2<f32>, across: vec2<f32>, down: vec2<f32>) ->
 }
 
 // The pixel's colour in GS units (raster.hlsl native_pixel, before its outputs) from the
-// texture's colour t (when textured); discards as it does.
+// texture's colour t (when textured); discards as it does. The alpha first, then the alpha test,
+// then the colour (the same expressions: the colour reads only the vertex alpha, the fog leaves
+// the alpha as it is), so a discarded pixel computes no colour.
 fn combine(i: Varyings, t: vec4<f32>) -> vec4<f32> {
     let flags = draw_flags();
-    var color = i.color;
-    if ((flags & 1u) != 0u) {
-        let tfx = (flags >> 2u) & 3u;
-        var rgb = select(min(floor(t.rgb * color.rgb / 128.0), vec3<f32>(255.0)), t.rgb, tfx == 1u);
-        if (tfx >= 2u) { rgb = min(rgb + color.a, vec3<f32>(255.0)); }
-        var a = color.a;
-        if ((flags & 2u) != 0u) {
-            if (tfx == 0u) { a = min(floor(t.a * color.a / 128.0), 255.0); }
-            else if (tfx == 2u) { a = min(t.a + color.a, 255.0); }
-            else { a = t.a; }
-        }
-        color = vec4<f32>(rgb, a);
+    let textured = (flags & 1u) != 0u;
+    let tfx = (flags >> 2u) & 3u;
+    var a = i.color.a;
+    if (textured && (flags & 2u) != 0u) {
+        if (tfx == 0u) { a = min(floor(t.a * i.color.a / 128.0), 255.0); }
+        else if (tfx == 2u) { a = min(t.a + i.color.a, 255.0); }
+        else { a = t.a; }
     }
-    if ((flags & 16u) != 0u) { color = vec4<f32>(floor(mix(nat.fog.rgb, color.rgb, i.stqf.w)), color.a); }
     if ((flags & 64u) != 0u) {
-        let a = u32(color.a);
+        let ua = u32(a);
         let r = nat.aref;
-        let t = alpha_test();
-        let passed = t == 1u || (t == 2u && a < r) || (t == 3u && a <= r) || (t == 4u && a == r) ||
-                     (t == 5u && a >= r) || (t == 6u && a > r) || (t == 7u && a != r);
+        let test = alpha_test();
+        let passed = test == 1u || (test == 2u && ua < r) || (test == 3u && ua <= r) || (test == 4u && ua == r) ||
+                     (test == 5u && ua >= r) || (test == 6u && ua > r) || (test == 7u && ua != r);
         if (passed == ((flags & 128u) != 0u)) { discard; }
     }
-    if ((flags & 512u) != 0u) { color = vec4<f32>(floor(color.rgb * color.a / 128.0), color.a); }
-    return color;
+    var rgb = i.color.rgb;
+    if (textured) {
+        rgb = select(min(floor(t.rgb * i.color.rgb / 128.0), vec3<f32>(255.0)), t.rgb, tfx == 1u);
+        if (tfx >= 2u) { rgb = min(rgb + i.color.a, vec3<f32>(255.0)); }
+    }
+    if ((flags & 16u) != 0u) { rgb = floor(mix(nat.fog.rgb, rgb, i.stqf.w)); }
+    if ((flags & 512u) != 0u) { rgb = floor(rgb * a / 128.0); }
+    return vec4<f32>(rgb, a);
 }
 
 fn shade(i: Varyings, uv: vec2<f32>, across: vec2<f32>, down: vec2<f32>) -> vec4<f32> {
