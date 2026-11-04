@@ -129,8 +129,12 @@ it unchanged (finding 088, CL3).
   makes the rooted Mi 11i match it at 1x paced 60 (39.6 fields/s, same thread split; `--restore`
   puts the phone back), with render scale ~2x/~5-6x standing in for the Mali's 1x/2x. On that
   profile two pacing changes and a GS fast path took 1x paced 60 from 39.6 to 55.0 fields/s
-  (median field 16.65 ms); finding 127 has the breakdown and what is left for 60. A gamepad or the
-  keyboard, or the touch controls (finding 141, branch `feat/touch-controls`; built and unit-tested,
+  (median field 16.65 ms); finding 127 has the breakdown and what is left for 60. At 2x and 4x paced
+  60 on that profile (finding 146, branch `perf/phone-60`) the race's slow middle went from 37-39 to
+  48-50 fps at 2x and from 36.5-37 to 44-45 at 4x: seven output-preserving GS, queue and renderer
+  changes (+17 % on race fields 3300-4300) and a profile-guided build (`build_apk.py --pgo-use`,
+  +12 % more, not the default). 60 is not held there; VU1, the EE and the GS thread are what is
+  left. A gamepad or the keyboard, or the touch controls (finding 141, branch `feat/touch-controls`; built and unit-tested,
   in-game checks pending): Thumb zones (floating stick, PEDAL with flick attacks, HOP / BRAKE / SLIDE,
   a trick stick in the air) and Classic pad, every touch plain pad input; the rules in
   `port/hle/touch.c`, drawn by the Rust renderer's overlay, the settings on SETTINGS > Touch Controls;
