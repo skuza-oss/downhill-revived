@@ -9,6 +9,7 @@ Checks, over the tracked files (git ls-files):
 - docs/findings/README.md's generated table is current (tools/findings_index.py --check);
 - every docs/...md path named in a tracked file exists (ERROR); build/audit/... paths (WARN: that
   folder is gitignored, so nobody else can read it);
+- every row of AGENTS.md's "Current decisions" table cites a current finding (ERROR);
 - AGENTS.md files stay short: the root at most 200 lines, nested ones at most 100 (ERROR);
 - no machine paths in tracked docs and agent files: drive letters, home folders, LAN addresses
   (ERROR).
@@ -83,6 +84,20 @@ def main():
     if subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'findings_index.py'), '--check'],
                                                          cwd=ROOT, capture_output=True).returncode:
         report('ERROR', 'docs/findings/README.md', 1, 'index out of date: run python tools/findings_index.py')
+
+    # AGENTS.md's current decisions must rest on current findings
+    agents = open(os.path.join(ROOT, 'AGENTS.md'), encoding='utf-8').read().split('\n')
+    in_table = False
+    for i, line in enumerate(agents, 1):
+        if line.startswith('## '):
+            in_table = line.startswith('## Current decisions')
+        elif in_table and line.startswith('|') and not line.startswith(('| Decision', '|---')):
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            for k in NUM.findall(cells[2] if len(cells) > 2 else ''):
+                n = '%03d' % int(k)
+                if status.get(n, ('',))[0] != 'current':
+                    report('ERROR', 'AGENTS.md', i, f'decision rests on finding {n}, which is '
+                           f'{status.get(n, ("missing",))[0]}: point it at a current finding')
 
     for path in tracked():
         ext = os.path.splitext(path)[1].lower()
