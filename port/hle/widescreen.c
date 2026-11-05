@@ -146,19 +146,25 @@ void host_widescreen_init(void)
 
 /* The bike shop builds its HUD and shadow at run time: when the shop's block is set up (the
    halfword at 0xA095D0 reads 2), widen the HUD bars and the shadow, as the patch's conditional
-   lines do (for 16:9: 1.33, 1.33 and -111). Writing 0xA095D0 itself ends the condition. The
-   shadow word is -95.886 in retail (C2BFC5EA, logged in round 40) and -111 in the 16:9 patch;
-   other shapes take the line through those two points in 1/s. The game writes the bars back each
-   field, as on PCSX2, whose patch is applied every field too. */
+   lines do (for 16:9: 1.33, 1.33 and -111). Writing 0xA095D0 itself ends the condition. The game
+   writes the bars back each field, as on PCSX2, whose patch is applied every field too.
+   The shadow word is no width: 0xA60030 is a VIF UNPACK V3-32 of the dark panel behind the rider,
+   and 0xA60038 its first vertex's second coordinate, the panel's far corner: -95.886 in retail
+   (C2BFC5EA, logged in round 40), -111 in the 16:9 patch, which moves the corner past the wider
+   view's left side. Up to 16:9 it takes the line through those two points in 1/s; wider shapes
+   keep -111, which leaves the corner past the left side up to 5.9:1 (more than the 4:1 cap). Further
+   along the line the vertex crosses the camera's plane (between -111 and -116) and the panel is
+   drawn mirrored across the picture, over the rider, from about 2:1 on (finding 154). */
 void host_widescreen_vsync(void)
 {
     if (!widescreen || *(volatile uint16_t *)(uintptr_t)(PS2_RAM_BASE + 0xA095D0) != 2) return;
     volatile uint32_t *top = (volatile uint32_t *)(uintptr_t)(PS2_RAM_BASE + 0xA095D0);
     volatile uint32_t *bottom = (volatile uint32_t *)(uintptr_t)(PS2_RAM_BASE + 0xA09610);
     volatile uint32_t *shadow = (volatile uint32_t *)(uintptr_t)(PS2_RAM_BASE + 0xA60038);
+    float wider = fminf(1.0f / port_fov_x, 4.0f / 3.0f);  /* how much wider than 4:3 the corner follows */
     *top = float_bits(1.0f / port_fov_x);     /* top HUD width */
     *bottom = float_bits(1.0f / port_fov_x);  /* bottom HUD width */
-    *shadow = float_bits(-95.886f - (111.0f - 95.886f) * 3.0f * (1.0f / port_fov_x - 1.0f));  /* shadow width */
+    *shadow = float_bits(-95.886f - (111.0f - 95.886f) * 3.0f * (wider - 1.0f));  /* the panel's corner */
 }
 
 /* ---- the 2D draw code's X (port/patches_widescreen.py) ---- */
