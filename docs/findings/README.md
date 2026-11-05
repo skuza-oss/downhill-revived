@@ -95,7 +95,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 053 | [The first public release: reverb from the disc, a reproducible build, the zip (round 39)](053-public-release.md) | partly superseded | [088](088-cleanup.md) for the 32-bit release build, its zip and checks |
 | 054 | [Online start gates, the version gate and the auto-updater (round 40, 0.2.0)](054-online-versioning-updater.md) | partly superseded | [093](093-launcher.md) for the game's own updater |
 | 055 | [The movies play (round 40)](055-movies.md) | partly superseded | [140](140-widescreen-everywhere.md) for movies shown at 4:3 |
-| 056 | [Widescreen HUD at any shape, player defaults, EXIT GAME](056-widescreen-hud-defaults.md) | partly superseded | [101](101-one-settings-implementation.md) for player_defaults in host.c, the disc prompt, 4:3 cards |
+| 056 | [Widescreen HUD at any shape, player defaults, EXIT GAME](056-widescreen-hud-defaults.md) | partly superseded | [101](101-one-settings-implementation.md) for player_defaults in host.c, the disc prompt, 4:3 cards; since 154 the bike shop corner past 16:9 |
 | 057 | [Round 40: texture replacement packs (upscale mods) in PCSX2's format](057-texture-packs.md) | current |  |
 | 058 | [the game's font drawn sharp at high resolutions](058-sharp-font.md) | current |  |
 | 059 | [keyboard play and generic controllers (SDL3)](059-keyboard-generic-pads.md) | partly superseded | [099](099-one-code-path.md) for XInput/raw-HID fallback, the i686 SDL build |
@@ -184,6 +184,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 151 | [Faster builds on every platform](151-build-speed.md) | current |  |
 | 152 | [Crash logs players can keep and share (Android first)](152-crash-log-sharing.md) | current |  |
 | 153 | [The native renderer's pipelines on Mali's r54p1 shader compiler](153-mali-shader-compiler-crash.md) | current |  |
+| 154 | [The rider missing from the inventory screen on phones](154-menu-rider-missing-on-phones.md) | current |  |
 | 155 | [The Android build for every arm64 core (ARMv8.0)](155-android-armv8-baseline.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

@@ -7,6 +7,8 @@ to 2026-10-25) are in the findings and in `git show v0.3.1:docs/STATE.md`.
 Add an entry when a lane merges: date, finding, one paragraph. Do not copy values that live in
 code (versions, MIN_VERSION, defaults): name the file instead.
 
+2026-11-05 (finding 154): the rider was missing from the bike shop (inventory) on phones, with a dark wedge in his place: widescreen at shapes wider than about 2:1 moved the shop panel's corner behind the camera, so the panel was drawn mirrored over him. Phones are 20:9 with widescreen on; 21:9 and 32:9 PC monitors had it too. Past 16:9 the corner keeps the 16:9 patch's value; 16:9 and narrower are unchanged. Checked on the Mi 11i and on Windows at 20:9, 21:9 and 32:9.
+
 2026-11-05 (finding 155): the Android build targets ARMv8.0 (`-march=armv8-a -moutline-atomics`, was ARMv8.2): phones with Cortex-A53/A73 cores such as the Snapdragon 680 closed at start with an illegal instruction (issues #45, #51). Atomics still use LSE where the core has it.
 
 2026-11-05 (finding 153): phones with a Mali GPU on Arm's r54 driver (Galaxy A07, Redmi with a Unisoc UMS9230E; issue #47) closed at startup with the native renderer: the driver's shader compiler crashes on a texture passed into a shader function. Each texture now has its own load function; the pictures are byte-identical, and a test checks that no shader passes a texture or sampler. Confirmed by a tester's Mali phone.

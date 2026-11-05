@@ -1,6 +1,6 @@
 # 056: Widescreen HUD at any shape, player defaults, EXIT GAME
 
-Status: partly superseded by 101 (player_defaults in host.c, the disc prompt, 4:3 cards)
+Status: partly superseded by 101 (player_defaults in host.c, the disc prompt, 4:3 cards; since 154 the bike shop corner past 16:9)
 Checked: 2026-11-04
 
 The HUD anchoring and EXIT GAME are current. The player defaults now live in one place, the
