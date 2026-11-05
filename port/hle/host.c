@@ -374,6 +374,19 @@ static struct sigaction *crash_before_of(int sig)
    with code 3, as before. */
 static void crashed(int sig, siginfo_t *info, void *ctx)
 {
+    /* Once only. A fault inside the report itself (an unwinder reading a broken stack) can come
+       back here: guard_fault (port/host/host_posix.c) calls this handler directly, so its
+       SA_RESETHAND never applies. A second entry, from any thread, skips the report. */
+    static int entered;
+    if (__atomic_fetch_add(&entered, 1, __ATOMIC_SEQ_CST)) {
+#ifdef __ANDROID__
+        sigaction(sig, crash_before_of(sig), NULL);
+        if (!info || info->si_code <= 0) raise(sig);
+        return;
+#else
+        _exit(3);
+#endif
+    }
     const char *name = sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGILL ? "SIGILL" : "SIGFPE";
     char thread[17] = "?";
     pthread_getname_np(pthread_self(), thread, sizeof thread);  /* which of the port's threads (host_thread_name) */
