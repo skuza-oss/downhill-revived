@@ -122,7 +122,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 088 | [Cleanup: one 64-bit build on the Rust renderer](088-cleanup.md) | current |  |
 | 089 | [Where the time goes (x64 and browser, race)](089-profile.md) | current |  |
 | 090 | [Game speed round 1 (x64 to 144 fps)](090-speed.md) | current |  |
-| 091 | [Android arm64 build (task AND1)](091-android.md) | partly superseded | [143](143-android-release.md) for the known gaps: touch, online, release key; the first speeds |
+| 091 | [Android arm64 build (task AND1)](091-android.md) | partly superseded | [143](143-android-release.md) for the known gaps: touch, online, release key; the first speeds; since 155 also -march |
 | 092 | [online flow, centred menu layer, mouse (UI1)](092-ui.md) | partly superseded | [128](128-room-ready-bikes.md) for bike and outfit online "not done" |
 | 093 | [the player launcher (DownhillRevived.exe)](093-launcher.md) | current |  |
 | 094 | [Crash after a Super Career finish that does not advance (issue #8)](094-career-finish-crash.md) | current |  |
@@ -184,6 +184,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 151 | [Faster builds on every platform](151-build-speed.md) | current |  |
 | 152 | [Crash logs players can keep and share (Android first)](152-crash-log-sharing.md) | current |  |
 | 153 | [The native renderer's pipelines on Mali's r54p1 shader compiler](153-mali-shader-compiler-crash.md) | current |  |
+| 155 | [The Android build for every arm64 core (ARMv8.0)](155-android-armv8-baseline.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

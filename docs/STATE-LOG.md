@@ -7,6 +7,8 @@ to 2026-10-25) are in the findings and in `git show v0.3.1:docs/STATE.md`.
 Add an entry when a lane merges: date, finding, one paragraph. Do not copy values that live in
 code (versions, MIN_VERSION, defaults): name the file instead.
 
+2026-11-05 (finding 155): the Android build targets ARMv8.0 (`-march=armv8-a -moutline-atomics`, was ARMv8.2): phones with Cortex-A53/A73 cores such as the Snapdragon 680 closed at start with an illegal instruction (issues #45, #51). Atomics still use LSE where the core has it.
+
 2026-11-05 (finding 153): phones with a Mali GPU on Arm's r54 driver (Galaxy A07, Redmi with a Unisoc UMS9230E; issue #47) closed at startup with the native renderer: the driver's shader compiler crashes on a texture passed into a shader function. Each texture now has its own load function; the pictures are byte-identical, and a test checks that no shader passes a texture or sampler. Confirmed by a tester's Mali phone.
 
 2026-11-05 (finding 152): Android players can send a crash log without a computer. After a crash the next start shows "Downhill Revived closed unexpectedly last time" with the reason Android recorded (crashed, the graphics driver crashed, ran out of memory, stopped responding), Share log (Android's share sheet, one text file with the phone, Android's record and tombstone summary, and the logs) and Play; the icon's long-press has Share log too. The POSIX crash handler now drains its report into dhd.log, can probe the stack safely, and on Android hands the crash on to the system's crash dump (tombstone, CRASH_NATIVE). Every platform keeps the run before as dhd-previous.log. Checked on the Mi 11i with a game-thread crash at start.

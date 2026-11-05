@@ -86,12 +86,14 @@ TARGETS = {t.key: t for t in (
     Target('macos-arm64', 'aarch64-apple-darwin', 'build/host64-macos', 'dhd64', 'arm64', jobs=4,
            flags=['-arch', 'arm64', '-mmacosx-version-min=' + MAC_MIN, '-mcpu=apple-m1'],
            wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
-    # -march=armv8.2-a: the Snapdragon 888's cores and every arm64 phone since 2018; tuned for its
-    # Cortex-X1 and A78s (finding 091)
+    # -march=armv8-a: every arm64 phone. ARMv8.2 (finding 091's first choice) closed the game at
+    # start with SIGILL on ARMv8.0 cores, which budget chips still ship (the Snapdragon 680's
+    # Cortex-A73/A53, issues #45 and #51; finding 155). -moutline-atomics keeps the ARMv8.1 atomics
+    # where the core has them (chosen at run time). Tuned for the Snapdragon 888's Cortex-X1 and A78s.
     # chunks of the module's C (stable_units) are small: half the CPUs (wasm2c's own 8 parts needed 2)
     Target('android-arm64', 'aarch64-linux-android', 'build/android', 'libmain.so', 'arm64',
            jobs=max(2, (os.cpu_count() or 4) // 2), outputs=8,
-           flags=['--target=aarch64-linux-android%d' % ANDROID_API, '-march=armv8.2-a', '-mtune=cortex-a78',
+           flags=['--target=aarch64-linux-android%d' % ANDROID_API, '-march=armv8-a', '-moutline-atomics', '-mtune=cortex-a78',
                   '-fPIC', '-fomit-frame-pointer']),
 )}
 # Off Windows: the POSIX host instead of the Win32 one
