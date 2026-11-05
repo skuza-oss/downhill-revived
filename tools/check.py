@@ -42,8 +42,12 @@ def main(argv):
     args = [a for a in argv if not a.startswith('-')]
     jobs = None
     if '-j' in argv:
-        jobs = int(argv[argv.index('-j') + 1])
-        args.remove(str(jobs))
+        at = argv.index('-j') + 1
+        if at >= len(argv) or not argv[at].isdigit():
+            print(__doc__)
+            return 2
+        jobs = int(argv[at])
+        args.remove(argv[at])
     tier = args[0] if args else ''
     plan = steps(tier, jobs)
     if plan is None:
