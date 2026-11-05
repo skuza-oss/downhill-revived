@@ -74,12 +74,14 @@ def sha256(path):
 def fetch():
     tarball = DOWNLOADS / ('SDL3-%s.tar.gz' % VERSION)
     old = ROOT / 'build' / 'downloads' / tarball.name  # where a checkout kept it before
+    # each process writes its own .part and publishes it whole (os.replace): checkouts share DOWNLOADS
+    part = tarball.with_name('%s.%d.part' % (tarball.name, os.getpid()))
     if not tarball.exists() and old.exists() and sha256(old) == SHA256:
         DOWNLOADS.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(old, tarball)
+        shutil.copyfile(old, part)
+        os.replace(part, tarball)
     if not tarball.exists() or sha256(tarball) != SHA256:
         DOWNLOADS.mkdir(parents=True, exist_ok=True)
-        part = tarball.with_suffix('.part')
         print('SDL3: downloading', URL)
         with urllib.request.urlopen(URL, timeout=120) as r, open(part, 'wb') as f:
             shutil.copyfileobj(r, f)
