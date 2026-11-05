@@ -184,6 +184,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 151 | [Faster builds on every platform](151-build-speed.md) | current |  |
 | 152 | [Crash logs players can keep and share (Android first)](152-crash-log-sharing.md) | current |  |
 | 153 | [The native renderer's pipelines on Mali's r54p1 shader compiler](153-mali-shader-compiler-crash.md) | current |  |
+| 154 | [The rider missing from the inventory screen on phones](154-menu-rider-missing-on-phones.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
