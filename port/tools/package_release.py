@@ -617,13 +617,14 @@ def source_changes():
 
 
 def require_release_split(out):
-    """Stop unless build_host64.py built the game in out with --release: wasm2c's own split parts.
-    Its development chunks (finding 151) cost the game ~1.5 % on a phone; split.txt says which."""
+    """Stop unless the game in out was built from one unit or wasm2c's own parts (build_host64.py
+    --release, as every release before finding 151): its development chunks cost the game ~1.5 % on
+    a phone. build_host64.py writes which in split.txt (one, wasm2c, chunks)."""
     split = out / 'split.txt'
     kind = split.read_text().strip() if split.exists() else 'unknown (no split.txt)'
-    if kind != 'wasm2c':
-        sys.exit("%s: the game was built with %s C, not a release build: build_host64.py --release "
-                 "(wasm2c's own parts); not packaged" % (out, kind))
+    if kind not in ('one', 'wasm2c'):
+        sys.exit("%s: the game was built from %s C, not a release build (build_host64.py --release); "
+                 "not packaged" % (out, kind))
 
 
 def build_exe(wasm, sdl_lib, sdl_include, jobs):
@@ -764,7 +765,6 @@ def android_release(a, platform, out, manifest_path, page):
         apk = build_apk.OUT / build_apk.release_apk_name(name)
     if not apk.is_file():
         sys.exit('%s: no such APK' % apk)
-    require_release_split(build_apk.OUT)
     problems, facts = build_apk.check_release(apk, name, code, a.new_signing_key)
     elf = a.elf.read_bytes()
     rsp = build_apk.OUT / 'work' / 'link.rsp'   # build_host64.py's: the Rust library linked into libmain.so

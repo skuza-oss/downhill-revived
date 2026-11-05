@@ -231,9 +231,9 @@ def main():
     p.add_argument('--jobs', type=int, help="parallel compiles (default: the target's)")
     p.add_argument('--num-outputs', type=int, help='WABT split C output count for .wasm input')
     p.add_argument('--release', action='store_true',
-                   help="a release build: wasm2c's own split parts, not the chunks (finding 151: the chunks' smaller "
-                        "units cost the game ~1.5 %% on a phone); written in <out>/split.txt, which "
-                        "package_release.py checks")
+                   help="a release build: one unit or wasm2c's own split parts, never the chunks (finding 151: "
+                        "the chunks' smaller units cost the game ~1.5 %% on a phone); <out>/split.txt says "
+                        "which (one, wasm2c, chunks), and package_release.py refuses chunks")
     p.add_argument('--wabt', type=Path, help="WABT (wasm2c and its runtime; default WABT_DIR, else the target's)")
     p.add_argument('--simde', type=Path, help='SIMDe headers (the wasm SIMD shim; default SIMDE_DIR, else the '
                    "target's)")
@@ -328,8 +328,9 @@ def main():
             old = {}
         made = [work/n for n in ('core.h', 'wasm-rt.h', 'imports_gen.c', 'exports_gen.h')]
         if (old.get('key') == prepared.hexdigest() and isinstance(old.get('units'), list) and 'imports' in old
-                and all(Path(u).exists() for u in old['units']) and all(p.exists() for p in made)):
-            units, imports = [Path(u) for u in old['units']], old['imports']
+                and old.get('split') in ('one', 'wasm2c', 'chunks') and isinstance(old.get('headers'), list)
+                and all(Path(u).exists() for u in old['units'] + old['headers']) and all(p.exists() for p in made)):
+            units, imports, split = [Path(u) for u in old['units']], old['imports'], old['split']
             step('module C as before')
         else:
             stamp.unlink(missing_ok=True)
@@ -369,12 +370,18 @@ def main():
             # a split module's functions in content-defined chunks, so an unchanged function's C stays
             # byte-identical and its object comes from the object cache (prepare_wasm2c.stable_units);
             # a release keeps wasm2c's own parts (bigger units, more inlining: the shipped code)
+            parts = units
             if not a.release:
                 units = stable_units(units, work)
                 step('chunks')
+            # what the game's module C is, from the units themselves (split.txt): one unit, wasm2c's
+            # parts (whether wasm2c split it here or the parts were given), or the chunks
+            split = 'chunks' if units != parts else 'one' if len(units) < 2 else 'wasm2c'
             imports = len(rows)
+            headers = sorted(str(p) for p in [*work.glob('*-impl.h'), *(work/'chunks').glob('*.h')]
+                             if split == 'chunks' or p.parent == work)
             stamp.write_text(json.dumps({'key': prepared.hexdigest(), 'units': [str(u) for u in units],
-                                         'imports': imports}))
+                                         'imports': imports, 'split': split, 'headers': headers}))
         # Bounds checks by guard pages: what lies beyond the memory's size is reserved, never
         # committed, so an out-of-bounds access faults and its reporter (guest_memory_*.c) names the
         # guest address and ends the process, as the trap did. WABT's own fault-to-trap handler stays
@@ -531,7 +538,7 @@ def main():
         step('link')
         (work/'failure.log').unlink(missing_ok=True)
         # how the module's C was split: package_release.py packages only a 'wasm2c' (--release) build
-        (out/'split.txt').write_text('one\n' if outputs < 2 else 'wasm2c\n' if a.release else 'chunks\n')
+        (out/'split.txt').write_text(split + '\n')
         host_summary = 'reused host library' if a.host_library else f'{len(host_objects)} {t.key} host objects'
         print(f'PASS: {imports} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
               flush=True)

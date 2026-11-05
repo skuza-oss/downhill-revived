@@ -145,9 +145,10 @@ Measured per platform and step in finding 151. What keeps a rebuild short:
   moves data addresses (new data in the module) still changes every function that uses them.
   `python port/tools/test_wasm2c_chunks.py` checks it. The chunks are for development only: their
   smaller units inline less, and the game ran ~1.5 % slower on the throttled Mi 11i (finding 151).
-  A release build passes `build_host64.py --release` (wasm2c's own parts, the shipped code as
-  before); it writes `split.txt` beside the game, and `package_release.py` packages only a
-  `wasm2c` build (it passes `--release` itself for Windows and Android).
+  A release build passes `build_host64.py --release` (one unit or wasm2c's own parts, the shipped
+  code as before); it writes `split.txt` beside the game (`one`, `wasm2c` or `chunks`; an APK
+  carries it as `assets/dhd-split.txt`), and `package_release.py` and the APK's release check
+  refuse `chunks` (`package_release.py` passes `--release` itself for Windows and Android).
 - Windows builds the module as one unit (`core.c`, about 160 MB of C, one compiler thread, the
   longest step after any change of the core). `build.py -- --num-outputs 8` builds it in chunks
   instead, for a development loop: the same game, but other code (functions are no longer static

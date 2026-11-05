@@ -162,8 +162,9 @@ new non-inlined function in `cdvd.c` (new port code: a new function in the modul
   PGO profile, 4 runs a build in both orders: race start (6400-7300) 69.80 -> 68.69 fields/s
   (-1.6 %), the 9000-14000 window 88.37 -> 87.23 (-1.3 %); the new build was slower in all 8
   pairs, whichever ran first. The chunks stay the development default (Android, Linux, the Mac);
-  `split.txt` beside the game says which C it was built from, and `package_release.py` refuses
-  anything but `wasm2c`.
+  `split.txt` beside the game (in an APK, `assets/dhd-split.txt`) says which C it was built from
+  (`one`, `wasm2c`, `chunks`), and `package_release.py` and the APK's release check refuse
+  `chunks`.
 - The memo files are plain JSON next to the core cache, keyed by content, shared by checkouts;
   each starts again past a size cap (no pruning walk).
 - Android's default job count follows the machine (half its threads, at least 2); the Mac keeps 4

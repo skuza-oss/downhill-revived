@@ -149,6 +149,10 @@ def check_release(apk, name, code, new_signing_key=False):
         import zipfile
         if b'__llvm_prf_cnts' in zipfile.ZipFile(apk).read('lib/arm64-v8a/libmain.so'):
             problems.append('libmain.so is the profile-collecting build (--pgo-generate)')
+        with zipfile.ZipFile(apk) as z:
+            split = z.read('assets/dhd-split.txt').decode().strip() if 'assets/dhd-split.txt' in z.namelist() else 'unknown'
+        if split not in ('one', 'wasm2c'):  # finding 151: the development chunks cost the game ~1.5 %
+            problems.append('libmain.so was built from %s C, not a release build (build_host64.py --release)' % split)
     except (OSError, KeyError, zipfile.BadZipFile) as e:
         problems.append('libmain.so not readable in the APK: %s' % e)
     facts['debuggable'] = 'application-debuggable' in badging
@@ -198,6 +202,12 @@ def project(libs, assets=None):
     icons(PROJECT / 'app' / 'src' / 'main' / 'res')
     if assets:  # files the APK carries as they are (package_release.py: the licence texts)
         shutil.copytree(assets, PROJECT / 'app' / 'src' / 'main' / 'assets')
+    # which C libmain.so was built from (build_host64's split.txt: one, wasm2c, chunks), so a release
+    # check of any APK can refuse the development chunks (finding 151)
+    split = OUT / 'split.txt'
+    if split.exists():
+        (PROJECT / 'app' / 'src' / 'main' / 'assets').mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(split, PROJECT / 'app' / 'src' / 'main' / 'assets' / 'dhd-split.txt')
     jni = PROJECT / 'app' / 'src' / 'main' / 'jniLibs' / 'arm64-v8a'
     jni.mkdir(parents=True)
     for lib in libs:
