@@ -839,6 +839,26 @@ static void log_version(void)
             SDL_GetSystemRAM() / 1024.0);
 }
 
+/* The run before keeps its log (finding 152): an existing dhd.log becomes dhd-previous.log
+   (replacing an older one) just before the game opens a new one, so a crash report survives the
+   next start, which is what a player does first after a crash. Only the dhd.log the game opens
+   itself: a terminal, a console window and the tools' own files and pipes stay as they are. */
+static void log_keep_previous(const char *path)
+{
+    char previous[HOST_PATH_MAX];
+    size_t n = strlen(path);
+    if (n < 4 || n + 10 > sizeof previous) return;
+    snprintf(previous, sizeof previous, "%.*s-previous.log", (int)(n - 4), path);  /* dhd.log -> dhd-previous.log */
+#ifdef _WIN32
+    WCHAR from[HOST_PATH_MAX], to[HOST_PATH_MAX];
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, from, HOST_PATH_MAX) &&
+        MultiByteToWideChar(CP_UTF8, 0, previous, -1, to, HOST_PATH_MAX))
+        MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING);
+#else
+    rename(path, previous);
+#endif
+}
+
 #ifdef _WIN32
 static void console_open(const char *path)
 {
@@ -852,6 +872,7 @@ static void console_open(const char *path)
     } else {
         WCHAR wide[HOST_PATH_MAX];  /* the UTF-8 path as Windows' own */
         if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, HOST_PATH_MAX)) return;
+        log_keep_previous(path);
         if (!_wfreopen(wide, L"w", stderr)) return;
         _wfreopen(wide, L"a", stdout);
         opened = 1;
@@ -870,6 +891,7 @@ static void console_open(const char *path)
     struct stat st;
     if (isatty(STDERR_FILENO) || (fstat(STDERR_FILENO, &st) == 0 && (S_ISFIFO(st.st_mode) || S_ISREG(st.st_mode))))
         return;
+    log_keep_previous(path);
     log_start(path);
 }
 #endif
@@ -878,7 +900,7 @@ static void console_open(const char *path)
    started from a console window or a terminal, there; else (the launcher, Explorer, Finder, a
    desktop's menu, Android) a new dhd.log in DHD_DATA_DIR (the launcher's folder for the player's
    files, port/launcher game.rs), else beside the game (on Android the app's files folder, which
-   stands for it). dhd.exe is a Windows program (/subsystem:windows), so a double-click opens no
+   stands for it); the one before becomes dhd-previous.log (log_keep_previous). dhd.exe is a Windows program (/subsystem:windows), so a double-click opens no
    console window. Before anything prints; once (android_main.c calls it before the game does). */
 void host_console_init(void)
 {

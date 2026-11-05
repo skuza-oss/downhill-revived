@@ -80,7 +80,8 @@ var
   N: String;
 begin
   N := Lowercase(Name);
-  Result := (N = 'dhd.ini') or (N = 'dhd.log') or (N = 'iso-check.txt') or (N = 'launcher.log');
+  Result := (N = 'dhd.ini') or (N = 'dhd.log') or (N = 'dhd-previous.log') or (N = 'iso-check.txt') or
+            (N = 'launcher.log');
 end;
 
 // A name from update-files.txt that may be deleted: a plain file name, never a path or a player's file.
