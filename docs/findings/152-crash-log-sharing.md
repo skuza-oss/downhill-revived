@@ -60,10 +60,63 @@ change.
 
 ## Progress
 
-- [ ] 2026-11-05: finding reserved
+- [x] 2026-11-05: finding reserved
+- [x] 1. `host.c` `log_keep_previous`: dhd.log becomes dhd-previous.log in both `console_open`
+  branches (Windows `MoveFileExW`, POSIX `rename`), only when the game opens dhd.log itself. The
+  launcher's updater (`update.rs` KEEP) and the uninstaller (`windows.iss` IsPlayerFile) count it
+  as a player's file; README, PLAYING.md and the bug report form name it.
+- [x] 2. `LastExit.java` reads `getHistoricalProcessExitReasons` once per process before native
+  code (SetupActivity, and DhdActivity for a USB-controller start that skips it) and writes
+  `files/dhd-exit.txt`; `android_main.c` `quote_last_exit` puts its lines in the new dhd.log as
+  `previous run: ...`. The tombstone (protobuf) summary and the reason rules are plain Java
+  (`CrashReport.java`) with a JVM test (`port/android/test/CrashReportTest.java`, run by
+  `test_disc_image.py`).
+- [x] 3. SetupActivity's dialog (`showClosedUnexpectedly`), once per exit (SharedPreferences
+  `crash-log`/`shown` = the exit's timestamp); Share log keeps the dialog for Play; Back = Play.
+- [x] 4. `LogShare.java` + `LogProvider.java` (not exported, read only, `cache/share/` only,
+  answers OpenableColumns); file `downhill-revived-<version>-log-<date>.txt`.
+- [x] 5. Static shortcut `res/xml/shortcuts.xml` (Share log) on SetupActivity, action
+  `app.downhillrevived.SHARE_LOG`: the share sheet only, no game.
+- [x] 6. `package_release.py --platform android` keeps `DownhillRevived-<version>-android-libmain.debug.so`
+  beside the APK when its GNU build ID is the APK's libmain.so's; `write_sums` leaves out
+  `KEPT_SUFFIXES` (`.map`, `.debug.so`). BUILDING.md "Release steps" and RELEASE-CHECKLIST.md
+  item 7 say how to keep and use them.
+- [x] 2026-11-05 checks: `check.py quick` OK; `test_disc_image.py` (CrashReportTest PASS);
+  `build_apk.py` debug APK built, its manifest has `LogProvider` (exported false,
+  grantUriPermissions) and the `share_log` shortcut on SetupActivity; `build_host64.py` win-x64
+  builds. Not run: the game itself on a desktop (the dhd-previous.log check) or on a phone.
+- [ ] On a phone and a desktop (the lead): the acceptance's crash, dialog, share, shortcut and
+  dhd-previous.log checks.
 
 ## Decisions
 
+- **The crash handler hands the crash on (Android).** host.c's POSIX `crashed` ended with
+  `_exit(3)`: Android then records `REASON_EXIT_SELF` status 3 and writes no tombstone, so item 2
+  had nothing to read. Now, after its report (unchanged) and `host_log_drain`, it calls the handler
+  that was installed before it (on Android debuggerd's, under ART's signal chain), then ends by the
+  signal with the default action (raised twice: ART's chain answers a default action by setting it
+  in the kernel and returning). The system writes its tombstone and records `REASON_CRASH_NATIVE`.
+  A desktop has no handler before ours: `_exit(3)` as before (no macOS crash reporter dialog, no
+  core dumps). EXIT_SELF status 3 and SIGNALED by a crash signal still count as "crashed".
+- **Which log is shared.** The plan said dhd-previous.log, but the dialog runs before the native
+  game, when dhd.log is still the run that crashed. The shared file holds both logs: first the run
+  that ended (dhd.log, or dhd-previous.log when a dhd.log was written since this process started,
+  i.e. the game is running now), then the other; each over 1.75 MB keeps its first 256 KB and last
+  1.5 MB. Above them: the phone, and how the last run ended (dhd-exit.txt).
+- **Low memory and excessive resource use** count only when the game was on the screen
+  (importance <= VISIBLE): Android ends a game left in the background for memory all the time.
+- **"The graphics driver crashed"**: a native crash whose frame #00 is in a GPU driver library
+  (Vulkan loader, Mali, Adreno's libgsl, PowerVR, Xclipse; `CrashReport.DRIVER`).
+- **A stale record** (older than dhd.log's last write by over 5 s) is not about that run:
+  dhd-exit.txt then says Android kept no record.
+- **The shortcut targets SetupActivity** (already exported, the launcher activity) with its own
+  action, so no new exported component; the provider is the only new one and is not exported.
+
 ## Surprises
+
+- The crash report could miss dhd.log on Linux, macOS and Android: `crashed` called `_exit` with
+  the report still in the log pipe (the copying thread dies with the process). It drains first now.
+- `at += length()` in Java reads `at` before `length()` moves it: the JVM test's tombstone caught
+  it (every length-delimited field skipped was off by its length's bytes).
 
 ## Result
