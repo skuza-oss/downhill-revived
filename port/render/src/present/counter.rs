@@ -2,6 +2,19 @@
 use crate::device::Gpu;
 use super::font8x8;
 
+/// The overlay's text texture over the corner of the surface.
+pub(crate) const SHADER: &str = r#"
+@group(0) @binding(0) var image: texture_2d<f32>;
+struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
+@vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
+    let uv = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+    return Out(vec4f(uv * vec2f(2., -2.) + vec2f(-1., 1.), 0., 1.), uv);
+}
+@fragment fn fs(p: Out) -> @location(0) vec4f {
+    return textureLoad(image, vec2i(p.uv * vec2f(128., 22.)), 0);
+}
+"#;
+
 #[derive(Default)]
 pub struct Counter {
     enabled: bool,
@@ -97,17 +110,8 @@ impl Objects {
     }
 
     fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
-        let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("performance counter"), source: wgpu::ShaderSource::Wgsl(r#"
-@group(0) @binding(0) var image: texture_2d<f32>;
-struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
-@vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
-    let uv = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
-    return Out(vec4f(uv * vec2f(2., -2.) + vec2f(-1., 1.), 0., 1.), uv);
-}
-@fragment fn fs(p: Out) -> @location(0) vec4f {
-    return textureLoad(image, vec2i(p.uv * vec2f(128., 22.)), 0);
-}
-"#.into()) });
+        let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("performance counter"),
+                                                                                  source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
         let pipe = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("performance counter"), layout: None,
             vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
