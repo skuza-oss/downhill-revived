@@ -369,11 +369,9 @@ static struct sigaction *crash_before_of(int sig)
 }
 
 /* Fatal signals end the process with the same words the Windows crash report has. The report is
-   drained into dhd.log first (the copying thread dies with the process). When a handler was there
-   before ours (Android's: debuggerd, under ART's signal chain), it gets the crash too and the
-   process then ends by the signal, as without us: the system writes its tombstone and records a
-   native crash, which the next start reads (SetupActivity, finding 152). A desktop has none: exit
-   code 3, as before. */
+   drained into dhd.log first (the copying thread dies with the process). On Android the crash then
+   goes on to the handlers before ours, down to the system's crash dump (below); a desktop exits
+   with code 3, as before. */
 static void crashed(int sig, siginfo_t *info, void *ctx)
 {
     const char *name = sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGILL ? "SIGILL" : "SIGFPE";
@@ -382,6 +380,17 @@ static void crashed(int sig, siginfo_t *info, void *ctx)
     fprintf(stderr, "crash: %s at %016llX in thread %s\n", name,
             (unsigned long long)(uintptr_t)(info ? info->si_addr : NULL), thread);
     fflush(stderr);
+    {
+        /* The report's stack walk probes memory (host_readable): a fault there must reach the
+           probe's handler. The crash's own signal is blocked while this handler runs, and a
+           fault on a blocked signal ends the process at once (no report, no tombstone): seen on
+           the Mi 11i with a crash near the top of the game thread's stack (finding 152). */
+        sigset_t faults;
+        sigemptyset(&faults);
+        sigaddset(&faults, SIGSEGV);
+        sigaddset(&faults, SIGBUS);
+        pthread_sigmask(SIG_UNBLOCK, &faults, NULL);
+    }
     report((const CONTEXT *)ctx);
     {
         void *frames[32];
@@ -391,17 +400,18 @@ static void crashed(int sig, siginfo_t *info, void *ctx)
     peek();
     fflush(stderr);
     host_log_drain();
-    const struct sigaction *before = crash_before_of(sig);
-    if ((before->sa_flags & SA_SIGINFO) && before->sa_sigaction && before->sa_sigaction != crashed) {
-        sigset_t self;
-        before->sa_sigaction(sig, info, ctx);
-        signal(sig, SIG_DFL);
-        sigemptyset(&self);
-        sigaddset(&self, sig);
-        pthread_sigmask(SIG_UNBLOCK, &self, NULL);
-        raise(sig);
-        raise(sig);  /* ART's chain answers a default action by setting it in the kernel and returning */
-    }
+#ifdef __ANDROID__
+    /* The handler that was there before ours gets the crash next: put back, it sees the fault
+       again when the faulting instruction runs again on return (a signal sent with kill is sent
+       again instead). Each handler below does the same with the one before it, down to the
+       system's crash dump (debuggerd), which writes the tombstone and ends the process, so Android
+       records a native crash that the next start reads (finding 152). Calling the handler before
+       ours directly instead lost the dump: guest memory's handler (port/host64) answers a fault
+       that is not its own with the default action. */
+    sigaction(sig, crash_before_of(sig), NULL);
+    if (!info || info->si_code <= 0) raise(sig);  /* delivered once this handler returns */
+    return;
+#endif
     _exit(3);
 }
 #endif

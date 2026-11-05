@@ -90,7 +90,15 @@ static void fault(int sig,siginfo_t *info,void *ctx) {
     struct sigaction dfl; memset(&dfl,0,sizeof dfl);
     dfl.sa_handler=SIG_DFL; sigemptyset(&dfl.sa_mask);
     if (!guest_base || host<guest_base || host-guest_base>=GUEST_SIZE) {
+#ifdef __ANDROID__
+        /* Not ours: the handler before ours (the system's crash dump) gets it, as below, so the
+           crash still ends in a tombstone (finding 152). */
+        sigaction(sig,sig==SIGBUS ? &old_bus : &old_segv,NULL);
+        if (info->si_code<=0) raise(sig);
+        return;
+#else
         sigaction(sig,&dfl,NULL); raise(sig); return;
+#endif
     }
     static const char head[]="host64 memory: access of uncommitted guest address 0x";
     static const char tail[]="\n";
