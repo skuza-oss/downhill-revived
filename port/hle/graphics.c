@@ -139,7 +139,14 @@ int sceGsExecStoreImage(uint32_t packet, uint32_t destination)
     size_t queued = defer && queue && host_fault_guard_here() ? store_bytes(packet) : 0;
     if (queued) {
         if (sync_reads) graphics_settle();
-        if (guard(destination, queued) && host_service_gs_store_image(packet, destination, (uint32_t)queued)) {
+        /* The packet is copied out of PS2 RAM before the destination is guarded: where the OS page
+           is bigger than 4 KB (16 KB on Apple silicon and some Android phones) the guard can cover
+           the packet too, and reading it would fault and settle, unguarding the destination before
+           its read is queued (the game would then read the old bytes). The copy is in the module's
+           own memory, never guarded; the queue takes its words at once. */
+        static uint32_t copy[28] __attribute__((aligned(16)));
+        memcpy(copy, GUEST(packet), sizeof copy);
+        if (guard(destination, queued) && host_service_gs_store_image(GADDR(copy), destination, (uint32_t)queued)) {
             queued_reads = 1;  /* the host consumes FINISH there, as below, and the unmask follows */
             return 0;
         }
