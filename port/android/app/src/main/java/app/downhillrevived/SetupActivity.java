@@ -21,6 +21,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -87,19 +88,24 @@ public class SetupActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        LastExit exit = LastExit.record(this);
+        backdrop();
         if (SHARE_LOG.equals(getIntent().getAction())) {
             sharingOnly = true;
-            backdrop();
-            if (!LogShare.start(this, SHARE)) finish();
+            LogShare.start(this, SHARE, this::finish);
             return;
         }
-        if (exit != null && exit.why != null && LastExit.firstAsk(this, exit)) {
-            backdrop();
-            showClosedUnexpectedly(exit.why);
-            return;
-        }
-        begin();
+        // The exit record is read off the UI thread: a native crash's trace can be megabytes and
+        // slow to come, and a frozen first screen would be Android's "not responding"
+        Context app = getApplicationContext();
+        new Thread(() -> {
+            LastExit exit = LastExit.record(app);
+            boolean ask = exit != null && exit.why != null && LastExit.firstAsk(app, exit);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (ask) showClosedUnexpectedly(exit.why);
+                else begin();
+            });
+        }, "last exit").start();
     }
 
     /** After a run that closed unexpectedly: what happened in a few words, Share log (the dialog
@@ -120,7 +126,7 @@ public class SetupActivity extends Activity {
                 dialog.dismiss();
                 begin();
             });
-            dialog.getButton(Dialog.BUTTON_NEGATIVE).setOnClickListener(v -> LogShare.start(this, SHARE));
+            dialog.getButton(Dialog.BUTTON_NEGATIVE).setOnClickListener(v -> LogShare.start(this, SHARE, null));
         });
         dialog.show();
     }

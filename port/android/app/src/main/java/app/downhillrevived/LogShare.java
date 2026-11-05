@@ -44,20 +44,47 @@ final class LogShare {
         return new File(context.getCacheDir(), "share");
     }
 
-    /** Writes the shared file and opens the share sheet (its result comes to activity's
-     *  onActivityResult with request); false, after saying so, when there is nothing to share or
-     *  the file can't be written. */
-    static boolean start(Activity activity, int request) {
+    /** Writes the shared file on a thread of its own (the logs are megabytes and the exit record's
+     *  trace may be slow to come: never on the UI thread, which would freeze the screen), then
+     *  opens the share sheet on the UI thread (its result comes to activity's onActivityResult
+     *  with request). When there is nothing to share or the file can't be written it says so and
+     *  runs failed (may be null). */
+    static void start(Activity activity, int request, Runnable failed) {
+        Context app = activity.getApplicationContext();
+        new Thread(() -> {
+            Object made;  // the share Intent, or the message for the player
+            try {
+                made = prepare(app);
+            } catch (Throwable e) {
+                made = "The log couldn't be copied (" + e.getMessage() + ").";
+            }
+            final Object result = made;
+            activity.runOnUiThread(() -> {
+                if (activity.isFinishing() || activity.isDestroyed()) return;
+                if (result instanceof Intent) {
+                    try {
+                        activity.startActivityForResult((Intent) result, request);
+                        return;
+                    } catch (ActivityNotFoundException e) {
+                        Toast.makeText(activity, "No app on this phone can share a file.", Toast.LENGTH_LONG).show();
+                    }
+                } else {
+                    Toast.makeText(activity, (String) result, Toast.LENGTH_LONG).show();
+                }
+                if (failed != null) failed.run();
+            });
+        }, "share log").start();
+    }
+
+    /** The shared file written, and the chooser's Intent for it; or the message for the player. */
+    private static Object prepare(Context activity) {
         File files = activity.getFilesDir();
         File log = new File(files, "dhd.log"), previous = new File(files, "dhd-previous.log");
         String exit = LastExit.text(activity);
         long started = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime());
         boolean running = log.isFile() && log.lastModified() >= started;
         File ended = running ? previous : log, other = running ? log : previous;
-        if (!ended.isFile() && !other.isFile() && exit == null) {
-            Toast.makeText(activity, "There is no log yet.", Toast.LENGTH_LONG).show();
-            return false;
-        }
+        if (!ended.isFile() && !other.isFile() && exit == null) return "There is no log yet.";
         String version = version(activity);
         Date now = new Date();
         File dir = folder(activity);
@@ -78,8 +105,7 @@ final class LogShare {
             section(o, other, (running ? "this run, still going (" : "the run before it (") + other.getName() + ")");
         } catch (IOException e) {
             Log.w(TAG, "the shared log can't be written: " + e);
-            Toast.makeText(activity, "The log couldn't be copied (" + e.getMessage() + ").", Toast.LENGTH_LONG).show();
-            return false;
+            return "The log couldn't be copied (" + e.getMessage() + ").";
         }
         Uri uri = LogProvider.uri(out);
         Intent send = new Intent(Intent.ACTION_SEND);
@@ -88,13 +114,7 @@ final class LogShare {
         send.putExtra(Intent.EXTRA_SUBJECT, "Downhill Revived " + version + " log");
         send.setClipData(ClipData.newRawUri(out.getName(), uri));  // the grant reaches the app chosen
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        try {
-            activity.startActivityForResult(Intent.createChooser(send, "Share log"), request);
-            return true;
-        } catch (ActivityNotFoundException e) {
-            Toast.makeText(activity, "No app on this phone can share a file.", Toast.LENGTH_LONG).show();
-            return false;
-        }
+        return Intent.createChooser(send, "Share log");
     }
 
     private static void section(OutputStream o, File log, String title) throws IOException {
