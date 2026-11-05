@@ -54,7 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gen_host64_imports import generate  # noqa: E402
 from host64_census import HOST_UNITS  # noqa: E402
 import objcache  # noqa: E402
-from prepare_wasm2c import check_launcher_exports, module_units, prepare_units  # noqa: E402
+from prepare_wasm2c import check_launcher_exports, module_units, prepare_units, stable_units  # noqa: E402
 DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  # downloaded tools and caches
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -340,6 +340,10 @@ def main():
                 raise ValueError('wasm-rt.h: guard-page support test not found (WABT version changed?)')
             header = header.replace(supported, supported[:-1] + ' || defined(__clang__))')
         (work/'wasm-rt.h').write_text(header)
+        # a split module's functions in content-defined chunks, so an unchanged function's C stays
+        # byte-identical and its object comes from the object cache (prepare_wasm2c.stable_units)
+        units = stable_units(units, work)
+        step('chunks')
         # Bounds checks by guard pages: what lies beyond the memory's size is reserved, never
         # committed, so an out-of-bounds access faults and its reporter (guest_memory_*.c) names the
         # guest address and ends the process, as the trap did. WABT's own fault-to-trap handler stays
@@ -417,23 +421,25 @@ def main():
         inc.append('static const struct { const char *name; const unsigned char *png; unsigned size; } button_pngs[] = {')
         inc += [f'    {{"{p.stem}", button_png_{p.stem}, sizeof button_png_{p.stem}}},' for p in pngs]
         (work/'button_icons.inc').write_text('\n'.join(inc + ['};', '']))
+        # one pool for the host's and the module's C, the biggest units first (the long ones must
+        # not start last); the link keeps the units' own order
+        sources = units + [rt/'wasm-rt-impl.c', work/'imports_gen.c'] + glue(t)
+        host_sources = [] if a.host_library else [ROOT/u for u in host_units(t)]
+        with ThreadPoolExecutor(jobs) as pool:
+            done = {s: pool.submit(compile_one, s, 900 if s in host_sources else 1800)
+                    for s in sorted(sources + host_sources, key=lambda s: -Path(s).stat().st_size)}
+            objects = [done[s].result() for s in sources]
+            host_objects = [done[s].result() for s in host_sources]
+        step('C')
         if a.host_library:
             library = a.host_library.resolve()
             if not library.exists():
                 raise ValueError(f'host library does not exist: {library}')
-            host_objects = []
         else:
-            with ThreadPoolExecutor(jobs) as pool:
-                host_objects = list(pool.map(lambda u: compile_one(ROOT/u, 900), host_units(t)))
             library = work/('host64.lib' if t.windows else 'libhost64.a')
             library.unlink(missing_ok=True)  # ar adds to an archive that is there: a stale member could win
             run([a.llvm/'llvm-lib.exe', '/out:'+str(library), *host_objects] if t.windows else
                 [ar, 'rcs', library, *host_objects])
-        step('host C')
-        sources = units + [rt/'wasm-rt-impl.c', work/'imports_gen.c'] + glue(t)
-        with ThreadPoolExecutor(jobs) as pool:
-            objects = list(pool.map(compile_one, sources))
-        step('module C')
         # rustc's list for the library (checked by rustgs against the target's allow-list)
         rust_libs = [x for x in report['native_static_libs'] if x != '-lc']
         exe = out/t.exe
