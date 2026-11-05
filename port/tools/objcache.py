@@ -361,6 +361,30 @@ def compile(cmd, out, run, extra=(), roots=(), cwd=None, env=None, hit=None):
     return r
 
 
+def tool_output(cmd, src, out, run, roots=()):
+    """A deterministic tool's run from one input file to one output file (the browser build's
+    wasm-opt passes, finding 151): run(cmd) unless an earlier run of the same tool (resolved path,
+    size, mtime, --version), the same arguments (src and out as tokens) and src's same bytes left
+    its output in the cache. Returns what compile() returns."""
+    if not ENABLED:
+        return run(cmd)
+    h = hashlib.sha256(VERSION + b' tool')
+    def part(data):
+        data = _norm(data, _folders(roots))
+        h.update(b'%d:' % len(data)); h.update(data)
+    part(_compiler(cmd[0]))
+    tokens = {os.path.abspath(str(src)): '<in>', os.path.abspath(str(out)): '<out>'}
+    part('\0'.join(tokens.get(os.path.abspath(a), a) for a in map(str, cmd[1:])))
+    part(hashlib.sha256(open(src, 'rb').read()).hexdigest())
+    k = h.hexdigest()
+    if fetch(k, str(out)):
+        return Result()
+    r = run(cmd)
+    if getattr(r, 'returncode', 0) == 0 and os.path.exists(str(out)):
+        store(k, str(out), roots)
+    return r
+
+
 def prune(limit=LIMIT):
     """Drop the least recently used entries until the cache is under 90% of limit."""
     entries = []
