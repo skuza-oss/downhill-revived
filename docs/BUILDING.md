@@ -143,11 +143,16 @@ Measured per platform and step in finding 151. What keeps a rebuild short:
   function whose name hashes to a cut, is named after its first function and declares only what it
   uses, so a changed function changes one chunk and the object cache has the rest. A change that
   moves data addresses (new data in the module) still changes every function that uses them.
-  `python port/tools/test_wasm2c_chunks.py` checks it.
+  `python port/tools/test_wasm2c_chunks.py` checks it. The chunks are for development only: their
+  smaller units inline less, and the game ran ~1.5 % slower on the throttled Mi 11i (finding 151).
+  A release build passes `build_host64.py --release` (wasm2c's own parts, the shipped code as
+  before); it writes `split.txt` beside the game, and `package_release.py` packages only a
+  `wasm2c` build (it passes `--release` itself for Windows and Android).
 - Windows builds the module as one unit (`core.c`, about 160 MB of C, one compiler thread, the
   longest step after any change of the core). `build.py -- --num-outputs 8` builds it in chunks
   instead, for a development loop: the same game, but other code (functions are no longer static
-  to one unit, so fewer are inlined), so a speed measurement or a release uses the default.
+  to one unit, so fewer are inlined), so a speed measurement uses the default and a release
+  `--num-outputs 8 --release`.
 - The core cache's key remembers each input file's hash by its path, size, modification time and
   file id (`DHD_DEVCACHES/dhd-modulecache/file-hashes.json`), so only changed files are read.
 - The browser build's wasm-opt passes keep their output in the object cache by tool, flags and input
@@ -188,8 +193,8 @@ MAJOR * 10000 + MINOR * 100 + PATCH (0.7.7: 707), so it grows with every release
 
 ### macOS (Apple silicon) and Linux (x64)
 
-Each is built on its own machine with the same script, `build_host64.py --target macos-arm64` or
-`--target linux-x64`, then packaged there with `package_release.py --platform mac|linux --game
+Each is built on its own machine with the same script, `build_host64.py --release --target
+macos-arm64` or `--release --target linux-x64`, then packaged there with `package_release.py --platform mac|linux --game
 build/host64-<macos|linux>/dhd64 --elf PATH/SCUS_971.77` (it builds the launcher with
 `build_launcher.py`; the Mac zip's app is signed ad hoc).
 

@@ -230,6 +230,10 @@ def main():
     p.add_argument('--host-library', type=Path, help='reuse an explicitly supplied host library')
     p.add_argument('--jobs', type=int, help="parallel compiles (default: the target's)")
     p.add_argument('--num-outputs', type=int, help='WABT split C output count for .wasm input')
+    p.add_argument('--release', action='store_true',
+                   help="a release build: wasm2c's own split parts, not the chunks (finding 151: the chunks' smaller "
+                        "units cost the game ~1.5 %% on a phone); written in <out>/split.txt, which "
+                        "package_release.py checks")
     p.add_argument('--wabt', type=Path, help="WABT (wasm2c and its runtime; default WABT_DIR, else the target's)")
     p.add_argument('--simde', type=Path, help='SIMDe headers (the wasm SIMD shim; default SIMDE_DIR, else the '
                    "target's)")
@@ -312,7 +316,7 @@ def main():
         # wasm2c, the imports, the prepared and chunked C: made again only when one of their inputs
         # changed (the module, these tools, WABT, the target); every compile's own cache key reads them
         inputs = [wasm] if wasm else sorted({p.resolve() for m in a.module for p in [m, *m.parent.glob('*.h')]})
-        prepared = hashlib.sha256(repr((t.key, outputs, a.fake, str(wabt))).encode())
+        prepared = hashlib.sha256(repr((t.key, outputs, a.fake, str(wabt), a.release)).encode())
         # host_api.h: gen_host64_imports reads it (the glue and its import checks)
         for f in inputs + [Path(__file__), ROOT/'port/tools/prepare_wasm2c.py', ROOT/'port/tools/gen_host64_imports.py',
                            ROOT/'port/host/host_api.h', *([wasm2c] if wasm else []), wabt/'include/wasm-rt.h']:
@@ -363,9 +367,11 @@ def main():
                 header = header.replace(supported, supported[:-1] + ' || defined(__clang__))')
             (work/'wasm-rt.h').write_text(header)
             # a split module's functions in content-defined chunks, so an unchanged function's C stays
-            # byte-identical and its object comes from the object cache (prepare_wasm2c.stable_units)
-            units = stable_units(units, work)
-            step('chunks')
+            # byte-identical and its object comes from the object cache (prepare_wasm2c.stable_units);
+            # a release keeps wasm2c's own parts (bigger units, more inlining: the shipped code)
+            if not a.release:
+                units = stable_units(units, work)
+                step('chunks')
             imports = len(rows)
             stamp.write_text(json.dumps({'key': prepared.hexdigest(), 'units': [str(u) for u in units],
                                          'imports': imports}))
@@ -524,6 +530,8 @@ def main():
                 timeout=900)
         step('link')
         (work/'failure.log').unlink(missing_ok=True)
+        # how the module's C was split: package_release.py packages only a 'wasm2c' (--release) build
+        (out/'split.txt').write_text('one\n' if outputs < 2 else 'wasm2c\n' if a.release else 'chunks\n')
         host_summary = 'reused host library' if a.host_library else f'{len(host_objects)} {t.key} host objects'
         print(f'PASS: {imports} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
               flush=True)

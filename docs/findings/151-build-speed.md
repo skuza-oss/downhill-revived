@@ -157,6 +157,13 @@ new non-inlined function in `cdvd.c` (new port code: a new function in the modul
   making it the default is a separate decision with a speed run (numbers below).
 - Content-defined chunks rather than a hash bucket per function: neighbours in the module stay
   together (callers and callees of one source unit), as in wasm2c's own split.
+- **Release builds keep wasm2c's own split** (`build_host64.py --release`, 2026-11-05): the chunks
+  cost the game on the phone. Throttled Mi 11i (t612), 2x, unlocked, the same core (b0a6059a) and
+  PGO profile, 4 runs a build in both orders: race start (6400-7300) 69.80 -> 68.69 fields/s
+  (-1.6 %), the 9000-14000 window 88.37 -> 87.23 (-1.3 %); the new build was slower in all 8
+  pairs, whichever ran first. The chunks stay the development default (Android, Linux, the Mac);
+  `split.txt` beside the game says which C it was built from, and `package_release.py` refuses
+  anything but `wasm2c`.
 - The memo files are plain JSON next to the core cache, keyed by content, shared by checkouts;
   each starts again past a size cap (no pruning walk).
 - Android's default job count follows the machine (half its threads, at least 2); the Mac keeps 4

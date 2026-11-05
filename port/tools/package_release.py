@@ -616,10 +616,20 @@ def source_changes():
     return r.stdout.splitlines()
 
 
+def require_release_split(out):
+    """Stop unless build_host64.py built the game in out with --release: wasm2c's own split parts.
+    Its development chunks (finding 151) cost the game ~1.5 % on a phone; split.txt says which."""
+    split = out / 'split.txt'
+    kind = split.read_text().strip() if split.exists() else 'unknown (no split.txt)'
+    if kind != 'wasm2c':
+        sys.exit("%s: the game was built with %s C, not a release build: build_host64.py --release "
+                 "(wasm2c's own parts); not packaged" % (out, kind))
+
+
 def build_exe(wasm, sdl_lib, sdl_include, jobs):
     """dhd64.exe from the module, by build_host64.py on the Rust renderer, under WORK."""
     cmd = [sys.executable, str(ROOT / 'port' / 'tools' / 'build_host64.py'), str(wasm),
-           '--num-outputs', '8', '--sdl-lib', str(sdl_lib), '--sdl-include', str(sdl_include),
+           '--num-outputs', '8', '--release', '--sdl-lib', str(sdl_lib), '--sdl-include', str(sdl_include),
            '--out', str(WORK), '--jobs', str(jobs)]
     print('building: ' + ' '.join(cmd), flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
@@ -754,6 +764,7 @@ def android_release(a, platform, out, manifest_path, page):
         apk = build_apk.OUT / build_apk.release_apk_name(name)
     if not apk.is_file():
         sys.exit('%s: no such APK' % apk)
+    require_release_split(build_apk.OUT)
     problems, facts = build_apk.check_release(apk, name, code, a.new_signing_key)
     elf = a.elf.read_bytes()
     rsp = build_apk.OUT / 'work' / 'link.rsp'   # build_host64.py's: the Rust library linked into libmain.so
@@ -907,6 +918,7 @@ def main():
             import sdl3  # noqa: E402
             sdl_lib, sdl_include = sdl3.build(sdl3.X64_TARGET)
         exe = build_exe(wasm, Path(sdl_lib).resolve(), Path(sdl_include).resolve(), a.jobs)
+    require_release_split(exe.parent)
     data = exe.read_bytes()
     if binary_kind(data) != platform.kind:
         sys.exit('%s is not a %s executable (%s)' % (exe, platform.kind, binary_kind(data) or 'unknown'))
