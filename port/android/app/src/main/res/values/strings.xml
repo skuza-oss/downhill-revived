@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Downhill Revived</string>
+    <!-- The icon's long-press shortcut (res/xml/shortcuts.xml, finding 152) -->
+    <string name="share_log">Share log</string>
+    <string name="share_log_long">Share the game\'s log</string>
 </resources>

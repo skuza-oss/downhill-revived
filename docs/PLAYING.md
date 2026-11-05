@@ -147,6 +147,12 @@ installed copy):
 | `dhd.ini` | Your settings, one `key = value` per line. The game adds your disc image; the PC SETTINGS page (OPTIONS) writes the rest. |
 | `saves\card1\` | Memory card 1, made at the first save. Copy this folder to back up your saves. |
 | `dhd.log` | Messages from the last run. Attach it when you report a problem. |
+| `dhd-previous.log` | The log of the run before. If you started the game again after a crash, the crash is in this one. |
+
+On Android the logs are inside the app, where no file manager reaches them: after the game closes
+unexpectedly it offers **Share log** at the next start, and a long press on its icon has
+**Share log** at any time. Both open Android's share sheet with one text file; nothing is sent
+unless you pick an app there.
 
 Moving from the zip to the installer: copy `dhd.ini` and `saves\` from the zip's folder into
 `%APPDATA%\Downhill Revived` (start the installed game once first, so the folder exists).

@@ -79,7 +79,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   output), controllers through SDL only (findings 059, 134), touch controls on phones
   (`port/hle/touch.c`, finding 141).
 - dhd.log on every platform, with `perf:` lines on speed and what limits it (finding 129) and
-  `net:` lines online (finding 135). What the game can detect goes in the log.
+  `net:` lines online (finding 135). What the game can detect goes in the log. Each start keeps
+  the one before as dhd-previous.log; on Android the log says how the run before ended (Android's
+  exit record and tombstone), and a crash dialog and the icon's shortcut share it (finding 152).
 
 ## What players get
 
