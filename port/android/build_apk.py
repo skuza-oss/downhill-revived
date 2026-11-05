@@ -145,6 +145,12 @@ def check_release(apk, name, code, new_signing_key=False):
     facts['native_code'] = native.group(1).strip() if native else ''
     if facts['native_code'] != "'arm64-v8a'":
         problems.append('native code %r, not arm64-v8a only' % facts['native_code'])
+    try:  # a profile-collecting library (--pgo-generate) has the counters' section; a release never does
+        import zipfile
+        if b'__llvm_prf_cnts' in zipfile.ZipFile(apk).read('lib/arm64-v8a/libmain.so'):
+            problems.append('libmain.so is the profile-collecting build (--pgo-generate)')
+    except (OSError, KeyError, zipfile.BadZipFile) as e:
+        problems.append('libmain.so not readable in the APK: %s' % e)
     facts['debuggable'] = 'application-debuggable' in badging
     if facts['debuggable']:
         problems.append('debuggable')
