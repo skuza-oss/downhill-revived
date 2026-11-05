@@ -834,9 +834,9 @@ static void *log_copy(void *unused)
     return NULL;
 }
 
-static void log_start(const char *path)
+static void log_start(const char *path, const char *mode)
 {
-    if (!(log_file = host_os_fopen(path, "w"))) return;
+    if (!(log_file = host_os_fopen(path, mode))) return;
     if (pipe(log_pipe) != 0) { log_pipe[0] = -1; return; }
     fflush(stdout), fflush(stderr);
     dup2(log_pipe[1], STDOUT_FILENO);
@@ -878,20 +878,25 @@ static void log_version(void)
 /* The run before keeps its log (finding 152): an existing dhd.log becomes dhd-previous.log
    (replacing an older one) just before the game opens a new one, so a crash report survives the
    next start, which is what a player does first after a crash. Only the dhd.log the game opens
-   itself: a terminal, a console window and the tools' own files and pipes stay as they are. */
-static void log_keep_previous(const char *path)
+   itself: a terminal, a console window and the tools' own files and pipes stay as they are.
+   The mode to open the new dhd.log with: "w", or "a" when an existing dhd.log could not be moved
+   (dhd-previous.log held open by a viewer on Windows, say), so the run before is never erased. */
+static const char *log_keep_previous(const char *path)
 {
     char previous[HOST_PATH_MAX];
     size_t n = strlen(path);
-    if (n < 4 || n + 10 > sizeof previous) return;
+    if (n < 4 || n + 10 > sizeof previous) return "a";
     snprintf(previous, sizeof previous, "%.*s-previous.log", (int)(n - 4), path);  /* dhd.log -> dhd-previous.log */
 #ifdef _WIN32
     WCHAR from[HOST_PATH_MAX], to[HOST_PATH_MAX];
-    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, from, HOST_PATH_MAX) &&
-        MultiByteToWideChar(CP_UTF8, 0, previous, -1, to, HOST_PATH_MAX))
-        MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING);
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, from, HOST_PATH_MAX) ||
+        !MultiByteToWideChar(CP_UTF8, 0, previous, -1, to, HOST_PATH_MAX))
+        return "a";
+    if (MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING)) return "w";
+    return GetLastError() == ERROR_FILE_NOT_FOUND ? "w" : "a";
 #else
-    rename(path, previous);
+    if (rename(path, previous) == 0) return "w";
+    return errno == ENOENT ? "w" : "a";
 #endif
 }
 
@@ -908,8 +913,8 @@ static void console_open(const char *path)
     } else {
         WCHAR wide[HOST_PATH_MAX];  /* the UTF-8 path as Windows' own */
         if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, HOST_PATH_MAX)) return;
-        log_keep_previous(path);
-        if (!_wfreopen(wide, L"w", stderr)) return;
+        const char *mode = log_keep_previous(path);
+        if (!_wfreopen(wide, mode[0] == 'a' ? L"a" : L"w", stderr)) return;
         _wfreopen(wide, L"a", stdout);
         opened = 1;
     }
@@ -927,8 +932,7 @@ static void console_open(const char *path)
     struct stat st;
     if (isatty(STDERR_FILENO) || (fstat(STDERR_FILENO, &st) == 0 && (S_ISFIFO(st.st_mode) || S_ISREG(st.st_mode))))
         return;
-    log_keep_previous(path);
-    log_start(path);
+    log_start(path, log_keep_previous(path));
 }
 #endif
 
