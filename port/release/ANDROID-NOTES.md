@@ -22,6 +22,11 @@ the screen; tap the line to open the release page, then install the new APK over
 settings and saves stay. Nothing is downloaded by the game itself. If you installed a test build before this release, uninstall it first: Android refuses an update signed
 by another key, and uninstalling deletes the app's files (the disc copy and your saves).
 
+**If the game closes unexpectedly**, it says so at the next start and offers **Share log**: send
+the file to us (a GitHub issue or Discord) and we can see what happened. Long-press the app's icon
+for **Share log** at any time, even when the game closes before anything shows. Nothing is sent
+unless you pick an app in Android's share sheet.
+
 **Not on phones yet.** Online play comes to phones later, once they run fast enough and the touch
 controls are ready; the Android build has no ONLINE menu.
 

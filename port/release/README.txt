@@ -117,6 +117,8 @@ An update or uninstall never deletes them.
 - dhd.ini       your settings, one "key = value" per line.
 - saves\card1\  memory card 1: your saves. Copy this folder to back them up.
 - dhd.log       messages from the last run. Attach it when you report a problem.
+- dhd-previous.log  the log of the run before. If you started the game again after a crash,
+                    the crash is in this one.
 
 Updates
 The launcher looks for a newer version when it opens and shows Update in its footer. Update

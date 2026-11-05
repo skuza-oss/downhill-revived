@@ -40,6 +40,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The icon's long-press shortcut: Share log, without starting the game (finding 152) -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
 
         <activity android:name=".DhdActivity"
@@ -56,5 +58,12 @@
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
         </activity>
+
+        <!-- The shared log's file for the app the player shares it with (LogShare.java, finding
+             152): not exported, read only through the share's grant; our own, no androidx -->
+        <provider android:name=".LogProvider"
+            android:authorities="app.downhillrevived.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

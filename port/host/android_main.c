@@ -4,7 +4,8 @@
    every platform, once the game's own main runs (port/host64/launcher.c, compiled as
    dhd_launcher_main). Before it:
    - the log (stdout, stderr) goes to logcat (tag DownhillRevived) and to dhd.log (host.c's
-     host_console_init, the log of every platform, started here before anything prints);
+     host_console_init, the log of every platform, started here before anything prints; the one
+     before becomes dhd-previous.log), which first says how the run before ended (quote_last_exit);
    - the app's files folder (internal storage, SDL_GetAndroidInternalStoragePath) stands for the
      folder of dhd.exe: host_exe_path names dhd64 there, so dhd.ini, saves, dhd.log and the disc
      image's copy live there;
@@ -123,6 +124,24 @@ static int disc_ready(const char *path)
     }
 }
 
+/* How the run before ended, as Android recorded it (the reason, and a native crash's tombstone in
+   short): the app's Java side writes dhd-exit.txt before the game starts (LastExit.java, finding
+   152); each of its lines goes into the new dhd.log as "previous run: ...", so a log always says how
+   the one before it (now dhd-previous.log) ended. */
+static void quote_last_exit(void)
+{
+    char path[1200], line[600];
+    snprintf(path, sizeof path, "%sdhd-exit.txt", files);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        size_t n = strlen(line);
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
+        fprintf(stderr, "previous run: %s\n", line);
+    }
+    fclose(f);
+}
+
 /* dhd.ini names the copy of the disc (host_disc_ready checks it in the core; DHD_ISO would skip
    that check): a dhd.ini without a disc gets it (dhd_settings, which starts a missing file). The
    player defaults apply as soon as dhd.ini exists (host_settings_load). */
@@ -144,6 +163,7 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
     snprintf(exe, sizeof exe, "%sdhd64", files);
     host_console_init();
     fprintf(stderr, "android: Downhill Revived in %s\n", files);
+    quote_last_exit();
     {   /* a profile-collecting build (build_host64.py --target android-arm64 --pgo-generate): its counters go to the
            files folder (host_exit writes them; the process ends with _exit, so no atexit runs) */
         extern void __llvm_profile_set_filename(const char *) __attribute__((weak));

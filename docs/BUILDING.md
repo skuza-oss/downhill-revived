@@ -378,6 +378,15 @@ folder and update from the zips (the AppImage from its own entry). None is code-
 Android (finding 143): `package_release.py --platform android` with the release key's
 `DHD_ANDROID_*` variables builds, checks and adds the `-android-experimental.apk` (latest.json's
 `android` entry); every run writes `SHA256SUMS`. The release page gets `port/release/ANDROID-NOTES.md`.
+Crash symbols (finding 152): `build/release/` also holds files that are kept, never published (not
+in `SHA256SUMS`): the Windows link map `-win.map` (`crash_stack.py` reads dhd.log's crash stacks
+with it) and `-android-libmain.debug.so`, the APK's `libmain.so` before stripping (copied only when
+its GNU build ID is the APK's). Keep both with the release's other files; a player's
+`libmain.so+0x...` frame (dhd.log's backtrace, or the tombstone a shared log carries) is named by
+`llvm-symbolizer --obj=DownhillRevived-<version>-android-libmain.debug.so 0xOFFSET` or
+`llvm-addr2line -fe ... 0xOFFSET` (the NDK's `toolchains/llvm/prebuilt/*/bin`). The macOS and Linux
+binaries keep their symbol tables, so their backtraces name functions already. Publish exactly
+the files `SHA256SUMS` lists, plus `SHA256SUMS`.
 Since 0.7.0 the mac and linux zips are `-mac-experimental.zip` and `-linux-experimental.zip`
 (finding 093, "0.7.0": built and checked on all three, published 2026-10-28; Linux is linked on
 Ubuntu 22.04 and runs on glibc 2.35 and later, which `package_release.py` checks).

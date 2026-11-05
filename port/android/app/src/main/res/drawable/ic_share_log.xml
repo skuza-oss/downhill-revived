@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Share log shortcut's icon (finding 152): three linked dots in the launcher's ember on its
+     ground colour (values/colors.xml) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="@color/ground"
+        android:pathData="M24,0A24,24 0,1 1,24 48A24,24 0,1 1,24 0Z" />
+    <path
+        android:strokeColor="@color/ember"
+        android:strokeWidth="2.5"
+        android:pathData="M17,24L31,16M17,24L31,32" />
+    <path
+        android:fillColor="@color/ember"
+        android:pathData="M31,16m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0M17,24m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0M31,32m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>

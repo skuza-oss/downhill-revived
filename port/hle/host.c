@@ -359,7 +359,21 @@ static LONG WINAPI crashed(EXCEPTION_POINTERS *e)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 #else
-/* Fatal signals end the process with the same words the Windows crash report has. */
+void host_log_drain(void);  /* below: the log's last lines reach the file */
+
+/* What SIGSEGV, SIGBUS, SIGILL and SIGFPE had before crashed (host_init). */
+static struct sigaction crash_before[4];
+static struct sigaction *crash_before_of(int sig)
+{
+    return &crash_before[sig == SIGSEGV ? 0 : sig == SIGBUS ? 1 : sig == SIGILL ? 2 : 3];
+}
+
+/* Fatal signals end the process with the same words the Windows crash report has. The report is
+   drained into dhd.log first (the copying thread dies with the process). When a handler was there
+   before ours (Android's: debuggerd, under ART's signal chain), it gets the crash too and the
+   process then ends by the signal, as without us: the system writes its tombstone and records a
+   native crash, which the next start reads (SetupActivity, finding 152). A desktop has none: exit
+   code 3, as before. */
 static void crashed(int sig, siginfo_t *info, void *ctx)
 {
     const char *name = sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGILL ? "SIGILL" : "SIGFPE";
@@ -376,6 +390,18 @@ static void crashed(int sig, siginfo_t *info, void *ctx)
     }
     peek();
     fflush(stderr);
+    host_log_drain();
+    const struct sigaction *before = crash_before_of(sig);
+    if ((before->sa_flags & SA_SIGINFO) && before->sa_sigaction && before->sa_sigaction != crashed) {
+        sigset_t self;
+        before->sa_sigaction(sig, info, ctx);
+        signal(sig, SIG_DFL);
+        sigemptyset(&self);
+        sigaddset(&self, sig);
+        pthread_sigmask(SIG_UNBLOCK, &self, NULL);
+        raise(sig);
+        raise(sig);  /* ART's chain answers a default action by setting it in the kernel and returning */
+    }
     _exit(3);
 }
 #endif
@@ -709,10 +735,10 @@ void host_init(void)
     sa.sa_sigaction = crashed;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGFPE, &sa, NULL);
+    sigaction(SIGSEGV, &sa, crash_before_of(SIGSEGV));
+    sigaction(SIGBUS, &sa, crash_before_of(SIGBUS));
+    sigaction(SIGILL, &sa, crash_before_of(SIGILL));
+    sigaction(SIGFPE, &sa, crash_before_of(SIGFPE));
     game_thread = pthread_self();
     game_thread_set = 1;
     host_thread_name("game");
@@ -839,6 +865,26 @@ static void log_version(void)
             SDL_GetSystemRAM() / 1024.0);
 }
 
+/* The run before keeps its log (finding 152): an existing dhd.log becomes dhd-previous.log
+   (replacing an older one) just before the game opens a new one, so a crash report survives the
+   next start, which is what a player does first after a crash. Only the dhd.log the game opens
+   itself: a terminal, a console window and the tools' own files and pipes stay as they are. */
+static void log_keep_previous(const char *path)
+{
+    char previous[HOST_PATH_MAX];
+    size_t n = strlen(path);
+    if (n < 4 || n + 10 > sizeof previous) return;
+    snprintf(previous, sizeof previous, "%.*s-previous.log", (int)(n - 4), path);  /* dhd.log -> dhd-previous.log */
+#ifdef _WIN32
+    WCHAR from[HOST_PATH_MAX], to[HOST_PATH_MAX];
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, from, HOST_PATH_MAX) &&
+        MultiByteToWideChar(CP_UTF8, 0, previous, -1, to, HOST_PATH_MAX))
+        MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING);
+#else
+    rename(path, previous);
+#endif
+}
+
 #ifdef _WIN32
 static void console_open(const char *path)
 {
@@ -852,6 +898,7 @@ static void console_open(const char *path)
     } else {
         WCHAR wide[HOST_PATH_MAX];  /* the UTF-8 path as Windows' own */
         if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, HOST_PATH_MAX)) return;
+        log_keep_previous(path);
         if (!_wfreopen(wide, L"w", stderr)) return;
         _wfreopen(wide, L"a", stdout);
         opened = 1;
@@ -870,6 +917,7 @@ static void console_open(const char *path)
     struct stat st;
     if (isatty(STDERR_FILENO) || (fstat(STDERR_FILENO, &st) == 0 && (S_ISFIFO(st.st_mode) || S_ISREG(st.st_mode))))
         return;
+    log_keep_previous(path);
     log_start(path);
 }
 #endif
@@ -878,7 +926,7 @@ static void console_open(const char *path)
    started from a console window or a terminal, there; else (the launcher, Explorer, Finder, a
    desktop's menu, Android) a new dhd.log in DHD_DATA_DIR (the launcher's folder for the player's
    files, port/launcher game.rs), else beside the game (on Android the app's files folder, which
-   stands for it). dhd.exe is a Windows program (/subsystem:windows), so a double-click opens no
+   stands for it); the one before becomes dhd-previous.log (log_keep_previous). dhd.exe is a Windows program (/subsystem:windows), so a double-click opens no
    console window. Before anything prints; once (android_main.c calls it before the game does). */
 void host_console_init(void)
 {

@@ -11,9 +11,15 @@
 // android_main.c checks the copy again (and the game's data, in the core), and keeps its own picker
 // for a start without this screen (a controller plugged in starts DhdActivity directly).
 // Its look follows the launcher's (port/launcher/ui/style.css): the same colours, 8 dp corners.
+// Before all that (finding 152): how the run before ended (LastExit, before any native code), and
+// when it closed unexpectedly, once per such end, a dialog that offers its log (Share log, LogShare)
+// before Play. The icon's long-press shortcut "Share log" (res/xml/shortcuts.xml, action SHARE_LOG)
+// starts this activity only to share the log, without the game.
 package app.downhillrevived;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.Cursor;
@@ -54,7 +60,9 @@ public class SetupActivity extends Activity {
     private static final String TAG = "DownhillRevived";
     /** The copy's name in the files folder (android_main.c's DISC_NAME). */
     private static final String DISC_NAME = "SCUS-97177.iso";
-    private static final int PICK = 1;
+    private static final int PICK = 1, SHARE = 2;
+    /** The shortcut's action: share the log, no game. */
+    static final String SHARE_LOG = "app.downhillrevived.SHARE_LOG";
     /** Room kept free besides the copy (saves, dhd.log, the texture cache). */
     private static final long MARGIN = 128L << 20;
     /** The temporary files of the copy jobs running in this process (Copy.temp's names): a new
@@ -73,9 +81,52 @@ public class SetupActivity extends Activity {
     /** The copy job this screen shows, null before the first; only its posts reach the screen. */
     private volatile Copy job;
 
+    /** Started by the shortcut: the share sheet only, then this activity ends. */
+    private boolean sharingOnly;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        LastExit exit = LastExit.record(this);
+        if (SHARE_LOG.equals(getIntent().getAction())) {
+            sharingOnly = true;
+            hideBars();
+            if (!LogShare.start(this, SHARE)) finish();
+            return;
+        }
+        if (exit != null && exit.why != null && LastExit.firstAsk(this, exit)) {
+            hideBars();
+            showClosedUnexpectedly(exit.why);
+            return;
+        }
+        begin();
+    }
+
+    /** After a run that closed unexpectedly: what happened in a few words, Share log (the dialog
+     *  stays for Play after the share sheet) and Play; Back plays too. */
+    private void showClosedUnexpectedly(String why) {
+        final AlertDialog dialog = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Downhill Revived closed unexpectedly last time")
+                .setMessage(why + "\n\nSharing the log helps get it fixed: it says what happened.")
+                .setPositiveButton("Play", null)
+                .setNegativeButton("Share log", null)
+                .create();
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.setOnCancelListener(d -> begin());
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(Dialog.BUTTON_POSITIVE).setTextColor(EMBER);
+            dialog.getButton(Dialog.BUTTON_NEGATIVE).setTextColor(LILAC);
+            dialog.getButton(Dialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                dialog.dismiss();
+                begin();
+            });
+            dialog.getButton(Dialog.BUTTON_NEGATIVE).setOnClickListener(v -> LogShare.start(this, SHARE));
+        });
+        dialog.show();
+    }
+
+    /** The first start's screens, or the game when the disc's copy is there. */
+    private void begin() {
         if (new File(getFilesDir(), DISC_NAME).isFile()) {
             startGame();
             return;
@@ -219,6 +270,10 @@ public class SetupActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == SHARE) {  // back from the share sheet: the shortcut's start ends, the dialog stays
+            if (sharingOnly) finish();
+            return;
+        }
         if (request != PICK || result != RESULT_OK || data == null || data.getData() == null) return;
         chosen = data.getData();
         Log.i(TAG, "disc image chosen: " + chosen);

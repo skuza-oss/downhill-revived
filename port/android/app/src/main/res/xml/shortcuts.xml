@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The icon's long-press menu (finding 152): Share log opens the share sheet with the game's log
+     (SetupActivity's SHARE_LOG start, LogShare.java) without starting the game, for a phone where
+     the game closes before anything on the screen can help. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="share_log"
+        android:enabled="true"
+        android:icon="@drawable/ic_share_log"
+        android:shortcutShortLabel="@string/share_log"
+        android:shortcutLongLabel="@string/share_log_long">
+        <intent
+            android:action="app.downhillrevived.SHARE_LOG"
+            android:targetPackage="app.downhillrevived"
+            android:targetClass="app.downhillrevived.SetupActivity" />
+    </shortcut>
+</shortcuts>
