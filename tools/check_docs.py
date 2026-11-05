@@ -47,8 +47,11 @@ OTHER_PROJECTS = {'docs/p2s-savestates.md'}  # Pedroj-64/DownHill-Port-PC, findi
 
 
 def tracked():
-    out = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True).stdout.decode('utf-8', 'replace')
-    return [p for p in out.split('\0') if p]
+    r = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True)
+    files = [p for p in r.stdout.decode('utf-8', 'replace').split('\0') if p]
+    if r.returncode or not files:  # not a repository, safe.directory: checking nothing must not pass
+        sys.exit('check_docs: git ls-files failed: %s' % r.stderr.decode('utf-8', 'replace').strip())
+    return files
 
 
 def main():

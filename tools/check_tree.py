@@ -59,7 +59,10 @@ ALLOW = {
 
 
 def git(*args):
-    return subprocess.run(['git', *args], cwd=ROOT, capture_output=True).stdout
+    r = subprocess.run(['git', *args], cwd=ROOT, capture_output=True)
+    if r.returncode:  # not a repository, safe.directory: checking nothing must not pass
+        sys.exit('check_tree: git %s failed: %s' % (' '.join(args), r.stderr.decode('utf-8', 'replace').strip()))
+    return r.stdout
 
 
 def content(path, staged):
