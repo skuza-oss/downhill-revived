@@ -128,6 +128,37 @@ refreshed). Several checkouts building at once can take turns: with `DHD_BUILD_S
 place (`~/scoop/apps/llvm/current/bin`). `build_host64.py` names the Visual Studio and Windows SDK
 folders it uses (MSVC 14.51, SDK 10.0.26100.0) at its top.
 
+### Build times
+
+Measured per platform and step in finding 151. What keeps a rebuild short:
+
+- `build_host64.py` prints each step's time as it ends (`step SDL3`, `Rust library`, `wasm2c`,
+  `prepare C`, `chunks`, `C`, `link`) and a `steps:` line at the end; the object cache prints its
+  hits and misses.
+- The module's C from wasm2c, prepared and cut into chunks, is made again only when the module, the
+  tools that make it, WABT or the target changed (`build/<target>/prepared.json`): a rebuild after a
+  host, Rust or renderer change skips it (`module C as before`).
+- A split module (`--num-outputs` above 1: Android's default 8, and the C the Mac and Linux builds
+  take) is cut into content-defined chunks (`prepare_wasm2c.stable_units`): a chunk ends after a
+  function whose name hashes to a cut, is named after its first function and declares only what it
+  uses, so a changed function changes one chunk and the object cache has the rest. A change that
+  moves data addresses (new data in the module) still changes every function that uses them.
+  `python port/tools/test_wasm2c_chunks.py` checks it.
+- Windows builds the module as one unit (`core.c`, about 160 MB of C, one compiler thread, the
+  longest step after any change of the core). `build.py -- --num-outputs 8` builds it in chunks
+  instead, for a development loop: the same game, but other code (functions are no longer static
+  to one unit, so fewer are inlined), so a speed measurement or a release uses the default.
+- The core cache's key remembers each input file's hash by its path, size, modification time and
+  file id (`DHD_DEVCACHES/dhd-modulecache/file-hashes.json`), so only changed files are read.
+- The browser build's wasm-opt passes keep their output in the object cache by tool, flags and input
+  (`objcache.tool_output`).
+- Android compiles with half the machine's threads by default (chunks are small; wasm2c's own parts
+  needed 2). With `--pgo-use`, the profile is part of every object's key, so a second build with the
+  same profile and core is all hits. A profile stays useful across core changes: clang applies a
+  function's counts only while the function is unchanged (its control-flow hash), so the changed
+  functions build as without PGO and the rest keep theirs. Record a new one when the hot code (EE,
+  VU, GS) changed, and at least once per release (finding 146).
+
 ### Android (arm64 APK)
 
 `python port/android/build_apk.py --wasm build/wasm/dhd_core.wasm` builds `libmain.so` with
@@ -168,7 +199,11 @@ build/host64-<macos|linux>/dhd64 --elf PATH/SCUS_971.77` (it builds the launcher
   naming a folder that holds WABT's `include/` and `share/`; `--simde` (or `SIMDE_DIR`) names SIMDe.
   `DHD_VUTEXT` names `vutext.bin` when the checkout has no `assets/`. An 8 GB Mac builds with 4
   jobs (the target's default). The first `cargo` run needs the network once
-  (`CARGO_NET_OFFLINE=false cargo fetch --locked` in `port/render`).
+  (`CARGO_NET_OFFLINE=false cargo fetch --locked` in `port/render`). Set `DHD_OBJCACHE_DIR` there
+  too: off Windows the object cache is off without it (a Mac rebuild with no change then compiles
+  everything again). If every link fails with `ld: tapi error ... unknown architecture` (the
+  command-line tools' newest SDK is newer than their `ld`), point the build at Xcode's SDK:
+  `export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)`.
 - Linux (or WSL): clang, lld, CMake, Ninja, and the X11, Wayland and PipeWire/PulseAudio/ALSA
   development packages SDL3 finds; WABT in `/opt/wabt`. The Rust library is built by `rustgs.py` on
   the machine, or in WSL without cargo by the Windows side through WSL's interop. The launcher needs
@@ -189,11 +224,14 @@ dirs go to `DHD_CARGO_DIR`, else `~/.cache/dhd-cargo`.
 `port/tools/sdl3.py`, which `package_release.py` runs, provides SDL3 as a static library, so
 `dhd.exe` stays one file:
 
-- it downloads `SDL3-3.4.18.tar.gz` from SDL's GitHub release into `build/downloads/` and checks
-  its SHA-256 (pinned in the script; any other file is refused), so later builds need no network;
+- it downloads `SDL3-3.4.18.tar.gz` from SDL's GitHub release into `DHD_DEVCACHES/downloads/` and
+  checks its SHA-256 (pinned in the script; any other file is refused), so later builds, in any
+  checkout, need no network;
 - it builds with CMake + Ninja + clang for `x86_64-pc-windows-msvc`, the static C runtime, only the
   window, audio, joystick, gamepad, HIDAPI and event parts, into `build/port/sdl3/3.4.18-x86_64/`
-  (a few minutes, once per checkout).
+  (a few minutes), and keeps the library and its headers in `DHD_DEVCACHES/dhd-sdl3/` under the
+  recipe and the compiler: another checkout copies them instead of building SDL again (finding 151).
+  The macOS, Linux and Android builds of SDL are kept the same way.
 
 To change the version, update `VERSION` and `SHA256` in `sdl3.py` together (the hash of the
 release's `.tar.gz` as GitHub lists it). `python port/tools/sdl3.py` builds it alone.
