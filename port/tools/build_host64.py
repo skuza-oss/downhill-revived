@@ -313,15 +313,18 @@ def main():
         # changed (the module, these tools, WABT, the target); every compile's own cache key reads them
         inputs = [wasm] if wasm else sorted({p.resolve() for m in a.module for p in [m, *m.parent.glob('*.h')]})
         prepared = hashlib.sha256(repr((t.key, outputs, a.fake, str(wabt))).encode())
+        # host_api.h: gen_host64_imports reads it (the glue and its import checks)
         for f in inputs + [Path(__file__), ROOT/'port/tools/prepare_wasm2c.py', ROOT/'port/tools/gen_host64_imports.py',
-                           *([wasm2c] if wasm else []), wabt/'include/wasm-rt.h']:
+                           ROOT/'port/host/host_api.h', *([wasm2c] if wasm else []), wabt/'include/wasm-rt.h']:
             prepared.update(hashlib.sha256(Path(f).read_bytes()).digest())
         stamp = work/'prepared.json'
         try:
             old = json.loads(stamp.read_text())
         except (OSError, ValueError):
             old = {}
-        if old.get('key') == prepared.hexdigest() and all(Path(u).exists() for u in old['units']):
+        made = [work/n for n in ('core.h', 'wasm-rt.h', 'imports_gen.c', 'exports_gen.h')]
+        if (old.get('key') == prepared.hexdigest() and isinstance(old.get('units'), list) and 'imports' in old
+                and all(Path(u).exists() for u in old['units']) and all(p.exists() for p in made)):
             units, imports = [Path(u) for u in old['units']], old['imports']
             step('module C as before')
         else:
