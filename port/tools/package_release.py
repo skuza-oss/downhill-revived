@@ -43,6 +43,8 @@ name; never in the repository) or takes a ready one (--apk), and puts it in the 
 DownhillRevived-<version>-android-experimental.apk, with latest.json's "android" entry (the game's
 update notice reads it, port/host/android_update.c; launchers ignore the key). The APK carries
 LICENSE.txt and THIRD-PARTY-NOTICES.txt (with the Rust crates linked into libmain.so) as assets.
+--pgo-use PROFDATA builds libmain.so with that merged phone profile (build_apk.py's --pgo-use;
+finding 146: record one at least once per release).
 Checked: build_apk.check_release (one signer, the release certificate build_apk.RELEASE_CERT_SHA256
 unless --new-signing-key, not debuggable, version, arm64-v8a only), every file in
 it as the zips' are (game data names and bytes, servers, local paths), libmain.so's version and
@@ -758,7 +760,7 @@ def android_release(a, platform, out, manifest_path, page):
         (texts / 'THIRD-PARTY-NOTICES.txt').write_bytes(lf((RELEASE / 'THIRD-PARTY-NOTICES.txt').read_bytes().rstrip()
                                                           + b'\n\n' + notices.encode('utf-8')))
         cmd = [sys.executable, str(ROOT / 'port' / 'android' / 'build_apk.py'), '--release', '--wasm', str(a.wasm.resolve()),
-               '--jobs', str(a.jobs), '--assets', str(texts)] + (['--new-signing-key'] if a.new_signing_key else [])
+               '--jobs', str(a.jobs), '--assets', str(texts)] + (['--new-signing-key'] if a.new_signing_key else [])             + (['--pgo-use', str(a.pgo_use.resolve())] if a.pgo_use else [])
         print('building: ' + ' '.join(cmd), flush=True)
         if subprocess.run(cmd).returncode:
             sys.exit('build_apk.py --release failed')
@@ -858,11 +860,17 @@ def main():
     ap.add_argument('--elf', type=Path, default=ROOT / 'iso' / 'SCUS_971.77', help='your retail ELF, for the game-data scan')
     ap.add_argument('--no-installer', action='store_true', help='only the zip: no Windows installer, AppImage or DMG')
     ap.add_argument('--apk', type=Path, help='android: a ready build_apk.py --release APK (default: build it)')
+    ap.add_argument('--pgo-use', type=Path, metavar='PROFDATA',
+                    help="android: build libmain.so with this merged profile (build_apk.py's --pgo-use)")
     ap.add_argument('--new-signing-key', action='store_true',
                     help='android: a deliberate key change: accept a signer other than build_apk.RELEASE_CERT_SHA256')
     ap.add_argument('--sums', action='store_true', help='only write SHA256SUMS again in the release folder')
     a = ap.parse_args()
     platform = PLATFORMS[a.platform]
+    if a.pgo_use and (platform.key != 'android' or a.apk or a.merge or a.sums):
+        sys.exit('--pgo-use is for building the APK: --platform android without --apk, --merge or --sums')
+    if a.pgo_use and not a.pgo_use.is_file():
+        sys.exit('%s: no such profile' % a.pgo_use)
     version = header_version()
     if a.version and a.version != version:
         sys.exit('--version %s, but port/include/version.h says %s (the exe reports that one); bump the header '
