@@ -85,6 +85,14 @@ void perf_present_wait(double seconds)
     if (seconds > 0) atomic_fetch_add_explicit(&present_wait_ns, (uint64_t)(seconds * 1e9), memory_order_relaxed);
 }
 
+/* DHD_TIMELINE's per-field rows (graphics_timeline.h, finding 156): the render thread's own waits
+   so far (the next field, its pacing) and its time inside the present, in seconds. */
+void perf_render_waits(double out[2])
+{
+    out[0] = atomic_load_explicit(&self_wait_ns[T_RENDER], memory_order_relaxed) * 1e-9;
+    out[1] = atomic_load_explicit(&present_wait_ns, memory_order_relaxed) * 1e-9;
+}
+
 /* ---- present.c's view of the window and the game ---- */
 
 static SDL_AtomicInt window_state;  /* bit 0: in front; the rest counts the changes */
