@@ -1,8 +1,9 @@
 ## Android (experimental)
 
 `DownhillRevived-<version>-android-experimental.apk` is the game for Android phones and tablets.
-It is experimental: it runs well on fast phones, slower ones may not hold 60 fps, and the touch
-controls are new.
+It is experimental: recent phones hold 60 fps at 2x resolution, slower ones (and 4x) may not.
+Play with the touch controls (Classic pad or Thumb zones, tilt steering if you like: OPTIONS >
+SETTINGS > Touch Controls) or a controller.
 
 **What you need**
 - An arm64 phone or tablet with Android 11 or later and Vulkan (most phones since 2018).

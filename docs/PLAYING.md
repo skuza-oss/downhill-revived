@@ -22,7 +22,8 @@ What works today:
   frame.
 - **Higher resolution and widescreen.** Internal resolution 1x to 8x (or matched to the window).
   Widescreen at the monitor's shape (16:9, 21:9 or any other) is Hor+: a wider view with the same
-  vertical framing, and the HUD, menus and 2D screens keep their shape. Windowed, borderless and
+  vertical framing, and the HUD, menus and 2D screens keep their shape; loading cards and movies
+  fill the screen too (the movie at its own shape, the sides blurred). Windowed, borderless and
   exclusive fullscreen. A new install starts borderless at 2x in widescreen, at the monitor's
   resolution.
 - **The movies play**: the intro, the attract loop and OPTIONS > VIDEO CLIPS, decoded with
@@ -59,10 +60,11 @@ What works today:
 - **Keyboard play**: a whole race on the keyboard, with gradual steering; letters go by their
   place on the keyboard, so AZERTY and QWERTZ work too (see [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
+- **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
+  or Thumb zones, tilt steering if you like), or a controller. No online races on phones yet.
 
 Known gaps:
 
-- Movies are shown 4:3 in widescreen, as on the PS2.
 - The 2-4 player split screens have not been checked in widescreen.
 - Online races have been tested with two games (PC and Mac) and up to nine scripted players, not
   yet with ten people on ten PCs.
@@ -105,6 +107,13 @@ as a non-Steam game from Desktop Mode. Your files go to `~/.local/share/downhill
 `$XDG_DATA_HOME/downhill-revived`). The zip (`-linux-experimental.zip`) stays a portable folder
 and needs WebKitGTK 4.1 from your distribution (`libwebkit2gtk-4.1-0`, already there with GNOME).
 Neither is signed.
+
+**Android** (experimental, arm64, Android 11 or later with Vulkan):
+`DownhillRevived-<version>-android-experimental.apk`. Open it on the phone and allow installs
+from your browser or file manager when Android asks; the app is not on Google Play. At the first
+start choose your `.iso`; it is copied into the app once (a few GB). Install a new release's APK
+over the old one: your settings and saves stay. The release page's Android section has the
+details and the signing certificate.
 
 Then:
 
@@ -257,4 +266,4 @@ Each key has a `DHD_*` environment variable (`scale` is `DHD_SCALE`, `server` is
 - A reasonably modern CPU: the PS2's vector units are run on the CPU.
 - Or, experimental: a Mac with Apple silicon (M1 or later) on macOS 11 or later; or 64-bit Linux
   with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and later), a Vulkan
-  driver and WebKitGTK 4.1 for the launcher.
+  driver and WebKitGTK 4.1 for the launcher; or an arm64 Android 11 phone or tablet with Vulkan.

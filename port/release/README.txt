@@ -14,6 +14,7 @@ What you need
   WebKitGTK 4.1 from your distribution: libwebkit2gtk-4.1-0, already there with GNOME).
   The Mac and Linux builds are experimental: they may have problems the Windows build doesn't.
   Please report them with your dhd.log.
+  There is also an experimental Android build (an .apk on the release page), without online play.
 - Your own dump of the Downhill Domination USA disc (SCUS-97177) as an .iso file. Other regions
   and modified images are refused.
 
@@ -142,9 +143,9 @@ A server of your own can keep an older version playing (its MIN_VERSION setting)
 update_url at your own latest.json, or set auto_update = off.
 
 Known gaps
-- Movies are shown 4:3 in widescreen, as on the PS2.
 - The 2-4 player split screens have not been checked in widescreen.
-- Online races have been tested with two players, not yet with four people on four PCs.
+- Online races have been tested with two games (PC and Mac) and up to nine scripted players,
+  not yet with ten people on ten PCs.
 
 Source code, building and bug reports: see the project's repository.
 Licence: GPL-3.0-or-later (LICENSE.txt). Third-party notices: THIRD-PARTY-NOTICES.txt.
