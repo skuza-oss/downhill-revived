@@ -34,8 +34,10 @@ reads (port/launcher/src-tauri/src/update.rs, finding 054): {"version", "url", "
 there (--merge adds the entries of another machine's). Publish the zips and latest.json, with every
 platform in it, as assets of the GitHub release tagged v<version>. Every run (and --merge) also
 writes SHA256SUMS beside them: the SHA-256 of each release file there (DownhillRevived-<version>-*
-but the link map, and latest.json), as sha256sum prints them; after copying another machine's
-files in, --sums writes it again.
+but the symbols, and latest.json), as sha256sum prints them; after copying another machine's
+files in, --sums writes it again. The symbols (KEPT_SUFFIXES: the Windows link map, Android's
+libmain.debug.so) stay beside the release files and are kept with them, never published: they
+name the code addresses of players' crash reports (finding 152).
 
 Android (finding 143, experimental): --platform android builds the release APK with
 port/android/build_apk.py --release from --wasm (signed with the key the DHD_ANDROID_* variables
@@ -49,6 +51,10 @@ Checked: build_apk.check_release (one signer, the release certificate build_apk.
 unless --new-signing-key, not debuggable, version, arm64-v8a only), every file in
 it as the zips' are (game data names and bytes, servers, local paths), libmain.so's version and
 its absolute paths and servers as the game's.
+Kept beside it, not published: DownhillRevived-<version>-android-libmain.debug.so, build_host64.py's
+libmain.so before its symbols were stripped, when its GNU build ID is the APK's libmain.so's
+(dhd.log's backtrace and Android's tombstone give libmain.so+offsets; llvm-symbolizer
+--obj=that-file 0xOFFSET or llvm-addr2line -fe that-file 0xOFFSET name them; finding 152).
 
 The Windows zip holds one folder, DownhillRevived-<version>, with:
   DownhillRevived.exe      the launcher (port/launcher, finding 093; built by build_launcher.py): settings,
@@ -731,14 +737,43 @@ def names_server_or_path(content, settings):
         s.lower() in content.lower() for s in FORBIDDEN + sorted(server_strings(settings))))
 
 
+# Release files kept beside the published ones, never published (not in SHA256SUMS): the symbols that
+# name the code addresses of players' crash reports (finding 152)
+KEPT_SUFFIXES = ('.map', '.debug.so')
+
+
 def write_sums(folder, version):
     """SHA256SUMS in folder: every release file of version there (DownhillRevived-<version>-*, but the
-    link map, which is kept, not published) and latest.json, as `sha256sum` prints them."""
+    symbols, KEPT_SUFFIXES, which are kept, not published) and latest.json, as `sha256sum` prints them."""
     names = sorted(p.name for p in folder.glob('DownhillRevived-%s-*' % version)
-                   if p.is_file() and p.suffix != '.map') + (['latest.json'] if (folder / 'latest.json').exists() else [])
+                   if p.is_file() and not p.name.endswith(KEPT_SUFFIXES)) + (['latest.json'] if (folder / 'latest.json').exists() else [])
     (folder / 'SHA256SUMS').write_text(''.join('%s  %s\n' % (hashlib.sha256((folder / n).read_bytes()).hexdigest(), n)
                                                for n in names), encoding='utf-8', newline='\n')
     return names
+
+
+def gnu_build_id(data):
+    """An ELF file's GNU build ID in hex (its NT_GNU_BUILD_ID note: name size 4, a descriptor of 8 to
+    64 bytes, type 3, "GNU"), '' without one."""
+    m = re.search(rb'\x04\x00\x00\x00([\x08-\x40])\x00\x00\x00\x03\x00\x00\x00GNU\x00', data)
+    return data[m.end():m.end() + m.group(1)[0]].hex() if m else ''
+
+
+def keep_android_symbols(apk_lib, out):
+    """build_host64.py's unstripped libmain.debug.so beside the release APK out, as
+    DownhillRevived-<version>-android-libmain.debug.so, when its build ID is apk_lib's (the APK's
+    libmain.so: --apk may name an APK of another build); the path kept, or None."""
+    debug = ROOT / 'build' / 'android' / 'libmain.debug.so'
+    wanted = gnu_build_id(apk_lib)
+    if not wanted or not debug.is_file() or gnu_build_id(debug.read_bytes()) != wanted:
+        print('  note: no libmain.debug.so with build ID %s; native crash frames of this APK can\'t be named'
+              % (wanted or '(none)'))
+        return None
+    kept = out.with_name(out.name.replace('-experimental.apk', '-libmain.debug.so'))
+    shutil.copyfile(debug, kept)
+    print('  symbols %s (build ID %s; keep it, never publish it: it names the libmain.so+0x... frames of '
+          'players\' crash reports)' % (kept, wanted))
+    return kept
 
 
 def android_release(a, platform, out, manifest_path, page):
@@ -803,6 +838,8 @@ def android_release(a, platform, out, manifest_path, page):
         sys.exit('%s is not fit to publish:\n  %s' % (apk, '\n  '.join(problems[:40])))
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(apk, out)
+    with zipfile.ZipFile(out) as z:
+        keep_android_symbols(z.read('lib/arm64-v8a/libmain.so'), out)
     apk_hash = hashlib.sha256(out.read_bytes()).hexdigest()
     url = (a.base_url.rstrip('/') + '/' + out.name if a.base_url
            else '%s/download/v%s/%s' % (RELEASES, a.version, out.name))
