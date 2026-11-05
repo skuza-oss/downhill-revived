@@ -237,7 +237,8 @@ def main():
         release_env()
     libs = [OUT / 'lib' / 'arm64-v8a' / n for n in ('libmain.so', 'libSDL3.so')]
     wasm = a.wasm or (ROOT / 'build' / 'wasm' / 'dhd_core.wasm')
-    if a.wasm or not all(p.exists() for p in libs):
+    # an explicit native option always builds: the libraries left by an earlier build lack it
+    if a.wasm or a.pgo_generate or a.pgo_use or a.line_tables or not all(p.exists() for p in libs):
         r = subprocess.run([sys.executable, str(ROOT / 'port' / 'tools' / 'build_host64.py'), '--target', 'android-arm64',
                             str(wasm)] + (['--jobs', str(a.jobs)] if a.jobs else []) + (['--debug'] if a.line_tables else []) +
                            (['--pgo-generate'] if a.pgo_generate else []) +
