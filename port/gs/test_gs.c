@@ -310,9 +310,88 @@ static void upload_fuzz(void)
     upload_fast.sync_range = upload_slow.sync_range = NULL;
 }
 
+/* The strip fast path (gs_feed's packed_strip, finding 146) against the qword-at-a-time path:
+   the same triangles in the same order and the same state after, for random PACKED strip tags
+   (2 to 5 registers, ADC skips, batches over 256 vertices, any split of the input). upload_fast
+   takes the fast path (draw_strip set), upload_slow the plain one. */
+enum { STRIP_LOG = 8192 };
+static GsVertex strip_log[2][STRIP_LOG * 3];
+static unsigned strip_logged[2], strip_batches;
+
+static void strip_note(Gs *g, const GsVertex *v)
+{
+    unsigned k = g == &upload_slow;
+    if (strip_logged[k] < STRIP_LOG) memcpy(&strip_log[k][strip_logged[k] * 3], v, 3 * sizeof *v);
+    strip_logged[k]++;
+}
+
+static void strip_draw(Gs *g, unsigned prim, const GsVertex *v, unsigned count)
+{
+    CHECK(prim == 4 && count == 3);
+    strip_note(g, v);
+}
+
+static void strip_batch(Gs *g, unsigned prim, const GsVertex *list, unsigned count, const uint8_t *drawn)
+{
+    CHECK(prim == 4 && count >= 3 && count <= 258);
+    strip_batches++;
+    for (unsigned i = 0; i + 2 < count; i++)
+        if (drawn[i]) strip_note(g, list + i);
+}
+
+static void strips(void)
+{
+    static const struct { uint32_t regs; unsigned nreg; } lists[] = {
+        {0x512, 3},     /* ST, RGBAQ, XYZ2 */
+        {0xC1, 2},      /* RGBAQ, XYZF2 */
+        {0xD213, 4},    /* UV, RGBAQ, ST, XYZF3 */
+        {0x51321, 5},   /* RGBAQ, ST, UV, RGBAQ, XYZ2: too long for the fast path */
+    };
+    static uint32_t words[(1 + 700 * 5) * 4];
+    unsigned random = 0x5EED, differing = 0;
+#define RND (random = random * 1664525u + 1013904223u, random >> 8)
+    for (unsigned trial = 0; trial < 64; trial++) {
+        unsigned which = trial % 4, nreg = lists[which].nreg, loops = 1 + RND % 700, n = 4;
+        words[0] = loops | 0x8000; words[1] = nreg << 28 | 1u << 14 | 4u << 15;  /* PRE, PRIM = triangle strip */
+        words[2] = lists[which].regs; words[3] = 0;
+        for (unsigned l = 0; l < loops; l++)
+            for (unsigned r = 0; r < nreg; r++, n += 4) {
+                for (unsigned i = 0; i < 4; i++) { unsigned low = RND; words[n + i] = low ^ RND << 16; }
+                if (r == nreg - 1) words[n + 3] = (words[n + 3] & ~0x8000u) | (RND % 8 == 0 ? 0x8000u : 0);
+            }
+        strip_logged[0] = strip_logged[1] = 0;
+        for (int pass = 0; pass < 2; pass++) {
+            Gs *g = pass ? &upload_slow : &upload_fast;
+            gs_reset(g);
+            g->draw = strip_draw; g->draw_strip = pass ? NULL : strip_batch;
+            unsigned split = random;
+            for (unsigned done = 0; done < n;) {
+                unsigned take = trial & 1 ? n : 1 + (split = split * 1664525u + 1013904223u) % 4000;
+                if (take > n - done) take = n - done;
+                gs_feed(g, 2, words + done, take);
+                done += take;
+            }
+        }
+        Gs *a = &upload_fast, *b = &upload_slow;
+        unsigned logged = strip_logged[0] < STRIP_LOG ? strip_logged[0] : STRIP_LOG;
+        if (strip_logged[0] != strip_logged[1] || memcmp(strip_log[0], strip_log[1], logged * 3 * sizeof (GsVertex)) ||
+            memcmp(&a->vertex, &b->vertex, sizeof a->vertex) || a->vertex_count != b->vertex_count ||
+            memcmp(a->vertices, b->vertices, a->vertex_count * sizeof *a->vertices) ||
+            a->strip_parity != b->strip_parity || a->kicks != b->kicks || a->adc_skips != b->adc_skips ||
+            a->vram_epoch != b->vram_epoch || memcmp(a->reg, b->reg, sizeof a->reg) ||
+            memcmp(a->path, b->path, sizeof a->path))
+            differing++;
+    }
+#undef RND
+    CHECK(differing == 0 && strip_batches > 64);
+    upload_fast.draw = upload_slow.draw = NULL;
+    upload_fast.draw_strip = NULL;
+    printf("strip fast path: 64 tags, %u batches, %u differing\n", strip_batches, differing);
+}
+
 int main(void)
 {
-    swizzles(); gif(); gif_staging(); palette(); upload_fuzz();
+    swizzles(); gif(); gif_staging(); palette(); upload_fuzz(); strips();
     uint32_t pixels[16]; unsigned w = 0, h = 0;
     gs_priv_write(&gs, GS_PMODE, 2);
     gs_priv_write(&gs, GS_DISPFB2, 1 | 1 << 9 | UINT64_C(63) << 32 | UINT64_C(31) << 43);

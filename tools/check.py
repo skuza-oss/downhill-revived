@@ -28,7 +28,8 @@ def steps(tier, jobs):
                     ('test_runtime', [PY, 'port/tools/test_runtime.py'], ROOT)]
     port = quick + [('build_game', [PY, 'port/tools/build.py', '--no-core'] + j, ROOT),
                     ('net_tests', [PY, 'port/net/build_tests.py'], ROOT),
-                    ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT)]
+                    ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT),
+                    ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT)]
     matching = [('configure', [PY, 'tools/configure.py'], ROOT),
                 ('ninja', [PY, '-m', 'ninja'] + j, ROOT),
                 ('check_image', [PY, 'tools/check_image.py', 'build/dhd.elf'], ROOT)]
