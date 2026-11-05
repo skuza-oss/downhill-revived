@@ -12,6 +12,12 @@
    Windows also samples scheduled CPU cycles for game/vu/gs/native (columns in millions of
    cycles, NOT milliseconds). They help distinguish work from descheduling, but are not
    context-switch traces and cannot by themselves distinguish changes in CPU frequency.
+   The render thread ("native"): its CPU ms, its own waits (the next field, pacing) and its time in
+   the present (port/gs/perf_log.c); the GPU: frames whose timestamps arrived in the field, their
+   GPU ms (the passes' sum) and their spans (first pass's start to last pass's end; on Apple GPUs,
+   whose passes overlap, the sum overcounts and the span is the bound to read) from dhdr_perf_read:
+   one frame in 8, every frame with DHD_GPU_TIMES (finding 156). Per field the GPU columns are
+   lumpy (the readback lands a few frames late): sum them over a window.
    bench_vsync calls graphics_timeline at every field of the window; at its end the medians and
    means go to stderr ("bench timeline:" lines) and, with a path, one CSV row per field. */
 #if !defined(GRAPHICS_QUEUE_TEST) || defined(GS_QUEUE_TEST)
@@ -20,10 +26,12 @@
 enum { TL_EE_VU, TL_EE_GS, TL_EE_FULL, TL_VU_IDLE, TL_VU_FULL, TL_GS_IDLE,
        TL_EE_CYCLES, TL_VU_CYCLES, TL_GS_CYCLES, TL_NATIVE_CYCLES,
        TL_EE_CPU, TL_VU_CPU, TL_GS_CPU,
-       TL_EE_SPIN, TL_EE_PARK, TL_VU_SPIN, TL_VU_PARK, TL_GS_SPIN, TL_GS_PARK, TL_COUNT };
+       TL_EE_SPIN, TL_EE_PARK, TL_VU_SPIN, TL_VU_PARK, TL_GS_SPIN, TL_GS_PARK,
+       TL_NATIVE_CPU, TL_NATIVE_WAIT, TL_PRESENT, TL_GPU_FRAMES, TL_GPU_MS, TL_GPU_SPAN, TL_COUNT };
 static const char *const tl_names[TL_COUNT] = {"ee_wait_vu", "ee_wait_gs", "ee_ring_full", "vu_idle", "vu_gs_full",
                                               "gs_idle", "ee_mcycles", "vu_mcycles", "gs_mcycles", "native_mcycles", "ee_cpu_ms", "vu_cpu_ms", "gs_cpu_ms",
-                                              "ee_spin", "ee_park", "vu_spin", "vu_park", "gs_spin", "gs_park"};
+                                              "ee_spin", "ee_park", "vu_spin", "vu_park", "gs_spin", "gs_park",
+                                              "native_cpu_ms", "native_wait", "present_wait", "gpu_frames", "gpu_ms", "gpu_span_ms"};
 static int tl_on = -1;
 /* One role per host thread: EE=0, VU=1, GS=2. */
 static _Thread_local unsigned tl_role;
@@ -116,9 +124,19 @@ void graphics_timeline(int phase, unsigned field, double wall_seconds)
     extern unsigned host_thread_cpu(const char **names, double *seconds, unsigned max);
     double seconds[16];
     threads = host_thread_cpu(names, seconds, 16);
-    for (unsigned i = 0; i < threads; i++)
+    for (unsigned i = 0; i < threads; i++) {
         for (unsigned j = 0; j < 3; j++)
             if (!strcmp(names[i], wanted[j])) now[TL_EE_CPU + j] = (int64_t)(seconds[i] * 1e7);
+        if (!strcmp(names[i], "native")) now[TL_NATIVE_CPU] = (int64_t)(seconds[i] * 1e7);
+    }
+    extern void perf_render_waits(double out[2]);  /* port/gs/perf_log.c */
+    double render[2];
+    perf_render_waits(render);
+    now[TL_NATIVE_WAIT] = (int64_t)(render[0] * 1e9), now[TL_PRESENT] = (int64_t)(render[1] * 1e9);
+    extern uint32_t dhdr_perf_read(uint64_t *out, uint32_t count);  /* the Rust renderer */
+    uint64_t gpu[4] = {0};
+    if (dhdr_perf_read(gpu, 4) >= 4)
+        now[TL_GPU_FRAMES] = (int64_t)gpu[1], now[TL_GPU_MS] = (int64_t)gpu[2], now[TL_GPU_SPAN] = (int64_t)gpu[3];
 #endif
     if (phase == 0) {
         fprintf(stderr, "bench timeline: clock field=%u host_s=%.9f\n", field, host_wall_seconds());
@@ -137,7 +155,14 @@ void graphics_timeline(int phase, unsigned field, double wall_seconds)
     }
     double *row = rows + count++ * (TL_COUNT + 1);
     row[0] = wall_seconds * 1e3;
-    for (unsigned i = 0; i < TL_COUNT; i++) row[i + 1] = (double)(now[i] - last[i]) * ((i >= TL_EE_CYCLES && i <= TL_NATIVE_CYCLES) ? 1e-6 : (i >= TL_EE_CPU && i <= TL_GS_CPU) ? 1e-4 : 1e3 / frequency);
+    for (unsigned i = 0; i < TL_COUNT; i++) {
+        double unit = (i >= TL_EE_CYCLES && i <= TL_NATIVE_CYCLES) ? 1e-6               /* M cycles */
+                    : (i >= TL_EE_CPU && i <= TL_GS_CPU) || i == TL_NATIVE_CPU ? 1e-4  /* 100 ns ticks */
+                    : i == TL_GPU_FRAMES ? 1                                           /* frames */
+                    : i >= TL_NATIVE_WAIT ? 1e-6                                       /* ns */
+                    : 1e3 / frequency;                                                 /* the counter */
+        row[i + 1] = (double)(now[i] - last[i]) * unit;
+    }
     memcpy(last, now, sizeof last);
     if (phase != 2) return;
     /* Report: mean and median of each column, then the busy share of each thread. */
@@ -156,9 +181,14 @@ void graphics_timeline(int phase, unsigned field, double wall_seconds)
     for (unsigned i = 0; i < TL_COUNT; i++) fprintf(stderr, " %s=%.3f", tl_names[i], median[i + 1]);
     fputc('\n', stderr);
     double field_ms = mean[0];
-    fprintf(stderr, "bench timeline: busy_ms_per_field game=%.3f vu=%.3f gs=%.3f\n",
+    double gpu_frames = mean[1 + TL_GPU_FRAMES];
+    fprintf(stderr, "bench timeline: busy_ms_per_field game=%.3f vu=%.3f gs=%.3f render=%.3f present_wait=%.3f"
+                    " | gpu_ms_per_timed_frame=%.3f span=%.3f\n",
             field_ms - mean[1 + TL_EE_VU] - mean[1 + TL_EE_GS] - mean[1 + TL_EE_FULL],
-            field_ms - mean[1 + TL_VU_IDLE] - mean[1 + TL_VU_FULL], field_ms - mean[1 + TL_GS_IDLE]);
+            field_ms - mean[1 + TL_VU_IDLE] - mean[1 + TL_VU_FULL], field_ms - mean[1 + TL_GS_IDLE],
+            field_ms - mean[1 + TL_NATIVE_WAIT] - mean[1 + TL_PRESENT], mean[1 + TL_PRESENT],
+            gpu_frames > 0 ? mean[1 + TL_GPU_MS] / gpu_frames : 0.0,
+            gpu_frames > 0 ? mean[1 + TL_GPU_SPAN] / gpu_frames : 0.0);
     /* exe+offset: the site's place in the link map (dhd64.map), whatever the load address */
 #ifdef _WIN32
     extern char __ImageBase[];  /* the linker's: the executable's load address */
