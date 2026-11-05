@@ -76,7 +76,10 @@ def is_binary(data):
 
 
 def url_ok(scheme, host, line, at):
-    if host.startswith(OFFICIAL) or LOCAL_HOSTS.match(host) or EXAMPLE.search(host):
+    # the official host, or it run into the next string ("wss://dhd.skuza.appnamedhd", as
+    # package_release's check): letters after it but no further dot, so dhd.skuza.app.other.org fails
+    official = host.startswith(OFFICIAL) and '.' not in host[len(OFFICIAL):].rstrip('.')
+    if official or LOCAL_HOSTS.match(host) or EXAMPLE.search(host):
         return True
     near = line[at:at + 80]
     if '<' in near or '{' in near or '...' in near:  # a placeholder: wss://dhd-online.<account>.workers.dev
