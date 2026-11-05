@@ -957,7 +957,8 @@ class ObjectSignatures:
         # the answers also depend on the parser and on wasm-objdump: both are in every key, so a
         # branch that changes either one gets its own entries
         import inspect
-        tool = hashlib.sha256(inspect.getsource(object_signatures_uncached).encode() + SECTION.pattern.encode())
+        tool = hashlib.sha256(inspect.getsource(object_signatures_uncached).encode() +
+                              repr([(r.pattern, r.flags) for r in (SECTION, TYPE_LINE, FUNC_LINE)]).encode())
         tool.update(subprocess.run([os.path.join(WABT, 'bin', 'wasm-objdump'), '--version'],
                                    capture_output=True).stdout)
         self.tool = tool.digest()
@@ -1329,9 +1330,13 @@ class FileHashes:
         self.changed = False
 
     def sha256(self, path, lf=False):
+        if lf:  # the checkout's own files are always read: an edit can keep size and mtime (and on
+            # Windows st_ctime is the creation time), and they are a small part of the bytes
+            return hashlib.sha256(open(path, 'rb').read().replace(b'\r\n', b'\n')).digest()
         st = os.stat(path)
-        name = ('lf:' if lf else '') + os.path.normcase(os.path.abspath(path))
-        # ctime too: a copy that puts the old mtime back (scp -p, tar) still changes it
+        name = os.path.normcase(os.path.abspath(path))
+        # ctime too (POSIX: the change time): a copy that puts the old mtime back still changes it.
+        # These are the toolchain trees (WASI sysroot, SIMDe), replaced whole by an update.
         stamp = [st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns]
         entry = self.known.get(name)
         if entry and entry[:4] == stamp:
