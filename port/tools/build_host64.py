@@ -48,6 +48,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gen_host64_imports import generate  # noqa: E402
@@ -195,6 +196,22 @@ def sdl(t, a):
     return Path(lib).resolve(), Path(include).resolve(), libs
 
 
+class Steps:
+    """Each step's wall time, printed as it ends and summed up at the end (docs/BUILDING.md,
+    "Build times")."""
+    def __init__(self):
+        self.times, self.last = [], time.time()
+
+    def __call__(self, name):
+        now = time.time()
+        self.times.append((name, now - self.last))
+        self.last = now
+        print('step %s: %.1f s' % self.times[-1], flush=True)
+
+    def summary(self):
+        return ', '.join('%s %.0f s' % (n, t) for n, t in self.times)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     p.add_argument('module', type=Path, nargs='*')
@@ -250,6 +267,7 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, TMP=str(scratch), TEMP=str(scratch), TMPDIR=str(scratch))
     commands = []
+    step = Steps()
 
     def run(cmd, timeout=180):
         cmd = list(map(str, cmd)); commands.append(cmd)
@@ -273,7 +291,9 @@ def main():
     try:
         # SDL3 and the Rust library first: their checks are quick to fail, the module's C is not
         sdl_lib, sdl_include, sdl_libs = sdl(t, a)
+        step('SDL3')
         report = rust_library(t, work)
+        step('Rust library')
         if a.fake:
             wasm = work / 'fake.wasm'
             run([a.wasi/'bin/clang.exe', '-O2', '-nostdlib', '-ffp-contract=off',
@@ -288,9 +308,11 @@ def main():
             wasm = None
         wasm2c = wabt / 'bin' / ('wasm2c.exe' if os.name == 'nt' else 'wasm2c')
         units = module_units(work, run, wasm2c, wasm, a.module, outputs)
+        step('wasm2c')
         rows, exports = generate(work/'core.h', work, linux=t.posix)
         check_launcher_exports(exports)
         prepare_units(units, work, exact_f32=True)
+        step('prepare C')
         # The module runs on one OS thread only (its fibers; posted jobs and callbacks are drained
         # there, finding 082 W7e), as its shared __stack_pointer global already requires. WABT's
         # call-depth counter is thread-local, which costs a TLS lookup on every wasm call and
@@ -407,9 +429,11 @@ def main():
             library.unlink(missing_ok=True)  # ar adds to an archive that is there: a stale member could win
             run([a.llvm/'llvm-lib.exe', '/out:'+str(library), *host_objects] if t.windows else
                 [ar, 'rcs', library, *host_objects])
+        step('host C')
         sources = units + [rt/'wasm-rt-impl.c', work/'imports_gen.c'] + glue(t)
         with ThreadPoolExecutor(jobs) as pool:
             objects = list(pool.map(compile_one, sources))
+        step('module C')
         # rustc's list for the library (checked by rustgs against the target's allow-list)
         rust_libs = [x for x in report['native_static_libs'] if x != '-lc']
         exe = out/t.exe
@@ -467,10 +491,12 @@ def main():
             run([cc, t.flags[0], '-pthread', '-rdynamic', '-fuse-ld=lld', '-Wl,--gc-sections', *pgo_flags[:1],
                  *objects, library, report['lib'], sdl_lib, *sdl_libs, '-o', exe, *rust_libs, '-ldl', '-lm'],
                 timeout=900)
+        step('link')
         (work/'failure.log').unlink(missing_ok=True)
         host_summary = 'reused host library' if a.host_library else f'{len(host_objects)} {t.key} host objects'
         print(f'PASS: {len(rows)} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
               flush=True)
+        print('steps: ' + step.summary(), flush=True)
         if a.run and not t.android:
             if a.fake:
                 (work/'fixture.txt').write_bytes(b'host64-proof')
