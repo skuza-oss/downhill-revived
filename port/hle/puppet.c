@@ -17,7 +17,7 @@
    snapshot's crash bit rises it starts the same crash, which then plays out here (the bike and
    the thrown body are simulated locally until the respawn).
 
-   Snapshots arrive about 20 a second. Each puppet keeps the last few and shows the remote rider
+   Snapshots arrive about 30 a second. Each puppet keeps the last few and shows the remote rider
    DELAY behind the newest it has (interpolated between the two around that moment, a short
    extrapolation when one is late); the remote clock is estimated from the arrivals. Every PC
    runs at its own frame rate (30-240), so the clocks here are race time in seconds, not ticks:
@@ -27,8 +27,8 @@
    Tests, one PC:
    DHD_PUPPET_RECORD=file   each race step, a snapshot of rider DHD_PUPPET_FROM (default 0)
    DHD_PUPPET_PLAY=file     replay those snapshots onto slot DHD_PUPPET_SLOT (default 1), one in
-                            DHD_PUPPET_RATE (default 3) ticks arriving as it was taken
-   DHD_PUPPET_DELAY=ms      how far behind the newest snapshot (default 100)
+                            DHD_PUPPET_RATE (default 2) ticks arriving as it was taken
+   DHD_PUPPET_DELAY=ms      fixed delay override in ms (otherwise adaptive, 50-150)
    DHD_PUPPET_CAMERA=1      player 0's camera follows the puppet (slot DHD_PUPPET_SLOT, online too)
    DHD_PUPPET_TRACE=file    each race step, each puppet as shown: race time here, the sender's
                             race time it shows, slot, position (text; tests, finding 114)
@@ -100,6 +100,7 @@ typedef struct Puppet {
     int count;
     double offset;           /* remote race time - local race time (s), smoothed over arrivals */
     int have_offset;
+    double arrival, remote_time, interval, jitter;
     uint32_t mirror[PAD_WORDS];  /* the remote virtual pad, as the deltas built it */
     int remote_crash;
     uint32_t sent_pad[PAD_WORDS];  /* owned slots: the pad as last sent */
@@ -136,8 +137,8 @@ static void setup(void)
     const char *s;
     pp.init = 1;
     pp.from = (s = getenv("DHD_PUPPET_FROM")) ? atoi(s) : 0;
-    pp.rate = (s = getenv("DHD_PUPPET_RATE")) && atoi(s) > 0 ? atoi(s) : 3;
-    pp.delay = ((s = getenv("DHD_PUPPET_DELAY")) ? atoi(s) : 100) / 1000.0;
+    pp.rate = (s = getenv("DHD_PUPPET_RATE")) && atoi(s) > 0 ? atoi(s) : 2;
+    pp.delay = (s = getenv("DHD_PUPPET_DELAY")) ? fmax(0, atoi(s)) / 1000.0 : -1;
 
     pp.play_slot = -1;
     if ((s = getenv("DHD_PUPPET_RECORD")) && *s && !(pp.record = fopen(s, "wb")))
@@ -198,6 +199,20 @@ static void feed(int slot, const Snapshot *s)
     if (p->count && s->time < p->ring[p->count - 1].time - 1)
         p->count = 0, p->have_offset = 0;  /* a new race */
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
+    double arrival = RACE_TIME;
+    if (!p->have_offset) {
+        p->interval = 1.0 / 30;
+        p->jitter = 0;
+    } else {
+        double interval = s->time - p->remote_time;
+        double variation = fabs((arrival - p->arrival) - interval);
+        p->jitter += (variation - p->jitter) / 16;
+        /* Lost packets must not teach the estimator a slower publication rate. */
+        if (interval > 0 && interval < 0.075)
+            p->interval += (interval - p->interval) / 16;
+    }
+    p->arrival = arrival;
+    p->remote_time = s->time;
     if (p->count == RING) memmove(p->ring, p->ring + 1, --p->count * sizeof *p->ring);
     p->ring[p->count++] = *s;
     double sample = s->time - RACE_TIME;
@@ -234,7 +249,8 @@ static int wanted(int slot, Snapshot *out)
 {
     Puppet *p = &pp.p[slot];
     if (!p->count) return 0;
-    double t = RACE_TIME + p->offset - pp.delay;
+    double delay = pp.delay >= 0 ? pp.delay : fmin(0.150, fmax(0.050, p->interval + 2 * p->jitter));
+    double t = RACE_TIME + p->offset - delay;
     int i = p->count - 1;
     while (i > 0 && p->ring[i].time > t) i--;
     const Snapshot *a = &p->ring[i], *b = i + 1 < p->count ? &p->ring[i + 1] : NULL;

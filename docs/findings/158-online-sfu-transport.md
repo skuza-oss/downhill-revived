@@ -69,7 +69,7 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 ## Progress
 
 - [x] 2026-11-06: lane plan (this file).
-- [ ] Part 1: 30 snapshots a second, adaptive puppet delay, snapshot-age `net:` lines.
+- [x] Part 1: 30 snapshots a second, adaptive puppet delay, snapshot-age `net:` lines.
 - [ ] Spike: a native Rust client connects to the Realtime SFU, publishes an unordered channel,
       a second client receives it. Library chosen and recorded under Decisions.
 - [ ] Server: SFU sessions and channels from the Durable Object; protocol 3 messages documented
@@ -79,6 +79,25 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - [ ] Measurements recorded (acceptance 3-5).
 
 ## Decisions
+
+- Native library choice: str0m 0.25 with default features disabled and `rust-crypto`.
+  The sans-IO loop fits the existing dedicated transport thread, supports negotiated channels
+  and MaxRetransmits(0), and its RustCrypto/dimpl backend avoids system OpenSSL on all three
+  desktop targets and Android. MIT/Apache-2.0 licences are GPL-compatible. webrtc-rs remains
+  the second candidate but adds an async runtime and shared connection tasks we do not need.
+  Sources: [str0m](https://docs.rs/str0m/0.25.0/str0m/),
+  [Cloudflare channels](https://developers.cloudflare.com/realtime/sfu/features/datachannels/),
+  [connection recipes](https://developers.cloudflare.com/realtime/sfu/get-started/connection-patterns/),
+  [limits](https://developers.cloudflare.com/realtime/sfu/platform/limits/).
+  Current documented DataChannel establishment generates an SFU offer: each client receives
+  only that offer and supplies its own answer to the API. No client SDP goes to another client.
+
+- Part 1 uses an RFC 3550-style EWMA of absolute arrival-spacing variation (gain 1/16).
+  Delay is the estimated interval plus twice jitter, clamped to 50-150 ms; the environment
+  override remains fixed. Arrival age is sampled every network tick per sender and reported
+  with bounded millisecond histograms: p50/p95/p99 and arrival gaps over 100 ms. This measures
+  freshness of the last received snapshot, not end-to-end one-way latency: race clocks are
+  independent. Bin 1001 means over one second. The estimator ignores multi-packet intervals.
 
 - 2026-11-06 (the user): players' IP addresses must never reach other players, so direct
   peer-to-peer is out.
@@ -92,5 +111,9 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   MotorStorm Pacific Rift revival's DME relay.
 
 ## Surprises
+
+- Credentials file is absent. Live SFU spike and measurements wait for the lead's credentials.
+- Existing snapshots encode pad deltas. Before unreliable transport is activated they must
+  become independent snapshots, and stale packets must be rejected before changing the mirror.
 
 ## Result

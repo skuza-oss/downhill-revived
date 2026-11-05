@@ -45,6 +45,9 @@ typedef struct {
     float window_worst;
     double window_start, next_log, joined_at;  /* joined_at 0: not in a room (nothing to log) */
     char logged_colo[8];  /* the room location the log has named */
+    /* Age since the newest STATE arrived, sampled every network tick. Histograms in ms;
+       this is buffer freshness, not one-way latency (peers have no shared race clock). */
+    struct { double arrived; unsigned age[1002], samples, gaps; } snapshot[NET_MAX_SLOTS];
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];

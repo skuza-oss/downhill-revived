@@ -15,7 +15,7 @@
      clock and every PC starts the countdown then, so the GOs land together (the frame clock
      slips by the wait, kernel_pace_slip).
    - In the race this PC's controller rides rider 0, from the grid place the host has for this
-     player. About 20 times a second it sends a snapshot of the riders it runs (its own; the host
+     player. About 30 times a second it sends a snapshot of the riders it runs (its own; the host
      also the AI riders) as STATE frames; the other humans, and on the other PCs the AI, are
      puppets in AI rider slots (each PC at its player's frame rate, 60-240: snapshots carry race
      time, and every count here is of race ticks, 1/60 s fields, or wall time, never of frames;
@@ -276,7 +276,7 @@ enum {
     EVENT_VERSION = 2, EVENT_HIT = 1, EVENT_LOADED = 2, EVENT_SETUP = 3, EVENT_START = 4, EVENT_GO = 5,
     EVENT_FINISH = 6, EVENT_RESULTS = 7, EVENT_PICKUP = 9  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
 };
-enum { SNAPSHOT_TICKS = 3 };  /* a snapshot every 3 race ticks: 20 a second at any frame rate */
+enum { SNAPSHOT_TICKS = 2 };  /* a snapshot every 2 race ticks: 30 a second at any frame rate */
 enum { NRIDERS = 10, START_LEAD_MS = 1500 };
 _Static_assert(2 + NRIDERS * 256 <= NET_FRAME_MAX, "all owned riders fit one STATE frame");
 #define RACE_CLOCK EE32(0x43EEC8)
