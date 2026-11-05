@@ -4,10 +4,12 @@
        test_gamepad mapping      gamepad.c's reading of what SDL reports (no pad needed): each
                                  kind of pad's button symbols, and stick values through the
                                  dead zone (stick.h): small ones ignored, large ones passed,
-                                 the whole travel used (finding 134)
+                                 the whole travel used (finding 134); a state through
+                                 the default and other layouts (finding 157)
    Built by port/tools/test_runtime.py (run there for 0 seconds and with mapping). */
 #include "hle.h"
 #include "stick.h"
+#include "controls_table.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +24,16 @@ int touch_host_event(const union SDL_Event *e) { (void)e; return 0; }  /* touch_
 void touch_host_tick(void) {}
 double host_pacing_period(void) { return 1.0 / 60; }  /* host.c's, for keyboard.c's field timing */
 
+/* A player's pad as the game gets it: the default layout, the game's dead zone. */
+static int read_pad(int player, HostPad *p)
+{
+    GamepadRaw raw;
+    memset(p, 0, sizeof *p);
+    if (!gamepad_raw(player, &raw)) return 0;
+    gamepad_apply(&control_defaults[CONTROL_PAD1], &raw, STICK_GAME, p);
+    return 1;
+}
+
 /* the game thread's side, as the game's: SDL's own loop runs on the main thread (sdl_host_main) */
 static int run(void *arg)
 {
@@ -35,7 +47,7 @@ static int run(void *arg)
     memset(last, 0, sizeof last);
     for (int i = 0; i < 4; i++) {
         HostPad p;
-        if (!gamepad_read(i, &p)) continue;
+        if (!read_pad(i, &p)) continue;
         players++;
         printf("player %d now: buttons %04X left %d,%d right %d,%d\n", i + 1, p.buttons, p.left_x, p.left_y,
                p.right_x, p.right_y);
@@ -44,7 +56,7 @@ static int run(void *arg)
     for (DWORD end = GetTickCount() + (DWORD)(seconds * 1000); GetTickCount() < end; Sleep(10))
         for (int i = 0; i < 4; i++) {
             HostPad p;
-            if (gamepad_read(i, &p) && memcmp(&p, &last[i], sizeof p)) {
+            if (read_pad(i, &p) && memcmp(&p, &last[i], sizeof p)) {
                 printf("player %d: buttons %04X left %3d,%3d right %3d,%3d L2 %3d R2 %3d\n", i + 1, p.buttons,
                        p.left_x, p.left_y, p.right_x, p.right_y, p.pressure[10], p.pressure[11]);
                 gamepad_vibrate(i, (p.buttons & PAD_CROSS) != 0, p.pressure[11]);  /* Cross / R2 rumble */
@@ -64,6 +76,61 @@ static void check(int ok, const char *what, int got, int want)
 {
     if (!ok) failures++;
     printf("%s %s: %d (want %d)\n", ok ? "ok  " : "FAIL", what, got, want);
+}
+
+static int id(const char *name)
+{
+    for (int i = 0; i < CONTROL_PAD_INPUTS; i++)
+        if (!strcmp(control_pad_inputs[i].name, name)) return control_pad_inputs[i].id;
+    return 0;
+}
+
+static HostPad applied(const ControlsLayout *l, const GamepadRaw *raw)
+{
+    HostPad p;
+    memset(&p, 0, sizeof p);
+    gamepad_apply(l, raw, STICK_GAME, &p);
+    return p;
+}
+
+/* A state through layouts (finding 157): the default is the old mapping by position (south
+   Cross, the triggers L2 and R2 with their pressure, the sticks as they are); another layout
+   moves the buttons, swaps and inverts the sticks. */
+static void run_layouts(void)
+{
+    static const struct { const char *input; uint16_t button; } positions[] = {
+        {"south", PAD_CROSS}, {"east", PAD_CIRCLE}, {"west", PAD_SQUARE}, {"north", PAD_TRIANGLE}, {"back", PAD_SELECT},
+        {"start", PAD_START}, {"ls", PAD_L3}, {"rs", PAD_R3}, {"lb", PAD_L1}, {"rb", PAD_R1}, {"dpad_up", PAD_UP},
+        {"dpad_down", PAD_DOWN}, {"dpad_left", PAD_LEFT}, {"dpad_right", PAD_RIGHT}};
+    const ControlsLayout *def = &control_defaults[CONTROL_PAD1];
+    for (size_t i = 0; i < sizeof positions / sizeof *positions; i++) {
+        GamepadRaw raw = {0};
+        raw.buttons = 1u << id(positions[i].input);
+        HostPad p = applied(def, &raw);
+        check(p.buttons == positions[i].button, positions[i].input, p.buttons, positions[i].button);
+    }
+    GamepadRaw raw = {0};
+    raw.buttons = 1u << id("south"), raw.trigger[0] = 20, raw.trigger[1] = 200;
+    raw.axis[0] = 5000, raw.axis[1] = -5000, raw.axis[2] = 32767, raw.axis[3] = -32768;
+    HostPad p = applied(def, &raw);
+    check(p.buttons == (PAD_CROSS | PAD_R2), "a light L2 is no press, R2 is", p.buttons, PAD_CROSS | PAD_R2);
+    check(p.pressure[10] == 20 && p.pressure[11] == 200 && p.pressure[6] == 255 && p.pressure[5] == 0, "pressures", p.pressure[10], 20);
+    check(p.left_x == 147 && p.left_y == 108 && p.right_x == 255 && p.right_y == 0, "sticks", p.left_x, 147);
+    /* another layout: Cross on east, Circle on south and L2 (main, alternate), sticks swapped, the left X inverted */
+    ControlsLayout l = *def;
+    l.input[0][0] = (uint8_t)id("east"), l.input[1][0] = (uint8_t)id("south"), l.input[1][1] = (uint8_t)id("lt");
+    l.input[6][0] = 0;
+    l.swap_sticks = 1, l.invert = CONTROL_INVERT_LX;
+    p = applied(&l, &raw);
+    check(p.buttons == (PAD_CIRCLE | PAD_R2), "south is Circle", p.buttons, PAD_CIRCLE | PAD_R2);
+    check(p.pressure[5] == 255 && p.pressure[10] == 0, "Circle's pressure: the most of its inputs", p.pressure[5], 255);
+    check(p.left_x == 255 && p.left_y == 0 && p.right_x == 108 && p.right_y == 108, "swapped, left X inverted", p.right_x, 108);
+    raw.buttons = 1u << id("east"), raw.trigger[0] = 0;
+    check(applied(&l, &raw).buttons == (PAD_CROSS | PAD_R2), "east is Cross", applied(&l, &raw).buttons, PAD_CROSS | PAD_R2);
+    raw.buttons = 0, raw.trigger[0] = 100;
+    check(applied(&l, &raw).buttons == (PAD_CIRCLE | PAD_R2), "LT is Circle's alternate", applied(&l, &raw).buttons, PAD_CIRCLE | PAD_R2);
+    raw.axis[0] = 0;
+    check(applied(&l, &raw).right_x == 128, "an inverted centre stays the centre", applied(&l, &raw).right_x, 128);
 }
 
 /* What gamepad.c does with what SDL reports: each pad's kind (the button symbols, prompts.c) and a
@@ -121,6 +188,7 @@ static int run_mapping(void)
     }
     check(stick_dead_zone_of("game") == STICK_GAME && stick_dead_zone_of(NULL) == STICK_GAME &&
           stick_dead_zone_of("15") == 15 && stick_dead_zone_of("400") == 95, "settings' values", 1, 1);
+    run_layouts();
     printf("test_gamepad mapping: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

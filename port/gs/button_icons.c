@@ -17,10 +17,19 @@
    L1, L2, R1, R2 = LB, LT, RB, RT / L, ZL, R, ZR. Nothing is written to GS memory: the game, its
    state and the exact renderer see the PS2's icons (the exact renderer draws them too).
 
-   The style is chosen on the game thread (host.c, each field: the setting and player 1's pad) and
-   mixed into the font texture's key (native_core.inc), so a change makes a new copy. */
+   The icons follow player 1's controller layout (dhd.ini pad1, finding 157): a PS2 button's cell
+   shows the icon of the controller button chosen for it (its main one), one of the eight above
+   by its place; with the PlayStation icons the game's own icon of that place (Cross on Circle's
+   place shows Circle's). A button on a place without an icon (the d-pad, Start, a stick pressed)
+   keeps the PS2's icon. Without a controller (the keyboard) the game's icons stay as they are.
+
+   The style and the places are chosen on the game thread (host.c, each field: the setting, player
+   1's pad and layout) as one key (style + 3 x the places, a base-9 digit a cell: 0 its own, else
+   the cell whose place it shows, plus 1), mixed into the font texture's key (native_core.inc), so
+   a change makes a new copy; 0 is the game's own icons, untouched. */
 #include "button_icons.h"
 #include "../render/include/dhd_render.h"  /* dhdr_png_size, dhdr_png_decode */
+#include "../hle/controls_table.h"           /* the layout's targets and controller inputs */
 #include "font_sharp.h"
 #include <SDL3/SDL_atomic.h>
 #include <SDL3/SDL_stdinc.h>
@@ -31,7 +40,46 @@
 
 static SDL_AtomicInt style;
 
-void button_icons_choose(const char *setting, int auto_style)
+/* The game's icon cells, the PS2 button each is (controls_table.h's name), the controller input
+   in its place (the default layout's) and the icon each style puts there. */
+enum { CELLS = 8 };
+static const struct { uint8_t code; const char *target, *place, *xbox, *nintendo; } cells[CELLS] = {
+    {0xAD, "cross", "south", "A", "B"}, {0xAB, "circle", "east", "B", "A"},     /* Cross Circle */
+    {0xA0, "square", "west", "X", "Y"}, {0xA7, "triangle", "north", "Y", "X"},  /* Square Triangle */
+    {0xB2, "l1", "lb", "LB", "L"},      {0xB3, "l2", "lt", "LT", "ZL"},         /* L1 L2 */
+    {0xB9, "r1", "rb", "RB", "R"},      {0xBA, "r2", "rt", "RT", "ZR"},         /* R1 R2 */
+};
+
+static int target_of(const char *name)
+{
+    for (int t = 0; t < CONTROL_BUTTONS; t++)
+        if (!strcmp(control_targets[t].name, name)) return t;
+    return -1;
+}
+
+static const char *input_name(int id)
+{
+    for (int i = 0; i < CONTROL_PAD_INPUTS; i++)
+        if (control_pad_inputs[i].id == id) return control_pad_inputs[i].name;
+    return "";
+}
+
+/* The places as the key's digits: each cell's 0 (its own) or 1 + the cell whose place its PS2
+   button's main input has. */
+static int places(const struct ControlsLayout *pad)
+{
+    int key = 0;
+    for (int n = CELLS - 1; n >= 0; n--) {
+        int t = target_of(cells[n].target), digit = 0;
+        const char *place = t >= 0 ? input_name(pad->input[t][0]) : "";
+        for (int m = 0; m < CELLS; m++)
+            if (m != n && !strcmp(cells[m].place, place)) digit = m + 1;
+        key = key * 9 + digit;
+    }
+    return key;
+}
+
+void button_icons_choose(const char *setting, int auto_style, const struct ControlsLayout *pad)
 {
     static int installed;
     if (!installed++) font_sharp_icons(button_icons_style, button_icons_paint);
@@ -39,16 +87,10 @@ void button_icons_choose(const char *setting, int auto_style)
     if (setting && !SDL_strcasecmp(setting, "xbox")) s = BUTTON_ICONS_XBOX;
     else if (setting && !SDL_strcasecmp(setting, "nintendo")) s = BUTTON_ICONS_NINTENDO;
     else if (setting && !SDL_strcasecmp(setting, "auto")) s = auto_style;
-    SDL_SetAtomicInt(&style, s);
+    SDL_SetAtomicInt(&style, s + 3 * (pad ? places(pad) : 0));
 }
 
 int button_icons_style(void) { return SDL_GetAtomicInt(&style); }
-
-/* The game's icon cells and the icon each style puts there. */
-static const struct { uint8_t code; const char *xbox, *nintendo; } cells[] = {
-    {0xAD, "A", "B"},   {0xAB, "B", "A"},   {0xA0, "X", "Y"},  {0xA7, "Y", "X"},    /* Cross Circle Square Triangle */
-    {0xB2, "LB", "L"},  {0xB3, "LT", "ZL"}, {0xB9, "RB", "R"}, {0xBA, "RT", "ZR"},  /* L1 L2 R1 R2 */
-};
 
 typedef struct {
     uint8_t *rgba;          /* decoded, 4 bytes a pixel */
@@ -112,12 +154,37 @@ static void sample(const Icon *c, float x, float y, float out[4])
     }
 }
 
-void button_icons_paint(uint8_t *big, unsigned f, const uint32_t *pixels, unsigned w, unsigned h, unsigned solid, int st)
+/* The game's own icons in other cells (the PlayStation icons on a layout that moves them): each
+   cell's copy as it was, then in the cells that show its place. */
+static void move_game_icons(uint8_t *big, unsigned f, unsigned W, const int source[CELLS])
 {
-    if (st == BUTTON_ICONS_GAME || w != 512 || h != 512 || !f) return;
+    const unsigned cell = 32 * f;
+    uint8_t *was = malloc((size_t)CELLS * cell * cell * 4);
+    if (!was) return;
+    for (int n = 0; n < CELLS; n++)
+        for (unsigned y = 0; y < cell; y++)
+            memcpy(was + ((size_t)n * cell + y) * cell * 4,
+                   big + ((size_t)((cells[n].code >> 4) * cell + y) * W + (cells[n].code & 15) * cell) * 4, (size_t)cell * 4);
+    for (int n = 0; n < CELLS; n++)
+        if (source[n] != n)
+            for (unsigned y = 0; y < cell; y++)
+                memcpy(big + ((size_t)((cells[n].code >> 4) * cell + y) * W + (cells[n].code & 15) * cell) * 4,
+                       was + ((size_t)source[n] * cell + y) * cell * 4, (size_t)cell * 4);
+    free(was);
+}
+
+void button_icons_paint(uint8_t *big, unsigned f, const uint32_t *pixels, unsigned w, unsigned h, unsigned solid, int key)
+{
+    int st = key % 3, source[CELLS];
+    for (int n = 0, rest = key / 3; n < CELLS; n++, rest /= 9) source[n] = rest % 9 ? rest % 9 - 1 : n;
+    if (!key || w != 512 || h != 512 || !f) return;
     const unsigned cell = 32, W = w * f;
-    for (unsigned n = 0; n < sizeof cells / sizeof *cells; n++) {
-        const Icon *c = icon(st == BUTTON_ICONS_XBOX ? cells[n].xbox : cells[n].nintendo);
+    if (st == BUTTON_ICONS_GAME) {
+        move_game_icons(big, f, W, source);
+        return;
+    }
+    for (unsigned n = 0; n < CELLS; n++) {
+        const Icon *c = icon(st == BUTTON_ICONS_XBOX ? cells[source[n]].xbox : cells[source[n]].nintendo);
         if (!c) continue;
         unsigned cx = (cells[n].code & 15) * cell, cy = (cells[n].code >> 4) * cell;
         /* the game's icon in its cell: its box, and its brightest solid colour (the symbol's) */

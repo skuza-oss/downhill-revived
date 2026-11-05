@@ -1745,9 +1745,27 @@ void pads_begin_field(void)
     if (on.started && EE32(MENU) != LOAD_MENU) race_left();
 }
 
+int port_controls_capturing(void);  /* controls_settings.c: a binding waits for a key or button */
+
+/* While PC SETTINGS > Controls waits for a key or button (and until it is let go), the game sees
+   no input: the press is the page's (finding 157). The pads stay connected. */
+static void held_back(HostPad *out)
+{
+    uint8_t connected = out->connected;
+    neutral(out);
+    out->connected = connected;
+}
+
 /* Online: the menu script, then in the race this PC's controller (DHD_NET_SCRIPTED=1, tests:
    still the script, DHD_RACE_PAD). */
+static void pads_read_now(int player, HostPad *out);
 void pads_read(int player, HostPad *out)
+{
+    pads_read_now(player, out);
+    if (port_controls_capturing()) held_back(out);
+}
+
+static void pads_read_now(int player, HostPad *out)
 {
     static HleEnv scripted_env;
     if (online_mode()) {
