@@ -954,9 +954,16 @@ class ObjectSignatures:
         except (OSError, ValueError):
             self.known = {}
         self.new = {}
+        # the answers also depend on the parser and on wasm-objdump: both are in every key, so a
+        # branch that changes either one gets its own entries
+        import inspect
+        tool = hashlib.sha256(inspect.getsource(object_signatures_uncached).encode() + SECTION.pattern.encode())
+        tool.update(subprocess.run([os.path.join(WABT, 'bin', 'wasm-objdump'), '--version'],
+                                   capture_output=True).stdout)
+        self.tool = tool.digest()
 
     def get(self, path):
-        key = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+        key = hashlib.sha256(self.tool + open(path, 'rb').read()).hexdigest()
         found = self.known.get(key) or self.new.get(key)
         if found is None:
             defs, imps = object_signatures_uncached(path)
@@ -1324,10 +1331,11 @@ class FileHashes:
     def sha256(self, path, lf=False):
         st = os.stat(path)
         name = ('lf:' if lf else '') + os.path.normcase(os.path.abspath(path))
-        stamp = [st.st_size, st.st_mtime_ns, st.st_ino]
+        # ctime too: a copy that puts the old mtime back (scp -p, tar) still changes it
+        stamp = [st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns]
         entry = self.known.get(name)
-        if entry and entry[:3] == stamp:
-            return bytes.fromhex(entry[3])
+        if entry and entry[:4] == stamp:
+            return bytes.fromhex(entry[4])
         data = open(path, 'rb').read()
         digest = hashlib.sha256(data.replace(b'\r\n', b'\n') if lf else data).digest()
         self.known[name] = stamp + [digest.hex()]
