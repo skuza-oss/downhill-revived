@@ -112,8 +112,9 @@ Neither is signed.
 `DownhillRevived-<version>-android-experimental.apk`. Open it on the phone and allow installs
 from your browser or file manager when Android asks; the app is not on Google Play. At the first
 start choose your `.iso`; it is copied into the app once (a few GB). Install a new release's APK
-over the old one: your settings and saves stay. The release page's Android section has the
-details and the signing certificate.
+over the old one: your settings and saves stay. If the game closes unexpectedly, the next start
+offers **Share log** (see below). The release page's Android section has the details and the
+signing certificate.
 
 Then:
 

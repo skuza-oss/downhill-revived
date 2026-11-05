@@ -6,7 +6,8 @@ Play with the touch controls (Classic pad or Thumb zones, tilt steering if you l
 SETTINGS > Touch Controls) or a controller.
 
 **What you need**
-- An arm64 phone or tablet with Android 11 or later and Vulkan (most phones since 2018).
+- Any arm64 phone or tablet with Android 11 or later and Vulkan (most phones since 2018),
+  older arm64 cores such as the Snapdragon 680's and Mali GPUs on Arm's newer drivers included.
 - Your own disc image of Downhill Domination (USA, SCUS-97177) as an `.iso` file, like the PC
   version. No game data comes with the app.
 - A few GB of free storage: the disc image is copied into the app once.
@@ -19,8 +20,9 @@ SETTINGS > Touch Controls) or a controller.
 
 **Updates.** The game checks once a day whether a newer release is out and says so at the top of
 the screen; tap the line to open the release page, then install the new APK over the old one. Your
-settings and saves stay. Nothing is downloaded by the game itself. If you installed a test build before this release, uninstall it first: Android refuses an update signed
-by another key, and uninstalling deletes the app's files (the disc copy and your saves).
+settings and saves stay. Nothing is downloaded by the game itself. If you installed a test build
+before this release, uninstall it first: Android refuses an update signed by another key, and
+uninstalling deletes the app's files (the disc copy and your saves).
 
 **If the game closes unexpectedly**, it says so at the next start and offers **Share log**: send
 the file to us (a GitHub issue or Discord) and we can see what happened. Long-press the app's icon
