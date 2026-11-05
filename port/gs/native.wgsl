@@ -8,6 +8,10 @@
 // struct there. Group 1 holds the entry point's textures. textureLoad outside a texture reads 0
 // here (load_*), as D3D11's Load does; WebGPU leaves it to the implementation.
 //
+// No function takes a texture or a sampler as an argument: each texture has its own load_*
+// reading the global. Mali's shader compiler (driver r54) crashes on a texture passed to a
+// function (a null read in vkCreate*Pipelines; finding 153), and naga passes one as written.
+//
 // Blending: with dual-source blending (native_dual.wgsl appended after "enable
 // dual_source_blending;") native_pixel_dual gives the colour and As / 128 as D3D11 does. Without
 // it a draw whose blend uses As is split: native_pixel_blend writes RGB with As / 128 as its
@@ -51,12 +55,11 @@ struct Native {
 @group(1) @binding(0) var native_texels: texture_2d<u32>;
 @group(1) @binding(1) var native_texel_sampler: sampler;
 
-fn load_rgba(t: texture_2d<f32>, xy: vec2<i32>) -> vec4<f32> {
-    let size = vec2<i32>(textureDimensions(t));
-    if (any(xy < vec2<i32>(0)) || any(xy >= size)) { return vec4<f32>(0.0); }
-    return textureLoad(t, xy, 0);
+// xy is outside a texture of `size` texels (the load_* below read 0 there).
+fn outside(xy: vec2<i32>, size: vec2<u32>) -> bool {
+    return any(xy < vec2<i32>(0)) || any(xy >= vec2<i32>(size));
 }
-// load_rgba(native_texture, xy) without a branch: the load always reads a texel inside the
+// A load_* of native_texture without a branch: the load always reads a texel inside the
 // texture (xy clamped) and the select gives 0 outside, so a bilinear's four loads can be issued
 // together instead of each waiting behind its own test (finding 131). Exactly tex_size
 // (texture_sized()): the uniform's size, not the texture's.
@@ -72,16 +75,6 @@ fn load_texels(xy: vec2<i32>) -> u32 {
     if (texture_sized()) { size = vec2<i32>(nat.tex_size); } else { size = vec2<i32>(textureDimensions(native_texels)); }
     let w = textureLoad(native_texels, clamp(xy, vec2<i32>(0), size - 1), 0).x;
     return select(0u, w, all(xy >= vec2<i32>(0)) && all(xy < size));
-}
-fn load_u(t: texture_2d<u32>, xy: vec2<i32>) -> u32 {
-    let size = vec2<i32>(textureDimensions(t));
-    if (any(xy < vec2<i32>(0)) || any(xy >= size)) { return 0u; }
-    return textureLoad(t, xy, 0).x;
-}
-fn load_depth(t: texture_depth_2d, xy: vec2<i32>) -> f32 {
-    let size = vec2<i32>(textureDimensions(t));
-    if (any(xy < vec2<i32>(0)) || any(xy >= size)) { return 0.0; }
-    return textureLoad(t, xy, 0);
 }
 
 struct Varyings {
@@ -336,6 +329,11 @@ struct Display { a: vec4<u32>, b: vec4<u32>, c: vec4<u32>, }
 @group(1) @binding(0) var native_source: texture_2d<f32>;
 @group(1) @binding(1) var screen: texture_storage_2d<rgba8unorm, write>;
 
+fn load_native_source(xy: vec2<i32>) -> vec4<f32> {
+    if (outside(xy, textureDimensions(native_source))) { return vec4<f32>(0.0); }
+    return textureLoad(native_source, xy, 0);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn native_scanout(@builtin(global_invocation_id) tid: vec3<u32>) {
     let a = display_state.a;
@@ -344,7 +342,7 @@ fn native_scanout(@builtin(global_invocation_id) tid: vec3<u32>) {
     if (tid.x >= b.y || tid.y >= b.z) { return; }
     let at = vec2<u32>(tid.x, tid.y >> b.w);
     let xy = ((vec2<u32>(a.w, b.x) + at / S) & vec2<u32>(2047u)) * S + at % S;
-    textureStore(screen, tid.xy, vec4<f32>(load_rgba(native_source, vec2<i32>(xy)).rgb, 1.0));
+    textureStore(screen, tid.xy, vec4<f32>(load_native_source(vec2<i32>(xy)).rgb, 1.0));
 }
 
 // Equivalent GS wrap for bounded display sizes (scanout.rs). The original map
@@ -364,7 +362,7 @@ fn native_scanout_fast(@builtin(global_invocation_id) tid: vec3<u32>) {
     var q = (dividend * c.z) >> vec2<u32>(16u);
     q -= select(vec2<u32>(0u), vec2<u32>(1u), q * c.y > dividend);
     let xy = dividend - q * c.y;
-    let color = vec4<f32>(load_rgba(native_source, vec2<i32>(xy)).rgb, 1.0);
+    let color = vec4<f32>(load_native_source(vec2<i32>(xy)).rgb, 1.0);
     textureStore(screen, vec2<u32>(tid.x, y), color);
     // The interlaced scanout maps both output rows to the same input texel.
     if (doubled && y + 1u < b.z) {
@@ -379,6 +377,15 @@ struct Blit { map: vec4<f32>, }
 @group(1) @binding(0) var blit_source: texture_2d<f32>;
 @group(1) @binding(1) var upload_previous: texture_2d<f32>;
 
+fn load_blit_source(xy: vec2<i32>) -> vec4<f32> {
+    if (outside(xy, textureDimensions(blit_source))) { return vec4<f32>(0.0); }
+    return textureLoad(blit_source, xy, 0);
+}
+fn load_upload_previous(xy: vec2<i32>) -> vec4<f32> {
+    if (outside(xy, textureDimensions(upload_previous))) { return vec4<f32>(0.0); }
+    return textureLoad(upload_previous, xy, 0);
+}
+
 @vertex
 fn fullscreen_vertex(@builtin(vertex_index) id: u32) -> @builtin(position) vec4<f32> {
     let p = vec2<f32>(select(-1.0, 3.0, id == 1u), select(1.0, -3.0, id == 2u));
@@ -387,14 +394,14 @@ fn fullscreen_vertex(@builtin(vertex_index) id: u32) -> @builtin(position) vec4<
 
 @fragment
 fn native_blit(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    return load_rgba(blit_source, vec2<i32>(floor((position.xy / blit.map.z + blit.map.xy) * blit.map.w)));
+    return load_blit_source(vec2<i32>(floor((position.xy / blit.map.z + blit.map.xy) * blit.map.w)));
 }
 
 @fragment
 fn native_upload_alpha(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let local = vec2<i32>(floor(position.xy / blit.map.z - blit.map.xy));
-    let upload = vec2<u32>(round(load_rgba(blit_source, local).rg * 255.0));
-    let previous = load_rgba(upload_previous, vec2<i32>(position.xy));
+    let upload = vec2<u32>(round(load_blit_source(local).rg * 255.0));
+    let previous = load_upload_previous(vec2<i32>(position.xy));
     let alpha = u32(round(previous.a * 255.0));
     return vec4<f32>(previous.rgb, f32((alpha & ~upload.y) | upload.x) / 255.0);
 }
@@ -402,9 +409,13 @@ fn native_upload_alpha(@builtin(position) position: vec4<f32>) -> @location(0) v
 // A Z surface grown to a larger texture (gpu_wgpu_native.inc, native_surface_resources): depth
 // textures can only be copied whole, so the old one is drawn into the new one.
 @group(1) @binding(0) var grow_source: texture_depth_2d;
+fn load_grow_source(xy: vec2<i32>) -> f32 {
+    if (outside(xy, textureDimensions(grow_source))) { return 0.0; }
+    return textureLoad(grow_source, xy, 0);
+}
 @fragment
 fn native_grow_depth(@builtin(position) position: vec4<f32>) -> @builtin(frag_depth) f32 {
-    return load_depth(grow_source, vec2<i32>(position.xy));
+    return load_grow_source(vec2<i32>(position.xy));
 }
 
 // A texture over GS memory some of which native surfaces drew (raster.hlsl native_convert). Z
@@ -429,6 +440,43 @@ struct Convert {
 // A converted texture's texels: each its RGBA bytes, as a decoded texture's (read by the `_u`
 // entry points).
 @group(1) @binding(10) var native_converted: texture_storage_2d<r32uint, write>;
+
+fn load_convert_base(xy: vec2<i32>) -> u32 {
+    if (outside(xy, textureDimensions(convert_base))) { return 0u; }
+    return textureLoad(convert_base, xy, 0).x;
+}
+fn load_convert_colour0(xy: vec2<i32>) -> vec4<f32> {
+    if (outside(xy, textureDimensions(convert_colour0))) { return vec4<f32>(0.0); }
+    return textureLoad(convert_colour0, xy, 0);
+}
+fn load_convert_colour1(xy: vec2<i32>) -> vec4<f32> {
+    if (outside(xy, textureDimensions(convert_colour1))) { return vec4<f32>(0.0); }
+    return textureLoad(convert_colour1, xy, 0);
+}
+fn load_convert_colour2(xy: vec2<i32>) -> vec4<f32> {
+    if (outside(xy, textureDimensions(convert_colour2))) { return vec4<f32>(0.0); }
+    return textureLoad(convert_colour2, xy, 0);
+}
+fn load_convert_colour3(xy: vec2<i32>) -> vec4<f32> {
+    if (outside(xy, textureDimensions(convert_colour3))) { return vec4<f32>(0.0); }
+    return textureLoad(convert_colour3, xy, 0);
+}
+fn load_convert_depth0(xy: vec2<i32>) -> f32 {
+    if (outside(xy, textureDimensions(convert_depth0))) { return 0.0; }
+    return textureLoad(convert_depth0, xy, 0);
+}
+fn load_convert_depth1(xy: vec2<i32>) -> f32 {
+    if (outside(xy, textureDimensions(convert_depth1))) { return 0.0; }
+    return textureLoad(convert_depth1, xy, 0);
+}
+fn load_convert_depth2(xy: vec2<i32>) -> f32 {
+    if (outside(xy, textureDimensions(convert_depth2))) { return 0.0; }
+    return textureLoad(convert_depth2, xy, 0);
+}
+fn load_convert_depth3(xy: vec2<i32>) -> f32 {
+    if (outside(xy, textureDimensions(convert_depth3))) { return 0.0; }
+    return textureLoad(convert_depth3, xy, 0);
+}
 
 fn bits_per_pixel(psm: u32) -> u32 {
     if (psm == 1u || psm == 49u) { return 24u; }
@@ -482,13 +530,13 @@ fn address(psm: u32, bp: u32, bw: u32, x: u32, y: u32) -> u32 {
 fn convert_word(slot: u32, xy: vec2<i32>, depth: bool, unit: f32) -> u32 {
     if (depth) {
         var d: f32;
-        if (slot == 0u) { d = load_depth(convert_depth0, xy); } else if (slot == 1u) { d = load_depth(convert_depth1, xy); }
-        else if (slot == 2u) { d = load_depth(convert_depth2, xy); } else { d = load_depth(convert_depth3, xy); }
+        if (slot == 0u) { d = load_convert_depth0(xy); } else if (slot == 1u) { d = load_convert_depth1(xy); }
+        else if (slot == 2u) { d = load_convert_depth2(xy); } else { d = load_convert_depth3(xy); }
         return select(u32(d * unit), 0xFFFFFFFFu, d >= 1.0);
     }
     var c: vec4<f32>;
-    if (slot == 0u) { c = load_rgba(convert_colour0, xy); } else if (slot == 1u) { c = load_rgba(convert_colour1, xy); }
-    else if (slot == 2u) { c = load_rgba(convert_colour2, xy); } else { c = load_rgba(convert_colour3, xy); }
+    if (slot == 0u) { c = load_convert_colour0(xy); } else if (slot == 1u) { c = load_convert_colour1(xy); }
+    else if (slot == 2u) { c = load_convert_colour2(xy); } else { c = load_convert_colour3(xy); }
     let u = vec4<u32>(round(c * 255.0));
     return u.r | u.g << 8u | u.b << 16u | u.a << 24u;
 }
@@ -511,7 +559,7 @@ fn native_convert(@builtin(global_invocation_id) tid: vec3<u32>) {
     let source = (convert.pages[page >> 4u][(page >> 2u) & 3u] >> ((page & 3u) * 8u)) & 255u;
     if (source == 0u) {
         // The base texture's texel as it is.
-        textureStore(native_converted, tid.xy, vec4<u32>(load_u(convert_base, vec2<i32>(tid.xy)), 0u, 0u, 0u));
+        textureStore(native_converted, tid.xy, vec4<u32>(load_convert_base(vec2<i32>(tid.xy)), 0u, 0u, 0u));
         return;
     }
     let s = convert.slot[source - 1u];

@@ -150,7 +150,7 @@ impl Objects {
 
 // Kinds as port/hle/touch.h numbers them (TS_*). Shapes are in mm; `screen` is the surface's
 // size in pixels and its pixels per mm.
-const SHADER: &str = r#"
+pub(crate) const SHADER: &str = r#"
 struct Screen { size: vec2f, per_mm: vec2f }
 @group(0) @binding(0) var<uniform> screen: Screen;
 @group(0) @binding(1) var font: texture_2d<f32>;

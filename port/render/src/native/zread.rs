@@ -28,7 +28,7 @@ pub fn folded() -> bool {
         && std::env::var("DHD_INTERP").ok().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0) == 0
 }
 
-const ZREAD_WGSL: &str = r#"
+pub(crate) const ZREAD_WGSL: &str = r#"
 struct Params { origin: vec2<u32>, size: vec2<u32>, scale: u32, pad0: u32, pad1: u32, pad2: u32 }
 @group(0) @binding(0) var zread_source: texture_depth_2d;
 @group(0) @binding(1) var<storage, read_write> zread_out: array<u32>;

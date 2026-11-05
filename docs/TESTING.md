@@ -16,6 +16,7 @@ profile). Tools read them; the game reads none of them.
 | `DHD_SCRATCH` | scratch folder for test runs, server state and temporary files (default the system temp) |
 | `DHD_GAME_SLOTS` | at most this many untimed game checks at once on the PC (the game lock, below); default 1 |
 | `DHD_TEST_ISO` | your Downhill Domination (USA) disc image, for the test tools |
+| `DHD_MALIOC` | optional: Arm's Mali Offline Compiler (`malioc.exe` from Arm Performance Studio, free; keep it off the system drive), for the `native_spirv` test below |
 
 Never set `DHD_ISO` for your user: the game reads it, and it overrides dhd.ini in every game
 started from that environment, your own included. Keep all three off a small system drive.
@@ -55,6 +56,7 @@ after a version change before a live check.
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
+| `port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- --test native_spirv` | the native renderer's SPIR-V for every pipeline stage, made as wgpu-hal's Vulkan backend makes it, with no texture passed into a function (Mali's r54 compiler crashes on that, finding 153). `DHD_SPIRV_OUT=DIR` keeps the `.spv` files; with `DHD_MALIOC` every stage is also compiled by malioc for `DHD_MALIOC_CORE` (default `Mali-G57`); `DHD_NATIVE_WGSL=FILE` compares another native.wgsl |
 
 A typical in-game check:
 
@@ -176,7 +178,7 @@ Keep the display and window configuration fixed across comparisons and report th
 GPU pass timestamps do not measure all compositor/copy costs.
 
 `DHD_SCALE_MEMORY_MB=N` overrides only the native resolution guard's memory estimate for
-controlled developer measurements (1–65536 MiB). Integrated GPUs can expose very little dedicated
+controlled developer measurements (1-65536 MiB). Integrated GPUs can expose very little dedicated
 VRAM while using shared RAM; their normal dedicated-memory guard may clamp requested 6x/8x to
 4x. Check `perf: render` for the actual scale. Choose a budget the machine can supply, keep it
 constant across runs, and inspect the logged override. This does not alter player defaults,
