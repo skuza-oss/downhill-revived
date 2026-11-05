@@ -26,7 +26,11 @@ it at run time; the game still starts on the Mi 11i; its speed is measured again
   LSE atomics in ordinary code; this build has 4, all inside the outline helpers behind their
   run-time test. No ARMv8.2 FP16, RDM or dot-product instructions in either. `crc32*` (47) is in
   both: optional in ARMv8.0 and present on the Cortex-A53 and A73, from code that checks for it.
-- [ ] The Mi 11i: start and speed against 0.7.10 (the lead, when the phone is free).
+- [x] 2026-11-05 the Mi 11i, throttled to the T612 profile (`phone_throttle.py --apply t612`),
+  2x, uncapped, fields per second, three rounds in alternating order (the lead's bench scripts, the
+  0.7.10 release APK against main 085117f's, both PGO with the same profile): race start
+  0.7.10 66.3 / 67.9 / 68.6 (mean 67.6), this build 68.2 / 68.5 / 68.5 (68.4); a later window
+  86.2 / 86.7 / 85.6 (86.1) against 85.9 / 85.9 / 86.7 (86.2). No loss: within the runs' spread.
 - [ ] A Snapdragon 680 player confirms the game starts (issues #45, #51).
 
 ## Decisions
@@ -40,5 +44,6 @@ it at run time; the game still starts on the Mi 11i; its speed is measured again
 ## Result
 
 The Android build targets ARMv8.0, so phones with older arm64 cores (Snapdragon 680 and other
-Cortex-A53/A73 chips) no longer close at start with an illegal instruction. Speed on the Mi 11i:
-to be measured.
+Cortex-A53/A73 chips) no longer close at start with an illegal instruction. On the Mi 11i the
+speed is unchanged (race start 67.6 -> 68.4, a later window 86.1 -> 86.2 fields per second,
+within the spread).
