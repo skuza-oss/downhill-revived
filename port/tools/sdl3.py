@@ -16,7 +16,9 @@ android_build() (--android) is libSDL3.so for Android arm64 with the NDK, plus S
 and the release's Java sources (build_host64.py --target android-arm64, port/android/build_apk.py; finding 091).
 SDL is zlib-licensed (port/release/THIRD-PARTY-NOTICES.txt).
 
-The download is kept in build/downloads, so a rebuild needs no network. Needs CMake on PATH (or in its default place), LLVM's clang and the
+The download is kept in DHD_DEVCACHES/downloads (one for every checkout; finding 151), so a rebuild
+needs no network, and each built library is kept in DHD_DEVCACHES/dhd-sdl3 under its recipe: a new
+checkout copies it instead of building SDL again. Needs CMake on PATH (or in its default place), LLVM's clang and the
 ninja Python package (requirements.txt)."""
 import hashlib
 import os
@@ -33,7 +35,9 @@ URL = 'https://github.com/libsdl-org/SDL/releases/download/release-%s/SDL3-%s.ta
 SHA256 = '9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3'
 
 ROOT = Path(__file__).resolve().parents[2]
-DOWNLOADS = ROOT / 'build' / 'downloads'
+DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  # downloaded tools and caches
+DOWNLOADS = DEVCACHES / 'downloads'
+SHARED = DEVCACHES / 'dhd-sdl3'
 OUT = ROOT / 'build' / 'port' / 'sdl3'
 CMAKE_DEFAULT = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'CMake' / 'bin' / 'cmake.exe'
 
@@ -69,6 +73,10 @@ def sha256(path):
 
 def fetch():
     tarball = DOWNLOADS / ('SDL3-%s.tar.gz' % VERSION)
+    old = ROOT / 'build' / 'downloads' / tarball.name  # where a checkout kept it before
+    if not tarball.exists() and old.exists() and sha256(old) == SHA256:
+        DOWNLOADS.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(old, tarball)
     if not tarball.exists() or sha256(tarball) != SHA256:
         DOWNLOADS.mkdir(parents=True, exist_ok=True)
         part = tarball.with_suffix('.part')
@@ -81,6 +89,38 @@ def fetch():
             sys.exit('SDL3: %s has SHA-256 %s, expected %s' % (URL, got, SHA256))
         os.replace(part, tarball)
     return tarball
+
+
+def _shared_entry(base, recipe, compiler):
+    """The machine-wide copy of base's library for this recipe and compiler (path, size, mtime)."""
+    st = os.stat(compiler)
+    ident = '%s|%s %d %d' % (recipe, os.path.realpath(compiler), st.st_size, st.st_mtime_ns)
+    return SHARED / ('%s-%s' % (base.name, hashlib.sha256(ident.encode()).hexdigest()[:16]))
+
+
+def _from_shared(base, entry):
+    """Copy a library built in another checkout (entry) into base; False if there is none."""
+    if not (entry / 'built.txt').exists():
+        return False
+    shutil.copytree(entry, base, dirs_exist_ok=True)
+    return True
+
+
+def _to_shared(base, entry, parts):
+    """Keep base's parts (relative paths: the library, its headers, the stamp) as entry, written
+    whole or not at all."""
+    if entry.exists():
+        return
+    tmp = entry.with_name(entry.name + '.tmp%d' % os.getpid())
+    try:
+        shutil.rmtree(tmp, ignore_errors=True)
+        for part in parts:
+            src, dst = base / part, tmp / part
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            (shutil.copytree if src.is_dir() else shutil.copy2)(src, dst)
+        os.replace(tmp, entry)
+    except OSError:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def tool(name, default=None):
@@ -105,6 +145,10 @@ def build(target=X64_TARGET):
     recipe = repr(sorted(OPTIONS.items())) + target
     if lib.exists() and stamp.exists() and stamp.read_text() == recipe:
         return lib, include
+    clang = tool('clang')
+    entry = _shared_entry(base, recipe, clang)
+    if _from_shared(base, entry) and stamp.read_text() == recipe:
+        return lib, include
     tarball = fetch()
     src_parent = base / 'src'
     if src_parent.exists():
@@ -118,7 +162,6 @@ def build(target=X64_TARGET):
         shutil.rmtree(bld)
     import ninja
     cmake = tool('cmake', CMAKE_DEFAULT)
-    clang = tool('clang')
     cmd = [cmake, '-S', str(src), '-B', str(bld), '-G', 'Ninja',
            '-DCMAKE_MAKE_PROGRAM=' + os.path.join(ninja.BIN_DIR, 'ninja.exe'),
            '-DCMAKE_C_COMPILER=' + clang, '-DCMAKE_C_COMPILER_TARGET=' + target,
@@ -133,6 +176,7 @@ def build(target=X64_TARGET):
     if not lib.exists():
         sys.exit('SDL3: %s missing after the build' % lib)
     stamp.write_text(recipe)
+    _to_shared(base, entry, [lib.relative_to(base), include.relative_to(base), 'built.txt'])
     return lib, include
 
 
@@ -175,6 +219,9 @@ def posix_build():
     options['CMAKE_C_FLAGS'] = '-ffile-prefix-map=%s=SDL3-%s' % (base / 'src' / ('SDL3-%s' % VERSION), VERSION)
     recipe = repr(sorted(options.items())) + '%s-%s' % (system, _platform.machine())
     if lib.exists() and stamp.exists() and libs_file.exists() and stamp.read_text() == recipe:
+        return lib, include, _json.loads(libs_file.read_text())
+    entry = _shared_entry(base, recipe, shutil.which('cc') or '/usr/bin/cc')
+    if _from_shared(base, entry) and stamp.read_text() == recipe and libs_file.exists():
         return lib, include, _json.loads(libs_file.read_text())
     for name in ('cmake', 'ninja'):
         if not shutil.which(name):
@@ -227,6 +274,7 @@ def posix_build():
         k += 1
     libs_file.write_text(_json.dumps(libs) + '\n')
     stamp.write_text(recipe)
+    _to_shared(base, entry, ['install', 'link_libs.json', 'built.txt'])
     return lib, include, libs
 
 
@@ -271,6 +319,9 @@ def android_build():
     recipe = repr(sorted(options.items())) + 'android-arm64-%d %s' % (ANDROID_API, ndk.name)
     if lib.exists() and stamp.exists() and stamp.read_text() == recipe:
         return lib, include, java
+    entry = _shared_entry(base, recipe, ndk / 'source.properties')
+    if _from_shared(base, entry) and stamp.read_text() == recipe:
+        return lib, include, java
     tarball = fetch()
     if src.parent.exists():
         shutil.rmtree(src.parent)
@@ -295,6 +346,9 @@ def android_build():
     if not lib.exists():
         sys.exit('SDL3: %s missing after the build' % lib)
     stamp.write_text(recipe)
+    # android-project: SDL's Java sources and the Gradle wrapper build_apk.py copies
+    _to_shared(base, entry, [lib.relative_to(base), include.relative_to(base), (src / 'android-project').relative_to(base),
+                             'built.txt'])
     return lib, include, java
 
 
