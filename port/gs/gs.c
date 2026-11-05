@@ -541,9 +541,11 @@ static inline __attribute__((always_inline)) void packed(Gs *g, GsPath *p, unsig
 enum { GS_PRIM_TRISTRIP = 4 };
 
 /* A PACKED tag's register list that gs_feed can run as a strip (finding 146): RGBAQ, ST and UV
-   in any order, then one XYZF2/XYZ2/XYZF3/XYZ3 last, so each loop is one vertex. */
+   in any order, then one XYZF2/XYZ2/XYZF3/XYZ3 last, so each loop is one vertex. At most four
+   registers (packed_strip's order[3] holds the ones before XYZ); longer lists go through packed(). */
 static int strip_regs(uint64_t regs, unsigned nreg)
 {
+    if (nreg < 1 || nreg > 4) return 0;
     unsigned xyz = (unsigned)(regs >> ((nreg - 1) * 4)) & 15;
     if (xyz != 4 && xyz != 5 && xyz != 12 && xyz != 13) return 0;
     for (unsigned r = 0; r + 1 < nreg; r++) {
