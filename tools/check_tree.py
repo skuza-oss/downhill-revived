@@ -35,7 +35,8 @@ SECRETS = [
     (re.compile(r'(?i)\b(?:password|passwd|secret|api[_-]?key|access[_-]?token)\s*[:=]\s*["\'][^"\'\s<>{}$]{12,}["\']'),
      'a secret-looking assignment'),
 ]
-URL = re.compile(r'\b(wss?|https?)://([A-Za-z0-9.\-]+|\[[0-9a-fA-F:]+\])')
+# case-insensitive, and past any user@ part (wss://x@host names host, not x)
+URL = re.compile(r'(?i)\b(wss?|https?)://(?:[^\s/@\'"<>]*@)?([A-Za-z0-9.\-]+|\[[0-9a-fA-F:]+\])')
 LOCAL_HOSTS = re.compile(r'^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1?\]|[^.]+)$')  # no dot: a test string
 EXAMPLE = re.compile(r'(^|\.)(example\.(org|com|net)|test|invalid|localhost)$')
 MACHINE = [
@@ -138,7 +139,7 @@ def main(argv):
                 if rx.search(line):
                     error(path, i, f'{why}: keep secrets in the environment, never in a file')
             for m in URL.finditer(line):
-                if not url_ok(m.group(1), m.group(2).lower(), line, m.start()):
+                if not url_ok(m.group(1).lower(), m.group(2).lower(), line, m.start()):
                     error(path, i, f'server address {m.group(0)}: only wss://{OFFICIAL} may be named')
             if any(p == path and marker in line for p, marker in ALLOW):
                 continue
