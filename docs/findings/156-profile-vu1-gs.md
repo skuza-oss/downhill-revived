@@ -18,8 +18,13 @@ Measure the current main (no speed changes in this lane) on:
 - **Android, the Mi 11i** (later, after the next mobile release; the lead says when).
 
 Per machine, at least: the attract/title, a menu with a 3D scene (the bike shop), the race start
-(the slowest interval on phones, findings 147-148) and mid-race, at 1x, 2x and 4x, uncapped
-(`DHD_FPS=240 DHD_VSYNC=0 DHD_FRAME_CLOCK=1`). For each: frames per second and the time per frame
+(the slowest interval on phones, findings 147-148) and mid-race, uncapped
+(`DHD_FPS=240 DHD_VSYNC=0 DHD_FRAME_CLOCK=1`), at the scales players use there (the owner,
+2026-11-05: 1x and 2x neither are played on desktops nor stress them):
+- **Windows and macOS**: 4x, 8x and `DHD_SCALE=window` (the picture at the window's own
+  resolution), in windows of the screen sizes players use: Windows 2560x1440 and 3840x2160 (on the
+  hidden desktop, if the harness allows those sizes), macOS the built-in display's native size;
+- **the phone**: 2x (the phone default) and 4x. For each: frames per second and the time per frame
 of each thread and stage: EE game code, VU0, VU1 (native kernels / translated / interpreted),
 VIF/DMA, the GS front end (exact or native), the renderer's CPU side (wgpu encoding, uploads,
 conversions, readbacks such as the Z read), and the GPU. Use what exists first (dhd.log `perf:`
@@ -32,7 +37,12 @@ code, audio, presentation). No game-state change.
 
 ## Progress
 
-- [ ] 2026-11-05: finding reserved
+- [x] 2026-11-05: finding reserved
+- [x] 2026-11-05: scales changed by the owner: desktops 4x, 8x, window (2560x1440, 3840x2160; the
+  Mac's own display); the phone 2x and 4x
+- [ ] Windows tables
+- [ ] macOS tables
+- [ ] phone recipe (the Mi 11i is measured later, after the next mobile release)
 
 ## Decisions
 
