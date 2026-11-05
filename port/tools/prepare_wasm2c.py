@@ -5,6 +5,7 @@ level. Refuse unknown templates rather than silently lose mirror correctness.
 """
 from pathlib import Path
 import argparse
+import hashlib
 import re
 import shutil
 import struct
@@ -222,6 +223,122 @@ def module_units(out, run, wasm2c, wasm=None, sources=(), num_outputs=1):
             shutil.copyfile(source, target)
         units.append(target)
     return units
+
+
+# ---- stable units: the module's functions in content-defined chunks (finding 151) ----
+# wasm2c's own split (--num-outputs) cuts the functions into equal counts in module order and
+# declares every function in core-impl.h, which every part includes: one changed function moves the
+# cuts and changes every part's text, so the object cache misses all of them. Here a chunk ends
+# after a function whose NAME hashes to a cut (content-defined chunking), so a change to one
+# function changes one chunk (unless it moves data addresses); each chunk is named after its
+# first function and includes a header of its own that declares only what it uses.
+FUNC_DEF = re.compile(r'^(static )?[A-Za-z_][^(\n]*?\b(\w+)\([^()]*\) \{$', re.M)  # long parameter lists wrap
+PROTOTYPE = re.compile(r'^(?!static |typedef |#)[A-Za-z_][^(\n]*?\b(\w+)\([^\n]*\);$')
+DECLARED = (re.compile(r'^FUNC_TYPE_DECL_EXTERN_T\((\w+)\);$'), re.compile(r'^extern [^\n]*?\b(\w+)\[\];$'))
+CHUNK_MIN, CHUNK_MAX, CHUNK_CUT = 256 << 10, 4 << 20, 192  # bytes, bytes, 1 in N function names
+
+
+def _name_hash(name):
+    return int(hashlib.sha1(name.encode()).hexdigest()[:8], 16)
+
+
+IDENT = re.compile(r'\b\w+\b')
+# the names a chunk's header may leave out (_header_lines), as they appear in the code
+NAMED = re.compile(r'\b(?:wasm_tailcall_|data_segment_data_|elem_segment_exprs_)?w2c_\w+')
+
+
+def _functions(text, movable):
+    """(definitions [(name, text)] of the movable functions, the rest of text). A function that
+    names one of the unit's own static symbols stays."""
+    defs, rest, last = [], [], 0
+    found = list(FUNC_DEF.finditer(text))
+    local = frozenset(m[2] for m in found if m[1])
+    for m in found:
+        if m.start() < last or m[1] or m[2] not in movable:
+            continue
+        end = text.find('\n}\n', m.end())
+        if end < 0:
+            raise ValueError(f'{m[2]}: no end of its definition')
+        body = text[m.start():end + 3]
+        if local and not local.isdisjoint(IDENT.findall(body)):
+            continue  # e.g. calls specialized to the unit's static table wrappers (specialize_dispatch)
+        rest.append(text[last:m.start()])
+        defs.append((m[2], body))
+        last = end + 3
+    rest.append(text[last:])
+    return defs, ''.join(rest)
+
+
+def _chunks(defs, sizes):
+    low, high, cut = sizes
+    chunks, current, size = [], [], 0
+    for name, body in defs:
+        current.append(body)
+        size += len(body)
+        if size >= high or (size >= low and _name_hash(name) % cut == 0):
+            chunks.append(current)
+            current, size = [], 0
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _header_lines(header):
+    """header (core-impl.h with core.h in it) as [(line, the name it declares or None)], without
+    blank or comment-only lines: what other chunks add or drop leaves a chunk's header the same."""
+    lines = []
+    for line in header.split('\n'):
+        if not line.strip() or (line.startswith('/*') and line.endswith('*/')):
+            continue
+        m = PROTOTYPE.match(line) or DECLARED[0].match(line) or DECLARED[1].match(line)
+        lines.append((line, m[1] if m and NAMED.fullmatch(m[1]) else None))
+    return lines
+
+
+def _own_header(lines, used):
+    """The header lines without the declarations of names not in used."""
+    return '\n'.join(line for line, name in lines if name is None or name in used) + '\n'
+
+
+def stable_units(units, out, sizes=(CHUNK_MIN, CHUNK_MAX, CHUNK_CUT)):
+    """The prepared wasm2c units (core_N.c beside core-impl.h) as content-defined chunks, written to
+    out/chunks/; returns the new unit list: the module's own part (core_module.c: data, tables,
+    instantiation, the static wrappers) and the chunks. One unit (core.c, no core-impl.h): kept."""
+    impl = out / 'core-impl.h'
+    if len(units) < 2 or not impl.exists():
+        return units
+    header = impl.read_text()
+    if header.count('#include "core.h"\n') != 1:
+        raise ValueError('core-impl.h: #include "core.h" not found once (WABT version changed?)')
+    header = header.replace('#include "core.h"\n', (out / 'core.h').read_text())
+    movable = {m[1] for line in header.split('\n') for m in [PROTOTYPE.match(line)]
+               if m and m[1].startswith('w2c_core_')}
+    defs, module = [], []
+    for i, unit in enumerate(units):
+        text = unit.read_text()
+        found, rest = _functions(text, movable)
+        defs += found
+        if i == 0:
+            module.append(rest)
+        elif rest.strip() not in ('/* Automatically generated by wasm2c */\n#include "core-impl.h"', ''):
+            raise ValueError(f'{unit.name}: text outside function definitions (WABT version changed?)')
+    folder = out / 'chunks'
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir()
+    (folder / 'core_module.c').write_text(module[0])
+    shutil.copyfile(impl, folder / 'core-impl.h')  # the module part keeps wasm2c's own header
+    names = [folder / 'core_module.c']
+    lines = _header_lines(header)
+    for chunk in _chunks(defs, sizes):
+        text = ''.join(chunk)
+        stem = 'core_%s' % FUNC_DEF.match(chunk[0])[2][len('w2c_core_'):][:48]
+        name = folder / f'{stem}.c'
+        if name.name.lower() in {n.name.lower() for n in names}:  # file names ignore case on Windows and macOS
+            raise ValueError(f'two chunks named {name.name}')
+        (folder / f'{stem}.h').write_text(_own_header(lines, set(NAMED.findall(text))))
+        name.write_text(f'#include "{stem}.h"\n' + text)
+        names.append(name)
+    return names
 
 
 def check_launcher_exports(exports):

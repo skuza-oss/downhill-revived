@@ -1,6 +1,6 @@
 """Build Downhill Revived's APK for Android arm64: a debug APK (finding 091) or the release APK (finding 143).
 
-    python port/android/build_apk.py [--wasm build/wasm/dhd_core.wasm] [--jobs 2] [--offline]
+    python port/android/build_apk.py [--wasm build/wasm/dhd_core.wasm] [--jobs N] [--offline]
     python port/android/build_apk.py --release [--wasm ...]   # signed with the release key (below)
     python port/android/build_apk.py --check APK                # only check_release on a built APK
 
@@ -211,7 +211,7 @@ def project(libs, assets=None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--wasm', type=Path, help='rebuild the libraries from this module first')
-    ap.add_argument('--jobs', type=int, default=2)
+    ap.add_argument('--jobs', type=int, help="parallel compiles (default: build_host64.py's for the target)")
     ap.add_argument('--line-tables', action='store_true',
                     help="libmain.debug.so with line tables (build_host64's --debug, for simpleperf); code unchanged")
     pgo = ap.add_mutually_exclusive_group()
@@ -239,7 +239,7 @@ def main():
     wasm = a.wasm or (ROOT / 'build' / 'wasm' / 'dhd_core.wasm')
     if a.wasm or not all(p.exists() for p in libs):
         r = subprocess.run([sys.executable, str(ROOT / 'port' / 'tools' / 'build_host64.py'), '--target', 'android-arm64',
-                            str(wasm), '--jobs', str(a.jobs)] + (['--debug'] if a.line_tables else []) +
+                            str(wasm)] + (['--jobs', str(a.jobs)] if a.jobs else []) + (['--debug'] if a.line_tables else []) +
                            (['--pgo-generate'] if a.pgo_generate else []) +
                            (['--pgo-use', str(a.pgo_use.resolve())] if a.pgo_use else []))
         if r.returncode:

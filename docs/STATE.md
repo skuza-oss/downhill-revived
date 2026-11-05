@@ -41,7 +41,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   wasm32 module, `build/wasm/dhd_core.wasm` (findings 081, 082).
 - **One host build script:** `port/tools/build_host64.py --target win-x64|linux-x64|macos-arm64|
   android-arm64` (wasm2c, the 64-bit host `port/host64` + `port/host`, the Rust library; finding
-  099). `port/tools/build.py` runs core + host in one command. Setup: `docs/BUILDING.md`.
+  099). `port/tools/build.py` runs core + host in one command. Setup: `docs/BUILDING.md`; what
+  each step costs and what is cached: its "Build times" section (finding 151).
 - **Browser:** `port/web/build.py build/wasm/dhd_core.wasm` (findings 083, 087).
 - **Android:** `port/android/build_apk.py` (debug, `--release` with the release key named by the
   `DHD_ANDROID_*` variables; findings 091, 143).

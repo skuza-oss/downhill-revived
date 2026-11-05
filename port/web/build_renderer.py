@@ -163,7 +163,10 @@ def build(profile='release', opt=True, out=OUT):
         bg = pkg / SERVED[1]
         tmp = out / 'dhd_render_bg-optimized.wasm'
         # The same feature set as build.py's pass (compact imports: unsupported by Node 24).
-        run([BINARYEN, bg, '-O3', '--all-features', '--disable-compact-imports', '-o', tmp], cwd=ROOT, env=env)
+        sys.path.insert(0, str(ROOT / 'port/tools'))
+        import objcache  # the same input's output from the object cache (objcache.tool_output)
+        cmd = [BINARYEN, bg, '-O3', '--all-features', '--disable-compact-imports', '-o', tmp]
+        objcache.tool_output(cmd, bg, tmp, lambda c: run(c, cwd=ROOT, env=env))
         if import_modules(tmp) != {GLUE_MODULE}:
             die('wasm-opt changed the import modules of %s' % bg)
         shutil.copyfile(tmp, bg)

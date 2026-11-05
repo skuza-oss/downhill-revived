@@ -44,6 +44,10 @@ def main():
     OUT.mkdir(parents=True,exist_ok=True)
     env=dict(os.environ,TEMP=str(OUT),TMP=str(OUT),TMPDIR=str(OUT))
     def run(*cmd):subprocess.run(list(map(str,cmd)),check=True,env=env,cwd=ROOT)
+    sys.path.insert(0,str(ROOT/'port/tools'))
+    import objcache
+    def wasm_opt(*cmd):  # input first, output last; its output from the object cache for the same input (objcache.tool_output)
+        objcache.tool_output(list(map(str,cmd)),cmd[1],cmd[-1],lambda c:subprocess.run(c,check=True,env=env,cwd=ROOT))
     # first: a Rust failure stops the build before the long core pass
     from build_renderer import build as build_renderer,SERVED,RENDERER
     renderer=build_renderer(a.renderer_profile,not a.no_opt,OUT)
@@ -51,7 +55,7 @@ def main():
     run(sys.executable,ROOT/'port/tools/rustgs.py','build','--target','wasm32-unknown-unknown','--crate','dhd_settings','--profile',a.renderer_profile)
     if not a.no_opt:
         tmp=OUT/'dhd_settings-optimized.wasm'
-        run(BINARYEN,settings,'-Oz','--all-features','--disable-compact-imports','-o',tmp)
+        wasm_opt(BINARYEN,settings,'-Oz','--all-features','--disable-compact-imports','-o',tmp)
         settings.write_bytes(tmp.read_bytes());tmp.unlink()
     run(sys.executable,ROOT/'port/web/postlink.py',source,OUT/'core-web-raw.wasm',*(['--debug-memory'] if a.debug_memory else []),*(['--legacy-memory'] if a.legacy_memory else []),*(['--no-inline-memory'] if a.no_inline_memory else []))
     run(sys.executable,ROOT/'port/web/build_graphics.py',*(['--debug-memory'] if a.debug_memory else []),*(['--legacy-memory'] if a.legacy_memory else []),*(['--exact-float'] if a.exact_float else []),*(['--threads'] if a.threads else []))
@@ -70,7 +74,7 @@ def main():
         if not a.no_opt:
             # Compact imports are a newer proposal unsupported by Node 24.
             tmp=OUT/(dst.stem+'-optimized.wasm')
-            run(BINARYEN,src,'-O3','-g','--all-features','--disable-compact-imports','-o',tmp)
+            wasm_opt(BINARYEN,src,'-O3','-g','--all-features','--disable-compact-imports','-o',tmp)
             dst.write_bytes(tmp.read_bytes())
         elif src!=dst:dst.write_bytes(src.read_bytes())
     generate(OUT/'dhd_core.wasm',OUT/'imports.json')

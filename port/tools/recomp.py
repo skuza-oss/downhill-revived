@@ -776,6 +776,74 @@ def forwarded_target(name):
     return transparent_target(insns)
 
 
+CALLED = re.compile(r'\b(\w+)\s*\(')  # what signatures() searched for name by name: r'\bNAME\s*\('
+
+
+class SignatureMemo:
+    """Each name's signature from the declarations (signatures()), remembered across builds and
+    checkouts in DHD_DEVCACHES/dhd-modulecache/recomp-signatures.json (finding 151). The key is
+    everything the answer is made from: the name, the text of every source file that names it,
+    the headers those files can include (include/ and port/include: src/ has none, and no source
+    includes another), clang's version, the target and this file. Without it every core build ran
+    clang's AST dump on each name's files again: thousands of processes, 1 to 2 minutes."""
+    base = None
+
+    def __init__(self, files):
+        devcaches = os.environ.get('DHD_DEVCACHES') or os.path.join(os.path.expanduser('~'), 'DevCaches')
+        self.path = os.path.join(devcaches, 'dhd-modulecache', 'recomp-signatures.json')
+        self.files = files
+        self.sha = {}
+        if not SignatureMemo.base:  # once a process: the headers do not change during a build
+            h = hashlib.sha256(('%s\0%s\0' % (SIGNATURE_VERSION, TARGET)).encode())
+            h.update(open(os.path.abspath(__file__), 'rb').read())
+            h.update(subprocess.run(['clang', '--version'], capture_output=True).stdout)
+            for d in (os.path.join(ROOT, 'include'), os.path.join(ROOT, 'port', 'include')):
+                for p in sorted(glob.glob(os.path.join(d, '**', '*'), recursive=True)):
+                    if os.path.isfile(p):
+                        h.update(os.path.relpath(p, ROOT).replace(os.sep, '/').encode() + b'\0' + open(p, 'rb').read())
+            SignatureMemo.base = h.digest()
+        self.base = SignatureMemo.base
+        try:
+            self.known = json.load(open(self.path))
+        except (OSError, ValueError):
+            self.known = {}
+        self.new = {}
+
+    def key(self, name, paths):
+        h = hashlib.sha256(self.base + name.encode())
+        for p in sorted(paths):
+            if p not in self.sha:
+                self.sha[p] = hashlib.sha256(self.files[p].encode('utf-8', 'surrogateescape')).digest()
+            h.update(os.path.relpath(p, SRC).replace(os.sep, '/').encode() + b'\0' + self.sha[p])
+        return h.hexdigest()
+
+    def get(self, name, paths):
+        sig = self.known.get(self.key(name, paths))
+        return dict(sig) if sig is not None else None
+
+    def put(self, name, paths, sig):
+        self.new[self.key(name, paths)] = dict(sig)
+
+    def save(self):
+        if not self.new:
+            return
+        try:
+            try:
+                known = json.load(open(self.path))
+            except (OSError, ValueError):
+                known = {}
+            if len(known) > 200000:  # entries of sources long gone: start again
+                known = {}
+            known.update(self.new)
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = '%s.%d.tmp' % (self.path, os.getpid())
+            with open(tmp, 'w') as f:
+                json.dump(known, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
 def signatures(names):
     """{name: {'ret': class, 'args': [class...], 'variadic': bool}}; default 8 int args."""
     cache_path = os.path.join(OUT, 'signatures.json')
@@ -800,13 +868,22 @@ def signatures(names):
     if todo:
         files = {p: open(p, encoding='utf-8', errors='replace').read()
                  for p in glob.glob(os.path.join(SRC, '**', '*.c*'), recursive=True)}
+        named = {}  # name -> the files that name it before a '(' (a declaration, a definition or a call)
+        for p, t in files.items():
+            for ident in set(CALLED.findall(t)):
+                named.setdefault(ident, []).append(p)
+        memo = SignatureMemo(files)
         for n in todo:
+            known = memo.get(n, named.get(n, ()))
+            if known is not None:
+                cache[n] = known
+                continue
             defin = re.compile(r'\b%s\s*\([^;{}]*\)\s*\{' % re.escape(n))
             # a variadic declaration first (sprintf declared with 4 int parameters somewhere still
             # takes more), then a definition
             varargs = re.compile(r'\b%s\s*\([^;{}()]*\.\.\.\s*\)' % re.escape(n))
-            cands = sorted((0 if varargs.search(t) else 1, 0 if defin.search(t) else 1, p)
-                           for p, t in files.items() if re.search(r'\b%s\s*\(' % re.escape(n), t))
+            cands = sorted((0 if varargs.search(files[p]) else 1, 0 if defin.search(files[p]) else 1, p)
+                           for p in named.get(n, ()))
             sig = unprototyped = None
             for _, _, p in cands[:6]:
                 r = ast_type(n, p)
@@ -826,6 +903,8 @@ def signatures(names):
                 if sig['ret'] != 'void':
                     break
             cache[n] = sig or {'ret': unprototyped or 'i32', 'args': ['i32'] * 8, 'variadic': False, 'from': None}
+            memo.put(n, named.get(n, ()), cache[n])
+        memo.save()
     for n in names:
         if n in NATIVE_SCALARS and NATIVE_SCALARS[n]['ret'] is None:
             cache[n]['args'] = [SCALAR_CLASS[c] for c in NATIVE_SCALARS[n]['args']]

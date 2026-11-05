@@ -27,7 +27,7 @@ usage: python port/tools/build_wasm.py [-j 8]
 Needs LLVM's clang, wasm-ld, llvm-nm, llvm-objcopy, llvm-cxxfilt on PATH (clang also assembles the
 data image as a COFF object, for its checks only), WABT's wasm-objdump, the wasi-sdk sysroot
 (WASI_SYSROOT) and SIMDe (SIMDE_DIR). The native hosts run wasm2c themselves (build_host64.py)."""
-import argparse, collections, glob, hashlib, json, os, re, shutil, subprocess, sys, time
+import argparse, collections, glob, hashlib, json, os, re, shutil, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -941,8 +941,63 @@ JOBS = {}      # object path -> (compile function, its base job): how to rebuild
 REFUSED = {}   # recompiled names the scalar guard refused (recompile_objects fills it)
 
 
+class ObjectSignatures:
+    """object_signatures' answers by the object's SHA-256, kept across builds and checkouts in
+    CORE_CACHE/object-signatures.json (finding 151): an object of the same bytes has the same
+    signatures, and a build reads those of about 4,500 objects (one wasm-objdump each: 5,000
+    processes, a third of a rebuild's time when every object came from the object cache)."""
+    def __init__(self):
+        self.path = CORE_CACHE / 'object-signatures.json'
+        self.lock = threading.Lock()
+        try:
+            self.known = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            self.known = {}
+        self.new = {}
+
+    def get(self, path):
+        key = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+        found = self.known.get(key) or self.new.get(key)
+        if found is None:
+            defs, imps = object_signatures_uncached(path)
+            with self.lock:
+                self.new[key] = [{n: [list(p), r] for n, (p, r) in d.items()} for d in (defs, imps)]
+            return defs, imps
+        return tuple({n: (tuple(p), r) for n, (p, r) in d.items()} for d in found)
+
+    def save(self):
+        if not self.new:
+            return
+        try:
+            try:
+                known = json.loads(self.path.read_text())
+            except (OSError, ValueError):
+                known = {}
+            if len(known) > 100000:  # objects of sources long gone: start again
+                known = {}
+            known.update(self.new)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name('object-signatures.json.%d.tmp' % os.getpid())
+            tmp.write_text(json.dumps(known))
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
+SIGNATURES = []  # the build's ObjectSignatures, made on first use
+SIGNATURES_LOCK = threading.Lock()
+
+
 def object_signatures(path):
-    """({defined name: sig}, {imported name: sig}) of a wasm object; sig = (param types, result or None)."""
+    """({defined name: sig}, {imported name: sig}) of a wasm object; sig = (param types, result or
+    None). Remembered by the object's bytes (ObjectSignatures)."""
+    with SIGNATURES_LOCK:
+        if not SIGNATURES:
+            SIGNATURES.append(ObjectSignatures())
+    return SIGNATURES[0].get(path)
+
+
+def object_signatures_uncached(path):
     types, defs, imps, section = {}, {}, {}, None
     for line in wasm_objdump(path, '-x').splitlines():
         m = SECTION.match(line)
@@ -1187,6 +1242,8 @@ def abi_stage_core(objs, rc_objs, failed_units, max_workers=8):
                                 where, '%s__as_%s' % (name, sig_tag(csig)),
                                 handling(csig, dsig), reads]))
     write(os.path.join(OUT, 'abi_thunks.tsv'), '\n'.join(table) + '\n')
+    if SIGNATURES:
+        SIGNATURES[0].save()
     return {'objs': [stub_o, thunk_o], 'stubs': sorted(stubs), 'thunks': len(thunks), 'rows': len(rows),
             'left': len(left), 'table': table}
 
@@ -1228,25 +1285,72 @@ def core_inputs_key():
         for p in glob.glob(os.path.join(ROOT, d, '**', '*'), recursive=True):
             if os.path.isfile(p):
                 names.add(os.path.relpath(p, ROOT).replace(os.sep, '/'))
+    memo = FileHashes()
     for n in sorted(names):
         p = os.path.join(ROOT, n)
         if os.path.isfile(p):
             # line endings as git stores them: checkouts differ (core.autocrlf), the module doesn't
-            h.update(n.encode() + b'\0' + hashlib.sha256(open(p, 'rb').read().replace(b'\r\n', b'\n')).digest())
+            h.update(n.encode() + b'\0' + memo.sha256(p, lf=True))
     for k in CORE_ENV:
         h.update(('%s=%s\n' % (k, os.environ.get(k, ''))).encode())
     # the inputs outside the checkout by their content, not only their place: an external
     # DHD_VUTEXT (vu1_aot.py reads it), SIMDe's headers, the WASI sysroot's headers and libraries
     vutext = os.environ.get('DHD_VUTEXT')
     if vutext and os.path.isfile(vutext):
-        h.update(b'vutext\0' + hashlib.sha256(open(vutext, 'rb').read()).digest())
+        h.update(b'vutext\0' + memo.sha256(vutext))
     for base, patterns in ((SIMDE, ('**/*.h',)), (WASI, ('include/**/*.h', 'lib/**/*.a'))):
         for pattern in patterns:
             for p in sorted(glob.glob(os.path.join(base, pattern), recursive=True)):
-                h.update(os.path.relpath(p, base).encode() + b'\0' + hashlib.sha256(open(p, 'rb').read()).digest())
+                h.update(os.path.relpath(p, base).encode() + b'\0' + memo.sha256(p))
     h.update(('%s|%s|%s\n' % (WASI, SIMDE, WABT)).encode())
     h.update(run(['clang', '--version']).stdout.encode())
+    memo.save()
     return h.hexdigest()
+
+
+class FileHashes:
+    """Files' SHA-256 remembered across builds by path, size, modification time and file id
+    (CORE_CACHE/file-hashes.json): the key re-reads only files changed since (finding 151: the
+    WASI sysroot and SIMDe alone are 272 MB, 5 s of every build, hits included). lf: the hash of
+    the text with CRLF as LF."""
+    def __init__(self):
+        self.path = CORE_CACHE / 'file-hashes.json'
+        try:
+            self.known = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            self.known = {}
+        self.changed = False
+
+    def sha256(self, path, lf=False):
+        st = os.stat(path)
+        name = ('lf:' if lf else '') + os.path.normcase(os.path.abspath(path))
+        stamp = [st.st_size, st.st_mtime_ns, st.st_ino]
+        entry = self.known.get(name)
+        if entry and entry[:3] == stamp:
+            return bytes.fromhex(entry[3])
+        data = open(path, 'rb').read()
+        digest = hashlib.sha256(data.replace(b'\r\n', b'\n') if lf else data).digest()
+        self.known[name] = stamp + [digest.hex()]
+        self.changed = True
+        return digest
+
+    def save(self):
+        if not self.changed:
+            return
+        try:  # merged with what other checkouts stored meanwhile; a lost race only costs a re-read
+            try:
+                known = json.loads(self.path.read_text())
+            except (OSError, ValueError):
+                known = {}
+            known.update(self.known)
+            if len(known) > 100000:  # files of removed checkouts
+                known = {k: v for k, v in known.items() if os.path.exists(k.removeprefix('lf:'))}
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name('file-hashes.json.%d.tmp' % os.getpid())
+            tmp.write_text(json.dumps(known))
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
 
 
 def core_cache_get(key):
