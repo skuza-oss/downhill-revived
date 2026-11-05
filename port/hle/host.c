@@ -359,7 +359,21 @@ static LONG WINAPI crashed(EXCEPTION_POINTERS *e)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 #else
-/* Fatal signals end the process with the same words the Windows crash report has. */
+void host_log_drain(void);  /* below: the log's last lines reach the file */
+
+/* What SIGSEGV, SIGBUS, SIGILL and SIGFPE had before crashed (host_init). */
+static struct sigaction crash_before[4];
+static struct sigaction *crash_before_of(int sig)
+{
+    return &crash_before[sig == SIGSEGV ? 0 : sig == SIGBUS ? 1 : sig == SIGILL ? 2 : 3];
+}
+
+/* Fatal signals end the process with the same words the Windows crash report has. The report is
+   drained into dhd.log first (the copying thread dies with the process). When a handler was there
+   before ours (Android's: debuggerd, under ART's signal chain), it gets the crash too and the
+   process then ends by the signal, as without us: the system writes its tombstone and records a
+   native crash, which the next start reads (SetupActivity, finding 152). A desktop has none: exit
+   code 3, as before. */
 static void crashed(int sig, siginfo_t *info, void *ctx)
 {
     const char *name = sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGILL ? "SIGILL" : "SIGFPE";
@@ -376,6 +390,18 @@ static void crashed(int sig, siginfo_t *info, void *ctx)
     }
     peek();
     fflush(stderr);
+    host_log_drain();
+    const struct sigaction *before = crash_before_of(sig);
+    if ((before->sa_flags & SA_SIGINFO) && before->sa_sigaction && before->sa_sigaction != crashed) {
+        sigset_t self;
+        before->sa_sigaction(sig, info, ctx);
+        signal(sig, SIG_DFL);
+        sigemptyset(&self);
+        sigaddset(&self, sig);
+        pthread_sigmask(SIG_UNBLOCK, &self, NULL);
+        raise(sig);
+        raise(sig);  /* ART's chain answers a default action by setting it in the kernel and returning */
+    }
     _exit(3);
 }
 #endif
@@ -709,10 +735,10 @@ void host_init(void)
     sa.sa_sigaction = crashed;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGFPE, &sa, NULL);
+    sigaction(SIGSEGV, &sa, crash_before_of(SIGSEGV));
+    sigaction(SIGBUS, &sa, crash_before_of(SIGBUS));
+    sigaction(SIGILL, &sa, crash_before_of(SIGILL));
+    sigaction(SIGFPE, &sa, crash_before_of(SIGFPE));
     game_thread = pthread_self();
     game_thread_set = 1;
     host_thread_name("game");
