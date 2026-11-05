@@ -7,6 +7,7 @@ products stay under build/wasm2c-chunks-test/.
 """
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -71,7 +72,7 @@ def main():
         text, header = u.read_text(), u.with_suffix('.h').read_text()
         for name in ('w2c_core_f%d' % i for i in range(COUNT)):
             if name + '(' in header:
-                assert name in text, '%s declares %s, unused' % (u.with_suffix('.h').name, name)
+                assert re.search(r'\b%s\b' % name, text), '%s declares %s, unused' % (u.with_suffix('.h').name, name)
     rt = wabt / 'share/wabt/wasm2c'
     cc = [str(LLVM / 'clang.exe') if os.name == 'nt' else 'clang', '-fsyntax-only', '-w',
           '-DWASM_RT_MEMCHECK_GUARD_PAGES=1', '-DWASM_RT_NONCONFORMING_ALLOW_OOB_READ_ELIMINATION=1',  # syntax only: no GNU asm
