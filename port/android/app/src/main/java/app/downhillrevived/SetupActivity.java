@@ -90,12 +90,12 @@ public class SetupActivity extends Activity {
         LastExit exit = LastExit.record(this);
         if (SHARE_LOG.equals(getIntent().getAction())) {
             sharingOnly = true;
-            hideBars();
+            backdrop();
             if (!LogShare.start(this, SHARE)) finish();
             return;
         }
         if (exit != null && exit.why != null && LastExit.firstAsk(this, exit)) {
-            hideBars();
+            backdrop();
             showClosedUnexpectedly(exit.why);
             return;
         }
@@ -551,6 +551,16 @@ public class SetupActivity extends Activity {
         d.setCornerRadius(dp(8));
         if (border != 0) d.setStroke(dp(1), border);
         return d;
+    }
+
+    /** A plain screen behind the dialog or the share sheet. It also gives the window its decor view,
+     *  which getInsetsController needs: before any setContentView it is null and hideBars throws
+     *  (Android 13, Mi 11i; finding 152). */
+    private void backdrop() {
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(GROUND);
+        setContentView(root);
+        hideBars();
     }
 
     private void hideBars() {
