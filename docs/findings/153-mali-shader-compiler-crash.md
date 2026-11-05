@@ -1,6 +1,6 @@
 # 153: The native renderer's pipelines on Mali's r54p1 shader compiler
 
-Status: in progress
+Status: current
 
 Branch `fix/mali-shader` from `main` 91f4f2a, started 2026-11-05. This file is the lane's plan
 while it runs and its finding when it merges.
@@ -135,6 +135,11 @@ The cause, with the evidence there is (no phone or malioc reproduction here):
   lacks; our stages declare no such capability; https://github.com/jacquesdupontd/port0r/issues/2),
   pipelines built on several threads at once (cinnabar's wgpu fork, PR #7; native_blit is the
   native renderer's first pipeline, built at create, before its specialisation worker exists).
+
+Confirmed on a phone (2026-11-05): a Discord tester's Mali phone that closed at startup with
+0.7.10 starts and plays with the test build carrying this fix (test-crashlog-2: main 86faa23 plus
+the pipeline trace patch). On the Mi 11i (Adreno 660) the same build creates all six changed
+pipelines and draws the title screen. The phone-test plan follows for the record.
 
 Left for a phone test (the lead): the Redmi (UMS9230E) or the Galaxy A07, 0.7.10's native renderer
 on r54p1, with this branch's build: the game starts with RENDER=native and draws a race (the blit,
