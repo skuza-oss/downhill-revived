@@ -1,6 +1,6 @@
 # 152: Crash logs players can keep and share (Android first)
 
-Status: in progress
+Status: current
 
 Branch `feat/crash-log` from `main` f7be0e2, started 2026-11-05. This file is the lane's plan
 while it runs and its finding when it merges.
@@ -85,19 +85,28 @@ change.
   `build_apk.py` debug APK built, its manifest has `LogProvider` (exported false,
   grantUriPermissions) and the `share_log` shortcut on SetupActivity; `build_host64.py` win-x64
   builds. Not run: the game itself on a desktop (the dhd-previous.log check) or on a phone.
-- [ ] On a phone and a desktop (the lead): the acceptance's crash, dialog, share, shortcut and
-  dhd-previous.log checks.
+- [x] 2026-11-05 on the Mi 11i (Android 13), release-signed build over 0.7.10 (the lead): a crash
+  of the game thread at start (a test-only switch on a test branch) is recorded by Android as
+  `APP CRASH(NATIVE)` with a tombstone; the next start shows the dialog ("It crashed."); Share log
+  opens the share sheet with `downhill-revived-0.7.10-log-2026-11-05.txt` holding Android's record,
+  the tombstone summary ("Cause: null pointer dereference", frames with build IDs) and the run's
+  full crash report; Play starts the game; a start after a user stop shows no dialog; the
+  `SHARE_LOG` action opens the share sheet only and Back ends it; the `share_log` shortcut is
+  registered. `check.py port` OK on the merged tree. Three faults were found and fixed on the way
+  (Surprises). Not run: the desktop dhd-previous.log check by hand.
 
 ## Decisions
 
 - **The crash handler hands the crash on (Android).** host.c's POSIX `crashed` ended with
   `_exit(3)`: Android then records `REASON_EXIT_SELF` status 3 and writes no tombstone, so item 2
-  had nothing to read. Now, after its report (unchanged) and `host_log_drain`, it calls the handler
-  that was installed before it (on Android debuggerd's, under ART's signal chain), then ends by the
-  signal with the default action (raised twice: ART's chain answers a default action by setting it
-  in the kernel and returning). The system writes its tombstone and records `REASON_CRASH_NATIVE`.
-  A desktop has no handler before ours: `_exit(3)` as before (no macOS crash reporter dialog, no
-  core dumps). EXIT_SELF status 3 and SIGNALED by a crash signal still count as "crashed".
+  had nothing to read. Now, after its report (unchanged) and `host_log_drain`, on Android it puts
+  back the handler that was installed before it and returns: the faulting instruction runs again
+  and faults into that handler (a signal sent with kill is raised again instead). Guest memory's
+  handler (`port/host64/guest_memory_posix.c`) does the same with the one before it for a fault
+  that is not its own, down to the system's crash dump (debuggerd), which writes the tombstone and
+  records `REASON_CRASH_NATIVE`. A desktop exits with code 3 as before (no macOS crash reporter
+  dialog, no core dumps). EXIT_SELF status 3 and SIGNALED by a crash signal still count as
+  "crashed".
 - **Which log is shared.** The plan said dhd-previous.log, but the dialog runs before the native
   game, when dhd.log is still the run that crashed. The shared file holds both logs: first the run
   that ended (dhd.log, or dhd-previous.log when a dhd.log was written since this process started,
@@ -116,7 +125,29 @@ change.
 
 - The crash report could miss dhd.log on Linux, macOS and Android: `crashed` called `_exit` with
   the report still in the log pipe (the copying thread dies with the process). It drains first now.
+- Found on the phone (2026-11-05), all fixed:
+  - SetupActivity called `hideBars` before any `setContentView` on the dialog and Share log paths:
+    the window has no decor view yet, `getInsetsController` threw, and every start after a crash
+    closed again at once. A plain backdrop view comes first now.
+  - The report's stack walk (`host_readable`) probes past the stack's end with a fault guard, but
+    inside the crash handler the fault signal was still blocked, and a fault on a blocked signal
+    ends the process at once: a crash near the top of a thread's stack left only the report's
+    first line and no tombstone. The handler unblocks SIGSEGV and SIGBUS before the report. This
+    predates the lane (every POSIX platform).
+  - The lane's first chain called the handler before ours directly; on Android that handler is
+    guest memory's, not debuggerd's, and it answered a fault not its own with the default action:
+    Android recorded `SIGNALED` and wrote no tombstone. Fixed as in Decisions.
+  - An external `kill -SEGV` lands on the Java main thread and is no test of a native crash; the
+    phone check used a test-only switch that faults the game thread at start.
 - `at += length()` in Java reads `at` before `length()` moves it: the JVM test's tombstone caught
   it (every length-delimited field skipped was off by its length's bytes).
 
 ## Result
+
+2026-11-05: after a crash on Android the next start says the game closed unexpectedly and why
+(crashed, the graphics driver crashed, ran out of memory, stopped responding), with Share log
+(Android's share sheet, one text file: the phone, Android's record of how the run ended with the
+tombstone's summary, then the logs) and Play; the icon's long-press has Share log too. Crashes now
+reach Android's crash dump (tombstone, `CRASH_NATIVE`), and the crash report always reaches
+dhd.log. Every platform keeps the run before as dhd-previous.log. The release keeps the unstripped
+libmain.so beside the APK (never published) to name backtraces' frames.
