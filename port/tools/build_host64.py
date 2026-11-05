@@ -307,43 +307,63 @@ def main():
         else:
             wasm = None
         wasm2c = wabt / 'bin' / ('wasm2c.exe' if os.name == 'nt' else 'wasm2c')
-        units = module_units(work, run, wasm2c, wasm, a.module, outputs)
-        step('wasm2c')
-        rows, exports = generate(work/'core.h', work, linux=t.posix)
-        check_launcher_exports(exports)
-        prepare_units(units, work, exact_f32=True)
-        step('prepare C')
-        # The module runs on one OS thread only (its fibers; posted jobs and callbacks are drained
-        # there, finding 082 W7e), as its shared __stack_pointer global already requires. WABT's
-        # call-depth counter is thread-local, which costs a TLS lookup on every wasm call and
-        # return; a copy of wasm-rt.h that lets the build choose the storage class makes it a
-        # plain global. The depth check itself (WASM_RT_STACK_DEPTH_COUNT, limit 512) is unchanged.
-        header = (wabt/'include/wasm-rt.h').read_text()
-        block = '#ifdef WASM_RT_C11_AVAILABLE\n#define WASM_RT_THREAD_LOCAL _Thread_local\n'
-        if header.count(block) != 1:
-            raise ValueError('wasm-rt.h: WASM_RT_THREAD_LOCAL block not found (WABT version changed?)')
-        start = header.index(block); end = header.index('#endif\n', start) + len('#endif\n')
-        header = (header[:start] + '#ifndef WASM_RT_THREAD_LOCAL\n' + header[start:end] + '#endif\n' +
-                  header[end:])
-        if t.windows:
-            # Guard pages: WABT keeps every load alive with GNU asm, which it gates on __GNUC__, and
-            # supports guard pages on every 64-bit GNU host; clang-cl has the same asm but does not
-            # define __GNUC__.
-            force_read = '#elif defined(__GNUC__) && WASM_RT_MEMCHECK_GUARD_PAGES'
-            for source in units + list(work.glob('*-impl.h')):
-                text = source.read_text()
-                if force_read in text:
-                    source.write_text(text.replace(force_read, '#elif (defined(__GNUC__) || defined(__clang__)) && '
-                                                               'WASM_RT_MEMCHECK_GUARD_PAGES'))
-            supported = '(WASM_RT_NONCONFORMING_ALLOW_OOB_READ_ELIMINATION || defined(__GNUC__))'
-            if header.count(supported) != 1:
-                raise ValueError('wasm-rt.h: guard-page support test not found (WABT version changed?)')
-            header = header.replace(supported, supported[:-1] + ' || defined(__clang__))')
-        (work/'wasm-rt.h').write_text(header)
-        # a split module's functions in content-defined chunks, so an unchanged function's C stays
-        # byte-identical and its object comes from the object cache (prepare_wasm2c.stable_units)
-        units = stable_units(units, work)
-        step('chunks')
+        # wasm2c, the imports, the prepared and chunked C: made again only when one of their inputs
+        # changed (the module, these tools, WABT, the target); every compile's own cache key reads them
+        inputs = [wasm] if wasm else sorted({p.resolve() for m in a.module for p in [m, *m.parent.glob('*.h')]})
+        prepared = hashlib.sha256(repr((t.key, outputs, a.fake, str(wabt))).encode())
+        for f in inputs + [Path(__file__), ROOT/'port/tools/prepare_wasm2c.py', ROOT/'port/tools/gen_host64_imports.py',
+                           *([wasm2c] if wasm else []), wabt/'include/wasm-rt.h']:
+            prepared.update(hashlib.sha256(Path(f).read_bytes()).digest())
+        stamp = work/'prepared.json'
+        try:
+            old = json.loads(stamp.read_text())
+        except (OSError, ValueError):
+            old = {}
+        if old.get('key') == prepared.hexdigest() and all(Path(u).exists() for u in old['units']):
+            units, imports = [Path(u) for u in old['units']], old['imports']
+            step('module C as before')
+        else:
+            stamp.unlink(missing_ok=True)
+            units = module_units(work, run, wasm2c, wasm, a.module, outputs)
+            step('wasm2c')
+            rows, exports = generate(work/'core.h', work, linux=t.posix)
+            check_launcher_exports(exports)
+            prepare_units(units, work, exact_f32=True)
+            step('prepare C')
+            # The module runs on one OS thread only (its fibers; posted jobs and callbacks are drained
+            # there, finding 082 W7e), as its shared __stack_pointer global already requires. WABT's
+            # call-depth counter is thread-local, which costs a TLS lookup on every wasm call and
+            # return; a copy of wasm-rt.h that lets the build choose the storage class makes it a
+            # plain global. The depth check itself (WASM_RT_STACK_DEPTH_COUNT, limit 512) is unchanged.
+            header = (wabt/'include/wasm-rt.h').read_text()
+            block = '#ifdef WASM_RT_C11_AVAILABLE\n#define WASM_RT_THREAD_LOCAL _Thread_local\n'
+            if header.count(block) != 1:
+                raise ValueError('wasm-rt.h: WASM_RT_THREAD_LOCAL block not found (WABT version changed?)')
+            start = header.index(block); end = header.index('#endif\n', start) + len('#endif\n')
+            header = (header[:start] + '#ifndef WASM_RT_THREAD_LOCAL\n' + header[start:end] + '#endif\n' +
+                      header[end:])
+            if t.windows:
+                # Guard pages: WABT keeps every load alive with GNU asm, which it gates on __GNUC__, and
+                # supports guard pages on every 64-bit GNU host; clang-cl has the same asm but does not
+                # define __GNUC__.
+                force_read = '#elif defined(__GNUC__) && WASM_RT_MEMCHECK_GUARD_PAGES'
+                for source in units + list(work.glob('*-impl.h')):
+                    text = source.read_text()
+                    if force_read in text:
+                        source.write_text(text.replace(force_read, '#elif (defined(__GNUC__) || defined(__clang__)) && '
+                                                                   'WASM_RT_MEMCHECK_GUARD_PAGES'))
+                supported = '(WASM_RT_NONCONFORMING_ALLOW_OOB_READ_ELIMINATION || defined(__GNUC__))'
+                if header.count(supported) != 1:
+                    raise ValueError('wasm-rt.h: guard-page support test not found (WABT version changed?)')
+                header = header.replace(supported, supported[:-1] + ' || defined(__clang__))')
+            (work/'wasm-rt.h').write_text(header)
+            # a split module's functions in content-defined chunks, so an unchanged function's C stays
+            # byte-identical and its object comes from the object cache (prepare_wasm2c.stable_units)
+            units = stable_units(units, work)
+            step('chunks')
+            imports = len(rows)
+            stamp.write_text(json.dumps({'key': prepared.hexdigest(), 'units': [str(u) for u in units],
+                                         'imports': imports}))
         # Bounds checks by guard pages: what lies beyond the memory's size is reserved, never
         # committed, so an out-of-bounds access faults and its reporter (guest_memory_*.c) names the
         # guest address and ends the process, as the trap did. WABT's own fault-to-trap handler stays
@@ -500,7 +520,7 @@ def main():
         step('link')
         (work/'failure.log').unlink(missing_ok=True)
         host_summary = 'reused host library' if a.host_library else f'{len(host_objects)} {t.key} host objects'
-        print(f'PASS: {len(rows)} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
+        print(f'PASS: {imports} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
               flush=True)
         print('steps: ' + step.summary(), flush=True)
         if a.run and not t.android:
