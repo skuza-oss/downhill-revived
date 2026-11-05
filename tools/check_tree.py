@@ -15,6 +15,7 @@ import os, re, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OFFICIAL = 'dhd.skuza.app'
+RUN_ON = re.compile(r'^dhd\.skuza\.app(?:name|wss)\w*$', re.I)  # see url_ok
 
 # Game data and other never-commit files, by name.
 DATA_EXT = {'.iso', '.elf', '.irx', '.bnk', '.vag', '.ngp', '.rtx', '.tex', '.pss', '.ps2', '.mc2',
@@ -80,9 +81,10 @@ def is_binary(data):
 
 
 def url_ok(scheme, host, line, at):
-    # the official host, or it run into the next string ("wss://dhd.skuza.appnamedhd", as
-    # package_release's check): letters after it but no further dot, so dhd.skuza.app.other.org fails
-    official = host.startswith(OFFICIAL) and '.' not in host[len(OFFICIAL):].rstrip('.')
+    # the official host exactly (a sentence's final dot allowed), or it run into the next string of
+    # a binary as package_release's docs show it ("wss://dhd.skuza.appnamedhd": dhd_settings' keys
+    # "name"/"wss" follow it); dhd.skuza.apple or dhd.skuza.app.other.org fail
+    official = host.rstrip('.') == OFFICIAL or RUN_ON.match(host)
     if official or LOCAL_HOSTS.match(host) or EXAMPLE.search(host):
         return True
     near = line[at:at + 80]
