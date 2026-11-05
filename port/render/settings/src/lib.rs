@@ -13,6 +13,9 @@
 //!   keeps only the text's storage (IndexedDB) and what the browser can't offer.
 //! - The rider name's rule (`name`) is here too, for the launcher's rider card and, through
 //!   settings_table.h, the game's online menu.
+//! - The keyboard and controller bindings (`controls`, finding 157): the `keyboard`, `pad1` and
+//!   `pad2` lines' layouts and the rules of a change, for the game (through port/hle/
+//!   controls_table.h and the C interface) and the launcher's Controls tab.
 //!
 //! Precedence: a DHD_* variable set in the environment overrides dhd.ini (the game's tools set
 //! them); dhd.ini overrides the player's default; without dhd.ini the game keeps its built-in
@@ -21,6 +24,7 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod c;
+pub mod controls;
 mod ini;
 pub mod name;
 pub mod table;
