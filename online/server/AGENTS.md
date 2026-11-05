@@ -9,7 +9,7 @@ The root `AGENTS.md` rules apply. Protocol: `docs/online-protocol.md`; steps and
   finding 138.
 - The official server is `wss://dhd.skuza.app`, the game's default. No other server address in a
   tracked file: `wrangler.jsonc` names no account, and examples use placeholders
-  (`dhd-online.<account-subdomain>.workers.dev`).
+  (`dhd-online.<account>.workers.dev`).
 - `MIN_VERSION` in `wrangler.jsonc` is the oldest game release the server lets in. Raise it only
   when a release is published and older ones should stop racing; read the value from the file,
   never copy it into docs.

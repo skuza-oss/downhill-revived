@@ -195,7 +195,7 @@ dhd.exe and the text files.
 ## 5. The official server is the default (round 39, third part)
 
 The project's public race server (`online/server/`, HTTP `GET /v1/lobbies`) was then deployed at
-its workers.dev address; today it is `wss://dhd.skuza.app`, the game's default. It is the one server address the repository and the
+its Cloudflare workers address; today it is `wss://dhd.skuza.app`, the game's default. It is the one server address the repository and the
 release may name. `host.c` `host_settings_load` sets `DHD_NET_SERVER` to it after reading dhd.ini
 when nothing set it: no dhd.ini, an empty `server =`, no `DHD_NET_SERVER`. An explicit
 `server = ...` or `DHD_NET_SERVER` still wins (self-hosting). The template's comment says so.

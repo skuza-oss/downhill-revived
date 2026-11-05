@@ -90,7 +90,7 @@ def url_ok(scheme, host, line, at):
     near = line[at:at + 80]
     if '<' in near or '{' in near or '...' in near:  # a placeholder: wss://dhd-online.<account>.workers.dev
         return True
-    if scheme.startswith('http') and not host.endswith('workers.dev'):
+    if scheme.startswith('http') and not re.search(r'\.workers\.dev$', host):
         return True  # web links (docs, sources) are fine; only race servers are restricted
     return False
 
