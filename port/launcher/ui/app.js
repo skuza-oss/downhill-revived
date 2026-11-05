@@ -42,6 +42,7 @@ const TABS = [
     { type: 'sticks' },
     { key: 'prompts', label: 'Button icons', hint: 'The buttons the game shows. Auto follows your controller.', type: 'seg' },
     { key: 'vibration', label: 'Vibration', type: 'switch' },
+    { type: 'bindings' },
   ]],
   ['Online', [
     { key: 'name', label: 'Rider name', hint: () => `Shown over your rider in online races. ${state.schema.name.rule.hint}`, type: 'name' },
@@ -50,6 +51,7 @@ const TABS = [
   ]],
 ];
 const GAME_TAB = 2;
+const CONTROLS_TAB = 3;
 const ONLINE_TAB = 4;
 const OFFLINE_ONLY = "Offline only: this disc image's game files are different from the USA disc's (SCUS-97177): a bad or modified dump. Make a new dump or choose another image.";
 
@@ -310,11 +312,12 @@ function renderTabs() {
 }
 
 function renderRows() {
-  const rows = TABS[state.tab][1].map((row) => {
+  const rows = TABS[state.tab][1].flatMap((row) => {
     if (row.type === 'sticks') {  // stick.js: the dead zone, live from the controller
       const { canvas, note } = stickIndicator(() => get('stick_dead_zone'));
       return el('div', { class: 'row sticks-row' }, el('div', { class: 'l' }, note), canvas);
     }
+    if (row.type === 'bindings') return bindingsBlock();  // controls.js: keys and buttons
     const off = row.when ? !row.when() : false;
     let hint = off ? row.offHint : typeof row.hint === 'function' ? row.hint() : row.hint;
     let title = null;
@@ -338,6 +341,7 @@ async function resetTab() {
   try {
     // a text row is emptied (its default, the official server, stays the game's to name)
     for (const row of rows) if (row.key && row.type !== 'disc' && row.type !== 'name') await write(row.key, row.type === 'text' ? '' : state.schema[row.key].default);
+    if (state.tab === CONTROLS_TAB) await resetBindings();  // the keyboard's and both controllers' layouts
     flash(`${name} is back to the defaults`);
   } catch (e) {
     fail(String(e));
