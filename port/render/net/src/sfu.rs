@@ -23,6 +23,10 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 /// Datagrams the reader took off the socket and their arrival times; at most INBOX.
 type Inbox = Arc<Mutex<VecDeque<(Instant, SocketAddr, Vec<u8>)>>>;
 const INBOX: usize = 1024;
+/// Events for a race this client hasn't seen start yet (its start message is still on the way):
+/// a sender's few setup events at a race's start, kept per sender and in all.
+const EARLY_EVENTS_PER_SENDER: usize = 16;
+const EARLY_EVENTS_MAX: usize = 128;
 /// How often the reader looks whether its association was dropped.
 const READER_CHECK: Duration = Duration::from_millis(100);
 /// UDP to the SFU that has not connected this long after the answer falls back to a TURN relay
@@ -483,8 +487,12 @@ impl Sfu {
         if bytes[8] != if c.state { 5 } else { 6 } { return Ok(()); }
         let epoch = u64::from_le_bytes(bytes[..8].try_into().unwrap());
         if epoch > self.race && !c.state {
-            if self.future_events.len() >= 128 { return Err("Early event queue full".into()); }
-            self.future_events.push_back((id, bytes));
+            // A next race's events can arrive before its start: keep a few per sender. Another
+            // player decides what arrives here, so a full queue drops theirs and never fails ours.
+            let theirs = self.future_events.iter().filter(|(other, _)| *other == id).count();
+            if theirs < EARLY_EVENTS_PER_SENDER && self.future_events.len() < EARLY_EVENTS_MAX {
+                self.future_events.push_back((id, bytes));
+            }
         } else if epoch == self.race && self.race != 0 {
             if c.state {
                 if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
@@ -637,8 +645,10 @@ mod tests {
         assert!(frames.is_empty());
         client.receive_frame(id, wire(200, 9), &mut frames).unwrap();
         assert_eq!(frames, vec![vec![6,5,9]]);
-        for _ in 0..128 { client.receive_frame(id, wire(300, 1), &mut frames).unwrap(); }
-        assert!(client.receive_frame(id, wire(300, 1), &mut frames).is_err());
+        // Another player's flood of next-race events is capped and dropped, never an error here.
+        for _ in 0..200 { client.receive_frame(id, wire(u64::MAX, 1), &mut frames).unwrap(); }
+        assert_eq!(client.future_events.len(), EARLY_EVENTS_PER_SENDER);
+        assert!(client.poll().is_ok());
     }
 
     #[test]
