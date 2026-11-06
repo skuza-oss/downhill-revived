@@ -540,10 +540,12 @@ static void run_micro(Vif *v, uint32_t addr)
                                        !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
     if (layout.state != 1) layout_run(addr, (v->code >> 24 & 0x7f) == MSCNT);
     uint32_t *mesh_packet = NULL;
+    double mesh_start = profile_start && mesh.state == MESH_ON ? host_wall_seconds() : 0;
     int mesh_batch = mesh.state != MESH_OFF ? mesh_before(addr, (v->code >> 24 & 0x7f) == MSCNT, &mesh_packet) : 0;
     if (mesh_batch == 1) {
         mesh_send(mesh_packet);
         mesh_skipped();
+        if (mesh_start) mesh_timed(host_wall_seconds() - mesh_start);
     } else {
         graphics_provenance.shadow = mesh_batch == 2;
         if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {

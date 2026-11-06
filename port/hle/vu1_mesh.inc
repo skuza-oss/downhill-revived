@@ -1,31 +1,42 @@
-/* Native VU1 world meshes (finding 164), included by vif.c: DHD_NATIVE_VU1=0170 hands overlay B's
-   prelit textured world mesh loop (VI13 0x11, loop 0170, MSCAL 0078: 37-49 % of VU1 time, finding
-   162) to the native renderer instead of running it.
+/* Native VU1 meshes (findings 164 and 167), included by vif.c: DHD_NATIVE_VU1 hands overlay B's
+   batch loops to the native renderer instead of running them. The value lists the loops (by their
+   address; "all" for every one), then optional flags: DHD_NATIVE_VU1=0170:skip.
 
-   The object's setup (MSCAL 0078: 1AE0, the matrices) still runs on the VU, so the registers stay
-   as the program leaves them; each batch after it (MSCNT at 1CB0 or 1040, VI13 0x11) is read from
-   VU1 data memory as the VIF left it and goes to the GS queue as one mesh item (gs_mesh.h): the
+   | loop | VI13  | fog      | colour | UV offset     | back faces | clipping |
+   | 0170 | 0x011 | computed | c vf31 | from vertex 1 | culled     | yes      |
+
+   (c the batch vertex's colour.)
+
+   A batch loop runs after a program's setup has set VI13 and the registers it reads: the shared
+   1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050 and 12F0), and for lit or
+   skinned objects a pass over the object's pool (MSCAL 0040's lighting, 0010/0020's skinning and
+   lighting) that writes positions at 181 + index and lighting at 373 + index. Those stay on the VU.
+   Each batch (MSCNT at 1CB0, 1040, 12E0 or 0590, VI13 a translated loop's) is read from VU1 data
+   memory and the registers as they are and goes to the GS queue as one mesh item (gs_mesh.h): the
    pool positions, colours and texture coordinates of its strip vertices, the triangles the strip
-   draws (the input's ADC joins left out, each in the winding the program's back-face test keeps),
-   the A+D texture writes and PRIM its packet would make, and the object's constants. The batch's
-   microprogram and its XGKICK do not run; what the next run reads is left as the batch leaves it
-   (the strip parity in vf6.x and at 1014, the rotating buffer in VI14/VI2, VI4, TPC 1040).
+   draws (the input's ADC joins left out; with back-face culling each in the winding the program's
+   test keeps), the A+D texture writes and PRIM its packet would make, and the constants. The
+   batch's microprogram and its XGKICK do not run; what the next run reads is left as the batch
+   leaves it (the rotating buffer in VI14/VI2, VI3, VI4, TPC 1040; 0170's strip parity in vf6.x and
+   at 1014). 0590's delay slot, the skinning's last pool store, is made first.
 
-   The batch, as the microcode does it (vudis.py, 0x88-0x268 and 0FA8): header qword at VI2 (the
-   strip's GIF tag: NLOOP n with EOP, PRE, PRIM, PACKED ST RGBAQ XYZF2; w: texture triplet offset
-   t in bits 0-14, bit 15 the strip's parity), then per vertex three qwords: the pool index (S-8),
-   the colour (V4-5), the texture coordinates (V2-16 as 12-bit fixed point; z the Q factor, w
-   2048.0 at a strip join, which the fog's FTOI4 turns into ADC). A vertex k is clip = C (x y z 1)
-   with C the setup's vf1..vf4; q = 1 / clip.w; XYZ = FTOI4(clip.xyz q); fog = clamp(vf19.w +
-   vf18.x + vf18.w q, 0, vf18.y); colour = min(c vf31, 255); STQ = (u, v, uz) q with vf19.xy added
-   to u, v past vertex 0. ADC also when back-facing: with P = 1 when the header's bit 15 is set,
-   else -1 (the prologue sets vf6.x to 1, then negates it), triangle (k-2, k-1, k) is culled when
-   P (-1)^k times its screen area (y down) is positive. CLIP against vf13 (data 996) sends a
-   triangle to the clipper (1948) when any vertex is off the guard band in x or y or below the near
-   bound. The clipper's fans do not come out as a GPU clips (their projection differs over the near
-   ground in fast race frames), so a batch with such a vertex runs on the VU: the same test on the
-   CPU, in homogeneous form, before the batch is translated (about a quarter of the batches).
-   DHD_NATIVE_VU1=0170:gpuclip draws those too and leaves them to the GPU's clipping (a measurement).
+   The batch, as the microcode does it (vudis.py; 0170: 0x88-0x268, the others alike, and 0FA8):
+   header qword at VI2 (the strip's GIF tag: NLOOP n with EOP, PRE, PRIM, PACKED ST RGBAQ XYZF2; w:
+   texture triplet offset t in bits 0-14, bit 15 the strip's parity), then per vertex three qwords:
+   the pool index (S-8), the colour (V4-5), the texture coordinates (V2-16 as 12-bit fixed point; z
+   the Q factor, w 2048.0 at a strip join, which the fog's FTOI4 turns into ADC). A vertex k is
+   clip = C (x y z 1) with C = vf1..vf4; q = 1 / clip.w; XYZ = FTOI4(clip.xyz q); fog = clamp(vf19.w
+   + vf18.x + vf18.w q, 0, vf18.y), or vf18.y itself; colour as the table says, clamped to 255 and
+   truncated; STQ = (u, v, uz) q with vf19.xy added to u, v as the table says. 0170's ADC also
+   marks back faces: with P = 1 when the header's bit 15 is set, else -1 (its prologue sets vf6.x
+   to 1, then negates it), triangle (k-2, k-1, k) is culled when P (-1)^k times its screen area (y
+   down) is positive. CLIP against vf13 (data 996) sends a triangle to the clipper (1948) when any
+   vertex is off the guard band in x or y or below the near bound; the loops without clipping
+   kick such a vertex as it comes. A GPU clips the sideways ones as the clipper does, but not those
+   that cross the near bound (w 1: the clipper's fans differ over the near ground in fast race
+   frames; finding 164), and the GS wraps the unclipped loops' ones: a batch with such a vertex
+   runs on the VU, by the same test on the CPU, in homogeneous form, before it is translated.
+   :gpuclip draws the near ones too and leaves them to the GPU's clipping (a measurement).
 
    Modes: skip (the batch's program does not run), or shadow, the default while DHD_EXACT_PROBE
    answers the lens flare's Z probe from the GS stream: the program runs too and its packet is
@@ -43,20 +54,40 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet) { (void)addr
 static void mesh_send(uint32_t *packet) { (void)packet; }
 static void mesh_skipped(void) {}
 static void mesh_after(unsigned addr, int mscnt) { (void)addr, (void)mscnt; }
+static void mesh_timed(double seconds) { (void)seconds; }
 #else
 enum { MESH_OFF = 1, MESH_ON = 2, MESH_SKIP = 1, MESH_SHADOW = 2 };
 enum { MESH_WHY_EOP, MESH_WHY_COUNT, MESH_WHY_TAG, MESH_WHY_PRIM, MESH_WHY_TEXTURE, MESH_WHY_COLOUR, MESH_WHY_JOIN,
-       MESH_WHY_CLIP, MESH_WHYS };
+       MESH_WHY_NEAR, MESH_WHY_CLIP, MESH_WHYS };
 static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", "prim", "texture tag", "colour",
-                                                     "join value", "a vertex for the clipper"};
+                                                     "join value", "a vertex below the near bound",
+                                                     "a vertex off the guard band in x or y"};
+
+/* The translated loops (the table above). colour: 0 c vf31, 1 c. */
+enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW };
+typedef struct {
+    const char *name;
+    uint16_t vi13;
+    uint8_t fog_max, colour, uv_offset, backface, clip;   /* uv_offset: 0 none, 1 from vertex 1, 2 every vertex */
+} MeshProgram;
+static const MeshProgram mesh_programs[] = {
+    {"0170", 0x011, 0, MESH_COLOUR_SCALED, 1, 1, 1},
+};
+enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
+
+typedef struct {
+    uint64_t batches, fallbacks, vertices, triangles, joins, why[MESH_WHYS];
+    double timed_seconds; uint64_t timed_batches, timed_vertices;   /* DHD_VU1_PROFILE (mesh_timed) */
+} MeshCounts;
+
 static struct {
     int state;                 /* 0 unread, MESH_OFF, MESH_ON */
     int mode;                  /* MESH_SKIP or MESH_SHADOW */
-    int object;                /* the open MSCAL object is a 0078 one: its batches are translated */
+    unsigned enabled;          /* the translated loops, a bit each (mesh_programs) */
+    int object;                /* the batch's loop (mesh_programs), or -1 */
     int gpu_clip;              /* :gpuclip: batches the VU would clip are drawn too (the GPU clips them) */
     uint64_t code_version; int overlay_b;
-    float matrix[16], clip[4], color[4], fog[4], uv[2];
-    uint64_t objects, batches, fallbacks, vertices, triangles, culled_joins, why[MESH_WHYS];
+    MeshCounts count[MESH_PROGRAMS];
     /* the queue item: header, vertices, indices */
     uint32_t packet[(sizeof(GsMeshHeader) + GS_MESH_MAX_VERTICES * sizeof(GsMeshVertex) +
                      GS_MESH_MAX_VERTICES * 3 * 2 + 4) / 4];
@@ -66,18 +97,39 @@ static struct {
     unsigned check_base; float check_parity; uint8_t join[GS_MESH_MAX_VERTICES];
     uint64_t checked, inside, bad_xy, bad_z, bad_fog, bad_colour, bad_stq, triangles_checked, clipped, bad_adc,
              backfaces;
-} mesh;
+} mesh = {.object = -1};
+
+/* A skipped batch's time on the VU thread, from the run's start to the item queued (profiled runs). */
+static void mesh_timed(double seconds)
+{
+    if (mesh.object < 0) return;
+    MeshCounts *c = &mesh.count[mesh.object];
+    c->timed_seconds += seconds;
+    c->timed_batches++;
+    c->timed_vertices += ((const GsMeshHeader *)mesh.packet)->vertices;
+}
 
 static void mesh_report(void)
 {
-    hle_log("native VU1 0170 (%s): %llu objects, %llu batches translated, %llu run on the VU; %llu vertices, "
-            "%llu triangles, %llu join vertices\n", mesh.mode == MESH_SHADOW ? "shadow" : "skip",
-            (unsigned long long)mesh.objects, (unsigned long long)mesh.batches, (unsigned long long)mesh.fallbacks,
-            (unsigned long long)mesh.vertices, (unsigned long long)mesh.triangles, (unsigned long long)mesh.culled_joins);
-    for (unsigned i = 0; i < MESH_WHYS; i++)
-        if (mesh.why[i]) hle_log("native VU1 0170: %llu batches on the VU: %s\n", (unsigned long long)mesh.why[i], mesh_why_names[i]);
+    for (unsigned p = 0; p < MESH_PROGRAMS; p++) {
+        const MeshCounts *c = &mesh.count[p];
+        if (!(mesh.enabled >> p & 1)) continue;
+        hle_log("native VU1 %s (%s): %llu batches translated, %llu run on the VU; %llu vertices, "
+                "%llu triangles, %llu join vertices\n", mesh_programs[p].name, mesh.mode == MESH_SHADOW ? "shadow" : "skip",
+                (unsigned long long)c->batches, (unsigned long long)c->fallbacks,
+                (unsigned long long)c->vertices, (unsigned long long)c->triangles, (unsigned long long)c->joins);
+        for (unsigned i = 0; i < MESH_WHYS; i++)
+            if (c->why[i])
+                hle_log("native VU1 %s: %llu batches on the VU: %s\n", mesh_programs[p].name, (unsigned long long)c->why[i],
+                        mesh_why_names[i]);
+        if (c->timed_batches)
+            hle_log("native VU1 %s cost (DHD_VU1_PROFILE): %.2f us a translated batch, %.1f ns a vertex (%llu batches)\n",
+                    mesh_programs[p].name, c->timed_seconds * 1e6 / (double)c->timed_batches,
+                    c->timed_seconds * 1e9 / (double)(c->timed_vertices ? c->timed_vertices : 1),
+                    (unsigned long long)c->timed_batches);
+    }
     if (mesh.check)
-        hle_log("native VU1 0170 check: %llu vertices (%llu inside the guard band): XY off by more than 1/16 px %llu, "
+        hle_log("native VU1 check: %llu vertices (%llu inside the guard band): XY off by more than 1/16 px %llu, "
                 "Z by more than 1 %llu, fog %llu, colour %llu, STQ %llu; %llu triangles (%llu back faces), ADC differs "
                 "%llu; %llu triangles left to the clipper\n",
                 (unsigned long long)mesh.checked, (unsigned long long)mesh.inside, (unsigned long long)mesh.bad_xy,
@@ -89,9 +141,11 @@ static void mesh_report(void)
 /* DHD_NATIVE_VU1_CHECK: after a shadow batch ran on the VU, its item's vertices through the
    shader's maths (native_mesh_vertex, in C) against the GIF packet the program wrote in place:
    per vertex STQ, RGBA, XYZF2 (qwords 0-2), and per triangle the ADC bit against the joins and
-   the back-face rule. Vertices off the guard band and triangles the clipper took are counted apart. */
+   (0170) the back-face rule. Vertices off the guard band and triangles the clipper took are
+   counted apart. */
 static void mesh_check(void)
 {
+    const MeshProgram *prog = &mesh_programs[mesh.object];
     const GsMeshHeader *h = (const GsMeshHeader *)mesh.packet;
     const GsMeshVertex *v = (const GsMeshVertex *)(h + 1);
     const ps2_q128 *m = vu1.vu0_mem;
@@ -137,7 +191,7 @@ static void mesh_check(void)
         if (!in[k] || !in[k - 1] || !in[k - 2]) { mesh.clipped++; continue; }
         float area = (sx[k - 1] - sx[k - 2]) * (sy[k] - sy[k - 1]) - (sy[k - 1] - sy[k - 2]) * (sx[k] - sx[k - 1]);
         float s = k & 1 ? -mesh.check_parity : mesh.check_parity;
-        int back = s * area > 0, adc = (m[(mesh.check_base + 3 + 3 * k) & 1023].w[3] & 0x8000) != 0;
+        int back = prog->backface && s * area > 0, adc = (m[(mesh.check_base + 3 + 3 * k) & 1023].w[3] & 0x8000) != 0;
         mesh.triangles_checked++;
         mesh.backfaces += back && !mesh.join[k];
         if (adc != (mesh.join[k] || back)) mesh.bad_adc++;
@@ -152,9 +206,19 @@ static int mesh_enabled(void)
     if (!read) {
         read = 1;
         s = getenv("DHD_NATIVE_VU1");
-        if (!s || strncmp(s, "0170", 4)) { mesh.state = MESH_OFF; return 0; }
-        forced = strstr(s + 4, ":skip") ? MESH_SKIP : strstr(s + 4, ":shadow") ? MESH_SHADOW : 0;
-        mesh.gpu_clip = strstr(s + 4, ":gpuclip") != NULL;
+        /* the loops before the first ':' (comma separated; "prelit" for all of them), flags after */
+        size_t list = s ? strcspn(s, ":") : 0;
+        for (const char *t = s; t && t < s + list;) {
+            size_t len = strcspn(t, ",:");
+            if (len == 3 && !strncmp(t, "all", 3)) mesh.enabled |= (1u << MESH_PROGRAMS) - 1;
+            for (unsigned p = 0; p < MESH_PROGRAMS; p++)
+                if (len == 4 && !strncmp(t, mesh_programs[p].name, 4)) mesh.enabled |= 1u << p;
+            t += len + (t[len] == ',');
+            if (!len) break;
+        }
+        if (!mesh.enabled) { mesh.state = MESH_OFF; return 0; }
+        forced = strstr(s + list, ":skip") ? MESH_SKIP : strstr(s + list, ":shadow") ? MESH_SHADOW : 0;
+        mesh.gpu_clip = strstr(s + list, ":gpuclip") != NULL;
     }
     /* The renderer is made at the first vsync (present.c), which can come after the first VU1 runs:
        until field 600 the translation waits for it. A forced mode runs without a mesh renderer too
@@ -169,8 +233,11 @@ static int mesh_enabled(void)
     mesh.mode = forced ? forced : gs_mesh_mode == 2 ? MESH_SHADOW : MESH_SKIP;
     mesh.state = MESH_ON;
     mesh.check = mesh.mode == MESH_SHADOW && getenv("DHD_NATIVE_VU1_CHECK") != NULL;
-    hle_log("native VU1: loop 0170 (MSCAL 0078) drawn by the native renderer, %s (DHD_NATIVE_VU1=%s)%s\n",
-            mesh.mode == MESH_SHADOW ? "shadow: the VU runs it too, for the exact Z probe" : "the VU skips it", s,
+    char names[64] = "";
+    for (unsigned p = 0; p < MESH_PROGRAMS; p++)
+        if (mesh.enabled >> p & 1) { strcat(names, " "); strcat(names, mesh_programs[p].name); }
+    hle_log("native VU1: loops%s drawn by the native renderer, %s (DHD_NATIVE_VU1=%s)%s\n", names,
+            mesh.mode == MESH_SHADOW ? "shadow: the VU runs them too, for the exact Z probe" : "the VU skips them", s,
             gs_mesh_mode ? "" : "; no mesh renderer: the items are dropped");
     if (mesh.gpu_clip) hle_log("native VU1: batches the VU would clip are drawn too, clipped by the GPU (:gpuclip)\n");
     atexit(mesh_report);
@@ -186,12 +253,19 @@ static int mesh_overlay_b(void)
     return mesh.overlay_b;
 }
 
-static int mesh_fail(unsigned why) { mesh.why[why]++; mesh.fallbacks++; return 0; }
+static int mesh_fail(unsigned why)
+{
+    mesh.count[mesh.object].why[why]++;
+    mesh.count[mesh.object].fallbacks++;
+    return 0;
+}
 
 /* The batch at VI2 as a mesh item in mesh.packet; 0 (and nothing built) for a form the
    translation does not know, which then runs on the VU. */
 static int mesh_build(void)
 {
+    const MeshProgram *prog = &mesh_programs[mesh.object];
+    MeshCounts *count = &mesh.count[mesh.object];
     const ps2_q128 *m = vu1.vu0_mem;
     unsigned base = vu1.vi[2] & 1023;
     const uint32_t *hdr = m[base].w;
@@ -220,31 +294,40 @@ static int mesh_build(void)
         memcpy(h->ad[3], m[164].w, 16);
         h->flags |= GS_MESH_TEXTURE;
     }
-    memcpy(h->matrix, mesh.matrix, sizeof h->matrix);
-    memcpy(h->clip, mesh.clip, sizeof h->clip);
-    memcpy(h->color, mesh.color, sizeof h->color);
-    memcpy(h->fog, mesh.fog, sizeof h->fog);
-    /* the prologue sets vf6.x = 1 (0098) and negates it unless the header's bit 15 (0158) */
+    /* the registers the loop reads, as the setup (and any pass since) left them */
+    for (unsigned col = 0; col < 4; col++) memcpy(&h->matrix[col * 4], vu1.vf[1 + col].f, 16);
+    memcpy(h->clip, prog->clip ? vu1.vf[13].f : m[996].f, sizeof h->clip);   /* the loops without CLIP: data 996 */
+    const float *v18 = vu1.vf[18].f, *v19 = vu1.vf[19].f;   /* the setup's data 21 and 4 */
+    if (prog->colour == MESH_COLOUR_SCALED) memcpy(h->color, vu1.vf[31].f, sizeof h->color);
+    else h->color[0] = h->color[1] = h->color[2] = h->color[3] = 1;                 /* min(c, 255) = c */
+    if (prog->fog_max) { h->fog[0] = h->fog[2] = v18[1]; h->fog[1] = 0; }          /* clamp(max) = max */
+    else { h->fog[0] = v19[3] + v18[0]; h->fog[1] = v18[3]; h->fog[2] = v18[1]; }
+    const float uv[2] = {v19[0], v19[1]};
+    /* 0170's prologue sets vf6.x = 1 (0098) and negates it unless the header's bit 15 (0158) */
     float parity = hdr[3] & 0x8000 ? 1.0f : -1.0f;
     mesh.check_parity = parity; mesh.check_base = base;
     GsMeshVertex *out = (GsMeshVertex *)(h + 1);
     uint8_t join[GS_MESH_MAX_VERTICES];
     const float fixed = 1.0f / 4096.0f;   /* ITOF12: exact for these integers */
     /* The guard band test of the loop's CLIP (vf13, data 996) in homogeneous form: a batch with a
-       vertex off it in x or y or below the near bound goes to the VU, whose clipper the GPU's
-       clipping does not reproduce (the speed blur over the near ground differs; finding 164). */
-    const __m128 c0 = _mm_loadu_ps(&mesh.matrix[0]), c1 = _mm_loadu_ps(&mesh.matrix[4]);
-    const __m128 c2 = _mm_loadu_ps(&mesh.matrix[8]), c3 = _mm_loadu_ps(&mesh.matrix[12]);
-    const float bound = mesh.clip[3] < 0 ? -mesh.clip[3] : mesh.clip[3], near = -bound - mesh.clip[2];
+       vertex off it in x or y or below the near bound goes to the VU (the loops with clipping send
+       its triangles to the clipper, whose fans a GPU's clipping does not reproduce; those without
+       kick it as it comes, which the GS wraps). */
+    const __m128 c0 = _mm_loadu_ps(&h->matrix[0]), c1 = _mm_loadu_ps(&h->matrix[4]);
+    const __m128 c2 = _mm_loadu_ps(&h->matrix[8]), c3 = _mm_loadu_ps(&h->matrix[12]);
+    const float bound = h->clip[3] < 0 ? -h->clip[3] : h->clip[3], near = -bound - h->clip[2];
     for (unsigned k = 0; k < n; k++) {
         const ps2_q128 *r = &m[base + 1 + 3 * k];
         const float *p = m[(181 + (r[0].w[3] & 0xFFFF)) & 1023].f;
-        if (!mesh.gpu_clip) {
+        if (!mesh.gpu_clip || !prog->clip) {
             float c[4];
             _mm_storeu_ps(c, _mm_add_ps(_mm_add_ps(_mm_mul_ps(c0, _mm_set1_ps(p[0])), _mm_mul_ps(c1, _mm_set1_ps(p[1]))),
                                         _mm_add_ps(_mm_mul_ps(c2, _mm_set1_ps(p[2])), c3)));
-            float x = c[0] + mesh.clip[0] * c[3], y = c[1] + mesh.clip[1] * c[3], b = bound * c[3];
-            if (!(c[3] > 0 && c[3] >= near && x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
+            float x = c[0] + h->clip[0] * c[3], y = c[1] + h->clip[1] * c[3], b = bound * c[3];
+            if (!(c[3] > 0 && c[3] >= near)) return mesh_fail(MESH_WHY_NEAR);
+            /* off the guard band sideways: the loops with clipping cut it as a GPU does (finding 164,
+               :gpuside), those without kick it as it comes */
+            if (!prog->clip && !(x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
         }
         const uint32_t *c = r[1].w;
         if ((c[0] | c[1] | c[2] | c[3]) > 255) return mesh_fail(MESH_WHY_COLOUR);
@@ -254,26 +337,27 @@ static int mesh_build(void)
         GsMeshVertex *o = &out[k];
         o->x = p[0]; o->y = p[1]; o->z = p[2];
         o->u = (float)r[2].sw[0] * fixed; o->v = (float)r[2].sw[1] * fixed; o->uz = (float)r[2].sw[2] * fixed;
-        if (k) { o->u += mesh.uv[0]; o->v += mesh.uv[1]; }   /* vf19.xy, added from vertex 1 on (0x1A0) */
+        if (prog->uv_offset == 2 || (prog->uv_offset == 1 && k)) { o->u += uv[0]; o->v += uv[1]; }   /* vf19.xy */
         o->unused = 0;
         o->rgba = c[0] | c[1] << 8 | c[2] << 16 | c[3] << 24;
     }
-    /* the strip's triangles: k-2, k-1, k for each vertex k >= 2 without the join's ADC, ordered so
-       that the cull (positive screen area, y down) drops what the back-face test would */
+    /* the strip's triangles: k-2, k-1, k for each vertex k >= 2 without the join's ADC; with 0170's
+       culling each ordered so that the cull (positive screen area, y down) drops what its back-face
+       test would */
     uint16_t *index = (uint16_t *)(out + n);
-    unsigned count = 0;
+    unsigned triangles = 0;
     for (unsigned k = 2; k < n; k++) {
-        if (join[k]) { mesh.culled_joins++; continue; }
-        int keep_order = (parity > 0) == !(k & 1);
-        index[count++] = (uint16_t)(keep_order ? k - 2 : k - 1);
-        index[count++] = (uint16_t)(keep_order ? k - 1 : k - 2);
-        index[count++] = (uint16_t)k;
+        if (join[k]) { count->joins++; continue; }
+        int keep_order = !prog->backface || (parity > 0) == !(k & 1);
+        index[triangles++] = (uint16_t)(keep_order ? k - 2 : k - 1);
+        index[triangles++] = (uint16_t)(keep_order ? k - 1 : k - 2);
+        index[triangles++] = (uint16_t)k;
     }
-    h->vertices = n; h->indices = count;
-    mesh.words = (unsigned)((sizeof *h + n * sizeof *out + count * 2 + 3) / 4);
-    mesh.batches++; mesh.vertices += n; mesh.triangles += count / 3;
-    /* the parity the batch leaves: one flip a vertex */
-    vu1.vf[6].f[0] = n & 1 ? -parity : parity;
+    h->vertices = n; h->indices = triangles;
+    mesh.words = (unsigned)((sizeof *h + n * sizeof *out + triangles * 2 + 3) / 4);
+    count->batches++; count->vertices += n; count->triangles += triangles / 3;
+    /* the parity 0170 leaves: one flip a vertex */
+    if (prog->backface) vu1.vf[6].f[0] = n & 1 ? -parity : parity;
     return 1;
 }
 
@@ -282,16 +366,19 @@ static int mesh_build(void)
 static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
 {
     if (!mesh_enabled()) return 0;
-    if (!mscnt) {   /* a new object: 0078 setups are translated from their batches on */
-        mesh.object = addr == 0x78 && mesh_overlay_b();
-        return 0;
-    }
-    if (!mesh.object || (addr != 0x1CB0 && addr != 0x1040) || vu1.vi[13] != 0x11) return 0;
+    mesh.object = -1;
+    if (!mscnt || (addr != 0x1040 && addr != 0x1CB0 && addr != 0x12E0 && addr != 0x0590)) return 0;
+    for (unsigned p = 0; p < MESH_PROGRAMS; p++)
+        if (vu1.vi[13] == mesh_programs[p].vi13 && (mesh.enabled >> p & 1)) mesh.object = (int)p;
+    if (mesh.object < 0 || !mesh_overlay_b()) return mesh.object = -1, 0;
+    /* 0590 (after the skinning pass): its JR's delay slot stores the pass's last vertex (SQ vf20,
+       -2(vi8)); the VU repeats it in shadow mode */
+    if (addr == 0x0590) memcpy(vu1.vu0_mem[(vu1.vi[8] - 2) & 1023].f, vu1.vf[20].f, 16);
     float parity = vu1.vf[6].f[0];
     if (!mesh_build()) return 0;
     *packet = mesh.packet;
     if (mesh.mode == MESH_SHADOW) {
-        vu1.vf[6].f[0] = parity;   /* the VU runs the batch itself and flips it there */
+        vu1.vf[6].f[0] = parity;   /* the VU runs the batch itself (0170 flips it there) */
         return 2;
     }
     return 1;
@@ -308,10 +395,10 @@ static void mesh_send(uint32_t *packet)
     graphics_gif_feed(GS_PATH_MESH, packet, mesh.words);
 }
 
-/* A skipped batch: the state its end leaves (1000-1030, the parity store at 1014). */
+/* A skipped batch: the state its end leaves (0FF8, 1000-1030; 0170's parity store at 1014). */
 static void mesh_skipped(void)
 {
-    memcpy(vu1.vu0_mem[1014].f, vu1.vf[6].f, 16);
+    if (mesh_programs[mesh.object].backface) memcpy(vu1.vu0_mem[1014].f, vu1.vf[6].f, 16);
     uint16_t buffer = (uint16_t)(vu1.vi[14] + 0x90);
     if (buffer == 0x3E8) buffer = 0x238;
     vu1.vi[14] = vu1.vi[2] = buffer;
@@ -320,16 +407,6 @@ static void mesh_skipped(void)
     vu1.vu0_ctrl[10] = 0x1040;
 }
 
-/* After a VU1 run that was not skipped: an 0078 setup's constants for its batches. */
-static void mesh_after(unsigned addr, int mscnt)
-{
-    if (mscnt || !mesh.object || addr != 0x78) return;
-    mesh.objects++;
-    for (unsigned col = 0; col < 4; col++) memcpy(&mesh.matrix[col * 4], vu1.vf[1 + col].f, 16);
-    memcpy(mesh.clip, vu1.vf[13].f, 16);
-    memcpy(mesh.color, vu1.vf[31].f, 16);
-    const float *v18 = vu1.vf[18].f, *v19 = vu1.vf[19].f;   /* data 21 and 4 */
-    mesh.fog[0] = v19[3] + v18[0]; mesh.fog[1] = v18[3]; mesh.fog[2] = v18[1]; mesh.fog[3] = 0;
-    mesh.uv[0] = v19[0]; mesh.uv[1] = v19[1];
-}
+/* After a VU1 run that was not skipped (the constants are read at each batch). */
+static void mesh_after(unsigned addr, int mscnt) { (void)addr, (void)mscnt; }
 #endif

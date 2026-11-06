@@ -111,10 +111,10 @@ fn native_vertex(@location(0) position_in: vec3<f32>, @location(1) stqf: vec4<f3
 // clip = matrix (x y z 1); q = 1 / w; XYZ = clip.xyz q; fog = clamp(A + B q, 0, max); colour =
 // min(c scale, 255), truncated; STQ = (u, v, uz) q. A vertex inside the program's guard band (its
 // CLIP against mesh_clip: x, y and the near bound on w) is placed as the GS would place the kicked
-// one, at FTOI4's 1/16 pixel and Z's integer, through native_vertex's mapping. Batches with any
-// other vertex run on the VU (vu1_mesh.inc), unless DHD_NATIVE_VU1=0170:gpuclip draws them here:
-// such a vertex goes out as the plain projection, both forms homogeneous (times w), and the GPU
-// clips the triangles where the VU's clipper would cut them into fans.
+// one, at FTOI4's 1/16 pixel and Z's integer, through native_vertex's mapping. A vertex off the
+// guard band sideways (and with :gpuclip one below the near bound; batches with those otherwise run
+// on the VU, vu1_mesh.inc) goes out as the plain projection; both forms homogeneous (times w), so the
+// GPU clips the triangles where the VU's clipper would cut them into fans.
 //
 // The GS interpolates STQ, colour and fog linearly in screen space, but a GPU computes no-perspective
 // varyings at the vertices clipping makes from the edge's ends' screen positions, which mean nothing
