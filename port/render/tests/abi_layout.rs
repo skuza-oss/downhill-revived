@@ -39,8 +39,7 @@ fn all() -> Vec<(&'static str, usize, usize, Vec<Field>)> {
         fields!(DhdrNativeConstants { target: [f32; 2], flags: u32, atst: u32, aref: u32, alpha_scale: f32,
                                       texa_alpha: f32, scale: u32, fog: [f32; 4], tex_offset: [i32; 2],
                                       tex_size: [u32; 2], wrap: [u32; 4], region: [u32; 4],
-                                      mesh_matrix: [f32; 16], mesh_clip: [f32; 4], mesh_color: [f32; 4],
-                                      mesh_fog: [f32; 4], mesh_offset: [f32; 4] }),
+                                      mesh_offset: [f32; 4] }),
         fields!(DhdrConvertConstants { tex: [u32; 4], size: [u32; 4], slot: [[u32; 4]; 4], pages: [u8; 512],
                                        palette: [u32; 256] }),
         fields!(DhdrCommand { kind: u8, depth_key: u8, color_mask: u8, pad: u8, target: i16, depth: i16,
@@ -129,7 +128,7 @@ fn sizes_the_header_documents() {
 
 #[test]
 fn constants() {
-    assert_eq!(DHDR_ABI_VERSION, 2);
+    assert_eq!(DHDR_ABI_VERSION, 3);
     assert_eq!([DHDR_DEV_VULKAN, DHDR_DEV_FXC, DHDR_DEV_DEBUG, DHDR_DEV_VALIDATION, DHDR_DEV_FALLBACK,
                 DHDR_DEV_NO_DUAL_SOURCE], [1, 2, 4, 8, 16, 32]);
     assert_eq!([DHDR_LOG_ERROR, DHDR_LOG_WARN, DHDR_LOG_INFO], [1, 2, 3]);

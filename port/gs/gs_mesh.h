@@ -23,7 +23,7 @@ enum {
 typedef struct {
     float x, y, z;                 /* object-space position (the batch's entry in the object's pool) */
     float u, v, uz;                /* texture coordinates (ITOF12, the object's UV offset added past vertex 0), Q factor */
-    float unused;
+    float unused;                  /* the GS thread writes the object's record there (native_mesh, finding 168) */
     uint32_t rgba;                 /* the V4-5 colour as unpacked: r << 3, g << 3, b << 3, a << 7 in bytes */
 } GsMeshVertex;
 

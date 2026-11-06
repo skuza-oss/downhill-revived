@@ -12,8 +12,8 @@
 //! Bits 25..28 are private: a power-of-two source scale (S=E), or zero for generic. Bit 29
 //! (`TEXELS`): the draw reads a decoded texture's R32Uint texels (the `_u` entry points and the
 //! texels layout). Bit 30 (`MESH`): a translated VU1 mesh draw (flag 4096, finding 164): the vertex
-//! stage is `native_mesh_vertex` and back faces are culled; bit 31 (`MESH_TWO_SIDED`) with it: no
-//! culling (finding 167).
+//! stage is `native_mesh_vertex`, the layout has group 2 (the objects' records, finding 168) and
+//! back faces are culled; bit 31 (`MESH_TWO_SIDED`) with it: no culling (finding 167).
 //! The GS key's blend, depth and variant fields remain unchanged. The cache's key is 64 bits: this
 //! key, and above it (`SPEC_SHIFT`) the fragment stage's specialisation, `spec` (native.wgsl's
 //! `native_spec`; zero for the generic shader).
@@ -250,12 +250,17 @@ struct Sources {
     dual_module: Option<wgpu::ShaderModule>,
     layout: wgpu::PipelineLayout,
     texels_layout: wgpu::PipelineLayout,
+    /// The mesh draws' (group 2: their object records; finding 168).
+    mesh_layout: Option<wgpu::PipelineLayout>,
+    mesh_texels_layout: Option<wgpu::PipelineLayout>,
 }
 
 impl Sources {
     fn of(objects: &Objects) -> Sources {
         Sources { module: objects.module.clone(), dual_module: objects.dual_module.clone(),
-                  layout: objects.draw_layout.clone(), texels_layout: objects.texels_draw_layout.clone() }
+                  layout: objects.draw_layout.clone(), texels_layout: objects.texels_draw_layout.clone(),
+                  mesh_layout: objects.mesh_draw_layout.clone(),
+                  mesh_texels_layout: objects.mesh_texels_draw_layout.clone() }
     }
 }
 
@@ -306,7 +311,12 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
     };
     Ok(gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("native draw"),
-        layout: Some(if texels { &objects.texels_layout } else { &objects.layout }),
+        layout: Some(match (mesh, texels) {
+            (false, false) => &objects.layout,
+            (false, true) => &objects.texels_layout,
+            (true, false) => objects.mesh_layout.as_ref().ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
+            (true, true) => objects.mesh_texels_layout.as_ref().ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
+        }),
         vertex: wgpu::VertexState {
             module: &objects.module,
             entry_point: Some(if mesh { "native_mesh_vertex" } else { "native_vertex" }),

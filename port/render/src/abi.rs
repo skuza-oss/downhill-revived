@@ -16,7 +16,7 @@ use core::marker::{PhantomData, PhantomPinned};
 use core::mem::{align_of, offset_of, size_of};
 
 /// `DHDR_ABI_VERSION`: `DhdrDeviceDesc.abi` must carry it.
-pub const DHDR_ABI_VERSION: u32 = 2;
+pub const DHDR_ABI_VERSION: u32 = 3;
 
 // ---------------- device ----------------
 
@@ -163,11 +163,8 @@ pub struct DhdrNativeConstants {
     pub tex_size: [u32; 2],
     pub wrap: [u32; 4],
     pub region: [u32; 4],
-    /// A mesh draw's (flag 4096, finding 164): native.wgsl's `native_mesh_vertex` reads these.
-    pub mesh_matrix: [f32; 16],
-    pub mesh_clip: [f32; 4],
-    pub mesh_color: [f32; 4],
-    pub mesh_fog: [f32; 4],
+    /// A mesh draw's (flag 4096, findings 164, 168): the draw offset, the largest Z and the Z scale
+    /// for native.wgsl's `native_mesh_vertex` (each object's values are its record in the vertices).
     pub mesh_offset: [f32; 4],
 }
 
@@ -425,19 +422,18 @@ layout!(DhdrWindow, size 24, align 8, { kind @ 0, reserved @ 4, a @ 8, b @ 16 })
 layout!(DhdrVertex, size 32, align 4, {
     x @ 0, y @ 4, z @ 8, s @ 12, t @ 16, q @ 20, fog @ 24, rgba @ 28,
 });
-layout!(DhdrNativeConstants, size 224, align 4, {
+layout!(DhdrNativeConstants, size 112, align 4, {
     target @ 0, flags @ 8, atst @ 12, aref @ 16, alpha_scale @ 20, texa_alpha @ 24, scale @ 28,
-    fog @ 32, tex_offset @ 48, tex_size @ 56, wrap @ 64, region @ 80, mesh_matrix @ 96, mesh_clip @ 160,
-    mesh_color @ 176, mesh_fog @ 192, mesh_offset @ 208,
+    fog @ 32, tex_offset @ 48, tex_size @ 56, wrap @ 64, region @ 80, mesh_offset @ 96,
 });
 layout!(DhdrConvertConstants, size 1632, align 4, {
     tex @ 0, size @ 16, slot @ 32, pages @ 96, palette @ 608,
 });
-layout!(DhdrCommand, size with_ptrs(296, 3), align P, {
+layout!(DhdrCommand, size with_ptrs(184, 3), align P, {
     kind @ 0, depth_key @ 1, color_mask @ 2, pad @ 3, target @ 4, depth @ 6, texture_surface @ 8,
-    convert @ 10, blend_key @ 12, blend_fix @ 16, scissor @ 20, constants @ 36, first @ 260,
-    count @ 264, source @ 268, pad2 @ 270, x @ 272, y @ 276, w @ 280, h @ 284, sx @ 288, sy @ 292,
-    texture @ 296, replacement @ 296 + P, pixels @ 296 + 2 * P,
+    convert @ 10, blend_key @ 12, blend_fix @ 16, scissor @ 20, constants @ 36, first @ 148,
+    count @ 152, source @ 156, pad2 @ 158, x @ 160, y @ 164, w @ 168, h @ 172, sx @ 176, sy @ 180,
+    texture @ 184, replacement @ 184 + P, pixels @ 184 + 2 * P,
 });
 layout!(DhdrConvert, size with_ptrs(1640, 1), align P, { surface @ 0, constants @ 8, base @ 1640 });
 layout!(DhdrSurfaceInfo, size 40, align 4, {

@@ -46,14 +46,15 @@ struct Native {
     tex_offset: vec2<i32>, tex_size: vec2<u32>,
     wrap: vec4<u32>,
     region: vec4<u32>,
-    // A mesh draw's (flag 4096, native_mesh_vertex; zero for every other draw).
-    mesh_matrix: mat4x4<f32>,
-    mesh_clip: vec4<f32>,
-    mesh_color: vec4<f32>,
-    mesh_fog: vec4<f32>,
+    // A mesh draw's (flag 4096, native_mesh_vertex; zero for every other draw): the draw offset
+    // (GS 12.4 units), the largest Z, the Z scale.
     mesh_offset: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> nat: Native;
+// A mesh draw's object records (native_core.inc's native_mesh_record): the picture's vertex buffer
+// again, as vec4s; a record is four vertices, eight vec4s: the matrix's columns, the guard band,
+// the colour scale, the fog (A, B, max). Bound for the mesh pipelines only (init.rs's mesh layout).
+@group(2) @binding(0) var<storage, read> mesh_records: array<vec4<f32>>;
 @group(1) @binding(0) var native_texture: texture_2d<f32>;
 @group(1) @binding(1) var native_replace_sampler: sampler;   // texture packs (flag 2048)
 // A decoded texture (textures.rs) is R32Uint: each texel its RGBA bytes, read by the `_u` entry
@@ -107,10 +108,11 @@ fn native_vertex(@location(0) position_in: vec3<f32>, @location(1) stqf: vec4<f3
 
 // A translated VU1 world-mesh batch (native_core.inc's native_mesh, port/hle/vu1_mesh.inc; finding
 // 164): VU1 loop 0170's maths on the batch's object-space vertex. position_in: the pool position;
-// uvq: u, v (the object's UV offset already added), the Q factor; color: the V4-5 colour bytes.
+// uvq: u, v (the object's UV offset already added), the Q factor, then the vertex index of the
+// object's record (finding 168); color: the V4-5 colour bytes.
 // clip = matrix (x y z 1); q = 1 / w; XYZ = clip.xyz q; fog = clamp(A + B q, 0, max); colour =
 // min(c scale, 255), truncated; STQ = (u, v, uz) q. A vertex inside the program's guard band (its
-// CLIP against mesh_clip: x, y and the near bound on w) is placed as the GS would place the kicked
+// CLIP against the record's guard band: x, y and the near bound on w) is placed as the GS would place the kicked
 // one, at FTOI4's 1/16 pixel and Z's integer, through native_vertex's mapping. A vertex off the
 // guard band sideways (and with :gpuclip one below the near bound; batches with those otherwise run
 // on the VU, vu1_mesh.inc) goes out as the plain projection; both forms homogeneous (times w), so the
@@ -132,27 +134,30 @@ struct MeshVaryings {
 fn native_mesh_vertex(@location(0) position_in: vec3<f32>, @location(1) uvq: vec4<f32>,
                       @location(2) color: vec4<u32>) -> MeshVaryings {
     var o: MeshVaryings;
-    let clip = nat.mesh_matrix * vec4<f32>(position_in, 1.0);
+    let r = 2u * u32(uvq.w);   // the record's first vec4: two a vertex
+    let matrix = mat4x4<f32>(mesh_records[r], mesh_records[r + 1u], mesh_records[r + 2u], mesh_records[r + 3u]);
+    let mesh_fog = mesh_records[r + 6u];
+    let clip = matrix * vec4<f32>(position_in, 1.0);
     let q = 1.0 / clip.w;
     let screen = clip.xyz * q;
-    let fog = max(min(nat.mesh_fog.x + nat.mesh_fog.y * q, nat.mesh_fog.z), 0.0);
+    let fog = max(min(mesh_fog.x + mesh_fog.y * q, mesh_fog.z), 0.0);
     o.stqf = vec4<f32>(uvq.xyz, floor(fog) / 255.0 * clip.w);   // (u, v, uz) q, times w
-    o.color = floor(min(vec4<f32>(color) * nat.mesh_color, vec4<f32>(255.0))) * clip.w;
+    o.color = floor(min(vec4<f32>(color) * mesh_records[r + 5u], vec4<f32>(255.0))) * clip.w;
     o.w = clip.w;
-    let k = nat.mesh_clip;
+    let k = mesh_records[r + 4u];
     let bound = abs(k.w);
     let inside = clip.w > 0.0 && abs(screen.x + k.x) <= bound && abs(screen.y + k.y) <= bound && clip.w + k.z >= -bound;
     if (inside) {
         let gs_xy = trunc(screen.xy * 16.0);
         let xy = (gs_xy - nat.mesh_offset.xy) * 0.0625 + 0.5;
         let z = min(max(trunc(screen.z), 0.0), nat.mesh_offset.z);
-        o.position = vec4<f32>(xy / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), z * nat.mesh_fog.w, 1.0)
+        o.position = vec4<f32>(xy / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), z * nat.mesh_offset.w, 1.0)
                      * clip.w;
     } else {
         // (x / w - offset / 16 + 0.5) / size * 2 - 1, times w; y likewise, flipped; z / w * scale, times w
         let at = clip.xy - (nat.mesh_offset.xy * 0.0625 - 0.5) * clip.w;
         o.position = vec4<f32>(at / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-clip.w, clip.w),
-                               clip.z * nat.mesh_fog.w, clip.w);
+                               clip.z * nat.mesh_offset.w, clip.w);
     }
     return o;
 }

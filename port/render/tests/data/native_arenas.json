@@ -4,7 +4,7 @@
   "source_sha256": "fab8010353642374f50ba45810ff83231984dbe3f4322c12610558689f214d55",
   "webgpu": "v29.0.1.1",
   "uniform_window": 2048,
-  "constants_bytes": 224,
+  "constants_bytes": 112,
   "lists": [
     {
       "name": "empty",
