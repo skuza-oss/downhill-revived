@@ -42,6 +42,13 @@ import {
     those and for one call that runs into its 15 s timeout, and ends before the game's 30 s wait
     for the others' rides (port/hle/online.c), which travel over the released channels. */
 const SFU_SETUP_MS = 25_000;
+/** A racer whose own Realtime connection isn't up this long after the race's start message (no
+    sfu_connected: UDP and the TURN fallback both failed, or the game never offered) leaves the race
+    alone (SFU_CONNECT_MS overrides it). Without this, every other racer waited for its channels:
+    a game reports sfu_ready only with every racer's channels, so at SFU_SETUP_MS the whole race
+    was out (0.7.12, rooms of 4-7 players, 2026-11-06). The others hear `left`, stop expecting it
+    and release. Real setups connect in 0.2-0.5 s over UDP and about 5 s through TURN. */
+const SFU_CONNECT_MS = 15_000;
 /** Sent to a racer whose Realtime setup failed or ran out of time; it is out of the race (the room
     stays). The footer holds about 45 characters. */
 const SFU_FAILED_MESSAGE = "Realtime connection failed: out of the race.";
@@ -113,6 +120,8 @@ interface Member {
   sfu?: SfuSession;
   sfuRace?: number;
   sfuReady?: boolean;
+  /** The race whose sfu_connected this member sent (set on arrival, before the SFU queue). */
+  sfuConnectedRace?: number;
   /** The race this member got TURN credentials for (one mint per member per race), and their
       username, kept to revoke them; neither ever goes to a client but its own sfu_turn. */
   turnRace?: number;
@@ -137,6 +146,8 @@ interface Race {
   startAt: number;
   /** Racers whose Realtime setup isn't done at this time are out of the race (SFU_SETUP_MS). */
   sfuBy?: number;
+  /** Racers whose own Realtime connection isn't up at this time leave alone (SFU_CONNECT_MS). */
+  sfuConnectBy?: number;
   /** The racers' traffic was released (sfu_ready sent). */
   sfuReleased?: boolean;
 }
@@ -397,6 +408,7 @@ export class Room extends DurableObject<Env> {
     const isHost = st.hostId === me.id;
 
     if (m.type.startsWith("sfu_")) {
+      if (m.type === "sfu_connected" && st.race && me.sfuRace === st.race.startAt) me.sfuConnectedRace = st.race.startAt;
       // Serialize across external awaits without holding the DO input gate.
       const run = this.sfuQueue.then(() => this.onSfu(ws, me, m));
       this.sfuQueue = run.then(() => {}, () => {});
@@ -531,9 +543,20 @@ export class Room extends DurableObject<Env> {
       if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(now, at));
       return;
     }
-    // Realtime setup not done in time (SFU_SETUP_MS): those racers are out, the rest go on.
+    // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
     const race = st.race;
-    if (race && !race.sfuReleased && race.sfuBy != null && now >= race.sfuBy) {
+    if (race && !race.sfuReleased && race.sfuConnectBy != null && now >= race.sfuConnectBy) {
+      race.sfuConnectBy = undefined;
+      const racers = st.members.filter(x => this.inRace(st, x.id));
+      const lost = racers.filter(x => !(x.sfuRace === race.startAt &&
+        (x.sfuConnectedRace === race.startAt || x.sfu?.phase === "ready")));
+      console.log(`room ${st.code}: Realtime setup after ${now - race.startAt + START_LEAD_MS} ms: ` + racers.map(x =>
+        `${x.id}${x.region ? "/" + x.region : ""}:${x.sfuRace !== race.startAt ? "no-offer" : x.sfuReady ? "ready" :
+          x.sfuConnectedRace === race.startAt || x.sfu?.phase === "ready" ? "connected" : x.turnRace === race.startAt ? "turn" : "offered"}`).join(" "));
+      if (lost.length) await this.retireSfu(lost.map(x => x.id), race.startAt);
+    }
+    // Realtime setup not done in time (SFU_SETUP_MS): those racers are out, the rest go on.
+    if (race && st.race === race && !race.sfuReleased && race.sfuBy != null && now >= race.sfuBy) {
       const late = st.members.filter(x => this.inRace(st, x.id) &&
         !(x.sfuRace === race.startAt && x.sfuReady && x.sfu?.phase === "ready")).map(x => x.id);
       if (late.length) await this.retireSfu(late, race.startAt);
@@ -570,7 +593,7 @@ export class Room extends DurableObject<Env> {
   /** The next ping, or the countdown's end if that is sooner. */
   private nextAlarm(st: RoomState, now: number): number {
     const ping = now + PING_INTERVAL_MS;
-    const sfuBy = st.race && !st.race.sfuReleased ? st.race.sfuBy : null;
+    const sfuBy = st.race && !st.race.sfuReleased ? Math.min(st.race.sfuBy ?? Infinity, st.race.sfuConnectBy ?? Infinity) : null;
     if (st.session) return Math.min(ping, ...[st.countdownEndsAt, st.nextRaceAt, st.race?.finishEndsAt, sfuBy]
       .filter((x): x is number => x != null).map(x => Math.max(now, x)));
     const at = st.countdownEndsAt != null && !st.race ? Math.min(ping, Math.max(now, st.countdownEndsAt)) : ping;
@@ -1002,6 +1025,11 @@ export class Room extends DurableObject<Env> {
     return this.capsNow;
   }
 
+  private sfuConnectMs(): number {
+    const v = Number((this.env as unknown as Record<string, unknown>).SFU_CONNECT_MS);
+    return Number.isFinite(v) && v > 0 ? v : SFU_CONNECT_MS;
+  }
+
   private sfuSetupMs(): number {
     const v = Number((this.env as unknown as Record<string, unknown>).SFU_SETUP_MS);
     return Number.isFinite(v) && v > 0 ? v : SFU_SETUP_MS;
@@ -1076,6 +1104,7 @@ export class Room extends DurableObject<Env> {
       seed: st.seed ?? randomSeed(),
       startAt: now + START_LEAD_MS,
       sfuBy: now + this.sfuSetupMs(),
+      sfuConnectBy: now + this.sfuConnectMs(),
     };
     st.grid = undefined; st.gridRules = undefined;
     this.rebuildRace();
