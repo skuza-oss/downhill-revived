@@ -273,8 +273,8 @@ describe("limits per connection source", () => {
 });
 
 describe("caps per member", () => {
-  it("caps binary at twice the worst a game sends, text at ten times", () => {
-    expect(BINARY_PER_WINDOW / 5).toBe(400); // a second: 10 riders at 20 snapshots, twice
+  it("caps binary and text at ten times what a game sends", () => {
+    expect(BINARY_PER_WINDOW / 5).toBe(20); // a second: the race's two pings, ten times
     expect(TEXT_PER_WINDOW / 5).toBe(20);
   });
 

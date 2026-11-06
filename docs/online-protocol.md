@@ -372,12 +372,14 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
 ## Limits
 
 - One room holds at most 10 members.
-- Text frames: at most 4 KB. Binary frames: at most 3072 bytes (a STATE frame carries all of a
-  player's riders).
+- Text frames: at most 4 KB. Binary frames on the WebSocket: at most 3072 bytes (only PING
+  carries a payload, at most 32 bytes).
 - A room with no members is deleted.
 - Caps per connection (finding 161, `online/server/src/guard.ts`): at most 100 text frames and
-  2000 binary frames in each 5 s window (20 and 400 a second; the game sends about 1.5 and 22).
-  Over a cap the rest of that window's frames of that kind are dropped (binary ones not relayed);
+  100 binary frames in each 5 s window (20 a second each; the game sends about 1.5 text and, in
+  a race, 2 binary PINGs a second: protocol 3 race frames travel over the SFU, finding 158, and a
+  race's Realtime setup is a few text messages). Over a cap the rest of that window's frames of
+  that kind are dropped (binary ones not answered);
   the first time the sender also gets the non-fatal
   `{"type":"error","code":"too_fast","message":"Slow down: too many messages."}`, and the next
   window over a cap closes it: `too_fast` "Disconnected: too many messages.", close 4012, and the

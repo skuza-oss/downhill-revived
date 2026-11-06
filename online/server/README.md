@@ -8,18 +8,19 @@ is `docs/ONLINE-PLAN.md`.
 |---|---|
 | `src/index.ts` | Worker entry: routes `/v1/lobbies`, `/v1/health`, `/v1/latest` and room WebSockets. |
 | `src/latest.ts` | `/v1/latest`: the newest release's `latest.json`, fetched from GitHub, checked and kept; the launcher's backup update check (finding 138). |
-| `src/room.ts` | `Room` Durable Object, one per join code: lobby, start, race relay, leave handling. |
+| `src/room.ts` | `Room` Durable Object, one per join code: lobby, start, the race's Realtime setup, leave handling. |
+| `src/sfu.ts` | The Realtime SFU control plane (sessions, DataChannels) the room drives (finding 158). |
 | `src/lobbies.ts` | `LobbyIndex` Durable Object (a single global one): the public lobby list. |
 | `src/protocol.ts` | Constants, join codes, the version gate. |
 | `src/guard.ts` | The abuse guard (finding 161): kill switch, limits per address, caps per member, bans, the moderation log. |
 | `migrations/` | The moderation store's tables (D1). |
 | `tools/moderate.mjs` | The operator's moderation tool: the log, bans (through `wrangler d1 execute`). |
 | `test/` | Vitest suite, run inside the Workers runtime (`@cloudflare/vitest-plugin`). |
-| `tools/loadtest.mjs` | Simulated race (STATE frames, 20 a second per player) against a running server; reports relay latency. |
+| `tools/loadtest.mjs` | The WebSocket side of a race (binary PINGs, the caps) against a running server; reports the PING round trip. Race frames travel over the SFU (finding 158): `port/render/net/src/probe.rs` measures them. |
 
-Rooms use the WebSocket hibernation API, so an idle lobby costs little. The relay path does
-no awaits and no copies: it fixes the slot byte and sends the received buffer to the other
-racers.
+Rooms use the WebSocket hibernation API, so an idle lobby costs little. Race frames do not go
+through the room: since protocol 3 they travel over Cloudflare Realtime SFU DataChannels, and the
+room only creates each racer's session and channels (finding 158).
 
 ## Develop and test
 
@@ -32,7 +33,7 @@ npm test                 # unit + integration tests (workerd, no network)
 npm run typecheck        # generates src/worker-configuration.d.ts, then tsc
 npm run dev              # local server on http://127.0.0.1:8787
 npm run loadtest         # in a second terminal: 4 players, 10 s
-node tools/loadtest.mjs --players 8 --seconds 30 --bytes 3000
+node tools/loadtest.mjs --players 10 --seconds 30 --rate 2
 node tools/loadtest.mjs --url wss://dhd-online.<account>.workers.dev   # against a deployment
 ```
 
