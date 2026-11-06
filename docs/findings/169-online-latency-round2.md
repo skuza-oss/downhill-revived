@@ -81,6 +81,15 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       PONG (a step would move this PC's puppets on every other screen). Unit test in
       `test_session.c`. The game's `online:` line gives each puppet as "shown behind / snapshot
       age" in ms; `port/tools/puppet_lag.py` (and `online_race.py --lag`) measure independently.
+- [x] Item 4, prediction: by default each puppet shows its newest snapshot carried to the present
+      (`port/hle/puppet_predict.h`): position along the velocity, the orientation rows turned by the
+      world-space angular velocity, at most 250 ms ahead. When a newer snapshot moves the
+      prediction, the rider is first shown where it was and the difference fades (1/e in 80 ms); a
+      jump over 8 units (a respawn, a long loss) and the first pose after a local crash are shown
+      at once. The pad words, State, crash and progress come from the newest snapshot as they
+      are. `DHD_PUPPET_PREDICT=0` interpolates in the past as item 3 does. Unit test
+      `test_puppet_predict.c` (a straight line, a turn in the right sense, a correction that starts
+      where the rider was and fades, a respawn that snaps).
 
 ## Decisions
 
@@ -98,7 +107,44 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
 
 - 2026-11-06 (the user): all five, then a PC↔Mac comparison of 0.7.11, 0.7.12 and this lane.
 
+- Item 4, which predictor: chosen offline from two recorded paths (`DHD_PUPPET_RECORD`, every
+  race step, base race). Error of the pose h after a snapshot against where the rider really was,
+  game units (riders move about 95 units a second), p50/p95:
+
+  | h | drawn as it was (no prediction) | velocity | velocity + acceleration |
+  |---|---|---|---|
+  | 33 ms | 3.0 / 3.7 | 0.04 / 0.22 | 0.05 / 0.28 |
+  | 50 ms | 4.6 / 5.6 | 0.06 / 0.41 | 0.08 / 0.55 |
+  | 80 ms | 7.6 / 9.3 | 0.38 / 0.80 | 0.36 / 1.16 |
+  | 120 ms | 9.6-10.9 / 13.5 | 0.39-0.51 / 1.19-1.25 | 0.52-0.56 / 1.42-1.50 |
+
+  Acceleration from the last two snapshots makes it worse (velocity noise), so velocity only. The
+  angular velocity is world-space and turns the rows (R Q^T): one step ahead p50 0.10 degree
+  against 0.16 for no turn, the three other conventions 0.13-0.25.
+- Item 4, hits and collisions with predicted puppets. Rule kept from finding 044: a hit by this
+  PC's rider on a puppet is decided here on the puppet as drawn, and the victim's PC applies the
+  EVENT to its own rider as it is when the event arrives; a puppet never hits or is hit locally,
+  and riders bump puppets where they are drawn. What prediction changes is where the puppet is
+  drawn: interpolating it was 45-90 ms in the past, 3.6-8.8 units (p50) behind its rider's real
+  position; predicted, 0.22-0.25 units p50 and 1.3-1.5 p95 from it (table below). So a punch,
+  kick or bump lands where the victim really is, about 20 times closer than before, and the victim
+  no longer gets hit by someone who on their own screen was a bike length or more away. The rare
+  misprediction (a sudden turn, a hit the victim took a moment ago) can put the puppet up to
+  about a unit off for one snapshot interval, and a hit during a fading correction lands on a
+  pose up to 80 ms into the fade; both are far below the 3.6-8.8 units every hit had before. Not
+  chosen: letting the victim's PC check the hit against its own rider (it would refuse hits the
+  attacker saw land, and the network delay makes such a check as wrong as the drawing it checks),
+  and rewinding ("lag compensation": deciding on the victim's past pose), which only made sense
+  while the puppets were drawn in the past.
+
 ## Surprises
+
+- Two runs late on 2026-11-06 (prediction on and off, the same build) had stalls of the other
+  rider's snapshots before they reached our socket: snapshot age p99 up to 1 s in some 30 s
+  windows and one gap of ~2.3 s, while the SFU loop's own waits stayed small (poll gap at most
+  34 ms, input wait at most 15 ms). Earlier runs had none. Another lane ran PC-Mac races on this
+  PC at that time. A stall hits both modes alike: interpolation carries the rider 0.2 s along its
+  velocity and holds, prediction 0.25 s and holds.
 
 - This PC's own rider's pad sender (`hle_puppet_start` began at slot 1) was never reset at a race
   start, while every receiver clears its mirror: pad words unchanged since the last race reached
