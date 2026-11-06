@@ -73,6 +73,7 @@ interface Member {
   token?: string;
   sfu?: SfuSession;
   sfuRace?: number;
+  sfuReady?: boolean;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -330,6 +331,7 @@ export class Room extends DurableObject<Env> {
             if (me.sfuRace === race.startAt)
               return this.error(ws, "bad_value", "One Realtime session per race.");
             me.sfuRace = race.startAt;
+            me.sfuReady = false;
             await this.save();
             if (me.sfu) await this.clearSfu(me);
             const opened = await api.open(m.sdp);
@@ -354,6 +356,10 @@ export class Room extends DurableObject<Env> {
               if (peer && theirs.length) this.send(peer, { type: "sfu_channels", channels: theirs });
             }
             await this.save();
+          } else if (m.type === "sfu_ready" && me.sfu?.phase === "ready") {
+            me.sfuReady = true;
+            await this.save();
+            this.releaseSfu(this.state!);
           } else throw new Error("Invalid signaling phase");
         } catch (error) {
           let detail = error instanceof Error ? error.message : "unknown";
@@ -916,6 +922,20 @@ export class Room extends DurableObject<Env> {
 
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
   /** Retire a publication and its subscriptions, without disclosing publication session IDs. */
+  private releaseSfu(st: RoomState): void {
+    const race = st.race;
+    if (!race) return;
+    const racers = st.members.filter(m => {
+      const slot = race.slots.indexOf(m.id);
+      return slot >= 0 && !race.left.includes(slot);
+    });
+    if (!racers.length || !racers.every(m => m.sfuReady && m.sfu?.phase === "ready")) return;
+    for (const member of racers) {
+      const peer = this.sockets.get(member.id);
+      if (peer) this.send(peer, {type:"sfu_ready"});
+    }
+  }
+
   private async closeRaceSfu(st: RoomState): Promise<void> {
     const cleanup = this.sfuQueue.then(async () => {
       for (const member of st.members) if (member.sfu) await this.clearSfu(member);
@@ -951,6 +971,7 @@ export class Room extends DurableObject<Env> {
     }
     if (st.session) this.retire(st, memberId, "left");
     st.members.splice(i, 1);
+    this.releaseSfu(st);
     const ws = this.sockets.get(memberId);
     this.sockets.delete(memberId);
     this.rtts.delete(memberId);

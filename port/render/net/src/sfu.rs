@@ -24,6 +24,9 @@ pub struct Sfu {
     race: u64,
     future_events: VecDeque<(ChannelId, Vec<u8>)>,
     connected: bool,
+    members: usize,
+    announced: bool,
+    released: bool,
     drop_percent: u64,
     sent: u64,
     pending_events: VecDeque<Vec<u8>>,
@@ -62,7 +65,7 @@ impl Sfu {
         let message = json!({ "type": "sfu_offer", "sdp": offer.to_sdp_string() });
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
         Ok((Self { rtc, pending: Some(pending), socket, channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
-            connected: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new() }, message))
+            connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
         if message["type"] == "sfu_answer" {
@@ -79,6 +82,8 @@ impl Sfu {
             self.race = message["startAt"].as_u64().filter(|n| *n > 0).ok_or("Missing race marker")?;
             self.slots.clear();
             self.rates.clear();
+            self.members = message["players"].as_array().map_or(1, |p| p.len());
+            self.announced = false; self.released = false;
             self.pending_state.clear();
             self.pending_events.clear();
             if let Some(players) = message["players"].as_array() {
@@ -91,6 +96,12 @@ impl Sfu {
                     }
                 }
             }
+        } else if message["type"] == "left" {
+            if let Some(member) = message["memberId"].as_u64() {
+                self.slots.remove(&member); self.members = self.slots.len().max(1);
+            }
+        } else if message["type"] == "sfu_ready" {
+            self.released = true;
         } else if message["type"] == "sfu_closed" {
             if let Some(ids) = message["channelIds"].as_array() {
                 for id in ids.iter().filter_map(Value::as_u64) {
@@ -154,6 +165,9 @@ impl Sfu {
         if message["type"] == "sfu_channels" { eprintln!("net: SFU channels allocated: {}", self.channels.len()); }
         Ok(())
     }
+    fn usable(&mut self) -> bool {
+        self.channels.len() >= self.members * 2 && self.channels.iter().all(|c| self.rtc.channel(c.id).is_some())
+    }
     pub fn send(&mut self, bytes: &[u8]) -> Result<()> {
         if bytes.len() < 2 || bytes.len() > 3072 {
             return Ok(());
@@ -187,7 +201,11 @@ impl Sfu {
         let mut frames = vec![];
         let pending = std::mem::take(&mut self.future_events);
         for (id, bytes) in pending { self.receive_frame(id, bytes, &mut frames)?; }
+        if self.usable() && !self.announced {
+            self.announced = true; text.push(json!({"type":"sfu_ready"}));
+        }
         for state in [false, true] {
+            if !self.released { break; }
             if let Some(c) = self.channels.iter().find(|c| c.local && c.state == state) {
                 if let Some(mut channel) = self.rtc.channel(c.id) {
                     if state {
@@ -381,6 +399,7 @@ mod tests {
         client
             .signal(&json!({"type":"start","startAt":1234,"players":[{"memberId":17,"slot":3}]}))
             .unwrap();
+        client.released = true;
         client.drop_percent = 5;
         let until = Instant::now() + Duration::from_secs(10);
         let mut connected = false;
