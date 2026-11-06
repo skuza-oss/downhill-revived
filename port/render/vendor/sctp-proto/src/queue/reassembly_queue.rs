@@ -412,6 +412,21 @@ impl ReassemblyQueue {
         Some(Chunks::new(0, chunks[0].payload_type, chunks))
     }
 
+    /// Moves every queued ordered message except DCEP's to the unordered path: complete ones
+    /// become readable at once, partial ones complete there by TSN.
+    pub(crate) fn release_ordered_as_unordered(&mut self) {
+        let (dcep, data): (VecDeque<Chunks>, VecDeque<Chunks>) =
+            self.ordered.drain(..).partition(|set| set.ppi == PayloadProtocolIdentifier::Dcep);
+        self.ordered = dcep;
+        for set in data {
+            for mut chunk in set.chunks {
+                self.subtract_num_bytes(chunk.user_data.len());
+                chunk.unordered = true;
+                let _ = self.push(chunk);
+            }
+        }
+    }
+
     pub(crate) fn is_readable(&self) -> bool {
         // Check unordered first
         if !self.unordered.is_empty() {

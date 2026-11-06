@@ -230,7 +230,10 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 At race start each racing member establishes one native WebRTC association to Cloudflare Realtime
 SFU. It is discarded at race end. Each player publishes `state` (unordered, maxRetransmits 0) and
-`events` (reliable, ordered), subscribing to the same channels of all other members. Channel
+`events` (reliable, ordered), subscribing to the same channels of all other members (the room asks
+the same policy for each subscription). Cloudflare forwards a subscription ordered and reliable
+whatever it was asked (finding 173), so the client's SCTP stack delivers each complete `state`
+message at once without regard to the sender's ordering (`port/render/vendor/sctp-proto`). Channel
 allocations identify members; `start.players` maps members to race slots. The receiver corrects
 byte 1 from that mapping. WebSocket binary frames only carry PING/PONG; all other types are dropped.
 

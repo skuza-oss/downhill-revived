@@ -122,7 +122,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `online/server/tools/moderate.mjs` (no admin endpoint). No player gets another's address, its
   hash or install id.
 - Race frames (finding 158): over Cloudflare Realtime SFU DataChannels, STATE unordered with no
-  retransmissions and EVENT reliable; the room sets up each racer's session and passes only that
+  retransmissions and EVENT reliable (Cloudflare forwards STATE ordered and reliable anyway; the
+  client's vendored sctp-proto delivers it unordered, finding 173); the room sets up each racer's session and passes only that
   racer's SDP. If UDP doesn't connect in 2 s, Cloudflare TURN over TLS on 443 with credentials
   minted for that racer. Protocol 4 (finding 169): a PC's riders of one tick go out bundled
   in STATE messages of at most 1,000 bytes (one datagram), stamped with their moment on the

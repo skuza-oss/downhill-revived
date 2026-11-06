@@ -520,6 +520,11 @@ impl<'a> Stream<'a> {
                 "[{}] reliability params: ordered={} type={} value={}",
                 s.side, !unordered, rel_type, rel_val
             );
+            if unordered && !s.unordered {
+                // Messages that arrived before the stream was configured are delivered unordered
+                // too, so none waits behind a gap that later chunks no longer fill.
+                s.reassembly_queue.release_ordered_as_unordered();
+            }
             s.unordered = unordered;
             s.reliability_type = rel_type;
             s.reliability_value = rel_val;
@@ -651,7 +656,15 @@ impl StreamState {
     }
 
     pub(crate) fn handle_data(&mut self, pd: &ChunkPayloadData) -> Result<bool> {
-        self.reassembly_queue.push(pd.clone())
+        let mut chunk = pd.clone();
+        // A stream this side configured unordered delivers each message as soon as it is
+        // complete, whatever the peer's U bit says (DCEP stays ordered, RFC 8832 6). A relay that
+        // forwards such a channel ordered would otherwise hold every later message behind one
+        // lost chunk until its retransmission.
+        if self.unordered && chunk.payload_type != PayloadProtocolIdentifier::Dcep {
+            chunk.unordered = true;
+        }
+        self.reassembly_queue.push(chunk)
     }
 
     fn packetize(
