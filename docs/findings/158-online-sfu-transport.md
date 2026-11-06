@@ -72,7 +72,7 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - Protocol 3 server fake API tests and typecheck pass, including private SDP/allocation messages.
 - Native str0m transport compiles on Windows. Native loopback delivered 95/100 STATE messages with 5% injection, the reliable EVENT,
   and corrected a forged sender slot from its channel identity. All three dhd_net unit tests
-  also pass with the patched crypto adapter. The patched native archive passes the unchanged path/linkage gate. The final serial port tier passes. Credentials remain absent; no live results are claimed.
+  also pass with the patched crypto adapter. The patched native archive passes the unchanged path/linkage gate. The final serial port tier passes. Credentials arrived during final validation; live harness checks are now running.
 
 - [x] 2026-11-06: lane plan (this file).
 - [x] Part 1: 30 snapshots a second, adaptive puppet delay, snapshot-age `net:` lines.
@@ -95,8 +95,12 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   [Cloudflare channels](https://developers.cloudflare.com/realtime/sfu/features/datachannels/),
   [connection recipes](https://developers.cloudflare.com/realtime/sfu/get-started/connection-patterns/),
   [limits](https://developers.cloudflare.com/realtime/sfu/platform/limits/).
-  Current documented DataChannel establishment generates an SFU offer: each client receives
-  only that offer and supplies its own answer to the API. No client SDP goes to another client.
+  The live API requires the initial offer in sessions/new. The client supplies its own SDP;
+  the DO sends it to that endpoint and returns only that session's SFU answer. A native negotiated
+  bootstrap channel reserves stream 65534 so application allocations cannot collide with stream 0.
+  No client SDP goes to another client. The empty-session/establish recipe in the docs failed
+  against the live service; see also Cloudflare docs issue 28488 (sessionDescription omitted
+  from the published session-create schema).
 
 - Part 1 uses an RFC 3550-style EWMA of absolute arrival-spacing variation (gain 1/16).
   Delay is the estimated interval plus twice jitter, clamped to 50-150 ms; the environment
@@ -121,6 +125,13 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 
 ## Surprises
 
+- The live spike completed: two clients published/subscribed through the SFU, puppets moved,
+  both finished at 70 s and agreed on results. The first run overlapped a baseline build; its
+  timing numbers are a spike only. Comparison/loss runs wait until builds finish.
+- The old one-second puppet lag diagnostic still used the fixed-delay sentinel (-1 s), producing
+  bogus negative lag while actual interpolation was correct. It now shares the adaptive delay
+  calculation with rendering. The new snapshot-age net lines were already correct.
+
 - Do not overlap two host builds in this worktree: one validation attempt collided while copying
   a generated header. Machine-wide build slots do not serialize a single worktree's outputs.
   Finish the current host build, then run the port tier serially.
@@ -144,7 +155,8 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   This costs more bandwidth, especially for the host's AI, but restores controls after packet loss.
   Slot identity is bound to the channel allocation's member ID, mapped by each race's start.
 
-- Credentials file is absent. Live SFU spike and measurements wait for the lead's credentials.
+- Credentials were initially absent, then arrived during final validation. Live harness checks
+  proceeded without printing or copying credential values.
 - Initial snapshots encoded pad deltas; protocol 3 sends independent snapshots and rejects
   stale packets before changing the mirror.
 
@@ -165,7 +177,10 @@ Validation completed:
   with the lead's merged verification. Online remains disabled on Android and in the browser.
 
 
-Live acceptance 3-5 is pending credentials. No real SFU latency numbers, packet-loss race or
+Live acceptance 3-5 is being checked with the supplied credentials. The first harness attempt
+stayed in the lobby because storing native fetch as an instance method supplied an invalid
+this binding. The default fetch adapter now calls global fetch through an arrow function.
+Signaling was also made client-offer/session-create-with-SDP/SFU-answer, as requested. No real SFU latency numbers, packet-loss race or
 before/after comparison have been measured. Do not release this lane until the live two-client
 spike and race pass. The lead also runs boot/race state traces against the shared reference build,
 and the cross-machine race in both directions after merging.

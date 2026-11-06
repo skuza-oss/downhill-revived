@@ -458,6 +458,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
     } else if (!strcmp(type, "error")) {
         json_string(text, "code", c->lobby.error_code, sizeof c->lobby.error_code);
         json_string(text, "message", c->lobby.error, sizeof c->lobby.error);
+        snprintf(line, sizeof line, "net: room %s: %s", c->lobby.code, c->lobby.error);
         changed(c);
     }
     SDL_UnlockMutex(c->lock);

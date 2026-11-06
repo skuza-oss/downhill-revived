@@ -322,15 +322,12 @@ export class Room extends DurableObject<Env> {
         if (this.sockets.get(me.id) !== ws || !this.state?.members.includes(me)) return;
         const api = new Realtime(this.env as Env & SfuSecrets);
         try {
-          if (m.type === "sfu_open") {
+          if (m.type === "sfu_offer") {
             if (me.sfu) await this.clearSfu(me);
-            const opened = await api.open();
+            const opened = await api.open(m.sdp);
             me.sfu = opened.session;
             await this.save();
             this.send(ws, opened.message);
-          } else if (m.type === "sfu_answer" && me.sfu) {
-            await api.answer(me.sfu, m.sdp);
-            await this.save();
           } else if (m.type === "sfu_connected" && me.sfu) {
             const channels = await api.publish(me.id, me.sfu);
             this.send(ws, { type: "sfu_channels", channels });
@@ -344,7 +341,12 @@ export class Room extends DurableObject<Env> {
             }
             await this.save();
           } else throw new Error("Invalid signaling phase");
-        } catch {
+        } catch (error) {
+          let detail = error instanceof Error ? error.message : "unknown";
+          const secrets = this.env as Env & SfuSecrets;
+          for (const value of [secrets.REALTIME_APP_ID, secrets.REALTIME_APP_TOKEN])
+            if (value) detail = detail.replaceAll(value, "<redacted>");
+          console.warn("Realtime setup failed", detail.slice(0, 200));
           if (me.sfu) me.sfu.phase = "failed";
           await this.save();
           this.error(ws, "bad_value", "Realtime connection failed. Rejoin the room.");

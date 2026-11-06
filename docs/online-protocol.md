@@ -165,10 +165,10 @@ byte 1 from that mapping. WebSocket binary frames only carry PING/PONG; all othe
 
 ### SFU signaling (private JSON on the room WebSocket)
 
-- Client sends `{"type":"sfu_open"}` after welcome. The DO creates a session and calls
-  DataChannels establish. The answer is `{"type":"sfu_offer","sdp":"<this session's SFU offer>"}`.
-- Client answers `{"type":"sfu_answer","sdp":"<its own answer>"}`. The DO sends it only to
-  that session's renegotiate API. The documented establish flow is SFU-offer/client-answer.
+- Client sends `{"type":"sfu_offer","sdp":"<its own offer>"}` after welcome. The DO calls
+  `sessions/new` with that offer as `sessionDescription`. The answer is
+  `{"type":"sfu_answer","sdp":"<this session's SFU answer>"}`, sent only to its owner.
+  The offer includes the SCTP transport; no separate `datachannels/establish` call is used.
 - Once WebRTC connects, client sends `{"type":"sfu_connected"}`. The DO publishes the two
   channels, then subscribes each connected member to every other publisher.
 - Each endpoint receives only its own allocations, in one or more messages:
@@ -182,7 +182,7 @@ byte 1 from that mapping. WebSocket binary frames only carry PING/PONG; all othe
 
 The Worker reads `REALTIME_APP_ID` and `REALTIME_APP_TOKEN` from env/secrets. For local tests they
 live only in gitignored `.dev.vars`. Neither is sent to clients. Client SDP is never broadcast or
-stored in room messages; SFU SDP is sent only to the session's owner. No message carries another
+stored in room messages; SFU answers are sent only to the session's owner. No message carries another
 player's SDP, candidates or address. The native client has no peer signaling or TURN mesh path.
 
 The API limit is 50 requests/session/second; mutations are serialized, and channels use one

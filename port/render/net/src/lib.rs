@@ -198,7 +198,7 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
         for (binary, data) in got {
             if !binary {
                 if let Ok(m) = serde_json::from_slice::<serde_json::Value>(&data) {
-                    if matches!(m["type"].as_str(), Some("welcome" | "sfu_offer" | "sfu_channels" | "sfu_closed" | "room" | "start" | "ended")) {
+                    if matches!(m["type"].as_str(), Some("welcome" | "sfu_answer" | "sfu_channels" | "sfu_closed" | "room" | "start" | "ended")) {
                         let mut q = lock(&c.queue);
                         if q.signals.len() < 64 { q.signals.push_back(m); }
                     }
@@ -222,8 +222,6 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
     let mut sfu: Option<sfu::Sfu> = None;
-    let mut race_start = None;
-    let mut room = None;
     let mut held_ready: Option<Vec<u8>> = None;
     let mut early_events: VecDeque<Vec<u8>> = VecDeque::new();
     while !c.stopping.load(Ordering::Acquire) {
@@ -238,29 +236,21 @@ fn send_main(c: Arc<WsConn>) {
             let result = match message["type"].as_str() {
                 Some("welcome") => {
                     sfu = None;
-                    race_start = None;
-                    room = None;
                     held_ready = None;
                     early_events.clear();
-                    lock(&c.queue).out.push_back((false, br#"{"type":"sfu_open"}"#.to_vec()));
-                    Ok(())
-                }
-                Some("sfu_offer") => match sfu::Sfu::offer(message["sdp"].as_str().unwrap_or("")) {
-                    Ok((mut rtc, answer)) => {
-                        if let Some(room) = &room { let _ = rtc.signal(room); }
-                        if let Some(start) = &race_start { let _ = rtc.signal(start); }
-                        sfu = Some(rtc);
-                        lock(&c.queue).out.push_back((false, answer.to_string().into_bytes()));
-                        Ok(())
+                    match sfu::Sfu::start() {
+                        Ok((rtc, offer)) => {
+                            sfu = Some(rtc);
+                            lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
                     }
-                    Err(e) => Err(e),
-                },
+                }
                 Some("room") => {
-                    room = Some(message.clone());
                     if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) }
                 },
                 Some("start") => {
-                    race_start = Some(message.clone());
                     if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) }
                 },
                 _ => if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) },

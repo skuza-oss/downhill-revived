@@ -1,41 +1,42 @@
 // Trusted control plane. Client SDP is consumed here, never copied into a client message.
 export interface SfuSecrets { REALTIME_APP_ID?: string; REALTIME_APP_TOKEN?: string; }
-export interface SfuSession { id: string; phase: "answer" | "connect" | "ready" | "failed"; channels: Allocation[]; }
+export interface SfuSession { id: string; phase: "connect" | "ready" | "failed"; channels: Allocation[]; }
 export interface Allocation { memberId: number; name: string; channelId: number; local: boolean; }
 type Json = Record<string, unknown>;
 const policies = [{ dataChannelName: "state", ordered: false, maxRetransmits: 0 },
                   { dataChannelName: "events", ordered: true }];
 
 export class Realtime {
-  constructor(private secrets: SfuSecrets, private request: typeof fetch = fetch) {}
+  constructor(private secrets: SfuSecrets, private request: typeof fetch = (input, init) => fetch(input, init)) {}
   private async call(path: string, body?: unknown, method = "POST"): Promise<Json> {
     const { REALTIME_APP_ID: app, REALTIME_APP_TOKEN: token } = this.secrets;
     if (!app || !token) throw new Error("Realtime is not configured");
-    const r = await this.request(`https://rtc.live.cloudflare.com/v1/apps/${encodeURIComponent(app)}/${path}`, {
+    const request = this.request;
+    const r = await request(`https://rtc.live.cloudflare.com/v1/apps/${encodeURIComponent(app)}/${path}`, {
       method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000),
     });
-    if (!r.ok) throw new Error("Realtime request failed");
+    if (!r.ok) {
+      console.warn("Realtime API operation failed", path.split("/").at(-1), r.status);
+      throw new Error("Realtime request failed");
+    }
     const data = await r.json() as Json;
-    if (data.errorCode) throw new Error("Realtime operation failed");
+    if (data.errorCode) {
+      const code = typeof data.errorCode === "string" && /^[a-z_]{1,64}$/.test(data.errorCode) ? data.errorCode : "unknown";
+      console.warn("Realtime API error", path.split("/").at(-1), code);
+      throw new Error("Realtime operation failed");
+    }
     return data;
   }
-  async open(): Promise<{ session: SfuSession; message: Json }> {
-    const r = await this.call("sessions/new");
+  async open(sdp: unknown): Promise<{ session: SfuSession; message: Json }> {
+    if (typeof sdp !== "string" || sdp.length > 32768) throw new Error("Invalid offer");
+    const r = await this.call("sessions/new", { sessionDescription: { type: "offer", sdp } });
     if (typeof r.sessionId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(r.sessionId)) throw new Error("Invalid session");
-    const session: SfuSession = { id: r.sessionId, phase: "answer", channels: [] };
-    const established = await this.call(`sessions/${session.id}/datachannels/establish`, {
-      dataChannel: { location: "remote", dataChannelName: "server-events" },
-    });
-    const description = established.sessionDescription as Json | undefined;
-    if (description?.type !== "offer" || typeof description.sdp !== "string") throw new Error("Invalid SFU offer");
-    // Construct explicitly: API errors, echoed client SDP and address fields never escape.
-    return { session, message: { type: "sfu_offer", sdp: description.sdp } };
-  }
-  async answer(session: SfuSession, sdp: unknown): Promise<void> {
-    if (session.phase !== "answer" || typeof sdp !== "string" || sdp.length > 32768) throw new Error("Invalid answer");
-    await this.call(`sessions/${session.id}/renegotiate`, { sessionDescription: { type: "answer", sdp } }, "PUT");
-    session.phase = "connect";
+    const session: SfuSession = { id: r.sessionId, phase: "connect", channels: [] };
+    const description = r.sessionDescription as Json | undefined;
+    if (description?.type !== "answer" || typeof description.sdp !== "string") throw new Error("Invalid SFU answer");
+    // Only this session's SFU answer escapes. Never echo the supplied client offer.
+    return { session, message: { type: "sfu_answer", sdp: description.sdp } };
   }
   async close(session: SfuSession, channels = session.channels): Promise<void> {
     if (!channels.length) return;

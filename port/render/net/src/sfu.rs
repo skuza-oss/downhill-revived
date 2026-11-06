@@ -1,9 +1,9 @@
 //! One SFU association per room, owned exclusively by the WebSocket send thread.
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::Instant;
-use str0m::change::SdpOffer;
+use str0m::change::{SdpAnswer, SdpPendingOffer};
 use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::net::{Protocol, Receive};
 use str0m::{Candidate, Event, Input, Output, Rtc};
@@ -17,6 +17,7 @@ struct Channel {
 }
 pub struct Sfu {
     rtc: Rtc,
+    pending: Option<SdpPendingOffer>,
     socket: UdpSocket,
     channels: Vec<Channel>,
     slots: HashMap<u64, u8>,
@@ -28,72 +29,37 @@ pub struct Sfu {
     pending_state: HashMap<u8, Vec<u8>>,
 }
 impl Sfu {
-    pub fn offer(sdp: &str) -> Result<(Self, Value)> {
-        // The DO supplies SFU SDP only. No STUN discovery service, peer signaling or TURN mesh.
-        let remote = sdp
-            .lines()
-            .filter(|l| l.starts_with("a=candidate:"))
-            .find_map(|l| {
-                let p: Vec<_> = l.split_whitespace().collect();
-                if p.len() < 6 || !p[2].eq_ignore_ascii_case("udp") {
-                    return None;
-                }
-                let ip: IpAddr = p[4].parse().ok()?;
-                if !ip.is_ipv4() {
-                    return None;
-                }
-                Some(SocketAddr::new(ip, p[5].parse().ok()?))
-            })
-            .ok_or("No SFU UDP candidate")?;
+    pub fn start() -> Result<(Self, Value)> {
+        let route = ("rtc.live.cloudflare.com", 443).to_socket_addrs()?.find(|a| a.is_ipv4()).ok_or("No SFU IPv4 route")?;
+        Self::start_at(route)
+    }
+    fn start_at(remote: SocketAddr) -> Result<(Self, Value)> {
+        // The only production route is Cloudflare. No peer signaling, discovery or TURN mesh.
         let route = UdpSocket::bind("0.0.0.0:0")?;
         route.connect(remote)?;
         let socket = UdpSocket::bind(SocketAddr::new(route.local_addr()?.ip(), 0))?;
         socket.set_nonblocking(true)?;
-        let mut rtc = Rtc::builder()
-            .set_crypto_provider(str0m::crypto::from_feature_flags().into())
-            .build(Instant::now());
+        let mut rtc = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
         rtc.add_local_candidate(Candidate::host(socket.local_addr()?, "udp")?);
-        // This socket uses IPv4. Do not give ICE candidates it cannot transmit to.
-        let filtered = sdp
-            .lines()
-            .filter(|line| {
-                if !line.starts_with("a=candidate:") {
-                    return true;
-                }
-                let p: Vec<_> = line.split_whitespace().collect();
-                p.len() >= 6
-                    && p[2].eq_ignore_ascii_case("udp")
-                    && p[4].parse::<std::net::Ipv4Addr>().is_ok()
-            })
-            .collect::<Vec<_>>()
-            .join("\r\n")
-            + "\r\n";
-        let offer = SdpOffer::from_sdp_string(&filtered)?;
-        let answer = rtc.sdp_api().accept_offer(offer)?;
-        let answer = json!({ "type": "sfu_answer", "sdp": answer.to_sdp_string() });
-        let drop_percent = std::env::var("DHD_NET_DROP_STATE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0)
-            .min(100);
-        Ok((
-            Self {
-                rtc,
-                socket,
-                channels: vec![],
-                slots: HashMap::new(),
-                members: 1,
-                connected: false,
-                drop_percent,
-                sent: 0,
-                pending_events: VecDeque::new(),
-                pending_state: HashMap::new(),
-            },
-            answer,
-        ))
+        let mut change = rtc.sdp_api();
+        change.add_channel_with_config(ChannelConfig { label: "server-events".into(), negotiated: Some(65534), ..Default::default() });
+        let (offer, pending) = change.apply().ok_or("No transport offer")?;
+        let message = json!({ "type": "sfu_offer", "sdp": offer.to_sdp_string() });
+        let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
+        Ok((Self { rtc, pending: Some(pending), socket, channels: vec![], slots: HashMap::new(), members: 1,
+            connected: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
-        if message["type"] == "room" {
+        if message["type"] == "sfu_answer" {
+            let sdp = message["sdp"].as_str().ok_or("Missing SFU answer")?;
+            let filtered = sdp.lines().filter(|line| {
+                if !line.starts_with("a=candidate:") { return true; }
+                let p: Vec<_> = line.split_whitespace().collect();
+                p.len() >= 6 && p[2].eq_ignore_ascii_case("udp") && p[4].parse::<std::net::Ipv4Addr>().is_ok()
+            }).collect::<Vec<_>>().join("\r\n") + "\r\n";
+            let pending = self.pending.take().ok_or("Unexpected answer")?;
+            self.rtc.sdp_api().accept_answer(pending, SdpAnswer::from_sdp_string(&filtered)?)?;
+        } else if message["type"] == "room" {
             self.members = message["members"].as_array().map_or(1, |v| v.len());
         } else if message["type"] == "start" {
             self.slots.clear();
@@ -169,6 +135,7 @@ impl Sfu {
                 });
             }
         }
+        if message["type"] == "sfu_channels" { eprintln!("net: SFU channels allocated: {}", self.channels.len()); }
         Ok(())
     }
     pub fn usable(&mut self) -> bool {
@@ -306,7 +273,6 @@ impl Sfu {
 mod tests {
     use super::*;
     use std::time::Duration;
-    use str0m::change::SdpAnswer;
 
     #[test]
     fn native_channels_deliver_and_bind_sender_with_state_loss() {
@@ -316,17 +282,9 @@ mod tests {
             .set_crypto_provider(str0m::crypto::from_feature_flags().into())
             .build(Instant::now());
         server.add_local_candidate(Candidate::host(socket.local_addr().unwrap(), "udp").unwrap());
-        let mut change = server.sdp_api();
-        change.add_channel("server-events".into());
-        let (offer, pending) = change.apply().unwrap();
-        let (mut client, answer) = Sfu::offer(&offer.to_sdp_string()).unwrap();
-        server
-            .sdp_api()
-            .accept_answer(
-                pending,
-                SdpAnswer::from_sdp_string(answer["sdp"].as_str().unwrap()).unwrap(),
-            )
-            .unwrap();
+        let (mut client, offer) = Sfu::start_at(socket.local_addr().unwrap()).unwrap();
+        let answer = server.sdp_api().accept_offer(str0m::change::SdpOffer::from_sdp_string(offer["sdp"].as_str().unwrap()).unwrap()).unwrap();
+        client.signal(&json!({"type":"sfu_answer","sdp":answer.to_sdp_string()})).unwrap();
         let server_state = server.direct_api().create_data_channel(ChannelConfig {
             label: "state".into(),
             ordered: false,
