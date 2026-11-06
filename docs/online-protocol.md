@@ -182,6 +182,9 @@ so the game sees start before buffered events. Channels close at race end.
   `{"type":"sfu_channels","channels":[{"memberId":2,"name":"state","channelId":10,"local":false}]}`.
   The endpoint creates negotiated channels with these IDs and the delivery policies above.
   `local:true` means its own publication. Session IDs and app credentials stay on the server.
+- After all allocated channels open, each client sends `{"type":"sfu_ready"}`. The DO replies
+  to all racing members only after every member acknowledges. Until then, race frames stay
+  queued locally so reliable events cannot precede a subscriber.
 - Departures and replacements send `{"type":"sfu_closed","channelIds":[10,12]}` only to
   affected endpoints, after closing those allocations through the API.
 - Setup failures use `error` with `bad_value` and ask the player to rejoin. No automatic API
@@ -216,8 +219,8 @@ watch the round-trip during a race; it is never forwarded.
 | 1 | u8 | `slot` of the sender |
 | 2 | n | payload, the client's format (finding 044) |
 
-State sync: a STATE frame is one independent rider snapshot (payload version 5, fixed 834
-bytes maximum). Its timestamp is sender race time in ms since GO. Version 5 repeats each changed pad word in six consecutive snapshots,
+State sync: a STATE frame is one rider snapshot (payload version 5, 104-834
+bytes). Its timestamp is sender race time in ms since GO. Version 5 repeats each changed pad word in six consecutive snapshots,
 and refreshes all 146 words every 30 snapshots, as index/u32 pairs; previous-action words 25-49 are reconstructed locally. Receivers reject older
 timestamps before changing the pad mirror. Every owned rider is sent about 30 times/second.
 EVENT remains payload version 2. The SFU reads none of the gameplay payload.
@@ -575,3 +578,7 @@ server's table of Durable Object locations, else the hint's (`EU`, `NA`, `SA`, `
 
 Every field and the message type are additions: clients that don't know them ignore them (the
 native client reads by key, the browser copies known keys), so `MIN_VERSION` stays as it is.
+
+SFU allocations are restricted to running race members, one setup attempt per member per race.
+Allocations close at race end or departure. Receiver rate protection silences a member for the
+remaining race if any rider exceeds 120 snapshots in a one-second window (normal: 30/s).

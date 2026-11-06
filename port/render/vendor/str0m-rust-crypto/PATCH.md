@@ -17,8 +17,12 @@ AWS-LC. Cargo features are additive: a downstream feature choice cannot disable 
 Sources: [adapter manifest](https://github.com/algesten/str0m/blob/main/crypto/rust-crypto/Cargo.toml),
 [dimpl manifest](https://github.com/algesten/dimpl/blob/main/Cargo.toml).
 Platform crypto providers would split the native implementation; OpenSSL adds a new native
-library. Allowing source paths in AWS-LC objects would weaken the archive gate, so keep this
-small patch until upstream separates certificate generation from its crypto provider.
+library. A scoped AWS-LC archive exception is possible, but accepting its absolute source paths
+would retain machine details in release artifacts. The existing ring exception rewrites known
+upstream paths; AWS-LC would need its own verified normalization of source/debug strings and
+checksums, rather than an allowlist alone. No such clean build was verified here. Keep this
+small patch until upstream separates certificate generation from its crypto provider or that
+normalization is implemented and validated.
 
 1. Replace this directory with the new published adapter crate; retain both licences.
    Current upstream revision: `5f2183ce7c67117cd1960dfeb11bed11fc188b66`, `crypto/rust-crypto`.
