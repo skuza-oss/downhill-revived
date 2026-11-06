@@ -462,6 +462,7 @@ void port_fps_contact_recovery(void *body)
     a->stalled_steps+=port_step();
     if (a->stalled_steps<120-0.00001) return;
     a->stalled_steps=0;
+    hle_log("fps: rider %d stuck on the ground while pedalling for 2 s: the collision recovery\n", slot);
     extern void func_00155E78(void *,int);
     func_00155E78(r+0x3FD0,2);
 }
