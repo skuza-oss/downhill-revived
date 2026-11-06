@@ -225,11 +225,11 @@ describe("limits per connection source", () => {
     let refused: { error: any; code: number } | null = null;
     let made = 0;
     // The rate limiter counts in fixed one-minute windows: a run that crosses a window's end sees
-    // the count start over (15 made, a flaky failure). That can happen once a minute, so a second
+    // the count start over (more than 10 made, a flaky failure). That can happen once a minute, so a second
     // try with a fresh address never crosses one too.
-    for (let attempt = 0; attempt < 2 && !refused; attempt++) {
+    for (let attempt = 0; attempt < 2 && made !== 10; attempt++) {
       const ip = randomIp();
-      made = 0;
+      made = 0, refused = null;
       for (let i = 0; i < 15 && !refused; i++) {
         const res = await upgrade("/v1/rooms/new", ip);
         // a room's socket waits for hello; a refusal closes at once
