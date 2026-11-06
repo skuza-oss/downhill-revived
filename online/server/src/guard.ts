@@ -23,13 +23,18 @@ export interface GuardEnv {
 // ---- What an isolate keeps of the store ----
 
 /**
- * Each isolate (the Worker's, each room's) keeps the kill switch it read for SWITCH_CACHE_MS, so a
- * connection costs no D1 read for it in the common case, and `online off` bites within 30 s. A
- * read that fails is kept only FAILED_CACHE_MS: a store back from an outage is read again soon,
- * and a broken one is not asked (and logged) at every connection.
+ * Each isolate (the Worker's, each room's) keeps what it read of the store for a short time, so a
+ * connection costs no D1 read in the common case: the kill switch SWITCH_CACHE_MS, a ban lookup
+ * BAN_CACHE_MS (banned or not). So a change made with tools/moderate.mjs bites within that long:
+ * `online off` up to 30 s late, a new ban (or a lifted one) up to a minute late. A read that
+ * fails is kept only FAILED_CACHE_MS: a store back from an outage is read again soon, and a broken
+ * one is not asked (and logged) at every connection.
  */
 export const SWITCH_CACHE_MS = 30_000;
+export const BAN_CACHE_MS = 60_000;
 export const FAILED_CACHE_MS = 10_000;
+/** At most this many ban lookups kept per isolate (one per address or install id seen lately). */
+export const BAN_CACHE_MAX = 10_000;
 
 interface Cached<T> {
   db: D1Database;
@@ -44,6 +49,7 @@ const noCache = (env: GuardEnv) => env.GUARD_CACHE === "off";
 export function resetGuardCaches(): void {
   switchCache = null;
   lastSwitch = ONLINE_ON;
+  banCache.clear();
 }
 
 // ---- The kill switch ----
@@ -268,27 +274,60 @@ export interface Ban {
   expiresAt: number | null;
 }
 
+const banCache = new Map<string, Cached<Ban | null>>();
+
+async function readBan(db: D1Database, by: { ip?: string; install?: string | null }, now: number): Promise<Ban | null> {
+  const row = await db
+    .prepare(
+      "SELECT kind, expires_at FROM bans WHERE ((kind = 'ip' AND value = ?1) OR (kind = 'install' AND value = ?2))" +
+        " AND (expires_at IS NULL OR expires_at > ?3) ORDER BY expires_at IS NULL DESC, expires_at DESC LIMIT 1",
+    )
+    .bind(by.ip || null, by.install || null, now)
+    .first<{ kind: "ip" | "install"; expires_at: number | null }>();
+  return row ? { kind: row.kind, expiresAt: row.expires_at } : null;
+}
+
+/** Makes room for one more ban lookup: drops the ones past their time, then the oldest. */
+function trimBanCache(now: number): void {
+  if (banCache.size < BAN_CACHE_MAX) return;
+  for (const [key, c] of banCache) if (c.until <= now) banCache.delete(key);
+  for (const key of banCache.keys()) {
+    if (banCache.size < BAN_CACHE_MAX) break;
+    banCache.delete(key);
+  }
+}
+
 /**
- * The ban in force for this address hash or install id, or null. A server without the store, or a
- * store that can't be read, bans nobody: players get in (availability first) and the failure is
+ * The ban in force for this address hash or install id, or null. Kept per isolate BAN_CACHE_MS
+ * (above): a ban the operator just added may take up to that long to bite, and a lifted one as
+ * long to go; a kept ban that has ended meanwhile no longer counts. A server without the store, or
+ * a store that can't be read, bans nobody: players get in (availability first) and the failure is
  * logged, so the operator sees a broken store in `wrangler tail`.
  */
 export async function findBan(env: GuardEnv, by: { ip?: string; install?: string | null }, now = Date.now()): Promise<Ban | null> {
   const db = env.MODERATION;
   if (!db || (!by.ip && !by.install)) return null;
-  try {
-    const row = await db
-      .prepare(
-        "SELECT kind, expires_at FROM bans WHERE ((kind = 'ip' AND value = ?1) OR (kind = 'install' AND value = ?2))" +
-          " AND (expires_at IS NULL OR expires_at > ?3) ORDER BY expires_at IS NULL DESC, expires_at DESC LIMIT 1",
-      )
-      .bind(by.ip || null, by.install || null, now)
-      .first<{ kind: "ip" | "install"; expires_at: number | null }>();
-    return row ? { kind: row.kind, expiresAt: row.expires_at } : null;
-  } catch (e) {
-    console.error("guard: the ban list can't be read; letting the player in", e);
-    return null;
+  const key = `${by.ip || ""}|${by.install || ""}`;
+  let entry = noCache(env) ? undefined : banCache.get(key);
+  if (!entry || entry.db !== db || now >= entry.until) {
+    const fresh: Cached<Ban | null> = { db, until: Infinity, value: Promise.resolve(null) };
+    fresh.value = readBan(db, by, now).then(
+      (ban) => {
+        fresh.until = now + BAN_CACHE_MS;
+        return ban;
+      },
+      (e) => {
+        console.error("guard: the ban list can't be read; letting the player in", e);
+        fresh.until = now + FAILED_CACHE_MS;
+        return null;
+      },
+    );
+    banCache.delete(key);
+    trimBanCache(now);
+    banCache.set(key, (entry = fresh));
   }
+  const ban = await entry.value;
+  return ban && ban.expiresAt !== null && ban.expiresAt <= now ? null : ban;
 }
 
 /** The refusal for a banned player: when it ends (UTC day), or none (footer-sized). */

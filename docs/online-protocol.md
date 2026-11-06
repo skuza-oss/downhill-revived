@@ -128,8 +128,9 @@ room, a banned install id at `hello`:
 {"type":"error","code":"banned","message":"You can't play online until 2026-11-20."}
 ```
 
-(or "You can't play online on this server." for a ban without an end), then close 4013. If the
-ban list can't be read, players are let in.
+(or "You can't play online on this server." for a ban without an end), then close 4013. The
+server keeps each lookup up to a minute, so a new ban (or a lifted one) takes up to that long to
+bite. If the ban list can't be read, players are let in.
 
 No message to any client carries an address, an address hash or an install id: not `welcome`,
 `room`, `where`, `start`, the lobby list, errors or refusals (`online/server/test/moderation.test.ts`).

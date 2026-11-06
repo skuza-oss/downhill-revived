@@ -4,8 +4,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
 import {
-  BINARY_PER_WINDOW, FAILED_CACHE_MS, MESSAGE_MAX, OFF_MESSAGE, RATE_MESSAGE, SWITCH_CACHE_MS,
-  TEXT_PER_WINDOW, TOO_FAST_MESSAGE, TOO_FAST_WARNING, ipHash, newTally, offMessage, onlineState, resetGuardCaches, tally,
+  BAN_CACHE_MAX, BAN_CACHE_MS, BINARY_PER_WINDOW, FAILED_CACHE_MS, MESSAGE_MAX, OFF_MESSAGE, RATE_MESSAGE, SWITCH_CACHE_MS,
+  TEXT_PER_WINDOW, TOO_FAST_MESSAGE, TOO_FAST_WARNING, findBan, ipHash, newTally, offMessage, onlineState, resetGuardCaches, tally,
 } from "../src/guard";
 import { FRAME_STATE } from "../src/protocol";
 import { Client, randomIp, startedRace } from "./helpers";
@@ -161,6 +161,54 @@ describe("what an isolate keeps of the store", () => {
     expect(fails).toBe(2);
     resetGuardCaches();
     expect((await onlineState({ MODERATION: broken }, t)).on).toBe(true); // nothing read yet: on
+  });
+
+  it("keeps a ban lookup BAN_CACHE_MS: a new ban, or a lifted one, bites after it", async () => {
+    const { db, reads } = counting(env.MODERATION);
+    const install = "1".repeat(31) + String(Math.floor(Math.random() * 10));
+    const t = Date.now();
+    const look = (at: number) => findBan({ MODERATION: db }, { install }, at);
+    expect(await look(t)).toBeNull();
+    await env.MODERATION.prepare("INSERT INTO bans (kind, value, created_at, expires_at) VALUES ('install', ?1, ?2, NULL)")
+      .bind(install, t).run();
+    expect(await look(t + BAN_CACHE_MS - 1)).toBeNull(); // not yet
+    expect(reads()).toBe(1);
+    expect(await look(t + BAN_CACHE_MS)).toEqual({ kind: "install", expiresAt: null });
+    await env.MODERATION.prepare("DELETE FROM bans WHERE value = ?1").bind(install).run();
+    expect(await look(t + 2 * BAN_CACHE_MS - 1)).not.toBeNull(); // lifted, not yet seen
+    expect(await look(t + 2 * BAN_CACHE_MS)).toBeNull();
+    expect(reads()).toBe(3);
+  });
+
+  it("drops a kept ban once it has ended, without asking the store", async () => {
+    const { db, reads } = counting(env.MODERATION);
+    const install = "2".repeat(31) + String(Math.floor(Math.random() * 10));
+    const t = Date.now();
+    await env.MODERATION.prepare("INSERT INTO bans (kind, value, created_at, expires_at) VALUES ('install', ?1, ?2, ?3)")
+      .bind(install, t, t + 5_000).run();
+    expect(await findBan({ MODERATION: db }, { install }, t)).toEqual({ kind: "install", expiresAt: t + 5_000 });
+    expect(await findBan({ MODERATION: db }, { install }, t + 5_000)).toBeNull();
+    expect(reads()).toBe(1);
+  });
+
+  it("keeps a failed ban lookup only FAILED_CACHE_MS, and at most BAN_CACHE_MAX lookups", async () => {
+    let n = 0;
+    const broken = { prepare: () => { n++; throw new Error("D1 is down"); } } as unknown as D1Database;
+    const t = Date.now();
+    expect(await findBan({ MODERATION: broken }, { ip: "a".repeat(64) }, t)).toBeNull();
+    expect(await findBan({ MODERATION: broken }, { ip: "a".repeat(64) }, t + FAILED_CACHE_MS - 1)).toBeNull();
+    expect(n).toBe(1);
+    await findBan({ MODERATION: broken }, { ip: "a".repeat(64) }, t + FAILED_CACHE_MS);
+    expect(n).toBe(2);
+
+    let reads = 0;
+    const empty = { prepare: () => ({ bind: () => ({ first: async () => (reads++, null) }) }) } as unknown as D1Database;
+    for (let i = 0; i <= BAN_CACHE_MAX; i++) await findBan({ MODERATION: empty }, { ip: `ip${i}` }, t);
+    expect(reads).toBe(BAN_CACHE_MAX + 1);
+    await findBan({ MODERATION: empty }, { ip: `ip${BAN_CACHE_MAX}` }, t); // the newest: kept
+    expect(reads).toBe(BAN_CACHE_MAX + 1);
+    await findBan({ MODERATION: empty }, { ip: "ip0" }, t); // the oldest: made room for the newest
+    expect(reads).toBe(BAN_CACHE_MAX + 2);
   });
 });
 

@@ -116,7 +116,10 @@ change with every isolate.
    read (players are let in then) and the daily cleanup's counts.
 
 A store that can't be read lets players in (availability first) and logs it; the log keeps 14
-days (the daily cron in `wrangler.jsonc` deletes older rows and ended bans).
+days (the daily cron in `wrangler.jsonc` deletes older rows and ended bans). Each server isolate
+keeps a ban lookup (banned or not) for up to 60 s, so a connection costs no database read in the
+common case: a ban you just added may take up to a minute to bite, and a lifted one as long to
+go. Someone already in a room stays until they leave; the ban stops their next connection.
 
 ### Moderation
 

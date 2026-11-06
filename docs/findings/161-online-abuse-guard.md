@@ -88,6 +88,9 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   `hello.installId` here (32 lowercase hex, optional; malformed = none). Tests
   `test/moderation.test.ts`, including "nothing private reaches a client". Acceptance 3 run
   against `wrangler dev` (two members, list by name, ban, refused, unban, let in): OK.
+- [x] Round 2: ban lookups kept per isolate (`src/guard.ts` `findBan`, `BAN_CACHE_MS` 60 s,
+  failures 10 s, at most `BAN_CACHE_MAX` 10,000 lookups); tests in `test/guard.test.ts` (a new
+  ban and a lifted one bite after the minute, a kept ban that ends, failures, the size cap).
 - [x] Install id in the game and `hello`: `port/render/settings/src/install.rs` (`install_id` in
   dhd.ini, 32 lowercase hex, made once; `dhd_settings_install_id`), `port/hle/host.c` puts it in
   `DHD_NET_INSTALL_ID` after the settings load, `port/net/net.c` takes it for each connection and
@@ -164,6 +167,13 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 - Retention by a daily cron trigger (`17 4 * * *`), not cleanup on write: the rows must go after
   14 days even when nobody joins. Ended bans are deleted too; a ban without expiry stays until
   lifted.
+- 2026-11-06, round 2 (the lead): every room connection read D1 for a ban. Each isolate now
+  keeps a lookup 60 s, "not banned" and "banned" alike (one rule; a lifted ban takes as long
+  as a new one), and drops a kept ban once its expiry passes. A ban takes up to a minute to
+  bite: a banned player who reconnects within it gets in once more, which costs less than a D1
+  read per connection. A failed read is kept 10 s (players let in, logged once per 10 s, not per
+  connection). At most 10,000 lookups per isolate, the oldest dropped first: memory stays small
+  even under a flood of new addresses (which the limits per address slow down first).
 - Address bans in the Worker, before any room (the plan); install-id bans in the room at
   `hello`, the first moment the id is known. While that lookup runs, the socket's other messages
   are dropped, so nothing reaches a room as from a member before its hello is through.
