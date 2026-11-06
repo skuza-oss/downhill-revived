@@ -192,6 +192,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 160 | [Garbage blocks on screen in the first seconds after start](160-boot-garbage-frames.md) | current |  |
 | 161 | [online abuse guard: kill switch, rate limits, bans and a short moderation log](161-online-abuse-guard.md) | current |  |
 | 163 | [REVIVED SETTINGS: tabs, a clearer Controls page, online name size](163-revived-settings.md) | current |  |
+| 165 | [no port patch in code the port does not compile](165-dead-patch-guard.md) | current |  |
 | 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

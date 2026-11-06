@@ -78,7 +78,7 @@ untouched).
 
   17 and 18 agree with finding 123's limits (six and eight).
 - **Pausing once in an online race stalls the return to the room (not this lane's code; seen on
-  Salt City TD, not fixed here).** In one room race the host paused (START) and resumed; at TIME
+  Salt City TD; fixed by finding 165).** In one room race the host paused (START) and resumed; at TIME
   UP the log said `online: race closed: back to the room` and the screen showed `TIME UP - DNF`,
   but the race went on for six minutes until the next START press, which went straight to the
   room. The two races before it in the same room, without a pause, went back by themselves.

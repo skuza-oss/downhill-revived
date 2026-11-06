@@ -919,7 +919,9 @@ void func_0020F9F0(int font, int view, int x, int y, const char *text);
    (func_001B4900: the race loop ends with 2 and the race screen opens its pause menu), whose
    builder then leaves the race screen at once as QUIT's Yes does (port_online_pause_rows). While
    the race loop runs, after a finish too, no menu opens: func_0015E0C0 alone or a pushed menu
-   does nothing there. Paused already, the menu opens again when the player resumes. */
+   does nothing there. Paused already, the loop's stop was taken by that pause (func_001B45F8 takes
+   one until the loop runs again), so the request is made again on the loop's first frame after
+   RESUME (hle_online_loop_frame): the menu opens again and leaves at once (finding 165). */
 static int quit_on_pause;
 static void leave_race(void)
 {
@@ -1156,7 +1158,15 @@ static void finish_step(void)
 extern void func_00148560(void *, int);
 extern void func_00148860(void *);
 
-void hle_online_watch_resume(void) { on.watch_paused = on.watch_direction = 0; }
+/* Every frame of the race loop (func_0016C0C8): the pause menu, which runs outside it, is closed.
+   watch_direction keeps the pad's last Left / Right (pads_read_now reads it in the menu too), so a
+   direction held through RESUME is no new press. A leave_race that came while the menu was up asks
+   the loop to stop again (ignored while a stop is pending). */
+void hle_online_loop_frame(void)
+{
+    on.watch_paused = 0;
+    if (quit_on_pause) func_001B45F8(EE_PTR(0x4B1F40), 2, 0);
+}
 
 /* View 0's camera setting (distance, D_004225A0 +0x12220, and its blend +0x12230, for the next
    race too): func_0014CC38 changes it from the view's rider's own camera buttons, so watching a
