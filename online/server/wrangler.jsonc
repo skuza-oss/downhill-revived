@@ -10,7 +10,7 @@
   // "A new version is available. Update to play online." Raise it to each new release once that
   // release is published; a self-hosted server can keep an older one. (The kill switch is not a
   // variable: it is in the moderation store, `node tools/moderate.mjs online off`, finding 161.)
-  "vars": { "MIN_VERSION": "0.7.9" },
+  "vars": { "MIN_VERSION": "0.7.12" },
   // The official server's address (port/hle/host.c OFFICIAL_SERVER).
   "routes": [{ "pattern": "dhd.skuza.app", "custom_domain": true }],
   // Limits per connection source (src/guard.ts overLimit, finding 161), keyed by the address's
@@ -28,6 +28,9 @@
   "triggers": { "crons": ["17 4 * * *"] },
   // Usage stats (src/room.ts stat): joins and races, no addresses or names. Optional.
   "analytics_engine_datasets": [{ "binding": "STATS", "dataset": "dhd_online" }],
+  "d1_databases": [
+    { "binding": "MODERATION", "database_name": "dhd-moderation", "database_id": "4bc29f41-0d85-48d3-ab22-fd5305da5e33", "migrations_dir": "migrations" }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "ROOM", "class_name": "Room" },
