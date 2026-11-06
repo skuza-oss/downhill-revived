@@ -452,6 +452,7 @@ void gs_priv_write(Gs *g, unsigned addr, uint64_t value)
                read circuit is on, the screen is black until the game sets its display again
                (sceGsResetGraph before a loading card and the title, finding 160). */
             memset(g->privileged, 0, (GS_BGCOLOR / 16 + 1) * sizeof *g->privileged);
+            g->resets++;
         }
         g->privileged[addr / 16] &= ~(value & 31);  /* interrupt bits are write-one-to-clear */
     } else g->privileged[addr / 16] = value;

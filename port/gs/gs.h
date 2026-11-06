@@ -103,6 +103,7 @@ struct Gs {
        every change of the CLUT's entries (host palette caches). Not PS2 state. */
     struct { uint32_t valid, cbp, cpsm, count, start, bytes; uint32_t source[256]; } clut_memo;
     uint64_t clut_writes;
+    uint64_t resets;  /* CSR.RESET writes so far (the presenter's movie hold, finding 160). Not PS2 state. */
 };
 extern Gs gs;
 
