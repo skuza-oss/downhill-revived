@@ -7,7 +7,8 @@
      [0]     6
      [1]     bundle index in this tick (0, 1, ...): the transport keeps the newest per index
      [2]     riders in the bundle (1-10)
-     [3..10] f64: the sender's server clock (ms since the Unix epoch) when the tick was packed
+     [3..10] f64: the moment the snapshots show on the server clock (ms since the Unix epoch): the
+             sender's GO there plus its race time
      then each rider's record: its global id, its race time (i32 ms), the body and the rest of
      the snapshot (port/hle/puppet.c), its pad-word count k and k index/u32 pairs. A record is
      STATE_RECORD_FIXED + 5k bytes, so it carries its own length.

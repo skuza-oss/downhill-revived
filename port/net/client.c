@@ -13,7 +13,7 @@
 #include "../host/host_api.h"
 #include <SDL3/SDL_timer.h>
 
-enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000 };
+enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000, CLOCK_SLEW_MS = 2 };
 
 double net_now_ms(void) { return (double)SDL_GetTicksNS() / 1e6; }
 
@@ -485,16 +485,29 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
     SDL_LockMutex(c->lock);
     c->last_rx = net_now_ms();
     if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG) {
-        double sent;
+        double sent, server_time, now = net_now_ms(), rtt;
         memcpy(&sent, data + 2, sizeof sent);
-        add_rtt(c, net_now_ms() - sent);
+        rtt = now - sent;
+        add_rtt(c, rtt);
+        /* Protocol 4: the server's clock after our bytes (finding 169). The race's snapshots are
+           stamped on it, so the offset follows it during the race too, from the quicker round
+           trips, but by at most CLOCK_SLEW_MS a pong: a sudden step would move every puppet of
+           this PC on the other screens. */
+        if (n >= 2 + 2 * sizeof(double) && rtt >= 0 && rtt < c->lobby.ping_ms + 1) {  /* ping_ms: the median, rounded */
+            memcpy(&server_time, data + n - sizeof server_time, sizeof server_time);
+            if (isfinite(server_time) && server_time > 0) {
+                double offset = server_time - (sent + rtt / 2), step = offset - c->clock_offset;
+                if (c->have_offset) step = step > CLOCK_SLEW_MS ? CLOCK_SLEW_MS : step < -CLOCK_SLEW_MS ? -CLOCK_SLEW_MS : step;
+                c->clock_offset += step, c->have_offset = c->clock_known = 1;
+            }
+        }
     } else if (c->racing && n >= 2 && n <= NET_FRAME_MAX && (data[0] == NET_FRAME_STATE || data[0] == NET_FRAME_EVENT)) {
         if (data[1] < NET_MAX_SLOTS) {
             int slot = data[1];
             if (data[0] == NET_FRAME_STATE) {
                 c->snapshot[slot].messages++;
                 /* A bundle (port/hle/state_bundle.h): version 6, index, riders, the sender's server
-                   clock when it was packed. */
+                   clock moment its snapshots show. */
                 if (n >= 13 && data[2] == 6) {
                     double epoch;
                     memcpy(&epoch, data + 5, sizeof epoch);

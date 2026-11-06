@@ -194,6 +194,30 @@ int main(void)
         assert(c.snapshot[2].age[1001] == 1);
         client_free(&c);
     }
+    {   /* The shared clock (finding 169): a race PONG with the server's time sets the offset, then
+           follows it by at most 2 ms a pong; a slow round trip or an older server's PONG changes
+           nothing. */
+        unsigned char pong[2 + 16] = {NET_FRAME_PONG, 0};
+        double sent, server;
+        client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+#define PONG(rtt, offset) (sent = net_now_ms() - (rtt), server = sent + (rtt) / 2 + (offset), \
+                           memcpy(pong + 2, &sent, 8), memcpy(pong + 10, &server, 8))
+        PONG(10, 1000.0);
+        client_on_binary(&c,pong,sizeof pong);
+        assert(c.have_offset && fabs(c.clock_offset - 1000) < 1.5);
+        PONG(10, 1100.0);
+        client_on_binary(&c,pong,sizeof pong);
+        assert(fabs(c.clock_offset - 1002) < 1.5);
+        PONG(400, 900.0);                  /* slower than the usual round trip: not trusted */
+        client_on_binary(&c,pong,sizeof pong);
+        assert(fabs(c.clock_offset - 1002) < 1.5);
+        PONG(10, 500.0);
+        client_on_binary(&c,pong,10);      /* a protocol 3 PONG: the send time only */
+        assert(fabs(c.clock_offset - 1002) < 1.5);
+#undef PONG
+        client_free(&c);
+    }
     {   /* the install id (finding 161): in every hello once set, only when it is 32 lowercase hex;
            none (an id never made) sends a hello without it, as older releases do */
         client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");

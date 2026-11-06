@@ -71,8 +71,25 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       second tick (30 a second); the own rider's full pad refresh once a second (every 60 sends),
       the AI's every 30; the adaptive delay's floor 30 ms (was 50); the SFU client's flood limit
       240 messages a second per bundle index (4x the own rider's 60).
+- [x] Item 3, a shared clock: a bundle's stamp is the moment its snapshots show on the server clock
+      (the sender's GO there plus its race time), and each puppet places a snapshot on its own race
+      clock by that stamp and this PC's GO (`hle_puppet_go`), instead of estimating the sender's
+      clock from arrival times. A snapshot's age on arrival is now measured; the interpolation
+      delay is that age (0-300 ms) plus the wait for the next one (interval + 2 x jitter, 30-150
+      ms). The room's binary PONG carries the server's time (8 bytes after the ping's), and during
+      a race the client follows it from round trips no slower than its median, by at most 2 ms a
+      PONG (a step would move this PC's puppets on every other screen). Unit test in
+      `test_session.c`. The game's `online:` line gives each puppet as "shown behind / snapshot
+      age" in ms; `port/tools/puppet_lag.py` (and `online_race.py --lag`) measure independently.
 
 ## Decisions
+
+- Item 3: the stamp is the snapshot's moment on the race clock carried onto the server clock (GO
+  + race time), not the server clock when packed. The first build stamped at packing; the puppets
+  then thought themselves ~15 ms nearer the present than the measurement showed, because a race
+  clock trails the wall clock by the pacing's few ms ("ms late" 6-14 here). Both sides now compare
+  race time with race time, and the game's own estimate matches the measurement (44-53 against
+  45-48 ms).
 
 - Bundles are made in the game (`online.c`), not in the transport: the game knows every rider of a
   tick at once, while the transport's send thread wakes per message and would split a tick's

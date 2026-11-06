@@ -48,7 +48,7 @@ typedef struct {
     double window_start, next_log, joined_at;  /* joined_at 0: not in a room (nothing to log) */
     char logged_colo[8];  /* the room location the log has named */
     /* Each sender's newest snapshot age on the server clock (now minus the bundle's stamp, the
-       sender's server clock when it packed it), sampled every network tick; 1001 is the overflow
+       moment its snapshots show), sampled every network tick; 1001 is the overflow
        bin. Messages: STATE messages received from that sender; states_sent: ours. */
     struct { double arrived, epoch; unsigned age[1002], samples, gaps, messages; } snapshot[NET_MAX_SLOTS];
     unsigned states_sent;

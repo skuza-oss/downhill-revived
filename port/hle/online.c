@@ -269,6 +269,7 @@ int hle_puppet_lag(char *out, int size);
 int hle_puppet_hits_taken(void);
 int hle_puppet_global(int slot), hle_puppet_local(int global), hle_puppet_owned(int slot);
 void hle_puppet_start(void);
+void hle_puppet_go(double go_server_ms);
 extern int func_001FA7C0(int frame);                      /* a frame's own colour (the shop's first BIKE COLOR) */
 extern void func_001B45F8(void *timer, int kind, int ticks);  /* the race-end countdown */
 
@@ -1312,8 +1313,8 @@ static void check_left(void)
 }
 
 /* This tick's snapshots of the riders this PC runs (ai: the AI riders' too), bundled
-   (state_bundle.h, finding 169): as few messages as fit one datagram each, stamped with the
-   server's clock. */
+   (state_bundle.h, finding 169): as few messages as fit one datagram each, stamped with their
+   moment on the server's clock. */
 static void send_snapshots(int ai)
 {
     static uint8_t rec[NRIDERS][STATE_RECORD_MAX], bundle[STATE_BUNDLE_RIDERS][STATE_BUNDLE_MAX];
@@ -1325,7 +1326,10 @@ static void send_snapshots(int ai)
         recs[count] = rec[count], size[count] = n, slots[count++] = slot;
     }
     if (!count) return;
-    double stamp = host_service_net_server_ms();
+    /* The moment the snapshots show, on the server clock: our GO there plus the race time. Not
+       the clock at packing: the race clock may trail the wall clock by a few ms (pacing), and the
+       pose is the race clock's (finding 169). */
+    double stamp = on.go_server ? on.go_server + port_field_seconds(RACE_CLOCK) * 1000 : host_service_net_server_ms();
     if (slots[0] == 0) {  /* DHD_NET_RECORD: this PC's rider alone, as a bundle of one */
         int one_size;
         if (state_bundle_pack(recs, size, 1, stamp, bundle, &one_size)) record(bundle[0], one_size);
@@ -1349,6 +1353,7 @@ static void state_sync(void)
     if (race_running() && !on.go_sent) {  /* GO: when it was, on the server's clock */
         uint8_t e[10] = {EVENT_VERSION, EVENT_GO};
         on.go_server = host_service_net_server_ms() - port_field_seconds(clock) * 1000;
+        hle_puppet_go(on.go_server);  /* snapshots' server stamps onto this race clock */
         memcpy(e + 2, &on.go_server, 8);
         send_event(e, sizeof e);
         on.go_sent = 1;
@@ -1408,9 +1413,9 @@ static void state_sync(void)
                   on.nslots, lobby.ping_ms, lobby.offline ? " - offline" : "",
                   on.end_held ? " - finished, waiting for the others" : "");
         extern unsigned kernel_pace_late_ms;
-        fprintf(stderr, "online: race clock %d (%d fps), %u snapshots sent, %u received, hits taken %d, %u ms late, "
-                "lag (ms):%s\n", clock, port_fps(), on.sent, on.received, hle_puppet_hits_taken(),
-                kernel_pace_late_ms, lag);
+        fprintf(stderr, "online: race clock %d (%d fps), %u snapshots sent in %u messages, %u messages received, "
+                "hits taken %d, %u ms late, puppets shown behind/snapshot age (ms):%s\n", clock, port_fps(), on.sent,
+                on.bundles_sent, on.received, hle_puppet_hits_taken(), kernel_pace_late_ms, lag);
         if (on.end_held) fprintf(stderr, "online: watching: %u owned AI snapshots sent, phase %d\n", on.ai_sent, EE32(PHASE));
         static double last_ping;
         if (last_title - last_ping >= 10) last_ping = last_title, log_pings(&lobby);

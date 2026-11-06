@@ -600,13 +600,19 @@ export class Room extends DurableObject<Env> {
     const b = new Uint8Array(data);
     b[1] = slot;
     switch (b[0]) {
-      case FRAME_PING:
+      case FRAME_PING: {
         if (n > 2 + PING_MAX_PAYLOAD) return;
-        b[0] = FRAME_PONG;
+        // The same bytes as PONG, then the server's clock (f64 ms, little-endian; protocol 4):
+        // the race's snapshots are stamped on it (finding 169).
+        const pong = new Uint8Array(n + 8);
+        pong.set(b);
+        pong[0] = FRAME_PONG;
+        new DataView(pong.buffer).setFloat64(n, Date.now(), true);
         try {
-          ws.send(data);
+          ws.send(pong);
         } catch {}
         return;
+      }
     }
   }
 

@@ -312,8 +312,12 @@ with a fresh session rather than retaining a broken connection. See finding 158 
 | 1 | u8 | `slot` |
 | 2 | n | any payload, at most 32 bytes (e.g. a u32 sequence and an f64 send time) |
 
-The server answers the sender only, with the same bytes and the type changed to 4. Use it to
-watch the round-trip during a race; it is never forwarded.
+The server answers the sender only, with the same bytes and the type changed to 4, followed by
+its clock (f64 ms since the Unix epoch, little-endian; protocol 4). Use it to watch the round-trip
+during a race and to keep the server clock offset (`offset ≈ serverTime - (tSend + rtt/2)`): the
+race's STATE bundles are stamped on that clock. The game takes a PONG only when its round trip is
+no slower than its usual one, and during a race moves its offset by at most 2 ms a PONG. It is
+never forwarded.
 
 ### STATE, type 5, and EVENT, type 6 — client ↔ SFU ↔ clients
 
@@ -335,7 +339,7 @@ sent every race tick (60 a second), AI riders every second tick (30 a second).
 | 0 | u8 | version = 6 |
 | 1 | u8 | bundle index in this tick (0, 1, ...); a congested sender keeps only the newest per index |
 | 2 | u8 | riders in the bundle, 1-10 |
-| 3 | f64 | the sender's server clock (ms since the Unix epoch) when it packed the tick |
+| 3 | f64 | the moment the snapshots show on the server clock (ms since the Unix epoch): the sender's GO there plus its race time |
 | 11 | n | the riders' records, back to back |
 
 A record: the rider's global id (u8: a human's lobby slot, an AI rider's slot), the sender's race
