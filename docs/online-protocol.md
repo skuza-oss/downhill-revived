@@ -257,7 +257,14 @@ so the game sees start before buffered events. Channels close at race end.
   to all racing members only after every member acknowledges. Until then, race frames stay
   queued locally so reliable events cannot precede a subscriber.
 - Departures and replacements send `{"type":"sfu_closed","channelIds":[10,12]}` only to
-  affected endpoints, after closing those allocations through the API.
+  affected endpoints, after closing those allocations through the API (a subscription that
+  doesn't close is announced all the same and closes with its subscriber's session).
+- Teardown goes on past a failed close or revoke. A session's channels or a TURN username that
+  did not close is kept in the room's pending cleanup, stored apart from the members (it outlives
+  the member and the room), and tried again by the room's alarm: after 5 s, then twice as long
+  each time up to every 5 minutes, until it succeeds or its time is up (a credential's 1-hour
+  TTL; an hour for a session, as Cloudflare documents no end for a connected DataChannel-only
+  session).
 - TURN over TLS, for networks that block UDP (finding 158, round 4). The client tries UDP to the
   SFU first. If its association has not connected 2 s after `sfu_answer`, it sends
   `{"type":"sfu_turn"}`. The DO accepts that once per member per race, only from a racer with an
@@ -271,8 +278,19 @@ so the game sees start before buffered events. Channels close at race end.
   sees the TURN service's address, never the player's. The DO revokes the credentials when that
   member's SFU session is cleared (race end, retire, leaving); a second `sfu_turn` in the race
   is a `bad_value` error. Clients accept `turns:` servers on `turn.cloudflare.com` only.
-- Setup failures use `error` with `bad_value` and ask the player to rejoin. No automatic API
-  mutation retries: a partially successful operation must not allocate duplicate channels.
+- Setup has a deadline: 25 s after the race's `start` (the room's `SFU_SETUP_MS` sets another),
+  every racer must have acknowledged `sfu_ready`. Measured setups take 0.2-0.5 s over UDP and
+  2.4-3.1 s through TURN; the margin covers ten racers' 90 subscription calls and one API call
+  that runs into its timeout, and ends before the game's 30 s wait for the others' rides.
+- A racer whose setup fails (an API error on its session, an invalid signaling step) or isn't
+  done by the deadline is out of the race, as a racer who leaves it (release review round 2,
+  finding 158). It gets `{"type":"error","code":"bad_value","message":"Realtime connection
+  failed: out of the race."}`; the other racers get `left` (`reason` `left`, the host's AI takes
+  the rider), the subscriptions to it close with `sfu_closed`, and the release is checked again
+  without it, so the others go on. It stays in the room: in a race room its member shows
+  `inRace` false and `raceState` `dnf` (`dnfReason` `left`), which takes its game back to the
+  room (port/net/client.c). No automatic API mutation retries and no second setup in that race:
+  a partially successful operation must not allocate duplicate channels.
 
 The Worker reads `REALTIME_APP_ID`, `REALTIME_APP_TOKEN`, `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`
 from env/secrets. For local tests they live only in gitignored `.dev.vars`. None is sent to

@@ -234,6 +234,27 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - Round 4: Cloudflare's TURN refuses a ChannelBind to some Cloudflare addresses (401 for 1.1.1.1
   and the API host's address) but binds to the SFU's own candidate address (7-13 ms) and to
   outside addresses. Its answer to a made-up username after the 401 challenge is a 400.
+- Release review round 2 (before 0.7.12): a ChannelBind was renewed 300 s after its success, but
+  the TURN permission it installs lasts 5 minutes (RFC 8656 9; the binding 10) and ChannelData
+  renews neither, so a relayed race over 5 minutes lost datagrams at each renewal. It is renewed
+  after 240 s now (`turn.rs` CHANNEL_REFRESH, unit-tested).
+- Release review round 2: `sfu_connected` walked the live member list across its API calls, and a
+  leave or kick (not queued with SFU work) spliced it, so the loop skipped the next racer: two
+  remaining racers never subscribed to each other and never got `sfu_ready`. The room now picks
+  the next missing subscription afresh after every call until none is missing, and the release
+  checks every pair first (server test with a leave during the held call).
+- Release review round 2: one racer's failed setup (an API error, or a game that never finished)
+  held every racer's traffic forever, since the release waits for all and the failed one could
+  not try again. Setup now has a deadline (25 s from the start, from the measured 0.2-3.1 s plus
+  ten racers' calls); a racer that fails or misses it is out of the race as one who leaves, and
+  the others are released without it (`docs/online-protocol.md`, server tests).
+- Release review round 2: teardown lost its only handles when a close or revoke failed: a
+  departed member was removed first, so its session id and TURN username went with it, and the
+  race-end loop stopped at the first failure. Teardown now goes on past failures, and what did not
+  close is stored apart from the members (and the room) and retried by the alarm with backoff
+  until it closes or its time is up. Cloudflare's SFU docs give a connected DataChannel-only
+  session no end ("close resources when finished"; retain cleanup state while retrying), so the
+  room gives up after an hour, as the TURN TTL does.
 
 ## Result
 

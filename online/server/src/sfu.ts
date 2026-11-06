@@ -95,10 +95,13 @@ export class Realtime {
     const r = await this.call(`sessions/${session.id}/datachannels/close`, {
       dataChannels: channels.map(c => ({ id: c.channelId })),
     }, "PUT");
-    const results = r.dataChannels as Json[];
-    if (!Array.isArray(results) || channels.some(c => !results.some(x => x.id === c.channelId &&
-        (!x.errorCode || x.errorCode === "close_track_error")))) throw new Error("Channel close incomplete");
-    session.channels = session.channels.filter(c => !channels.includes(c));
+    // close_track_error: absent or closed already. Channels that closed are forgotten even when
+    // others did not, so a retry asks only for the rest.
+    const results = r.dataChannels;
+    const closed = Array.isArray(results) ? channels.filter(c => (results as Json[]).some(x => x.id === c.channelId &&
+        (!x.errorCode || x.errorCode === "close_track_error"))) : [];
+    session.channels = session.channels.filter(c => !closed.includes(c));
+    if (closed.length < channels.length) throw new Error("Channel close incomplete");
   }
   async publish(memberId: number, session: SfuSession): Promise<Allocation[]> {
     if (session.phase !== "connect") throw new Error("Transport not connected");
