@@ -20,3 +20,14 @@ fn settings_table_h_is_current() {
 fn controls_table_h_is_current() {
     current("controls_table.h", dhd_settings::controls::c_table());
 }
+
+#[test]
+fn online_names_choices_and_defaults() {
+    let setting = dhd_settings::table::find("names").unwrap();
+    assert_eq!(setting.env, "DHD_NAMES");
+    assert_eq!(setting.default, "small");
+    assert_eq!(setting.builtin, "small");
+    assert_eq!(setting.choices.iter().map(|c| c.value).collect::<Vec<_>>(), ["off", "small", "medium", "large"]);
+    assert_eq!(setting.canonical("MEDIUM"), Some("medium"));
+    assert_eq!(setting.canonical("broken"), None);
+}

@@ -3,13 +3,13 @@
    presses the key or controller button that stands for each of the PS2 pad's buttons.
      Device:  < Keyboard >     the keyboard (player 1's), Controller 1, Controller 2
      Show:    < Buttons >      Cross to SELECT, or the d-pad and the sticks
-     Cross:   < Space >  X     the main and the alternate (left / right choose the slot)
+     Cross:   Space   also: X     the main; dimmed also: X is launcher-only
      ...
      Reset Keyboard
    Cross on a button's row waits for a key (the keyboard) or a controller button (that player's
-   controller, else any), which then takes the slot; Esc, or five seconds without a press, gives
+   controller, else any), which then takes the main slot; Esc, or five seconds without a press, gives
    up. While it waits, and until every key and button is let go after it, the game sees no input
-   at all (pads_read), so the press is only the page's. Square clears the slot. A controller's
+   at all (pads_read), so the press is only the page's. Square clears the main slot. A controller's
    Show: D-pad and Sticks has Swap Sticks and an Invert for each of its sticks' axes.
    The rules are dhd_settings' (port/render/settings/src/controls.rs, through the host): a key or
    button another PS2 button had moves (the hint says from where), and a change that would leave
@@ -34,7 +34,7 @@ static const char *const option_label[OPTIONS] = {"Swap Sticks:", "Invert Left X
                                                   "Invert Right Y:"};
 static const uint8_t option_bit[OPTIONS] = {0, CONTROL_INVERT_LX, CONTROL_INVERT_LY, CONTROL_INVERT_RX, CONTROL_INVERT_RY};
 
-static int device, group, slot;        /* what is shown; the slot left / right chose */
+static int device, group;             /* the layout and target group shown */
 static ControlsLayout layout;          /* the device's, as the host plays with it */
 static int kind;                       /* the controller's PAD_KIND_* (its buttons' words); 0 none */
 static int row_kind[MENU_PAGE_ROWS], row_item[MENU_PAGE_ROWS];  /* each row's ROW_* and its target or option */
@@ -82,15 +82,13 @@ static int group_targets(int *first)
     return device == CONTROL_KEYBOARD ? CONTROL_TARGETS - 12 : CONTROL_BUTTONS - 12;
 }
 
-/* "Cross:  < Space >  X": the chosen slot between the arrows; "Press a key" while it waits. */
+/* The main binding, or the capture prompt. The alternate is drawn dimmed beside it. */
 static void target_text(int row, char *value, size_t size)
 {
     const uint8_t *in = layout.input[row_item[row]];
-    const char *words[CONTROL_SLOTS] = {input_word(in[0]), input_word(in[1])};
-    if (capture == CAPTURE_WAIT && row == capture_row) words[slot] = device == CONTROL_KEYBOARD ? "Press a key" : "Press a button";
-    int arrows = !locked();
-    if (slot == 0) snprintf(value, size, arrows ? "< %s >  %s" : "%s  %s", words[0], words[1]);
-    else snprintf(value, size, arrows ? "%s  < %s >" : "%s  %s", words[0], words[1]);
+    const char *words[1] = {input_word(in[0])};
+    if (capture == CAPTURE_WAIT && row == capture_row) words[0] = device == CONTROL_KEYBOARD ? "Press a key" : "Press a button";
+    snprintf(value, size, "%s", words[0]);
 }
 
 static int option_on(int option)
@@ -122,6 +120,16 @@ static void show(MenuPage *p)
     }
 }
 
+void controls_settings_draw(MenuPage *p)
+{
+    for (int row = 0; row < menu_page_rows(p); row++) {
+        if (row_kind[row] != ROW_TARGET || !layout.input[row_item[row]][1] || (capture == CAPTURE_WAIT && row == capture_row)) continue;
+        char text[48];
+        snprintf(text, sizeof text, "also: %s", input_word(layout.input[row_item[row]][1]));
+        menu_page_suffix(p, row, text);
+    }
+}
+
 const char *controls_settings_title(void) { return "CONTROLS"; }
 
 void controls_settings_build(MenuPage *p)
@@ -143,6 +151,7 @@ void controls_settings_build(MenuPage *p)
     snprintf(reset_text, sizeof reset_text, "Reset %s", control_devices[device].label);
     row = menu_page_row(p, reset_text, !locked());
     if (row >= 0) row_kind[row] = ROW_RESET;
+    menu_page_text(p, "Changes are saved as you make them");
     show(p);
 }
 
@@ -174,6 +183,7 @@ static void change(MenuPage *p, int edit, int target, int which, int input)
     if (done == CONTROL_REFUSED) menu_play("S_BACK");
     else if (done == CONTROL_CHANGED) menu_play("S_SELECT");
     if (*message) say(message);
+    else if (done == CONTROL_CHANGED && edit != CONTROL_RESET) say("Saved");
     else if (done == CONTROL_CHANGED && edit == CONTROL_RESET) {
         char text[64];
         snprintf(text, sizeof text, "%s: back to the defaults", control_devices[device].label);
@@ -187,19 +197,20 @@ static void change(MenuPage *p, int edit, int target, int which, int input)
 
 void controls_settings_update(MenuPage *p, int cursor)
 {
+    p->footer = GLYPH_CROSS " Change  " GLYPH_SQUARE " Clear  " GLYPH_TRIANGLE " Back";
     p->hint = NULL;
     if (capture == CAPTURE_WAIT) {
         int got = host_service_controls_capture(device, 0);
         double waited = host_seconds() - capture_since;
         if (got > 0) {
             capture = CAPTURE_RELEASE;
-            change(p, CONTROL_ASSIGN, row_item[capture_row], slot, got);
+            change(p, CONTROL_ASSIGN, row_item[capture_row], 0, got);
         } else if (got == -2 || waited >= CAPTURE_SECONDS) {
             capture = CAPTURE_RELEASE;
             menu_play("S_BACK");
             show(p);
         } else {
-            snprintf(hint, sizeof hint, "%s for %s (Esc: cancel) %d", device == CONTROL_KEYBOARD ? "Press a key" : "Press a button",
+            snprintf(hint, sizeof hint, "%s for %s (Esc cancels) %d", device == CONTROL_KEYBOARD ? "Press a key" : "Press a button",
                      control_targets[row_item[capture_row]].label, CAPTURE_SECONDS - (int)waited);
             p->hint = hint;
             return;
@@ -214,7 +225,7 @@ void controls_settings_update(MenuPage *p, int cursor)
     int square = held & PAD_SQUARE && !(held_before & PAD_SQUARE);
     held_before = held;
     if (square && p->armed && cursor >= 0 && cursor < MENU_PAGE_ROWS && row_kind[cursor] == ROW_TARGET && !locked())
-        change(p, CONTROL_CLEAR, row_item[cursor], slot, 0);
+        change(p, CONTROL_CLEAR, row_item[cursor], 0, 0);
     if (*note && host_seconds() - note_since < NOTE_SECONDS) {
         p->hint = note;
         return;
@@ -229,10 +240,14 @@ void controls_settings_update(MenuPage *p, int cursor)
                                              : "Every controller of this player uses this layout";
     else if (row_kind[cursor] == ROW_TARGET) {
         const char *race = control_targets[row_item[cursor]].race;
-        snprintf(hint, sizeof hint, "%s%s" GLYPH_CROSS " Set  " GLYPH_SQUARE " Clear", race, *race ? "   " : "");
+        const char *also = input_word(layout.input[row_item[cursor]][1]);
+        snprintf(hint, sizeof hint, "%s%s%s", race, layout.input[row_item[cursor]][1] ? "   also: " : "",
+                 layout.input[row_item[cursor]][1] ? also : "");
         p->hint = hint;
-    } else if (row_kind[cursor] == ROW_OPTION)
-        p->hint = row_item[cursor] == OPTION_SWAP ? "The right stick steers, the left pedals" : "The controller's own stick, before any swap";
+    } else if (row_kind[cursor] == ROW_RESET)
+        p->hint = "Restores this device to its default bindings";
+    else if (row_kind[cursor] == ROW_OPTION)
+        p->hint = row_item[cursor] == OPTION_SWAP ? "The right stick steers, the left pedals" : "Reverses this axis before Swap Sticks";
 }
 
 void controls_settings_change(MenuPage *p, int row, int step)
@@ -249,12 +264,7 @@ void controls_settings_change(MenuPage *p, int row, int step)
         menu_page_sound(step > 0);
         menu_page_rebuild_at(p, row);
         break;
-    case ROW_TARGET:
-        if (locked()) return;
-        slot = !slot;
-        menu_page_sound(step > 0);
-        show(p);
-        break;
+    case ROW_TARGET: break;
     case ROW_OPTION:
         if (locked()) return;
         if (row_item[row] == OPTION_SWAP) change(p, CONTROL_SWAP_STICKS, 0, 0, !option_on(OPTION_SWAP));
@@ -291,7 +301,6 @@ int controls_settings_accept(MenuPage *p, int row)
    that opened it is no Square press. */
 void controls_settings_open(void)
 {
-    slot = 0;
     capture = CAPTURE_NONE, *note = 0;
     held_before = 0xFFFF;
 }

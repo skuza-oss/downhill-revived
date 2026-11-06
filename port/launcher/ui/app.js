@@ -8,7 +8,7 @@ const listen = T.event.listen;
 const appWindow = T.window.getCurrentWindow();
 const $ = (id) => document.getElementById(id);
 
-// The settings pages: the rows of OPTIONS > PC SETTINGS plus the dhd.ini lines players change. Each
+// The settings pages: the rows of OPTIONS > REVIVED SETTINGS plus the dhd.ini lines players change. Each
 // setting's choices (value and label) and default are the game's (dhd_settings, port/render/settings,
 // through settings_schema); a switch's are off then on. A row with `when` is greyed out, with
 // `offHint`, while that doesn't hold. A hint may be a function (drawn with the schema); a select's
@@ -45,6 +45,7 @@ const TABS = [
     { type: 'bindings' },
   ]],
   ['Online', [
+    { key: 'names', label: 'Player names', hint: 'Names above other riders in online races. Medium is the original size.', type: 'seg' },
     { key: 'name', label: 'Rider name', hint: () => `Shown over your rider in online races. ${state.schema.name.rule.hint}`, type: 'name' },
     { key: 'server', label: 'Race server', hint: 'Leave empty for the official server', type: 'text', placeholder: 'wss://dhd.skuza.app' },
     { key: 'discord', label: 'Discord status', hint: 'Shows what you are playing on your Discord profile while Discord runs', type: 'switch' },
@@ -721,7 +722,7 @@ async function start() {
     state.played = e.payload.played;
     renderPlayed();
     // what this run's dhd.log says about the resolution scale (the GPU may have changed), and the
-    // bindings PC SETTINGS > Controls may have changed (controls.js reads them again)
+    // bindings REVIVED SETTINGS > Controls may have changed (controls.js reads them again)
     bind.layouts = null;
     invoke('snapshot').then((snap) => { state.scale = snap.scale; if (!$('page-settings').hidden) renderRows(); });
     renderFooter();

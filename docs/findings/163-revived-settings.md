@@ -51,10 +51,54 @@ each size in an online race against a local server and a bot (docs/TESTING.md, t
 
 ## Progress
 
-- [ ] 2026-11-06: finding reserved
+- [x] 2026-11-06: finding reserved
+- [x] 2026-11-06: tabs, main-slot Controls flow and shared names setting implemented
+- [x] 2026-11-06: unit tests, full port/server checks, hidden-desktop captures and state traces
 
 ## Decisions
 
+- Display holds window mode/size, picture, widescreen, rate, V-Sync and FPS & Ping;
+  Graphics holds resolution, scaling, textures and font; Controls holds vibration, dead zone,
+  icons, Controls and Touch Controls; Online holds player name size; Game holds movies and unlocks.
+- Tabs use the mapped PS2 L1/R1 bits from the host, with bound input words in the legend.
+  Tabs can also be tapped or clicked, keeping them usable on phones.
+  Empty tabs follow the host row mask. Controls subpages keep their immediate-save behavior.
+- Names use 75%, 100% and 125% of the old font metrics. Off returns before touching the pen.
+  The setting affects drawing only, with no protocol or server changes.
+- Research: SDL3's [button enum](https://wiki.libsdl.org/SDL3/SDL_GamepadButton) confirms the
+  shoulder inputs by position. Existing host bindings already translate these to PS2 L1/R1;
+  no external code was copied.
+
 ## Surprises
 
+- The first core build exposed a missing portable string-compare include in online.c; added it
+  before the final build. The baseline boot and race traces completed (600 and 5000 fields).
+
 ## Result
+
+Implemented and checked on Windows, 2026-11-06. REVIVED SETTINGS is the first OPTIONS row;
+Android keeps SETTINGS. The five tabs and the Controls flow are described above. The launcher
+keeps its Bindings block and gets the shared `names` choice in Online. Player docs, new dhd.ini
+headers and browser help use the new name.
+
+Validation:
+
+- `cargo test -p dhd_settings`: 20 tests passed, including the names choices/default, generated
+  C table and browser corpus. `node port/launcher/test_controls.js` passed.
+- The new guest `settings-tabs` unit test (in `test_runtime.py`) covers hidden rows, ordered tabs,
+  the Controls subpages, no visible tabs, and switching past either end.
+- `python tools/check.py port -j 6`: all steps passed on the final code (core, runtime, host,
+  network tests, renderer tests and wasm2c chunks). `python tools/check.py server`: 94 tests
+  and the type check passed. No server or protocol changes.
+- State traces against the base code (9ecb8e1): boot 600/600 and race 5000/5000 fields equal.
+  Final core id: `eab088198abdcebc`.
+- Hidden desktop: OPTIONS, every tab, Controls, its countdown prompt, Saved and the return flow.
+  Cross changed to J, saved as `keyboard = cross:j,x`; J opens Controls without a restart.
+  The alternate stays dimmed and is not selected with left/right.
+- Off, Small, Medium and Large captured in online races against a local server and a snapshot
+  bot. The Large capture uses a bot following the local rider so its label stays in view;
+  the other sizes use a bot echoing a host AI. Off has no label, and the three sizes are visible.
+  Captures stay in `DHD_SCRATCH/revived-settings/menus` and `names-off`, `names-small`,
+  `names-medium`, `names-large` there, never in git. PNGs were decoded completely for validation.
+
+No acceptance work remains. Status stays in progress until the lane merges.

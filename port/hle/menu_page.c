@@ -241,6 +241,16 @@ void menu_page_value_set(MenuPage *p, int row, const char *label, const char *va
     value_text(p->text[row], label, value, arrows);
 }
 
+void menu_page_suffix(MenuPage *p, int row, const char *text)
+{
+    if (row < 0 || row >= menu_page_rows(p)) return;
+    MenuStyle normal = menu_page_style(p, MENU_STYLE_ROW);
+    MenuStyle dim = menu_page_style(p, MENU_STYLE_OFF);
+    int x = MENU(p, X_ROW_X, int) + menu_text_width(p->text[row], &normal) / 2 + 6;
+    int y = MENU(p, X_ROW_Y, int) + row * MENU(p, X_ROW_STEP, int);
+    menu_draw_text(MENU_LEFT, x, y, text, &dim);
+}
+
 void menu_page_enable(MenuPage *p, int row, int enabled)
 {
     if (row >= 0 && row < menu_page_rows(p)) ((Item *)((char *)p->menu + X_ITEMS))[row].enabled = (char)(enabled != 0);
@@ -628,6 +638,10 @@ static uint16_t page_legend_button(void *menu, int view)
 static void popup_mouse(void *menu, int view, int moved, int left, int right, int wheel)
 {
     MenuPage *p = page_of(menu);
+    if (p && p->header_mouse && left) {
+        int mx, my;
+        if (pointer(view, &mx, &my) && p->header_mouse(p, mx, my)) return;
+    }
     if (p && p->mouse) {  /* a page that lays itself out hit-tests its own pieces */
         int mx, my;
         if (pointer(view, &mx, &my) && (moved || left || wheel)) p->mouse(p, mx, my, moved, left, wheel);

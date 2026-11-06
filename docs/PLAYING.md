@@ -16,7 +16,7 @@ What works today:
   original PS2 graphics hardware is reproduced on the GPU. An exact emulation path stays in the
   code as the reference it is tested against.
 - **60 fps or more, with even frame pacing.** The game runs at its original 59.94 Hz, and each
-  picture is shown on a fixed grid, so frames don't come out long-short-long. PC SETTINGS > Frame
+  picture is shown on a fixed grid, so frames don't come out long-short-long. REVIVED SETTINGS > Frame
   Rate also offers 120, 144, 165 or 240 fps, or the monitor's rate, online too (experimental:
   players at different rates race together). Pad input is read as late as possible before each
   frame.
@@ -27,16 +27,16 @@ What works today:
   exclusive fullscreen. A new install starts borderless at 2x in widescreen, at the monitor's
   resolution.
 - **The movies play**: the intro, the attract loop and OPTIONS > VIDEO CLIPS, decoded with
-  libmpeg2 from your disc. Skip Movies in PC SETTINGS (on in a new install) skips them.
-- **PC SETTINGS in the game's own OPTIONS menu**: resolution, display mode, window size, picture
+  libmpeg2 from your disc. Skip Movies in REVIVED SETTINGS (on in a new install) skips them.
+- **REVIVED SETTINGS in the game's own OPTIONS menu**: resolution, display mode, window size, picture
   shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone, the button icons
   (PlayStation, Xbox or Nintendo, or the controller's), texture pack and font, drawn with the
   game's own menus and font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
   each picture without tearing.
-- **Unlock All** (PC SETTINGS, off by default): every track, rider, bike and shop item reads as
+- **Unlock All** (REVIVED SETTINGS, off by default): every track, rider, bike and shop item reads as
   unlocked while it is on. Your save isn't changed, so turning it off brings your own progress back.
 - **A sharp font**: the game's text is drawn with clean edges at any resolution, made in memory
-  from the font on your disc (PC SETTINGS > Font: Sharp or Original).
+  from the font on your disc (REVIVED SETTINGS > Font: Sharp or Original).
 - **Texture packs**: replacement packs made for PCSX2 (PNG files named by PCSX2's texture hash)
   work unchanged with the native renderer (see [Texture packs](#texture-packs)).
 - **Automatic updates**: at start the game looks for a newer release and offers to install it;
@@ -145,7 +145,7 @@ installed copy):
 
 | File | What |
 |---|---|
-| `dhd.ini` | Your settings, one `key = value` per line. The game adds your disc image; the PC SETTINGS page (OPTIONS) writes the rest. |
+| `dhd.ini` | Your settings, one `key = value` per line. The game adds your disc image; the REVIVED SETTINGS page (OPTIONS) writes the rest. |
 | `saves\card1\` | Memory card 1, made at the first save. Copy this folder to back up your saves. |
 | `dhd.log` | Messages from the last run. Attach it when you report a problem. |
 | `dhd-previous.log` | The log of the run before. If you started the game again after a crash, the crash is in this one. |
@@ -181,12 +181,12 @@ A controller works out of the box. The buttons go by position, as on a PlayStati
 bottom = Cross, right = Circle, left = Square, top = Triangle. A pad SDL doesn't know can be added
 with a line in SDL's format in `gamecontrollerdb.txt` beside `dhd.exe`.
 
-- **Button icons** (PC SETTINGS > Button Icons, the launcher's Settings > Controls): the game shows
+- **Button icons** (REVIVED SETTINGS > Button Icons, the launcher's Settings > Controls): the game shows
   the buttons of your controller. Auto follows player 1's controller: Xbox pads (and a Steam Deck)
   get A, B, X, Y and LB, RB, LT, RT, Switch pads B, A, Y, X and L, R, ZL, ZR (by position, so the
   bottom button is always the one the game means), PlayStation pads and the keyboard the game's
   own symbols. Or choose PlayStation, Xbox or Nintendo.
-- **Stick dead zone** (PC SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before
+- **Stick dead zone** (REVIVED SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before
   the rider responds. Game is the PS2's own, about 36% of the travel; a smaller one steers sooner,
   a larger one ignores a worn stick that drifts. The whole travel past it is used, so full lock is
   still at the end. The launcher's Controls tab shows your stick and what the rider gets from it.
@@ -212,12 +212,13 @@ Letters are places on the keyboard as on a US one: on AZERTY or QWERTZ use the k
 places. The game's own controls screen (OPTIONS > CONTROLS) names the PlayStation buttons; the
 keys above stand for them.
 
-**Your own keys and buttons** (PC SETTINGS > Controls in the game, the launcher's Settings >
+**Your own keys and buttons** (REVIVED SETTINGS > Controls in the game, the launcher's Settings >
 Controls > Bindings): choose which key or controller button stands for each PlayStation button,
 for the keyboard and for each player's controller (player 1 and player 2; every controller of a
 player uses that player's layout). Each button has a main and an alternate. In the game, Cross on
-a button's row waits for the key or button you press (Esc gives up), Square clears it, left and
-right choose main or alternate; a change works at once. In the launcher, click a button's key to
+a button's row waits up to five seconds for the main key or button (Esc cancels), Square clears
+the main, and Triangle or Esc goes back. Changes are saved as you make them. The dimmed
+'also' binding is the alternate, changed in the launcher. In the launcher, click a button's key to
 change it, right-click to clear it; the game takes it at its next start. The buttons keep their
 meaning (Cross pedals in a race and confirms in menus), only the key or button for them changes.
 
@@ -280,13 +281,20 @@ An empty `server =` line means the official server.
 Texture replacement packs made for PCSX2 work unchanged. Packs are made by their authors and are
 not part of this project. Either put the pack's files in `textures\SCUS-97177\replacements`
 beside `dhd.ini` (your data folder, see [Installing](#installing)), or name the pack's folder on the `texture_pack =` line of `dhd.ini` (for
-example PCSX2's own `textures\SCUS-97177\replacements` folder in your Documents). PC SETTINGS >
+example PCSX2's own `textures\SCUS-97177\replacements` folder in your Documents). REVIVED SETTINGS >
 Texture Pack turns it off or on at the next start.
 
 ### Settings
 
+OPTIONS starts with REVIVED SETTINGS (SETTINGS on Android). L1/R1 switch its Display,
+Graphics, Controls, Online and Game tabs; the legend shows your bound inputs. Up/down choose
+rows and left/right change them. Cross keeps changes and closes; Triangle undoes the settings
+page's changes and closes (Android Back keeps them). Controls and Touch Controls save as you go.
+A star marks a choice that applies at the next start. A host hides tabs it cannot offer.
+
+
 `dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
-first start. The PC SETTINGS page writes most of them for you.
+first start. The REVIVED SETTINGS page writes most of them for you.
 
 | Key | Default | What |
 |---|---|---|
@@ -300,6 +308,7 @@ first start. The PC SETTINGS page writes most of them for you.
 | `vibration` | on | `0` turns rumble off |
 | `stick_dead_zone` | `game` | the sticks' dead zone: `game` (the PS2's own, about 36%) or a percentage such as `10` |
 | `prompts` | `auto` | the button icons: `auto` (the controller's), `playstation`, `xbox` or `nintendo` |
+| `names` | `small` | names above online riders: `off`, `small`, `medium` (original size), `large`; drawing only |
 | `keyboard` | (empty) | your keys for the PlayStation buttons, see [Controls](#controls); empty: the table there |
 | `pad1`, `pad2` | (empty) | player 1's and player 2's controller buttons and stick options, see [Controls](#controls); empty: by position |
 | `texture_pack` | (empty) | a texture pack's folder; empty: `textures\SCUS-97177\replacements` beside `dhd.ini` |

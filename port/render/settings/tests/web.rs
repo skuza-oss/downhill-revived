@@ -21,7 +21,7 @@ const CASES: &[Case] = &[
     // the round trip: comments, a section, a key twice (not the saved one), an unknown key, CRLF
     Case {
         name: "comments and duplicates",
-        text: b"; Downhill Revived settings\r\n# OPTIONS > PC SETTINGS writes here\r\n[video]\r\nscale = 2 ; two\r\nfps = 120\r\n\
+        text: b"; Downhill Revived settings\r\n# OPTIONS > REVIVED SETTINGS writes here\r\n[video]\r\nscale = 2 ; two\r\nfps = 120\r\n\
                 fps = 144\r\nfoo = bar\r\nwidescreen = 0\r\n\r\ngame_options = 1 800\r\n",
         stored: true,
         set: &[],
