@@ -210,6 +210,51 @@ describe("A racer whose Realtime setup fails or never ends", () => {
     }
   });
 
+  it("takes only the racer whose connection never comes up out; the others then release (real games)", async () => {
+    // As real games do: a game says sfu_ready only once it has every racer's channels, so members
+    // 0 and 1, connected and subscribed to each other, wait for member 2, whose UDP and TURN both
+    // failed. 0.7.12 took all three out at SFU_SETUP_MS; only member 2 goes now, at SFU_CONNECT_MS.
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    try {
+      await twoReady(stub, (room) => {
+        const [a, b] = room.state.members;
+        a.sfuReady = b.sfuReady = false;
+        room.state.race.sfuConnectBy = Date.now() - 1;
+      });
+      expect(await runDurableObjectAlarm(stub)).toBe(true);
+      expect((await clients[2].json("error")).message).toBe("Realtime connection failed: out of the race.");
+      for (const c of clients.slice(0, 2)) expect(await c.json("left")).toMatchObject({ slot: 2, memberId: 2 });
+      // Their games stop expecting member 2's channels (port/render/net/src/sfu.rs `left`) and say ready.
+      clients[0].sendJson({ type: "sfu_ready" });
+      clients[1].sendJson({ type: "sfu_ready" });
+      await Promise.all([clients[0].json("sfu_ready"), clients[1].json("sfu_ready")]);
+      await runInDurableObject(stub, async (room: any) => {
+        expect(room.state.race.slots.length).toBe(3);
+        expect(room.state.race.left).toEqual([2]);
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("keeps a racer whose sfu_connected came in time though its publication is still queued", async () => {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    try {
+      await twoReady(stub, (room) => {
+        room.state.members[2].sfuConnectedRace = room.state.race.startAt;
+        room.state.race.sfuConnectBy = Date.now() - 1;
+      });
+      expect(await runDurableObjectAlarm(stub)).toBe(true);
+      await runInDurableObject(stub, async (room: any) => expect(room.state.race.left).toEqual([]));
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("takes a racer that never finishes its setup out when the time is up (race room)", async () => {
     const host = await Client.connect("/v1/rooms/new");
     host.hello("P0", { features: ["session"] });
