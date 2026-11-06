@@ -218,7 +218,6 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
     let mut sfu: Option<sfu::Sfu> = None;
-    let mut held_ready: Option<Vec<u8>> = None;
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
@@ -232,16 +231,19 @@ fn send_main(c: Arc<WsConn>) {
             let Some((binary, data)) = item else { break };
             if !binary {
                 if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data) {
-                    let result = if message["type"] == "welcome" {
-                        held_ready = None;
+                    let result = if message["type"] == "start" {
                         match sfu::Sfu::start() {
                             Ok((rtc, offer)) => {
+                                let mut rtc = rtc;
+                                let result = rtc.signal(&message);
                                 sfu = Some(rtc);
                                 lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
-                                Ok(())
+                                result
                             }
                             Err(e) => Err(e),
                         }
+                    } else if message["type"] == "ended" || message["type"] == "welcome" {
+                        sfu = None; Ok(())
                     } else if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) };
                     if result.is_err() {
                         eprintln!("net: SFU signaling failed"); c.force_close(); sfu = None; break;
@@ -255,9 +257,6 @@ fn send_main(c: Arc<WsConn>) {
         }
         let mut incoming = Vec::new();
         if let Some(rtc) = sfu.as_mut() {
-            if rtc.usable() {
-                if let Some(ready) = held_ready.take() { lock(&c.queue).out.push_back((false, ready)); }
-            }
             match rtc.poll() {
                 Ok((text, frames)) => {
                     for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
@@ -276,16 +275,6 @@ fn send_main(c: Arc<WsConn>) {
                 let failed = sfu.as_mut().is_none_or(|rtc| rtc.send(&data).is_err());
                 if failed { c.force_close(); sfu = None; }
                 continue;
-            }
-            if !binary {
-                if let Ok(m) = serde_json::from_slice::<serde_json::Value>(&data) {
-                    if m["type"] == "ready" {
-                        if m["ready"] == false { held_ready = None; }
-                        else if !sfu.as_mut().is_some_and(|rtc| rtc.usable()) {
-                            held_ready = Some(data); continue;
-                        }
-                    }
-                }
             }
             let mut live = lock(&c.live);
             if let Some(l) = live.as_mut() {

@@ -157,8 +157,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 ## Race (binary frames, little-endian)
 
-After joining a room each client establishes one native WebRTC association to Cloudflare Realtime
-SFU. It persists across races. Each player publishes `state` (unordered, maxRetransmits 0) and
+At race start each racing member establishes one native WebRTC association to Cloudflare Realtime
+SFU. It is discarded at race end. Each player publishes `state` (unordered, maxRetransmits 0) and
 `events` (reliable, ordered), subscribing to the same channels of all other members. Channel
 allocations identify members; `start.players` maps members to race slots. The receiver corrects
 byte 1 from that mapping. WebSocket binary frames only carry PING/PONG; all other types are dropped.
@@ -168,11 +168,11 @@ DataChannel messages add an 8-byte little-endian unsigned prefix containing that
 identifier, not a game clock or tick agreement. Endpoints discard older races' messages. Early
 reliable EVENTs wait in a bounded queue until their matching WebSocket start is delivered; future
 STATEs can be dropped. WebSocket callbacks and SFU callbacks are delivered on one network thread,
-so the game sees start before buffered events. Channels stay connected between races.
+so the game sees start before buffered events. Channels close at race end.
 
 ### SFU signaling (private JSON on the room WebSocket)
 
-- Client sends `{"type":"sfu_offer","sdp":"<its own offer>"}` after welcome. The DO calls
+- Client sends `{"type":"sfu_offer","sdp":"<its own offer>"}` after start. The DO calls
   `sessions/new` with that offer as `sessionDescription`. The answer is
   `{"type":"sfu_answer","sdp":"<this session's SFU answer>"}`, sent only to its owner.
   The offer includes the SCTP transport; no separate `datachannels/establish` call is used.
@@ -216,9 +216,9 @@ watch the round-trip during a race; it is never forwarded.
 | 1 | u8 | `slot` of the sender |
 | 2 | n | payload, the client's format (finding 044) |
 
-State sync: a STATE frame is one independent rider snapshot (payload version 4, fixed 834
-bytes). Its timestamp is sender race time in ms since GO. It carries all 146 current pad words
-as index/u32 pairs; previous-action words 25-49 are reconstructed locally. Receivers reject older
+State sync: a STATE frame is one independent rider snapshot (payload version 5, fixed 834
+bytes maximum). Its timestamp is sender race time in ms since GO. Version 5 repeats each changed pad word in six consecutive snapshots,
+and refreshes all 146 words every 30 snapshots, as index/u32 pairs; previous-action words 25-49 are reconstructed locally. Receivers reject older
 timestamps before changing the pad mirror. Every owned rider is sent about 30 times/second.
 EVENT remains payload version 2. The SFU reads none of the gameplay payload.
 

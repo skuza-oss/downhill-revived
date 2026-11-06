@@ -200,3 +200,50 @@ and relay server. The metric reads both snapshot layouts, so compare the same es
 both transports. To repeat the native channel test with the normal CLI wrapper:
 `python port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- -p dhd_net -p dhd_render --lib native_channels`.
 
+
+## Round 2: transport constraints and crypto review
+
+Cloudflare [TURN service](https://developers.cloudflare.com/realtime/turn/) supports TLS/TCP
+on 443 and is free with the SFU. The [credential API](https://developers.cloudflare.com/realtime/turn/generate-credentials/)
+requires a separate TURN key ID/API token; SFU app credentials alone are insufficient.
+No secrets were created or changed. str0m 0.25 is sans IO: its
+[upstream README](https://github.com/algesten/str0m#nic-enumeration-and-turn-and-stun)
+explicitly leaves TURN allocation and transport to the caller. It accepts relayed candidates,
+but has no iceServers setting, TURN credential client, TLS stream framing, allocation refresh,
+CreatePermission or ChannelBind loop. Merely retaining TCP candidates from the SFU answer
+cannot provide a TCP socket or TURN transport. UDP-blocked access remains unimplemented.
+The smallest option is one TURN/TLS adapter beside the UDP socket in Sfu: rustls on 443,
+a maintained TURN client (licence/API review first), bounded stream queues, authenticated
+Allocate/Refresh/permission maintenance, candidate registration and demultiplexing returned
+UDP datagrams into str0m. The DO must mint expiring credentials for that race member only,
+revoke on departure/end, and never broadcast them or peer SDP. This is feasible with str0m,
+but is a separate transport implementation and needs blocked-UDP integration testing before
+claiming support. No TCP fallback has been advertised to players.
+
+Crypto review: latest upstream str0m/adapter/dimpl still have the forced AWS-LC dependency.
+Cargo feature unification cannot subtract it. Keep the minimal adapter patch and the unchanged
+archive gate; accepting embedded source paths would undermine the repository rule. PATCH.md
+now gives the exact reapplication steps and upstream revision. No newer clean published option
+was found. The reviewed upstream manifests are linked there.
+
+Round 2 snapshot change: payload version 5 keeps the 104-byte fixed snapshot and sends
+changed pad words six times, with a full 834-byte refresh every 30 snapshots. This handles
+five consecutive lost changed updates; a longer burst recovers at the next received full
+refresh. The receiver keeps a mirror, rejects stale timestamps before applying updates,
+and validates every word before mutation. Race start clears mirrors and sender repetition
+history. Guest-path unit tests cover five lost repeats, all repeats lost, periodic repair,
+zeroing a released action, and malformed updates. Empty updates are 104 bytes; one repeated
+word makes 109 bytes. Live distribution is still to be measured. The adaptive lag diagnostic
+now uses the same calculated delay as rendering.
+
+Round 2 abuse bounds: SFU offers are accepted only for active race slots, one attempt/session
+per member per race (failed attempts consume the cap). The cap is persisted before external
+I/O; queued mutations recheck membership and race identity. Clients now start WebRTC on start,
+so lobby readiness does not allocate SFU resources. Race end destroys the local association
+and closes server allocations; departure removes publication/subscriptions. Remote snapshots
+are counted per member and rider in one-second windows; more than 120/s for any rider (4x the
+normal 30/s) silences that member's snapshots and events for the rest of the race. A new race
+resets the limiter. No close/error codes from the guard lane are used. Server tests cover
+lobby/end rejection and repeated setup attempts; the native limiter has a flood test.
+Sources for server lifecycle review:
+[Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/).

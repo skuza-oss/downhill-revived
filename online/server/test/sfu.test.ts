@@ -1,7 +1,23 @@
 import { describe, it, expect } from "vitest";
+import { Client, startedRace } from "./helpers";
 import { Realtime } from "../src/sfu";
 
 describe("Realtime control plane", () => {
+  it("rejects lobby allocations and caps attempts at one per race", async () => {
+    const { host } = await Client.host();
+    host.sendJson({type:"sfu_offer", sdp:"private"});
+    expect((await host.json("error")).message).toContain("active race");
+    const {clients} = await startedRace(2);
+    clients[0].sendJson({type:"sfu_offer", sdp:"private"});
+    // Fake test environment has no app secrets: a failed attempt still consumes the cap.
+    expect((await clients[0].json("error")).message).toContain("failed");
+    clients[0].sendJson({type:"sfu_offer", sdp:"private"});
+    expect((await clients[0].json("error")).message).toContain("One Realtime session");
+    clients[0].sendJson({type:"end"});
+    await clients[0].json("ended");
+    clients[0].sendJson({type:"sfu_offer", sdp:"private"});
+    expect((await clients[0].json("error")).message).toContain("active race");
+  });
   it("allocates matching policies and never discloses another player's SDP or addresses", async () => {
     const requests: { path: string; body: any }[] = [];
     let next = 0, channel = 10;

@@ -21,7 +21,6 @@ pub struct Sfu {
     socket: UdpSocket,
     channels: Vec<Channel>,
     slots: HashMap<u64, u8>,
-    members: usize,
     race: u64,
     future_events: VecDeque<(ChannelId, Vec<u8>)>,
     connected: bool,
@@ -29,6 +28,20 @@ pub struct Sfu {
     sent: u64,
     pending_events: VecDeque<Vec<u8>>,
     pending_state: HashMap<u8, Vec<u8>>,
+    rates: HashMap<u64, SenderRate>,
+}
+// Four times the normal per-rider rate, with a 120-packet burst allowance.
+// Exceeding it silences this member (including events) until the next race.
+struct SenderRate { since: Instant, count: [u16; 10], blocked: bool }
+impl SenderRate {
+    fn new() -> Self { Self { since: Instant::now(), count: [0; 10], blocked: false } }
+    fn accept(&mut self, rider: u8, now: Instant) -> bool {
+        if self.blocked { return false; }
+        if now.duration_since(self.since).as_secs() >= 1 { self.count = [0; 10]; self.since = now; }
+        self.count[rider as usize] += 1;
+        self.blocked = self.count[rider as usize] > 120;
+        !self.blocked
+    }
 }
 impl Sfu {
     pub fn start() -> Result<(Self, Value)> {
@@ -48,8 +61,8 @@ impl Sfu {
         let (offer, pending) = change.apply().ok_or("No transport offer")?;
         let message = json!({ "type": "sfu_offer", "sdp": offer.to_sdp_string() });
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
-        Ok((Self { rtc, pending: Some(pending), socket, channels: vec![], slots: HashMap::new(), members: 1, race: 0, future_events: VecDeque::new(),
-            connected: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new() }, message))
+        Ok((Self { rtc, pending: Some(pending), socket, channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
+            connected: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
         if message["type"] == "sfu_answer" {
@@ -61,11 +74,11 @@ impl Sfu {
             }).collect::<Vec<_>>().join("\r\n") + "\r\n";
             let pending = self.pending.take().ok_or("Unexpected answer")?;
             self.rtc.sdp_api().accept_answer(pending, SdpAnswer::from_sdp_string(&filtered)?)?;
-        } else if message["type"] == "room" {
-            self.members = message["members"].as_array().map_or(1, |v| v.len());
+
         } else if message["type"] == "start" {
             self.race = message["startAt"].as_u64().filter(|n| *n > 0).ok_or("Missing race marker")?;
             self.slots.clear();
+            self.rates.clear();
             self.pending_state.clear();
             self.pending_events.clear();
             if let Some(players) = message["players"].as_array() {
@@ -140,14 +153,6 @@ impl Sfu {
         }
         if message["type"] == "sfu_channels" { eprintln!("net: SFU channels allocated: {}", self.channels.len()); }
         Ok(())
-    }
-    pub fn usable(&mut self) -> bool {
-        if self.channels.len() < self.members * 2 {
-            return false;
-        }
-        self.channels
-            .iter()
-            .all(|c| self.rtc.channel(c.id).is_some())
     }
     pub fn send(&mut self, bytes: &[u8]) -> Result<()> {
         if bytes.len() < 2 || bytes.len() > 3072 {
@@ -249,6 +254,11 @@ impl Sfu {
             if self.future_events.len() >= 128 { return Err("Early event queue full".into()); }
             self.future_events.push_back((id, bytes));
         } else if epoch == self.race && self.race != 0 {
+            if c.state {
+                if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
+                if !self.rates.entry(c.member).or_insert_with(SenderRate::new).accept(bytes[11], Instant::now()) { return Ok(()); }
+            }
+            if self.rates.get(&c.member).is_some_and(|r| r.blocked) { return Ok(()); }
             if let Some(slot) = self.slots.get(&c.member) {
                 let mut frame = bytes[8..].to_vec();
                 frame[1] = *slot;
@@ -287,6 +297,16 @@ impl Sfu {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn snapshot_flood_silences_member_for_race() {
+        let mut rate = SenderRate::new();
+        let now = rate.since;
+        for _ in 0..120 { assert!(rate.accept(0, now)); }
+        assert!(rate.accept(1, now));
+        assert!(!rate.accept(0, now));
+        assert!(!rate.accept(1, now + Duration::from_secs(2)));
+    }
 
     #[test]
     fn reliable_events_wait_for_start_and_old_race_frames_are_dropped() {

@@ -72,6 +72,7 @@ interface Member {
       before tokens have none; their games (older releases) are below MIN_VERSION. */
   token?: string;
   sfu?: SfuSession;
+  sfuRace?: number;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -320,19 +321,32 @@ export class Room extends DurableObject<Env> {
       // Serialize across external awaits without holding the DO input gate.
       const run = this.sfuQueue.then(async () => {
         if (this.sockets.get(me.id) !== ws || !this.state?.members.includes(me)) return;
+        const race = this.state.race;
+        if (!race || !race.slots.includes(me.id) || race.left.includes(race.slots.indexOf(me.id)))
+          return this.error(ws, "bad_value", "Realtime requires an active race.");
         const api = new Realtime(this.env as Env & SfuSecrets);
         try {
           if (m.type === "sfu_offer") {
+            if (me.sfuRace === race.startAt)
+              return this.error(ws, "bad_value", "One Realtime session per race.");
+            me.sfuRace = race.startAt;
+            await this.save();
             if (me.sfu) await this.clearSfu(me);
             const opened = await api.open(m.sdp);
             me.sfu = opened.session;
+            if (this.state?.race !== race || !this.state.members.includes(me)) {
+              await this.clearSfu(me); return;
+            }
             await this.save();
             this.send(ws, opened.message);
           } else if (m.type === "sfu_connected" && me.sfu) {
             const channels = await api.publish(me.id, me.sfu);
             this.send(ws, { type: "sfu_channels", channels });
+            if (this.state?.race !== race || !this.state.members.includes(me)) {
+              await this.clearSfu(me); return;
+            }
             for (const other of this.state!.members) {
-              if (other.id === me.id || !other.sfu || other.sfu.phase !== "ready") continue;
+              if (other.id === me.id || !race.slots.includes(other.id) || !other.sfu || other.sfu.phase !== "ready") continue;
               const mine = await api.subscribe(me.sfu, other.id, other.sfu);
               if (mine.length) this.send(ws, { type: "sfu_channels", channels: mine });
               const theirs = await api.subscribe(other.sfu, me.id, me.sfu);
@@ -418,6 +432,7 @@ export class Room extends DurableObject<Env> {
         for (const x of st.members) x.ready = false;
         this.rebuildRace();
         this.broadcast({ type: "ended" });
+        await this.closeRaceSfu(st);
         return this.changed();
       case "leave":
         await this.leave(me.id, "leave");
@@ -901,6 +916,14 @@ export class Room extends DurableObject<Env> {
 
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
   /** Retire a publication and its subscriptions, without disclosing publication session IDs. */
+  private async closeRaceSfu(st: RoomState): Promise<void> {
+    const cleanup = this.sfuQueue.then(async () => {
+      for (const member of st.members) if (member.sfu) await this.clearSfu(member);
+    });
+    this.sfuQueue = cleanup.catch(() => {});
+    await cleanup;
+  }
+
   private async clearSfu(member: Member): Promise<void> {
     const api = new Realtime(this.env as Env & SfuSecrets);
     if (member.sfu) await api.close(member.sfu);
@@ -1046,6 +1069,7 @@ export class Room extends DurableObject<Env> {
     this.rebuildRace();
     await this.save();
     this.broadcast({type:"ended", reason:voided ? "void" : "done"});
+    await this.closeRaceSfu(st);
   }
 
   private async destroy(): Promise<void> {
