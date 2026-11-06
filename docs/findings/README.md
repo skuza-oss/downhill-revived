@@ -196,6 +196,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 165 | [no port patch in code the port does not compile](165-dead-patch-guard.md) | current |  |
 | 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
 | 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | in progress |  |
+| 173 | [STATE snapshots that stop for seconds on the SFU, then arrive at once](173-sfu-snapshot-stalls.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
