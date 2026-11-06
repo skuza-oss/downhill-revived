@@ -44,10 +44,11 @@ Acceptance (the decision gate after this phase):
 - [x] builds (core id unchanged, `1fe325c006976190`), first pictures; the parity and the clipped
   triangles fixed (Surprises), the shadow check (`DHD_NATIVE_VU1_CHECK`) clean
 - [x] pictures switch off vs on (2x, 4x, four scenes, eleven fields): within MAE 0.07
-- [ ] PCSX2 referee
-- [x] boot state traces (switch off, shadow, skip); [ ] race state traces
-- [x] timing: Windows RTX 8x; [ ] Mi 11i t612 2x
-- [ ] the gate's answer
+- [x] PCSX2 referee (2.8.2, with every phase 2 loop on: finding 167's run, below)
+- [x] boot state traces (switch off, shadow, skip); race state traces with every phase 2 loop on
+  as well (finding 167: shadow equal to the base in every row; skip: game state equal)
+- [x] timing: Windows RTX 8x; Mi 11i t612 2x (with phase 2's APK)
+- [x] the gate's answer (Result)
 
 ## How loop 0170 works (the translation's specification)
 
@@ -162,6 +163,27 @@ MAE 2.1 (Surprises).
 
 The captures and their side-by-side and difference images stay local (game pictures, not committed).
 
+### PCSX2 as the referee
+
+Each scene's field (700, 3300, 6600, 9300) captured as a GS dump (`DHD_GS_CAPTURE`, 1x, shadow mode,
+so the stream holds the translated loops' packets as the VU kicks them) with the switch off and with
+`DHD_NATIVE_VU1=all`, replayed in stock PCSX2 2.8.2's software renderer (`compare_pcsx2.replay_pcsx2`),
+against the port's native picture of the same field. 2.8.2 saves this game's field buffers (0x8C0,
+0x1180) with the picture 224 rows down, where `compare_pcsx2.scanout` crops at DBY mod 8 (black);
+the field's window was found by search instead (row 224 in every field), line-doubled as the
+harness does. PCSX2 against the port, MAE / % of pixels off by more than 8:
+
+| field | switch off | `all` |
+|---|---|---|
+| title 700 | 2.903 / 9.34 % | 2.903 / 9.34 % |
+| shop 3300 | 11.503 / 45.37 % | 11.503 / 45.37 % |
+| race start 6600 | 6.052 / 19.67 % | 6.053 / 19.67 % |
+| mid-race 9300 | 6.326 / 27.58 % | 6.328 / 27.60 % |
+
+The switch moves the port neither toward PCSX2 nor away from it (at most 0.002 MAE): what PCSX2
+sees differently is the native renderer's own (finding 162: mip levels, filtering), the same in both
+modes. The port's two pictures differ by MAE 0.001-0.073 at 1x.
+
 ### Game state
 
 Boot state traces (`state_trace_run.py boot`, 600 fields, headless: no renderer, so the switch's
@@ -225,6 +247,31 @@ Whole route (fields 300-14000): base 263.4 / 269.7, off 270.0 / 264.6, on 308.5 
   0078 batches are mostly clipped ones.
 - **The GPU** does not notice: 1.4-1.9 ms a frame either way at 8x.
 
+### Mi 11i on the t612 profile, 2x
+
+Measured with phase 2's APK (finding 167: release-signed, the shipped builds' PGO profile, `39533bb`)
+and `DHD_NATIVE_VU1=0170`, which is this phase's loop with `02e48c5`'s sideways clipping (85 % of its
+batches on the GPU rather than 77 %); finding 156's run script, the frozen t612 profile, two runs of
+each (the switch-off pair shared with finding 167). Mean of the two runs; ms a field from the run's
+timeline: the game, VU and GS threads' CPU time, the render thread's, the GPU (sampled).
+
+| scene | switch | fps | field | game | VU | GS | render | GPU |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| title | off | 49.6 (49.3/49.8) | 20.18 | 15.34 | 18.71 | 17.53 | 4.65 | 0.40 |
+| title | 0170 | 59.4 (59.5/59.3) | 16.84 | 12.82 | 15.51 | 13.98 | 4.99 | 0.43 |
+| shop | off | 63.0 (63.0/63.1) | 15.87 | 10.71 | 14.36 | 9.73 | 6.38 | 0.51 |
+| shop | 0170 | 70.7 (70.6/70.8) | 14.14 | 9.59 | 12.61 | 8.08 | 6.75 | 0.53 |
+| start | off | 58.8 (58.5/59.0) | 17.01 | 14.36 | 14.72 | 15.04 | 13.33 | 0.83 |
+| start | 0170 | 63.5 (63.1/63.8) | 15.75 | 13.22 | 12.73 | 12.55 | 13.95 | 0.85 |
+| mid | off | 72.7 (72.9/72.6) | 13.75 | 11.78 | 11.89 | 11.83 | 10.69 | 0.64 |
+| mid | 0170 | 80.7 (80.8/80.6) | 12.39 | 10.48 | 10.43 | 10.10 | 11.14 | 0.66 |
+| route | off | 63.9 (63.7/64.0) | 15.66 | 12.06 | 13.06 | 12.71 | 9.49 | 0.59 |
+| route | 0170 | 71.9 (71.8/72.0) | 13.91 | 10.61 | 11.13 | 10.67 | 9.96 | 0.61 |
+
+- **The route: 63.9 -> 71.9 fields/s (+12.5 %)**; the title +20 %, the shop +12 %, the race start
+  +8 %, mid-race +11 %. The VU thread does 1.9 ms and the GS thread 2.0 ms less a field over the
+  route; the render thread 0.5 ms more (the mesh draws).
+
 ### The near ground in fast race frames: not the texture level
 
 The difference `gpuclip` leaves at fields 9000 and 9600 (the owner's reading of the side-by-sides:
@@ -284,3 +331,18 @@ a GPU pass that does what it does), not a texture level.
   batches translated on the route, then 85 % with the sideways ones on the GPU (`02e48c5`).
 
 ## Result
+
+The gate's answer: **yes, phase 1 justified phase 2**, and the owner approved it on these numbers
+(2026-11-06; its results are finding 167).
+
+- **Correct:** the pictures with 0170 on the GPU are within the tolerance in every scene at 2x and
+  4x (MAE <= 0.066, <= 0.085 % of pixels off by more than 8), the shadow check finds no colour or
+  fog difference, and the game state is the switch-off run's (boot, and race with every phase 2
+  loop on).
+- **Faster:** Windows RTX 8x +16 % over the route (+11 to +22 % per scene), the Mi 11i on the t612
+  profile at 2x +12.5 % (+8 to +20 %). The GPU does not notice on either.
+- **The translator's own cost** on the VU thread: 0.41 us a translated batch, 10 ns a vertex
+  (`DHD_VU1_PROFILE`, Windows 8x), about 0.16 ms a field on the route against the 0.3-0.7 ms of VU
+  work and 0.3-0.6 ms of GS work it saves.
+- **Left on the VU:** the batches with a vertex below the near bound (15 % of 0170's on the route),
+  because the clipper's fans there are not what a GPU's clipping draws.
