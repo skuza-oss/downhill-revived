@@ -155,6 +155,7 @@ impl Pass {
             }
         }
         let offset = arenas.constants(constant_bytes(c));
+        rstat::tally(rstat::COPIES, 1);
         self.constants = Some((*c, offset));
         offset
     }
@@ -195,10 +196,12 @@ impl Pass {
         let s = &mut self.state;
         if s.offset != Some(offset) {
             pass.set_bind_group(0, uniforms, &[offset]);
+            rstat::tally(rstat::BIND0, 1);
             s.offset = Some(offset);
         }
         if s.group.as_ref() != Some(group) {
             pass.set_bind_group(1, group, &[]);
+            rstat::tally(rstat::BIND1, 1);
             s.group = Some(group.clone());
         }
     }
@@ -280,6 +283,7 @@ impl Pass {
                 self.flush();
                 if let Some(pass) = self.pass.as_mut() {
                     pass.set_pipeline(pipe);
+                    rstat::tally(rstat::PIPES, 1);
                     #[cfg(not(target_arch = "wasm32"))]
                     crate::native::pipelines::pipelog::bind(key as u32);
                     #[cfg(not(target_arch = "wasm32"))]
@@ -325,6 +329,7 @@ impl Pass {
             if let Some(pass) = self.pass.as_mut() {
                 #[cfg(not(target_arch = "wasm32"))]
                 let q = self.stats.draw_begin(pass, _class);
+                rstat::tally(rstat::DRAWS, 1);
                 if self.indexed {
                     pass.draw_indexed(first..first.saturating_add(count), 0, 0..1);
                 } else {
@@ -427,6 +432,9 @@ impl Native {
             self.arenas.reserve_indices(gpu, p.commands, count)?;
         }
         t.add(rstat::RESERVE);
+        rstat::tally(rstat::COMMANDS, p.commands.len() as u64);
+        rstat::tally(rstat::VERTICES, p.vertices.len() as u64);
+        rstat::tally(rstat::INDICES, indices.map_or(0, |i| i.len() as u64));
         let uniforms = self.arenas.uniform_group().cloned().ok_or("gs native: no constants bind group")?;
         let vertices = self.arenas.vertex_buffer().cloned().ok_or("gs native: no vertex buffer")?;
         let vertex_bytes = self.arenas.vertex_capacity();
@@ -969,12 +977,26 @@ pub mod rstat {
     /// Pictures per log line (about two seconds at 120 field/s).
     pub const EVERY: u32 = 240;
 
+    /// What a picture records, counted (`tally`): draw calls, constants copies, group 0 and group 1
+    /// binds, pipeline binds, commands, vertices and indices.
+    pub const DRAWS: usize = 0;
+    pub const COPIES: usize = 1;
+    pub const BIND0: usize = 2;
+    pub const BIND1: usize = 3;
+    pub const PIPES: usize = 4;
+    pub const COMMANDS: usize = 5;
+    pub const VERTICES: usize = 6;
+    pub const INDICES: usize = 7;
+    const TALLIES: usize = 8;
+    const TALLY_NAMES: [&str; TALLIES] = ["draws", "copies", "bind0", "bind1", "pipes", "commands", "vertices", "indices"];
+
     thread_local! {
         static ON: Cell<u8> = const { Cell::new(0) };
         static ACC: Cell<[u64; PARTS]> = const { Cell::new([0; PARTS]) };
         static COUNT: Cell<u32> = const { Cell::new(0) };
         /// Draw passes begun since the last line (each one creates a VkFramebuffer).
         static PASSES: Cell<u32> = const { Cell::new(0) };
+        static TALLY: Cell<[u64; TALLIES]> = const { Cell::new([0; TALLIES]) };
     }
 
     /// Counts a draw pass (`Pass::begin`).
@@ -982,6 +1004,18 @@ pub mod rstat {
     pub fn pass() {
         if on() {
             PASSES.with(|c| c.set(c.get() + 1));
+        }
+    }
+
+    /// Adds `n` to tally `k` (DRAWS, COPIES, ...).
+    #[inline]
+    pub fn tally(k: usize, n: u64) {
+        if on() {
+            TALLY.with(|c| {
+                let mut v = c.get();
+                v[k] = v[k].saturating_add(n);
+                c.set(v);
+            });
         }
     }
 
@@ -1044,6 +1078,10 @@ pub mod rstat {
         }
         let passes = PASSES.with(|c| c.replace(0));
         let _ = write!(line, " passes={:.1}", passes as f64 / EVERY as f64);
+        let tally = TALLY.with(|c| c.replace([0; TALLIES]));
+        for (i, name) in TALLY_NAMES.iter().enumerate() {
+            let _ = write!(line, " {name}={:.1}", tally[i] as f64 / EVERY as f64);
+        }
         crate::host::log(&line);
     }
 }
