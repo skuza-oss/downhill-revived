@@ -10,6 +10,12 @@ with llvm-symbolizer (needs a PDB beside the exe: build_host64.py --debug). The 
 self samples per function and per thread, and the inlined frames (llvm-symbolizer --inlines)
 are kept so a function inlined into its caller is still visible. Only the process given (or
 started here, through owned_process, which ends it and what it started) is touched.
+
+--stacks THREAD (e.g. game) walks the whole call stack of that thread's samples instead (dbghelp's
+StackWalk64 over the modules' x64 unwind data, the thread suspended while it is walked): the report
+gains "stacks" (outermost frame first, inlined frames expanded) and "inclusive" (samples in which a
+function is anywhere on the stack). The walk costs more per sample than a pc read, so the sampled
+thread runs slower; use the shares, not the times.
 """
 import argparse
 import collections
@@ -151,17 +157,80 @@ def return_chain(process, sp, exe_base, exe_size, cache, depth=4):
     return tuple(out)
 
 
-def sample(pid, seconds, interval, alive, minimize=False, callers=None):
+class ADDRESS64(ctypes.Structure):
+    _fields_ = [('Offset', ctypes.c_uint64), ('Segment', ctypes.c_uint16), ('Mode', ctypes.c_uint32)]
+
+
+class STACKFRAME64(ctypes.Structure):
+    _fields_ = [('AddrPC', ADDRESS64), ('AddrReturn', ADDRESS64), ('AddrFrame', ADDRESS64),
+                ('AddrStack', ADDRESS64), ('AddrBStore', ADDRESS64), ('FuncTableEntry', ctypes.c_void_p),
+                ('Params', ctypes.c_uint64 * 4), ('Far', wintypes.BOOL), ('Virtual', wintypes.BOOL),
+                ('Reserved', ctypes.c_uint64 * 3), ('KdHelp', ctypes.c_uint64 * 32)]  # KDHELP64, with room
+
+
+class StackWalker:
+    """Whole call stacks of a suspended thread through dbghelp's StackWalk64 (the x64 unwind data of
+    every module), for --stacks. The thread stays suspended while it is walked."""
+    CONTEXT_FULL = 0x10000B
+
+    def __init__(self, process, depth):
+        self.process, self.depth = process, depth
+        self.dbghelp = ctypes.WinDLL('dbghelp', use_last_error=True)
+        self.dbghelp.SymInitializeW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.BOOL]
+        self.dbghelp.StackWalk64.argtypes = [wintypes.DWORD, wintypes.HANDLE, wintypes.HANDLE,
+                                             ctypes.POINTER(STACKFRAME64), ctypes.c_void_p, ctypes.c_void_p,
+                                             ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        self.dbghelp.SymSetOptions(0x00000002 | 0x00000004)  # deferred loads, no symbols needed: unwind data only
+        if not self.dbghelp.SymInitializeW(process, None, True):
+            raise OSError(ctypes.get_last_error(), 'SymInitialize')
+        self.table = ctypes.cast(self.dbghelp.SymFunctionTableAccess64, ctypes.c_void_p)
+        self.base = ctypes.cast(self.dbghelp.SymGetModuleBase64, ctypes.c_void_p)
+
+    def refresh(self):
+        self.dbghelp.SymRefreshModuleList(self.process)
+
+    def walk(self, thread):
+        """Return addresses, innermost first (the pc, then each return address), or None."""
+        if k32.SuspendThread(thread.handle) == 0xFFFFFFFF:
+            return None
+        try:
+            ctypes.memset(thread.ctx, 0, 1232)
+            ctypes.c_uint32.from_address(thread.ctx + 0x30).value = self.CONTEXT_FULL
+            if not k32.GetThreadContext(thread.handle, thread.ctx):
+                return None
+            frame = STACKFRAME64()
+            frame.AddrPC.Offset = ctypes.c_uint64.from_address(thread.ctx + 0xF8).value   # Rip
+            frame.AddrStack.Offset = ctypes.c_uint64.from_address(thread.ctx + 0x98).value  # Rsp
+            frame.AddrFrame.Offset = ctypes.c_uint64.from_address(thread.ctx + 0xA0).value  # Rbp
+            frame.AddrPC.Mode = frame.AddrStack.Mode = frame.AddrFrame.Mode = 3  # AddrModeFlat
+            out = []
+            while len(out) < self.depth and self.dbghelp.StackWalk64(
+                    0x8664, self.process, thread.handle, ctypes.byref(frame), ctypes.c_void_p(thread.ctx),
+                    None, self.table, self.base, None):
+                pc = frame.AddrPC.Offset
+                if not pc or (out and pc == out[-1]):
+                    break
+                out.append(pc)
+            return out
+        finally:
+            k32.ResumeThread(thread.handle)
+
+
+def sample(pid, seconds, interval, alive, minimize=False, callers=None, stacks=None, depth=96):
     process = k32.OpenProcess(PROCESS_ACCESS, False, pid)
     threads = {}
     counts = collections.Counter()  # (thread name or id, pc)
     caller_counts = collections.Counter()  # (callee rva, caller return rva)
+    stack_counts = collections.Counter()  # (thread name, (pc, return addresses...)) for --stacks threads
+    walker = StackWalker(process, depth) if stacks else None
+    mods = []
     exe_base = exe_size = 0
     targets = set(); ret_cache = {}
     if callers:
         exe_base, exe_size, _ = next((m for m in modules_of(process) if m[2].lower().endswith('.exe')), (0, 0, ''))
         targets = {exe_base + (c - 0x140000000) for c, _ in callers}
     winmm.timeBeginPeriod(1)
+    sample.utc = [time.time(), None]
     end = time.perf_counter() + seconds
     last_scan = 0
     ticks = 0
@@ -171,17 +240,28 @@ def sample(pid, seconds, interval, alive, minimize=False, callers=None):
             if now - last_scan > 0.5:
                 if minimize:
                     owned_process.minimize_windows([pid])
+                fresh = False
                 for tid in threads_of(pid):
                     if tid not in threads:
                         t = Thread(tid)
                         if t.handle:
-                            t.busy(); threads[tid] = t
+                            t.busy(); threads[tid] = t; fresh = True
+                if walker and fresh:
+                    walker.refresh()
+                if fresh:
+                    mods = modules_of(process) or mods  # while the process lives (it may exit before the end)
                 last_scan = now
             for t in list(threads.values()):
                 d = t.busy()
                 if d is None:
                     del threads[t.tid]; continue
                 if d < 100000:  # under ~20 us of cycles since the last tick: idle
+                    continue
+                if walker and t.name in stacks:
+                    chain = walker.walk(t)
+                    if chain:
+                        stack_counts[(t.name, tuple(chain))] += 1
+                        counts[(t.name, chain[0])] += 1
                     continue
                 pc = t.pc()
                 if pc is not None:
@@ -197,10 +277,12 @@ def sample(pid, seconds, interval, alive, minimize=False, callers=None):
                             caller_counts[(start, tuple(r - exe_base + 0x140000000 for r in chain))] += 1
             ticks += 1
             time.sleep(interval / 1000)
-        mods = modules_of(process)
+        mods = modules_of(process) or mods
     finally:
         winmm.timeEndPeriod(1)
+    sample.utc[1] = time.time()
     sample.callers = caller_counts
+    sample.stacks = stack_counts
     return counts, mods, ticks
 
 
@@ -236,6 +318,10 @@ def main():
                     help='only run (minimised) until exit or --seconds: a timing run without the sampler')
     ap.add_argument('--callers', action='append', default=[],
                     help='ADDR:SIZE (preferred-base VA of a function): attribute its samples to direct callers')
+    ap.add_argument('--stacks', action='append', default=[],
+                    help='thread name (e.g. game): take whole call stacks of its samples (StackWalk64), for '
+                         'inclusive times; the report gains "stacks" and "inclusive"')
+    ap.add_argument('--depth', type=int, default=96, help='--stacks: frames per stack at most')
     ap.add_argument('--top', type=int, default=60)
     a = ap.parse_args()
     with contextlib.ExitStack() as owned:   # a started process ends with it
@@ -267,7 +353,7 @@ def main():
             print('exit', proc.returncode if proc else None)
             return
         callers = [tuple(int(x, 0) for x in c.split(':')) for c in a.callers]
-        counts, mods, ticks = sample(pid, a.seconds, a.interval, alive, a.minimize, callers)
+        counts, mods, ticks = sample(pid, a.seconds, a.interval, alive, a.minimize, callers, set(a.stacks), a.depth)
     exe = (a.exe or a.run).resolve()
     exe_mod = next((m for m in mods if m[2].lower() == exe.name.lower()), None)
     preferred = 0x140000000
@@ -290,7 +376,7 @@ def main():
             name = m[2] if m else '?'
             per_mod[name] += n
             self_fn[(thread, '[' + name + ']')] += n
-    report = {'pid': pid, 'ticks': ticks, 'samples': total,
+    report = {'pid': pid, 'ticks': ticks, 'samples': total, 'utc': getattr(sample, 'utc', None),
               'threads': per_thread.most_common(), 'modules': per_mod.most_common(),
               'self': [[t, f, n] for (t, f), n in self_fn.most_common()],
               'outer': [[t, f, n] for (t, f), n in outer.most_common(400)],
@@ -309,6 +395,33 @@ def main():
         report['callers'] = [list(k) + [n] for k, n in named.most_common(300)]
         for k, n in named.most_common(40):
             print('caller %6d  %s <- %s' % (n, k[0], ' <- '.join(k[1:])))
+    st = getattr(sample, 'stacks', {})
+    if st and exe_mod:
+        # A return address is symbolized one byte back (inside its call); each address expands to its
+        # inlined frames. Stacks are written outermost first; a function counts once per sample in
+        # "inclusive" however often it appears in the stack.
+        def rva(pc, first):
+            return pc - exe_mod[0] + preferred - (0 if first else 1)
+        wanted = sorted({rva(pc, i == 0) for (_, chain) in st for i, pc in enumerate(chain)
+                         if exe_mod[0] <= pc < exe_mod[0] + exe_mod[1]})
+        ssyms = symbolize(exe, wanted, a.llvm)
+        def names(pc, first):
+            if exe_mod[0] <= pc < exe_mod[0] + exe_mod[1]:
+                return ssyms.get(rva(pc, first)) or ['??']
+            m = next((m for m in mods if m[0] <= pc < m[0] + m[1]), None)
+            return ['[' + (m[2] if m else '?') + ']']
+        stacks_out = []; inclusive = collections.Counter(); totals = collections.Counter()
+        for (thread, chain), n in st.items():
+            frames = [f for i, pc in enumerate(chain) for f in names(pc, i == 0)]
+            stacks_out.append([thread, n, frames[::-1]])
+            totals[thread] += n
+            for f in set(frames):
+                inclusive[(thread, f)] += n
+        stacks_out.sort(key=lambda s: -s[1])
+        report['stacks'] = stacks_out
+        report['inclusive'] = [[t, f, n] for (t, f), n in inclusive.most_common(600)]
+        for (t, f), n in inclusive.most_common(a.top):
+            print('incl %6.2f%%  %-10s %s' % (100 * n / max(totals[t], 1), t[:10], f))
     a.out.write_text(json.dumps(report, indent=1))
     print('samples %d in %d ticks' % (total, ticks))
     for t, n in per_thread.most_common():

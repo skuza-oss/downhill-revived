@@ -54,6 +54,8 @@ after a version change before a live check.
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/route_profile.py EXE OUT [--profile]` | finding 156's route on a hidden desktop (timed lock) with the timeline: per scene (title, shop, race start, mid-race) fields/s and each thread's work and busy time; `--profile` also samples the game thread's call stacks in each scene (finding 162) |
+| `port/tools/sample_profile.py --pid N --stacks game` | whole call stacks of one thread's samples (dbghelp's StackWalk64): the report's `stacks` and `inclusive`; slower per sample, so shares only (finding 162) |
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
 | `port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- --test native_spirv` | the native renderer's SPIR-V for every pipeline stage, made as wgpu-hal's Vulkan backend makes it, with no texture passed into a function (Mali's r54 compiler crashes on that, finding 153). `DHD_SPIRV_OUT=DIR` keeps the `.spv` files; with `DHD_MALIOC` every stage is also compiled by malioc for `DHD_MALIOC_CORE` (default `Mali-G57`); `DHD_NATIVE_WGSL=FILE` compares another native.wgsl |
