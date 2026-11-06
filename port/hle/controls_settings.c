@@ -3,7 +3,7 @@
    presses the key or controller button that stands for each of the PS2 pad's buttons.
      Device:  < Keyboard >     the keyboard (player 1's), Controller 1, Controller 2
      Show:    < Buttons >      Cross to SELECT, or the d-pad and the sticks
-     Cross:   Space   also: X     the main; dimmed also: X is launcher-only
+     Cross:   Space   (also X)    the main; the dimmed alternate is launcher-only
      ...
      Reset Keyboard
    Cross on a button's row waits for a key (the keyboard) or a controller button (that player's
@@ -125,7 +125,7 @@ void controls_settings_draw(MenuPage *p)
     for (int row = 0; row < menu_page_rows(p); row++) {
         if (row_kind[row] != ROW_TARGET || !layout.input[row_item[row]][1] || (capture == CAPTURE_WAIT && row == capture_row)) continue;
         char text[48];
-        snprintf(text, sizeof text, "also: %s", input_word(layout.input[row_item[row]][1]));
+        snprintf(text, sizeof text, "(also %s)", input_word(layout.input[row_item[row]][1]));
         menu_page_suffix(p, row, text);
     }
 }

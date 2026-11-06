@@ -246,7 +246,7 @@ void menu_page_suffix(MenuPage *p, int row, const char *text)
     if (row < 0 || row >= menu_page_rows(p)) return;
     MenuStyle normal = menu_page_style(p, MENU_STYLE_ROW);
     MenuStyle dim = menu_page_style(p, MENU_STYLE_OFF);
-    int x = MENU(p, X_ROW_X, int) + menu_text_width(p->text[row], &normal) / 2 + 6;
+    int x = MENU(p, X_ROW_X, int) + menu_text_width(p->text[row], &normal) / 2 + 24;  /* a clear gap after the row */
     int y = MENU(p, X_ROW_Y, int) + row * MENU(p, X_ROW_STEP, int);
     menu_draw_text(MENU_LEFT, x, y, text, &dim);
 }
