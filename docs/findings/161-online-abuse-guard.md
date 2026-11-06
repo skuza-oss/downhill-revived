@@ -106,6 +106,9 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   Left for the lead: the one-time setup in `online/server/README.md` ("Abuse guard: one-time
   setup", round 2: commit the `d1_databases` binding with its id, apply both migrations), the
   deploy, and a real race once the game sends the install id.
+- [x] 2026-11-06 round 2 (server only, nothing outside `online/server` and docs): `check.py
+  server` OK (120 tests, typecheck), `check.py docs` OK; the tool's `online` against a local
+  store and `wrangler dev` as above.
 
 ## Decisions
 
