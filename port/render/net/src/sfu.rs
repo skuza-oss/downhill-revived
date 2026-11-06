@@ -269,6 +269,10 @@ impl Sfu {
     fn usable(&mut self) -> bool {
         self.channels.len() >= self.members * 2 && self.channels.iter().all(|c| self.rtc.channel(c.id).is_some())
     }
+    /// Frames queued by send() that the next poll would write now.
+    pub fn unwritten(&self) -> bool {
+        self.released && !(self.pending_state.is_empty() && self.pending_events.is_empty())
+    }
     pub fn send(&mut self, bytes: &[u8]) -> Result<()> {
         if bytes.len() < 2 || bytes.len() > 3072 {
             return Ok(());

@@ -229,10 +229,13 @@ fn send_main(c: Arc<WsConn>) {
             c.wake.notify_all();
         }
     });
+    // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
+    let mut unwritten = false;
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
-            let (mut q, _) = c.wake.wait_timeout_while(q, TICK, |q| q.out.is_empty() && q.incoming.is_empty() && !q.sfu_input && !c.stopping.load(Ordering::Acquire)).unwrap_or_else(|e| e.into_inner());
+            let wait = if unwritten { Duration::ZERO } else { TICK };
+            let (mut q, _) = c.wake.wait_timeout_while(q, wait, |q| q.out.is_empty() && q.incoming.is_empty() && !q.sfu_input && !c.stopping.load(Ordering::Acquire)).unwrap_or_else(|e| e.into_inner());
             q.sfu_input = false;
         }
         if !lock(&c.queue).connected { sfu = None; continue; }
@@ -287,6 +290,8 @@ fn send_main(c: Arc<WsConn>) {
             if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
         }
         flush(&c, &mut sfu);
+        // Once: frames a full SCTP buffer refuses wait for the next wake, not a busy loop.
+        unwritten = !unwritten && sfu.as_ref().is_some_and(|s| s.unwritten());
         if let Some(f) = c.h.on_tick {
             if unsafe { f(c.h.ctx) } != 0 {
                 c.force_close();
