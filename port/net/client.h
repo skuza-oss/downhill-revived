@@ -77,6 +77,11 @@ typedef struct {
     struct { double due; int binary; uint16_t n; char data[128]; } held[16];
     unsigned held_head, held_count;
     int releasing;  /* client_tick hands a held pong over: it counts now */
+    /* DHD_NET_TEST_DROP=S (a test switch, finding 175): the room connection is cut once in this
+       room, S seconds after a race's startAt (negative: during its setup; the start message comes
+       3 s before startAt), as a network drop is (no close frame) */
+    double test_drop_s;
+    int test_drop, test_dropped;
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];

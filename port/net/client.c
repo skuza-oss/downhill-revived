@@ -82,6 +82,8 @@ void client_init(NetClient *c, const char *name, const char *version, const char
             c->pong_delay_ms = atof(delay);
             c->pong_delay_from_s = at ? atof(at + 1) : 60;
         }
+        const char *drop = getenv("DHD_NET_TEST_DROP");
+        if (drop && *drop) c->test_drop = 1, c->test_drop_s = atof(drop);
     }
 }
 
@@ -736,7 +738,13 @@ int client_tick(NetClient *c)
             }
         }
         dead = now - c->last_rx > SILENT_MS;
-        if (c->joined_at && (c->lobby.state == NET_LOBBY || c->lobby.state == NET_RACING) && now >= c->next_log) {
+        if (c->test_drop && !c->test_dropped && c->racing && c->race_at > 0 &&
+            now + c->clock_offset >= c->race_at + c->test_drop_s * 1000) {
+            c->test_dropped = dead = 1;
+            snprintf(line, sizeof line, "net: DHD_NET_TEST_DROP: the room connection is cut %.1f s after the race's start (test switch)",
+                     c->test_drop_s);
+        }
+        if (!line[0] && c->joined_at && (c->lobby.state == NET_LOBBY || c->lobby.state == NET_RACING) && now >= c->next_log) {
             int n = snprintf(line, sizeof line, "net: room %s%s, ", c->lobby.code, c->racing ? " (racing)" : "");
             window_stats(c, line + n, sizeof line - n);
             c->next_log = now + NET_LOG_MS;
