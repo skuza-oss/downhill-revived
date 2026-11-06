@@ -11,10 +11,15 @@
    | 1110 | 0x20C | computed | c d5 L + d20 L.w^2 + d1015     | every vertex  | drawn      | yes      |
    | 13A0 | 0x260 | maximum  | c L + d20 L.w^2 + d1015        | none          | drawn      | no       |
    | 1510 | 0x288 | computed | c vf31 + d20 max(N.H, 0)^16    | every vertex  | drawn      | yes      |
+   | 3140 | 0x616 | maximum  | d1013                          | (untextured)  | drawn      | no       |
 
    (c the batch vertex's colour, L its pool entry's lighting at data 373 + index, N its pool
    normal there (12-bit fixed point), H = (d6.w, d7.w, d8.w), dN data N; the lit colours clamped
-   to 255 and truncated, their alpha c.a d5.a + d20.a L.w^2, d1015 adding to RGB only.)
+   to 255 and truncated, their alpha c.a d5.a + d20.a L.w^2, d1015 adding to RGB only. 3140 draws
+   the shadow silhouettes into the shadow targets (setup 30A0: the matrix data 1008-1011 times the
+   object's, no divide; translated while that leaves w at 1, which the vertex shader's divide then
+   keeps) with its own strip tag: the loop writes the I register's constant at 0x30C0 over the
+   header's second word (PRE, PRIM 00C, NREG 3).)
 
    A batch loop runs after a program's setup has set VI13 and the registers it reads: the shared
    1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050 and 12F0), and for lit or
@@ -68,17 +73,20 @@ static void mesh_timed(double seconds) { (void)seconds; }
 #else
 enum { MESH_OFF = 1, MESH_ON = 2, MESH_SKIP = 1, MESH_SHADOW = 2 };
 enum { MESH_WHY_EOP, MESH_WHY_COUNT, MESH_WHY_TAG, MESH_WHY_PRIM, MESH_WHY_TEXTURE, MESH_WHY_COLOUR, MESH_WHY_JOIN,
-       MESH_WHY_NEAR, MESH_WHY_CLIP, MESH_WHYS };
+       MESH_WHY_NEAR, MESH_WHY_CLIP, MESH_WHY_ORTHO, MESH_WHYS };
 static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", "prim", "texture tag", "colour",
                                                      "join value", "a vertex below the near bound",
-                                                     "a vertex off the guard band in x or y"};
+                                                     "a vertex off the guard band in x or y",
+                                                     "w other than 1 (no divide)"};
 
-/* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight. */
-enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW, MESH_COLOUR_LIT_D5, MESH_COLOUR_LIT, MESH_COLOUR_HIGHLIGHT };
+/* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight, d1013. */
+enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW, MESH_COLOUR_LIT_D5, MESH_COLOUR_LIT, MESH_COLOUR_HIGHLIGHT,
+       MESH_COLOUR_CONSTANT };
 typedef struct {
     const char *name;
     uint16_t vi13;
     uint8_t fog_max, colour, uv_offset, backface, clip;   /* uv_offset: 0 none, 1 from vertex 1, 2 every vertex */
+    uint8_t ortho;                                         /* 3140: no divide, its tag from the I constant */
 } MeshProgram;
 static const MeshProgram mesh_programs[] = {
     {"0170", 0x011, 0, MESH_COLOUR_SCALED, 1, 1, 1},
@@ -89,8 +97,9 @@ static const MeshProgram mesh_programs[] = {
     {"1110", 0x20C, 0, MESH_COLOUR_LIT_D5, 2, 0, 1},
     {"13A0", 0x260, 1, MESH_COLOUR_LIT, 0, 0, 0},
     {"1510", 0x288, 0, MESH_COLOUR_HIGHLIGHT, 2, 0, 1},
+    {"3140", 0x616, 1, MESH_COLOUR_CONSTANT, 0, 0, 0, 1},
 };
-enum { MESH_PRELIT = 0x1F, MESH_LIT = 0xE0 };   /* the groups' bits */
+enum { MESH_PRELIT = 0x1F, MESH_LIT = 0xE0, MESH_SHADOW_LOOP = 0x100 };   /* the groups' bits */
 enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
 
 typedef struct {
@@ -189,7 +198,9 @@ static void mesh_check(void)
         int dx = (int16_t)(uint16_t)((o[2].w[0] & 0xFFFF) - ((uint32_t)(int32_t)(x * 16.0f) & 0xFFFF));
         int dy = (int16_t)(uint16_t)((o[2].w[1] & 0xFFFF) - ((uint32_t)(int32_t)(y * 16.0f) & 0xFFFF));
         if (dx > 1 || dx < -1 || dy > 1 || dy < -1) mesh.bad_xy++;
-        int dz = (o[2].sw[2] >> 4) - (int32_t)z;
+        float z16 = z * 16.0f;   /* FTOI4 saturates (3140's shadow pass leaves z unscaled) */
+        int32_t zi = z16 >= 2147483648.0f ? INT32_MAX : z16 <= -2147483648.0f ? INT32_MIN : (int32_t)z16;
+        int dz = (o[2].sw[2] >> 4) - (zi >> 4);
         if (dz > 1 || dz < -1) mesh.bad_z++;
         int df = (int)(o[2].w[3] >> 4 & 255) - (int)fog;
         if (df > 1 || df < -1) mesh.bad_fog++;
@@ -230,6 +241,7 @@ static int mesh_enabled(void)
             size_t len = strcspn(t, ",:");
             if (len == 6 && !strncmp(t, "prelit", 6)) mesh.enabled |= MESH_PRELIT;
             if (len == 3 && !strncmp(t, "lit", 3)) mesh.enabled |= MESH_LIT;
+            if (len == 6 && !strncmp(t, "shadow", 6)) mesh.enabled |= MESH_SHADOW_LOOP;
             if (len == 3 && !strncmp(t, "all", 3)) mesh.enabled |= (1u << MESH_PROGRAMS) - 1;
             for (unsigned p = 0; p < MESH_PROGRAMS; p++)
                 if (len == 4 && !strncmp(t, mesh_programs[p].name, 4)) mesh.enabled |= 1u << p;
@@ -293,6 +305,7 @@ static int mesh_build(void)
     if (!(hdr[0] & 0x8000)) return mesh_fail(MESH_WHY_EOP);
     if (n < 1 || n > GS_MESH_MAX_VERTICES || base + 1 + 3 * n > 1024) return mesh_fail(MESH_WHY_COUNT);
     uint32_t tag1 = hdr[1];
+    if (prog->ortho) memcpy(&tag1, micro(1) + 0x30C0, 4);   /* 30C0's LOI, stored over the header (30E0, 3138) */
     /* PACKED, NREG 3: ST RGBAQ XYZF2, PRE */
     if ((tag1 >> 26 & 3) || tag1 >> 28 != 3 || (hdr[2] & 0xFFF) != 0x412 || !(tag1 >> 14 & 1))
         return mesh_fail(MESH_WHY_TAG);
@@ -303,7 +316,7 @@ static int mesh_build(void)
     h->magic = GS_MESH_MAGIC;
     h->flags = (mesh.mode == MESH_SHADOW ? GS_MESH_SHADOW : 0) | (prog->backface ? 0 : GS_MESH_TWO_SIDED);
     h->prim = prim;
-    unsigned t = hdr[3] & 0x7FFF;
+    unsigned t = prog->ortho ? 0 : hdr[3] & 0x7FFF;   /* 3140 sets no texture */
     if (t) {   /* 0FA8: an A+D tag (data 26), TEX0 TEX1 MIPTBP1 (149-151 + t) and TEXFLUSH (164) */
         const uint32_t *tag = m[26].w;
         if ((tag[0] & 0xFFFF) != 4 || (tag[1] >> 14 & 1) || (tag[1] >> 26 & 3) || tag[1] >> 28 != 1 ||
@@ -326,6 +339,13 @@ static int mesh_build(void)
     const float uv[2] = {v19[0], v19[1]};
     const float *d5 = m[5].f, *d20 = m[20].f, *d1015 = m[1015].f;
     const float highlight[3] = {m[6].f[3], m[7].f[3], m[8].f[3]};
+    uint32_t constant = 0;
+    if (prog->colour == MESH_COLOUR_CONSTANT)   /* FTOI0(d1013), the same for every vertex */
+        for (unsigned i = 0; i < 4; i++) {
+            float f = m[1013].f[i];
+            if (!(f > -1.0f && f < 256.0f)) return mesh_fail(MESH_WHY_COLOUR);
+            constant |= (uint32_t)(int)f << (i * 8);
+        }
     /* 0170's prologue sets vf6.x = 1 (0098) and negates it unless the header's bit 15 (0158) */
     float parity = hdr[3] & 0x8000 ? 1.0f : -1.0f;
     mesh.check_parity = parity; mesh.check_base = base;
@@ -348,13 +368,14 @@ static int mesh_build(void)
             _mm_storeu_ps(c, _mm_add_ps(_mm_add_ps(_mm_mul_ps(c0, _mm_set1_ps(p[0])), _mm_mul_ps(c1, _mm_set1_ps(p[1]))),
                                         _mm_add_ps(_mm_mul_ps(c2, _mm_set1_ps(p[2])), c3)));
             float x = c[0] + h->clip[0] * c[3], y = c[1] + h->clip[1] * c[3], b = bound * c[3];
+            if (prog->ortho && c[3] != 1.0f) return mesh_fail(MESH_WHY_ORTHO);   /* the shader's divide by 1 */
             if (!(c[3] > 0 && c[3] >= near)) return mesh_fail(MESH_WHY_NEAR);
             /* off the guard band sideways: the loops with clipping cut it as a GPU does (finding 164,
                :gpuside), those without kick it as it comes */
             if (!prog->clip && !(x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
         }
-        const uint32_t *c = r[1].w;
-        if ((c[0] | c[1] | c[2] | c[3]) > 255) return mesh_fail(MESH_WHY_COLOUR);
+        const uint32_t *c = r[1].w;   /* (3140 overwrites it with its constant) */
+        if (prog->colour != MESH_COLOUR_CONSTANT && (c[0] | c[1] | c[2] | c[3]) > 255) return mesh_fail(MESH_WHY_COLOUR);
         int32_t w = r[2].sw[3];
         if (w != 0 && w != 0x800000) return mesh_fail(MESH_WHY_JOIN);   /* 2048.0: ADC through the fog's FTOI4 */
         join[k] = mesh.join[k] = w != 0;
@@ -363,7 +384,9 @@ static int mesh_build(void)
         o->u = (float)r[2].sw[0] * fixed; o->v = (float)r[2].sw[1] * fixed; o->uz = (float)r[2].sw[2] * fixed;
         if (prog->uv_offset == 2 || (prog->uv_offset == 1 && k)) { o->u += uv[0]; o->v += uv[1]; }   /* vf19.xy */
         o->unused = 0;
-        if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510: the pool normal against d6-d8's w */
+        if (prog->colour == MESH_COLOUR_CONSTANT)
+            o->rgba = constant;
+        else if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510: the pool normal against d6-d8's w */
             const int32_t *nw = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].sw;
             float d = highlight[0] * ((float)nw[0] * fixed) + highlight[1] * ((float)nw[1] * fixed) +
                       highlight[2] * ((float)nw[2] * fixed);
@@ -462,6 +485,13 @@ static void mesh_skipped(void)
         memcpy(vu1.vf[14].f, vu1.vu0_mem[6].f, 16);
         memcpy(vu1.vf[8].f, vu1.vu0_mem[18].f, 16);
         memcpy(vu1.vf[10].f, vu1.vu0_mem[19].f, 16);
+    } else if (prog->ortho) {   /* 3140's: the I constant stored over the header's tag word (the buffer's
+                                   next batch brings its own header), vf5.y = I, vf5.w = vf18.y,
+                                   vf10 = FTOI0(d1013) (in 0..255: mesh_build) */
+        memcpy(&vu1.vu0_mem[mesh.check_base].w[1], micro(1) + 0x30C0, 4);
+        memcpy(&vu1.vf[5].f[1], micro(1) + 0x30C0, 4);
+        vu1.vf[5].f[3] = vu1.vf[18].f[1];
+        for (unsigned i = 0; i < 4; i++) vu1.vf[10].sw[i] = (int32_t)vu1.vu0_mem[1013].f[i];
     }
     uint16_t buffer = (uint16_t)(vu1.vi[14] + 0x90);
     if (buffer == 0x3E8) buffer = 0x238;
