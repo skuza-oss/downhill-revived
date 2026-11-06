@@ -10,6 +10,7 @@ const bind = {
   layouts: null,    // controls_state: per device { inputs: [[main, alternate]...], swap_sticks, invert }
   device: 0,        // the layout shown: 0 keyboard, 1 Controller 1, 2 Controller 2
   capture: null,    // waiting: { device, target, slot, since, held: Set of pad buttons down at the start }
+  taken: new Set(), // the pad buttons down when a binding took one: pad.js ignores them until let go
   note: '',         // what the last change did (moved from, or why not)
   bad: false,
 };
@@ -121,6 +122,7 @@ function pollCapture() {
   for (const i of c.held) if (!down.has(i)) c.held.delete(i);
   const input = padInputPressed(bind.schema, c.held, down);
   if (input) {
+    bind.taken = down;  // the press is the binding's, not a Start, Back or tab change as well
     bind.capture = null;
     return bindEdit(c.device, { edit: 'assign', target: c.target, slot: c.slot, input });
   }
@@ -146,8 +148,15 @@ addEventListener('keydown', (e) => {
   bindEdit(0, { edit: 'assign', target: c.target, slot: c.slot, input });
 }, true);
 
-// pad.js: no navigation while a controller button is awaited
-const bindCapturing = () => !!bind.capture;
+// pad.js: no navigation while a controller button is awaited, nor from the buttons that answered
+// it until they are let go
+function bindCapturing() {
+  if (bind.capture) return true;
+  if (!bind.taken.size) return false;
+  const down = padButtonsDown([...(navigator.getGamepads?.() ?? [])].filter(Boolean));
+  for (const i of bind.taken) if (!down.has(i)) bind.taken.delete(i);
+  return bind.taken.size > 0;
+}
 
 // The tab's bindings block: the device, its rows, a controller's stick options and its Reset.
 function bindingsBlock() {
