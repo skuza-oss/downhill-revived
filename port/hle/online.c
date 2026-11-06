@@ -1155,7 +1155,10 @@ static void finish_step(void)
 extern void func_00148560(void *, int);
 extern void func_00148860(void *);
 
-void hle_online_watch_resume(void) { on.watch_paused = on.watch_direction = 0; }
+/* Every frame of the race loop (func_0016C0C8): the pause menu, which runs outside it, is closed.
+   watch_direction keeps the pad's last Left / Right (pads_read_now reads it in the menu too), so a
+   direction held through RESUME is no new press. */
+void hle_online_watch_resume(void) { on.watch_paused = 0; }
 
 /* View 0's camera setting (distance, D_004225A0 +0x12220, and its blend +0x12230, for the next
    race too): func_0014CC38 changes it from the view's rider's own camera buttons, so watching a
