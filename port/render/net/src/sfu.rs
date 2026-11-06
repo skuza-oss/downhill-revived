@@ -68,6 +68,10 @@ pub struct Sfu {
     released: bool,
     drop_percent: u64,
     sent: u64,
+    /// DHD_NET_SFU_DROP_IN (test switch): this share in percent of the DTLS application records
+    /// received from the SFU over UDP is dropped before str0m, as a lossy link would.
+    drop_in_percent: u64,
+    records_in: u64,
     pending_events: VecDeque<(Instant, Vec<u8>)>,
     pending_state: HashMap<u8, (Instant, Vec<u8>)>,
     rates: HashMap<u64, SenderRate>,
@@ -213,8 +217,10 @@ impl Sfu {
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
         let direct = std::env::var("DHD_NET_SFU_UDP").map_or(true, |v| v.trim() != "0");
         if !direct { eprintln!("net: SFU: DHD_NET_SFU_UDP=0, direct UDP to the SFU is blocked (test switch)"); }
+        let drop_in_percent = std::env::var("DHD_NET_SFU_DROP_IN").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0u64).min(100);
+        if drop_in_percent > 0 { eprintln!("net: SFU: DHD_NET_SFU_DROP_IN={drop_in_percent}, that share of the SFU's records is dropped on arrival (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
-            connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
+            connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
             wake, direct, answered_at: None, turn_asked: false, relay: None, last_in_relayed: false, via_relay: false,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
@@ -407,6 +413,11 @@ impl Sfu {
         for (at, source, data) in datagrams {
             if !self.direct { continue; }
             self.stats.input(now.saturating_duration_since(at));
+            // 23: a DTLS application record (SCTP), not ICE or the handshake.
+            if self.drop_in_percent > 0 && data.first() == Some(&23) {
+                self.records_in += 1;
+                if (self.records_in * 37) % 100 < self.drop_in_percent { continue; }
+            }
             if let Ok(contents) = data.as_slice().try_into() {
                 // str0m's clock only moves forward: the input is stamped now, not at arrival.
                 let input = Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination: self.local, contents });

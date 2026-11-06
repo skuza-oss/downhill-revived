@@ -356,7 +356,9 @@ first, then reject each record older than the newest they hold for that rider be
 pad mirror. EVENT remains payload version 2. The SFU reads none of the gameplay payload.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
-EVENT is unaffected. `DHD_NET_SFU_UDP=0` drops every UDP datagram to and from the SFU (a network that
+EVENT is unaffected. `DHD_NET_SFU_DROP_IN=N` drops N percent of the DTLS records arriving from the
+SFU over UDP before the client's WebRTC stack, as a lossy link would (Cloudflare then retransmits).
+`DHD_NET_SFU_UDP=0` drops every UDP datagram to and from the SFU (a network that
 blocks UDP), so the TURN-over-TLS fallback must carry the race. `net:` reports per-sender p50/p95/p99 snapshot age and
 gaps longer than 100 ms, and STATE messages a second each way. Age is this PC's server clock minus
 the newest bundle's stamp, sampled every network tick, so it includes transit and time awaiting
