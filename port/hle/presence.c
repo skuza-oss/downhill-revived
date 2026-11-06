@@ -4,6 +4,7 @@
    (port/render/presence: it paces the updates and starts the elapsed time); the browser's does
    nothing with it. */
 #include "hle.h"
+#include "../include/fps.h"
 #include "../net/net.h"
 
 #include <stdio.h>
@@ -12,15 +13,15 @@
 #define EE32(a) (*(volatile int32_t *)(uintptr_t)(0x08000000u + (a)))
 #define EE_PTR(a) ((void *)(uintptr_t)(0x08000000u + (a)))
 
-/* The game's state (findings 040, 094): the shell's menu (9 the race screen: the load, the flight
-   over the track, the race and its results); the race phase (5 the flight, 1 the countdown, 2-4 the
-   race: the places are worked out from 2, the countdown has every rider 1st); the setup block
-   D_004B25A0 (+0x10C the mode, 10 the title's attract demo; +0x110 1 for the career's races; +0x2A0
-   the track); the loaded level's name; the riders D_002AF2C0 (the player's first, +0x798C its
-   place, 1 first) and their count. */
-enum { MENU = 0x29DED8, PHASE = 0x43F348, SETUP = 0x4B25A0, LEVEL_NAME = 0x4BD4DC, RIDERS = 0x2AF2C0,
+/* The game's state (findings 040, 094): in a race (port_in_race, fps.h: the race's loop runs, from
+   the flight over the track to the results, not the attract demo; not the shell's screen 9, which a
+   career continued from a save never shows, finding 159); the race phase (5 the flight, 1 the
+   countdown, 2-4 the race: the places are worked out from 2, the countdown has every rider 1st); the
+   setup block D_004B25A0 (+0x110 1 for the career's races; +0x2A0 the track); the loaded level's
+   name; the riders D_002AF2C0 (the player's first, +0x798C its place, 1 first) and their count. */
+enum { PHASE = 0x43F348, SETUP = 0x4B25A0, LEVEL_NAME = 0x4BD4DC, RIDERS = 0x2AF2C0,
        PLACE = RIDERS + 0x798C, RIDER_COUNT = RIDERS + 0x501A8 };
-enum { LOAD_MENU = 9, FLYBY_PHASE = 5, DEMO_MODE = 10, CHECK_FIELDS = 30 };
+enum { FLYBY_PHASE = 5, CHECK_FIELDS = 30 };
 
 const char *port_track_name(int index);  /* online_menu.c */
 
@@ -32,7 +33,7 @@ static void state(HostPresence *p)
     memset(p, 0, sizeof *p);
     if (host_service_movie_playing()) {
         p->kind = PRESENCE_MOVIE;
-    } else if (EE32(MENU) == LOAD_MENU && EE32(SETUP + 0x10C) != DEMO_MODE) {
+    } else if (port_in_race()) {
         p->kind = pads_online() || lobby.state == NET_RACING ? PRESENCE_ONLINE_RACE
                   : EE32(SETUP + 0x110) == 1 ? PRESENCE_CAREER : PRESENCE_RACE;
         const char *name = port_track_name(EE32(SETUP + 0x2A0));
