@@ -7,7 +7,7 @@ import {
   BAN_CACHE_MAX, BAN_CACHE_MS, BINARY_PER_WINDOW, FAILED_CACHE_MS, MESSAGE_MAX, OFF_MESSAGE, RATE_MESSAGE, SWITCH_CACHE_MS,
   TEXT_PER_WINDOW, TOO_FAST_MESSAGE, TOO_FAST_WARNING, findBan, ipHash, newTally, offMessage, onlineState, resetGuardCaches, tally,
 } from "../src/guard";
-import { FRAME_STATE } from "../src/protocol";
+import { FRAME_PING, FRAME_PONG } from "../src/protocol";
 import { Client, randomIp, startedRace } from "./helpers";
 
 /** The Worker with some variables changed (the test run's own are fixed). */
@@ -121,12 +121,16 @@ describe("kill switch", () => {
   // (A rejoin during a race is a session room's (finding 137); the lobby's rejoin above is the
   // same check at hello.)
   it("lets a race that is running go on", async () => {
-    const { clients } = await startedRace(2);
+    const { clients, code } = await startedRace(2);
     await setOnline(false);
-    clients[0].ws.send(new Uint8Array([FRAME_STATE, 0, 1, 2, 3]).buffer);
-    expect((await clients[1].binary())[0]).toBe(FRAME_STATE);
-    clients[1].ws.send(new Uint8Array([FRAME_STATE, 0, 4, 5, 6]).buffer);
-    expect((await clients[0].binary())[0]).toBe(FRAME_STATE);
+    // Race frames go over the SFU (finding 158); the room keeps answering the race's pings and
+    // keeps its race.
+    for (const c of clients) {
+      c.ws.send(new Uint8Array([FRAME_PING, 0, 7]).buffer);
+      expect([...(await c.binary())]).toEqual([FRAME_PONG, clients.indexOf(c), 7]);
+    }
+    const race = await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), (room: any) => room.state?.race?.startAt);
+    expect(race).toBeTypeOf("number");
   });
 });
 
@@ -269,8 +273,8 @@ describe("limits per connection source", () => {
 });
 
 describe("caps per member", () => {
-  it("caps binary at twice the worst a game sends, text at ten times", () => {
-    expect(BINARY_PER_WINDOW / 5).toBe(400); // a second: 10 riders at 20 snapshots, twice
+  it("caps binary and text at ten times what a game sends", () => {
+    expect(BINARY_PER_WINDOW / 5).toBe(20); // a second: the race's two pings, ten times
     expect(TEXT_PER_WINDOW / 5).toBe(20);
   });
 
@@ -313,27 +317,28 @@ describe("caps per member", () => {
     expect(host.closeCode).toBeNull();
   });
 
-  it("relays no more race frames than the cap and warns the sender", async () => {
+  it("answers no more binary frames than the cap and warns the sender", async () => {
     const { clients, code } = await startedRace(2);
     const [a, b] = clients;
-    // The test runtime relays about one frame each 2 ms, so 2000 would take 4 s: this room's cap is
-    // 50 a long window.
+    // A long window, so the test runtime's speed does not matter; this room's cap is 50.
     const cap = 50;
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), (room: any) => {
       room.env = { ...room.env, CAP_WINDOW_MS: "60000", CAP_BINARY: String(cap) };
     });
-    const frame = new Uint8Array([5, 0, 1, 2, 3]);
-    for (let i = 0; i < cap + 20; i++) a.ws.send(frame);
-    const warned = await a.next((f) => typeof f === "string" && JSON.parse(f).type === "error", 20_000);
-    expect(JSON.parse(warned as string).code).toBe("too_fast");
+    for (let i = 0; i < cap + 20; i++) a.ws.send(new Uint8Array([FRAME_PING, 0, i]).buffer);
     let got = 0;
+    let warned: unknown = null;
     try {
-      for (;;) {
-        await b.binary();
-        got++;
-      }
+      // Count every pong until the frames stop (the warning comes among them).
+      await a.next((f) => {
+        if (typeof f !== "string") got++;
+        else if (JSON.parse(f).type === "error") warned = JSON.parse(f).code;
+        return false;
+      }, 1_500);
     } catch {}
+    expect(warned).toBe("too_fast");
     expect(got).toBe(cap);
-
+    // A pong goes to its sender only: nothing on the socket reaches another member.
+    await expect(b.next((f) => typeof f !== "string", 300)).rejects.toThrow();
   });
 });

@@ -28,6 +28,12 @@ export default defineConfig(async () => {
             CAP_WINDOW_MS: "1000",
             IP_HASH_KEY: "test-ip-hash-key",
             GUARD_CACHE: "off",
+            // Never the real Realtime or TURN API from a test, even with a filled .dev.vars:
+            // tests that need them pass a fake fetch or stub it.
+            REALTIME_APP_ID: "",
+            REALTIME_APP_TOKEN: "",
+            TURN_KEY_ID: "",
+            TURN_KEY_API_TOKEN: "",
             TEST_MIGRATIONS: migrations,
           },
           d1Databases: ["MODERATION"],

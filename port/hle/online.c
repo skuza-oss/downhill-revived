@@ -15,7 +15,7 @@
      clock and every PC starts the countdown then, so the GOs land together (the frame clock
      slips by the wait, kernel_pace_slip).
    - In the race this PC's controller rides rider 0, from the grid place the host has for this
-     player. About 20 times a second it sends a snapshot of the riders it runs (its own; the host
+     player. About 30 times a second it sends a snapshot of the riders it runs (its own; the host
      also the AI riders) as STATE frames; the other humans, and on the other PCs the AI, are
      puppets in AI rider slots (each PC at its player's frame rate, 60-240: snapshots carry race
      time, and every count here is of race ticks, 1/60 s fields, or wall time, never of frames;
@@ -277,9 +277,9 @@ enum {
     EVENT_VERSION = 2, EVENT_HIT = 1, EVENT_LOADED = 2, EVENT_SETUP = 3, EVENT_START = 4, EVENT_GO = 5,
     EVENT_FINISH = 6, EVENT_RESULTS = 7, EVENT_PICKUP = 9  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
 };
-enum { SNAPSHOT_TICKS = 3 };  /* a snapshot every 3 race ticks: 20 a second at any frame rate */
+enum { SNAPSHOT_TICKS = 2 };  /* a snapshot every 2 race ticks: 30 a second at any frame rate */
 enum { NRIDERS = 10, START_LEAD_MS = 1500 };
-_Static_assert(2 + NRIDERS * 256 <= NET_FRAME_MAX, "all owned riders fit one STATE frame");
+_Static_assert(2 + 834 <= NET_FRAME_MAX, "one independent rider snapshot fits one STATE frame");
 #define RACE_CLOCK EE32(0x43EEC8)
 /* The race object D_0043EEC0 (func_0019F210): +8 the race clock, +0x1C finish times (race ticks)
    and +0x58 finished flags by rider slot, +0x62 finishes to apply on the next step. */
@@ -664,11 +664,9 @@ static void receive_frames(void)
     while ((n = host_service_net_receive_frame(GADDR(frame), sizeof frame)) > 0) {
         int sender = frame[1];
         const uint8_t *e = frame + 2;
-        if (frame[0] == NET_FRAME_STATE) {  /* the sender's riders: [size][snapshot]... */
-            for (const uint8_t *end = frame + n; e < end && e + 1 + e[0] <= end; e += 1 + e[0]) {
-                hle_puppet_receive(sender, e + 1, e[0]);
-                on.received++;
-            }
+        if (frame[0] == NET_FRAME_STATE) {
+            hle_puppet_receive(sender, e, n - 2);
+            on.received++;
             continue;
         }
         if (frame[0] != NET_FRAME_EVENT || n < 4 || e[0] != EVENT_VERSION || sender >= NET_MAX_SLOTS) continue;
@@ -1362,21 +1360,15 @@ static void state_sync(void)
     }
     if (!race_running() || clock < on.last_sent + SNAPSHOT_TICKS && clock >= on.last_sent) return;
     on.last_sent = clock - clock % SNAPSHOT_TICKS;
-    /* All our riders in one frame (the host's AI riders too): one message to the server a
-       snapshot, not one a rider. Each is [size][snapshot]; a snapshot stays within 255 bytes. */
-    int at = 0, riders = 0, ai = 0;
+    /* Each message is an independent rider snapshot, below the SFU message/MTU budget. */
     for (int slot = 0; slot < hle_online_race_riders(); slot++) {
-        int room = (int)sizeof payload - at - 1;
-        if ((n = hle_puppet_pack(slot, payload + at + 1, room < 255 ? room : 255)) > 0) {
-            payload[at] = (uint8_t)n;
-            if (slot == 0) record(payload + at + 1, n);
-            at += 1 + n, riders++;
-            if (slot && hle_puppet_owned(slot)) ai++;
+        if ((n = hle_puppet_pack(slot, payload, sizeof payload)) > 0) {
+            if (slot == 0) record(payload, n);
+            if (host_service_net_send_frame(NET_FRAME_STATE, GADDR(payload), n)) {
+                on.sent++;
+                if (slot && hle_puppet_owned(slot)) on.ai_sent++;
+            }
         }
-    }
-    if (at && host_service_net_send_frame(NET_FRAME_STATE, GADDR(payload), at)) {
-        on.sent += riders;
-        on.ai_sent += ai;
     }
     while ((n = hle_puppet_take_event(payload, sizeof payload)) > 0) send_event(payload, n);
     static double last_title;

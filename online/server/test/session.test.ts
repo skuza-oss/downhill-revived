@@ -32,11 +32,12 @@ async function start(h:Client,cs:Client[],code:string) {
   await Promise.all(cs.map(c=>c.json("start")));
 }
 describe("session rooms",()=>{
-  it("relays only between current entrants, excluding waiting and returned players",async()=>{
+  it("never relays race data over the control socket",async()=>{
     const {h,cs,code}=await setup(); await start(h,cs,code);
     const late=await Client.join(code,"Late");
     cs[1].ws.send(new Uint8Array([5,0,99]).buffer);
-    expect([...(await h.binary())]).toEqual([5,1,99]);
+    cs[1].sendJson({type:"ping",t:1}); await cs[1].json("pong");
+    await expect(h.next(f=>typeof f!=="string",50)).rejects.toThrow("timed out");
     late.sendJson({type:"ping",t:1}); await late.json("pong"); late.drain();
     await expect(late.next(f=>typeof f!=="string",50)).rejects.toThrow("timed out");
     h.sendJson({type:"back"}); await snap(h,r=>!r.members[0].inRace);

@@ -23,3 +23,8 @@ tungstenite = { version = "=0.30.0", default-features = false, features = ["hand
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = { version = "=1.0.11", default-features = false }
 httparse = { version = "=1.10.1", default-features = false, features = ["std"] }
+# The TURN client's message integrity (HMAC-SHA1) and transaction ids: rustls' own ring.
+ring = { version = "=0.17.14", default-features = false }
+
+str0m = { version = "=0.25.0", default-features = false, features = ["rust-crypto"] }
+serde_json = "=1.0.154"

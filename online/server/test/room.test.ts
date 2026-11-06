@@ -10,7 +10,7 @@ describe("lobby", () => {
     const bo = await Client.connect(`/v1/rooms/${code.toLowerCase()}`);
     bo.hello("Bo");
     const welcome = await bo.json("welcome");
-    expect(welcome).toMatchObject({ code, host: false, protocol: 2 });
+    expect(welcome).toMatchObject({ code, host: false, protocol: 3 });
     const room = await host.next((f) => typeof f === "string" && JSON.parse(f).members?.length === 2);
     const r = JSON.parse(room as string);
     expect(r.members.map((m: any) => m.name)).toEqual(["Ann", "Bo"]);
@@ -66,7 +66,7 @@ describe("lobby", () => {
   it("refuses clients older than MIN_VERSION with a readable reason, hosts and joiners alike", async () => {
     // A 0.1.0 hello: no clientVersion, version is the exe hash. MIN_VERSION is 0.2.0 here.
     const old = await Client.connect("/v1/rooms/new");
-    old.sendJson({ type: "hello", protocol: 2, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
+    old.sendJson({ type: "hello", protocol: 3, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
     const err = await old.json("error");
     expect(err).toMatchObject({
       code: "client_outdated",
@@ -93,7 +93,7 @@ describe("lobby", () => {
 
   it("names the minimum version in health and the lobby list", async () => {
     const health = await (await exports.default.fetch("https://dhd.test/v1/health")).json<any>();
-    expect(health).toMatchObject({ ok: true, protocol: 2, minVersion: "0.2.0" });
+    expect(health).toMatchObject({ ok: true, protocol: 3, minVersion: "0.2.0" });
     const list = await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>();
     expect(list.minVersion).toBe("0.2.0");
   });
@@ -282,51 +282,20 @@ describe("race relay", () => {
     expect([...(await clients[2].binary())]).toEqual([4, 2, 9, 9]);
   });
 
-  it("relays STATE and EVENT frames to the other racers with the sender's slot", async () => {
-    const { clients } = await startedRace(3);
-    const state = new Uint8Array(200).fill(7);
-    state[0] = 5;
-    clients[1].ws.send(state.buffer);
-    clients[2].ws.send(new Uint8Array([6, 0, 1, 2, 3]).buffer);
-    const f = await clients[0].binary();
-    expect(f.length).toBe(200);
-    expect([f[0], f[1], f[2]]).toEqual([5, 1, 7]);
-    expect([...(await clients[0].binary())]).toEqual([6, 2, 1, 2, 3]);
-    expect([...(await clients[1].binary())]).toEqual([6, 2, 1, 2, 3]);
-    expect((await clients[2].binary())[0]).toBe(5);
-  });
-
-  it("drops short frames and the old INPUT and HASH types", async () => {
+  it("drops every WebSocket race frame; only PING/PONG remains", async () => {
     const { clients } = await startedRace(2);
-    clients[0].ws.send(new Uint8Array([5]).buffer);
-    clients[0].ws.send(new Uint8Array([1, 0, 0, 0, 0, 0, 1, 1, 2, 3, 4, 5, 6]).buffer);
-    clients[0].ws.send(new Uint8Array([2, 0, 59, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]).buffer);
-    clients[0].ws.send(new Uint8Array([5, 0, 7]).buffer);
-    expect([...(await clients[1].binary())]).toEqual([5, 0, 7]);
+    for (const type of [1, 2, 5, 6]) clients[0].ws.send(new Uint8Array([type, 0, 7]).buffer);
+    // A same-socket ping proves all earlier frames were processed without forwarding.
+    clients[0].ws.send(new Uint8Array([3, 0, 42]).buffer);
+    expect([...(await clients[0].binary())]).toEqual([4, 0, 42]);
+    await expect(clients[1].next(f => typeof f !== "string", 100)).rejects.toThrow("timed out");
   });
 
-  it("announces a dropped racer", async () => {
-    const { clients } = await startedRace(3);
-    clients[1].ws.send(new Uint8Array([5, 0, 40]).buffer);
-    await clients[0].binary();
-    clients[1].ws.close(1000);
-    const left = await clients[0].json("left");
-    expect(left).toMatchObject({ slot: 1, reason: "disconnect" });
-    expect(left.fromField).toBeUndefined();
-    // The others keep relaying to each other.
-    clients[2].ws.send(new Uint8Array([5, 0, 44]).buffer);
-    expect((await clients[0].binary())[1]).toBe(2);
-  });
-
-  it("keeps relaying after the room is evicted with hibernated sockets", async () => {
+  it("announces departure after hibernation", async () => {
     const { clients, code } = await startedRace(3);
     await evictDurableObject(env.ROOM.get(env.ROOM.idFromName(code)));
-    clients[1].ws.send(new Uint8Array([5, 0, 10]).buffer);
-    for (const i of [0, 2]) expect((await clients[i].binary())[1]).toBe(1);
     clients[2].ws.close(1000);
     expect(await clients[0].json("left")).toMatchObject({ slot: 2 });
-    clients[1].ws.close(1000);
-    expect(await clients[0].json("left")).toMatchObject({ slot: 1 });
   });
 
   it("hands a kicked racer to AI", async () => {
@@ -349,7 +318,7 @@ describe("race relay", () => {
 
 describe("worker routes", () => {
   it("health and 404", async () => {
-    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 2, minVersion: "0.2.0", online: true });
+    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 3, minVersion: "0.2.0", online: true });
     expect((await exports.default.fetch("https://dhd.test/nope")).status).toBe(404);
     expect((await exports.default.fetch("https://dhd.test/v1/rooms/new")).status).toBe(426);
   });

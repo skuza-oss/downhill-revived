@@ -195,20 +195,19 @@ export async function overLimit(env: GuardEnv, hash: string, create: boolean): P
  * What one socket may send, counted over windows of CAP_WINDOW_MS (a window, not a second, so a
  * hitch's burst of queued frames doesn't count as a flood).
  *
- * Binary: the game sends one STATE frame a snapshot, about 20 a second at any frame rate, with all
- * the riders it runs in it (port/hle/online.c SNAPSHOT_TICKS; the host's AI riders too), plus
- * EVENT frames (hits, pickups, the setup, the finish: a few a second in a crowd) and two binary
- * pings a second (port/net/client.c PING_RACE_MS). Even one STATE frame per rider, 10 riders at
- * 20 a second, would be 200 a second: the cap is twice that, 400 a second, 2000 a window. Each
- * frame goes out to up to 9 others, so this is also what one member can make the room send.
+ * Binary: since protocol 3 (finding 158) race frames travel over the Realtime SFU, not this
+ * socket; what is left is the game's binary PING, two a second in a race (port/net/client.c
+ * PING_RACE_MS), each answered with one PONG to the sender only. 20 a second, 100 a window, is ten
+ * times that; nothing a member sends here is copied to other members any more.
  *
  * Text: in the lobby the game sends a ping a second and a pong every 2 s (PING_LOBBY_MS, the
  * server's PING_INTERVAL_MS), plus a message per click (pick, ready, settings; the host's room
- * setup sends three at once). 20 a second, 100 a window, is ten times what a player clicking fast
- * sends.
+ * setup sends three at once); a race adds its Realtime setup, a few messages per race (sfu_offer,
+ * sfu_connected, sfu_ready, turn; docs/online-protocol.md). 20 a second, 100 a window, is ten
+ * times what a player clicking fast sends.
  */
 export const CAP_WINDOW_MS = 5_000;
-export const BINARY_PER_WINDOW = 2_000;
+export const BINARY_PER_WINDOW = 100;
 export const TEXT_PER_WINDOW = 100;
 
 /** The warning (a non-fatal error) the first time a socket goes over a cap, and the refusal the
