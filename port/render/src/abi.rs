@@ -358,6 +358,9 @@ pub type dhdr_surface_destroy_fn = unsafe extern "C" fn(s: *mut DhdrSurface);
 pub type dhdr_surface_usage_fn = unsafe extern "C" fn(s: *const DhdrSurface) -> u32;
 pub type dhdr_present_exact_fn = unsafe extern "C" fn(s: *mut DhdrSurface, x: *mut DhdrExact, pixels: *const u32,
                                                       w: u32, h: u32, window_w: u32, window_h: u32) -> i32;
+pub type dhdr_surface_counter_fn = unsafe extern "C" fn(s: *mut DhdrSurface, enabled: i32, ms: i32, riders: i32, seconds: f64);
+pub type dhdr_surface_touch_fn =
+    unsafe extern "C" fn(s: *mut DhdrSurface, items: *const f32, count: u32, width_mm: f32, height_mm: f32);
 pub type dhdr_surface_present_fn = unsafe extern "C" fn(s: *mut DhdrSurface);
 
 pub type dhdr_native_create_fn = unsafe extern "C" fn(flags: u32) -> *mut DhdrNative;

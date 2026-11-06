@@ -18,9 +18,12 @@ The counter measures successfully acquired pictures passed to surface presentati
 including interpolation, with a monotonic host clock and half-second samples.
 This counts presentation submissions; a compositor may discard a submitted picture.
 
-The native glue (`gpu_rust.c`, `gpu_rust_native.inc`) passes the switch and the ping
-(`net_ping_ms`: a room or race with a known ping, else -1; a few fields, not a copy of the
-lobby for every picture). The switch is read at the first picture and again when PC SETTINGS
+The native glue (`gpu_rust.c`, `gpu_rust_native.inc`) passes the switch and the online line
+(`net_ping_ms`: a room with a known ping, else -1; a few fields, not a copy of the lobby for
+every picture). In a race the line is "RIDERS N MS" instead (finding 169, `net_riders_ms`): the
+slowest other player's median snapshot age on arrival, what the puppets are predicted across.
+The ping is the round trip to the room's server, which carries no race data since protocol 3
+(finding 158), so it said nothing about the race; dhd.log's `net:` lines keep both. The switch is read at the first picture and again when PC SETTINGS
 changes it (`gs_present_options_apply`, on the game thread that sets it; the browser on
 `web_env_changed`), not for every picture: getenv scans the environment (finding 090 SP14).
 The bitmap is uploaded only when its numbers change (twice a second at most). The same

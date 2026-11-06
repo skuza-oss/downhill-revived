@@ -195,6 +195,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 163 | [REVIVED SETTINGS: tabs, a clearer Controls page, online name size](163-revived-settings.md) | current |  |
 | 165 | [no port patch in code the port does not compile](165-dead-patch-guard.md) | current |  |
 | 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
+| 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | current |  |
 | 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | in progress |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |

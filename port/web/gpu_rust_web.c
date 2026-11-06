@@ -51,7 +51,7 @@ static void counter_present(DhdrSurface *surface)
         counter_on = v && atoi(v) != 0;
     }
     clock_gettime(CLOCK_MONOTONIC, &now);
-    dhdr_surface_counter(surface, counter_on, -1, now.tv_sec + now.tv_nsec * 1e-9);
+    dhdr_surface_counter(surface, counter_on, -1, 0, now.tv_sec + now.tv_nsec * 1e-9);
     dhdr_surface_present(surface);
 }
 

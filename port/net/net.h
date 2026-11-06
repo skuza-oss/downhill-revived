@@ -3,9 +3,9 @@
 
    Races use state sync (findings 041, 044): every PC runs its own one-player race and sends
    snapshots of the riders it owns (STATE frames) and hits it deals (EVENT frames) with
-   net_send_frame, through a relay over a WebSocket; the others' riders are puppets
-   (port/hle/online.c, port/hle/puppet.c). A background thread keeps the connection (lobby JSON,
-   binary race frames, pings). */
+   net_send_frame, through the room's SFU association (port/render/net/src/sfu.rs); the others'
+   riders are puppets (port/hle/online.c, port/hle/puppet.c). Background threads keep the room's
+   WebSocket (lobby JSON, binary pings) and the SFU association. */
 #ifndef NET_H
 #define NET_H
 
@@ -129,17 +129,21 @@ double net_seconds(void);                          /* the clock start_at uses */
    same moment on every PC to a few ms, for starting the race together. */
 double net_server_ms(void);
 int net_ping_ms(void);                             /* in a room, else -1 */
+/* In a race: how old the other riders' snapshots are when they arrive (the slowest player's
+   median, ms; what the puppets are predicted across), else -1 (finding 169). */
+int net_riders_ms(void);
 
 /* ---- the race ---- */
 
 int net_racing(void);
 int net_local_slot(void);
 
-/* Binary frames the relay forwards as they are to every other racer: a snapshot of riders this
-   PC owns, an event it decided for another PC's rider. A frame is type, slot (the server sets
-   it), payload. */
-/* NET_FRAME_MAX: a STATE frame carries all of a player's riders (up to ten snapshots of at most
-   255 bytes); the server's MAX_BINARY_BYTES is the same. */
+/* Race frames, carried by the Cloudflare Realtime SFU to every other racer (finding 158): a STATE
+   bundle of riders this PC owns, an event it decided for another PC's rider. A frame is type, slot
+   (the receiver sets it from the channel), payload. */
+/* NET_FRAME_MAX: the largest frame accepted. A STATE frame is one bundle of at most
+   STATE_BUNDLE_MAX bytes (port/hle/state_bundle.h: as many riders as fit one datagram, finding
+   169); a PC with more riders sends several. The server's MAX_BINARY_BYTES is the same. */
 enum { NET_FRAME_STATE = 5, NET_FRAME_EVENT = 6, NET_FRAME_MAX = 3072, NET_RELAY_QUEUE = 128 };
 /* The race's pings (client.c): type, slot, the send time; the server answers PONG with the rest
    as it was. */

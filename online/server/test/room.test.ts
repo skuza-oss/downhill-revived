@@ -2,6 +2,7 @@ import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { Client, ISO, startedRace } from "./helpers";
+import { PROTOCOL } from "../src/protocol";
 
 describe("lobby", () => {
   it("creates a room with a join code and lets others join", async () => {
@@ -10,7 +11,7 @@ describe("lobby", () => {
     const bo = await Client.connect(`/v1/rooms/${code.toLowerCase()}`);
     bo.hello("Bo");
     const welcome = await bo.json("welcome");
-    expect(welcome).toMatchObject({ code, host: false, protocol: 3 });
+    expect(welcome).toMatchObject({ code, host: false, protocol: PROTOCOL });
     const room = await host.next((f) => typeof f === "string" && JSON.parse(f).members?.length === 2);
     const r = JSON.parse(room as string);
     expect(r.members.map((m: any) => m.name)).toEqual(["Ann", "Bo"]);
@@ -99,7 +100,7 @@ describe("lobby", () => {
 
   it("names the minimum version in health and the lobby list", async () => {
     const health = await (await exports.default.fetch("https://dhd.test/v1/health")).json<any>();
-    expect(health).toMatchObject({ ok: true, protocol: 3, minVersion: "0.2.0" });
+    expect(health).toMatchObject({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0" });
     const list = await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>();
     expect(list.minVersion).toBe("0.2.0");
   });
@@ -282,10 +283,17 @@ describe("public lobby list", () => {
 });
 
 describe("race relay", () => {
-  it("answers a race ping to the sender only, with its slot", async () => {
+  it("answers a race ping to the sender only, with its slot and the server's clock", async () => {
     const { clients } = await startedRace(3);
+    const before = Date.now();
     clients[2].ws.send(new Uint8Array([3, 0, 9, 9]).buffer);
-    expect([...(await clients[2].binary())]).toEqual([4, 2, 9, 9]);
+    const pong = await clients[2].binary();
+    expect([...pong.slice(0, 4)]).toEqual([4, 2, 9, 9]);
+    // protocol 4: the server's time (f64 ms) after the ping's bytes (finding 169)
+    expect(pong.length).toBe(12);
+    const serverTime = new DataView(pong.buffer, pong.byteOffset).getFloat64(4, true);
+    expect(serverTime).toBeGreaterThanOrEqual(before);
+    expect(serverTime).toBeLessThanOrEqual(Date.now());
   });
 
   it("drops every WebSocket race frame; only PING/PONG remains", async () => {
@@ -293,7 +301,7 @@ describe("race relay", () => {
     for (const type of [1, 2, 5, 6]) clients[0].ws.send(new Uint8Array([type, 0, 7]).buffer);
     // A same-socket ping proves all earlier frames were processed without forwarding.
     clients[0].ws.send(new Uint8Array([3, 0, 42]).buffer);
-    expect([...(await clients[0].binary())]).toEqual([4, 0, 42]);
+    expect([...(await clients[0].binary()).slice(0, 3)]).toEqual([4, 0, 42]);
     await expect(clients[1].next(f => typeof f !== "string", 100)).rejects.toThrow("timed out");
   });
 
@@ -324,7 +332,7 @@ describe("race relay", () => {
 
 describe("worker routes", () => {
   it("health and 404", async () => {
-    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 3, minVersion: "0.2.0", online: true });
+    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0", online: true });
     expect((await exports.default.fetch("https://dhd.test/nope")).status).toBe(404);
     expect((await exports.default.fetch("https://dhd.test/v1/rooms/new")).status).toBe(426);
   });

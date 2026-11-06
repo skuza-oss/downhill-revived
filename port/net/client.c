@@ -13,7 +13,11 @@
 #include "../host/host_api.h"
 #include <SDL3/SDL_timer.h>
 
-enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000 };
+enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000, CLOCK_SLEW_MS = 2 };
+/* clock_sample: the round-trip floor rises 0.2 ms a second (a lasting route change is learnt
+   in minutes), and a pong within CLOCK_MARGIN_MS + 10% of it measures the clock */
+#define CLOCK_FLOOR_RISE 0.0002
+#define CLOCK_MARGIN_MS 3.0
 
 double net_now_ms(void) { return (double)SDL_GetTicksNS() / 1e6; }
 
@@ -70,6 +74,7 @@ void client_init(NetClient *c, const char *name, const char *version, const char
     copy(c->iso, sizeof c->iso, iso);
     c->lobby.seed = -1;
     c->lobby.ping_ms = -1;
+    c->rtt_floor = -1;
 }
 
 void client_set_install_id(NetClient *c, const char *id)
@@ -257,7 +262,7 @@ static void read_start(NetClient *c, const char *t)
         l->start_at = net_now_ms() / 1000.0;
     c->relayed_head = c->relayed_count = 0;
     memset(c->snapshot, 0, sizeof c->snapshot);
-    memset(c->sender_go, 0, sizeof c->sender_go);
+    c->states_sent = 0;
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -292,6 +297,52 @@ static void add_rtt(NetClient *c, double rtt)
    the last line and every other player's as the server measures them. Nothing per frame. The lines
    are made with the lock held and printed after it is released (the log is a pipe). */
 
+/* Whether a pong's round trip may measure the server clock (NTP's rule): only one near the quickest
+   recent round trip. A slow one is usually slow one way (a busy uplink, a queue), and half its
+   excess lands in the offset: with the median as the test, a Mac whose round trips stayed at
+   150-240 ms (66-76 usual) moved its clock ~45 ms and drew another rider 37-78 ms ahead of where
+   it was for a whole race (finding 169). Between trusted pongs the offset keeps its last value. */
+static int clock_sample(NetClient *c, double rtt, double now)
+{
+    if (!(rtt >= 0)) return 0;
+    if (c->rtt_floor < 0) c->rtt_floor = rtt;
+    else c->rtt_floor = fmin(rtt, c->rtt_floor + (now - c->rtt_floor_at) * CLOCK_FLOOR_RISE);
+    c->rtt_floor_at = now;
+    return rtt <= c->rtt_floor * 1.1 + CLOCK_MARGIN_MS;
+}
+
+/* The median age of a sender's last NET_ARRIVALS snapshots on arrival (ms), -1 none. */
+static double arrival_median(const NetClient *c, int slot)
+{
+    float sorted[NET_ARRIVALS];
+    unsigned k = c->snapshot[slot].arrivals < NET_ARRIVALS ? c->snapshot[slot].arrivals : NET_ARRIVALS;
+    if (!k) return -1;
+    memcpy(sorted, c->snapshot[slot].arrival, k * sizeof sorted[0]);
+    for (unsigned i = 1; i < k; i++)
+        for (unsigned j = i; j > 0 && sorted[j] < sorted[j - 1]; j--) {
+            float x = sorted[j];
+            sorted[j] = sorted[j - 1], sorted[j - 1] = x;
+        }
+    return k % 2 ? sorted[k / 2] : (sorted[k / 2 - 1] + sorted[k / 2]) / 2;
+}
+
+/* The FPS & Ping counter's race line (finding 169): the slowest other player's snapshot delay (the
+   median age of their snapshots on arrival over the last NET_ARRIVALS, among those heard from in
+   the last 2 s), in ms; -1 when not racing or none. */
+int client_riders_ms(NetClient *c)
+{
+    double worst = -1, now = net_now_ms();
+    SDL_LockMutex(c->lock);
+    if (c->racing && c->connected)
+        for (int slot = 0; slot < NET_MAX_SLOTS; slot++)
+            if (slot != c->lobby.local_slot && c->snapshot[slot].arrivals && now - c->snapshot[slot].arrived < 2000) {
+                double m = arrival_median(c, slot);
+                if (m > worst) worst = m;
+            }
+    SDL_UnlockMutex(c->lock);
+    return worst < 0 ? -1 : (int)(worst + 0.5);
+}
+
 /* "last 30 s: ping 34 ms median, 51 worst (30 pings); players: ANNA (host, PL) 36 ms", and a new
    window from now. */
 static void window_stats(NetClient *c, char *out, size_t cap)
@@ -325,7 +376,12 @@ static void window_stats(NetClient *c, char *out, size_t cap)
         if (n >= (int)cap) n = (int)cap - 1;
     }
     if (!others && n < (int)cap - 16) n += snprintf(out + n, cap - n, "; no other players");
-    for (int slot = 0; slot < NET_MAX_SLOTS && n < (int)cap - 100; slot++) {
+    double seconds = (now - c->window_start) / 1000;
+    if (c->states_sent && seconds > 0 && n < (int)cap - 48) {
+        n += snprintf(out + n, cap - n, "; snapshot messages sent %.1f/s", c->states_sent / seconds);
+        c->states_sent = 0;
+    }
+    for (int slot = 0; slot < NET_MAX_SLOTS && n < (int)cap - 140; slot++) {
         unsigned count = c->snapshot[slot].samples;
         if (!count) continue;
         unsigned sum = 0, q[3] = {0}, pc[3] = {50, 95, 99};
@@ -333,11 +389,12 @@ static void window_stats(NetClient *c, char *out, size_t cap)
             sum += c->snapshot[slot].age[ms];
             while (k < 3 && sum >= (count * pc[k] + 99) / 100) q[k++] = ms;
         }
-        n += snprintf(out + n, cap - n, "; slot %d snapshot age p50/p95/p99 %u/%u/%u ms (1001=overflow), gaps>100ms %u",
-                      slot, q[0], q[1], q[2], c->snapshot[slot].gaps);
+        n += snprintf(out + n, cap - n, "; slot %d snapshot age p50/p95/p99 %u/%u/%u ms (1001=overflow), on arrival %.0f ms, "
+                      "gaps>100ms %u, messages %.1f/s", slot, q[0], q[1], q[2], arrival_median(c, slot),
+                      c->snapshot[slot].gaps, seconds > 0 ? c->snapshot[slot].messages / seconds : 0.0);
         if (n >= (int)cap) n = (int)cap - 1;
         memset(c->snapshot[slot].age, 0, sizeof c->snapshot[slot].age);
-        c->snapshot[slot].samples = c->snapshot[slot].gaps = 0;
+        c->snapshot[slot].samples = c->snapshot[slot].gaps = c->snapshot[slot].messages = 0;
     }
     c->window_n = c->window_count = 0;
     c->window_worst = 0;
@@ -367,8 +424,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
     else if (!strcmp(type, "pong") && json_number(text, "t", &t)) {
         double now = net_now_ms(), rtt = now - t;
         add_rtt(c, rtt);
-        if (json_number(text, "serverTime", &server_time) &&
-            (!c->have_offset || rtt <= c->lobby.ping_ms))
+        if (clock_sample(c, rtt, now) && json_number(text, "serverTime", &server_time))
             c->clock_offset = server_time - (t + rtt / 2), c->have_offset = c->clock_known = 1;
         changed(c);
     } else if (!strcmp(type, "welcome")) {
@@ -480,30 +536,44 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
     SDL_LockMutex(c->lock);
     c->last_rx = net_now_ms();
     if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG) {
-        double sent;
+        double sent, server_time, now = net_now_ms(), rtt;
         memcpy(&sent, data + 2, sizeof sent);
-        add_rtt(c, net_now_ms() - sent);
+        rtt = now - sent;
+        add_rtt(c, rtt);
+        /* Protocol 4: the server's clock after our bytes (finding 169). The race's snapshots are
+           stamped on it, so the offset follows it during the race too, from the quick round
+           trips (clock_sample), but by at most CLOCK_SLEW_MS a pong: a sudden step would move
+           every puppet of this PC on the other screens. */
+        if (n >= 2 + 2 * sizeof(double) && clock_sample(c, rtt, now)) {
+            memcpy(&server_time, data + n - sizeof server_time, sizeof server_time);
+            if (isfinite(server_time) && server_time > 0) {
+                double offset = server_time - (sent + rtt / 2), step = offset - c->clock_offset;
+                if (c->have_offset) step = step > CLOCK_SLEW_MS ? CLOCK_SLEW_MS : step < -CLOCK_SLEW_MS ? -CLOCK_SLEW_MS : step;
+                c->clock_offset += step, c->have_offset = c->clock_known = 1;
+            }
+        }
     } else if (c->racing && n >= 2 && n <= NET_FRAME_MAX && (data[0] == NET_FRAME_STATE || data[0] == NET_FRAME_EVENT)) {
         if (data[1] < NET_MAX_SLOTS) {
             int slot = data[1];
-            if (data[0] == NET_FRAME_EVENT && n >= 12 && data[2] == 2 && data[3] == 5) {
-                double go;
-                memcpy(&go, data + 4, sizeof go);  /* existing EVENT_GO, server ms */
-                if (isfinite(go) && go > 0) c->sender_go[slot] = go;
-            }
             if (data[0] == NET_FRAME_STATE) {
-                /* v4 standalone and v3's first batched rider (the WebSocket baseline). */
-                int offset = n >= 8 && (data[2] == 4 || data[2] == 5) ? 4 : n >= 9 && data[3] == 3 ? 5 : 0;
-                if (offset) {
-                    uint32_t ms;
-                    memcpy(&ms, data + offset, sizeof ms);
+                c->snapshot[slot].messages++;
+                /* A bundle (port/hle/state_bundle.h): version 6, index, riders, the sender's server
+                   clock moment its snapshots show. */
+                if (n >= 13 && data[2] == 6) {
+                    double epoch;
+                    memcpy(&epoch, data + 5, sizeof epoch);
                     double now = net_now_ms();
-                    double epoch = c->sender_go[slot] > 0 ? c->sender_go[slot] + ms : 0;
+                    if (!isfinite(epoch) || epoch <= 0) epoch = 0;
                     if (!c->snapshot[slot].arrived || !epoch || epoch > c->snapshot[slot].epoch) {
                         if (c->snapshot[slot].arrived && now - c->snapshot[slot].arrived > 100.5)
                             c->snapshot[slot].gaps++;
                         c->snapshot[slot].arrived = now;
                         c->snapshot[slot].epoch = epoch;
+                        if (epoch) {  /* how old it is on arrival: the riders' delay (finding 169) */
+                            double age = now + c->clock_offset - epoch;
+                            c->snapshot[slot].arrival[c->snapshot[slot].arrivals++ % NET_ARRIVALS] =
+                                (float)(age < 0 ? 0 : age > 9999 ? 9999 : age);
+                        }
                     }
                 }
             }
@@ -794,6 +864,7 @@ int client_send_frame(NetClient *c, int type, const void *payload, size_t n)
     SDL_LockMutex(c->lock);
     if (c->racing && c->connected) {
         send_binary(c, frame, n + 2);
+        c->states_sent += type == NET_FRAME_STATE;
         sent = 1;
     }
     SDL_UnlockMutex(c->lock);

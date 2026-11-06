@@ -7,7 +7,10 @@ host's results (or --seconds). The summary has the start (GO on the server's clo
 each puppet, hits, finishes and results.
 
     python port/tools/online_race.py [--seconds 420] [--out DIR] [--capture g+600,g+1200]
-                                     [--bots N --replay FILE] [--kill-guest-at SECONDS]
+                                     [--bots N --replay FILE] [--kill-guest-at SECONDS] [--lag]
+
+--lag: both games trace their puppets and record their own rider, and the summary ends with how
+far behind real time and how far from the real rider each shows the other (puppet_lag.py).
 
 Needs DHD_ISO, DHD_NET_SERVER (the official wss://dhd.skuza.app or
 your own; never write any other deployed address into a tracked file) and the
@@ -133,6 +136,7 @@ def main():
     ap.add_argument('--stop-if', default=os.path.join(ROOT, 'build', 'port', 'BENCH.lock'),
                     help='stop everything as soon as this file exists (the benchmark lock)')
     ap.add_argument('--minimized', action='store_true', help='both games start minimised (the PC stays usable)')
+    ap.add_argument('--lag', action='store_true', help='measure how far behind each puppet is drawn (puppet_lag.py)')
     ap.add_argument('--a', action='append', default=[], help='extra NAME=VALUE for the host game')
     ap.add_argument('--b', action='append', default=[], help='extra NAME=VALUE for the joining game')
     a = ap.parse_args()
@@ -162,6 +166,9 @@ def main():
         dirs.append(d)
         return d
 
+    if a.lag:
+        for side in (a.a, a.b):
+            side[:0] = ['DHD_PUPPET_TRACE=puppet.txt', 'DHD_PUPPET_RECORD=own.bin']
     players = 2 + a.bots
     owned.enter_context(game_lock.held('online_race'))  # untimed: one place for its two games
     with owned:
@@ -213,6 +220,10 @@ def main():
         print('  screenshots:', ' '.join(sorted(f.name for f in d.glob('shot-*.bmp'))))
     for k in range(a.bots):
         print(f'--- bot{k}:', (out / f'bot{k}' / 'stdout.log').read_text(errors='replace')[-600:])
+    if a.lag and not a.kill_guest_at:
+        import puppet_lag
+        print('--- puppets (puppet_lag.py):')
+        puppet_lag.report(out)
     return 0 if ok else 1
 
 

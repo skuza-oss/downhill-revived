@@ -8,7 +8,7 @@
 
 #include "net.h"
 
-enum { NET_PROTOCOL = 3, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
+enum { NET_PROTOCOL = 4, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000, NET_ARRIVALS = 64 };
 
 typedef struct {
     void *ctx;
@@ -35,6 +35,9 @@ typedef struct {
     /* pings and the server clock */
     double next_ping, last_rx, clock_offset;  /* offset: server ms - local ms */
     int have_offset;   /* the offset is from a pong (the best measure) */
+    /* the quickest recent round trip (ms, -1 none), rising slowly with time: only pongs near it
+       measure the clock (client.c clock_sample) */
+    double rtt_floor, rtt_floor_at;
     int clock_known;   /* the offset is set at all: a pong, a welcome or the public list's "now" */
     float rtt[5];
     int nrtt;
@@ -47,10 +50,16 @@ typedef struct {
     float window_worst;
     double window_start, next_log, joined_at;  /* joined_at 0: not in a room (nothing to log) */
     char logged_colo[8];  /* the room location the log has named */
-    /* Estimated age on the server clock: sender's existing GO stamp + snapshot race ms.
-       Histograms are sampled every network tick; 1001 is the overflow bin. */
-    double sender_go[NET_MAX_SLOTS];
-    struct { double arrived, epoch; unsigned age[1002], samples, gaps; } snapshot[NET_MAX_SLOTS];
+    /* Each sender's newest snapshot age on the server clock (now minus the bundle's stamp, the
+       moment its snapshots show), sampled every network tick; 1001 is the overflow
+       bin. Messages: STATE messages received from that sender; states_sent: ours. */
+    struct {
+        double arrived, epoch;
+        unsigned age[1002], samples, gaps, messages;
+        float arrival[NET_ARRIVALS];  /* the last snapshots' ages on arrival (ms), a ring */
+        unsigned arrivals;
+    } snapshot[NET_MAX_SLOTS];
+    unsigned states_sent;
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];
@@ -91,6 +100,8 @@ void client_lobby(NetClient *c, NetLobby *out);
 int client_read_lobbies(NetClient *c, const char *body, double sent, double got, NetLobbyInfo *out, int max);
 
 int client_send_frame(NetClient *c, int type, const void *payload, size_t n);
+/* The other riders' delay for the counter in a race (ms), -1 none (finding 169). */
+int client_riders_ms(NetClient *c);
 int client_receive_frame(NetClient *c, uint8_t *out, size_t max);
 
 #endif

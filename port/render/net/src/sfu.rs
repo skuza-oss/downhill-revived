@@ -166,17 +166,22 @@ fn read_socket(socket: UdpSocket, inbox: Inbox, alive: Arc<AtomicBool>, failed: 
     }
 }
 
-// Four times the normal per-rider rate, with a 120-packet burst allowance.
-// Exceeding it silences this member (including events) until the next race.
-struct SenderRate { since: Instant, count: [u16; 10], blocked: bool }
+// Per bundle index (a STATE message's byte 3, port/hle/state_bundle.h): four times the normal
+// rate (bundle 0 carries a player's own rider, 60 a second), so 240 a second; more in one second
+// are dropped. A sender is never silenced for the rest of the race (0.7.12 did that): after a
+// network stall the backlog can arrive at once, several seconds of an honest sender's snapshots,
+// and that froze its rider for the rest of the race (finding 169).
+const FLOOD_PER_SECOND: u16 = 240;
+struct SenderRate { since: Instant, count: [u16; 10], dropped: u32 }
 impl SenderRate {
-    fn new() -> Self { Self { since: Instant::now(), count: [0; 10], blocked: false } }
+    fn new() -> Self { Self { since: Instant::now(), count: [0; 10], dropped: 0 } }
     fn accept(&mut self, rider: u8, now: Instant) -> bool {
-        if self.blocked { return false; }
         if now.duration_since(self.since).as_secs() >= 1 { self.count = [0; 10]; self.since = now; }
-        self.count[rider as usize] += 1;
-        self.blocked = self.count[rider as usize] > 120;
-        !self.blocked
+        let count = &mut self.count[rider as usize];
+        *count = count.saturating_add(1);
+        let ok = *count <= FLOOD_PER_SECOND;
+        if !ok { self.dropped += 1; }
+        ok
     }
 }
 impl Sfu {
@@ -343,7 +348,8 @@ impl Sfu {
         let mut wire = self.race.to_le_bytes().to_vec();
         wire.extend_from_slice(bytes);
         if state {
-            // One newest snapshot per rider; never accumulate stale snapshots under congestion.
+            // One newest bundle per bundle index (byte 3, port/hle/state_bundle.h); never
+            // accumulate stale snapshots under congestion.
             if bytes.len() >= 4 {
                 self.pending_state.insert(bytes[3], (Instant::now(), wire));
             }
@@ -496,9 +502,12 @@ impl Sfu {
         } else if epoch == self.race && self.race != 0 {
             if c.state {
                 if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
-                if !self.rates.entry(c.member).or_insert_with(SenderRate::new).accept(bytes[11], Instant::now()) { return Ok(()); }
+                let rate = self.rates.entry(c.member).or_insert_with(SenderRate::new);
+                if !rate.accept(bytes[11], Instant::now()) {
+                    if rate.dropped == 1 { eprintln!("net: SFU: member {} sent over {FLOOD_PER_SECOND} snapshot messages in a second; the excess is dropped", c.member); }
+                    return Ok(());
+                }
             }
-            if self.rates.get(&c.member).is_some_and(|r| r.blocked) { return Ok(()); }
             if let Some(slot) = self.slots.get(&c.member) {
                 let mut frame = bytes[8..].to_vec();
                 frame[1] = *slot;
@@ -582,13 +591,17 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn snapshot_flood_silences_member_for_race() {
+    fn snapshot_flood_drops_the_excess_and_never_silences() {
         let mut rate = SenderRate::new();
         let now = rate.since;
-        for _ in 0..120 { assert!(rate.accept(0, now)); }
+        for _ in 0..FLOOD_PER_SECOND { assert!(rate.accept(0, now)); }
         assert!(rate.accept(1, now));
         assert!(!rate.accept(0, now));
-        assert!(!rate.accept(1, now + Duration::from_secs(2)));
+        for _ in 0..70_000 { rate.accept(0, now); }  // no overflow
+        assert_eq!(rate.dropped, 70_001);
+        // a backlog after a stall costs the excess of that second, not the rest of the race
+        assert!(rate.accept(0, now + Duration::from_secs(2)));
+        assert!(rate.accept(1, now + Duration::from_secs(2)));
     }
 
     #[test]

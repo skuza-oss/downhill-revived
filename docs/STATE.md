@@ -124,8 +124,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - Race frames (finding 158): over Cloudflare Realtime SFU DataChannels, STATE unordered with no
   retransmissions and EVENT reliable; the room sets up each racer's session and passes only that
   racer's SDP. If UDP doesn't connect in 2 s, Cloudflare TURN over TLS on 443 with credentials
-  minted for that racer. 30 snapshots a second; the puppets' delay adapts per sender (50-150 ms).
-  Protocol 3.
+  minted for that racer. Protocol 4 (finding 169): a PC's riders of one tick go out bundled
+  in STATE messages of at most 1,000 bytes (one datagram), stamped with their moment on the
+  server clock; each player's own rider 60 times a second, AI riders 30. Puppets are drawn at the
+  present: the newest snapshot carried forward by its velocity and angular velocity, corrections
+  fading in (`DHD_PUPPET_PREDICT=0` interpolates in the past instead). Hits are decided on the
+  puppet as drawn. In a race the FPS & Ping counter shows "RIDERS N MS", the other riders' delay.
 - Client: `port/net/` over `port/net/ws.h`, the Rust crate `dhd_net` (`port/render/net`:
   tungstenite over rustls for the lobby, str0m for the SFU with a vendored RustCrypto adapter,
   its own TURN client; webpki roots, no OS certificate store).

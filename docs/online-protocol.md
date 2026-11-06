@@ -1,4 +1,4 @@
-# Online protocol (version 3)
+# Online protocol (version 4)
 
 The wire protocol between the PC port (`port/net/`) and the online server (`online/server/`,
 Cloudflare Workers + Durable Objects). The plan behind it is `docs/ONLINE-PLAN.md`.
@@ -23,7 +23,7 @@ host.
 | WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. |
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
-| GET | `/v1/health` | `{"ok":true,"protocol":3,"minVersion":"0.1.0","online":true}` (`online` and `message`: the kill switch, below) |
+| GET | `/v1/health` | `{"ok":true,"protocol":4,"minVersion":"0.1.0","online":true}` (`online` and `message`: the kill switch, below) |
 | GET | `/v1/latest` | The newest release's `latest.json` (the launcher's backup update check; below). |
 
 Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
@@ -144,7 +144,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 ```jsonc
 // First message, required. name: 1-24 characters.
-{"type":"hello","protocol":3,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
+{"type":"hello","protocol":4,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
 // A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>"
 // From the release after 0.7.11 (finding 161): "installId":"<32 lowercase hex>", optional (below)
@@ -181,7 +181,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 ```jsonc
 // Answer to hello: who you are in this room, and where you and the room are (Region, below).
-{"type":"welcome","protocol":3,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
+{"type":"welcome","protocol":4,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
  "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU",
  "rejoinToken":"<32 hex>"}  // this member's rejoin token: only this client gets it (Limits, below)
 
@@ -312,8 +312,12 @@ with a fresh session rather than retaining a broken connection. See finding 158 
 | 1 | u8 | `slot` |
 | 2 | n | any payload, at most 32 bytes (e.g. a u32 sequence and an f64 send time) |
 
-The server answers the sender only, with the same bytes and the type changed to 4. Use it to
-watch the round-trip during a race; it is never forwarded.
+The server answers the sender only, with the same bytes and the type changed to 4, followed by
+its clock (f64 ms since the Unix epoch, little-endian; protocol 4). Use it to watch the round-trip
+during a race and to keep the server clock offset (`offset ≈ serverTime - (tSend + rtt/2)`): the
+race's STATE bundles are stamped on that clock. The game takes a PONG only when its round trip is
+no slower than its usual one, and during a race moves its offset by at most 2 ms a PONG. It is
+never forwarded.
 
 ### STATE, type 5, and EVENT, type 6 — client ↔ SFU ↔ clients
 
@@ -323,18 +327,37 @@ watch the round-trip during a race; it is never forwarded.
 | 1 | u8 | `slot` of the sender |
 | 2 | n | payload, the client's format (finding 044) |
 
-State sync: a STATE frame is one rider snapshot (payload version 5, 104-834
-bytes). Its timestamp is sender race time in ms since GO. Version 5 repeats each changed pad word in six consecutive snapshots,
-and refreshes all 146 words every 30 snapshots, as index/u32 pairs; previous-action words 25-49 are reconstructed locally. Receivers reject older
-timestamps before changing the pad mirror. Every owned rider is sent about 30 times/second.
-EVENT remains payload version 2. The SFU reads none of the gameplay payload.
+State sync: a STATE frame is one bundle of the sender's rider snapshots (payload version 6, protocol
+4, finding 169; `port/hle/state_bundle.h`), at most 990 bytes so that the frame with its 8-byte race
+marker stays at or under 1,000 bytes: one SCTP chunk (str0m's is 1,062 bytes), since a STATE
+message split over several datagrams is lost whole when any of them is. A PC with more riders
+than fit (a host with its AI riders) sends several bundles for one tick. A player's own rider is
+sent every race tick (60 a second), AI riders every second tick (30 a second).
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | u8 | version = 6 |
+| 1 | u8 | bundle index in this tick (0, 1, ...); a congested sender keeps only the newest per index |
+| 2 | u8 | riders in the bundle, 1-10 |
+| 3 | f64 | the moment the snapshots show on the server clock (ms since the Unix epoch): the sender's GO there plus its race time |
+| 11 | n | the riders' records, back to back |
+
+A record: the rider's global id (u8: a human's lobby slot, an AI rider's slot), the sender's race
+time (i32 ms since its GO), position, orientation (3 rows), velocity and angular velocity (f32 x 3
+each), the wheels (4 f32), the wheel contacts (2 u8), the State (u16), crash flags and kind,
+checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad words as index (u8)
+and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
+all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom
+share a tick); previous-action words 25-49 are rebuilt locally. Receivers check the whole bundle
+first, then reject each record older than the newest they hold for that rider before changing its
+pad mirror. EVENT remains payload version 2. The SFU reads none of the gameplay payload.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
 EVENT is unaffected. `DHD_NET_SFU_UDP=0` drops every UDP datagram to and from the SFU (a network that
-blocks UDP), so the TURN-over-TLS fallback must carry the race. `net:` reports per-sender p50/p95/p99 estimated snapshot age and
-gaps longer than 100 ms. Age uses the existing per-sender EVENT_GO server-clock stamp plus the
-snapshot race timestamp, so it includes transit and time awaiting the next snapshot. Peer clock
-offset error and simulation drift affect the estimate; this is not a precise one-way latency probe.
+blocks UDP), so the TURN-over-TLS fallback must carry the race. `net:` reports per-sender p50/p95/p99 snapshot age and
+gaps longer than 100 ms, and STATE messages a second each way. Age is this PC's server clock minus
+the newest bundle's stamp, sampled every network tick, so it includes transit and time awaiting
+the next bundle; the two PCs' clock offset errors add to it.
 
 ### Leaving
 
@@ -365,7 +388,7 @@ The server keeps what everyone has to agree on:
 `GET /v1/lobbies` → `200 application/json`:
 
 ```json
-{"protocol":3,"minVersion":"0.1.0","region":"EU","now":1734000000000,"lobbies":[
+{"protocol":4,"minVersion":"0.1.0","region":"EU","now":1734000000000,"lobbies":[
   {"code":"K7QX2M","roomName":"Friday race","version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","track":3,
    "players":2,"maxPlayers":10,"hostName":"Ann","region":"EU","colo":"FRA","createdIn":"EU"}]}
 ```
@@ -694,5 +717,7 @@ Every field and the message type are additions: clients that don't know them ign
 native client reads by key, the browser copies known keys), so `MIN_VERSION` stays as it is.
 
 SFU allocations are restricted to running race members, one setup attempt per member per race.
-Allocations close at race end or departure. Receiver rate protection silences a member for the
-remaining race if any rider exceeds 120 snapshots in a one-second window (normal: 30/s).
+Allocations close at race end or departure. Receiver rate protection drops a member's STATE
+messages beyond 240 in a one-second window per bundle index (normal: 60/s for index 0); it never
+silences a member for the rest of the race (protocol 3 did, and a backlog after a network stall
+froze an honest rider; finding 169).

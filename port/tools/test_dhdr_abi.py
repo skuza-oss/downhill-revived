@@ -145,8 +145,8 @@ def rust_check(arch, rows, abi_rs, out, problems):
 # ---- function prototypes ----
 
 C_BASE = {'int': 'i32', 'uint32_t': 'u32', 'uint8_t': 'u8', 'size_t': 'usize', 'char': 'c_char', 'void': 'c_void',
-          'uint64_t': 'u64', 'int32_t': 'i32'}
-RUST_SCALARS = {'i32', 'u32', 'u8', 'usize', 'u64', 'c_int', 'c_char', 'c_void'}
+          'uint64_t': 'u64', 'int32_t': 'i32', 'float': 'f32', 'double': 'f64'}
+RUST_SCALARS = {'i32', 'u32', 'u8', 'usize', 'u64', 'c_int', 'c_char', 'c_void', 'f32', 'f64'}
 
 
 def strip_c_comments(text):

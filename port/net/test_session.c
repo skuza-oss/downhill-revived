@@ -162,31 +162,71 @@ int main(void)
         client_free(&c);
     }
     {   /* Snapshot freshness and long gaps are per sender and sampled on network ticks. */
-        const unsigned char state[] = {NET_FRAME_STATE, 2, 4, 0, 0, 0, 0, 0};
-        unsigned char go[12] = {NET_FRAME_EVENT, 2, 2, 5};
-        double stamp = 100000 + net_now_ms() - 150;
+        /* A bundle's header (port/hle/state_bundle.h): version 6, index, riders, the stamp. */
+        unsigned char state[13] = {NET_FRAME_STATE, 2, 6, 0, 1};
+        double stamp = 100000 + net_now_ms() - 150, newer = stamp + 1;
         client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);
         c.racing = 1;
         c.clock_offset = 100000;
-        memcpy(go + 4, &stamp, sizeof stamp);
-        client_on_binary(&c,go,sizeof go);
+        memcpy(state + 5, &stamp, sizeof stamp);
         c.snapshot[2].arrived = net_now_ms() - 150;
         client_on_binary(&c,state,sizeof state);
-        assert(c.snapshot[2].gaps == 1 && c.snapshot[1].gaps == 0);
+        assert(c.snapshot[2].gaps == 1 && c.snapshot[1].gaps == 0 && c.snapshot[2].messages == 1);
         client_tick(&c);
         assert(c.snapshot[2].samples == 1 && c.snapshot[1].samples == 0);
-        assert(c.snapshot[2].epoch == stamp && c.snapshot[2].age[0] == 0);
-        {   /* The same estimator reads the old relay layout for before/after measurements. */
-            const unsigned char legacy[] = {NET_FRAME_STATE, 2, 8, 3, 0, 1, 0, 0, 0};
-            client_on_binary(&c,legacy,sizeof legacy);
-            assert(c.snapshot[2].epoch == stamp + 1);
-            client_on_binary(&c,state,sizeof state);  /* older unordered packet */
-            assert(c.snapshot[2].epoch == stamp + 1);
+        {   /* about 150 ms old (a loaded PC may take a little longer between the two lines) */
+            unsigned near = 0;
+            for (int ms = 145; ms < 400; ms++) near += c.snapshot[2].age[ms];
+            assert(c.snapshot[2].epoch == stamp && near == 1);
+        }
+        {
+            unsigned char later[13];
+            memcpy(later, state, sizeof later);
+            memcpy(later + 5, &newer, sizeof newer);
+            client_on_binary(&c,later,sizeof later);
+            assert(c.snapshot[2].epoch == newer);
+            client_on_binary(&c,state,sizeof state);  /* an older unordered message */
+            assert(c.snapshot[2].epoch == newer && c.snapshot[2].messages == 3);
         }
         c.snapshot[2].epoch = c.clock_offset + net_now_ms() - 2000;
         client_tick(&c);
         assert(c.snapshot[2].age[1001] == 1);
+        client_free(&c);
+    }
+    {   /* The shared clock (finding 169): a race PONG with the server's time sets the offset, then
+           follows it by at most 2 ms a pong; a slow round trip or an older server's PONG changes
+           nothing. */
+        unsigned char pong[2 + 16] = {NET_FRAME_PONG, 0};
+        double sent, server;
+        client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+#define PONG(rtt, offset) (sent = net_now_ms() - (rtt), server = sent + (rtt) / 2 + (offset), \
+                           memcpy(pong + 2, &sent, 8), memcpy(pong + 10, &server, 8))
+        PONG(10, 1000.0);
+        client_on_binary(&c,pong,sizeof pong);
+        assert(c.have_offset && fabs(c.clock_offset - 1000) < 1.5);
+        PONG(10, 1100.0);
+        client_on_binary(&c,pong,sizeof pong);
+        assert(fabs(c.clock_offset - 1002) < 1.5);
+        PONG(400, 900.0);                  /* slower than the usual round trip: not trusted */
+        client_on_binary(&c,pong,sizeof pong);
+        assert(fabs(c.clock_offset - 1002) < 1.5);
+        PONG(10, 500.0);
+        client_on_binary(&c,pong,10);      /* a protocol 3 PONG: the send time only */
+        assert(fabs(c.clock_offset - 1002) < 1.5);
+        /* round trips slow for a long time, one way (a busy uplink: the server's time is read
+           late on the way out, so it looks 60 ms ahead): the median follows them, the clock
+           must not (the 45 ms skew of finding 169's PC-Mac run) */
+        for (int i = 0; i < 40; i++) {
+            PONG(160, 1062.0);
+            client_on_binary(&c,pong,sizeof pong);
+        }
+        assert(c.lobby.ping_ms >= 150 && fabs(c.clock_offset - 1002) < 1.5);
+        PONG(11, 1003.0);                  /* a quick one again: trusted */
+        client_on_binary(&c,pong,sizeof pong);
+        assert(fabs(c.clock_offset - 1003) < 1.5);
+#undef PONG
         client_free(&c);
     }
     {   /* the install id (finding 161): in every hello once set, only when it is 32 lowercase hex;
