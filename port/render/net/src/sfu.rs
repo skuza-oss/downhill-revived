@@ -22,6 +22,8 @@ pub struct Sfu {
     channels: Vec<Channel>,
     slots: HashMap<u64, u8>,
     members: usize,
+    race: u64,
+    future_events: VecDeque<(ChannelId, Vec<u8>)>,
     connected: bool,
     drop_percent: u64,
     sent: u64,
@@ -46,7 +48,7 @@ impl Sfu {
         let (offer, pending) = change.apply().ok_or("No transport offer")?;
         let message = json!({ "type": "sfu_offer", "sdp": offer.to_sdp_string() });
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
-        Ok((Self { rtc, pending: Some(pending), socket, channels: vec![], slots: HashMap::new(), members: 1,
+        Ok((Self { rtc, pending: Some(pending), socket, channels: vec![], slots: HashMap::new(), members: 1, race: 0, future_events: VecDeque::new(),
             connected: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -62,6 +64,7 @@ impl Sfu {
         } else if message["type"] == "room" {
             self.members = message["members"].as_array().map_or(1, |v| v.len());
         } else if message["type"] == "start" {
+            self.race = message["startAt"].as_u64().filter(|n| *n > 0).ok_or("Missing race marker")?;
             self.slots.clear();
             self.pending_state.clear();
             self.pending_events.clear();
@@ -150,6 +153,7 @@ impl Sfu {
         if bytes.len() < 2 || bytes.len() > 3072 {
             return Ok(());
         }
+        if self.race == 0 { return Err("Race not started".into()); }
         let state = bytes[0] == 5;
         if state {
             self.sent += 1;
@@ -158,22 +162,26 @@ impl Sfu {
                 return Ok(());
             }
         }
+        let mut wire = self.race.to_le_bytes().to_vec();
+        wire.extend_from_slice(bytes);
         if state {
             // One newest snapshot per rider; never accumulate stale snapshots under congestion.
             if bytes.len() >= 4 {
-                self.pending_state.insert(bytes[3], bytes.to_vec());
+                self.pending_state.insert(bytes[3], wire);
             }
         } else {
             if self.pending_events.len() >= 128 {
                 return Err("Event send queue full".into());
             }
-            self.pending_events.push_back(bytes.to_vec());
+            self.pending_events.push_back(wire);
         }
         Ok(())
     }
     pub fn poll(&mut self) -> Result<(Vec<Value>, Vec<Vec<u8>>)> {
         let mut text = vec![];
         let mut frames = vec![];
+        let pending = std::mem::take(&mut self.future_events);
+        for (id, bytes) in pending { self.receive_frame(id, bytes, &mut frames)?; }
         for state in [false, true] {
             if let Some(c) = self.channels.iter().find(|c| c.local && c.state == state) {
                 if let Some(mut channel) = self.rtc.channel(c.id) {
@@ -232,6 +240,24 @@ impl Sfu {
         Ok((text, frames))
     }
 
+    fn receive_frame(&mut self, id: ChannelId, bytes: Vec<u8>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+        if bytes.len() < 10 || bytes.len() > 3080 { return Ok(()); }
+        let Some(c) = self.channels.iter().find(|c| c.id == id && !c.local) else { return Ok(()); };
+        if bytes[8] != if c.state { 5 } else { 6 } { return Ok(()); }
+        let epoch = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+        if epoch > self.race && !c.state {
+            if self.future_events.len() >= 128 { return Err("Early event queue full".into()); }
+            self.future_events.push_back((id, bytes));
+        } else if epoch == self.race && self.race != 0 {
+            if let Some(slot) = self.slots.get(&c.member) {
+                let mut frame = bytes[8..].to_vec();
+                frame[1] = *slot;
+                frames.push(frame);
+            }
+        }
+        Ok(())
+    }
+
     fn drain(&mut self, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
         for _ in 0..512 {
             match self.rtc.poll_output()? {
@@ -248,19 +274,7 @@ impl Sfu {
                     text.push(json!({"type":"sfu_connected"}));
                 }
                 Output::Event(Event::ChannelData(data)) => {
-                    if let Some(c) = self.channels.iter().find(|c| c.id == data.id && !c.local) {
-                        if let Some(slot) = self.slots.get(&c.member) {
-                            let mut bytes = data.data;
-                            if data.binary
-                                && bytes.len() >= 2
-                                && bytes.len() <= 3072
-                                && bytes[0] == if c.state { 5 } else { 6 }
-                            {
-                                bytes[1] = *slot;
-                                frames.push(bytes);
-                            }
-                        }
-                    }
+                    if data.binary { self.receive_frame(data.id, data.data, frames)?; }
                 }
                 _ => {}
             }
@@ -273,6 +287,37 @@ impl Sfu {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn reliable_events_wait_for_start_and_old_race_frames_are_dropped() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap()).unwrap();
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":14,"name":"events","memberId":17,"local":false}
+        ]})).unwrap();
+        let id = client.channels[0].id;
+        let wire = |epoch: u64, payload: u8| {
+            let mut bytes = epoch.to_le_bytes().to_vec();
+            bytes.extend_from_slice(&[6, 99, payload]); bytes
+        };
+        let mut frames = vec![];
+        client.receive_frame(id, wire(100, 7), &mut frames).unwrap();
+        assert!(frames.is_empty());
+        assert_eq!(client.future_events.len(), 1);
+        client.signal(&json!({"type":"start","startAt":100,"players":[{"memberId":17,"slot":3}]})).unwrap();
+        let (_, frames) = client.poll().unwrap();
+        assert_eq!(frames, vec![vec![6,3,7]]);
+        client.send(&[6,0,1]).unwrap();
+        assert_eq!(&client.pending_events[0][..8], &100u64.to_le_bytes());
+        client.signal(&json!({"type":"start","startAt":200,"players":[{"memberId":17,"slot":5}]})).unwrap();
+        assert!(client.pending_events.is_empty());
+        let mut frames = vec![];
+        client.receive_frame(id, wire(100, 8), &mut frames).unwrap();
+        assert!(frames.is_empty());
+        client.receive_frame(id, wire(200, 9), &mut frames).unwrap();
+        assert_eq!(frames, vec![vec![6,5,9]]);
+        for _ in 0..128 { client.receive_frame(id, wire(300, 1), &mut frames).unwrap(); }
+        assert!(client.receive_frame(id, wire(300, 1), &mut frames).is_err());
+    }
 
     #[test]
     fn native_channels_deliver_and_bind_sender_with_state_loss() {
@@ -314,7 +359,7 @@ mod tests {
             ]}))
             .unwrap();
         client
-            .signal(&json!({"type":"start","players":[{"memberId":17,"slot":3}]}))
+            .signal(&json!({"type":"start","startAt":1234,"players":[{"memberId":17,"slot":3}]}))
             .unwrap();
         client.drop_percent = 5;
         let until = Instant::now() + Duration::from_secs(10);
@@ -330,7 +375,9 @@ mod tests {
             bound_sender |= frames.iter().any(|f| f == &[6, 3, 2]);
             if !replied {
                 if let Some(mut c) = server.channel(server_reply) {
-                    replied = c.write(true, &[6, 99, 2]).unwrap();
+                    let mut reply = 1234u64.to_le_bytes().to_vec();
+                    reply.extend_from_slice(&[6, 99, 2]);
+                    replied = c.write(true, &reply).unwrap();
                 }
             }
             connected |= text.iter().any(|x| x["type"] == "sfu_connected");

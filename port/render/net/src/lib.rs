@@ -61,7 +61,7 @@ struct Live {
 struct Queue {
     out: VecDeque<(bool, Vec<u8>)>,
     connected: bool,
-    signals: VecDeque<serde_json::Value>,
+    incoming: VecDeque<(bool, Vec<u8>)>,
 }
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
@@ -89,7 +89,12 @@ impl WsConn {
     /// Drops the connection from outside the receive thread: its next look finds none.
     fn force_close(&self) {
         let mut live = lock(&self.live);
-        lock(&self.queue).connected = false;
+        {
+            let mut q = lock(&self.queue);
+            q.connected = false;
+            q.out.clear();
+            q.incoming.clear();
+        }
         if let Some(l) = live.take() {
             let _ = l.tcp.shutdown(Shutdown::Both);
         }
@@ -117,7 +122,7 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                     let mut live = lock(&c.live);
                     let mut q = lock(&c.queue);
                     q.out.clear();
-                    q.signals.clear();
+                    q.incoming.clear();
                     q.connected = true;
                     *live = Some(Live { ws, tcp });
                 }
@@ -196,22 +201,13 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
             }
         }
         for (binary, data) in got {
-            if !binary {
-                if let Ok(m) = serde_json::from_slice::<serde_json::Value>(&data) {
-                    if matches!(m["type"].as_str(), Some("welcome" | "sfu_answer" | "sfu_channels" | "sfu_closed" | "room" | "start" | "ended")) {
-                        let mut q = lock(&c.queue);
-                        if q.signals.len() < 64 { q.signals.push_back(m); }
-                    }
-                }
-            } else if matches!(data.first(), Some(5 | 6)) {
-                continue; // Race frames have exactly one transport: SFU DataChannels.
-            }
-            if let Some(f) = c.h.on_message {
-                let mut v = Vec::with_capacity(data.len() + 1);
-                v.extend_from_slice(&data);
-                v.push(0);
-                unsafe { f(c.h.ctx, binary as c_int, v.as_ptr(), data.len()) };
-            }
+            if binary && matches!(data.first(), Some(5 | 6)) { continue; }
+            let mut q = lock(&c.queue);
+            if !q.connected { return (1006, "connection closed".into()); }
+            if q.incoming.len() >= 256 { return (1006, "control queue full".into()); }
+            q.incoming.push_back((binary, data.to_vec()));
+            drop(q);
+            c.wake.notify_all();
         }
         if let Some(end) = end {
             return end;
@@ -223,45 +219,42 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
 fn send_main(c: Arc<WsConn>) {
     let mut sfu: Option<sfu::Sfu> = None;
     let mut held_ready: Option<Vec<u8>> = None;
-    let mut early_events: VecDeque<Vec<u8>> = VecDeque::new();
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
-            let _ = c.wake.wait_timeout_while(q, TICK, |q| q.out.is_empty() && !c.stopping.load(Ordering::Acquire));
+            let _ = c.wake.wait_timeout_while(q, TICK, |q| q.out.is_empty() && q.incoming.is_empty() && !c.stopping.load(Ordering::Acquire));
         }
-        if !lock(&c.queue).connected { sfu = None; }
+        if !lock(&c.queue).connected { sfu = None; continue; }
+        // Lobby and SFU callbacks share this thread. Apply the transport's start marker
+        // before the game sees start, then deliver any early reliable race events.
         loop {
-            let message = lock(&c.queue).signals.pop_front();
-            let Some(message) = message else { break };
-            let result = match message["type"].as_str() {
-                Some("welcome") => {
-                    sfu = None;
-                    held_ready = None;
-                    early_events.clear();
-                    match sfu::Sfu::start() {
-                        Ok((rtc, offer)) => {
-                            sfu = Some(rtc);
-                            lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
-                            Ok(())
+            let item = lock(&c.queue).incoming.pop_front();
+            let Some((binary, data)) = item else { break };
+            if !binary {
+                if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data) {
+                    let result = if message["type"] == "welcome" {
+                        held_ready = None;
+                        match sfu::Sfu::start() {
+                            Ok((rtc, offer)) => {
+                                sfu = Some(rtc);
+                                lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
+                                Ok(())
+                            }
+                            Err(e) => Err(e),
                         }
-                        Err(e) => Err(e),
+                    } else if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) };
+                    if result.is_err() {
+                        eprintln!("net: SFU signaling failed"); c.force_close(); sfu = None; break;
                     }
                 }
-                Some("room") => {
-                    if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) }
-                },
-                Some("start") => {
-                    if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) }
-                },
-                _ => if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) },
-            };
-            if result.is_err() { eprintln!("net: SFU signaling failed"); c.force_close(); sfu = None; }
+            }
+            if let Some(f) = c.h.on_message {
+                let mut bytes = data.clone(); bytes.push(0);
+                unsafe { f(c.h.ctx, binary as c_int, bytes.as_ptr(), data.len()) };
+            }
         }
         let mut incoming = Vec::new();
         if let Some(rtc) = sfu.as_mut() {
-            while let Some(event) = early_events.pop_front() {
-                if rtc.send(&event).is_err() { c.force_close(); break; }
-            }
             if rtc.usable() {
                 if let Some(ready) = held_ready.take() { lock(&c.queue).out.push_back((false, ready)); }
             }
@@ -280,14 +273,8 @@ fn send_main(c: Arc<WsConn>) {
             let item = lock(&c.queue).out.pop_front();
             let Some((binary, data)) = item else { break };
             if binary && matches!(data.first(), Some(5 | 6)) {
-                if let Some(rtc) = sfu.as_mut() {
-                    while let Some(event) = early_events.pop_front() {
-                        if rtc.send(&event).is_err() { break; }
-                    }
-                    if rtc.send(&data).is_err() { c.force_close(); sfu = None; }
-                } else if data.first() == Some(&6) {
-                    if early_events.len() < 128 { early_events.push_back(data); } else { c.force_close(); }
-                }
+                let failed = sfu.as_mut().is_none_or(|rtc| rtc.send(&data).is_err());
+                if failed { c.force_close(); sfu = None; }
                 continue;
             }
             if !binary {

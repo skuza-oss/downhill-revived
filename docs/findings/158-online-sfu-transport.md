@@ -86,6 +86,12 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 
 ## Decisions
 
+- DataChannels prefix race frames with the existing room startAt value as an opaque race marker.
+  No new clock sample, tick agreement or lobby field is introduced. Separate WebSocket control
+  and SFU streams can reorder at race boundaries: early reliable events buffer until start,
+  old-race frames are discarded, and all message callbacks run on the send thread. This keeps
+  the association across races without replaying an old finish/pickup into the next race.
+
 - Native library choice: str0m 0.25 with default features disabled and `rust-crypto`.
   The sans-IO loop fits the existing dedicated transport thread, supports negotiated channels
   and MaxRetransmits(0), and its RustCrypto/dimpl backend avoids system OpenSSL on all three

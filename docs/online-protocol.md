@@ -163,6 +163,13 @@ SFU. It persists across races. Each player publishes `state` (unordered, maxRetr
 allocations identify members; `start.players` maps members to race slots. The receiver corrects
 byte 1 from that mapping. WebSocket binary frames only carry PING/PONG; all other types are dropped.
 
+DataChannel messages add an 8-byte little-endian unsigned prefix containing that race's existing
+`start.startAt` value in ms. The original type/slot/payload follows it unchanged. This is a race
+identifier, not a game clock or tick agreement. Endpoints discard older races' messages. Early
+reliable EVENTs wait in a bounded queue until their matching WebSocket start is delivered; future
+STATEs can be dropped. WebSocket callbacks and SFU callbacks are delivered on one network thread,
+so the game sees start before buffered events. Channels stay connected between races.
+
 ### SFU signaling (private JSON on the room WebSocket)
 
 - Client sends `{"type":"sfu_offer","sdp":"<its own offer>"}` after welcome. The DO calls

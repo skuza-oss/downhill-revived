@@ -14,7 +14,7 @@ typedef struct WsConn WsConn;
 typedef struct {
     void *ctx;
     void (*on_open)(void *ctx, WsConn *ws);  /* receive thread; the queue is empty */
-    void (*on_message)(void *ctx, int binary, const uint8_t *data, size_t n);  /* either thread; text data[n] is 0 */
+    void (*on_message)(void *ctx, int binary, const uint8_t *data, size_t n);  /* send thread; text data[n] is 0 */
     /* Receive thread: the connection ended or failed (code -1: connecting failed). Returns the URL
        to connect to next, after a backoff (1, 2, 4, then 8 s), or NULL to stop. attempt counts
        failures since the last open. Also called for the close ws_stop makes. */
