@@ -611,6 +611,29 @@ static void test_restart_clock(void)
     field();
 }
 
+/* Issue #54 (finding 159): a career continued from a save races with the shell's screen id still
+   22 (CONTINUE SAVED GAME), not 9 (GET READY), so the race test may not read the screen. It is the
+   race phase alone (1 the countdown, 2-4 the race), the attract demo (mode 10) excepted; the
+   continued career's own modes (0-5, func_001EE2A0) count. The overlay then shows as in any race. */
+static void test_race_running(void)
+{
+    for (int mode = 0; mode <= 5; mode++) {
+        CHECK(touch_race_running(1, mode));
+        CHECK(touch_race_running(3, mode));
+        CHECK(touch_race_running(4, mode));
+        CHECK(!touch_race_running(0, mode));   /* the menus */
+        CHECK(!touch_race_running(5, mode));   /* the race loaded, before its countdown */
+    }
+    CHECK(!touch_race_running(3, TOUCH_MODE_ATTRACT));
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    game.race_hud = 0;
+    wait_ms(500);
+    CHECK(!touch_visible(t));
+    game.race_hud = touch_race_running(2, 3);   /* touch_field: the HUD hook in a continued career's race */
+    field();
+    CHECK(touch_visible(t));
+}
+
 /* The trick-stick hint: it holds the game until a push, and when the hold ends without one (5 s)
    the hint goes too. */
 static void test_trick_hint(void)
@@ -1079,6 +1102,7 @@ int main(void)
     test_pause();
     test_pause_controller();
     test_restart_clock();
+    test_race_running();
     test_editor_bar();
     test_trick_hint();
     test_classic_resume();

@@ -28,10 +28,65 @@ game state).
 
 ## Progress
 
-- [ ] 2026-11-06: finding reserved
+- [x] 2026-11-06: finding reserved (f3a6b57)
+- [x] 2026-11-06: cause found in the player's log and the code, reproduced on Windows (below)
+- [x] 2026-11-06: fix: touch_field's race test reads the race phase and mode, not the screen id;
+  `test_touch` case `test_race_running`
+- [ ] checks: `check.py port`, the reproduction again with the fix, boot and race state traces
+
+## Cause
+
+`touch_field.c` counted the race HUD hook only on "the race screen", the shell's screen id
+`D_0029DED8` = 9 with the race phase `D_0043F348` 1-4. 9 is GET READY (finding 050), the screen
+that starts a race on most routes (a new career, single events, multiplayer, online). A career
+continued from a save does not pass it: SINGLE PLAYER > rider > CONTINUE SAVED GAME (screen 16,
+row 1) opens screen 22 (`func_001EE2A0`), and its Cross sends S_ENTER_GAME without changing the
+screen id (`001EB1D8.cpp`, `func_001EE2A0`, the `D_0029DF8B` branch; compare `func_001EDD28`, which
+sets 9 first). The race runs with the id still 22, so `race_hud` was never 1: no overlay, the HUD
+not moved. Every later session that continues the career takes the same route, which is why a
+restart did not help and a new career did.
+
+Evidence:
+- The player's log (0.7.10, Samsung SM-A075M): the freeze line written while the app was in the
+  background mid-race reads `menu 22 phase 3`.
+- Windows reproduction (hidden desktop, base build of 113f76f, `DHD_TOUCH_MOUSE=1
+  DHD_TOUCH_LOG=1`, a career profile with progress on the first rider on the card,
+  `DHD_NAV=0:cross,15:cross,3:cross,16:down,16:cross,22:cross,22/5:cross`): the nav steps print
+  `menu=22 phase=5` (loaded) and `menu=22 phase=1` (countdown); in 50 s of race the touch log has
+  no line at all (its `air` line prints only while `race_hud` is 1), the picture shows the race HUD
+  at the game's places and no overlay. The control, the same build and settings through a new
+  game (`RACE_NAV` of `state_trace_run.py`, empty card): `menu=9 phase=1`, `touch log: air 0`
+  at the countdown, the Classic pad drawn and the speedometer moved to the top left.
+
+Ruled out: `hidden_by_pad` (a touch brings it back, and nothing sends pad events in the
+reproduction), the save's options block (the reproduction loads them and the HUD is drawn as
+always), a HUD drawn through calls the hook does not see (the HUD is the same; only the screen
+test failed).
 
 ## Decisions
 
+- The race test is `touch_race_running(phase, mode)` in `touch.h` (a pure function, so
+  `test_touch` covers it): phase 1-4 and not the attract demo (mode 10, `D_004B25A0` +0x10C; the
+  demo starts from the title, screen 0, and draws the HUD's timers through the hooked text calls).
+  Not a list of screen ids: besides 9 and 22, the bike shop (screen 18, modes 15 and 17) enters
+  a race and then sets the id to `D_004B25A0` +0xA08 or 9, and the results' NEXT / RETRY flows
+  (`0013BA60.cpp`, `001F8A08.c`, `001F8E90.c`, `00198AC0.c`) re-enter without touching it.
+- The HUD hook stays the evidence that a race is on screen: the HUD's code runs only from the
+  race's draw loop (`001B40A0.c`) and the race's own UI panels (`0014F300.c`, `001688C8.c`, both
+  in the race UI's tables), so a race phase left over in the menus shows nothing.
+
 ## Surprises
+
+- Other port code tests "screen 9" for a race too, so a continued career misses it as well
+  (not changed here, outside this lane):
+  - `port/hle/fps.c:437`, the human rider's grounded-stall recovery (`a->stalled_steps`): it never
+    runs in a continued career's races. It changes game state, so it needs its own decision and
+    state traces.
+  - `port/hle/fps.c:538` (dhd.log's `clock:` lines, finding 139: none in such a race; the
+    `perf:` lines use their own test and do appear in the player's log), `fps.c:602`
+    (`DHD_FPS_TRACE`, a test trace), `port/hle/presence.c:35` (Discord shows menus during the
+    race).
+  - Online (`fps.c:25`, `puppet.c`, `online.c`) always starts through screen 9
+    (`online_menu.c`), so it is not affected.
 
 ## Result

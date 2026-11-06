@@ -87,6 +87,14 @@ typedef struct {
     int fps;             /* the game's VBLANKs a second (60, or the high rate) */
 } TouchGame;
 
+/* A race is on, as touch_field.c reads it from the game (finding 159): the race phase
+   (D_0043F348: 1 the countdown, 2-4 the race to the results) outside the title's attract demo
+   (mode 10, D_004B25A0 +0x10C). Not the shell's screen id (D_0029DED8): a race keeps the id of the
+   screen that started it, 9 (GET READY) for most, 22 for CONTINUE SAVED GAME (a career loaded from
+   a save), 0 for the attract demo. With the HUD hook it says the race HUD is on screen. */
+enum { TOUCH_MODE_ATTRACT = 10 };
+static inline int touch_race_running(int phase, int mode) { return phase >= 1 && phase <= 4 && mode != TOUCH_MODE_ATTRACT; }
+
 /* One shape of the overlay (the renderer draws them in order, port/render/src/present/touch.rs). */
 enum {
     TS_DISC,       /* filled circle with a two-tone rim: x,y centre, a radius */
