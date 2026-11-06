@@ -1168,6 +1168,13 @@ void host_settings_load(void)
         at += n + (at[n] == ',');
     }
     hle_log("settings:%s\n", *settings_seen ? settings_seen : " (none)");
+    /* The install id for the online hello (finding 161; port/net/net.c): made once and kept in
+       dhd.ini. Set straight into the environment, never through settings_set: dhd.log, which
+       players post, must not show it (whoever copied it could get its player banned). */
+    if (!getenv("DHD_NET_INSTALL_ID")) {
+        char id[40];
+        if (dhd_settings_install_id(path, id, sizeof id)) host_putenv_s("DHD_NET_INSTALL_ID", id);
+    }
 }
 
 /* One dhd.ini line (the others kept). Nonzero when saved. */

@@ -80,7 +80,11 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   `hello.installId` here (32 lowercase hex, optional; malformed = none). Tests
   `test/moderation.test.ts`, including "nothing private reaches a client". Acceptance 3 run
   against `wrangler dev` (two members, list by name, ban, refused, unban, let in): OK.
-- [ ] Install id in the game and `hello`.
+- [x] Install id in the game and `hello`: `port/render/settings/src/install.rs` (`install_id` in
+  dhd.ini, 32 lowercase hex, made once; `dhd_settings_install_id`), `port/hle/host.c` puts it in
+  `DHD_NET_INSTALL_ID` after the settings load, `port/net/net.c` takes it for each connection and
+  `client.c` sends `"installId"` in every hello. Tests: `settings/tests/corpus.rs` `install_id`,
+  `port/net/test_session.c`.
 - [ ] Privacy note, protocol docs.
 
 ## Decisions
@@ -141,6 +145,23 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   spares them. The lead may prefer install-only as the default.
 - The log keeps the raw name (operators look for names players report) and the rejoins too (a
   rejoin may come from another address).
+- The install id is not a settings-table row: a row would reach the launcher's settings snapshot
+  and, as a variable, the `settings:` line of dhd.log, which players post (whoever copies an id
+  can get its player banned). It is its own key the crate knows (`install.rs`; not "unknown" in
+  the log either), put into `DHD_NET_INSTALL_ID` by `host_putenv_s` directly, never through
+  `settings_set`.
+- Made at the settings load, saved only when dhd.ini exists: creating a dhd.ini for it would give
+  the tools' runs the player's defaults (the crate applies them only when the file exists). The
+  tools' runs and DHD_SETTINGS=none get one for the run. `DHD_NET_INSTALL_ID` set beforehand
+  overrides (tests).
+- The randomness: the crate takes no dependencies, so the id is SipHash under std's
+  `RandomState` (keys from the operating system's random source) over time and process id;
+  unguessable without the key, which is all an id that names nothing needs.
+- net.c reads the variable on the game's thread (`connect_to`), not in `client_connected` on the
+  socket's thread: the game changes its environment while it runs, and getenv beside putenv on
+  another thread is a race.
+- The browser's client (`port/web/www/net.js`) sends no install id: the browser offers no online
+  play (finding 143), and the field is optional.
 
 ## Surprises
 

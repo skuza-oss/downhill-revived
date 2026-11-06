@@ -95,6 +95,9 @@ static int connect_to(const char *path)
     SDL_LockMutex(api);
     client_free(&client);
     client_init(&client, name, version, iso);
+    /* the install id (port/hle/host.c; finding 161), read here on the game's thread, the one that
+       sets the environment */
+    client_set_install_id(&client, getenv("DHD_NET_INSTALL_ID"));
     if (!NET_OFFERED) {
         client.lobby.state = NET_FAILED;
         snprintf(client.lobby.error, sizeof client.lobby.error, NET_NOT_OFFERED);

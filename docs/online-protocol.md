@@ -140,6 +140,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"hello","protocol":2,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
 // A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>"
+// Since 0.7.12 (finding 161): "installId":"<32 lowercase hex>", optional (below)
 
 // Host only. Every field optional; omitted fields keep their value.
 {"type":"settings","track":3,"laps":2,"seed":12345,"public":true,"maxPlayers":10,"roomName":"Friday race"}
@@ -162,6 +163,10 @@ use the same `error` frame **without** a close; the client just shows `message`.
 - `maxPlayers`: 2..10, default 10. It can't go below the current member count.
 - `public`: listed in `/v1/lobbies` while not started and not full. Default `false`
   (private, join code only).
+- `installId`: a random id the game makes once and keeps in dhd.ini (`install_id`), the same in
+  every hello of that copy of the game, for the server's moderation log and bans (Refusals,
+  above). Optional: releases before it send none and join as before; one that is not 32 lowercase
+  hex digits counts as none. The server sends it to nobody. The game never writes it to dhd.log.
 - `features`: what the client understands beyond version 1. `"countdown"`: the room may start
   the race by itself (below).
 

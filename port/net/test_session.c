@@ -161,6 +161,24 @@ int main(void)
         assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"rejoinToken"));
         client_free(&c);
     }
+    {   /* the install id (finding 161): in every hello once set, only when it is 32 lowercase hex;
+           none (an id never made) sends a hello without it, as older releases do */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"installId"));
+        client_free(&c);
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_set_install_id(&c,"0123456789abcdef0123456789abcdef");
+        client_connected(&c,&t);
+        assert(strstr(sent,",\"installId\":\"0123456789abcdef0123456789abcdef\""));
+        client_set_install_id(&c,"0123456789ABCDEF0123456789abcdef");
+        client_connected(&c,&t);
+        assert(!strstr(sent,"installId"));
+        client_set_install_id(&c,"\",\"x\":\"0123456789abcdef01234567");
+        client_connected(&c,&t);
+        assert(!strstr(sent,"installId"));
+        client_free(&c);
+    }
     puts("test_session: session and ten-player checks passed");
     return 0;
 }
