@@ -88,11 +88,11 @@ typedef struct Snapshot {
 } Snapshot;
 
 enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
-/* Wire format version 3: rider ids are global (a human's lobby slot, an AI rider's slot), the
+/* Wire format version 4 (independent pad snapshots): rider ids are global (a human's lobby slot, an AI rider's slot), the
    snapshot carries the checkpoints passed and the attack power-ups (version 2), and its clock is
    the sender's race time in ms, not its ticks (finding 114). STATE_FIXED: the payload before the
    pad words. */
-enum { WIRE_VERSION = 3, STATE_FIXED = 104, EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
+enum { WIRE_VERSION = 4, STATE_FIXED = 104, EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
 
 typedef struct Puppet {
     int on;                  /* this slot is a puppet */
@@ -103,8 +103,6 @@ typedef struct Puppet {
     double arrival, remote_time, interval, jitter;
     uint32_t mirror[PAD_WORDS];  /* the remote virtual pad, as the deltas built it */
     int remote_crash;
-    uint32_t sent_pad[PAD_WORDS];  /* owned slots: the pad as last sent */
-    int sent_any;
 } Puppet;
 
 extern void func_0012DDC0(void *rider);              /* body to scene node */
@@ -399,7 +397,7 @@ void hle_puppet_start(void)
 {
     for (int i = 1; i < NRIDERS; i++) {
         Puppet *p = &pp.p[i];
-        p->count = 0, p->have_offset = 0, p->offset = 0, p->remote_crash = 0, p->sent_any = 0;
+        p->count = 0, p->have_offset = 0, p->offset = 0, p->remote_crash = 0;
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
             p->on = !owned(i);
@@ -438,7 +436,7 @@ void hle_puppet_drop(int lobby, int host, int finished)
     for (int i = 1; i < NRIDERS; i++) {
         Puppet *p = &pp.p[i];
         if (p->on && owned(i)) {
-            p->on = 0, p->count = 0, p->sent_any = 0;
+            p->on = 0, p->count = 0;
             fprintf(stderr, "puppet: tick %d slot %d (player %d) is this PC's AI now\n", RACE_CLOCK, i, to_global(i));
         }
     }
@@ -495,12 +493,11 @@ void hle_puppet_start_point(uint8_t *race, uint8_t *r)
 static uint8_t *put(uint8_t *o, const void *v, size_t n) { memcpy(o, v, n); return o + n; }
 
 /* One STATE payload for an owned slot: version, rider (global id), race time (ms), body, wheels, contacts,
-   State, crash, checkpoints passed, attack kind, bottles, then the virtual pad words changed since the last one sent (the
-   relay keeps order and loses nothing; last tick's actions don't travel). 0: not owned. */
+   State, crash, checkpoints passed, attack kind, bottles, then every current pad word.
+   Snapshots stand alone on an unreliable channel; last tick's actions do not travel. 0: not owned. */
 int hle_puppet_pack(int slot, uint8_t *out, int max)
 {
-    if (!pp.online || slot < 0 || slot >= hle_online_race_riders() || !owned(slot) || !RACING || max < 128) return 0;
-    Puppet *p = &pp.p[slot];
+    if (!pp.online || slot < 0 || slot >= hle_online_race_riders() || !owned(slot) || !RACING || max < STATE_FIXED + (PAD_WORDS - 25) * 5) return 0;
     Snapshot s;
     take(&s, rider(slot));
     uint8_t *o = out, *count;
@@ -522,13 +519,11 @@ int hle_puppet_pack(int slot, uint8_t *out, int max)
     count = o++;
     *count = 0;
     for (int i = 0; i < PAD_WORDS && o + 5 <= out + max; i++)
-        if ((i < PREV_FIRST || i > PREV_LAST) && (!p->sent_any || s.pad[i] != p->sent_pad[i])) {
+        if ((i < PREV_FIRST || i > PREV_LAST)) {
             *o++ = (uint8_t)i;
             o = put(o, &s.pad[i], 4);
-            p->sent_pad[i] = s.pad[i];
             (*count)++;
         }
-    p->sent_any = 1;
     return (int)(o - out);
 }
 
@@ -537,9 +532,9 @@ static const uint8_t *get(const uint8_t *in, void *v, size_t n) { memcpy(v, in, 
 /* A STATE payload from the PC in lobby slot sender. */
 void hle_puppet_receive(int sender, const uint8_t *in, int n)
 {
-    if (!pp.online || n < STATE_FIXED || in[0] != WIRE_VERSION || sender == pp.local) return;
+    if (!pp.online || n != STATE_FIXED + (PAD_WORDS - 25) * 5 || in[0] != WIRE_VERSION || sender == pp.local) return;
     int slot = to_local(in[1]);
-    if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on) return;
+    if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
     Puppet *p = &pp.p[slot];
     const uint8_t *i = in + 2, *end = in + n;
     uint16_t state;
@@ -548,6 +543,9 @@ void hle_puppet_receive(int sender, const uint8_t *in, int n)
     memset(&s, 0, sizeof s);
     i = get(i, &ms, 4);
     s.time = ms / 1000.0;
+    /* Reject stale unordered packets before touching the pad mirror. */
+    if (p->count && s.time <= p->ring[p->count - 1].time) return;
+    memset(p->mirror, 0, sizeof p->mirror);
     i = get(i, s.pos, 12);
     for (int k = 0; k < 3; k++) i = get(i, s.rot[k], 12);
     i = get(i, s.vel, 12);

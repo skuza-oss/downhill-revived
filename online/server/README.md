@@ -84,3 +84,11 @@ removing a class later needs a new migration entry, not an edit of `v1`.
 - No authentication or rate limiting beyond the protocol checks (version, ISO hash, sizes).
 - The server does not check the ISO hash against the known US ISO; the client must refuse
   other regions, and the server only makes everyone match the host.
+
+## Realtime SFU (protocol 3)
+
+Set Worker secrets `REALTIME_APP_ID` and `REALTIME_APP_TOKEN` to the Realtime SFU app's
+credentials. Local development reads them from gitignored `.dev.vars`; never put values in
+config, logs or client messages. Lobby tests use a fake API and do not need credentials.
+The DO owns session and channel creation; clients connect only to Cloudflare. See
+[the protocol](../../docs/online-protocol.md) and finding 158 for setup, tests and live acceptance.

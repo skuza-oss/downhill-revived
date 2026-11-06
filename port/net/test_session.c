@@ -161,6 +161,21 @@ int main(void)
         assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"rejoinToken"));
         client_free(&c);
     }
+    {   /* Snapshot freshness and long gaps are per sender and sampled on network ticks. */
+        const unsigned char state[] = {NET_FRAME_STATE, 2, 4, 0};
+        client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        c.racing = 1;
+        c.snapshot[2].arrived = net_now_ms() - 150;
+        client_on_binary(&c,state,sizeof state);
+        assert(c.snapshot[2].gaps == 1 && c.snapshot[1].gaps == 0);
+        client_tick(&c);
+        assert(c.snapshot[2].samples == 1 && c.snapshot[1].samples == 0);
+        c.snapshot[2].arrived = net_now_ms() - 2000;
+        client_tick(&c);
+        assert(c.snapshot[2].age[1001] == 1);
+        client_free(&c);
+    }
     puts("test_session: session and ten-player checks passed");
     return 0;
 }

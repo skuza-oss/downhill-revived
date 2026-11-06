@@ -68,14 +68,19 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 
 ## Progress
 
+- Part 1 committed as `0a16e3c`; quick and C loopback/session tests passed.
+- Protocol 3 server fake API tests and typecheck pass, including private SDP/allocation messages.
+- Native str0m transport compiles on Windows. Native loopback delivered 95/100 STATE messages with 5% injection, the reliable EVENT,
+  and corrected a forged sender slot from its channel identity. Final build checks are running. Credentials remain absent; no live results are claimed.
+
 - [x] 2026-11-06: lane plan (this file).
 - [x] Part 1: 30 snapshots a second, adaptive puppet delay, snapshot-age `net:` lines.
 - [ ] Spike: a native Rust client connects to the Realtime SFU, publishes an unordered channel,
       a second client receives it. Library chosen and recorded under Decisions.
-- [ ] Server: SFU sessions and channels from the Durable Object; protocol 3 messages documented
+- [x] Server: SFU sessions and channels from the Durable Object; protocol 3 messages documented
       in `docs/online-protocol.md`.
-- [ ] Client: `dhd_net` SFU transport; `port/net/client.c` sends and receives race frames on it.
-- [ ] WebSocket race relay deleted; tests and docs updated.
+- [x] Client: `dhd_net` SFU transport; `port/net/client.c` sends and receives race frames on it.
+- [x] WebSocket race relay deleted; tests and docs updated.
 - [ ] Measurements recorded (acceptance 3-5).
 
 ## Decisions
@@ -112,8 +117,37 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 
 ## Surprises
 
+- The native test caught DTLS receive-queue overflow when several datagrams were fed before
+  polling str0m. The transport now drains outputs after every datagram and after each timeout.
+- Initial native transport uses IPv4 UDP to SFU candidates; no TCP/TURN path is implemented.
+  Readying waits for all current members' negotiated channels to open. Reliable events queue
+  during setup; snapshots retain only the newest per rider under congestion. Queue overflow
+  fails the connection for reliable messages instead of silently losing gameplay events.
+
+- Upstream str0m's RustCrypto adapter enables dimpl's rcgen feature, which forces AWS-LC and
+  silently selects its DTLS provider. The unchanged archive gate rejected absolute source paths
+  in AWS-LC's Windows objects. A minimal vendored adapter patch disables that feature, uses
+  rcgen/ring (already linked for HTTPS) for certificates, and explicitly selects RustCrypto DTLS.
+  The final graph contains neither AWS-LC nor OpenSSL. See vendor/str0m-rust-crypto/PATCH.md.
+  Upstream source revision is 5f2183ce7c67117cd1960dfeb11bed11fc188b66, crypto/rust-crypto;
+  the repository MIT licence and original source are retained.
+- A snapshot used to be capped at 255 bytes and the initial pad could be silently truncated.
+  Protocol 3 now sends one full 834-byte rider snapshot per STATE (payload version 4), at 30 Hz.
+  This costs more bandwidth, especially for the host's AI, but restores controls after packet loss.
+  Slot identity is bound to the channel allocation's member ID, mapped by each race's start.
+
 - Credentials file is absent. Live SFU spike and measurements wait for the lead's credentials.
 - Existing snapshots encode pad deltas. Before unreliable transport is activated they must
   become independent snapshots, and stale packets must be rejected before changing the mirror.
 
 ## Result
+
+Live acceptance 3-5 is pending credentials. No real SFU latency numbers, packet-loss race or
+before/after comparison have been measured. Do not release this lane until the live two-client
+spike and race pass. The lead also runs boot/race state traces against the shared reference build,
+and the cross-machine race in both directions after merging.
+
+Restart steps: provide the documented Realtime env/secrets in the server's gitignored `.dev.vars`,
+run the native channel test and server suite, then use `local_server.py` with `online_race.py`.
+Repeat with `DHD_NET_DROP_STATE=5` in the clients' environments; collect both 30 s `net:` windows.
+The Part 1 commit is the WebSocket baseline for the same setup (before activating protocol 3).

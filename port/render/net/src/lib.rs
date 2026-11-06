@@ -9,11 +9,14 @@
 //! read and written at once, so it sits behind `Conn::live` (the send lock): the receive thread
 //! waits for bytes by peeking at its own handle of the socket, unlocked (50 ms at most, so a
 //! dropped connection is noticed), then reads what arrived without blocking under the lock; the
-//! send thread writes, blocking, under the same lock.
+//! send thread writes, blocking, under the same lock. It also owns the room's SFU UDP socket,
+//! str0m state machine, negotiated channels and bounded event/state queues. Race frames never
+//! enter the TCP stream. Signaling remains on the room WebSocket.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 mod http;
 mod stream;
+mod sfu;
 
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -58,6 +61,7 @@ struct Live {
 struct Queue {
     out: VecDeque<(bool, Vec<u8>)>,
     connected: bool,
+    signals: VecDeque<serde_json::Value>,
 }
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
@@ -113,6 +117,7 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                     let mut live = lock(&c.live);
                     let mut q = lock(&c.queue);
                     q.out.clear();
+                    q.signals.clear();
                     q.connected = true;
                     *live = Some(Live { ws, tcp });
                 }
@@ -191,6 +196,16 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
             }
         }
         for (binary, data) in got {
+            if !binary {
+                if let Ok(m) = serde_json::from_slice::<serde_json::Value>(&data) {
+                    if matches!(m["type"].as_str(), Some("welcome" | "sfu_offer" | "sfu_channels" | "sfu_closed" | "room" | "start" | "ended")) {
+                        let mut q = lock(&c.queue);
+                        if q.signals.len() < 64 { q.signals.push_back(m); }
+                    }
+                }
+            } else if matches!(data.first(), Some(5 | 6)) {
+                continue; // Race frames have exactly one transport: SFU DataChannels.
+            }
             if let Some(f) = c.h.on_message {
                 let mut v = Vec::with_capacity(data.len() + 1);
                 v.extend_from_slice(&data);
@@ -206,14 +221,96 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
 
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
+    let mut sfu: Option<sfu::Sfu> = None;
+    let mut race_start = None;
+    let mut room = None;
+    let mut held_ready: Option<Vec<u8>> = None;
+    let mut early_events: VecDeque<Vec<u8>> = VecDeque::new();
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
             let _ = c.wake.wait_timeout_while(q, TICK, |q| q.out.is_empty() && !c.stopping.load(Ordering::Acquire));
         }
+        if !lock(&c.queue).connected { sfu = None; }
         loop {
+            let message = lock(&c.queue).signals.pop_front();
+            let Some(message) = message else { break };
+            let result = match message["type"].as_str() {
+                Some("welcome") => {
+                    sfu = None;
+                    race_start = None;
+                    room = None;
+                    held_ready = None;
+                    early_events.clear();
+                    lock(&c.queue).out.push_back((false, br#"{"type":"sfu_open"}"#.to_vec()));
+                    Ok(())
+                }
+                Some("sfu_offer") => match sfu::Sfu::offer(message["sdp"].as_str().unwrap_or("")) {
+                    Ok((mut rtc, answer)) => {
+                        if let Some(room) = &room { let _ = rtc.signal(room); }
+                        if let Some(start) = &race_start { let _ = rtc.signal(start); }
+                        sfu = Some(rtc);
+                        lock(&c.queue).out.push_back((false, answer.to_string().into_bytes()));
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                },
+                Some("room") => {
+                    room = Some(message.clone());
+                    if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) }
+                },
+                Some("start") => {
+                    race_start = Some(message.clone());
+                    if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) }
+                },
+                _ => if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) },
+            };
+            if result.is_err() { eprintln!("net: SFU signaling failed"); c.force_close(); sfu = None; }
+        }
+        let mut incoming = Vec::new();
+        if let Some(rtc) = sfu.as_mut() {
+            while let Some(event) = early_events.pop_front() {
+                if rtc.send(&event).is_err() { c.force_close(); break; }
+            }
+            if rtc.usable() {
+                if let Some(ready) = held_ready.take() { lock(&c.queue).out.push_back((false, ready)); }
+            }
+            match rtc.poll() {
+                Ok((text, frames)) => {
+                    for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
+                    incoming = frames;
+                }
+                Err(_) => { eprintln!("net: SFU connection failed"); c.force_close(); sfu = None; }
+            }
+        }
+        for data in incoming {
+            if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
+        }
+        loop {
+            let item = lock(&c.queue).out.pop_front();
+            let Some((binary, data)) = item else { break };
+            if binary && matches!(data.first(), Some(5 | 6)) {
+                if let Some(rtc) = sfu.as_mut() {
+                    while let Some(event) = early_events.pop_front() {
+                        if rtc.send(&event).is_err() { break; }
+                    }
+                    if rtc.send(&data).is_err() { c.force_close(); sfu = None; }
+                } else if data.first() == Some(&6) {
+                    if early_events.len() < 128 { early_events.push_back(data); } else { c.force_close(); }
+                }
+                continue;
+            }
+            if !binary {
+                if let Ok(m) = serde_json::from_slice::<serde_json::Value>(&data) {
+                    if m["type"] == "ready" {
+                        if m["ready"] == false { held_ready = None; }
+                        else if !sfu.as_mut().is_some_and(|rtc| rtc.usable()) {
+                            held_ready = Some(data); continue;
+                        }
+                    }
+                }
+            }
             let mut live = lock(&c.live);
-            let Some((binary, data)) = lock(&c.queue).out.pop_front() else { break };
             if let Some(l) = live.as_mut() {
                 let msg = if binary {
                     Message::Binary(Bytes::from(data))
@@ -273,6 +370,13 @@ pub unsafe extern "C" fn ws_send(ws: *mut WsConn, binary: c_int, data: *const c_
     let bytes = if n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(data as *const u8, n) }.to_vec() };
     let mut q = lock(&c.queue);
     if !q.connected {
+        return;
+    }
+    if q.out.len() >= 256 {
+        // State may be superseded; reliable control/events must fail visibly, never vanish.
+        let state = binary != 0 && bytes.first() == Some(&5);
+        drop(q);
+        if !state { c.force_close(); }
         return;
     }
     q.out.push_back((binary != 0, bytes));

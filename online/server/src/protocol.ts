@@ -1,6 +1,6 @@
 // Wire protocol constants and pure helpers. The specification is docs/online-protocol.md.
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 export const MAX_MEMBERS = 10;
 export const DEFAULT_MAX_PLAYERS = 10;

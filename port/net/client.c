@@ -43,6 +43,8 @@ static void say(NetClient *c, const char *fmt, ...)
         c->tr.send_text(c->tr.ctx, text);
 }
 
+/* dhd_net routes STATE to state and EVENT to events on the room SFU association;
+   only binary PING/PONG use the WebSocket. The fake transport tests exercise the same API. */
 static void send_binary(NetClient *c, const uint8_t *data, size_t n)
 {
     if (c->connected && n)

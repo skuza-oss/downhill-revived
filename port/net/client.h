@@ -8,7 +8,7 @@
 
 #include "net.h"
 
-enum { NET_PROTOCOL = 2, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
+enum { NET_PROTOCOL = 3, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
 
 typedef struct {
     void *ctx;

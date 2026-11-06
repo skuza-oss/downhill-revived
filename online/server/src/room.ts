@@ -1,5 +1,6 @@
 // One lobby and its race. Lobby control is JSON; the race is binary frames relayed to the other
-// racers with no game logic. Protocol: docs/online-protocol.md.
+// racers through the SFU; this object owns lobby and signaling. Protocol: docs/online-protocol.md.
+import { Realtime, type SfuSession, type SfuSecrets } from "./sfu";
 import { DurableObject } from "cloudflare:workers";
 import { LISTING_REFRESH_MS, type LobbyEntry } from "./lobbies";
 import {
@@ -9,8 +10,6 @@ import {
   FEATURE_COUNTDOWN,
   FRAME_PING,
   FRAME_PONG,
-  FRAME_STATE,
-  FRAME_EVENT,
   HELLO_TIMEOUT_MS,
   OUTDATED_MESSAGE,
   MAX_BINARY_BYTES,
@@ -72,6 +71,7 @@ interface Member {
   /** The rejoin token (rejoinToken): only a hello with it takes this member back. Members made
       before tokens have none; their games (older releases) are below MIN_VERSION. */
   token?: string;
+  sfu?: SfuSession;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -175,6 +175,7 @@ function sessionName(s: string): string {
 type Msg = Record<string, unknown> & { type: string };
 
 export class Room extends DurableObject<Env> {
+  private sfuQueue: Promise<void> = Promise.resolve();
   private state: RoomState | null = null;
   private sockets = new Map<number, WebSocket>();
   /** Round-trips from our pings, per member. Memory only; re-measured after a wake-up. */
@@ -315,6 +316,43 @@ export class Room extends DurableObject<Env> {
     if (!st || !me) return;
     const isHost = st.hostId === me.id;
 
+    if (m.type.startsWith("sfu_")) {
+      // Serialize across external awaits without holding the DO input gate.
+      const run = this.sfuQueue.then(async () => {
+        if (this.sockets.get(me.id) !== ws || !this.state?.members.includes(me)) return;
+        const api = new Realtime(this.env as Env & SfuSecrets);
+        try {
+          if (m.type === "sfu_open") {
+            if (me.sfu) await this.clearSfu(me);
+            const opened = await api.open();
+            me.sfu = opened.session;
+            await this.save();
+            this.send(ws, opened.message);
+          } else if (m.type === "sfu_answer" && me.sfu) {
+            await api.answer(me.sfu, m.sdp);
+            await this.save();
+          } else if (m.type === "sfu_connected" && me.sfu) {
+            const channels = await api.publish(me.id, me.sfu);
+            this.send(ws, { type: "sfu_channels", channels });
+            for (const other of this.state!.members) {
+              if (other.id === me.id || !other.sfu || other.sfu.phase !== "ready") continue;
+              const mine = await api.subscribe(me.sfu, other.id, other.sfu);
+              if (mine.length) this.send(ws, { type: "sfu_channels", channels: mine });
+              const theirs = await api.subscribe(other.sfu, me.id, me.sfu);
+              const peer = this.sockets.get(other.id);
+              if (peer && theirs.length) this.send(peer, { type: "sfu_channels", channels: theirs });
+            }
+            await this.save();
+          } else throw new Error("Invalid signaling phase");
+        } catch {
+          if (me.sfu) me.sfu.phase = "failed";
+          await this.save();
+          this.error(ws, "bad_value", "Realtime connection failed. Rejoin the room.");
+        }
+      });
+      this.sfuQueue = run.catch(() => {});
+      return run;
+    }
     switch (m.type) {
       case "pong":
         return this.onPong(me.id, m.s);
@@ -497,19 +535,6 @@ export class Room extends DurableObject<Env> {
     const b = new Uint8Array(data);
     b[1] = slot;
     switch (b[0]) {
-      case FRAME_STATE:
-      case FRAME_EVENT: {
-        const socks = this.raceSockets;
-        for (let i = 0; i < socks.length; i++) {
-          const s = socks[i];
-          if (s !== null && s !== ws) {
-            try {
-              s.send(data);
-            } catch {}
-          }
-        }
-        return;
-      }
       case FRAME_PING:
         if (n > 2 + PING_MAX_PAYLOAD) return;
         b[0] = FRAME_PONG;
@@ -873,11 +898,32 @@ export class Room extends DurableObject<Env> {
   }
 
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
+  /** Retire a publication and its subscriptions, without disclosing publication session IDs. */
+  private async clearSfu(member: Member): Promise<void> {
+    const api = new Realtime(this.env as Env & SfuSecrets);
+    if (member.sfu) await api.close(member.sfu);
+    for (const other of this.state?.members ?? []) {
+      if (other.id === member.id || !other.sfu) continue;
+      const channels = other.sfu.channels.filter(c => !c.local && c.memberId === member.id);
+      if (!channels.length) continue;
+      await api.close(other.sfu, channels);
+      const peer = this.sockets.get(other.id);
+      if (peer) this.send(peer, { type: "sfu_closed", channelIds: channels.map(c => c.channelId) });
+    }
+    delete member.sfu;
+  }
+
   private async leave(memberId: number, reason: "disconnect" | "leave" | "kicked"): Promise<void> {
     const st = this.state;
     if (!st) return;
     const i = st.members.findIndex((x) => x.id === memberId);
     if (i < 0) return;
+    const departed = st.members[i];
+    if (departed.sfu) {
+      const cleanup = this.sfuQueue.then(() => this.clearSfu(departed));
+      this.sfuQueue = cleanup.catch(() => {});
+      this.ctx.waitUntil(cleanup.catch(() => {}).then(() => this.save()));
+    }
     if (st.session) this.retire(st, memberId, "left");
     st.members.splice(i, 1);
     const ws = this.sockets.get(memberId);
