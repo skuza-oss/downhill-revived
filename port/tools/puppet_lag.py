@@ -16,8 +16,15 @@ For every traced step of the other human's puppet:
   lag         how far behind that moment the drawn position is: the time t' at which the sender's
               path passes nearest to the drawn position (searched 0.5 s back to 0.3 s ahead,
               linear between recorded steps), lag = now - t'. A lag near 0 means drawn at now.
+  jerks       steps where the puppet's drawn speed (its move since the previous drawn step) differs
+              from the sender's real speed by more than JERK units a second: a visible jump or
+              stop. Per thousand steps, and per thousand outside stalls (no step within 0.5 s
+              drawn more than 0.2 s behind: snapshots that stopped coming, which no way of
+              drawing can hide).
 Steps where the sender is crashing or the path jumps (a respawn) are skipped. Times in ms."""
 import argparse, bisect, re, struct, sys
+
+JERK = 30.0  # units a second; riders move about 95
 from pathlib import Path
 
 SNAP = struct.Struct('<i4xdi4f12f4f4f4f')  # clock, time, state, pos[4], rot[12], vel[4], spin[4]
@@ -86,7 +93,8 @@ def measure(viewer, sender, args):
         return None
     skew = float(m[-1][1]) / 1000  # the sender's GO minus ours, s
     times, pos, crash = own_path(sender / 'own.bin')
-    lags, errors = [], []
+    lags, errors, jerk_at, steps, stalled = [], [], [], 0, []
+    prev = None
     for line in (viewer / 'puppet.txt').read_text().splitlines():
         f = line.split()
         if len(f) < 6 or f[2] != '1':  # slot 1: the other human on a two-player race
@@ -94,18 +102,34 @@ def measure(viewer, sender, args):
         t = float(f[0])
         if t < args.start or t > args.end:
             continue
+        if t - float(f[1]) > 0.2:
+            stalled.append(t)
         p = tuple(map(float, f[3:6]))
         t_sender = t - skew   # the same real moment on the sender's race clock
         i = bisect.bisect_right(times, t_sender)
         if i <= 1 or i >= len(times) or any(crash[max(0, i - 40):i + 2]):
+            prev = None
             continue
         now = at_time(times, pos, t_sender)
         e, when = nearest_time(times, pos, p, t_sender)
         if now is None or when is None or e > 2.0:
+            prev = None
             continue
         errors.append(dist(p, now))
         lags.append((t_sender - when) * 1000)
-    return lags, errors
+        if prev and 0.002 < t - prev[0] < 0.05:
+            dt = t - prev[0]
+            before = at_time(times, pos, t_sender - dt)
+            if before is not None:
+                steps += 1
+                if abs(dist(p, prev[1]) / dt - dist(now, before) / dt) > JERK:
+                    jerk_at.append(t)
+        prev = (t, p)
+    def near_stall(t):
+        i = bisect.bisect_left(stalled, t - 0.5)
+        return i < len(stalled) and stalled[i] <= t + 0.5
+    calm = [t for t in jerk_at if not near_stall(t)]
+    return lags, errors, len(jerk_at) * 1000.0 / max(steps, 1), len(calm) * 1000.0 / max(steps, 1), len(stalled)
 
 
 def report(run, start=5, end=1e9):
@@ -116,10 +140,11 @@ def report(run, start=5, end=1e9):
         if not r:
             print(f'{viewer} shows {sender}: no GO skew in the log')
             continue
-        lags, errors = r
+        lags, errors, jerks, calm, stalled = r
         print(f'{viewer} shows {sender}: {len(lags)} steps; lag p50/p95/p99 {pct(lags, 50):.0f}/{pct(lags, 95):.0f}/'
               f'{pct(lags, 99):.0f} ms; error now p50/p95/p99 {pct(errors, 50):.3f}/{pct(errors, 95):.3f}/'
-              f'{pct(errors, 99):.3f} units')
+              f'{pct(errors, 99):.3f} units; jerks {jerks:.1f} per 1000 steps, {calm:.1f} outside stalls '
+              f'({stalled} stalled steps)')
 
 
 def main():

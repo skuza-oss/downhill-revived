@@ -47,7 +47,8 @@ after a version change before a live check.
 | `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots, PrintWindow captures) |
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting |
-| `port/tools/online_race.py` | two local games through a server, optionally with nettool bots |
+| `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |
+| `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool |
 | `port/android/test_disc_image.py [ISO]` | the Android side's plain-JVM tests: the first start's disc rules (the check, a complete copy) on synthetic images, and the update notice's page rule (finding 143) |
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
@@ -123,6 +124,7 @@ Online:
 | `DHD_NET_AFTER_RACE` | (with SCRIPTED) the menu script after a race |
 | `DHD_ONLINE_MENU_TRACE=1` | logs every online menu page and its rows |
 | `DHD_PUPPET_CAMERA=1` | camera 0 follows a puppet rider (the spectating camera) |
+| `DHD_PUPPET_PREDICT=0` | puppets interpolated in the past instead of predicted to the present (finding 169) |
 
 Pictures:
 

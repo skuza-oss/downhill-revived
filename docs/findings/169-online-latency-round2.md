@@ -61,8 +61,8 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
 - [x] Item 1, bundling: a PC's riders of one tick go out as STATE bundles (payload version 6,
       `port/hle/state_bundle.h`), first fit largest first, each at most 990 bytes of payload so the
       message with its race marker stays at or under 1,000 bytes, one SCTP chunk (str0m: 1150 - 48
-      DTLS - 40 SCTP = 1,062). The bundle header carries the sender's server clock when it packed
-      the tick (used by item 3). The riders' full pad refreshes (834 bytes) start at different
+      DTLS - 40 SCTP = 1,062). The bundle header carries a server-clock stamp (item 3 says which
+      moment). The riders' full pad refreshes (834 bytes) start at different
       phases (AI rider i at 30 - 3i), so two never share a tick; unit test `test_state_bundle.c`:
       ten riders with eight changing pad words fit at most 3 bundles a tick, the largest 987 bytes,
       never two full refreshes in one tick. Protocol 4 (server and client). nettool's replay and
@@ -99,6 +99,9 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       most, the bitmap's width). `src/abi.rs` gained the counter's and the touch overlay's
       function types, and `test_dhdr_abi.py` reads `f32`/`f64` (both functions were missing from
       the ABI check because it could not).
+- [x] The flood limit no longer silences a sender for the rest of the race (Surprises): messages
+      over 240 a second per bundle index are dropped, the first drop is logged.
+- [x] Checks, measurements, state traces, the Mac check (Result).
 
 ## Decisions
 
@@ -148,16 +151,86 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
 
 ## Surprises
 
-- Two runs late on 2026-11-06 (prediction on and off, the same build) had stalls of the other
-  rider's snapshots before they reached our socket: snapshot age p99 up to 1 s in some 30 s
-  windows and one gap of ~2.3 s, while the SFU loop's own waits stayed small (poll gap at most
-  34 ms, input wait at most 15 ms). Earlier runs had none. Another lane ran PC-Mac races on this
-  PC at that time. A stall hits both modes alike: interpolation carries the rider 0.2 s along its
-  velocity and holds, prediction 0.25 s and holds.
-
+- Snapshot stalls inside the receiving SCTP stack. In some local runs (the base build's too: age
+  p99 380-585 ms in a late window) a sender's STATE messages stop coming out for 0.5-6 s and then
+  arrive all at once. The datagrams keep arriving meanwhile (the guest's SFU line: ~100 a second
+  in, as usual), and our loop never waits (poll gap at most 34 ms, input wait at most 15 ms): str0m
+  holds the unordered messages until something unblocks it, most likely a lost chunk waiting for
+  its FORWARD-TSN. Not fixed here (a transport lane: str0m's PR-SCTP receive path, or sending
+  STATE so it can't wait); while it lasts both drawing modes hold the rider (interpolation after
+  carrying it 0.2 s, prediction after 0.25 s), and it shows as the p99s and the "stalled steps"
+  in the tables.
+- A stall's backlog froze a rider for the rest of a race: 360 STATE messages (6 s of the host's)
+  came out of the guest's SCTP stack at once, over the flood limit of 240 a second for bundle 0,
+  and the limit (finding 158 round 2: "silences that member's snapshots and events for the rest
+  of the race") silenced the host. 0.7.12 has the same hazard at its 120 a second per rider. The
+  limit now drops the excess of that second only (0e9c5fd); the same kind of run afterwards kept
+  every rider moving.
 - This PC's own rider's pad sender (`hle_puppet_start` began at slot 1) was never reset at a race
   start, while every receiver clears its mirror: pad words unchanged since the last race reached
   the others only at the next full refresh, up to a second into the race. Item 1 resets it with
   the others.
 
 ## Result
+
+Five items and one fix on `feat/online-latency`: 108a0cd (bundles, protocol 4), 00ca19e (60 a
+second), 94c5462 (shared clock, PONG time, `puppet_lag.py`), a1ed16c (prediction), 106e312 (the
+counter), 0e9c5fd (the flood limit), and this file with the docs.
+
+### Local numbers (one PC, two games, the real SFU)
+
+`port/tools/online_race.py --lag` through `local_server.py` (control plane on `wrangler dev`, race
+frames through the nearest Cloudflare location), both games minimised at 1x, scripted riding,
+finish at 70 s, eight host AI riders, WARP off, the PC shared with other lanes. Messages and ages
+from dhd.log's `net:` lines (the 30 s windows between GO and the finish); "behind" and "from the
+rider" from `puppet_lag.py` over race seconds 5-68 (both directions: host showing guest; guest
+showing host). Riders move about 95 units a second.
+
+| Build | STATE messages a second: host / guest sends | Snapshot age p50 / p95, ms | Puppet drawn behind real time p50 / p95, ms | Distance from the real rider p50 / p95, units | Jerks per 1000 steps (outside stalls) |
+|---|---|---|---|---|---|
+| Base (fce8a1f, 0.7.12) | 270 / 30 | 5-38 / 27-62 | 92 / 103; 52 / 56 | 8.8 / 10.8; 4.4 / 6.1 | 2.9; 2.4 |
+| Items 1+2 (00ca19e) | 90 / 60 | 11-17 / 24-26 | 46 / 52; 48 / 51 | 3.5 / 5.0; 4.6 / 5.5 | 3.2; 1.4 |
+| Item 3 (94c5462) | 89 / 60 | 20-24 / 30-40 | 45 / 48; 48 / 51 | 3.9 / 5.1; 4.7 / 5.3 | 4.0; 1.7 |
+| Lane, `DHD_PUPPET_PREDICT=0` | 89 / 60 | 21-41 / 36-48 (one window 633: a stall) | 44 / 48; 50 / 56 | 3.7 / 4.9; 4.4 / 5.7 | 1.5; 8.5 |
+| Lane, prediction (default) | 89 / 60 | 20-33 / 34-71 | 0 / 5; 0 / 4 | 0.20 / 0.96; 0.18 / 1.02 | 1.5; 2.0 |
+
+The last two rows are the final build (0e9c5fd), one run each, back to back; an earlier pair of the
+same code before the flood-limit fix gave the same picture (prediction: 0 ms, 0.22-0.25 / 1.3-1.5
+units; interpolation 44-61 ms, 3.8-5.1 units). The base's ages use finding 158's estimator (GO +
+race ms), the others the bundle stamp; both are the server-clock age of the newest snapshot
+sampled every network tick. With prediction the age no longer adds to what players see: it is
+the span the rider is carried across. Every race ended with both riders at 1:10.03 and the same
+results on both games; hits landed in every run (the guest's 2-3 punches, the host AI's 9-14 on
+the guest), each applied by its victim's PC.
+
+The counter in a race (guest, prediction on): "RIDERS 33 MS", "RIDERS 12 MS" (captured with
+`DHD_CAPTURE_PRESENTED`).
+
+### Checks
+
+- `python tools/check.py server`: OK (135 tests, typecheck). `python tools/check.py port -j 6`
+  (it runs `quick` first: docs, core, runtime tests with `state-bundle` and `puppet-predict`): OK
+  on 106e312. After 0e9c5fd (Rust only): `rustgs.py test -- -p dhd_net -p dhd_render --lib` 14 + 9
+  passed, the game rebuilt; the final check runs are listed below.
+- State traces (`state_trace_run.py`, the base build fce8a1f against the lane at 106e312, same
+  recipe): boot all 600 rows match, race all 5,000 rows match. Offline and deterministic runs are
+  unchanged: every change is in online-only paths (`pp.online`, `on.*`, the network library) or
+  the counter's text.
+- macOS: `rustgs.py check --target aarch64-apple-darwin` cannot run on Windows as it stands: ring's
+  C needs Apple's SDK header `TargetConditionals.h` (no worktree on this PC has ever finished that
+  target). With ring compiled freestanding as rustgs does for Linux (`-ffreestanding -nostdlibinc
+  -DRING_CORE_NOSTDLIBINC=1`) and a stand-in for that one header (only for the check, not
+  committed), the whole library checks for aarch64-apple-darwin. The C changes have no platform
+  code. A real Mac build is the PC<->Mac run's.
+
+### For the lead
+
+- Protocol 4: the release must raise `MIN_VERSION` to it; 0.7.12 and this lane cannot race
+  together (the server refuses the other protocol).
+- The PC<->Mac comparison (acceptance 4) is the other worker's run of this build; record it here.
+- The receive-side SCTP stalls (Surprises) are worth a transport lane; with the flood-limit fix they
+  only hold a rider while they last.
+- `rustgs.py check --target aarch64-apple-darwin` needs a decision: ship a stand-in
+  `TargetConditionals.h` for Windows checks, or say in `port/render/AGENTS.md` that the Mac check
+  runs on the Mac.
+- Hits keep finding 044's rule on the predicted pose (Decisions); a victim-side check was not added.
