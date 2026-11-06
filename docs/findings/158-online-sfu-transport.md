@@ -83,6 +83,8 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - [x] Client: `dhd_net` SFU transport; `port/net/client.c` sends and receives race frames on it.
 - [x] WebSocket race relay deleted; tests and docs updated.
 - [x] Measurements recorded (acceptance 3-5); local routing and load caveats below.
+- [x] Round 3: bare transport probe, client loop delays found and fixed, fair race comparison
+      against the relay on the official server (section "Round 3" below).
 
 ## Decisions
 
@@ -118,6 +120,18 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   Gaps count arrival intervals over 100 ms. The follow-up metric commit also reads the v3 batch
   header, so it can be applied to Part 1 for the WebSocket baseline before comparing ages.
 
+- Round 3: the SFU socket gets its own reader thread, which blocks in `recv_from` (100 ms
+  timeout to notice a dropped association) and wakes the send thread for every datagram. The
+  send thread stays the only owner of `Rtc` (str0m is sans-IO and single-owner); only raw
+  datagrams cross threads, through a bounded inbox (1,024). Windows' UDP reset after an ICMP
+  unreachable is ignored; ICE consent decides whether the association is gone.
+- Round 3: the protocol-2 relay baseline for the fair comparison runs against the official
+  server `wss://dhd.skuza.app` in the harness's private rooms (unlisted unless DHD_NET_PUBLIC).
+  `wrangler dev --remote` cannot host this server: its Durable Objects are SQLite-backed, and
+  Cloudflare's docs say SQLite-backed Durable Objects do not support remote development
+  ([environments](https://developers.cloudflare.com/durable-objects/reference/environments/)).
+  The official server's code is unchanged since v0.7.11 and has no STATE rate limit, so it relays
+  the baseline's 30 Hz Part 1 snapshots as they are. Nothing was deployed.
 - 2026-11-06 (the user): players' IP addresses must never reach other players, so direct
   peer-to-peer is out.
 - 2026-11-06 (the user): the SFU design over keeping the Durable Object relay, own UDP relays, or
@@ -165,6 +179,28 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   proceeded without printing or copying credential values.
 - Initial snapshots encoded pad deltas; protocol 3 sends independent snapshots and rejects
   stale packets before changing the mirror.
+- Round 3: most of round 2's SFU delay came from the PC, not Cloudflare. Three causes, with
+  numbers in "Round 3" below: (1) the send thread read the UDP socket only when it woke (a
+  queued message or its 10 ms tick, which Windows' default timer stretches to ~15.6 ms);
+  (2) frames the game queued were handed to the SFU after the poll that writes them, so each
+  waited for the next wake; (3) frames queued during a poll had the same wait (~3% of a
+  host's nine-rider snapshots, up to 12.5 ms). str0m itself adds nothing measurable: a write
+  reaches the socket in 0.01 ms (p99 0.02-0.6 ms) and received data comes out in the same
+  `handle_input`.
+- Round 3: this PC ran Cloudflare WARP, and all SFU traffic went through its tunnel (route
+  interface `CloudflareWARP`). The tunnel set the floor at ~28 ms RTT and made most of the
+  tail: an ICMP ping to the SFU edge alone gave p99 65-79 ms, max 123 ms, and lost packets.
+  The owner turned WARP off on 2026-11-06 (it stays off). The traffic now goes over Ethernet and
+  the same ping is p50 8 / p99 11 / max 37 ms. Round 2's numbers, and the first round 3
+  probes below, include the tunnel. Round 2's age growth from one window to the next did not
+  reproduce in a 120 s probe through the tunnel (p50 32 in every window). After the fixes and
+  without WARP, the race windows have 0-1 gaps over 100 ms instead of 6-17. The first window
+  is lower on both transports because it starts at GO.
+- Round 3, tried and ruled out: str0m's SCTP send buffer (128 kB `max_buffered_amount`, never
+  near full at these rates), SCTP bundling or pacing (write to datagram 0.01 ms), and a stall
+  in our loop when it is polled continuously (longest round 5.9 ms with one rider). Loop
+  outliers that remain (poll gaps up to 33 ms, a few input waits over 5 ms per 30 s) come
+  with the PC at 55-62% CPU from other lanes' builds and games: the thread is not scheduled.
 
 ## Result
 
@@ -359,3 +395,100 @@ before treating restrictive-network support as complete. Also retain the lead's 
 shared-main-reference trace and cross-machine races in both directions, native Mac/Linux
 verification, and a full-room/AI upload measurement. The local WebSocket comparison alone
 cannot establish a latency improvement for geographically distant rooms.
+
+## Round 3: the client loop, the probe and a fair comparison
+
+### Bare transport probe
+
+`port/render/net/src/probe.rs` (tests only, `#[ignore]`) opens two Realtime SFU sessions
+through the real API, publishes `state` (unordered, maxRetransmits 0) and `events` from each,
+subscribes each to the other, and sends timestamped snapshots at 30 Hz. Both clients live in one
+process, so one clock gives the one-way delay. `probe_sfu_one_way_delay` runs the game's own
+stack (`ws_start`, its send thread, `sfu::Sfu`) behind a local stand-in for the room's Durable
+Object, which makes the Realtime API calls itself. `probe_sfu_direct` busy-polls two `Sfu` values
+on one thread: the floor without our loop. Credentials come from REALTIME_APP_ID /
+REALTIME_APP_TOKEN or `online/server/.dev.vars` at run time and are never printed. Run:
+`python port/tools/rustgs.py test -- -p dhd_net -p dhd_render --lib -- --include-ignored --nocapture probe_sfu`
+(DHD_PROBE_SECONDS, DHD_PROBE_RIDERS, DHD_PROBE_RIDERS_B, DHD_PROBE_BYTES; see the file).
+
+One-way delay, ms, both directions (client 0 / client 1 where they differ); "gaps" are rider-0
+arrival intervals over 100 ms. 30 s runs unless noted; 150-byte snapshots, 170 for 9+1.
+
+| Run | Riders per tick | p50 | p95 | p99 | max | gaps |
+|---|---|---|---|---|---|---|
+| WARP on, before (code of 857fe29) | 1 | 44.3 | 87.8 | 112 | 154 | 3 / 4 |
+| WARP on, before, busy-polled floor | 1 | 30.6 | 34-63 | 65-91 | 90-130 | 0 |
+| WARP on, before | 10 | 53-54 | 110 | 133-154 | 299 | 11 / 9 |
+| WARP on, before, busy-polled floor | 10 | 33-35 | 76-89 | 95 | 131-134 | 1 / 0 |
+| WARP on, + reader thread (df0772c) | 1 | 37.7-38.0 | 66 | 97-99 | 122 | 2 / 3 |
+| WARP on, + reader thread | 10 | 35.7-36.0 | 93 | 152 | 216 | 5 / 5 |
+| WARP on, + flush before poll (4362170) | 1 | 30.6-30.7 | 77-79 | 116 | 158 | 2 |
+| WARP on, + flush before poll | 10 | 33.1-33.5 | 59.5 | 93 | 113 | 0 |
+| WARP on, + re-poll (c38fa54), 60 s | 9 + 1 | 32.8 / 33.8 | 71 / 78 | 93 / 95 | 166 | 7 / 9 |
+| WARP off, final, 60 s | 1 | 8.6 / 9.1 | 9.6 / 10.8 | 11.5 / 12.2 | 21 / 26 | 0 |
+| WARP off, final, busy-polled floor, 60 s | 1 | 8.7 / 8.3 | 9.6 / 9.4 | 15.9 / 17.4 | 34 / 33 | 0 |
+| WARP off, final, 60 s | 9 + 1 | 8.6 / 11.4 | 10.5 / 12.8 | 12.6 / 14.5 | 25 / 33 | 0 |
+
+The loop's own wait, from its new 30 s `net: SFU` line (dhd.log): before the fixes about half of
+all writes waited over 5 ms (up to 12.5-15 ms) and datagrams waited up to a tick. With all three
+fixes, input wait max 1-3.5 ms and send wait max 0.1-9.4 ms (0-8 over 5 ms per 30 s, of
+1,700-2,300 datagrams). The final game stack through the SFU is within ~1 ms of the busy-polled
+floor and of the ICMP ping to the edge. Edge ping, 900 samples, the same window as a probe:
+WARP on p50 28 / p95 32 / p99 79 / one lost; WARP off p50 8 / p95 9 / p99 11 / max 37 / none lost.
+
+### Fair race comparison (WARP off, same PC, same harness)
+
+Same method as round 2: two native clients from `online_race.py`, native renderer at 1x,
+minimised, no screenshots, scripted pedal/punch, forced finish at 70 s, eight host-owned AI
+riders, the GO-clock age estimator, the first two 30 s windows after GO (both before the finish).
+SFU: this branch at c38fa54, control plane on a local `wrangler dev` (it only sets up the
+channels), race frames through the nearest Cloudflare location. Relay: the prepared Part 1 +
+age-metric build (protocol 2) against the official server in a private room; the room's
+Durable Object ran in a city in another country, game ping 43-49 ms. The nearest Cloudflare
+location is ~8 ms RTT from this PC. Runs were interleaved (SFU, relay, relay, SFU). The PC was
+not idle: other lanes ran builds and two games throughout. CPU is the whole PC's, sampled every
+2 s for 200 s per run.
+
+| Run (PC CPU avg / p95) | Receiver, sender | Window 1 p50/p95/p99; gaps | Window 2 p50/p95/p99; gaps |
+|---|---|---|---|
+| SFU 1 (62% / 82%) | host, guest | 45/66/70; 0 | 41/61/67; 0 |
+| SFU 1 | guest, host | 19/41/45; 0 | 37/62/67; 0 |
+| Relay 1 (56% / 73%) | host, guest | 71/87/89; 0 | 89/101/102; 0 |
+| Relay 1 | guest, host | 72/87/92; 0 | 90/104/105; 0 |
+| Relay 2 (54% / 75%) | host, guest | 85/102/104; 0 | 83/104/106; 0 |
+| Relay 2 | guest, host | 77/99/109; 0 | 78/99/104; 0 |
+| SFU 2 (55% / 74%) | host, guest | 30/45/49; 0 | 43/60/64; 0 |
+| SFU 2 | guest, host | 28/53/56; 0 | 37/62/66; 0 |
+
+All races finished at 70.03 s for both riders with matching results. The third window (it
+reaches the finish and results wait) shows bin 1001 on both transports and is excluded, as in
+round 2. Raw logs (local only): build/check/sfu-round3-2, -3 and ws-round3-1, -2. An earlier
+SFU run (sfu-round3-1) still went through WARP and is left out. The estimator adds ~30 ms to
+the one-way transit on both transports (time to the next snapshot at 30 Hz, network-tick
+sampling, clock offset).
+
+Result: through the SFU the snapshot age is about 40-45 ms lower at p50 and at p95 than the
+relay through the official server (SFU p50 19-45, p95 41-66; relay p50 71-90, p95 87-104),
+with no gaps over 100 ms on either. On this PC the relay pays the Durable Object detour
+(finding 135): ~45 ms RTT against ~8 ms to the SFU's edge. Where a room's Durable Object runs in
+the players' own city, the relay's detour is small and the two should come out close; that case
+was not measured here. The SFU keeps its other advantage there: one lost packet does not hold
+later snapshots back (no TCP head-of-line blocking), and loss repeats (round 2) showed that.
+
+### Round 3 validation and recommendation
+
+- Unit tests (5 dhd_net, 8 renderer) pass with every commit. `check.py quick -j 6`, `check.py
+  server -j 6` (npm test, typecheck) and `check.py port -j 6` (game build, net tests, GS and
+  wasm2c tests) pass on c38fa54 plus the probe and this file.
+- No state trace was run: round 3 changes only the Rust network library (the core module is
+  reused unchanged, "module C as before"), and deterministic offline runs never start the
+  network. The lead's merged-branch traces still apply.
+- All harness, wrangler/workerd, game and probe processes this round started have ended.
+  Nothing was pushed, deployed, tagged or changed in secrets or version.
+
+Recommendation: keep the SFU. With the client loop fixed it adds ~1 ms over the network path
+in the bare probe, and in the race it beats the relay through the official server by ~40-45 ms
+at p50 and p95 on this PC, where the room's Durable Object sits in another country. The relay
+plus Part 1 is the fallback only if the remaining SFU work (TURN/TLS for UDP-blocked players,
+native Mac/Linux checks, the cross-machine races) turns out too costly. Unmeasured: a room
+whose Durable Object runs in the players' own city, and two PCs on different networks.
