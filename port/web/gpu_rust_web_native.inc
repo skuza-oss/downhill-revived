@@ -159,6 +159,9 @@ static int native_show(Native *n, DhdrSurface *surface, unsigned w, unsigned h)
    core's calls (a promising root). */
 static int native_read_wait(void) { return web_gpu_await(); }
 
+/* A present failed: the browser's lost device has its own handling (port/render/src/web). */
+static void native_device_lost(void) {}
+
 /* A read of GS memory (gs_read_image's pages). The browser's reads are never deferred
    (port/hle/graphics.c defers only behind a memory fault guard, which wasm has not), so the Z
    probe's bookkeeping that natively runs as the read is deferred (native_stage_pages: the watch

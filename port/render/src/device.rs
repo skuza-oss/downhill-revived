@@ -12,7 +12,8 @@
 //!   the PCI ids (not a CPU one), else high performance.
 //! - Device: the adapter's own limits; DUAL_SOURCE_BLENDING when offered and not refused
 //!   (`DHDR_DEV_NO_DUAL_SOURCE`); default memory hints; trace off.
-//! - `guard::install_error_handler` right after creation; `log::set_level(log_level)`.
+//! - `guard::install_error_handler` right after creation, and `lost::watch` (a lost device ends
+//!   the game with a message, finding 171); `log::set_level(log_level)`.
 //! - `DHDR_FEAT_RENDER_PIPELINES`: present.wgsl's pipeline (an RGBA8 target) built inside a
 //!   Validation scope, as the probe.
 //!
@@ -182,6 +183,12 @@ mod native {
     pub fn create(o: &DeviceOptions) -> Result<Gpu, String> {
         crate::log::set_level(o.log_level);
         let backends = backends(o);
+        // DHD_GPU_DRED=1: D3D12's breadcrumbs for a lost device's report (finding 171). Before the
+        // instance: wgpu-hal makes each D3D12 adapter's device when it enumerates adapters.
+        #[cfg(windows)]
+        if backends == wgpu::Backends::DX12 {
+            crate::lost::d3d12::dred_enable();
+        }
         let compiler = shader_compiler(o);
         let mut instance = instance(o, compiler.clone());
         let mut adapter = adapter(&instance, backends, o)?;
@@ -238,6 +245,7 @@ mod native {
         }))
         .map_err(|e| format!("request_device on {} ({:?}): {e}", info.name, info.backend))?;
         crate::guard::install_error_handler(&device);
+        crate::lost::watch(&device);
         let render_pipelines = pollster::block_on(render_probe(&device).pop()).is_none();
         Ok(Gpu::from_parts(instance, adapter, device, queue, o.clone(), render_pipelines))
     }

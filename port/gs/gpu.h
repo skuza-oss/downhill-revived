@@ -31,6 +31,9 @@ int gs_gpu_surface_reset(Gs *g, const GsWindow *window);
 void gs_window_pixels(unsigned *width, unsigned *height);
 int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned height,
                    unsigned window_width, unsigned window_height);
+/* 1 once a present failed on a lost device (the driver reset or removed the GPU; finding 171): no
+   picture can be shown any more. Any thread. */
+int gs_gpu_lost(void);
 /* Counts describe submissions, not completed GPU work (the exact front end's, gpu_exact.inc). */
 enum {
     GS_GPU_HW_DISABLED, GS_GPU_HW_UNAVAILABLE, GS_GPU_HW_FORMAT, GS_GPU_HW_ALIAS,

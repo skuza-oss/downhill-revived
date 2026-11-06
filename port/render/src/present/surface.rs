@@ -283,6 +283,10 @@ impl Surface {
     /// Occluded); Err failed. The native present pass (native/present.rs) draws through this too.
     pub fn acquire(&mut self, window_w: u32, window_h: u32, reconfigure: bool) -> Result<Option<wgpu::TextureView>, String> {
         self.frame = None; // a frame drawn but never presented is dropped
+        if crate::lost::lost() {
+            // every call is a no-op on a lost device; C asks dhdr_device_lost and ends the game
+            return Err("the GPU device was lost".into());
+        }
         if window_w == 0 || window_h == 0 {
             return Ok(None);
         }
@@ -314,6 +318,7 @@ impl Surface {
                 wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
                     let view = t.texture.create_view(&wgpu::TextureViewDescriptor::default());
                     self.frame = Some(t);
+                    crate::lost::frame_acquired(self.gpu); // DHD_TEST_DEVICE_LOST
                     return Ok(Some(view));
                 }
                 wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return Ok(None),

@@ -4,7 +4,7 @@
    DHDR_FN declarations of both headers.
 
    SP10 (docs/findings/090-speed.md): an indexed native picture. Finding 109: the device's largest
-   texture. Finding 129: the perf: lines' GPU counters. */
+   texture. Finding 129: the perf: lines' GPU counters. Finding 171: a lost device. */
 #ifndef DHD_RENDER_EXT_H
 #define DHD_RENDER_EXT_H
 
@@ -35,6 +35,12 @@ DHDR_FN(dhdr_device_max_texture) uint32_t dhdr_device_max_texture(void);
    1 immediate, 2 mailbox, 3 fifo, 4 fifo-relaxed), [5] the adapter's kind (0 other, 1 integrated,
    2 discrete, 3 virtual, 4 cpu). Returns how many it wrote. Any thread. */
 DHDR_FN(dhdr_perf_read) uint32_t dhdr_perf_read(uint64_t *out, uint32_t count);
+
+/* Finding 171: 1 when the device was lost (the driver reset or removed it: every later call draws
+   nothing), else 0. The first 1 logs why (on D3D12 the removed reason, and DRED's breadcrumbs with
+   DHD_GPU_DRED=1). C asks after a present failed and then ends the game with a message. Any
+   thread; the browser's device always answers 0 (it has its own lost handling). */
+DHDR_FN(dhdr_device_lost) int dhdr_device_lost(void);
 
 #ifdef __cplusplus
 }

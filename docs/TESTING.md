@@ -134,6 +134,8 @@ Pictures:
 | `DHD_PERF_COUNTER=1` | the FPS & PING counter |
 | `DHD_PERF_LOG=0` | no `perf:` lines in dhd.log (on by default, finding 129) and none of their counting |
 | `DHD_GPU_STATS=N` | every N-th picture, GPU time (and on Vulkan pixels shaded) per kind of draw in dhd.log (finding 131) |
+| `DHD_TEST_DEVICE_LOST=N` | (D3D12) at the N-th presented frame this game's GPU device is removed (`ID3D12Device5::RemoveDevice`: this process only, no GPU reset); the game must log the reason and end with the lost-device box, exit code 1 (finding 171) |
+| `DHD_GPU_DRED=1` | (D3D12) DRED's breadcrumbs and page faults: a lost device's report names the command lists the GPU had not finished and where they stopped (finding 171) |
 | `DHD_NATIVE_SPEC=0\|sync` | `0`: the generic draw shader only; `sync`: specialised draw pipelines built at first use, not on a worker (replays and picture checks; finding 131) |
 
 Sound evidence: `DHD_SND_WAV=path` (the final mix), `DHD_SND_VOICE_TRACE=path` (each sounding voice

@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dhd_render.h"   /* -Iport/render/include */
+#include "dhd_render_ext.h"   /* dhdr_device_lost */
 #include "perf_log.h"     /* the perf: lines (finding 129) */
 
 #ifndef DHD_GS_TEST_BUILD
@@ -339,6 +340,18 @@ static void window_size(const GsWindow *window, unsigned *width, unsigned *heigh
     if (window->size) window->size(width, height);
 }
 
+/* A lost device (finding 171): a present failed and the renderer says the device is gone (the driver
+   reset or removed it; every later call draws nothing). Set from the presenting thread; present.c's
+   gs_pump_messages reads it on the game thread (gs_gpu_lost) and ends the game with a message. */
+static SDL_AtomicInt device_lost;
+
+static void device_lost_check(void)
+{
+    if (dhdr_device_lost()) SDL_SetAtomicInt(&device_lost, 1);
+}
+
+int gs_gpu_lost(void) { return SDL_GetAtomicInt(&device_lost); }
+
 /* ---- the native renderer (DHD_RENDER=native) ---- */
 
 #include "gpu_rust_native.inc"  /* the shared device ops, the native hooks, native_init, native_waits_for_vsync */
@@ -480,7 +493,10 @@ int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned heigh
     if (pixels && (!width || !height || width > 1024 || height > 1024)) return 0;
     if (!pixels && !p->e.display_valid) return 0;
     int r = dhdr_present_exact(p->surface, p->x, pixels, width, height, window_width, window_height);
-    if (r < 0) return 0;
+    if (r < 0) {
+        device_lost_check();
+        return 0;
+    }
     if (pixels) p->e.display_valid = 1;
     if (r == 1) {
         perf_render_size(pixels ? "exact (a movie or the CPU scanout)" : "exact", 1, width, height, window_width,
