@@ -1053,6 +1053,12 @@ export class Room extends DurableObject<Env> {
     // Back in the room: the Ready that put them in this race is spent; a new one is for the next.
     const member = st.members.find(x => x.id === id);
     if (member) member.ready = false;
+    if (member?.sfu && reason !== "left") {
+      const cleanup = this.sfuQueue.then(() => this.clearSfu(member));
+      this.sfuQueue = cleanup.catch(() => {});
+      this.ctx.waitUntil(cleanup.catch(() => {}).then(() => this.save()));
+    }
+    this.releaseSfu(st);
     this.rebuildRace();
     for (const ws of this.raceSockets) if (ws)
       this.send(ws, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
