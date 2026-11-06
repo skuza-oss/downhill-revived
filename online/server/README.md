@@ -36,6 +36,9 @@ node tools/loadtest.mjs --players 8 --seconds 30 --bytes 3000
 node tools/loadtest.mjs --url wss://dhd-online.<account>.workers.dev   # against a deployment
 ```
 
+The load test connects every player from one address: the limit per address (30 room
+connections a minute, `wrangler.jsonc` `ratelimits`) refuses runs past that (`rate_limited`).
+
 Measured with `wrangler dev` on the dev PC (4 players, 4 s, 600-byte STATE frames): every
 frame arrived whole and in order, relay one-way (sender → server → receiver) median 2.2 ms,
 p99 4.7 ms; binary PING round-trip median 3.8 ms. These are local numbers: on the internet add

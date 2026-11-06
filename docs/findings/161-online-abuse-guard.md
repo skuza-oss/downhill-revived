@@ -168,6 +168,11 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 
 ## Surprises
 
+- `tools/loadtest.mjs` still said protocol 1 in its hello, so the server (protocol 2) refused it:
+  fixed to take the protocol from `/v1/health`. With the guard on (`wrangler dev`): 4 players at
+  600 bytes and 10 players at 3000 bytes for 8 s, every frame relayed in order, no cap or limit
+  hit (relay median 4.2 and 7.3 ms locally).
+
 - The test runtime relays a binary frame in about 2 ms (300 frames took 687 ms), so a test can't
   send 2000 of them in a window: one test sets a room's own cap (`CAP_BINARY`, `CAP_WINDOW_MS`
   through the room's env), the tally itself is tested directly.
