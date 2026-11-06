@@ -187,11 +187,28 @@ own sending pauses (Surprises).
   object cache) made it, and the rerun passed. `python tools/check.py server`: OK (npm test,
   typecheck).
 
-### For the lead
+### PC↔Mac, merged `main` (cfe842a, with finding 169)
 
-- One PC↔Mac check (`cross_race.py`, both ways) of this branch was not run: it needs a Mac build
-  of the branch, and the local evidence above already covers the mechanism. The Mac runs the same
-  Rust code.
+Run by the lead's measurement worker after the merge, the same way as finding 169's comparison
+(temporary test Worker, both directions, 5 complete two-player races each, prediction on, lag
+traces on both games). Against finding 169's build alone (C there):
+
+| | 169 alone | 169 + this fix |
+|---|---|---|
+| Snapshot age p50 / p95 / p99 (ms) | 30-31 / 104-132 / 478-840 | 22-30 / 37-47 / 40-61 |
+| 30 s windows with p99 over 300 ms | 11 of 27 | 0 of 27 |
+| Gaps over 100 ms per minute | 0-3.3 | 0-1.2 |
+| Spike-seconds, PC / Mac | 9 / 7 | 0 / 0 |
+| Drawn behind real time, p50 / p95 / p99 (ms) | 0 / 3-7 / 5-55 | 0 / 3-4 / 6 |
+| Distance from the real rider, p50 / p95 / p99 (units) | 0.11-0.18 / 0.6-1.2 / 1.2-7.1 | 0.13-0.14 / 0.68-0.83 / 1.23-1.52 |
+
+Finish times matched on both machines in every race. The shared clock was symmetric (age on
+arrival 16-40 ms on the PC, 17-38 on the Mac); the inflated round trip that skewed it in 169's run
+did not recur, so finding 169's clock fix (56c8ce1) is still untested against it. No room
+WebSocket dropped at a race start (0 of 12), but those drops were intermittent and nothing here
+touches the room connection.
+
+### For the lead
 - Worth telling Cloudflare: subscriptions ignore `ordered` / `maxRetransmits` /
   `maxPacketLifeTime` (U bit 0, retransmitted, no FORWARD-TSN), with this file's evidence. If they
   fix it, their sender stops retransmitting STATE and the remaining timer-backoff pauses go too;
