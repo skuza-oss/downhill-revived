@@ -1,7 +1,9 @@
 //! Which keys and controller buttons stand for the PS2 pad's buttons (finding 157): dhd.ini's
 //! `keyboard`, `pad1` and `pad2` lines, their defaults (the layout the game always had), how a line
-//! is read and written, and the rules of a change: an input bound to another button moves (no
-//! duplicates), and no player is left without a way through the menus.
+//! is read and written, and the rules of a change: an input another button had swaps with the
+//! button's old one (no duplicates), and no device is left without a way through the menus (each
+//! of the keyboard, Controller 1 and Controller 2 on its own keeps Cross, Triangle, START and the
+//! d-pad).
 //!
 //! - What is bound are the DualShock 2's buttons (`TARGETS`): the game's own meaning of each stays
 //!   (Cross pedals in a race and confirms in the menus). The keyboard can also hold the sticks'
@@ -43,8 +45,8 @@ pub struct Target {
     /// (-1 left or up, 1 right or down).
     pub axis: u8,
     pub dir: i8,
-    /// The menus need it (Cross, Triangle, START, the d-pad): it is never left with nothing on the
-    /// keyboard and player 1's controller together, nor on player 2's controller.
+    /// The menus need it (Cross, Triangle, START, the d-pad): each device keeps an input on it, on
+    /// its own (the keyboard doesn't count for Controller 1, nor Controller 1 for the keyboard).
     pub essential: bool,
 }
 
@@ -451,7 +453,8 @@ pub fn format(device: usize, l: &Layout) -> String {
 /// A change to one layout, on a page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edit {
-    /// `input` (a key's vk, a controller input's id) to the target's slot; taken from where it was.
+    /// `input` (a key's vk, a controller input's id) to the target's slot; a button that had it gets the
+    /// target's old one there (a swap).
     Assign { target: usize, slot: usize, input: u8 },
     Clear { target: usize, slot: usize },
     /// The device's defaults.
@@ -470,8 +473,7 @@ pub enum Outcome {
     Refused(String),
 }
 
-/// The three layouts together: the rule that no player is left without a way through the menus
-/// looks at the keyboard and player 1's controller at once.
+/// The three layouts together (the dhd.ini lines are read and written as one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Controls {
     pub layouts: [Layout; 3],
@@ -483,20 +485,28 @@ impl Default for Controls {
     }
 }
 
+/// What a device's essential button needs, in the pages' words: "a key" or "a button".
+fn an_input(device: usize) -> &'static str {
+    if DEVICES[device].pad { "a button" } else { "a key" }
+}
+
 impl Controls {
     /// The layouts the three lines give (`parse`). A hand-made line that leaves an essential button
-    /// with nothing (the keyboard and player 1's controller both, or player 2's controller) puts
-    /// that player's keyboard (player 1) or controller (player 2) back to its defaults, with a line
-    /// in `problems`.
+    /// with nothing on its device puts that device alone back to its defaults, with a line in
+    /// `problems`.
     pub fn from_values(values: [&str; 3], problems: &mut Vec<String>) -> Controls {
         let mut c = Controls { layouts: [0, 1, 2].map(|d| parse(d, values[d], problems)) };
-        while let Some((player, t)) = c.unreachable() {
-            let device = if player == 1 { KEYBOARD } else { PAD2 };
-            problems.push(format!(
-                "{}: {} has no key or button: {} is back to its defaults",
-                DEVICES[device].key, TARGETS[t].label, DEVICES[device].label
-            ));
-            c.layouts[device] = default_layout(device);
+        for device in 0..DEVICES.len() {
+            if let Some(t) = c.missing(device) {
+                problems.push(format!(
+                    "{}: {} has no {}: {} is back to its defaults",
+                    DEVICES[device].key,
+                    TARGETS[t].label,
+                    if DEVICES[device].pad { "button" } else { "key" },
+                    DEVICES[device].label
+                ));
+                c.layouts[device] = default_layout(device);
+            }
         }
         c
     }
@@ -506,22 +516,20 @@ impl Controls {
         [0, 1, 2].map(|d| format(d, &self.layouts[d]))
     }
 
-    /// The first essential target a player has nothing on: (player, target).
-    pub fn unreachable(&self) -> Option<(u8, usize)> {
-        let has = |d: usize, t: usize| self.layouts[d].input[t][0] != 0;
-        (0..TARGETS.len()).filter(|&t| TARGETS[t].essential).find_map(|t| {
-            if !has(KEYBOARD, t) && !has(PAD1, t) {
-                Some((1, t))
-            } else if !has(PAD2, t) {
-                Some((2, t))
-            } else {
-                None
-            }
-        })
+    /// The first essential target `device`'s layout has nothing on.
+    pub fn missing(&self, device: usize) -> Option<usize> {
+        (0..TARGETS.len()).find(|&t| TARGETS[t].essential && self.layouts[device].input[t][0] == 0)
     }
 
-    /// Makes the change to `device`'s layout, unless it would leave a player without an essential
-    /// button. `kind`: the controller's PAD_KIND_*, for the words of the message.
+    /// The first device with an essential target it has nothing on: (device, target).
+    pub fn unreachable(&self) -> Option<(usize, usize)> {
+        (0..DEVICES.len()).find_map(|d| self.missing(d).map(|t| (d, t)))
+    }
+
+    /// Makes the change to `device`'s layout, unless it would leave that device without an
+    /// essential button ("Cross needs a button"). An input another button has swaps: the target
+    /// takes it, the other button the target's old input in that slot (none there: the other button
+    /// keeps what else it has). `kind`: the controller's PAD_KIND_*, for the words of the message.
     pub fn edit(&mut self, device: usize, edit: Edit, kind: i32) -> Outcome {
         let dev = &DEVICES[device];
         let mut next = *self;
@@ -536,6 +544,8 @@ impl Controls {
                     return Outcome::Refused(if dev.pad { "That button can't be used".into() } else { "That key can't be used".into() });
                 }
                 let word = input_label(device, input, kind);
+                // an alternate without a main is the main
+                let slot = if l.input[target][0] == 0 { 0 } else { slot };
                 match holder(l, input) {
                     Some((t, s)) if t == target && s == slot => return Outcome::Unchanged,
                     Some((t, _)) if t == target => {
@@ -543,15 +553,18 @@ impl Controls {
                         l.input[t].swap(0, 1);
                         tidy(&mut l.input[t]);
                     }
-                    other => {
-                        if let Some((t, s)) = other {
-                            l.input[t][s] = 0;
-                            tidy(&mut l.input[t]);
-                            message = format!("{word} moved from {} to {}", TARGETS[t].label, TARGETS[target].label);
-                        }
-                        let slot = if l.input[target][0] == 0 { 0 } else { slot };
+                    Some((t, s)) => {
+                        let old = l.input[target][slot];
                         l.input[target][slot] = input;
+                        l.input[t][s] = old;
+                        tidy(&mut l.input[t]);
+                        message = if old != 0 {
+                            format!("Swapped {} and {}", TARGETS[target].label, TARGETS[t].label)
+                        } else {
+                            format!("{word} moved from {} to {}", TARGETS[t].label, TARGETS[target].label)
+                        };
                     }
+                    None => l.input[target][slot] = input,
                 }
             }
             Edit::Clear { target, slot } => {
@@ -571,9 +584,8 @@ impl Controls {
         if next == *self {
             return Outcome::Unchanged;
         }
-        if let Some((player, t)) = next.unreachable() {
-            let without = if player == 1 { "no key and no button" } else { "no button on Controller 2" };
-            return Outcome::Refused(format!("Not changed: {} would have {without}", TARGETS[t].label));
+        if let Some(t) = next.missing(device) {
+            return Outcome::Refused(format!("{} needs {}", TARGETS[t].label, an_input(device)));
         }
         *self = next;
         Outcome::Changed(message)

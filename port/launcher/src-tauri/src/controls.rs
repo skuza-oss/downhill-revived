@@ -165,8 +165,14 @@ mod tests {
         let square = controls::target("square").unwrap();
         let ask = |edit: &str, target, input| Request { edit: edit.into(), target, slot: 0, input, on: true };
         let a = edit(&ini, 0, &ask("assign", square, x), 2, save).unwrap();
-        assert_eq!((a.outcome, a.message.as_str()), ("changed", "X moved from Cross to Square"));
-        assert_eq!(dhd_settings::read(&ini).unwrap().written("keyboard").as_deref(), Some("cross:space square:x"));
+        assert_eq!((a.outcome, a.message.as_str()), ("changed", "Swapped Square and Cross"));
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("keyboard").as_deref(), Some("cross:space,z square:x"));
+        // Cross's last key can't be cleared (finding 157: each device on its own)
+        let cross = controls::target("cross").unwrap();
+        assert_eq!(edit(&ini, 0, &ask("clear", cross, 0), 2, save).unwrap().outcome, "changed");
+        let a = edit(&ini, 0, &ask("clear", cross, 0), 2, save).unwrap();
+        assert_eq!((a.outcome, a.message.as_str()), ("refused", "Cross needs a key"));
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("keyboard").as_deref(), Some("cross:z square:x"));
         assert_eq!(state(&ini).layouts[0].inputs[square], [x, 0]);
         let a = edit(&ini, 2, &ask("swap", 0, 0), 2, save).unwrap();
         assert_eq!(a.outcome, "changed");

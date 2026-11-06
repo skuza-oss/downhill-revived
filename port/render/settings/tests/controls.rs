@@ -1,5 +1,6 @@
 //! The bindings' rules (controls.rs, finding 157): the defaults are the game's old layouts, lines
-//! read and written, a moved input, the rule that keeps the menus reachable.
+//! read and written, a swapped or moved input, the rule that keeps the menus reachable on each
+//! device on its own.
 
 use dhd_settings::controls::*;
 
@@ -116,32 +117,37 @@ fn broken_lines_fall_back() {
     assert_eq!(p.input[t("circle")], [id("south"), 0]);
     assert_eq!(p.input[t("cross")], [0, 0], "south went to circle");
     assert_eq!(problems.len(), 1, "{problems:?}");
-    // ...which leaves player 2 without Cross: Controller 2 goes back to its defaults
+    // ...which leaves Controller 2 without Cross: it goes back to its defaults
     let (c, problems) = layouts("", "", "square:east circle:south");
     assert_eq!(c.layouts[PAD2], default_layout(PAD2));
     assert!(problems.last().unwrap().contains("Controller 2 is back to its defaults"), "{problems:?}");
-    // player 1: the keyboard and Controller 1 together
+    // each device on its own: the keyboard's Cross doesn't count for Controller 1, nor its for the keyboard
     let (c, problems) = layouts("cross:none", "", "");
-    assert!(problems.is_empty());
-    assert_eq!(c.layouts[KEYBOARD].input[t("cross")], [0, 0]);
-    let (c, problems) = layouts("cross:none", "cross:none", "");
-    assert_eq!(c.layouts[KEYBOARD], default_layout(KEYBOARD));
-    assert_eq!(c.layouts[PAD1].input[t("cross")], [0, 0]);
-    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert_eq!(c, Controls::default());
+    assert_eq!(problems, ["keyboard: Cross has no key: Keyboard is back to its defaults"]);
+    let (c, problems) = layouts("square:x", "cross:none square:none", "up:none");
+    assert_eq!(c.values(), ["cross:space square:x".to_string(), String::new(), String::new()], "only the broken devices");
+    assert_eq!(problems, ["pad1: Cross has no button: Controller 1 is back to its defaults",
+                          "pad2: Up has no button: Controller 2 is back to its defaults"]);
 }
 
 #[test]
-fn a_key_moves() {
+fn a_key_swaps() {
     let mut c = Controls::default();
+    // X was Cross's alternate: Square takes it, Cross gets Square's Z in that slot
     let out = c.edit(KEYBOARD, Edit::Assign { target: t("square"), slot: 0, input: vk("x") }, 0);
-    assert_eq!(out, Outcome::Changed("X moved from Cross to Square".into()));
-    assert_eq!(c.layouts[KEYBOARD].input[t("cross")], [vk("space"), 0]);
-    assert_eq!(c.layouts[KEYBOARD].input[t("square")], [vk("x"), 0], "Z is left without a button");
-    assert_eq!(c.values()[KEYBOARD], "cross:space square:x");
-    // the same place again: nothing to do; the other slot of the same button: they change places
+    assert_eq!(out, Outcome::Changed("Swapped Square and Cross".into()));
+    assert_eq!(c.layouts[KEYBOARD].input[t("cross")], [vk("space"), vk("z")]);
+    assert_eq!(c.layouts[KEYBOARD].input[t("square")], [vk("x"), 0]);
+    assert_eq!(c.values()[KEYBOARD], "cross:space,z square:x");
+    // the same place again: nothing to do
     assert_eq!(c.edit(KEYBOARD, Edit::Assign { target: t("square"), slot: 0, input: vk("x") }, 0), Outcome::Unchanged);
-    c.edit(KEYBOARD, Edit::Assign { target: t("square"), slot: 1, input: vk("z") }, 0);
+    // to an empty slot: nothing to swap, so it moves (Cross keeps Space)
+    let out = c.edit(KEYBOARD, Edit::Assign { target: t("square"), slot: 1, input: vk("z") }, 0);
+    assert_eq!(out, Outcome::Changed("Z moved from Cross to Square".into()));
+    assert_eq!(c.layouts[KEYBOARD].input[t("cross")], [vk("space"), 0]);
     assert_eq!(c.layouts[KEYBOARD].input[t("square")], [vk("x"), vk("z")]);
+    // the other slot of the same button: they change places
     assert_eq!(c.edit(KEYBOARD, Edit::Assign { target: t("square"), slot: 1, input: vk("x") }, 0), Outcome::Changed(String::new()));
     assert_eq!(c.layouts[KEYBOARD].input[t("square")], [vk("z"), vk("x")]);
     // an alternate without a main is the main
@@ -150,9 +156,14 @@ fn a_key_moves() {
     c.edit(KEYBOARD, Edit::Clear { target: t("l3"), slot: 0 }, 0);
     c.edit(KEYBOARD, Edit::Assign { target: t("l3"), slot: 1, input: vk("g") }, 0);
     assert_eq!(c.layouts[KEYBOARD].input[t("l3")], [vk("g"), 0]);
-    // a stick direction on the keyboard
-    let out = c.edit(KEYBOARD, Edit::Assign { target: t("lstick_left"), slot: 0, input: vk("left") }, 0);
-    assert_eq!(out, Outcome::Changed("Left moved from Left to Left Stick Left".into()));
+    // a stick direction: taking the d-pad's only Left key would leave the keyboard without Left
+    let refused = c.edit(KEYBOARD, Edit::Assign { target: t("lstick_left"), slot: 0, input: vk("left") }, 0);
+    assert_eq!(refused, Outcome::Refused("Left needs a key".into()));
+    assert_eq!(c.edit(KEYBOARD, Edit::Assign { target: t("lstick_left"), slot: 0, input: vk("kp4") }, 0), Outcome::Changed(String::new()));
+    let out = c.edit(KEYBOARD, Edit::Assign { target: t("left"), slot: 0, input: vk("kp4") }, 0);
+    assert_eq!(out, Outcome::Changed("Swapped Left and Left Stick Left".into()));
+    assert_eq!((c.layouts[KEYBOARD].input[t("left")], c.layouts[KEYBOARD].input[t("lstick_left")]),
+               ([vk("kp4"), 0], [vk("left"), 0]));
     // the line read back is the same layout
     let mut problems = Vec::new();
     let again = Controls::from_values(c.values().each_ref().map(|s| s.as_str()), &mut problems);
@@ -164,30 +175,80 @@ fn a_key_moves() {
 }
 
 #[test]
-fn menus_stay_reachable() {
+fn each_device_keeps_the_menus() {
     let mut c = Controls::default();
-    // player 1: the keyboard may lose Cross while Controller 1 has it, not both
-    assert!(matches!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Changed(_)));
-    assert!(matches!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Changed(_)));
-    assert_eq!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Unchanged);
-    let refused = c.edit(PAD1, Edit::Assign { target: t("square"), slot: 0, input: id("south") }, 2);
-    assert_eq!(refused, Outcome::Refused("Not changed: Cross would have no key and no button".into()));
-    assert_eq!(c.layouts[PAD1], default_layout(PAD1), "a refused change changes nothing");
-    // player 2's controller on its own; the message names the pad's own button
-    let refused = c.edit(PAD2, Edit::Clear { target: t("up"), slot: 0 }, 1);
-    assert_eq!(refused, Outcome::Refused("Not changed: Up would have no button on Controller 2".into()));
+    // the keyboard on its own: Cross may lose Space (X is left), not its last key
+    assert_eq!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Changed(String::new()));
+    assert_eq!(c.layouts[KEYBOARD].input[t("cross")], [vk("x"), 0]);
+    assert_eq!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Refused("Cross needs a key".into()));
+    assert_eq!(c.layouts[KEYBOARD].input[t("cross")], [vk("x"), 0], "a refused change changes nothing");
+    // Controller 1 on its own, though the keyboard has Cross; Controller 2 the same
+    let refused = c.edit(PAD1, Edit::Clear { target: t("cross"), slot: 0 }, 1);
+    assert_eq!(refused, Outcome::Refused("Cross needs a button".into()));
+    assert_eq!(c.layouts[PAD1], default_layout(PAD1));
+    assert_eq!(c.edit(PAD2, Edit::Clear { target: t("up"), slot: 0 }, 1), Outcome::Refused("Up needs a button".into()));
+    for name in ["triangle", "start", "down", "left", "right"] {
+        assert!(matches!(c.edit(PAD2, Edit::Clear { target: t(name), slot: 0 }, 1), Outcome::Refused(_)), "{name}");
+    }
+    // other buttons may be left with nothing
+    assert_eq!(c.edit(PAD2, Edit::Clear { target: t("select"), slot: 0 }, 1), Outcome::Changed(String::new()));
     let out = c.edit(PAD2, Edit::Assign { target: t("square"), slot: 1, input: id("lt") }, 1);
     assert_eq!(out, Outcome::Changed("L2 moved from L2 to Square".into()));
-    // an essential button that keeps a second input may give one away
+    assert_eq!(c.layouts[PAD2].input[t("l2")], [0, 0]);
+    // a move (to an empty slot) that would take an essential button's last input: refused
+    let before = c;
+    let refused = c.edit(PAD2, Edit::Assign { target: t("circle"), slot: 1, input: id("south") }, 1);
+    assert_eq!(refused, Outcome::Refused("Cross needs a button".into()));
+    assert_eq!(c, before);
+    // an essential button that keeps a second input may give one away; a swap gives it the other's
     let mut c = Controls::default();
-    assert!(matches!(c.edit(PAD2, Edit::Assign { target: t("cross"), slot: 1, input: id("rb") }, 3), Outcome::Changed(_)));
+    assert_eq!(c.edit(PAD2, Edit::Assign { target: t("cross"), slot: 1, input: id("rb") }, 3),
+               Outcome::Changed("R moved from R1 to Cross".into()));
     assert_eq!(c.edit(PAD2, Edit::Assign { target: t("circle"), slot: 0, input: id("south") }, 3),
-               Outcome::Changed("B moved from Cross to Circle".into()));
-    assert_eq!(c.layouts[PAD2].input[t("cross")], [id("rb"), 0]);
+               Outcome::Changed("Swapped Circle and Cross".into()));
+    assert_eq!((c.layouts[PAD2].input[t("cross")], c.layouts[PAD2].input[t("circle")]), ([id("east"), id("rb")], [id("south"), 0]));
     // what can't be bound
     assert!(matches!(c.edit(PAD1, Edit::Assign { target: t("lstick_up"), slot: 0, input: id("south") }, 0), Outcome::Refused(_)));
     assert!(matches!(c.edit(KEYBOARD, Edit::Assign { target: t("cross"), slot: 0, input: 0x1B }, 0), Outcome::Refused(_)));
     assert!(matches!(c.edit(PAD1, Edit::Assign { target: t("cross"), slot: 0, input: 99 }, 0), Outcome::Refused(_)));
+}
+
+/// The owner's edits on the in-game Controls page (a DualSense as Controller 1; finding 157,
+/// 2026-11-06), as their dhd.log shows them: under the old rule they left `pad1 = cross:none
+/// square:none` and no way to confirm on the controller.
+#[test]
+fn the_owners_sequence() {
+    let mut c = Controls::default();
+    let ps = 1; // PAD_KIND_PLAYSTATION
+    let assign = |name, input| Edit::Assign { target: t(name), slot: 0, input: id(input) };
+    let clear = |name| Edit::Clear { target: t(name), slot: 0 };
+    // Square's button onto Cross: they swap
+    assert_eq!(c.edit(PAD1, assign("cross", "west"), ps), Outcome::Changed("Swapped Cross and Square".into()));
+    assert_eq!(c.values()[PAD1], "cross:west square:south");
+    assert_eq!(c.edit(PAD1, assign("square", "south"), ps), Outcome::Unchanged);
+    assert_eq!(c.edit(PAD1, clear("square"), ps), Outcome::Changed(String::new()));
+    assert_eq!(c.values()[PAD1], "cross:west square:none");
+    assert_eq!(c.edit(PAD1, assign("square", "south"), ps), Outcome::Changed(String::new()));
+    assert_eq!(c.values()[PAD1], "cross:west square:south");
+    // clearing Cross, again and again: refused, though the keyboard has Cross
+    for _ in 0..11 {
+        assert_eq!(c.edit(PAD1, clear("cross"), ps), Outcome::Refused("Cross needs a button".into()));
+    }
+    assert_eq!(c.edit(PAD1, clear("square"), ps), Outcome::Changed(String::new()));
+    assert_eq!(c.values()[PAD1], "cross:west square:none", "Cross keeps a button");
+    assert_eq!(c.layouts[KEYBOARD], default_layout(KEYBOARD));
+    // the same on the keyboard: Square's Z onto Cross, then Cross cleared twice
+    let mut c = Controls::default();
+    let out = c.edit(KEYBOARD, Edit::Assign { target: t("cross"), slot: 0, input: vk("z") }, 0);
+    assert_eq!(out, Outcome::Changed("Swapped Cross and Square".into()));
+    assert_eq!(c.values()[KEYBOARD], "cross:z,x square:space");
+    assert_eq!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Changed(String::new()));
+    assert_eq!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Refused("Cross needs a key".into()));
+    assert_eq!(c.values()[KEYBOARD], "cross:x square:space");
+    // the line the old rule wrote: Controller 1 alone goes back to its defaults at the next start
+    let (c, problems) = layouts("", "cross:none square:none", "");
+    assert_eq!(c, Controls::default());
+    assert_eq!(problems, ["pad1: Cross has no button: Controller 1 is back to its defaults"]);
 }
 
 #[test]

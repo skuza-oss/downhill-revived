@@ -222,10 +222,12 @@ the main, and Triangle or Esc goes back. Changes are saved as you make them. The
 change it, right-click to clear it; the game takes it at its next start. The buttons keep their
 meaning (Cross pedals in a race and confirms in menus), only the key or button for them changes.
 
-- A key or button that another PlayStation button had moves to the new one, and the page says so.
-- Cross, Triangle, START and the d-pad always keep a key or a button (on the keyboard or player 1's
-  controller for player 1, on player 2's controller for player 2): a change that would take the
-  last one away is refused.
+- A key or button that another PlayStation button had swaps: the new button takes it and the
+  other one gets the new button's old key or button ("Swapped Cross and Square"). Given to an empty
+  alternate, it just moves there.
+- Cross, Triangle, START and the d-pad always keep a key or a button on each of the keyboard,
+  Controller 1 and Controller 2, each on its own (the keyboard's keys don't count for a controller):
+  a clear or a move that would take the last one away is refused ("Cross needs a button").
 - Esc can't be changed: it always goes back in menus and pauses a race. Alt, Ctrl and the Windows
   keys stay your system's.
 - Keys on the d-pad (the arrows by default) steer gradually while riding, whichever keys they are.
@@ -258,9 +260,9 @@ PlayStation pad Cross, Circle, Square, Triangle; on an Xbox pad A, B, X, Y), `lb
 `dpad_right`, `misc` (Share, Mic or Capture), `paddle_r1`, `paddle_l1`, `paddle_r2`, `paddle_l2`,
 `touchpad`. The defaults are the tables above: the keyboard's keys, and on a controller the
 button in the same place as on a PlayStation pad. A line the game can't read is skipped where it
-can't be read (that button keeps its default) and dhd.log says why; a line that would leave a
-player without Cross, Triangle, START or a d-pad direction puts that player's keyboard or
-controller back to its defaults. Players 3 and 4 use the default controller layout.
+can't be read (that button keeps its default) and dhd.log says why; a line that would leave the
+keyboard or a controller without Cross, Triangle, START or a d-pad direction puts that one layout
+back to its defaults. Players 3 and 4 use the default controller layout.
 
 ### Online
 
