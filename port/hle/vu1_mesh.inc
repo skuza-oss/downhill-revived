@@ -1,30 +1,39 @@
 /* Native VU1 meshes (findings 164 and 167), included by vif.c: DHD_NATIVE_VU1 hands overlay B's
    batch loops to the native renderer instead of running them. The value lists the loops (by their
-   address; "prelit", "lit" or "all" for groups), then optional flags: DHD_NATIVE_VU1=0170,1708:skip.
+   address; "prelit", "lit", "shadow" or "all" for groups), then optional flags:
+   DHD_NATIVE_VU1=0170,1708:skip.
 
-   | loop | VI13  | fog      | colour                         | UV offset     | back faces | clipping |
-   | 0170 | 0x011 | computed | c vf31                         | from vertex 1 | culled     | yes      |
-   | 1708 | 0x2C9 | computed | c vf31                         | every vertex  | drawn      | yes      |
-   | 08B0 | 0x100 | computed | c vf31                         | every vertex  | drawn      | no       |
-   | 0798 | 0x0E0 | maximum  | c                              | none          | drawn      | no       |
-   | 18B0 | 0x2FE | maximum  | c                              | none          | drawn      | yes      |
-   | 1110 | 0x20C | computed | c d5 L + d20 L.w^2 + d1015     | every vertex  | drawn      | yes      |
-   | 13A0 | 0x260 | maximum  | c L + d20 L.w^2 + d1015        | none          | drawn      | no       |
-   | 1510 | 0x288 | computed | c vf31 + d20 max(N.H, 0)^16    | every vertex  | drawn      | yes      |
-   | 3140 | 0x616 | maximum  | d1013                          | (untextured)  | drawn      | no       |
+   | loop | VI13  | setup      | fog      | colour                      | ST                      | back faces | clipping |
+   | 0170 | 0x011 | 0078       | computed | c vf31                      | UV + vf19 from vertex 1 | culled     | yes      |
+   | 1708 | 0x2C9 | 1638       | computed | c vf31                      | UV + vf19               | drawn      | yes      |
+   | 08B0 | 0x100 | 07F0       | computed | c vf31                      | UV + vf19               | drawn      | no       |
+   | 0798 | 0x0E0 | 06F0       | maximum  | c                           | UV                      | drawn      | no       |
+   | 18B0 | 0x2FE | 17E0       | maximum  | c                           | UV                      | drawn      | yes      |
+   | 1110 | 0x20C | 1050 *     | computed | c d5 L + d20 L.w^2 + d1015  | UV + vf19               | drawn      | yes      |
+   | 13A0 | 0x260 | 12F0 *     | maximum  | c L + d20 L.w^2 + d1015     | UV                      | drawn      | no       |
+   | 1510 | 0x288 | 1430       | computed | c vf31 + d20 max(N.H, 0)^16 | UV + vf19               | drawn      | yes      |
+   | 0AA0 | 0x154 | 0A90       | maximum  | c                           | environment map         | drawn      | no       |
+   | 0C30 | 0x186 | 0C20       | computed | c vf31                      | environment map         | drawn      | yes      |
+   | 3140 | 0x616 | 30A0 *     | maximum  | d1013                       | (untextured)            | drawn      | no       |
 
-   (c the batch vertex's colour, L its pool entry's lighting at data 373 + index, N its pool
+   (* and the batches after the lit and skinned objects' passes, 0040, 0010 and 0020; c the batch
+   vertex's colour, L its pool entry's lighting at data 373 + index, N its pool
    normal there (12-bit fixed point), H = (d6.w, d7.w, d8.w), dN data N; the lit colours clamped
-   to 255 and truncated, their alpha c.a d5.a + d20.a L.w^2, d1015 adding to RGB only. 3140 draws
-   the shadow silhouettes into the shadow targets (setup 30A0: the matrix data 1008-1011 times the
-   object's, no divide; translated while that leaves w at 1, which the vertex shader's divide then
-   keeps) with its own strip tag: the loop writes the I register's constant at 0x30C0 over the
-   header's second word (PRE, PRIM 00C, NREG 3).)
+   to 255 and truncated, their alpha c.a d5.a + d20.a L.w^2, d1015 adding to RGB only. UV is the
+   batch's (u, v, uz), STQ = UV q. The environment map (0AA0, 0C30): S, T = E N + (x q + d997.zw)
+   d998.zw with E the 2 x 3 matrix d997-d999.xy times the object's rotation d0-d2, and Q = 1:
+   screen-linear, so the item carries (S w, T w, w), which the shader's divide by w turns back.
+   3140 draws the shadow silhouettes into the shadow targets (setup 30A0: the matrix data 1008-1011
+   times the object's, no divide; translated while that leaves w at 1, which the vertex shader's
+   divide then keeps) with its own strip tag: the loop writes the I register's constant (LOI at
+   0x30C0: PRIM 00C) over the header's second word.)
 
    A batch loop runs after a program's setup has set VI13 and the registers it reads: the shared
-   1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050 and 12F0), and for lit or
-   skinned objects a pass over the object's pool (MSCAL 0040's lighting, 0010/0020's skinning and
-   lighting) that writes positions at 181 + index and lighting at 373 + index. Those stay on the VU.
+   1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050, 12F0, 1430, 0A90,
+   0C20), 30A0's 3190, and for lit or skinned objects a pass over the object's
+   pool (MSCAL 0040's lighting, 0010/0020's skinning and lighting) that writes positions at 181 +
+   index and lighting at 373 + index. Those stay on the VU (the near-bound test below needs the
+   pool's positions on the CPU).
    Each batch (MSCNT at 1CB0, 1040, 12E0 or 0590, VI13 a translated loop's) is read from VU1 data
    memory and the registers as they are and goes to the GS queue as one mesh item (gs_mesh.h): the
    pool positions, colours and texture coordinates of its strip vertices, the triangles the strip
@@ -32,8 +41,8 @@
    test keeps), the A+D texture writes and PRIM its packet would make, and the constants. The
    batch's microprogram and its XGKICK do not run; what the next run reads is left as the batch
    leaves it (the rotating buffer in VI14/VI2, VI3, VI4, TPC 1040; 0170's strip parity in vf6.x and
-   at 1014; the lit loops' registers vf31 or vf13 and vf14). 0590's delay slot, the skinning's last
-   pool store, is made first.
+   at 1014; the registers the loops load with constants and keep, mesh_skipped). 0590's delay slot,
+   the skinning's last pool store, is made first.
 
    The batch, as the microcode does it (vudis.py; 0170: 0x88-0x268, the others alike, and 0FA8):
    header qword at VI2 (the strip's GIF tag: NLOOP n with EOP, PRE, PRIM, PACKED ST RGBAQ XYZF2; w:
@@ -79,32 +88,40 @@ static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", 
                                                      "a vertex off the guard band in x or y",
                                                      "w other than 1 (no divide)"};
 
-/* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight, d1013. */
+/* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight, d1013;
+   st: UV, UV + vf19 from vertex 1, UV + vf19, the environment map. */
 enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW, MESH_COLOUR_LIT_D5, MESH_COLOUR_LIT, MESH_COLOUR_HIGHLIGHT,
        MESH_COLOUR_CONSTANT };
+enum { MESH_ST_UV, MESH_ST_OFFSET_AFTER_FIRST, MESH_ST_OFFSET, MESH_ST_ENVIRONMENT };
 typedef struct {
     const char *name;
     uint16_t vi13;
-    uint8_t fog_max, colour, uv_offset, backface, clip;   /* uv_offset: 0 none, 1 from vertex 1, 2 every vertex */
-    uint8_t ortho;                                         /* 3140: no divide, its tag from the I constant */
+    uint8_t fog_max, colour, st, backface, clip;
+    uint8_t ortho;      /* 3140: no divide */
+    uint16_t tag_loi;   /* the LOI whose I the loop stores as the tag's second word (3140), or 0 */
 } MeshProgram;
 static const MeshProgram mesh_programs[] = {
-    {"0170", 0x011, 0, MESH_COLOUR_SCALED, 1, 1, 1},
-    {"1708", 0x2C9, 0, MESH_COLOUR_SCALED, 2, 0, 1},
-    {"08B0", 0x100, 0, MESH_COLOUR_SCALED, 2, 0, 0},
-    {"0798", 0x0E0, 1, MESH_COLOUR_RAW, 0, 0, 0},
-    {"18B0", 0x2FE, 1, MESH_COLOUR_RAW, 0, 0, 1},
-    {"1110", 0x20C, 0, MESH_COLOUR_LIT_D5, 2, 0, 1},
-    {"13A0", 0x260, 1, MESH_COLOUR_LIT, 0, 0, 0},
-    {"1510", 0x288, 0, MESH_COLOUR_HIGHLIGHT, 2, 0, 1},
-    {"3140", 0x616, 1, MESH_COLOUR_CONSTANT, 0, 0, 0, 1},
+    {"0170", 0x011, 0, MESH_COLOUR_SCALED, MESH_ST_OFFSET_AFTER_FIRST, 1, 1},
+    {"1708", 0x2C9, 0, MESH_COLOUR_SCALED, MESH_ST_OFFSET, 0, 1},
+    {"08B0", 0x100, 0, MESH_COLOUR_SCALED, MESH_ST_OFFSET, 0, 0},
+    {"0798", 0x0E0, 1, MESH_COLOUR_RAW, MESH_ST_UV, 0, 0},
+    {"18B0", 0x2FE, 1, MESH_COLOUR_RAW, MESH_ST_UV, 0, 1},
+    {"1110", 0x20C, 0, MESH_COLOUR_LIT_D5, MESH_ST_OFFSET, 0, 1},
+    {"13A0", 0x260, 1, MESH_COLOUR_LIT, MESH_ST_UV, 0, 0},
+    {"1510", 0x288, 0, MESH_COLOUR_HIGHLIGHT, MESH_ST_OFFSET, 0, 1},
+    {"3140", 0x616, 1, MESH_COLOUR_CONSTANT, MESH_ST_UV, 0, 0, 1, 0x30C0},
+    {"0AA0", 0x154, 1, MESH_COLOUR_RAW, MESH_ST_ENVIRONMENT, 0, 0},
+    {"0C30", 0x186, 0, MESH_COLOUR_SCALED, MESH_ST_ENVIRONMENT, 0, 1},
 };
-enum { MESH_PRELIT = 0x1F, MESH_LIT = 0xE0, MESH_SHADOW_LOOP = 0x100 };   /* the groups' bits */
+enum { MESH_PRELIT = 0x1F, MESH_LIT = 0x6E0, MESH_SHADOW_LOOP = 0x100 };   /* the groups' bits */
 enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
 
 typedef struct {
     uint64_t batches, fallbacks, vertices, triangles, joins, why[MESH_WHYS];
     double timed_seconds; uint64_t timed_batches, timed_vertices;   /* DHD_VU1_PROFILE (mesh_timed) */
+    /* DHD_NATIVE_VU1_CHECK=1 (shadow mode): the items against what the program wrote (mesh_check) */
+    uint64_t checked, inside, bad_xy, bad_z, bad_fog, bad_colour, bad_stq, triangles_checked, clipped, bad_adc,
+             backfaces;
 } MeshCounts;
 
 static struct {
@@ -122,8 +139,6 @@ static struct {
     /* DHD_NATIVE_VU1_CHECK=1 (shadow mode): each item against what the program wrote (mesh_check) */
     int check;
     unsigned check_base; float check_parity; uint8_t join[GS_MESH_MAX_VERTICES];
-    uint64_t checked, inside, bad_xy, bad_z, bad_fog, bad_colour, bad_stq, triangles_checked, clipped, bad_adc,
-             backfaces;
 } mesh = {.object = -1};
 
 /* A skipped batch's time on the VU thread, from the run's start to the item queued (profiled runs). */
@@ -154,15 +169,15 @@ static void mesh_report(void)
                     mesh_programs[p].name, c->timed_seconds * 1e6 / (double)c->timed_batches,
                     c->timed_seconds * 1e9 / (double)(c->timed_vertices ? c->timed_vertices : 1),
                     (unsigned long long)c->timed_batches);
+        if (mesh.check)
+            hle_log("native VU1 %s check: %llu vertices (%llu inside the guard band): XY off by more than 1/16 px %llu, "
+                    "Z by more than 1 %llu, fog %llu, colour %llu, STQ %llu; %llu triangles (%llu back faces), ADC "
+                    "differs %llu; %llu triangles left to the clipper\n", mesh_programs[p].name,
+                    (unsigned long long)c->checked, (unsigned long long)c->inside, (unsigned long long)c->bad_xy,
+                    (unsigned long long)c->bad_z, (unsigned long long)c->bad_fog, (unsigned long long)c->bad_colour,
+                    (unsigned long long)c->bad_stq, (unsigned long long)c->triangles_checked,
+                    (unsigned long long)c->backfaces, (unsigned long long)c->bad_adc, (unsigned long long)c->clipped);
     }
-    if (mesh.check)
-        hle_log("native VU1 check: %llu vertices (%llu inside the guard band): XY off by more than 1/16 px %llu, "
-                "Z by more than 1 %llu, fog %llu, colour %llu, STQ %llu; %llu triangles (%llu back faces), ADC differs "
-                "%llu; %llu triangles left to the clipper\n",
-                (unsigned long long)mesh.checked, (unsigned long long)mesh.inside, (unsigned long long)mesh.bad_xy,
-                (unsigned long long)mesh.bad_z, (unsigned long long)mesh.bad_fog, (unsigned long long)mesh.bad_colour,
-                (unsigned long long)mesh.bad_stq, (unsigned long long)mesh.triangles_checked,
-                (unsigned long long)mesh.backfaces, (unsigned long long)mesh.bad_adc, (unsigned long long)mesh.clipped);
 }
 
 /* DHD_NATIVE_VU1_CHECK: after a shadow batch ran on the VU, its item's vertices through the
@@ -173,6 +188,7 @@ static void mesh_report(void)
 static void mesh_check(void)
 {
     const MeshProgram *prog = &mesh_programs[mesh.object];
+    MeshCounts *count = &mesh.count[mesh.object];
     const GsMeshHeader *h = (const GsMeshHeader *)mesh.packet;
     const GsMeshVertex *v = (const GsMeshVertex *)(h + 1);
     const ps2_q128 *m = vu1.vu0_mem;
@@ -192,38 +208,38 @@ static void mesh_check(void)
         float bound = h->clip[3] < 0 ? -h->clip[3] : h->clip[3];
         in[k] = c[3] > 0 && x + h->clip[0] <= bound && x + h->clip[0] >= -bound && y + h->clip[1] <= bound &&
                 y + h->clip[1] >= -bound && c[3] + h->clip[2] >= -bound;
-        mesh.checked++;
+        count->checked++;
         if (!in[k]) continue;
-        mesh.inside++;
+        count->inside++;
         int dx = (int16_t)(uint16_t)((o[2].w[0] & 0xFFFF) - ((uint32_t)(int32_t)(x * 16.0f) & 0xFFFF));
         int dy = (int16_t)(uint16_t)((o[2].w[1] & 0xFFFF) - ((uint32_t)(int32_t)(y * 16.0f) & 0xFFFF));
-        if (dx > 1 || dx < -1 || dy > 1 || dy < -1) mesh.bad_xy++;
+        if (dx > 1 || dx < -1 || dy > 1 || dy < -1) count->bad_xy++;
         float z16 = z * 16.0f;   /* FTOI4 saturates (3140's shadow pass leaves z unscaled) */
         int32_t zi = z16 >= 2147483648.0f ? INT32_MAX : z16 <= -2147483648.0f ? INT32_MIN : (int32_t)z16;
         int dz = (o[2].sw[2] >> 4) - (zi >> 4);
-        if (dz > 1 || dz < -1) mesh.bad_z++;
+        if (dz > 1 || dz < -1) count->bad_z++;
         int df = (int)(o[2].w[3] >> 4 & 255) - (int)fog;
-        if (df > 1 || df < -1) mesh.bad_fog++;
+        if (df > 1 || df < -1) count->bad_fog++;
         const uint8_t *rgba = (const uint8_t *)&v[k].rgba;
         for (unsigned i = 0; i < 4; i++) {
             float want = (float)rgba[i] * h->color[i];
             int ref = (int)(want > 255 ? 255 : want), got = o[1].sw[i];
-            if (got - ref > 1 || ref - got > 1) { mesh.bad_colour++; break; }
+            if (got - ref > 1 || ref - got > 1) { count->bad_colour++; break; }
         }
         const float st[3] = {v[k].u * q, v[k].v * q, v[k].uz * q};
         for (unsigned i = 0; i < 3 && (h->prim & 16); i++) {   /* untextured: ST is not written */
             float d = o[0].f[i] - st[i], scale = (st[i] < 0 ? -st[i] : st[i]) + 1e-3f;
-            if (d > 1e-4f * scale || d < -1e-4f * scale) { mesh.bad_stq++; break; }
+            if (d > 1e-4f * scale || d < -1e-4f * scale) { count->bad_stq++; break; }
         }
     }
     for (unsigned k = 2; k < n; k++) {
-        if (!in[k] || !in[k - 1] || !in[k - 2]) { mesh.clipped++; continue; }
+        if (!in[k] || !in[k - 1] || !in[k - 2]) { count->clipped++; continue; }
         float area = (sx[k - 1] - sx[k - 2]) * (sy[k] - sy[k - 1]) - (sy[k - 1] - sy[k - 2]) * (sx[k] - sx[k - 1]);
         float s = k & 1 ? -mesh.check_parity : mesh.check_parity;
         int back = prog->backface && s * area > 0, adc = (m[(mesh.check_base + 3 + 3 * k) & 1023].w[3] & 0x8000) != 0;
-        mesh.triangles_checked++;
-        mesh.backfaces += back && !mesh.join[k];
-        if (adc != (mesh.join[k] || back)) mesh.bad_adc++;
+        count->triangles_checked++;
+        count->backfaces += back && !mesh.join[k];
+        if (adc != (mesh.join[k] || back)) count->bad_adc++;
     }
 }
 
@@ -265,7 +281,7 @@ static int mesh_enabled(void)
     mesh.mode = forced ? forced : gs_mesh_mode == 2 ? MESH_SHADOW : MESH_SKIP;
     mesh.state = MESH_ON;
     mesh.check = mesh.mode == MESH_SHADOW && getenv("DHD_NATIVE_VU1_CHECK") != NULL;
-    char names[64] = "";
+    char names[5 * MESH_PROGRAMS + 1] = "";
     for (unsigned p = 0; p < MESH_PROGRAMS; p++)
         if (mesh.enabled >> p & 1) { strcat(names, " "); strcat(names, mesh_programs[p].name); }
     hle_log("native VU1: loops%s drawn by the native renderer, %s (DHD_NATIVE_VU1=%s)%s\n", names,
@@ -292,6 +308,16 @@ static int mesh_fail(unsigned why)
     return 0;
 }
 
+/* The environment map's 2 x 3 matrix E: d997-d999.xy times the object's rotation d0-d2 (0AA0's
+   vf14-vf16.xy, 0C30's vf8, vf10, vf14 .xy). */
+static void mesh_environment(float env[3][2])
+{
+    const ps2_q128 *m = vu1.vu0_mem;
+    for (unsigned j = 0; j < 3; j++)
+        for (unsigned a = 0; a < 2; a++)
+            env[j][a] = m[997].f[a] * m[j].f[0] + m[998].f[a] * m[j].f[1] + m[999].f[a] * m[j].f[2];
+}
+
 /* The batch at VI2 as a mesh item in mesh.packet; 0 (and nothing built) for a form the
    translation does not know, which then runs on the VU. */
 static int mesh_build(void)
@@ -305,7 +331,7 @@ static int mesh_build(void)
     if (!(hdr[0] & 0x8000)) return mesh_fail(MESH_WHY_EOP);
     if (n < 1 || n > GS_MESH_MAX_VERTICES || base + 1 + 3 * n > 1024) return mesh_fail(MESH_WHY_COUNT);
     uint32_t tag1 = hdr[1];
-    if (prog->ortho) memcpy(&tag1, micro(1) + 0x30C0, 4);   /* 30C0's LOI, stored over the header (30E0, 3138) */
+    if (prog->tag_loi) memcpy(&tag1, micro(1) + prog->tag_loi, 4);   /* that LOI's I, stored over the header */
     /* PACKED, NREG 3: ST RGBAQ XYZF2, PRE */
     if ((tag1 >> 26 & 3) || tag1 >> 28 != 3 || (hdr[2] & 0xFFF) != 0x412 || !(tag1 >> 14 & 1))
         return mesh_fail(MESH_WHY_TAG);
@@ -346,6 +372,10 @@ static int mesh_build(void)
             if (!(f > -1.0f && f < 256.0f)) return mesh_fail(MESH_WHY_COLOUR);
             constant |= (uint32_t)(int)f << (i * 8);
         }
+    /* the environment map's E and screen terms */
+    float env[3][2] = {{0}};
+    if (prog->st == MESH_ST_ENVIRONMENT) mesh_environment(env);
+    const float env_add[2] = {m[997].f[2], m[997].f[3]}, env_scale[2] = {m[998].f[2], m[998].f[3]};
     /* 0170's prologue sets vf6.x = 1 (0098) and negates it unless the header's bit 15 (0158) */
     float parity = hdr[3] & 0x8000 ? 1.0f : -1.0f;
     mesh.check_parity = parity; mesh.check_base = base;
@@ -363,33 +393,43 @@ static int mesh_build(void)
     for (unsigned k = 0; k < n; k++) {
         const ps2_q128 *r = &m[base + 1 + 3 * k];
         const float *p = m[(181 + (r[0].w[3] & 0xFFFF)) & 1023].f;
-        if (!mesh.gpu_clip || !prog->clip) {
-            float c[4];
-            _mm_storeu_ps(c, _mm_add_ps(_mm_add_ps(_mm_mul_ps(c0, _mm_set1_ps(p[0])), _mm_mul_ps(c1, _mm_set1_ps(p[1]))),
+        const int32_t *normal = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].sw;
+        float cp[4];
+        if (!mesh.gpu_clip || !prog->clip || prog->st == MESH_ST_ENVIRONMENT)
+            _mm_storeu_ps(cp, _mm_add_ps(_mm_add_ps(_mm_mul_ps(c0, _mm_set1_ps(p[0])), _mm_mul_ps(c1, _mm_set1_ps(p[1]))),
                                         _mm_add_ps(_mm_mul_ps(c2, _mm_set1_ps(p[2])), c3)));
-            float x = c[0] + h->clip[0] * c[3], y = c[1] + h->clip[1] * c[3], b = bound * c[3];
-            if (prog->ortho && c[3] != 1.0f) return mesh_fail(MESH_WHY_ORTHO);   /* the shader's divide by 1 */
-            if (!(c[3] > 0 && c[3] >= near)) return mesh_fail(MESH_WHY_NEAR);
+        if (!mesh.gpu_clip || !prog->clip) {
+            float x = cp[0] + h->clip[0] * cp[3], y = cp[1] + h->clip[1] * cp[3], b = bound * cp[3];
+            if (prog->ortho && cp[3] != 1.0f) return mesh_fail(MESH_WHY_ORTHO);   /* the shader's divide by 1 */
+            if (!(cp[3] > 0 && cp[3] >= near)) return mesh_fail(MESH_WHY_NEAR);
             /* off the guard band sideways: the loops with clipping cut it as a GPU does (finding 164,
                :gpuside), those without kick it as it comes */
             if (!prog->clip && !(x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
         }
-        const uint32_t *c = r[1].w;   /* (3140 overwrites it with its constant) */
+        const uint32_t *c = r[1].w;   /* (3140 overwrites it) */
         if (prog->colour != MESH_COLOUR_CONSTANT && (c[0] | c[1] | c[2] | c[3]) > 255) return mesh_fail(MESH_WHY_COLOUR);
         int32_t w = r[2].sw[3];
         if (w != 0 && w != 0x800000) return mesh_fail(MESH_WHY_JOIN);   /* 2048.0: ADC through the fog's FTOI4 */
         join[k] = mesh.join[k] = w != 0;
         GsMeshVertex *o = &out[k];
         o->x = p[0]; o->y = p[1]; o->z = p[2];
-        o->u = (float)r[2].sw[0] * fixed; o->v = (float)r[2].sw[1] * fixed; o->uz = (float)r[2].sw[2] * fixed;
-        if (prog->uv_offset == 2 || (prog->uv_offset == 1 && k)) { o->u += uv[0]; o->v += uv[1]; }   /* vf19.xy */
+        const float nx = (float)normal[0] * fixed, ny = (float)normal[1] * fixed, nz = (float)normal[2] * fixed;
+        if (prog->st == MESH_ST_ENVIRONMENT) {   /* screen-linear S, T and Q = 1: times w (the shader divides) */
+            float q = 1.0f / cp[3], st[2];
+            for (unsigned a = 0; a < 2; a++)
+                st[a] = env[0][a] * nx + env[1][a] * ny + env[2][a] * nz + (cp[a] * q + env_add[a]) * env_scale[a];
+            o->u = st[0] * cp[3]; o->v = st[1] * cp[3]; o->uz = cp[3];
+        } else {
+            o->u = (float)r[2].sw[0] * fixed; o->v = (float)r[2].sw[1] * fixed; o->uz = (float)r[2].sw[2] * fixed;
+            if (prog->st == MESH_ST_OFFSET || (prog->st == MESH_ST_OFFSET_AFTER_FIRST && k)) {   /* vf19.xy */
+                o->u += uv[0]; o->v += uv[1];
+            }
+        }
         o->unused = 0;
         if (prog->colour == MESH_COLOUR_CONSTANT)
             o->rgba = constant;
         else if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510: the pool normal against d6-d8's w */
-            const int32_t *nw = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].sw;
-            float d = highlight[0] * ((float)nw[0] * fixed) + highlight[1] * ((float)nw[1] * fixed) +
-                      highlight[2] * ((float)nw[2] * fixed);
+            float d = highlight[0] * nx + highlight[1] * ny + highlight[2] * nz;
             d = d > 0 ? d : 0;
             d *= d; d *= d; d *= d; d *= d;   /* four squarings: ^16 */
             const float *s31 = vu1.vf[31].f;
@@ -400,7 +440,7 @@ static int mesh_build(void)
                 rgba |= (uint32_t)(int)(sum > 255 ? 255.0f : sum) << (i * 8);
             }
             o->rgba = rgba;
-        } else if (prog->colour >= MESH_COLOUR_LIT_D5) {   /* 1110 / 13A0: the lit pool entry */
+        } else if (prog->colour == MESH_COLOUR_LIT_D5 || prog->colour == MESH_COLOUR_LIT) {   /* 1110 / 13A0: the lit pool entry */
             const float *L = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].f, l2 = L[3] * L[3];
             uint32_t rgba = 0;
             for (unsigned i = 0; i < 4; i++) {
@@ -472,26 +512,54 @@ static void mesh_skipped(void)
 {
     const MeshProgram *prog = &mesh_programs[mesh.object];
     if (prog->backface) memcpy(vu1.vu0_mem[1014].f, vu1.vf[6].f, 16);
-    if (prog->colour == MESH_COLOUR_LIT_D5) {   /* 1110's prologue: vf31 = d20, vf8 = d5, vf26 = d1015 */
-        memcpy(vu1.vf[31].f, vu1.vu0_mem[20].f, 16);
-        memcpy(vu1.vf[8].f, vu1.vu0_mem[5].f, 16);
-        memcpy(vu1.vf[26].f, vu1.vu0_mem[1015].f, 16);
-    } else if (prog->colour == MESH_COLOUR_LIT) {   /* 13A0's: vf13 = d1015, vf14 = d20 */
-        memcpy(vu1.vf[13].f, vu1.vu0_mem[1015].f, 16);
-        memcpy(vu1.vf[14].f, vu1.vu0_mem[20].f, 16);
-    } else if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510's: vf7 = d17, vf14 = d6, and from its last
-                                                              pass vf8 = d18, vf10 = d19 (15E8, 1608) */
-        memcpy(vu1.vf[7].f, vu1.vu0_mem[17].f, 16);
-        memcpy(vu1.vf[14].f, vu1.vu0_mem[6].f, 16);
-        memcpy(vu1.vf[8].f, vu1.vu0_mem[18].f, 16);
-        memcpy(vu1.vf[10].f, vu1.vu0_mem[19].f, 16);
-    } else if (prog->ortho) {   /* 3140's: the I constant stored over the header's tag word (the buffer's
-                                   next batch brings its own header), vf5.y = I, vf5.w = vf18.y,
-                                   vf10 = FTOI0(d1013) (in 0..255: mesh_build) */
-        memcpy(&vu1.vu0_mem[mesh.check_base].w[1], micro(1) + 0x30C0, 4);
-        memcpy(&vu1.vf[5].f[1], micro(1) + 0x30C0, 4);
-        vu1.vf[5].f[3] = vu1.vf[18].f[1];
-        for (unsigned i = 0; i < 4; i++) vu1.vf[10].sw[i] = (int32_t)vu1.vu0_mem[1013].f[i];
+    /* the registers each loop loads with constants and keeps (its working registers, the last
+       vertex's values and the fog base vf22.w, are set by every prologue before they are read) */
+    ps2_q128 *vf = vu1.vf;
+    const ps2_q128 *m = vu1.vu0_mem;
+    if (prog->tag_loi) memcpy(&vu1.vu0_mem[mesh.check_base].w[1], micro(1) + prog->tag_loi, 4);   /* the tag word */
+    switch (prog->vi13) {
+    case 0x20C:   /* 1110's prologue: vf31 = d20, vf8 = d5, vf26 = d1015 */
+        memcpy(vf[31].f, m[20].f, 16);
+        memcpy(vf[8].f, m[5].f, 16);
+        memcpy(vf[26].f, m[1015].f, 16);
+        break;
+    case 0x260:   /* 13A0's: vf13 = d1015, vf14 = d20 */
+        memcpy(vf[13].f, m[1015].f, 16);
+        memcpy(vf[14].f, m[20].f, 16);
+        break;
+    case 0x288:   /* 1510's: vf7 = d17, vf14 = d6, and from its last pass vf8 = d18, vf10 = d19 (15E8, 1608) */
+        memcpy(vf[7].f, m[17].f, 16);
+        memcpy(vf[14].f, m[6].f, 16);
+        memcpy(vf[8].f, m[18].f, 16);
+        memcpy(vf[10].f, m[19].f, 16);
+        break;
+    case 0x616:   /* 3140's: vf5.y = I (the tag word), vf5.w = vf18.y, vf10 = FTOI0(d1013) (0..255: mesh_build) */
+        memcpy(&vf[5].f[1], micro(1) + prog->tag_loi, 4);
+        vf[5].f[3] = vf[18].f[1];
+        for (unsigned i = 0; i < 4; i++) vf[10].sw[i] = (int32_t)m[1013].f[i];
+        break;
+    case 0x154:
+    case 0x186: {   /* 0AA0's: vf14-vf16.xy = E, vf13.xyz = (d997.z, d997.w, d997.w) (MR32 twice), vf17 =
+                       (d998.z, d998.w, d998.w, d998.w), vf8.z = 1, vf5.w = vf18.y; 0C30's: vf8, vf10,
+                       vf14 .xy = E, vf7 = (d997.zw, d998.zw), vf27.xy = d998.zw, vf17.z = 1 */
+        float env[3][2];
+        mesh_environment(env);
+        const float *d997 = m[997].f, *d998 = m[998].f;
+        static const unsigned at[2][3] = {{14, 15, 16}, {8, 10, 14}};
+        const int c30 = prog->vi13 == 0x186;
+        for (unsigned j = 0; j < 3; j++) memcpy(vf[at[c30][j]].f, env[j], 8);
+        if (!c30) {
+            vf[13].f[0] = d997[2]; vf[13].f[1] = d997[3]; vf[13].f[2] = d997[3];
+            vf[17].f[0] = d998[2]; vf[17].f[1] = vf[17].f[2] = vf[17].f[3] = d998[3];
+            vf[8].f[2] = 1.0f;
+            vf[5].f[3] = vf[18].f[1];
+        } else {
+            vf[7].f[0] = d997[2]; vf[7].f[1] = d997[3]; vf[7].f[2] = d998[2]; vf[7].f[3] = d998[3];
+            vf[27].f[0] = d998[2]; vf[27].f[1] = d998[3];
+            vf[17].f[2] = 1.0f;
+        }
+        break;
+    }
     }
     uint16_t buffer = (uint16_t)(vu1.vi[14] + 0x90);
     if (buffer == 0x3E8) buffer = 0x238;
