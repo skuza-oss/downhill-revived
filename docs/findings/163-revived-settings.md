@@ -1,9 +1,10 @@
 # 163: REVIVED SETTINGS: tabs, a clearer Controls page, online name size
 
 Status: current
+Checked: 2026-11-06
 
-Branch `feat/revived-settings` from `main` 9ecb8e1, started 2026-11-06. This file is the lane's
-plan while it runs and its finding when it merges.
+Branch `feat/revived-settings` from `main` 9ecb8e1, started 2026-11-06. Merged into `main` at
+4d419ed on 2026-11-06; released in 0.7.12.
 
 ## Goal and acceptance
 
@@ -101,4 +102,4 @@ Validation:
   Captures stay in `DHD_SCRATCH/revived-settings/menus` and `names-off`, `names-small`,
   `names-medium`, `names-large` there, never in git. PNGs were decoded completely for validation.
 
-No acceptance work remains. Status stays in progress until the lane merges.
+No acceptance work remains.

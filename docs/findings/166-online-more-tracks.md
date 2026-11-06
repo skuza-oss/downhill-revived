@@ -1,9 +1,10 @@
 # 166: Online races on the tracks without a split-screen level (Salt City MX and TD)
 
 Status: current
+Checked: 2026-11-06
 
-Branch `feat/online-more-tracks` from `main` 1ff885d, started 2026-11-06. This file is the lane's
-plan while it runs and its finding when it merges.
+Branch `feat/online-more-tracks` from `main` 1ff885d, started 2026-11-06. Merged into `main` at
+fa9de1a on 2026-11-06; released in 0.7.12.
 
 ## Goal and acceptance
 

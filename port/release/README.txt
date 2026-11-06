@@ -86,10 +86,23 @@ places (e.g. Square is the key left of X, wherever its label says Z, W or Y).
 The game's own controls screen (OPTIONS > CONTROLS) and its trick lists name the PlayStation
 buttons; the keys above stand for them.
 
-Settings: the first row of OPTIONS > REVIVED SETTINGS in the game's menu (resolution, display mode, window size,
-picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, texture
-pack, font). Changes are
-saved to dhd.ini at once.
+Your own keys and buttons: REVIVED SETTINGS > Controls in the game, or the launcher's Settings >
+Controls > Bindings. Choose the key or controller button for each PlayStation button, a main and
+an alternate, for the keyboard and for each of two controllers (player 1 and player 2), plus
+Swap Sticks and Invert per stick axis on a controller. In the game, Cross on a button's row waits
+up to five seconds for the new key or button (Esc cancels), Square clears it, Triangle or Esc goes
+back; changes save at once. The dimmed "also" binding is the alternate, changed in the launcher
+(click a slot, right-click clears; the game takes it at its next start). A key or button another
+PlayStation button had swaps between the two. Cross, Triangle, START, R1 and the d-pad always keep
+a key or button on the keyboard and on each controller, so you can't lock yourself out of the
+menus; Esc always goes back and pauses. Reset brings the layouts above back. dhd.ini keeps them
+as the lines keyboard, pad1 and pad2 (docs/PLAYING.md in the repository explains them).
+
+Settings: OPTIONS > REVIVED SETTINGS in the game's menu, the first row, with Display, Graphics,
+Controls, Online and Game tabs (L1/R1 switch them): resolution, display mode, window size,
+picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, your keys
+and buttons, the size of online riders' names (Off, Small, Medium as the original, Large),
+texture pack, font. Changes are saved to dhd.ini.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game
@@ -137,8 +150,12 @@ Online races (experimental)
 Choose ONLINE in the main menu: create a public or private race, or join one from the list or
 with its code. It works out of the box, on the project's official server
 (wss://dhd.skuza.app). Every player needs the same USA disc image,
-and the newest version of the game: an older one is told "A new version is out. Update to play
-online." and offered Update Now, which closes the game and lets the launcher update it.
+and the newest version of the game (0.7.12 can't race with 0.7.11 or older): an older one is
+told "A new version is out. Update to play online." and offered Update Now, which closes the game
+and lets the launcher update it.
+In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
+to you (UDP); where a network blocks UDP the game falls back to an encrypted connection on port
+443 by itself.
 Running your own server is optional: put its address on the "server =" line of dhd.ini, e.g.
     server = wss://races.example.org
 A server of your own can keep an older version playing (its MIN_VERSION setting); then point
@@ -157,8 +174,3 @@ Known gaps
 Source code, building and bug reports: see the project's repository.
 Licence: GPL-3.0-or-later (LICENSE.txt). Third-party notices: THIRD-PARTY-NOTICES.txt.
 The original game, its data, names and trademarks belong to their owners.
-
-REVIVED SETTINGS has Display, Graphics, Controls, Online and Game tabs (L1/R1).
-Controls edits the main binding with Cross, clears it with Square and goes back with Triangle
-or Esc. Changes save at once. Dimmed "also" bindings are changed in the launcher.
-Online > Player Names: Off, Small (default), Medium (original size), Large.

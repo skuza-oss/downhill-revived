@@ -2,14 +2,17 @@
 
 Status: current
 Supersedes: parts of 016, 039, 040, 041, 042
-Checked: 2026-11-04
+Checked: 2026-11-06
 
 This is the design online races still use. Later changes on top of it: snapshots are stamped
 with race time in ms since GO, not ticks, and each PC races at its own frame rate (wire version 3,
 `STATE_FIXED` 104 bytes, finding 114; `docs/online-protocol.md`); finishes and results, leaving,
 the grid and hits (finding 047); the in-game ONLINE menus and rooms instead of a boot-time lobby
 (findings 065, 092, 118, 119); riders' own looks and bikes (finding 128); shared track pickups
-(finding 144); ten players (finding 123).
+(finding 144); ten players (finding 123). Since 0.7.12 (finding 158) the race frames travel over
+Cloudflare Realtime SFU instead of through the room's relay, 30 snapshots a second (every 2 race
+ticks), and a puppet's delay adapts to each sender (50-150 ms); the sections below give the first
+build's numbers.
 
 2026-10-16. Replaces input lockstep (finding 041) as the way online races work
 (`docs/ONLINE-PLAN.md`, decision table). Every PC runs a normal one-player race (full screen,
@@ -25,8 +28,8 @@ is written from the snapshots.
 | `port/hle/puppet.c` | The puppets: snapshots, interpolation, the race-step hooks, crashes, hits, the wire format, record/replay for tests. |
 | `port/patches.py` | Hooks in `0011A100.c` (race step), `0012FE38.cpp` (State switch), `00155E78.cpp` (crash start), `0012E940.c` (hit). |
 | `port/hle/online.c` | The online race: (then a lobby barrier at boot and scripted menus; now the in-game room, findings 092, 118), the load wait, then `state_sync` each field. No lockstep. |
-| `port/net/` | `net_send_frame` / `net_receive_frame`: binary STATE and EVENT frames through the room. |
-| `online/server/` | The relay passes frame types 5 (STATE) and 6 (EVENT) to the other racers (`docs/online-protocol.md`). Deployed. |
+| `port/net/` | `net_send_frame` / `net_receive_frame`: binary STATE and EVENT frames (over the SFU since finding 158; `port/render/net`). |
+| `online/server/` | The room; it relayed frame types 5 (STATE) and 6 (EVENT) until finding 158, and now sets up each racer's SFU session (`docs/online-protocol.md`). |
 | `port/tools/online_race.py` | Two instances on one PC, host and guest, each on its own scripted line; screenshots and memory dumps at race-clock moments. |
 
 ## The rider (`D_002AF2C0`, 10 riders × 0x7BD0)

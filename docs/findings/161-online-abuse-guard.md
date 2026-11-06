@@ -1,9 +1,10 @@
 # 161: online abuse guard: kill switch, rate limits, bans and a short moderation log
 
 Status: current
+Checked: 2026-11-06
 
-Branch `feat/online-guard` from `main` 9ecb8e1, started 2026-11-06. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `feat/online-guard` from `main` 9ecb8e1, started 2026-11-06. Merged into `main` at c230599 on
+2026-11-06; released in 0.7.12.
 
 ## Goal and acceptance
 

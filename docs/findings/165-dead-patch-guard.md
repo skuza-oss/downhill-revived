@@ -1,9 +1,10 @@
 # 165: no port patch in code the port does not compile
 
 Status: current
+Checked: 2026-11-06
 
-Branch `fix/dead-patches` from `main` 1ff885d, started 2026-11-06. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `fix/dead-patches` from `main` 1ff885d, started 2026-11-06. Merged into `main` at c11b489 on
+2026-11-06; released in 0.7.12.
 
 ## Goal and acceptance
 

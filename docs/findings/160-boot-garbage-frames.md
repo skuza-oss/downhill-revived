@@ -1,9 +1,10 @@
 # 160: Garbage blocks on screen in the first seconds after start
 
 Status: current
+Checked: 2026-11-06
 
-Branch `fix/boot-artifacts` from `main` 113f76f, started 2026-11-06. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `fix/boot-artifacts` from `main` 113f76f, started 2026-11-06. Merged into `main` at b8a63b5
+on 2026-11-06; released in 0.7.12.
 
 ## Goal and acceptance
 

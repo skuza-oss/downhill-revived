@@ -315,7 +315,7 @@ with a fresh session rather than retaining a broken connection. See finding 158 
 The server answers the sender only, with the same bytes and the type changed to 4. Use it to
 watch the round-trip during a race; it is never forwarded.
 
-### STATE, type 5, and EVENT, type 6 — client ↔ server ↔ clients
+### STATE, type 5, and EVENT, type 6 — client ↔ SFU ↔ clients
 
 | Offset | Size | Field |
 |---|---|---|
@@ -490,7 +490,7 @@ start_cancelled. An AUTO room returns to a new 30 second intermission; a host
 room returns to open. A new countdown clears lastEvent.
 At the deadline, only entrants receive start and slots, with an entering host
 first, then join order. The existing startAt lead for loading still follows the
-countdown. Members outside the grid receive room snapshots and no binary relay.
+countdown. Members outside the grid receive room snapshots and no race frames.
 Joins are accepted in every phase up to maxPlayers, counting all members.
 
 ### Finishes and return
@@ -502,12 +502,12 @@ Only the first finish from that entrant counts. Computer finishes send nothing.
 
 The first human finish sets finishEndsAt to now plus the running finishWindow.
 With finishWindow zero the deadline remains null. Later finishes do not move it.
-At the deadline all unfinished entrants become DNF time_up and leave the relay.
-Finished entrants retain their finish and leave the relay too.
+At the deadline all unfinished entrants become DNF time_up and leave the race's frames.
+Finished entrants retain their finish and leave them too.
 
 A client sends `{"type":"back"}` when leaving the race scene for the room.
 An unfinished entrant becomes DNF gave_up. A finisher keeps its finish.
-Its relay stops. Remaining racers receive `left` with its slot, memberId and
+Its race frames stop. Remaining racers receive `left` with its slot, memberId and
 reason finished or gave_up. Timeouts use time_up; disconnects use left.
 The client retains the connection and can pick and ready while others race.
 Disconnecting or leaving removes membership and records DNF left if unfinished.

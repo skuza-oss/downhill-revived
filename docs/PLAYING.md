@@ -28,10 +28,11 @@ What works today:
   resolution.
 - **The movies play**: the intro, the attract loop and OPTIONS > VIDEO CLIPS, decoded with
   libmpeg2 from your disc. Skip Movies in REVIVED SETTINGS (on in a new install) skips them.
-- **REVIVED SETTINGS in the game's own OPTIONS menu**: resolution, display mode, window size, picture
-  shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone, the button icons
-  (PlayStation, Xbox or Nintendo, or the controller's), texture pack and font, drawn with the
-  game's own menus and font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
+- **REVIVED SETTINGS in the game's own OPTIONS menu**, in tabs (L1/R1): resolution, display mode,
+  window size, picture shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone,
+  the button icons (PlayStation, Xbox or Nintendo, or the controller's), your keys and buttons,
+  the size of online riders' names, texture pack and font, drawn with the game's own menus and
+  font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
   each picture without tearing.
 - **Unlock All** (REVIVED SETTINGS, off by default): every track, rider, bike and shop item reads as
   unlocked while it is on. Your save isn't changed, so turning it off brings your own progress back.
@@ -59,6 +60,9 @@ What works today:
   connected controller.
 - **Keyboard play**: a whole race on the keyboard, with gradual steering; letters go by their
   place on the keyboard, so AZERTY and QWERTZ work too (see [Controls](#controls)).
+- **Your own keys and buttons**: every PlayStation button can be put on another key or controller
+  button, a main and an alternate, for the keyboard and each of two controllers, with Swap Sticks
+  and Invert per stick axis, in the game or the launcher (see [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
   or Thumb zones, tilt steering if you like), or a controller. No online races on phones yet.
@@ -269,7 +273,12 @@ back to its defaults. Players 3 and 4 use the default controller layout.
 
 Online works out of the box: choose ONLINE in the main menu to create a public or private race,
 or join one from the list or with its code. The game uses the project's official server,
-`wss://dhd.skuza.app`. Every player needs the same USA disc image.
+`wss://dhd.skuza.app`. Every player needs the same USA disc image and the same release of the
+game (0.7.12 and later can't race with 0.7.11 or older; the ONLINE menu offers the update).
+
+In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
+to you (UDP). Where a network blocks UDP, the game falls back to an encrypted connection on port
+443 by itself. No other player ever gets your internet address.
 
 Running your own server is optional. `online/server/` is the server (Cloudflare Workers), and
 [online/server/README.md](../online/server/README.md) explains how to deploy it. Then put its
@@ -311,7 +320,6 @@ Graphics, Controls, Online and Game tabs; the legend shows your bound inputs. Up
 rows and left/right change them. Cross keeps changes and closes; Triangle undoes the settings
 page's changes and closes (Android Back keeps them). Controls and Touch Controls save as you go.
 A star marks a choice that applies at the next start. A host hides tabs it cannot offer.
-
 
 `dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
 first start. The REVIVED SETTINGS page writes most of them for you.

@@ -1,9 +1,10 @@
 # 159: Touch controls gone after loading a career save
 
 Status: current
+Checked: 2026-11-06
 
-Branch `fix/touch-after-load` from `main` 113f76f, started 2026-11-06. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `fix/touch-after-load` from `main` 113f76f, started 2026-11-06. Merged into `main` at 1ff885d
+on 2026-11-06; released in 0.7.12.
 
 ## Goal and acceptance
 
@@ -113,7 +114,7 @@ test failed).
   have been off (the unit tests pass; only a game run shows it). Moved to `func_0016C0C8` (ce25541).
   The older patch there, `hle_online_watch_resume()` (online spectating: the pause menu's builder
   marks the watch paused "until re-entry"), is dead the same way; not changed here, for the
-  online lane to look at.
+  online lane to look at (finding 165 moved it).
 - The stall recovery runs only on the delta-time clock (`port_delta_clock()`: paced play, a rate
   other than 60, or `DHD_STEP_CLOCK=1`). The deterministic state traces at 60 never reach it, so
   they cannot show it either way; a trace with `DHD_STEP_CLOCK=1` does.

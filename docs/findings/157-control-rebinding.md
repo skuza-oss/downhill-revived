@@ -1,9 +1,11 @@
 # 157: Keyboard and controller rebinding, in the launcher and in the game
 
 Status: current
+Checked: 2026-11-06
 
-Branch `feat/rebinding` from `main` 113f76f, started 2026-11-05. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `feat/rebinding` from `main` 113f76f, started 2026-11-05, merged 2026-11-06 (released in
+0.7.12). The game's PC SETTINGS is called REVIVED SETTINGS since finding 163, which also put the
+Controls page on a tab of its own; the release review's changes are the last section of Decisions.
 
 ## Goal and acceptance
 
@@ -150,6 +152,19 @@ together for player 1, and the keyboard still had Cross. The owner approved thes
 The owner's sequence under the new rules: Square's button onto Cross swaps (`cross:west
 square:south`), clearing Cross is refused every time, clearing Square is allowed; Controller 1
 keeps a button for Cross throughout. It is the unit test `the_owners_sequence`.
+
+### 2026-11-06: the release review
+
+- **R1 is kept too** (60b4e29): it is the only input that switches REVIVED SETTINGS' tabs (they
+  wrap, so R1 alone reaches each), so each device keeps an input on Cross, Triangle, START, R1 and
+  the d-pad (`controls.rs`, `essential`). A value dhd.ini can't read keeps the button's default;
+  only `none` (or nothing) unbinds it, as docs/PLAYING.md says.
+- **A click on a binding row starts its change** (f98ce93): value rows say what they are
+  (`MENU_VALUE_FIXED`, `_ARROWS`, `_ACTION`, `port/hle/menu_page.h`); a click on an ACTION row is
+  Cross.
+- **The launcher's wait** (7d6f880, 2420caa, `port/launcher/ui/controls.js`): it counts only on the
+  Controls tab, for the device it began on, for five seconds; the button that answered it does
+  nothing else until let go (Start no longer launches the game, B no longer goes back).
 
 ## Surprises
 

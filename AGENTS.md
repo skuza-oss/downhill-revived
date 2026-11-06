@@ -49,7 +49,8 @@ change needs them or someone asks.
 
 | Decision | Since | Finding | Do not |
 |---|---|---|---|
-| Online races are state sync: each game runs its own one-player race, the others are puppet riders moved from snapshots (~20 a second); hits are events; each game times its own finish | 2026-10-16 | 044 | add input lockstep, input delay, state hashes or tick agreement between PCs; peers share neither frame rate nor floats |
+| Online races are state sync: each game runs its own one-player race, the others are puppet riders moved from snapshots (30 a second); hits are events; each game times its own finish | 2026-10-16 | 044 | add input lockstep, input delay, state hashes or tick agreement between PCs; peers share neither frame rate nor floats |
+| Race frames travel through Cloudflare only (Realtime SFU, TURN over TLS on 443 as the fallback); the room sets them up; no player ever receives another's address | 2026-11-06 | 158 | add peer-to-peer links or a TURN mesh, or send a player another's address, SDP, TURN credentials, address hash or install id |
 | One delta-time game clock at every frame rate, 60 included and online; deterministic runs keep the original clock | 2026-11-02 | 139 | add a fixed 1/60 step, a frame cap with repaid debt, or extra online fields |
 | Our own GS renderer (Rust, wgpu) with an exact and a native front end; PCSX2 is the referee (replay the same GS stream), not the renderer | 2026-10-14 | 085 | swap in PCSX2's GS or blame the renderer before replaying the stream (025) |
 | One code path for every platform, no legacy kept beside a new path; old code is deleted when replaced | 2026-10-27 | 099 | keep a second implementation "as a fallback" (the 32-bit build, D3D11, XInput, the game's updater are gone, 088) |

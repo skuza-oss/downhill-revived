@@ -3,10 +3,12 @@
 The root `AGENTS.md` rules apply. Protocol: `docs/online-protocol.md`; steps and deployment:
 `README.md` here.
 
-- Races are state sync (finding 044): the server relays STATE and EVENT frames, slot corrected,
-  and keeps nothing of them. Do not add input lockstep, input delay or race hashes. Rooms,
-  sessions and rules: findings 118, 119, 123, 128, 135, 137; the update backup `/v1/latest`:
-  finding 138.
+- Races are state sync (finding 044). Since protocol 3 the STATE and EVENT frames travel over
+  Cloudflare Realtime SFU (TURN over TLS as the fallback); the room only sets up each racer's
+  session and credentials and never sends a player another's address, SDP or credentials
+  (finding 158). Do not add input lockstep, input delay or race hashes. Rooms, sessions and
+  rules: findings 118, 119, 123, 128, 135, 137; the abuse guard: finding 161; the update backup
+  `/v1/latest`: finding 138.
 - The official server is `wss://dhd.skuza.app`, the game's default. No other server address in a
   tracked file: `wrangler.jsonc` names no account, and examples use placeholders
   (`dhd-online.<account>.workers.dev`).

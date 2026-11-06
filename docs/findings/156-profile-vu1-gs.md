@@ -1,6 +1,7 @@
 # 156: Where a frame's time goes, before replacing the VU1 and GS emulation
 
 Status: current
+Checked: 2026-11-06
 
 Branch `perf/profile-vu1-gs` from `main` 085117f, started 2026-11-05; the desktops merged into
 `main` at 113f76f, the phone (Mi 11i, the 0.7.11 code) measured on 2026-11-06.

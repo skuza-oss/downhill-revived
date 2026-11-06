@@ -36,7 +36,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 ## The port: how it is built
 
 - **One portable core:** `port/tools/build_wasm.py` compiles every `src/` unit (rewritten by
-  `port/tools/transform.py` with the patches of `port/patches*.py`), the asm-only functions
+  `port/tools/transform.py` with the patches of `port/patches*.py`; a patch in code the port
+  doesn't compile is refused, finding 165), the asm-only functions
   recompiled to C (`recomp.py`), the module-side runtime and HLE and the data image into one
   wasm32 module, `build/wasm/dhd_core.wasm` (findings 081, 082).
 - **One host build script:** `port/tools/build_host64.py --target win-x64|linux-x64|macos-arm64|
@@ -92,7 +93,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), movies,
   vibration, stick dead zone and button icons (finding 134), the keys and controller buttons for
   the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
-  Ping counter (finding 120), Unlock All (finding 095), EXIT GAME. dhd.ini has one implementation, the Rust crate
+  Ping counter (finding 120), online name size (finding 163), Unlock All (finding 095), EXIT GAME. dhd.ini has one implementation, the Rust crate
   `dhd_settings` (`port/render/settings`), used by the game, the launcher and the browser.
 - The launcher holds settings, rider name and updates on every desktop platform, decides the one
   data folder (`DHD_SETTINGS`, `DHD_MEMCARD_DIR`, `DHD_DATA_DIR`), updates from `latest.json`
@@ -111,7 +112,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   Track pickups are shared events (finding 144); a player who leaves becomes an AI rider.
 - Server: `online/server/` (Cloudflare Workers + Durable Objects) at `wss://dhd.skuza.app`, the
   game's default (dhd.ini `server =` or `DHD_NET_SERVER` override it). Rooms of up to 10
-  (finding 123) that live across races (findings 118, 119), Ready for the next race and MOSH by
+  (finding 123) that live across races (findings 118, 119), 25 tracks with Salt City MX and TD
+  (finding 166), Ready for the next race and MOSH by
   the host's pick (finding 128), rooms placed near their creator (finding 135), rejoin by token
   (finding 137). Protocol: `docs/online-protocol.md`; steps: `online/server/README.md`.
 - Abuse guard (finding 161): a kill switch in the moderation database (`moderate.mjs online

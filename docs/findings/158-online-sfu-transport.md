@@ -1,6 +1,7 @@
 # 158: race frames over Cloudflare Realtime SFU, and puppets with less delay
 
 Status: current
+Checked: 2026-11-06
 
 Branch `feat/online-sfu` from `main` 113f76f, started 2026-11-06. This file is the lane's plan
 while it runs and its finding when it merges.
@@ -234,6 +235,12 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - Round 4: Cloudflare's TURN refuses a ChannelBind to some Cloudflare addresses (401 for 1.1.1.1
   and the API host's address) but binds to the SFU's own candidate address (7-13 ms) and to
   outside addresses. Its answer to a made-up username after the 401 challenge is a 400.
+- Release review round 1 (before 0.7.12): puppets lost their snapshot history at every snapshot
+  (`feed()` in `port/hle/puppet.c` had lost the braces of its new-race reset), so they didn't
+  interpolate (3331300); a peer could fill the early-event queue and its overflow closed the
+  receiving player's connection, now capped per sender and dropped (`sfu.rs`, 56dce3c); a ban,
+  limit or kill-switch message lost the race against its close and showed as "connection closed"
+  (`port/render/net/src/lib.rs`, dfab5c4).
 - Release review round 2 (before 0.7.12): a ChannelBind was renewed 300 s after its success, but
   the TURN permission it installs lasts 5 minutes (RFC 8656 9; the binding 10) and ChannelData
   renews neither, so a relayed race over 5 minutes lost datagrams at each renewal. It is renewed
@@ -266,7 +273,8 @@ State sync is unchanged (finding 044); the race frames' transport and the puppet
   channels and sends each client only its own SDP and channel ids; no player receives another's
   address, SDP or TURN credentials (`online/server/src/sfu.ts`, `port/render/net/src/sfu.rs`).
   The WebSocket race relay is gone; binary PING/PONG on the WebSocket stays for the ping counter.
-  `PROTOCOL` is 3; the release that ships it raises `MIN_VERSION`.
+  `PROTOCOL` is 3; 0.7.12 ships it, and `MIN_VERSION` is 0.7.12 (`online/server/wrangler.jsonc`,
+  3e65337): 0.7.11 can't race with it.
 - When UDP to the SFU does not connect within 2 s, the client falls back to Cloudflare TURN over
   TLS on 443 with short-lived credentials the room mints for that racer only (`turn.rs`,
   `relay.rs`; test switch `DHD_NET_SFU_UDP=0`).
