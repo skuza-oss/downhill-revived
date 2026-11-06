@@ -55,6 +55,7 @@ after a version change before a live check.
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
 | `port/tools/route_profile.py EXE OUT [--profile]` | finding 156's route on a hidden desktop (timed lock) with the timeline: per scene (title, shop, race start, mid-race) fields/s and each thread's work and busy time; `--profile` also samples the game thread's call stacks in each scene (finding 162) |
+| `port/tools/gs_census.py DUMP.gs... [--group NAME=A-B] [--log game.log]` | what a GS stream uses, per field and group of dumps: primitives by type and path, textures and CLUTs, filters, blending, tests, render targets, render-to-texture, transfers, the display; reads the game's `DHD_GS_CAPTURE` dumps or PCSX2's uncompressed ones (finding 162) |
 | `port/tools/sample_profile.py --pid N --stacks game` | whole call stacks of one thread's samples (dbghelp's StackWalk64): the report's `stacks` and `inclusive`; slower per sample, so shares only (finding 162) |
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
