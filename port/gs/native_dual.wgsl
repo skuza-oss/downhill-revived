@@ -7,6 +7,7 @@ struct NativeDual {
 
 @fragment
 fn native_pixel_dual(i: Varyings) -> NativeDual {
+    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -19,6 +20,7 @@ fn native_pixel_dual(i: Varyings) -> NativeDual {
 
 @fragment
 fn native_pixel_dual_u(i: Varyings) -> NativeDual {
+    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -33,6 +35,7 @@ fn native_pixel_dual_u(i: Varyings) -> NativeDual {
 @fragment
 fn native_pixel_dual_mesh(m: MeshVaryings) -> NativeDual {
     let i = mesh_varyings(m);
+    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -46,6 +49,7 @@ fn native_pixel_dual_mesh(m: MeshVaryings) -> NativeDual {
 @fragment
 fn native_pixel_dual_u_mesh(m: MeshVaryings) -> NativeDual {
     let i = mesh_varyings(m);
+    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);

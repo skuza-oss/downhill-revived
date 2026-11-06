@@ -258,7 +258,7 @@ struct Sources {
 impl Sources {
     fn of(objects: &Objects) -> Sources {
         Sources { module: objects.module.clone(), dual_module: objects.dual_module.clone(),
-                  layout: objects.draw_layout.clone(), texels_layout: objects.texels_draw_layout.clone(),
+                  layout: objects.native_draw_layout.clone(), texels_layout: objects.native_texels_draw_layout.clone(),
                   mesh_layout: objects.mesh_draw_layout.clone(),
                   mesh_texels_layout: objects.mesh_texels_draw_layout.clone() }
     }
