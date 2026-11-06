@@ -2,7 +2,7 @@
 // local_copy, scanout) for the WebGPU backend (gpu_wgpu.c, finding 084). Hand-ported line by line;
 // raster.hlsl and the D3D11 backend stay the oracle, and the results must match theirs bit for bit.
 //
-// Two things differ in form, not in result:
+// Three things differ in form, not in result:
 // - The oracle is compiled with IEEE strictness, so every a*b+c is a rounded multiply and then a
 //   rounded add. WGSL has no `precise`, and FXC (wgpu's DX12 compiler) or a driver may fuse them
 //   into one FMA. keep() passes each such product through an integer OR with a uniform zero, which
@@ -10,6 +10,10 @@
 // - WGSL has no f64. The depth plane is evaluated with an exact software binary64 (sd_*, u32
 //   limbs): each multiply and add is rounded to nearest-even like the oracle's precise double
 //   dmul/dadd, so Z is the same integer by construction (finding 084, section W4).
+// - A subtraction clamped at zero, (a > b) ? a - b : 0, passes its difference through keep_u(),
+//   the same OR with the uniform zero. PowerVR Rogue's driver compiles SPIR-V through LLVM 9,
+//   which turns that select into llvm.usub.sat, and its code writer cannot lower that intrinsic in a
+//   compute shader: the pipeline crashes the game (finding 170). native_spirv checks every stage.
 
 override EARLY_DEPTH: bool = false;
 override EXCLUSIVE_WORD_STORE: bool = false;
@@ -47,6 +51,7 @@ fn keep(x: f32) -> f32 { return bitcast<f32>(bitcast<u32>(x) | batch.w); }
 fn keep2(x: vec2<f32>) -> vec2<f32> { return bitcast<vec2<f32>>(bitcast<vec2<u32>>(x) | vec2<u32>(batch.w)); }
 fn keep3(x: vec3<f32>) -> vec3<f32> { return bitcast<vec3<f32>>(bitcast<vec3<u32>>(x) | vec3<u32>(batch.w)); }
 fn keep4(x: vec4<f32>) -> vec4<f32> { return bitcast<vec4<f32>>(bitcast<vec4<u32>>(x) | vec4<u32>(batch.w)); }
+fn keep_u(x: u32) -> u32 { return x | batch.w; }
 
 // D3D's ftoi/ftou: NaN gives 0 and out-of-range values saturate (a WGSL conversion's
 // out-of-range result is its own).
@@ -200,7 +205,7 @@ fn texel(xy_in: vec2<i32>, ctxt: u32, level: u32) -> vec4<i32> {
     let c = states[state].regs[8u + ctxt].xy;
     var tw = (t.x >> 26u) & 15u;
     var th = (t.x >> 30u) | ((t.y & 3u) << 2u);
-    tw = select(0u, tw - level, tw > level); th = select(0u, th - level, th > level);
+    tw = select(0u, keep_u(tw - level), tw > level); th = select(0u, keep_u(th - level), th > level);
     var xy = xy_in;
     xy.x = clamp_coordinate(xy.x, c.x & 3u, 1u << tw, ((c.x >> 4u) & 1023u) >> level, ((c.x >> 14u) & 1023u) >> level);
     xy.y = clamp_coordinate(xy.y, (c.x >> 2u) & 3u, 1u << th, ((c.x >> 24u) | ((c.y & 3u) << 8u)) >> level, ((c.y >> 2u) & 1023u) >> level);
