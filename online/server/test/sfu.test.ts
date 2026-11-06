@@ -1,8 +1,22 @@
 import { describe, it, expect } from "vitest";
+import { env, runInDurableObject } from "cloudflare:test";
 import { Client, startedRace } from "./helpers";
 import { Realtime } from "../src/sfu";
 
 describe("Realtime control plane", () => {
+  it("releases race traffic only after every subscriber acknowledges", async () => {
+    const {clients, code} = await startedRace(2);
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+      for (const member of room.state.members)
+        member.sfu = {id:`fake-${member.id}`, phase:"ready", channels:[]};
+    });
+    clients[0].sendJson({type:"sfu_ready"});
+    await expect(clients[0].next(f => typeof f === "string" && JSON.parse(f).type === "sfu_ready", 50)).rejects.toThrow();
+    clients[1].sendJson({type:"sfu_ready"});
+    await Promise.all(clients.map(c => c.json("sfu_ready")));
+    clients[0].sendJson({type:"end"});
+    await clients[0].json("ended");
+  });
   it("rejects lobby allocations and caps attempts at one per race", async () => {
     const { host } = await Client.host();
     host.sendJson({type:"sfu_offer", sdp:"private"});
