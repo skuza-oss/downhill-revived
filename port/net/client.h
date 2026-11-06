@@ -69,6 +69,14 @@ typedef struct {
         unsigned arrivals;
     } snapshot[NET_MAX_SLOTS];
     unsigned states_sent;
+    /* DHD_NET_TEST_PONG_DELAY=N[@S] (a test switch, finding 175): from S seconds (default 60) after
+       the first welcome, every pong (the room's JSON one and the race's PONG frame) is held N ms
+       plus 0-N/2 ms more before it counts, a slow return path one way. Held pongs, oldest first. */
+    double pong_delay_ms, pong_delay_from_s;
+    unsigned pong_delays;
+    struct { double due; int binary; uint16_t n; char data[128]; } held[16];
+    unsigned held_head, held_count;
+    int releasing;  /* client_tick hands a held pong over: it counts now */
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];

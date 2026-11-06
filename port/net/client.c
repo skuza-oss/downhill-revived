@@ -75,6 +75,32 @@ void client_init(NetClient *c, const char *name, const char *version, const char
     c->lobby.seed = -1;
     c->lobby.ping_ms = -1;
     c->rtt_floor = -1;
+    {
+        const char *delay = getenv("DHD_NET_TEST_PONG_DELAY");
+        if (delay && *delay) {
+            const char *at = strchr(delay, '@');
+            c->pong_delay_ms = atof(delay);
+            c->pong_delay_from_s = at ? atof(at + 1) : 60;
+        }
+    }
+}
+
+/* DHD_NET_TEST_PONG_DELAY: this pong is held (copied for client_tick), or counts now. */
+static int hold_pong(NetClient *c, int binary, const void *data, size_t n)
+{
+    double now = net_now_ms();
+    if (c->releasing || c->pong_delay_ms <= 0 || !c->joined_at || now < c->joined_at + c->pong_delay_from_s * 1000 ||
+        n > sizeof c->held[0].data || c->held_count == sizeof c->held / sizeof c->held[0])
+        return 0;
+    if (!c->pong_delays++)
+        fprintf(stderr, "net: DHD_NET_TEST_PONG_DELAY: pongs held %.0f-%.0f ms from now (test switch)\n",
+                c->pong_delay_ms, c->pong_delay_ms * 1.5);
+    unsigned at = (c->held_head + c->held_count++) % (sizeof c->held / sizeof c->held[0]);
+    /* the extra 0-N/2 ms: deterministic, so runs repeat */
+    c->held[at].due = now + c->pong_delay_ms + c->pong_delay_ms * 0.5 * ((c->pong_delays * 37) % 100) / 100.0;
+    c->held[at].binary = binary, c->held[at].n = (uint16_t)n;
+    memcpy(c->held[at].data, data, n);
+    return 1;
 }
 
 void client_set_install_id(NetClient *c, const char *id)
@@ -428,6 +454,8 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         ;
     else if (!strcmp(type, "ping") && json_int(text, "s", &v))
         say(c, "{\"type\":\"pong\",\"s\":%lld}", v);
+    else if (!strcmp(type, "pong") && hold_pong(c, 0, text, strlen(text) + 1))
+        ;
     else if (!strcmp(type, "pong") && json_number(text, "t", &t)) {
         double now = net_now_ms(), rtt = now - t;
         add_rtt(c, rtt);
@@ -556,7 +584,9 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
 {
     SDL_LockMutex(c->lock);
     c->last_rx = net_now_ms();
-    if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG) {
+    if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG && hold_pong(c, 1, data, n))
+        ;
+    else if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG) {
         double sent, server_time, now = net_now_ms(), rtt;
         memcpy(&sent, data + 2, sizeof sent);
         rtt = now - sent;
@@ -712,8 +742,29 @@ int client_tick(NetClient *c)
             c->next_log = now + NET_LOG_MS;
         }
     }
+    /* held pongs whose time has come (DHD_NET_TEST_PONG_DELAY), handed over unlocked */
+    char pong[128];
+    int binary = 0;
+    size_t pong_n = 0;
+    if (c->held_count && c->held[c->held_head].due <= now) {
+        unsigned at = c->held_head;
+        binary = c->held[at].binary, pong_n = c->held[at].n;
+        memcpy(pong, c->held[at].data, pong_n);
+        c->held_head = (at + 1) % (sizeof c->held / sizeof c->held[0]);
+        c->held_count--;
+    }
     SDL_UnlockMutex(c->lock);
     if (line[0]) fprintf(stderr, "%s\n", line);
+    if (pong_n) {
+        SDL_LockMutex(c->lock);
+        c->releasing = 1;
+        SDL_UnlockMutex(c->lock);
+        if (binary) client_on_binary(c, (const uint8_t *)pong, pong_n);
+        else client_on_text(c, pong, pong_n - 1);
+        SDL_LockMutex(c->lock);
+        c->releasing = 0;
+        SDL_UnlockMutex(c->lock);
+    }
     return dead;
 }
 

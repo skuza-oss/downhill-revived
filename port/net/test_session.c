@@ -1,6 +1,7 @@
 /* Session wire parsing and serializers without a server or game data. */
 #include "client.h"
 #include "lobby_row.h"
+#include <SDL3/SDL_timer.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -227,6 +228,16 @@ int main(void)
         PONG(11, 1003.0);                  /* a quick one again: trusted */
         client_on_binary(&c,pong,sizeof pong);
         assert(fabs(c.clock_offset - 1003) < 1.5);
+        /* DHD_NET_TEST_PONG_DELAY (finding 175): a pong is held, then counts at its time */
+        c.pong_delay_ms = 50, c.pong_delay_from_s = 0, c.joined_at = net_now_ms() - 1;
+        PONG(11, 1004.0);
+        client_on_binary(&c,pong,sizeof pong);
+        assert(c.held_count == 1 && fabs(c.clock_offset - 1003) < 1.5);
+        {
+            double until = net_now_ms() + 1000;
+            while (c.held_count && net_now_ms() < until) { SDL_Delay(5); client_tick(&c); }
+        }
+        assert(!c.held_count && c.lobby.ping_ms >= 50);  /* its round trip includes the hold */
 #undef PONG
         client_free(&c);
     }
