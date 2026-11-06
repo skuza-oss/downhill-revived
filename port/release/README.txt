@@ -143,6 +143,11 @@ Running your own server is optional: put its address on the "server =" line of d
     server = wss://races.example.org
 A server of your own can keep an older version playing (its MIN_VERSION setting); then point
 update_url at your own latest.json, or set auto_update = off.
+What the official server keeps, against cheaters and abuse: a log of who joined which race (the
+time, the room, your rider name, the game's version, your country, a keyed hash of your internet
+address, never the address itself, and the game's install id, a random number kept in dhd.ini
+as install_id), deleted after 14 days; bans go by that hash or install id, until they end. No
+other player ever sees your address, its hash or your install id.
 
 Known gaps
 - The 2-4 player split screens have not been checked in widescreen.

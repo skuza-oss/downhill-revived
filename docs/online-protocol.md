@@ -140,7 +140,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"hello","protocol":2,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
 // A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>"
-// Since 0.7.12 (finding 161): "installId":"<32 lowercase hex>", optional (below)
+// From the release after 0.7.11 (finding 161): "installId":"<32 lowercase hex>", optional (below)
 
 // Host only. Every field optional; omitted fields keep their value.
 {"type":"settings","track":3,"laps":2,"seed":12345,"public":true,"maxPlayers":10,"roomName":"Friday race"}

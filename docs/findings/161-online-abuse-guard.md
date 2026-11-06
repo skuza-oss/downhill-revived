@@ -85,7 +85,10 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   `DHD_NET_INSTALL_ID` after the settings load, `port/net/net.c` takes it for each connection and
   `client.c` sends `"installId"` in every hello. Tests: `settings/tests/corpus.rs` `install_id`,
   `port/net/test_session.c`.
-- [ ] Privacy note, protocol docs.
+- [x] Privacy note, protocol docs: `docs/PLAYING.md` "What the official server keeps" and
+  `port/release/README.txt` (what, why, 14 days, bans by hash or install id, nobody sees another's
+  address, hash or install id); `docs/online-protocol.md` has every new code, the kill switch's
+  message, the limits, caps, bans, the log and `hello.installId` (written with each item).
 
 ## Decisions
 
