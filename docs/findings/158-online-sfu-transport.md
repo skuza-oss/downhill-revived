@@ -243,6 +243,11 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   remaining racers never subscribed to each other and never got `sfu_ready`. The room now picks
   the next missing subscription afresh after every call until none is missing, and the release
   checks every pair first (server test with a leave during the held call).
+- Release review round 2: one racer's failed setup (an API error, or a game that never finished)
+  held every racer's traffic forever, since the release waits for all and the failed one could
+  not try again. Setup now has a deadline (25 s from the start, from the measured 0.2-3.1 s plus
+  ten racers' calls); a racer that fails or misses it is out of the race as one who leaves, and
+  the others are released without it (`docs/online-protocol.md`, server tests).
 
 ## Result
 

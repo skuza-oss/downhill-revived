@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, runInDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { Client, startedRace } from "./helpers";
 import { fakeRealtime, publishedSession } from "./sfu-fake";
 import { Realtime, Turn, TURN_TTL_S } from "../src/sfu";
@@ -26,12 +26,19 @@ describe("Realtime control plane", () => {
     const { host } = await Client.host();
     host.sendJson({type:"sfu_offer", sdp:"private"});
     expect((await host.json("error")).message).toContain("active race");
-    const {clients} = await startedRace(2);
+    const {clients, code} = await startedRace(3);
+    // A second offer in the same race is refused (the first one is under way or done).
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+      room.state.members[1].sfuRace = room.state.race.startAt;
+    });
+    clients[1].sendJson({type:"sfu_offer", sdp:"private"});
+    expect((await clients[1].json("error")).message).toContain("One Realtime session");
+    // Fake test environment has no app secrets: a failed attempt takes the racer out of the race,
+    // so it has no second one either.
     clients[0].sendJson({type:"sfu_offer", sdp:"private"});
-    // Fake test environment has no app secrets: a failed attempt still consumes the cap.
-    expect((await clients[0].json("error")).message).toContain("failed");
+    expect((await clients[0].json("error")).message).toBe("Realtime connection failed: out of the race.");
     clients[0].sendJson({type:"sfu_offer", sdp:"private"});
-    expect((await clients[0].json("error")).message).toContain("One Realtime session");
+    expect((await clients[0].json("error")).message).toContain("active race");
     clients[0].sendJson({type:"end"});
     await clients[0].json("ended");
     clients[0].sendJson({type:"sfu_offer", sdp:"private"});
@@ -134,6 +141,103 @@ describe("Realtime setup while the race's members change", () => {
       clients[1].sendJson({ type: "sfu_ready" });
       clients[2].sendJson({ type: "sfu_ready" });
       await Promise.all([clients[1].json("sfu_ready"), clients[2].json("sfu_ready")]);
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
+describe("A racer whose Realtime setup fails or never ends", () => {
+  /** Members 0 and 1 published, subscribed to each other and acknowledged; member 2 connecting. */
+  async function twoReady(stub: DurableObjectStub, extra: (room: any) => void = () => {}) {
+    await runInDurableObject(stub, async (room: any) => {
+      room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
+      const [a, b, c] = room.state.members;
+      a.sfu = publishedSession(a.id, [b.id]);
+      b.sfu = publishedSession(b.id, [a.id]);
+      c.sfu = { id: `session-${c.id}`, phase: "connect", channels: [] };
+      for (const m of room.state.members) m.sfuRace = room.state.race.startAt;
+      a.sfuReady = b.sfuReady = true;
+      extra(room);
+    });
+  }
+
+  it("takes a racer whose publication fails out of the race and releases the others", async () => {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    fake.fail = (path) => path.endsWith("datachannels/new");
+    try {
+      await twoReady(stub);
+      clients[2].sendJson({ type: "sfu_connected" });
+      expect((await clients[2].json("error")).message).toBe("Realtime connection failed: out of the race.");
+      for (const c of clients.slice(0, 2)) {
+        expect(await c.json("left")).toMatchObject({ slot: 2, memberId: 2 });
+        await c.json("sfu_ready");
+      }
+      await runInDurableObject(stub, async (room: any) => {
+        await room.sfuQueue;
+        expect(room.state.race.left).toEqual([2]);
+        expect(room.state.race.sfuReleased).toBe(true);
+        // Still in the room, not in the race, its session closed.
+        expect(room.state.members.map((m: any) => m.id)).toEqual([0, 1, 2]);
+        expect(room.state.members[2].sfu).toBeUndefined();
+      });
+      clients[2].sendJson({ type: "sfu_connected" });
+      expect((await clients[2].json("error")).message).toContain("active race");
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("takes a racer whose subscription fails out, not the one that connected", async () => {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    // Member 1's session refuses the subscription to member 2's publication.
+    fake.fail = (path) => path.includes("/sessions/session-1/datachannels/new");
+    try {
+      await twoReady(stub);
+      clients[2].sendJson({ type: "sfu_connected" });
+      expect((await clients[1].json("error")).message).toBe("Realtime connection failed: out of the race.");
+      expect(await clients[0].json("left")).toMatchObject({ slot: 1 });
+      expect(await clients[2].json("left")).toMatchObject({ slot: 1 });
+      // Members 0 and 2 have each other; their acknowledgements release them.
+      clients[2].sendJson({ type: "sfu_ready" });
+      await Promise.all([clients[0].json("sfu_ready"), clients[2].json("sfu_ready")]);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("takes a racer that never finishes its setup out when the time is up (race room)", async () => {
+    const host = await Client.connect("/v1/rooms/new");
+    host.hello("P0", { features: ["session"] });
+    const { code } = await host.json("welcome");
+    const clients = [host, await Client.join(code, "P1"), await Client.join(code, "P2")];
+    for (const c of clients) c.sendJson({ type: "ready", ready: true });
+    await Promise.all(clients.map((c) => c.json("start")));
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    try {
+      // Member 2 never sends its offer.
+      await twoReady(stub, (room) => {
+        delete room.state.members[2].sfu;
+        delete room.state.members[2].sfuRace;
+        room.state.race.sfuBy = Date.now() - 1;
+      });
+      expect(await runDurableObjectAlarm(stub)).toBe(true);
+      expect((await clients[2].json("error")).message).toBe("Realtime connection failed: out of the race.");
+      for (const c of clients.slice(0, 2)) {
+        expect(await c.json("left")).toMatchObject({ slot: 2, memberId: 2, reason: "left" });
+        await c.json("sfu_ready");
+      }
+      // Its game reads that it is out of the race (port/net/client.c) and goes back to the room.
+      const room = await clients[2].next((f) => typeof f === "string" && JSON.parse(f).type === "room" &&
+        JSON.parse(f).members.some((m: any) => m.id === 2 && m.inRace === false));
+      const me = JSON.parse(room as string).members.find((m: any) => m.id === 2);
+      expect(me).toMatchObject({ raceState: "dnf", dnfReason: "left" });
+      expect(JSON.parse(room as string).phase).toBe("racing");
     } finally {
       fake.restore();
     }
