@@ -13,7 +13,7 @@
    Show: D-pad and Sticks has Swap Sticks and an Invert for each of its sticks' axes.
    The rules are dhd_settings' (port/render/settings/src/controls.rs, through the host): a key or
    button another PS2 button had swaps with this button's old one (the hint says which), and a
-   change that would leave this device without Cross, Triangle, START or a d-pad direction is
+   change that would leave this device without Cross, Triangle, START, R1 or a d-pad direction is
    refused (the hint says why: "Cross needs a button").
    Every change is saved to dhd.ini at once (keyboard, pad1, pad2) and the host plays with it at
    once. A layout the environment sets (DHD_KEYBOARD, DHD_PAD1, DHD_PAD2) is shown, not changed.

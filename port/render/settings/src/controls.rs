@@ -2,8 +2,8 @@
 //! `keyboard`, `pad1` and `pad2` lines, their defaults (the layout the game always had), how a line
 //! is read and written, and the rules of a change: an input another button had swaps with the
 //! button's old one (no duplicates), and no device is left without a way through the menus (each
-//! of the keyboard, Controller 1 and Controller 2 on its own keeps Cross, Triangle, START and the
-//! d-pad).
+//! of the keyboard, Controller 1 and Controller 2 on its own keeps Cross, Triangle, START, R1 (the
+//! settings tabs) and the d-pad).
 //!
 //! - What is bound are the DualShock 2's buttons (`TARGETS`): the game's own meaning of each stays
 //!   (Cross pedals in a race and confirms in the menus). The keyboard can also hold the sticks'
@@ -45,7 +45,7 @@ pub struct Target {
     /// (-1 left or up, 1 right or down).
     pub axis: u8,
     pub dir: i8,
-    /// The menus need it (Cross, Triangle, START, the d-pad): each device keeps an input on it, on
+    /// The menus need it (Cross, Triangle, START, the d-pad, and R1 for the settings tabs): each device keeps an input on it, on
     /// its own (the keyboard doesn't count for Controller 1, nor Controller 1 for the keyboard).
     pub essential: bool,
 }
@@ -65,7 +65,7 @@ pub const TARGETS: [Target; 24] = [
     button("square", "Square", "Punch", 0x8000, false),
     button("triangle", "Triangle", "Brake (in the air: tweak), back", 0x1000, true),
     button("l1", "L1", "Tricks (with R1: Superman)", 0x0400, false),
-    button("r1", "R1", "Tricks (with L1: Superman)", 0x0800, false),
+    button("r1", "R1", "Tricks (with L1: Superman), settings tabs", 0x0800, true),
     button("l2", "L2", "Tricks", 0x0100, false),
     button("r2", "R2", "Tricks, bunny hop", 0x0200, false),
     button("l3", "L3", "Powerslide", 0x0002, false),
@@ -403,6 +403,11 @@ pub fn parse(device: usize, text: &str, problems: &mut Vec<String>) -> Layout {
             }
             slots[n] = code;
             n += 1;
+        }
+        // `none` (or nothing) unbinds the button; a value the game can't read is skipped, so a
+        // button with none it can read keeps its default (PLAYING.md, "Controls").
+        if n == 0 && values.split(',').any(|v| !v.is_empty() && v != "none" && v != "-") {
+            continue;
         }
         l.input[t] = slots;
         named[t] = true;

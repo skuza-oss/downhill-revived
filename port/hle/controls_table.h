@@ -28,7 +28,7 @@ static const ControlTarget control_targets[CONTROL_TARGETS] = {
     {"square", "Square", "Punch", 0x8000, 0, 0, 0},
     {"triangle", "Triangle", "Brake (in the air: tweak), back", 0x1000, 0, 0, 1},
     {"l1", "L1", "Tricks (with R1: Superman)", 0x0400, 0, 0, 0},
-    {"r1", "R1", "Tricks (with L1: Superman)", 0x0800, 0, 0, 0},
+    {"r1", "R1", "Tricks (with L1: Superman), settings tabs", 0x0800, 0, 0, 1},
     {"l2", "L2", "Tricks", 0x0100, 0, 0, 0},
     {"r2", "R2", "Tricks, bunny hop", 0x0200, 0, 0, 0},
     {"l3", "L3", "Powerslide", 0x0002, 0, 0, 0},

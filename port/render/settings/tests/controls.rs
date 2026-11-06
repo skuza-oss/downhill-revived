@@ -72,7 +72,7 @@ fn tables() {
         assert_eq!(s.env, d.env);
         assert_eq!(s.default, "", "an empty line is the defaults");
     }
-    assert!(TARGETS.iter().filter(|t| t.essential).count() == 7);
+    assert!(TARGETS.iter().filter(|t| t.essential).count() == 8);
 }
 
 #[test]
@@ -104,11 +104,18 @@ fn lines_read_and_written() {
 fn broken_lines_fall_back() {
     let mut problems = Vec::new();
     let l = parse(KEYBOARD, "cross:nokey square circle:c,c,c triangle:esc sticks:swap cross:j l1:x,a,b", &mut problems);
-    assert_eq!(l.input[t("cross")], [0, 0], "cross: its one input unknown, so nothing");
+    assert_eq!(l.input[t("cross")], [vk("j"), 0], "cross:nokey skipped, so the later cross:j counts");
     assert_eq!(l.input[t("circle")], [vk("c"), 0]);
-    assert_eq!(l.input[t("triangle")], [0, 0], "Esc is never bound");
+    assert_eq!(l.input[t("triangle")], default_layout(KEYBOARD).input[t("triangle")], "Esc is never bound: the default stays");
     assert_eq!(l.input[t("l1")], [vk("x"), vk("a")], "two at most");
-    assert_eq!(problems.len(), 6, "{problems:?}");
+    assert_eq!(problems.len(), 5, "{problems:?}");
+    // a mistyped value keeps that button's default; `none` still unbinds it
+    let mut problems = Vec::new();
+    let l = parse(KEYBOARD, "cross:j square:typo circle:none", &mut problems);
+    assert_eq!(l.input[t("cross")], [vk("j"), 0]);
+    assert_eq!(l.input[t("square")], default_layout(KEYBOARD).input[t("square")]);
+    assert_eq!(l.input[t("circle")], [0, 0]);
+    assert_eq!(problems.len(), 1, "{problems:?}");
     assert!(problems.iter().all(|p| p.starts_with("keyboard: ")));
     // a controller has no stick directions; a hand-made duplicate: the first one counts
     let mut problems = Vec::new();
@@ -202,11 +209,14 @@ fn each_device_keeps_the_menus() {
     assert_eq!(c, before);
     // an essential button that keeps a second input may give one away; a swap gives it the other's
     let mut c = Controls::default();
-    assert_eq!(c.edit(PAD2, Edit::Assign { target: t("cross"), slot: 1, input: id("rb") }, 3),
-               Outcome::Changed("R moved from R1 to Cross".into()));
+    assert_eq!(c.edit(PAD2, Edit::Assign { target: t("cross"), slot: 1, input: id("lb") }, 3),
+               Outcome::Changed("L moved from L1 to Cross".into()));
+    // R1 switches the settings tabs: its last input stays (finding 157, release review)
+    assert_eq!(c.edit(PAD2, Edit::Assign { target: t("square"), slot: 1, input: id("rb") }, 3),
+               Outcome::Refused("R1 needs a button".into()));
     assert_eq!(c.edit(PAD2, Edit::Assign { target: t("circle"), slot: 0, input: id("south") }, 3),
                Outcome::Changed("Swapped Circle and Cross".into()));
-    assert_eq!((c.layouts[PAD2].input[t("cross")], c.layouts[PAD2].input[t("circle")]), ([id("east"), id("rb")], [id("south"), 0]));
+    assert_eq!((c.layouts[PAD2].input[t("cross")], c.layouts[PAD2].input[t("circle")]), ([id("east"), id("lb")], [id("south"), 0]));
     // what can't be bound
     assert!(matches!(c.edit(PAD1, Edit::Assign { target: t("lstick_up"), slot: 0, input: id("south") }, 0), Outcome::Refused(_)));
     assert!(matches!(c.edit(KEYBOARD, Edit::Assign { target: t("cross"), slot: 0, input: 0x1B }, 0), Outcome::Refused(_)));
