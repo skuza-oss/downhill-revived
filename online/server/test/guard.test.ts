@@ -222,20 +222,26 @@ describe("limits per connection source", () => {
   }
 
   it("refuses an address that makes too many rooms in a minute, not another address", async () => {
-    const ip = randomIp();
     let refused: { error: any; code: number } | null = null;
     let made = 0;
-    for (let i = 0; i < 15 && !refused; i++) {
-      const res = await upgrade("/v1/rooms/new", ip);
-      // a room's socket waits for hello; a refusal closes at once
-      const c = new Client(res.webSocket!);
-      res.webSocket!.accept();
-      c.hello(`P${i}`);
-      try {
-        await c.json("welcome");
-        made++;
-      } catch {
-        refused = { error: null, code: c.closeCode! };
+    // The rate limiter counts in fixed one-minute windows: a run that crosses a window's end sees
+    // the count start over (15 made, a flaky failure). That can happen once a minute, so a second
+    // try with a fresh address never crosses one too.
+    for (let attempt = 0; attempt < 2 && !refused; attempt++) {
+      const ip = randomIp();
+      made = 0;
+      for (let i = 0; i < 15 && !refused; i++) {
+        const res = await upgrade("/v1/rooms/new", ip);
+        // a room's socket waits for hello; a refusal closes at once
+        const c = new Client(res.webSocket!);
+        res.webSocket!.accept();
+        c.hello(`P${i}`);
+        try {
+          await c.json("welcome");
+          made++;
+        } catch {
+          refused = { error: null, code: c.closeCode! };
+        }
       }
     }
     expect(made).toBe(10); // wrangler.jsonc RL_CREATE
