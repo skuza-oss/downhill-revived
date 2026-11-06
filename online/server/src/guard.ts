@@ -17,6 +17,8 @@ export interface GuardEnv {
       room WebSocket, and new rooms. */
   RL_CONNECT?: RateLimit;
   RL_CREATE?: RateLimit;
+  /** The moderation log and the ban list (migrations/0001_moderation.sql; README.md sets it up). */
+  MODERATION?: D1Database;
 }
 
 // ---- The kill switch ----
@@ -179,4 +181,92 @@ export function tally(t: Tally, binary: boolean, now: number, caps: Caps = CAPS)
   if (t.warned) return "close";
   t.warned = true;
   return "warn";
+}
+
+// ---- Bans and the moderation log ----
+
+/** How long the moderation log keeps a join: 14 days (finding 161, the privacy note). */
+export const LOG_DAYS = 14;
+const DAY_MS = 86_400_000;
+
+/** A random install id from the game (port/render/settings install_id): 32 lowercase hex. */
+export function installIdOf(v: unknown): string | null {
+  return typeof v === "string" && /^[0-9a-f]{32}$/.test(v) ? v : null;
+}
+
+export interface Ban {
+  kind: "ip" | "install";
+  /** ms since the Unix epoch; null: until lifted. */
+  expiresAt: number | null;
+}
+
+/**
+ * The ban in force for this address hash or install id, or null. A server without the store, or a
+ * store that can't be read, bans nobody: players get in (availability first) and the failure is
+ * logged, so the operator sees a broken store in `wrangler tail`.
+ */
+export async function findBan(env: GuardEnv, by: { ip?: string; install?: string | null }, now = Date.now()): Promise<Ban | null> {
+  const db = env.MODERATION;
+  if (!db || (!by.ip && !by.install)) return null;
+  try {
+    const row = await db
+      .prepare(
+        "SELECT kind, expires_at FROM bans WHERE ((kind = 'ip' AND value = ?1) OR (kind = 'install' AND value = ?2))" +
+          " AND (expires_at IS NULL OR expires_at > ?3) ORDER BY expires_at IS NULL DESC, expires_at DESC LIMIT 1",
+      )
+      .bind(by.ip || null, by.install || null, now)
+      .first<{ kind: "ip" | "install"; expires_at: number | null }>();
+    return row ? { kind: row.kind, expiresAt: row.expires_at } : null;
+  } catch (e) {
+    console.error("guard: the ban list can't be read; letting the player in", e);
+    return null;
+  }
+}
+
+/** The refusal for a banned player: when it ends (UTC day), or none (footer-sized). */
+export function banMessage(ban: Ban): string {
+  if (ban.expiresAt === null) return "You can't play online on this server.";
+  return `You can't play online until ${new Date(ban.expiresAt).toISOString().slice(0, 10)}.`;
+}
+
+/** One moderation log row: a player who entered a room. */
+export interface JoinRow {
+  at: number;
+  room: string;
+  member: number;
+  kind: "host" | "guest" | "rejoin";
+  name: string;
+  clientVersion: string;
+  country: string;
+  ipHash: string;
+  installId: string | null;
+}
+
+/** Writes a join into the moderation log; a failure is logged and nothing else. */
+export async function logJoin(env: GuardEnv, row: JoinRow): Promise<void> {
+  const db = env.MODERATION;
+  if (!db) return;
+  try {
+    await db
+      .prepare(
+        "INSERT INTO joins (at, room, member, kind, name, client_version, country, ip_hash, install_id)" +
+          " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+      )
+      .bind(row.at, row.room, row.member, row.kind, row.name, row.clientVersion, row.country, row.ipHash, row.installId)
+      .run();
+  } catch (e) {
+    console.error("guard: the moderation log can't be written", e);
+  }
+}
+
+/** The daily cleanup (src/index.ts scheduled): joins older than LOG_DAYS and bans that have ended
+    go. Returns how many of each. */
+export async function cleanup(env: GuardEnv, now = Date.now()): Promise<{ joins: number; bans: number }> {
+  const db = env.MODERATION;
+  if (!db) return { joins: 0, bans: 0 };
+  const [joins, bans] = await db.batch([
+    db.prepare("DELETE FROM joins WHERE at < ?1").bind(now - LOG_DAYS * DAY_MS),
+    db.prepare("DELETE FROM bans WHERE expires_at IS NOT NULL AND expires_at <= ?1").bind(now),
+  ]);
+  return { joins: joins.meta.changes ?? 0, bans: bans.meta.changes ?? 0 };
 }

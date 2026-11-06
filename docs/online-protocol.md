@@ -54,6 +54,7 @@ A refusal is one text frame followed by a close:
 | `client_outdated` | 4009 | `hello.clientVersion` is below the server's `MIN_VERSION` (below). |
 | `rate_limited` | 4011 | Too many connections or new rooms from one address in a minute (below). |
 | `too_fast` | 4012 | A member sent far more than the game does, a second time (caps, under Limits). The first time it is a non-fatal `too_fast` error. |
+| `banned` | 4013 | The operator banned this player's address (refused before any room) or install id (refused at `hello`). |
 | `online_off` | 4010 | The operator turned online off (the kill switch, below). Also a non-fatal error to a `start`, and to the room when a countdown runs out. |
 
 ### Minimum client version
@@ -106,6 +107,26 @@ refuses at once, like the kill switch:
 then close 4011. The limits are generous because many players can share one address (a
 household, a LAN party, carrier-grade NAT). `/v1/lobbies` and the other HTTP endpoints have no
 limit of their own.
+
+### Bans and the moderation log (finding 161)
+
+When a player enters a room (a new member or a rejoin) the server writes a row to its moderation
+log: the time, the room code, the member id, the name, `hello.clientVersion`, the country
+(Cloudflare's), a keyed hash of the address (HMAC-SHA-256 with a Worker secret; the address
+itself is never stored or logged) and `hello.installId`. Rows older than 14 days are deleted
+every day. The operator bans a row's address hash and/or install id (with an expiry, or until
+lifted) with a local tool; names are never a ban's key. A banned address is refused before any
+room, a banned install id at `hello`:
+
+```json
+{"type":"error","code":"banned","message":"You can't play online until 2026-11-20."}
+```
+
+(or "You can't play online on this server." for a ban without an end), then close 4013. If the
+ban list can't be read, players are let in.
+
+No message to any client carries an address, an address hash or an install id: not `welcome`,
+`room`, `where`, `start`, the lobby list, errors or refusals (`online/server/test/moderation.test.ts`).
 
 Non-fatal errors (a non-host sending a host command, a `start` while someone is not ready)
 use the same `error` frame **without** a close; the client just shows `message`.

@@ -11,6 +11,9 @@ is `docs/ONLINE-PLAN.md`.
 | `src/room.ts` | `Room` Durable Object, one per join code: lobby, start, race relay, leave handling. |
 | `src/lobbies.ts` | `LobbyIndex` Durable Object (a single global one): the public lobby list. |
 | `src/protocol.ts` | Constants, join codes, the version gate. |
+| `src/guard.ts` | The abuse guard (finding 161): kill switch, limits per address, caps per member, bans, the moderation log. |
+| `migrations/` | The moderation store's tables (D1). |
+| `tools/moderate.mjs` | The operator's moderation tool: the log, bans (through `wrangler d1 execute`). |
 | `test/` | Vitest suite, run inside the Workers runtime (`@cloudflare/vitest-plugin`). |
 | `tools/loadtest.mjs` | Simulated race (STATE frames, 20 a second per player) against a running server; reports relay latency. |
 
@@ -71,6 +74,69 @@ is out. Update to play online." (`docs/online-protocol.md`). 0.1.0 sends no vers
 counts as 0.1.0. Raise it after a release is published, so players update, and deploy again;
 `/v1/health` shows the value in force. For a one-off change without editing the file:
 `npx wrangler deploy --var MIN_VERSION:0.2.0`.
+
+### Abuse guard: one-time setup (finding 161)
+
+The kill switch, the limits per address (`ratelimits`) and the caps per member need nothing
+beyond `wrangler.jsonc`. Bans and the moderation log need a D1 database and a secret, made once
+by the maintainer with their own login (`npx wrangler login`). Until they exist the server runs
+without bans and log; without the secret, address hashes change with every isolate.
+
+1. The secret for the keyed address hash (64 random hex digits; keep no copy in the repository):
+
+   ```sh
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   npx wrangler secret put IP_HASH_KEY       # paste the value
+   ```
+
+   A new value later makes every stored hash useless (address bans stop matching): rotate it
+   only to forget them all.
+2. The database and its tables:
+
+   ```sh
+   npx wrangler d1 create dhd-moderation
+   ```
+
+   Add its binding to `wrangler.jsonc` (the id is the one `d1 create` printed):
+
+   ```jsonc
+   "d1_databases": [
+     { "binding": "MODERATION", "database_name": "dhd-moderation", "database_id": "<id>", "migrations_dir": "migrations" }
+   ],
+   ```
+
+   ```sh
+   npx wrangler d1 migrations apply dhd-moderation --remote
+   ```
+3. Deploy (not during races). `npx wrangler tail` shows `guard:` lines when the store can't be
+   read (players are let in then) and the daily cleanup's counts.
+
+A store that can't be read lets players in (availability first) and logs it; the log keeps 14
+days (the daily cron in `wrangler.jsonc` deletes older rows and ended bans).
+
+### Moderation
+
+`tools/moderate.mjs` (also `npm run moderate -- ...`) reads the log and changes bans in the
+deployed database through `wrangler d1 execute` under your login; there is no admin endpoint.
+Bans go by address hash or install id, never by name (anyone can take any name):
+
+```sh
+node tools/moderate.mjs joins --name alexander --since 2026-11-05   # who, when, which room
+node tools/moderate.mjs joins --like 812          # every row with row 812's address or install id
+node tools/moderate.mjs ban 812 --days 14 --reason "impossible times"
+node tools/moderate.mjs bans                      # bans in force
+node tools/moderate.mjs unban 3
+```
+
+`ban` takes a row's address hash and install id (`--ip-only`, `--install-only` for one),
+30 days unless `--days`, `--hours`, `--until` or `--forever` says otherwise, and names the other
+players the log has from that address (a household or carrier-grade NAT shares one): ban those
+cases with `--install-only`. Hashes and install ids are printed only with `--hashes`. Run with no
+arguments for the full help.
+
+Locally: `npm run dev:guard` writes `wrangler.guard-local.jsonc` (gitignored: `wrangler.jsonc`
+with a local moderation database), applies the migrations to the local store and starts
+`wrangler dev` with it; `node tools/moderate.mjs ... --local` works on that store.
 
 ### Turning online off
 

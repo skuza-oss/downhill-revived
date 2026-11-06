@@ -31,7 +31,10 @@ import {
   randomSeed,
 } from "./protocol";
 import { placeOf, regionOfPlace, roomRegion, traceColo } from "./region";
-import { CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, newTally, offMessage, onlineOff, tally, type Caps, type GuardEnv, type Tally } from "./guard";
+import {
+  CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, banMessage, findBan, installIdOf, logJoin, newTally, offMessage, onlineOff, tally,
+  type Caps, type GuardEnv, type Tally,
+} from "./guard";
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -159,6 +162,9 @@ interface SocketInfo {
   continent?: string;
   region?: string;
   colo?: string;
+  /** The address's keyed hash (src/guard.ts ipHash), from the Worker: the moderation log only,
+      never sent to anyone (finding 161). */
+  ipHash?: string;
 }
 
 /** FNV-1a: a player name becomes a number, so the stats can count players without names. */
@@ -200,6 +206,8 @@ export class Room extends DurableObject<Env> {
   /** Each socket's message counts (src/guard.ts tally, finding 161). Memory only: after a wake-up
       a socket starts a new window. */
   private tallies = new WeakMap<WebSocket, Tally>();
+  /** Sockets whose hello waits for the ban list (onHello): their other messages are dropped. */
+  private helloPending = new WeakSet<WebSocket>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -283,6 +291,7 @@ export class Room extends DurableObject<Env> {
       continent: place.continent ?? "",
       region: regionOfPlace(place),
       colo: place.colo ?? "",
+      ipHash: request.headers.get("x-dhd-ip-hash") ?? "",
     };
     server.serializeAttachment(info);
     if ((await this.ctx.storage.getAlarm()) === null)
@@ -324,7 +333,7 @@ export class Room extends DurableObject<Env> {
       return this.refuse(ws, "bad_message", "Missing message type.");
 
     const info = ws.deserializeAttachment() as SocketInfo;
-    if (info.gone) return;
+    if (info.gone || this.helloPending.has(ws)) return;
     if (info.memberId === null) {
       if (m.type !== "hello") return this.refuse(ws, "bad_message", "Send hello first.");
       return this.onHello(ws, info, m);
@@ -597,6 +606,21 @@ export class Room extends DurableObject<Env> {
       return this.refuse(ws, "bad_message", "hello.isoSha256 must be 64 lowercase hex digits.");
     if (name.length < 1 || name.length > 24)
       return this.refuse(ws, "bad_message", "hello.name must be 1-24 characters.");
+    // The install id (optional; releases before it send none, a malformed one counts as none) and
+    // its ban (finding 161): the address's was checked before the room. Nothing else of this
+    // socket is handled meanwhile.
+    const installId = installIdOf(m.installId);
+    if (installId && (this.env as GuardEnv).MODERATION) {
+      this.helloPending.add(ws);
+      let ban;
+      try {
+        ban = await findBan(this.env as GuardEnv, { install: installId });
+      } finally {
+        this.helloPending.delete(ws);
+      }
+      if ((ws.deserializeAttachment() as SocketInfo | null)?.gone) return;
+      if (ban) return this.refuse(ws, "banned", banMessage(ban));
+    }
 
     const st = this.state;
     const asHost = info.create && st !== null && st.version === null && st.members.length === 0;
@@ -663,6 +687,11 @@ export class Room extends DurableObject<Env> {
       this.rebuildRace();
       if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
     } else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
+    // The moderation log (finding 161): who entered which room, kept 14 days, for bans.
+    this.ctx.waitUntil(logJoin(this.env as GuardEnv, {
+      at: Date.now(), room: st.code, member: member.id, kind: asHost ? "host" : ghost ? "rejoin" : "guest", name: member.name,
+      clientVersion, country: info.country ?? "", ipHash: info.ipHash ?? "", installId,
+    }));
     this.send(ws, {
       type: "welcome",
       protocol: PROTOCOL,

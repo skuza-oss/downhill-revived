@@ -73,7 +73,13 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 - [x] Per-member caps: `src/guard.ts` `tally` (per socket, 5 s windows: 100 text, 2000 binary),
   used first thing in `Room.webSocketMessage`; over: dropped, the first time a non-fatal `too_fast`
   warning, the next window over closes with `too_fast` (4012). Tests in `test/guard.test.ts`.
-- [ ] Moderation log, bans, local tool.
+- [x] Moderation log, bans, local tool: D1 tables `joins` and `bans` (`online/server/migrations/`),
+  `src/guard.ts` `findBan`, `logJoin`, `cleanup` (daily cron); address bans in the Worker before
+  any room, install-id bans at `hello` in the room (`banned`, 4013); the log row written at every
+  join and rejoin. `tools/moderate.mjs` (joins, ban, bans, unban, local-setup). The server reads
+  `hello.installId` here (32 lowercase hex, optional; malformed = none). Tests
+  `test/moderation.test.ts`, including "nothing private reaches a client". Acceptance 3 run
+  against `wrangler dev` (two members, list by name, ban, refused, unban, let in): OK.
 - [ ] Install id in the game and `hello`.
 - [ ] Privacy note, protocol docs.
 
@@ -111,6 +117,30 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   that somehow goes over once (a bug) keeps playing and tells us in its log.
 - The counts are memory only (a WeakMap per socket): a room waking from hibernation starts new
   windows. Nothing is stored for them.
+- The store is D1, as the plan proposed: SQL makes "joins by name and time, rows with the same
+  address" one query, and the operator's tool needs no endpoint at all: `wrangler d1 execute`
+  with the operator's login. Its binding is not in `wrangler.jsonc`: a D1 binding needs the
+  database's id, and wrangler's automatic provisioning would make a database on the next deploy
+  without its tables. `README.md` gives the one-time steps (secret, `d1 create`, binding,
+  `migrations apply`); tests bind a database through miniflare, local runs through the generated
+  `wrangler.guard-local.jsonc`. Whether the database id is committed is the maintainer's choice
+  (it is not a secret, but account-specific).
+- Fail open: a store that can't be read lets players in and logs `guard:` lines (`wrangler
+  tail`). A broken store must not stop online for everyone; a ban that fails to hold for a few
+  minutes costs less.
+- Retention by a daily cron trigger (`17 4 * * *`), not cleanup on write: the rows must go after
+  14 days even when nobody joins. Ended bans are deleted too; a ban without expiry stays until
+  lifted.
+- Address bans in the Worker, before any room (the plan); install-id bans in the room at
+  `hello`, the first moment the id is known. While that lookup runs, the socket's other messages
+  are dropped, so nothing reaches a room as from a member before its hello is through.
+- `ban` takes both the address hash and the install id by default: a cheater clears the install
+  id by editing dhd.ini, so an install-only ban is easy to dodge. An address can be many players'
+  (a household, carrier-grade NAT; the acceptance run showed it, both fake members came from one
+  address), so `ban` names the other players the log has from that address and `--install-only`
+  spares them. The lead may prefer install-only as the default.
+- The log keeps the raw name (operators look for names players report) and the rejoins too (a
+  rejoin may come from another address).
 
 ## Surprises
 

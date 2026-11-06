@@ -48,6 +48,8 @@ export const CLOSE_CODES = {
   /** A member sent more messages or race frames than the game ever does, after a warning
       (src/guard.ts TEXT_PER_WINDOW, BINARY_PER_WINDOW). The warning is a non-fatal too_fast. */
   too_fast: 4012,
+  /** The operator banned this address hash or install id (src/guard.ts findBan). */
+  banned: 4013,
 } as const;
 export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
 

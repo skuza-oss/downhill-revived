@@ -18,12 +18,15 @@ export class Client {
   private inbox: Frame[] = [];
   private waiter: (() => void) | null = null;
   closeCode: number | null = null;
+  /** Every text frame this client received, kept (the privacy test reads them all). */
+  seen: string[] = [];
   /** The last welcome read (json("welcome")): its rejoinToken is what the game's rejoin sends. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   welcome: any = null;
 
   constructor(readonly ws: WebSocket) {
     ws.addEventListener("message", (e) => {
+      if (typeof e.data === "string") this.seen.push(e.data);
       this.inbox.push(e.data as Frame);
       this.waiter?.();
     });

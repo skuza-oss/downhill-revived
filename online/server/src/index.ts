@@ -2,7 +2,9 @@
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
-import { RATE_MESSAGE, ipHash, offMessage, onlineOff, overLimit, refuseSocket, type GuardEnv } from "./guard";
+import {
+  RATE_MESSAGE, banMessage, cleanup, findBan, ipHash, offMessage, onlineOff, overLimit, refuseSocket, type GuardEnv,
+} from "./guard";
 
 export { Room } from "./room";
 export { LobbyIndex } from "./lobbies";
@@ -53,8 +55,14 @@ export default {
       // Limits per connection source (finding 161), by the address's keyed hash, before any room.
       const ip = await ipHash(env as GuardEnv, request);
       if (await overLimit(env as GuardEnv, ip, m[1] === "new")) return refuseSocket("rate_limited", RATE_MESSAGE);
+      // A ban on this address, before any room (an install id's is checked at hello, in the room).
+      const ban = await findBan(env as GuardEnv, { ip });
+      if (ban) return refuseSocket("banned", banMessage(ban));
       const headers = new Headers(request.headers);
       headers.delete("x-dhd-create");
+      // The address's hash for the room's moderation log (src/room.ts); never one a client sent.
+      headers.delete("x-dhd-ip-hash");
+      if (ip) headers.set("x-dhd-ip-hash", ip);
       if (m[1] === "new") {
         headers.set("x-dhd-create", "1");
         // A new room runs near its creator: the hint from their continent and country, not from the
@@ -76,5 +84,16 @@ export default {
     }
 
     return json({ error: "Not found" }, 404);
+  },
+
+  // Daily (wrangler.jsonc triggers): the moderation log's rows older than 14 days and ended bans go
+  // (finding 161).
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      cleanup(env as GuardEnv).then(
+        (n) => console.log(`guard: cleanup removed ${n.joins} joins and ${n.bans} ended bans`),
+        (e) => console.error("guard: cleanup failed", e),
+      ),
+    );
   },
 } satisfies ExportedHandler<Env>;

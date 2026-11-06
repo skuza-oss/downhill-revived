@@ -131,8 +131,6 @@ describe("limits per connection source", () => {
 });
 
 describe("caps per member", () => {
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
   it("caps binary at twice the worst a game sends, text at ten times", () => {
     expect(BINARY_PER_WINDOW / 5).toBe(400); // a second: 10 riders at 20 snapshots, twice
     expect(TEXT_PER_WINDOW / 5).toBe(20);
@@ -152,11 +150,22 @@ describe("caps per member", () => {
   it("warns a member who sends too many messages, then closes it the next time", async () => {
     const { host, code } = await Client.host("Ann");
     const bo = await Client.join(code, "Bo");
-    await sleep(1100); // a new window (1 s in the tests)
+    // Windows of a minute (a loaded test runtime takes over 1 s for 100 messages), and every
+    // socket's window starts anew when the test says (nextWindow).
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const nextWindow = () =>
+      runInDurableObject(stub, (room: any, state) => {
+        room.env = { ...room.env, CAP_WINDOW_MS: "60000" };
+        for (const ws of state.getWebSockets()) {
+          const t = room.tallies.get(ws);
+          if (t) t.start = -1e12;
+        }
+      });
+    await nextWindow();
     for (let i = 0; i <= TEXT_PER_WINDOW; i++) bo.sendJson({ type: "ping", t: i });
     expect(await bo.json("error")).toEqual({ type: "error", code: "too_fast", message: TOO_FAST_WARNING });
     expect(bo.closeCode).toBeNull();
-    await sleep(1100);
+    await nextWindow();
     for (let i = 0; i <= TEXT_PER_WINDOW; i++) bo.sendJson({ type: "ping", t: i });
     const err = await bo.next((f) => typeof f === "string" && JSON.parse(f).type === "error" && JSON.parse(f).code === "too_fast" && JSON.parse(f).message === TOO_FAST_MESSAGE);
     expect(err).toBeTruthy();

@@ -25,6 +25,9 @@
     { "name": "RL_CONNECT", "namespace_id": "1611", "simple": { "limit": 30, "period": 60 } },
     { "name": "RL_CREATE", "namespace_id": "1612", "simple": { "limit": 10, "period": 60 } }
   ],
+  // Daily at 04:17 UTC: the moderation log's rows older than 14 days and ended bans are deleted
+  // (src/index.ts scheduled, finding 161). Without the MODERATION database it does nothing.
+  "triggers": { "crons": ["17 4 * * *"] },
   // Usage stats (src/room.ts stat): joins and races, no addresses or names. Optional.
   "analytics_engine_datasets": [{ "binding": "STATS", "dataset": "dhd_online" }],
   "durable_objects": {
