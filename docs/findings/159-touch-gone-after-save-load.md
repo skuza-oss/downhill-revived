@@ -31,8 +31,10 @@ game state).
 - [x] 2026-11-06: finding reserved (f3a6b57)
 - [x] 2026-11-06: cause found in the player's log and the code, reproduced on Windows (below)
 - [x] 2026-11-06: fix: touch_field's race test reads the race phase and mode, not the screen id;
-  `test_touch` case `test_race_running`
-- [ ] checks: `check.py port`, the reproduction again with the fix, boot and race state traces
+  `test_touch` case `test_race_running` (794d9d2)
+- [x] 2026-11-06: checks on 794d9d2: `check.py port` OK (`test_touch: all passed`); the
+  reproduction again (below); boot (600 rows) and race (5000 rows) state traces equal to the
+  base build's (`state_diff.py`: PASS)
 
 ## Cause
 
@@ -89,4 +91,21 @@ test failed).
   - Online (`fps.c:25`, `puppet.c`, `online.c`) always starts through screen 9
     (`online_menu.c`), so it is not affected.
 
+- The race phase is not reset when a race is left: quitting the continued career's race (pause >
+  QUIT > Yes) returns to the title, screen 0, with the phase still 3. Nothing shows there (no HUD
+  is drawn), which is why the HUD hook stays part of the test; a check on the phase alone would
+  be wrong.
+
 ## Result
+
+The overlay shows in every race, also one started from CONTINUE SAVED GAME. Shown on Windows with
+the fixed build (the reproduction's route, then pause > QUIT > Yes through
+`DHD_NAV=...,22/5:cross,22/3+600:start,22/3:up,22/3:cross,22/3:down,22/3:cross`): the countdown
+at `menu=22 phase=1`, `touch log: air` lines through the race (race_hud 1), the Classic pad drawn
+and the speedometer moved to the top left; after QUIT the title with no overlay. The game's
+state is unchanged: boot and race traces equal the base build's (the race route goes through
+screen 9, where nothing changed; the fix only changes what touch_field passes to the host).
+
+Left for a phone (the lead): on the Android build, SINGLE PLAYER > a rider with a saved career >
+CONTINUE SAVED GAME > an event: the overlay in the countdown and the race, the HUD moved; leaving
+the race, none in the menus. The "screen 9" tests listed under Surprises are separate fixes.
