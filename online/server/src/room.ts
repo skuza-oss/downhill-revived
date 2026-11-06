@@ -208,6 +208,8 @@ export class Room extends DurableObject<Env> {
   private tallies = new WeakMap<WebSocket, Tally>();
   /** Sockets whose hello waits for the ban list (onHello): their other messages are dropped. */
   private helloPending = new WeakSet<WebSocket>();
+  private capsFor: unknown = null;
+  private capsNow: Caps = CAPS;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -831,15 +833,19 @@ export class Room extends DurableObject<Env> {
     );
   }
 
-  /** The caps per member (src/guard.ts CAPS). The tests change them through CAP_WINDOW_MS and
-      CAP_BINARY (vitest.config.ts; one test sets the room's own env). */
+  /** The caps per member (src/guard.ts CAPS), worked out once per env (every message asks, the race
+      relay's too). The tests change them through CAP_WINDOW_MS and CAP_BINARY (vitest.config.ts;
+      a test may give a room a new env). */
   private caps(): Caps {
+    if (this.capsFor === this.env) return this.capsNow;
     const env = this.env as unknown as Record<string, unknown>;
     const knob = (name: string, value: number) => {
       const v = Number(env[name]);
       return env[name] !== undefined && Number.isFinite(v) && v > 0 ? v : value;
     };
-    return { windowMs: knob("CAP_WINDOW_MS", CAPS.windowMs), text: CAPS.text, binary: knob("CAP_BINARY", CAPS.binary) };
+    this.capsFor = this.env;
+    this.capsNow = { windowMs: knob("CAP_WINDOW_MS", CAPS.windowMs), text: CAPS.text, binary: knob("CAP_BINARY", CAPS.binary) };
+    return this.capsNow;
   }
 
   private countdownMs(): number {
