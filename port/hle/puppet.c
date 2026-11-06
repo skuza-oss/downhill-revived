@@ -193,10 +193,11 @@ static void take(Snapshot *s, const uint8_t *r)
 static void feed(int slot, const Snapshot *s)
 {
     Puppet *p = &pp.p[slot];
+    /* A new race (a replayed file starting over). Online, hle_puppet_start clears the pad mirror
+       and the ring at each race's start, and hle_puppet_receive has already applied this
+       snapshot's pad words to the mirror, so nothing here may clear it. */
     if (p->count && s->time < p->ring[p->count - 1].time - 1)
-        memset(&p->sent_pad, 0, sizeof p->sent_pad);
-        memset(p->mirror, 0, sizeof p->mirror);
-        p->count = 0, p->have_offset = 0;  /* a new race */
+        p->count = 0, p->have_offset = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double arrival = RACE_TIME;
     if (!p->have_offset) {
