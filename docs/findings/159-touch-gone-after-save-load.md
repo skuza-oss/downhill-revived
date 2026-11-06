@@ -10,8 +10,8 @@ on 2026-11-06; released in 0.7.12.
 
 Issue #54 (0.7.10, Android): a player saved their career to continue later; after loading that
 save, the touch controls never show in races again, also after restarting the app. A brand-new
-career shows them. The player's shared log (Share log, finding 152) is kept by the lead
-(`F:\Temp\issue54\`); its settings line has `TOUCH_WITH_PAD=hide` and the classic pad.
+career shows them. The player's shared log (Share log, finding 152) is kept by the lead,
+outside the repository; its settings line has `TOUCH_WITH_PAD=hide` and the classic pad.
 
 What decides whether the overlay shows (finding 141; `port/hle/touch.c` `touch_visible`,
 `race_on_screen`, `hidden_by_pad`, `touch_pad_used`; `port/hle/touch_field.c`: the race HUD hook
