@@ -1,15 +1,19 @@
 /* Native VU1 meshes (findings 164 and 167), included by vif.c: DHD_NATIVE_VU1 hands overlay B's
    batch loops to the native renderer instead of running them. The value lists the loops (by their
-   address; "prelit" or "all" for groups), then optional flags: DHD_NATIVE_VU1=0170,1708:skip.
+   address; "prelit", "lit" or "all" for groups), then optional flags: DHD_NATIVE_VU1=0170,1708:skip.
 
-   | loop | VI13  | fog      | colour | UV offset     | back faces | clipping |
-   | 0170 | 0x011 | computed | c vf31 | from vertex 1 | culled     | yes      |
-   | 1708 | 0x2C9 | computed | c vf31 | every vertex  | drawn      | yes      |
-   | 08B0 | 0x100 | computed | c vf31 | every vertex  | drawn      | no       |
-   | 0798 | 0x0E0 | maximum  | c      | none          | drawn      | no       |
-   | 18B0 | 0x2FE | maximum  | c      | none          | drawn      | yes      |
+   | loop | VI13  | fog      | colour                         | UV offset     | back faces | clipping |
+   | 0170 | 0x011 | computed | c vf31                         | from vertex 1 | culled     | yes      |
+   | 1708 | 0x2C9 | computed | c vf31                         | every vertex  | drawn      | yes      |
+   | 08B0 | 0x100 | computed | c vf31                         | every vertex  | drawn      | no       |
+   | 0798 | 0x0E0 | maximum  | c                              | none          | drawn      | no       |
+   | 18B0 | 0x2FE | maximum  | c                              | none          | drawn      | yes      |
+   | 1110 | 0x20C | computed | c d5 L + d20 L.w^2 + d1015     | every vertex  | drawn      | yes      |
+   | 13A0 | 0x260 | maximum  | c L + d20 L.w^2 + d1015        | none          | drawn      | no       |
 
-   (c the batch vertex's colour.)
+   (c the batch vertex's colour, L its pool entry's lighting at data 373 + index, dN data N; the
+   lit colours clamped to 255 and truncated, their alpha c.a d5.a + d20.a L.w^2, d1015 adding to
+   RGB only.)
 
    A batch loop runs after a program's setup has set VI13 and the registers it reads: the shared
    1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050 and 12F0), and for lit or
@@ -22,7 +26,8 @@
    test keeps), the A+D texture writes and PRIM its packet would make, and the constants. The
    batch's microprogram and its XGKICK do not run; what the next run reads is left as the batch
    leaves it (the rotating buffer in VI14/VI2, VI3, VI4, TPC 1040; 0170's strip parity in vf6.x and
-   at 1014). 0590's delay slot, the skinning's last pool store, is made first.
+   at 1014; the lit loops' registers vf31 or vf13 and vf14). 0590's delay slot, the skinning's last
+   pool store, is made first.
 
    The batch, as the microcode does it (vudis.py; 0170: 0x88-0x268, the others alike, and 0FA8):
    header qword at VI2 (the strip's GIF tag: NLOOP n with EOP, PRE, PRIM, PACKED ST RGBAQ XYZF2; w:
@@ -67,8 +72,8 @@ static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", 
                                                      "join value", "a vertex below the near bound",
                                                      "a vertex off the guard band in x or y"};
 
-/* The translated loops (the table above). colour: 0 c vf31, 1 c. */
-enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW };
+/* The translated loops (the table above). colour: 0 c vf31, 1 c, 2 lit with d5, 3 lit. */
+enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW, MESH_COLOUR_LIT_D5, MESH_COLOUR_LIT };
 typedef struct {
     const char *name;
     uint16_t vi13;
@@ -80,8 +85,10 @@ static const MeshProgram mesh_programs[] = {
     {"08B0", 0x100, 0, MESH_COLOUR_SCALED, 2, 0, 0},
     {"0798", 0x0E0, 1, MESH_COLOUR_RAW, 0, 0, 0},
     {"18B0", 0x2FE, 1, MESH_COLOUR_RAW, 0, 0, 1},
+    {"1110", 0x20C, 0, MESH_COLOUR_LIT_D5, 2, 0, 1},
+    {"13A0", 0x260, 1, MESH_COLOUR_LIT, 0, 0, 0},
 };
-enum { MESH_PRELIT = 0x1F };   /* the group's bits */
+enum { MESH_PRELIT = 0x1F, MESH_LIT = 0x60 };   /* the groups' bits */
 enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
 
 typedef struct {
@@ -220,6 +227,7 @@ static int mesh_enabled(void)
         for (const char *t = s; t && t < s + list;) {
             size_t len = strcspn(t, ",:");
             if (len == 6 && !strncmp(t, "prelit", 6)) mesh.enabled |= MESH_PRELIT;
+            if (len == 3 && !strncmp(t, "lit", 3)) mesh.enabled |= MESH_LIT;
             if (len == 3 && !strncmp(t, "all", 3)) mesh.enabled |= (1u << MESH_PROGRAMS) - 1;
             for (unsigned p = 0; p < MESH_PROGRAMS; p++)
                 if (len == 4 && !strncmp(t, mesh_programs[p].name, 4)) mesh.enabled |= 1u << p;
@@ -313,6 +321,7 @@ static int mesh_build(void)
     if (prog->fog_max) { h->fog[0] = h->fog[2] = v18[1]; h->fog[1] = 0; }          /* clamp(max) = max */
     else { h->fog[0] = v19[3] + v18[0]; h->fog[1] = v18[3]; h->fog[2] = v18[1]; }
     const float uv[2] = {v19[0], v19[1]};
+    const float *d5 = m[5].f, *d20 = m[20].f, *d1015 = m[1015].f;
     /* 0170's prologue sets vf6.x = 1 (0098) and negates it unless the header's bit 15 (0158) */
     float parity = hdr[3] & 0x8000 ? 1.0f : -1.0f;
     mesh.check_parity = parity; mesh.check_base = base;
@@ -349,7 +358,18 @@ static int mesh_build(void)
         o->u = (float)r[2].sw[0] * fixed; o->v = (float)r[2].sw[1] * fixed; o->uz = (float)r[2].sw[2] * fixed;
         if (prog->uv_offset == 2 || (prog->uv_offset == 1 && k)) { o->u += uv[0]; o->v += uv[1]; }   /* vf19.xy */
         o->unused = 0;
-        o->rgba = c[0] | c[1] << 8 | c[2] << 16 | c[3] << 24;
+        if (prog->colour >= MESH_COLOUR_LIT_D5) {   /* 1110 / 13A0: the lit pool entry */
+            const float *L = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].f, l2 = L[3] * L[3];
+            uint32_t rgba = 0;
+            for (unsigned i = 0; i < 4; i++) {
+                float f = (float)c[i] * (prog->colour == MESH_COLOUR_LIT_D5 ? d5[i] : 1.0f);
+                float sum = d20[i] * l2 + (i < 3 ? d1015[i] : 0.0f) + f * (i < 3 ? L[i] : 1.0f);
+                if (!(sum > -1.0f)) return mesh_fail(MESH_WHY_COLOUR);   /* FTOI0 of a negative: the GS wraps it */
+                rgba |= (uint32_t)(int)(sum > 255 ? 255.0f : sum) << (i * 8);   /* (-1, 0) truncates to 0 */
+            }
+            o->rgba = rgba;
+        } else
+            o->rgba = c[0] | c[1] << 8 | c[2] << 16 | c[3] << 24;
     }
     /* the strip's triangles: k-2, k-1, k for each vertex k >= 2 without the join's ADC; with 0170's
        culling each ordered so that the cull (positive screen area, y down) drops what its back-face
@@ -408,7 +428,16 @@ static void mesh_send(uint32_t *packet)
 /* A skipped batch: the state its end leaves (0FF8, 1000-1030; 0170's parity store at 1014). */
 static void mesh_skipped(void)
 {
-    if (mesh_programs[mesh.object].backface) memcpy(vu1.vu0_mem[1014].f, vu1.vf[6].f, 16);
+    const MeshProgram *prog = &mesh_programs[mesh.object];
+    if (prog->backface) memcpy(vu1.vu0_mem[1014].f, vu1.vf[6].f, 16);
+    if (prog->colour == MESH_COLOUR_LIT_D5) {   /* 1110's prologue: vf31 = d20, vf8 = d5, vf26 = d1015 */
+        memcpy(vu1.vf[31].f, vu1.vu0_mem[20].f, 16);
+        memcpy(vu1.vf[8].f, vu1.vu0_mem[5].f, 16);
+        memcpy(vu1.vf[26].f, vu1.vu0_mem[1015].f, 16);
+    } else if (prog->colour == MESH_COLOUR_LIT) {   /* 13A0's: vf13 = d1015, vf14 = d20 */
+        memcpy(vu1.vf[13].f, vu1.vu0_mem[1015].f, 16);
+        memcpy(vu1.vf[14].f, vu1.vu0_mem[20].f, 16);
+    }
     uint16_t buffer = (uint16_t)(vu1.vi[14] + 0x90);
     if (buffer == 0x3E8) buffer = 0x238;
     vu1.vi[14] = vu1.vi[2] = buffer;
