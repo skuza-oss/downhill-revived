@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { env, runInDurableObject } from "cloudflare:test";
 import { Client, startedRace } from "./helpers";
-import { Realtime } from "../src/sfu";
+import { Realtime, Turn, TURN_TTL_S } from "../src/sfu";
 
 describe("Realtime control plane", () => {
   it("releases race traffic only after every subscriber acknowledges", async () => {
@@ -89,5 +89,78 @@ describe("Realtime control plane", () => {
     const session = { id: "fake", phase: "connect" as const, channels: [] };
     await expect(partial.publish(1, session)).rejects.toThrow();
     expect(session.channels).toEqual([{ memberId: 1, name: "state", channelId: 10, local: true }]);
+  });
+});
+
+describe("TURN over TLS fallback", () => {
+  const ICE = { iceServers: [
+    { urls: ["stun:stun.cloudflare.com:3478"] },
+    { urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:5349?transport=tcp", "turns:turn.cloudflare.com:443?transport=tcp"],
+      username: "u".repeat(64), credential: "c".repeat(64) },
+  ] };
+
+  it("mints one racer's credentials with a TTL and a tag, and keeps only the TLS servers", async () => {
+    const requests: { path: string; body: any }[] = [];
+    const fake: typeof fetch = async (input, init) => {
+      requests.push({ path: String(input), body: init?.body ? JSON.parse(String(init.body)) : null });
+      return String(input).endsWith("/revoke") ? new Response(null, { status: 204 }) : Response.json(ICE, { status: 201 });
+    };
+    const turn = new Turn({ TURN_KEY_ID: "key", TURN_KEY_API_TOKEN: "token" }, fake);
+    const { username, message } = await turn.mint("room-ABC234-m1");
+    expect(requests[0].path).toBe("https://rtc.live.cloudflare.com/v1/turn/keys/key/credentials/generate-ice-servers");
+    expect(requests[0].body).toEqual({ ttl: TURN_TTL_S, customIdentifier: "room-ABC234-m1" });
+    expect(username).toBe("u".repeat(64));
+    expect(Object.keys(message).sort()).toEqual(["credential", "type", "urls", "username"]);
+    expect(message.urls).toEqual(["turns:turn.cloudflare.com:5349?transport=tcp", "turns:turn.cloudflare.com:443?transport=tcp"]);
+    await turn.revoke(username);
+    expect(requests[1].path).toBe(`https://rtc.live.cloudflare.com/v1/turn/keys/key/credentials/${"u".repeat(64)}/revoke`);
+    await expect(new Turn({}).mint("x")).rejects.toThrow("not configured");
+    await expect(new Turn({ TURN_KEY_ID: "k", TURN_KEY_API_TOKEN: "t" }, async () => Response.json({ iceServers: [{ urls: ["turn:x:3478"], username: "a", credential: "b" }] })).mint("x"))
+      .rejects.toThrow("Invalid TURN");
+  });
+
+  it("gives credentials only to the racer that asks, once per race, and revokes them at the end", async () => {
+    const { clients, code } = await startedRace(2);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const calls: string[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      calls.push(String(input));
+      return String(input).endsWith("/revoke") ? new Response(null, { status: 204 }) : Response.json(ICE, { status: 201 });
+    });
+    try {
+      await runInDurableObject(stub, async (room: any) => {
+        room.env = { ...room.env, TURN_KEY_ID: "key", TURN_KEY_API_TOKEN: "token" };
+        for (const member of room.state.members) {
+          member.sfuRace = room.state.race.startAt;
+          member.sfu = { id: `fake-${member.id}`, phase: "connect", channels: [] };
+        }
+      });
+      clients[0].sendJson({ type: "sfu_turn" });
+      const got = await clients[0].json("sfu_turn");
+      expect(got.credential).toBe("c".repeat(64));
+      clients[0].sendJson({ type: "sfu_turn" });
+      expect((await clients[0].json("error")).message).toContain("One TURN credential per race");
+      expect(calls.filter(c => c.endsWith("generate-ice-servers"))).toHaveLength(1);
+      // The other racer hears nothing of it.
+      await expect(clients[1].next(f => typeof f === "string" && /sfu_turn|ccccccc|uuuuuuu/.test(f), 200)).rejects.toThrow();
+      clients[0].sendJson({ type: "end" });
+      await Promise.all(clients.map(c => c.json("ended")));
+      await runInDurableObject(stub, async (room: any) => {
+        await room.sfuQueue;
+        expect(room.state.members.every((m: any) => m.turnUser === undefined)).toBe(true);
+      });
+      expect(calls.filter(c => c.endsWith(`/credentials/${"u".repeat(64)}/revoke`))).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("refuses TURN outside a race or before the racer's SFU session", async () => {
+    const { host } = await Client.host();
+    host.sendJson({ type: "sfu_turn" });
+    expect((await host.json("error")).message).toContain("active race");
+    const { clients } = await startedRace(2);
+    clients[0].sendJson({ type: "sfu_turn" });
+    expect((await clients[0].json("error")).message).toContain("Realtime connection failed");
   });
 });
