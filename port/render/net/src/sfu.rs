@@ -185,15 +185,25 @@ fn read_socket(socket: UdpSocket, inbox: Inbox, alive: Arc<AtomicBool>, failed: 
 // are dropped. A sender is never silenced for the rest of the race (0.7.12 did that): after a
 // network stall the backlog can arrive at once, several seconds of an honest sender's snapshots,
 // and that froze its rider for the rest of the race (finding 169).
+//
+// Over the limit a message is still taken when its stamp (the moment its snapshots show) is newer
+// than the newest taken from that index, at most FLOOD_PER_SECOND more a second (finding 175): a
+// backlog arrives oldest first, so the excess the limit used to drop was the newest, the one the
+// puppet needed to catch up. A flood stays bounded (twice the limit) and old or repeated stamps
+// over the limit are dropped.
 const FLOOD_PER_SECOND: u16 = 240;
-struct SenderRate { since: Instant, count: [u16; 10], dropped: u32 }
+struct SenderRate { since: Instant, count: [u16; 10], newer: [u16; 10], newest: [f64; 10], dropped: u32 }
 impl SenderRate {
-    fn new() -> Self { Self { since: Instant::now(), count: [0; 10], dropped: 0 } }
-    fn accept(&mut self, rider: u8, now: Instant) -> bool {
-        if now.duration_since(self.since).as_secs() >= 1 { self.count = [0; 10]; self.since = now; }
-        let count = &mut self.count[rider as usize];
-        *count = count.saturating_add(1);
-        let ok = *count <= FLOOD_PER_SECOND;
+    fn new() -> Self { Self { since: Instant::now(), count: [0; 10], newer: [0; 10], newest: [f64::MIN; 10], dropped: 0 } }
+    /// `stamp`: the bundle's server-clock moment (None: a message without one, counted only).
+    fn accept(&mut self, rider: u8, stamp: Option<f64>, now: Instant) -> bool {
+        if now.duration_since(self.since).as_secs() >= 1 { self.count = [0; 10]; self.newer = [0; 10]; self.since = now; }
+        let i = rider as usize;
+        self.count[i] = self.count[i].saturating_add(1);
+        let newest = stamp.is_some_and(|t| t.is_finite() && t > self.newest[i]);
+        let ok = self.count[i] <= FLOOD_PER_SECOND || (newest && self.newer[i] < FLOOD_PER_SECOND);
+        if ok && self.count[i] > FLOOD_PER_SECOND { self.newer[i] += 1; }
+        if ok && newest { self.newest[i] = stamp.unwrap(); }
         if !ok { self.dropped += 1; }
         ok
     }
@@ -551,8 +561,10 @@ impl Sfu {
         } else if epoch == self.race && self.race != 0 {
             if c.state {
                 if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
+                // A bundle's stamp (version 6: bytes 5-12 of the frame, after the 8-byte race marker).
+                let stamp = (bytes.len() >= 21 && bytes[10] == 6).then(|| f64::from_le_bytes(bytes[13..21].try_into().unwrap()));
                 let rate = self.rates.entry(c.member).or_insert_with(SenderRate::new);
-                if !rate.accept(bytes[11], Instant::now()) {
+                if !rate.accept(bytes[11], stamp, Instant::now()) {
                     if rate.dropped == 1 { eprintln!("net: SFU: member {} sent over {FLOOD_PER_SECOND} snapshot messages in a second; the excess is dropped", c.member); }
                     return Ok(());
                 }
@@ -644,14 +656,34 @@ mod tests {
     fn snapshot_flood_drops_the_excess_and_never_silences() {
         let mut rate = SenderRate::new();
         let now = rate.since;
-        for _ in 0..FLOOD_PER_SECOND { assert!(rate.accept(0, now)); }
-        assert!(rate.accept(1, now));
-        assert!(!rate.accept(0, now));
-        for _ in 0..70_000 { rate.accept(0, now); }  // no overflow
+        for _ in 0..FLOOD_PER_SECOND { assert!(rate.accept(0, None, now)); }
+        assert!(rate.accept(1, None, now));
+        assert!(!rate.accept(0, None, now));
+        for _ in 0..70_000 { rate.accept(0, None, now); }  // no overflow
         assert_eq!(rate.dropped, 70_001);
         // a backlog after a stall costs the excess of that second, not the rest of the race
-        assert!(rate.accept(0, now + Duration::from_secs(2)));
-        assert!(rate.accept(1, now + Duration::from_secs(2)));
+        assert!(rate.accept(0, None, now + Duration::from_secs(2)));
+        assert!(rate.accept(1, None, now + Duration::from_secs(2)));
+    }
+
+    /// A backlog arrives oldest first: over the limit the newest still come through (finding 175),
+    /// old and repeated stamps don't, and a flood of ever newer stamps stays at twice the limit.
+    #[test]
+    fn snapshot_flood_keeps_the_newest() {
+        let mut rate = SenderRate::new();
+        let now = rate.since;
+        // 5 s of a 60 Hz sender at once: 300 messages, stamps rising 16.7 ms apart
+        let taken: Vec<bool> = (0..300).map(|k| rate.accept(0, Some(1000.0 + k as f64 * 16.7), now)).collect();
+        assert!(taken.iter().all(|t| *t), "every one of the backlog, the newest last");
+        assert!(!rate.accept(0, Some(1000.0), now), "an old stamp over the limit");
+        assert!(!rate.accept(0, Some(1000.0 + 299.0 * 16.7), now), "a repeated one");
+        assert!(!rate.accept(0, None, now), "none at all");
+        // a flood of ever newer stamps: at most twice the limit a second, per bundle index
+        let mut flood = SenderRate::new();
+        let now = flood.since;
+        let taken = (0..10_000).filter(|k| flood.accept(3, Some(*k as f64), now)).count();
+        assert_eq!(taken, 2 * FLOOD_PER_SECOND as usize);
+        assert!(flood.accept(3, Some(1e9), now + Duration::from_secs(1)));
     }
 
     /// A rejoin's whole channel list (finding 175): kept channels stay the same, missing ones are
