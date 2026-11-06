@@ -1,14 +1,26 @@
-//! One SFU association per room, owned exclusively by the WebSocket send thread.
+//! One SFU association per room, owned exclusively by the WebSocket send thread. A reader thread
+//! blocks on the UDP socket and wakes that thread for every datagram, so input waits for neither
+//! the send thread's tick nor the OS timer (finding 158, round 3).
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
+use std::io::ErrorKind;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use str0m::change::{SdpAnswer, SdpPendingOffer};
 use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::net::{Protocol, Receive};
 use str0m::{Candidate, Event, Input, Output, Rtc};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+/// Called by the socket reader when a datagram waits: the owner's thread polls next.
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+/// Datagrams the reader took off the socket and their arrival times; at most INBOX.
+type Inbox = Arc<Mutex<VecDeque<(Instant, SocketAddr, Vec<u8>)>>>;
+const INBOX: usize = 1024;
+/// How often the reader looks whether its association was dropped.
+const READER_CHECK: Duration = Duration::from_millis(100);
 struct Channel {
     id: ChannelId,
     member: u64,
@@ -19,6 +31,11 @@ pub struct Sfu {
     rtc: Rtc,
     pending: Option<SdpPendingOffer>,
     socket: UdpSocket,
+    local: SocketAddr,
+    inbox: Inbox,
+    reader_alive: Arc<AtomicBool>,
+    reader_failed: Arc<AtomicBool>,
+    stats: Stats,
     channels: Vec<Channel>,
     slots: HashMap<u64, u8>,
     race: u64,
@@ -29,10 +46,79 @@ pub struct Sfu {
     released: bool,
     drop_percent: u64,
     sent: u64,
-    pending_events: VecDeque<Vec<u8>>,
-    pending_state: HashMap<u8, Vec<u8>>,
+    pending_events: VecDeque<(Instant, Vec<u8>)>,
+    pending_state: HashMap<u8, (Instant, Vec<u8>)>,
     rates: HashMap<u64, SenderRate>,
 }
+/// What the transport loop did in the last 30 s, for dhd.log: how long datagrams waited for the
+/// loop, how long frames waited to be written, the longest time between polls.
+#[derive(Default)]
+struct Stats {
+    since: Option<Instant>,
+    last_poll: Option<Instant>,
+    datagrams_in: u32,
+    datagrams_out: u32,
+    input_wait_max: f64,
+    input_waits_over_5ms: u32,
+    send_wait_max: f64,
+    send_waits_over_5ms: u32,
+    poll_gap_max: f64,
+    inbox_max: usize,
+}
+impl Stats {
+    fn input(&mut self, waited: Duration) {
+        let ms = waited.as_secs_f64() * 1e3;
+        self.datagrams_in += 1;
+        self.input_wait_max = self.input_wait_max.max(ms);
+        self.input_waits_over_5ms += (ms > 5.0) as u32;
+    }
+    fn sent(&mut self, waited: Duration) {
+        let ms = waited.as_secs_f64() * 1e3;
+        self.send_wait_max = self.send_wait_max.max(ms);
+        self.send_waits_over_5ms += (ms > 5.0) as u32;
+    }
+    /// Notes a poll; every 30 s of a race, the line for dhd.log.
+    fn poll(&mut self, now: Instant, inbox: usize, racing: bool) -> Option<String> {
+        if let Some(last) = self.last_poll { self.poll_gap_max = self.poll_gap_max.max((now - last).as_secs_f64() * 1e3); }
+        self.last_poll = Some(now);
+        self.inbox_max = self.inbox_max.max(inbox);
+        let since = *self.since.get_or_insert(now);
+        if now - since < Duration::from_secs(30) { return None; }
+        let line = format!(
+            "net: SFU 30 s: datagrams {} in, {} out; input wait max {:.1} ms ({} over 5 ms); send wait max {:.1} ms ({} over 5 ms); poll gap max {:.1} ms; inbox max {}",
+            self.datagrams_in, self.datagrams_out, self.input_wait_max, self.input_waits_over_5ms, self.send_wait_max,
+            self.send_waits_over_5ms, self.poll_gap_max, self.inbox_max);
+        *self = Stats { since: Some(now), last_poll: Some(now), ..Default::default() };
+        racing.then_some(line)
+    }
+}
+
+/// The reader thread: blocks on the socket, queues each datagram with its arrival time and wakes
+/// the owner. It ends when the association is dropped (within READER_CHECK) or the socket fails.
+fn read_socket(socket: UdpSocket, inbox: Inbox, alive: Arc<AtomicBool>, failed: Arc<AtomicBool>, wake: Wake) {
+    let mut buffer = vec![0u8; 65536];
+    while alive.load(Ordering::Acquire) {
+        match socket.recv_from(&mut buffer) {
+            Ok((n, source)) => {
+                let at = Instant::now();
+                {
+                    let mut q = inbox.lock().unwrap_or_else(|e| e.into_inner());
+                    if q.len() < INBOX { q.push_back((at, source, buffer[..n].to_vec())); }
+                }
+                wake();
+            }
+            // Windows reports an ICMP unreachable as a reset on the next read; the ICE consent
+            // checks decide whether the association is gone.
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted | ErrorKind::ConnectionReset) => {}
+            Err(_) => {
+                failed.store(true, Ordering::Release);
+                wake();
+                break;
+            }
+        }
+    }
+}
+
 // Four times the normal per-rider rate, with a 120-packet burst allowance.
 // Exceeding it silences this member (including events) until the next race.
 struct SenderRate { since: Instant, count: [u16; 10], blocked: bool }
@@ -47,16 +133,24 @@ impl SenderRate {
     }
 }
 impl Sfu {
-    pub fn start() -> Result<(Self, Value)> {
+    pub fn start(wake: Wake) -> Result<(Self, Value)> {
         let route = ("rtc.live.cloudflare.com", 443).to_socket_addrs()?.find(|a| a.is_ipv4()).ok_or("No SFU IPv4 route")?;
-        Self::start_at(route)
+        Self::start_at(route, wake)
     }
-    fn start_at(remote: SocketAddr) -> Result<(Self, Value)> {
+    fn start_at(remote: SocketAddr, wake: Wake) -> Result<(Self, Value)> {
         // The only production route is Cloudflare. No peer signaling, discovery or TURN mesh.
         let route = UdpSocket::bind("0.0.0.0:0")?;
         route.connect(remote)?;
         let socket = UdpSocket::bind(SocketAddr::new(route.local_addr()?.ip(), 0))?;
-        socket.set_nonblocking(true)?;
+        // Blocking with a timeout: the reader thread waits in recv_from; sends never wait.
+        socket.set_read_timeout(Some(READER_CHECK))?;
+        let local = socket.local_addr()?;
+        let inbox: Inbox = Arc::default();
+        let (reader_alive, reader_failed) = (Arc::new(AtomicBool::new(true)), Arc::new(AtomicBool::new(false)));
+        {
+            let (socket, inbox, alive, failed) = (socket.try_clone()?, inbox.clone(), reader_alive.clone(), reader_failed.clone());
+            std::thread::Builder::new().name("dhd-sfu-read".into()).spawn(move || read_socket(socket, inbox, alive, failed, wake))?;
+        }
         let mut rtc = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
         rtc.add_local_candidate(Candidate::host(socket.local_addr()?, "udp")?);
         let mut change = rtc.sdp_api();
@@ -64,7 +158,7 @@ impl Sfu {
         let (offer, pending) = change.apply().ok_or("No transport offer")?;
         let message = json!({ "type": "sfu_offer", "sdp": offer.to_sdp_string() });
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
-        Ok((Self { rtc, pending: Some(pending), socket, channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
+        Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
             connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -186,13 +280,13 @@ impl Sfu {
         if state {
             // One newest snapshot per rider; never accumulate stale snapshots under congestion.
             if bytes.len() >= 4 {
-                self.pending_state.insert(bytes[3], wire);
+                self.pending_state.insert(bytes[3], (Instant::now(), wire));
             }
         } else {
             if self.pending_events.len() >= 128 {
                 return Err("Event send queue full".into());
             }
-            self.pending_events.push_back(wire);
+            self.pending_events.push_back((Instant::now(), wire));
         }
         Ok(())
     }
@@ -210,8 +304,9 @@ impl Sfu {
                 if let Some(mut channel) = self.rtc.channel(c.id) {
                     if state {
                         let mut sent = vec![];
-                        for (rider, bytes) in &self.pending_state {
+                        for (rider, (queued, bytes)) in &self.pending_state {
                             if channel.write(true, bytes)? {
+                                self.stats.sent(queued.elapsed());
                                 sent.push(*rider);
                             } else {
                                 break;
@@ -221,39 +316,33 @@ impl Sfu {
                             self.pending_state.remove(&rider);
                         }
                     } else {
-                        while let Some(bytes) = self.pending_events.front() {
+                        while let Some((queued, bytes)) = self.pending_events.front() {
                             if !channel.write(true, bytes)? {
                                 break;
                             }
+                            self.stats.sent(queued.elapsed());
                             self.pending_events.pop_front();
                         }
                     }
                 }
             }
         }
-        let mut buffer = [0u8; 65536];
-        for _ in 0..256 {
-            match self.socket.recv_from(&mut buffer) {
-                Ok((n, source)) => {
-                    if let Ok(contents) = buffer[..n].try_into() {
-                        let input = Input::Receive(
-                            Instant::now(),
-                            Receive {
-                                proto: Protocol::Udp,
-                                source,
-                                destination: self.socket.local_addr()?,
-                                contents,
-                            },
-                        );
-                        if self.rtc.accepts(&input) {
-                            self.rtc.handle_input(input)?;
-                            self.drain(&mut text, &mut frames)?;
-                        }
-                    }
+        let datagrams = std::mem::take(&mut *self.inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        let now = Instant::now();
+        if let Some(line) = self.stats.poll(now, datagrams.len(), self.race != 0 && self.released) { eprintln!("{line}"); }
+        for (at, source, data) in datagrams {
+            self.stats.input(now.saturating_duration_since(at));
+            if let Ok(contents) = data.as_slice().try_into() {
+                // str0m's clock only moves forward: the input is stamped now, not at arrival.
+                let input = Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination: self.local, contents });
+                if self.rtc.accepts(&input) {
+                    self.rtc.handle_input(input)?;
+                    self.drain(&mut text, &mut frames)?;
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e.into()),
             }
+        }
+        if self.reader_failed.load(Ordering::Acquire) {
+            return Err("SFU socket failed".into());
         }
         self.rtc.handle_input(Input::Timeout(Instant::now()))?;
         self.drain(&mut text, &mut frames)?;
@@ -291,6 +380,7 @@ impl Sfu {
             match self.rtc.poll_output()? {
                 Output::Timeout(_) => break,
                 Output::Transmit(t) => {
+                    self.stats.datagrams_out += 1;
                     if let Err(e) = self.socket.send_to(&t.contents, t.destination) {
                         if e.kind() != std::io::ErrorKind::WouldBlock {
                             return Err(e.into());
@@ -311,6 +401,12 @@ impl Sfu {
     }
 }
 
+impl Drop for Sfu {
+    fn drop(&mut self) {
+        self.reader_alive.store(false, Ordering::Release);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,7 +424,7 @@ mod tests {
 
     #[test]
     fn reliable_events_wait_for_start_and_old_race_frames_are_dropped() {
-        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap()).unwrap();
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
         client.signal(&json!({"type":"sfu_channels","channels":[
             {"channelId":14,"name":"events","memberId":17,"local":false}
         ]})).unwrap();
@@ -345,7 +441,7 @@ mod tests {
         let (_, frames) = client.poll().unwrap();
         assert_eq!(frames, vec![vec![6,3,7]]);
         client.send(&[6,0,1]).unwrap();
-        assert_eq!(&client.pending_events[0][..8], &100u64.to_le_bytes());
+        assert_eq!(&client.pending_events[0].1[..8], &100u64.to_le_bytes());
         client.signal(&json!({"type":"start","startAt":200,"players":[{"memberId":17,"slot":5}]})).unwrap();
         assert!(client.pending_events.is_empty());
         let mut frames = vec![];
@@ -365,7 +461,7 @@ mod tests {
             .set_crypto_provider(str0m::crypto::from_feature_flags().into())
             .build(Instant::now());
         server.add_local_candidate(Candidate::host(socket.local_addr().unwrap(), "udp").unwrap());
-        let (mut client, offer) = Sfu::start_at(socket.local_addr().unwrap()).unwrap();
+        let (mut client, offer) = Sfu::start_at(socket.local_addr().unwrap(), Arc::new(|| {})).unwrap();
         let answer = server.sdp_api().accept_offer(str0m::change::SdpOffer::from_sdp_string(offer["sdp"].as_str().unwrap()).unwrap()).unwrap();
         client.signal(&json!({"type":"sfu_answer","sdp":answer.to_sdp_string()})).unwrap();
         let server_state = server.direct_api().create_data_channel(ChannelConfig {

@@ -10,7 +10,8 @@
 //! waits for bytes by peeking at its own handle of the socket, unlocked (50 ms at most, so a
 //! dropped connection is noticed), then reads what arrived without blocking under the lock; the
 //! send thread writes, blocking, under the same lock. It also owns the room's SFU UDP socket,
-//! str0m state machine, negotiated channels and bounded event/state queues. Race frames never
+//! str0m state machine, negotiated channels and bounded event/state queues; the SFU's reader
+//! thread wakes it for each datagram, as ws_send does for each message. Race frames never
 //! enter the TCP stream. Signaling remains on the room WebSocket.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
@@ -62,6 +63,8 @@ struct Queue {
     out: VecDeque<(bool, Vec<u8>)>,
     connected: bool,
     incoming: VecDeque<(bool, Vec<u8>)>,
+    /// set by the SFU socket reader: a datagram waits for the send thread
+    sfu_input: bool,
 }
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
@@ -218,10 +221,19 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
     let mut sfu: Option<sfu::Sfu> = None;
+    // The SFU reader wakes this thread for each datagram, as ws_send does for each message.
+    let weak = Arc::downgrade(&c);
+    let wake: sfu::Wake = Arc::new(move || {
+        if let Some(c) = weak.upgrade() {
+            lock(&c.queue).sfu_input = true;
+            c.wake.notify_all();
+        }
+    });
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
-            let _ = c.wake.wait_timeout_while(q, TICK, |q| q.out.is_empty() && q.incoming.is_empty() && !c.stopping.load(Ordering::Acquire));
+            let (mut q, _) = c.wake.wait_timeout_while(q, TICK, |q| q.out.is_empty() && q.incoming.is_empty() && !q.sfu_input && !c.stopping.load(Ordering::Acquire)).unwrap_or_else(|e| e.into_inner());
+            q.sfu_input = false;
         }
         if !lock(&c.queue).connected { sfu = None; continue; }
         // Lobby and SFU callbacks share this thread. Apply the transport's start marker
@@ -235,7 +247,7 @@ fn send_main(c: Arc<WsConn>) {
                         lock(&c.queue).out.retain(|(binary, bytes)| !*binary || !matches!(bytes.first(), Some(5 | 6)));
                     }
                     let result = if message["type"] == "start" {
-                        match sfu::Sfu::start() {
+                        match sfu::Sfu::start(wake.clone()) {
                             Ok((rtc, offer)) => {
                                 let mut rtc = rtc;
                                 let result = rtc.signal(&message);
@@ -271,33 +283,38 @@ fn send_main(c: Arc<WsConn>) {
         for data in incoming {
             if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
         }
-        loop {
-            let item = lock(&c.queue).out.pop_front();
-            let Some((binary, data)) = item else { break };
-            if binary && matches!(data.first(), Some(5 | 6)) {
-                let failed = sfu.as_mut().is_some_and(|rtc| rtc.send(&data).is_err());
-                if failed { c.force_close(); sfu = None; }
-                continue;
-            }
-            let mut live = lock(&c.live);
-            if let Some(l) = live.as_mut() {
-                let msg = if binary {
-                    Message::Binary(Bytes::from(data))
-                } else {
-                    Message::Text(Utf8Bytes::from(String::from_utf8_lossy(&data).into_owned()))
-                };
-                if l.ws.send(msg).is_err() {
-                    // a failed or timed-out write leaves the stream unusable: drop it
-                    lock(&c.queue).connected = false;
-                    if let Some(l) = live.take() {
-                        let _ = l.tcp.shutdown(Shutdown::Both);
-                    }
-                }
-            }
-        }
+        flush(&c, &mut sfu);
         if let Some(f) = c.h.on_tick {
             if unsafe { f(c.h.ctx) } != 0 {
                 c.force_close();
+            }
+        }
+    }
+}
+
+/// Sends what is queued, in order: race frames to the SFU association, the rest on the WebSocket.
+fn flush(c: &WsConn, sfu: &mut Option<sfu::Sfu>) {
+    loop {
+        let item = lock(&c.queue).out.pop_front();
+        let Some((binary, data)) = item else { break };
+        if binary && matches!(data.first(), Some(5 | 6)) {
+            let failed = sfu.as_mut().is_some_and(|rtc| rtc.send(&data).is_err());
+            if failed { c.force_close(); *sfu = None; }
+            continue;
+        }
+        let mut live = lock(&c.live);
+        if let Some(l) = live.as_mut() {
+            let msg = if binary {
+                Message::Binary(Bytes::from(data))
+            } else {
+                Message::Text(Utf8Bytes::from(String::from_utf8_lossy(&data).into_owned()))
+            };
+            if l.ws.send(msg).is_err() {
+                // a failed or timed-out write leaves the stream unusable: drop it
+                lock(&c.queue).connected = false;
+                if let Some(l) = live.take() {
+                    let _ = l.tcp.shutdown(Shutdown::Both);
+                }
             }
         }
     }
