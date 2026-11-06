@@ -49,7 +49,13 @@ pub struct Sfu {
     pending_events: VecDeque<(Instant, Vec<u8>)>,
     pending_state: HashMap<u8, (Instant, Vec<u8>)>,
     rates: HashMap<u64, SenderRate>,
+    #[cfg(test)]
+    probe: ProbeTimes,
 }
+/// The bare transport probe's timings (tests only).
+#[cfg(test)]
+#[derive(Default)]
+struct ProbeTimes { wrote_at: Option<Instant>, tx_lag: Vec<f64> }
 /// What the transport loop did in the last 30 s, for dhd.log: how long datagrams waited for the
 /// loop, how long frames waited to be written, the longest time between polls.
 #[derive(Default)]
@@ -159,7 +165,8 @@ impl Sfu {
         let message = json!({ "type": "sfu_offer", "sdp": offer.to_sdp_string() });
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
-            connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new() }, message))
+            connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
+            #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
         if message["type"] == "sfu_answer" {
@@ -306,6 +313,8 @@ impl Sfu {
                         let mut sent = vec![];
                         for (rider, (queued, bytes)) in &self.pending_state {
                             if channel.write(true, bytes)? {
+                                #[cfg(test)]
+                                self.probe.wrote_at.get_or_insert_with(Instant::now);
                                 self.stats.sent(queued.elapsed());
                                 sent.push(*rider);
                             } else {
@@ -381,6 +390,8 @@ impl Sfu {
                 Output::Timeout(_) => break,
                 Output::Transmit(t) => {
                     self.stats.datagrams_out += 1;
+                    #[cfg(test)]
+                    if let Some(w) = self.probe.wrote_at.take() { self.probe.tx_lag.push(w.elapsed().as_secs_f64() * 1e3); }
                     if let Err(e) = self.socket.send_to(&t.contents, t.destination) {
                         if e.kind() != std::io::ErrorKind::WouldBlock {
                             return Err(e.into());
@@ -406,6 +417,10 @@ impl Drop for Sfu {
         self.reader_alive.store(false, Ordering::Release);
     }
 }
+
+#[cfg(test)]
+#[path = "probe.rs"]
+mod probe;
 
 #[cfg(test)]
 mod tests {
