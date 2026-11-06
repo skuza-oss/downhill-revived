@@ -448,6 +448,10 @@ void gs_priv_write(Gs *g, unsigned addr, uint64_t value)
             memset(g->reg, 0, sizeof g->reg); memset(g->path, 0, sizeof g->path);
             g->reg[GS_PRMODECONT] = 1; g->reg[GS_TRXDIR] = 3;
             g->vertex_count = 0;
+            /* It clears the display registers too (PMODE to BGCOLOR, as PCSX2's gsCSRwrite): no
+               read circuit is on, the screen is black until the game sets its display again
+               (sceGsResetGraph before a loading card and the title, finding 160). */
+            memset(g->privileged, 0, (GS_BGCOLOR / 16 + 1) * sizeof *g->privileged);
         }
         g->privileged[addr / 16] &= ~(value & 31);  /* interrupt bits are write-one-to-clear */
     } else g->privileged[addr / 16] = value;
