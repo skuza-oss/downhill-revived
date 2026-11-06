@@ -135,7 +135,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 - Phones: on the low-end profile (Realme RMX3930 (Unisoc T612), reproduced on a throttled Mi 11i)
   2x races hold 60 with the profile-guided build and reach about 59.5 at the race start without
-  it; 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149 say what is left.
+  it; 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149 say what is left;
+  finding 156 says where a frame's time goes on the phone and the desktops, and what replacing the
+  VU1 and GS emulation with native rendering would remove.
 - Browser speed is below 60 in races (finding 087).
 - High-rate handling differs a little from 60 by the race's own chaos, with no trend (finding
   139, after finding 067's limits).
