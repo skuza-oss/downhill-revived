@@ -717,5 +717,7 @@ Every field and the message type are additions: clients that don't know them ign
 native client reads by key, the browser copies known keys), so `MIN_VERSION` stays as it is.
 
 SFU allocations are restricted to running race members, one setup attempt per member per race.
-Allocations close at race end or departure. Receiver rate protection silences a member for the
-remaining race if any rider exceeds 120 snapshots in a one-second window (normal: 30/s).
+Allocations close at race end or departure. Receiver rate protection drops a member's STATE
+messages beyond 240 in a one-second window per bundle index (normal: 60/s for index 0); it never
+silences a member for the rest of the race (protocol 3 did, and a backlog after a network stall
+froze an honest rider; finding 169).
