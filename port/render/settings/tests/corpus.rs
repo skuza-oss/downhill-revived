@@ -231,3 +231,40 @@ fn c_interface() {
     assert_eq!(fs::read_to_string(&p).unwrap(), "fps = 120\ngame_options = 1 800\nscale = 5\n");
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn install_id() {
+    use dhd_settings::install;
+    let a = install::fresh();
+    let b = install::fresh();
+    assert!(install::valid(&a) && install::valid(&b), "{a} {b}");
+    assert_ne!(a, b);
+    assert!(!install::valid("0123456789ABCDEF0123456789abcdef") && !install::valid("abc"));
+    let dir = std::env::temp_dir().join(format!("dhd-settings-install-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("dhd.ini");
+    // no file: an id for this run, and no dhd.ini made for it
+    let (once, kept) = install::get(&p);
+    assert!(install::valid(&once) && !kept && !p.exists());
+    // a file: made once, kept after
+    fs::write(&p, "fps = 120\ninstall_id = not-an-id\n").unwrap();
+    let (id, kept) = install::get(&p);
+    assert!(install::valid(&id) && kept);
+    assert_eq!(fs::read_to_string(&p).unwrap(), format!("fps = 120\ninstall_id = {id}\n"));
+    assert_eq!(install::get(&p), (id.clone(), true));
+    // not a setting: no variable, not an unknown line, not in the launcher's table
+    let ini = dhd_settings::Ini::parse(&fs::read(&p).unwrap());
+    assert!(ini.unknown_keys().is_empty());
+    let env = dhd_settings::environment(Some(&ini), |_| false);
+    assert!(env.vars.iter().all(|(_, v)| v != &id));
+    assert!(dhd_settings::find("install_id").is_none());
+    // the C interface
+    let path = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
+    let mut out = [0 as std::ffi::c_char; 33];
+    unsafe {
+        assert_eq!(dhd_settings::c::dhd_settings_install_id(path.as_ptr(), out.as_mut_ptr(), out.len()), 1);
+        assert_eq!(std::ffi::CStr::from_ptr(out.as_ptr()).to_str().unwrap(), id);
+        assert_eq!(dhd_settings::c::dhd_settings_install_id(path.as_ptr(), out.as_mut_ptr(), 32), 0);
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

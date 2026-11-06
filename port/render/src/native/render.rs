@@ -757,9 +757,14 @@ impl Native {
     }
 
     /// native_scanout through scanout.rs: the picture's display surface (with a texture) into the
-    /// display texture, recorded after the open pass ends; false when nothing was scanned out.
+    /// display texture, recorded after the open pass ends; false when nothing was scanned out. The
+    /// display off (`DISPLAY_OFF`) makes the display texture black.
     fn scan_out(&mut self, p: &Picture) -> bool {
         let gpu = self.gpu;
+        if p.display_surface == DISPLAY_OFF {
+            let encoder = self.pass.encoder(gpu);
+            return self.display.black(encoder);
+        }
         if p.display_surface < 0 {
             return false;
         }

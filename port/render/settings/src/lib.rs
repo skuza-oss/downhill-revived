@@ -3,8 +3,8 @@
 //!
 //! - The game links it through dhd_render's static library (`native`) and calls the C interface
 //!   (`c.rs`, port/render/include/dhd_settings.h) from port/hle/host.c: at the start each setting
-//!   becomes the DHD_* variable the game reads (`environment`); PC SETTINGS saves through it. The
-//!   PC SETTINGS page itself runs inside the game core, which has no Rust: it reads the choices from
+//!   becomes the DHD_* variable the game reads (`environment`); REVIVED SETTINGS saves through it. The
+//!   REVIVED SETTINGS page itself runs inside the game core, which has no Rust: it reads the choices from
 //!   port/hle/settings_table.h, generated from this crate's table (`table::c_table`).
 //! - The launcher (port/launcher) uses it as a Rust crate: its tabs show the table's choices and
 //!   defaults, and it saves through `save`.
@@ -13,6 +13,11 @@
 //!   keeps only the text's storage (IndexedDB) and what the browser can't offer.
 //! - The rider name's rule (`name`) is here too, for the launcher's rider card and, through
 //!   settings_table.h, the game's online menu.
+//! - The install id (`install`, finding 161): a random id kept in dhd.ini for the online server's
+//!   bans; not a setting, never a variable or a log line.
+//! - The keyboard and controller bindings (`controls`, finding 157): the `keyboard`, `pad1` and
+//!   `pad2` lines' layouts and the rules of a change, for the game (through port/hle/
+//!   controls_table.h and the C interface) and the launcher's Controls tab.
 //!
 //! Precedence: a DHD_* variable set in the environment overrides dhd.ini (the game's tools set
 //! them); dhd.ini overrides the player's default; without dhd.ini the game keeps its built-in
@@ -21,7 +26,9 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod c;
+pub mod controls;
 mod ini;
+pub mod install;
 pub mod name;
 pub mod table;
 #[cfg(target_arch = "wasm32")]
@@ -41,7 +48,7 @@ use std::{
 
 /// The first lines of a new dhd.ini.
 pub const HEADER: &str = "; Downhill Revived settings: one \"key = value\" per line. The launcher and\n\
-; OPTIONS > PC SETTINGS in the game write them here. DHD_* environment variables override them.\n";
+; OPTIONS > REVIVED SETTINGS in the game write them here. DHD_* environment variables override them.\n";
 
 /// DHD_SETTINGS=none (or 0): no settings file, the tools' rule.
 pub fn disabled(path: &Path) -> bool {
@@ -119,7 +126,7 @@ pub struct Environment {
 
 /// The game's start: dhd.ini (None: no file) as DHD_* variables. `is_set` says whether the
 /// environment has a variable already; it wins. DHD_ENV_OVERRIDES lists the settings' variables
-/// the environment set (",DHD_SCALE,DHD_FPS,"), which PC SETTINGS shows locked.
+/// the environment set (",DHD_SCALE,DHD_FPS,"), which REVIVED SETTINGS shows locked.
 pub fn environment(ini: Option<&Ini>, is_set: impl Fn(&str) -> bool) -> Environment {
     let mut out = Environment::default();
     let mut overrides = String::from(",");

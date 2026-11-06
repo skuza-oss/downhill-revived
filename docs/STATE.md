@@ -85,12 +85,14 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 ## What players get
 
-- PC SETTINGS in the game's options, saved to dhd.ini (findings 064, 101): resolution scale
+- REVIVED SETTINGS at the top of the game's options, with Display, Graphics, Controls, Online
+  and Game tabs (finding 163), saved to dhd.ini (findings 064, 101): resolution scale
   (capped by GPU memory and said so, finding 136), window mode, widescreen with the HUD anchored
   and no 4:3 screens left (findings 056, 140), frame rate 60-240 or Monitor (findings 067, 139),
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), movies,
-  vibration, stick dead zone and button icons (finding 134), FPS & Ping counter (finding 120),
-  Unlock All (finding 095), EXIT GAME. dhd.ini has one implementation, the Rust crate
+  vibration, stick dead zone and button icons (finding 134), the keys and controller buttons for
+  the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
+  Ping counter (finding 120), Unlock All (finding 095), EXIT GAME. dhd.ini has one implementation, the Rust crate
   `dhd_settings` (`port/render/settings`), used by the game, the launcher and the browser.
 - The launcher holds settings, rider name and updates on every desktop platform, decides the one
   data folder (`DHD_SETTINGS`, `DHD_MEMCARD_DIR`, `DHD_DATA_DIR`), updates from `latest.json`
@@ -112,6 +114,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (finding 123) that live across races (findings 118, 119), Ready for the next race and MOSH by
   the host's pick (finding 128), rooms placed near their creator (finding 135), rejoin by token
   (finding 137). Protocol: `docs/online-protocol.md`; steps: `online/server/README.md`.
+- Abuse guard (finding 161): a kill switch in the moderation database (`moderate.mjs online
+  off`), limits per address, caps per member, and
+  bans by address hash or install id with a 14-day moderation log in D1, worked from
+  `online/server/tools/moderate.mjs` (no admin endpoint). No player gets another's address, its
+  hash or install id.
 - Client: `port/net/` over `port/net/ws.h`, the Rust crate `dhd_net` (`port/render/net`,
   tungstenite over rustls, webpki roots; no OS certificate store).
 - Online needs the USA disc's game files (a hash of every ISO 9660 file, `dhd_disc`; finding 098).
@@ -135,7 +142,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 - Phones: on the low-end profile (Realme RMX3930 (Unisoc T612), reproduced on a throttled Mi 11i)
   2x races hold 60 with the profile-guided build and reach about 59.5 at the race start without
-  it; 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149 say what is left.
+  it; 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149 say what is left;
+  finding 156 says where a frame's time goes on the phone and the desktops, and what replacing the
+  VU1 and GS emulation with native rendering would remove.
 - Browser speed is below 60 in races (finding 087).
 - High-rate handling differs a little from 60 by the race's own chaos, with no trend (finding
   139, after finding 067's limits).

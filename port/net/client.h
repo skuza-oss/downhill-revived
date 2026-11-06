@@ -25,6 +25,8 @@ typedef struct {
     /* this room's rejoin token from the welcome (hex; "" none yet): a rejoin's hello sends it back
        to get the member again (finding 137). client_init clears it for each new room. */
     char rejoin_token[65];
+    /* this game's install id (32 lowercase hex, "" none; finding 161), sent in every hello */
+    char install_id[33];
     NetLobby lobby;
     int racing;
     /* what to repeat after a lobby reconnect */
@@ -58,6 +60,8 @@ typedef struct {
 double net_now_ms(void);  /* a monotonic clock */
 
 void client_init(NetClient *c, const char *name, const char *version, const char *iso);
+/* The install id for the hellos (finding 161): kept only when it is 32 lowercase hex digits. */
+void client_set_install_id(NetClient *c, const char *id);
 void client_free(NetClient *c);
 /* The transport connected: hello goes out. */
 void client_connected(NetClient *c, const NetTransport *tr);

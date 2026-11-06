@@ -100,6 +100,8 @@ Menus and riding:
 | `DHD_AUTOPAD` | button script by seconds |
 | `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...` |
 | `DHD_RACE_SYNC=1` | race scripts run on the race clock |
+| `DHD_KEYS` | (race clock) keys through the keyboard's layout, `start:length:key[+key],...` with dhd.ini's key names (`space`, `j`, `kp1`, ...) or `esc` |
+| `DHD_TEST_PAD`, `DHD_TEST_PAD2` | (race clock) player 1's or 2's controller by its inputs' places, `start:length:input[+input],...` (`south`, `east`, `lt`, `dpad_up`, `lx=-50`, ...), through that player's layout (`pad1`, `pad2`) as a real pad's; logged as `test pad N` (finding 157) |
 | `DHD_REPLAY_TEST=S` | at race second S the race's replay starts, as REPLAY in the results does; `DHD_REPLAY_TRACE=path`: the riders' positions each field (finding 142) |
 | `DHD_FRAME_CLOCK=1` | the game clock from field counts, not the wall clock (repeatable runs) |
 | `DHD_HEADLESS=1` | no message boxes (a bad disc only logs), and no launcher (Linux smoke runs) |

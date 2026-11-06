@@ -153,7 +153,7 @@ pub mod native {
         pub commands: &'a [DhdrCommand],
         pub converts: &'a [DhdrConvert],
         pub surfaces: &'a [DhdrSurfaceInfo],
-        /// The scanned-out surface, or -1.
+        /// The scanned-out surface, -1 (none: the last picture stays) or `abi::DISPLAY_OFF` (black).
         pub display_surface: i32,
         pub display: [u32; 12],
         /// `movie_on`: the movie frame (width, height, RGBA8 pixels), shown instead.

@@ -59,6 +59,23 @@ void port_ragdoll_step(void *points, int count, int stride, float damping);
 void port_fps_force_window(void *body, int clear);
 void port_fps_contact_recovery(void *body);
 
+/* Where the game is (finding 159). A race is on while the race world's update (func_0016C0C8, run by
+   the race's loop and its load) has run since the front end's last frame (port_shell_frame), paused
+   too, and it is not the title's
+   attract demo (mode 10, D_004B25A0 +0x10C). Not the shell's screen id D_0029DED8: a race keeps the
+   id of the screen that started it, 9 (GET READY) on most routes but 22 for CONTINUE SAVED GAME; and
+   not the race phase alone: D_0043F348 keeps its last value in the menus after a race. The race
+   phase then says which part: 5 the load and the flight over the track, 1 the countdown, 2-4 the
+   race to its results. */
+enum { PORT_MODE_ATTRACT = 10 };
+static inline int port_race_rule(int race_loop, int mode, int phase, int first_phase)
+{
+    return race_loop && mode != PORT_MODE_ATTRACT && phase >= first_phase && phase <= 4;
+}
+void port_loop_frame(int race);           /* 1 from the race world's update, 0 from the front end's frame */
+int port_in_race(void);                   /* a race's loop runs, any phase (not the attract demo) */
+int port_race_running(int first_phase);   /* port_race_rule now: the phase first_phase (1 or 2) to 4 */
+
 /* dhd.log's clock: lines (every VBLANK; finding 139): game time against wall time in a race. */
 void port_clock_observe(void);
 

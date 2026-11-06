@@ -318,7 +318,7 @@ describe("race relay", () => {
 
 describe("worker routes", () => {
   it("health and 404", async () => {
-    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 3, minVersion: "0.2.0" });
+    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 3, minVersion: "0.2.0", online: true });
     expect((await exports.default.fetch("https://dhd.test/nope")).status).toBe(404);
     expect((await exports.default.fetch("https://dhd.test/v1/rooms/new")).status).toBe(426);
   });

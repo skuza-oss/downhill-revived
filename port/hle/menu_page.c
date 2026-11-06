@@ -11,6 +11,7 @@
    Below them, the mouse for every popup the manager runs, the game's own as well (finding 092). */
 #include "hle.h"
 #include "menu_page.h"
+#include "../include/fps.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -239,6 +240,16 @@ void menu_page_value_set(MenuPage *p, int row, const char *label, const char *va
 {
     if (row < 0 || row >= menu_page_rows(p) || row >= MENU_PAGE_ROWS) return;
     value_text(p->text[row], label, value, arrows);
+}
+
+void menu_page_suffix(MenuPage *p, int row, const char *text)
+{
+    if (row < 0 || row >= menu_page_rows(p)) return;
+    MenuStyle normal = menu_page_style(p, MENU_STYLE_ROW);
+    MenuStyle dim = menu_page_style(p, MENU_STYLE_OFF);
+    int x = MENU(p, X_ROW_X, int) + menu_text_width(p->text[row], &normal) / 2 + 24;  /* a clear gap after the row */
+    int y = MENU(p, X_ROW_Y, int) + row * MENU(p, X_ROW_STEP, int);
+    menu_draw_text(MENU_LEFT, x, y, text, &dim);
 }
 
 void menu_page_enable(MenuPage *p, int row, int enabled)
@@ -628,6 +639,10 @@ static uint16_t page_legend_button(void *menu, int view)
 static void popup_mouse(void *menu, int view, int moved, int left, int right, int wheel)
 {
     MenuPage *p = page_of(menu);
+    if (p && p->header_mouse && left) {
+        int mx, my;
+        if (pointer(view, &mx, &my) && p->header_mouse(p, mx, my)) return;
+    }
     if (p && p->mouse) {  /* a page that lays itself out hit-tests its own pieces */
         int mx, my;
         if (pointer(view, &mx, &my) && (moved || left || wheel)) p->mouse(p, mx, my, moved, left, wheel);
@@ -760,6 +775,7 @@ static int shell_ran;                   /* a shell frame has run: the game's vie
 
 void port_shell_frame(void)
 {
+    port_loop_frame(0);   /* not in a race (fps.h, finding 159) */
     shell_fill ^= 1;
     shell_count[shell_fill] = 0;
     shell_seen = fields;

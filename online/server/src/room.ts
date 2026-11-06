@@ -30,6 +30,10 @@ import {
   randomSeed,
 } from "./protocol";
 import { placeOf, regionOfPlace, roomRegion, traceColo } from "./region";
+import {
+  CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, banMessage, findBan, installIdOf, logJoin, newTally, onlineState, tally,
+  type Caps, type GuardEnv, type OnlineState, type Tally,
+} from "./guard";
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -160,6 +164,9 @@ interface SocketInfo {
   continent?: string;
   region?: string;
   colo?: string;
+  /** The address's keyed hash (src/guard.ts ipHash), from the Worker: the moderation log only,
+      never sent to anyone (finding 161). */
+  ipHash?: string;
 }
 
 /** FNV-1a: a player name becomes a number, so the stats can count players without names. */
@@ -199,6 +206,13 @@ export class Room extends DurableObject<Env> {
   /** When each socket last sent anything. Memory only: a socket not here (a wake-up) counts from
       the instance's start. */
   private heard = new WeakMap<WebSocket, number>();
+  /** Each socket's message counts (src/guard.ts tally, finding 161). Memory only: after a wake-up
+      a socket starts a new window. */
+  private tallies = new WeakMap<WebSocket, Tally>();
+  /** Sockets whose hello waits for the ban list (onHello): their other messages are dropped. */
+  private helloPending = new WeakSet<WebSocket>();
+  private capsFor: unknown = null;
+  private capsNow: Caps = CAPS;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -282,6 +296,7 @@ export class Room extends DurableObject<Env> {
       continent: place.continent ?? "",
       region: regionOfPlace(place),
       colo: place.colo ?? "",
+      ipHash: request.headers.get("x-dhd-ip-hash") ?? "",
     };
     server.serializeAttachment(info);
     if ((await this.ctx.storage.getAlarm()) === null)
@@ -292,7 +307,22 @@ export class Room extends DurableObject<Env> {
   // ---- WebSocket events ----
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
-    this.heard.set(ws, Date.now());
+    const now = Date.now();
+    this.heard.set(ws, now);
+    // Caps per member (finding 161): more than the game ever sends is dropped, warned once, then
+    // closed.
+    let t = this.tallies.get(ws);
+    if (!t) this.tallies.set(ws, (t = newTally(now)));
+    const verdict = tally(t, typeof msg !== "string", now, this.caps());
+    if (verdict !== "ok") {
+      if (verdict === "warn") this.error(ws, "too_fast", TOO_FAST_WARNING);
+      if (verdict === "close") {
+        const info = ws.deserializeAttachment() as SocketInfo | null;
+        console.warn(`room ${this.state?.code ?? ""}: member ${info?.memberId ?? "-"} closed: too many messages`);
+        return this.refuse(ws, "too_fast", TOO_FAST_MESSAGE);
+      }
+      return;
+    }
     if (typeof msg !== "string") {
       this.relay(ws, msg);
       return;
@@ -308,7 +338,7 @@ export class Room extends DurableObject<Env> {
       return this.refuse(ws, "bad_message", "Missing message type.");
 
     const info = ws.deserializeAttachment() as SocketInfo;
-    if (info.gone) return;
+    if (info.gone || this.helloPending.has(ws)) return;
     if (info.memberId === null) {
       if (m.type !== "hello") return this.refuse(ws, "bad_message", "Send hello first.");
       return this.onHello(ws, info, m);
@@ -626,8 +656,28 @@ export class Room extends DurableObject<Env> {
       return this.refuse(ws, "bad_message", "hello.isoSha256 must be 64 lowercase hex digits.");
     if (name.length < 1 || name.length > 24)
       return this.refuse(ws, "bad_message", "hello.name must be 1-24 characters.");
+    // The kill switch, the install id (optional; releases before it send none, a malformed one
+    // counts as none) and its ban (finding 161): the address's was checked before the room. Both
+    // come from the store (kept per isolate); nothing else of this socket is handled meanwhile.
+    const installId = installIdOf(m.installId);
+    let sw: OnlineState = { on: true, message: "" };
+    if ((this.env as GuardEnv).MODERATION) {
+      this.helloPending.add(ws);
+      let ban;
+      try {
+        [sw, ban] = await Promise.all([this.online(), installId ? findBan(this.env as GuardEnv, { install: installId }) : null]);
+      } finally {
+        this.helloPending.delete(ws);
+      }
+      if ((ws.deserializeAttachment() as SocketInfo | null)?.gone) return;
+      if (ban) return this.refuse(ws, "banned", banMessage(ban));
+    }
 
     const st = this.state;
+    // Online off: only this room's own members come back (a dropped racer rejoins its race, which
+    // goes on); nobody new gets in.
+    if (!sw.on && !(st && st.version !== null && this.rejoinOf(st, m.rejoinToken)))
+      return this.refuse(ws, "online_off", sw.message);
     const asHost = info.create && st !== null && st.version === null && st.members.length === 0;
     if (!st || (!asHost && st.version === null))
       return this.refuse(ws, "room_not_found", "No room has this code.");
@@ -692,6 +742,11 @@ export class Room extends DurableObject<Env> {
       this.rebuildRace();
       if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
     } else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
+    // The moderation log (finding 161): who entered which room, kept 14 days, for bans.
+    this.ctx.waitUntil(logJoin(this.env as GuardEnv, {
+      at: Date.now(), room: st.code, member: member.id, kind: asHost ? "host" : ghost ? "rejoin" : "guest", name: member.name,
+      clientVersion, country: info.country ?? "", ipHash: info.ipHash ?? "", installId,
+    }));
     this.send(ws, {
       type: "welcome",
       protocol: PROTOCOL,
@@ -808,7 +863,10 @@ export class Room extends DurableObject<Env> {
   }
 
   private async onStart(ws: WebSocket, st: RoomState): Promise<void> {
+    const sw = await this.online();
+    if (st !== this.state) return;
     if (st.race) return this.error(ws, "room_started", "The race is already running.");
+    if (!sw.on) return this.error(ws, "online_off", sw.message);
     if (st.session) {
       if (!st.members.some(x => x.ready && !x.choosing)) return this.error(ws, "not_ready", "Nobody is ready.");
       if (st.countdownEndsAt == null) this.lockGrid(st);
@@ -830,13 +888,41 @@ export class Room extends DurableObject<Env> {
     );
   }
 
+  /** The caps per member (src/guard.ts CAPS), worked out once per env (every message asks, the race
+      relay's too). The tests change them through CAP_WINDOW_MS and CAP_BINARY (vitest.config.ts;
+      a test may give a room a new env). */
+  private caps(): Caps {
+    if (this.capsFor === this.env) return this.capsNow;
+    const env = this.env as unknown as Record<string, unknown>;
+    const knob = (name: string, value: number) => {
+      const v = Number(env[name]);
+      return env[name] !== undefined && Number.isFinite(v) && v > 0 ? v : value;
+    };
+    this.capsFor = this.env;
+    this.capsNow = { windowMs: knob("CAP_WINDOW_MS", CAPS.windowMs), text: CAPS.text, binary: knob("CAP_BINARY", CAPS.binary) };
+    return this.capsNow;
+  }
+
   private countdownMs(): number {
     const v = Number((this.env as unknown as Record<string, unknown>).COUNTDOWN_MS);
     return Number.isFinite(v) && v >= 0 ? v : COUNTDOWN_MS;
   }
 
-  /** Starts or stops the countdown after a change; true when it started now. */
-  private updateCountdown(st: RoomState): boolean {
+  /** The kill switch (finding 161; src/guard.ts onlineState, kept 30 s per isolate): while online
+      is off no race starts here and nobody new joins; the room stays a lobby for its members (a
+      race already running goes on). */
+  private online(): Promise<OnlineState> {
+    return onlineState(this.env as GuardEnv);
+  }
+
+  /** Starts or stops the countdown after a change (none while online is off); true when it
+      started now. */
+  private updateCountdown(st: RoomState, off: boolean): boolean {
+    if (off && !st.race) {
+      st.countdownEndsAt = null;
+      st.grid = undefined; st.gridRules = undefined;
+      return false;
+    }
     if (st.session) {
       if (st.race) return false;
       if (st.grid) {
@@ -861,7 +947,17 @@ export class Room extends DurableObject<Env> {
   }
 
   private async startRace(st: RoomState, country: string): Promise<void> {
+    const sw = await this.online();
+    if (st !== this.state || st.race) return;
     st.countdownEndsAt = null;
+    if (!sw.on) {
+      // A countdown that ran out with online off (it was turned off since): no race.
+      st.grid = undefined; st.gridRules = undefined;
+      await this.save();
+      this.broadcast({ type: "error", code: "online_off", message: sw.message });
+      this.broadcastRoom();
+      return;
+    }
 
     // Host first, then join order.
     // Members away after a drop (finding 137) don't race: their game isn't here to start.
@@ -1116,12 +1212,13 @@ export class Room extends DurableObject<Env> {
   }
 
   private async changed(): Promise<void> {
+    const off = !(await this.online()).on;
     const st = this.state;
     if (st?.session) {
-      this.updateCountdown(st);
+      this.updateCountdown(st, off);
       await this.ctx.storage.setAlarm(this.nextAlarm(st, Date.now()));
     }
-    if (st && !st.session && this.updateCountdown(st)) {
+    if (st && !st.session && this.updateCountdown(st, off)) {
       const at = await this.ctx.storage.getAlarm();
       if (at === null || at > st.countdownEndsAt!) await this.ctx.storage.setAlarm(st.countdownEndsAt!);
     }

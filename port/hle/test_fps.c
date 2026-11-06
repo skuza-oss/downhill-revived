@@ -82,7 +82,7 @@ int main(int argc,char **argv)
     if (wall) port_clock_wall(1);
     assert(port_delta_clock() && port_animation_scale()==1024);
     port_clock_reset();
-    *(int *)0x0829DED8=9;*(int *)0x0843F348=2;
+    port_loop_frame(1);*(int *)0x0829DED8=9;*(int *)0x0843F348=2;   /* a race's loop runs (fps.h) */
     unsigned char __attribute__((aligned(16))) rider[0x7BD0]={0},bike[0x4C0]={0};
     if (wall) {
         /* The delta-time clock (finding 139): each step is the wall time since the last frame,
@@ -230,6 +230,7 @@ int main(int argc,char **argv)
         assert(port_vblank_seconds()==1.0/n);
         return 0;
     }
+    *(int *)0x0829DED8=22;   /* a career continued from a save races on screen 22 (finding 159) */
     *(void **)(bike+0x158)=rider;bike[0x354]=bike[0x3D4]=1;
     *(int *)(rider+0x7A5C)=1;
     *(float *)(rider+0x7A78)=1;
@@ -246,6 +247,13 @@ int main(int argc,char **argv)
         assert(recoveries==(i==n*2-1)); /* velocity jitter cannot reset immobility */
     }
     assert(recovery_kind==2);
+    port_clock_reset();recoveries=0;port_loop_frame(0);
+    for (int i=0;i<n*3;i++) {
+        *(float *)(bike+0x50)=i&1 ? .05f : -.05f;
+        port_fps_contact_recovery(bike);
+    }
+    assert(!recoveries); /* the menus after a race: the phase is left at 2-4, the front end runs */
+    port_loop_frame(1);
     port_clock_reset();recoveries=0;braking=1;
     for (int i=0;i<n*3;i++) port_fps_contact_recovery(bike);
     assert(!recoveries); /* holding the brake is intentional */

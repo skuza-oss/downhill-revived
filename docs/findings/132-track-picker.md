@@ -1,6 +1,6 @@
 # 132: Track picker names and disc previews
 
-Status: current
+Status: partly superseded by 166 (the 23-track list: 25 since 166)
 Supersedes: parts of 115, 116
 Checked: 2026-11-04
 

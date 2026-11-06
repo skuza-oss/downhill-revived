@@ -267,6 +267,10 @@ pub struct DhdrSurfaceInfo {
     pub extent: [u32; 2],
 }
 
+/// `DhdrPicture::display_surface` when the display is off (PMODE has no read circuit on, as after
+/// a GS reset): the picture is black, as the PS2 shows it (finding 160). -1: none, the last stays.
+pub const DISPLAY_OFF: i32 = -2;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct DhdrPicture {

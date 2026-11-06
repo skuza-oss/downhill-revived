@@ -139,13 +139,17 @@ void pad_vsync(void)
     }
 }
 
+int port_controls_capturing(void);  /* controls_settings.c */
+
 /* Just-in-time frames (kernel.c): the controller read again into the frames pad_vsync just wrote,
    at the end of the wait after the VBLANK, so the game reads the newest state. Only the input
-   bytes change (no new frame counter). Scripted and online input stay as pad_vsync read them. */
+   bytes change (no new frame counter). Scripted and online input stay as pad_vsync read them, and
+   so does the held-back input while PC SETTINGS > Controls waits for a key or button (pads_read). */
 void pad_refresh(void)
 {
     static int live = -1;
     int port, slot;
+    if (port_controls_capturing()) return;
     if (live < 0)
         live = !getenv("DHD_AUTOPAD") && !getenv("DHD_AUTOPAD_FRAMES") && !getenv("DHD_NAV") &&
                !getenv("DHD_NET_CREATE") && !getenv("DHD_NET_JOIN");

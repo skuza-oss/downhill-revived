@@ -9,6 +9,7 @@
 #include "state_trace.h"
 #include "pace_grid.h"
 #include "stick.h"
+#include "controls_table.h"  /* the bindings' tables (port/render/settings, finding 157) */
 #include "../gs/button_icons.h"
 #include "../include/version.h"
 #include "../runtime/sha256.h"
@@ -985,46 +986,105 @@ void host_pad_vibrate(int port, int light, int heavy)
     if (gamepad_start()) gamepad_vibrate(port, light, heavy);
 }
 
+/* ---- keyboard and controller bindings (finding 157) ----
+   The layouts the game plays with: DHD_KEYBOARD, DHD_PAD1 and DHD_PAD2 (dhd.ini keyboard, pad1,
+   pad2) as dhd_settings reads them (port/render/settings/src/controls.rs: unset, the defaults),
+   read again whenever one of them changes (PC SETTINGS > Controls sets them as it saves), and
+   logged then. The CONTROLS page's services below make every change through dhd_settings too. */
+
+static ControlsLayout controls[CONTROL_DEVICES];
+typedef char controls_layout_size[sizeof(ControlsLayout) == sizeof(DhdControlsLayout) && sizeof(ControlsLayout) == 52 ? 1 : -1];
+static char controls_seen[CONTROL_DEVICES][512];
+static int controls_ready;
+
+static void controls_problem(const char *text) { hle_log("controls: %s\n", text); }
+
+static const char *controls_value(int device)
+{
+    const char *v = getenv(control_devices[device].env);
+    return v ? v : "";
+}
+
+static void controls_follow(void)
+{
+    int changed = !controls_ready;
+    for (int d = 0; d < CONTROL_DEVICES; d++) changed |= strncmp(controls_value(d), controls_seen[d], sizeof controls_seen[d]) != 0;
+    if (!changed) return;
+    for (int d = 0; d < CONTROL_DEVICES; d++) snprintf(controls_seen[d], sizeof controls_seen[d], "%s", controls_value(d));
+    dhd_controls_layouts(controls_seen[0], controls_seen[1], controls_seen[2], (DhdControlsLayout *)controls, controls_problem);
+    hle_log("controls: keyboard %s, controller 1 %s, controller 2 %s\n", *controls_seen[0] ? controls_seen[0] : "(defaults)",
+            *controls_seen[1] ? controls_seen[1] : "(defaults)", *controls_seen[2] ? controls_seen[2] : "(defaults)");
+    controls_ready = 1;
+}
+
+/* A device's layout (CONTROL_KEYBOARD, CONTROL_PAD1, CONTROL_PAD2). */
+static const ControlsLayout *controls_layout(int device)
+{
+    controls_follow();
+    return &controls[device];
+}
+
+/* Player `port`'s controller layout: players 1 and 2 have their own, 3 and 4 the default. */
+static const ControlsLayout *pad_layout(int port)
+{
+    return port < 2 ? controls_layout(CONTROL_PAD1 + port) : &control_defaults[CONTROL_PAD1];
+}
+
 /* The game's controls are in riding mode (D_0029E290, func_00220550): keyboard.c moves the left
-   stick with the arrows then, and the d-pad in menus. */
+   stick with the d-pad's keys then, and the d-pad in menus. */
 static int riding_controls(void) { return *(volatile int32_t *)GUEST(0x0829E290) != 0; }
 
-/* The keyboard (layout: keyboard.c), only while the game's window has the keyboard (keyboard_focused,
-   fed by the SDL thread: sdl_host.c), and not while Alt, Ctrl or a Windows key is held, so Alt+Tab,
-   Alt+Enter, Ctrl+Esc and the like stay the system's. A key let go elsewhere is let go here too
-   (keyboard_focus clears the keys when the window loses the keyboard). Letters are read by their
-   place on a US keyboard (keyboard.c), and text_input_key_allowed takes the character the key types. */
+/* The keyboard (its layout: dhd.ini keyboard, keyboard.c), only while the game's window has the
+   keyboard (keyboard_focused, fed by the SDL thread: sdl_host.c), and not while Alt, Ctrl or a
+   Windows key is held, so Alt+Tab, Alt+Enter, Ctrl+Esc and the like stay the system's. A key let
+   go elsewhere is let go here too (keyboard_focus clears the keys when the window loses the
+   keyboard). Keys are read by their place on a US keyboard (keyboard.c), and
+   text_input_key_allowed takes the character the key types. */
 static void keyboard_merge(HostPad *out)
 {
-    uint8_t down[256] = {0};
+    uint8_t down[256] = {0}, keys[CONTROL_TARGETS * CONTROL_SLOTS + 1];
+    const ControlsLayout *layout = controls_layout(CONTROL_KEYBOARD);
     if (keyboard_focused() && !keyboard_is_down(VKEY_MENU) && !keyboard_is_down(VKEY_CONTROL) &&
         !keyboard_is_down(VKEY_LWIN) && !keyboard_is_down(VKEY_RWIN)) {
-        int count;
-        const uint8_t *keys = keyboard_keys(&count);
+        int count = keyboard_keys(layout, keys);
         for (int i = 0; i < count; i++) {
             unsigned place = keys[i];
             if (text_input_key_allowed(keyboard_typed_of(place)) && keyboard_position_down(place)) down[keys[i]] = 1;
         }
     }
-    keyboard_pad(down, riding_controls(), host_seconds(), out);
+    keyboard_pad(layout, down, riding_controls(), host_seconds(), out);
+    /* typing a name or a room code (text_input.c): the arrows still move the field's pad picker,
+       whatever keys the d-pad has */
+    static const struct { uint8_t vk; uint16_t bit; uint8_t pressure; } arrows[] = {
+        {0x27, PAD_RIGHT, 0}, {0x25, PAD_LEFT, 1}, {0x26, PAD_UP, 2}, {0x28, PAD_DOWN, 3}};
+    if (keyboard_focused() && text_input_active())
+        for (unsigned i = 0; i < sizeof arrows / sizeof *arrows; i++)
+            if (keyboard_position_down(arrows[i].vk) && text_input_key_allowed(arrows[i].vk))
+                out->buttons |= arrows[i].bit, out->pressure[arrows[i].pressure] = 255;
 }
 
-/* Player `port`'s controller (SDL, gamepad.c), and for player 1 the keyboard as well, merged. */
+/* Player `port`'s controller (SDL, gamepad.c) through the player's layout, and for player 1 the
+   keyboard as well, merged. */
 void host_pad_device(int port, HostPad *out)
 {
+    GamepadRaw raw;
     memset(out, 0, sizeof *out);
     out->right_x = out->right_y = out->left_x = out->left_y = 128;
+    int connected = gamepad_start() && gamepad_raw(port, &raw);
     /* the sticks' dead zone (stick.h), followed here on the game thread, where PC SETTINGS sets it */
-    if (port == 0 && gamepad_start()) gamepad_dead_zone(stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")));
-    /* the button icons (dhd.ini prompts, PC SETTINGS > Button Icons): auto follows player 1's pad */
+    if (connected) gamepad_apply(pad_layout(port), &raw, stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")), out);
     if (port == 0) {
-        int kind = gamepad_start() ? gamepad_kind(0) : PAD_KIND_NONE;
-        button_icons_choose(getenv("DHD_PROMPTS"), kind == PAD_KIND_XBOX ? BUTTON_ICONS_XBOX
-                                                   : kind == PAD_KIND_NINTENDO ? BUTTON_ICONS_NINTENDO : BUTTON_ICONS_GAME);
+        /* the button icons (dhd.ini prompts, PC SETTINGS > Button Icons): auto follows player 1's pad,
+           and they follow its layout while a pad is there or icons are chosen */
+        const char *prompts = getenv("DHD_PROMPTS");
+        int kind = connected ? gamepad_kind(0) : PAD_KIND_NONE;
+        int follow = connected || (prompts && SDL_strcasecmp(prompts, "auto"));
+        button_icons_choose(prompts, kind == PAD_KIND_XBOX ? BUTTON_ICONS_XBOX : kind == PAD_KIND_NINTENDO ? BUTTON_ICONS_NINTENDO
+                                                                                                           : BUTTON_ICONS_GAME,
+                            follow ? controls_layout(CONTROL_PAD1) : NULL);
+        keyboard_merge(out);
+        touch_host_merge(out);  /* the touch controls (touch_host.c, finding 141) */
     }
-    int connected = gamepad_start() && gamepad_read(port, out);
-    if (port == 0) keyboard_merge(out);
-    if (port == 0) touch_host_merge(out);  /* the touch controls (touch_host.c, finding 141) */
     out->connected = (uint8_t)(connected || port == 0);  /* player 1 always has the keyboard */
 }
 
@@ -1108,6 +1168,13 @@ void host_settings_load(void)
         at += n + (at[n] == ',');
     }
     hle_log("settings:%s\n", *settings_seen ? settings_seen : " (none)");
+    /* The install id for the online hello (finding 161; port/net/net.c): made once and kept in
+       dhd.ini. Set straight into the environment, never through settings_set: dhd.log, which
+       players post, must not show it (whoever copied it could get its player banned). */
+    if (!getenv("DHD_NET_INSTALL_ID")) {
+        char id[40];
+        if (dhd_settings_install_id(path, id, sizeof id)) host_putenv_s("DHD_NET_INSTALL_ID", id);
+    }
 }
 
 /* One dhd.ini line (the others kept). Nonzero when saved. */
@@ -1287,6 +1354,118 @@ const char *host_disc_check(const char *path)
 }
 #endif
 int host_service_host_poll_dump(void) { return atomic_exchange(&dump_pending, 0) != 0; }
+/* ---- the CONTROLS page's services (port/hle/controls_settings.c, finding 157) ---- */
+
+/* A device's layout as the host plays with it into out (guest, 52 bytes). */
+int host_service_controls_layout(int device, uint32_t out)
+{
+    if (device < 0 || device >= CONTROL_DEVICES) return 0;
+    memcpy(GUEST(out), controls_layout(device), sizeof(ControlsLayout));
+    return 1;
+}
+
+/* Player 1's or 2's controller: its PAD_KIND_* plus 1, 0 none connected. */
+int host_service_controls_pad(int player)
+{
+    GamepadRaw raw;
+    if (player < 1 || player > 2 || !gamepad_start() || !gamepad_raw(player - 1, &raw)) return 0;
+    return gamepad_kind(player - 1) + 1;
+}
+
+/* A change by dhd_settings' rules (dhd_controls_edit): saved to dhd.ini and played with at once
+   (the device's variable). The page's words into message (guest, size bytes). */
+int host_service_controls_change(int device, int edit, int target, int slot, int input, uint32_t message, int size)
+{
+    char value[512], *said = size > 0 ? (char *)GUEST(message) : NULL;
+    if (said) *said = 0;
+    if (device < 0 || device >= CONTROL_DEVICES) return CONTROL_UNCHANGED;
+    if (host_setting_locked(control_devices[device].env)) {
+        if (said) snprintf(said, (size_t)size, "Set by %s outside the game", control_devices[device].env);
+        return CONTROL_REFUSED;
+    }
+    controls_follow();
+    int kind = device == CONTROL_KEYBOARD ? PAD_KIND_NONE : gamepad_start() ? gamepad_kind(device - 1) : PAD_KIND_NONE;
+    int done = dhd_controls_edit(controls_seen[0], controls_seen[1], controls_seen[2], device, edit, target, slot, input, kind,
+                                 value, sizeof value, said, size > 0 ? (size_t)size : 0);
+    if (done == CONTROL_CHANGED) {
+        if (!host_setting_save(control_devices[device].key, value)) hle_log("controls: dhd.ini not saved\n");
+        host_putenv_s(control_devices[device].env, value);
+    }
+    return done;
+}
+
+/* What is held for a wait: the bindable keys and Esc, and each input of a controller (a trigger
+   past half way) as a bit of its id; one player's controller (1 or 2), or every one (0). */
+static int controls_key_held(int vk) { return keyboard_focused() && keyboard_position_down((unsigned)vk); }
+
+static uint32_t pad_held(int player)
+{
+    uint32_t held = 0;
+    for (int p = player ? player - 1 : 0; p < (player ? player : 4); p++) {
+        GamepadRaw raw;
+        if (!gamepad_start() || !gamepad_raw(p, &raw)) continue;
+        held |= raw.buttons;
+        for (int i = 0; i < CONTROL_PAD_INPUTS; i++)
+            if (control_pad_inputs[i].trigger && raw.trigger[control_pad_inputs[i].trigger - 1] > 128) held |= 1u << control_pad_inputs[i].id;
+    }
+    return held;
+}
+
+static int system_keys_held(void)
+{
+    return keyboard_is_down(VKEY_MENU) || keyboard_is_down(VKEY_CONTROL) || keyboard_is_down(VKEY_LWIN) || keyboard_is_down(VKEY_RWIN);
+}
+
+/* The CONTROLS page waits for a key or a button for device: command 1 begins (what is held now
+   doesn't count until it is let go and pressed again); 0 asks: the key's vk or the controller
+   input's id pressed since (that player's controller, else any), -2 Esc (give up), -1 nothing yet;
+   2: 1 while any key or controller input is still held. */
+int host_service_controls_capture(int device, int command)
+{
+    static uint8_t keys_before[256];
+    static uint32_t pads_before;
+    int player = device == CONTROL_PAD1 ? 1 : device == CONTROL_PAD2 ? 2 : 0;
+    if (player && !host_service_controls_pad(player)) player = 0;  /* that player's pad isn't there: any */
+    if (command == 2) {
+        if (pad_held(0) || controls_key_held(0x1B)) return 1;
+        for (int i = 0; i < CONTROL_KEYS; i++)
+            if (controls_key_held(control_keys[i].vk)) return 1;
+        return 0;
+    }
+    if (command == 1) {
+        memset(keys_before, 0, sizeof keys_before);
+        keys_before[0x1B] = (uint8_t)controls_key_held(0x1B);
+        for (int i = 0; i < CONTROL_KEYS; i++) keys_before[control_keys[i].vk] = (uint8_t)controls_key_held(control_keys[i].vk);
+        pads_before = pad_held(0);
+        return 0;
+    }
+    /* a key held at the beginning counts once it was let go */
+    int esc = controls_key_held(0x1B);
+    if (!esc) keys_before[0x1B] = 0;
+    else if (!keys_before[0x1B]) return -2;
+    int pressed = 0;
+    for (int i = 0; i < CONTROL_KEYS; i++) {
+        int vk = control_keys[i].vk, down = controls_key_held(vk);
+        if (!down) keys_before[vk] = 0;
+        else if (!keys_before[vk] && !pressed) pressed = vk;
+    }
+    uint32_t held = pad_held(0), mine = pad_held(player);
+    pads_before &= held;
+    uint32_t fresh = mine & ~pads_before;
+    if (device == CONTROL_KEYBOARD) return pressed && !system_keys_held() ? pressed : -1;
+    for (int id = 1; id < 32; id++)
+        if (fresh & 1u << id) return id;
+    return -1;
+}
+
+/* A controller's state through player's layout (DHD_TEST_PAD, autopad.c): raw (guest GamepadRaw)
+   into out (guest HostPad), as host_pad_device turns a real pad's. */
+void host_service_controls_map(int player, uint32_t raw, uint32_t out)
+{
+    HostPad *pad = (HostPad *)GUEST(out);
+    gamepad_apply(pad_layout(player), (const GamepadRaw *)GUEST(raw), stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")), pad);
+}
+
 void host_service_host_settings_load(void) { host_settings_load(); }
 int host_service_host_setting_save(uint32_t a0, uint32_t a1) { return host_setting_save((const char *)GUEST(a0), (const char *)GUEST(a1)); }
 int host_service_host_setting_locked(uint32_t a0) { return host_setting_locked((const char *)GUEST(a0)); }

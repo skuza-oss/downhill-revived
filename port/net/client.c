@@ -72,6 +72,13 @@ void client_init(NetClient *c, const char *name, const char *version, const char
     c->lobby.ping_ms = -1;
 }
 
+void client_set_install_id(NetClient *c, const char *id)
+{
+    c->install_id[0] = 0;
+    if (id && strlen(id) == 32 && strspn(id, "0123456789abcdef") == 32)
+        memcpy(c->install_id, id, 33);
+}
+
 void client_free(NetClient *c)
 {
     SDL_DestroyCondition(c->changed);
@@ -80,7 +87,7 @@ void client_free(NetClient *c)
 
 void client_connected(NetClient *c, const NetTransport *tr)
 {
-    char name[200], token[96] = "";
+    char name[200], token[96] = "", install[64] = "";
     SDL_LockMutex(c->lock);
     c->tr = *tr;
     c->connected = 1;
@@ -89,12 +96,15 @@ void client_connected(NetClient *c, const NetTransport *tr)
     /* a rejoin: the room's token takes our member back, host rights included (finding 137) */
     if (c->rejoin_token[0])
         snprintf(token, sizeof token, ",\"rejoinToken\":\"%s\"", c->rejoin_token);
+    /* installId: this copy of the game, for the server's bans (finding 161); no other player gets it */
+    if (c->install_id[0])
+        snprintf(install, sizeof install, ",\"installId\":\"%s\"", c->install_id);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
     /* features: this client shows the race room's countdown (the server runs one only when
        everyone's does) */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\"]%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
-        name, token);
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\"]%s%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
+        name, install, token);
     if (c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
     changed(c);

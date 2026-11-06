@@ -81,6 +81,19 @@ static struct {
 
 static int inited;
 
+/* The last picture of the movie that ended, kept for the presenter (movie_picture, movie_drop): the
+   PS2's player shows its pictures from a buffer of its own, which stays on screen after the movie
+   until the game sets its display again (finding 160). */
+static uint32_t *held;
+static unsigned held_rows;
+
+/* The presenter is done with the last movie's picture (or a new movie starts). */
+void movie_drop(void)
+{
+    free(held);
+    held = NULL;
+}
+
 static void movie_init_once(void)
 {
     if (inited) return;
@@ -348,6 +361,7 @@ int movie_open(const char *iso, uint32_t lsn, uint32_t size, int audio, const ch
 {
     movie_init_once();
     release();
+    movie_drop();
     memset(M.slots, 0, sizeof M.slots);
     M.stop = 0; M.audio = audio; M.width = M.height = 0; M.frame_period = 900900;  /* 29.97 Hz */
     M.decoded = 0; M.ended = M.failed = 0; M.audio_offset = 0;
@@ -430,9 +444,14 @@ void movie_audio(int32_t *mix, int frames)
 
 /* The picture to present now (PICTURE_WIDTH x PICTURE_HEIGHT RGBA, the movie centred on black),
    or NULL without a movie; rows: the picture's rows the movie fills, in its middle (all of them
-   until its first picture is decoded). Game thread, once a field. */
+   until its first picture is decoded). After a movie, its last picture until movie_drop (the
+   presenter's call). Game thread, once a field. */
 const uint32_t *movie_picture(unsigned *width, unsigned *height, unsigned *rows)
 {
+    if (!M.active && held) {
+        *width = PICTURE_WIDTH, *height = PICTURE_HEIGHT, *rows = held_rows;
+        return held;
+    }
     if (!M.active || !M.picture) return NULL;
     SDL_LockMutex(M.lock);
     int64_t want = clock_picture();
@@ -491,6 +510,11 @@ int host_service_movie_update(int keep)
     if (!started++) return 0;
     if (keep && movie_playing() && !movie_over()) return 0;
     if (movie_playing()) hle_log("movie: %s %s\n", M.name, keep ? "ended" : "skipped");
+    if (movie_playing() && M.shown >= 0) {  /* its last picture stays on screen (movie_picture) */
+        movie_drop();
+        held = M.picture, held_rows = (unsigned)M.height;
+        M.picture = NULL;
+    }
     movie_close();
     return 1;
 }

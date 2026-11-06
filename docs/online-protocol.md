@@ -23,7 +23,7 @@ host.
 | WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. |
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
-| GET | `/v1/health` | `{"ok":true,"protocol":3,"minVersion":"0.1.0"}` |
+| GET | `/v1/health` | `{"ok":true,"protocol":3,"minVersion":"0.1.0","online":true}` (`online` and `message`: the kill switch, below) |
 | GET | `/v1/latest` | The newest release's `latest.json` (the launcher's backup update check; below). |
 
 Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
@@ -52,6 +52,10 @@ A refusal is one text frame followed by a close:
 | `kicked` | 4007 | The host removed this player. |
 | `hello_timeout` | 4008 | No `hello` within 10 seconds. |
 | `client_outdated` | 4009 | `hello.clientVersion` is below the server's `MIN_VERSION` (below). |
+| `rate_limited` | 4011 | Too many connections or new rooms from one address in a minute (below). |
+| `too_fast` | 4012 | A member sent far more than the game does, a second time (caps, under Limits). The first time it is a non-fatal `too_fast` error. |
+| `banned` | 4013 | The operator banned this player's address (refused before any room) or install id (refused at `hello`). |
+| `online_off` | 4010 | The operator turned online off (the kill switch, below): a new room, or a `hello` that is not a member's rejoin. Also a non-fatal error to a `start`, and to the room when a countdown runs out. |
 
 ### Minimum client version
 
@@ -69,6 +73,68 @@ refusal carries both versions:
 0.1.0 knows no `client_outdated`: like any refusal it shows `message` on the ONLINE screen.
 0.2.0 and later show the same text and add an **Update Now** row (finding 054).
 
+### The kill switch (finding 161)
+
+The operator turns online off and on without a deploy or a game update (`node tools/moderate.mjs
+online off`, a row in the server's moderation database; `online/server/README.md`). The server
+reads it at most every 30 s, so a change takes up to that long. While off:
+
+- `/v1/rooms/new` is refused at once, before `hello` and before any room (the one exception to
+  "before `hello` the server sends nothing");
+- a join by code is refused at `hello`, unless the `hello` is a rejoin of one of the room's own
+  members (its `rejoinToken`): rooms that were open stay, their members are not kicked and come
+  back after a drop.
+
+The refusal is:
+
+```json
+{"type":"error","code":"online_off","message":"Online races are paused. Try again later."}
+```
+
+then close 4010. The operator may give another text (`--message`, within about 45 characters, the
+ONLINE screen's footer). Every release shows a refusal's `message`, so 0.7.11 and older need
+nothing new. `/v1/health` adds `"online":false` and the `message`; `/v1/lobbies` lists no rooms
+and adds the same two fields. An open room starts no race: its countdown is dropped and `start`
+answers the non-fatal `online_off` error (so does a countdown that runs out, to the whole room). A
+race already running goes on to its finish.
+
+### Limits per address (finding 161)
+
+Before a WebSocket reaches a room, the Worker counts it against the connecting address (by its
+keyed hash, never the address itself): at most 30 room connections a minute (new rooms, joins and
+rejoins together) and 10 new rooms a minute (`ratelimits` in `online/server/wrangler.jsonc`;
+Cloudflare's rate limiter, per Cloudflare location and approximate). Over either, the Worker
+refuses at once, like the kill switch:
+
+```json
+{"type":"error","code":"rate_limited","message":"Too many tries. Wait a minute and retry."}
+```
+
+then close 4011. The limits are generous because many players can share one address (a
+household, a LAN party, carrier-grade NAT). `/v1/lobbies` and the other HTTP endpoints have no
+limit of their own.
+
+### Bans and the moderation log (finding 161)
+
+When a player enters a room (a new member or a rejoin) the server writes a row to its moderation
+log: the time, the room code, the member id, the name, `hello.clientVersion`, the country
+(Cloudflare's), a keyed hash of the address (HMAC-SHA-256 with a Worker secret; the address
+itself is never stored or logged) and `hello.installId`. Rows older than 14 days are deleted
+every day. The operator bans a row's address hash and/or install id (with an expiry, or until
+lifted) with a local tool; names are never a ban's key. A banned address is refused before any
+room, a banned install id at `hello`:
+
+```json
+{"type":"error","code":"banned","message":"You can't play online until 2026-11-20."}
+```
+
+(or "You can't play online on this server." for a ban without an end), then close 4013. The
+server keeps each lookup up to a minute, so a new ban (or a lifted one) takes up to that long to
+bite. If the ban list can't be read, players are let in.
+
+No message to any client carries an address, an address hash or an install id: not `welcome`,
+`room`, `where`, `start`, the lobby list, errors or refusals (`online/server/test/moderation.test.ts`).
+
 Non-fatal errors (a non-host sending a host command, a `start` while someone is not ready)
 use the same `error` frame **without** a close; the client just shows `message`.
 
@@ -81,6 +147,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"hello","protocol":3,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
 // A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>"
+// From the release after 0.7.11 (finding 161): "installId":"<32 lowercase hex>", optional (below)
 
 // Host only. Every field optional; omitted fields keep their value.
 {"type":"settings","track":3,"laps":2,"seed":12345,"public":true,"maxPlayers":10,"roomName":"Friday race"}
@@ -103,6 +170,10 @@ use the same `error` frame **without** a close; the client just shows `message`.
 - `maxPlayers`: 2..10, default 10. It can't go below the current member count.
 - `public`: listed in `/v1/lobbies` while not started and not full. Default `false`
   (private, join code only).
+- `installId`: a random id the game makes once and keeps in dhd.ini (`install_id`), the same in
+  every hello of that copy of the game, for the server's moderation log and bans (Refusals,
+  above). Optional: releases before it send none and join as before; one that is not 32 lowercase
+  hex digits counts as none. The server sends it to nobody. The game never writes it to dhd.log.
 - `features`: what the client understands beyond version 1. `"countdown"`: the room may start
   the race by itself (below).
 
@@ -304,6 +375,13 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
 - Text frames: at most 4 KB. Binary frames: at most 3072 bytes (a STATE frame carries all of a
   player's riders).
 - A room with no members is deleted.
+- Caps per connection (finding 161, `online/server/src/guard.ts`): at most 100 text frames and
+  2000 binary frames in each 5 s window (20 and 400 a second; the game sends about 1.5 and 22).
+  Over a cap the rest of that window's frames of that kind are dropped (binary ones not relayed);
+  the first time the sender also gets the non-fatal
+  `{"type":"error","code":"too_fast","message":"Slow down: too many messages."}`, and the next
+  window over a cap closes it: `too_fast` "Disconnected: too many messages.", close 4012, and the
+  member leaves as a disconnect.
 - No reconnect in version 1: a dropped racer is handed to AI for the rest of the race.
 - Rejoin (finding 137). Each member has a random rejoin token, sent only in its own `welcome`
   (never in `room` or anywhere else). A client keeps it for that room, and when its connection

@@ -553,9 +553,9 @@ PATCHES['unsorted/001EB1D8.cpp'] += [
     ('text', '        PlayMenuBackLegacy(&D_004C6D98_M);\n',
      '        PlayMenuBackLegacy(&D_004C6D98_M);\n        port_options_row = 0;\n'),
     ('text', 'func_001F5EE8_M(1,0,0,530,90 + index * 10,D_0029E070_M[index+1],192);',
-     'func_001F5EE8_M(1,0,0,530,90 + index * 10,port_options_label(D_0029E070_M[index+1],index),192);'),
+     'func_001F5EE8_M(1,0,0,530,90 + index * 10,port_options_label(D_0029E070_M[index ? index : 10],index),192);'),
     ('text', 'func_001F5EE8_M(1,selected,style,530,90 + index * 10,D_0029E070_M[index+1],255);',
-     'func_001F5EE8_M(1,selected,style,530,90 + index * 10,port_options_label(D_0029E070_M[index+1],index),255);'),
+     'func_001F5EE8_M(1,selected,style,530,90 + index * 10,port_options_label(D_0029E070_M[index ? index : 10],index),255);'),
     ('text', '(u128)0x5F5245544E455F53UL);\n            }\n            break;\n        }\n',
      '(u128)0x5F5245544E455F53UL);\n            }\n            break;\n'
      '        case 9:\n'
@@ -566,6 +566,9 @@ PATCHES['unsorted/001EB1D8.cpp'] += [
      '            func_001F57D0_M(9001,1);\n'
      '            break;\n'
      '        }\n'),
+    ('text', 'if (D_004225A0_M.x12198 == 0) disabled[5] = 1;', 'if (D_004225A0_M.x12198 == 0) disabled[6] = 1;'),
+    ('text', 'if (D_004225A0_M.x1219F == 0) disabled[4] = 1;', 'if (D_004225A0_M.x1219F == 0) disabled[5] = 1;'),
+    ('text', 'switch (D_004C6D98_M.x10)', 'switch (D_004C6D98_M.x10 ? D_004C6D98_M.x10 - 1 : 9)'),
     # the page's left/right sounds, as the front end's other value rows play them
     ('text', '        func_001F76B8_M(&D_004C6D98_M);\n    }\n}\n\nextern "C" {\ntypedef struct { char bytes[48]; } LocalItems__w1;',
      '        func_001F76B8_M(&D_004C6D98_M);\n    }\n}\n'
@@ -860,4 +863,12 @@ PATCHES['unsorted/00148BE8.c'] = PATCHES.get('unsorted/00148BE8.c', []) + [
 PATCHES['unsorted/001B40A0.c'] = PATCHES.get('unsorted/001B40A0.c', []) + [
     ('text', 'int func_001B40A0(Obj *arg0)\n{',
      'extern void hle_online_watch_resume(void);\nint func_001B40A0(Obj *arg0)\n{\n    hle_online_watch_resume();'),
+]
+
+# A race runs (fps.h port_loop_frame, finding 159): the race world's update, every unpaused frame of
+# the race's loop and in its load (func_0019C868); the shell's frame clears it. (func_001B40A0 itself
+# is NONMATCHING C: the core runs its recompiled asm, so a patch there never runs.)
+PATCHES['unsorted/0016C0C8.c'] = PATCHES.get('unsorted/0016C0C8.c', []) + [
+    ('text', 'void func_0016C0C8(Obj *obj)\n{',
+     'extern void port_loop_frame(int);\nvoid func_0016C0C8(Obj *obj)\n{\n    port_loop_frame(1);'),
 ]

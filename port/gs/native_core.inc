@@ -127,6 +127,11 @@ typedef struct {
     NativeConvertConstants constants;
 } NativeConvert;
 
+/* A field's display_surface when PMODE has no read circuit on (after a GS reset, finding 160): the
+   picture is black, as the PS2 shows it (DhdrPicture.display_surface). -1: nothing to scan out,
+   the last picture stays. */
+#define NATIVE_DISPLAY_OFF (-2)
+
 typedef struct {
     NativeVertex *vertices;
     unsigned vertex_count, vertex_capacity;
@@ -136,7 +141,7 @@ typedef struct {
     unsigned command_count, command_capacity;
     NativeConvert *converts;
     unsigned convert_count, convert_capacity;
-    int display_surface;
+    int display_surface;             /* the displayed surface, -1 or NATIVE_DISPLAY_OFF */
     uint32_t display[12];
     uint32_t *movie;                 /* a movie's picture shown instead (gs_native_movie), when movie_on */
     unsigned movie_width, movie_height, movie_capacity;
@@ -2700,7 +2705,8 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
     /* scanout reads display_state[0] = d[0..3] and [1] = d[4..7] with b.x = DBY etc. */
     uint32_t packed[12] = {d[0], d[1] / 32, d[2], d[3], d[4], d[5], d[6], d[7]};
     f->display_surface = -1;
-    if ((pmode & 3) && d[2] && d[5] && d[6] && d[5] <= 1024 && d[6] <= 1024 && psm_color(d[0])) {
+    if (!(pmode & 3)) f->display_surface = NATIVE_DISPLAY_OFF;  /* no read circuit on: a black screen */
+    else if (d[2] && d[5] && d[6] && d[5] <= 1024 && d[6] <= 1024 && psm_color(d[0])) {
         f->display_surface = native_surface(n, (unsigned)fb & 511, d[2], d[0], 0);
         if (f->display_surface >= 0) {
             native_claim(n, g, f->display_surface, d[0], (int)d[3], (int)d[4], (int)(d[3] + d[5] - 1),
