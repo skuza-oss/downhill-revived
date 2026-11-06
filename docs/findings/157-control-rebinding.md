@@ -57,7 +57,8 @@ Acceptance:
   host.c's layouts and services, the button icons) and the core (PC SETTINGS > Controls,
   `port/hle/controls_settings.c`; input held back while a binding waits; DHD_KEYS through the
   layout; DHD_TEST_PAD / DHD_TEST_PAD2) (e5199f3), Square on the page fixed (507d757)
-- [x] 2026-11-06: the launcher: Settings > Controls > Bindings (73645c4)
+- [x] 2026-11-06: the launcher: Settings > Controls > Bindings (73645c4; read again after the game
+  exits, 7ab407d)
 - [x] 2026-11-06: docs (PLAYING.md Controls and Settings, TESTING.md, STATE.md) and the checks below
 
 ## Decisions
@@ -140,8 +141,10 @@ What changed: see Decisions; dhd.ini `keyboard`, `pad1`, `pad2` documented in do
   (with the launcher's schema too), `test_runtime.py`'s keyboard (a player's layout: J for Cross,
   WASD as the ramped d-pad, stick keys, Esc fixed) and gamepad mapping (every place through the
   default layout, triggers and pressures, another layout with an alternate, swap and invert).
+- `python tools/check.py port`: OK (docs, tree, core, test_runtime, game, net tests, test_gs_wgpu,
+  wasm2c chunks).
 - State traces with the defaults against the base build (113f76f + the finding): boot 600/600 and
-  race 5000/5000 rows equal.
+  race 5000/5000 rows equal (the lane's last game build, 507d757).
 - Equivalence traces (the bindings drive the game as the buttons they stand for): race with
   DHD_TEST_PAD `east`, `dpad_left`, `south` and `DHD_PAD1=cross:east circle:south right:dpad_left
   left:dpad_right` = the race with DHD_RACE_PAD `cross`, `right`, `circle`, 5000/5000 rows; the same
