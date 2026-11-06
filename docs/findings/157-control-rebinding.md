@@ -85,7 +85,9 @@ Acceptance:
   directions (ramped the same way, menus too). A controller's sticks are its own: Swap Sticks and
   an Invert per axis of the controller's own sticks (before the swap); its buttons bind the PS2's 16
   buttons.
-- **The rules in one place**: dhd_settings (`controls.rs`) parses, writes, moves an input (the
+- **The rules in one place** (the move and the player rule of this bullet and the next were
+  replaced on 2026-11-06: each device on its own, a taken input swaps; see the dated section at the
+  end of Decisions): dhd_settings (`controls.rs`) parses, writes, moves an input (the
   button it leaves keeps its other slot, else has none; an alternate without a main becomes the
   main; the same input on the button's other slot swaps the two) and refuses a change that leaves
   Cross, Triangle, START or a d-pad direction with nothing on the keyboard and Controller 1
@@ -119,6 +121,36 @@ Acceptance:
   Start, a stick) keeps the PS2 one. The key is one int (style + 3 x base-9 places), so font_sharp
   and native_core.inc are unchanged.
 
+### 2026-11-06: each device on its own, a taken input swaps
+
+The owner (Windows, a DualSense as Controller 1, the in-game Controls page) moved Square's button
+onto Cross, then cleared Cross: dhd.log's `controls:` lines show `pad1 = cross:west square:none`,
+then `cross:none square:south`, then `cross:none square:none`, and no way to confirm in any menu
+with the controller. The old rule let it through because it counted the keyboard and Controller 1
+together for player 1, and the keyboard still had Cross. The owner approved these rules
+(`controls.rs`, which the game and the launcher share):
+
+1. **Each device on its own** keeps Cross, Triangle, START and the four d-pad directions: the
+   keyboard alone, Controller 1 alone, Controller 2 alone (`Controls::missing(device)`). The
+   keyboard no longer counts for a pad, nor a pad for the keyboard.
+2. **Clear is refused** on the last input of one of those buttons; the pages show "Cross needs a
+   button" (a controller) or "Cross needs a key" (the keyboard).
+3. **An input another PS2 button has swaps**: the target takes it, the other button gets the
+   target's old input in that slot ("Swapped Cross and Square"). When the target had nothing in
+   that slot (an empty alternate) there is nothing to swap: the input moves, the other button keeps
+   its other slot ("X moved from Cross to Square"), and if that leaves an essential button with
+   nothing the change is refused with the same "needs a button" message. The same input on the
+   button's other slot still makes the two slots change places.
+4. **A hand-written dhd.ini line that breaks rule 1** resets only that device's layout to its
+   defaults, with a dhd.log line per device: `controls: pad1: Cross has no button: Controller 1 is
+   back to its defaults`. The file keeps the line until the next change on that device, which
+   writes the device's whole line again (the owner's `pad1 = cross:none square:none` becomes the
+   defaults at the next start; one change there writes a good line).
+
+The owner's sequence under the new rules: Square's button onto Cross swaps (`cross:west
+square:south`), clearing Cross is refused every time, clearing Square is allowed; Controller 1
+keeps a button for Cross throughout. It is the unit test `the_owners_sequence`.
+
 ## Surprises
 
 - `func_00220230(1)` (the game's held buttons for the second port, which menu_page.c ORs in) isn't
@@ -129,6 +161,16 @@ Acceptance:
   have: its tests run with plain `cargo test -p dhd_settings` in `port/render` (as AGENTS.md says).
 - A hidden-desktop run with a dhd.ini of its own gets that file's defaults, Discord presence on
   among them: test dhd.ini files want `discord = off`.
+- 2026-11-06: `rustgs.py test --target x86_64-pc-windows-msvc -- -p dhd_render -p dhd_settings`
+  runs dhd_settings' tests through the wrapper too (`--features native` then has a package that
+  owns it).
+- 2026-11-06: the Controller 1 page can't be driven through a swap on the hidden desktop:
+  DHD_TEST_PAD only runs from a race's GO, and the page's wait reads a real controller
+  (`host_service_controls_capture`). Square (clear) comes from the keyboard through the layouts,
+  so the refused clear on Controller 1 can be shown; the pad swap is the unit test's.
+- 2026-11-06: dhd.log's `controls: keyboard ..., controller 1 ...` line prints the dhd.ini values
+  as written, so after a per-device reset it still shows the broken line; the `back to its
+  defaults` line before it says what the game plays with.
 
 ## Result
 
@@ -161,6 +203,26 @@ What changed: see Decisions; dhd.ini `keyboard`, `pad1`, `pad2` documented in do
 - The launcher builds (`port/tools/build_launcher.py`); its Controls tab drawn headless (Edge, a
   mocked Tauri over the real ui files): keyboard, Controller 1, a slot waiting.
 
+Checks of the 2026-11-06 rules (each device on its own, swaps), Windows:
+
+- Unit tests: dhd_settings' 8 bindings tests (new: `a_key_swaps`, `each_device_keeps_the_menus`,
+  `the_owners_sequence`, the per-device reset in `broken_lines_fall_back`), the launcher's `cargo
+  test controls` (its edit test now swaps and has Cross's last key refused), `node
+  port/launcher/test_controls.js` with and without the launcher's schema (the page logic encodes
+  no rule, unchanged). `test_runtime.py`'s keyboard and gamepad tests build layouts directly and
+  encode no rule: unchanged, and they pass.
+- `python tools/check.py port`: OK.
+- State traces with the defaults against the base build (fa9de1a's sources built in the lane):
+  boot 600/600 and race 5000/5000 rows equal.
+- Hidden desktop (live_game.py, a dhd.ini holding the owner's `pad1 = cross:none square:none`):
+  at boot `controls: pad1: Cross has no button: Controller 1 is back to its defaults` and the
+  keyboard untouched. REVIVED SETTINGS > Controls > Controls, keyboard: Cross's row, Cross, then Z
+  (Square's key): "Swapped Cross and Square" (dhd.ini `keyboard = cross:z,x square:space`); Square
+  (now Space) clears Z (`cross:x`), Square again: "Cross needs a key", nothing changed. Controller
+  1: its rows show the defaults; Square on Cross's row: "Cross needs a button", though the keyboard
+  has Cross; Square on Square's row clears it and writes `pad1 = square:none` (the broken line
+  gone). Captures kept outside the repository.
+
 Left open:
 - No real controller was pressed in these checks (the PC's pad is the owner's, and SDL here has no
   virtual pads): pads were checked through DHD_TEST_PAD, which goes through the same gamepad_apply as
@@ -170,3 +232,5 @@ Left open:
   bindings; Android's SETTINGS shows no Controls row (its controllers still use dhd.ini's pad1,
   pad2 if written by hand).
 - Players 3 and 4 have no layout of their own.
+- 2026-11-06: the swap on a controller's page was checked by the unit tests only (no virtual pad
+  reaches the page's wait); the owner's DualSense repeat of their sequence is the hand check.
