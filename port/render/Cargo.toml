@@ -14,9 +14,11 @@ members = [".", "tools", "net", "settings", "presence", "disc"]
 resolver = "2"
 
 # Keep the pinned family; only Vulkan framebuffer ownership differs (vendor/wgpu-hal/PATCH.md).
+# sctp-proto: unordered channels deliver out of order whatever the peer marks (vendor/sctp-proto/PATCH.md).
 [patch.crates-io]
 wgpu-hal = { path = "vendor/wgpu-hal" }
 str0m-rust-crypto = { path = "vendor/str0m-rust-crypto" }
+sctp-proto = { path = "vendor/sctp-proto" }
 
 [package]
 name = "dhd_render"

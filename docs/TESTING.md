@@ -124,6 +124,9 @@ Online:
 | `DHD_NET_AFTER_RACE` | (with SCRIPTED) the menu script after a race |
 | `DHD_ONLINE_MENU_TRACE=1` | logs every online menu page and its rows |
 | `DHD_PUPPET_CAMERA=1` | camera 0 follows a puppet rider (the spectating camera) |
+| `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
+| `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
+| `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |
 | `DHD_PUPPET_PREDICT=0` | puppets interpolated in the past instead of predicted to the present (finding 169) |
 
 Pictures:

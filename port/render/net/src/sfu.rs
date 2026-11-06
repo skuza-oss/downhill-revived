@@ -68,6 +68,10 @@ pub struct Sfu {
     released: bool,
     drop_percent: u64,
     sent: u64,
+    /// DHD_NET_SFU_DROP_IN (test switch): this share in percent of the DTLS application records
+    /// received from the SFU over UDP is dropped before str0m, as a lossy link would.
+    drop_in_percent: u64,
+    records_in: u64,
     pending_events: VecDeque<(Instant, Vec<u8>)>,
     pending_state: HashMap<u8, (Instant, Vec<u8>)>,
     rates: HashMap<u64, SenderRate>,
@@ -213,8 +217,10 @@ impl Sfu {
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
         let direct = std::env::var("DHD_NET_SFU_UDP").map_or(true, |v| v.trim() != "0");
         if !direct { eprintln!("net: SFU: DHD_NET_SFU_UDP=0, direct UDP to the SFU is blocked (test switch)"); }
+        let drop_in_percent = std::env::var("DHD_NET_SFU_DROP_IN").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0u64).min(100);
+        if drop_in_percent > 0 { eprintln!("net: SFU: DHD_NET_SFU_DROP_IN={drop_in_percent}, that share of the SFU's records is dropped on arrival (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
-            connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
+            connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
             wake, direct, answered_at: None, turn_asked: false, relay: None, last_in_relayed: false, via_relay: false,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
@@ -407,6 +413,11 @@ impl Sfu {
         for (at, source, data) in datagrams {
             if !self.direct { continue; }
             self.stats.input(now.saturating_duration_since(at));
+            // 23: a DTLS application record (SCTP), not ICE or the handshake.
+            if self.drop_in_percent > 0 && data.first() == Some(&23) {
+                self.records_in += 1;
+                if (self.records_in * 37) % 100 < self.drop_in_percent { continue; }
+            }
             if let Ok(contents) = data.as_slice().try_into() {
                 // str0m's clock only moves forward: the input is stamped now, not at arrival.
                 let input = Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination: self.local, contents });
@@ -779,5 +790,69 @@ mod tests {
         assert!(bound_sender);
         assert_eq!(received_state, 95);
         assert_eq!(received_events, 1);
+    }
+
+    /// Cloudflare forwards a subscribed STATE channel ordered and reliable, whatever policy was
+    /// asked (finding 173). Here the "SFU" sends that way and loses message 10 and its
+    /// retransmissions (the only datagrams that large): every later message must come out at
+    /// once, not behind message 10.
+    #[test]
+    fn relay_sent_ordered_state_is_delivered_unordered() {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let local = socket.local_addr().unwrap();
+        let mut server = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
+        server.add_local_candidate(Candidate::host(local, "udp").unwrap());
+        let (mut client, offer) = Sfu::start_at(local, Arc::new(|| {})).unwrap();
+        let answer = server.sdp_api().accept_offer(str0m::change::SdpOffer::from_sdp_string(offer["sdp"].as_str().unwrap()).unwrap()).unwrap();
+        client.signal(&json!({"type":"sfu_answer","sdp":answer.to_sdp_string()})).unwrap();
+        // As the SFU sends it: ordered, reliable (U bit 0, retransmitted).
+        let relayed = server.direct_api().create_data_channel(ChannelConfig { label: "state".into(), negotiated: Some(16), ..Default::default() });
+        client.signal(&json!({"type":"sfu_channels","channels":[{"channelId":16,"name":"state","memberId":17,"local":false}]})).unwrap();
+        client.signal(&json!({"type":"start","startAt":1234,"players":[{"memberId":17,"slot":3}]})).unwrap();
+        let mut b = [0u8; 65536];
+        // Moves the server's datagrams to the client, except those carrying message 10.
+        let pump = |server: &mut Rtc, lose_large: bool, b: &mut [u8; 65536]| {
+            while let Ok((n, source)) = socket.recv_from(b) {
+                if let Ok(contents) = b[..n].try_into() {
+                    server.handle_input(Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination: local, contents })).unwrap();
+                }
+            }
+            server.handle_input(Input::Timeout(Instant::now())).unwrap();
+            loop {
+                match server.poll_output().unwrap() {
+                    Output::Timeout(_) => break,
+                    Output::Transmit(t) => { if !lose_large || t.contents.len() < 300 { socket.send_to(&t.contents, t.destination).unwrap(); } }
+                    _ => {}
+                }
+            }
+        };
+        let mut arrived: HashMap<u8, Instant> = HashMap::new();
+        let mut sent_at: HashMap<u8, Instant> = HashMap::new();
+        let mut next = 0u8;
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && arrived.len() < 49 {
+            let (_, frames) = client.poll().unwrap();
+            for f in frames { if f.len() >= 5 && f[0] == 5 { arrived.entry(f[4]).or_insert_with(Instant::now); } }
+            let open = server.channel(relayed).is_some() && client.rtc.channel(client.channels[0].id).is_some();
+            if open && next < 50 && sent_at.get(&next.wrapping_sub(1)).map_or(true, |t| t.elapsed() >= Duration::from_millis(5)) {
+                let mut wire = 1234u64.to_le_bytes().to_vec();
+                wire.extend_from_slice(&[5, 0, 4, 0, next]);
+                if next == 10 { wire.resize(400, 0); }
+                if server.channel(relayed).unwrap().write(true, &wire).unwrap() {
+                    sent_at.insert(next, Instant::now());
+                    next += 1;
+                }
+            }
+            pump(&mut server, next > 10, &mut b);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(next, 50, "the channel opened and every message was written");
+        for i in 11..50u8 {
+            let at = arrived.get(&i).unwrap_or_else(|| panic!("message {i} never arrived"));
+            let held = at.duration_since(sent_at[&i]);
+            assert!(held < Duration::from_millis(300), "message {i} waited {held:?} behind the lost message 10");
+        }
+        assert!(!arrived.contains_key(&10), "message 10 was lost");
     }
 }

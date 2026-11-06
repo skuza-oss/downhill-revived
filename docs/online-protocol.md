@@ -230,7 +230,10 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 At race start each racing member establishes one native WebRTC association to Cloudflare Realtime
 SFU. It is discarded at race end. Each player publishes `state` (unordered, maxRetransmits 0) and
-`events` (reliable, ordered), subscribing to the same channels of all other members. Channel
+`events` (reliable, ordered), subscribing to the same channels of all other members (the room asks
+the same policy for each subscription). Cloudflare forwards a subscription ordered and reliable
+whatever it was asked (finding 173), so the client's SCTP stack delivers each complete `state`
+message at once without regard to the sender's ordering (`port/render/vendor/sctp-proto`). Channel
 allocations identify members; `start.players` maps members to race slots. The receiver corrects
 byte 1 from that mapping. WebSocket binary frames only carry PING/PONG; all other types are dropped.
 
@@ -353,7 +356,9 @@ first, then reject each record older than the newest they hold for that rider be
 pad mirror. EVENT remains payload version 2. The SFU reads none of the gameplay payload.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
-EVENT is unaffected. `DHD_NET_SFU_UDP=0` drops every UDP datagram to and from the SFU (a network that
+EVENT is unaffected. `DHD_NET_SFU_DROP_IN=N` drops N percent of the DTLS records arriving from the
+SFU over UDP before the client's WebRTC stack, as a lossy link would (Cloudflare then retransmits).
+`DHD_NET_SFU_UDP=0` drops every UDP datagram to and from the SFU (a network that
 blocks UDP), so the TURN-over-TLS fallback must carry the race. `net:` reports per-sender p50/p95/p99 snapshot age and
 gaps longer than 100 ms, and STATE messages a second each way. Age is this PC's server clock minus
 the newest bundle's stamp, sampled every network tick, so it includes transit and time awaiting
