@@ -1,9 +1,9 @@
 # 156: Where a frame's time goes, before replacing the VU1 and GS emulation
 
-Status: in progress
+Status: current
 
-Branch `perf/profile-vu1-gs` from `main` 085117f, started 2026-11-05. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `perf/profile-vu1-gs` from `main` 085117f, started 2026-11-05; the desktops merged into
+`main` at 113f76f, the phone (Mi 11i, the 0.7.11 code) measured on 2026-11-06.
 
 ## Goal and acceptance
 
@@ -15,7 +15,7 @@ today, per thread and per stage, so the gain of a native path is known.
 Measure the current main (no speed changes in this lane) on:
 - **Windows** (this PC: the CPU and GPU named in dhd.log),
 - **macOS** (the M1 MacBook Air build host),
-- **Android, the Mi 11i** (later, after the next mobile release; the lead says when).
+- **Android, the Mi 11i** (after the 0.7.11 mobile release: measured 2026-11-06).
 
 Per machine, at least: the attract/title, a menu with a 3D scene (the bike shop), the race start
 (the slowest interval on phones, findings 147-148) and mid-race, uncapped
@@ -42,7 +42,10 @@ code, audio, presentation). No game-state change.
 - [x] 2026-11-05: `d9d2baa` DHD_TIMELINE's per-field CSV gains the render thread and the GPU
 - [x] Windows tables (RTX 3070 and, as a second GPU, the CPU's integrated Radeon)
 - [x] macOS tables (M1, 8 GB)
-- [x] phone recipe (below; the Mi 11i is measured after the next mobile release)
+- [x] phone recipe ("Phone method" below)
+- [x] 2026-11-06: the Mi 11i on main 113f76f (0.7.11's code): timing runs as players have the
+  phone and on finding 127's frozen low-end profile, 2x and 4x, two runs each; diagnostics and
+  simpleperf as players have it
 
 ## Summary
 
@@ -63,6 +66,21 @@ code, audio, presentation). No game-state change.
   today). **What stays:** the game code 1.9-2.9 ms (part of it builds the packets: not yet
   attributed), VU0 0.5-0.7, the sound mixer about 0.1, the wasm memory checks 0.1-0.2, wgpu and
   the driver, the present, and the GPU's draws.
+- **The Mi 11i as players have it** (no throttle): 2x runs at the 120 Hz display in races
+  (116-117 fps; 119-126 fields/s over the route), the VU thread busy 7.6 of 8.6 ms at the race start
+  and the whole field in the title (8.5-8.8 ms). At 4x the GPU holds the races (8.1-10.7 ms a frame:
+  85 fps at the race start, 112 mid-race). Every CPU stage costs 1.3-2.6 times the desktops'.
+- **On the frozen low-end profile** (`t612`, as findings 146-149) the VU thread holds every 2x
+  scene (busy 96-100 % of the field: 51 fps in the title, 60 at the race start, 74 mid-race) and the GS
+  thread is right behind it (work 9.6-17.4 ms a field, on the little cores): removing only the VU
+  thread would leave the GS thread as the limit at nearly the same rate. Removing both moves the
+  limit to the game thread and the render thread (about 12 ms busy each at the race start: about
+  80 fps instead of 60). At 4x the GPU limits the race (19.3 ms a frame at the race start).
+- **On the phone a native path also removes more than half of the process's CPU time**: the VU
+  thread, most of the GS thread and the game thread's spin on a big core (2.3-3.9 ms a field, 9.7
+  in the title on the low-end profile) are 57-62 % of it at 2x and 4x on both profiles (of 20 ms a
+  field as players have it, 48 on the low-end profile): heat and battery, even where no frame is
+  gained.
 
 ## Method
 
@@ -253,30 +271,184 @@ draws: 73-87 % of every measured GPU frame. A native renderer could make those d
 (hardware texture formats and samplers instead of the GS texel path that finding 149 priced on
 phones), but that is a design choice, not removed emulation.
 
-## Phone recipe (the Mi 11i, after the next mobile release)
+## The phone (Mi 11i)
 
-The same three kinds of run at 2x and 4x, with finding 147-149's runner (writes the run's `DHD_*`
-keys into the app's dhd.ini by root and restores it, closes third-party apps, cools 45-90 s with
-the screen on, samples clocks, records simpleperf, pulls the files):
+### Phone method
 
-1. APK: the release commit, `build_apk.py --release --line-tables` (code unchanged; the
-   `libmain.debug.so` beside it symbolises), and the shipped PGO build for the headline numbers.
-   Decide once whether the phone runs as players have it (no throttle) or on finding 127's frozen
-   profile (`phone_throttle.py --apply t612 ...`, comparable with 146-149); record which.
-2. Keys for every run: `DHD_FPS=240 DHD_VSYNC=0 DHD_FRAME_CLOCK=1 DHD_SCALE=2|4 DHD_SKIP_MOVIES=1
-   DHD_MEMCARD=0 DHD_SND_OFF=1 DHD_BENCH=300-14000 DHD_BENCH_EXIT=1`, the race route's `DHD_NAV`,
-   `DHD_RACE_SYNC=1`, `DHD_RACE_PAD` and `DHD_RACE_SEED=81257` (race_compare.py), and
-   `DHD_TIMELINE=<a file in the app's files folder>`.
-3. Timing run: only the keys above. Diagnostics run: add `DHD_RSTAT=1 DHD_GPU_TIMES=240
-   DHD_VU1_PROFILE=<file> DHD_VU1_PROFILE_FIELDS=300-14000/100`. Profile run: `simpleperf record
-   -p PID -f 1000 --duration S` four times, started from the log: 1 s after `nav step 2` (title),
-   1 s after `nav step 6` (shop), at `race anchor=g` (race start, 4 s) and about 45 s after it at
-   phone rates (mid-race fields 9000-14000; check the field in the next heartbeat).
-4. Read them as above: the scene windows of the CSV, the stages by the function lists in "Stages"
-   (simpleperf's report per thread: `--sort comm,symbol`), the rstat and gpu_times lines placed by
-   the nav and anchor lines. Adreno's timestamps are per pass and do not overlap as Apple's do.
-5. Expected from 146-149: CPU-bound at 2x (the VU thread busy 17-18 ms of a race field), GPU-bound
-   at the 4x race start.
+The recipe planned here before the release, as run on 2026-11-06:
+
+- **One APK for every run**: main 113f76f (0.7.11's code plus `d9d2baa`'s timeline columns,
+  host-only), `build_apk.py --release --line-tables --pgo-use <the profile the 0.7.11 APK was
+  built with>`: the shipped build's code, with `libmain.debug.so` beside it for symbols.
+  Release-signed, installed with `adb install -r`; the shipped 0.7.11 APK put back at the end.
+- **Two profiles, decided before the runs**: timing runs as players have the phone (no throttle)
+  and on finding 127's frozen low-end profile (`phone_throttle.py --apply t612 --big-max 1209600
+  --little-max 1497600`, comparable with 146-149; `--restore` after each pair). Two runs of each
+  scale and profile, interleaved. Diagnostics and simpleperf runs as players have it.
+- **The runner** (scratch, not committed) is findings 147-149's: it writes the run's `DHD_*` keys
+  into the app's dhd.ini by root (dhd.ini passes every `DHD_*` key it holds into the environment,
+  so `DHD_TIMELINE`, `DHD_RSTAT`, `DHD_GPU_TIMES` and `DHD_VU1_PROFILE` need no patch), closes the
+  third-party apps, cools 60 s with the screen on, starts the app, samples clocks every 3 s, pulls
+  dhd.log, the timeline CSV and the VU1 profile, and puts the original dhd.ini back (md5 checked).
+- **Keys**: the recipe's (`DHD_FPS=240 DHD_VSYNC=0 DHD_FRAME_CLOCK=1 DHD_SCALE=2|4
+  DHD_SKIP_MOVIES=1 DHD_MEMCARD=0 DHD_SND_OFF=1 DHD_BENCH=300-14000 DHD_BENCH_EXIT=1`, the race
+  route, `DHD_TIMELINE`), plus finding 147-149's `DHD_RENDER=native DHD_WIDESCREEN=0
+  DHD_ASPECT=4:3`: 2x draws 1024x896 (1280x896 under a widescreen card), 4x 2048x1792, shown in
+  a 1440x1080 area of the 2400x1080 screen, Vulkan mailbox, the display at 120 Hz.
+- **Profiles**: `simpleperf record -p PID -f 1000` (cpu-cycles at 1 kHz a thread; samples, not
+  cycles, are counted, so a sample is about a millisecond on any core at any clock), 5-6 s at four
+  points read from the log: 1 s after `nav step 2` (title), after `nav step 6` (shop), after `race
+  anchor=g` (race start), and from the heartbeats after GO aimed at about field 9300 (2x) and
+  10300 (4x) for mid-race. Symbols through simpleperf's binary cache with the build's
+  `libmain.debug.so`; each sample address then goes through `llvm-symbolizer --inlining`, and the
+  innermost inlined function that matches a stage of its thread decides the stage (PGO inlines the
+  VU1 kernels into `ps2_vu1_run`, the strip assembly into `native_draw_strip`). A stage's ms = the
+  timing runs' CPU work of that thread (mean of the two runs) times its share of the thread's
+  samples outside its spin.
+
+### Phone tables
+
+Columns as the desktops' (fps = 1000 / the mean field; the two runs' fps in brackets where they
+differ), plus the game thread's spin and its wait for the GS thread, ms per field. The GS thread's
+busy time is not given: on the phone it includes its waits for a free picture slot of the render
+thread.
+
+As players have the phone (no throttle):
+
+| scale | scene | fps | field | game work / busy | vu work / busy | gs | render CPU / busy | present | GPU | EE spin | EE waits GS | limit |
+|---|---|---:|---:|---|---|---:|---|---:|---:|---:|---:|---|
+| 2x | title | 116 (101/134) | 8.65 | 2.35 / 2.10 | 8.52 / 8.65 | 3.90 | 1.85 / 1.53 | 2.01 | 2.10 | 3.85 | 6.54 | vu |
+| 2x | shop | 127 | 7.90 | 1.76 / 1.63 | 6.91 / 6.93 | 1.89 | 2.21 / 2.08 | 4.70 | 2.76 | 3.25 | 6.27 | vu, display near |
+| 2x | race start | 116 | 8.61 | 5.91 / 5.77 | 7.60 / 7.64 | 3.43 | 4.69 / 6.12 | 2.41 | 4.82 | 2.35 | 2.84 | vu, display near |
+| 2x | mid-race | 117 | 8.57 | 4.97 / 5.04 | 6.31 / 6.32 | 2.40 | 3.97 / 3.67 | 4.90 | 3.50 | 2.86 | 3.53 | display (120 Hz) |
+| 4x | title | 112 (98/130) | 8.94 | 2.34 / 2.12 | 8.75 / 8.92 | 3.64 | 1.83 / 1.52 | 2.21 | 6.00 | 3.85 | 6.82 | vu |
+| 4x | shop | 115 | 8.73 | 1.72 / 1.81 | 7.03 / 7.10 | 1.78 | 2.44 / 6.13 | 1.92 | 7.90 | 3.22 | 6.92 | gpu |
+| 4x | race start | 85 | 11.75 | 6.72 / 5.89 | 8.34 / 8.38 | 3.54 | 4.83 / 8.70 | 3.04 | 10.67 | 3.53 | 5.86 | gpu |
+| 4x | mid-race | 112 | 8.91 | 5.56 / 5.64 | 7.46 / 7.53 | 3.26 | 4.33 / 6.62 | 2.27 | 8.07 | 2.31 | 3.27 | gpu, vu near |
+
+Route (fields 300-14000): 119.4 and 125.5 fields/s at 2x, 110.1 and 111.8 at 4x.
+
+On the frozen low-end profile (`t612`):
+
+| scale | scene | fps | field | game work / busy | vu work / busy | gs | render CPU / busy | present | GPU | EE spin | EE waits GS | limit |
+|---|---|---:|---:|---|---|---:|---|---:|---:|---:|---:|---|
+| 2x | title | 51 | 19.59 | 5.37 / 3.22 | 18.24 / 19.59 | 17.36 | 4.57 / 3.38 | 1.70 | 3.55 | 9.66 | 16.37 | vu |
+| 2x | shop | 64 | 15.70 | 3.92 / 2.91 | 14.21 / 15.70 | 9.64 | 6.48 / 5.33 | 1.73 | 4.64 | 6.81 | 12.79 | vu |
+| 2x | race start | 60 | 16.75 | 11.16 / 12.43 | 14.34 / 16.10 | 14.87 | 13.30 / 12.31 | 2.29 | 7.51 | 2.95 | 4.32 | vu, gs near |
+| 2x | mid-race | 74 | 13.55 | 9.73 / 11.16 | 11.64 / 13.43 | 11.69 | 10.64 / 9.64 | 1.84 | 5.78 | 1.84 | 2.40 | vu |
+| 4x | title | 51 | 19.66 | 5.32 / 3.25 | 18.27 / 19.66 | 17.39 | 4.60 / 3.41 | 1.71 | 10.61 | 9.80 | 16.41 | vu |
+| 4x | shop | 59 | 16.91 | 3.60 / 3.18 | 14.36 / 15.77 | 9.23 | 6.82 / 9.46 | 1.89 | 13.88 | 5.93 | 13.73 | vu |
+| 4x | race start | 44 | 22.51 | 12.06 / 11.82 | 15.78 / 16.88 | 16.70 | 14.07 / 16.40 | 6.10 | 19.28 | 6.20 | 10.69 | gpu |
+| 4x | mid-race | 63 | 15.76 | 9.81 / 11.20 | 12.24 / 13.66 | 11.67 | 11.20 / 13.69 | 1.88 | 14.08 | 2.63 | 4.55 | gpu, vu near |
+
+Route: 65.0 and 64.8 fields/s at 2x, 57.7 and 57.4 at 4x (the two runs within 0.5 % in every
+scene). For comparison, finding 149's PGO build on the same profile (sound on, window runs): race
+start 61.6, fields 9000-14000 76.4; here 60 and 74.
+
+### Phone stages
+
+ms per field of CPU work as players have the phone (the profiles' shares times the timing runs'
+work); race start / mid-race, and the title at 2x.
+
+| thread | stage | 2x | 4x | title 2x |
+|---|---|---|---|---:|
+| game | game code (`w2c_core_*`) | 3.59 / 3.18 | 4.11 / 3.66 | 1.13 |
+| game | VU0 (`run_fast_program`, `ps2_vcallms`, `vu0c_*`) | 1.23 / 0.89 | 1.29 / 0.93 | 0.40 |
+| game | wasm memory translation | 0.21 / 0.20 | 0.19 / 0.23 | 0.05 |
+| game | sound mixer (SPU2) | 0.08 / 0.06 | 0.10 / 0.12 | 0.06 |
+| game | graphics HLE (DMA kicks, queue) | 0.03 / 0.03 | 0.05 / 0.05 | 0.03 |
+| game | libc copies, atomics, kernel | 0.59 / 0.42 | 0.66 / 0.40 | 0.48 |
+| game | spin on the graphics queue (`idle_wait`; measured, not sampled) | 2.35 / 2.86 | 3.53 / 2.31 | 3.85 |
+| vu | VU1 native kernels (`native_geometry_*`, `native_clip_run`, ...) | 3.81 / 3.43 | 4.25 / 4.13 | 4.31 |
+| vu | VU1 translated blocks (`aot_block_*`) | 1.29 / 0.89 | 1.52 / 1.05 | 1.29 |
+| vu | VIF unpack and dispatch | 1.03 / 0.84 | 1.09 / 0.96 | 1.14 |
+| vu | VU1 dispatch / interpreter (`ps2_vu1_run`, `run_micro`) | 0.67 / 0.54 | 0.76 / 0.67 | 0.70 |
+| vu | GIF hand-off (XGKICK) | 0.05 / 0.05 | 0.05 / 0.09 | 0.06 |
+| vu | libc copies and clears, kernel wakeups | 0.62 / 0.48 | 0.56 / 0.44 | 0.93 |
+| gs | draw recording (`native_draw_strip`, `packed_strip`, ...) | 1.39 / 0.93 | 1.26 / 1.30 | 1.62 |
+| gs | GS packet decode and registers | 1.13 / 0.91 | 1.20 / 1.23 | 1.59 |
+| gs | textures, CLUT, palettes | 0.43 / 0.31 | 0.42 / 0.44 | 0.12 |
+| gs | GS VRAM transfers | 0.11 / 0.07 | 0.14 / 0.05 | 0.02 |
+| gs | kernel, libc, atomics | 0.25 / 0.11 | 0.41 / 0.15 | 0.40 |
+| render | Vulkan driver (Adreno) | 1.50 / 1.23 | 1.67 / 1.40 | 0.50 |
+| render | dhd_render and wgpu (encoding, submit) | 1.37 / 1.11 | 1.40 / 1.29 | 0.38 |
+| render | kernel (wakeups, the GPU driver's ioctls) | 0.67 / 0.70 | 0.49 / 0.47 | 0.40 |
+| render | memcpy (uploads into mapped buffers) | 0.38 / 0.30 | 0.43 / 0.33 | 0.28 |
+| render | allocator, libgui, the rest | 0.77 / 0.63 | 0.84 / 0.84 | 0.29 |
+
+The render thread by `DHD_RSTAT` (diagnostics runs, ms a picture, race start / mid-race): 2x
+picture 5.54 / 2.62 = record 0.65 / 0.37, write 0.36 / 0.28, submit 4.49 / 1.93 (the queue submit
+`qsub` 2.70 / 0.53, `finish` 1.76 / 1.37), present 0.46 / 0.31, the flare's Z read `zstart` +
+`ztake` 0.58 / 0.87; 4x picture 10.05 / 5.70 with `qsub` 7.06 / 2.97 (Adreno's driver blocks the
+submit while the GPU is behind: a wait, not work) and the Z read 0.24 / 1.05. Render passes per
+picture: 18.0 at the race start, 11.75 mid-race, 6 in the shop, 1 in the title (as on the
+desktops).
+
+GPU per kind of pass (`DHD_GPU_TIMES`, ms a frame; Adreno's passes do not overlap, so the sum and
+the span agree within 0.8 ms):
+
+| | draw | scanout | present | convert | sum |
+|---|---:|---:|---:|---:|---:|
+| 2x race start / mid-race | 3.38 / 2.16 | 0.16 / 0.15 | 0.45 / 0.39 | 0.12 / 0.11 | 4.11 / 2.81 |
+| 4x race start / mid-race | 10.05 / 6.20 | 0.59 / 0.60 | 0.49 / 0.50 | 0.11 / 0.12 | 11.24 / 7.41 |
+| 4x title / shop | 4.76 / 6.27 | 0.78 / 0.74 | 0.31 / 0.29 | 0 / 0.09 | 5.85 / 7.39 |
+
+VU1 programs (`DHD_VU1_PROFILE`, 2x, ms a field on the profile's own clock, ranking only): mid-race
+0078 1.67, 1638 0.60, 0040 0.45, 07F0 0.37, 0020 0.26; title 0078 3.32, 0020 2.12, 06F0 0.69: the
+desktops' order, at about twice the Windows times.
+
+### What a native VU1+GS path would remove on the phone, ranked
+
+1. **The VU thread: 6.3-8.3 ms a race field as players have it (8.5-8.8 in the title), 11.6-15.8
+   on the low-end profile (18.2-18.3 in the title).** Kernels about half of it, translated blocks and
+   VIF unpack the next quarter. It is the limit of every 2x scene on the low-end profile, of the
+   title at both scales as players have it, and close behind the 120 Hz display in 2x races.
+2. **The GS thread: 1.8-3.9 ms as players have it, 9.2-17.4 on the low-end profile.** Draw
+   recording and packet decode about 40 % each, textures and CLUTs 5-13 %. On the low-end profile
+   it runs on the little cores (finding 146) and at the 2x race start does as much work as the VU
+   thread (14.9 against 14.3 ms): on a low-end phone the two must go together, or the GS
+   thread takes over the limit at about the same frame rate. With both gone the next limits are
+   the game thread (busy 12.4 ms at the race start, 11.2 mid-race) and the render thread (12.3 /
+   9.6): about 80 fps at the race start instead of 60 (+35 %), about 90 mid-race instead of 74
+   (+21 %), the title more than double.
+3. **The game thread's spin and waits on the graphics queue: spin 2.3-3.9 ms a field as players
+   have it, 1.8-9.8 on the low-end profile (the most in the title); waits for the GS 2.8-6.9 (up to
+   16.4).**
+   The spin burns a big core (heat, battery); with the VU and GS threads it is 57-62 % of the
+   process's CPU time at 2x and 4x on both profiles.
+4. **GPU: the scanout pass and the conversions, 0.27 ms at 2x and 0.7 ms at 4x a frame (6-10 %
+   of a 4x race frame, 13 % of the 4x title's).** At 4x the races are GPU-bound (8.1-10.7 ms a frame
+   as players have it, 14.1-19.3 on the low-end profile), and the draws are 84-89 % of the frame:
+   the GPU frames a native path gains there come from cheaper draws (finding 149's texel path, a
+   design choice), not from removed emulation.
+5. **The render thread's GS-shaped work: the Z read 0.2-1.1 ms a picture, and part of 2.3-3.1 ms
+   of driver plus wgpu encoding** for 12-18 passes a race picture. On the low-end profile the render
+   thread (10.6-14.1 ms of CPU a race field) becomes a co-limit once the VU and GS threads are
+   gone, so fewer passes and less driver work count on low-end phones, unlike the desktops.
+
+**What stays on the phone** (as players have it, race): the game code 3.2-4.1 ms, VU0 0.9-1.3, the
+wasm memory checks 0.2, the sound mixer 0.1, the Vulkan driver and wgpu 2.3-3.1 ms a field
+(less with fewer passes), the present 0.3-0.5, and on the GPU the draws.
+
+### Phone and desktops
+
+Mid-race at 4x, ms per field (CPU work; GPU ms a frame):
+
+| | Windows RTX 3070 | macOS M1 | Mi 11i | Mi 11i, low-end profile |
+|---|---:|---:|---:|---:|
+| fps | 272 | 100 | 112 | 63 |
+| game work | 2.92 | 4.15 | 5.56 | 9.81 |
+| vu work | 3.51 | 3.85 | 7.46 | 12.24 |
+| gs work | 1.86 | 1.59 | 3.26 | 11.67 |
+| render CPU | 1.64 | 2.83 | 4.33 | 11.20 |
+| GPU | 0.92 | 10.49 | 8.07 | 14.08 |
+| limit | vu | gpu | gpu (vu near) | gpu (vu near) |
+
+The phone's CPU stages cost 1.3-2.6 times the desktops' as players have it and 2.4-7.3 times on
+the low-end profile (the GS thread most, on little cores); the split inside each thread is the same
+(kernels about half of the VU thread, recording and decode most of the GS thread). The Adreno
+660's GPU time at 4x is about the M1's (8-11 ms a race frame). The phone gains most from a native path where the desktops gain
+nothing: on the low-end profile at 2x, the scale phones run by default.
 
 ## Decisions
 
@@ -293,6 +465,14 @@ the screen on, samples clocks, records simpleperf, pulls the files):
   read only with DHD_TIMELINE set, is host-only (core id 3c01ff3cfcfea8d5 unchanged), and is what
   lets one run give every scene. The driver and analysis scripts stayed local; their rules are in
   "Method" and "Stages".
+- **The phone both ways** (decided before the runs): timing as players have it and on the frozen
+  low-end profile; diagnostics and profiles only as players have it, so the low-end profile's
+  stage split is not measured (its thread totals are; the split inside a thread was the same on
+  every machine measured).
+- **The shipped PGO build for every phone run, with line tables**: the headline numbers and the
+  symbols from one APK (line tables change no code, finding 146).
+- **No new instrumentation for the phone**: the timeline, rstat, gpu_times and the VU1 profile
+  were enough.
 
 ## Surprises
 
@@ -309,6 +489,20 @@ the screen on, samples clocks, records simpleperf, pulls the files):
   (Android) are what exists.
 - `DHD_HEADLESS=1` (the Mac smoke runs') has no window and no renderer: no use for a GPU or render
   measurement.
+- **The phone at 2x reaches its 120 Hz display**: unpaced and uncapped, Vulkan mailbox, the 2x
+  races still run at 116-117 fps with the render thread waiting 2-5 ms a field in the present.
+  Mailbox on Android does not free the game from the display's rate as it does on the desktops.
+- **On the low-end profile the GS thread costs as much as the VU thread** (title 17.4 against
+  18.2 ms, race start 14.9 against 14.3), against about half of it as players have it: it lands on
+  the little cores. A native path that removed only VU1 would gain little on low-end phones.
+- **Adreno's driver blocks inside `vkQueueSubmit`** while the GPU is behind (`qsub` 3-7 ms a
+  picture at 4x): on the phone the render thread's GPU wait is in the submit, not in the present.
+- **The PGO build inlines the VU1 kernels into `ps2_vu1_run`** and the strip assembly into
+  `native_draw_strip`: a flat simpleperf report by symbol shows `ps2_vu1_run` at 16 % of all
+  samples. The stages need the inline frames (llvm-symbolizer --inlining on each sample address).
+- **The local patch for `DHD_*` keys on Android was not needed**: dhd.ini passes every `DHD_*`
+  key it holds into the environment (the settings crate's unknown-key rule), so diagnostic keys
+  work from dhd.ini as the runner writes it.
 
 ## Caveats
 
@@ -330,9 +524,30 @@ the screen on, samples clocks, records simpleperf, pulls the files):
   therefore from DHD_RSTAT's timers. macOS `sample` gives full call trees.
 - **The EE game code is not split into "the game's renderer" and the rest**: that needs names for
   the hot functions (the next step for a design).
+- **The phone as players have it varies between runs**: the GPU sat at 608 MHz in every sample
+  (the thermal level the phone keeps at rest, not the 840 MHz top); the second pair of runs started
+  warmer (battery 34 °C against 24-30 °C) and its A78 cores ran mostly at 1.3-1.9 GHz against 2.4.
+  The VU thread's work differs by up to 45 % between the two runs (mid-race 2x 5.1 / 7.5 ms) and
+  the title the other way (9.7 / 7.4 ms; 101 / 134 fps): the scheduler's choice of core as well as
+  the clocks. The 2x races stayed at the display's rate in both. The tables give the mean of the
+  two. The low-end profile's two runs agree within 0.5 %.
+- **Phone sound off** (`DHD_SND_OFF=1`, as the desktops): the SPU2 mixer still runs on the game
+  thread (0.1 ms); the audio output thread does not. Findings 146-149 ran with sound.
+- **The phone's mid-race profiles** cover fields of about 9300-10000 (2x) and 10300-10900 (4x), not
+  all of 9000-14000; the timing columns they are scaled by cover the whole window.
+- **Throttle restore once reported a difference**: the first `--apply` saved the minimum clocks
+  while an install's boost held them at the maximum; `--restore` put every other value back and the
+  minimums returned to their defaults by themselves (691200 / 710400 / 844800 kHz, the values of
+  earlier restores). The second pair waited for the default minimum before applying; its restore
+  read back clean. MIUI brought cpu6-7 online a few times during the low-end runs; the watchdog
+  took them off again within half a second.
 
 ## Result
 
-Measured on Windows (RTX 3070 and the integrated Radeon) and macOS (M1) at 4x and 8x; tables,
-stages and the ranked list above; the phone recipe for the Mi 11i. One commit of instrumentation
-(`d9d2baa`); no speed changes and no game-state change (host-only, core id unchanged).
+Measured on Windows (RTX 3070 and the integrated Radeon) and macOS (M1) at 4x and 8x, and on the
+Mi 11i at 2x and 4x as players have it and on the frozen low-end profile; tables, stages and the
+ranked lists above. On fast desktops the VU thread is the limit; on the M1, integrated GPUs and
+4x phone races the GPU is, and the draws stay; on a low-end phone at 2x the VU and GS threads
+together are the limit and a native path would gain about a third at the race start and remove
+more than half of the CPU time. One commit of instrumentation (`d9d2baa`); no speed changes and no
+game-state change (host-only, core id unchanged).
