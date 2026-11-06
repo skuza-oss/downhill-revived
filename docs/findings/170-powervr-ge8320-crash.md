@@ -65,6 +65,18 @@ draws the title (the lead or the lane, phone rules apply).
   (`llvm_saturating_forms`; `llvm_saturating_forms_scan` proves each detector on a small module). On
   main's raster.wgsl it reports the two `texel()` selects in all 24 `main` stages and nothing else
   in any module; with the fix it passes.
+- [x] 2026-11-06 checks: `check.py port` OK. The exact renderer's pictures: `test_gs_wgpu.py
+  --skip-hardware --only gpu` with main's raster.wgsl and with this one gives the same bytes in both
+  VRAM logs (WARP, with and without early depth). gs_golden's test-gpu goldens could not be used:
+  they belong to an older NVIDIA driver and compare refuses another (as in finding 153). State
+  traces, a game built with main's raster.wgsl against this one: boot, all 600 rows match; race,
+  all 5000 rows match.
+- [x] 2026-11-06: the test build for players: this branch plus the pipeline trace patch (finding
+  153's, a local test branch), built as the 0.7.12 APK is (package_release.py, the phone profile,
+  the release key): versionCode 712, so it installs over 0.7.12 and 0.7.12 over it.
+- [x] 2026-11-06: the test build on the Mi 11i (Adreno 660): it starts and draws the title screen.
+  Its log has the trace of all 64 pipelines built by then: the render probe, scanout, `main` (key 7),
+  local_copy, then the native renderer's. Afterwards 0.7.12 as shipped was installed again.
 
 ## Decisions
 
@@ -138,6 +150,12 @@ Candidates, ranked:
 
 After `main` the phone builds `local_copy` and the native renderer's pipelines; all scan clean. If
 one still crashes, the test build's pipeline trace names it.
+
+Left for a phone test (the lead, with the players of #56 and #60): the test build on a GE8320 phone
+(any Helio G35/P35/P22-class phone with "PowerVR Rogue GE8320" in its log). It should reach the
+title and the menus, then a race. If it still closes, Share log: the last `pipeline trace:` line
+names the pipeline the driver could not build, and the test build's kept `libmain.so` maps its
+frames. The same build on the Mi 11i (Adreno) is in Progress.
 
 How to look again (no driver binary or path in the repository): GitHub code search for
 `vulkan.mt6765.so` finds MT6765 firmware dumps; take one whose `vendor/lib64/libufwriter.so` exports
