@@ -100,6 +100,10 @@ struct Stats {
     inbox_max: usize,
     relayed_in: u32,
     relayed_out: u32,
+    /// The relay's stream: the longest wait between reads with data, and the longest a read waited
+    /// for this thread.
+    relay_read_gap_max: f64,
+    relay_wait_max: f64,
 }
 impl Stats {
     fn input(&mut self, waited: Duration) {
@@ -120,8 +124,11 @@ impl Stats {
         self.inbox_max = self.inbox_max.max(inbox);
         let since = *self.since.get_or_insert(now);
         if now - since < Duration::from_secs(30) { return None; }
+        let relay = if self.relayed_in + self.relayed_out > 0 {
+            format!("; relay read gap max {:.1} ms, relay input wait max {:.1} ms", self.relay_read_gap_max, self.relay_wait_max)
+        } else { String::new() };
         let line = format!(
-            "net: SFU 30 s via {via}: datagrams {} in, {} out ({} in, {} out relayed); input wait max {:.1} ms ({} over 5 ms); send wait max {:.1} ms ({} over 5 ms); poll gap max {:.1} ms; inbox max {}",
+            "net: SFU 30 s via {via}: datagrams {} in, {} out ({} in, {} out relayed); input wait max {:.1} ms ({} over 5 ms); send wait max {:.1} ms ({} over 5 ms); poll gap max {:.1} ms; inbox max {}{relay}",
             self.datagrams_in, self.datagrams_out, self.relayed_in, self.relayed_out, self.input_wait_max, self.input_waits_over_5ms,
             self.send_wait_max, self.send_waits_over_5ms, self.poll_gap_max, self.inbox_max);
         *self = Stats { since: Some(now), last_poll: Some(now), ..Default::default() };
@@ -431,7 +438,12 @@ impl Sfu {
         }
         if !r.link.ready() { return Ok(()); }
         let now = Instant::now();
-        let bytes = r.link.take();
+        let (bytes, arrived) = r.link.take();
+        if let Some(at) = arrived { self.stats.relay_wait_max = self.stats.relay_wait_max.max((now - at).as_secs_f64() * 1e3); }
+        // Read gaps count once race frames may flow (idle moments, the countdown, the finish wait,
+        // count too: a long gap is a TCP stall only while snapshots keep coming; finding 158).
+        let gap = r.link.take_read_gap().as_secs_f64() * 1e3;
+        if self.released { self.stats.relay_read_gap_max = self.stats.relay_read_gap_max.max(gap); }
         if !bytes.is_empty() { r.client.receive(&bytes, now); }
         r.client.tick(now);
         let mut events = vec![];

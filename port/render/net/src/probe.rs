@@ -444,7 +444,7 @@ fn probe_turn_allocate() {
     eprintln!("probe: TLS to {host}:{port} ready after {} ms", start.elapsed().as_millis());
     let pump = |client: &mut crate::turn::Client| {
         link.write(&client.output());
-        let bytes = link.take();
+        let (bytes, _) = link.take();
         if !bytes.is_empty() { client.receive(&bytes, Instant::now()); }
         client.tick(Instant::now());
         std::thread::sleep(Duration::from_millis(1));
@@ -489,7 +489,7 @@ fn probe_turn_tls_no_credentials() {
     while client.failed().is_none() {
         assert!(Instant::now() < until && !link.failed(), "no TURN answer");
         link.write(&client.output());
-        let bytes = link.take();
+        let (bytes, _) = link.take();
         if !bytes.is_empty() { client.receive(&bytes, Instant::now()); }
         std::thread::sleep(Duration::from_millis(1));
     }

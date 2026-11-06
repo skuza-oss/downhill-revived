@@ -11,7 +11,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How often the reader looks whether its link was dropped.
 const READER_CHECK: Duration = Duration::from_millis(100);
@@ -20,9 +20,20 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// At most this many bytes read and not yet taken; more fails the link (the owner stalled).
 const INBOX_MAX: usize = 1 << 20;
 
+/// When the stream's bytes came, for the 30 s line: the longest wait between two reads that
+/// brought data (a TCP stall shows here, before our code sees anything), and when the oldest
+/// byte not yet taken arrived.
+#[derive(Default)]
+struct Timing {
+    last_read: Option<Instant>,
+    read_gap_max: Duration,
+    oldest_unread: Option<Instant>,
+}
+
 struct Shared {
     tls: Mutex<Option<(ClientConnection, TcpStream)>>,
     inbox: Mutex<VecDeque<u8>>,
+    timing: Mutex<Timing>,
     local: Mutex<Option<SocketAddr>>,
     alive: AtomicBool,
     failed: AtomicBool,
@@ -38,7 +49,7 @@ impl Link {
     /// Connects to host:port in a thread; `ready()` says when writes can go.
     pub fn open(host: &str, port: u16, wake: Wake) -> Self {
         let shared = Arc::new(Shared {
-            tls: Mutex::new(None), inbox: Mutex::new(VecDeque::new()), local: Mutex::new(None),
+            tls: Mutex::new(None), inbox: Mutex::new(VecDeque::new()), timing: Mutex::default(), local: Mutex::new(None),
             alive: AtomicBool::new(true), failed: AtomicBool::new(false),
         });
         let (s, host) = (shared.clone(), host.to_owned());
@@ -56,8 +67,13 @@ impl Link {
     pub fn failed(&self) -> bool { self.shared.failed.load(Ordering::Acquire) }
     /// The local end of the TCP connection (the relayed candidate's base).
     pub fn local(&self) -> Option<SocketAddr> { *lock(&self.shared.local) }
-    /// What was read since the last call.
-    pub fn take(&self) -> Vec<u8> { lock(&self.shared.inbox).drain(..).collect() }
+    /// What was read since the last call, and when its oldest byte arrived.
+    pub fn take(&self) -> (Vec<u8>, Option<Instant>) {
+        let bytes: Vec<u8> = lock(&self.shared.inbox).drain(..).collect();
+        (bytes, lock(&self.shared.timing).oldest_unread.take())
+    }
+    /// The longest wait between two reads with data since the last call.
+    pub fn take_read_gap(&self) -> Duration { std::mem::take(&mut lock(&self.shared.timing).read_gap_max) }
     /// Writes bytes to the stream (after `ready()`), blocking at most WRITE_TIMEOUT.
     pub fn write(&self, bytes: &[u8]) {
         if bytes.is_empty() { return; }
@@ -101,7 +117,13 @@ fn run(s: &Shared, host: &str, port: u16, wake: &Wake) -> Result<(), String> {
     while s.alive.load(Ordering::Acquire) {
         let n = match reader.read(&mut buffer) {
             Ok(0) => return Err("closed by the server".into()),
-            Ok(n) => n,
+            Ok(n) => {
+                let now = Instant::now();
+                let mut t = lock(&s.timing);
+                if let Some(last) = t.last_read { t.read_gap_max = t.read_gap_max.max(now - last); }
+                t.last_read = Some(now);
+                n
+            }
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted) => continue,
             Err(e) => return Err(e.to_string()),
         };
@@ -126,6 +148,7 @@ fn run(s: &Shared, host: &str, port: u16, wake: &Wake) -> Result<(), String> {
             let mut inbox = lock(&s.inbox);
             if inbox.len() + plain.len() > INBOX_MAX { return Err("inbox full".into()); }
             inbox.extend(plain);
+            lock(&s.timing).oldest_unread.get_or_insert_with(Instant::now);
             drop(inbox);
             wake();
         }
