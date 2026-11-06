@@ -278,8 +278,13 @@ State sync is unchanged (finding 044); the race frames' transport and the puppet
 - Checked on the merged tree: `python tools/check.py server` and `python tools/check.py port`.
   Mac: the Rust network and renderer tests and the release library; Linux: the library
   cross-builds only.
-- Not yet: the deploy's four Worker secrets (`online/server/README.md`), a real race between two
-  machines both ways, Linux tests, and a test on a network that really blocks UDP.
+- PC and Mac (2026-11-06, release check, `port/tools/cross_race.py`, server at the release
+  review's fixes): each side hosting, and the Mac forced onto TURN/TLS (`DHD_NET_SFU_UDP=0`).
+  Every two-player race finished with the same results on both, no freeze, no gap over 100 ms.
+  Snapshot age p50/p95/p99 26-47/43-69/45-71 ms (UDP) and 31-35/43-54/46-60 ms (Mac on TURN);
+  puppet delay medians 49-73 ms; snapshots 30 a second per rider throughout.
+- Not yet: the deploy's four Worker secrets (`online/server/README.md`), Linux tests, a network
+  that really blocks UDP, and a race longer than 5 minutes on TURN (the ChannelBind renewal).
 
 Earlier validation notes, kept from round 1:
 

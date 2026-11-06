@@ -161,7 +161,11 @@ with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=nativ
 - **nettool bots report place = slot + 1**, so results with bots show odd places.
 - **Single-PC online tests miss cross-platform bugs** (the version string, POSIX putenv, pacing,
   all shipped once): every release with online or pacing changes runs cross_race.py both ways, and
-  a `freeze:` line counts as a failure.
+  a `freeze:` line counts as a failure. From Git Bash set `MSYS_NO_PATHCONV=1`, or it rewrites the
+  Mac's paths and the remote game never starts. A public room's grid locks 30 s after the host
+  readies, so the host's first race is usually alone; it counts toward `--races`. To test the
+  TURN/TLS fallback, give `--remote-app` a small script there that sets `DHD_NET_SFU_UDP=0` and
+  `exec`s the game.
 - **Never wait for a process by matching its command line in a loop whose own command line
   contains the same text.**
 
