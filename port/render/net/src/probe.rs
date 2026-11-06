@@ -10,7 +10,8 @@
 //! `python port/tools/rustgs.py test -- -p dhd_net --lib probe -- --ignored --nocapture`
 //!
 //! DHD_PROBE_SECONDS (default 30), DHD_PROBE_RIDERS (snapshots per 30 Hz tick, default 1; 10 is a
-//! host with nine AI riders), DHD_PROBE_BYTES (snapshot size, default 150).
+//! host with nine AI riders), DHD_PROBE_RIDERS_B (the second client's, default the same),
+//! DHD_PROBE_BYTES (snapshot size, default 150). Runs longer than 30 s also print each 30 s window.
 use super::Sfu;
 use crate::{ws_send, ws_start, ws_stop, WsConn, WsHandler};
 use serde_json::{json, Value};
@@ -95,9 +96,11 @@ fn allocate(session: &str, member: u64, publisher: Option<&str>) -> Vec<Value> {
 struct Rx {
     open: bool,
     ready: bool,
-    delays: Vec<f64>,
+    /// (send tick, one-way ms) of every snapshot
+    delays: Vec<(u32, f64)>,
     last_arrival: Option<Instant>,
-    gaps: Vec<f64>,
+    /// (send tick, arrival interval ms) of rider 0
+    gaps: Vec<(u32, f64)>,
     seqs: std::collections::HashSet<u32>,
 }
 
@@ -124,23 +127,34 @@ impl Rx {
         let seq = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
         let sent = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
         let at = now.duration_since(epoch()).as_nanos() as u64;
-        self.delays.push(at.saturating_sub(sent) as f64 / 1e6);
+        self.delays.push((seq, at.saturating_sub(sent) as f64 / 1e6));
         if bytes[3] == 0 {
-            if let Some(last) = self.last_arrival { self.gaps.push(now.duration_since(last).as_secs_f64() * 1e3); }
+            if let Some(last) = self.last_arrival { self.gaps.push((seq, now.duration_since(last).as_secs_f64() * 1e3)); }
             self.last_arrival = Some(now);
             self.seqs.insert(seq);
         }
     }
     fn clear(&mut self) { self.delays.clear(); self.gaps.clear(); self.last_arrival = None; self.seqs.clear(); }
+    /// The whole run, then each 30 s window (as the game's net: lines), when longer than one.
     fn report(&self, name: &str, ticks: u64) {
-        let mut d = self.delays.clone();
-        d.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let over100 = self.gaps.iter().filter(|g| **g > 100.0).count();
-        let max_gap = self.gaps.iter().cloned().fold(0.0, f64::max);
-        eprintln!(
-            "probe: {name} received {} of {ticks} rider-0 snapshots ({} frames); one-way ms p50 {:.1} p95 {:.1} p99 {:.1} max {:.1}; gaps >100 ms {over100}, longest gap {max_gap:.1} ms",
-            self.seqs.len(), d.len(), percentile(&d, 0.5), percentile(&d, 0.95), percentile(&d, 0.99), d.last().copied().unwrap_or(f64::NAN)
-        );
+        let line = |label: String, from: u32, to: u32| {
+            let mut d: Vec<f64> = self.delays.iter().filter(|(t, _)| (from..to).contains(t)).map(|x| x.1).collect();
+            d.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let gaps: Vec<f64> = self.gaps.iter().filter(|(t, _)| (from..to).contains(t)).map(|x| x.1).collect();
+            let over100 = gaps.iter().filter(|g| **g > 100.0).count();
+            let max_gap = gaps.iter().cloned().fold(0.0, f64::max);
+            let got = self.seqs.iter().filter(|t| (from..to).contains(*t)).count();
+            eprintln!(
+                "probe: {label} received {got} of {} rider-0 snapshots ({} frames); one-way ms p50 {:.1} p95 {:.1} p99 {:.1} max {:.1}; gaps >100 ms {over100}, longest gap {max_gap:.1} ms",
+                to - from, d.len(), percentile(&d, 0.5), percentile(&d, 0.95), percentile(&d, 0.99), d.last().copied().unwrap_or(f64::NAN)
+            );
+        };
+        line(name.to_string(), 0, ticks as u32);
+        if ticks > 900 {
+            for w in 0..ticks.div_ceil(900) as u32 {
+                line(format!("{name} window {}", w + 1), w * 900, ((w + 1) * 900).min(ticks as u32));
+            }
+        }
     }
 }
 
@@ -240,6 +254,7 @@ fn probe_sfu_one_way_delay() {
     epoch();
     let seconds = env_or("DHD_PROBE_SECONDS", 30);
     let riders = env_or("DHD_PROBE_RIDERS", 1).clamp(1, 10) as u8;
+    let riders = [riders, env_or("DHD_PROBE_RIDERS_B", riders as u64).clamp(1, 10) as u8];
     let size = env_or("DHD_PROBE_BYTES", 150).clamp(16, 834) as usize;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = CString::new(format!("ws://{}/", listener.local_addr().unwrap())).unwrap();
@@ -264,9 +279,9 @@ fn probe_sfu_one_way_delay() {
         let r = room.lock().unwrap();
         for who in 0..2 { r.out[who].send(json!({"type":"start","startAt":RACE,"players":players}).to_string()).unwrap(); }
     }
-    let until = Instant::now() + Duration::from_secs(20);
+    let until = Instant::now() + Duration::from_secs(40);
     while !rx.iter().all(|r| r.lock().unwrap().ready) { assert!(Instant::now() < until, "SFU setup timed out"); std::thread::sleep(Duration::from_millis(5)); }
-    eprintln!("probe: SFU ready; {seconds} s at 30 Hz, {riders} snapshot(s) of {size} bytes per tick per client");
+    eprintln!("probe: SFU ready; {seconds} s at 30 Hz, {riders:?} snapshot(s) of {size} bytes per tick per client");
     std::thread::sleep(Duration::from_millis(500));
     for r in &rx { r.lock().unwrap().clear(); }
     let start = Instant::now();
@@ -274,7 +289,7 @@ fn probe_sfu_one_way_delay() {
     for tick in 0..ticks {
         wait_until(start + Duration::from_micros(tick * 33_333));
         for (me, c) in clients.iter().enumerate() {
-            for rider in 0..riders {
+            for rider in 0..riders[me] {
                 let b = snapshot(me, rider, tick, size);
                 unsafe { ws_send(*c as *mut WsConn, 1, b.as_ptr() as *const c_void, b.len()) };
             }
@@ -294,6 +309,7 @@ fn probe_sfu_direct() {
     epoch();
     let seconds = env_or("DHD_PROBE_SECONDS", 30);
     let riders = env_or("DHD_PROBE_RIDERS", 1).clamp(1, 10) as u8;
+    let riders = [riders, env_or("DHD_PROBE_RIDERS_B", riders as u64).clamp(1, 10) as u8];
     let size = env_or("DHD_PROBE_BYTES", 150).clamp(16, 834) as usize;
     let nap = Duration::from_micros(env_or("DHD_PROBE_SLEEP_US", 0));
     let mut c: Vec<Sfu> = vec![];
@@ -341,7 +357,7 @@ fn probe_sfu_direct() {
         std::thread::sleep(Duration::from_millis(1));
     }
     for s in c.iter_mut() { s.released = true; }
-    eprintln!("probe: direct, SFU ready; {seconds} s at 30 Hz, {riders} snapshot(s) of {size} bytes per tick per client, {} us between polls", nap.as_micros());
+    eprintln!("probe: direct, SFU ready; {seconds} s at 30 Hz, {riders:?} snapshot(s) of {size} bytes per tick per client, {} us between polls", nap.as_micros());
     let settle = Instant::now() + Duration::from_millis(500);
     while Instant::now() < settle { poll(&mut c, &mut rx); }
     for r in rx.iter_mut() { r.clear(); }
@@ -359,7 +375,7 @@ fn probe_sfu_direct() {
         last = now;
         if tick < ticks && Instant::now() >= start + Duration::from_micros(tick * 33_333) {
             for who in 0..2 {
-                for rider in 0..riders { c[who].send(&snapshot(who, rider, tick, size)).unwrap(); }
+                for rider in 0..riders[who] { c[who].send(&snapshot(who, rider, tick, size)).unwrap(); }
             }
             tick += 1;
         }
