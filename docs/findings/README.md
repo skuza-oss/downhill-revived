@@ -199,6 +199,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | in progress |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
 | 173 | [STATE snapshots that stop for seconds on the SFU, then arrive at once](173-sfu-snapshot-stalls.md) | current |  |
+| 174 | [60 fps at 2x on a Mali-G52 phone (Redmi 9): the GPU side](174-mali-gpu-60-at-2x.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
