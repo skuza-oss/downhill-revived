@@ -549,8 +549,7 @@ void port_clock_observe(void)
         const char *s = host_getenv("DHD_PERF_LOG");
         on = !s || strcmp(s, "0") != 0;
     }
-    int race_phase = *(int *)GUEST(0x0843F348);
-    if (!on || *(int *)GUEST(0x0829DED8) != 9 || race_phase < 2 || race_phase > 4) {
+    if (!on || !port_race_running(2)) {
         last_wall = 0;
         return;
     }
@@ -611,10 +610,9 @@ void port_fps_observe(void)
     static int raced, still;
     if (!out) return;
     int tick=*(int *)GUEST(0x0843EEC8);
-    /* The race is over (rate_drift.py: the finish times are in) when its screen or phase ends, or
-       when its clock stops (every rider in, the results wait) for 3600 updates (15 s at 240). */
-    if ((raced && (tick==last ? ++still : (still=0))>3600) ||
-        *(int *)GUEST(0x0829DED8)!=9 || *(int *)GUEST(0x0843F348)<2 || *(int *)GUEST(0x0843F348)>4) {
+    /* The race is over (rate_drift.py: the finish times are in) when it ends (port_race_running),
+       or when its clock stops (every rider in, the results wait) for 3600 updates (15 s at 240). */
+    if ((raced && (tick==last ? ++still : (still=0))>3600) || !port_race_running(2)) {
         if (raced) {
             fclose(out);
             fclose(steps_out);
