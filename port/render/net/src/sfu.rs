@@ -36,6 +36,14 @@ const READER_CHECK: Duration = Duration::from_millis(100);
 /// for players behind a UDP block; going sooner would put players with a slow first packet on the
 /// relay for nothing (finding 158, round 4).
 pub const DIRECT_TIMEOUT: Duration = Duration::from_millis(2000);
+/// A game says sfu_ready once it has every racer's channels. A racer whose own connection never
+/// comes up has none to give, so every other game waited for it, and a room without SFU_CONNECT_MS
+/// (servers before b0812d6) took the whole race out at its setup deadline (0.7.12, rooms of 4-7).
+/// This long after its own association connected, with its own channels open, a game says
+/// sfu_ready all the same (finding 175). The room releases the race only when every connected
+/// racer is subscribed both ways, so nothing is lost: the missing racer has nothing published.
+/// Longer than a TURN setup (about 5 s), shorter than the room's 15 s SFU_CONNECT_MS.
+pub const READY_TIMEOUT: Duration = Duration::from_millis(10_000);
 /// The relay in use: the TURN client, its TLS stream and the relayed address once allocated.
 struct Relay {
     client: turn::Client,
@@ -80,6 +88,7 @@ pub struct Sfu {
     /// SFU, as a network that blocks UDP does, so the TURN/TLS fallback must carry the race.
     direct: bool,
     answered_at: Option<Instant>,
+    connected_at: Option<Instant>,
     turn_asked: bool,
     relay: Option<Relay>,
     /// Whether the last datagram str0m got came through the relay; at Connected, the path used.
@@ -221,7 +230,7 @@ impl Sfu {
         if drop_in_percent > 0 { eprintln!("net: SFU: DHD_NET_SFU_DROP_IN={drop_in_percent}, that share of the SFU's records is dropped on arrival (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
             connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
-            wake, direct, answered_at: None, turn_asked: false, relay: None, last_in_relayed: false, via_relay: false,
+            wake, direct, answered_at: None, connected_at: None, turn_asked: false, relay: None, last_in_relayed: false, via_relay: false,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -331,6 +340,17 @@ impl Sfu {
         if message["type"] == "sfu_channels" { eprintln!("net: SFU channels allocated: {}", self.channels.len()); }
         Ok(())
     }
+    /// The race this association belongs to (its start's startAt; 0 before the start).
+    pub fn race(&self) -> u64 { self.race }
+    /// READY_TIMEOUT: connected that long, its own channels open, some racer's still missing.
+    fn ready_anyway(&mut self) -> bool {
+        if !self.connected_at.is_some_and(|t| t.elapsed() >= READY_TIMEOUT) || self.race == 0 { return false; }
+        let own: Vec<ChannelId> = self.channels.iter().filter(|c| c.local).map(|c| c.id).collect();
+        if own.len() < 2 || !own.iter().all(|id| self.rtc.channel(*id).is_some()) { return false; }
+        eprintln!("net: SFU: ready without every racer's channels {} s after connecting ({} of {} channels)",
+            READY_TIMEOUT.as_secs(), self.channels.len(), self.members * 2);
+        true
+    }
     fn usable(&mut self) -> bool {
         self.channels.len() >= self.members * 2 && self.channels.iter().all(|c| self.rtc.channel(c.id).is_some())
     }
@@ -372,7 +392,7 @@ impl Sfu {
         let mut frames = vec![];
         let pending = std::mem::take(&mut self.future_events);
         for (id, bytes) in pending { self.receive_frame(id, bytes, &mut frames)?; }
-        if self.usable() && !self.announced {
+        if !self.announced && (self.usable() || self.ready_anyway()) {
             self.announced = true; text.push(json!({"type":"sfu_ready"}));
         }
         for state in [false, true] {
@@ -549,6 +569,7 @@ impl Sfu {
                 }
                 Output::Event(Event::Connected) if !self.connected => {
                     self.connected = true;
+                    self.connected_at = Some(Instant::now());
                     self.via_relay = self.last_in_relayed;
                     let after = self.answered_at.map_or(0, |t| t.elapsed().as_millis());
                     eprintln!("net: SFU connected via {} {after} ms after the answer", if self.via_relay { "TURN/TLS" } else { "UDP" });
@@ -790,6 +811,55 @@ mod tests {
         assert!(bound_sender);
         assert_eq!(received_state, 95);
         assert_eq!(received_events, 1);
+    }
+
+    /// A racer whose connection never comes up publishes nothing, so this game never has every
+    /// racer's channels: READY_TIMEOUT after its own association connected it says sfu_ready all
+    /// the same, once (finding 175), not before.
+    #[test]
+    fn ready_without_a_racer_that_never_connects() {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let local = socket.local_addr().unwrap();
+        let mut server = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
+        server.add_local_candidate(Candidate::host(local, "udp").unwrap());
+        let (mut client, offer) = Sfu::start_at(local, Arc::new(|| {})).unwrap();
+        let answer = server.sdp_api().accept_offer(str0m::change::SdpOffer::from_sdp_string(offer["sdp"].as_str().unwrap()).unwrap()).unwrap();
+        client.signal(&json!({"type":"sfu_answer","sdp":answer.to_sdp_string()})).unwrap();
+        for (id, label) in [(10, "state"), (12, "events")] {
+            server.direct_api().create_data_channel(ChannelConfig { label: label.into(), negotiated: Some(id), ..Default::default() });
+        }
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":10,"name":"state","memberId":7,"local":true},
+            {"channelId":12,"name":"events","memberId":7,"local":true}]})).unwrap();
+        // Two racers: member 17's channels never come.
+        client.signal(&json!({"type":"start","startAt":1234,"players":[{"memberId":7,"slot":0},{"memberId":17,"slot":1}]})).unwrap();
+        let mut b = [0u8; 65536];
+        let mut readies = 0;
+        let mut open = false;
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && !open {
+            let (text, _) = client.poll().unwrap();
+            readies += text.iter().filter(|m| m["type"] == "sfu_ready").count();
+            open = client.connected && client.channels.iter().all(|c| client.rtc.channel(c.id).is_some());
+            while let Ok((n, source)) = socket.recv_from(&mut b) {
+                if let Ok(contents) = b[..n].try_into() {
+                    server.handle_input(Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination: local, contents })).unwrap();
+                }
+            }
+            server.handle_input(Input::Timeout(Instant::now())).unwrap();
+            while let Output::Transmit(t) = server.poll_output().unwrap() { socket.send_to(&t.contents, t.destination).unwrap(); }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(open, "its own channels opened");
+        let (text, _) = client.poll().unwrap();
+        readies += text.iter().filter(|m| m["type"] == "sfu_ready").count();
+        assert_eq!(readies, 0, "not before READY_TIMEOUT");
+        client.connected_at = Some(Instant::now() - READY_TIMEOUT);
+        let (text, _) = client.poll().unwrap();
+        assert_eq!(text.iter().filter(|m| m["type"] == "sfu_ready").count(), 1);
+        let (text, _) = client.poll().unwrap();
+        assert!(text.iter().all(|m| m["type"] != "sfu_ready"), "once");
     }
 
     /// Cloudflare forwards a subscribed STATE channel ordered and reliable, whatever policy was
