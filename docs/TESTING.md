@@ -137,6 +137,7 @@ Pictures:
 | `DHD_PERF_COUNTER=1` | the FPS & PING counter |
 | `DHD_PERF_LOG=0` | no `perf:` lines in dhd.log (on by default, finding 129) and none of their counting |
 | `DHD_GPU_STATS=N` | every N-th picture, GPU time (and on Vulkan pixels shaded) per kind of draw in dhd.log (finding 131) |
+| `DHD_VU1_LAYOUT=path` with `DHD_VU1_LAYOUT_FIELDS=a-b[,c-d...]` | per field window and kind of VU1 run (overlay, program, entry, MSCNT, VI13): the VIF1 commands before it (UNPACK forms, addresses, counts, masks) and the GIF tags it kicks; read only (finding 162) |
 | `DHD_NATIVE_SPEC=0\|sync` | `0`: the generic draw shader only; `sync`: specialised draw pipelines built at first use, not on a worker (replays and picture checks; finding 131) |
 
 Sound evidence: `DHD_SND_WAV=path` (the final mix), `DHD_SND_VOICE_TRACE=path` (each sounding voice
