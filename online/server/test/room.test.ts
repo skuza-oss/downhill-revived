@@ -82,6 +82,12 @@ describe("lobby", () => {
     expect((await older.json("error")).code).toBe("client_outdated");
     expect(await older.closed()).toBe(4009);
 
+    // an older release that also speaks an older protocol still gets the Update Now refusal
+    const protocol2 = await Client.connect(`/v1/rooms/${code}`);
+    protocol2.hello("Protocol2", { protocol: 2, clientVersion: "0.1.5" });
+    expect((await protocol2.json("error")).code).toBe("client_outdated");
+    expect(await protocol2.closed()).toBe(4009);
+
     const junk = await Client.connect(`/v1/rooms/${code}`);
     junk.hello("Junk", { clientVersion: "nightly" });
     expect(await junk.closed()).toBe(4009);

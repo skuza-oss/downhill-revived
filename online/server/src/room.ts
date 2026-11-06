@@ -650,13 +650,15 @@ export class Room extends DurableObject<Env> {
   }
 
   private async onHello(ws: WebSocket, info: SocketInfo, m: Msg): Promise<void> {
-    if (m.protocol !== PROTOCOL)
-      return this.refuse(ws, "protocol_mismatch", `This server speaks protocol ${PROTOCOL}; update the game.`);
-    // The version gate: releases older than MIN_VERSION (wrangler.jsonc) may not play.
+    // The version gate first: releases older than MIN_VERSION (wrangler.jsonc) may not play, and
+    // client_outdated is the refusal their ONLINE screen answers with Update Now (finding 054), also
+    // when they speak an older protocol (0.7.11, protocol 2, against protocol 3: finding 158).
     const minVersion = minVersionOf(this.env.MIN_VERSION);
     const clientVersion = clientVersionOf(m);
     if (isOutdated(clientVersion, minVersion))
       return this.refuse(ws, "client_outdated", OUTDATED_MESSAGE, { minVersion, clientVersion });
+    if (m.protocol !== PROTOCOL)
+      return this.refuse(ws, "protocol_mismatch", `This server speaks protocol ${PROTOCOL}; update the game.`);
     const version = m.version;
     const iso = m.isoSha256;
     const session = this.state?.session || (info.create && Array.isArray(m.features) && m.features.includes("session"));
