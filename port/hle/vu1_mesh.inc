@@ -10,10 +10,11 @@
    | 18B0 | 0x2FE | maximum  | c                              | none          | drawn      | yes      |
    | 1110 | 0x20C | computed | c d5 L + d20 L.w^2 + d1015     | every vertex  | drawn      | yes      |
    | 13A0 | 0x260 | maximum  | c L + d20 L.w^2 + d1015        | none          | drawn      | no       |
+   | 1510 | 0x288 | computed | c vf31 + d20 max(N.H, 0)^16    | every vertex  | drawn      | yes      |
 
-   (c the batch vertex's colour, L its pool entry's lighting at data 373 + index, dN data N; the
-   lit colours clamped to 255 and truncated, their alpha c.a d5.a + d20.a L.w^2, d1015 adding to
-   RGB only.)
+   (c the batch vertex's colour, L its pool entry's lighting at data 373 + index, N its pool
+   normal there (12-bit fixed point), H = (d6.w, d7.w, d8.w), dN data N; the lit colours clamped
+   to 255 and truncated, their alpha c.a d5.a + d20.a L.w^2, d1015 adding to RGB only.)
 
    A batch loop runs after a program's setup has set VI13 and the registers it reads: the shared
    1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050 and 12F0), and for lit or
@@ -72,8 +73,8 @@ static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", 
                                                      "join value", "a vertex below the near bound",
                                                      "a vertex off the guard band in x or y"};
 
-/* The translated loops (the table above). colour: 0 c vf31, 1 c, 2 lit with d5, 3 lit. */
-enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW, MESH_COLOUR_LIT_D5, MESH_COLOUR_LIT };
+/* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight. */
+enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW, MESH_COLOUR_LIT_D5, MESH_COLOUR_LIT, MESH_COLOUR_HIGHLIGHT };
 typedef struct {
     const char *name;
     uint16_t vi13;
@@ -87,8 +88,9 @@ static const MeshProgram mesh_programs[] = {
     {"18B0", 0x2FE, 1, MESH_COLOUR_RAW, 0, 0, 1},
     {"1110", 0x20C, 0, MESH_COLOUR_LIT_D5, 2, 0, 1},
     {"13A0", 0x260, 1, MESH_COLOUR_LIT, 0, 0, 0},
+    {"1510", 0x288, 0, MESH_COLOUR_HIGHLIGHT, 2, 0, 1},
 };
-enum { MESH_PRELIT = 0x1F, MESH_LIT = 0x60 };   /* the groups' bits */
+enum { MESH_PRELIT = 0x1F, MESH_LIT = 0xE0 };   /* the groups' bits */
 enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
 
 typedef struct {
@@ -198,7 +200,7 @@ static void mesh_check(void)
             if (got - ref > 1 || ref - got > 1) { mesh.bad_colour++; break; }
         }
         const float st[3] = {v[k].u * q, v[k].v * q, v[k].uz * q};
-        for (unsigned i = 0; i < 3; i++) {
+        for (unsigned i = 0; i < 3 && (h->prim & 16); i++) {   /* untextured: ST is not written */
             float d = o[0].f[i] - st[i], scale = (st[i] < 0 ? -st[i] : st[i]) + 1e-3f;
             if (d > 1e-4f * scale || d < -1e-4f * scale) { mesh.bad_stq++; break; }
         }
@@ -290,11 +292,12 @@ static int mesh_build(void)
     unsigned n = hdr[0] & 0x7FFF;
     if (!(hdr[0] & 0x8000)) return mesh_fail(MESH_WHY_EOP);
     if (n < 1 || n > GS_MESH_MAX_VERTICES || base + 1 + 3 * n > 1024) return mesh_fail(MESH_WHY_COUNT);
+    uint32_t tag1 = hdr[1];
     /* PACKED, NREG 3: ST RGBAQ XYZF2, PRE */
-    if ((hdr[1] >> 26 & 3) || hdr[1] >> 28 != 3 || (hdr[2] & 0xFFF) != 0x412 || !(hdr[1] >> 14 & 1))
+    if ((tag1 >> 26 & 3) || tag1 >> 28 != 3 || (hdr[2] & 0xFFF) != 0x412 || !(tag1 >> 14 & 1))
         return mesh_fail(MESH_WHY_TAG);
-    unsigned prim = (unsigned)((hdr[0] | (uint64_t)hdr[1] << 32) >> 47 & 0x7FF);
-    if ((prim & 0x107) != 4) return mesh_fail(MESH_WHY_PRIM);   /* a triangle strip with ST */
+    unsigned prim = tag1 >> 15 & 0x7FF;
+    if ((prim & 7) != 4 || (prim & 0x110) == 0x110) return mesh_fail(MESH_WHY_PRIM);   /* a strip, not textured by UV */
     GsMeshHeader *h = (GsMeshHeader *)mesh.packet;
     memset(h, 0, sizeof *h);
     h->magic = GS_MESH_MAGIC;
@@ -322,6 +325,7 @@ static int mesh_build(void)
     else { h->fog[0] = v19[3] + v18[0]; h->fog[1] = v18[3]; h->fog[2] = v18[1]; }
     const float uv[2] = {v19[0], v19[1]};
     const float *d5 = m[5].f, *d20 = m[20].f, *d1015 = m[1015].f;
+    const float highlight[3] = {m[6].f[3], m[7].f[3], m[8].f[3]};
     /* 0170's prologue sets vf6.x = 1 (0098) and negates it unless the header's bit 15 (0158) */
     float parity = hdr[3] & 0x8000 ? 1.0f : -1.0f;
     mesh.check_parity = parity; mesh.check_base = base;
@@ -329,9 +333,10 @@ static int mesh_build(void)
     uint8_t join[GS_MESH_MAX_VERTICES];
     const float fixed = 1.0f / 4096.0f;   /* ITOF12: exact for these integers */
     /* The guard band test of the loop's CLIP (vf13, data 996) in homogeneous form: a batch with a
-       vertex off it in x or y or below the near bound goes to the VU (the loops with clipping send
-       its triangles to the clipper, whose fans a GPU's clipping does not reproduce; those without
-       kick it as it comes, which the GS wraps). */
+       vertex below the near bound goes to the VU (the clipper's fans there are not what a GPU's
+       clipping draws), and so does one with a vertex off it in x or y in a loop without CLIP (the
+       loop kicks it as it comes, which the GS wraps); the CLIP loops' sideways ones are drawn and
+       the GPU clips them. */
     const __m128 c0 = _mm_loadu_ps(&h->matrix[0]), c1 = _mm_loadu_ps(&h->matrix[4]);
     const __m128 c2 = _mm_loadu_ps(&h->matrix[8]), c3 = _mm_loadu_ps(&h->matrix[12]);
     const float bound = h->clip[3] < 0 ? -h->clip[3] : h->clip[3], near = -bound - h->clip[2];
@@ -358,7 +363,21 @@ static int mesh_build(void)
         o->u = (float)r[2].sw[0] * fixed; o->v = (float)r[2].sw[1] * fixed; o->uz = (float)r[2].sw[2] * fixed;
         if (prog->uv_offset == 2 || (prog->uv_offset == 1 && k)) { o->u += uv[0]; o->v += uv[1]; }   /* vf19.xy */
         o->unused = 0;
-        if (prog->colour >= MESH_COLOUR_LIT_D5) {   /* 1110 / 13A0: the lit pool entry */
+        if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510: the pool normal against d6-d8's w */
+            const int32_t *nw = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].sw;
+            float d = highlight[0] * ((float)nw[0] * fixed) + highlight[1] * ((float)nw[1] * fixed) +
+                      highlight[2] * ((float)nw[2] * fixed);
+            d = d > 0 ? d : 0;
+            d *= d; d *= d; d *= d; d *= d;   /* four squarings: ^16 */
+            const float *s31 = vu1.vf[31].f;
+            uint32_t rgba = 0;
+            for (unsigned i = 0; i < 4; i++) {
+                float sum = d20[i] * d + (float)c[i] * s31[i];
+                if (!(sum > -1.0f)) return mesh_fail(MESH_WHY_COLOUR);
+                rgba |= (uint32_t)(int)(sum > 255 ? 255.0f : sum) << (i * 8);
+            }
+            o->rgba = rgba;
+        } else if (prog->colour >= MESH_COLOUR_LIT_D5) {   /* 1110 / 13A0: the lit pool entry */
             const float *L = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].f, l2 = L[3] * L[3];
             uint32_t rgba = 0;
             for (unsigned i = 0; i < 4; i++) {
@@ -437,6 +456,12 @@ static void mesh_skipped(void)
     } else if (prog->colour == MESH_COLOUR_LIT) {   /* 13A0's: vf13 = d1015, vf14 = d20 */
         memcpy(vu1.vf[13].f, vu1.vu0_mem[1015].f, 16);
         memcpy(vu1.vf[14].f, vu1.vu0_mem[20].f, 16);
+    } else if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510's: vf7 = d17, vf14 = d6, and from its last
+                                                              pass vf8 = d18, vf10 = d19 (15E8, 1608) */
+        memcpy(vu1.vf[7].f, vu1.vu0_mem[17].f, 16);
+        memcpy(vu1.vf[14].f, vu1.vu0_mem[6].f, 16);
+        memcpy(vu1.vf[8].f, vu1.vu0_mem[18].f, 16);
+        memcpy(vu1.vf[10].f, vu1.vu0_mem[19].f, 16);
     }
     uint16_t buffer = (uint16_t)(vu1.vi[14] + 0x90);
     if (buffer == 0x3E8) buffer = 0x238;
