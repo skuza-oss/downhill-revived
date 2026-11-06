@@ -22,7 +22,7 @@ Goal: cut the render thread's cost per picture for all draws, one code path for 
 - **Constants:** looked up per draw from one storage buffer (an index per draw: a push constant or
   a vertex attribute) instead of a dynamic-offset rebind per draw.
 - **Pipelines:** one shared layout for the mesh and GS draw pipelines (168's
-  `F:\Temp\native-vu1\shared-records-layout.patch`), fewer pipeline variants switched per picture
+  layout patch, kept outside the repository), fewer pipeline variants switched per picture
   where specialisation constants can become uniform branches without a GPU cost.
 - Measure each step with `DHD_RSTAT`'s counters and the render thread's ms (encoder finish,
   submit) before keeping it.
