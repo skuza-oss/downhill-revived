@@ -113,7 +113,8 @@ impl Display {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+                | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT, // `black` clears it
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -148,6 +149,27 @@ impl Display {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
+        true
+    }
+
+    /// The display off (no read circuit on, as after a GS reset; finding 160): the displayed picture
+    /// black, at the size it had, cleared in `encoder` (no pass may be open on it). False before the
+    /// first picture: nothing to show yet.
+    pub fn black(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        let Some(t) = &self.target else { return false };
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("native display off"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &t.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
         true
     }
 

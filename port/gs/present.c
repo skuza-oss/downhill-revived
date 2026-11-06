@@ -822,6 +822,29 @@ static void bench_vsync(void)
 }
 
 const uint32_t *movie_picture(unsigned *width, unsigned *height, unsigned *rows);  /* port/hle/movie.c */
+int movie_playing(void);
+void movie_drop(void);
+
+/* The movie's picture to show this field, or NULL. The PS2's player shows its pictures from a
+   buffer of its own (DISPFB2 at page 280, func_0020BDA0), which stays on screen after the movie,
+   between the startup movies and after a skip, until the game sets its display again: the GS reset
+   before the next screen, or that screen's own display (finding 160). The port's player never
+   touches the GS, so the game's display registers hold what they held before the movie (the
+   memory card check card, or nothing after the reset before the movies). So the movie's last
+   picture stays while the registers are the ones the game kept during the movie and no GS reset
+   came since. */
+static const uint32_t *movie_shown(const uint64_t mmio[15], unsigned *width, unsigned *height, unsigned *rows)
+{
+    static uint64_t during[15], resets;
+    const uint32_t *movie = movie_picture(width, height, rows);
+    if (!movie) return NULL;
+    if (movie_playing()) memcpy(during, mmio, sizeof during), resets = gs.resets;
+    else if (resets != gs.resets || memcmp(during, mmio, sizeof during)) {
+        movie_drop();
+        return NULL;
+    }
+    return movie;
+}
 int host_widescreen_flat_limit(void);  /* port/hle/host.c */
 int host_widescreen_card_drawn(void);
 
@@ -898,7 +921,7 @@ void gs_vsync(void)
     for (unsigned addr = 0; addr <= 0xE0; addr += 16) mmio[addr / 16] = *(volatile uint64_t *)GUEST(0x12000000 + addr);
     /* While a movie plays (port/hle/movie.c, finding 055) its picture is shown instead. */
     unsigned movie_width, movie_height, movie_rows;
-    const uint32_t *movie = movie_picture(&movie_width, &movie_height, &movie_rows);
+    const uint32_t *movie = movie_shown(mmio, &movie_width, &movie_height, &movie_rows);
     /* Deferred vsync: the GS worker hands the native picture on after the drawing queued before it;
        the game thread goes on. A movie or the exact renderer waits for the drawing here instead.
        (Capture and DHD_PROFILE turn deferral off: they read the GS below.) */
