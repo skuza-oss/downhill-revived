@@ -223,11 +223,88 @@ The counter in a race (guest, prediction on): "RIDERS 33 MS", "RIDERS 12 MS" (ca
   committed), the whole library checks for aarch64-apple-darwin. The C changes have no platform
   code. A real Mac build is the PC<->Mac run's.
 
+### PC <-> Mac over the internet (acceptance 4)
+
+The same scripted two-player race on a Windows PC and the M1 Mac. Each version ran against its own
+temporary room server on Cloudflare (workers.dev: 0.7.11's relay; 0.7.12's and this lane's server
+with the SFU), so every byte crossed the internet:
+
+- **A:** 0.7.11 plus only finding 158's age metric.
+- **B:** the shipped 0.7.12.
+- **C:** this lane at b8eb93c, release builds, the same core on both machines.
+
+Setup and counts:
+
+- The race: 60 fps, eight host AI riders, both riders pedalling (no steering), the guest punching.
+  The host finishes at 40 s and the guest at 42 s.
+- Both directions (PC hosts, Mac hosts), with 3-5 complete two-player races each.
+- C also ran 3 races with `DHD_PUPPET_PREDICT=0` (items 1-3 only).
+- Both machines share one home connection in North Africa (Cloudflare edge MRS or CDG; rooms in LHR,
+  CDG or AMS).
+
+How each row was read:
+
+- **"Drawn behind":** for A and B, the game's lag (puppet delay + transit). For C, the game's "shown
+  behind" and `puppet_lag.py` run per race across the two machines, counting only steps where the
+  sender moves at least 20 units a second.
+- **A/B distances** are estimates (delay × ~75 units/s); C's are measured.
+
+| | A: 0.7.11 relay | B: 0.7.12 SFU | C: this lane | C, prediction off |
+|---|---|---|---|---|
+| Drawn behind real time, p50 | 171-180 ms | 66-82 ms | 0 ms (`puppet_lag.py` p95 3-7, p99 5-55) | 47-56 ms (measured 48-55, p95 79-213) |
+| Distance from the real rider, p50 / p95, units | ~13 | ~5 | 0.11-0.18 / 0.6-1.2 | 3.5-4.3 / 6.7-13.9 |
+| Snapshot age p50 / p95 (median of 30 s windows) | 90-106 / 114-134 ms | 29-46 / 52-71 ms | 30-31 / 104-132 ms (calm windows p95 31-58) | 31-33 / 51-618 ms |
+| Windows with age p99 over 500 ms | 1 of 23 | 7 of 25 | 11 of 27 | 3 of 6 |
+| Gaps over 100 ms a minute | 5-10 | 8-12 | 0-3.3 | 3.3-4.7 |
+| Spike-seconds (drawn 100 ms later than usual) | 3 of 700 | 21 of 700 (18 host to guest) | 16 of 560 | 22 of 210 |
+| STATE messages a second, host / guest | 20 / 20 (bundled frames) | 270 / 30 | ~90 / 60 | ~90 / 60 |
+| A rider stopped for the rest of a race | none | 1 (3.6 s behind to the end, finish and results lost) | none; no flood-limit drop logged | none |
+| Results on both machines | the same | the same | the same | the same |
+
+Notes on the C column:
+
+- C's spike-seconds count "shown behind", which only rises once a stall has held the rider for
+  0.25 s, so stalls shorter than that don't count.
+- The prediction row leaves out one race spoiled by a skewed clock (below). With that race included,
+  the Mac's view of the PC has a distance p95 of 5.7 units.
+
+What it shows:
+
+- **Prediction:** another rider is drawn at the present and about a fifth of a unit from where it
+  really is. That's down from ~72 ms and ~5 units in 0.7.12, and ~175 ms and ~13 units in 0.7.11.
+- **Items 1-3 alone:** they bring the in-the-past delay from 66-82 to 47-56 ms. Bundling cuts the
+  host's messages from 270 to ~90 a second, and long gaps fall to 0-4 a minute.
+- **The receive-side stalls (Surprises) happen between the two machines too:** a window age p99 of
+  830-1000 ms in both directions.
+  - The rider is held, then catches up ("shown behind" up to 725-754 ms; distance p99 up to 35 units
+    in the worst race).
+  - Unlike 0.7.12, no rider stayed stopped for the rest of a race.
+- **A skewed round trip biases the shared clock.**
+  - In one session the Mac's round trip to the room rose to a 147-238 ms median (worst 668-959;
+    normally 66-76) for two races.
+  - The Mac's game then measured the PC's snapshots at −43 to 0 ms old, while the PC measured the
+    Mac's at 92-104. That's the same ~45 ms clock error seen from each side, around a true age near
+    50 ms.
+  - In one of those races the Mac drew the PC's rider 37-78 ms ahead of where it really was for the
+    whole race: 3.7 units p50, 7 p95.
+  - Every other race was within a few ms. Following the median round trip doesn't help when the
+    median itself is inflated for a whole race.
+- **Room WebSockets reset at race starts:** both games at once, 1006. This happened in 0.7.11 (3
+  sessions) and in this lane (2 of about 16 race starts).
+  - The rejoin was refused by a TCP reset, and the session ended.
+  - Nothing showed on the server, and a separate tail WebSocket from the same PC dropped at the
+    same moment once. So most likely it's the shared uplink or the edge, not the room code.
+  - 0.7.12 had one, in the lobby, and rejoined.
+
 ### For the lead
 
 - Protocol 4: the release must raise `MIN_VERSION` to it; 0.7.12 and this lane cannot race
   together (the server refuses the other protocol).
-- The PC<->Mac comparison (acceptance 4) is the other worker's run of this build; record it here.
+- The PC<->Mac comparison (acceptance 4) is recorded above.
+- Two follow-ups came out of it:
+  - the shared clock's offset when a player's round trip stays inflated for a whole race (the
+    Mac's view was 37-78 ms ahead);
+  - a host whose room WebSocket drops at a race start is refused on rejoin and loses the session.
 - The receive-side SCTP stalls (Surprises) are worth a transport lane; with the flood-limit fix they
   only hold a rider while they last.
 - `rustgs.py check --target aarch64-apple-darwin` needs a decision: ship a stand-in
