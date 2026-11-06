@@ -101,19 +101,28 @@ change with every isolate.
    npx wrangler d1 create dhd-moderation
    ```
 
-   Add its binding to `wrangler.jsonc` (the id is the one `d1 create` printed):
+   Add its binding to `wrangler.jsonc` with the id `d1 create` printed, and commit it: a
+   database id is not a secret (it is useless without the account's login), like the `routes`
+   entry. Once the official server's binding is in the file, a self-hosted server replaces
+   `database_id` with its own database's id, as it replaces `routes`:
 
    ```jsonc
    "d1_databases": [
-     { "binding": "MODERATION", "database_name": "dhd-moderation", "database_id": "<id>", "migrations_dir": "migrations" }
+     { "binding": "MODERATION", "database_name": "dhd-moderation", "database_id": "<id from d1 create>", "migrations_dir": "migrations" }
    ],
    ```
+
+   Then the tables (also after a pull that adds a file to `migrations/`):
 
    ```sh
    npx wrangler d1 migrations apply dhd-moderation --remote
    ```
 3. Deploy (not during races). `npx wrangler tail` shows `guard:` lines when the store can't be
    read (players are let in then) and the daily cleanup's counts.
+4. Check: `node tools/moderate.mjs online` says "Online is on." (and `bans` lists none).
+
+Never deploy a binding without its `database_id`: wrangler would then make a new, empty database
+without the tables.
 
 A store that can't be read lets players in (availability first) and logs it; the log keeps 14
 days (the daily cron in `wrangler.jsonc` deletes older rows and ended bans). Each server isolate

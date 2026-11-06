@@ -104,7 +104,8 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   OK (quick included: core, runtime tests, host build, net tests, renderer tests), the settings
   crate's tests OK, acceptance 3 against `wrangler dev` OK, the load test with the guard on OK.
   Left for the lead: the one-time setup in `online/server/README.md` ("Abuse guard: one-time
-  setup"), the deploy, and a real race once the game sends the install id.
+  setup", round 2: commit the `d1_databases` binding with its id, apply both migrations), the
+  deploy, and a real race once the game sends the install id.
 
 ## Decisions
 
@@ -159,8 +160,11 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   database's id, and wrangler's automatic provisioning would make a database on the next deploy
   without its tables. `README.md` gives the one-time steps (secret, `d1 create`, binding,
   `migrations apply`); tests bind a database through miniflare, local runs through the generated
-  `wrangler.guard-local.jsonc`. Whether the database id is committed is the maintainer's choice
-  (it is not a secret, but account-specific).
+  `wrangler.guard-local.jsonc`.
+- 2026-11-06, round 2 (the lead): the official database's id is committed in `wrangler.jsonc`
+  at deploy time, by the lead. It is not a secret (useless without the account's login), and
+  self-hosters already replace `routes`; the README tells them to replace `database_id` too. The
+  lane commits no id.
 - Fail open: a store that can't be read lets players in and logs `guard:` lines (`wrangler
   tail`). A broken store must not stop online for everyone; a ban that fails to hold for a few
   minutes costs less.
