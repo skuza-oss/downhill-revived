@@ -244,6 +244,108 @@ describe("A racer whose Realtime setup fails or never ends", () => {
   });
 });
 
+describe("Cleanup that fails", () => {
+  /** Every racer published and subscribed to every other; member 0 also has TURN credentials. */
+  async function allPublished(stub: DurableObjectStub) {
+    await runInDurableObject(stub, async (room: any) => {
+      room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token", TURN_KEY_ID: "key", TURN_KEY_API_TOKEN: "token" };
+      const ids = room.state.members.map((m: any) => m.id);
+      for (const m of room.state.members) {
+        m.sfu = publishedSession(m.id, ids.filter((id: number) => id !== m.id));
+        m.sfuRace = room.state.race.startAt;
+      }
+      room.state.members[2].turnUser = "u2";
+      room.state.members[2].turnUntil = Date.now() + 3_600_000;
+    });
+  }
+
+  it("still closes the others' subscriptions to a kicked racer and tries its own close again later", async () => {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    let down = true;
+    fake.fail = (path) => down && (path.endsWith("/revoke") || path.includes("/sessions/session-2/datachannels/close"));
+    try {
+      await allPublished(stub);
+      clients[0].sendJson({ type: "kick", member: 2 });
+      // Its revoke and its own close fail; the subscriptions to it close and the others hear so.
+      const closed0 = await clients[0].json("sfu_closed");
+      const closed1 = await clients[1].json("sfu_closed");
+      expect(closed0.channelIds.sort()).toEqual([202, 302]);
+      expect(closed1.channelIds.sort()).toEqual([212, 312]);
+      await runInDurableObject(stub, async (room: any) => {
+        await room.sfuQueue;
+        expect(room.state.members.map((m: any) => m.id)).toEqual([0, 1]);
+        expect(room.cleanup.map((x: any) => x.turnUser ?? x.session)).toEqual(["u2", "session-2"]);
+        expect(room.cleanup[1].channels.sort((a: number, b: number) => a - b)).toEqual([21, 22, 220, 221, 320, 321]);
+        expect((await room.ctx.storage.get("cleanup")).length).toBe(2);
+        // Not yet due: the alarm leaves it.
+        expect(room.cleanup.every((x: any) => x.at > Date.now())).toBe(true);
+      });
+      // A failed retry waits longer; then one that works drops it.
+      await runInDurableObject(stub, async (room: any) => { for (const x of room.cleanup) x.at = 0; });
+      await runDurableObjectAlarm(stub);
+      await runInDurableObject(stub, async (room: any) => {
+        expect(room.cleanup.map((x: any) => x.tries)).toEqual([1, 1]);
+        expect(room.cleanup.every((x: any) => x.at > Date.now() + 5_000)).toBe(true);
+        for (const x of room.cleanup) x.at = 0;
+      });
+      down = false;
+      const before = fake.calls.length;
+      await runDurableObjectAlarm(stub);
+      const retried = fake.calls.slice(before).map((c) => c.path.split("/").slice(-3).join("/"));
+      expect(retried).toEqual(["credentials/u2/revoke", "session-2/datachannels/close"]);
+      await runInDurableObject(stub, async (room: any) => {
+        expect(room.cleanup).toEqual([]);
+        expect(await room.ctx.storage.get("cleanup")).toBeUndefined();
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("closes every racer at the race's end past one failure, and keeps what failed after the room ends", async () => {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    // The first racer's session refuses to close (the old loop stopped there).
+    fake.fail = (path) => path.includes("/sessions/session-0/datachannels/close");
+    try {
+      await allPublished(stub);
+      clients[0].sendJson({ type: "end" });
+      await Promise.all(clients.map((c) => c.json("ended")));
+      await runInDurableObject(stub, async (room: any) => {
+        await room.sfuQueue;
+        expect(room.state.members.every((m: any) => m.sfu === undefined && m.turnUser === undefined)).toBe(true);
+        expect(room.cleanup.map((x: any) => x.session)).toEqual(["session-0"]);
+      });
+      const closes = fake.calls.filter((c) => c.path.endsWith("datachannels/close")).map((c) => c.path.split("/").at(-3));
+      expect(new Set(closes)).toEqual(new Set(["session-0", "session-1", "session-2"]));
+      expect(fake.calls.some((c) => c.path.endsWith("credentials/u2/revoke"))).toBe(true);
+      // Everyone leaves: the room ends, its cleanup stays with an alarm.
+      for (const c of clients) c.sendJson({ type: "leave" });
+      for (const c of clients) await c.closed();
+      await runInDurableObject(stub, async (room: any) => {
+        await room.sfuQueue;
+        expect(room.state).toBeNull();
+        expect((await room.ctx.storage.get("cleanup")).length).toBe(1);
+        expect(await room.ctx.storage.getAlarm()).not.toBeNull();
+        // Its time is up: dropped without another call.
+        room.cleanup[0].until = 0;
+      });
+      const before = fake.calls.length;
+      await runDurableObjectAlarm(stub);
+      expect(fake.calls.length).toBe(before);
+      await runInDurableObject(stub, async (room: any) => {
+        expect(room.cleanup).toEqual([]);
+        expect(await room.ctx.storage.get("cleanup")).toBeUndefined();
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
 describe("TURN over TLS fallback", () => {
   const ICE = { iceServers: [
     { urls: ["stun:stun.cloudflare.com:3478"] },

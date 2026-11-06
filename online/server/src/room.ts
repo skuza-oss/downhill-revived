@@ -1,6 +1,6 @@
 // One lobby and its race. Lobby control is JSON; the race is binary frames relayed to the other
 // racers through the SFU; this object owns lobby and signaling. Protocol: docs/online-protocol.md.
-import { Realtime, Turn, type SfuSession, type SfuSecrets } from "./sfu";
+import { Realtime, Turn, TURN_TTL_S, type SfuSession, type SfuSecrets } from "./sfu";
 import { DurableObject } from "cloudflare:workers";
 import { LISTING_REFRESH_MS, type LobbyEntry } from "./lobbies";
 import {
@@ -45,6 +45,30 @@ const SFU_SETUP_MS = 25_000;
 /** Sent to a racer whose Realtime setup failed or ran out of time; it is out of the race (the room
     stays). The footer holds about 45 characters. */
 const SFU_FAILED_MESSAGE = "Realtime connection failed: out of the race.";
+
+/** A Realtime session or TURN credential whose close failed (release review round 2, finding 158).
+    Kept apart from the members, under its own storage key that outlives the room ("cleanup"), and
+    tried again by the alarm until it closes or its time is up. */
+interface Cleanup {
+  /** An SFU session and its channels still open... */
+  session?: string;
+  channels?: number[];
+  /** ...or a TURN username not revoked. */
+  turnUser?: string;
+  /** Given up then: the credential's TTL ends it; a session gets SFU_CLEANUP_MS. */
+  until: number;
+  /** The next try, and the failed ones so far. */
+  at: number;
+  tries: number;
+}
+/** A failed close is tried again after 5 s, then twice as long each time, at most every 5 minutes. */
+const CLEANUP_FIRST_MS = 5_000;
+const CLEANUP_MAX_MS = 300_000;
+/** A session's channels are given up after an hour, as a TURN credential is. Cloudflare documents
+    no end for a connected DataChannel-only session (Realtime SFU limits: only a session that lost
+    its connection ends, after 30 s), and a game drops its association at the race's end, so only
+    a modified one keeps it that long. */
+const SFU_CLEANUP_MS = TURN_TTL_S * 1000;
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -93,6 +117,8 @@ interface Member {
       username, kept to revoke them; neither ever goes to a client but its own sfu_turn. */
   turnRace?: number;
   turnUser?: string;
+  /** When those credentials end by themselves (their TTL). */
+  turnUntil?: number;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -204,6 +230,8 @@ type Msg = Record<string, unknown> & { type: string };
 
 export class Room extends DurableObject<Env> {
   private sfuQueue: Promise<void> = Promise.resolve();
+  /** Resources still to close (Cleanup), also in storage under "cleanup". */
+  private cleanup: Cleanup[] = [];
   private state: RoomState | null = null;
   private sockets = new Map<number, WebSocket>();
   /** Round-trips from our pings, per member. Memory only; re-measured after a wake-up. */
@@ -237,6 +265,7 @@ export class Room extends DurableObject<Env> {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       this.state = (await ctx.storage.get<RoomState>("room")) ?? null;
+      this.cleanup = (await ctx.storage.get<Cleanup[]>("cleanup")) ?? [];
       for (const ws of ctx.getWebSockets()) {
         const info = ws.deserializeAttachment() as SocketInfo | null;
         if (info?.memberId != null) this.sockets.set(info.memberId, ws);
@@ -467,6 +496,7 @@ export class Room extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     const now = Date.now();
+    await this.retryCleanup(now);
     let pending = 0;
     for (const ws of this.ctx.getWebSockets()) {
       const info = ws.deserializeAttachment() as SocketInfo | null;
@@ -496,7 +526,9 @@ export class Room extends DurableObject<Env> {
       }
     const st = this.state;
     if (!st) {
-      if (pending) await this.ctx.storage.setAlarm(now + PING_INTERVAL_MS);
+      // An ended room still wakes for sockets waiting for hello and for its pending cleanup.
+      const at = Math.min(pending ? now + PING_INTERVAL_MS : Infinity, ...this.cleanup.map(x => Math.min(x.at, x.until)));
+      if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(now, at));
       return;
     }
     // Realtime setup not done in time (SFU_SETUP_MS): those racers are out, the rest go on.
@@ -797,7 +829,7 @@ export class Room extends DurableObject<Env> {
         }
         me.turnRace = race.startAt;
         await this.save();
-        if (me.turnUser) await this.revokeTurn(me);
+        await this.clearTurn(me);
         let minted: Awaited<ReturnType<Turn["mint"]>>;
         try {
           minted = await new Turn(this.env as Env & SfuSecrets).mint(`room-${this.state?.code ?? ""}-m${me.id}`);
@@ -807,8 +839,9 @@ export class Room extends DurableObject<Env> {
           return;
         }
         me.turnUser = minted.username;
-        if (this.state?.race !== race || !this.state.members.includes(me) || this.sockets.get(me.id) !== ws) {
-          await this.revokeTurn(me); await this.save(); return;
+        me.turnUntil = Date.now() + TURN_TTL_S * 1000;
+        if (!this.sfuCurrent(race, me) || this.sockets.get(me.id) !== ws) {
+          await this.clearTurn(me); await this.save(); return;
         }
         await this.save();
         this.send(ws, minted.message);
@@ -1161,33 +1194,119 @@ export class Room extends DurableObject<Env> {
   private async closeRaceSfu(st: RoomState): Promise<void> {
     const cleanup = this.sfuQueue.then(async () => {
       // A copy: a leave during an API call must not make the loop skip anyone.
-      for (const member of [...st.members]) if (member.sfu || member.turnUser) await this.clearSfu(member);
+      for (const member of [...st.members]) if (member.sfu || member.turnUser) {
+        try { await this.clearSfu(member); } catch (error) { console.warn("Realtime cleanup failed", String(error).slice(0, 80)); }
+      }
     });
     this.sfuQueue = cleanup.catch(() => {});
     await cleanup;
   }
 
-  /** Revokes a member's TURN credentials (kept until the revoke succeeds or the TTL ends them). */
-  private async revokeTurn(member: Member): Promise<void> {
+  /** Revokes a member's TURN credentials. A revoke that fails goes to the pending cleanup (until
+      the credentials' TTL ends them), so the username outlives the member. Never throws. */
+  private async clearTurn(member: Member): Promise<void> {
     const username = member.turnUser;
     if (!username) return;
-    await new Turn(this.env as Env & SfuSecrets).revoke(username);
-    if (member.turnUser === username) delete member.turnUser;
+    const until = member.turnUntil ?? Date.now() + TURN_TTL_S * 1000;
+    try {
+      await new Turn(this.env as Env & SfuSecrets).revoke(username);
+    } catch (error) {
+      console.warn("TURN revoke failed; tried again later", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+      await this.keepCleanup({ turnUser: username, until });
+    }
+    if (member.turnUser === username) {
+      delete member.turnUser;
+      delete member.turnUntil;
+    }
   }
 
+  /** Closes a member's SFU session and the other racers' subscriptions to it, and revokes its TURN
+      credentials. Never throws, and one failure doesn't stop the rest (release review round 2):
+      a session that doesn't close goes to the pending cleanup, retried by the alarm after the
+      member is gone; a subscription that doesn't close stays on its subscriber's session, which
+      closes it with the rest. */
   private async clearSfu(member: Member): Promise<void> {
     const api = new Realtime(this.env as Env & SfuSecrets);
-    try { await this.revokeTurn(member); } catch { /* logged; the TTL ends them */ }
-    if (member.sfu) await api.close(member.sfu);
+    await this.clearTurn(member);
+    const session = member.sfu;
+    if (session) {
+      delete member.sfu;
+      try {
+        await api.close(session);
+      } catch (error) {
+        console.warn("Realtime close failed; tried again later", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+        if (session.channels.length)
+          await this.keepCleanup({ session: session.id, channels: session.channels.map(c => c.channelId), until: Date.now() + SFU_CLEANUP_MS });
+      }
+    }
     for (const other of [...(this.state?.members ?? [])]) {
-      if (other.id === member.id || !other.sfu) continue;
-      const channels = other.sfu.channels.filter(c => !c.local && c.memberId === member.id);
+      const sub = other.sfu;
+      if (other.id === member.id || !sub) continue;
+      const channels = sub.channels.filter(c => !c.local && c.memberId === member.id);
       if (!channels.length) continue;
-      await api.close(other.sfu, channels);
+      try {
+        await api.close(sub, channels);
+      } catch (error) {
+        console.warn("Realtime close failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+      }
+      // Told either way: the publication is gone for it (the room said so).
       const peer = this.sockets.get(other.id);
       if (peer) this.send(peer, { type: "sfu_closed", channelIds: channels.map(c => c.channelId) });
     }
-    delete member.sfu;
+  }
+
+  /** Adds a resource to the pending cleanup and stores it. */
+  private async keepCleanup(item: Omit<Cleanup, "at" | "tries">): Promise<void> {
+    this.cleanup.push({ ...item, at: Date.now() + CLEANUP_FIRST_MS, tries: 0 });
+    await this.saveCleanup();
+  }
+
+  /** Stores the pending cleanup (apart from the room, which may have ended) and makes sure an
+      alarm comes for it. */
+  private async saveCleanup(): Promise<void> {
+    if (!this.cleanup.length) {
+      await this.ctx.storage.delete("cleanup");
+      return;
+    }
+    await this.ctx.storage.put("cleanup", this.cleanup);
+    const at = Math.min(...this.cleanup.map(x => Math.min(x.at, x.until)));
+    const alarm = await this.ctx.storage.getAlarm();
+    if (alarm === null || alarm > at) await this.ctx.storage.setAlarm(at);
+  }
+
+  /** Tries the pending cleanup that is due again, in the SFU queue; what closes or has run out of
+      time is dropped, what fails waits twice as long (CLEANUP_MAX_MS at most). */
+  private async retryCleanup(now: number): Promise<void> {
+    if (!this.cleanup.some(x => x.at <= now || x.until <= now)) return;
+    const run = this.sfuQueue.then(async () => {
+      const api = new Realtime(this.env as Env & SfuSecrets), turn = new Turn(this.env as Env & SfuSecrets);
+      for (const item of [...this.cleanup]) {
+        let done = item.until <= now;
+        if (done) console.warn("Realtime cleanup given up: its time is up");
+        else if (item.at <= now) {
+          try {
+            if (item.turnUser) await turn.revoke(item.turnUser);
+            else if (item.session && item.channels?.length) {
+              const session: SfuSession = { id: item.session, phase: "failed",
+                channels: item.channels.map(channelId => ({ memberId: -1, name: "", channelId, local: true })) };
+              try {
+                await api.close(session);
+              } finally {
+                item.channels = session.channels.map(c => c.channelId);
+              }
+            }
+            done = true;
+          } catch {
+            item.tries++;
+            item.at = Date.now() + Math.min(CLEANUP_MAX_MS, CLEANUP_FIRST_MS * 2 ** item.tries);
+          }
+        }
+        if (done) this.cleanup = this.cleanup.filter(x => x !== item);
+      }
+      await this.saveCleanup();
+    });
+    this.sfuQueue = run.catch(() => {});
+    await run.catch((error) => console.warn("Realtime cleanup failed", String(error).slice(0, 80)));
   }
 
   /** Racers whose Realtime setup failed for good or ran out of time (SFU_SETUP_MS) leave the race
@@ -1370,6 +1489,8 @@ export class Room extends DurableObject<Env> {
     this.rebuildRace();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    // What didn't close outlives the room (Cleanup): stored again, with its alarm.
+    if (this.cleanup.length) await this.saveCleanup();
     // Sockets still waiting for hello get room_not_found then; keep their timeout running.
     if (this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(Date.now() + PING_INTERVAL_MS);
   }

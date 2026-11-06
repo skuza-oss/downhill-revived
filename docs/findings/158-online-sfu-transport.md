@@ -248,6 +248,13 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   not try again. Setup now has a deadline (25 s from the start, from the measured 0.2-3.1 s plus
   ten racers' calls); a racer that fails or misses it is out of the race as one who leaves, and
   the others are released without it (`docs/online-protocol.md`, server tests).
+- Release review round 2: teardown lost its only handles when a close or revoke failed: a
+  departed member was removed first, so its session id and TURN username went with it, and the
+  race-end loop stopped at the first failure. Teardown now goes on past failures, and what did not
+  close is stored apart from the members (and the room) and retried by the alarm with backoff
+  until it closes or its time is up. Cloudflare's SFU docs give a connected DataChannel-only
+  session no end ("close resources when finished"; retain cleanup state while retrying), so the
+  room gives up after an hour, as the TURN TTL does.
 
 ## Result
 

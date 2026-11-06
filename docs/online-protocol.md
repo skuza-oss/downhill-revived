@@ -257,7 +257,14 @@ so the game sees start before buffered events. Channels close at race end.
   to all racing members only after every member acknowledges. Until then, race frames stay
   queued locally so reliable events cannot precede a subscriber.
 - Departures and replacements send `{"type":"sfu_closed","channelIds":[10,12]}` only to
-  affected endpoints, after closing those allocations through the API.
+  affected endpoints, after closing those allocations through the API (a subscription that
+  doesn't close is announced all the same and closes with its subscriber's session).
+- Teardown goes on past a failed close or revoke. A session's channels or a TURN username that
+  did not close is kept in the room's pending cleanup, stored apart from the members (it outlives
+  the member and the room), and tried again by the room's alarm: after 5 s, then twice as long
+  each time up to every 5 minutes, until it succeeds or its time is up (a credential's 1-hour
+  TTL; an hour for a session, as Cloudflare documents no end for a connected DataChannel-only
+  session).
 - TURN over TLS, for networks that block UDP (finding 158, round 4). The client tries UDP to the
   SFU first. If its association has not connected 2 s after `sfu_answer`, it sends
   `{"type":"sfu_turn"}`. The DO accepts that once per member per race, only from a racer with an
