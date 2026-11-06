@@ -278,7 +278,9 @@ enum {
     EVENT_VERSION = 2, EVENT_HIT = 1, EVENT_LOADED = 2, EVENT_SETUP = 3, EVENT_START = 4, EVENT_GO = 5,
     EVENT_FINISH = 6, EVENT_RESULTS = 7, EVENT_PICKUP = 9  /* 8 was 0.7.3's rematch (TRY AGAIN / NEW LEVEL in the race) */
 };
-enum { SNAPSHOT_TICKS = 2 };  /* a snapshot every 2 race ticks: 30 a second at any frame rate */
+/* Snapshots: this PC's own rider every race tick (60 a second at any frame rate), the AI riders it
+   runs every AI_SNAPSHOT_TICKS (30 a second; finding 169). */
+enum { AI_SNAPSHOT_TICKS = 2 };
 enum { NRIDERS = 10, START_LEAD_MS = 1500 };
 _Static_assert(2 + STATE_BUNDLE_MAX <= NET_FRAME_MAX, "a STATE bundle fits one frame");
 #define RACE_CLOCK EE32(0x43EEC8)
@@ -324,7 +326,7 @@ static struct {
        moment; the players it still waits for (start_waiting: the first) */
     double start_entered, start_said;
     int start_announced, start_missing, start_waiting;
-    int last_sent;              /* race clock of the last snapshot sent */
+    int last_sent, last_ai_sent; /* race clock of the last snapshots sent: this PC's rider, the AI */
     unsigned sent, received;    /* rider snapshots */
     unsigned bundles_sent;      /* STATE messages (bundles) */
     /* the finish (global rider ids: humans 0..nslots-1, AI riders their slot) */
@@ -1309,14 +1311,15 @@ static void check_left(void)
     }
 }
 
-/* This tick's snapshots of the riders this PC runs, bundled (state_bundle.h, finding 169): as
-   few messages as fit one datagram each, stamped with the server's clock. */
-static void send_snapshots(void)
+/* This tick's snapshots of the riders this PC runs (ai: the AI riders' too), bundled
+   (state_bundle.h, finding 169): as few messages as fit one datagram each, stamped with the
+   server's clock. */
+static void send_snapshots(int ai)
 {
     static uint8_t rec[NRIDERS][STATE_RECORD_MAX], bundle[STATE_BUNDLE_RIDERS][STATE_BUNDLE_MAX];
     const uint8_t *recs[NRIDERS];
     int size[NRIDERS], slots[NRIDERS], count = 0, bundle_size[STATE_BUNDLE_RIDERS];
-    for (int slot = 0; slot < hle_online_race_riders() && count < NRIDERS; slot++) {
+    for (int slot = 0; slot < (ai ? hle_online_race_riders() : 1) && count < NRIDERS; slot++) {
         int n = hle_puppet_pack(slot, rec[count], STATE_RECORD_MAX);
         if (n <= 0) continue;
         recs[count] = rec[count], size[count] = n, slots[count++] = slot;
@@ -1387,9 +1390,11 @@ static void state_sync(void)
             set_env("DHD_NAV", script);
         }
     }
-    if (!race_running() || clock < on.last_sent + SNAPSHOT_TICKS && clock >= on.last_sent) return;
-    on.last_sent = clock - clock % SNAPSHOT_TICKS;
-    send_snapshots();
+    if (!race_running() || clock == on.last_sent) return;
+    int ai = clock >= on.last_ai_sent + AI_SNAPSHOT_TICKS || clock < on.last_ai_sent;
+    on.last_sent = clock;
+    if (ai) on.last_ai_sent = clock - clock % AI_SNAPSHOT_TICKS;
+    send_snapshots(ai);
     while ((n = hle_puppet_take_event(payload, sizeof payload)) > 0) send_event(payload, n);
     static double last_title;
     if (host_wall_seconds() - last_title > 1) {

@@ -8,12 +8,13 @@ typedef struct PadSender {
     uint32_t last[PAD_WORDS];
     uint8_t repeats[PAD_WORDS];
     unsigned count;
+    unsigned period;  /* a full update every this many (0: 30) */
 } PadSender;
-/* Caller reserves 1 + 146*5 bytes. First update and each thirtieth are full. */
+/* Caller reserves 1 + 146*5 bytes. Updates whose count is a multiple of the period are full. */
 static int pad_snapshot_pack(PadSender *p, const uint32_t *pad, uint8_t *out)
 {
     uint8_t *o = out + 1;
-    int full = p->count++ % 30 == 0;
+    int full = p->count++ % (p->period ? p->period : 30) == 0;
     *out = 0;
     for (int i = 0; i < PAD_WORDS; i++) {
         if (i >= PREV_FIRST && i <= PREV_LAST) continue;

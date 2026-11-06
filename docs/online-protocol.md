@@ -327,7 +327,8 @@ State sync: a STATE frame is one bundle of the sender's rider snapshots (payload
 4, finding 169; `port/hle/state_bundle.h`), at most 990 bytes so that the frame with its 8-byte race
 marker stays at or under 1,000 bytes: one SCTP chunk (str0m's is 1,062 bytes), since a STATE
 message split over several datagrams is lost whole when any of them is. A PC with more riders
-than fit (a host with its AI riders) sends several bundles for one tick.
+than fit (a host with its AI riders) sends several bundles for one tick. A player's own rider is
+sent every race tick (60 a second), AI riders every second tick (30 a second).
 
 | Offset | Size | Field |
 |---|---|---|
@@ -342,7 +343,7 @@ time (i32 ms since its GO), position, orientation (3 rows), velocity and angular
 each), the wheels (4 f32), the wheel contacts (2 u8), the State (u16), crash flags and kind,
 checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad words as index (u8)
 and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
-all 146 words are sent every 30 records (each rider at another phase, so two full records seldom
+all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom
 share a tick); previous-action words 25-49 are rebuilt locally. Receivers check the whole bundle
 first, then reject each record older than the newest they hold for that rider before changing its
 pad mirror. EVENT remains payload version 2. The SFU reads none of the gameplay payload.

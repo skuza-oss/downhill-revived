@@ -167,8 +167,9 @@ fn read_socket(socket: UdpSocket, inbox: Inbox, alive: Arc<AtomicBool>, failed: 
 }
 
 // Per bundle index (a STATE message's byte 3, port/hle/state_bundle.h): four times the normal
-// rate, with a 120-packet burst allowance. Exceeding it silences this member (including events)
+// rate (bundle 0 carries a player's own rider, 60 a second), so 240 a second. Exceeding it silences this member (including events)
 // until the next race.
+const FLOOD_PER_SECOND: u16 = 240;
 struct SenderRate { since: Instant, count: [u16; 10], blocked: bool }
 impl SenderRate {
     fn new() -> Self { Self { since: Instant::now(), count: [0; 10], blocked: false } }
@@ -176,7 +177,7 @@ impl SenderRate {
         if self.blocked { return false; }
         if now.duration_since(self.since).as_secs() >= 1 { self.count = [0; 10]; self.since = now; }
         self.count[rider as usize] += 1;
-        self.blocked = self.count[rider as usize] > 120;
+        self.blocked = self.count[rider as usize] > FLOOD_PER_SECOND;
         !self.blocked
     }
 }
@@ -587,7 +588,7 @@ mod tests {
     fn snapshot_flood_silences_member_for_race() {
         let mut rate = SenderRate::new();
         let now = rate.since;
-        for _ in 0..120 { assert!(rate.accept(0, now)); }
+        for _ in 0..FLOOD_PER_SECOND { assert!(rate.accept(0, now)); }
         assert!(rate.accept(1, now));
         assert!(!rate.accept(0, now));
         assert!(!rate.accept(1, now + Duration::from_secs(2)));

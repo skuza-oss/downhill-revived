@@ -17,7 +17,8 @@
    snapshot's crash bit rises it starts the same crash, which then plays out here (the bike and
    the thrown body are simulated locally until the respawn).
 
-   Snapshots arrive about 30 a second. Each puppet keeps the last few and shows the remote rider
+   Snapshots arrive 60 a second for a player's own rider, 30 for the AI riders (finding 169). Each
+   puppet keeps the last few and shows the remote rider
    DELAY behind the newest it has (interpolated between the two around that moment, a short
    extrapolation when one is late); the remote clock is estimated from the arrivals. Every PC
    runs at its own frame rate (30-240), so the clocks here are race time in seconds, not ticks:
@@ -28,7 +29,7 @@
    DHD_PUPPET_RECORD=file   each race step, a snapshot of rider DHD_PUPPET_FROM (default 0)
    DHD_PUPPET_PLAY=file     replay those snapshots onto slot DHD_PUPPET_SLOT (default 1), one in
                             DHD_PUPPET_RATE (default 2) ticks arriving as it was taken
-   DHD_PUPPET_DELAY=ms      fixed delay override in ms (otherwise adaptive, 50-150)
+   DHD_PUPPET_DELAY=ms      fixed delay override in ms (otherwise adaptive, 30-150)
    DHD_PUPPET_CAMERA=1      player 0's camera follows the puppet (slot DHD_PUPPET_SLOT, online too)
    DHD_PUPPET_TRACE=file    each race step, each puppet as shown: race time here, the sender's
                             race time it shows, slot, position (text; tests, finding 114)
@@ -246,7 +247,7 @@ static void blend_rotation(float out[3][4], const float a[3][4], const float b[3
 
 static double puppet_delay(const Puppet *p)
 {
-    return pp.delay >= 0 ? pp.delay : fmin(0.150, fmax(0.050, p->interval + 2 * p->jitter));
+    return pp.delay >= 0 ? pp.delay : fmin(0.150, fmax(0.030, p->interval + 2 * p->jitter));
 }
 
 /* What to show now: the remote rider pp.delay behind its newest snapshot (out->time: that moment
@@ -408,8 +409,9 @@ void hle_puppet_start(void)
         memset(&p->sent_pad, 0, sizeof p->sent_pad);
         /* Full refreshes (834 bytes) at different sends for different riders, so two seldom share
            a tick and one bundle (finding 169): the AI riders' 30 phases 3 apart, this PC's rider
-           at its first send. */
+           at its first send and then once a second (it sends 60 a second, the AI 30). */
         p->sent_pad.count = (unsigned)(30 - 3 * i) % 30;
+        p->sent_pad.period = i ? 30 : 60;
         if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_offset = 0, p->offset = 0, p->remote_crash = 0;

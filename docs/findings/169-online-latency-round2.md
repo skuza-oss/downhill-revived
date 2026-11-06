@@ -67,6 +67,10 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       ten riders with eight changing pad words fit at most 3 bundles a tick, the largest 987 bytes,
       never two full refreshes in one tick. Protocol 4 (server and client). nettool's replay and
       bot modes read and send bundles.
+- [x] Item 2, 60 a second for each player's own rider: sent every race tick, the AI riders every
+      second tick (30 a second); the own rider's full pad refresh once a second (every 60 sends),
+      the AI's every 30; the adaptive delay's floor 30 ms (was 50); the SFU client's flood limit
+      240 messages a second per bundle index (4x the own rider's 60).
 
 ## Decisions
 
