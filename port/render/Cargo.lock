@@ -485,6 +485,7 @@ name = "dhd_net"
 version = "1.0.0"
 dependencies = [
  "httparse",
+ "ring",
  "rustls",
  "serde_json",
  "str0m",

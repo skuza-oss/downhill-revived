@@ -12,6 +12,11 @@
 //! DHD_PROBE_SECONDS (default 30), DHD_PROBE_RIDERS (snapshots per 30 Hz tick, default 1; 10 is a
 //! host with nine AI riders), DHD_PROBE_RIDERS_B (the second client's, default the same),
 //! DHD_PROBE_BYTES (snapshot size, default 150). Runs longer than 30 s also print each 30 s window.
+//!
+//! The TURN fallback (round 4): with DHD_NET_SFU_UDP=0 both clients drop every UDP datagram to and
+//! from the SFU, ask this stand-in room for TURN credentials after the direct timeout, and reach
+//! the SFU through Cloudflare's TURN service over TLS on 443. The stand-in mints them with the TURN
+//! key (TURN_KEY_ID / TURN_KEY_API_TOKEN, same sources) and revokes them at the end.
 use super::Sfu;
 use crate::{ws_send, ws_start, ws_stop, WsConn, WsHandler};
 use serde_json::{json, Value};
@@ -29,31 +34,47 @@ fn epoch() -> Instant {
     *E.get_or_init(Instant::now)
 }
 
-fn credentials() -> (String, String) {
-    if let (Ok(a), Ok(t)) = (std::env::var("REALTIME_APP_ID"), std::env::var("REALTIME_APP_TOKEN")) {
-        return (a, t);
-    }
+/// A secret from the environment, else from the server's gitignored `.dev.vars`; never printed.
+fn secret(k: &str) -> String {
+    if let Ok(v) = std::env::var(k) { return v; }
     let dir = std::env::var("CARGO_MANIFEST_DIR").expect("run through cargo");
     let file = std::path::Path::new(&dir).join("../../../online/server/.dev.vars");
     let text = std::fs::read_to_string(file).expect("online/server/.dev.vars");
-    let get = |k: &str| {
-        text.lines()
-            .find_map(|l| l.trim().strip_prefix(k).and_then(|r| r.trim_start().strip_prefix('=')))
-            .map(|v| v.trim().trim_matches('"').to_string())
-            .expect("credential missing")
-    };
-    (get("REALTIME_APP_ID"), get("REALTIME_APP_TOKEN"))
+    text.lines()
+        .find_map(|l| l.trim().strip_prefix(k).and_then(|r| r.trim_start().strip_prefix('=')))
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .expect("credential missing")
 }
 
 /// One Realtime API call (HTTP/1.1, Connection: close).
 fn api(method: &str, path: &str, body: &Value) -> Value {
-    let (app, token) = credentials();
+    let (app, token) = (secret("REALTIME_APP_ID"), secret("REALTIME_APP_TOKEN"));
+    call(method, &format!("/v1/apps/{app}/{path}"), &token, body)
+}
+
+/// TURN credentials for one client, as the room mints them (online/server/src/sfu.ts Turn).
+fn turn_credentials(tag: &str) -> (String, Value) {
+    let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
+    let r = call("POST", &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"), &token, &json!({"ttl": 3600, "customIdentifier": tag}));
+    let server = r["iceServers"].as_array().unwrap().iter().find(|s| s["username"].is_string()).unwrap().clone();
+    let urls: Vec<Value> = server["urls"].as_array().unwrap().iter().filter(|u| u.as_str().is_some_and(|u| u.starts_with("turns:"))).cloned().collect();
+    let user = server["username"].as_str().unwrap().to_string();
+    (user.clone(), json!({"type":"sfu_turn","urls":urls,"username":user,"credential":server["credential"]}))
+}
+
+fn revoke_turn(user: &str) {
+    let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
+    call("POST", &format!("/v1/turn/keys/{key}/credentials/{user}/revoke"), &token, &Value::Null);
+}
+
+/// One HTTPS call to rtc.live.cloudflare.com; panics on a status outside 2xx. A 204 is Null.
+fn call(method: &str, path: &str, token: &str, body: &Value) -> Value {
     let uri: tungstenite::http::Uri = "https://rtc.live.cloudflare.com/".parse().unwrap();
     let (mut s, tcp) = crate::stream::open(&uri, true).expect("Realtime API connection");
     let _ = tcp.set_read_timeout(Some(Duration::from_secs(15)));
-    let body = body.to_string();
+    let body = if body.is_null() { String::new() } else { body.to_string() };
     let request = format!(
-        "{method} /v1/apps/{app}/{path} HTTP/1.1\r\nHost: rtc.live.cloudflare.com\r\nAuthorization: Bearer {token}\r\n\
+        "{method} {path} HTTP/1.1\r\nHost: rtc.live.cloudflare.com\r\nAuthorization: Bearer {token}\r\n\
          Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
@@ -69,10 +90,12 @@ fn api(method: &str, path: &str, body: &Value) -> Value {
     let start = match r.parse(&data) { Ok(httparse::Status::Complete(n)) => n, _ => panic!("no HTTP response") };
     let chunked = r.headers.iter().any(|h| h.name.eq_ignore_ascii_case("transfer-encoding")
         && String::from_utf8_lossy(h.value).to_ascii_lowercase().contains("chunked"));
-    assert!(r.code.is_some_and(|c| (200..300).contains(&c)), "Realtime API {path}: {:?}", r.code);
+    let what = path.rsplit('/').next().unwrap_or("");
+    assert!(r.code.is_some_and(|c| (200..300).contains(&c)), "Realtime API {what}: {:?}", r.code);
+    if r.code == Some(204) { return Value::Null; }
     let body = if chunked { crate::http::dechunk(&data[start..]).unwrap() } else { data[start..].to_vec() };
     let v: Value = serde_json::from_slice(&body).expect("Realtime JSON");
-    assert!(v.get("errorCode").is_none(), "Realtime error on {}", path.split('/').next_back().unwrap_or(""));
+    assert!(v.get("errorCode").is_none(), "Realtime error on {what}");
     v
 }
 
@@ -185,6 +208,7 @@ struct Room {
     published: [bool; 2],
     ready: [bool; 2],
     out: Vec<mpsc::Sender<String>>,
+    turn_users: Vec<String>,
 }
 
 fn serve(room: Arc<Mutex<Room>>, me: usize, mut ws: tungstenite::WebSocket<TcpStream>, out: mpsc::Receiver<String>) {
@@ -226,6 +250,13 @@ fn serve(room: Arc<Mutex<Room>>, me: usize, mut ws: tungstenite::WebSocket<TcpSt
                     send(&r, me, json!({"type":"sfu_channels","channels":sub_me}));
                     send(&r, other, json!({"type":"sfu_channels","channels":sub_other}));
                 }
+            }
+            Some("sfu_turn") => {
+                let (user, message) = turn_credentials(&format!("probe-m{member}"));
+                let mut r = room.lock().unwrap();
+                r.turn_users.push(user);
+                eprintln!("probe: client {me} asked for TURN credentials");
+                send(&r, me, message);
             }
             Some("sfu_ready") => {
                 let mut r = room.lock().unwrap();
@@ -279,9 +310,11 @@ fn probe_sfu_one_way_delay() {
         let r = room.lock().unwrap();
         for who in 0..2 { r.out[who].send(json!({"type":"start","startAt":RACE,"players":players}).to_string()).unwrap(); }
     }
-    let until = Instant::now() + Duration::from_secs(40);
+    let setup = Instant::now();
+    let until = setup + Duration::from_secs(40);
     while !rx.iter().all(|r| r.lock().unwrap().ready) { assert!(Instant::now() < until, "SFU setup timed out"); std::thread::sleep(Duration::from_millis(5)); }
-    eprintln!("probe: SFU ready; {seconds} s at 30 Hz, {riders:?} snapshot(s) of {size} bytes per tick per client");
+    eprintln!("probe: SFU ready {} ms after start; {seconds} s at 30 Hz, {riders:?} snapshot(s) of {size} bytes per tick per client",
+        setup.elapsed().as_millis());
     std::thread::sleep(Duration::from_millis(500));
     for r in &rx { r.lock().unwrap().clear(); }
     let start = Instant::now();
@@ -299,6 +332,9 @@ fn probe_sfu_one_way_delay() {
     for (me, r) in rx.iter().enumerate() { r.lock().unwrap().report(&format!("client {me}"), ticks); }
     for c in clients { unsafe { ws_stop(c as *mut WsConn) }; }
     for s in servers { let _ = s.join(); }
+    let users = std::mem::take(&mut room.lock().unwrap().turn_users);
+    for user in &users { revoke_turn(user); }
+    if !users.is_empty() { eprintln!("probe: revoked {} TURN credential(s)", users.len()); }
 }
 
 /// The same two sessions with no thread loop: one thread sends on each tick and busy-polls both
@@ -390,4 +426,50 @@ fn probe_sfu_direct() {
         eprintln!("probe: direct client {who} send(): write to first datagram ms p50 {:.2} p99 {:.2} max {:.2} ({} writes)",
             percentile(&tx, 0.5), percentile(&tx, 0.99), tx.last().copied().unwrap_or(f64::NAN), tx.len());
     }
+}
+
+/// The TURN relay alone (round 4): credentials as the room mints them, an allocation over TLS on
+/// 443, then a channel to a fresh SFU session's candidate (the SFU's own address); each step timed.
+/// DHD_PROBE_PEER=ip:port binds to another peer instead.
+#[test]
+#[ignore = "needs the network and TURN credentials"]
+fn probe_turn_allocate() {
+    let (user, message) = turn_credentials("probe-allocate");
+    let (host, port) = super::turns_server(&message["urls"]).unwrap();
+    let start = Instant::now();
+    let link = crate::relay::Link::open(&host, port, Arc::new(|| {}));
+    let mut client = crate::turn::Client::new(&user, message["credential"].as_str().unwrap(), Instant::now());
+    let until = start + Duration::from_secs(15);
+    while !link.ready() { assert!(!link.failed() && Instant::now() < until, "TLS link"); std::thread::sleep(Duration::from_millis(1)); }
+    eprintln!("probe: TLS to {host}:{port} ready after {} ms", start.elapsed().as_millis());
+    let pump = |client: &mut crate::turn::Client| {
+        link.write(&client.output());
+        let bytes = link.take();
+        if !bytes.is_empty() { client.receive(&bytes, Instant::now()); }
+        client.tick(Instant::now());
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    while client.relayed.is_none() {
+        assert!(Instant::now() < until && client.failed().is_none() && !link.failed(), "allocation: {:?}", client.failed());
+        pump(&mut client);
+    }
+    eprintln!("probe: TURN allocation after {} ms", start.elapsed().as_millis());
+    let (_sfu, offer) = Sfu::start(Arc::new(|| {})).unwrap();
+    let answer = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
+    let peer = std::env::var("DHD_PROBE_PEER").ok().and_then(|p| p.parse().ok()).unwrap_or_else(|| {
+        let line = answer["sessionDescription"]["sdp"].as_str().unwrap().lines()
+            .find(|l| l.starts_with("a=candidate:") && l.split_whitespace().nth(2).is_some_and(|t| t.eq_ignore_ascii_case("udp"))).unwrap().to_string();
+        let p: Vec<&str> = line.split_whitespace().collect();
+        format!("{}:{}", p[4], p[5]).parse().unwrap()
+    });
+    let bind = Instant::now();
+    client.send_to(peer, &[0u8; 20], bind);
+    while client.output_pending() || client.binding() {
+        assert!(Instant::now() < bind + Duration::from_secs(5) && client.failed().is_none(), "channel bind: {:?}", client.failed());
+        pump(&mut client);
+    }
+    eprintln!("probe: channel to the SFU bound after {} ms", bind.elapsed().as_millis());
+    client.close(Instant::now());
+    link.write(&client.output());
+    revoke_turn(&user);
 }

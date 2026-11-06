@@ -1,6 +1,10 @@
 //! One SFU association per room, owned exclusively by the WebSocket send thread. A reader thread
 //! blocks on the UDP socket and wakes that thread for every datagram, so input waits for neither
-//! the send thread's tick nor the OS timer (finding 158, round 3).
+//! the send thread's tick nor the OS timer (finding 158, round 3). When UDP to the SFU does not
+//! connect within DIRECT_TIMEOUT, the room is asked for TURN credentials and a TURN allocation over
+//! TLS on 443 (`turn.rs`, `relay.rs`) adds a relayed candidate: the SFU is then reached through
+//! Cloudflare's TURN service (round 4).
+use crate::{relay, turn};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io::ErrorKind;
@@ -21,6 +25,20 @@ type Inbox = Arc<Mutex<VecDeque<(Instant, SocketAddr, Vec<u8>)>>>;
 const INBOX: usize = 1024;
 /// How often the reader looks whether its association was dropped.
 const READER_CHECK: Duration = Duration::from_millis(100);
+/// UDP to the SFU that has not connected this long after the answer falls back to a TURN relay
+/// over TLS. Direct setup is an ICE check and the DTLS handshake, about four round trips to the
+/// nearest Cloudflare location (8-40 ms each for most players, 150 ms far from one): well under a
+/// second, with room for a lost packet's retransmission. Waiting longer only delays the race start
+/// for players behind a UDP block; going sooner would put players with a slow first packet on the
+/// relay for nothing (finding 158, round 4).
+pub const DIRECT_TIMEOUT: Duration = Duration::from_millis(2000);
+/// The relay in use: the TURN client, its TLS stream and the relayed address once allocated.
+struct Relay {
+    client: turn::Client,
+    link: relay::Link,
+    relayed: Option<SocketAddr>,
+    since: Instant,
+}
 struct Channel {
     id: ChannelId,
     member: u64,
@@ -49,6 +67,16 @@ pub struct Sfu {
     pending_events: VecDeque<(Instant, Vec<u8>)>,
     pending_state: HashMap<u8, (Instant, Vec<u8>)>,
     rates: HashMap<u64, SenderRate>,
+    wake: Wake,
+    /// False with DHD_NET_SFU_UDP=0: a test switch that drops every UDP datagram to and from the
+    /// SFU, as a network that blocks UDP does, so the TURN/TLS fallback must carry the race.
+    direct: bool,
+    answered_at: Option<Instant>,
+    turn_asked: bool,
+    relay: Option<Relay>,
+    /// Whether the last datagram str0m got came through the relay; at Connected, the path used.
+    last_in_relayed: bool,
+    via_relay: bool,
     #[cfg(test)]
     probe: ProbeTimes,
 }
@@ -70,6 +98,8 @@ struct Stats {
     send_waits_over_5ms: u32,
     poll_gap_max: f64,
     inbox_max: usize,
+    relayed_in: u32,
+    relayed_out: u32,
 }
 impl Stats {
     fn input(&mut self, waited: Duration) {
@@ -84,16 +114,16 @@ impl Stats {
         self.send_waits_over_5ms += (ms > 5.0) as u32;
     }
     /// Notes a poll; every 30 s of a race, the line for dhd.log.
-    fn poll(&mut self, now: Instant, inbox: usize, racing: bool) -> Option<String> {
+    fn poll(&mut self, now: Instant, inbox: usize, racing: bool, via: &str) -> Option<String> {
         if let Some(last) = self.last_poll { self.poll_gap_max = self.poll_gap_max.max((now - last).as_secs_f64() * 1e3); }
         self.last_poll = Some(now);
         self.inbox_max = self.inbox_max.max(inbox);
         let since = *self.since.get_or_insert(now);
         if now - since < Duration::from_secs(30) { return None; }
         let line = format!(
-            "net: SFU 30 s: datagrams {} in, {} out; input wait max {:.1} ms ({} over 5 ms); send wait max {:.1} ms ({} over 5 ms); poll gap max {:.1} ms; inbox max {}",
-            self.datagrams_in, self.datagrams_out, self.input_wait_max, self.input_waits_over_5ms, self.send_wait_max,
-            self.send_waits_over_5ms, self.poll_gap_max, self.inbox_max);
+            "net: SFU 30 s via {via}: datagrams {} in, {} out ({} in, {} out relayed); input wait max {:.1} ms ({} over 5 ms); send wait max {:.1} ms ({} over 5 ms); poll gap max {:.1} ms; inbox max {}",
+            self.datagrams_in, self.datagrams_out, self.relayed_in, self.relayed_out, self.input_wait_max, self.input_waits_over_5ms,
+            self.send_wait_max, self.send_waits_over_5ms, self.poll_gap_max, self.inbox_max);
         *self = Stats { since: Some(now), last_poll: Some(now), ..Default::default() };
         racing.then_some(line)
     }
@@ -155,6 +185,7 @@ impl Sfu {
         let (reader_alive, reader_failed) = (Arc::new(AtomicBool::new(true)), Arc::new(AtomicBool::new(false)));
         {
             let (socket, inbox, alive, failed) = (socket.try_clone()?, inbox.clone(), reader_alive.clone(), reader_failed.clone());
+            let wake = wake.clone();
             std::thread::Builder::new().name("dhd-sfu-read".into()).spawn(move || read_socket(socket, inbox, alive, failed, wake))?;
         }
         let mut rtc = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
@@ -164,8 +195,11 @@ impl Sfu {
         let (offer, pending) = change.apply().ok_or("No transport offer")?;
         let message = json!({ "type": "sfu_offer", "sdp": offer.to_sdp_string() });
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
+        let direct = std::env::var("DHD_NET_SFU_UDP").map_or(true, |v| v.trim() != "0");
+        if !direct { eprintln!("net: SFU: DHD_NET_SFU_UDP=0, direct UDP to the SFU is blocked (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
             connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
+            wake, direct, answered_at: None, turn_asked: false, relay: None, last_in_relayed: false, via_relay: false,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -178,6 +212,15 @@ impl Sfu {
             }).collect::<Vec<_>>().join("\r\n") + "\r\n";
             let pending = self.pending.take().ok_or("Unexpected answer")?;
             self.rtc.sdp_api().accept_answer(pending, SdpAnswer::from_sdp_string(&filtered)?)?;
+            self.answered_at = Some(Instant::now());
+        } else if message["type"] == "sfu_turn" {
+            // Credentials for this player only (the room mints them for a racer that asks).
+            if self.relay.is_some() || !self.turn_asked { return Err("Unexpected TURN credentials".into()); }
+            let field = |k: &str| message[k].as_str().filter(|v| !v.is_empty() && v.len() <= 256);
+            let (user, pass) = (field("username").ok_or("Missing TURN username")?, field("credential").ok_or("Missing TURN credential")?);
+            let (host, port) = turns_server(&message["urls"]).ok_or("No TURN over TLS server")?;
+            eprintln!("net: SFU: TURN relay over TLS to {host}:{port}");
+            self.relay = Some(Relay { client: turn::Client::new(user, pass, Instant::now()), link: relay::Link::open(&host, port, self.wake.clone()), relayed: None, since: Instant::now() });
 
         } else if message["type"] == "start" {
             self.race = message["startAt"].as_u64().filter(|n| *n > 0).ok_or("Missing race marker")?;
@@ -342,13 +385,16 @@ impl Sfu {
         }
         let datagrams = std::mem::take(&mut *self.inbox.lock().unwrap_or_else(|e| e.into_inner()));
         let now = Instant::now();
-        if let Some(line) = self.stats.poll(now, datagrams.len(), self.race != 0 && self.released) { eprintln!("{line}"); }
+        let via = if self.via_relay { "TURN/TLS" } else { "UDP" };
+        if let Some(line) = self.stats.poll(now, datagrams.len(), self.race != 0 && self.released, via) { eprintln!("{line}"); }
         for (at, source, data) in datagrams {
+            if !self.direct { continue; }
             self.stats.input(now.saturating_duration_since(at));
             if let Ok(contents) = data.as_slice().try_into() {
                 // str0m's clock only moves forward: the input is stamped now, not at arrival.
                 let input = Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination: self.local, contents });
                 if self.rtc.accepts(&input) {
+                    self.last_in_relayed = false;
                     self.rtc.handle_input(input)?;
                     self.drain(&mut text, &mut frames)?;
                 }
@@ -357,12 +403,66 @@ impl Sfu {
         if self.reader_failed.load(Ordering::Acquire) {
             return Err("SFU socket failed".into());
         }
+        self.pump_relay(&mut text, &mut frames)?;
+        if !self.connected && !self.turn_asked && self.answered_at.is_some_and(|t| t.elapsed() >= DIRECT_TIMEOUT) {
+            self.turn_asked = true;
+            eprintln!("net: SFU: no UDP connection {} ms after the answer; asking for a TURN relay", DIRECT_TIMEOUT.as_millis());
+            text.push(json!({"type":"sfu_turn"}));
+        }
         self.rtc.handle_input(Input::Timeout(Instant::now()))?;
         self.drain(&mut text, &mut frames)?;
+        // Before its TLS link is up the TURN client keeps what it would send.
+        if let Some(r) = self.relay.as_mut().filter(|r| r.link.ready()) { r.link.write(&r.client.output()); }
         if !self.rtc.is_alive() {
             return Err("SFU disconnected".into());
         }
         Ok((text, frames))
+    }
+
+    /// The relay's side of a poll: what the TLS stream read goes to the TURN client, its relayed
+    /// datagrams to str0m, its allocation becomes a local candidate. A relay that fails while it
+    /// carries the association (or before anything connected) fails the association.
+    fn pump_relay(&mut self, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+        let Some(r) = self.relay.as_mut() else { return Ok(()) };
+        if r.link.failed() || r.client.failed().is_some() {
+            eprintln!("net: SFU: TURN relay failed ({})", r.client.failed().unwrap_or("its TLS link"));
+            self.relay = None;
+            return if self.connected && !self.via_relay { Ok(()) } else { Err("TURN relay failed".into()) };
+        }
+        if !r.link.ready() { return Ok(()); }
+        let now = Instant::now();
+        let bytes = r.link.take();
+        if !bytes.is_empty() { r.client.receive(&bytes, now); }
+        r.client.tick(now);
+        let mut events = vec![];
+        while let Some(e) = r.client.poll_event() { events.push(e); }
+        r.link.write(&r.client.output());
+        let base = r.link.local();
+        let since = r.since;
+        for e in events {
+            match e {
+                turn::Event::Allocated(addr) => {
+                    if let Some(r) = self.relay.as_mut() { r.relayed = Some(addr); }
+                    // The relayed candidate: str0m transmits from it, drain() routes those to the relay.
+                    let candidate = Candidate::relayed(addr, base.unwrap_or(addr), "udp")?;
+                    self.rtc.add_local_candidate(candidate);
+                    eprintln!("net: SFU: TURN allocation ready {} ms after the credentials", since.elapsed().as_millis());
+                }
+                turn::Event::Data(source, data) => {
+                    let Some(destination) = self.relay.as_ref().and_then(|r| r.relayed) else { continue };
+                    self.stats.relayed_in += 1;
+                    if let Ok(contents) = data.as_slice().try_into() {
+                        let input = Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination, contents });
+                        if self.rtc.accepts(&input) {
+                            self.last_in_relayed = true;
+                            self.rtc.handle_input(input)?;
+                            self.drain(text, frames)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn receive_frame(&mut self, id: ChannelId, bytes: Vec<u8>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
@@ -396,14 +496,22 @@ impl Sfu {
                     self.stats.datagrams_out += 1;
                     #[cfg(test)]
                     if let Some(w) = self.probe.wrote_at.take() { self.probe.tx_lag.push(w.elapsed().as_secs_f64() * 1e3); }
-                    if let Err(e) = self.socket.send_to(&t.contents, t.destination) {
-                        if e.kind() != std::io::ErrorKind::WouldBlock {
-                            return Err(e.into());
+                    if let Some(r) = self.relay.as_mut().filter(|r| r.relayed == Some(t.source)) {
+                        self.stats.relayed_out += 1;
+                        r.client.send_to(t.destination, &t.contents, Instant::now());
+                    } else if self.direct {
+                        if let Err(e) = self.socket.send_to(&t.contents, t.destination) {
+                            if e.kind() != std::io::ErrorKind::WouldBlock {
+                                return Err(e.into());
+                            }
                         }
                     }
                 }
                 Output::Event(Event::Connected) if !self.connected => {
                     self.connected = true;
+                    self.via_relay = self.last_in_relayed;
+                    let after = self.answered_at.map_or(0, |t| t.elapsed().as_millis());
+                    eprintln!("net: SFU connected via {} {after} ms after the answer", if self.via_relay { "TURN/TLS" } else { "UDP" });
                     text.push(json!({"type":"sfu_connected"}));
                 }
                 Output::Event(Event::ChannelData(data)) => {
@@ -419,7 +527,29 @@ impl Sfu {
 impl Drop for Sfu {
     fn drop(&mut self) {
         self.reader_alive.store(false, Ordering::Release);
+        // Ends the TURN allocation at once instead of at its lifetime (the room also revokes the
+        // credentials when the race ends).
+        if let Some(r) = self.relay.as_mut().filter(|r| r.link.ready()) {
+            r.client.close(Instant::now());
+            r.link.write(&r.client.output());
+        }
     }
+}
+
+/// The TURN-over-TLS server from the room's `urls`: `turns:` on port 443 first (what networks
+/// that block UDP let through), else another `turns:` port. Only Cloudflare's TURN service: a
+/// client talks to Cloudflare only (finding 158).
+fn turns_server(urls: &Value) -> Option<(String, u16)> {
+    let mut found: Vec<(String, u16)> = urls.as_array()?.iter().filter_map(|u| {
+        let rest = u.as_str()?.strip_prefix("turns:")?;
+        let rest = rest.split('?').next()?;
+        let (host, port) = rest.rsplit_once(':')?;
+        let port: u16 = port.parse().ok()?;
+        let host = host.to_ascii_lowercase();
+        (host == "turn.cloudflare.com" || host.ends_with(".turn.cloudflare.com")).then_some((host, port))
+    }).collect();
+    found.sort_by_key(|(_, p)| *p != 443);
+    found.into_iter().next()
 }
 
 #[cfg(test)]
@@ -439,6 +569,33 @@ mod tests {
         assert!(rate.accept(1, now));
         assert!(!rate.accept(0, now));
         assert!(!rate.accept(1, now + Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn turn_only_over_tls_to_cloudflare_443_first() {
+        let urls = json!(["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:5349?transport=tcp",
+            "turns:turn.cloudflare.com:443?transport=tcp"]);
+        assert_eq!(turns_server(&urls), Some(("turn.cloudflare.com".into(), 443)));
+        assert_eq!(turns_server(&json!(["turns:turn.cloudflare.com:5349?transport=tcp"])), Some(("turn.cloudflare.com".into(), 5349)));
+        assert_eq!(turns_server(&json!(["turns:relay.example:443?transport=tcp", "turns:turn.cloudflare.com.example:443"])), None);
+        assert_eq!(turns_server(&json!(["turn:turn.cloudflare.com:443?transport=udp"])), None);
+    }
+
+    #[test]
+    fn turn_credentials_only_after_asking_and_only_once() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
+        let turn = json!({"type":"sfu_turn","urls":["turns:turn.cloudflare.com:443?transport=tcp"],"username":"u","credential":"c"});
+        assert!(client.signal(&turn).is_err()); // nobody asked
+        client.answered_at = Some(Instant::now() - DIRECT_TIMEOUT);
+        let (text, _) = client.poll().unwrap();
+        assert_eq!(text.iter().filter(|m| m["type"] == "sfu_turn").count(), 1);
+        let (text, _) = client.poll().unwrap();
+        assert!(text.iter().all(|m| m["type"] != "sfu_turn")); // asked once
+        assert!(client.signal(&json!({"type":"sfu_turn","urls":["turns:turn.cloudflare.com:443"],"username":"","credential":"c"})).is_err());
+        let mut elsewhere = turn.clone();
+        elsewhere["urls"] = json!(["turns:relay.example:443?transport=tcp"]);
+        assert!(client.signal(&elsewhere).is_err());
+        assert!(client.relay.is_none());
     }
 
     #[test]
