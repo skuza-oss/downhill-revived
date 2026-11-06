@@ -720,7 +720,9 @@ async function start() {
     state.confirmClose = false;
     state.played = e.payload.played;
     renderPlayed();
-    // what this run's dhd.log says about the resolution scale (the GPU may have changed)
+    // what this run's dhd.log says about the resolution scale (the GPU may have changed), and the
+    // bindings PC SETTINGS > Controls may have changed (controls.js reads them again)
+    bind.layouts = null;
     invoke('snapshot').then((snap) => { state.scale = snap.scale; if (!$('page-settings').hidden) renderRows(); });
     renderFooter();
     checkServer();
