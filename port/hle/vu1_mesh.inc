@@ -14,6 +14,7 @@
    | 1510 | 0x288 | 1430       | computed | c vf31 + d20 max(N.H, 0)^16 | UV + vf19               | drawn      | yes      |
    | 0AA0 | 0x154 | 0A90       | maximum  | c                           | environment map         | drawn      | no       |
    | 0C30 | 0x186 | 0C20       | computed | c vf31                      | environment map         | drawn      | yes      |
+   | 2DE8 | 0x5BD | 2DC8       | maximum  | 128, alpha lit              | projected (d5-d8)       | drawn      | yes      |
    | 3140 | 0x616 | 30A0 *     | maximum  | d1013                       | (untextured)            | drawn      | no       |
 
    (* and the batches after the lit and skinned objects' passes, 0040, 0010 and 0020; c the batch
@@ -23,14 +24,17 @@
    batch's (u, v, uz), STQ = UV q. The environment map (0AA0, 0C30): S, T = E N + (x q + d997.zw)
    d998.zw with E the 2 x 3 matrix d997-d999.xy times the object's rotation d0-d2, and Q = 1:
    screen-linear, so the item carries (S w, T w, w), which the shader's divide by w turns back.
+   2DE8 projects a second texture: STQ = (d5-d8) (x y z 1) q (setup 2FD8 stores d5-d8 = data
+   1008-1011 times the object's matrix), RGB the float 1.0000153's low byte (128), alpha d1013.w's
+   low byte where N.d1013 > 0 (its FSAND at 2F30 sees 2F10's MAC: vu1_native_2dc8.h), else 0.
    3140 draws the shadow silhouettes into the shadow targets (setup 30A0: the matrix data 1008-1011
    times the object's, no divide; translated while that leaves w at 1, which the vertex shader's
-   divide then keeps) with its own strip tag: the loop writes the I register's constant (LOI at
-   0x30C0: PRIM 00C) over the header's second word.)
+   divide then keeps). 2DE8 and 3140 make their own strip tag: the loop writes the I register's
+   constant (LOI at 0x2E98: PRIM 05C; at 0x30C0: PRIM 00C) over the header's second word.)
 
    A batch loop runs after a program's setup has set VI13 and the registers it reads: the shared
-   1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050, 12F0, 1430, 0A90,
-   0C20), 30A0's 3190, and for lit or skinned objects a pass over the object's
+   1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050, 12F0, 1430, 0A90, 0C20;
+   2DC8 after its own 2FD8), 30A0's 3190, and for lit or skinned objects a pass over the object's
    pool (MSCAL 0040's lighting, 0010/0020's skinning and lighting) that writes positions at 181 +
    index and lighting at 373 + index. Those stay on the VU (the near-bound test below needs the
    pool's positions on the CPU).
@@ -88,17 +92,17 @@ static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", 
                                                      "a vertex off the guard band in x or y",
                                                      "w other than 1 (no divide)"};
 
-/* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight, d1013;
-   st: UV, UV + vf19 from vertex 1, UV + vf19, the environment map. */
+/* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight, d1013,
+   2DE8's; st: UV, UV + vf19 from vertex 1, UV + vf19, the environment map, 2DE8's projection. */
 enum { MESH_COLOUR_SCALED, MESH_COLOUR_RAW, MESH_COLOUR_LIT_D5, MESH_COLOUR_LIT, MESH_COLOUR_HIGHLIGHT,
-       MESH_COLOUR_CONSTANT };
-enum { MESH_ST_UV, MESH_ST_OFFSET_AFTER_FIRST, MESH_ST_OFFSET, MESH_ST_ENVIRONMENT };
+       MESH_COLOUR_CONSTANT, MESH_COLOUR_LIGHT_ALPHA };
+enum { MESH_ST_UV, MESH_ST_OFFSET_AFTER_FIRST, MESH_ST_OFFSET, MESH_ST_ENVIRONMENT, MESH_ST_PROJECTED };
 typedef struct {
     const char *name;
     uint16_t vi13;
     uint8_t fog_max, colour, st, backface, clip;
     uint8_t ortho;      /* 3140: no divide */
-    uint16_t tag_loi;   /* the LOI whose I the loop stores as the tag's second word (3140), or 0 */
+    uint16_t tag_loi;   /* the LOI whose I the loop stores as the tag's second word (2DE8, 3140), or 0 */
 } MeshProgram;
 static const MeshProgram mesh_programs[] = {
     {"0170", 0x011, 0, MESH_COLOUR_SCALED, MESH_ST_OFFSET_AFTER_FIRST, 1, 1},
@@ -112,6 +116,7 @@ static const MeshProgram mesh_programs[] = {
     {"3140", 0x616, 1, MESH_COLOUR_CONSTANT, MESH_ST_UV, 0, 0, 1, 0x30C0},
     {"0AA0", 0x154, 1, MESH_COLOUR_RAW, MESH_ST_ENVIRONMENT, 0, 0},
     {"0C30", 0x186, 0, MESH_COLOUR_SCALED, MESH_ST_ENVIRONMENT, 0, 1},
+    {"2DE8", 0x5BD, 1, MESH_COLOUR_LIGHT_ALPHA, MESH_ST_PROJECTED, 0, 1, 0, 0x2E98},
 };
 enum { MESH_PRELIT = 0x1F, MESH_LIT = 0x6E0, MESH_SHADOW_LOOP = 0x100 };   /* the groups' bits */
 enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
@@ -223,7 +228,8 @@ static void mesh_check(void)
         const uint8_t *rgba = (const uint8_t *)&v[k].rgba;
         for (unsigned i = 0; i < 4; i++) {
             float want = (float)rgba[i] * h->color[i];
-            int ref = (int)(want > 255 ? 255 : want), got = o[1].sw[i];
+            int ref = (int)(want > 255 ? 255 : want);
+            int got = prog->colour == MESH_COLOUR_LIGHT_ALPHA ? (int)(o[1].w[i] & 255) : o[1].sw[i];   /* 2DE8: floats */
             if (got - ref > 1 || ref - got > 1) { count->bad_colour++; break; }
         }
         const float st[3] = {v[k].u * q, v[k].v * q, v[k].uz * q};
@@ -372,6 +378,9 @@ static int mesh_build(void)
             if (!(f > -1.0f && f < 256.0f)) return mesh_fail(MESH_WHY_COLOUR);
             constant |= (uint32_t)(int)f << (i * 8);
         }
+    /* 2DE8: RGB 128 (the float 1 + 2^-16 its 2EB8 LOI puts in vf19.xyz), the light d1013 */
+    const float *light = m[1013].f, nudge = 1.0000152587890625f;
+    const uint32_t lit_alpha = m[1013].w[3] & 255;
     /* the environment map's E and screen terms */
     float env[3][2] = {{0}};
     if (prog->st == MESH_ST_ENVIRONMENT) mesh_environment(env);
@@ -406,8 +415,10 @@ static int mesh_build(void)
                :gpuside), those without kick it as it comes */
             if (!prog->clip && !(x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
         }
-        const uint32_t *c = r[1].w;   /* (3140 overwrites it) */
-        if (prog->colour != MESH_COLOUR_CONSTANT && (c[0] | c[1] | c[2] | c[3]) > 255) return mesh_fail(MESH_WHY_COLOUR);
+        const uint32_t *c = r[1].w;   /* (3140 and 2DE8 overwrite it) */
+        if (prog->colour != MESH_COLOUR_CONSTANT && prog->colour != MESH_COLOUR_LIGHT_ALPHA &&
+            (c[0] | c[1] | c[2] | c[3]) > 255)
+            return mesh_fail(MESH_WHY_COLOUR);
         int32_t w = r[2].sw[3];
         if (w != 0 && w != 0x800000) return mesh_fail(MESH_WHY_JOIN);   /* 2048.0: ADC through the fog's FTOI4 */
         join[k] = mesh.join[k] = w != 0;
@@ -419,6 +430,10 @@ static int mesh_build(void)
             for (unsigned a = 0; a < 2; a++)
                 st[a] = env[0][a] * nx + env[1][a] * ny + env[2][a] * nz + (cp[a] * q + env_add[a]) * env_scale[a];
             o->u = st[0] * cp[3]; o->v = st[1] * cp[3]; o->uz = cp[3];
+        } else if (prog->st == MESH_ST_PROJECTED) {   /* (d5-d8) (x y z 1), its z the texture's Q */
+            float s[3];
+            for (unsigned a = 0; a < 3; a++) s[a] = m[8].f[a] + m[5].f[a] * p[0] + m[6].f[a] * p[1] + m[7].f[a] * p[2];
+            o->u = s[0]; o->v = s[1]; o->uz = s[2];
         } else {
             o->u = (float)r[2].sw[0] * fixed; o->v = (float)r[2].sw[1] * fixed; o->uz = (float)r[2].sw[2] * fixed;
             if (prog->st == MESH_ST_OFFSET || (prog->st == MESH_ST_OFFSET_AFTER_FIRST && k)) {   /* vf19.xy */
@@ -428,7 +443,10 @@ static int mesh_build(void)
         o->unused = 0;
         if (prog->colour == MESH_COLOUR_CONSTANT)
             o->rgba = constant;
-        else if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510: the pool normal against d6-d8's w */
+        else if (prog->colour == MESH_COLOUR_LIGHT_ALPHA) {   /* 2DE8 (2F08, 2F10): (z + y) + nudge x */
+            float d = (nz * light[2] + ny * light[1]) + nudge * (nx * light[0]);
+            o->rgba = 0x808080u | (d > 0 ? lit_alpha : 0) << 24;
+        } else if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510: the pool normal against d6-d8's w */
             float d = highlight[0] * nx + highlight[1] * ny + highlight[2] * nz;
             d = d > 0 ? d : 0;
             d *= d; d *= d; d *= d; d *= d;   /* four squarings: ^16 */
@@ -560,6 +578,16 @@ static void mesh_skipped(void)
         }
         break;
     }
+    case 0x5BD:   /* 2DE8's: vf6 = d1013, vf7, vf8, vf10, vf14 = d5-d8, vf19 = (nudge x3, d1013.w), vf23.y = I */
+        memcpy(vf[6].f, m[1013].f, 16);
+        memcpy(vf[7].f, m[5].f, 16);
+        memcpy(vf[8].f, m[6].f, 16);
+        memcpy(vf[10].f, m[7].f, 16);
+        memcpy(vf[14].f, m[8].f, 16);
+        vf[19].f[0] = vf[19].f[1] = vf[19].f[2] = 1.0000152587890625f;
+        vf[19].f[3] = m[1013].f[3];
+        memcpy(&vf[23].f[1], micro(1) + prog->tag_loi, 4);
+        break;
     }
     uint16_t buffer = (uint16_t)(vu1.vi[14] + 0x90);
     if (buffer == 0x3E8) buffer = 0x238;
