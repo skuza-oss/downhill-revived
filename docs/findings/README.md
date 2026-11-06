@@ -191,6 +191,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 162 | [Native VU1 and GS rendering, phase 0: what the game draws and how](162-native-vu1-gs-phase0.md) | in progress |  |
 | 164 | [Native VU1 rendering, phase 1: the world mesh loop on the GPU](164-native-vu1-world-mesh.md) | in progress |  |
 | 167 | [Native VU1 rendering, phase 2: the remaining VU1 programs](167-native-vu1-phase2.md) | in progress |  |
+| 168 | [Native mesh draws batched, for the render thread](168-native-mesh-draw-batching.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
