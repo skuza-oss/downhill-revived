@@ -67,6 +67,11 @@ struct Queue {
     incoming: VecDeque<(bool, Vec<u8>)>,
     /// set by the SFU socket reader: a datagram waits for the send thread
     sfu_input: bool,
+    /// Received messages queued for the send thread, and those it has handed to the game: the
+    /// receive thread waits for the two to match before it reports the close, so a refusal's
+    /// text reaches the game before its close does.
+    received: u64,
+    handled: u64,
 }
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
@@ -99,10 +104,19 @@ impl WsConn {
             q.connected = false;
             q.out.clear();
             q.incoming.clear();
+            q.handled = q.received; // nothing more of this connection will be handed over
         }
+        self.wake.notify_all();
         if let Some(l) = live.take() {
             let _ = l.tcp.shutdown(Shutdown::Both);
         }
+    }
+
+    /// Waits until the send thread has handed the game every message received so far (a server's
+    /// refusal is a text then a close), at most `limit`, or until ws_stop.
+    fn wait_handled(&self, limit: Duration) {
+        let q = lock(&self.queue);
+        let _ = self.wake.wait_timeout_while(q, limit, |q| q.handled < q.received && !self.stopping.load(Ordering::Acquire));
     }
 
     /// Waits up to `ms`, or until ws_stop.
@@ -135,6 +149,7 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                     unsafe { f(c.h.ctx, c.ptr()) };
                 }
                 let end = receive(&c, &peek);
+                c.wait_handled(Duration::from_secs(1));
                 c.force_close();
                 end
             }
@@ -211,6 +226,7 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
             if !q.connected { return (1006, "connection closed".into()); }
             if q.incoming.len() >= 256 { return (1006, "control queue full".into()); }
             q.incoming.push_back((binary, data.to_vec()));
+            q.received += 1;
             drop(q);
             c.wake.notify_all();
         }
@@ -274,6 +290,8 @@ fn send_main(c: Arc<WsConn>) {
                 let mut bytes = data.clone(); bytes.push(0);
                 unsafe { f(c.h.ctx, binary as c_int, bytes.as_ptr(), data.len()) };
             }
+            lock(&c.queue).handled += 1;
+            c.wake.notify_all();
         }
         // Race frames the game queued go to the SFU before this poll, which writes them out:
         // they never wait for the next wake (finding 158, round 3).
