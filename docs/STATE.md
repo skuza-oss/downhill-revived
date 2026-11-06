@@ -89,8 +89,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (capped by GPU memory and said so, finding 136), window mode, widescreen with the HUD anchored
   and no 4:3 screens left (findings 056, 140), frame rate 60-240 or Monitor (findings 067, 139),
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), movies,
-  vibration, stick dead zone and button icons (finding 134), FPS & Ping counter (finding 120),
-  Unlock All (finding 095), EXIT GAME. dhd.ini has one implementation, the Rust crate
+  vibration, stick dead zone and button icons (finding 134), the keys and controller buttons for
+  the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
+  Ping counter (finding 120), Unlock All (finding 095), EXIT GAME. dhd.ini has one implementation, the Rust crate
   `dhd_settings` (`port/render/settings`), used by the game, the launcher and the browser.
 - The launcher holds settings, rider name and updates on every desktop platform, decides the one
   data folder (`DHD_SETTINGS`, `DHD_MEMCARD_DIR`, `DHD_DATA_DIR`), updates from `latest.json`
