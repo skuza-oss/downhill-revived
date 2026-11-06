@@ -257,7 +257,7 @@ static void read_start(NetClient *c, const char *t)
         l->start_at = net_now_ms() / 1000.0;
     c->relayed_head = c->relayed_count = 0;
     memset(c->snapshot, 0, sizeof c->snapshot);
-    memset(c->sender_go, 0, sizeof c->sender_go);
+    c->states_sent = 0;
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -325,7 +325,12 @@ static void window_stats(NetClient *c, char *out, size_t cap)
         if (n >= (int)cap) n = (int)cap - 1;
     }
     if (!others && n < (int)cap - 16) n += snprintf(out + n, cap - n, "; no other players");
-    for (int slot = 0; slot < NET_MAX_SLOTS && n < (int)cap - 100; slot++) {
+    double seconds = (now - c->window_start) / 1000;
+    if (c->states_sent && seconds > 0 && n < (int)cap - 48) {
+        n += snprintf(out + n, cap - n, "; snapshot messages sent %.1f/s", c->states_sent / seconds);
+        c->states_sent = 0;
+    }
+    for (int slot = 0; slot < NET_MAX_SLOTS && n < (int)cap - 140; slot++) {
         unsigned count = c->snapshot[slot].samples;
         if (!count) continue;
         unsigned sum = 0, q[3] = {0}, pc[3] = {50, 95, 99};
@@ -333,11 +338,11 @@ static void window_stats(NetClient *c, char *out, size_t cap)
             sum += c->snapshot[slot].age[ms];
             while (k < 3 && sum >= (count * pc[k] + 99) / 100) q[k++] = ms;
         }
-        n += snprintf(out + n, cap - n, "; slot %d snapshot age p50/p95/p99 %u/%u/%u ms (1001=overflow), gaps>100ms %u",
-                      slot, q[0], q[1], q[2], c->snapshot[slot].gaps);
+        n += snprintf(out + n, cap - n, "; slot %d snapshot age p50/p95/p99 %u/%u/%u ms (1001=overflow), gaps>100ms %u, messages %.1f/s",
+                      slot, q[0], q[1], q[2], c->snapshot[slot].gaps, seconds > 0 ? c->snapshot[slot].messages / seconds : 0.0);
         if (n >= (int)cap) n = (int)cap - 1;
         memset(c->snapshot[slot].age, 0, sizeof c->snapshot[slot].age);
-        c->snapshot[slot].samples = c->snapshot[slot].gaps = 0;
+        c->snapshot[slot].samples = c->snapshot[slot].gaps = c->snapshot[slot].messages = 0;
     }
     c->window_n = c->window_count = 0;
     c->window_worst = 0;
@@ -486,19 +491,15 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
     } else if (c->racing && n >= 2 && n <= NET_FRAME_MAX && (data[0] == NET_FRAME_STATE || data[0] == NET_FRAME_EVENT)) {
         if (data[1] < NET_MAX_SLOTS) {
             int slot = data[1];
-            if (data[0] == NET_FRAME_EVENT && n >= 12 && data[2] == 2 && data[3] == 5) {
-                double go;
-                memcpy(&go, data + 4, sizeof go);  /* existing EVENT_GO, server ms */
-                if (isfinite(go) && go > 0) c->sender_go[slot] = go;
-            }
             if (data[0] == NET_FRAME_STATE) {
-                /* v4 standalone and v3's first batched rider (the WebSocket baseline). */
-                int offset = n >= 8 && (data[2] == 4 || data[2] == 5) ? 4 : n >= 9 && data[3] == 3 ? 5 : 0;
-                if (offset) {
-                    uint32_t ms;
-                    memcpy(&ms, data + offset, sizeof ms);
+                c->snapshot[slot].messages++;
+                /* A bundle (port/hle/state_bundle.h): version 6, index, riders, the sender's server
+                   clock when it was packed. */
+                if (n >= 13 && data[2] == 6) {
+                    double epoch;
+                    memcpy(&epoch, data + 5, sizeof epoch);
                     double now = net_now_ms();
-                    double epoch = c->sender_go[slot] > 0 ? c->sender_go[slot] + ms : 0;
+                    if (!isfinite(epoch) || epoch <= 0) epoch = 0;
                     if (!c->snapshot[slot].arrived || !epoch || epoch > c->snapshot[slot].epoch) {
                         if (c->snapshot[slot].arrived && now - c->snapshot[slot].arrived > 100.5)
                             c->snapshot[slot].gaps++;
@@ -794,6 +795,7 @@ int client_send_frame(NetClient *c, int type, const void *payload, size_t n)
     SDL_LockMutex(c->lock);
     if (c->racing && c->connected) {
         send_binary(c, frame, n + 2);
+        c->states_sent += type == NET_FRAME_STATE;
         sent = 1;
     }
     SDL_UnlockMutex(c->lock);

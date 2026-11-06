@@ -8,7 +8,7 @@
 
 #include "net.h"
 
-enum { NET_PROTOCOL = 3, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
+enum { NET_PROTOCOL = 4, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
 
 typedef struct {
     void *ctx;
@@ -47,10 +47,11 @@ typedef struct {
     float window_worst;
     double window_start, next_log, joined_at;  /* joined_at 0: not in a room (nothing to log) */
     char logged_colo[8];  /* the room location the log has named */
-    /* Estimated age on the server clock: sender's existing GO stamp + snapshot race ms.
-       Histograms are sampled every network tick; 1001 is the overflow bin. */
-    double sender_go[NET_MAX_SLOTS];
-    struct { double arrived, epoch; unsigned age[1002], samples, gaps; } snapshot[NET_MAX_SLOTS];
+    /* Each sender's newest snapshot age on the server clock (now minus the bundle's stamp, the
+       sender's server clock when it packed it), sampled every network tick; 1001 is the overflow
+       bin. Messages: STATE messages received from that sender; states_sent: ours. */
+    struct { double arrived, epoch; unsigned age[1002], samples, gaps, messages; } snapshot[NET_MAX_SLOTS];
+    unsigned states_sent;
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];

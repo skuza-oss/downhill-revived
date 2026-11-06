@@ -2,6 +2,7 @@ import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { Client, ISO, startedRace } from "./helpers";
+import { PROTOCOL } from "../src/protocol";
 
 describe("lobby", () => {
   it("creates a room with a join code and lets others join", async () => {
@@ -10,7 +11,7 @@ describe("lobby", () => {
     const bo = await Client.connect(`/v1/rooms/${code.toLowerCase()}`);
     bo.hello("Bo");
     const welcome = await bo.json("welcome");
-    expect(welcome).toMatchObject({ code, host: false, protocol: 3 });
+    expect(welcome).toMatchObject({ code, host: false, protocol: PROTOCOL });
     const room = await host.next((f) => typeof f === "string" && JSON.parse(f).members?.length === 2);
     const r = JSON.parse(room as string);
     expect(r.members.map((m: any) => m.name)).toEqual(["Ann", "Bo"]);
@@ -99,7 +100,7 @@ describe("lobby", () => {
 
   it("names the minimum version in health and the lobby list", async () => {
     const health = await (await exports.default.fetch("https://dhd.test/v1/health")).json<any>();
-    expect(health).toMatchObject({ ok: true, protocol: 3, minVersion: "0.2.0" });
+    expect(health).toMatchObject({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0" });
     const list = await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>();
     expect(list.minVersion).toBe("0.2.0");
   });
@@ -324,7 +325,7 @@ describe("race relay", () => {
 
 describe("worker routes", () => {
   it("health and 404", async () => {
-    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: 3, minVersion: "0.2.0", online: true });
+    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0", online: true });
     expect((await exports.default.fetch("https://dhd.test/nope")).status).toBe(404);
     expect((await exports.default.fetch("https://dhd.test/v1/rooms/new")).status).toBe(426);
   });

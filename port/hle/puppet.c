@@ -86,11 +86,12 @@ typedef struct Snapshot {
 } Snapshot;
 
 enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
-/* Wire format version 5 (six repeats per changed pad word, full copy every 30 snapshots): rider ids are global (a human's lobby slot, an AI rider's slot), the
-   snapshot carries the checkpoints passed and the attack power-ups (version 2), and its clock is
-   the sender's race time in ms, not its ticks (finding 114). STATE_FIXED: the payload before the
-   pad words. */
-enum { WIRE_VERSION = 5, STATE_FIXED = 104, EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
+/* A rider's record in a STATE bundle (state_bundle.h, payload version 6, finding 169): its global
+   id (a human's lobby slot, an AI rider's slot), its race time in ms (finding 114), the body, the
+   checkpoints passed and the attack power-ups, then the changed pad words (six repeats each, a
+   full copy every PAD_REFRESH sends, finding 158). */
+#include "state_bundle.h"
+enum { EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
 
 typedef struct Puppet {
     int on;                  /* this slot is a puppet */
@@ -402,9 +403,14 @@ void hle_puppet_online(int local, int nslots, int host)
    starts now). */
 void hle_puppet_start(void)
 {
-    for (int i = 1; i < NRIDERS; i++) {
+    for (int i = 0; i < NRIDERS; i++) {  /* slot 0 too: this PC's rider starts afresh on every PC */
         Puppet *p = &pp.p[i];
         memset(&p->sent_pad, 0, sizeof p->sent_pad);
+        /* Full refreshes (834 bytes) at different sends for different riders, so two seldom share
+           a tick and one bundle (finding 169): the AI riders' 30 phases 3 apart, this PC's rider
+           at its first send. */
+        p->sent_pad.count = (unsigned)(30 - 3 * i) % 30;
+        if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_offset = 0, p->offset = 0, p->remote_crash = 0;
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
@@ -501,18 +507,18 @@ void hle_puppet_start_point(uint8_t *race, uint8_t *r)
 
 static uint8_t *put(uint8_t *o, const void *v, size_t n) { memcpy(o, v, n); return o + n; }
 
-/* One STATE payload for an owned slot: version, rider (global id), race time (ms), body, wheels, contacts,
-   State, crash, checkpoints passed, attack kind, bottles, then repeated pad changes (six sends), with a full refresh every 30 sends.
-   Last tick's actions do not travel; the full refresh bounds recovery after longer loss bursts. 0: not owned. */
+/* One rider's record for a STATE bundle (state_bundle.h), for an owned slot: rider (global id),
+   race time (ms), body, wheels, contacts, State, crash, checkpoints passed, attack kind, bottles,
+   then repeated pad changes (six sends) with a full refresh every 30 sends. Last tick's actions
+   do not travel; the full refresh bounds recovery after longer loss bursts. 0: not owned. */
 int hle_puppet_pack(int slot, uint8_t *out, int max)
 {
-    if (!pp.online || slot < 0 || slot >= hle_online_race_riders() || !owned(slot) || !RACING || max < STATE_FIXED + (PAD_WORDS - 25) * 5) return 0;
+    if (!pp.online || slot < 0 || slot >= hle_online_race_riders() || !owned(slot) || !RACING || max < STATE_RECORD_MAX) return 0;
     Snapshot s;
     take(&s, rider(slot));
     uint8_t *o = out;
     uint16_t state = (uint16_t)s.state;
     int32_t ms = (int32_t)floor(s.time * 1000 + 0.5);
-    *o++ = WIRE_VERSION;
     *o++ = (uint8_t)to_global(slot);
     o = put(o, &ms, 4);
     o = put(o, s.pos, 12);
@@ -531,14 +537,13 @@ int hle_puppet_pack(int slot, uint8_t *out, int max)
 
 static const uint8_t *get(const uint8_t *in, void *v, size_t n) { memcpy(v, in, n); return in + n; }
 
-/* A STATE payload from the PC in lobby slot sender. */
-void hle_puppet_receive(int sender, const uint8_t *in, int n)
+/* One rider's record (its size checked) from the PC in lobby slot sender. */
+static void receive_record(int sender, const uint8_t *in, int n)
 {
-    if (!pp.online || n < STATE_FIXED || n > STATE_FIXED + (PAD_WORDS - 25) * 5 || in[0] != WIRE_VERSION || sender == pp.local) return;
-    int slot = to_local(in[1]);
+    int slot = to_local(in[0]);
     if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
     Puppet *p = &pp.p[slot];
-    const uint8_t *i = in + 2, *end = in + n;
+    const uint8_t *i = in + 1, *end = in + n;
     uint16_t state;
     int32_t ms;
     Snapshot s;
@@ -547,7 +552,6 @@ void hle_puppet_receive(int sender, const uint8_t *in, int n)
     s.time = ms / 1000.0;
     /* Reject stale unordered packets before touching the pad mirror. */
     if (p->count && s.time <= p->ring[p->count - 1].time) return;
-    if (n != STATE_FIXED + in[STATE_FIXED - 1] * 5) return;
     i = get(i, s.pos, 12);
     for (int k = 0; k < 3; k++) i = get(i, s.rot[k], 12);
     i = get(i, s.vel, 12);
@@ -562,6 +566,18 @@ void hle_puppet_receive(int sender, const uint8_t *in, int n)
     if (!pad_snapshot_apply(p->mirror, i, (int)(end - i))) return;
     memcpy(s.pad, p->mirror, sizeof s.pad);
     feed(slot, &s);
+}
+
+/* A STATE bundle from the PC in lobby slot sender: every record, once the whole bundle checks. */
+void hle_puppet_receive(int sender, const uint8_t *in, int n)
+{
+    double stamp;
+    if (!pp.online || sender == pp.local || !state_bundle_check(in, n, &stamp)) return;
+    for (int at = STATE_BUNDLE_HEADER; at < n;) {
+        int size = state_record_size(in + at, n - at);
+        receive_record(sender, in + at, size);
+        at += size;
+    }
 }
 
 /* func_0012E940 (rider self hit by other). A hit by a puppet is decided on its PC; a hit by a

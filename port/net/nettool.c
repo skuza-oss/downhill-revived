@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "net.h"
+#include "../hle/state_bundle.h"
 
 static void wait_for(int (*done)(const NetLobby *), double seconds, const char *what)
 {
@@ -44,11 +45,38 @@ static int racing(const NetLobby *l) { return l->state == NET_RACING; }
 
 /* --replay FILE (with --bot): a player of a state-sync race (port/hle/online.c, finding 047)
    without a game. It says it has loaded and what it rides, takes the race's GO from the first
-   game's GO event, then sends the snapshots a game recorded (DHD_NET_RECORD) as its own rider when
-   the race time reaches each one's (ms, finding 114), and its finish when they run out. */
+   game's GO event, then sends the snapshots a game recorded (DHD_NET_RECORD: bundles of the game's
+   own rider alone, port/hle/state_bundle.h) as its own rider, stamped now, when the race time
+   reaches each one's (ms, finding 114), and its finish when they run out. */
 enum { EVENT_VERSION = 2, EVENT_LOADED = 2, EVENT_SETUP = 3, EVENT_START = 4, EVENT_GO = 5, EVENT_FINISH = 6, EVENT_RESULTS = 7 };
 
 static void put32(uint8_t *o, int32_t v) { memcpy(o, &v, 4); }
+
+/* One rider's record from a received STATE bundle sent again as this player's own rider (a bundle of
+   one, stamped now), moved dx along x: 1 when sent. */
+static int resend_rider(const uint8_t *in, int n, int rider, int as, float dx)
+{
+    double stamp;
+    if (!state_bundle_check(in, n, &stamp)) return 0;
+    for (int at = STATE_BUNDLE_HEADER; at < n;) {
+        int size = state_record_size(in + at, n - at);
+        if (in[at] == rider) {
+            uint8_t out[STATE_BUNDLE_MAX];
+            float x;
+            memcpy(out, in, STATE_BUNDLE_HEADER);
+            memcpy(out + STATE_BUNDLE_HEADER, in + at, size);
+            out[1] = 0, out[2] = 1, out[STATE_BUNDLE_HEADER] = (uint8_t)as;
+            stamp = net_server_ms();
+            memcpy(out + 3, &stamp, 8);
+            memcpy(&x, out + STATE_BUNDLE_HEADER + 5, 4);
+            x += dx;
+            memcpy(out + STATE_BUNDLE_HEADER + 5, &x, 4);
+            return net_send_frame(NET_FRAME_STATE, out, STATE_BUNDLE_HEADER + size) != 0;
+        }
+        at += size;
+    }
+    return 0;
+}
 
 static int replay(const char *path, int slot, int rider, double seconds)
 {
@@ -81,11 +109,15 @@ static int replay(const char *path, int slot, int rider, double seconds)
             uint16_t len;
             int32_t when;
             memcpy(&len, data + at, 2);
-            if (at + 2 + len > size || len < 6) { at = size; break; }
-            memcpy(&when, data + at + 4, 4);
+            uint8_t *bundle = data + at + 2;
+            double stamp;
+            if (at + 2 + len > size || !state_bundle_check(bundle, len, &stamp) || bundle[2] != 1) { at = size; break; }
+            memcpy(&when, bundle + STATE_BUNDLE_HEADER + 1, 4);
             if (when > clock) break;
-            data[at + 3] = (uint8_t)slot;  /* the rider is this player's */
-            net_send_frame(NET_FRAME_STATE, data + at + 2, len);
+            bundle[STATE_BUNDLE_HEADER] = (uint8_t)slot;  /* the rider is this player's */
+            stamp = net_server_ms();
+            memcpy(bundle + 3, &stamp, 8);
+            net_send_frame(NET_FRAME_STATE, bundle, len);
             last_clock = when, sent++, at += 2 + len;
         }
         if (go && at + 2 > size && last_clock) {
@@ -239,25 +271,8 @@ int main(int argc, char **argv)
             }
             while ((n = net_receive_frame(frame, sizeof frame)) > 0) {
                 received++;
-                if (follow_host && frame[0] == NET_FRAME_STATE && frame[1] == 0) {
-                    for (int at = 2; at < n;) {
-                        int size = frame[at++];
-                        if (size < 18 || at + size > n) break;
-                        if (frame[at] == 3 && frame[at+1] == 0) {
-                            uint8_t moving[256];
-                            moving[0] = (uint8_t)size;
-                            memcpy(moving + 1, frame + at, size);
-                            moving[2] = (uint8_t)l.local_slot;
-                            float x;
-                            memcpy(&x, moving + 7, 4);
-                            x += 6.0f * l.local_slot;
-                            memcpy(moving + 7, &x, 4);
-                            followed += net_send_frame(NET_FRAME_STATE, moving, size + 1) != 0;
-                            break;
-                        }
-                        at += size;
-                    }
-                }
+                if (follow_host && frame[0] == NET_FRAME_STATE && frame[1] == 0)
+                    followed += resend_rider(frame + 2, n - 2, 0, l.local_slot, 6.0f * l.local_slot);
                 if (frame[0] == NET_FRAME_EVENT && n >= 4 && frame[2] == EVENT_VERSION && frame[3] == EVENT_LOADED) others_loaded = 1;
                 if (echo_ai && !saw_go && frame[0] == NET_FRAME_EVENT && n >= 12 &&
                     frame[2] == EVENT_VERSION && frame[3] == EVENT_GO) {
@@ -267,27 +282,9 @@ int main(int argc, char **argv)
                     saw_go = 1;
                 }
                 /* Mirror a distinct host-owned AI's live snapshots. This exercises actual
-                   puppet playback with no stored game data in the test fixture.
-                   STATE payload: [length][version, global rider, time, position, ...]. */
-                if (echo_ai && saw_go && !acted && l.state == NET_RACING && frame[0] == NET_FRAME_STATE) {
-                    for (int at = 2; at < n; ) {
-                        int size = frame[at];
-                        if (size < 18 || at + 1 + size > n) break;
-                        const uint8_t *snapshot = frame + at + 1;
-                        if (snapshot[1] == l.nslots + l.local_slot - 1) {
-                            uint8_t copy[256];
-                            memcpy(copy, frame + at, size + 1);
-                            copy[2] = (uint8_t)l.local_slot;
-                            float x;
-                            memcpy(&x, copy + 7, sizeof x);
-                            x += 2.0f * l.local_slot;
-                            memcpy(copy + 7, &x, sizeof x);
-                            if (net_send_frame(NET_FRAME_STATE, copy, size + 1)) echoed++;
-                            break;
-                        }
-                        at += 1 + size;
-                    }
-                }
+                   puppet playback with no stored game data in the test fixture. */
+                if (echo_ai && saw_go && !acted && l.state == NET_RACING && frame[0] == NET_FRAME_STATE)
+                    echoed += resend_rider(frame + 2, n - 2, l.nslots + l.local_slot - 1, l.local_slot, 2.0f * l.local_slot);
             }
             Sleep(10);
         }

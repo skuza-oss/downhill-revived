@@ -31,6 +31,7 @@
 #include "../net/net.h"
 #include "../include/version.h"
 #include "../include/fps.h"
+#include "state_bundle.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -279,7 +280,7 @@ enum {
 };
 enum { SNAPSHOT_TICKS = 2 };  /* a snapshot every 2 race ticks: 30 a second at any frame rate */
 enum { NRIDERS = 10, START_LEAD_MS = 1500 };
-_Static_assert(2 + 834 <= NET_FRAME_MAX, "one independent rider snapshot fits one STATE frame");
+_Static_assert(2 + STATE_BUNDLE_MAX <= NET_FRAME_MAX, "a STATE bundle fits one frame");
 #define RACE_CLOCK EE32(0x43EEC8)
 /* The race object D_0043EEC0 (func_0019F210): +8 the race clock, +0x1C finish times (race ticks)
    and +0x58 finished flags by rider slot, +0x62 finishes to apply on the next step. */
@@ -324,7 +325,8 @@ static struct {
     double start_entered, start_said;
     int start_announced, start_missing, start_waiting;
     int last_sent;              /* race clock of the last snapshot sent */
-    unsigned sent, received;
+    unsigned sent, received;    /* rider snapshots */
+    unsigned bundles_sent;      /* STATE messages (bundles) */
     /* the finish (global rider ids: humans 0..nslots-1, AI riders their slot) */
     int finish[NRIDERS];        /* race ticks, -1: not finished */
     int reported[NRIDERS];
@@ -1307,6 +1309,33 @@ static void check_left(void)
     }
 }
 
+/* This tick's snapshots of the riders this PC runs, bundled (state_bundle.h, finding 169): as
+   few messages as fit one datagram each, stamped with the server's clock. */
+static void send_snapshots(void)
+{
+    static uint8_t rec[NRIDERS][STATE_RECORD_MAX], bundle[STATE_BUNDLE_RIDERS][STATE_BUNDLE_MAX];
+    const uint8_t *recs[NRIDERS];
+    int size[NRIDERS], slots[NRIDERS], count = 0, bundle_size[STATE_BUNDLE_RIDERS];
+    for (int slot = 0; slot < hle_online_race_riders() && count < NRIDERS; slot++) {
+        int n = hle_puppet_pack(slot, rec[count], STATE_RECORD_MAX);
+        if (n <= 0) continue;
+        recs[count] = rec[count], size[count] = n, slots[count++] = slot;
+    }
+    if (!count) return;
+    double stamp = host_service_net_server_ms();
+    if (slots[0] == 0) {  /* DHD_NET_RECORD: this PC's rider alone, as a bundle of one */
+        int one_size;
+        if (state_bundle_pack(recs, size, 1, stamp, bundle, &one_size)) record(bundle[0], one_size);
+    }
+    int bundles = state_bundle_pack(recs, size, count, stamp, bundle, bundle_size), sent = 0;
+    for (int b = 0; b < bundles; b++)
+        sent += host_service_net_send_frame(NET_FRAME_STATE, GADDR(bundle[b]), bundle_size[b]) != 0;
+    if (!sent) return;
+    on.bundles_sent += sent;
+    on.sent += count;
+    for (int i = 0; i < count; i++) on.ai_sent += slots[i] != 0;
+}
+
 /* Each vsync of the race: the snapshots and events in, ours out. */
 static void state_sync(void)
 {
@@ -1360,16 +1389,7 @@ static void state_sync(void)
     }
     if (!race_running() || clock < on.last_sent + SNAPSHOT_TICKS && clock >= on.last_sent) return;
     on.last_sent = clock - clock % SNAPSHOT_TICKS;
-    /* Each message is an independent rider snapshot, below the SFU message/MTU budget. */
-    for (int slot = 0; slot < hle_online_race_riders(); slot++) {
-        if ((n = hle_puppet_pack(slot, payload, sizeof payload)) > 0) {
-            if (slot == 0) record(payload, n);
-            if (host_service_net_send_frame(NET_FRAME_STATE, GADDR(payload), n)) {
-                on.sent++;
-                if (slot && hle_puppet_owned(slot)) on.ai_sent++;
-            }
-        }
-    }
+    send_snapshots();
     while ((n = hle_puppet_take_event(payload, sizeof payload)) > 0) send_event(payload, n);
     static double last_title;
     if (host_wall_seconds() - last_title > 1) {

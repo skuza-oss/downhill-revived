@@ -1,11 +1,11 @@
 // Wire protocol constants and pure helpers. The specification is docs/online-protocol.md.
 
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 
 export const MAX_MEMBERS = 10;
 export const DEFAULT_MAX_PLAYERS = 10;
 export const MAX_TEXT_BYTES = 4096;
-/** A STATE frame carries all of a player's riders (port/net/net.h NET_FRAME_MAX). */
+/** The largest binary WebSocket message (port/net/net.h NET_FRAME_MAX); only PING/PONG use it now. */
 export const MAX_BINARY_BYTES = 3072;
 
 export const HELLO_TIMEOUT_MS = 10_000;
@@ -24,7 +24,8 @@ export const RTT_SAMPLES = 5;
 // the game no longer uses; the server drops them.)
 export const FRAME_PING = 3;
 export const FRAME_PONG = 4;
-/** State sync (finding 044): a rider snapshot and a gameplay event, relayed as they are. */
+/** State sync (finding 044): a bundle of rider snapshots and a gameplay event. They travel over the
+ *  Realtime SFU (finding 158), never this server; a WebSocket message of either type is dropped. */
 export const FRAME_STATE = 5;
 export const FRAME_EVENT = 6;
 export const PING_MAX_PAYLOAD = 32;

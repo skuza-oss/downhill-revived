@@ -166,8 +166,9 @@ fn read_socket(socket: UdpSocket, inbox: Inbox, alive: Arc<AtomicBool>, failed: 
     }
 }
 
-// Four times the normal per-rider rate, with a 120-packet burst allowance.
-// Exceeding it silences this member (including events) until the next race.
+// Per bundle index (a STATE message's byte 3, port/hle/state_bundle.h): four times the normal
+// rate, with a 120-packet burst allowance. Exceeding it silences this member (including events)
+// until the next race.
 struct SenderRate { since: Instant, count: [u16; 10], blocked: bool }
 impl SenderRate {
     fn new() -> Self { Self { since: Instant::now(), count: [0; 10], blocked: false } }
@@ -343,7 +344,8 @@ impl Sfu {
         let mut wire = self.race.to_le_bytes().to_vec();
         wire.extend_from_slice(bytes);
         if state {
-            // One newest snapshot per rider; never accumulate stale snapshots under congestion.
+            // One newest bundle per bundle index (byte 3, port/hle/state_bundle.h); never
+            // accumulate stale snapshots under congestion.
             if bytes.len() >= 4 {
                 self.pending_state.insert(bytes[3], (Instant::now(), wire));
             }

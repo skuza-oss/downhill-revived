@@ -162,27 +162,32 @@ int main(void)
         client_free(&c);
     }
     {   /* Snapshot freshness and long gaps are per sender and sampled on network ticks. */
-        const unsigned char state[] = {NET_FRAME_STATE, 2, 4, 0, 0, 0, 0, 0};
-        unsigned char go[12] = {NET_FRAME_EVENT, 2, 2, 5};
-        double stamp = 100000 + net_now_ms() - 150;
+        /* A bundle's header (port/hle/state_bundle.h): version 6, index, riders, the stamp. */
+        unsigned char state[13] = {NET_FRAME_STATE, 2, 6, 0, 1};
+        double stamp = 100000 + net_now_ms() - 150, newer = stamp + 1;
         client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);
         c.racing = 1;
         c.clock_offset = 100000;
-        memcpy(go + 4, &stamp, sizeof stamp);
-        client_on_binary(&c,go,sizeof go);
+        memcpy(state + 5, &stamp, sizeof stamp);
         c.snapshot[2].arrived = net_now_ms() - 150;
         client_on_binary(&c,state,sizeof state);
-        assert(c.snapshot[2].gaps == 1 && c.snapshot[1].gaps == 0);
+        assert(c.snapshot[2].gaps == 1 && c.snapshot[1].gaps == 0 && c.snapshot[2].messages == 1);
         client_tick(&c);
         assert(c.snapshot[2].samples == 1 && c.snapshot[1].samples == 0);
-        assert(c.snapshot[2].epoch == stamp && c.snapshot[2].age[0] == 0);
-        {   /* The same estimator reads the old relay layout for before/after measurements. */
-            const unsigned char legacy[] = {NET_FRAME_STATE, 2, 8, 3, 0, 1, 0, 0, 0};
-            client_on_binary(&c,legacy,sizeof legacy);
-            assert(c.snapshot[2].epoch == stamp + 1);
-            client_on_binary(&c,state,sizeof state);  /* older unordered packet */
-            assert(c.snapshot[2].epoch == stamp + 1);
+        {   /* about 150 ms old (a loaded PC may take a little longer between the two lines) */
+            unsigned near = 0;
+            for (int ms = 145; ms < 400; ms++) near += c.snapshot[2].age[ms];
+            assert(c.snapshot[2].epoch == stamp && near == 1);
+        }
+        {
+            unsigned char later[13];
+            memcpy(later, state, sizeof later);
+            memcpy(later + 5, &newer, sizeof newer);
+            client_on_binary(&c,later,sizeof later);
+            assert(c.snapshot[2].epoch == newer);
+            client_on_binary(&c,state,sizeof state);  /* an older unordered message */
+            assert(c.snapshot[2].epoch == newer && c.snapshot[2].messages == 3);
         }
         c.snapshot[2].epoch = c.clock_offset + net_now_ms() - 2000;
         client_tick(&c);

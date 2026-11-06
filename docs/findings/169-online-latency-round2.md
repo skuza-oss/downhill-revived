@@ -58,11 +58,30 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
 ## Progress
 
 - [x] 2026-11-06: lane plan (this file).
+- [x] Item 1, bundling: a PC's riders of one tick go out as STATE bundles (payload version 6,
+      `port/hle/state_bundle.h`), first fit largest first, each at most 990 bytes of payload so the
+      message with its race marker stays at or under 1,000 bytes, one SCTP chunk (str0m: 1150 - 48
+      DTLS - 40 SCTP = 1,062). The bundle header carries the sender's server clock when it packed
+      the tick (used by item 3). The riders' full pad refreshes (834 bytes) start at different
+      phases (AI rider i at 30 - 3i), so two never share a tick; unit test `test_state_bundle.c`:
+      ten riders with eight changing pad words fit at most 3 bundles a tick, the largest 987 bytes,
+      never two full refreshes in one tick. Protocol 4 (server and client). nettool's replay and
+      bot modes read and send bundles.
 
 ## Decisions
+
+- Bundles are made in the game (`online.c`), not in the transport: the game knows every rider of a
+  tick at once, while the transport's send thread wakes per message and would split a tick's
+  bundle at random. The transport keeps the newest message per bundle index (byte 3, where the
+  rider id was), and its flood limit counts per bundle index.
 
 - 2026-11-06 (the user): all five, then a PC↔Mac comparison of 0.7.11, 0.7.12 and this lane.
 
 ## Surprises
+
+- This PC's own rider's pad sender (`hle_puppet_start` began at slot 1) was never reset at a race
+  start, while every receiver clears its mirror: pad words unchanged since the last race reached
+  the others only at the next full refresh, up to a second into the race. Item 1 resets it with
+  the others.
 
 ## Result
