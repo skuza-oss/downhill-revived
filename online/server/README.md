@@ -80,10 +80,11 @@ counts as 0.1.0. Raise it after a release is published, so players update, and d
 
 ### Abuse guard: one-time setup (finding 161)
 
-The kill switch, the limits per address (`ratelimits`) and the caps per member need nothing
-beyond `wrangler.jsonc`. Bans and the moderation log need a D1 database and a secret, made once
-by the maintainer with their own login (`npx wrangler login`). Until they exist the server runs
-without bans and log; without the secret, address hashes change with every isolate.
+The limits per address (`ratelimits`) and the caps per member need nothing beyond
+`wrangler.jsonc`. The kill switch, bans and the moderation log need a D1 database and a secret,
+made once by the maintainer with their own login (`npx wrangler login`). Until they exist the
+server runs with online always on, without bans and log; without the secret, address hashes
+change with every isolate.
 
 1. The secret for the keyed address hash (64 random hex digits; keep no copy in the repository):
 
@@ -119,8 +120,9 @@ days (the daily cron in `wrangler.jsonc` deletes older rows and ended bans).
 
 ### Moderation
 
-`tools/moderate.mjs` (also `npm run moderate -- ...`) reads the log and changes bans in the
-deployed database through `wrangler d1 execute` under your login; there is no admin endpoint.
+`tools/moderate.mjs` (also `npm run moderate -- ...`) reads the log, changes bans and turns online
+off and on (below) in the deployed database through `wrangler d1 execute` under your login; there
+is no admin endpoint.
 Bans go by address hash or install id, never by name (anyone can take any name):
 
 ```sh
@@ -143,11 +145,23 @@ with a local moderation database), applies the migrations to the local store and
 
 ### Turning online off
 
-`ONLINE` under `vars` in `wrangler.jsonc` is the kill switch (finding 161): `"off"` refuses new
-rooms, joins and race starts with a plain message on the game's ONLINE screen ("Online races are
-paused. Try again later.", or `ONLINE_MESSAGE`), and `/v1/health` shows `"online":false`. No game
-update is needed: `npx wrangler deploy --var ONLINE:off` (and later a plain deploy, or
-`--var ONLINE:on`, to turn it back on). Like any deploy it restarts every open room.
+The kill switch (finding 161) is a row in the moderation database, set with the moderation tool;
+no deploy, so no room restarts:
+
+```sh
+node tools/moderate.mjs online off                          # the default message
+node tools/moderate.mjs online off --message "Back at 18:00 UTC."
+node tools/moderate.mjs online                              # show the state
+node tools/moderate.mjs online on
+```
+
+While off, the server refuses new rooms, joins and race starts with a plain message on the game's
+ONLINE screen ("Online races are paused. Try again later.", or `--message`, within about 45
+characters), and `/v1/health` and `/v1/lobbies` show `"online":false`. Rooms already open stay:
+their members are not kicked and may rejoin after a drop, a race already running finishes, but no
+new race starts and nobody new gets in. Each server isolate keeps the state it read for up to
+30 s, so a change bites within that long. Without the database (one-time setup above) there is no
+kill switch: online is on.
 
 Live logs: `npx wrangler tail`. Redeploying disconnects every open room (Durable Objects
 restart on a new version), so don't deploy during races.

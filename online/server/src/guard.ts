@@ -7,18 +7,43 @@ import { CLOSE_CODES } from "./protocol";
 /** The guard's settings and bindings. All optional: a server without them runs as before (online
     on, no limits per address, no bans, no log); wrangler.jsonc and README.md say which exist. */
 export interface GuardEnv {
-  /** The kill switch: "off" refuses new rooms, joins and race starts. Anything else is on. */
-  ONLINE?: string;
-  /** The refusal text while online is off (OFF_MESSAGE when unset). */
-  ONLINE_MESSAGE?: string;
   /** The secret for the keyed IP hash (ipHash): a Worker secret, never in a tracked file. */
   IP_HASH_KEY?: string;
   /** Rate limiters per connection source (wrangler.jsonc `ratelimits`, keyed by ipHash): every
       room WebSocket, and new rooms. */
   RL_CONNECT?: RateLimit;
   RL_CREATE?: RateLimit;
-  /** The moderation log and the ban list (migrations/0001_moderation.sql; README.md sets it up). */
+  /** The kill switch, the moderation log and the ban list (migrations/; README.md sets it up). */
   MODERATION?: D1Database;
+  /** Tests only (vitest.config.ts): "off" reads the store at every lookup, so a test sees its own
+      change at once. */
+  GUARD_CACHE?: string;
+}
+
+// ---- What an isolate keeps of the store ----
+
+/**
+ * Each isolate (the Worker's, each room's) keeps the kill switch it read for SWITCH_CACHE_MS, so a
+ * connection costs no D1 read for it in the common case, and `online off` bites within 30 s. A
+ * read that fails is kept only FAILED_CACHE_MS: a store back from an outage is read again soon,
+ * and a broken one is not asked (and logged) at every connection.
+ */
+export const SWITCH_CACHE_MS = 30_000;
+export const FAILED_CACHE_MS = 10_000;
+
+interface Cached<T> {
+  db: D1Database;
+  /** ms since the Unix epoch; Infinity while the read runs (callers then share it). */
+  until: number;
+  value: Promise<T>;
+}
+
+const noCache = (env: GuardEnv) => env.GUARD_CACHE === "off";
+
+/** Forgets everything this isolate kept (tests). */
+export function resetGuardCaches(): void {
+  switchCache = null;
+  lastSwitch = ONLINE_ON;
 }
 
 // ---- The kill switch ----
@@ -28,16 +53,59 @@ export interface GuardEnv {
  * screen's footer, which holds about 45 characters at 640 pixels (finding 054): keep it short.
  */
 export const OFF_MESSAGE = "Online races are paused. Try again later.";
+/** The longest operator's message the server shows (tools/moderate.mjs refuses longer ones). */
+export const MESSAGE_MAX = 120;
 
-/** True while the operator has turned online off (ONLINE = "off"). */
-export function onlineOff(env: GuardEnv): boolean {
-  return typeof env.ONLINE === "string" && env.ONLINE.trim().toLowerCase() === "off";
+/** The kill switch as the store has it (migrations/0002_settings.sql: keys `online` and
+    `online_message`, written by tools/moderate.mjs online). `message`: what players read while off. */
+export interface OnlineState {
+  on: boolean;
+  message: string;
+}
+const ONLINE_ON: OnlineState = { on: true, message: "" };
+
+let switchCache: Cached<OnlineState> | null = null;
+/** The last state this isolate read: what a failed read keeps. */
+let lastSwitch: OnlineState = ONLINE_ON;
+
+/** The operator's message, or OFF_MESSAGE when there is none. */
+export function offMessage(message: unknown): string {
+  return typeof message === "string" && message.trim() ? message.trim().slice(0, MESSAGE_MAX) : OFF_MESSAGE;
 }
 
-/** What players read while online is off: ONLINE_MESSAGE, else OFF_MESSAGE. */
-export function offMessage(env: GuardEnv): string {
-  const m = env.ONLINE_MESSAGE;
-  return typeof m === "string" && m.trim() ? m.trim().slice(0, 120) : OFF_MESSAGE;
+async function readSwitch(db: D1Database): Promise<OnlineState> {
+  const { results } = await db
+    .prepare("SELECT key, value FROM settings WHERE key IN ('online', 'online_message')")
+    .all<{ key: string; value: string }>();
+  const get = (key: string) => results.find((r) => r.key === key)?.value;
+  return get("online")?.trim().toLowerCase() === "off" ? { on: false, message: offMessage(get("online_message")) } : ONLINE_ON;
+}
+
+/**
+ * The kill switch (finding 161): off while the operator has turned online off with
+ * `tools/moderate.mjs online off`; kept per isolate SWITCH_CACHE_MS (above). No store: on. A store
+ * that can't be read keeps the last state this isolate read (on, if none) and logs it: a broken
+ * store turns online neither off nor on.
+ */
+export function onlineState(env: GuardEnv, now = Date.now()): Promise<OnlineState> {
+  const db = env.MODERATION;
+  if (!db) return Promise.resolve(ONLINE_ON);
+  const cached = switchCache;
+  if (!noCache(env) && cached && cached.db === db && now < cached.until) return cached.value;
+  const entry: Cached<OnlineState> = { db, until: Infinity, value: Promise.resolve(ONLINE_ON) };
+  entry.value = readSwitch(db).then(
+    (state) => {
+      entry.until = now + SWITCH_CACHE_MS;
+      return (lastSwitch = state);
+    },
+    (e) => {
+      console.error("guard: the kill switch can't be read; keeping the last state", e);
+      entry.until = now + FAILED_CACHE_MS;
+      return lastSwitch;
+    },
+  );
+  switchCache = entry;
+  return entry.value;
 }
 
 // ---- Refusals before any room ----

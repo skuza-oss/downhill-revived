@@ -55,7 +55,7 @@ A refusal is one text frame followed by a close:
 | `rate_limited` | 4011 | Too many connections or new rooms from one address in a minute (below). |
 | `too_fast` | 4012 | A member sent far more than the game does, a second time (caps, under Limits). The first time it is a non-fatal `too_fast` error. |
 | `banned` | 4013 | The operator banned this player's address (refused before any room) or install id (refused at `hello`). |
-| `online_off` | 4010 | The operator turned online off (the kill switch, below). Also a non-fatal error to a `start`, and to the room when a countdown runs out. |
+| `online_off` | 4010 | The operator turned online off (the kill switch, below): a new room, or a `hello` that is not a member's rejoin. Also a non-fatal error to a `start`, and to the room when a countdown runs out. |
 
 ### Minimum client version
 
@@ -75,22 +75,28 @@ refusal carries both versions:
 
 ### The kill switch (finding 161)
 
-The Worker variable `ONLINE` (`online/server/wrangler.jsonc`) is `"on"`; `"off"` stops online
-without a game update. Then every WebSocket to `/v1/rooms/...`, a new room, a join or a rejoin,
-is refused at once, before `hello` and before any room (the one exception to "before `hello` the
-server sends nothing"):
+The operator turns online off and on without a deploy or a game update (`node tools/moderate.mjs
+online off`, a row in the server's moderation database; `online/server/README.md`). The server
+reads it at most every 30 s, so a change takes up to that long. While off:
+
+- `/v1/rooms/new` is refused at once, before `hello` and before any room (the one exception to
+  "before `hello` the server sends nothing");
+- a join by code is refused at `hello`, unless the `hello` is a rejoin of one of the room's own
+  members (its `rejoinToken`): rooms that were open stay, their members are not kicked and come
+  back after a drop.
+
+The refusal is:
 
 ```json
 {"type":"error","code":"online_off","message":"Online races are paused. Try again later."}
 ```
 
-then close 4010. `ONLINE_MESSAGE` replaces the text (keep it within about 45 characters, the
+then close 4010. The operator may give another text (`--message`, within about 45 characters, the
 ONLINE screen's footer). Every release shows a refusal's `message`, so 0.7.11 and older need
 nothing new. `/v1/health` adds `"online":false` and the `message`; `/v1/lobbies` lists no rooms
-and adds the same two fields. A room that was open when the switch turned off (switching needs a
-deploy, which restarts every room, so normally only for the seconds the rooms take to restart)
-starts no race: its countdown is dropped and `start` answers the non-fatal `online_off` error. A
-race already running goes on.
+and adds the same two fields. An open room starts no race: its countdown is dropped and `start`
+answers the non-fatal `online_off` error (so does a countdown that runs out, to the whole room). A
+race already running goes on to its finish.
 
 ### Limits per address (finding 161)
 

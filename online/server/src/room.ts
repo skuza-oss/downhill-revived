@@ -32,8 +32,8 @@ import {
 } from "./protocol";
 import { placeOf, regionOfPlace, roomRegion, traceColo } from "./region";
 import {
-  CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, banMessage, findBan, installIdOf, logJoin, newTally, offMessage, onlineOff, tally,
-  type Caps, type GuardEnv, type Tally,
+  CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, banMessage, findBan, installIdOf, logJoin, newTally, onlineState, tally,
+  type Caps, type GuardEnv, type OnlineState, type Tally,
 } from "./guard";
 
 /** A claimed room nobody joined is dropped after this long. */
@@ -608,15 +608,16 @@ export class Room extends DurableObject<Env> {
       return this.refuse(ws, "bad_message", "hello.isoSha256 must be 64 lowercase hex digits.");
     if (name.length < 1 || name.length > 24)
       return this.refuse(ws, "bad_message", "hello.name must be 1-24 characters.");
-    // The install id (optional; releases before it send none, a malformed one counts as none) and
-    // its ban (finding 161): the address's was checked before the room. Nothing else of this
-    // socket is handled meanwhile.
+    // The kill switch, the install id (optional; releases before it send none, a malformed one
+    // counts as none) and its ban (finding 161): the address's was checked before the room. Both
+    // come from the store (kept per isolate); nothing else of this socket is handled meanwhile.
     const installId = installIdOf(m.installId);
-    if (installId && (this.env as GuardEnv).MODERATION) {
+    let sw: OnlineState = { on: true, message: "" };
+    if ((this.env as GuardEnv).MODERATION) {
       this.helloPending.add(ws);
       let ban;
       try {
-        ban = await findBan(this.env as GuardEnv, { install: installId });
+        [sw, ban] = await Promise.all([this.online(), installId ? findBan(this.env as GuardEnv, { install: installId }) : null]);
       } finally {
         this.helloPending.delete(ws);
       }
@@ -625,6 +626,10 @@ export class Room extends DurableObject<Env> {
     }
 
     const st = this.state;
+    // Online off: only this room's own members come back (a dropped racer rejoins its race, which
+    // goes on); nobody new gets in.
+    if (!sw.on && !(st && st.version !== null && this.rejoinOf(st, m.rejoinToken)))
+      return this.refuse(ws, "online_off", sw.message);
     const asHost = info.create && st !== null && st.version === null && st.members.length === 0;
     if (!st || (!asHost && st.version === null))
       return this.refuse(ws, "room_not_found", "No room has this code.");
@@ -810,8 +815,10 @@ export class Room extends DurableObject<Env> {
   }
 
   private async onStart(ws: WebSocket, st: RoomState): Promise<void> {
+    const sw = await this.online();
+    if (st !== this.state) return;
     if (st.race) return this.error(ws, "room_started", "The race is already running.");
-    if (this.off()) return this.error(ws, "online_off", offMessage(this.env as GuardEnv));
+    if (!sw.on) return this.error(ws, "online_off", sw.message);
     if (st.session) {
       if (!st.members.some(x => x.ready && !x.choosing)) return this.error(ws, "not_ready", "Nobody is ready.");
       if (st.countdownEndsAt == null) this.lockGrid(st);
@@ -853,15 +860,17 @@ export class Room extends DurableObject<Env> {
     return Number.isFinite(v) && v >= 0 ? v : COUNTDOWN_MS;
   }
 
-  /** The kill switch (finding 161): while online is off no race starts here; the room stays a
-      lobby (a race already running goes on). */
-  private off(): boolean {
-    return onlineOff(this.env as GuardEnv);
+  /** The kill switch (finding 161; src/guard.ts onlineState, kept 30 s per isolate): while online
+      is off no race starts here and nobody new joins; the room stays a lobby for its members (a
+      race already running goes on). */
+  private online(): Promise<OnlineState> {
+    return onlineState(this.env as GuardEnv);
   }
 
-  /** Starts or stops the countdown after a change; true when it started now. */
-  private updateCountdown(st: RoomState): boolean {
-    if (this.off() && !st.race) {
+  /** Starts or stops the countdown after a change (none while online is off); true when it
+      started now. */
+  private updateCountdown(st: RoomState, off: boolean): boolean {
+    if (off && !st.race) {
       st.countdownEndsAt = null;
       st.grid = undefined; st.gridRules = undefined;
       return false;
@@ -890,12 +899,14 @@ export class Room extends DurableObject<Env> {
   }
 
   private async startRace(st: RoomState, country: string): Promise<void> {
+    const sw = await this.online();
+    if (st !== this.state || st.race) return;
     st.countdownEndsAt = null;
-    if (this.off()) {
+    if (!sw.on) {
       // A countdown that ran out with online off (it was turned off since): no race.
       st.grid = undefined; st.gridRules = undefined;
       await this.save();
-      this.broadcast({ type: "error", code: "online_off", message: offMessage(this.env as GuardEnv) });
+      this.broadcast({ type: "error", code: "online_off", message: sw.message });
       this.broadcastRoom();
       return;
     }
@@ -1102,12 +1113,13 @@ export class Room extends DurableObject<Env> {
   }
 
   private async changed(): Promise<void> {
+    const off = !(await this.online()).on;
     const st = this.state;
     if (st?.session) {
-      this.updateCountdown(st);
+      this.updateCountdown(st, off);
       await this.ctx.storage.setAlarm(this.nextAlarm(st, Date.now()));
     }
-    if (st && !st.session && this.updateCountdown(st)) {
+    if (st && !st.session && this.updateCountdown(st, off)) {
       const at = await this.ctx.storage.getAlarm();
       if (at === null || at > st.countdownEndsAt!) await this.ctx.storage.setAlarm(st.countdownEndsAt!);
     }

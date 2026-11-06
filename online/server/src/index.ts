@@ -3,7 +3,7 @@ import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
 import {
-  RATE_MESSAGE, banMessage, cleanup, findBan, ipHash, offMessage, onlineOff, overLimit, refuseSocket, type GuardEnv,
+  RATE_MESSAGE, banMessage, cleanup, findBan, ipHash, onlineState, overLimit, refuseSocket, type GuardEnv,
 } from "./guard";
 
 export { Room } from "./room";
@@ -21,10 +21,12 @@ export default {
 
     // minVersion: the oldest client release the server lets play (MIN_VERSION, wrangler.jsonc).
     const minVersion = minVersionOf(env.MIN_VERSION);
-    // The kill switch (ONLINE = "off", finding 161): no new rooms, joins or races, and the health
-    // check and the lobby list say so.
-    const off = onlineOff(env as GuardEnv);
-    const offState = off ? { online: false, message: offMessage(env as GuardEnv) } : { online: true };
+    // The kill switch (finding 161: tools/moderate.mjs online off, kept 30 s per isolate): no new
+    // rooms, joins or races, and the health check and the lobby list say so.
+    const lookup = path === "/v1/health" || path === "/v1/lobbies" || path.startsWith("/v1/rooms/");
+    const sw = lookup ? await onlineState(env as GuardEnv) : null;
+    const off = sw !== null && !sw.on;
+    const offState = off ? { online: false, message: sw.message } : { online: true };
     if (path === "/v1/health") return json({ ok: true, protocol: PROTOCOL, minVersion, ...offState });
 
     // The newest release's latest.json, the launcher's backup when GitHub's API can't be reached
@@ -51,7 +53,9 @@ export default {
     if (m) {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
         return json({ error: "Expected a WebSocket upgrade" }, 426);
-      if (off) return refuseSocket("online_off", offMessage(env as GuardEnv));
+      // Off: no new room. A join by code still reaches its room, which lets only its own members
+      // back in (a dropped racer rejoining a race that goes on) and refuses the rest at hello.
+      if (off && m[1] === "new") return refuseSocket("online_off", sw.message);
       // Limits per connection source (finding 161), by the address's keyed hash, before any room.
       const ip = await ipHash(env as GuardEnv, request);
       if (await overLimit(env as GuardEnv, ip, m[1] === "new")) return refuseSocket("rate_limited", RATE_MESSAGE);

@@ -17,7 +17,9 @@ export default defineConfig(async () => {
         // Cloudflare trace where they run (src/room.ts probeColo): tests set the colo themselves.
         // The members' caps count over 1 s windows here (src/guard.ts CAP_WINDOW_MS, 5 s), so a test
         // sees a second window soon. IP_HASH_KEY: a test key for the keyed address hash (a Worker
-        // secret in production).
+        // secret in production). GUARD_CACHE off: the kill switch and bans are read from the store
+        // at every lookup (src/guard.ts keeps them 30 s and 60 s per isolate), so a test's change
+        // bites at once; the cache's own tests pass an env without it.
         miniflare: {
           bindings: {
             MIN_VERSION: "0.2.0",
@@ -25,6 +27,7 @@ export default defineConfig(async () => {
             COLO_PROBE: "off",
             CAP_WINDOW_MS: "1000",
             IP_HASH_KEY: "test-ip-hash-key",
+            GUARD_CACHE: "off",
             TEST_MIGRATIONS: migrations,
           },
           d1Databases: ["MODERATION"],

@@ -15,9 +15,11 @@ do, and let the operator stop a bad actor.
 
 The lane adds, server side, deployable without a game update (0.7.11 clients keep working):
 
-1. **Kill switch.** A Worker variable (for example `ONLINE = "off"`) makes the server refuse new
-   rooms, joins and race starts with a clear message, and lets `/v1/health` say so. Changing it
-   needs only a variable change and deploy, no game update.
+1. **Kill switch.** The operator makes the server refuse new rooms, joins and race starts with a
+   clear message, and `/v1/health` says so; no game update. (Round 1 made it a Worker variable,
+   which needs a deploy that restarts every room; the lead's round-2 review moved it into the D1
+   store, toggled by the local tool, no deploy: rooms already open keep their members and races
+   in progress finish.)
 2. **Limits per connection source.** At most a few new rooms and a few connections per minute
    from one IP address, using Cloudflare's Workers rate-limiting binding (or the closest Cloudflare
    feature, with the reason in Decisions). Over the limit: a refusal with its own error code.
@@ -63,9 +65,15 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 ## Progress
 
 - [x] 2026-11-06: lane plan (this file).
-- [x] Kill switch: `ONLINE` var (`wrangler.jsonc`, `"on"`), `src/guard.ts` `onlineOff`; the Worker
-  refuses every room WebSocket with `online_off` (4010) before any room, `/v1/health` and
-  `/v1/lobbies` say `online:false`; rooms start no race while off. Tests `test/guard.test.ts`.
+- [x] Kill switch (round 1: the `ONLINE` variable; round 2: in D1, no deploy): table `settings`
+  (`migrations/0002_settings.sql`, keys `online`, `online_message`), `tools/moderate.mjs online
+  [on | off [--message]]`, `src/guard.ts` `onlineState` (kept 30 s per isolate). While off the
+  Worker refuses `/v1/rooms/new` with `online_off` (4010) at once; a room refuses at hello anyone
+  but its own members' rejoins; `/v1/health` and `/v1/lobbies` say `online:false`; rooms start no
+  race, a running race finishes. Tests `test/guard.test.ts` (refusals, message, an open room's
+  members staying and rejoining, a running race, the cache and its failure path). Checked against
+  a local `wrangler dev`: `online off --message` showed in `/v1/health` at once, `online on`
+  after the 30 s.
 - [x] Rate limits per connection source: the Workers rate-limiting binding (`ratelimits` in
   `wrangler.jsonc`: `RL_CONNECT` 30 room connections a minute, `RL_CREATE` 10 new rooms a minute),
   keyed by the keyed IP hash (`src/guard.ts` `ipHash`, HMAC-SHA-256 with the `IP_HASH_KEY`
@@ -106,13 +114,26 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 - Server only first: the lane deploys without a game update; only the install id needs the next
   release.
 
-- Kill switch refusals come from the Worker itself (a WebSocket it accepts, one error frame,
-  close), not from a room: an off server reaches no Durable Object. It answers at once, before
-  `hello`; every release reads an error frame then a 4000-4099 close as a refusal (no rejoin,
-  `port/net/client.c` `client_on_closed`) and shows `message`, so no client change is needed.
-- Turning online off refuses rejoins too: the variable needs a deploy, which restarts every room
-  and drops every socket anyway, so "off" means off at once. Races running when a room sees the
-  switch go on; only new starts are refused.
+- Refusals before any room come from the Worker itself (a WebSocket it accepts, one error frame,
+  close): it answers at once, before `hello`; every release reads an error frame then a
+  4000-4099 close as a refusal (no rejoin, `port/net/client.c` `client_on_closed`) and shows
+  `message`, so no client change is needed.
+- 2026-11-06, round 2 (the lead): the kill switch is a row in the D1 store, not a Worker
+  variable. A variable needs a deploy, and a deploy restarts every room and drops every lobby.
+  The `ONLINE` variable is gone, not kept as a second switch (one code path): its only remaining
+  use would be "D1 down and online must go off at once", and then a deploy is as disruptive as
+  the outage; a self-hosted server without the database has online always on.
+- Each isolate keeps the switch 30 s (`SWITCH_CACHE_MS`): a connection costs no D1 read in the
+  common case, and 30 s is short enough for an emergency. Concurrent lookups share one read. A
+  failed read keeps the last state the isolate read (on, if none) and retries after 10 s
+  (`FAILED_CACHE_MS`): a broken store turns online neither off nor on.
+- While off, new rooms are refused by the Worker at once, but a join by code goes to its room,
+  which refuses at hello anyone but its own members' rejoins (the token is only known there). Now
+  that switching drops nobody, a racer whose connection blips mid-race must get back to the race
+  that goes on; the cost is that an off server still wakes a room per join attempt (behind the
+  limits per address). Members in a lobby are not kicked; their room starts no race.
+- The tests turn the cache off (`GUARD_CACHE = "off"`, vitest.config.ts only) so a test's change
+  bites at once; the cache's own tests pass envs without it, with their own clock.
 - Rate limits: Cloudflare's Workers rate-limiting binding (GA since 2025-09), as the plan said.
   It needs no resource made beforehand (`namespace_id` is a number of our choosing), so it is in
   `wrangler.jsonc` now and today's deploy keeps working. It counts per Cloudflare location and is

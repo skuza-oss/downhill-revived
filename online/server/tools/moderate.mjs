@@ -10,6 +10,7 @@
 //                                 [--days N | --hours N | --until WHEN | --forever] [--reason TEXT]
 //   node tools/moderate.mjs bans [--all] [--hashes]
 //   node tools/moderate.mjs unban BAN_ID...
+//   node tools/moderate.mjs online [on | off [--message TEXT]]
 //   node tools/moderate.mjs local-setup      the local store for `npm run dev:guard` (below)
 //
 // joins lists who entered rooms, newest first: time (UTC), room, member, name, release, country,
@@ -25,6 +26,13 @@
 // from it; --install-only spares them, --ip-only catches a player who resets the install id. Banning
 // again changes the expiry. bans lists the bans in force (--all: ended ones too, until the daily
 // cleanup removes them); unban lifts bans by their id.
+//
+// online is the kill switch, no deploy needed: `online off` refuses new rooms, joins and race
+// starts (races running finish, rooms' members stay and may rejoin), with --message TEXT on the
+// game's ONLINE screen instead of the default (keep it within about 45 characters, the screen's
+// footer; at most 120); `online on` lets players in again; `online` alone shows the state. The
+// servers keep what they read for up to 30 s, and a ban lookup up to a minute: a change bites
+// within that long.
 //
 // Where: the deployed database by default (--remote); --local is the store of a local
 // `npm run dev:guard`. --db NAME (default dhd-moderation) and --config FILE pick another.
@@ -50,7 +58,7 @@ function fail(message) {
 function parseArgs(argv) {
   const flags = {};
   const rest = [];
-  const valued = new Set(["name", "since", "until", "room", "like", "limit", "days", "hours", "reason", "db", "config"]);
+  const valued = new Set(["name", "since", "until", "room", "like", "limit", "days", "hours", "reason", "db", "config", "message"]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith("--")) {
@@ -155,6 +163,28 @@ export function bansSql(flags, now = Date.now()) {
     ` FROM bans${flags.all ? "" : ` WHERE expires_at IS NULL OR expires_at > ${now}`} ORDER BY id`
   );
 }
+
+/** The footer of the game's ONLINE screen holds about this many characters (src/guard.ts
+    OFF_MESSAGE); the server shows at most MESSAGE_MAX. */
+const FOOTER_CHARS = 45;
+const MESSAGE_MAX = 120;
+
+/** The kill switch's rows (migrations/0002_settings.sql): `online` and its message ('' when off
+    without --message, so an old message never comes back; the server's default then). */
+export function onlineSql(state, flags, now = Date.now()) {
+  const message = state === "off" ? String(flags.message ?? "").trim() : null;
+  if (message !== null && message.length > MESSAGE_MAX) fail(`--message holds at most ${MESSAGE_MAX} characters`);
+  const rows = [["online", state]];
+  if (message !== null) rows.push(["online_message", message]);
+  return rows.map(
+    ([key, value]) =>
+      `INSERT INTO settings (key, value, updated_at) VALUES (${sqlString(key)}, ${sqlString(value)}, ${now})` +
+      ` ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  );
+}
+
+export const ONLINE_SHOW_SQL =
+  `SELECT key, value, ${utc("updated_at")} AS since_utc FROM settings WHERE key IN ('online', 'online_message') ORDER BY key`;
 
 // ---- wrangler ----
 
@@ -290,6 +320,24 @@ function main(argv) {
       const results = execute(flags, [`DELETE FROM bans WHERE id IN (${ids.join(", ")}) RETURNING id, kind, name`]);
       console.log("Lifted:");
       printTable(results[0]);
+      return;
+    }
+    case "online": {
+      if (rest.length > 1 || (rest.length && !["on", "off"].includes(rest[0]))) fail("online takes on, off or nothing");
+      if (flags.message !== undefined && rest[0] !== "off") fail("--message goes with online off");
+      if (rest[0] === "off" && String(flags.message ?? "").trim().length > FOOTER_CHARS)
+        console.warn(`moderate: the message is longer than the ONLINE screen's footer (about ${FOOTER_CHARS} characters) and may be cut`);
+      const results = execute(flags, [...(rest.length ? onlineSql(rest[0], flags) : []), ONLINE_SHOW_SQL]);
+      const rows = results[results.length - 1];
+      const get = (key) => rows.find((r) => r.key === key);
+      const off = get("online")?.value.trim().toLowerCase() === "off";
+      const message = get("online_message")?.value.trim();
+      console.log(
+        off
+          ? `Online is OFF since ${get("online").since_utc} UTC, message: ${message ? `"${message}"` : "the default"}`
+          : `Online is on${get("online") ? ` since ${get("online").since_utc} UTC` : ""}.`,
+      );
+      if (rest.length) console.log("The servers keep the old state for up to 30 s.");
       return;
     }
     case "local-setup":

@@ -1,11 +1,13 @@
 // The abuse guard (finding 161): the kill switch, limits, caps, bans and the moderation log.
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
 import {
-  BINARY_PER_WINDOW, OFF_MESSAGE, RATE_MESSAGE, TEXT_PER_WINDOW, TOO_FAST_MESSAGE, TOO_FAST_WARNING, ipHash, newTally, tally,
+  BINARY_PER_WINDOW, FAILED_CACHE_MS, MESSAGE_MAX, OFF_MESSAGE, RATE_MESSAGE, SWITCH_CACHE_MS,
+  TEXT_PER_WINDOW, TOO_FAST_MESSAGE, TOO_FAST_WARNING, ipHash, newTally, offMessage, onlineState, resetGuardCaches, tally,
 } from "../src/guard";
+import { FRAME_STATE } from "../src/protocol";
 import { Client, randomIp, startedRace } from "./helpers";
 
 /** The Worker with some variables changed (the test run's own are fixed). */
@@ -29,40 +31,75 @@ async function refusalOf(res: Response): Promise<{ error: any; code: number }> {
   return got;
 }
 
+/** The kill switch as tools/moderate.mjs sets it (`online off [--message]`, `online on`). */
+async function setOnline(on: boolean, message = ""): Promise<void> {
+  const now = Date.now();
+  await env.MODERATION.batch(
+    [["online", on ? "on" : "off"], ["online_message", message]].map(([k, v]) =>
+      env.MODERATION.prepare(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)" +
+          " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+      ).bind(k, v, now),
+    ),
+  );
+}
+
+/** A D1 database that counts its queries (the caches' tests). */
+function counting(db: D1Database): { db: D1Database; reads: () => number } {
+  let n = 0;
+  const wrapped = { prepare: (q: string) => (n++, db.prepare(q)) } as unknown as D1Database;
+  return { db: wrapped, reads: () => n };
+}
+
+const ROOM_UPGRADE = { headers: { Upgrade: "websocket" } };
+
 describe("kill switch", () => {
+  afterEach(() => setOnline(true));
+
   it("is on by default and says so in the health check", async () => {
+    await env.MODERATION.prepare("DELETE FROM settings").run();
     const health = await (await fetchWith({}, "/v1/health")).json<any>();
     expect(health).toMatchObject({ ok: true, online: true });
     expect(health.message).toBeUndefined();
+    const sw = await onlineState({}); // no store: on
+    expect(sw.on).toBe(true);
   });
 
-  it("refuses new rooms and joins with a plain message while off", async () => {
-    const off = { ONLINE: "off" };
-    for (const path of ["/v1/rooms/new", "/v1/rooms/ABCDEF"]) {
-      const { error, code } = await refusalOf(await fetchWith(off, path, { headers: { Upgrade: "websocket" } }));
-      expect(error).toEqual({ type: "error", code: "online_off", message: OFF_MESSAGE });
-      expect(code).toBe(4010);
+  it("refuses new rooms at once and joins at hello with a plain message while off", async () => {
+    const { code: open } = await Client.host("Ann");
+    await setOnline(false);
+    const { error, code } = await refusalOf(await fetchWith({}, "/v1/rooms/new", ROOM_UPGRADE));
+    expect(error).toEqual({ type: "error", code: "online_off", message: OFF_MESSAGE });
+    expect(code).toBe(4010);
+    for (const room of [open, "ABCDEF"]) {
+      const c = await Client.connect(`/v1/rooms/${room}`);
+      c.hello("Late");
+      expect(await c.json("error")).toEqual({ type: "error", code: "online_off", message: OFF_MESSAGE });
+      expect(await c.closed()).toBe(4010);
     }
     expect(OFF_MESSAGE.length).toBeLessThanOrEqual(45); // the ONLINE screen's footer
-    const health = await (await fetchWith(off, "/v1/health")).json<any>();
+    const health = await (await fetchWith({}, "/v1/health")).json<any>();
     expect(health).toMatchObject({ ok: true, online: false, message: OFF_MESSAGE });
-    const list = await (await fetchWith(off, "/v1/lobbies")).json<any>();
+    const list = await (await fetchWith({}, "/v1/lobbies")).json<any>();
     expect(list).toMatchObject({ online: false, lobbies: [] });
+    // On again: rooms again.
+    await setOnline(true);
+    expect((await (await fetchWith({}, "/v1/health")).json<any>()).online).toBe(true);
+    await Client.join(open, "Bo");
   });
 
   it("takes the operator's own message", async () => {
-    const vars = { ONLINE: "OFF", ONLINE_MESSAGE: "Back at 18:00 UTC." };
-    const { error } = await refusalOf(await fetchWith(vars, "/v1/rooms/new", { headers: { Upgrade: "websocket" } }));
+    await setOnline(false, "  Back at 18:00 UTC. ");
+    const { error } = await refusalOf(await fetchWith({}, "/v1/rooms/new", ROOM_UPGRADE));
     expect(error.message).toBe("Back at 18:00 UTC.");
+    expect(offMessage("x".repeat(500)).length).toBe(MESSAGE_MAX);
+    expect(offMessage("  ")).toBe(OFF_MESSAGE);
   });
 
-  it("starts no race in a room while off, and the room stays", async () => {
+  it("starts no race in a room while off; its members stay and come back, nobody new gets in", async () => {
     const { host, code } = await Client.host("Ann");
     const bo = await Client.join(code, "Bo");
-    const stub = env.ROOM.get(env.ROOM.idFromName(code));
-    await runInDurableObject(stub, (room: any) => {
-      room.env = { ...room.env, ONLINE: "off" };
-    });
+    await setOnline(false);
     for (const c of [host, bo]) c.sendJson({ type: "ready", ready: true });
     await host.next((f) => typeof f === "string" && JSON.parse(f).type === "room" && JSON.parse(f).members.every((m: any) => m.ready));
     host.sendJson({ type: "start" });
@@ -71,6 +108,59 @@ describe("kill switch", () => {
     host.sendJson({ type: "ping", t: 1 });
     expect((await host.json("pong")).t).toBe(1); // still connected
     expect(host.closeCode).toBeNull();
+    // Bo's connection drops and comes back with its token: let back in.
+    const again = await Client.connect(`/v1/rooms/${code}`);
+    again.hello("Bo", { rejoinToken: bo.welcome.rejoinToken });
+    expect((await again.json("welcome")).memberId).toBe(bo.welcome.memberId);
+    // A new player is not.
+    const cy = await Client.connect(`/v1/rooms/${code}`);
+    cy.hello("Cy");
+    expect((await cy.json("error")).code).toBe("online_off");
+  });
+
+  // (A rejoin during a race is a session room's (finding 137); the lobby's rejoin above is the
+  // same check at hello.)
+  it("lets a race that is running go on", async () => {
+    const { clients } = await startedRace(2);
+    await setOnline(false);
+    clients[0].ws.send(new Uint8Array([FRAME_STATE, 0, 1, 2, 3]).buffer);
+    expect((await clients[1].binary())[0]).toBe(FRAME_STATE);
+    clients[1].ws.send(new Uint8Array([FRAME_STATE, 0, 4, 5, 6]).buffer);
+    expect((await clients[0].binary())[0]).toBe(FRAME_STATE);
+  });
+});
+
+describe("what an isolate keeps of the store", () => {
+  // These pass envs without GUARD_CACHE (vitest.config.ts turns the cache off for the other tests).
+  beforeEach(() => resetGuardCaches());
+  afterEach(() => setOnline(true));
+
+  it("reads the kill switch once per SWITCH_CACHE_MS, and sees a change after it", async () => {
+    const { db, reads } = counting(env.MODERATION);
+    const t = Date.now();
+    await setOnline(true);
+    const [a, b] = await Promise.all([onlineState({ MODERATION: db }, t), onlineState({ MODERATION: db }, t)]);
+    expect([a.on, b.on, reads()]).toEqual([true, true, 1]); // one read for both
+    await setOnline(false, "Maintenance.");
+    expect((await onlineState({ MODERATION: db }, t + SWITCH_CACHE_MS - 1)).on).toBe(true);
+    expect(reads()).toBe(1);
+    expect(await onlineState({ MODERATION: db }, t + SWITCH_CACHE_MS)).toEqual({ on: false, message: "Maintenance." });
+    expect(reads()).toBe(2);
+  });
+
+  it("keeps the last state when the store can't be read, and asks again soon", async () => {
+    const t = Date.now();
+    await setOnline(false);
+    expect((await onlineState({ MODERATION: env.MODERATION }, t)).on).toBe(false);
+    let fails = 0;
+    const broken = { prepare: () => { fails++; throw new Error("D1 is down"); } } as unknown as D1Database;
+    expect((await onlineState({ MODERATION: broken }, t)).on).toBe(false); // still off, not on
+    expect((await onlineState({ MODERATION: broken }, t + FAILED_CACHE_MS - 1)).on).toBe(false);
+    expect(fails).toBe(1);
+    await onlineState({ MODERATION: broken }, t + FAILED_CACHE_MS);
+    expect(fails).toBe(2);
+    resetGuardCaches();
+    expect((await onlineState({ MODERATION: broken }, t)).on).toBe(true); // nothing read yet: on
   });
 });
 
