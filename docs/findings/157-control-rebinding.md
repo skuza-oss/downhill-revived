@@ -1,6 +1,6 @@
 # 157: Keyboard and controller rebinding, in the launcher and in the game
 
-Status: in progress
+Status: current
 
 Branch `feat/rebinding` from `main` 113f76f, started 2026-11-05. This file is the lane's plan
 while it runs and its finding when it merges.
