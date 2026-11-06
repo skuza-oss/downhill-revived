@@ -238,6 +238,11 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   the TURN permission it installs lasts 5 minutes (RFC 8656 9; the binding 10) and ChannelData
   renews neither, so a relayed race over 5 minutes lost datagrams at each renewal. It is renewed
   after 240 s now (`turn.rs` CHANNEL_REFRESH, unit-tested).
+- Release review round 2: `sfu_connected` walked the live member list across its API calls, and a
+  leave or kick (not queued with SFU work) spliced it, so the loop skipped the next racer: two
+  remaining racers never subscribed to each other and never got `sfu_ready`. The room now picks
+  the next missing subscription afresh after every call until none is missing, and the release
+  checks every pair first (server test with a leave during the held call).
 
 ## Result
 

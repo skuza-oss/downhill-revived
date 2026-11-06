@@ -378,17 +378,10 @@ export class Room extends DurableObject<Env> {
           } else if (m.type === "sfu_connected" && me.sfu) {
             const channels = await api.publish(me.id, me.sfu);
             this.send(ws, { type: "sfu_channels", channels });
-            if (this.state?.race !== race || !this.state.members.includes(me)) {
+            if (!this.sfuCurrent(race, me)) {
               await this.clearSfu(me); return;
             }
-            for (const other of this.state!.members) {
-              if (other.id === me.id || !race.slots.includes(other.id) || !other.sfu || other.sfu.phase !== "ready") continue;
-              const mine = await api.subscribe(me.sfu, other.id, other.sfu);
-              if (mine.length) this.send(ws, { type: "sfu_channels", channels: mine });
-              const theirs = await api.subscribe(other.sfu, me.id, me.sfu);
-              const peer = this.sockets.get(other.id);
-              if (peer && theirs.length) this.send(peer, { type: "sfu_channels", channels: theirs });
-            }
+            await this.subscribeRacers(api, race);
             await this.save();
           } else if (m.type === "sfu_turn" && me.sfu && me.sfuRace === race.startAt) {
             // UDP to the SFU did not connect for this racer: TURN over TLS (finding 158, round 4).
@@ -1040,16 +1033,66 @@ export class Room extends DurableObject<Env> {
     await this.changed();
   }
 
-  /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
-  /** Retire a publication and its subscriptions, without disclosing publication session IDs. */
+  /** `member` is still a racer of `race`, the room's running race. */
+  private sfuCurrent(race: Race, member: Member): boolean {
+    const st = this.state;
+    return !!st && st.race === race && st.members.includes(member) && this.inRace(st, member.id);
+  }
+
+  /** The racers of `race` whose publication is up (their own channels allocated). */
+  private sfuRacers(race: Race): Member[] {
+    const st = this.state;
+    if (!st || st.race !== race) return [];
+    return st.members.filter(x => this.inRace(st, x.id) && x.sfuRace === race.startAt && x.sfu?.phase === "ready");
+  }
+
+  /** A subscriber and the publisher it has no subscription to yet, among those racers. */
+  private missingSubscription(race: Race): [Member, Member] | null {
+    const racers = this.sfuRacers(race);
+    for (const a of racers) for (const b of racers)
+      if (a !== b && !a.sfu!.channels.some(c => !c.local && c.memberId === b.id)) return [a, b];
+    return null;
+  }
+
+  /** Subscribes every published racer of `race` to every other one's publication it lacks, each
+      endpoint told only its own allocations. Leaves and kicks are not queued with this, so the
+      racers are read again after every API call: a departure during one can't make it skip a
+      remaining racer (release review round 2, finding 158). It ends when no pair is missing. */
+  private async subscribeRacers(api: Realtime, race: Race): Promise<void> {
+    // Bounded: every call allocates a missing pair or finds it allocated (at most 10 x 9 pairs).
+    for (let calls = 0; calls <= MAX_MEMBERS * MAX_MEMBERS; calls++) {
+      const pair = this.missingSubscription(race);
+      if (!pair) return;
+      const [sub, pub] = pair;
+      const channels = await api.subscribe(sub.sfu!, pub.id, pub.sfu!);
+      const peer = this.sockets.get(sub.id);
+      if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
+    }
+  }
+
+  /** A subscription missing at release (none should be: every racer's sfu_connected subscribes
+      all pairs): allocated in the queue, then the release is checked again. */
+  private reconciling = false;
+  private queueReconcile(race: Race): void {
+    if (this.reconciling) return;
+    this.reconciling = true;
+    const run = this.sfuQueue.then(() => this.subscribeRacers(new Realtime(this.env as Env & SfuSecrets), race));
+    this.sfuQueue = run.then(() => {}, () => {});
+    this.ctx.waitUntil(run.then(async () => {
+      this.reconciling = false;
+      await this.save();
+      if (this.state?.race === race) this.releaseSfu(this.state);
+    }, () => { this.reconciling = false; }));
+  }
+
+  /** Lets race traffic flow once every racer acknowledged its channels and every pair of racers
+      is subscribed both ways. */
   private releaseSfu(st: RoomState): void {
     const race = st.race;
     if (!race) return;
-    const racers = st.members.filter(m => {
-      const slot = race.slots.indexOf(m.id);
-      return slot >= 0 && !race.left.includes(slot);
-    });
+    const racers = st.members.filter(m => this.inRace(st, m.id));
     if (!racers.length || !racers.every(m => m.sfuRace === race.startAt && m.sfuReady && m.sfu?.phase === "ready")) return;
+    if (this.missingSubscription(race)) return this.queueReconcile(race);
     for (const member of racers) {
       const peer = this.sockets.get(member.id);
       if (peer) this.send(peer, {type:"sfu_ready"});
@@ -1058,7 +1101,8 @@ export class Room extends DurableObject<Env> {
 
   private async closeRaceSfu(st: RoomState): Promise<void> {
     const cleanup = this.sfuQueue.then(async () => {
-      for (const member of st.members) if (member.sfu || member.turnUser) await this.clearSfu(member);
+      // A copy: a leave during an API call must not make the loop skip anyone.
+      for (const member of [...st.members]) if (member.sfu || member.turnUser) await this.clearSfu(member);
     });
     this.sfuQueue = cleanup.catch(() => {});
     await cleanup;
@@ -1076,7 +1120,7 @@ export class Room extends DurableObject<Env> {
     const api = new Realtime(this.env as Env & SfuSecrets);
     try { await this.revokeTurn(member); } catch { /* logged; the TTL ends them */ }
     if (member.sfu) await api.close(member.sfu);
-    for (const other of this.state?.members ?? []) {
+    for (const other of [...(this.state?.members ?? [])]) {
       if (other.id === member.id || !other.sfu) continue;
       const channels = other.sfu.channels.filter(c => !c.local && c.memberId === member.id);
       if (!channels.length) continue;
@@ -1087,6 +1131,7 @@ export class Room extends DurableObject<Env> {
     delete member.sfu;
   }
 
+  /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
   private async leave(memberId: number, reason: "disconnect" | "leave" | "kicked"): Promise<void> {
     const st = this.state;
     if (!st) return;

@@ -1,15 +1,18 @@
 import { describe, it, expect, vi } from "vitest";
 import { env, runInDurableObject } from "cloudflare:test";
 import { Client, startedRace } from "./helpers";
+import { fakeRealtime, publishedSession } from "./sfu-fake";
 import { Realtime, Turn, TURN_TTL_S } from "../src/sfu";
 
 describe("Realtime control plane", () => {
   it("releases race traffic only after every subscriber acknowledges", async () => {
     const {clients, code} = await startedRace(2);
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+      const ids = room.state.members.map((m: any) => m.id);
       for (const member of room.state.members) {
         member.sfuRace = room.state.race.startAt;
-        member.sfu = {id:`fake-${member.id}`, phase:"ready", channels:[]};
+        member.sfu = {id:`fake-${member.id}`, phase:"ready", channels: ids.filter((id: number) => id !== member.id)
+          .map((id: number, k: number) => ({memberId:id, name:"state", channelId:20 + k, local:false}))};
       }
     });
     clients[0].sendJson({type:"sfu_ready"});
@@ -89,6 +92,51 @@ describe("Realtime control plane", () => {
     const session = { id: "fake", phase: "connect" as const, channels: [] };
     await expect(partial.publish(1, session)).rejects.toThrow();
     expect(session.channels).toEqual([{ memberId: 1, name: "state", channelId: 10, local: true }]);
+  });
+});
+
+describe("Realtime setup while the race's members change", () => {
+  it("subscribes every remaining racer when one leaves during sfu_connected's API calls", async () => {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    // The first subscription waits until the test lets it go: a leave comes in meanwhile.
+    fake.hold = (path, body) => path.endsWith("datachannels/new") && !!body.dataChannels[0].sessionId && fake.held === 0;
+    try {
+      await runInDurableObject(stub, async (room: any) => {
+        room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
+        const [a, b, c] = room.state.members;
+        a.sfu = publishedSession(a.id, [b.id]);
+        b.sfu = publishedSession(b.id, [a.id]);
+        c.sfu = { id: `session-${c.id}`, phase: "connect", channels: [] };
+        for (const m of room.state.members) m.sfuRace = room.state.race.startAt;
+      });
+      // Member 2 (slot 2) connects; its first subscription is to member 0's publication.
+      clients[2].sendJson({ type: "sfu_connected" });
+      for (let i = 0; i < 200 && !fake.held; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(fake.held).toBe(1);
+      clients[0].sendJson({ type: "leave" });
+      await clients[1].json("left");
+      fake.release();
+      // Members 1 and 2 subscribe to each other, so both can acknowledge and be released.
+      const got1 = await clients[1].next((f) => typeof f === "string" && JSON.parse(f).type === "sfu_channels" &&
+        JSON.parse(f).channels.some((c: any) => c.memberId === 2));
+      expect(JSON.parse(got1 as string).channels.every((c: any) => !c.local)).toBe(true);
+      await clients[2].next((f) => typeof f === "string" && JSON.parse(f).type === "sfu_channels" &&
+        JSON.parse(f).channels.some((c: any) => c.memberId === 1));
+      await runInDurableObject(stub, async (room: any) => {
+        await room.sfuQueue;
+        const [b, c] = room.state.members;
+        expect(b.sfu.channels.some((x: any) => !x.local && x.memberId === c.id)).toBe(true);
+        expect(c.sfu.channels.some((x: any) => !x.local && x.memberId === b.id)).toBe(true);
+        expect(room.state.members.every((m: any) => m.sfu.channels.every((x: any) => x.memberId !== 0))).toBe(true);
+      });
+      clients[1].sendJson({ type: "sfu_ready" });
+      clients[2].sendJson({ type: "sfu_ready" });
+      await Promise.all([clients[1].json("sfu_ready"), clients[2].json("sfu_ready")]);
+    } finally {
+      fake.restore();
+    }
   });
 });
 
