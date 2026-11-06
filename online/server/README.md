@@ -193,8 +193,25 @@ removing a class later needs a new migration entry, not an edit of `v1`.
 
 ## Realtime SFU (protocol 3)
 
-Set Worker secrets `REALTIME_APP_ID` and `REALTIME_APP_TOKEN` to the Realtime SFU app's
-credentials. Local development reads them from gitignored `.dev.vars`; never put values in
-config, logs or client messages. Lobby tests use a fake API and do not need credentials.
+The deploy needs four Worker secrets (values from the Cloudflare dashboard, Realtime; never in a
+tracked file, a log or a client message):
+
+| Secret | What |
+|---|---|
+| `REALTIME_APP_ID` | the Realtime SFU app's id |
+| `REALTIME_APP_TOKEN` | that app's API token |
+| `TURN_KEY_ID` | the TURN key's id (Realtime > TURN), for the fallback over TLS on 443 |
+| `TURN_KEY_API_TOKEN` | that TURN key's API token |
+
+```sh
+npx wrangler secret put REALTIME_APP_ID      # paste each value when asked
+npx wrangler secret put REALTIME_APP_TOKEN
+npx wrangler secret put TURN_KEY_ID
+npx wrangler secret put TURN_KEY_API_TOKEN
+```
+
+Without the TURN pair, races still run over UDP; a player whose network blocks UDP gets no relay
+(the room logs "TURN credentials unavailable") and their race does not start. Local development reads all four from the
+gitignored `.dev.vars`. Lobby tests use a fake API and do not need credentials.
 The DO owns session and channel creation; clients connect only to Cloudflare. See
 [the protocol](../../docs/online-protocol.md) and finding 158 for setup, tests and live acceptance.

@@ -85,6 +85,9 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - [x] Measurements recorded (acceptance 3-5); local routing and load caveats below.
 - [x] Round 3: bare transport probe, client loop delays found and fixed, fair race comparison
       against the relay on the official server (section "Round 3" below).
+- [x] Round 4: main merged (the abuse guard, finding 161) with caps for protocol 3; TURN over TLS
+      on 443 as the fallback when UDP does not connect, measured through the real SFU and TURN;
+      Mac and Linux checks (section "Round 4" below).
 
 ## Decisions
 
@@ -138,6 +141,25 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   a TURN-forced mesh. A mesh sends nine copies per player and still needs relays; own relays need
   servers to run. Cost on the current plan: SFU and TURN egress is free up to 1,000 GB a month
   (Cloudflare Realtime pricing, read 2026-11-05); a full ten-player race is a few MB per player.
+- Round 4: TURN is a fallback, not a second path kept beside the first: UDP is tried first, the
+  relay only after DIRECT_TIMEOUT (2 s after the answer; the reasoning is beside the constant and
+  in "Round 4"). Credentials are minted per racer per race on request, never handed out to every
+  racer in advance: most players never need them, and a credential nobody got cannot leak.
+- Round 4: an own TURN client, not `turn-client-proto` (ystreet, MIT OR Apache-2.0, maintained,
+  sans-IO). Its `stun-types` 2.0 pulls the older RustCrypto generation (digest 0.10, hmac 0.12,
+  sha1 0.10, md-5 0.10, rand 0.9) beside the 0.11 one str0m already links, plus byteorder and
+  smallvec: two copies of the hash stack for a few hundred lines of protocol. `turn.rs` needs only
+  what this fallback uses (Allocate, Refresh, ChannelBind, ChannelData; no TCP relaying, no Send
+  indications) and takes no new crate: HMAC-SHA1 and random ids from ring (already linked for
+  rustls), MD5 in 40 lines (only for the long-term key, RFC 8489 9.2.2) with RFC 1321's vectors,
+  MESSAGE-INTEGRITY checked against RFC 5769 2.4's sample. Sources:
+  [RFC 8656](https://www.rfc-editor.org/rfc/rfc8656), [RFC 8489](https://www.rfc-editor.org/rfc/rfc8489),
+  [RFC 5769](https://www.rfc-editor.org/rfc/rfc5769),
+  [turn-client-proto](https://crates.io/crates/turn-client-proto).
+- Round 4: the TURN credential TTL is an hour and the room revokes them when the racer's session
+  ends; a revoke that fails leaves at most an unused credential for the rest of the hour.
+- Round 4: only `turns:` urls on `turn.cloudflare.com` are used, 443 first: a network that blocks
+  UDP usually lets TLS on 443 through, and TURN over UDP or plain TCP would not help there.
 - State sync stays (finding 044). Research on how other fan ports and revival servers do online
   (2026-11-06) found no reason for lockstep or rollback. Most of them send race traffic player to
   player and expose IPs. The closest relay designs are PPSSPP's relay-only ad hoc server and the
@@ -158,7 +180,8 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 
 - The native test caught DTLS receive-queue overflow when several datagrams were fed before
   polling str0m. The transport now drains outputs after every datagram and after each timeout.
-- Initial native transport uses IPv4 UDP to SFU candidates; no TCP/TURN path is implemented.
+- Initial native transport uses IPv4 UDP to SFU candidates (round 4 adds the TURN-over-TLS
+  fallback for networks that block UDP).
   Readying waits for all current members' negotiated channels to open. Reliable events queue
   during setup; snapshots retain only the newest per rider under congestion. Queue overflow
   fails the connection for reliable messages instead of silently losing gameplay events.
@@ -201,6 +224,16 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   in our loop when it is polled continuously (longest round 5.9 ms with one rider). Loop
   outliers that remain (poll gaps up to 33 ms, a few input waits over 5 ms per 30 s) come
   with the PC at 55-62% CPU from other lanes' builds and games: the thread is not scheduled.
+
+- Round 4: vitest loads the server's gitignored `.dev.vars`, so with real credentials there the
+  tests called the real Realtime API (with invalid offers) and one new test minted a real TURN
+  credential (unused, expired within the hour). The test bindings now blank all four secrets.
+- Round 4: the first relayed run failed with "TURN server did not answer": the end of each poll
+  drained the TURN client's output into a link that was not connected yet, so the first Allocate
+  was dropped. Output now stays in the client until the TLS link is up.
+- Round 4: Cloudflare's TURN refuses a ChannelBind to some Cloudflare addresses (401 for 1.1.1.1
+  and the API host's address) but binds to the SFU's own candidate address (7-13 ms) and to
+  outside addresses. Its answer to a made-up username after the 401 challenge is a 400.
 
 ## Result
 
@@ -492,3 +525,163 @@ at p50 and p95 on this PC, where the room's Durable Object sits in another count
 plus Part 1 is the fallback only if the remaining SFU work (TURN/TLS for UDP-blocked players,
 native Mac/Linux checks, the cross-machine races) turns out too costly. Unmeasured: a room
 whose Durable Object runs in the players' own city, and two PCs on different networks.
+
+## Round 4: main merged, TURN over TLS on 443, Mac and Linux
+
+### Main merged (the abuse guard, finding 161)
+
+`git merge main` (77bf688): conflicts only in the findings index, the health route of
+`docs/online-protocol.md` and `room.test.ts` (protocol 3 plus the guard's `online` field), and
+`port/net/test_session.c` (both new tests kept). The guard's checks stay first in
+`Room.webSocketMessage`, before any `sfu_*` message is read, so protocol 3 clients get the kill
+switch, the limits per address, bans and the caps like everyone else. Close codes do not collide:
+the SFU lane adds none (its errors are `bad_value`), the guard owns 4010-4013. Fix-up e1b0051:
+protocol 3 sends race frames over the SFU, so a member's WebSocket binary traffic is only the
+race's two PINGs a second; the binary cap went from 2000 to 100 a 5 s window (ten times the game),
+text stays at 100 and covers the race's few Realtime messages. `tools/loadtest.mjs` measured the
+deleted relay; it now sends the game's PINGs and checks every PONG and that no cap is hit.
+
+### TURN over TLS: the design
+
+- **When:** UDP stays the first path. `DIRECT_TIMEOUT` is 2 s after the SFU's answer
+  (`port/render/net/src/sfu.rs`). Direct setup is an ICE check plus the DTLS handshake, about four
+  round trips to the nearest Cloudflare location: measured 198-241 ms here (8 ms RTT), under a
+  second at 150 ms RTT, with room for one lost packet's retransmission. A shorter timeout would put
+  slow-but-working UDP on the relay; a longer one only delays the race start for blocked players.
+- **Credentials:** the client sends `sfu_turn`; the room (`online/server/src/sfu.ts` `Turn`) mints
+  them with `generate-ice-servers` only for a racer with an SFU session in the running race, once
+  per member per race, TTL one hour (longer than any race with its finish wait, so a running
+  relay's Refresh never meets an expired credential), `customIdentifier` `room-<CODE>-m<id>`
+  (accepted by that endpoint, checked live: 201). It sends the `turns:` urls, username and
+  credential to that member only, and revokes them when the member's SFU session is cleared (race
+  end, retire, leaving). A failed mint sends nothing and leaves the session usable (UDP may still
+  connect). The client accepts only `turns:` servers on `turn.cloudflare.com`, port 443 first.
+- **Client:** `turn.rs`, a sans-IO TURN client (RFC 8656 subset): Allocate with the long-term
+  credential (401 challenge, MD5 key, HMAC-SHA1 MESSAGE-INTEGRITY), 438 stale-nonce retry, Refresh a
+  minute before the lifetime ends, ChannelBind per SFU candidate (which also installs the
+  permission) refreshed every 5 minutes, ChannelData padded to 4 bytes on the stream, integrity
+  checked on every success answer, a 10 s transaction timeout, Refresh with lifetime 0 at the end.
+  `relay.rs`: the TLS stream (rustls on ring, the bundled roots, SNI `turn.cloudflare.com`) with its
+  own reader thread that wakes the send thread, as the UDP reader does. The allocation's address
+  goes to str0m as a relayed candidate; str0m's transmits from it go to the relay, relayed datagrams
+  come back as input with the relayed address as destination. str0m's ICE keeps the association
+  alive through its Disconnected state, so the candidate added after the timeout is checked and
+  nominated like any other.
+- **Test switch:** `DHD_NET_SFU_UDP=0` drops every UDP datagram to and from the SFU, as a network
+  that blocks UDP does; the timeout and fallback then run as they would there.
+- **Hard rule:** a TURN allocation carries only that player's own traffic to the SFU; the SFU sees
+  the TURN service's address. Credentials go to their owner only (server test). No player gets
+  another's address, SDP or credentials.
+
+### Round 4 measurements (WARP off, route interface Ethernet for the SFU and TURN)
+
+Bare probe (`probe_sfu_one_way_delay`, both clients in one process, one clock), one-way ms.
+Runs were interleaved; the PC ran other lanes' work.
+
+| Run | Riders A+B, bytes | Client 0 p50/p95/p99/max; gaps >100 ms | Client 1 p50/p95/p99/max; gaps | Setup |
+|---|---|---|---|---|
+| UDP, 30 s | 1+1, 150 | 10.6/26.1/29.6/37.7; 0 | 10.5/26.7/29.8/42.9; 0 | connected 216-241 ms after the answer |
+| TURN/TLS, 30 s | 1+1, 150 | 9.1/23.4/40.0/139.5; 1 | 8.7/19.3/26.0/28.7; 0 | allocation 38 ms after the credentials; connected 2395-2399 ms after the answer |
+| UDP 1, 60 s | 10+1, 170 | 8.8/17.1/25.1/32.1; 1 | 10.2/17.8/26.3/45.0; 1 | |
+| TURN/TLS 1, 60 s | 10+1, 170 | 8.3/14.6/22.3/35.4; 0 | 11.9/17.3/24.6/71.6; 0 | |
+| UDP 2, 60 s | 10+1, 170 | 9.7/16.4/25.4/32.9; 0 | 9.9/15.9/25.1/32.1; 0 | |
+| TURN/TLS 2, 60 s | 10+1, 170 | 9.7/13.1/26.0/110.1; 2 | 11.2/13.8/30.5/185.4; 3 | |
+
+Every TURN run delivered 1800/1800 (900/900) rider-0 snapshots; the UDP runs 1797-1800. The 30 s
+`net: SFU` line says `via TURN/TLS` with 0 direct datagrams and ~1,150 relayed each way. Result:
+from this PC the relay costs nothing measurable at p50/p95 (Cloudflare's TURN and SFU are the same
+edge); the tail is what TCP adds: one lost segment holds later ones (max 110-185 ms, 1-3 gaps
+over 100 ms a minute against 0-1 on UDP). Setup through the relay adds ~2.1-2.4 s (the 2 s
+timeout, the credential mint through the room, TLS ~25-45 ms, Allocate ~20 ms, ChannelBind 7-13
+ms, ICE and DTLS through the relay). `probe_turn_allocate` times the bare steps.
+
+**Two-game race through TURN/TLS** (`online_race.py` through `local_server.py`, both games with
+`DHD_NET_SFU_UDP=0`, minimised, 120 s after GO, eight host AI riders; raw logs local only in
+`build/check/sfu-turn-round4`). Both games fell back as designed: no UDP connection 2 s after the
+answer, the credentials through the local room, the TURN allocation 41-42 ms later, connected via
+TURN/TLS 2420 and 3125 ms after the answer; both loaded, the countdown started +0.0/+0.2 ms from
+the agreed moment and GO was 0.4 ms apart. Every `net: SFU` line says `via TURN/TLS`, 0 direct
+datagrams. Snapshot age (the GO-clock estimator, as in rounds 2 and 3), the 30 s windows after GO:
+
+| Receiver, sender | Window 1 | Window 2 | Window 3 | Window 4 |
+|---|---|---|---|---|
+| host, guest | 37/53/56; 0 | 52/65/66; 0 | 54/65/68; 0 | 54/65/97; 3 |
+| guest, host | 33/52/57; 0 | 53/849/1001; 13 | 47/66/155; 4 | 44/66/73; 2 |
+
+(p50/p95/p99 ms; gaps over 100 ms.) Apart from one window this matches round 3's UDP race
+(p50 19-45, p95 41-66).
+
+The guest's window 2 (race seconds ~30-60) is not the TURN setup: setup ended before GO and
+window 1 is clean. In it, the guest's snapshots from the host came in bursts (per second 117, 334,
+63, 406, ... against a steady 270) with puppet lag up to 249 ms, so the stream stalled and then
+delivered what had queued. Our code is not where they waited: the send threads never paused more
+than 12.7 ms (poll gap), frames waited at most 10.2 ms to be written, and nothing was dropped.
+To check the receive side as well, the `net: SFU` line now reports the relay's longest read gap and
+how long read bytes waited for the send thread (52c39be). In ten more forced-TURN probe runs (60 s,
+host load) bytes waited 0.1-3 ms after the read. Snapshot stalls of about one second happened in
+two of them (1034 and 1039 ms; 0-3 gaps over 100 ms in the others). So the time is lost before
+the bytes reach our socket read: TCP retransmission on the TLS stream, which holds every later
+byte back (head-of-line blocking; the UDP runs on the same PC and path had no such stalls). That is
+the known cost of a TCP fallback, not a bug here. The relay is only for players whose UDP is
+blocked, and for them it replaces no online play at all. Two parallel TLS links carrying duplicate
+snapshots would hide most of these stalls; not done, a lead decision if players on the relay
+report it.
+
+Not measured: a real UDP-blocking network, and players on different networks through the relay.
+
+### Cost
+
+Cloudflare's pricing (read 2026-11-06): SFU and TURN egress share one allowance, 1,000 GB a month
+free, then $0.05 per GB; "traffic between Realtime TURN and Realtime SFU ... does not incur any
+charges" (TURN FAQ); TURN bills what its edge sends to the client. So a relayed player's downstream
+is billed once, as TURN egress instead of SFU egress, plus the framing (4-byte ChannelData header,
+padding, TLS records: roughly 10-15% on 150-200-byte snapshots). The fallback runs only for players
+whose UDP fails. Minting and revoking credentials cost nothing. Nothing here changes the plan's
+cost picture. Sources: [pricing](https://developers.cloudflare.com/realtime/pricing/),
+[TURN FAQ](https://developers.cloudflare.com/realtime/turn/faq/),
+[credentials](https://developers.cloudflare.com/realtime/turn/generate-credentials/).
+
+### Mac and Linux
+
+- **macOS arm64** (the Mac build host, macOS on M1, the same sources copied to a folder of its
+  own and removed afterwards): `rustgs.py test --target aarch64-apple-darwin -- -p dhd_net -p
+  dhd_render --lib`: 13 dhd_net and 8 renderer tests pass. Among them the UDP/DTLS/SCTP loopback
+  test (`native_channels_deliver_and_bind_sender_with_state_loss`: the reader thread, its wakeups
+  and the 5% loss count on macOS sockets), the TURN codec tests and
+  `probe_turn_tls_no_credentials` (TLS to `turn.cloudflare.com:443` ready in 74 ms, the 401
+  challenge and refusal in 191 ms). `rustgs.py build --target aarch64-apple-darwin` builds the
+  release `libdhd_render.a` with its gates (the vendored str0m crypto patch compiles there: no
+  AWS-LC, no OpenSSL). The live SFU/TURN probes need the Realtime and TURN keys, which stay on
+  this PC, so they did not run on the Mac. The game itself was not linked there (the Mac's disk
+  had about 6 GB free); the lead's PC<->Mac race builds it.
+- **Linux x64:** `rustgs.py build --target x86_64-unknown-linux-gnu` cross-builds the release
+  library here with its gates. Linux tests did not run: no Linux machine is reachable from here,
+  WSL's Ubuntu 22.04 has no cargo, and its networking does not start (mirrored mode fails, falls
+  back to none). Nothing in the new code is Windows-specific: std sockets and threads, rustls,
+  ring; the one platform case in the UDP reader (Windows' reset after an ICMP unreachable) is a
+  harmless extra match elsewhere.
+
+### Round 4 validation, what is left, lead decisions
+
+Commits on `feat/online-sfu` this round: 77bf688 (merge of main), e1b0051 (guard caps for protocol 3,
+the load test), 47cb3ff (server: TURN credentials), 184f3e0 (client: TURN over TLS), c4bab01 (a
+failed mint keeps the session; hermetic server tests), 1d762be (the credential-free TLS probe),
+52c39be (the relay's stream timing), and this file with the protocol doc and the server README.
+
+- After the merge: `check.py server` and `check.py quick` passed. On the final code (52c39be):
+  `check.py server` (129 tests, typecheck), `check.py port -j 6` (game build, net tests, GS and
+  wasm2c tests), `check.py quick -j 6` and `check.py docs` pass.
+- dhd_net 13 and renderer 8 unit tests on Windows and macOS; the live probes on Windows.
+- No state trace: round 4 changes only the Rust network library, the server and docs (the core
+  module is unchanged), and deterministic offline runs never start the network.
+- Every harness, wrangler/workerd, game, probe and Mac job this round started has ended; my Mac
+  folders are removed. Nothing was pushed, deployed, tagged, or changed in secrets or version.
+
+Left: the lead's PC<->Mac race (the TURN path can be forced there with `DHD_NET_SFU_UDP=0` on
+either side); a test on a network that really blocks UDP; Linux unit tests on a Linux machine; a
+full game link on the Mac.
+
+For the lead: the deploy needs the two new secrets `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`
+(online/server/README.md) besides the Realtime pair. `DIRECT_TIMEOUT` (2 s) is a judgment call: a
+shorter one puts slow UDP on the relay, a longer one delays blocked players' race start.
+Duplicate TLS links to hide TCP stalls on the relay: only if relay players report stutter.

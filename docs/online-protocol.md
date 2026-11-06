@@ -258,13 +258,28 @@ so the game sees start before buffered events. Channels close at race end.
   queued locally so reliable events cannot precede a subscriber.
 - Departures and replacements send `{"type":"sfu_closed","channelIds":[10,12]}` only to
   affected endpoints, after closing those allocations through the API.
+- TURN over TLS, for networks that block UDP (finding 158, round 4). The client tries UDP to the
+  SFU first. If its association has not connected 2 s after `sfu_answer`, it sends
+  `{"type":"sfu_turn"}`. The DO accepts that once per member per race, only from a racer with an
+  SFU session in the running race. It mints TURN credentials through Cloudflare's TURN API
+  (`generate-ice-servers`, TTL 1 hour, `customIdentifier` `room-<CODE>-m<memberId>`, no personal
+  data) and sends them to that member only:
+  `{"type":"sfu_turn","urls":["turns:turn.cloudflare.com:5349?transport=tcp","turns:turn.cloudflare.com:443?transport=tcp"],"username":"<hex>","credential":"<hex>"}`
+  (`urls`: the `turns:` entries only). The client connects with TLS to the port-443 entry (the
+  others are fallbacks), takes a relayed address (TURN Allocate, ChannelBind to the SFU's
+  candidates, ChannelData over the stream) and gives it to ICE as a relayed candidate. The SFU
+  sees the TURN service's address, never the player's. The DO revokes the credentials when that
+  member's SFU session is cleared (race end, retire, leaving); a second `sfu_turn` in the race
+  is a `bad_value` error. Clients accept `turns:` servers on `turn.cloudflare.com` only.
 - Setup failures use `error` with `bad_value` and ask the player to rejoin. No automatic API
   mutation retries: a partially successful operation must not allocate duplicate channels.
 
-The Worker reads `REALTIME_APP_ID` and `REALTIME_APP_TOKEN` from env/secrets. For local tests they
-live only in gitignored `.dev.vars`. Neither is sent to clients. Client SDP is never broadcast or
-stored in room messages; SFU answers are sent only to the session's owner. No message carries another
-player's SDP, candidates or address. The native client has no peer signaling or TURN mesh path.
+The Worker reads `REALTIME_APP_ID`, `REALTIME_APP_TOKEN`, `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`
+from env/secrets. For local tests they live only in gitignored `.dev.vars`. None is sent to
+clients. Client SDP is never broadcast or stored in room messages; SFU answers and TURN
+credentials are sent only to their owner. No message carries another player's SDP, candidates,
+TURN credentials or address. The native client has no peer signaling or TURN mesh path: a TURN
+relay only ever carries that player's own traffic to the SFU.
 
 The API limit is 50 requests/session/second; mutations are serialized, and channels use one
 publication batch and one subscription batch per publisher. API operations have a 15 s timeout.
@@ -297,7 +312,8 @@ timestamps before changing the pad mirror. Every owned rider is sent about 30 ti
 EVENT remains payload version 2. The SFU reads none of the gameplay payload.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
-EVENT is unaffected. `net:` reports per-sender p50/p95/p99 estimated snapshot age and
+EVENT is unaffected. `DHD_NET_SFU_UDP=0` drops every UDP datagram to and from the SFU (a network that
+blocks UDP), so the TURN-over-TLS fallback must carry the race. `net:` reports per-sender p50/p95/p99 estimated snapshot age and
 gaps longer than 100 ms. Age uses the existing per-sender EVENT_GO server-clock stamp plus the
 snapshot race timestamp, so it includes transit and time awaiting the next snapshot. Peer clock
 offset error and simulation drift affect the estimate; this is not a precise one-way latency probe.
