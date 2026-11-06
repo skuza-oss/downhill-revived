@@ -129,6 +129,9 @@ double net_seconds(void);                          /* the clock start_at uses */
    same moment on every PC to a few ms, for starting the race together. */
 double net_server_ms(void);
 int net_ping_ms(void);                             /* in a room, else -1 */
+/* In a race: how old the other riders' snapshots are when they arrive (the slowest player's
+   median, ms; what the puppets are predicted across), else -1 (finding 169). */
+int net_riders_ms(void);
 
 /* ---- the race ---- */
 

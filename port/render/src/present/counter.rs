@@ -18,11 +18,14 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 #[derive(Default)]
 pub struct Counter {
     enabled: bool,
-    ping: i32,
+    /// The online line: milliseconds (< 0: none), and whether they are the riders' (a race) or the
+    /// room server's ping.
+    ms: i32,
+    riders: bool,
     start: Option<f64>,
     frames: u32,
     fps: u32,
-    shown: Option<(u32, i32)>,
+    shown: Option<(u32, i32, bool)>,
     objects: Option<Objects>,
 }
 struct Objects {
@@ -33,9 +36,10 @@ struct Objects {
 impl Counter {
     // Called only for acquired pictures immediately before presenting. Count those
     // pictures, including interpolated ones, rather than simulation ticks/vblanks.
-    pub fn update(&mut self, enabled: bool, ping: i32, now: f64) {
+    pub fn update(&mut self, enabled: bool, ms: i32, riders: bool, now: f64) {
         self.enabled = enabled;
-        self.ping = ping;
+        self.ms = ms;
+        self.riders = riders;
         if let Some(start) = self.start {
             self.frames += 1;
             let elapsed = now - start;
@@ -53,9 +57,9 @@ impl Counter {
         if !self.enabled { return; }
         let o = self.objects.get_or_insert_with(|| Objects::new(gpu, format));
         // The numbers change twice a second at most: the bitmap is written again only then.
-        if self.shown != Some((self.fps, self.ping)) {
-            self.shown = Some((self.fps, self.ping));
-            o.write(gpu, self.fps, self.ping);
+        if self.shown != Some((self.fps, self.ms, self.riders)) {
+            self.shown = Some((self.fps, self.ms, self.riders));
+            o.write(gpu, &lines(self.fps, self.ms, self.riders));
         }
         // Integer scaling keeps the bitmap crisp: eight pixels is about 2% of height.
         let scale = ((h as f32 / 400.0).round() as u32).max(1);
@@ -83,11 +87,19 @@ impl Counter {
         gpu.queue.submit([encoder.finish()]);
     }
 }
+/// The counter's text: frames a second, then the online line. In a race the other riders' delay
+/// (how old their snapshots are when they arrive: what the puppets are predicted across, finding
+/// 169), else the round trip to the room's server, which carries no race data. At most 13
+/// characters a line (the bitmap is 128 pixels wide).
+fn lines(fps: u32, ms: i32, riders: bool) -> [String; 2] {
+    [format!("{} FPS", fps.min(99999)),
+     if ms < 0 { String::new() } else if riders { format!("RIDERS {} MS", ms.min(999)) } else { format!("{} MS PING", ms.min(99999)) }]
+}
+
 impl Objects {
-    fn write(&self, gpu: &Gpu, fps: u32, ping: i32) {
-        let lines = [format!("{} FPS", fps), if ping >= 0 { format!("{} MS PING", ping.min(99999)) } else { String::new() }];
+    fn write(&self, gpu: &Gpu, lines: &[String; 2]) {
         let width = lines.iter().map(|s| s.len()).max().unwrap_or(0) as u32 * 8 + 4;
-        let height = if ping >= 0 { 22 } else { 12 };
+        let height = if lines[1].is_empty() { 12 } else { 22 };
         let xoff = 128 - width;
         let mut pixels = vec![0u8; 128 * 22 * 4];
         for y in 0..height { for x in 0..width {
@@ -184,4 +196,19 @@ fn capture_png(gpu: &Gpu, frame: &wgpu::Texture, path: &str) -> Result<(), Strin
     encoder.write_header().map_err(|e| e.to_string())?.write_image_data(&pixels).map_err(|e| e.to_string())?;
     crate::host::log(&format!("present capture: {path}"));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lines;
+
+    #[test]
+    fn online_line_names_what_it_measures_and_fits() {
+        assert_eq!(lines(144, 38, true), ["144 FPS".to_string(), "RIDERS 38 MS".to_string()]);
+        assert_eq!(lines(60, 21, false)[1], "21 MS PING");
+        assert_eq!(lines(60, -1, true)[1], "");
+        for l in lines(999_999, 123_456, true).iter().chain(lines(999_999, 123_456, false).iter()) {
+            assert!(l.len() * 8 + 4 <= 128, "{l} is wider than the bitmap");
+        }
+    }
 }

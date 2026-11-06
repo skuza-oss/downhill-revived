@@ -8,7 +8,7 @@
 
 #include "net.h"
 
-enum { NET_PROTOCOL = 4, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
+enum { NET_PROTOCOL = 4, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000, NET_ARRIVALS = 64 };
 
 typedef struct {
     void *ctx;
@@ -50,7 +50,12 @@ typedef struct {
     /* Each sender's newest snapshot age on the server clock (now minus the bundle's stamp, the
        moment its snapshots show), sampled every network tick; 1001 is the overflow
        bin. Messages: STATE messages received from that sender; states_sent: ours. */
-    struct { double arrived, epoch; unsigned age[1002], samples, gaps, messages; } snapshot[NET_MAX_SLOTS];
+    struct {
+        double arrived, epoch;
+        unsigned age[1002], samples, gaps, messages;
+        float arrival[NET_ARRIVALS];  /* the last snapshots' ages on arrival (ms), a ring */
+        unsigned arrivals;
+    } snapshot[NET_MAX_SLOTS];
     unsigned states_sent;
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
@@ -92,6 +97,8 @@ void client_lobby(NetClient *c, NetLobby *out);
 int client_read_lobbies(NetClient *c, const char *body, double sent, double got, NetLobbyInfo *out, int max);
 
 int client_send_frame(NetClient *c, int type, const void *payload, size_t n);
+/* The other riders' delay for the counter in a race (ms), -1 none (finding 169). */
+int client_riders_ms(NetClient *c);
 int client_receive_frame(NetClient *c, uint8_t *out, size_t max);
 
 #endif

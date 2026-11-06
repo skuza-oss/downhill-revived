@@ -90,6 +90,15 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       are. `DHD_PUPPET_PREDICT=0` interpolates in the past as item 3 does. Unit test
       `test_puppet_predict.c` (a straight line, a turn in the right sense, a correction that starts
       where the rider was and fades, a respawn that snaps).
+- [x] Item 5, the counter: in a race the FPS & Ping counter's second line reads "RIDERS N MS",
+      the slowest other player's median age of their snapshots on arrival (the last 64, players
+      heard from in the last 2 s; `net_riders_ms`): the network delay to the other riders and the
+      span the puppets are predicted across. Outside a race it stays "N MS PING" (the room's
+      server). dhd.log's `net:` lines keep the ping and add each sender's age on arrival ("on
+      arrival N ms"). Rust test `online_line_names_what_it_measures_and_fits` (13 characters at
+      most, the bitmap's width). `src/abi.rs` gained the counter's and the touch overlay's
+      function types, and `test_dhdr_abi.py` reads `f32`/`f64` (both functions were missing from
+      the ABI check because it could not).
 
 ## Decisions
 

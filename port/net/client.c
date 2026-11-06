@@ -292,6 +292,38 @@ static void add_rtt(NetClient *c, double rtt)
    the last line and every other player's as the server measures them. Nothing per frame. The lines
    are made with the lock held and printed after it is released (the log is a pipe). */
 
+/* The median age of a sender's last NET_ARRIVALS snapshots on arrival (ms), -1 none. */
+static double arrival_median(const NetClient *c, int slot)
+{
+    float sorted[NET_ARRIVALS];
+    unsigned k = c->snapshot[slot].arrivals < NET_ARRIVALS ? c->snapshot[slot].arrivals : NET_ARRIVALS;
+    if (!k) return -1;
+    memcpy(sorted, c->snapshot[slot].arrival, k * sizeof sorted[0]);
+    for (unsigned i = 1; i < k; i++)
+        for (unsigned j = i; j > 0 && sorted[j] < sorted[j - 1]; j--) {
+            float x = sorted[j];
+            sorted[j] = sorted[j - 1], sorted[j - 1] = x;
+        }
+    return k % 2 ? sorted[k / 2] : (sorted[k / 2 - 1] + sorted[k / 2]) / 2;
+}
+
+/* The FPS & Ping counter's race line (finding 169): the slowest other player's snapshot delay (the
+   median age of their snapshots on arrival over the last NET_ARRIVALS, among those heard from in
+   the last 2 s), in ms; -1 when not racing or none. */
+int client_riders_ms(NetClient *c)
+{
+    double worst = -1, now = net_now_ms();
+    SDL_LockMutex(c->lock);
+    if (c->racing && c->connected)
+        for (int slot = 0; slot < NET_MAX_SLOTS; slot++)
+            if (slot != c->lobby.local_slot && c->snapshot[slot].arrivals && now - c->snapshot[slot].arrived < 2000) {
+                double m = arrival_median(c, slot);
+                if (m > worst) worst = m;
+            }
+    SDL_UnlockMutex(c->lock);
+    return worst < 0 ? -1 : (int)(worst + 0.5);
+}
+
 /* "last 30 s: ping 34 ms median, 51 worst (30 pings); players: ANNA (host, PL) 36 ms", and a new
    window from now. */
 static void window_stats(NetClient *c, char *out, size_t cap)
@@ -338,8 +370,9 @@ static void window_stats(NetClient *c, char *out, size_t cap)
             sum += c->snapshot[slot].age[ms];
             while (k < 3 && sum >= (count * pc[k] + 99) / 100) q[k++] = ms;
         }
-        n += snprintf(out + n, cap - n, "; slot %d snapshot age p50/p95/p99 %u/%u/%u ms (1001=overflow), gaps>100ms %u, messages %.1f/s",
-                      slot, q[0], q[1], q[2], c->snapshot[slot].gaps, seconds > 0 ? c->snapshot[slot].messages / seconds : 0.0);
+        n += snprintf(out + n, cap - n, "; slot %d snapshot age p50/p95/p99 %u/%u/%u ms (1001=overflow), on arrival %.0f ms, "
+                      "gaps>100ms %u, messages %.1f/s", slot, q[0], q[1], q[2], arrival_median(c, slot),
+                      c->snapshot[slot].gaps, seconds > 0 ? c->snapshot[slot].messages / seconds : 0.0);
         if (n >= (int)cap) n = (int)cap - 1;
         memset(c->snapshot[slot].age, 0, sizeof c->snapshot[slot].age);
         c->snapshot[slot].samples = c->snapshot[slot].gaps = c->snapshot[slot].messages = 0;
@@ -518,6 +551,11 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
                             c->snapshot[slot].gaps++;
                         c->snapshot[slot].arrived = now;
                         c->snapshot[slot].epoch = epoch;
+                        if (epoch) {  /* how old it is on arrival: the riders' delay (finding 169) */
+                            double age = now + c->clock_offset - epoch;
+                            c->snapshot[slot].arrival[c->snapshot[slot].arrivals++ % NET_ARRIVALS] =
+                                (float)(age < 0 ? 0 : age > 9999 ? 9999 : age);
+                        }
                     }
                 }
             }

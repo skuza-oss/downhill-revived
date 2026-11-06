@@ -207,6 +207,13 @@ int net_ping_ms(void)
     return inited && (l->state == NET_LOBBY || l->state == NET_RACING) && !l->offline && l->code[0] ? l->ping_ms : -1;
 }
 
+/* In a race, the other riders' delay (ms; client_riders_ms), else -1: the counter shows it
+   instead of the ping to the room's server, which carries no race data (finding 169). */
+int net_riders_ms(void)
+{
+    return inited && client.racing && !client.lobby.offline ? client_riders_ms(&client) : -1;
+}
+
 int net_racing(void)
 {
     return inited && client.racing;
