@@ -31,6 +31,7 @@ import {
   randomSeed,
 } from "./protocol";
 import { placeOf, regionOfPlace, roomRegion, traceColo } from "./region";
+import { offMessage, onlineOff, type GuardEnv } from "./guard";
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -761,6 +762,7 @@ export class Room extends DurableObject<Env> {
 
   private async onStart(ws: WebSocket, st: RoomState): Promise<void> {
     if (st.race) return this.error(ws, "room_started", "The race is already running.");
+    if (this.off()) return this.error(ws, "online_off", offMessage(this.env as GuardEnv));
     if (st.session) {
       if (!st.members.some(x => x.ready && !x.choosing)) return this.error(ws, "not_ready", "Nobody is ready.");
       if (st.countdownEndsAt == null) this.lockGrid(st);
@@ -787,8 +789,19 @@ export class Room extends DurableObject<Env> {
     return Number.isFinite(v) && v >= 0 ? v : COUNTDOWN_MS;
   }
 
+  /** The kill switch (finding 161): while online is off no race starts here; the room stays a
+      lobby (a race already running goes on). */
+  private off(): boolean {
+    return onlineOff(this.env as GuardEnv);
+  }
+
   /** Starts or stops the countdown after a change; true when it started now. */
   private updateCountdown(st: RoomState): boolean {
+    if (this.off() && !st.race) {
+      st.countdownEndsAt = null;
+      st.grid = undefined; st.gridRules = undefined;
+      return false;
+    }
     if (st.session) {
       if (st.race) return false;
       if (st.grid) {
@@ -814,6 +827,14 @@ export class Room extends DurableObject<Env> {
 
   private async startRace(st: RoomState, country: string): Promise<void> {
     st.countdownEndsAt = null;
+    if (this.off()) {
+      // A countdown that ran out with online off (it was turned off since): no race.
+      st.grid = undefined; st.gridRules = undefined;
+      await this.save();
+      this.broadcast({ type: "error", code: "online_off", message: offMessage(this.env as GuardEnv) });
+      this.broadcastRoom();
+      return;
+    }
 
     // Host first, then join order.
     // Members away after a drop (finding 137) don't race: their game isn't here to start.

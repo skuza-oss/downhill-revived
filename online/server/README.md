@@ -72,6 +72,14 @@ counts as 0.1.0. Raise it after a release is published, so players update, and d
 `/v1/health` shows the value in force. For a one-off change without editing the file:
 `npx wrangler deploy --var MIN_VERSION:0.2.0`.
 
+### Turning online off
+
+`ONLINE` under `vars` in `wrangler.jsonc` is the kill switch (finding 161): `"off"` refuses new
+rooms, joins and race starts with a plain message on the game's ONLINE screen ("Online races are
+paused. Try again later.", or `ONLINE_MESSAGE`), and `/v1/health` shows `"online":false`. No game
+update is needed: `npx wrangler deploy --var ONLINE:off` (and later a plain deploy, or
+`--var ONLINE:on`, to turn it back on). Like any deploy it restarts every open room.
+
 Live logs: `npx wrangler tail`. Redeploying disconnects every open room (Durable Objects
 restart on a new version), so don't deploy during races.
 

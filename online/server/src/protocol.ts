@@ -41,6 +41,8 @@ export const CLOSE_CODES = {
   kicked: 4007,
   hello_timeout: 4008,
   client_outdated: 4009,
+  /** The operator turned online off (wrangler.jsonc ONLINE; finding 161). */
+  online_off: 4010,
 } as const;
 export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
 

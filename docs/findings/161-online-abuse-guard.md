@@ -63,7 +63,9 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 ## Progress
 
 - [x] 2026-11-06: lane plan (this file).
-- [ ] Kill switch.
+- [x] Kill switch: `ONLINE` var (`wrangler.jsonc`, `"on"`), `src/guard.ts` `onlineOff`; the Worker
+  refuses every room WebSocket with `online_off` (4010) before any room, `/v1/health` and
+  `/v1/lobbies` say `online:false`; rooms start no race while off. Tests `test/guard.test.ts`.
 - [ ] Rate limits per connection source.
 - [ ] Per-member caps.
 - [ ] Moderation log, bans, local tool.
@@ -80,6 +82,14 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   useless.
 - Server only first: the lane deploys without a game update; only the install id needs the next
   release.
+
+- Kill switch refusals come from the Worker itself (a WebSocket it accepts, one error frame,
+  close), not from a room: an off server reaches no Durable Object. It answers at once, before
+  `hello`; every release reads an error frame then a 4000-4099 close as a refusal (no rejoin,
+  `port/net/client.c` `client_on_closed`) and shows `message`, so no client change is needed.
+- Turning online off refuses rejoins too: the variable needs a deploy, which restarts every room
+  and drops every socket anyway, so "off" means off at once. Races running when a room sees the
+  switch go on; only new starts are refused.
 
 ## Surprises
 

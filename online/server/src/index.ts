@@ -2,6 +2,7 @@
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
+import { offMessage, onlineOff, refuseSocket, type GuardEnv } from "./guard";
 
 export { Room } from "./room";
 export { LobbyIndex } from "./lobbies";
@@ -18,7 +19,11 @@ export default {
 
     // minVersion: the oldest client release the server lets play (MIN_VERSION, wrangler.jsonc).
     const minVersion = minVersionOf(env.MIN_VERSION);
-    if (path === "/v1/health") return json({ ok: true, protocol: PROTOCOL, minVersion });
+    // The kill switch (ONLINE = "off", finding 161): no new rooms, joins or races, and the health
+    // check and the lobby list say so.
+    const off = onlineOff(env as GuardEnv);
+    const offState = off ? { online: false, message: offMessage(env as GuardEnv) } : { online: true };
+    if (path === "/v1/health") return json({ ok: true, protocol: PROTOCOL, minVersion, ...offState });
 
     // The newest release's latest.json, the launcher's backup when GitHub's API can't be reached
     // (src/latest.ts, finding 138).
@@ -32,6 +37,7 @@ export default {
       if (request.method !== "GET") return json({ error: "GET only" }, 405);
       // region: the asker's, as Cloudflare places them; their region's rooms come first (finding 135).
       const region = regionOfPlace(placeOf(request));
+      if (off) return json({ protocol: PROTOCOL, minVersion, region, now: Date.now(), lobbies: [], ...offState });
       const lobbies = sortForRegion(await env.LOBBIES.get(env.LOBBIES.idFromName("global")).list(), region);
       // now: the server's clock (ms since the Unix epoch). A client in no room yet has no clock
       // offset from a room's pings; without this its list counted "ENDS IN" from the epoch (0.7.6
@@ -43,6 +49,7 @@ export default {
     if (m) {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
         return json({ error: "Expected a WebSocket upgrade" }, 426);
+      if (off) return refuseSocket("online_off", offMessage(env as GuardEnv));
       const headers = new Headers(request.headers);
       headers.delete("x-dhd-create");
       if (m[1] === "new") {

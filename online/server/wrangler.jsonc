@@ -9,7 +9,10 @@
   // The oldest game release that may play online ("X.Y.Z"). Older clients are refused with
   // "A new version is available. Update to play online." Raise it to each new release once that
   // release is published; a self-hosted server can keep an older one.
-  "vars": { "MIN_VERSION": "0.7.9" },
+  // ONLINE: the kill switch (finding 161). "off" refuses new rooms, joins and race starts with
+  // ONLINE_MESSAGE (or src/guard.ts OFF_MESSAGE) on the game's ONLINE screen; /v1/health says so.
+  // Turning it off or on needs only this and a deploy (or `npx wrangler deploy --var ONLINE:off`).
+  "vars": { "MIN_VERSION": "0.7.9", "ONLINE": "on" },
   // The official server's address (port/hle/host.c OFFICIAL_SERVER).
   "routes": [{ "pattern": "dhd.skuza.app", "custom_domain": true }],
   // Usage stats (src/room.ts stat): joins and races, no addresses or names. Optional.

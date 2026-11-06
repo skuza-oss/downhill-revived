@@ -23,7 +23,7 @@ host.
 | WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. |
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
-| GET | `/v1/health` | `{"ok":true,"protocol":2,"minVersion":"0.1.0"}` |
+| GET | `/v1/health` | `{"ok":true,"protocol":2,"minVersion":"0.1.0","online":true}` (`online` and `message`: the kill switch, below) |
 | GET | `/v1/latest` | The newest release's `latest.json` (the launcher's backup update check; below). |
 
 Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
@@ -52,6 +52,7 @@ A refusal is one text frame followed by a close:
 | `kicked` | 4007 | The host removed this player. |
 | `hello_timeout` | 4008 | No `hello` within 10 seconds. |
 | `client_outdated` | 4009 | `hello.clientVersion` is below the server's `MIN_VERSION` (below). |
+| `online_off` | 4010 | The operator turned online off (the kill switch, below). Also a non-fatal error to a `start`, and to the room when a countdown runs out. |
 
 ### Minimum client version
 
@@ -68,6 +69,25 @@ refusal carries both versions:
 
 0.1.0 knows no `client_outdated`: like any refusal it shows `message` on the ONLINE screen.
 0.2.0 and later show the same text and add an **Update Now** row (finding 054).
+
+### The kill switch (finding 161)
+
+The Worker variable `ONLINE` (`online/server/wrangler.jsonc`) is `"on"`; `"off"` stops online
+without a game update. Then every WebSocket to `/v1/rooms/...`, a new room, a join or a rejoin,
+is refused at once, before `hello` and before any room (the one exception to "before `hello` the
+server sends nothing"):
+
+```json
+{"type":"error","code":"online_off","message":"Online races are paused. Try again later."}
+```
+
+then close 4010. `ONLINE_MESSAGE` replaces the text (keep it within about 45 characters, the
+ONLINE screen's footer). Every release shows a refusal's `message`, so 0.7.11 and older need
+nothing new. `/v1/health` adds `"online":false` and the `message`; `/v1/lobbies` lists no rooms
+and adds the same two fields. A room that was open when the switch turned off (switching needs a
+deploy, which restarts every room, so normally only for the seconds the rooms take to restart)
+starts no race: its countdown is dropped and `start` answers the non-fatal `online_off` error. A
+race already running goes on.
 
 Non-fatal errors (a non-host sending a host command, a `start` while someone is not ready)
 use the same `error` frame **without** a close; the client just shows `message`.
