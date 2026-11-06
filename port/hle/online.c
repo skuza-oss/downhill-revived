@@ -26,6 +26,7 @@
      AI rider (findings 044, 047). Room finishers stay to watch until the server closes the race
      or they choose BACK TO THE ROOM / LEAVE THE ROOM (finding 122). */
 #include "hle.h"
+#include "../runtime/portable.h"
 #include "../gs/present.h"
 #include "../net/net.h"
 #include "../include/version.h"
@@ -1421,6 +1422,10 @@ extern float port_fov_x;  /* widescreen.c: glyph width scale, 1 when off */
 void hle_online_names(void *rider, int view)
 {
     if (!online_mode() || !on.started || rider != RIDER(0) || !race_running()) return;
+    static HleEnv names_env;
+    const char *names = hle_env(&names_env, "DHD_NAMES");
+    if (names && !dhd_stricmp(names, "off")) return;
+    int name_width = names && !dhd_stricmp(names, "large") ? 400 : names && !dhd_stricmp(names, "medium") ? 320 : 240;
     uint8_t *pen = EE_PTR(0x4F3570), kept[0x20];
     int cx, cy, w, h, drawn = 0;
     func_0023D618(view, &cx, &cy);
@@ -1448,7 +1453,7 @@ void hle_online_names(void *rider, int view)
         /* Text normally stays inside the middle 4:3 area. Undo that mapping for
            this world anchor, while keeping the glyphs themselves in proportion. */
         int x = (int)(w / 2 + (local_x - w / 2) / port_fov_x), y = (int)local_y - 16;
-        func_0020FB80(0, 320, 240, -102, -24);
+        func_0020FB80(0, name_width, name_width * 3 / 4, -name_width * 102 / 320, -name_width * 24 / 320);
         int half_width = (func_0020F860(0, on.name[global]) + 31) / 32;
         if (local_x - half_width * port_fov_x < 1 || local_x + half_width * port_fov_x >= w - 1 || y < 1) continue;
         func_0020F518(0, 0, 0, 0, 128);

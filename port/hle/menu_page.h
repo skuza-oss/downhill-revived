@@ -60,6 +60,7 @@ struct MenuPage {
     void (*mouse)(MenuPage *, int x, int y, int moved, int left, int wheel);
     void (*draw)(MenuPage *);  /* every frame after the game's update (which starts the popups'
                                   frame afresh): the menu_draw_* calls */
+    int (*header_mouse)(MenuPage *, int x, int y);  /* consumes a click above the rows */
     int title_y;               /* above 0: the title's y, instead of above the rows */
 } __attribute__((aligned(16)));  /* the game stores a u128 at +0x490 with aligned SSE moves */
 
@@ -76,6 +77,7 @@ void menu_page_rebuild_at(MenuPage *p, int row);  /* the same, the cursor on tha
 int menu_page_cursor(const MenuPage *p);
 void menu_page_set_cursor(MenuPage *p, int row);
 int menu_page_rows(const MenuPage *p);
+void menu_page_suffix(MenuPage *p, int row, const char *text);  /* dim text after a row */
 void menu_page_enable(MenuPage *p, int row, int enabled);  /* a row's flag, without building again */
 void menu_page_sound(int next);        /* S_NEXT / S_PREVIOUS, as the value rows play them */
 

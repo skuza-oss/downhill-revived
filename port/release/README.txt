@@ -58,11 +58,11 @@ other USB or Bluetooth pads (through SDL3 and its controller database), with vib
 pad has motors. The buttons go by position, as on a PlayStation pad: bottom = Cross, right =
 Circle, left = Square, top = Triangle. A pad SDL doesn't know can be added with a line in SDL's
 format in gamecontrollerdb.txt beside dhd.exe.
-Button icons (PC SETTINGS > Button Icons, the launcher's Settings > Controls): Auto shows the
+Button icons (REVIVED SETTINGS > Button Icons, the launcher's Settings > Controls): Auto shows the
 buttons of player 1's controller: A B X Y and LB RB LT RT on Xbox pads and a Steam Deck, B A Y X
 and L R ZL ZR on Switch pads, the game's own symbols on PlayStation pads and the keyboard. Or
 choose PlayStation, Xbox or Nintendo.
-Stick dead zone (PC SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before the
+Stick dead zone (REVIVED SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before the
 rider responds. Game is the PS2's own (about 36% of the travel); smaller steers sooner, larger
 ignores a drifting stick. The launcher's Controls tab shows your stick and what the rider gets.
 
@@ -86,14 +86,14 @@ places (e.g. Square is the key left of X, wherever its label says Z, W or Y).
 The game's own controls screen (OPTIONS > CONTROLS) and its trick lists name the PlayStation
 buttons; the keys above stand for them.
 
-Settings: OPTIONS > PC SETTINGS in the game's menu (resolution, display mode, window size,
+Settings: the first row of OPTIONS > REVIVED SETTINGS in the game's menu (resolution, display mode, window size,
 picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, texture
 pack, font). Changes are
 saved to dhd.ini at once.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game
-starts; nothing is saved. "font = original" (PC SETTINGS > Font, at the next start) draws it as
+starts; nothing is saved. "font = original" (REVIVED SETTINGS > Font, at the next start) draws it as
 the PS2 does. A texture pack that replaces the font wins over both.
 
 Texture packs (upscale mods)
@@ -103,7 +103,7 @@ hash). Packs are made by their authors and are not part of this game; get one yo
   data folder, below), or
 - name the pack's folder in dhd.ini (its full path), e.g. the one PCSX2 uses:
     texture_pack = <Documents>\PCSX2\textures\SCUS-97177\replacements
-OPTIONS > PC SETTINGS > Texture Pack turns it off or on (at the next start); in dhd.ini that is
+OPTIONS > REVIVED SETTINGS > Texture Pack turns it off or on (at the next start); in dhd.ini that is
 "textures = off" or "on". Replacements load in the background the first time a texture shows,
 so the game's own texture can show for a moment first. texture_cache_mb = N sets how much
 graphics memory they may use (default: half the card's, at most 2048).
@@ -157,3 +157,8 @@ Known gaps
 Source code, building and bug reports: see the project's repository.
 Licence: GPL-3.0-or-later (LICENSE.txt). Third-party notices: THIRD-PARTY-NOTICES.txt.
 The original game, its data, names and trademarks belong to their owners.
+
+REVIVED SETTINGS has Display, Graphics, Controls, Online and Game tabs (L1/R1).
+Controls edits the main binding with Cross, clears it with Square and goes back with Triangle
+or Esc. Changes save at once. Dimmed "also" bindings are changed in the launcher.
+Online > Player Names: Off, Small (default), Medium (original size), Large.

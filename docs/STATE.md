@@ -85,7 +85,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 ## What players get
 
-- PC SETTINGS in the game's options, saved to dhd.ini (findings 064, 101): resolution scale
+- REVIVED SETTINGS at the top of the game's options, with Display, Graphics, Controls, Online
+  and Game tabs (finding 163), saved to dhd.ini (findings 064, 101): resolution scale
   (capped by GPU memory and said so, finding 136), window mode, widescreen with the HUD anchored
   and no 4:3 screens left (findings 056, 140), frame rate 60-240 or Monitor (findings 067, 139),
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), movies,

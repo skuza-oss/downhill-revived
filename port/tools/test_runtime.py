@@ -86,6 +86,7 @@ def guest_tests():
     run('member-abi', [member_test])
     run('autopad', [HLE / 'autopad.c', HLE / 'test_autopad.c'])
     run('game-options', [HLE / 'game_options.c', HLE / 'test_game_options.c'])
+    run('settings-tabs', [HLE / 'test_settings_tabs.c'])
     run('keyboard', [HLE / 'keyboard.c', HLE / 'test_keyboard.c'])  # layout and steering ramp (finding 059)
     run('sif', [HLE / 'sif.c', HLE / 'test_sif.c'])
     run('timer', [HLE / 'timer.c', HLE / 'test_timer.c'])
