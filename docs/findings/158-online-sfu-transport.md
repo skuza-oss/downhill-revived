@@ -234,6 +234,10 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - Round 4: Cloudflare's TURN refuses a ChannelBind to some Cloudflare addresses (401 for 1.1.1.1
   and the API host's address) but binds to the SFU's own candidate address (7-13 ms) and to
   outside addresses. Its answer to a made-up username after the 401 challenge is a 400.
+- Release review round 2 (before 0.7.12): a ChannelBind was renewed 300 s after its success, but
+  the TURN permission it installs lasts 5 minutes (RFC 8656 9; the binding 10) and ChannelData
+  renews neither, so a relayed race over 5 minutes lost datagrams at each renewal. It is renewed
+  after 240 s now (`turn.rs` CHANNEL_REFRESH, unit-tested).
 
 ## Result
 

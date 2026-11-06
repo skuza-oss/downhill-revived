@@ -36,8 +36,12 @@ const REQUESTED_TRANSPORT: u16 = 0x0019;
 /// A request with no answer this long fails the allocation (RFC 8489's 39.5 s is for a call;
 /// a race setup would rather fail over to "no SFU" than wait that long).
 pub const TRANSACTION_TIMEOUT: Duration = Duration::from_secs(10);
-/// Channel bindings last 10 minutes (RFC 8656 12); refreshed after half of that.
-const CHANNEL_REFRESH: Duration = Duration::from_secs(300);
+/// A ChannelBind is renewed this long after its success. The binding lasts 10 minutes (RFC 8656
+/// 12), but the permission it installs only 5 (RFC 8656 9), and ChannelData does not renew
+/// either: renewing at 300 s reached the server after the permission had lapsed, so relayed
+/// datagrams were dropped at each renewal of a race over 5 minutes (release review, finding 158).
+/// 240 s leaves a minute for the request's way there, a stalled TLS stream and TRANSACTION_TIMEOUT.
+const CHANNEL_REFRESH: Duration = Duration::from_secs(240);
 /// At most this many datagrams wait for their channel's binding; more are dropped (ICE and
 /// SCTP retransmit what matters).
 const QUEUED_MAX: usize = 32;
@@ -570,6 +574,41 @@ mod tests {
         // Unanswered: the allocation fails after the transaction timeout.
         c.tick(now + Duration::from_secs(541) + TRANSACTION_TIMEOUT + Duration::from_secs(1));
         assert!(c.failed().is_some());
+    }
+
+    #[test]
+    fn channel_binds_are_renewed_before_their_permission_ends() {
+        let now = Instant::now();
+        let mut server = Server { key: md5(b"u:example.org:p").to_vec(), nonce: "n", stale_bind: false };
+        let mut c = Client::new("u", "p", now);
+        let r = server.answer(&c.output(), None);
+        c.receive(&r, now);
+        let r = server.answer(&c.output(), None);
+        c.receive(&r, now);
+        let peer: SocketAddr = "203.0.113.9:4000".parse().unwrap();
+        c.send_to(peer, b"hello", now);
+        let r = server.answer(&c.output(), None);
+        c.receive(&r, now);
+        assert_eq!(&c.output()[..4], &[0x40, 0x00, 0, 5]);
+        // The permission ChannelBind installs lasts 300 s: renewed well before, and again after
+        // each renewal, so a long race never loses it.
+        let mut bound = now;
+        for _ in 0..2 { // the allocation's own Refresh comes at 540 s
+            c.tick(bound + CHANNEL_REFRESH - Duration::from_secs(1));
+            assert!(c.output().is_empty());
+            let at = bound + CHANNEL_REFRESH;
+            assert!(at - bound <= Duration::from_secs(300) - TRANSACTION_TIMEOUT - Duration::from_secs(30));
+            c.tick(at);
+            let bind = c.output();
+            assert_eq!(u16::from_be_bytes([bind[0], bind[1]]), CHANNEL_BIND);
+            // Datagrams keep flowing on the channel while the renewal is out.
+            c.send_to(peer, b"x", at);
+            assert_eq!(&c.output()[..2], &[0x40, 0x00]);
+            let r = server.answer(&bind, None);
+            c.receive(&r, at);
+            bound = at;
+        }
+        assert!(c.failed().is_none());
     }
 
     #[test]
