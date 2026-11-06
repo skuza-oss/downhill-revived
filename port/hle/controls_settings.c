@@ -25,8 +25,6 @@
 
 #include "controls_table.h"  /* the targets, keys and controller inputs: generated from port/render/settings */
 
-int func_00220230(int port);  /* the buttons held on a pad, as the game reads them (menu_page.c) */
-
 enum { GROUPS = 2, CAPTURE_SECONDS = 5, NOTE_SECONDS = 4 };
 enum { CAPTURE_NONE, CAPTURE_WAIT, CAPTURE_RELEASE };  /* waiting for a press; for every input let go */
 enum { ROW_DEVICE, ROW_GROUP, ROW_TARGET, ROW_OPTION, ROW_RESET };
@@ -148,6 +146,20 @@ void controls_settings_build(MenuPage *p)
     show(p);
 }
 
+/* The PS2 buttons players 1 and 2 hold now (their keyboard and controllers through their layouts):
+   Square on the page. */
+static uint16_t buttons_now(void)
+{
+    uint16_t held = 0;
+    for (int player = 0; player < 2; player++) {
+        HostPad pad;
+        memset(&pad, 0, sizeof pad);
+        host_service_host_pad_device(player, GADDR(&pad));
+        held |= pad.buttons;
+    }
+    return held;
+}
+
 static void say(const char *text)
 {
     snprintf(note, sizeof note, "%s", text);
@@ -198,7 +210,7 @@ void controls_settings_update(MenuPage *p, int cursor)
         p->armed = 0;  /* the page acts again once the game has seen every button up */
     }
     /* Square on a button's row: the slot cleared (a press, not a hold) */
-    uint16_t held = capture ? 0 : (uint16_t)(func_00220230(0) | func_00220230(1));
+    uint16_t held = capture ? 0 : buttons_now();
     int square = held & PAD_SQUARE && !(held_before & PAD_SQUARE);
     held_before = held;
     if (square && p->armed && cursor >= 0 && cursor < MENU_PAGE_ROWS && row_kind[cursor] == ROW_TARGET && !locked())
