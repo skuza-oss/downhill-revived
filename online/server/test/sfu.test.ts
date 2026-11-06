@@ -155,6 +155,23 @@ describe("TURN over TLS fallback", () => {
     }
   });
 
+  it("sends nothing and keeps the session when TURN is not configured", async () => {
+    const { clients, code } = await startedRace(2);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    await runInDurableObject(stub, async (room: any) => {
+      const me = room.state.members[0];
+      me.sfuRace = room.state.race.startAt;
+      me.sfu = { id: "fake", phase: "connect", channels: [] };
+    });
+    // Member 0's client asks (the other one, without a session, gets an error).
+    for (const c of clients) c.sendJson({ type: "sfu_turn" });
+    await runInDurableObject(stub, async (room: any) => {
+      await room.sfuQueue;
+      expect(room.state.members[0].sfu.phase).toBe("connect");
+      expect(room.state.members[0].turnUser).toBeUndefined();
+    });
+  });
+
   it("refuses TURN outside a race or before the racer's SFU session", async () => {
     const { host } = await Client.host();
     host.sendJson({ type: "sfu_turn" });

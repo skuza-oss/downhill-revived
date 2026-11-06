@@ -396,7 +396,14 @@ export class Room extends DurableObject<Env> {
             me.turnRace = race.startAt;
             await this.save();
             if (me.turnUser) await this.revokeTurn(me);
-            const minted = await new Turn(this.env as Env & SfuSecrets).mint(`room-${this.state?.code ?? ""}-m${me.id}`);
+            let minted: Awaited<ReturnType<Turn["mint"]>>;
+            try {
+              minted = await new Turn(this.env as Env & SfuSecrets).mint(`room-${this.state?.code ?? ""}-m${me.id}`);
+            } catch (error) {
+              // No relay: the racer's UDP attempt goes on (its session stays usable); nothing sent.
+              console.warn("TURN credentials unavailable", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+              return;
+            }
             me.turnUser = minted.username;
             if (this.state?.race !== race || !this.state.members.includes(me) || this.sockets.get(me.id) !== ws) {
               await this.revokeTurn(me); await this.save(); return;
