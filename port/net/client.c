@@ -483,7 +483,7 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
             }
             if (data[0] == NET_FRAME_STATE) {
                 /* v4 standalone and v3's first batched rider (the WebSocket baseline). */
-                int offset = n >= 8 && data[2] == 4 ? 4 : n >= 9 && data[3] == 3 ? 5 : 0;
+                int offset = n >= 8 && (data[2] == 4 || data[2] == 5) ? 4 : n >= 9 && data[3] == 3 ? 5 : 0;
                 if (offset) {
                     uint32_t ms;
                     memcpy(&ms, data + offset, sizeof ms);
