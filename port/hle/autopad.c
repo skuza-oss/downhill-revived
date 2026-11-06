@@ -3,6 +3,7 @@
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "stick.h"
+#include "controls_table.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -353,7 +354,8 @@ static void sticks_script(HostPad *out)
 }
 
 /* DHD_KEYS (tests, finding 059): fake keys from the race's GO on, as DHD_RACE_PAD, through the
-   keyboard's mapping; each change is logged with the steering the rider got from it. */
+   keyboard's layout (dhd.ini keyboard, finding 157; the host's); each change is logged with the
+   steering the rider got from it. */
 static void keys_script(HostPad *out)
 {
     static HleEnv keys_env;
@@ -365,7 +367,9 @@ static void keys_script(HostPad *out)
         fprintf(stderr, "Invalid DHD_KEYS: expected start:duration:key[+key],...\n");
         exit(1);
     }
-    keyboard_pad(down, riding_controls(), host_seconds(), out);
+    ControlsLayout layout;
+    int own = host_service_controls_layout(CONTROL_KEYBOARD, GADDR(&layout));
+    keyboard_pad(own ? &layout : NULL, down, riding_controls(), host_seconds(), out);
     int right, left;
     rider_steering(&right, &left);
     static int last[5] = {-1};
@@ -374,6 +378,67 @@ static void keys_script(HostPad *out)
         hle_log("keys race=%.3f riding=%d buttons=%04X lx=%d ly=%d steer right=%d left=%d\n", seconds,
                 riding_controls(), out->buttons, out->left_x, out->left_y, right, left);
         memcpy(last, now, sizeof now);
+    }
+}
+
+/* DHD_TEST_PAD (player 1) and DHD_TEST_PAD2 (player 2) (tests, finding 157): a controller's
+   inputs by their place from the race's GO on, "start:duration:input[+input],..." with the inputs
+   by their dhd.ini names (south, east, lt, dpad_up, ...; lx=P, ly=P, rx=P, ry=P a stick's travel in
+   percent, -100..100), through that player's layout (dhd.ini pad1, pad2) as a real controller's
+   are (host_service_controls_map: gamepad_apply); each change is logged with what the game got. */
+static void test_pad_script(int player, HostPad *out)
+{
+    static HleEnv envs[2];
+    static int last[2][3] = {{-1}, {-1}};
+    if (player < 0 || player > 1) return;
+    const char *script = hle_env(&envs[player], player ? "DHD_TEST_PAD2" : "DHD_TEST_PAD");
+    double seconds = race_sync_seconds();
+    if (!script || seconds < 0) return;
+    GamepadRaw raw;
+    memset(&raw, 0, sizeof raw);
+    for (const char *at = script; *at;) {
+        double start, duration;
+        char items[128];
+        int used = 0, bad = sscanf(at, "%lf:%lf:%127[a-z0-9_=+-]%n", &start, &duration, items, &used) != 3 || duration <= 0;
+        int active = !bad && seconds >= start && seconds < start + duration;
+        for (char *item = bad ? NULL : strtok(items, "+"); item; item = strtok(NULL, "+")) {
+            static const char *const axes[4] = {"lx=", "ly=", "rx=", "ry="};
+            int known = 0;
+            for (int a = 0; a < 4; a++)
+                if (!strncmp(item, axes[a], 3)) {
+                    int value = atoi(item + 3);
+                    value = value < -100 ? -100 : value > 100 ? 100 : value;
+                    if (active) raw.axis[a] = (int16_t)(value >= 0 ? value * 32767 / 100 : value * 32768 / 100);
+                    known = 1;
+                }
+            for (int i = 0; i < CONTROL_PAD_INPUTS && !known; i++)
+                if (!strcmp(control_pad_inputs[i].name, item)) {
+                    known = 1;
+                    if (!active) continue;
+                    if (control_pad_inputs[i].trigger) raw.trigger[control_pad_inputs[i].trigger - 1] = 255;
+                    else raw.buttons |= 1u << control_pad_inputs[i].id;
+                }
+            bad |= !known;
+        }
+        at += used;
+        if (*at == ',') at++;
+        else if (*at) bad = 1;
+        if (bad) {
+            fprintf(stderr, "Invalid DHD_TEST_PAD%s: expected start:duration:input[+input],... (south, east, lt, lx=P...)\n",
+                    player ? "2" : "");
+            exit(1);
+        }
+    }
+    HostPad pad;
+    memset(&pad, 0, sizeof pad);
+    host_service_controls_map(player, GADDR(&raw), GADDR(&pad));
+    out->buttons |= pad.buttons;
+    out->left_x = pad.left_x, out->left_y = pad.left_y, out->right_x = pad.right_x, out->right_y = pad.right_y;
+    int now[3] = {pad.buttons, pad.left_x, pad.right_y};
+    if (memcmp(now, last[player], sizeof now)) {
+        hle_log("test pad %d race=%.3f inputs=%08X buttons=%04X lx=%d ry=%d\n", player + 1, seconds, raw.buttons, pad.buttons,
+                pad.left_x, pad.right_y);
+        memcpy(last[player], now, sizeof now);
     }
 }
 
@@ -405,6 +470,7 @@ int host_pad_script(int player, HostPad *out)
     }
     race_sync_vsync(kernel_vsync_count);
     race_sync_pad(player, &out->buttons);
+    test_pad_script(player, out);
     if (player == 0) keys_script(out), sticks_script(out);
     static uint16_t previous;
     if (player == 0 && previous != out->buttons) {

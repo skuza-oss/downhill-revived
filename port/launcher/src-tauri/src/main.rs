@@ -3,6 +3,7 @@
 //! the game. The front end is ../ui; everything that touches files, network or processes is here.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod controls;
 mod disc;
 mod game;
 mod log;
@@ -188,6 +189,24 @@ fn rider_name(text: String) -> String {
 #[tauri::command]
 fn save_setting(app: State<App>, key: String, value: String) -> Result<(), String> {
     save(&app.place, &key, &value)
+}
+
+/// The Controls tab's bindings (controls.rs): the keys, controller buttons and PS2 buttons.
+#[tauri::command]
+fn controls_schema() -> controls::Schema {
+    controls::schema()
+}
+
+/// The keyboard's and both controllers' layouts, as dhd.ini has them.
+#[tauri::command]
+fn controls_state(app: State<App>) -> controls::State {
+    controls::state(&app.place.settings())
+}
+
+/// One change to a layout, by the game's rules; saved when it changes something.
+#[tauri::command]
+fn controls_edit(app: State<App>, device: usize, edit: controls::Request, kind: i32) -> Result<controls::Answer, String> {
+    controls::edit(&app.place.settings(), device, &edit, kind, |k, v| save(&app.place, k, v))
 }
 
 fn save(place: &game::Place, key: &str, value: &str) -> Result<(), String> {
@@ -585,6 +604,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             snapshot,
             settings_schema,
+            controls_schema,
+            controls_state,
+            controls_edit,
             rider_name,
             save_setting,
             check_update,

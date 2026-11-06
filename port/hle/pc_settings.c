@@ -19,9 +19,11 @@
    variable at once and the host follows it), and DHD_PC_SETTINGS_RESTART replaces the hint of
    a row that waits for the next start. The browser sets all three (port/web/www/settings.js);
    x64 sets none of them, so its page is as described above.
-   With touch (the host sets DHD_TOUCH: android, or mouse for a desktop test) the page ends with a
-   Touch Controls row whose three screens are touch_settings.c's (finding 141); on Android the
-   page is called SETTINGS. */
+   After the rows, Controls opens the CONTROLS screen (controls_settings.c, finding 157: the keys
+   and controller buttons for the PS2 pad's buttons; a host lists DHD_KEYBOARD in its
+   DHD_PC_SETTINGS_ROWS to show it). With touch (the host sets DHD_TOUCH: android, or mouse for a
+   desktop test) the page ends with a Touch Controls row whose three screens are
+   touch_settings.c's (finding 141); on Android the page is called SETTINGS. */
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "menu_page.h"
@@ -40,6 +42,13 @@ void touch_settings_build(MenuPage *p, int page);
 void touch_settings_update(MenuPage *p, int page, int cursor);
 void touch_settings_change(MenuPage *p, int page, int row, int step);
 int touch_settings_accept(MenuPage *p, int page, int row);
+/* controls_settings.c: the CONTROLS screen of this page */
+const char *controls_settings_title(void);
+void controls_settings_open(void);
+void controls_settings_build(MenuPage *p);
+void controls_settings_update(MenuPage *p, int cursor);
+void controls_settings_change(MenuPage *p, int row, int step);
+int controls_settings_accept(MenuPage *p, int row);
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
@@ -194,12 +203,15 @@ static int locked(const Row *r)
 }
 
 static MenuPage page;
-static int screen;         /* 0 the PC settings, 1-3 TOUCH CONTROLS */
-static int touch_row = -1; /* the Touch Controls row, -1 without touch */
+enum { CONTROLS = 4 };      /* the screen of controls_settings.c */
+static int screen;          /* 0 the PC settings, 1-3 TOUCH CONTROLS, CONTROLS */
+static int touch_row = -1;  /* the Touch Controls row, -1 without touch */
+static int controls_row = -1;  /* the Controls row, -1 when the host doesn't offer it */
 
 static const char *page_title(void)
 {
     const char *touch = host_getenv("DHD_TOUCH");
+    if (screen == CONTROLS) return controls_settings_title();
     if (screen) return touch_settings_title(screen);
     return touch && !strcmp(touch, "android") ? "SETTINGS" : "PC SETTINGS";
 }
@@ -280,20 +292,25 @@ static void change(int index, int step)
 static void page_build(MenuPage *p)
 {
     p->title = page_title();
+    if (screen == CONTROLS) { controls_settings_build(p); return; }
     if (screen) { touch_settings_build(p, screen); return; }
     for (int i = 0; i < shown_count; i++) {
         menu_page_value(p, rows[shown[i]].label, "", 1);
         format(&rows[shown[i]]);
     }
+    const char *list = host_getenv("DHD_PC_SETTINGS_ROWS");
+    controls_row = !list || listed(list, "DHD_KEYBOARD") ? menu_page_row(p, "Controls", 1) : -1;
     const char *touch = host_getenv("DHD_TOUCH");
     touch_row = touch && *touch ? menu_page_row(p, "Touch Controls", 1) : -1;
 }
 
 static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the legend stays) */
 {
+    if (screen == CONTROLS) { controls_settings_update(p, cursor); return; }
     if (screen) { touch_settings_update(p, screen, cursor); return; }
     const Row *r = row_at(cursor);
     p->hint = NULL;
+    if (cursor >= 0 && cursor == controls_row) p->hint = "Your keys and controller buttons";
     if (r && locked(r)) {
         snprintf(hint, sizeof hint, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
         p->hint = hint;
@@ -309,10 +326,11 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
 
 static void page_back(MenuPage *p)  /* Triangle: the values the page opened with, close */
 {
-    if (screen) {  /* TOUCH CONTROLS saves as it goes: back to the PC settings, on its row */
+    if (screen) {  /* TOUCH CONTROLS and CONTROLS save as they go: back to the PC settings, on their row */
+        int row = screen == CONTROLS ? controls_row : touch_row;
         screen = 0;
         menu_play("S_BACK");
-        menu_page_rebuild_at(p, touch_row >= 0 ? touch_row : 0);
+        menu_page_rebuild_at(p, row >= 0 ? row : 0);
         return;
     }
     /* A phone's Back (and △) leaves SETTINGS as its other screens do: with what was chosen, which
@@ -332,12 +350,26 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
     menu_page_cancel(p);
 }
 
-static void page_left(MenuPage *p, int index) { if (screen) touch_settings_change(p, screen, index, -1); else change(index, -1); }
-static void page_right(MenuPage *p, int index) { if (screen) touch_settings_change(p, screen, index, 1); else change(index, 1); }
+static void page_step(MenuPage *p, int index, int step)
+{
+    if (screen == CONTROLS) controls_settings_change(p, index, step);
+    else if (screen) touch_settings_change(p, screen, index, step);
+    else change(index, step);
+}
+static void page_left(MenuPage *p, int index) { page_step(p, index, -1); }
+static void page_right(MenuPage *p, int index) { page_step(p, index, 1); }
 
-/* Cross: keep and close; on Touch Controls (and inside it) the touch screens. */
+/* Cross: keep and close; on Touch Controls (and inside it) the touch screens, on Controls its screen. */
 static void page_accept(MenuPage *p, int index)
 {
+    if (screen == CONTROLS) { controls_settings_accept(p, index); return; }
+    if (!screen && controls_row >= 0 && index == controls_row) {
+        menu_play("S_SELECT");
+        controls_settings_open();
+        screen = CONTROLS;
+        menu_page_rebuild_at(p, 0);
+        return;
+    }
     if (!screen && (touch_row < 0 || index != touch_row)) { menu_page_close(p); return; }
     int next = screen ? touch_settings_accept(p, screen, index) : 1;
     if (!screen) menu_play("S_SELECT");

@@ -6,10 +6,14 @@
 enum { BUTTON_ICONS_GAME = 0, BUTTON_ICONS_XBOX = 1, BUTTON_ICONS_NINTENDO = 2 };
 
 /* Each field on the game thread (host.c): the setting (DHD_PROMPTS: auto, playstation, xbox,
-   nintendo; NULL the game's own) and what auto means now (player 1's controller: BUTTON_ICONS_*). */
-void button_icons_choose(const char *setting, int auto_style);
+   nintendo; NULL the game's own), what auto means now (player 1's controller: BUTTON_ICONS_*) and
+   player 1's controller layout the icons follow (port/hle/controls_table.h; NULL: none, the
+   keyboard's player). */
+struct ControlsLayout;
+void button_icons_choose(const char *setting, int auto_style, const struct ControlsLayout *pad);
 
-/* BUTTON_ICONS_*: the icons the font copy gets now (any thread). */
+/* The icons the font copy gets now (any thread): a key, BUTTON_ICONS_* plus 3 x where the layout
+   puts them (button_icons.c); 0 the game's own, untouched. */
 int button_icons_style(void);
 
 /* Paints the style's icons over the game's button icons in a copy of the menus' font atlas

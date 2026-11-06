@@ -212,6 +212,55 @@ Letters are places on the keyboard as on a US one: on AZERTY or QWERTZ use the k
 places. The game's own controls screen (OPTIONS > CONTROLS) names the PlayStation buttons; the
 keys above stand for them.
 
+**Your own keys and buttons** (PC SETTINGS > Controls in the game, the launcher's Settings >
+Controls > Bindings): choose which key or controller button stands for each PlayStation button,
+for the keyboard and for each player's controller (player 1 and player 2; every controller of a
+player uses that player's layout). Each button has a main and an alternate. In the game, Cross on
+a button's row waits for the key or button you press (Esc gives up), Square clears it, left and
+right choose main or alternate; a change works at once. In the launcher, click a button's key to
+change it, right-click to clear it; the game takes it at its next start. The buttons keep their
+meaning (Cross pedals in a race and confirms in menus), only the key or button for them changes.
+
+- A key or button that another PlayStation button had moves to the new one, and the page says so.
+- Cross, Triangle, START and the d-pad always keep a key or a button (on the keyboard or player 1's
+  controller for player 1, on player 2's controller for player 2): a change that would take the
+  last one away is refused.
+- Esc can't be changed: it always goes back in menus and pauses a race. Alt, Ctrl and the Windows
+  keys stay your system's.
+- Keys on the d-pad (the arrows by default) steer gradually while riding, whichever keys they are.
+  The keyboard can also take the sticks' directions.
+- A controller's sticks stay its own: **Swap Sticks** (the right stick steers) and an **Invert**
+  for each axis of each stick.
+- The button icons (Button Icons) show the controller button you chose for each PlayStation
+  button.
+- **Reset Keyboard**, **Reset Controller 1** and **Reset Controller 2** (and the launcher tab's
+  Reset) bring back the layouts above.
+
+They are saved in `dhd.ini` as one line for each layout, with only what differs from the
+defaults:
+
+    keyboard = cross:j,space square:x
+    pad1 = cross:east circle:south sticks:swap invert:ly
+
+Each entry is `button:key` or `button:main,alternate` (`none` for nothing). Buttons: `cross`,
+`circle`, `square`, `triangle`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `start`, `select`, `up`,
+`down`, `left`, `right`, and on the keyboard `lstick_up`, `lstick_down`, `lstick_left`,
+`lstick_right`, `rstick_up`, `rstick_down`, `rstick_left`, `rstick_right`. Keys by their place on a
+US keyboard: `a` to `z`, `0` to `9`, `space`, `enter`, `tab`, `backspace`, `up`, `down`, `left`,
+`right`, `lshift`, `rshift`, `f1` to `f12`, `insert`, `delete`, `home`, `end`, `pageup`,
+`pagedown`, `minus`, `equals`, `lbracket`, `rbracket`, `backslash`, `semicolon`, `quote`,
+`backquote`, `comma`, `period`, `slash`, `intlbackslash` (the key beside the left Shift on some
+keyboards), `kp0` to `kp9`, `kp_plus`, `kp_minus`, `kp_multiply`, `kp_divide`, `kp_period`.
+Controller buttons by their place: `south`, `east`, `west`, `north` (the face buttons: on a
+PlayStation pad Cross, Circle, Square, Triangle; on an Xbox pad A, B, X, Y), `lb`, `rb`, `lt`,
+`rt`, `ls`, `rs` (the sticks pressed), `back`, `start`, `dpad_up`, `dpad_down`, `dpad_left`,
+`dpad_right`, `misc` (Share, Mic or Capture), `paddle_r1`, `paddle_l1`, `paddle_r2`, `paddle_l2`,
+`touchpad`. The defaults are the tables above: the keyboard's keys, and on a controller the
+button in the same place as on a PlayStation pad. A line the game can't read is skipped where it
+can't be read (that button keeps its default) and dhd.log says why; a line that would leave a
+player without Cross, Triangle, START or a d-pad direction puts that player's keyboard or
+controller back to its defaults. Players 3 and 4 use the default controller layout.
+
 ### Online
 
 Online works out of the box: choose ONLINE in the main menu to create a public or private race,
@@ -251,6 +300,8 @@ first start. The PC SETTINGS page writes most of them for you.
 | `vibration` | on | `0` turns rumble off |
 | `stick_dead_zone` | `game` | the sticks' dead zone: `game` (the PS2's own, about 36%) or a percentage such as `10` |
 | `prompts` | `auto` | the button icons: `auto` (the controller's), `playstation`, `xbox` or `nintendo` |
+| `keyboard` | (empty) | your keys for the PlayStation buttons, see [Controls](#controls); empty: the table there |
+| `pad1`, `pad2` | (empty) | player 1's and player 2's controller buttons and stick options, see [Controls](#controls); empty: by position |
 | `texture_pack` | (empty) | a texture pack's folder; empty: `textures\SCUS-97177\replacements` beside `dhd.ini` |
 | `textures` | `on` | `off` draws the game's own textures |
 | `texture_cache_mb` | half the card's memory, at most 2048 | graphics memory for replacements |

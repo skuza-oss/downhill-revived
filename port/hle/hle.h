@@ -102,10 +102,16 @@ void host_pad_read(int port, HostPad *out);  /* a script if one is set, else the
 int host_pad_script(int player, HostPad *out);  /* DHD_NAV / DHD_AUTOPAD / DHD_RACE_PAD; 0 if none */
 void host_pad_device(int port, HostPad *out);   /* the controller, and for port 0 the keyboard too */
 
-/* keyboard.c: keys (Windows virtual-key codes, down[key] != 0) as a pad, merged into `out`;
-   `riding`: the game's riding controls are on (D_0029E290), the arrows move the left stick. */
-void keyboard_pad(const uint8_t down[256], int riding, double now, HostPad *out);
-const uint8_t *keyboard_keys(int *count);  /* the keys it reads */
+/* A keyboard or controller layout (port/hle/controls_table.h, finding 157): which key or
+   controller input stands for each PS2 button. */
+struct ControlsLayout;
+
+/* keyboard.c: keys (Windows virtual-key codes, down[key] != 0) as a pad by the layout (NULL: the
+   default one), merged into `out`; `riding`: the game's riding controls are on (D_0029E290), the
+   d-pad's keys move the left stick. */
+void keyboard_pad(const struct ControlsLayout *layout, const uint8_t down[256], int riding, double now, HostPad *out);
+/* The keys it reads with the layout (NULL: the default one) into list (49 at most): their count. */
+int keyboard_keys(const struct ControlsLayout *layout, uint8_t *list);
 void keyboard_reset(void);
 int keyboard_game_axis(int raw);           /* the game's reading of a stick byte (-127..127) */
 int keyboard_script(const char *script, double seconds, uint8_t down[256]);  /* DHD_KEYS */
@@ -122,11 +128,19 @@ enum { VKEY_SHIFT = 0x10, VKEY_CONTROL = 0x11, VKEY_MENU = 0x12, VKEY_LWIN = 0x5
 
 /* gamepad.c: controllers through SDL3 (XInput, DirectInput, HID: DualSense, DualShock 4, Switch
    Pro and the generic pads in SDL's mapping database). gamepad_start: 1 if SDL is running. The
-   pads are read on the SDL thread (sdl_host.c: the main thread), which calls gamepad_thread_*. */
+   pads are read on the SDL thread (sdl_host.c: the main thread), which calls gamepad_thread_*.
+   A controller's state by its inputs' places (GamepadRaw: a bit per input id of
+   controls_table.h, the triggers' bytes 0-255, SDL's stick axes: left X, Y, right X, Y), which
+   gamepad_apply turns into the PS2 pad's with a layout and the sticks' dead zone (stick.h). */
+typedef struct {
+    uint32_t buttons;
+    uint8_t trigger[2];
+    int16_t axis[4];
+} GamepadRaw;  /* 16 bytes */
 int gamepad_start(void);
-int gamepad_read(int player, HostPad *out);  /* 0: no controller for that player */
+int gamepad_raw(int player, GamepadRaw *out);  /* 0: no controller for that player */
+void gamepad_apply(const struct ControlsLayout *layout, const GamepadRaw *raw, int dead_zone, HostPad *out);
 void gamepad_vibrate(int player, int light, int heavy);
-void gamepad_dead_zone(int dead);  /* stick.h: STICK_GAME or a percentage */
 /* What a controller's buttons are labelled: for the button icons (port/gs/button_icons.c). */
 enum { PAD_KIND_NONE = 0, PAD_KIND_PLAYSTATION = 1, PAD_KIND_XBOX = 2, PAD_KIND_NINTENDO = 3 };
 int gamepad_kind_of(int type, int south_label);  /* PAD_KIND_* of an SDL_GamepadType and its bottom button's label */

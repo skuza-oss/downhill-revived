@@ -304,6 +304,9 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
             'host_service_host_game_options_read': [(0,'a1')],
             'host_service_text_input_edit': [(0,'host64_bridge_array_bytes((int32_t)a1,1)')],
             'host_vu1_snapshot': [(0,'2096')], 'host_vu1_file': [(0,'1024')],
+            'host_service_controls_layout': [(1,'52')],
+            'host_service_controls_change': [(5,'host64_bridge_array_bytes((int32_t)a6,1)')],
+            'host_service_controls_map': [(1,'16'),(2,'sizeof(HostPad)')],
         }
         for i, length in spans.get(name, []):
             code.append(f'    (void)host64_bridge_pointer(a{i},{length});')
