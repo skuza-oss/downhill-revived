@@ -29,6 +29,15 @@ typedef struct {
     char install_id[33];
     NetLobby lobby;
     int racing;
+    /* In a race whose room connection dropped (finding 175): the race goes on over the SFU while
+       the transport rejoins; race frames are still sent. */
+    int rejoining;
+    unsigned rejoin_tries;  /* closes since the last welcome */
+    /* the race this game is in, its start's startAt (server ms; 0 none), sent in a rejoin's hello;
+       its finish or BACK, said again after a rejoin in case the drop lost it */
+    double race_at;
+    int finished, finish_place, gave_up;
+    unsigned finish_ticks;
     /* what to repeat after a lobby reconnect */
     int picked, rider, bike, ready, choosing;
     double countdown_ends;  /* the server's countdown end, server ms; 0 none */
@@ -76,8 +85,11 @@ void client_free(NetClient *c);
 void client_connected(NetClient *c, const NetTransport *tr);
 void client_on_text(NetClient *c, const char *text, size_t n);
 void client_on_binary(NetClient *c, const uint8_t *data, size_t n);
-/* The connection ended. Returns 1 when it should rejoin the room by its code (a lobby drop). */
+/* The connection ended. Returns 1 when it should rejoin the room by its code (a drop in the
+   room or, finding 175, in a race). */
 int client_on_closed(NetClient *c, int code, const char *reason);
+/* The rejoin's attempts are over: the room is lost (in a race: this PC races on alone). */
+void client_rejoin_failed(NetClient *c);
 /* Every few ms from a network thread: pings. Returns 1 when the server has been silent too long
    and the connection should be dropped. */
 int client_tick(NetClient *c);

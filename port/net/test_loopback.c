@@ -198,7 +198,13 @@ static void drop(Player *p)
         if (players[i].open)
             text_to(&players[i], p, text);
     LeaveCriticalSection(&relay);
-    client_on_closed(&p->client, 1006, "dropped");
+    /* In a race a drop starts a rejoin (finding 175); this relay never takes the player back, so
+       the attempts end at once, as net.c ends them after REJOIN_ATTEMPTS. */
+    if (!client_on_closed(&p->client, 1006, "dropped") || !p->client.rejoining) {
+        fprintf(stderr, "test_loopback: a drop in the race started no rejoin\n");
+        failures++;
+    }
+    client_rejoin_failed(&p->client);
 }
 
 /* The network thread: deliveries when due, and ticks. */

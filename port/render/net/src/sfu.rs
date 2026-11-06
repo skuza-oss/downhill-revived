@@ -53,6 +53,7 @@ struct Relay {
 }
 struct Channel {
     id: ChannelId,
+    stream: u16,
     member: u64,
     state: bool,
     local: bool,
@@ -297,10 +298,24 @@ impl Sfu {
             let channels = message["channels"]
                 .as_array()
                 .ok_or("Missing allocations")?;
-            if self.channels.len() + channels.len() > 20 {
+            // A rejoin's whole list (finding 175): the channels it lacks are new, those it has stay,
+            // and those not listed closed while the room connection was down (their sfu_closed missed).
+            let full = message["full"] == true;
+            if full {
+                let listed: Vec<u64> = channels.iter().filter_map(|c| c["channelId"].as_u64()).collect();
+                let gone: Vec<ChannelId> = self.channels.iter().filter(|c| !listed.contains(&(c.stream as u64))).map(|c| c.id).collect();
+                for id in gone {
+                    self.rtc.direct_api().close_data_channel(id);
+                    self.channels.retain(|c| c.id != id);
+                }
+            }
+            let known = |s: &Self, c: &Value| c["channelId"].as_u64().is_some_and(|id| s.channels.iter().any(|x| x.stream as u64 == id));
+            let new = if full { channels.iter().filter(|c| !known(self, c)).count() } else { channels.len() };
+            if self.channels.len() + new > 20 {
                 return Err("Too many channels".into());
             }
             for c in channels {
+                if full && known(self, c) { continue; }
                 let stream = c["channelId"]
                     .as_u64()
                     .filter(|id| *id < 65535)
@@ -310,7 +325,9 @@ impl Sfu {
                     .filter(|s| *s == "state" || *s == "events")
                     .ok_or("Invalid channel name")?;
                 let state = name == "state";
-                if self
+                // Ours too: before the association is up str0m knows no stream ids yet, and a
+                // duplicate would panic inside it.
+                if self.channels.iter().any(|c| c.stream == stream) || self
                     .rtc
                     .direct_api()
                     .channel_id_by_sctp_stream_id(stream)
@@ -331,6 +348,7 @@ impl Sfu {
                 });
                 self.channels.push(Channel {
                     id,
+                    stream,
                     member: c["memberId"].as_u64().ok_or("Missing member")?,
                     state,
                     local: c["local"].as_bool().ok_or("Missing direction")?,
@@ -634,6 +652,28 @@ mod tests {
         // a backlog after a stall costs the excess of that second, not the rest of the race
         assert!(rate.accept(0, now + Duration::from_secs(2)));
         assert!(rate.accept(1, now + Duration::from_secs(2)));
+    }
+
+    /// A rejoin's whole channel list (finding 175): kept channels stay the same, missing ones are
+    /// opened, those it doesn't list go (their sfu_closed was missed); a plain list still refuses a
+    /// channel it already has.
+    #[test]
+    fn a_rejoins_full_channel_list_reconciles() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":14,"name":"events","memberId":17,"local":false},
+            {"channelId":16,"name":"state","memberId":17,"local":false}
+        ]})).unwrap();
+        let kept = client.channels.iter().find(|c| c.stream == 16).unwrap().id;
+        client.signal(&json!({"type":"sfu_channels","full":true,"channels":[
+            {"channelId":16,"name":"state","memberId":17,"local":false},
+            {"channelId":18,"name":"state","memberId":21,"local":false}
+        ]})).unwrap();
+        let streams: Vec<u16> = client.channels.iter().map(|c| c.stream).collect();
+        assert_eq!(streams, vec![16, 18]);
+        assert_eq!(client.channels[0].id, kept);
+        assert!(client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":18,"name":"state","memberId":21,"local":false}]})).is_err());
     }
 
     #[test]

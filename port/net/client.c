@@ -52,7 +52,7 @@ static void say(NetClient *c, const char *fmt, ...)
    only binary PING/PONG use the WebSocket. The fake transport tests exercise the same API. */
 static void send_binary(NetClient *c, const uint8_t *data, size_t n)
 {
-    if (c->connected && n)
+    if ((c->connected || c->rejoining) && n)
         c->tr.send_binary(c->tr.ctx, data, n);
 }
 
@@ -104,13 +104,17 @@ void client_connected(NetClient *c, const NetTransport *tr)
     /* installId: this copy of the game, for the server's bans (finding 161); no other player gets it */
     if (c->install_id[0])
         snprintf(install, sizeof install, ",\"installId\":\"%s\"", c->install_id);
+    /* back in a race (finding 175): which one, so the room sends the start again if not this one */
+    if (c->rejoin_token[0] && c->race_at > 0 && (c->racing || c->gave_up))
+        snprintf(token + strlen(token), sizeof token - strlen(token), ",\"raceStartAt\":%.0f", c->race_at);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
     /* features: this client shows the race room's countdown (the server runs one only when
-       everyone's does) */
+       everyone's does); race_rejoin: it races on over the SFU while its room connection is down
+       and rejoins its race (finding 175) */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\"]%s%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
-        name, install, token);
-    if (c->lobby.state != NET_RECONNECTING)
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\"]%s%s}", NET_PROTOCOL, c->version,
+        DHD_VERSION, c->iso, name, install, token);
+    if (!c->racing && c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
     changed(c);
     SDL_UnlockMutex(c->lock);
@@ -215,6 +219,7 @@ static void read_room(NetClient *c, const char *t)
     for (i = 0; i < l->nmembers; i++)
         if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
             c->racing = 0; l->state = NET_LOBBY; l->started = 0; c->relayed_head = c->relayed_count = 0;
+            c->race_at = 0, c->gave_up = 0;
         }
 }
 
@@ -253,8 +258,10 @@ static void read_start(NetClient *c, const char *t)
             nslots = slot + 1;
     }
     l->nslots = nslots;
+    c->race_at = 0, c->finished = c->gave_up = 0;
     /* the start's time on our clock */
     if (json_number(t, "startAt", &start_at)) {
+        c->race_at = start_at;
         if (!c->have_offset && json_number(t, "serverTime", &server_time))
             c->clock_offset = server_time - net_now_ms();
         l->start_at = (start_at - c->clock_offset) / 1000.0;
@@ -333,7 +340,7 @@ int client_riders_ms(NetClient *c)
 {
     double worst = -1, now = net_now_ms();
     SDL_LockMutex(c->lock);
-    if (c->racing && c->connected)
+    if (c->racing && (c->connected || c->rejoining))
         for (int slot = 0; slot < NET_MAX_SLOTS; slot++)
             if (slot != c->lobby.local_slot && c->snapshot[slot].arrivals && now - c->snapshot[slot].arrived < 2000) {
                 double m = arrival_median(c, slot);
@@ -444,14 +451,27 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         }
         if (json_number(text, "serverTime", &server_time) && !c->have_offset)
             c->clock_offset = server_time - net_now_ms(), c->clock_known = 1;
-        c->lobby.state = NET_LOBBY;
         c->lobby.error_code[0] = c->lobby.error[0] = 0;
-        if (c->choosing)  /* after a reconnect: still on the rider screen */
-            say(c, "{\"type\":\"pick\",\"choosing\":true}");
-        else if (c->picked)  /* what we had chosen */
-            say(c, "{\"type\":\"pick\",\"rider\":%d,\"bike\":%d}", c->rider, c->bike);
-        if (c->ready)
-            say(c, "{\"type\":\"ready\",\"ready\":true}");
+        c->rejoining = 0, c->rejoin_tries = 0;
+        double race_at = 0;
+        int in_race = json_number(text, "race.startAt", &race_at) && race_at > 0 && race_at == c->race_at;
+        if (c->racing || c->gave_up) {
+            /* back in a race (finding 175): its state stays; what the drop may have lost goes again.
+               A welcome without this race: the room's snapshot that follows takes it back to the room. */
+            c->lobby.state = c->racing ? NET_RACING : NET_LOBBY;
+            if (in_race && c->gave_up)
+                say(c, "{\"type\":\"back\"}");
+            else if (in_race && c->finished)
+                say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d}", c->finish_ticks, c->finish_place);
+        } else {
+            c->lobby.state = NET_LOBBY;
+            if (c->choosing)  /* after a reconnect: still on the rider screen */
+                say(c, "{\"type\":\"pick\",\"choosing\":true}");
+            else if (c->picked)  /* what we had chosen */
+                say(c, "{\"type\":\"pick\",\"rider\":%d,\"bike\":%d}", c->rider, c->bike);
+            if (c->ready)
+                say(c, "{\"type\":\"ready\",\"ready\":true}");
+        }
         /* where this PC and the room are (finding 135; an older server sends none) */
         l->edge_colo[0] = l->country[0] = l->continent[0] = l->room_colo[0] = l->room_region[0] = 0;
         located = json_string(text, "edgeColo", l->edge_colo, sizeof l->edge_colo);
@@ -461,8 +481,8 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         json_string(text, "roomRegion", l->room_region, sizeof l->room_region);
         {
             double now = net_now_ms();
-            int n = snprintf(line, sizeof line, "net: %s room %s%s: ", c->joined_at ? "back in" : "in", l->code,
-                             l->is_host ? " (host)" : "");
+            int n = snprintf(line, sizeof line, "net: %s room %s%s%s: ", c->joined_at ? "back in" : "in", l->code,
+                             l->is_host ? " (host)" : "", !c->racing ? "" : in_race ? ", back in the race" : ", the race is over");
             if (!c->joined_at) c->joined_at = now;
             c->window_n = c->window_count = 0, c->window_worst = 0, c->window_start = now;
             c->next_log = now + NET_LOG_MS;
@@ -518,6 +538,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         changed(c);
     } else if (!strcmp(type, "ended")) {
         c->racing = 0;
+        c->race_at = 0, c->gave_up = 0;
         c->lobby.started = 0;
         c->lobby.state = NET_LOBBY;
         changed(c);
@@ -595,17 +616,28 @@ int client_on_closed(NetClient *c, int code, const char *reason)
     char line[4096] = "";
     SDL_LockMutex(c->lock);
     c->connected = 0;
-    if (c->racing) {
-        /* No reconnect during a race (protocol 1): the others hand our rider to the host's AI,
-           and here the race goes on without them (online.c). */
+    /* a refusal ends it, but a rejoin refused by the limits per address is tried again (the PC and
+       others behind one address all rejoin at once after a shared drop, finding 175) */
+    int refused = code >= 4000 && code < 4100 && !(code == 4011 && (c->rejoining || c->lobby.state == NET_RECONNECTING));
+    if (c->racing && !c->leaving && !refused && c->lobby.code[0]) {
+        /* In a race (finding 175): it goes on over the SFU, which doesn't use this connection,
+           while we rejoin; the room keeps our seat and race place meanwhile. */
+        c->rejoining = 1;
+        c->rejoin_tries++;
+        rejoin = 1;
+    } else if (c->racing) {
+        /* No way back: the others hand our rider to the host's AI, and here the race goes on
+           without them (online.c). */
+        c->rejoining = 0;
         c->lobby.offline = 1;
         c->lobby.state = NET_FAILED;
     } else if (c->leaving)
         c->lobby.state = NET_IDLE;
-    else if (code >= 4000 && code < 4100)  /* refused */
+    else if (refused)
         c->lobby.state = NET_FAILED;
     else if (c->lobby.code[0] && c->lobby.state != NET_CONNECTING) {
         c->lobby.state = NET_RECONNECTING;
+        c->rejoin_tries++;
         rejoin = 1;
     } else
         c->lobby.state = NET_FAILED;
@@ -614,8 +646,11 @@ int client_on_closed(NetClient *c, int code, const char *reason)
                  reason && *reason ? ": " : "", reason ? reason : "");
     if (c->joined_at && !c->leaving) {  /* a drop: the last window, and whether it comes back */
         int n = snprintf(line, sizeof line, "net: room %s: connection closed (%d)%s; ", c->lobby.code, code,
-                         rejoin ? ", rejoining" : "");
-        window_stats(c, line + n, sizeof line - n);
+                         !rejoin ? "" : c->racing ? ", rejoining (the race goes on)" : ", rejoining");
+        if (c->rejoin_tries <= 1)  /* the window once, not after every failed attempt */
+            window_stats(c, line + n, sizeof line - n);
+        else
+            snprintf(line + n, sizeof line - n, "attempt %u", c->rejoin_tries);
         if (!rejoin) c->joined_at = 0;
     }
     changed(c);
@@ -624,14 +659,32 @@ int client_on_closed(NetClient *c, int code, const char *reason)
     return rejoin;
 }
 
+void client_rejoin_failed(NetClient *c)
+{
+    char line[160] = "";
+    SDL_LockMutex(c->lock);
+    if (c->rejoining || c->lobby.state == NET_RECONNECTING) {
+        snprintf(line, sizeof line, "net: room %s: no way back after %u attempts%s", c->lobby.code, c->rejoin_tries,
+                 c->racing ? "; the race goes on here alone" : "");
+        if (c->racing) c->lobby.offline = 1;
+        c->rejoining = 0;
+        c->lobby.state = NET_FAILED;
+        if (!c->lobby.error[0]) snprintf(c->lobby.error, sizeof c->lobby.error, "connection lost");
+        c->joined_at = 0;
+        changed(c);
+    }
+    SDL_UnlockMutex(c->lock);
+    if (line[0]) fprintf(stderr, "%s\n", line);
+}
+
 int client_tick(NetClient *c)
 {
     double now = net_now_ms();
     int dead = 0;
     char line[4096] = "";
     SDL_LockMutex(c->lock);
-    if (c->connected) {
-        if (c->racing) for (int slot = 0; slot < NET_MAX_SLOTS; slot++) {
+    if (c->racing && (c->connected || c->rejoining))
+        for (int slot = 0; slot < NET_MAX_SLOTS; slot++) {
             double epoch = c->snapshot[slot].epoch;
             if (!epoch) continue;
             double age = now + c->clock_offset - epoch;
@@ -639,6 +692,7 @@ int client_tick(NetClient *c)
             c->snapshot[slot].age[ms]++;
             c->snapshot[slot].samples++;
         }
+    if (c->connected) {
         if (now >= c->next_ping) {
             if (c->racing) {
                 uint8_t ping[2 + sizeof(double)] = {NET_FRAME_PING, (uint8_t)c->lobby.local_slot};
@@ -733,6 +787,7 @@ void client_end(NetClient *c)
 void client_finish(NetClient *c, unsigned ticks, int place)
 {
     SDL_LockMutex(c->lock);
+    c->finished = 1, c->finish_ticks = ticks, c->finish_place = place;
     say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d}", ticks, place);
     SDL_UnlockMutex(c->lock);
 }
@@ -743,6 +798,7 @@ void client_back(NetClient *c)
 {
     SDL_LockMutex(c->lock);
     say(c, "{\"type\":\"back\"}");
+    c->gave_up = c->race_at > 0;
     c->racing = 0;
     c->relayed_head = c->relayed_count = 0;
     c->lobby.started = 0;
@@ -787,6 +843,7 @@ void client_leave(NetClient *c)
     char line[4096] = "";
     SDL_LockMutex(c->lock);
     c->leaving = 1;
+    c->rejoining = 0;  /* no frame goes out after this: ws_stop frees the transport */
     if (c->racing)
         say(c, "{\"type\":\"leave\"}");
     if (c->joined_at) {
@@ -862,7 +919,7 @@ int client_send_frame(NetClient *c, int type, const void *payload, size_t n)
     frame[1] = 0;
     memcpy(frame + 2, payload, n);
     SDL_LockMutex(c->lock);
-    if (c->racing && c->connected) {
+    if (c->racing && (c->connected || c->rejoining)) {
         send_binary(c, frame, n + 2);
         c->states_sent += type == NET_FRAME_STATE;
         sent = 1;
