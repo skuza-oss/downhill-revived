@@ -3,6 +3,7 @@
    port/tools/test_runtime.py (a host program). */
 #include "touch.h"
 #include "hle.h"
+#include "../include/fps.h"
 
 #include <assert.h>
 #include <math.h>
@@ -611,6 +612,32 @@ static void test_restart_clock(void)
     field();
 }
 
+/* Issue #54 (finding 159): a career continued from a save races with the shell's screen id still
+   22 (CONTINUE SAVED GAME), not 9 (GET READY), so the race test (port_race_rule, fps.h) does not read
+   the screen: a race's loop ran since the front end's last frame, not the attract demo (mode 10),
+   the race phase from first_phase (1 the countdown for the overlay) to 4. The continued career's
+   own modes (0-5, func_001EE2A0) count. After a race the phase stays (3 on the title after QUIT),
+   so the front end's frame is what ends it. The overlay then shows as in any race. */
+static void test_race_running(void)
+{
+    for (int mode = 0; mode <= 5; mode++) {
+        CHECK(port_race_rule(1, mode, 1, 1));
+        CHECK(port_race_rule(1, mode, 3, 1));
+        CHECK(port_race_rule(1, mode, 4, 1));
+        CHECK(!port_race_rule(1, mode, 1, 2));   /* the countdown, for a test from GO */
+        CHECK(!port_race_rule(1, mode, 5, 1));   /* the load and the flight over the track */
+        CHECK(!port_race_rule(0, mode, 3, 1));   /* the menus after a race: the phase left at 3 */
+    }
+    CHECK(!port_race_rule(1, PORT_MODE_ATTRACT, 3, 1));
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    game.race_hud = 0;
+    wait_ms(500);
+    CHECK(!touch_visible(t));
+    game.race_hud = port_race_rule(1, 3, 2, 1);   /* touch_field: the HUD hook in a continued career's race */
+    field();
+    CHECK(touch_visible(t));
+}
+
 /* The trick-stick hint: it holds the game until a push, and when the hold ends without one (5 s)
    the hint goes too. */
 static void test_trick_hint(void)
@@ -1079,6 +1106,7 @@ int main(void)
     test_pause();
     test_pause_controller();
     test_restart_clock();
+    test_race_running();
     test_editor_bar();
     test_trick_hint();
     test_classic_resume();

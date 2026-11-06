@@ -861,3 +861,11 @@ PATCHES['unsorted/001B40A0.c'] = PATCHES.get('unsorted/001B40A0.c', []) + [
     ('text', 'int func_001B40A0(Obj *arg0)\n{',
      'extern void hle_online_watch_resume(void);\nint func_001B40A0(Obj *arg0)\n{\n    hle_online_watch_resume();'),
 ]
+
+# A race runs (fps.h port_loop_frame, finding 159): the race world's update, every unpaused frame of
+# the race's loop and in its load (func_0019C868); the shell's frame clears it. (func_001B40A0 itself
+# is NONMATCHING C: the core runs its recompiled asm, so a patch there never runs.)
+PATCHES['unsorted/0016C0C8.c'] = PATCHES.get('unsorted/0016C0C8.c', []) + [
+    ('text', 'void func_0016C0C8(Obj *obj)\n{',
+     'extern void port_loop_frame(int);\nvoid func_0016C0C8(Obj *obj)\n{\n    port_loop_frame(1);'),
+]
