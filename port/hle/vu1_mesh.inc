@@ -1,9 +1,13 @@
 /* Native VU1 meshes (findings 164 and 167), included by vif.c: DHD_NATIVE_VU1 hands overlay B's
    batch loops to the native renderer instead of running them. The value lists the loops (by their
-   address; "all" for every one), then optional flags: DHD_NATIVE_VU1=0170:skip.
+   address; "prelit" or "all" for groups), then optional flags: DHD_NATIVE_VU1=0170,1708:skip.
 
    | loop | VI13  | fog      | colour | UV offset     | back faces | clipping |
    | 0170 | 0x011 | computed | c vf31 | from vertex 1 | culled     | yes      |
+   | 1708 | 0x2C9 | computed | c vf31 | every vertex  | drawn      | yes      |
+   | 08B0 | 0x100 | computed | c vf31 | every vertex  | drawn      | no       |
+   | 0798 | 0x0E0 | maximum  | c      | none          | drawn      | no       |
+   | 18B0 | 0x2FE | maximum  | c      | none          | drawn      | yes      |
 
    (c the batch vertex's colour.)
 
@@ -72,7 +76,12 @@ typedef struct {
 } MeshProgram;
 static const MeshProgram mesh_programs[] = {
     {"0170", 0x011, 0, MESH_COLOUR_SCALED, 1, 1, 1},
+    {"1708", 0x2C9, 0, MESH_COLOUR_SCALED, 2, 0, 1},
+    {"08B0", 0x100, 0, MESH_COLOUR_SCALED, 2, 0, 0},
+    {"0798", 0x0E0, 1, MESH_COLOUR_RAW, 0, 0, 0},
+    {"18B0", 0x2FE, 1, MESH_COLOUR_RAW, 0, 0, 1},
 };
+enum { MESH_PRELIT = 0x1F };   /* the group's bits */
 enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
 
 typedef struct {
@@ -210,6 +219,7 @@ static int mesh_enabled(void)
         size_t list = s ? strcspn(s, ":") : 0;
         for (const char *t = s; t && t < s + list;) {
             size_t len = strcspn(t, ",:");
+            if (len == 6 && !strncmp(t, "prelit", 6)) mesh.enabled |= MESH_PRELIT;
             if (len == 3 && !strncmp(t, "all", 3)) mesh.enabled |= (1u << MESH_PROGRAMS) - 1;
             for (unsigned p = 0; p < MESH_PROGRAMS; p++)
                 if (len == 4 && !strncmp(t, mesh_programs[p].name, 4)) mesh.enabled |= 1u << p;
@@ -280,7 +290,7 @@ static int mesh_build(void)
     GsMeshHeader *h = (GsMeshHeader *)mesh.packet;
     memset(h, 0, sizeof *h);
     h->magic = GS_MESH_MAGIC;
-    h->flags = mesh.mode == MESH_SHADOW ? GS_MESH_SHADOW : 0;
+    h->flags = (mesh.mode == MESH_SHADOW ? GS_MESH_SHADOW : 0) | (prog->backface ? 0 : GS_MESH_TWO_SIDED);
     h->prim = prim;
     unsigned t = hdr[3] & 0x7FFF;
     if (t) {   /* 0FA8: an A+D tag (data 26), TEX0 TEX1 MIPTBP1 (149-151 + t) and TEXFLUSH (164) */

@@ -16,6 +16,7 @@ enum {
     GS_MESH_MAGIC = 0x3170564Du,   /* "MVp1" */
     GS_MESH_SHADOW = 1,            /* the VU program ran too and kicked its packet (exact Z probe): no register writes */
     GS_MESH_TEXTURE = 2,           /* ad[] holds the batch's A+D texture qwords (TEX0, TEX1, MIPTBP1, TEXFLUSH) */
+    GS_MESH_TWO_SIDED = 4,         /* no back-face culling (the loop draws both sides) */
     GS_MESH_MAX_VERTICES = 64
 };
 

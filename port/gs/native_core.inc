@@ -76,7 +76,8 @@ typedef struct {
     float mesh_matrix[16];
     float mesh_clip[4], mesh_color[4], mesh_fog[4], mesh_offset[4];
 } NativeConstants;
-enum { NATIVE_MESH = 4096 };   /* constants.flags: a mesh draw (render.rs picks its pipeline) */
+enum { NATIVE_MESH = 4096, NATIVE_MESH_TWO_SIDED = 8192 };   /* constants.flags: a mesh draw (render.rs picks its
+                                                              pipeline), drawn without back-face culling */
 
 typedef struct {
     uint64_t key;
@@ -1986,7 +1987,7 @@ _Static_assert(sizeof(GsMeshVertex) == sizeof(NativeVertex), "a mesh vertex is s
 
 static void native_mesh_constants(NativeConstants *k, const GsMeshHeader *h, const float offset[2], const Native *n)
 {
-    k->flags |= NATIVE_MESH;
+    k->flags |= NATIVE_MESH | (h->flags & GS_MESH_TWO_SIDED ? NATIVE_MESH_TWO_SIDED : 0);
     memcpy(k->mesh_matrix, h->matrix, sizeof k->mesh_matrix);
     memcpy(k->mesh_clip, h->clip, sizeof k->mesh_clip);
     memcpy(k->mesh_color, h->color, sizeof k->mesh_color);
@@ -2014,7 +2015,8 @@ static void native_mesh(Gs *g, const uint32_t *words, size_t count)
                n->state_prim == prim && !((prim & 16) && n->written != g->pixels_written) &&
                !memcmp(k->mesh_matrix, h->matrix, sizeof h->matrix) && !memcmp(k->mesh_clip, h->clip, sizeof h->clip) &&
                !memcmp(k->mesh_color, h->color, sizeof h->color) && !memcmp(k->mesh_fog, h->fog, 3 * sizeof *h->fog) &&
-               k->mesh_offset[0] == offset[0] && k->mesh_offset[1] == offset[1];
+               k->mesh_offset[0] == offset[0] && k->mesh_offset[1] == offset[1] &&
+               !(k->flags & NATIVE_MESH_TWO_SIDED) == !(h->flags & GS_MESH_TWO_SIDED);
     if (!same) {
         native_close(n, g);
         native_state(n, g, prim, ctxt);

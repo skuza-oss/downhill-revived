@@ -12,7 +12,8 @@
 //! Bits 25..28 are private: a power-of-two source scale (S=E), or zero for generic. Bit 29
 //! (`TEXELS`): the draw reads a decoded texture's R32Uint texels (the `_u` entry points and the
 //! texels layout). Bit 30 (`MESH`): a translated VU1 mesh draw (flag 4096, finding 164): the vertex
-//! stage is `native_mesh_vertex` and back faces are culled.
+//! stage is `native_mesh_vertex` and back faces are culled; bit 31 (`MESH_TWO_SIDED`) with it: no
+//! culling (finding 167).
 //! The GS key's blend, depth and variant fields remain unchanged. The cache's key is 64 bits: this
 //! key, and above it (`SPEC_SHIFT`) the fragment stage's specialisation, `spec` (native.wgsl's
 //! `native_spec`; zero for the generic shader).
@@ -39,6 +40,8 @@ pub const TEXEL_SCALE_SHIFT: u32 = 25;
 pub const TEXELS: u32 = 1 << 29;
 /// A translated VU1 mesh draw (native.wgsl's `native_mesh_vertex`, back faces culled; finding 164).
 pub const MESH: u32 = 1 << 30;
+/// With MESH: both sides drawn (the loops without back-face culling; finding 167).
+pub const MESH_TWO_SIDED: u32 = 1 << 31;
 /// Where a cache key holds the draw's fragment specialisation (`spec`).
 pub const SPEC_SHIFT: u32 = 32;
 
@@ -315,7 +318,7 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: if mesh { Some(wgpu::Face::Back) } else { None },
+            cull_mode: if mesh && key & MESH_TWO_SIDED == 0 { Some(wgpu::Face::Back) } else { None },
             ..Default::default()
         },
         depth_stencil: d.depth.clone(),
