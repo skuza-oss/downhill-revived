@@ -929,7 +929,7 @@ export class Room extends DurableObject<Env> {
       const slot = race.slots.indexOf(m.id);
       return slot >= 0 && !race.left.includes(slot);
     });
-    if (!racers.length || !racers.every(m => m.sfuReady && m.sfu?.phase === "ready")) return;
+    if (!racers.length || !racers.every(m => m.sfuRace === race.startAt && m.sfuReady && m.sfu?.phase === "ready")) return;
     for (const member of racers) {
       const peer = this.sockets.get(member.id);
       if (peer) this.send(peer, {type:"sfu_ready"});

@@ -7,8 +7,10 @@ describe("Realtime control plane", () => {
   it("releases race traffic only after every subscriber acknowledges", async () => {
     const {clients, code} = await startedRace(2);
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
-      for (const member of room.state.members)
+      for (const member of room.state.members) {
+        member.sfuRace = room.state.race.startAt;
         member.sfu = {id:`fake-${member.id}`, phase:"ready", channels:[]};
+      }
     });
     clients[0].sendJson({type:"sfu_ready"});
     await expect(clients[0].next(f => typeof f === "string" && JSON.parse(f).type === "sfu_ready", 50)).rejects.toThrow();
