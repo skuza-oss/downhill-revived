@@ -162,7 +162,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 129 | [perf: lines, how fast the game ran and what held it back, in every dhd.log](129-perf-log.md) | current |  |
 | 130 | [Integrated GPU performance](130-igpu-performance.md) | current |  |
 | 131 | [The draw pass from first principles: where an iGPU frame's time goes, and what is left](131-gpu-first-principles.md) | current |  |
-| 132 | [Track picker names and disc previews](132-track-picker.md) | current |  |
+| 132 | [Track picker names and disc previews](132-track-picker.md) | partly superseded | [166](166-online-more-tracks.md) for the 23-track list: 25 since 166 |
 | 133 | [Ambient sound too loud on Mt. Liddellroch (issue #19)](133-ambient-sound.md) | current |  |
 | 134 | [controllers: stick dead zone, button icons, starting without the launcher](134-controllers.md) | current |  |
 | 135 | [where the player and the room are, in dhd.log and in the room list, and rooms made near...](135-net-region.md) | current |  |
@@ -192,6 +192,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 160 | [Garbage blocks on screen in the first seconds after start](160-boot-garbage-frames.md) | current |  |
 | 161 | [online abuse guard: kill switch, rate limits, bans and a short moderation log](161-online-abuse-guard.md) | current |  |
 | 163 | [REVIVED SETTINGS: tabs, a clearer Controls page, online name size](163-revived-settings.md) | current |  |
+| 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
