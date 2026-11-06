@@ -1,6 +1,6 @@
 # 171: The picture freezes when the GPU device is lost
 
-Status: in progress
+Status: current
 
 Branch `fix/device-lost` from `main` fce8a1f (0.7.12), started 2026-11-06. This file is the lane's
 plan while it runs and its finding when it merges.
