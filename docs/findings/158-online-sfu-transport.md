@@ -71,7 +71,8 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 - Part 1 committed as `0a16e3c`; quick and C loopback/session tests passed.
 - Protocol 3 server fake API tests and typecheck pass, including private SDP/allocation messages.
 - Native str0m transport compiles on Windows. Native loopback delivered 95/100 STATE messages with 5% injection, the reliable EVENT,
-  and corrected a forged sender slot from its channel identity. Final build checks are running. Credentials remain absent; no live results are claimed.
+  and corrected a forged sender slot from its channel identity. All three dhd_net unit tests
+  also pass with the patched crypto adapter. The patched native archive passes the unchanged path/linkage gate. The final serial port tier passes. Credentials remain absent; no live results are claimed.
 
 - [x] 2026-11-06: lane plan (this file).
 - [x] Part 1: 30 snapshots a second, adaptive puppet delay, snapshot-age `net:` lines.
@@ -99,10 +100,13 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
 
 - Part 1 uses an RFC 3550-style EWMA of absolute arrival-spacing variation (gain 1/16).
   Delay is the estimated interval plus twice jitter, clamped to 50-150 ms; the environment
-  override remains fixed. Arrival age is sampled every network tick per sender and reported
-  with bounded millisecond histograms: p50/p95/p99 and arrival gaps over 100 ms. This measures
-  freshness of the last received snapshot, not end-to-end one-way latency: race clocks are
-  independent. Bin 1001 means over one second. The estimator ignores multi-packet intervals.
+  override remains fixed. The final age metric uses the existing per-sender EVENT_GO stamp
+  (server clock) plus snapshot race time, sampled on network ticks into bounded millisecond
+  histograms. Thus p50/p95/p99 include transit and time waiting for a newer snapshot. It is an
+  estimate subject to each peer's server-clock offset error and simulation clock drift; values
+  below zero clamp to zero, and bin 1001 means over one second. No new wire fields are needed.
+  Gaps count arrival intervals over 100 ms. The follow-up metric commit also reads the v3 batch
+  header, so it can be applied to Part 1 for the WebSocket baseline before comparing ages.
 
 - 2026-11-06 (the user): players' IP addresses must never reach other players, so direct
   peer-to-peer is out.
@@ -116,6 +120,10 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   MotorStorm Pacific Rift revival's DME relay.
 
 ## Surprises
+
+- Do not overlap two host builds in this worktree: one validation attempt collided while copying
+  a generated header. Machine-wide build slots do not serialize a single worktree's outputs.
+  Finish the current host build, then run the port tier serially.
 
 - The native test caught DTLS receive-queue overflow when several datagrams were fed before
   polling str0m. The transport now drains outputs after every datagram and after each timeout.
@@ -137,10 +145,25 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   Slot identity is bound to the channel allocation's member ID, mapped by each race's start.
 
 - Credentials file is absent. Live SFU spike and measurements wait for the lead's credentials.
-- Existing snapshots encode pad deltas. Before unreliable transport is activated they must
-  become independent snapshots, and stale packets must be rejected before changing the mirror.
+- Initial snapshots encoded pad deltas; protocol 3 sends independent snapshots and rejects
+  stale packets before changing the mirror.
 
 ## Result
+
+Validation completed:
+- `python tools/check.py quick -j 6`: pass (core build and runtime tests).
+- `python tools/check.py server -j 6`: pass, 94 tests and TypeScript typecheck.
+- `python tools/check.py port -j 6`: pass after rerunning serially; native game build, C network
+  tests, renderer checks and wasm2c chunk tests all pass. The native archive gate is unchanged.
+- All three dhd_net unit tests pass through rustgs's environment and version gates. The native
+  UDP/DTLS/SCTP test delivers 95 of 100 STATE messages with 5% outgoing loss, one reliable EVENT,
+  and corrects a forged sender slot from the receiving channel's identity. This is a local
+  stand-in SFU endpoint, not a live Cloudflare measurement.
+- The C metric test covers GO timestamps, both snapshot layouts, stale-packet rejection for
+  the estimator, per-sender long gaps and histogram overflow.
+- Windows was built and tested here; native Mac/Linux builds and cross-machine races remain
+  with the lead's merged verification. Online remains disabled on Android and in the browser.
+
 
 Live acceptance 3-5 is pending credentials. No real SFU latency numbers, packet-loss race or
 before/after comparison have been measured. Do not release this lane until the live two-client
@@ -150,4 +173,9 @@ and the cross-machine race in both directions after merging.
 Restart steps: provide the documented Realtime env/secrets in the server's gitignored `.dev.vars`,
 run the native channel test and server suite, then use `local_server.py` with `online_race.py`.
 Repeat with `DHD_NET_DROP_STATE=5` in the clients' environments; collect both 30 s `net:` windows.
-The Part 1 commit is the WebSocket baseline for the same setup (before activating protocol 3).
+For the WebSocket baseline, use Part 1 and apply only the `port/net/client.c` and
+`port/net/client.h` changes from the GO-clock age metric commit; keep that baseline's protocol 2
+and relay server. The metric reads both snapshot layouts, so compare the same estimator on
+both transports. To repeat the native channel test with the normal CLI wrapper:
+`python port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- -p dhd_net -p dhd_render --lib native_channels`.
+

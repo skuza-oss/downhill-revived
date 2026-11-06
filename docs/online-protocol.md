@@ -216,8 +216,10 @@ timestamps before changing the pad mirror. Every owned rider is sent about 30 ti
 EVENT remains payload version 2. The SFU reads none of the gameplay payload.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
-EVENT is unaffected. `net:` reports per-sender p50/p95/p99 age since the latest STATE arrival and
-gaps longer than 100 ms. These are freshness measurements, not one-way network latency.
+EVENT is unaffected. `net:` reports per-sender p50/p95/p99 estimated snapshot age and
+gaps longer than 100 ms. Age uses the existing per-sender EVENT_GO server-clock stamp plus the
+snapshot race timestamp, so it includes transit and time awaiting the next snapshot. Peer clock
+offset error and simulation drift affect the estimate; this is not a precise one-way latency probe.
 
 ### Leaving
 

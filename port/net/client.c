@@ -2,6 +2,7 @@
    frames and pings. */
 #include "client.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -246,6 +247,7 @@ static void read_start(NetClient *c, const char *t)
         l->start_at = net_now_ms() / 1000.0;
     c->relayed_head = c->relayed_count = 0;
     memset(c->snapshot, 0, sizeof c->snapshot);
+    memset(c->sender_go, 0, sizeof c->sender_go);
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -471,12 +473,29 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
         memcpy(&sent, data + 2, sizeof sent);
         add_rtt(c, net_now_ms() - sent);
     } else if (c->racing && n >= 2 && n <= NET_FRAME_MAX && (data[0] == NET_FRAME_STATE || data[0] == NET_FRAME_EVENT)) {
-        if (data[0] == NET_FRAME_STATE && data[1] < NET_MAX_SLOTS) {
+        if (data[1] < NET_MAX_SLOTS) {
             int slot = data[1];
-            double now = net_now_ms();
-            if (c->snapshot[slot].arrived && now - c->snapshot[slot].arrived > 100.5)
-                c->snapshot[slot].gaps++;
-            c->snapshot[slot].arrived = now;
+            if (data[0] == NET_FRAME_EVENT && n >= 12 && data[2] == 2 && data[3] == 5) {
+                double go;
+                memcpy(&go, data + 4, sizeof go);  /* existing EVENT_GO, server ms */
+                if (isfinite(go) && go > 0) c->sender_go[slot] = go;
+            }
+            if (data[0] == NET_FRAME_STATE) {
+                /* v4 standalone and v3's first batched rider (the WebSocket baseline). */
+                int offset = n >= 8 && data[2] == 4 ? 4 : n >= 9 && data[3] == 3 ? 5 : 0;
+                if (offset) {
+                    uint32_t ms;
+                    memcpy(&ms, data + offset, sizeof ms);
+                    double now = net_now_ms();
+                    double epoch = c->sender_go[slot] > 0 ? c->sender_go[slot] + ms : 0;
+                    if (!c->snapshot[slot].arrived || !epoch || epoch > c->snapshot[slot].epoch) {
+                        if (c->snapshot[slot].arrived && now - c->snapshot[slot].arrived > 100.5)
+                            c->snapshot[slot].gaps++;
+                        c->snapshot[slot].arrived = now;
+                        c->snapshot[slot].epoch = epoch;
+                    }
+                }
+            }
         }
         unsigned at = (c->relayed_head + c->relayed_count) % NET_RELAY_QUEUE;
         if (c->relayed_count == NET_RELAY_QUEUE)
@@ -532,9 +551,9 @@ int client_tick(NetClient *c)
     SDL_LockMutex(c->lock);
     if (c->connected) {
         if (c->racing) for (int slot = 0; slot < NET_MAX_SLOTS; slot++) {
-            double arrived = c->snapshot[slot].arrived;
-            if (!arrived) continue;
-            double age = now - arrived;
+            double epoch = c->snapshot[slot].epoch;
+            if (!epoch) continue;
+            double age = now + c->clock_offset - epoch;
             unsigned ms = age > 1000 ? 1001 : age < 0 ? 0 : (unsigned)age;
             c->snapshot[slot].age[ms]++;
             c->snapshot[slot].samples++;
