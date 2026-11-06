@@ -70,7 +70,9 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   `wrangler.jsonc`: `RL_CONNECT` 30 room connections a minute, `RL_CREATE` 10 new rooms a minute),
   keyed by the keyed IP hash (`src/guard.ts` `ipHash`, HMAC-SHA-256 with the `IP_HASH_KEY`
   secret); over: `rate_limited` (4011) from the Worker. Tests in `test/guard.test.ts`.
-- [ ] Per-member caps.
+- [x] Per-member caps: `src/guard.ts` `tally` (per socket, 5 s windows: 100 text, 2000 binary),
+  used first thing in `Room.webSocketMessage`; over: dropped, the first time a non-fatal `too_fast`
+  warning, the next window over closes with `too_fast` (4012). Tests in `test/guard.test.ts`.
 - [ ] Moderation log, bans, local tool.
 - [ ] Install id in the game and `hello`.
 - [ ] Privacy note, protocol docs.
@@ -102,7 +104,18 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   address); a missing binding or a failing limiter lets players in (logged).
 - Without the `IP_HASH_KEY` secret each isolate draws a random HMAC key (warned once in the log):
   limits still hold within it, bans by address don't. Production needs the secret.
+- Caps count over 5 s windows, not seconds, so a hitch's burst of queued frames (the game's
+  network thread sends what piled up) doesn't count as a flood. Binary: twice what one STATE frame
+  per rider would be for 10 riders (today one frame carries all of a PC's riders, so about 13 times
+  what a host sends); text: ten times a fast-clicking player. One warning, then a close: a game
+  that somehow goes over once (a bug) keeps playing and tells us in its log.
+- The counts are memory only (a WeakMap per socket): a room waking from hibernation starts new
+  windows. Nothing is stored for them.
 
 ## Surprises
+
+- The test runtime relays a binary frame in about 2 ms (300 frames took 687 ms), so a test can't
+  send 2000 of them in a window: one test sets a room's own cap (`CAP_BINARY`, `CAP_WINDOW_MS`
+  through the room's env), the tally itself is tested directly.
 
 ## Result

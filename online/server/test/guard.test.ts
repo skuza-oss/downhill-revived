@@ -3,8 +3,10 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
-import { OFF_MESSAGE, RATE_MESSAGE, ipHash } from "../src/guard";
-import { Client, randomIp } from "./helpers";
+import {
+  BINARY_PER_WINDOW, OFF_MESSAGE, RATE_MESSAGE, TEXT_PER_WINDOW, TOO_FAST_MESSAGE, TOO_FAST_WARNING, ipHash, newTally, tally,
+} from "../src/guard";
+import { Client, randomIp, startedRace } from "./helpers";
 
 /** The Worker with some variables changed (the test run's own are fixed). */
 function fetchWith(vars: Record<string, string>, path: string, init: RequestInit = {}): Promise<Response> {
@@ -125,5 +127,66 @@ describe("limits per connection source", () => {
     expect(await ipHash({ IP_HASH_KEY: "k1" }, req("203.0.113.8"))).not.toBe(a);
     expect(a).not.toContain("203");
     expect(await ipHash({ IP_HASH_KEY: "k1" }, new Request("https://dhd.test/"))).toBe("");
+  });
+});
+
+describe("caps per member", () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("caps binary at twice the worst a game sends, text at ten times", () => {
+    expect(BINARY_PER_WINDOW / 5).toBe(400); // a second: 10 riders at 20 snapshots, twice
+    expect(TEXT_PER_WINDOW / 5).toBe(20);
+  });
+
+  it("counts per window: ok, then warn once, drop, and close the next window over", () => {
+    const t = newTally(0);
+    for (let i = 0; i < TEXT_PER_WINDOW; i++) expect(tally(t, false, 10)).toBe("ok");
+    expect(tally(t, false, 10)).toBe("warn");
+    expect(tally(t, false, 20)).toBe("drop");
+    expect(tally(t, true, 20)).toBe("ok"); // binary has its own count
+    expect(tally(t, false, 5_000)).toBe("ok"); // a new window
+    for (let i = 1; i < TEXT_PER_WINDOW; i++) tally(t, false, 5_001);
+    expect(tally(t, false, 5_002)).toBe("close");
+  });
+
+  it("warns a member who sends too many messages, then closes it the next time", async () => {
+    const { host, code } = await Client.host("Ann");
+    const bo = await Client.join(code, "Bo");
+    await sleep(1100); // a new window (1 s in the tests)
+    for (let i = 0; i <= TEXT_PER_WINDOW; i++) bo.sendJson({ type: "ping", t: i });
+    expect(await bo.json("error")).toEqual({ type: "error", code: "too_fast", message: TOO_FAST_WARNING });
+    expect(bo.closeCode).toBeNull();
+    await sleep(1100);
+    for (let i = 0; i <= TEXT_PER_WINDOW; i++) bo.sendJson({ type: "ping", t: i });
+    const err = await bo.next((f) => typeof f === "string" && JSON.parse(f).type === "error" && JSON.parse(f).code === "too_fast" && JSON.parse(f).message === TOO_FAST_MESSAGE);
+    expect(err).toBeTruthy();
+    expect(await bo.closed()).toBe(4012);
+    // Bo is gone from the room; the host stays.
+    await host.next((f) => typeof f === "string" && JSON.parse(f).type === "room" && JSON.parse(f).members.length === 1);
+    expect(host.closeCode).toBeNull();
+  });
+
+  it("relays no more race frames than the cap and warns the sender", async () => {
+    const { clients, code } = await startedRace(2);
+    const [a, b] = clients;
+    // The test runtime relays about one frame each 2 ms, so 2000 would take 4 s: this room's cap is
+    // 50 a long window.
+    const cap = 50;
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), (room: any) => {
+      room.env = { ...room.env, CAP_WINDOW_MS: "60000", CAP_BINARY: String(cap) };
+    });
+    const frame = new Uint8Array([5, 0, 1, 2, 3]);
+    for (let i = 0; i < cap + 20; i++) a.ws.send(frame);
+    const warned = await a.next((f) => typeof f === "string" && JSON.parse(f).type === "error", 20_000);
+    expect(JSON.parse(warned as string).code).toBe("too_fast");
+    let got = 0;
+    try {
+      for (;;) {
+        await b.binary();
+        got++;
+      }
+    } catch {}
+    expect(got).toBe(cap);
+
   });
 });

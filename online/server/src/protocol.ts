@@ -45,6 +45,9 @@ export const CLOSE_CODES = {
   online_off: 4010,
   /** Too many connections or new rooms from one address in a minute (wrangler.jsonc ratelimits). */
   rate_limited: 4011,
+  /** A member sent more messages or race frames than the game ever does, after a warning
+      (src/guard.ts TEXT_PER_WINDOW, BINARY_PER_WINDOW). The warning is a non-fatal too_fast. */
+  too_fast: 4012,
 } as const;
 export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
 

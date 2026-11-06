@@ -112,3 +112,71 @@ export async function overLimit(env: GuardEnv, hash: string, create: boolean): P
   }
   return false;
 }
+
+// ---- Caps per member in a room ----
+
+/**
+ * What one socket may send, counted over windows of CAP_WINDOW_MS (a window, not a second, so a
+ * hitch's burst of queued frames doesn't count as a flood).
+ *
+ * Binary: the game sends one STATE frame a snapshot, about 20 a second at any frame rate, with all
+ * the riders it runs in it (port/hle/online.c SNAPSHOT_TICKS; the host's AI riders too), plus
+ * EVENT frames (hits, pickups, the setup, the finish: a few a second in a crowd) and two binary
+ * pings a second (port/net/client.c PING_RACE_MS). Even one STATE frame per rider, 10 riders at
+ * 20 a second, would be 200 a second: the cap is twice that, 400 a second, 2000 a window. Each
+ * frame goes out to up to 9 others, so this is also what one member can make the room send.
+ *
+ * Text: in the lobby the game sends a ping a second and a pong every 2 s (PING_LOBBY_MS, the
+ * server's PING_INTERVAL_MS), plus a message per click (pick, ready, settings; the host's room
+ * setup sends three at once). 20 a second, 100 a window, is ten times what a player clicking fast
+ * sends.
+ */
+export const CAP_WINDOW_MS = 5_000;
+export const BINARY_PER_WINDOW = 2_000;
+export const TEXT_PER_WINDOW = 100;
+
+/** The warning (a non-fatal error) the first time a socket goes over a cap, and the refusal the
+    next time (footer-sized, see OFF_MESSAGE). */
+export const TOO_FAST_WARNING = "Slow down: too many messages.";
+export const TOO_FAST_MESSAGE = "Disconnected: too many messages.";
+
+/** One socket's counts in its current window. */
+export interface Tally {
+  start: number;
+  text: number;
+  binary: number;
+  /** Over a cap in this window already (its other messages are dropped). */
+  over: boolean;
+  /** Warned once already: the next window over a cap closes the socket. */
+  warned: boolean;
+}
+
+export function newTally(now: number): Tally {
+  return { start: now, text: 0, binary: 0, over: false, warned: false };
+}
+
+/**
+ * Counts one message: "ok" to handle it; "drop" to drop it (over a cap in this window); "warn" the
+ * first time ever over a cap (drop it and warn the sender); "close" the next window over a cap.
+ */
+export interface Caps {
+  windowMs: number;
+  text: number;
+  binary: number;
+}
+export const CAPS: Caps = { windowMs: CAP_WINDOW_MS, text: TEXT_PER_WINDOW, binary: BINARY_PER_WINDOW };
+
+export function tally(t: Tally, binary: boolean, now: number, caps: Caps = CAPS): "ok" | "drop" | "warn" | "close" {
+  if (now - t.start >= caps.windowMs) {
+    t.start = now;
+    t.text = t.binary = 0;
+    t.over = false;
+  }
+  const n = binary ? ++t.binary : ++t.text;
+  if (n <= (binary ? caps.binary : caps.text)) return "ok";
+  if (t.over) return "drop";
+  t.over = true;
+  if (t.warned) return "close";
+  t.warned = true;
+  return "warn";
+}

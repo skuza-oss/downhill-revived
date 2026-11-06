@@ -31,7 +31,7 @@ import {
   randomSeed,
 } from "./protocol";
 import { placeOf, regionOfPlace, roomRegion, traceColo } from "./region";
-import { offMessage, onlineOff, type GuardEnv } from "./guard";
+import { CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, newTally, offMessage, onlineOff, tally, type Caps, type GuardEnv, type Tally } from "./guard";
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -197,6 +197,9 @@ export class Room extends DurableObject<Env> {
   /** When each socket last sent anything. Memory only: a socket not here (a wake-up) counts from
       the instance's start. */
   private heard = new WeakMap<WebSocket, number>();
+  /** Each socket's message counts (src/guard.ts tally, finding 161). Memory only: after a wake-up
+      a socket starts a new window. */
+  private tallies = new WeakMap<WebSocket, Tally>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -290,7 +293,22 @@ export class Room extends DurableObject<Env> {
   // ---- WebSocket events ----
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
-    this.heard.set(ws, Date.now());
+    const now = Date.now();
+    this.heard.set(ws, now);
+    // Caps per member (finding 161): more than the game ever sends is dropped, warned once, then
+    // closed.
+    let t = this.tallies.get(ws);
+    if (!t) this.tallies.set(ws, (t = newTally(now)));
+    const verdict = tally(t, typeof msg !== "string", now, this.caps());
+    if (verdict !== "ok") {
+      if (verdict === "warn") this.error(ws, "too_fast", TOO_FAST_WARNING);
+      if (verdict === "close") {
+        const info = ws.deserializeAttachment() as SocketInfo | null;
+        console.warn(`room ${this.state?.code ?? ""}: member ${info?.memberId ?? "-"} closed: too many messages`);
+        return this.refuse(ws, "too_fast", TOO_FAST_MESSAGE);
+      }
+      return;
+    }
     if (typeof msg !== "string") {
       this.relay(ws, msg);
       return;
@@ -782,6 +800,17 @@ export class Room extends DurableObject<Env> {
       st.members.length >= 2 &&
       st.members.every((x) => x.ready && !x.choosing && x.countdown)
     );
+  }
+
+  /** The caps per member (src/guard.ts CAPS). The tests change them through CAP_WINDOW_MS and
+      CAP_BINARY (vitest.config.ts; one test sets the room's own env). */
+  private caps(): Caps {
+    const env = this.env as unknown as Record<string, unknown>;
+    const knob = (name: string, value: number) => {
+      const v = Number(env[name]);
+      return env[name] !== undefined && Number.isFinite(v) && v > 0 ? v : value;
+    };
+    return { windowMs: knob("CAP_WINDOW_MS", CAPS.windowMs), text: CAPS.text, binary: knob("CAP_BINARY", CAPS.binary) };
   }
 
   private countdownMs(): number {

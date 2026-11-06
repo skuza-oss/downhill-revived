@@ -53,6 +53,7 @@ A refusal is one text frame followed by a close:
 | `hello_timeout` | 4008 | No `hello` within 10 seconds. |
 | `client_outdated` | 4009 | `hello.clientVersion` is below the server's `MIN_VERSION` (below). |
 | `rate_limited` | 4011 | Too many connections or new rooms from one address in a minute (below). |
+| `too_fast` | 4012 | A member sent far more than the game does, a second time (caps, under Limits). The first time it is a non-fatal `too_fast` error. |
 | `online_off` | 4010 | The operator turned online off (the kill switch, below). Also a non-fatal error to a `start`, and to the room when a countdown runs out. |
 
 ### Minimum client version
@@ -302,6 +303,13 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
 - Text frames: at most 4 KB. Binary frames: at most 3072 bytes (a STATE frame carries all of a
   player's riders).
 - A room with no members is deleted.
+- Caps per connection (finding 161, `online/server/src/guard.ts`): at most 100 text frames and
+  2000 binary frames in each 5 s window (20 and 400 a second; the game sends about 1.5 and 22).
+  Over a cap the rest of that window's frames of that kind are dropped (binary ones not relayed);
+  the first time the sender also gets the non-fatal
+  `{"type":"error","code":"too_fast","message":"Slow down: too many messages."}`, and the next
+  window over a cap closes it: `too_fast` "Disconnected: too many messages.", close 4012, and the
+  member leaves as a disconnect.
 - No reconnect in version 1: a dropped racer is handed to AI for the rest of the race.
 - Rejoin (finding 137). Each member has a random rejoin token, sent only in its own `welcome`
   (never in `room` or anywhere else). A client keeps it for that room, and when its connection
