@@ -2,6 +2,9 @@
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
+import {
+  RATE_MESSAGE, banMessage, cleanup, findBan, ipHash, onlineState, overLimit, refuseSocket, type GuardEnv,
+} from "./guard";
 
 export { Room } from "./room";
 export { LobbyIndex } from "./lobbies";
@@ -18,7 +21,13 @@ export default {
 
     // minVersion: the oldest client release the server lets play (MIN_VERSION, wrangler.jsonc).
     const minVersion = minVersionOf(env.MIN_VERSION);
-    if (path === "/v1/health") return json({ ok: true, protocol: PROTOCOL, minVersion });
+    // The kill switch (finding 161: tools/moderate.mjs online off, kept 30 s per isolate): no new
+    // rooms, joins or races, and the health check and the lobby list say so.
+    const lookup = path === "/v1/health" || path === "/v1/lobbies" || path.startsWith("/v1/rooms/");
+    const sw = lookup ? await onlineState(env as GuardEnv) : null;
+    const off = sw !== null && !sw.on;
+    const offState = off ? { online: false, message: sw.message } : { online: true };
+    if (path === "/v1/health") return json({ ok: true, protocol: PROTOCOL, minVersion, ...offState });
 
     // The newest release's latest.json, the launcher's backup when GitHub's API can't be reached
     // (src/latest.ts, finding 138).
@@ -32,6 +41,7 @@ export default {
       if (request.method !== "GET") return json({ error: "GET only" }, 405);
       // region: the asker's, as Cloudflare places them; their region's rooms come first (finding 135).
       const region = regionOfPlace(placeOf(request));
+      if (off) return json({ protocol: PROTOCOL, minVersion, region, now: Date.now(), lobbies: [], ...offState });
       const lobbies = sortForRegion(await env.LOBBIES.get(env.LOBBIES.idFromName("global")).list(), region);
       // now: the server's clock (ms since the Unix epoch). A client in no room yet has no clock
       // offset from a room's pings; without this its list counted "ENDS IN" from the epoch (0.7.6
@@ -43,8 +53,20 @@ export default {
     if (m) {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
         return json({ error: "Expected a WebSocket upgrade" }, 426);
+      // Off: no new room. A join by code still reaches its room, which lets only its own members
+      // back in (a dropped racer rejoining a race that goes on) and refuses the rest at hello.
+      if (off && m[1] === "new") return refuseSocket("online_off", sw.message);
+      // Limits per connection source (finding 161), by the address's keyed hash, before any room.
+      const ip = await ipHash(env as GuardEnv, request);
+      if (await overLimit(env as GuardEnv, ip, m[1] === "new")) return refuseSocket("rate_limited", RATE_MESSAGE);
+      // A ban on this address, before any room (an install id's is checked at hello, in the room).
+      const ban = await findBan(env as GuardEnv, { ip });
+      if (ban) return refuseSocket("banned", banMessage(ban));
       const headers = new Headers(request.headers);
       headers.delete("x-dhd-create");
+      // The address's hash for the room's moderation log (src/room.ts); never one a client sent.
+      headers.delete("x-dhd-ip-hash");
+      if (ip) headers.set("x-dhd-ip-hash", ip);
       if (m[1] === "new") {
         headers.set("x-dhd-create", "1");
         // A new room runs near its creator: the hint from their continent and country, not from the
@@ -66,5 +88,16 @@ export default {
     }
 
     return json({ error: "Not found" }, 404);
+  },
+
+  // Daily (wrangler.jsonc triggers): the moderation log's rows older than 14 days and ended bans go
+  // (finding 161).
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      cleanup(env as GuardEnv).then(
+        (n) => console.log(`guard: cleanup removed ${n.joins} joins and ${n.bans} ended bans`),
+        (e) => console.error("guard: cleanup failed", e),
+      ),
+    );
   },
 } satisfies ExportedHandler<Env>;

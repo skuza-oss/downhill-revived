@@ -13,6 +13,8 @@
 //!   keeps only the text's storage (IndexedDB) and what the browser can't offer.
 //! - The rider name's rule (`name`) is here too, for the launcher's rider card and, through
 //!   settings_table.h, the game's online menu.
+//! - The install id (`install`, finding 161): a random id kept in dhd.ini for the online server's
+//!   bans; not a setting, never a variable or a log line.
 //! - The keyboard and controller bindings (`controls`, finding 157): the `keyboard`, `pad1` and
 //!   `pad2` lines' layouts and the rules of a change, for the game (through port/hle/
 //!   controls_table.h and the C interface) and the launcher's Controls tab.
@@ -26,6 +28,7 @@
 pub mod c;
 pub mod controls;
 mod ini;
+pub mod install;
 pub mod name;
 pub mod table;
 #[cfg(target_arch = "wasm32")]

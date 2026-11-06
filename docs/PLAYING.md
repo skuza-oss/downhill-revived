@@ -275,6 +275,23 @@ address on the `server =` line of `dhd.ini` (the game writes the file at the fir
 
 An empty `server =` line means the official server.
 
+#### What the official server keeps
+
+To deal with cheaters and other abuse, the server keeps a short log of who joined which race:
+the time, the room's code, your rider name, the game's version, your country (as Cloudflare
+sees it), a scrambled form of your internet address (a keyed hash: the address itself is never
+stored, and the hash can't be turned back into it) and your game's install id (a random number
+the game makes once and keeps in `dhd.ini` as `install_id`; it says nothing about you or your
+PC). Log entries are deleted after 14 days. A player who is banned is banned by that hash or
+install id, not by name, until the ban ends (or until it is lifted, for one without an end).
+
+No other player ever sees your internet address, its hash or your install id, and the game
+doesn't write the install id into `dhd.log`. Deleting the `install_id` line makes the game
+pick a new one. Players in a room see each other's rider names, ping and region (EU, NA...).
+
+The server's operator can also turn online races off for a while; the ONLINE screen then says
+so ("Online races are paused. Try again later.").
+
 ### Texture packs
 
 Texture replacement packs made for PCSX2 work unchanged. Packs are made by their authors and are

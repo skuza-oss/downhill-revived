@@ -31,6 +31,12 @@ int dhd_settings_save(const char *path, const char *key, const char *value);
    one. */
 int dhd_settings_read(const char *path, const char *key, char *out, size_t size);
 
+/* The install id (finding 161): a random id of 32 lowercase hex digits that dhd.ini at path keeps
+   as install_id, made and saved there the first time (without the file: one for this run only),
+   into out (size bytes, at least 33). 1 when out has it. Not a setting: never a variable from
+   dhd_settings_load, never in dhd.log; the online hello sends it (port/net/client.c). */
+int dhd_settings_install_id(const char *path, char *out, size_t size);
+
 /* ---- keyboard and controller bindings (finding 157; port/render/settings/src/controls.rs) ----
    A layout as port/hle/controls_table.h's ControlsLayout (52 bytes): each of the 24 targets' main
    and alternate input (the keyboard: a key's virtual-key code; a controller: an input's id; 0

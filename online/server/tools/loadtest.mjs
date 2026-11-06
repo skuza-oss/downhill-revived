@@ -109,7 +109,7 @@ async function main() {
   const health = await (await fetch(BASE.replace(/^ws/, "http") + "/v1/health")).json();
   console.log(`server ${BASE}: protocol ${health.protocol}, minimum version ${health.minVersion}`);
   // The version gate: play as the oldest release the server allows.
-  const hello = (name) => ({ type: "hello", protocol: 1, version: VERSION, clientVersion: health.minVersion, isoSha256: ISO, name });
+  const hello = (name) => ({ type: "hello", protocol: health.protocol, version: VERSION, clientVersion: health.minVersion, isoSha256: ISO, name });
 
   const players = [];
   const host = new Player("P0");

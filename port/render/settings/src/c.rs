@@ -101,6 +101,27 @@ pub unsafe extern "C" fn dhd_settings_read(path: *const c_char, key: *const c_ch
     1
 }
 
+/// The install id (install.rs, finding 161) of dhd.ini at `path`, made and saved there if it has
+/// none (without the file: one for this run only), into `out` (`size` bytes, at least 33). 1 when
+/// `out` has it.
+///
+/// # Safety
+/// `path` is a NUL-terminated string; `out` has room for `size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dhd_settings_install_id(path: *const c_char, out: *mut c_char, size: usize) -> c_int {
+    // SAFETY: the caller's contract.
+    let Some(path) = (unsafe { text(path) }) else {
+        return 0;
+    };
+    let (id, _) = crate::install::get(Path::new(path));
+    if out.is_null() || size <= id.len() {
+        return 0;
+    }
+    // SAFETY: out has size > id.len() bytes.
+    unsafe { put(out, size, &id) };
+    1
+}
+
 /// `text` into `out` (`size` bytes), cut to fit, NUL-terminated.
 ///
 /// # Safety
