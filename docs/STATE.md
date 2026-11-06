@@ -119,8 +119,14 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   bans by address hash or install id with a 14-day moderation log in D1, worked from
   `online/server/tools/moderate.mjs` (no admin endpoint). No player gets another's address, its
   hash or install id.
-- Client: `port/net/` over `port/net/ws.h`, the Rust crate `dhd_net` (`port/render/net`,
-  tungstenite over rustls, webpki roots; no OS certificate store).
+- Race frames (finding 158): over Cloudflare Realtime SFU DataChannels, STATE unordered with no
+  retransmissions and EVENT reliable; the room sets up each racer's session and passes only that
+  racer's SDP. If UDP doesn't connect in 2 s, Cloudflare TURN over TLS on 443 with credentials
+  minted for that racer. 30 snapshots a second; the puppets' delay adapts per sender (50-150 ms).
+  Protocol 3.
+- Client: `port/net/` over `port/net/ws.h`, the Rust crate `dhd_net` (`port/render/net`:
+  tungstenite over rustls for the lobby, str0m for the SFU with a vendored RustCrypto adapter,
+  its own TURN client; webpki roots, no OS certificate store).
 - Online needs the USA disc's game files (a hash of every ISO 9660 file, `dhd_disc`; finding 098).
 - Releases with online or pacing changes need a real race between two different machines both
   ways (single-PC tests have hidden bugs before).

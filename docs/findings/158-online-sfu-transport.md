@@ -1,6 +1,6 @@
 # 158: race frames over Cloudflare Realtime SFU, and puppets with less delay
 
-Status: in progress
+Status: current
 
 Branch `feat/online-sfu` from `main` 113f76f, started 2026-11-06. This file is the lane's plan
 while it runs and its finding when it merges.
@@ -236,6 +236,31 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   outside addresses. Its answer to a made-up username after the 401 challenge is a 400.
 
 ## Result
+
+Merged into `main` on 2026-11-06 (four rounds; the round sections below hold the details).
+State sync is unchanged (finding 044); the race frames' transport and the puppets' delay changed:
+
+- Race frames travel over Cloudflare Realtime SFU DataChannels: STATE on an unordered channel
+  with no retransmissions, EVENT on a reliable one. The room creates each racer's SFU session and
+  channels and sends each client only its own SDP and channel ids; no player receives another's
+  address, SDP or TURN credentials (`online/server/src/sfu.ts`, `port/render/net/src/sfu.rs`).
+  The WebSocket race relay is gone; binary PING/PONG on the WebSocket stays for the ping counter.
+  `PROTOCOL` is 3; the release that ships it raises `MIN_VERSION`.
+- When UDP to the SFU does not connect within 2 s, the client falls back to Cloudflare TURN over
+  TLS on 443 with short-lived credentials the room mints for that racer only (`turn.rs`,
+  `relay.rs`; test switch `DHD_NET_SFU_UDP=0`).
+- 30 snapshots a second, a puppet delay that adapts to each sender (50-150 ms), snapshots that
+  survive loss (changed pad words repeated, a full copy about once a second), and snapshot age,
+  gaps and the SFU loop's timings in dhd.log's `net:` lines.
+- Measured on one PC (WARP off), snapshot age in a race, median: the 0.7.11 relay through the
+  official server 71-90 ms, the SFU 19-45 ms, the SFU forced through TURN/TLS 33-54 ms.
+- Checked on the merged tree: `python tools/check.py server` and `python tools/check.py port`.
+  Mac: the Rust network and renderer tests and the release library; Linux: the library
+  cross-builds only.
+- Not yet: the deploy's four Worker secrets (`online/server/README.md`), a real race between two
+  machines both ways, Linux tests, and a test on a network that really blocks UDP.
+
+Earlier validation notes, kept from round 1:
 
 Validation completed:
 - `python tools/check.py quick -j 6`: pass (core build and runtime tests).
