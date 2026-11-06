@@ -440,7 +440,7 @@ void port_fps_contact_recovery(void *body)
     if (!port_delta_clock()) return;
     unsigned char *b=body,*r=*(unsigned char **)(b+0x158);
     Air *a=air_for(body);
-    int slot=*(int *)(r+0x797C),race_phase=*(int *)GUEST(0x0843F348);
+    int slot=*(int *)(r+0x797C);
     float *p=(float *)(b+0x50);
     int contact=b[0x354]!=2 || b[0x3D4]!=2;
     int supported=contact || (a->stalled_steps && port_air_age(body,*(short *)(b+0x4A4))<4);
@@ -448,7 +448,8 @@ void port_fps_contact_recovery(void *body)
     extern float func_0012DF48(void *);
     /* AI already has the retail grounded recovery states (001100D0/103B0).
        Preserve their own field timers; this fills the human controller gap. */
-    if (*(int *)(r+0x7A5C)!=1 || slot<0 || slot>=10 || *(int *)GUEST(0x0829DED8)!=9 || race_phase<2 || race_phase>4 ||
+    /* in a race from GO, also one started from CONTINUE SAVED GAME (screen 22, finding 159) */
+    if (*(int *)(r+0x7A5C)!=1 || slot<0 || slot>=10 || !port_race_running(2) ||
         *(unsigned char *)GUEST(0x0843EF18+slot) || (r[0x4098]&4) ||
         !supported || !pedal || func_0012DF48(r)>0) {
         a->stalled_steps=0;
