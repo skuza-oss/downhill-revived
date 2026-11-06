@@ -180,7 +180,11 @@ own sending pauses (Surprises).
   message 11 never arrives while message 10 is lost).
 - State traces (`state_trace_run.py`, base b8eb93c against e6ba527, same recipe): boot all 600 rows
   match, race all 5,000 rows match. Only the network library changed.
-- `python tools/check.py port -j 6` and `python tools/check.py server`: see the hand-back.
+- `python tools/check.py port -j 6`: OK on 9c583ab (all eight steps). The first run failed only in
+  test_runtime ("no ps2_asm() calls in build/wasm/src"): a worktree whose core came from the module
+  cache has no `build/wasm/src`; `DHD_MODULE_CACHE=0 build_wasm.py` (279 s, every object from the
+  object cache) made it, and the rerun passed. `python tools/check.py server`: OK (npm test,
+  typecheck).
 
 ### For the lead
 
