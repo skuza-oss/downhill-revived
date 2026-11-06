@@ -270,6 +270,9 @@ fn send_main(c: Arc<WsConn>) {
                 unsafe { f(c.h.ctx, binary as c_int, bytes.as_ptr(), data.len()) };
             }
         }
+        // Race frames the game queued go to the SFU before this poll, which writes them out:
+        // they never wait for the next wake (finding 158, round 3).
+        flush(&c, &mut sfu);
         let mut incoming = Vec::new();
         if let Some(rtc) = sfu.as_mut() {
             match rtc.poll() {
