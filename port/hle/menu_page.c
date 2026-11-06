@@ -223,7 +223,7 @@ static void value_text(char *out, const char *label, const char *value, int arro
     char shown[MENU_PAGE_TEXT];
     size_t n = strlen(value);
     int star = n >= 2 && !strcmp(value + n - 2, " *");
-    snprintf(shown, sizeof shown, arrows ? "< %.*s >%s" : "%.*s%s", (int)(star ? n - 2 : n), value, star ? " *" : "");
+    snprintf(shown, sizeof shown, arrows == MENU_VALUE_ARROWS ? "< %.*s >%s" : "%.*s%s", (int)(star ? n - 2 : n), value, star ? " *" : "");
     if (label && *label) snprintf(out, MENU_PAGE_TEXT, "%s  %s", label, shown);
     else snprintf(out, MENU_PAGE_TEXT, "%s", shown);
 }
@@ -233,6 +233,7 @@ int menu_page_value(MenuPage *p, const char *label, const char *value, int arrow
     int row = menu_page_rows(p);
     if (row >= MENU_PAGE_ROWS) return -1;
     value_text(p->text[row], label, value, arrows);
+    p->arrows[row] = (unsigned char)arrows;
     return add(p, p->text[row], 1, MENU_ROW_VALUE);
 }
 
@@ -240,6 +241,7 @@ void menu_page_value_set(MenuPage *p, int row, const char *label, const char *va
 {
     if (row < 0 || row >= menu_page_rows(p) || row >= MENU_PAGE_ROWS) return;
     value_text(p->text[row], label, value, arrows);
+    p->arrows[row] = (unsigned char)arrows;
 }
 
 void menu_page_suffix(MenuPage *p, int row, const char *text)
@@ -650,7 +652,7 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
         return;
     }
     int left_arrow, row = row_at(menu, view, &left_arrow);
-    int value_row = p && row >= 0 && row < MENU_PAGE_ROWS && p->kind[row] == MENU_ROW_VALUE;
+    int value_row = p && row >= 0 && row < MENU_PAGE_ROWS && p->kind[row] == MENU_ROW_VALUE && p->arrows[row] != MENU_VALUE_ACTION;
     if (moved && row >= 0 && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row)
         AT(menu, X_CURSOR, int) = row;
     if (left && row >= 0 && row_enabled(menu, row)) {
@@ -662,7 +664,7 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
     }
     if (right) press(PAD_TRIANGLE);
     int cursor = AT(menu, X_CURSOR, int);
-    int on_value = p && cursor >= 0 && cursor < MENU_PAGE_ROWS && p->kind[cursor] == MENU_ROW_VALUE;
+    int on_value = p && cursor >= 0 && cursor < MENU_PAGE_ROWS && p->kind[cursor] == MENU_ROW_VALUE && p->arrows[cursor] != MENU_VALUE_ACTION;
     for (; wheel > 0; wheel--) press(on_value ? PAD_RIGHT : PAD_UP);
     for (; wheel < 0; wheel++) press(on_value ? PAD_LEFT : PAD_DOWN);
 }

@@ -18,7 +18,7 @@
 
    The mouse (menu_mouse_*, below; any of the game's popups gets the same): the row under the
    pointer is selected when the mouse moves, a left click is Cross (on a value picker: its arrows,
-   else the next value), a right click is Triangle, the wheel moves the cursor or changes the value.
+   else the next value; on an ACTION value: Cross), a right click is Triangle, the wheel moves the cursor or changes the value.
    PC SETTINGS (pc_settings.c), EXIT GAME (exit_menu.c) and the online pages (online_menu.c) are
    such pages. */
 #ifndef MENU_PAGE_H
@@ -34,6 +34,10 @@
 
 enum { MENU_PAGE_ROWS = 24, MENU_PAGE_TEXT = 80 };
 enum { MENU_ROW_BUTTON, MENU_ROW_VALUE, MENU_ROW_TEXT };
+/* menu_page_value's arrows: FIXED can't be changed (shown without arrows), ARROWS left/right
+   change it, ACTION is shown without arrows and Cross acts on it (a click is Cross, as on a row:
+   the Controls page's bindings). */
+enum { MENU_VALUE_FIXED, MENU_VALUE_ARROWS, MENU_VALUE_ACTION };
 
 typedef struct MenuPage MenuPage;
 struct MenuPage {
@@ -53,6 +57,7 @@ struct MenuPage {
     int rebuild_row;           /* and the cursor's row then */
     int armed;                 /* the buttons were all released since the page opened */
     unsigned char kind[MENU_PAGE_ROWS];     /* MENU_ROW_* of each row */
+    unsigned char arrows[MENU_PAGE_ROWS];   /* a value row's MENU_VALUE_* */
     char text[MENU_PAGE_ROWS][MENU_PAGE_TEXT];  /* the value rows' text */
     /* A page that lays itself out (the race room): it has no rows and draws in update with the
        menu_draw_* calls below. mouse: once a field when the mouse did something, the pointer in

@@ -110,7 +110,7 @@ static void show(MenuPage *p)
             char label[32];
             snprintf(label, sizeof label, "%s:", control_targets[row_item[row]].label);
             target_text(row, value, sizeof value);
-            menu_page_value_set(p, row, label, value, 0);
+            menu_page_value_set(p, row, label, value, MENU_VALUE_ACTION);
             break;
         }
         case ROW_OPTION:
@@ -141,7 +141,7 @@ void controls_settings_build(MenuPage *p)
     row = menu_page_value(p, "Device:", "", 1), row_kind[row] = ROW_DEVICE;
     row = menu_page_value(p, "Show:", "", 1), row_kind[row] = ROW_GROUP;
     for (int t = first; t < first + count; t++) {
-        row = menu_page_value(p, "", "", 0);
+        row = menu_page_value(p, "", "", MENU_VALUE_ACTION);
         if (row >= 0) row_kind[row] = ROW_TARGET, row_item[row] = t;
     }
     if (device != CONTROL_KEYBOARD && group == 1)
