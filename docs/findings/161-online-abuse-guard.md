@@ -1,6 +1,6 @@
 # 161: online abuse guard: kill switch, rate limits, bans and a short moderation log
 
-Status: in progress
+Status: current
 
 Branch `feat/online-guard` from `main` 9ecb8e1, started 2026-11-06. This file is the lane's plan
 while it runs and its finding when it merges.
@@ -221,3 +221,23 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   through the room's env), the tally itself is tested directly.
 
 ## Result
+
+Merged into `main` on 2026-11-06. The server refuses abuse without a game update; only the
+install id waits for the next release.
+
+- Kill switch in the D1 `settings` table, toggled with `node tools/moderate.mjs online off|on`
+  (`online/server/src/guard.ts`, cached per isolate); refusal `online_off` (4010).
+- Limits per connection source with the Workers rate-limiting binding, keyed by the IP hash
+  (`rate_limited`, 4011); per-member message caps in the room (`too_fast`, 4012).
+- Moderation log and bans in D1 (`migrations/`): joins with a keyed IP hash and the install id,
+  kept 14 days; bans by IP hash and/or install id with an expiry (`banned`, 4013), cached per
+  isolate for up to a minute. Operated only from `online/server/tools/moderate.mjs` with the
+  operator's own wrangler login; no admin endpoint.
+- Install id in dhd.ini (`port/render/settings/src/install.rs`), sent as `hello.installId`;
+  never written to dhd.log.
+- Privacy note in `docs/PLAYING.md` and `port/release/README.txt`.
+
+Checked: `python tools/check.py server` and `python tools/check.py port` on the merged tree;
+a test asserts no client ever receives another player's IP hash or install id; against a local
+`wrangler dev`, a player listed by name was banned, refused, unbanned and let back in.
+Not yet: the deploy and its one-time setup (`online/server/README.md`).

@@ -113,7 +113,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (finding 123) that live across races (findings 118, 119), Ready for the next race and MOSH by
   the host's pick (finding 128), rooms placed near their creator (finding 135), rejoin by token
   (finding 137). Protocol: `docs/online-protocol.md`; steps: `online/server/README.md`.
-- Abuse guard (finding 161): a kill switch (`ONLINE`), limits per address, caps per member, and
+- Abuse guard (finding 161): a kill switch in the moderation database (`moderate.mjs online
+  off`), limits per address, caps per member, and
   bans by address hash or install id with a 14-day moderation log in D1, worked from
   `online/server/tools/moderate.mjs` (no admin endpoint). No player gets another's address, its
   hash or install id.
