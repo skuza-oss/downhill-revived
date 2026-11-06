@@ -231,6 +231,9 @@ fn send_main(c: Arc<WsConn>) {
             let Some((binary, data)) = item else { break };
             if !binary {
                 if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data) {
+                    if matches!(message["type"].as_str(), Some("start" | "ended" | "welcome")) {
+                        lock(&c.queue).out.retain(|(binary, bytes)| !*binary || !matches!(bytes.first(), Some(5 | 6)));
+                    }
                     let result = if message["type"] == "start" {
                         match sfu::Sfu::start() {
                             Ok((rtc, offer)) => {
@@ -272,7 +275,7 @@ fn send_main(c: Arc<WsConn>) {
             let item = lock(&c.queue).out.pop_front();
             let Some((binary, data)) = item else { break };
             if binary && matches!(data.first(), Some(5 | 6)) {
-                let failed = sfu.as_mut().is_none_or(|rtc| rtc.send(&data).is_err());
+                let failed = sfu.as_mut().is_some_and(|rtc| rtc.send(&data).is_err());
                 if failed { c.force_close(); sfu = None; }
                 continue;
             }
