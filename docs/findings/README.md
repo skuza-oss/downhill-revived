@@ -191,6 +191,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 159 | [Touch controls gone after loading a career save](159-touch-gone-after-save-load.md) | current |  |
 | 160 | [Garbage blocks on screen in the first seconds after start](160-boot-garbage-frames.md) | current |  |
 | 161 | [online abuse guard: kill switch, rate limits, bans and a short moderation log](161-online-abuse-guard.md) | current |  |
+| 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
