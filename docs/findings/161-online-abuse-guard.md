@@ -89,6 +89,11 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
   `port/release/README.txt` (what, why, 14 days, bans by hash or install id, nobody sees another's
   address, hash or install id); `docs/online-protocol.md` has every new code, the kill switch's
   message, the limits, caps, bans, the log and `hello.installId` (written with each item).
+- [x] 2026-11-06 checks on the lane: `check.py server` OK (114 tests, typecheck), `check.py port`
+  OK (quick included: core, runtime tests, host build, net tests, renderer tests), the settings
+  crate's tests OK, acceptance 3 against `wrangler dev` OK, the load test with the guard on OK.
+  Left for the lead: the one-time setup in `online/server/README.md` ("Abuse guard: one-time
+  setup"), the deploy, and a real race once the game sends the install id.
 
 ## Decisions
 
