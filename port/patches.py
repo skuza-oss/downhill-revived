@@ -859,11 +859,11 @@ PATCHES['unsorted/00148BE8.c'] = PATCHES.get('unsorted/00148BE8.c', []) + [
 # A race runs (fps.h port_loop_frame, finding 159): the race world's update, every unpaused frame of
 # the race's loop and in its load (func_0019C868); the shell's frame clears it. (func_001B40A0 itself
 # is NONMATCHING C: the core runs its recompiled asm, so a patch there never runs; finding 165.)
-# Room spectating (finding 122): START ends the race loop and the pause menu runs in the front end;
-# its builder holds the watching camera (port_online_pause_rows), and the loop's first frame after
-# RESUME lets it go (hle_online_watch_resume).
+# Online rooms (online.c hle_online_loop_frame, finding 165): START ends the race loop and the pause
+# menu runs in the front end; the loop's first frame after RESUME lets the watching camera go
+# (finding 122) and repeats a leave that came while the menu was up.
 PATCHES['unsorted/0016C0C8.c'] = PATCHES.get('unsorted/0016C0C8.c', []) + [
     ('text', 'void func_0016C0C8(Obj *obj)\n{',
-     'extern void port_loop_frame(int);\nextern void hle_online_watch_resume(void);\n'
-     'void func_0016C0C8(Obj *obj)\n{\n    port_loop_frame(1);\n    hle_online_watch_resume();'),
+     'extern void port_loop_frame(int);\nextern void hle_online_loop_frame(void);\n'
+     'void func_0016C0C8(Obj *obj)\n{\n    port_loop_frame(1);\n    hle_online_loop_frame();'),
 ]
