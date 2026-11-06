@@ -11,7 +11,8 @@
 //!   (`native_pixel_blend`), 3 alpha only (no blend state).
 //! Bits 25..28 are private: a power-of-two source scale (S=E), or zero for generic. Bit 29
 //! (`TEXELS`): the draw reads a decoded texture's R32Uint texels (the `_u` entry points and the
-//! texels layout).
+//! texels layout). Bit 30 (`MESH`): a translated VU1 mesh draw (flag 4096, finding 164): the vertex
+//! stage is `native_mesh_vertex` and back faces are culled.
 //! The GS key's blend, depth and variant fields remain unchanged. The cache's key is 64 bits: this
 //! key, and above it (`SPEC_SHIFT`) the fragment stage's specialisation, `spec` (native.wgsl's
 //! `native_spec`; zero for the generic shader).
@@ -36,6 +37,8 @@ pub const VARIANT_ALPHA_ONLY: u32 = 3;
 pub const TEXEL_SCALE_SHIFT: u32 = 25;
 /// The draw reads a decoded texture's texels (native.wgsl's `_u` entry points).
 pub const TEXELS: u32 = 1 << 29;
+/// A translated VU1 mesh draw (native.wgsl's `native_mesh_vertex`, back faces culled; finding 164).
+pub const MESH: u32 = 1 << 30;
 /// Where a cache key holds the draw's fragment specialisation (`spec`).
 pub const SPEC_SHIFT: u32 = 32;
 
@@ -258,11 +261,19 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
     let key = full as u32;
     let spec = (full >> SPEC_SHIFT) as u32;
     let texels = key & TEXELS != 0;
-    let entry = match (d.entry, texels) {
-        ("native_pixel", true) => "native_pixel_u",
-        ("native_pixel_blend", true) => "native_pixel_blend_u",
-        ("native_pixel_dual", true) => "native_pixel_dual_u",
-        (e, _) => e,
+    let mesh = key & MESH != 0;
+    let entry = match (d.entry, texels, mesh) {
+        ("native_pixel", true, false) => "native_pixel_u",
+        ("native_pixel_blend", true, false) => "native_pixel_blend_u",
+        ("native_pixel_dual", true, false) => "native_pixel_dual_u",
+        // a mesh draw's MeshVaryings (native.wgsl's native_pixel*_mesh)
+        ("native_pixel", false, true) => "native_pixel_mesh",
+        ("native_pixel_blend", false, true) => "native_pixel_blend_mesh",
+        ("native_pixel_dual", false, true) => "native_pixel_dual_mesh",
+        ("native_pixel", true, true) => "native_pixel_u_mesh",
+        ("native_pixel_blend", true, true) => "native_pixel_blend_u_mesh",
+        ("native_pixel_dual", true, true) => "native_pixel_dual_u_mesh",
+        (e, _, _) => e,
     };
     let fragment_module = if d.dual_module {
         objects
@@ -295,13 +306,16 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         layout: Some(if texels { &objects.texels_layout } else { &objects.layout }),
         vertex: wgpu::VertexState {
             module: &objects.module,
-            entry_point: Some("native_vertex"),
+            entry_point: Some(if mesh { "native_mesh_vertex" } else { "native_vertex" }),
             compilation_options: crate::native::init::compilation_options(),
             buffers: &[vertex],
         },
+        // A mesh's triangles come in the winding that leaves the VU's back faces with a positive
+        // area in GS pixels (y down): clockwise in clip space (vu1_mesh.inc).
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
-            cull_mode: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: if mesh { Some(wgpu::Face::Back) } else { None },
             ..Default::default()
         },
         depth_stencil: d.depth.clone(),

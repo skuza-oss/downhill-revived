@@ -39,7 +39,7 @@ use crate::device::Gpu;
 use crate::native::arenas::Arenas;
 use crate::native::convert::{ConvertObjects, ConvertSource};
 use crate::native::scanout::ScanoutObjects;
-use crate::native::pipelines::{gputimes, SPEC_SHIFT, TEXELS, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
+use crate::native::pipelines::{gputimes, MESH, SPEC_SHIFT, TEXELS, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
 use crate::native::shared::NativeShared;
 use crate::native::surfaces::Kit;
 use crate::native::{Native, Picture};
@@ -397,7 +397,7 @@ fn uses_constant(blend_key: u32) -> bool {
 
 /// The draw constants as the uniform block's bytes.
 fn constant_bytes(c: &DhdrNativeConstants) -> &[u8] {
-    // SAFETY: DhdrNativeConstants is repr(C) with 24 four-byte fields and no padding, so every
+    // SAFETY: DhdrNativeConstants is repr(C) with 56 four-byte fields and no padding, so every
     // byte is initialised; the length is its size.
     unsafe { std::slice::from_raw_parts((c as *const DhdrNativeConstants).cast::<u8>(), std::mem::size_of_val(c)) }
 }
@@ -793,6 +793,9 @@ impl Native {
         // texel_scale carries TEXELS (bit 29) above the scale itself.
         let texel_key = (texel_scale & 15) << TEXEL_SCALE_SHIFT | texel_scale & TEXELS;
         let texel_scale = texel_scale & 15;
+        // A translated VU1 mesh (flag 4096): its own vertex stage and culling (pipelines.rs MESH).
+        let mesh = if k.constants.flags & 4096 != 0 { MESH } else { 0 };
+        let texel_key = texel_key | mesh;
         let base = blend_key | depth << 18 | texel_key;
         let special = (spec as u64) << SPEC_SHIFT;
         self.pass.set_groups(uniforms, offset, group);

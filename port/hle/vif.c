@@ -482,6 +482,8 @@ static void capture_representative(unsigned addr, unsigned top, unsigned itop)
     count[group][continuation]++; next[group][continuation] = now + 2;
 }
 
+#include "../hle/vu1_mesh.inc"  /* DHD_NATIVE_VU1 (finding 164) */
+
 #endif
 
 static void run_micro(Vif *v, uint32_t addr)
@@ -537,9 +539,20 @@ static void run_micro(Vif *v, uint32_t addr)
     if (profile_start) profile_overlay = !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x265C10), 32) ? 1 :
                                        !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
     if (layout.state != 1) layout_run(addr, (v->code >> 24 & 0x7f) == MSCNT);
-    if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {
-        hle_log("vif1: microprogram at 0x%X failed\n", addr);
-        if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed");
+    uint32_t *mesh_packet = NULL;
+    int mesh_batch = mesh.state != MESH_OFF ? mesh_before(addr, (v->code >> 24 & 0x7f) == MSCNT, &mesh_packet) : 0;
+    if (mesh_batch == 1) {
+        mesh_send(mesh_packet);
+        mesh_skipped();
+    } else {
+        graphics_provenance.shadow = mesh_batch == 2;
+        if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {
+            hle_log("vif1: microprogram at 0x%X failed\n", addr);
+            if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed");
+        }
+        graphics_provenance.shadow = 0;
+        if (mesh_batch == 2) mesh_send(mesh_packet);
+        if (mesh.state != MESH_OFF) mesh_after(addr, (v->code >> 24 & 0x7f) == MSCNT);
     }
     layout.run = NULL;
     if (profile_start) vu_profile_end(profile_start, profile_overlay, graphics_provenance.program, addr, (v->code >> 24 & 0x7f) == MSCNT);

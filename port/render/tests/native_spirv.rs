@@ -171,6 +171,7 @@ fn stages() -> Vec<Stage> {
         Stage::new(Native, Compute, "native_scanout_fast", TWO),
         Stage::new(Native, Compute, "native_convert", &[1, 11]),
         Stage::new(Native, Vertex, "native_vertex", TWO),
+        Stage::new(Native, Vertex, "native_mesh_vertex", TWO),
     ];
     // Specialisations: each flag alone and in the common mixes, every CLAMP pair, every alpha test.
     let mut specs = vec![0u32];
@@ -198,6 +199,12 @@ fn stages() -> Vec<Stage> {
         (Native, "native_pixel_blend_u"),
         (Dual, "native_pixel_dual"),
         (Dual, "native_pixel_dual_u"),
+        (Native, "native_pixel_mesh"),
+        (Native, "native_pixel_blend_mesh"),
+        (Native, "native_pixel_u_mesh"),
+        (Native, "native_pixel_blend_u_mesh"),
+        (Dual, "native_pixel_dual_mesh"),
+        (Dual, "native_pixel_dual_u_mesh"),
     ];
     for (source, entry) in fragments {
         for scale in [0u32, 1, 2, 4, 8] {

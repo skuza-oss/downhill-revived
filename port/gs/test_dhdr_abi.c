@@ -22,7 +22,8 @@
         F(DhdrNativeConstants, atst) F(DhdrNativeConstants, aref) F(DhdrNativeConstants, alpha_scale) \
         F(DhdrNativeConstants, texa_alpha) F(DhdrNativeConstants, scale) F(DhdrNativeConstants, fog) \
         F(DhdrNativeConstants, tex_offset) F(DhdrNativeConstants, tex_size) F(DhdrNativeConstants, wrap) \
-        F(DhdrNativeConstants, region) \
+        F(DhdrNativeConstants, region) F(DhdrNativeConstants, mesh_matrix) F(DhdrNativeConstants, mesh_clip) \
+        F(DhdrNativeConstants, mesh_color) F(DhdrNativeConstants, mesh_fog) F(DhdrNativeConstants, mesh_offset) \
     S(DhdrConvertConstants) F(DhdrConvertConstants, tex) F(DhdrConvertConstants, size) \
         F(DhdrConvertConstants, slot) F(DhdrConvertConstants, pages) F(DhdrConvertConstants, palette) \
     S(DhdrCommand) F(DhdrCommand, kind) F(DhdrCommand, depth_key) F(DhdrCommand, color_mask) F(DhdrCommand, pad) \

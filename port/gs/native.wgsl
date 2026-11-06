@@ -46,6 +46,12 @@ struct Native {
     tex_offset: vec2<i32>, tex_size: vec2<u32>,
     wrap: vec4<u32>,
     region: vec4<u32>,
+    // A mesh draw's (flag 4096, native_mesh_vertex; zero for every other draw).
+    mesh_matrix: mat4x4<f32>,
+    mesh_clip: vec4<f32>,
+    mesh_color: vec4<f32>,
+    mesh_fog: vec4<f32>,
+    mesh_offset: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> nat: Native;
 @group(1) @binding(0) var native_texture: texture_2d<f32>;
@@ -97,6 +103,70 @@ fn native_vertex(@location(0) position_in: vec3<f32>, @location(1) stqf: vec4<f3
     o.stqf = stqf;
     o.color = vec4<f32>(color);
     return o;
+}
+
+// A translated VU1 world-mesh batch (native_core.inc's native_mesh, port/hle/vu1_mesh.inc; finding
+// 164): VU1 loop 0170's maths on the batch's object-space vertex. position_in: the pool position;
+// uvq: u, v (the object's UV offset already added), the Q factor; color: the V4-5 colour bytes.
+// clip = matrix (x y z 1); q = 1 / w; XYZ = clip.xyz q; fog = clamp(A + B q, 0, max); colour =
+// min(c scale, 255), truncated; STQ = (u, v, uz) q. A vertex inside the program's guard band (its
+// CLIP against mesh_clip: x, y and the near bound on w) is placed as the GS would place the kicked
+// one, at FTOI4's 1/16 pixel and Z's integer, through native_vertex's mapping. Batches with any
+// other vertex run on the VU (vu1_mesh.inc), unless DHD_NATIVE_VU1=0170:gpuclip draws them here:
+// such a vertex goes out as the plain projection, both forms homogeneous (times w), and the GPU
+// clips the triangles where the VU's clipper would cut them into fans.
+//
+// The GS interpolates STQ, colour and fog linearly in screen space, but a GPU computes no-perspective
+// varyings at the vertices clipping makes from the edge's ends' screen positions, which mean nothing
+// for an end behind the eye. So a mesh's varyings are perspective-correct (MeshVaryings), carrying
+// each value times w and w itself; the fragment divides one by the other (mesh_varyings), which is
+// the value linear in screen space, on clipped triangles too.
+struct MeshVaryings {
+    @builtin(position) @invariant position: vec4<f32>,
+    @location(0) stqf: vec4<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) w: f32,
+}
+
+@vertex
+fn native_mesh_vertex(@location(0) position_in: vec3<f32>, @location(1) uvq: vec4<f32>,
+                      @location(2) color: vec4<u32>) -> MeshVaryings {
+    var o: MeshVaryings;
+    let clip = nat.mesh_matrix * vec4<f32>(position_in, 1.0);
+    let q = 1.0 / clip.w;
+    let screen = clip.xyz * q;
+    let fog = max(min(nat.mesh_fog.x + nat.mesh_fog.y * q, nat.mesh_fog.z), 0.0);
+    o.stqf = vec4<f32>(uvq.xyz, floor(fog) / 255.0 * clip.w);   // (u, v, uz) q, times w
+    o.color = floor(min(vec4<f32>(color) * nat.mesh_color, vec4<f32>(255.0))) * clip.w;
+    o.w = clip.w;
+    let k = nat.mesh_clip;
+    let bound = abs(k.w);
+    let inside = clip.w > 0.0 && abs(screen.x + k.x) <= bound && abs(screen.y + k.y) <= bound && clip.w + k.z >= -bound;
+    if (inside) {
+        let gs_xy = trunc(screen.xy * 16.0);
+        let xy = (gs_xy - nat.mesh_offset.xy) * 0.0625 + 0.5;
+        let z = min(max(trunc(screen.z), 0.0), nat.mesh_offset.z);
+        o.position = vec4<f32>(xy / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), z * nat.mesh_fog.w, 1.0)
+                     * clip.w;
+    } else {
+        // (x / w - offset / 16 + 0.5) / size * 2 - 1, times w; y likewise, flipped; z / w * scale, times w
+        let at = clip.xy - (nat.mesh_offset.xy * 0.0625 - 0.5) * clip.w;
+        o.position = vec4<f32>(at / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-clip.w, clip.w),
+                               clip.z * nat.mesh_fog.w, clip.w);
+    }
+    return o;
+}
+
+// A mesh pixel's varyings as the GS has them: each value times w over w (both perspective-correct)
+// is the value linear in screen space. Colour and fog to 1/4096 and 1/65536 of a unit, so a value the
+// three vertices share comes out exactly (the two interpolations round apart by an ulp or two).
+fn mesh_varyings(m: MeshVaryings) -> Varyings {
+    var i: Varyings;
+    let inv = 1.0 / m.w;
+    i.position = m.position;
+    i.stqf = vec4<f32>(m.stqf.xyz * inv, round(m.stqf.w * inv * 65536.0) / 65536.0);
+    i.color = round(m.color * inv * 4096.0) / 4096.0;
+    return i;
 }
 
 // CLAMP modes: repeat, clamp, region clamp, region repeat (MINU is the mask, MAXU the fix).
@@ -316,6 +386,47 @@ fn native_pixel_u(i: Varyings) -> @location(0) vec4<f32> {
 
 @fragment
 fn native_pixel_blend_u(i: Varyings) -> @location(0) vec4<f32> {
+    let uv = texture_uv(i);
+    let across = dpdx(uv);
+    let down = dpdy(uv);
+    let color = shade_u(i, uv, across, down);
+    return vec4<f32>(color.rgb / 255.0, saturate(color.a / 128.0));
+}
+
+// The four entry points above for a mesh draw (native_mesh_vertex's MeshVaryings).
+@fragment
+fn native_pixel_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
+    let i = mesh_varyings(m);
+    let uv = texture_uv(i);
+    let across = dpdx(uv);
+    let down = dpdy(uv);
+    let color = shade(i, uv, across, down);
+    return vec4<f32>(color.rgb / 255.0, saturate(color.a / 255.0));
+}
+
+@fragment
+fn native_pixel_blend_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
+    let i = mesh_varyings(m);
+    let uv = texture_uv(i);
+    let across = dpdx(uv);
+    let down = dpdy(uv);
+    let color = shade(i, uv, across, down);
+    return vec4<f32>(color.rgb / 255.0, saturate(color.a / 128.0));
+}
+
+@fragment
+fn native_pixel_u_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
+    let i = mesh_varyings(m);
+    let uv = texture_uv(i);
+    let across = dpdx(uv);
+    let down = dpdy(uv);
+    let color = shade_u(i, uv, across, down);
+    return vec4<f32>(color.rgb / 255.0, saturate(color.a / 255.0));
+}
+
+@fragment
+fn native_pixel_blend_u_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
+    let i = mesh_varyings(m);
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
