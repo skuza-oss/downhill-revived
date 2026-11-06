@@ -95,19 +95,28 @@ function endCapture() {
   renderRows();
 }
 
+// A wait counts only while its prompt is on screen (the settings page's Controls tab, the device
+// it began on) and for five seconds: leaving it gives up, so a key typed elsewhere is never taken.
+function captureLive(c) {
+  return c === bind.capture && state.tab === CONTROLS_TAB && !$('page-settings').hidden
+    && bind.device === c.device && performance.now() - c.since <= CAPTURE_MS;
+}
+
 function startCapture(device, target, slot) {
   const pads = [...(navigator.getGamepads?.() ?? [])].filter(Boolean);
-  bind.capture = { device, target, slot, since: performance.now(), held: padButtonsDown(pads) };
+  const c = { device, target, slot, since: performance.now(), held: padButtonsDown(pads) };
+  bind.capture = c;
   bind.note = '';
   renderRows();
   if (device > 0) requestAnimationFrame(pollCapture);
+  else setTimeout(() => { if (bind.capture === c) endCapture(); }, CAPTURE_MS + 50);
 }
 
 // A controller's wait: the first button pressed after it began; five seconds without one give up.
 function pollCapture() {
   const c = bind.capture;
   if (!c || c.device === 0) return;
-  if (performance.now() - c.since > CAPTURE_MS) return endCapture();
+  if (!captureLive(c)) return endCapture();
   const down = padButtonsDown([...(navigator.getGamepads?.() ?? [])].filter(Boolean));
   for (const i of c.held) if (!down.has(i)) c.held.delete(i);
   const input = padInputPressed(bind.schema, c.held, down);
@@ -122,6 +131,7 @@ function pollCapture() {
 addEventListener('keydown', (e) => {
   const c = bind.capture;
   if (!c) return;
+  if (!captureLive(c)) { endCapture(); return; }  // the key goes where it was typed
   e.preventDefault();
   e.stopPropagation();
   if (e.code === 'Escape') return endCapture();
