@@ -2,7 +2,7 @@
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
-import { offMessage, onlineOff, refuseSocket, type GuardEnv } from "./guard";
+import { RATE_MESSAGE, ipHash, offMessage, onlineOff, overLimit, refuseSocket, type GuardEnv } from "./guard";
 
 export { Room } from "./room";
 export { LobbyIndex } from "./lobbies";
@@ -50,6 +50,9 @@ export default {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
         return json({ error: "Expected a WebSocket upgrade" }, 426);
       if (off) return refuseSocket("online_off", offMessage(env as GuardEnv));
+      // Limits per connection source (finding 161), by the address's keyed hash, before any room.
+      const ip = await ipHash(env as GuardEnv, request);
+      if (await overLimit(env as GuardEnv, ip, m[1] === "new")) return refuseSocket("rate_limited", RATE_MESSAGE);
       const headers = new Headers(request.headers);
       headers.delete("x-dhd-create");
       if (m[1] === "new") {

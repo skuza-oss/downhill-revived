@@ -11,6 +11,12 @@ export interface GuardEnv {
   ONLINE?: string;
   /** The refusal text while online is off (OFF_MESSAGE when unset). */
   ONLINE_MESSAGE?: string;
+  /** The secret for the keyed IP hash (ipHash): a Worker secret, never in a tracked file. */
+  IP_HASH_KEY?: string;
+  /** Rate limiters per connection source (wrangler.jsonc `ratelimits`, keyed by ipHash): every
+      room WebSocket, and new rooms. */
+  RL_CONNECT?: RateLimit;
+  RL_CREATE?: RateLimit;
 }
 
 // ---- The kill switch ----
@@ -45,4 +51,64 @@ export function refuseSocket(code: keyof typeof CLOSE_CODES, message: string): R
   server.send(JSON.stringify({ type: "error", code, message }));
   server.close(CLOSE_CODES[code], code);
   return new Response(null, { status: 101, webSocket: client });
+}
+
+// ---- The keyed IP hash ----
+
+const encoder = new TextEncoder();
+let keyFor: { secret: string; key: Promise<CryptoKey> } | null = null;
+let warnedNoKey = false;
+
+/** The HMAC key from IP_HASH_KEY. Without the secret (a server not set up for it, a local test)
+    each isolate draws its own random key: rate limits still work within it, but hashes don't match
+    across isolates or restarts, so bans by address don't hold. Said once in the log. */
+function hashKey(env: GuardEnv): Promise<CryptoKey> {
+  let secret = typeof env.IP_HASH_KEY === "string" ? env.IP_HASH_KEY : "";
+  if (!secret) {
+    if (!warnedNoKey) console.warn("guard: no IP_HASH_KEY secret; address hashes last only this isolate");
+    warnedNoKey = true;
+    secret = keyFor?.secret.startsWith("random:") ? keyFor.secret : `random:${crypto.randomUUID()}`;
+  }
+  if (keyFor?.secret !== secret)
+    keyFor = {
+      secret,
+      key: crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]),
+    };
+  return keyFor.key;
+}
+
+/**
+ * The connection's address as a keyed hash: HMAC-SHA-256 of Cloudflare's CF-Connecting-IP with
+ * the IP_HASH_KEY secret, 64 hex digits. The address itself is read only here and never stored,
+ * logged or passed on; without the key nobody can tell which address a hash stands for, and a new
+ * key makes every old hash useless (finding 161). "" when the request has no address.
+ */
+export async function ipHash(env: GuardEnv, request: Request): Promise<string> {
+  const ip = request.headers.get("CF-Connecting-IP") ?? "";
+  if (!ip) return "";
+  const mac = await crypto.subtle.sign("HMAC", await hashKey(env), encoder.encode(ip));
+  return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---- Limits per connection source ----
+
+/** The refusal over a limit per address (footer-sized, see OFF_MESSAGE). */
+export const RATE_MESSAGE = "Too many tries. Wait a minute and retry.";
+
+/**
+ * True when this address has opened too many room connections (RL_CONNECT), or made too many
+ * rooms (RL_CREATE, `create`), in the last minute; the limits and their reasons are in
+ * wrangler.jsonc. Keyed by the address's hash, so the rate limiter never sees the address. A
+ * missing binding, a request without an address or a limiter that fails lets the player in (a
+ * failure is logged): the limits keep floods off, they are not worth refusing players for.
+ */
+export async function overLimit(env: GuardEnv, hash: string, create: boolean): Promise<boolean> {
+  if (!hash) return false;
+  try {
+    if (env.RL_CONNECT && !(await env.RL_CONNECT.limit({ key: hash })).success) return true;
+    if (create && env.RL_CREATE && !(await env.RL_CREATE.limit({ key: hash })).success) return true;
+  } catch (e) {
+    console.error("guard: rate limiter failed; letting the connection in", e);
+  }
+  return false;
 }

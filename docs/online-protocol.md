@@ -52,6 +52,7 @@ A refusal is one text frame followed by a close:
 | `kicked` | 4007 | The host removed this player. |
 | `hello_timeout` | 4008 | No `hello` within 10 seconds. |
 | `client_outdated` | 4009 | `hello.clientVersion` is below the server's `MIN_VERSION` (below). |
+| `rate_limited` | 4011 | Too many connections or new rooms from one address in a minute (below). |
 | `online_off` | 4010 | The operator turned online off (the kill switch, below). Also a non-fatal error to a `start`, and to the room when a countdown runs out. |
 
 ### Minimum client version
@@ -88,6 +89,22 @@ and adds the same two fields. A room that was open when the switch turned off (s
 deploy, which restarts every room, so normally only for the seconds the rooms take to restart)
 starts no race: its countdown is dropped and `start` answers the non-fatal `online_off` error. A
 race already running goes on.
+
+### Limits per address (finding 161)
+
+Before a WebSocket reaches a room, the Worker counts it against the connecting address (by its
+keyed hash, never the address itself): at most 30 room connections a minute (new rooms, joins and
+rejoins together) and 10 new rooms a minute (`ratelimits` in `online/server/wrangler.jsonc`;
+Cloudflare's rate limiter, per Cloudflare location and approximate). Over either, the Worker
+refuses at once, like the kill switch:
+
+```json
+{"type":"error","code":"rate_limited","message":"Too many tries. Wait a minute and retry."}
+```
+
+then close 4011. The limits are generous because many players can share one address (a
+household, a LAN party, carrier-grade NAT). `/v1/lobbies` and the other HTTP endpoints have no
+limit of their own.
 
 Non-fatal errors (a non-host sending a host command, a `start` while someone is not ready)
 use the same `error` frame **without** a close; the client just shows `message`.

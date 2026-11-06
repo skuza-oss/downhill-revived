@@ -3,8 +3,8 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
-import { OFF_MESSAGE } from "../src/guard";
-import { Client } from "./helpers";
+import { OFF_MESSAGE, RATE_MESSAGE, ipHash } from "../src/guard";
+import { Client, randomIp } from "./helpers";
 
 /** The Worker with some variables changed (the test run's own are fixed). */
 function fetchWith(vars: Record<string, string>, path: string, init: RequestInit = {}): Promise<Response> {
@@ -69,5 +69,61 @@ describe("kill switch", () => {
     host.sendJson({ type: "ping", t: 1 });
     expect((await host.json("pong")).t).toBe(1); // still connected
     expect(host.closeCode).toBeNull();
+  });
+});
+
+describe("limits per connection source", () => {
+  async function upgrade(path: string, ip: string): Promise<Response> {
+    return worker.fetch(new Request(`https://dhd.test${path}`, { headers: { Upgrade: "websocket", "CF-Connecting-IP": ip } }), env);
+  }
+
+  it("refuses an address that makes too many rooms in a minute, not another address", async () => {
+    const ip = randomIp();
+    let refused: { error: any; code: number } | null = null;
+    let made = 0;
+    for (let i = 0; i < 15 && !refused; i++) {
+      const res = await upgrade("/v1/rooms/new", ip);
+      // a room's socket waits for hello; a refusal closes at once
+      const c = new Client(res.webSocket!);
+      res.webSocket!.accept();
+      c.hello(`P${i}`);
+      try {
+        await c.json("welcome");
+        made++;
+      } catch {
+        refused = { error: null, code: c.closeCode! };
+      }
+    }
+    expect(made).toBe(10); // wrangler.jsonc RL_CREATE
+    expect(refused?.code).toBe(4011);
+    const other = await Client.connect("/v1/rooms/new", undefined, randomIp());
+    other.hello("Other");
+    expect((await other.json("welcome")).code).toMatch(/^[A-Z0-9]{6}$/);
+  });
+
+  it("refuses an address that opens too many connections, with its own code and message", async () => {
+    const ip = randomIp();
+    const { code } = await Client.host("Ann");
+    let last: { error: any; code: number } | null = null;
+    for (let i = 0; i < 31; i++) {
+      const res = await upgrade(`/v1/rooms/${code}`, ip);
+      if (i < 30) {
+        res.webSocket!.accept();
+        res.webSocket!.close(1000);
+      } else last = await refusalOf(res);
+    }
+    expect(last).toEqual({ error: { type: "error", code: "rate_limited", message: RATE_MESSAGE }, code: 4011 });
+    expect(RATE_MESSAGE.length).toBeLessThanOrEqual(45);
+  });
+
+  it("hashes the address with the key: stable, keyed, and never the address", async () => {
+    const req = (ip: string) => new Request("https://dhd.test/", { headers: { "CF-Connecting-IP": ip } });
+    const a = await ipHash({ IP_HASH_KEY: "k1" }, req("203.0.113.7"));
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(await ipHash({ IP_HASH_KEY: "k1" }, req("203.0.113.7"))).toBe(a);
+    expect(await ipHash({ IP_HASH_KEY: "k2" }, req("203.0.113.7"))).not.toBe(a);
+    expect(await ipHash({ IP_HASH_KEY: "k1" }, req("203.0.113.8"))).not.toBe(a);
+    expect(a).not.toContain("203");
+    expect(await ipHash({ IP_HASH_KEY: "k1" }, new Request("https://dhd.test/"))).toBe("");
   });
 });

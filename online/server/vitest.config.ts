@@ -9,7 +9,8 @@ export default defineConfig({
       // the helpers' hello is release 0.2.0, and a hello without clientVersion (0.1.0) is refused.
       // The race room's countdown is short here (src/protocol.ts COUNTDOWN_MS). Rooms don't ask a
       // Cloudflare trace where they run (src/room.ts probeColo): tests set the colo themselves.
-      miniflare: { bindings: { MIN_VERSION: "0.2.0", COUNTDOWN_MS: "300", COLO_PROBE: "off" } },
+      // IP_HASH_KEY: a test key for the keyed address hash (a Worker secret in production).
+      miniflare: { bindings: { MIN_VERSION: "0.2.0", COUNTDOWN_MS: "300", COLO_PROBE: "off", IP_HASH_KEY: "test-ip-hash-key" } },
     }),
   ],
 });

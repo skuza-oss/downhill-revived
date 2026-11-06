@@ -89,6 +89,8 @@ removing a class later needs a new migration entry, not an edit of `v1`.
 ## Limits and what is not there yet
 
 - No reconnect: a dropped racer becomes the host's AI rider for the rest of the race.
-- No authentication or rate limiting beyond the protocol checks (version, ISO hash, sizes).
+- No authentication: the game is open source, so any client can connect. The abuse guard
+  (finding 161) limits what one can do: limits per address (`ratelimits` in `wrangler.jsonc`),
+  the kill switch, per-player caps in a room, and bans.
 - The server does not check the ISO hash against the known US ISO; the client must refuse
   other regions, and the server only makes everyone match the host.

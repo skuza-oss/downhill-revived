@@ -66,7 +66,10 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 - [x] Kill switch: `ONLINE` var (`wrangler.jsonc`, `"on"`), `src/guard.ts` `onlineOff`; the Worker
   refuses every room WebSocket with `online_off` (4010) before any room, `/v1/health` and
   `/v1/lobbies` say `online:false`; rooms start no race while off. Tests `test/guard.test.ts`.
-- [ ] Rate limits per connection source.
+- [x] Rate limits per connection source: the Workers rate-limiting binding (`ratelimits` in
+  `wrangler.jsonc`: `RL_CONNECT` 30 room connections a minute, `RL_CREATE` 10 new rooms a minute),
+  keyed by the keyed IP hash (`src/guard.ts` `ipHash`, HMAC-SHA-256 with the `IP_HASH_KEY`
+  secret); over: `rate_limited` (4011) from the Worker. Tests in `test/guard.test.ts`.
 - [ ] Per-member caps.
 - [ ] Moderation log, bans, local tool.
 - [ ] Install id in the game and `hello`.
@@ -90,6 +93,15 @@ anything in the SFU lane (branch `feat/online-sfu`) beyond what merging needs.
 - Turning online off refuses rejoins too: the variable needs a deploy, which restarts every room
   and drops every socket anyway, so "off" means off at once. Races running when a room sees the
   switch go on; only new starts are refused.
+- Rate limits: Cloudflare's Workers rate-limiting binding (GA since 2025-09), as the plan said.
+  It needs no resource made beforehand (`namespace_id` is a number of our choosing), so it is in
+  `wrangler.jsonc` now and today's deploy keeps working. It counts per Cloudflare location and is
+  approximate; a strict global limit would need a Durable Object per address, not worth it for
+  keeping floods off. The key is the keyed IP hash, so not even Cloudflare's rate limiter sees the
+  address from our code. The limits are generous (carrier-grade NAT puts many players behind one
+  address); a missing binding or a failing limiter lets players in (logged).
+- Without the `IP_HASH_KEY` secret each isolate draws a random HMAC key (warned once in the log):
+  limits still hold within it, bans by address don't. Production needs the secret.
 
 ## Surprises
 

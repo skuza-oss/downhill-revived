@@ -43,6 +43,8 @@ export const CLOSE_CODES = {
   client_outdated: 4009,
   /** The operator turned online off (wrangler.jsonc ONLINE; finding 161). */
   online_off: 4010,
+  /** Too many connections or new rooms from one address in a minute (wrangler.jsonc ratelimits). */
+  rate_limited: 4011,
 } as const;
 export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
 
