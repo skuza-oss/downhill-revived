@@ -13,7 +13,9 @@ message-rate cap, no way to ban anyone and no way to turn online off. The game i
 the server can't prove a client is an official build: protection has to limit what any client can
 do, and let the operator stop a bad actor.
 
-The lane adds, server side, deployable without a game update (0.7.11 clients keep working):
+The lane adds, server side (on its own branch it deployed without a game update and 0.7.11
+clients kept working; since finding 158 merged, `main`'s server speaks protocol 3 and refuses
+0.7.11, so it deploys only with the release that ships protocol 3):
 
 1. **Kill switch.** The operator makes the server refuse new rooms, joins and race starts with a
    clear message, and `/v1/health` says so; no game update. (Round 1 made it a Worker variable,
