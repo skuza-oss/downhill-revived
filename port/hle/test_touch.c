@@ -3,6 +3,7 @@
    port/tools/test_runtime.py (a host program). */
 #include "touch.h"
 #include "hle.h"
+#include "../include/fps.h"
 
 #include <assert.h>
 #include <math.h>
@@ -612,24 +613,27 @@ static void test_restart_clock(void)
 }
 
 /* Issue #54 (finding 159): a career continued from a save races with the shell's screen id still
-   22 (CONTINUE SAVED GAME), not 9 (GET READY), so the race test may not read the screen. It is the
-   race phase alone (1 the countdown, 2-4 the race), the attract demo (mode 10) excepted; the
-   continued career's own modes (0-5, func_001EE2A0) count. The overlay then shows as in any race. */
+   22 (CONTINUE SAVED GAME), not 9 (GET READY), so the race test (port_race_rule, fps.h) does not read
+   the screen: a race's loop ran since the front end's last frame, not the attract demo (mode 10),
+   the race phase from first_phase (1 the countdown for the overlay) to 4. The continued career's
+   own modes (0-5, func_001EE2A0) count. After a race the phase stays (3 on the title after QUIT),
+   so the front end's frame is what ends it. The overlay then shows as in any race. */
 static void test_race_running(void)
 {
     for (int mode = 0; mode <= 5; mode++) {
-        CHECK(touch_race_running(1, mode));
-        CHECK(touch_race_running(3, mode));
-        CHECK(touch_race_running(4, mode));
-        CHECK(!touch_race_running(0, mode));   /* the menus */
-        CHECK(!touch_race_running(5, mode));   /* the race loaded, before its countdown */
+        CHECK(port_race_rule(1, mode, 1, 1));
+        CHECK(port_race_rule(1, mode, 3, 1));
+        CHECK(port_race_rule(1, mode, 4, 1));
+        CHECK(!port_race_rule(1, mode, 1, 2));   /* the countdown, for a test from GO */
+        CHECK(!port_race_rule(1, mode, 5, 1));   /* the load and the flight over the track */
+        CHECK(!port_race_rule(0, mode, 3, 1));   /* the menus after a race: the phase left at 3 */
     }
-    CHECK(!touch_race_running(3, TOUCH_MODE_ATTRACT));
+    CHECK(!port_race_rule(1, PORT_MODE_ATTRACT, 3, 1));
     start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
     game.race_hud = 0;
     wait_ms(500);
     CHECK(!touch_visible(t));
-    game.race_hud = touch_race_running(2, 3);   /* touch_field: the HUD hook in a continued career's race */
+    game.race_hud = port_race_rule(1, 3, 2, 1);   /* touch_field: the HUD hook in a continued career's race */
     field();
     CHECK(touch_visible(t));
 }

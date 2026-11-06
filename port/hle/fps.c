@@ -18,6 +18,20 @@ static double phase, anim_phase;
 static double step_fields, previous_wall, owed;
 static int wall_mode, delta = -1;
 static unsigned clock_serial;
+static int race_loop;   /* the race's loop ran since the front end's last frame (fps.h, finding 159) */
+
+void port_loop_frame(int race)
+{
+    if (race != race_loop) hle_log(race ? "game: a race's loop runs\n" : "game: the front end runs\n");
+    race_loop = race;
+}
+
+int port_in_race(void) { return race_loop && *(int *)GUEST(0x084B26AC) != PORT_MODE_ATTRACT; }
+int port_race_running(int first_phase)
+{
+    return port_race_rule(race_loop, *(int *)GUEST(0x084B26AC), *(int *)GUEST(0x0843F348), first_phase);
+}
+
 /* Online, from the countdown to the finish (race screen, race phase 1-4). */
 static int online_race(void)
 {

@@ -857,7 +857,9 @@ PATCHES['unsorted/00148BE8.c'] = PATCHES.get('unsorted/00148BE8.c', []) + [
 ]
 
 # The pause menu runs outside the race loop; its builder marks it paused until re-entry.
+# port_loop_frame: a race's loop runs (fps.h, finding 159); the shell's frame clears it.
 PATCHES['unsorted/001B40A0.c'] = PATCHES.get('unsorted/001B40A0.c', []) + [
     ('text', 'int func_001B40A0(Obj *arg0)\n{',
-     'extern void hle_online_watch_resume(void);\nint func_001B40A0(Obj *arg0)\n{\n    hle_online_watch_resume();'),
+     'extern void hle_online_watch_resume(void);\nextern void port_loop_frame(int);\n'
+     'int func_001B40A0(Obj *arg0)\n{\n    hle_online_watch_resume();\n    port_loop_frame(1);'),
 ]

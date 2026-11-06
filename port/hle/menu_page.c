@@ -11,6 +11,7 @@
    Below them, the mouse for every popup the manager runs, the game's own as well (finding 092). */
 #include "hle.h"
 #include "menu_page.h"
+#include "../include/fps.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -760,6 +761,7 @@ static int shell_ran;                   /* a shell frame has run: the game's vie
 
 void port_shell_frame(void)
 {
+    port_loop_frame(0);   /* not in a race (fps.h, finding 159) */
     shell_fill ^= 1;
     shell_count[shell_fill] = 0;
     shell_seen = fields;

@@ -4,17 +4,15 @@
      (+0x40C0) airborne age, a short that func_00135A30 counts up every frame in the air and resets
      on contact (findings 049, 067; at high rates fps.c's port_air_tick keeps it in fields);
    - the race HUD hook: widescreen.c's HUD calls (the 3D pieces through func_00176930, the HUD's
-     text) set touch_hud_seen; in a race (phase D_0043F348 1-4, not the attract demo:
-     touch_race_running, touch.h) that says the race HUD is drawn, which is when the overlay
-     shows. The shell's screen id is no test: a career continued from a save races on screen 22,
-     not 9 (finding 159). The same hook moves the HUD by touch_hud_place (widescreen.c,
+     text) set touch_hud_seen; in a race from its countdown (port_race_running(1), fps.h; not
+     the shell's screen id, finding 159) that says the race HUD is drawn, which is when the
+     overlay shows. The same hook moves the HUD by touch_hud_place (widescreen.c,
      touch_hud_move).
    Besides those, the race clock (D_0043EEC8, the double-tap windows count it) and, for the pause
    rows' ↓ steps, the rows the game's pause menu builds (func_0015E238's own conditions, a menu
    read). Out: where the HUD goes, the online panel's Leave race, and the trick-stick hint's hold:
    the game waits here, then forgets the stall (no game time is caught up after it). */
 #include "hle.h"
-#include "touch.h"
 #include "../include/fps.h"
 
 #include <string.h>
@@ -24,7 +22,6 @@
 #define EE8(a) (*(volatile uint8_t *)(uintptr_t)(0x08000000u + (a)))
 
 enum {
-    RACE_PHASE = 0x43F348,     /* 1 countdown, 2-4 the race, 5 loaded */
     RACE_CLOCK = 0x43EEC8,     /* fields since GO */
     RIDER_AIR = 0x2AF2C0 + 0x4564,
     RACE_STATE = 0x4B25A0,     /* D_004B25A0: +0x10C the mode, +0x110, +0x288 */
@@ -63,8 +60,8 @@ void touch_field(void)
     static double last_ms;
     HostTouch h;
     memset(&h, 0, sizeof h);
-    int phase = EE32(RACE_PHASE), clock = EE32(RACE_CLOCK);
-    int race_screen = touch_race_running(phase, EE32(RACE_STATE + 0x10C));
+    int clock = EE32(RACE_CLOCK);
+    int race_screen = port_race_running(1);
     h.race_hud = touch_hud_seen && race_screen;
     touch_hud_seen = 0;
     h.air = race_screen && EE16(RIDER_AIR) != 0;
