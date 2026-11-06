@@ -241,6 +241,9 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
     }
 }
 
+/* A present failed: per side, a lost device is noticed (x64: the game ends, finding 171). */
+static void native_device_lost(void);
+
 /* The displayed picture onto surface, configured to w x h (the window or the canvas): drawn in the
    rectangle that keeps its shape (native_present_rect), the sides filled for widescreen's 4:3
    pictures, resize when the size changed.
@@ -262,6 +265,7 @@ static int native_present_draw(Native *n, DhdrSurface *surface, unsigned w, unsi
     if (drawn < 0) {
         n->present_failed = 1;
         fprintf(stderr, "gs native: presenting failed; no more pictures are shown\n");
+        native_device_lost();
     }
     return drawn;
 }

@@ -61,7 +61,8 @@ png = { version = "=0.18.1", default-features = false, optional = true }
 dhd_presence = { path = "presence", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "=0.62.2", default-features = false }
+# Direct3D 12: a lost device's removed reason and DRED (src/lost.rs, finding 171).
+windows = { version = "=0.62.2", default-features = false, features = ["Win32_Graphics_Direct3D12"] }
 windows-link = { version = "=0.2.1", default-features = false }
 wgpu-core-deps-windows-linux-android = { version = "=29.0.3", default-features = false }
 

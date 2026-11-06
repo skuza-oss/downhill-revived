@@ -14,6 +14,7 @@
 //! | `abi` | F0a | the `#[repr(C)]` mirrors of the header (frozen) |
 //! | `ffi`, `guard`, `host`, `log`, `shaders` | F0b | exports, MXCSR guard and `Owned`, host log, logger, WGSL |
 //! | `device` | A2 | the process's one device |
+//! | `lost` | 171 | a lost device: noticed, its reason logged once (the game then ends) |
 //! | `exact::pipelines` | A2 | raster.wgsl's compute pipelines |
 //! | `exact::{buffers, encoder, readback}` | A3 (B1: wasm readback) | the 11 buffers, the open encoder and pass, reads |
 //! | `exact::display` | A4 | the display texture, scanout's bind group, capture |
@@ -37,6 +38,7 @@ pub mod ffi;
 pub mod guard;
 pub mod host;
 pub mod log;
+pub mod lost;
 pub mod shaders;
 
 /// The texture packs' PNG decoder (port/gs/texpack.c), on every native platform.

@@ -112,6 +112,9 @@ static void native_surface_reset(Native *n)
 /* The display read: dhdr_native_read_finish waits for the map itself. */
 static int native_read_wait(void) { return 1; }
 
+/* A present failed (native_present_draw): a lost device ends the game (gpu_rust.c, finding 171). */
+static void native_device_lost(void) { device_lost_check(); }
+
 /* PC SETTINGS' Resolution row (port/hle/pc_settings.c): the scale the pictures are drawn at
    (asked 0) or the one asked for (asked 1: DHD_SCALE's, or the window's match before the limit),
    native_scale_now's; 0 before the first picture and without this renderer. */

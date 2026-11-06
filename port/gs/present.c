@@ -564,10 +564,36 @@ void gs_window_close(void)
     exit(0);
 }
 
-/* The window's events are the SDL thread's (sdl_host.c); here the game ends once the window closed. */
+static void hide_window(void *unused)
+{
+    (void)unused;
+    if (sdl_window) SDL_HideWindow(sdl_window);
+}
+
+/* The GPU device was lost (finding 171): the driver reset or removed it (a GPU that stopped
+   responding, a driver crash or update). Nothing can be drawn any more, and the renderer's objects
+   live on that device for the process's life, so the game ends with a message instead of running
+   on with a frozen picture. On the game thread, from gs_pump_messages; the reason is in the log
+   already (dhdr_device_lost). */
+static void graphics_lost(void)
+{
+    hle_log("gs: the GPU device was lost; the game ends\n");
+    sdl_host_run(hide_window, NULL);  /* the box over the desktop, not under a borderless window */
+    host_error_box("Downhill Revived",
+                   "The graphics driver stopped responding and was reset, so Downhill Revived can't show "
+                   "pictures any more and has to close.\n\n"
+                   "Update the graphics driver (from the maker of your computer or of its graphics chip) "
+                   "and start the game again. If it happens again, please report it with dhd.log, which "
+                   "is next to the game.");
+    exit(1);
+}
+
+/* The window's events are the SDL thread's (sdl_host.c); here the game ends once the window closed,
+   or with a message once the GPU device was lost. */
 void gs_pump_messages(void)
 {
     if (window_closed) exit(0);
+    if (gs_gpu_lost()) graphics_lost();
 }
 
 /* The window's drawable size in pixels (the renderer's GsWindow.size, any thread): 0 x 0 without a
