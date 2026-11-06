@@ -98,6 +98,9 @@ impl Client {
     /// Bytes wait in `output()` (the probe).
     #[cfg(test)]
     pub fn output_pending(&self) -> bool { !self.out.is_empty() }
+    /// The server's 401 brought a realm and nonce (the probe).
+    #[cfg(test)]
+    pub fn challenged(&self) -> bool { self.realm.is_some() && self.nonce.is_some() }
     /// A ChannelBind is in flight (the probe).
     #[cfg(test)]
     pub fn binding(&self) -> bool { self.pending.values().any(|(k, _)| matches!(k, Kind::Bind(_))) }

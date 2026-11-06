@@ -473,3 +473,28 @@ fn probe_turn_allocate() {
     link.write(&client.output());
     revoke_turn(&user);
 }
+
+/// TLS on 443 and the TURN framing with no credentials (round 4: the Mac and Linux check, which
+/// must not have the TURN key): the first Allocate goes unauthenticated and Cloudflare's TURN
+/// answers 401 with its realm and nonce; the retry with a made-up credential is refused (4xx).
+#[test]
+#[ignore = "needs the network"]
+fn probe_turn_tls_no_credentials() {
+    let start = Instant::now();
+    let link = crate::relay::Link::open("turn.cloudflare.com", 443, Arc::new(|| {}));
+    let mut client = crate::turn::Client::new("not-a-user", "not-a-credential", Instant::now());
+    let until = start + Duration::from_secs(15);
+    while !link.ready() { assert!(!link.failed() && Instant::now() < until, "TLS link"); std::thread::sleep(Duration::from_millis(1)); }
+    eprintln!("probe: TLS to turn.cloudflare.com:443 ready after {} ms", start.elapsed().as_millis());
+    while client.failed().is_none() {
+        assert!(Instant::now() < until && !link.failed(), "no TURN answer");
+        link.write(&client.output());
+        let bytes = link.take();
+        if !bytes.is_empty() { client.receive(&bytes, Instant::now()); }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(client.challenged(), "no 401 challenge with a realm and nonce");
+    // 401 or 400 (Cloudflare's answer to a username it can't parse): refused either way.
+    assert!(client.failed().is_some_and(|f| f.starts_with("TURN error 4")), "{:?}", client.failed());
+    eprintln!("probe: TURN challenge and refusal after {} ms", start.elapsed().as_millis());
+}
