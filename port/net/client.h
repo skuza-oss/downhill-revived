@@ -35,6 +35,9 @@ typedef struct {
     /* pings and the server clock */
     double next_ping, last_rx, clock_offset;  /* offset: server ms - local ms */
     int have_offset;   /* the offset is from a pong (the best measure) */
+    /* the quickest recent round trip (ms, -1 none), rising slowly with time: only pongs near it
+       measure the clock (client.c clock_sample) */
+    double rtt_floor, rtt_floor_at;
     int clock_known;   /* the offset is set at all: a pong, a welcome or the public list's "now" */
     float rtt[5];
     int nrtt;

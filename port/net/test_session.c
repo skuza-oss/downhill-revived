@@ -215,6 +215,17 @@ int main(void)
         PONG(10, 500.0);
         client_on_binary(&c,pong,10);      /* a protocol 3 PONG: the send time only */
         assert(fabs(c.clock_offset - 1002) < 1.5);
+        /* round trips slow for a long time, one way (a busy uplink: the server's time is read
+           late on the way out, so it looks 60 ms ahead): the median follows them, the clock
+           must not (the 45 ms skew of finding 169's PC-Mac run) */
+        for (int i = 0; i < 40; i++) {
+            PONG(160, 1062.0);
+            client_on_binary(&c,pong,sizeof pong);
+        }
+        assert(c.lobby.ping_ms >= 150 && fabs(c.clock_offset - 1002) < 1.5);
+        PONG(11, 1003.0);                  /* a quick one again: trusted */
+        client_on_binary(&c,pong,sizeof pong);
+        assert(fabs(c.clock_offset - 1003) < 1.5);
 #undef PONG
         client_free(&c);
     }

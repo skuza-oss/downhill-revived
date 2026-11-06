@@ -14,6 +14,10 @@
 #include <SDL3/SDL_timer.h>
 
 enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000, CLOCK_SLEW_MS = 2 };
+/* clock_sample: the round-trip floor rises 0.2 ms a second (a lasting route change is learnt
+   in minutes), and a pong within CLOCK_MARGIN_MS + 10% of it measures the clock */
+#define CLOCK_FLOOR_RISE 0.0002
+#define CLOCK_MARGIN_MS 3.0
 
 double net_now_ms(void) { return (double)SDL_GetTicksNS() / 1e6; }
 
@@ -70,6 +74,7 @@ void client_init(NetClient *c, const char *name, const char *version, const char
     copy(c->iso, sizeof c->iso, iso);
     c->lobby.seed = -1;
     c->lobby.ping_ms = -1;
+    c->rtt_floor = -1;
 }
 
 void client_set_install_id(NetClient *c, const char *id)
@@ -292,6 +297,20 @@ static void add_rtt(NetClient *c, double rtt)
    the last line and every other player's as the server measures them. Nothing per frame. The lines
    are made with the lock held and printed after it is released (the log is a pipe). */
 
+/* Whether a pong's round trip may measure the server clock (NTP's rule): only one near the quickest
+   recent round trip. A slow one is usually slow one way (a busy uplink, a queue), and half its
+   excess lands in the offset: with the median as the test, a Mac whose round trips stayed at
+   150-240 ms (66-76 usual) moved its clock ~45 ms and drew another rider 37-78 ms ahead of where
+   it was for a whole race (finding 169). Between trusted pongs the offset keeps its last value. */
+static int clock_sample(NetClient *c, double rtt, double now)
+{
+    if (!(rtt >= 0)) return 0;
+    if (c->rtt_floor < 0) c->rtt_floor = rtt;
+    else c->rtt_floor = fmin(rtt, c->rtt_floor + (now - c->rtt_floor_at) * CLOCK_FLOOR_RISE);
+    c->rtt_floor_at = now;
+    return rtt <= c->rtt_floor * 1.1 + CLOCK_MARGIN_MS;
+}
+
 /* The median age of a sender's last NET_ARRIVALS snapshots on arrival (ms), -1 none. */
 static double arrival_median(const NetClient *c, int slot)
 {
@@ -405,8 +424,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
     else if (!strcmp(type, "pong") && json_number(text, "t", &t)) {
         double now = net_now_ms(), rtt = now - t;
         add_rtt(c, rtt);
-        if (json_number(text, "serverTime", &server_time) &&
-            (!c->have_offset || rtt <= c->lobby.ping_ms))
+        if (clock_sample(c, rtt, now) && json_number(text, "serverTime", &server_time))
             c->clock_offset = server_time - (t + rtt / 2), c->have_offset = c->clock_known = 1;
         changed(c);
     } else if (!strcmp(type, "welcome")) {
@@ -523,10 +541,10 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
         rtt = now - sent;
         add_rtt(c, rtt);
         /* Protocol 4: the server's clock after our bytes (finding 169). The race's snapshots are
-           stamped on it, so the offset follows it during the race too, from the quicker round
-           trips, but by at most CLOCK_SLEW_MS a pong: a sudden step would move every puppet of
-           this PC on the other screens. */
-        if (n >= 2 + 2 * sizeof(double) && rtt >= 0 && rtt < c->lobby.ping_ms + 1) {  /* ping_ms: the median, rounded */
+           stamped on it, so the offset follows it during the race too, from the quick round
+           trips (clock_sample), but by at most CLOCK_SLEW_MS a pong: a sudden step would move
+           every puppet of this PC on the other screens. */
+        if (n >= 2 + 2 * sizeof(double) && clock_sample(c, rtt, now)) {
             memcpy(&server_time, data + n - sizeof server_time, sizeof server_time);
             if (isfinite(server_time) && server_time > 0) {
                 double offset = server_time - (sent + rtt / 2), step = offset - c->clock_offset;

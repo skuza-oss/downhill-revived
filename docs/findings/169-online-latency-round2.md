@@ -77,8 +77,9 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       clock from arrival times. A snapshot's age on arrival is now measured; the interpolation
       delay is that age (0-300 ms) plus the wait for the next one (interval + 2 x jitter, 30-150
       ms). The room's binary PONG carries the server's time (8 bytes after the ping's), and during
-      a race the client follows it from round trips no slower than its median, by at most 2 ms a
-      PONG (a step would move this PC's puppets on every other screen). Unit test in
+      a race the client follows it by at most 2 ms a PONG (a step would move this PC's puppets on
+      every other screen), from round trips near the quickest recent one (`clock_sample`: within
+      3 ms + 10% of a floor that rises 0.2 ms a second; first the median, see Result). Unit test in
       `test_session.c`. The game's `online:` line gives each puppet as "shown behind / snapshot
       age" in ms; `port/tools/puppet_lag.py` (and `online_race.py --lag`) measure independently.
 - [x] Item 4, prediction: by default each puppet shows its newest snapshot carried to the present
@@ -289,6 +290,10 @@ What it shows:
     whole race: 3.7 units p50, 7 p95.
   - Every other race was within a few ms. Following the median round trip doesn't help when the
     median itself is inflated for a whole race.
+  - Fixed after the run (the lead): only a round trip near the quickest recent one measures the
+    clock (NTP's rule, `client.c` `clock_sample`), so slow one-way queues leave the offset where it
+    was; `test_session.c` holds 40 slow pongs 60 ms off and the offset stays. Not re-measured
+    PC-Mac.
 - **Room WebSockets reset at race starts:** both games at once, 1006. This happened in 0.7.11 (3
   sessions) and in this lane (2 of about 16 race starts).
   - The rejoin was refused by a TCP reset, and the session ended.
@@ -303,11 +308,10 @@ What it shows:
 - The PC<->Mac comparison (acceptance 4) is recorded above.
 - Two follow-ups came out of it:
   - the shared clock's offset when a player's round trip stays inflated for a whole race (the
-    Mac's view was 37-78 ms ahead);
+    Mac's view was 37-78 ms ahead): fixed (above);
   - a host whose room WebSocket drops at a race start is refused on rejoin and loses the session.
 - The receive-side SCTP stalls (Surprises) are worth a transport lane; with the flood-limit fix they
   only hold a rider while they last.
-- `rustgs.py check --target aarch64-apple-darwin` needs a decision: ship a stand-in
-  `TargetConditionals.h` for Windows checks, or say in `port/render/AGENTS.md` that the Mac check
-  runs on the Mac.
+- `rustgs.py check --target aarch64-apple-darwin`: the lead's call, `port/render/AGENTS.md` now
+  says the Mac check runs on a Mac.
 - Hits keep finding 044's rule on the predicted pose (Decisions); a victim-side check was not added.

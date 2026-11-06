@@ -9,7 +9,8 @@ The root and `port/AGENTS.md` rules apply.
   `disc` (the USA disc's game-files hash, finding 098), `presence` (Discord IPC, finding 106).
 - Build and test through the wrapper, not bare cargo: `python port/tools/rustgs.py build|test|
   check --target <triple>` (pinned toolchain `rust-toolchain.toml`, cache dirs from
-  `DHD_DEVCACHES`). `rustgs.py check --target aarch64-apple-darwin` checks the Mac code anywhere.
+  `DHD_DEVCACHES`). `rustgs.py check --target aarch64-apple-darwin` checks the Mac code on a Mac
+  (on Windows `ring`'s build script needs the macOS SDK headers and fails, finding 169).
 - The C side talks to the library through `include/dhd_render.h` and `dhd_render_ext.h`; keep
   `src/abi.rs` and `port/gs/test_dhdr_abi.c` in step (`port/tools/test_dhdr_abi.py`).
 - The exact renderer draws the PS2's pixels and answers the game's Z probe: its output is part of
