@@ -26,7 +26,7 @@
 //!
 //! Referee: `rustgs.py test ... -- --test native_keys`, and `--test device_smoke native`.
 use crate::device::Gpu;
-use crate::native::init::{scoped, Objects};
+use crate::native::init::{scoped_pipeline, Objects};
 use std::collections::HashMap;
 
 pub const VARIANT_PLAIN: u32 = 0;
@@ -246,6 +246,24 @@ pub fn describe(key: u32) -> Result<PipelineDesc, String> {
     })
 }
 
+/// What a failed pipeline was (its log line, finding 176): the fragment entry point and
+/// specialisation, the blend state, the write mask and the depth state.
+fn summary(full: u64, d: &PipelineDesc) -> String {
+    let key = full as u32;
+    let blend = match &d.color.blend {
+        Some(b) => format!("{:?}/{:?} {:?}", b.color.src_factor, b.color.dst_factor, b.color.operation),
+        None => "none".into(),
+    };
+    let depth = match &d.depth {
+        Some(z) => format!("{:?}{}", z.depth_compare.unwrap_or(wgpu::CompareFunction::Always),
+                           if z.depth_write_enabled == Some(true) { " write" } else { "" }),
+        None => "none".into(),
+    };
+    format!("fs {}{} spec {:X} texel scale {}, blend {blend}, write mask {:X}, depth {depth}",
+            d.entry, if key & TEXELS != 0 { " (texels)" } else { "" }, full >> SPEC_SHIFT,
+            key >> TEXEL_SCALE_SHIFT & 15, d.color.write_mask.bits())
+}
+
 /// The vertex layout of every draw (`DhdrVertex`, 32 bytes): position xyz, stqf, rgba bytes.
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] = [
     wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
@@ -359,8 +377,9 @@ impl Worker {
             // Ends when the Pipelines (the sender) is dropped.
             while let Ok((key, d)) = inbox.recv() {
                 let start = std::time::Instant::now();
-                let pipe = scoped(gpu, &format!("native pipeline {key:X}"), || build(gpu, &sources, key, &d))
-                    .and_then(|r| r);
+                let pipe = scoped_pipeline(gpu, &format!("native pipeline {key:X}"), || build(gpu, &sources, key, &d))
+                    .and_then(|r| r)
+                    .map_err(|e| format!("{e} ({})", summary(key, &d)));
                 let took = start.elapsed().as_secs_f64();
                 if took > 0.25 {
                     crate::host::log(&format!("gs native: specialised pipeline {key:X} built in {took:.2} s (worker)"));
@@ -469,7 +488,9 @@ impl Pipelines {
             let d = describe(key as u32)?;
             #[cfg(not(target_arch = "wasm32"))]
             let start = std::time::Instant::now();
-            let pipe = scoped(gpu, &format!("native pipeline {key:X}"), || build(gpu, &Sources::of(objects), key, &d))??;
+            let pipe = scoped_pipeline(gpu, &format!("native pipeline {key:X}"), || build(gpu, &Sources::of(objects), key, &d))
+                .and_then(|r| r)
+                .map_err(|e| format!("{e} ({})", summary(key, &d)))?;
             #[cfg(not(target_arch = "wasm32"))]
             {
                 let took = start.elapsed().as_secs_f64();

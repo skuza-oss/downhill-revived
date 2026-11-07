@@ -65,3 +65,14 @@ GPU memory (`kgsl_ioctl_gpuobj_alloc`, whose address search walks the process's 
 of the render thread. `destroy_texture_view` leaves such a view alone (`surface_cached`); the
 swapchain's `release_resources` destroys its images' kept views and their framebuffer entries after
 its device wait, and `DeviceShared`'s drop destroys any left.
+
+## A pipeline the driver does not create is that pipeline's error (finding 176)
+
+`device.rs` `create_render_pipeline` and `create_compute_pipeline`: a VK_ERROR_OUT_OF_HOST_MEMORY
+or VK_ERROR_OUT_OF_DEVICE_MEMORY from vkCreateGraphicsPipelines / vkCreateComputePipelines is a
+`PipelineError::Linkage` (`mod.rs` `map_pipeline_creation_err`; wgpu-core makes it an internal
+error of that pipeline), not a `DeviceError::OutOfMemory`, which wgpu-core answers by losing the
+device. The Vulkan spec leaves the device usable after a failed pipeline creation, and PowerVR
+Rogue's driver 1.13 returns VK_ERROR_OUT_OF_HOST_MEMORY for every shader its compilers refuse. The
+temporary shader modules are destroyed on that path too (upstream returns before destroying them).
+Other results keep upstream's mapping.

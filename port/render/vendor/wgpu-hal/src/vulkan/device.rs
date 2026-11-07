@@ -2062,20 +2062,14 @@ impl crate::Device for super::Device {
             .map(|it| it.raw)
             .unwrap_or(vk::PipelineCache::null());
 
-        let mut raw_vec = {
+        let created = {
             profiling::scope!("vkCreateGraphicsPipelines");
             unsafe {
                 self.shared
                     .raw
                     .create_graphics_pipelines(pipeline_cache, &vk_infos, None)
-                    .map_err(|(_, e)| super::map_pipeline_err(e))
-            }?
+            }
         };
-
-        let raw = raw_vec.pop().unwrap();
-        if let Some(label) = desc.label {
-            unsafe { self.shared.set_object_name(raw, label) };
-        }
 
         if let Some(CompiledStage {
             temp_raw_module: Some(raw_module),
@@ -2104,6 +2098,16 @@ impl crate::Device for super::Device {
         }) = compiled_fs
         {
             unsafe { self.shared.raw.destroy_shader_module(raw_module, None) };
+        }
+
+        // Downhill Revived: the temporary modules above go on failure too, and a failure is the
+        // pipeline's own (`map_pipeline_creation_err`, finding 176).
+        let mut raw_vec = created.map_err(|(_, e)| {
+            super::map_pipeline_creation_err(e, wgt::ShaderStages::VERTEX_FRAGMENT)
+        })?;
+        let raw = raw_vec.pop().unwrap();
+        if let Some(label) = desc.label {
+            unsafe { self.shared.set_object_name(raw, label) };
         }
 
         self.counters.render_pipelines.add(1);
@@ -2145,23 +2149,25 @@ impl crate::Device for super::Device {
             .map(|it| it.raw)
             .unwrap_or(vk::PipelineCache::null());
 
-        let mut raw_vec = {
+        let created = {
             profiling::scope!("vkCreateComputePipelines");
             unsafe {
                 self.shared
                     .raw
                     .create_compute_pipelines(pipeline_cache, &vk_infos, None)
-                    .map_err(|(_, e)| super::map_pipeline_err(e))
-            }?
+            }
         };
-
-        let raw = raw_vec.pop().unwrap();
-        if let Some(label) = desc.label {
-            unsafe { self.shared.set_object_name(raw, label) };
-        }
 
         if let Some(raw_module) = compiled.temp_raw_module {
             unsafe { self.shared.raw.destroy_shader_module(raw_module, None) };
+        }
+
+        // Downhill Revived: as create_render_pipeline (finding 176).
+        let mut raw_vec = created
+            .map_err(|(_, e)| super::map_pipeline_creation_err(e, wgt::ShaderStages::COMPUTE))?;
+        let raw = raw_vec.pop().unwrap();
+        if let Some(label) = desc.label {
+            unsafe { self.shared.set_object_name(raw, label) };
         }
 
         self.counters.compute_pipelines.add(1);
