@@ -368,7 +368,11 @@ impl Sfu {
             }
         } else if message["type"] == "sfu_ready" {
             // This race's release (an older race's says nothing about this one).
-            if self.race_open && message["race"].as_u64().is_none_or(|r| r == self.race) { self.released = true; }
+            if self.race_open && message["race"].as_u64().is_none_or(|r| r == self.race) && !self.released {
+                self.released = true;
+                eprintln!("net: SFU: race released {} ms after its start message ({} channels)",
+                    self.started_at.map_or(0, |t| t.elapsed().as_millis()), self.channels.len());
+            }
         } else if message["type"] == "sfu_closed" {
             if let Some(ids) = message["channelIds"].as_array() {
                 for id in ids.iter().filter_map(Value::as_u64).filter(|id| *id < 65535) {
@@ -569,6 +573,9 @@ impl Sfu {
         }
         if self.race_open && !self.announced && (self.usable() || self.ready_anyway()) {
             self.announced = true; text.push(json!({"type":"sfu_ready","race":self.race}));
+            eprintln!("net: SFU: channels ready {} ms after the start message ({} racers, association up {} s)",
+                self.started_at.map_or(0, |t| t.elapsed().as_millis()), self.slots.len(),
+                self.connected_at.map_or(0, |t| t.elapsed().as_secs()));
         }
         for state in [false, true] {
             if !self.released { break; }
