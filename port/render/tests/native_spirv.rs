@@ -207,8 +207,9 @@ fn stages() -> Vec<Stage> {
     }
     // Specialisations: each flag alone and in the common mixes, every CLAMP pair, every alpha test.
     let mut specs = vec![0u32];
-    let flag_sets = [0u32, 1, 1 | 2, 1 | 2 | 4, 1 | 2 | 8, 1 | 2 | 12, 1 | 32, 1 | 2 | 32 | 64, 16, 64, 64 | 128,
-                     512, 1 | 256, 1 | 1024, 1 | 2048, 1 | 2 | 16 | 32 | 64 | 512 | 1024, 0xFFF];
+    // 1 | 16 | 32 (with and without 2): textured, fogged, bilinear, the race's most drawn pixels (finding 174).
+    let flag_sets = [0u32, 1, 1 | 2, 1 | 2 | 4, 1 | 2 | 8, 1 | 2 | 12, 1 | 32, 1 | 16 | 32, 1 | 2 | 16 | 32, 1 | 2 | 32 | 64,
+                     16, 64, 64 | 128, 512, 1 | 256, 1 | 1024, 1 | 2048, 1 | 2 | 16 | 32 | 64 | 512 | 1024, 0xFFF];
     for &f in &flag_sets {
         for sized in [false, true] {
             specs.push(pipelines::spec(f, [0, 0], 0, sized, true));
@@ -235,8 +236,9 @@ fn stages() -> Vec<Stage> {
     for (source, entry) in fragments {
         for scale in [0u32, 1, 2, 4, 8] {
             for &spec in &specs {
-                // Every scale with the generic shader; the specialisations at scales 0 and 2.
-                if spec != 0 && scale != 0 && scale != 2 {
+                // Every scale with the generic shader; the specialisations at scales 0, 1 (the
+                // decoded textures' scale, the only one with the bilinear's gather) and 2.
+                if spec != 0 && scale > 2 {
                     continue;
                 }
                 let mut constants = Vec::new();
