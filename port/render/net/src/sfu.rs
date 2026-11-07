@@ -269,10 +269,66 @@ impl SenderRate {
         ok
     }
 }
+/// How long a new association waits for the SFU's address when no earlier lookup found one.
+const LOOKUP_WAIT: Duration = Duration::from_millis(300);
+type Lookup = Arc<dyn Fn() -> std::io::Result<Vec<SocketAddr>> + Send + Sync>;
+/// The SFU's address, looked up on a thread of its own (finding 179): the lookup used to run on
+/// the send thread, which also polls the association and hands the room's messages to the game, so
+/// a slow resolver during a session replacement held all of that. Each new association starts a
+/// fresh lookup (one at a time) and takes the last address found at once; with none yet it waits
+/// at most LOOKUP_WAIT, and a lookup that hasn't finished by then or failed fails that attempt,
+/// which the send thread retries after its pause.
+struct Route {
+    lookup: Lookup,
+    shared: Arc<(Mutex<RouteState>, std::sync::Condvar)>,
+}
+#[derive(Default)]
+struct RouteState {
+    last: Option<SocketAddr>,
+    running: bool,
+    /// Why the latest finished lookup found nothing.
+    failed: Option<String>,
+}
+impl Route {
+    fn new(lookup: Lookup) -> Self { Self { lookup, shared: Arc::default() } }
+    fn address(&self, wait: Duration) -> Result<SocketAddr> {
+        let (state, done) = &*self.shared;
+        let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+        if !s.running {
+            s.running = true;
+            let (lookup, shared) = (self.lookup.clone(), self.shared.clone());
+            let spawned = std::thread::Builder::new().name("dhd-sfu-dns".into()).spawn(move || {
+                let found = lookup().map_err(|e| e.to_string())
+                    .and_then(|a| a.into_iter().find(|a| a.is_ipv4()).ok_or_else(|| "no IPv4 address".to_string()));
+                let (state, done) = &*shared;
+                let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+                s.running = false;
+                match found {
+                    Ok(a) => { s.last = Some(a); s.failed = None; }
+                    Err(e) => { eprintln!("net: SFU: address lookup failed ({e})"); s.failed = Some(e); }
+                }
+                done.notify_all();
+            });
+            if let Err(e) = spawned { s.running = false; return Err(e.into()); }
+        }
+        if let Some(a) = s.last { return Ok(a); }
+        let (s, _) = done.wait_timeout_while(s, wait, |s| s.running).unwrap_or_else(|e| e.into_inner());
+        if let Some(a) = s.last { return Ok(a); }
+        if s.running {
+            eprintln!("net: SFU: address lookup still running after {} ms; trying again later", wait.as_millis());
+            return Err("SFU address lookup still running".into());
+        }
+        Err(format!("No SFU address ({})", s.failed.as_deref().unwrap_or("lookup failed")).into())
+    }
+}
+fn sfu_route() -> &'static Route {
+    static ROUTE: std::sync::OnceLock<Route> = std::sync::OnceLock::new();
+    ROUTE.get_or_init(|| Route::new(Arc::new(|| ("rtc.live.cloudflare.com", 443).to_socket_addrs().map(|a| a.collect()))))
+}
 impl Sfu {
     /// A new association and its offer. `turn_first`: ask for TURN as soon as the answer comes.
     pub fn start(wake: Wake, turn_first: bool) -> Result<(Self, Value)> {
-        let route = ("rtc.live.cloudflare.com", 443).to_socket_addrs()?.find(|a| a.is_ipv4()).ok_or("No SFU IPv4 route")?;
+        let route = sfu_route().address(LOOKUP_WAIT)?;
         let (mut sfu, offer) = Self::start_at(route, wake)?;
         sfu.turn_first = turn_first;
         Ok((sfu, offer))
@@ -1409,6 +1465,66 @@ mod tests {
         assert_eq!(theirs, vec![(14, member), (16, member)]);
         assert!(client.orphans.is_empty() && client.rtc.is_alive());
     }
+    /// Finding 179: the SFU's address lookup hangs (a slow resolver) while the send thread starts
+    /// new associations. The thread keeps polling (each attempt waits at most LOOKUP_WAIT and
+    /// fails), one lookup runs at a time, its answer serves the next attempt, and later attempts
+    /// take that address at once while their own fresh lookup hangs.
+    #[test]
+    fn a_hanging_address_lookup_never_holds_the_poll_thread() {
+        use std::sync::atomic::{AtomicU64, AtomicUsize};
+        // Lookup k hangs until the test lets k lookups answer.
+        let answers = Arc::new(AtomicUsize::new(0));
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let route = Arc::new(Route::new({
+            let (answers, lookups) = (answers.clone(), lookups.clone());
+            Arc::new(move || {
+                let k = lookups.fetch_add(1, Ordering::SeqCst) + 1;
+                while answers.load(Ordering::SeqCst) < k { std::thread::sleep(Duration::from_millis(5)); }
+                Ok(vec!["[::1]:443".parse().unwrap(), "127.0.0.1:443".parse().unwrap()])
+            })
+        }));
+        // The send thread: a poll every 2 ms, a new association every 500 ms.
+        let stop = Arc::new(AtomicBool::new(false));
+        let gap_max = Arc::new(AtomicU64::new(0));
+        let results: Arc<Mutex<Vec<(Duration, std::result::Result<SocketAddr, String>)>>> = Arc::default();
+        let poller = {
+            let (route, stop, gap_max, results) = (route.clone(), stop.clone(), gap_max.clone(), results.clone());
+            std::thread::spawn(move || {
+                let (mut last_poll, mut last_start) = (Instant::now(), Instant::now() - Duration::from_secs(1));
+                while !stop.load(Ordering::Acquire) {
+                    if last_start.elapsed() >= Duration::from_millis(500) {
+                        last_start = Instant::now();
+                        let got = route.address(LOOKUP_WAIT).map_err(|e| e.to_string());
+                        results.lock().unwrap().push((last_start.elapsed(), got));
+                    }
+                    gap_max.fetch_max(last_poll.elapsed().as_millis() as u64, Ordering::SeqCst);
+                    last_poll = Instant::now();
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            })
+        };
+        std::thread::sleep(Duration::from_millis(1600));
+        answers.store(1, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(1100));
+        answers.store(usize::MAX, Ordering::SeqCst);
+        stop.store(true, Ordering::Release);
+        poller.join().unwrap();
+        let results = results.lock().unwrap().clone();
+        assert!(gap_max.load(Ordering::SeqCst) < LOOKUP_WAIT.as_millis() as u64 + 150, "the poll thread was held {} ms", gap_max.load(Ordering::SeqCst));
+        let hung: Vec<_> = results.iter().take_while(|(_, r)| r.is_err()).collect();
+        assert!(hung.len() >= 3, "attempts while the lookup hung: {results:?}");
+        assert!(hung.iter().all(|(took, r)| *took < LOOKUP_WAIT + Duration::from_millis(100) && r.as_ref().unwrap_err().contains("still running")));
+        let found = &results[hung.len()..];
+        assert!(found.len() >= 2 && found.iter().all(|(_, r)| r.as_ref().ok() == Some(&"127.0.0.1:443".parse().unwrap())), "{results:?}");
+        // After the answer each attempt starts a fresh lookup (it hangs) and takes the last address at once.
+        assert!(found[1..].iter().all(|(took, _)| *took < Duration::from_millis(50)), "{results:?}");
+        assert_eq!(lookups.load(Ordering::SeqCst), 2, "one lookup at a time");
+        // A lookup that fails fails its attempt with the reason; nothing found earlier to fall back on.
+        let failing = Route::new(Arc::new(|| Err(std::io::Error::new(ErrorKind::Other, "no such host"))));
+        let err = failing.address(LOOKUP_WAIT).unwrap_err().to_string();
+        assert!(err.contains("no such host"), "{err}");
+    }
+
     #[test]
     fn a_rejoin_takes_a_recycled_stream_id_for_its_new_member() { rejoin_over_recycled_stream_ids(true); }
     #[test]
