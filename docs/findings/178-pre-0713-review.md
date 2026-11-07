@@ -42,6 +42,12 @@ await allocated duplicate channel pairs. Admission now marks the session connect
 awaiting and ignores repeats. A held-publication test observed two calls without the fix,
 one with it, and exactly two retained channels.
 
+P2, `online/server/src/room.ts`: a mint completing after a newer session received TURN
+credentials overwrote its cleanup record before detecting the stale attempt. The new
+credential was then untracked and could not be revoked on leave. Validate ownership
+before assigning; revoke a stale result through a detached record. The held-mint test
+fails without the fix and verifies both the retained replacement and the old revocation.
+
 ## Result
 
 Pending review completion.

@@ -942,11 +942,15 @@ export class Room extends DurableObject<Env> {
           console.warn("TURN credentials unavailable", error instanceof Error ? error.message.slice(0, 80) : "unknown");
           return false;
         }
-        me.turnUser = minted.username;
-        me.turnUntil = Date.now() + TURN_TTL_S * 1000;
+        const until = Date.now() + TURN_TTL_S * 1000;
         if (me.sfuAttempt !== attempt || !this.state?.members.includes(me) || this.sockets.get(me.id) !== ws) {
-          await this.clearTurn(me); await this.save(); return false;
+          // The mint belongs to the old attempt. Never overwrite the replacement's credential
+          // record, even temporarily: revoke this result using a detached owner instead.
+          await this.clearTurn({ ...me, turnUser: minted.username, turnUntil: until });
+          return false;
         }
+        me.turnUser = minted.username;
+        me.turnUntil = until;
         await this.save();
         this.send(ws, minted.message);
       } else if (m.type === "sfu_ready") {

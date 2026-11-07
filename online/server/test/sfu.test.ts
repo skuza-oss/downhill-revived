@@ -572,3 +572,30 @@ describe("publication admission", () => {
     } finally { fake.release(); fake.restore(); }
   });
 });
+
+
+describe("TURN generation ownership", () => {
+  it("a late mint revokes only its own credential and preserves the replacement's", async () => {
+    const { code } = await Client.host();
+    const fake = fakeRealtime();
+    fake.hold = path => path.endsWith("generate-ice-servers");
+    try {
+      await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+        room.env = { ...room.env, TURN_KEY_ID: "key", TURN_KEY_API_TOKEN: "token" };
+        const me = room.state.members[0], ws = room.sockets.get(me.id);
+        me.sfuAttempt = 1;
+        me.sfu = publishedSession(me.id, []);
+        const pending = room.onSfu(ws, me, { type: "sfu_turn" });
+        for (let i = 0; i < 200 && !fake.held; i++) await new Promise(r => setTimeout(r, 5));
+        expect(fake.held).toBe(1);
+        me.sfuAttempt = 2;
+        me.turnUser = "replacement-credential";
+        me.turnUntil = Date.now() + 3600000;
+        fake.release();
+        expect(await pending).toBe(false);
+        expect(me.turnUser).toBe("replacement-credential");
+        expect(fake.calls.filter(c => c.path.endsWith("/revoke")).map(c => c.path.split("/").at(-2))).toEqual(["u".repeat(32)]);
+      });
+    } finally { fake.release(); fake.restore(); }
+  });
+});
