@@ -131,26 +131,36 @@ those races finished with the same results on both machines.
   others and now run at once; a late session is still closed if the race moved on. Test: an offer
   answered and credentials minted while a subscription call hangs in the queue.
 
-## Room SHCF93: a release that waited minutes
+## Room SHCF93: the release that seemed to wait minutes
 
 Production's Workers Logs (the lead's read-only query), 2026-11-07 02:28-02:36: the setup line came at 68 s
-("setup after 68271 ms: 0/SA:ready 1/SA:ready 2/SA:ready") instead of at 15 s, and the release
-only at 222 s, right after the lead's deploy reset the room (02:35:52). Room UXJ2ZB the same.
-Meanwhile the room retried `datachannels/close` of gone sessions every 5.4 s (410 each time).
-- A close answered 410 (the session is gone) counted as a failure and went to the pending cleanup,
-  retried on the room's SFU queue; the alarm awaited that pass, so its setup checks ran a minute
-  late.
-- The reconcile flag was one for any race: an older race's reconcile, still queued, swallowed the
-  running race's; it re-checked only its own race; and nothing asked for the release again (at
-  SFU_SETUP_MS no racer is late when all are ready). The lead's hotfix 4 pass had the same shape
-  (one `subscribing` flag, its repeat ending on the race it was first asked for).
-- Fixed (8d7c005, ee9b074): a 410/404 close counts as closed; the cleanup pass runs in the
-  background, one at a time; the pass's repeat runs for the room's current race and checks the
-  release after each pass; every alarm tick asks for the release again while it hasn't come.
-  Tests fail without each part. Also (2bf98fd) the release is logged once: a racer finishing
-  released the rest again and logged "released" with fewer racers, which made production show
-  bursts like "released 203945 ms" for 1-5 racers.
-- Hotfix 4's pass, tested (lead's request): six racers connecting 20 ms apart get every ordered
+("setup after 68271 ms: 0/SA:ready 1/SA:ready 2/SA:ready") instead of at 15 s, another at 206 s,
+and "released" lines only at 222 s, after the lead's deploy reset the room (02:35:52).
+
+- **The cause (the lead's reading, confirmed in the code, 35fe555):** `releaseSfu` set
+  `race.sfuReleased` and never saved it, nor did the setup check save its own result. The race was
+  most likely released about 3 s after its start; SHCF93's race began before hotfix 2 added the
+  "released" log line, so that release left no line. When the object was evicted and loaded again
+  the race looked unreleased: the alarm's setup check ran again (68 s, 206 s; room 3G5MXD the same
+  at 66 s for a race released at 3 s) and every later retire sent `sfu_ready` and logged
+  "released" again (222 s, with 2 then 1 racers). Now the release and the check are saved, each
+  racer gets `sfu_ready` once per race (`releasedRace`; again only after its session restarted),
+  the release is logged once, and a retire sends `left` before releasing the rest. Tests: after an
+  eviction no setup check and no second `sfu_ready`; a restarted racer released again alone (all
+  fail without the fix).
+- **My first reading was wrong for this room** (8d7c005's message): I took the 68 s line for a
+  release held by a reconcile that an older race's swallowed. That shape exists (one flag for any
+  race; hotfix 4's pass had it too: its repeat ended on the race it was first asked for), and
+  8d7c005 and ee9b074 remove it (a reconcile and a pass serve the current race and re-check the
+  release; every alarm tick asks for the release while it hasn't come), with tests that fail
+  without them. But nothing shows it happened in SHCF93.
+- **Real in that window, and fixed (8d7c005):** the room retried `datachannels/close` of gone
+  sessions every 5.4 s (410 each time) from the pending cleanup, on the SFU queue, and the alarm
+  awaited each pass. A 410/404 close now counts as closed, and the cleanup pass runs in the
+  background, one at a time (test: the alarm returns at once while a cleanup call hangs).
+- Also (2bf98fd, folded into 35fe555): "released" bursts like 203945 ms for 1-5 racers (room
+  UXJ2ZB) were these repeats, not late releases.
+- Hotfix 4's pass, tested (the lead's request): six racers connecting 20 ms apart get every ordered
   pair subscribed once and none twice (30 calls), and are released.
 
 ## Item 2: PC↔Mac runs
