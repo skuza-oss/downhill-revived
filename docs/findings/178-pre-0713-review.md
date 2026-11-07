@@ -1,6 +1,6 @@
 # 178: pre-release online lifecycle review
 
-Status: current
+Status: partly superseded by 179 (the three risks left open, now fixed)
 
 Branch `review/pre-0713` from `main` 84558c4, started 2026-11-07. This file is the lane's plan
 while it runs and its finding when it merges.
