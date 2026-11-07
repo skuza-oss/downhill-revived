@@ -7,8 +7,10 @@ export interface SfuSecrets {
 export interface SfuSession { id: string; phase: "connect" | "ready" | "failed"; channels: Allocation[]; }
 /** One channel on a session: its own publication (local) or a subscription to `memberId`'s
     publication on that member's session `session` (remote). The session id never goes to a client
-    (clientChannels). */
-export interface Allocation { memberId: number; name: string; channelId: number; local: boolean; session?: string; }
+    (clientChannels). A subscription whose close failed stays on its session with `closeAt` (its
+    next try) and `closeTries` (the failed ones so far) until a close goes through (finding 179);
+    its endpoint was told it closed. */
+export interface Allocation { memberId: number; name: string; channelId: number; local: boolean; session?: string; closeAt?: number; closeTries?: number; }
 /** Allocations as their own endpoint gets them: no session ids. */
 export function clientChannels(channels: Allocation[]): Allocation[] {
   return channels.map(({ memberId, name, channelId, local }) => ({ memberId, name, channelId, local }));
@@ -138,7 +140,7 @@ export class Realtime {
   }
   async subscribe(session: SfuSession, memberId: number, publisher: SfuSession): Promise<Allocation[]> {
     if (session.phase !== "ready" || publisher.phase !== "ready") return [];
-    if (session.channels.some(x => !x.local && x.memberId === memberId && x.session === publisher.id)) return [];
+    if (session.channels.some(x => !x.local && x.memberId === memberId && x.session === publisher.id && x.closeAt == null)) return [];
     const allocations = await this.allocate(session, memberId, false, publisher.id);
     return allocations;
   }
@@ -158,6 +160,9 @@ export class Realtime {
       }
       const allocation: Allocation = { memberId, name: policy.dataChannelName, channelId: Number(item.id), local, ...(publisher ? { session: publisher } : {}) };
       allocations.push(allocation);
+      // Cloudflare gives an id only once its last channel closed: a subscription still marked
+      // closing on that id is gone, and must never be "closed again" over its successor.
+      session.channels = session.channels.filter(c => !(c.closeAt != null && c.channelId === allocation.channelId));
       // Keep successful partial allocations for teardown, even if another item failed.
       session.channels.push(allocation);
     }

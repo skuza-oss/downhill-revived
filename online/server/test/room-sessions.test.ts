@@ -6,6 +6,7 @@ import { env, runInDurableObject, runDurableObjectAlarm } from "cloudflare:test"
 import { describe, it, expect } from "vitest";
 import { Client } from "./helpers";
 import { fakeRealtime } from "./sfu-fake";
+import { Realtime, type SfuSession } from "../src/sfu";
 
 const FEATURES = ["session", "countdown", "race_rejoin"];
 const room = (code: string) => env.ROOM.get(env.ROOM.idFromName(code));
@@ -215,5 +216,144 @@ describe("one Realtime session per member per room (finding 177)", () => {
     } finally {
       fake.restore();
     }
+  });
+});
+
+describe("subscription closes that fail (finding 179)", () => {
+  const remote = (code: string, member: number) => runInDurableObject(room(code), async (r: any) =>
+    r.state.members[member].sfu.channels.filter((x: any) => !x.local));
+  const closesOn = (fake: Fake, session: string, from: number) => fake.calls.slice(from)
+    .filter((c) => c.path.endsWith(`/sessions/${session}/datachannels/close`)).map((c) => c.body.dataChannels.map((x: any) => x.id).sort());
+  /** The failed ones are due now: the alarm's pass tries them again. */
+  const due = (code: string) => runInDurableObject(room(code), async (r: any) => {
+    for (const m of r.state.members) for (const c of m.sfu?.channels ?? []) if (c.closeAt != null) c.closeAt = 0;
+  });
+
+  /** Three members race once; then P2 sits race 2 out and the close of its subscriptions fails. */
+  async function sitOutWithFailingClose(fake: Fake) {
+    const { cs, code } = await sessionRoom(3);
+    for (const c of cs) await connect(c);
+    let starts = await race(cs, code);
+    await release(cs, starts[0].startAt);
+    await finish(cs, code);
+    const session: string = await runInDurableObject(room(code), async (r: any) => r.state.members[2].sfu.id);
+    fake.fail = (path) => path.endsWith(`/sessions/${session}/datachannels/close`);
+    const racers = cs.slice(0, 2);
+    const from = fake.calls.length;
+    starts = await race(racers, code);
+    const closed: number[] = (await cs[2].json("sfu_closed")).channelIds;
+    await release(racers, starts[0].startAt);
+    await passDone(code);
+    expect(closed).toHaveLength(4);
+    expect(closesOn(fake, session, from)).toEqual([[...closed].sort()]);
+    return { cs, code, session, closed: [...closed].sort() };
+  }
+
+  it("a prune whose close fails is kept, survives an eviction, and is closed by a later pass", async () => {
+    const fake = fakeRealtime();
+    try {
+      const { cs, code, session, closed } = await sitOutWithFailingClose(fake);
+      // Kept, marked for a later try (forgotten before: P2 kept receiving the racers' frames).
+      let pending = await remote(code, 2);
+      expect(pending.map((x: any) => x.channelId).sort()).toEqual(closed);
+      expect(pending.every((x: any) => x.closeTries === 1 && x.closeAt > Date.now())).toBe(true);
+      // Not due yet: the alarm leaves them.
+      let from = fake.calls.length;
+      await runDurableObjectAlarm(room(code));
+      await passDone(code);
+      expect(closesOn(fake, session, from)).toEqual([]);
+      // Stored with the room: the room as an eviction leaves it, loaded back from storage as its
+      // constructor does (evictDurableObject hangs in this pool once the object used the fake fetch).
+      await runInDurableObject(room(code), async (r: any, ctx) => {
+        r.state = await ctx.storage.get("room");
+        r.rebuildRace();
+      });
+      pending = await remote(code, 2);
+      expect(pending.map((x: any) => x.channelId).sort()).toEqual(closed);
+      expect(pending.every((x: any) => x.closeTries === 1)).toBe(true);
+      // The API works again: the next pass closes them; the game hears nothing more.
+      fake.fail = null;
+      await due(code);
+      from = fake.calls.length;
+      await runDurableObjectAlarm(room(code));
+      await passDone(code);
+      expect(closesOn(fake, session, from)).toEqual([closed]);
+      expect(await remote(code, 2)).toEqual([]);
+      expect(cs[2].seen.filter((s) => JSON.parse(s).type === "sfu_closed")).toHaveLength(1);
+      expect(cs[2].seen.some((s) => JSON.parse(s).type === "sfu_reset")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("a close that keeps failing is tried a bounded number of times, then the subscriber's session is reset", async () => {
+    const fake = fakeRealtime();
+    try {
+      const { cs, code, session, closed } = await sitOutWithFailingClose(fake);
+      for (let tries = 1; tries <= 4; tries++) {
+        // Between tries the alarm makes no call: each waits twice as long as the last.
+        let from = fake.calls.length;
+        for (let i = 0; i < 3; i++) await runDurableObjectAlarm(room(code));
+        await passDone(code);
+        expect(closesOn(fake, session, from)).toEqual([]);
+        const pending = await remote(code, 2);
+        expect(pending.every((x: any) => x.closeTries === tries && x.closeAt >= Date.now() + 5_000 * 2 ** (tries - 1) - 1_000)).toBe(true);
+        await due(code);
+        from = fake.calls.length;
+        await runDurableObjectAlarm(room(code));
+        await passDone(code);
+        expect(closesOn(fake, session, from)).toEqual([closed]);
+      }
+      // Five calls in all; then no sixth: P2's session is reset (its game drops the association,
+      // and Cloudflare ends the session with its connection, whatever the API says).
+      await due(code);
+      const from = fake.calls.length;
+      await runDurableObjectAlarm(room(code));
+      expect(await cs[2].json("sfu_reset")).toBeTruthy();
+      await passDone(code);
+      const after = closesOn(fake, session, from);
+      expect(after.every((ids) => ids.length > closed.length)).toBe(true);  // the whole session's close, once
+      expect(after).toHaveLength(1);
+      await runInDurableObject(room(code), async (r: any) => {
+        expect(r.state.members[2].sfu).toBeUndefined();
+        expect(r.cleanup.map((x: any) => x.session)).toEqual([session]);  // its own retries from now on
+        expect(r.state.members[0].sfu.phase).toBe("ready");  // the racers go on
+      });
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("a gone session (410, 404) counts as closed: one more call, no reset", async () => {
+    for (const status of [410, 404]) {
+      const fake = fakeRealtime();
+      try {
+        const { cs, code, session, closed } = await sitOutWithFailingClose(fake);
+        fake.failStatus = status;
+        await due(code);
+        const from = fake.calls.length;
+        await runDurableObjectAlarm(room(code));
+        await passDone(code);
+        expect(closesOn(fake, session, from)).toEqual([closed]);
+        expect(await remote(code, 2)).toEqual([]);
+        await runDurableObjectAlarm(room(code));
+        await passDone(code);
+        expect(closesOn(fake, session, from)).toHaveLength(1);
+        expect(cs[2].seen.some((s) => JSON.parse(s).type === "sfu_reset")).toBe(false);
+      } finally {
+        fake.restore();
+      }
+    }
+  });
+
+  it("a closing id the SFU gives out again belongs to the new subscription only", async () => {
+    const session: SfuSession = { id: "s", phase: "ready", channels: [
+      { memberId: 4, name: "state", channelId: 7, local: false, session: "old", closeAt: 0, closeTries: 1 },
+      { memberId: 4, name: "events", channelId: 8, local: false, session: "old", closeAt: 0, closeTries: 1 }] };
+    const api = new Realtime({ REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" }, async (_input, init) =>
+      Response.json({ dataChannels: JSON.parse(String(init!.body)).dataChannels.map((x: any, i: number) => ({ ...x, id: 7 + 2 * i })) }));
+    const channels = await api.subscribe(session, 4, { id: "new", phase: "ready", channels: [] });
+    expect(channels.map((c) => c.channelId)).toEqual([7, 9]);
+    expect(session.channels.map((c) => [c.channelId, c.session, c.closeAt != null])).toEqual([[8, "old", true], [7, "new", false], [9, "new", false]]);
   });
 });

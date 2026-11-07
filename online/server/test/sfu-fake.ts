@@ -3,7 +3,8 @@ import type { SfuSession } from "../src/sfu";
 
 /** A Realtime and TURN API stand-in on the global fetch (the room's default), recording each call.
     A call `hold` picks waits (in the room's own context: a promise from the test's can't be
-    awaited there) until `release()`; `held` counts those waiting. `fail` makes a call answer 500. */
+    awaited there) until `release()`; `held` counts those waiting. `fail` makes a call answer
+    `failStatus` (500). */
 export function fakeRealtime() {
   let channel = 100;
   const fake = {
@@ -13,6 +14,7 @@ export function fakeRealtime() {
     released: false,
     release: () => { fake.released = true; },
     fail: null as null | ((path: string, body: any) => boolean),
+    failStatus: 500,
     restore: () => spy.mockRestore(),
   };
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -22,7 +24,7 @@ export function fakeRealtime() {
       fake.held++;
       while (!fake.released) await new Promise((r) => setTimeout(r, 5));
     }
-    if (fake.fail?.(path, body)) return new Response("no", { status: 500 });
+    if (fake.fail?.(path, body)) return new Response("no", { status: fake.failStatus });
     if (path.endsWith("/revoke")) return new Response(null, { status: 204 });
     if (path.endsWith("generate-ice-servers")) return Response.json({ iceServers: [{ urls: ["turns:turn.cloudflare.com:443?transport=tcp"], username: "u".repeat(32), credential: "c".repeat(32) }] });
     if (path.endsWith("sessions/new")) return Response.json({ sessionId: `session-${channel++}`, sessionDescription: { type: "answer", sdp: "SFU" } });
