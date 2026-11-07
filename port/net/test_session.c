@@ -1,13 +1,15 @@
 /* Session wire parsing and serializers without a server or game data. */
 #include "client.h"
 #include "lobby_row.h"
+#include <SDL3/SDL_timer.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 static char sent[4096];
 static void text(void *ctx, const char *s) { (void)ctx; snprintf(sent,sizeof sent,"%s",s); }
-static void binary(void *ctx, const void *s, size_t n) { (void)ctx; (void)s; (void)n; }
+static int binaries;
+static void binary(void *ctx, const void *s, size_t n) { (void)ctx; (void)s; (void)n; binaries++; }
 int main(void)
 {
     NetClient c;
@@ -226,6 +228,16 @@ int main(void)
         PONG(11, 1003.0);                  /* a quick one again: trusted */
         client_on_binary(&c,pong,sizeof pong);
         assert(fabs(c.clock_offset - 1003) < 1.5);
+        /* DHD_NET_TEST_PONG_DELAY (finding 175): a pong is held, then counts at its time */
+        c.pong_delay_ms = 50, c.pong_delay_from_s = 0, c.joined_at = net_now_ms() - 1;
+        PONG(11, 1004.0);
+        client_on_binary(&c,pong,sizeof pong);
+        assert(c.held_count == 1 && fabs(c.clock_offset - 1003) < 1.5);
+        {
+            double until = net_now_ms() + 1000;
+            while (c.held_count && net_now_ms() < until) { SDL_Delay(5); client_tick(&c); }
+        }
+        assert(!c.held_count && c.lobby.ping_ms >= 50);  /* its round trip includes the hold */
 #undef PONG
         client_free(&c);
     }
@@ -245,6 +257,90 @@ int main(void)
         client_set_install_id(&c,"\",\"x\":\"0123456789abcdef01234567");
         client_connected(&c,&t);
         assert(!strstr(sent,"installId"));
+        client_free(&c);
+    }
+    {   /* A drop in the race (finding 175): the race goes on (state, frames), the rejoin's hello
+           names the race, the welcome keeps it racing and what the drop may have lost goes again;
+           a refusal or the end of the attempts leaves it racing alone, offline. */
+        const char *tokened = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"RACE22\",\"serverTime\":1000,"
+            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\"}";
+        const char *start = "{\"type\":\"start\",\"yourSlot\":1,\"startAt\":5000,\"serverTime\":2000,\"players\":["
+            "{\"slot\":0,\"memberId\":0,\"name\":\"A\"},{\"slot\":1,\"memberId\":1,\"name\":\"Test\"}]}";
+        const char *back_in = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"RACE22\",\"serverTime\":9000,"
+            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"race\":{\"startAt\":5000,\"sfu\":\"ready\"}}";
+        const char *no_race = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"RACE22\",\"serverTime\":9000,"
+            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\"}";
+        const char *out = "{\"type\":\"room\",\"phase\":\"racing\",\"members\":[{\"id\":1,\"name\":\"Test\",\"inRace\":false}]}";
+        unsigned char payload[4] = {1, 2, 3, 4};
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"race_rejoin\"") && !strstr(sent,"raceStartAt"));
+        client_on_text(&c,tokened,strlen(tokened));
+        client_on_text(&c,start,strlen(start));
+        assert(c.racing && c.race_at == 5000);
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_lobby(&c,&l);
+        assert(c.rejoining && l.state == NET_RACING && !l.offline);
+        binaries = 0;
+        assert(client_send_frame(&c, NET_FRAME_STATE, payload, sizeof payload) && binaries == 1);  /* over the SFU */
+        assert(client_on_closed(&c,4011,"rate_limited") == 1);  /* a rejoin refused by the limits: again */
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"raceStartAt\":5000}"));
+        client_lobby(&c,&l);
+        assert(l.state == NET_RACING);
+        client_finish(&c, 777, 2);
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_finish(&c, 777, 2);  /* said while the socket was down: lost */
+        client_connected(&c,&t);
+        client_on_text(&c,back_in,strlen(back_in));
+        client_lobby(&c,&l);
+        assert(l.state == NET_RACING && c.racing && !c.rejoining && c.rejoin_tries == 0);
+        assert(!strcmp(sent,"{\"type\":\"finish\",\"ticks\":777,\"place\":2}"));  /* said again */
+        /* gave up while the socket was down: BACK again after the rejoin */
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_back(&c);
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"raceStartAt\":5000"));
+        client_on_text(&c,back_in,strlen(back_in));
+        assert(!strcmp(sent,"{\"type\":\"back\"}"));
+        client_free(&c);
+        /* back, but the race is over for us: the room's snapshot takes the game back to the room */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,tokened,strlen(tokened));
+        client_on_text(&c,start,strlen(start));
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_connected(&c,&t);
+        client_on_text(&c,no_race,strlen(no_race));
+        client_on_text(&c,out,strlen(out));
+        client_lobby(&c,&l);
+        assert(!c.racing && l.state == NET_LOBBY && c.race_at == 0);
+        client_free(&c);
+        /* a refusal in the race, or the attempts' end: racing alone, offline, as before */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,tokened,strlen(tokened));
+        client_on_text(&c,start,strlen(start));
+        assert(client_on_closed(&c,1006,"") == 1);
+        assert(client_on_closed(&c,4006,"room_not_found") == 0);
+        client_lobby(&c,&l);
+        assert(l.offline && l.state == NET_FAILED && !c.rejoining);
+        client_free(&c);
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,tokened,strlen(tokened));
+        client_on_text(&c,start,strlen(start));
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_rejoin_failed(&c);
+        client_lobby(&c,&l);
+        assert(l.offline && l.state == NET_FAILED);
+        binaries = 0;
+        assert(!client_send_frame(&c, NET_FRAME_STATE, payload, sizeof payload) && binaries == 0);
+        client_free(&c);
+        /* in the room, a first join refused by the limits stays refused */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        assert(client_on_closed(&c,4011,"rate_limited") == 0);
         client_free(&c);
     }
     puts("test_session: session and ten-player checks passed");

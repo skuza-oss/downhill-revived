@@ -24,6 +24,7 @@ export function fakeRealtime() {
     }
     if (fake.fail?.(path, body)) return new Response("no", { status: 500 });
     if (path.endsWith("/revoke")) return new Response(null, { status: 204 });
+    if (path.endsWith("generate-ice-servers")) return Response.json({ iceServers: [{ urls: ["turns:turn.cloudflare.com:443?transport=tcp"], username: "u".repeat(32), credential: "c".repeat(32) }] });
     if (path.endsWith("sessions/new")) return Response.json({ sessionId: `session-${channel++}`, sessionDescription: { type: "answer", sdp: "SFU" } });
     if (path.endsWith("datachannels/close")) return Response.json({ dataChannels: body.dataChannels });
     if (path.endsWith("datachannels/new")) return Response.json({ dataChannels: body.dataChannels.map((x: any) => ({ ...x, id: channel++ })) });

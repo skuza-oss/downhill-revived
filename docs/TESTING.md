@@ -23,8 +23,14 @@ started from that environment, your own included. Keep all three off a small sys
 
 A git worktree lacks the files that are never committed (asm/, assets/, iso/SCUS_971.77):
 `python tools/worktree_setup.py` copies them from the main checkout and, for a worktree on the
-system drive, moves build/ and node_modules/ to `DHD_SCRATCH` by junctions.
-`tools/worktree_setup.py --list` shows every worktree, merged or not.
+system drive, moves build/ and node_modules/ to `DHD_SCRATCH` by junctions. There it also installs
+`online/server` and `port/launcher` (`npm ci` in the junction's target, a folder named
+node_modules, as wrangler needs; again whenever the lock changes, or with `--npm`). Never run
+`npm ci` in such a worktree yourself: it deletes the junction and installs onto the system drive;
+run worktree_setup.py again instead. `tools/worktree_setup.py --list` shows every worktree, merged
+or not. After `git worktree remove`, `tools/worktree_setup.py --remove PATH` deletes its scratch
+folders and the junctions git leaves behind (only the links: `tools/compilers` points into the
+main checkout).
 
 ## Build
 
@@ -127,7 +133,10 @@ Online:
 | `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
 | `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |
+| `DHD_NET_SFU_TURN=0` | the TURN fallback is never asked for; with `DHD_NET_SFU_UDP=0` a racer whose connection never comes up, whom the others must race without (finding 175) |
 | `DHD_PUPPET_PREDICT=0` | puppets interpolated in the past instead of predicted to the present (finding 169) |
+| `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |
+| `DHD_NET_TEST_PONG_DELAY=N[@S]` | from S seconds (default 60) after joining a room, every pong this PC gets (the room's and the race's PONG) is held N ms plus 0-N/2 ms more before it counts: a slow return path one way, for the shared clock (finding 175) |
 
 Pictures:
 

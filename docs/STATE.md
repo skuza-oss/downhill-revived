@@ -115,7 +115,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (finding 123) that live across races (findings 118, 119), 25 tracks with Salt City MX and TD
   (finding 166), Ready for the next race and MOSH by
   the host's pick (finding 128), rooms placed near their creator (finding 135), rejoin by token
-  (finding 137). Protocol: `docs/online-protocol.md`; steps: `online/server/README.md`.
+  (finding 137); a room connection lost in a race no longer ends it: the game races on over the
+  SFU and rejoins, the seat is kept 20 s (finding 175). Protocol: `docs/online-protocol.md`; steps: `online/server/README.md`.
 - Abuse guard (finding 161): a kill switch in the moderation database (`moderate.mjs online
   off`), limits per address, caps per member, and
   bans by address hash or install id with a 14-day moderation log in D1, worked from
@@ -125,7 +126,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   retransmissions and EVENT reliable (Cloudflare forwards STATE ordered and reliable anyway; the
   client's vendored sctp-proto delivers it unordered, finding 173); the room sets up each racer's session and passes only that
   racer's SDP. If UDP doesn't connect in 2 s, Cloudflare TURN over TLS on 443 with credentials
-  minted for that racer. Protocol 4 (finding 169): a PC's riders of one tick go out bundled
+  minted for that racer. A racer whose Realtime never connects leaves after 10 s and the others
+  race on (finding 175). Protocol 4 (finding 169): a PC's riders of one tick go out bundled
   in STATE messages of at most 1,000 bytes (one datagram), stamped with their moment on the
   server clock; each player's own rider 60 times a second, AI riders 30. Puppets are drawn at the
   present: the newest snapshot carried forward by its velocity and angular velocity, corrections

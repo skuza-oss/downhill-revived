@@ -146,7 +146,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // First message, required. name: 1-24 characters.
 {"type":"hello","protocol":4,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
-// A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>"
+// A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>",
+// and during a race (finding 175) the startAt of the race it knows: "raceStartAt":1734000003000
 // From the release after 0.7.11 (finding 161): "installId":"<32 lowercase hex>", optional (below)
 
 // Host only. Every field optional; omitted fields keep their value.
@@ -175,7 +176,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
   above). Optional: releases before it send none and join as before; one that is not 32 lowercase
   hex digits counts as none. The server sends it to nobody. The game never writes it to dhd.log.
 - `features`: what the client understands beyond version 1. `"countdown"`: the room may start
-  the race by itself (below).
+  the race by itself (below). `"race_rejoin"` (finding 175): the game keeps racing over the SFU
+  while its room connection is down and rejoins its race (Limits, below).
 
 ### Server → client
 
@@ -184,6 +186,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"welcome","protocol":4,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
  "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU",
  "rejoinToken":"<32 hex>"}  // this member's rejoin token: only this client gets it (Limits, below)
+// A rejoin into the member's running race (finding 175) adds the race and its session's state here:
+// "race":{"startAt":1734000003000,"sfu":"ready"}  // "ready": keep the session; "setup": start it again
 
 // Where the room runs and each member's region (never their country): after every join and when
 // the room learns its colo (Region, below).
@@ -259,6 +263,15 @@ so the game sees start before buffered events. Channels close at race end.
 - After all allocated channels open, each client sends `{"type":"sfu_ready"}`. The DO replies
   to all racing members only after every member acknowledges. Until then, race frames stay
   queued locally so reliable events cannot precede a subscriber.
+- A rejoined racer (finding 175, Limits below) gets, after its `welcome`, all its allocations at
+  once: `{"type":"sfu_channels","full":true,"channels":[...]}`. Its client keeps the channels it
+  has, opens the missing ones and closes those not listed (it missed their `sfu_closed`). Then
+  `sfu_ready` again if the race's traffic was released meanwhile. A rejoined racer whose session
+  was still being set up (`"sfu":"setup"` in the welcome), or whose client lost it, sends
+  `{"type":"sfu_restart"}` and then a new `sfu_offer`: the room clears its session, TURN
+  credentials and the others' subscriptions to it (`sfu_closed`), and the new session is set up
+  as at the start (the setup deadline still counts from the race's start). At most 3 restarts
+  per racer per race (`bad_value` after that), only for `race_rejoin` members.
 - Departures and replacements send `{"type":"sfu_closed","channelIds":[10,12]}` only to
   affected endpoints, after closing those allocations through the API (a subscription that
   doesn't close is announced all the same and closes with its subscriber's session).
@@ -281,6 +294,12 @@ so the game sees start before buffered events. Channels close at race end.
   sees the TURN service's address, never the player's. The DO revokes the credentials when that
   member's SFU session is cleared (race end, retire, leaving); a second `sfu_turn` in the race
   is a `bad_value` error. Clients accept `turns:` servers on `turn.cloudflare.com` only.
+- A racer whose own connection isn't up 10 s after the race's `start` (no `sfu_connected`; the
+  room's `SFU_CONNECT_MS`) leaves the race alone, as below: the others stop expecting its channels
+  and are released. Measured setups (finding 175): from the answer to connected, UDP 0.7-1.5 s and
+  TURN over TLS 2.9-3.2 s. A game says `sfu_ready` once it has every racer's channels, or 8 s
+  after its own connection with its own channels open (a racer that never connects publishes
+  none); the room still releases only when every connected racer is subscribed both ways.
 - Setup has a deadline: 25 s after the race's `start` (the room's `SFU_SETUP_MS` sets another),
   every racer must have acknowledged `sfu_ready`. Measured setups take 0.2-0.5 s over UDP and
   2.4-3.1 s through TURN; the margin covers ten racers' 90 subscription calls and one API call
@@ -302,10 +321,16 @@ credentials are sent only to their owner. No message carries another player's SD
 TURN credentials or address. The native client has no peer signaling or TURN mesh path: a TURN
 relay only ever carries that player's own traffic to the SFU.
 
-The API limit is 50 requests/session/second; mutations are serialized, and channels use one
-publication batch and one subscription batch per publisher. API operations have a 15 s timeout.
+The API limit is 50 requests/session/second. Mutations that touch several racers' sessions
+(publications, subscriptions, closes) run one after another in the room's queue; a racer's own
+first session of the race (`sessions/new`) and its TURN credentials don't wait in it (finding 175).
+Each racer has one publication batch; the subscriptions run in one coalesced pass per race
+outside the queue (each subscriber's publishers one call each, subscribers in parallel). API
+operations have a 15 s timeout.
 A lost WebRTC connection has a 30 s session reuse window; the game reports failure and rejoins
-with a fresh session rather than retaining a broken connection. See finding 158 for live checks.
+with a fresh session rather than retaining a broken connection (`sfu_restart`, above). A lost
+room WebSocket leaves the SFU session up: the race goes on over it while the game rejoins.
+See finding 158 for live checks.
 
 ### PING, type 3 — client → server; PONG, type 4 — server → client
 
@@ -446,17 +471,25 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
   `{"type":"error","code":"too_fast","message":"Slow down: too many messages."}`, and the next
   window over a cap closes it: `too_fast` "Disconnected: too many messages.", close 4012, and the
   member leaves as a disconnect.
-- No reconnect in version 1: a dropped racer is handed to AI for the rest of the race.
 - Rejoin (finding 137). Each member has a random rejoin token, sent only in its own `welcome`
   (never in `room` or anywhere else). A client keeps it for that room, and when its connection
   drops it says hello again with `"rejoinToken"`: the member with that token is taken back at
   once (id, host, rider, Ready), whether its old socket has closed yet or not; the old socket is
   closed (1000, `replaced`). A name alone takes no member back: a hello without a token, or with
   one no member has, joins as a new member, as any player whose name is already in the room does
-  (names are not unique). A socket that ends without a close frame (1006) outside its race keeps
-  its member 20 s for the rejoin (it doesn't race meanwhile); a member whose socket sends nothing
-  for 20 s leaves as a disconnect and the socket is closed (1001, `silent`). A clean close (1000)
-  or a drop during the member's race leaves at once.
+  (names are not unique). A socket that ends without a close frame (1006) keeps its member 20 s
+  for the rejoin; a member whose socket sends nothing for 20 s leaves as a disconnect and the
+  socket is closed (1001, `silent`). A clean close (1000) leaves at once.
+- In a race (finding 175): a racer whose hello listed `"race_rejoin"` and whose socket drops
+  (1006) stays in its race through those 20 s; the game races on over the SFU meanwhile (STATE
+  and EVENT never use the room socket), so the others see its rider move. Its rejoin hello sends
+  `raceStartAt`; the welcome says `race` (above) and is followed by what it missed: `left` for
+  each racer gone since, its channels (`sfu_channels` with `full`) and `sfu_ready`, or, when the
+  hello names another race or none (it missed the `start`), the `start` again for its slot. Its
+  game then sends its `finish` or `back` again if it had sent one while the socket was down. Not
+  back in 20 s: out of the race as a racer who leaves (`left`, the host's AI takes the rider). A
+  racer without `race_rejoin` (older releases drop their SFU with the socket) leaves its race at
+  the drop, as before. A rejoin refused with `rate_limited` is tried again by the game.
 - A server restart (a deploy) drops every socket with no close event. A lobby client says hello
   again with its token and gets its member back; members not back within the hello timeout leave
   as disconnects.

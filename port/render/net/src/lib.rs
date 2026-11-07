@@ -53,6 +53,8 @@ unsafe impl Sync for WsHandler {}
 const PEEK: Duration = Duration::from_millis(50);
 /// The send thread's tick.
 const TICK: Duration = Duration::from_millis(10);
+/// A connection that lasted this long starts the attempts' count again.
+const LASTING: Duration = Duration::from_secs(5);
 
 /// The open connection: the WebSocket and the socket's handle for shutting it down.
 struct Live {
@@ -81,6 +83,9 @@ pub struct WsConn {
     wake: Condvar,
     live: Mutex<Option<Live>>,
     stopping: AtomicBool,
+    /// The send thread holds an SFU association for a race: race frames are taken while the room
+    /// connection is down (finding 175), the race goes on over it.
+    sfu_live: AtomicBool,
     /// set while the receive thread runs; cleared (and `ended` notified) when it ends
     running: Mutex<bool>,
     ended: Condvar,
@@ -136,7 +141,7 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
     while !c.stopping.load(Ordering::Acquire) {
         let (code, reason) = match stream::connect_ws(&url) {
             Ok((ws, tcp, peek)) => {
-                attempt = 0;
+                let opened = std::time::Instant::now();
                 {
                     let mut live = lock(&c.live);
                     let mut q = lock(&c.queue);
@@ -151,6 +156,9 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                 let end = receive(&c, &peek);
                 c.wait_handled(Duration::from_secs(1));
                 c.force_close();
+                // A refusal (a rate limit) or a connection that ends at once counts as a failed
+                // attempt, so the backoff grows and the attempts end (finding 175).
+                if opened.elapsed() >= LASTING { attempt = 0; }
                 end
             }
             Err(why) => (-1, why),
@@ -249,6 +257,10 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
+    // The race's start message (a rejoin starts the association again from it) and the SFU's
+    // signaling made while the room connection was down, sent after the rejoin's welcome.
+    let mut last_start: Option<serde_json::Value> = None;
+    let mut held: Vec<serde_json::Value> = Vec::new();
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
@@ -256,7 +268,10 @@ fn send_main(c: Arc<WsConn>) {
             let (mut q, _) = c.wake.wait_timeout_while(q, wait, |q| q.out.is_empty() && q.incoming.is_empty() && !q.sfu_input && !c.stopping.load(Ordering::Acquire)).unwrap_or_else(|e| e.into_inner());
             q.sfu_input = false;
         }
-        if !lock(&c.queue).connected { sfu = None; continue; }
+        let connected = lock(&c.queue).connected;
+        // The room connection is down: the race goes on over the SFU while the receive thread
+        // rejoins (finding 175); without an association there is nothing to do.
+        if !connected && sfu.is_none() { c.sfu_live.store(false, Ordering::Release); continue; }
         // Lobby and SFU callbacks share this thread. Apply the transport's start marker
         // before the game sees start, then deliver any early reliable race events.
         loop {
@@ -264,22 +279,45 @@ fn send_main(c: Arc<WsConn>) {
             let Some((binary, data)) = item else { break };
             if !binary {
                 if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data) {
-                    if matches!(message["type"].as_str(), Some("start" | "ended" | "welcome")) {
+                    let welcome = message["type"] == "welcome";
+                    let race_at = message["race"]["startAt"].as_u64();
+                    // A rejoin's welcome back into this association's race: it stays, and so
+                    // does what it said meanwhile.
+                    let keep = welcome && message["race"]["sfu"] == "ready" &&
+                        sfu.as_ref().is_some_and(|rtc| rtc.race() != 0 && race_at == Some(rtc.race()));
+                    if matches!(message["type"].as_str(), Some("start" | "ended")) || (welcome && !keep) {
                         lock(&c.queue).out.retain(|(binary, bytes)| !*binary || !matches!(bytes.first(), Some(5 | 6)));
                     }
                     let result = if message["type"] == "start" {
-                        match sfu::Sfu::start(wake.clone()) {
-                            Ok((rtc, offer)) => {
-                                let mut rtc = rtc;
-                                let result = rtc.signal(&message);
-                                sfu = Some(rtc);
-                                lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
-                                result
+                        last_start = Some(message.clone());
+                        held.clear();
+                        start_sfu(&c, &wake, &message, &mut sfu)
+                    } else if message["type"] == "ended" {
+                        last_start = None;
+                        held.clear();
+                        sfu = None;
+                        Ok(())
+                    } else if keep {
+                        let mut q = lock(&c.queue);
+                        for m in held.drain(..) { q.out.push_back((false, m.to_string().into_bytes())); }
+                        Ok(())
+                    } else if welcome {
+                        held.clear();
+                        sfu = None;
+                        // Back in this race with its session still being set up, or lost here: a
+                        // new one from the race's start (the room clears the old on sfu_restart).
+                        let start = last_start.clone().filter(|s| race_at.is_some() && s["startAt"].as_u64() == race_at);
+                        match start {
+                            Some(start) => {
+                                eprintln!("net: SFU: back in the race; its session starts again");
+                                lock(&c.queue).out.push_back((false, br#"{"type":"sfu_restart"}"#.to_vec()));
+                                start_sfu(&c, &wake, &start, &mut sfu)
                             }
-                            Err(e) => Err(e),
+                            None => {
+                                last_start = None;
+                                Ok(())
+                            }
                         }
-                    } else if message["type"] == "ended" || message["type"] == "welcome" {
-                        sfu = None; Ok(())
                     } else if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) };
                     if result.is_err() {
                         eprintln!("net: SFU signaling failed"); c.force_close(); sfu = None; break;
@@ -300,12 +338,19 @@ fn send_main(c: Arc<WsConn>) {
         if let Some(rtc) = sfu.as_mut() {
             match rtc.poll() {
                 Ok((text, frames)) => {
-                    for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
+                    // While the room connection is down its signaling waits for the rejoin.
+                    if lock(&c.queue).connected {
+                        for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
+                    } else {
+                        held.extend(text);
+                    }
                     incoming = frames;
                 }
+                // The welcome of this drop's rejoin starts a new session.
                 Err(_) => { eprintln!("net: SFU connection failed"); c.force_close(); sfu = None; }
             }
         }
+        c.sfu_live.store(sfu.is_some(), Ordering::Release);
         for data in incoming {
             if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
         }
@@ -318,6 +363,16 @@ fn send_main(c: Arc<WsConn>) {
             }
         }
     }
+}
+
+/// A race's association from its start message; its offer goes to the room.
+fn start_sfu(c: &WsConn, wake: &sfu::Wake, start: &serde_json::Value, sfu: &mut Option<sfu::Sfu>) -> Result<(), Box<dyn std::error::Error>> {
+    let (mut rtc, offer) = sfu::Sfu::start(wake.clone())?;
+    let result = rtc.signal(start);
+    *sfu = Some(rtc);
+    lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
+    c.sfu_live.store(true, Ordering::Release);
+    result
 }
 
 /// Sends what is queued, in order: race frames to the SFU association, the rest on the WebSocket.
@@ -361,6 +416,7 @@ pub unsafe extern "C" fn ws_start(url: *const c_char, h: *const WsHandler) -> *m
         wake: Condvar::new(),
         live: Mutex::new(None),
         stopping: AtomicBool::new(false),
+        sfu_live: AtomicBool::new(false),
         running: Mutex::new(true),
         ended: Condvar::new(),
         threads: Mutex::new(None),
@@ -383,7 +439,9 @@ pub unsafe extern "C" fn ws_send(ws: *mut WsConn, binary: c_int, data: *const c_
     let Some(c) = (unsafe { ws.as_ref() }) else { return };
     let bytes = if n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(data as *const u8, n) }.to_vec() };
     let mut q = lock(&c.queue);
-    if !q.connected {
+    let race_frame = binary != 0 && matches!(bytes.first(), Some(5 | 6));
+    // Race frames go on over the SFU while the room connection is down (finding 175).
+    if !q.connected && !(race_frame && c.sfu_live.load(Ordering::Acquire)) {
         return;
     }
     if q.out.len() >= 256 {
