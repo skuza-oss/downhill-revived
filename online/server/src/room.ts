@@ -1,6 +1,6 @@
 // One lobby and its race. Lobby control is JSON; the race is binary frames relayed to the other
 // racers through the SFU; this object owns lobby and signaling. Protocol: docs/online-protocol.md.
-import { Realtime, Turn, TURN_TTL_S, type SfuSession, type SfuSecrets } from "./sfu";
+import { Realtime, Turn, TURN_TTL_S, clientChannels, type Allocation, type SfuSession, type SfuSecrets } from "./sfu";
 import { DurableObject } from "cloudflare:workers";
 import { LISTING_REFRESH_MS, type LobbyEntry } from "./lobbies";
 import {
@@ -37,10 +37,11 @@ import {
 
 /** A racer's Realtime setup, from the race's start message to its channels acknowledged, has
     this long (SFU_SETUP_MS overrides it); one not done by then is out of the race (finding 158,
-    release review round 2). Measured setups take 0.2-0.5 s over UDP and 2.4-3.1 s through the
-    TURN fallback; ten racers' subscriptions are 90 serialized API calls more. 25 s leaves room for
-    those and for one call that runs into its 15 s timeout, and ends before the game's 30 s wait
-    for the others' rides (port/hle/online.c), which travel over the released channels. */
+    release review round 2). A member connected before its grid locked has nothing left to do but
+    acknowledge (finding 177); a newcomer's own session takes 0.7-1.5 s over UDP and about 3 s
+    through the TURN fallback, then its pairs' calls, SUBSCRIBE_PARALLEL at once per subscriber.
+    25 s leaves room for one call that runs into its 15 s timeout, and ends before the game's 30 s
+    wait for the others' rides (port/hle/online.c), which travel over the released channels. */
 const SFU_SETUP_MS = 25_000;
 /** A racer whose own Realtime connection isn't up this long after the race's start message (no
     sfu_connected: UDP and the TURN fallback both failed, or the game never offered) leaves the race
@@ -53,8 +54,14 @@ const SFU_SETUP_MS = 25_000;
     holds in a full room too: at most about 4 s from the start message; 10 s keeps 2.5 times that
     and shortens the others' wait on the load screen for a racer who never connects (15 s before). */
 const SFU_CONNECT_MS = 10_000;
-/** A subscription pass waits at most this long after a publish for racers still connecting. */
-const SUBSCRIBE_WAIT_MS = 1_500;
+/** A subscriber's subscription calls run this many at once (finding 177, question C: concurrent
+    datachannels/new calls on one connected session all succeeded against the real API). */
+const SUBSCRIBE_PARALLEL = 4;
+/** A member may start this many Realtime sessions (sfu_offer) in SFU_OFFER_WINDOW_MS: one when it
+    joins, and a new one after a failure, a lost connection or a TURN renewal (finding 177). Each
+    costs API calls on the others' sessions too. */
+const SFU_OFFERS = 6;
+const SFU_OFFER_WINDOW_MS = 300_000;
 /** Sent to a racer whose Realtime setup failed or ran out of time; it is out of the race (the room
     stays). The footer holds about 45 characters. */
 const SFU_FAILED_MESSAGE = "Realtime connection failed: out of the race.";
@@ -79,8 +86,8 @@ const CLEANUP_FIRST_MS = 5_000;
 const CLEANUP_MAX_MS = 300_000;
 /** A session's channels are given up after an hour, as a TURN credential is. Cloudflare documents
     no end for a connected DataChannel-only session (Realtime SFU limits: only a session that lost
-    its connection ends, after 30 s), and a game drops its association at the race's end, so only
-    a modified one keeps it that long. */
+    its connection ends, after 30 s); a session whose close failed belongs to a member who left or
+    replaced it, and its game dropped that association, so it ends 30 s later anyway. */
 const SFU_CLEANUP_MS = TURN_TTL_S * 1000;
 
 /** A claimed room nobody joined is dropped after this long. */
@@ -98,9 +105,6 @@ const REJOIN_GRACE_MS = 20_000;
 const REPLACED_CLOSE = 1000;
 /** A hello feature (finding 175): see Member.raceRejoin. */
 const FEATURE_RACE_REJOIN = "race_rejoin";
-/** Realtime sessions a rejoined racer may start again in one race (sfu_restart): each costs API
-    calls, and one is all an honest game needs per drop. */
-const SFU_RESTARTS = 3;
 
 /** A member's rejoin token (finding 137): 16 random bytes in hex, sent only to that member's game
     in its welcome. Its rejoin hello sends it back and gets the member again; nothing else does. */
@@ -132,21 +136,25 @@ interface Member {
       connection is down and rejoins its race (finding 175). Older games drop their SFU with the
       socket, so a drop in their race still takes them out of it at once. */
   raceRejoin?: boolean;
-  /** The race (its startAt) and how many times this member restarted its Realtime session in it
-      after a rejoin (sfu_restart, at most SFU_RESTARTS). */
-  restartRace?: number;
-  restarts?: number;
-  /** The race (startAt) whose sfu_ready this member got: one per race, again only after its
-      session started again (sfu_restart). Stored with the room (finding 175). */
-  releasedRace?: number;
+  /** This member's Realtime session for its whole stay in the room (finding 177): made from its
+      game's sfu_offer when it joins, kept across races with its two publications and its
+      subscriptions; closed when the member leaves, when it fails, or when the game offers again
+      (a new session replaces it). */
   sfu?: SfuSession;
-  sfuRace?: number;
-  sfuReady?: boolean;
-  /** The race whose sfu_connected this member sent (set on arrival, before the SFU queue). */
-  sfuConnectedRace?: number;
-  /** The race this member got TURN credentials for (one mint per member per race), and their
-      username, kept to revoke them; neither ever goes to a client but its own sfu_turn. */
-  turnRace?: number;
+  /** Counts this member's offers: work begun for an older session is dropped when it ends. */
+  sfuAttempt?: number;
+  /** When this member's recent offers came (at most SFU_OFFERS in SFU_OFFER_WINDOW_MS). */
+  sfuOffers?: number[];
+  /** sfu_connected came for the current session (set on arrival, before its publication). */
+  sfuConnected?: boolean;
+  /** The race (startAt) this member acknowledged its channels for (sfu_ready). */
+  sfuReadyRace?: number;
+  /** The race (startAt) whose sfu_ready this member got: one per race, again only after a new
+      session. Stored with the room (finding 175). */
+  releasedRace?: number;
+  /** The session (its sfuAttempt) this member got TURN credentials for (one mint per session), and
+      their username, kept to revoke them; neither ever goes to a client but its own sfu_turn. */
+  turnAttempt?: number;
   turnUser?: string;
   /** When those credentials end by themselves (their TTL). */
   turnUntil?: number;
@@ -433,20 +441,18 @@ export class Room extends DurableObject<Env> {
     const isHost = st.hostId === me.id;
 
     if (m.type.startsWith("sfu_")) {
-      if (m.type === "sfu_connected" && st.race && me.sfuRace === st.race.startAt) me.sfuConnectedRace = st.race.startAt;
+      if (m.type === "sfu_connected" && me.sfu) me.sfuConnected = true;
       // Serialize across external awaits without holding the DO input gate. What touches only this
-      // racer's own session runs at once, in parallel with the others' (2026-11-07, finding 175):
+      // member's own session runs at once, in parallel with the others' (2026-11-07, finding 175):
       // its publish (sfu_connected; 7 racers' publishes took 6 s one after another in the queue),
-      // its TURN credentials and its first session of the race (the last racers' answers and a
-      // TURN racer's credentials came seconds late behind the others' work, eating into
-      // SFU_CONNECT_MS). A late session is still closed if the race moved on (onSfu's sfuCurrent
-      // checks); restarts and closes stay in the queue.
-      const own = m.type === "sfu_connected" || m.type === "sfu_turn" || (m.type === "sfu_offer" && !me.sfu);
+      // its TURN credentials, its acknowledgement and its first session (the last racers' answers
+      // and a TURN racer's credentials came seconds late behind the others' work). A session made
+      // for an offer that a newer one replaced is dropped (onSfu's attempt checks). An offer that
+      // replaces a session stays in the queue: the old one's channels close first.
+      const own = m.type !== "sfu_offer" || !me.sfu;
       const run = own ? this.onSfu(ws, me, m) : this.sfuQueue.then(() => this.onSfu(ws, me, m));
       if (!own) this.sfuQueue = run.then(() => {}, () => {});
-      const failed = await run.catch(() => undefined);
-      // Out of the race outside the queue: its end (closeRace) waits for the queue.
-      if (failed) await this.retireSfu(failed.ids, failed.startAt);
+      if (await run.catch(() => false)) await this.sfuFailed([me.id]);
       return;
     }
     switch (m.type) {
@@ -512,7 +518,6 @@ export class Room extends DurableObject<Env> {
         for (const x of st.members) x.ready = false;
         this.rebuildRace();
         this.broadcast({ type: "ended" });
-        await this.closeRaceSfu(st);
         return this.changed();
       case "leave":
         await this.leave(me.id, "leave");
@@ -585,27 +590,28 @@ export class Room extends DurableObject<Env> {
       return;
     }
     const race = st.race;
-    if (race && !race.sfuReleased && this.missingSubscription(race)) void this.subscribePass(race);
+    // A pass that an eviction cut short, or a pair still missing for the coming or running race.
+    if (this.sfuWork()) void this.subscribePass();
     // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
     if (race && !race.sfuReleased && race.sfuConnectBy != null && now >= race.sfuConnectBy) {
       race.sfuConnectBy = undefined;
       const racers = st.members.filter(x => this.inRace(st, x.id));
-      const lost = racers.filter(x => !(x.sfuRace === race.startAt &&
-        (x.sfuConnectedRace === race.startAt || x.sfu?.phase === "ready")));
+      const lost = racers.filter(x => !(x.sfuConnected || x.sfu?.phase === "ready"));
       console.log(`room ${st.code}: Realtime setup after ${now - race.startAt + START_LEAD_MS} ms: ` + racers.map(x =>
-        `${x.id}${x.region ? "/" + x.region : ""}:${x.sfuRace !== race.startAt ? "no-offer" : x.sfuReady ? "ready" :
-          x.sfuConnectedRace === race.startAt || x.sfu?.phase === "ready" ? "connected" : x.turnRace === race.startAt ? "turn" : "offered"}`).join(" "));
-      if (lost.length) await this.retireSfu(lost.map(x => x.id), race.startAt);
+        `${x.id}${x.region ? "/" + x.region : ""}:${!x.sfu ? "no-session" : x.sfuReadyRace === race.startAt ? "ready" :
+          x.sfuConnected || x.sfu.phase === "ready" ? "connected" : x.turnAttempt === x.sfuAttempt ? "turn" : "offered"}`).join(" "));
+      if (lost.length) await this.retireSfu(lost.map(x => x.id), race.startAt, false);
       else await this.save();  // the check is done: not again after an eviction (finding 175)
     }
     // Every racer ready but no release yet (a reconcile that never asked again, finding 175):
     // asked again each tick; releaseSfu does nothing until every racer is ready.
     if (race && st.race === race && !race.sfuReleased) this.releaseSfu(st);
-    // Realtime setup not done in time (SFU_SETUP_MS): those racers are out, the rest go on.
+    // Realtime setup not done in time (SFU_SETUP_MS): those racers are out, the rest go on; a
+    // connected one's channels never opened, so its game starts a new session.
     if (race && st.race === race && !race.sfuReleased && race.sfuBy != null && now >= race.sfuBy) {
       const late = st.members.filter(x => this.inRace(st, x.id) &&
-        !(x.sfuRace === race.startAt && x.sfuReady && x.sfu?.phase === "ready")).map(x => x.id);
-      if (late.length) await this.retireSfu(late, race.startAt);
+        !(x.sfuReadyRace === race.startAt && x.sfu?.phase === "ready")).map(x => x.id);
+      if (late.length) await this.retireSfu(late, race.startAt, true);
     }
     if (st.session) {
       if (st.race?.finishEndsAt != null && now >= st.race.finishEndsAt) {
@@ -857,14 +863,15 @@ export class Room extends DurableObject<Env> {
       roomRegion: this.region(st),
       // Only this game gets it; its rejoin hello sends it back (finding 137).
       rejoinToken: member.token,
-      // Back in a running race (finding 175): which one, and whether this racer's Realtime
-      // session is up here ("ready": keep it) or still being set up ("setup": start it again).
-      // A game that missed the race's start (its hello names another race or none) gets the
-      // start again, and its session is made anew: "setup".
-      ...(backInRace ? { race: { startAt: st.race!.startAt,
-        sfu: member.sfu?.phase === "ready" && m.raceStartAt === st.race!.startAt ? "ready" : "setup" } } : {}),
+      // Whether the room holds a Realtime session for this member (finding 177): "ready", its game
+      // keeps its association if it has one (a rejoin), else offers a new session; "setup", none
+      // here (a new member, or its session ended): its game offers one.
+      sfu: member.sfu && member.sfu.phase !== "failed" ? "ready" : "setup",
+      // Back in a running race (finding 175): which one. A game that missed the race's start (its
+      // hello names another race or none) gets the start again.
+      ...(backInRace ? { race: { startAt: st.race!.startAt } } : {}),
     });
-    if (backInRace) this.raceCatchUp(ws, st, member, m.raceStartAt);
+    if (ghost) this.catchUp(ws, st, member, backInRace, m.raceStartAt);
     this.probeColo();
     // First ping right away so the lobby shows a delay quickly.
     this.send(ws, { type: "ping", s: Date.now() });
@@ -872,100 +879,93 @@ export class Room extends DurableObject<Env> {
     this.broadcastWhere();
   }
 
-  /** One Realtime signaling message (docs/online-protocol.md), run in the SFU queue. Returns the
-      racers whose setup failed for good: the caller takes them out of the race (retireSfu). */
-  private async onSfu(ws: WebSocket, me: Member, m: Msg): Promise<{ startAt: number; ids: number[] } | undefined> {
-    if (this.sockets.get(me.id) !== ws || !this.state?.members.includes(me)) return;
-    const race = this.state.race;
-    if (!race || !this.inRace(this.state, me.id)) {
-      this.error(ws, "bad_value", "Realtime requires an active race.");
-      return;
-    }
-    if (m.type === "sfu_restart") {
-      // A rejoined racer whose session was still being set up, or whose game lost it (finding
-      // 175): what the room has for it goes, and its next sfu_offer starts a new one. The others'
-      // subscriptions to its old channels close (sfu_closed) and come back with the new ones.
-      if (!me.raceRejoin) { this.error(ws, "bad_value", "Unknown signaling message."); return; }
-      if (me.restartRace !== race.startAt) { me.restartRace = race.startAt; me.restarts = 0; }
-      if ((me.restarts ?? 0) >= SFU_RESTARTS) { this.error(ws, "bad_value", "No more Realtime restarts in this race."); return; }
-      me.restarts = (me.restarts ?? 0) + 1;
-      if (me.sfu || me.turnUser) await this.clearSfu(me);
-      delete me.sfuRace; delete me.sfuReady; delete me.turnRace; delete me.sfuConnectedRace; delete me.releasedRace;
-      await this.save();
-      return;
-    }
+  /** One Realtime signaling message from a member (docs/online-protocol.md). Returns true when its
+      session failed for good: the caller ends it (sfuFailed). */
+  private async onSfu(ws: WebSocket, me: Member, m: Msg): Promise<boolean> {
+    if (this.sockets.get(me.id) !== ws || !this.state?.members.includes(me)) return false;
+    const st = this.state;
     const api = new Realtime(this.env as Env & SfuSecrets);
     try {
       if (m.type === "sfu_offer") {
-        if (me.sfuRace === race.startAt) {
-          this.error(ws, "bad_value", "One Realtime session per race.");
-          return;
+        // A member's session for its stay in the room (finding 177); a new offer replaces the old
+        // one (its game lost it, or renews its TURN relay), within SFU_OFFERS a window.
+        const now = Date.now();
+        me.sfuOffers = (me.sfuOffers ?? []).filter((t) => now - t < SFU_OFFER_WINDOW_MS);
+        if (me.sfuOffers.length >= SFU_OFFERS) {
+          this.error(ws, "bad_value", "Too many Realtime sessions: wait a few minutes.");
+          return false;
         }
-        me.sfuRace = race.startAt;
-        me.sfuReady = false;
+        me.sfuOffers.push(now);
+        const attempt = (me.sfuAttempt ?? 0) + 1;
+        me.sfuAttempt = attempt;
+        if (me.sfu || me.turnUser) await this.clearSfu(me);
         await this.save();
-        if (me.sfu) await this.clearSfu(me);
         const opened = await api.open(m.sdp);
+        // Replaced meanwhile, or gone: a session nobody connects ends by itself after 30 s.
+        if (me.sfuAttempt !== attempt || !this.state?.members.includes(me)) return false;
         me.sfu = opened.session;
-        if (!this.sfuCurrent(race, me)) {
-          await this.clearSfu(me); return;
-        }
         await this.save();
         this.send(ws, opened.message);
-      } else if (m.type === "sfu_connected" && me.sfu) {
-        const channels = await api.publish(me.id, me.sfu);
-        this.send(ws, { type: "sfu_channels", channels });
-        if (!this.sfuCurrent(race, me)) {
-          await this.clearSfu(me); return;
+      } else if (m.type === "sfu_connected") {
+        const session = me.sfu;
+        if (!session || session.phase !== "connect") return false;  // a repeat, or none to publish
+        const channels = await api.publish(me.id, session);
+        if (me.sfu !== session || !this.state?.members.includes(me)) {
+          // Replaced or cleared during the call: what it allocated closes with that session.
+          await api.close(session).catch(() => undefined);
+          return false;
         }
+        this.send(ws, { type: "sfu_channels", channels: clientChannels(channels) });
         await this.save();
-        // Subscriptions run in one coalesced pass (subscribePass), not here: run per connect,
-        // every racer's connect re-ran them in the queue one after another, and rooms of 6-8
-        // racers missed SFU_SETUP_MS (2026-11-07 logs: 24 calls for 6 racers, 25 s).
-        this.kickSubscribe(race);
-      } else if (m.type === "sfu_turn" && me.sfu && me.sfuRace === race.startAt) {
-        // UDP to the SFU did not connect for this racer: TURN over TLS (finding 158, round 4).
-        if (me.turnRace === race.startAt) {
-          this.error(ws, "bad_value", "One TURN credential per race.");
-          return;
-        }
-        me.turnRace = race.startAt;
+        // Subscriptions run in one coalesced pass (subscribePass): a newcomer to the coming or
+        // running race gets its missing pairs; anyone else waits for its next grid.
+        this.kickSubscribe();
+      } else if (m.type === "sfu_turn") {
+        // UDP to the SFU did not connect for this member: TURN over TLS (finding 158, round 4).
+        const attempt = me.sfuAttempt;
+        if (!me.sfu) { this.error(ws, "bad_value", "TURN requires a Realtime session."); return false; }
+        if (me.turnAttempt === attempt) { this.error(ws, "bad_value", "One TURN credential per session."); return false; }
+        me.turnAttempt = attempt;
         await this.save();
         await this.clearTurn(me);
         let minted: Awaited<ReturnType<Turn["mint"]>>;
         try {
-          minted = await new Turn(this.env as Env & SfuSecrets).mint(`room-${this.state?.code ?? ""}-m${me.id}`);
+          minted = await new Turn(this.env as Env & SfuSecrets).mint(`room-${st.code}-m${me.id}`);
         } catch (error) {
-          // No relay: the racer's UDP attempt goes on (its session stays usable); nothing sent.
+          // No relay: the member's UDP attempt goes on (its session stays usable); nothing sent.
           console.warn("TURN credentials unavailable", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-          return;
+          return false;
         }
         me.turnUser = minted.username;
         me.turnUntil = Date.now() + TURN_TTL_S * 1000;
-        if (!this.sfuCurrent(race, me) || this.sockets.get(me.id) !== ws) {
-          await this.clearTurn(me); await this.save(); return;
+        if (me.sfuAttempt !== attempt || !this.state?.members.includes(me) || this.sockets.get(me.id) !== ws) {
+          await this.clearTurn(me); await this.save(); return false;
         }
         await this.save();
         this.send(ws, minted.message);
-      } else if (m.type === "sfu_ready" && me.sfu?.phase === "ready") {
-        me.sfuReady = true;
+      } else if (m.type === "sfu_ready") {
+        // Its channels for this race are open (an older race's acknowledgement counts for nothing).
+        const race = st.race;
+        if (!race || !this.inRace(st, me.id) || me.sfu?.phase !== "ready") return false;
+        if (m.race !== undefined && m.race !== race.startAt) return false;
+        if (me.sfuReadyRace === race.startAt) return false;
+        me.sfuReadyRace = race.startAt;
+        this.releaseSfu(st);
         await this.save();
-        this.releaseSfu(this.state!);
-      } else throw new Error("Invalid signaling phase");
+      } else this.error(ws, "bad_value", "Unknown signaling message.");
+      return false;
     } catch (error) {
       let detail = error instanceof Error ? error.message : "unknown";
       const secrets = this.env as Env & SfuSecrets;
       for (const value of [secrets.REALTIME_APP_ID, secrets.REALTIME_APP_TOKEN, secrets.TURN_KEY_ID, secrets.TURN_KEY_API_TOKEN])
         if (value) detail = detail.replaceAll(value, "<redacted>");
       console.warn("Realtime setup failed", detail.slice(0, 200));
-      // No second attempt in this race (a partly made allocation must not be doubled): the racer
-      // is out of it, and the others go on without waiting for it.
+      // No retry of the call (a partly made allocation must not be doubled): the session ends.
       if (me.sfu) me.sfu.phase = "failed";
       await this.save();
-      return { startAt: race.startAt, ids: [me.id] };
+      return true;
     }
   }
-
   private onPong(memberId: number, s: unknown): void {
     if (typeof s !== "number") return;
     const rtt = Date.now() - s;
@@ -1189,6 +1189,10 @@ export class Room extends DurableObject<Env> {
     });
     this.broadcastRoom();
     this.updateListing();
+    // Racers whose sessions were up at the grid's lock are subscribed already (finding 177): their
+    // games acknowledge at once. This pass adds what is still missing (a racer that connected
+    // since) and closes the subscriptions of members sitting this race out.
+    this.kickSubscribe(true);
   }
 
   /** The race's start for the racer in `slot`. */
@@ -1201,27 +1205,27 @@ export class Room extends DurableObject<Env> {
       serverTime: now, startAt: race.startAt };
   }
 
-  /** What a racer back in its race missed while its socket was down (finding 175), after the
-      welcome: the start, if its hello names another race (`known`, the game's raceStartAt) or none;
-      else the racers who left meanwhile, its channels (all of them: the game keeps those it has and
-      drops the others) and, once the race's traffic flows, sfu_ready. The race data itself never
+  /** What a member back with its token missed while its socket was down, after the welcome. In
+      its race (finding 175): the start, if its hello names another race (`known`, the game's
+      raceStartAt) or none, and the racers who left meanwhile. Then, in the race or not, its
+      channels (all of them: the game keeps those it has and drops the others, finding 177) and,
+      once the race's traffic flows and it had acknowledged, sfu_ready. The race data itself never
       waited: it goes over the SFU. */
-  private raceCatchUp(ws: WebSocket, st: RoomState, me: Member, known: unknown): void {
-    const race = st.race!;
-    const slot = race.slots.indexOf(me.id);
-    if (known !== race.startAt) {
-      // Its game has no session for this race: whatever the room has for it goes.
-      delete me.sfuRace; delete me.sfuReady; delete me.turnRace; delete me.sfuConnectedRace; delete me.releasedRace;
-      if (me.sfu || me.turnUser) this.queueClear(me);
-      this.send(ws, this.startMessage(race, slot, Date.now()));
+  private catchUp(ws: WebSocket, st: RoomState, me: Member, inRace: boolean, known: unknown): void {
+    const race = st.race;
+    if (race && inRace) {
+      if (known !== race.startAt) this.send(ws, this.startMessage(race, race.slots.indexOf(me.id), Date.now()));
+      for (const left of race.left) {
+        const id = race.slots[left], r = race.results?.find((x) => x.id === id);
+        this.send(ws, { type: "left", slot: left, memberId: id, reason: r?.ticks !== undefined ? "finished" : r?.dnfReason ?? "left" });
+      }
     }
-    for (const left of race.left) {
-      const id = race.slots[left], r = race.results?.find((x) => x.id === id);
-      this.send(ws, { type: "left", slot: left, memberId: id, reason: r?.ticks !== undefined ? "finished" : r?.dnfReason ?? "left" });
-    }
-    if (known === race.startAt && me.sfu?.phase === "ready") {
-      this.send(ws, { type: "sfu_channels", full: true, channels: me.sfu.channels });
-      if (race.sfuReleased) { this.send(ws, { type: "sfu_ready" }); me.releasedRace = race.startAt; }
+    if (me.sfu?.phase === "ready") {
+      this.send(ws, { type: "sfu_channels", full: true, channels: clientChannels(me.sfu.channels) });
+      if (race && inRace && race.sfuReleased && me.sfuReadyRace === race.startAt) {
+        this.send(ws, { type: "sfu_ready", race: race.startAt });
+        me.releasedRace = race.startAt;
+      }
     }
   }
 
@@ -1253,65 +1257,104 @@ export class Room extends DurableObject<Env> {
     await this.changed();
   }
 
-  /** `member` is still a racer of `race`, the room's running race. */
-  private sfuCurrent(race: Race, member: Member): boolean {
+  /** Whom subscriptions are for now (finding 177): the running race's racers, or, during the
+      countdown before a race, the locked grid's members still in the room, so that the race's
+      start finds them subscribed (the pre-setup). Null between races. */
+  private sfuGroup(): Member[] | null {
     const st = this.state;
-    return !!st && st.race === race && st.members.includes(member) && this.inRace(st, member.id);
-  }
-
-  /** The racers of `race` whose publication is up (their own channels allocated). */
-  private sfuRacers(race: Race): Member[] {
-    const st = this.state;
-    if (!st || st.race !== race) return [];
-    return st.members.filter(x => this.inRace(st, x.id) && x.sfuRace === race.startAt && x.sfu?.phase === "ready");
-  }
-
-  /** A subscriber and the publisher it has no subscription to yet, among those racers. */
-  private missingSubscription(race: Race): [Member, Member] | null {
-    const racers = this.sfuRacers(race);
-    for (const a of racers) for (const b of racers)
-      if (a !== b && !a.sfu!.channels.some(c => !c.local && c.memberId === b.id)) return [a, b];
+    if (!st) return null;
+    if (st.race) return st.members.filter((x) => this.inRace(st, x.id));
+    if (st.grid?.length) return st.members.filter((x) => st.grid!.includes(x.id) && this.sockets.has(x.id));
+    // A room with the old rules has no grid: its countdown runs only with everyone ready.
+    if (!st.session && st.countdownEndsAt != null) return st.members.filter((x) => this.sockets.has(x.id));
     return null;
   }
 
-  /** Subscribes every published racer of `race` to every other one's publication it lacks, each
-      endpoint told only its own allocations. Leaves and kicks are not queued with this, so the
-      racers are read again after every API call: a departure during one can't make it skip a
-      remaining racer (release review round 2, finding 158). It ends when no pair is missing.
-      Returns the subscribers whose call failed: their session is failed (no second attempt) and
-      the caller takes them out of the race. */
-  private async subscribeRacers(api: Realtime, race: Race): Promise<number[]> {
+  /** `sub` holds a live subscription to `pub`'s current publication: one made to its present
+      session (a subscription to an earlier session of `pub` is stale, subscribePass closes it). */
+  private subscribed(sub: Member, pub: Member): boolean {
+    return !!sub.sfu?.channels.some((c) => !c.local && c.memberId === pub.id && c.session === pub.sfu?.id);
+  }
+
+  /** A subscriber and a publisher of `group` with no subscription between them yet, among those
+      whose publication is up. */
+  private missingSubscription(group: Member[]): [Member, Member] | null {
+    const published = group.filter((x) => x.sfu?.phase === "ready");
+    for (const a of published) for (const b of published) if (a !== b && !this.subscribed(a, b)) return [a, b];
+    return null;
+  }
+
+  /** Remote channels of `sub` that no longer lead anywhere: to a member gone, or to an earlier
+      session of theirs. */
+  private staleChannels(sub: Member): Allocation[] {
+    const st = this.state;
+    return (sub.sfu?.channels ?? []).filter((c) => !c.local && c.session !== st?.members.find((x) => x.id === c.memberId)?.sfu?.id);
+  }
+
+  /** The subscription pass has work: a pair missing in the group, or a stale channel to close. */
+  private sfuWork(): boolean {
+    const group = this.sfuGroup();
+    return (!!group && !!this.missingSubscription(group)) ||
+      !!this.state?.members.some((x) => x.sfu?.phase === "ready" && this.staleChannels(x).length);
+  }
+
+  /** Subscribes every published member of the group to every other one's publication it lacks,
+      each endpoint told only its own allocations, and first closes stale channels (and, at a race's
+      start, the subscriptions of members outside it: a member who sits a race out receives
+      nothing). Each subscriber's calls run SUBSCRIBE_PARALLEL at once (finding 177, question C),
+      subscribers in parallel. Leaves and kicks are not queued with this, so the group is read
+      again before every call: a departure during one can't make it skip anyone (release review
+      round 2, finding 158). Rounds repeat until nothing is missing. Returns the subscribers whose
+      call failed: their session is failed (no second attempt), the caller ends it. */
+  private async subscribeGroup(api: Realtime, prune: boolean): Promise<number[]> {
     const failed: number[] = [];
-    // Subscribers in parallel, each one's publishers in turn (concurrent calls on one session are
-    // not risked). One API call at a time made rooms of 4+ players miss SFU_SETUP_MS on 0.7.12:
-    // every racer connected, none got all its channels in 25 s (2026-11-07 logs). Rounds repeat
-    // until no pair is missing; a departure during a call just drops that pair (racers re-read).
+    const st = this.state;
+    if (!st) return failed;
+    // Close what leads nowhere, and what a member outside the race holds.
+    const group = this.sfuGroup();
+    await Promise.all(st.members.filter((x) => x.sfu?.phase === "ready").map(async (sub) => {
+      const session = sub.sfu!;
+      const outside = prune && st.race && group && !group.includes(sub);
+      const close = outside ? session.channels.filter((c) => !c.local) : this.staleChannels(sub);
+      if (!close.length) return;
+      try {
+        await api.close(session, close);
+      } catch (error) {
+        console.warn("Realtime close failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+        session.channels = session.channels.filter((c) => !close.includes(c));  // closes with its session
+      }
+      const peer = this.sockets.get(sub.id);
+      if (peer && sub.sfu === session) this.send(peer, { type: "sfu_closed", channelIds: close.map((c) => c.channelId) });
+    }));
     for (let round = 0; round <= MAX_MEMBERS; round++) {
-      const racers = this.sfuRacers(race);
+      const group = this.sfuGroup();
+      if (!group) break;
+      const published = group.filter((x) => x.sfu?.phase === "ready");
       const work = new Map<Member, Member[]>();
-      for (const a of racers) for (const b of racers)
-        if (a !== b && !a.sfu!.channels.some(c => !c.local && c.memberId === b.id)) {
-          const list = work.get(a) ?? [];
-          list.push(b);
-          work.set(a, list);
-        }
+      for (const a of published) for (const b of published)
+        if (a !== b && !this.subscribed(a, b)) work.set(a, [...(work.get(a) ?? []), b]);
       if (!work.size) break;
       let progress = false;
       await Promise.all([...work].map(async ([sub, pubs]) => {
-        for (const pub of pubs) {
-          const now = this.sfuRacers(race);
-          if (!now.includes(sub) || !now.includes(pub)) continue;
-          try {
-            const channels = await api.subscribe(sub.sfu!, pub.id, pub.sfu!);
-            if (channels.length) progress = true;
-            const peer = this.sockets.get(sub.id);
-            if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
-          } catch (error) {
-            console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-            if (sub.sfu) sub.sfu.phase = "failed";
-            failed.push(sub.id);
-            return;
-          }
+        for (let i = 0; i < pubs.length; i += SUBSCRIBE_PARALLEL) {
+          const results = await Promise.all(pubs.slice(i, i + SUBSCRIBE_PARALLEL).map(async (pub) => {
+            const now = this.sfuGroup() ?? [];
+            if (!now.includes(sub) || !now.includes(pub) || sub.sfu?.phase !== "ready" || pub.sfu?.phase !== "ready") return true;
+            const session = sub.sfu;
+            try {
+              const channels = await api.subscribe(session, pub.id, pub.sfu);
+              if (channels.length) progress = true;
+              const peer = this.sockets.get(sub.id);
+              if (channels.length && peer && sub.sfu === session && this.state?.members.includes(sub))
+                this.send(peer, { type: "sfu_channels", channels: clientChannels(channels) });
+              return true;
+            } catch (error) {
+              console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+              if (sub.sfu === session) session.phase = "failed";
+              return false;
+            }
+          }));
+          if (results.includes(false)) { failed.push(sub.id); return; }
         }
       }));
       if (!progress) break;
@@ -1319,45 +1362,35 @@ export class Room extends DurableObject<Env> {
     return failed;
   }
 
-
-  /** One subscription pass for a race, coalesced (2026-11-07): it starts at once when every racer
-      of the race has published (or failed), else at most SUBSCRIBE_WAIT_MS after a publish that
-      found racers still connecting; a pass asked for while one runs runs once more after it. A
-      pass subscribes each subscriber's missing publishers (subscribeRacers) and takes the racers
-      whose subscription failed out. The alarm (SFU_CONNECT_MS) runs one too, as a backstop. */
-  private subscribeTimer?: ReturnType<typeof setTimeout>;
+  /** One subscription pass at a time, coalesced (2026-11-07): a pass asked for while one runs runs
+      once more after it, for the room as it is then (finding 175: a pass must never end with an
+      older race). It runs at a grid's lock (the pre-setup, finding 177), at a race's start (pruning
+      those outside it), at every publication, and from the alarm when work is left. After each
+      pass the release is checked again. */
   private subscribing = false;
   private subscribeAgain = false;
-  private kickSubscribe(race: Race): void {
-    const st = this.state;
-    if (!st || st.race !== race) return;
-    const waiting = st.members.some(x => this.inRace(st, x.id) && x.sfu?.phase !== "ready" && x.sfu?.phase !== "failed");
-    if (!waiting) {
-      if (this.subscribeTimer) clearTimeout(this.subscribeTimer);
-      this.subscribeTimer = undefined;
-      void this.subscribePass(race);
-    } else if (!this.subscribeTimer) {
-      this.subscribeTimer = setTimeout(() => { this.subscribeTimer = undefined; void this.subscribePass(race); }, SUBSCRIBE_WAIT_MS);
-    }
+  private pruneDue = false;
+  private kickSubscribe(prune = false): void {
+    if (prune) this.pruneDue = true;
+    void this.subscribePass();
   }
-  private async subscribePass(race: Race): Promise<void> {
+  private async subscribePass(): Promise<void> {
     if (this.subscribing) { this.subscribeAgain = true; return; }
     this.subscribing = true;
     try {
-      // The repeat runs for the room's race as it is then (finding 175): a pass asked for while an
-      // older race's pass ran must not end with that race (room SHCF93's release waited minutes
-      // behind a reconcile of another race). After each pass the release is checked again.
-      let current: Race | null = race;
       do {
         this.subscribeAgain = false;
-        if (this.state?.race !== current) current = this.state?.race ?? null;
-        if (!current) break;
-        const failed = await this.subscribeRacers(new Realtime(this.env as Env & SfuSecrets), current);
+        const prune = this.pruneDue;
+        this.pruneDue = false;
+        const started = Date.now(), race = this.state?.race ?? null;
+        const before = this.calls;
+        const failed = await this.subscribeGroup(new Realtime(this.env as Env & SfuSecrets, this.countedFetch), prune);
+        if (this.calls > before)
+          console.log(`room ${this.state?.code ?? ""}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms`);
         await this.save();
-        if (failed.length) await this.retireSfu(failed, current.startAt);
+        if (failed.length) await this.sfuFailed(failed);
         const st = this.state;
-        if (st?.race === current && !current.sfuReleased) this.releaseSfu(st);
-        current = this.state?.race ?? null;
+        if (st?.race && !st.race.sfuReleased) this.releaseSfu(st);
       } while (this.subscribeAgain);
     } catch (error) {
       console.warn("Realtime subscription pass failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
@@ -1365,26 +1398,23 @@ export class Room extends DurableObject<Env> {
       this.subscribing = false;
     }
   }
+  /** API calls the subscription passes made (their log line). */
+  private calls = 0;
+  private countedFetch: typeof fetch = (input, init) => { this.calls++; return fetch(input, init); };
 
-  /** A subscription missing at release: one more pass (subscribePass). */
-  private queueReconcile(race: Race): void {
-    void this.subscribePass(race);
-  }
-
-
-  /** Lets race traffic flow once every racer acknowledged its channels and every pair of racers
-      is subscribed both ways. */
+  /** Lets race traffic flow once every racer acknowledged its channels for this race and every pair
+      of racers is subscribed both ways. */
   private releaseSfu(st: RoomState): void {
     const race = st.race;
     if (!race) return;
     const racers = st.members.filter(m => this.inRace(st, m.id));
-    if (!racers.length || !racers.every(m => m.sfuRace === race.startAt && m.sfuReady && m.sfu?.phase === "ready")) return;
-    if (this.missingSubscription(race)) return this.queueReconcile(race);
+    if (!racers.length || !racers.every(m => m.sfuReadyRace === race.startAt && m.sfu?.phase === "ready")) return;
+    if (this.missingSubscription(racers)) return this.kickSubscribe();
     // Once per race and racer, and stored (finding 175): the release was never saved, so after the
     // object was evicted and loaded again the race looked unreleased; the setup checks ran again
     // ("setup after 66255 ms" for a race released 3 s after its start, room 3G5MXD) and every
-    // later retire sent sfu_ready and logged "released" again. A racer that started its session
-    // again after the release (sfu_restart) gets it once more.
+    // later retire sent sfu_ready and logged "released" again. A racer that started a new session
+    // after the release gets it once more.
     const first = !race.sfuReleased;
     race.sfuReleased = true;
     if (first) console.log(`room ${st.code}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
@@ -1393,24 +1423,12 @@ export class Room extends DurableObject<Env> {
       if (member.releasedRace === race.startAt) continue;
       const peer = this.sockets.get(member.id);
       if (!peer) continue;  // away: its rejoin's catch-up sends it
-      this.send(peer, {type:"sfu_ready"});
+      this.send(peer, { type: "sfu_ready", race: race.startAt });
       member.releasedRace = race.startAt;
       sent = true;
     }
     if (first || sent) this.ctx.waitUntil(this.save());
   }
-
-  private async closeRaceSfu(st: RoomState): Promise<void> {
-    const cleanup = this.sfuQueue.then(async () => {
-      // A copy: a leave during an API call must not make the loop skip anyone.
-      for (const member of [...st.members]) if (member.sfu || member.turnUser) {
-        try { await this.clearSfu(member); } catch (error) { console.warn("Realtime cleanup failed", String(error).slice(0, 80)); }
-      }
-    });
-    this.sfuQueue = cleanup.catch(() => {});
-    await cleanup;
-  }
-
   /** Revokes a member's TURN credentials. A revoke that fails goes to the pending cleanup (until
       the credentials' TTL ends them), so the username outlives the member. Never throws. */
   private async clearTurn(member: Member): Promise<void> {
@@ -1429,17 +1447,18 @@ export class Room extends DurableObject<Env> {
     }
   }
 
-  /** Closes a member's SFU session and the other racers' subscriptions to it, and revokes its TURN
+  /** Closes a member's SFU session and the others' subscriptions to it, and revokes its TURN
       credentials. Never throws, and one failure doesn't stop the rest (release review round 2):
       a session that doesn't close goes to the pending cleanup, retried by the alarm after the
-      member is gone; a subscription that doesn't close stays on its subscriber's session, which
-      closes it with the rest. */
+      member is gone; a subscription that doesn't close is forgotten (it leads to a closed session,
+      and its subscriber's session closes it with the rest). Its subscribers hear sfu_closed. */
   private async clearSfu(member: Member): Promise<void> {
     const api = new Realtime(this.env as Env & SfuSecrets);
-    await this.clearTurn(member);
     const session = member.sfu;
+    delete member.sfu;
+    delete member.sfuConnected; delete member.sfuReadyRace; delete member.releasedRace;
+    await this.clearTurn(member);
     if (session) {
-      delete member.sfu;
       try {
         await api.close(session);
       } catch (error) {
@@ -1448,22 +1467,22 @@ export class Room extends DurableObject<Env> {
           await this.keepCleanup({ session: session.id, channels: session.channels.map(c => c.channelId), until: Date.now() + SFU_CLEANUP_MS });
       }
     }
-    for (const other of [...(this.state?.members ?? [])]) {
+    await Promise.all([...(this.state?.members ?? [])].map(async (other) => {
       const sub = other.sfu;
-      if (other.id === member.id || !sub) continue;
+      if (other.id === member.id || !sub) return;
       const channels = sub.channels.filter(c => !c.local && c.memberId === member.id);
-      if (!channels.length) continue;
+      if (!channels.length) return;
       try {
         await api.close(sub, channels);
       } catch (error) {
         console.warn("Realtime close failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+        sub.channels = sub.channels.filter((c) => !channels.includes(c));
       }
       // Told either way: the publication is gone for it (the room said so).
       const peer = this.sockets.get(other.id);
-      if (peer) this.send(peer, { type: "sfu_closed", channelIds: channels.map(c => c.channelId) });
-    }
+      if (peer && other.sfu === sub) this.send(peer, { type: "sfu_closed", channelIds: channels.map(c => c.channelId) });
+    }));
   }
-
   /** Adds a resource to the pending cleanup and stores it. */
   private async keepCleanup(item: Omit<Cleanup, "at" | "tries">): Promise<void> {
     this.cleanup.push({ ...item, at: Date.now() + CLEANUP_FIRST_MS, tries: 0 });
@@ -1518,12 +1537,13 @@ export class Room extends DurableObject<Env> {
     await run.catch((error) => console.warn("Realtime cleanup failed", String(error).slice(0, 80)));
   }
 
-  /** Racers whose Realtime setup failed for good or ran out of time (SFU_SETUP_MS) leave the race
-      `startAt` (release review round 2, finding 158): the others' traffic would otherwise wait for
-      them forever. They stay in the room. As for any racer who leaves, the others hear `left` and
-      the host's AI takes the rider; the racer hears the error, and the room's next snapshot (not
-      in the race) takes its game back to the room. Its session and TURN credentials are closed. */
-  private async retireSfu(ids: number[], startAt: number): Promise<void> {
+  /** Racers whose Realtime setup failed for good or ran out of time (SFU_CONNECT_MS, SFU_SETUP_MS)
+      leave the race `startAt` (release review round 2, finding 158): the others' traffic would
+      otherwise wait for them forever. They stay in the room. As for any racer who leaves, the
+      others hear `left` and the host's AI takes the rider; the racer hears the error, and the
+      room's next snapshot (not in the race) takes its game back to the room. `reset`: its session
+      ends too (sfuReset), else it is kept for the next race (a racer still connecting). */
+  private async retireSfu(ids: number[], startAt: number, reset: boolean): Promise<void> {
     const st = this.state;
     let out = 0;
     for (const id of ids) {
@@ -1532,7 +1552,6 @@ export class Room extends DurableObject<Env> {
       out++;
       const member = st.members.find((x) => x.id === id);
       console.warn(`room ${st.code}: member ${id} out of the race: no Realtime connection`);
-      if (member?.sfu) member.sfu.phase = "failed";
       const ws = this.sockets.get(id);
       if (ws) this.error(ws, "bad_value", SFU_FAILED_MESSAGE);
       if (st.session) this.retire(st, id, "left");
@@ -1543,7 +1562,7 @@ export class Room extends DurableObject<Env> {
         this.rebuildRace();
         for (const s of this.raceSockets) if (s) this.send(s, { type: "left", slot, memberId: id, reason: "left" });
       }
-      if (member && (member.sfu || member.turnUser)) this.queueClear(member);
+      if (member && (reset || member.sfu?.phase === "failed")) this.sfuReset(member);
     }
     if (!out || !st) return;
     this.releaseSfu(st);
@@ -1551,13 +1570,37 @@ export class Room extends DurableObject<Env> {
     await this.changed();
   }
 
+  /** Members whose session failed (an API call on it): it ends (sfuReset), and a racer among them
+      is out of the running race, as before finding 177. */
+  private async sfuFailed(ids: number[]): Promise<void> {
+    const st = this.state;
+    if (!st) return;
+    const race = st.race;
+    const racers = race ? ids.filter((id) => this.inRace(st, id)) : [];
+    if (race && racers.length) await this.retireSfu(racers, race.startAt, true);
+    for (const id of ids.filter((id) => !racers.includes(id))) {
+      const member = st.members.find((x) => x.id === id);
+      if (member) this.sfuReset(member);
+    }
+  }
+
+  /** Ends a member's session the room gave up on: closed after the queued work (queueClear), and
+      its game told to offer a new one (`sfu_reset`; an away game hears "setup" in its rejoin's
+      welcome). */
+  private sfuReset(member: Member): void {
+    if (member.sfu) member.sfu.phase = "failed";
+    if (member.sfu || member.turnUser) this.queueClear(member);
+    const ws = this.sockets.get(member.id);
+    if (ws) this.send(ws, { type: "sfu_reset" });
+  }
+
   /** Clears a member's SFU session and TURN credentials after the queued work. */
   private queueClear(member: Member): void {
-    const cleanup = this.sfuQueue.then(() => this.clearSfu(member));
+    const session = member.sfu;
+    const cleanup = this.sfuQueue.then(() => (member.sfu === session ? this.clearSfu(member) : undefined));
     this.sfuQueue = cleanup.catch(() => {});
     this.ctx.waitUntil(cleanup.catch(() => {}).then(() => this.save()));
   }
-
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
   private async leave(memberId: number, reason: "disconnect" | "leave" | "kicked"): Promise<void> {
     const st = this.state;
@@ -1639,6 +1682,9 @@ export class Room extends DurableObject<Env> {
       }
     }
     st.countdownEndsAt = Date.now() + this.countdownMs();
+    // The pre-setup (finding 177): the grid's missing subscriptions are made during the countdown,
+    // so the start message finds nothing left to do for members already connected.
+    this.kickSubscribe();
   }
 
   private retire(st: RoomState, id: number, reason: string): void {
@@ -1650,7 +1696,6 @@ export class Room extends DurableObject<Env> {
     // Back in the room: the Ready that put them in this race is spent; a new one is for the next.
     const member = st.members.find(x => x.id === id);
     if (member) member.ready = false;
-    if ((member?.sfu || member?.turnUser) && reason !== "left") this.queueClear(member!);
     this.rebuildRace();
     for (const ws of this.raceSockets) if (ws)
       this.send(ws, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
@@ -1691,7 +1736,6 @@ export class Room extends DurableObject<Env> {
     this.rebuildRace();
     await this.save();
     this.broadcast({type:"ended", reason:voided ? "void" : "done"});
-    await this.closeRaceSfu(st);
   }
 
   private async destroy(): Promise<void> {
@@ -1720,6 +1764,7 @@ export class Room extends DurableObject<Env> {
       await this.ctx.storage.setAlarm(this.nextAlarm(st, Date.now()));
     }
     if (st && !st.session && this.updateCountdown(st, off)) {
+      this.kickSubscribe();
       const at = await this.ctx.storage.getAlarm();
       if (at === null || at > st.countdownEndsAt!) await this.ctx.storage.setAlarm(st.countdownEndsAt!);
     }

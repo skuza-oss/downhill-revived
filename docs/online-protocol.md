@@ -186,8 +186,9 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"welcome","protocol":4,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
  "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU",
  "rejoinToken":"<32 hex>"}  // this member's rejoin token: only this client gets it (Limits, below)
-// A rejoin into the member's running race (finding 175) adds the race and its session's state here:
-// "race":{"startAt":1734000003000,"sfu":"ready"}  // "ready": keep the session; "setup": start it again
+// Whether the room holds a Realtime session for this member (finding 177): "sfu":"ready" (a rejoin:
+// keep the association) or "sfu":"setup" (offer one). A rejoin into the member's running race
+// (finding 175) adds the race: "race":{"startAt":1734000003000}
 
 // Where the room runs and each member's region (never their country): after every join and when
 // the room learns its colo (Region, below).
@@ -232,10 +233,12 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 ## Race (binary frames, little-endian)
 
-At race start each racing member establishes one native WebRTC association to Cloudflare Realtime
-SFU. It is discarded at race end. Each player publishes `state` (unordered, maxRetransmits 0) and
-`events` (reliable, ordered), subscribing to the same channels of all other members (the room asks
-the same policy for each subscription). Cloudflare forwards a subscription ordered and reliable
+Each member's game establishes one native WebRTC association to Cloudflare Realtime SFU when it
+joins the room, and keeps it for its whole stay, across races (finding 177; before, one per race,
+built from the start message). Each player publishes `state` (unordered, maxRetransmits 0) and
+`events` (reliable, ordered) once, and is subscribed to the same channels of the other racers of
+each race it rides (the room asks the same policy for each subscription); subscriptions stay
+across races, so a race adds only the pairs that are missing. Cloudflare forwards a subscription ordered and reliable
 whatever it was asked (finding 173), so the client's SCTP stack delivers each complete `state`
 message at once without regard to the sender's ordering (`port/render/vendor/sctp-proto`). Channel
 allocations identify members; `start.players` maps members to race slots. The receiver corrects
@@ -245,36 +248,61 @@ DataChannel messages add an 8-byte little-endian unsigned prefix containing that
 `start.startAt` value in ms. The original type/slot/payload follows it unchanged. This is a race
 identifier, not a game clock or tick agreement. Endpoints discard older races' messages. Early
 reliable EVENTs wait in a bounded queue until their matching WebSocket start is delivered; future
-STATEs can be dropped. WebSocket callbacks and SFU callbacks are delivered on one network thread,
-so the game sees start before buffered events. Channels close at race end.
+STATEs can be dropped; a race's frames after its `ended` are dropped. WebSocket callbacks and SFU
+callbacks are delivered on one network thread, so the game sees start before buffered events. At
+each start the client begins that race's own state (the racers, the acknowledgement, queued
+frames, flood counters); the association and its channels stay.
 
 ### SFU signaling (private JSON on the room WebSocket)
 
-- Client sends `{"type":"sfu_offer","sdp":"<its own offer>"}` after start. The DO calls
-  `sessions/new` with that offer as `sessionDescription`. The answer is
-  `{"type":"sfu_answer","sdp":"<this session's SFU answer>"}`, sent only to its owner.
-  The offer includes the SCTP transport; no separate `datachannels/establish` call is used.
-- Once WebRTC connects, client sends `{"type":"sfu_connected"}`. The DO publishes the two
-  channels, then subscribes each connected member to every other publisher.
+A member's session lives as long as its stay in the room (finding 177):
+
+- After its `welcome` (`"sfu":"setup"`), the client sends `{"type":"sfu_offer","sdp":"<its own
+  offer>"}`. The DO calls `sessions/new` with that offer as `sessionDescription`. The answer is
+  `{"type":"sfu_answer","sdp":"<this session's SFU answer>"}`, sent only to its owner. The offer
+  includes the SCTP transport; no separate `datachannels/establish` call is used. A later
+  `sfu_offer` replaces the member's session: the room closes the old one first (its channels, the
+  others' subscriptions to it with `sfu_closed`, its TURN credentials). A member may offer 6 times
+  in 5 minutes (`bad_value` after that); the client offers again after a failure, a lost
+  association or for a TURN renewal (below), pausing 1 s, then twice as long each time up to a
+  minute, until one connects.
+- Once WebRTC connects, the client sends `{"type":"sfu_connected"}`. The DO publishes the two
+  channels (one call); between races that is all.
+- Subscriptions are made for a race's racers, in one coalesced pass: at the grid's lock, during
+  the countdown before the start message (the pre-setup), for every grid member whose session is
+  up; at the start for what is still missing (a racer that connected since); and when a racer of
+  the coming or running race publishes. Each subscriber's calls run 4 at once (finding 177 tested
+  concurrent `datachannels/new` calls on one connected session against the real API: none failed), the
+  subscribers in parallel. They stay after the race. At a race's start the subscriptions of members
+  outside it are closed (`sfu_closed`), so nobody is sent race frames it would drop; they come back
+  at the member's next grid.
 - Each endpoint receives only its own allocations, in one or more messages:
   `{"type":"sfu_channels","channels":[{"memberId":2,"name":"state","channelId":10,"local":false}]}`.
   The endpoint creates negotiated channels with these IDs and the delivery policies above.
   `local:true` means its own publication. Session IDs and app credentials stay on the server.
-- After all allocated channels open, each client sends `{"type":"sfu_ready"}`. The DO replies
-  to all racing members only after every member acknowledges. Until then, race frames stay
-  queued locally so reliable events cannot precede a subscriber.
-- A rejoined racer (finding 175, Limits below) gets, after its `welcome`, all its allocations at
-  once: `{"type":"sfu_channels","full":true,"channels":[...]}`. Its client keeps the channels it
-  has, opens the missing ones and closes those not listed (it missed their `sfu_closed`). Then
-  `sfu_ready` again if the race's traffic was released meanwhile. A rejoined racer whose session
-  was still being set up (`"sfu":"setup"` in the welcome), or whose client lost it, sends
-  `{"type":"sfu_restart"}` and then a new `sfu_offer`: the room clears its session, TURN
-  credentials and the others' subscriptions to it (`sfu_closed`), and the new session is set up
-  as at the start (the setup deadline still counts from the race's start). At most 3 restarts
-  per racer per race (`bad_value` after that), only for `race_rejoin` members.
+  Cloudflare gives a closed channel's ID to the next allocation on that session at once: the client
+  makes the new channel once the old one's stream reset is done (the vendored sctp-proto takes
+  Cloudflare's stream resets in order, `port/render/vendor/sctp-proto/PATCH.md`).
+- After the race's `start`, once this game's own channels and every other racer's are open, the
+  client sends `{"type":"sfu_ready","race":<startAt>}` (an older race's counts for nothing). The DO
+  replies `{"type":"sfu_ready","race":<startAt>}` to all racers only after every racer acknowledged
+  and every pair of racers is subscribed both ways. Until then, race frames stay queued locally so
+  reliable events cannot precede a subscriber. A room whose racers were connected before the grid
+  locked has nothing left to do at the start: the release follows the acknowledgements.
+- A member back with its rejoin token (findings 137, 175) gets `"sfu":"ready"` in the welcome when
+  the room still holds its session: its client keeps its association, sends what it said while the
+  room connection was down, and gets all its allocations at once:
+  `{"type":"sfu_channels","full":true,"channels":[...]}`. Its client keeps the channels it has,
+  opens the missing ones and closes those not listed (it missed their `sfu_closed`). Then, in its
+  race, `sfu_ready` if the race's traffic was released and it had acknowledged. A client without a
+  usable association (it lost it, or never got its answer) offers a new session, which replaces
+  the room's.
 - Departures and replacements send `{"type":"sfu_closed","channelIds":[10,12]}` only to
   affected endpoints, after closing those allocations through the API (a subscription that
   doesn't close is announced all the same and closes with its subscriber's session).
+- A session the room gives up on (an API call on it failed, or a racer whose channels did not open
+  by the setup deadline) is closed, and its owner hears `{"type":"sfu_reset"}`: its client drops
+  the association and offers a new session after its pause.
 - Teardown goes on past a failed close or revoke. A session's channels or a TURN username that
   did not close is kept in the room's pending cleanup, stored apart from the members (it outlives
   the member and the room), and tried again by the room's alarm: after 5 s, then twice as long
@@ -283,27 +311,30 @@ so the game sees start before buffered events. Channels close at race end.
   session).
 - TURN over TLS, for networks that block UDP (finding 158, round 4). The client tries UDP to the
   SFU first. If its association has not connected 2 s after `sfu_answer`, it sends
-  `{"type":"sfu_turn"}`. The DO accepts that once per member per race, only from a racer with an
-  SFU session in the running race. It mints TURN credentials through Cloudflare's TURN API
-  (`generate-ice-servers`, TTL 1 hour, `customIdentifier` `room-<CODE>-m<memberId>`, no personal
-  data) and sends them to that member only:
+  `{"type":"sfu_turn"}` (at once, when the association it replaces had used TURN). The DO accepts
+  that once per session, only from a member with a session. It mints TURN credentials through
+  Cloudflare's TURN API (`generate-ice-servers`, TTL 1 hour, `customIdentifier`
+  `room-<CODE>-m<memberId>`, no personal data) and sends them to that member only:
   `{"type":"sfu_turn","urls":["turns:turn.cloudflare.com:5349?transport=tcp","turns:turn.cloudflare.com:443?transport=tcp"],"username":"<hex>","credential":"<hex>"}`
   (`urls`: the `turns:` entries only). The client connects with TLS to the port-443 entry (the
   others are fallbacks), takes a relayed address (TURN Allocate, ChannelBind to the SFU's
   candidates, ChannelData over the stream) and gives it to ICE as a relayed candidate. The SFU
   sees the TURN service's address, never the player's. The DO revokes the credentials when that
-  member's SFU session is cleared (race end, retire, leaving); a second `sfu_turn` in the race
-  is a `bad_value` error. Clients accept `turns:` servers on `turn.cloudflare.com` only.
+  member's session ends; a second `sfu_turn` for one session is a `bad_value` error. Clients accept
+  `turns:` servers on `turn.cloudflare.com` only. A relay keeps its credentials for its life (RFC
+  8656) and refreshes its allocation and its channel bindings itself (`port/render/net/src/turn.rs`);
+  between races, once its credentials are 35 minutes old, the client offers a new session, which
+  gets new credentials.
 - A racer whose own connection isn't up 10 s after the race's `start` (no `sfu_connected`; the
   room's `SFU_CONNECT_MS`) leaves the race alone, as below: the others stop expecting its channels
-  and are released. Measured setups (finding 175): from the answer to connected, UDP 0.7-1.5 s and
-  TURN over TLS 2.9-3.2 s. A game says `sfu_ready` once it has every racer's channels, or 8 s
-  after its own connection with its own channels open (a racer that never connects publishes
-  none); the room still releases only when every connected racer is subscribed both ways.
+  and are released. Its session is kept for the next race. Measured setups (finding 175): from the
+  answer to connected, UDP 0.7-1.5 s and TURN over TLS 2.9-3.2 s. A game says `sfu_ready` once it
+  has every racer's channels, or 8 s after the start with its own channels open (a racer that never
+  connects publishes none); the room still releases only when every connected racer is subscribed
+  both ways.
 - Setup has a deadline: 25 s after the race's `start` (the room's `SFU_SETUP_MS` sets another),
-  every racer must have acknowledged `sfu_ready`. Measured setups take 0.2-0.5 s over UDP and
-  2.4-3.1 s through TURN; the margin covers ten racers' 90 subscription calls and one API call
-  that runs into its timeout, and ends before the game's 30 s wait for the others' rides.
+  every racer must have acknowledged `sfu_ready`. It covers a newcomer's whole setup and one API
+  call that runs into its timeout, and ends before the game's 30 s wait for the others' rides.
 - A racer whose setup fails (an API error on its session, an invalid signaling step) or isn't
   done by the deadline is out of the race, as a racer who leaves it (release review round 2,
   finding 158). It gets `{"type":"error","code":"bad_value","message":"Realtime connection
@@ -311,27 +342,25 @@ so the game sees start before buffered events. Channels close at race end.
   the rider), the subscriptions to it close with `sfu_closed`, and the release is checked again
   without it, so the others go on. It stays in the room: in a race room its member shows
   `inRace` false and `raceState` `dnf` (`dnfReason` `left`), which takes its game back to the
-  room (port/net/client.c). No automatic API mutation retries and no second setup in that race:
-  a partially successful operation must not allocate duplicate channels.
+  room (port/net/client.c). No API mutation is retried: a partially successful operation must not
+  allocate duplicate channels; its game offers a new session (`sfu_reset`).
 
 The Worker reads `REALTIME_APP_ID`, `REALTIME_APP_TOKEN`, `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`
 from env/secrets. For local tests they live only in gitignored `.dev.vars`. None is sent to
 clients. Client SDP is never broadcast or stored in room messages; SFU answers and TURN
 credentials are sent only to their owner. No message carries another player's SDP, candidates,
-TURN credentials or address. The native client has no peer signaling or TURN mesh path: a TURN
-relay only ever carries that player's own traffic to the SFU.
+TURN credentials, session id or address. The native client has no peer signaling or TURN mesh
+path: a TURN relay only ever carries that player's own traffic to the SFU.
 
-The API limit is 50 requests/session/second. Mutations that touch several racers' sessions
-(publications, subscriptions, closes) run one after another in the room's queue; a racer's own
-first session of the race (`sessions/new`) and its TURN credentials don't wait in it (finding 175).
-Each racer has one publication batch; the subscriptions run in one coalesced pass per race
-outside the queue (each subscriber's publishers one call each, subscribers in parallel). API
-operations have a 15 s timeout.
-A lost WebRTC connection has a 30 s session reuse window; the game reports failure and rejoins
-with a fresh session rather than retaining a broken connection (`sfu_restart`, above). A lost
-room WebSocket leaves the SFU session up: the race goes on over it while the game rejoins.
-See finding 158 for live checks.
-
+The API limit is 50 requests/session/second. A member's own session work (`sessions/new`, its
+publication, its TURN credentials, its acknowledgement) runs at once; a replacing offer and the
+closes run one after another in the room's queue; subscriptions run in the coalesced pass above.
+API operations have a 15 s timeout. A lost WebRTC connection has a 30 s session reuse window; the
+game drops a failed association and offers a new session rather than retaining a broken
+connection. A lost room WebSocket leaves the SFU session up: the race goes on over it while the
+game rejoins. An idle session costs about nothing: Realtime bills only what Cloudflare sends to
+clients (pricing: egress, publishing is free), and between races nothing flows but the transport's
+keepalives. See findings 158 and 177 for live checks.
 ### PING, type 3 — client → server; PONG, type 4 — server → client
 
 | Offset | Size | Field |
@@ -754,8 +783,9 @@ server's table of Durable Object locations, else the hint's (`EU`, `NA`, `SA`, `
 Every field and the message type are additions: clients that don't know them ignore them (the
 native client reads by key, the browser copies known keys), so `MIN_VERSION` stays as it is.
 
-SFU allocations are restricted to running race members, one setup attempt per member per race.
-Allocations close at race end or departure. Receiver rate protection drops a member's STATE
+SFU sessions belong to room members, one at a time per member (finding 177); subscriptions are
+made for each race's racers and close on departure, on a session's replacement, or for a member
+sitting a race out. Receiver rate protection drops a member's STATE
 messages beyond 240 in a one-second window per bundle index (normal: 60/s for index 0); it never
 silences a member for the rest of the race (protocol 3 did, and a backlog after a network stall
 froze an honest rider; finding 169).

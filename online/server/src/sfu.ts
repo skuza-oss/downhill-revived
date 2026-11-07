@@ -5,17 +5,25 @@ export interface SfuSecrets {
   TURN_KEY_ID?: string; TURN_KEY_API_TOKEN?: string;
 }
 export interface SfuSession { id: string; phase: "connect" | "ready" | "failed"; channels: Allocation[]; }
-export interface Allocation { memberId: number; name: string; channelId: number; local: boolean; }
+/** One channel on a session: its own publication (local) or a subscription to `memberId`'s
+    publication on that member's session `session` (remote). The session id never goes to a client
+    (clientChannels). */
+export interface Allocation { memberId: number; name: string; channelId: number; local: boolean; session?: string; }
+/** Allocations as their own endpoint gets them: no session ids. */
+export function clientChannels(channels: Allocation[]): Allocation[] {
+  return channels.map(({ memberId, name, channelId, local }) => ({ memberId, name, channelId, local }));
+}
 type Json = Record<string, unknown>;
 const policies = [{ dataChannelName: "state", ordered: false, maxRetransmits: 0 },
                   { dataChannelName: "events", ordered: true }];
 
 /**
- * TURN credentials last this long (seconds). They are minted per racer per race, only for a racer
- * whose UDP to the SFU did not connect, and revoked when that racer's SFU session is cleared (race
- * end, leaving, a new race); the TTL only bounds a credential whose revoke failed. An hour is
- * longer than any race with its finish wait, so a running relay's Refresh never meets an expired
- * credential.
+ * TURN credentials last this long (seconds). They are minted once per member's Realtime session,
+ * only for a member whose UDP to the SFU did not connect, and revoked when that session ends (the
+ * member leaves, its session fails or a new one replaces it); the TTL also bounds a credential
+ * whose revoke failed. A session now lasts the whole room stay (finding 177) and a relay can't take
+ * new credentials, so between races the game replaces a session whose credentials are 35 minutes
+ * old (port/render/net/src/sfu.rs TURN_RENEW): no race meets an expired credential.
  */
 export const TURN_TTL_S = 3600;
 
@@ -130,7 +138,7 @@ export class Realtime {
   }
   async subscribe(session: SfuSession, memberId: number, publisher: SfuSession): Promise<Allocation[]> {
     if (session.phase !== "ready" || publisher.phase !== "ready") return [];
-    if (session.channels.some(x => !x.local && x.memberId === memberId)) return [];
+    if (session.channels.some(x => !x.local && x.memberId === memberId && x.session === publisher.id)) return [];
     const allocations = await this.allocate(session, memberId, false, publisher.id);
     return allocations;
   }
@@ -148,7 +156,7 @@ export class Realtime {
         failed = true;
         continue;
       }
-      const allocation = { memberId, name: policy.dataChannelName, channelId: Number(item.id), local };
+      const allocation: Allocation = { memberId, name: policy.dataChannelName, channelId: Number(item.id), local, ...(publisher ? { session: publisher } : {}) };
       allocations.push(allocation);
       // Keep successful partial allocations for teardown, even if another item failed.
       session.channels.push(allocation);

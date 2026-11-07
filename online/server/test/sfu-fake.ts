@@ -40,7 +40,7 @@ export function publishedSession(memberId: number, subscribed: number[]): SfuSes
     { memberId, name: "events", channelId: 10 * memberId + 2, local: true },
   ];
   for (const id of subscribed)
-    channels.push({ memberId: id, name: "state", channelId: 200 + 10 * memberId + id, local: false },
-                  { memberId: id, name: "events", channelId: 300 + 10 * memberId + id, local: false });
+    channels.push({ memberId: id, name: "state", channelId: 200 + 10 * memberId + id, local: false, session: `session-${id}` } as any,
+                  { memberId: id, name: "events", channelId: 300 + 10 * memberId + id, local: false, session: `session-${id}` } as any);
   return { id: `session-${memberId}`, phase: "ready", channels };
 }

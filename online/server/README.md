@@ -20,7 +20,7 @@ is `docs/ONLINE-PLAN.md`.
 
 Rooms use the WebSocket hibernation API, so an idle lobby costs little. Race frames do not go
 through the room: since protocol 3 they travel over Cloudflare Realtime SFU DataChannels, and the
-room only creates each racer's session and channels (finding 158).
+room only creates each member's session (one per room stay, finding 177) and channels (finding 158).
 
 ## Develop and test
 
