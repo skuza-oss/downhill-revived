@@ -104,6 +104,37 @@ struct PassState {
     offset: Option<u32>,
     /// Group 1, the draw's texture.
     group: Option<wgpu::BindGroup>,
+    /// The union of the pass's draws' scissors (left, top, right, bottom) and its draw commands
+    /// (DHD_PASS_TRACE).
+    area: Option<[u32; 4]>,
+    draws: u32,
+    /// The union of the draws' vertex bounds inside their scissors, and the draws with a Z surface
+    /// (DHD_PASS_TRACE only).
+    bounds: Option<[u32; 4]>,
+    zdraws: u32,
+    /// The surfaces the pass's draws read (as textures, or through conversions), one bit each.
+    reads: u64,
+}
+
+/// The pixels draw `first..first + count` of `vertices` (through `indices` when given) can touch: its
+/// vertices' bounding box at `scale`, one pixel wider, cut to the scissor (left, top, width, height);
+/// left, top, right, bottom. DHD_PASS_TRACE.
+fn draw_bounds(vertices: &[DhdrVertex], indices: Option<&[u32]>, first: u32, count: u32, scale: u32,
+               scissor: [u32; 4]) -> Option<[u32; 4]> {
+    let (mut l, mut t, mut r, mut b) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for i in first..first.saturating_add(count) {
+        let v = match indices {
+            Some(ix) => ix.get(i as usize).and_then(|&j| vertices.get(j as usize)),
+            None => vertices.get(i as usize),
+        }?;
+        l = l.min(v.x); t = t.min(v.y); r = r.max(v.x); b = b.max(v.y);
+    }
+    let s = scale as f32;
+    let clip = |v: f32, lo: u32, hi: u32| (v.max(lo as f32).min(hi as f32)) as u32;
+    let [x, y, w, h] = scissor;
+    let (l, t) = (clip((l * s).floor() - 1.0, x, x + w), clip((t * s).floor() - 1.0, y, y + h));
+    let (r, b) = (clip((r * s).ceil() + 1.0, x, x + w), clip((b * s).ceil() + 1.0, y, y + h));
+    (r > l && b > t).then_some([l, t, r, b])
 }
 
 impl Pass {
@@ -137,7 +168,13 @@ impl Pass {
     fn end_reason(&mut self, reason: &str) {
         self.flush();
         if let Some(pass) = self.pass.take() {
-            pass_trace::event(reason, self.target, self.depth);
+            if pass_trace::on() {
+                let [l, t, r, b] = self.state.area.unwrap_or([0; 4]);
+                let [bl, bt, br, bb] = self.state.bounds.unwrap_or([0; 4]);
+                pass_trace::event(&format!("{reason} area={l},{t},{}x{} bounds={bl},{bt},{}x{} draws={} zdraws={} reads={:x}",
+                                           r - l, b - t, br - bl, bb - bt, self.state.draws, self.state.zdraws,
+                                           self.state.reads), self.target, self.depth);
+            }
             drop(pass);
             self.target = -2;
             self.depth = -2;
@@ -225,10 +262,11 @@ impl Pass {
 
     /// native_begin_pass (once `open_on` said no): a pass into `color` (and `z`), loading and
     /// storing both, with the whole vertex buffer at slot 0 (and in an indexed picture the whole
-    /// index buffer).
+    /// index buffer). `size`: the attachments' size (DHD_PASS_TRACE).
     #[allow(clippy::too_many_arguments)]
-    fn begin(&mut self, gpu: &Gpu, target: i32, depth: i32, color: &wgpu::TextureView, z: Option<&wgpu::TextureView>,
-             vertices: &wgpu::Buffer, vertex_bytes: u64, indices: Option<&(wgpu::Buffer, u64)>) {
+    fn begin(&mut self, gpu: &Gpu, target: i32, depth: i32, size: [u32; 2], color: &wgpu::TextureView,
+             z: Option<&wgpu::TextureView>, vertices: &wgpu::Buffer, vertex_bytes: u64,
+             indices: Option<&(wgpu::Buffer, u64)>) {
         self.end_reason(if self.target != target { "target-change" } else { "depth-change" });
         let keep = wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store };
         let times = gputimes::slot(gpu, gputimes::DRAW);
@@ -263,7 +301,9 @@ impl Pass {
         rstat::pass();
         #[cfg(not(target_arch = "wasm32"))]
         self.stats.pass();
-        pass_trace::event("draw-begin:load/store", target, depth);
+        if pass_trace::on() {
+            pass_trace::event(&format!("draw-begin:load/store {}x{}", size[0], size[1]), target, depth);
+        }
     }
 
     /// native_set_pipeline in the open pass: false (reported once per key) when the key has no
@@ -631,8 +671,8 @@ impl Native {
                     },
                     None => None,
                 };
-                self.pass.begin(gpu, k.target as i32, depth_index, &color, z.as_ref(), &v.vertices, v.vertex_bytes,
-                                v.indices.as_ref());
+                self.pass.begin(gpu, k.target as i32, depth_index, target.size, &color, z.as_ref(), &v.vertices,
+                                v.vertex_bytes, v.indices.as_ref());
             }
             let mut constants = k.constants;
             constants.scale = big_t | big_s << 8 | big_s.min(big_t) << 16;
@@ -653,6 +693,29 @@ impl Native {
             }
             let scissor = [left as u32, top as u32, (right - left) as u32, (bottom - top) as u32];
             self.pass.set_state(tw, th, scissor, uses_constant(k.blend_key).then_some(k.blend_fix));
+            if pass_trace::on() {
+                let s = &mut self.pass.state;
+                let [x, y, sw, sh] = scissor;
+                s.area = Some(match s.area {
+                    Some([l, t, r, b]) => [l.min(x), t.min(y), r.max(x + sw), b.max(y + sh)],
+                    None => [x, y, x + sw, y + sh],
+                });
+                s.draws += 1;
+                self.pass.state.zdraws += depth.is_some() as u32;
+                let mut reads = 0u64;
+                if k.texture_surface >= 0 { reads |= 1u64 << (k.texture_surface as u32 & 63); }
+                if let Some(c) = (k.convert >= 0).then(|| p.converts.get(k.convert as usize)).flatten() {
+                    for &s in c.surface.iter().filter(|&&s| s >= 0) { reads |= 1u64 << (s as u32 & 63); }
+                }
+                self.pass.state.reads |= reads;
+                if let Some([l, t, r, b]) = draw_bounds(p.vertices, indices, k.first, k.count, big_t, scissor) {
+                    let s = &mut self.pass.state;
+                    s.bounds = Some(match s.bounds {
+                        Some([l0, t0, r0, b0]) => [l0.min(l), t0.min(t), r0.max(r), b0.max(b)],
+                        None => [l, t, r, b],
+                    });
+                }
+            }
             // Specialise decoded textures and scaled surface reads only when both
             // scale factors match and their division is an exact binary shift.
             let source_scale = constants.scale >> 8 & 255;
@@ -687,9 +750,14 @@ impl Native {
     /// it), recorded after the open pass ends.
     fn transfer(&mut self, k: &DhdrCommand, pixels: Option<&[u32]>, shared: &NativeShared) {
         let gpu = self.gpu;
-        self.pass.end_reason(match k.kind {
+        let kind = match k.kind {
             DHDR_CMD_COPY => "copy", DHDR_CMD_IMPORT => "import", _ => "alpha-upload",
-        });
+        };
+        self.pass.end_reason(kind);
+        if pass_trace::on() {
+            pass_trace::event(&format!("transfer:{kind} source={} at={},{} to={},{} size={}x{}", k.source, k.sx, k.sy,
+                                       k.x, k.y, k.w, k.h), k.target as i32, -1);
+        }
         let (encoder, drawn) = self.pass.split(gpu);
         let mut kit = Kit::new(gpu, &self.objects, shared, &mut self.arenas, encoder);
         self.surfaces.transfer(&mut kit, k, pixels, drawn);
@@ -1058,8 +1126,10 @@ pub mod pass_trace {
         static ON: bool = std::env::var_os("DHD_PASS_TRACE").is_some();
         static PICTURE: Cell<u32> = const { Cell::new(0) };
     }
+    /// Whether DHD_PASS_TRACE is set (a caller builds a line's text only then).
+    pub fn on() -> bool { ON.with(|v| *v) }
     pub fn event(reason: &str, target: i32, depth: i32) {
-        if ON.with(|v| *v) {
+        if on() {
             let n = PICTURE.with(Cell::get);
             if n % 240 == 0 {
                 crate::host::log(&format!("pass-trace: picture={n} {reason} target={target} depth={depth}"));
