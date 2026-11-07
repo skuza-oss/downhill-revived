@@ -117,38 +117,6 @@ export class Realtime {
     const allocations = await this.allocate(session, memberId, false, publisher.id);
     return allocations;
   }
-  /** Subscribes `session` to every listed publisher it lacks in ONE call (a remote batch may name
-      several publishing sessions, Realtime API "Batch resource operations"): one call per racer
-      instead of one per pair, which rooms of 7+ racers could not fit in SFU_SETUP_MS (2026-11-07).
-      Results are matched by position, checked against the entry's channel name and, when the
-      result names it, its publishing session. Successful allocations are kept for teardown even
-      when another item fails; then it throws (the subscriber is out, as before). */
-  async subscribeAll(session: SfuSession, publishers: { memberId: number; session: SfuSession }[]): Promise<Allocation[]> {
-    if (session.phase !== "ready") return [];
-    const pubs = publishers.filter(p => p.session.phase === "ready" &&
-      !session.channels.some(x => !x.local && x.memberId === p.memberId));
-    if (!pubs.length) return [];
-    const entries = pubs.flatMap(p => policies.map(policy => ({ ...policy, location: "remote", sessionId: p.session.id })));
-    const r = await this.call(`sessions/${session.id}/datachannels/new`, { dataChannels: entries });
-    const items = r.dataChannels as Json[];
-    if (!Array.isArray(items)) throw new Error("Missing channels");
-    const fits = (x: Json | undefined, e: typeof entries[number]) => !!x && x.dataChannelName === e.dataChannelName &&
-      (x.sessionId === undefined || x.sessionId === e.sessionId);
-    const allocations: Allocation[] = [];
-    let failed = false;
-    entries.forEach((entry, i) => {
-      const item = fits(items[i], entry) ? items[i] : items.find(x => x.dataChannelName === entry.dataChannelName && x.sessionId === entry.sessionId);
-      if (!item || item.errorCode || !Number.isInteger(item.id) || Number(item.id) < 0 || Number(item.id) > 65534) {
-        failed = true;
-        return;
-      }
-      const allocation = { memberId: pubs[Math.floor(i / policies.length)].memberId, name: entry.dataChannelName, channelId: Number(item.id), local: false };
-      allocations.push(allocation);
-      session.channels.push(allocation);
-    });
-    if (failed) throw new Error("Channel allocation failed");
-    return allocations;
-  }
   private async allocate(session: SfuSession, memberId: number, local: boolean, publisher?: string): Promise<Allocation[]> {
     const r = await this.call(`sessions/${session.id}/datachannels/new`, { dataChannels: policies.map(p => ({
       ...p, location: local ? "local" : "remote", ...(publisher ? { sessionId: publisher } : {}),
