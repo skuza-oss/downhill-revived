@@ -49,6 +49,8 @@ const SFU_SETUP_MS = 25_000;
     was out (0.7.12, rooms of 4-7 players, 2026-11-06). The others hear `left`, stop expecting it
     and release. Real setups connect in 0.2-0.5 s over UDP and about 5 s through TURN. */
 const SFU_CONNECT_MS = 15_000;
+/** A subscription pass waits at most this long after a publish for racers still connecting. */
+const SUBSCRIBE_WAIT_MS = 1_500;
 /** Sent to a racer whose Realtime setup failed or ran out of time; it is out of the race (the room
     stays). The footer holds about 45 characters. */
 const SFU_FAILED_MESSAGE = "Realtime connection failed: out of the race.";
@@ -543,8 +545,9 @@ export class Room extends DurableObject<Env> {
       if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(now, at));
       return;
     }
-    // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
     const race = st.race;
+    if (race && !race.sfuReleased && this.missingSubscription(race)) void this.subscribePass(race);
+    // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
     if (race && !race.sfuReleased && race.sfuConnectBy != null && now >= race.sfuConnectBy) {
       race.sfuConnectBy = undefined;
       const racers = st.members.filter(x => this.inRace(st, x.id));
@@ -849,9 +852,11 @@ export class Room extends DurableObject<Env> {
         if (!this.sfuCurrent(race, me)) {
           await this.clearSfu(me); return;
         }
-        const failed = await this.subscribeRacers(api, race);
         await this.save();
-        if (failed.length) return { startAt: race.startAt, ids: failed };
+        // Subscriptions run in one coalesced pass (subscribePass), not here: run per connect,
+        // every racer's connect re-ran them in the queue one after another, and rooms of 6-8
+        // racers missed SFU_SETUP_MS (2026-11-07 logs: 24 calls for 6 racers, 25 s).
+        this.kickSubscribe(race);
       } else if (m.type === "sfu_turn" && me.sfu && me.sfuRace === race.startAt) {
         // UDP to the SFU did not connect for this racer: TURN over TLS (finding 158, round 4).
         if (me.turnRace === race.startAt) {
@@ -1217,21 +1222,49 @@ export class Room extends DurableObject<Env> {
   }
 
 
-  /** A subscription missing at release (none should be: every racer's sfu_connected subscribes
-      all pairs): allocated in the queue, then the release is checked again. */
-  private reconciling = false;
-  private queueReconcile(race: Race): void {
-    if (this.reconciling) return;
-    this.reconciling = true;
-    const run = this.sfuQueue.then(() => this.subscribeRacers(new Realtime(this.env as Env & SfuSecrets), race));
-    this.sfuQueue = run.then(() => {}, () => {});
-    this.ctx.waitUntil(run.then(async (failed) => {
-      this.reconciling = false;
-      await this.save();
-      if (failed.length) await this.retireSfu(failed, race.startAt);
-      else if (this.state?.race === race) this.releaseSfu(this.state);
-    }, () => { this.reconciling = false; }));
+  /** One subscription pass for a race, coalesced (2026-11-07): it starts at once when every racer
+      of the race has published (or failed), else at most SUBSCRIBE_WAIT_MS after a publish that
+      found racers still connecting; a pass asked for while one runs runs once more after it. A
+      pass subscribes each subscriber's missing publishers (subscribeRacers) and takes the racers
+      whose subscription failed out. The alarm (SFU_CONNECT_MS) runs one too, as a backstop. */
+  private subscribeTimer?: ReturnType<typeof setTimeout>;
+  private subscribing = false;
+  private subscribeAgain = false;
+  private kickSubscribe(race: Race): void {
+    const st = this.state;
+    if (!st || st.race !== race) return;
+    const waiting = st.members.some(x => this.inRace(st, x.id) && x.sfu?.phase !== "ready" && x.sfu?.phase !== "failed");
+    if (!waiting) {
+      if (this.subscribeTimer) clearTimeout(this.subscribeTimer);
+      this.subscribeTimer = undefined;
+      void this.subscribePass(race);
+    } else if (!this.subscribeTimer) {
+      this.subscribeTimer = setTimeout(() => { this.subscribeTimer = undefined; void this.subscribePass(race); }, SUBSCRIBE_WAIT_MS);
+    }
   }
+  private async subscribePass(race: Race): Promise<void> {
+    if (this.subscribing) { this.subscribeAgain = true; return; }
+    this.subscribing = true;
+    try {
+      do {
+        this.subscribeAgain = false;
+        if (this.state?.race !== race) return;
+        const failed = await this.subscribeRacers(new Realtime(this.env as Env & SfuSecrets), race);
+        await this.save();
+        if (failed.length) await this.retireSfu(failed, race.startAt);
+      } while (this.subscribeAgain);
+    } catch (error) {
+      console.warn("Realtime subscription pass failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+    } finally {
+      this.subscribing = false;
+    }
+  }
+
+  /** A subscription missing at release: one more pass (subscribePass). */
+  private queueReconcile(race: Race): void {
+    void this.subscribePass(race);
+  }
+
 
   /** Lets race traffic flow once every racer acknowledged its channels and every pair of racers
       is subscribed both ways. */
