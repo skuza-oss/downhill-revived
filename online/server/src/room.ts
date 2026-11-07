@@ -1265,42 +1265,34 @@ export class Room extends DurableObject<Env> {
       the caller takes them out of the race. */
   private async subscribeRacers(api: Realtime, race: Race): Promise<number[]> {
     const failed: number[] = [];
-    // Subscribers in parallel, each one's publishers in turn (concurrent calls on one session are
-    // not risked). One API call at a time made rooms of 4+ players miss SFU_SETUP_MS on 0.7.12:
-    // every racer connected, none got all its channels in 25 s (2026-11-07 logs). Rounds repeat
-    // until no pair is missing; a departure during a call just drops that pair (racers re-read).
+    // One call per subscriber for every publisher it lacks (Realtime.subscribeAll), subscribers in
+    // parallel (each session's mutations stay serial). One call per pair, one at a time, made
+    // rooms of 4+ racers miss SFU_SETUP_MS on 0.7.12 (2026-11-07 logs); per pair in parallel still
+    // missed it at 7-8. Rounds repeat for racers that became ready meanwhile; racers are re-read.
     for (let round = 0; round <= MAX_MEMBERS; round++) {
       const racers = this.sfuRacers(race);
-      const work = new Map<Member, Member[]>();
-      for (const a of racers) for (const b of racers)
-        if (a !== b && !a.sfu!.channels.some(c => !c.local && c.memberId === b.id)) {
-          const list = work.get(a) ?? [];
-          list.push(b);
-          work.set(a, list);
-        }
-      if (!work.size) break;
+      const work = racers.filter(a => racers.some(b => a !== b && !a.sfu!.channels.some(c => !c.local && c.memberId === b.id)));
+      if (!work.length) break;
       let progress = false;
-      await Promise.all([...work].map(async ([sub, pubs]) => {
-        for (const pub of pubs) {
-          const now = this.sfuRacers(race);
-          if (!now.includes(sub) || !now.includes(pub)) continue;
-          try {
-            const channels = await api.subscribe(sub.sfu!, pub.id, pub.sfu!);
-            if (channels.length) progress = true;
-            const peer = this.sockets.get(sub.id);
-            if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
-          } catch (error) {
-            console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-            if (sub.sfu) sub.sfu.phase = "failed";
-            failed.push(sub.id);
-            return;
-          }
+      await Promise.all(work.map(async (sub) => {
+        const now = this.sfuRacers(race);
+        if (!now.includes(sub)) return;
+        try {
+          const channels = await api.subscribeAll(sub.sfu!, now.filter(p => p !== sub).map(p => ({ memberId: p.id, session: p.sfu! })));
+          if (channels.length) progress = true;
+          const peer = this.sockets.get(sub.id);
+          if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
+        } catch (error) {
+          console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+          if (sub.sfu) sub.sfu.phase = "failed";
+          failed.push(sub.id);
         }
       }));
       if (!progress) break;
     }
     return failed;
   }
+
 
 
   /** A subscription missing at release (none should be: every racer's sfu_connected subscribes
