@@ -199,7 +199,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | in progress |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
 | 173 | [STATE snapshots that stop for seconds on the SFU, then arrive at once](173-sfu-snapshot-stalls.md) | current |  |
-| 175 | [online follow-ups after 0.7.12 (rejoin in a race, a racer that never connects, TURN che...](175-online-followups.md) | in progress |  |
+| 175 | [online follow-ups after 0.7.12 (rejoin in a race, setup that never takes a race down, T...](175-online-followups.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
