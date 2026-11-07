@@ -24,7 +24,7 @@ usage: python port/tools/data.py   (normally run by port/tools/build_wasm.py's i
 import ast, bisect, glob, os, re, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-P = LABEL_PREFIX = ''  # the module's C symbols carry no prefix (build/audit/w5-wasm-module.md 2.1)
+P = LABEL_PREFIX = ''  # the module's C symbols carry no prefix (finding 082, "W5")
 # The emulated PS2 RAM (32 MB) sits at this guest address, with the uncached mirrors at
 # 0x20000000/0x30000000 + it (port/runtime/memory.c). Below 0x10000000, so a PS2 DMA address
 # (pointer & 0x0FFFFFFF) is still the guest pointer.

@@ -1,10 +1,10 @@
 # 173: STATE snapshots that stop for seconds on the SFU, then arrive at once
 
 Status: current
-Checked: 2026-11-06
+Checked: 2026-11-07
 
-Branch `fix/sfu-stalls` from `feat/online-latency` b8eb93c (finding 169), started 2026-11-06. This
-file is the lane's plan while it runs and its finding when it merges.
+Branch `fix/sfu-stalls` from `feat/online-latency` b8eb93c (finding 169), started 2026-11-06,
+merged into `main` as cfe842a. This file was the lane's plan and is now its finding.
 
 ## Goal and acceptance
 
@@ -47,7 +47,7 @@ Out of scope: TURN/TLS changes, the latency work of finding 169, phones and the 
       dropped on arrival, so a local race reproduces a lossy link.
 - [x] Before/after measurements, publisher-leg check, state traces, `check.py port` and `server`
       (Result).
-- [ ] PC↔Mac check of the fix: not run (For the lead).
+- [x] PC↔Mac check of the fix: run after the merge (Result, "PC↔Mac, merged `main`").
 
 ## Cause
 
@@ -106,7 +106,8 @@ Ruled out with the same trace:
   touches anything (`port/hle/puppet.c`, `receive_record`). One transport path, no fallback.
 - sctp-proto is vendored (`port/render/vendor/sctp-proto`, MIT OR Apache-2.0, licences kept) as an
   unchanged commit first, then the patch, so the diff is reviewable; `PATCH.md` says what and why
-  and how to reapply. str0m 0.25.0 has no switch for this.
+  and how to reapply. str0m 0.25.0 has no switch for this. Since finding 177 the vendored crate
+  carries a second change (a peer's stream resets taken in order); `PATCH.md` covers both.
 - Not chosen: a channel per snapshot or several STATE channels (each still ordered on Cloudflare's
   leg, more allocations per member and race, and only a share of the stalls avoided); a second
   subscriber session as a duplicate path (twice the traffic, and the same Cloudflare sender
@@ -134,8 +135,9 @@ Ruled out with the same trace:
   `tools/worktree_setup.py` makes with a real folder on C:, and after `--move` put it back as
   `online_server_node_modules\node_modules`; and wrangler fails through a junction whose target
   folder is not named `node_modules` (node resolves the real path: "Cannot find module
-  'esbuild'"). Pointing the junction at `…\online_server\node_modules` worked. Not fixed here
-  (For the lead).
+  'esbuild'"). Pointing the junction at `…\online_server\node_modules` worked. Fixed later in
+  finding 175: `worktree_setup.py` now points the junction at a folder named `node_modules` and
+  runs `npm ci` there.
 
 ## Result
 
@@ -213,4 +215,4 @@ touches the room connection.
   `maxPacketLifeTime` (U bit 0, retransmitted, no FORWARD-TSN), with this file's evidence. If they
   fix it, their sender stops retransmitting STATE and the remaining timer-backoff pauses go too;
   our patch stays correct either way.
-- `tools/worktree_setup.py`'s `node_modules` junction (Surprises).
+- `tools/worktree_setup.py`'s `node_modules` junction (Surprises): done in finding 175.

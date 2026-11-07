@@ -1,6 +1,6 @@
 # Online server
 
-Lobbies, join codes and the race relay for the PC port's online races. Cloudflare
+Lobbies, join codes and each race's Realtime setup for the PC port's online races. Cloudflare
 Workers + Durable Objects, TypeScript. The wire protocol is `docs/online-protocol.md`; the plan
 is `docs/ONLINE-PLAN.md`.
 
@@ -40,10 +40,9 @@ node tools/loadtest.mjs --url wss://dhd-online.<account>.workers.dev   # against
 The load test connects every player from one address: the limit per address (30 room
 connections a minute, `wrangler.jsonc` `ratelimits`) refuses runs past that (`rate_limited`).
 
-Measured with `wrangler dev` on the dev PC (4 players, 4 s, 600-byte STATE frames): every
-frame arrived whole and in order, relay one-way (sender → server → receiver) median 2.2 ms,
-p99 4.7 ms; binary PING round-trip median 3.8 ms. These are local numbers: on the internet add
-the players' own round-trips to the nearest Cloudflare location.
+Race frames no longer pass through this server (protocol 3 and later: Cloudflare Realtime SFU,
+below); the load test measures the room's messages. `port/render/net/src/probe.rs` measures the SFU
+path (findings 158, 177).
 
 ## Deploy
 
@@ -184,14 +183,15 @@ removing a class later needs a new migration entry, not an edit of `v1`.
 
 ## Limits and what is not there yet
 
-- No reconnect: a dropped racer becomes the host's AI rider for the rest of the race.
+- A racer whose room connection drops races on over the SFU and has 20 s to rejoin (findings 137,
+  175); one not back by then becomes the host's AI rider for the rest of the race.
 - No authentication: the game is open source, so any client can connect. The abuse guard
   (finding 161) limits what one can do: limits per address (`ratelimits` in `wrangler.jsonc`),
   the kill switch, per-player caps in a room, and bans.
 - The server does not check the ISO hash against the known US ISO; the client must refuse
   other regions, and the server only makes everyone match the host.
 
-## Realtime SFU (protocol 3)
+## Realtime SFU (since protocol 3)
 
 The deploy needs four Worker secrets (values from the Cloudflare dashboard, Realtime; never in a
 tracked file, a log or a client message):
@@ -211,7 +211,8 @@ npx wrangler secret put TURN_KEY_API_TOKEN
 ```
 
 Without the TURN pair, races still run over UDP; a player whose network blocks UDP gets no relay
-(the room logs "TURN credentials unavailable") and their race does not start. Local development reads all four from the
-gitignored `.dev.vars`. Lobby tests use a fake API and do not need credentials.
+(the room logs "TURN credentials unavailable") and leaves each race 10 s after its start; the others
+race on. Local development reads all four from the gitignored `.dev.vars`. Lobby tests use a fake
+API and do not need credentials.
 The DO owns session and channel creation; clients connect only to Cloudflare. See
 [the protocol](../../docs/online-protocol.md) and finding 158 for setup, tests and live acceptance.

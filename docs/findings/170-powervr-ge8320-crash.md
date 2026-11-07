@@ -1,9 +1,11 @@
 # 170: PowerVR GE8320 phones close at start
 
-Status: in progress
+Status: current
+Checked: 2026-11-07
 
 Branch `fix/powervr-crash` from `main` fce8a1f (0.7.12), started 2026-11-06. This file is the
-lane's plan while it runs and its finding when it merges.
+lane's plan while it runs and its finding when it merges. Merged into `main` on 2026-11-06
+(cc2feee).
 
 ## Goal and acceptance
 
@@ -77,6 +79,12 @@ draws the title (the lead or the lane, phone rules apply).
 - [x] 2026-11-06: the test build on the Mi 11i (Adreno 660): it starts and draws the title screen.
   Its log has the trace of all 64 pipelines built by then: the render probe, scanout, `main` (key 7),
   local_copy, then the native renderer's. Afterwards 0.7.12 as shipped was installed again.
+- [x] 2026-11-06: merged into `main` (cc2feee; the fix is 114ee64).
+- [x] after the merge, #56's player (OPPO CPH2269) ran the test build: the game starts and reaches
+  the menus, so raster.wgsl `main` now builds there. It then closes when the rider enters the Bike
+  Shop, on a native renderer draw pipeline the driver refuses ("Out of Memory"): another cause,
+  the lane `fix/powervr-oom`, not merged into `main` when this was checked.
+- [ ] not done: a report from #60's phone (Infinix Hot 11 Play); a race on a GE8320 phone.
 
 ## Decisions
 
@@ -96,7 +104,8 @@ draws the title (the lead or the lane, phone rules apply).
 ## Surprises
 
 - **Not native.wgsl** (finding 153's module): the exact renderer is built first even with
-  RENDER=native (it answers the Z probe), and its rasterizer is the pipeline that crashes.
+  `DHD_RENDER=native` (it answers the Z probe; `gs_gpu_init` in `port/gs/gpu_rust.c`), and its
+  rasterizer is the pipeline that crashes.
 - **Not the thread-safety problem** of Godot (#123614) and cinnabar's wgpu fork (#17), where GE8320
   phones crash in `libufwriter.so` with pipelines compiled on several threads. Here one thread
   compiles, and the crash is a lookup that misses every time.
@@ -106,6 +115,15 @@ draws the title (the lead or the lane, phone rules apply).
   not know.
 
 ## Result
+
+What changed: `port/gs/raster.wgsl` `texel()` passes its two clamped subtractions through
+`keep_u()` (an OR with `batch.w`, which `port/gs/gpu_exact.inc` always writes as 0), and
+`port/render/tests/native_spirv.rs` writes raster.wgsl's stages too and fails on the forms LLVM 9
+turns into `llvm.usub.sat`, `llvm.uadd.sat` or `llvm.fshl` (`docs/TESTING.md`). raster.wgsl is the
+exact renderer's module; it is built at start on every platform and with either renderer, since the
+exact renderer answers the Z probe. Its results are the old ones on every GPU (Decisions); the native
+renderer's shaders did not change. On #56's phone the game now starts and reaches the menus
+(Progress); the Bike Shop crash there is the `fix/powervr-oom` lane's.
 
 The cause, with the evidence:
 1. **The pipeline**: raster.wgsl `main` (Progress). In the driver, the frames run from
@@ -151,11 +169,11 @@ Candidates, ranked:
 After `main` the phone builds `local_copy` and the native renderer's pipelines; all scan clean. If
 one still crashes, the test build's pipeline trace names it.
 
-Left for a phone test (the lead, with the players of #56 and #60): the test build on a GE8320 phone
-(any Helio G35/P35/P22-class phone with "PowerVR Rogue GE8320" in its log). It should reach the
-title and the menus, then a race. If it still closes, Share log: the last `pipeline trace:` line
-names the pipeline the driver could not build, and the test build's kept `libmain.so` maps its
-frames. The same build on the Mi 11i (Adreno) is in Progress.
+Phone tests: on #56's GE8320 phone the test build reaches the title and the menus, then closes in
+the Bike Shop (`fix/powervr-oom`, Progress). Not done: #60's phone, and a race on any GE8320 phone. If a
+GE8320 phone still closes, Share log from a test build with the trace: the last `pipeline trace:`
+line names the pipeline the driver could not build, and the test build's kept `libmain.so` maps
+its frames. The same build on the Mi 11i (Adreno) is in Progress.
 
 How to look again (no driver binary or path in the repository): GitHub code search for
 `vulkan.mt6765.so` finds MT6765 firmware dumps; take one whose `vendor/lib64/libufwriter.so` exports

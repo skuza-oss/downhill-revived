@@ -1,5 +1,5 @@
 """wasm_postlink.py on a synthetic module: each kind of mismatched indirect call found in
-dhd_core.wasm (build/audit/w7f-indirect.md) traps without the step and works with it, with the
+dhd_core.wasm (finding 082, "W7f") traps without the step and works with it, with the
 values of the port's call contract (wasm_postlink.py's adapter semantics: arguments by 4-byte
 slot, missing slots 0, the documented results).
 

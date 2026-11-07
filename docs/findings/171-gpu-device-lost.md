@@ -1,9 +1,10 @@
 # 171: The picture freezes when the GPU device is lost
 
 Status: current
+Checked: 2026-11-07
 
 Branch `fix/device-lost` from `main` fce8a1f (0.7.12), started 2026-11-06. This file is the lane's
-plan while it runs and its finding when it merges.
+plan while it runs and its finding when it merges. Merged into `main` on 2026-11-06 (9b88d82).
 
 ## Goal and acceptance
 
@@ -71,6 +72,7 @@ passing, and pictures unchanged in normal runs.
   message instead of a frozen picture; `DHD_TEST_DEVICE_LOST` and `DHD_GPU_DRED` (38a988c)
 - [x] 2026-11-06: reproduced on this PC (hidden desktop, both renderers, DRED on); `check.py port`
   passes (`test_gs_wgpu` PASS); `rustgs.py check` passes for Linux and the browser
+- [x] 2026-11-06: merged into `main` (9b88d82)
 - [ ] the lead: one check on the merged branch; ask #58's player for a newer Intel driver, then
   (if it still hangs) one start with `DHD_GPU_DRED=1` and one with `DHD_WGPU_DUAL_SOURCE=0`
 
@@ -88,8 +90,14 @@ passing, and pictures unchanged in normal runs.
 - `present.c`'s `gs_pump_messages` (the game thread, every field) sees it: logs `gs: the GPU
   device was lost; the game ends`, hides the window, shows the box "The graphics driver stopped
   responding and was reset ... Update the graphics driver ... and start the game again" and exits
-  with code 1 (as `graphics_failed` does when the graphics never start). `DHD_HEADLESS` shows no
-  box.
+  with code 1 (as `graphics_failed` does when the graphics never start). The box is
+  `host_error_box` (`port/host/host_sdl.c`, SDL's message box); `DHD_HEADLESS` shows no box.
+- Where: Windows, macOS, Linux and Android share this path (`gpu_rust.c`, `present.c`); only
+  D3D12 was tested (Reproduction). Elsewhere it ends the game when wgpu reports the loss through
+  the callback; the reason logged is then the backend, GPU and driver. The browser does not end the
+  game: its device has its own callback (`port/render/src/web/init.rs`: it logs `dhd_render:
+  WebGPU device lost` and makes later reads refuse), and its native present's lost-device hook
+  does nothing (`port/web/gpu_rust_web_native.inc`).
 - `DHD_GPU_DRED=1` (Windows, D3D12): DRED's auto-breadcrumbs and page-fault reports are switched
   on before the device is made; the lost-device report then names each command list the GPU had
   not finished (wgpu's encoder labels: `native picture`, `present`, ...) and the operations around
@@ -158,13 +166,12 @@ so they were not run.
 
 ## Result
 
-Filled in by the lane; the lead sets the Status at the merge.
-
 - What changed: a lost device (any backend) is noticed through wgpu's device-lost callback; the
   failed present logs the backend's reason once (`port/render/src/lost.rs`,
   `dhdr_device_lost`); the game thread ends the game with a box and exit code 1
   (`port/gs/present.c`, `graphics_lost`). No device is made again and nothing falls back to
-  Vulkan (Decisions). Normal runs are untouched: one atomic load per acquired frame and per field.
+  Vulkan (Decisions). Normal runs are untouched: per acquired frame two atomic loads (the lost
+  flag and the test switch's cached setting), per field one.
 - Checked: the forced removal on both renderers (Reproduction); `python tools/check.py port` OK
   (docs, core, runtime tests, game, net tests, `test_gs_wgpu --skip-hardware` VERDICT PASS,
   wasm2c chunks); `rustgs.py check` for `x86_64-unknown-linux-gnu` and the browser

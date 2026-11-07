@@ -14,7 +14,7 @@ under build/. The game runs headless (DHD_HEADLESS=1, no window) and ends itself
 field (DHD_STATE_STOP); if it hasn't ended after --timeout seconds it is stopped, with whatever it
 started (owned_process), and the run fails.
 
-The recipe (build/audit/h4-state-trace.md, section 7): the virtual clock (DHD_FRAME_CLOCK=1),
+The recipe (finding 081, "The proof: state traces"): the virtual clock (DHD_FRAME_CLOCK=1),
 no movies, no memory card, no sound device, native renderer, default settings only
 (DHD_SETTINGS=none), a pinned race seed, and field- or race-clock-keyed pad scripts. The race
 scenario needs DHD_RACE_SYNC=1 for its race-clock pad (the same route bench_race.py uses); that starts a 30 s heartbeat thread that only reads and prints."""

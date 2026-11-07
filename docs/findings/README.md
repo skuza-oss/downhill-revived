@@ -23,14 +23,14 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | Matching decomp | 002 compiler, 003 build, 004 small data, 012 C idioms, 013/014 asm forms, 074 NONMATCHING, `docs/WORKER.md` | 001 |
 | Port core (wasm32 core, 64-bit host) | 081 plan, 082 host runtime, 088 one 64-bit build, 099 one code path, 104 tests | 015, 017, 018, 020 (32-bit parts) |
 | Game clock and pacing | 139 delta-time clock, 142 replays on it, 052 just-in-time frames, 026 vblank wait | 027, 036, 049 (survey still true), 067 |
-| Renderer (GS, Rust/wgpu) | 021 GS core, 084 WGSL, 085/086 Rust renderer, 088 CL2, 131 draw pass, 045/136 scale | 025, 031-033, 035, 038 |
+| Renderer (GS, Rust/wgpu) | 021 GS core, 084 WGSL, 085/086 Rust renderer, 088 CL2, 131 draw pass, 045/136 scale, 171 lost device | 025, 031-033, 035, 038 |
 | VU0/VU1 | 016, 019, 030, 090 (VU1R, OP3, SP1) | 027, 029, 037 |
 | Audio and movies | 022, 133, 055 | |
-| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, `docs/online-protocol.md` | 039-042 (lockstep parts) |
+| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 169 snapshots and prediction, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
 | Menus, settings, input | 050, 064, 092, 101/102 settings, 059/134 controllers, 141 touch, 056/140 widescreen | 065 (WM_CHAR part) |
 | Launcher, releases, installers | 093, 125, 138, 143, 098 disc check | 053, 054, 070 |
 | Speed (PC) | 089, 090, 129 perf log, 130/131 iGPU | 031, 032, 046, 048, 051, 066, 069 |
-| Android and phones | 091, 107, 108, 126/127 low-end profile, 143, 145, 146-149 | |
+| Android and phones | 091, 107, 108, 126/127 low-end profile, 143, 145, 146-149, 170 PowerVR | |
 | Browser | 083, 087, 102 | |
 
 ## Numbers not in this folder
@@ -188,7 +188,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 155 | [The Android build for every arm64 core (ARMv8.0)](155-android-armv8-baseline.md) | current |  |
 | 156 | [Where a frame's time goes, before replacing the VU1 and GS emulation](156-profile-vu1-gs.md) | current |  |
 | 157 | [Keyboard and controller rebinding, in the launcher and in the game](157-control-rebinding.md) | current |  |
-| 158 | [race frames over Cloudflare Realtime SFU, and puppets with less delay](158-online-sfu-transport.md) | current |  |
+| 158 | [race frames over Cloudflare Realtime SFU, and puppets with less delay](158-online-sfu-transport.md) | partly superseded | [177](177-sfu-room-sessions.md) for the per-race Realtime sessions set up at the race's start, and TURN credentials per racer per race |
 | 159 | [Touch controls gone after loading a career save](159-touch-gone-after-save-load.md) | current |  |
 | 160 | [Garbage blocks on screen in the first seconds after start](160-boot-garbage-frames.md) | current |  |
 | 161 | [online abuse guard: kill switch, rate limits, bans and a short moderation log](161-online-abuse-guard.md) | current |  |
@@ -196,10 +196,10 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 165 | [no port patch in code the port does not compile](165-dead-patch-guard.md) | current |  |
 | 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
 | 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | current |  |
-| 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | in progress |  |
+| 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | current |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
 | 173 | [STATE snapshots that stop for seconds on the SFU, then arrive at once](173-sfu-snapshot-stalls.md) | current |  |
-| 175 | [online follow-ups after 0.7.12 (rejoin in a race, setup that never takes a race down, T...](175-online-followups.md) | current |  |
+| 175 | [online follow-ups after 0.7.12 (rejoin in a race, setup that never takes a race down, T...](175-online-followups.md) | partly superseded | [177](177-sfu-room-sessions.md) for the rejoin's SFU session restart: `sfu_restart` and the welcome's `race.sfu`; per-race sessions |
 | 177 | [one Realtime session per member per room, set up before the race](177-sfu-room-sessions.md) | current |  |
 | 178 | [pre-release online lifecycle review](178-pre-0713-review.md) | partly superseded | [179](179-sfu-review-risks.md) for the three risks left open, now fixed |
 | 179 | [the three SFU risks the pre-release review left open](179-sfu-review-risks.md) | current |  |

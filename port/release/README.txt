@@ -102,7 +102,9 @@ Settings: OPTIONS > REVIVED SETTINGS in the game's menu, the first row, with Dis
 Controls, Online and Game tabs (L1/R1 switch them): resolution, display mode, window size,
 picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, your keys
 and buttons, the size of online riders' names (Off, Small, Medium as the original, Large),
-texture pack, font. Changes are saved to dhd.ini.
+texture pack, font, FPS & Ping (frames a second; online the round trip to the room's server,
+"N MS PING", and in a race "RIDERS N MS", how old the other riders' positions are when they
+arrive). Changes are saved to dhd.ini.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game
@@ -150,7 +152,7 @@ Online races (experimental)
 Choose ONLINE in the main menu: create a public or private race, or join one from the list or
 with its code. It works out of the box, on the project's official server
 (wss://dhd.skuza.app). Every player needs the same USA disc image,
-and the newest version of the game (0.7.12 can't race with 0.7.11 or older): an older one is
+and the newest version of the game (0.7.13 can't race with 0.7.12 or older): an older one is
 told "A new version is out. Update to play online." and offered Update Now, which closes the game
 and lets the launcher update it.
 In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest

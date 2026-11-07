@@ -1,7 +1,7 @@
 # 169: online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction
 
 Status: current
-Checked: 2026-11-06
+Checked: 2026-11-07
 
 Branch `feat/online-latency` from `main` fce8a1f (0.7.12 plus the server's refusal order), started
 2026-11-06. This file is the lane's plan while it runs and its finding when it merges. Merged into `main`
@@ -99,11 +99,14 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       span the puppets are predicted across. Outside a race it stays "N MS PING" (the room's
       server). dhd.log's `net:` lines keep the ping and add each sender's age on arrival ("on
       arrival N ms"). Rust test `online_line_names_what_it_measures_and_fits` (13 characters at
-      most, the bitmap's width). `src/abi.rs` gained the counter's and the touch overlay's
-      function types, and `test_dhdr_abi.py` reads `f32`/`f64` (both functions were missing from
+      most, the bitmap's width). `port/render/src/abi.rs` gained the counter's and the touch
+      overlay's function types, and `test_dhdr_abi.py` reads `f32`/`f64` (both functions were missing from
       the ABI check because it could not).
 - [x] The flood limit no longer silences a sender for the rest of the race (Surprises): messages
-      over 240 a second per bundle index are dropped, the first drop is logged.
+      over 240 a second per bundle index are dropped, the first drop is logged. (Finding 175
+      changed this: over the limit a message whose stamp is newer than the newest taken still
+      counts, at most 240 more a second, so a backlog's newest snapshots get through;
+      `SenderRate` in `port/render/net/src/sfu.rs`.)
 - [x] Checks, measurements, state traces, the Mac check (Result).
 
 ## Decisions
@@ -162,13 +165,18 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
   its FORWARD-TSN. Not fixed here (a transport lane: str0m's PR-SCTP receive path, or sending
   STATE so it can't wait); while it lasts both drawing modes hold the rider (interpolation after
   carrying it 0.2 s, prediction after 0.25 s), and it shows as the p99s and the "stalled steps"
-  in the tables.
+  in the tables. (Finding 173 found the cause and fixed it: Cloudflare forwards the STATE channel
+  ordered and reliable whatever policy is asked, so one lost datagram held every later snapshot
+  until Cloudflare's retransmission, not a FORWARD-TSN; the vendored sctp-proto now delivers each
+  complete message on a stream this side opened unordered at once.)
 - A stall's backlog froze a rider for the rest of a race: 360 STATE messages (6 s of the host's)
   came out of the guest's SCTP stack at once, over the flood limit of 240 a second for bundle 0,
   and the limit (finding 158 round 2: "silences that member's snapshots and events for the rest
   of the race") silenced the host. 0.7.12 has the same hazard at its 120 a second per rider. The
   limit now drops the excess of that second only (0e9c5fd); the same kind of run afterwards kept
-  every rider moving.
+  every rider moving. Since finding 175 (ac2c9b6) a message over the limit still gets through
+  when its stamp is newer than any taken (up to twice the limit a second), so a backlog's newest
+  snapshots arrive.
 - This PC's own rider's pad sender (`hle_puppet_start` began at slot 1) was never reset at a race
   start, while every receiver clears its mirror: pad words unchanged since the last race reached
   the others only at the next full refresh, up to a second into the race. Item 1 resets it with
@@ -229,8 +237,8 @@ The counter in a race (guest, prediction on): "RIDERS 33 MS", "RIDERS 12 MS" (ca
 ### PC <-> Mac over the internet (acceptance 4)
 
 The same scripted two-player race on a Windows PC and the M1 Mac. Each version ran against its own
-temporary room server on Cloudflare (workers.dev: 0.7.11's relay; 0.7.12's and this lane's server
-with the SFU), so every byte crossed the internet:
+temporary room server on the developer's Cloudflare account (0.7.11's relay; 0.7.12's and this
+lane's server with the SFU), so every byte crossed the internet:
 
 - **A:** 0.7.11 plus only finding 158's age metric.
 - **B:** the shipped 0.7.12.
@@ -278,7 +286,7 @@ What it shows:
 - **Items 1-3 alone:** they bring the in-the-past delay from 66-82 to 47-56 ms. Bundling cuts the
   host's messages from 270 to ~90 a second, and long gaps fall to 0-4 a minute.
 - **The receive-side stalls (Surprises) happen between the two machines too:** a window age p99 of
-  830-1000 ms in both directions.
+  830-1000 ms in both directions. (Finding 173 fixed these stalls.)
   - The rider is held, then catches up ("shown behind" up to 725-754 ms; distance p99 up to 35 units
     in the worst race).
   - Unlike 0.7.12, no rider stayed stopped for the rest of a race.
@@ -298,7 +306,10 @@ What it shows:
     PC-Mac.
 - **Room WebSockets reset at race starts:** both games at once, 1006. This happened in 0.7.11 (3
   sessions) and in this lane (2 of about 16 race starts).
-  - The rejoin was refused by a TCP reset, and the session ended.
+  - The rejoin was refused by a TCP reset, and the session ended. (Finding 175 read these logs
+    again: the game never tried a rejoin in a race; the reset was that same drop's, shown by the
+    room menu after the race closed. Since finding 175 a game whose room connection drops in a
+    race races on over the SFU and rejoins; the room keeps its seat 20 s.)
   - Nothing showed on the server, and a separate tail WebSocket from the same PC dropped at the
     same moment once. So most likely it's the shared uplink or the edge, not the room code.
   - 0.7.12 had one, in the lobby, and rejoined.
@@ -306,14 +317,16 @@ What it shows:
 ### For the lead
 
 - Protocol 4: the release must raise `MIN_VERSION` to it; 0.7.12 and this lane cannot race
-  together (the server refuses the other protocol).
+  together (the server refuses the other protocol). Done for 0.7.13 (8f5e1cd), whose protocol 4
+  also carries finding 177's room sessions.
 - The PC<->Mac comparison (acceptance 4) is recorded above.
 - Two follow-ups came out of it:
   - the shared clock's offset when a player's round trip stays inflated for a whole race (the
     Mac's view was 37-78 ms ahead): fixed (above);
-  - a host whose room WebSocket drops at a race start is refused on rejoin and loses the session.
+  - a host whose room WebSocket drops at a race start is refused on rejoin and loses the session:
+    fixed by finding 175 (no rejoin was tried in a race at all; now the game rejoins and races on).
 - The receive-side SCTP stalls (Surprises) are worth a transport lane; with the flood-limit fix they
-  only hold a rider while they last.
+  only hold a rider while they last. Finding 173 was that lane and fixed them.
 - `rustgs.py check --target aarch64-apple-darwin`: the lead's call, `port/render/AGENTS.md` now
   says the Mac check runs on a Mac.
 - Hits keep finding 044's rule on the predicted pose (Decisions); a victim-side check was not added.

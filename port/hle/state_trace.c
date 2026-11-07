@@ -1,4 +1,4 @@
-/* Per-field state trace (build/audit/h4-state-trace.md, section 7; finding 081 phase 1).
+/* Per-field state trace (finding 081, "The proof: state traces", phase 1).
 
    DHD_STATE_TRACE=<prefix> writes <prefix>.tsv: a header line, a column line, then one row per
    game field (vsync). Each section is hashed with XXH64 over an explicit little-endian

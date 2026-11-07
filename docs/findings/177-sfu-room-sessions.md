@@ -1,6 +1,11 @@
 # 177: one Realtime session per member per room, set up before the race
 
 Status: current
+Supersedes: parts of 158 (its per-race Realtime sessions, set up from the race's start message) and of 175 (the rejoin's session restart, `sfu_restart`)
+Checked: 2026-11-07
+
+Finding 178 reviewed this design before 0.7.13; finding 179 fixed the three risks it left open
+(notes below, under Sessions, Subscriptions and Rejoin).
 
 Branch `feat/sfu-room-sessions` from `main` 562e627, started 2026-11-07. 176 is taken by
 `fix/powervr-oom`.
@@ -41,7 +46,8 @@ Done:
 - [x] Question C against the real API, and the stream id reuse it found: 26dc9e0 (sctp-proto takes
       Cloudflare's stream resets in order), probe `probe_parallel_subscriptions`.
 - [x] Server: 55dbca2 (sessions per room stay, the pre-setup, parallel subscriptions, protocol
-      doc). Tests `online/server/test/room-sessions.test.ts` (5) and the updated SFU tests.
+      doc). Tests `online/server/test/room-sessions.test.ts` (5; finding 179 added four on failed
+      subscription closes) and the updated SFU tests.
 - [x] Client: 1f86802 (one association per room stay, per-race state, replacement after a failure,
       TURN renewal, stream id reuse). Rust tests `the_association_outlives_races_and_each_race_starts_its_own_state`,
       `a_closed_subscriptions_stream_id_serves_the_next_one`.
@@ -62,7 +68,10 @@ the two publications (`state`, `events`); between races nothing more happens. A 
 replaces the session: the room closes the old one first (its channels, the others' subscriptions
 to it with `sfu_closed`, its TURN credentials). Offers are capped at 6 in 5 minutes per member.
 The client offers again after a failure, a lost association, a `sfu_reset` or a TURN renewal,
-pausing 1 s, then twice as long each time up to a minute, back to 1 s once one connects.
+pausing 1 s, then twice as long each time up to a minute, back to 1 s once one connects. Since
+finding 179 the SFU's address is looked up on a thread of its own, not on the send thread: a
+replacement uses the last address found at once, the run's first association waits at most 300 ms
+(`LOOKUP_WAIT`), and an attempt without an address fails and is retried after the pause.
 
 **Subscriptions.** Made for a race's racers in one coalesced pass: at the grid's lock (the
 countdown; rooms with the old rules: their countdown), at the start for what is missing (a racer
@@ -70,7 +79,11 @@ connected since), and when a racer of the coming or running race publishes. They
 race. Each subscription remembers the publisher's session (server side only); one to an earlier
 session of that member is stale and the pass closes it. At a race's start the subscriptions held
 by members outside it are closed, so a member sitting a race out is sent no race frames
-(egress is what Realtime bills); they come back at its next grid.
+(egress is what Realtime bills); they come back at its next grid. A subscription whose close
+fails (here, or when a publisher leaves or replaces its session) was forgotten until finding 179:
+now it stays on its subscriber's record marked closing, the pass tries it again 5, 10, 20 and 40 s
+later, and if it then still forwards a live publication, its subscriber's session is reset
+(`sfu_reset`) once that member is outside the running race and the locked grid.
 
 **Release.** After the start the game says `sfu_ready` with the race's marker once its own
 channels and every other racer's are open; the room releases (`sfu_ready` with the marker) when
@@ -94,7 +107,10 @@ member, not only racers.
 welcome says `"sfu":"ready"`; its client keeps the association if it has its answer, sends what it
 said meanwhile, and gets its whole channel list (`full`), then `sfu_ready` if its race was released
 and it had acknowledged. A client without a usable association offers anew. A member not back in
-20 s leaves, and its session closes.
+20 s leaves, and its session closes. The client first kept a listed channel by its stream id
+alone; since finding 179 it keeps one only if its whole allocation is listed (id, member, name,
+direction) and the SFU hasn't reset its stream, and closes the others as `sfu_closed` would, so an
+id Cloudflare recycled while the room connection was down opens for its new allocation.
 
 **TURN.** Credentials (TTL 1 h) are minted once per session and revoked when the session ends. A
 relay can't take new credentials (RFC 8656: the allocation's username for every request), and its

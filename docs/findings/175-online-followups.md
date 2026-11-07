@@ -1,6 +1,7 @@
 # 175: online follow-ups after 0.7.12 (rejoin in a race, setup that never takes a race down, TURN check, clock, flood limit)
 
-Status: current
+Status: partly superseded by 177 (the rejoin's SFU session restart: `sfu_restart` and the welcome's `race.sfu`; per-race sessions)
+Checked: 2026-11-07
 
 Branch `fix/online-followups` from `main` 9298a71, started 2026-11-07. Local main merged in three
 times for the lead's production hotfixes (b0812d6 SFU_CONNECT_MS at 1246a15; 0d6eee3 at 8c36cf4;
@@ -85,14 +86,23 @@ Server (`room.ts`, protocol doc "Limits"):
 - The rejoin's hello sends `raceStartAt`; the welcome says `race: {startAt, sfu}` (`ready`: keep
   the session; `setup`: start it again) and is followed by what it missed: `left` for racers gone
   since, its full channel list (`sfu_channels` with `full`), `sfu_ready` if released; or the
-  `start` again when the hello names another race or none.
-- `sfu_restart` (3 per racer per race) clears a session the rejoined game can't keep.
-- Games without `race_rejoin` (0.7.12) keep the old rule (their SFU died with the socket).
+  `start` again when the hello names another race or none. Finding 177 replaced the `sfu` part:
+  every welcome says `"sfu":"ready"` or `"setup"` at its top level, `race` is only `{startAt}`,
+  and `sfu_ready` follows only if the racer had acknowledged its channels. Since finding 179 the
+  full list keeps a channel only if its whole allocation is listed.
+- `sfu_restart` (3 per racer per race) clears a session the rejoined game can't keep. Finding 177
+  replaced this: `sfu_restart` is gone, a new `sfu_offer` replaces the session (at most 6 offers
+  in 5 minutes per member).
+- Games without `race_rejoin` (0.7.12) keep the old rule (their SFU died with the socket). The
+  rule is still in `room.ts`, but since 8f5e1cd the server's minimum version admits only releases
+  whose hello lists `race_rejoin`.
 
 Client:
 - The association lives through the socket drop: race frames still go out, the SFU's signaling
   waits for the welcome, which keeps it, restarts it from the saved start (`sfu_restart`, new
-  offer), or drops it.
+  offer), or drops it. Finding 177 replaced the restart: a welcome with `"sfu":"ready"` keeps an
+  association that has its answer (and sends what it held), anything else starts a new
+  association whose offer replaces the session (`port/render/net/src/lib.rs`, `Assoc`).
 - `client.c`: a drop in a race starts a rejoin; the state stays `NET_RACING` (the game sees
   nothing); a finish or BACK said during the gap is said again. A refusal other than
   `rate_limited`, or the end of the attempts, leaves it racing alone as before.
@@ -111,7 +121,8 @@ those races finished with the same results on both machines.
 - **Client fallback (8715952, a648ecb):** a game said `sfu_ready` only with every racer's channels,
   so on a server without SFU_CONNECT_MS one broken racer hung every game until the 25 s deadline
   took the whole race out. Now, READY_TIMEOUT (8 s) after its own association connected with its
-  own channels open, a game says `sfu_ready` anyway. The room still releases only when every
+  own channels open, a game says `sfu_ready` anyway (since finding 177 the association outlives
+  races: counted from the race's start, or from the connection if that came later). The room still releases only when every
   connected racer is subscribed both ways, so nothing is lost; against an older server only the
   broken racer is out at 25 s. Rust test `ready_without_a_racer_that_never_connects`.
 - **The wait players see.** The game exchanges rides (`exchange_rides`, port/hle/online.c) in a
@@ -126,13 +137,18 @@ those races finished with the same results on both machines.
   answer itself well under a second when a racer's `sessions/new` doesn't queue (60b72f2), that is
   at most about 4 s after the start; 10 s keeps 2.5 times that. Measured frozen wait with a racer
   that never connects: about 11 s at 15 s (T2, every race on both machines), about 6 s at 10 s
-  (U1, U2).
+  (U1, U2). Since finding 177 a member connects on joining the room, so only a racer whose session
+  is new or replaced at the start still sets up within these 10 s.
 - **A racer's own setup off the room's SFU queue (60b72f2).** Every `sfu_*` message ran in one
   queue per room, so in a full room the last racers' `sessions/new` (0.25-0.40 s each in
   production) and a TURN racer's credentials waited behind the others' publications and
   subscriptions. A racer's first session of a race and its TURN credentials touch nothing of the
   others and now run at once; a late session is still closed if the race moved on. Test: an offer
-  answered and credentials minted while a subscription call hangs in the queue.
+  answered and credentials minted while a subscription call hangs in the queue. Hotfix 5 (merged
+  at f9fbf1b) took the publication off the queue too; today only an offer that replaces a session
+  waits in it. Finding 177 replaced the per-race session: the first session is the member's on
+  joining the room, and one answered for an offer a newer one replaced is dropped (it ends by
+  itself after 30 s).
 
 ## Room SHCF93: the release that seemed to wait minutes
 
@@ -147,7 +163,7 @@ and "released" lines only at 222 s, after the lead's deploy reset the room (02:3
   the race looked unreleased: the alarm's setup check ran again (68 s, 206 s; room 3G5MXD the same
   at 66 s for a race released at 3 s) and every later retire sent `sfu_ready` and logged
   "released" again (222 s, with 2 then 1 racers). Now the release and the check are saved, each
-  racer gets `sfu_ready` once per race (`releasedRace`; again only after its session restarted),
+  racer gets `sfu_ready` once per race (`releasedRace`; again only after a new session),
   the release is logged once, and a retire sends `left` before releasing the rest. Tests: after an
   eviction no setup check and no second `sfu_ready`; a restarted racer released again alone (all
   fail without the fix).
@@ -156,7 +172,9 @@ and "released" lines only at 222 s, after the lead's deploy reset the room (02:3
   race; hotfix 4's pass had it too: its repeat ended on the race it was first asked for), and
   6c98e33 and 640e018 remove it (a reconcile and a pass serve the current race and re-check the
   release; every alarm tick asks for the release while it hasn't come), with tests that fail
-  without them. But nothing shows it happened in SHCF93.
+  without them. But nothing shows it happened in SHCF93. Finding 177 replaced the per-race
+  reconcile and pass with one coalesced pass for the locked grid or the running race
+  (`subscribePass`); the alarm still asks for the release each tick.
 - **Real in that window, and fixed (6c98e33):** the room retried `datachannels/close` of gone
   sessions every 5.4 s (410 each time) from the pending cleanup, on the SFU queue, and the alarm
   awaited each pass. A 410/404 close now counts as closed, and the cleanup pass runs in the
@@ -241,7 +259,8 @@ switch cherry-picked (K-base, both machines; local commit d1edcc1 on a temporary
 - **5 (32980fa):** the junction's target is a folder named node_modules
   (`DHD_SCRATCH/worktrees/<name>/online_server/node_modules`) and setup runs `npm ci` there next to
   copies of package.json and the lock, again when the lock changes (`--npm`: always); `--remove
-  PATH` unlinks the junctions `git worktree remove` leaves. Checked on a fresh worktree on C::
+  PATH` unlinks the junctions `git worktree remove` leaves. Checked on a fresh worktree on the
+  system drive:
   typecheck, `npm test` 142/142 and `local_server.py`'s wrangler dev through the junction, a rerun
   up to date, then removed.
 - **6 (ac2c9b6):** over 240 a second per bundle index, a message whose stamp is newer than the
@@ -270,9 +289,9 @@ switch cherry-picked (K-base, both machines; local commit d1edcc1 on a temporary
   looks at our own channel list.
 - `git worktree remove` leaves the junctions; one points into the main checkout's
   `tools/compilers`.
-- Creating a junction on F: started to fail during the lane ("The file or directory is corrupted
-  and unreadable", any target, cmd/PowerShell/Python); junctions on C: pointing at F: and folders
-  on F: work, no NTFS or disk event logged. Not this lane's to repair.
+- Creating a junction on the scratch drive started to fail during the lane ("The file or directory
+  is corrupted and unreadable", any target, cmd/PowerShell/Python); junctions on the system drive
+  pointing at it and folders on it work, no NTFS or disk event logged. Not this lane's to repair.
 - Two local two-game runs on this PC ran the second game out of GPU memory (the owner's game held
   5.7 of 8 GB) and showed the out-of-memory box: the PC↔Mac runs used one headless game here.
 - A killed host now stays in its race for the 20 s grace, so a public room can stay listed that
@@ -305,4 +324,5 @@ five merges of local main for the lead's hotfixes 1-5 (hotfix 3 came and went).
 Open:
 - The start wait could be made non-blocking only with a hold in the game's load step before the
   race build (a game-code patch); not done.
-- `race_rejoin` needs a release to reach players; old clients keep the old behaviour.
+- `race_rejoin` needs a release to reach players; old clients keep the old behaviour. 0.7.13
+  carries it, and 8f5e1cd raised the server's minimum version to that release.

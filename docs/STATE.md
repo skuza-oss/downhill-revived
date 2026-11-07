@@ -68,7 +68,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - GS: GS memory and registers in C (`port/gs/`); the Rust renderer (`port/render`, wgpu: DX12 or
   Vulkan on Windows, Metal on Apple, Vulkan on Linux and Android, WebGPU in the browser) behind
   the shared C front ends `gpu_exact.inc` (exact: the PS2's pixels, the reference) and
-  `native_core.inc` (native, upscaled, the player default). Findings 084-086, 088, 131.
+  `native_core.inc` (native, upscaled, the player default). Findings 084-086, 088, 131. A lost GPU
+  device ends the game with a message box instead of a frozen picture (desktop and Android; tried on
+  Direct3D 12; finding 171).
 - **The game clock:** one delta-time clock at every frame rate, 60 included and online: each
   paced frame steps by the real time since the last, between one step at the selected rate and two
   fields (finding 139, `port/hle/fps.c`, `port/hle/kernel.c`). Deterministic runs keep the
@@ -93,8 +95,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), movies,
   vibration, stick dead zone and button icons (finding 134), the keys and controller buttons for
   the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
-  Ping counter (finding 120), online name size (finding 163), Unlock All (finding 095), EXIT GAME. dhd.ini has one implementation, the Rust crate
-  `dhd_settings` (`port/render/settings`), used by the game, the launcher and the browser.
+  Ping counter (findings 120, 169), online name size (finding 163), Unlock All (finding 095),
+  EXIT GAME. dhd.ini has one implementation, the Rust crate `dhd_settings`
+  (`port/render/settings`), used by the game, the launcher and the browser.
 - The launcher holds settings, rider name and updates on every desktop platform, decides the one
   data folder (`DHD_SETTINGS`, `DHD_MEMCARD_DIR`, `DHD_DATA_DIR`), updates from `latest.json`
   with a backup through the server's `/v1/latest` (findings 093, 125, 138). A phone has no
@@ -116,26 +119,33 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (finding 166), Ready for the next race and MOSH by
   the host's pick (finding 128), rooms placed near their creator (finding 135), rejoin by token
   (finding 137); a room connection lost in a race no longer ends it: the game races on over the
-  SFU and rejoins, the seat is kept 20 s (finding 175). Protocol: `docs/online-protocol.md`; steps: `online/server/README.md`.
+  SFU and rejoins, the seat is kept 20 s (finding 175). Protocol: `docs/online-protocol.md`;
+  steps: `online/server/README.md`.
 - Abuse guard (finding 161): a kill switch in the moderation database (`moderate.mjs online
   off`), limits per address, caps per member, and
   bans by address hash or install id with a 14-day moderation log in D1, worked from
   `online/server/tools/moderate.mjs` (no admin endpoint). No player gets another's address, its
   hash or install id.
-- Race frames (finding 158): over Cloudflare Realtime SFU DataChannels, STATE unordered with no
-  retransmissions and EVENT reliable (Cloudflare forwards STATE ordered and reliable anyway; the
+- Race frames (findings 158, 177): over Cloudflare Realtime SFU DataChannels, STATE unordered with
+  no retransmissions and EVENT reliable (Cloudflare forwards STATE ordered and reliable anyway; the
   client's vendored sctp-proto delivers it unordered, finding 173). One Realtime session per member
   per room stay (finding 177): made when the member joins, kept across races with its
-  publications and subscriptions; a race's missing pairs are subscribed at the grid's lock, during
-  the countdown, so a connected room is released as soon as its games acknowledge the start. The
-  room passes each member only its own SDP and channels. If UDP doesn't connect in 2 s, Cloudflare
-  TURN over TLS on 443 with credentials minted for that member, renewed between races. A racer whose Realtime never connects leaves after 10 s and the others
-  race on (finding 175). Protocol 4 (finding 169): a PC's riders of one tick go out bundled
-  in STATE messages of at most 1,000 bytes (one datagram), stamped with their moment on the
-  server clock; each player's own rider 60 times a second, AI riders 30. Puppets are drawn at the
-  present: the newest snapshot carried forward by its velocity and angular velocity, corrections
-  fading in (`DHD_PUPPET_PREDICT=0` interpolates in the past instead). Hits are decided on the
-  puppet as drawn. In a race the FPS & Ping counter shows "RIDERS N MS", the other riders' delay.
+  publications and subscriptions (a member who sits a race out loses its subscriptions at that
+  race's start and gets them back at its next grid); a race's missing pairs are subscribed at the
+  grid's lock, during the countdown, so a connected room is released as soon as its games
+  acknowledge the start. The room passes each member only its own SFU answer, channels and TURN
+  credentials, never a session id. If UDP doesn't connect in 2 s, Cloudflare TURN over TLS on 443
+  with credentials minted for that member, renewed between races once 35 minutes old. A racer
+  whose Realtime never connects leaves the race 10 s after its start message and the others race
+  on (finding 175); failed subscription closes are retried and a rejoin's channel list replaces
+  recycled channel ids (finding 179).
+- Protocol 4 (0.7.13, finding 169): a PC's riders of one tick go out bundled in STATE messages of
+  at most 1,000 bytes (one datagram), stamped with their moment on the server clock (the PONG
+  carries the server's time); each player's own rider 60 times a second, AI riders 30. Puppets are
+  drawn at the present: the newest snapshot carried forward by its velocity and angular velocity,
+  corrections fading in (`DHD_PUPPET_PREDICT=0` interpolates in the past instead). Hits are
+  decided on the puppet as drawn. In a race the FPS & Ping counter shows "RIDERS N MS", the other
+  riders' snapshot delay; outside a race "N MS PING", the round trip to the room's server.
 - Client: `port/net/` over `port/net/ws.h`, the Rust crate `dhd_net` (`port/render/net`:
   tungstenite over rustls for the lobby, str0m for the SFU with a vendored RustCrypto adapter,
   its own TURN client; webpki roots, no OS certificate store).
@@ -163,6 +173,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   it; 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149 say what is left;
   finding 156 says where a frame's time goes on the phone and the desktops, and what replacing the
   VU1 and GS emulation with native rendering would remove.
+- PowerVR GE8320 phones start since finding 170; one player's phone then closed entering the Bike
+  Shop (the driver refused a native renderer pipeline, "Out of Memory"): not fixed on `main` yet.
 - Browser speed is below 60 in races (finding 087).
 - High-rate handling differs a little from 60 by the race's own chaos, with no trend (finding
   139, after finding 067's limits).

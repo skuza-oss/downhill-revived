@@ -13,7 +13,7 @@ Writes build/wasm/dhd_core.wasm from
 Data symbols are numbers, not linker symbols: wasm-ld has no --defsym, the wasm assembler rejects
 absolute symbols, and an alias needs an anchor as big as the guest space. So each C declaration of
 a data name (D_xxxxxxxx, _gp) becomes a macro for its PS2 address (data.absolute). Design and the
-checks behind it: build/audit/w5-wasm-module.md.
+checks behind it: finding 082 ("W5").
 
 The module's imports are the host_api.h functions only (--allow-undefined-file). Anything else that
 doesn't resolve fails the strict link; a diagnostic link with --allow-undefined then writes the
@@ -60,7 +60,7 @@ SIMDE = os.environ.get('SIMDE_DIR', str(DEVCACHES / 'simde-src'))
 WABT = os.environ.get('WABT_DIR', str(DEVCACHES / 'wabt/wabt-1.0.42'))
 WASM = os.path.join(OUT, 'dhd_core.wasm')
 
-# The module's own memory: above the scratchpad (0x70000000), see build/audit/w5-wasm-module.md 3.
+# The module's own memory: above the scratchpad (0x70000000), see finding 082 ("W5").
 STACK_BASE = 0x70100000
 STACK_SIZE = 1 << 20
 DATA_BASE = STACK_BASE + STACK_SIZE

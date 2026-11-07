@@ -1,9 +1,11 @@
 # 178: pre-release online lifecycle review
 
 Status: partly superseded by 179 (the three risks left open, now fixed)
+Checked: 2026-11-07
 
-Branch `review/pre-0713` from `main` 84558c4, started 2026-11-07. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `review/pre-0713` from `main` 84558c4, started 2026-11-07, merged into `main` at 8cbd3b0.
+Its three fixes are current; the three risks it left open ("Review coverage" below) were fixed
+by finding 179.
 
 ## Goal and acceptance
 
@@ -66,7 +68,8 @@ budget; rate counters reset by time and race; the release is persisted and sent 
 racer; the reset-before-close handling preserves the stream reset lifecycle. State sync
 and the delta-time clock remain intact.
 
-Unchanged risks for the lead (design/lifecycle changes need separate integration coverage):
+Risks the review left open for the lead (superseded: finding 179 fixed all three before 0.7.13;
+kept here as the review's record of the code at 84558c4):
 
 - **P2, rejoin during channel churn**, `port/render/net/src/sfu.rs`, full `sfu_channels`:
   the reconciliation considers an allocation known by stream ID alone. If the SFU recycles
@@ -74,25 +77,31 @@ Unchanged risks for the lead (design/lifecycle changes need separate integration
   on that ID can keep the old channel identity. Decide whether mismatched allocations
   should replace individual channels or restart the association; test a dropped room
   connection overlapping a departure and newcomer. Not reproduced against the live SFU.
+  Fixed: 179, risk 1 (a channel stays only if its whole allocation is listed).
 - **P2, failed subscription closes**, `subscribeGroup` / `clearSfu`: failed remote closes
   are forgotten rather than persisted for retry. In particular pruning a sitting-out
   member can leave live subscriptions receiving traffic until its session ends. Decide
   whether to track these independently or reset the subscriber on a failed prune. The
   current cleanup queue only guarantees retries for whole sessions and TURN credentials.
+  Fixed: 179, risk 2 (failed closes kept and retried, then the subscriber's session reset).
 - **P2, transport thread DNS**, `Sfu::start`: synchronous `to_socket_addrs` runs on the
   sole callback/poll thread during replacement. Slow DNS can pause room processing and
   rejoin handling. Decide whether to resolve asynchronously with a bounded wait.
+  Fixed: 179, risk 3 (a lookup thread; at most a 300 ms wait, none on a replacement).
 
 ## Result
 
 Fixes: `d9efff3` (stale failures), `a540278` (duplicate publish), `21fe897` (stale TURN
 mint). Five regression cases fail on the corresponding unfixed code and pass with the
-fixes; the full server tier passes 162 tests and typecheck.
+fixes; the full server tier passes 162 tests and typecheck (166 since finding 179's four). The
+five cases are in `online/server/test/sfu.test.ts`: "late failures of replaced Realtime
+sessions" (three), "publication admission" and "TURN generation ownership".
 
 The core module's SHA-256 equals the shared main build's; port source is unchanged
 by this branch. The shared executable supplies baseline boot (600 fields) and race
 (5000 fields) traces. Every boot and race row matches (`state_diff.py`: PASS for both).
-Rust SFU tests pass: 12 passed, 6 ignored live probes, 9 unrelated tests filtered out.
+Rust SFU tests pass: 12 passed, 6 ignored live probes, 9 unrelated tests filtered out (15 pass
+since finding 179's three).
 No build or game process started by this review remains running.
 
 The review stopped `check.py port` before its renderer step: the brief's "WARP stays off" meant

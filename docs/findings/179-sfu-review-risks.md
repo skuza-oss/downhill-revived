@@ -1,11 +1,11 @@
 # 179: the three SFU risks the pre-release review left open
 
 Status: current
-
 Supersedes: parts of 178 (its three open risks)
+Checked: 2026-11-07
 
-Branch `fix/sfu-review-risks` from `main` c4f0776, started 2026-11-07. This file is the lane's plan
-while it runs and its finding when it merges.
+Branch `fix/sfu-review-risks` from `main` c4f0776, started 2026-11-07, merged into `main` at
+6e4ec25.
 
 ## Goal and acceptance
 
@@ -54,9 +54,10 @@ Out of scope: any change to state sync, the relay-only transport or the game clo
   same allocation is listed again: the member sat a race out and got the same ids back). Anything
   else goes through `close_stream`, the path the room's `sfu_closed` takes since finding 177 (wait
   for Cloudflare's reset, reset from here after 2 s), and the listed allocation waits in
-  `open_waiting` for the id. That path already handles a reused id in both orders (reset before or
-  after the room's message, finding 177's tests and live run R2b); a restart would cost the member a
-  new session (offer, publications, every other member's subscriptions to it) for one channel.
+  `waiting` until `open_waiting` finds its id free. That path already handles a reused id in both
+  orders (reset before or after the room's message, finding 177's tests and live run R2b); a
+  restart would cost the member a new session (offer, publications, every other member's
+  subscriptions to it) for one channel.
 - **Risk 2: retry on the subscriber's own record, then reset its session.** A subscription whose
   close fails stays in its subscriber's `channels` marked `closeAt`/`closeTries` (so it is stored
   with the room and survives an eviction), is no longer counted as a subscription (`subscribed`,

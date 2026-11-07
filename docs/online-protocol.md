@@ -8,8 +8,8 @@ Cloudflare Workers + Durable Objects). The plan behind it is `docs/ONLINE-PLAN.m
 - The server runs no game logic. Race frames use the SFU (state sync: every
   PC runs its own race and shows the others' riders from their snapshots, findings 041 and 044)
   and reports players who leave.
-- `PROTOCOL = 3`. It is in `hello`; the endpoint URL remains `/v1/`. Any incompatible change raises
-  it; the server refuses clients with another number.
+- `PROTOCOL = 4` (since 0.7.13; 0.7.12 spoke 3). It is in `hello`; the endpoint URL remains `/v1/`.
+  Any incompatible change raises it; the server refuses clients with another number.
 
 ## Endpoints
 
@@ -37,7 +37,7 @@ the server sends nothing.
 A refusal is one text frame followed by a close:
 
 ```json
-{"type":"error","code":"iso_mismatch","message":"Your ISO does not match the host's (US SCUS-97177 expected)."}
+{"type":"error","code":"iso_mismatch","message":"Your game ISO does not match the host's."}
 ```
 
 | `code` | Close code | When |
@@ -145,7 +145,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 ```jsonc
 // First message, required. name: 1-24 characters.
 {"type":"hello","protocol":4,"version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","clientVersion":"0.2.0",
- "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown"]}  // features: optional
+ "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown","session","race_rejoin"]}  // features: optional
 // A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>",
 // and during a race (finding 175) the startAt of the race it knows: "raceStartAt":1734000003000
 // From the release after 0.7.11 (finding 161): "installId":"<32 lowercase hex>", optional (below)
@@ -176,7 +176,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
   above). Optional: releases before it send none and join as before; one that is not 32 lowercase
   hex digits counts as none. The server sends it to nobody. The game never writes it to dhd.log.
 - `features`: what the client understands beyond version 1. `"countdown"`: the room may start
-  the race by itself (below). `"race_rejoin"` (finding 175): the game keeps racing over the SFU
+  the race by itself (below). `"session"`: a creator's hello asks for session-room rules (Session
+  rooms, below). `"race_rejoin"` (finding 175): the game keeps racing over the SFU
   while its room connection is down and rejoins its race (Limits, below).
 
 ### Server → client
@@ -202,7 +203,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
             {"id":2,"name":"Bo","ready":false,"rider":0,"bike":0,"rttMs":null,"choosing":true}],
  "countdownEndsAt":null,"serverTime":1734000000000}
 
-// Server-timestamped ping, every 2 s while in the lobby. Echo "s" back unchanged in a "pong".
+// Server-timestamped ping, every 2 s (in a session room during races too; with the old rules only
+// outside a race). Echo "s" back unchanged in a "pong".
 {"type":"ping","s":1734000000123}
 
 // Answer to a client "ping": "t" echoed, serverTime added (use it to estimate the clock offset).
@@ -215,7 +217,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
  "serverTime":1734000005000,"startAt":1734000008000}
 
 // A racer left or dropped. The host's game hands their rider to its AI.
-{"type":"left","slot":1,"memberId":2,"reason":"disconnect"}   // or "leave"/"kicked"
+{"type":"left","slot":1,"memberId":2,"reason":"disconnect"}   // or "leave"/"kicked"; session
+// rooms: "left", "finished", "gave_up" or "time_up" (Finishes and return, below)
 
 // Host ended the race; the room is a lobby again (ready flags cleared).
 {"type":"ended"}
@@ -282,7 +285,8 @@ A member's session lives as long as its stay in the room (finding 177):
   `local:true` means its own publication. Session IDs and app credentials stay on the server.
   Cloudflare gives a closed channel's ID to the next allocation on that session at once: the client
   makes the new channel once the old one's stream reset is done (the vendored sctp-proto takes
-  Cloudflare's stream resets in order, `port/render/vendor/sctp-proto/PATCH.md`).
+  Cloudflare's stream resets in order, `port/render/vendor/sctp-proto/PATCH.md`). A channel still
+  not open 10 s after its allocation fails the association, and the client offers a new session.
 - After the race's `start`, once this game's own channels and every other racer's are open, the
   client sends `{"type":"sfu_ready","race":<startAt>}` (an older race's counts for nothing). The DO
   replies `{"type":"sfu_ready","race":<startAt>}` to all racers only after every racer acknowledged
@@ -498,7 +502,7 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
 - A room with no members is deleted.
 - Caps per connection (finding 161, `online/server/src/guard.ts`): at most 100 text frames and
   100 binary frames in each 5 s window (20 a second each; the game sends about 1.5 text and, in
-  a race, 2 binary PINGs a second: protocol 3 race frames travel over the SFU, finding 158, and a
+  a race, 2 binary PINGs a second: since protocol 3 race frames travel over the SFU, finding 158, and a
   race's Realtime setup is a few text messages). Over a cap the rest of that window's frames of
   that kind are dropped (binary ones not answered);
   the first time the sender also gets the non-fatal
@@ -542,7 +546,7 @@ that includes this UI at release time; no deployment is part of this change.
 
 A creator opts in with `"features":["countdown","session"]` in hello.
 The creator's feature selects the rules for the room's whole lifetime.
-Version and ISO matching still apply. Protocol remains 1.
+Version and ISO matching still apply. The protocol number did not change (it was 1 then).
 A creator without session keeps all the old rules, including immediate host Start,
 no racing joins, and hiding racing or full rooms from the public list.
 Binary STATE and EVENT formats do not change. The server runs no game logic.
@@ -729,8 +733,8 @@ A late join waits for its first grid. Existing recording replay mode remains.
 New public and private rooms default to ten members. The host can choose 2–10,
 but cannot shrink below current membership. A race still uses one local human.
 NetLobby member, racer and result arrays each have ten entries. Native and browser
-hosts use the regenerated shared ABI. Rider STATE format remains version 3;
-EVENT format remains version 3. The binary relay path is unchanged.
+hosts use the regenerated shared ABI. It changed no binary format (today's formats and their
+SFU path: Race, above).
 
 Rotation settings carry `rotation` and parallel `trackLimits` arrays in the same
 message. Limits are 6, 8 or 10. At least one entry must take ten riders. Clients

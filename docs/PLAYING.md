@@ -274,7 +274,7 @@ back to its defaults. Players 3 and 4 use the default controller layout.
 Online works out of the box: choose ONLINE in the main menu to create a public or private race,
 or join one from the list or with its code. The game uses the project's official server,
 `wss://dhd.skuza.app`. Every player needs the same USA disc image and the same release of the
-game (0.7.12 and later can't race with 0.7.11 or older; the ONLINE menu offers the update).
+game (0.7.13 can't race with 0.7.12 or older; the ONLINE menu offers the update).
 
 In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
 to you (UDP). Where a network blocks UDP, the game falls back to an encrypted connection on port
@@ -347,6 +347,7 @@ first start. The REVIVED SETTINGS page writes most of them for you.
 | `server` | (empty) | the online server; empty: the official one |
 | `font` | `sharp` | `original` draws the game's font as the PS2 does |
 | `vsync` | `1` | `1` shows each picture without tearing, `0` sends it at once (may tear) |
+| `perf_counter` | `0` | `1` shows FPS & Ping: frames a second and, online, `N MS PING` (the round trip to the room's server); in a race `RIDERS N MS`, how old the other riders' positions are when they arrive |
 | `unlock_all` | `0` | `1`: everything reads as unlocked, without changing the save |
 | `name` | (empty) | your rider name in online races |
 

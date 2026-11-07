@@ -1,7 +1,12 @@
 # 158: race frames over Cloudflare Realtime SFU, and puppets with less delay
 
-Status: current
-Checked: 2026-11-06
+Status: partly superseded by 177 (the per-race Realtime sessions set up at the race's start, and TURN credentials per racer per race)
+Checked: 2026-11-07
+
+Since finding 177 each member has one Realtime session for its whole stay in the room, made on
+joining and kept across races, and a race's missing subscriptions are made at the grid's lock.
+The transport, the channels, the hard rule, the TURN fallback and the measurements below still
+hold; lines about a session per racer per race describe the design before 177.
 
 Branch `feat/online-sfu` from `main` 113f76f, started 2026-11-06. This file is the lane's plan
 while it runs and its finding when it merges.
@@ -144,8 +149,9 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   (Cloudflare Realtime pricing, read 2026-11-05); a full ten-player race is a few MB per player.
 - Round 4: TURN is a fallback, not a second path kept beside the first: UDP is tried first, the
   relay only after DIRECT_TIMEOUT (2 s after the answer; the reasoning is beside the constant and
-  in "Round 4"). Credentials are minted per racer per race on request, never handed out to every
-  racer in advance: most players never need them, and a credential nobody got cannot leak.
+  in "Round 4"). Credentials are minted on request for the player who asks only (per race then,
+  per Realtime session since finding 177), never handed out to every racer in advance: most
+  players never need them, and a credential nobody got cannot leak.
 - Round 4: an own TURN client, not `turn-client-proto` (ystreet, MIT OR Apache-2.0, maintained,
   sans-IO). Its `stun-types` 2.0 pulls the older RustCrypto generation (digest 0.10, hmac 0.12,
   sha1 0.10, md-5 0.10, rand 0.9) beside the 0.11 one str0m already links, plus byteorder and
@@ -259,7 +265,8 @@ them out later), cheating checks, the puppet extrapolation rules, room placement
   departed member was removed first, so its session id and TURN username went with it, and the
   race-end loop stopped at the first failure. Teardown now goes on past failures, and what did not
   close is stored apart from the members (and the room) and retried by the alarm with backoff
-  until it closes or its time is up. Cloudflare's SFU docs give a connected DataChannel-only
+  until it closes or its time is up (a subscription whose close fails is retried by the
+  subscription pass since finding 179). Cloudflare's SFU docs give a connected DataChannel-only
   session no end ("close resources when finished"; retain cleanup state while retrying), so the
   room gives up after an hour, as the TURN TTL does.
 
@@ -269,16 +276,17 @@ Merged into `main` on 2026-11-06 (four rounds; the round sections below hold the
 State sync is unchanged (finding 044); the race frames' transport and the puppets' delay changed:
 
 - Race frames travel over Cloudflare Realtime SFU DataChannels: STATE on an unordered channel
-  with no retransmissions, EVENT on a reliable one. The room creates each racer's SFU session and
-  channels and sends each client only its own SDP and channel ids; no player receives another's
-  address, SDP or TURN credentials (`online/server/src/sfu.ts`, `port/render/net/src/sfu.rs`).
+  with no retransmissions, EVENT on a reliable one. The room creates the SFU sessions and channels
+  (a session per racer per race here; one per member per room stay since finding 177) and sends
+  each client only its own SDP and channel ids; no player receives another's address, SDP or TURN
+  credentials (`online/server/src/sfu.ts`, `port/render/net/src/sfu.rs`).
   The WebSocket race relay is gone; binary PING/PONG on the WebSocket stays for the ping counter.
-  `PROTOCOL` is 3; 0.7.12 ships it, and `MIN_VERSION` is 0.7.12 (`online/server/wrangler.jsonc`,
-  3e65337): 0.7.11 can't race with it.
+  `PROTOCOL` was 3, shipped in 0.7.12 with `MIN_VERSION` raised to it (`online/server/wrangler.jsonc`,
+  3e65337): 0.7.11 can't race with it. Protocol 4 followed (findings 169 and 177).
 - When UDP to the SFU does not connect within 2 s, the client falls back to Cloudflare TURN over
-  TLS on 443 with short-lived credentials the room mints for that racer only (`turn.rs`,
+  TLS on 443 with short-lived credentials the room mints for that player only (`turn.rs`,
   `relay.rs`; test switch `DHD_NET_SFU_UDP=0`).
-- 30 snapshots a second, a puppet delay that adapts to each sender (50-150 ms), snapshots that
+- 30 snapshots a second (60 for a player's own rider since finding 169), a puppet delay that adapts to each sender (50-150 ms), snapshots that
   survive loss (changed pad words repeated, a full copy about once a second), and snapshot age,
   gaps and the SFU loop's timings in dhd.log's `net:` lines.
 - Measured on one PC (WARP off), snapshot age in a race, median: the 0.7.11 relay through the
@@ -375,6 +383,10 @@ are counted per member and rider in one-second windows; more than 120/s for any 
 normal 30/s) silences that member's snapshots and events for the rest of the race. A new race
 resets the limiter. No close/error codes from the guard lane are used. Server tests cover
 lobby/end rejection and repeated setup attempts; the native limiter has a flood test.
+Replaced since: the per-race sessions by finding 177 (one session per member per room stay, made
+on joining, at most 6 offers in 5 minutes, kept across races, closed on leaving, failure or
+replacement; the client resets only its per-race state at each start), and the silencing for the
+rest of the race by findings 169 and 175 (a limit per rider each second, never for the whole race).
 Sources for server lifecycle review:
 [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/).
 
@@ -608,12 +620,13 @@ deleted relay; it now sends the game's PINGs and checks every PONG and that no c
   second at 150 ms RTT, with room for one lost packet's retransmission. A shorter timeout would put
   slow-but-working UDP on the relay; a longer one only delays the race start for blocked players.
 - **Credentials:** the client sends `sfu_turn`; the room (`online/server/src/sfu.ts` `Turn`) mints
-  them with `generate-ice-servers` only for a racer with an SFU session in the running race, once
-  per member per race, TTL one hour (longer than any race with its finish wait, so a running
-  relay's Refresh never meets an expired credential), `customIdentifier` `room-<CODE>-m<id>`
+  them with `generate-ice-servers` only for a member with an SFU session, once per session (once
+  per racer per race until finding 177), TTL one hour (a relay can't take new credentials, so since
+  finding 177 the client replaces a session whose credentials are 35 minutes old between races,
+  `TURN_RENEW` in `sfu.rs`), `customIdentifier` `room-<CODE>-m<id>`
   (accepted by that endpoint, checked live: 201). It sends the `turns:` urls, username and
-  credential to that member only, and revokes them when the member's SFU session is cleared (race
-  end, retire, leaving). A failed mint sends nothing and leaves the session usable (UDP may still
+  credential to that member only, and revokes them when the member's SFU session ends (leaving, a
+  failed session, a replacement; race end too before finding 177). A failed mint sends nothing and leaves the session usable (UDP may still
   connect). The client accepts only `turns:` servers on `turn.cloudflare.com`, port 443 first.
 - **Client:** `turn.rs`, a sans-IO TURN client (RFC 8656 subset): Allocate with the long-term
   credential (401 challenge, MD5 key, HMAC-SHA1 MESSAGE-INTEGRITY), 438 stale-nonce retry, Refresh a
