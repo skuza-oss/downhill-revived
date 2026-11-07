@@ -66,7 +66,12 @@ test branch); on the Mi 11i (Adreno) it starts and reaches the Bike Shop.
 - [x] 2026-11-07: the test build for players: local branch `test/powervr-oom-1` (this branch plus
   the pipeline trace patch 1165468, as e3c81d4), built as 0.7.12's APK is (package_release.py,
   the phone profile, the release key), versionCode 712.
-- [ ] the test build on the Mi 11i: starts and reaches the Bike Shop.
+- [x] 2026-11-07: on the Mi 11i (Adreno 660): the test build starts and draws the title (64
+  pipelines traced, no error). The same build with the local env-file hook of finding 154
+  (`files/dhd-test.env`, never committed) and DHD_NAV
+  `0:triangle|cross,15:cross,3:cross,16:cross,1:cross,11:cross` reaches the Bike Shop's inventory
+  (rider, bike and jersey drawn; menus at 59.9 fps; 83 pipelines traced, none with blend Zero /
+  One, no error). Afterwards 0.7.12 as shipped was installed again (its APK's hash checked).
 
 ## Decisions
 
