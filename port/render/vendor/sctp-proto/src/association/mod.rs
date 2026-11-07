@@ -135,6 +135,9 @@ pub enum Event {
     DatagramReceived,
 }
 
+/// How far ahead of the last accepted peer RE-CONFIG request one may be held (reconfig_ahead).
+const RECONFIG_AHEAD_MAX: u32 = 64;
+
 /// Multiset of stream ids owing a terminal reset event.
 /// Each `Finished` for an id arms one result, a re-created id is a distinct
 /// generation and owes its own.
@@ -243,6 +246,13 @@ pub struct Association {
     /// Application-initiated resets waiting for the active request to finish.
     pending_reset_streams: VecDeque<StreamId>,
     reconfig_requests: FxHashMap<u32, ParamOutgoingResetRequest>,
+    /// Peer requests that arrived ahead of their turn (Downhill Revived, finding 177): Cloudflare
+    /// Realtime's SFU sends several Outgoing SSN Reset Requests at once, against RFC 6525 5.1.1,
+    /// and they can arrive out of order or while an earlier one is deferred. They are held here
+    /// and processed in sequence order, instead of answered "Bad Sequence Number" or "Request
+    /// already in progress", which the SFU does not retry: the streams it named then never
+    /// finished their reset and their ids could not be used again.
+    reconfig_ahead: FxHashMap<u32, ParamOutgoingResetRequest>,
     /// DATA received above an InProgress reset boundary. A copy is retained
     /// after cumulative TSN processing removes it from `payload_queue`, so it
     /// can remain withheld until the old stream generation is drained.
@@ -361,6 +371,7 @@ impl Default for Association {
             active_reconfig: None,
             pending_reset_streams: VecDeque::default(),
             reconfig_requests: FxHashMap::default(),
+            reconfig_ahead: FxHashMap::default(),
             deferred_reset_data: FxHashMap::default(),
             max_completed_reconfig_rsn: None,
             peer_last_reconfig_rsn: 0,
@@ -993,6 +1004,7 @@ impl Association {
             self.reconfigs.clear();
             self.reconfig_reset_streams.clear();
             self.reconfig_requests.clear();
+            self.reconfig_ahead.clear();
             self.deferred_reset_data.clear();
             self.control_queue.clear();
             self.active_reconfig = None;
@@ -2826,6 +2838,28 @@ impl Association {
                 self.max_completed_reconfig_rsn = Some(seq);
             }
         }
+        self.process_reconfig_ahead(reply)
+    }
+
+    /// Processes held peer requests (reconfig_ahead) whose turn has come, in sequence order, while
+    /// none is deferred.
+    fn process_reconfig_ahead(&mut self, reply: &mut Vec<Packet>) -> Result<()> {
+        while self.reconfig_requests.is_empty() {
+            let next = self.peer_last_reconfig_rsn.wrapping_add(1);
+            let Some(request) = self.reconfig_ahead.remove(&next) else { break };
+            self.peer_last_reconfig_rsn = next;
+            self.reconfig_requests.insert(next, request.clone());
+            self.reset_streams_if_any(&request, true, reply)?;
+            if !self.reconfig_requests.contains_key(&next) {
+                self.max_completed_reconfig_rsn = Some(next);
+            }
+        }
+        // Anything at or behind the last accepted request is stale.
+        let last = self.peer_last_reconfig_rsn;
+        self.reconfig_ahead.retain(|seq, _| {
+            let ahead = seq.wrapping_sub(last);
+            ahead >= 1 && ahead <= RECONFIG_AHEAD_MAX
+        });
         Ok(())
     }
 
@@ -2928,6 +2962,17 @@ impl Association {
             }
 
             if !self.reconfig_requests.contains_key(&seq) {
+                // A request ahead of its turn (the next one while another is
+                // deferred, or a later one before the next): held, unanswered,
+                // until its predecessors are done (reconfig_ahead).
+                let ahead = seq.wrapping_sub(self.peer_last_reconfig_rsn);
+                if self.peer_reconfig_rsn_initialized
+                    && (ahead >= 2 || (ahead == 1 && !self.reconfig_requests.is_empty()))
+                    && ahead <= RECONFIG_AHEAD_MAX
+                {
+                    self.reconfig_ahead.insert(seq, p.clone());
+                    return Ok(());
+                }
                 // RFC 6525 section 5.2.2 E4: only the next expected peer
                 // request sequence number may start a new operation. A request
                 // already deferred in reconfig_requests is a retransmission and
@@ -2963,7 +3008,7 @@ impl Association {
             if !self.reconfig_requests.contains_key(&seq) {
                 self.max_completed_reconfig_rsn = Some(seq);
             }
-            Ok(())
+            self.process_reconfig_ahead(reply)
         } else if let Some(p) = raw.as_any().downcast_ref::<ParamReconfigResponse>() {
             let rsn = p.reconfig_response_sequence_number;
             // RFC 6525 section 5.2.7 H1: ignore responses unless this RSN owns
