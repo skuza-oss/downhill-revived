@@ -1,6 +1,5 @@
 # State log
 
-
 Dated entries, newest first: what a lane or round changed and how it was checked. What is true
 now is in `docs/STATE.md`; the details are in the findings it names. Older round logs (2026-10-12
 to 2026-10-25) are in the findings and in `git show v0.3.1:docs/STATE.md`.
@@ -8,12 +7,11 @@ to 2026-10-25) are in the findings and in `git show v0.3.1:docs/STATE.md`.
 Add an entry when a lane merges: date, finding, one paragraph. Do not copy values that live in
 code (versions, MIN_VERSION, defaults): name the file instead.
 
-2026-11-07 (finding 178): pre-release review fixes stale Realtime failures affecting replacement sessions,
-duplicate publications during an in-flight publish, and stale TURN mints losing replacement cleanup
-records. Five regression cases; server tier 162 tests and typecheck pass; boot 600 and race 5000
-state-trace rows match. Port build/runtime/network/chunk and Rust SFU checks pass; full port tier
-remains incomplete because its renderer gate invokes WARP and this review requires WARP off.
-Rejoin identity reuse, failed subscription close policy and synchronous DNS remain lead decisions.
+2026-11-07 (finding 178): a deep review before 0.7.13 of every change since 0.7.12. Three server fixes in the room's Realtime handling: a call that fails after a newer offer replaced its session no longer fails the healthy replacement or retires its racer; a repeated `sfu_connected` during a publish no longer makes a second pair of publications; a TURN mint that finishes after a newer session no longer loses the replacement's credentials record. Five regression tests fail without the fixes. Three risks left open in the finding: a full channel list after a rejoin matches channels by stream id only, a failed subscription close is not retried, the SFU transport resolves DNS on its own thread. Checked on merged main: `check.py port` and `check.py server` pass; state traces equal the base build's.
+
+2026-11-07 (finding 177): one Realtime session per member for its whole room stay instead of one per race; a race's missing subscriptions are made at the grid's lock, up to 4 calls at once per subscriber (4,320 concurrent calls tested against the real API, none failed). PC, Mac and 4 bots, 6 racers, over UDP and forced TURN, with joins, leaves and rejoins: every race released 46-166 ms after its start message (production with 0.7.12: 3-20 s and more). Two interop fixes on the way: Cloudflare's out-of-order stream resets (vendored sctp-proto) and its reset arriving before the room's `sfu_closed` (client). Protocol 4 changed again (`docs/online-protocol.md`). `check.py port` and `server` pass; state traces equal the base build's.
+
+2026-11-07 (finding 175): a room connection lost in a race no longer ends it (the game races on over the SFU and rejoins; the seat is kept 20 s); a racer whose Realtime never connects leaves after 10 s and the others race on; the release is saved and sent once per racer; closes of gone sessions count as closed. Includes production hotfixes 1-5 of the 0.7.12 outage (rooms of 3+ thrown out at the start). PC-Mac runs over UDP and TURN with forced and natural drops. `check.py port` and `server` pass; state traces equal the base build's.
 
 2026-11-06 (finding 173): online snapshots no longer stall for 0.5-6 s. Cloudflare Realtime SFU forwards the STATE channel to each subscriber ordered and reliable whatever the channel asks, so one lost datagram held every later snapshot until Cloudflare resent it (often after its 1 s timer). The vendored sctp-proto (`port/render/vendor/sctp-proto/PATCH.md`) hands out each message on a channel we opened unordered as soon as it is complete. Local two-game races, host to guest: snapshot age p99 489-984 ms before, 24-82 ms after; with 3% loss injected (`DHD_NET_SFU_DROP_IN`) 924-989 before, 50-103 after. Cloudflare's own pauses after a lost retransmission (up to 2 s, rare) remain.
 

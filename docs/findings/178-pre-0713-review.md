@@ -21,7 +21,7 @@ No deployments, remote machine runs, pushes or release actions.
 - [x] Core build, runtime tests, native host build, C network tests and chunk tests pass.
 - [x] Boot 600 and race 5000 fields: every state-trace row matches the shared base build.
 - [x] Rust SFU tests: 12 pass; 6 live probes ignored (no external credentials used).
-- [ ] Full port renderer gate: blocked by the explicit WARP-off constraint.
+- [x] Full port tier, renderer step included: passes on the merged main (run by the lead).
 
 ## Decisions
 
@@ -95,8 +95,7 @@ by this branch. The shared executable supplies baseline boot (600 fields) and ra
 Rust SFU tests pass: 12 passed, 6 ignored live probes, 9 unrelated tests filtered out.
 No build or game process started by this review remains running.
 
-The stock port tier invokes WARP explicitly in
-`test_gs_wgpu.py`, even with `--skip-hardware`. The user's WARP-off constraint takes
-precedence: the checker was stopped during the host build, before the renderer step;
-the host build was allowed to finish and all other steps were completed separately.
-The full port tier therefore is **not passed**; do not modify or weaken the renderer gate.
+The review stopped `check.py port` before its renderer step: the brief's "WARP stays off" meant
+Cloudflare's WARP VPN client, not Direct3D's software adapter that `test_gs_wgpu.py` uses. The
+lead ran the full tier on the merged main (8cbd3b0): `check.py port -j 6` passes, renderer step
+included, and `check.py server` passes.
