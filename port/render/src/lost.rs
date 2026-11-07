@@ -108,11 +108,8 @@ pub mod d3d12 {
         if std::env::var("DHD_GPU_DRED").map_or(true, |v| v.trim() != "1") {
             return;
         }
-        let mut settings: Option<ID3D12DeviceRemovedExtendedDataSettings> = None;
-        // SAFETY: an out pointer to a local Option of the interface asked for.
-        let made = unsafe { D3D12GetDebugInterface(&mut settings) };
-        match (made, settings) {
-            (Ok(()), Some(s)) => {
+        match dred_settings() {
+            Ok(s) => {
                 // SAFETY: a live settings object; the calls take plain values.
                 unsafe {
                     s.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
@@ -120,8 +117,41 @@ pub mod d3d12 {
                 }
                 crate::host::log("gs: D3D12 DRED on (DHD_GPU_DRED=1): breadcrumbs and page faults");
             }
-            (made, _) => crate::host::log(&format!("gs: D3D12 DRED unavailable: {made:?}")),
+            Err(why) => crate::host::log(&format!("gs: D3D12 DRED unavailable: {why}")),
         }
+    }
+
+    windows_link::link!("kernel32.dll" "system" fn LoadLibraryExW(name: *const u16, file: *mut core::ffi::c_void, flags: u32) -> *mut core::ffi::c_void);
+    windows_link::link!("kernel32.dll" "system" fn GetProcAddress(module: *mut core::ffi::c_void, name: *const u8) -> *mut core::ffi::c_void);
+
+    /// DRED's settings through d3d12.dll's `D3D12GetDebugInterface`, looked up only when asked: dhd.exe
+    /// imports no d3d12.dll (wgpu loads it itself), so its imports stay Windows' core DLLs that
+    /// package_release.py allows.
+    fn dred_settings() -> Result<ID3D12DeviceRemovedExtendedDataSettings, String> {
+        type GetDebugInterface =
+            unsafe extern "system" fn(*const windows::core::GUID, *mut *mut core::ffi::c_void) -> windows::core::HRESULT;
+        const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x800;
+        let name: Vec<u16> = "d3d12.dll\0".encode_utf16().collect();
+        // SAFETY: a NUL-terminated name; the module stays loaded for the process (never freed).
+        let module = unsafe { LoadLibraryExW(name.as_ptr(), std::ptr::null_mut(), LOAD_LIBRARY_SEARCH_SYSTEM32) };
+        if module.is_null() {
+            return Err("no d3d12.dll".into());
+        }
+        // SAFETY: a loaded module and a NUL-terminated export name.
+        let proc_ = unsafe { GetProcAddress(module, b"D3D12GetDebugInterface\0".as_ptr()) };
+        if proc_.is_null() {
+            return Err("no D3D12GetDebugInterface".into());
+        }
+        // SAFETY: the export has this signature (d3d12.h).
+        let get: GetDebugInterface = unsafe { std::mem::transmute(proc_) };
+        let mut raw = std::ptr::null_mut();
+        // SAFETY: the interface's IID and an out pointer for it.
+        unsafe { get(&ID3D12DeviceRemovedExtendedDataSettings::IID, &mut raw) }.ok().map_err(|e| format!("{e:?}"))?;
+        if raw.is_null() {
+            return Err("no settings object".into());
+        }
+        // SAFETY: a live interface pointer the call handed over with its reference.
+        Ok(unsafe { ID3D12DeviceRemovedExtendedDataSettings::from_raw(raw) })
     }
 
     /// What a DXGI removed reason means.

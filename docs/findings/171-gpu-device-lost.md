@@ -102,7 +102,9 @@ passing, and pictures unchanged in normal runs.
   on before the device is made; the lost-device report then names each command list the GPU had
   not finished (wgpu's encoder labels: `native picture`, `present`, ...) and the operations around
   where it stopped (`>DrawInstanced` marks the first unfinished one), and a page fault's address.
-  Off by default: DRED costs a little on every command.
+  Off by default: DRED costs a little on every command. `D3D12GetDebugInterface` is looked up in
+  d3d12.dll only then (`dred_settings`): dhd.exe imports no d3d12.dll, as `package_release.py`'s
+  import check requires (the first 0.7.13 package stopped on the direct import).
 - `DHD_TEST_DEVICE_LOST=N` (tests): at the N-th frame a surface acquires, the D3D12 device is
   removed with `ID3D12Device5::RemoveDevice`. That marks only this process's device removed (its
   fences signal, its calls fail): no GPU reset, no other program touched, so it is safe on a PC
