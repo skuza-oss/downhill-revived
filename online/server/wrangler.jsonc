@@ -10,7 +10,7 @@
   // "A new version is available. Update to play online." Raise it to each new release once that
   // release is published; a self-hosted server can keep an older one. (The kill switch is not a
   // variable: it is in the moderation store, `node tools/moderate.mjs online off`, finding 161.)
-  "vars": { "MIN_VERSION": "0.7.12" },
+  "vars": { "MIN_VERSION": "0.7.13" },
   // The official server's address (port/hle/host.c OFFICIAL_SERVER).
   "routes": [{ "pattern": "dhd.skuza.app", "custom_domain": true }],
   // Limits per connection source (src/guard.ts overLimit, finding 161), keyed by the address's
