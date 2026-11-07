@@ -2,7 +2,7 @@
 // that is asked again until it comes.
 // Room SHCF93 (production, 2026-11-07 02:28-02:36): every racer ready at 68 s, released at 222 s
 // only because a deploy reset the room.
-import { env, runInDurableObject, runDurableObjectAlarm } from "cloudflare:test";
+import { env, runInDurableObject, runDurableObjectAlarm, evictDurableObject } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 import { startedRace } from "./helpers";
 import { fakeRealtime, publishedSession } from "./sfu-fake";
@@ -144,5 +144,69 @@ describe("the coalesced subscription pass (hotfix 4)", () => {
     } finally {
       fake.restore();
     }
+  });
+});
+
+describe("the release is stored and sent once (rooms SHCF93, 3G5MXD)", () => {
+  /** Three racers published, subscribed to each other and acknowledged: the race is released. */
+  async function releasedRace() {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    await runInDurableObject(stub, async (room: any) => {
+      const sessions = ready([0, 1, 2]);
+      room.state.members.forEach((m: any, i: number) => { m.sfu = sessions[i]; m.sfuRace = room.state.race.startAt; m.sfuConnectedRace = room.state.race.startAt; });
+      await room.save();
+    });
+    for (const c of clients) c.sendJson({ type: "sfu_ready" });
+    await Promise.all(clients.map((c) => c.json("sfu_ready")));
+    return { clients, code, stub };
+  }
+
+  it("after an eviction the race is still released: no setup check again, no second sfu_ready", async () => {
+    const { clients, stub } = await releasedRace();
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, async (room: any) => {
+      expect(room.state.race.sfuReleased).toBe(true);
+      room.state.race.sfuConnectBy = Date.now() - 1;  // as if its check were due after the reload
+      await room.save();
+    });
+    const logs: string[] = [];
+    const log = console.log;
+    console.log = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    try {
+      await runDurableObjectAlarm(stub);
+      clients[2].sendJson({ type: "back" });  // a retire after the release
+      await clients[0].json("left");
+    } finally {
+      console.log = log;
+    }
+    expect(logs.filter((l) => l.includes("Realtime setup after") || l.includes("Realtime released"))).toEqual([]);
+    await expect(clients[0].next((f) => typeof f === "string" && JSON.parse(f).type === "sfu_ready", 300)).rejects.toThrow("timed out");
+  });
+
+  it("the setup check's result is stored too: it doesn't run again after an eviction", async () => {
+    const { code } = await startedRace(2);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    await runInDurableObject(stub, async (room: any) => {
+      for (const m of room.state.members) { m.sfu = { id: `session-${m.id}`, phase: "connect", channels: [] }; m.sfuRace = room.state.race.startAt; m.sfuConnectedRace = room.state.race.startAt; }
+      room.state.race.sfuConnectBy = Date.now() - 1;
+      await room.save();
+    });
+    await runDurableObjectAlarm(stub);
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, async (room: any) => { expect(room.state.race.sfuConnectBy).toBeUndefined(); });
+  });
+
+  it("a racer that started its session again after the release gets sfu_ready once more, the others don't", async () => {
+    const { clients, stub } = await releasedRace();
+    await runInDurableObject(stub, async (room: any) => {
+      const m = room.state.members[1];
+      m.raceRejoin = true;
+      delete m.releasedRace;  // as sfu_restart leaves it, with its new session set up again
+    });
+    clients[1].sendJson({ type: "sfu_ready" });
+    await clients[1].json("sfu_ready");
+    for (const c of [clients[0], clients[2]])
+      await expect(c.next((f) => typeof f === "string" && JSON.parse(f).type === "sfu_ready", 300)).rejects.toThrow("timed out");
   });
 });

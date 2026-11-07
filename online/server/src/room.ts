@@ -136,6 +136,9 @@ interface Member {
       after a rejoin (sfu_restart, at most SFU_RESTARTS). */
   restartRace?: number;
   restarts?: number;
+  /** The race (startAt) whose sfu_ready this member got: one per race, again only after its
+      session started again (sfu_restart). Stored with the room (finding 175). */
+  releasedRace?: number;
   sfu?: SfuSession;
   sfuRace?: number;
   sfuReady?: boolean;
@@ -593,6 +596,7 @@ export class Room extends DurableObject<Env> {
         `${x.id}${x.region ? "/" + x.region : ""}:${x.sfuRace !== race.startAt ? "no-offer" : x.sfuReady ? "ready" :
           x.sfuConnectedRace === race.startAt || x.sfu?.phase === "ready" ? "connected" : x.turnRace === race.startAt ? "turn" : "offered"}`).join(" "));
       if (lost.length) await this.retireSfu(lost.map(x => x.id), race.startAt);
+      else await this.save();  // the check is done: not again after an eviction (finding 175)
     }
     // Every racer ready but no release yet (a reconcile that never asked again, finding 175):
     // asked again each tick; releaseSfu does nothing until every racer is ready.
@@ -886,7 +890,7 @@ export class Room extends DurableObject<Env> {
       if ((me.restarts ?? 0) >= SFU_RESTARTS) { this.error(ws, "bad_value", "No more Realtime restarts in this race."); return; }
       me.restarts = (me.restarts ?? 0) + 1;
       if (me.sfu || me.turnUser) await this.clearSfu(me);
-      delete me.sfuRace; delete me.sfuReady; delete me.turnRace; delete me.sfuConnectedRace;
+      delete me.sfuRace; delete me.sfuReady; delete me.turnRace; delete me.sfuConnectedRace; delete me.releasedRace;
       await this.save();
       return;
     }
@@ -1207,7 +1211,7 @@ export class Room extends DurableObject<Env> {
     const slot = race.slots.indexOf(me.id);
     if (known !== race.startAt) {
       // Its game has no session for this race: whatever the room has for it goes.
-      delete me.sfuRace; delete me.sfuReady; delete me.turnRace; delete me.sfuConnectedRace;
+      delete me.sfuRace; delete me.sfuReady; delete me.turnRace; delete me.sfuConnectedRace; delete me.releasedRace;
       if (me.sfu || me.turnUser) this.queueClear(me);
       this.send(ws, this.startMessage(race, slot, Date.now()));
     }
@@ -1217,7 +1221,7 @@ export class Room extends DurableObject<Env> {
     }
     if (known === race.startAt && me.sfu?.phase === "ready") {
       this.send(ws, { type: "sfu_channels", full: true, channels: me.sfu.channels });
-      if (race.sfuReleased) this.send(ws, { type: "sfu_ready" });
+      if (race.sfuReleased) { this.send(ws, { type: "sfu_ready" }); me.releasedRace = race.startAt; }
     }
   }
 
@@ -1376,14 +1380,24 @@ export class Room extends DurableObject<Env> {
     const racers = st.members.filter(m => this.inRace(st, m.id));
     if (!racers.length || !racers.every(m => m.sfuRace === race.startAt && m.sfuReady && m.sfu?.phase === "ready")) return;
     if (this.missingSubscription(race)) return this.queueReconcile(race);
-    // Logged once: a racer finishing or leaving releases the rest again, which logged "released"
-    // again with fewer racers long after the real release (finding 175).
-    if (!race.sfuReleased) console.log(`room ${st.code}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
+    // Once per race and racer, and stored (finding 175): the release was never saved, so after the
+    // object was evicted and loaded again the race looked unreleased; the setup checks ran again
+    // ("setup after 66255 ms" for a race released 3 s after its start, room 3G5MXD) and every
+    // later retire sent sfu_ready and logged "released" again. A racer that started its session
+    // again after the release (sfu_restart) gets it once more.
+    const first = !race.sfuReleased;
     race.sfuReleased = true;
+    if (first) console.log(`room ${st.code}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
+    let sent = false;
     for (const member of racers) {
+      if (member.releasedRace === race.startAt) continue;
       const peer = this.sockets.get(member.id);
-      if (peer) this.send(peer, {type:"sfu_ready"});
+      if (!peer) continue;  // away: its rejoin's catch-up sends it
+      this.send(peer, {type:"sfu_ready"});
+      member.releasedRace = race.startAt;
+      sent = true;
     }
+    if (first || sent) this.ctx.waitUntil(this.save());
   }
 
   private async closeRaceSfu(st: RoomState): Promise<void> {
@@ -1637,10 +1651,12 @@ export class Room extends DurableObject<Env> {
     const member = st.members.find(x => x.id === id);
     if (member) member.ready = false;
     if ((member?.sfu || member?.turnUser) && reason !== "left") this.queueClear(member!);
-    this.releaseSfu(st);
     this.rebuildRace();
     for (const ws of this.raceSockets) if (ws)
       this.send(ws, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
+    // After `left`: the others hear who is gone before their traffic is released (sent once now,
+    // finding 175; the repeat used to come after `left` by chance).
+    this.releaseSfu(st);
   }
 
   private async closeRace(st: RoomState, voided: boolean): Promise<void> {
