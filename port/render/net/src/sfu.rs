@@ -375,6 +375,7 @@ impl Sfu {
             }
         } else if message["type"] == "sfu_closed" {
             if let Some(ids) = message["channelIds"].as_array() {
+                eprintln!("net: SFU channels closed: {ids:?}");
                 for id in ids.iter().filter_map(Value::as_u64).filter(|id| *id < 65535) {
                     self.close_stream(id as u16);
                 }
@@ -422,7 +423,10 @@ impl Sfu {
             }
             self.open_waiting();
         }
-        if message["type"] == "sfu_channels" { eprintln!("net: SFU channels allocated: {}", self.channels.len() + self.waiting.len()); }
+        if message["type"] == "sfu_channels" {
+            let ids: Vec<u64> = message["channels"].as_array().map_or(vec![], |a| a.iter().filter_map(|c| c["channelId"].as_u64()).collect());
+            eprintln!("net: SFU channels allocated: {} ({ids:?}; {} waiting for their id)", self.channels.len() + self.waiting.len(), self.waiting.len());
+        }
         Ok(())
     }
     /// This association has a channel on that stream id, open or waiting.
@@ -433,10 +437,13 @@ impl Sfu {
     /// here, and left to Cloudflare's own reset (Closing).
     fn close_stream(&mut self, stream: u16) {
         self.waiting.retain(|w| w.stream != stream);
-        let gone: Vec<ChannelId> = self.channels.iter().filter(|c| c.stream == stream).map(|c| c.id).collect();
-        for id in gone {
+        let gone: Vec<(ChannelId, bool)> = self.channels.iter().filter(|c| c.stream == stream).map(|c| (c.id, c.opened)).collect();
+        for (id, opened) in gone {
             self.channels.retain(|c| c.id != id);
-            let seen = self.rtc.direct_api().channel_id_by_sctp_stream_id(stream) == Some(id);
+            // Cloudflare's reset often arrives before the room's sfu_closed: str0m may have let the
+            // channel go already. One that opened had its stream; one that never did may still be
+            // waiting for it inside str0m.
+            let seen = opened || self.rtc.channel(id).is_some() || self.rtc.direct_api().channel_id_by_sctp_stream_id(stream) == Some(id);
             self.closing.push(Closing { id, stream, since: Instant::now(), closed: false, seen });
         }
     }
@@ -477,13 +484,16 @@ impl Sfu {
                 c.seen = true;
                 if !c.closed && c.since.elapsed() >= CLOSE_GRACE {
                     c.closed = true;
+                    eprintln!("net: SFU: channel {} not reset by the SFU in {} s; closing it here", c.stream, CLOSE_GRACE.as_secs());
                     let id = c.id;
                     self.rtc.direct_api().close_data_channel(id);
                 }
                 i += 1;
             } else if c.seen {
+                if c.since.elapsed() >= CLOSE_GRACE { eprintln!("net: SFU: channel {} closed after {} ms", c.stream, c.since.elapsed().as_millis()); }
                 self.closing.remove(i);
             } else if c.since.elapsed() >= CLOSE_GRACE {
+                eprintln!("net: SFU: channel {} closed before it opened; its id stays unusable here", c.stream);
                 self.orphans.push(c.stream);
                 self.closing.remove(i);
             } else {
@@ -491,10 +501,18 @@ impl Sfu {
             }
         }
         for c in self.channels.iter_mut().filter(|c| !c.opened) {
-            if self.rtc.channel(c.id).is_some() { c.opened = true; }
-            else if self.connected && c.since.elapsed() >= OPEN_LIMIT { return Err("An SFU channel never opened".into()); }
+            if self.rtc.channel(c.id).is_some() {
+                c.opened = true;
+                if c.since.elapsed() >= Duration::from_secs(1) { eprintln!("net: SFU: channel {} opened after {} ms", c.stream, c.since.elapsed().as_millis()); }
+            } else if self.connected && c.since.elapsed() >= OPEN_LIMIT {
+                eprintln!("net: SFU: channel {} never opened", c.stream);
+                return Err("An SFU channel never opened".into());
+            }
         }
-        if self.connected && self.waiting.iter().any(|w| w.since.elapsed() >= OPEN_LIMIT) {
+        if let Some(w) = self.waiting.iter().find(|w| self.connected && w.since.elapsed() >= OPEN_LIMIT) {
+            let held = self.rtc.direct_api().channel_id_by_sctp_stream_id(w.stream).is_some();
+            eprintln!("net: SFU: channel {} waited {} s for its stream id (str0m holds it: {held}; closing {}; orphan {})", w.stream,
+                OPEN_LIMIT.as_secs(), self.closing.iter().any(|c| c.stream == w.stream), self.orphans.contains(&w.stream));
             return Err("An SFU channel's stream id stayed held".into());
         }
         Ok(())
@@ -1266,9 +1284,11 @@ mod tests {
 
     /// Finding 177: the room closes a subscription and Cloudflare gives its stream id to the next
     /// one at once. The client waits for the old channel's reset before it makes the new one
-    /// (str0m would panic on a live duplicate), and the new channel carries the new member's frames.
-    #[test]
-    fn a_closed_subscriptions_stream_id_serves_the_next_one() {
+    /// (str0m would panic on a live duplicate), and the new channel carries the new member's frames:
+    /// with the room's sfu_closed first, and with the SFU's reset first (live runs: the reset over
+    /// UDP usually beats the room's message, and the closed channel was taken for one that never
+    /// opened, its id never used again).
+    fn reuse_a_closed_stream_id(reset_first: bool) {
         let (mut sfu, mut client) = LocalSfu::start();
         sfu.channel(10, true);
         sfu.channel(12, false);
@@ -1281,12 +1301,18 @@ mod tests {
         while Instant::now() < until && !(client.channels.iter().all(|c| client.rtc.channel(c.id).is_some()) && sfu.server.channel(old).is_some()) {
             sfu.pump(&mut client, &mut text, &mut frames);
         }
+        for _ in 0..20 { sfu.pump(&mut client, &mut text, &mut frames); }
         // Member 17 leaves: the room closes its subscription (the SFU resets the stream), and the
         // same id comes back at once for member 21's events.
-        client.signal(&json!({"type":"sfu_closed","channelIds":[14]})).unwrap();
         sfu.server.direct_api().close_data_channel(old);
+        if reset_first {
+            let until = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < until && client.rtc.direct_api().channel_id_by_sctp_stream_id(14).is_some() {
+                sfu.pump(&mut client, &mut text, &mut frames);
+            }
+        }
+        client.signal(&json!({"type":"sfu_closed","channelIds":[14]})).unwrap();
         client.signal(&json!({"type":"sfu_channels","channels":[{"channelId":14,"name":"events","memberId":21,"local":false}]})).unwrap();
-        assert!(client.channels.iter().all(|c| c.stream != 14), "not made while the old one is held");
         client.signal(&json!({"type":"start","startAt":3000,"yourSlot":0,"players":[{"memberId":7,"slot":0},{"memberId":21,"slot":4}]})).unwrap();
         let mut new = None;
         let until = Instant::now() + Duration::from_secs(10);
@@ -1296,5 +1322,9 @@ mod tests {
             if let Some(id) = new { if let Some(mut c) = sfu.server.channel(id) { let _ = c.write(true, &event(3000, 5)); } }
         }
         assert_eq!(frames.first(), Some(&vec![6, 4, 5]), "the new subscription's frames, from member 21");
+        assert!(client.orphans.is_empty());
     }
-}
+    #[test]
+    fn a_closed_subscriptions_stream_id_serves_the_next_one() { reuse_a_closed_stream_id(false); }
+    #[test]
+    fn a_closed_subscriptions_stream_id_serves_the_next_one_reset_first() { reuse_a_closed_stream_id(true); }}

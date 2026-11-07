@@ -702,3 +702,90 @@ fn probe_parallel_subscriptions() {
         percentile(&ms_all, 0.5), percentile(&ms_all, 0.95), ms_all.last().copied().unwrap_or(f64::NAN));
     assert_eq!((failed, unopened, undelivered), (0, 0, 0));
 }
+
+/// Finding 177: a publisher leaves the room. Sessions 0 and 1 subscribe to 2 and to each other;
+/// then, as the room does for a member who leaves, 2's own channels close, then 0's and 1's
+/// subscriptions to it (DHD_PROBE_SUBS_FIRST=1: the other way round), and 2's association is
+/// dropped. A new session 3 publishes and 0 and 1 subscribe to it (Cloudflare reuses the ids):
+/// prints, every 250 ms, which closed stream ids str0m still holds, and whether the new channels
+/// open and carry an event.
+#[test]
+#[ignore = "needs the network and Realtime credentials"]
+fn probe_publisher_leaves() {
+    let subs_first = env_or("DHD_PROBE_SUBS_FIRST", 0) != 0;
+    let mut c: Vec<Option<Sfu>> = vec![];
+    let mut sessions = vec![];
+    let connect = |c: &mut Vec<Option<Sfu>>, sessions: &mut Vec<String>| {
+        let (mut sfu, offer) = Sfu::start(Arc::new(|| {}), false).unwrap();
+        let r = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
+        sessions.push(r["sessionId"].as_str().unwrap().to_string());
+        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]})).unwrap();
+        c.push(Some(sfu));
+    };
+    let poll = |c: &mut Vec<Option<Sfu>>, got: &mut Vec<Vec<Vec<u8>>>| {
+        for (k, s) in c.iter_mut().enumerate() { if let Some(s) = s { let (_, f) = s.poll().expect("association"); got[k].extend(f); } }
+    };
+    let mut got: Vec<Vec<Vec<u8>>> = vec![vec![]; 4];
+    for _ in 0..3 { connect(&mut c, &mut sessions); }
+    let until = Instant::now() + Duration::from_secs(20);
+    while !c.iter().all(|s| s.as_ref().unwrap().connected) { assert!(Instant::now() < until); poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+    for k in 0..3 { let ch = allocate(&sessions[k], k as u64 + 1, None); c[k].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap(); }
+    let mut held_ids: Vec<Vec<u64>> = vec![vec![]; 2];
+    for sub in 0..2 {
+        for publ in 0..3 {
+            if publ == sub { continue; }
+            let ch = allocate(&sessions[sub], publ as u64 + 1, Some(&sessions[publ]));
+            if publ == 2 { held_ids[sub] = ch.iter().map(|x| x["channelId"].as_u64().unwrap()).collect(); }
+            c[sub].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+        }
+    }
+    let settle = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < settle { poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+    let (app, token) = (secret("REALTIME_APP_ID"), secret("REALTIME_APP_TOKEN"));
+    let close = |session: &str, ids: &[u64]| {
+        let list: Vec<Value> = ids.iter().map(|id| json!({"id": id})).collect();
+        let r = try_call("PUT", &format!("/v1/apps/{app}/sessions/{session}/datachannels/close"), &token, &json!({"dataChannels": list}));
+        eprintln!("probe: close {} on a session: {}", ids.len(), match &r { Ok(v) => v["dataChannels"].to_string(), Err(e) => e.clone() });
+    };
+    let own2: Vec<u64> = c[2].as_ref().unwrap().channels.iter().filter(|x| x.local).map(|x| x.stream as u64).collect();
+    if !subs_first { close(&sessions[2], &own2); }
+    for sub in 0..2 {
+        close(&sessions[sub], &held_ids[sub]);
+        c[sub].as_mut().unwrap().signal(&json!({"type":"sfu_closed","channelIds":held_ids[sub]})).unwrap();
+    }
+    if subs_first { close(&sessions[2], &own2); }
+    c[2] = None;  // the leaving game drops its association
+    let started = Instant::now();
+    connect(&mut c, &mut sessions);
+    let mut last = String::new();
+    let mut subscribed = false;
+    let mut new_ids: Vec<Vec<u64>> = vec![vec![]; 2];
+    while started.elapsed() < Duration::from_secs(20) {
+        poll(&mut c, &mut got);
+        if !subscribed && c[3].as_ref().unwrap().connected {
+            let ch = allocate(&sessions[3], 4, None);
+            c[3].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+            for sub in 0..2 {
+                let ch = allocate(&sessions[sub], 4, Some(&sessions[3]));
+                new_ids[sub] = ch.iter().map(|x| x["channelId"].as_u64().unwrap()).collect();
+                c[sub].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+            }
+            eprintln!("probe: {} ms: subscribed to the new session: ids {new_ids:?} (closed ones {held_ids:?})", started.elapsed().as_millis());
+            subscribed = true;
+            for s in c.iter_mut().flatten() { s.signal(&json!({"type":"start","startAt":4242,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1},{"memberId":4,"slot":3}]})).unwrap(); s.released = true; }
+        }
+        if subscribed { let _ = c[3].as_mut().unwrap().send(&[6, 3, 7]); }
+        let state: Vec<String> = (0..2).map(|s| {
+            let x = c[s].as_mut().unwrap();
+            let held: Vec<u64> = held_ids[s].iter().copied().filter(|id| x.rtc.direct_api().channel_id_by_sctp_stream_id(*id as u16).is_some()).collect();
+            let open = x.channels.iter().filter(|ch| new_ids[s].contains(&(ch.stream as u64))).filter(|ch| x.rtc.channel(ch.id).is_some()).count();
+            format!("sub {s}: str0m holds {held:?}, waiting {}, closing {}, new open {open}, events {}", x.waiting.len(), x.closing.len(),
+                got[s].iter().filter(|f| f[0] == 6 && f[1] == 3).count())
+        }).collect();
+        let line = state.join("; ");
+        if line != last { eprintln!("probe: {} ms: {line}", started.elapsed().as_millis()); last = line; }
+        if got[0].iter().any(|f| f[0] == 6 && f[1] == 3) && got[1].iter().any(|f| f[0] == 6 && f[1] == 3) { eprintln!("probe: both got the new publisher's event"); return; }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("the new publisher's channels never worked");
+}
