@@ -1,6 +1,6 @@
 # 177: one Realtime session per member per room, set up before the race
 
-Status: in progress
+Status: current
 
 Branch `feat/sfu-room-sessions` from `main` 562e627, started 2026-11-07. 176 is taken by
 `fix/powervr-oom`.
