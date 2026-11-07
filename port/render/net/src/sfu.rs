@@ -88,6 +88,9 @@ pub struct Sfu {
     /// False with DHD_NET_SFU_UDP=0: a test switch that drops every UDP datagram to and from the
     /// SFU, as a network that blocks UDP does, so the TURN/TLS fallback must carry the race.
     direct: bool,
+    /// False with DHD_NET_SFU_TURN=0 (test switch, finding 175): the TURN fallback is never asked
+    /// for; with DHD_NET_SFU_UDP=0 too, a racer whose connection never comes up.
+    turn_allowed: bool,
     answered_at: Option<Instant>,
     connected_at: Option<Instant>,
     turn_asked: bool,
@@ -237,11 +240,13 @@ impl Sfu {
         let drop_percent = std::env::var("DHD_NET_DROP_STATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0).min(100);
         let direct = std::env::var("DHD_NET_SFU_UDP").map_or(true, |v| v.trim() != "0");
         if !direct { eprintln!("net: SFU: DHD_NET_SFU_UDP=0, direct UDP to the SFU is blocked (test switch)"); }
+        let turn_allowed = std::env::var("DHD_NET_SFU_TURN").map_or(true, |v| v.trim() != "0");
+        if !turn_allowed { eprintln!("net: SFU: DHD_NET_SFU_TURN=0, no TURN relay is asked for (test switch)"); }
         let drop_in_percent = std::env::var("DHD_NET_SFU_DROP_IN").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0u64).min(100);
         if drop_in_percent > 0 { eprintln!("net: SFU: DHD_NET_SFU_DROP_IN={drop_in_percent}, that share of the SFU's records is dropped on arrival (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], slots: HashMap::new(), race: 0, future_events: VecDeque::new(),
             connected: false, members: 1, announced: false, released: false, drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
-            wake, direct, answered_at: None, connected_at: None, turn_asked: false, relay: None, last_in_relayed: false, via_relay: false,
+            wake, direct, turn_allowed, answered_at: None, connected_at: None, turn_asked: false, relay: None, last_in_relayed: false, via_relay: false,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -480,7 +485,7 @@ impl Sfu {
             return Err("SFU socket failed".into());
         }
         self.pump_relay(&mut text, &mut frames)?;
-        if !self.connected && !self.turn_asked && self.answered_at.is_some_and(|t| t.elapsed() >= DIRECT_TIMEOUT) {
+        if !self.connected && !self.turn_asked && self.turn_allowed && self.answered_at.is_some_and(|t| t.elapsed() >= DIRECT_TIMEOUT) {
             self.turn_asked = true;
             eprintln!("net: SFU: no UDP connection {} ms after the answer; asking for a TURN relay", DIRECT_TIMEOUT.as_millis());
             text.push(json!({"type":"sfu_turn"}));
