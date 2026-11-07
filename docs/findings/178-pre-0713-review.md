@@ -27,7 +27,15 @@ for the lead. Review our SCTP patches, excluding unchanged upstream implementati
 
 ## Surprises
 
-Pending.
+P1, `online/server/src/room.ts`: failures completing after a session replacement
+were attributed to the member's new session. A failed old offer/publication could fail
+its healthy replacement; an old subscription failure could retire the replacement racer.
+Three deterministic held-API tests failed on the base and pass with generation checks.
+The subscription pass also retains the failed session identity across its storage await.
+
+Research: Cloudflare's [in-memory state reference](https://developers.cloudflare.com/durable-objects/reference/in-memory-state/)
+and [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/).
+No external implementation copied.
 
 ## Result
 

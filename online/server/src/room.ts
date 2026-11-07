@@ -885,6 +885,10 @@ export class Room extends DurableObject<Env> {
     if (this.sockets.get(me.id) !== ws || !this.state?.members.includes(me)) return false;
     const st = this.state;
     const api = new Realtime(this.env as Env & SfuSecrets);
+    let attempt = me.sfuAttempt;
+    const original = me.sfu;
+    const current = () => me.sfuAttempt === attempt && !!this.state?.members.includes(me) &&
+      (m.type !== "sfu_connected" || me.sfu === original);
     try {
       if (m.type === "sfu_offer") {
         // A member's session for its stay in the room (finding 177); a new offer replaces the old
@@ -896,7 +900,7 @@ export class Room extends DurableObject<Env> {
           return false;
         }
         me.sfuOffers.push(now);
-        const attempt = (me.sfuAttempt ?? 0) + 1;
+        attempt = (me.sfuAttempt ?? 0) + 1;
         me.sfuAttempt = attempt;
         if (me.sfu || me.turnUser) await this.clearSfu(me);
         await this.save();
@@ -960,10 +964,13 @@ export class Room extends DurableObject<Env> {
       for (const value of [secrets.REALTIME_APP_ID, secrets.REALTIME_APP_TOKEN, secrets.TURN_KEY_ID, secrets.TURN_KEY_API_TOKEN])
         if (value) detail = detail.replaceAll(value, "<redacted>");
       console.warn("Realtime setup failed", detail.slice(0, 200));
+      // An old call may fail after a newer offer replaced its session. Only the operation's
+      // own generation may fail the member; otherwise a healthy replacement is torn down.
+      if (!current()) return false;
       // No retry of the call (a partly made allocation must not be doubled): the session ends.
       if (me.sfu) me.sfu.phase = "failed";
       await this.save();
-      return true;
+      return current();
     }
   }
   private onPong(memberId: number, s: unknown): void {
@@ -1306,8 +1313,8 @@ export class Room extends DurableObject<Env> {
       again before every call: a departure during one can't make it skip anyone (release review
       round 2, finding 158). Rounds repeat until nothing is missing. Returns the subscribers whose
       call failed: their session is failed (no second attempt), the caller ends it. */
-  private async subscribeGroup(api: Realtime, prune: boolean): Promise<number[]> {
-    const failed: number[] = [];
+  private async subscribeGroup(api: Realtime, prune: boolean): Promise<{ id: number; session: SfuSession }[]> {
+    const failed: { id: number; session: SfuSession }[] = [];
     const st = this.state;
     if (!st) return failed;
     // Close what leads nowhere, and what a member outside the race holds.
@@ -1350,11 +1357,13 @@ export class Room extends DurableObject<Env> {
               return true;
             } catch (error) {
               console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-              if (sub.sfu === session) session.phase = "failed";
+              if (sub.sfu !== session || !this.state?.members.includes(sub)) return true;
+              session.phase = "failed";
+              if (!failed.some(f => f.session === session)) failed.push({ id: sub.id, session });
               return false;
             }
           }));
-          if (results.includes(false)) { failed.push(sub.id); return; }
+          if (results.includes(false)) return;
         }
       }));
       if (!progress) break;
@@ -1388,7 +1397,9 @@ export class Room extends DurableObject<Env> {
         if (this.calls > before)
           console.log(`room ${this.state?.code ?? ""}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms`);
         await this.save();
-        if (failed.length) await this.sfuFailed(failed);
+        // Saving yields too: a replacement completed since the failing call is healthy.
+        const currentFailures = failed.filter(f => this.state?.members.find(m => m.id === f.id)?.sfu === f.session);
+        if (currentFailures.length) await this.sfuFailed(currentFailures.map(f => f.id));
         const st = this.state;
         if (st?.race && !st.race.sfuReleased) this.releaseSfu(st);
       } while (this.subscribeAgain);
