@@ -26,7 +26,7 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
     const { clients, code } = await startedRace(3);
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
       const sessions = ready([0, 1, 2]);
-      room.state.members.forEach((m: any, i: number) => { m.sfu = sessions[i]; m.sfuRace = room.state.race.startAt; m.sfuReady = true; });
+      room.state.members.forEach((m: any, i: number) => { m.sfu = sessions[i]; m.sfuReadyRace = room.state.race.startAt; });
       room.subscribing = true;  // a subscription pass that never ends (a hung call)
     });
     await runDurableObjectAlarm(env.ROOM.get(env.ROOM.idFromName(code)));
@@ -36,7 +36,7 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
     });
   });
 
-  it("a pass asked for an older race serves the running race: the missing pair is subscribed and released", async () => {
+  it("a pass serves the room as it is when it runs: the missing pair is subscribed and released", async () => {
     const { clients, code } = await startedRace(2);
     const fake = fakeRealtime();
     try {
@@ -45,9 +45,8 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
         const [a, b] = room.state.members;
         a.sfu = publishedSession(a.id, [b.id]);
         b.sfu = publishedSession(b.id, []);  // its subscription to a is missing
-        for (const m of [a, b]) { m.sfuRace = room.state.race.startAt; m.sfuReady = true; }
-        // a pass for the previous race (another Race object), as one still running when this race started
-        await room.subscribePass({ ...room.state.race, startAt: room.state.race.startAt - 60_000 });
+        for (const m of [a, b]) m.sfuReadyRace = room.state.race.startAt;
+        await room.subscribePass();
       });
       await Promise.all(clients.map((c) => c.json("sfu_ready")));
       expect(fake.calls.filter((c) => c.path.endsWith("datachannels/new"))).toHaveLength(1);
@@ -94,7 +93,6 @@ describe("a racer's own setup doesn't wait behind the others' (finding 175)", ()
         const [a, b] = room.state.members;
         a.sfu = { id: `session-${a.id}`, phase: "connect", channels: [] };
         b.sfu = publishedSession(b.id, []);
-        a.sfuRace = b.sfuRace = room.state.race.startAt;
       });
       clients[0].sendJson({ type: "sfu_connected" });  // its publication's call hangs in the queue
       for (let i = 0; i < 200 && !fake.held; i++) await new Promise((r) => setTimeout(r, 10));
@@ -121,7 +119,7 @@ describe("the coalesced subscription pass (hotfix 4)", () => {
     try {
       await runInDurableObject(stub, async (room: any) => {
         room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
-        for (const m of room.state.members) { m.sfu = { id: `session-${m.id}`, phase: "connect", channels: [] }; m.sfuRace = room.state.race.startAt; }
+        for (const m of room.state.members) m.sfu = { id: `session-${m.id}`, phase: "connect", channels: [] };
       });
       const started = Date.now();
       for (const c of clients) { c.sendJson({ type: "sfu_connected" }); await new Promise((r) => setTimeout(r, 20)); }
@@ -154,7 +152,7 @@ describe("the release is stored and sent once (rooms SHCF93, 3G5MXD)", () => {
     const stub = env.ROOM.get(env.ROOM.idFromName(code));
     await runInDurableObject(stub, async (room: any) => {
       const sessions = ready([0, 1, 2]);
-      room.state.members.forEach((m: any, i: number) => { m.sfu = sessions[i]; m.sfuRace = room.state.race.startAt; m.sfuConnectedRace = room.state.race.startAt; });
+      room.state.members.forEach((m: any, i: number) => { m.sfu = sessions[i]; m.sfuConnected = true; });
       await room.save();
     });
     for (const c of clients) c.sendJson({ type: "sfu_ready" });
@@ -188,7 +186,7 @@ describe("the release is stored and sent once (rooms SHCF93, 3G5MXD)", () => {
     const { code } = await startedRace(2);
     const stub = env.ROOM.get(env.ROOM.idFromName(code));
     await runInDurableObject(stub, async (room: any) => {
-      for (const m of room.state.members) { m.sfu = { id: `session-${m.id}`, phase: "connect", channels: [] }; m.sfuRace = room.state.race.startAt; m.sfuConnectedRace = room.state.race.startAt; }
+      for (const m of room.state.members) { m.sfu = { id: `session-${m.id}`, phase: "connect", channels: [] }; m.sfuConnected = true; }
       room.state.race.sfuConnectBy = Date.now() - 1;
       await room.save();
     });
@@ -201,8 +199,8 @@ describe("the release is stored and sent once (rooms SHCF93, 3G5MXD)", () => {
     const { clients, stub } = await releasedRace();
     await runInDurableObject(stub, async (room: any) => {
       const m = room.state.members[1];
-      m.raceRejoin = true;
-      delete m.releasedRace;  // as sfu_restart leaves it, with its new session set up again
+      delete m.releasedRace;  // as a new session leaves it, set up again
+      delete m.sfuReadyRace;
     });
     clients[1].sendJson({ type: "sfu_ready" });
     await clients[1].json("sfu_ready");

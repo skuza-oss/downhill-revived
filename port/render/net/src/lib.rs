@@ -244,9 +244,47 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
     }
 }
 
+/// The send thread's SFU association for the room stay (finding 177): made when the room's welcome
+/// comes, kept across races, replaced when it fails (with a growing pause between tries) and when
+/// its TURN credentials near their end between races.
+struct Assoc {
+    sfu: Option<sfu::Sfu>,
+    /// The running race's start message: a new association mid-race takes its race from it.
+    start: Option<serde_json::Value>,
+    /// The SFU's signaling made while the room connection was down, sent after the rejoin's welcome.
+    held: Vec<serde_json::Value>,
+    /// When the next new association may start after a failure, and the pause after that one.
+    retry_at: Option<std::time::Instant>,
+    pause: Duration,
+    /// The last association went through the TURN relay: the next asks for one at once.
+    turn_first: bool,
+}
+
+impl Assoc {
+    /// A new association (its offer replaces any session the room has for this member), given the
+    /// running race if there is one.
+    fn start(&mut self, c: &WsConn, wake: &sfu::Wake) -> Result<(), Box<dyn std::error::Error>> {
+        self.held.clear();
+        if let Some(old) = self.sfu.take() { self.turn_first |= old.via_relay(); }
+        let (mut rtc, offer) = sfu::Sfu::start(wake.clone(), self.turn_first)?;
+        let result = self.start.as_ref().map_or(Ok(()), |s| rtc.signal(s));
+        self.sfu = Some(rtc);
+        lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
+        c.sfu_live.store(true, Ordering::Release);
+        result
+    }
+    /// The association failed: dropped; a new one after the pause (doubling up to a minute, back to
+    /// a second once one connects), sooner if the room asks (welcome, sfu_reset).
+    fn failed(&mut self) {
+        if let Some(old) = self.sfu.take() { self.turn_first |= old.via_relay(); }
+        self.held.clear();
+        self.retry_at = Some(std::time::Instant::now() + self.pause);
+        self.pause = (self.pause * 2).min(Duration::from_secs(60));
+    }
+}
+
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
-    let mut sfu: Option<sfu::Sfu> = None;
     // The SFU reader wakes this thread for each datagram, as ws_send does for each message.
     let weak = Arc::downgrade(&c);
     let wake: sfu::Wake = Arc::new(move || {
@@ -257,10 +295,9 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
-    // The race's start message (a rejoin starts the association again from it) and the SFU's
-    // signaling made while the room connection was down, sent after the rejoin's welcome.
-    let mut last_start: Option<serde_json::Value> = None;
-    let mut held: Vec<serde_json::Value> = Vec::new();
+    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false };
+    // A room's welcome came on this connection: an association belongs here.
+    let mut welcomed = false;
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
@@ -269,9 +306,10 @@ fn send_main(c: Arc<WsConn>) {
             q.sfu_input = false;
         }
         let connected = lock(&c.queue).connected;
+        if !connected { welcomed = false; }
         // The room connection is down: the race goes on over the SFU while the receive thread
         // rejoins (finding 175); without an association there is nothing to do.
-        if !connected && sfu.is_none() { c.sfu_live.store(false, Ordering::Release); continue; }
+        if !connected && a.sfu.is_none() { c.sfu_live.store(false, Ordering::Release); continue; }
         // Lobby and SFU callbacks share this thread. Apply the transport's start marker
         // before the game sees start, then deliver any early reliable race events.
         loop {
@@ -279,48 +317,45 @@ fn send_main(c: Arc<WsConn>) {
             let Some((binary, data)) = item else { break };
             if !binary {
                 if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data) {
-                    let welcome = message["type"] == "welcome";
-                    let race_at = message["race"]["startAt"].as_u64();
-                    // A rejoin's welcome back into this association's race: it stays, and so
-                    // does what it said meanwhile.
-                    let keep = welcome && message["race"]["sfu"] == "ready" &&
-                        sfu.as_ref().is_some_and(|rtc| rtc.race() != 0 && race_at == Some(rtc.race()));
-                    if matches!(message["type"].as_str(), Some("start" | "ended")) || (welcome && !keep) {
+                    let kind = message["type"].as_str().unwrap_or("");
+                    if matches!(kind, "start" | "ended") {
                         lock(&c.queue).out.retain(|(binary, bytes)| !*binary || !matches!(bytes.first(), Some(5 | 6)));
                     }
-                    let result = if message["type"] == "start" {
-                        last_start = Some(message.clone());
-                        held.clear();
-                        start_sfu(&c, &wake, &message, &mut sfu)
-                    } else if message["type"] == "ended" {
-                        last_start = None;
-                        held.clear();
-                        sfu = None;
-                        Ok(())
-                    } else if keep {
-                        let mut q = lock(&c.queue);
-                        for m in held.drain(..) { q.out.push_back((false, m.to_string().into_bytes())); }
-                        Ok(())
-                    } else if welcome {
-                        held.clear();
-                        sfu = None;
-                        // Back in this race with its session still being set up, or lost here: a
-                        // new one from the race's start (the room clears the old on sfu_restart).
-                        let start = last_start.clone().filter(|s| race_at.is_some() && s["startAt"].as_u64() == race_at);
-                        match start {
-                            Some(start) => {
-                                eprintln!("net: SFU: back in the race; its session starts again");
-                                lock(&c.queue).out.push_back((false, br#"{"type":"sfu_restart"}"#.to_vec()));
-                                start_sfu(&c, &wake, &start, &mut sfu)
-                            }
-                            None => {
-                                last_start = None;
+                    let result = match kind {
+                        "welcome" => {
+                            welcomed = true;
+                            // Back in this room (a rejoin): the room still has this game's session
+                            // and the association still has its answer, so both stay, with what it
+                            // said meanwhile. Otherwise a new association, and with it a new session.
+                            let race_at = message["race"]["startAt"].as_u64();
+                            if a.start.as_ref().and_then(|s| s["startAt"].as_u64()) != race_at { a.start = None; }
+                            if message["sfu"] == "ready" && a.sfu.as_ref().is_some_and(|s| s.answered()) {
+                                let mut q = lock(&c.queue);
+                                for m in a.held.drain(..) { q.out.push_back((false, m.to_string().into_bytes())); }
                                 Ok(())
+                            } else {
+                                if a.sfu.is_some() { eprintln!("net: SFU: back in the room; a new session"); }
+                                a.start(&c, &wake)
                             }
                         }
-                    } else if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) };
+                        "sfu_reset" => {
+                            // A new one after the pause (a session that keeps failing backs off).
+                            eprintln!("net: SFU: the room ended this game's session; a new one");
+                            a.failed();
+                            Ok(())
+                        }
+                        "start" => {
+                            a.start = Some(message.clone());
+                            match a.sfu.as_mut() { Some(rtc) => rtc.signal(&message), None => a.start(&c, &wake) }
+                        }
+                        "ended" => {
+                            a.start = None;
+                            a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message))
+                        }
+                        _ => a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message)),
+                    };
                     if result.is_err() {
-                        eprintln!("net: SFU signaling failed"); c.force_close(); sfu = None; break;
+                        eprintln!("net: SFU signaling failed"); a.failed();
                     }
                 }
             }
@@ -331,32 +366,46 @@ fn send_main(c: Arc<WsConn>) {
             lock(&c.queue).handled += 1;
             c.wake.notify_all();
         }
+        // A new association after a failure's pause, or for a TURN relay whose credentials near
+        // their end between races; only on a room connection whose welcome came.
+        if connected && welcomed {
+            let due = match a.sfu.as_ref() {
+                None => a.retry_at.is_none_or(|t| std::time::Instant::now() >= t),
+                Some(rtc) => rtc.renew_due(),
+            };
+            if due {
+                if a.sfu.is_some() { eprintln!("net: SFU: TURN credentials near their end; a new session"); a.turn_first = true; }
+                else { eprintln!("net: SFU: a new session after the last one failed"); }
+                if a.start(&c, &wake).is_err() { a.failed(); }
+            }
+        }
         // Race frames the game queued go to the SFU before this poll, which writes them out:
         // they never wait for the next wake (finding 158, round 3).
-        flush(&c, &mut sfu);
+        flush(&c, &mut a);
         let mut incoming = Vec::new();
-        if let Some(rtc) = sfu.as_mut() {
+        if let Some(rtc) = a.sfu.as_mut() {
             match rtc.poll() {
                 Ok((text, frames)) => {
+                    if text.iter().any(|t| t["type"] == "sfu_connected") { a.pause = Duration::from_secs(1); a.turn_first = rtc.via_relay(); }
                     // While the room connection is down its signaling waits for the rejoin.
                     if lock(&c.queue).connected {
                         for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
                     } else {
-                        held.extend(text);
+                        a.held.extend(text);
                     }
                     incoming = frames;
                 }
-                // The welcome of this drop's rejoin starts a new session.
-                Err(_) => { eprintln!("net: SFU connection failed"); c.force_close(); sfu = None; }
+                // A new one after the pause; a lost room connection's welcome starts it at once.
+                Err(e) => { eprintln!("net: SFU connection failed ({e})"); a.failed(); }
             }
         }
-        c.sfu_live.store(sfu.is_some(), Ordering::Release);
+        c.sfu_live.store(a.sfu.is_some(), Ordering::Release);
         for data in incoming {
             if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
         }
-        flush(&c, &mut sfu);
+        flush(&c, &mut a);
         // Once: frames a full SCTP buffer refuses wait for the next wake, not a busy loop.
-        unwritten = !unwritten && sfu.as_ref().is_some_and(|s| s.unwritten());
+        unwritten = !unwritten && a.sfu.as_ref().is_some_and(|s| s.unwritten());
         if let Some(f) = c.h.on_tick {
             if unsafe { f(c.h.ctx) } != 0 {
                 c.force_close();
@@ -364,25 +413,17 @@ fn send_main(c: Arc<WsConn>) {
         }
     }
 }
-
-/// A race's association from its start message; its offer goes to the room.
-fn start_sfu(c: &WsConn, wake: &sfu::Wake, start: &serde_json::Value, sfu: &mut Option<sfu::Sfu>) -> Result<(), Box<dyn std::error::Error>> {
-    let (mut rtc, offer) = sfu::Sfu::start(wake.clone())?;
-    let result = rtc.signal(start);
-    *sfu = Some(rtc);
-    lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
-    c.sfu_live.store(true, Ordering::Release);
-    result
-}
-
 /// Sends what is queued, in order: race frames to the SFU association, the rest on the WebSocket.
-fn flush(c: &WsConn, sfu: &mut Option<sfu::Sfu>) {
+fn flush(c: &WsConn, a: &mut Assoc) {
     loop {
         let item = lock(&c.queue).out.pop_front();
         let Some((binary, data)) = item else { break };
         if binary && matches!(data.first(), Some(5 | 6)) {
-            let failed = sfu.as_mut().is_some_and(|rtc| rtc.send(&data).is_err());
-            if failed { c.force_close(); *sfu = None; }
+            // A full event queue: the association is stuck; a new one replaces it.
+            if a.sfu.as_mut().is_some_and(|rtc| rtc.send(&data).is_err()) {
+                eprintln!("net: SFU send queue full");
+                a.failed();
+            }
             continue;
         }
         let mut live = lock(&c.live);

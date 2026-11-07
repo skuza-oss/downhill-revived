@@ -3202,8 +3202,10 @@ fn test_oversized_deferred_successor_is_rejected_before_old_read() -> Result<()>
 }
 
 #[test]
-fn test_future_peer_reconfig_sequence_is_rejected() -> Result<()> {
-    let stream_id = 1;
+fn test_next_peer_reconfig_is_held_while_one_is_deferred() -> Result<()> {
+    // Downhill Revived (finding 177): the next request while an earlier one waits for its DATA
+    // ("In progress") is held, not answered "Request already in progress".
+    let (first, second) = (1, 2);
     let mut a = Association {
         peer_last_tsn: 0,
         peer_last_reconfig_rsn: 40,
@@ -3211,40 +3213,88 @@ fn test_future_peer_reconfig_sequence_is_rejected() -> Result<()> {
         my_next_tsn: 1,
         ..Default::default()
     };
-    assert!(
-        a.create_stream(stream_id, false, PayloadProtocolIdentifier::Binary)
-            .is_some()
-    );
+    for id in [first, second] {
+        assert!(a.create_stream(id, false, PayloadProtocolIdentifier::Binary).is_some());
+    }
+    let deferred: Box<dyn Param + Send + Sync> = Box::new(ParamOutgoingResetRequest {
+        reconfig_request_sequence_number: 41,
+        reconfig_response_sequence_number: u32::MAX,
+        sender_last_tsn: 5,
+        stream_identifiers: vec![first],
+    });
+    let mut reply = vec![];
+    a.handle_reconfig_param(&deferred, &mut reply)?;
+    assert_eq!(reconfig_response_result(&reply, 41), Some(ReconfigResult::InProgress));
+    let next: Box<dyn Param + Send + Sync> = Box::new(ParamOutgoingResetRequest {
+        reconfig_request_sequence_number: 42,
+        reconfig_response_sequence_number: u32::MAX,
+        sender_last_tsn: 0,
+        stream_identifiers: vec![second],
+    });
+    let mut reply = vec![];
+    a.handle_reconfig_param(&next, &mut reply)?;
+    assert_eq!(reconfig_response_result(&reply, 42), None);
+    assert!(a.streams.contains_key(&second));
+    assert!(a.reconfig_ahead.contains_key(&42));
+    Ok(())
+}
+#[test]
+fn test_future_peer_reconfig_sequence_is_held_until_its_turn() -> Result<()> {
+    // Downhill Revived (finding 177): Cloudflare Realtime's SFU has several requests in flight.
+    // One ahead of its turn is held, unanswered, and processed after its predecessor.
+    let (first, second) = (1, 2);
+    let mut a = Association {
+        peer_last_tsn: 0,
+        peer_last_reconfig_rsn: 40,
+        peer_reconfig_rsn_initialized: true,
+        my_next_tsn: 1,
+        ..Default::default()
+    };
+    for id in [first, second] {
+        assert!(a.create_stream(id, false, PayloadProtocolIdentifier::Binary).is_some());
+    }
 
     let future: Box<dyn Param + Send + Sync> = Box::new(ParamOutgoingResetRequest {
         reconfig_request_sequence_number: 42,
         reconfig_response_sequence_number: u32::MAX,
         sender_last_tsn: a.peer_last_tsn,
-        stream_identifiers: vec![stream_id],
+        stream_identifiers: vec![second],
     });
     let mut reply = vec![];
     a.handle_reconfig_param(&future, &mut reply)?;
 
-    assert_eq!(
-        reconfig_response_result(&reply, 42),
-        Some(ReconfigResult::ErrorBadSequenceNumber)
-    );
+    assert_eq!(reconfig_response_result(&reply, 42), None);
     assert_eq!(a.peer_last_reconfig_rsn, 40);
     assert!(a.max_completed_reconfig_rsn.is_none());
-    assert!(a.streams.contains_key(&stream_id));
+    assert!(a.streams.contains_key(&second));
 
     let expected: Box<dyn Param + Send + Sync> = Box::new(ParamOutgoingResetRequest {
         reconfig_request_sequence_number: 41,
         reconfig_response_sequence_number: u32::MAX,
         sender_last_tsn: a.peer_last_tsn,
-        stream_identifiers: vec![stream_id],
+        stream_identifiers: vec![first],
     });
-    a.handle_reconfig_param(&expected, &mut vec![])?;
-    assert!(!a.streams.contains_key(&stream_id));
-    assert_eq!(a.max_completed_reconfig_rsn, Some(41));
+    let mut reply = vec![];
+    a.handle_reconfig_param(&expected, &mut reply)?;
+    assert_eq!(reconfig_response_result(&reply, 41), Some(ReconfigResult::SuccessPerformed));
+    assert_eq!(reconfig_response_result(&reply, 42), Some(ReconfigResult::SuccessPerformed));
+    assert!(!a.streams.contains_key(&first));
+    assert!(!a.streams.contains_key(&second));
+    assert_eq!(a.peer_last_reconfig_rsn, 42);
+    assert_eq!(a.max_completed_reconfig_rsn, Some(42));
+
+    // Far ahead, or behind: still refused.
+    let far: Box<dyn Param + Send + Sync> = Box::new(ParamOutgoingResetRequest {
+        reconfig_request_sequence_number: 42 + 1000,
+        reconfig_response_sequence_number: u32::MAX,
+        sender_last_tsn: a.peer_last_tsn,
+        stream_identifiers: vec![],
+    });
+    let mut reply = vec![];
+    a.handle_reconfig_param(&far, &mut reply)?;
+    assert_eq!(reconfig_response_result(&reply, 1042), Some(ReconfigResult::ErrorBadSequenceNumber));
     Ok(())
 }
-
 #[test]
 fn test_peer_reconfig_sequence_accepts_wrap_to_zero() -> Result<()> {
     let stream_id = 1;

@@ -60,8 +60,7 @@ async function released(code: string) {
     const ids = r.state.members.map((m: any) => m.id);
     for (const m of r.state.members) {
       m.sfu = publishedSession(m.id, ids.filter((id: number) => id !== m.id));
-      m.sfuRace = r.state.race.startAt;
-      m.sfuReady = true;
+      m.sfuReadyRace = r.state.race.startAt;
     }
     r.state.race.sfuReleased = true;
     await ctx.storage.put("room", r.state);
@@ -90,20 +89,18 @@ describe("a racer's room connection drops in its race (finding 175)", () => {
     }
     const host = await rejoin(code, "Host", h.welcome.rejoinToken, ip, { raceStartAt: startAt });
     const guest = await rejoin(code, "P1", token, ip, { raceStartAt: startAt });
-    expect(host.welcome).toMatchObject({ memberId: 0, host: true, race: { startAt, sfu: "setup" } });
-    expect(guest.welcome).toMatchObject({ memberId: 1, race: { startAt, sfu: "setup" } });
+    expect(host.welcome).toMatchObject({ memberId: 0, host: true, sfu: "setup", race: { startAt } });
+    expect(guest.welcome).toMatchObject({ memberId: 1, sfu: "setup", race: { startAt } });
     const r = await snap(host.c, r => r.members.length === 2);
     expect(r.phase).toBe("racing");
     expect(r.members.map((m: any) => [m.id, m.inRace, m.raceState])).toEqual([[0, true, "racing"], [1, true, "racing"]]);
-    // A session still being set up starts again: sfu_restart, then a new offer is taken.
+    // A session its game can't keep: its new offer replaces it (finding 177).
     const fake = fakeRealtime();
     try {
       await runInDurableObject(room(code), async (r: any) => {
         r.env = { ...r.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
-        r.state.members[1].sfuRace = startAt;  // its first offer had gone out before the drop
         r.state.members[1].sfu = { id: "session-old", phase: "connect", channels: [] };
       });
-      guest.c.sendJson({ type: "sfu_restart" });
       guest.c.sendJson({ type: "sfu_offer", sdp: "offer" });
       expect((await guest.c.json("sfu_answer")).sdp).toBe("SFU");
       await runInDurableObject(room(code), async (r: any) => {
@@ -111,10 +108,6 @@ describe("a racer's room connection drops in its race (finding 175)", () => {
         expect(r.state.members[1].sfu.id).not.toBe("session-old");
         expect(r.inRace(r.state, 1)).toBe(true);
       });
-      // At most SFU_RESTARTS (3) a race.
-      for (let i = 0; i < 2; i++) guest.c.sendJson({ type: "sfu_restart" });
-      guest.c.sendJson({ type: "sfu_restart" });
-      expect((await guest.c.json("error")).message).toContain("No more Realtime restarts");
     } finally {
       fake.restore();
     }
@@ -132,7 +125,7 @@ describe("a racer's room connection drops in its race (finding 175)", () => {
     await snap(h, r => r.members[0].raceState === "finished");
     await runDurableObjectAlarm(room(code));
     const { c, welcome } = await rejoin(code, "P1", p1.welcome.rejoinToken, ip, { raceStartAt: startAt });
-    expect(welcome).toMatchObject({ memberId: 1, race: { startAt, sfu: "ready" } });
+    expect(welcome).toMatchObject({ memberId: 1, sfu: "ready", race: { startAt } });
     expect(await c.json("left")).toMatchObject({ slot: 2, memberId: 2, reason: "gave_up" });
     const channels = await c.json("sfu_channels");
     expect(channels.full).toBe(true);
@@ -151,7 +144,7 @@ describe("a racer's room connection drops in its race (finding 175)", () => {
     const { cs, code, ip, starts } = await raceSetup(2);
     await dropped(code, 1);
     const { c, welcome } = await rejoin(code, "P1", cs[1].welcome.rejoinToken, ip);
-    expect(welcome.race).toMatchObject({ startAt: starts[1].startAt, sfu: "setup" });
+    expect(welcome).toMatchObject({ sfu: "setup", race: { startAt: starts[1].startAt } });
     const start = await c.json("start");
     expect(start).toMatchObject({ yourSlot: starts[1].yourSlot, startAt: starts[1].startAt, seed: starts[1].seed, players: starts[1].players });
   });

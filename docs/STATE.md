@@ -124,9 +124,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   hash or install id.
 - Race frames (finding 158): over Cloudflare Realtime SFU DataChannels, STATE unordered with no
   retransmissions and EVENT reliable (Cloudflare forwards STATE ordered and reliable anyway; the
-  client's vendored sctp-proto delivers it unordered, finding 173); the room sets up each racer's session and passes only that
-  racer's SDP. If UDP doesn't connect in 2 s, Cloudflare TURN over TLS on 443 with credentials
-  minted for that racer. A racer whose Realtime never connects leaves after 10 s and the others
+  client's vendored sctp-proto delivers it unordered, finding 173). One Realtime session per member
+  per room stay (finding 177): made when the member joins, kept across races with its
+  publications and subscriptions; a race's missing pairs are subscribed at the grid's lock, during
+  the countdown, so a connected room is released as soon as its games acknowledge the start. The
+  room passes each member only its own SDP and channels. If UDP doesn't connect in 2 s, Cloudflare
+  TURN over TLS on 443 with credentials minted for that member, renewed between races. A racer whose Realtime never connects leaves after 10 s and the others
   race on (finding 175). Protocol 4 (finding 169): a PC's riders of one tick go out bundled
   in STATE messages of at most 1,000 bytes (one datagram), stamped with their moment on the
   server clock; each player's own rider 60 times a second, AI riders 30. Puppets are drawn at the
