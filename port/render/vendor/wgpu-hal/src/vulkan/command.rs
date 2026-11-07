@@ -214,28 +214,34 @@ impl crate::CommandEncoder for super::CommandEncoder {
     where
         T: Iterator<Item = crate::BufferBarrier<'a, super::Buffer>>,
     {
-        //Note: this is done so that we never end up with empty stage flags
-        let mut src_stages = vk::PipelineStageFlags::TOP_OF_PIPE;
-        let mut dst_stages = vk::PipelineStageFlags::BOTTOM_OF_PIPE;
-        let vk_barriers = &mut self.temp.buffer_barriers;
-        vk_barriers.clear();
-
+        // Downhill Revived: one vkCmdPipelineBarrier per (source, destination) stage pair, not one
+        // with every barrier's stages merged (PATCH.md, finding 174). Merged, one barrier's
+        // fragment source and another's vertex destination make all later vertex work wait for all
+        // earlier fragment work, which a tiler then cannot overlap.
+        let staged = &mut self.temp.buffer_staged;
+        staged.clear();
         for bar in barriers {
             let (src_stage, src_access) = conv::map_buffer_usage_to_barrier(bar.usage.from);
-            src_stages |= src_stage;
             let (dst_stage, dst_access) = conv::map_buffer_usage_to_barrier(bar.usage.to);
-            dst_stages |= dst_stage;
-
-            vk_barriers.push(
+            //Note: this is done so that we never end up with empty stage flags
+            staged.push((
+                src_stage | vk::PipelineStageFlags::TOP_OF_PIPE,
+                dst_stage | vk::PipelineStageFlags::BOTTOM_OF_PIPE,
                 vk::BufferMemoryBarrier::default()
                     .buffer(bar.buffer.raw)
                     .size(vk::WHOLE_SIZE)
                     .src_access_mask(src_access)
                     .dst_access_mask(dst_access),
-            )
+            ));
         }
-
-        if !vk_barriers.is_empty() {
+        staged.sort_by_key(|&(src, dst, _)| (src.as_raw(), dst.as_raw()));
+        let vk_barriers = &mut self.temp.buffer_barriers;
+        let mut start = 0;
+        while start < staged.len() {
+            let (src_stages, dst_stages, _) = staged[start];
+            let end = start + staged[start..].iter().take_while(|&&(s, d, _)| (s, d) == (src_stages, dst_stages)).count();
+            vk_barriers.clear();
+            vk_barriers.extend(staged[start..end].iter().map(|&(_, _, b)| b));
             unsafe {
                 self.device.raw.cmd_pipeline_barrier(
                     self.active,
@@ -247,6 +253,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
                     &[],
                 )
             };
+            start = end;
         }
     }
 
@@ -254,11 +261,10 @@ impl crate::CommandEncoder for super::CommandEncoder {
     where
         T: Iterator<Item = crate::TextureBarrier<'a, super::Texture>>,
     {
-        let mut src_stages = vk::PipelineStageFlags::empty();
-        let mut dst_stages = vk::PipelineStageFlags::empty();
-        let vk_barriers = &mut self.temp.image_barriers;
-        vk_barriers.clear();
-
+        // Downhill Revived: one vkCmdPipelineBarrier per (source, destination) stage pair, as in
+        // `transition_buffers` (PATCH.md, finding 174).
+        let staged = &mut self.temp.image_staged;
+        staged.clear();
         for bar in barriers {
             let range = conv::map_subresource_range_combined_aspect(
                 &bar.range,
@@ -267,12 +273,14 @@ impl crate::CommandEncoder for super::CommandEncoder {
             );
             let (src_stage, src_access) = conv::map_texture_usage_to_barrier(bar.usage.from);
             let src_layout = conv::derive_image_layout(bar.usage.from, bar.texture.format);
-            src_stages |= src_stage;
             let (dst_stage, dst_access) = conv::map_texture_usage_to_barrier(bar.usage.to);
             let dst_layout = conv::derive_image_layout(bar.usage.to, bar.texture.format);
-            dst_stages |= dst_stage;
-
-            vk_barriers.push(
+            // A group alone must not have empty stage flags (merged, the others' filled them).
+            let src_stage = if src_stage.is_empty() { vk::PipelineStageFlags::TOP_OF_PIPE } else { src_stage };
+            let dst_stage = if dst_stage.is_empty() { vk::PipelineStageFlags::BOTTOM_OF_PIPE } else { dst_stage };
+            staged.push((
+                src_stage,
+                dst_stage,
                 vk::ImageMemoryBarrier::default()
                     .image(bar.texture.raw)
                     .subresource_range(range)
@@ -280,10 +288,16 @@ impl crate::CommandEncoder for super::CommandEncoder {
                     .dst_access_mask(dst_access)
                     .old_layout(src_layout)
                     .new_layout(dst_layout),
-            );
+            ));
         }
-
-        if !vk_barriers.is_empty() {
+        staged.sort_by_key(|&(src, dst, _)| (src.as_raw(), dst.as_raw()));
+        let vk_barriers = &mut self.temp.image_barriers;
+        let mut start = 0;
+        while start < staged.len() {
+            let (src_stages, dst_stages, _) = staged[start];
+            let end = start + staged[start..].iter().take_while(|&&(s, d, _)| (s, d) == (src_stages, dst_stages)).count();
+            vk_barriers.clear();
+            vk_barriers.extend(staged[start..end].iter().map(|&(_, _, b)| b));
             unsafe {
                 self.device.raw.cmd_pipeline_barrier(
                     self.active,
@@ -295,6 +309,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
                     vk_barriers,
                 )
             };
+            start = end;
         }
     }
 

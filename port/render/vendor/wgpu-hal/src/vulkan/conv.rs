@@ -271,8 +271,9 @@ pub fn map_texture_usage_to_barrier(
 ) -> (vk::PipelineStageFlags, vk::AccessFlags) {
     let mut stages = vk::PipelineStageFlags::empty();
     let mut access = vk::AccessFlags::empty();
-    let shader_stages = vk::PipelineStageFlags::VERTEX_SHADER
-        | vk::PipelineStageFlags::FRAGMENT_SHADER
+    // Downhill Revived: no vertex shader of the game reads a texture (PATCH.md, finding 174), so
+    // sampled and storage textures synchronise with the fragment and compute stages only.
+    let shader_stages = vk::PipelineStageFlags::FRAGMENT_SHADER
         | vk::PipelineStageFlags::COMPUTE_SHADER;
 
     if usage.contains(wgt::TextureUses::COPY_SRC) {

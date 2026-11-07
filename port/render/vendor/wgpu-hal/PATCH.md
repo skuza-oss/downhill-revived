@@ -65,3 +65,27 @@ GPU memory (`kgsl_ioctl_gpuobj_alloc`, whose address search walks the process's 
 of the render thread. `destroy_texture_view` leaves such a view alone (`surface_cached`); the
 swapchain's `release_resources` destroys its images' kept views and their framebuffer entries after
 its device wait, and `DeviceShared`'s drop destroys any left.
+
+## Barriers: one per stage pair, textures without the vertex stage (finding 174)
+
+Two changes to how textures and buffers are synchronised, both in the Vulkan backend:
+
+- `command.rs` `transition_buffers` and `transition_textures` issue one `vkCmdPipelineBarrier` per
+  distinct (source, destination) stage pair of their barriers, each with only its own barriers,
+  instead of one with every barrier's stages merged. Each resource keeps the synchronisation it had
+  (its stages, accesses and layout transition); only the dependencies between unrelated resources
+  that the merge added are gone (what `vkCmdPipelineBarrier2`'s per-barrier stages give). A batch
+  whose barriers share one stage pair is one call, as before.
+- `conv.rs` `map_texture_usage_to_barrier`: sampled and storage textures synchronise with the
+  fragment and compute shader stages, not the vertex shader stage. No vertex shader of the game
+  reads a texture; `src/shaders.rs`'s `no_vertex_texture_reads` test checks every WGSL module the
+  renderer builds and fails if one ever does.
+
+Why: on a Mali job-manager GPU a barrier whose source stages include fragment work and whose
+destination stages include the vertex stage makes all later vertex and binning work wait for all
+earlier fragment work, and image copies (texture uploads) run as fragment jobs there. Every picture
+uploads new decoded textures, whose barrier to "sampled" named the vertex stage, so the picture's
+binning and compute work waited behind the last picture's fragment work. On the Redmi 9's Mali-G52
+(driver r26p0) at 2x the two changes together took finding 156's route from 48.25-48.27 to
+49.09-49.96 fields/s (the race start 34.0-34.4 -> 36.4-36.5); the per-pair barriers alone changed
+nothing measurable.

@@ -886,6 +886,10 @@ struct Temp {
     marker: Vec<u8>,
     buffer_barriers: Vec<vk::BufferMemoryBarrier<'static>>,
     image_barriers: Vec<vk::ImageMemoryBarrier<'static>>,
+    // Downhill Revived: each barrier with its own source and destination stages, grouped into
+    // one vkCmdPipelineBarrier per stage pair (`transition_buffers`, `transition_textures`).
+    buffer_staged: Vec<(vk::PipelineStageFlags, vk::PipelineStageFlags, vk::BufferMemoryBarrier<'static>)>,
+    image_staged: Vec<(vk::PipelineStageFlags, vk::PipelineStageFlags, vk::ImageMemoryBarrier<'static>)>,
 }
 
 impl Temp {
@@ -893,6 +897,8 @@ impl Temp {
         self.marker.clear();
         self.buffer_barriers.clear();
         self.image_barriers.clear();
+        self.buffer_staged.clear();
+        self.image_staged.clear();
     }
 
     fn make_c_str(&mut self, name: &str) -> &CStr {
