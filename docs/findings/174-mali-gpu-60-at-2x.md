@@ -50,6 +50,8 @@ pictures identical, boot trace while iterating and race trace once at the end, `
   scale 1 (malioc sees them)
 - [x] 2026-11-07: the owner's question: the optional effects on and off (below): all off,
   49.5 -> 60.4 fields/s over the route; the riders' shadows and the sun glow carry most of it
+- [x] 2026-11-07: the widest set off (shadows, sun glow and flare, fog, point sampling, overlay A's
+  particles, the frame at 896 lines): 49.9 -> 62.8 fields/s over the route (below)
 - [x] 2026-11-07: `e30cd85` checked: pictures byte-identical to the base on the Redmi 9 (5 shots,
   2x) and the PC (5 shots, 4x, Vulkan), boot and race state traces match, `check.py port` OK
 - [ ] the Mi 11i (no regression on Adreno): not run, its 0.7.12 is release-signed and the lane
@@ -152,6 +154,35 @@ Fog changes only the arithmetic a pixel: malioc for Mali-G52 gives the commonest
 4-5 % of the scene's fragment work. So the riders' shadows and the sun glow carry most of the gain,
 the lens flare a little at the race start, fog little. The split is from the PC and malioc; the
 phone measured only all on and all off.
+
+**The widest set** (the owner's question of 2026-11-07: everything a Performance group could
+offer, all on against all off). The same diagnostic build plus three more switches (not committed;
+`point`, `DHD_DIAG_SKIP_A`, `DHD_DIAG_OUTPUT`):
+
+- the three above (`small`, `fog`, `blend:885`);
+- `point`: each draw's bilinear bit cleared (point-sampled textures; the scene shader is
+  arithmetic-bound and bilinear is its gather path);
+- `DHD_DIAG_SKIP_A`: overlay A's programs not run (their VU1 work and their draws) except 0x26D8.
+  Skipped one at a time on the PC over the route: 0x26D8 draws the sun and its flare (kept: skipping
+  it removes the sun), 0x0E10 and 0x29C0 the riders' ground shadows, 0x02D0 and 0x2E48 a few
+  pixels (dust); the others change neither checked picture (fields 6800 and 9500; likely particles
+  of other places, tracks and weather);
+- `DHD_DIAG_OUTPUT=896`: the window's frame drawn 896 lines high (2x's picture height, the window's
+  aspect), the display scaling it to 2340 x 1080 (not confirmed on the phone: the log does not
+  give the swapchain's size).
+
+What it looks like (PC, 2x): the sun is gone with `small` (its glow chain draws it), the haze too;
+point sampling makes the sky's large textures visibly blocky.
+
+| | on 1 | on 2 | off 1 | off 2 |
+|---|---:|---:|---:|---:|
+| fields/s over the route | 50.12 | 49.72 | 62.80 | 62.76 |
+| p99 field ms | 37.3 | 38.3 | 22.9 | 22.8 |
+| race, 30 s windows (fps) | 47-52, start 38.4 | 47-51, start 37.6 | 60-66 | 60-66 |
+| busy ms a field: render / VU / GS | 12.6 / 15.2 / 18.9 | 12.9 / 15.4 / 19.1 | 8.2 / 13.7 / 14.6 | 8.1 / 13.7 / 14.7 |
+
+About +12.9 fields/s (+26 %), and the race start goes from 38 to 60: about 2.4 fields/s more than
+the three effects alone (60.4). With all off the limit moves between the GPU and the VU thread.
 
 ## Decisions
 
