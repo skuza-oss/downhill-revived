@@ -1,11 +1,19 @@
 # State log
 
+
 Dated entries, newest first: what a lane or round changed and how it was checked. What is true
 now is in `docs/STATE.md`; the details are in the findings it names. Older round logs (2026-10-12
 to 2026-10-25) are in the findings and in `git show v0.3.1:docs/STATE.md`.
 
 Add an entry when a lane merges: date, finding, one paragraph. Do not copy values that live in
 code (versions, MIN_VERSION, defaults): name the file instead.
+
+2026-11-07 (finding 178): pre-release review fixes stale Realtime failures affecting replacement sessions,
+duplicate publications during an in-flight publish, and stale TURN mints losing replacement cleanup
+records. Five regression cases; server tier 162 tests and typecheck pass; boot 600 and race 5000
+state-trace rows match. Port build/runtime/network/chunk and Rust SFU checks pass; full port tier
+remains incomplete because its renderer gate invokes WARP and this review requires WARP off.
+Rejoin identity reuse, failed subscription close policy and synchronous DNS remain lead decisions.
 
 2026-11-06 (finding 173): online snapshots no longer stall for 0.5-6 s. Cloudflare Realtime SFU forwards the STATE channel to each subscriber ordered and reliable whatever the channel asks, so one lost datagram held every later snapshot until Cloudflare resent it (often after its 1 s timer). The vendored sctp-proto (`port/render/vendor/sctp-proto/PATCH.md`) hands out each message on a channel we opened unordered as soon as it is complete. Local two-game races, host to guest: snapshot age p99 489-984 ms before, 24-82 ms after; with 3% loss injected (`DHD_NET_SFU_DROP_IN`) 924-989 before, 50-103 after. Cloudflare's own pauses after a lost retransmission (up to 2 s, rare) remain.
 
