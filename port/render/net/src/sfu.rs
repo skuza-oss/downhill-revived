@@ -386,11 +386,30 @@ impl Sfu {
                 .ok_or("Missing allocations")?;
             // A rejoin's whole list (finding 175): the channels it lacks are new, those it has stay,
             // and those not listed closed while the room connection was down (their sfu_closed missed).
+            // A channel stays only if its whole allocation is listed (id, member, name, direction)
+            // and the SFU hasn't reset its stream: Cloudflare gives a closed subscription's id to the
+            // next one at once (finding 177), so while the room connection was down an id may have
+            // gone to another member, or to the same allocation again. Such a channel is closed as
+            // the room's sfu_closed would have and the listed one opens on its id (finding 179).
             let full = message["full"] == true;
             if full {
-                let listed: Vec<u64> = channels.iter().filter_map(|c| c["channelId"].as_u64()).collect();
-                let gone: Vec<u16> = self.channels.iter().map(|c| c.stream).chain(self.waiting.iter().map(|w| w.stream))
-                    .filter(|s| !listed.contains(&(*s as u64))).collect();
+                let listed: Vec<(u64, u64, bool, bool)> = channels.iter().filter_map(|c| {
+                    let state = match c["name"].as_str() { Some("state") => true, Some("events") => false, _ => return None };
+                    Some((c["channelId"].as_u64()?, c["memberId"].as_u64()?, state, c["local"].as_bool()?))
+                }).collect();
+                let mut gone: Vec<u16> = self.waiting.iter().filter(|w| !listed.contains(&(w.stream as u64, w.member, w.state, w.local)))
+                    .map(|w| w.stream).collect();
+                for i in 0..self.channels.len() {
+                    let (id, stream, opened) = (self.channels[i].id, self.channels[i].stream, self.channels[i].opened);
+                    let c = &self.channels[i];
+                    let same = listed.contains(&(stream as u64, c.member, c.state, c.local));
+                    let reset = opened && self.rtc.direct_api().channel_id_by_sctp_stream_id(stream) != Some(id);
+                    if !same || reset {
+                        if same { eprintln!("net: SFU: channel {stream} was reset while the room connection was down; opening it again"); }
+                        else if listed.iter().any(|l| l.0 == stream as u64) { eprintln!("net: SFU: channel {stream} went to another allocation while the room connection was down"); }
+                        gone.push(stream);
+                    }
+                }
                 for stream in gone { self.close_stream(stream); }
             }
             let known = |s: &Self, c: &Value| c["channelId"].as_u64().is_some_and(|id| s.has_stream(id));
@@ -880,6 +899,17 @@ mod tests {
         assert_eq!(client.channels[0].id, kept);
         assert!(client.signal(&json!({"type":"sfu_channels","channels":[
             {"channelId":18,"name":"state","memberId":21,"local":false}]})).is_err());
+        // A listed id whose allocation differs (finding 179: Cloudflare recycled it while the room
+        // connection was down) is not the channel this side has: closed, and the new one waits for
+        // the old one's stream to go.
+        client.signal(&json!({"type":"sfu_channels","full":true,"channels":[
+            {"channelId":16,"name":"state","memberId":23,"local":false},
+            {"channelId":18,"name":"events","memberId":21,"local":false}
+        ]})).unwrap();
+        assert!(client.channels.is_empty());
+        let waiting: Vec<(u16, u64, bool)> = client.waiting.iter().map(|w| (w.stream, w.member, w.state)).collect();
+        assert_eq!(waiting, vec![(16, 23, true), (18, 21, false)]);
+        assert_eq!(client.closing.len(), 3);
     }
 
     #[test]
@@ -1327,4 +1357,60 @@ mod tests {
     #[test]
     fn a_closed_subscriptions_stream_id_serves_the_next_one() { reuse_a_closed_stream_id(false); }
     #[test]
-    fn a_closed_subscriptions_stream_id_serves_the_next_one_reset_first() { reuse_a_closed_stream_id(true); }}
+    fn a_closed_subscriptions_stream_id_serves_the_next_one_reset_first() { reuse_a_closed_stream_id(true); }
+
+    /// Finding 179: the room connection drops while member 17's subscriptions close (it leaves, or
+    /// this game sits a race out) and Cloudflare gives their stream ids to the next subscriptions
+    /// at once: a newcomer's (member 21), or member 17's own again. The room's sfu_closed and
+    /// sfu_channels are lost with the connection; the rejoin's whole list names the ids again. The
+    /// channels on them must be the new ones: same ids, but a different member, or the same
+    /// allocation on a stream the SFU reset meanwhile.
+    fn rejoin_over_recycled_stream_ids(newcomer: bool) {
+        let (mut sfu, mut client) = LocalSfu::start();
+        sfu.channel(10, true);
+        sfu.channel(12, false);
+        let old = [sfu.channel(14, false), sfu.channel(16, true)];
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":10,"name":"state","memberId":7,"local":true}, {"channelId":12,"name":"events","memberId":7,"local":true},
+            {"channelId":14,"name":"events","memberId":17,"local":false}, {"channelId":16,"name":"state","memberId":17,"local":false}]})).unwrap();
+        let (mut text, mut frames) = (vec![], vec![]);
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && !(client.channels.iter().all(|c| client.rtc.channel(c.id).is_some()) && old.iter().all(|id| sfu.server.channel(*id).is_some())) {
+            sfu.pump(&mut client, &mut text, &mut frames);
+        }
+        for _ in 0..20 { sfu.pump(&mut client, &mut text, &mut frames); }
+        assert!(client.channels.iter().all(|c| c.opened), "every channel opened");
+        // The room connection is down: the SFU resets the old subscriptions' streams (that goes
+        // over the association, which stays up) and makes the new ones on the same ids.
+        for id in old { sfu.server.direct_api().close_data_channel(id); }
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until && [14, 16].iter().any(|s| client.rtc.direct_api().channel_id_by_sctp_stream_id(*s).is_some()) {
+            sfu.pump(&mut client, &mut text, &mut frames);
+        }
+        let member = if newcomer { 21 } else { 17 };
+        let mut new: [Option<ChannelId>; 2] = [None, None];
+        // Back in the room: the rejoin's whole list, then the next race with that member in slot 4.
+        client.signal(&json!({"type":"sfu_channels","full":true,"channels":[
+            {"channelId":10,"name":"state","memberId":7,"local":true}, {"channelId":12,"name":"events","memberId":7,"local":true},
+            {"channelId":14,"name":"events","memberId":member,"local":false}, {"channelId":16,"name":"state","memberId":member,"local":false}]})).unwrap();
+        client.signal(&json!({"type":"start","startAt":3000,"yourSlot":0,"players":[{"memberId":7,"slot":0},{"memberId":member,"slot":4}]})).unwrap();
+        text.clear();
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && (frames.is_empty() || text.iter().all(|m| m["type"] != "sfu_ready")) {
+            sfu.pump(&mut client, &mut text, &mut frames);
+            for (k, (stream, state)) in [(14u16, false), (16, true)].into_iter().enumerate() {
+                if new[k].is_none() && sfu.server.direct_api().channel_id_by_sctp_stream_id(stream).is_none() { new[k] = Some(sfu.channel(stream, state)); }
+            }
+            if let Some(id) = new[0] { if let Some(mut c) = sfu.server.channel(id) { let _ = c.write(true, &event(3000, 5)); } }
+        }
+        assert_eq!(frames.first(), Some(&vec![6, 4, 5]), "the new subscription's frames reach slot 4");
+        assert!(text.iter().any(|m| m["type"] == "sfu_ready" && m["race"] == 3000), "every racer's channels open: acknowledged");
+        let theirs: Vec<(u16, u64)> = client.channels.iter().filter(|c| !c.local).map(|c| (c.stream, c.member)).collect();
+        assert_eq!(theirs, vec![(14, member), (16, member)]);
+        assert!(client.orphans.is_empty() && client.rtc.is_alive());
+    }
+    #[test]
+    fn a_rejoin_takes_a_recycled_stream_id_for_its_new_member() { rejoin_over_recycled_stream_ids(true); }
+    #[test]
+    fn a_rejoin_takes_a_recycled_stream_id_reset_meanwhile() { rejoin_over_recycled_stream_ids(false); }
+}
