@@ -292,14 +292,19 @@ A member's session lives as long as its stay in the room (finding 177):
 - A member back with its rejoin token (findings 137, 175) gets `"sfu":"ready"` in the welcome when
   the room still holds its session: its client keeps its association, sends what it said while the
   room connection was down, and gets all its allocations at once:
-  `{"type":"sfu_channels","full":true,"channels":[...]}`. Its client keeps the channels it has,
-  opens the missing ones and closes those not listed (it missed their `sfu_closed`). Then, in its
-  race, `sfu_ready` if the race's traffic was released and it had acknowledged. A client without a
+  `{"type":"sfu_channels","full":true,"channels":[...]}`. Its client keeps a channel only if its
+  whole allocation is listed (id, member, name, direction) and the SFU hasn't reset its stream,
+  closes the others (it missed their `sfu_closed`, or Cloudflare gave their id to another allocation
+  meanwhile, finding 179) and opens the listed ones it lacks. Then, in its race, `sfu_ready` if the
+  race's traffic was released and it had acknowledged. A client without a
   usable association (it lost it, or never got its answer) offers a new session, which replaces
   the room's.
 - Departures and replacements send `{"type":"sfu_closed","channelIds":[10,12]}` only to
-  affected endpoints, after closing those allocations through the API (a subscription that
-  doesn't close is announced all the same and closes with its subscriber's session).
+  affected endpoints, after closing those allocations through the API. A subscription that
+  doesn't close is announced all the same, stays on its subscriber's session (stored with the room)
+  and is tried again by the subscription pass 5, 10, 20 and 40 s later; if it still forwards a live
+  publication after that, its subscriber's session is reset (`sfu_reset`) once the subscriber is
+  outside the running race or locked grid; one to no live publication is forgotten (finding 179).
 - A session the room gives up on (an API call on it failed, or a racer whose channels did not open
   by the setup deadline) is closed, and its owner hears `{"type":"sfu_reset"}`: its client drops
   the association and offers a new session after its pause.

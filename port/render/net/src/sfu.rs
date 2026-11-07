@@ -269,10 +269,66 @@ impl SenderRate {
         ok
     }
 }
+/// How long a new association waits for the SFU's address when no earlier lookup found one.
+const LOOKUP_WAIT: Duration = Duration::from_millis(300);
+type Lookup = Arc<dyn Fn() -> std::io::Result<Vec<SocketAddr>> + Send + Sync>;
+/// The SFU's address, looked up on a thread of its own (finding 179): the lookup used to run on
+/// the send thread, which also polls the association and hands the room's messages to the game, so
+/// a slow resolver during a session replacement held all of that. Each new association starts a
+/// fresh lookup (one at a time) and takes the last address found at once; with none yet it waits
+/// at most LOOKUP_WAIT, and a lookup that hasn't finished by then or failed fails that attempt,
+/// which the send thread retries after its pause.
+struct Route {
+    lookup: Lookup,
+    shared: Arc<(Mutex<RouteState>, std::sync::Condvar)>,
+}
+#[derive(Default)]
+struct RouteState {
+    last: Option<SocketAddr>,
+    running: bool,
+    /// Why the latest finished lookup found nothing.
+    failed: Option<String>,
+}
+impl Route {
+    fn new(lookup: Lookup) -> Self { Self { lookup, shared: Arc::default() } }
+    fn address(&self, wait: Duration) -> Result<SocketAddr> {
+        let (state, done) = &*self.shared;
+        let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+        if !s.running {
+            s.running = true;
+            let (lookup, shared) = (self.lookup.clone(), self.shared.clone());
+            let spawned = std::thread::Builder::new().name("dhd-sfu-dns".into()).spawn(move || {
+                let found = lookup().map_err(|e| e.to_string())
+                    .and_then(|a| a.into_iter().find(|a| a.is_ipv4()).ok_or_else(|| "no IPv4 address".to_string()));
+                let (state, done) = &*shared;
+                let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+                s.running = false;
+                match found {
+                    Ok(a) => { s.last = Some(a); s.failed = None; }
+                    Err(e) => { eprintln!("net: SFU: address lookup failed ({e})"); s.failed = Some(e); }
+                }
+                done.notify_all();
+            });
+            if let Err(e) = spawned { s.running = false; return Err(e.into()); }
+        }
+        if let Some(a) = s.last { return Ok(a); }
+        let (s, _) = done.wait_timeout_while(s, wait, |s| s.running).unwrap_or_else(|e| e.into_inner());
+        if let Some(a) = s.last { return Ok(a); }
+        if s.running {
+            eprintln!("net: SFU: address lookup still running after {} ms; trying again later", wait.as_millis());
+            return Err("SFU address lookup still running".into());
+        }
+        Err(format!("No SFU address ({})", s.failed.as_deref().unwrap_or("lookup failed")).into())
+    }
+}
+fn sfu_route() -> &'static Route {
+    static ROUTE: std::sync::OnceLock<Route> = std::sync::OnceLock::new();
+    ROUTE.get_or_init(|| Route::new(Arc::new(|| ("rtc.live.cloudflare.com", 443).to_socket_addrs().map(|a| a.collect()))))
+}
 impl Sfu {
     /// A new association and its offer. `turn_first`: ask for TURN as soon as the answer comes.
     pub fn start(wake: Wake, turn_first: bool) -> Result<(Self, Value)> {
-        let route = ("rtc.live.cloudflare.com", 443).to_socket_addrs()?.find(|a| a.is_ipv4()).ok_or("No SFU IPv4 route")?;
+        let route = sfu_route().address(LOOKUP_WAIT)?;
         let (mut sfu, offer) = Self::start_at(route, wake)?;
         sfu.turn_first = turn_first;
         Ok((sfu, offer))
@@ -386,11 +442,30 @@ impl Sfu {
                 .ok_or("Missing allocations")?;
             // A rejoin's whole list (finding 175): the channels it lacks are new, those it has stay,
             // and those not listed closed while the room connection was down (their sfu_closed missed).
+            // A channel stays only if its whole allocation is listed (id, member, name, direction)
+            // and the SFU hasn't reset its stream: Cloudflare gives a closed subscription's id to the
+            // next one at once (finding 177), so while the room connection was down an id may have
+            // gone to another member, or to the same allocation again. Such a channel is closed as
+            // the room's sfu_closed would have and the listed one opens on its id (finding 179).
             let full = message["full"] == true;
             if full {
-                let listed: Vec<u64> = channels.iter().filter_map(|c| c["channelId"].as_u64()).collect();
-                let gone: Vec<u16> = self.channels.iter().map(|c| c.stream).chain(self.waiting.iter().map(|w| w.stream))
-                    .filter(|s| !listed.contains(&(*s as u64))).collect();
+                let listed: Vec<(u64, u64, bool, bool)> = channels.iter().filter_map(|c| {
+                    let state = match c["name"].as_str() { Some("state") => true, Some("events") => false, _ => return None };
+                    Some((c["channelId"].as_u64()?, c["memberId"].as_u64()?, state, c["local"].as_bool()?))
+                }).collect();
+                let mut gone: Vec<u16> = self.waiting.iter().filter(|w| !listed.contains(&(w.stream as u64, w.member, w.state, w.local)))
+                    .map(|w| w.stream).collect();
+                for i in 0..self.channels.len() {
+                    let (id, stream, opened) = (self.channels[i].id, self.channels[i].stream, self.channels[i].opened);
+                    let c = &self.channels[i];
+                    let same = listed.contains(&(stream as u64, c.member, c.state, c.local));
+                    let reset = opened && self.rtc.direct_api().channel_id_by_sctp_stream_id(stream) != Some(id);
+                    if !same || reset {
+                        if same { eprintln!("net: SFU: channel {stream} was reset while the room connection was down; opening it again"); }
+                        else if listed.iter().any(|l| l.0 == stream as u64) { eprintln!("net: SFU: channel {stream} went to another allocation while the room connection was down"); }
+                        gone.push(stream);
+                    }
+                }
                 for stream in gone { self.close_stream(stream); }
             }
             let known = |s: &Self, c: &Value| c["channelId"].as_u64().is_some_and(|id| s.has_stream(id));
@@ -880,6 +955,17 @@ mod tests {
         assert_eq!(client.channels[0].id, kept);
         assert!(client.signal(&json!({"type":"sfu_channels","channels":[
             {"channelId":18,"name":"state","memberId":21,"local":false}]})).is_err());
+        // A listed id whose allocation differs (finding 179: Cloudflare recycled it while the room
+        // connection was down) is not the channel this side has: closed, and the new one waits for
+        // the old one's stream to go.
+        client.signal(&json!({"type":"sfu_channels","full":true,"channels":[
+            {"channelId":16,"name":"state","memberId":23,"local":false},
+            {"channelId":18,"name":"events","memberId":21,"local":false}
+        ]})).unwrap();
+        assert!(client.channels.is_empty());
+        let waiting: Vec<(u16, u64, bool)> = client.waiting.iter().map(|w| (w.stream, w.member, w.state)).collect();
+        assert_eq!(waiting, vec![(16, 23, true), (18, 21, false)]);
+        assert_eq!(client.closing.len(), 3);
     }
 
     #[test]
@@ -1327,4 +1413,120 @@ mod tests {
     #[test]
     fn a_closed_subscriptions_stream_id_serves_the_next_one() { reuse_a_closed_stream_id(false); }
     #[test]
-    fn a_closed_subscriptions_stream_id_serves_the_next_one_reset_first() { reuse_a_closed_stream_id(true); }}
+    fn a_closed_subscriptions_stream_id_serves_the_next_one_reset_first() { reuse_a_closed_stream_id(true); }
+
+    /// Finding 179: the room connection drops while member 17's subscriptions close (it leaves, or
+    /// this game sits a race out) and Cloudflare gives their stream ids to the next subscriptions
+    /// at once: a newcomer's (member 21), or member 17's own again. The room's sfu_closed and
+    /// sfu_channels are lost with the connection; the rejoin's whole list names the ids again. The
+    /// channels on them must be the new ones: same ids, but a different member, or the same
+    /// allocation on a stream the SFU reset meanwhile.
+    fn rejoin_over_recycled_stream_ids(newcomer: bool) {
+        let (mut sfu, mut client) = LocalSfu::start();
+        sfu.channel(10, true);
+        sfu.channel(12, false);
+        let old = [sfu.channel(14, false), sfu.channel(16, true)];
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":10,"name":"state","memberId":7,"local":true}, {"channelId":12,"name":"events","memberId":7,"local":true},
+            {"channelId":14,"name":"events","memberId":17,"local":false}, {"channelId":16,"name":"state","memberId":17,"local":false}]})).unwrap();
+        let (mut text, mut frames) = (vec![], vec![]);
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && !(client.channels.iter().all(|c| client.rtc.channel(c.id).is_some()) && old.iter().all(|id| sfu.server.channel(*id).is_some())) {
+            sfu.pump(&mut client, &mut text, &mut frames);
+        }
+        for _ in 0..20 { sfu.pump(&mut client, &mut text, &mut frames); }
+        assert!(client.channels.iter().all(|c| c.opened), "every channel opened");
+        // The room connection is down: the SFU resets the old subscriptions' streams (that goes
+        // over the association, which stays up) and makes the new ones on the same ids.
+        for id in old { sfu.server.direct_api().close_data_channel(id); }
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until && [14, 16].iter().any(|s| client.rtc.direct_api().channel_id_by_sctp_stream_id(*s).is_some()) {
+            sfu.pump(&mut client, &mut text, &mut frames);
+        }
+        let member = if newcomer { 21 } else { 17 };
+        let mut new: [Option<ChannelId>; 2] = [None, None];
+        // Back in the room: the rejoin's whole list, then the next race with that member in slot 4.
+        client.signal(&json!({"type":"sfu_channels","full":true,"channels":[
+            {"channelId":10,"name":"state","memberId":7,"local":true}, {"channelId":12,"name":"events","memberId":7,"local":true},
+            {"channelId":14,"name":"events","memberId":member,"local":false}, {"channelId":16,"name":"state","memberId":member,"local":false}]})).unwrap();
+        client.signal(&json!({"type":"start","startAt":3000,"yourSlot":0,"players":[{"memberId":7,"slot":0},{"memberId":member,"slot":4}]})).unwrap();
+        text.clear();
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && (frames.is_empty() || text.iter().all(|m| m["type"] != "sfu_ready")) {
+            sfu.pump(&mut client, &mut text, &mut frames);
+            for (k, (stream, state)) in [(14u16, false), (16, true)].into_iter().enumerate() {
+                if new[k].is_none() && sfu.server.direct_api().channel_id_by_sctp_stream_id(stream).is_none() { new[k] = Some(sfu.channel(stream, state)); }
+            }
+            if let Some(id) = new[0] { if let Some(mut c) = sfu.server.channel(id) { let _ = c.write(true, &event(3000, 5)); } }
+        }
+        assert_eq!(frames.first(), Some(&vec![6, 4, 5]), "the new subscription's frames reach slot 4");
+        assert!(text.iter().any(|m| m["type"] == "sfu_ready" && m["race"] == 3000), "every racer's channels open: acknowledged");
+        let theirs: Vec<(u16, u64)> = client.channels.iter().filter(|c| !c.local).map(|c| (c.stream, c.member)).collect();
+        assert_eq!(theirs, vec![(14, member), (16, member)]);
+        assert!(client.orphans.is_empty() && client.rtc.is_alive());
+    }
+    /// Finding 179: the SFU's address lookup hangs (a slow resolver) while the send thread starts
+    /// new associations. The thread keeps polling (each attempt waits at most LOOKUP_WAIT and
+    /// fails), one lookup runs at a time, its answer serves the next attempt, and later attempts
+    /// take that address at once while their own fresh lookup hangs.
+    #[test]
+    fn a_hanging_address_lookup_never_holds_the_poll_thread() {
+        use std::sync::atomic::{AtomicU64, AtomicUsize};
+        // Lookup k hangs until the test lets k lookups answer.
+        let answers = Arc::new(AtomicUsize::new(0));
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let route = Arc::new(Route::new({
+            let (answers, lookups) = (answers.clone(), lookups.clone());
+            Arc::new(move || {
+                let k = lookups.fetch_add(1, Ordering::SeqCst) + 1;
+                while answers.load(Ordering::SeqCst) < k { std::thread::sleep(Duration::from_millis(5)); }
+                Ok(vec!["[::1]:443".parse().unwrap(), "127.0.0.1:443".parse().unwrap()])
+            })
+        }));
+        // The send thread: a poll every 2 ms, a new association every 500 ms.
+        let stop = Arc::new(AtomicBool::new(false));
+        let gap_max = Arc::new(AtomicU64::new(0));
+        let results: Arc<Mutex<Vec<(Duration, std::result::Result<SocketAddr, String>)>>> = Arc::default();
+        let poller = {
+            let (route, stop, gap_max, results) = (route.clone(), stop.clone(), gap_max.clone(), results.clone());
+            std::thread::spawn(move || {
+                let (mut last_poll, mut last_start) = (Instant::now(), Instant::now() - Duration::from_secs(1));
+                while !stop.load(Ordering::Acquire) {
+                    if last_start.elapsed() >= Duration::from_millis(500) {
+                        last_start = Instant::now();
+                        let got = route.address(LOOKUP_WAIT).map_err(|e| e.to_string());
+                        results.lock().unwrap().push((last_start.elapsed(), got));
+                    }
+                    gap_max.fetch_max(last_poll.elapsed().as_millis() as u64, Ordering::SeqCst);
+                    last_poll = Instant::now();
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            })
+        };
+        std::thread::sleep(Duration::from_millis(1600));
+        answers.store(1, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(1100));
+        answers.store(usize::MAX, Ordering::SeqCst);
+        stop.store(true, Ordering::Release);
+        poller.join().unwrap();
+        let results = results.lock().unwrap().clone();
+        assert!(gap_max.load(Ordering::SeqCst) < LOOKUP_WAIT.as_millis() as u64 + 150, "the poll thread was held {} ms", gap_max.load(Ordering::SeqCst));
+        let hung: Vec<_> = results.iter().take_while(|(_, r)| r.is_err()).collect();
+        assert!(hung.len() >= 3, "attempts while the lookup hung: {results:?}");
+        assert!(hung.iter().all(|(took, r)| *took < LOOKUP_WAIT + Duration::from_millis(100) && r.as_ref().unwrap_err().contains("still running")));
+        let found = &results[hung.len()..];
+        assert!(found.len() >= 2 && found.iter().all(|(_, r)| r.as_ref().ok() == Some(&"127.0.0.1:443".parse().unwrap())), "{results:?}");
+        // After the answer each attempt starts a fresh lookup (it hangs) and takes the last address at once.
+        assert!(found[1..].iter().all(|(took, _)| *took < Duration::from_millis(50)), "{results:?}");
+        assert_eq!(lookups.load(Ordering::SeqCst), 2, "one lookup at a time");
+        // A lookup that fails fails its attempt with the reason; nothing found earlier to fall back on.
+        let failing = Route::new(Arc::new(|| Err(std::io::Error::new(ErrorKind::Other, "no such host"))));
+        let err = failing.address(LOOKUP_WAIT).unwrap_err().to_string();
+        assert!(err.contains("no such host"), "{err}");
+    }
+
+    #[test]
+    fn a_rejoin_takes_a_recycled_stream_id_for_its_new_member() { rejoin_over_recycled_stream_ids(true); }
+    #[test]
+    fn a_rejoin_takes_a_recycled_stream_id_reset_meanwhile() { rejoin_over_recycled_stream_ids(false); }
+}

@@ -89,6 +89,12 @@ const CLEANUP_MAX_MS = 300_000;
     its connection ends, after 30 s); a session whose close failed belongs to a member who left or
     replaced it, and its game dropped that association, so it ends 30 s later anyway. */
 const SFU_CLEANUP_MS = TURN_TTL_S * 1000;
+/** A subscription whose close failed (Allocation.closeAt) is tried again by the subscription pass
+    on the CLEANUP_FIRST_MS schedule (5, 10, 20, 40 s), this many times. Then, if it still forwards a
+    live publication to a member outside the race (egress Realtime bills), that member's session is
+    reset: its game drops the association and Cloudflare ends the session with its connection,
+    whatever the API answers. One that leads nowhere live is forgotten (finding 179). */
+const CLOSE_RETRIES = 4;
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -1234,7 +1240,8 @@ export class Room extends DurableObject<Env> {
       }
     }
     if (me.sfu?.phase === "ready") {
-      this.send(ws, { type: "sfu_channels", full: true, channels: clientChannels(me.sfu.channels) });
+      // Not those still closing: the game was told they closed (finding 179).
+      this.send(ws, { type: "sfu_channels", full: true, channels: clientChannels(me.sfu.channels.filter((c) => c.closeAt == null)) });
       if (race && inRace && race.sfuReleased && me.sfuReadyRace === race.startAt) {
         this.send(ws, { type: "sfu_ready", race: race.startAt });
         me.releasedRace = race.startAt;
@@ -1286,7 +1293,7 @@ export class Room extends DurableObject<Env> {
   /** `sub` holds a live subscription to `pub`'s current publication: one made to its present
       session (a subscription to an earlier session of `pub` is stale, subscribePass closes it). */
   private subscribed(sub: Member, pub: Member): boolean {
-    return !!sub.sfu?.channels.some((c) => !c.local && c.memberId === pub.id && c.session === pub.sfu?.id);
+    return !!sub.sfu?.channels.some((c) => !c.local && c.memberId === pub.id && c.session === pub.sfu?.id && c.closeAt == null);
   }
 
   /** A subscriber and a publisher of `group` with no subscription between them yet, among those
@@ -1301,43 +1308,92 @@ export class Room extends DurableObject<Env> {
       session of theirs. */
   private staleChannels(sub: Member): Allocation[] {
     const st = this.state;
-    return (sub.sfu?.channels ?? []).filter((c) => !c.local && c.session !== st?.members.find((x) => x.id === c.memberId)?.sfu?.id);
+    return (sub.sfu?.channels ?? []).filter((c) => !c.local && c.closeAt == null && c.session !== st?.members.find((x) => x.id === c.memberId)?.sfu?.id);
   }
 
-  /** The subscription pass has work: a pair missing in the group, or a stale channel to close. */
+  /** `sub`'s subscriptions whose close failed and is due again (finding 179): those to try again
+      (CLOSE_RETRIES), those given up that lead to no live publication (forgotten), and whether one
+      given up still forwards a live one while `sub` is outside the group (its session is reset;
+      in the group it waits: a racer is not reset for a duplicate of a pair it receives anyway). */
+  private failedCloses(sub: Member, group: Member[] | null, now: number): { retry: Allocation[]; forget: Allocation[]; reset: boolean } {
+    const st = this.state;
+    const retry: Allocation[] = [], forget: Allocation[] = [];
+    let reset = false;
+    for (const c of sub.sfu?.channels ?? []) {
+      if (c.closeAt == null || c.closeAt > now) continue;
+      if ((c.closeTries ?? 0) <= CLOSE_RETRIES) retry.push(c);
+      else if (!st?.members.some((m) => m.id === c.memberId && m.sfu?.id === c.session)) forget.push(c);
+      else if (!group?.includes(sub)) reset = true;
+    }
+    return { retry, forget, reset };
+  }
+
+  /** The subscription pass has work: a pair missing in the group, a stale channel to close, or a
+      failed close due again. */
   private sfuWork(): boolean {
-    const group = this.sfuGroup();
+    const group = this.sfuGroup(), now = Date.now();
     return (!!group && !!this.missingSubscription(group)) ||
-      !!this.state?.members.some((x) => x.sfu?.phase === "ready" && this.staleChannels(x).length);
+      !!this.state?.members.some((x) => {
+        if (x.sfu?.phase !== "ready") return false;
+        const failed = this.failedCloses(x, group, now);
+        return this.staleChannels(x).length || failed.retry.length || failed.forget.length || failed.reset;
+      });
+  }
+
+  /** Closes subscriptions `channels` of `session`. Those that don't close stay on it marked
+      closing, tried again by the subscription pass (failedCloses), stored with the room so an
+      eviction keeps them (finding 179): forgotten, a member sitting races out kept receiving the
+      racers' frames until its session ended. */
+  private async closeSubscriptions(api: Realtime, session: SfuSession, channels: Allocation[]): Promise<void> {
+    try {
+      await api.close(session, channels);
+    } catch (error) {
+      const now = Date.now();
+      const left = channels.filter((c) => session.channels.includes(c));
+      for (const c of left) {
+        c.closeTries = (c.closeTries ?? 0) + 1;
+        c.closeAt = now + CLEANUP_FIRST_MS * 2 ** (c.closeTries - 1);
+      }
+      console.warn(`Realtime close failed; ${left.length} subscriptions tried again later`, error instanceof Error ? error.message.slice(0, 80) : "unknown");
+    }
   }
 
   /** Subscribes every published member of the group to every other one's publication it lacks,
       each endpoint told only its own allocations, and first closes stale channels (and, at a race's
       start, the subscriptions of members outside it: a member who sits a race out receives
-      nothing). Each subscriber's calls run SUBSCRIBE_PARALLEL at once (finding 177, question C),
-      subscribers in parallel. Leaves and kicks are not queued with this, so the group is read
+      nothing) and tries failed closes again (failedCloses). Each subscriber's calls run
+      SUBSCRIBE_PARALLEL at once (finding 177, question C), subscribers in parallel. Leaves and kicks are not queued with this, so the group is read
       again before every call: a departure during one can't make it skip anyone (release review
       round 2, finding 158). Rounds repeat until nothing is missing. Returns the subscribers whose
-      call failed: their session is failed (no second attempt), the caller ends it. */
+      call failed, or whose subscriptions don't close: their session is failed (no second
+      attempt), the caller ends it. */
   private async subscribeGroup(api: Realtime, prune: boolean): Promise<{ id: number; session: SfuSession }[]> {
     const failed: { id: number; session: SfuSession }[] = [];
     const st = this.state;
     if (!st) return failed;
-    // Close what leads nowhere, and what a member outside the race holds.
-    const group = this.sfuGroup();
+    // Close what leads nowhere, and what a member outside the race holds; try failed closes again.
+    const group = this.sfuGroup(), now = Date.now();
     await Promise.all(st.members.filter((x) => x.sfu?.phase === "ready").map(async (sub) => {
       const session = sub.sfu!;
       const outside = prune && st.race && group && !group.includes(sub);
-      const close = outside ? session.channels.filter((c) => !c.local) : this.staleChannels(sub);
-      if (!close.length) return;
-      try {
-        await api.close(session, close);
-      } catch (error) {
-        console.warn("Realtime close failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-        session.channels = session.channels.filter((c) => !close.includes(c));  // closes with its session
+      const fresh = outside ? session.channels.filter((c) => !c.local && c.closeAt == null) : this.staleChannels(sub);
+      const { retry, forget, reset } = this.failedCloses(sub, group, now);
+      if (forget.length) {
+        console.warn(`Realtime close given up for ${forget.length} subscriptions to no live publication`);
+        session.channels = session.channels.filter((c) => !forget.includes(c));
       }
+      if (reset) {
+        console.warn(`room ${st.code}: member ${sub.id}'s subscriptions don't close; its session is reset`);
+        session.phase = "failed";
+        if (!failed.some(f => f.session === session)) failed.push({ id: sub.id, session });
+        return;
+      }
+      const close = [...fresh, ...retry];
+      if (!close.length) return;
+      await this.closeSubscriptions(api, session, close);
+      // Told either way, once: the room took them away.
       const peer = this.sockets.get(sub.id);
-      if (peer && sub.sfu === session) this.send(peer, { type: "sfu_closed", channelIds: close.map((c) => c.channelId) });
+      if (fresh.length && peer && sub.sfu === session) this.send(peer, { type: "sfu_closed", channelIds: fresh.map((c) => c.channelId) });
     }));
     for (let round = 0; round <= MAX_MEMBERS; round++) {
       const group = this.sfuGroup();
@@ -1467,8 +1523,9 @@ export class Room extends DurableObject<Env> {
   /** Closes a member's SFU session and the others' subscriptions to it, and revokes its TURN
       credentials. Never throws, and one failure doesn't stop the rest (release review round 2):
       a session that doesn't close goes to the pending cleanup, retried by the alarm after the
-      member is gone; a subscription that doesn't close is forgotten (it leads to a closed session,
-      and its subscriber's session closes it with the rest). Its subscribers hear sfu_closed. */
+      member is gone; a subscription that doesn't close stays marked closing on its subscriber's
+      session and is tried again by the subscription pass (finding 179). Its subscribers hear
+      sfu_closed. */
   private async clearSfu(member: Member): Promise<void> {
     const api = new Realtime(this.env as Env & SfuSecrets);
     const session = member.sfu;
@@ -1487,14 +1544,9 @@ export class Room extends DurableObject<Env> {
     await Promise.all([...(this.state?.members ?? [])].map(async (other) => {
       const sub = other.sfu;
       if (other.id === member.id || !sub) return;
-      const channels = sub.channels.filter(c => !c.local && c.memberId === member.id);
+      const channels = sub.channels.filter(c => !c.local && c.memberId === member.id && c.closeAt == null);
       if (!channels.length) return;
-      try {
-        await api.close(sub, channels);
-      } catch (error) {
-        console.warn("Realtime close failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-        sub.channels = sub.channels.filter((c) => !channels.includes(c));
-      }
+      await this.closeSubscriptions(api, sub, channels);
       // Told either way: the publication is gone for it (the room said so).
       const peer = this.sockets.get(other.id);
       if (peer && other.sfu === sub) this.send(peer, { type: "sfu_closed", channelIds: channels.map(c => c.channelId) });
