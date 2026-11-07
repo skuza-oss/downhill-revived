@@ -40,6 +40,10 @@ str0m kept their ids held, and the new channels on them never opened (`probe_par
 in `port/render/net/src/probe.rs`: from the second round on; with the patch 400 of 400 calls and
 every channel worked over 20 rounds).
 
+One more, in the tests only: `association_test.rs` uses addresses of the documentation range
+192.0.2.0/24 (RFC 5737) where upstream's tests use private 192.168.1.x addresses (the
+repository's checks refuse LAN addresses in added lines). The tests only parse them.
+
 ## Reapplying on an update
 
 1. Replace this directory with the new published crate (Cargo.toml, licences, README, src,

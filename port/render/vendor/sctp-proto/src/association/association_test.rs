@@ -4625,7 +4625,7 @@ fn test_out_of_band_association_creation() {
     let local_init = ChunkInit::unmarshal(&local_init_bytes).unwrap();
     let remote_init = ChunkInit::unmarshal(&remote_init_bytes).unwrap();
 
-    let remote_addr: SocketAddr = "192.168.1.1:5000".parse().unwrap();
+    let remote_addr: SocketAddr = "192.0.2.1:5000".parse().unwrap();
 
     let assoc = Association::new_with_out_of_band_init(
         local_config.clone(),
@@ -4701,7 +4701,7 @@ fn test_out_of_band_association_stream_negotiation() {
     assert_eq!(remote_init.num_outbound_streams, u16::MAX);
     assert_eq!(remote_init.num_inbound_streams, u16::MAX);
 
-    let remote_addr: SocketAddr = "192.168.1.1:5000".parse().unwrap();
+    let remote_addr: SocketAddr = "192.0.2.1:5000".parse().unwrap();
 
     let assoc = Association::new_with_out_of_band_init(
         config.clone(),
@@ -4739,7 +4739,7 @@ fn test_out_of_band_connected_event() {
     let local_init = ChunkInit::unmarshal(&local_init_bytes).unwrap();
     let remote_init = ChunkInit::unmarshal(&remote_init_bytes).unwrap();
 
-    let remote_addr: SocketAddr = "192.168.1.1:5000".parse().unwrap();
+    let remote_addr: SocketAddr = "192.0.2.1:5000".parse().unwrap();
 
     let mut assoc = Association::new_with_out_of_band_init(
         local_config.clone(),
@@ -4772,8 +4772,8 @@ fn test_out_of_band_symmetric_setup() {
     let init_a = ChunkInit::unmarshal(&init_a_bytes).unwrap();
     let init_b = ChunkInit::unmarshal(&init_b_bytes).unwrap();
 
-    let addr_a: SocketAddr = "192.168.1.1:5000".parse().unwrap();
-    let addr_b: SocketAddr = "192.168.1.2:5000".parse().unwrap();
+    let addr_a: SocketAddr = "192.0.2.1:5000".parse().unwrap();
+    let addr_b: SocketAddr = "192.0.2.2:5000".parse().unwrap();
 
     // Create association A (local=A, remote=B)
     let assoc_a = Association::new_with_out_of_band_init(
@@ -4836,7 +4836,7 @@ fn test_out_of_band_with_forward_tsn_support() {
         "Generated INIT should include ForwardTSN support"
     );
 
-    let remote_addr: SocketAddr = "192.168.1.1:5000".parse().unwrap();
+    let remote_addr: SocketAddr = "192.0.2.1:5000".parse().unwrap();
 
     let assoc = Association::new_with_out_of_band_init(
         local_config.clone(),
@@ -4869,7 +4869,7 @@ fn test_out_of_band_initial_tsn_zero_wrap() {
     // Generate a fresh local init for the association
     let actual_local_init_bytes = generate_snap_token(&config).unwrap();
     let local_init = ChunkInit::unmarshal(&actual_local_init_bytes).unwrap();
-    let remote_addr: SocketAddr = "192.168.1.1:5000".parse().unwrap();
+    let remote_addr: SocketAddr = "192.0.2.1:5000".parse().unwrap();
 
     let assoc = Association::new_with_out_of_band_init(
         config.clone(),
@@ -4901,7 +4901,7 @@ fn test_out_of_band_rwnd_negotiation() {
     let local_init = ChunkInit::unmarshal(&local_init_bytes).unwrap();
     let remote_init = ChunkInit::unmarshal(&remote_init_bytes).unwrap();
 
-    let remote_addr: SocketAddr = "192.168.1.1:5000".parse().unwrap();
+    let remote_addr: SocketAddr = "192.0.2.1:5000".parse().unwrap();
 
     let assoc = Association::new_with_out_of_band_init(
         local_config.clone(),
