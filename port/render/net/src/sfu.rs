@@ -42,8 +42,10 @@ pub const DIRECT_TIMEOUT: Duration = Duration::from_millis(2000);
 /// This long after its own association connected, with its own channels open, a game says
 /// sfu_ready all the same (finding 175). The room releases the race only when every connected
 /// racer is subscribed both ways, so nothing is lost: the missing racer has nothing published.
-/// Longer than a TURN setup (about 5 s), shorter than the room's 15 s SFU_CONNECT_MS.
-pub const READY_TIMEOUT: Duration = Duration::from_millis(10_000);
+/// Longer than another racer's TURN setup (2.9-3.2 s from the answer, measured in finding 175),
+/// and with this game's own connection (about 1 s after the start) before the room's 10 s
+/// SFU_CONNECT_MS.
+pub const READY_TIMEOUT: Duration = Duration::from_millis(8_000);
 /// The relay in use: the TURN client, its TLS stream and the relayed address once allocated.
 struct Relay {
     client: turn::Client,
