@@ -267,7 +267,7 @@ int main(void)
         const char *start = "{\"type\":\"start\",\"yourSlot\":1,\"startAt\":5000,\"serverTime\":2000,\"players\":["
             "{\"slot\":0,\"memberId\":0,\"name\":\"A\"},{\"slot\":1,\"memberId\":1,\"name\":\"Test\"}]}";
         const char *back_in = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"RACE22\",\"serverTime\":9000,"
-            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"race\":{\"startAt\":5000,\"sfu\":\"ready\"}}";
+            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"sfu\":\"ready\",\"race\":{\"startAt\":5000}}";
         const char *no_race = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"RACE22\",\"serverTime\":9000,"
             "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\"}";
         const char *out = "{\"type\":\"room\",\"phase\":\"racing\",\"members\":[{\"id\":1,\"name\":\"Test\",\"inRace\":false}]}";
