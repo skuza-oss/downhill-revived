@@ -1,10 +1,10 @@
 # 175: online follow-ups after 0.7.12 (rejoin in a race, setup that never takes a race down, TURN check, clock, flood limit)
 
-Status: in progress
+Status: current
 
 Branch `fix/online-followups` from `main` 9298a71, started 2026-11-07. Local main merged in three
-times for the lead's production hotfixes (b0812d6 SFU_CONNECT_MS at 1246a15; 0d6eee3 at 6fd2a5d;
-637f1dc, the coalesced subscription pass, with hotfix 3 reverted, at ee9b074). 174 is taken by
+times for the lead's production hotfixes (b0812d6 SFU_CONNECT_MS at 1246a15; 0d6eee3 at 8c36cf4;
+637f1dc, the coalesced subscription pass, with hotfix 3 reverted, at 640e018). 174 is taken by
 `perf/mali-gpu`.
 
 ## Goal and acceptance
@@ -33,20 +33,23 @@ traces equal 9298a71's.
 - [x] Item 1, server: bf6f1f1; tests `online/server/test/race-rejoin.test.ts` (5).
 - [x] Item 1, client: ddfe0fc; tests in `port/net/test_session.c`, `test_loopback.c`, Rust
       `a_rejoins_full_channel_list_reconciles`.
-- [x] A racer that never connects: 8715952 (client `sfu_ready` fallback), 68cc24d (8 s), f7734cd
-      (SFU_CONNECT_MS 15 → 10 s), 480e0ae (a racer's own session and TURN credentials off the
+- [x] A racer that never connects: 8715952 (client `sfu_ready` fallback), a648ecb (8 s), f79f4cc
+      (SFU_CONNECT_MS 15 → 10 s), 60b72f2 (a racer's own session and TURN credentials off the
       room's SFU queue).
-- [x] Room SHCF93: 8d7c005 (410 close = closed, cleanup off the alarm, reconcile per race, release
-      asked again each tick), ee9b074 (the coalesced pass's repeat runs for the current race),
-      2bf98fd (the release logged once); tests `online/server/test/release.test.ts` (6).
-- [x] My batched subscription (90830c0) reverted (290b9c7): the lead's hotfix 3
+- [x] Room SHCF93: 6c98e33 (410 close = closed, cleanup off the alarm, reconcile per race, release
+      asked again each tick), 640e018 (the coalesced pass's repeat runs for the current race),
+      f50b2c3 (the release logged once); tests `online/server/test/release.test.ts` (9).
+- [x] My batched subscription (66e0fa8) reverted (846b930): the lead's hotfix 3
       did the same, was slower in production and was reverted on main for hotfix 4.
-- [x] Test switches: 29aa442 `DHD_NET_TEST_PONG_DELAY`, bd4a473 `DHD_NET_TEST_DROP`, c3d713d
+- [x] Test switches: 29aa442 `DHD_NET_TEST_PONG_DELAY`, bd4a473 `DHD_NET_TEST_DROP`, 4dd3830
       `DHD_NET_SFU_TURN=0`, all in TESTING.md.
 - [x] Item 6: ac2c9b6. Item 5: 32980fa. Item 4: the draft (outside the repository).
 - [x] Item 2 and 3: PC↔Mac runs T1, T2 (TURN), U1, U2 (UDP, forced and natural drops, a racer
       that never connects), K-lane, K-base (clock), M4 (4 racers); M5 (4 racers, final server).
-- [ ] `check.py port`, `check.py server`, state traces.
+- [x] bc7f6bf: the release stored and sent once per racer (the real SHCF93 cause, the lead's
+      reading); f9fbf1b merges hotfix 5.
+- [x] `check.py port` and `check.py server` pass (151 server tests); boot and race state traces
+      equal the base build's (600 and 5000 rows).
 
 ## Item 1: a room connection lost in a race
 
@@ -105,7 +108,7 @@ those races finished with the same results on both machines.
 ## A racer whose setup fails, and the start wait
 
 - **Server:** the lead's b0812d6 (a racer not connected by SFU_CONNECT_MS leaves alone), kept.
-- **Client fallback (8715952, 68cc24d):** a game said `sfu_ready` only with every racer's channels,
+- **Client fallback (8715952, a648ecb):** a game said `sfu_ready` only with every racer's channels,
   so on a server without SFU_CONNECT_MS one broken racer hung every game until the 25 s deadline
   took the whole race out. Now, READY_TIMEOUT (8 s) after its own association connected with its
   own channels open, a game says `sfu_ready` anyway. The room still releases only when every
@@ -118,13 +121,13 @@ those races finished with the same results on both machines.
   show the same picture, so it can't be made to look alive from there. Making it yield needs a
   new hold in the game's load step before the race build (like `hle_online_countdown_hold`); not
   done here (a game-code patch with its own state-trace risk). Instead the wait is shorter:
-- **SFU_CONNECT_MS 15 → 10 s (f7734cd).** Setups measured on 2026-11-07 PC↔Mac, from the answer
+- **SFU_CONNECT_MS 15 → 10 s (f79f4cc).** Setups measured on 2026-11-07 PC↔Mac, from the answer
   to connected: UDP 0.69-1.46 s (92 setups, median 0.89), TURN/TLS 2.94-3.22 s (5). With the
-  answer itself well under a second when a racer's `sessions/new` doesn't queue (480e0ae), that is
+  answer itself well under a second when a racer's `sessions/new` doesn't queue (60b72f2), that is
   at most about 4 s after the start; 10 s keeps 2.5 times that. Measured frozen wait with a racer
   that never connects: about 11 s at 15 s (T2, every race on both machines), about 6 s at 10 s
   (U1, U2).
-- **A racer's own setup off the room's SFU queue (480e0ae).** Every `sfu_*` message ran in one
+- **A racer's own setup off the room's SFU queue (60b72f2).** Every `sfu_*` message ran in one
   queue per room, so in a full room the last racers' `sessions/new` (0.25-0.40 s each in
   production) and a TURN racer's credentials waited behind the others' publications and
   subscriptions. A racer's first session of a race and its TURN credentials touch nothing of the
@@ -137,7 +140,7 @@ Production's Workers Logs (the lead's read-only query), 2026-11-07 02:28-02:36: 
 ("setup after 68271 ms: 0/SA:ready 1/SA:ready 2/SA:ready") instead of at 15 s, another at 206 s,
 and "released" lines only at 222 s, after the lead's deploy reset the room (02:35:52).
 
-- **The cause (the lead's reading, confirmed in the code, 35fe555):** `releaseSfu` set
+- **The cause (the lead's reading, confirmed in the code, bc7f6bf):** `releaseSfu` set
   `race.sfuReleased` and never saved it, nor did the setup check save its own result. The race was
   most likely released about 3 s after its start; SHCF93's race began before hotfix 2 added the
   "released" log line, so that release left no line. When the object was evicted and loaded again
@@ -148,17 +151,17 @@ and "released" lines only at 222 s, after the lead's deploy reset the room (02:3
   the release is logged once, and a retire sends `left` before releasing the rest. Tests: after an
   eviction no setup check and no second `sfu_ready`; a restarted racer released again alone (all
   fail without the fix).
-- **My first reading was wrong for this room** (8d7c005's message): I took the 68 s line for a
+- **My first reading was wrong for this room** (6c98e33's message): I took the 68 s line for a
   release held by a reconcile that an older race's swallowed. That shape exists (one flag for any
   race; hotfix 4's pass had it too: its repeat ended on the race it was first asked for), and
-  8d7c005 and ee9b074 remove it (a reconcile and a pass serve the current race and re-check the
+  6c98e33 and 640e018 remove it (a reconcile and a pass serve the current race and re-check the
   release; every alarm tick asks for the release while it hasn't come), with tests that fail
   without them. But nothing shows it happened in SHCF93.
-- **Real in that window, and fixed (8d7c005):** the room retried `datachannels/close` of gone
+- **Real in that window, and fixed (6c98e33):** the room retried `datachannels/close` of gone
   sessions every 5.4 s (410 each time) from the pending cleanup, on the SFU queue, and the alarm
   awaited each pass. A 410/404 close now counts as closed, and the cleanup pass runs in the
   background, one at a time (test: the alarm returns at once while a cleanup call hangs).
-- Also (2bf98fd, folded into 35fe555): "released" bursts like 203945 ms for 1-5 racers (room
+- Also (f50b2c3, folded into bc7f6bf): "released" bursts like 203945 ms for 1-5 racers (room
   UXJ2ZB) were these repeats, not late releases.
 - Hotfix 4's pass, tested (the lead's request): six racers connecting 20 ms apart get every ordered
   pair subscribed once and none twice (30 calls), and are released.
@@ -168,7 +171,7 @@ and "released" lines only at 222 s, after the lead's deploy reset the room (02:3
 All on 2026-11-07 between this PC and the M1 Mac on the same home connection, through a
 temporary test Worker (this branch's server, rate limiters on, no D1), deleted
 afterwards; the method of finding 169's PC↔Mac report (a local copy of run D's
-driver with a third racer). Lane build 68cc24d (PC and Mac; T1 and T2 at c3d713d, the same client
+driver with a third racer). Lane build a648ecb (PC and Mac; T1 and T2 at 4dd3830, the same client
 but READY_TIMEOUT 10 s and SFU_CONNECT_MS 15 s). PC game headless, one game on the PC (the owner
 was gaming). "Behind" and "distance" are `puppet_lag.py` per race across the two machines
 (`lag_cross.py`); the Mac's view in T2 and U2 matched only 256-385 steps (its first race had a
@@ -185,8 +188,10 @@ windows, worst window in brackets.
 | | | Mac | 16/37/60 (304) | 1 of 8 | 2.8 | 0/4/13 | 0.11/0.58/1.39 | | 1 forced at setup / 1 |
 | U2, Mac hosts | 3 (+NOCONN), UDP | PC | 10/22/28 (895) | 1 of 5 | 2.5 | 0/4/12 | 0.12/0.88/5.37 | 4 of 4 | 1 forced mid-race / 1 |
 | | | Mac | 32/112/236 (1001) | 2 of 6 | 6.7 | - | - | | 0 |
-| M4, PC hosts | 4 (2 bots), UDP | | | | | | | 3 of 3 | 0 |
-| M5, PC hosts | 4 (2 bots), Mac on TURN, final server | | M5_ROW | | | | | | |
+| M4, PC hosts | 4 (2 bots), UDP | PC | 37/50/65 (71) | 0 of 8 | 0.6 | | | 3 of 3 | 1 natural / 1 |
+| | | Mac | 27/47/67 (847) | 1 of 9 | 3.2 | | | | 1 natural / 1 |
+| M5, PC hosts | 4 (2 bots), Mac on TURN | PC | 26/40/47 (69) | 0 of 7 | 0.0 | | | 3 of 3 (+1 of 2 racers) | 0 |
+| | | Mac | 34/45/48 (55) | 0 of 9 | 0.2 | | | | 0 |
 
 - TURN carried every race of T1 and T2: the Mac connected through TURN/TLS 2.9-3.2 s after the
   answer each time (UDP blocked by `DHD_NET_SFU_UDP=0`). No regression from finding 173's
@@ -196,8 +201,15 @@ windows, worst window in brackets.
   `ready without every racer's channels` each time.
 - The bad windows (p99 over 300 ms) are single pauses on one direction, with the room's ping
   spiking in the same window (U2 race 3: 301 ms); U2's drop race itself stayed at p99 294 ms.
-- M4: 8 subscription calls (one per pair, before hotfix 4's pass) of 264-386 ms, all done within
-  1.4 s for 4 racers. M5_NOTE
+- M4 (server of 02:52, one call per pair): 8 subscription calls of 264-386 ms, all done within
+  1.4 s for 4 racers. M5 (server at f50b2c3, hotfix 4's pass, a racer's own setup off the queue):
+  the Mac on TURN connected 2.99-3.20 s after its answer and the PC on UDP 0.81-0.86 s, in rooms
+  of four; the subscription calls the tail kept took 0.28-0.90 s. Every race started on both
+  machines after the usual 1.5 s countdown wait. `wrangler tail` sampled the logs (no "released"
+  lines kept), so the release moments themselves are not measured here; production's Workers
+  Logs carry them now (logged once since f50b2c3).
+- Natural room drops: U1 (the PC, mid-race, a route change) and M4 (both machines): each rejoined
+  and raced on.
 
 ## Item 3: the shared clock under a slow one-way path
 
@@ -270,3 +282,27 @@ switch cherry-picked (K-base, both machines; local commit d1edcc1 on a temporary
   come from the clients' logs and the few calls it kept.
 
 ## Result
+
+Twenty-one commits on `fix/online-followups` after the reservation (the list under Progress), and
+five merges of local main for the lead's hotfixes 1-5 (hotfix 3 came and went).
+
+- **Item 1:** a room connection lost at any phase no longer loses the race: the game races on over
+  the SFU and rejoins; the room keeps its seat for 20 s. Shown across machines with forced drops
+  at the SFU setup (U1) and mid-race (U2) and with three natural drops (U1, M4). The guard was not
+  involved in runs A and C (no rejoin was attempted). A racer whose setup fails no longer takes the
+  others down (client fallback, SFU_CONNECT_MS 10 s, a racer's own setup off the room's queue); the
+  others' frozen load-screen wait went from about 11 s to about 6 s. Room SHCF93's "late release"
+  was an unsaved release (fixed); the 410 close retries and an older race's pass swallowing the
+  current race's are fixed too.
+- **Item 2:** TURN carried every race both ways with no regression from finding 173's patch (T1,
+  T2, M5); UDP both ways (U1, U2, M4); results identical on both machines in every shared race.
+- **Item 3:** with the Mac's round trip at 168-186 ms (normal 43-53), ages on arrival stayed
+  symmetric within the paths' own asymmetry and no puppet was drawn ahead or behind, on this build
+  and on the base (which already has the rule).
+- **Items 4-6:** the Cloudflare draft, worktree_setup off the system drive, the flood limit that
+  keeps the newest.
+
+Open:
+- The start wait could be made non-blocking only with a hold in the game's load step before the
+  race build (a game-code patch); not done.
+- `race_rejoin` needs a release to reach players; old clients keep the old behaviour.
