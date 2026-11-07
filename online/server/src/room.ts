@@ -1375,8 +1375,10 @@ export class Room extends DurableObject<Env> {
     const racers = st.members.filter(m => this.inRace(st, m.id));
     if (!racers.length || !racers.every(m => m.sfuRace === race.startAt && m.sfuReady && m.sfu?.phase === "ready")) return;
     if (this.missingSubscription(race)) return this.queueReconcile(race);
+    // Logged once: a racer finishing or leaving releases the rest again, which logged "released"
+    // again with fewer racers long after the real release (finding 175).
+    if (!race.sfuReleased) console.log(`room ${st.code}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
     race.sfuReleased = true;
-    console.log(`room ${st.code}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
     for (const member of racers) {
       const peer = this.sockets.get(member.id);
       if (peer) this.send(peer, {type:"sfu_ready"});
