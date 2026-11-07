@@ -1269,8 +1269,6 @@ export class Room extends DurableObject<Env> {
     // not risked). One API call at a time made rooms of 4+ players miss SFU_SETUP_MS on 0.7.12:
     // every racer connected, none got all its channels in 25 s (2026-11-07 logs). Rounds repeat
     // until no pair is missing; a departure during a call just drops that pair (racers re-read).
-    // Since finding 175 each subscriber asks for all its missing publishers in one call (Cloudflare's
-    // batched datachannels/new), so a 10-racer setup costs one call per racer, not nine.
     for (let round = 0; round <= MAX_MEMBERS; round++) {
       const racers = this.sfuRacers(race);
       const work = new Map<Member, Member[]>();
@@ -1283,18 +1281,20 @@ export class Room extends DurableObject<Env> {
       if (!work.size) break;
       let progress = false;
       await Promise.all([...work].map(async ([sub, pubs]) => {
-        const now = this.sfuRacers(race);
-        if (!now.includes(sub)) return;
-        const live = pubs.filter(pub => now.includes(pub));
-        try {
-          const channels = await api.subscribeAll(sub.sfu!, live.map(pub => ({ memberId: pub.id, session: pub.sfu! })));
-          if (channels.length) progress = true;
-          const peer = this.sockets.get(sub.id);
-          if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
-        } catch (error) {
-          console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-          if (sub.sfu) sub.sfu.phase = "failed";
-          failed.push(sub.id);
+        for (const pub of pubs) {
+          const now = this.sfuRacers(race);
+          if (!now.includes(sub) || !now.includes(pub)) continue;
+          try {
+            const channels = await api.subscribe(sub.sfu!, pub.id, pub.sfu!);
+            if (channels.length) progress = true;
+            const peer = this.sockets.get(sub.id);
+            if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
+          } catch (error) {
+            console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+            if (sub.sfu) sub.sfu.phase = "failed";
+            failed.push(sub.id);
+            return;
+          }
         }
       }));
       if (!progress) break;

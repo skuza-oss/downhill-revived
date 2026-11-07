@@ -63,9 +63,6 @@ export class RealtimeError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-/** A publisher a subscriber asks for (subscribeAll). */
-export interface Publisher { memberId: number; session: SfuSession; }
-
 export class Realtime {
   constructor(private secrets: SfuSecrets, private request: typeof fetch = (input, init) => fetch(input, init)) {}
   private async call(path: string, body?: unknown, method = "POST"): Promise<Json> {
@@ -132,38 +129,9 @@ export class Realtime {
     return allocations;
   }
   async subscribe(session: SfuSession, memberId: number, publisher: SfuSession): Promise<Allocation[]> {
-    return this.subscribeAll(session, [{ memberId, session: publisher }]);
-  }
-  /** Subscribes `session` to every publisher it lacks in ONE datachannels/new call (finding 175):
-      an entry per publisher and policy, each with that publisher's sessionId (Cloudflare's batch:
-      all remote, publishers may differ). The answer's items are matched by name and sessionId, or
-      by position when an item names no session. Successful allocations are kept (teardown closes
-      them) even when another item failed; then it throws, as one subscription failing did. */
-  async subscribeAll(session: SfuSession, publishers: Publisher[]): Promise<Allocation[]> {
-    if (session.phase !== "ready") return [];
-    const wanted = publishers.filter((p) => p.session.phase === "ready" &&
-      !session.channels.some(x => !x.local && x.memberId === p.memberId));
-    if (!wanted.length) return [];
-    const entries = wanted.flatMap((p) => policies.map((policy) => ({ p, policy })));
-    const r = await this.call(`sessions/${session.id}/datachannels/new`, { dataChannels: entries.map(({ p, policy }) => ({
-      ...policy, location: "remote", sessionId: p.session.id,
-    })) });
-    const items = r.dataChannels as Json[];
-    if (!Array.isArray(items)) throw new Error("Missing channels");
-    const allocations: Allocation[] = [];
-    let failed = false;
-    entries.forEach(({ p, policy }, i) => {
-      const item = items.find(x => x.dataChannelName === policy.dataChannelName && x.sessionId === p.session.id) ??
-        (items[i] && items[i].sessionId === undefined && items[i].dataChannelName === policy.dataChannelName ? items[i] : undefined);
-      if (!item || item.errorCode || !Number.isInteger(item.id) || Number(item.id) < 0 || Number(item.id) > 65534) {
-        failed = true;
-        return;
-      }
-      const allocation = { memberId: p.memberId, name: policy.dataChannelName, channelId: Number(item.id), local: false };
-      allocations.push(allocation);
-      session.channels.push(allocation);
-    });
-    if (failed) throw new Error("Channel allocation failed");
+    if (session.phase !== "ready" || publisher.phase !== "ready") return [];
+    if (session.channels.some(x => !x.local && x.memberId === memberId)) return [];
+    const allocations = await this.allocate(session, memberId, false, publisher.id);
     return allocations;
   }
   private async allocate(session: SfuSession, memberId: number, local: boolean, publisher?: string): Promise<Allocation[]> {
