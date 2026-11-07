@@ -140,6 +140,23 @@ pub fn blend_operation(d3d: u32) -> Option<wgpu::BlendOperation> {
     }
 }
 
+/// A draw's blend key and colour write mask without a blend that keeps the colour: Cs * 0 + Cd * 1
+/// (or Cd * 1 - Cs * 0) leaves every colour channel as it was, so the draw is the same without
+/// blending and with only its alpha channel written (the alpha blend is One / Zero, a plain write).
+/// Exact: a UNORM target clamps Cs to [0, 1] before blending, so Cs * 0 is 0. The GS makes it
+/// with A = B ((Cs - Cs) * As + Cd, native_blend), a draw that only writes Z or alpha. PowerVR
+/// Rogue's driver (1.13), which blends in the fragment program, does not create that pipeline
+/// (finding 176). A draw left with no channel and no Z write draws nothing (`render.rs` skips it).
+pub fn without_kept_colour(blend_key: u32, mask: u32) -> (u32, u32) {
+    let (src, dst, op) = (blend_key >> 1 & 31, blend_key >> 6 & 31, blend_key >> 11 & 7);
+    // D3D11 ZERO (1) and ONE (2); operations 0 and 1 are Add, 3 ReverseSubtract (blend_operation).
+    if blend_key & 1 != 0 && src == 1 && dst == 2 && matches!(op, 0 | 1 | 3) {
+        (0, mask & 8)
+    } else {
+        (blend_key, mask)
+    }
+}
+
 /// The depth function of a key's depth field (0-4: never, always, gequal, greater, equal; 5-7
 /// always).
 fn depth_compare(function: u32) -> wgpu::CompareFunction {
@@ -862,7 +879,26 @@ pub(crate) mod gputimes {
 
 #[cfg(test)]
 mod tests {
-    use super::spec;
+    use super::{spec, without_kept_colour};
+
+    /// Cs * 0 + Cd * 1 (and Cd * 1 - Cs * 0) loses its blend and its colour channels; every other
+    /// blend stays as it is.
+    #[test]
+    fn kept_colour_is_not_blended() {
+        let key = |src: u32, dst: u32, op: u32| 1 | src << 1 | dst << 6 | op << 11;
+        assert_eq!(without_kept_colour(key(1, 2, 1), 15), (0, 8));
+        assert_eq!(without_kept_colour(key(1, 2, 1), 7), (0, 0));
+        assert_eq!(without_kept_colour(key(1, 2, 0), 7), (0, 0));
+        assert_eq!(without_kept_colour(key(1, 2, 3), 15), (0, 8));
+        // Cs * 0 - Cd is not Cd; other factors read Cs.
+        assert_eq!(without_kept_colour(key(1, 2, 2), 7), (key(1, 2, 2), 7));
+        assert_eq!(without_kept_colour(key(1, 6, 1), 7), (key(1, 6, 1), 7));
+        assert_eq!(without_kept_colour(key(2, 2, 1), 7), (key(2, 2, 1), 7));
+        assert_eq!(without_kept_colour(key(5, 6, 1), 15), (key(5, 6, 1), 15));
+        // Min and Max ignore the factors; no blend stays no blend.
+        assert_eq!(without_kept_colour(key(1, 2, 4), 7), (key(1, 2, 4), 7));
+        assert_eq!(without_kept_colour(1 << 1 | 2 << 6, 7), (1 << 1 | 2 << 6, 7));
+    }
 
     /// `spec` keeps only what the draw's path reads, so draws that differ elsewhere share a pipeline.
     #[test]
