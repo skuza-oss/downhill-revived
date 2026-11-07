@@ -411,6 +411,15 @@ export class Room extends DurableObject<Env> {
 
     if (m.type.startsWith("sfu_")) {
       if (m.type === "sfu_connected" && st.race && me.sfuRace === st.race.startAt) me.sfuConnectedRace = st.race.startAt;
+      if (m.type === "sfu_connected") {
+        // A racer's publish touches only its own session: in parallel with the others' (in the
+        // queue, 7 racers' publishes took 6 s one after another on 2026-11-07, which with the
+        // subscriptions after them missed SFU_SETUP_MS). Its offer was answered in the queue
+        // before the game could send this.
+        const failed = await this.onSfu(ws, me, m).catch(() => undefined);
+        if (failed) await this.retireSfu(failed.ids, failed.startAt);
+        return;
+      }
       // Serialize across external awaits without holding the DO input gate.
       const run = this.sfuQueue.then(() => this.onSfu(ws, me, m));
       this.sfuQueue = run.then(() => {}, () => {});
