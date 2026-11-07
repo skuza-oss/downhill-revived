@@ -431,13 +431,14 @@ export class Room extends DurableObject<Env> {
 
     if (m.type.startsWith("sfu_")) {
       if (m.type === "sfu_connected" && st.race && me.sfuRace === st.race.startAt) me.sfuConnectedRace = st.race.startAt;
-      // Serialize across external awaits without holding the DO input gate. A racer's own TURN
-      // credentials and its first session of the race touch no other racer's resources, so they
-      // don't wait in that queue behind the others' publications and subscriptions (finding
-      // 175): in a full room the last racers' answers and TURN credentials came seconds late
-      // there, eating into SFU_CONNECT_MS. A late session is still closed if the race moved on
-      // (onSfu's sfuCurrent checks).
-      const own = m.type === "sfu_turn" || (m.type === "sfu_offer" && !me.sfu);
+      // Serialize across external awaits without holding the DO input gate. What touches only this
+      // racer's own session runs at once, in parallel with the others' (2026-11-07, finding 175):
+      // its publish (sfu_connected; 7 racers' publishes took 6 s one after another in the queue),
+      // its TURN credentials and its first session of the race (the last racers' answers and a
+      // TURN racer's credentials came seconds late behind the others' work, eating into
+      // SFU_CONNECT_MS). A late session is still closed if the race moved on (onSfu's sfuCurrent
+      // checks); restarts and closes stay in the queue.
+      const own = m.type === "sfu_connected" || m.type === "sfu_turn" || (m.type === "sfu_offer" && !me.sfu);
       const run = own ? this.onSfu(ws, me, m) : this.sfuQueue.then(() => this.onSfu(ws, me, m));
       if (!own) this.sfuQueue = run.then(() => {}, () => {});
       const failed = await run.catch(() => undefined);
