@@ -48,10 +48,13 @@ const SFU_SETUP_MS = 25_000;
     a game reports sfu_ready only with every racer's channels, so at SFU_SETUP_MS the whole race
     was out (0.7.12, rooms of 4-7 players, 2026-11-06). The others hear `left`, stop expecting it
     and release. Measured between a PC and a Mac on 2026-11-07 (finding 175): from the SFU's answer
-    to connected, UDP 0.69-1.46 s (92 setups) and TURN over TLS 2.9-3.2 s (2 s of UDP first), so at
-    most about 4 s from the start message; 10 s keeps 2.5 times that and shortens the others' wait
-    on the load screen for a racer who never connects (15 s before). */
+    to connected, UDP 0.69-1.46 s (92 setups) and TURN over TLS 2.9-3.2 s (2 s of UDP first). A
+    racer's own session and TURN credentials don't wait in the room's SFU queue (onSfu), so that
+    holds in a full room too: at most about 4 s from the start message; 10 s keeps 2.5 times that
+    and shortens the others' wait on the load screen for a racer who never connects (15 s before). */
 const SFU_CONNECT_MS = 10_000;
+/** A subscription pass waits at most this long after a publish for racers still connecting. */
+const SUBSCRIBE_WAIT_MS = 1_500;
 /** Sent to a racer whose Realtime setup failed or ran out of time; it is out of the race (the room
     stays). The footer holds about 45 characters. */
 const SFU_FAILED_MESSAGE = "Realtime connection failed: out of the race.";
@@ -577,8 +580,9 @@ export class Room extends DurableObject<Env> {
       if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(now, at));
       return;
     }
-    // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
     const race = st.race;
+    if (race && !race.sfuReleased && this.missingSubscription(race)) void this.subscribePass(race);
+    // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
     if (race && !race.sfuReleased && race.sfuConnectBy != null && now >= race.sfuConnectBy) {
       race.sfuConnectBy = undefined;
       const racers = st.members.filter(x => this.inRace(st, x.id));
@@ -909,9 +913,11 @@ export class Room extends DurableObject<Env> {
         if (!this.sfuCurrent(race, me)) {
           await this.clearSfu(me); return;
         }
-        const failed = await this.subscribeRacers(api, race);
         await this.save();
-        if (failed.length) return { startAt: race.startAt, ids: failed };
+        // Subscriptions run in one coalesced pass (subscribePass), not here: run per connect,
+        // every racer's connect re-ran them in the queue one after another, and rooms of 6-8
+        // racers missed SFU_SETUP_MS (2026-11-07 logs: 24 calls for 6 racers, 25 s).
+        this.kickSubscribe(race);
       } else if (m.type === "sfu_turn" && me.sfu && me.sfuRace === race.startAt) {
         // UDP to the SFU did not connect for this racer: TURN over TLS (finding 158, round 4).
         if (me.turnRace === race.startAt) {
@@ -1271,27 +1277,36 @@ export class Room extends DurableObject<Env> {
       the caller takes them out of the race. */
   private async subscribeRacers(api: Realtime, race: Race): Promise<number[]> {
     const failed: number[] = [];
-    // One call per subscriber for every publisher it lacks (Realtime.subscribeAll), subscribers in
-    // parallel (each session's mutations stay serial). One call per pair, one at a time, made
-    // rooms of 4+ racers miss SFU_SETUP_MS on 0.7.12 (2026-11-07 logs); per pair in parallel still
-    // missed it at 7-8. Rounds repeat for racers that became ready meanwhile; racers are re-read.
+    // Subscribers in parallel, each one's publishers in turn (concurrent calls on one session are
+    // not risked). One API call at a time made rooms of 4+ players miss SFU_SETUP_MS on 0.7.12:
+    // every racer connected, none got all its channels in 25 s (2026-11-07 logs). Rounds repeat
+    // until no pair is missing; a departure during a call just drops that pair (racers re-read).
     for (let round = 0; round <= MAX_MEMBERS; round++) {
       const racers = this.sfuRacers(race);
-      const work = racers.filter(a => racers.some(b => a !== b && !a.sfu!.channels.some(c => !c.local && c.memberId === b.id)));
-      if (!work.length) break;
+      const work = new Map<Member, Member[]>();
+      for (const a of racers) for (const b of racers)
+        if (a !== b && !a.sfu!.channels.some(c => !c.local && c.memberId === b.id)) {
+          const list = work.get(a) ?? [];
+          list.push(b);
+          work.set(a, list);
+        }
+      if (!work.size) break;
       let progress = false;
-      await Promise.all(work.map(async (sub) => {
-        const now = this.sfuRacers(race);
-        if (!now.includes(sub)) return;
-        try {
-          const channels = await api.subscribeAll(sub.sfu!, now.filter(p => p !== sub).map(p => ({ memberId: p.id, session: p.sfu! })));
-          if (channels.length) progress = true;
-          const peer = this.sockets.get(sub.id);
-          if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
-        } catch (error) {
-          console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-          if (sub.sfu) sub.sfu.phase = "failed";
-          failed.push(sub.id);
+      await Promise.all([...work].map(async ([sub, pubs]) => {
+        for (const pub of pubs) {
+          const now = this.sfuRacers(race);
+          if (!now.includes(sub) || !now.includes(pub)) continue;
+          try {
+            const channels = await api.subscribe(sub.sfu!, pub.id, pub.sfu!);
+            if (channels.length) progress = true;
+            const peer = this.sockets.get(sub.id);
+            if (channels.length && peer && this.sfuCurrent(race, sub)) this.send(peer, { type: "sfu_channels", channels });
+          } catch (error) {
+            console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+            if (sub.sfu) sub.sfu.phase = "failed";
+            failed.push(sub.id);
+            return;
+          }
         }
       }));
       if (!progress) break;
@@ -1300,26 +1315,57 @@ export class Room extends DurableObject<Env> {
   }
 
 
-
-  /** A subscription missing at release (none should be: every racer's sfu_connected subscribes
-      all pairs): allocated in the queue, then the release is checked again. */
-  /** The race (startAt) whose reconcile is queued. Per race (finding 175): a flag for any race let
-      an older race's reconcile, still queued, swallow the running race's, and nothing asked again
-      (room SHCF93 waited minutes with every racer ready). */
-  private reconciling: number | null = null;
-  private queueReconcile(race: Race): void {
-    if (this.reconciling === race.startAt) return;
-    this.reconciling = race.startAt;
-    const run = this.sfuQueue.then(() => this.subscribeRacers(new Realtime(this.env as Env & SfuSecrets), race));
-    this.sfuQueue = run.then(() => {}, () => {});
-    const done = () => { if (this.reconciling === race.startAt) this.reconciling = null; };
-    this.ctx.waitUntil(run.then(async (failed) => {
-      done();
-      await this.save();
-      if (failed.length) await this.retireSfu(failed, race.startAt);
-      else if (this.state?.race && !this.state.race.sfuReleased) this.releaseSfu(this.state);
-    }, done));
+  /** One subscription pass for a race, coalesced (2026-11-07): it starts at once when every racer
+      of the race has published (or failed), else at most SUBSCRIBE_WAIT_MS after a publish that
+      found racers still connecting; a pass asked for while one runs runs once more after it. A
+      pass subscribes each subscriber's missing publishers (subscribeRacers) and takes the racers
+      whose subscription failed out. The alarm (SFU_CONNECT_MS) runs one too, as a backstop. */
+  private subscribeTimer?: ReturnType<typeof setTimeout>;
+  private subscribing = false;
+  private subscribeAgain = false;
+  private kickSubscribe(race: Race): void {
+    const st = this.state;
+    if (!st || st.race !== race) return;
+    const waiting = st.members.some(x => this.inRace(st, x.id) && x.sfu?.phase !== "ready" && x.sfu?.phase !== "failed");
+    if (!waiting) {
+      if (this.subscribeTimer) clearTimeout(this.subscribeTimer);
+      this.subscribeTimer = undefined;
+      void this.subscribePass(race);
+    } else if (!this.subscribeTimer) {
+      this.subscribeTimer = setTimeout(() => { this.subscribeTimer = undefined; void this.subscribePass(race); }, SUBSCRIBE_WAIT_MS);
+    }
   }
+  private async subscribePass(race: Race): Promise<void> {
+    if (this.subscribing) { this.subscribeAgain = true; return; }
+    this.subscribing = true;
+    try {
+      // The repeat runs for the room's race as it is then (finding 175): a pass asked for while an
+      // older race's pass ran must not end with that race (room SHCF93's release waited minutes
+      // behind a reconcile of another race). After each pass the release is checked again.
+      let current: Race | null = race;
+      do {
+        this.subscribeAgain = false;
+        if (this.state?.race !== current) current = this.state?.race ?? null;
+        if (!current) break;
+        const failed = await this.subscribeRacers(new Realtime(this.env as Env & SfuSecrets), current);
+        await this.save();
+        if (failed.length) await this.retireSfu(failed, current.startAt);
+        const st = this.state;
+        if (st?.race === current && !current.sfuReleased) this.releaseSfu(st);
+        current = this.state?.race ?? null;
+      } while (this.subscribeAgain);
+    } catch (error) {
+      console.warn("Realtime subscription pass failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+    } finally {
+      this.subscribing = false;
+    }
+  }
+
+  /** A subscription missing at release: one more pass (subscribePass). */
+  private queueReconcile(race: Race): void {
+    void this.subscribePass(race);
+  }
+
 
   /** Lets race traffic flow once every racer acknowledged its channels and every pair of racers
       is subscribed both ways. */

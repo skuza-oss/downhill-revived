@@ -22,12 +22,12 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
     expect(kept.channels).toHaveLength(4);
   });
 
-  it("every racer ready, no release yet, an older race's reconcile pending: the alarm releases", async () => {
+  it("every racer ready, no release yet, a pass running: the alarm releases", async () => {
     const { clients, code } = await startedRace(3);
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
       const sessions = ready([0, 1, 2]);
       room.state.members.forEach((m: any, i: number) => { m.sfu = sessions[i]; m.sfuRace = room.state.race.startAt; m.sfuReady = true; });
-      room.reconciling = room.state.race.startAt - 60_000;  // the previous race's, still queued
+      room.subscribing = true;  // a subscription pass that never ends (a hung call)
     });
     await runDurableObjectAlarm(env.ROOM.get(env.ROOM.idFromName(code)));
     await Promise.all(clients.map((c) => c.json("sfu_ready")));
@@ -36,7 +36,7 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
     });
   });
 
-  it("an older race's reconcile doesn't swallow this race's: the missing pair is subscribed and released", async () => {
+  it("a pass asked for an older race serves the running race: the missing pair is subscribed and released", async () => {
     const { clients, code } = await startedRace(2);
     const fake = fakeRealtime();
     try {
@@ -46,9 +46,9 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
         a.sfu = publishedSession(a.id, [b.id]);
         b.sfu = publishedSession(b.id, []);  // its subscription to a is missing
         for (const m of [a, b]) { m.sfuRace = room.state.race.startAt; m.sfuReady = true; }
-        room.reconciling = room.state.race.startAt - 60_000;
+        // a pass for the previous race (another Race object), as one still running when this race started
+        await room.subscribePass({ ...room.state.race, startAt: room.state.race.startAt - 60_000 });
       });
-      clients[1].sendJson({ type: "sfu_ready" });
       await Promise.all(clients.map((c) => c.json("sfu_ready")));
       expect(fake.calls.filter((c) => c.path.endsWith("datachannels/new"))).toHaveLength(1);
     } finally {
@@ -107,6 +107,41 @@ describe("a racer's own setup doesn't wait behind the others' (finding 175)", ()
       expect(fake.released).toBe(false);
     } finally {
       fake.release();
+      fake.restore();
+    }
+  });
+});
+
+describe("the coalesced subscription pass (hotfix 4)", () => {
+  it("six racers connecting within a short window: one call per ordered pair, none twice, all released", async () => {
+    const n = 6;
+    const { clients, code } = await startedRace(n);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    try {
+      await runInDurableObject(stub, async (room: any) => {
+        room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
+        for (const m of room.state.members) { m.sfu = { id: `session-${m.id}`, phase: "connect", channels: [] }; m.sfuRace = room.state.race.startAt; }
+      });
+      const started = Date.now();
+      for (const c of clients) { c.sendJson({ type: "sfu_connected" }); await new Promise((r) => setTimeout(r, 20)); }
+      // each racer: its own channels, then the other five's
+      await Promise.all(clients.map((c) => c.next((f) => typeof f === "string" && JSON.parse(f).type === "sfu_channels" &&
+        JSON.parse(f).channels.some((x: any) => !x.local), 5000)));
+      await runInDurableObject(stub, async (room: any) => {
+        for (let i = 0; i < 300 && room.state.members.some((m: any) => m.sfu.channels.filter((c: any) => !c.local).length < 2 * (n - 1)); i++)
+          await new Promise((r) => setTimeout(r, 10));
+        for (const m of room.state.members) expect(m.sfu.channels.filter((c: any) => !c.local)).toHaveLength(2 * (n - 1));
+      });
+      const subs = fake.calls.filter((c) => c.path.endsWith("datachannels/new") && c.body.dataChannels[0].location === "remote");
+      const pairs = subs.map((c) => `${c.path.split("/").at(-3)}<-${c.body.dataChannels[0].sessionId}`);
+      expect(new Set(pairs).size).toBe(pairs.length);  // no pair asked twice
+      expect(pairs).toHaveLength(n * (n - 1));          // every ordered pair once
+      expect(fake.calls.filter((c) => c.path.endsWith("datachannels/new") && c.body.dataChannels[0].location === "local")).toHaveLength(n);
+      for (const c of clients) c.sendJson({ type: "sfu_ready" });
+      await Promise.all(clients.map((c) => c.json("sfu_ready")));
+      console.log(`coalesced pass: ${n} racers, ${pairs.length} subscription calls, released ${Date.now() - started} ms after the first connect`);
+    } finally {
       fake.restore();
     }
   });
