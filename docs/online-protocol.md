@@ -324,7 +324,8 @@ relay only ever carries that player's own traffic to the SFU.
 The API limit is 50 requests/session/second. Mutations that touch several racers' sessions
 (publications, subscriptions, closes) run one after another in the room's queue; a racer's own
 first session of the race (`sessions/new`) and its TURN credentials don't wait in it (finding 175).
-Each racer has one publication batch and one subscription batch for all its publishers. API
+Each racer has one publication batch; the subscriptions run in one coalesced pass per race
+outside the queue (each subscriber's publishers one call each, subscribers in parallel). API
 operations have a 15 s timeout.
 A lost WebRTC connection has a 30 s session reuse window; the game reports failure and rejoins
 with a fresh session rather than retaining a broken connection (`sfu_restart`, above). A lost
