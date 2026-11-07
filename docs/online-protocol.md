@@ -294,6 +294,12 @@ so the game sees start before buffered events. Channels close at race end.
   sees the TURN service's address, never the player's. The DO revokes the credentials when that
   member's SFU session is cleared (race end, retire, leaving); a second `sfu_turn` in the race
   is a `bad_value` error. Clients accept `turns:` servers on `turn.cloudflare.com` only.
+- A racer whose own connection isn't up 10 s after the race's `start` (no `sfu_connected`; the
+  room's `SFU_CONNECT_MS`) leaves the race alone, as below: the others stop expecting its channels
+  and are released. Measured setups (finding 175): from the answer to connected, UDP 0.7-1.5 s and
+  TURN over TLS 2.9-3.2 s. A game says `sfu_ready` once it has every racer's channels, or 8 s
+  after its own connection with its own channels open (a racer that never connects publishes
+  none); the room still releases only when every connected racer is subscribed both ways.
 - Setup has a deadline: 25 s after the race's `start` (the room's `SFU_SETUP_MS` sets another),
   every racer must have acknowledged `sfu_ready`. Measured setups take 0.2-0.5 s over UDP and
   2.4-3.1 s through TURN; the margin covers ten racers' 90 subscription calls and one API call

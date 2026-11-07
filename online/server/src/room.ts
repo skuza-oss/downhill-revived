@@ -47,8 +47,11 @@ const SFU_SETUP_MS = 25_000;
     alone (SFU_CONNECT_MS overrides it). Without this, every other racer waited for its channels:
     a game reports sfu_ready only with every racer's channels, so at SFU_SETUP_MS the whole race
     was out (0.7.12, rooms of 4-7 players, 2026-11-06). The others hear `left`, stop expecting it
-    and release. Real setups connect in 0.2-0.5 s over UDP and about 5 s through TURN. */
-const SFU_CONNECT_MS = 15_000;
+    and release. Measured between a PC and a Mac on 2026-11-07 (finding 175): from the SFU's answer
+    to connected, UDP 0.69-1.46 s (92 setups) and TURN over TLS 2.9-3.2 s (2 s of UDP first), so at
+    most about 4 s from the start message; 10 s keeps 2.5 times that and shortens the others' wait
+    on the load screen for a racer who never connects (15 s before). */
+const SFU_CONNECT_MS = 10_000;
 /** Sent to a racer whose Realtime setup failed or ran out of time; it is out of the race (the room
     stays). The footer holds about 45 characters. */
 const SFU_FAILED_MESSAGE = "Realtime connection failed: out of the race.";
