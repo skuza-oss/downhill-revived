@@ -23,8 +23,14 @@ started from that environment, your own included. Keep all three off a small sys
 
 A git worktree lacks the files that are never committed (asm/, assets/, iso/SCUS_971.77):
 `python tools/worktree_setup.py` copies them from the main checkout and, for a worktree on the
-system drive, moves build/ and node_modules/ to `DHD_SCRATCH` by junctions.
-`tools/worktree_setup.py --list` shows every worktree, merged or not.
+system drive, moves build/ and node_modules/ to `DHD_SCRATCH` by junctions. There it also installs
+`online/server` and `port/launcher` (`npm ci` in the junction's target, a folder named
+node_modules, as wrangler needs; again whenever the lock changes, or with `--npm`). Never run
+`npm ci` in such a worktree yourself: it deletes the junction and installs onto the system drive;
+run worktree_setup.py again instead. `tools/worktree_setup.py --list` shows every worktree, merged
+or not. After `git worktree remove`, `tools/worktree_setup.py --remove PATH` deletes its scratch
+folders and the junctions git leaves behind (only the links: `tools/compilers` points into the
+main checkout).
 
 ## Build
 
