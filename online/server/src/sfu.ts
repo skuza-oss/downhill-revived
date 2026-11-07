@@ -63,11 +63,13 @@ export class Realtime {
   private async call(path: string, body?: unknown, method = "POST"): Promise<Json> {
     const { REALTIME_APP_ID: app, REALTIME_APP_TOKEN: token } = this.secrets;
     if (!app || !token) throw new Error("Realtime is not configured");
-    const request = this.request;
+    const request = this.request, started = Date.now();
     const r = await request(`https://rtc.live.cloudflare.com/v1/apps/${encodeURIComponent(app)}/${path}`, {
       method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000),
     });
+    // Every call's time (2026-11-07: rooms' setups ran past SFU_SETUP_MS; this says where).
+    console.log(`Realtime ${path.includes("datachannels") ? "datachannels/" : "sessions/"}${path.split("/").at(-1)} ${r.status} ${Date.now() - started} ms`);
     if (!r.ok) {
       console.warn("Realtime API operation failed", path.split("/").at(-1), r.status);
       throw new Error("Realtime request failed");
