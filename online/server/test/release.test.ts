@@ -81,3 +81,33 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
     }
   });
 });
+
+describe("a racer's own setup doesn't wait behind the others' (finding 175)", () => {
+  it("while a subscription call hangs in the SFU queue, another racer's offer is answered and its TURN credentials come", async () => {
+    const { clients, code } = await startedRace(3);
+    const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    const fake = fakeRealtime();
+    fake.hold = (path) => path.endsWith("datachannels/new") && fake.held === 0;
+    try {
+      await runInDurableObject(stub, async (room: any) => {
+        room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token", TURN_KEY_ID: "key", TURN_KEY_API_TOKEN: "token" };
+        const [a, b] = room.state.members;
+        a.sfu = { id: `session-${a.id}`, phase: "connect", channels: [] };
+        b.sfu = publishedSession(b.id, []);
+        a.sfuRace = b.sfuRace = room.state.race.startAt;
+      });
+      clients[0].sendJson({ type: "sfu_connected" });  // its publication's call hangs in the queue
+      for (let i = 0; i < 200 && !fake.held; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(fake.held).toBe(1);
+      clients[2].sendJson({ type: "sfu_offer", sdp: "offer" });
+      expect((await clients[2].json("sfu_answer")).sdp).toBe("SFU");
+      await runInDurableObject(stub, async (room: any) => { room.state.members[2].sfu.phase = "connect"; });
+      clients[2].sendJson({ type: "sfu_turn" });
+      expect((await clients[2].json("sfu_turn")).urls.length).toBeGreaterThan(0);
+      expect(fake.released).toBe(false);
+    } finally {
+      fake.release();
+      fake.restore();
+    }
+  });
+});

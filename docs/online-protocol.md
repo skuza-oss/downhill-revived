@@ -321,8 +321,11 @@ credentials are sent only to their owner. No message carries another player's SD
 TURN credentials or address. The native client has no peer signaling or TURN mesh path: a TURN
 relay only ever carries that player's own traffic to the SFU.
 
-The API limit is 50 requests/session/second; mutations are serialized, and channels use one
-publication batch and one subscription batch per publisher. API operations have a 15 s timeout.
+The API limit is 50 requests/session/second. Mutations that touch several racers' sessions
+(publications, subscriptions, closes) run one after another in the room's queue; a racer's own
+first session of the race (`sessions/new`) and its TURN credentials don't wait in it (finding 175).
+Each racer has one publication batch and one subscription batch for all its publishers. API
+operations have a 15 s timeout.
 A lost WebRTC connection has a 30 s session reuse window; the game reports failure and rejoins
 with a fresh session rather than retaining a broken connection (`sfu_restart`, above). A lost
 room WebSocket leaves the SFU session up: the race goes on over it while the game rejoins.

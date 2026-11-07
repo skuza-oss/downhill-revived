@@ -428,9 +428,15 @@ export class Room extends DurableObject<Env> {
 
     if (m.type.startsWith("sfu_")) {
       if (m.type === "sfu_connected" && st.race && me.sfuRace === st.race.startAt) me.sfuConnectedRace = st.race.startAt;
-      // Serialize across external awaits without holding the DO input gate.
-      const run = this.sfuQueue.then(() => this.onSfu(ws, me, m));
-      this.sfuQueue = run.then(() => {}, () => {});
+      // Serialize across external awaits without holding the DO input gate. A racer's own TURN
+      // credentials and its first session of the race touch no other racer's resources, so they
+      // don't wait in that queue behind the others' publications and subscriptions (finding
+      // 175): in a full room the last racers' answers and TURN credentials came seconds late
+      // there, eating into SFU_CONNECT_MS. A late session is still closed if the race moved on
+      // (onSfu's sfuCurrent checks).
+      const own = m.type === "sfu_turn" || (m.type === "sfu_offer" && !me.sfu);
+      const run = own ? this.onSfu(ws, me, m) : this.sfuQueue.then(() => this.onSfu(ws, me, m));
+      if (!own) this.sfuQueue = run.then(() => {}, () => {});
       const failed = await run.catch(() => undefined);
       // Out of the race outside the queue: its end (closeRace) waits for the queue.
       if (failed) await this.retireSfu(failed.ids, failed.startAt);
