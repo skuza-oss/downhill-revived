@@ -245,6 +245,7 @@ static void blend_scenes(void)
     const uint64_t fix = 0 | 1 << 2 | 2 << 4 | 1 << 6 | 0x50ULL << 32;   /* (Cs - Cd) * 0x50 + Cd */
     const uint64_t sub = 1 | 0 << 2 | 0 << 4 | 1 << 6;            /* (Cd - Cs) * As + Cd */
     const uint64_t inverse = 0 | 1 << 2 | 0 << 4 | 2 << 6;        /* (Cs - Cd) * As + 0 */
+    const uint64_t keep = 0 | 0 << 2 | 0 << 4 | 1 << 6;           /* (Cs - Cs) * As + Cd: the colour kept */
     const uint64_t always = 1ULL << 16 | 1ULL << 17, gequal = 1ULL << 16 | 2ULL << 17, greater = 1ULL << 16 | 3ULL << 17;
     const unsigned tri = 3 | 8 | 64;
     blend_scene("blend As, alpha written, no Z", blend, 0, 0, 0, tri);
@@ -263,6 +264,11 @@ static void blend_scenes(void)
     blend_scene("blend As, alpha test AFAIL FB_ONLY", blend, 0, greater | 1 | 5 << 1 | 0x60 << 4 | 1 << 12, 1, tri);
     blend_scene("blend As, alpha test AFAIL RGB_ONLY", blend, 0, gequal | 1 | 5 << 1 | 0x60 << 4 | 3 << 12, 1, tri);
     blend_scene("no blending, Z GREATER with writes", blend, 0, greater, 1, 3 | 8);
+    /* The colour kept (blend Zero / One; finding 176): drawn without blending, colour masked. */
+    blend_scene("Cd kept, alpha written, Z GEQUAL with writes", keep, 0, gequal, 1, tri);
+    blend_scene("Cd kept, alpha masked, Z GREATER with writes", keep, 0xFF000000u, greater, 1, tri);
+    blend_scene("Cd kept, alpha masked, Z GEQUAL read only", keep, 0xFF000000u, gequal, 0, tri);
+    blend_scene("Cd kept, alpha test AFAIL FB_ONLY", keep, 0, greater | 1 | 5 << 1 | 0x60 << 4 | 1 << 12, 1, tri);
 }
 
 /* A full picture from CPU memory alone (an upload: no draw). */
