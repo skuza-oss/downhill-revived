@@ -492,3 +492,110 @@ describe("TURN over TLS fallback", () => {
     expect((await clients[0].json("error")).message).toContain("TURN requires a Realtime session");
   });
 });
+
+describe("late failures of replaced Realtime sessions", () => {
+  for (const kind of ["sfu_offer", "sfu_connected"]) {
+    it(`${kind}: an old API failure cannot fail the replacement`, async () => {
+      const { host, code } = await Client.host();
+      const fake = fakeRealtime();
+      const suffix = kind === "sfu_offer" ? "sessions/new" : "datachannels/new";
+      fake.hold = path => path.endsWith(suffix);
+      fake.fail = path => path.endsWith(suffix);
+      try {
+        await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+          room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
+          const me = room.state.members[0], ws = room.sockets.get(me.id);
+          me.sfuAttempt = 1;
+          if (kind === "sfu_connected") me.sfu = { id: "old-session", phase: "connect", channels: [] };
+          const pending = room.onSfu(ws, me, { type: kind, sdp: "offer" });
+          for (let i = 0; i < 200 && !fake.held; i++) await new Promise(r => setTimeout(r, 5));
+          expect(fake.held).toBe(1);
+          // A newer offer completed while the earlier API call was in flight.
+          me.sfuAttempt++;
+          const replacement = publishedSession(me.id, []);
+          replacement.id = "replacement";
+          me.sfu = replacement;
+          fake.release();
+          expect(await pending).toBe(false);
+          expect(me.sfu).toBe(replacement);
+          expect(me.sfu.phase).toBe("ready");
+        });
+      } finally { fake.release(); fake.restore(); }
+    });
+  }
+  it("an old subscription failure cannot retire the replacement subscriber", async () => {
+    const { clients, code } = await startedRace(2);
+    const fake = fakeRealtime();
+    fake.hold = (path, body) => path.endsWith("datachannels/new") && body.dataChannels[0].sessionId === "session-1";
+    fake.fail = fake.hold;
+    try {
+      await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+        room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
+        const [a, b] = room.state.members;
+        a.sfu = publishedSession(a.id, []);
+        b.sfu = publishedSession(b.id, [a.id]);
+        const pending = room.subscribeGroup(new Realtime(room.env), false);
+        for (let i = 0; i < 200 && !fake.held; i++) await new Promise(r => setTimeout(r, 5));
+        expect(fake.held).toBe(1);
+        a.sfu = publishedSession(a.id, [b.id]);
+        a.sfu.id = "replacement";
+        fake.release();
+        expect(await pending).toEqual([]);
+        expect(a.sfu.phase).toBe("ready");
+      });
+    } finally { fake.release(); fake.restore(); }
+  });
+});
+
+
+describe("publication admission", () => {
+  it("duplicate connected messages publish only once while the first API call waits", async () => {
+    const { code } = await Client.host();
+    const fake = fakeRealtime();
+    fake.hold = path => path.endsWith("datachannels/new");
+    try {
+      await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+        room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
+        const me = room.state.members[0], ws = room.sockets.get(me.id);
+        me.sfu = { id: "pending-publication", phase: "connect", channels: [] };
+        const first = room.onSfu(ws, me, { type: "sfu_connected" });
+        for (let i = 0; i < 200 && !fake.held; i++) await new Promise(r => setTimeout(r, 5));
+        expect(fake.held).toBe(1);
+        const duplicate = room.onSfu(ws, me, { type: "sfu_connected" });
+        await new Promise(r => setTimeout(r, 20));
+        fake.release();
+        expect(await first).toBe(false);
+        expect(await duplicate).toBe(false);
+        expect(fake.calls.filter(c => c.path.endsWith("datachannels/new"))).toHaveLength(1);
+        expect(me.sfu.channels).toHaveLength(2);
+      });
+    } finally { fake.release(); fake.restore(); }
+  });
+});
+
+
+describe("TURN generation ownership", () => {
+  it("a late mint revokes only its own credential and preserves the replacement's", async () => {
+    const { code } = await Client.host();
+    const fake = fakeRealtime();
+    fake.hold = path => path.endsWith("generate-ice-servers");
+    try {
+      await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+        room.env = { ...room.env, TURN_KEY_ID: "key", TURN_KEY_API_TOKEN: "token" };
+        const me = room.state.members[0], ws = room.sockets.get(me.id);
+        me.sfuAttempt = 1;
+        me.sfu = publishedSession(me.id, []);
+        const pending = room.onSfu(ws, me, { type: "sfu_turn" });
+        for (let i = 0; i < 200 && !fake.held; i++) await new Promise(r => setTimeout(r, 5));
+        expect(fake.held).toBe(1);
+        me.sfuAttempt = 2;
+        me.turnUser = "replacement-credential";
+        me.turnUntil = Date.now() + 3600000;
+        fake.release();
+        expect(await pending).toBe(false);
+        expect(me.turnUser).toBe("replacement-credential");
+        expect(fake.calls.filter(c => c.path.endsWith("/revoke")).map(c => c.path.split("/").at(-2))).toEqual(["u".repeat(32)]);
+      });
+    } finally { fake.release(); fake.restore(); }
+  });
+});
