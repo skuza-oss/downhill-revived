@@ -58,6 +58,11 @@ export class Turn {
   }
 }
 
+/** A Realtime API answer that wasn't OK, with its HTTP status (410: the session is gone). */
+export class RealtimeError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 export class Realtime {
   constructor(private secrets: SfuSecrets, private request: typeof fetch = (input, init) => fetch(input, init)) {}
   private async call(path: string, body?: unknown, method = "POST"): Promise<Json> {
@@ -72,7 +77,7 @@ export class Realtime {
     console.log(`Realtime ${path.includes("datachannels") ? "datachannels/" : "sessions/"}${path.split("/").at(-1)} ${r.status} ${Date.now() - started} ms`);
     if (!r.ok) {
       console.warn("Realtime API operation failed", path.split("/").at(-1), r.status);
-      throw new Error("Realtime request failed");
+      throw new RealtimeError("Realtime request failed", r.status);
     }
     const data = await r.json() as Json;
     if (data.errorCode) {
@@ -94,9 +99,21 @@ export class Realtime {
   }
   async close(session: SfuSession, channels = session.channels): Promise<void> {
     if (!channels.length) return;
-    const r = await this.call(`sessions/${session.id}/datachannels/close`, {
-      dataChannels: channels.map(c => ({ id: c.channelId })),
-    }, "PUT");
+    let r: Json;
+    try {
+      r = await this.call(`sessions/${session.id}/datachannels/close`, {
+        dataChannels: channels.map(c => ({ id: c.channelId })),
+      }, "PUT");
+    } catch (error) {
+      // 410 (404): the session itself is gone, its channels with it (a racer's session that
+      // ended with its connection). Retrying that close forever, 5.4 s a call on the room's SFU
+      // queue, held room SHCF93's release for minutes (finding 175).
+      if (error instanceof RealtimeError && (error.status === 410 || error.status === 404)) {
+        session.channels = session.channels.filter(c => !channels.includes(c));
+        return;
+      }
+      throw error;
+    }
     // close_track_error: absent or closed already. Channels that closed are forgotten even when
     // others did not, so a retry asks only for the rest.
     const results = r.dataChannels;

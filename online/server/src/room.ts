@@ -525,9 +525,18 @@ export class Room extends DurableObject<Env> {
     await this.dropSocket(ws, true);
   }
 
+  /** A cleanup pass runs (retryCleanup): the alarm starts no second one meanwhile. */
+  private cleaning = false;
+
   async alarm(): Promise<void> {
     const now = Date.now();
-    await this.retryCleanup(now);
+    // In the background (finding 175): the alarm awaited the pass, which waits for the SFU queue
+    // and makes its own API calls (5.4 s each for a gone session's close), so the setup checks
+    // below ran a minute late (room SHCF93: "setup after 68271 ms").
+    if (!this.cleaning) {
+      this.cleaning = true;
+      this.ctx.waitUntil(this.retryCleanup(now).finally(() => { this.cleaning = false; }));
+    }
     let pending = 0;
     for (const ws of this.ctx.getWebSockets()) {
       const info = ws.deserializeAttachment() as SocketInfo | null;
@@ -574,6 +583,9 @@ export class Room extends DurableObject<Env> {
           x.sfuConnectedRace === race.startAt || x.sfu?.phase === "ready" ? "connected" : x.turnRace === race.startAt ? "turn" : "offered"}`).join(" "));
       if (lost.length) await this.retireSfu(lost.map(x => x.id), race.startAt);
     }
+    // Every racer ready but no release yet (a reconcile that never asked again, finding 175):
+    // asked again each tick; releaseSfu does nothing until every racer is ready.
+    if (race && st.race === race && !race.sfuReleased) this.releaseSfu(st);
     // Realtime setup not done in time (SFU_SETUP_MS): those racers are out, the rest go on.
     if (race && st.race === race && !race.sfuReleased && race.sfuBy != null && now >= race.sfuBy) {
       const late = st.members.filter(x => this.inRace(st, x.id) &&
@@ -1293,18 +1305,22 @@ export class Room extends DurableObject<Env> {
 
   /** A subscription missing at release (none should be: every racer's sfu_connected subscribes
       all pairs): allocated in the queue, then the release is checked again. */
-  private reconciling = false;
+  /** The race (startAt) whose reconcile is queued. Per race (finding 175): a flag for any race let
+      an older race's reconcile, still queued, swallow the running race's, and nothing asked again
+      (room SHCF93 waited minutes with every racer ready). */
+  private reconciling: number | null = null;
   private queueReconcile(race: Race): void {
-    if (this.reconciling) return;
-    this.reconciling = true;
+    if (this.reconciling === race.startAt) return;
+    this.reconciling = race.startAt;
     const run = this.sfuQueue.then(() => this.subscribeRacers(new Realtime(this.env as Env & SfuSecrets), race));
     this.sfuQueue = run.then(() => {}, () => {});
+    const done = () => { if (this.reconciling === race.startAt) this.reconciling = null; };
     this.ctx.waitUntil(run.then(async (failed) => {
-      this.reconciling = false;
+      done();
       await this.save();
       if (failed.length) await this.retireSfu(failed, race.startAt);
-      else if (this.state?.race === race) this.releaseSfu(this.state);
-    }, () => { this.reconciling = false; }));
+      else if (this.state?.race && !this.state.race.sfuReleased) this.releaseSfu(this.state);
+    }, done));
   }
 
   /** Lets race traffic flow once every racer acknowledged its channels and every pair of racers
