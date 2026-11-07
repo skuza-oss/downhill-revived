@@ -546,3 +546,29 @@ describe("late failures of replaced Realtime sessions", () => {
     } finally { fake.release(); fake.restore(); }
   });
 });
+
+
+describe("publication admission", () => {
+  it("duplicate connected messages publish only once while the first API call waits", async () => {
+    const { code } = await Client.host();
+    const fake = fakeRealtime();
+    fake.hold = path => path.endsWith("datachannels/new");
+    try {
+      await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (room: any) => {
+        room.env = { ...room.env, REALTIME_APP_ID: "app", REALTIME_APP_TOKEN: "token" };
+        const me = room.state.members[0], ws = room.sockets.get(me.id);
+        me.sfu = { id: "pending-publication", phase: "connect", channels: [] };
+        const first = room.onSfu(ws, me, { type: "sfu_connected" });
+        for (let i = 0; i < 200 && !fake.held; i++) await new Promise(r => setTimeout(r, 5));
+        expect(fake.held).toBe(1);
+        const duplicate = room.onSfu(ws, me, { type: "sfu_connected" });
+        await new Promise(r => setTimeout(r, 20));
+        fake.release();
+        expect(await first).toBe(false);
+        expect(await duplicate).toBe(false);
+        expect(fake.calls.filter(c => c.path.endsWith("datachannels/new"))).toHaveLength(1);
+        expect(me.sfu.channels).toHaveLength(2);
+      });
+    } finally { fake.release(); fake.restore(); }
+  });
+});

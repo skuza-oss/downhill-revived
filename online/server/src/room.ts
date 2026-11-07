@@ -441,7 +441,6 @@ export class Room extends DurableObject<Env> {
     const isHost = st.hostId === me.id;
 
     if (m.type.startsWith("sfu_")) {
-      if (m.type === "sfu_connected" && me.sfu) me.sfuConnected = true;
       // Serialize across external awaits without holding the DO input gate. What touches only this
       // member's own session runs at once, in parallel with the others' (2026-11-07, finding 175):
       // its publish (sfu_connected; 7 racers' publishes took 6 s one after another in the queue),
@@ -912,7 +911,10 @@ export class Room extends DurableObject<Env> {
         this.send(ws, opened.message);
       } else if (m.type === "sfu_connected") {
         const session = me.sfu;
-        if (!session || session.phase !== "connect") return false;  // a repeat, or none to publish
+        if (!session || session.phase !== "connect" || me.sfuConnected) return false;
+        // Admit once before the external await: repeats while publish is in flight must not
+        // allocate a second pair (or make every subscriber follow duplicate publications).
+        me.sfuConnected = true;
         const channels = await api.publish(me.id, session);
         if (me.sfu !== session || !this.state?.members.includes(me)) {
           // Replaced or cleared during the call: what it allocated closes with that session.

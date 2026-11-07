@@ -37,6 +37,11 @@ Research: Cloudflare's [in-memory state reference](https://developers.cloudflare
 and [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/).
 No external implementation copied.
 
+P2, `online/server/src/room.ts`: repeated `sfu_connected` during the publication API
+await allocated duplicate channel pairs. Admission now marks the session connected before
+awaiting and ignores repeats. A held-publication test observed two calls without the fix,
+one with it, and exactly two retained channels.
+
 ## Result
 
 Pending review completion.
