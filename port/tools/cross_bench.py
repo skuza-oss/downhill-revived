@@ -1,6 +1,7 @@
 """Measure real gameplay-channel RTT on a PC and an SSH-accessible Mac.
 
-Uses private rooms on the official service, the same two-player race, fixed seed,
+Uses private rooms on the official service (or, with --server local, this checkout's server, which
+the Mac reaches by an ssh reverse tunnel), the same two-player race, fixed seed,
 60 FPS and 640x480 windows. No screenshots or SSH polling during measurement.
 Both games must be built with the opt-in DHD_NET_BENCH instrumentation.
 Run --matrix for interleaved SFU/P2P trials and separate forced-TURN controls.
@@ -18,6 +19,7 @@ import subprocess
 import time
 
 import game_lock
+import local_server
 import owned_process
 from hidden_game import test_iso
 from online_race import iso_files_sha256
@@ -32,7 +34,7 @@ def main():
     p.add_argument('--remote-app', default=os.environ.get('DHD_REMOTE_APP'), required=not os.environ.get('DHD_REMOTE_APP'))
     p.add_argument('--remote-iso', default=os.environ.get('DHD_REMOTE_ISO'), required=not os.environ.get('DHD_REMOTE_ISO'))
     p.add_argument('--exe', type=Path, default=ROOT / 'build/host64-exe/dhd64.exe')
-    p.add_argument('--server', default='wss://dhd.skuza.app')
+    p.add_argument('--server', default='wss://dhd.skuza.app', help="the room server, or 'local': this checkout's")
     p.add_argument('--remote-dir', default='dhd-netbench')
     p.add_argument('--ssh-option', action='append', default=[])
     p.add_argument('--backend', choices=('sfu', 'p2p'), default='p2p')
@@ -40,6 +42,7 @@ def main():
     p.add_argument('--force-turn', action='store_true')
     p.add_argument('--seconds', type=int, default=60)
     p.add_argument('--matrix', action='store_true')
+    p.add_argument('--env', action='append', default=[], metavar='NAME=VALUE', help='an extra variable for both games')
     a = p.parse_args()
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -64,7 +67,7 @@ def main():
         pc = None
         result = dict(label=label, backend=backend, host=host, force_turn=force,
                       seconds=a.seconds, started_epoch=time.time(), status='running')
-        base = dict(DHD_NET_SERVER=a.server, DHD_NET_BACKEND=backend, DHD_NET_BENCH='bench.csv',
+        base = dict(DHD_NET_SERVER=servers[0], DHD_NET_BENCH='bench.csv',
                     DHD_NET_ISO_SHA256=iso_hash, DHD_SKIP_MOVIES='1', DHD_SND_OFF='1',
                     DHD_MEMCARD='1', DHD_MEMCARD_DIR='card', DHD_SETTINGS='none', DHD_RENDER='native',
                     DHD_FPS='60', DHD_SCALE='1', DHD_WINDOW='windowed', DHD_WINDOW_WIDTH='640',
@@ -72,11 +75,12 @@ def main():
                     DHD_NET_TEST_FINISH=str(a.seconds + 180))
         if force:
             base['DHD_NET_P2P_UDP' if backend == 'p2p' else 'DHD_NET_SFU_UDP'] = '0'
+        base.update(item.split('=', 1) for item in a.env)
 
         def start(side, code=None):
             nonlocal pc, remote_pid
             env = dict(base, DHD_NET_NAME=side.upper(), DHD_NET_RIDER='4' if side == host else '8')
-            if code is None: env.update(DHD_NET_CREATE='1', DHD_NET_PLAYERS='2')
+            if code is None: env.update(DHD_NET_CREATE='p2p' if backend == 'p2p' else '1', DHD_NET_PLAYERS='2')
             else: env['DHD_NET_JOIN'] = code
             if side == 'pc':
                 (folder / 'card').mkdir()
@@ -86,7 +90,7 @@ def main():
                     stdout=log, stderr=log, minimized=True))
                 result['pc_pid'] = pc.pid
             else:
-                env['DHD_ISO'] = a.remote_iso
+                env.update(DHD_ISO=a.remote_iso, DHD_NET_SERVER=servers[1])
                 assigns = ' '.join(f'{k}={shlex.quote(v)}' for k, v in env.items())
                 reply = ssh(f'mkdir -p {remote_q}/card; cd {remote_q}; '
                             f'env {assigns} nohup {shlex.quote(a.remote_app)} > stdout.log 2> stderr.log < /dev/null & echo $!')
@@ -113,7 +117,7 @@ def main():
             log = stack.enter_context(pc_log_path.open('w'))
             try:
                 start(host)
-                code = wait(lambda: read(host), r'online: room (\w{6}) \(host\)', 120).group(1)
+                code = wait(lambda: read(host), r'online: room (\w{6,7}) \(host\)', 120).group(1)
                 result['room'] = code
                 result['room_open_seconds'] = time.time() - result['started_epoch']
                 start('mac' if host == 'pc' else 'pc', code)
@@ -159,7 +163,10 @@ def main():
         first = [('sfu', 'pc', False), ('p2p', 'pc', False), ('sfu', 'mac', False), ('p2p', 'mac', False)]
         cases = first + list(reversed(first)) + [('sfu','pc',True),('p2p','pc',True),('p2p','mac',True),('sfu','mac',True)]
     results = []
-    with game_lock.held('cross_bench', timed=True):
+    with contextlib.ExitStack() as held:
+        servers = (held.enter_context(local_server.tunnelled(a.remote, a.ssh_option)) if a.server == 'local'
+                   else (a.server, a.server))
+        held.enter_context(game_lock.held('cross_bench', timed=True))
         for number, case in enumerate(cases, 1):
             results.append(trial(number, *case))
             (out / 'trials.json').write_text(json.dumps(results, indent=2) + '\n')

@@ -238,8 +238,12 @@ int main(int argc, char **argv)
             }
             was_racing = l.state == NET_RACING;
             if (l.state == NET_RACING && !acted && now - loaded_at >= 0.5) {
-                /* "loaded", as a game says it until GO: the games' start needn't wait 60 s for this one */
-                uint8_t e[2] = {EVENT_VERSION, EVENT_LOADED};
+                /* "loaded", as a game says it until GO: the games' start needn't wait 60 s for this one;
+                   and its rider again: a host still in its menus keeps only its newest 128 frames
+                   (NET_RELAY_QUEUE), and these loaded messages alone can push the first one out */
+                uint8_t e[2] = {EVENT_VERSION, EVENT_LOADED}, ride[30] = {EVENT_VERSION, EVENT_SETUP};
+                put32(ride + 2, 0x20 * (rider + 1)), put32(ride + 6, rider), put32(ride + 18, 8), put32(ride + 22, 3);
+                net_send_frame(NET_FRAME_EVENT, ride, sizeof ride);
                 net_send_frame(NET_FRAME_EVENT, e, 2);
                 loaded_at = now;
                 /* the host's start, as a host game's start_step says it once the others loaded: a
@@ -286,8 +290,10 @@ int main(int argc, char **argv)
                 }
                 /* Mirror a distinct host-owned AI's live snapshots. This exercises actual
                    puppet playback with no stored game data in the test fixture. */
-                if (echo_ai && saw_go && !acted && l.state == NET_RACING && frame[0] == NET_FRAME_STATE)
-                    echoed += resend_rider(frame + 2, n - 2, l.nslots + l.local_slot - 1, l.local_slot, 2.0f * l.local_slot);
+                /* The AI riders follow the humans (ten in all): with many humans, bots share them. */
+                if (echo_ai && saw_go && !acted && l.state == NET_RACING && frame[0] == NET_FRAME_STATE && l.nslots < NET_MAX_SLOTS)
+                    echoed += resend_rider(frame + 2, n - 2, l.nslots + (l.local_slot - 1) % (NET_MAX_SLOTS - l.nslots),
+                                           l.local_slot, 2.0f * l.local_slot);
             }
             Sleep(10);
         }
