@@ -57,6 +57,8 @@ static int arena(int track) { return track == 23; }
 static const char code_letters[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";  /* the server's join codes */
 static const char name_letters[] = SETTING_NAME_LETTERS;
 enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 10 };
+/* HOME's rows after the two Create rows (0 Name, 1 Quick Race, 2 Public Races, 3 and 4 Create) */
+enum { HOME_REGION = 5, HOME_CODE = 6, HOME_UPDATE = 7 };
 
 enum { HOME, LIST, NAME, CODE, ROOM, QUICK };
 /* The room's rows */
@@ -372,6 +374,35 @@ static void save(const char *key, const char *env, const char *value)
     hle_env_changed();
 }
 
+/* Where the rooms this player creates run (dhd.ini room_region, DHD_NET_ROOM_REGION; finding 181):
+   the settings table's choices, Auto first. The server makes the room with that location hint. */
+static const SettingInfo *region_setting(void)
+{
+    for (int i = 0; i < COUNT(setting_table); i++)
+        if (!strcmp(setting_table[i].key, "room_region")) return &setting_table[i];
+    return NULL;
+}
+
+static int region_index(void)
+{
+    const SettingInfo *s = region_setting();
+    const char *v = getenv("DHD_NET_ROOM_REGION");
+    for (int i = 0; s && v && i < s->count; i++)
+        if (!strcmp(s->choices[i].value, v)) return i;
+    return 0;  /* unset or unknown: Auto */
+}
+
+static void region_step(MenuPage *p, int by)
+{
+    const SettingInfo *s = region_setting();
+    if (!s) return;
+    int i = (region_index() + by + s->count) % s->count;
+    save("room_region", "DHD_NET_ROOM_REGION", s->choices[i].value);
+    menu_page_value_set(p, HOME_REGION, "Room Region:", s->choices[i].label, MENU_VALUE_ARROWS);
+    menu_page_sound(by > 0);
+    hle_log("online menu: room region %s\n", s->choices[i].value);
+}
+
 /* What stops this PC from joining a race, or NULL. */
 static const char *not_ready(void)
 {
@@ -445,9 +476,11 @@ static void list_row(int i)
     if (strcmp(l->version, version)) snprintf(now, sizeof now, "OTHER VERSION");
     else if (l->full || l->players >= l->max_players) snprintf(now, sizeof now, "FULL");
     else net_lobby_now(l, t, now, sizeof now);  /* counted only on a known server clock (finding 135) */
-    /* where the room runs (EU, NA, ASIA...; finding 135): a far room shows before joining it */
+    /* where the room runs (EU WEST, NA EAST...; finding 181; an older server's EU, NA...; finding
+       135): a far room shows before joining it */
+    const char *where = l->area[0] ? l->area : l->region;
     snprintf(text[i], ROW_TEXT, "%.14s  %s%s%d/%d  %s  %s", l->room_name[0] ? l->room_name : l->host_name,
-             l->region, l->region[0] ? "  " : "", l->players, l->max_players, track, now);
+             where, where[0] ? "  " : "", l->players, l->max_players, track, now);
 }
 
 static void enter_room(int create, const char *code)
@@ -486,6 +519,10 @@ static void page_build(MenuPage *p)
         menu_page_row(p, "Public Races", 1);
         menu_page_row(p, "Create A Public Race", 1);
         menu_page_row(p, "Create A Private Race", 1);
+        {
+            const SettingInfo *s = region_setting();
+            menu_page_value(p, "Room Region:", s ? s->choices[region_index()].label : "Auto", MENU_VALUE_ARROWS);
+        }
         menu_page_row(p, "Join With A Code", 1);
         if (outdated) menu_page_row(p, "Update Now", 1);
         disc_shown = disc_note();
@@ -547,7 +584,7 @@ static void refused(const NetLobby *l)
     host_service_net_leave();
     reset_selection();
     connecting = 0;
-    if (too_old) home_row = 6;
+    if (too_old) home_row = HOME_UPDATE;
 }
 
 /* In the room: the host's settings, then this member's first (not ready) state, once each. */
@@ -1584,24 +1621,31 @@ static void room_draw(MenuPage *p)
             /* the left text's room, less a quarter: mixed-case track names draw wider than
                menu_text_width measures them (as capitals); a tenth was not enough (finding 132) */
             int room_w = (CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10) * 3 / 4;
-            char forms[4][64];
+            char forms[5][64];
             const char *what = l->last_race_id ? track_name(l->last_race_track) : NULL, *region = l->room_region;
+            const char *area = l->room_area[0] ? l->room_area : region;  /* finding 181 */
             char players[16];
             snprintf(players, sizeof players, "PLAYERS %d/%d", l->nmembers, l->max_players);
-            /* before a race: the players and where the room runs (finding 135), "- EU SERVER", then
-               "- EU", then left out; after a race: the last race's track only (the region is in the
-               list and was in this header before the race) */
+            /* before a race: the players and where the room runs (findings 135, 181), "- EU WEST
+               SERVER", then "- EU WEST", then "- EU", then left out; after a race: the last race's
+               track only (the region is in the list and was in this header before the race) */
             if (what) {
                 snprintf(forms[0], 64, "LAST RACE - %s", what);
                 snprintf(forms[1], 64, "%s", what);
-                forms[2][0] = forms[3][0] = 0;
+                forms[2][0] = forms[3][0] = forms[4][0] = 0;
             } else {
-                snprintf(forms[0], 64, "%s%s%s%s", players, region[0] ? " - " : "", region, region[0] ? " SERVER" : "");
-                snprintf(forms[1], 64, "%s%s%s", players, region[0] ? " - " : "", region);
-                snprintf(forms[2], 64, "%s", players);
-                forms[3][0] = 0;
+                snprintf(forms[0], 64, "%s%s%s%s", players, area[0] ? " - " : "", area, area[0] ? " SERVER" : "");
+                snprintf(forms[1], 64, "%s%s%s", players, area[0] ? " - " : "", area);
+                if (strcmp(area, region) && region[0]) snprintf(forms[2], 64, "%s - %s", players, region);
+                else forms[2][0] = 0;
+                snprintf(forms[3], 64, "%s", players);
+                forms[4][0] = 0;
             }
-            const char *const texts[] = {forms[0], forms[1], forms[2][0] ? forms[2] : NULL, forms[3][0] ? forms[3] : NULL, NULL};
+            const char *texts[6];
+            int k = 0;
+            for (int f = 0; f < 5; f++)
+                if (forms[f][0]) texts[k++] = forms[f];
+            texts[k] = NULL;
             const char *left = first_fit(texts, st, 80, room_w);
             put(MENU_LEFT, CARD_X + 3, TOP + 1, left, fit(left, st_row, 80, room_w));
         }
@@ -1786,11 +1830,13 @@ static void page_accept(MenuPage *p, int row)
             }
         } else if (row == 3 || row == 4)
             enter_room(row == 3 ? 2 : 1, NULL);
-        else if (row == 5) {
+        else if (row == HOME_REGION)
+            region_step(p, 1);
+        else if (row == HOME_CODE) {
             entry[0] = 0;
             entry_pick = 0;
             go(CODE);
-        } else if (row == 6 && outdated) {
+        } else if (row == HOME_UPDATE && outdated) {
             hle_log("online menu: Update Now\n");
             host_service_update_request();  /* ends the game; the launcher updates it */
         }
@@ -1865,12 +1911,15 @@ static void page_back(MenuPage *p)
 static void page_step(MenuPage *p, int row, int by)
 {
     if (connecting) return;
+    if (screen == HOME && row == HOME_REGION) {
+        region_step(p, by);
+        return;
+    }
     if ((screen == NAME || screen == CODE) && row == 0) {
         int n = screen == NAME ? (int)sizeof name_letters - 1 : (int)sizeof code_letters - 1;
         entry_pick = (entry_pick + by + n) % n;
         menu_page_sound(by > 0);
     }
-    (void)p;
 }
 
 static void page_left(MenuPage *p, int row) { page_step(p, row, -1); }

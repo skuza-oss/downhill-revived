@@ -59,6 +59,7 @@ static void send_binary(NetClient *c, const uint8_t *data, size_t n)
 void client_init(NetClient *c, const char *name, const char *version, const char *iso)
 {
     memset(c, 0, sizeof *c);
+    c->race_ms = -1;
     c->lock = SDL_CreateMutex();
     c->changed = SDL_CreateCondition();
     copy(c->name, sizeof c->name, name);
@@ -378,6 +379,36 @@ int client_riders_ms(NetClient *c)
     return worst < 0 ? -1 : (int)(worst + 0.5);
 }
 
+void client_race_rtt(NetClient *c, int ms)
+{
+    double now = net_now_ms();
+    SDL_LockMutex(c->lock);
+    if (ms < 0) {
+        c->nrace_rtt = 0, c->race_ms = -1;
+    } else if (now >= c->next_race_sample) {
+        float sorted[5];
+        c->next_race_sample = now + 1000;
+        memmove(c->race_rtt + 1, c->race_rtt, sizeof c->race_rtt - sizeof c->race_rtt[0]);
+        c->race_rtt[0] = (float)ms;
+        if (c->nrace_rtt < 5) c->nrace_rtt++;
+        memcpy(sorted, c->race_rtt, sizeof sorted);
+        for (int i = 1; i < c->nrace_rtt; i++)
+            for (int j = i; j > 0 && sorted[j] < sorted[j - 1]; j--) {
+                float x = sorted[j];
+                sorted[j] = sorted[j - 1], sorted[j - 1] = x;
+            }
+        c->race_ms = (int)(sorted[c->nrace_rtt / 2] + 0.5f);
+        if (c->race_window_n < NET_RTT_WINDOW) c->race_window[c->race_window_n++] = (float)ms;
+        if (ms > c->race_window_worst) c->race_window_worst = (float)ms;
+    }
+    SDL_UnlockMutex(c->lock);
+}
+
+int client_race_ms(NetClient *c)
+{
+    return c->race_ms;
+}
+
 /* "last 30 s: ping 34 ms median, 51 worst (30 pings); players: ANNA (host, PL) 36 ms", and a new
    window from now. */
 static void window_stats(NetClient *c, char *out, size_t cap)
@@ -399,6 +430,20 @@ static void window_stats(NetClient *c, char *out, size_t cap)
                       (int)(c->window_worst + 0.5f), c->window_count, c->window_count == 1 ? "" : "s");
     } else
         n += snprintf(out + n, cap - n, "no pings");
+    if (c->race_window_n && n < (int)cap - 80) {
+        /* the race network's round trip beside the room's (finding 181) */
+        int k = c->race_window_n;
+        memcpy(sorted, c->race_window, k * sizeof sorted[0]);
+        for (int i = 1; i < k; i++)
+            for (int j = i; j > 0 && sorted[j] < sorted[j - 1]; j--) {
+                float x = sorted[j];
+                sorted[j] = sorted[j - 1], sorted[j - 1] = x;
+            }
+        n += snprintf(out + n, cap - n, "; race network %d ms median, %d worst (%d samples)",
+                      (int)((k % 2 ? sorted[k / 2] : (sorted[k / 2 - 1] + sorted[k / 2]) / 2) + 0.5f),
+                      (int)(c->race_window_worst + 0.5f), k);
+    }
+    c->race_window_n = 0, c->race_window_worst = 0;
     for (int i = 0; i < l->nmembers && n < (int)cap - 64; i++) {
         const NetMember *m = &l->member[i];
         int host = m->id == l->host_id;
@@ -436,11 +481,13 @@ static void window_stats(NetClient *c, char *out, size_t cap)
     c->window_start = now;
 }
 
-/* "where the room runs" for the log: "FRA (EU)", "EU (location not known yet)" or "?" */
+/* "where the room runs" for the log: "FRA (EU EAST)", "EU EAST (location not known yet)" or "an
+   unknown location"; ", picked by its creator" when the region was (finding 181). */
 static void room_place(const NetLobby *l, char *out, size_t cap)
 {
-    if (l->room_colo[0]) snprintf(out, cap, "%s (%s)", l->room_colo, l->room_region[0] ? l->room_region : "region unknown");
-    else if (l->room_region[0]) snprintf(out, cap, "%s (location not known yet)", l->room_region);
+    const char *where = l->room_area[0] ? l->room_area : l->room_region, *picked = l->room_chosen ? ", picked by its creator" : "";
+    if (l->room_colo[0]) snprintf(out, cap, "%s (%s%s)", l->room_colo, where[0] ? where : "region unknown", picked);
+    else if (where[0]) snprintf(out, cap, "%s (location not known yet%s)", where, picked);
     else snprintf(out, cap, "an unknown location");
 }
 
@@ -503,12 +550,15 @@ void client_on_text(NetClient *c, const char *text, size_t n)
                 say(c, "{\"type\":\"ready\",\"ready\":true}");
         }
         /* where this PC and the room are (finding 135; an older server sends none) */
-        l->edge_colo[0] = l->country[0] = l->continent[0] = l->room_colo[0] = l->room_region[0] = 0;
+        l->edge_colo[0] = l->country[0] = l->continent[0] = l->room_colo[0] = l->room_region[0] = l->room_area[0] = 0;
+        l->room_chosen = 0;
         located = json_string(text, "edgeColo", l->edge_colo, sizeof l->edge_colo);
         json_string(text, "country", l->country, sizeof l->country);
         json_string(text, "continent", l->continent, sizeof l->continent);
         json_string(text, "roomColo", l->room_colo, sizeof l->room_colo);
         json_string(text, "roomRegion", l->room_region, sizeof l->room_region);
+        json_string(text, "roomArea", l->room_area, sizeof l->room_area);  /* finding 181 */
+        json_bool(text, "roomChosen", &l->room_chosen);
         {
             double now = net_now_ms();
             int n = snprintf(line, sizeof line, "net: %s room %s%s%s: ", c->joined_at ? "back in" : "in", l->code,
@@ -519,7 +569,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             if (!located)
                 snprintf(line + n, sizeof line - n, "the server sent no locations (an older server)");
             else {
-                char room[48];
+                char room[80];
                 room_place(l, room, sizeof room);
                 snprintf(line + n, sizeof line - n, "this PC reached Cloudflare %s%s%s%s%s%s; the room runs in %s",
                          l->edge_colo[0] ? l->edge_colo : "?", l->country[0] ? " from " : "", l->country,
@@ -534,6 +584,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         char path[32];
         int n = json_count(text, "members");
         json_string(text, "region", l->room_region, sizeof l->room_region);
+        json_string(text, "area", l->room_area, sizeof l->room_area);
         json_string(text, "colo", l->room_colo, sizeof l->room_colo);
         c->where_count = 0;
         for (int i = 0; i < n && c->where_count < NET_MAX_SLOTS; i++) {
@@ -550,7 +601,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             for (int k = 0; k < c->where_count; k++)
                 if (c->where_id[k] == l->member[i].id) memcpy(l->member[i].region, c->where_region[k], sizeof l->member[i].region);
         if (c->joined_at && l->room_colo[0] && strcmp(l->room_colo, c->logged_colo)) {
-            char room[48];
+            char room[80];
             room_place(l, room, sizeof room);
             snprintf(line, sizeof line, "net: room %s runs in %s", l->code, room);
             snprintf(c->logged_colo, sizeof c->logged_colo, "%s", l->room_colo);
@@ -963,6 +1014,7 @@ int client_read_lobbies(NetClient *c, const char *body, double sent, double got,
         json_number(body, FIELD("nextRaceAt"), &l->next_race_at);
         json_string(body, FIELD("region"), l->region, sizeof l->region);  /* finding 135 */
         json_string(body, FIELD("colo"), l->colo, sizeof l->colo);
+        json_string(body, FIELD("area"), l->area, sizeof l->area);  /* finding 181 */
         l->timed = timed;
 #undef FIELD
     }

@@ -117,7 +117,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   game's default (dhd.ini `server =` or `DHD_NET_SERVER` override it). Rooms of up to 10
   (finding 123) that live across races (findings 118, 119), 25 tracks with Salt City MX and TD
   (finding 166), Ready for the next race and MOSH by
-  the host's pick (finding 128), rooms placed near their creator (finding 135), rejoin by token
+  the host's pick (finding 128), rooms placed where their creator picks (ONLINE's Room Region row,
+  dhd.ini `room_region`) or, on Auto, by the Cloudflare location the creator reached, from measured
+  round trips (findings 135, 181), rejoin by token
   (finding 137); a room connection lost in a race no longer ends it: the game races on over the
   SFU and rejoins, the seat is kept 20 s (finding 175). Protocol: `docs/online-protocol.md`;
   steps: `online/server/README.md`.
@@ -144,8 +146,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   carries the server's time); each player's own rider 60 times a second, AI riders 30. Puppets are
   drawn at the present: the newest snapshot carried forward by its velocity and angular velocity,
   corrections fading in (`DHD_PUPPET_PREDICT=0` interpolates in the past instead). Hits are
-  decided on the puppet as drawn. In a race the FPS & Ping counter shows "RIDERS N MS", the other
-  riders' snapshot delay; outside a race "N MS PING", the round trip to the room's server.
+  decided on the puppet as drawn. In a room the FPS & Ping counter shows "SERVER N MS", the round
+  trip to the room's server, and "RACE N MS", the round trip to Cloudflare's race network (the SFU
+  association's ICE checks); in a race the second line is "RIDERS N MS", the other riders'
+  snapshot delay (findings 169, 181).
 - Client: `port/net/` over `port/net/ws.h`, the Rust crate `dhd_net` (`port/render/net`:
   tungstenite over rustls for the lobby, str0m for the SFU with a vendored RustCrypto adapter,
   its own TURN client; webpki roots, no OS certificate store).

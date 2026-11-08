@@ -98,6 +98,8 @@ const CLOSE_GRACE: Duration = Duration::from_secs(2);
 /// A channel the room allocated that hasn't opened this long after (its stream id still held by a
 /// reset that never completed) fails the association: a new one starts clean.
 const OPEN_LIMIT: Duration = Duration::from_secs(10);
+/// How often str0m reports the connection's statistics: the race ping is read from them.
+const STATS_INTERVAL: Duration = Duration::from_secs(1);
 pub struct Sfu {
     rtc: Rtc,
     pending: Option<SdpPendingOffer>,
@@ -156,6 +158,10 @@ pub struct Sfu {
     /// Whether the last datagram str0m got came through the relay; at Connected, the path used.
     last_in_relayed: bool,
     via_relay: bool,
+    /// The race ping (finding 181): the round trip of the latest ICE check on the selected pair,
+    /// this PC to Cloudflare Realtime's nearest location (through the relay when it carries the
+    /// race), from str0m's statistics; None until one is measured.
+    rtt: Option<Duration>,
     #[cfg(test)]
     probe: ProbeTimes,
 }
@@ -348,7 +354,8 @@ impl Sfu {
             let wake = wake.clone();
             std::thread::Builder::new().name("dhd-sfu-read".into()).spawn(move || read_socket(socket, inbox, alive, failed, wake))?;
         }
-        let mut rtc = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
+        let mut rtc = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into())
+            .set_stats_interval(Some(STATS_INTERVAL)).build(Instant::now());
         rtc.add_local_candidate(Candidate::host(socket.local_addr()?, "udp")?);
         let mut change = rtc.sdp_api();
         change.add_channel_with_config(ChannelConfig { label: "server-events".into(), negotiated: Some(65534), ..Default::default() });
@@ -364,7 +371,7 @@ impl Sfu {
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], waiting: vec![], closing: vec![], orphans: vec![], slots: HashMap::new(),
             race: 0, race_open: false, me: None, started_at: None, created: Instant::now(), future_events: VecDeque::new(),
             connected: false, announced: false, released: false, drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
-            wake, direct, turn_allowed, answered_at: None, connected_at: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false,
+            wake, direct, turn_allowed, answered_at: None, connected_at: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -595,6 +602,10 @@ impl Sfu {
     pub fn answered(&self) -> bool { self.answered_at.is_some() }
     /// It connected through the TURN relay (a replacement asks for TURN at once).
     pub fn via_relay(&self) -> bool { self.via_relay }
+    /// The race ping in ms once connected and measured (finding 181), else None.
+    pub fn rtt_ms(&self) -> Option<u32> {
+        self.connected.then_some(self.rtt?).map(|d| d.as_millis().min(60_000) as u32)
+    }
     /// Its TURN credentials are TURN_RENEW old and no race runs: time for a new association.
     pub fn renew_due(&self) -> bool {
         !self.race_open && self.relay.is_some() && self.turn_at.is_some_and(|t| t.elapsed() >= TURN_RENEW)
@@ -845,6 +856,9 @@ impl Sfu {
                             }
                         }
                     }
+                }
+                Output::Event(Event::PeerStats(stats)) => {
+                    if let Some(rtt) = stats.selected_candidate_pair.and_then(|p| p.current_round_trip_time) { self.rtt = Some(rtt); }
                 }
                 Output::Event(Event::Connected) if !self.connected => {
                     self.connected = true;
@@ -1366,6 +1380,22 @@ mod tests {
         assert_eq!(client.channels.iter().map(|c| c.id).collect::<Vec<_>>(), ids, "the same channels throughout");
         assert!(client.connected && client.rtc.is_alive());
         let _ = own_state;
+    }
+
+    /// Finding 181: the race ping comes from the selected ICE pair's checks, once connected: none
+    /// before, a loopback round trip after (str0m reports its statistics every STATS_INTERVAL).
+    #[test]
+    fn a_connected_association_measures_the_race_ping() {
+        let (mut sfu, mut client) = LocalSfu::start();
+        assert_eq!(client.rtt_ms(), None);
+        let (mut text, mut frames) = (vec![], vec![]);
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && client.rtt_ms().is_none() {
+            sfu.pump(&mut client, &mut text, &mut frames);
+        }
+        assert!(client.connected, "connected");
+        let ms = client.rtt_ms().expect("a race ping within 10 s of connecting");
+        assert!(ms < 1000, "{ms} ms on loopback");
     }
 
     /// Finding 177: the room closes a subscription and Cloudflare gives its stream id to the next

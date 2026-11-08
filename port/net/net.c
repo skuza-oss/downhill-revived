@@ -67,7 +67,11 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
 
 static int on_tick(void *ctx)
 {
+    /* the send thread of conn itself: net_leave clears conn before it stops the connection, and
+       a connection's threads end before the next one starts */
+    WsConn *ws = conn;
     (void)ctx;
+    client_race_rtt(&client, ws ? ws_race_rtt_ms(ws) : -1);
     return client_tick(&client);
 }
 
@@ -123,7 +127,15 @@ static int connect_to(const char *path)
 
 int net_create_room(void)
 {
-    return connect_to("/v1/rooms/new");
+    /* the region its creator picked (finding 181): a hint's letters only, never anything else in
+       the URL; "auto", unset or anything odd lets the server pick */
+    const char *region = getenv("DHD_NET_ROOM_REGION");
+    char path[64];
+    if (region && *region && strcmp(region, "auto") && strlen(region) < 16 && strspn(region, "abcdefghijklmnopqrstuvwxyz-") == strlen(region))
+        snprintf(path, sizeof path, "/v1/rooms/new?region=%s", region);
+    else
+        snprintf(path, sizeof path, "/v1/rooms/new");
+    return connect_to(path);
 }
 
 int net_join_room(const char *code)
@@ -213,6 +225,12 @@ int net_ping_ms(void)
 
 /* In a race, the other riders' delay (ms; client_riders_ms), else -1: the counter shows it
    instead of the ping to the room's server, which carries no race data (finding 169). */
+int net_race_ms(void)
+{
+    const NetLobby *l = &client.lobby;
+    return inited && (l->state == NET_LOBBY || l->state == NET_RACING) && !l->offline && l->code[0] ? client_race_ms(&client) : -1;
+}
+
 int net_riders_ms(void)
 {
     return inited && client.racing && !client.lobby.offline ? client_riders_ms(&client) : -1;

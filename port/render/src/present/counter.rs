@@ -11,21 +11,24 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
     return Out(vec4f(uv * vec2f(2., -2.) + vec2f(-1., 1.), 0., 1.), uv);
 }
 @fragment fn fs(p: Out) -> @location(0) vec4f {
-    return textureLoad(image, vec2i(p.uv * vec2f(128., 22.)), 0);
+    return textureLoad(image, vec2i(p.uv * vec2f(128., 32.)), 0);
 }
 "#;
+
+/// The bitmap: up to three lines of 8x8 glyphs, 10 pixels apart (the shader's size too).
+const W: u32 = 128;
+const H: u32 = 32;
 
 #[derive(Default)]
 pub struct Counter {
     enabled: bool,
-    /// The online line: milliseconds (< 0: none), and whether they are the riders' (a race) or the
-    /// room server's ping.
-    ms: i32,
-    riders: bool,
+    /// The online numbers, ms (< 0: none): the room server's round trip, the race network's, the
+    /// other riders' delay (`lines`).
+    online: [i32; 3],
     start: Option<f64>,
     frames: u32,
     fps: u32,
-    shown: Option<(u32, i32, bool)>,
+    shown: Option<(u32, [i32; 3])>,
     objects: Option<Objects>,
 }
 struct Objects {
@@ -36,10 +39,9 @@ struct Objects {
 impl Counter {
     // Called only for acquired pictures immediately before presenting. Count those
     // pictures, including interpolated ones, rather than simulation ticks/vblanks.
-    pub fn update(&mut self, enabled: bool, ms: i32, riders: bool, now: f64) {
+    pub fn update(&mut self, enabled: bool, online: [i32; 3], now: f64) {
         self.enabled = enabled;
-        self.ms = ms;
-        self.riders = riders;
+        self.online = online;
         if let Some(start) = self.start {
             self.frames += 1;
             let elapsed = now - start;
@@ -57,15 +59,15 @@ impl Counter {
         if !self.enabled { return; }
         let o = self.objects.get_or_insert_with(|| Objects::new(gpu, format));
         // The numbers change twice a second at most: the bitmap is written again only then.
-        if self.shown != Some((self.fps, self.ms, self.riders)) {
-            self.shown = Some((self.fps, self.ms, self.riders));
-            o.write(gpu, &lines(self.fps, self.ms, self.riders));
+        if self.shown != Some((self.fps, self.online)) {
+            self.shown = Some((self.fps, self.online));
+            o.write(gpu, &lines(self.fps, self.online));
         }
         // Integer scaling keeps the bitmap crisp: eight pixels is about 2% of height.
         let scale = ((h as f32 / 400.0).round() as u32).max(1);
         let margin = (4 * scale).min(w / 4).min(h / 4);
-        let vw = 128 * scale;
-        let vh = 22 * scale;
+        let vw = W * scale;
+        let vh = H * scale;
         if vw + margin > w || vh + margin > h { return; }
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("performance counter") });
         {
@@ -78,8 +80,8 @@ impl Counter {
             pass.set_pipeline(&o.pipe);
             pass.set_bind_group(0, &o.group, &[]);
             // Draw the whole fixed texture; transparent unused pixels cost no background.
-            let full_w = 128 * scale;
-            let full_h = 22 * scale;
+            let full_w = W * scale;
+            let full_h = H * scale;
             pass.set_viewport((w - margin - vw) as f32, margin as f32, full_w as f32, full_h as f32, 0.0, 1.0);
             pass.set_scissor_rect(w - margin - vw, margin, vw, vh);
             pass.draw(0..3, 0..1);
@@ -87,38 +89,47 @@ impl Counter {
         gpu.queue.submit([encoder.finish()]);
     }
 }
-/// The counter's text: frames a second, then the online line. In a race the other riders' delay
-/// (how old their snapshots are when they arrive: what the puppets are predicted across, finding
-/// 169), else the round trip to the room's server, which carries no race data. At most 13
-/// characters a line (the bitmap is 128 pixels wide).
-fn lines(fps: u32, ms: i32, riders: bool) -> [String; 2] {
-    [format!("{} FPS", fps.min(99999)),
-     if ms < 0 { String::new() } else if riders { format!("RIDERS {} MS", ms.min(999)) } else { format!("{} MS PING", ms.min(99999)) }]
+/// The counter's text (finding 181): frames a second, then online two numbers, each named for what
+/// it measures, since the room's server carries no race data (findings 158, 177):
+/// - "SERVER n MS": the round trip to the room's server (the lobby; it can run on another
+///   continent, finding 135);
+/// - in a race "RIDERS n MS": how old the other riders' snapshots are when they arrive, what the
+///   puppets are predicted across (finding 169); else, and in a race with no rider heard from yet,
+///   "RACE n MS": the round trip to Cloudflare's race network, where this PC's race frames go.
+/// `online` is [server, race, riders] in ms, < 0 for none. At most 13 characters a line (the bitmap
+/// is 128 pixels wide: 15 fit), so each number stops at 999.
+fn lines(fps: u32, online: [i32; 3]) -> Vec<String> {
+    let [server, race, riders] = online;
+    let mut out = vec![format!("{} FPS", fps.min(99999))];
+    if server >= 0 { out.push(format!("SERVER {} MS", server.min(999))); }
+    if riders >= 0 { out.push(format!("RIDERS {} MS", riders.min(999))); }
+    else if race >= 0 { out.push(format!("RACE {} MS", race.min(999))); }
+    out
 }
 
 impl Objects {
-    fn write(&self, gpu: &Gpu, lines: &[String; 2]) {
-        let width = lines.iter().map(|s| s.len()).max().unwrap_or(0) as u32 * 8 + 4;
-        let height = if lines[1].is_empty() { 12 } else { 22 };
-        let xoff = 128 - width;
-        let mut pixels = vec![0u8; 128 * 22 * 4];
+    fn write(&self, gpu: &Gpu, lines: &[String]) {
+        let width = (lines.iter().map(|s| s.len()).max().unwrap_or(0) as u32 * 8 + 4).min(W);
+        let height = (lines.len() as u32 * 10 + 2).min(H);
+        let xoff = W - width;
+        let mut pixels = vec![0u8; (W * H * 4) as usize];
         for y in 0..height { for x in 0..width {
-            pixels[(y * 128 + x + xoff) as usize * 4 + 3] = 180;
+            pixels[(y * W + x + xoff) as usize * 4 + 3] = 180;
         }}
         for (line, text) in lines.iter().enumerate() {
             for (col, ch) in text.bytes().enumerate() {
                 let glyph = font8x8::glyph(ch);
                 for (y, row) in glyph.iter().enumerate() { for x in 0..8 {
                     if row & (1 << x) != 0 {
-                        let at = ((line * 10 + y + 2) * 128 + col * 8 + x + 2 + xoff as usize) * 4;
+                        let at = ((line * 10 + y + 2) * W as usize + col * 8 + x + 2 + xoff as usize) * 4;
                         pixels[at..at+4].fill(255);
                     }
                 }}
             }
         }
         gpu.queue.write_texture(wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &pixels, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(512), rows_per_image: Some(22) },
-            wgpu::Extent3d { width: 128, height: 22, depth_or_array_layers: 1 });
+            &pixels, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(W * 4), rows_per_image: Some(H) },
+            wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 });
     }
 
     fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
@@ -132,7 +143,7 @@ impl Objects {
             primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview_mask: None, cache: None,
         });
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("performance counter"), size: wgpu::Extent3d { width: 128, height: 22, depth_or_array_layers: 1 },
+            label: Some("performance counter"), size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[],
         });
@@ -203,12 +214,21 @@ mod tests {
     use super::lines;
 
     #[test]
-    fn online_line_names_what_it_measures_and_fits() {
-        assert_eq!(lines(144, 38, true), ["144 FPS".to_string(), "RIDERS 38 MS".to_string()]);
-        assert_eq!(lines(60, 21, false)[1], "21 MS PING");
-        assert_eq!(lines(60, -1, true)[1], "");
-        for l in lines(999_999, 123_456, true).iter().chain(lines(999_999, 123_456, false).iter()) {
-            assert!(l.len() * 8 + 4 <= 128, "{l} is wider than the bitmap");
+    fn online_lines_name_what_they_measure_and_fit() {
+        // in a room: the server's round trip and the race network's (finding 181)
+        assert_eq!(lines(144, [180, 40, -1]), ["144 FPS", "SERVER 180 MS", "RACE 40 MS"]);
+        // in a race: the server's, then the riders' delay (finding 169)
+        assert_eq!(lines(60, [180, 40, 38]), ["60 FPS", "SERVER 180 MS", "RIDERS 38 MS"]);
+        // before the race network answers, without a server ping, in no room
+        assert_eq!(lines(60, [21, -1, -1]), ["60 FPS", "SERVER 21 MS"]);
+        assert_eq!(lines(60, [-1, 30, -1]), ["60 FPS", "RACE 30 MS"]);
+        assert_eq!(lines(60, [-1, -1, -1]), ["60 FPS"]);
+        assert_eq!(lines(60, [5000, -1, -1])[1], "SERVER 999 MS");
+        for online in [[123_456, 123_456, 123_456], [123_456, 123_456, -1], [1000, 1000, -1]] {
+            let l = lines(999_999, online);
+            assert!(l.len() as u32 * 10 + 2 <= super::H, "{l:?}: more lines than the bitmap holds");
+            for line in &l[1..] { assert!(line.len() <= 13, "{line}: more than 13 characters"); }
+            for line in &l { assert!(line.len() as u32 * 8 + 4 <= super::W, "{line} is wider than the bitmap"); }
         }
     }
 }

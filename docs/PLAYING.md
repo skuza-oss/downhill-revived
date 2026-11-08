@@ -280,6 +280,14 @@ In a race the riders' data goes over Cloudflare's network, from the Cloudflare l
 to you (UDP). Where a network blocks UDP, the game falls back to an encrypted connection on port
 443 by itself. No other player ever gets your internet address.
 
+A room's server (the lobby: who is in it, the next race, the start) runs in one of Cloudflare's
+Durable Object cities, which are in North America, Europe, East and Southeast Asia and Australia
+only. ONLINE's **Room Region** row picks where the rooms you create run: Auto (the server picks the
+one nearest the Cloudflare location you reach) or EU West, EU East, NA East, NA West, Asia NE,
+Asia SE or Oceania. The FPS & Ping counter (`perf_counter`) shows both numbers: `SERVER` is the
+room's server and `RACE` the race network. From South America, Africa or the Middle East the
+`SERVER` number is high wherever the room runs; races don't go through it.
+
 Running your own server is optional. `online/server/` is the server (Cloudflare Workers), and
 [online/server/README.md](../online/server/README.md) explains how to deploy it. Then put its
 address on the `server =` line of `dhd.ini` (the game writes the file at the first start):
@@ -347,9 +355,10 @@ first start. The REVIVED SETTINGS page writes most of them for you.
 | `server` | (empty) | the online server; empty: the official one |
 | `font` | `sharp` | `original` draws the game's font as the PS2 does |
 | `vsync` | `1` | `1` shows each picture without tearing, `0` sends it at once (may tear) |
-| `perf_counter` | `0` | `1` shows FPS & Ping: frames a second and, online, `N MS PING` (the round trip to the room's server); in a race `RIDERS N MS`, how old the other riders' positions are when they arrive |
+| `perf_counter` | `0` | `1` shows FPS & Ping: frames a second and, online, `SERVER N MS` (the round trip to the room's server, which carries no race data) and `RACE N MS` (the round trip to Cloudflare's race network, where race data goes); in a race `RIDERS N MS` instead of `RACE`, how old the other riders' positions are when they arrive |
 | `unlock_all` | `0` | `1`: everything reads as unlocked, without changing the save |
 | `name` | (empty) | your rider name in online races |
+| `room_region` | `auto` | where the rooms you create run (ONLINE's Room Region row): `auto` (the server picks by where you reach Cloudflare), `weur`, `eeur`, `enam`, `wnam`, `apac-ne`, `apac-se` or `oc` |
 
 Each key has a `DHD_*` environment variable (`scale` is `DHD_SCALE`, `server` is
 `DHD_NET_SERVER`; see [docs/BUILDING.md](BUILDING.md)), which wins over the file.

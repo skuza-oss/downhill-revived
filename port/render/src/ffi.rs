@@ -403,11 +403,11 @@ pub unsafe extern "C" fn dhdr_present_exact(s: *mut DhdrSurface, x: *mut DhdrExa
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_surface_counter(s: *mut DhdrSurface, enabled: i32, ms: i32, riders: i32, seconds: f64) {
+pub unsafe extern "C" fn dhdr_surface_counter(s: *mut DhdrSurface, enabled: i32, server_ms: i32, race_ms: i32, riders_ms: i32, seconds: f64) {
     const E: &str = "dhdr_surface_counter";
     let _g = Guard::enter(E);
     // SAFETY: the caller owns a live surface, as for surface_present.
-    unsafe { surface(s, E) }.with(E, |s| s.counter.update(enabled != 0, ms, riders != 0, seconds));
+    unsafe { surface(s, E) }.with(E, |s| s.counter.update(enabled != 0, [server_ms, race_ms, riders_ms], seconds));
 }
 
 #[no_mangle]

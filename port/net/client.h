@@ -59,6 +59,15 @@ typedef struct {
     float window_worst;
     double window_start, next_log, joined_at;  /* joined_at 0: not in a room (nothing to log) */
     char logged_colo[8];  /* the room location the log has named */
+    /* The race ping (finding 181): the SFU association's round trip, sampled once a second
+       (client_race_rtt); the last 5 for the counter (race_ms, their median, -1 none) and the
+       samples since the last net: line. */
+    float race_rtt[5];
+    int nrace_rtt, race_ms;
+    double next_race_sample;
+    float race_window[NET_RTT_WINDOW];
+    int race_window_n;
+    float race_window_worst;
     /* Each sender's newest snapshot age on the server clock (now minus the bundle's stamp, the
        moment its snapshots show), sampled every network tick; 1001 is the overflow
        bin. Messages: STATE messages received from that sender; states_sent: ours. */
@@ -127,6 +136,10 @@ int client_read_lobbies(NetClient *c, const char *body, double sent, double got,
 int client_send_frame(NetClient *c, int type, const void *payload, size_t n);
 /* The other riders' delay for the counter in a race (ms), -1 none (finding 169). */
 int client_riders_ms(NetClient *c);
+/* The network thread, every tick: the transport's race ping (ws_race_rtt_ms; -1 none). Sampled
+   once a second for the counter and the net: lines (finding 181). */
+void client_race_rtt(NetClient *c, int ms);
+int client_race_ms(NetClient *c);  /* the counter's race ping, -1 none */
 int client_receive_frame(NetClient *c, uint8_t *out, size_t max);
 
 #endif

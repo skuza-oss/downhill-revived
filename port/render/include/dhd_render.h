@@ -157,10 +157,13 @@ DHDR_FN(dhdr_surface_usage)   uint32_t dhdr_surface_usage(const DhdrSurface *s);
 DHDR_FN(dhdr_present_exact)   int dhdr_present_exact(DhdrSurface *s, DhdrExact *x, const uint32_t *pixels,
                                                      uint32_t w, uint32_t h, uint32_t window_w, uint32_t window_h);
 /* Presents the texture the last call that returned 1 drew (SurfaceTexture::present). */
-/* Live presenter overlay. The online line: ms < 0 hides it; riders 0: "ms MS PING" (the round trip
-   to the room's server), 1: "RIDERS ms MS" (how old the other riders' snapshots are on arrival, in
-   a race; finding 169). seconds is monotonic wall time. */
-DHDR_FN(dhdr_surface_counter) void dhdr_surface_counter(DhdrSurface *s, int enabled, int ms, int riders, double seconds);
+/* Live presenter overlay: frames a second, then the online lines, each hidden when its value is
+   < 0 (finding 181): "SERVER n MS", server_ms the round trip to the room's server; then in a race
+   "RIDERS n MS", riders_ms how old the other riders' snapshots are on arrival (finding 169), else
+   "RACE n MS", race_ms the round trip to Cloudflare's race network (the SFU). seconds is
+   monotonic wall time. */
+DHDR_FN(dhdr_surface_counter) void dhdr_surface_counter(DhdrSurface *s, int enabled, int server_ms, int race_ms, int riders_ms,
+                                                        double seconds);
 /* The touch controls' overlay (finding 141) for the next pictures: count shapes of 16 floats each
    (kind, x, y, a, b, c, d, 0, fill r g b a, line r g b a; port/hle/touch.h's TouchShape in mm and
    colours 0..1) on a screen width_mm x height_mm; count 0 hides it. The data is copied. */

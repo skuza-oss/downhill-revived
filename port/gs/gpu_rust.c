@@ -78,13 +78,13 @@ static void touch_present(DhdrSurface *surface)
 static void counter_present(DhdrSurface *surface, int touched)
 {
     if (SDL_GetAtomicInt(&counter_on) < 0) gs_gpu_counter_apply();
-    int enabled = SDL_GetAtomicInt(&counter_on), ms = -1, riders = 0;
+    int enabled = SDL_GetAtomicInt(&counter_on), server_ms = -1, race_ms = -1, riders_ms = -1;
 #ifndef DHD_GS_TEST_BUILD
-    /* in a race the other riders' delay, else the room server's ping (finding 169) */
-    if (enabled && (ms = net_riders_ms()) >= 0) riders = 1;
-    else if (enabled) ms = net_ping_ms();
+    /* the room server's ping, then in a race the other riders' delay (finding 169), else the round
+       trip to the race network (finding 181) */
+    if (enabled) server_ms = net_ping_ms(), race_ms = net_race_ms(), riders_ms = net_riders_ms();
 #endif
-    dhdr_surface_counter(surface, enabled, ms, riders,
+    dhdr_surface_counter(surface, enabled, server_ms, race_ms, riders_ms,
                          (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency());
     if (!touched) touch_present(surface);
     dhdr_surface_present(surface);
