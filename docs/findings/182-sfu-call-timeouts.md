@@ -25,9 +25,10 @@ one with forced call timeouts, nobody out of the race. Out of scope: the publica
 
 ## Progress
 
-- [x] 2026-11-08: evidence from Workers Logs (below)
-- [ ] the fix, unit tests
-- [ ] test Worker runs
+- [x] 2026-11-08: evidence from Workers Logs (below): 60a2272
+- [x] 2026-11-08: the fix and its unit tests (`test/sfu-timeouts.test.ts`): 030f457
+- [x] 2026-11-08: the spin the test Worker found (Surprises), with its test: c15e41c
+- [x] 2026-11-08: test Worker runs (below); the test Worker deleted
 
 ## Evidence (Workers Logs, 2026-11-07 16:00 to 2026-11-08 22:00 local)
 
@@ -88,10 +89,96 @@ p50 1,054 ms, p99 5,637 ms, p99.9 8,286 ms, max 9,362 ms (4,363 calls, none over
 
 ## Decisions
 
+- **One gate for the room's calls, not a longer timeout.** `CallGate` (sfu.ts): at most 5 Realtime
+  and TURN calls at once (`ROOM_CALLS`; the runtime allows 6 waiting for headers, one is left for
+  anything else), subscription work (subscriptions, closes, inspections) at most 4
+  (`BACKGROUND_CALLS`). A member's own session, publication and TURN calls are urgent: they go
+  first and always find a slot, because the connect check (`SFU_CONNECT_MS`, 10 s) waits for
+  them. A call's timeout starts when it leaves the gate, so it measures the call, not the queue.
+- **One call per subscriber and pass.** A remote `datachannels/new` batch may name several
+  publishing sessions (Realtime SFU API, "Batch resource operations"); the pass asks once per
+  subscriber for every channel it lacks: 8 calls for a fresh grid of 8 instead of 56. Checked on
+  the real API (test Worker): the answer's items name their `sessionId` and come in request
+  order; the room matches them by publisher session and name. The client already takes several
+  members' channels in one `sfu_channels` (port/render/net/src/sfu.rs, at most 20 channels).
+- **One change at a time per session** (`serial` in room.ts), as Cloudflare asks ("Serialize
+  mutations per session"): a departure's closes and a pass's calls on one subscriber no longer
+  overlap. Finding 177's 4 calls at once per subscriber are gone.
+- **What counts as unknown.** No answer (timeout, network error, an answer cut short), 5xx, 409
+  and 429: the session waits (no change on it), is listed with `GET sessions/{id}` after 2 s
+  (doubling to 16 s for outcomes in a row), channels the record lacks are adopted when they lead
+  to a member of the group and the record has no live one for that publisher and name, otherwise
+  closed unannounced; then the missing pairs are made in the same pass. Cloudflare: "An empty
+  snapshot cannot resolve an uncertain request", so the session is listed once more 10 s later
+  (`RECHECK_MS`) to close a second subscription the aborted call made late. Definite (an item
+  `errorCode`, another 4xx, an answer that makes no sense): the session fails, as before.
+- **Timeout 10 s in the pass** (`SUBSCRIBE_TIMEOUT_MS`; 15 s for a member's own calls, as
+  before). Ungated calls with at most 3 others of their room in flight ended within 9.4 s (p99.9
+  8.3 s, 4,363 calls), so a longer limit buys almost nothing, and a run-out call now costs only
+  a retry: at a race start a newcomer's 10 s, 2 s of backoff, a GET (~0.2 s) and the retry
+  (~1 s) end near 14 s, inside `SFU_SETUP_MS` (25 s), with room for a second unknown.
+- **Deploy storms need nothing more.** After a deploy every member offers a new session: those
+  calls are urgent; the pass then makes one call per subscriber, 4 at once, only for the race's
+  racers or the locked grid (`sfuGroup`). Spreading the rebuild over time would only delay it.
+- **The publication call** (`sfu_connected`) still fails the session on any error: one call per
+  session, made with nothing queued in front of it now, and its failure only means a new session.
+- **Test switch** `SFU_TEST_LOST_ANSWERS=N` (a var on a test Worker, never in `wrangler.jsonc`):
+  the room's first N subscription calls are carried out by Cloudflare, their answer dropped, and
+  the call waits for its timeout: the worst case, an allocation the room doesn't know of.
+
 ## Surprises
 
+- **A pass that made no call ran again at once, without end** (test Worker, first forced run).
+  Every subscriber still missing a pair waited for its inspection; `releaseSfu` asked for a pass
+  for the missing pair, the pass did nothing and asked again, with no I/O between: "Durable
+  Object exceeded its CPU time limit and was reset", then "overloaded" for 30 s, and a racer was
+  out 52 s after the start. Now a pass repeats only after one that made a call, the release asks
+  only for pairs a pass can make now, and the alarm takes the rest (c15e41c; the test fails on
+  the old code after 64 s).
+- **4 lost calls hold the 4 background slots for their 10 s.** In the forced run the other
+  subscribers' calls waited 10 s in the gate ("waited 10000 ms"). Only a forced worst case: a
+  real call that long is rare once nothing queues (above).
+- **This PC's path to Workers went slow for half an hour** (22:30-23:02): TLS to a workers.dev
+  host 1-1.5 s and requests 2-7 s (production as well), cloudflare.com 0.15 s, ICMP 8 ms, WARP
+  off. Bot runs in that window had room pings of 1-9 s and room connections dropping; one forced
+  run lost a racer that way (its own WebSocket dropped twice; the room's CPU per event stayed at
+  p99 2 ms). The run was repeated once the path was quick again (below).
 - A `datachannels/new` on a session whose PeerConnection is not connected answers 425
   (`session_error`, "Session is not ready yet"), here after 11.5 s: the concurrency can't be
   probed with bare sessions, only with real connected endpoints.
 
+## Live runs (test Worker)
+
+A temporary Worker running this branch (workers.dev, no D1, rate limits or cron; the test
+Realtime app's secrets; deleted after), as in findings 175 and 181: 8
+nettool bots on this PC (the finding 181 build), each a real SFU connection (UDP), one host and 7
+joining, `--races 1 --finish-after 45`. Room in LHR or MAD, edge MRS/CDG. Logs: the Worker's
+Workers Logs.
+
+| Run | Subscription pass | Released after the start | Out of the race |
+|---|---|---|---|
+| Normal, 8 racers | grid: 8 calls in 2,563 ms, pairs ok 56 (4 calls of 7 publishers at 1.8 s, then 4 at 0.55-0.69 s after waiting 1.8 s) | 704 ms | none |
+| `SFU_TEST_LOST_ANSWERS=5`, 8 racers | grid: 12 calls in 20,356 ms, pairs ok 21, unknown 35, inspected 4, adopted 56; then inspected 1, adopted 14; two rechecks closed nothing | 18,161 ms | none |
+
+The forced run's five dropped answers had all made their channels on Cloudflare (70); every one
+was adopted, none made twice. Its release came at 18 s because the fifth dropped call started
+behind the first four (they held the four background slots for their 10 s) and the race started
+during it. Every bot raced and finished; each that wasn't hosting received 732 frames (764 in
+the normal run, whose traffic was released 17 s sooner).
+
+Unit tests (`test/sfu-timeouts.test.ts`): a held call that times out doesn't fail its
+subscriber, and the next pass lists the session and makes the pair; an aborted call whose
+channels exist is adopted, not made again; a second pair an aborted call made after the
+inspection is closed at the recheck, unannounced; a 429 is unknown, an item error fails the
+subscriber; a pass whose missing pairs all wait ends without a call; the gate's limits and order;
+a fresh 8-member grid makes 8 calls, 4 at once, while a newcomer's offer is answered at once.
+`python tools/check.py server`: OK (183 tests, typecheck).
+
 ## Result
+
+Filled in at the merge. For the lead: a server-only hotfix, no protocol or `MIN_VERSION`
+change (0.7.13 games already take several members' channels in one `sfu_channels`). After the
+deploy, the pass lines in Workers Logs read `pairs ok N unknown N failed N; inspected N adopted
+N closed N`; "Realtime subscription outcome unknown" replaces the old "Realtime subscription
+failed" for timeouts, and "out of the race: no Realtime connection" should follow only a real
+connection failure or `SFU_SETUP_MS`.
