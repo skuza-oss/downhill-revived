@@ -2,6 +2,7 @@
 // mouse (or touch) and sound through SharedArrayBuffers (the worker never returns to its event loop mid-field, so
 // messages would wait). Needs a cross-origin isolated page: serve.mjs sends COOP/COEP.
 import { startSettings } from './settings.js';
+import { createP2pBridge } from './p2p.js';
 const $ = id => document.getElementById(id);
 const status = $('status'), log = $('log'), canvas = $('screen');
 const params = new URLSearchParams(location.search);
@@ -130,8 +131,10 @@ async function start(source) {
   // After the sound, which needs the Start click; read again at each start, as the game reads it.
   if (await shape(source.env ?? {})) { canvas.width = 1708; canvas.height = 960; }
   const worker = new Worker('worker.js', { type: 'module' });
+  const network = await createP2pBridge(worker);
   const offscreen = canvas.transferControlToOffscreen();
   worker.onmessage = e => { const m = e.data;
+    if (m.type === 'net') { network(m).catch(e => addLog('P2P: ' + e)); return; }
     if (m.type === 'log') addLog(m.text);
     else if (m.type === 'error') { addLog('ERROR ' + m.text); status.textContent = 'stopped: ' + m.text.split('\n')[0];
       $('logPanel').hidden = false; }

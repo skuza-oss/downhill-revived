@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The official server's P2P rooms (finding 180) as their own Worker: the route below takes
+  // /v1/p2p/* ahead of the main Worker's custom domain, so a P2P deploy never restarts an SFU room.
+  // Same account, moderation database and TURN key as the main Worker (wrangler.jsonc); its
+  // secrets: TURN_KEY_ID, TURN_KEY_API_TOKEN and IP_HASH_KEY (README.md). A self-hosted server
+  // needs none of this: its main Worker serves /v1/p2p/* too.
+  "name": "dhd-revived-p2p",
+  "main": "src/p2p-entry.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "upload_source_maps": true,
+  "observability": { "enabled": true },
+  // Keep it equal to wrangler.jsonc's.
+  "vars": { "MIN_VERSION": "0.7.13" },
+  "routes": [{ "pattern": "dhd.skuza.app/v1/p2p/*", "zone_name": "skuza.app" }],
+  // The main Worker's limits per connection source (wrangler.jsonc), in namespaces of their own.
+  "ratelimits": [
+    { "name": "RL_CONNECT", "namespace_id": "1801", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_CREATE", "namespace_id": "1802", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "d1_databases": [
+    { "binding": "MODERATION", "database_name": "dhd-moderation", "database_id": "4bc29f41-0d85-48d3-ab22-fd5305da5e33", "migrations_dir": "migrations" }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "P2P_ROOM", "class_name": "P2pRoom" }],
+    // A deploy reaches a running P2P room only when it ends (or after 24 h): it never restarts for
+    // new code, as its games can't rejoin (src/p2p.ts, finding 184). Don't deploy with
+    // tools/deploy.mjs --emergency's immediate updates here: every P2P race would end.
+    "code_update_strategy": { "mode": "deferred", "max_delay": 86400 }
+  },
+  // v2: P2P rooms are never listed (finding 180), so the first deploy's lobby index went.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["P2pRoom", "LobbyIndex"] },
+    { "tag": "v2", "deleted_classes": ["LobbyIndex"] }
+  ]
+}

@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createNet } from './www/net.js';
 import { layout } from './www/net_layout.js';
-test('no online in the browser: not offered, and nothing connects (finding 143)',()=>{
+test('disabled online makes no connections',()=>{
   const bytes=new Uint8Array(4096),span=(a,n)=>bytes.subarray(a,a+n);
   const str=a=>new TextDecoder().decode(bytes.subarray(a,bytes.indexOf(0,a)));
   let made=0;
   globalThis.WebSocket=class {constructor(){made++;}};
-  const api=createNet({span,str});
+  const api=createNet({span,str,online:false});
   assert.equal(api.host_service_net_offered(),0);
   assert.equal(api.host_service_net_create_room(),-1);
   assert.equal(api.host_service_net_join_room(0),-1);
@@ -26,9 +26,13 @@ test('browser session messages and shared snapshots',()=>{
     send(m){this.sent.push(typeof m==='string'?JSON.parse(m):m);}
     close(){}
   };
-  const api=createNet({span,str,online:true});
+  const api=createNet({span,str,online:true,openSocket:url=>new WebSocket(url)});
   api.host_service_net_init(0,put(1,'Test'),put(20,'0.7.4'),put(40,'a'.repeat(64)));
-  api.host_service_net_create_room();socket.onopen();
+  assert.equal(api.host_service_net_offered(),2);  // P2P rooms only (finding 180)
+  assert.equal(api.host_service_net_create_room(0),-1);
+  assert.equal(api.host_service_net_join_room(put(100,'ABCDEF')),-1);  // an SFU room's code
+  api.host_service_net_create_room(1);socket.onopen();
+  assert.match(socket.url,/\/v1\/p2p\/rooms\/new$/);
   assert.deepEqual(socket.sent[0].features,['countdown','session']);
   const recv=m=>socket.onmessage({data:JSON.stringify(m)});
   recv({type:'welcome',memberId:7,code:'TEST22',serverTime:1000});

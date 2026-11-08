@@ -56,9 +56,11 @@ static int arena(int track) { return track == 23; }
 
 static const char code_letters[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";  /* the server's join codes */
 static const char name_letters[] = SETTING_NAME_LETTERS;
-enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 10 };
-/* HOME's rows after the two Create rows (0 Name, 1 Quick Race, 2 Public Races, 3 and 4 Create) */
-enum { HOME_REGION = 5, HOME_CODE = 6, HOME_UPDATE = 7 };
+/* CODE_LENGTH: an SFU room's code; a P2P room's has one more (port/net/net.h, finding 180). */
+enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, P2P_CODE_LENGTH = 7, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 10 };
+/* HOME's rows, in this order, those the platform offers (host_service_net_offered: SFU rooms on
+   the desktop, P2P rooms everywhere, finding 180); home_kind[] says what each shown row does. */
+enum { HOME_NAME, HOME_QUICK, HOME_LIST, HOME_PUBLIC, HOME_PRIVATE, HOME_REGION, HOME_P2P, HOME_JOIN, HOME_UPDATE, HOME_KINDS };
 
 enum { HOME, LIST, NAME, CODE, ROOM, QUICK };
 /* The room's rows */
@@ -225,7 +227,7 @@ static void reset_selection(void)
 }
 
 static char text[MAX_ROWS][ROW_TEXT], status[128];
-static int outdated;  /* the server refused this release: HOME offers Update Now (row 5) */
+static int outdated;  /* the server refused this release: HOME offers Update Now */
 /* 44 characters: the footer fits about 45 at 640 wide (0.1.0 shows the server's copy there too) */
 static const char outdated_text[] = "A new version is out. Update to play online.";
 
@@ -392,13 +394,15 @@ static int region_index(void)
     return 0;  /* unset or unknown: Auto */
 }
 
+static int home_row_of(int kind);
+
 static void region_step(MenuPage *p, int by)
 {
     const SettingInfo *s = region_setting();
     if (!s) return;
     int i = (region_index() + by + s->count) % s->count;
     save("room_region", "DHD_NET_ROOM_REGION", s->choices[i].value);
-    menu_page_value_set(p, HOME_REGION, "Room Region:", s->choices[i].label, MENU_VALUE_ARROWS);
+    menu_page_value_set(p, home_row_of(HOME_REGION), "Room Region:", s->choices[i].label, MENU_VALUE_ARROWS);
     menu_page_sound(by > 0);
     hle_log("online menu: room region %s\n", s->choices[i].value);
 }
@@ -436,6 +440,27 @@ static const char *const *disc_note(void)
 static int entry_pick;           /* the letter on offer */
 static char entry[16];
 static int home_row;  /* HOME's row last chosen: the cursor goes back to it */
+
+static int home_kind[HOME_KINDS], home_rows;
+/* A P2P room's members reach the host's game directly, so each sees the host's network address
+   and the host every member's (finding 180). Said on HOME's row and in the room when it opens. */
+static const char p2p_notice[] = "Players in this room can see your network address.";
+static const char p2p_row_notice[] = "Players in it can see your network address.";  /* the footer's 45 */
+static double p2p_notice_until;
+static int p2p_noticed;
+
+static void home_add(MenuPage *p, int kind, const char *label)
+{
+    home_kind[home_rows++] = kind;
+    menu_page_row(p, label, 1);
+}
+
+static int home_row_of(int kind)
+{
+    for (int i = 0; i < home_rows; i++)
+        if (home_kind[i] == kind) return i;
+    return 0;
+}
 static const char *const *disc_shown;  /* the disc_note HOME's rows have */
 
 static void room_open(void);
@@ -483,6 +508,7 @@ static void list_row(int i)
              where, where[0] ? "  " : "", l->players, l->max_players, track, now);
 }
 
+/* create: 0 joins the room of `code`, else makes a room: HOME_PUBLIC, HOME_PRIVATE or HOME_P2P. */
 static void enter_room(int create, const char *code)
 {
     const char *why = not_ready();
@@ -492,20 +518,22 @@ static void enter_room(int create, const char *code)
         return;
     }
     host_service_net_init(GADDR(server()), GADDR(name), GADDR(version), GADDR(iso_hash));
-    if (create) host_service_net_create_room();
+    if (create) host_service_net_create_room(create == HOME_P2P);
     else if (host_service_net_join_room(GADDR(code)) < 0) {
         snprintf(status, sizeof status, "That code can't be one");
         return;
     }
     reset_selection();
     choosing = 0;
-    public_room = create == 2;
+    public_room = create == HOME_PUBLIC;
+    p2p_noticed = 0;
     if (create) room_options &= ~ROOM_CHEATS;  /* a new room starts with cheats off */
     room_settings_sent = rotation_sent = !create;  /* a guest who becomes host keeps the room as it is */
     room_ready_sent = 0;
     connecting = 1;
     snprintf(status, sizeof status, "Connecting to the server...");
-    hle_log("online menu: %s %s\n", create ? "creating a room" : "joining", create ? (public_room ? "(public)" : "(private)") : code);
+    hle_log("online menu: %s %s\n", create ? "creating a room" : "joining",
+            create == HOME_P2P ? "(P2P)" : create ? (public_room ? "(public)" : "(private)") : code);
 }
 
 static void page_build(MenuPage *p)
@@ -513,18 +541,22 @@ static void page_build(MenuPage *p)
     switch (screen) {
     case HOME:
         p->title = "ONLINE";
+        home_rows = 0;
         snprintf(text[0], ROW_TEXT, "Name:  %s", name);
-        menu_page_row(p, text[0], 1);
-        menu_page_row(p, "Quick Race", 1);
-        menu_page_row(p, "Public Races", 1);
-        menu_page_row(p, "Create A Public Race", 1);
-        menu_page_row(p, "Create A Private Race", 1);
-        {
+        home_add(p, HOME_NAME, text[0]);
+        if (host_service_net_offered() & NET_OFFER_SFU) {
+            home_add(p, HOME_QUICK, "Quick Race");
+            home_add(p, HOME_LIST, "Public Races");
+            home_add(p, HOME_PUBLIC, "Create A Public Race");
+            home_add(p, HOME_PRIVATE, "Create A Private Race");
+            /* where a new SFU room runs (finding 181); a P2P room's server only relays signaling */
             const SettingInfo *s = region_setting();
+            home_kind[home_rows++] = HOME_REGION;
             menu_page_value(p, "Room Region:", s ? s->choices[region_index()].label : "Auto", MENU_VALUE_ARROWS);
         }
-        menu_page_row(p, "Join With A Code", 1);
-        if (outdated) menu_page_row(p, "Update Now", 1);
+        if (host_service_net_offered() & NET_OFFER_P2P) home_add(p, HOME_P2P, "Create A P2P Race");
+        home_add(p, HOME_JOIN, "Join With A Code");
+        if (outdated) home_add(p, HOME_UPDATE, "Update Now");
         disc_shown = disc_note();
         for (const char *const *line = disc_shown; line && *line; line++) menu_page_text(p, *line);
         break;
@@ -565,7 +597,7 @@ static void page_build(MenuPage *p)
 static void entry_text(void)
 {
     const char *letters = screen == NAME ? name_letters : code_letters;
-    int max = screen == NAME ? NAME_MAX : CODE_LENGTH;
+    int max = screen == NAME ? NAME_MAX : P2P_CODE_LENGTH;
     char shown = letters[entry_pick] == ' ' ? '-' : letters[entry_pick];
     if ((int)strlen(entry) < max)
         snprintf(text[0], ROW_TEXT, "%s  %s[%c]", screen == NAME ? "Name:" : "Code:", entry, shown);
@@ -584,7 +616,7 @@ static void refused(const NetLobby *l)
     host_service_net_leave();
     reset_selection();
     connecting = 0;
-    if (too_old) home_row = HOME_UPDATE;
+    if (too_old) home_row = home_row_of(HOME_UPDATE);
 }
 
 /* In the room: the host's settings, then this member's first (not ready) state, once each. */
@@ -766,7 +798,8 @@ static RoomNow room_now(void)
 static int focusable(int f, const RoomNow *r)
 {
     switch (f) {
-    case RF_TRACK: case RF_BOTS: case RF_CHEATS: case RF_PUBLIC: return r->host && r->in;
+    case RF_TRACK: case RF_BOTS: case RF_CHEATS: return r->host && r->in;
+    case RF_PUBLIC: return r->host && r->in && !room.is_p2p;  /* a P2P room is never listed */
     case RF_RULES: return r->in;  /* everyone reads them; the host changes them */
     case RF_RIDER: return r->in;
     case RF_READY: return r->in && strcmp(r->own_race, "racing") != 0;
@@ -1220,7 +1253,7 @@ static void draw_left(const RoomNow *r)
     hit(&hits[RF_TRACK], L_X, TOP + 14, L_W, 20);
     draw_setting(RF_BOTS, TOP + 39, "COMPUTER RIDERS", l->laps & ROOM_NO_BOTS ? "OFF" : "ON", r);
     draw_setting(RF_CHEATS, TOP + 52, "CHEATS", l->laps & ROOM_CHEATS ? "ON" : "OFF", r);
-    draw_setting(RF_PUBLIC, TOP + 65, "ROOM", l->is_public ? "PUBLIC" : "PRIVATE", r);
+    draw_setting(RF_PUBLIC, TOP + 65, "ROOM", l->is_p2p ? "P2P, PRIVATE" : l->is_public ? "PUBLIC" : "PRIVATE", r);
     /* the room's rules in one line; Cross opens them (everyone reads them, the host changes them) */
     on = rf == RF_RULES && !track_list && !leave_ask && !rules_open;
     if (on) bar(L_X + 6, TOP + 77, L_W - 12, 11);
@@ -1354,6 +1387,7 @@ static void draw_status(const RoomNow *r)
         if (r->riding == 1 && !strcmp(l->member[i].race_state, "racing")) riding = i;
     if (status[0]) snprintf(line, sizeof line, "%s", status);
     else if (!r->in) snprintf(line, sizeof line, "CONNECTING TO THE SERVER...");
+    else if (l->is_p2p && host_seconds() < p2p_notice_until) snprintf(line, sizeof line, "%s", p2p_notice);
     else if (r->starting && r->own_ready) snprintf(line, sizeof line, "YOU'RE IN THIS RACE: UNREADY TO STAY OUT"), c = green;
     else if (r->starting) snprintf(line, sizeof line, "YOU WEREN'T READY: READY NOW TO RACE THE ONE AFTER");
     else if (r->racing && r->own_race[0]) {
@@ -1687,6 +1721,11 @@ static void room_update(MenuPage *p)
 {
     NetLobby *l = &room;
     host_service_net_get_lobby(GADDR(l));
+    if (l->is_p2p && !p2p_noticed) {  /* once per room, when it first shows */
+        p2p_noticed = 1;
+        p2p_notice_until = host_seconds() + 15;
+        hle_log("online menu: P2P room: the address notice shown\n");
+    }
     if (l->state == NET_FAILED || l->state == NET_IDLE) {
         refused(l);
         if (in_shell) {  /* the rider screen's Back, then ONLINE again with the reason */
@@ -1774,7 +1813,12 @@ static void page_update(MenuPage *p, int cursor)
             menu_page_rebuild_at(p, cursor);
             break;
         }
-        if (!status[0] && (cursor == 1 || cursor >= 3 || disc_shown) && not_ready()) p->footer = not_ready();
+        {
+            int kind = cursor < home_rows ? home_kind[cursor] : HOME_NAME;
+            /* what keeps this PC out of a room; the list and the name need no disc */
+            if (!status[0] && ((kind != HOME_NAME && kind != HOME_LIST) || disc_shown) && not_ready()) p->footer = not_ready();
+            else if (!status[0] && kind == HOME_P2P) p->footer = p2p_row_notice;
+        }
         break;
     case LIST:
         if (list_state == 2 && !list_shown) menu_page_rebuild(p);  /* the answer came: the rows again */
@@ -1798,7 +1842,7 @@ static void page_update(MenuPage *p, int cursor)
     case NAME:
     case CODE:
         {
-            int action = host_service_text_input_edit(GADDR(entry), (screen == NAME ? NAME_MAX : CODE_LENGTH) + 1, GADDR(screen == NAME ? name_letters : code_letters));
+            int action = host_service_text_input_edit(GADDR(entry), (screen == NAME ? NAME_MAX : P2P_CODE_LENGTH) + 1, GADDR(screen == NAME ? name_letters : code_letters));
             if (action < 0) { go(HOME); return; }
             if (action > 0) { page_accept(p, 1); return; }
         }
@@ -1819,28 +1863,43 @@ static void page_accept(MenuPage *p, int row)
     switch (screen) {
     case HOME:
         home_row = row;
-        if (row == 0) {
+        switch (row < home_rows ? home_kind[row] : -1) {
+        case HOME_NAME:
             snprintf(entry, sizeof entry, "%s", name);
             entry_pick = 0;
             go(NAME);
-        } else if (row == 1 || row == 2) {
-            const char *why = row == 1 ? not_ready() : !server() ? "No server: set server = ... in dhd.ini" : NULL;
+            break;
+        case HOME_QUICK:
+        case HOME_LIST: {
+            int quick = home_kind[row] == HOME_QUICK;
+            const char *why = quick ? not_ready() : !server() ? "No server: set server = ... in dhd.ini" : NULL;
             if (why) snprintf(status, sizeof status, "%s", why);
             else {
                 start_list();
-                go(row == 1 ? QUICK : LIST);
+                go(quick ? QUICK : LIST);
             }
-        } else if (row == 3 || row == 4)
-            enter_room(row == 3 ? 2 : 1, NULL);
-        else if (row == HOME_REGION)
+            break;
+        }
+        case HOME_PUBLIC:
+        case HOME_PRIVATE:
+        case HOME_P2P:
+            enter_room(home_kind[row], NULL);
+            break;
+        case HOME_REGION:
             region_step(p, 1);
-        else if (row == HOME_CODE) {
-            entry[0] = 0;
+            break;
+        case HOME_JOIN: {
+            /* tests (DHD_NET_SCRIPTED): DHD_NET_TEST_CODE is the code, as if typed (cross_race.py) */
+            const char *test_code = getenv("DHD_NET_SCRIPTED") ? getenv("DHD_NET_TEST_CODE") : NULL;
+            snprintf(entry, sizeof entry, "%.*s", P2P_CODE_LENGTH, test_code ? test_code : "");
             entry_pick = 0;
             go(CODE);
-        } else if (row == HOME_UPDATE && outdated) {
+            break;
+        }
+        case HOME_UPDATE:
             hle_log("online menu: Update Now\n");
             host_service_update_request();  /* ends the game; the launcher updates it */
+            break;
         }
         break;
     case LIST:
@@ -1853,11 +1912,12 @@ static void page_accept(MenuPage *p, int row)
     case NAME:
     case CODE: {
         const char *letters = screen == NAME ? name_letters : code_letters;
-        int max = screen == NAME ? NAME_MAX : CODE_LENGTH;
+        int max = screen == NAME ? NAME_MAX : P2P_CODE_LENGTH;
         size_t n = strlen(entry);
         if (row == 0) {
             if ((int)n < max) entry[n] = letters[entry_pick], entry[n + 1] = 0;
-            if (screen == CODE && (int)n + 1 == max) menu_page_set_cursor(p, 1);  /* the code is whole: Join */
+            /* an SFU code is whole at 6 (Up adds a P2P code's seventh), a P2P one at 7: Join */
+            if (screen == CODE && ((int)n + 1 == CODE_LENGTH || (int)n + 1 == max)) menu_page_set_cursor(p, 1);
         } else if (screen == NAME) {
             while (n && entry[n - 1] == ' ') entry[--n] = 0;
             if (n) {
@@ -1865,14 +1925,14 @@ static void page_accept(MenuPage *p, int row)
                 save("name", "DHD_NET_NAME", name);
             }
             go(HOME);
-        } else if ((int)n == CODE_LENGTH)
+        } else if ((int)n == CODE_LENGTH || (int)n == P2P_CODE_LENGTH)
             enter_room(0, entry);
         else
-            snprintf(status, sizeof status, "A code has %d letters and digits", CODE_LENGTH);
+            snprintf(status, sizeof status, "A code has %d or %d letters and digits", CODE_LENGTH, P2P_CODE_LENGTH);
         break;
     }
     case QUICK:
-        if (list_state == 2 && row == 1) enter_room(2, NULL);
+        if (list_state == 2 && row == 1) enter_room(HOME_PUBLIC, NULL);  /* Quick Race found none: a public room */
         else if (list_state == 2 && row == 2) go(HOME);
         break;
     case ROOM:  /* the room reads the pads itself (room_input) */
@@ -1913,7 +1973,7 @@ static void page_back(MenuPage *p)
 static void page_step(MenuPage *p, int row, int by)
 {
     if (connecting) return;
-    if (screen == HOME && row == HOME_REGION) {
+    if (screen == HOME && row < home_rows && home_kind[row] == HOME_REGION) {
         region_step(p, by);
         return;
     }

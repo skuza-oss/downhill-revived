@@ -6,6 +6,8 @@ length of a test: started, waited for, and stopped with everything it started (w
 
     with local_server.running() as url:      # 'ws://127.0.0.1:<port>'
         ...
+    with local_server.tunnelled('user@mac') as (here, there):   # the same server for another
+        ...                                                     # machine too, by an ssh tunnel
 
 Each run gets fresh server state (its own --persist-to folder) and a scratch TEMP, both under
 DHD_SCRATCH (else the system temp) and deleted afterwards; the server's log stays at
@@ -72,6 +74,25 @@ def running(port=None, timeout=90, say=print):
             finally:
                 server.stop()
     shutil.rmtree(run_dir, ignore_errors=True)
+
+
+@contextlib.contextmanager
+def tunnelled(remote, ssh_options=(), remote_port=8787, say=print):
+    """This checkout's server for this PC and for `remote` (an ssh destination), whose
+    127.0.0.1:remote_port an ssh reverse tunnel takes to it. Yields (this PC's address, the other
+    machine's). Only the room connection goes through the tunnel; P2P games then reach each other
+    directly (or through the TURN relay), as with the official server."""
+    with running(say=say) as url:
+        port = url.rsplit(':', 1)[1]
+        options = [x for option in ssh_options for x in ('-o', option)]
+        cmd = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', *options, '-N', '-o', 'ExitOnForwardFailure=yes',
+               '-R', f'{remote_port}:127.0.0.1:{port}', remote]
+        with owned_process.start(cmd) as tunnel:
+            time.sleep(3)
+            if tunnel.poll() is not None:
+                raise RuntimeError(f'the ssh tunnel to {remote} did not start (its port {remote_port} in use?)')
+            say(f'tunnel: {remote} 127.0.0.1:{remote_port} -> this server')
+            yield url, f'ws://127.0.0.1:{remote_port}'
 
 
 def main():

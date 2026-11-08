@@ -57,6 +57,13 @@ change needs them or someone asks.
 | Keep the original game's feel: no gameplay additions; QoL and online features are welcome | 2026-10-31 | | add custom music, taunts, assists or handling changes |
 | No online play on Android or in the browser yet: the host does not offer it | 2026-11-03 | 143 | enable ONLINE there without a decision |
 
+P2P rooms (180) are an explicit exception to the single-implementation rule: the creator picks
+SFU or P2P per room; the race's synchronization is the SFU's. The owner authorizes peer
+addressing for them, so a P2P room is private (joined by its code, never listed; the game says
+players see each other's network address), and P2P rooms on Android and in the browser (SFU
+rooms stay desktop-only there). They reach players as a test prerelease first. Native iOS app
+work is deferred.
+
 A lane's plan is its finding: copy `docs/findings/TEMPLATE.md` on the lane's first commit
 (`Status: in progress`, which reserves the number) and keep its Progress, Decisions and Surprises
 current; at the merge it becomes `current`. Findings carry a `Status:` line; only `current` findings and the still-true parts of `partly

@@ -123,7 +123,8 @@ SEED = CARGO_TARGETS / 'seed'
 WEB_OUT = ROOT / 'build' / 'web' / 'renderer'
 RENDER_CRATE = 'dhd_render'
 SETTINGS_CRATE = 'dhd_settings'   # --crate: the browser's dhd.ini module (wasm32 only)
-CRATES = (RENDER_CRATE, SETTINGS_CRATE)
+SESSION_CRATE = 'dhd_session'
+CRATES = (RENDER_CRATE, SETTINGS_CRATE, SESSION_CRATE)
 SETTINGS_WEB_OUT = ROOT / 'build' / 'web'   # dhd_settings.wasm
 X64 = 'x86_64-pc-windows-msvc'
 WASM = 'wasm32-unknown-unknown'
@@ -760,6 +761,36 @@ def build_settings(profile='release', no_cache=False):
     return rep
 
 
+def build_session(profile='release'):
+    """The portable P2P coordinator, separate from the game and renderer memories."""
+    env = common(WASM, profile)
+    tdir = target_dir() / SESSION_CRATE
+    env['CARGO_TARGET_DIR'] = str(tdir)
+    env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(rustflags(WASM, SETTINGS_CRATE))
+    include_precheck()
+    cmd = ['cargo', 'rustc', '-p', SESSION_CRATE, '--lib', '--crate-type', 'cdylib', *cargo_args(WASM, profile)]
+    r = run_cargo(cmd, env)
+    if r.returncode:
+        sys.stdout.write(r.stdout)
+        raise SystemExit('rustgs: session cargo failed')
+    built = tdir / WASM / profile
+    inputs_gate(built / (SESSION_CRATE + '.d'))
+    out = ROOT / 'build/web/session'
+    out.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(['wasm-bindgen', '--target', 'web', '--no-typescript', '--out-dir', str(out),
+                        '--out-name', SESSION_CRATE, str(built / (SESSION_CRATE + '.wasm'))], env=env, capture_output=True, text=True)
+    if r.returncode:
+        refuse('session wasm-bindgen: ' + r.stderr[-1000:])
+    lib = out / (SESSION_CRATE + '_bg.wasm')
+    sysroot = Path(tool_version(['rustc', '--print', 'sysroot'], env).strip()) / 'lib/rustlib' / WASM / 'lib'
+    problems = check_rust_lib.problems(lib, trees=[ROOT], extra=[tdir], sysroot=sysroot)
+    if problems:
+        refuse('session check_rust_lib: ' + '; '.join(problems[:8]))
+    sha = check_rust_lib.sha256(lib)
+    return {'lib': str(lib), 'crate': SESSION_CRATE, 'sha256': sha, 'cache': 'miss', 'key': sha,
+            'glue': [str(out / (SESSION_CRATE + '.js'))]}
+
+
 def build(triple, features=(), profile='release', no_cache=False, crate=RENDER_CRATE):
     """Builds (or fetches) the library; returns the report dict. Raises Refused or SystemExit."""
     features = list(parse_features(','.join(features)))
@@ -768,6 +799,10 @@ def build(triple, features=(), profile='release', no_cache=False, crate=RENDER_C
         refuse('--target %s builds on a Mac (ring compiles its C against the macOS SDK); `check` runs here' % MAC)
     if crate not in CRATES:
         refuse('--crate %s: one of %s' % (crate, ', '.join(CRATES)))
+    if crate == SESSION_CRATE:
+        if triple != WASM or features:
+            refuse('dhd_session is the browser coordinator (--target wasm32-unknown-unknown, no features)')
+        return build_session(profile)
     if crate == SETTINGS_CRATE:
         if triple != WASM or features:
             refuse('--crate %s: the browser\'s module only (--target %s, no features); the game links it '
