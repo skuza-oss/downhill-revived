@@ -13,8 +13,10 @@ const room = (code: string) => env.ROOM.get(env.ROOM.idFromName(code));
 const snap = async (c: Client, pred: (r: any) => boolean = () => true) =>
   JSON.parse(await c.next(f => typeof f === "string" && JSON.parse(f).type === "room" && pred(JSON.parse(f))) as string);
 type Fake = ReturnType<typeof fakeRealtime>;
+/** The pairs subscribed, "subscriber<-publisher" (a call names every publisher it subscribes to,
+    finding 182). */
 const subscriptions = (fake: Fake, from = 0) => fake.calls.slice(from).filter((c) => c.path.endsWith("datachannels/new") && c.body.dataChannels[0].location === "remote")
-  .map((c) => `${c.path.split("/").at(-3)}<-${c.body.dataChannels[0].sessionId}`);
+  .flatMap((c) => [...new Set(c.body.dataChannels.map((x: any) => x.sessionId))].map((pub) => `${c.path.split("/").at(-3)}<-${pub}`));
 
 /** A session room of `n` members with Realtime configured (the fake API). */
 async function sessionRoom(n: number) {
