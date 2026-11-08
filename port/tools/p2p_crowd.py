@@ -99,6 +99,7 @@ def main():
             bot_log = stack.enter_context(path.open('w'))
             stack.enter_context(owned_process.start(
                 [str(a.nettool), '--version', version, '--iso', iso_hash, '--name', f'BOT{k}', '--pick', str(k + 1),
+                 '--players', str(players),  # a session bot readies once the room has this many
                  '--races', '1', '--ready-after', '1', '--echo-ai', '--finish-after', str(a.race_seconds),
                  '--seconds', str(a.race_seconds + 240), 'join', code],
                 env=bot_env, stdout=bot_log, stderr=subprocess.STDOUT))

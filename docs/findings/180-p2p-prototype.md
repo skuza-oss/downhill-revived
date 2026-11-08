@@ -41,7 +41,8 @@ migration, rejoin into a P2P room, automatic SFU fallback.
 - [x] Checks: `check.py port`, `check.py server`, boot 600 and race 5000 field traces equal
   0.7.13's; native 2- and 10-game room tests; PC-host and Mac-host LAN runs direct; 7-racer room;
   the 24-trial LAN matrix (0c86d38).
-- [x] Test package: Windows and macOS from the final commit (not published).
+- [x] Test package: Windows and macOS from 3b3920f (not published); the packaged Windows dhd.exe
+  hosted a P2P room with two bots (one relayed, one direct), all raced, no freeze.
 - [ ] The internet matrix: not run (see Surprises: the Mac never left the home LAN).
 - [ ] Merge; lead: deploy the P2P Worker (README "P2P rooms"), the billing alert, publish the test
   prerelease.
