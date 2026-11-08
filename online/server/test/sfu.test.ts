@@ -463,6 +463,8 @@ describe("TURN over TLS fallback", () => {
       clients[1].sendJson({ type: "leave" });
       await clients[0].json("room");
       await runInDurableObject(stub, async (room: any) => { await room.sfuQueue; });
+      // The revoke goes through the room's call gate (finding 182), so it may land just after.
+      for (let i = 0; i < 100 && !calls.some(c => c.endsWith("/revoke")); i++) await new Promise(r => setTimeout(r, 10));
       expect(calls.filter(c => c.endsWith(`/credentials/${"u".repeat(64)}/revoke`))).toHaveLength(1);
     } finally {
       spy.mockRestore();
