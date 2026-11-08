@@ -41,13 +41,16 @@ describe("Auto by the creator's colo", () => {
 
   it("falls back to the country and continent for a colo the table doesn't have, then to none", () => {
     expect(placeRoom(QATAR_UNKNOWN_COLO)).toEqual({ hint: "me", how: "place" });
+    // Fortaleza: unmeasured and far from any measured colo, so no row (great circles put it in weur)
+    expect(COLO_HINTS.FOR).toBeUndefined();
+    expect(placeRoom({ colo: "FOR", country: "BR", continent: "SA" })).toEqual({ hint: "sam", how: "place" });
     expect(placeRoom({ country: "DE", continent: "EU" })).toEqual({ hint: "eeur", how: "place" });
     expect(placeRoom({})).toEqual({ how: "none" });
     expect(placeRoom({ continent: "T1" })).toEqual({ how: "none" });  // Tor
   });
 
-  it("has a row for every Cloudflare location of the snapshot, each a hint that runs objects", () => {
-    expect(Object.keys(COLO_HINTS).length).toBeGreaterThanOrEqual(300);
+  it("has rows only for colos the data speaks for, each a hint that runs objects", () => {
+    expect(Object.keys(COLO_HINTS).length).toBeGreaterThanOrEqual(150);
     const offered = new Set(CHOICES.map((c) => c.hint));
     for (const [colo, hint] of Object.entries(COLO_HINTS)) {
       expect(LOCATION_HINTS, colo).toContain(hint);

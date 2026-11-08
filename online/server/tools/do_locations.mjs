@@ -6,16 +6,23 @@
 //                                       every Cloudflare location (colo) with its coordinates and
 //                                       whether it runs Durable Objects, and for each location hint
 //                                       the colos that serve it and how often
-//   node tools/do_locations.mjs         writes src/colo-hints.ts from tools/do-locations.json and,
-//                                       when present, tools/do-rtt.json (measured round trips)
+//   node tools/do_locations.mjs         writes src/colo-hints.ts from tools/do-locations.json and
+//                                       tools/do-rtt.json (measured round trips)
 //   node tools/do_locations.mjs check   fails when src/colo-hints.ts is not what the data gives
+//   node tools/do_locations.mjs report  the measured colos' three nearest hints, ms
 //
-// A hint does not pick one colo: Cloudflare spreads a hint's objects over its colos (enam: ATL 22%,
-// EWR 20%, MIA 20%, ORD 19%, IAD 18% on 2026-11-08). So for each colo the table takes the hint
-// whose rooms are nearest on average: the sum over the hint's colos of share x distance, the great
-// circle distance standing in for the round trip; a measured round trip replaces the distance for
-// the pairs tools/do-rtt.json has. where.durableobjects.live is the reference Cloudflare's
-// data-location docs link; it is refreshed every five minutes from Cloudflare's own placements.
+// tools/do-rtt.json: for each Cloudflare location (colo) a measuring request reached, the quickest
+// round trip from a Worker there to a Durable Object in each colo that runs them (finding 181 says
+// how it was measured). A colo gets a row only when the data says something about it:
+// - measured: the hint whose two quickest colos are quickest on average (a hint's objects land in
+//   its colos near the edge the first request came through: weur from CDG gave CDG and LHR only,
+//   from MAD gave MAD, MRS and LIS, 2026-11-08);
+// - a neighbour: within NEIGHBOUR_KM of a measured colo, that colo's choice;
+// - its own: a colo that runs Durable Objects, its own region's hint.
+// Any other colo has no row, and the server falls back to the creator's country and continent:
+// great-circle distance was tried and dropped, it put Johannesburg, Beirut and Tel Aviv in eeur
+// where measurements say weur, and Fortaleza in weur across the Atlantic. where.durableobjects.live
+// is the reference Cloudflare's data-location docs link (refreshed every five minutes).
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,15 +72,14 @@ export function km(a, b) {
     neighbours, which reach the rest of Cloudflare by the same routes. */
 export const NEIGHBOUR_KM = 600;
 
-/** For each colo: the hint whose rooms run nearest it, and how it was decided ("measured": round
-    trips from that colo; "neighbour": a measured colo near it; "distance": great circles).
-    A hint's objects land in its colos near the edge the first request came through (seen on
-    2026-11-08: weur from CDG gave CDG and LHR only, from MAD gave MAD, MRS and LIS), so a hint
-    costs the mean of its two nearest colos, not the mean over all of them. */
-export function table(snapshot, measured = {}) {
+/** For each colo the data speaks for: the hint whose rooms run nearest it, and how it was decided
+    ("measured", "neighbour" of a measured colo, or "own": it runs objects itself). */
+export function table(snapshot, measured = {}, neighbourKm = NEIGHBOUR_KM) {
   // sam, afr and me are served by enam's, weur's and eeur's colos (their shares differ only by
   // sampling): they are left out, so a room is given the hint that names where it runs.
   const hints = CANDIDATES.filter((h) => Object.keys(snapshot.serves[h]).every((c) => snapshot.colos[c]));
+  const own = {};
+  for (const hint of hints) for (const c of Object.keys(snapshot.serves[hint])) own[c] = hint;
   const nearest = (cost) => {
     let best = null;
     for (const hint of hints) {
@@ -93,14 +99,14 @@ export function table(snapshot, measured = {}) {
     if (out[code]?.how === "measured") continue;
     const near = Object.keys(measured).filter((m) => out[m]?.how === "measured" && snapshot.colos[m])
       .map((m) => ({ m, d: km(colo, snapshot.colos[m]) })).sort((a, b) => a.d - b.d)[0];
-    if (near && near.d <= NEIGHBOUR_KM) out[code] = { hint: out[near.m].hint, cost: Math.round(near.d), how: "neighbour", of: near.m };
-    else out[code] = { ...nearest((c) => km(colo, snapshot.colos[c])), how: "distance" };
+    if (own[code]) out[code] = { hint: own[code], cost: 0, how: "own" };
+    else if (near && near.d <= neighbourKm) out[code] = { hint: out[near.m].hint, cost: Math.round(near.d), how: "neighbour", of: near.m };
   }
   return out;
 }
 
 function render(snapshot, rows) {
-  const how = { measured: 0, neighbour: 0, distance: 0 };
+  const how = { measured: 0, neighbour: 0, own: 0 };
   for (const r of Object.values(rows)) how[r.how]++;
   const byHint = {};
   for (const [code, { hint }] of Object.entries(rows).sort()) (byHint[hint] ??= []).push(code);
@@ -112,9 +118,9 @@ function render(snapshot, rows) {
   return `// Generated by tools/do_locations.mjs from tools/do-locations.json (${snapshot.source}, ${snapshot.updated.slice(0, 10)})
 // and tools/do-rtt.json. Do not edit: change the data or the tool and run it again (finding 181).
 //
-// For each Cloudflare location (colo) a room's creator can reach: the location hint whose Durable
-// Objects run nearest it. ${how.measured} colos by measured round trips, ${how.neighbour} by a measured colo within
-// ${NEIGHBOUR_KM} km, ${how.distance} by distance.
+// For a Cloudflare location (colo) a room's creator reaches: the location hint whose Durable Objects
+// run nearest it. ${how.measured} colos by measured round trips, ${how.neighbour} by a measured colo within ${NEIGHBOUR_KM} km,
+// ${how.own} that run objects themselves; a colo not here falls back to the creator's country.
 import type { LocationHint } from "./region";
 
 const BY_HINT: [LocationHint, string][] = [
@@ -126,8 +132,11 @@ for (const [hint, colos] of BY_HINT) for (const c of colos.split(" ")) COLO_HINT
 `;
 }
 
-const mode = process.argv[2] ?? "write";
-if (mode === "fetch") {
+const main = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const mode = main ? process.argv[2] ?? "write" : "none";
+if (mode === "none") {
+  // imported (a test or an analysis): nothing to do
+} else if (mode === "fetch") {
   const snapshot = await fetchSnapshot();
   writeFileSync(SNAPSHOT, JSON.stringify(snapshot, null, 1) + "\n");
   console.log(`${SNAPSHOT}: ${Object.keys(snapshot.colos).length} colos, ${Object.values(snapshot.colos).filter((c) => c.objects).length} run objects (${snapshot.updated})`);
