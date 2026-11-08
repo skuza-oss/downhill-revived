@@ -261,6 +261,60 @@ within 1 point (+40.3 % against +39.6 %), and over the route within 4 points (+2
 From the GPU times, about 5x (1.56x the pixels: the race start's 17.4 ms -> about 27 ms, the
 Redmi's 26 ms) would bring the Mi's GPU load to the Redmi's. This estimate is not measured.
 
+## Mi 11i stand-in at 5x
+
+The 4x test repeated at `DHD_SCALE=5` (picture 2560 x 2240), the estimate from the GPU times above.
+Everything else was the same: the `fx5` APK, the keys, the route, `--apply t612`,
+`DHD_DIAG_OUTPUT=896` in the off state, on, off, on, off with 90 s cool-downs, the screen on and
+other apps closed. Samples every 5 s showed cpus 0-5 online and the GPU at 315 MHz throughout, with
+the battery at 27-32 °C. At the end the throttle restore printed RESTORED, the 0.7.12 release APK
+went back on (sha256 equal to `SHA256SUMS`) and the app's files were restored (md5 equal).
+
+| | on 1 | on 2 | off 1 | off 2 |
+|---|---:|---:|---:|---:|
+| fields/s over the route | 45.38 | 45.49 | 69.16 | 69.38 |
+| p99 field ms | 42.7 | 42.4 | 23.8 | 23.3 |
+| busy ms a field: render / VU / GS | 15.5 / 12.8 / 21.8 | 15.5 / 12.8 / 21.7 | 4.5 / 11.7 / 13.4 | 4.6 / 11.7 / 13.6 |
+| GPU ms a frame (timestamps) | 19.49 | 19.48 | 12.15 | 12.15 |
+| race windows (30 s): limits | gpu x5, cpu:render x1 | the same | gpu x3, cpu:vu x1 | the same |
+
+With all on, the Mi is now GPU-bound mid-race: 5 of the 6 race windows give `limit=gpu`, at
+18.7-26 GPU ms a frame. One window (48 fps) gives cpu:render. At 4x it was render-thread-bound
+after the start. With all off, GPU and VU alternate. The Redmi's off state was mostly cpu:vu.
+
+The same field ranges as before (fields/s, means of the two runs; the Mi's GPU ms a frame in brackets):
+
+| fields | Mi 5x on | Mi 5x off | gain | Mi 4x gain | Redmi on | Redmi off | gain |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| menus and loading, 300-6060 | 47.9 (17.8) | 66.2 (12.1) | +38 % | +18 % | 54.3 | 59.3 | +9 % |
+| race start, 6321-7500 | 34.8 (25.7) | 72.2 (11.2) | +107 % | +57 % | 37.8 | 63.7 | +69 % |
+| 7500-9000 | 44.4 (20.7) | 70.6 (12.6) | +59 % | +28 % | 47.4 | 66.0 | +39 % |
+| 9000-10500 | 46.2 (19.7) | 73.0 (12.2) | +58 % | +30 % | 48.4 | 66.6 | +38 % |
+| 10500-12000 | 45.3 (20.2) | 69.2 (12.9) | +53 % | +48 % | 49.5 | 65.9 | +33 % |
+| 12000-14000 | 48.0 (19.0) | 74.4 (12.0) | +55 % | +42 % | 51.9 | 66.6 | +28 % |
+| **the race, 6321-14000** | **43.9** | **72.0** | **+63.9 %** | **+40.3 %** | **47.2** | **65.9** | **+39.6 %** |
+
+On every range, the two runs of each state agree within 3.3 % (the off state's race start: 71.0 and 73.3).
+
+- **Absolute fps**: the 5x numbers are closer than the 4x ones, but they fall on opposite sides
+  of the Redmi. With all on, the Mi is 5-12 % slower: the race is 43.9 against 47.2 (-7 %), the
+  start 34.8 against 37.8 (-8 %) and the route 45.4 against 49.9 (-9 %). With all off it is
+  5-13 % faster: the race is 72.0 against 65.9 (+9 %) and the route 69.3 against 62.8 (+10 %).
+  The Mi's VU and render threads are faster, so its off state is not held at about 66 the way
+  the Redmi's is.
+- **Gains**: they overshoot by 20-39 points per range and by 24 over the race (+63.9 % against
+  +39.6 %). At 4x the race gain was within 1 point. At 5x the Mi's GPU carries more of the frame
+  than the Redmi's does (its CPU is faster, so less of the frame waits on the CPU), so a GPU-side
+  change shows up larger.
+
+**Verdict**: do not use 5x as the stand-in. It is within about 10 % of the Redmi's absolute fps
+(low with all on, high with all off). Its gains run 20-39 points high, against about 1 point over
+the race at 4x. Keep the 4x stand-in, for whole-race gains only, with the limits listed above.
+5x can serve as a rough check of a GPU-bound "all on" level, if a 5-12 % low reading is
+acceptable. Between the two scales the Mi moves from understating GPU-only gains mid-race (4x,
+render-bound) to overstating them (5x, GPU-bound). A scale between them (not measured) would
+probably land closer on both measures.
+
 ## Decisions
 
 - **Counters, not timestamps, on the Mali**: its driver offers no timestamp queries; Streamline's
