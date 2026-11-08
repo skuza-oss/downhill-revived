@@ -31,6 +31,10 @@ import {
 } from "./protocol";
 import { placeOf, regionOfPlace, roomArea, roomRegion, traceColo, type HintSource } from "./region";
 import {
+  RESTART_CLOSE, RESTART_REASON, UPDATE_NOTICE, WORKER_VERSION_HEADER, newest, nextRecord, restartTarget, safeMoment,
+  versionOf, type CodeVersion, type RestartRecord,
+} from "./rollout";
+import {
   CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, banMessage, findBan, installIdOf, logJoin, newTally, onlineState, tally,
   type Caps, type GuardEnv, type OnlineState, type Tally,
 } from "./guard";
@@ -318,12 +322,14 @@ export class Room extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       this.state = (await ctx.storage.get<RoomState>("room")) ?? null;
       this.cleanup = (await ctx.storage.get<Cleanup[]>("cleanup")) ?? [];
+      this.lastRestart = (await ctx.storage.get<RestartRecord>("update")) ?? null;
       for (const ws of ctx.getWebSockets()) {
         const info = ws.deserializeAttachment() as SocketInfo | null;
         if (info?.memberId != null) this.sockets.set(info.memberId, ws);
       }
       // After a wake-up mid-race the last relayed fields are unknown (see leave()).
       this.rebuildRace();
+      this.backFromRestart();
     });
   }
 
@@ -393,6 +399,9 @@ export class Room extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
       return new Response("Expected a WebSocket upgrade", { status: 426 });
+    // Restarting for new code (finding 184): the game's rejoin tries again after its backoff.
+    if (this.restarting) return new Response("Restarting", { status: 503 });
+    this.heardVersion = newest(this.heardVersion, versionOf(request.headers.get(WORKER_VERSION_HEADER)));
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server);
     const place = placeOf(request);
@@ -415,6 +424,7 @@ export class Room extends DurableObject<Env> {
   // ---- WebSocket events ----
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer): Promise<void> {
+    if (this.restarting) return;
     const now = Date.now();
     this.heard.set(ws, now);
     // Caps per member (finding 161): more than the game ever sends is dropped, warned once, then
@@ -467,7 +477,12 @@ export class Room extends DurableObject<Env> {
       const own = m.type !== "sfu_offer" || !me.sfu;
       const run = own ? this.onSfu(ws, me, m) : this.sfuQueue.then(() => this.onSfu(ws, me, m));
       if (!own) this.sfuQueue = run.then(() => {}, () => {});
-      if (await run.catch(() => false)) await this.sfuFailed([me.id]);
+      this.sfuCalls++;  // no restart for new code meanwhile (finding 184)
+      try {
+        if (await run.catch(() => false)) await this.sfuFailed([me.id]);
+      } finally {
+        this.sfuCalls--;
+      }
       return;
     }
     switch (m.type) {
@@ -546,6 +561,7 @@ export class Room extends DurableObject<Env> {
   }
 
   async webSocketClose(ws: WebSocket, code: number, _reason?: string, wasClean?: boolean): Promise<void> {
+    if (this.restarting) return;  // the restart closed it: the member waits for its rejoin
     // 1006: the connection ended without a close frame (the game's network dropped, or it gave a
     // silent connection up): it may come back. A game that leaves sends "leave" first.
     await this.dropSocket(ws, code === 1006 || wasClean === false);
@@ -555,6 +571,7 @@ export class Room extends DurableObject<Env> {
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
+    if (this.restarting) return;
     await this.dropSocket(ws, true);
   }
 
@@ -655,6 +672,7 @@ export class Room extends DurableObject<Env> {
       if (now - this.listedAt > LISTING_REFRESH_MS) this.updateListing(true);
     }
     await this.ctx.storage.setAlarm(this.nextAlarm(st, now));
+    await this.updateAtSafeMoment(st, now, pending);
   }
 
   /** The next ping, or the countdown's end if that is sooner. */
@@ -851,6 +869,7 @@ export class Room extends DurableObject<Env> {
     info.memberId = member.id;
     ws.serializeAttachment(info);
     this.sockets.set(member.id, ws);
+    if (ghost) this.noteRejoin(st);
     if (ghost) {
       this.rebuildRace();
       if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
@@ -1682,7 +1701,8 @@ export class Room extends DurableObject<Env> {
     const session = member.sfu;
     const cleanup = this.sfuQueue.then(() => (member.sfu === session ? this.clearSfu(member) : undefined));
     this.sfuQueue = cleanup.catch(() => {});
-    this.ctx.waitUntil(cleanup.catch(() => {}).then(() => this.save()));
+    this.sfuCalls++;
+    this.ctx.waitUntil(cleanup.catch(() => {}).then(() => this.save()).finally(() => { this.sfuCalls--; }));
   }
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
   private async leave(memberId: number, reason: "disconnect" | "leave" | "kicked"): Promise<void> {
@@ -1833,6 +1853,86 @@ export class Room extends DurableObject<Env> {
     if (this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(Date.now() + PING_INTERVAL_MS);
   }
 
+  // ---- Code updates at a safe moment (src/rollout.ts, finding 184) ----
+
+  /** The newest Worker version heard on this instance's requests (WORKER_VERSION_HEADER). */
+  private heardVersion: CodeVersion | null = null;
+  /** The last restart for new code (storage key "update"), and when this instance logs its
+      members' rejoins. */
+  private lastRestart: RestartRecord | null = null;
+  private rejoinsSince: number | null = null;
+  /** Saved and closing for a restart: nothing else is handled or stored. */
+  private restarting = false;
+  /** Realtime signaling calls and queued closes in flight (setup work a restart would cut). */
+  private sfuCalls = 0;
+
+  private ownVersion(): CodeVersion | null {
+    return versionOf((this.env as unknown as Record<string, unknown>).CF_VERSION_METADATA);
+  }
+
+  /** The constructor after a restart for new code: one log line, and the members' rejoins timed. */
+  private backFromRestart(): void {
+    const last = this.lastRestart, st = this.state;
+    if (!last || !st || this.startedAt - last.at > 60_000) return;
+    const own = this.ownVersion();
+    const adopted = !!own && own.id !== last.from;
+    console.log(`room ${st.code}: back ${this.startedAt - last.at} ms after its restart for new code, ` +
+      (adopted ? `now on ${own!.id}` : `still on ${last.from} (try ${last.tries})`));
+    this.rejoinsSince = last.at;
+  }
+
+  /** A member back by token: once every member is back after a restart, how long it took. */
+  private noteRejoin(st: RoomState): void {
+    if (this.rejoinsSince == null || !st.members.every((x) => this.sockets.has(x.id))) return;
+    console.log(`room ${st.code}: all ${st.members.length} members back ${Date.now() - this.rejoinsSince} ms after the restart for new code`);
+    this.rejoinsSince = null;
+  }
+
+  /** The alarm's last step: restarts the room for new code when one is deployed and nothing is
+      under way (safeMoment). `pending`: sockets that haven't said hello yet. */
+  private async updateAtSafeMoment(st: RoomState, now: number, pending: number): Promise<void> {
+    if (this.restarting || st !== this.state) return;
+    const moment = {
+      race: !!st.race, grid: !!st.grid?.length, countdown: st.countdownEndsAt != null,
+      setup: this.subscribing || this.cleaning || this.sfuCalls > 0, hello: pending > 0,
+      nextRaceInMs: st.nextRaceAt != null ? st.nextRaceAt - now : null, members: st.members.length,
+    };
+    if (!safeMoment(moment)) return;
+    const own = this.ownVersion();
+    const { rollout } = await this.online();
+    const target = restartTarget(own, rollout, this.heardVersion, this.lastRestart, now);
+    // The store's answer may have taken a moment: still nothing under way?
+    if (target === null || !own || st !== this.state || this.restarting || this.subscribing || this.sfuCalls > 0 ||
+        !safeMoment({ ...moment, race: !!st.race, grid: !!st.grid?.length, countdown: st.countdownEndsAt != null })) return;
+    await this.restartForUpdate(st, own, target, rollout !== undefined && rollout !== null);
+  }
+
+  /** Saves, tells every member (UPDATE_NOTICE), closes their sockets (RESTART_CLOSE) and resets the
+      object, which comes back on the deployed code. The games rejoin by token (finding 137) and keep
+      their seats; their Realtime sessions are in the stored state (finding 177). */
+  private async restartForUpdate(st: RoomState, own: CodeVersion, target: string, byRollout: boolean): Promise<void> {
+    const now = Date.now();
+    const record = nextRecord(own, target, byRollout, this.lastRestart, now, st.members.length);
+    this.lastRestart = record;
+    await this.ctx.storage.put("room", st);
+    await this.ctx.storage.put("update", record);
+    await this.ctx.storage.sync();
+    this.restarting = true;
+    console.log(`room ${st.code}: restarting for new code at a safe moment: ${own.id} -> ${target}, ` +
+      `${st.members.length} members, try ${record.tries}`);
+    const notice = JSON.stringify(UPDATE_NOTICE);
+    for (const ws of this.ctx.getWebSockets()) {
+      const info = ws.deserializeAttachment() as SocketInfo | null;
+      if (info?.memberId != null) this.sendRaw(ws, notice);
+      try {
+        ws.close(RESTART_CLOSE, RESTART_REASON);
+      } catch {}
+    }
+    // The frames go out before the reset.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    this.ctx.abort("code update at a safe moment (finding 184)", { retryAlarm: false });
+  }
+
   // ---- Helpers ----
 
   private rttOf(memberId: number): number | null {
@@ -1857,7 +1957,7 @@ export class Room extends DurableObject<Env> {
   }
 
   private async save(): Promise<void> {
-    if (this.state) await this.ctx.storage.put("room", this.state);
+    if (this.state && !this.restarting) await this.ctx.storage.put("room", this.state);
   }
 
   private snapshot(st: RoomState) {

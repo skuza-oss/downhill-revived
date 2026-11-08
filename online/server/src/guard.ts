@@ -3,6 +3,7 @@
 // tell an official build from another: what any client may do is limited here, and the operator
 // can stop one.
 import { CLOSE_CODES } from "./protocol";
+import { rolloutOf } from "./rollout";
 
 /** The guard's settings and bindings. All optional: a server without them runs as before (online
     on, no limits per address, no bans, no log); wrangler.jsonc and README.md say which exist. */
@@ -63,10 +64,13 @@ export const OFF_MESSAGE = "Online races are paused. Try again later.";
 export const MESSAGE_MAX = 120;
 
 /** The kill switch as the store has it (migrations/0002_settings.sql: keys `online` and
-    `online_message`, written by tools/moderate.mjs online). `message`: what players read while off. */
+    `online_message`, written by tools/moderate.mjs online). `message`: what players read while off.
+    `rollout`: the key `rollout`, written by tools/deploy.mjs (src/rollout.ts, finding 184): the
+    version deployed at 100%, "" during a gradual deployment, absent without the row. */
 export interface OnlineState {
   on: boolean;
   message: string;
+  rollout?: string;
 }
 const ONLINE_ON: OnlineState = { on: true, message: "" };
 
@@ -81,10 +85,12 @@ export function offMessage(message: unknown): string {
 
 async function readSwitch(db: D1Database): Promise<OnlineState> {
   const { results } = await db
-    .prepare("SELECT key, value FROM settings WHERE key IN ('online', 'online_message')")
+    .prepare("SELECT key, value FROM settings WHERE key IN ('online', 'online_message', 'rollout')")
     .all<{ key: string; value: string }>();
   const get = (key: string) => results.find((r) => r.key === key)?.value;
-  return get("online")?.trim().toLowerCase() === "off" ? { on: false, message: offMessage(get("online_message")) } : ONLINE_ON;
+  const state = get("online")?.trim().toLowerCase() === "off" ? { on: false, message: offMessage(get("online_message")) } : ONLINE_ON;
+  const rollout = rolloutOf(get("rollout"));
+  return rollout === undefined ? state : { ...state, rollout };
 }
 
 /**
