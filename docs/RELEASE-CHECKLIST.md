@@ -26,4 +26,11 @@ in one docs commit. It keeps the docs an agent reads first true to the code. Abo
    can't be named: rebuild with `package_release.py --platform android` rather than `--apk`).
    Keep both with the release's files, never publish them: publish what `SHA256SUMS` lists
    (`docs/BUILDING.md`, "Release steps").
-8. **After a major model upgrade:** delete rules that only worked around an older model's habits.
+8. **The server's deploy** (finding 184). `online/server/README.md` ("New versions without
+   cutting races") still matches `tools/deploy.mjs --help`, and the release notes say whether the
+   server changed. The lead deploys after publishing with `node online/server/tools/deploy.mjs`
+   (never `wrangler deploy` on the official server: it skips the canary and the rollout row);
+   `--emergency` only for an urgent fix. After it: its summary says "promoted", and Workers Logs
+   show the rooms' "restarting for new code" and "all N members back" lines, no "out of the race"
+   beyond the usual.
+9. **After a major model upgrade:** delete rules that only worked around an older model's habits.

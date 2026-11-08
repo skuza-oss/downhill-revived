@@ -110,7 +110,7 @@ export const layout = {
     ]
   },
   "NetLobby": {
-    "size": 5080,
+    "size": 5144,
     "state": [
       0,
       4
@@ -318,6 +318,10 @@ export const layout = {
     "room_chosen": [
       5076,
       4
+    ],
+    "notice": [
+      5080,
+      64
     ]
   },
   "NetLobbyInfo": {

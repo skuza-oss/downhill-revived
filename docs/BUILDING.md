@@ -364,8 +364,9 @@ asset URL, the zip's SHA-256 and size) for the updater; publish both as release 
 
 Bump `port/include/version.h`, `build_wasm.py`, `package_release.py`, publish the zip and
 `latest.json` as `v<version>`, then raise `MIN_VERSION` in
-`online/server/wrangler.jsonc` and deploy when older versions should stop racing (finding 054,
-section 6; finding 088, CL3). macOS and Linux (finding 093, Release): `package_release.py
+`online/server/wrangler.jsonc` and deploy (`node online/server/tools/deploy.mjs`: a watched 10%
+canary, then 100%; rooms move between races, finding 184) when older versions should stop racing
+(finding 054, section 6; finding 088, CL3). macOS and Linux (finding 093, Release): `package_release.py
 --platform mac|linux --game PATH` on that machine (the mac zip is signed there), then
 `--merge` its `latest.json` into the Windows one; publish every zip with the one `latest.json`.
 Installers (finding 125, after 0.7.5): the same runs also make each platform's installer from the

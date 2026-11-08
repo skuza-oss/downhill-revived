@@ -87,6 +87,9 @@ typedef struct {
        whether its creator picked the region (finding 181). */
     char room_area[12];
     int room_chosen;
+    /* The server's notice before it restarts the room for new code (finding 184): a footer line
+       while this PC rejoins ("Server updated, reconnecting..."); "" none. The welcome clears it. */
+    char notice[64];
 } NetLobby;
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */

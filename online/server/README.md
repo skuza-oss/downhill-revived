@@ -15,6 +15,8 @@ is `docs/ONLINE-PLAN.md`.
 | `src/guard.ts` | The abuse guard (finding 161): kill switch, limits per address, caps per member, bans, the moderation log. |
 | `migrations/` | The moderation store's tables (D1). |
 | `tools/moderate.mjs` | The operator's moderation tool: the log, bans (through `wrangler d1 execute`). |
+| `src/rollout.ts` | Code updates at a safe moment: when a room restarts itself for new code, and the notice it sends (finding 184). |
+| `tools/deploy.mjs` | The operator's deploy: checks, a 10% canary watched in Workers Logs, then 100% or a rollback (finding 184). |
 | `test/` | Vitest suite, run inside the Workers runtime (`@cloudflare/vitest-plugin`). |
 | `tools/loadtest.mjs` | The WebSocket side of a race (binary PINGs, the caps) against a running server; reports the PING round trip. Race frames travel over the SFU (finding 158): `port/render/net/src/probe.rs` measures them. |
 
@@ -57,7 +59,9 @@ npx wrangler login       # opens the browser once; stores the token in your user
 npx wrangler deploy
 ```
 
-`wrangler deploy` prints the URL, `https://dhd-online.<account-subdomain>.workers.dev`. Players
+`wrangler deploy` prints the URL, `https://dhd-online.<account-subdomain>.workers.dev`. (The
+official server deploys with `tools/deploy.mjs`: [New versions](#new-versions-without-cutting-races),
+below.) Players
 put `server = wss://dhd-online.<account-subdomain>.workers.dev` in their `dhd.ini`. The client
 then uses:
 
@@ -175,11 +179,54 @@ new race starts and nobody new gets in. Each server isolate keeps the state it r
 30 s, so a change bites within that long. Without the database (one-time setup above) there is no
 kill switch: online is on.
 
-Live logs: `npx wrangler tail`. Redeploying disconnects every open room (Durable Objects
-restart on a new version), so don't deploy during races.
+Live logs: `npx wrangler tail`. A new version reaches a busy room only between its races
+(below).
 
 The Durable Object classes are created by the `v1` migration in `wrangler.jsonc`. Renaming or
 removing a class later needs a new migration entry, not an edit of `v1`.
+
+### New versions without cutting races
+
+A busy room never hibernates (an alarm every 2 s, a game message every second), so Cloudflare would
+reset it at the end of `code_update_strategy`'s `max_delay` (`wrangler.jsonc`: 24 h), at any
+moment. Instead the room restarts itself at a safe moment (`src/rollout.ts`, finding 184): no race,
+no locked grid or countdown, no Realtime setup in flight, no automatic race due within 10 s. It
+saves, sends its players `{"type":"notice","code":"server_update"}` (the game shows "Server
+updated, reconnecting..." as the room page's footer; 0.7.13 and older show nothing), closes their
+sockets with 1012 and resets; the games rejoin by token within about a second and keep their seats
+and Realtime sessions. A room learns which version is deployed from the rollout row (the moderation
+store's `settings` key `rollout`, which `tools/deploy.mjs` writes: the version at 100%, or empty
+while a gradual deployment runs, when no room moves), or, without the row, from the Worker's own
+version on its requests (newer than the room's: restart). Empty rooms simply start on the new code.
+
+The official server deploys with one command, from `online/server`, under the operator's login:
+
+```sh
+export CLOUDFLARE_ACCOUNT_ID=<the account that runs the server>
+export DHD_LOGS_TOKEN_FILE=<a file holding a read-only Workers Observability token>   # or .deploy.json
+node tools/deploy.mjs                 # check.py server, upload, 10% for 10 min, then 100% or back
+node tools/deploy.mjs --dry-run       # the plan only
+node tools/deploy.mjs --emergency     # 100% now with immediate updates: every room restarts, races too
+```
+
+1. `python tools/check.py server` (nothing is uploaded if it fails), then `wrangler versions upload`.
+2. The rollout row is set to "hold", then `wrangler versions deploy NEW@10% OLD@90%` with deferred
+   updates: Cloudflare gives about 10% of the Durable Objects the new version (new rooms start on
+   it; busy ones assigned to it keep the old code meanwhile, since no room moves while split).
+3. For `--watch` minutes (10) it reads Workers Logs every `--poll` seconds (60) and compares the new
+   version with the old over the same minutes: error lines, invocations ending in an exception,
+   "out of the race" lines and objects (`tools/rollout-verdict.mjs`). The new version fails when
+   one of these is at least 3 and above twice the old rate plus a margin.
+4. Then `NEW@100%` (or `OLD@100%` on a failure, or Ctrl-C) and, 20 s later, the rollout row: from
+   then on every busy room on the other version restarts at its next safe moment. A summary ends
+   the run; the exit code is 1 after a rollback. With too little traffic on the canary it says so
+   and goes on (`--require-traffic`: roll back instead).
+
+`.deploy.json` (gitignored) can hold `{"logsTokenFile": "<path>"}` instead of the variable; the
+tool reads the token and never prints it. A server without the MODERATION database has no rollout
+row: deploy it with `npx wrangler deploy` (100%; rooms follow the newer Worker version) or
+`--emergency`. Rooms that a deploy left on the old version (a restart that came back on it) try
+again after 2, 10 and 30 minutes, then wait for Cloudflare's 24 h.
 
 ## Limits and what is not there yet
 

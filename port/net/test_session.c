@@ -393,6 +393,27 @@ int main(void)
         assert(client_on_closed(&c,4011,"rate_limited") == 0);
         client_free(&c);
     }
+    {   /* the room restarts for new code (finding 184): its notice, its 1012 close, the rejoin */
+        const char *notice = "{\"type\":\"notice\",\"code\":\"server_update\",\"message\":\"Server updated, reconnecting...\"}";
+        const char *odd = "{\"type\":\"notice\",\"code\":\"server_update\",\"message\":\"café\n\"}";
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,welcome,strlen(welcome));
+        client_on_text(&c,notice,strlen(notice));
+        client_lobby(&c,&l);
+        assert(!strcmp(l.notice,"Server updated, reconnecting...") && l.state == NET_LOBBY);
+        assert(client_on_closed(&c,1012,"server_update") == 1);
+        client_lobby(&c,&l);
+        assert(l.state == NET_RECONNECTING && l.notice[0] && !l.error[0]);
+        client_connected(&c,&t);
+        client_on_text(&c,welcome,strlen(welcome));
+        client_lobby(&c,&l);
+        assert(l.state == NET_LOBBY && !l.notice[0]);
+        client_on_text(&c,odd,strlen(odd));  /* only what the game's font can draw */
+        client_lobby(&c,&l);
+        for (const char *q = l.notice; *q; q++) assert(*q >= 0x20 && *q <= 0x7e);
+        client_free(&c);
+    }
     puts("test_session: session and ten-player checks passed");
     return 0;
 }
