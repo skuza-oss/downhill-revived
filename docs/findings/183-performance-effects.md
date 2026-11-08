@@ -57,6 +57,11 @@ committed). Pixels differing by more than 8 from the all-on picture:
 All off is the union of the three; the sun's disc and halo stay in every picture; no other part of
 the picture changes. No "microprogram failed" line in any run.
 
+**The page** (hidden desktop, keys): Graphics shows Resolution, Scaling, Texture Pack, Font, the
+"Performance" heading, Performance Mode and the three switches. Performance Mode ON set all three
+OFF; Particles back ON showed Performance Mode as Custom; dhd.ini then held `shadows = 0`,
+`lens_flare = 0`, `particles = 1`.
+
 **State traces** (`state_trace_run.py`, the effects build against the base build):
 
 - Everything on: boot (600 fields) and race (5000 fields) identical to the base, every section.
