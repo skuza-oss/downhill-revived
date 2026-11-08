@@ -29,6 +29,10 @@ void ws_send(WsConn *ws, int binary, const void *data, size_t n);
 /* Sends what is queued, closes, stops the threads and frees ws. Not from a callback. */
 void ws_stop(WsConn *ws);
 
+/* The race ping, ms: the round trip of the connection's SFU association to Cloudflare Realtime
+   (its selected ICE pair's latest check), -1 while it has none (finding 181). Any thread. */
+int ws_race_rtt_ms(WsConn *ws);
+
 /* A blocking HTTP(S) GET; ws:// and wss:// URLs work too. Returns the body length after a 200
    (at most cap - 1, NUL-terminated), -1 on error. */
 int http_get(const char *url, char *out, size_t cap);

@@ -24,6 +24,8 @@ export interface LobbyEntry {
   region?: string;
   colo?: string;
   createdIn?: string;
+  /** The finer name of where it runs ("EU WEST"...; src/region.ts roomArea, finding 181). */
+  area?: string;
 }
 
 interface Stored extends LobbyEntry {

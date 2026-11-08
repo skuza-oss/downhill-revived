@@ -9,7 +9,9 @@
     "moderate": "node tools/moderate.mjs",
     "types": "wrangler types src/worker-configuration.d.ts",
     "typecheck": "wrangler types src/worker-configuration.d.ts && tsc --noEmit",
+    "pretest": "node tools/do_locations.mjs check",
     "test": "vitest run",
+    "colo-hints": "node tools/do_locations.mjs",
     "loadtest": "node tools/loadtest.mjs",
     "deploy": "wrangler deploy"
   },

@@ -137,10 +137,10 @@ describe("rooms and their region", () => {
     guest.hello("Yank");
     expect(await guest.json("welcome")).toMatchObject({ edgeColo: "ORD", country: "US", continent: "NA", roomRegion: "EU" });
     const where = JSON.parse(await host.next((f) => typeof f === "string" && JSON.parse(f).type === "where" && JSON.parse(f).members.length === 2) as string);
-    expect(where).toEqual({ type: "where", region: "EU", colo: "", members: [{ id: 0, region: "EU" }, { id: 1, region: "NA" }] });
-    // the hint and the creator are kept with the room
+    expect(where).toEqual({ type: "where", region: "EU", area: "EU EAST", colo: "", members: [{ id: 0, region: "EU" }, { id: 1, region: "NA" }] });
+    // the hint and the creator are kept with the room (Auto by the colo since finding 181)
     await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(welcome.code)), async (r: any) => {
-      expect(r.state.origin).toEqual({ hint: "eeur", createdIn: "EU", createdFrom: "WAW" });
+      expect(r.state.origin).toEqual({ hint: "eeur", how: "colo", createdIn: "EU", createdFrom: "WAW" });
     });
   });
 

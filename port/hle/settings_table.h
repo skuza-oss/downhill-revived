@@ -40,6 +40,7 @@ static const SettingChoice setting_choices_touch_vibration[] = {{"0", "Off"}, {"
 static const SettingChoice setting_choices_touch_with_pad[] = {{"hide", "Hide"}, {"show", "Show"}};
 static const SettingChoice setting_choices_touch_tilt_strength[] = {{"0", "0%"}, {"10", "10%"}, {"20", "20%"}, {"30", "30%"}, {"40", "40%"}, {"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}};
 static const SettingChoice setting_choices_names[] = {{"off", "Off"}, {"small", "Small"}, {"medium", "Medium"}, {"large", "Large"}};
+static const SettingChoice setting_choices_room_region[] = {{"auto", "Auto"}, {"weur", "EU West"}, {"eeur", "EU East"}, {"enam", "NA East"}, {"wnam", "NA West"}, {"apac-ne", "Asia NE"}, {"apac-se", "Asia SE"}, {"oc", "Oceania"}};
 static const SettingChoice setting_choices_auto_update[] = {{"ask", "Ask"}, {"on", "Automatic"}, {"off", "Off"}};
 static const SettingChoice setting_choices_discord[] = {{"off", "OFF"}, {"on", "ON"}};
 
@@ -75,6 +76,7 @@ static const SettingInfo setting_table[] = {
     {"touch_with_pad", "DHD_TOUCH_WITH_PAD", "hide", setting_choices_touch_with_pad, 2},
     {"touch_tilt_strength", "DHD_TOUCH_TILT_STRENGTH", "50", setting_choices_touch_tilt_strength, 11},
     {"names", "DHD_NAMES", "small", setting_choices_names, 4},
+    {"room_region", "DHD_NET_ROOM_REGION", "auto", setting_choices_room_region, 8},
     {"auto_update", "", "ask", setting_choices_auto_update, 3},
     {"discord", "DHD_DISCORD", "off", setting_choices_discord, 2},
 };

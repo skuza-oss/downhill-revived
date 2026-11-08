@@ -25,7 +25,7 @@ use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::io::ErrorKind;
 use std::net::{Shutdown, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -86,6 +86,9 @@ pub struct WsConn {
     /// The send thread holds an SFU association for a race: race frames are taken while the room
     /// connection is down (finding 175), the race goes on over it.
     sfu_live: AtomicBool,
+    /// The race ping in ms (`Sfu::rtt_ms`, finding 181), -1 none: written by the send thread
+    /// after each poll, read by `ws_race_rtt_ms`.
+    race_rtt_ms: AtomicI32,
     /// set while the receive thread runs; cleared (and `ended` notified) when it ends
     running: Mutex<bool>,
     ended: Condvar,
@@ -309,7 +312,7 @@ fn send_main(c: Arc<WsConn>) {
         if !connected { welcomed = false; }
         // The room connection is down: the race goes on over the SFU while the receive thread
         // rejoins (finding 175); without an association there is nothing to do.
-        if !connected && a.sfu.is_none() { c.sfu_live.store(false, Ordering::Release); continue; }
+        if !connected && a.sfu.is_none() { c.sfu_live.store(false, Ordering::Release); c.race_rtt_ms.store(-1, Ordering::Relaxed); continue; }
         // Lobby and SFU callbacks share this thread. Apply the transport's start marker
         // before the game sees start, then deliver any early reliable race events.
         loop {
@@ -400,6 +403,7 @@ fn send_main(c: Arc<WsConn>) {
             }
         }
         c.sfu_live.store(a.sfu.is_some(), Ordering::Release);
+        c.race_rtt_ms.store(a.sfu.as_ref().and_then(|s| s.rtt_ms()).map_or(-1, |ms| ms as i32), Ordering::Relaxed);
         for data in incoming {
             if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
         }
@@ -458,6 +462,7 @@ pub unsafe extern "C" fn ws_start(url: *const c_char, h: *const WsHandler) -> *m
         live: Mutex::new(None),
         stopping: AtomicBool::new(false),
         sfu_live: AtomicBool::new(false),
+        race_rtt_ms: AtomicI32::new(-1),
         running: Mutex::new(true),
         ended: Condvar::new(),
         threads: Mutex::new(None),
@@ -527,6 +532,14 @@ pub unsafe extern "C" fn ws_stop(ws: *mut WsConn) {
         c.force_close();
     }
     let _ = io.join();
+}
+
+/// ws.h: the race ping, ms: the round trip of the room's SFU association to Cloudflare Realtime
+/// (the selected ICE pair's latest check), -1 while there is none (finding 181).
+#[no_mangle]
+pub unsafe extern "C" fn ws_race_rtt_ms(ws: *mut WsConn) -> c_int {
+    let Some(c) = (unsafe { ws.as_ref() }) else { return -1 };
+    c.race_rtt_ms.load(Ordering::Relaxed)
 }
 
 /// ws.h: a blocking HTTP(S) GET (ws:// and wss:// read as http:// and https://). Returns the body's

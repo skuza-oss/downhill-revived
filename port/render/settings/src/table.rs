@@ -159,6 +159,11 @@ pub const SETTINGS: &[Setting] = &[
     text("name", "DHD_NET_NAME"),
     choice("names", "DHD_NAMES", &[c("off", "Off"), c("small", "Small"), c("medium", "Medium"), c("large", "Large")], "small", "small"),
     text("rider", "DHD_NET_RIDER"),
+    // Where the rooms this player creates run (ONLINE's Room Region row, finding 181): Auto (the
+    // server picks by the Cloudflare location this PC reaches) or a Durable Object location hint.
+    choice("room_region", "DHD_NET_ROOM_REGION", &[c("auto", "Auto"), c("weur", "EU West"), c("eeur", "EU East"),
+                                                   c("enam", "NA East"), c("wnam", "NA West"), c("apac-ne", "Asia NE"),
+                                                   c("apac-se", "Asia SE"), c("oc", "Oceania")], "auto", "auto"),
     // The launcher's: whether it looks for a newer release, and where (empty: the official releases).
     choice("auto_update", "", &[c("ask", "Ask"), c("on", "Automatic"), c("off", "Off")], "ask", "ask"),
     text("update_url", "DHD_UPDATE_URL"),

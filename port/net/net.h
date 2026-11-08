@@ -83,6 +83,10 @@ typedef struct {
        location this connection reached, this PC's country and continent as Cloudflare sees them,
        the location the room runs in and its region ("EU", "NA", "ASIA"...). */
     char edge_colo[8], country[4], continent[4], room_colo[8], room_region[8];
+    /* Where the room runs, finer ("EU WEST", "ASIA SE"...; "" unknown or an older server), and
+       whether its creator picked the region (finding 181). */
+    char room_area[12];
+    int room_chosen;
 } NetLobby;
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */
@@ -101,11 +105,15 @@ typedef struct {
     char region[8], colo[8];   /* where the room runs ("EU"...; finding 135), "" unknown */
     int timed;                 /* the times above can be counted against net_server_ms(): the list
                                   came with the server's "now", or a room's pings set the clock */
+    char area[12];             /* where the room runs, finer ("EU WEST"...; finding 181), "" unknown */
 } NetLobbyInfo;
 
 /* base_url: "wss://host" or "ws://127.0.0.1:8787". version: the build's version string (the
    server refuses players whose version differs from the host's). iso_sha256: 64 lowercase hex. */
 void net_init(const char *base_url, const char *name, const char *version, const char *iso_sha256);
+/* Where the new room runs: DHD_NET_ROOM_REGION (dhd.ini room_region, the ONLINE page's Room Region
+   row): a Durable Object location hint the server offers ("weur", "apac-se"...), or "auto"/unset:
+   the server picks (finding 181). */
 int net_create_room(void);
 int net_join_room(const char *code);   /* -1 when the code can't be one */
 void net_leave(void);
@@ -129,6 +137,9 @@ double net_seconds(void);                          /* the clock start_at uses */
    same moment on every PC to a few ms, for starting the race together. */
 double net_server_ms(void);
 int net_ping_ms(void);                             /* in a room, else -1 */
+/* In a room: the round trip to Cloudflare's race network (the room's SFU association; the median
+   of the last 5 one-second samples), else -1 (finding 181). */
+int net_race_ms(void);
 /* In a race: how old the other riders' snapshots are when they arrive (the slowest player's
    median, ms; what the puppets are predicted across), else -1 (finding 169). */
 int net_riders_ms(void);

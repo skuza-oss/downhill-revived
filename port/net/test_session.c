@@ -93,6 +93,56 @@ int main(void)
         assert(!l.edge_colo[0] && !l.country[0] && !l.room_region[0]);
         client_free(&c);
     }
+    {   /* the room's area and its creator's pick (finding 181): from the welcome, then the where
+           message; the list's rows; the race ping's samples and their net: line */
+        const char *picked = "{\"type\":\"welcome\",\"memberId\":0,\"host\":true,\"code\":\"AREA22\",\"serverTime\":1000,"
+            "\"edgeColo\":\"MRS\",\"country\":\"DZ\",\"continent\":\"AF\",\"roomColo\":\"\",\"roomRegion\":\"ASIA\","
+            "\"roomArea\":\"ASIA SE\",\"roomChosen\":true}";
+        const char *where = "{\"type\":\"where\",\"region\":\"ASIA\",\"area\":\"ASIA SE\",\"colo\":\"SIN\",\"members\":[{\"id\":0,\"region\":\"AF\"}]}";
+        const char *list = "{\"protocol\":4,\"lobbies\":[{\"code\":\"AREA22\",\"region\":\"EU\",\"area\":\"EU WEST\",\"colo\":\"MRS\"},"
+            "{\"code\":\"OLD222\",\"region\":\"NA\"}]}";
+        NetLobbyInfo rows[2];
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert(client_race_ms(&c) == -1);
+        client_connected(&c,&t);
+        client_on_text(&c,picked,strlen(picked));  /* net: in room AREA22 (host): ... ASIA SE (location not known yet, picked by its creator) */
+        client_lobby(&c,&l);
+        assert(!strcmp(l.room_area,"ASIA SE") && l.room_chosen && !strcmp(l.room_region,"ASIA"));
+        client_on_text(&c,where,strlen(where));  /* net: room AREA22 runs in SIN (ASIA SE, picked by its creator) */
+        client_lobby(&c,&l);
+        assert(!strcmp(l.room_colo,"SIN") && !strcmp(l.room_area,"ASIA SE"));
+        /* the race ping: one sample a second, the counter shows the median of the last 5 */
+        client_race_rtt(&c, 40);
+        assert(client_race_ms(&c) == 40 && c.race_window_n == 1);
+        client_race_rtt(&c, 900);  /* within the same second: not a sample */
+        assert(client_race_ms(&c) == 40 && c.race_window_n == 1);
+        for (int ms = 41; ms <= 44; ms++) { c.next_race_sample = 0; client_race_rtt(&c, ms); }
+        assert(client_race_ms(&c) == 42 && c.race_window_n == 5);
+        c.next_race_sample = 0; client_race_rtt(&c, 500);  /* one slow check moves the median by one */
+        assert(client_race_ms(&c) == 43);
+        c.next_log = 0;
+        client_tick(&c);  /* net: room AREA22, last 0 s: no pings; race network 42 ms median, 500 worst (6 samples)... */
+        assert(c.race_window_n == 0);
+        client_race_rtt(&c, -1);  /* the association is gone */
+        assert(client_race_ms(&c) == -1);
+        client_free(&c);
+        /* the list: the area when the server sends one, else nothing (an older server: the region) */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert(client_read_lobbies(&c, list, net_now_ms(), net_now_ms(), rows, 2) == 2);
+        assert(!strcmp(rows[0].area, "EU WEST") && !strcmp(rows[0].region, "EU") && !rows[1].area[0] && !strcmp(rows[1].region, "NA"));
+        client_free(&c);
+        /* a 0.7.13 server's welcome: no area, not picked */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        {
+            const char *old = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"OLD222\",\"serverTime\":1000,"
+                "\"edgeColo\":\"WAW\",\"country\":\"PL\",\"continent\":\"EU\",\"roomColo\":\"FRA\",\"roomRegion\":\"EU\"}";
+            client_on_text(&c,old,strlen(old));
+        }
+        client_lobby(&c,&l);
+        assert(!l.room_area[0] && !l.room_chosen && !strcmp(l.room_region,"EU"));
+        client_free(&c);
+    }
     {   /* the public list in no room (finding 135): its "now" sets the clock, so a racing room's
            ENDS IN counts from the server's time; 0.7.6 counted from the epoch (ENDS IN 29893031:32).
            Without "now" (an older server) and no room, the row shows no time at all. */

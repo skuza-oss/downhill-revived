@@ -110,7 +110,7 @@ export const layout = {
     ]
   },
   "NetLobby": {
-    "size": 5064,
+    "size": 5080,
     "state": [
       0,
       4
@@ -310,10 +310,18 @@ export const layout = {
     "room_region": [
       5056,
       8
+    ],
+    "room_area": [
+      5064,
+      12
+    ],
+    "room_chosen": [
+      5076,
+      4
     ]
   },
   "NetLobbyInfo": {
-    "size": 352,
+    "size": 368,
     "code": [
       0,
       8
@@ -373,6 +381,10 @@ export const layout = {
     "timed": [
       348,
       4
+    ],
+    "area": [
+      352,
+      12
     ]
   }
 };

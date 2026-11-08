@@ -20,7 +20,7 @@ host.
 
 | Method | Path | What |
 |---|---|---|
-| WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. |
+| WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. `?region=<hint>` picks where it runs (Region, below). |
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
 | GET | `/v1/health` | `{"ok":true,"protocol":4,"minVersion":"0.1.0","online":true}` (`online` and `message`: the kill switch, below) |
@@ -186,6 +186,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // Answer to hello: who you are in this room, and where you and the room are (Region, below).
 {"type":"welcome","protocol":4,"code":"K7QX2M","memberId":2,"host":false,"serverTime":1734000000000,
  "edgeColo":"WAW","country":"PL","continent":"EU","roomColo":"FRA","roomRegion":"EU",
+ "roomArea":"EU EAST","roomChosen":false,
  "rejoinToken":"<32 hex>"}  // this member's rejoin token: only this client gets it (Limits, below)
 // Whether the room holds a Realtime session for this member (finding 177): "sfu":"ready" (a rejoin:
 // keep the association) or "sfu":"setup" (offer one). A rejoin into the member's running race
@@ -193,7 +194,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 // Where the room runs and each member's region (never their country): after every join and when
 // the room learns its colo (Region, below).
-{"type":"where","region":"EU","colo":"FRA","members":[{"id":0,"region":"EU"},{"id":2,"region":"NA"}]}
+{"type":"where","region":"EU","area":"EU EAST","colo":"FRA","members":[{"id":0,"region":"EU"},{"id":2,"region":"NA"}]}
 
 // Full room snapshot. Sent after every change and every ~2 s with fresh ping numbers.
 {"type":"room","code":"K7QX2M","hostId":0,"roomName":"Friday race","public":true,"maxPlayers":10,
@@ -458,7 +459,7 @@ The server keeps what everyone has to agree on:
 ```json
 {"protocol":4,"minVersion":"0.1.0","region":"EU","now":1734000000000,"lobbies":[
   {"code":"K7QX2M","roomName":"Friday race","version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","track":3,
-   "players":2,"maxPlayers":10,"hostName":"Ann","region":"EU","colo":"FRA","createdIn":"EU"}]}
+   "players":2,"maxPlayers":10,"hostName":"Ann","region":"EU","colo":"FRA","createdIn":"EU","area":"EU EAST"}]}
 ```
 
 `region` at the top is the asker's own; the list comes in their region's order (Region, below).
@@ -761,7 +762,8 @@ including ping, readiness, race state and results. The fourth room rule sets cap
 
 ## Region (finding 135)
 
-A room is a Durable Object, and it runs where it was created. `/v1/rooms/new` creates it with a
+A room is a Durable Object, and it runs where it was created. `/v1/rooms/new` creates it with the
+hint its creator picked or Auto's (below, since finding 181); before that, a
 location hint from the creator's continent and country as Cloudflare's geolocation places them
 (`request.cf`; never the IP), not from the Cloudflare location their ISP happens to reach:
 Europe `weur` (the Atlantic side: GB, IE, FR, ES, PT, the Benelux...) or `eeur` (the rest),
@@ -791,6 +793,37 @@ server's table of Durable Object locations, else the hint's (`EU`, `NA`, `SA`, `
 
 Every field and the message type are additions: clients that don't know them ignore them (the
 native client reads by key, the browser copies known keys), so `MIN_VERSION` stays as it is.
+
+### The creator's pick and Auto (finding 181)
+
+`/v1/rooms/new?region=<hint>` makes the room with that hint. The hints offered are the ones that
+run Durable Objects of their own:
+
+| `region` | Area players see | Colos it ran in (2026-11-08) |
+|---|---|---|
+| `weur` | `EU WEST` | AMS LHR CDG MAD MRS LIS |
+| `eeur` | `EU EAST` | FRA MXP WAW VIE OTP ARN PRG |
+| `enam` | `NA EAST` | ATL EWR MIA ORD IAD |
+| `wnam` | `NA WEST` | DFW SJC LAX DEN SEA |
+| `apac-ne` | `ASIA NE` | NRT KIX ICN |
+| `apac-se` | `ASIA SE` | SIN HKG |
+| `oc` | `OCEANIA` | SYD MEL BNE |
+
+No `region`, `auto`, or any other value (`sam`, `afr`, `me`, `apac`, unknown names) is Auto, so a
+game never fails to make a room over its pick. Auto takes the hint of the Cloudflare location the
+creator reached (`online/server/src/colo-hints.ts`, made by `online/server/tools/do_locations.mjs`
+from Cloudflare's published Durable Object locations and measured round trips) when that colo is on
+the creator's own continent (Asia split as below: northeast, southeast, the Middle East, the rest),
+and the country and continent above otherwise: when the colo is not in the table, or when the
+creator's ISP took them to another continent (an Indonesian reaching Tokyo or Paris keeps the
+Southeast Asian room). The server logs, once per room, `room CODE: runs in COLO, made with HINT
+(chosen | colo | country | colo-other-continent | none) from EDGE`.
+
+- `welcome` adds `roomArea` (the finer name of where the room runs: its colo's area, else its
+  hint's; `""` unknown) and `roomChosen` (`true`: the creator picked the region).
+- `where` and each `/v1/lobbies` row add `area`, the same name.
+
+All additions: games up to 0.7.13 send no `region` (Auto) and ignore the new keys.
 
 SFU sessions belong to room members, one at a time per member (finding 177); subscriptions are
 made for each race's racers and close on departure, on a session's replacement, or for a member
