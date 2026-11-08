@@ -1,4 +1,5 @@
-//! Opt-in native transport counters. Addresses are classified, never printed.
+//! Opt-in native transport counters (DHD_NET_BENCH): each second, a peer connection's path, bytes and
+//! ICE round trip. Addresses are classified, never printed.
 use std::net::SocketAddr;
 use str0m::stats::PeerStats;
 
@@ -25,8 +26,9 @@ pub fn peer(backend: &str, stats: &PeerStats, relay: Option<SocketAddr>) {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        eprintln!("netbench: epoch_ms={epoch} backend={backend} path={path} remote_scope={scope} rx={} tx={} ice_rtt_ms={:.3}",
+        // conn: the local candidate's port, which tells a host's peer connections apart.
+        eprintln!("netbench: epoch_ms={epoch} backend={backend} path={path} remote_scope={scope} rx={} tx={} ice_rtt_ms={:.3} conn={}",
             stats.peer_bytes_rx, stats.peer_bytes_tx,
-            pair.current_round_trip_time.map_or(-1.0, |d| d.as_secs_f64() * 1000.0));
+            pair.current_round_trip_time.map_or(-1.0, |d| d.as_secs_f64() * 1000.0), pair.local.addr.port());
     }
 }

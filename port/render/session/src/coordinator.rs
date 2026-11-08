@@ -1,14 +1,41 @@
-//! Portable P2P room coordinator. No sockets, platform APIs or game simulation.
-//! Both transports expose the same room/start/frame contract to the existing game.
+//! A P2P room's coordinator (finding 180): the room rules an SFU room's server runs
+//! (online/server/src/room.ts: ready, countdown, start, finish window, results, the Then rule),
+//! run by the host's game instead, and the race-frame routing of a host star. Plain data in and
+//! out, no sockets: the native send thread (port/render/net/src/p2p.rs) and the browser page
+//! (port/web/www/p2p.js, through browser.rs) drive the same code. The game sees the SFU room's messages
+//! (room, start, left, ended, error), so its online code is one for both kinds of room.
+//!
+//! On a peer connection a room message is byte 0 then JSON; a race frame is byte 1, the race's
+//! start time (u64, little-endian: frames of an older race are dropped), then the game's frame.
+//! The host stamps each frame with the sender's slot for the connection it came on, so no guest
+//! can speak for another rider.
 use serde_json::{json, Value};
 
 #[derive(Debug)]
 pub enum Action {
-    Client(Value),
+    /// A room message for this game (as an SFU room's server would send it).
+    Game(Value),
+    /// A race frame for this game.
     Frame(Vec<u8>),
+    /// A message for one peer: (member, reliable, bytes).
     Peer(u64, bool, Vec<u8>),
-    Service(Value),
+    /// A message for the room server (online/server/src/p2p.ts).
+    Server(Value),
 }
+
+/// The most members a room holds (online/server/src/protocol.ts MAX_MEMBERS).
+const MAX_MEMBERS: u64 = 10;
+/// The SFU room's timings (online/server/src/protocol.ts): the countdown once a grid locks, the
+/// lead from the start message to the start, the AUTO rule's wait between races.
+const COUNTDOWN_MS: u64 = 5000;
+const START_LEAD_MS: u64 = 1500;
+const NEXT_RACE_MS: u64 = 30000;
+/// A room message on a peer connection is at most this long.
+const COMMAND_MAX: usize = 16384;
+/// A race frame with its header (marker 8, type 1, slot 1, frame up to 3070).
+const FRAME_MAX: usize = 3080;
+/// A state bundle fits one datagram (port/hle/state_bundle.h).
+const STATE_MAX: usize = 1000;
 
 pub struct Session {
     pub me: u64,
@@ -20,7 +47,8 @@ pub struct Session {
     grid_rules: Value,
     out: Vec<Action>,
     last_publish: u64,
-    next_explicit: bool,
+    /// The capacity last told to the server (p2p_capacity): it refuses joins beyond it.
+    told_capacity: u64,
 }
 
 impl Session {
@@ -36,9 +64,10 @@ impl Session {
             grid_rules: Value::Null,
             out: vec![],
             last_publish: now,
-            next_explicit: false,
+            told_capacity: MAX_MEMBERS,
+            // Never public: a P2P room is reached by its code only (finding 180).
             room: json!({"type":"room","code":welcome["code"],"hostId":host,"roomName":"P2P race",
-                "public":false,"maxPlayers":10,"started":false,"version":welcome["version"],
+                "public":false,"maxPlayers":MAX_MEMBERS,"started":false,"version":welcome["version"],
                 "settings":{"track":0,"laps":0,"seed":null},"members":[],"phase":"open",
                 "rules":{"finishWindow":60,"nextRace":"host","then":"same"},"rotation":[],
                 "trackLimits":[],"pickOnly":[],"countdownEndsAt":null,"nextRaceAt":null,"lastRace":null}),
@@ -46,7 +75,7 @@ impl Session {
         let mut w = welcome.clone();
         w["type"] = json!("welcome");
         w["host"] = json!(me == host);
-        s.out.push(Action::Client(w));
+        s.out.push(Action::Game(w));
         s.members(&welcome["members"], now);
         s
     }
@@ -69,7 +98,7 @@ impl Session {
     }
     fn send(&mut self, to: u64, message: Value) {
         if to == self.me {
-            self.out.push(Action::Client(message));
+            self.out.push(Action::Game(message));
         } else if self.connected.contains(&to) {
             let mut bytes = vec![0];
             bytes.extend(message.to_string().as_bytes());
@@ -85,7 +114,7 @@ impl Session {
         if !self.is_host() {
             return;
         }
-        let Some(incoming) = members.as_array().filter(|a| a.len() <= 10) else {
+        let Some(incoming) = members.as_array().filter(|a| a.len() as u64 <= MAX_MEMBERS) else {
             return;
         };
         let old = self.room["members"].as_array().cloned().unwrap_or_default();
@@ -116,14 +145,15 @@ impl Session {
         } else {
             self.connected.retain(|x| *x != id);
             if id == self.host && !self.is_host() {
-                self.out.push(Action::Client(
-                    json!({"type":"error","code":"host_left","message":"The host disconnected."}),
+                self.out.push(Action::Game(
+                    json!({"type":"error","code":"host_left","message":"The host left: the room has ended."}),
                 ));
-                self.out.push(Action::Service(json!({"type":"leave"})));
+                self.out.push(Action::Server(json!({"type":"leave"})));
             } else if self.is_host() {
+                // The host carries the race: a guest it can't reach is out of the room (its rider
+                // is the host's AI for the rest of this race).
                 self.retire(id, "disconnect");
-                self.out
-                    .push(Action::Service(json!({"type":"p2p_kick","member":id})));
+                self.out.push(Action::Server(json!({"type":"p2p_kick","member":id,"reason":"unreachable"})));
                 self.publish(now);
             }
         }
@@ -139,7 +169,7 @@ impl Session {
     }
     pub fn receive(&mut self, from: u64, reliable: bool, bytes: Vec<u8>, now: u64) {
         if bytes.first() == Some(&0) {
-            if !reliable || bytes.len() > 16384 {
+            if !reliable || bytes.len() > COMMAND_MAX {
                 return;
             }
             let Ok(m) = serde_json::from_slice::<Value>(&bytes[1..]) else {
@@ -165,7 +195,7 @@ impl Session {
                     Some("error") => {}
                     _ => return,
                 }
-                self.out.push(Action::Client(m));
+                self.out.push(Action::Game(m));
             }
         } else if bytes.first() == Some(&1) {
             self.route_frame(from, reliable, bytes[1..].to_vec());
@@ -206,7 +236,7 @@ impl Session {
     }
     fn route_frame(&mut self, from: u64, reliable: bool, mut bytes: Vec<u8>) {
         let Some(race) = &self.race else { return };
-        if bytes.len() < 10 || bytes.len() > 3080 || bytes[8] != if reliable { 6 } else { 5 } {
+        if bytes.len() < 10 || bytes.len() > FRAME_MAX || bytes[8] != if reliable { 6 } else { 5 } {
             return;
         }
         if u64::from_le_bytes(bytes[..8].try_into().unwrap())
@@ -215,7 +245,7 @@ impl Session {
             return;
         }
         if !reliable
-            && (bytes.len() > 1000 || bytes.len() < 21 || bytes[10] != 6 || bytes[11] >= 10)
+            && (bytes.len() > STATE_MAX || bytes.len() < 21 || bytes[10] != 6 || bytes[11] >= 10)
         {
             return;
         }
@@ -266,17 +296,11 @@ impl Session {
                 }
                 if let Some(n) = m["maxPlayers"]
                     .as_u64()
-                    .filter(|n| (2..=10).contains(n) && *n >= self.ids().len() as u64)
+                    .filter(|n| (2..=MAX_MEMBERS).contains(n) && *n >= self.ids().len() as u64)
                 {
                     self.room["maxPlayers"] = json!(n);
                 }
-                if m["public"].is_boolean() {
-                    self.room["public"] = m["public"].clone();
-                    if !self.next_explicit {
-                        self.room["rules"]["nextRace"] =
-                            json!(if m["public"] == true { "auto" } else { "host" });
-                    }
-                }
+                // "public" is ignored: a P2P room is never listed.
                 if let Some(name) = m["roomName"].as_str().filter(|s| s.chars().count() <= 24) {
                     self.room["roomName"] = json!(name);
                 }
@@ -292,7 +316,6 @@ impl Session {
                 }
                 if ["auto", "host"].contains(&m["nextRace"].as_str().unwrap_or("")) {
                     self.room["rules"]["nextRace"] = m["nextRace"].clone();
-                    self.next_explicit = true;
                 }
                 if ["same", "next", "random"].contains(&m["then"].as_str().unwrap_or("")) {
                     self.room["rules"]["then"] = m["then"].clone();
@@ -350,7 +373,7 @@ impl Session {
                     if self.room["waitingForRider"] == true {
                         self.lock_grid(now);
                     } else if self.room["nextRaceAt"].is_null() {
-                        self.room["nextRaceAt"] = json!(now + 30000);
+                        self.room["nextRaceAt"] = json!(now + NEXT_RACE_MS);
                     }
                 }
             }
@@ -364,8 +387,7 @@ impl Session {
             }
             Some("kick") if from == self.host => {
                 if let Some(id) = m["member"].as_u64().filter(|id| *id != self.host) {
-                    self.out
-                        .push(Action::Service(json!({"type":"p2p_kick","member":id})));
+                    self.out.push(Action::Server(json!({"type":"p2p_kick","member":id})));
                 }
             }
             Some("back") => self.retire(from, "gave_up"),
@@ -456,7 +478,7 @@ impl Session {
             }
         }
         self.grid_rules = self.room["rules"].clone();
-        self.room["countdownEndsAt"] = json!(now + 5000);
+        self.room["countdownEndsAt"] = json!(now + COUNTDOWN_MS);
         self.room["nextRaceAt"] = Value::Null;
         self.room["waitingForRider"] = json!(false);
     }
@@ -478,7 +500,7 @@ impl Session {
             .map(|m| json!({"id":m["id"],"name":m["name"],"rider":m["rider"],"place":0}))
             .collect();
         self.race = Some(
-            json!({"type":"start","startAt":now + 1500,"serverTime":now,"track":self.room["settings"]["track"],"laps":self.room["settings"]["laps"],"seed":self.room["settings"]["seed"].as_u64().unwrap_or(now & 0xffff_ffff),"players":players,"results":results,"rules":self.grid_rules}),
+            json!({"type":"start","startAt":now + START_LEAD_MS,"serverTime":now,"track":self.room["settings"]["track"],"laps":self.room["settings"]["laps"],"seed":self.room["settings"]["seed"].as_u64().unwrap_or(now & 0xffff_ffff),"players":players,"results":results,"rules":self.grid_rules}),
         );
         self.room["countdownEndsAt"] = Value::Null;
         self.grid.clear();
@@ -557,7 +579,7 @@ impl Session {
         }
         self.room["countdownEndsAt"] = Value::Null;
         self.room["nextRaceAt"] = if race["rules"]["nextRace"] == "auto" {
-            json!(now + 30000)
+            json!(now + NEXT_RACE_MS)
         } else {
             Value::Null
         };
@@ -685,9 +707,13 @@ impl Session {
                 member["dnfReason"] = Value::Null;
             }
         }
+        let capacity = room["maxPlayers"].as_u64().unwrap_or(MAX_MEMBERS);
+        if capacity != self.told_capacity {
+            self.told_capacity = capacity;
+            self.out.push(Action::Server(json!({"type":"p2p_capacity","maxPlayers":capacity})));
+        }
         self.room = room.clone();
-        self.broadcast(room.clone());
-        self.out.push(Action::Service(json!({"type":"p2p_listing","roomName":room["roomName"],"public":room["public"],"maxPlayers":room["maxPlayers"],"track":room["settings"]["track"],"phase":room["phase"],"raceStartedAt":room["raceStartedAt"],"finishEndsAt":room["finishEndsAt"],"nextRaceAt":room["nextRaceAt"]})));
+        self.broadcast(room);
     }
 }
 
@@ -732,5 +758,34 @@ mod tests {
             .any(|a| matches!(a,Action::Frame(f) if f[1]==1)));
         s.receive(2, true, vec![0; 12], 3200);
         assert!(s.take().is_empty());
+    }
+    #[test]
+    fn rooms_stay_private_and_the_server_hears_the_capacity_once() {
+        let mut s = host();
+        s.link(2, true, 100);
+        s.take();
+        s.local(json!({"type":"settings","public":true,"maxPlayers":4}), 200);
+        assert_eq!(s.room["public"], false);
+        assert_eq!(s.room["rules"]["nextRace"], "host");
+        let capacity = |actions: &[Action]| actions.iter().filter(|a| matches!(a, Action::Server(m) if m["type"] == "p2p_capacity")).count();
+        let first = s.take();
+        assert_eq!(capacity(&first), 1);
+        assert!(first.iter().any(|a| matches!(a, Action::Server(m) if m["maxPlayers"] == 4)));
+        s.tick(1300); // the room is published again each second
+        assert_eq!(capacity(&s.take()), 0);
+    }
+    #[test]
+    fn an_unreachable_guest_is_removed_and_its_rider_retired() {
+        let mut s = host();
+        s.link(2, true, 100);
+        s.local(json!({"type":"ready","ready":true}), 100);
+        s.command(2, json!({"type":"ready","ready":true}), 100);
+        s.tick(5101);
+        s.take();
+        s.link(2, false, 6000);
+        let actions = s.take();
+        assert!(actions.iter().any(|a| matches!(a, Action::Server(m) if m["type"] == "p2p_kick" && m["reason"] == "unreachable")));
+        assert!(actions.iter().any(|a| matches!(a, Action::Game(m) if m["type"] == "left" && m["memberId"] == 2)));
+        assert_eq!(s.active_slot(2), None);
     }
 }

@@ -12,14 +12,14 @@
 //! send thread writes, blocking, under the same lock. It also owns the room's SFU UDP socket,
 //! str0m state machine, negotiated channels and bounded event/state queues; the SFU's reader
 //! thread wakes it for each datagram, as ws_send does for each message. Race frames never
-//! enter the TCP stream. Signaling remains on the room WebSocket.
+//! enter the TCP stream. Signaling remains on the room WebSocket. A P2P room's connection
+//! (finding 180) has its own send thread, p2p.rs: peer connections instead of the SFU.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
-mod http;
-mod peer;
-mod session;
-mod p2p;
 mod diagnostics;
+mod http;
+mod p2p;
+mod peer;
 mod relay;
 mod sfu;
 mod stream;
@@ -82,6 +82,7 @@ struct Queue {
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
 pub struct WsConn {
+    /// A P2P room (its URL's /v1/p2p/): p2p.rs runs the send thread.
     p2p: bool,
     h: WsHandler,
     queue: Mutex<Queue>,
@@ -127,6 +128,34 @@ impl WsConn {
     fn wait_handled(&self, limit: Duration) {
         let q = lock(&self.queue);
         let _ = self.wake.wait_timeout_while(q, limit, |q| q.handled < q.received && !self.stopping.load(Ordering::Acquire));
+    }
+
+    /// Hands one message to the game (ws.h's on_message; text NUL-terminated, as it reads it).
+    fn deliver(&self, binary: bool, data: &[u8]) {
+        if let Some(f) = self.h.on_message {
+            let mut bytes = Vec::with_capacity(data.len() + 1);
+            bytes.extend_from_slice(data);
+            bytes.push(0);
+            unsafe { f(self.h.ctx, binary as c_int, bytes.as_ptr(), data.len()) };
+        }
+    }
+
+    /// Writes one message on the room connection now. A failed write leaves the stream unusable:
+    /// it is dropped, and the receive thread reports the close.
+    fn write_now(&self, binary: bool, data: Vec<u8>) {
+        let mut live = lock(&self.live);
+        let Some(l) = live.as_mut() else { return };
+        let msg = if binary {
+            Message::Binary(Bytes::from(data))
+        } else {
+            Message::Text(Utf8Bytes::from(String::from_utf8_lossy(&data).into_owned()))
+        };
+        if l.ws.send(msg).is_err() {
+            lock(&self.queue).connected = false;
+            if let Some(l) = live.take() {
+                let _ = l.tcp.shutdown(Shutdown::Both);
+            }
+        }
     }
 
     /// Waits up to `ms`, or until ws_stop.
@@ -290,7 +319,9 @@ impl Assoc {
 
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
-    if c.p2p { return p2p::run(c); }
+    if c.p2p {
+        return p2p::run(&c);
+    }
     // The SFU reader wakes this thread for each datagram, as ws_send does for each message.
     let weak = Arc::downgrade(&c);
     let wake: sfu::Wake = Arc::new(move || {
@@ -365,10 +396,7 @@ fn send_main(c: Arc<WsConn>) {
                     }
                 }
             }
-            if let Some(f) = c.h.on_message {
-                let mut bytes = data.clone(); bytes.push(0);
-                unsafe { f(c.h.ctx, binary as c_int, bytes.as_ptr(), data.len()) };
-            }
+            c.deliver(binary, &data);
             lock(&c.queue).handled += 1;
             c.wake.notify_all();
         }
@@ -407,7 +435,7 @@ fn send_main(c: Arc<WsConn>) {
         }
         c.sfu_live.store(a.sfu.is_some(), Ordering::Release);
         for data in incoming {
-            if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
+            c.deliver(true, &data);
         }
         flush(&c, &mut a);
         // Once: frames a full SCTP buffer refuses wait for the next wake, not a busy loop.
@@ -432,21 +460,7 @@ fn flush(c: &WsConn, a: &mut Assoc) {
             }
             continue;
         }
-        let mut live = lock(&c.live);
-        if let Some(l) = live.as_mut() {
-            let msg = if binary {
-                Message::Binary(Bytes::from(data))
-            } else {
-                Message::Text(Utf8Bytes::from(String::from_utf8_lossy(&data).into_owned()))
-            };
-            if l.ws.send(msg).is_err() {
-                // a failed or timed-out write leaves the stream unusable: drop it
-                lock(&c.queue).connected = false;
-                if let Some(l) = live.take() {
-                    let _ = l.tcp.shutdown(Shutdown::Both);
-                }
-            }
-        }
+        c.write_now(binary, data);
     }
 }
 

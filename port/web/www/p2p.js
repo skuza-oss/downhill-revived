@@ -1,4 +1,6 @@
-// Page-side WebRTC adapter. The room coordinator is the same Rust source as the native host.
+// The page's side of a P2P room (finding 180): WebRTC belongs to Window, so the page holds the
+// room connection, the peer connections and the coordinator (the native games' Rust, as wasm) and
+// bridges them to the game worker (net.js). Host star: the host links to every guest.
 import initSession, { P2pSession } from '/build/session/dhd_session.js';
 
 export async function createP2pBridge(worker) {
@@ -27,9 +29,9 @@ export async function createP2pBridge(worker) {
   function drain() {
     if(!session)return;
     for(const a of JSON.parse(session.drain())) {
-      if(a.kind==='client')notify('message',{data:JSON.stringify(a.message)});
+      if(a.kind==='game')notify('message',{data:JSON.stringify(a.message)});
       else if(a.kind==='frame')notify('message',{data:new Uint8Array(a.bytes)});
-      else if(a.kind==='service')service(a.message);
+      else if(a.kind==='server')service(a.message);
       else if(a.kind==='peer'){const p=peers.get(a.to);if(p)queue(p,a.reliable,new Uint8Array(a.bytes));}
     }
     for(const p of peers.values())flush(p);

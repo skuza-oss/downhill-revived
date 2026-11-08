@@ -484,6 +484,7 @@ dependencies = [
 name = "dhd_net"
 version = "1.0.0"
 dependencies = [
+ "dhd_session",
  "httparse",
  "ring",
  "rustls",
