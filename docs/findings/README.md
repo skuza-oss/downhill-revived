@@ -204,6 +204,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 178 | [pre-release online lifecycle review](178-pre-0713-review.md) | partly superseded | [179](179-sfu-review-risks.md) for the three risks left open, now fixed |
 | 179 | [the three SFU risks the pre-release review left open](179-sfu-review-risks.md) | current |  |
 | 181 | [the room's region chosen by its creator, a smarter Auto, and a race ping beside the ser...](181-room-region-race-ping.md) | current |  |
+| 182 | [a slow Realtime API call no longer takes a racer out of the race](182-sfu-call-timeouts.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
