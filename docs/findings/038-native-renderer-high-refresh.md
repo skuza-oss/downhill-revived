@@ -1,7 +1,17 @@
 # Native renderer and interpolated high-refresh presentation (round 29)
 
-Status: the native renderer (`DHD_RENDER=native`) and interpolated presentation (`DHD_INTERP=1`)
-are committed, off by default. The exact GS backend stays the default, the reference and the
+Status: partly superseded by 088 (the D3D11 native renderer, off by default; gate_native_renderer.py)
+Checked: 2026-11-04
+
+Now: the native renderer is the player default (dhd.ini `renderer = native`,
+`port/render/settings/src/table.rs`; Rust, `port/gs/native_core.inc`, findings 085, 086), and the
+exact one stays the reference (`DHD_RENDER=exact`; a run without dhd.ini still gets exact).
+`DHD_INTERP` still exists, a developer variable, off by default (`port/gs/native_core.inc`); the
+user rejected in-between pictures (finding 049), so it is not offered to players. The D3D11 code and
+`gate_native_renderer.py` are gone (finding 088); state traces are the check now (finding 081).
+
+Round 29: the native renderer (`DHD_RENDER=native`) and interpolated presentation (`DHD_INTERP=1`)
+were committed, off by default. The exact GS backend stayed the default, the reference and the
 referee. `port/tools/gate_native_renderer.py` passes: exact and native arms of one exe match at
 all six EE moments, every readback record matches, and both match the r27-defined-native
 reference at GO+0/2/12/16. User direction for this round: pictures need not be bit-identical to

@@ -18,7 +18,7 @@ bios/
 *.p2s
 # generated from your own executable by tools/split.py
 asm/
-assets/
+/assets/
 !assets/cover.webp
 !assets/gameplay.mp4
 !assets/gameplay-preview.webp
@@ -81,6 +81,7 @@ saves/
 # --- Local notes and editor/agent settings ---------------------------------------------
 docs/private/
 .claude/
+.agents/
 .vscode/
 .idea/
 

@@ -1,5 +1,8 @@
 # 122: Watch the rest of a room race after finishing
 
+Status: current
+Checked: 2026-11-04
+
 A room finisher stays on the race screen. The retail eight-second results countdown stays
 held. Three seconds after the finish, view 0 watches the best-placed human still racing.
 Left and Right, or the left stick, cycle through unfinished humans and computer riders in

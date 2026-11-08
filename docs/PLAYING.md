@@ -16,26 +16,28 @@ What works today:
   original PS2 graphics hardware is reproduced on the GPU. An exact emulation path stays in the
   code as the reference it is tested against.
 - **60 fps or more, with even frame pacing.** The game runs at its original 59.94 Hz, and each
-  picture is shown on a fixed grid, so frames don't come out long-short-long. PC SETTINGS > Frame
+  picture is shown on a fixed grid, so frames don't come out long-short-long. REVIVED SETTINGS > Frame
   Rate also offers 120, 144, 165 or 240 fps, or the monitor's rate, online too (experimental:
   players at different rates race together). Pad input is read as late as possible before each
   frame.
 - **Higher resolution and widescreen.** Internal resolution 1x to 8x (or matched to the window).
   Widescreen at the monitor's shape (16:9, 21:9 or any other) is Hor+: a wider view with the same
-  vertical framing, and the HUD, menus and 2D screens keep their shape. Windowed, borderless and
+  vertical framing, and the HUD, menus and 2D screens keep their shape; loading cards and movies
+  fill the screen too (the movie at its own shape, the sides blurred). Windowed, borderless and
   exclusive fullscreen. A new install starts borderless at 2x in widescreen, at the monitor's
   resolution.
 - **The movies play**: the intro, the attract loop and OPTIONS > VIDEO CLIPS, decoded with
-  libmpeg2 from your disc. Skip Movies in PC SETTINGS (on in a new install) skips them.
-- **PC SETTINGS in the game's own OPTIONS menu**: resolution, display mode, window size, picture
-  shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone, the button icons
-  (PlayStation, Xbox or Nintendo, or the controller's), texture pack and font, drawn with the
-  game's own menus and font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
+  libmpeg2 from your disc. Skip Movies in REVIVED SETTINGS (on in a new install) skips them.
+- **REVIVED SETTINGS in the game's own OPTIONS menu**, in tabs (L1/R1): resolution, display mode,
+  window size, picture shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone,
+  the button icons (PlayStation, Xbox or Nintendo, or the controller's), your keys and buttons,
+  the size of online riders' names, texture pack and font, drawn with the game's own menus and
+  font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
   each picture without tearing.
-- **Unlock All** (PC SETTINGS, off by default): every track, rider, bike and shop item reads as
+- **Unlock All** (REVIVED SETTINGS, off by default): every track, rider, bike and shop item reads as
   unlocked while it is on. Your save isn't changed, so turning it off brings your own progress back.
 - **A sharp font**: the game's text is drawn with clean edges at any resolution, made in memory
-  from the font on your disc (PC SETTINGS > Font: Sharp or Original).
+  from the font on your disc (REVIVED SETTINGS > Font: Sharp or Original).
 - **Texture packs**: replacement packs made for PCSX2 (PNG files named by PCSX2's texture hash)
   work unchanged with the native renderer (see [Texture packs](#texture-packs)).
 - **Automatic updates**: at start the game looks for a newer release and offers to install it;
@@ -58,11 +60,15 @@ What works today:
   connected controller.
 - **Keyboard play**: a whole race on the keyboard, with gradual steering; letters go by their
   place on the keyboard, so AZERTY and QWERTZ work too (see [Controls](#controls)).
+- **Your own keys and buttons**: every PlayStation button can be put on another key or controller
+  button, a main and an alternate, for the keyboard and each of two controllers, with Swap Sticks
+  and Invert per stick axis, in the game or the launcher (see [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
+- **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
+  or Thumb zones, tilt steering if you like), or a controller. No online races on phones yet.
 
 Known gaps:
 
-- Movies are shown 4:3 in widescreen, as on the PS2.
 - The 2-4 player split screens have not been checked in widescreen.
 - Online races have been tested with two games (PC and Mac) and up to nine scripted players, not
   yet with ten people on ten PCs.
@@ -106,6 +112,14 @@ as a non-Steam game from Desktop Mode. Your files go to `~/.local/share/downhill
 and needs WebKitGTK 4.1 from your distribution (`libwebkit2gtk-4.1-0`, already there with GNOME).
 Neither is signed.
 
+**Android** (experimental, arm64, Android 11 or later with Vulkan):
+`DownhillRevived-<version>-android-experimental.apk`. Open it on the phone and allow installs
+from your browser or file manager when Android asks; the app is not on Google Play. At the first
+start choose your `.iso`; it is copied into the app once (a few GB). Install a new release's APK
+over the old one: your settings and saves stay. If the game closes unexpectedly, the next start
+offers **Share log** (see below). The release page's Android section has the details and the
+signing certificate.
+
 Then:
 
 1. Start Downhill Revived (`DownhillRevived.exe` in the zip; `dhd.exe` opens it too) and press PLAY.
@@ -135,9 +149,15 @@ installed copy):
 
 | File | What |
 |---|---|
-| `dhd.ini` | Your settings, one `key = value` per line. The game adds your disc image; the PC SETTINGS page (OPTIONS) writes the rest. |
+| `dhd.ini` | Your settings, one `key = value` per line. The game adds your disc image; the REVIVED SETTINGS page (OPTIONS) writes the rest. |
 | `saves\card1\` | Memory card 1, made at the first save. Copy this folder to back up your saves. |
 | `dhd.log` | Messages from the last run. Attach it when you report a problem. |
+| `dhd-previous.log` | The log of the run before. If you started the game again after a crash, the crash is in this one. |
+
+On Android the logs are inside the app, where no file manager reaches them: after the game closes
+unexpectedly it offers **Share log** at the next start, and a long press on its icon has
+**Share log** at any time. Both open Android's share sheet with one text file; nothing is sent
+unless you pick an app there.
 
 Moving from the zip to the installer: copy `dhd.ini` and `saves\` from the zip's folder into
 `%APPDATA%\Downhill Revived` (start the installed game once first, so the folder exists).
@@ -165,12 +185,12 @@ A controller works out of the box. The buttons go by position, as on a PlayStati
 bottom = Cross, right = Circle, left = Square, top = Triangle. A pad SDL doesn't know can be added
 with a line in SDL's format in `gamecontrollerdb.txt` beside `dhd.exe`.
 
-- **Button icons** (PC SETTINGS > Button Icons, the launcher's Settings > Controls): the game shows
+- **Button icons** (REVIVED SETTINGS > Button Icons, the launcher's Settings > Controls): the game shows
   the buttons of your controller. Auto follows player 1's controller: Xbox pads (and a Steam Deck)
   get A, B, X, Y and LB, RB, LT, RT, Switch pads B, A, Y, X and L, R, ZL, ZR (by position, so the
   bottom button is always the one the game means), PlayStation pads and the keyboard the game's
   own symbols. Or choose PlayStation, Xbox or Nintendo.
-- **Stick dead zone** (PC SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before
+- **Stick dead zone** (REVIVED SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before
   the rider responds. Game is the PS2's own, about 36% of the travel; a smaller one steers sooner,
   a larger one ignores a worn stick that drifts. The whole travel past it is used, so full lock is
   still at the end. The launcher's Controls tab shows your stick and what the rider gets from it.
@@ -196,11 +216,69 @@ Letters are places on the keyboard as on a US one: on AZERTY or QWERTZ use the k
 places. The game's own controls screen (OPTIONS > CONTROLS) names the PlayStation buttons; the
 keys above stand for them.
 
+**Your own keys and buttons** (REVIVED SETTINGS > Controls in the game, the launcher's Settings >
+Controls > Bindings): choose which key or controller button stands for each PlayStation button,
+for the keyboard and for each player's controller (player 1 and player 2; every controller of a
+player uses that player's layout). Each button has a main and an alternate. In the game, Cross on
+a button's row waits up to five seconds for the main key or button (Esc cancels), Square clears
+the main, and Triangle or Esc goes back. Changes are saved as you make them. The dimmed
+'also' binding is the alternate, changed in the launcher. In the launcher, click a button's key to
+change it, right-click to clear it; the game takes it at its next start. The buttons keep their
+meaning (Cross pedals in a race and confirms in menus), only the key or button for them changes.
+
+- A key or button that another PlayStation button had swaps: the new button takes it and the
+  other one gets the new button's old key or button ("Swapped Cross and Square"). Given to an empty
+  alternate, it just moves there.
+- Cross, Triangle, START, R1 (it switches the REVIVED SETTINGS tabs) and the d-pad always keep a
+  key or a button on each of the keyboard,
+  Controller 1 and Controller 2, each on its own (the keyboard's keys don't count for a controller):
+  a clear or a move that would take the last one away is refused ("Cross needs a button").
+- Esc can't be changed: it always goes back in menus and pauses a race. Alt, Ctrl and the Windows
+  keys stay your system's.
+- Keys on the d-pad (the arrows by default) steer gradually while riding, whichever keys they are.
+  The keyboard can also take the sticks' directions.
+- A controller's sticks stay its own: **Swap Sticks** (the right stick steers) and an **Invert**
+  for each axis of each stick.
+- The button icons (Button Icons) show the controller button you chose for each PlayStation
+  button.
+- **Reset Keyboard**, **Reset Controller 1** and **Reset Controller 2** (and the launcher tab's
+  Reset) bring back the layouts above.
+
+They are saved in `dhd.ini` as one line for each layout, with only what differs from the
+defaults:
+
+    keyboard = cross:j,space square:x
+    pad1 = cross:east circle:south sticks:swap invert:ly
+
+Each entry is `button:key` or `button:main,alternate` (`none` for nothing). Buttons: `cross`,
+`circle`, `square`, `triangle`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `start`, `select`, `up`,
+`down`, `left`, `right`, and on the keyboard `lstick_up`, `lstick_down`, `lstick_left`,
+`lstick_right`, `rstick_up`, `rstick_down`, `rstick_left`, `rstick_right`. Keys by their place on a
+US keyboard: `a` to `z`, `0` to `9`, `space`, `enter`, `tab`, `backspace`, `up`, `down`, `left`,
+`right`, `lshift`, `rshift`, `f1` to `f12`, `insert`, `delete`, `home`, `end`, `pageup`,
+`pagedown`, `minus`, `equals`, `lbracket`, `rbracket`, `backslash`, `semicolon`, `quote`,
+`backquote`, `comma`, `period`, `slash`, `intlbackslash` (the key beside the left Shift on some
+keyboards), `kp0` to `kp9`, `kp_plus`, `kp_minus`, `kp_multiply`, `kp_divide`, `kp_period`.
+Controller buttons by their place: `south`, `east`, `west`, `north` (the face buttons: on a
+PlayStation pad Cross, Circle, Square, Triangle; on an Xbox pad A, B, X, Y), `lb`, `rb`, `lt`,
+`rt`, `ls`, `rs` (the sticks pressed), `back`, `start`, `dpad_up`, `dpad_down`, `dpad_left`,
+`dpad_right`, `misc` (Share, Mic or Capture), `paddle_r1`, `paddle_l1`, `paddle_r2`, `paddle_l2`,
+`touchpad`. The defaults are the tables above: the keyboard's keys, and on a controller the
+button in the same place as on a PlayStation pad. A line the game can't read is skipped where it
+can't be read (that button keeps its default) and dhd.log says why; a line that would leave the
+keyboard or a controller without Cross, Triangle, START, R1 or a d-pad direction puts that one layout
+back to its defaults. Players 3 and 4 use the default controller layout.
+
 ### Online
 
 Online works out of the box: choose ONLINE in the main menu to create a public or private race,
 or join one from the list or with its code. The game uses the project's official server,
-`wss://dhd.skuza.app`. Every player needs the same USA disc image.
+`wss://dhd.skuza.app`. Every player needs the same USA disc image and the same release of the
+game (0.7.12 and later can't race with 0.7.11 or older; the ONLINE menu offers the update).
+
+In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
+to you (UDP). Where a network blocks UDP, the game falls back to an encrypted connection on port
+443 by itself. No other player ever gets your internet address.
 
 Running your own server is optional. `online/server/` is the server (Cloudflare Workers), and
 [online/server/README.md](../online/server/README.md) explains how to deploy it. Then put its
@@ -210,18 +288,41 @@ address on the `server =` line of `dhd.ini` (the game writes the file at the fir
 
 An empty `server =` line means the official server.
 
+#### What the official server keeps
+
+To deal with cheaters and other abuse, the server keeps a short log of who joined which race:
+the time, the room's code, your rider name, the game's version, your country (as Cloudflare
+sees it), a scrambled form of your internet address (a keyed hash: the address itself is never
+stored, and the hash can't be turned back into it) and your game's install id (a random number
+the game makes once and keeps in `dhd.ini` as `install_id`; it says nothing about you or your
+PC). Log entries are deleted after 14 days. A player who is banned is banned by that hash or
+install id, not by name, until the ban ends (or until it is lifted, for one without an end).
+
+No other player ever sees your internet address, its hash or your install id, and the game
+doesn't write the install id into `dhd.log`. Deleting the `install_id` line makes the game
+pick a new one. Players in a room see each other's rider names, ping and region (EU, NA...).
+
+The server's operator can also turn online races off for a while; the ONLINE screen then says
+so ("Online races are paused. Try again later.").
+
 ### Texture packs
 
 Texture replacement packs made for PCSX2 work unchanged. Packs are made by their authors and are
 not part of this project. Either put the pack's files in `textures\SCUS-97177\replacements`
 beside `dhd.ini` (your data folder, see [Installing](#installing)), or name the pack's folder on the `texture_pack =` line of `dhd.ini` (for
-example PCSX2's own `textures\SCUS-97177\replacements` folder in your Documents). PC SETTINGS >
+example PCSX2's own `textures\SCUS-97177\replacements` folder in your Documents). REVIVED SETTINGS >
 Texture Pack turns it off or on at the next start.
 
 ### Settings
 
+OPTIONS starts with REVIVED SETTINGS (SETTINGS on Android). L1/R1 switch its Display,
+Graphics, Controls, Online and Game tabs; the legend shows your bound inputs. Up/down choose
+rows and left/right change them. Cross keeps changes and closes; Triangle undoes the settings
+page's changes and closes (Android Back keeps them). Controls and Touch Controls save as you go.
+A star marks a choice that applies at the next start. A host hides tabs it cannot offer.
+
 `dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
-first start. The PC SETTINGS page writes most of them for you.
+first start. The REVIVED SETTINGS page writes most of them for you.
 
 | Key | Default | What |
 |---|---|---|
@@ -235,6 +336,9 @@ first start. The PC SETTINGS page writes most of them for you.
 | `vibration` | on | `0` turns rumble off |
 | `stick_dead_zone` | `game` | the sticks' dead zone: `game` (the PS2's own, about 36%) or a percentage such as `10` |
 | `prompts` | `auto` | the button icons: `auto` (the controller's), `playstation`, `xbox` or `nintendo` |
+| `names` | `small` | names above online riders: `off`, `small`, `medium` (original size), `large`; drawing only |
+| `keyboard` | (empty) | your keys for the PlayStation buttons, see [Controls](#controls); empty: the table there |
+| `pad1`, `pad2` | (empty) | player 1's and player 2's controller buttons and stick options, see [Controls](#controls); empty: by position |
 | `texture_pack` | (empty) | a texture pack's folder; empty: `textures\SCUS-97177\replacements` beside `dhd.ini` |
 | `textures` | `on` | `off` draws the game's own textures |
 | `texture_cache_mb` | half the card's memory, at most 2048 | graphics memory for replacements |
@@ -257,4 +361,4 @@ Each key has a `DHD_*` environment variable (`scale` is `DHD_SCALE`, `server` is
 - A reasonably modern CPU: the PS2's vector units are run on the CPU.
 - Or, experimental: a Mac with Apple silicon (M1 or later) on macOS 11 or later; or 64-bit Linux
   with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and later), a Vulkan
-  driver and WebKitGTK 4.1 for the launcher.
+  driver and WebKitGTK 4.1 for the launcher; or an arm64 Android 11 phone or tablet with Vulkan.

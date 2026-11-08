@@ -16,6 +16,7 @@ resolver = "2"
 # Keep the pinned family; only Vulkan framebuffer ownership differs (vendor/wgpu-hal/PATCH.md).
 [patch.crates-io]
 wgpu-hal = { path = "vendor/wgpu-hal" }
+str0m-rust-crypto = { path = "vendor/str0m-rust-crypto" }
 
 [package]
 name = "dhd_render"

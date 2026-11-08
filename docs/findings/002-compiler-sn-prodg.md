@@ -1,5 +1,9 @@
 # 002 — Compiler identified: SN ProDG 3.01 (ee-gcc 2.95.3 SN BUILD 1.36 + ps2eeas)
 
+Status: current
+Supersedes: 001
+Checked: 2026-11-04
+
 Supersedes the verdict table in `001-compiler-identification.md`.
 
 ## Result

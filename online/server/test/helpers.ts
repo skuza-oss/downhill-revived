@@ -7,17 +7,26 @@ export const ISO = "a".repeat(64);
 
 type Frame = string | ArrayBuffer | Blob;
 
+/** A random documentation address (198.18.0.0/15, the benchmarking range). */
+export function randomIp(): string {
+  const b = crypto.getRandomValues(new Uint8Array(3));
+  return `198.${18 + (b[0] & 1)}.${b[1]}.${b[2]}`;
+}
+
 /** A test player: a WebSocket to the worker with an inbox. */
 export class Client {
   private inbox: Frame[] = [];
   private waiter: (() => void) | null = null;
   closeCode: number | null = null;
+  /** Every text frame this client received, kept (the privacy test reads them all). */
+  seen: string[] = [];
   /** The last welcome read (json("welcome")): its rejoinToken is what the game's rejoin sends. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   welcome: any = null;
 
   constructor(readonly ws: WebSocket) {
     ws.addEventListener("message", (e) => {
+      if (typeof e.data === "string") this.seen.push(e.data);
       this.inbox.push(e.data as Frame);
       this.waiter?.();
     });
@@ -28,8 +37,13 @@ export class Client {
   }
 
   /** cf: what Cloudflare would say of the connection (request.cf: colo, country, continent...). */
-  static async connect(path: string, cf?: Record<string, unknown>): Promise<Client> {
-    const res = await exports.default.fetch(`https://dhd.test${path}`, { headers: { Upgrade: "websocket" }, ...(cf ? { cf } : {}) });
+  /** ip: the address Cloudflare would give (CF-Connecting-IP); each connection has its own by
+      default, so the limits per address (wrangler.jsonc ratelimits) don't add up across tests. */
+  static async connect(path: string, cf?: Record<string, unknown>, ip = randomIp()): Promise<Client> {
+    const res = await exports.default.fetch(`https://dhd.test${path}`, {
+      headers: { Upgrade: "websocket", "CF-Connecting-IP": ip },
+      ...(cf ? { cf } : {}),
+    });
     if (res.status !== 101 || !res.webSocket) throw new Error(`upgrade failed: ${res.status}`);
     res.webSocket.accept();
     return new Client(res.webSocket);
@@ -51,7 +65,7 @@ export class Client {
   }
 
   hello(name: string, extra: object = {}): void {
-    this.sendJson({ type: "hello", protocol: 2, version: VERSION, clientVersion: CLIENT_VERSION, isoSha256: ISO, name, ...extra });
+    this.sendJson({ type: "hello", protocol: 3, version: VERSION, clientVersion: CLIENT_VERSION, isoSha256: ISO, name, ...extra });
   }
 
   sendJson(obj: object): void {

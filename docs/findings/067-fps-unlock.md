@@ -1,6 +1,17 @@
 # 067 - Real offline simulation steps (experimental; equivalence not established)
 
-Nothing is published or merged.
+Status: partly superseded by 139 (the fixed 60 clock, the 144 cap and debt, online forced to 60, replays off)
+Checked: 2026-11-04
+
+Shipped in 0.2.9 (finding 053 §13) and kept: the rate-aware game fixes, whole-field timers, the
+sub-field animation clock and fractional particles, checked by `port/tools/test_fps_race.py`.
+Changed since: rates go to 240 and Monitor (`fps` in `port/render/settings/src/table.rs`);
+online races run at each player's rate (finding 114, no longer forced to 60); one delta-time clock
+steps every rate, 60 included, with no one-field cap or debt (finding 139); replays and ghosts
+work at every rate (finding 142). The physics/AI equivalence limits measured below are still the
+known limits (finding 139: no trend against 60 at 30-144 steps a second).
+
+Nothing was published or merged when this was written.
 
 Cleanup 0.2.5: the measurement scripts, probes, traces and rejected trials named below were removed
 from the tree and remain in git history at `99d04692`. The kept check for the high-rate path is
@@ -23,11 +34,11 @@ and remaining work are recorded at the end of this finding.
 The implementation follows finding 049: a fractional offline simulation clock, whole-field integer
 timers, rate-aware forces/decays, a sub-field animation clock and fractional particles. `src/` and
 the retail matching checks stay unchanged. `fps=60` retains the original NTSC clock and arithmetic
-paths. Higher rates are nominal integer rates (120/144), capped at 144; `monitor` uses the primary
-desktop refresh. Online is forced to 60 by `pads_online()`. The setting applies at next start to
-avoid converting live animation timestamps or changing integrator history mid-race. Replay
-recording/playback and ghost sampling are disabled above 60, rather than writing a new incompatible
-format.
+paths (until finding 139's one clock). Higher rates were nominal integer rates (120/144), capped at
+144 (now up to 240); `monitor` uses the primary desktop refresh. Online was forced to 60 by
+`pads_online()` (no longer, finding 114). The setting applies at next start to avoid converting
+live animation timestamps or changing integrator history mid-race. Replay recording/playback and
+ghost sampling were disabled above 60 (back since finding 142).
 
 This is an experimental implementation until the race comparison below passes; real update/draw
 cadence alone does not establish equivalent handling.

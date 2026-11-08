@@ -1,5 +1,17 @@
 # 047 — Online races with friends: start, riders, grid, hits, finish, leaving, launcher
 
+Status: partly superseded by 118 (the boot-time lobby, scripted menus, the friends' zip, the 30 fps limit)
+Checked: 2026-11-04
+
+The race protocol here (SETUP, LOADED, START on the server clock, GO, HIT, FINISH, RESULTS,
+leaving, the grid) is still how online races run. Changed since: there is no boot-time lobby or
+menu script (players create or join rooms in the game's ONLINE menu, findings 065, 092, 118, 119),
+the shared-clock rule of step 8 is replaced by the delta-time clock and race time in ms (findings
+114, 139: no two-field doubling, no 30 fps floor), snapshots and events carry later versions
+(wire version 3, `port/hle/puppet.c`), and the friends' package below is gone: players use the
+release with its launcher (findings 053, 093), and rooms match by release version and
+`MIN_VERSION` (finding 054), not by dhd.exe's hash.
+
 2026-10-16. Builds on the puppet riders (finding 044). The goal: a build that 4 people on 4
 PCs can race. Everything here is in `port/hle/online.c`, `port/hle/puppet.c`,
 `port/hle/kernel.c` (pacing), `port/gs/present.c` (window), `port/net/nettool.c` (bots),
@@ -8,8 +20,8 @@ new messages are all EVENT frames (type 6) the server already passes on.
 
 ## The flow
 
-1. **Lobby** (unchanged): the barrier at boot; the host starts when everyone is ready.
-2. **Menus**: the built-in script goes to a single race. On the load screen (menu 9) each PC
+1. **Lobby** (then): the barrier at boot; the host starts when everyone is ready.
+2. **Menus**: (then) the built-in script went to a single race. On the load screen (menu 9) each PC
    writes the lobby's track and its player's rider into the setup block `D_004B25A0`, then sends
    **SETUP** (its rider id, the rider/outfit triple +0x1B8, the bike triple +0x11C) and waits up
    to 30 s for everyone's.
@@ -34,7 +46,7 @@ new messages are all EVENT frames (type 6) the server already passes on.
    0 punch, 1 kick, 2 check, 3 stick, 4 bottle; `func_00179A60` shows it on the HUD) and the
    bottles left (+0x7ADC); wire version 2. A puppet attacks as its owner can. Each PC sends
    **GO** (its GO on the server clock) so both sides log the skew.
-8. **Shared clock**: from the agreed moment the frame pacing keeps to it
+8. **Shared clock** (then; replaced by findings 114 and 139): from the agreed moment the frame pacing keeps to it
    (`kernel_pace_shared`). A PC that falls behind (a hitch, a stall, a PC too slow for the race)
    runs without waiting, and while more than a field late each game frame gets two fields: the
    game then measures the frame as two fields and moves everything twice as far, as it does on a
@@ -115,7 +127,7 @@ breaking such an object could hit it. r5 ran with the fix and didn't crash.
 
 ## Limits
 
-- **Speed**: a PC has to render at least 30 frames a second in the race to keep to the shared
+- **Speed** (then; finding 139 removed the floor): a PC had to render at least 30 frames a second in the race to keep to the shared
   clock (two fields a frame). Slower, it falls behind and the others see its rider late.
 - **Leaving**: tested only as the guest's crash (the host took its rider over). The host
   leaving (a guest becomes host and takes the AI) is coded, not run. A deliberate kill
@@ -131,7 +143,7 @@ breaking such an object could hit it. r5 ran with the fix and didn't crash.
 - **Bots** replay one recorded line, all on the same path; they test the protocol, not riding.
 - **4 PCs**: not tried on 4 real PCs yet.
 
-## The friends' package
+## The friends' package (gone)
 
 `python port/tools/package_online.py` (with `DHD_NET_SERVER` set, so it can check) writes
 `build/dhd-online.zip`: dhd.exe, `Play-online.cmd` + `Online.ps1` (create or join with a

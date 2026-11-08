@@ -1,5 +1,17 @@
 # 091: Android arm64 build (task AND1)
 
+Status: partly superseded by 143 (the known gaps: touch, online, release key; the first speeds; since 155 also -march)
+Checked: 2026-11-04
+
+The design (arm64 host, Rust renderer on Vulkan, SDL3, Gradle without Android Studio) is
+current. Changed since: the build is `build_host64.py --target android-arm64` (finding 099;
+`build_host64_android.py` is gone) and `port/android/build_apk.py`; races went from 24-25 to
+about 115 fields/s at 1x on the Mi 11i (findings 107, 112); the known gaps below are closed or
+decided: touch controls (finding 141), online not offered on phones (finding 143, by decision;
+the network client is Rust `dhd_net` with TLS, not `ws_posix.c`), a release key and the APK as
+a release asset (finding 143), the native renderer crash (AND3 below), the surface format
+(finding 145). Low-end phones: findings 126, 127, 146-148.
+
 Branch `rr/AND1` (from `e7bd97212`, main `4755df0af` merged in). **It runs on the Mi 11i (M2012K11G,
 Android 13): title, menus and a race draw correctly, at about 24-25 fields/s in a race** (see
 "Device results").
@@ -32,7 +44,7 @@ The Android libraries take about 5 minutes on 2 jobs with a warm objcache; Gradl
 
 ## Design
 
-### Native library (`port/tools/build_host64_android.py`)
+### Native library (then `port/tools/build_host64_android.py`; now `build_host64.py --target android-arm64`)
 
 Modelled on `build_host64_linux.py`: the same wasm2c output (`prepare_units(exact_f32=True)`, the
 mirror-address adapter, `--num-outputs 8`; since AND2 guard pages and a plain call-depth counter, as

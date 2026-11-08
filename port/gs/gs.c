@@ -68,9 +68,23 @@ static void load_clut(Gs *g, uint64_t tex)
     }
     start = (csa & ((cpsm & 2) ? 31 : 15)) * 16;
     if (!csm) {
+        /* The same source words into the same entries as the last load, with no other load
+           since: every entry already holds its value (none changes, nothing counts). The
+           source is one contiguous run from cbp: 1 KB (CT32, 256 entries), 512 bytes (CT16, 256)
+           or 64 bytes (16 entries). */
+        unsigned bytes = (cpsm & 2) ? (count == 256 ? 512 : 64) : count * 4, base = (cbp * 256) & (GS_VRAM_SIZE - 1);
+        const uint8_t *source = (const uint8_t *)g->vram + base;
+        if (base + bytes <= GS_VRAM_SIZE) {
+            if (g->clut_memo.valid && g->clut_memo.cbp == cbp && g->clut_memo.cpsm == cpsm &&
+                g->clut_memo.count == count && g->clut_memo.start == start && !memcmp(g->clut_memo.source, source, bytes))
+                return;
+            g->clut_memo.valid = 1; g->clut_memo.cbp = cbp; g->clut_memo.cpsm = cpsm;
+            g->clut_memo.count = count; g->clut_memo.start = start; g->clut_memo.bytes = bytes;
+            memcpy(g->clut_memo.source, source, bytes);
+        } else g->clut_memo.valid = 0;
         /* CSM1: the entries are distinct, so only the number of changed ones matters for
            state_version; counted without a branch per entry. */
-        uint16_t low[256], high[256];
+        uint16_t low[256] PS2_NO_AUTO_INIT, high[256] PS2_NO_AUTO_INIT;  /* written for every entry read */
         unsigned first = 0, changed = 0;
         if (cpsm & 2) {
             for (i = 0; i < count; i++) {
@@ -96,8 +110,10 @@ static void load_clut(Gs *g, uint64_t tex)
             }
         }
         g->state_version += changed;
+        g->clut_writes += changed;
         return;
     }
+    g->clut_memo.valid = 0;
     for (i = 0; i < count; i++) {
         unsigned dst = start + i, value;
         if (csm) {
@@ -116,10 +132,10 @@ static void load_clut(Gs *g, uint64_t tex)
             } else src = t32[i];
             value = g->vram[(cbp * 64 + src) & (GS_VRAM_SIZE / 4 - 1)];
         }
-        if (g->clut[dst & 511] != (uint16_t)value) g->state_version++;
+        if (g->clut[dst & 511] != (uint16_t)value) g->state_version++, g->clut_writes++;
         g->clut[dst & 511] = (uint16_t)value;
         if (!(cpsm & 2)) {
-            if (g->clut[(dst + 256) & 511] != (uint16_t)(value >> 16)) g->state_version++;
+            if (g->clut[(dst + 256) & 511] != (uint16_t)(value >> 16)) g->state_version++, g->clut_writes++;
             g->clut[(dst + 256) & 511] = (uint16_t)(value >> 16);
         }
     }
@@ -432,6 +448,11 @@ void gs_priv_write(Gs *g, unsigned addr, uint64_t value)
             memset(g->reg, 0, sizeof g->reg); memset(g->path, 0, sizeof g->path);
             g->reg[GS_PRMODECONT] = 1; g->reg[GS_TRXDIR] = 3;
             g->vertex_count = 0;
+            /* It clears the display registers too (PMODE to BGCOLOR, as PCSX2's gsCSRwrite): no
+               read circuit is on, the screen is black until the game sets its display again
+               (sceGsResetGraph before a loading card and the title, finding 160). */
+            memset(g->privileged, 0, (GS_BGCOLOR / 16 + 1) * sizeof *g->privileged);
+            g->resets++;
         }
         g->privileged[addr / 16] &= ~(value & 31);  /* interrupt bits are write-one-to-clear */
     } else g->privileged[addr / 16] = value;
@@ -475,29 +496,157 @@ static inline void vertex_write(Gs *g, unsigned reg, uint64_t value)
     }
 }
 
-static void packed(Gs *g, GsPath *p, unsigned reg, const uint32_t *w)
+/* One PACKED qword. The registers a vertex writes every time (RGBAQ, ST, UV, XYZF2/3, XYZ2/3) are
+   stored here directly, as vertex_write would store them (finding 146: one switch a qword, not
+   two); A+D and the rest go through vertex_write or gs_write as before. */
+static inline __attribute__((always_inline)) void packed(Gs *g, GsPath *p, unsigned reg, const uint32_t *w)
 {
     uint64_t value = w[0] | (uint64_t)w[1] << 32;
     switch (reg) {
-    case 1: value = (w[0] & 255) | (w[1] & 255) << 8 | (w[2] & 255) << 16 |
-                   (w[3] & 255) << 24 | (uint64_t)p->q << 32; break;
-    case 2: p->q = w[2]; break;
-    case 3: value = (w[0] & 0x3FFF) | (uint64_t)(w[1] & 0x3FFF) << 16; break;
-    case 4: case 12:
-        value = (w[0] & 65535) | (uint64_t)(w[1] & 65535) << 16 |
-                (uint64_t)(w[2] >> 4 & 0xFFFFFF) << 32 | (uint64_t)(w[3] >> 4 & 255) << 56;
-        if (w[3] & 0x8000) reg = 12;
-        break;
-    case 5: case 13:
-        value = (w[0] & 65535) | (uint64_t)(w[1] & 65535) << 16 | (uint64_t)w[2] << 32;
-        if (w[3] & 0x8000) reg = 13;
-        break;
+    case 1: {
+        uint32_t rgba = (w[0] & 255) | (w[1] & 255) << 8 | (w[2] & 255) << 16 | (w[3] & 255) << 24;
+        g->reg[GS_RGBAQ] = rgba | (uint64_t)p->q << 32;
+        g->vertex.rgba = rgba;
+        memcpy(&g->vertex.q, &p->q, 4);
+        return;
+    }
+    case 2:
+        p->q = w[2];
+        g->reg[GS_ST] = value;
+        memcpy(&g->vertex.s, &value, 8);
+        return;
+    case 3:
+        g->vertex.u = w[0] & 0x3FFF; g->vertex.v = w[1] & 0x3FFF;
+        g->reg[GS_UV] = g->vertex.u | (uint64_t)g->vertex.v << 16;
+        return;
+    case 4: case 12: {
+        uint32_t x = w[0] & 65535, y = w[1] & 65535, z = w[2] >> 4 & 0xFFFFFF, fog = w[3] >> 4 & 255;
+        unsigned xyz = w[3] & 0x8000 ? GS_XYZF3 : reg;
+        g->reg[xyz] = x | (uint64_t)y << 16 | (uint64_t)z << 32 | (uint64_t)fog << 56;
+        g->vertex.x = x; g->vertex.y = y; g->vertex.z = z; g->vertex.fog = fog;
+        vertex_kick(g, xyz == GS_XYZF3);
+        return;
+    }
+    case 5: case 13: {
+        uint32_t x = w[0] & 65535, y = w[1] & 65535;
+        unsigned xyz = w[3] & 0x8000 ? GS_XYZ3 : reg;
+        g->reg[xyz] = x | (uint64_t)y << 16 | (uint64_t)w[2] << 32;
+        g->vertex.x = x; g->vertex.y = y; g->vertex.z = w[2];
+        vertex_kick(g, xyz == GS_XYZ3);
+        return;
+    }
     case 10: value = (uint64_t)(w[3] >> 4 & 255) << 56; break;
     case 14: reg = w[2] & 127; break;
     case 11: case 15: return;
     }
     if ((reg >= GS_RGBAQ && reg <= GS_XYZ2) || reg == GS_XYZF3 || reg == GS_XYZ3) vertex_write(g, reg, value);
     else gs_write(g, reg, value);
+}
+
+enum { GS_PRIM_TRISTRIP = 4 };
+
+/* A PACKED tag's register list that gs_feed can run as a strip (finding 146): RGBAQ, ST and UV
+   in any order, then one XYZF2/XYZ2/XYZF3/XYZ3 last, so each loop is one vertex. At most four
+   registers (packed_strip's order[3] holds the ones before XYZ); longer lists go through packed(). */
+static int strip_regs(uint64_t regs, unsigned nreg)
+{
+    if (nreg < 1 || nreg > 4) return 0;
+    unsigned xyz = (unsigned)(regs >> ((nreg - 1) * 4)) & 15;
+    if (xyz != 4 && xyz != 5 && xyz != 12 && xyz != 13) return 0;
+    for (unsigned r = 0; r + 1 < nreg; r++) {
+        unsigned reg = (unsigned)(regs >> (r * 4)) & 15;
+        if (reg < 1 || reg > 3) return 0;
+    }
+    return 1;
+}
+
+/* loops whole loops of such a tag while PRIM is a triangle strip: each register as packed()
+   writes it, and each vertex kicked as vertex_kick would (the counters, ADC skips, the strip's
+   parity and its last vertices), with the triangles handed to draw_strip in batches instead of
+   one draw call each. The vertex, Q and RGBAQ/ST/UV live in locals for the loop (nothing reads
+   them in it: draw_strip takes the list) and are stored once after it, as the last writes left
+   them. */
+static void packed_strip(Gs *g, GsPath *p, uint64_t regs, unsigned nreg, const uint32_t *w, size_t loops)
+{
+    enum { BATCH = 256 };
+    /* 10 KB a call, thousands of calls a field: entries are written before they are read */
+    GsVertex list[BATCH + 2] PS2_NO_AUTO_INIT;
+    uint8_t drawn[BATCH] PS2_NO_AUTO_INIT;
+    unsigned m = g->vertex_count, xyz = (unsigned)(regs >> ((nreg - 1) * 4)) & 15;
+    int kicked = 0;   /* the last vertex made a triangle */
+    GsVertex v = g->vertex;
+    uint32_t q = p->q;
+    uint64_t rgbaq = 0, st = 0, uv = 0, xyz_value;
+    unsigned written = 0;   /* 1 RGBAQ, 2 ST, 4 UV */
+    unsigned order[3], n = nreg - 1;
+    for (unsigned r = 0; r < n; r++) order[r] = (unsigned)(regs >> (r * 4)) & 15;
+    memcpy(list, g->vertices, m * sizeof *list);
+    for (size_t k = 0; k < loops; k++) {
+        for (unsigned r = 0; r < n; r++, w += 4) {
+            switch (order[r]) {
+            case 1:
+                v.rgba = (w[0] & 255) | (w[1] & 255) << 8 | (w[2] & 255) << 16 | (w[3] & 255) << 24;
+                rgbaq = v.rgba | (uint64_t)q << 32;
+                memcpy(&v.q, &q, 4);
+                written |= 1;
+                break;
+            case 2:
+                q = w[2];
+                st = w[0] | (uint64_t)w[1] << 32;
+                memcpy(&v.s, &st, 8);
+                written |= 2;
+                break;
+            default:  /* 3, UV (strip_regs) */
+                v.u = w[0] & 0x3FFF; v.v = w[1] & 0x3FFF;
+                uv = v.u | (uint64_t)v.v << 16;
+                written |= 4;
+                break;
+            }
+        }
+        uint32_t x = w[0] & 65535, y = w[1] & 65535;
+        unsigned reg;
+        if (xyz == GS_XYZF2 || xyz == GS_XYZF3) {
+            uint32_t z = w[2] >> 4 & 0xFFFFFF, fog = w[3] >> 4 & 255;
+            reg = w[3] & 0x8000 ? GS_XYZF3 : xyz;
+            xyz_value = x | (uint64_t)y << 16 | (uint64_t)z << 32 | (uint64_t)fog << 56;
+            v.x = x; v.y = y; v.z = z; v.fog = fog;
+        } else {
+            reg = w[3] & 0x8000 ? GS_XYZ3 : xyz;
+            xyz_value = x | (uint64_t)y << 16 | (uint64_t)w[2] << 32;
+            v.x = x; v.y = y; v.z = w[2];
+        }
+        g->reg[reg] = xyz_value;
+        w += 4;
+        int skip = reg == GS_XYZF3 || reg == GS_XYZ3;
+        if (skip) g->adc_skips++;
+        list[m++] = v;
+        kicked = m >= 3;
+        if (kicked) {   /* vertex_kick: the window was full, a triangle */
+            g->kicks++;
+            drawn[m - 3] = (uint8_t)!skip;
+            if (!skip) g->vram_epoch++;
+            g->strip_parity ^= 1;
+        }
+        if (m == BATCH + 2) {
+            g->draw_strip(g, GS_PRIM_TRISTRIP, list, m, drawn);
+            list[0] = list[m - 2]; list[1] = list[m - 1]; m = 2;
+        }
+    }
+    g->vertex = v;
+    p->q = q;
+    if (written & 1) g->reg[GS_RGBAQ] = rgbaq;
+    if (written & 2) g->reg[GS_ST] = st;
+    if (written & 4) g->reg[GS_UV] = uv;
+    if (m >= 3) g->draw_strip(g, GS_PRIM_TRISTRIP, list, m, drawn);
+    /* The window vertex_kick leaves: the last two after a kick (its third slot holds the last one
+       kicked), else the vertices so far. */
+    if (kicked) {
+        g->vertices[0] = list[m - 2]; g->vertices[1] = g->vertices[2] = list[m - 1];
+        g->vertex_count = 2;
+    } else {
+        memcpy(g->vertices, list, m * sizeof *list);
+        g->vertex_count = m;
+    }
 }
 
 static void gif_qword(Gs *g, unsigned path, GsPath *p)
@@ -544,6 +693,32 @@ void gs_feed(Gs *g, unsigned path, const uint32_t *words, size_t count)
             memcpy(p->words, words + i + (run - 1) * 4, sizeof p->words);
             p->left -= (uint32_t)run;
             i += run * 4;
+        } else if (bulk && !p->have && count - i >= 4 && p->left && p->mode == 0 && !g->record_transfer) {
+            /* PACKED data: the run of whole qwords at once, each register as gif_qword would
+               write it, read in place, with the tag's counters in locals. The path keeps the
+               last qword, as it would. */
+            size_t avail = (count - i) / 4, done = 0;
+            uint32_t left = p->left, reg = p->reg, nreg = p->nreg;
+            uint64_t regs = p->regs;
+            const uint32_t *w = words + i;
+            int strips = g->draw_strip && g->draw && strip_regs(regs, nreg);
+            while (done < avail && left) {
+                if (strips && !reg && (g->reg[GS_PRIM] & 7) == GS_PRIM_TRISTRIP) {
+                    size_t loops = (avail - done) / nreg;
+                    if (loops > left) loops = left;
+                    if (loops) {   /* whole vertices of a strip at once */
+                        packed_strip(g, p, regs, nreg, w, loops);
+                        w += loops * nreg * 4; done += loops * nreg; left -= (uint32_t)loops;
+                        continue;
+                    }
+                }
+                packed(g, p, (unsigned)(regs >> (reg * 4)) & 15, w);
+                w += 4; done++;
+                if (++reg == nreg) { reg = 0; left--; }
+            }
+            memcpy(p->words, w - 4, sizeof p->words);
+            p->left = left; p->reg = reg;
+            i += done * 4;
         } else if (bulk && !p->have && count - i >= 4) {
             memcpy(p->words, words + i, sizeof p->words);
             p->have = 4;  /* the transfer callback observes a completed qword */

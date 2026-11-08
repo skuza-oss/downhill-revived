@@ -1,6 +1,6 @@
 """Build Downhill Revived's APK for Android arm64: a debug APK (finding 091) or the release APK (finding 143).
 
-    python port/android/build_apk.py [--wasm build/wasm/dhd_core.wasm] [--jobs 2] [--offline]
+    python port/android/build_apk.py [--wasm build/wasm/dhd_core.wasm] [--jobs N] [--offline]
     python port/android/build_apk.py --release [--wasm ...]   # signed with the release key (below)
     python port/android/build_apk.py --check APK                # only check_release on a built APK
 
@@ -145,6 +145,16 @@ def check_release(apk, name, code, new_signing_key=False):
     facts['native_code'] = native.group(1).strip() if native else ''
     if facts['native_code'] != "'arm64-v8a'":
         problems.append('native code %r, not arm64-v8a only' % facts['native_code'])
+    try:  # a profile-collecting library (--pgo-generate) has the counters' section; a release never does
+        import zipfile
+        if b'__llvm_prf_cnts' in zipfile.ZipFile(apk).read('lib/arm64-v8a/libmain.so'):
+            problems.append('libmain.so is the profile-collecting build (--pgo-generate)')
+        with zipfile.ZipFile(apk) as z:
+            split = z.read('assets/dhd-split.txt').decode().strip() if 'assets/dhd-split.txt' in z.namelist() else 'unknown'
+        if split not in ('one', 'wasm2c'):  # finding 151: the development chunks cost the game ~1.5 %
+            problems.append('libmain.so was built from %s C, not a release build (build_host64.py --release)' % split)
+    except (OSError, KeyError, zipfile.BadZipFile) as e:
+        problems.append('libmain.so not readable in the APK: %s' % e)
     facts['debuggable'] = 'application-debuggable' in badging
     if facts['debuggable']:
         problems.append('debuggable')
@@ -192,6 +202,12 @@ def project(libs, assets=None):
     icons(PROJECT / 'app' / 'src' / 'main' / 'res')
     if assets:  # files the APK carries as they are (package_release.py: the licence texts)
         shutil.copytree(assets, PROJECT / 'app' / 'src' / 'main' / 'assets')
+    # which C libmain.so was built from (build_host64's split.txt: one, wasm2c, chunks), so a release
+    # check of any APK can refuse the development chunks (finding 151)
+    split = OUT / 'split.txt'
+    if split.exists():
+        (PROJECT / 'app' / 'src' / 'main' / 'assets').mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(split, PROJECT / 'app' / 'src' / 'main' / 'assets' / 'dhd-split.txt')
     jni = PROJECT / 'app' / 'src' / 'main' / 'jniLibs' / 'arm64-v8a'
     jni.mkdir(parents=True)
     for lib in libs:
@@ -211,7 +227,13 @@ def project(libs, assets=None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--wasm', type=Path, help='rebuild the libraries from this module first')
-    ap.add_argument('--jobs', type=int, default=2)
+    ap.add_argument('--jobs', type=int, help="parallel compiles (default: build_host64.py's for the target)")
+    ap.add_argument('--line-tables', action='store_true',
+                    help="libmain.debug.so with line tables (build_host64's --debug, for simpleperf); code unchanged")
+    pgo = ap.add_mutually_exclusive_group()
+    pgo.add_argument('--pgo-generate', action='store_true',
+                     help="build_host64's: an instrumented build; a run writes files/dhd-<pid>.profraw at its exit")
+    pgo.add_argument('--pgo-use', type=Path, metavar='PROFDATA', help="build_host64's: optimise with this merged profile")
     ap.add_argument('--offline', action='store_true', help="Gradle from GRADLE_USER_HOME's cache only")
     ap.add_argument('--release', action='store_true', help='the release APK, signed with the key DHD_ANDROID_* name')
     ap.add_argument('--new-signing-key', action='store_true',
@@ -231,9 +253,13 @@ def main():
         release_env()
     libs = [OUT / 'lib' / 'arm64-v8a' / n for n in ('libmain.so', 'libSDL3.so')]
     wasm = a.wasm or (ROOT / 'build' / 'wasm' / 'dhd_core.wasm')
-    if a.wasm or not all(p.exists() for p in libs):
+    # an explicit native option or a release always builds: an earlier build's libraries may lack it
+    # (a release: wasm2c's own split parts, build_host64 --release)
+    if a.wasm or a.release or a.pgo_generate or a.pgo_use or a.line_tables or not all(p.exists() for p in libs):
         r = subprocess.run([sys.executable, str(ROOT / 'port' / 'tools' / 'build_host64.py'), '--target', 'android-arm64',
-                            str(wasm), '--jobs', str(a.jobs)])
+                            str(wasm)] + (['--jobs', str(a.jobs)] if a.jobs else []) + (['--debug'] if a.line_tables else []) + (['--release'] if a.release else []) +
+                           (['--pgo-generate'] if a.pgo_generate else []) +
+                           (['--pgo-use', str(a.pgo_use.resolve())] if a.pgo_use else []))
         if r.returncode:
             sys.exit('build_apk: build_host64.py --target android-arm64 failed')
     project(libs + a.extra_lib, a.assets)

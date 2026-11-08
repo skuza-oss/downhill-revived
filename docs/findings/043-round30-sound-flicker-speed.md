@@ -1,6 +1,16 @@
 # Round 30: sound stutter, native flicker, exact-frame cost, VU1 load
 
-Status: sound time-stretch, the native renderer's alpha and texture fixes, the shorter
+Status: partly superseded by 088 (gate/build tools, the "still to do" list)
+Checked: 2026-11-04
+
+Since then: resolution scale is done (findings 045, 086: 1x-8x), the unstretched 16:9 HUD too
+(finding 056), vibration through SDL3 (finding 059), a stick dead zone (finding 134). MSAA/FXAA,
+texture filtering and button remap options were not built (no such key in
+`port/render/settings/src/table.rs`). The
+launcher here is gone (the player launcher is `port/launcher`, finding 093), and so are
+`gate_native_renderer.py` and `build_clean.py` (finding 088); state traces are the check now.
+
+Done in this round: sound time-stretch, the native renderer's alpha and texture fixes, the shorter
 exact-frame hold, cheaper work-queue signalling, a bulk VIF unpack path, the dhd.ini settings
 file, window modes, scaled presentation, widescreen 16:9 and a launcher are committed;
 `port/tools/gate_native_renderer.py` passes on each batch (game state, every readback record and

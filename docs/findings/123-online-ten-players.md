@@ -1,5 +1,8 @@
 # 123: Ten players in an online room
 
+Status: current
+Checked: 2026-11-04
+
 Each PC still runs one human. The other humans take computer-rider slots.
 The split-screen controller and camera arrays stay at four. The online room,
 race, loaded and GO arrays now hold ten. The puppet leaver arrays also hold ten.

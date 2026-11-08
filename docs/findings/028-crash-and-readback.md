@@ -1,5 +1,8 @@
 # 028 - Round 20: the late-race crash and the GPU readback wait (2026-10-15)
 
+Status: current
+Checked: 2026-11-04
+
 ## 1. The late-race crash in func_00214BA0
 
 Every build crashed 40-125 s into a race, as recorded in finding 027:

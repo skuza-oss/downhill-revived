@@ -559,7 +559,8 @@ impl Native {
             let mut big_s: u32 = 1;
             // Untextured, or a surface without a texture: zeros.
             let mut group = Some(v.shared.dummy_group.clone());
-            // A decoded texture's size, when that is what the draw reads (`spec`'s `sized`).
+            // A decoded or converted texture's size, when that is what the draw reads (`spec`'s
+            // `sized`; both are R32Uint texels).
             let mut decoded: Option<(u32, u32)> = None;
             if k.texture_surface >= 0 {
                 let ts = k.texture_surface as usize;
@@ -607,6 +608,8 @@ impl Native {
                     continue;
                 }
                 group = converted.clone();
+                // Its texels, as a decoded texture's (convert.rs).
+                decoded = Some(self.converts.size(k.convert as usize));
             }
             if k.convert < 0 {
                 last_convert = -1;
@@ -658,12 +661,15 @@ impl Native {
                 && source_scale <= 8 && source_scale.is_power_of_two() { source_scale } else { 0 };
             let spec = if crate::native::pipelines::spec_enabled() {
                 let c = &constants;
-                let sized = decoded == Some((c.tex_size[0], c.tex_size[1]));
-                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, sized)
+                // Powers of two (as the GS's): the gather's corner / size is then exact.
+                let sized = decoded == Some((c.tex_size[0], c.tex_size[1]))
+                    && c.tex_size[0].is_power_of_two() && c.tex_size[1].is_power_of_two();
+                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, sized, c.alpha_scale == 255.0)
             } else {
                 0
             };
-            // A decoded texture is R32Uint texels: the `_u` entry points read it (pipelines.rs TEXELS).
+            // Decoded and converted textures are R32Uint texels: the `_u` entry points read them
+            // (pipelines.rs TEXELS).
             let texels = if decoded.is_some() { TEXELS } else { 0 };
             self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale | texels, spec,
                              offset, &v.uniforms, &group);
@@ -738,8 +744,8 @@ impl Native {
             pipeline: &self.objects.convert_pipe,
             layout: &self.objects.convert_layout,
             inverse: &self.objects.inverse,
-            texture_layout: &shared.texture_layout,
-            nearest: &shared.nearest,
+            texels_layout: &shared.texels_layout,
+            texels_sampler: &shared.repeat,
             dummy_view: &shared.dummy_view,
             dummy_texels_view: &shared.dummy_texels_view,
             dummy_depth_view: &shared.dummy_depth_view,
@@ -751,9 +757,14 @@ impl Native {
     }
 
     /// native_scanout through scanout.rs: the picture's display surface (with a texture) into the
-    /// display texture, recorded after the open pass ends; false when nothing was scanned out.
+    /// display texture, recorded after the open pass ends; false when nothing was scanned out. The
+    /// display off (`DISPLAY_OFF`) makes the display texture black.
     fn scan_out(&mut self, p: &Picture) -> bool {
         let gpu = self.gpu;
+        if p.display_surface == DISPLAY_OFF {
+            let encoder = self.pass.encoder(gpu);
+            return self.display.black(encoder);
+        }
         if p.display_surface < 0 {
             return false;
         }

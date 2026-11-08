@@ -92,7 +92,7 @@ public enum LauncherRoute: String, Hashable, CaseIterable {
 public class LauncherModel: ObservableObject {
     public static let shared = LauncherModel()
 
-    public let appVersion = "0.7.9 (iOS r1)"
+    public let appVersion = "0.7.12 (iOS r6)"
 
     @Published var autoStartGame = UserDefaults.standard.bool(forKey: "DHD_IOS_AUTO_START") {
         didSet { UserDefaults.standard.set(autoStartGame, forKey: "DHD_IOS_AUTO_START") }
@@ -101,6 +101,8 @@ public class LauncherModel: ObservableObject {
 
     @Published public var isGameRunning: Bool = false
     @Published public var showInGameMenu: Bool = false
+    @Published private(set) var controlsEditorActive = false
+    private var controlsEditingDepth = 0
     @Published public var navigationPath: [LauncherRoute] = []
     @Published public var focusedCardIndex: Int = 0
 
@@ -201,9 +203,10 @@ public class LauncherModel: ObservableObject {
 
     // Controls Settings
     @Published public var touchOpacity: Double = 0.50
-    @Published public var touchDeadzone: Double = 0.15
+    @Published public var gamepadDeadzone: Double = 0.05
+    @Published public var touchDeadzone: Double = 0.02
     @Published public var touchSensitivity: Double = 1.0
-    @Published public var floatingStick: Bool = true
+    @Published public var floatingStick: Bool = false
     @Published public var autoHideOnGamepad: Bool = true
     @Published public var hapticsEnabled: Bool = true
     @Published public var controllerStyle: ControllerStyle = .auto
@@ -364,7 +367,7 @@ public class LauncherModel: ObservableObject {
         }
 
         gamepad.dpad.valueChangedHandler = { [weak self] _, xValue, yValue in
-            guard let self = self, !self.isGameRunning else { return }
+            guard let self = self, !self.isGameRunning, !self.controlsEditorActive else { return }
             DispatchQueue.main.async {
                 let routes = LauncherRoute.allCases
                 if yValue > 0.5 {
@@ -380,7 +383,7 @@ public class LauncherModel: ObservableObject {
         }
 
         gamepad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
-            guard let self = self, pressed, !self.isGameRunning else { return }
+            guard let self = self, pressed, !self.isGameRunning, !self.controlsEditorActive else { return }
             DispatchQueue.main.async {
                 if self.navigationPath.isEmpty {
                     let routes = LauncherRoute.allCases
@@ -392,7 +395,7 @@ public class LauncherModel: ObservableObject {
         }
 
         gamepad.buttonB.pressedChangedHandler = { [weak self] _, _, pressed in
-            guard let self = self, pressed else { return }
+            guard let self = self, pressed, !self.controlsEditorActive else { return }
             DispatchQueue.main.async {
                 if self.isGameRunning && self.showInGameMenu {
                     self.showInGameMenu = false
@@ -403,7 +406,7 @@ public class LauncherModel: ObservableObject {
         }
 
         gamepad.buttonMenu.pressedChangedHandler = { [weak self] _, _, pressed in
-            guard let self = self, pressed else { return }
+            guard let self = self, pressed, !self.controlsEditorActive else { return }
             DispatchQueue.main.async {
                 if !self.isGameRunning && self.navigationPath.isEmpty && self.discReady {
                     self.launchGame()
@@ -430,6 +433,22 @@ public class LauncherModel: ObservableObject {
         vsyncEnabled = options.vsync
         externalResolutionUnlimited = options.unlimitedTVOutput
         savePreferences()
+    }
+
+    func beginControlsEditing() {
+        controlsEditingDepth += 1
+        guard controlsEditingDepth == 1 else { return }
+        controlsEditorActive = true
+        touch_input_reset()
+        touch_input_set_editing(true)
+    }
+
+    func endControlsEditing() {
+        controlsEditingDepth = max(0, controlsEditingDepth - 1)
+        guard controlsEditingDepth == 0 else { return }
+        touch_input_set_editing(false)
+        touch_input_reset()
+        controlsEditorActive = false
     }
 
     public func sendInGameStartPulse() {
@@ -547,9 +566,11 @@ public class LauncherModel: ObservableObject {
         self.vsyncEnabled = defaults.object(forKey: "DHD_VSYNC") != nil ? defaults.bool(forKey: "DHD_VSYNC") : true
         self.textureFiltering = defaults.string(forKey: "DHD_FILTER") ?? "Bilinear"
         self.touchOpacity = defaults.object(forKey: "DHD_TOUCH_OPACITY") != nil ? defaults.double(forKey: "DHD_TOUCH_OPACITY") : 0.50
-        self.touchDeadzone = defaults.object(forKey: "DHD_TOUCH_DEADZONE") != nil ? defaults.double(forKey: "DHD_TOUCH_DEADZONE") : 0.15
+        let storedGamepadDeadzone = defaults.object(forKey: "DHD_GAMEPAD_DEADZONE") != nil ? defaults.double(forKey: "DHD_GAMEPAD_DEADZONE") : 0.05
+        self.gamepadDeadzone = storedGamepadDeadzone.isFinite ? min(0.40, max(0, storedGamepadDeadzone)) : 0.05
+        self.touchDeadzone = defaults.object(forKey: "DHD_TOUCH_DEADZONE") != nil ? defaults.double(forKey: "DHD_TOUCH_DEADZONE") : 0.02
         self.touchSensitivity = defaults.object(forKey: "DHD_TOUCH_SENS") != nil ? defaults.double(forKey: "DHD_TOUCH_SENS") : 1.0
-        self.floatingStick = defaults.object(forKey: "DHD_TOUCH_FLOATING") != nil ? defaults.bool(forKey: "DHD_TOUCH_FLOATING") : true
+        self.floatingStick = defaults.object(forKey: "DHD_TOUCH_FLOATING") != nil ? defaults.bool(forKey: "DHD_TOUCH_FLOATING") : false
         self.autoHideOnGamepad = defaults.object(forKey: "DHD_TOUCH_AUTOHIDE") != nil ? defaults.bool(forKey: "DHD_TOUCH_AUTOHIDE") : true
         self.hapticsEnabled = defaults.object(forKey: "DHD_TOUCH_HAPTICS") != nil ? defaults.bool(forKey: "DHD_TOUCH_HAPTICS") : true
         if let styleStr = defaults.string(forKey: "DHD_CTRL_STYLE"), let st = ControllerStyle(rawValue: styleStr) {
@@ -573,6 +594,7 @@ public class LauncherModel: ObservableObject {
         defaults.set(vsyncEnabled, forKey: "DHD_VSYNC")
         defaults.set(textureFiltering, forKey: "DHD_FILTER")
         defaults.set(touchOpacity, forKey: "DHD_TOUCH_OPACITY")
+        defaults.set(gamepadDeadzone, forKey: "DHD_GAMEPAD_DEADZONE")
         defaults.set(touchDeadzone, forKey: "DHD_TOUCH_DEADZONE")
         defaults.set(touchSensitivity, forKey: "DHD_TOUCH_SENS")
         defaults.set(floatingStick, forKey: "DHD_TOUCH_FLOATING")
@@ -594,6 +616,7 @@ public class LauncherModel: ObservableObject {
         cfg.stick_floating = floatingStick
         cfg.auto_hide_on_gamepad = autoHideOnGamepad
         cfg.haptics_enabled = hapticsEnabled
+        touch_input_set_gamepad_deadzone(Float(gamepadDeadzone))
         touch_input_set_config(&cfg)
         _ = touch_input_save_layout()
 

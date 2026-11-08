@@ -1,0 +1,10 @@
+#!/bin/sh
+# The repository's pre-commit hook: the public never-commit rules on the staged files
+# (tools/check_tree.py --staged) and the docs linter (tools/check_docs.py).
+# Install once per clone: python tools/hooks/install.py
+# Skip it only when you know why (git commit --no-verify), and say so in the commit.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+PY=python3
+command -v "$PY" >/dev/null 2>&1 && "$PY" -c "" >/dev/null 2>&1 || PY=python
+"$PY" tools/check_tree.py --staged || { echo "pre-commit: fix the lines above, then commit again"; exit 1; }
+"$PY" tools/check_docs.py --quiet || { echo "pre-commit: fix the lines above, then commit again"; exit 1; }

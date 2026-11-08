@@ -1,0 +1,3 @@
+# rustc --print native-static-libs for the aarch64-apple-ios static library (wgpu with Metal, dhd_net)
+-lSystem -framework QuartzCore -framework Metal -framework Foundation -framework CoreFoundation -framework UIKit -framework GameController -lobjc -liconv -lc -lm
+

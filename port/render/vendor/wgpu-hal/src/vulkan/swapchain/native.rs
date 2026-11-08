@@ -115,6 +115,18 @@ impl Surface for NativeSurface {
             }
         };
 
+        // Downhill Revived: on Android the loader answers vkGetPhysicalDeviceSurfaceFormatsKHR by
+        // asking gralloc (AHardwareBuffer_isSupported) about its optional formats, and Qualcomm's
+        // gralloc on some phones (Adreno 710, driver 0615.73, Android 14) then leaves its
+        // BufferManager lock held: the next query (wgpu-core asks again in configure) or the
+        // swapchain's buffers wait on it forever, a black screen. The loader always lists these
+        // two first without asking gralloc; the renderer draws RGBA8Unorm.
+        #[cfg(target_os = "android")]
+        let raw_surface_formats = alloc::vec![
+            vk::SurfaceFormatKHR { format: vk::Format::R8G8B8A8_UNORM, color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR },
+            vk::SurfaceFormatKHR { format: vk::Format::R8G8B8A8_SRGB, color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR },
+        ];
+        #[cfg(not(target_os = "android"))]
         let raw_surface_formats = {
             profiling::scope!("vkGetPhysicalDeviceSurfaceFormatsKHR");
             match unsafe {
@@ -354,6 +366,9 @@ impl Swapchain for NativeSwapchain {
 
         unsafe { device.shared.raw.destroy_fence(self.fence, None) }
 
+        // Downhill Revived: the views kept for this swapchain's images (after the wait above).
+        device.shared.forget_surface_views(&self.images);
+
         // We cannot take this by value, as the function returns `self`.
         for semaphore in self.acquire_semaphores.drain(..) {
             let arc_removed = Arc::into_inner(semaphore).expect(
@@ -506,6 +521,7 @@ impl Swapchain for NativeSwapchain {
                     depth: 1,
                 },
                 identity,
+                surface_image: true,
             },
             metadata: Box::new(NativeSurfaceTextureMetadata {
                 acquire_semaphores: acquire_semaphore_arc,

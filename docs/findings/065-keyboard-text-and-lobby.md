@@ -1,12 +1,20 @@
-﻿# 065: Keyboard text entry and online selection flow
+# 065: Keyboard text entry and online selection flow
+
+Status: partly superseded by 099 (the WM_CHAR text path)
+Checked: 2026-11-04
+
+Text entry now goes through SDL3's text input on the SDL thread (`port/hle/text_input.c`, a
+locked queue the game thread reads; finding 099), not the Win32 window's WM_CHAR. The rules
+(capitals, field alphabet and lengths, Backspace/Enter/Esc, Ctrl+V) are the same. The room flow
+here was reworked later (findings 092, 115, 118, 128).
 
 2026-10-18. Implementation and final clean-build/default-gate acceptance complete.
 All game-derived captures stay local in ignored `build/port/r65/`.
 
 ## Player-visible changes and choices
 
-Online NAME and CODE accept physical keyboard typing through the existing
-window thread's TranslateMessage/WM_CHAR path. Windows translates the keyboard
+Online NAME and CODE accept physical keyboard typing (then through the
+window thread's TranslateMessage/WM_CHAR path; now SDL3 text input). The OS translates the keyboard
 layout. Lowercase maps to the game's capitals; the existing field alphabet and
 length limits remain (12-character name, six-character code). Backspace deletes,
 Enter confirms, Esc discards the edit, Ctrl+V appends allowed clipboard text.

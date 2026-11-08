@@ -1,5 +1,9 @@
 # 086: Fixes from a play test of the Rust renderer
 
+Status: current
+Supersedes: parts of 045
+Checked: 2026-11-04
+
 2026-10-25, branch `render/rust`. One section per task.
 
 ## W1: Browser on the native (upscaled) renderer

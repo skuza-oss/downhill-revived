@@ -99,11 +99,14 @@ def prepare_project_bundle(team=None):
     if input_dst.exists():
         shutil.rmtree(input_dst)
     shutil.copytree(HERE / 'input', input_dst)
+    shutil.copyfile(ROOT / 'port/hle/stick.h', input_dst / 'stick.h')
 
     host_dst = PROJECT / 'Host'
     if host_dst.exists():
         shutil.rmtree(host_dst)
     shutil.copytree(HERE / 'host', host_dst)
+    shutil.copyfile(ROOT / 'port/render/include/dhd_settings.h', host_dst / 'dhd_settings.h')
+    shutil.copyfile(ROOT / 'port/hle/controls_table.h', host_dst / 'controls_table.h')
 
     render_dst = PROJECT / 'Render'
     if render_dst.exists():
@@ -224,8 +227,8 @@ def prepare_project_bundle(team=None):
 
 
 def resolve_team(team=None):
-    value = team or os.environ.get('DHD_APPLE_TEAM', '26HD3WHJGE')
-    if not re.fullmatch(r'[A-Z0-9]{10}', value):
+    value = team or os.environ.get('DHD_APPLE_TEAM', '')
+    if value and not re.fullmatch(r'[A-Z0-9]{10}', value):
         raise ValueError('The Apple development team must contain 10 uppercase letters/digits.')
     return value
 
@@ -362,8 +365,10 @@ def main():
             raise RuntimeError('The signed app has no provisioning profile. Configure its Team in Xcode, '
                                'or pass --allow-provisioning-updates when you want Xcode to update it.')
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app_path)], check=True)
-
-    package_ipa(app_path)
+        package_ipa(app_path)
+    else:
+        import package_unsigned
+        package_unsigned.package_unsigned_ipa(app_path)
 
     if args.install:
         print('ios: installing onto device:', device_info)

@@ -20,7 +20,7 @@ function focusable() {
   });
 }
 const area = (e) => e.closest('.rail, .main, .foot');
-const rowsOf = () => [$('tabs'), ...$('rows').querySelectorAll('.row:not(.off):not(.sticks-row)')];
+const rowsOf = () => [$('tabs'), ...$('rows').querySelectorAll('.row:not(.off):not(.sticks-row):not(.bind-note)')];
 
 // A settings row's control: the chosen choice of a segmented one, else the first.
 function rowControl(row) {
@@ -123,7 +123,9 @@ function poll(now) {
     if (x > STICK) down.add(PAD.RIGHT);
   }
   for (const k of held.keys()) if (!down.has(k)) held.delete(k);
-  if (document.hasFocus()) {
+  // a binding waits for a button (controls.js): the press is its own, and stays held until let go
+  if (bindCapturing()) for (const k of down) held.set(k, Infinity);
+  if (document.hasFocus() && !bindCapturing()) {
     for (const k of down) {
       const act = ACTIONS[k];
       if (!act) continue;

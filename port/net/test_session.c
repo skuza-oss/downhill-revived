@@ -161,6 +161,52 @@ int main(void)
         assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"rejoinToken"));
         client_free(&c);
     }
+    {   /* Snapshot freshness and long gaps are per sender and sampled on network ticks. */
+        const unsigned char state[] = {NET_FRAME_STATE, 2, 4, 0, 0, 0, 0, 0};
+        unsigned char go[12] = {NET_FRAME_EVENT, 2, 2, 5};
+        double stamp = 100000 + net_now_ms() - 150;
+        client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        c.racing = 1;
+        c.clock_offset = 100000;
+        memcpy(go + 4, &stamp, sizeof stamp);
+        client_on_binary(&c,go,sizeof go);
+        c.snapshot[2].arrived = net_now_ms() - 150;
+        client_on_binary(&c,state,sizeof state);
+        assert(c.snapshot[2].gaps == 1 && c.snapshot[1].gaps == 0);
+        client_tick(&c);
+        assert(c.snapshot[2].samples == 1 && c.snapshot[1].samples == 0);
+        assert(c.snapshot[2].epoch == stamp && c.snapshot[2].age[0] == 0);
+        {   /* The same estimator reads the old relay layout for before/after measurements. */
+            const unsigned char legacy[] = {NET_FRAME_STATE, 2, 8, 3, 0, 1, 0, 0, 0};
+            client_on_binary(&c,legacy,sizeof legacy);
+            assert(c.snapshot[2].epoch == stamp + 1);
+            client_on_binary(&c,state,sizeof state);  /* older unordered packet */
+            assert(c.snapshot[2].epoch == stamp + 1);
+        }
+        c.snapshot[2].epoch = c.clock_offset + net_now_ms() - 2000;
+        client_tick(&c);
+        assert(c.snapshot[2].age[1001] == 1);
+        client_free(&c);
+    }
+    {   /* the install id (finding 161): in every hello once set, only when it is 32 lowercase hex;
+           none (an id never made) sends a hello without it, as older releases do */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"installId"));
+        client_free(&c);
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_set_install_id(&c,"0123456789abcdef0123456789abcdef");
+        client_connected(&c,&t);
+        assert(strstr(sent,",\"installId\":\"0123456789abcdef0123456789abcdef\""));
+        client_set_install_id(&c,"0123456789ABCDEF0123456789abcdef");
+        client_connected(&c,&t);
+        assert(!strstr(sent,"installId"));
+        client_set_install_id(&c,"\",\"x\":\"0123456789abcdef01234567");
+        client_connected(&c,&t);
+        assert(!strstr(sent,"installId"));
+        client_free(&c);
+    }
     puts("test_session: session and ten-player checks passed");
     return 0;
 }

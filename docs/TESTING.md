@@ -16,6 +16,7 @@ profile). Tools read them; the game reads none of them.
 | `DHD_SCRATCH` | scratch folder for test runs, server state and temporary files (default the system temp) |
 | `DHD_GAME_SLOTS` | at most this many untimed game checks at once on the PC (the game lock, below); default 1 |
 | `DHD_TEST_ISO` | your Downhill Domination (USA) disc image, for the test tools |
+| `DHD_MALIOC` | optional: Arm's Mali Offline Compiler (`malioc.exe` from Arm Performance Studio, free; keep it off the system drive), for the `native_spirv` test below |
 
 Never set `DHD_ISO` for your user: the game reads it, and it overrides dhd.ini in every game
 started from that environment, your own included. Keep all three off a small system drive.
@@ -55,6 +56,7 @@ after a version change before a live check.
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
+| `port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- --test native_spirv` | the native renderer's SPIR-V for every pipeline stage, made as wgpu-hal's Vulkan backend makes it, with no texture passed into a function (Mali's r54 compiler crashes on that, finding 153). `DHD_SPIRV_OUT=DIR` keeps the `.spv` files; with `DHD_MALIOC` every stage is also compiled by malioc for `DHD_MALIOC_CORE` (default `Mali-G57`); `DHD_NATIVE_WGSL=FILE` compares another native.wgsl |
 
 A typical in-game check:
 
@@ -98,6 +100,8 @@ Menus and riding:
 | `DHD_AUTOPAD` | button script by seconds |
 | `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...` |
 | `DHD_RACE_SYNC=1` | race scripts run on the race clock |
+| `DHD_KEYS` | (race clock) keys through the keyboard's layout, `start:length:key[+key],...` with dhd.ini's key names (`space`, `j`, `kp1`, ...) or `esc` |
+| `DHD_TEST_PAD`, `DHD_TEST_PAD2` | (race clock) player 1's or 2's controller by its inputs' places, `start:length:input[+input],...` (`south`, `east`, `lt`, `dpad_up`, `lx=-50`, ...), through that player's layout (`pad1`, `pad2`) as a real pad's; logged as `test pad N` (finding 157) |
 | `DHD_REPLAY_TEST=S` | at race second S the race's replay starts, as REPLAY in the results does; `DHD_REPLAY_TRACE=path`: the riders' positions each field (finding 142) |
 | `DHD_FRAME_CLOCK=1` | the game clock from field counts, not the wall clock (repeatable runs) |
 | `DHD_HEADLESS=1` | no message boxes (a bad disc only logs), and no launcher (Linux smoke runs) |
@@ -157,7 +161,11 @@ with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=nativ
 - **nettool bots report place = slot + 1**, so results with bots show odd places.
 - **Single-PC online tests miss cross-platform bugs** (the version string, POSIX putenv, pacing,
   all shipped once): every release with online or pacing changes runs cross_race.py both ways, and
-  a `freeze:` line counts as a failure.
+  a `freeze:` line counts as a failure. From Git Bash set `MSYS_NO_PATHCONV=1`, or it rewrites the
+  Mac's paths and the remote game never starts. A public room's grid locks 30 s after the host
+  readies, so the host's first race is usually alone; it counts toward `--races`. To test the
+  TURN/TLS fallback, give `--remote-app` a small script there that sets `DHD_NET_SFU_UDP=0` and
+  `exec`s the game.
 - **Never wait for a process by matching its command line in a loop whose own command line
   contains the same text.**
 
@@ -176,7 +184,7 @@ Keep the display and window configuration fixed across comparisons and report th
 GPU pass timestamps do not measure all compositor/copy costs.
 
 `DHD_SCALE_MEMORY_MB=N` overrides only the native resolution guard's memory estimate for
-controlled developer measurements (1–65536 MiB). Integrated GPUs can expose very little dedicated
+controlled developer measurements (1-65536 MiB). Integrated GPUs can expose very little dedicated
 VRAM while using shared RAM; their normal dedicated-memory guard may clamp requested 6x/8x to
 4x. Check `perf: render` for the actual scale. Choose a budget the machine can supply, keep it
 constant across runs, and inspect the logged override. This does not alter player defaults,

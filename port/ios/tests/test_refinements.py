@@ -21,9 +21,10 @@ class RefinementChecks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             source, executable = Path(td)/'check.c', Path(td)/'check'
             source.write_text(code)
+            gc_flag = '-Wl,-dead_strip' if sys.platform == 'darwin' else '-Wl,--gc-sections'
             subprocess.run([CC, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-                            '-ffunction-sections', '-fdata-sections', str(source), *args,
-                            '-Wl,--gc-sections', '-lm', '-o', str(executable)], check=True)
+                            '-ffunction-sections', '-fdata-sections', '-I'+str(ROOT/'port/hle'), str(source), *args,
+                            gc_flag, '-lm', '-o', str(executable)], check=True)
             subprocess.run([str(executable)], check=True, timeout=20)
 
     def test_tv_fits_16_9_caps_output_and_uses_supported_cadence(self):
@@ -65,21 +66,51 @@ int main(void) {
         a = source.index('static void trigger_haptic(')
         b = source.index('\nvoid touch_input_restore_defaults', a)
         source = source[:a] + 'static void trigger_haptic(bool heavy) { (void)heavy; }\n' + source[b:]
+        gamepad = (ROOT/'port/hle/gamepad.c').read_text()
+        pressure = gamepad[gamepad.index('static const uint16_t pressure_order'):gamepad.index('static uint8_t trigger_byte')]
+        mapping = gamepad[gamepad.index('static int input_value('):gamepad.index('/* What its buttons say:')]
+        keyboard = (ROOT/'port/hle/keyboard.c').read_text()
+        decode = keyboard[keyboard.index('int keyboard_game_axis('):keyboard.index('/* The raw byte for a fraction')]
+        raw_header = (ROOT/'port/hle/hle.h').read_text()
+        raw_type = re.search(r'typedef struct \{[^{}]*\} GamepadRaw;', raw_header).group()
         code = r'''
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 typedef int os_unfair_lock;
 #define OS_UNFAIR_LOCK_INIT 0
 static void os_unfair_lock_lock(os_unfair_lock *p){(void)p;}
 static void os_unfair_lock_unlock(os_unfair_lock *p){(void)p;}
-''' + source + r'''
+static int applied_deadzone = -1, deadzone_writes, layout_writes;
+static char pad1_value[512], pad2_value[512];
+void host_putenv_s(const char *name, const char *value) {
+ if (!strcmp(name,"DHD_PAD1") || !strcmp(name,"DHD_PAD2")) {
+  snprintf(!strcmp(name,"DHD_PAD1") ? pad1_value : pad2_value,512,"%s",value); layout_writes++;
+ } else { applied_deadzone = atoi(value); deadzone_writes++; }
+}
+''' + source + raw_type + '\nenum { PRESSED = 30 };\n' + '\n#include \"controls_table.h\"\n' + pressure + mapping + decode + r'''
 #include <assert.h>
 static HostPad poll(void) {
  HostPad p={0}; p.left_x=p.left_y=p.right_x=p.right_y=128; touch_pad_merge(&p); return p;
 }
 int main(void) {
+ HostPad p;
  touch_input_restore_defaults(); touch_input_reset(); s_gamepad_connected=true;
+ poll(); assert(applied_deadzone==5 && deadzone_writes==1);
+ poll(); assert(deadzone_writes==1);
+ touch_input_set_gamepad_deadzone(.20f); assert(applied_deadzone==5);
+ poll(); assert(applied_deadzone==20 && deadzone_writes==2);
+ touch_input_set_gamepad_deadzone(.20f); poll(); assert(deadzone_writes==2);
+ touch_input_set_gamepad_deadzone(NAN); poll(); assert(applied_deadzone==5);
+ /* The raw-coordinate fixed stick also applies the configured zone on touch-down. */
+ s_config.stick_floating=false; s_config.stick_deadzone=.15f;
+ touch_input_update_viewport(1000,1000,0,0,0,0);
+ touch_input_begin(1,145,720); assert(poll().left_x==128);
+ touch_input_end(1,145,720);
+ touch_input_begin(2,160,720); p=poll(); assert(p.left_x>=178 && p.left_x<200);
+ touch_input_cancel(2); assert(poll().left_x==128); s_config.stick_deadzone=.05f;
  touch_input_set_button(TOUCH_CTRL_CROSS,true);
- HostPad p=poll(); assert(p.buttons==PAD_CROSS && p.pressure[6]==255);
+ p=poll(); assert(p.buttons==PAD_CROSS && p.pressure[6]==255);
  p=poll(); assert(p.buttons==PAD_CROSS);
  touch_input_set_button(TOUCH_CTRL_CROSS,false); assert(poll().buttons==0);
  touch_input_set_button(TOUCH_CTRL_CROSS,true); touch_input_set_button(TOUCH_CTRL_CROSS,false);
@@ -91,7 +122,72 @@ int main(void) {
  touch_input_set_button(TOUCH_CTRL_L1,true); touch_input_set_button(TOUCH_CTRL_R2,true);
  touch_input_set_stick(1,-1); p=poll(); assert(p.buttons==(PAD_L1|PAD_R2) && p.left_x>200 && p.left_y<50);
  touch_input_reset(); p=poll(); assert(p.buttons==0 && p.left_x==128 && p.left_y==128);
+ /* This range reproduced the bug before the fix: a light axis encoded as 174..177. */
+ for (int direction=-1; direction<=1; direction+=2) {
+  int previous_touch=0, previous_pad=0;
+  for (int i=0; i<=32767; i++) {
+   float deflection=direction*(i/32767.f);
+   touch_input_set_stick(deflection,0); p=poll();
+   int value=abs(keyboard_game_axis(p.left_x));
+   int steering=value*value/127;
+   assert(steering!=1 && steering>=previous_touch);
+   assert(p.buttons==0 && p.left_y==128);
+   if (i<1600) assert(steering==0);
+   if (i==2400) assert(steering>0 && steering<10);
+   previous_touch=steering;
+   touch_input_set_stick(0,0);
+   GamepadRaw raw={0}; raw.axis[0]=direction*i;
+   memset(&p,0,sizeof p); p.left_x=p.left_y=p.right_x=p.right_y=128;
+   gamepad_apply(&control_defaults[CONTROL_PAD1],&raw,applied_deadzone,&p);
+   touch_pad_merge(&p);
+   value=abs(keyboard_game_axis(p.left_x)); steering=value*value/127;
+   assert(steering!=1 && steering>=previous_pad && p.buttons==0);
+   if (i<1600) assert(steering==0);
+   if (i==2400) assert(steering>0 && steering<10);
+   previous_pad=steering;
+  }
+  assert(previous_touch==127 && previous_pad==127);
+ }
+ /* A neutral touch must leave the physical device's axes and digital d-pad intact. */
+ touch_input_set_stick(0,0);
+ p=(HostPad){.left_x=222,.left_y=128,.right_x=12,.right_y=244,.buttons=PAD_RIGHT};
+ touch_pad_merge(&p); assert(p.left_x==222 && p.right_x==12 && p.right_y==244 && p.buttons==PAD_RIGHT);
+
+ /* Cross-axial deadzone on physical controller: steer left with minor vertical thumb arc */
+ GamepadRaw steer_left = {.axis = {-30000, -5000, 0, 0}};
+ memset(&p, 0, sizeof p);
+ gamepad_apply(&control_defaults[CONTROL_PAD1], &steer_left, applied_deadzone, &p);
+ assert(p.left_x < 50 && p.left_y == 128);
+
+ /* Steer right with minor vertical thumb arc downward */
+ GamepadRaw steer_right = {.axis = {30000, 5000, 0, 0}};
+ memset(&p, 0, sizeof p);
+ gamepad_apply(&control_defaults[CONTROL_PAD1], &steer_right, applied_deadzone, &p);
+ assert(p.left_x > 200 && p.left_y == 128);
+
+ /* Intentional 45-degree diagonal trick must remain active on both axes */
+ GamepadRaw diag = {.axis = {-25000, -25000, 0, 0}};
+ memset(&p, 0, sizeof p);
+ gamepad_apply(&control_defaults[CONTROL_PAD1], &diag, applied_deadzone, &p);
+ assert(p.left_x < 50 && p.left_y < 50);
+
  touch_input_set_button((TouchControlID)-1,true); assert(poll().buttons==0);
+ touch_input_set_button(TOUCH_CTRL_CROSS,true); touch_input_set_stick(1,0);
+ touch_input_set_editing(true);
+ p=(HostPad){.buttons=PAD_CROSS|PAD_RIGHT,.left_x=255,.left_y=0,.right_x=255,.right_y=0};
+ touch_pad_merge(&p); assert(p.buttons==0 && p.left_x==128 && p.right_y==128);
+ touch_input_set_button(TOUCH_CTRL_R1,true); touch_input_set_stick(1,1);
+ touch_input_queue_controller_layout(1,"cross:east circle:south");
+ touch_input_queue_controller_layout(1,"cross:north triangle:south");
+ touch_input_queue_controller_layout(2,"cross:west square:south");
+ assert(layout_writes==0);
+ p=poll(); assert(p.buttons==0 && p.left_x==128 && layout_writes==2);
+ assert(!strcmp(pad1_value,"cross:north triangle:south") && !strcmp(pad2_value,"cross:west square:south"));
+ touch_input_reset(); poll(); assert(layout_writes==2);
+ touch_input_set_editing(false); assert(poll().buttons==0 && poll().left_x==128);
+ touch_input_set_button(TOUCH_CTRL_CROSS,true); assert(poll().buttons==PAD_CROSS);
+ touch_input_reset();
+
  return 0;
 }
 '''
@@ -103,6 +199,7 @@ int main(void) {
         code = r'''
 #define _GNU_SOURCE
 #include <assert.h>
+#include <fenv.h>
 #include <sys/mman.h>
 #include "widescreen.c"
 uintptr_t guest_base=0;
@@ -172,6 +269,24 @@ int main(void) {
  assert(host_widescreen_frame_aspect()==-1 && fabs(view.x0-688)<.02);
  output=4.0/3;host_widescreen_vsync();
  assert(host_widescreen_frame_aspect()==0 && fabs(view.x0-688)<.02);
+ /* Boot in IEEE round-to-nearest (1260x709) then switch on the EE fiber (round-toward-zero, 2346x1080). */
+ fesetround(FE_TONEAREST);
+ output=1260.0/709.0;host_widescreen_init();
+ WsView *race_view=(WsView*)(uintptr_t)(PS2_RAM_BASE+0x27ECC0);
+ race_view->width=512; race_view->height=448;
+ D_0075A9D0[0]=(WsEntry){race_view,race_view,5,{0}};
+ D_0075A9D0[1]=(WsEntry){0};
+ current_y[0]=bits_float(*y);
+ fesetround(FE_TOWARDZERO);
+ output=2346.0/1080.0;host_widescreen_vsync();
+ assert(*y==float_bits(bits_float(0x3F15551D)/port_fov_x));
+ assert(fabs(race_view->x0*current_y[0]-277.0f*bits_float(0x3F15551D))<.02);
+ output=1260.0/709.0;host_widescreen_vsync();
+ assert(*y==float_bits(bits_float(0x3F15551D)/port_fov_x));
+ output=2346.0/1080.0;host_widescreen_vsync();
+ assert(*x==float_bits(277.0f*port_fov_x) && *y==float_bits(bits_float(0x3F15551D)/port_fov_x));
+ assert(fabs(race_view->x0*current_y[0]-277.0f*bits_float(0x3F15551D))<.02);
+ fesetround(FE_TONEAREST);
  return 0;
 }
 '''

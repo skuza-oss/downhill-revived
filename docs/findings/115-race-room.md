@@ -1,5 +1,8 @@
 # 115: The race room, laid out (layout B)
 
+Status: partly superseded by 132 (no track thumbnails)
+Checked: 2026-11-04
+
 A player asked for three things in the online room: READY in green, a sound when someone
 joins or gets ready, and no way to spam Ready. The room was a column of menu rows. This work
 replaces it with a screen laid out as the HTML mock-up the players chose (layout B), still in
@@ -81,8 +84,9 @@ Colours mean one thing each:
 ## Not done yet
 
 - Track thumbnails (in the mock-up) need the game's track preview art loaded at run time.
-  The first build shows the track name large instead.
-- The server change has not been deployed. Deploying it together with a client release lets
+  The first build shows the track name large instead. (Done in finding 132: the picker shows the
+  track's loading-page picture read from the player's disc.)
+- The server change had not been deployed then. Deploying it together with a client release lets
   the countdown and rider ownership work for everyone.
 
 ## Tests

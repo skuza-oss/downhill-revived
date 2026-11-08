@@ -187,6 +187,13 @@ class BuildTests(unittest.TestCase):
             lib = root / 'build/host64-ios/libdhd_ios.a'
             lib.parent.mkdir(parents=True)
             lib.write_bytes(b'test-only')
+            stick = root / 'port/hle/stick.h'
+            stick.parent.mkdir(parents=True)
+            stick.write_bytes((ROOT / 'port/hle/stick.h').read_bytes())
+            for name in ('port/render/include/dhd_settings.h', 'port/hle/controls_table.h'):
+                destination = root / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes((ROOT / name).read_bytes())
             project = root / 'project'
             with patch.object(build, 'ROOT', root), patch.object(build, 'PROJECT', project), \
                     patch.object(build.subprocess, 'run'):
@@ -196,12 +203,23 @@ class BuildTests(unittest.TestCase):
             self.assertIn('GCC_OPTIMIZATION_LEVEL: "3"', text)
             self.assertIn('DEVELOPMENT_TEAM: "TESTTEAM01"', text)
             self.assertTrue((project / 'Render/performance_stats.c').is_file())
+            self.assertEqual((project / 'Input/stick.h').read_bytes(), stick.read_bytes())
+            self.assertEqual((project / 'Host/dhd_settings.h').read_bytes(), (ROOT / 'port/render/include/dhd_settings.h').read_bytes())
+            self.assertEqual((project / 'Host/controls_table.h').read_bytes(), (ROOT / 'port/hle/controls_table.h').read_bytes())
+            self.assertTrue((project / 'Launcher/ControlsCustomizationView.swift').is_file())
             self.assertEqual((project / 'Lib/libdhd_ios.a').read_bytes(), b'test-only')
 
     def test_launcher_localizations_are_complete_and_copied_into_project(self):
         languages = {'en', 'pt-BR', 'es', 'fr', 'de', 'it', 'ja', 'zh-Hans'}
         with tempfile.TemporaryDirectory() as td:
             project = Path(td) / 'project'
+            stick = Path(td) / 'port/hle/stick.h'
+            stick.parent.mkdir(parents=True)
+            stick.write_bytes((ROOT / 'port/hle/stick.h').read_bytes())
+            for name in ('port/render/include/dhd_settings.h', 'port/hle/controls_table.h'):
+                destination = Path(td) / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes((ROOT / name).read_bytes())
             with patch.object(build, 'ROOT', Path(td)), patch.object(build, 'PROJECT', project), \
                     patch.object(build.subprocess, 'run'):
                 build.prepare_project_bundle(team='TESTTEAM01')
@@ -276,7 +294,7 @@ int main(void){
             src, exe = Path(td) / 'stick.c', Path(td) / 'stick'
             src.write_text(code)
             subprocess.run([CC, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-                '-I'+str(ROOT / 'port/ios/input'), str(src), '-lm', '-o', str(exe)], check=True)
+                '-I'+str(ROOT / 'port/ios/input'), '-I'+str(ROOT / 'port/hle'), str(src), '-lm', '-o', str(exe)], check=True)
             subprocess.run([str(exe)], check=True, timeout=20)
 
     def test_frame_stats_measure_rate_percentile_and_reset(self):

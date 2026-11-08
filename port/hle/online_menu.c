@@ -21,14 +21,17 @@
    good dump with other sectors around them is taken too. */
 static const char us_files_sha256[] = "c8c17bcae383daf9f2feadc7f6d7476c43d659ab8d66127a299b01311f2a3476";
 
-/* The tracks with a 2-4 player level (online.c mp_level) and the riders every save has
-   (online.c regular): the game's indexes and names, as the online launcher lists them. */
+/* The online tracks and the riders every save has (online.c regular): the game's indexes and
+   names, as the online launcher lists them. Every PC races its own one-player race (finding 044),
+   so a track needs only its one-player level: Salt City MX (17) and TD (18), which have no 2-4
+   player level, are in. Not 21, DUAL: the career's one-on-one Dual Slalom, with two start places
+   and no Single Event entry (func_001E3810 skips it), finding 166. */
 /* Retail's full event names (also used by its Single Event and records pages).
    Read from the player's data image; omit country, keep FR/MX/TD suffixes intact. */
 extern const char *D_0026EFE8[];
 static const struct { int index; } tracks[] = {
     {0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12},
-    {13}, {14}, {15}, {16}, {19}, {20}, {22}, {23}, {24}, {25}};
+    {13}, {14}, {15}, {16}, {17}, {18}, {19}, {20}, {22}, {23}, {24}, {25}};
 static const char *track_name(int index)
 {
     static char names[26][64];
@@ -1420,18 +1423,19 @@ static void draw_track_list(void)
     rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
     box(36, 24, 568, 176, 110);
     put(MENU_CENTRE, 320, 30, "CHOOSE A TRACK", menu_style(st_row, 115, -1, 0, 0));
-    /* Two columns of names; the rider limit goes beside the picture, so each name has room. */
+    /* Two columns of names; the rider limit goes beside the picture, so each name has room. 13 rows
+       of 10.5 units fit between the title and BACK. */
     for (int i = 0; i < COUNT(tracks); i++) {
-        int x = 44 + (i % TRACK_COLUMNS) * 192, y = 46 + (i / TRACK_COLUMNS) * 11, on = i == track_cursor;
+        int x = 44 + (i % TRACK_COLUMNS) * 192, y = 45 + (i / TRACK_COLUMNS) * 21 / 2, on = i == track_cursor;
         const char *name = track_name(tracks[i].index);
         MenuStyle s = fit(name, on || i == room_track ? st_on : st_row, 90, 178);
         if (on) bar(x + 2, y - 1, 186, 10);
         put(MENU_CENTRE, x + 95, y, name, s);
         if (i == room_track) {  /* the current one: underlined under its name's own width, below the letters */
             int u = menu_text_width(name, &s) * 640 / vw;
-            rect(x + 95 - u / 2, y + 10, u, 1, (const int[]){0xC0, 0xB8, 0x40}, 128);
+            rect(x + 95 - u / 2, y + 9, u, 1, (const int[]){0xC0, 0xB8, 0x40}, 128);
         }
-        hit(&track_hits[i], x, y - 1, 190, 11);
+        hit(&track_hits[i], x, y - 1, 190, 10);
     }
     int at = tracks[track_cursor].index;
     char limit[32];

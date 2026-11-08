@@ -1,5 +1,8 @@
 # 108: Where a 120 field/s frame goes on the phone
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-28, Mi 11i M2012K11G / Snapdragon 888 / Adreno 660 / Android 13, adb `1ae461e`. A
 test-sub-agent round: measure where each frame's time goes at `DHD_FPS=120` over render scales 1-4,
 and check that the Android build really displays at 120 Hz.

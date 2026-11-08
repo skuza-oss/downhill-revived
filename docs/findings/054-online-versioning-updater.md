@@ -1,5 +1,8 @@
 # 054 — Online start gates, the version gate and the auto-updater (round 40, 0.2.0)
 
+Status: partly superseded by 093 (the game's own updater)
+Checked: 2026-11-04
+
 The game's own updater (`port/hle/update.c`) was removed on 2026-10-27: the launcher
 (`port/launcher`, finding 093) is the updater on every platform, with the same rules.
 

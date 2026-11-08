@@ -8,7 +8,7 @@
 
 #include "net.h"
 
-enum { NET_PROTOCOL = 2, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
+enum { NET_PROTOCOL = 3, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000 };
 
 typedef struct {
     void *ctx;
@@ -25,6 +25,8 @@ typedef struct {
     /* this room's rejoin token from the welcome (hex; "" none yet): a rejoin's hello sends it back
        to get the member again (finding 137). client_init clears it for each new room. */
     char rejoin_token[65];
+    /* this game's install id (32 lowercase hex, "" none; finding 161), sent in every hello */
+    char install_id[33];
     NetLobby lobby;
     int racing;
     /* what to repeat after a lobby reconnect */
@@ -45,6 +47,10 @@ typedef struct {
     float window_worst;
     double window_start, next_log, joined_at;  /* joined_at 0: not in a room (nothing to log) */
     char logged_colo[8];  /* the room location the log has named */
+    /* Estimated age on the server clock: sender's existing GO stamp + snapshot race ms.
+       Histograms are sampled every network tick; 1001 is the overflow bin. */
+    double sender_go[NET_MAX_SLOTS];
+    struct { double arrived, epoch; unsigned age[1002], samples, gaps; } snapshot[NET_MAX_SLOTS];
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];
@@ -54,6 +60,8 @@ typedef struct {
 double net_now_ms(void);  /* a monotonic clock */
 
 void client_init(NetClient *c, const char *name, const char *version, const char *iso);
+/* The install id for the hellos (finding 161): kept only when it is 32 lowercase hex digits. */
+void client_set_install_id(NetClient *c, const char *id);
 void client_free(NetClient *c);
 /* The transport connected: hello goes out. */
 void client_connected(NetClient *c, const NetTransport *tr);

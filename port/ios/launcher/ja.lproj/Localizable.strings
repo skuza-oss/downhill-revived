@@ -164,3 +164,63 @@
 "Insufficient storage. Available: %llu MB, needed: %llu MB." = "空き容量が不足しています。空き：%llu MB、必要：%llu MB。";
 "Open the game automatically" = "ゲームを自動起動";
 "Apply Changes" = "変更を適用";
+
+"Controller Stick Deadzone" = "コントローラーのデッドゾーン";
+
+"Customize Controls" = "操作をカスタマイズ";
+"Arrange and remap touch controls" = "タッチ操作の配置と割り当て";
+"Drag controls, choose their actions and save a layout for each orientation." = "操作をドラッグしてアクションを選び、画面の向きごとに配置を保存します。";
+"Physical Controllers" = "物理コントローラー";
+"Controller button bindings" = "コントローラーのボタン割り当て";
+"Done" = "完了";
+"Orientation" = "画面の向き";
+"Portrait" = "縦向き";
+"Landscape" = "横向き";
+"Drag a control to move it. Select a button to change its action." = "ドラッグして移動します。ボタンを選択するとアクションを変更できます。";
+"Touch Layout" = "タッチ配置";
+"Cancel" = "キャンセル";
+"Could not save controls" = "操作を保存できませんでした";
+"Control" = "操作";
+"Action" = "アクション";
+"Visible" = "表示";
+"Size" = "サイズ";
+"Restore this layout" = "この配置を初期化";
+"Keep the stick, Menu, Cross, Triangle, START and R1 visible." = "スティック、メニュー、クロス、三角、START、R1を表示してください。";
+"Analog Stick" = "アナログスティック";
+"Cross" = "クロス";
+"Circle" = "丸";
+"Square" = "四角";
+"Triangle" = "三角";
+"Controller" = "コントローラー";
+"Player %lld" = "プレイヤー %lld";
+"Changes apply immediately. Essential menu buttons stay assigned." = "変更はすぐに適用されます。メニューに必要なボタンの割り当ては維持されます。";
+"Button bindings" = "ボタン割り当て";
+"Main input" = "メイン入力";
+"Alternate input" = "代替入力";
+"Analog Sticks" = "アナログスティック";
+"Swap Sticks" = "スティックを交換";
+"Invert left X" = "左X軸を反転";
+"Invert left Y" = "左Y軸を反転";
+"Invert right X" = "右X軸を反転";
+"Invert right Y" = "右Y軸を反転";
+"Restore controller bindings" = "コントローラーの割り当てを初期化";
+"Could not update bindings" = "割り当てを更新できませんでした";
+
+"Horizontal position" = "横位置";
+"Vertical position" = "縦位置";
+"Discard unsaved changes?" = "未保存の変更を破棄しますか？";
+"Discard Changes" = "変更を破棄";
+"Keep Editing" = "編集を続ける";
+"Restore this layout?" = "このレイアウトを初期化しますか？";
+"The other orientation will keep its current layout." = "もう一方の向きのレイアウトは保持されます。";
+"Restore controller bindings?" = "コントローラーの割り当てを初期化しますか？";
+"Only Player %lld will be reset." = "プレイヤー%lldのみ初期化されます。";
+
+"Control options" = "操作ボタンの設定";
+"Drag to move. Rotate the device to edit the other orientation." = "ドラッグして移動します。別の向きを編集するには端末を回転してください。";
+
+"Undo" = "元に戻す";
+"Redo" = "やり直す";
+"Collapse tools" = "ツールを折りたたむ";
+"Expand tools" = "ツールを展開";
+"Hidden" = "非表示";

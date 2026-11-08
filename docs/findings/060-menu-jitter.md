@@ -1,5 +1,8 @@
 # Native progressive field jitter
 
+Status: current
+Checked: 2026-11-04
+
 ## Measurement (round 44)
 
 Release 0.2.2's clean object basis (`c4e2c707`), with only the GS diagnostic added:

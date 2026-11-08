@@ -48,7 +48,7 @@ const REPOSITORY: &str = "https://github.com/skuza-oss/downhill-revived/";
 const RELEASE_DOWNLOADS: &str = "https://github.com/skuza-oss/downhill-revived/releases/download/";
 const WORK_DIR: &str = "dhd-update";
 /// Never replaced by an update: the player's own files.
-const KEEP: [&str; 4] = ["dhd.ini", "dhd.log", "iso-check.txt", "launcher.log"];
+const KEEP: [&str; 5] = ["dhd.ini", "dhd.log", "dhd-previous.log", "iso-check.txt", "launcher.log"];
 /// In a folder install: the names of the files updates copied in, one a line (the uninstaller reads
 /// it; windows.iss UpdateList).
 pub const UPDATE_LIST: &str = "update-files.txt";

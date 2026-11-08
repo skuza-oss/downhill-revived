@@ -31,6 +31,10 @@ int graphics_xgkick(uint32_t memory,unsigned qword) { return gs_xgkick(&gs,GUEST
 #ifndef GRAPHICS_QUEUE_TEST
 void graphics_wait(void) {}
 void host_service_graphics_wait(void) { graphics_wait(); }  /* graphics_queue.c's, without the queue */
+/* graphics_queue.c's without workers: nothing queued, the store-image read waits */
+uint32_t host_service_gs_store_image(uint32_t packet, uint32_t destination, uint32_t bytes)
+{ (void)packet; (void)destination; (void)bytes; return 0; }
+void host_service_gs_store_settle(void) {}
 #endif
 extern int sceGsExecStoreImage(uint32_t, uint32_t) RETAIL(func_00244228);
 static void code(uint32_t value) {

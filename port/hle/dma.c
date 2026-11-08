@@ -202,7 +202,13 @@ void dma_mmio_write(uintptr_t address, uint64_t value, unsigned size)
     if (address >= 0x12000000 && address < 0x12001100 && !(address & 15)) {
         host_service_graphics_wait();
         host_service_gs_priv_write((unsigned)address, value);
-        if (address == 0x12001000)
+        if (address == 0x12001000) {
             *(volatile uint64_t *)address = host_service_gs_priv_read(GS_CSR);
+            /* A GS reset (sceGsResetGraph) cleared the display registers (gs_priv_write): so does
+               this page, which the presenter reads at each vsync (finding 160). */
+            if (value & 0x200)
+                for (unsigned reg = GS_PMODE; reg <= GS_BGCOLOR; reg += 16)
+                    *(volatile uint64_t *)(uintptr_t)(0x12000000u + reg) = host_service_gs_priv_read(reg);
+        }
     }
 }

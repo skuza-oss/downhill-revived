@@ -1,5 +1,9 @@
 # 128: Ready for the next race, MOSH by choice only, bikes and jerseys online
 
+Status: current
+Supersedes: parts of 092
+Checked: 2026-11-04
+
 Three room changes decided with the lead (2026-11-01), branch `feat/room-ready-bikes` from
 public main 6beb2c5 (0.7.6).
 

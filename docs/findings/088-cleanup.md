@@ -1,5 +1,9 @@
 # 088 — Cleanup: one 64-bit build on the Rust renderer
 
+Status: current
+Supersedes: parts of 015, 018, 020, 021, 023, 024, 038, 043, 053, 081
+Checked: 2026-11-04
+
 The 32-bit (i686) pipeline, the Direct3D 11 renderer and the C wgpu-native renderer are retired (the
 last 32-bit release is tagged `v0.3.1`). Each cleanup task has a section here.
 

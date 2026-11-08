@@ -1,5 +1,8 @@
 # 095: PC SETTINGS "Unlock All" reads, never writes
 
+Status: current
+Checked: 2026-11-04
+
 The option (dhd.ini `unlock_all`, `DHD_UNLOCK_ALL`, `port_unlock_all()` in `port/hle/pc_settings.c`,
 off by default) makes the game read every unlock as the retail unlock-all code `func_001F0780`
 (called from `func_0012C9E0`) leaves it, without that code's writes. Only readers are patched

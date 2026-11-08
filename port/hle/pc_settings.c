@@ -19,9 +19,11 @@
    variable at once and the host follows it), and DHD_PC_SETTINGS_RESTART replaces the hint of
    a row that waits for the next start. The browser sets all three (port/web/www/settings.js);
    x64 sets none of them, so its page is as described above.
-   With touch (the host sets DHD_TOUCH: android, or mouse for a desktop test) the page ends with a
-   Touch Controls row whose three screens are touch_settings.c's (finding 141); on Android the
-   page is called SETTINGS. */
+   After the rows, Controls opens the CONTROLS screen (controls_settings.c, finding 157: the keys
+   and controller buttons for the PS2 pad's buttons; a host lists DHD_KEYBOARD in its
+   DHD_PC_SETTINGS_ROWS to show it). With touch (the host sets DHD_TOUCH: android, or mouse for a
+   desktop test) the page ends with a Touch Controls row whose three screens are
+   touch_settings.c's (finding 141); on Android the page is called SETTINGS. */
 #include "hle.h"
 #include "../runtime/portable.h"
 #include "menu_page.h"
@@ -31,6 +33,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "controls_table.h"
+#include "settings_tabs.h"
 #include "settings_table.h"  /* the settings' choices: generated from port/render/settings */
 
 void gs_window_apply(void);           /* port/gs/present.c */
@@ -40,10 +44,18 @@ void touch_settings_build(MenuPage *p, int page);
 void touch_settings_update(MenuPage *p, int page, int cursor);
 void touch_settings_change(MenuPage *p, int page, int row, int step);
 int touch_settings_accept(MenuPage *p, int page, int row);
+/* controls_settings.c: the CONTROLS screen of this page */
+const char *controls_settings_title(void);
+void controls_settings_open(void);
+void controls_settings_build(MenuPage *p);
+void controls_settings_draw(MenuPage *p);
+void controls_settings_update(MenuPage *p, int cursor);
+void controls_settings_change(MenuPage *p, int row, int step);
+int controls_settings_accept(MenuPage *p, int row);
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
-enum { ROWS = 16, MAX_CHOICES = 16 };
+enum { ROWS = 17, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -57,7 +69,7 @@ typedef struct {
 } Row;
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, PROMPTS, TEXTURES, FONT, RATE,
-       VSYNC, COUNTER, UNLOCK };
+       VSYNC, COUNTER, UNLOCK, NAMES };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 0},
     {"Display:", "window", 1},
@@ -74,7 +86,8 @@ static Row rows[ROWS] = {
     {"Frame Rate:", "fps", 0},
     {"V-Sync:", "vsync", 0},  /* no tearing (port/gs/gpu_rust.c) */
     {"FPS & Ping:", "perf_counter", 1},
-    {"Unlock All:", "unlock_all", 1},  /* port_unlock_all */
+    {"Unlock All:", "unlock_all", 1},
+    {"Player Names:", "names", 1},
 };
 static char monitor_size[24];
 
@@ -141,6 +154,14 @@ static void choices_build(void)
 }
 static char hint[64];
 static const char *restart_hint = "* Applies when the game starts again";
+enum { TAB_DISPLAY, TAB_GRAPHICS, TAB_CONTROLS, TAB_ONLINE, TAB_GAME, TABS };
+static const char *const tab_labels[TABS] = {"Display", "Graphics", "Controls", "Online", "Game"};
+static const int row_tab[ROWS] = {TAB_GRAPHICS, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GRAPHICS,
+    TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_CONTROLS, TAB_CONTROLS, TAB_GRAPHICS, TAB_GRAPHICS,
+    TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE};
+static int tab, visible[ROWS], tabs[TABS], tab_count;
+static unsigned held_before;
+static int tab_left[TABS], tab_right[TABS];
 static int shown[ROWS], shown_count;  /* the page's rows: indexes into rows[] */
 
 /* Whether env is one of list's comma-separated names. */
@@ -159,11 +180,13 @@ static void choose_rows(void)
     const char *list = host_getenv("DHD_PC_SETTINGS_ROWS"), *live = host_getenv("DHD_PC_SETTINGS_LIVE");
     const char *restart = host_getenv("DHD_PC_SETTINGS_RESTART");
     if (restart && *restart) restart_hint = restart;
-    shown_count = 0;
     for (int i = 0; i < ROWS; i++) {
-        if (!list || listed(list, rows[i].env)) shown[shown_count++] = i;
+        visible[i] = !list || listed(list, rows[i].env);
         if (live && listed(live, rows[i].env)) rows[i].live = 1;
     }
+    const char *touch = host_getenv("DHD_TOUCH");
+    int controls = !list || listed(list, "DHD_KEYBOARD") || (touch && *touch);
+    tab_count = settings_tabs_choose(tabs, TABS, row_tab, visible, ROWS, TAB_CONTROLS, controls);
 }
 
 static Row *row_at(int index) { return index >= 0 && index < shown_count ? &rows[shown[index]] : NULL; }
@@ -194,14 +217,17 @@ static int locked(const Row *r)
 }
 
 static MenuPage page;
-static int screen;         /* 0 the PC settings, 1-3 TOUCH CONTROLS */
-static int touch_row = -1; /* the Touch Controls row, -1 without touch */
+enum { CONTROLS = 4 };      /* the screen of controls_settings.c */
+static int screen;          /* 0 the PC settings, 1-3 TOUCH CONTROLS, CONTROLS */
+static int touch_row = -1;  /* the Touch Controls row, -1 without touch */
+static int controls_row = -1;  /* the Controls row, -1 when the host doesn't offer it */
 
 static const char *page_title(void)
 {
     const char *touch = host_getenv("DHD_TOUCH");
+    if (screen == CONTROLS) return controls_settings_title();
     if (screen) return touch_settings_title(screen);
-    return touch && !strcmp(touch, "android") ? "SETTINGS" : "PC SETTINGS";
+    return touch && !strcmp(touch, "android") ? "SETTINGS" : "REVIVED SETTINGS";
 }
 
 /* Resolution's value as the GPU draws it (scale_limit, host_service_gs_scale), after its label:
@@ -280,20 +306,49 @@ static void change(int index, int step)
 static void page_build(MenuPage *p)
 {
     p->title = page_title();
+    p->title_y = screen ? 0 : 35;
+    p->footer = NULL;
+    if (screen == CONTROLS) { controls_settings_build(p); return; }
     if (screen) { touch_settings_build(p, screen); return; }
+    shown_count = 0;
+    for (int i = 0; i < ROWS; i++)
+        if (visible[i] && row_tab[i] == tabs[tab]) shown[shown_count++] = i;
+    const char *touch_mode = host_getenv("DHD_TOUCH");
+    p->footer = touch_mode && !strcmp(touch_mode, "android")
+        ? GLYPH_LEFT " Change " GLYPH_RIGHT "  " GLYPH_CROSS " Keep  " GLYPH_TRIANGLE " Back"
+        : GLYPH_LEFT " Change " GLYPH_RIGHT "  " GLYPH_CROSS " Keep  " GLYPH_TRIANGLE " Undo";
     for (int i = 0; i < shown_count; i++) {
         menu_page_value(p, rows[shown[i]].label, "", 1);
         format(&rows[shown[i]]);
     }
+    const char *list = host_getenv("DHD_PC_SETTINGS_ROWS");
+    controls_row = tabs[tab] == TAB_CONTROLS && (!list || listed(list, "DHD_KEYBOARD")) ? menu_page_row(p, "Controls", 1) : -1;
     const char *touch = host_getenv("DHD_TOUCH");
-    touch_row = touch && *touch ? menu_page_row(p, "Touch Controls", 1) : -1;
+    touch_row = tabs[tab] == TAB_CONTROLS && touch && *touch ? menu_page_row(p, "Touch Controls", 1) : -1;
 }
 
 static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the legend stays) */
 {
+    if (screen == CONTROLS) { controls_settings_update(p, cursor); return; }
     if (screen) { touch_settings_update(p, screen, cursor); return; }
+    unsigned held = 0;
+    for (int player = 0; player < 2; player++) {
+        HostPad pad = {0};
+        host_service_host_pad_device(player, GADDR(&pad));
+        held |= pad.buttons;
+    }
+    unsigned pressed = held & ~held_before;
+    held_before = held;
+    if (p->armed && tab_count > 1 && (pressed & (PAD_L1 | PAD_R1))) {
+        int step = pressed & PAD_R1 ? 1 : -1;
+        tab = settings_tab_step(tab, step, tab_count);
+        menu_page_sound(step > 0);
+        menu_page_rebuild_at(p, 0);
+        return;
+    }
     const Row *r = row_at(cursor);
     p->hint = NULL;
+    if (cursor >= 0 && cursor == controls_row) p->hint = "Your keys and controller buttons";
     if (r && locked(r)) {
         snprintf(hint, sizeof hint, "Set by %s outside the game", r == &rows[SIZE] ? "DHD_WINDOW_WIDTH" : r->env);
         p->hint = hint;
@@ -309,10 +364,11 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
 
 static void page_back(MenuPage *p)  /* Triangle: the values the page opened with, close */
 {
-    if (screen) {  /* TOUCH CONTROLS saves as it goes: back to the PC settings, on its row */
+    if (screen) {  /* TOUCH CONTROLS and CONTROLS save as they go: back to the PC settings, on their row */
+        int row = screen == CONTROLS ? controls_row : touch_row;
         screen = 0;
         menu_play("S_BACK");
-        menu_page_rebuild_at(p, touch_row >= 0 ? touch_row : 0);
+        menu_page_rebuild_at(p, row >= 0 ? row : 0);
         return;
     }
     /* A phone's Back (and △) leaves SETTINGS as its other screens do: with what was chosen, which
@@ -332,12 +388,26 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
     menu_page_cancel(p);
 }
 
-static void page_left(MenuPage *p, int index) { if (screen) touch_settings_change(p, screen, index, -1); else change(index, -1); }
-static void page_right(MenuPage *p, int index) { if (screen) touch_settings_change(p, screen, index, 1); else change(index, 1); }
+static void page_step(MenuPage *p, int index, int step)
+{
+    if (screen == CONTROLS) controls_settings_change(p, index, step);
+    else if (screen) touch_settings_change(p, screen, index, step);
+    else change(index, step);
+}
+static void page_left(MenuPage *p, int index) { page_step(p, index, -1); }
+static void page_right(MenuPage *p, int index) { page_step(p, index, 1); }
 
-/* Cross: keep and close; on Touch Controls (and inside it) the touch screens. */
+/* Cross: keep and close; on Touch Controls (and inside it) the touch screens, on Controls its screen. */
 static void page_accept(MenuPage *p, int index)
 {
+    if (screen == CONTROLS) { controls_settings_accept(p, index); return; }
+    if (!screen && controls_row >= 0 && index == controls_row) {
+        menu_play("S_SELECT");
+        controls_settings_open();
+        screen = CONTROLS;
+        menu_page_rebuild_at(p, 0);
+        return;
+    }
     if (!screen && (touch_row < 0 || index != touch_row)) { menu_page_close(p); return; }
     int next = screen ? touch_settings_accept(p, screen, index) : 1;
     if (!screen) menu_play("S_SELECT");
@@ -347,13 +417,68 @@ static void page_accept(MenuPage *p, int index)
     menu_page_rebuild_at(p, back_to_row);
 }
 
-/* OPTIONS, item 9 (patched func_001F0160): run the page until it closes. */
+static void page_draw(MenuPage *p)
+{
+    if (screen == CONTROLS) { controls_settings_draw(p); return; }
+    if (screen) return;
+    MenuStyle style = menu_page_style(p, MENU_STYLE_OFF);
+    char legend[96];
+    int width = 0;
+    for (int i = 0; i < tab_count; i++) width += menu_text_width(tab_labels[tabs[i]], &style) + 16;
+    int x = 256 - width / 2;
+    for (int i = 0; i < tab_count; i++) {
+        int w = menu_text_width(tab_labels[tabs[i]], &style) + 16;
+        tab_left[i] = x, tab_right[i] = x + w;
+        char label[24];
+        snprintf(label, sizeof label, i == tab ? "[%s]" : "%s", tab_labels[tabs[i]]);
+        MenuStyle shown = menu_page_style(p, i == tab ? MENU_STYLE_SELECTED : MENU_STYLE_OFF);
+        menu_draw_text(MENU_CENTRE, x + w / 2, 62, label, &shown);
+        x += w;
+    }
+    ControlsLayout layout;
+    int pad = host_service_controls_pad(CONTROL_PAD1);
+    int device = pad > 0 ? CONTROL_PAD1 : CONTROL_KEYBOARD;
+    if (!host_service_controls_layout(device, GADDR(&layout))) layout = control_defaults[device];
+    const char *words[2] = {"-", "-"};
+    for (int i = 0; i < 2; i++) {
+        int code = layout.input[4 + i][0];
+        if (device == CONTROL_KEYBOARD) {
+            for (int k = 0; k < CONTROL_KEYS; k++) if (control_keys[k].vk == code) words[i] = control_keys[k].label;
+        } else {
+            for (int k = 0; k < CONTROL_PAD_INPUTS; k++) if (control_pad_inputs[k].id == code)
+                words[i] = control_pad_inputs[k].label[pad - 1 == PAD_KIND_PLAYSTATION ? 1 : pad - 1 == PAD_KIND_NINTENDO ? 2 : 0];
+        }
+    }
+    snprintf(legend, sizeof legend, "%s / %s  Tabs", words[0], words[1]);
+    menu_draw_text(MENU_CENTRE, 256, 180, legend, &style);
+}
+
+/* A tap or click on a tab keeps the normal row and legend mouse handling. */
+static int page_header_mouse(MenuPage *p, int x, int y)
+{
+    if (screen || y < 55 || y > 73) return 0;
+    for (int i = 0; i < tab_count; i++) {
+        if (x < tab_left[i] || x >= tab_right[i]) continue;
+        if (i != tab) {
+            menu_page_sound(i > tab);
+            tab = i;
+            menu_page_rebuild_at(p, 0);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* OPTIONS, first item (patched func_001F0160): run the page until it closes. */
 void port_pc_settings(void)
 {
     screen = 0;
+    held_before = 0xFFFF;
     page.title = page_title();
     page.build = page_build;
     page.update = page_update;
+    page.draw = page_draw;
+    page.header_mouse = page_header_mouse;
     page.hints = 1;   /* the row's hint above the legend (menu_page.h) */
     page.accept = page_accept;  /* Cross: keep, close (Touch Controls: its screens) */
     page.back = page_back;
@@ -373,11 +498,11 @@ void port_pc_settings(void)
     menu_page_run(&page);
 }
 
-/* OPTIONS' rows (patched func_001F0160): row 9 is this page; the game's table has an unused
+/* OPTIONS' rows (patched func_001F0160): row 0 is this page; the game's table has an unused
    "UNLOCK RIDERS/BIKES(test)" there, which stays as it is. */
 char *port_options_label(char *label, int index)
 {
-    if (index != 9) return label;
+    if (index != 0) return label;
     const char *touch = host_getenv("DHD_TOUCH");  /* the page's own name (page_title): SETTINGS on a phone */
-    return (char *)(touch && !strcmp(touch, "android") ? "SETTINGS" : "PC SETTINGS");
+    return (char *)(touch && !strcmp(touch, "android") ? "SETTINGS" : "REVIVED SETTINGS");
 }

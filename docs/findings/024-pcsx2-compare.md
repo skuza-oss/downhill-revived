@@ -1,5 +1,12 @@
 # 024 - Automatic PCSX2 rendering comparisons
 
+Status: partly superseded by 088 (i686 build steps, build_compare_port.py and link.py)
+Checked: 2026-11-04
+
+The method (the race clock as the sync point, the pinned race seed, NAV, game-state dumps) is
+current. Build steps are not: `build_compare_port.py --link` and the `link.py` relink are gone;
+`race_compare.py` takes the 64-bit game with `--exe build/host64-exe/dhd64.exe`.
+
 ## Round 3: race comparison synchronised on the game's race clock (2026-10-14)
 
 `port/tools/race_compare.py` compares retail PCSX2 and the port at five race moments:
@@ -7,13 +14,12 @@ countdown, start, +10 s, +30 s and +50 s. No GUI, no dialogs and no wall-clock t
 
 ```powershell
 python port/tools/prepare_pcsx2_compare.py                      # patched PCSX2 adapter, once
-python port/tools/build_compare_port.py --link build/port/r5-snapshot/build/port/link
+python port/tools/build_host64.py                                # today; was build_compare_port.py --link
 $env:DHD_ISO = '...\Downhill Domination (USA).iso'
-python port/tools/race_compare.py LABEL                          # about 40 minutes
+python port/tools/race_compare.py LABEL --exe build/host64-exe/dhd64.exe   # about 40 minutes
 ```
 
-`--link` names the link directory holding the current port objects (another worker
-may link outside `build/port/link`). Clang and lld must be on PATH (scoop's LLVM works).
+(Then `--link` named the 32-bit link directory; that step is gone.)
 Output: `build/port/compare/LABEL/index.html`, `contact-sheet.png`, one
 `moment-*.png` triptych (PCSX2 | port | difference heatmap) per moment, `scores.json`,
 and the raw captures under `retail/` and `port/`.
@@ -257,8 +263,7 @@ in place. No BIOS, ISO or ELF was copied, moved or downloaded for this task.
 ## Usage
 
 Install the small Python dependencies if absent: `python -m pip install Pillow numpy`.
-Relink after taking the small scheduling changes (`python port/tools/link.py`,
-with the project's LLVM/Visual Studio environment). Set `DHD_ISO` to the existing
+Build the game first (today `python port/tools/build_host64.py`; then `link.py`). Set `DHD_ISO` to the existing
 USA disc image. The tool rejects an unset or nonexistent path; it never copies it.
 
 ```powershell

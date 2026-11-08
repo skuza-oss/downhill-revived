@@ -143,7 +143,7 @@ fn native(adapter: Adapter) {
                         let key = blend | mask << 14 | depth << 18 | variant << 23;
                         assert!(pipelines::describe(key).is_ok(), "key {key:#09x} describes");
                         no_errors(g, &format!("native pipeline {key:#09x}"), || {
-                            cache.get(g, &objects, key).map(|_| ())
+                            cache.get(g, &objects, key as u64).map(|_| ())
                         })
                         .unwrap_or_else(|e| panic!("{adapter:?} native pipeline {key:#09x} (dual {dual}): {e}"));
                     }

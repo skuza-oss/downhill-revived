@@ -53,7 +53,7 @@ typedef struct {
 /* Touch Layout Configuration */
 typedef struct {
     float opacity;              /* Global controls opacity: 0.1 to 1.0 (default 0.5) */
-    float stick_deadzone;       /* Analog deadzone: 0.0 to 0.4 (default 0.15) */
+    float stick_deadzone;       /* Analog deadzone: 0.0 to 0.4 (default 0.05) */
     float stick_sensitivity;    /* Stick sensitivity: 0.5 to 2.0 (default 1.0) */
     bool stick_floating;        /* True: stick centers where finger touches down */
     bool auto_hide_on_gamepad;  /* True: hide touch controls if physical pad connected */
@@ -86,6 +86,11 @@ bool touch_input_is_pressed(TouchControlID ctrl_id);
 void touch_input_set_button(TouchControlID ctrl_id, bool pressed);
 void touch_input_set_stick(float dx, float dy);
 void touch_input_get_stick(float *out_dx, float *out_dy);
+/* Queue the physical-controller deadzone for the game thread's next pad poll. */
+void touch_input_set_gamepad_deadzone(float deadzone);
+/* Editor input is consumed by the UI. Pending engine settings apply on its thread. */
+void touch_input_set_editing(bool editing);
+void touch_input_queue_controller_layout(int player, const char *value);
 
 /* Configuration and layout persistence */
 const TouchConfig *touch_input_get_config(void);

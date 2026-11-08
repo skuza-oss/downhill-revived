@@ -122,6 +122,16 @@ static double wanted_aspect(void)
 static uint32_t float_bits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 static float bits_float(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 
+/* host_widescreen_init runs before kernel_run (IEEE round-to-nearest), while live updates run on
+   the EE fiber (round-toward-zero), and func_0023D8D8 rewrites the active descriptor's x0. */
+static int word_owned(uint32_t actual, uint32_t expected, uint32_t applied)
+{
+    if (actual == expected || (applied && actual == applied)) return 1;
+    uint32_t ref = applied ? applied : expected;
+    uint32_t diff = actual > ref ? actual - ref : ref - actual;
+    return diff <= 4;
+}
+
 static void apply_aspect(double want)
 {
     /* PS2 address, retail word, 1 for an X (times s) or 0 for a Y factor (divided by s). The view
@@ -139,6 +149,8 @@ static void apply_aspect(double want)
         {0x27F2C0, 0x43520000, 1}, {0x27F2E0, 0x3EF0A3D7, 0},
         {0x27F380, 0x43520000, 1}, {0x27F3A0, 0x3EF0A3D7, 0},
     };
+    static uint32_t applied_words[sizeof words / sizeof *words];
+    static uint32_t applied_sprites[sizeof ws_sprite_widths / sizeof *ws_sprite_widths];
     float previous = port_fov_x;
     widescreen = want >= 4.0 / 3.0 + 0.01;
     aspect = widescreen ? fmin(want, 4.0) : 4.0 / 3.0;
@@ -157,13 +169,19 @@ static void apply_aspect(double want)
         uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + words[i][0]);
         float v = bits_float(words[i][1]);
         uint32_t expected = float_bits(words[i][2] ? v * previous : v / previous);
-        if (*at == expected) { *at = float_bits(words[i][2] ? v * port_fov_x : v / port_fov_x); changed++; }
-        else hle_log("widescreen: %06X holds %08X, not %08X; left\n", words[i][0], *at, words[i][1]);
+        if (word_owned(*at, expected, applied_words[i])) {
+            *at = applied_words[i] = float_bits(words[i][2] ? v * port_fov_x : v / port_fov_x);
+            changed++;
+        } else {
+            hle_log("widescreen: %06X holds %08X, not %08X; left\n", words[i][0], *at, words[i][1]);
+        }
     }
+    uint32_t expected_sprite = float_bits(277.0f * previous);
+    uint32_t next_sprite = float_bits(277.0f * port_fov_x);
     for (unsigned i = 0; i < sizeof ws_sprite_widths / sizeof *ws_sprite_widths; i++) {
         uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + ws_sprite_widths[i].ee);
-        if (at[0] == float_bits(277.0f * previous) && at[1] == ws_sprite_widths[i].upper)
-            at[0] = float_bits(277.0f * port_fov_x);
+        if (word_owned(at[0], expected_sprite, applied_sprites[i]) && at[1] == ws_sprite_widths[i].upper)
+            at[0] = applied_sprites[i] = next_sprite;
     }
     hle_log("widescreen: aspect %.4f (s %.4f), %u of %u data words\n", aspect, port_fov_x, changed,
             (unsigned)(sizeof words / sizeof *words));
@@ -195,12 +213,14 @@ static void update_ios_projection(double next)
     float target = next >= 4.0 / 3.0 + .01 ? (float)(4.0 / 3.0 / fmin(next, 4.0)) : 1.0f;
     if (target == port_fov_x) return;
     float focal[WS_VIEW_COUNT] = {0}, vertical[WS_VIEW_COUNT];
+    uint32_t old_x0[WS_VIEW_COUNT] = {0};
     float previous = port_fov_x;
     int active_view = D_0029E454;
     for (int i = 0; i < WS_VIEW_COUNT; i++) {
         const WsEntry *entry = &D_0075A9D0[i];
         if (!entry->camera || !entry->view || entry->mode == 10 ||
             !isfinite(entry->view->x0) || entry->view->x0 <= 0) continue;
+        old_x0[i] = float_bits(entry->view->x0);
         func_0023D898(i, &focal[i], &vertical[i]);
         if (!isfinite(vertical[i]) || vertical[i] <= 0) focal[i] = 0;
     }
@@ -212,7 +232,12 @@ static void update_ios_projection(double next)
         if (i == active_view) continue;
         int slot = i == WS_VIEW_COUNT ? active_view : i;
         if (slot >= 0 && slot < WS_VIEW_COUNT && focal[slot] > 0) {
-            func_0023D8D8(slot, focal[slot] * change, vertical[slot] / change);
+            const WsView *view = D_0075A9D0[slot].view;
+            float next_focal = float_bits(view->x0) != old_x0[slot] ? view->x0 : focal[slot] * change;
+            uintptr_t addr = (uintptr_t)view;
+            float next_vertical = (addr >= PS2_RAM_BASE + 0x27ECC0 && addr <= PS2_RAM_BASE + 0x27F380)
+                ? *(const float *)(addr + 0x20) : vertical[slot] / change;
+            func_0023D8D8(slot, next_focal, next_vertical);
             func_0023CB00(slot);
         }
     }
@@ -258,9 +283,11 @@ void host_widescreen_vsync(void)
     }
     if (!widescreen || (!fresh && !(ios_display_auto && D_0029C470 && owned))) return;
     float inverse = 1.0f / port_fov_x;
+    /* Upstream 154: the shadow vertex crosses the camera plane beyond 16:9. */
+    float shadow_width = fminf(inverse, 4.0f / 3.0f);
     *top = applied_top = float_bits(inverse);
     *bottom = applied_bottom = float_bits(inverse);
-    *shadow = applied_shadow = float_bits(-95.886f - (111.0f - 95.886f) * 3.0f * (inverse - 1.0f));
+    *shadow = applied_shadow = float_bits(-95.886f - (111.0f - 95.886f) * 3.0f * (shadow_width - 1.0f));
 }
 
 /* The iOS presenter distinguishes explicit Stretch from 4:3 with the same retail projection. */

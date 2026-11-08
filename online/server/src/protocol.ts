@@ -1,6 +1,6 @@
 // Wire protocol constants and pure helpers. The specification is docs/online-protocol.md.
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 export const MAX_MEMBERS = 10;
 export const DEFAULT_MAX_PLAYERS = 10;
@@ -41,6 +41,15 @@ export const CLOSE_CODES = {
   kicked: 4007,
   hello_timeout: 4008,
   client_outdated: 4009,
+  /** The operator turned online off (the kill switch in the D1 store; finding 161). */
+  online_off: 4010,
+  /** Too many connections or new rooms from one address in a minute (wrangler.jsonc ratelimits). */
+  rate_limited: 4011,
+  /** A member sent more messages or race frames than the game ever does, after a warning
+      (src/guard.ts TEXT_PER_WINDOW, BINARY_PER_WINDOW). The warning is a non-fatal too_fast. */
+  too_fast: 4012,
+  /** The operator banned this address hash or install id (src/guard.ts findBan). */
+  banned: 4013,
 } as const;
 export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
 

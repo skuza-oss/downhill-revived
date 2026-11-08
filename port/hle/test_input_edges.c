@@ -101,6 +101,7 @@ int main(int argc,char **argv) {
 void pads_begin_field(void) { abort(); }
 int pads_multitap(void) { abort(); }
 void pads_read(int i,HostPad *p) { abort(); }
+int port_controls_capturing(void) { return 0; }  /* controls_settings.c: no binding waits */
 int pads_online(void) { return 0; }
 int pads_connected(void) { abort(); }
 int pads_live(void) { return 0; }

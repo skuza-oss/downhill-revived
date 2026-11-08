@@ -1,4 +1,4 @@
-"""Guard for the state trace's learned pointer words (finding 075, phase 2 / W1).
+"""Guard for the state trace's learned pointer words (finding 081, phase 2 / W1).
 
 A learned word is a host code or data address, hashed by its symbol. A word that is not a pointer
 can still look like one: a float of game state that differs between builds (a sound stream

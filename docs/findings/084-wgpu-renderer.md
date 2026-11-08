@@ -1,5 +1,13 @@
 # 084: The wgpu renderer — moving the GS from D3D11 to WebGPU
 
+Status: partly superseded by 085 (the C wgpu-native backend, gpu_wgpu.c)
+Checked: 2026-11-04
+
+The D3D11 → WebGPU analysis, the WGSL port of the shaders (§2, W4 depth plane, §12, §14 DXC) and
+the test plan are current and cited by `port/gs/*.wgsl`, `test_depth.c`, `dxc.py`. The backend it
+first built in C on wgpu-native (`gpu_wgpu.c`) was replaced by the Rust renderer on wgpu
+(`port/render`, `port/gs/gpu_rust.c`; findings 085, 088 CL2); wgpu-native is no longer used.
+
 This is the design document for phase 5 of finding 081 ("the platforms: wgpu renderer, Linux, web,
 Android, iOS"). It inventories what the PS2 GS renderer asks of D3D11, maps every use onto webgpu.h,
 decides how `raster.hlsl` becomes WGSL, pins the wgpu-native version and its build/link story,

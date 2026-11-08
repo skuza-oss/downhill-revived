@@ -19,6 +19,20 @@ static double phase, anim_phase;
 static double step_fields, previous_wall, owed;
 static int wall_mode, delta = -1;
 static unsigned clock_serial;
+static int race_loop;   /* the race's loop ran since the front end's last frame (fps.h, finding 159) */
+
+void port_loop_frame(int race)
+{
+    if (race != race_loop) hle_log(race ? "game: a race's loop runs\n" : "game: the front end runs\n");
+    race_loop = race;
+}
+
+int port_in_race(void) { return race_loop && *(int *)GUEST(0x084B26AC) != PORT_MODE_ATTRACT; }
+int port_race_running(int first_phase)
+{
+    return port_race_rule(race_loop, *(int *)GUEST(0x084B26AC), *(int *)GUEST(0x0843F348), first_phase);
+}
+
 /* Online, from the countdown to the finish (race screen, race phase 1-4). */
 static int online_race(void)
 {
@@ -106,7 +120,7 @@ static void clock_rest(void)
     if (wall_mode) previous_wall=host_wall_seconds();
     owed=0;
 }
-/* The mixer's time for one VBLANK on the delta-time clock (kernel.c vsync; finding 113). The frame
+/* The mixer's time for one VBLANK on the delta-time clock (kernel.c vsync; finding 139). The frame
    clock delivers a VBLANK every BUS_HZ/N cycles, 1024 per kernel boundary (timer.c), and a frame
    crosses about 400 boundaries: above about 360 one update spans several VBLANKs. Charging the
    update's step on each VBLANK ran the sound that many times too fast.
@@ -446,7 +460,7 @@ void port_fps_contact_recovery(void *body)
     if (!port_delta_clock()) return;
     unsigned char *b=body,*r=*(unsigned char **)(b+0x158);
     Air *a=air_for(body);
-    int slot=*(int *)(r+0x797C),race_phase=*(int *)GUEST(0x0843F348);
+    int slot=*(int *)(r+0x797C);
     float *p=(float *)(b+0x50);
     int contact=b[0x354]!=2 || b[0x3D4]!=2;
     int supported=contact || (a->stalled_steps && port_air_age(body,*(short *)(b+0x4A4))<4);
@@ -454,7 +468,8 @@ void port_fps_contact_recovery(void *body)
     extern float func_0012DF48(void *);
     /* AI already has the retail grounded recovery states (001100D0/103B0).
        Preserve their own field timers; this fills the human controller gap. */
-    if (*(int *)(r+0x7A5C)!=1 || slot<0 || slot>=10 || *(int *)GUEST(0x0829DED8)!=9 || race_phase<2 || race_phase>4 ||
+    /* in a race from GO, also one started from CONTINUE SAVED GAME (screen 22, finding 159) */
+    if (*(int *)(r+0x7A5C)!=1 || slot<0 || slot>=10 || !port_race_running(2) ||
         *(unsigned char *)GUEST(0x0843EF18+slot) || (r[0x4098]&4) ||
         !supported || !pedal || func_0012DF48(r)>0) {
         a->stalled_steps=0;
@@ -467,6 +482,7 @@ void port_fps_contact_recovery(void *body)
     a->stalled_steps+=port_step();
     if (a->stalled_steps<120-0.00001) return;
     a->stalled_steps=0;
+    hle_log("fps: rider %d stuck on the ground while pedalling for 2 s: the collision recovery\n", slot);
     extern void func_00155E78(void *,int);
     func_00155E78(r+0x3FD0,2);
 }
@@ -554,8 +570,7 @@ void port_clock_observe(void)
         const char *s = host_getenv("DHD_PERF_LOG");
         on = !s || strcmp(s, "0") != 0;
     }
-    int race_phase = *(int *)GUEST(0x0843F348);
-    if (!on || *(int *)GUEST(0x0829DED8) != 9 || race_phase < 2 || race_phase > 4) {
+    if (!on || !port_race_running(2)) {
         last_wall = 0;
         return;
     }
@@ -616,10 +631,9 @@ void port_fps_observe(void)
     static int raced, still;
     if (!out) return;
     int tick=*(int *)GUEST(0x0843EEC8);
-    /* The race is over (rate_drift.py: the finish times are in) when its screen or phase ends, or
-       when its clock stops (every rider in, the results wait) for 3600 updates (15 s at 240). */
-    if ((raced && (tick==last ? ++still : (still=0))>3600) ||
-        *(int *)GUEST(0x0829DED8)!=9 || *(int *)GUEST(0x0843F348)<2 || *(int *)GUEST(0x0843F348)>4) {
+    /* The race is over (rate_drift.py: the finish times are in) when it ends (port_race_running),
+       or when its clock stops (every rider in, the results wait) for 3600 updates (15 s at 240). */
+    if ((raced && (tick==last ? ++still : (still=0))>3600) || !port_race_running(2)) {
         if (raced) {
             fclose(out);
             fclose(steps_out);

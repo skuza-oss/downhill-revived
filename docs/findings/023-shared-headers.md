@@ -1,5 +1,13 @@
 # Shared animation and vector headers
 
+Status: partly superseded by 088 (x87 return checks of the i686 build)
+Checked: 2026-11-04
+
+The shared headers and every source fix are current. The x87 float-return checks and "native
+i386" observations describe the retired 32-bit build (finding 088); on the wasm32 core float
+returns are checked by `abi_check.py` and the scalar/float ABI tests (`port/tools/test_float_abi.py`,
+`scalar_abi.py`; finding 104).
+
 2026-10-13. Both builds already search `include/` (SN through `tools/sncc.py`,
 PC through `port/tools/build.py`). No compiler flags or match checks changed.
 

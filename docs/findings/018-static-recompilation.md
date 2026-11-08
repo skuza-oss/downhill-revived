@@ -1,5 +1,13 @@
 # 018 — Static recompilation of the remaining MIPS functions
 
+Status: partly superseded by 088 (the i686 link it ran in)
+Checked: 2026-11-04
+
+`port/tools/recomp.py` still does this, now for the wasm32 core
+(`build_wasm.py` runs it; findings 081, 082); the i686 link (`link.py`, the 1 MB emulated stack
+beside host code) is retired (finding 088). The VU0 entries it starts now run compiled
+(`vu0_aot.py`, finding 090 SP1). The 2026-10-13 counts below are a snapshot.
+
 The PC build links only C, so every function that is still asm (unfinished, hand-written,
 remnant, libgcc) is turned into C mechanically by `port/tools/recomp.py`. This is a bridge to a
 running game: a function's matching C replaces its recompiled version as soon as it exists.
@@ -23,8 +31,9 @@ running game: a function's matching C replaces its recompiled version as soon as
   `sqrt.s` takes |x|, `cvt.w.s` truncates and saturates, integer division by zero has the EE's
   results, `mult`/`madd` write LO/HI and rd, the second pipeline (`mult1`, `div1`, `mflo1`, ...)
   has its own LO1/HI1.
-- `link.py` runs it to a fixed point: functions the link needs, then whatever those call, and
-  functions referenced by pointer from the data (vtables, callback tables).
+- The build runs it to a fixed point (then `link.py`, now `build_wasm.py`): functions the link
+  needs, then whatever those call, and functions referenced by pointer from the data (vtables,
+  callback tables).
 
 ## Result (2026-10-13)
 
@@ -46,8 +55,9 @@ Other fixes in the same step:
 
 - `func_0021B7E8`/`func_0021B8A8` (hand-written VU0 code) start VU0 microprograms at 0x0, 0x180,
   0x238, 0x2E0, 0x5E8, 0x7B8, 0x808, 0x8D0, 0xB40, 0xBD0, 0xC50 and 0xCD0, which have no native
-  version (finding 016 has the four that do). The VU0 micro interpreter runs them, checked
-  against PCSX2's VU0 interpreter on captured race inputs (finding 021, round 5).
+  version (finding 016 has the four that do). The VU0 micro interpreter ran them, checked
+  against PCSX2's VU0 interpreter on captured race inputs (finding 021, round 5); since finding
+  090 SP1 they are compiled to C (`vu0_aot.py`), checked against the uploaded words.
 - `jal` doesn't set `$ra`, so libgcc's MIPS exception unwinder links but can't work.
 - `jalr` passes 8 integer arguments only; a float argument through a function pointer would be lost.
 - `bc0f` (wait for VU0) is treated as done.

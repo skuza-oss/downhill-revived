@@ -18,12 +18,13 @@ compiler runtime to the key. Its entry is the linked module.
 Entries: DIR/<2 hex>/<sha256>.o, written to a temp file and renamed, so a parallel reader sees a
 whole object or none. A hit is copied, not hardlinked: build_wasm.py renames symbols in place
 in its objects. Compiler messages (warnings) are not stored: a hit prints none.
-At the end of a build that stored objects the cache is cut back to 90% of DHD_OBJCACHE_GB
-(default 30) by dropping the least recently used entries (a hit touches its entry).
+At the end of a build that stored objects, at most once in DHD_OBJCACHE_PRUNE_HOURS (default 24)
+on the machine, the cache is cut back to 90% of DHD_OBJCACHE_GB (default 30) by dropping the least
+recently used entries (a hit touches its entry).
 
     DHD_OBJCACHE=0         compile everything, read and write nothing
     DHD_OBJCACHE_DIR=PATH  another cache folder (default DHD_DEVCACHES\\dhd-objcache, DHD_DEVCACHES defaulting to ~/DevCaches; never C:)"""
-import atexit, hashlib, os, re, shutil, subprocess, sys, threading
+import atexit, hashlib, os, re, shutil, subprocess, sys, threading, time
 from pathlib import Path
 DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  # downloaded tools and caches
 
@@ -360,6 +361,30 @@ def compile(cmd, out, run, extra=(), roots=(), cwd=None, env=None, hit=None):
     return r
 
 
+def tool_output(cmd, src, out, run, roots=()):
+    """A deterministic tool's run from one input file to one output file (the browser build's
+    wasm-opt passes, finding 151): run(cmd) unless an earlier run of the same tool (resolved path,
+    size, mtime, --version), the same arguments (src and out as tokens) and src's same bytes left
+    its output in the cache. Returns what compile() returns."""
+    if not ENABLED:
+        return run(cmd)
+    h = hashlib.sha256(VERSION + b' tool')
+    def part(data):
+        data = _norm(data, _folders(roots))
+        h.update(b'%d:' % len(data)); h.update(data)
+    part(_compiler(cmd[0]))
+    tokens = {os.path.abspath(str(src)): '<in>', os.path.abspath(str(out)): '<out>'}
+    part('\0'.join(tokens.get(os.path.abspath(a), a) for a in map(str, cmd[1:])))
+    part(hashlib.sha256(open(src, 'rb').read()).hexdigest())
+    k = h.hexdigest()
+    if fetch(k, str(out)):
+        return Result()
+    r = run(cmd)
+    if getattr(r, 'returncode', 0) == 0 and os.path.exists(str(out)):
+        store(k, str(out), roots)
+    return r
+
+
 def prune(limit=LIMIT):
     """Drop the least recently used entries until the cache is under 90% of limit."""
     entries = []
@@ -387,10 +412,31 @@ def prune(limit=LIMIT):
     return dropped
 
 
+# The walk over every entry (460,000 files, 25 GB: 30 to 65 s) ran at the end of every build that
+# stored an object; now at most once in PRUNE_HOURS on the machine (DIR/pruned.stamp). Between two
+# walks the cache can grow past the limit by what builds store meanwhile (finding 151).
+PRUNE_HOURS = float(os.environ.get('DHD_OBJCACHE_PRUNE_HOURS', '24'))
+
+
+def prune_due():
+    stamp = os.path.join(DIR, 'pruned.stamp')
+    try:
+        if time.time() - os.path.getmtime(stamp) < PRUNE_HOURS * 3600:
+            return False
+    except OSError:
+        pass
+    try:
+        os.makedirs(DIR, exist_ok=True)
+        open(stamp, 'w').close()  # the next build's walk waits PRUNE_HOURS, even if this one fails
+    except OSError:
+        pass
+    return True
+
+
 def summary():
     if not ENABLED or not any(_stats.values()):
         return
-    dropped = prune() if _stats['miss'] else 0
+    dropped = prune() if _stats['miss'] and prune_due() else 0
     print('objcache: %d hits, %d misses, %d not cacheable%s (%s)' % (
         _stats['hit'], _stats['miss'], _stats['uncached'],
         ', %d old entries dropped' % dropped if dropped else '', DIR), flush=True)

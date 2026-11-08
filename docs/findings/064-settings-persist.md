@@ -1,5 +1,8 @@
 # 064: Player settings across restarts
 
+Status: current
+Checked: 2026-11-04
+
 Round 49, 2026-10-18. Implementation and validation complete. Evidence stays
 locally under `build/port/r49settings/`; no game images/data belong in this commit.
 

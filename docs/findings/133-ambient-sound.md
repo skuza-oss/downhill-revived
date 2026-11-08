@@ -1,5 +1,8 @@
 # 133: Ambient sound too loud on Mt. Liddellroch (issue #19)
 
+Status: current
+Checked: 2026-11-04
+
 Branch `fix/ambient-sound` from `next/0.7.7`. Public issue #19 ("Sound effects too loud"): the
 ambient/background sound on every Liddellroch circuit and career race is wrong; the player's video
 (not watched here) is a Liddellroch career race.

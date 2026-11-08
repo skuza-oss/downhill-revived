@@ -1,6 +1,13 @@
 # Round 33: game logic overlapping the drawing (deferred vsync), measured and not shipped
 
-Status: tried, measured, reverted. The code is commit f80b4d61 (reverted by 7fcb47b9; the
+Status: partly superseded by 090 (the revert: deferred vsync shipped in 090 HO1)
+Checked: 2026-11-04
+
+Reverted here because VU1 was then the bottleneck; the same design shipped later as deferred
+vsync on the native hosts' graphics workers (finding 090 HO1, `host_service_graphics_threaded()`
+returning 2). Read HO1 for what runs today; the measurements below are the 32-bit build's.
+
+Tried, measured and reverted here. The code is commit f80b4d61 (reverted by 7fcb47b9; the
 launcher exe stays the round 32 build). Goal: let the EE (game) thread run the next field while
 the VU and GS threads are still drawing the last one, as PCSX2's MTGS/MTVU do, with everything
 the game can observe exact: readbacks (the flare Z probe), CSR/FINISH/SIGNAL/vblank state, VU1

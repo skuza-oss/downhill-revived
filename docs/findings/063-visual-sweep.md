@@ -1,5 +1,8 @@
 # Visual sweep (round 48)
 
+Status: current
+Checked: 2026-11-04
+
 Follow-up implementation: [finding 068](068-visual-sweep-fixes.md). The boot loading-card cause is
 isolated and corrected (masked high-byte uploads); fresh native pictures, identical-stream replay
 and retail confirm the card. The Fog Editor grey bar is confirmed as retail behavior, with its

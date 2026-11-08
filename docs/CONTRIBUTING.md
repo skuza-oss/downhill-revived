@@ -7,7 +7,9 @@ port fixes, widescreen split screens, testing on other PCs.
 - To decompile a function, follow `docs/WORKER.md`. A function is accepted only when
   `tools/try_func.py` prints MATCH and `tools/promote.py` confirms the whole image still matches.
 - Port changes go in `port/`; `src/` must keep matching.
-- Never commit game data, secrets or server addresses other than the official server's.
+- Never commit game data, secrets or server addresses other than the official server's. Install
+  the pre-commit hook once (`python tools/hooks/install.py`): it checks these rules and the docs
+  on every commit. `python tools/check.py docs` runs the same by hand.
 
 How to build both the PC port and the matching build: [BUILDING.md](BUILDING.md).
 

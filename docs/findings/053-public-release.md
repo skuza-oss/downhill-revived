@@ -1,5 +1,16 @@
 # 053 — The first public release: reverb from the disc, a reproducible build, the zip (round 39)
 
+Status: partly superseded by 088 (the 32-bit release build, its zip and checks)
+Checked: 2026-11-04
+
+Still true: reverb presets read from the player's disc (section 1), the game data image read
+from the player's `SCUS_971.77` instead of shipped in the exe (section 4), the official server as
+the default (section 5), and the rule behind them (no GPL-incompatible code, no game data, no
+local inputs). Retired: the 32-bit build path of sections 2-3 and 6-13 (`build_clean.py`,
+`link.py`, `--recomp-basis`, `dhd.exe` with D3D11/WinHTTP imports, the game's own updater). Today
+`port/tools/package_release.py` builds and checks the 64-bit release itself (finding 088 CL3, the
+release steps in `docs/STATE.md`). Sections 6-13 are the 0.2.x release log.
+
 Goal: a release that anyone can rebuild from the public repository and their own disc, with no
 third-party code under a GPL-incompatible licence and no local inputs.
 
@@ -43,7 +54,7 @@ Sources: ps2sdk `effect.c` and `libsd-common.h` for the table layout and registe
 or values copied); the [no$psx SPU specification](https://psx-spx.consoledev.net/soundprocessingunitspu/)
 for the register meanings.
 
-## 2. The release build is the plain build
+## 2. The release build is the plain build (32-bit, retired)
 
 Recent test executables were linked with
 `build_clean.py --recomp-basis build/port/r29/native16/objects.rsp`, a local object set that is
@@ -85,7 +96,7 @@ Results on b7904561:
   lists the 54 words), and is the gate's default now. No check or exclusion changed. Gate on the
   plain exe, separate run: MATCH (all moments, 1,167 readbacks).
 
-## 3. The release zip
+## 3. The release zip (the 32-bit zip; today finding 088 CL3)
 
 `port/tools/package_release.py --exe build/port/clean/<rev>/dhd.exe --version X` writes
 `build/release/DownhillRevived-X-win.zip`, one folder holding:
@@ -183,8 +194,8 @@ dhd.exe and the text files.
 
 ## 5. The official server is the default (round 39, third part)
 
-The project's public race server is deployed at `wss://dhd-online.downhill-revived.workers.dev`
-(`online/server/`, HTTP `GET /v1/lobbies`). It is the one server address the repository and the
+The project's public race server (`online/server/`, HTTP `GET /v1/lobbies`) was then deployed at
+its Cloudflare workers address; today it is `wss://dhd.skuza.app`, the game's default. It is the one server address the repository and the
 release may name. `host.c` `host_settings_load` sets `DHD_NET_SERVER` to it after reading dhd.ini
 when nothing set it: no dhd.ini, an empty `server =`, no `DHD_NET_SERVER`. An explicit
 `server = ...` or `DHD_NET_SERVER` still wins (self-hosting). The template's comment says so.

@@ -1,5 +1,8 @@
 # 137: rejoining players no longer clone themselves in online rooms
 
+Status: current
+Checked: 2026-11-04
+
 Why: GitHub issue #30, "Players are cloning in lobbies". In a room, players at random appear twice
 and take up slots. The host can clone too and then loses the host rights. The reporter's 0.7.7
 dhd.log is from players in Indonesia in a room that runs in HKG. Their ISP sends them to far

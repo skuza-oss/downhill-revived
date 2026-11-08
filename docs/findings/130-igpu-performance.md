@@ -1,5 +1,8 @@
 # 130: Integrated GPU performance
 
+Status: current
+Checked: 2026-11-04
+
 Branch `perf/igpu`, based on local `feat/perf-log` (`0003e65`). Three exact renderer
 optimisations retained; final measurements and validation are complete.
 

@@ -263,6 +263,12 @@ async function start(m) {
     host_service_movie_update: () => 0, host_service_movie_playing: () => 0,
     host_service_host_poll_dump: () => 0,
     host_service_graphics_threaded: () => 1, host_service_texpack_available: () => 0, host_service_gs_scale: () => 0,
+    // Keys and controller bindings (finding 157): the browser keeps its own fixed layout (KEYS, main.js's GP)
+    // and shows no Controls row; DHD_KEYS and DHD_TEST_PAD play the defaults.
+    host_service_controls_layout: () => 0, host_service_controls_pad: () => 0, host_service_controls_change: () => 0,
+    host_service_controls_capture: () => -2,
+    // The browser keeps the waiting store-image read (graphics.c): nothing is ever queued to settle.
+    host_service_gs_store_image: () => 0, host_service_gs_store_settle: () => {},
     host_pacing_period: () => 1 / 60,
     host_pacing_config: p => { period = p * 1000; },
     host_sound_write: (a, frames) => {
@@ -313,7 +319,7 @@ host_service_movie_prepare host_service_movie_start host_service_movie_audio hos
 host_service_gs_pump_messages host_service_gs_window_title host_service_gs_native_view
 host_service_gs_window_apply host_service_gs_present_options_apply host_service_gs_window_close
 host_service_text_input_begin host_service_text_input_end host_service_host_backtrace host_service_presence host_service_touch_field
-host_service_net_get_lobby host_service_clipboard_set`.split(/\s+/);
+host_service_net_get_lobby host_service_clipboard_set host_service_controls_map`.split(/\s+/);
   for (const n of noops) impl[n] ??= () => {};
   for (const n of ['host_heartbeat_eip', 'host_service_launcher_open']) impl[n] = () => 0;
 

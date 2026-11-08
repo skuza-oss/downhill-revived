@@ -27,6 +27,7 @@ enum {
 };
 #endif
 #include <math.h>
+#include <stdio.h>
 #include <os/lock.h>
 
 #define MAX_ACTIVE_TOUCHES 16
@@ -63,6 +64,13 @@ static bool  s_stick_has_floating_center = false;
 static uint32_t s_direct_buttons = 0;
 /* Keep a tap shorter than a game field until the next pad poll. */
 static uint32_t s_pending_buttons = 0;
+static int s_gamepad_deadzone = 5;
+static bool s_gamepad_deadzone_pending = true;
+static bool s_editing;
+static char s_controller_layout[2][512];
+static bool s_controller_layout_pending[2];
+/* The engine's environment writer, used on the game thread as in REVIVED SETTINGS. */
+void host_putenv_s(const char *name, const char *value);
 
 /* Physical gamepad presence */
 static bool s_gamepad_connected = false;
@@ -93,9 +101,9 @@ void touch_input_restore_defaults(void) {
     os_unfair_lock_lock(&s_lock);
     memset(&s_config, 0, sizeof s_config);
     s_config.opacity = 0.50f;
-    s_config.stick_deadzone = 0.15f;
+    s_config.stick_deadzone = 0.02f;
     s_config.stick_sensitivity = 1.0f;
-    s_config.stick_floating = true;
+    s_config.stick_floating = false;
     s_config.auto_hide_on_gamepad = true;
     s_config.haptics_enabled = true;
 
@@ -185,6 +193,10 @@ void touch_input_reset(void) {
 void touch_input_set_button(TouchControlID ctrl_id, bool pressed) {
     if ((int)ctrl_id < 0 || ctrl_id >= TOUCH_CTRL_COUNT) return;
     os_unfair_lock_lock(&s_lock);
+    if (s_editing && pressed) {
+        os_unfair_lock_unlock(&s_lock);
+        return;
+    }
     if (pressed) {
         if (!(s_direct_buttons & (1u << (unsigned)ctrl_id)))
             s_pending_buttons |= (1u << (unsigned)ctrl_id);
@@ -198,8 +210,36 @@ void touch_input_set_button(TouchControlID ctrl_id, bool pressed) {
 
 void touch_input_set_stick(float dx, float dy) {
     os_unfair_lock_lock(&s_lock);
-    touch_normalize_stick(dx, dy, s_config.stick_deadzone, s_config.stick_sensitivity,
+    touch_normalize_stick(s_editing ? 0 : dx, s_editing ? 0 : dy, s_config.stick_deadzone, s_config.stick_sensitivity,
                           &s_stick_dx, &s_stick_dy);
+    os_unfair_lock_unlock(&s_lock);
+}
+
+void touch_input_set_editing(bool editing) {
+    os_unfair_lock_lock(&s_lock);
+    s_editing = editing;
+    memset(s_touches, 0, sizeof s_touches);
+    s_stick_dx = s_stick_dy = 0;
+    s_stick_has_floating_center = false;
+    s_direct_buttons = s_pending_buttons = 0;
+    os_unfair_lock_unlock(&s_lock);
+}
+
+void touch_input_queue_controller_layout(int player, const char *value) {
+    if (player < 1 || player > 2 || !value || strlen(value) >= sizeof s_controller_layout[0]) return;
+    os_unfair_lock_lock(&s_lock);
+    snprintf(s_controller_layout[player - 1], sizeof s_controller_layout[0], "%s", value);
+    s_controller_layout_pending[player - 1] = true;
+    os_unfair_lock_unlock(&s_lock);
+}
+
+void touch_input_set_gamepad_deadzone(float deadzone) {
+    int percent = (int)lroundf(touch_clamp(deadzone, 0, .95f, .05f) * 100);
+    os_unfair_lock_lock(&s_lock);
+    if (percent != s_gamepad_deadzone) {
+        s_gamepad_deadzone = percent;
+        s_gamepad_deadzone_pending = true;
+    }
     os_unfair_lock_unlock(&s_lock);
 }
 
@@ -279,12 +319,10 @@ void touch_input_begin(intptr_t touch_id, float x, float y) {
             } else {
                 float cx, cy, cr;
                 get_control_pixel_pos(TOUCH_CTRL_STICK, &cx, &cy, &cr);
-                float dx = (x - cx) / cr;
-                float dy = (y - cy) / cr;
-                float mag = hypotf(dx, dy);
-                if (mag > 1.0f) { dx /= mag; dy /= mag; }
-                s_stick_dx = dx;
-                s_stick_dy = dy;
+                float dx = (x - cx) / (cr > 0 ? cr : 1.0f);
+                float dy = (y - cy) / (cr > 0 ? cr : 1.0f);
+                touch_normalize_stick(dx, dy, s_config.stick_deadzone, s_config.stick_sensitivity,
+                                      &s_stick_dx, &s_stick_dy);
             }
         } else {
             /* Button press haptic */
@@ -360,6 +398,18 @@ bool touch_input_is_pressed(TouchControlID ctrl_id) {
 void touch_pad_merge(HostPad *out) {
     if (!out) return;
     os_unfair_lock_lock(&s_lock);
+    for (int player = 0; player < 2; player++) {
+        if (!s_controller_layout_pending[player]) continue;
+        host_putenv_s(player ? "DHD_PAD2" : "DHD_PAD1", s_controller_layout[player]);
+        s_controller_layout_pending[player] = false;
+    }
+    if (s_editing) {
+        memset(out, 0, sizeof *out);
+        out->left_x = out->left_y = out->right_x = out->right_y = 128;
+        out->connected = 1;
+        os_unfair_lock_unlock(&s_lock);
+        return;
+    }
 
     /* Visibility is a UI policy; it must never discard a real touch sample. */
     uint32_t buttons = s_direct_buttons | s_pending_buttons;
@@ -401,16 +451,20 @@ void touch_pad_merge(HostPad *out) {
 
     out->buttons |= b;
 
-    /* Analog stick mapping (0..255, 128 is center) */
-    if (fabsf(s_stick_dx) > 0.01f || fabsf(s_stick_dy) > 0.01f) {
-        int lx = (int)(s_stick_dx * 127.0f) + 128;
-        int ly = (int)(s_stick_dy * 127.0f) + 128;
-        if (lx < 0) lx = 0;
-        if (lx > 255) lx = 255;
-        if (ly < 0) ly = 0;
-        if (ly > 255) ly = 255;
-        out->left_x = (uint8_t)lx;
-        out->left_y = (uint8_t)ly;
+    /* Both orientations use these bytes. Keep the physical stick when touch is neutral. */
+    if (s_stick_dx != 0 || s_stick_dy != 0) {
+        out->left_x = touch_stick_byte(s_stick_dx);
+        out->left_y = touch_stick_byte(s_stick_dy);
+    }
+
+    /* UI changes arrive under the input lock. Only the game thread changes the engine
+       environment, so SDL's layout/invert/swap and the game's own deadzone row still apply.
+       host_pad_device reads the new value on the next poll. */
+    if (s_gamepad_deadzone_pending) {
+        char value[4];
+        snprintf(value, sizeof value, "%d", s_gamepad_deadzone);
+        host_putenv_s("DHD_STICK_DEAD_ZONE", value);
+        s_gamepad_deadzone_pending = false;
     }
 
     /* Update button pressures */
@@ -437,7 +491,7 @@ void touch_input_set_config(const TouchConfig *cfg) {
     os_unfair_lock_lock(&s_lock);
     s_config = *cfg;
     s_config.opacity = touch_clamp(s_config.opacity, 0, 1, .5f);
-    s_config.stick_deadzone = touch_clamp(s_config.stick_deadzone, 0, .95f, .15f);
+    s_config.stick_deadzone = touch_clamp(s_config.stick_deadzone, 0, .95f, .05f);
     s_config.stick_sensitivity = touch_clamp(s_config.stick_sensitivity, 0, 3, 1);
     for (int i = 0; i < TOUCH_CTRL_COUNT; i++) {
         TouchControlLayout *c = &s_config.controls[i];

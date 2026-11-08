@@ -1,5 +1,8 @@
 # 136: The resolution scale the GPU allows, said where the player picks it
 
+Status: current
+Checked: 2026-11-04
+
 Why: on integrated GPUs the native renderer lowers the resolution scale to fit its graphics-memory
 budget, and said so only in one dhd.log line. A player who picked 8x got 4x and nothing in the game
 or the launcher told them (40-50 fps "at 8x" that was really 4x). Finding 130's first 6x run was

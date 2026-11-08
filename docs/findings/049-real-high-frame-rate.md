@@ -1,6 +1,16 @@
 # Real frames above 60: the game's frame clock (research)
 
-Status (2026-10-16): full source survey of the clock's users plus a hunt for per-frame work that
+Status: partly superseded by 139 (the verdict and plan for real 120; the 60-only launcher)
+Checked: 2026-11-04
+
+Still true, and the base of findings 067 and 139: the survey of the frame clock and its users
+(the "frame clock", "who reads it", "verdict classes" and "work that ignores the step"
+sections). Superseded: the verdict and the plan. Real high rates were built: the frame-rate
+unlock (finding 067, 60-240 fps) and one delta-time clock for every rate, 60 included (finding
+139, `port/hle/fps.c`, `port/hle/kernel.c`); replays and ghosts work on it (finding 142). The
+launcher offers 60-240 and Monitor (`fps` in `port/render/settings/src/table.rs`).
+
+2026-10-16: full source survey of the clock's users plus a hunt for per-frame work that
 ignores the clock. No experiment build was run (reason under "Experiment"). Verdict: real 120
 steps a second is possible but needs a set of known game-code fixes (about 25 hand edits plus 4
 shared helpers that cover about 190 call sites), a fractional animation clock, and an audit of
@@ -10,8 +20,8 @@ second first. Not a small step.
 Context: the user rejected interpolated or generated in-between pictures (finding 038's
 `DHD_INTERP` made ground, billboards and trees shimmer while the camera moved: pieces held at the
 newer field next to pieces moved halfway, and the in-between pictures were drawn into the frame
-buffer the display circuit wasn't showing). The launcher now offers only the game's own 60
-pictures a second. The question here: can the game itself simulate more than 60 steps a second?
+buffer the display circuit wasn't showing). The launcher then offered only the game's own 60
+pictures a second (today: 60-240, finding 067). The question here: can the game itself simulate more than 60 steps a second?
 
 ## The frame clock (`src/unsorted/00238*.c`)
 
@@ -211,7 +221,7 @@ above (the `0.9`, `0.95`, `++x4A4` cases were only found by reading the rider ch
 functions still in assembly, and VU microcode. A grep for per-frame `++`/`--` on struct fields
 alone hits 172 game files; most are loop indices, but some will be frame counters like `x4A4`.
 
-## What real 120 would need
+## What real 120 would need (the plan then; what was built is findings 067 and 139)
 
 1. **Clock**: half-field steps (`D_0029E3F0` = 120 so steps a second = 120 and `D_0029E400` =
    1/120; `func_00238F68` targets doubled), the field counter `D_0029E3D8` kept in real fields,

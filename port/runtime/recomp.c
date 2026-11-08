@@ -152,7 +152,7 @@ uint32_t ps2_mfc0(int reg)
 {
     if (reg == 9) {
         /* cop0 Count (EE clock / 2). Under DHD_FRAME_CLOCK it counts the virtual clock (bus cycles
-           / 2), so the frame clock stays the only time the game can see (finding 075). The
+           / 2), so the frame clock stays the only time the game can see (finding 081). The
            shipped SCUS_971.77 executes no mfc0 $9 (checked: no such word in its code), so this
            path only guards the frame clock. */
         if (ee_frame_clock_enabled()) return (uint32_t)(ee_frame_clock_cycles() / 2);

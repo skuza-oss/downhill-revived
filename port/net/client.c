@@ -2,6 +2,7 @@
    frames and pings. */
 #include "client.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,8 @@ static void say(NetClient *c, const char *fmt, ...)
         c->tr.send_text(c->tr.ctx, text);
 }
 
+/* dhd_net routes STATE to state and EVENT to events on the room SFU association;
+   only binary PING/PONG use the WebSocket. The fake transport tests exercise the same API. */
 static void send_binary(NetClient *c, const uint8_t *data, size_t n)
 {
     if (c->connected && n)
@@ -69,6 +72,13 @@ void client_init(NetClient *c, const char *name, const char *version, const char
     c->lobby.ping_ms = -1;
 }
 
+void client_set_install_id(NetClient *c, const char *id)
+{
+    c->install_id[0] = 0;
+    if (id && strlen(id) == 32 && strspn(id, "0123456789abcdef") == 32)
+        memcpy(c->install_id, id, 33);
+}
+
 void client_free(NetClient *c)
 {
     SDL_DestroyCondition(c->changed);
@@ -77,7 +87,7 @@ void client_free(NetClient *c)
 
 void client_connected(NetClient *c, const NetTransport *tr)
 {
-    char name[200], token[96] = "";
+    char name[200], token[96] = "", install[64] = "";
     SDL_LockMutex(c->lock);
     c->tr = *tr;
     c->connected = 1;
@@ -86,12 +96,15 @@ void client_connected(NetClient *c, const NetTransport *tr)
     /* a rejoin: the room's token takes our member back, host rights included (finding 137) */
     if (c->rejoin_token[0])
         snprintf(token, sizeof token, ",\"rejoinToken\":\"%s\"", c->rejoin_token);
+    /* installId: this copy of the game, for the server's bans (finding 161); no other player gets it */
+    if (c->install_id[0])
+        snprintf(install, sizeof install, ",\"installId\":\"%s\"", c->install_id);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
     /* features: this client shows the race room's countdown (the server runs one only when
        everyone's does) */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\"]%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
-        name, token);
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\"]%s%s}", NET_PROTOCOL, c->version, DHD_VERSION, c->iso,
+        name, install, token);
     if (c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
     changed(c);
@@ -243,6 +256,8 @@ static void read_start(NetClient *c, const char *t)
     } else
         l->start_at = net_now_ms() / 1000.0;
     c->relayed_head = c->relayed_count = 0;
+    memset(c->snapshot, 0, sizeof c->snapshot);
+    memset(c->sender_go, 0, sizeof c->sender_go);
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -309,7 +324,21 @@ static void window_stats(NetClient *c, char *out, size_t cap)
         n += snprintf(out + n, cap - n, "%s %s%s %s ms", others++ ? "," : "; players:", m->name, tag, rtt);
         if (n >= (int)cap) n = (int)cap - 1;
     }
-    if (!others && n < (int)cap - 16) snprintf(out + n, cap - n, "; no other players");
+    if (!others && n < (int)cap - 16) n += snprintf(out + n, cap - n, "; no other players");
+    for (int slot = 0; slot < NET_MAX_SLOTS && n < (int)cap - 100; slot++) {
+        unsigned count = c->snapshot[slot].samples;
+        if (!count) continue;
+        unsigned sum = 0, q[3] = {0}, pc[3] = {50, 95, 99};
+        for (unsigned ms = 0, k = 0; ms < 1002 && k < 3; ms++) {
+            sum += c->snapshot[slot].age[ms];
+            while (k < 3 && sum >= (count * pc[k] + 99) / 100) q[k++] = ms;
+        }
+        n += snprintf(out + n, cap - n, "; slot %d snapshot age p50/p95/p99 %u/%u/%u ms (1001=overflow), gaps>100ms %u",
+                      slot, q[0], q[1], q[2], c->snapshot[slot].gaps);
+        if (n >= (int)cap) n = (int)cap - 1;
+        memset(c->snapshot[slot].age, 0, sizeof c->snapshot[slot].age);
+        c->snapshot[slot].samples = c->snapshot[slot].gaps = 0;
+    }
     c->window_n = c->window_count = 0;
     c->window_worst = 0;
     c->window_start = now;
@@ -439,6 +468,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
     } else if (!strcmp(type, "error")) {
         json_string(text, "code", c->lobby.error_code, sizeof c->lobby.error_code);
         json_string(text, "message", c->lobby.error, sizeof c->lobby.error);
+        snprintf(line, sizeof line, "net: room %s: %s", c->lobby.code, c->lobby.error);
         changed(c);
     }
     SDL_UnlockMutex(c->lock);
@@ -454,6 +484,30 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
         memcpy(&sent, data + 2, sizeof sent);
         add_rtt(c, net_now_ms() - sent);
     } else if (c->racing && n >= 2 && n <= NET_FRAME_MAX && (data[0] == NET_FRAME_STATE || data[0] == NET_FRAME_EVENT)) {
+        if (data[1] < NET_MAX_SLOTS) {
+            int slot = data[1];
+            if (data[0] == NET_FRAME_EVENT && n >= 12 && data[2] == 2 && data[3] == 5) {
+                double go;
+                memcpy(&go, data + 4, sizeof go);  /* existing EVENT_GO, server ms */
+                if (isfinite(go) && go > 0) c->sender_go[slot] = go;
+            }
+            if (data[0] == NET_FRAME_STATE) {
+                /* v4 standalone and v3's first batched rider (the WebSocket baseline). */
+                int offset = n >= 8 && (data[2] == 4 || data[2] == 5) ? 4 : n >= 9 && data[3] == 3 ? 5 : 0;
+                if (offset) {
+                    uint32_t ms;
+                    memcpy(&ms, data + offset, sizeof ms);
+                    double now = net_now_ms();
+                    double epoch = c->sender_go[slot] > 0 ? c->sender_go[slot] + ms : 0;
+                    if (!c->snapshot[slot].arrived || !epoch || epoch > c->snapshot[slot].epoch) {
+                        if (c->snapshot[slot].arrived && now - c->snapshot[slot].arrived > 100.5)
+                            c->snapshot[slot].gaps++;
+                        c->snapshot[slot].arrived = now;
+                        c->snapshot[slot].epoch = epoch;
+                    }
+                }
+            }
+        }
         unsigned at = (c->relayed_head + c->relayed_count) % NET_RELAY_QUEUE;
         if (c->relayed_count == NET_RELAY_QUEUE)
             c->relayed_head = (c->relayed_head + 1) % NET_RELAY_QUEUE;
@@ -468,7 +522,7 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
 int client_on_closed(NetClient *c, int code, const char *reason)
 {
     int rejoin = 0;
-    char line[1024] = "";
+    char line[4096] = "";
     SDL_LockMutex(c->lock);
     c->connected = 0;
     if (c->racing) {
@@ -504,9 +558,17 @@ int client_tick(NetClient *c)
 {
     double now = net_now_ms();
     int dead = 0;
-    char line[1024] = "";
+    char line[4096] = "";
     SDL_LockMutex(c->lock);
     if (c->connected) {
+        if (c->racing) for (int slot = 0; slot < NET_MAX_SLOTS; slot++) {
+            double epoch = c->snapshot[slot].epoch;
+            if (!epoch) continue;
+            double age = now + c->clock_offset - epoch;
+            unsigned ms = age > 1000 ? 1001 : age < 0 ? 0 : (unsigned)age;
+            c->snapshot[slot].age[ms]++;
+            c->snapshot[slot].samples++;
+        }
         if (now >= c->next_ping) {
             if (c->racing) {
                 uint8_t ping[2 + sizeof(double)] = {NET_FRAME_PING, (uint8_t)c->lobby.local_slot};
@@ -652,7 +714,7 @@ void client_rotation(NetClient *c, const unsigned char *ids, int count)
 
 void client_leave(NetClient *c)
 {
-    char line[1024] = "";
+    char line[4096] = "";
     SDL_LockMutex(c->lock);
     c->leaving = 1;
     if (c->racing)

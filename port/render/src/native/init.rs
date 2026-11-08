@@ -379,13 +379,13 @@ fn texture_entry(binding: u32, stage: wgpu::ShaderStages, sample_type: wgpu::Tex
     }
 }
 
-fn storage_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+fn storage_texture_entry(binding: u32, format: wgpu::TextureFormat) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::COMPUTE,
         ty: wgpu::BindingType::StorageTexture {
             access: wgpu::StorageTextureAccess::WriteOnly,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format,
             view_dimension: wgpu::TextureViewDimension::D2,
         },
         count: None,
@@ -504,7 +504,7 @@ impl Objects {
         ]);
         let texels_layout = layout(gpu, &crate::native::shared::texels_entries());
         let blit_layout = layout(gpu, &[texture_entry(0, S::FRAGMENT, unfilterable), texture_entry(1, S::FRAGMENT, unfilterable)]);
-        let scanout_layout = layout(gpu, &[texture_entry(0, S::COMPUTE, unfilterable), storage_texture_entry(1)]);
+        let scanout_layout = layout(gpu, &[texture_entry(0, S::COMPUTE, unfilterable), storage_texture_entry(1, wgpu::TextureFormat::Rgba8Unorm)]);
         let mut convert = Vec::with_capacity(11);
         convert.push(wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -523,7 +523,8 @@ impl Objects {
         for i in 6..10 {
             convert.push(texture_entry(i, S::COMPUTE, T::Depth));
         }
-        convert.push(storage_texture_entry(10));
+        // A converted texture holds texels as a decoded one does (R32Uint, convert.rs).
+        convert.push(storage_texture_entry(10, wgpu::TextureFormat::R32Uint));
         let convert_layout = layout(gpu, &convert);
         let grow_layout = layout(gpu, &[texture_entry(0, S::FRAGMENT, T::Depth)]);
 

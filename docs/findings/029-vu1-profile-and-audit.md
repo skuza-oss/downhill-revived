@@ -1,5 +1,12 @@
 # 029 - Round 21: the struct-indexing audit, VU1 from inside, the graphics worker (2026-10-15)
 
+Status: partly superseded by 030 (DHD_MTVU opt-in)
+Checked: 2026-11-04
+
+The graphics worker of section 3 (`DHD_MTVU=1` here) became the default in finding 030 (9cc58bf8):
+VIF1/VU1/GS run on worker threads unless `DHD_MTVU=0` (`port/hle/graphics_queue.c`). The worker
+measurements below are the 32-bit D3D11 build's.
+
 Goal: a race at 60 fps, paced. It ran at ~35 fps with VU1 at 60% of the frame (finding 028).
 
 ## 1. The struct-indexing audit

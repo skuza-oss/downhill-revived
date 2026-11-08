@@ -1,7 +1,18 @@
 # 082: Independent wasm2c x64 core host runtime
 
+Status: partly superseded by 099 ("unproven" status, per-OS build scripts)
+Checked: 2026-11-04
+
+This is the 64-bit host every release runs on since 0.4.0 (finding 088): the game's state traces
+match and it is faster than the 32-bit build was (findings 089, 090). Changed: one build script
+for every target, `port/tools/build_host64.py --target win-x64|linux-x64|macos-arm64|android-arm64`
+(finding 099; `build_host64_linux.py` is gone), fibers in one module (`port/host64/fiber.c`), the
+VU0 entries compiled (`vu0_aot.py`, finding 090 SP1). The rounds below are the log of how it got
+there.
+
 The runtime supplies aliased linear memory, fixed guest stack fibers with wasm SP/call-depth saves,
-and EE/IEEE FP switching. Real-game equivalence and whole-core speed parity remain unproven.
+and EE/IEEE FP switching. Real-game equivalence and whole-core speed parity were unproven at this
+first round.
 
 Round 2 replaces the full barrier around every wasm2c access with span-aware host address folding.
 Only the two exact RAM mirror windows fold to canonical RAM. Guest pointer values, non-RAM addresses

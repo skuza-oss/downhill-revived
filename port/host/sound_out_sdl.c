@@ -1,4 +1,4 @@
-/* Host side of the 989snd output (finding 022, phase 2 part C, finding 075), the one sound output
+/* Host side of the 989snd output (finding 022, phase 2 part C, finding 081), the one sound output
    on every platform: an SDL3 audio device stream (WASAPI under it on Windows, Core Audio on macOS,
    PipeWire/PulseAudio/ALSA on Linux, AAudio on Android). The mixer (port/hle/sound.c) renders game
    time and hands its PCM over with host_sound_write; nothing here affects what the game can

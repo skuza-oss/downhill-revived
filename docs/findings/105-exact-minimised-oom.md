@@ -1,5 +1,8 @@
 # 105: the exact renderer ran out of GPU memory while minimised
 
+Status: current
+Checked: 2026-11-04
+
 ## The crash
 
 A minimised start on the exact renderer (`DHD_SETTINGS=none`, so no dhd.ini and the game's own

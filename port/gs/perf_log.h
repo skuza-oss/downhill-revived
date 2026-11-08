@@ -41,6 +41,8 @@ void perf_thread(const char *name);
    (Hz, 0 unknown); and every field, whether a race is being ridden. */
 void perf_window(int front, double refresh_hz);
 void perf_field(int riding);
+/* DHD_TIMELINE: the render thread's waits and its present time so far, in seconds. */
+void perf_render_waits(double out[2]);
 #endif
 
 #endif

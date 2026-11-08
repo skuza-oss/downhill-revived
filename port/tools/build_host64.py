@@ -48,12 +48,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gen_host64_imports import generate  # noqa: E402
 from host64_census import HOST_UNITS  # noqa: E402
 import objcache  # noqa: E402
-from prepare_wasm2c import check_launcher_exports, module_units, prepare_units  # noqa: E402
+from prepare_wasm2c import check_launcher_exports, module_units, prepare_units, stable_units  # noqa: E402
 DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  # downloaded tools and caches
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -96,10 +97,14 @@ TARGETS = {t.key: t for t in (
     Target('ios-arm64', 'aarch64-apple-ios', 'build/host64-ios', 'libdhd_ios.a', 'arm64', jobs=4,
            flags=(['-isysroot', IOS_SYSROOT] if IOS_SYSROOT else []) + ['-arch', 'arm64', '-miphoneos-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
            wabt=Path.home() / 'DevCaches/wabt/wabt-1.0.42', simde=Path.home() / 'DevCaches/simde-src'),
-    # -march=armv8.2-a: the Snapdragon 888's cores and every arm64 phone since 2018; tuned for its
-    # Cortex-X1 and A78s (finding 091)
-    Target('android-arm64', 'aarch64-linux-android', 'build/android', 'libmain.so', 'arm64', jobs=2, outputs=8,
-           flags=['--target=aarch64-linux-android%d' % ANDROID_API, '-march=armv8.2-a', '-mtune=cortex-a78',
+    # -march=armv8-a: every arm64 phone. ARMv8.2 (finding 091's first choice) closed the game at
+    # start with SIGILL on ARMv8.0 cores, which budget chips still ship (the Snapdragon 680's
+    # Cortex-A73/A53, issues #45 and #51; finding 155). -moutline-atomics keeps the ARMv8.1 atomics
+    # where the core has them (chosen at run time). Tuned for the Snapdragon 888's Cortex-X1 and A78s.
+    # chunks of the module's C (stable_units) are small: half the CPUs (wasm2c's own 8 parts needed 2)
+    Target('android-arm64', 'aarch64-linux-android', 'build/android', 'libmain.so', 'arm64',
+           jobs=max(2, (os.cpu_count() or 4) // 2), outputs=8,
+           flags=['--target=aarch64-linux-android%d' % ANDROID_API, '-march=armv8-a', '-moutline-atomics', '-mtune=cortex-a78',
                   '-fPIC', '-fomit-frame-pointer']),
 )}
 # Off Windows: the POSIX host instead of the Win32 one
@@ -210,6 +215,22 @@ def sdl(t, a):
     return Path(lib).resolve(), Path(include).resolve(), libs
 
 
+class Steps:
+    """Each step's wall time, printed as it ends and summed up at the end (docs/BUILDING.md,
+    "Build times")."""
+    def __init__(self):
+        self.times, self.last = [], time.time()
+
+    def __call__(self, name):
+        now = time.time()
+        self.times.append((name, now - self.last))
+        self.last = now
+        print('step %s: %.1f s' % self.times[-1], flush=True)
+
+    def summary(self):
+        return ', '.join('%s %.0f s' % (n, t) for n, t in self.times)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     p.add_argument('module', type=Path, nargs='*')
@@ -226,6 +247,10 @@ def main():
     p.add_argument('--host-library', type=Path, help='reuse an explicitly supplied host library')
     p.add_argument('--jobs', type=int, help="parallel compiles (default: the target's)")
     p.add_argument('--num-outputs', type=int, help='WABT split C output count for .wasm input')
+    p.add_argument('--release', action='store_true',
+                   help="a release build: one unit or wasm2c's own split parts, never the chunks (finding 151: "
+                        "the chunks' smaller units cost the game ~1.5 %% on a phone); <out>/split.txt says "
+                        "which (one, wasm2c, chunks), and package_release.py refuses chunks")
     p.add_argument('--wabt', type=Path, help="WABT (wasm2c and its runtime; default WABT_DIR, else the target's)")
     p.add_argument('--simde', type=Path, help='SIMDe headers (the wasm SIMD shim; default SIMDE_DIR, else the '
                    "target's)")
@@ -265,6 +290,7 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, TMP=str(scratch), TEMP=str(scratch), TMPDIR=str(scratch))
     commands = []
+    step = Steps()
 
     def run(cmd, timeout=180):
         cmd = list(map(str, cmd)); commands.append(cmd)
@@ -292,7 +318,9 @@ def main():
     try:
         # SDL3 and the Rust library first: their checks are quick to fail, the module's C is not
         sdl_lib, sdl_include, sdl_libs = sdl(t, a)
+        step('SDL3')
         report = rust_library(t, work)
+        step('Rust library')
         if a.fake:
             wasm = work / 'fake.wasm'
             run([a.wasi/'bin/clang.exe', '-O2', '-nostdlib', '-ffp-contract=off',
@@ -306,37 +334,75 @@ def main():
         else:
             wasm = None
         wasm2c = wabt / 'bin' / ('wasm2c.exe' if os.name == 'nt' else 'wasm2c')
-        units = module_units(work, run, wasm2c, wasm, a.module, outputs)
-        rows, exports = generate(work/'core.h', work, linux=t.posix)
-        check_launcher_exports(exports)
-        prepare_units(units, work, exact_f32=True)
-        # The module runs on one OS thread only (its fibers; posted jobs and callbacks are drained
-        # there, finding 082 W7e), as its shared __stack_pointer global already requires. WABT's
-        # call-depth counter is thread-local, which costs a TLS lookup on every wasm call and
-        # return; a copy of wasm-rt.h that lets the build choose the storage class makes it a
-        # plain global. The depth check itself (WASM_RT_STACK_DEPTH_COUNT, limit 512) is unchanged.
-        header = (wabt/'include/wasm-rt.h').read_text()
-        block = '#ifdef WASM_RT_C11_AVAILABLE\n#define WASM_RT_THREAD_LOCAL _Thread_local\n'
-        if header.count(block) != 1:
-            raise ValueError('wasm-rt.h: WASM_RT_THREAD_LOCAL block not found (WABT version changed?)')
-        start = header.index(block); end = header.index('#endif\n', start) + len('#endif\n')
-        header = (header[:start] + '#ifndef WASM_RT_THREAD_LOCAL\n' + header[start:end] + '#endif\n' +
-                  header[end:])
-        if t.windows:
-            # Guard pages: WABT keeps every load alive with GNU asm, which it gates on __GNUC__, and
-            # supports guard pages on every 64-bit GNU host; clang-cl has the same asm but does not
-            # define __GNUC__.
-            force_read = '#elif defined(__GNUC__) && WASM_RT_MEMCHECK_GUARD_PAGES'
-            for source in units + list(work.glob('*-impl.h')):
-                text = source.read_text()
-                if force_read in text:
-                    source.write_text(text.replace(force_read, '#elif (defined(__GNUC__) || defined(__clang__)) && '
-                                                               'WASM_RT_MEMCHECK_GUARD_PAGES'))
-            supported = '(WASM_RT_NONCONFORMING_ALLOW_OOB_READ_ELIMINATION || defined(__GNUC__))'
-            if header.count(supported) != 1:
-                raise ValueError('wasm-rt.h: guard-page support test not found (WABT version changed?)')
-            header = header.replace(supported, supported[:-1] + ' || defined(__clang__))')
-        (work/'wasm-rt.h').write_text(header)
+        # wasm2c, the imports, the prepared and chunked C: made again only when one of their inputs
+        # changed (the module, these tools, WABT, the target); every compile's own cache key reads them
+        inputs = [wasm] if wasm else sorted({p.resolve() for m in a.module for p in [m, *m.parent.glob('*.h')]})
+        prepared = hashlib.sha256(repr((t.key, outputs, a.fake, str(wabt), a.release)).encode())
+        # host_api.h: gen_host64_imports reads it (the glue and its import checks)
+        for f in inputs + [Path(__file__), ROOT/'port/tools/prepare_wasm2c.py', ROOT/'port/tools/gen_host64_imports.py',
+                           ROOT/'port/host/host_api.h', *([wasm2c] if wasm else []), wabt/'include/wasm-rt.h']:
+            prepared.update(hashlib.sha256(Path(f).read_bytes()).digest())
+        stamp = work/'prepared.json'
+        try:
+            old = json.loads(stamp.read_text())
+        except (OSError, ValueError):
+            old = {}
+        made = [work/n for n in ('core.h', 'wasm-rt.h', 'imports_gen.c', 'exports_gen.h')]
+        if (old.get('key') == prepared.hexdigest() and isinstance(old.get('units'), list) and 'imports' in old
+                and old.get('split') in ('one', 'wasm2c', 'chunks') and isinstance(old.get('headers'), list)
+                and all(Path(u).exists() for u in old['units'] + old['headers']) and all(p.exists() for p in made)):
+            units, imports, split = [Path(u) for u in old['units']], old['imports'], old['split']
+            step('module C as before')
+        else:
+            stamp.unlink(missing_ok=True)
+            units = module_units(work, run, wasm2c, wasm, a.module, outputs)
+            step('wasm2c')
+            rows, exports = generate(work/'core.h', work, linux=t.posix)
+            check_launcher_exports(exports)
+            prepare_units(units, work, exact_f32=True)
+            step('prepare C')
+            # The module runs on one OS thread only (its fibers; posted jobs and callbacks are drained
+            # there, finding 082 W7e), as its shared __stack_pointer global already requires. WABT's
+            # call-depth counter is thread-local, which costs a TLS lookup on every wasm call and
+            # return; a copy of wasm-rt.h that lets the build choose the storage class makes it a
+            # plain global. The depth check itself (WASM_RT_STACK_DEPTH_COUNT, limit 512) is unchanged.
+            header = (wabt/'include/wasm-rt.h').read_text()
+            block = '#ifdef WASM_RT_C11_AVAILABLE\n#define WASM_RT_THREAD_LOCAL _Thread_local\n'
+            if header.count(block) != 1:
+                raise ValueError('wasm-rt.h: WASM_RT_THREAD_LOCAL block not found (WABT version changed?)')
+            start = header.index(block); end = header.index('#endif\n', start) + len('#endif\n')
+            header = (header[:start] + '#ifndef WASM_RT_THREAD_LOCAL\n' + header[start:end] + '#endif\n' +
+                      header[end:])
+            if t.windows:
+                # Guard pages: WABT keeps every load alive with GNU asm, which it gates on __GNUC__, and
+                # supports guard pages on every 64-bit GNU host; clang-cl has the same asm but does not
+                # define __GNUC__.
+                force_read = '#elif defined(__GNUC__) && WASM_RT_MEMCHECK_GUARD_PAGES'
+                for source in units + list(work.glob('*-impl.h')):
+                    text = source.read_text()
+                    if force_read in text:
+                        source.write_text(text.replace(force_read, '#elif (defined(__GNUC__) || defined(__clang__)) && '
+                                                                   'WASM_RT_MEMCHECK_GUARD_PAGES'))
+                supported = '(WASM_RT_NONCONFORMING_ALLOW_OOB_READ_ELIMINATION || defined(__GNUC__))'
+                if header.count(supported) != 1:
+                    raise ValueError('wasm-rt.h: guard-page support test not found (WABT version changed?)')
+                header = header.replace(supported, supported[:-1] + ' || defined(__clang__))')
+            (work/'wasm-rt.h').write_text(header)
+            # a split module's functions in content-defined chunks, so an unchanged function's C stays
+            # byte-identical and its object comes from the object cache (prepare_wasm2c.stable_units);
+            # a release keeps wasm2c's own parts (bigger units, more inlining: the shipped code)
+            parts = units
+            if not a.release:
+                units = stable_units(units, work)
+                step('chunks')
+            # what the game's module C is, from the units themselves (split.txt): one unit, wasm2c's
+            # parts (whether wasm2c split it here or the parts were given), or the chunks
+            split = 'chunks' if units != parts else 'one' if len(units) < 2 else 'wasm2c'
+            imports = len(rows)
+            headers = sorted(str(p) for p in [*work.glob('*-impl.h'), *(work/'chunks').glob('*.h')]
+                             if split == 'chunks' or p.parent == work)
+            stamp.write_text(json.dumps({'key': prepared.hexdigest(), 'units': [str(u) for u in units],
+                                         'imports': imports, 'split': split, 'headers': headers}))
         # Bounds checks by guard pages: what lies beyond the memory's size is reserved, never
         # committed, so an out-of-bounds access faults and its reporter (guest_memory_*.c) names the
         # guest address and ends the process, as the trap did. WABT's own fault-to-trap handler stays
@@ -415,21 +481,25 @@ def main():
         inc.append('static const struct { const char *name; const unsigned char *png; unsigned size; } button_pngs[] = {')
         inc += [f'    {{"{p.stem}", button_png_{p.stem}, sizeof button_png_{p.stem}}},' for p in pngs]
         (work/'button_icons.inc').write_text('\n'.join(inc + ['};', '']))
+        # one pool for the host's and the module's C, the biggest units first (the long ones must
+        # not start last); the link keeps the units' own order
+        sources = units + [rt/'wasm-rt-impl.c', work/'imports_gen.c'] + glue(t)
+        host_sources = [] if a.host_library else [ROOT/u for u in host_units(t)]
+        with ThreadPoolExecutor(jobs) as pool:
+            done = {s: pool.submit(compile_one, s, 900 if s in host_sources else 1800)
+                    for s in sorted(sources + host_sources, key=lambda s: -Path(s).stat().st_size)}
+            objects = [done[s].result() for s in sources]
+            host_objects = [done[s].result() for s in host_sources]
+        step('C')
         if a.host_library:
             library = a.host_library.resolve()
             if not library.exists():
                 raise ValueError(f'host library does not exist: {library}')
-            host_objects = []
         else:
-            with ThreadPoolExecutor(jobs) as pool:
-                host_objects = list(pool.map(lambda u: compile_one(ROOT/u, 900), host_units(t)))
             library = work/('host64.lib' if t.windows else 'libhost64.a')
             library.unlink(missing_ok=True)  # ar adds to an archive that is there: a stale member could win
             run([a.llvm/'llvm-lib.exe', '/out:'+str(library), *host_objects] if t.windows else
                 [ar, 'rcs', library, *host_objects])
-        sources = units + [rt/'wasm-rt-impl.c', work/'imports_gen.c'] + glue(t)
-        with ThreadPoolExecutor(jobs) as pool:
-            objects = list(pool.map(compile_one, sources))
         # rustc's list for the library (checked by rustgs against the target's allow-list)
         rust_libs = [x for x in report['native_static_libs'] if x != '-lc']
         exe = out/t.exe
@@ -491,10 +561,14 @@ def main():
             run([cc, t.flags[0], '-pthread', '-rdynamic', '-fuse-ld=lld', '-Wl,--gc-sections', *pgo_flags[:1],
                  *objects, library, report['lib'], sdl_lib, *sdl_libs, '-o', exe, *rust_libs, '-ldl', '-lm'],
                 timeout=900)
+        step('link')
         (work/'failure.log').unlink(missing_ok=True)
+        # how the module's C was split: package_release.py packages only a 'wasm2c' (--release) build
+        (out/'split.txt').write_text(split + '\n')
         host_summary = 'reused host library' if a.host_library else f'{len(host_objects)} {t.key} host objects'
-        print(f'PASS: {len(rows)} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
+        print(f'PASS: {imports} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
               flush=True)
+        print('steps: ' + step.summary(), flush=True)
         if a.run and not t.android:
             if a.fake:
                 (work/'fixture.txt').write_bytes(b'host64-proof')

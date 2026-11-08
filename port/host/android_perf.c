@@ -14,6 +14,8 @@
    - Placement: DHD_AFFINITY = name:cpus,... (cpus: 7, or 4-6, or 4+7) keeps a named thread on those
      cores. Applied from the game thread by thread ID and again every 10 fields, because the system
      moves threads off their cores (cpuset moves; on the Mi 11i something resets it every few seconds).
+     Without it, a phone with one or two big cores keeps gs and native on the others
+     (default_placement); DHD_AFFINITY=0 places nothing.
 
    Only clocks and placement change: what the threads compute is the same. */
 #define _GNU_SOURCE
@@ -80,12 +82,92 @@ static int pin_set(const char *spec, int i, cpu_set_t *set)
     return 0;
 }
 
+/* The online CPUs and their capacity (the kernel's cpu_capacity, 1024 for the fastest core): the
+   number read, 0 when unreadable. */
+static int cpu_capacities(int capacity[CPU_SETSIZE], cpu_set_t *online)
+{
+    char line[256];
+    FILE *f = fopen("/sys/devices/system/cpu/online", "r");
+    if (!f) return 0;
+    int ok = fgets(line, sizeof line, f) != NULL;
+    fclose(f);
+    if (!ok) return 0;
+    CPU_ZERO(online);
+    for (const char *p = line; *p >= '0' && *p <= '9';) {  /* "0-5" or "0-3,5,7" */
+        char *end;
+        long lo = strtol(p, &end, 10), hi = lo;
+        if (*end == '-') hi = strtol(end + 1, &end, 10);
+        for (long c = lo; c <= hi && c < CPU_SETSIZE; c++) CPU_SET((int)c, online);
+        p = *end == ',' ? end + 1 : end;
+    }
+    int n = 0;
+    for (int c = 0; c < CPU_SETSIZE; c++) {
+        if (!CPU_ISSET(c, online)) continue;
+        char path[64];
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpu_capacity", c);
+        f = fopen(path, "r");
+        if (!f) return 0;
+        capacity[c] = fscanf(f, "%d", &capacity[c]) == 1 ? capacity[c] : 0;
+        fclose(f);
+        if (capacity[c] <= 0) return 0;
+        n++;
+    }
+    return n;
+}
+
+/* Without DHD_AFFINITY: with one or two big cores online (faster than the slowest cluster) and at
+   least two others, the gs and native threads stay off the big ones, so the game and vu threads,
+   the pipeline's longest, have them to themselves instead of being pushed onto a little core
+   while gs or native take a turn there (finding 149: the throttled Mi 11i's race start +6 %).
+   With more big cores every thread fits on one, and nothing is placed. Into spec (the
+   DHD_AFFINITY form), "" when nothing is placed; re-read as cores go on and offline. */
+static void default_placement(char *spec, size_t size)
+{
+    static int capacity[CPU_SETSIZE];
+    cpu_set_t online;
+    spec[0] = 0;
+    if (!cpu_capacities(capacity, &online)) return;
+    int low = 1 << 30, big = 0, little = 0;
+    for (int c = 0; c < CPU_SETSIZE; c++)
+        if (CPU_ISSET(c, &online) && capacity[c] < low) low = capacity[c];
+    char cores[160] = "";
+    for (int c = 0; c < CPU_SETSIZE; c++) {
+        if (!CPU_ISSET(c, &online)) continue;
+        if (capacity[c] > low) { big++; continue; }
+        size_t at = strlen(cores);
+        snprintf(cores + at, sizeof cores - at, "%s%d", little++ ? "+" : "", c);
+    }
+    if (big >= 1 && big <= 2 && little >= 2) snprintf(spec, size, "gs:%s,native:%s", cores, cores);
+}
+
 static void place(unsigned field)
 {
     static const char *spec;
-    static int read, reported, failures;
-    if (!read) { spec = getenv("DHD_AFFINITY"); read = 1; }
-    if (!spec || field % 10) return;
+    static char automatic[400], last[400];
+    static int read, reported, failures, chosen;
+    if (!read) {
+        spec = getenv("DHD_AFFINITY");
+        chosen = spec != NULL;  /* DHD_AFFINITY set (an empty one or "0": no placement at all) */
+        if (spec && (!spec[0] || !strcmp(spec, "0"))) spec = NULL;
+        read = 1;
+    }
+    if (field % 10) return;
+    if (!chosen && field % 60 == 0) {
+        default_placement(automatic, sizeof automatic);
+        if (strcmp(automatic, last)) {
+            fprintf(stderr, "android: field %u: thread placement %s\n", field, automatic[0] ? automatic : "none (left to the system)");
+            if (!automatic[0])  /* was placed: back to every core */
+                for (int i = 0; i < HOT; i++) {
+                    cpu_set_t all;
+                    CPU_ZERO(&all);
+                    for (int c = 0; c < CPU_SETSIZE; c++) CPU_SET(c, &all);
+                    if (__atomic_load_n(&threads[i].set, __ATOMIC_ACQUIRE)) sched_setaffinity(threads[i].tid, sizeof all, &all);
+                }
+            memcpy(last, automatic, sizeof last);
+        }
+        spec = automatic[0] ? automatic : NULL;
+    }
+    if (!spec) return;
     for (int i = 0; i < HOT; i++) {
         cpu_set_t set, now;
         if (!__atomic_load_n(&threads[i].set, __ATOMIC_ACQUIRE) || !pin_set(spec, i, &set)) continue;

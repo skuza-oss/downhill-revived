@@ -12,8 +12,10 @@ import sys
 import zipfile
 from pathlib import Path
 
-KNOWN_UNSIGNED_NAME = "DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa"
-KNOWN_UNSIGNED_SHA256 = "4181572bd7b78ce87e956d52309e0879b3230f82a7511d325a6abd2b50adcc4c"
+KNOWN_HASHES = {
+    "DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa": "4181572bd7b78ce87e956d52309e0879b3230f82a7511d325a6abd2b50adcc4c",
+    "DownhillRevived-0.7.12-unsigned.ipa": "936bceb240e41256893be9a5fab07e398bcd4a25284dabefbec764fc7c61ccc0"
+}
 
 
 def sha256(path: Path) -> str:
@@ -36,9 +38,10 @@ def main() -> int:
     print(f"Arquivo / File: {path.name}")
     print(f"Tamanho / Size: {path.stat().st_size:,} bytes")
     print(f"SHA-256: {digest}")
-    if path.name == KNOWN_UNSIGNED_NAME:
-        print("Checksum oficial deste arquivo: " + ("CONFERE" if digest == KNOWN_UNSIGNED_SHA256 else "NAO CONFERE"))
-        if digest != KNOWN_UNSIGNED_SHA256:
+    if path.name in KNOWN_HASHES:
+        expected = KNOWN_HASHES[path.name]
+        print("Checksum oficial deste arquivo: " + ("CONFERE" if digest == expected else "NAO CONFERE"))
+        if digest != expected:
             return 1
     with zipfile.ZipFile(path) as ipa:
         files = ipa.namelist()

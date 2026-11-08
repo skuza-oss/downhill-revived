@@ -3,6 +3,7 @@
 //! the game. The front end is ../ui; everything that touches files, network or processes is here.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod controls;
 mod disc;
 mod game;
 mod log;
@@ -37,6 +38,7 @@ struct App {
 #[derive(Serialize)]
 struct Snapshot {
     version: &'static str,
+    native_window_controls: bool,
     /// Every setting's value: dhd.ini's, else the player's default (dhd_settings).
     settings: BTreeMap<&'static str, String>,
     game_found: bool,
@@ -148,6 +150,7 @@ fn snapshot(app: State<App>) -> Snapshot {
         .unwrap_or_else(|| app.place.data.join("textures").join("SCUS-97177").join("replacements"));
     Snapshot {
         version: VERSION,
+        native_window_controls: cfg!(target_os = "macos"),
         disc_problem: iso.and_then(|p| disc::problem(std::path::Path::new(&p))),
         texture_pack: std::fs::read_dir(pack).is_ok_and(|mut d| d.next().is_some()),
         game_found: app.place.exe().is_file(),
@@ -186,6 +189,24 @@ fn rider_name(text: String) -> String {
 #[tauri::command]
 fn save_setting(app: State<App>, key: String, value: String) -> Result<(), String> {
     save(&app.place, &key, &value)
+}
+
+/// The Controls tab's bindings (controls.rs): the keys, controller buttons and PS2 buttons.
+#[tauri::command]
+fn controls_schema() -> controls::Schema {
+    controls::schema()
+}
+
+/// The keyboard's and both controllers' layouts, as dhd.ini has them.
+#[tauri::command]
+fn controls_state(app: State<App>) -> controls::State {
+    controls::state(&app.place.settings())
+}
+
+/// One change to a layout, by the game's rules; saved when it changes something.
+#[tauri::command]
+fn controls_edit(app: State<App>, device: usize, edit: controls::Request, kind: i32) -> Result<controls::Answer, String> {
+    controls::edit(&app.place.settings(), device, &edit, kind, |k, v| save(&app.place, k, v))
 }
 
 fn save(place: &game::Place, key: &str, value: &str) -> Result<(), String> {
@@ -552,6 +573,17 @@ fn main() {
     } else {
         place
     };
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "macos")]
+    let context = {
+        let mut context = context;
+        let window = context.config_mut().app.windows.iter_mut().find(|w| w.label == "main")
+            .expect("the launcher window config");
+        window.decorations = true;
+        window.title_bar_style = tauri::TitleBarStyle::Overlay;
+        window.hidden_title = true;
+        context
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -572,6 +604,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             snapshot,
             settings_schema,
+            controls_schema,
+            controls_state,
+            controls_edit,
             rider_name,
             save_setting,
             check_update,
@@ -584,6 +619,6 @@ fn main() {
             open_folder,
             open_link
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("the launcher window");
 }

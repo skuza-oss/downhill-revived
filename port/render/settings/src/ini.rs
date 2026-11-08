@@ -168,12 +168,13 @@ impl Ini {
         }
     }
 
-    /// Keys of lines that aren't settings or DHD_* variables (the game logs them).
+    /// Keys of lines that aren't settings, the install id or DHD_* variables (the game logs them).
     pub fn unknown_keys(&self) -> Vec<String> {
         self.lines()
             .into_iter()
             .filter_map(|l| entry(self.content(l)).map(|(k, _)| text(k)))
-            .filter(|k| table::find(k).is_none() && !k.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("DHD_")))
+            .filter(|k| table::find(k).is_none() && !k.eq_ignore_ascii_case(crate::install::KEY))
+            .filter(|k| !k.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("DHD_")))
             .collect()
     }
 

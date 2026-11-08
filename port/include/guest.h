@@ -1,4 +1,4 @@
-/* Guest (EE) memory for host-side code (docs/findings/075-portable-core.md, phase 2).
+/* Guest (EE) memory for host-side code (docs/findings/081-portable-core.md, phase 2).
 
    A guest address is a 32-bit PS2 address as the module sees it: PS2 RAM at PS2_RAM_BASE
    (port/runtime/memory.h), the scratchpad, the VU memories and the hardware registers at their

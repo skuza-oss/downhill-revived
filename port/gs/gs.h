@@ -5,6 +5,20 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifndef PS2_NO_AUTO_INIT
+/* The build zero-fills every local (-ftrivial-auto-var-init=zero: the game reads some before
+   writing them, finding 081). A port local every read of which follows a write can skip that
+   fill where it costs (finding 148). */
+#if defined(__has_attribute)
+#if __has_attribute(uninitialized)
+#define PS2_NO_AUTO_INIT __attribute__((uninitialized))
+#endif
+#endif
+#ifndef PS2_NO_AUTO_INIT
+#define PS2_NO_AUTO_INIT
+#endif
+#endif
+
 enum { GS_VRAM_SIZE = 4 * 1024 * 1024 };
 enum {
     GS_PSMCT32 = 0, GS_PSMCT24 = 1, GS_PSMCT16 = 2, GS_PSMCT16S = 10,
@@ -79,6 +93,17 @@ struct Gs {
     void (*flush_draw)(Gs *gs);
     /* Optional native high-byte overlay, before the CPU word/page version changes. */
     void (*write_high)(Gs *gs, unsigned bit_address, uint32_t value, uint32_t mask);
+    /* Optional, with draw: a triangle strip's draws at once (gs_feed's PACKED strips, finding 146).
+       Triangle i is list[i..i+2], and draw would have been called for it when drawn[i] is set; the
+       same draws, in the same order, with the same GS state but for the vertex registers, which
+       already hold the strip's last values. */
+    void (*draw_strip)(Gs *gs, unsigned prim, const GsVertex *list, unsigned count, const uint8_t *drawn);
+    /* load_clut's last CSM1 load (finding 148): its source bytes, where they came from and which
+       entries they filled; valid while no other load has written the CLUT. clut_writes counts
+       every change of the CLUT's entries (host palette caches). Not PS2 state. */
+    struct { uint32_t valid, cbp, cpsm, count, start, bytes; uint32_t source[256]; } clut_memo;
+    uint64_t clut_writes;
+    uint64_t resets;  /* CSR.RESET writes so far (the presenter's movie hold, finding 160). Not PS2 state. */
 };
 extern Gs gs;
 

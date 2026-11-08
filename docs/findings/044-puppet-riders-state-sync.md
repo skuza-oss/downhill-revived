@@ -1,5 +1,19 @@
 # 044 — Puppet riders: state-sync online races
 
+Status: current
+Supersedes: parts of 016, 039, 040, 041, 042
+Checked: 2026-11-06
+
+This is the design online races still use. Later changes on top of it: snapshots are stamped
+with race time in ms since GO, not ticks, and each PC races at its own frame rate (wire version 3,
+`STATE_FIXED` 104 bytes, finding 114; `docs/online-protocol.md`); finishes and results, leaving,
+the grid and hits (finding 047); the in-game ONLINE menus and rooms instead of a boot-time lobby
+(findings 065, 092, 118, 119); riders' own looks and bikes (finding 128); shared track pickups
+(finding 144); ten players (finding 123). Since 0.7.12 (finding 158) the race frames travel over
+Cloudflare Realtime SFU instead of through the room's relay, 30 snapshots a second (every 2 race
+ticks), and a puppet's delay adapts to each sender (50-150 ms); the sections below give the first
+build's numbers.
+
 2026-10-16. Replaces input lockstep (finding 041) as the way online races work
 (`docs/ONLINE-PLAN.md`, decision table). Every PC runs a normal one-player race (full screen,
 full-detail level files, `DHD_RENDER=native`) and owns its rider: no input delay. About 20 times
@@ -13,9 +27,9 @@ is written from the snapshots.
 |---|---|
 | `port/hle/puppet.c` | The puppets: snapshots, interpolation, the race-step hooks, crashes, hits, the wire format, record/replay for tests. |
 | `port/patches.py` | Hooks in `0011A100.c` (race step), `0012FE38.cpp` (State switch), `00155E78.cpp` (crash start), `0012E940.c` (hit). |
-| `port/hle/online.c` | The online race: lobby barrier at boot, scripted menus to a single race, the load wait, then `state_sync` each field. No lockstep. |
-| `port/net/` | `net_send_frame` / `net_receive_frame`: binary STATE and EVENT frames through the room. |
-| `online/server/` | The relay passes frame types 5 (STATE) and 6 (EVENT) to the other racers (`docs/online-protocol.md`). Deployed. |
+| `port/hle/online.c` | The online race: (then a lobby barrier at boot and scripted menus; now the in-game room, findings 092, 118), the load wait, then `state_sync` each field. No lockstep. |
+| `port/net/` | `net_send_frame` / `net_receive_frame`: binary STATE and EVENT frames (over the SFU since finding 158; `port/render/net`). |
+| `online/server/` | The room; it relayed frame types 5 (STATE) and 6 (EVENT) until finding 158, and now sets up each racer's SFU session (`docs/online-protocol.md`). |
 | `port/tools/online_race.py` | Two instances on one PC, host and guest, each on its own scripted line; screenshots and memory dumps at race-clock moments. |
 
 ## The rider (`D_002AF2C0`, 10 riders × 0x7BD0)
@@ -108,7 +122,8 @@ sound, and collisions with other riders.
 
 Each puppet keeps its last 32 snapshots. It estimates the sender's clock from arrivals, as a
 moving average of (snapshot clock − local clock), weight 0.05, reset when off by more than 30.
-It shows the sender `DHD_PUPPET_DELAY` ticks (default 6, 100 ms) behind the newest it holds:
+It shows the sender `DHD_PUPPET_DELAY` behind the newest it holds (then 6 ticks; now milliseconds,
+default 100, `port/hle/puppet.c`):
 
 - position, velocity and angular velocity are interpolated between the two snapshots around
   that moment;
@@ -118,7 +133,7 @@ It shows the sender `DHD_PUPPET_DELAY` ticks (default 6, 100 ms) behind the newe
 
 A snapshot more than 60 ticks older than the newest held clears the ring: a new race.
 
-## Wire format
+## Wire format (version 1, as first built; version 3 today, finding 114)
 
 STATE (type 5) and EVENT (type 6) are binary frames: byte 0 the type, byte 1 the sender's lobby
 slot (stamped by the server), then the payload, at most 254 bytes. The relay forwards them to
@@ -150,8 +165,9 @@ AI slots keep their numbers on every PC.
 
 ## Online race flow (`port/hle/online.c`)
 
-1. At boot the PC waits in the lobby (the barrier) until the host starts. Then the menu
-   script goes to a single race.
+1. (Then) at boot the PC waited in the lobby (the barrier) until the host started, and a menu
+   script went to a single race. Now the player creates or joins a room in the game's ONLINE
+   menu (findings 065, 092, 118).
 2. On the load screen the lobby's track and this player's rider go into the setup block
    `D_004B25A0`, and the room seed into `DHD_RACE_SEED`.
 3. At the countdown every PC sends EVENT type 2 and waits up to 60 s for the others. The
@@ -208,14 +224,15 @@ Positions are compared against the original 6 ticks earlier.
 ## Limits and next steps
 
 - **Lap and finish:** the finish (each PC reports its own time, the host publishes the
-  results) is not done yet. Neither are lap/progress or power-ups in the snapshot.
-- **Rider models:** the riders' models per slot come from each PC's own race setup, so a
-  puppet can wear another character than its player chose.
+  results) was not done yet; finding 047 added it. Power-ups and pickups: findings 047, 144.
+- **Rider models:** the riders' models per slot came from each PC's own race setup, so a
+  puppet could wear another character than its player chose; findings 047 and 128 send each
+  player's rider, bike, jersey and colour.
 - **Crash detail:** the puppet's crash (bike tumble, thrown body) is simulated locally from the
   same start, so its details can differ from the owner's. The respawn point comes from the
   snapshots again.
 - **Hits:** the hit events were coded but not triggered in these runs (the scripted lines
-  never punched another rider).
+  never punched another rider); finding 047 ran them.
 - **Clock lag:** the clock offset follows arrivals, so a puppet's lag is the delay plus the
   one-way latency, plus any GO difference between the PCs.
 

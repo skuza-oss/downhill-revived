@@ -18,6 +18,10 @@ pub struct TouchOverlay {
     width_mm: f32,
     height_mm: f32,
     objects: Option<Objects>,
+    /// The shapes and the screen uniform last written to the GPU (written again only on a change).
+    written: (Vec<f32>, [f32; 4]),
+    /// Drawn in this picture's present pass already (`draw_in_pass`); `draw` then skips it once.
+    drawn: bool,
 }
 
 struct Objects {
@@ -38,20 +42,55 @@ impl TouchOverlay {
         self.height_mm = height_mm;
     }
 
-    pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, format: wgpu::TextureFormat, w: u32, h: u32) {
-        if self.items.is_empty() || w == 0 || h == 0 || self.width_mm <= 0.0 || self.height_mm <= 0.0 { return; }
+    /// The shapes' instances and the screen uniform on the GPU for a w x h frame (each written
+    /// only when it changed); the number of shapes to draw, or None when there are none.
+    fn prepare(&mut self, gpu: &Gpu, format: wgpu::TextureFormat, w: u32, h: u32) -> Option<u32> {
+        if self.items.is_empty() || w == 0 || h == 0 || self.width_mm <= 0.0 || self.height_mm <= 0.0 { return None; }
         let o = self.objects.get_or_insert_with(|| Objects::new(gpu, format));
         let count = (self.items.len() / ITEM_FLOATS) as u64;
         if count * ITEM_BYTES > o.capacity {
             o.capacity = (count * ITEM_BYTES).next_power_of_two();
             o.instances = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("touch overlay shapes"), size: o.capacity,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            self.written.0.clear();  /* a new buffer holds nothing yet */
         }
-        let bytes: Vec<u8> = self.items.iter().flat_map(|f| f.to_le_bytes()).collect();
-        gpu.queue.write_buffer(&o.instances, 0, &bytes);
+        if self.written.0 != self.items {
+            let bytes: Vec<u8> = self.items.iter().flat_map(|f| f.to_le_bytes()).collect();
+            gpu.queue.write_buffer(&o.instances, 0, &bytes);
+            self.written.0.clone_from(&self.items);
+        }
         let uniforms = [w as f32, h as f32, w as f32 / self.width_mm, h as f32 / self.height_mm];
-        let ub: Vec<u8> = uniforms.iter().flat_map(|f| f.to_le_bytes()).collect();
-        gpu.queue.write_buffer(&o.uniforms, 0, &ub);
+        if self.written.1 != uniforms {
+            let ub: Vec<u8> = uniforms.iter().flat_map(|f| f.to_le_bytes()).collect();
+            gpu.queue.write_buffer(&o.uniforms, 0, &ub);
+            self.written.1 = uniforms;
+        }
+        Some(count as u32)
+    }
+
+    fn record(&self, pass: &mut wgpu::RenderPass<'_>, count: u32) {
+        let Some(o) = self.objects.as_ref() else { return };
+        pass.set_pipeline(&o.pipe);
+        pass.set_bind_group(0, &o.group, &[]);
+        pass.set_vertex_buffer(0, o.instances.slice(..count as u64 * ITEM_BYTES));
+        pass.draw(0..6, 0..count);
+    }
+
+    /// The overlay as the last draws of a pass already open on the w x h frame (the native
+    /// renderer's present pass, finding 146): the same pixels as `draw`'s pass of its own after
+    /// it, without a second command buffer, submission and load and store of the whole frame.
+    /// The next `draw` (dhdr_surface_present's) skips it.
+    pub fn draw_in_pass(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass<'_>, format: wgpu::TextureFormat, w: u32, h: u32) {
+        if let Some(count) = self.prepare(gpu, format, w, h) {
+            pass.set_scissor_rect(0, 0, w, h);
+            self.record(pass, count);
+            self.drawn = true;
+        }
+    }
+
+    pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, format: wgpu::TextureFormat, w: u32, h: u32) {
+        if std::mem::take(&mut self.drawn) { return; }
+        let Some(count) = self.prepare(gpu, format, w, h) else { return };
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("touch overlay") });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -60,10 +99,7 @@ impl TouchOverlay {
                     ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
                 depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
             });
-            pass.set_pipeline(&o.pipe);
-            pass.set_bind_group(0, &o.group, &[]);
-            pass.set_vertex_buffer(0, o.instances.slice(..count * ITEM_BYTES));
-            pass.draw(0..6, 0..count as u32);
+            self.record(&mut pass, count);
         }
         gpu.queue.submit([encoder.finish()]);
     }
@@ -114,7 +150,7 @@ impl Objects {
 
 // Kinds as port/hle/touch.h numbers them (TS_*). Shapes are in mm; `screen` is the surface's
 // size in pixels and its pixels per mm.
-const SHADER: &str = r#"
+pub(crate) const SHADER: &str = r#"
 struct Screen { size: vec2f, per_mm: vec2f }
 @group(0) @binding(0) var<uniform> screen: Screen;
 @group(0) @binding(1) var font: texture_2d<f32>;

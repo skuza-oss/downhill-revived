@@ -1,5 +1,8 @@
 # 069 — Independent performance review of the combined CPU/FPS build
 
+Status: current
+Checked: 2026-11-04
+
 Review date: 2026-10-18. Source: `fbb0fa536df6ee1a7c95fb6084231d1c6b749057` (`test/cpu-plus-fps`).
 
 ## Conclusion and interpretation

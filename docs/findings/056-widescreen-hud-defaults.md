@@ -1,5 +1,14 @@
 # 056: Widescreen HUD at any shape, player defaults, EXIT GAME
 
+Status: partly superseded by 101 (player_defaults in host.c, the disc prompt, 4:3 cards; since 154 the bike shop corner past 16:9)
+Checked: 2026-11-04
+
+The HUD anchoring and EXIT GAME are current. The player defaults now live in one place, the
+`dhd_settings` crate (`port/render/settings/src/table.rs`, finding 101): native, 2x, borderless,
+widescreen on and `DHD_ASPECT` wide as below, but `skip_movies` is 1 there (movies skipped); `host.c`'s `player_defaults` and the disc prompt are gone
+(findings 093, 101). The full-screen 4:3 pictures of the "Full-screen 2D pictures" section fill
+widescreen since finding 140.
+
 Round 40. Three parts:
 - in widescreen the HUD, menus and 2D keep their shape at any aspect;
 - a new install starts at 2x, borderless, in the monitor's shape with widescreen on;
@@ -119,7 +128,7 @@ holds, as on PCSX2.
 - The pnach's 16:9 shadow is -111. Other shapes use the line through (1, -95.886) and
   (4/3, -111) in 1/s.
 
-## Player defaults (port/hle/host.c `player_defaults`)
+## Player defaults (then `port/hle/host.c` `player_defaults`; now `dhd_settings`, finding 101)
 
 The defaults apply only with a dhd.ini, and only for keys it doesn't name:
 

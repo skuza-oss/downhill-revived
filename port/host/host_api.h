@@ -1,4 +1,4 @@
-/* The host interface of the port (finding 075, phase 2): the OS services the module side uses,
+/* The host interface of the port (finding 081, phase 2): the OS services the module side uses,
    the game's code and runtime and the PS2 system's own code (port/runtime, port/hle). The module
    is wasm32 later and the host is native, so nothing here names a host type. Guest addresses are
    uint32_t; handles are small integers, 0 is "none"; the one host object the module keeps is the
@@ -250,6 +250,11 @@ uint64_t host_service_gs_priv_read(unsigned a0);
 void host_service_gs_priv_write(unsigned a0, uint64_t a1);
 uint32_t host_service_gs_read_image(uint32_t a0, uint32_t a1);
 uint32_t host_service_gs_defer_read_image(uint32_t a0, uint32_t a1);
+/* sceGsExecStoreImage queued behind the drawing (graphics_queue.c, finding 148): its 28-word
+   packet, the read to destination and the unmask. 1 if queued, 0 if nothing was and the caller
+   must wait and read; settle writes the queued reads' bytes. */
+uint32_t host_service_gs_store_image(uint32_t packet, uint32_t destination, uint32_t bytes);
+void host_service_gs_store_settle(void);
 uint64_t host_service_gs_register(unsigned reg);
 void host_service_net_set_room(uint32_t address);
 uint64_t host_service_net_hash_ranges(uint32_t address, int count);
@@ -313,6 +318,19 @@ void host_service_text_input_begin(void);
 void host_service_text_input_end(void);
 int host_service_text_input_edit(uint32_t a0, int a1, uint32_t a2);
 int host_service_clipboard_set(uint32_t text);  /* 1 when the text is on the clipboard */
+
+/* ---- keyboard and controller bindings (port/hle/controls_settings.c, finding 157) ----
+   device: 0 the keyboard, 1 Controller 1, 2 Controller 2 (controls_table.h's CONTROL_*). */
+int host_service_controls_layout(int device, uint32_t out);  /* the layout played with into out (52 bytes); 0: none */
+int host_service_controls_pad(int player);  /* player 1's or 2's controller: its PAD_KIND_* + 1, 0 none */
+/* A change (CONTROL_ASSIGN ...) by dhd_settings' rules, saved and played with at once: CONTROL_REFUSED,
+   _UNCHANGED or _CHANGED; what the page says into message (size bytes). */
+int host_service_controls_change(int device, int edit, int target, int slot, int input, uint32_t message, int size);
+/* The wait for a key or button: command 1 begins, 0 asks (the input pressed since, -2 Esc, -1
+   nothing yet), 2: 1 while anything is still held. */
+int host_service_controls_capture(int device, int command);
+/* A controller's state (hle.h GamepadRaw, 16 bytes) through player's layout into a HostPad (tests). */
+void host_service_controls_map(int player, uint32_t raw, uint32_t out);
 void host_service_movie_start(uint32_t name, uint32_t lsn, uint32_t size, int audio, int found);
 int host_service_movie_update(int keep);
 

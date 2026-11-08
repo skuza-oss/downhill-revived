@@ -1,5 +1,8 @@
 # 117: The race room's CHEATS setting, and where the game reads cheat codes
 
+Status: current
+Checked: 2026-11-04
+
 Players asked that cheat codes not spoil online races (suggested by Noireadas Slytherin on
 Discord). Since 0.7.3 the race room has a host setting, **CHEATS: OFF / ON**, OFF by default. With
 it OFF, a code typed in an online race does nothing, and the race starts with no cheat on. With

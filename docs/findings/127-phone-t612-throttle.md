@@ -1,5 +1,8 @@
 # 127: The Mi 11i throttled to a Unisoc T612: where a 1x field goes, and 39.6 -> 55 fields/s
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-31, a test-sub-agent round. Finding 126 measured a low-end phone, the Realme RMX3930
 (Unisoc T612, Mali-G57 MC1). This round makes a rooted Mi 11i (M2012K11G, Snapdragon 888, Adreno
 660, adb `1ae461e`, Magisk) behave like it, so that the 60 fps work for low-end phones can be

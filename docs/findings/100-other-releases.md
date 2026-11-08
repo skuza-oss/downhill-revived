@@ -1,5 +1,8 @@
 # 100 — Other releases: what supporting the European disc (and others) would take
 
+Status: current
+Checked: 2026-11-04
+
 ## In short (for players)
 
 - **Only the USA disc works:** *Downhill Domination*, SCUS-97177. Dump your own disc to an ISO
@@ -127,7 +130,7 @@ preferred, so function order is kept:
 - **"Only immediates differ" (574):** the same instructions and registers. By what changed:
   - Struct offsets in 110 functions (269 immediates: +4, +8 and +0x140 the most common). A few
     structs gained members. One of them is a size used as 72 in the USA build and 76 in the EU
-    build, in 20 functions. The rider struct is still 0x7BD0 bytes (finding 011;
+    build, in 20 functions. The rider struct is still 0x7BD0 bytes (finding 040;
     `port/hle/puppet.c`).
   - Screen layout for 512 lines: 448→512 (`func_0020B938`), 224→256 and 512→640
     (`func_00228BE8`), and menu coordinates scaled 1.14-1.25 (`func_001F5828`, `func_001A2EF8`,
@@ -241,7 +244,7 @@ menus, options and text, where the PC SETTINGS, unlock and exit patches sit.
 | Europe / Australasia | SLES-52202 (and SLES-52202-GER cover), v1.01 | 2004-02 | Codemasters; this finding (redump 4510) |
 | Japan: MT Bikers: Bakusou Mountain Bikers | SCPS-15062 | 2004-05-20 | SCEI; a later build; Japanese text; one rider replaced (fandom wiki); PCSX2 wiki also lists SCAJ-20083 for Asia |
 | USA demo | SCUS-97329 | 2003 | here (`iso/demo_us`, `SCUS_973.29`, NTSC) |
-| Europe demo | SLED-52325 | 2003-12 | here (`iso/demo_eu`, `SLED_523.25`, PAL); a layout close to the retail EU ELF (finding 011) |
+| Europe demo | SLED-52325 | 2003-12 | here (`iso/demo_eu`, `SLED_523.25`, PAL); a layout close to the retail EU ELF (unverified: the note this cited, number 011, is not in this repository) |
 | prototype, 2003-05-23 | (SCUS_971.77 loader + overlays) | 2003-05 | here (`iso/proto0523`) |
 
 No Greatest Hits or Platinum reissue and no second USA revision were found (redump, PSXDataCenter,

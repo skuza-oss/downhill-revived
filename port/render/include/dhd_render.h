@@ -227,7 +227,8 @@ typedef struct DhdrSurfaceInfo {     /* native_core.inc's NativeSurface, as the 
 typedef struct DhdrPicture {
     uint32_t size;                   /* sizeof(DhdrPicture) */
     uint32_t vertex_count, command_count, convert_count, surface_count;
-    int32_t display_surface;         /* scanned-out surface, or -1 */
+    int32_t display_surface;         /* scanned-out surface; -1 none (the last picture stays); -2 the display
+                                        is off (no read circuit on): a black picture */
     uint32_t display[12];            /* scanout constants as recorded (native.wgsl native_scanout) */
     uint32_t movie_width, movie_height, movie_on;
     uint32_t scale;                  /* the renderer's resolution scale (DHD_SCALE or matched) */

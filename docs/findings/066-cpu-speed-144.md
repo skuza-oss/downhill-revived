@@ -1,5 +1,14 @@
 # 066 — CPU speed toward 144 real steps/s
 
+Status: partly superseded by 090 (VU0 AOT opt-in; the i686 build)
+Checked: 2026-11-04
+
+A round on the 32-bit build (`build_clean.py`, the r46 gate; both retired, finding 088). Still in
+the port: the native VU1 kernels 1430, 2DC8, 0E10 and 2E48 and the native VU0 entries
+(`port/runtime/vu1_native_*.h`, `vu0_micro.c`). Changed: VU0 AOT, opt-in here, is built always
+and runs every VU0 entry without a native version (`port/tools/vu0_aot.py`, finding 090 SP1), and
+144 real steps a second were reached (finding 090).
+
 Pure host performance work; the simulation clock and matching `src/` are unchanged. The real
 simulation-rate work is separate.
 
@@ -882,7 +891,8 @@ Every native batch reports 2,000,001 hits, others zero. In this noisy series 05E
 the interpreter; no AOT default is inferred from it. The isolated race queue uses one clean
 executable and explicit native-off, native-off+AOT, and native-on arms. Historical live results
 above remain the only accepted before/after race table and predate both the GS staging follow-up and
-these VU0 additions. The steady 144 / 6.9 ms tail target is still unproved. AOT stays opt-in.
+these VU0 additions. The steady 144 / 6.9 ms tail target is still unproved. AOT stays opt-in
+(here; built always since finding 090 SP1).
 
 Next deliverable is the requested throwaway combined test branch, merging the then-latest committed
 FPS work, with its own clean build and 60 gate.

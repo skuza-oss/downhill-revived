@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/BASE-0.7.9-FF961F?style=for-the-badge&labelColor=141824" />
+  <img alt="Version" src="https://img.shields.io/badge/BASE-0.7.12-FF961F?style=for-the-badge&labelColor=141824" />
   <img alt="iOS" src="https://img.shields.io/badge/iOS-17.0%2B-1675E0?style=for-the-badge&labelColor=141824" />
   <img alt="Platform" src="https://img.shields.io/badge/ARM64-METAL-3EAFCE?style=for-the-badge&labelColor=141824" />
   <img alt="License" src="https://img.shields.io/badge/GPL-3.0%2B-78B45A?style=for-the-badge&labelColor=141824" />
@@ -53,8 +53,8 @@ The codebase is based on the work of **[skuza-oss](https://github.com/skuza-oss/
 ## Download
 
 - [Download the latest release](https://github.com/ribeirogustav/downhill-revived-ios/releases)
-- Current version: `0.7.9 (Beta)`
-- Asset: `DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
+- Current version: `0.7.12`
+- Asset: `DownhillRevived-0.7.12-unsigned.ipa`
 - Target: iOS 17.0+ (ARM64 / Metal)
 
 This IPA is unsigned. It cannot be installed directly on an ordinary iPhone/iPad as-is. Developers may sign a build with an appropriate Apple team and provisioning profile. Instructions: [Installation and signing](docs/INSTALLATION.md).
@@ -62,10 +62,10 @@ This IPA is unsigned. It cannot be installed directly on an ordinary iPhone/iPad
 **SHA-256 of the unsigned IPA:**
 
 ```text
-4181572bd7b78ce87e956d52309e0879b3230f82a7511d325a6abd2b50adcc4c
+936bceb240e41256893be9a5fab07e398bcd4a25284dabefbec764fc7c61ccc0
 ```
 
-The hash above verifies the **exact unsigned 70902 IPA**. Signing, re-packaging or rebuilding changes its checksum. Compare only the matching release filename and see [`SHA256SUMS`](SHA256SUMS).
+The hash above verifies the **exact unsigned 71206 IPA**. Signing, re-packaging or rebuilding changes its checksum. Compare only the matching release filename and see [`SHA256SUMS`](SHA256SUMS).
 
 ## Requirements
 

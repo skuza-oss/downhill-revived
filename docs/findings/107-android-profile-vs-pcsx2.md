@@ -1,5 +1,8 @@
 # 107: Current Android profile versus PCSX2
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-28, Mi 11i M2012K11G / Snapdragon 888 / Adreno 660 / Android 13, adb `1ae461e`. The current
 native port reaches the 60 Hz pacing limit on the first level: **1x median 59.748 fields/s across
 three runs**; default scale 2 gives 59.600 fields/s across two runs. Finding 091's 25-30 fields/s

@@ -9,11 +9,17 @@
 //! read and written at once, so it sits behind `Conn::live` (the send lock): the receive thread
 //! waits for bytes by peeking at its own handle of the socket, unlocked (50 ms at most, so a
 //! dropped connection is noticed), then reads what arrived without blocking under the lock; the
-//! send thread writes, blocking, under the same lock.
+//! send thread writes, blocking, under the same lock. It also owns the room's SFU UDP socket,
+//! str0m state machine, negotiated channels and bounded event/state queues; the SFU's reader
+//! thread wakes it for each datagram, as ws_send does for each message. Race frames never
+//! enter the TCP stream. Signaling remains on the room WebSocket.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 mod http;
+mod relay;
+mod sfu;
 mod stream;
+mod turn;
 
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -58,6 +64,14 @@ struct Live {
 struct Queue {
     out: VecDeque<(bool, Vec<u8>)>,
     connected: bool,
+    incoming: VecDeque<(bool, Vec<u8>)>,
+    /// set by the SFU socket reader: a datagram waits for the send thread
+    sfu_input: bool,
+    /// Received messages queued for the send thread, and those it has handed to the game: the
+    /// receive thread waits for the two to match before it reports the close, so a refusal's
+    /// text reaches the game before its close does.
+    received: u64,
+    handled: u64,
 }
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
@@ -85,10 +99,24 @@ impl WsConn {
     /// Drops the connection from outside the receive thread: its next look finds none.
     fn force_close(&self) {
         let mut live = lock(&self.live);
-        lock(&self.queue).connected = false;
+        {
+            let mut q = lock(&self.queue);
+            q.connected = false;
+            q.out.clear();
+            q.incoming.clear();
+            q.handled = q.received; // nothing more of this connection will be handed over
+        }
+        self.wake.notify_all();
         if let Some(l) = live.take() {
             let _ = l.tcp.shutdown(Shutdown::Both);
         }
+    }
+
+    /// Waits until the send thread has handed the game every message received so far (a server's
+    /// refusal is a text then a close), at most `limit`, or until ws_stop.
+    fn wait_handled(&self, limit: Duration) {
+        let q = lock(&self.queue);
+        let _ = self.wake.wait_timeout_while(q, limit, |q| q.handled < q.received && !self.stopping.load(Ordering::Acquire));
     }
 
     /// Waits up to `ms`, or until ws_stop.
@@ -113,6 +141,7 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                     let mut live = lock(&c.live);
                     let mut q = lock(&c.queue);
                     q.out.clear();
+                    q.incoming.clear();
                     q.connected = true;
                     *live = Some(Live { ws, tcp });
                 }
@@ -120,6 +149,7 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                     unsafe { f(c.h.ctx, c.ptr()) };
                 }
                 let end = receive(&c, &peek);
+                c.wait_handled(Duration::from_secs(1));
                 c.force_close();
                 end
             }
@@ -191,12 +221,14 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
             }
         }
         for (binary, data) in got {
-            if let Some(f) = c.h.on_message {
-                let mut v = Vec::with_capacity(data.len() + 1);
-                v.extend_from_slice(&data);
-                v.push(0);
-                unsafe { f(c.h.ctx, binary as c_int, v.as_ptr(), data.len()) };
-            }
+            if binary && matches!(data.first(), Some(5 | 6)) { continue; }
+            let mut q = lock(&c.queue);
+            if !q.connected { return (1006, "connection closed".into()); }
+            if q.incoming.len() >= 256 { return (1006, "control queue full".into()); }
+            q.incoming.push_back((binary, data.to_vec()));
+            q.received += 1;
+            drop(q);
+            c.wake.notify_all();
         }
         if let Some(end) = end {
             return end;
@@ -206,32 +238,111 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
 
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
+    let mut sfu: Option<sfu::Sfu> = None;
+    // The SFU reader wakes this thread for each datagram, as ws_send does for each message.
+    let weak = Arc::downgrade(&c);
+    let wake: sfu::Wake = Arc::new(move || {
+        if let Some(c) = weak.upgrade() {
+            lock(&c.queue).sfu_input = true;
+            c.wake.notify_all();
+        }
+    });
+    // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
+    let mut unwritten = false;
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
-            let _ = c.wake.wait_timeout_while(q, TICK, |q| q.out.is_empty() && !c.stopping.load(Ordering::Acquire));
+            let wait = if unwritten { Duration::ZERO } else { TICK };
+            let (mut q, _) = c.wake.wait_timeout_while(q, wait, |q| q.out.is_empty() && q.incoming.is_empty() && !q.sfu_input && !c.stopping.load(Ordering::Acquire)).unwrap_or_else(|e| e.into_inner());
+            q.sfu_input = false;
         }
+        if !lock(&c.queue).connected { sfu = None; continue; }
+        // Lobby and SFU callbacks share this thread. Apply the transport's start marker
+        // before the game sees start, then deliver any early reliable race events.
         loop {
-            let mut live = lock(&c.live);
-            let Some((binary, data)) = lock(&c.queue).out.pop_front() else { break };
-            if let Some(l) = live.as_mut() {
-                let msg = if binary {
-                    Message::Binary(Bytes::from(data))
-                } else {
-                    Message::Text(Utf8Bytes::from(String::from_utf8_lossy(&data).into_owned()))
-                };
-                if l.ws.send(msg).is_err() {
-                    // a failed or timed-out write leaves the stream unusable: drop it
-                    lock(&c.queue).connected = false;
-                    if let Some(l) = live.take() {
-                        let _ = l.tcp.shutdown(Shutdown::Both);
+            let item = lock(&c.queue).incoming.pop_front();
+            let Some((binary, data)) = item else { break };
+            if !binary {
+                if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data) {
+                    if matches!(message["type"].as_str(), Some("start" | "ended" | "welcome")) {
+                        lock(&c.queue).out.retain(|(binary, bytes)| !*binary || !matches!(bytes.first(), Some(5 | 6)));
+                    }
+                    let result = if message["type"] == "start" {
+                        match sfu::Sfu::start(wake.clone()) {
+                            Ok((rtc, offer)) => {
+                                let mut rtc = rtc;
+                                let result = rtc.signal(&message);
+                                sfu = Some(rtc);
+                                lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
+                                result
+                            }
+                            Err(e) => Err(e),
+                        }
+                    } else if message["type"] == "ended" || message["type"] == "welcome" {
+                        sfu = None; Ok(())
+                    } else if let Some(rtc) = sfu.as_mut() { rtc.signal(&message) } else { Ok(()) };
+                    if result.is_err() {
+                        eprintln!("net: SFU signaling failed"); c.force_close(); sfu = None; break;
                     }
                 }
             }
+            if let Some(f) = c.h.on_message {
+                let mut bytes = data.clone(); bytes.push(0);
+                unsafe { f(c.h.ctx, binary as c_int, bytes.as_ptr(), data.len()) };
+            }
+            lock(&c.queue).handled += 1;
+            c.wake.notify_all();
         }
+        // Race frames the game queued go to the SFU before this poll, which writes them out:
+        // they never wait for the next wake (finding 158, round 3).
+        flush(&c, &mut sfu);
+        let mut incoming = Vec::new();
+        if let Some(rtc) = sfu.as_mut() {
+            match rtc.poll() {
+                Ok((text, frames)) => {
+                    for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
+                    incoming = frames;
+                }
+                Err(_) => { eprintln!("net: SFU connection failed"); c.force_close(); sfu = None; }
+            }
+        }
+        for data in incoming {
+            if let Some(f) = c.h.on_message { unsafe { f(c.h.ctx, 1, data.as_ptr(), data.len()) }; }
+        }
+        flush(&c, &mut sfu);
+        // Once: frames a full SCTP buffer refuses wait for the next wake, not a busy loop.
+        unwritten = !unwritten && sfu.as_ref().is_some_and(|s| s.unwritten());
         if let Some(f) = c.h.on_tick {
             if unsafe { f(c.h.ctx) } != 0 {
                 c.force_close();
+            }
+        }
+    }
+}
+
+/// Sends what is queued, in order: race frames to the SFU association, the rest on the WebSocket.
+fn flush(c: &WsConn, sfu: &mut Option<sfu::Sfu>) {
+    loop {
+        let item = lock(&c.queue).out.pop_front();
+        let Some((binary, data)) = item else { break };
+        if binary && matches!(data.first(), Some(5 | 6)) {
+            let failed = sfu.as_mut().is_some_and(|rtc| rtc.send(&data).is_err());
+            if failed { c.force_close(); *sfu = None; }
+            continue;
+        }
+        let mut live = lock(&c.live);
+        if let Some(l) = live.as_mut() {
+            let msg = if binary {
+                Message::Binary(Bytes::from(data))
+            } else {
+                Message::Text(Utf8Bytes::from(String::from_utf8_lossy(&data).into_owned()))
+            };
+            if l.ws.send(msg).is_err() {
+                // a failed or timed-out write leaves the stream unusable: drop it
+                lock(&c.queue).connected = false;
+                if let Some(l) = live.take() {
+                    let _ = l.tcp.shutdown(Shutdown::Both);
+                }
             }
         }
     }
@@ -273,6 +384,13 @@ pub unsafe extern "C" fn ws_send(ws: *mut WsConn, binary: c_int, data: *const c_
     let bytes = if n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(data as *const u8, n) }.to_vec() };
     let mut q = lock(&c.queue);
     if !q.connected {
+        return;
+    }
+    if q.out.len() >= 256 {
+        // State may be superseded; reliable control/events must fail visibly, never vanish.
+        let state = binary != 0 && bytes.first() == Some(&5);
+        drop(q);
+        if !state { c.force_close(); }
         return;
     }
     q.out.push_back((binary != 0, bytes));

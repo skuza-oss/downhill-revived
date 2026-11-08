@@ -1,6 +1,7 @@
 /* The keyboard as player 1's DualShock 2 (finding 059). host.c reads which keys are down (only
    while the game's window has focus) and this file turns them into pad state, merged with the
-   controller's, so both work at once.
+   controller's, so both work at once. Which key stands for which button is the player's layout
+   (dhd.ini keyboard, finding 157; port/hle/controls_table.h, the defaults below when NULL).
 
    The game reads its controls two ways (src: func_00220550 sets D_0029E290):
    - in menus (D_0029E290 = 0) only buttons count, each press once: the d-pad moves, Cross
@@ -8,17 +9,18 @@
    - while riding (D_0029E290 = 1) buttons are held and the left stick steers (X) and leans (Y)
      in proportion (func_0017E1C0, func_0017E300). The d-pad steers too, but always at full lock
      (func_0012DEB0 reads a digital press as 1.0).
-   So while riding the arrow keys move the left stick instead of the d-pad, ramped: full tilt
-   ~100 ms after the press, back to centre at once on release. The ramp is linear in what the
-   game makes of the stick: func_00220AE0 has a dead zone (raw 92-162) and two slopes, and the
+   So while riding the keys on the d-pad move the left stick instead of the d-pad, ramped: full
+   tilt ~100 ms after the press, back to centre at once on release. The ramp is linear in what
+   the game makes of the stick: func_00220AE0 has a dead zone (raw 92-162) and two slopes, and the
    steering squares the result (v * v / 127), so each step of the ramp picks the raw value whose
-   steering is the wanted fraction of full lock. Esc pauses while riding (START) and goes back
-   in menus (Triangle).
+   steering is the wanted fraction of full lock. Keys on a stick direction (the layout's
+   lstick_* and rstick_*) move that stick the same way, in menus too. Esc is no key of the
+   layout: it pauses while riding (START) and goes back in menus (Triangle), always.
 
    A key keeps the meaning it had when it went down until it is let go: Esc pressed while riding
    stays START while the pause menu opens, so the menu doesn't see a Triangle and close again.
 
-   Layout (keys are Windows virtual-key codes):
+   The default layout (keys are Windows virtual-key codes, by their place on a US keyboard):
      arrows     d-pad in menus; steer / lean while riding (left stick, ramped)
      Space, X   Cross     confirm; pedal (twice: sprint)
      S          Triangle  back; brake (tweak a trick in the air)
@@ -34,36 +36,15 @@
      F          L3        powerslide */
 #include "hle.h"
 #include "../include/fps.h"
+#include "controls_table.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { VK_BACK_ = 0x08, VK_TAB_ = 0x09, VK_RETURN_ = 0x0D, VK_ESCAPE_ = 0x1B, VK_SPACE_ = 0x20,
-       VK_LEFT_ = 0x25, VK_UP_ = 0x26, VK_RIGHT_ = 0x27, VK_DOWN_ = 0x28 };
-enum { NO_AXIS, LEFT_X, LEFT_Y };
-
-typedef struct {
-    uint8_t key;
-    uint16_t menu, riding;  /* the button in menus and while riding */
-    uint8_t axis;           /* while riding: the left stick axis it moves instead, */
-    int8_t dir;             /* -1 left/up, 1 right/down */
-} Key;
-
-static const Key keys[] = {
-    {VK_LEFT_, PAD_LEFT, 0, LEFT_X, -1},   {VK_RIGHT_, PAD_RIGHT, 0, LEFT_X, 1},
-    {VK_UP_, PAD_UP, 0, LEFT_Y, -1},       {VK_DOWN_, PAD_DOWN, 0, LEFT_Y, 1},
-    {VK_SPACE_, PAD_CROSS, PAD_CROSS},     {'X', PAD_CROSS, PAD_CROSS},
-    {'S', PAD_TRIANGLE, PAD_TRIANGLE},     {VK_BACK_, PAD_TRIANGLE, PAD_TRIANGLE},
-    {VK_ESCAPE_, PAD_TRIANGLE, PAD_START}, {VK_RETURN_, PAD_START, PAD_START},
-    {VK_TAB_, PAD_SELECT, PAD_SELECT},     {'Z', PAD_SQUARE, PAD_SQUARE},
-    {'C', PAD_CIRCLE, PAD_CIRCLE},         {'A', PAD_L1, PAD_L1},
-    {'D', PAD_R1, PAD_R1},                 {'Q', PAD_L2, PAD_L2},
-    {'E', PAD_R2, PAD_R2},                 {'W', PAD_R3, PAD_R3},
-    {'F', PAD_L3, PAD_L3},
-};
-enum { KEYS = sizeof keys / sizeof *keys };
+enum { VK_ESCAPE_ = 0x1B };
+enum { NO_AXIS, LEFT_X, LEFT_Y, RIGHT_X, RIGHT_Y, AXES };
 
 #define RAMP_SECONDS 0.1
 #if defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__)
@@ -74,17 +55,25 @@ enum { KEYS = sizeof keys / sizeof *keys };
 #endif
 
 static struct {
-    int8_t held[KEYS];      /* 0 up, 1 down as in menus, 2 down as while riding */
-    int8_t dir[3];          /* each stick axis: the direction the arrows last gave it, */
-    double since[3];        /* from when (its ramp starts there) */
+    int8_t held[256];       /* each key: 0 up, 1 down as in menus, 2 down as while riding */
+    int8_t dir[AXES];       /* each stick axis: the direction the keys last gave it, */
+    double since[AXES];     /* from when (its ramp starts there) */
 } state;
 
-const uint8_t *keyboard_keys(int *count)
+static const struct ControlsLayout *layout_or_default(const struct ControlsLayout *layout)
 {
-    static uint8_t list[KEYS];
-    for (int i = 0; i < KEYS; i++) list[i] = keys[i].key;
-    *count = KEYS;
-    return list;
+    return layout ? layout : &control_defaults[CONTROL_KEYBOARD];
+}
+
+int keyboard_keys(const struct ControlsLayout *layout, uint8_t *list)
+{
+    layout = layout_or_default(layout);
+    int count = 0;
+    list[count++] = VK_ESCAPE_;
+    for (int t = 0; t < CONTROL_TARGETS; t++)
+        for (int s = 0; s < CONTROL_SLOTS; s++)
+            if (layout->input[t][s]) list[count++] = layout->input[t][s];
+    return count;
 }
 
 void keyboard_reset(void) { memset(&state, 0, sizeof state); }
@@ -171,25 +160,47 @@ static uint8_t ramp_raw(double fraction, int dir)
     return (uint8_t)raw;
 }
 
+/* The left stick axis and way a d-pad button steers while riding (0: not the d-pad). */
+static int dpad_axis(uint16_t bit, int *dir)
+{
+    switch (bit) {
+    case PAD_LEFT: *dir = -1; return LEFT_X;
+    case PAD_RIGHT: *dir = 1; return LEFT_X;
+    case PAD_UP: *dir = -1; return LEFT_Y;
+    case PAD_DOWN: *dir = 1; return LEFT_Y;
+    default: return NO_AXIS;
+    }
+}
+
 /* Merges the keys that are down into `out` (a controller's state, or a neutral pad): buttons and
-   pressures add, the left stick follows the arrows while riding. */
-void keyboard_pad(const uint8_t down[256], int riding, double now, HostPad *out)
+   pressures add, a stick follows its keys (the left one the d-pad's keys while riding). */
+void keyboard_pad(const struct ControlsLayout *layout, const uint8_t down[256], int riding, double now, HostPad *out)
 {
     static const uint16_t pressure_order[12] = {PAD_RIGHT, PAD_LEFT, PAD_UP, PAD_DOWN, PAD_TRIANGLE, PAD_CIRCLE,
                                                 PAD_CROSS, PAD_SQUARE, PAD_L1, PAD_R1, PAD_L2, PAD_R2};
+    layout = layout_or_default(layout);
     uint16_t buttons = 0;
-    int dir[3] = {0};
-    for (int i = 0; i < KEYS; i++) {
-        const Key *k = &keys[i];
-        if (!down[k->key]) {
-            state.held[i] = 0;
-            continue;
-        }
-        if (!state.held[i]) state.held[i] = riding ? 2 : 1;
-        if (state.held[i] == 2 && k->axis) dir[k->axis] += k->dir;
-        else buttons |= state.held[i] == 2 ? k->riding : k->menu;
+    int dir[AXES] = {0};
+    if (!down[VK_ESCAPE_]) state.held[VK_ESCAPE_] = 0;
+    else {
+        if (!state.held[VK_ESCAPE_]) state.held[VK_ESCAPE_] = riding ? 2 : 1;
+        buttons |= state.held[VK_ESCAPE_] == 2 ? PAD_START : PAD_TRIANGLE;
     }
-    for (int axis = LEFT_X; axis <= LEFT_Y; axis++) {
+    for (int t = 0; t < CONTROL_TARGETS; t++)
+        for (int s = 0; s < CONTROL_SLOTS; s++) {
+            int key = layout->input[t][s], way = 0, axis;
+            if (!key || key == VK_ESCAPE_) continue;
+            if (!down[key]) {
+                state.held[key] = 0;
+                continue;
+            }
+            if (!state.held[key]) state.held[key] = riding ? 2 : 1;
+            const ControlTarget *c = &control_targets[t];
+            if (c->axis) dir[c->axis] += c->dir;
+            else if (state.held[key] == 2 && (axis = dpad_axis(c->bit, &way))) dir[axis] += way;
+            else buttons |= c->bit;
+        }
+    for (int axis = LEFT_X; axis < AXES; axis++) {
         if (dir[axis] != state.dir[axis]) {  /* pressed, let go or turned: the ramp starts again */
             state.dir[axis] = (int8_t)dir[axis];
             state.since[axis] = now;
@@ -199,39 +210,44 @@ void keyboard_pad(const uint8_t down[256], int riding, double now, HostPad *out)
         if (fraction > 1) fraction = 1;
         uint8_t raw = ramp_raw(fraction, dir[axis]);
         if (axis == LEFT_X) out->left_x = raw;
-        else out->left_y = raw;
+        else if (axis == LEFT_Y) out->left_y = raw;
+        else if (axis == RIGHT_X) out->right_x = raw;
+        else out->right_y = raw;
     }
     out->buttons |= buttons;
     for (int i = 0; i < 12; i++)
         if (buttons & pressure_order[i]) out->pressure[i] = 255;
 }
 
+/* A key by its dhd.ini name (controls_table.h; "esc" too): its virtual-key code, 0 none. */
+static int key_named(const char *name, size_t n)
+{
+    if (n == 3 && !strncmp(name, "esc", 3)) return VK_ESCAPE_;
+    for (int i = 0; i < CONTROL_KEYS; i++)
+        if (strlen(control_keys[i].name) == n && !strncmp(control_keys[i].name, name, n)) return control_keys[i].vk;
+    return 0;
+}
+
 /* DHD_KEYS (tests): "start:duration:key[+key],..." as DHD_RACE_PAD, seconds on the race clock
-   after GO; keys: up down left right space enter esc tab backspace, or a letter. Sets down[]
-   for the given time; 0 if the script is invalid. */
+   after GO; keys by their dhd.ini names (up down left right space enter tab backspace, a letter,
+   a digit, f1, kp1, lshift, ...) or esc. Sets down[] for the given time; 0 if the script is
+   invalid. */
 int keyboard_script(const char *script, double seconds, uint8_t down[256])
 {
-    static const struct { const char *name; uint8_t key; } names[] = {
-        {"up", VK_UP_}, {"down", VK_DOWN_}, {"left", VK_LEFT_}, {"right", VK_RIGHT_}, {"space", VK_SPACE_},
-        {"enter", VK_RETURN_}, {"esc", VK_ESCAPE_}, {"tab", VK_TAB_}, {"backspace", VK_BACK_},
-    };
     memset(down, 0, 256);
     while (script && *script) {
         double start, duration;
         char chord[128];
         int consumed = 0;
-        if (sscanf(script, "%lf:%lf:%127[a-z+]%n", &start, &duration, chord, &consumed) != 3 || start < 0 ||
+        if (sscanf(script, "%lf:%lf:%127[a-z0-9_+]%n", &start, &duration, chord, &consumed) != 3 || start < 0 ||
             duration <= 0)
             return 0;
         int active = seconds >= start && seconds < start + duration;
         for (char *name = chord; *name;) {
             char *end = strchr(name, '+');
             size_t n = end ? (size_t)(end - name) : strlen(name);
-            int key = -1;
-            if (n == 1) key = name[0] - 'a' + 'A';
-            for (size_t i = 0; i < sizeof names / sizeof *names; i++)
-                if (strlen(names[i].name) == n && !strncmp(names[i].name, name, n)) key = names[i].key;
-            if (key < 0) return 0;
+            int key = key_named(name, n);
+            if (!key) return 0;
             if (active) down[key] = 1;
             name += n + (end != NULL);
         }

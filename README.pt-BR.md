@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Versão" src="https://img.shields.io/badge/BASE-0.7.9-FF961F?style=for-the-badge&labelColor=141824" />
+  <img alt="Versão" src="https://img.shields.io/badge/BASE-0.7.12-FF961F?style=for-the-badge&labelColor=141824" />
   <img alt="iOS" src="https://img.shields.io/badge/iOS-17.0%2B-1675E0?style=for-the-badge&labelColor=141824" />
   <img alt="Plataforma" src="https://img.shields.io/badge/ARM64-METAL-3EAFCE?style=for-the-badge&labelColor=141824" />
   <img alt="Licença" src="https://img.shields.io/badge/GPL-3.0%2B-78B45A?style=for-the-badge&labelColor=141824" />
@@ -53,8 +53,8 @@ Todo o trabalho original de recriação, descompilação e port para computadore
 ## Download
 
 - [Baixar a versão mais recente](https://github.com/ribeirogustav/downhill-revived-ios/releases)
-- Versão atual: `0.7.9 (Beta)`
-- Arquivo: `DownhillRevived-iOS-0.7.9-build-70902-unsigned.ipa`
+- Versão atual: `0.7.12`
+- Arquivo: `DownhillRevived-0.7.12-unsigned.ipa`
 - Plataforma: iOS 17.0+ (ARM64 / Metal)
 
 Atenção: esse IPA não está assinado digitalmente e não pode ser instalado diretamente em um iPhone comum. Para instalar, é necessário assinar o aplicativo com credenciais e provisionamento Apple válidos. Leia [instalação e assinatura](docs/INSTALACAO.pt-BR.md).
@@ -62,10 +62,10 @@ Atenção: esse IPA não está assinado digitalmente e não pode ser instalado d
 **SHA-256 do IPA não assinado:**
 
 ```text
-4181572bd7b78ce87e956d52309e0879b3230f82a7511d325a6abd2b50adcc4c
+936bceb240e41256893be9a5fab07e398bcd4a25284dabefbec764fc7c61ccc0
 ```
 
-O hash se refere **somente** a esse arquivo IPA, sem alterações. Uma assinatura ou nova compilação muda o checksum. Consulte [`SHA256SUMS`](SHA256SUMS).
+O hash se refere **somente** a esse arquivo IPA build 71206, sem alterações. Uma assinatura ou nova compilação muda o checksum. Consulte [`SHA256SUMS`](SHA256SUMS).
 
 ## Requisitos
 

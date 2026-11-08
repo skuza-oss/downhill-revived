@@ -51,6 +51,18 @@ public class DhdActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // How the run before ended, before the native game starts (it quotes dhd-exit.txt into the
+        // new dhd.log): once per process, so a start that skips SetupActivity (a USB controller
+        // plugged in) writes it too (finding 152). On a thread, waited for 2 s at most: the record's
+        // trace can be slow to come, and the UI thread must not freeze; a late record only misses
+        // this run's "previous run" lines
+        Thread exit = new Thread(() -> LastExit.record(getApplicationContext()), "last exit");
+        exit.start();
+        try {
+            exit.join(2000);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
         super.onCreate(savedInstanceState);
         // The screen's shape (its long side over its short one), for widescreen = 1:
         // host_monitor_aspect reads DHD_MONITOR_ASPECT. Set before SDL_main starts.

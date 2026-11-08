@@ -1,5 +1,11 @@
 # Data fixup audit and reference refresh (round 46)
 
+Status: history
+
+A round-46 audit on the 32-bit build. Its corrections are in the data conversion
+(`port/tools/data.py`, which `build_wasm.py` runs); `audit_data_fixups.py` and the renderer gate
+are gone (finding 088).
+
 ## Scope and reproducible inventory
 
 `port/tools/audit_data_fixups.py` assembles the converter's image, checks every

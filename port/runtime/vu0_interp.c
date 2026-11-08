@@ -1566,7 +1566,7 @@ void ps2_vu_aot_load(const void *vutext)
 static inline __attribute__((always_inline)) int run(ps2_cpu *cpu, unsigned addr, unsigned unit, unsigned top, unsigned itop,
                ps2_vu_kick_fn kick, void *opaque)
 {
-    Vu u;
+    Vu u PS2_NO_AUTO_INIT;  /* the prefix is cleared below; vu1_file is filled before use (vu1_used) */
     unsigned mask = unit ? 0x7FF : 0x1FF;
     unsigned pc = (addr / 8) & mask;
     int branch = -1, ending = 0;

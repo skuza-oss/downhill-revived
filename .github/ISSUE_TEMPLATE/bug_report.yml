@@ -10,7 +10,8 @@ body:
         - **Windows:** in the folder with `dhd.exe` and `DownhillRevived.exe` (or `%APPDATA%\Downhill Revived` if that folder can't be written to).
         - **Mac:** `~/Library/Application Support/Downhill Revived` (Finder: Go > Go to Folder).
         - **Linux:** beside `DownhillRevived` (or `~/.local/share/downhill-revived`).
-        dhd.log is overwritten at every start, so grab it **right after** the problem happens, before you play again.
+        - **Android:** long-press the app's icon and tap **Share log** (the game also offers it after it closes unexpectedly).
+        Each start begins a new dhd.log and keeps the one before as **dhd-previous.log**: if you started the game again after the problem, send dhd-previous.log.
   - type: dropdown
     id: where
     attributes:

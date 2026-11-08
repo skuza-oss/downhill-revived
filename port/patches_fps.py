@@ -257,9 +257,12 @@ def add(patches):
          'port_animation_fields((float)p->x4->x14) * p->x4->x1C')
     edit('00202E00', 'elapsed = (float)(now - (unsigned int)p->x4->x14);',
          'elapsed = port_animation_fields((float)(now - (unsigned int)p->x4->x14));')
-    # six frame-time constants: func_00204F38 (blend, 6e6ac09a) is the sixth
-    patches['unsorted/00202E00.cpp'].append(('re', (r'\* 16\.66667f', 6),
-                                           '* (port_animation_scale()>1 ? 16.66667f/1024 : 16.66667f)'))
+    # the frame-time constants of the compiled timers; the sixth, in func_00204F38 (the pose
+    # blend), is NONMATCHING C: its recompiled asm is scaled in recomp.py (finding 165)
+    for timer in ('D_0029E160__c38 - fade->start', 'D_0029E160__c142 - obj->x48', 'D_0029E160__c43 - obj->x48',
+                  'D_0029E160__c39 - obj->x48', 'D_0029E160__c42 - obj->x48'):
+        edit('00202E00', '((float)%s) * 16.66667f' % timer,
+             '((float)%s) * (port_animation_scale()>1 ? 16.66667f/1024 : 16.66667f)' % timer)
     edit('00206440', 'frame = D_0029E160;', 'frame = D_0029E160 / port_animation_scale();')
     # Execute all skeleton updates at high rates (the original scheduler skips
     # expensive animation updates by field period for distant models).

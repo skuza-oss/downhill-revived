@@ -1,5 +1,8 @@
 # 129: perf: lines, how fast the game ran and what held it back, in every dhd.log
 
+Status: current
+Checked: 2026-11-04
+
 Why: a player on an i7-7500U (2 cores, 4 threads) with a GeForce 920M sent two 0.7.6 logs, at
 scale 2 and 3, both "low fps". They had the settings, the GPU and its driver and the exit's
 `profile native:` counts, but no frame rate, no frame times and no per-thread or GPU time, so

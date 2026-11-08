@@ -32,11 +32,12 @@ async function start(h:Client,cs:Client[],code:string) {
   await Promise.all(cs.map(c=>c.json("start")));
 }
 describe("session rooms",()=>{
-  it("relays only between current entrants, excluding waiting and returned players",async()=>{
+  it("never relays race data over the control socket",async()=>{
     const {h,cs,code}=await setup(); await start(h,cs,code);
     const late=await Client.join(code,"Late");
     cs[1].ws.send(new Uint8Array([5,0,99]).buffer);
-    expect([...(await h.binary())]).toEqual([5,1,99]);
+    cs[1].sendJson({type:"ping",t:1}); await cs[1].json("pong");
+    await expect(h.next(f=>typeof f!=="string",50)).rejects.toThrow("timed out");
     late.sendJson({type:"ping",t:1}); await late.json("pong"); late.drain();
     await expect(late.next(f=>typeof f!=="string",50)).rejects.toThrow("timed out");
     h.sendJson({type:"back"}); await snap(h,r=>!r.members[0].inRace);
@@ -275,6 +276,36 @@ describe("session rooms",()=>{
     await start(h,cs,code);
     for(let i=0;i<10;i++)cs[i].sendJson({type:"finish",ticks:600+i,place:i+1});
     expect((await snap(h,r=>r.lastRace)).settings.track).toBe(12);
+  });
+  // Finding 166: the game's online list as a host sends it (online_menu.c tracks, limits from
+  // func_00182290), with Salt City MX (17, six riders) and Salt City TD (18, eight); MOSH pick-only.
+  const gameTracks=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,23,24,25];
+  const gameLimits=gameTracks.map(t=>[0,1,2,3,5,11,12,19,20].includes(t)?10:[4,10,13,16,18,22,24].includes(t)?8:6);
+  it("takes the game's list with both Salt City events and their rider limits",async()=>{
+    const {h,cs,code}=await setup(8);
+    h.sendJson({type:"settings",track:17,then:"next",rotation:gameTracks,trackLimits:gameLimits,pickOnly:[23]});
+    await snap(h,r=>r.rotation.length===25&&r.settings.track===17);
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)),async(room:any)=>{
+      expect([room.trackLimit(room.state,17),room.trackLimit(room.state,18)]).toEqual([6,8]);
+      expect(room.fittingRotation(room.state,6).slice(0,2)).toEqual([18,19]);
+      expect(room.fittingRotation(room.state,8)).toEqual([18,19,20,22,24,0,1,2,3,4,5,10,11,12,13,16]);
+    });
+    // eight ready on Salt City MX (six places): Salt City TD at grid lock, then NEXT goes on to BC
+    await start(h,cs,code);
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)),async(room:any)=>{
+      expect([room.state.race.track,room.state.race.slots.length,room.state.lastEvent]).toEqual([18,8,"track_switch:17:6:18"]);
+    });
+    for(let i=0;i<8;i++)cs[i].sendJson({type:"finish",ticks:600+i,place:i+1});
+    expect((await snap(h,r=>r.lastRace)).settings.track).toBe(19);
+  });
+  it("races six on Salt City MX without a switch",async()=>{
+    const {h,cs,code}=await setup(6);
+    h.sendJson({type:"settings",track:17,rotation:gameTracks,trackLimits:gameLimits,pickOnly:[23]});
+    await snap(h,r=>r.rotation.length===25&&r.settings.track===17);
+    await start(h,cs,code);
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)),async(room:any)=>{
+      expect([room.state.race.track,room.state.race.slots.length]).toEqual([17,6]);
+    });
   });
   // Finding 128: Ready means "count me in for the next race".
   const readies=(r:any)=>r.members.map((m:any)=>m.ready);

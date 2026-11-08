@@ -1,5 +1,8 @@
 # 138: the update check falls back to our server, and its errors say what went wrong
 
+Status: current
+Checked: 2026-11-04
+
 Why: until now the launcher checked for updates only through GitHub's releases API
 (`https://api.github.com/repos/skuza-oss/downhill-revived/releases/latest`, `update.rs`
 `OFFICIAL_SOURCE`). On 2026-11-02 the owner's own PC couldn't reach api.github.com for an hour

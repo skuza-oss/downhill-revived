@@ -1,5 +1,12 @@
 # 135: where the player and the room are, in dhd.log and in the room list, and rooms made near their creator
 
+Status: current
+Checked: 2026-11-06
+
+Since 0.7.12 (finding 158) race frames go over Cloudflare Realtime SFU from each player's nearest
+Cloudflare location, not through the room, so where the room runs matters for the lobby, pings and
+race setup, not for the riders' snapshots. The rest below still holds.
+
 Why: a European player reported about 300 ms ping. Their 0.7.6 dhd.log had no network data at
 all: it showed a join into a public room that was already racing, then two private rooms made and
 left. A room is a Cloudflare Durable Object (`online/server/src/index.ts`:

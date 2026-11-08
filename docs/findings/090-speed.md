@@ -1,5 +1,9 @@
 # 090: Game speed round 1 (x64 to 144 fps)
 
+Status: current
+Supersedes: parts of 019, 048, 066
+Checked: 2026-11-04
+
 The changes finding 089's profile ranked. Each task has a section here.
 
 ## VU1R: VU1 speed round

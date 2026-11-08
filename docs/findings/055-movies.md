@@ -1,8 +1,13 @@
 # 055 — The movies play (round 40)
 
+Status: partly superseded by 140 (movies shown at 4:3)
+Checked: 2026-11-04
+
 The startup movies (Sony and copyright screens, the Incognito logo, the attract movie) and
 OPTIONS > VIDEO CLIPS now play on the PC with picture and sound. PC SETTINGS > Skip Movies
-(dhd.ini `skip_movies`, DHD_SKIP_MOVIES) is the player's choice again, 0 by default. The race,
+(dhd.ini `skip_movies`, DHD_SKIP_MOVIES) is the player's choice again, then 0 by default (today
+the player default is 1, movies skipped: `skip_movies` in `port/render/settings/src/table.rs`,
+since finding 101). The race,
 gate and bench tools still set DHD_SKIP_MOVIES=1.
 
 ## 1. Why every movie crashed or hung
@@ -182,6 +187,7 @@ pcsx2_retail, lockstep_local and online_race set it too.
   it was taken out.
 
 Not done:
-- The picture is shown at 4:3 in widescreen too, as the PS2 showed it.
+- The picture is shown at 4:3 in widescreen too, as the PS2 showed it. (Done later: movies fill
+  a widescreen window with their own picture blurred at the sides, finding 140.)
 - The movies' sound is mixed at the PCM's own level. The volume the PS2 player gives 989snd's
   stream was not checked against PCSX2, and no game volume setting applies to it.

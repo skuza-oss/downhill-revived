@@ -9,8 +9,8 @@
 //! The caller (render.rs, N6) ends its open render pass first (native_end_pass) and passes the
 //! native objects it owns (`ConvertObjects`) and the four source surfaces as they stand
 //! (`ConvertSource`), so this module needs nothing of init.rs, shared.rs or surfaces.rs beyond
-//! wgpu handles. The returned bind group is the draw's group 1 (the converted texture with the
-//! nearest sampler, native_texture_group); it is a cheap clone of the cached one.
+//! wgpu handles. The returned bind group is the draw's group 1 (the converted texture's R32Uint
+//! texels with the texels sampler, as a decoded texture's); it is a cheap clone of the cached one.
 //!
 //! Referee: native_replay on the conversion pictures (N5; run with N6 at the gate).
 use crate::abi::{DhdrConvert, DhdrConvertConstants};
@@ -30,9 +30,9 @@ pub struct ConvertObjects<'a> {
     pub layout: &'a wgpu::BindGroupLayout,
     /// The inverse table (init.rs INVERSE_WORDS u32, inverse_table).
     pub inverse: &'a wgpu::Buffer,
-    /// The draw texture layout and its nearest sampler (native_texture_group).
-    pub texture_layout: &'a wgpu::BindGroupLayout,
-    pub nearest: &'a wgpu::Sampler,
+    /// The draw texels layout and its sampler (a decoded texture's group, `NativeShared::texels_group`).
+    pub texels_layout: &'a wgpu::BindGroupLayout,
+    pub texels_sampler: &'a wgpu::Sampler,
     /// Bound where a slot has no colour (or no depth) surface, and where there is no base.
     pub dummy_view: &'a wgpu::TextureView,
     pub dummy_texels_view: &'a wgpu::TextureView,
@@ -127,17 +127,19 @@ impl Converts {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
+                // Texels as a decoded texture's (each its RGBA bytes): the draws read it by the
+                // `_u` entry points, the same bytes a unorm8 texture gave (finding 149).
+                format: wgpu::TextureFormat::R32Uint,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("native converted group"),
-                layout: o.texture_layout,
+                layout: o.texels_layout,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(o.nearest) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(o.texels_sampler) },
                 ],
             });
             *slot = Some(Converted { _texture: texture, view, group, w, h });

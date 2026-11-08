@@ -1,5 +1,8 @@
 # NONMATCHING C for the last unmatched functions (2026-10-21)
 
+Status: current
+Checked: 2026-11-04
+
 The 26 functions left `failed` in the queue never got a byte-exact match. 25 now have readable,
 behaviour-equivalent C next to their original asm. The default build still uses the asm and
 matches retail. The 26th, func_00220DA0, is hand-written asm and stays asm.

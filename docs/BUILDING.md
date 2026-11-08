@@ -91,8 +91,9 @@ into `build/host64-exe/`.
 (`port/hle/game_data.c`); the executable keeps only the words the port changes in them
 (pointers and code addresses, `port/tools/data.py`).
 
-To run a build, copy `dhd.exe` (with `dxcompiler.dll`) to a folder of its own and start it. It
-asks for your `.iso` the first time. `DHD_ISO=<path to iso>` in the environment skips the question.
+To run a build, copy `dhd.exe` (with `dxcompiler.dll`) to a folder of its own and start it with
+the disc image named: `iso = <path>` in its `dhd.ini` or `DHD_ISO=<path>` in the environment. The
+game has no disc dialog of its own; for players the launcher picks the disc (finding 093).
 
 ### Tools outside the checkout
 
@@ -127,6 +128,43 @@ refreshed). Several checkouts building at once can take turns: with `DHD_BUILD_S
 place (`~/scoop/apps/llvm/current/bin`). `build_host64.py` names the Visual Studio and Windows SDK
 folders it uses (MSVC 14.51, SDK 10.0.26100.0) at its top.
 
+### Build times
+
+Measured per platform and step in finding 151. What keeps a rebuild short:
+
+- `build_host64.py` prints each step's time as it ends (`step SDL3`, `Rust library`, `wasm2c`,
+  `prepare C`, `chunks`, `C`, `link`) and a `steps:` line at the end; the object cache prints its
+  hits and misses.
+- The module's C from wasm2c, prepared and cut into chunks, is made again only when the module, the
+  tools that make it, WABT or the target changed (`build/<target>/prepared.json`): a rebuild after a
+  host, Rust or renderer change skips it (`module C as before`).
+- A split module (`--num-outputs` above 1: Android's default 8, and the C the Mac and Linux builds
+  take) is cut into content-defined chunks (`prepare_wasm2c.stable_units`): a chunk ends after a
+  function whose name hashes to a cut, is named after its first function and declares only what it
+  uses, so a changed function changes one chunk and the object cache has the rest. A change that
+  moves data addresses (new data in the module) still changes every function that uses them.
+  `python port/tools/test_wasm2c_chunks.py` checks it. The chunks are for development only: their
+  smaller units inline less, and the game ran ~1.5 % slower on the throttled Mi 11i (finding 151).
+  A release build passes `build_host64.py --release` (one unit or wasm2c's own parts, the shipped
+  code as before); it writes `split.txt` beside the game (`one`, `wasm2c` or `chunks`; an APK
+  carries it as `assets/dhd-split.txt`), and `package_release.py` and the APK's release check
+  refuse `chunks` (`package_release.py` passes `--release` itself for Windows and Android).
+- Windows builds the module as one unit (`core.c`, about 160 MB of C, one compiler thread, the
+  longest step after any change of the core). `build.py -- --num-outputs 8` builds it in chunks
+  instead, for a development loop: the same game, but other code (functions are no longer static
+  to one unit, so fewer are inlined), so a speed measurement uses the default and a release
+  `--num-outputs 8 --release`.
+- The core cache's key remembers each input file's hash by its path, size, modification time and
+  file id (`DHD_DEVCACHES/dhd-modulecache/file-hashes.json`), so only changed files are read.
+- The browser build's wasm-opt passes keep their output in the object cache by tool, flags and input
+  (`objcache.tool_output`).
+- Android compiles with half the machine's threads by default (chunks are small; wasm2c's own parts
+  needed 2). With `--pgo-use`, the profile is part of every object's key, so a second build with the
+  same profile and core is all hits. A profile stays useful across core changes: clang applies a
+  function's counts only while the function is unchanged (its control-flow hash), so the changed
+  functions build as without PGO and the rest keep theirs. Record a new one when the hot code (EE,
+  VU, GS) changed, and at least once per release (finding 146).
+
 ### Android (arm64 APK)
 
 `python port/android/build_apk.py --wasm build/wasm/dhd_core.wasm` builds `libmain.so` with
@@ -156,8 +194,8 @@ MAJOR * 10000 + MINOR * 100 + PATCH (0.7.7: 707), so it grows with every release
 
 ### macOS (Apple silicon) and Linux (x64)
 
-Each is built on its own machine with the same script, `build_host64.py --target macos-arm64` or
-`--target linux-x64`, then packaged there with `package_release.py --platform mac|linux --game
+Each is built on its own machine with the same script, `build_host64.py --release --target
+macos-arm64` or `--release --target linux-x64`, then packaged there with `package_release.py --platform mac|linux --game
 build/host64-<macos|linux>/dhd64 --elf PATH/SCUS_971.77` (it builds the launcher with
 `build_launcher.py`; the Mac zip's app is signed ad hoc).
 
@@ -167,7 +205,11 @@ build/host64-<macos|linux>/dhd64 --elf PATH/SCUS_971.77` (it builds the launcher
   naming a folder that holds WABT's `include/` and `share/`; `--simde` (or `SIMDE_DIR`) names SIMDe.
   `DHD_VUTEXT` names `vutext.bin` when the checkout has no `assets/`. An 8 GB Mac builds with 4
   jobs (the target's default). The first `cargo` run needs the network once
-  (`CARGO_NET_OFFLINE=false cargo fetch --locked` in `port/render`).
+  (`CARGO_NET_OFFLINE=false cargo fetch --locked` in `port/render`). Set `DHD_OBJCACHE_DIR` there
+  too: off Windows the object cache is off without it (a Mac rebuild with no change then compiles
+  everything again). If every link fails with `ld: tapi error ... unknown architecture` (the
+  command-line tools' newest SDK is newer than their `ld`), point the build at Xcode's SDK:
+  `export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)`.
 - Linux (or WSL): clang, lld, CMake, Ninja, and the X11, Wayland and PipeWire/PulseAudio/ALSA
   development packages SDL3 finds; WABT in `/opt/wabt`. The Rust library is built by `rustgs.py` on
   the machine, or in WSL without cargo by the Windows side through WSL's interop. The launcher needs
@@ -188,11 +230,14 @@ dirs go to `DHD_CARGO_DIR`, else `~/.cache/dhd-cargo`.
 `port/tools/sdl3.py`, which `package_release.py` runs, provides SDL3 as a static library, so
 `dhd.exe` stays one file:
 
-- it downloads `SDL3-3.4.18.tar.gz` from SDL's GitHub release into `build/downloads/` and checks
-  its SHA-256 (pinned in the script; any other file is refused), so later builds need no network;
+- it downloads `SDL3-3.4.18.tar.gz` from SDL's GitHub release into `DHD_DEVCACHES/downloads/` and
+  checks its SHA-256 (pinned in the script; any other file is refused), so later builds, in any
+  checkout, need no network;
 - it builds with CMake + Ninja + clang for `x86_64-pc-windows-msvc`, the static C runtime, only the
   window, audio, joystick, gamepad, HIDAPI and event parts, into `build/port/sdl3/3.4.18-x86_64/`
-  (a few minutes, once per checkout).
+  (a few minutes), and keeps the library and its headers in `DHD_DEVCACHES/dhd-sdl3/` under the
+  recipe and the compiler: another checkout copies them instead of building SDL again (finding 151).
+  The macOS, Linux and Android builds of SDL are kept the same way.
 
 To change the version, update `VERSION` and `SHA256` in `sdl3.py` together (the hash of the
 release's `.tar.gz` as GitHub lists it). `python port/tools/sdl3.py` builds it alone.
@@ -224,7 +269,8 @@ Every run also writes `build/release/SHA256SUMS` (each release file and `latest.
 
 `python port/tools/test_runtime.py` builds and runs the runtime and HLE tests, among them
 `test_keyboard` (keyboard layout and steering ramp) and `test_gamepad` (SDL starts and lists the
-controllers; none needed). These small test programs are still 32-bit Windows builds.
+controllers; none needed). Test programs run where the game runs their code: the core's C as wasm32
+guest programs through wasm2c, the host's on the 64-bit host (`port/tools/testprog.py`, finding 104).
 
 The renderer's tests run the Rust renderer in x64: `python port/tools/test_gs_wgpu.py`
 (test_gpu, test_depth, test_present) and `python port/tools/gs_golden.py compare KIND` (replay
@@ -313,3 +359,36 @@ On Android `auto_update = off` also turns off the once-a-day update notice.
 `port/include/version.h` holds the version, the only place it is written. `package_release.py`
 names the zip after it and writes `build/release/latest.json` beside it (version, the release
 asset URL, the zip's SHA-256 and size) for the updater; publish both as release assets.
+
+### Release steps
+
+Bump `port/include/version.h`, `build_wasm.py`, `package_release.py`, publish the zip and
+`latest.json` as `v<version>`, then raise `MIN_VERSION` in
+`online/server/wrangler.jsonc` and deploy when older versions should stop racing (finding 054,
+section 6; finding 088, CL3). macOS and Linux (finding 093, Release): `package_release.py
+--platform mac|linux --game PATH` on that machine (the mac zip is signed there), then
+`--merge` its `latest.json` into the Windows one; publish every zip with the one `latest.json`.
+Installers (finding 125, after 0.7.5): the same runs also make each platform's installer from the
+checked files (`port/tools/installers.py`; `--no-installer` skips it): the per-user Windows setup
+(`-win-setup.exe`, Inno Setup 7 via `innosetup.py`, `port/release/installer/windows.iss`), the
+macOS DMG (on the Mac) and the Linux AppImage (`-linux-experimental.AppImage`, Tauri's bundle with
+WebKitGTK inside; its `linux-appimage` entry goes into latest.json and `--merge` carries it).
+Publish them next to the zips; installed copies keep the player's files in the system's app-data
+folder and update from the zips (the AppImage from its own entry). None is code-signed.
+Android (finding 143): `package_release.py --platform android` with the release key's
+`DHD_ANDROID_*` variables builds, checks and adds the `-android-experimental.apk` (latest.json's
+`android` entry); every run writes `SHA256SUMS`. The release page gets `port/release/ANDROID-NOTES.md`.
+Crash symbols (finding 152): `build/release/` also holds files that are kept, never published (not
+in `SHA256SUMS`): the Windows link map `-win.map` (`crash_stack.py` reads dhd.log's crash stacks
+with it) and `-android-libmain.debug.so`, the APK's `libmain.so` before stripping (copied only when
+its GNU build ID is the APK's). Keep both with the release's other files; a player's
+`libmain.so+0x...` frame (dhd.log's backtrace, or the tombstone a shared log carries) is named by
+`llvm-symbolizer --obj=DownhillRevived-<version>-android-libmain.debug.so 0xOFFSET` or
+`llvm-addr2line -fe ... 0xOFFSET` (the NDK's `toolchains/llvm/prebuilt/*/bin`). The macOS and Linux
+binaries keep their symbol tables, so their backtraces name functions already. Publish exactly
+the files `SHA256SUMS` lists, plus `SHA256SUMS`.
+Since 0.7.0 the mac and linux zips are `-mac-experimental.zip` and `-linux-experimental.zip`
+(finding 093, "0.7.0": built and checked on all three, published 2026-10-28; Linux is linked on
+Ubuntu 22.04 and runs on glibc 2.35 and later, which `package_release.py` checks).
+
+Before the version commit, run the doc-gardening checklist (`docs/RELEASE-CHECKLIST.md`).

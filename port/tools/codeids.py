@@ -1,4 +1,4 @@
-"""The code and data identity tables of dhd_core.wasm (finding 075, the code pointers of the state
+"""The code and data identity tables of dhd_core.wasm (finding 081, the code pointers of the state
 trace).
 
 A guest word that holds a code address names a function, and the address moves whenever the code

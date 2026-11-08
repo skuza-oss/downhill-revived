@@ -164,3 +164,63 @@
 "Insufficient storage. Available: %llu MB, needed: %llu MB." = "存储空间不足。可用：%llu MB，所需：%llu MB。";
 "Open the game automatically" = "自动启动游戏";
 "Apply Changes" = "应用更改";
+
+"Controller Stick Deadzone" = "手柄摇杆死区";
+
+"Customize Controls" = "自定义控制";
+"Arrange and remap touch controls" = "排列并重新映射触控按钮";
+"Drag controls, choose their actions and save a layout for each orientation." = "拖动控件、选择动作，并为每种屏幕方向保存布局。";
+"Physical Controllers" = "实体手柄";
+"Controller button bindings" = "手柄按键映射";
+"Done" = "完成";
+"Orientation" = "屏幕方向";
+"Portrait" = "竖屏";
+"Landscape" = "横屏";
+"Drag a control to move it. Select a button to change its action." = "拖动控件以移动。选择按钮可更改其动作。";
+"Touch Layout" = "触控布局";
+"Cancel" = "取消";
+"Could not save controls" = "无法保存控制设置";
+"Control" = "控件";
+"Action" = "动作";
+"Visible" = "显示";
+"Size" = "大小";
+"Restore this layout" = "重置此布局";
+"Keep the stick, Menu, Cross, Triangle, START and R1 visible." = "请保持摇杆、菜单、叉、三角、START 和 R1 可见。";
+"Analog Stick" = "模拟摇杆";
+"Cross" = "叉";
+"Circle" = "圆圈";
+"Square" = "方块";
+"Triangle" = "三角";
+"Controller" = "手柄";
+"Player %lld" = "玩家 %lld";
+"Changes apply immediately. Essential menu buttons stay assigned." = "更改立即生效。菜单必需按键会保留映射。";
+"Button bindings" = "按键映射";
+"Main input" = "主要输入";
+"Alternate input" = "备用输入";
+"Analog Sticks" = "模拟摇杆";
+"Swap Sticks" = "交换摇杆";
+"Invert left X" = "反转左摇杆 X 轴";
+"Invert left Y" = "反转左摇杆 Y 轴";
+"Invert right X" = "反转右摇杆 X 轴";
+"Invert right Y" = "反转右摇杆 Y 轴";
+"Restore controller bindings" = "重置手柄映射";
+"Could not update bindings" = "无法更新按键映射";
+
+"Horizontal position" = "水平位置";
+"Vertical position" = "垂直位置";
+"Discard unsaved changes?" = "放弃未保存的更改？";
+"Discard Changes" = "放弃更改";
+"Keep Editing" = "继续编辑";
+"Restore this layout?" = "重置此布局？";
+"The other orientation will keep its current layout." = "另一方向的布局将保持不变。";
+"Restore controller bindings?" = "重置手柄按键映射？";
+"Only Player %lld will be reset." = "仅重置玩家%lld的设置。";
+
+"Control options" = "控件选项";
+"Drag to move. Rotate the device to edit the other orientation." = "拖动以移动。旋转设备以编辑另一方向。";
+
+"Undo" = "撤销";
+"Redo" = "重做";
+"Collapse tools" = "收起工具";
+"Expand tools" = "展开工具";
+"Hidden" = "已隐藏";

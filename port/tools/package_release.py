@@ -34,8 +34,10 @@ reads (port/launcher/src-tauri/src/update.rs, finding 054): {"version", "url", "
 there (--merge adds the entries of another machine's). Publish the zips and latest.json, with every
 platform in it, as assets of the GitHub release tagged v<version>. Every run (and --merge) also
 writes SHA256SUMS beside them: the SHA-256 of each release file there (DownhillRevived-<version>-*
-but the link map, and latest.json), as sha256sum prints them; after copying another machine's
-files in, --sums writes it again.
+but the symbols, and latest.json), as sha256sum prints them; after copying another machine's
+files in, --sums writes it again. The symbols (KEPT_SUFFIXES: the Windows link map, Android's
+libmain.debug.so) stay beside the release files and are kept with them, never published: they
+name the code addresses of players' crash reports (finding 152).
 
 Android (finding 143, experimental): --platform android builds the release APK with
 port/android/build_apk.py --release from --wasm (signed with the key the DHD_ANDROID_* variables
@@ -43,10 +45,16 @@ name; never in the repository) or takes a ready one (--apk), and puts it in the 
 DownhillRevived-<version>-android-experimental.apk, with latest.json's "android" entry (the game's
 update notice reads it, port/host/android_update.c; launchers ignore the key). The APK carries
 LICENSE.txt and THIRD-PARTY-NOTICES.txt (with the Rust crates linked into libmain.so) as assets.
+--pgo-use PROFDATA builds libmain.so with that merged phone profile (build_apk.py's --pgo-use;
+finding 146: record one at least once per release).
 Checked: build_apk.check_release (one signer, the release certificate build_apk.RELEASE_CERT_SHA256
 unless --new-signing-key, not debuggable, version, arm64-v8a only), every file in
 it as the zips' are (game data names and bytes, servers, local paths), libmain.so's version and
 its absolute paths and servers as the game's.
+Kept beside it, not published: DownhillRevived-<version>-android-libmain.debug.so, build_host64.py's
+libmain.so before its symbols were stripped, when its GNU build ID is the APK's libmain.so's
+(dhd.log's backtrace and Android's tombstone give libmain.so+offsets; llvm-symbolizer
+--obj=that-file 0xOFFSET or llvm-addr2line -fe that-file 0xOFFSET name them; finding 152).
 
 The Windows zip holds one folder, DownhillRevived-<version>, with:
   DownhillRevived.exe      the launcher (port/launcher, finding 093; built by build_launcher.py): settings,
@@ -616,10 +624,21 @@ def source_changes():
     return r.stdout.splitlines()
 
 
+def require_release_split(out):
+    """Stop unless the game in out was built from one unit or wasm2c's own parts (build_host64.py
+    --release, as every release before finding 151): its development chunks cost the game ~1.5 % on
+    a phone. build_host64.py writes which in split.txt (one, wasm2c, chunks)."""
+    split = out / 'split.txt'
+    kind = split.read_text().strip() if split.exists() else 'unknown (no split.txt)'
+    if kind not in ('one', 'wasm2c'):
+        sys.exit("%s: the game was built from %s C, not a release build (build_host64.py --release); "
+                 "not packaged" % (out, kind))
+
+
 def build_exe(wasm, sdl_lib, sdl_include, jobs):
     """dhd64.exe from the module, by build_host64.py on the Rust renderer, under WORK."""
     cmd = [sys.executable, str(ROOT / 'port' / 'tools' / 'build_host64.py'), str(wasm),
-           '--num-outputs', '8', '--sdl-lib', str(sdl_lib), '--sdl-include', str(sdl_include),
+           '--num-outputs', '8', '--release', '--sdl-lib', str(sdl_lib), '--sdl-include', str(sdl_include),
            '--out', str(WORK), '--jobs', str(jobs)]
     print('building: ' + ' '.join(cmd), flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
@@ -718,14 +737,43 @@ def names_server_or_path(content, settings):
         s.lower() in content.lower() for s in FORBIDDEN + sorted(server_strings(settings))))
 
 
+# Release files kept beside the published ones, never published (not in SHA256SUMS): the symbols that
+# name the code addresses of players' crash reports (finding 152)
+KEPT_SUFFIXES = ('.map', '.debug.so')
+
+
 def write_sums(folder, version):
     """SHA256SUMS in folder: every release file of version there (DownhillRevived-<version>-*, but the
-    link map, which is kept, not published) and latest.json, as `sha256sum` prints them."""
+    symbols, KEPT_SUFFIXES, which are kept, not published) and latest.json, as `sha256sum` prints them."""
     names = sorted(p.name for p in folder.glob('DownhillRevived-%s-*' % version)
-                   if p.is_file() and p.suffix != '.map') + (['latest.json'] if (folder / 'latest.json').exists() else [])
+                   if p.is_file() and not p.name.endswith(KEPT_SUFFIXES)) + (['latest.json'] if (folder / 'latest.json').exists() else [])
     (folder / 'SHA256SUMS').write_text(''.join('%s  %s\n' % (hashlib.sha256((folder / n).read_bytes()).hexdigest(), n)
                                                for n in names), encoding='utf-8', newline='\n')
     return names
+
+
+def gnu_build_id(data):
+    """An ELF file's GNU build ID in hex (its NT_GNU_BUILD_ID note: name size 4, a descriptor of 8 to
+    64 bytes, type 3, "GNU"), '' without one."""
+    m = re.search(rb'\x04\x00\x00\x00([\x08-\x40])\x00\x00\x00\x03\x00\x00\x00GNU\x00', data)
+    return data[m.end():m.end() + m.group(1)[0]].hex() if m else ''
+
+
+def keep_android_symbols(apk_lib, out):
+    """build_host64.py's unstripped libmain.debug.so beside the release APK out, as
+    DownhillRevived-<version>-android-libmain.debug.so, when its build ID is apk_lib's (the APK's
+    libmain.so: --apk may name an APK of another build); the path kept, or None."""
+    debug = ROOT / 'build' / 'android' / 'libmain.debug.so'
+    wanted = gnu_build_id(apk_lib)
+    if not wanted or not debug.is_file() or gnu_build_id(debug.read_bytes()) != wanted:
+        print('  note: no libmain.debug.so with build ID %s; native crash frames of this APK can\'t be named'
+              % (wanted or '(none)'))
+        return None
+    kept = out.with_name(out.name.replace('-experimental.apk', '-libmain.debug.so'))
+    shutil.copyfile(debug, kept)
+    print('  symbols %s (build ID %s; keep it, never publish it: it names the libmain.so+0x... frames of '
+          'players\' crash reports)' % (kept, wanted))
+    return kept
 
 
 def android_release(a, platform, out, manifest_path, page):
@@ -747,7 +795,7 @@ def android_release(a, platform, out, manifest_path, page):
         (texts / 'THIRD-PARTY-NOTICES.txt').write_bytes(lf((RELEASE / 'THIRD-PARTY-NOTICES.txt').read_bytes().rstrip()
                                                           + b'\n\n' + notices.encode('utf-8')))
         cmd = [sys.executable, str(ROOT / 'port' / 'android' / 'build_apk.py'), '--release', '--wasm', str(a.wasm.resolve()),
-               '--jobs', str(a.jobs), '--assets', str(texts)] + (['--new-signing-key'] if a.new_signing_key else [])
+               '--jobs', str(a.jobs), '--assets', str(texts)] + (['--new-signing-key'] if a.new_signing_key else [])             + (['--pgo-use', str(a.pgo_use.resolve())] if a.pgo_use else [])
         print('building: ' + ' '.join(cmd), flush=True)
         if subprocess.run(cmd).returncode:
             sys.exit('build_apk.py --release failed')
@@ -790,6 +838,8 @@ def android_release(a, platform, out, manifest_path, page):
         sys.exit('%s is not fit to publish:\n  %s' % (apk, '\n  '.join(problems[:40])))
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(apk, out)
+    with zipfile.ZipFile(out) as z:
+        keep_android_symbols(z.read('lib/arm64-v8a/libmain.so'), out)
     apk_hash = hashlib.sha256(out.read_bytes()).hexdigest()
     url = (a.base_url.rstrip('/') + '/' + out.name if a.base_url
            else '%s/download/v%s/%s' % (RELEASES, a.version, out.name))
@@ -847,11 +897,17 @@ def main():
     ap.add_argument('--elf', type=Path, default=ROOT / 'iso' / 'SCUS_971.77', help='your retail ELF, for the game-data scan')
     ap.add_argument('--no-installer', action='store_true', help='only the zip: no Windows installer, AppImage or DMG')
     ap.add_argument('--apk', type=Path, help='android: a ready build_apk.py --release APK (default: build it)')
+    ap.add_argument('--pgo-use', type=Path, metavar='PROFDATA',
+                    help="android: build libmain.so with this merged profile (build_apk.py's --pgo-use)")
     ap.add_argument('--new-signing-key', action='store_true',
                     help='android: a deliberate key change: accept a signer other than build_apk.RELEASE_CERT_SHA256')
     ap.add_argument('--sums', action='store_true', help='only write SHA256SUMS again in the release folder')
     a = ap.parse_args()
     platform = PLATFORMS[a.platform]
+    if a.pgo_use and (platform.key != 'android' or a.apk or a.merge or a.sums):
+        sys.exit('--pgo-use is for building the APK: --platform android without --apk, --merge or --sums')
+    if a.pgo_use and not a.pgo_use.is_file():
+        sys.exit('%s: no such profile' % a.pgo_use)
     version = header_version()
     if a.version and a.version != version:
         sys.exit('--version %s, but port/include/version.h says %s (the exe reports that one); bump the header '
@@ -907,6 +963,7 @@ def main():
             import sdl3  # noqa: E402
             sdl_lib, sdl_include = sdl3.build(sdl3.X64_TARGET)
         exe = build_exe(wasm, Path(sdl_lib).resolve(), Path(sdl_include).resolve(), a.jobs)
+    require_release_split(exe.parent)
     data = exe.read_bytes()
     if binary_kind(data) != platform.kind:
         sys.exit('%s is not a %s executable (%s)' % (exe, platform.kind, binary_kind(data) or 'unknown'))

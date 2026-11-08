@@ -1,0 +1,13 @@
+<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <linearGradient gradientUnits="userSpaceOnUse" x1="-819.2" x2="819.2" spreadMethod="pad" gradientTransform="matrix(0 0.0390625 -0.0390625 0 32 32)" id="gradient0">
+      <stop offset="0" stop-color="#333341"/>
+      <stop offset="1" stop-color="#1E1E23"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <path stroke="none" fill="url(#gradient0)" d="M64 32 Q64 45.25 54.6 54.6 45.25 64 32 64 18.75 64 9.35 54.6 0 45.25 0 32 0 18.75 9.35 9.35 18.75 0 32 0 45.25 0 54.6 9.35 64 18.75 64 32 M58 32 Q58 21.25 50.35 13.6 42.75 6 32 6 21.25 6 13.6 13.6 6 21.25 6 32 6 42.75 13.6 50.35 21.25 58 32 58 42.75 58 50.35 50.4 L50.4 50.35 Q58 42.75 58 32"/>
+    <path stroke="none" fill="#222229" d="M58 32 Q58 42.75 50.4 50.35 L50.35 50.4 Q42.75 58 32 58 21.25 58 13.6 50.35 6 42.75 6 32 6 21.25 13.6 13.6 21.25 6 32 6 42.75 6 50.35 13.6 58 21.25 58 32"/>
+    <path fill="none" stroke="#323240" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" d="M58 32 Q58 42.75 50.4 50.35 L50.35 50.4 Q42.75 58 32 58 21.25 58 13.6 50.35 6 42.75 6 32 6 21.25 13.6 13.6 21.25 6 32 6 42.75 6 50.35 13.6 58 21.25 58 32"/>
+  </g>
+</svg>

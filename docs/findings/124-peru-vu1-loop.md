@@ -1,5 +1,8 @@
 # 124: PERU weather inherits particle floats as VU1 loop counts
 
+Status: current
+Checked: 2026-11-04
+
 The warning `vu1: microprogram at 0x1F50 didn't end` comes from an uninitialized
 weather batch record in the EE particle pool. VU execution faithfully consumes
 the bad input. The fix initializes the producer's four per-view records;

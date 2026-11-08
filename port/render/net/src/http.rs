@@ -164,7 +164,7 @@ fn get_once(url: &str) -> Result<Answer, String> {
 }
 
 /// A chunked body's data (RFC 9112 section 7.1).
-fn dechunk(mut body: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn dechunk(mut body: &[u8]) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     loop {
         let line = body.windows(2).position(|w| w == b"\r\n").ok_or("short chunk")?;

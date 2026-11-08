@@ -486,6 +486,9 @@ struct DeviceShared {
     render_passes: Mutex<FastHashMap<RenderPassKey, vk::RenderPass>>,
     // Downhill Revived: survives command-pool resets; all access uses this one lock.
     framebuffers: Mutex<FastHashMap<FramebufferKey, Arc<Framebuffer>>>,
+    // Downhill Revived: one view per swapchain image and view description, kept until the
+    // swapchain's resources are released, so its framebuffer is found in the cache above.
+    surface_views: Mutex<FastHashMap<SurfaceViewKey, (vk::ImageView, ResourceIdentity<vk::ImageView>)>>,
     sampler_cache: Mutex<sampler::SamplerCache>,
     memory_allocations_counter: InternalCounter,
 
@@ -508,6 +511,9 @@ impl Drop for DeviceShared {
     fn drop(&mut self) {
         // Downhill Revived: destroy cached children before their render passes/device.
         self.framebuffers.lock().clear();
+        for (_, (raw, _)) in self.surface_views.lock().drain() {
+            unsafe { self.raw.destroy_image_view(raw, None) };
+        }
         for &raw in self.render_passes.lock().values() {
             unsafe { self.raw.destroy_render_pass(raw, None) };
         }
@@ -528,6 +534,32 @@ impl DeviceShared {
             .lock()
             .retain(|key, _| !key.attachment_identities.contains(&identity));
     }
+
+    // Downhill Revived: the kept views of these swapchain images, destroyed when the swapchain's
+    // resources are released (after its device wait; no command may use them any more).
+    fn forget_surface_views(&self, images: &[vk::Image]) {
+        let gone: Vec<(vk::ImageView, ResourceIdentity<vk::ImageView>)> = {
+            let mut views = self.surface_views.lock();
+            let keys: Vec<SurfaceViewKey> = views.keys().filter(|k| images.contains(&k.image)).cloned().collect();
+            keys.iter().filter_map(|k| views.remove(k)).collect()
+        };
+        for (raw, identity) in gone {
+            self.invalidate_framebuffers(identity);
+            unsafe { self.raw.destroy_image_view(raw, None) };
+        }
+    }
+}
+
+/// Downhill Revived: what a swapchain image's view is made from (`create_texture_view`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SurfaceViewKey {
+    image: vk::Image,
+    format: vk::Format,
+    view_type: vk::ImageViewType,
+    aspect: vk::ImageAspectFlags,
+    mips: (u32, u32),
+    layers: (u32, u32),
+    usage: vk::ImageUsageFlags,
 }
 
 pub struct Device {
@@ -741,6 +773,8 @@ pub struct Texture {
     format: wgt::TextureFormat,
     copy_size: crate::CopyExtent,
     identity: ResourceIdentity<vk::Image>,
+    /// Downhill Revived: a swapchain image (its views are kept, `DeviceShared::surface_views`).
+    surface_image: bool,
 
     // The `drop_guard` field must be the last field of this struct so it is dropped last.
     // Do not add new fields after it.
@@ -777,6 +811,8 @@ pub struct TextureView {
     dimension: wgt::TextureViewDimension,
     texture_identity: ResourceIdentity<vk::Image>,
     view_identity: ResourceIdentity<vk::ImageView>,
+    /// Downhill Revived: owned by `DeviceShared::surface_views`, not destroyed with the view.
+    surface_cached: bool,
 }
 
 impl crate::DynTextureView for TextureView {}

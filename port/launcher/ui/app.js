@@ -8,7 +8,7 @@ const listen = T.event.listen;
 const appWindow = T.window.getCurrentWindow();
 const $ = (id) => document.getElementById(id);
 
-// The settings pages: the rows of OPTIONS > PC SETTINGS plus the dhd.ini lines players change. Each
+// The settings pages: the rows of OPTIONS > REVIVED SETTINGS plus the dhd.ini lines players change. Each
 // setting's choices (value and label) and default are the game's (dhd_settings, port/render/settings,
 // through settings_schema); a switch's are off then on. A row with `when` is greyed out, with
 // `offHint`, while that doesn't hold. A hint may be a function (drawn with the schema); a select's
@@ -42,14 +42,17 @@ const TABS = [
     { type: 'sticks' },
     { key: 'prompts', label: 'Button icons', hint: 'The buttons the game shows. Auto follows your controller.', type: 'seg' },
     { key: 'vibration', label: 'Vibration', type: 'switch' },
+    { type: 'bindings' },
   ]],
   ['Online', [
+    { key: 'names', label: 'Player names', hint: 'Names above other riders in online races. Medium is the original size.', type: 'seg' },
     { key: 'name', label: 'Rider name', hint: () => `Shown over your rider in online races. ${state.schema.name.rule.hint}`, type: 'name' },
     { key: 'server', label: 'Race server', hint: 'Leave empty for the official server', type: 'text', placeholder: 'wss://dhd.skuza.app' },
     { key: 'discord', label: 'Discord status', hint: 'Shows what you are playing on your Discord profile while Discord runs', type: 'switch' },
   ]],
 ];
 const GAME_TAB = 2;
+const CONTROLS_TAB = 3;
 const ONLINE_TAB = 4;
 const OFFLINE_ONLY = "Offline only: this disc image's game files are different from the USA disc's (SCUS-97177): a bad or modified dump. Make a new dump or choose another image.";
 
@@ -310,11 +313,12 @@ function renderTabs() {
 }
 
 function renderRows() {
-  const rows = TABS[state.tab][1].map((row) => {
+  const rows = TABS[state.tab][1].flatMap((row) => {
     if (row.type === 'sticks') {  // stick.js: the dead zone, live from the controller
       const { canvas, note } = stickIndicator(() => get('stick_dead_zone'));
       return el('div', { class: 'row sticks-row' }, el('div', { class: 'l' }, note), canvas);
     }
+    if (row.type === 'bindings') return bindingsBlock();  // controls.js: keys and buttons
     const off = row.when ? !row.when() : false;
     let hint = off ? row.offHint : typeof row.hint === 'function' ? row.hint() : row.hint;
     let title = null;
@@ -338,6 +342,7 @@ async function resetTab() {
   try {
     // a text row is emptied (its default, the official server, stays the game's to name)
     for (const row of rows) if (row.key && row.type !== 'disc' && row.type !== 'name') await write(row.key, row.type === 'text' ? '' : state.schema[row.key].default);
+    if (state.tab === CONTROLS_TAB) await resetBindings();  // the keyboard's and both controllers' layouts
     flash(`${name} is back to the defaults`);
   } catch (e) {
     fail(String(e));
@@ -656,6 +661,8 @@ async function play() {
 
 async function start() {
   const snap = await invoke('snapshot');
+  // macOS supplies real window buttons over the title bar's drag region.
+  document.querySelector('.win-ctl').hidden = snap.native_window_controls;
   state.schema = Object.fromEntries((await invoke('settings_schema')).map((s) => [s.key, s]));
   $('rider-input').maxLength = state.schema.name.rule.max;
   state.version = snap.version;
@@ -714,7 +721,9 @@ async function start() {
     state.confirmClose = false;
     state.played = e.payload.played;
     renderPlayed();
-    // what this run's dhd.log says about the resolution scale (the GPU may have changed)
+    // what this run's dhd.log says about the resolution scale (the GPU may have changed), and the
+    // bindings REVIVED SETTINGS > Controls may have changed (controls.js reads them again)
+    bind.layouts = null;
     invoke('snapshot').then((snap) => { state.scale = snap.scale; if (!$('page-settings').hidden) renderRows(); });
     renderFooter();
     checkServer();

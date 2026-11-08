@@ -1,5 +1,8 @@
 # 102: dhd.ini in the browser through dhd_settings; the rider name's rule in the crate
 
+Status: current
+Checked: 2026-11-04
+
 2026-10-28, branch `desk/settings-web` (from `desk/settings`). Finding 101 gave dhd.ini one
 implementation, the Rust crate `dhd_settings` (`port/render/settings`), for the game and the
 launcher; the browser kept its own copy of the rules in `port/web/www/settings.js`, and the rider

@@ -1,5 +1,14 @@
 # 083: Direct wasm core in Node (first web-route proof)
 
+Status: partly superseded by 087 (the i686 core link, the JS renderer)
+Checked: 2026-11-04
+
+The browser route is current, rebuilt since: the core comes from `build_wasm.py` alone (no i686
+link; the i686 traces below were the referee then, finding 088 retired that build), the graphics
+side runs in its own worker on shared memory (finding 087 BS2), and the browser draws only with
+the Rust renderer (`gpu.js` and the WebGPU compute rasterizer are gone, finding 088 CL5). Today's
+build is `python port/web/build.py build/wasm/dhd_core.wasm`.
+
 The core now runs directly in Node 24.21.0 with JSPI, without wasm2c, a browser, window, sound
 device, or an ISO copy. The existing host GS/VIF1/VU1 C runs in a second wasm reactor sharing the
 core's WebAssembly.Memory.
@@ -401,7 +410,7 @@ card saves are kept in IndexedDB (`port/web/www/vfs.js`).
 ### How to start it
 
 ```
-# 1. the core module (needs an i686 link with DHD_BUILD_VU_AOT=1 for vu1_aot.inc; objcache makes warm runs quick)
+# 1. the core module (then needed an i686 link for vu1_aot.inc; build_wasm.py now makes it alone)
 python port/tools/build_wasm.py -j 8 --no-wasm2c
 # 2. the browser modules (core postlink + the GS/VIF1/VU1 reactor, into build/web)
 python port/web/build.py build/wasm/dhd_core.wasm

@@ -127,6 +127,11 @@ typedef struct {
     NativeConvertConstants constants;
 } NativeConvert;
 
+/* A field's display_surface when PMODE has no read circuit on (after a GS reset, finding 160): the
+   picture is black, as the PS2 shows it (DhdrPicture.display_surface). -1: nothing to scan out,
+   the last picture stays. */
+#define NATIVE_DISPLAY_OFF (-2)
+
 typedef struct {
     NativeVertex *vertices;
     unsigned vertex_count, vertex_capacity;
@@ -136,7 +141,7 @@ typedef struct {
     unsigned command_count, command_capacity;
     NativeConvert *converts;
     unsigned convert_count, convert_capacity;
-    int display_surface;
+    int display_surface;             /* the displayed surface, -1 or NATIVE_DISPLAY_OFF */
     uint32_t display[12];
     uint32_t *movie;                 /* a movie's picture shown instead (gs_native_movie), when movie_on */
     unsigned movie_width, movie_height, movie_capacity;
@@ -212,6 +217,18 @@ typedef struct Native {
     float uv_scale[2];                /* FST: reciprocal GS texture dimensions, including 1/16 */
     float vertex_fog[256];            /* same rounded fog/255 values, shared by all vertices */
     int vertex_fog_ready, field_trace_on;
+    /* Two of the last triangle's vertices as native_set converted them (each with its own
+       colour): the ones a next strip (its second and third) or fan (its first and third) triangle
+       shares (finding 146). Good while conv_ok == conv_serial (native_state moves conv_serial)
+       and for the same offset and FST. */
+    GsVertex conv_gs[2];
+    /* native_palette: the 256 entries gs_palette converts for the last CPSM/CSA/TEXA, valid while
+       the CLUT's entries stay (clut_writes); digest16/256 mix the first 16 or all of them. */
+    struct { int valid, full; uint64_t writes, clut_key, texa, digest16, digest256; uint32_t entry[256]; } palette_memo;
+    NativeVertex conv[2];
+    int conv_fst;
+    uint64_t conv_offset;
+    unsigned conv_serial, conv_ok;
     /* Draws are indexed (dhdr_native_picture_indexed): a vertex a strip or fan shares with the
        previous triangle, and a quad's shared corners, are stored once. Off with DHD_INTERP (its
        mix pairs and moves vertices by their recorded order) and with DHD_NATIVE_INDEXED=0. */
@@ -611,6 +628,29 @@ static uint64_t native_page_hash(Native *n, const Gs *g, unsigned page)
     return n->page_hash[page];
 }
 
+/* The palette of tex0 as gs_palette gives it, entry by entry (finding 148): the converted entries
+   depend on the CLUT's entries, CPSM, CSA and TEXA only, so they are kept until one changes. */
+static const uint32_t *native_palette(Native *n, const Gs *g, uint64_t tex0, int full)
+{
+    uint64_t clut_key = (tex0 >> 51 & 15) | (tex0 >> 56 & 31) << 4, texa = g->reg[GS_TEXA];   /* CPSM, CSA */
+    if (!n->palette_memo.valid || n->palette_memo.writes != g->clut_writes || n->palette_memo.clut_key != clut_key ||
+        n->palette_memo.texa != texa) {
+        uint64_t digest = 16;
+        for (unsigned i = 0; i < 16; i++) digest = native_mix(digest, n->palette_memo.entry[i] = gs_palette(g, tex0, i));
+        n->palette_memo.digest16 = digest;
+        n->palette_memo.valid = 1; n->palette_memo.full = 0; n->palette_memo.writes = g->clut_writes;
+        n->palette_memo.clut_key = clut_key; n->palette_memo.texa = texa;
+    }
+    if (full && !n->palette_memo.full) {  /* the other 240, for 8-bit textures (full: all 256 needed) */
+        uint64_t digest = 256;
+        for (unsigned i = 0; i < 16; i++) digest = native_mix(digest, n->palette_memo.entry[i]);
+        for (unsigned i = 16; i < 256; i++) digest = native_mix(digest, n->palette_memo.entry[i] = gs_palette(g, tex0, i));
+        n->palette_memo.digest256 = digest;
+        n->palette_memo.full = 1;
+    }
+    return n->palette_memo.entry;
+}
+
 static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w, unsigned h, uint64_t key)
 {
     unsigned slot = (unsigned)(key % NATIVE_TEXTURES);
@@ -631,7 +671,7 @@ static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w,
     uint32_t *pixels = malloc((size_t)w * h * 4), palette[256];
     if (!pixels) return NULL;
     int indexed = psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH;
-    if (indexed) for (unsigned i = 0; i < 256; i++) palette[i] = gs_palette(g, tex0, i);
+    if (indexed) memcpy(palette, native_palette(n, g, tex0, 1), sizeof palette);
     if (!tbw) tbw = 1;
     for (unsigned y = 0; y < h; y++)
         for (unsigned x = 0; x < w; x++) {
@@ -710,7 +750,7 @@ static int native_convert_texture(Native *n, Gs *g, uint64_t tex0, unsigned w, u
     v->constants.size[0] = w; v->constants.size[1] = h;
     v->constants.size[2] = (uint32_t)texa; v->constants.size[3] = (uint32_t)(texa >> 32);
     if (gs_bits_per_pixel(psm) <= 8)
-        for (unsigned i = 0; i < 256; i++) v->constants.palette[i] = gs_palette(g, tex0, i);
+        memcpy(v->constants.palette, native_palette(n, g, tex0, 1), sizeof v->constants.palette);
     if (n->texlog)
         for (unsigned i = 0; i < slots; i++) {
             const NativeSurface *s = &n->surfaces[v->surface[i]];
@@ -784,8 +824,10 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
             if (native_owner(n, g, p) >= 0 && !gpu_pages++) gpu_page = p;
         }
     if (psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH) {
-        unsigned entries = psm == GS_PSMT8 || psm == GS_PSMT8H ? 256 : 16;
-        for (unsigned i = 0; i < entries; i++) key = native_mix(key, gs_palette(g, tex0, i));
+        /* the digest of the 16 or 256 converted entries (native_palette, finding 148) */
+        int full = psm == GS_PSMT8 || psm == GS_PSMT8H;
+        native_palette(n, g, tex0, full);
+        key = native_mix(key, full ? n->palette_memo.digest256 : n->palette_memo.digest16);
     }
     if (gpu_pages) {
         /* The menus' font lives in a depth buffer's top bytes; the sharp one is drawn from the
@@ -856,6 +898,7 @@ static void native_state(Native *n, Gs *g, unsigned prim, unsigned ctxt)
         for (unsigned i = 0; i < 256; i++) n->vertex_fog[i] = (float)i / 255.0f;
         n->vertex_fog_ready = 1;
     }
+    n->conv_serial++;  /* zmax, zscale and uv_scale may change below */
     NativeCommand *c = &n->current;
     uint64_t frame = g->reg[GS_FRAME_1 + ctxt], zbuf = g->reg[GS_ZBUF_1 + ctxt], test = g->reg[GS_TEST_1 + ctxt];
     uint64_t scissor = g->reg[GS_SCISSOR_1 + ctxt];
@@ -1118,6 +1161,21 @@ static FILE *native_field_trace(const char *kind)
     return *kind == 'd' ? draws : registers;
 }
 
+/* The draw offset native_record converts with. The game alternates OFY by 8/16 of a framebuffer
+   line in INT+FFMD mode. Scanout line-doubles to progressive output; retaining that field
+   displacement makes the whole scene bob, and sprite rounding can turn it into a full line.
+   Remove only the half-line component on screen-sized targets, before rounding. Small offscreen
+   targets (shadows/blur) keep their own coordinates. This local offset never reaches the exact
+   GS rasterizer, probe replay or EE readbacks. */
+static uint64_t native_offset(const Gs *g, unsigned ctxt)
+{
+    uint64_t offset = g->reg[GS_XYOFFSET_1 + ctxt];
+    if ((offset >> 32 & 15) == 8 && (g->privileged[GS_SMODE2 / 16] & 3) == 3 &&
+        (g->reg[GS_FRAME_1 + ctxt] >> 16 & 63) >= 8)
+        offset -= UINT64_C(8) << 32;
+    return offset;
+}
+
 static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, unsigned count, unsigned prim, unsigned ctxt)
 {
     FILE *trace = n->field_trace_on ? native_field_trace("draws") : NULL;
@@ -1141,29 +1199,44 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
     }
     if (n->skip) return;
     NativeFrame *f = n->recording;
-    uint64_t offset = g->reg[GS_XYOFFSET_1 + ctxt];
-    /* The game alternates OFY by 8/16 of a framebuffer line in INT+FFMD mode.
-       Scanout line-doubles to progressive output; retaining that field displacement
-       makes the whole scene bob, and sprite rounding can turn it into a full line.
-       Remove only the half-line component on screen-sized targets, before rounding.
-       Small offscreen targets (shadows/blur) keep their own coordinates. This local
-       offset never reaches the exact GS rasterizer, probe replay or EE readbacks. */
-    if ((offset >> 32 & 15) == 8 && (g->privileged[GS_SMODE2 / 16] & 3) == 3 &&
-        (g->reg[GS_FRAME_1 + ctxt] >> 16 & 63) >= 8)
-        offset -= UINT64_C(8) << 32;
+    uint64_t offset = native_offset(g, ctxt);
     int fst = prim >> 8 & 1, flat = !(prim >> 3 & 1);
     float x[3], y[3];
+    int px[3], py[3];
     int left = n->box[0], top = n->box[1], right = n->box[2], bottom = n->box[3];
+    /* A triangle's vertices are converted here. A strip's first two are the last triangle's last
+       two, a fan's its first and last: those take the last triangle's conversion when their
+       registers are the same bytes (native_set is a function of them, the offset, FST and the
+       state's scales), so most strip vertices are converted once, not three times. */
+    int triangle = type >= 3 && type <= 5 && count == 3;
+    NativeVertex t[3];
+    unsigned reused = 0;
+    if (triangle && (type == 4 || type == 5) && n->conv_ok == n->conv_serial && n->conv_offset == offset &&
+        n->conv_fst == fst) {
+        if (!memcmp(&v[0], &n->conv_gs[0], sizeof *v)) t[0] = n->conv[0], reused |= 1;
+        if (!memcmp(&v[1], &n->conv_gs[1], sizeof *v)) t[1] = n->conv[1], reused |= 2;
+    }
+    /* * 0.0625f: the same value as / 16.0f (a power of two), without a divide a vertex (finding 146) */
     for (unsigned i = 0; i < count; i++) {
-        x[i] = (float)((int)v[i].x - (int)(offset & 65535)) / 16.0f + 0.5f;
-        y[i] = (float)((int)v[i].y - (int)(offset >> 32 & 65535)) / 16.0f + 0.5f;
-        int px = (int)x[i], py = (int)y[i];
-        if (px - 1 < left) left = px - 1;
-        if (py - 1 < top) top = py - 1;
-        if (px + 1 > right) right = px + 1;
-        if (py + 1 > bottom) bottom = py + 1;
+        if (!(reused >> i & 1)) {
+            x[i] = (float)((int)v[i].x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+            y[i] = (float)((int)v[i].y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+            px[i] = (int)x[i], py[i] = (int)y[i];
+            if (triangle) native_set(&t[i], &v[i], &v[i], n, fst, x[i], y[i]);
+        } else px[i] = (int)t[i].x, py[i] = (int)t[i].y;   /* native_set keeps x and y */
+        if (px[i] - 1 < left) left = px[i] - 1;
+        if (py[i] - 1 < top) top = py[i] - 1;
+        if (px[i] + 1 > right) right = px[i] + 1;
+        if (py[i] + 1 > bottom) bottom = py[i] + 1;
     }
     n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
+    if (triangle) {
+        unsigned shared = type == 5 ? 0 : 1;   /* a fan keeps its first vertex, a strip its second */
+        n->conv_gs[0] = v[shared]; n->conv[0] = t[shared];
+        n->conv_gs[1] = v[2]; n->conv[1] = t[2];
+        n->conv_offset = offset; n->conv_fst = fst; n->conv_ok = n->conv_serial;
+        if (flat) t[0].rgba = t[1].rgba = t[2].rgba;   /* flat: the last vertex's colour */
+    }
     const GsVertex *last = &v[count - 1];
     native_reserve(f, 6);
     if (n->indexed) native_reserve_indices(f, 6);
@@ -1181,13 +1254,10 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
         }
     }
     NativeVertex *o = &f->vertices[f->vertex_count];
-    if (type >= 3 && type <= 5 && count == 3) {
-        if (n->indexed) {
-            NativeVertex t[3];
-            for (unsigned i = 0; i < 3; i++) native_set(&t[i], &v[i], flat ? last : &v[i], n, fst, x[i], y[i]);
-            native_triangle_indexed(f, type, t);
-        } else {
-            for (unsigned i = 0; i < 3; i++) native_set(&o[i], &v[i], flat ? last : &v[i], n, fst, x[i], y[i]);
+    if (triangle) {
+        if (n->indexed) native_triangle_indexed(f, type, t);
+        else {
+            memcpy(o, t, sizeof t);
             f->vertex_count += 3;
         }
     } else if (type == 6 && count == 2) {
@@ -1803,6 +1873,104 @@ static void native_draw(Gs *g, unsigned type, const GsVertex *v, unsigned count)
     native_exact(n, g, type, v, count, prim, ctxt);
     native_record(n, g, type, v, count, prim, ctxt);
     n->stats.draws++;
+}
+
+/* gs.c's strips (draw_strip, finding 146): the drawn triangles of list, as native_draw would draw
+   each in turn. The first goes through native_draw (it may change the state). The state then
+   holds for the rest (gs.c writes only vertex registers in a strip; native_exact without the
+   exact probe only notes the Z buffer's width, the same for each, and with it runs for each
+   triangle before its record, as in native_draw), so each later vertex is converted once and
+   each triangle recorded as native_record records it: the same box, vertices, indices, counts
+   and conversion cache. With a per-primitive diagnostic (the field trace, interpolation's
+   segments) or a state that draws nothing, every triangle goes through native_draw. */
+static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsigned count, const uint8_t *drawn)
+{
+    NativeExact *gpu = g->backend;
+    Native *n = gpu->native;
+    unsigned end = count - 2, i = 0;   /* triangle k is list[k..k+2], k < end */
+    while (i < end && !drawn[i]) i++;
+    if (i == end) return;
+    native_draw(g, type, &list[i], 3);
+    unsigned prim = (unsigned)((g->reg[GS_PRIM] & 7) |
+                    ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
+    unsigned ctxt = prim >> 9 & 1;
+    if (n->interp || n->field_trace_on || n->skip || !n->current_valid ||
+        n->state_version != g->state_version || n->state_ctxt != ctxt || n->state_prim != prim ||
+        ((prim & 16) && n->written != g->pixels_written) || type != 4) {
+        for (i++; i < end; i++) if (drawn[i]) native_draw(g, type, &list[i], 3);
+        return;
+    }
+    NativeFrame *f = n->recording;
+    uint64_t offset = native_offset(g, ctxt);
+    int fst = prim >> 8 & 1, flat = !(prim >> 3 & 1);
+    int left = n->box[0], top = n->box[1], right = n->box[2], bottom = n->box[3];
+    native_reserve(f, 3 * (end - i));
+    if (n->indexed) native_reserve_indices(f, 3 * (end - i));
+    /* the window of converted vertices: c[k % 3] is list[k]'s, with its pixel */
+    NativeVertex c[3];
+    int cx[3], cy[3];
+    for (unsigned k = i + 1; k < i + 3; k++) {
+        float x = (float)((int)list[k].x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+        float y = (float)((int)list[k].y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+        cx[k % 3] = (int)x, cy[k % 3] = (int)y;
+        native_set(&c[k % 3], &list[k], &list[k], n, fst, x, y);
+    }
+    unsigned recorded = 0, last = UINT32_MAX;   /* last: the latest triangle recorded in this loop */
+    for (unsigned k = i + 1; k < end; k++) {
+        unsigned a = k % 3, b = (k + 1) % 3, d = (k + 2) % 3;
+        float x = (float)((int)list[k + 2].x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+        float y = (float)((int)list[k + 2].y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+        cx[d] = (int)x, cy[d] = (int)y;
+        native_set(&c[d], &list[k + 2], &list[k + 2], n, fst, x, y);
+        if (!drawn[k]) continue;
+        if (n->exact_probe) native_exact(n, g, type, &list[k], 3, prim, ctxt);
+        /* The box grows by each vertex's pixel +-1; after the triangle just before, its first two
+           are in it already (the box only grows), so only the new one can move it. */
+        const unsigned w[3] = {a, b, d};
+        for (unsigned j = last == k - 1 ? 2 : 0; j < 3; j++) {
+            if (cx[w[j]] - 1 < left) left = cx[w[j]] - 1;
+            if (cy[w[j]] - 1 < top) top = cy[w[j]] - 1;
+            if (cx[w[j]] + 1 > right) right = cx[w[j]] + 1;
+            if (cy[w[j]] + 1 > bottom) bottom = cy[w[j]] + 1;
+        }
+        if (n->indexed && !flat && last == k - 1) {
+            /* Its first two vertices are the bytes of the previous triangle's last two (the same
+               converted c[], unchanged without flat colour): native_triangle_indexed would find
+               them equal and reuse both indices, then store the third. */
+            uint32_t *o = f->indices + f->index_count;
+            o[0] = o[-2]; o[1] = o[-1]; o[2] = f->vertex_count;
+            f->vertices[f->vertex_count++] = c[d];
+            f->index_count += 3;
+            last = k;
+            recorded++;
+            continue;
+        }
+        NativeVertex t[3] = {c[a], c[b], c[d]};
+        if (flat) t[0].rgba = t[1].rgba = t[2].rgba;   /* flat: the last vertex's colour */
+        last = k;
+        if (n->indexed) native_triangle_indexed(f, type, t);
+        else {
+            memcpy(&f->vertices[f->vertex_count], t, sizeof t);
+            f->vertex_count += 3;
+        }
+        recorded++;
+    }
+    /* native_record's conversion cache after the last triangle recorded: its second and third
+       vertex (nothing in the loop reads it, so it is set once; c[] may have moved on since, and
+       native_set gives the same bytes again) */
+    if (last != UINT32_MAX) {
+        for (unsigned j = 0; j < 2; j++) {
+            const GsVertex *v = &list[last + 1 + j];
+            float x = (float)((int)v->x - (int)(offset & 65535)) * 0.0625f + 0.5f;
+            float y = (float)((int)v->y - (int)(offset >> 32 & 65535)) * 0.0625f + 0.5f;
+            n->conv_gs[j] = *v;
+            native_set(&n->conv[j], v, v, n, fst, x, y);
+        }
+    }
+    n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
+    if (g->source_path == 1) f->path1 += recorded;
+    n->stats.primitives += recorded;
+    n->stats.draws += recorded;
 }
 
 /* A host upload must not become the starting content of an earlier pending draw. */
@@ -2551,7 +2719,8 @@ void gs_native_vsync_handed(Gs *g, unsigned *width, unsigned *height, int resize
     /* scanout reads display_state[0] = d[0..3] and [1] = d[4..7] with b.x = DBY etc. */
     uint32_t packed[12] = {d[0], d[1] / 32, d[2], d[3], d[4], d[5], d[6], d[7]};
     f->display_surface = -1;
-    if ((pmode & 3) && d[2] && d[5] && d[6] && d[5] <= 1024 && d[6] <= 1024 && psm_color(d[0])) {
+    if (!(pmode & 3)) f->display_surface = NATIVE_DISPLAY_OFF;  /* no read circuit on: a black screen */
+    else if (d[2] && d[5] && d[6] && d[5] <= 1024 && d[6] <= 1024 && psm_color(d[0])) {
         f->display_surface = native_surface(n, (unsigned)fb & 511, d[2], d[0], 0);
         if (f->display_surface >= 0) {
             native_claim(n, g, f->display_surface, d[0], (int)d[3], (int)d[4], (int)(d[3] + d[5] - 1),
@@ -2865,6 +3034,7 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
     exact->clip_on = 1;
     exact->e.upload_lazily = 1;  /* the probe's draws need only the uploaded pages they touch */
     g->draw = native_draw;
+    g->draw_strip = native_draw_strip;
     g->local_copy = native_local_copy;
     g->flush_draw = native_flush_draw;
     g->write_high = native_write_high;

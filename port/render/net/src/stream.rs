@@ -48,7 +48,7 @@ impl Write for Stream {
 }
 
 /// The one TLS configuration: ring's provider, its safe protocol versions, Mozilla's roots.
-fn tls_config() -> Result<Arc<ClientConfig>, String> {
+pub(crate) fn tls_config() -> Result<Arc<ClientConfig>, String> {
     static CONFIG: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
     CONFIG
         .get_or_init(|| {
@@ -62,7 +62,7 @@ fn tls_config() -> Result<Arc<ClientConfig>, String> {
 }
 
 /// The TCP connection to host:port, each of its addresses in turn.
-fn dial(host: &str, port: u16) -> io::Result<TcpStream> {
+pub(crate) fn dial(host: &str, port: u16) -> io::Result<TcpStream> {
     let mut last = io::Error::new(io::ErrorKind::NotFound, "no address");
     for addr in (host, port).to_socket_addrs()? {
         match TcpStream::connect_timeout(&addr, TIMEOUT) {

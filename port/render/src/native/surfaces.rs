@@ -92,7 +92,7 @@ struct DepthFill {
 }
 
 /// The Z fill (replays only): each pixel's depth is the float whose bits the source holds.
-const DEPTH_FILL_WGSL: &str = r#"
+pub(crate) const DEPTH_FILL_WGSL: &str = r#"
 @group(0) @binding(0) var fill_source: texture_2d<u32>;
 @vertex
 fn fill_vertex(@builtin(vertex_index) id: u32) -> @builtin(position) vec4<f32> {

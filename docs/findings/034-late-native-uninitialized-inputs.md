@@ -1,5 +1,8 @@
 # Late native-state nondeterminism
 
+Status: current
+Checked: 2026-11-04
+
 The extended round 27 gate found one differing EE word at GO+60 seconds and
 two at GO+75 seconds despite matching images and exact Z readbacks. Neither
 word was excluded. A private hardware-write-watch build of the original shader

@@ -1,4 +1,4 @@
-/* Per-field state trace (build/audit/h4-state-trace.md, section 7; finding 075 phase 1).
+/* Per-field state trace (build/audit/h4-state-trace.md, section 7; finding 081 phase 1).
 
    DHD_STATE_TRACE=<prefix> writes <prefix>.tsv: a header line, a column line, then one row per
    game field (vsync). Each section is hashed with XXH64 over an explicit little-endian
@@ -6,7 +6,7 @@
    between builds), so the same machine state gives the same hash in every build.
 
    Host addresses are normalised by value. The game copies host values into its memory and
-   registers (uninitialised words, saved registers that held host pointers; findings 041, 075):
+   registers (uninitialised words, saved registers that held host pointers; findings 041, 081):
    stack, heap and DLL addresses that move with Windows' ASLR. Every 32-bit word whose value
    points into host-owned memory is replaced by 0x57AC57AC before hashing and dumping. Host-owned
    means, from a VirtualQuery walk of the address space each field: private or mapped memory
@@ -42,7 +42,7 @@
    field and the rendered sample count), and the ids: field, menu, phase, race clock, next_vsync
    (in combined). The combined column hashes all section values and the ids, in order.
 
-   Code pointers (finding 075, phase 2): some EE words hold host code addresses (function pointers
+   Code pointers (finding 081, phase 2): some EE words hold host code addresses (function pointers
    of the data image and callbacks the game stores). Their values move with any code change, so
    they are left out of ram (hashed as zero) and hashed in the code section by identity instead:
    the function that contains the value (a stable id of its name, from the link-time table
@@ -338,7 +338,8 @@ static const char *header_env[] = {
     "DHD_RACE_SEED", "DHD_NAV", "DHD_AUTOPAD", "DHD_AUTOPAD_FRAMES", "DHD_RACE_SYNC", "DHD_RACE_PAD",
     "DHD_RACE_PAD1", "DHD_RACE_PAD2", "DHD_RACE_PAD3", "DHD_PADS", "DHD_FPS", "DHD_STEP_CLOCK", "DHD_LATENCY",
     "DHD_INTERP", "DHD_KEYS", "DHD_GS_CAPTURE", "DHD_HASH_LOG", "DHD_PROFILE", "DHD_STATE_STOP",
-    "DHD_STATE_MASK", "DHD_STATE_CODEPTRS", "DHD_STATE_NORM", "DHD_STATE_NOWAIT", "DHD_SYNC_STRICT", NULL};
+    "DHD_STATE_MASK", "DHD_STATE_CODEPTRS", "DHD_STATE_NORM", "DHD_STATE_NOWAIT", "DHD_SYNC_STRICT",
+    "DHD_KEYBOARD", "DHD_PAD1", "DHD_PAD2", "DHD_TEST_PAD", "DHD_TEST_PAD2", NULL};
 
 const char *state_trace_watch_spec(void)
 {

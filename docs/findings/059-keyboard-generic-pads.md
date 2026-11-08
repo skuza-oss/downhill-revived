@@ -1,6 +1,17 @@
 # 059: keyboard play and generic controllers (SDL3)
 
-Status: committed. Friends without a controller can play a whole race on the keyboard, and pads
+Status: partly superseded by 099 (XInput/raw-HID fallback, the i686 SDL build)
+Checked: 2026-11-04
+
+The keyboard layout and the SDL3 pad rules (buttons by position, default mapping,
+`gamecontrollerdb.txt`, vibration) are current (`port/hle/keyboard.c`, `port/hle/gamepad.c`).
+Changed: SDL is the only controller path (the XInput and raw-HID fallback is gone; `DHD_SDL=0`
+means no pads, the keyboard still plays), SDL runs on the process's main thread with the window
+and audio (`port/host/sdl_host.c`, finding 099), and SDL is built for every 64-bit target by
+`port/tools/sdl3.py` (the i686 build details below are retired). Dead zone and button icons:
+finding 134.
+
+Friends without a controller can play a whole race on the keyboard, and pads
 that aren't XInput (cheap USB pads, Switch Pro, 8BitDo in D-input mode, other DirectInput/HID
 pads) work through SDL3. Code: `port/hle/keyboard.c` (layout, menus versus riding, the ramp),
 `port/hle/gamepad.c` (SDL3), `port/hle/host.c` (focus, merging, fallback, vibration),
@@ -103,7 +114,7 @@ audio, video, render, GPU, camera, haptic, sensor off. Two CMake details:
 Drivers in the build: XInput, RawInput, Windows.Gaming.Input, DirectInput, HIDAPI (DualSense,
 DualShock 4, Switch Pro, 8BitDo, ...). dhd.exe stays one file; it grows by about 1.6 MB.
 
-`gamepad.c`: SDL runs on a thread of its own ("controllers"): `SDL_Init(SDL_INIT_GAMEPAD)`
+`gamepad.c`: SDL ran on a thread of its own ("controllers"; now SDL's one thread, `sdl_host.c`): `SDL_Init(SDL_INIT_GAMEPAD)`
 there, then a loop that waits for events (4 ms at most), opens each new device into the first
 free player slot (1-4, kept until it disconnects), copies each player's state for the game
 thread and sends the vibration it asked for. The game thread only copies (`gamepad_read`).
@@ -120,7 +131,7 @@ whether or not the game is in front).
   Every pad SDL can rumble (XInput, DualSense, DualShock 4, Switch Pro, ...); DHD_VIBRATION=0 still
   turns it off.
 
-Coexistence: SDL replaces the direct XInput and raw-HID Sony code, which stays as the fallback:
+Coexistence (then; the fallback is deleted): SDL replaces the direct XInput and raw-HID Sony code, which stays as the fallback:
 `DHD_SDL=0`, or SDL not starting within 3 s. Each read uses one of the two, never both, so no
 pad is read twice. A virtual pad from DS4Windows/DSX beside the real one shows as two players
 (hide the real one, e.g. with HidHide, as those tools advise).

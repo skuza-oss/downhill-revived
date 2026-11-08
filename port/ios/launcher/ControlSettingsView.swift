@@ -5,6 +5,7 @@ import SwiftUI
 struct ControlSettingsView: View {
     @ObservedObject var model = LauncherModel.shared
     var isTVPreview = false
+    @State private var showCustomization = false
 
     var body: some View {
         GeometryReader { geo in
@@ -16,6 +17,16 @@ struct ControlSettingsView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
+                        Button {
+                            showCustomization = true
+                        } label: {
+                            Label("Customize Controls", systemImage: "hand.draw.fill")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isTVPreview)
+
                         // Physical Gamepads Card
                         gamepadsCard
 
@@ -62,9 +73,10 @@ struct ControlSettingsView: View {
                 Button("Defaults") {
                     touch_input_restore_defaults()
                     model.touchOpacity = 0.50
-                    model.touchDeadzone = 0.15
+                    model.gamepadDeadzone = 0.05
+                    model.touchDeadzone = 0.02
                     model.touchSensitivity = 1.0
-                    model.floatingStick = true
+                    model.floatingStick = false
                     model.autoHideOnGamepad = true
                     model.hapticsEnabled = true
                     model.controllerStyle = .auto
@@ -74,6 +86,7 @@ struct ControlSettingsView: View {
                 .foregroundColor(.orange)
             }
         }
+        .fullScreenCover(isPresented: $showCustomization) { ControlsCustomizationView() }
         .onDisappear {
             if !isTVPreview { model.savePreferences() }
         }
@@ -130,6 +143,8 @@ struct ControlSettingsView: View {
                     .cornerRadius(8)
                 }
             }
+            ControlSlider(title: "Controller Stick Deadzone", valueText: "\(Int(model.gamepadDeadzone * 100))%", value: $model.gamepadDeadzone, range: 0.0...0.40)
+                .onChange(of: model.gamepadDeadzone) { _, _ in model.savePreferences() }
         }
         .padding(12)
         .background(Color.white.opacity(0.04))

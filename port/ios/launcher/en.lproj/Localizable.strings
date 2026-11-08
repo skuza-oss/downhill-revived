@@ -164,3 +164,63 @@
 "Insufficient storage. Available: %llu MB, needed: %llu MB." = "Insufficient storage. Available: %llu MB, needed: %llu MB.";
 "Open the game automatically" = "Open the game automatically";
 "Apply Changes" = "Apply Changes";
+
+"Controller Stick Deadzone" = "Controller Stick Deadzone";
+
+"Customize Controls" = "Customize Controls";
+"Arrange and remap touch controls" = "Arrange and remap touch controls";
+"Drag controls, choose their actions and save a layout for each orientation." = "Drag controls, choose their actions and save a layout for each orientation.";
+"Physical Controllers" = "Physical Controllers";
+"Controller button bindings" = "Controller button bindings";
+"Done" = "Done";
+"Orientation" = "Orientation";
+"Portrait" = "Portrait";
+"Landscape" = "Landscape";
+"Drag a control to move it. Select a button to change its action." = "Drag a control to move it. Select a button to change its action.";
+"Touch Layout" = "Touch Layout";
+"Cancel" = "Cancel";
+"Could not save controls" = "Could not save controls";
+"Control" = "Control";
+"Action" = "Action";
+"Visible" = "Visible";
+"Size" = "Size";
+"Restore this layout" = "Restore this layout";
+"Keep the stick, Menu, Cross, Triangle, START and R1 visible." = "Keep the stick, Menu, Cross, Triangle, START and R1 visible.";
+"Analog Stick" = "Analog Stick";
+"Cross" = "Cross";
+"Circle" = "Circle";
+"Square" = "Square";
+"Triangle" = "Triangle";
+"Controller" = "Controller";
+"Player %lld" = "Player %lld";
+"Changes apply immediately. Essential menu buttons stay assigned." = "Changes apply immediately. Essential menu buttons stay assigned.";
+"Button bindings" = "Button bindings";
+"Main input" = "Main input";
+"Alternate input" = "Alternate input";
+"Analog Sticks" = "Analog Sticks";
+"Swap Sticks" = "Swap Sticks";
+"Invert left X" = "Invert left X";
+"Invert left Y" = "Invert left Y";
+"Invert right X" = "Invert right X";
+"Invert right Y" = "Invert right Y";
+"Restore controller bindings" = "Restore controller bindings";
+"Could not update bindings" = "Could not update bindings";
+
+"Horizontal position" = "Horizontal position";
+"Vertical position" = "Vertical position";
+"Discard unsaved changes?" = "Discard unsaved changes?";
+"Discard Changes" = "Discard Changes";
+"Keep Editing" = "Keep Editing";
+"Restore this layout?" = "Restore this layout?";
+"The other orientation will keep its current layout." = "The other orientation will keep its current layout.";
+"Restore controller bindings?" = "Restore controller bindings?";
+"Only Player %lld will be reset." = "Only Player %lld will be reset.";
+
+"Control options" = "Control options";
+"Drag to move. Rotate the device to edit the other orientation." = "Drag to move. Rotate the device to edit the other orientation.";
+
+"Undo" = "Undo";
+"Redo" = "Redo";
+"Collapse tools" = "Collapse tools";
+"Expand tools" = "Expand tools";
+"Hidden" = "Hidden";

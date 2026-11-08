@@ -1,11 +1,15 @@
 # 081: A portable 64-bit core (plan)
 
-Status: phase 0 (audit) and phase 1 (state trace) done; phase 2 next. Branch `port/portable-core`.
+Status: partly superseded by 088 (the phase status; the 32-bit description is the then-state)
+Checked: 2026-11-04
+
+Written during phase 1 (2026-10-24, branch `port/portable-core`). Every phase is done since: the
+64-bit build is the only build and shipped as 0.4.0 (finding 088).
 
 ## The problem
 
-The port is 32-bit Windows (`i686-pc-windows-itanium`, port/tools/pctarget.py). That isn't just a
-build setting. The design depends on it:
+The port was 32-bit Windows then (`i686-pc-windows-itanium`, port/tools/pctarget.py, both gone).
+That wasn't just a build setting. The design depended on it:
 
 - **The game code needs 4-byte pointers.**
   - The decompiled game code in `src/` keeps pointers in its structs.

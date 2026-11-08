@@ -1,4 +1,4 @@
-/* What the module's C needs from its compiler and C library, in one place (docs/findings/075-portable-core.md,
+/* What the module's C needs from its compiler and C library, in one place (docs/findings/081-portable-core.md,
    phase 2 and 3). The module is the 32-bit Windows build today and wasm32 later. Each macro here
    expands to exactly the code the Windows build had before, so the i686 build is unchanged. */
 #ifndef DHD_PORTABLE_H
@@ -42,6 +42,20 @@
 #define PS2_OPAQUE_M128(v) __asm__("" : "+w"(v))
 #else
 #define PS2_OPAQUE_M128(v) do { volatile __typeof__(v) ps2_opaque_ = (v); (v) = ps2_opaque_; } while (0)
+#endif
+
+#ifndef PS2_NO_AUTO_INIT
+/* The build zero-fills every local (-ftrivial-auto-var-init=zero: the game reads some before
+   writing them, finding 081). A port local every read of which follows a write can skip that
+   fill where it costs (finding 148). */
+#if defined(__has_attribute)
+#if __has_attribute(uninitialized)
+#define PS2_NO_AUTO_INIT __attribute__((uninitialized))
+#endif
+#endif
+#ifndef PS2_NO_AUTO_INIT
+#define PS2_NO_AUTO_INIT
+#endif
 #endif
 
 #endif

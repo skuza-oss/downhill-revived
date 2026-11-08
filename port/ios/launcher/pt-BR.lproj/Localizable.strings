@@ -164,3 +164,63 @@
 "Insufficient storage. Available: %llu MB, needed: %llu MB." = "Espaço insuficiente. Disponível: %llu MB. Necessário: %llu MB.";
 "Open the game automatically" = "Abrir direto no jogo";
 "Apply Changes" = "Aplicar alterações";
+
+"Controller Stick Deadzone" = "Zona morta do controle físico";
+
+"Customize Controls" = "Personalizar controles";
+"Arrange and remap touch controls" = "Organizar e remapear controles de toque";
+"Drag controls, choose their actions and save a layout for each orientation." = "Arraste os controles, escolha suas ações e salve um layout para cada orientação.";
+"Physical Controllers" = "Controles físicos";
+"Controller button bindings" = "Mapeamento do controle físico";
+"Done" = "Concluir";
+"Orientation" = "Orientação";
+"Portrait" = "Retrato";
+"Landscape" = "Paisagem";
+"Drag a control to move it. Select a button to change its action." = "Arraste um controle para movê-lo. Selecione um botão para mudar sua ação.";
+"Touch Layout" = "Layout de toque";
+"Cancel" = "Cancelar";
+"Could not save controls" = "Não foi possível salvar os controles";
+"Control" = "Controle";
+"Action" = "Ação";
+"Visible" = "Visível";
+"Size" = "Tamanho";
+"Restore this layout" = "Restaurar este layout";
+"Keep the stick, Menu, Cross, Triangle, START and R1 visible." = "Mantenha o analógico, Menu, Cruz, Triângulo, START e R1 visíveis.";
+"Analog Stick" = "Analógico";
+"Cross" = "Cruz";
+"Circle" = "Círculo";
+"Square" = "Quadrado";
+"Triangle" = "Triângulo";
+"Controller" = "Controle físico";
+"Player %lld" = "Jogador %lld";
+"Changes apply immediately. Essential menu buttons stay assigned." = "As alterações são aplicadas imediatamente. Os botões essenciais do menu continuam atribuídos.";
+"Button bindings" = "Mapeamento dos botões";
+"Main input" = "Entrada principal";
+"Alternate input" = "Entrada alternativa";
+"Analog Sticks" = "Analógicos";
+"Swap Sticks" = "Trocar analógicos";
+"Invert left X" = "Inverter X esquerdo";
+"Invert left Y" = "Inverter Y esquerdo";
+"Invert right X" = "Inverter X direito";
+"Invert right Y" = "Inverter Y direito";
+"Restore controller bindings" = "Restaurar mapeamento do controle";
+"Could not update bindings" = "Não foi possível atualizar o mapeamento";
+
+"Horizontal position" = "Posição horizontal";
+"Vertical position" = "Posição vertical";
+"Discard unsaved changes?" = "Descartar alterações não salvas?";
+"Discard Changes" = "Descartar alterações";
+"Keep Editing" = "Continuar editando";
+"Restore this layout?" = "Restaurar este layout?";
+"The other orientation will keep its current layout." = "O layout da outra orientação será mantido.";
+"Restore controller bindings?" = "Restaurar mapeamento do controle?";
+"Only Player %lld will be reset." = "Somente o Jogador %lld terá o mapeamento restaurado.";
+
+"Control options" = "Opções do controle";
+"Drag to move. Rotate the device to edit the other orientation." = "Arraste para mover. Gire o aparelho para editar a outra orientação.";
+
+"Undo" = "Desfazer";
+"Redo" = "Refazer";
+"Collapse tools" = "Recolher ferramentas";
+"Expand tools" = "Expandir ferramentas";
+"Hidden" = "Oculto";

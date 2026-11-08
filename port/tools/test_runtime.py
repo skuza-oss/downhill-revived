@@ -86,8 +86,10 @@ def guest_tests():
     run('member-abi', [member_test])
     run('autopad', [HLE / 'autopad.c', HLE / 'test_autopad.c'])
     run('game-options', [HLE / 'game_options.c', HLE / 'test_game_options.c'])
+    run('settings-tabs', [HLE / 'test_settings_tabs.c'])
     run('keyboard', [HLE / 'keyboard.c', HLE / 'test_keyboard.c'])  # layout and steering ramp (finding 059)
     run('sif', [HLE / 'sif.c', HLE / 'test_sif.c'])
+    run('pad-snapshot', [HLE / 'test_pad_snapshot.c'])
     run('timer', [HLE / 'timer.c', HLE / 'test_timer.c'])
     run('sound', [HLE / 'sound.c', HLE / 'test_sound.c'], defines=['SND_NO_HOST'])
 
@@ -136,7 +138,7 @@ def main():
     guest_tests()
     host_tests()
     scripts = ['test_rider_time', 'test_rider_interaction', 'test_npc_animation', 'test_rider_input', 'test_float',
-               'test_port_headers']
+               'test_port_headers', 'test_patch_guard']
     if os.environ.get('DHD_PCSX2_VU'):
         scripts += ['test_vu1_pcsx2', 'test_vu0_pcsx2']
     for script in scripts:

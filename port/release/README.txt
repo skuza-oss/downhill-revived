@@ -14,6 +14,7 @@ What you need
   WebKitGTK 4.1 from your distribution: libwebkit2gtk-4.1-0, already there with GNOME).
   The Mac and Linux builds are experimental: they may have problems the Windows build doesn't.
   Please report them with your dhd.log.
+  There is also an experimental Android build (an .apk on the release page), without online play.
 - Your own dump of the Downhill Domination USA disc (SCUS-97177) as an .iso file. Other regions
   and modified images are refused.
 
@@ -57,11 +58,11 @@ other USB or Bluetooth pads (through SDL3 and its controller database), with vib
 pad has motors. The buttons go by position, as on a PlayStation pad: bottom = Cross, right =
 Circle, left = Square, top = Triangle. A pad SDL doesn't know can be added with a line in SDL's
 format in gamecontrollerdb.txt beside dhd.exe.
-Button icons (PC SETTINGS > Button Icons, the launcher's Settings > Controls): Auto shows the
+Button icons (REVIVED SETTINGS > Button Icons, the launcher's Settings > Controls): Auto shows the
 buttons of player 1's controller: A B X Y and LB RB LT RT on Xbox pads and a Steam Deck, B A Y X
 and L R ZL ZR on Switch pads, the game's own symbols on PlayStation pads and the keyboard. Or
 choose PlayStation, Xbox or Nintendo.
-Stick dead zone (PC SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before the
+Stick dead zone (REVIVED SETTINGS > Dead Zone, Settings > Controls): how far a stick moves before the
 rider responds. Game is the PS2's own (about 36% of the travel); smaller steers sooner, larger
 ignores a drifting stick. The launcher's Controls tab shows your stick and what the rider gets.
 
@@ -85,14 +86,27 @@ places (e.g. Square is the key left of X, wherever its label says Z, W or Y).
 The game's own controls screen (OPTIONS > CONTROLS) and its trick lists name the PlayStation
 buttons; the keys above stand for them.
 
-Settings: OPTIONS > PC SETTINGS in the game's menu (resolution, display mode, window size,
-picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, texture
-pack, font). Changes are
-saved to dhd.ini at once.
+Your own keys and buttons: REVIVED SETTINGS > Controls in the game, or the launcher's Settings >
+Controls > Bindings. Choose the key or controller button for each PlayStation button, a main and
+an alternate, for the keyboard and for each of two controllers (player 1 and player 2), plus
+Swap Sticks and Invert per stick axis on a controller. In the game, Cross on a button's row waits
+up to five seconds for the new key or button (Esc cancels), Square clears it, Triangle or Esc goes
+back; changes save at once. The dimmed "also" binding is the alternate, changed in the launcher
+(click a slot, right-click clears; the game takes it at its next start). A key or button another
+PlayStation button had swaps between the two. Cross, Triangle, START, R1 and the d-pad always keep
+a key or button on the keyboard and on each controller, so you can't lock yourself out of the
+menus; Esc always goes back and pauses. Reset brings the layouts above back. dhd.ini keeps them
+as the lines keyboard, pad1 and pad2 (docs/PLAYING.md in the repository explains them).
+
+Settings: OPTIONS > REVIVED SETTINGS in the game's menu, the first row, with Display, Graphics,
+Controls, Online and Game tabs (L1/R1 switch them): resolution, display mode, window size,
+picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, your keys
+and buttons, the size of online riders' names (Off, Small, Medium as the original, Large),
+texture pack, font. Changes are saved to dhd.ini.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game
-starts; nothing is saved. "font = original" (PC SETTINGS > Font, at the next start) draws it as
+starts; nothing is saved. "font = original" (REVIVED SETTINGS > Font, at the next start) draws it as
 the PS2 does. A texture pack that replaces the font wins over both.
 
 Texture packs (upscale mods)
@@ -102,7 +116,7 @@ hash). Packs are made by their authors and are not part of this game; get one yo
   data folder, below), or
 - name the pack's folder in dhd.ini (its full path), e.g. the one PCSX2 uses:
     texture_pack = <Documents>\PCSX2\textures\SCUS-97177\replacements
-OPTIONS > PC SETTINGS > Texture Pack turns it off or on (at the next start); in dhd.ini that is
+OPTIONS > REVIVED SETTINGS > Texture Pack turns it off or on (at the next start); in dhd.ini that is
 "textures = off" or "on". Replacements load in the background the first time a texture shows,
 so the game's own texture can show for a moment first. texture_cache_mb = N sets how much
 graphics memory they may use (default: half the card's, at most 2048).
@@ -116,6 +130,8 @@ An update or uninstall never deletes them.
 - dhd.ini       your settings, one "key = value" per line.
 - saves\card1\  memory card 1: your saves. Copy this folder to back them up.
 - dhd.log       messages from the last run. Attach it when you report a problem.
+- dhd-previous.log  the log of the run before. If you started the game again after a crash,
+                    the crash is in this one.
 
 Updates
 The launcher looks for a newer version when it opens and shows Update in its footer. Update
@@ -134,17 +150,26 @@ Online races (experimental)
 Choose ONLINE in the main menu: create a public or private race, or join one from the list or
 with its code. It works out of the box, on the project's official server
 (wss://dhd.skuza.app). Every player needs the same USA disc image,
-and the newest version of the game: an older one is told "A new version is out. Update to play
-online." and offered Update Now, which closes the game and lets the launcher update it.
+and the newest version of the game (0.7.12 can't race with 0.7.11 or older): an older one is
+told "A new version is out. Update to play online." and offered Update Now, which closes the game
+and lets the launcher update it.
+In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
+to you (UDP); where a network blocks UDP the game falls back to an encrypted connection on port
+443 by itself.
 Running your own server is optional: put its address on the "server =" line of dhd.ini, e.g.
     server = wss://races.example.org
 A server of your own can keep an older version playing (its MIN_VERSION setting); then point
 update_url at your own latest.json, or set auto_update = off.
+What the official server keeps, against cheaters and abuse: a log of who joined which race (the
+time, the room, your rider name, the game's version, your country, a keyed hash of your internet
+address, never the address itself, and the game's install id, a random number kept in dhd.ini
+as install_id), deleted after 14 days; bans go by that hash or install id, until they end. No
+other player ever sees your address, its hash or your install id.
 
 Known gaps
-- Movies are shown 4:3 in widescreen, as on the PS2.
 - The 2-4 player split screens have not been checked in widescreen.
-- Online races have been tested with two players, not yet with four people on four PCs.
+- Online races have been tested with two games (PC and Mac) and up to nine scripted players,
+  not yet with ten people on ten PCs.
 
 Source code, building and bug reports: see the project's repository.
 Licence: GPL-3.0-or-later (LICENSE.txt). Third-party notices: THIRD-PARTY-NOTICES.txt.
