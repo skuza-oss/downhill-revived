@@ -206,8 +206,10 @@ describe("A racer whose Realtime setup fails or never ends", () => {
     const { clients, code } = await startedRace(3);
     const stub = env.ROOM.get(env.ROOM.idFromName(code));
     const fake = fakeRealtime();
-    // Member 1's session refuses the subscription to member 2's publication.
+    // Member 1's session refuses the subscription to member 2's publication: a definite refusal
+    // (a 4xx; a 5xx or no answer is an unknown outcome, finding 182).
     fake.fail = (path) => path.includes("/sessions/session-1/datachannels/new");
+    fake.failStatus = 400;
     try {
       await twoReady(stub);
       clients[2].sendJson({ type: "sfu_connected" });

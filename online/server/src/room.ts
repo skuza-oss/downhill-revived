@@ -1,6 +1,9 @@
 // One lobby and its race. Lobby control is JSON; the race is binary frames relayed to the other
 // racers through the SFU; this object owns lobby and signaling. Protocol: docs/online-protocol.md.
-import { Realtime, Turn, TURN_TTL_S, clientChannels, type Allocation, type SfuSession, type SfuSecrets } from "./sfu";
+import {
+  CallGate, Realtime, Turn, TURN_TTL_S, clientChannels, unknownOutcome, type Allocation, type ListedChannel, type SfuSession,
+  type SfuSecrets,
+} from "./sfu";
 import { DurableObject } from "cloudflare:workers";
 import { LISTING_REFRESH_MS, type LobbyEntry } from "./lobbies";
 import {
@@ -39,8 +42,8 @@ import {
     this long (SFU_SETUP_MS overrides it); one not done by then is out of the race (finding 158,
     release review round 2). A member connected before its grid locked has nothing left to do but
     acknowledge (finding 177); a newcomer's own session takes 0.7-1.5 s over UDP and about 3 s
-    through the TURN fallback, then its pairs' calls, SUBSCRIBE_PARALLEL at once per subscriber.
-    25 s leaves room for one call that runs into its 15 s timeout, and ends before the game's 30 s
+    through the TURN fallback, then one subscription call per subscriber (finding 182). 25 s leaves
+    room for one call that runs into its 10 s timeout, the inspection and the retry, and ends before the game's 30 s
     wait for the others' rides (port/hle/online.c), which travel over the released channels. */
 const SFU_SETUP_MS = 25_000;
 /** A racer whose own Realtime connection isn't up this long after the race's start message (no
@@ -54,9 +57,25 @@ const SFU_SETUP_MS = 25_000;
     holds in a full room too: at most about 4 s from the start message; 10 s keeps 2.5 times that
     and shortens the others' wait on the load screen for a racer who never connects (15 s before). */
 const SFU_CONNECT_MS = 10_000;
-/** A subscriber's subscription calls run this many at once (finding 177, question C: concurrent
-    datachannels/new calls on one connected session all succeeded against the real API). */
-const SUBSCRIBE_PARALLEL = 4;
+/** The room's Realtime and TURN calls run at most this many at once, and its subscription work
+    (subscriptions, closes, inspections) at most BACKGROUND_CALLS of them, so a member's own
+    session, publication or TURN call always finds a slot (CallGate, finding 182). A Durable Object
+    has 6 outgoing connections waiting for headers; past that a fetch waits in the runtime's queue
+    with its timeout running. One is left for anything else the object fetches. */
+const ROOM_CALLS = 5;
+const BACKGROUND_CALLS = 4;
+/** A subscription pass's call has this long once it starts (SFU_SUBSCRIBE_TIMEOUT_MS overrides it).
+    Production, 30 h to 2026-11-08: calls with at most 3 others of their room in flight took p99
+    5.6 s, p99.9 8.3 s, at most 9.4 s (4,363 calls). A call that runs out is no longer a failure,
+    only an unknown outcome, so a shorter limit gets to the inspection and retry sooner: at the race
+    start a newcomer's 10 s, the backoff, a GET and the retry stay within SFU_SETUP_MS. */
+const SUBSCRIBE_TIMEOUT_MS = 10_000;
+/** After an unknown outcome a subscriber's session waits this long before it is inspected (twice as
+    long for each one in a row, UNSURE_MAX_MS at most), and is inspected again RECHECK_MS after that
+    for a second subscription an aborted call made late (finding 182). */
+const UNSURE_FIRST_MS = 2_000;
+const UNSURE_MAX_MS = 16_000;
+const RECHECK_MS = 10_000;
 /** A member may start this many Realtime sessions (sfu_offer) in SFU_OFFER_WINDOW_MS: one when it
     joins, and a new one after a failure, a lost connection or a TURN renewal (finding 177). Each
     costs API calls on the others' sessions too. */
@@ -95,6 +114,10 @@ const SFU_CLEANUP_MS = TURN_TTL_S * 1000;
     reset: its game drops the association and Cloudflare ends the session with its connection,
     whatever the API answers. One that leads nowhere live is forgotten (finding 179). */
 const CLOSE_RETRIES = 4;
+
+/** What a subscription pass did (its log line, finding 182): pairs subscribed, with an unknown
+    outcome and failed for certain; sessions inspected, channels adopted and unrecorded ones closed. */
+interface PassCounts { ok: number; unknown: number; failed: number; inspected: number; adopted: number; extra: number; }
 
 /** A claimed room nobody joined is dropped after this long. */
 const UNUSED_ROOM_MS = 60_000;
@@ -903,7 +926,7 @@ export class Room extends DurableObject<Env> {
   private async onSfu(ws: WebSocket, me: Member, m: Msg): Promise<boolean> {
     if (this.sockets.get(me.id) !== ws || !this.state?.members.includes(me)) return false;
     const st = this.state;
-    const api = new Realtime(this.env as Env & SfuSecrets);
+    const api = this.realtime(true);
     let attempt = me.sfuAttempt;
     const original = me.sfu;
     const current = () => me.sfuAttempt === attempt && !!this.state?.members.includes(me) &&
@@ -956,7 +979,7 @@ export class Room extends DurableObject<Env> {
         await this.clearTurn(me);
         let minted: Awaited<ReturnType<Turn["mint"]>>;
         try {
-          minted = await new Turn(this.env as Env & SfuSecrets).mint(`room-${st.code}-m${me.id}`);
+          minted = await this.turn().mint(`room-${st.code}-m${me.id}`);
         } catch (error) {
           // No relay: the member's UDP attempt goes on (its session stays usable); nothing sent.
           console.warn("TURN credentials unavailable", error instanceof Error ? error.message.slice(0, 80) : "unknown");
@@ -1304,10 +1327,12 @@ export class Room extends DurableObject<Env> {
     return null;
   }
 
-  /** `sub` holds a live subscription to `pub`'s current publication: one made to its present
-      session (a subscription to an earlier session of `pub` is stale, subscribePass closes it). */
+  /** `sub` holds a live subscription to both channels of `pub`'s current publication: made to its
+      present session (a subscription to an earlier session of `pub` is stale, subscribePass closes
+      it). Both: an adopted half (finding 182) still needs its other channel. */
   private subscribed(sub: Member, pub: Member): boolean {
-    return !!sub.sfu?.channels.some((c) => !c.local && c.memberId === pub.id && c.session === pub.sfu?.id && c.closeAt == null);
+    const live = (name: string) => !!sub.sfu?.channels.some((c) => !c.local && c.memberId === pub.id && c.session === pub.sfu?.id && c.name === name && c.closeAt == null);
+    return live("state") && live("events");
   }
 
   /** A subscriber and a publisher of `group` with no subscription between them yet, among those
@@ -1342,16 +1367,35 @@ export class Room extends DurableObject<Env> {
     return { retry, forget, reset };
   }
 
-  /** The subscription pass has work: a pair missing in the group, a stale channel to close, or a
-      failed close due again. */
+  /** `session` waits for the outcome of an earlier call (finding 182): no change on it before then. */
+  private unsure(session: SfuSession, now: number): boolean {
+    return session.unsure != null && session.unsure > now;
+  }
+
+  /** The subscription pass has work: a pair missing in the group, a stale channel to close, a failed
+      close due again, or an inspection due (finding 182). */
   private sfuWork(): boolean {
     const group = this.sfuGroup(), now = Date.now();
     return (!!group && !!this.missingSubscription(group)) ||
       !!this.state?.members.some((x) => {
-        if (x.sfu?.phase !== "ready") return false;
+        const s = x.sfu;
+        if (s?.phase !== "ready") return false;
+        if ((s.unsure != null && s.unsure <= now) || (s.recheckAt != null && s.recheckAt <= now)) return true;
         const failed = this.failedCloses(x, group, now);
         return this.staleChannels(x).length || failed.retry.length || failed.forget.length || failed.reset;
       });
+  }
+
+  /** Runs `change` after the changes already queued on session `id`: Cloudflare asks for the
+      mutations of one session one at a time (Realtime SFU, "Serialize mutations per session"); a
+      departure's closes and a pass's calls on one subscriber came at once (finding 182). */
+  private sessionTail = new Map<string, Promise<unknown>>();
+  private serial<T>(id: string, change: () => Promise<T>): Promise<T> {
+    const run = (this.sessionTail.get(id) ?? Promise.resolve()).then(change, change);
+    const tail = run.catch(() => {});
+    this.sessionTail.set(id, tail);
+    void tail.then(() => { if (this.sessionTail.get(id) === tail) this.sessionTail.delete(id); });
+    return run;
   }
 
   /** Closes subscriptions `channels` of `session`. Those that don't close stay on it marked
@@ -1360,7 +1404,7 @@ export class Room extends DurableObject<Env> {
       racers' frames until its session ended. */
   private async closeSubscriptions(api: Realtime, session: SfuSession, channels: Allocation[]): Promise<void> {
     try {
-      await api.close(session, channels);
+      await this.serial(session.id, () => api.close(session, channels));
     } catch (error) {
       const now = Date.now();
       const left = channels.filter((c) => session.channels.includes(c));
@@ -1372,16 +1416,92 @@ export class Room extends DurableObject<Env> {
     }
   }
 
-  /** Subscribes every published member of the group to every other one's publication it lacks,
-      each endpoint told only its own allocations, and first closes stale channels (and, at a race's
-      start, the subscriptions of members outside it: a member who sits a race out receives
-      nothing) and tries failed closes again (failedCloses). Each subscriber's calls run
-      SUBSCRIBE_PARALLEL at once (finding 177, question C), subscribers in parallel. Leaves and kicks are not queued with this, so the group is read
-      again before every call: a departure during one can't make it skip anyone (release review
-      round 2, finding 158). Rounds repeat until nothing is missing. Returns the subscribers whose
-      call failed, or whose subscriptions don't close: their session is failed (no second
-      attempt), the caller ends it. */
-  private async subscribeGroup(api: Realtime, prune: boolean): Promise<{ id: number; session: SfuSession }[]> {
+  /** Brings `sub`'s record in line with its session as Cloudflare lists it after an unknown outcome
+      (finding 182): a subscription to a member of the group that the record lacks is adopted (the
+      aborted call made it; its subscriber hears it in sfu_channels), one it already has, or one to
+      nobody in the group, is closed (an aborted call made it after a retry, or for a pair no longer
+      wanted). Channels the record knows (live or closing) are left alone. */
+  private async adopt(api: Realtime, sub: Member, session: SfuSession, listed: ListedChannel[], group: Member[] | null,
+                      counts: PassCounts): Promise<void> {
+    const st = this.state;
+    const adopted: Allocation[] = [], extra: Allocation[] = [];
+    for (const c of listed) {
+      if (c.local || c.status === "inactive" || session.channels.some((a) => a.channelId === c.id)) continue;
+      const pub = st?.members.find((m) => m !== sub && m.sfu?.phase === "ready" && m.sfu.id === c.session);
+      const wanted = !!pub && !!group?.includes(pub) && !!group.includes(sub) && (c.name === "state" || c.name === "events") &&
+        !session.channels.some((a) => !a.local && a.memberId === pub.id && a.session === c.session && a.name === c.name && a.closeAt == null);
+      const allocation: Allocation = { memberId: pub?.id ?? -1, name: c.name, channelId: c.id, local: false, ...(c.session ? { session: c.session } : {}) };
+      if (wanted) {
+        session.channels.push(allocation);
+        adopted.push(allocation);
+      } else extra.push(allocation);
+    }
+    counts.adopted += adopted.length;
+    const peer = this.sockets.get(sub.id);
+    if (adopted.length && peer && sub.sfu === session) this.send(peer, { type: "sfu_channels", channels: clientChannels(adopted) });
+    if (!extra.length) return;
+    // Never on the record, so nobody hears of them; one that doesn't close is tried at the next
+    // inspection, then left to the session's end.
+    try {
+      await this.serial(session.id, () => api.close({ ...session, channels: [...extra] }, extra));
+      counts.extra += extra.length;
+    } catch (error) {
+      console.warn(`Realtime close of ${extra.length} unrecorded subscriptions failed`, error instanceof Error ? error.message.slice(0, 80) : "unknown");
+      if (session.recheckAt == null) session.recheckAt = Date.now() + RECHECK_MS;
+    }
+  }
+
+  /** An inspection due on `sub`'s session (after an unknown outcome, or its recheck): lists the
+      session and adopts or closes what the record doesn't know. False while the outcome stays
+      unknown (the inspection itself got no answer) or the session failed. */
+  private async inspect(api: Realtime, sub: Member, session: SfuSession, group: Member[] | null, counts: PassCounts,
+                        failed: { id: number; session: SfuSession }[]): Promise<boolean> {
+    const now = Date.now();
+    const due = session.unsure != null && session.unsure <= now, recheck = session.recheckAt != null && session.recheckAt <= now;
+    if (!due && !recheck) return true;
+    let listed: ListedChannel[];
+    try {
+      listed = await this.serial(session.id, () => api.inspect(session));
+    } catch (error) {
+      if (sub.sfu !== session) return false;
+      if (unknownOutcome(error)) {
+        this.unsureOf(session);
+        counts.unknown++;
+        return false;
+      }
+      console.warn("Realtime inspection failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+      session.phase = "failed";
+      if (!failed.some(f => f.session === session)) failed.push({ id: sub.id, session });
+      return false;
+    }
+    if (sub.sfu !== session || session.phase !== "ready") return false;
+    // The recheck comes once after an inspection that found the outcome: a call Cloudflare carried
+    // out after that GET (an empty snapshot doesn't settle a pending request) shows by then.
+    session.unsure = undefined;
+    session.recheckAt = due ? Date.now() + RECHECK_MS : undefined;
+    counts.inspected++;
+    await this.adopt(api, sub, session, listed, group, counts);
+    return true;
+  }
+
+  /** Marks `session` as waiting for an unknown outcome: inspected after the backoff. */
+  private unsureOf(session: SfuSession): void {
+    session.unknowns = (session.unknowns ?? 0) + 1;
+    session.unsure = Date.now() + Math.min(UNSURE_MAX_MS, UNSURE_FIRST_MS * 2 ** (session.unknowns - 1));
+  }
+
+  /** Subscribes every published member of the group to every publication it lacks, one call per
+      subscriber (finding 182), each endpoint told only its own allocations, and first closes stale
+      channels (and, at a race's start, the subscriptions of members outside it: a member who sits a
+      race out receives nothing) and tries failed closes again (failedCloses). A subscriber whose
+      last call's outcome is unknown is left alone until its inspection is due, then inspected
+      first. All calls go through the room's gate, the calls on one session one at a time (serial).
+      Leaves and kicks are not queued with this, so the group is read again before every call: a
+      departure during one can't make it skip anyone (release review round 2, finding 158). Rounds
+      repeat until nothing is missing. Returns the subscribers whose call failed for certain (an
+      item error, a 4xx), or whose subscriptions don't close: their session is failed (no second
+      attempt), the caller ends it. An unknown outcome fails nobody. */
+  private async subscribeGroup(api: Realtime, prune: boolean, counts: PassCounts): Promise<{ id: number; session: SfuSession }[]> {
     const failed: { id: number; session: SfuSession }[] = [];
     const st = this.state;
     if (!st) return failed;
@@ -1389,6 +1509,7 @@ export class Room extends DurableObject<Env> {
     const group = this.sfuGroup(), now = Date.now();
     await Promise.all(st.members.filter((x) => x.sfu?.phase === "ready").map(async (sub) => {
       const session = sub.sfu!;
+      if (this.unsure(session, now) || !await this.inspect(api, sub, session, group, counts, failed)) return;
       const outside = prune && st.race && group && !group.includes(sub);
       const fresh = outside ? session.channels.filter((c) => !c.local && c.closeAt == null) : this.staleChannels(sub);
       const { retry, forget, reset } = this.failedCloses(sub, group, now);
@@ -1413,33 +1534,46 @@ export class Room extends DurableObject<Env> {
       const group = this.sfuGroup();
       if (!group) break;
       const published = group.filter((x) => x.sfu?.phase === "ready");
+      const now = Date.now();
       const work = new Map<Member, Member[]>();
       for (const a of published) for (const b of published)
-        if (a !== b && !this.subscribed(a, b)) work.set(a, [...(work.get(a) ?? []), b]);
+        if (a !== b && !this.subscribed(a, b) && !this.unsure(a.sfu!, now)) work.set(a, [...(work.get(a) ?? []), b]);
       if (!work.size) break;
       let progress = false;
       await Promise.all([...work].map(async ([sub, pubs]) => {
-        for (let i = 0; i < pubs.length; i += SUBSCRIBE_PARALLEL) {
-          const results = await Promise.all(pubs.slice(i, i + SUBSCRIBE_PARALLEL).map(async (pub) => {
+        const session = sub.sfu!;
+        // An inspection due first (the round may come after the backoff of an earlier round's).
+        if (!await this.inspect(api, sub, session, group, counts, failed)) return;
+        try {
+          const channels = await this.serial(session.id, async () => {
+            // Read again when the call starts: who left, who is published, what an earlier change
+            // or the inspection gave it meanwhile.
             const now = this.sfuGroup() ?? [];
-            if (!now.includes(sub) || !now.includes(pub) || sub.sfu?.phase !== "ready" || pub.sfu?.phase !== "ready") return true;
-            const session = sub.sfu;
-            try {
-              const channels = await api.subscribe(session, pub.id, pub.sfu);
-              if (channels.length) progress = true;
-              const peer = this.sockets.get(sub.id);
-              if (channels.length && peer && sub.sfu === session && this.state?.members.includes(sub))
-                this.send(peer, { type: "sfu_channels", channels: clientChannels(channels) });
-              return true;
-            } catch (error) {
-              console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
-              if (sub.sfu !== session || !this.state?.members.includes(sub)) return true;
-              session.phase = "failed";
-              if (!failed.some(f => f.session === session)) failed.push({ id: sub.id, session });
-              return false;
-            }
-          }));
-          if (results.includes(false)) return;
+            if (!now.includes(sub) || sub.sfu !== session || session.phase !== "ready" || this.unsure(session, Date.now())) return null;
+            return api.subscribeAll(session, pubs.filter((p) => now.includes(p) && p.sfu?.phase === "ready" && !this.subscribed(sub, p))
+              .map((p) => ({ memberId: p.id, session: p.sfu! })));
+          });
+          if (!channels) return;
+          session.unknowns = 0;
+          if (channels.length) progress = true;
+          counts.ok += new Set(channels.map((c) => c.memberId)).size;
+          const peer = this.sockets.get(sub.id);
+          if (channels.length && peer && sub.sfu === session && this.state?.members.includes(sub))
+            this.send(peer, { type: "sfu_channels", channels: clientChannels(channels) });
+        } catch (error) {
+          if (sub.sfu !== session || !this.state?.members.includes(sub)) return;
+          if (unknownOutcome(error)) {
+            // Not a failure (finding 182): the session is inspected after the backoff, what the
+            // call made is adopted, the rest made in a later pass.
+            console.warn("Realtime subscription outcome unknown; inspected later", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+            this.unsureOf(session);
+            counts.unknown += pubs.length;
+            return;
+          }
+          console.warn("Realtime subscription failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+          counts.failed += pubs.length;
+          session.phase = "failed";
+          if (!failed.some(f => f.session === session)) failed.push({ id: sub.id, session });
         }
       }));
       if (!progress) break;
@@ -1450,8 +1584,8 @@ export class Room extends DurableObject<Env> {
   /** One subscription pass at a time, coalesced (2026-11-07): a pass asked for while one runs runs
       once more after it, for the room as it is then (finding 175: a pass must never end with an
       older race). It runs at a grid's lock (the pre-setup, finding 177), at a race's start (pruning
-      those outside it), at every publication, and from the alarm when work is left. After each
-      pass the release is checked again. */
+      those outside it), at every publication, and from the alarm when work is left (an inspection
+      due included). After each pass the release is checked again. */
   private subscribing = false;
   private subscribeAgain = false;
   private pruneDue = false;
@@ -1469,9 +1603,13 @@ export class Room extends DurableObject<Env> {
         this.pruneDue = false;
         const started = Date.now(), race = this.state?.race ?? null;
         const before = this.calls;
-        const failed = await this.subscribeGroup(new Realtime(this.env as Env & SfuSecrets, this.countedFetch), prune);
+        const counts: PassCounts = { ok: 0, unknown: 0, failed: 0, inspected: 0, adopted: 0, extra: 0 };
+        const failed = await this.subscribeGroup(this.realtime(false, this.countedFetch, this.subscribeTimeoutMs()), prune, counts);
+        // Pairs subscribed, unknown (inspected later) and failed for certain; inspections, channels
+        // they adopted and unrecorded ones they closed (finding 182).
         if (this.calls > before)
-          console.log(`room ${this.state?.code ?? ""}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms`);
+          console.log(`room ${this.state?.code ?? ""}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms; ` +
+            `pairs ok ${counts.ok} unknown ${counts.unknown} failed ${counts.failed}; inspected ${counts.inspected} adopted ${counts.adopted} closed ${counts.extra}`);
         await this.save();
         // Saving yields too: a replacement completed since the failing call is healthy.
         const currentFailures = failed.filter(f => this.state?.members.find(m => m.id === f.id)?.sfu === f.session);
@@ -1485,9 +1623,41 @@ export class Room extends DurableObject<Env> {
       this.subscribing = false;
     }
   }
+  /** The room's call gate (finding 182) and its API clients: `urgent` for a member's own session,
+      publication and TURN credentials. */
+  private gate = new CallGate(ROOM_CALLS, BACKGROUND_CALLS);
+  private realtime(urgent: boolean, request?: typeof fetch, timeoutMs?: number): Realtime {
+    return new Realtime(this.env as Env & SfuSecrets, request, { gate: this.gate, urgent, timeoutMs });
+  }
+  private turn(): Turn {
+    return new Turn(this.env as Env & SfuSecrets, undefined, this.gate);
+  }
+  private subscribeTimeoutMs(): number {
+    const v = Number((this.env as unknown as Record<string, unknown>).SFU_SUBSCRIBE_TIMEOUT_MS);
+    return Number.isFinite(v) && v > 0 ? v : SUBSCRIBE_TIMEOUT_MS;
+  }
   /** API calls the subscription passes made (their log line). */
   private calls = 0;
-  private countedFetch: typeof fetch = (input, init) => { this.calls++; return fetch(input, init); };
+  /** A test switch for a test server, never set in production: SFU_TEST_LOST_ANSWERS=N makes the
+      room's first N subscription calls lose their answer (Cloudflare carries the call out; the room
+      waits for its timeout and sees no answer), the slow-call case of finding 182. */
+  private lostAnswers?: number;
+  private countedFetch: typeof fetch = async (input, init) => {
+    this.calls++;
+    this.lostAnswers ??= Math.max(0, Math.floor(Number((this.env as unknown as Record<string, unknown>).SFU_TEST_LOST_ANSWERS) || 0));
+    const lose = this.lostAnswers > 0 && String(input).endsWith("/datachannels/new") && String(init?.body ?? "").includes("\"remote\"");
+    const answer = await fetch(input, init);
+    if (!lose) return answer;
+    this.lostAnswers--;
+    await answer.body?.cancel();
+    console.log(`room ${this.state?.code ?? ""}: test: a subscription call's answer is dropped (${this.lostAnswers} left)`);
+    return new Promise<Response>((_, reject) => {
+      const signal = init?.signal;
+      if (!signal) return reject(new Error("no answer"));
+      if (signal.aborted) return reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  };
 
   /** Lets race traffic flow once every racer acknowledged its channels for this race and every pair
       of racers is subscribed both ways. */
@@ -1523,7 +1693,7 @@ export class Room extends DurableObject<Env> {
     if (!username) return;
     const until = member.turnUntil ?? Date.now() + TURN_TTL_S * 1000;
     try {
-      await new Turn(this.env as Env & SfuSecrets).revoke(username);
+      await this.turn().revoke(username);
     } catch (error) {
       console.warn("TURN revoke failed; tried again later", error instanceof Error ? error.message.slice(0, 80) : "unknown");
       await this.keepCleanup({ turnUser: username, until });
@@ -1541,14 +1711,14 @@ export class Room extends DurableObject<Env> {
       session and is tried again by the subscription pass (finding 179). Its subscribers hear
       sfu_closed. */
   private async clearSfu(member: Member): Promise<void> {
-    const api = new Realtime(this.env as Env & SfuSecrets);
+    const api = this.realtime(false);
     const session = member.sfu;
     delete member.sfu;
     delete member.sfuConnected; delete member.sfuReadyRace; delete member.releasedRace;
     await this.clearTurn(member);
     if (session) {
       try {
-        await api.close(session);
+        await this.serial(session.id, () => api.close(session));
       } catch (error) {
         console.warn("Realtime close failed; tried again later", error instanceof Error ? error.message.slice(0, 80) : "unknown");
         if (session.channels.length)
@@ -1590,7 +1760,7 @@ export class Room extends DurableObject<Env> {
   private async retryCleanup(now: number): Promise<void> {
     if (!this.cleanup.some(x => x.at <= now || x.until <= now)) return;
     const run = this.sfuQueue.then(async () => {
-      const api = new Realtime(this.env as Env & SfuSecrets), turn = new Turn(this.env as Env & SfuSecrets);
+      const api = this.realtime(false), turn = this.turn();
       for (const item of [...this.cleanup]) {
         let done = item.until <= now;
         if (done) console.warn("Realtime cleanup given up: its time is up");

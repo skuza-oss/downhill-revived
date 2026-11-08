@@ -132,7 +132,7 @@ describe("the coalesced subscription pass (hotfix 4)", () => {
         for (const m of room.state.members) expect(m.sfu.channels.filter((c: any) => !c.local)).toHaveLength(2 * (n - 1));
       });
       const subs = fake.calls.filter((c) => c.path.endsWith("datachannels/new") && c.body.dataChannels[0].location === "remote");
-      const pairs = subs.map((c) => `${c.path.split("/").at(-3)}<-${c.body.dataChannels[0].sessionId}`);
+      const pairs = subs.flatMap((c) => [...new Set(c.body.dataChannels.map((x: any) => x.sessionId))].map((pub) => `${c.path.split("/").at(-3)}<-${pub}`));
       expect(new Set(pairs).size).toBe(pairs.length);  // no pair asked twice
       expect(pairs).toHaveLength(n * (n - 1));          // every ordered pair once
       expect(fake.calls.filter((c) => c.path.endsWith("datachannels/new") && c.body.dataChannels[0].location === "local")).toHaveLength(n);

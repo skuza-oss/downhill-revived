@@ -275,9 +275,8 @@ A member's session lives as long as its stay in the room (finding 177):
 - Subscriptions are made for a race's racers, in one coalesced pass: at the grid's lock, during
   the countdown before the start message (the pre-setup), for every grid member whose session is
   up; at the start for what is still missing (a racer that connected since); and when a racer of
-  the coming or running race publishes. Each subscriber's calls run 4 at once (finding 177 tested
-  concurrent `datachannels/new` calls on one connected session against the real API: none failed), the
-  subscribers in parallel. They stay after the race. At a race's start the subscriptions of members
+  the coming or running race publishes. Each subscriber gets one `datachannels/new` call per pass
+  naming every publisher it lacks (finding 182), the subscribers in parallel. They stay after the race. At a race's start the subscriptions of members
   outside it are closed (`sfu_closed`), so nobody is sent race frames it would drop; they come back
   at the member's next grid.
 - Each endpoint receives only its own allocations, in one or more messages:
@@ -365,7 +364,16 @@ path: a TURN relay only ever carries that player's own traffic to the SFU.
 The API limit is 50 requests/session/second. A member's own session work (`sessions/new`, its
 publication, its TURN credentials, its acknowledgement) runs at once; a replacing offer and the
 closes run one after another in the room's queue; subscriptions run in the coalesced pass above.
-API operations have a 15 s timeout. A lost WebRTC connection has a 30 s session reuse window; the
+The room runs at most 5 API calls at once, its subscription work (subscriptions, closes,
+inspections) at most 4, so a member's own session work always finds a slot; a call's timeout (15 s,
+10 s in the subscription pass) starts when the call does (finding 182: a Durable Object has 6
+outgoing connections waiting for headers, a 7th waited in the runtime's queue with its timeout
+running). A subscription call with no answer (a timeout, a network error, a 5xx, 409 or 429) fails
+nobody: after 2 s (doubling, at most 16 s) the subscriber's session is listed (`GET
+sessions/{id}`), what the call made is adopted and sent in `sfu_channels`, the rest made again, and
+10 s later the session is listed once more to close a second subscription an aborted call made
+late (never announced: its endpoint never heard of it). An item error or another 4xx fails the
+session as before. A lost WebRTC connection has a 30 s session reuse window; the
 game drops a failed association and offers a new session rather than retaining a broken
 connection. A lost room WebSocket leaves the SFU session up: the race goes on over it while the
 game rejoins. An idle session costs about nothing: Realtime bills only what Cloudflare sends to
