@@ -237,10 +237,11 @@ int main(int argc, char **argv)
                 net_send_frame(NET_FRAME_EVENT, e, sizeof e);
             }
             was_racing = l.state == NET_RACING;
-            if (l.state == NET_RACING && !acted && now - loaded_at >= 0.5) {
+            if (l.state == NET_RACING && !acted && now - loaded_at >= 2) {
                 /* "loaded", as a game says it until GO: the games' start needn't wait 60 s for this one;
-                   and its rider again: a host still in its menus keeps only its newest 128 frames
-                   (NET_RELAY_QUEUE), and these loaded messages alone can push the first one out */
+                   and its rider again: a game still in its menus keeps only its newest 128 frames
+                   (NET_RELAY_QUEUE), and a burst of bots' messages can push a rider's one out. Every
+                   2 s: a game sends each once, so a room of bots must not flood the slow loaders. */
                 uint8_t e[2] = {EVENT_VERSION, EVENT_LOADED}, ride[30] = {EVENT_VERSION, EVENT_SETUP};
                 put32(ride + 2, 0x20 * (rider + 1)), put32(ride + 6, rider), put32(ride + 18, 8), put32(ride + 22, 3);
                 net_send_frame(NET_FRAME_EVENT, ride, sizeof ride);

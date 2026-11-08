@@ -37,7 +37,7 @@ from online_race import iso_files_sha256  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 NETBENCH = re.compile(r'netbench: epoch_ms=(\d+) backend=p2p path=(\w+) remote_scope=(\w+) rx=(\d+) tx=(\d+) .*?conn=(\d+)')
-AGE = re.compile(r'slot (\d+) snapshot age p50/p95/p99 (\d+)/(\d+)/(\d+) ms .*?on arrival (-?\d+) ms')
+AGE = re.compile(r'slot (\d+) snapshot age p50/p95/p99 (\d+)/(\d+)/(\d+) ms .*?on arrival (-?\d+) ms, gaps>100ms (\d+), messages ([\d.]+)/s')
 
 
 def main():
@@ -171,12 +171,19 @@ def peers(text):
 
 
 def ages(text):
-    """The host's last 30 s line per sender: snapshot age p50/p95/p99 and the median on arrival."""
-    found = {}
+    """Snapshot age per sender over the race: from the 30 s `net:` lines whose sender was still
+    racing (10 snapshot messages a second or more), the median across those windows of each
+    percentile and of the arrival age (the window around the finish has the wait for the results
+    in it), and the gaps over 100 ms in all."""
+    windows = {}
     for m in AGE.finditer(text):
-        slot, p50, p95, p99, arrival = m.groups()
-        found[f'slot{slot}'] = dict(p50=int(p50), p95=int(p95), p99=int(p99), arrival_median=int(arrival))
-    return found
+        slot, p50, p95, p99, arrival, gaps, rate = m.groups()
+        if float(rate) >= 10:
+            windows.setdefault(f'slot{slot}', []).append((int(p50), int(p95), int(p99), int(arrival), int(gaps), float(rate)))
+    median = lambda values: sorted(values)[len(values) // 2]
+    return {slot: dict(windows=len(w), p50=median([x[0] for x in w]), p95=median([x[1] for x in w]), p99=median([x[2] for x in w]),
+                       arrival_median=median([x[3] for x in w]), gaps=sum(x[4] for x in w), messages_s=median([x[5] for x in w]))
+            for slot, w in sorted(windows.items())}
 
 
 def bot(text):

@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::net::{Protocol, Receive};
-use str0m::{Candidate, Event, Input, Output, Rtc};
+use str0m::{Candidate, CandidateKind, Event, Input, Output, Rtc};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -91,6 +91,8 @@ pub struct Peer {
     state: ChannelId,
     events: ChannelId,
     relay: Option<Relay>,
+    /// The other game's relayed candidates: a pair to one of these is relayed at its end.
+    remote_relays: Vec<SocketAddr>,
     stun: Option<Stun>,
     connected: bool,
     path: Option<Path>,
@@ -158,7 +160,7 @@ impl Peer {
             (state, events, None)
         };
         Ok(Self {
-            rtc, sockets, pending, state, events, relay: None, stun, connected: false, path: None,
+            rtc, sockets, pending, state, events, relay: None, remote_relays: vec![], stun, connected: false, path: None,
             created: Instant::now(), outgoing_events: VecDeque::new(), outgoing_states: HashMap::new(),
             signals, incoming: vec![], refused: None,
         })
@@ -176,7 +178,13 @@ impl Peer {
                 let pending = self.pending.take().ok_or("unexpected peer answer")?;
                 self.rtc.sdp_api().accept_answer(pending, SdpAnswer::from_sdp_string(text("sdp", MESSAGE_MAX)?)?)?;
             }
-            Some("candidate") => self.rtc.add_remote_candidate(Candidate::from_sdp_string(text("candidate", 2048)?)?),
+            Some("candidate") => {
+                let candidate = Candidate::from_sdp_string(text("candidate", 2048)?)?;
+                if candidate.kind() == CandidateKind::Relayed {
+                    self.remote_relays.push(candidate.addr());
+                }
+                self.rtc.add_remote_candidate(candidate);
+            }
             _ => return Err("unknown peer signal".into()),
         }
         Ok(())
@@ -356,7 +364,7 @@ impl Peer {
                 Output::Event(Event::PeerStats(stats)) => {
                     let relay = self.relay.as_ref().and_then(|r| r.address);
                     if let (true, None, Some(pair)) = (self.connected, self.path, &stats.selected_candidate_pair) {
-                        self.path = Some(if relay == Some(pair.local.addr) {
+                        self.path = Some(if relay == Some(pair.local.addr) || self.remote_relays.contains(&pair.remote.addr) {
                             Path::Relay
                         } else if is_local(pair.remote.addr.ip()) {
                             Path::Lan
