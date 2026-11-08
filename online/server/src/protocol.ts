@@ -108,17 +108,20 @@ export function isOutdated(clientVersion: string, minVersion: string): boolean {
 // Join codes: no 0/O, 1/I/L.
 export const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 export const CODE_LENGTH = 6;
+/** A P2P room's code is one longer (src/p2p.ts, finding 180): the game tells the two kinds apart
+    by length alone, and a room that shares addresses is harder to guess. */
+export const P2P_CODE_LENGTH = 7;
 
-export function randomCode(): string {
-  const bytes = new Uint8Array(CODE_LENGTH);
+export function randomCode(length = CODE_LENGTH): string {
+  const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
   let code = "";
   for (const b of bytes) code += CODE_ALPHABET[b % CODE_ALPHABET.length];
   return code;
 }
 
-export function isValidCode(code: string): boolean {
-  if (code.length !== CODE_LENGTH) return false;
+export function isValidCode(code: string, length = CODE_LENGTH): boolean {
+  if (code.length !== length) return false;
   for (const c of code) if (!CODE_ALPHABET.includes(c)) return false;
   return true;
 }

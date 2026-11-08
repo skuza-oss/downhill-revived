@@ -800,28 +800,51 @@ silences a member for the rest of the race (protocol 3 did, and a backlog after 
 froze an honest rider; finding 169).
 
 
-## Experimental P2P rooms (finding 180)
+## P2P rooms (finding 180, test builds)
 
-The creator selects the backend before creating a room. P2P uses `/v1/p2p/rooms/new`,
-`/v1/p2p/rooms/CODE`, and `/v1/p2p/lobbies` on the same official server. These routes can
-be deployed independently using `online/server/wrangler.p2p.jsonc`; they never relay gameplay.
+The creator chooses an SFU or a P2P room (CREATE A P2P RACE); the room keeps it. A P2P room's
+games connect to the host's game directly, or through Cloudflare's TURN relay (TLS on 443) when
+no direct path works, and the host's game runs the room's rules (port/render/session). The
+server (`online/server/src/p2p.ts`; the official server runs it as its own Worker,
+`wrangler.p2p.jsonc`) only admits members, relays signaling and gives each member its TURN
+credentials. It never carries race frames.
 
-The existing protocol-4 hello is followed by `p2p_welcome` (memberId, hostId, members,
-serverTime, code, version, turnPending), `p2p_members`, and optional `p2p_turn` (the member's
-own short-lived ICE credentials). Signaling is `p2p_signal` with `to` and an offer, answer
-or candidate in `signal`; the service authenticates `from` and permits only host-star pairs.
-`p2p_listing` is a host-only discovery update; `p2p_kick` removes a guest. Binary PING/PONG
-and JSON ping retain their existing lobby-clock meanings.
+**Private.** Signaling gives the host every member's network address and every member the
+host's, so a P2P room is never listed: there is no P2P lobby list, a host's `public` setting is
+ignored, and the game says "Players in this room can see your network address." on its CREATE A
+P2P RACE row and when a P2P room opens. Guests never signal each other.
 
-Negotiated WebRTC stream 0 carries unordered snapshots with zero retransmissions; stream 1
-carries ordered reliable events and room commands. A reliable control message begins with
-byte 0 followed by JSON. A gameplay message begins with byte 1, followed by its race's
-startAt as eight little-endian bytes, then the existing STATE/EVENT frame. The host binds
-the sender slot to the peer connection before forwarding; old race markers are rejected.
-The same C snapshot packing, puppet prediction, corrections, events and loading barrier run
-for SFU and P2P. The host coordinator emits the existing room/start/left/ended messages.
+**Codes.** A P2P room's code has 7 characters (an SFU room's 6, the same alphabet): the game sends
+a join to `/v1/p2p/rooms/CODE` or `/v1/rooms/CODE` by the code's length. New room:
+`/v1/p2p/rooms/new`.
 
-Host loss closes the session; a lost guest becomes AI. No host migration, reconnect recovery
-or SFU failover is attempted. Browser WebRTC runs on Window, with the same Rust session source
-compiled to WASM and bridged to the game worker. Production page CSP must allow HTTPS/WSS
-connections to the official server when hosting a browser build.
+**The room connection.** The protocol-4 hello, then from the server:
+
+| Message | What |
+|---|---|
+| `p2p_welcome` | `code`, `memberId`, `hostId`, `version`, `serverTime`, `members` [{id, name}], `turnPending` |
+| `p2p_members` | `members`, after every join or leave |
+| `p2p_turn` | this member's own TURN credentials (`urls`, `username`, `credential`), when the server has a TURN key |
+| `p2p_signal` | `from`, `signal`: an `offer`, `answer` (`sdp`) or `candidate` (`candidate`) |
+| `error` | refusals as an SFU room's (`room_full`, `version_mismatch`, `iso_mismatch`, `kicked`, `host_left`...), and the non-fatal `turn_unavailable` and `too_fast` |
+
+From the game: `p2p_signal` (`to`, `signal`; the server sets `from` and allows only host-guest
+pairs), from the host `p2p_capacity` (`maxPlayers`: joins beyond it are refused) and `p2p_kick`
+(`member`, optional `reason: "unreachable"` when the host's game could not connect to it),
+`leave`, the JSON `ping` and the binary PING (answered with the server's clock, as in an SFU room).
+Host loss ends the room (`host_left`, 4014); there is no host migration and no rejoin.
+
+**Peer connections.** WebRTC data channels negotiated with fixed ids: 0 race snapshots
+(unordered, no retransmission), 1 reliable. A room message is byte 0 then JSON (the SFU room's
+`room`, `start`, `left`, `ended`, `error` from the host; the game's room commands to it); a race
+frame is byte 1, the race's `startAt` (u64, little-endian; an older race's frames are dropped),
+then the game's STATE or EVENT frame. The host stamps each frame with the slot of the member whose
+connection it came on, then forwards it to the other racers. Each game offers two host candidates
+on one address, the second answering only (it sends nothing before the other game reaches it:
+some computers refuse UDP flows the game opens itself), a server-reflexive one from
+`stun.cloudflare.com` and its TURN relay. A guest the host cannot reach within 20 s is removed;
+its rider in a running race becomes the host's AI.
+
+The browser runs P2P rooms only: the page owns WebRTC (RTCPeerConnection belongs to Window) and
+the same coordinator built as wasm, bridged to the game worker (`port/web/www/p2p.js`). A page
+that hosts it must allow HTTPS and WSS connections to the official server in its CSP.

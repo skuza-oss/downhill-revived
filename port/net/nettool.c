@@ -4,7 +4,8 @@
 
    usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]
                   [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]
-                  host [--players N] [--code-file PATH] [--public] | join CODE | list
+                  host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list
+   --p2p makes a P2P room (finding 180); a join goes to a P2P room when its code has 7 characters.
    The server is --server or DHD_NET_SERVER (ws://127.0.0.1:8787 for wrangler dev). With the
    game's --version and --iso hash it can join a room of real games (finding 041). */
 #include <windows.h>
@@ -144,6 +145,7 @@ int main(int argc, char **argv)
     int pick = -1;            /* --pick N: the lobby's rider number (1..16); 0 stays choosing */
     double ready_after = 0;   /* --ready-after S: Ready after S seconds; below 0 never */
     int i, slot, races = 0, public_room = 0;  /* --public: the host's room is on the public list */
+    int p2p = 0;              /* --p2p: the host's room is a P2P one */
     double finish_after = -1, back_after = -1;
     uint8_t frame[NET_FRAME_MAX];
     double until;
@@ -165,6 +167,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--races") && i + 1 < argc) races = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--echo-ai")) echo_ai = 1;
         else if (!strcmp(argv[i], "--public")) public_room = 1;
+        else if (!strcmp(argv[i], "--p2p")) p2p = 1;
         else if (!strcmp(argv[i], "--finish-after") && i + 1 < argc) finish_after = atof(argv[++i]);
         else if (!strcmp(argv[i], "--give-up-after") && i + 1 < argc) back_after = atof(argv[++i]);
         else if (!mode) mode = argv[i];
@@ -172,7 +175,7 @@ int main(int argc, char **argv)
     }
     if (!mode || (!strcmp(mode, "join") && !code)) {
         printf("usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]\n"
-               "               [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public] | join CODE | list\n");
+               "               [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
         return 2;
     }
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -187,7 +190,7 @@ int main(int argc, char **argv)
                    info[i].version, info[i].region[0] ? info[i].region : "-", info[i].colo[0] ? info[i].colo : "-");
         return n < 0;
     }
-    if (!strcmp(mode, "host") ? net_create_room() : net_join_room(code)) {
+    if (!strcmp(mode, "host") ? net_create_room(p2p) : net_join_room(code)) {
         printf("FAILED: bad code or no server (set DHD_NET_SERVER)\n");
         return 1;
     }

@@ -10,7 +10,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Turn, type SfuSecrets } from "./sfu";
 import {
-  CLOSE_CODES, FRAME_PING, FRAME_PONG, HELLO_TIMEOUT_MS, MAX_MEMBERS, PROTOCOL,
+  CLOSE_CODES, FRAME_PING, FRAME_PONG, HELLO_TIMEOUT_MS, MAX_MEMBERS, P2P_CODE_LENGTH, PROTOCOL,
   clientVersionOf, isOutdated, isValidCode, minVersionOf, randomCode,
 } from "./protocol";
 import {
@@ -62,20 +62,16 @@ interface Connection {
   turnUser?: string;
 }
 
-/** The P2P routes: GET /v1/p2p/rooms/CODE says whether a room exists (the game asks before a join
-    by code, which may be an SFU room's); a WebSocket to /v1/p2p/rooms/new or /v1/p2p/rooms/CODE
-    makes or joins one. Returns null for any other path. */
+/** The P2P routes: a WebSocket to /v1/p2p/rooms/new makes a room, to /v1/p2p/rooms/CODE joins one
+    (seven characters: an SFU room's code has six). Returns null for any other path. */
 export async function p2pRoute(request: Request, env: Env, path: string): Promise<Response | null> {
   const m = path.match(/^\/v1\/p2p\/rooms\/([^/]+)$/);
   if (!m) return null;
   const create = m[1] === "new";
   const code = create ? "" : m[1].toUpperCase();
-  if (!create && !isValidCode(code)) return Response.json({ error: "Bad room code" }, { status: 404 });
-  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-    if (create || request.method !== "GET") return Response.json({ error: "Expected a WebSocket upgrade" }, { status: 426 });
-    const exists = await env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code)).exists();
-    return exists ? Response.json({ room: code }) : Response.json({ error: "No such room" }, { status: 404 });
-  }
+  if (!create && !isValidCode(code, P2P_CODE_LENGTH)) return Response.json({ error: "Bad room code" }, { status: 404 });
+  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
+    return Response.json({ error: "Expected a WebSocket upgrade" }, { status: 426 });
   const guard = env as GuardEnv;
   const sw = await onlineState(guard);
   if (!sw.on) return refuseSocket("online_off", sw.message);
@@ -90,7 +86,7 @@ export async function p2pRoute(request: Request, env: Env, path: string): Promis
   const forward = new Request(request, { headers });
   if (!create) return env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code)).fetch(forward);
   for (let attempt = 0; attempt < 8; attempt++) {
-    const fresh = randomCode();
+    const fresh = randomCode(P2P_CODE_LENGTH);
     const room = env.P2P_ROOM.get(env.P2P_ROOM.idFromName(fresh));
     if (await room.claim(fresh)) return room.fetch(forward);
   }
@@ -113,10 +109,6 @@ export class P2pRoom extends DurableObject<Env> {
     this.meta = { code, hostId: 0, nextId: 1, version: "", iso: "", maxPlayers: MAX_MEMBERS, closed: false };
     await this.save();
     return true;
-  }
-
-  async exists(): Promise<boolean> {
-    return !!this.meta && !this.meta.closed;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -168,7 +160,9 @@ export class P2pRoom extends DurableObject<Env> {
         if (host && m.member !== meta.hostId) {
           const target = this.members().find(([, i]) => i.id === m.member);
           if (target) {
-            this.refuse(target[0], "kicked", "The host removed you from the room.");
+            // "unreachable": the host's game could not connect to this one (port/render/session).
+            this.refuse(target[0], "kicked", m.reason === "unreachable"
+              ? "Your game could not connect to the host's." : "The host removed you from the room.");
             await this.remove(target[0]);
           }
         }

@@ -33,18 +33,12 @@ describe("P2P rooms", () => {
     host.ws.close();
   });
 
-  it("answer a code probe: an open room exists, a closed or unknown one does not", async () => {
+  it("have seven-character codes, so the game can tell them from an SFU room's", async () => {
     const { host, code } = await p2pHost();
-    const open = await get(`/v1/p2p/rooms/${code}`);
-    expect(open.status).toBe(200);
-    expect(await open.json()).toEqual({ room: code });
-    expect((await get("/v1/p2p/rooms/ZZZZZZ")).status).toBe(404);
-    expect((await get("/v1/p2p/rooms/bad!")).status).toBe(404);
+    expect(code).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{7}$/);
+    // A six-character (SFU) code is no P2P room.
+    expect((await get(`/v1/p2p/rooms/${code.slice(0, 6)}`)).status).toBe(404);
     host.ws.close();
-    // The room ends with its host; give the close a moment to reach the object.
-    for (let i = 0; i < 20 && (await get(`/v1/p2p/rooms/${code}`)).status === 200; i++)
-      await new Promise((r) => setTimeout(r, 25));
-    expect((await get(`/v1/p2p/rooms/${code}`)).status).toBe(404);
   });
 
   it("relay signaling host-star only, from the connection's own member", async () => {
@@ -114,6 +108,11 @@ describe("P2P rooms", () => {
     expect((await a.json("error")).code).toBe("kicked");
     expect(await a.closed()).toBe(CLOSE_CODES.kicked);
     expect(host.closeCode).toBeNull();
+    // A guest the host's game could not reach is told so.
+    const b = await p2pJoin(code, "B");
+    const wb = await b.json("p2p_welcome");
+    host.sendJson({ type: "p2p_kick", member: wb.memberId, reason: "unreachable" });
+    expect((await b.json("error")).message).toContain("could not connect");
     host.ws.close();
   });
 
@@ -125,7 +124,7 @@ describe("P2P rooms", () => {
     expect((await guest.json("error")).code).toBe("host_left");
     expect(await guest.closed()).toBe(CLOSE_CODES.host_left);
     const late = await p2pJoin(code, "Late");
-    expect(await late.closed()).toBe(CLOSE_CODES.room_not_found);
+    expect((await late.json("error")).code).toBe("room_not_found");
   });
 
   it("run no race: room commands get no answer and nothing is relayed", async () => {

@@ -1,11 +1,13 @@
 // Browser network host services. Struct offsets come from the shared C header.
 import { layout } from './net_layout.js';
 
-// P2P uses page-owned WebRTC and the shared Rust session coordinator (finding 180).
+// The browser offers P2P rooms only (host_api.h NET_OFFER_P2P, finding 180): page-owned WebRTC
+// and the same Rust room coordinator as the native games. SFU rooms need the native SFU client.
+const NET_OFFER_P2P = 2, P2P_CODE_LENGTH = 7;
 const ONLINE_OFFERED = true;
 
 // RTCPeerConnection belongs to Window. This socket-shaped bridge keeps the game host ABI
-// in its worker while the page owns WebRTC and the shared Rust room coordinator.
+// in its worker while the page owns WebRTC and the room coordinator (p2p.js).
 let bridgedSocket;
 if(typeof addEventListener==='function')addEventListener('message', e => {
   const m=e.data;if(m.type!=='net'||!bridgedSocket)return;
@@ -23,16 +25,16 @@ function openP2p(url) {
 export function createNet({span, str, online = ONLINE_OFFERED, openSocket = openP2p}) {
   let base = 'wss://dhd.skuza.app', name = '', version = '', iso = '', ws;
   let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {};
-  let frames = [], list = [], listing = false, listError = false, timer, clockKnown = false;
+  let frames = [], timer;
   let error = '', errorCode = '';
   const send = m => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)); };
   const now = () => performance.now();
   const serverMs = () => now() + offset;
   const me = () => room.members?.find(x => x.id === member);
   function connect(path) {
-    if (!online) { state = 5; error = 'Online play is not offered in the browser.'; seq++; return -1; }
+    if (!online || !path) { state = 5; error = 'Only P2P rooms are offered in the browser.'; seq++; return -1; }
     ws?.close(); clearInterval(timer); state = 1; room = {}; start = {}; frames = []; welcome = {}; where = {};
-    ws = openSocket(base + path.replace('/v1/rooms/','/v1/p2p/rooms/')); ws.binaryType = 'arraybuffer';
+    ws = openSocket(base + path); ws.binaryType = 'arraybuffer';
     const socket = ws;
     ws.onopen = () => {
       send({type:'hello', protocol:4, version, clientVersion:version.match(/\d+\.\d+\.\d+/)?.[0] || '0.7.13',
@@ -74,7 +76,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
   function lobby(a) {
     const rules=room.rules||{}, members=room.members||[], results=room.lastRace?.entrants||[];
     write('NetLobby',a,{state,seq,code:room.code||'',member_id:member,host_id:room.hostId??-1,is_host:room.hostId===member,
-      room_name:room.roomName||'',is_public:!!room.public,max_players:room.maxPlayers||0,started:!!room.started&&(!room.phase||!!me()?.inRace),
+      room_name:room.roomName||'',is_public:!!room.public,is_p2p:state!==0,max_players:room.maxPlayers||0,started:!!room.started&&(!room.phase||!!me()?.inRace),
       track:room.settings?.track||0,laps:room.settings?.laps||0,seed:BigInt(room.settings?.seed??-1),
       nmembers:members.length,ping_ms:-1,local_slot:start.yourSlot||0,nslots:start.players?.length||0,
       race_track:start.track||0,race_laps:start.laps||0,race_seed:start.seed||0,
@@ -94,17 +96,12 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     results.slice(0,10).forEach((m,i)=>write('NetResult',a+layout.NetLobby.result[0]+i*layout.NetResult.size,{...m,dnf_reason:m.dnfReason||'',ticks:BigInt(m.ticks??-1)}));
     span(a+layout.NetLobby.rotation[0],64).set((room.rotation||[]).slice(0,64));
   }
-  function writeList(a,max) {
-    list.slice(0,max).forEach((m,i)=>write('NetLobbyInfo',a+i*layout.NetLobbyInfo.size,
-      {...m,room_name:m.roomName,host_name:m.hostName,max_players:m.maxPlayers,race_started_at:m.raceStartedAt,
-        finish_ends_at:m.finishEndsAt,next_race_at:m.nextRaceAt}));
-    return Math.min(list.length,max);
-  }
   const api = {
     host_service_net_init:(a,b,c,d)=>{base=a?str(a):base;name=str(b);version=str(c);iso=str(d);},
-    host_service_net_offered:()=>online?1:0,
-    host_service_net_create_room:()=>connect('/v1/rooms/new'),
-    host_service_net_join_room:a=>connect('/v1/rooms/'+str(a)),
+    host_service_net_offered:()=>online?NET_OFFER_P2P:0,
+    host_service_net_create_room:p2p=>connect(p2p?'/v1/p2p/rooms/new':''),
+    host_service_net_join_room:a=>{const code=str(a).toUpperCase();
+      return /^[23456789A-HJKMNP-Z]+$/.test(code)&&code.length===P2P_CODE_LENGTH?connect('/v1/p2p/rooms/'+code):-1;},
     host_service_net_leave:()=>{send({type:'leave'});ws?.close();ws=null;clearInterval(timer);state=0;},
     host_service_net_get_lobby:lobby,
     host_service_net_pick:(member,rider,bike)=>send({type:'pick',...(member>=0?{member}:{}),...(rider<0?{choosing:true}:{rider,bike,choosing:false})}),
@@ -127,19 +124,10 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_send_frame:(type,a,n)=>{
       if(state!==3||n>3070)return 0;const f=new Uint8Array(n+2);f[0]=type;f.set(span(a,n),2);ws.send(f);return 1;},
     host_service_net_receive_frame:(a,n)=>{const f=frames.shift();if(!f||f.length>n)return 0;span(a,f.length).set(f);return f.length;},
-    host_service_net_list_lobbies_start:()=>{
-      if(listing||!online)return 0;listing=true;listError=false;
-      // the list's "now" sets the clock when no room's pings have, so its times count from the server's (finding 135)
-      const sent=now();
-      fetch(base.replace(/^ws/,'http')+'/v1/p2p/lobbies').then(r=>r.json()).then(r=>{
-        const inRoom=state===2||state===3;
-        if(r.now>0&&!inRoom){offset=r.now-(sent+now())/2;clockKnown=true;}
-        list=r.lobbies.map(x=>({...x,timed:clockKnown||inRoom?1:0}));
-      }).catch(()=>listError=true).finally(()=>listing=false);
-      return 1;
-    },
-    host_service_net_list_lobbies_poll:(a,n)=>listing?-2:listError?-1:writeList(a,n),
-    host_service_net_list_lobbies:(a,n)=>writeList(a,n),
+    // P2P rooms are never listed, and the browser offers no SFU rooms: no list here.
+    host_service_net_list_lobbies_start:()=>0,
+    host_service_net_list_lobbies_poll:()=>-1,
+    host_service_net_list_lobbies:()=>0,
   };
   return api;
 }

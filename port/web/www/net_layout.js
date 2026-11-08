@@ -151,12 +151,16 @@ export const layout = {
       136,
       4
     ],
-    "track": [
+    "is_p2p": [
       140,
       4
     ],
-    "laps": [
+    "track": [
       144,
+      4
+    ],
+    "laps": [
+      148,
       4
     ],
     "seed": [

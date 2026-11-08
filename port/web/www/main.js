@@ -132,7 +132,6 @@ async function start(source) {
   if (await shape(source.env ?? {})) { canvas.width = 1708; canvas.height = 960; }
   const worker = new Worker('worker.js', { type: 'module' });
   const network = await createP2pBridge(worker);
-  source.env = { DHD_NET_BACKEND:'p2p', DHD_NET_P2P_ONLY:'1', ...source.env };
   const offscreen = canvas.transferControlToOffscreen();
   worker.onmessage = e => { const m = e.data;
     if (m.type === 'net') { network(m).catch(e => addLog('P2P: ' + e)); return; }

@@ -157,7 +157,6 @@ pub const SETTINGS: &[Setting] = &[
     text("sound_latency_ms", "DHD_SND_LATENCY_MS"),
     Setting { default: OFFICIAL_SERVER, builtin: OFFICIAL_SERVER, always: true, ..text("server", "DHD_NET_SERVER") },
     text("name", "DHD_NET_NAME"),
-    choice("net_backend", "DHD_NET_BACKEND", &[c("sfu", "SFU"), c("p2p", "P2P")], "sfu", "sfu"),
     choice("names", "DHD_NAMES", &[c("off", "Off"), c("small", "Small"), c("medium", "Medium"), c("large", "Large")], "small", "small"),
     text("rider", "DHD_NET_RIDER"),
     // The launcher's: whether it looks for a newer release, and where (empty: the official releases).

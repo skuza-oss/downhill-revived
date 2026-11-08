@@ -52,12 +52,12 @@ after a version change before a live check.
 | `port/tools/live_game.py OUT --script FILE` | a game on a hidden desktop run by commands (keys, waits, shots, nettool bots) |
 | `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots, PrintWindow captures) |
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
-| `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting |
-| `port/tools/cross_bench.py` | native PC/Mac SFU/P2P comparison: private rooms, both host roles, interleaved repeats and forced TURN controls (`--matrix`); raw evidence under the chosen output directory |
+| `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` over the relay only |
+| `port/tools/cross_bench.py` | native PC/Mac SFU/P2P comparison: private rooms, both host roles, interleaved repeats and forced TURN controls (`--matrix`), `--env NAME=VALUE` for both games; raw evidence under the chosen output directory |
 | `port/tools/analyze_netbench.py` | summarize a cross_bench output directory into JSON, CSV and Markdown; application RTT, delivery and native transport counters |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |
 | `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
-| `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool |
+| `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot) |
 | `port/android/test_disc_image.py [ISO]` | the Android side's plain-JVM tests: the first start's disc rules (the check, a complete copy) on synthetic images, and the update notice's page rule (finding 143) |
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
@@ -137,12 +137,14 @@ Missing echo replies are application delivery failures, not a raw packet-loss me
 | Variable | What |
 |---|---|
 | `DHD_NET_SERVER` | the server (`ws://127.0.0.1:<port>` for a local one) |
+| `DHD_NET_CREATE=1\|p2p`, `DHD_NET_JOIN=CODE` | a race outside the menus: make an SFU (`1`) or P2P (`p2p`) room, or join one (a 7-character code is a P2P room's) |
 | `DHD_NET_NAME` | the player name |
 | `DHD_NET_ISO_SHA256` | the disc's files hash the server compares (online_race.iso_files_sha256) |
 | `DHD_NET_SCRIPTED=1` | the online flow takes its input from the scripts above, not the pad |
 | `DHD_NET_TEST_READY=1` | (with SCRIPTED) presses READY in the room after every race |
 | `DHD_NET_TEST_FINISH=S` | this PC's rider finishes at race second S |
 | `DHD_NET_TEST_TRACK=N` | (with SCRIPTED) a host's room starts on game track N |
+| `DHD_NET_TEST_CODE=CODE` | (with SCRIPTED) JOIN WITH A CODE starts with this code typed (cross_race.py's P2P guest) |
 | `DHD_NET_TEST_THEN=same\|next\|random` | (with SCRIPTED) a host's room's Then rule (the track after each race) |
 | `DHD_NET_TEST_SHOP=1` | (with SCRIPTED) the shop waits for the pads; without it a scripted run presses START there at once |
 | `DHD_NET_TEST_SKIP=S` | presses START S seconds into each flight over the track, as a player skipping it |
@@ -152,6 +154,7 @@ Missing echo replies are application delivery failures, not a raw packet-loss me
 | `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
 | `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |
+| `DHD_NET_P2P_UDP=0` | a P2P room's direct UDP is off: no host or server-reflexive candidate, the TURN relay carries everything (finding 180) |
 | `DHD_NET_SFU_TURN=0` | the TURN fallback is never asked for; with `DHD_NET_SFU_UDP=0` a racer whose connection never comes up, whom the others must race without (finding 175) |
 | `DHD_PUPPET_PREDICT=0` | puppets interpolated in the past instead of predicted to the present (finding 169) |
 | `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |

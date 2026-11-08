@@ -53,6 +53,7 @@ typedef struct {
     int member_id, host_id, is_host;
     char room_name[100];
     int is_public, max_players, started;
+    int is_p2p;                /* a P2P room (finding 180): the host's game runs it; never public */
     int track, laps;
     long long seed;            /* -1 until set */
     int nmembers;
@@ -106,7 +107,12 @@ typedef struct {
 /* base_url: "wss://host" or "ws://127.0.0.1:8787". version: the build's version string (the
    server refuses players whose version differs from the host's). iso_sha256: 64 lowercase hex. */
 void net_init(const char *base_url, const char *name, const char *version, const char *iso_sha256);
-int net_create_room(void);
+/* host_service_net_offered's bits: the kinds of room this build offers (port/host/host_api.h). */
+enum { NET_OFFER_SFU = 1, NET_OFFER_P2P = 2 };
+
+/* A room code has 6 characters (an SFU room) or 7 (a P2P room, finding 180): the length says
+   which service a join goes to. */
+int net_create_room(int p2p);
 int net_join_room(const char *code);   /* -1 when the code can't be one */
 void net_leave(void);
 /* Public lobbies (blocking HTTP GET); returns how many, -1 on error. */
