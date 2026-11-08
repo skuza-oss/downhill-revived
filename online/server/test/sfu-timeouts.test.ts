@@ -155,6 +155,36 @@ describe("subscription calls with no answer (finding 182)", () => {
     }
   });
 
+  it("a pass whose missing pairs all wait for an inspection ends without a call instead of running again at once", async () => {
+    const { code } = await startedRace(3);
+    const fake = fakeRealtime();
+    try {
+      await twoReady(code);
+      const result = await runInDurableObject(room(code), async (r: any) => {
+        const [a, b, c] = r.state.members;
+        c.sfu = publishedSession(c.id, []);
+        c.sfuReadyRace = r.state.race.startAt;
+        // Every subscriber missing a pair waits for its inspection (the test Worker's case: the
+        // release asked for a pass, the pass made no call and asked again, without end).
+        for (const m of [a, b, c]) m.sfu.unsure = Date.now() + 60_000;
+        let passes = 0;
+        const pass = r.subscribeGroup.bind(r);
+        r.subscribeGroup = (...args: any[]) => { passes++; return pass(...args); };
+        r.releaseSfu(r.state);
+        await r.subscribePass();
+        r.releaseSfu(r.state);
+        await r.subscribePass();
+        return { passes, released: !!r.state.race.sfuReleased, work: r.sfuWork() };
+      });
+      expect(result.passes).toBeLessThanOrEqual(2);
+      expect(result.released).toBe(false);
+      expect(result.work).toBe(false);  // nothing for the alarm either until the inspection is due
+      expect(fake.calls).toEqual([]);
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("a 5xx or 429 is an unknown outcome too; a definite item error still fails the subscriber", async () => {
     const { clients, code } = await startedRace(3);
     const fake = fakeRealtime();

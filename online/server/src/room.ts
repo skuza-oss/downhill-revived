@@ -1336,10 +1336,15 @@ export class Room extends DurableObject<Env> {
   }
 
   /** A subscriber and a publisher of `group` with no subscription between them yet, among those
-      whose publication is up. */
-  private missingSubscription(group: Member[]): [Member, Member] | null {
+      whose publication is up. `now`: only a pair a pass can make now, not one whose subscriber
+      waits for an unknown outcome (finding 182: asking for a pass for such a pair made the pass
+      run again at once, without a call, until the object ran out of CPU time). */
+  private missingSubscription(group: Member[], now?: number): [Member, Member] | null {
     const published = group.filter((x) => x.sfu?.phase === "ready");
-    for (const a of published) for (const b of published) if (a !== b && !this.subscribed(a, b)) return [a, b];
+    for (const a of published) {
+      if (now != null && this.unsure(a.sfu!, now)) continue;
+      for (const b of published) if (a !== b && !this.subscribed(a, b)) return [a, b];
+    }
     return null;
   }
 
@@ -1376,7 +1381,7 @@ export class Room extends DurableObject<Env> {
       close due again, or an inspection due (finding 182). */
   private sfuWork(): boolean {
     const group = this.sfuGroup(), now = Date.now();
-    return (!!group && !!this.missingSubscription(group)) ||
+    return (!!group && !!this.missingSubscription(group, now)) ||
       !!this.state?.members.some((x) => {
         const s = x.sfu;
         if (s?.phase !== "ready") return false;
@@ -1596,6 +1601,7 @@ export class Room extends DurableObject<Env> {
   private async subscribePass(): Promise<void> {
     if (this.subscribing) { this.subscribeAgain = true; return; }
     this.subscribing = true;
+    let called = false;
     try {
       do {
         this.subscribeAgain = false;
@@ -1616,7 +1622,11 @@ export class Room extends DurableObject<Env> {
         if (currentFailures.length) await this.sfuFailed(currentFailures.map(f => f.id));
         const st = this.state;
         if (st?.race && !st.race.sfuReleased) this.releaseSfu(st);
-      } while (this.subscribeAgain);
+        called = this.calls > before;
+        // Again only after a pass that made a call: one that made none (every missing pair waits
+        // for an inspection) would run again at once, without yielding (finding 182, the test
+        // Worker: the object ran out of CPU time). The alarm asks for the next one (sfuWork).
+      } while (this.subscribeAgain && called);
     } catch (error) {
       console.warn("Realtime subscription pass failed", error instanceof Error ? error.message.slice(0, 80) : "unknown");
     } finally {
@@ -1646,9 +1656,9 @@ export class Room extends DurableObject<Env> {
     this.calls++;
     this.lostAnswers ??= Math.max(0, Math.floor(Number((this.env as unknown as Record<string, unknown>).SFU_TEST_LOST_ANSWERS) || 0));
     const lose = this.lostAnswers > 0 && String(input).endsWith("/datachannels/new") && String(init?.body ?? "").includes("\"remote\"");
+    if (lose) this.lostAnswers--;  // before the await: calls run at once
     const answer = await fetch(input, init);
     if (!lose) return answer;
-    this.lostAnswers--;
     await answer.body?.cancel();
     console.log(`room ${this.state?.code ?? ""}: test: a subscription call's answer is dropped (${this.lostAnswers} left)`);
     return new Promise<Response>((_, reject) => {
@@ -1666,7 +1676,11 @@ export class Room extends DurableObject<Env> {
     if (!race) return;
     const racers = st.members.filter(m => this.inRace(st, m.id));
     if (!racers.length || !racers.every(m => m.sfuReadyRace === race.startAt && m.sfu?.phase === "ready")) return;
-    if (this.missingSubscription(racers)) return this.kickSubscribe();
+    if (this.missingSubscription(racers)) {
+      // A pass for a pair it can make now; one waiting for its inspection gets the alarm's.
+      if (this.missingSubscription(racers, Date.now())) this.kickSubscribe();
+      return;
+    }
     // Once per race and racer, and stored (finding 175): the release was never saved, so after the
     // object was evicted and loaded again the race looked unreleased; the setup checks ran again
     // ("setup after 66255 ms" for a race released 3 s after its start, room 3G5MXD) and every
