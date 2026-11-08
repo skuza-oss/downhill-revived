@@ -7,7 +7,8 @@
      or △ BACK presses it (menu_page.c).
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
    window size, picture shape, scaling, skip movies (the startup movies), vibration, the sticks'
-   dead zone, the button symbols, unlock all and FPS & Ping apply at once; resolution,
+   dead zone, the button symbols, unlock all, FPS & Ping and the Performance group (Graphics:
+   Performance Mode, a preset for the three effects after it, finding 183) apply at once; resolution,
    widescreen, the texture pack, the font, the frame rate and V-Sync at the next start ("*" and
    the row's hint, a line above the legend, say so). A setting the environment sets (DHD_*) is
    shown but can't be changed here.
@@ -55,7 +56,7 @@ int controls_settings_accept(MenuPage *p, int row);
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
-enum { ROWS = 17, MAX_CHOICES = 16 };
+enum { ROWS = 21, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -69,7 +70,7 @@ typedef struct {
 } Row;
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, PROMPTS, TEXTURES, FONT, RATE,
-       VSYNC, COUNTER, UNLOCK, NAMES };
+       VSYNC, COUNTER, UNLOCK, NAMES, PERFORMANCE, SHADOWS, FLARE, PARTICLES };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 0},
     {"Display:", "window", 1},
@@ -88,6 +89,12 @@ static Row rows[ROWS] = {
     {"FPS & Ping:", "perf_counter", 1},
     {"Unlock All:", "unlock_all", 1},
     {"Player Names:", "names", 1},
+    /* the Performance group (finding 183): the preset is no setting of its own; ON is the three
+       below off, OFF the three on, anything else Custom (perf_state) */
+    {"Performance Mode:", "", 1},
+    {"Shadows & Sun Glow:", "shadows", 1},
+    {"Lens Flare:", "lens_flare", 1},
+    {"Particles:", "particles", 1},
 };
 static char monitor_size[24];
 
@@ -100,6 +107,36 @@ int port_unlock_all(void)
     static HleEnv env;
     const char *v = hle_env(&env, "DHD_UNLOCK_ALL");
     return v && atoi(v) != 0;
+}
+
+/* Performance (finding 183): Shadows & Sun Glow (dhd.ini "shadows", DHD_SHADOWS), Lens Flare
+   ("lens_flare") and Particles ("particles"), on without a value. The game's draw code asks these
+   each frame (port/patches_effects.py): off, the effect is not drawn; nothing the game logic reads
+   changes, so they apply at once and online too. */
+static int effect_on(HleEnv *env, const char *name)
+{
+    const char *v = hle_env(env, name);
+    return !v || !*v || atoi(v) != 0;
+}
+int port_fx_shadows(void) { static HleEnv env; return effect_on(&env, "DHD_SHADOWS"); }
+int port_fx_lens_flare(void) { static HleEnv env; return effect_on(&env, "DHD_LENS_FLARE"); }
+int port_fx_particles(void) { static HleEnv env; return effect_on(&env, "DHD_PARTICLES"); }
+
+/* The heat haze's two textures (VU1 program 0x29C0 in the two packets func_00237918 makes once a
+   race, each starting it with MSCAL and continuing it with MSCNT): those four words, set to VIF
+   NOPs while Particles is off (the haze's emitters, which read the textures, aren't drawn then) and
+   back to the game's words when it is on. */
+enum { HAZE_WORDS = 4 };
+static unsigned *haze_words[HAZE_WORDS], haze_game[HAZE_WORDS], haze_count;
+void port_fx_haze_word(unsigned *word)
+{
+    if (haze_count == HAZE_WORDS) haze_count = 0;  /* a new race: the game makes both packets again */
+    haze_words[haze_count] = word;
+    haze_game[haze_count++] = *word;
+}
+void port_fx_haze(int on)
+{
+    for (unsigned i = 0; i < haze_count; i++) *haze_words[i] = on ? haze_game[i] : 0;
 }
 
 static int loaded;
@@ -151,6 +188,23 @@ static void choices_build(void)
             if (!known && r->count < MAX_CHOICES) r->choices[r->count++] = (SettingChoice){monitor_size, monitor_size};
         }
     }
+    /* Performance Mode: OFF (the effects on) or ON (them off) */
+    rows[PERFORMANCE].env = "";
+    rows[PERFORMANCE].builtin = "0";
+    rows[PERFORMANCE].count = 2;
+    rows[PERFORMANCE].choices[0] = (SettingChoice){"0", "OFF"};
+    rows[PERFORMANCE].choices[1] = (SettingChoice){"1", "ON"};
+}
+
+/* Performance Mode as the three effects' rows stand: 1 all off, 0 all on, -1 a mix (Custom). */
+static int perf_state(void)
+{
+    int off = 0;
+    for (int i = SHADOWS; i <= PARTICLES; i++) {
+        const Row *r = &rows[i];
+        off += r->selected >= 0 && !strcmp(r->choices[r->selected].value, "0");
+    }
+    return off == 3 ? 1 : off == 0 ? 0 : -1;
 }
 static char hint[64];
 static const char *restart_hint = "* Applies when the game starts again";
@@ -158,7 +212,8 @@ enum { TAB_DISPLAY, TAB_GRAPHICS, TAB_CONTROLS, TAB_ONLINE, TAB_GAME, TABS };
 static const char *const tab_labels[TABS] = {"Display", "Graphics", "Controls", "Online", "Game"};
 static const int row_tab[ROWS] = {TAB_GRAPHICS, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_CONTROLS, TAB_CONTROLS, TAB_GRAPHICS, TAB_GRAPHICS,
-    TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE};
+    TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE, TAB_GRAPHICS, TAB_GRAPHICS, TAB_GRAPHICS,
+    TAB_GRAPHICS};
 static int tab, visible[ROWS], tabs[TABS], tab_count;
 static unsigned held_before;
 static int tab_left[TABS], tab_right[TABS];
@@ -181,20 +236,29 @@ static void choose_rows(void)
     const char *restart = host_getenv("DHD_PC_SETTINGS_RESTART");
     if (restart && *restart) restart_hint = restart;
     for (int i = 0; i < ROWS; i++) {
-        visible[i] = !list || listed(list, rows[i].env);
-        if (live && listed(live, rows[i].env)) rows[i].live = 1;
+        int named = rows[i].env && *rows[i].env;
+        visible[i] = !list || (named && listed(list, rows[i].env));
+        if (live && named && listed(live, rows[i].env)) rows[i].live = 1;
     }
+    visible[PERFORMANCE] = visible[SHADOWS] || visible[FLARE] || visible[PARTICLES];
     const char *touch = host_getenv("DHD_TOUCH");
     int controls = !list || listed(list, "DHD_KEYBOARD") || (touch && *touch);
     tab_count = settings_tabs_choose(tabs, TABS, row_tab, visible, ROWS, TAB_CONTROLS, controls);
 }
 
-static Row *row_at(int index) { return index >= 0 && index < shown_count ? &rows[shown[index]] : NULL; }
+/* The page's menu rows: which of rows[] each is (-1 a heading), and each shown row's menu row. */
+static int row_of_menu[MENU_PAGE_ROWS], menu_of_row[ROWS];
+static Row *row_at(int index) { return index >= 0 && index < MENU_PAGE_ROWS && row_of_menu[index] >= 0 ? &rows[row_of_menu[index]] : NULL; }
 
 /* The value the program runs with now: the variable (set from dhd.ini, in a choice's own spelling,
    or the environment), else the game's built-in one. */
 static void current(const Row *r, char *out, size_t size)
 {
+    if (r == &rows[PERFORMANCE]) {
+        int state = perf_state();
+        snprintf(out, size, "%s", state < 0 ? "Custom" : state ? "1" : "0");
+        return;
+    }
     if (r == &rows[SIZE]) {
         const char *w = host_getenv("DHD_WINDOW_WIDTH"), *h = host_getenv("DHD_WINDOW_HEIGHT");
         snprintf(out, size, "%dx%d", w && atoi(w) > 0 ? atoi(w) : 896, h && atoi(h) > 0 ? atoi(h) : 672);
@@ -213,6 +277,7 @@ static int find(const Row *r, const char *value)
 
 static int locked(const Row *r)
 {
+    if (r == &rows[PERFORMANCE]) return locked(&rows[SHADOWS]) && locked(&rows[FLARE]) && locked(&rows[PARTICLES]);
     return host_service_host_setting_locked(GADDR(r->env)) || (r == &rows[SIZE] && host_service_host_setting_locked(GADDR("DHD_WINDOW_HEIGHT")));
 }
 
@@ -254,10 +319,9 @@ static void scale_note(const Row *r, char *value, size_t size)
 static void format(Row *r)
 {
     char value[48];
-    int index = -1;
-    for (int i = 0; i < shown_count; i++)
-        if (&rows[shown[i]] == r) index = i;
+    int index = menu_of_row[r - rows];
     if (index < 0) return;
+    if (r == &rows[PERFORMANCE]) r->selected = r->running = perf_state();  /* -1: Custom */
     if (r->selected >= 0) snprintf(value, sizeof value, "%s", r->choices[r->selected].label);
     else current(r, value, sizeof value);
     if (r == &rows[RESOLUTION]) scale_note(r, value, sizeof value);
@@ -287,6 +351,21 @@ static void change(int index, int step)
     Row *r = row_at(index);
     if (!r) return;
     if (locked(r)) return;
+    if (r == &rows[PERFORMANCE]) {  /* the preset: ON turns the three effects off, OFF on (Custom: right is ON) */
+        int on = perf_state() < 0 ? step > 0 : perf_state() == 0;
+        menu_page_sound(step > 0);
+        for (int i = SHADOWS; i <= PARTICLES; i++) {
+            Row *e = &rows[i];
+            int want = find(e, on ? "0" : "1");
+            if (locked(e) || want < 0 || e->selected == want) continue;
+            e->selected = want;
+            commit(e, e->live);
+            format(e);
+        }
+        format(r);
+        hle_log("pc settings: %s %s\n", r->label, on ? "on" : "off");
+        return;
+    }
     r->selected = r->selected < 0 ? (step > 0 ? 0 : r->count - 1) : (r->selected + step + r->count) % r->count;
     menu_page_sound(step > 0);
     commit(r, r->live);
@@ -298,6 +377,7 @@ static void change(int index, int step)
         format(&rows[SHAPE]);
     }
     format(r);
+    if (r >= &rows[SHADOWS] && r <= &rows[PARTICLES]) format(&rows[PERFORMANCE]);
     hle_log("pc settings: %s %s\n", r->label, r->choices[r->selected].value);
 }
 
@@ -317,8 +397,14 @@ static void page_build(MenuPage *p)
     p->footer = touch_mode && !strcmp(touch_mode, "android")
         ? GLYPH_LEFT " Change " GLYPH_RIGHT "  " GLYPH_CROSS " Keep  " GLYPH_TRIANGLE " Back"
         : GLYPH_LEFT " Change " GLYPH_RIGHT "  " GLYPH_CROSS " Keep  " GLYPH_TRIANGLE " Undo";
+    for (int i = 0; i < MENU_PAGE_ROWS; i++) row_of_menu[i] = -1;
+    for (int i = 0; i < ROWS; i++) menu_of_row[i] = -1;
     for (int i = 0; i < shown_count; i++) {
-        menu_page_value(p, rows[shown[i]].label, "", 1);
+        if (shown[i] == PERFORMANCE) menu_page_text(p, "Performance");  /* the group's heading */
+        int at = menu_page_value(p, rows[shown[i]].label, "", 1);
+        if (at < 0 || at >= MENU_PAGE_ROWS) continue;
+        row_of_menu[at] = shown[i];
+        menu_of_row[shown[i]] = at;
         format(&rows[shown[i]]);
     }
     const char *list = host_getenv("DHD_PC_SETTINGS_ROWS");
@@ -354,6 +440,10 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
         p->hint = hint;
     } else if (r && r->selected != r->running) p->hint = restart_hint;
     else if (r == &rows[TEXTURES] && !host_service_texpack_available()) p->hint = "No pack: see texture_pack in dhd.ini";
+    else if (r == &rows[PERFORMANCE]) p->hint = "ON: the three effects below off, for speed";
+    else if (r == &rows[SHADOWS]) p->hint = "The riders' shadows and the glow around the sun";
+    else if (r == &rows[FLARE]) p->hint = "The rings across the picture from the sun";
+    else if (r == &rows[PARTICLES]) p->hint = "Dust, dirt, spray and heat haze";
     else if (r == &rows[RESOLUTION] && scale_limit && scale_limit < 8) {
         if (scale_phone) snprintf(hint, sizeof hint, "Phones go up to %dx", scale_limit);
         else if (scale_why) snprintf(hint, sizeof hint, "This GPU's %s allows up to %dx", scale_why + 4, scale_limit);
@@ -381,7 +471,7 @@ static void page_back(MenuPage *p)  /* Triangle: the values the page opened with
     }
     for (int i = 0; i < ROWS; i++) {
         Row *r = &rows[i];
-        if (r->selected == r->opened || r->opened < 0) continue;
+        if (i == PERFORMANCE || r->selected == r->opened || r->opened < 0) continue;
         r->selected = r->opened;
         commit(r, r->live || r->opened == r->running);
     }
