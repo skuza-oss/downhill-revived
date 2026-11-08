@@ -10,7 +10,7 @@
 // Since finding 181 the creator can pick the region (CHOICES), and Auto goes by the Cloudflare
 // location the creator reached (src/colo-hints.ts, made from Cloudflare's published Durable Object
 // locations and measured round trips), the country and continent only when that colo isn't known.
-import { COLO_HINTS } from "./colo-hints";
+import { COLO_COUNTRIES, COLO_HINTS } from "./colo-hints";
 
 /** Cloudflare's Durable Object location hints (developers.cloudflare.com/durable-objects/reference/
     data-location/, checked 2026-11-02). sam, afr and me host no Durable Objects yet: Cloudflare puts
@@ -87,20 +87,39 @@ export function locationHintFor(p: Place): LocationHint | undefined {
   }
 }
 
-/** How the hint of a new room was picked: the creator's choice, Auto by the colo they reached, Auto
-    by their country and continent, or none (the default placement). */
-export type HintSource = "chosen" | "colo" | "place" | "none";
+/** The continent placeRoom compares (finding 181): Cloudflare's continent, Asia split the way
+    locationHintFor already splits it by country (apac-ne, apac-se, me, the rest apac), because a hop
+    from Jakarta to Tokyo is as far as one to another continent; "" unknown (Tor too). */
+export function continentOf(p: Place): string {
+  const c = (p.continent ?? "").toUpperCase();
+  if (c === "AS" || c === "ME") return locationHintFor(p) ?? "";
+  return regionOfContinent(c);
+}
+
+/** How the hint of a new room was picked (the server's log line, finding 181): the creator's choice;
+    Auto by the colo they reached; Auto by their country and continent, because the table has no row
+    for that colo ("country") or because the colo is on another continent than theirs
+    ("colo-other-continent"); or none (no data: the default placement). Rooms made before this kept
+    no source: their hint came from the country. */
+export type HintSource = "chosen" | "colo" | "country" | "colo-other-continent" | "none";
 
 /** The hint for a room the creator makes from `p`, with `choice` the region they picked (undefined:
-    Auto). Auto takes the creator's colo's row in src/colo-hints.ts: their ping to the room is their
-    way to that colo plus the colo's to the room, and the first part is the same wherever the room
-    runs. A colo the table doesn't have (a new one) falls back to the country and continent. */
+    Auto). Auto takes the creator's colo's row in src/colo-hints.ts (their ping to the room is their
+    way to that colo plus the colo's to the room), but only when that colo is on the creator's own
+    continent (continentOf: the colo's country against the creator's; the owner's decision,
+    2026-11-08). A creator whose ISP takes them to another continent (Indonesians reaching Tokyo,
+    Paris or San Jose) gets the country rule, so their room stays near the other players from their
+    country. A colo the table doesn't have falls back to the country rule too. */
 export function placeRoom(p: Place, choice?: LocationHint): { hint?: LocationHint; how: HintSource } {
   if (choice) return { hint: choice, how: "chosen" };
-  const byColo = p.colo ? COLO_HINTS[p.colo.toUpperCase()] : undefined;
-  if (byColo) return { hint: byColo, how: "colo" };
+  const colo = (p.colo ?? "").toUpperCase();
+  const byColo = colo ? COLO_HINTS[colo] : undefined;
+  const mine = continentOf(p);
+  const coloWhere = COLO_COUNTRIES[colo];
+  if (byColo && mine && coloWhere && continentOf(coloWhere) === mine) return { hint: byColo, how: "colo" };
   const byPlace = locationHintFor(p);
-  return byPlace ? { hint: byPlace, how: "place" } : { how: "none" };
+  if (!byPlace) return { how: "none" };
+  return { hint: byPlace, how: byColo ? "colo-other-continent" : "country" };
 }
 
 /** The regions a room's creator can pick (Create's REGION row, finding 181): the hints that run

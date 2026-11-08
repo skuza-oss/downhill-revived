@@ -812,8 +812,12 @@ run Durable Objects of their own:
 No `region`, `auto`, or any other value (`sam`, `afr`, `me`, `apac`, unknown names) is Auto, so a
 game never fails to make a room over its pick. Auto takes the hint of the Cloudflare location the
 creator reached (`online/server/src/colo-hints.ts`, made by `online/server/tools/do_locations.mjs`
-from Cloudflare's published Durable Object locations and measured round trips), and the country
-and continent above only when that colo is not in the table.
+from Cloudflare's published Durable Object locations and measured round trips) when that colo is on
+the creator's own continent (Asia split as below: northeast, southeast, the Middle East, the rest),
+and the country and continent above otherwise: when the colo is not in the table, or when the
+creator's ISP took them to another continent (an Indonesian reaching Tokyo or Paris keeps the
+Southeast Asian room). The server logs, once per room, `room CODE: runs in COLO, made with HINT
+(chosen | colo | country | colo-other-continent | none) from EDGE`.
 
 - `welcome` adds `roomArea` (the finer name of where the room runs: its colo's area, else its
   hint's; `""` unknown) and `roomChosen` (`true`: the creator picked the region).

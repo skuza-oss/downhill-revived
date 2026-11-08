@@ -50,6 +50,8 @@ Out of scope: P2P rooms (another lane, branch `feat/p2p-clean`), moving a room a
 - [x] 2026-11-08: test Worker: pings per region and Auto from this PC; a 7-racer race (this PC's game
       and 6 nettool bots); both test Workers deleted
 - [x] 2026-11-08: log replay of 427 rooms made in the 7 days before
+- [x] 2026-11-08: the owner's decision: Auto uses the colo only on the creator's own continent;
+      the replay again
 
 ## Decisions
 
@@ -90,6 +92,15 @@ Out of scope: P2P rooms (another lane, branch `feat/p2p-clean`), moving a room a
   Every other colo falls back to the country and continent (finding 135). A hint costs the mean of its
   two quickest colos from that edge, because a hint's objects land in its colos near the edge (below).
   `npm test` runs `do_locations.mjs check` first.
+- **Same continent only (the owner, 2026-11-08).** The colo's row is used only when the colo is on
+  the creator's own continent; otherwise the country rule, so a creator whose ISP takes them abroad
+  keeps the room near the other players from their country. `continentOf` (`src/region.ts`):
+  Cloudflare's continent, Asia split as the country rule splits it (apac-ne, apac-se, me, the rest
+  apac), because the owner's example counts Tokyo as foreign for an Indonesian. The colo's country
+  and continent come from its place name (`COUNTRIES` in `do_locations.mjs`, GeoNames' continents:
+  TR, GE, AM, AZ, KZ in Asia; CY, RU in Europe), generated into `COLO_COUNTRIES`. The log line's
+  `how`: `chosen`, `colo`, `country` (no row), `colo-other-continent` (a row on another continent),
+  `none`.
 - **Measured how:** a temporary Worker (`dhd-region-probe`, deleted) with one Durable Object placed
   in each of the 31 colos (placed by hints from this PC and from Globalping probes in NL, ES, PT, FR,
   BE, GB, KR until every colo had one; each object learns its colo from a trace). Its `/probe` times
@@ -125,6 +136,13 @@ Out of scope: P2P rooms (another lane, branch `feat/p2p-clean`), moving a room a
 
 ### The log replay (Auto by colo against the old country rule)
 
+**With the owner's same-continent rule (what the branch does): 6 of 427 rooms (1.4%) would run
+elsewhere.** 5 Iraqi rooms (BGW, BSR: neighbours of the measured Kuwait colo) me → weur, 1 Indian at
+DEL apac → apac-se. Everyone else gets the 0.7.13 placement: the 29 Indonesians and the Malaysian at
+foreign edges keep apac-se, an Algerian in Zurich keeps afr. 162 rooms' creators stay at 100 ms or
+more from their edge to the room (the 148 South Americans and the 13 creators at foreign edges, 1 at
+DEL). Before that rule (the numbers below), the colo alone would have moved 35.
+
 Every `/v1/rooms/new` of the 7 days (Workers Logs) through both rules; the cost is the edge's
 measured round trip to the hint's two quickest colos.
 
@@ -134,7 +152,7 @@ measured round trip to the hint's two quickest colos.
   eeur 1.
 - For the 29 of them at a measured edge, the creator's edge-to-room leg gets shorter by 54 ms (median;
   0-180 ms; the Indonesians at European and US edges 142-180 ms). Their room is then far for players
-  who reach Cloudflare in Singapore: the creator's ping wins, as the owner asked.
+  who reach Cloudflare in Singapore, which is why the owner chose the same-continent rule.
 - **148 rooms (35%) are South Americans at GRU, GIG or EZE**, still 113-133 ms from any room (enam).
   No hint fixes that; the race ping shows them their races don't go there.
 

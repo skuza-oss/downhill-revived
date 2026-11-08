@@ -373,7 +373,7 @@ export class Room extends DurableObject<Env> {
         await this.save();
         // One line per room for the server's logs: where hints really put rooms (finding 181).
         const o = this.state.origin;
-        if (o) console.log(`room ${this.state.code}: runs in ${colo}, made with ${o.hint || "no hint"} (${o.how ?? "place"}) from ${o.createdFrom || "?"}`);
+        if (o) console.log(`room ${this.state.code}: runs in ${colo}, made with ${o.hint || "no hint"} (${o.how ?? "country"}) from ${o.createdFrom || "?"}`);
         this.broadcastWhere();
         this.updateListing();
       } catch {}
