@@ -117,6 +117,12 @@ pub const SETTINGS: &[Setting] = &[
     text("texture_cache_mb", "DHD_TEXTURE_CACHE_MB"),
     // sharp: the game's font with clean edges at any resolution; original: as the PS2 draws it.
     switch("font", "DHD_FONT", &[c("original", "Original"), c("sharp", "Sharp")], "sharp", "sharp"),
+    // The optional effects (finding 183, port/patches_effects.py): the riders' shadows and the sun's
+    // glow, the lens flare's ghosts, the particle system's effects. Off: not drawn, for speed; the
+    // game itself runs the same (allowed online). PC SETTINGS' Performance Mode turns all three off.
+    switch("shadows", "DHD_SHADOWS", SWITCH, "1", "1"),
+    switch("lens_flare", "DHD_LENS_FLARE", SWITCH, "1", "1"),
+    switch("particles", "DHD_PARTICLES", SWITCH, "1", "1"),
     // Simulation steps a second (findings 067, 114), offline and online.
     choice("fps", "DHD_FPS", &[c("60", "60 fps"), c("120", "120 fps"), c("144", "144 fps"), c("165", "165 fps"),
                                c("240", "240 fps"), c("monitor", "Monitor")], "60", "60"),

@@ -92,7 +92,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   and Game tabs (finding 163), saved to dhd.ini (findings 064, 101): resolution scale
   (capped by GPU memory and said so, finding 136), window mode, widescreen with the HUD anchored
   and no 4:3 screens left (findings 056, 140), frame rate 60-240 or Monitor (findings 067, 139),
-  V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), movies,
+  V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), a
+  Performance group (shadows and sun glow, lens flare, particles; finding 183), movies,
   vibration, stick dead zone and button icons (finding 134), the keys and controller buttons for
   the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
   Ping counter (findings 120, 169), online name size (finding 163), Unlock All (finding 095),

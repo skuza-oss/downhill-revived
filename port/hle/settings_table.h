@@ -22,6 +22,9 @@ static const SettingChoice setting_choices_stick_dead_zone[] = {{"game", "Game (
 static const SettingChoice setting_choices_prompts[] = {{"auto", "Auto"}, {"playstation", "PlayStation"}, {"xbox", "Xbox"}, {"nintendo", "Nintendo"}};
 static const SettingChoice setting_choices_textures[] = {{"off", "OFF"}, {"on", "ON"}};
 static const SettingChoice setting_choices_font[] = {{"original", "Original"}, {"sharp", "Sharp"}};
+static const SettingChoice setting_choices_shadows[] = {{"0", "OFF"}, {"1", "ON"}};
+static const SettingChoice setting_choices_lens_flare[] = {{"0", "OFF"}, {"1", "ON"}};
+static const SettingChoice setting_choices_particles[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_fps[] = {{"60", "60 fps"}, {"120", "120 fps"}, {"144", "144 fps"}, {"165", "165 fps"}, {"240", "240 fps"}, {"monitor", "Monitor"}};
 static const SettingChoice setting_choices_vsync[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_perf_counter[] = {{"0", "OFF"}, {"1", "ON"}};
@@ -58,6 +61,9 @@ static const SettingInfo setting_table[] = {
     {"prompts", "DHD_PROMPTS", "playstation", setting_choices_prompts, 4},
     {"textures", "DHD_TEXTURES", "on", setting_choices_textures, 2},
     {"font", "DHD_FONT", "sharp", setting_choices_font, 2},
+    {"shadows", "DHD_SHADOWS", "1", setting_choices_shadows, 2},
+    {"lens_flare", "DHD_LENS_FLARE", "1", setting_choices_lens_flare, 2},
+    {"particles", "DHD_PARTICLES", "1", setting_choices_particles, 2},
     {"fps", "DHD_FPS", "60", setting_choices_fps, 6},
     {"vsync", "DHD_VSYNC", "0", setting_choices_vsync, 2},
     {"perf_counter", "DHD_PERF_COUNTER", "0", setting_choices_perf_counter, 2},
