@@ -53,6 +53,8 @@ after a version change before a live check.
 | `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots, PrintWindow captures) |
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting |
+| `port/tools/cross_bench.py` | native PC/Mac SFU/P2P comparison: private rooms, both host roles, interleaved repeats and forced TURN controls (`--matrix`); raw evidence under the chosen output directory |
+| `port/tools/analyze_netbench.py` | summarize a cross_bench output directory into JSON, CSV and Markdown; application RTT, delivery and native transport counters |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |
 | `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool |
@@ -114,6 +116,23 @@ Menus and riding:
 | `DHD_HEADLESS=1` | no message boxes (a bad disc only logs), and no launcher (Linux smoke runs) |
 
 Online:
+
+For a transport comparison, build both endpoints with the same core, stop VPN routing for a
+plain LAN baseline, and keep settings and network interfaces fixed. Set `DHD_REMOTE`,
+`DHD_REMOTE_APP` and `DHD_REMOTE_ISO` to an SSH target, its native executable and its disc path;
+these stay in the local environment. Run `cross_bench.py build/check/netbench --matrix`, then
+`analyze_netbench.py build/check/netbench`. `--exe` selects the local build; `--ssh-option`
+passes an SSH option such as a trusted host-key alias. Do not run other games, builds, captures
+or network benchmarks concurrently. The harness owns only the processes it starts.
+
+`DHD_NET_BENCH=CSV` enables native diagnostic probes on both gameplay channels, plus selected
+ICE path and byte-counter logs. It requires exactly two game clients; the normal host AI still
+runs. Probes never reach rider synchronization. It also fixes the room seed for comparisons.
+Without this variable the probes, file and extra native stats are disabled. The runner waits
+ten seconds before sending probes, measures sixty seconds by default, and leaves drain time
+before collection. The two endpoint clocks are never subtracted to estimate one-way latency.
+Compare application RTT with application RTT, not lobby PING or an SFU's per-hop ICE RTT.
+Missing echo replies are application delivery failures, not a raw packet-loss measurement.
 
 | Variable | What |
 |---|---|

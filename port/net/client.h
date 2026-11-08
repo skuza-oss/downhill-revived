@@ -7,6 +7,7 @@
 #include <SDL3/SDL_mutex.h>
 
 #include "net.h"
+#include "bench.h"
 
 enum { NET_PROTOCOL = 4, NET_RTT_WINDOW = 128, NET_LOG_MS = 30000, NET_ARRIVALS = 64 };
 
@@ -86,6 +87,7 @@ typedef struct {
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];
     unsigned relayed_head, relayed_count;
+    NetBench bench; /* opt-in test instrumentation, not part of the core/host ABI */
 } NetClient;
 
 double net_now_ms(void);  /* a monotonic clock */

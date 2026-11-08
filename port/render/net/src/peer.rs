@@ -54,9 +54,9 @@ impl Peer {
         let socket = UdpSocket::bind(SocketAddr::new(local, 0))?;
         socket.set_nonblocking(true)?;
         let local = socket.local_addr()?;
-        let mut rtc = Rtc::builder()
-            .set_crypto_provider(str0m::crypto::from_feature_flags().into())
-            .build(Instant::now());
+        let mut config = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into());
+        if crate::diagnostics::enabled() { config = config.set_stats_interval(Some(Duration::from_secs(1))); }
+        let mut rtc = config.build(Instant::now());
         let host = Candidate::host(local, "udp")?;
         rtc.add_local_candidate(host);
         let state_config = ChannelConfig {
@@ -378,6 +378,9 @@ impl Peer {
                     }
                 }
                 Output::Event(Event::Connected) => self.connected = true,
+                Output::Event(Event::PeerStats(stats)) => {
+                    crate::diagnostics::peer("p2p", &stats, self.relay.as_ref().and_then(|r| r.address));
+                }
                 Output::Event(Event::ChannelData(data))
                     if data.binary && data.data.len() <= MESSAGE_MAX =>
                 {

@@ -19,6 +19,7 @@ mod http;
 mod peer;
 mod session;
 mod p2p;
+mod diagnostics;
 mod relay;
 mod sfu;
 mod stream;

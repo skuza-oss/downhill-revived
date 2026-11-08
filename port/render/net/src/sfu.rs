@@ -348,7 +348,9 @@ impl Sfu {
             let wake = wake.clone();
             std::thread::Builder::new().name("dhd-sfu-read".into()).spawn(move || read_socket(socket, inbox, alive, failed, wake))?;
         }
-        let mut rtc = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
+        let mut config = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into());
+        if crate::diagnostics::enabled() { config = config.set_stats_interval(Some(Duration::from_secs(1))); }
+        let mut rtc = config.build(Instant::now());
         rtc.add_local_candidate(Candidate::host(socket.local_addr()?, "udp")?);
         let mut change = rtc.sdp_api();
         change.add_channel_with_config(ChannelConfig { label: "server-events".into(), negotiated: Some(65534), ..Default::default() });
@@ -845,6 +847,9 @@ impl Sfu {
                             }
                         }
                     }
+                }
+                Output::Event(Event::PeerStats(stats)) => {
+                    crate::diagnostics::peer("sfu", &stats, self.relay.as_ref().and_then(|r| r.relayed));
                 }
                 Output::Event(Event::Connected) if !self.connected => {
                     self.connected = true;
