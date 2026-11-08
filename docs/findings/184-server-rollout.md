@@ -49,7 +49,9 @@ new flow. Out of scope: deploying production (the lead does).
 - [x] README, AGENTS.md, BUILDING.md, RELEASE-CHECKLIST.md (ea67446).
 - [x] End-to-end runs on a temporary test Worker (deleted after): runs 1, 2 and the emergency path
       (below). `check.py server` passes (198 tests).
-- [ ] `check.py port`, boot and race state traces against 0.7.13's.
+- [x] `check.py port` passes; the boot (600 rows) and race (5000 rows) state traces of this
+      branch's `dhd64.exe` equal 0.7.13's reference rows (`state_diff.py`: PASS both; the
+      reference was made from the 0.7.13 release with `--env DHD_LAUNCHER=1`, as these).
 
 ## Decisions
 
@@ -155,3 +157,16 @@ B@100% again 4 s later, the rollout row = B 21 s after that; exit code 1, 108 s 
   test clients rejoin a fresh instance, so the restart path is covered without a deploy.
 
 ## Result
+
+Filled in at the merge. For the lead:
+
+- Merge after 182 (it touches `room.ts`'s SFU path; this lane's hooks are a few lines each plus
+  one new section before the helpers), then `check.py server` once more.
+- The first production deploy with this code is itself still the old way for the rooms already
+  open: they run 625b5b91, which has no safe-moment logic, so they reset at Cloudflare's limit.
+  With this branch's `wrangler.jsonc` (24 h) that limit is 24 h, so rooms open at the deploy would
+  run old code up to a day, or until they empty. Deploy it at a quiet hour with `--emergency`
+  (immediate, as today) or accept the day; every later deploy is the staged one.
+- Production needs nothing new: the rollout row lives in the existing `settings` table (no
+  migration), the version metadata binding is in `wrangler.jsonc`, and the logs token is the
+  existing read-only one (it can run `telemetry/query`).
