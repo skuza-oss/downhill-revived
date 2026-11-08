@@ -203,7 +203,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 177 | [one Realtime session per member per room, set up before the race](177-sfu-room-sessions.md) | current |  |
 | 178 | [pre-release online lifecycle review](178-pre-0713-review.md) | partly superseded | [179](179-sfu-review-risks.md) for the three risks left open, now fixed |
 | 179 | [the three SFU risks the pre-release review left open](179-sfu-review-risks.md) | current |  |
-| 180 | [Selectable host-star P2P races](180-p2p-prototype.md) | in progress |  |
+| 180 | [P2P rooms, chosen per room (host star)](180-p2p-prototype.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
