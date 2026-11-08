@@ -223,6 +223,10 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 // Host ended the race; the room is a lobby again (ready flags cleared).
 {"type":"ended"}
+
+// The room restarts for new code (finding 184, below): sent to every member just before it closes
+// their sockets with 1012 "server_update". 0.7.13 and older ignore the type.
+{"type":"notice","code":"server_update","message":"Server updated, reconnecting..."}
 ```
 
 - **Member ids** are fixed for the life of a connection and never reused in a room. **Slots**
@@ -234,6 +238,25 @@ use the same `error` frame **without** a close; the client just shows `message`.
   to local time with the offset from `ping`/`pong` (`offset ≈ serverTime - (tSend + rtt/2)`).
   The game itself starts every PC's countdown together on the server's clock once all have
   loaded (port/hle/online.c).
+
+### A room restarting for new code (finding 184)
+
+A deploy gives a busy room new code only when the room restarts itself at a safe moment (no race,
+no locked grid or countdown, no Realtime setup in flight, no automatic race due within 10 s:
+`online/server/src/rollout.ts`). The room saves its state, sends `notice` (above) to every member,
+closes every socket with **1012** (`server_update`) and resets. A game treats it like any drop
+below 4000: it rejoins with its `rejoinToken` (finding 137) after its usual backoff (first try
+after 1 s) and gets its member back: id, host, rider, bike, Ready and its Realtime session
+(`"sfu":"ready"` in the welcome, finding 177). A connection that arrives during the restart's
+quarter second gets HTTP 503 and is tried again by the rejoin.
+
+- **0.7.13 and older** ignore `notice` (an unknown type) and rejoin; their room page shows no
+  footer meanwhile.
+- **Newer games** keep `message` (printable ASCII; `NetLobby.notice`) and show it as the room
+  page's footer while they rejoin; the welcome clears it.
+- The Worker passes its own version to the room (`x-dhd-worker-version: <id> <upload time>`,
+  dropped if a client sent one); an older room ignores the header. Nothing a client sends or
+  receives changed otherwise.
 
 ## Race (binary frames, little-endian)
 
