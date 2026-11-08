@@ -56,6 +56,9 @@ pictures identical, boot trace while iterating and race trace once at the end, `
   2x) and the PC (5 shots, 4x, Vulkan), boot and race state traces match, `check.py port` OK
 - [ ] the Mi 11i (no regression on Adreno): not run, its 0.7.12 is release-signed and the lane
   has no release key, so a debug-signed build cannot go over it
+- [x] 2026-11-08: the Mi 11i (throttled, 4x) as the Redmi 9's stand-in: the widest set off gives
+  the same gain over the race (+40 % against +40 %), not the same fps or the same shape per scene
+  ("Mi 11i stand-in" below)
 
 ## Method
 
@@ -183,6 +186,80 @@ point sampling makes the sky's large textures visibly blocky.
 
 About +12.9 fields/s (+26 %), and the race start goes from 38 to 60: about 2.4 fields/s more than
 the three effects alone (60.4). With all off the limit moves between the GPU and the VU thread.
+
+## Mi 11i stand-in
+
+The Redmi 9 is no longer available. The question: can the rooted Mi 11i (Snapdragon 888, Adreno
+660), throttled and at 4x, stand in for the Redmi 9 at 2x? The test was the widest set above, all
+on against all off, with the same APK (`fx5`, sha256 `ba662e08…`), interleaved on, off, on, off.
+
+- **The phone**: `phone_throttle.py --apply t612` with the profile's own clocks (cpu6-7 offline, A78
+  at 1.44 GHz, A55 at 1.80 GHz, the Adreno held at level 9, 315 MHz). That is finding 127's
+  nominal T612, closer to the Helio G80's 2.0 GHz A75 than 127's calibrated 1.21 / 1.50 GHz.
+  Samples every 5 s: cpus 0-5 online and the GPU at 315 MHz throughout; battery 26-31 °C.
+- **The run**: the Redmi's keys with `DHD_SCALE=4` (picture 2048 x 1792, shown 1440 x 1080 in
+  the 2400 x 1080 window), the touch controls drawn (classic pad, as on the Redmi), 90 s cool-down
+  with the screen on and other apps closed.
+- **`DHD_DIAG_OUTPUT=896` kept**: on the Redmi, 896 lines was the picture's height and 83 % of the
+  screen's 1080. At 4x the picture (1792 lines) is taller than the Mi's screen, so a "picture
+  height" rule would change nothing. 896 lines cuts the present pass by the same fraction as on
+  the Redmi: 1991 x 896 instead of 2400 x 1080.
+- **The release-signed app**: 0.7.12 uninstalled first, after its files were backed up (the ISO
+  moved aside on the phone, the rest on the PC and in a tar on the phone, md5 checked). At the
+  end the release APK went back on (sha256 equal to the release's `SHA256SUMS`) and the files
+  were restored: md5 equal, the app's new uid, the app's SELinux context. The same method would
+  let the Adreno regression check above run.
+
+| | on 1 | on 2 | off 1 | off 2 |
+|---|---:|---:|---:|---:|
+| fields/s over the route | 61.05 | 61.08 | 79.29 | 79.16 |
+| p99 field ms | 32.6 | 32.1 | 23.8 | 24.2 |
+| busy ms a field: render / VU / GS | 11.3 / 12.5 / 15.8 | 11.3 / 12.5 / 15.8 | 4.4 / 11.7 / 10.6 | 4.5 / 11.7 / 10.7 |
+| GPU ms a frame (timestamps) | 13.16 | 13.16 | 8.26 | 8.24 |
+| race windows (30 s): limits | gpu at the start, then cpu:render x3 | the same | gpu, cpu:vu x2 | cpu:gs, cpu:vu x2 |
+
+Over the route, +18.2 fields/s (+29.7 %); the Redmi gave +12.9 (+25.8 %). The 30 s windows cover
+different fields on the two phones, because the Mi runs faster. So the scenes are compared over the
+same field ranges, from the `DHD_TIMELINE` CSVs (fields/s, means of the two runs; the Mi's GPU ms a
+frame in brackets):
+
+| fields | Mi on | Mi off | gain | Redmi on | Redmi off | gain |
+|---|---:|---:|---:|---:|---:|---:|
+| menus and loading, 300-6060 | 62.5 (11.8) | 73.6 (8.0) | +18 % | 54.3 | 59.3 | +9 % |
+| race start, 6321-7500 | 47.3 (17.4) | 74.3 (7.8) | +57 % | 37.8 | 63.7 | +69 % |
+| 7500-9000 | 60.7 (14.2) | 77.6 (8.7) | +28 % | 47.4 | 66.0 | +39 % |
+| 9000-10500 | 63.5 (13.5) | 82.3 (8.5) | +30 % | 48.4 | 66.6 | +38 % |
+| 10500-12000 | 62.7 (13.8) | 92.6 (8.8) | +48 % | 49.5 | 65.9 | +33 % |
+| 12000-14000 | 66.6 (12.9) | 94.8 (8.3) | +42 % | 51.9 | 66.6 | +28 % |
+| **the race, 6321-14000** | **60.3** | **84.6** | **+40.3 %** | **47.2** | **65.9** | **+39.6 %** |
+
+The two runs of each state agree within 1.2 % on every range.
+
+What differs:
+
+- **The level**: the Mi at 4x is 22-28 % faster than the Redmi at 2x in both states (race 60 against
+  47 with all on). So it cannot answer "does it reach 60".
+- **The limit**: with all on, the Mi is GPU-bound only at the race start (GPU 17.4 ms of a 21 ms
+  frame). Mid-race the render thread is the limit (busy 13.5-15 ms a field, A78 at 1.44 GHz), with
+  the GPU 80-90 % busy (13-14 ms of a 15-16.5 ms frame). The Redmi's counters show its GPU busy
+  throughout.
+- **The off state**: the Redmi stays flat at about 66, held by the VU thread. The Mi's faster CPU
+  lets it climb to 95 late in the race. That is why the shape per range differs (Mi +28 to +48 %,
+  Redmi +28 to +39 %), and why the menus gain twice as much on the Mi.
+- **The render thread** drops more on the Mi (11.3 -> 4.5 ms a field, Redmi 12.6 -> 8.1). Part of
+  the Mi's gain is CPU work, not GPU work.
+
+**Verdict**: the Mi 11i throttled at 4x can stand in for the Redmi 9 at 2x on one measure only:
+the gain over the whole race (6321-14000) from a large GPU-side change. On this change it was
+within 1 point (+40.3 % against +39.6 %), and over the route within 4 points (+29.7 % against
++25.8 %); count it as matching within ±5 points. It is not a stand-in for:
+
+- absolute fps or the 60 target;
+- a single scene (up to 15 points apart);
+- a GPU-only change mid-race, where the Mi is render-thread-bound and would understate the gain.
+
+From the GPU times, about 5x (1.56x the pixels: the race start's 17.4 ms -> about 27 ms, the
+Redmi's 26 ms) would bring the Mi's GPU load to the Redmi's. This estimate is not measured.
 
 ## Decisions
 
