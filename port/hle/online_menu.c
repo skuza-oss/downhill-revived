@@ -1555,7 +1555,9 @@ static void room_texts(MenuPage *p)
     } else
         snprintf(title_text, sizeof title_text, "RACE ROOM");
     p->title = title_text;
-    if (rules_open)
+    if (l->state == NET_RECONNECTING && l->notice[0])  /* the server restarts the room (finding 184) */
+        snprintf(footer_text, sizeof footer_text, "%s", l->notice);
+    else if (rules_open)
         snprintf(footer_text, sizeof footer_text, r.host ? GLYPH_LEFT GLYPH_RIGHT " CHANGE   " GLYPH_TRIANGLE " BACK"
                                                          : GLYPH_TRIANGLE " BACK");
     else if (leave_ask)

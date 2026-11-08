@@ -528,7 +528,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         }
         if (json_number(text, "serverTime", &server_time) && !c->have_offset)
             c->clock_offset = server_time - net_now_ms(), c->clock_known = 1;
-        c->lobby.error_code[0] = c->lobby.error[0] = 0;
+        c->lobby.error_code[0] = c->lobby.error[0] = c->lobby.notice[0] = 0;
         c->rejoining = 0, c->rejoin_tries = 0;
         double race_at = 0;
         int in_race = json_number(text, "race.startAt", &race_at) && race_at > 0 && race_at == c->race_at;
@@ -622,6 +622,17 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         c->race_at = 0, c->gave_up = 0;
         c->lobby.started = 0;
         c->lobby.state = NET_LOBBY;
+        changed(c);
+    } else if (!strcmp(type, "notice")) {
+        /* The room restarts for new code at a safe moment and closes this connection (1012): the
+           rejoin follows as after any drop; meanwhile the room page shows this (finding 184).
+           Printable ASCII only: the game's font has nothing else. */
+        char notice[sizeof c->lobby.notice] = "";
+        json_string(text, "message", notice, sizeof notice);
+        for (char *p = notice; *p; p++)
+            if (*p < 0x20 || *p > 0x7e) *p = '?';
+        memcpy(c->lobby.notice, notice, sizeof notice);
+        snprintf(line, sizeof line, "net: room %s: the server restarts the room for new code", c->lobby.code);
         changed(c);
     } else if (!strcmp(type, "error")) {
         json_string(text, "code", c->lobby.error_code, sizeof c->lobby.error_code);
