@@ -1,5 +1,6 @@
 // Worker entry: routes lobby-list requests to the LobbyIndex and WebSockets to a Room by code.
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
+import { p2pRoute } from "./p2p";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
 import {
@@ -20,26 +21,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname.replace(/\/+$/, "");
 
-    // A separate namespace and route: the SFU room implementation stays unchanged.
-    if (path === "/v1/p2p/lobbies" || path.startsWith("/v1/p2p/rooms/")) {
-      const sw = await onlineState(env as GuardEnv);
-      if (!sw.on) return refuseSocket("online_off", sw.message);
-      if (path === "/v1/p2p/lobbies") return json({protocol:PROTOCOL,now:Date.now(),lobbies:await env.LOBBIES.get(env.LOBBIES.idFromName("p2p")).list()});
-      const code = path.slice("/v1/p2p/rooms/".length).toUpperCase();
-      const ip = await ipHash(env as GuardEnv,request);
-      if (await overLimit(env as GuardEnv,ip,code === "NEW")) return refuseSocket("rate_limited",RATE_MESSAGE);
-      const ban = await findBan(env as GuardEnv,{ip});
-      if (ban) return refuseSocket("banned",banMessage(ban));
-      if (code === "NEW") {
-        for (let i=0;i<8;i++) {
-          const c=randomCode(), room=env.P2P_ROOM.get(env.P2P_ROOM.idFromName(c));
-          if (await room.claim(c)) return room.fetch(request);
-        }
-        return json({error:"Could not allocate room"},503);
-      }
-      if (!/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(code)) return json({error:"Bad room code"},404);
-      return env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code)).fetch(request);
-    }
+    // P2P rooms (src/p2p.ts, finding 180): their own objects; the SFU rooms below never see them.
+    const p2p = await p2pRoute(request, env, path);
+    if (p2p) return p2p;
 
     // minVersion: the oldest client release the server lets play (MIN_VERSION, wrangler.jsonc).
     const minVersion = minVersionOf(env.MIN_VERSION);

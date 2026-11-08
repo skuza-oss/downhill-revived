@@ -216,3 +216,25 @@ race on. Local development reads all four from the gitignored `.dev.vars`. Lobby
 API and do not need credentials.
 The DO owns session and channel creation; clients connect only to Cloudflare. See
 [the protocol](../../docs/online-protocol.md) and finding 158 for setup, tests and live acceptance.
+
+## P2P rooms (finding 180, test builds)
+
+A room's creator can pick P2P instead of the SFU: the games connect to the host's game directly
+(Cloudflare TURN over TLS on 443 when no direct path works), and the host's game runs the room.
+The server only admits members, relays host-star signaling and gives each member its own TURN
+credentials (`src/p2p.ts`). P2P rooms are private, joined by code and never listed: signaling
+gives the host every member's network address and every member the host's.
+
+A self-hosted server serves `/v1/p2p/*` from its one Worker, as `npx wrangler deploy` makes it.
+The official server runs them as a Worker of their own, so deploying them never restarts an SFU
+room:
+
+```sh
+npx wrangler deploy --config wrangler.p2p.jsonc
+npx wrangler secret put TURN_KEY_ID --config wrangler.p2p.jsonc         # the same values as above
+npx wrangler secret put TURN_KEY_API_TOKEN --config wrangler.p2p.jsonc
+npx wrangler secret put IP_HASH_KEY --config wrangler.p2p.jsonc
+```
+
+Its route (`dhd.skuza.app/v1/p2p/*`) takes those paths ahead of the main Worker's custom domain.
+Relayed P2P races use the account's TURN quota: set a billing alert (finding 180).

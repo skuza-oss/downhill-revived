@@ -51,6 +51,8 @@ export const CLOSE_CODES = {
   too_fast: 4012,
   /** The operator banned this address hash or install id (src/guard.ts findBan). */
   banned: 4013,
+  /** A P2P room's host left: the room ends with it (src/p2p.ts; no host migration). */
+  host_left: 4014,
 } as const;
 export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
 

@@ -1,36 +1,157 @@
-import { describe,it,expect } from "vitest";
-import { Client } from "./helpers";
+// P2P rooms (src/p2p.ts, finding 180): membership, host-star signaling and privacy. The race itself
+// runs between the games, so these tests check what the server must and must not do.
+import { exports } from "cloudflare:workers";
+import { describe, expect, it } from "vitest";
+import { CLOSE_CODES } from "../src/protocol";
+import { Client, VERSION } from "./helpers";
 
-async function room() {
-  const host=await Client.connect("/v1/p2p/rooms/new");host.hello("Host");
-  const welcome=await host.json("p2p_welcome");
-  return {host,welcome};
+async function p2pHost(name = "Host") {
+  const host = await Client.connect("/v1/p2p/rooms/new");
+  host.hello(name);
+  const welcome = await host.json("p2p_welcome");
+  return { host, welcome, code: welcome.code as string };
 }
-async function join(code: string,name: string) {
-  const peer=await Client.connect(`/v1/p2p/rooms/${code}`);peer.hello(name);
-  return {peer,welcome:await peer.json("p2p_welcome")};
+
+async function p2pJoin(code: string, name: string, extra: object = {}) {
+  const guest = await Client.connect(`/v1/p2p/rooms/${code}`);
+  guest.hello(name, extra);
+  return guest;
 }
-describe("P2P signaling",()=>{
-  it("authenticates sender identity and restricts signaling to host-star pairs",async()=>{
-    const {host,welcome:h}=await room();
-    const {peer:a,welcome:wa}=await join(h.code,"A");
-    const {peer:b,welcome:wb}=await join(h.code,"B");
-    a.sendJson({type:"p2p_signal",to:h.memberId,from:wb.memberId,signal:{type:"offer",sdp:"test"}});
-    const signal=await host.json("p2p_signal");expect(signal.from).toBe(wa.memberId);
-    a.sendJson({type:"p2p_signal",to:wb.memberId,signal:{type:"offer",sdp:"test"}});
+
+const get = (path: string) => exports.default.fetch(`https://dhd.test${path}`);
+
+describe("P2P rooms", () => {
+  it("are never listed: not in the lobby list, and no P2P list exists", async () => {
+    const { host, code } = await p2pHost();
+    // A host asking to be public is not a thing here; the old listing message is ignored.
+    host.sendJson({ type: "p2p_listing", public: true, maxPlayers: 10, track: 0, roomName: "Open" });
+    host.sendJson({ type: "ping", t: 1 });
+    await host.json("pong");
+    const list = await (await get("/v1/lobbies")).json<{ lobbies: { code: string }[] }>();
+    expect(list.lobbies.some((l) => l.code === code)).toBe(false);
+    expect((await get("/v1/p2p/lobbies")).status).toBe(404);
+    host.ws.close();
+  });
+
+  it("answer a code probe: an open room exists, a closed or unknown one does not", async () => {
+    const { host, code } = await p2pHost();
+    const open = await get(`/v1/p2p/rooms/${code}`);
+    expect(open.status).toBe(200);
+    expect(await open.json()).toEqual({ room: code });
+    expect((await get("/v1/p2p/rooms/ZZZZZZ")).status).toBe(404);
+    expect((await get("/v1/p2p/rooms/bad!")).status).toBe(404);
+    host.ws.close();
+    // The room ends with its host; give the close a moment to reach the object.
+    for (let i = 0; i < 20 && (await get(`/v1/p2p/rooms/${code}`)).status === 200; i++)
+      await new Promise((r) => setTimeout(r, 25));
+    expect((await get(`/v1/p2p/rooms/${code}`)).status).toBe(404);
+  });
+
+  it("relay signaling host-star only, from the connection's own member", async () => {
+    const { host, welcome, code } = await p2pHost();
+    const a = await p2pJoin(code, "A");
+    const wa = await a.json("p2p_welcome");
+    const b = await p2pJoin(code, "B");
+    const wb = await b.json("p2p_welcome");
+    expect(wa.hostId).toBe(welcome.memberId);
+    // A forged "from" is replaced by the sender's own id.
+    a.sendJson({ type: "p2p_signal", to: welcome.memberId, from: wb.memberId, signal: { type: "offer", sdp: "x" } });
+    const signal = await host.json("p2p_signal");
+    expect(signal.from).toBe(wa.memberId);
+    expect(signal.signal).toEqual({ type: "offer", sdp: "x" });
+    // Guest to guest is refused: guests never learn each other's addresses.
+    a.sendJson({ type: "p2p_signal", to: wb.memberId, signal: { type: "offer", sdp: "x" } });
     expect((await a.json("error")).message).toContain("host-star");
-    host.ws.close();a.ws.close();b.ws.close();
+    expect(await a.closed()).toBe(CLOSE_CODES.bad_message);
+    expect(b.seen.some((s) => JSON.parse(s).type === "p2p_signal")).toBe(false);
+    host.ws.close();
+    b.ws.close();
   });
-  it("ends the room on host loss rather than migrating the host",async()=>{
-    const {host,welcome:h}=await room();const {peer}=await join(h.code,"Guest");
-    host.ws.close();expect((await peer.json("error")).code).toBe("host_left");
-    await peer.closed();
+
+  it("tell every member who is in the room, and give no member another's address", async () => {
+    const { host, code } = await p2pHost();
+    const guest = await p2pJoin(code, "Guest");
+    await guest.json("p2p_welcome");
+    let members = await host.json("p2p_members");
+    if (members.members.length < 2) members = await host.json("p2p_members");  // the host's own join first
+    expect(members.members.map((m: { name: string }) => m.name).sort()).toEqual(["Guest", "Host"]);
+    for (const text of [...host.seen, ...guest.seen])
+      expect(text).not.toMatch(/198\.1[89]\.\d+\.\d+|ipHash|installId|session/);
+    host.ws.close();
+    guest.ws.close();
   });
-  it("does not coordinate race starts or relay gameplay over the lobby",async()=>{
-    const {host,welcome:h}=await room();const {peer}=await join(h.code,"Guest");
-    host.sendJson({type:"start"});host.sendJson({type:"ready",ready:true});
-    peer.sendJson({type:"ping",t:12});expect((await peer.json("pong")).t).toBe(12);
-    expect(peer.seen.some(s=>JSON.parse(s).type==="start")).toBe(false);
-    host.ws.close();peer.ws.close();
+
+  it("let only the host set how many may join", async () => {
+    const { host, code } = await p2pHost();
+    const a = await p2pJoin(code, "A");
+    await a.json("p2p_welcome");
+    a.sendJson({ type: "p2p_capacity", maxPlayers: 10 });
+    host.sendJson({ type: "p2p_capacity", maxPlayers: 2 });
+    host.sendJson({ type: "ping", t: 2 });
+    await host.json("pong");
+    const c = await p2pJoin(code, "C");
+    expect((await c.json("error")).code).toBe("room_full");
+    expect(await c.closed()).toBe(CLOSE_CODES.room_full);
+    host.ws.close();
+    a.ws.close();
+  });
+
+  it("refuse another build or disc than the host's", async () => {
+    const { host, code } = await p2pHost();
+    const other = await p2pJoin(code, "Other", { version: VERSION + " other" });
+    expect((await other.json("error")).code).toBe("version_mismatch");
+    const disc = await p2pJoin(code, "Disc", { isoSha256: "b".repeat(64) });
+    expect((await disc.json("error")).code).toBe("iso_mismatch");
+    host.ws.close();
+  });
+
+  it("let the host remove a guest, and no guest remove anyone", async () => {
+    const { host, welcome, code } = await p2pHost();
+    const a = await p2pJoin(code, "A");
+    const wa = await a.json("p2p_welcome");
+    a.sendJson({ type: "p2p_kick", member: welcome.memberId });
+    host.sendJson({ type: "p2p_kick", member: wa.memberId });
+    expect((await a.json("error")).code).toBe("kicked");
+    expect(await a.closed()).toBe(CLOSE_CODES.kicked);
+    expect(host.closeCode).toBeNull();
+    host.ws.close();
+  });
+
+  it("end on host loss, without migrating the host", async () => {
+    const { host, code } = await p2pHost();
+    const guest = await p2pJoin(code, "Guest");
+    await guest.json("p2p_welcome");
+    host.ws.close();
+    expect((await guest.json("error")).code).toBe("host_left");
+    expect(await guest.closed()).toBe(CLOSE_CODES.host_left);
+    const late = await p2pJoin(code, "Late");
+    expect(await late.closed()).toBe(CLOSE_CODES.room_not_found);
+  });
+
+  it("run no race: room commands get no answer and nothing is relayed", async () => {
+    const { host, code } = await p2pHost();
+    const guest = await p2pJoin(code, "Guest");
+    await guest.json("p2p_welcome");
+    host.sendJson({ type: "start" });
+    host.sendJson({ type: "ready", ready: true });
+    host.ws.send(new Uint8Array([5, 0, 6, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]));
+    guest.sendJson({ type: "ping", t: 12 });
+    expect((await guest.json("pong")).t).toBe(12);
+    expect(guest.seen.some((s) => ["start", "room", "ended"].includes(JSON.parse(s).type))).toBe(false);
+    host.ws.close();
+    guest.ws.close();
+  });
+
+  it("answer the clock's binary PING with the server's time", async () => {
+    const { host } = await p2pHost();
+    const ping = new Uint8Array(10);
+    ping[0] = 3;
+    new DataView(ping.buffer).setFloat64(2, 1234.5, true);
+    host.ws.send(ping);
+    const pong = await host.binary();
+    expect(pong[0]).toBe(4);
+    expect(new DataView(pong.buffer, pong.byteOffset).getFloat64(2, true)).toBe(1234.5);
+    expect(new DataView(pong.buffer, pong.byteOffset).getFloat64(10, true)).toBeGreaterThan(0);
+    host.ws.close();
   });
 });

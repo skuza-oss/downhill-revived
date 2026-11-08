@@ -1,149 +1,352 @@
-// P2P control plane only: membership, bounded host-star signaling, discovery and TURN credentials.
-// Race rules and results belong to the player host. No gameplay binary frame is forwarded here.
+// P2P rooms (finding 180): the server admits members, relays host-star signaling and gives each
+// member its own TURN credentials. Nothing else: the host's game runs the room's rules and carries
+// the race (port/render/net/src/session.rs); no race frame passes through here.
+//
+// A P2P room is private. Signaling carries each member's network addresses to the host and the
+// host's to every member, so a room is reached only by its code and never listed; the game says so
+// when it creates or joins one. The official server runs these routes as their own Worker
+// (wrangler.p2p.jsonc, src/p2p-entry.ts), so deploying them never restarts an SFU room; a local or
+// self-hosted server serves them from the main Worker (src/index.ts).
 import { DurableObject } from "cloudflare:workers";
-import { Turn } from "./sfu";
-import { PROTOCOL, minVersionOf, isOutdated } from "./protocol";
-import type { LobbyEntry } from "./lobbies";
-import { findBan, installIdOf, banMessage } from "./guard";
+import { Turn, type SfuSecrets } from "./sfu";
+import {
+  CLOSE_CODES, FRAME_PING, FRAME_PONG, HELLO_TIMEOUT_MS, MAX_MEMBERS, PROTOCOL,
+  clientVersionOf, isOutdated, isValidCode, minVersionOf, randomCode,
+} from "./protocol";
+import {
+  CAP_WINDOW_MS, RATE_MESSAGE, TOO_FAST_MESSAGE, TOO_FAST_WARNING, banMessage, findBan, installIdOf, ipHash,
+  logJoin, newTally, onlineState, overLimit, refuseSocket, tally, type Caps, type GuardEnv, type Tally,
+} from "./guard";
 
-interface SocketInfo {
-  id: number | null; name: string; opened: number; heard: number;
-  window: number; messages: number; turnUser?: string;
+/** A member who has sent nothing for this long is gone (the game pings every second). */
+const IDLE_MS = 20_000;
+/** How often the room looks for idle and silent connections. */
+const SWEEP_MS = 5_000;
+/** The largest signaling message: an SDP offer or answer with its candidates fits in a few kB. */
+const SIGNAL_MAX_BYTES = 24_000;
+/** Connections a room accepts at once: its members and two more still saying hello. */
+const MAX_CONNECTIONS = MAX_MEMBERS + 2;
+const NAME_MAX = 24;
+/** A binary PING: type, one byte of payload, the client's send time (f64). The PONG adds the
+    server's clock, so the game keeps one clock for P2P rooms as for SFU rooms. */
+const PING_BYTES = 10;
+/** A member's message caps (src/guard.ts tally). A host signals every guest at once: an offer and
+    its trickled candidates (host, server-reflexive, relay; a browser gathers one per network
+    interface) to up to nine guests is about a hundred messages in its first second. Pings come
+    once a second. Binary is only the clock's PING. */
+const P2P_CAPS: Caps = { windowMs: CAP_WINDOW_MS, text: 400, binary: 20 };
+
+type Message = Record<string, unknown>;
+
+/** What the room keeps: the room's code, host and build, and how many may join. */
+interface RoomMeta {
+  code: string;
+  hostId: number;
+  nextId: number;
+  /** The host's game build and disc hash: every member must have the same. "" before the host. */
+  version: string;
+  iso: string;
+  maxPlayers: number;
+  closed: boolean;
 }
-interface Meta {
-  code: string; hostId: number; nextId: number; version: string; iso: string;
-  closed: boolean; listing: LobbyEntry | null;
+
+/** Each connection's own state, in its WebSocket attachment (it survives hibernation). */
+interface Connection {
+  id: number | null;
+  name: string;
+  opened: number;
+  heard: number;
+  tally: Tally;
+  ipHash: string;
+  country: string;
+  turnUser?: string;
+}
+
+/** The P2P routes: GET /v1/p2p/rooms/CODE says whether a room exists (the game asks before a join
+    by code, which may be an SFU room's); a WebSocket to /v1/p2p/rooms/new or /v1/p2p/rooms/CODE
+    makes or joins one. Returns null for any other path. */
+export async function p2pRoute(request: Request, env: Env, path: string): Promise<Response | null> {
+  const m = path.match(/^\/v1\/p2p\/rooms\/([^/]+)$/);
+  if (!m) return null;
+  const create = m[1] === "new";
+  const code = create ? "" : m[1].toUpperCase();
+  if (!create && !isValidCode(code)) return Response.json({ error: "Bad room code" }, { status: 404 });
+  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+    if (create || request.method !== "GET") return Response.json({ error: "Expected a WebSocket upgrade" }, { status: 426 });
+    const exists = await env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code)).exists();
+    return exists ? Response.json({ room: code }) : Response.json({ error: "No such room" }, { status: 404 });
+  }
+  const guard = env as GuardEnv;
+  const sw = await onlineState(guard);
+  if (!sw.on) return refuseSocket("online_off", sw.message);
+  const ip = await ipHash(guard, request);
+  if (await overLimit(guard, ip, create)) return refuseSocket("rate_limited", RATE_MESSAGE);
+  const ban = await findBan(guard, { ip });
+  if (ban) return refuseSocket("banned", banMessage(ban));
+  // The address's hash for the moderation log; never one a client sent.
+  const headers = new Headers(request.headers);
+  headers.delete("x-dhd-ip-hash");
+  if (ip) headers.set("x-dhd-ip-hash", ip);
+  const forward = new Request(request, { headers });
+  if (!create) return env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code)).fetch(forward);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const fresh = randomCode();
+    const room = env.P2P_ROOM.get(env.P2P_ROOM.idFromName(fresh));
+    if (await room.claim(fresh)) return room.fetch(forward);
+  }
+  return Response.json({ error: "Could not allocate a room code" }, { status: 503 });
 }
 
 export class P2pRoom extends DurableObject<Env> {
-  private meta: Meta | null = null;
+  private meta: RoomMeta | null = null;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    ctx.blockConcurrencyWhile(async () => { this.meta = await ctx.storage.get<Meta>("meta") ?? null; });
+    ctx.blockConcurrencyWhile(async () => {
+      this.meta = (await ctx.storage.get<RoomMeta>("meta")) ?? null;
+    });
   }
+
+  /** Takes a fresh code for a new room; false when the code is in use. */
   async claim(code: string): Promise<boolean> {
     if (this.meta) return false;
-    this.meta = { code, hostId: 1, nextId: 1, version: "", iso: "", closed: false, listing: null };
-    await this.save(); return true;
+    this.meta = { code, hostId: 0, nextId: 1, version: "", iso: "", maxPlayers: MAX_MEMBERS, closed: false };
+    await this.save();
+    return true;
   }
-  private save(): Promise<void> { return this.ctx.storage.put("meta", this.meta); }
-  private index() { return this.env.LOBBIES.get(this.env.LOBBIES.idFromName("p2p")); }
-  private members(): [WebSocket, SocketInfo][] {
-    return this.ctx.getWebSockets().map(ws => [ws, ws.deserializeAttachment() as SocketInfo] as [WebSocket, SocketInfo])
-      .filter(([,i]) => i?.id != null);
+
+  async exists(): Promise<boolean> {
+    return !!this.meta && !this.meta.closed;
   }
-  private send(ws: WebSocket, m: unknown): void { try { ws.send(JSON.stringify(m)); } catch {} }
-  private refuse(ws: WebSocket, code: string, message: string): void {
-    this.send(ws,{type:"error",code,message}); try { ws.close(4000,message.slice(0,100)); } catch {}
-  }
-  private broadcastMembers(): void {
-    const members=this.members().map(([,i])=>({id:i.id,name:i.name}));
-    for (const [ws] of this.members()) this.send(ws,{type:"p2p_members",members});
-  }
+
   async fetch(request: Request): Promise<Response> {
-    if (!this.meta || this.meta.closed) return new Response("Room not found",{status:404});
-    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("Expected WebSocket",{status:426});
-    if (this.ctx.getWebSockets().length >= 12) return new Response("Room full",{status:429});
-    const pair=new WebSocketPair(), now=Date.now();
-    const info: SocketInfo={id:null,name:"",opened:now,heard:now,window:now,messages:0};
-    this.ctx.acceptWebSocket(pair[1]); pair[1].serializeAttachment(info);
-    await this.ctx.storage.setAlarm(now+5000);
-    return new Response(null,{status:101,webSocket:pair[0]});
+    if (!this.meta || this.meta.closed) return refuseSocket("room_not_found", "There is no room with that code.");
+    if (this.ctx.getWebSockets().length >= MAX_CONNECTIONS) return refuseSocket("room_full", "This room is full.");
+    const now = Date.now();
+    const cf = request.cf as { country?: string } | undefined;
+    const { 0: client, 1: server } = new WebSocketPair();
+    this.ctx.acceptWebSocket(server);
+    this.attach(server, {
+      id: null, name: "", opened: now, heard: now, tally: newTally(now),
+      ipHash: request.headers.get("x-dhd-ip-hash") ?? "", country: cf?.country ?? "",
+    });
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    return new Response(null, { status: 101, webSocket: client });
   }
+
   async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
-    const meta=this.meta, info=ws.deserializeAttachment() as SocketInfo;
+    const meta = this.meta, info = this.info(ws);
     if (!meta || meta.closed || !info) return;
-    const now=Date.now(); info.heard=now;
-    if (now-info.window>=10000) {info.window=now;info.messages=0;}
-    if (++info.messages>300) return this.refuse(ws,"too_fast","Too many signaling messages.");
-    ws.serializeAttachment(info);
-    if (typeof data!=="string") {
-      if (info.id===null || data.byteLength!==10 || new Uint8Array(data)[0]!==3) return;
-      const out=new Uint8Array(18);out.set(new Uint8Array(data));out[0]=4;
-      new DataView(out.buffer).setFloat64(10,now,true);ws.send(out);return;
+    const now = Date.now();
+    info.heard = now;
+    const verdict = tally(info.tally, typeof data !== "string", now, P2P_CAPS);
+    this.attach(ws, info);
+    if (verdict === "close") return this.refuse(ws, "too_fast", TOO_FAST_MESSAGE);
+    if (verdict === "warn") this.send(ws, { type: "error", code: "too_fast", message: TOO_FAST_WARNING });
+    if (verdict !== "ok") return;
+    if (typeof data !== "string") return this.pong(ws, info, data, now);
+    if (data.length > SIGNAL_MAX_BYTES) return this.refuse(ws, "bad_message", "Message too large.");
+    let m: Message;
+    try {
+      m = JSON.parse(data);
+      if (!m || typeof m !== "object" || Array.isArray(m)) throw new Error("not an object");
+    } catch {
+      return this.refuse(ws, "bad_message", "Invalid message.");
     }
-    if (data.length>24000) return this.refuse(ws,"bad_message","Message too large.");
-    let m: Record<string,unknown>;
-    try { m=JSON.parse(data); if (!m || typeof m!=="object" || Array.isArray(m)) throw new Error(); }
-    catch { return this.refuse(ws,"bad_message","Invalid message."); }
-    if (m.type==="ping") {this.send(ws,{type:"pong",t:m.t,serverTime:now});return;}
-    if (m.type==="hello") {
-      if (info.id!==null) return this.refuse(ws,"bad_message","Already joined.");
-      const ban=await findBan(this.env,{install:installIdOf(m.installId)});
-      if (ban) return this.refuse(ws,"banned",banMessage(ban));
-      if ((ws.deserializeAttachment() as SocketInfo).id!==null || meta.closed) return;
-      if (m.protocol!==PROTOCOL) return this.refuse(ws,"protocol_mismatch","Incompatible P2P protocol.");
-      if (typeof m.name!=="string" || !m.name.trim() || m.name.length>24 || typeof m.version!=="string" || m.version.length>100 || typeof m.isoSha256!=="string" || !/^[a-f0-9]{64}$/.test(m.isoSha256))
-        return this.refuse(ws,"bad_message","Invalid player details.");
-      if (isOutdated(typeof m.clientVersion==="string"?m.clientVersion:"0.0.0",minVersionOf(this.env.MIN_VERSION)))
-        return this.refuse(ws,"client_outdated","Update the game before joining.");
-      if (meta.version && (meta.version!==m.version || meta.iso!==m.isoSha256))
-        return this.refuse(ws,"version_mismatch","The host has a different game build or disc.");
-      if (this.members().length >= (meta.listing?.maxPlayers??10)) return this.refuse(ws,"room_full","This room is full.");
-      info.id=meta.nextId++;info.name=m.name.trim();
-      if (!meta.version) {meta.version=m.version;meta.iso=m.isoSha256;meta.hostId=info.id;}
-      ws.serializeAttachment(info);await this.save();
-      this.send(ws,{type:"p2p_welcome",code:meta.code,memberId:info.id,hostId:meta.hostId,version:meta.version,
-        turnPending:!!(this.env.TURN_KEY_ID && this.env.TURN_KEY_API_TOKEN),
-        serverTime:Date.now(),members:this.members().map(([,i])=>({id:i.id,name:i.name}))});
-      this.broadcastMembers();
-      if (this.env.TURN_KEY_ID && this.env.TURN_KEY_API_TOKEN) {
-        try {
-          const credentials=await new Turn(this.env).mint(`p2p-${meta.code}-${info.id}`);
-          if (meta.closed || !this.members().some(([s])=>s===ws)) {await new Turn(this.env).revoke(credentials.username);return;}
-          const current=ws.deserializeAttachment() as SocketInfo;
-          current.turnUser=credentials.username;ws.serializeAttachment(current);
-          this.send(ws,{...credentials.message,type:"p2p_turn"});
-        } catch {this.send(ws,{type:"error",code:"turn_unavailable",message:"Relay setup failed. Direct connections may still work."});}
-      }
-      return;
+    if (m.type === "ping") return this.send(ws, { type: "pong", t: m.t, serverTime: now });
+    if (m.type === "hello") return this.hello(ws, info, m);
+    if (info.id === null) return this.refuse(ws, "bad_message", "Send hello first.");
+    const host = info.id === meta.hostId;
+    switch (m.type) {
+      case "leave":
+        await this.remove(ws);
+        try { ws.close(1000, "left"); } catch { /* already closed */ }
+        return;
+      case "p2p_signal":
+        return this.signal(ws, info.id, m);
+      case "p2p_kick":
+        if (host && m.member !== meta.hostId) {
+          const target = this.members().find(([, i]) => i.id === m.member);
+          if (target) {
+            this.refuse(target[0], "kicked", "The host removed you from the room.");
+            await this.remove(target[0]);
+          }
+        }
+        return;
+      case "p2p_capacity":
+        // The host's MAX PLAYERS: joins beyond it are refused. Members already in stay.
+        if (host && Number.isInteger(m.maxPlayers) && (m.maxPlayers as number) >= 2 && (m.maxPlayers as number) <= MAX_MEMBERS) {
+          meta.maxPlayers = m.maxPlayers as number;
+          await this.save();
+        }
+        return;
     }
-    if (info.id===null) return this.refuse(ws,"bad_message","Send hello first.");
-    if (m.type==="leave") {await this.remove(ws);try {ws.close(1000,"left");} catch {}return;}
-    if (m.type==="p2p_signal") {
-      if (!Number.isSafeInteger(m.to) || !m.signal || typeof m.signal!=="object") return;
-      if (info.id!==meta.hostId && m.to!==meta.hostId) return this.refuse(ws,"bad_message","Only host-star links are allowed.");
-      const target=this.members().find(([,i])=>i.id===m.to);
-      if (target && target[1].id!==info.id) this.send(target[0],{type:"p2p_signal",from:info.id,signal:m.signal});
-      return;
-    }
-    if (m.type==="p2p_kick" && info.id===meta.hostId && m.member!==meta.hostId) {
-      const target=this.members().find(([,i])=>i.id===m.member);
-      if (target) {this.refuse(target[0],"kicked","The host removed you from the room.");await this.remove(target[0]);}return;
-    }
-    if (m.type==="p2p_listing" && info.id===meta.hostId) {
-      const max=Number(m.maxPlayers), track=Number(m.track);
-      if (!Number.isInteger(max)||max<2||max>10||!Number.isInteger(track)||track<0||track>255) return;
-      const entry: LobbyEntry={code:meta.code,roomName:String(m.roomName??"P2P race").slice(0,96),version:meta.version,
-        track,players:this.members().length,maxPlayers:max,hostName:info.name,phase:["open","starting","racing","intermission"].includes(String(m.phase))?String(m.phase):"open"};
-      for (const k of ["raceStartedAt","finishEndsAt","nextRaceAt"] as const) if (typeof m[k]==="number" && Number.isFinite(m[k])) entry[k]=m[k];
-      meta.listing=entry;await this.save();
-      if (m.public===true) await this.index().upsert(entry);else await this.index().remove(meta.code);
-      return;
-    }
-    // No race commands or gameplay frames are relayed by the lobby.
+    // Room commands and race frames go to the host over the peer connection, never through here.
   }
-  private async remove(ws: WebSocket): Promise<void> {
-    const meta=this.meta, info=ws.deserializeAttachment() as SocketInfo;
-    if (!meta || !info || info.id===null) return;
-    const id=info.id;info.id=null;ws.serializeAttachment(info);
-    if (info.turnUser) this.ctx.waitUntil(new Turn(this.env).revoke(info.turnUser).catch(()=>{}));
-    if (id===meta.hostId) {
-      meta.closed=true;await this.save();await this.index().remove(meta.code);
-      for (const [other] of this.members()) {this.refuse(other,"host_left","The host disconnected.");}
-    } else {this.broadcastMembers();}
+
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    await this.remove(ws);
   }
-  async webSocketClose(ws: WebSocket): Promise<void> {await this.remove(ws);}
-  async webSocketError(ws: WebSocket): Promise<void> {await this.remove(ws);}
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    await this.remove(ws);
+  }
+
+  /** Drops connections that never said hello and members gone silent. */
   async alarm(): Promise<void> {
     if (!this.meta || this.meta.closed) return;
-    const now=Date.now();
+    const now = Date.now();
     for (const ws of this.ctx.getWebSockets()) {
-      const info=ws.deserializeAttachment() as SocketInfo;
-      if (info && (info.id===null ? now-info.opened>10000 : now-info.heard>20000)) {
-        await this.remove(ws);try {ws.close(1001,"timed out");} catch {}
+      const info = this.info(ws);
+      if (!info) continue;
+      if (info.id === null ? now - info.opened > HELLO_TIMEOUT_MS : now - info.heard > IDLE_MS) {
+        await this.remove(ws);
+        try { ws.close(1001, "timed out"); } catch { /* already closed */ }
       }
     }
-    if (!this.meta.closed && this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(now+5000);
+    if (!this.meta.closed && this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+  }
+
+  private async hello(ws: WebSocket, info: Connection, m: Message): Promise<void> {
+    const meta = this.meta!;
+    if (info.id !== null) return this.refuse(ws, "bad_message", "Already joined.");
+    if (m.protocol !== PROTOCOL) return this.refuse(ws, "protocol_mismatch", "This game speaks another online protocol.");
+    const name = typeof m.name === "string" ? m.name.trim() : "";
+    if (!name || name.length > NAME_MAX || typeof m.version !== "string" || m.version.length > 100 ||
+        typeof m.isoSha256 !== "string" || !/^[a-f0-9]{64}$/.test(m.isoSha256))
+      return this.refuse(ws, "bad_message", "Invalid player details.");
+    const clientVersion = clientVersionOf(m);
+    if (isOutdated(clientVersion, minVersionOf(this.env.MIN_VERSION)))
+      return this.refuse(ws, "client_outdated", "A new version is out. Update to play online.");
+    const installId = installIdOf(m.installId);
+    const ban = await findBan(this.env as GuardEnv, { install: installId });
+    if (ban) return this.refuse(ws, "banned", banMessage(ban));
+    // The ban lookup waited: the room may have closed, or this socket gone, meanwhile.
+    if (meta.closed || this.info(ws)?.id !== null) return;
+    if (meta.version && meta.version !== m.version) return this.refuse(ws, "version_mismatch", "The host has another version of the game.");
+    if (meta.iso && meta.iso !== m.isoSha256) return this.refuse(ws, "iso_mismatch", "The host's game files differ from yours.");
+    if (this.members().length >= meta.maxPlayers) return this.refuse(ws, "room_full", "This room is full.");
+
+    const asHost = !meta.hostId;
+    info.id = meta.nextId++;
+    info.name = name;
+    if (asHost) {
+      meta.hostId = info.id;
+      meta.version = m.version;
+      meta.iso = m.isoSha256;
+    }
+    this.attach(ws, info);
+    await this.save();
+    const turn = !!(this.secrets().TURN_KEY_ID && this.secrets().TURN_KEY_API_TOKEN);
+    this.send(ws, {
+      type: "p2p_welcome", code: meta.code, memberId: info.id, hostId: meta.hostId, version: meta.version,
+      serverTime: Date.now(), members: this.roster(), turnPending: turn,
+    });
+    this.broadcastMembers();
+    this.ctx.waitUntil(logJoin(this.env as GuardEnv, {
+      at: Date.now(), room: meta.code, member: info.id, kind: asHost ? "host" : "guest", name, clientVersion,
+      country: info.country, ipHash: info.ipHash, installId,
+    }));
+    if (turn) await this.giveTurn(ws, info.id);
+  }
+
+  /** The member's own TURN credentials: the fallback when no direct path between two games works. */
+  private async giveTurn(ws: WebSocket, id: number): Promise<void> {
+    const meta = this.meta!;
+    const turn = new Turn(this.secrets());
+    try {
+      const credentials = await turn.mint(`p2p-${meta.code}-${id}`);
+      const current = this.info(ws);
+      if (meta.closed || current?.id !== id) {
+        await turn.revoke(credentials.username).catch(() => {});
+        return;
+      }
+      current.turnUser = credentials.username;
+      this.attach(ws, current);
+      this.send(ws, { ...(credentials.message as object), type: "p2p_turn" });
+    } catch {
+      this.send(ws, { type: "error", code: "turn_unavailable", message: "Relay setup failed. Direct connections may still work." });
+    }
+  }
+
+  /** Host-star only: a guest signals the host, the host any guest. The sender is the connection's
+      member, whatever the message claims. */
+  private signal(ws: WebSocket, from: number, m: Message): void {
+    const meta = this.meta!;
+    if (!Number.isSafeInteger(m.to) || !m.signal || typeof m.signal !== "object" || Array.isArray(m.signal)) return;
+    if (from !== meta.hostId && m.to !== meta.hostId) return this.refuse(ws, "bad_message", "Only host-star links are allowed.");
+    const target = this.members().find(([, i]) => i.id === m.to && i.id !== from);
+    if (target) this.send(target[0], { type: "p2p_signal", from, signal: m.signal });
+  }
+
+  private async remove(ws: WebSocket): Promise<void> {
+    const meta = this.meta, info = this.info(ws);
+    if (!meta || !info || info.id === null) return;
+    const id = info.id;
+    info.id = null;
+    this.attach(ws, info);
+    if (info.turnUser) this.ctx.waitUntil(new Turn(this.secrets()).revoke(info.turnUser).catch(() => {}));
+    if (id !== meta.hostId) {
+      this.broadcastMembers();
+      return;
+    }
+    // No host migration: the room ends with its host (the host carries everyone's race).
+    meta.closed = true;
+    await this.save();
+    for (const [other] of this.members()) this.refuse(other, "host_left", "The host left: the room has ended.");
+  }
+
+  /** A binary PING answered with the server's clock; anything else binary is not for the server. */
+  private pong(ws: WebSocket, info: Connection, data: ArrayBuffer, now: number): void {
+    if (info.id === null || data.byteLength !== PING_BYTES || new Uint8Array(data)[0] !== FRAME_PING) return;
+    const out = new Uint8Array(PING_BYTES + 8);
+    out.set(new Uint8Array(data));
+    out[0] = FRAME_PONG;
+    new DataView(out.buffer).setFloat64(PING_BYTES, now, true);
+    try { ws.send(out); } catch { /* closing */ }
+  }
+
+  /** The TURN key: Worker secrets, so not in the generated Env. */
+  private secrets(): Env & SfuSecrets {
+    return this.env as Env & SfuSecrets;
+  }
+
+  private save(): Promise<void> {
+    return this.ctx.storage.put("meta", this.meta);
+  }
+
+  private info(ws: WebSocket): Connection | null {
+    return (ws.deserializeAttachment() as Connection | null) ?? null;
+  }
+
+  private attach(ws: WebSocket, info: Connection): void {
+    ws.serializeAttachment(info);
+  }
+
+  private members(): [WebSocket, Connection][] {
+    const out: [WebSocket, Connection][] = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      const info = this.info(ws);
+      if (info?.id != null) out.push([ws, info]);
+    }
+    return out;
+  }
+
+  private roster(): { id: number; name: string }[] {
+    return this.members().map(([, i]) => ({ id: i.id!, name: i.name }));
+  }
+
+  private broadcastMembers(): void {
+    const members = this.roster();
+    for (const [ws] of this.members()) this.send(ws, { type: "p2p_members", members });
+  }
+
+  private send(ws: WebSocket, m: unknown): void {
+    try { ws.send(JSON.stringify(m)); } catch { /* closing */ }
+  }
+
+  private refuse(ws: WebSocket, code: keyof typeof CLOSE_CODES, message: string): void {
+    this.send(ws, { type: "error", code, message });
+    try { ws.close(CLOSE_CODES[code], code); } catch { /* already closed */ }
   }
 }

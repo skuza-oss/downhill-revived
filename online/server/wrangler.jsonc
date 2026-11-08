@@ -34,6 +34,8 @@
   "durable_objects": {
     "bindings": [
       { "name": "ROOM", "class_name": "Room" },
+      // P2P rooms (src/p2p.ts, finding 180). The official server serves them from its own Worker
+      // (wrangler.p2p.jsonc), whose route takes /v1/p2p/* first; a self-hosted one from this one.
       { "name": "P2P_ROOM", "class_name": "P2pRoom" },
       { "name": "LOBBIES", "class_name": "LobbyIndex" }
     ]
