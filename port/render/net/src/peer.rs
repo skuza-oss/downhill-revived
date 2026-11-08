@@ -300,7 +300,11 @@ impl Peer {
     fn poll_relay(&mut self) -> Result<()> {
         let Some(r) = self.relay.as_mut() else { return Ok(()) };
         if r.link.failed() || r.client.failed().is_some() {
-            return Err(format!("peer TURN/TLS allocation failed: {}", r.client.failed().unwrap_or("TLS stream closed")).into());
+            // Only the relay is gone (its credentials end after an hour, finding 180): a direct
+            // path goes on; a connection that ran over the relay fails through ICE.
+            eprintln!("net: P2P: the relay failed ({}); direct paths go on", r.client.failed().unwrap_or("TLS stream closed"));
+            self.relay = None;
+            return Ok(());
         }
         if !r.link.ready() {
             return Ok(());
