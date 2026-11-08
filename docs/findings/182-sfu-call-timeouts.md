@@ -1,6 +1,7 @@
 # 182: a slow Realtime API call no longer takes a racer out of the race
 
-Status: in progress
+Status: current
+Checked: 2026-11-08
 
 Branch `fix/sfu-call-timeouts` from `main` 0574b05, started 2026-11-08. A server hotfix: no
 protocol change, no `MIN_VERSION` change; 0.7.13 games keep working unchanged.
