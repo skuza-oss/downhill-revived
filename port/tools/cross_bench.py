@@ -42,6 +42,8 @@ def main():
     p.add_argument('--force-turn', action='store_true')
     p.add_argument('--seconds', type=int, default=60)
     p.add_argument('--matrix', action='store_true')
+    p.add_argument('--rounds', type=int, default=0, help='with --matrix: this many trials of every case, '
+                   'automatic paths in alternating order (default: two automatic, one forced TURN)')
     p.add_argument('--env', action='append', default=[], metavar='NAME=VALUE', help='an extra variable for both games')
     a = p.parse_args()
     out = a.out.resolve()
@@ -161,7 +163,12 @@ def main():
     cases = [(a.backend, a.host, a.force_turn)]
     if a.matrix:
         first = [('sfu', 'pc', False), ('p2p', 'pc', False), ('sfu', 'mac', False), ('p2p', 'mac', False)]
-        cases = first + list(reversed(first)) + [('sfu','pc',True),('p2p','pc',True),('p2p','mac',True),('sfu','mac',True)]
+        turn = [('sfu', 'pc', True), ('p2p', 'pc', True), ('p2p', 'mac', True), ('sfu', 'mac', True)]
+        if a.rounds:
+            cases = [c for r in range(a.rounds) for c in (first if r % 2 == 0 else list(reversed(first)))]
+            cases += [c for r in range(a.rounds) for c in (turn if r % 2 == 0 else list(reversed(turn)))]
+        else:
+            cases = first + list(reversed(first)) + turn
     results = []
     with contextlib.ExitStack() as held:
         servers = (held.enter_context(local_server.tunnelled(a.remote, a.ssh_option)) if a.server == 'local'
