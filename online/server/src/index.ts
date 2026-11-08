@@ -1,7 +1,7 @@
 // Worker entry: routes lobby-list requests to the LobbyIndex and WebSockets to a Room by code.
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
-import { locationHintFor, placeOf, regionOfPlace, sortForRegion } from "./region";
+import { placeOf, placeRoom, regionChoice, regionOfPlace, sortForRegion } from "./region";
 import {
   RATE_MESSAGE, banMessage, cleanup, findBan, ipHash, onlineState, overLimit, refuseSocket, type GuardEnv,
 } from "./guard";
@@ -69,15 +69,16 @@ export default {
       if (ip) headers.set("x-dhd-ip-hash", ip);
       if (m[1] === "new") {
         headers.set("x-dhd-create", "1");
-        // A new room runs near its creator: the hint from their continent and country, not from the
-        // Cloudflare location their ISP happened to reach (finding 135). Only the first get() of an
-        // object reads a hint; joining by code below needs none.
+        // A new room runs where its creator picked (`?region=`, finding 181), else near them: Auto
+        // goes by the Cloudflare location they reached, then by their country and continent
+        // (src/region.ts placeRoom). Only the first get() of an object reads a hint; joining by
+        // code below needs none. Games up to 0.7.13 send no region: Auto.
         const place = placeOf(request);
-        const hint = locationHintFor(place);
+        const { hint, how } = placeRoom(place, regionChoice(new URL(request.url).searchParams.get("region")));
         for (let attempt = 0; attempt < 8; attempt++) {
           const code = randomCode();
           const room = env.ROOM.get(env.ROOM.idFromName(code), hint ? { locationHint: hint } : undefined);
-          if (await room.claim(code, { hint: hint ?? "", createdIn: regionOfPlace(place), createdFrom: place.colo ?? "" }))
+          if (await room.claim(code, { hint: hint ?? "", how, createdIn: regionOfPlace(place), createdFrom: place.colo ?? "" }))
             return room.fetch(new Request(request, { headers }));
         }
         return json({ error: "Could not allocate a room code" }, 503);

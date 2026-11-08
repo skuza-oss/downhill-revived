@@ -6,6 +6,11 @@
 // request went through, which for a player whose ISP routes far away (or who reaches another
 // continent's edge) is far from them and from everyone else in their region. The hint comes from
 // the creator's continent and country as Cloudflare's geolocation sees them, not from the edge.
+//
+// Since finding 181 the creator can pick the region (CHOICES), and Auto goes by the Cloudflare
+// location the creator reached (src/colo-hints.ts, made from Cloudflare's published Durable Object
+// locations and measured round trips), the country and continent only when that colo isn't known.
+import { COLO_HINTS } from "./colo-hints";
 
 /** Cloudflare's Durable Object location hints (developers.cloudflare.com/durable-objects/reference/
     data-location/, checked 2026-11-02). sam, afr and me host no Durable Objects yet: Cloudflare puts
@@ -80,6 +85,59 @@ export function locationHintFor(p: Place): LocationHint | undefined {
     default:
       return undefined;
   }
+}
+
+/** How the hint of a new room was picked: the creator's choice, Auto by the colo they reached, Auto
+    by their country and continent, or none (the default placement). */
+export type HintSource = "chosen" | "colo" | "place" | "none";
+
+/** The hint for a room the creator makes from `p`, with `choice` the region they picked (undefined:
+    Auto). Auto takes the creator's colo's row in src/colo-hints.ts: their ping to the room is their
+    way to that colo plus the colo's to the room, and the first part is the same wherever the room
+    runs. A colo the table doesn't have (a new one) falls back to the country and continent. */
+export function placeRoom(p: Place, choice?: LocationHint): { hint?: LocationHint; how: HintSource } {
+  if (choice) return { hint: choice, how: "chosen" };
+  const byColo = p.colo ? COLO_HINTS[p.colo.toUpperCase()] : undefined;
+  if (byColo) return { hint: byColo, how: "colo" };
+  const byPlace = locationHintFor(p);
+  return byPlace ? { hint: byPlace, how: "place" } : { how: "none" };
+}
+
+/** The regions a room's creator can pick (Create's REGION row, finding 181): the hints that run
+    Durable Objects of their own, each with the name players see and the colos it ran in on
+    2026-11-08 (where.durableobjects.live). sam, afr and me run none (their rooms land in enam, weur
+    and eeur), and apac only spreads rooms over apac-ne's and apac-se's colos, so they are not
+    offered. */
+export const CHOICES: { hint: LocationHint; area: string; colos: string }[] = [
+  { hint: "weur", area: "EU WEST", colos: "AMS LHR CDG MAD MRS LIS" },
+  { hint: "eeur", area: "EU EAST", colos: "FRA MXP WAW VIE OTP ARN PRG" },
+  { hint: "enam", area: "NA EAST", colos: "ATL EWR MIA ORD IAD" },
+  { hint: "wnam", area: "NA WEST", colos: "DFW SJC LAX DEN SEA" },
+  { hint: "apac-ne", area: "ASIA NE", colos: "NRT KIX ICN" },
+  { hint: "apac-se", area: "ASIA SE", colos: "SIN HKG" },
+  { hint: "oc", area: "OCEANIA", colos: "SYD MEL BNE" },
+];
+
+/** The creator's pick from `/v1/rooms/new?region=`: one of CHOICES' hints; anything else (none,
+    "auto", an unknown or retired name) is Auto, so a newer or older game never fails to make a
+    room over it. */
+export function regionChoice(value: string | null | undefined): LocationHint | undefined {
+  const v = (value ?? "").trim().toLowerCase();
+  return CHOICES.find((c) => c.hint === v)?.hint;
+}
+
+const COLO_AREAS: Record<string, string> = {};
+for (const c of CHOICES) for (const colo of c.colos.split(" ")) COLO_AREAS[colo] = c.area;
+
+/** Where a room runs, in the finer names of CHOICES ("EU WEST"...): its colo's when that colo is
+    one of theirs, else the hint's (sam, afr and me by the region that serves them, apac "ASIA"),
+    "" unknown. */
+export function roomArea(colo: string | undefined, hint: string | undefined): string {
+  const byColo = colo ? COLO_AREAS[colo.toUpperCase()] : undefined;
+  if (byColo) return byColo;
+  const served: Record<string, string> = { sam: "enam", afr: "weur", me: "eeur" };
+  const h = served[hint ?? ""] ?? hint;
+  return CHOICES.find((c) => c.hint === h)?.area ?? (h === "apac" ? "ASIA" : "");
 }
 
 /** The short region players see. */

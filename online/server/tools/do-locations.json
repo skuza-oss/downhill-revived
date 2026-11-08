@@ -1,0 +1,2130 @@
+{
+ "source": "https://where.durableobjects.live",
+ "updated": "2026-11-08T19:30:02.691Z",
+ "serves": {
+  "wnam": {
+   "DFW": 0.3439,
+   "SJC": 0.2706,
+   "LAX": 0.14679999999999999,
+   "DEN": 0.12240000000000001,
+   "SEA": 0.11599999999999999
+  },
+  "enam": {
+   "ATL": 0.2232,
+   "EWR": 0.21230000000000002,
+   "IAD": 0.1955,
+   "MIA": 0.1942,
+   "ORD": 0.1745
+  },
+  "sam": {
+   "EWR": 0.217,
+   "ATL": 0.2006,
+   "MIA": 0.2003,
+   "IAD": 0.1945,
+   "ORD": 0.18739999999999998
+  },
+  "weur": {
+   "AMS": 0.2796,
+   "LHR": 0.2615,
+   "CDG": 0.19649999999999998,
+   "MAD": 0.13119999999999998,
+   "MRS": 0.06849999999999999,
+   "LIS": 0.062400000000000004
+  },
+  "eeur": {
+   "FRA": 0.2501,
+   "MXP": 0.20879999999999999,
+   "WAW": 0.1718,
+   "ARN": 0.1041,
+   "VIE": 0.09570000000000001,
+   "OTP": 0.0889,
+   "PRG": 0.0802
+  },
+  "apac": {
+   "SIN": 0.4071,
+   "HKG": 0.1754,
+   "NRT": 0.1702,
+   "KIX": 0.16699999999999998,
+   "ICN": 0.0801
+  },
+  "apac-ne": {
+   "NRT": 0.4108,
+   "KIX": 0.39799999999999996,
+   "ICN": 0.191
+  },
+  "apac-se": {
+   "SIN": 0.659,
+   "HKG": 0.34090000000000004
+  },
+  "oc": {
+   "SYD": 0.4993,
+   "MEL": 0.2522,
+   "BNE": 0.2483
+  },
+  "afr": {
+   "AMS": 0.2798,
+   "LHR": 0.2659,
+   "CDG": 0.1943,
+   "MAD": 0.13470000000000001,
+   "MRS": 0.06570000000000001,
+   "LIS": 0.0593
+  },
+  "me": {
+   "FRA": 0.23620000000000002,
+   "MXP": 0.2052,
+   "WAW": 0.1791,
+   "ARN": 0.1005,
+   "PRG": 0.0989,
+   "VIE": 0.0928,
+   "OTP": 0.087
+  }
+ },
+ "colos": {
+  "AMS": {
+   "name": "Amsterdam, Noord-Holland, Netherlands",
+   "lon": 4.76389,
+   "lat": 52.308601,
+   "objects": true
+  },
+  "AMM": {
+   "name": "Amman, Amman Governorate, Jordan",
+   "lon": 35.9931983948,
+   "lat": 31.7226009369,
+   "objects": false
+  },
+  "ADL": {
+   "name": "Adelaide, South Australia, Australia",
+   "lon": 138.533393,
+   "lat": -34.947512,
+   "objects": false
+  },
+  "QWJ": {
+   "name": "Americana, São Paulo, Brazil",
+   "lon": -47.269408,
+   "lat": -22.755917,
+   "objects": false
+  },
+  "ACC": {
+   "name": "Accra, Greater Accra Region, Ghana",
+   "lon": -0.16678600013256073,
+   "lat": 5.605189800262451,
+   "objects": false
+  },
+  "AMD": {
+   "name": "Ahmedabad, Gujarat, India",
+   "lon": 72.634697,
+   "lat": 23.0772,
+   "objects": false
+  },
+  "ABQ": {
+   "name": "Albuquerque, New Mexico, United States",
+   "lon": -106.608925,
+   "lat": 35.039976,
+   "objects": false
+  },
+  "AKL": {
+   "name": "Auckland, Auckland Region, New Zealand",
+   "lon": 174.786331,
+   "lat": -37.01199,
+   "objects": false
+  },
+  "ATH": {
+   "name": "Spata-Artemida, Attica, Greece",
+   "lon": 23.9445,
+   "lat": 37.936401,
+   "objects": false
+  },
+  "ARI": {
+   "name": "Arica, Arica and Parinacota Region, Chile",
+   "lon": -70.338699,
+   "lat": -18.348499,
+   "objects": false
+  },
+  "ALG": {
+   "name": "Algiers, Algiers Province, Algeria",
+   "lon": 3.214531,
+   "lat": 36.693886,
+   "objects": false
+  },
+  "ALA": {
+   "name": "Almaty, Almaty City, Kazakhstan",
+   "lon": 77.042828,
+   "lat": 43.354267,
+   "objects": false
+  },
+  "LLK": {
+   "name": "Lankaran, Lankaran District, Azerbaijan",
+   "lon": 48.807042,
+   "lat": 38.757919,
+   "objects": false
+  },
+  "ANC": {
+   "name": "Anchorage, Alaska, United States",
+   "lon": -149.992561,
+   "lat": 61.179004,
+   "objects": false
+  },
+  "IAD": {
+   "name": "Dulles, Virginia, United States",
+   "lon": -77.455803,
+   "lat": 38.9445,
+   "objects": true
+  },
+  "BNE": {
+   "name": "Brisbane, Queensland, Australia",
+   "lon": 153.11700439453125,
+   "lat": -27.384199142456055,
+   "objects": true
+  },
+  "BCN": {
+   "name": "Barcelona, Catalonia, Spain",
+   "lon": 2.07846,
+   "lat": 41.2971,
+   "objects": false
+  },
+  "BGW": {
+   "name": "Baghdad, Baghdad Governorate, Iraq",
+   "lon": 44.2346,
+   "lat": 33.262501,
+   "objects": false
+  },
+  "ASU": {
+   "name": "Asunción, Central Department, Paraguay",
+   "lon": -57.519227,
+   "lat": -25.240156,
+   "objects": false
+  },
+  "AAE": {
+   "name": "Annaba, Annaba Province, Algeria",
+   "lon": 7.81334,
+   "lat": 36.826781,
+   "objects": false
+  },
+  "ATL": {
+   "name": "Atlanta, Georgia, United States",
+   "lon": -84.428101,
+   "lat": 33.6367,
+   "objects": true
+  },
+  "BEG": {
+   "name": "Belgrade, Beograd, Serbia",
+   "lon": 20.309099,
+   "lat": 44.818401,
+   "objects": false
+  },
+  "GYD": {
+   "name": "Baku, Baku, Azerbaijan",
+   "lon": 50.050931,
+   "lat": 40.47278,
+   "objects": false
+  },
+  "BLR": {
+   "name": "Bengaluru, Karnataka, India",
+   "lon": 77.706299,
+   "lat": 13.1979,
+   "objects": false
+  },
+  "TNR": {
+   "name": "Antananarivo, Antananarivo, Madagascar",
+   "lon": 47.478802,
+   "lat": -18.7969,
+   "objects": false
+  },
+  "CBR": {
+   "name": "Canberra, Australian Capital Territory, Australia",
+   "lon": 149.195007,
+   "lat": -35.3069,
+   "objects": false
+  },
+  "BEL": {
+   "name": "Belém, Pará, Brazil",
+   "lon": -48.476207,
+   "lat": -1.379279,
+   "objects": false
+  },
+  "TXL": {
+   "name": "Berlin, Germany",
+   "lon": 13.2877,
+   "lat": 52.5597,
+   "objects": false
+  },
+  "BKK": {
+   "name": "Bangkok, Bangkok, Thailand",
+   "lon": 100.747002,
+   "lat": 13.6811,
+   "objects": false
+  },
+  "CPT": {
+   "name": "Cape Town, Western Cape, South Africa",
+   "lon": 18.604333,
+   "lat": -33.97403,
+   "objects": false
+  },
+  "CNF": {
+   "name": "Belo Horizonte, Minas Gerais, Brazil",
+   "lon": -43.966928,
+   "lat": -19.63571,
+   "objects": false
+  },
+  "BSR": {
+   "name": "Basra, Basra Governorate, Iraq",
+   "lon": 47.662102,
+   "lat": 30.549101,
+   "objects": false
+  },
+  "CHC": {
+   "name": "Christchurch, Canterbury Region, New Zealand",
+   "lon": 172.532065,
+   "lat": -43.489029,
+   "objects": false
+  },
+  "AUS": {
+   "name": "Austin, Texas, United States",
+   "lon": -97.662015,
+   "lat": 30.197535,
+   "objects": false
+  },
+  "BEY": {
+   "name": "Beirut, Mount Lebanon Governorate, Lebanon",
+   "lon": 35.487443,
+   "lat": 33.819833,
+   "objects": false
+  },
+  "BWN": {
+   "name": "Bandar Seri Begawan, Brunei-Muara District, Brunei",
+   "lon": 114.928001,
+   "lat": 4.9442,
+   "objects": false
+  },
+  "GUM": {
+   "name": "Hagåtña, Guam",
+   "lon": 144.797282,
+   "lat": 13.485,
+   "objects": false
+  },
+  "BGR": {
+   "name": "Bangor, Maine, United States",
+   "lon": -68.826668,
+   "lat": 44.806364,
+   "objects": false
+  },
+  "BOD": {
+   "name": "Bordeaux, Nouvelle-Aquitaine, France",
+   "lon": -0.715356,
+   "lat": 44.82865,
+   "objects": false
+  },
+  "BOS": {
+   "name": "Boston, Massachusetts, United States",
+   "lon": -71.0079,
+   "lat": 42.36197,
+   "objects": false
+  },
+  "BOG": {
+   "name": "Bogota, Bogotá Capital District, Colombia",
+   "lon": -74.1469,
+   "lat": 4.70159,
+   "objects": false
+  },
+  "DKR": {
+   "name": "Dakar, Dakar Region, Senegal",
+   "lon": -17.479222,
+   "lat": 14.742337,
+   "objects": false
+  },
+  "DMM": {
+   "name": "Ad Dammam, Ash Sharqiyah Region, Saudi Arabia",
+   "lon": 49.798209,
+   "lat": 26.4691,
+   "objects": false
+  },
+  "BTS": {
+   "name": "Bratislava, Bratislava Region, Slovakia",
+   "lon": 17.2127,
+   "lat": 48.1702,
+   "objects": false
+  },
+  "MEL": {
+   "name": "Melbourne, Victoria, Australia",
+   "lon": 144.837898,
+   "lat": -37.670732,
+   "objects": true
+  },
+  "DOH": {
+   "name": "Doha, Ad-Dawhah Municipality, Qatar",
+   "lon": 51.608056,
+   "lat": 25.273056,
+   "objects": false
+  },
+  "BRU": {
+   "name": "Zaventem, Flemish Brabant Province, Belgium",
+   "lon": 4.48444,
+   "lat": 50.901402,
+   "objects": false
+  },
+  "DAR": {
+   "name": "Dar es Salaam, Dar-es-Salaam Region, Tanzania",
+   "lon": 39.207288,
+   "lat": -6.873499,
+   "objects": false
+  },
+  "BSB": {
+   "name": "Brasília, Distrito Federal, Brazil",
+   "lon": -47.920834,
+   "lat": -15.869167,
+   "objects": false
+  },
+  "EZE": {
+   "name": "Buenos Aires (Ezeiza), Buenos Aires Province, Argentina",
+   "lon": -58.5358,
+   "lat": -34.8222,
+   "objects": false
+  },
+  "OTP": {
+   "name": "Otopeni, Ilfov County, Romania",
+   "lon": 26.103285,
+   "lat": 44.571792,
+   "objects": true
+  },
+  "DXB": {
+   "name": "Dubai, Dubai Emirate, United Arab Emirates",
+   "lon": 55.370992,
+   "lat": 25.24979,
+   "objects": false
+  },
+  "JIB": {
+   "name": "Djibouti City, Djibouti Region, Djibouti",
+   "lon": 43.1595,
+   "lat": 11.5473,
+   "objects": false
+  },
+  "YYC": {
+   "name": "Calgary, Alberta, Canada",
+   "lon": -114.009933,
+   "lat": 51.118822,
+   "objects": false
+  },
+  "CEB": {
+   "name": "Cebu City/Lapu-Lapu City, Cebu Province, Philippines",
+   "lon": 123.97974,
+   "lat": 10.309261,
+   "objects": false
+  },
+  "NOU": {
+   "name": "Nouméa (La Tontouta), Province Sud, New Caledonia",
+   "lon": 166.212997,
+   "lat": -22.014601,
+   "objects": false
+  },
+  "PER": {
+   "name": "Perth, Western Australia, Australia",
+   "lon": 115.96700286865234,
+   "lat": -31.94029998779297,
+   "objects": false
+  },
+  "BUD": {
+   "name": "Budapest, Budapest, Hungary",
+   "lon": 19.262393,
+   "lat": 47.43018,
+   "objects": false
+  },
+  "DUR": {
+   "name": "Durban, Kwazulu-Natal, South Africa",
+   "lon": 31.1197222222,
+   "lat": -29.6144444444,
+   "objects": false
+  },
+  "CLT": {
+   "name": "Charlotte, North Carolina, United States",
+   "lon": -80.94309997558594,
+   "lat": 35.2140007019043,
+   "objects": false
+  },
+  "CFC": {
+   "name": "Caçador, Santa Catarina, Brazil",
+   "lon": -50.939942,
+   "lat": -26.787423,
+   "objects": false
+  },
+  "EBL": {
+   "name": "Arbil, Erbil Governorate, Iraq",
+   "lon": 43.946615,
+   "lat": 36.236047,
+   "objects": false
+  },
+  "IXC": {
+   "name": "Chandigarh, Chandigarh, India",
+   "lon": 76.788498,
+   "lat": 30.6735,
+   "objects": false
+  },
+  "ORD": {
+   "name": "Chicago, Illinois, United States",
+   "lon": -87.9048,
+   "lat": 41.9786,
+   "objects": true
+  },
+  "SYD": {
+   "name": "Sydney (Mascot), New South Wales, Australia",
+   "lon": 151.177002,
+   "lat": -33.946098,
+   "objects": true
+  },
+  "KIV": {
+   "name": "Chișinău, Moldova",
+   "lon": 28.930999,
+   "lat": 46.9277,
+   "objects": false
+  },
+  "VCP": {
+   "name": "Campinas, São Paulo, Brazil",
+   "lon": -47.134502,
+   "lat": -23.007404,
+   "objects": false
+  },
+  "CGD": {
+   "name": "Changde (Dingcheng), Hunan Province, China",
+   "lon": 111.639999,
+   "lat": 28.9189,
+   "objects": false
+  },
+  "HFA": {
+   "name": "Haifa, Haifa District, Israel",
+   "lon": 35.043719,
+   "lat": 32.810219,
+   "objects": false
+  },
+  "GBE": {
+   "name": "Gaborone, Gaborone, Botswana",
+   "lon": 25.9182,
+   "lat": -24.555201,
+   "objects": false
+  },
+  "CPH": {
+   "name": "Copenhagen, Capital Region, Denmark",
+   "lon": 12.656000137329,
+   "lat": 55.617900848389,
+   "objects": false
+  },
+  "MAA": {
+   "name": "Chennai, Tamil Nadu, India",
+   "lon": 80.169296,
+   "lat": 12.990005,
+   "objects": false
+  },
+  "HRE": {
+   "name": "Harare, Harare Metropolitan Province, Zimbabwe",
+   "lon": 31.0928,
+   "lat": -17.931801,
+   "objects": false
+  },
+  "JED": {
+   "name": "Jeddah, Makkah Region, Saudi Arabia",
+   "lon": 39.157436,
+   "lat": 21.680241,
+   "objects": false
+  },
+  "PPT": {
+   "name": "Papeete, French Polynesia",
+   "lon": -149.606936,
+   "lat": -17.553472,
+   "objects": false
+  },
+  "CLE": {
+   "name": "Cleveland, Ohio, United States",
+   "lon": -81.8498,
+   "lat": 41.411701,
+   "objects": false
+  },
+  "JNB": {
+   "name": "Johannesburg, Gauteng, South Africa",
+   "lon": 28.246801,
+   "lat": -26.140081,
+   "objects": false
+  },
+  "KWI": {
+   "name": "Kuwait City, Al Farwaniyah Governorate, Kuwait",
+   "lon": 47.969813,
+   "lat": 29.224487,
+   "objects": false
+  },
+  "DUB": {
+   "name": "Dublin, County Dublin, Ireland",
+   "lon": -6.262121,
+   "lat": 53.428713,
+   "objects": false
+  },
+  "CMH": {
+   "name": "Columbus, Ohio, United States",
+   "lon": -82.891899,
+   "lat": 39.998001,
+   "objects": false
+  },
+  "COR": {
+   "name": "Cordoba, Córdoba Province, Argentina",
+   "lon": -64.208329,
+   "lat": -31.312346,
+   "objects": false
+  },
+  "SUV": {
+   "name": "Nausori, Central Division, Fiji",
+   "lon": 178.561486,
+   "lat": -18.044226,
+   "objects": false
+  },
+  "DFW": {
+   "name": "Dallas-Fort Worth, Texas, United States",
+   "lon": -97.038002,
+   "lat": 32.896801,
+   "objects": true
+  },
+  "DUS": {
+   "name": "Düsseldorf, North Rhine-Westphalia, Germany",
+   "lon": 6.76678,
+   "lat": 51.289501,
+   "objects": false
+  },
+  "BAH": {
+   "name": "Manama, Muharraq Governorate, Bahrain",
+   "lon": 50.63764,
+   "lat": 26.267295,
+   "objects": false
+  },
+  "KGL": {
+   "name": "Kigali, City of Kigali, Rwanda",
+   "lon": 30.1395,
+   "lat": -1.96863,
+   "objects": false
+  },
+  "CGP": {
+   "name": "Chattogram (Chittagong), Chittagong Division, Bangladesh",
+   "lon": 91.813301,
+   "lat": 22.249599,
+   "objects": false
+  },
+  "HBA": {
+   "name": "Hobart (Cambridge), Tasmania, Australia",
+   "lon": 147.513022,
+   "lat": -42.837032,
+   "objects": false
+  },
+  "FRA": {
+   "name": "Frankfurt am Main, Hesse, Germany",
+   "lon": 8.55835,
+   "lat": 50.026706,
+   "objects": true
+  },
+  "MCT": {
+   "name": "Muscat/Seeb, Masqat Governorate, Oman",
+   "lon": 58.285268,
+   "lat": 23.600218,
+   "objects": false
+  },
+  "DEN": {
+   "name": "Denver, Colorado, United States",
+   "lon": -104.673792,
+   "lat": 39.860027,
+   "objects": true
+  },
+  "CMB": {
+   "name": "Colombo, Western Province, Sri Lanka",
+   "lon": 79.88410186767578,
+   "lat": 7.180759906768799,
+   "objects": false
+  },
+  "LOS": {
+   "name": "Lagos, Lagos State, Nigeria",
+   "lon": 3.32116,
+   "lat": 6.57737,
+   "objects": false
+  },
+  "CWB": {
+   "name": "Curitiba, Paraná, Brazil",
+   "lon": -49.1758,
+   "lat": -25.5285,
+   "objects": false
+  },
+  "WLG": {
+   "name": "Wellington, Wellington Region, New Zealand",
+   "lon": 174.806862,
+   "lat": -41.326839,
+   "objects": false
+  },
+  "LAD": {
+   "name": "Luanda, Luanda Province, Angola",
+   "lon": 13.2312,
+   "lat": -8.85837,
+   "objects": false
+  },
+  "DTW": {
+   "name": "Detroit, Michigan, United States",
+   "lon": -83.353786,
+   "lat": 42.21377,
+   "objects": false
+  },
+  "GVA": {
+   "name": "Geneva, Geneva, Switzerland",
+   "lon": 6.10895,
+   "lat": 46.238098,
+   "objects": false
+  },
+  "DAC": {
+   "name": "Dhaka, Dhaka Division, Bangladesh",
+   "lon": 90.397783,
+   "lat": 23.843347,
+   "objects": false
+  },
+  "FLN": {
+   "name": "Florianópolis, Santa Catarina, Brazil",
+   "lon": -48.552502,
+   "lat": -27.670279,
+   "objects": false
+  },
+  "NJF": {
+   "name": "Najaf, Najaf Governorate, Iraq",
+   "lon": 44.405019,
+   "lat": 31.991116,
+   "objects": false
+  },
+  "FOR": {
+   "name": "Fortaleza, Ceará, Brazil",
+   "lon": -38.532222,
+   "lat": -3.775833,
+   "objects": false
+  },
+  "GOT": {
+   "name": "Göteborg, Västra Götalands län, Sweden",
+   "lon": 12.2798,
+   "lat": 57.6628,
+   "objects": false
+  },
+  "MPM": {
+   "name": "Maputo, Maputo, Mozambique",
+   "lon": 32.572601,
+   "lat": -25.920799,
+   "objects": false
+  },
+  "FUO": {
+   "name": "Foshan (Nanhai), Guangdong Province, China",
+   "lon": 113.070833,
+   "lat": 23.0825,
+   "objects": false
+  },
+  "XNH": {
+   "name": "Nasiriyah, Dhi Qar Governorate, Iraq",
+   "lon": 46.090099,
+   "lat": 30.935801,
+   "objects": false
+  },
+  "RDU": {
+   "name": "Raleigh/Durham, North Carolina, United States",
+   "lon": -78.7873,
+   "lat": 35.878659,
+   "objects": false
+  },
+  "MBA": {
+   "name": "Mombasa, Mombasa County, Kenya",
+   "lon": 39.5942,
+   "lat": -4.03483,
+   "objects": false
+  },
+  "HAM": {
+   "name": "Hamburg, Hamburg, Germany",
+   "lon": 9.98823,
+   "lat": 53.630402,
+   "objects": false
+  },
+  "ZDM": {
+   "name": "Ramallah, Ramallah and al-Bireh Governorate, Palestinian Territory",
+   "lon": 35.20756,
+   "lat": 31.91123,
+   "objects": false
+  },
+  "GEO": {
+   "name": "Georgetown, Demerara-Mahaica, Guyana",
+   "lon": -58.254101,
+   "lat": 6.49855,
+   "objects": false
+  },
+  "FUK": {
+   "name": "Fukuoka, Fukuoka Prefecture, Japan",
+   "lon": 130.4510040283203,
+   "lat": 33.585899353027344,
+   "objects": false
+  },
+  "GDL": {
+   "name": "Guadalajara, Jalisco, Mexico",
+   "lon": -103.310108,
+   "lat": 20.523342,
+   "objects": false
+  },
+  "HEL": {
+   "name": "Helsinki (Vantaa), Uusimaa Region, Finland",
+   "lon": 24.963341,
+   "lat": 60.318363,
+   "objects": false
+  },
+  "RUH": {
+   "name": "Riyadh, Riyadh Region, Saudi Arabia",
+   "lon": 46.698799,
+   "lat": 24.9576,
+   "objects": false
+  },
+  "NBO": {
+   "name": "Nairobi, Nairobi City County, Kenya",
+   "lon": 36.928233,
+   "lat": -1.318886,
+   "objects": false
+  },
+  "GYN": {
+   "name": "Goiânia, Goiás, Brazil",
+   "lon": -49.220699,
+   "lat": -16.632,
+   "objects": false
+  },
+  "FOC": {
+   "name": "Fuzhou (Changle), Fujian Province, China",
+   "lon": 119.672524,
+   "lat": 25.929254,
+   "objects": false
+  },
+  "YHZ": {
+   "name": "Halifax, Nova Scotia, Canada",
+   "lon": -63.5085983276,
+   "lat": 44.8807983398,
+   "objects": false
+  },
+  "CAN": {
+   "name": "Guangzhou (Huadu), Guangdong Province, China",
+   "lon": 113.299004,
+   "lat": 23.392401,
+   "objects": false
+  },
+  "IST": {
+   "name": "Istanbul, İstanbul Province, Turkey",
+   "lon": 28.732136,
+   "lat": 41.274874,
+   "objects": false
+  },
+  "GUA": {
+   "name": "Guatemala City, Guatemala Department, Guatemala",
+   "lon": -90.527515,
+   "lat": 14.582896,
+   "objects": false
+  },
+  "HNL": {
+   "name": "Honolulu, Oahu, Hawaii, United States",
+   "lon": -157.92567,
+   "lat": 21.318387,
+   "objects": false
+  },
+  "ISU": {
+   "name": "Sulaymaniyah, As-Sulaymaniyyah Governorate, Iraq",
+   "lon": 45.315137,
+   "lat": 35.560487,
+   "objects": false
+  },
+  "ORN": {
+   "name": "Es-Sénia, Oran Province, Algeria",
+   "lon": -0.622486,
+   "lat": 35.620648,
+   "objects": false
+  },
+  "TLV": {
+   "name": "Tel Aviv, Central District, Israel",
+   "lon": 34.8867,
+   "lat": 32.011398,
+   "objects": false
+  },
+  "IAH": {
+   "name": "Houston, Texas, United States",
+   "lon": -95.3414,
+   "lat": 29.9844,
+   "objects": false
+  },
+  "GYE": {
+   "name": "Guayaquil, Guayas Province, Ecuador",
+   "lon": -79.883598,
+   "lat": -2.15742,
+   "objects": false
+  },
+  "HAK": {
+   "name": "Haikou (Meilan), Hainan Province, China",
+   "lon": 110.459,
+   "lat": 19.9349,
+   "objects": false
+  },
+  "OUA": {
+   "name": "Ouagadougou, Kadiogo Province, Burkina Faso",
+   "lon": -1.51242,
+   "lat": 12.3532,
+   "objects": false
+  },
+  "ADB": {
+   "name": "Gaziemir, İzmir Province, Turkey",
+   "lon": 27.157,
+   "lat": 38.2924,
+   "objects": false
+  },
+  "KBP": {
+   "name": "Boryspil, Kyiv Oblast, Ukraine",
+   "lon": 30.894699,
+   "lat": 50.345001,
+   "objects": false
+  },
+  "MRU": {
+   "name": "Plaine Magnien, Grand Port, Mauritius",
+   "lon": 57.683601,
+   "lat": -20.430201,
+   "objects": false
+  },
+  "IND": {
+   "name": "Indianapolis, Indiana, United States",
+   "lon": -86.294403,
+   "lat": 39.7173,
+   "objects": false
+  },
+  "HAN": {
+   "name": "Hanoi (Soc Son), Red River Delta Region, Vietnam",
+   "lon": 105.806999,
+   "lat": 21.221201,
+   "objects": false
+  },
+  "LIS": {
+   "name": "Lisbon, Lisbon District, Portugal",
+   "lon": -9.13592,
+   "lat": 38.7813,
+   "objects": true
+  },
+  "JAX": {
+   "name": "Jacksonville, Florida, United States",
+   "lon": -81.687813,
+   "lat": 30.492469,
+   "objects": false
+  },
+  "SJW": {
+   "name": "Shijiazhuang, Hebei Province, China",
+   "lon": 114.696999,
+   "lat": 38.280701,
+   "objects": false
+  },
+  "JOI": {
+   "name": "Joinville, Santa Catarina, Brazil",
+   "lon": -48.797401,
+   "lat": -26.224501,
+   "objects": false
+  },
+  "LHR": {
+   "name": "London, England, United Kingdom",
+   "lon": -0.459909,
+   "lat": 51.470748,
+   "objects": true
+  },
+  "MCI": {
+   "name": "Kansas City, Missouri, United States",
+   "lon": -94.713893,
+   "lat": 39.301699,
+   "objects": false
+  },
+  "SGN": {
+   "name": "Ho Chi Minh City, Southeast Region, Vietnam",
+   "lon": 106.652,
+   "lat": 10.8188,
+   "objects": false
+  },
+  "TUN": {
+   "name": "Tunis, Tunis Governorate, Tunisia",
+   "lon": 10.2272,
+   "lat": 36.851002,
+   "objects": false
+  },
+  "JDO": {
+   "name": "Juazeiro do Norte, Ceará, Brazil",
+   "lon": -39.269096,
+   "lat": -7.21932,
+   "objects": false
+  },
+  "HKG": {
+   "name": "Hong Kong, New Territories, Hong Kong",
+   "lon": 113.914862,
+   "lat": 22.31184,
+   "objects": true
+  },
+  "LIM": {
+   "name": "Lima, Lima Region, Peru",
+   "lon": -77.114305,
+   "lat": -12.0219,
+   "objects": false
+  },
+  "LUX": {
+   "name": "Luxembourg, Luxembourg, Luxembourg",
+   "lon": 6.212134,
+   "lat": 49.626845,
+   "objects": false
+  },
+  "KIN": {
+   "name": "Kingston, Kingston Parish, Jamaica",
+   "lon": -76.7874984741211,
+   "lat": 17.935699462890625,
+   "objects": false
+  },
+  "LAS": {
+   "name": "Las Vegas, Nevada, United States",
+   "lon": -115.151817,
+   "lat": 36.083361,
+   "objects": false
+  },
+  "HYD": {
+   "name": "Hyderabad, Telangana, India",
+   "lon": 78.429855,
+   "lat": 17.231318,
+   "objects": false
+  },
+  "MAO": {
+   "name": "Manaus, Amazonas, Brazil",
+   "lon": -60.049702,
+   "lat": -3.03861,
+   "objects": false
+  },
+  "LYS": {
+   "name": "Colombier-Saugnieu, Rhône, Auvergne-Rhône-Alpes, France",
+   "lon": 5.090139,
+   "lat": 45.725996,
+   "objects": false
+  },
+  "CAI": {
+   "name": "Cairo, Cairo Governorate, Egypt",
+   "lon": 31.396694,
+   "lat": 30.111534,
+   "objects": false
+  },
+  "LAX": {
+   "name": "Los Angeles, California, United States",
+   "lon": -118.407997,
+   "lat": 33.942501,
+   "objects": true
+  },
+  "MAD": {
+   "name": "Madrid, Madrid, Spain",
+   "lon": -3.572249,
+   "lat": 40.493407,
+   "objects": true
+  },
+  "MDE": {
+   "name": "Medellín, Antioquía Department, Colombia",
+   "lon": -75.4231,
+   "lat": 6.16454,
+   "objects": false
+  },
+  "ISB": {
+   "name": "Attock, Punjab, Pakistan",
+   "lon": 72.82566,
+   "lat": 33.549,
+   "objects": false
+  },
+  "WDH": {
+   "name": "Windhoek, Khomas Region, Namibia",
+   "lon": 17.4709,
+   "lat": -22.4799,
+   "objects": false
+  },
+  "MAN": {
+   "name": "Manchester, Greater Manchester, England, United Kingdom",
+   "lon": -2.279521,
+   "lat": 53.349375,
+   "objects": false
+  },
+  "MEM": {
+   "name": "Memphis, Tennessee, United States",
+   "lon": -89.97634,
+   "lat": 35.043845,
+   "objects": false
+  },
+  "CGK": {
+   "name": "Jakarta, Banten, Indonesia",
+   "lon": 106.655998,
+   "lat": -6.12557,
+   "objects": false
+  },
+  "NQN": {
+   "name": "Neuquén, Neuquén Province, Argentina",
+   "lon": -68.155701,
+   "lat": -38.949001,
+   "objects": false
+  },
+  "ASK": {
+   "name": "Yamoussoukro, Yamoussoukro, Côte d'Ivoire",
+   "lon": -5.36558,
+   "lat": 6.90317,
+   "objects": false
+  },
+  "MRS": {
+   "name": "Marignane, Bouches-du-Rhône, Provence-Alpes-Côte-d'Azur, France",
+   "lon": 5.2125,
+   "lat": 43.438088,
+   "objects": true
+  },
+  "PTY": {
+   "name": "Tocumen, Panamá Province, Panama",
+   "lon": -79.383499,
+   "lat": 9.07136,
+   "objects": false
+  },
+  "MEX": {
+   "name": "Mexico City, Ciudad de México, Mexico",
+   "lon": -99.07033,
+   "lat": 19.435822,
+   "objects": false
+  },
+  "ABJ": {
+   "name": "Abidjan, Abidjan, Côte d'Ivoire",
+   "lon": -3.92629,
+   "lat": 5.26139,
+   "objects": false
+  },
+  "MIA": {
+   "name": "Miami, Florida, United States",
+   "lon": -80.289751,
+   "lat": 25.796011,
+   "objects": true
+  },
+  "MXP": {
+   "name": "Ferno (VA), Lombardy, Italy",
+   "lon": 8.72811,
+   "lat": 45.6306,
+   "objects": true
+  },
+  "TNA": {
+   "name": "Jinan (Licheng), Shandong Province, China",
+   "lon": 117.216003,
+   "lat": 36.857201,
+   "objects": false
+  },
+  "PBM": {
+   "name": "Paramaribo, Para, Suriname",
+   "lon": -55.187801,
+   "lat": 5.45283,
+   "objects": false
+  },
+  "EBB": {
+   "name": "Entebbe, Central Region, Uganda",
+   "lon": 32.443501,
+   "lat": 0.042386,
+   "objects": false
+  },
+  "MSP": {
+   "name": "Minneapolis, Minnesota, United States",
+   "lon": -93.221741,
+   "lat": 44.880081,
+   "objects": false
+  },
+  "POA": {
+   "name": "Porto Alegre, Rio Grande do Sul, Brazil",
+   "lon": -51.167482,
+   "lat": -29.993984,
+   "objects": false
+  },
+  "MSQ": {
+   "name": "Minsk, Minsk Region, Belarus",
+   "lon": 28.039964,
+   "lat": 53.888071,
+   "objects": false
+  },
+  "YUL": {
+   "name": "Montréal, Quebec, Canada",
+   "lon": -73.742294,
+   "lat": 45.467837,
+   "objects": false
+  },
+  "DME": {
+   "name": "Moscow, Moscow Oblast, Russia",
+   "lon": 37.9063,
+   "lat": 55.408798,
+   "objects": false
+  },
+  "JHB": {
+   "name": "Johor Bahru, Johor, Malaysia",
+   "lon": 103.669998,
+   "lat": 1.64131,
+   "objects": false
+  },
+  "RUN": {
+   "name": "Sainte-Marie, Saint-Denis Arrondissement, Réunion",
+   "lon": 55.518894,
+   "lat": -20.890087,
+   "objects": false
+  },
+  "UIO": {
+   "name": "Quito, Pichincha Province, Ecuador",
+   "lon": -78.354306,
+   "lat": -0.125399,
+   "objects": false
+  },
+  "MUC": {
+   "name": "Munich, Bavaria, Germany",
+   "lon": 11.7861,
+   "lat": 48.353802,
+   "objects": false
+  },
+  "KNU": {
+   "name": "Kanpur, Uttar Pradesh, India",
+   "lon": 80.410103,
+   "lat": 26.404301,
+   "objects": false
+  },
+  "BNA": {
+   "name": "Nashville, Tennessee, United States",
+   "lon": -86.6782,
+   "lat": 36.1245,
+   "objects": false
+  },
+  "EWR": {
+   "name": "Newark, New Jersey, United States",
+   "lon": -74.170545,
+   "lat": 40.6894,
+   "objects": true
+  },
+  "LCA": {
+   "name": "Larnaca, Larnaca District, Cyprus",
+   "lon": 33.624901,
+   "lat": 34.875099,
+   "objects": false
+  },
+  "KHH": {
+   "name": "Kaohsiung (Xiaogang), Kaohsiung City, Taiwan",
+   "lon": 120.349998,
+   "lat": 22.577101,
+   "objects": false
+  },
+  "REC": {
+   "name": "Recife, Pernambuco, Brazil",
+   "lon": -34.922961,
+   "lat": -8.12747,
+   "objects": false
+  },
+  "OSL": {
+   "name": "Oslo (Gardermoen), Akershus, Norway",
+   "lon": 11.1004,
+   "lat": 60.193901,
+   "objects": false
+  },
+  "ORF": {
+   "name": "Norfolk, Virginia, United States",
+   "lon": -76.201,
+   "lat": 36.895341,
+   "objects": false
+  },
+  "KHI": {
+   "name": "Karachi, Sindh, Pakistan",
+   "lon": 67.160797,
+   "lat": 24.9065,
+   "objects": false
+  },
+  "RAO": {
+   "name": "Ribeirão Preto, São Paulo, Brazil",
+   "lon": -47.774053,
+   "lat": -21.134314,
+   "objects": false
+  },
+  "GIG": {
+   "name": "Rio De Janeiro, Rio de Janeiro, Brazil",
+   "lon": -43.250557,
+   "lat": -22.809999,
+   "objects": false
+  },
+  "KTM": {
+   "name": "Kathmandu, Bagmati Province, Nepal",
+   "lon": 85.3591,
+   "lat": 27.6966,
+   "objects": false
+  },
+  "PMO": {
+   "name": "Palermo, Sicily, Italy",
+   "lon": 13.091,
+   "lat": 38.175999,
+   "objects": false
+  },
+  "OKC": {
+   "name": "Oklahoma City, Oklahoma, United States",
+   "lon": -97.598248,
+   "lat": 35.393388,
+   "objects": false
+  },
+  "CDG": {
+   "name": "Paris (Roissy-en-France, Val-d'Oise), Île-de-France, France",
+   "lon": 2.554117,
+   "lat": 49.00896,
+   "objects": true
+  },
+  "OMA": {
+   "name": "Omaha, Nebraska, United States",
+   "lon": -95.894096,
+   "lat": 41.3032,
+   "objects": false
+  },
+  "PRG": {
+   "name": "Prague, Praha (Prague), Czech Republic",
+   "lon": 14.259911,
+   "lat": 50.100874,
+   "objects": true
+  },
+  "CCU": {
+   "name": "Kolkata, West Bengal, India",
+   "lon": 88.44765,
+   "lat": 22.654012,
+   "objects": false
+  },
+  "SJO": {
+   "name": "San José (Alajuela), Alajuela Province, Costa Rica",
+   "lon": -84.208801,
+   "lat": 9.99386,
+   "objects": false
+  },
+  "SCL": {
+   "name": "Santiago, Santiago Metropolitan Region, Chile",
+   "lon": -70.78579711914062,
+   "lat": -33.393001556396484,
+   "objects": false
+  },
+  "KEF": {
+   "name": "Reykjavík, Southern Peninsula, Iceland",
+   "lon": -22.6056,
+   "lat": 63.985001,
+   "objects": false
+  },
+  "PHL": {
+   "name": "Philadelphia, Pennsylvania, United States",
+   "lon": -75.241096,
+   "lat": 39.871899,
+   "objects": false
+  },
+  "LUN": {
+   "name": "Lusaka, Lusaka Province, Zambia",
+   "lon": 28.452722,
+   "lat": -15.330833,
+   "objects": false
+  },
+  "KUL": {
+   "name": "Sepang, Selangor, Malaysia",
+   "lon": 101.709999,
+   "lat": 2.74558,
+   "objects": false
+  },
+  "PHX": {
+   "name": "Phoenix, Arizona, United States",
+   "lon": -112.005905,
+   "lat": 33.435302,
+   "objects": false
+  },
+  "RIX": {
+   "name": "Riga, Mārupe Municipality, Latvia",
+   "lon": 23.970711,
+   "lat": 56.920752,
+   "objects": false
+  },
+  "SDQ": {
+   "name": "Santo Domingo, Distrito Nacional, Dominican Republic",
+   "lon": -69.668899536133,
+   "lat": 18.42970085144,
+   "objects": false
+  },
+  "ADD": {
+   "name": "Addis Ababa, Addis Ababa, Ethiopia",
+   "lon": 38.799301,
+   "lat": 8.97789,
+   "objects": false
+  },
+  "FCO": {
+   "name": "Rome, Lazio, Italy",
+   "lon": 12.251998,
+   "lat": 41.804532,
+   "objects": false
+  },
+  "PIT": {
+   "name": "Pittsburgh, Pennsylvania, United States",
+   "lon": -80.232903,
+   "lat": 40.491501,
+   "objects": false
+  },
+  "SJP": {
+   "name": "São José do Rio Preto, São Paulo, Brazil",
+   "lon": -49.406963,
+   "lat": -20.817113,
+   "objects": false
+  },
+  "PDX": {
+   "name": "Portland, Oregon, United States",
+   "lon": -122.598,
+   "lat": 45.588699,
+   "objects": false
+  },
+  "LED": {
+   "name": "St. Petersburg, Saint Petersburg, Russia",
+   "lon": 30.262501,
+   "lat": 59.800301,
+   "objects": false
+  },
+  "PKX": {
+   "name": "Beijing, Beijing Municipality, China",
+   "lon": 116.413967,
+   "lat": 39.501289,
+   "objects": false
+  },
+  "SJK": {
+   "name": "São José Dos Campos, São Paulo, Brazil",
+   "lon": -45.8615,
+   "lat": -23.2292,
+   "objects": false
+  },
+  "CZL": {
+   "name": "Constantine, Constantine Province, Algeria",
+   "lon": 6.62039,
+   "lat": 36.276001,
+   "objects": false
+  },
+  "GRU": {
+   "name": "São Paulo, São Paulo, Brazil",
+   "lon": -46.469954,
+   "lat": -23.431274,
+   "objects": false
+  },
+  "QRO": {
+   "name": "Querétaro, Querétaro, Mexico",
+   "lon": -100.186449,
+   "lat": 20.618779,
+   "objects": false
+  },
+  "MLA": {
+   "name": "Valletta, Luqa, Malta",
+   "lon": 14.491546,
+   "lat": 35.845932,
+   "objects": false
+  },
+  "DLA": {
+   "name": "Douala, Littoral Region, Cameroon",
+   "lon": 9.71948,
+   "lat": 4.00608,
+   "objects": false
+  },
+  "RIC": {
+   "name": "Richmond, Virginia, United States",
+   "lon": -77.319702,
+   "lat": 37.505199,
+   "objects": false
+  },
+  "SOD": {
+   "name": "Sorocaba, São Paulo, Brazil",
+   "lon": -47.490002,
+   "lat": -23.478001,
+   "objects": false
+  },
+  "SKP": {
+   "name": "Ilinden, Skopje Statistical Region, North Macedonia",
+   "lon": 21.622581,
+   "lat": 41.958087,
+   "objects": false
+  },
+  "LLW": {
+   "name": "Lumbadzi, Lilongwe District, Malawi",
+   "lon": 33.780998,
+   "lat": -13.7894,
+   "objects": false
+  },
+  "SOF": {
+   "name": "Sofia, Sofia City Province, Bulgaria",
+   "lon": 23.417671,
+   "lat": 42.696357,
+   "objects": false
+  },
+  "MFM": {
+   "name": "Nossa Senhora do Carmo, Nossa Senhora do Carmo (Taipa), Macau",
+   "lon": 113.592003,
+   "lat": 22.149599,
+   "objects": false
+  },
+  "SMF": {
+   "name": "Sacramento, California, United States",
+   "lon": -121.591003,
+   "lat": 38.6954,
+   "objects": false
+  },
+  "ARN": {
+   "name": "Stockholm, Stockholms län, Sweden",
+   "lon": 17.928829,
+   "lat": 59.64849,
+   "objects": true
+  },
+  "SLC": {
+   "name": "Salt Lake City, Utah, United States",
+   "lon": -111.979866,
+   "lat": 40.78886,
+   "objects": false
+  },
+  "MLE": {
+   "name": "Malé, Malé, Maldives",
+   "lon": 73.529099,
+   "lat": 4.19183,
+   "objects": false
+  },
+  "TGU": {
+   "name": "Tegucigalpa, Francisco Morazán Department, Honduras",
+   "lon": -87.217201,
+   "lat": 14.0609,
+   "objects": false
+  },
+  "NVT": {
+   "name": "Navegantes, Santa Catarina, Brazil",
+   "lon": -48.650979,
+   "lat": -26.879431,
+   "objects": false
+  },
+  "STR": {
+   "name": "Stuttgart, Baden-Württemberg, Germany",
+   "lon": 9.22196,
+   "lat": 48.689899,
+   "objects": false
+  },
+  "SAT": {
+   "name": "San Antonio, Texas, United States",
+   "lon": -98.469803,
+   "lat": 29.533701,
+   "objects": false
+  },
+  "MNL": {
+   "name": "Manila (Pasay), National Capital Region (Metropolitan Manila), Philippines",
+   "lon": 121.019997,
+   "lat": 14.5086,
+   "objects": false
+  },
+  "SAN": {
+   "name": "San Diego, California, United States",
+   "lon": -117.190002,
+   "lat": 32.733601,
+   "objects": false
+  },
+  "TLL": {
+   "name": "Tallinn, Harju County, Estonia",
+   "lon": 24.83264,
+   "lat": 59.413246,
+   "objects": false
+  },
+  "UDI": {
+   "name": "Uberlândia, Minas Gerais, Brazil",
+   "lon": -48.225936,
+   "lat": -18.883579,
+   "objects": false
+  },
+  "BOM": {
+   "name": "Mumbai, Maharashtra, India",
+   "lon": 72.867897,
+   "lat": 19.088699,
+   "objects": false
+  },
+  "TBS": {
+   "name": "Tbilisi, Tbilisi, Georgia",
+   "lon": 44.9547,
+   "lat": 41.669201,
+   "objects": false
+  },
+  "SFO": {
+   "name": "San Francisco, California, United States",
+   "lon": -122.374821,
+   "lat": 37.619806,
+   "objects": false
+  },
+  "VIX": {
+   "name": "Vitória, Espírito Santo, Brazil",
+   "lon": -40.285,
+   "lat": -20.258,
+   "objects": false
+  },
+  "SJC": {
+   "name": "San Jose, California, United States",
+   "lon": -121.929188,
+   "lat": 37.362452,
+   "objects": true
+  },
+  "SKG": {
+   "name": "Thessaloniki, Central Macedonia, Greece",
+   "lon": 22.970009,
+   "lat": 40.51928,
+   "objects": false
+  },
+  "NAG": {
+   "name": "Nagpur, Maharashtra, India",
+   "lon": 79.047203,
+   "lat": 21.092199,
+   "objects": false
+  },
+  "YXE": {
+   "name": "Saskatoon, Saskatchewan, Canada",
+   "lon": -106.700793,
+   "lat": 52.170723,
+   "objects": false
+  },
+  "OKA": {
+   "name": "Naha, Okinawa Prefecture, Japan",
+   "lon": 127.639804,
+   "lat": 26.192437,
+   "objects": false
+  },
+  "TIA": {
+   "name": "Rinas, Durrës County, Albania",
+   "lon": 19.7206,
+   "lat": 41.4147,
+   "objects": false
+  },
+  "CAW": {
+   "name": "Campos dos Goytacazes, Rio de Janeiro, Brazil",
+   "lon": -41.301701,
+   "lat": -21.698299,
+   "objects": false
+  },
+  "SEA": {
+   "name": "Seattle, Washington, United States",
+   "lon": -122.310276,
+   "lat": 47.447943,
+   "objects": true
+  },
+  "VIE": {
+   "name": "Vienna, Vienna, Austria",
+   "lon": 16.5697,
+   "lat": 48.110298,
+   "objects": true
+  },
+  "DEL": {
+   "name": "New Delhi, Delhi, India",
+   "lon": 77.09519,
+   "lat": 28.55563,
+   "objects": false
+  },
+  "XAP": {
+   "name": "Chapecó, Santa Catarina, Brazil",
+   "lon": -52.656601,
+   "lat": -27.134199,
+   "objects": false
+  },
+  "KIX": {
+   "name": "Osaka, Ōsaka Prefecture, Japan",
+   "lon": 135.244003,
+   "lat": 34.427299,
+   "objects": true
+  },
+  "VNO": {
+   "name": "Vilnius, Vilnius County, Lithuania",
+   "lon": 25.285801,
+   "lat": 54.634102,
+   "objects": false
+  },
+  "FSD": {
+   "name": "Sioux Falls, South Dakota, United States",
+   "lon": -96.741152,
+   "lat": 43.585463,
+   "objects": false
+  },
+  "BGI": {
+   "name": "Bridgetown, Christ Church, Barbados",
+   "lon": -59.491034,
+   "lat": 13.074667,
+   "objects": false
+  },
+  "WAW": {
+   "name": "Warsaw, Masovian Voivodeship, Poland",
+   "lon": 20.9671,
+   "lat": 52.165699,
+   "objects": true
+  },
+  "STL": {
+   "name": "St Louis, Missouri, United States",
+   "lon": -90.370003,
+   "lat": 38.748697,
+   "objects": false
+  },
+  "PAT": {
+   "name": "Patna, Bihar, India",
+   "lon": 85.087997,
+   "lat": 25.591299,
+   "objects": false
+  },
+  "GND": {
+   "name": "Saint George's, Saint George, Grenada",
+   "lon": -61.785302,
+   "lat": 12.003996,
+   "objects": false
+  },
+  "PNH": {
+   "name": "Phnom Penh (Pou Senchey), Phnom Penh, Cambodia",
+   "lon": 104.844699,
+   "lat": 11.547155,
+   "objects": false
+  },
+  "TLH": {
+   "name": "Tallahassee, Florida, United States",
+   "lon": -84.35433,
+   "lat": 30.401209,
+   "objects": false
+  },
+  "STI": {
+   "name": "Santiago, Santiago de los Caballeros Province, Dominican Republic",
+   "lon": -70.604431,
+   "lat": 19.40406,
+   "objects": false
+  },
+  "WRO": {
+   "name": "Wrocław, Lower Silesian Voivodeship, Poland",
+   "lon": 16.882096,
+   "lat": 51.103719,
+   "objects": false
+  },
+  "ZAG": {
+   "name": "Velika Gorica, Zagreb County, Croatia",
+   "lon": 16.0688,
+   "lat": 45.742901,
+   "objects": false
+  },
+  "TAO": {
+   "name": "Qingdao (Jiaozhou), Shandong Province, China",
+   "lon": 120.088171,
+   "lat": 36.361953,
+   "objects": false
+  },
+  "TPA": {
+   "name": "Tampa, Florida, United States",
+   "lon": -82.533203,
+   "lat": 27.9755,
+   "objects": false
+  },
+  "LPB": {
+   "name": "La Paz / El Alto, La Paz Department, Bolivia",
+   "lon": -68.189416,
+   "lat": -16.510272,
+   "objects": false
+  },
+  "YYZ": {
+   "name": "Toronto, Ontario, Canada",
+   "lon": -79.629421,
+   "lat": 43.675935,
+   "objects": false
+  },
+  "ICN": {
+   "name": "Seoul, Incheon-Gwangyeoksi (Incheon Metropolitan City), South Korea",
+   "lon": 126.450996,
+   "lat": 37.469101,
+   "objects": true
+  },
+  "ZRH": {
+   "name": "Zurich, Zürich, Switzerland",
+   "lon": 8.548056,
+   "lat": 47.458056,
+   "objects": false
+  },
+  "YVR": {
+   "name": "Vancouver, British Columbia, Canada",
+   "lon": -123.183998,
+   "lat": 49.193901,
+   "objects": false
+  },
+  "SHA": {
+   "name": "Shanghai (Minhang), Shanghai Municipality, China",
+   "lon": 121.33426,
+   "lat": 31.198104,
+   "objects": false
+  },
+  "SJU": {
+   "name": "San Juan, Puerto Rico",
+   "lon": -66.001801,
+   "lat": 18.4394,
+   "objects": false
+  },
+  "SIN": {
+   "name": "Singapore, South East, Singapore",
+   "lon": 103.994003,
+   "lat": 1.35019,
+   "objects": true
+  },
+  "YWG": {
+   "name": "Winnipeg, Manitoba, Canada",
+   "lon": -97.2398986816,
+   "lat": 49.909999847399995,
+   "objects": false
+  },
+  "BAQ": {
+   "name": "Barranquilla, Atlántico Department, Colombia",
+   "lon": -74.7808,
+   "lat": 10.8896,
+   "objects": false
+  },
+  "URT": {
+   "name": "Surat Thani, Surat Thani Province, Thailand",
+   "lon": 99.135597229,
+   "lat": 9.13259983063,
+   "objects": false
+  },
+  "PMW": {
+   "name": "Palmas, Tocantins, Brazil",
+   "lon": -48.356998,
+   "lat": -10.2915,
+   "objects": false
+  },
+  "CVG": {
+   "name": "Cincinnati / Covington, Kentucky, United States",
+   "lon": -84.667801,
+   "lat": 39.048801,
+   "objects": false
+  },
+  "TPE": {
+   "name": "Taoyuan, Taoyuan City, Taiwan",
+   "lon": 121.233002,
+   "lat": 25.0777,
+   "objects": false
+  },
+  "ARU": {
+   "name": "Araçatuba, São Paulo, Brazil",
+   "lon": -50.424575,
+   "lat": -21.141479,
+   "objects": false
+  },
+  "POS": {
+   "name": "Port of Spain, Tunapuna-Piarco, Trinidad and Tobago",
+   "lon": -61.337568,
+   "lat": 10.59535,
+   "objects": false
+  },
+  "SSA": {
+   "name": "Salvador, Bahia, Brazil",
+   "lon": -38.322498,
+   "lat": -12.908611,
+   "objects": false
+  },
+  "NRT": {
+   "name": "Narita, Chiba Prefecture, Japan",
+   "lon": 140.388714,
+   "lat": 35.76858,
+   "objects": true
+  },
+  "ULN": {
+   "name": "Ulaanbaatar, Ulaanbaatar, Mongolia",
+   "lon": 106.766998,
+   "lat": 47.843102,
+   "objects": false
+  },
+  "VTE": {
+   "name": "Vientiane, Vientiane Prefecture, Laos",
+   "lon": 102.566692,
+   "lat": 17.985052,
+   "objects": false
+  },
+  "KHN": {
+   "name": "Nanchang, Jiangxi Province, China",
+   "lon": 115.90271,
+   "lat": 28.864815,
+   "objects": false
+  },
+  "EVN": {
+   "name": "Yerevan, Yerevan, Armenia",
+   "lon": 44.397887,
+   "lat": 40.148941,
+   "objects": false
+  },
+  "JOG": {
+   "name": "Yogyakarta, Yogyakarta, Indonesia",
+   "lon": 110.431999,
+   "lat": -7.78818,
+   "objects": false
+  },
+  "CGY": {
+   "name": "Laguindingan, Misamis Oriental Province, Philippines",
+   "lon": 124.456496,
+   "lat": 8.612203,
+   "objects": false
+  },
+  "LJU": {
+   "name": "Zgornji Brnik, Cerklje na Gorenjskem Municipality, Slovenia",
+   "lon": 14.4576,
+   "lat": 46.223701,
+   "objects": false
+  },
+  "PRN": {
+   "name": "Prishtina, Pristina District, Kosovo",
+   "lon": 21.035801,
+   "lat": 42.5728,
+   "objects": false
+  },
+  "COK": {
+   "name": "Kochi, Kerala, India",
+   "lon": 76.400838,
+   "lat": 10.151047,
+   "objects": false
+  },
+  "CGB": {
+   "name": "Cuiabá, Mato Grosso, Brazil",
+   "lon": -56.116699,
+   "lat": -15.6529,
+   "objects": false
+  },
+  "DPS": {
+   "name": "Kuta, Badung, Bali, Indonesia",
+   "lon": 115.167123,
+   "lat": -8.748409,
+   "objects": false
+  },
+  "CNN": {
+   "name": "Kannur, Kerala, India",
+   "lon": 75.544979,
+   "lat": 11.916343,
+   "objects": false
+  },
+  "CLO": {
+   "name": "Cali, Valle del Cauca Department, Colombia",
+   "lon": -76.381898,
+   "lat": 3.542717,
+   "objects": false
+  },
+  "SAP": {
+   "name": "San Pedro Sula, Cortés Department, Honduras",
+   "lon": -87.923599,
+   "lat": 15.4526,
+   "objects": false
+  },
+  "SZX": {
+   "name": "Shenzhen, Guangdong Province, China",
+   "lon": 113.803262,
+   "lat": 22.639474,
+   "objects": false
+  },
+  "KWE": {
+   "name": "Guiyang (Nanming), Guizhou Province, China",
+   "lon": 106.80402,
+   "lat": 26.541805,
+   "objects": false
+  },
+  "HGH": {
+   "name": "Hangzhou, Zhejiang Province, China",
+   "lon": 120.428865,
+   "lat": 30.23609,
+   "objects": false
+  },
+  "CZX": {
+   "name": "Changzhou, Jiangsu Province, China",
+   "lon": 119.77546,
+   "lat": 31.920485,
+   "objects": false
+  },
+  "KMG": {
+   "name": "Kunming, Yunnan Province, China",
+   "lon": 102.936743,
+   "lat": 25.110313,
+   "objects": false
+  },
+  "CNX": {
+   "name": "Chiang Mai, Chiang Mai Province, Thailand",
+   "lon": 98.962600708,
+   "lat": 18.766799926799997,
+   "objects": false
+  },
+  "CGO": {
+   "name": "Zhengzhou, Henan Province, China",
+   "lon": 113.849165,
+   "lat": 34.526497,
+   "objects": false
+  },
+  "TYN": {
+   "name": "Taiyuan, Shanxi Province, China",
+   "lon": 112.627998,
+   "lat": 37.746899,
+   "objects": false
+  },
+  "CSX": {
+   "name": "Changsha (Changsha), Hunan Province, China",
+   "lon": 113.220001,
+   "lat": 28.189199,
+   "objects": false
+  },
+  "DLC": {
+   "name": "Dalian (Ganjingzi), Liaoning Province, China",
+   "lon": 121.538477,
+   "lat": 38.965719,
+   "objects": false
+  },
+  "CKG": {
+   "name": "Chongqing, Chongqing Municipality, China",
+   "lon": 106.651895,
+   "lat": 29.712254,
+   "objects": false
+  },
+  "XFN": {
+   "name": "Xiangyang (Xiangzhou), Hubei Province, China",
+   "lon": 112.291666,
+   "lat": 32.152222,
+   "objects": false
+  },
+  "DAD": {
+   "name": "Da Nang, South Central Coast Region, Vietnam",
+   "lon": 108.198997,
+   "lat": 16.0439,
+   "objects": false
+  },
+  "JXG": {
+   "name": "Jiaxing, Zhejiang, China",
+   "lon": 120.75557057437169,
+   "lat": 30.76341423925632,
+   "objects": false
+  },
+  "CRK": {
+   "name": "Mabalacat, Pampanga Province, Philippines",
+   "lon": 120.559998,
+   "lat": 15.186,
+   "objects": false
+  },
+  "PBH": {
+   "name": "Paro, Paro District, Bhutan",
+   "lon": 89.424599,
+   "lat": 27.4032,
+   "objects": false
+  },
+  "XIY": {
+   "name": "Xi'an, Shaanxi Province, China",
+   "lon": 108.762385,
+   "lat": 34.442207,
+   "objects": false
+  },
+  "KCH": {
+   "name": "Kuching, Sarawak, Malaysia",
+   "lon": 110.352859,
+   "lat": 1.487364,
+   "objects": false
+  },
+  "AKX": {
+   "name": "Aktobe, Aktobe Region, Kazakhstan",
+   "lon": 57.204144,
+   "lat": 50.248116,
+   "objects": false
+  },
+  "TEN": {
+   "name": "Tongren (Daxing), Guizhou Province, China",
+   "lon": 109.308889,
+   "lat": 27.883333,
+   "objects": false
+  },
+  "HYN": {
+   "name": "Taizhou (Luqiao), Zhejiang Province, China",
+   "lon": 121.429001,
+   "lat": 28.562201,
+   "objects": false
+  },
+  "MLG": {
+   "name": "Malang, Jawa Timur (East Java), Indonesia",
+   "lon": 112.714233,
+   "lat": -7.929099,
+   "objects": false
+  },
+  "LHE": {
+   "name": "Lahore, Punjab, Pakistan",
+   "lon": 74.403603,
+   "lat": 31.521601,
+   "objects": false
+  },
+  "CTU": {
+   "name": "Chengdu (Shuangliu), Sichuan Province, China",
+   "lon": 103.945966,
+   "lat": 30.558257,
+   "objects": false
+  },
+  "AGR": {
+   "name": "Agra, Uttar Pradesh, India",
+   "lon": 77.961025,
+   "lat": 27.157975,
+   "objects": false
+  },
+  "CJB": {
+   "name": "Coimbatore, Tamil Nadu, India",
+   "lon": 77.043404,
+   "lat": 11.03,
+   "objects": false
+  },
+  "ACX": {
+   "name": "Xingyi, Guizhou Province, China",
+   "lon": 104.960804,
+   "lat": 25.083423,
+   "objects": false
+  },
+  "BBI": {
+   "name": "Bhubaneswar, Odisha, India",
+   "lon": 85.814747,
+   "lat": 20.251021,
+   "objects": false
+  },
+  "LYA": {
+   "name": "Luoyang (Laocheng), Henan Province, China",
+   "lon": 112.388,
+   "lat": 34.7411,
+   "objects": false
+  },
+  "PNQ": {
+   "name": "Pune, Maharashtra, India",
+   "lon": 73.919701,
+   "lat": 18.5821,
+   "objects": false
+  },
+  "JRG": {
+   "name": ", Odisha, India",
+   "lon": 84.0504,
+   "lat": 21.9135,
+   "objects": false
+  },
+  "AVA": {
+   "name": "Anshun (Xixiu), Guizhou Province, China",
+   "lon": 105.873333,
+   "lat": 26.260556,
+   "objects": false
+  },
+  "NQZ": {
+   "name": "Astana, Astana City, Kazakhstan",
+   "lon": 71.467094,
+   "lat": 51.027035,
+   "objects": false
+  },
+  "BDQ": {
+   "name": "Vadodara, Gujarat, India",
+   "lon": 73.226303,
+   "lat": 22.336201,
+   "objects": false
+  },
+  "UDR": {
+   "name": "Udaipur, Rajasthan, India",
+   "lon": 73.89610290530001,
+   "lat": 24.617700576799997,
+   "objects": false
+  },
+  "AIP": {
+   "name": "Adampur, Punjab, India",
+   "lon": 75.758797,
+   "lat": 31.4338,
+   "objects": false
+  },
+  "LHW": {
+   "name": "Lanzhou (Yongdeng), Gansu Province, China",
+   "lon": 103.620003,
+   "lat": 36.515202,
+   "objects": false
+  },
+  "DYU": {
+   "name": "Dushanbe, Dushanbe, Tajikistan",
+   "lon": 68.822977,
+   "lat": 38.543746,
+   "objects": false
+  },
+  "LUH": {
+   "name": ", Punjab, India",
+   "lon": 75.95259857177734,
+   "lat": 30.854700088500977,
+   "objects": false
+  },
+  "JAI": {
+   "name": "Jaipur, Rajasthan, India",
+   "lon": 75.812202,
+   "lat": 26.8242,
+   "objects": false
+  }
+ }
+}

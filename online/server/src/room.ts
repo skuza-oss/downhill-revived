@@ -29,7 +29,7 @@ import {
   minVersionOf,
   randomSeed,
 } from "./protocol";
-import { placeOf, regionOfPlace, roomRegion, traceColo } from "./region";
+import { placeOf, regionOfPlace, roomArea, roomRegion, traceColo, type HintSource } from "./region";
 import {
   CAPS, TOO_FAST_MESSAGE, TOO_FAST_WARNING, banMessage, findBan, installIdOf, logJoin, newTally, onlineState, tally,
   type Caps, type GuardEnv, type OnlineState, type Tally,
@@ -233,8 +233,10 @@ interface RoomState {
 
 /** Where a room was made (src/index.ts, finding 135). */
 export interface RoomOrigin {
-  /** The Durable Object location hint it was made with ("" none). */
+  /** The Durable Object location hint it was made with ("" none), and how it was picked (finding
+      181; absent in rooms made before). */
   hint: string;
+  how?: HintSource;
   /** The creator's region (src/region.ts regionOfPlace). */
   createdIn: string;
   /** The Cloudflare location the creator reached. */
@@ -369,6 +371,9 @@ export class Room extends DurableObject<Env> {
         if (!colo || !this.state || this.state.colo) return;
         this.state.colo = colo;
         await this.save();
+        // One line per room for the server's logs: where hints really put rooms (finding 181).
+        const o = this.state.origin;
+        if (o) console.log(`room ${this.state.code}: runs in ${colo}, made with ${o.hint || "no hint"} (${o.how ?? "place"}) from ${o.createdFrom || "?"}`);
         this.broadcastWhere();
         this.updateListing();
       } catch {}
@@ -378,6 +383,11 @@ export class Room extends DurableObject<Env> {
   /** Where the room runs, for players: "EU", "NA", "ASIA"... ("" unknown). */
   private region(st: RoomState): string {
     return roomRegion(st.colo, st.origin?.hint);
+  }
+
+  /** The same, finer: "EU WEST", "ASIA SE"... ("" unknown; finding 181). */
+  private area(st: RoomState): string {
+    return roomArea(st.colo, st.origin?.hint);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -866,6 +876,10 @@ export class Room extends DurableObject<Env> {
       continent: info.continent ?? "",
       roomColo: st.colo ?? "",
       roomRegion: this.region(st),
+      // The finer name ("EU WEST"...) and whether the creator picked the region or Auto did
+      // (finding 181; older clients ignore them).
+      roomArea: this.area(st),
+      roomChosen: st.origin?.how === "chosen",
       // Only this game gets it; its rejoin hello sends it back (finding 137).
       rejoinToken: member.token,
       // Whether the room holds a Realtime session for this member (finding 177): "ready", its game
@@ -1893,6 +1907,7 @@ export class Room extends DurableObject<Env> {
     this.broadcast({
       type: "where",
       region: this.region(st),
+      area: this.area(st),
       colo: st.colo ?? "",
       members: st.members.map((x) => ({ id: x.id, region: x.region ?? "" })),
     });
@@ -1915,6 +1930,7 @@ export class Room extends DurableObject<Env> {
         maxPlayers: st.maxPlayers,
         hostName: st.members.find((x) => x.id === st.hostId)?.name ?? "",
         region: this.region(st),
+        area: this.area(st),
         colo: st.colo ?? "",
         createdIn: st.origin?.createdIn ?? "",
       };
