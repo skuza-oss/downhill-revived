@@ -133,8 +133,8 @@ impl P2pRoom<'_> {
         let wanted: Vec<u64> =
             ids.into_iter().filter(|&id| id != s.me && (s.is_host() || id == s.host) && !self.links.contains_key(&id)).collect();
         let host = s.is_host();
-        // The address this game reaches the server from: the network the other games can reach.
-        let Some(local) = lock(&self.c.live).as_ref().and_then(|l| l.tcp.local_addr().ok()).map(|a| a.ip()) else { return };
+        let room = lock(&self.c.live).as_ref().and_then(|l| l.tcp.local_addr().ok()).map(|a| a.ip());
+        let Some(local) = crate::peer::reachable_address(room) else { return };
         for id in wanted {
             match self.make_peer(local, host) {
                 Ok(peer) => {

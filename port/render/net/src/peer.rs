@@ -390,6 +390,9 @@ impl Peer {
         if socket.answer_only && !socket.heard {
             return; // ICE retransmits; once the other game reaches this socket it answers
         }
+        if socket.local.ip().is_loopback() && !destination.ip().is_loopback() {
+            return; // a local test server's room: only games on this machine are reachable directly
+        }
         if let Err(e) = socket.udp.send_to(contents, destination) {
             if self.refused.is_none() {
                 self.refused = Some(e.kind());
@@ -401,6 +404,19 @@ impl Peer {
             }
         }
     }
+}
+
+/// The address the other games can reach this one at: the interface this machine reaches the
+/// internet through (a route lookup toward the STUN server; nothing is sent), else `room`, the room
+/// connection's own. Not the room connection's first: a local test server (or an ssh tunnel to one)
+/// runs it over 127.0.0.1, where no other machine reaches.
+pub fn reachable_address(room: Option<IpAddr>) -> Option<IpAddr> {
+    let routed = STUN_SERVER.to_socket_addrs().ok().and_then(|mut found| found.find(|a| a.is_ipv4())).and_then(|server| {
+        let probe = UdpSocket::bind(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 0)).ok()?;
+        probe.connect(server).ok()?;
+        Some(probe.local_addr().ok()?.ip())
+    });
+    routed.filter(|ip| !ip.is_unspecified()).or(room)
 }
 
 /// An address inside a local network (or this machine): direct only, never through the relay.
