@@ -1,13 +1,26 @@
 // Browser network host services. Struct offsets come from the shared C header.
 import { layout } from './net_layout.js';
 
-// Online play is not offered in the browser (finding 143): the page's CSP blocks the race server's
-// socket, so it never worked here. The core asks host_service_net_offered and shows no ONLINE row;
-// the connections below refuse whatever asks. The same switch is off on Android (port/net/net.c).
-// online: true only in check_net.mjs, which tests the session code for when it comes back.
-const ONLINE_OFFERED = false;
+// P2P uses page-owned WebRTC and the shared Rust session coordinator (finding 180).
+const ONLINE_OFFERED = true;
 
-export function createNet({span, str, online = ONLINE_OFFERED}) {
+// RTCPeerConnection belongs to Window. This socket-shaped bridge keeps the game host ABI
+// in its worker while the page owns WebRTC and the shared Rust room coordinator.
+let bridgedSocket;
+if(typeof addEventListener==='function')addEventListener('message', e => {
+  const m=e.data;if(m.type!=='net'||!bridgedSocket)return;
+  const s=bridgedSocket;
+  if(m.event==='open'){s.readyState=1;s.onopen?.();}
+  else if(m.event==='message')s.onmessage?.({data:typeof m.data==='string'?m.data:new Uint8Array(m.data).buffer});
+  else if(m.event==='close'){s.readyState=3;s.onclose?.();}
+  else if(m.event==='error')s.onerror?.();
+});
+function openP2p(url) {
+  const socket={readyState:0,send:data=>postMessage({type:'net',op:'send',data}),close:()=>postMessage({type:'net',op:'close'})};
+  bridgedSocket=socket;postMessage({type:'net',op:'connect',url});return socket;
+}
+
+export function createNet({span, str, online = ONLINE_OFFERED, openSocket = openP2p}) {
   let base = 'wss://dhd.skuza.app', name = '', version = '', iso = '', ws;
   let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {};
   let frames = [], list = [], listing = false, listError = false, timer, clockKnown = false;
@@ -19,10 +32,10 @@ export function createNet({span, str, online = ONLINE_OFFERED}) {
   function connect(path) {
     if (!online) { state = 5; error = 'Online play is not offered in the browser.'; seq++; return -1; }
     ws?.close(); clearInterval(timer); state = 1; room = {}; start = {}; frames = []; welcome = {}; where = {};
-    ws = new WebSocket(base + path); ws.binaryType = 'arraybuffer';
+    ws = openSocket(base + path.replace('/v1/rooms/','/v1/p2p/rooms/')); ws.binaryType = 'arraybuffer';
     const socket = ws;
     ws.onopen = () => {
-      send({type:'hello', protocol:2, version, clientVersion:version.match(/\d+\.\d+\.\d+/)?.[0] || '0.7.4',
+      send({type:'hello', protocol:4, version, clientVersion:version.match(/\d+\.\d+\.\d+/)?.[0] || '0.7.13',
         isoSha256:iso, name, features:['countdown','session']});
       timer = setInterval(() => send({type:'ping',t:now()}),1000);
     };
@@ -118,7 +131,7 @@ export function createNet({span, str, online = ONLINE_OFFERED}) {
       if(listing||!online)return 0;listing=true;listError=false;
       // the list's "now" sets the clock when no room's pings have, so its times count from the server's (finding 135)
       const sent=now();
-      fetch(base.replace(/^ws/,'http')+'/v1/lobbies').then(r=>r.json()).then(r=>{
+      fetch(base.replace(/^ws/,'http')+'/v1/p2p/lobbies').then(r=>r.json()).then(r=>{
         const inRoom=state===2||state===3;
         if(r.now>0&&!inRoom){offset=r.now-(sent+now())/2;clockKnown=true;}
         list=r.lobbies.map(x=>({...x,timed:clockKnown||inRoom?1:0}));

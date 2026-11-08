@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dhd-revived-p2p",
+  "main": "src/p2p-entry.ts",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": false,
+  "upload_source_maps": true,
+  "observability": { "enabled": true },
+  "vars": { "MIN_VERSION": "0.7.13" },
+  "routes": [{ "pattern": "dhd.skuza.app/v1/p2p/*", "zone_name": "skuza.app" }],
+  "ratelimits": [
+    { "name": "RL_CONNECT", "namespace_id": "1801", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_CREATE", "namespace_id": "1802", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "d1_databases": [
+    { "binding": "MODERATION", "database_name": "dhd-moderation", "database_id": "4bc29f41-0d85-48d3-ab22-fd5305da5e33", "migrations_dir": "migrations" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "P2P_ROOM", "class_name": "P2pRoom" },
+      { "name": "LOBBIES", "class_name": "LobbyIndex" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["P2pRoom", "LobbyIndex"] }]
+}

@@ -879,7 +879,7 @@ impl Drop for Sfu {
 /// The TURN-over-TLS server from the room's `urls`: `turns:` on port 443 first (what networks
 /// that block UDP let through), else another `turns:` port. Only Cloudflare's TURN service: a
 /// client talks to Cloudflare only (finding 158).
-fn turns_server(urls: &Value) -> Option<(String, u16)> {
+pub(crate) fn turns_server(urls: &Value) -> Option<(String, u16)> {
     let mut found: Vec<(String, u16)> = urls.as_array()?.iter().filter_map(|u| {
         let rest = u.as_str()?.strip_prefix("turns:")?;
         let rest = rest.split('?').next()?;
@@ -894,7 +894,7 @@ fn turns_server(urls: &Value) -> Option<(String, u16)> {
 
 #[cfg(test)]
 #[path = "probe.rs"]
-mod probe;
+pub(crate) mod probe;
 
 #[cfg(test)]
 mod tests {

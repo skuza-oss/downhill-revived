@@ -16,6 +16,9 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 mod http;
+mod peer;
+mod session;
+mod p2p;
 mod relay;
 mod sfu;
 mod stream;
@@ -78,6 +81,7 @@ struct Queue {
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
 pub struct WsConn {
+    p2p: bool,
     h: WsHandler,
     queue: Mutex<Queue>,
     wake: Condvar,
@@ -285,6 +289,7 @@ impl Assoc {
 
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
+    if c.p2p { return p2p::run(c); }
     // The SFU reader wakes this thread for each datagram, as ws_send does for each message.
     let weak = Arc::downgrade(&c);
     let wake: sfu::Wake = Arc::new(move || {
@@ -452,6 +457,7 @@ pub unsafe extern "C" fn ws_start(url: *const c_char, h: *const WsHandler) -> *m
     }
     let url = unsafe { CStr::from_ptr(url) }.to_string_lossy().into_owned();
     let c = Arc::new(WsConn {
+        p2p: url.contains("/v1/p2p/rooms/"),
         h: unsafe { *h },
         queue: Mutex::new(Queue::default()),
         wake: Condvar::new(),

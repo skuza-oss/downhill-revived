@@ -34,10 +34,12 @@
   "durable_objects": {
     "bindings": [
       { "name": "ROOM", "class_name": "Room" },
+      { "name": "P2P_ROOM", "class_name": "P2pRoom" },
       { "name": "LOBBIES", "class_name": "LobbyIndex" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Room", "LobbyIndex"] }
+    { "tag": "v1", "new_sqlite_classes": ["Room", "LobbyIndex"] },
+    { "tag": "v2-p2p", "new_sqlite_classes": ["P2pRoom"] }
   ]
 }

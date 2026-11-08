@@ -487,6 +487,8 @@ static void page_build(MenuPage *p)
         menu_page_row(p, "Create A Public Race", 1);
         menu_page_row(p, "Create A Private Race", 1);
         menu_page_row(p, "Join With A Code", 1);
+        snprintf(text[6], ROW_TEXT, "Backend:  %s", getenv("DHD_NET_P2P_ONLY") || (getenv("DHD_NET_BACKEND") && !strcmp(getenv("DHD_NET_BACKEND"), "p2p")) ? "P2P" : "SFU");
+        menu_page_row(p, text[6], !getenv("DHD_NET_P2P_ONLY"));
         if (outdated) menu_page_row(p, "Update Now", 1);
         disc_shown = disc_note();
         for (const char *const *line = disc_shown; line && *line; line++) menu_page_text(p, *line);
@@ -547,7 +549,7 @@ static void refused(const NetLobby *l)
     host_service_net_leave();
     reset_selection();
     connecting = 0;
-    if (too_old) home_row = 6;
+    if (too_old) home_row = 7;
 }
 
 /* In the room: the host's settings, then this member's first (not ready) state, once each. */
@@ -1790,7 +1792,11 @@ static void page_accept(MenuPage *p, int row)
             entry[0] = 0;
             entry_pick = 0;
             go(CODE);
-        } else if (row == 6 && outdated) {
+        } else if (row == 6) {
+            const char *backend = getenv("DHD_NET_BACKEND");
+            save("net_backend", "DHD_NET_BACKEND", backend && !strcmp(backend, "p2p") ? "sfu" : "p2p");
+            menu_page_rebuild_at(p, 6);
+        } else if (row == 7 && outdated) {
             hle_log("online menu: Update Now\n");
             host_service_update_request();  /* ends the game; the launcher updates it */
         }

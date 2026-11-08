@@ -798,3 +798,30 @@ sitting a race out. Receiver rate protection drops a member's STATE
 messages beyond 240 in a one-second window per bundle index (normal: 60/s for index 0); it never
 silences a member for the rest of the race (protocol 3 did, and a backlog after a network stall
 froze an honest rider; finding 169).
+
+
+## Experimental P2P rooms (finding 180)
+
+The creator selects the backend before creating a room. P2P uses `/v1/p2p/rooms/new`,
+`/v1/p2p/rooms/CODE`, and `/v1/p2p/lobbies` on the same official server. These routes can
+be deployed independently using `online/server/wrangler.p2p.jsonc`; they never relay gameplay.
+
+The existing protocol-4 hello is followed by `p2p_welcome` (memberId, hostId, members,
+serverTime, code, version, turnPending), `p2p_members`, and optional `p2p_turn` (the member's
+own short-lived ICE credentials). Signaling is `p2p_signal` with `to` and an offer, answer
+or candidate in `signal`; the service authenticates `from` and permits only host-star pairs.
+`p2p_listing` is a host-only discovery update; `p2p_kick` removes a guest. Binary PING/PONG
+and JSON ping retain their existing lobby-clock meanings.
+
+Negotiated WebRTC stream 0 carries unordered snapshots with zero retransmissions; stream 1
+carries ordered reliable events and room commands. A reliable control message begins with
+byte 0 followed by JSON. A gameplay message begins with byte 1, followed by its race's
+startAt as eight little-endian bytes, then the existing STATE/EVENT frame. The host binds
+the sender slot to the peer connection before forwarding; old race markers are rejected.
+The same C snapshot packing, puppet prediction, corrections, events and loading barrier run
+for SFU and P2P. The host coordinator emits the existing room/start/left/ended messages.
+
+Host loss closes the session; a lost guest becomes AI. No host migration, reconnect recovery
+or SFU failover is attempted. Browser WebRTC runs on Window, with the same Rust session source
+compiled to WASM and bridged to the game worker. Production page CSP must allow HTTPS/WSS
+connections to the official server when hosting a browser build.

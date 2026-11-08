@@ -14,14 +14,8 @@
 
 enum { REJOIN_ATTEMPTS = 5 };
 
-/* Online play is not offered on phones yet (finding 143): their speed and the touch controls come
-   first. Android builds refuse every connection here, whatever asks (the menu, DHD_NET_*, a
-   dhd.ini server), and the core hides ONLINE (host_service_net_offered). */
-#ifdef __ANDROID__
-#define NET_OFFERED 0
-#else
+/* Native platforms share the transport; P2P support is finding 180. */
 #define NET_OFFERED 1
-#endif
 #define NET_NOT_OFFERED "online play comes to phones later"
 
 static NetClient client;
@@ -29,6 +23,12 @@ static WsConn *conn;
 static int inited;
 static char base[256], name[100], version[64], iso[65], next_url[300];
 static SDL_Mutex *api;  /* serialises connect, leave and the reset between rooms */
+
+static int p2p_backend(void)
+{
+    const char *backend = getenv("DHD_NET_BACKEND");
+    return backend && !strcmp(backend, "p2p");
+}
 
 static void send_text(void *ws, const char *text) { ws_send(ws, 0, text, strlen(text)); }
 static void send_binary(void *ws, const void *data, size_t n) { ws_send(ws, 1, data, n); }
@@ -54,6 +54,11 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
 {
     NetLobby lobby;
     (void)ctx;
+    if (p2p_backend()) {
+        client_on_closed(&client, code, reason);
+        client_rejoin_failed(&client);
+        return NULL;
+    }
     if (!client_on_closed(&client, code, reason))
         return NULL;
     if (attempt >= REJOIN_ATTEMPTS) {
@@ -123,7 +128,7 @@ static int connect_to(const char *path)
 
 int net_create_room(void)
 {
-    return connect_to("/v1/rooms/new");
+    return connect_to(p2p_backend() ? "/v1/p2p/rooms/new" : "/v1/rooms/new");
 }
 
 int net_join_room(const char *code)
@@ -136,7 +141,7 @@ int net_join_room(const char *code)
     up[i] = 0;
     if (i != 6 || strspn(up, alphabet) != 6)
         return -1;
-    snprintf(path, sizeof path, "/v1/rooms/%s", up);
+    snprintf(path, sizeof path, p2p_backend() ? "/v1/p2p/rooms/%s" : "/v1/rooms/%s", up);
     return connect_to(path);
 }
 
@@ -162,7 +167,7 @@ int net_list_lobbies(NetLobbyInfo *out, int max)
     int n;
     if (!NET_OFFERED || !base[0] || !inited)
         return -1;
-    snprintf(url, sizeof url, "%s/v1/lobbies", base);
+    snprintf(url, sizeof url, p2p_backend() ? "%s/v1/p2p/lobbies" : "%s/v1/lobbies", base);
     sent = net_now_ms();
     if (http_get(url, body, sizeof body) < 0)
         return -1;
