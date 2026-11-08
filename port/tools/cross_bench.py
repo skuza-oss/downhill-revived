@@ -35,6 +35,7 @@ def main():
     p.add_argument('--remote-iso', default=os.environ.get('DHD_REMOTE_ISO'), required=not os.environ.get('DHD_REMOTE_ISO'))
     p.add_argument('--exe', type=Path, default=ROOT / 'build/host64-exe/dhd64.exe')
     p.add_argument('--server', default='wss://dhd.skuza.app', help="the room server, or 'local': this checkout's")
+    p.add_argument('--p2p-server', help='the server for P2P trials, when not --server (as the official P2P Worker)')
     p.add_argument('--remote-dir', default='dhd-netbench')
     p.add_argument('--ssh-option', action='append', default=[])
     p.add_argument('--backend', choices=('sfu', 'p2p'), default='p2p')
@@ -69,7 +70,8 @@ def main():
         pc = None
         result = dict(label=label, backend=backend, host=host, force_turn=force,
                       seconds=a.seconds, started_epoch=time.time(), status='running')
-        base = dict(DHD_NET_SERVER=servers[0], DHD_NET_BENCH='bench.csv',
+        here, there = (a.p2p_server, a.p2p_server) if backend == 'p2p' and a.p2p_server else servers
+        base = dict(DHD_NET_SERVER=here, DHD_NET_BENCH='bench.csv',
                     DHD_NET_ISO_SHA256=iso_hash, DHD_SKIP_MOVIES='1', DHD_SND_OFF='1',
                     DHD_MEMCARD='1', DHD_MEMCARD_DIR='card', DHD_SETTINGS='none', DHD_RENDER='native',
                     DHD_FPS='60', DHD_SCALE='1', DHD_WINDOW='windowed', DHD_WINDOW_WIDTH='640',
@@ -92,7 +94,7 @@ def main():
                     stdout=log, stderr=log, minimized=True))
                 result['pc_pid'] = pc.pid
             else:
-                env.update(DHD_ISO=a.remote_iso, DHD_NET_SERVER=servers[1])
+                env.update(DHD_ISO=a.remote_iso, DHD_NET_SERVER=there)
                 assigns = ' '.join(f'{k}={shlex.quote(v)}' for k, v in env.items())
                 reply = ssh(f'mkdir -p {remote_q}/card; cd {remote_q}; '
                             f'env {assigns} nohup {shlex.quote(a.remote_app)} > stdout.log 2> stderr.log < /dev/null & echo $!')
