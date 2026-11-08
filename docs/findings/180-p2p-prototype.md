@@ -72,11 +72,31 @@ No game data, credentials, machine paths or non-official server addresses in tra
   work. The friend build is explicitly a development snapshot, assembled under build/ using
   the packager's executable, Rust library, dependency, license, retail-data and path/address scans.
 
+## PC/Mac validation (2026-11-08)
+
+The same core ran on Windows x64 and an Apple M1 Mac. Native macOS build passed with the
+existing pinned toolchain. `port/tools/cross_race.py` now accepts `--backend p2p`, `--server`
+and `--force-turn`; without those arguments its SFU/local-server behavior remains the default.
+The test navigates the actual ONLINE menus, readies, runs scripted riders, finishes, watches,
+returns to the room and starts again.
+
+- Mac-host and PC-host automatic-path runs both passed two shared races and repeated starts.
+- Mac-host automatic mode used direct UDP, confirmed by gameplay-sized UDP counters.
+- PC-host automatic mode used TURN/TLS, confirmed by TCP gameplay traffic and only ICE probes
+  on UDP. This is a successful automatic fallback, not evidence of direct connectivity in that role.
+- PC-host forced-TURN passed a shared race and return to the room; UDP counters were zero.
+- Mac-host forced-TURN also passed a shared race and return to the room; UDP counters were zero.
+- Both automatic-path runs completed two shared races; both forced-TURN runs completed one.
+  No freeze or peer-failure lines appeared. Temporary diagnostic logging was removed from
+  the Mac snapshot before the forced-TURN checks; no gameplay or transport fix was needed.
+- The initial apparent start stall was a partial-log reading during a slow load. The complete
+  log shows that race finished; additional tracing and repeat runs required no gameplay fix.
+
 ## Result
 
 Windows friend-test snapshot verified and packaged. The existing SFU Worker was not redeployed.
-Android has a Rust compile check and browsers a real WebRTC/WASM session check. macOS, Linux,
-physical Android, Safari/iPad/iPhone, full browser gameplay and native/browser interoperability
-still require device testing; do not describe them as validated. Native iOS remains deferred.
+macOS now has a native build and PC/Mac gameplay validation. Android has a Rust compile check
+and browsers a real WebRTC/WASM session check. Linux, physical Android, Safari/iPad/iPhone,
+full browser gameplay and native/browser interoperability still require device testing; do not describe them as validated. Native iOS remains deferred.
 TURN credentials currently last one hour: recreate long-running prototype rooms rather than
 adding credential recovery or host migration to this first experiment.
