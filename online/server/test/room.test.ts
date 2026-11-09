@@ -282,11 +282,11 @@ describe("public lobby list", () => {
   });
 });
 
-describe("race relay", () => {
-  it("answers a race ping to the sender only, with its slot and the server's clock", async () => {
+describe("the race on the room socket", () => {
+  it("answers a race ping to the sender only, its bytes and the server's clock", async () => {
     const { clients } = await startedRace(3);
     const before = Date.now();
-    clients[2].ws.send(new Uint8Array([3, 0, 9, 9]).buffer);
+    clients[2].ws.send(new Uint8Array([3, 2, 9, 9]).buffer);
     const pong = await clients[2].binary();
     expect([...pong.slice(0, 4)]).toEqual([4, 2, 9, 9]);
     // protocol 4: the server's time (f64 ms) after the ping's bytes (finding 169)
@@ -296,7 +296,7 @@ describe("race relay", () => {
     expect(serverTime).toBeLessThanOrEqual(Date.now());
   });
 
-  it("drops every WebSocket race frame; only PING/PONG remains", async () => {
+  it("drops every binary message but PING", async () => {
     const { clients } = await startedRace(2);
     for (const type of [1, 2, 5, 6]) clients[0].ws.send(new Uint8Array([type, 0, 7]).buffer);
     // A same-socket ping proves all earlier frames were processed without forwarding.

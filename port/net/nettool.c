@@ -1,4 +1,4 @@
-/* A command-line player for testing the relay: it joins a room through net.h as the game does,
+/* A command-line player for testing rooms and races: it joins a room through net.h as the game does,
    and in the race replays a recorded rider (--replay, port/tools/online_race.py's bots) or just
    stays in it for --seconds, counting the others' frames; then it prints a RESULT line and leaves.
 

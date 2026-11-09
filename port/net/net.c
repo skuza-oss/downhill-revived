@@ -1,4 +1,4 @@
-/* net.h's API: one client (client.c) over one WebSocket (ws.h). The relay's address
+/* net.h's API: one client (client.c) over one WebSocket (ws.h). The server's address
    comes from net_init or the DHD_NET_SERVER environment variable (the official server unless
    dhd.ini or the environment names another, port/hle/host.c). */
 #include "net.h"

@@ -268,7 +268,6 @@ describe("subscription closes that fail (finding 179)", () => {
       // constructor does (evictDurableObject hangs in this pool once the object used the fake fetch).
       await runInDurableObject(room(code), async (r: any, ctx) => {
         r.state = await ctx.storage.get("room");
-        r.rebuildRace();
       });
       pending = await remote(code, 2);
       expect(pending.map((x: any) => x.channelId).sort()).toEqual(closed);

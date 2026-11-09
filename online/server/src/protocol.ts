@@ -5,8 +5,6 @@ export const PROTOCOL = 4;
 export const MAX_MEMBERS = 10;
 export const DEFAULT_MAX_PLAYERS = 10;
 export const MAX_TEXT_BYTES = 4096;
-/** The largest binary WebSocket message (port/net/net.h NET_FRAME_MAX); only PING/PONG use it now. */
-export const MAX_BINARY_BYTES = 3072;
 
 export const HELLO_TIMEOUT_MS = 10_000;
 export const PING_INTERVAL_MS = 2_000;
@@ -20,14 +18,11 @@ export const COUNTDOWN_MS = 5_000;
 export const FEATURE_COUNTDOWN = "countdown";
 export const RTT_SAMPLES = 5;
 
-// Binary race frames. (Types 1 and 2 were the first design's INPUT and HASH, input lockstep, which
-// the game no longer uses; the server drops them.)
+/** The one binary message on a room's WebSocket: the game's PING and the server's PONG, which adds
+ *  the server's clock. The race's frames travel over the Realtime SFU (finding 158) or, in a P2P
+ *  room, the peer connections (finding 180); any other binary message is dropped. */
 export const FRAME_PING = 3;
 export const FRAME_PONG = 4;
-/** State sync (finding 044): a bundle of rider snapshots and a gameplay event. They travel over the
- *  Realtime SFU (finding 158), never this server; a WebSocket message of either type is dropped. */
-export const FRAME_STATE = 5;
-export const FRAME_EVENT = 6;
 export const PING_MAX_PAYLOAD = 32;
 
 /** Refusal reasons and the close code each one uses. */

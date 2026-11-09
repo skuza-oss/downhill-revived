@@ -126,7 +126,7 @@ describe("kill switch", () => {
     // Race frames go over the SFU (finding 158); the room keeps answering the race's pings and
     // keeps its race.
     for (const c of clients) {
-      c.ws.send(new Uint8Array([FRAME_PING, 0, 7]).buffer);
+      c.ws.send(new Uint8Array([FRAME_PING, clients.indexOf(c), 7]).buffer);
       expect([...(await c.binary()).slice(0, 3)]).toEqual([FRAME_PONG, clients.indexOf(c), 7]);
     }
     const race = await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), (room: any) => room.state?.race?.startAt);

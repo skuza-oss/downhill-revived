@@ -410,8 +410,8 @@ keepalives. See findings 158 and 177 for live checks.
 | 1 | u8 | `slot` |
 | 2 | n | any payload, at most 32 bytes (e.g. a u32 sequence and an f64 send time) |
 
-The server answers the sender only, with the same bytes and the type changed to 4, followed by
-its clock (f64 ms since the Unix epoch, little-endian; protocol 4). Use it to watch the round-trip
+The server answers any member's PING, to the sender only, with the same bytes and the type changed
+to 4, followed by its clock (f64 ms since the Unix epoch, little-endian; protocol 4). Use it to watch the round-trip
 during a race and to keep the server clock offset (`offset ≈ serverTime - (tSend + rtt/2)`): the
 race's STATE bundles are stamped on that clock. The game takes a PONG only when its round trip is
 no slower than its usual one, and during a race moves its offset by at most 2 ms a PONG. It is
@@ -529,8 +529,8 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
 ## Limits
 
 - One room holds at most 10 members.
-- Text frames: at most 4 KB. Binary frames on the WebSocket: at most 3072 bytes (only PING
-  carries a payload, at most 32 bytes).
+- Text frames: at most 4 KB. The only binary frame on the WebSocket is PING (at most 32 bytes of
+  payload); the server drops any other.
 - A room with no members is deleted.
 - Caps per connection (finding 161, `online/server/src/guard.ts`): at most 100 text frames and
   100 binary frames in each 5 s window (20 a second each; the game sends about 1.5 text and, in
@@ -698,7 +698,7 @@ Session room snapshots keep all old fields and add:
 | rulesPending | current rules differ from the locked copy |
 | lastRace | null, or {id, track, entrants} |
 
-Each member adds inRace (still attached to this race scene/relay).
+Each member adds inRace (still in this race's scene).
 Members with a current race entry add raceState: racing, finished, or dnf;
 place; finishTicks for finishers; dnfReason for DNFs.
 Members waiting outside the race omit raceState and result fields.

@@ -1,5 +1,6 @@
-// One lobby and its race. Lobby control is JSON; the race is binary frames relayed to the other
-// racers through the SFU; this object owns lobby and signaling. Protocol: docs/online-protocol.md.
+// One lobby and its races. Lobby control is JSON on the room WebSocket; the race's frames travel
+// over the Realtime SFU, and this object owns the lobby and the SFU signaling. The only binary
+// message here is the clock's PING. Protocol: docs/online-protocol.md.
 import {
   CallGate, Realtime, Turn, TURN_TTL_S, clientChannels, unknownOutcome, type Allocation, type ListedChannel, type SfuSession,
   type SfuSecrets,
@@ -15,7 +16,6 @@ import {
   FRAME_PONG,
   HELLO_TIMEOUT_MS,
   OUTDATED_MESSAGE,
-  MAX_BINARY_BYTES,
   MAX_MEMBERS,
   MAX_TEXT_BYTES,
   PING_INTERVAL_MS,
@@ -318,10 +318,6 @@ export class Room extends DurableObject<Env> {
   /** The first round-trip after connect, kept apart: see measuredRtt. */
   private firstRtts = new Map<number, number>();
 
-  // Race relay state, rebuilt from `state.race` after a wake-up.
-  private raceSockets: (WebSocket | null)[] = [];
-  private slotOf = new Map<WebSocket, number>();
-
   private listedKey: string | null = null;
   private listedAt = 0;
   /** This instance's start. Members then without a socket are a restart's ghosts, kept for their
@@ -350,8 +346,6 @@ export class Room extends DurableObject<Env> {
         const info = ws.deserializeAttachment() as SocketInfo | null;
         if (info?.memberId != null) this.sockets.set(info.memberId, ws);
       }
-      // After a wake-up mid-race the last relayed fields are unknown (see leave()).
-      this.rebuildRace();
       this.backFromRestart();
     });
   }
@@ -465,7 +459,7 @@ export class Room extends DurableObject<Env> {
       return;
     }
     if (typeof msg !== "string") {
-      this.relay(ws, msg);
+      this.pong(ws, msg);
       return;
     }
     if (msg.length > MAX_TEXT_BYTES) return this.refuse(ws, "bad_message", "Message too long.");
@@ -569,8 +563,7 @@ export class Room extends DurableObject<Env> {
         st.race = null;
         st.countdownEndsAt = null;
         for (const x of st.members) x.ready = false;
-        this.rebuildRace();
-        this.broadcast({ type: "ended" });
+            this.broadcast({ type: "ended" });
         return this.changed();
       case "leave":
         await this.leave(me.id, "leave");
@@ -708,8 +701,6 @@ export class Room extends DurableObject<Env> {
     return sfuBy != null ? Math.min(at, Math.max(now, sfuBy)) : at;
   }
 
-  // ---- Race relay (hot path: no awaits, no allocation beyond the frame) ----
-
   /** Usage stats: one Workers Analytics Engine point (dataset dhd_online; wrangler.jsonc STATS).
       Joins carry the release, the country and a hash of the name; races the player count, track
       and laps; a join refused for a full room the member count and the limit. No addresses or names.
@@ -720,55 +711,29 @@ export class Room extends DurableObject<Env> {
     } catch {}
   }
 
-  private relay(ws: WebSocket, data: ArrayBuffer): void {
-    let slot = this.slotOf.get(ws);
-    if (slot === undefined) {
-      slot = this.findSlot(ws);
-      if (slot === undefined) return; // not racing: drop
-    }
-    const n = data.byteLength;
-    if (n < 2 || n > MAX_BINARY_BYTES) return;
-    const b = new Uint8Array(data);
-    b[1] = slot;
-    switch (b[0]) {
-      case FRAME_PING: {
-        if (n > 2 + PING_MAX_PAYLOAD) return;
-        // The same bytes as PONG, then the server's clock (f64 ms, little-endian; protocol 4):
-        // the race's snapshots are stamped on it (finding 169).
-        const pong = new Uint8Array(n + 8);
-        pong.set(b);
-        pong[0] = FRAME_PONG;
-        new DataView(pong.buffer).setFloat64(n, Date.now(), true);
-        try {
-          ws.send(pong);
-        } catch {}
-        return;
-      }
-    }
-  }
-
-  private findSlot(ws: WebSocket): number | undefined {
-    const race = this.state?.race;
+  /** A member's binary PING, answered to it alone: the same bytes with the type changed to PONG,
+      then the server's clock (f64 ms, little-endian; protocol 4), on which the race's snapshots
+      are stamped (finding 169). Any other binary message is not for the server and is dropped. */
+  private pong(ws: WebSocket, data: ArrayBuffer): void {
     const info = ws.deserializeAttachment() as SocketInfo | null;
-    if (!race || info?.memberId == null) return undefined;
-    const slot = race.slots.indexOf(info.memberId);
-    if (slot < 0 || race.left.includes(slot)) return undefined;
-    this.slotOf.set(ws, slot);
-    this.raceSockets[slot] = ws;
-    return slot;
+    const n = data.byteLength;
+    if (info?.memberId == null || n < 2 || n > 2 + PING_MAX_PAYLOAD) return;
+    const b = new Uint8Array(data);
+    if (b[0] !== FRAME_PING) return;
+    const pong = new Uint8Array(n + 8);
+    pong.set(b);
+    pong[0] = FRAME_PONG;
+    new DataView(pong.buffer).setFloat64(n, Date.now(), true);
+    try {
+      ws.send(pong);
+    } catch {}
   }
 
-  private rebuildRace(): void {
-    const race = this.state?.race;
-    this.slotOf.clear();
-    if (!race) {
-      this.raceSockets = [];
-      return;
-    }
-    this.raceSockets = race.slots.map((id, slot) => {
-      const ws = race.left.includes(slot) ? null : (this.sockets.get(id) ?? null);
-      if (ws) this.slotOf.set(ws, slot);
-      return ws;
+  /** Sends to every racer of the running race still in it. */
+  private sendRacers(race: Race, msg: object): void {
+    race.slots.forEach((id, slot) => {
+      const ws = race.left.includes(slot) ? undefined : this.sockets.get(id);
+      if (ws) this.send(ws, msg);
     });
   }
 
@@ -878,7 +843,6 @@ export class Room extends DurableObject<Env> {
       const old = this.sockets.get(ghost.id);
       if (old && old !== ws) {
         old.serializeAttachment({ ...(old.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
-        this.slotOf.delete(old);
         try {
           old.close(REPLACED_CLOSE, "replaced");
         } catch {}
@@ -894,7 +858,6 @@ export class Room extends DurableObject<Env> {
     this.sockets.set(member.id, ws);
     if (ghost) this.noteRejoin(st);
     if (ghost) {
-      this.rebuildRace();
       if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
     } else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
     // The moderation log (finding 161): who entered which room, kept 14 days, for bans.
@@ -1254,7 +1217,6 @@ export class Room extends DurableObject<Env> {
       players: racers.map((x, slot) => ({ slot, memberId: x.id, name: x.name, rider: x.rider, bike: x.bike })),
     };
     st.grid = undefined; st.gridRules = undefined;
-    this.rebuildRace();
     await this.save();
     const race = st.race;
     this.stat(["race", "", country], [racers.length, race.track, race.laps]);
@@ -1325,11 +1287,8 @@ export class Room extends DurableObject<Env> {
     this.rtts.delete(id);
     this.firstRtts.delete(id);
     ws.serializeAttachment({ ...info, memberId: null, gone: true });
-    this.slotOf.delete(ws);
-    if (racing) {
+    if (racing)
       console.log(`room ${st.code}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
-      this.rebuildRace();
-    }
     await this.changed();
   }
 
@@ -1845,8 +1804,7 @@ export class Room extends DurableObject<Env> {
         const slot = race.slots.indexOf(id);
         race.left.push(slot);
         if (member) member.ready = false;
-        this.rebuildRace();
-        for (const s of this.raceSockets) if (s) this.send(s, { type: "left", slot, memberId: id, reason: "left" });
+        this.sendRacers(race, { type: "left", slot, memberId: id, reason: "left" });
       }
       if (member && (reset || member.sfu?.phase === "failed")) this.sfuReset(member);
     }
@@ -1906,14 +1864,12 @@ export class Room extends DurableObject<Env> {
     if (ws) {
       // Forget the socket so a late close event doesn't count twice.
       ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
-      this.slotOf.delete(ws);
     }
     const race = st.race;
     if (race) {
       const slot = race.slots.indexOf(memberId);
       if (slot >= 0 && !race.left.includes(slot)) {
         race.left.push(slot);
-        this.raceSockets[slot] = null;
         this.broadcast({ type: "left", slot, memberId, reason });
       }
     }
@@ -1983,9 +1939,7 @@ export class Room extends DurableObject<Env> {
     // Back in the room: the Ready that put them in this race is spent; a new one is for the next.
     const member = st.members.find(x => x.id === id);
     if (member) member.ready = false;
-    this.rebuildRace();
-    for (const ws of this.raceSockets) if (ws)
-      this.send(ws, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
+    this.sendRacers(st.race, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
     // After `left`: the others hear who is gone before their traffic is released (sent once now,
     // finding 175; the repeat used to come after `left` by chance).
     this.releaseSfu(st);
@@ -2020,7 +1974,6 @@ export class Room extends DurableObject<Env> {
     st.race = null;
     st.countdownEndsAt = null;
     st.nextRaceAt = race.rules!.nextRace === "auto" ? Date.now() + 30_000 : null;
-    this.rebuildRace();
     await this.save();
     this.broadcast({type:"ended", reason:voided ? "void" : "done"});
   }
@@ -2028,7 +1981,6 @@ export class Room extends DurableObject<Env> {
   private async destroy(): Promise<void> {
     if (this.listedKey !== null) this.updateListing(false, true);
     this.state = null;
-    this.rebuildRace();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // What didn't close outlives the room (Cleanup): stored again, with its alarm.

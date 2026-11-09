@@ -201,10 +201,9 @@ export async function overLimit(env: GuardEnv, hash: string, create: boolean): P
  * What one socket may send, counted over windows of CAP_WINDOW_MS (a window, not a second, so a
  * hitch's burst of queued frames doesn't count as a flood).
  *
- * Binary: since protocol 3 (finding 158) race frames travel over the Realtime SFU, not this
- * socket; what is left is the game's binary PING, two a second in a race (port/net/client.c
- * PING_RACE_MS), each answered with one PONG to the sender only. 20 a second, 100 a window, is ten
- * times that; nothing a member sends here is copied to other members any more.
+ * Binary: the game's PING, two a second in a race (port/net/client.c PING_RACE_MS), each answered
+ * with one PONG to the sender only (race frames travel over the Realtime SFU, finding 158). 20 a
+ * second, 100 a window, is ten times that.
  *
  * Text: in the lobby the game sends a ping a second and a pong every 2 s (PING_LOBBY_MS, the
  * server's PING_INTERVAL_MS), plus a message per click (pick, ready, settings; the host's room
