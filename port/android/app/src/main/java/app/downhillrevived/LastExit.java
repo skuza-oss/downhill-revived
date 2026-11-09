@@ -10,6 +10,7 @@
 package app.downhillrevived;
 
 import android.app.ActivityManager;
+import android.annotation.TargetApi;
 import android.app.ApplicationExitInfo;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -144,6 +145,7 @@ final class LastExit {
     }
 
     /** The record's trace, at most max bytes, null when it has none (a native crash's only from Android 12). */
+    @TargetApi(Build.VERSION_CODES.R)  // only from find's Android 11 path
     private static byte[] readTrace(ApplicationExitInfo e, int max) {
         try (InputStream in = e.getTraceInputStream()) {
             if (in == null) return null;

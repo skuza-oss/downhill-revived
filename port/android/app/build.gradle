@@ -18,7 +18,7 @@ android {
     compileSdk = 35
     defaultConfig {
         applicationId = "app.downhillrevived"
-        minSdk = 30
+        minSdk = 29   // Android 10 (finding 191); build_apk.py's check_release reads it here
         targetSdk = 35
         versionCode = project.hasProperty('dhdVersionCode') ? project.dhdVersionCode.toInteger() : 1
         versionName = project.hasProperty('dhdVersionName') ? project.dhdVersionName : "0.0"
@@ -37,8 +37,12 @@ android {
                 storePassword = System.getenv('DHD_ANDROID_KEYSTORE_PASS')
                 keyAlias = System.getenv('DHD_ANDROID_KEY_ALIAS')
                 keyPassword = System.getenv('DHD_ANDROID_KEY_PASS')
-                // scheme v3 (Android 9 and later; it allows a key rotation later on). With it AGP leaves
-                // out v2 at minSdk 30; without it AGP signs v2 only (finding 143)
+                // schemes v2 and v3, both asked for: v3 (Android 9 and later, so Android 10 too) allows
+                // a key rotation later on; with only v3 asked for AGP leaves out v2 (seen at minSdk 29
+                // and 30, findings 143, 191), and without it AGP signs v2 only. v2 as well keeps the
+                // APK readable by any installer or store that checks v2 only; v1 is off from minSdk 24.
+                // apksigner verify reports v2 only for API 24-27 (build_apk.py's check_release)
+                enableV2Signing = true
                 enableV3Signing = true
             }
         }
