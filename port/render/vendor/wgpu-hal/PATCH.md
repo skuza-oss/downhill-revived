@@ -89,3 +89,14 @@ binning and compute work waited behind the last picture's fragment work. On the 
 (driver r26p0) at 2x the two changes together took finding 156's route from 48.25-48.27 to
 49.09-49.96 fields/s (the race start 34.0-34.4 -> 36.4-36.5); the per-pair barriers alone changed
 nothing measurable.
+
+## A pipeline the driver does not create is that pipeline's error (finding 176)
+
+`device.rs` `create_render_pipeline` and `create_compute_pipeline`: a VK_ERROR_OUT_OF_HOST_MEMORY
+or VK_ERROR_OUT_OF_DEVICE_MEMORY from vkCreateGraphicsPipelines / vkCreateComputePipelines is a
+`PipelineError::Linkage` (`mod.rs` `map_pipeline_creation_err`; wgpu-core makes it an internal
+error of that pipeline), not a `DeviceError::OutOfMemory`, which wgpu-core answers by losing the
+device. The Vulkan spec leaves the device usable after a failed pipeline creation, and PowerVR
+Rogue's driver 1.13 returns VK_ERROR_OUT_OF_HOST_MEMORY for every shader its compilers refuse. The
+temporary shader modules are destroyed on that path too (upstream returns before destroying them).
+Other results keep upstream's mapping.

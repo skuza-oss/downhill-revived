@@ -1531,6 +1531,24 @@ fn map_pipeline_err(err: vk::Result) -> crate::DeviceError {
     map_host_device_oom_err(err)
 }
 
+/// Downhill Revived (finding 176): vkCreateGraphicsPipelines' and vkCreateComputePipelines'
+/// out-of-memory results are that pipeline's failure, a [`crate::PipelineError::Linkage`]
+/// (wgpu-core: an internal error), not a device error, which wgpu-core answers by losing the
+/// device. The Vulkan spec leaves the device usable after a failed pipeline creation, and
+/// PowerVR Rogue's driver (1.13) returns VK_ERROR_OUT_OF_HOST_MEMORY for every shader its
+/// compilers refuse. Other results stay device errors (`map_pipeline_err`).
+fn map_pipeline_creation_err(err: vk::Result, stages: wgt::ShaderStages) -> crate::PipelineError {
+    match err {
+        vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+            crate::PipelineError::Linkage(
+                stages,
+                alloc::format!("the driver did not create the pipeline ({err:?})"),
+            )
+        }
+        e => crate::PipelineError::Device(map_pipeline_err(e)),
+    }
+}
+
 /// Returns [`crate::DeviceError::Unexpected`] or panics if the `internal_error_panic`
 /// feature flag is enabled.
 fn get_unexpected_err(_err: vk::Result) -> crate::DeviceError {

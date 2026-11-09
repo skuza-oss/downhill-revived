@@ -39,7 +39,7 @@ use crate::device::Gpu;
 use crate::native::arenas::Arenas;
 use crate::native::convert::{ConvertObjects, ConvertSource};
 use crate::native::scanout::ScanoutObjects;
-use crate::native::pipelines::{gputimes, SPEC_SHIFT, TEXELS, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
+use crate::native::pipelines::{gputimes, without_kept_colour, SPEC_SHIFT, TEXELS, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
 use crate::native::shared::NativeShared;
 use crate::native::surfaces::Kit;
 use crate::native::{Native, Picture};
@@ -859,10 +859,15 @@ impl Native {
                    retained_depth: bool, texel_scale: u32, spec: u32, offset: u32, uniforms: &wgpu::BindGroup,
                    group: &wgpu::BindGroup) {
         let gpu = self.gpu;
-        let (blend_key, mask, dk) = (k.blend_key, k.color_mask as u32, k.depth_key as u32);
+        let (blend_key, mask) = without_kept_colour(k.blend_key, k.color_mask as u32);
+        let dk = k.depth_key as u32;
         let (src, dst) = (blend_key >> 1 & 31, blend_key >> 6 & 31);
         let uses_as = blend_key & 1 != 0 && (src == BLEND_SA || src == BLEND_ISA || dst == BLEND_SA || dst == BLEND_ISA);
         let depth = if has_depth { 16 | if dk & 4 != 0 { 8 } else { 0 } | (dk & 3) } else if retained_depth { 17 } else { 0 };
+        if mask == 0 && depth & 8 == 0 {
+            // A blend that keeps the colour, its alpha masked and no Z write: nothing changes.
+            return;
+        }
         // texel_scale carries TEXELS (bit 29) above the scale itself.
         let texel_key = (texel_scale & 15) << TEXEL_SCALE_SHIFT | texel_scale & TEXELS;
         let texel_scale = texel_scale & 15;

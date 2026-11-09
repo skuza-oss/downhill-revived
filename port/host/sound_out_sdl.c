@@ -345,6 +345,19 @@ static void SDLCALL host_callback(void *unused, SDL_AudioStream *stream, int add
     SDL_PutAudioStreamData(stream, buf, (int)(made * 4));
 }
 
+/* The open stream, for host_stop. */
+static SDL_AudioStream *host_stream;
+
+/* At exit (atexit, before the libraries' static destructors run): the stream closes, which stops
+   SDL's device thread. exit() with the device thread still in the callback crashed on Android, in
+   its AudioTrack thread (#56, a Helio G35 phone; Android recorded a normal exit). */
+static void host_stop(void)
+{
+    SDL_AudioStream *stream = host_stream;
+    host_stream = NULL;
+    if (stream) SDL_DestroyAudioStream(stream);
+}
+
 static void host_start(void)
 {
     SDL_AudioSpec spec;
@@ -388,7 +401,10 @@ static void host_start(void)
                 SND_RATE, SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "?",
                 device.freq, device.channels, frames);
     }
-    /* The stream lives as long as the process; SDL_Quit (or the process end) closes it. */
+    /* The stream lives as long as the process; host_stop closes it at exit (a host_exit, _exit,
+       ends the process without it). */
+    host_stream = stream;
+    atexit(host_stop);
 }
 
 /* ---- the interface (host_api.h, "sound output") ---- */

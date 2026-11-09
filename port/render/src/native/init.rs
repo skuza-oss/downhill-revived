@@ -38,6 +38,30 @@ pub(crate) fn scoped<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<
     }
 }
 
+/// As `scoped`, for building one draw pipeline: a Validation and an Internal error scope. A
+/// pipeline the driver does not create is an internal error (the vendored wgpu-hal's
+/// `map_pipeline_creation_err`; PowerVR Rogue reports a shader its compilers refuse as out of
+/// memory, finding 176): Err, so that draw is not drawn and the game goes on.
+pub(crate) fn scoped_pipeline<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<R, String> {
+    #[cfg(feature = "native")]
+    {
+        let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = gpu.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let r = f();
+        let i = pollster::block_on(internal.pop());
+        let v = pollster::block_on(validation.pop());
+        match v.or(i) {
+            Some(e) => Err(format!("{what}: {e}")),
+            None => Ok(r),
+        }
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = (gpu, what);
+        Ok(f())
+    }
+}
+
 /// wgpu-native's pipeline compilation options: no override constants, workgroup memory not
 /// zero-initialised.
 pub(crate) fn compilation_options() -> wgpu::PipelineCompilationOptions<'static> {
