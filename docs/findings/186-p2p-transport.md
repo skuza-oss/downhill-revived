@@ -137,9 +137,12 @@ allowed (P2P rooms).
   ICE says so). Room commands no longer travel over peers.
 - **Hub choice**: present members first; one that has been on a star, then a working SFU session,
   then the lowest room ping (the server's own measure of a member's connection; the games measure
-  no link between two members), then the earliest joiner. Replaced at once when it leaves, when
-  its room connection drops, or when every link that worked died; not within a minute for having
-  no link at all (direct links work for others) or for having no SFU session to bridge with.
+  no link between two members), then the earliest joiner; a member whose own working link died in
+  the last minute comes last, and is never picked while the hub is still there. Replaced at once
+  when it leaves or its room connection drops; after 12 s with fallback racers waiting and no
+  working SFU session (by a member with one); and, not within a minute of the last change, when
+  no member links to it although direct links work for some (two or more members, all on the
+  SFU, their lost links settled 5 s). One member's link going down never moves it (review).
 - **Results come from the room** (item 7): `ended` and the room's `lastRace` go from the server to
   every member's socket however the race ended, so the bug of finding 185 (the host's game
   stopped before it sent them) is gone by construction; server test "results reach every member
@@ -168,6 +171,32 @@ allowed (P2P rooms).
   when every link that worked died (9373bf4a).
 - `rustgs.py test` always passed the renderer's `native` feature, so `-p dhd_net` alone failed;
   `-- -p dhd_net -p dhd_star` now runs those crates' tests through the wrapper.
+
+## The lead's review (2026-11-09)
+
+An independent read-only review of the branch found nothing that blocks live SFU rooms and eight
+things to fix, each fixed in its own commit with a server or client test that fails without it:
+
+| # | Found | Fix (commit) |
+|---|---|---|
+| 1 | The "every link to it died" rule moved the hub at once and without limit: `hubLinked` stayed true for the room's life, so one member's blip (or a false report) with the others on the SFU moved it, and every star racer reconnected mid-race | The instant rule went; the hub moves for its links only after HUB_RETRY_MS since the last change, with two or more members all on the SFU and their lost links 5 s old, and never to a member whose own link died in the last minute (`lostLinkAt`; a forced change takes it last) (8be70ed8) |
+| 2 | A hub whose SFU session was being renewed (a new offer clears it) looked "unbridged" and was moved mid-race | 12 s of grace (`unbridgedSince`, UNBRIDGED_GRACE_MS) before a hub without a working session is replaced (7de2a51c) |
+| 3 | One fallback racer not ready held back the bridged group's release; a hub that can't bridge got its fallback racers retired at 25 s before the 60 s rule could move it; racers released through an earlier hub were skipped by the deadlines and could race on with no route | The hub and the ready fallback racers are released each when ready; the hub moves (to a member with a working session) rather than its racers being retired while one exists; a hub change clears the releases, so a racer that falls back again has its deadlines again (41e21af5) |
+| 4 | A member back from a drop kept its old link deadline and went to the SFU without trying the hub | Its link time starts when it is back, and doesn't run while it is away (35ed08bb) |
+| 5 | No hub epoch: an old hub's late offer or candidates reached the new hub, and the native hold and the page's pending applied them | The routes carry the hub's `epoch`, every `p2p_signal` too; the room, the native send thread and the page drop another epoch's (ccdc28f6) |
+| 6 | The server's logs and the moderation log carried whole P2P codes | `logCode` shows them by their first two characters, as dhd.log does; `moderate.mjs joins --room` matches that (f9b20a6f) |
+| 7 | 400 text frames of 16 kB per window let one member send about 1.3 MB/s of signaling to the hub | 64 kB of signaling per member per window; the excess dropped, the first answered with `too_fast` (29bac0f8) |
+| 8 | `wrangler.jsonc`'s comment named the deleted P2P Worker files | Rewritten (41f3486e) |
+
+The reviewer also checked and found fine: the SFU path is unchanged for SFU rooms (their release,
+stamping on receipt, deadlines and sessions); privacy (no address, hash or install id in any room
+message, signaling only between the hub and a member, codes masked in dhd.log); results always
+from `closeRace` to every member's socket; the clients' slot stamping (the hub stamps by
+connection, an SFU frame from a non-hub must carry its own slot).
+
+After the fixes: `p2p-rooms.test.ts` 24 tests (server 227), `dhd_net` 33 and `dhd_star` 10, the
+local-server room tests (2 games, 10 games, the hub leaving mid-race) and `check_p2p.mjs` pass;
+`check.py port` and `check.py server` OK (on 41f3486e; the core is unchanged by the fixes: `build_wasm` took the cached module).
 
 ## Result
 
