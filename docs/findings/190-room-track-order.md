@@ -1,9 +1,10 @@
 # 190: the online room's track list in Super Career order
 
-Status: in progress
+Status: current
+Checked: 2026-11-09
 
-Branch `feat/room-track-order` from `main` ac62c78d (0.7.14), started 2026-11-09. This file is
-the lane's plan while it runs and its finding when it merges.
+Branch `feat/room-track-order` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at 34cf1293 on
+2026-11-09; not yet released.
 
 ## Goal and acceptance
 

@@ -1,9 +1,10 @@
 # 191: Android 10 (API 29) as the APK's minimum
 
-Status: in progress
+Status: current
+Checked: 2026-11-09
 
-Branch `feat/android-10` from `main` ac62c78d (0.7.14), started 2026-11-09. This file is the lane's
-plan while it runs and its finding when it merges.
+Branch `feat/android-10` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at bd368803 on
+2026-11-09; not yet released.
 
 ## Goal and acceptance
 

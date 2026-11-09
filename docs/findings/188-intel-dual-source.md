@@ -1,9 +1,9 @@
 # 188: dual-source blending off on Intel GPUs
 
-Status: in progress
+Status: current
+Checked: 2026-11-09
 
-Branch `fix/intel-dual-source` from `main` ac62c78d (0.7.14), started 2026-11-09. This file is the
-lane's plan while it runs and its finding when it merges.
+Branch `fix/intel-dual-source` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at a97b42d7 on 2026-11-09; not yet released.
 
 ## Goal and acceptance
 

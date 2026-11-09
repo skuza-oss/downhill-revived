@@ -81,8 +81,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - Host services: one code path on SDL3 for every platform (finding 099): `host_sdl.c` (files,
   clock, frame waits, display, threads, the error box), `sdl_host.c` (SDL's loop on the main
   thread, the game on its own thread), `present.c` (the window), `sound_out_sdl.c` (one sound
-  output), controllers through SDL only (findings 059, 134), touch controls on phones
-  (`port/hle/touch.c`, finding 141).
+  output), controllers through SDL only (findings 059, 134; Swap L1/L2 and R1/R2 per controller,
+  finding 189), touch controls on phones (`port/hle/touch.c`, finding 141; the game's codes from
+  the touch pause menu, finding 189).
 - dhd.log on every platform, with `perf:` lines on speed and what limits it (finding 129) and
   `net:` lines online (finding 135). What the game can detect goes in the log. Each start keeps
   the one before as dhd-previous.log; on Android the log says how the run before ended (Android's
@@ -121,7 +122,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - Server: `online/server/` (Cloudflare Workers + Durable Objects) at `wss://dhd.skuza.app`, the
   game's default (dhd.ini `server =` or `DHD_NET_SERVER` override it). Rooms of up to 10
   (finding 123) that live across races (findings 118, 119), 25 tracks with Salt City MX and TD
-  (finding 166), Ready for the next race and MOSH by
+  (finding 166) listed in Super Career order (finding 190), Ready for the next race and MOSH by
   the host's pick (finding 128), rooms placed where their creator picks (ONLINE's Room Region row,
   dhd.ini `room_region`) or, on Auto, by the Cloudflare location the creator reached, from measured
   round trips (findings 135, 181), rejoin by token

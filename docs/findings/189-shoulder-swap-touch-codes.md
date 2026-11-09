@@ -1,9 +1,10 @@
 # 189: Swap L1/L2 and R1/R2 per controller, and the game's codes on touch
 
-Status: in progress
+Status: current
+Checked: 2026-11-09
 
-Branch `feat/shoulder-swap-touch-codes` from `main` ac62c78d (0.7.14), started 2026-11-09. This
-file is the lane's plan while it runs and its finding when it merges.
+Branch `feat/shoulder-swap-touch-codes` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at 9609ea6f on
+2026-11-09; not yet released.
 
 ## Goal and acceptance
 
