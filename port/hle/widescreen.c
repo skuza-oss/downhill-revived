@@ -50,11 +50,18 @@ void port_card_setup(int on) { card_setup = on; }
 static int map_2d(void) { return widescreen && !card_2d && !card_setup; }
 
 /* The game's views (func_0023D650, func_0023D8D8): an entry per view, its View first the focal
-   length in pixels (x0, the X field of view, already times s) and the size in pixels. */
+   length in pixels (x0, the X field of view, already times s) and the size in pixels. The table
+   has six 20-byte entries: func_0023D6C8 clears views 0-5 (slti 6) at boot (finding 192). */
 typedef struct { float x0; unsigned short width, height; } WsView;
 typedef struct { void *camera; WsView *view; int mode; char pad[8]; } WsEntry;
 enum { WS_VIEW_COUNT = 6 };
 extern WsEntry D_0075A9D0[WS_VIEW_COUNT];
+
+/* The view's View, or NULL for a view number outside the table or a view not set up. */
+static const WsView *ws_view(int view)
+{
+    return view >= 0 && view < WS_VIEW_COUNT ? D_0075A9D0[view].view : NULL;
+}
 void func_0023D8D8(int view, float focal, float vertical);
 static int rebuilding_projection;
 
@@ -194,7 +201,7 @@ void host_widescreen_vsync(void)
 static int view_size(int view, int *cx, int *w)
 {
     int cy, h;
-    if (view < 0 || view >= 32 || !D_0075A9D0[view].view) return 0;
+    if (!ws_view(view)) return 0;
     func_0023D618(view, cx, &cy);
     func_0023D650(view, w, &h);
     return *w > 0;
@@ -276,8 +283,8 @@ static void touch_hud_move(float u, float v, float *du, float *dv)
 void port_ws_hud_offset(int view, float *local)
 {
     touch_hud_seen = 1;
-    if (view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
-    const WsView *v = D_0075A9D0[view].view;
+    const WsView *v = ws_view(view);
+    if (!v) return;
     float depth = local[1], focal = v->x0, half = v->width * 0.5f;
     if (depth <= 0 || focal <= 0 || half <= 0) return;
     if (touch_hud_place) {   /* the piece's place in the 4:3 view; its height is three quarters of its width */
@@ -331,7 +338,7 @@ static void touch_hud_text(int view, int *x, int *y)
 {
     touch_hud_seen = 1;
     int w, h;
-    if (!touch_hud_place || view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
+    if (!touch_hud_place || !ws_view(view)) return;
     func_0023D650(view, &w, &h);
     if (w <= 0 || h <= 0) return;
     float du, dv;
