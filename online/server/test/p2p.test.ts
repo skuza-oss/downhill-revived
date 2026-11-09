@@ -209,4 +209,33 @@ describe("P2P rooms", () => {
     expect(turn.revoked.sort()).toEqual(["u1", "u2"]);
     host.ws.close();
   });
+
+  it("end with the host: every guest's credentials revoked at once, and the room's storage gone", async () => {
+    const { host, code } = await p2pHost();
+    const turn = await fakeTurn(code);
+    const a = await p2pJoin(code, "A");
+    expect((await a.json("p2p_turn")).username).toBe("u1");
+    const b = await p2pJoin(code, "B");
+    expect((await b.json("p2p_turn")).username).toBe("u2");
+    // The host leaves; the guests' sockets stay open on their side (no close from them).
+    host.sendJson({ type: "leave" });
+    expect((await a.json("error")).code).toBe("host_left");
+    await until("the guests' revokes", () => turn.revoked.length === 2);
+    expect(turn.revoked.sort()).toEqual(["u1", "u2"]);
+    const kept = await runInDurableObject(room(code), async (_r, state) => ({
+      keys: (await state.storage.list()).size, alarm: await state.storage.getAlarm(),
+    }));
+    expect(kept).toEqual({ keys: 0, alarm: null });
+    expect((await (await p2pJoin(code, "Late")).json("error")).code).toBe("room_not_found");
+  });
+
+  it("forget a room whose host went silent", async () => {
+    const { code } = await p2pHost();
+    await runInDurableObject(room(code), (_r, state) => {
+      for (const ws of state.getWebSockets()) ws.serializeAttachment({ ...ws.deserializeAttachment(), heard: 0 });
+    });
+    await runDurableObjectAlarm(room(code));
+    const keys = await runInDurableObject(room(code), async (_r, state) => (await state.storage.list()).size);
+    expect(keys).toBe(0);
+  });
 });

@@ -215,7 +215,8 @@ export class P2pRoom extends DurableObject<Env> {
   }
 
   /** Drops connections that never said hello and members gone silent, and renews TURN credentials
-      that are due. */
+      that are due. A room nobody is connected to any more is forgotten (a code claimed by a game
+      that never said hello). */
   async alarm(): Promise<void> {
     if (!this.meta || this.meta.closed) return;
     const now = Date.now();
@@ -233,7 +234,9 @@ export class P2pRoom extends DurableObject<Env> {
       }
     }
     await Promise.all(renewals);
-    if (!this.meta.closed && this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    if (this.meta.closed) return;
+    if (this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    else await this.forget();
   }
 
   private async hello(ws: WebSocket, info: Connection, m: Message): Promise<void> {
@@ -335,17 +338,35 @@ export class P2pRoom extends DurableObject<Env> {
     const meta = this.meta, info = this.info(ws);
     if (!meta || !info || info.id === null) return;
     const id = info.id;
-    info.id = null;
-    this.attach(ws, info);
-    for (const user of [info.turnUser, info.turnOld]) if (user) this.revokeLater(user);
+    this.release(ws, info);
     if (id !== meta.hostId) {
-      this.broadcastMembers();
+      if (!meta.closed) this.broadcastMembers();
       return;
     }
-    // No host migration: the room ends with its host (the host carries everyone's race).
+    // No host migration: the room ends with its host (the host carries everyone's race). Every
+    // guest's credentials go now, not when (or if) its close arrives.
     meta.closed = true;
-    await this.save();
-    for (const [other] of this.members()) this.refuse(other, "host_left", "The host left: the room has ended.");
+    for (const [other, i] of this.members()) {
+      this.release(other, i);
+      this.refuse(other, "host_left", "The host left: the room has ended.");
+    }
+    await this.forget();
+  }
+
+  /** The connection is no member any more; its TURN credentials are revoked. */
+  private release(ws: WebSocket, info: Connection): void {
+    info.id = null;
+    for (const user of [info.turnUser, info.turnOld]) if (user) this.revokeLater(user);
+    info.turnUser = info.turnOld = undefined;
+    this.attach(ws, info);
+  }
+
+  /** The room has ended (or nobody came): its storage goes. This object keeps `meta.closed` while
+      it lives, so its code stays refused; once evicted, the code is simply unknown. */
+  private async forget(): Promise<void> {
+    if (this.meta) this.meta.closed = true;
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
   }
 
   /** A binary PING answered with the server's clock; anything else binary is not for the server. */
@@ -363,8 +384,9 @@ export class P2pRoom extends DurableObject<Env> {
     return this.env as Env & SfuSecrets;
   }
 
-  private save(): Promise<void> {
-    return this.ctx.storage.put("meta", this.meta);
+  /** Nothing once the room has ended: its storage is gone for good (`forget`). */
+  private async save(): Promise<void> {
+    if (this.meta && !this.meta.closed) await this.ctx.storage.put("meta", this.meta);
   }
 
   private info(ws: WebSocket): Connection | null {

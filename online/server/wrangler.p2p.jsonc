@@ -29,7 +29,9 @@
     // tools/deploy.mjs --emergency's immediate updates here: every P2P race would end.
     "code_update_strategy": { "mode": "deferred", "max_delay": 86400 }
   },
-  // v2: P2P rooms are never listed (finding 180), so the first deploy's lobby index went.
+  // v2: P2P rooms are never listed (finding 180), so the first deploy's lobby index went. A fresh
+  // account's first deploy applies both at once; Cloudflare checks the end state, so the unexported
+  // LobbyIndex is no obstacle (a fresh workers.dev deploy, 2026-11-09). Applied tags never change.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["P2pRoom", "LobbyIndex"] },
     { "tag": "v2", "deleted_classes": ["LobbyIndex"] }
