@@ -52,8 +52,8 @@ after a version change before a live check.
 | `port/tools/live_game.py OUT --script FILE` | a game on a hidden desktop run by commands (keys, waits, shots, nettool bots) |
 | `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots, PrintWindow captures) |
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
-| `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` over the relay only |
-| `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game hosts, `--bots N` nettool P2P bots join (`--turn-bots K` of them relay-only), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, snapshot age per sender (summary.json) |
+| `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` with direct UDP off (an SFU room's TURN relay, a P2P room's SFU fallback) |
+| `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game makes it (the hub), `--bots N` nettool bots join (`--sfu-bots K` of them with direct links off: they race over the SFU fallback, which needs `.dev.vars`), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, who raced over the SFU, snapshot age per sender (summary.json) |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |
 | `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot) |
@@ -137,8 +137,8 @@ Online:
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
 | `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |
 | `DHD_NET_PEER_STATS=1` | each second, a `netstats:` line per peer connection in dhd.log: its path (UDP or TURN over TLS), bytes each way and ICE round trip (p2p_crowd.py reads the host's) |
-| `DHD_NET_LOG_CODE=1` | dhd.log shows a P2P room's code in full (players' logs show `AB*****`: the code lets anyone in, and so see the host's address; finding 180); the tools that read the host's code from its log set it |
-| `DHD_NET_P2P_UDP=0` | a P2P room's direct UDP is off: no host or server-reflexive candidate, the TURN relay carries everything (finding 180) |
+| `DHD_NET_LOG_CODE=1` | dhd.log shows a P2P room's code in full (players' logs show `AB*****`: the code lets anyone in, and so see the hub's address; finding 180); the tools that read the host's code from its log set it |
+| `DHD_NET_P2P_UDP=0` | in a P2P room this game makes no direct link and says so at once, so it races over the room's SFU (the fallback, finding 186) |
 | `DHD_NET_SFU_TURN=0` | the TURN fallback is never asked for; with `DHD_NET_SFU_UDP=0` a racer whose connection never comes up, whom the others must race without (finding 175) |
 | `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |
 | `DHD_NET_TEST_PONG_DELAY=N[@S]` | from S seconds (default 60) after joining a room, every pong this PC gets (the room's and the race's PONG) is held N ms plus 0-N/2 ms more before it counts: a slow return path one way, for the shared clock (finding 175) |

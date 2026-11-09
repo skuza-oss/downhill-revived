@@ -20,14 +20,14 @@ host.
 
 | Method | Path | What |
 |---|---|---|
-| WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. `?region=<hint>` picks where it runs (Region, below). |
+| WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. `?region=<hint>` picks where it runs (Region, below); `?transport=p2p` makes a P2P room (P2P rooms, below). |
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
 | GET | `/v1/health` | `{"ok":true,"protocol":4,"minVersion":"0.7.13","online":true}` (`online` and `message`: the kill switch, below) |
 | GET | `/v1/latest` | The newest release's `latest.json` (the launcher's backup update check; below). |
 
-Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
-upper-case what the user types and reject characters outside that alphabet.
+Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`), a P2P room's 7.
+Clients upper-case what the user types and reject characters outside that alphabet.
 
 The client sends `hello` as its first message, within 10 seconds of connecting. Before `hello`
 the server sends nothing.
@@ -176,7 +176,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
   above). Optional (the browser sends none); one that is not 32 lowercase hex digits counts as
   none. The server sends it to nobody. The game never writes it to dhd.log.
 - `features`: what the client can do. `"race_rejoin"` (finding 175): the game keeps racing over
-  the SFU while its room connection is down and rejoins its race (Limits, below). Games send
+  the SFU (or a P2P room's star) while its room connection is down and rejoins its race (Limits,
+  below). `"p2p"` (finding 186): it races in P2P rooms (below), which take no game without it. Games send
   `"countdown"` and `"session"` too, which asked older servers for the race room rules; every
   room has them since finding 185, and the server ignores both.
 
@@ -858,51 +859,78 @@ silences a member for the rest of the race (protocol 3 did, and a backlog after 
 froze an honest rider; finding 169).
 
 
-## P2P rooms (finding 180, test builds)
+## P2P rooms (finding 186, test builds)
 
-The creator chooses an SFU or a P2P room (CREATE A P2P RACE); the room keeps it. A P2P room's
-games connect to the host's game directly, or through Cloudflare's TURN relay (TLS on 443) when
-no direct path works, and the host's game runs the room's rules (port/render/session). The
-server (`online/server/src/p2p.ts`; the official server runs it as its own Worker,
-`wrangler.p2p.jsonc`) only admits members, relays signaling and gives each member its TURN
-credentials. It never carries race frames.
+A P2P room is a room as above, with every rule, rejoin and restart, whose race frames travel
+between the games instead of through the SFU: in a **star** of WebRTC peer connections around one
+member, the **hub**, which forwards the others' frames. A member who can't reach the hub races over
+the room's SFU instead (the **fallback**), bridged by the hub. Its code has 7 characters (an SFU
+room's 6, the same alphabet), so a game knows the kind of room from the code alone.
 
-**Private.** Signaling gives the host every member's network address and every member the
-host's, so a P2P room is never listed: there is no P2P lobby list, a host's `public` setting is
-ignored, and the game says "Players in this room can see your network address." on its CREATE A
-P2P RACE row and when a P2P room opens. Guests never signal each other.
+**Private.** The hub's game learns each member's network address from their signaling and each
+member the hub's, so a P2P room is never listed: `public` is ignored and the room is never in
+`/v1/lobbies`. The game says "Players in this room can see your network address." on its CREATE A
+P2P RACE row and when a P2P room opens. Members never signal each other; a fallback member's own
+SFU session tells nobody anything (as in an SFU room).
 
-**Codes.** A P2P room's code has 7 characters (an SFU room's 6, the same alphabet): the game sends
-a join to `/v1/p2p/rooms/CODE` or `/v1/rooms/CODE` by the code's length. New room:
-`/v1/p2p/rooms/new`.
+**Joining.** `/v1/rooms/new?transport=p2p` makes one (with `region` as any room: its rules and its
+fallback run there); a join goes to `/v1/rooms/CODE` like any other. The hello must list the
+`p2p` feature (a game that doesn't is refused with `bad_message`). The welcome adds
+`"transport":"p2p"`; games take the kind of room from it.
 
-**The room connection.** The protocol-4 hello, then from the server:
+**Routes** (server → every member, after every change: a join or leave, a link, a new hub, a
+race's start, a racer leaving it, its end; the start's routes come before the start message):
 
-| Message | What |
-|---|---|
-| `p2p_welcome` | `code`, `memberId`, `hostId`, `version`, `serverTime`, `members` [{id, name}], `turnPending` |
-| `p2p_members` | `members`, after every join or leave |
-| `p2p_turn` | this member's own TURN credentials (`urls`, `username`, `credential`), when the server has a TURN key |
-| `p2p_signal` | `from`, `signal`: an `offer`, `answer` (`sdp`) or `candidate` (`candidate`) |
-| `error` | refusals as an SFU room's (`room_full`, `version_mismatch`, `iso_mismatch`, `kicked`, `host_left`...), and the non-fatal `turn_unavailable` and `too_fast` |
+```json
+{"type":"p2p","hub":2,"members":[{"id":2},{"id":5,"link":"star"},{"id":7,"link":"sfu"},{"id":8}],
+ "race":{"startAt":1734000003000,"slots":[2,5,7],"left":[]}}
+```
 
-From the game: `p2p_signal` (`to`, `signal`; the server sets `from` and allows only host-guest
-pairs), from the host `p2p_capacity` (`maxPlayers`: joins beyond it are refused) and `p2p_kick`
-(`member`, optional `reason: "unreachable"` when the host's game could not connect to it),
-`leave`, the JSON `ping` and the binary PING (answered with the server's clock, as in an SFU room).
-Host loss ends the room (`host_left`, 4014); there is no host migration and no rejoin.
+`hub`: the member whose game the others connect to (at first the room's creator). A member's
+`link`: `star` once its link to the hub is up, `sfu` when it races over the SFU, absent while it is
+being made (the hub has none). `race`: the running race's marker and its slots (member ids by
+slot) and the slots that left, or null: the hub forwards a race's frames whether it races or not.
 
-**Peer connections.** WebRTC data channels negotiated with fixed ids: 0 race snapshots
-(unordered, no retransmission), 1 reliable. A room message is byte 0 then JSON (the SFU room's
-`room`, `start`, `left`, `ended`, `error` from the host; the game's room commands to it); a race
-frame is byte 1, the race's `startAt` (u64, little-endian; an older race's frames are dropped),
-then the game's STATE or EVENT frame. The host stamps each frame with the slot of the member whose
-connection it came on, then forwards it to the other racers. Each game offers two host candidates
-on one address, the second answering only (it sends nothing before the other game reaches it:
-some computers refuse UDP flows the game opens itself), a server-reflexive one from
-`stun.cloudflare.com` and its TURN relay. A guest the host cannot reach within 20 s is removed;
-its rider in a running race becomes the host's AI.
+**Signaling.** `{"type":"p2p_signal","to":5,"signal":{...}}` from the game, passed on as
+`{"type":"p2p_signal","from":2,"signal":{...}}`, only between the hub and a member; `signal` is an
+`offer`, `answer` (`sdp`) or `candidate` (`candidate`). The hub offers. Text frames in a P2P room may
+be up to 16 KB for this message (4 KB for any other), and a member may send 400 text frames per
+window (finding 161's caps: 100 elsewhere).
 
-The browser runs P2P rooms only: the page owns WebRTC (RTCPeerConnection belongs to Window) and
-the same coordinator built as wasm, bridged to the game worker (`port/web/www/p2p.js`). A page
-that hosts it must allow HTTPS and WSS connections to the official server in its CSP.
+**Links.** `{"type":"p2p_link","hub":2,"member":5,"up":true}` from either end of the link between
+the hub 2 and member 5; one naming another hub is ignored. Up: `star`. Down, or not up within
+`P2P_LINK_MS` (10 s) of being asked for (the member's join, a new hub): `sfu`, until the race ends
+or the hub changes, when it tries again. A link is decided once per try (a late up after the
+fallback waits for the next).
+
+**The SFU's part.** Every member makes its SFU session on joining, as in any room. Only the
+fallback racers and the hub (when there are any) take part in a race's SFU side: each fallback racer
+is subscribed to the hub's publication and to the other fallback racers', the hub to theirs; star
+racers are never subscribed. The release (`sfu_ready`) waits for those members alone and comes again
+for racers that fall back during the race; the hub's acknowledgement counts whether it races or not.
+A fallback racer has an SFU room's setup deadlines (`SFU_CONNECT_MS`, `SFU_SETUP_MS`) from the
+moment it fell back, at the earliest the start; a star racer's session failing takes it out of
+nothing. On a P2P room's SFU a frame carries its sender's slot: a receiver keeps the slot of the hub's
+frames (it publishes every star racer's) and drops another publisher's frame whose slot isn't its
+own.
+
+**The hub.** Picked by the room: at first the creator; then, when the hub leaves the room (a drop
+waits the rejoin's 20 s), when no other member is linked to it although some have been on a star, or
+when fallback racers wait and it has no working SFU session (a browser's game), the next is the
+present member that has been on a star, then one with a working SFU session, then the lowest room
+ping, then the one here longest; not again for the last two reasons within a minute. Every member
+then connects anew; a running race goes on (riders resume when the links are up; a member that
+can't reach the new hub falls back).
+
+**Peer connections.** WebRTC data channels negotiated with fixed ids: 0 race snapshots (unordered, no
+retransmission), 1 reliable. A message is `1`, the race's `startAt` (u64, little-endian; another
+race's frames are dropped), then the game's STATE or EVENT frame; or `2` alone, a keepalive (each
+second; a link silent for 5 s is down). The hub stamps a member's frame with that member's slot.
+Direct paths only (host and server-reflexive candidates from `stun.cloudflare.com`; no relay between
+games): each game offers two host candidates on one address, the second answering only (some
+computers refuse UDP flows the game opens itself, finding 180).
+
+The browser runs P2P rooms only: the page owns the room connection and WebRTC (RTCPeerConnection
+belongs to Window) and runs the same star as wasm (`port/render/star`, `port/web/www/p2p.js`); it has
+no SFU client yet. A page that hosts it must allow HTTPS and WSS connections to the official server
+in its CSP.

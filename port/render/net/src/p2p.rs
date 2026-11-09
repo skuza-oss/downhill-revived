@@ -32,6 +32,8 @@ pub struct P2p {
     /// The address the peers bind to (peer::reachable_address), found with the first peer.
     local: Option<IpAddr>,
     hub: Option<u64>,
+    /// The members the routes put on the SFU, logged once each (per hub).
+    on_sfu: Vec<u64>,
     started: Instant,
 }
 
@@ -43,7 +45,7 @@ impl P2p {
         if !direct {
             eprintln!("net: P2P: DHD_NET_P2P_UDP=0, no direct links from this game (test switch): it races over the SFU");
         }
-        Self { star: Star::new(direct), peers: HashMap::new(), held: HashMap::new(), wake, local: None, hub: None, started: Instant::now() }
+        Self { star: Star::new(direct), peers: HashMap::new(), held: HashMap::new(), wake, local: None, hub: None, on_sfu: vec![], started: Instant::now() }
     }
 
     /// The router's clock: milliseconds since the room began here.
@@ -51,20 +53,30 @@ impl P2p {
         self.started.elapsed().as_millis() as u64
     }
 
-    /// A room message for the star: the welcome and the routes. Logs a new hub.
+    /// A room message for the star: the welcome and the routes. Logs a new hub and each member the
+    /// room puts on its SFU (dhd.log: who raced how, without an address).
     pub fn room(&mut self, m: &Value) {
         self.star.room(m);
-        if m["type"] == "p2p" {
-            let hub = m["hub"].as_u64();
-            if hub != self.hub {
-                self.hub = hub;
-                match hub {
-                    Some(id) if self.star.is_hub() => eprintln!("net: P2P: this game is the room's hub (member {id})"),
-                    Some(id) => eprintln!("net: P2P: member {id} is the room's hub"),
-                    None => {}
-                }
+        if m["type"] != "p2p" {
+            return;
+        }
+        let hub = m["hub"].as_u64();
+        if hub != self.hub {
+            self.hub = hub;
+            self.on_sfu.clear();
+            match hub {
+                Some(id) if self.star.is_hub() => eprintln!("net: P2P: this game is the room's hub (member {id})"),
+                Some(id) => eprintln!("net: P2P: member {id} is the room's hub"),
+                None => {}
             }
         }
+        let sfu: Vec<u64> = m["members"].as_array().map_or(vec![], |a| {
+            a.iter().filter(|x| x["link"] == "sfu").filter_map(|x| x["id"].as_u64()).collect()
+        });
+        for id in sfu.iter().filter(|id| !self.on_sfu.contains(id)) {
+            eprintln!("net: P2P: member {id} races over the room's SFU (no direct link to the hub)");
+        }
+        self.on_sfu = sfu;
     }
 
     /// The other end's signaling, as the room passed it on; held when its peer is still to be made.
