@@ -898,8 +898,9 @@ slot) and the slots that left, or null: the hub forwards a race's frames whether
 only with the current `epoch` (a late signal for an earlier hub's peers is dropped by the room, and
 by a game whose routes name another epoch); `signal` is an `offer`, `answer` (`sdp`) or `candidate`
 (`candidate`). The hub offers. Text frames in a P2P room may
-be up to 16 KB for this message (4 KB for any other), and a member may send 400 text frames per
-window (finding 161's caps: 100 elsewhere).
+be up to 16 KB for this message (4 KB for any other), a member may send 400 text frames per window
+(finding 161's caps: 100 elsewhere) and 64 KB of signaling per window; signals beyond that are
+dropped, the first answered with the non-fatal `too_fast` warning.
 
 **Links.** `{"type":"p2p_link","hub":2,"member":5,"up":true}` from either end of the link between
 the hub 2 and member 5; one naming another hub is ignored. Up: `star`. Down, or not up within

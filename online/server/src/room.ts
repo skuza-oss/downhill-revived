@@ -168,6 +168,13 @@ const P2P_TEXT_BYTES = 16_384;
     and its trickled candidates each (about 40 messages for nine members, more from a browser,
     which gathers a candidate per network interface), and again after a new hub. */
 const P2P_TEXT_PER_WINDOW = 400;
+/** And the bytes of signaling a member may send in a caps window (src/guard.ts CAP_WINDOW_MS, 5 s):
+    a link's offer or answer and its candidates take 1-10 kB (a game's offer about 0.6 kB, a
+    browser's a few kB), so a hub signalling nine members at once, a browser's included, stays well
+    within it; 400 messages of 16 kB would be 1.3 MB/s into the room and on to the hub (review 7).
+    Signals over it are dropped (the link then fails over to the SFU); the first is answered with
+    the non-fatal too_fast warning. */
+const P2P_SIGNAL_BYTES_PER_WINDOW = 65_536;
 
 /** A member's rejoin token (finding 137): 16 random bytes in hex, sent only to that member's game
     in its welcome. Its rejoin hello sends it back and gets the member again; nothing else does. */
@@ -388,6 +395,8 @@ export class Room extends DurableObject<Env> {
   private tallies = new WeakMap<WebSocket, Tally>();
   /** Sockets whose hello waits for the ban list (onHello): their other messages are dropped. */
   private helloPending = new WeakSet<WebSocket>();
+  /** Each socket's signaling bytes in the current caps window (P2P_SIGNAL_BYTES_PER_WINDOW). */
+  private signalBytes = new WeakMap<WebSocket, { since: number; bytes: number; warned: boolean }>();
   private capsFor: unknown = null;
   private capsNow: Caps = CAPS;
 
@@ -627,7 +636,8 @@ export class Room extends DurableObject<Env> {
         return;
       // A P2P room's peer connections (finding 186); in an SFU room they are unknown types.
       case "p2p_signal":
-        if (st.transport === "p2p") return this.onSignal(st, me, m);
+        if (st.transport === "p2p" && this.signalBudget(ws, msg.length, now)) return this.onSignal(st, me, m);
+        if (st.transport === "p2p") return;
         return this.refuse(ws, "bad_message", `Unknown message type "${m.type}".`);
       case "p2p_link":
         if (st.transport === "p2p") return this.onLink(st, me, m);
@@ -2123,6 +2133,23 @@ export class Room extends DurableObject<Env> {
     if (m.epoch !== (st.hubEpoch ?? 0)) return;
     const ws = this.sockets.get(to.id);
     if (ws) this.send(ws, { type: "p2p_signal", from: me.id, epoch: m.epoch, signal: m.signal });
+  }
+
+  /** Whether a signal of `bytes` fits its sender's budget for the window (P2P_SIGNAL_BYTES_PER_WINDOW);
+      counted when it does. */
+  private signalBudget(ws: WebSocket, bytes: number, now: number): boolean {
+    const windowMs = this.caps(true).windowMs;
+    let b = this.signalBytes.get(ws);
+    if (!b || now - b.since >= windowMs) this.signalBytes.set(ws, (b = { since: now, bytes: 0, warned: false }));
+    if (b.bytes + bytes <= P2P_SIGNAL_BYTES_PER_WINDOW) {
+      b.bytes += bytes;
+      return true;
+    }
+    if (!b.warned) {
+      b.warned = true;
+      this.error(ws, "too_fast", TOO_FAST_WARNING);
+    }
+    return false;
   }
 
   /** A link report: `{"type":"p2p_link","hub":H,"member":M,"up":true}` from either end of the

@@ -562,6 +562,25 @@ describe("P2P rooms (finding 186)", () => {
     }
   });
 
+  it("a member's signaling has a byte budget per window; the excess is dropped (review 7)", async () => {
+    const { cs, ids } = await p2pRoom(2);
+    const [hub, a] = cs;
+    const epoch = (await routes(a)).epoch;
+    // Six signals of 15 kB in one window (1 s in the tests): the budget (64 kB) takes four.
+    for (let k = 0; k < 6; k++)
+      hub.sendJson({ type: "p2p_signal", to: ids[1], epoch, signal: { type: "candidate", candidate: String(k).repeat(15_000) } });
+    expect((await hub.json("error")).code).toBe("too_fast");
+    hub.sendJson({ type: "ping", t: 1 });
+    await hub.json("pong");
+    a.sendJson({ type: "ping", t: 2 });
+    await a.json("pong");
+    expect(a.seen.filter((t) => JSON.parse(t).type === "p2p_signal")).toHaveLength(4);
+    // A new window, a new budget.
+    await new Promise((r) => setTimeout(r, 1100));
+    hub.sendJson({ type: "p2p_signal", to: ids[1], epoch, signal: { type: "candidate", candidate: "x" } });
+    expect((await a.json("p2p_signal")).signal.candidate).toBe("x");
+  });
+
   it("a member back by its token keeps the hub and its link, and hears the routes again", async () => {
     const { cs, code, ids } = await p2pRoom(2);
     const [hub, a] = cs;
