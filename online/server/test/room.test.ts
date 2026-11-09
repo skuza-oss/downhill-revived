@@ -65,44 +65,44 @@ describe("lobby", () => {
   });
 
   it("refuses clients older than MIN_VERSION with a readable reason, hosts and joiners alike", async () => {
-    // A 0.1.0 hello: no clientVersion, version is the exe hash. MIN_VERSION is 0.2.0 here.
+    // A 0.1.0 hello: no clientVersion, version is the exe hash, protocol 1. MIN_VERSION is 0.7.13 here.
     const old = await Client.connect("/v1/rooms/new");
-    old.sendJson({ type: "hello", protocol: 3, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
+    old.sendJson({ type: "hello", protocol: 1, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
     const err = await old.json("error");
     expect(err).toMatchObject({
       code: "client_outdated",
       message: "A new version is out. Update to play online.",
-      minVersion: "0.2.0",
-      clientVersion: "0.1.0",
+      minVersion: "0.7.13",
+      clientVersion: "",
     });
     expect(await old.closed()).toBe(4009);
 
     const { code } = await Client.host();
     const older = await Client.connect(`/v1/rooms/${code}`);
-    older.hello("Older", { clientVersion: "0.1.5" });
+    older.hello("Older", { clientVersion: "0.7.12" });
     expect((await older.json("error")).code).toBe("client_outdated");
     expect(await older.closed()).toBe(4009);
 
     // an older release that also speaks an older protocol still gets the Update Now refusal
-    const protocol2 = await Client.connect(`/v1/rooms/${code}`);
-    protocol2.hello("Protocol2", { protocol: 2, clientVersion: "0.1.5" });
-    expect((await protocol2.json("error")).code).toBe("client_outdated");
-    expect(await protocol2.closed()).toBe(4009);
+    const protocol3 = await Client.connect(`/v1/rooms/${code}`);
+    protocol3.hello("Protocol3", { protocol: 3, clientVersion: "0.7.12" });
+    expect((await protocol3.json("error")).code).toBe("client_outdated");
+    expect(await protocol3.closed()).toBe(4009);
 
     const junk = await Client.connect(`/v1/rooms/${code}`);
     junk.hello("Junk", { clientVersion: "nightly" });
     expect(await junk.closed()).toBe(4009);
 
     const newer = await Client.connect(`/v1/rooms/${code}`);
-    newer.hello("Newer", { clientVersion: "0.3.0" });
+    newer.hello("Newer", { clientVersion: "0.7.14" });
     expect((await newer.json("welcome")).code).toBe(code);
   });
 
   it("names the minimum version in health and the lobby list", async () => {
     const health = await (await exports.default.fetch("https://dhd.test/v1/health")).json<any>();
-    expect(health).toMatchObject({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0" });
+    expect(health).toMatchObject({ ok: true, protocol: PROTOCOL, minVersion: "0.7.13" });
     const list = await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>();
-    expect(list.minVersion).toBe("0.2.0");
+    expect(list.minVersion).toBe("0.7.13");
   });
 
   it("refuses joins beyond maxPlayers", async () => {
@@ -123,9 +123,9 @@ describe("lobby", () => {
     bo.sendJson({ type: "pick", member: 0, rider: 3 });
     expect((await bo.json("error")).code).toBe("not_host");
     bo.sendJson({ type: "pick", rider: 7, bike: 2 });
-    host.sendJson({ type: "settings", track: 5, laps: 3, seed: 1234 });
     host.sendJson({ type: "settings", track: 999 });
     expect((await host.json("error")).code).toBe("bad_value");
+    host.sendJson({ type: "settings", track: 5, laps: 3, seed: 1234 });
     const r = JSON.parse(
       (await host.next((f) => typeof f === "string" && JSON.parse(f).settings?.track === 5 && JSON.parse(f).members?.[1]?.rider === 7)) as string,
     );
@@ -133,16 +133,14 @@ describe("lobby", () => {
     expect(r.members[1]).toMatchObject({ rider: 7, bike: 2 });
   });
 
-  it("starts only when everyone is ready, assigning slots host first", async () => {
+  it("starts with the ready players, assigning slots host first; a late joiner waits in the room", async () => {
     const { host, code } = await Client.host("H");
     const a = await Client.join(code, "A");
     host.sendJson({ type: "settings", track: 2, seed: 77 });
-    host.sendJson({ type: "ready", ready: true });
     host.sendJson({ type: "start" });
     expect((await host.json("error")).code).toBe("not_ready");
+    host.sendJson({ type: "ready", ready: true });
     a.sendJson({ type: "ready", ready: true });
-    await host.next((f) => typeof f === "string" && JSON.parse(f).members?.every((m: any) => m.ready));
-    host.sendJson({ type: "start" });
     const [sh, sa] = await Promise.all([host.json("start"), a.json("start")]);
     expect(sh).toMatchObject({ yourSlot: 0, track: 2, seed: 77 });
     expect(sa.yourSlot).toBe(1);
@@ -150,9 +148,10 @@ describe("lobby", () => {
     expect(sa.inputDelay).toBeUndefined();
     expect(sa.startAt).toBeGreaterThan(sa.serverTime);
 
-    const late = await Client.connect(`/v1/rooms/${code}`);
-    late.hello("Late");
-    expect((await late.json("error")).code).toBe("room_started");
+    const late = await Client.join(code, "Late");
+    const r = await late.json("room");
+    expect(r.phase).toBe("racing");
+    expect(r.members.find((m: any) => m.name === "Late").inRace).toBe(false);
   });
 
   it("hands the host role to the longest-present member", async () => {
@@ -171,7 +170,6 @@ describe("lobby", () => {
 describe("race room", () => {
   const room = (f: unknown) => typeof f === "string" && JSON.parse(f).type === "room";
   const snap = async (c: Client, pred: (r: any) => boolean) => JSON.parse((await c.next((f) => room(f) && pred(JSON.parse(f as string)))) as string);
-  const countdown = { features: ["countdown"] };
 
   it("keeps Ready across a new track, computer riders and going public; cheats unready everyone", async () => {
     const { host, code } = await Client.host("H");
@@ -218,12 +216,8 @@ describe("race room", () => {
   });
 
   it("counts down once everyone is ready and starts the race by itself", async () => {
-    const host = await Client.connect("/v1/rooms/new");
-    host.hello("H", countdown);
-    const { code } = await host.json("welcome");
-    const a = await Client.connect(`/v1/rooms/${code}`);
-    a.hello("A", countdown);
-    await a.json("welcome");
+    const { host, code } = await Client.host("H");
+    const a = await Client.join(code, "A");
     host.sendJson({ type: "ready", ready: true });
     a.sendJson({ type: "ready", ready: true });
     const r = await snap(host, (r) => r.countdownEndsAt !== null);
@@ -233,38 +227,6 @@ describe("race room", () => {
     await runDurableObjectAlarm(env.ROOM.get(env.ROOM.idFromName(code)));
     const [sh, sa] = await Promise.all([host.json("start"), a.json("start")]);
     expect([sh.yourSlot, sa.yourSlot]).toEqual([0, 1]);
-  });
-
-  it("stops the countdown when someone unreadies, and Start still starts at once", async () => {
-    const host = await Client.connect("/v1/rooms/new");
-    host.hello("H", countdown);
-    const { code } = await host.json("welcome");
-    const a = await Client.connect(`/v1/rooms/${code}`);
-    a.hello("A", countdown);
-    await a.json("welcome");
-    host.sendJson({ type: "ready", ready: true });
-    a.sendJson({ type: "ready", ready: true });
-    await snap(host, (r) => r.countdownEndsAt !== null);
-    a.sendJson({ type: "ready", ready: false });
-    await snap(host, (r) => r.countdownEndsAt === null && !r.members[1].ready);
-    await new Promise((done) => setTimeout(done, 350));
-    await runDurableObjectAlarm(env.ROOM.get(env.ROOM.idFromName(code)));
-    expect((await snap(host, () => true)).started).toBe(false);
-    a.sendJson({ type: "ready", ready: true });
-    await snap(host, (r) => r.countdownEndsAt !== null);
-    host.sendJson({ type: "start" });
-    await Promise.all([host.json("start"), a.json("start")]);
-  });
-
-  it("runs no countdown while anyone's client doesn't show one", async () => {
-    const host = await Client.connect("/v1/rooms/new");
-    host.hello("H", countdown);
-    const { code } = await host.json("welcome");
-    const old = await Client.join(code, "Old");
-    host.sendJson({ type: "ready", ready: true });
-    old.sendJson({ type: "ready", ready: true });
-    const r = await snap(host, (r) => r.members.length === 2 && r.members.every((m: any) => m.ready));
-    expect(r.countdownEndsAt).toBeNull();
   });
 });
 
@@ -282,11 +244,11 @@ describe("public lobby list", () => {
   });
 });
 
-describe("race relay", () => {
-  it("answers a race ping to the sender only, with its slot and the server's clock", async () => {
+describe("the race on the room socket", () => {
+  it("answers a race ping to the sender only, its bytes and the server's clock", async () => {
     const { clients } = await startedRace(3);
     const before = Date.now();
-    clients[2].ws.send(new Uint8Array([3, 0, 9, 9]).buffer);
+    clients[2].ws.send(new Uint8Array([3, 2, 9, 9]).buffer);
     const pong = await clients[2].binary();
     expect([...pong.slice(0, 4)]).toEqual([4, 2, 9, 9]);
     // protocol 4: the server's time (f64 ms) after the ping's bytes (finding 169)
@@ -296,7 +258,7 @@ describe("race relay", () => {
     expect(serverTime).toBeLessThanOrEqual(Date.now());
   });
 
-  it("drops every WebSocket race frame; only PING/PONG remains", async () => {
+  it("drops every binary message but PING", async () => {
     const { clients } = await startedRace(2);
     for (const type of [1, 2, 5, 6]) clients[0].ws.send(new Uint8Array([type, 0, 7]).buffer);
     // A same-socket ping proves all earlier frames were processed without forwarding.
@@ -317,7 +279,7 @@ describe("race relay", () => {
     clients[0].sendJson({ type: "kick", member: 1 });
     expect((await clients[1].json("error")).code).toBe("kicked");
     expect(await clients[1].closed()).toBe(4007);
-    expect(await clients[0].json("left")).toMatchObject({ slot: 1, reason: "kicked" });
+    expect(await clients[0].json("left")).toMatchObject({ slot: 1, reason: "left" });
   });
 
   it("returns to the lobby when the host ends the race", async () => {
@@ -332,7 +294,7 @@ describe("race relay", () => {
 
 describe("worker routes", () => {
   it("health and 404", async () => {
-    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0", online: true });
+    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: PROTOCOL, minVersion: "0.7.13", online: true });
     expect((await exports.default.fetch("https://dhd.test/nope")).status).toBe(404);
     expect((await exports.default.fetch("https://dhd.test/v1/rooms/new")).status).toBe(426);
   });

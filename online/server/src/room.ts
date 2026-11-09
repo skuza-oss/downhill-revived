@@ -1,5 +1,6 @@
-// One lobby and its race. Lobby control is JSON; the race is binary frames relayed to the other
-// racers through the SFU; this object owns lobby and signaling. Protocol: docs/online-protocol.md.
+// One lobby and its races. Lobby control is JSON on the room WebSocket; the race's frames travel
+// over the Realtime SFU, and this object owns the lobby and the SFU signaling. The only binary
+// message here is the clock's PING. Protocol: docs/online-protocol.md.
 import {
   CallGate, Realtime, Turn, TURN_TTL_S, clientChannels, unknownOutcome, type Allocation, type ListedChannel, type SfuSession,
   type SfuSecrets,
@@ -10,12 +11,10 @@ import {
   CLOSE_CODES,
   COUNTDOWN_MS,
   DEFAULT_MAX_PLAYERS,
-  FEATURE_COUNTDOWN,
   FRAME_PING,
   FRAME_PONG,
   HELLO_TIMEOUT_MS,
   OUTDATED_MESSAGE,
-  MAX_BINARY_BYTES,
   MAX_MEMBERS,
   MAX_TEXT_BYTES,
   PING_INTERVAL_MS,
@@ -154,8 +153,6 @@ interface Member {
   bike: number;
   /** On the rider screen: not ready until they come back with a rider. */
   choosing?: boolean;
-  /** The hello listed the "countdown" feature (COUNTDOWN_MS). */
-  countdown?: boolean;
   /** Their region as Cloudflare places them ("EU", "NA"...; "" unknown), shown to the room. Never
       their country: rooms are public and players post their logs (finding 135). */
   region?: string;
@@ -219,6 +216,9 @@ interface Race {
 interface StartPlayer { slot: number; memberId: number; name: string; rider: number; bike: number; }
 
 interface RoomState {
+  /** Always true: every room has the race room rules (finding 115) since the old rules for
+      releases before 0.7.4 went (finding 185). Still written, so a previous version of this code
+      that loads the room during a rollout keeps those rules. */
   session?: boolean;
   rules?: Rules;
   nextExplicit?: boolean;
@@ -318,10 +318,6 @@ export class Room extends DurableObject<Env> {
   /** The first round-trip after connect, kept apart: see measuredRtt. */
   private firstRtts = new Map<number, number>();
 
-  // Race relay state, rebuilt from `state.race` after a wake-up.
-  private raceSockets: (WebSocket | null)[] = [];
-  private slotOf = new Map<WebSocket, number>();
-
   private listedKey: string | null = null;
   private listedAt = 0;
   /** This instance's start. Members then without a socket are a restart's ghosts, kept for their
@@ -350,8 +346,6 @@ export class Room extends DurableObject<Env> {
         const info = ws.deserializeAttachment() as SocketInfo | null;
         if (info?.memberId != null) this.sockets.set(info.memberId, ws);
       }
-      // After a wake-up mid-race the last relayed fields are unknown (see leave()).
-      this.rebuildRace();
       this.backFromRestart();
     });
   }
@@ -465,7 +459,7 @@ export class Room extends DurableObject<Env> {
       return;
     }
     if (typeof msg !== "string") {
-      this.relay(ws, msg);
+      this.pong(ws, msg);
       return;
     }
     if (msg.length > MAX_TEXT_BYTES) return this.refuse(ws, "bad_message", "Message too long.");
@@ -516,16 +510,16 @@ export class Room extends DurableObject<Env> {
         return;
       case "settings":
         if (!isHost) return this.error(ws, "not_host", "Only the host can change the settings.");
-        if (st.race && (!st.session || (this.inRace(st, me.id) && st.race.results!.find(x => x.id === me.id)?.ticks === undefined))) return this.error(ws, "room_started", "The race is running.");
+        if (st.race && this.inRace(st, me.id) && st.race.results!.find(x => x.id === me.id)?.ticks === undefined) return this.error(ws, "room_started", "The race is running.");
         return this.onSettings(ws, st, m);
       case "pick":
         return this.onPick(ws, st, me, isHost, m);
       case "ready":
-        if (st.race && (!st.session || this.inRace(st, me.id))) return this.error(ws, "room_started", "The race is running.");
+        if (st.race && this.inRace(st, me.id)) return this.error(ws, "room_started", "The race is running.");
         if (m.ready === true && me.choosing) return this.error(ws, "not_ready", "Choose your rider first.");
         me.ready = m.ready === true;
-        if (st.session && st.grid && !me.ready) st.grid = st.grid.filter(id => id !== me.id);
-        if (st.session && st.waitingForRider && me.ready) {
+        if (st.grid && !me.ready) st.grid = st.grid.filter(id => id !== me.id);
+        if (st.waitingForRider && me.ready) {
           st.waitingForRider = false;
           st.nextRaceAt = Date.now() + 30_000;
         }
@@ -535,7 +529,7 @@ export class Room extends DurableObject<Env> {
         const target = st.members.find((x) => x.id === m.member);
         if (!target || target.id === me.id) return this.error(ws, "bad_value", "No such player.");
         const tws = this.sockets.get(target.id);
-        await this.leave(target.id, "kicked");
+        await this.leave(target.id);
         if (tws) this.close(tws, "kicked", "The host removed you from the room.");
         return;
       }
@@ -543,7 +537,6 @@ export class Room extends DurableObject<Env> {
         if (!isHost) return this.error(ws, "not_host", "Only the host can start the race.");
         return this.onStart(ws, st);
       case "finish":
-        if (!st.session) return this.refuse(ws, "bad_message", "Unknown message type.");
         if (!isU32(m.ticks) || !Number.isInteger(m.place) || (m.place as number) < 1 || (m.place as number) > 255)
           return this.error(ws, "bad_value", "Invalid finish.");
         if (st.race && this.inRace(st, me.id)) {
@@ -558,22 +551,16 @@ export class Room extends DurableObject<Env> {
         }
         return;
       case "back":
-        if (!st.session) return this.refuse(ws, "bad_message", "Unknown message type.");
         this.retire(st, me.id, "gave_up");
         if (st.race && !this.anyRacing(st)) await this.closeRace(st, false);
         return this.changed();
       case "end":
         if (!isHost) return this.error(ws, "not_host", "Only the host can end the race.");
         if (!st.race) return;
-        if (st.session) { await this.closeRace(st, true); return this.changed(); }
-        st.race = null;
-        st.countdownEndsAt = null;
-        for (const x of st.members) x.ready = false;
-        this.rebuildRace();
-        this.broadcast({ type: "ended" });
+        await this.closeRace(st, true);
         return this.changed();
       case "leave":
-        await this.leave(me.id, "leave");
+        await this.leave(me.id);
         try {
           ws.close(1000, "leave");
         } catch {}
@@ -626,7 +613,7 @@ export class Room extends DurableObject<Env> {
           // Dead connections: no message (a game sends one every second) for REJOIN_GRACE_MS. The
           // close event of a connection that died on the way may come minutes later, or never.
           if (now - this.heardAt(ws) > REJOIN_GRACE_MS) {
-            await this.leave(x.id, "disconnect");
+            await this.leave(x.id);
             try {
               ws.close(1001, "silent");
             } catch {}
@@ -634,7 +621,7 @@ export class Room extends DurableObject<Env> {
         } else if (now > (x.awaySince != null ? x.awaySince + REJOIN_GRACE_MS : this.startedAt + HELLO_TIMEOUT_MS)) {
           // Not back in time: after a drop (awaySince), or after a restart (a deploy drops every
           // socket and no close event comes: members without a socket at the start are ghosts).
-          await this.leave(x.id, "disconnect");
+          await this.leave(x.id);
         }
       }
     const st = this.state;
@@ -668,27 +655,25 @@ export class Room extends DurableObject<Env> {
         !(x.sfuReadyRace === race.startAt && x.sfu?.phase === "ready")).map(x => x.id);
       if (late.length) await this.retireSfu(late, race.startAt, true);
     }
-    if (st.session) {
-      if (st.race?.finishEndsAt != null && now >= st.race.finishEndsAt) {
-        for (const id of st.race.slots) this.retire(st, id, "time_up");
-        await this.closeRace(st, false);
-        await this.changed();
-      }
-      if (!st.race && st.nextRaceAt != null && now >= st.nextRaceAt) {
-        st.nextRaceAt = null;
-        if (st.members.some(x => x.ready && !x.choosing)) this.lockGrid(st);
-        else st.waitingForRider = true;
-        await this.changed();
-      }
+    if (st.race?.finishEndsAt != null && now >= st.race.finishEndsAt) {
+      for (const id of st.race.slots) this.retire(st, id, "time_up");
+      await this.closeRace(st, false);
+      await this.changed();
+    }
+    if (!st.race && st.nextRaceAt != null && now >= st.nextRaceAt) {
+      st.nextRaceAt = null;
+      if (st.members.some(x => x.ready && !x.choosing)) this.lockGrid(st);
+      else st.waitingForRider = true;
+      await this.changed();
     }
     // The countdown's end. Alarms fire at or after their time; a little early still counts.
     if (st.countdownEndsAt != null && now >= st.countdownEndsAt - 20 && !st.race) {
-      if (st.session ? !!st.grid?.length : this.countdownReady(st)) await this.startRace(st, "");
+      if (st.grid?.length) await this.startRace(st);
       else st.countdownEndsAt = null;
     }
     if (st.members.length === 0) {
       if (pending === 0 && now - st.createdAt > UNUSED_ROOM_MS) return this.destroy();
-    } else if (!st.race || st.session) {
+    } else {
       const ping = JSON.stringify({ type: "ping", s: now });
       for (const ws of this.sockets.values()) this.sendRaw(ws, ping);
       this.broadcastRoom();
@@ -698,17 +683,14 @@ export class Room extends DurableObject<Env> {
     await this.updateAtSafeMoment(st, now, pending);
   }
 
-  /** The next ping, or the countdown's end if that is sooner. */
+  /** The next ping, or a deadline (the countdown's end, the intermission's, the finish window's, a
+      Realtime setup's) if that is sooner. */
   private nextAlarm(st: RoomState, now: number): number {
     const ping = now + PING_INTERVAL_MS;
     const sfuBy = st.race && !st.race.sfuReleased ? Math.min(st.race.sfuBy ?? Infinity, st.race.sfuConnectBy ?? Infinity) : null;
-    if (st.session) return Math.min(ping, ...[st.countdownEndsAt, st.nextRaceAt, st.race?.finishEndsAt, sfuBy]
+    return Math.min(ping, ...[st.countdownEndsAt, st.nextRaceAt, st.race?.finishEndsAt, sfuBy]
       .filter((x): x is number => x != null).map(x => Math.max(now, x)));
-    const at = st.countdownEndsAt != null && !st.race ? Math.min(ping, Math.max(now, st.countdownEndsAt)) : ping;
-    return sfuBy != null ? Math.min(at, Math.max(now, sfuBy)) : at;
   }
-
-  // ---- Race relay (hot path: no awaits, no allocation beyond the frame) ----
 
   /** Usage stats: one Workers Analytics Engine point (dataset dhd_online; wrangler.jsonc STATS).
       Joins carry the release, the country and a hash of the name; races the player count, track
@@ -720,55 +702,29 @@ export class Room extends DurableObject<Env> {
     } catch {}
   }
 
-  private relay(ws: WebSocket, data: ArrayBuffer): void {
-    let slot = this.slotOf.get(ws);
-    if (slot === undefined) {
-      slot = this.findSlot(ws);
-      if (slot === undefined) return; // not racing: drop
-    }
-    const n = data.byteLength;
-    if (n < 2 || n > MAX_BINARY_BYTES) return;
-    const b = new Uint8Array(data);
-    b[1] = slot;
-    switch (b[0]) {
-      case FRAME_PING: {
-        if (n > 2 + PING_MAX_PAYLOAD) return;
-        // The same bytes as PONG, then the server's clock (f64 ms, little-endian; protocol 4):
-        // the race's snapshots are stamped on it (finding 169).
-        const pong = new Uint8Array(n + 8);
-        pong.set(b);
-        pong[0] = FRAME_PONG;
-        new DataView(pong.buffer).setFloat64(n, Date.now(), true);
-        try {
-          ws.send(pong);
-        } catch {}
-        return;
-      }
-    }
-  }
-
-  private findSlot(ws: WebSocket): number | undefined {
-    const race = this.state?.race;
+  /** A member's binary PING, answered to it alone: the same bytes with the type changed to PONG,
+      then the server's clock (f64 ms, little-endian; protocol 4), on which the race's snapshots
+      are stamped (finding 169). Any other binary message is not for the server and is dropped. */
+  private pong(ws: WebSocket, data: ArrayBuffer): void {
     const info = ws.deserializeAttachment() as SocketInfo | null;
-    if (!race || info?.memberId == null) return undefined;
-    const slot = race.slots.indexOf(info.memberId);
-    if (slot < 0 || race.left.includes(slot)) return undefined;
-    this.slotOf.set(ws, slot);
-    this.raceSockets[slot] = ws;
-    return slot;
+    const n = data.byteLength;
+    if (info?.memberId == null || n < 2 || n > 2 + PING_MAX_PAYLOAD) return;
+    const b = new Uint8Array(data);
+    if (b[0] !== FRAME_PING) return;
+    const pong = new Uint8Array(n + 8);
+    pong.set(b);
+    pong[0] = FRAME_PONG;
+    new DataView(pong.buffer).setFloat64(n, Date.now(), true);
+    try {
+      ws.send(pong);
+    } catch {}
   }
 
-  private rebuildRace(): void {
-    const race = this.state?.race;
-    this.slotOf.clear();
-    if (!race) {
-      this.raceSockets = [];
-      return;
-    }
-    this.raceSockets = race.slots.map((id, slot) => {
-      const ws = race.left.includes(slot) ? null : (this.sockets.get(id) ?? null);
-      if (ws) this.slotOf.set(ws, slot);
-      return ws;
+  /** Sends to every racer of the running race still in it. */
+  private sendRacers(race: Race, msg: object): void {
+    race.slots.forEach((id, slot) => {
+      const ws = race.left.includes(slot) ? undefined : this.sockets.get(id);
+      if (ws) this.send(ws, msg);
     });
   }
 
@@ -789,7 +745,7 @@ export class Room extends DurableObject<Env> {
   private async onHello(ws: WebSocket, info: SocketInfo, m: Msg): Promise<void> {
     // The version gate first: releases older than MIN_VERSION (wrangler.jsonc) may not play, and
     // client_outdated is the refusal their ONLINE screen answers with Update Now (finding 054), also
-    // when they speak an older protocol (0.7.11, protocol 2, against protocol 3: finding 158).
+    // when they speak an older protocol.
     const minVersion = minVersionOf(this.env.MIN_VERSION);
     const clientVersion = clientVersionOf(m);
     if (isOutdated(clientVersion, minVersion))
@@ -798,9 +754,7 @@ export class Room extends DurableObject<Env> {
       return this.refuse(ws, "protocol_mismatch", `This server speaks protocol ${PROTOCOL}; update the game.`);
     const version = m.version;
     const iso = m.isoSha256;
-    const session = this.state?.session || (info.create && Array.isArray(m.features) && m.features.includes("session"));
-    const clean = (s: string) => session ? sessionName(s) : s;
-    const name = typeof m.name === "string" ? clean(m.name).trim() : "";
+    const name = typeof m.name === "string" ? sessionName(m.name).trim() : "";
     if (typeof version !== "string" || version.length < 1 || version.length > 64)
       return this.refuse(ws, "bad_message", "hello.version must be 1-64 characters.");
     if (typeof iso !== "string" || !/^[0-9a-f]{64}$/.test(iso))
@@ -836,7 +790,6 @@ export class Room extends DurableObject<Env> {
     // socket) gets its member again: id, host, rider, Ready and race place included (finding 137).
     const ghost = asHost ? undefined : this.rejoinOf(st, m.rejoinToken);
     if (!asHost) {
-      if (st.race && !st.session) return this.refuse(ws, "room_started", "The race has already started.");
       if (version !== st.version)
         return this.refuse(ws, "version_mismatch", `The host runs "${st.version}", you run "${version}".`);
       if (iso !== st.isoSha256)
@@ -847,8 +800,9 @@ export class Room extends DurableObject<Env> {
         return this.refuse(ws, "room_full", "The room is full.");
       }
     } else {
-      st.session = Array.isArray(m.features) && m.features.includes("session");
-      if (st.session) { st.rules = {finishWindow: 60, nextRace: "host", then: "next"}; st.rotation = []; }
+      st.session = true;
+      st.rules = {finishWindow: 60, nextRace: "host", then: "next"};
+      st.rotation = [];
       st.version = version;
       st.isoSha256 = iso;
       st.roomName = `${name}'s room`;
@@ -861,7 +815,6 @@ export class Room extends DurableObject<Env> {
       ready: false,
       rider: 0,
       bike: 0,
-      countdown: features.includes(FEATURE_COUNTDOWN),
       token: rejoinToken(),
     };
     member.region = info.region ?? "";
@@ -869,33 +822,30 @@ export class Room extends DurableObject<Env> {
     if (!ghost) st.members.push(member);
     if (asHost) st.hostId = member.id;
     // A racer back in its race (finding 175): it raced on over the SFU meanwhile.
-    const backInRace = !!ghost && !!st.session && this.inRace(st, ghost.id) && !!ghost.raceRejoin;
+    const backInRace = !!ghost && this.inRace(st, ghost.id) && !!ghost.raceRejoin;
     if (ghost) {
       delete ghost.awaySince;
-      ghost.countdown = features.includes(FEATURE_COUNTDOWN);
       // The old socket may not close for minutes (a dead path the room hasn't seen end yet):
       // forget it, so its late close doesn't remove the member, and close it.
       const old = this.sockets.get(ghost.id);
       if (old && old !== ws) {
         old.serializeAttachment({ ...(old.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
-        this.slotOf.delete(old);
         try {
           old.close(REPLACED_CLOSE, "replaced");
         } catch {}
       }
       this.rtts.delete(ghost.id);
       this.firstRtts.delete(ghost.id);
-      // An older game never rejoins during its race (it races on alone): a member still in the
-      // race is out of it now. A game with race_rejoin gets its race back (raceCatchUp below).
-      if (st.session && this.inRace(st, ghost.id) && !backInRace) this.retire(st, ghost.id, "left");
+      // A game without race_rejoin never rejoins during its race (it races on alone): a member
+      // still in the race is out of it now. A game with it gets its race back (catchUp below).
+      if (this.inRace(st, ghost.id) && !backInRace) this.retire(st, ghost.id, "left");
     }
     info.memberId = member.id;
     ws.serializeAttachment(info);
     this.sockets.set(member.id, ws);
     if (ghost) this.noteRejoin(st);
     if (ghost) {
-      this.rebuildRace();
-      if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
+      if (st.race && !this.anyRacing(st)) await this.closeRace(st, false);
     } else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
     // The moderation log (finding 161): who entered which room, kept 14 days, for bans.
     this.ctx.waitUntil(logJoin(this.env as GuardEnv, {
@@ -1068,55 +1018,48 @@ export class Room extends DurableObject<Env> {
       if (!Number.isInteger(mp) || (mp as number) < 2 || (mp as number) > MAX_MEMBERS) return bad("maxPlayers");
       if ((mp as number) < st.members.length) return bad("maxPlayers (below the player count)");
     }
-    if (st.session) {
-      if (m.finishWindow !== undefined && ![0,30,60,120].includes(m.finishWindow as number)) return bad("finishWindow");
-      if (m.nextRace !== undefined && !["auto","host"].includes(m.nextRace as string)) return bad("nextRace");
-      if (m.then !== undefined && !["same","next","random"].includes(m.then as string)) return bad("then");
-      if (m.rotation !== undefined && (!Array.isArray(m.rotation) || m.rotation.length > 64 || !m.rotation.every(isByte))) return bad("rotation");
-      if (m.rotation !== undefined && (!Array.isArray(m.trackLimits) ||
-          m.trackLimits.length !== (m.rotation as number[]).length ||
-          !m.trackLimits.every(x => x === 6 || x === 8 || x === 10) ||
-          !m.trackLimits.includes(10))) return bad("trackLimits");
-      if (m.pickOnly !== undefined && (m.rotation === undefined || !Array.isArray(m.pickOnly) ||
-          !m.pickOnly.every(x => (m.rotation as number[]).includes(x)))) return bad("pickOnly");
-      if (m.finishWindow !== undefined) st.rules!.finishWindow = m.finishWindow as number;
-      if (m.then !== undefined) st.rules!.then = m.then as Rules["then"];
-      if (m.nextRace !== undefined) { st.rules!.nextRace = m.nextRace as Rules["nextRace"]; st.nextExplicit = true; }
-      if (m.public !== undefined && !st.nextExplicit) st.rules!.nextRace = m.public ? "auto" : "host";
-      if (m.rotation !== undefined) {
-        st.rotation = m.rotation as number[];
-        st.trackLimits = m.trackLimits as number[];
-        st.pickOnly = (m.pickOnly as number[] | undefined) ?? [];
-      }
-      if (m.track !== undefined && m.track !== st.track && st.nextRaceAt != null)
-        st.nextRaceAt = Math.max(st.nextRaceAt, Date.now() + 15_000);
+    if (m.finishWindow !== undefined && ![0,30,60,120].includes(m.finishWindow as number)) return bad("finishWindow");
+    if (m.nextRace !== undefined && !["auto","host"].includes(m.nextRace as string)) return bad("nextRace");
+    if (m.then !== undefined && !["same","next","random"].includes(m.then as string)) return bad("then");
+    if (m.rotation !== undefined && (!Array.isArray(m.rotation) || m.rotation.length > 64 || !m.rotation.every(isByte))) return bad("rotation");
+    if (m.rotation !== undefined && (!Array.isArray(m.trackLimits) ||
+        m.trackLimits.length !== (m.rotation as number[]).length ||
+        !m.trackLimits.every(x => x === 6 || x === 8 || x === 10) ||
+        !m.trackLimits.includes(10))) return bad("trackLimits");
+    if (m.pickOnly !== undefined && (m.rotation === undefined || !Array.isArray(m.pickOnly) ||
+        !m.pickOnly.every(x => (m.rotation as number[]).includes(x)))) return bad("pickOnly");
+    if (m.finishWindow !== undefined) st.rules!.finishWindow = m.finishWindow as number;
+    if (m.then !== undefined) st.rules!.then = m.then as Rules["then"];
+    if (m.nextRace !== undefined) { st.rules!.nextRace = m.nextRace as Rules["nextRace"]; st.nextExplicit = true; }
+    if (m.public !== undefined && !st.nextExplicit) st.rules!.nextRace = m.public ? "auto" : "host";
+    if (m.rotation !== undefined) {
+      st.rotation = m.rotation as number[];
+      st.trackLimits = m.trackLimits as number[];
+      st.pickOnly = (m.pickOnly as number[] | undefined) ?? [];
     }
+    if (m.track !== undefined && m.track !== st.track && st.nextRaceAt != null)
+      st.nextRaceAt = Math.max(st.nextRaceAt, Date.now() + 15_000);
     // Ready means "count me in for the next race", not "I agree to these settings": a new track or
     // computer riders on or off keep it. Cheats on or off make another kind of race, so everyone
     // outside the running race readies again for it (finding 128).
     if (m.laps !== undefined && (((m.laps as number) ^ st.laps) & LAPS_CHEATS))
-      for (const x of st.members) if (!st.session || !this.inRace(st, x.id)) x.ready = false;
+      for (const x of st.members) if (!this.inRace(st, x.id)) x.ready = false;
     const newTrack = m.track !== undefined && m.track !== st.track;
     if (m.track !== undefined) st.track = m.track as number;
-    // A new track during the start countdown: the countdown runs again in full, so the ready
-    // players see the change (session rooms lock their grid again, which checks the new
-    // track's limit).
-    if (newTrack && !st.race && st.countdownEndsAt != null) {
-      if (st.session && st.grid) this.lockGrid(st);
-      else if (!st.session) st.countdownEndsAt = Date.now() + this.countdownMs();
-    }
+    // A new track during the start countdown: the grid is locked again and the countdown runs
+    // again in full, so the ready players see the change; the new track's limit is checked.
+    if (newTrack && !st.race && st.countdownEndsAt != null && st.grid) this.lockGrid(st);
     if (m.laps !== undefined) st.laps = m.laps as number;
     if (m.seed !== undefined) st.seed = m.seed as number | null;
     if (m.public !== undefined) st.public = m.public as boolean;
-    if (m.roomName !== undefined) st.roomName = (st.session ? sessionName(m.roomName as string) : m.roomName as string).trim();
+    if (m.roomName !== undefined) st.roomName = sessionName(m.roomName as string).trim();
     if (m.maxPlayers !== undefined) st.maxPlayers = m.maxPlayers as number;
     await this.changed();
   }
 
   private async onPick(ws: WebSocket, st: RoomState, me: Member, isHost: boolean, m: Msg): Promise<void> {
-    if (st.race && !st.session) return this.error(ws, "room_started", "The race is running.");
     const target = m.member === undefined ? me : st.members.find((x) => x.id === m.member);
-    if (target && st.session && this.inRace(st, target.id)) return this.error(ws, "room_started", "The rider is racing.");
+    if (target && this.inRace(st, target.id)) return this.error(ws, "room_started", "The rider is racing.");
     if (!target) return this.error(ws, "bad_value", "No such player.");
     if (target !== me && !isHost) return this.error(ws, "not_host", "Only the host can pick for others.");
     if (m.rider !== undefined && !isByte(m.rider)) return this.error(ws, "bad_value", "Invalid rider.");
@@ -1135,25 +1078,9 @@ export class Room extends DurableObject<Env> {
     if (st !== this.state) return;
     if (st.race) return this.error(ws, "room_started", "The race is already running.");
     if (!sw.on) return this.error(ws, "online_off", sw.message);
-    if (st.session) {
-      if (!st.members.some(x => x.ready && !x.choosing)) return this.error(ws, "not_ready", "Nobody is ready.");
-      if (st.countdownEndsAt == null) this.lockGrid(st);
-      return this.changed();
-    }
-    const waiting = st.members.filter((x) => !x.ready);
-    if (waiting.length)
-      return this.error(ws, "not_ready", `Not ready: ${waiting.map((x) => x.name).join(", ")}.`);
-    const hostInfo = ws.deserializeAttachment() as SocketInfo | null;
-    await this.startRace(st, hostInfo?.country ?? "");
-  }
-
-  /** Everyone can race now, and every client shows the countdown. */
-  private countdownReady(st: RoomState): boolean {
-    return (
-      !st.race &&
-      st.members.length >= 2 &&
-      st.members.every((x) => x.ready && !x.choosing && x.countdown)
-    );
+    if (!st.members.some(x => x.ready && !x.choosing)) return this.error(ws, "not_ready", "Nobody is ready.");
+    if (st.countdownEndsAt == null) this.lockGrid(st);
+    return this.changed();
   }
 
   /** The caps per member (src/guard.ts CAPS), worked out once per env (every message asks, the race
@@ -1201,30 +1128,21 @@ export class Room extends DurableObject<Env> {
       st.grid = undefined; st.gridRules = undefined;
       return false;
     }
-    if (st.session) {
-      if (st.race) return false;
-      if (st.grid) {
-        st.grid = st.grid.filter(id => st.members.some(x => x.id === id && x.ready && !x.choosing));
-        if (st.grid.length) return false;
-        st.grid = undefined; st.gridRules = undefined; st.countdownEndsAt = null;
-        st.lastEvent = "start_cancelled";
-        if (st.rules!.nextRace === "auto") st.nextRaceAt = Date.now() + 30_000;
-        return false;
-      }
-      // Everyone ready starts it in any phase, an intermission's timer or a host-started room's too.
-      if (st.members.length >= 2 && st.members.every(x => x.ready && !x.choosing)) { this.lockGrid(st); return true; }
+    if (st.race) return false;
+    if (st.grid) {
+      st.grid = st.grid.filter(id => st.members.some(x => x.id === id && x.ready && !x.choosing));
+      if (st.grid.length) return false;
+      st.grid = undefined; st.gridRules = undefined; st.countdownEndsAt = null;
+      st.lastEvent = "start_cancelled";
+      if (st.rules!.nextRace === "auto") st.nextRaceAt = Date.now() + 30_000;
       return false;
     }
-    if (!this.countdownReady(st)) {
-      st.countdownEndsAt = null;
-      return false;
-    }
-    if (st.countdownEndsAt != null) return false;
-    st.countdownEndsAt = Date.now() + this.countdownMs();
-    return true;
+    // Everyone ready starts it in any phase, an intermission's timer or a host-started room's too.
+    if (st.members.length >= 2 && st.members.every(x => x.ready && !x.choosing)) { this.lockGrid(st); return true; }
+    return false;
   }
 
-  private async startRace(st: RoomState, country: string): Promise<void> {
+  private async startRace(st: RoomState): Promise<void> {
     const sw = await this.online();
     if (st !== this.state || st.race) return;
     st.countdownEndsAt = null;
@@ -1239,10 +1157,11 @@ export class Room extends DurableObject<Env> {
 
     // Host first, then join order.
     // Members away after a drop (finding 137) don't race: their game isn't here to start.
-    const racers = st.members.filter(x => this.sockets.has(x.id) && (!st.session || st.grid?.includes(x.id))).sort((a, b) => Number(b.id === st.hostId) - Number(a.id === st.hostId));
+    const racers = st.members.filter(x => this.sockets.has(x.id) && st.grid?.includes(x.id)).sort((a, b) => Number(b.id === st.hostId) - Number(a.id === st.hostId));
     const now = Date.now();
     st.race = {
-      ...(st.session ? {rules: {...st.gridRules!}, results: racers.map(x => ({id:x.id, name:x.name, rider:x.rider, place:0}))} : {}),
+      rules: {...st.gridRules!},
+      results: racers.map(x => ({id:x.id, name:x.name, rider:x.rider, place:0})),
       slots: racers.map((x) => x.id),
       left: [],
       track: st.track,
@@ -1254,10 +1173,9 @@ export class Room extends DurableObject<Env> {
       players: racers.map((x, slot) => ({ slot, memberId: x.id, name: x.name, rider: x.rider, bike: x.bike })),
     };
     st.grid = undefined; st.gridRules = undefined;
-    this.rebuildRace();
     await this.save();
     const race = st.race;
-    this.stat(["race", "", country], [racers.length, race.track, race.laps]);
+    this.stat(["race", "", ""], [racers.length, race.track, race.laps]);
     racers.forEach((x, slot) => {
       const s = this.sockets.get(x.id);
       if (s) this.send(s, this.startMessage(race, slot, now));
@@ -1318,18 +1236,15 @@ export class Room extends DurableObject<Env> {
     // for: it stays in the race, its rider moving on the others' screens, until it is back or the
     // grace is up (the alarm then retires it). An older game's rider would stand still meanwhile.
     const racing = !!st && this.inRace(st, id!);
-    if (!dropped || !st || !member || (racing && !(st.session && member.raceRejoin)) || this.sockets.get(id) !== ws)
-      return this.leave(id, "disconnect");
+    if (!dropped || !st || !member || (racing && !member.raceRejoin) || this.sockets.get(id) !== ws)
+      return this.leave(id);
     member.awaySince = Date.now();
     this.sockets.delete(id);
     this.rtts.delete(id);
     this.firstRtts.delete(id);
     ws.serializeAttachment({ ...info, memberId: null, gone: true });
-    this.slotOf.delete(ws);
-    if (racing) {
+    if (racing)
       console.log(`room ${st.code}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
-      this.rebuildRace();
-    }
     await this.changed();
   }
 
@@ -1342,7 +1257,6 @@ export class Room extends DurableObject<Env> {
     if (st.race) return st.members.filter((x) => this.inRace(st, x.id));
     if (st.grid?.length) return st.members.filter((x) => st.grid!.includes(x.id) && this.sockets.has(x.id));
     // A room with the old rules has no grid: its countdown runs only with everyone ready.
-    if (!st.session && st.countdownEndsAt != null) return st.members.filter((x) => this.sockets.has(x.id));
     return null;
   }
 
@@ -1840,19 +1754,12 @@ export class Room extends DurableObject<Env> {
       console.warn(`room ${st.code}: member ${id} out of the race: no Realtime connection`);
       const ws = this.sockets.get(id);
       if (ws) this.error(ws, "bad_value", SFU_FAILED_MESSAGE);
-      if (st.session) this.retire(st, id, "left");
-      else {
-        const slot = race.slots.indexOf(id);
-        race.left.push(slot);
-        if (member) member.ready = false;
-        this.rebuildRace();
-        for (const s of this.raceSockets) if (s) this.send(s, { type: "left", slot, memberId: id, reason: "left" });
-      }
+      this.retire(st, id, "left");
       if (member && (reset || member.sfu?.phase === "failed")) this.sfuReset(member);
     }
     if (!out || !st) return;
     this.releaseSfu(st);
-    if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
+    if (st.race && !this.anyRacing(st)) await this.closeRace(st, false);
     await this.changed();
   }
 
@@ -1889,14 +1796,14 @@ export class Room extends DurableObject<Env> {
     this.ctx.waitUntil(cleanup.catch(() => {}).then(() => this.save()).finally(() => { this.sfuCalls--; }));
   }
   /** Removes a member (idempotent). A racer's rider goes to the host's AI (the game decides). */
-  private async leave(memberId: number, reason: "disconnect" | "leave" | "kicked"): Promise<void> {
+  private async leave(memberId: number): Promise<void> {
     const st = this.state;
     if (!st) return;
     const i = st.members.findIndex((x) => x.id === memberId);
     if (i < 0) return;
     const departed = st.members[i];
     if (departed.sfu || departed.turnUser) this.queueClear(departed);
-    if (st.session) this.retire(st, memberId, "left");
+    this.retire(st, memberId, "left");
     st.members.splice(i, 1);
     this.releaseSfu(st);
     const ws = this.sockets.get(memberId);
@@ -1906,20 +1813,10 @@ export class Room extends DurableObject<Env> {
     if (ws) {
       // Forget the socket so a late close event doesn't count twice.
       ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
-      this.slotOf.delete(ws);
-    }
-    const race = st.race;
-    if (race) {
-      const slot = race.slots.indexOf(memberId);
-      if (slot >= 0 && !race.left.includes(slot)) {
-        race.left.push(slot);
-        this.raceSockets[slot] = null;
-        this.broadcast({ type: "left", slot, memberId, reason });
-      }
     }
     if (st.hostId === memberId) st.hostId = st.members[0]?.id ?? null;
     if (st.members.length === 0) return this.destroy();
-    if (st.session && st.race && !this.anyRacing(st)) await this.closeRace(st, false);
+    if (st.race && !this.anyRacing(st)) await this.closeRace(st, false);
     await this.changed();
   }
 
@@ -1983,9 +1880,7 @@ export class Room extends DurableObject<Env> {
     // Back in the room: the Ready that put them in this race is spent; a new one is for the next.
     const member = st.members.find(x => x.id === id);
     if (member) member.ready = false;
-    this.rebuildRace();
-    for (const ws of this.raceSockets) if (ws)
-      this.send(ws, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
+    this.sendRacers(st.race, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
     // After `left`: the others hear who is gone before their traffic is released (sent once now,
     // finding 175; the repeat used to come after `left` by chance).
     this.releaseSfu(st);
@@ -2020,7 +1915,6 @@ export class Room extends DurableObject<Env> {
     st.race = null;
     st.countdownEndsAt = null;
     st.nextRaceAt = race.rules!.nextRace === "auto" ? Date.now() + 30_000 : null;
-    this.rebuildRace();
     await this.save();
     this.broadcast({type:"ended", reason:voided ? "void" : "done"});
   }
@@ -2028,7 +1922,6 @@ export class Room extends DurableObject<Env> {
   private async destroy(): Promise<void> {
     if (this.listedKey !== null) this.updateListing(false, true);
     this.state = null;
-    this.rebuildRace();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // What didn't close outlives the room (Cleanup): stored again, with its alarm.
@@ -2126,14 +2019,9 @@ export class Room extends DurableObject<Env> {
   private async changed(): Promise<void> {
     const off = !(await this.online()).on;
     const st = this.state;
-    if (st?.session) {
+    if (st) {
       this.updateCountdown(st, off);
       await this.ctx.storage.setAlarm(this.nextAlarm(st, Date.now()));
-    }
-    if (st && !st.session && this.updateCountdown(st, off)) {
-      this.kickSubscribe();
-      const at = await this.ctx.storage.getAlarm();
-      if (at === null || at > st.countdownEndsAt!) await this.ctx.storage.setAlarm(st.countdownEndsAt!);
     }
     await this.save();
     this.broadcastRoom();
@@ -2146,14 +2034,12 @@ export class Room extends DurableObject<Env> {
 
   private snapshot(st: RoomState) {
     return {
-      ...(st.session ? {
-        phase: this.phase(st), raceStartedAt: st.race?.startAt ?? null,
-        finishEndsAt: st.race?.finishEndsAt ?? null, nextRaceAt: st.nextRaceAt ?? null,
-        waitingForRider: st.waitingForRider ?? false, lastEvent: st.lastEvent ?? null,
-        lastRace: st.lastRace ?? null, rules: st.rules, rotation: st.rotation,
-        rulesPending: !!((st.race?.rules || st.gridRules) &&
-          JSON.stringify(st.race?.rules || st.gridRules) !== JSON.stringify(st.rules)),
-      } : {}),
+      phase: this.phase(st), raceStartedAt: st.race?.startAt ?? null,
+      finishEndsAt: st.race?.finishEndsAt ?? null, nextRaceAt: st.nextRaceAt ?? null,
+      waitingForRider: st.waitingForRider ?? false, lastEvent: st.lastEvent ?? null,
+      lastRace: st.lastRace ?? null, rules: st.rules, rotation: st.rotation,
+      rulesPending: !!((st.race?.rules || st.gridRules) &&
+        JSON.stringify(st.race?.rules || st.gridRules) !== JSON.stringify(st.rules)),
       type: "room",
       code: st.code,
       hostId: st.hostId,
@@ -2166,7 +2052,7 @@ export class Room extends DurableObject<Env> {
       countdownEndsAt: st.countdownEndsAt ?? null,
       serverTime: Date.now(),
       members: st.members.map((x) => ({
-        ...(st.session ? this.memberRace(st, x.id) : {}),
+        ...this.memberRace(st, x.id),
         id: x.id,
         name: x.name,
         ready: x.ready,
@@ -2201,11 +2087,11 @@ export class Room extends DurableObject<Env> {
   private updateListing(refresh = false, forceRemove = false): void {
     const st = this.state;
     let entry: LobbyEntry | null = null;
-    if (!forceRemove && st && st.public && (st.session || !st.race) && st.hostId !== null && (st.session || st.members.length < st.maxPlayers)) {
+    if (!forceRemove && st && st.public && st.hostId !== null) {
       entry = {
-        ...(st.session ? {phase: this.phase(st), raceStartedAt: st.race?.startAt ?? null,
-          finishEndsAt: st.race?.finishEndsAt ?? null, nextRaceAt: st.nextRaceAt ?? null,
-          full: st.members.length >= st.maxPlayers} : {}),
+        phase: this.phase(st), raceStartedAt: st.race?.startAt ?? null,
+        finishEndsAt: st.race?.finishEndsAt ?? null, nextRaceAt: st.nextRaceAt ?? null,
+        full: st.members.length >= st.maxPlayers,
         code: st.code,
         roomName: st.roomName,
         version: st.version ?? "",

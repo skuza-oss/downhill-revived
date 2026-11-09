@@ -250,7 +250,7 @@ int main(void)
         client_free(&c);
     }
     {   /* The shared clock (finding 169): a race PONG with the server's time sets the offset, then
-           follows it by at most 2 ms a pong; a slow round trip or an older server's PONG changes
+           follows it by at most 2 ms a pong; a slow round trip or a PONG without the clock changes
            nothing. */
         unsigned char pong[2 + 16] = {NET_FRAME_PONG, 0};
         double sent, server;
@@ -268,7 +268,7 @@ int main(void)
         client_on_binary(&c,pong,sizeof pong);
         assert(fabs(c.clock_offset - 1002) < 1.5);
         PONG(10, 500.0);
-        client_on_binary(&c,pong,10);      /* a protocol 3 PONG: the send time only */
+        client_on_binary(&c,pong,10);      /* no server clock: not a PONG */
         assert(fabs(c.clock_offset - 1002) < 1.5);
         /* round trips slow for a long time, one way (a busy uplink: the server's time is read
            late on the way out, so it looks 60 ms ahead): the median follows them, the clock

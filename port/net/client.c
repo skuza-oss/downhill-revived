@@ -76,7 +76,6 @@ void client_init(NetClient *c, const char *name, const char *version, const char
     c->lobby.seed = -1;
     c->lobby.ping_ms = -1;
     c->rtt_floor = -1;
-    bench_open(&c->bench, getenv("DHD_NET_BENCH"));
     {
         const char *delay = getenv("DHD_NET_TEST_PONG_DELAY");
         if (delay && *delay) {
@@ -116,7 +115,6 @@ void client_set_install_id(NetClient *c, const char *id)
 
 void client_free(NetClient *c)
 {
-    if (c->bench.file) fclose(c->bench.file);
     SDL_DestroyCondition(c->changed);
     SDL_DestroyMutex(c->lock);
 }
@@ -139,9 +137,9 @@ void client_connected(NetClient *c, const NetTransport *tr)
     if (c->rejoin_token[0] && c->race_at > 0 && (c->racing || c->gave_up))
         snprintf(token + strlen(token), sizeof token - strlen(token), ",\"raceStartAt\":%.0f", c->race_at);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
-    /* features: this client shows the race room's countdown (the server runs one only when
-       everyone's does); race_rejoin: it races on over the SFU while its room connection is down
-       and rejoins its race (finding 175) */
+    /* features: race_rejoin, it races on over the SFU while its room connection is down and
+       rejoins its race (finding 175). "countdown" and "session" asked servers before finding 185
+       for the race room rules, which every room has now; still sent while such a server runs. */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
         "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\"]%s%s}", NET_PROTOCOL, c->version,
         DHD_VERSION, c->iso, name, install, token);
@@ -544,8 +542,6 @@ void client_on_text(NetClient *c, const char *text, size_t n)
                 say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d}", c->finish_ticks, c->finish_place);
         } else {
             c->lobby.state = NET_LOBBY;
-            if (c->bench.file && c->lobby.is_host)
-                say(c, "{\"type\":\"settings\",\"seed\":73127}");
             if (c->choosing)  /* after a reconnect: still on the rider screen */
                 say(c, "{\"type\":\"pick\",\"choosing\":true}");
             else if (c->picked)  /* what we had chosen */
@@ -652,46 +648,19 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
 {
     SDL_LockMutex(c->lock);
     c->last_rx = net_now_ms();
-    if (c->bench.file && c->racing && bench_match(data, n)) {
-        int kind = data[0] == NET_FRAME_STATE;
-        const char *label = kind ? "state" : "event";
-        const uint8_t *r = data + (kind ? 13 : 2);
-        unsigned seq; double sent;
-        memcpy(&seq, r + 11, 4); memcpy(&sent, r + 15, 8);
-        double now = c->last_rx;
-        if (!seq || !isfinite(sent) || sent <= 0 || r[10] >= 2) {
-            SDL_UnlockMutex(c->lock);
-            return;
-        }
-        if (!r[9] && r[10] != c->lobby.local_slot) {
-            bench_row(&c->bench, "rx", now, label, seq, data[1], n, 0, 0);
-            uint8_t reply[BENCH_STATE_BYTES]; memcpy(reply, data, n);
-            uint8_t *record = reply + (kind ? 13 : 2); record[9] = 1;
-            if (kind) { double epoch = now + c->clock_offset; memcpy(reply + 5, &epoch, 8); }
-            double processing = net_now_ms() - now; memcpy(record + 23, &processing, 8);
-            send_binary(c, reply, n);
-            bench_row(&c->bench, "echo", now, label, seq, data[1], n, 0, 0);
-        } else if (r[9] && r[10] == c->lobby.local_slot &&
-                   c->bench.sent[kind][seq % BENCH_RING] == sent) {
-            double processing; memcpy(&processing, r + 23, 8);
-            c->bench.sent[kind][seq % BENCH_RING] = 0;
-            bench_row(&c->bench, "rtt", now, label, seq, data[1], n, now - sent, processing);
-        }
-        SDL_UnlockMutex(c->lock);
-        return;
-    }
-    if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG && hold_pong(c, 1, data, n))
+    /* A PONG: our PING's bytes (the send time after type and slot), then the server's clock */
+    if (n >= 2 + 2 * sizeof(double) && data[0] == NET_FRAME_PONG && hold_pong(c, 1, data, n))
         ;
-    else if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG) {
+    else if (n >= 2 + 2 * sizeof(double) && data[0] == NET_FRAME_PONG) {
         double sent, server_time, now = net_now_ms(), rtt;
         memcpy(&sent, data + 2, sizeof sent);
         rtt = now - sent;
         add_rtt(c, rtt);
-        /* Protocol 4: the server's clock after our bytes (finding 169). The race's snapshots are
-           stamped on it, so the offset follows it during the race too, from the quick round
-           trips (clock_sample), but by at most CLOCK_SLEW_MS a pong: a sudden step would move
-           every puppet of this PC on the other screens. */
-        if (n >= 2 + 2 * sizeof(double) && clock_sample(c, rtt, now)) {
+        /* The race's snapshots are stamped on the server's clock (finding 169), so the offset
+           follows it during the race too, from the quick round trips (clock_sample), but by at
+           most CLOCK_SLEW_MS a pong: a sudden step would move every puppet of this PC on the
+           other screens. */
+        if (clock_sample(c, rtt, now)) {
             memcpy(&server_time, data + n - sizeof server_time, sizeof server_time);
             if (isfinite(server_time) && server_time > 0) {
                 double offset = server_time - (sent + rtt / 2), step = offset - c->clock_offset;
@@ -809,24 +778,6 @@ int client_tick(NetClient *c)
     int dead = 0;
     char line[4096] = "";
     SDL_LockMutex(c->lock);
-    if (c->bench.file && c->racing && c->connected && c->lobby.nslots == 2 && c->states_sent > 60) {
-        if (c->bench.race != c->race_at) {
-            c->bench.race = c->race_at; c->bench.next = now + 10000;
-            memset(c->bench.sent, 0, sizeof c->bench.sent);
-            bench_row(&c->bench, "warmup", now, "all", 0, c->lobby.local_slot, 0, 10000, bench_epoch_ms());
-        }
-        if (now >= c->bench.next) {
-            for (int kind = 0; kind < 2; kind++) {
-                uint8_t packet[BENCH_STATE_BYTES];
-                unsigned seq = ++c->bench.sequence[kind];
-                size_t n = bench_packet(packet, kind, c->lobby.local_slot, seq, now, now + c->clock_offset);
-                c->bench.sent[kind][seq % BENCH_RING] = now;
-                send_binary(c, packet, n);
-                bench_row(&c->bench, "tx", now, kind ? "state" : "event", seq, c->lobby.local_slot, n, 0, 0);
-            }
-            c->bench.next = now + 200; /* 5 Hz per channel, same load on both backends */
-        }
-    }
     if (c->racing && (c->connected || c->rejoining))
         for (int slot = 0; slot < NET_MAX_SLOTS; slot++) {
             double epoch = c->snapshot[slot].epoch;

@@ -5,11 +5,11 @@
 //
 // Each player creates/joins one room, readies up, and after "start" sends a binary PING --rate
 // times a second (the game: 2, port/net/client.c PING_RACE_MS) and answers the room's text pings.
-// Since protocol 3 race frames travel over the Realtime SFU (finding 158), not this socket; the
+// Race frames travel over the Realtime SFU (finding 158), not this socket; the
 // SFU path is measured by port/render/net/src/probe.rs. Every PING must come back as its PONG, and
 // no player may be warned or closed by the caps (src/guard.ts). These players never set up the SFU,
-// so the room takes them out of the race 25 s after its start (src/room.ts SFU_SETUP_MS): keep
-// --seconds below that, or run wrangler dev with a larger SFU_SETUP_MS (--var SFU_SETUP_MS:...).
+// so the room takes them out of the race 10 s after its start (src/room.ts SFU_CONNECT_MS); the
+// room answers a member's PINGs in a race or not.
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a, i, all) => (a.startsWith("--") ? [a.slice(2), all[i + 1]?.startsWith("--") ? true : (all[i + 1] ?? true)] : null)).filter(Boolean),

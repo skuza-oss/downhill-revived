@@ -53,9 +53,7 @@ after a version change before a live check.
 | `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots, PrintWindow captures) |
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` over the relay only |
-| `port/tools/cross_bench.py` | native PC/Mac SFU/P2P comparison: private rooms, both host roles, interleaved repeats and forced TURN controls (`--matrix`, `--rounds N` trials of each case), `--p2p-server URL` for P2P trials, `--env NAME=VALUE` for both games; raw evidence under the chosen output directory |
 | `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game hosts, `--bots N` nettool P2P bots join (`--turn-bots K` of them relay-only), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, snapshot age per sender (summary.json) |
-| `port/tools/analyze_netbench.py` | summarize a cross_bench output directory into JSON, CSV and Markdown; application RTT, delivery and native transport counters |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |
 | `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot) |
@@ -118,24 +116,6 @@ Menus and riding:
 
 Online:
 
-For a transport comparison, build both endpoints with the same core, stop VPN routing for a
-plain LAN baseline, and keep settings and network interfaces fixed. Set `DHD_REMOTE`,
-`DHD_REMOTE_APP` and `DHD_REMOTE_ISO` to an SSH target, its native executable and its disc path;
-these stay in the local environment. Run `cross_bench.py build/check/netbench --matrix`, then
-`analyze_netbench.py build/check/netbench`. `--exe` selects the local build; `--ssh-option`
-passes an SSH option such as a trusted host-key alias. `--server local` uses this checkout's server, which the
-Mac reaches by an ssh reverse tunnel (`local_server.tunnelled`). Do not run other games, builds, captures
-or network benchmarks concurrently. The harness owns only the processes it starts.
-
-`DHD_NET_BENCH=CSV` enables native diagnostic probes on both gameplay channels, plus selected
-ICE path and byte-counter logs. It requires exactly two game clients; the normal host AI still
-runs. Probes never reach rider synchronization. It also fixes the room seed for comparisons.
-Without this variable the probes, file and extra native stats are disabled. The runner waits
-ten seconds before sending probes, measures sixty seconds by default, and leaves drain time
-before collection. The two endpoint clocks are never subtracted to estimate one-way latency.
-Compare application RTT with application RTT, not lobby PING or an SFU's per-hop ICE RTT.
-Missing echo replies are application delivery failures, not a raw packet-loss measurement.
-
 | Variable | What |
 |---|---|
 | `DHD_NET_SERVER` | the server (`ws://127.0.0.1:<port>` for a local one) |
@@ -156,10 +136,10 @@ Missing echo replies are application delivery failures, not a raw packet-loss me
 | `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
 | `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |
+| `DHD_NET_PEER_STATS=1` | each second, a `netstats:` line per peer connection in dhd.log: its path (UDP or TURN over TLS), bytes each way and ICE round trip (p2p_crowd.py reads the host's) |
 | `DHD_NET_LOG_CODE=1` | dhd.log shows a P2P room's code in full (players' logs show `AB*****`: the code lets anyone in, and so see the host's address; finding 180); the tools that read the host's code from its log set it |
 | `DHD_NET_P2P_UDP=0` | a P2P room's direct UDP is off: no host or server-reflexive candidate, the TURN relay carries everything (finding 180) |
 | `DHD_NET_SFU_TURN=0` | the TURN fallback is never asked for; with `DHD_NET_SFU_UDP=0` a racer whose connection never comes up, whom the others must race without (finding 175) |
-| `DHD_PUPPET_PREDICT=0` | puppets interpolated in the past instead of predicted to the present (finding 169) |
 | `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |
 | `DHD_NET_TEST_PONG_DELAY=N[@S]` | from S seconds (default 60) after joining a room, every pong this PC gets (the room's and the race's PONG) is held N ms plus 0-N/2 ms more before it counts: a slow return path one way, for the shared clock (finding 175) |
 

@@ -22,7 +22,7 @@ export default defineConfig(async () => {
         // bites at once; the cache's own tests pass an env without it.
         miniflare: {
           bindings: {
-            MIN_VERSION: "0.2.0",
+            MIN_VERSION: "0.7.13",
             COUNTDOWN_MS: "300",
             COLO_PROBE: "off",
             CAP_WINDOW_MS: "1000",

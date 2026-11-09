@@ -34,7 +34,7 @@ The lane does five things, each its own commit or commits:
    existing extrapolation code as the base) and blend corrections smoothly when new data arrives.
    Hits and collisions with puppets must not get worse: decide how hits use the predicted pose
    (for example, the victim's PC still decides from its own rider, as today) and say so. A switch
-   (`DHD_PUPPET_PREDICT=0`) keeps interpolation for comparison. Crashes, respawns, the grid
+   (`DHD_PUPPET_PREDICT=0`, removed in finding 185) keeps interpolation for comparison. Crashes, respawns, the grid
    before GO and a rider's finish must look right.
 5. **A ping that means something.** The FPS & Ping counter shows the round trip to the room's
    lobby server, which no longer carries race data. Show the time to the other riders instead (for

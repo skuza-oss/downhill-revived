@@ -45,8 +45,8 @@ describe("moderation log", () => {
     await bo.json("welcome");
     const rows = await joinsOf(code, 2);
     expect(rows.map((r) => [r.member, r.kind, r.name, r.client_version, r.country])).toEqual([
-      [0, "host", "Ann", "0.2.0", "PL"],
-      [1, "guest", "Bo", "0.2.0", "US"],
+      [0, "host", "Ann", "0.7.13", "PL"],
+      [1, "guest", "Bo", "0.7.13", "US"],
     ]);
     expect(rows[0].ip_hash).toBe(await hashOf(ipA));
     expect(rows[1].ip_hash).toBe(await hashOf(ipB));

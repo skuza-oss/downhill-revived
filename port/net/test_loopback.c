@@ -1,7 +1,7 @@
 /* Four players in one process: client.c over a fake transport, through a fake relay that does
-   what online/server does (docs/online-protocol.md): welcome and room snapshots, slots at start,
-   STATE and EVENT relayed with the slot byte overwritten, PING answered, left when a socket
-   closes. Each player has its own one-way latency; delivery keeps each socket's order. Each
+   what the room (online/server) and the race network (the SFU) do together
+   (docs/online-protocol.md): welcome and room snapshots, slots at start, STATE and EVENT
+   forwarded with the slot byte set to the sender's, PING answered, left when a socket closes. Each player has its own one-way latency; delivery keeps each socket's order. Each
    player's game thread sends numbered STATE frames for a while, as online.c does about 20 times
    a second, and checks that every other player's frames arrive whole and in order. */
 #include "client.h"
@@ -161,9 +161,11 @@ static void relay_binary(Player *p, const uint8_t *data, size_t n)
         for (i = 0; i < PLAYERS; i++)
             if (&players[i] != p)
                 deliver(&players[i], p, 1, frame, n);
-    } else if (frame[0] == NET_FRAME_PING) {
+    } else if (frame[0] == NET_FRAME_PING && n + sizeof(double) <= sizeof frame) {
+        double clock = net_now_ms();  /* the server's clock after the ping's bytes (protocol 4) */
         frame[0] = NET_FRAME_PONG;
-        deliver(p, p, 1, frame, n);
+        memcpy(frame + n, &clock, sizeof clock);
+        deliver(p, p, 1, frame, n + sizeof clock);
     } else {
         printf("  relay: unexpected binary frame type %d\n", frame[0]);
         failures++;

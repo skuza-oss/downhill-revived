@@ -266,7 +266,6 @@ fn receive(c: &WsConn, peek: &TcpStream) -> (c_int, String) {
             }
         }
         for (binary, data) in got {
-            if binary && matches!(data.first(), Some(5 | 6)) { continue; }
             let mut q = lock(&c.queue);
             if !q.connected { return (1006, "connection closed".into()); }
             if q.incoming.len() >= 256 { return (1006, "control queue full".into()); }

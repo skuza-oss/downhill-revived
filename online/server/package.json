@@ -2,7 +2,7 @@
   "name": "dhd-online-server",
   "private": true,
   "type": "module",
-  "description": "Downhill Domination PC port: online lobbies and race relay (Cloudflare Workers + Durable Objects)",
+  "description": "Downhill Domination PC port: online lobbies and race signaling (Cloudflare Workers + Durable Objects)",
   "scripts": {
     "dev": "node tools/selfhost-config.mjs && wrangler dev --config wrangler.selfhost.jsonc",
     "dev:guard": "node tools/moderate.mjs local-setup && wrangler dev --config wrangler.guard-local.jsonc",

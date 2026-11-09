@@ -72,7 +72,9 @@ describe("a gone session and a release that waited (room SHCF93)", () => {
       for (let i = 0; i < 100 && !fake.held; i++) await new Promise((r) => setTimeout(r, 10));
       expect(fake.held).toBe(1);  // the pass runs, in the background
       await runInDurableObject(stub, async (room: any) => {
-        expect(room.state.race.sfuConnectBy).toBeUndefined();  // the setup check ran meanwhile
+        // the setup check ran meanwhile: neither racer ever connected, so both are out and the
+        // race with them
+        expect(room.state.race).toBeNull();
       });
     } finally {
       fake.release();

@@ -120,6 +120,9 @@ sound, and collisions with other riders.
 
 ## Interpolation
 
+Replaced by finding 169's prediction to the present; the interpolation mode and its switches
+(`DHD_PUPPET_PREDICT=0`, `DHD_PUPPET_DELAY`) were removed in finding 185. As first built:
+
 Each puppet keeps its last 32 snapshots. It estimates the sender's clock from arrivals, as a
 moving average of (snapshot clock − local clock), weight 0.05, reset when off by more than 30.
 It shows the sender `DHD_PUPPET_DELAY` behind the newest it holds (then 6 ticks; now milliseconds,

@@ -1,4 +1,4 @@
-/* A command-line player for testing the relay: it joins a room through net.h as the game does,
+/* A command-line player for testing rooms and races: it joins a room through net.h as the game does,
    and in the race replays a recorded rider (--replay, port/tools/online_race.py's bots) or just
    stays in it for --seconds, counting the others' frames; then it prints a RESULT line and leaves.
 
@@ -44,7 +44,7 @@ static int all_ready(const NetLobby *l)
 }
 static int racing(const NetLobby *l) { return l->state == NET_RACING; }
 
-/* --replay FILE (with --bot): a player of a state-sync race (port/hle/online.c, finding 047)
+/* --replay FILE: a player of a state-sync race (port/hle/online.c, finding 047)
    without a game. It says it has loaded and what it rides, takes the race's GO from the first
    game's GO event, then sends the snapshots a game recorded (DHD_NET_RECORD: bundles of the game's
    own rider alone, port/hle/state_bundle.h) as its own rider, stamped now, when the race time
@@ -157,7 +157,6 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--code-file") && i + 1 < argc) code_file = argv[++i];
         else if (!strcmp(argv[i], "--version") && i + 1 < argc) version = argv[++i];
         else if (!strcmp(argv[i], "--iso") && i + 1 < argc) iso = argv[++i];
-        else if (!strcmp(argv[i], "--bot")) ;  /* (older scripts' flag; nothing to do) */
         else if (!strcmp(argv[i], "--follow-host")) follow_host = 1;
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc) replay_file = argv[++i];
         else if (!strcmp(argv[i], "--rider") && i + 1 < argc) rider = atoi(argv[++i]);

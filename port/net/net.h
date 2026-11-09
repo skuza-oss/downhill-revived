@@ -184,10 +184,10 @@ int net_local_slot(void);
    (the receiver sets it from the channel), payload. */
 /* NET_FRAME_MAX: the largest frame accepted. A STATE frame is one bundle of at most
    STATE_BUNDLE_MAX bytes (port/hle/state_bundle.h: as many riders as fit one datagram, finding
-   169); a PC with more riders sends several. The server's MAX_BINARY_BYTES is the same. */
+   169); a PC with more riders sends several. */
 enum { NET_FRAME_STATE = 5, NET_FRAME_EVENT = 6, NET_FRAME_MAX = 3072, NET_RELAY_QUEUE = 128 };
-/* The race's pings (client.c): type, slot, the send time; the server answers PONG with the rest
-   as it was. */
+/* The race's pings over the room WebSocket, its only binary messages (client.c): type, slot, the
+   send time; the server answers PONG with the same bytes and its clock. */
 enum { NET_FRAME_PING = 3, NET_FRAME_PONG = 4 };
 /* Sends type and payload (at most NET_FRAME_MAX - 2 bytes); 0 when not racing. */
 int net_send_frame(int type, const void *payload, size_t n);
