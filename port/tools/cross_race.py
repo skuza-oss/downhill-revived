@@ -5,10 +5,11 @@ machine reaches by an ssh reverse tunnel (its 127.0.0.1:8787 is this PC's server
     python port/tools/cross_race.py OUT --host pc  --remote user@mac --remote-app '/path/Downhill Revived.app/Contents/MacOS/dhd'
     python port/tools/cross_race.py OUT --host mac ...                 # the other way round
 
---backend p2p races in a P2P room (finding 180): the host takes CREATE A P2P RACE and the other
-joins by the room's code (a P2P room is never listed); --force-turn turns direct UDP off on both
-games, so the relay carries the race. --server names a server instead of this checkout's local
-one and its reverse tunnel (the P2P service needs no tunnel: the games connect to each other).
+--backend p2p races in a P2P room (findings 180, 186): the host takes CREATE A P2P RACE and the
+other joins by the room's code (a P2P room is never listed); the games link to each other directly.
+--force-turn turns direct UDP off on both games: in an SFU room the TURN relay carries the race, in
+a P2P room the room's SFU (the fallback; the room needs Realtime then: .dev.vars). --server names a
+server instead of this checkout's local one and its reverse tunnel.
 
 The host side makes a public room from the ONLINE menu (CREATE A PUBLIC RACE); the other takes QUICK
 RACE into it. Both ready by DHD_NET_TEST_READY after each race, pedal by DHD_RACE_PAD; the host
@@ -60,7 +61,7 @@ def main():
     p.add_argument('--races', type=int, default=2)
     p.add_argument('--backend', choices=('sfu', 'p2p'), default='sfu')
     p.add_argument('--server', help='use an existing signaling server instead of a local server/tunnel')
-    p.add_argument('--force-turn', action='store_true', help='disable direct UDP on both games')
+    p.add_argument('--force-turn', action='store_true', help='direct UDP off on both games: the TURN relay (SFU room) or the SFU fallback (P2P room)')
     p.add_argument('--exe', type=Path, default=ROOT / 'build' / 'host64-exe' / 'dhd64.exe')
     p.add_argument('--remote', default=os.environ.get('DHD_REMOTE'), help='ssh destination of the other machine')
     p.add_argument('--remote-app', default=os.environ.get('DHD_REMOTE_APP'), help="the game's executable there")

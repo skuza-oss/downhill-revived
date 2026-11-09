@@ -55,7 +55,7 @@ typedef struct {
     int member_id, host_id, is_host;
     char room_name[100];
     int is_public, max_players, started;
-    int is_p2p;                /* a P2P room (finding 180): the host's game runs it; never public */
+    int is_p2p;                /* a P2P room (findings 180, 186): races over a star of games; never public */
     int track, laps;
     long long seed;            /* -1 until set */
     int nmembers;
@@ -123,16 +123,16 @@ void net_init(const char *base_url, const char *name, const char *version, const
 /* host_service_net_offered's bits: the kinds of room this build offers (port/host/host_api.h). */
 enum { NET_OFFER_SFU = 1, NET_OFFER_P2P = 2 };
 
-/* A room code has 6 characters (an SFU room) or 7 (a P2P room, finding 180): the length says
-   which service a join goes to. An SFU room runs where DHD_NET_ROOM_REGION says (dhd.ini
-   room_region, the ONLINE page's Room Region row): a Durable Object location hint the server
-   offers ("weur", "apac-se"...), or "auto"/unset: the server picks (finding 181). A P2P room
-   needs none: its server only relays signaling, and the race runs between the games. */
+/* A room code has 6 characters (an SFU room) or 7 (a P2P room, findings 180, 186): both are
+   server rooms, a P2P one racing over a star of the games' own connections. A room runs where
+   DHD_NET_ROOM_REGION says (dhd.ini room_region, the ONLINE page's Room Region row): a Durable
+   Object location hint the server offers ("weur", "apac-se"...), or "auto"/unset: the server picks
+   (finding 181). */
 int net_create_room(int p2p);
 int net_join_room(const char *code);   /* -1 when the code can't be one */
 
 /* A room's code as dhd.log shows it: net_log_code(code).text. Anyone holding an open P2P room's
-   code can join it and so learn its host's network address, and players post dhd.log in public:
+   code can join it and so learn its hub's network address, and players post dhd.log in public:
    a P2P room's code (7 characters) shows only its first two ("AB*****"; finding 180). An SFU
    room's (6) shows as it is. DHD_NET_LOG_CODE=1 shows every code in full: the test tools read the
    host's code from the log (docs/TESTING.md). Core and host both use it, so it lives here. */

@@ -1,6 +1,6 @@
 # 180: P2P rooms, chosen per room (host star)
 
-Status: current
+Status: partly superseded by 186 (the host's coordinator and the P2P server and Worker, TURN between games and its renewal, host loss ending the room; P2P rooms are server rooms with a hub star and an SFU fallback now)
 
 Branches: `feat/p2p-prototype` from `main` db3702d (the prototype, 2026-11-08), then
 `feat/p2p-clean` from its tip b592126 (the cleanup, the fixes and the tests below, 2026-11-08),

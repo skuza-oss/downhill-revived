@@ -129,11 +129,14 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   bans by address hash or install id with a 14-day moderation log in D1, worked from
   `online/server/tools/moderate.mjs` (no admin endpoint). In an SFU room no player gets another's address, its
   hash or install id.
-- P2P rooms (finding 180): private, by code (7 characters), the creator's choice beside SFU rooms;
-  the host's game coordinates and forwards race frames over WebRTC data channels, Cloudflare TURN
-  on 443 as the fallback, and the game warns that the room's players can see your network
-  address. Served by its own Worker (`online/server/wrangler.p2p.jsonc`). Windows and macOS
-  tested; Android and the browser build it but were not run.
+- P2P rooms (findings 180, 186): the creator's choice beside SFU rooms, private, by code (7
+  characters). A server room like any other (its rules, results, rejoin, region) whose race frames
+  travel over WebRTC data channels in a star around one member, the hub, which the room picks (the
+  creator, the next one when it leaves or can't do its work) and which forwards the others'
+  frames; a member who can't reach it directly races over the room's SFU, bridged by the hub. The
+  game warns that the room's players can see your network address. One send thread and one star
+  router (`port/render/star`) for the native games and the browser page. Windows and macOS tested; Android
+  builds it but was not run; the browser joins and races on the star (no SFU fallback there yet).
 - Race frames (findings 158, 177): over Cloudflare Realtime SFU DataChannels, STATE unordered with
   no retransmissions and EVENT reliable (Cloudflare forwards STATE ordered and reliable anyway; the
   client's vendored sctp-proto delivers it unordered, finding 173). One Realtime session per member

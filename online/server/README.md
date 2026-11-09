@@ -264,38 +264,18 @@ API and do not need credentials.
 The DO owns session and channel creation; clients connect only to Cloudflare. See
 [the protocol](../../docs/online-protocol.md) and finding 158 for setup, tests and live acceptance.
 
-## P2P rooms (finding 180, test builds)
+## P2P rooms (finding 186, test builds)
 
-A room's creator can pick P2P instead of the SFU: the games connect to the host's game directly
-(Cloudflare TURN over TLS on 443 when no direct path works), and the host's game runs the room.
-The server only admits members, relays host-star signaling and gives each member its own TURN
-credentials (`src/p2p.ts`). P2P rooms are private, joined by code and never listed: signaling
-gives the host every member's network address and every member the host's.
+A room's creator can pick P2P instead of the SFU (`/v1/rooms/new?transport=p2p`): it is a room like
+any other (`src/room.ts` runs its rules), but its race frames travel over peer connections between
+the games, in a star around one member, the hub, which forwards the others' frames. The room picks
+the hub (the creator first, the next one when it leaves or can't do its work), relays the star's
+signaling between the hub and each member, and puts a member whose link to the hub doesn't come up
+(or fails) on the SFU, bridged by the hub. P2P rooms are private, joined by their 7-character code
+and never listed: the hub's game sees each member's network address and each member the hub's.
+Nothing to deploy apart from the main Worker; a fallback racer uses Realtime (and its TURN
+fallback) as an SFU room's racer does.
 
-A self-hosted server serves `/v1/p2p/*` from its one Worker. `wrangler.jsonc` is the official main
-Worker's config and has no P2P rooms (the official server's are their own Worker, below, and
-`tools/deploy.mjs` uploads versions, which Cloudflare refuses for a version that creates a Durable
-Object class), so a self-hosted server deploys `wrangler.jsonc` plus the P2P binding and its
-migration, which `tools/selfhost-config.mjs` writes as `wrangler.selfhost.jsonc` (gitignored; run it
-again after editing `wrangler.jsonc`):
-
-```sh
-node tools/selfhost-config.mjs
-npx wrangler deploy --config wrangler.selfhost.jsonc
-```
-
-Without it, `/v1/p2p/*` answers "This server has no P2P rooms". Local test servers
-(`port/tools/local_server.py`, `npm run dev`, `npm run dev:guard`) use the same config.
-
-The official server runs P2P rooms as a Worker of their own, so deploying them never restarts an
-SFU room:
-
-```sh
-npx wrangler deploy --config wrangler.p2p.jsonc
-npx wrangler secret put TURN_KEY_ID --config wrangler.p2p.jsonc         # the same values as above
-npx wrangler secret put TURN_KEY_API_TOKEN --config wrangler.p2p.jsonc
-npx wrangler secret put IP_HASH_KEY --config wrangler.p2p.jsonc
-```
-
-Its route (`dhd.skuza.app/v1/p2p/*`) takes those paths ahead of the main Worker's custom domain.
-Relayed P2P races use the account's TURN quota: set a billing alert (finding 180).
+A self-hosted server that once added P2P rooms with the old `wrangler.selfhost.jsonc` (finding 180)
+has a `P2pRoom` class: its next deploy needs a migration that deletes it
+(`{ "tag": "v3-no-p2p", "deleted_classes": ["P2pRoom"] }`).

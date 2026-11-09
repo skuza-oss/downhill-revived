@@ -28,14 +28,14 @@ test('browser session messages and shared snapshots',()=>{
   };
   const api=createNet({span,str,online:true,openSocket:url=>new WebSocket(url)});
   api.host_service_net_init(0,put(1,'Test'),put(20,'0.7.4'),put(40,'a'.repeat(64)));
-  assert.equal(api.host_service_net_offered(),2);  // P2P rooms only (finding 180)
+  assert.equal(api.host_service_net_offered(),2);  // P2P rooms only (findings 180, 186)
   assert.equal(api.host_service_net_create_room(0),-1);
   assert.equal(api.host_service_net_join_room(put(100,'ABCDEF')),-1);  // an SFU room's code
   api.host_service_net_create_room(1);socket.onopen();
-  assert.match(socket.url,/\/v1\/p2p\/rooms\/new$/);
-  assert.deepEqual(socket.sent[0].features,['countdown','session']);
+  assert.match(socket.url,/\/v1\/rooms\/new\?transport=p2p$/);  // a server room with the P2P transport (finding 186)
+  assert.deepEqual(socket.sent[0].features,['countdown','session','race_go','p2p']);
   const recv=m=>socket.onmessage({data:JSON.stringify(m)});
-  recv({type:'welcome',memberId:7,code:'TEST22',serverTime:1000});
+  recv({type:'welcome',memberId:7,code:'TEST222',serverTime:1000,transport:'p2p'});
   recv({type:'room',phase:'intermission',hostId:7,nextRaceAt:31000,rules:{finishWindow:60,nextRace:'auto',then:'next'},
     members:[{id:7,name:'Test',ready:true,inRace:false,finishTicks:360,place:4}],
     lastRace:{id:2,track:3,entrants:[{id:7,name:'Test',ticks:360,place:4}]}});
@@ -43,6 +43,7 @@ test('browser session messages and shared snapshots',()=>{
   assert.equal(str(1024+layout.NetLobby.phase[0]),'intermission');
   assert.equal(dv.getFloat64(1024+layout.NetLobby.next_race_at[0],true),31000);
   assert.equal(dv.getInt32(1024+layout.NetLobby.state[0],true),2);
+  assert.equal(dv.getInt32(1024+layout.NetLobby.is_p2p[0],true),1);
   assert.equal(dv.getBigInt64(1024+layout.NetLobby.member[0]+layout.NetMember.finish_ticks[0],true),360n);
   // where the room runs and the members' regions (finding 135)
   recv({type:'where',region:'EU',colo:'FRA',members:[{id:7,region:'EU'}]});
@@ -50,6 +51,13 @@ test('browser session messages and shared snapshots',()=>{
   assert.equal(str(1024+layout.NetLobby.room_region[0]),'EU');
   assert.equal(str(1024+layout.NetLobby.room_colo[0]),'FRA');
   assert.equal(str(1024+layout.NetLobby.member[0]+layout.NetMember.region[0]),'EU');
+  // The start moment over the room (finding 187): sent to a server that takes it, taken in the race.
+  recv({type:'welcome',memberId:7,code:'TEST222',serverTime:1000,transport:'p2p',features:['sfu_silent','race_go']});
+  recv({type:'start',yourSlot:0,startAt:5000,players:[{slot:0,memberId:7,name:'Test'},{slot:1,memberId:8,name:'B'}]});
+  api.host_service_net_race_go(9000.5);assert.deepEqual(socket.sent.at(-1),{type:'race_go',race:5000,at:9000.5});
+  recv({type:'race_go',race:5000,at:9500});api.host_service_net_get_lobby(1024);
+  assert.equal(dv.getFloat64(1024+layout.NetLobby.race_go_at[0],true),9500);
+  recv({type:'ended',reason:'done'});
   api.host_service_net_finish(600,4);assert.deepEqual(socket.sent.at(-1),{type:'finish',ticks:600,place:4});
   api.host_service_net_back();assert.deepEqual(socket.sent.at(-1),{type:'back'});
   api.host_service_net_rules(60,1,2);assert.equal(socket.sent.at(-1).then,'random');

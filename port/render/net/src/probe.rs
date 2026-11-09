@@ -54,13 +54,8 @@ fn api(method: &str, path: &str, body: &Value) -> Value {
 
 /// TURN credentials for one client, as the room mints them (online/server/src/sfu.ts Turn).
 pub(crate) fn turn_credentials(tag: &str) -> (String, Value) {
-    turn_credentials_lasting(tag, 3600)
-}
-
-/// Credentials valid for `ttl` seconds (peer.rs's renewal test: one that expires during the test).
-pub(crate) fn turn_credentials_lasting(tag: &str, ttl: u32) -> (String, Value) {
     let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
-    let r = call("POST", &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"), &token, &json!({"ttl": ttl, "customIdentifier": tag}));
+    let r = call("POST", &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"), &token, &json!({"ttl": 3600, "customIdentifier": tag}));
     let server = r["iceServers"].as_array().unwrap().iter().find(|s| s["username"].is_string()).unwrap().clone();
     let urls: Vec<Value> = server["urls"].as_array().unwrap().iter().filter(|u| u.as_str().is_some_and(|u| u.starts_with("turns:"))).cloned().collect();
     let user = server["username"].as_str().unwrap().to_string();
@@ -381,7 +376,7 @@ fn probe_sfu_direct() {
             let (t, frames) = c[who].poll().unwrap();
             text[who] = t.iter().any(|m| m["type"] == "sfu_connected");
             let now = Instant::now();
-            for f in frames { rx[who].record(&f, now); }
+            for (_, f) in frames { rx[who].record(&f, now); }
         }
         text
     };
@@ -565,7 +560,7 @@ fn probe_parallel_subscriptions() {
         for (who, s) in c.iter_mut().enumerate() {
             let (text, frames) = s.poll().expect("association");
             connected[who] = text.iter().any(|m| m["type"] == "sfu_connected");
-            got[who].extend(frames);
+            got[who].extend(frames.into_iter().map(|(_, f)| f));
         }
         connected
     };
@@ -733,7 +728,7 @@ fn probe_unannounced_subscription_close() {
         c.push(sfu);
     };
     let poll = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>| {
-        for (k, s) in c.iter_mut().enumerate() { let (_, f) = s.poll().expect("association"); got[k].extend(f); }
+        for (k, s) in c.iter_mut().enumerate() { let (_, f) = s.poll().expect("association"); got[k].extend(f.into_iter().map(|(_, f)| f)); }
     };
     let wait = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>, ms: u64| {
         let until = Instant::now() + Duration::from_millis(ms);
@@ -854,7 +849,7 @@ fn probe_publisher_leaves() {
         c.push(Some(sfu));
     };
     let poll = |c: &mut Vec<Option<Sfu>>, got: &mut Vec<Vec<Vec<u8>>>| {
-        for (k, s) in c.iter_mut().enumerate() { if let Some(s) = s { let (_, f) = s.poll().expect("association"); got[k].extend(f); } }
+        for (k, s) in c.iter_mut().enumerate() { if let Some(s) = s { let (_, f) = s.poll().expect("association"); got[k].extend(f.into_iter().map(|(_, f)| f)); } }
     };
     let mut got: Vec<Vec<Vec<u8>>> = vec![vec![]; 4];
     for _ in 0..3 { connect(&mut c, &mut sessions); }

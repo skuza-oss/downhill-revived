@@ -4,7 +4,9 @@ The root `AGENTS.md` rules apply. Protocol: `docs/online-protocol.md`; steps and
 `README.md` here.
 
 - Races are state sync (finding 044). The STATE and EVENT frames travel over
-  Cloudflare Realtime SFU (TURN over TLS as the fallback); the room only sets up each member's
+  Cloudflare Realtime SFU (TURN over TLS as the fallback), or in a P2P room over peer connections
+  around a hub (finding 186: its members see each other's addresses; the room relays only the
+  star's signaling, its fallback members use the SFU); the room only sets up each member's
   session (one per room stay, its subscriptions made at the grid's lock: finding 177) and
   credentials and never sends a player another's address, SDP, session id or credentials
   (finding 158). Do not add input lockstep, input delay or race hashes. Rooms, sessions and
@@ -18,9 +20,8 @@ The root `AGENTS.md` rules apply. Protocol: `docs/online-protocol.md`; steps and
   never copy it into docs.
 - `wrangler.jsonc` is the official main Worker's config: `tools/deploy.mjs` uploads versions, which
   Cloudflare refuses for a version that creates a Durable Object class, so a new class needs a plain
-  `wrangler deploy` first. P2P rooms are not in it: the official server's are their own Worker
-  (`wrangler.p2p.jsonc`), a local or self-hosted server's come from `wrangler.selfhost.jsonc`
-  (`tools/selfhost-config.mjs`; finding 180).
+  `wrangler deploy` first. P2P rooms are the same Room class with another race transport (a star of
+  peer connections around a hub, the SFU as a member's fallback; finding 186).
 - Deploy with `tools/deploy.mjs` (finding 184), only from the maintainer's account after review
   (deploy notes are kept outside the repository): a 10% canary watched in Workers Logs, then 100%
   or a rollback; busy rooms adopt the new code between races (`src/rollout.ts`). `--emergency`

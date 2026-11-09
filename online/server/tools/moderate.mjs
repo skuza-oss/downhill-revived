@@ -40,7 +40,6 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { withP2p } from "./selfhost-config.mjs";
 
 const SERVER = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const WRANGLER = path.join(SERVER, "node_modules", "wrangler", "bin", "wrangler.js");
@@ -116,7 +115,9 @@ export function joinsSql(flags, now = Date.now()) {
   if (flags.until !== undefined) where.push(`j.at < ${parseWhen(String(flags.until), now)}`);
   if (flags.room !== undefined) {
     if (!/^[A-Za-z0-9]{1,12}$/.test(String(flags.room))) fail("--room takes a join code");
-    where.push(`j.room = ${sqlString(String(flags.room).toUpperCase())}`);
+    // A P2P room's code is kept by its first two characters (src/protocol.ts logCode).
+    const code = String(flags.room).toUpperCase();
+    where.push(`j.room = ${sqlString(code.length === 7 ? code.slice(0, 2) + "*****" : code)}`);
   }
   if (flags.like !== undefined) {
     const id = positiveInt(flags.like, "--like");
@@ -254,10 +255,9 @@ export function stripJsonc(text) {
   return out.replace(/,(\s*[}\]])/g, "$1");
 }
 
-/** wrangler.guard-local.jsonc: wrangler.jsonc with P2P rooms (tools/selfhost-config.mjs) and the
-    MODERATION binding to a local database, no custom domain; then the migrations into that local store. */
+/** wrangler.guard-local.jsonc: wrangler.jsonc with the MODERATION binding to a local database, no custom domain; then the migrations into that local store. */
 function localSetup() {
-  const config = withP2p(JSON.parse(stripJsonc(readFileSync(path.join(SERVER, "wrangler.jsonc"), "utf8"))));
+  const config = JSON.parse(stripJsonc(readFileSync(path.join(SERVER, "wrangler.jsonc"), "utf8")));
   delete config.routes;
   config.d1_databases = [{ binding: "MODERATION", database_name: DEFAULT_DB, database_id: "local-moderation", migrations_dir: "migrations" }];
   writeFileSync(

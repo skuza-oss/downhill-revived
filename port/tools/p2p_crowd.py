@@ -1,14 +1,15 @@
-"""A crowded P2P room (finding 180): this PC's game hosts, nettool bots join over P2P (each its own
-process with its own peer connection), optionally the Mac's game too, and they race once. Since
-the 0.7.12 outage every online release gets a 6+ racer setup test: this is P2P's.
+"""A crowded P2P room (findings 180, 186): this PC's game makes it (the hub), nettool bots join (each
+its own process with its own peer connection), optionally the Mac's game too, and they race once.
+Since the 0.7.12 outage every online release gets a 6+ racer setup test: this is P2P's.
 
-    python port/tools/p2p_crowd.py OUT [--bots 5] [--turn-bots 1] [--remote user@mac --remote-app PATH --remote-iso PATH]
+    python port/tools/p2p_crowd.py OUT [--bots 5] [--sfu-bots 1] [--remote user@mac --remote-app PATH --remote-iso PATH]
                                        [--server wss://dhd.skuza.app]
 
 The bots are `nettool --races 1 --echo-ai` (they ready, mirror a host AI rider as their own, so
-every one sends real snapshots, and finish); --turn-bots of them run with DHD_NET_P2P_UDP=0, so
-the relay carries theirs. Without --server the room server is this checkout's local one; the
-Mac (DHD_REMOTE, DHD_REMOTE_APP, DHD_REMOTE_ISO) reaches the local one by an ssh reverse tunnel.
+every one sends real snapshots, and finish); --sfu-bots of them run with DHD_NET_P2P_UDP=0, so
+they race over the room's SFU, bridged by the hub (a local server needs the Realtime secrets in
+online/server/.dev.vars for that). Without --server the room server is this checkout's local one;
+the Mac (DHD_REMOTE, DHD_REMOTE_APP, DHD_REMOTE_ISO) reaches the local one by an ssh reverse tunnel.
 
 Measured, in OUT/summary.json and on stdout: the setup time from the room's opening to the
 host's countdown and to every bot's race; the host's CPU time and upload while racing (its
@@ -44,7 +45,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('out', type=Path)
     p.add_argument('--bots', type=int, default=5)
-    p.add_argument('--turn-bots', type=int, default=0, help='bots with direct UDP off (the relay only)')
+    p.add_argument('--sfu-bots', type=int, default=0, help='bots with direct UDP off: they race over the SFU fallback')
     p.add_argument('--race-seconds', type=int, default=75, help='the bots finish after this long')
     p.add_argument('--exe', type=Path, default=ROOT / 'build/host64-exe/dhd64.exe')
     p.add_argument('--nettool', type=Path, default=ROOT / 'build/port/net/nettool.exe')
@@ -66,7 +67,7 @@ def main():
     def ssh(command):
         return subprocess.run(ssh_base + [a.remote, command], capture_output=True, text=True, timeout=30).stdout
 
-    summary = dict(players=players, bots=a.bots, turn_bots=a.turn_bots, mac=use_mac)
+    summary = dict(players=players, bots=a.bots, sfu_bots=a.sfu_bots, mac=use_mac)
     host_log = out / 'host-stderr.log'
     with contextlib.ExitStack() as stack:
         stack.enter_context(game_lock.held('p2p_crowd'))
@@ -96,7 +97,7 @@ def main():
         bot_logs = []
         for k in range(a.bots):
             path = out / f'bot{k}.log'
-            bot_env = dict(os.environ, DHD_NET_SERVER=server, **({'DHD_NET_P2P_UDP': '0'} if k < a.turn_bots else {}))
+            bot_env = dict(os.environ, DHD_NET_SERVER=server, **({'DHD_NET_P2P_UDP': '0'} if k < a.sfu_bots else {}))
             bot_log = stack.enter_context(path.open('w'))
             stack.enter_context(owned_process.start(
                 [str(a.nettool), '--version', version, '--iso', iso_hash, '--name', f'BOT{k}', '--pick', str(k + 1),
@@ -139,6 +140,7 @@ def main():
     summary['bots'] = [bot(path.read_text(errors='replace')) for path in bot_logs]
     summary['freezes'] = host_text.count('freeze:')
     summary['paths'] = re.findall(r'net: P2P: member (\d+) connected: (.+)', host_text)
+    summary['on_sfu'] = sorted(set(re.findall(r'net: P2P: member (\d+) races over the room\'s SFU', host_text)))
     (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     print(json.dumps(summary, indent=2))
     return 0 if all(b['race'] for b in summary['bots']) and not summary['freezes'] else 1

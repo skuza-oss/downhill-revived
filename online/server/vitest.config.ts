@@ -37,9 +37,6 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
           },
           d1Databases: ["MODERATION"],
-          // P2P rooms (finding 180): not in wrangler.jsonc, the official main Worker's config
-          // (tools/selfhost-config.mjs says why); a local or self-hosted main Worker has them.
-          durableObjects: { P2P_ROOM: { className: "P2pRoom", useSQLite: true } },
         },
       }),
     ],

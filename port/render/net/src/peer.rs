@@ -1,16 +1,17 @@
-//! One WebRTC peer connection of a P2P room (finding 180): the host has one per guest, a guest one
-//! to the host. str0m does ICE, DTLS and SCTP over this game's own UDP sockets; the TURN-over-TLS
-//! relay is the SFU's (relay.rs, turn.rs). Two negotiated channels: 0 carries race snapshots
-//! (unordered, no retransmission: a late one is worthless), 1 reliable events and room commands.
+//! One WebRTC peer connection of a P2P room's star (findings 180, 186): the hub has one per member,
+//! a member one to the hub. str0m does ICE, DTLS and SCTP over this game's own UDP sockets: direct
+//! paths only (host and server-reflexive candidates); a member who can't reach the hub races over
+//! the room's SFU instead. Two negotiated channels: 0 carries race snapshots (unordered, no
+//! retransmission: a late one is worthless), 1 reliable events and keepalives (dhd_star).
 //!
 //! Each peer has two host candidates on the same address. The first sends at once, as ICE does.
 //! The second answers only: it sends nothing until the other game's packet has reached it. Some
 //! computers refuse a UDP flow the game opens itself while letting through one the other side
 //! opened (a Mac running a network filter: every send failed with "host unreachable", finding
 //! 180), so if only the first candidate existed, the game that sends first would decide whether
-//! the direct path works: the guest, which learns the host's candidates first. With the second,
+//! the direct path works: the member, which learns the hub's candidates first. With the second,
 //! one candidate pair is always opened from the far side.
-use crate::{relay, turn};
+use crate::turn;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io::ErrorKind;
@@ -27,15 +28,17 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 /// Reliable messages waiting for SCTP's window; more means the peer is stuck.
 const EVENTS_MAX: usize = 256;
-/// The largest channel message: a room command's JSON or a race frame (3 kB) with its header.
+/// The largest channel message: a race frame (3 kB) with its header.
 pub const MESSAGE_MAX: usize = 16384;
-/// A peer not connected this long after it was made has failed (the relay is up within ~3 s).
+/// A peer not connected this long after it was made has failed. The room puts a member whose link
+/// isn't up in 10 s on the SFU first (online/server/src/room.ts P2P_LINK_MS) and its routes close
+/// the peer; this is for a room that never says so.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// A connected peer whose ICE stays disconnected this long has failed. str0m reports Disconnected
 /// once the path in use stopped answering its checks (about 22 s with its default timing) and no
 /// other pair is left to try; it never closes the connection itself, so without this the other
-/// game's rider froze for good (a relay that ended, a network gone). The wait lets a pair still
-/// being checked (a late relay candidate) take over.
+/// game's rider froze for good (a network gone). The wait lets a pair still being checked take
+/// over. In a race the star's keepalives find a silent link sooner (dhd_star LINK_SILENT_MS).
 const ICE_LOST_GRACE: Duration = Duration::from_secs(5);
 /// The STUN server for the server-reflexive candidate, and how often to ask before giving up.
 const STUN_SERVER: (&str, u16) = ("stun.cloudflare.com", 3478);
@@ -45,17 +48,15 @@ const STUN_RETRY: Duration = Duration::from_millis(500);
 const STATS_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The race channel's header: the race's start marker (8 bytes), the frame's type, its sender's
-/// slot, then a state bundle's version and index (port/render/session/src/coordinator.rs).
+/// slot, then a state bundle's version and index (port/render/star/src/lib.rs).
 const STATE_SENDER: usize = 10;
 const STATE_INDEX: usize = 12;
 
-/// How a connected peer is reached, for the log: a direct path inside the LAN or across the
-/// internet, or Cloudflare's relay.
+/// How a connected peer is reached, for the log: inside the LAN or across the internet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Path {
     Lan,
     Internet,
-    Relay,
 }
 
 impl Path {
@@ -63,7 +64,6 @@ impl Path {
         match self {
             Path::Lan => "direct, inside the local network",
             Path::Internet => "direct, across the internet",
-            Path::Relay => "Cloudflare's relay (TURN over TLS)",
         }
     }
 }
@@ -83,22 +83,12 @@ struct Stun {
     tries: u8,
 }
 
-struct Relay {
-    client: turn::Client,
-    link: relay::Link,
-    address: Option<SocketAddr>,
-}
-
 pub struct Peer {
     rtc: Rtc,
-    /// Empty when direct UDP is off (DHD_NET_P2P_UDP=0): the relay carries everything.
     sockets: Vec<Socket>,
     pending: Option<SdpPendingOffer>,
     state: ChannelId,
     events: ChannelId,
-    relay: Option<Relay>,
-    /// The other game's relayed candidates: a pair to one of these is relayed at its end.
-    remote_relays: Vec<SocketAddr>,
     stun: Option<Stun>,
     connected: bool,
     /// When ICE reported Disconnected after the connection was up (cleared when it recovers).
@@ -115,15 +105,15 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// `local` is the address this game reaches the internet from (its room connection's);
-    /// `offerer` is the host's side; `direct` false leaves only the relay (tests of the fallback).
-    pub fn new(local: IpAddr, offerer: bool, direct: bool) -> Result<Self> {
-        Self::with_check_interval(local, offerer, direct, None)
+    /// `local` is the address this game reaches the internet from (reachable_address); `offerer`
+    /// is the hub's side.
+    pub fn new(local: IpAddr, offerer: bool) -> Result<Self> {
+        Self::with_check_interval(local, offerer, None)
     }
 
     /// `check_interval`: str0m's longest wait between ICE checks (its default, 3 s, when None);
     /// tests shorten it to see a lost path sooner.
-    fn with_check_interval(local: IpAddr, offerer: bool, direct: bool, check_interval: Option<Duration>) -> Result<Self> {
+    fn with_check_interval(local: IpAddr, offerer: bool, check_interval: Option<Duration>) -> Result<Self> {
         let mut config = Rtc::builder()
             .set_crypto_provider(str0m::crypto::from_feature_flags().into())
             .set_stats_interval(Some(STATS_INTERVAL));
@@ -132,16 +122,14 @@ impl Peer {
         }
         let mut rtc = config.build(Instant::now());
         let mut sockets = vec![];
-        if direct {
-            for answer_only in [false, true] {
-                let udp = UdpSocket::bind(SocketAddr::new(local, 0))?;
-                udp.set_nonblocking(true)?;
-                let local = udp.local_addr()?;
-                rtc.add_local_candidate(Candidate::host(local, "udp")?);
-                sockets.push(Socket { udp, local, answer_only, heard: false });
-            }
+        for answer_only in [false, true] {
+            let udp = UdpSocket::bind(SocketAddr::new(local, 0))?;
+            udp.set_nonblocking(true)?;
+            let local = udp.local_addr()?;
+            rtc.add_local_candidate(Candidate::host(local, "udp")?);
+            sockets.push(Socket { udp, local, answer_only, heard: false });
         }
-        let stun = match (direct && !local.is_loopback(), STUN_SERVER.to_socket_addrs()) {
+        let stun = match (!local.is_loopback(), STUN_SERVER.to_socket_addrs()) {
             (true, Ok(mut found)) => match found.find(|a| a.is_ipv4() == local.is_ipv4()) {
                 Some(server) => Some(Stun { server, id: random_id()?, next: Instant::now(), tries: 0 }),
                 None => None,
@@ -177,13 +165,13 @@ impl Peer {
             (state, events, None)
         };
         Ok(Self {
-            rtc, sockets, pending, state, events, relay: None, remote_relays: vec![], stun, connected: false, lost_since: None, path: None,
+            rtc, sockets, pending, state, events, stun, connected: false, lost_since: None, path: None,
             created: Instant::now(), outgoing_events: VecDeque::new(), outgoing_states: HashMap::new(),
             signals, incoming: vec![], refused: None,
         })
     }
 
-    /// The other game's offer, answer or trickled candidate, as the room relays it. A failure says
+    /// The other game's offer, answer or trickled candidate, as the room passes it on. A failure says
     /// only which step failed: str0m's errors quote the text they could not take, and an offer or
     /// a candidate holds the other game's network addresses, which must not reach dhd.log.
     pub fn signal(&mut self, m: &Value) -> Result<()> {
@@ -201,30 +189,13 @@ impl Peer {
             }
             Some("candidate") => {
                 let candidate = Candidate::from_sdp_string(text("candidate", 2048)?).map_err(|_| "unreadable peer candidate")?;
-                if candidate.kind() == CandidateKind::Relayed {
-                    self.remote_relays.push(candidate.addr());
+                // Direct paths only: a relayed candidate (a browser's own TURN) is not taken.
+                if candidate.kind() != CandidateKind::Relayed {
+                    self.rtc.add_remote_candidate(candidate);
                 }
-                self.rtc.add_remote_candidate(candidate);
             }
             _ => return Err("unknown peer signal".into()),
         }
-        Ok(())
-    }
-
-    /// This game's own TURN credentials (the room's p2p_turn): a relayed candidate once allocated.
-    /// Later ones (the room renews them before they expire, online/server/src/p2p.ts) keep the
-    /// allocation alive: its Refresh is then signed with them.
-    pub fn turn(&mut self, credentials: &Value, wake: Wake) -> Result<()> {
-        let field = |k: &str| credentials[k].as_str().filter(|s| !s.is_empty() && s.len() <= 256);
-        let username = field("username").ok_or("TURN username missing")?;
-        let password = field("credential").ok_or("TURN credential missing")?;
-        if let Some(r) = self.relay.as_mut() {
-            r.client.renew(username, password);
-            return Ok(());
-        }
-        let (host, port) = crate::sfu::turns_server(&credentials["urls"]).ok_or("no Cloudflare TURN/TLS server")?;
-        let client = turn::Client::new(username, password, Instant::now());
-        self.relay = Some(Relay { client, link: relay::Link::open(&host, port, wake), address: None });
         Ok(())
     }
 
@@ -282,13 +253,9 @@ impl Peer {
                 self.receive(source, local, &buffer[..n])?;
             }
         }
-        self.poll_relay()?;
         self.rtc.handle_input(Input::Timeout(Instant::now()))?;
         self.flush()?;
         self.drain()?;
-        if let Some(r) = self.relay.as_mut().filter(|r| r.link.ready()) {
-            r.link.write(&r.client.output());
-        }
         if !self.rtc.is_alive() {
             return Err("peer disconnected".into());
         }
@@ -320,41 +287,6 @@ impl Peer {
             self.stun = None;
         }
         Ok(true)
-    }
-
-    fn poll_relay(&mut self) -> Result<()> {
-        let Some(r) = self.relay.as_mut() else { return Ok(()) };
-        if r.link.failed() || r.client.failed().is_some() {
-            // Only the relay is gone (its credentials end after an hour, finding 180): a direct
-            // path goes on; a connection that ran over the relay fails through ICE.
-            eprintln!("net: P2P: the relay failed ({}); direct paths go on", r.client.failed().unwrap_or("TLS stream closed"));
-            self.relay = None;
-            return Ok(());
-        }
-        if !r.link.ready() {
-            return Ok(());
-        }
-        let now = Instant::now();
-        let (bytes, _) = r.link.take();
-        r.client.receive(&bytes, now);
-        r.client.tick(now);
-        let mut received = vec![];
-        while let Some(event) = r.client.poll_event() {
-            match event {
-                turn::Event::Allocated(addr) => {
-                    r.address = Some(addr);
-                    let candidate = Candidate::relayed(addr, r.link.local().unwrap_or(addr), "udp")?;
-                    self.signals.push(json!({"type": "candidate", "candidate": candidate.to_sdp_string()}));
-                    self.rtc.add_local_candidate(candidate);
-                }
-                turn::Event::Data(source, data) => received.extend(r.address.map(|to| (source, to, data))),
-            }
-        }
-        r.link.write(&r.client.output());
-        for (from, to, data) in received {
-            self.receive(from, to, &data)?;
-        }
-        Ok(())
     }
 
     fn receive(&mut self, source: SocketAddr, destination: SocketAddr, bytes: &[u8]) -> Result<()> {
@@ -398,17 +330,10 @@ impl Peer {
                     _ => {}
                 },
                 Output::Event(Event::PeerStats(stats)) => {
-                    let relay = self.relay.as_ref().and_then(|r| r.address);
                     if let (true, None, Some(pair)) = (self.connected, self.path, &stats.selected_candidate_pair) {
-                        self.path = Some(if relay == Some(pair.local.addr) || self.remote_relays.contains(&pair.remote.addr) {
-                            Path::Relay
-                        } else if is_local(pair.remote.addr.ip()) {
-                            Path::Lan
-                        } else {
-                            Path::Internet
-                        });
+                        self.path = Some(if is_local(pair.remote.addr.ip()) { Path::Lan } else { Path::Internet });
                     }
-                    crate::diagnostics::peer("p2p", &stats, relay);
+                    crate::diagnostics::peer("p2p", &stats, None);
                 }
                 Output::Event(Event::ChannelData(data)) if data.binary && data.data.len() <= MESSAGE_MAX => {
                     if data.id == self.state || data.id == self.events {
@@ -422,14 +347,6 @@ impl Peer {
     }
 
     fn transmit(&mut self, source: SocketAddr, destination: SocketAddr, contents: &[u8]) {
-        if let Some(r) = self.relay.as_mut().filter(|r| r.address == Some(source)) {
-            // A LAN candidate is tried directly: TURN servers refuse permissions to private
-            // addresses, and such a refusal must not end the allocation.
-            if !is_local(destination.ip()) {
-                r.client.send_to(destination, contents, Instant::now());
-            }
-            return;
-        }
         let Some(socket) = self.sockets.iter().find(|s| s.local == source) else { return };
         if socket.answer_only && !socket.heard {
             return; // ICE retransmits; once the other game reaches this socket it answers
@@ -442,7 +359,7 @@ impl Peer {
                 self.refused = Some(e.kind());
                 eprintln!(
                     "net: P2P: this computer refused a direct send ({:?}): a firewall or network filter may hold \
-                     back the game's own connections; those the other game opens, and the relay, still work",
+                     back the game's own connections; those the other game opens still work",
                     e.kind()
                 );
             }
@@ -463,7 +380,7 @@ pub fn reachable_address(room: Option<IpAddr>) -> Option<IpAddr> {
     routed.filter(|ip| !ip.is_unspecified()).or(room)
 }
 
-/// An address inside a local network (or this machine): direct only, never through the relay.
+/// An address inside a local network (or this machine).
 fn is_local(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
@@ -481,16 +398,6 @@ fn random_id() -> Result<[u8; 12]> {
     let mut id = [0; 12];
     ring::rand::SystemRandom::new().fill(&mut id).map_err(|_| "no random STUN transaction id")?;
     Ok(id)
-}
-
-impl Drop for Peer {
-    fn drop(&mut self) {
-        // Ends the allocation now rather than at its lifetime's end.
-        if let Some(r) = self.relay.as_mut().filter(|r| r.link.ready()) {
-            r.client.close(Instant::now());
-            r.link.write(&r.client.output());
-        }
-    }
 }
 
 #[cfg(test)]
@@ -536,19 +443,19 @@ mod tests {
     #[test]
     fn direct_peers_exchange_reliable_events_and_unreliable_states() {
         let ip = "127.0.0.1".parse().unwrap();
-        let (mut a, mut b) = (Peer::new(ip, true, true).unwrap(), Peer::new(ip, false, true).unwrap());
+        let (mut a, mut b) = (Peer::new(ip, true).unwrap(), Peer::new(ip, false).unwrap());
         let mut event = false;
         exchange(&mut a, &mut b, 5, |a, frames| both_classes(a, frames, &mut event, b"hello"));
     }
 
-    /// The other game goes silent after connecting (its network gone, its relay ended): this one
+    /// The other game goes silent after connecting (its network gone): this one
     /// fails within str0m's ICE timeout plus the grace, rather than keeping a frozen rider.
     #[test]
     fn a_connected_peer_whose_path_stops_answering_fails() {
         let ip = "127.0.0.1".parse().unwrap();
         let fast = Some(Duration::from_millis(400));
-        let mut a = Peer::with_check_interval(ip, true, true, fast).unwrap();
-        let mut b = Peer::with_check_interval(ip, false, true, fast).unwrap();
+        let mut a = Peer::with_check_interval(ip, true, fast).unwrap();
+        let mut b = Peer::with_check_interval(ip, false, fast).unwrap();
         let mut event = false;
         exchange(&mut a, &mut b, 5, |a, frames| both_classes(a, frames, &mut event, b"hello"));
         drop(b);
@@ -571,7 +478,7 @@ mod tests {
     #[test]
     fn the_answer_only_socket_waits_to_be_reached() {
         let ip = "127.0.0.1".parse().unwrap();
-        let mut a = Peer::new(ip, true, true).unwrap();
+        let mut a = Peer::new(ip, true).unwrap();
         let (offer, _) = a.poll().unwrap();
         // Both host candidates are offered.
         assert_eq!(offer[0]["sdp"].as_str().unwrap().matches("typ host").count(), 2);
@@ -591,7 +498,7 @@ mod tests {
 
     #[test]
     fn states_keep_only_the_newest_per_sender_and_index() {
-        let mut a = Peer::new("127.0.0.1".parse().unwrap(), true, true).unwrap();
+        let mut a = Peer::new("127.0.0.1".parse().unwrap(), true).unwrap();
         let mut older = state(2);
         older[15] = 1;
         a.send(false, older).unwrap();
@@ -605,7 +512,7 @@ mod tests {
     /// What failed to parse never shows in the error (dhd.log): it can hold the other game's address.
     #[test]
     fn a_signal_that_fails_to_parse_names_no_address() {
-        let mut a = Peer::new("127.0.0.1".parse().unwrap(), false, true).unwrap();
+        let mut a = Peer::new("127.0.0.1".parse().unwrap(), false).unwrap();
         let bad = [
             json!({"type": "candidate", "candidate": "candidate:1 1 udp 2130706431 203.0.113.77 not-a-port typ host"}),
             json!({"type": "offer", "sdp": "v=0\r\no=- 1 1 IN IP4 203.0.113.77\r\nc=IN IP4 203.0.113.77\r\nnonsense"}),
@@ -615,75 +522,5 @@ mod tests {
             assert!(e.starts_with("unreadable peer") || e.starts_with("peer offer"), "{e}");
             assert!(!e.contains("203.0.113"), "{e}");
         }
-    }
-
-    /// Revokes the test's TURN credentials when it ends, passed or not.
-    struct Revoke(Vec<String>);
-    impl Drop for Revoke {
-        fn drop(&mut self) {
-            for user in &self.0 {
-                crate::sfu::probe::revoke_turn(user);
-            }
-        }
-    }
-
-    #[test]
-    #[ignore = "needs Cloudflare TURN credentials and the network"]
-    fn cloudflare_turn_tls_without_direct_udp() {
-        let (_, ca) = crate::sfu::probe::turn_credentials("p2p-qualification-a");
-        let (_, cb) = crate::sfu::probe::turn_credentials("p2p-qualification-b");
-        let _revoke = Revoke(vec![ca["username"].as_str().unwrap().into(), cb["username"].as_str().unwrap().into()]);
-        let ip = "0.0.0.0".parse().unwrap();
-        let (mut a, mut b) = (Peer::new(ip, true, false).unwrap(), Peer::new(ip, false, false).unwrap());
-        a.turn(&ca, Arc::new(|| {})).unwrap();
-        b.turn(&cb, Arc::new(|| {})).unwrap();
-        let mut event = false;
-        exchange(&mut a, &mut b, 30, |a, frames| both_classes(a, frames, &mut event, b"turn-event"));
-    }
-
-    /// Two relay-only peers; `a`'s first credentials last 60 s and are renewed once connected:
-    /// Cloudflare takes the Refresh signed with the new ones on the live allocation (a refusal,
-    /// 401 or 441, fails the client at once), and the relay carries the peers' events past the
-    /// first credentials' end. About 3 minutes. (Not renewed, a relay outlived its expired
-    /// credentials by 11 minutes on 2026-11-09: when Cloudflare ends one is not pinned down, so
-    /// no test relies on it; finding 180.)
-    #[test]
-    #[ignore = "needs Cloudflare TURN credentials and the network; about 3 minutes"]
-    fn cloudflare_turn_takes_renewed_credentials_on_the_live_allocation() {
-        use crate::sfu::probe::{turn_credentials, turn_credentials_lasting};
-        let (ua, ca) = turn_credentials_lasting("p2p-renewal-a", 60);
-        let (ub, cb) = turn_credentials("p2p-renewal-b");
-        let (ua2, ca2) = turn_credentials("p2p-renewal-a2");
-        let _revoke = Revoke(vec![ua, ub, ua2.clone()]);
-        let ip = "0.0.0.0".parse().unwrap();
-        let (mut a, mut b) = (Peer::new(ip, true, false).unwrap(), Peer::new(ip, false, false).unwrap());
-        a.turn(&ca, Arc::new(|| {})).unwrap();
-        b.turn(&cb, Arc::new(|| {})).unwrap();
-        let mut event = false;
-        exchange(&mut a, &mut b, 30, |a, frames| both_classes(a, frames, &mut event, b"first"));
-        a.turn(&ca2, Arc::new(|| {})).unwrap();
-        let start = Instant::now();
-        let mut last_heard = Instant::now();
-        while start.elapsed() < Duration::from_secs(150) {
-            let (signals, _) = a.poll().unwrap();
-            for s in signals {
-                b.signal(&s).unwrap();
-            }
-            let (signals, frames) = b.poll().unwrap();
-            for s in signals {
-                a.signal(&s).unwrap();
-            }
-            if frames.iter().any(|(reliable, f)| *reliable && f == b"tick") {
-                last_heard = Instant::now();
-            }
-            if a.outgoing_events.is_empty() {
-                a.send(true, b"tick".to_vec()).unwrap();
-            }
-            assert!(last_heard.elapsed() < Duration::from_secs(10), "nothing arrived for 10 s after the renewal");
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let client = &a.relay.as_ref().expect("the relay is gone").client;
-        assert!(client.failed().is_none());
-        assert_eq!(client.username(), ua2, "the renewal was never applied");
     }
 }

@@ -28,5 +28,5 @@ ring = { version = "=0.17.14", default-features = false }
 
 str0m = { version = "=0.25.0", default-features = false, features = ["rust-crypto"] }
 serde_json = "=1.0.154"
-# P2P rooms' coordinator (finding 180), shared with the browser.
-dhd_session = { path = "../session" }
+# P2P rooms' star (finding 186), shared with the browser.
+dhd_star = { path = "../star" }

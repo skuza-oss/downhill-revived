@@ -18,7 +18,7 @@ export const RTT_SAMPLES = 5;
 
 /** The one binary message on a room's WebSocket: the game's PING and the server's PONG, which adds
  *  the server's clock. The race's frames travel over the Realtime SFU (finding 158) or, in a P2P
- *  room, the peer connections (finding 180); any other binary message is dropped. */
+ *  room, the peer connections between the games (finding 186); any other binary message is dropped. */
 export const FRAME_PING = 3;
 export const FRAME_PONG = 4;
 export const PING_MAX_PAYLOAD = 32;
@@ -44,8 +44,6 @@ export const CLOSE_CODES = {
   too_fast: 4012,
   /** The operator banned this address hash or install id (src/guard.ts findBan). */
   banned: 4013,
-  /** A P2P room's host left: the room ends with it (src/p2p.ts; no host migration). */
-  host_left: 4014,
 } as const;
 export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "bad_value";
 
@@ -96,9 +94,16 @@ export function isOutdated(clientVersion: string, minVersion: string): boolean {
 // Join codes: no 0/O, 1/I/L.
 export const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 export const CODE_LENGTH = 6;
-/** A P2P room's code is one longer (src/p2p.ts, finding 180): the game tells the two kinds apart
-    by length alone, and a room that shares addresses is harder to guess. */
+/** A P2P room's code is one longer (findings 180, 186): the game tells the two kinds apart by length
+    alone, and a room whose members see each other's addresses is harder to guess. */
 export const P2P_CODE_LENGTH = 7;
+
+/** A room's code as the server's logs and its moderation log show it (finding 186): a P2P room's
+    by its first two characters, as the game's dhd.log does (port/net/net.h net_log_code), since the
+    code lets anyone in and so see the hub's network address; an SFU room's as it is. */
+export function logCode(code: string): string {
+  return code.length === P2P_CODE_LENGTH ? code.slice(0, 2) + "*".repeat(code.length - 2) : code;
+}
 
 export function randomCode(length = CODE_LENGTH): string {
   const bytes = new Uint8Array(length);

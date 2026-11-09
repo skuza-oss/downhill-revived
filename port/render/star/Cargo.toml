@@ -1,0 +1,19 @@
+# A P2P room's race transport (finding 186): the star around the room's hub and its bridge to the
+# SFU, src/lib.rs. Used by dhd_net (the native games) and, built as a wasm cdylib by
+# port/tools/rustgs.py --crate dhd_star, by the browser page (src/browser.rs, port/web/www/p2p.js).
+# Plain data in and out: no sockets, no platform code.
+[package]
+name = "dhd_star"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = "=1.0.154"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"

@@ -8,7 +8,10 @@ host's results (or --seconds). The summary has the start (GO on the server's clo
 each puppet, hits, finishes and results.
 
     python port/tools/online_race.py [--seconds 420] [--out DIR] [--capture g+600,g+1200]
-                                     [--bots N [--replay FILE]] [--kill-guest-at SECONDS] [--lag]
+                                     [--bots N [--replay FILE]] [--kill-guest-at SECONDS | --kill-host-at SECONDS] [--lag]
+
+--kill-host-at stops the room's creator mid-race: in a P2P room (--a DHD_NET_CREATE=p2p) its hub, so
+the room picks the next hub and the others race on over it and get the results (finding 186).
 
 --exe can be another build than --nettool's: a release's games with this checkout's client code
 in the bots (the bots claim the host's version, as rooms take only one build).
@@ -137,6 +140,7 @@ def main():
     ap.add_argument('--bots', type=int, default=0, help='nettool players: --replay, else echoing an AI rider')
     ap.add_argument('--replay', help='a STATE/EVENT recording (DHD_NET_RECORD) for the bots (else they echo an AI rider)')
     ap.add_argument('--kill-guest-at', type=float, help='stop the guest this many seconds after GO')
+    ap.add_argument('--kill-host-at', type=float, help='stop the host (in a P2P room, its hub) this many seconds after GO')
     ap.add_argument('--stop-if', default=os.path.join(ROOT, 'build', 'port', 'BENCH.lock'),
                     help='stop everything as soon as this file exists (the benchmark lock)')
     ap.add_argument('--minimized', action='store_true', help='both games start minimised (the PC stays usable)')
@@ -205,12 +209,13 @@ def main():
             p.minimize()  # a window SDL showed after the start
         if not all(go):
             print('a game did not reach the countdown')
-        elif a.kill_guest_at:
-            time.sleep(4 + a.kill_guest_at)  # the countdown, then the race
-            procs.remove(guest)
-            guest.stop()
-            print('guest stopped')
-        logs = [da / 'stderr.log'] + ([] if a.kill_guest_at else [db / 'stderr.log'])
+        elif a.kill_guest_at or a.kill_host_at:
+            time.sleep(4 + (a.kill_guest_at or a.kill_host_at))  # the countdown, then the race
+            gone = guest if a.kill_guest_at else procs[0]
+            procs.remove(gone)
+            gone.stop()
+            print('guest stopped' if a.kill_guest_at else 'host stopped')
+        logs = ([] if a.kill_host_at else [da / 'stderr.log']) + ([] if a.kill_guest_at else [db / 'stderr.log'])
         done = wait_line(logs, r'online: result 1\.', a.seconds, procs, a.stop_if)
         time.sleep(6)
         if not all(done):
@@ -231,7 +236,7 @@ def main():
         print('  screenshots:', ' '.join(sorted(f.name for f in d.glob('shot-*.bmp'))))
     for k in range(a.bots):
         print(f'--- bot{k}:', (out / f'bot{k}' / 'stdout.log').read_text(errors='replace')[-600:])
-    if a.lag and not a.kill_guest_at:
+    if a.lag and not (a.kill_guest_at or a.kill_host_at):
         import puppet_lag
         print('--- puppets (puppet_lag.py):')
         puppet_lag.report(out)

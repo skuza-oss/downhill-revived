@@ -75,7 +75,7 @@ int main(void)
         const char *again = "{\"type\":\"race_go\",\"race\":5000,\"at\":12000}";
         client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);
-        assert(strstr(sent,"\"race_rejoin\",\"race_go\"]"));
+        assert(strstr(sent,"\"race_rejoin\",\"race_go\",\"p2p\"]"));
         client_on_text(&c,older,strlen(older));
         client_on_text(&c,start,strlen(start));
         sent[0] = 0;

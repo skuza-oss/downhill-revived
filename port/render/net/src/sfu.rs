@@ -49,16 +49,34 @@ pub const READY_TIMEOUT: Duration = Duration::from_millis(8_000);
 /// An offer the room never answers (it refused it: too many sessions) fails the association this
 /// long after it was made; the send thread offers again later.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
-/// A released race whose other racers sent this game nothing this long after both its release and
-/// the race's startAt has a silent race link (finding 187): every game sends its ride at the start
-/// and its LOADED every half second once loaded, and nothing came, while Cloudflare acknowledged
-/// everything this game sent. The cause seen: stream ids dead on the session's Cloudflare side,
-/// every call answered 200. The room is told (`sfu_silent`) and gives this game a new session, the
-/// only thing that clears it. Well inside the game's 30 s wait for the others' rides.
+/// A released race whose other racers sent this game nothing this long after the race's start
+/// moment (and its release) has a silent race link (finding 187). The moment is the countdown's
+/// start every game holds to: one racer names it and the room sends it to every racer (`race_go`),
+/// so a game whose link brings nothing has it too. From then every racer still in the race sends its
+/// ride, and nothing came, while Cloudflare acknowledged everything this game sent. Before it a
+/// racer may still be on its way to the load screen, sending nothing: no report without the moment.
+/// The cause seen: stream ids dead on the session's Cloudflare side, every call answered 200. The
+/// room is told (`sfu_silent`) and gives this game a new session, the only thing that clears it.
 pub const SILENT_AFTER: Duration = Duration::from_secs(8);
 /// The start message comes this long before the race's startAt (online/server/src/protocol.ts
-/// START_LEAD_MS): nobody sends a race frame before.
+/// START_LEAD_MS): the race's clock on this PC (race_clock).
 const START_LEAD: Duration = Duration::from_millis(3000);
+/// A race's clock on this PC, taken when its start message comes: its marker (startAt) and the
+/// instant here that is its startAt (the message's arrival plus START_LEAD). Late by the message's
+/// way here, never early.
+pub fn race_clock(start: &Value) -> Option<(u64, Instant)> {
+    start["startAt"].as_u64().filter(|n| *n > 0).map(|race| (race, Instant::now() + START_LEAD))
+}
+/// The race's start moment (`race_go`: its race and its time on the server's clock, finding 187) on
+/// this PC's clock, by the race's own (race_clock): `at - startAt` after the race's startAt here.
+/// None for another race's moment.
+pub fn race_moment(clock: Option<(u64, Instant)>, message: &Value) -> Option<(u64, Instant)> {
+    let (race, start) = clock?;
+    if message["race"].as_u64() != Some(race) { return None; }
+    let after = message["at"].as_f64()? - race as f64;
+    if !(after >= 0.0) { return None; }
+    Some((race, start.checked_add(Duration::from_nanos((after * 1e6).round() as u64))?))
+}
 /// DHD_NET_SFU_SILENT=N (test switch, finding 187): the first N associations this process makes
 /// drop every race frame they receive, as the dead stream ids did. 1: the new session the room
 /// gives repairs it; 2 or more: the racer is taken out of the race.
@@ -150,6 +168,9 @@ pub struct Sfu {
     announced: bool,
     released: bool,
     released_at: Option<Instant>,
+    /// This race's start moment on this PC's clock (race_go, from the send thread): its silent link
+    /// counts from it.
+    go_at: Option<Instant>,
     /// A frame of this race came from another racer; this race's link was reported silent
     /// (sfu_silent, finding 187); DHD_NET_SFU_SILENT drops every received race frame.
     heard: bool,
@@ -162,8 +183,16 @@ pub struct Sfu {
     drop_in_percent: u64,
     records_in: u64,
     pending_events: VecDeque<(Instant, Vec<u8>)>,
-    pending_state: HashMap<u8, (Instant, Vec<u8>)>,
-    rates: HashMap<u64, SenderRate>,
+    /// The newest state bundle waiting per (sender's slot, bundle index): a P2P room's hub sends
+    /// its star's frames too (finding 186).
+    pending_state: HashMap<(u8, u8), (Instant, Vec<u8>)>,
+    /// Flood counters per (publisher, slot): the hub's publication carries several racers.
+    rates: HashMap<(u64, u8), SenderRate>,
+    /// A P2P room (finding 186): the publishers whose channels this game needs for the race (its
+    /// part of the race, the star's router says: dhd_star sfu_expect), and frames go up with their
+    /// publisher, their slot as sent. None: an SFU room, every racer's channels, the slot stamped
+    /// here from the publisher.
+    p2p: Option<Vec<u64>>,
     wake: Wake,
     /// False with DHD_NET_SFU_UDP=0: a test switch that drops every UDP datagram to and from the
     /// SFU, as a network that blocks UDP does, so the TURN/TLS fallback must carry the race.
@@ -397,8 +426,8 @@ impl Sfu {
         if drop_all_in { eprintln!("net: SFU: DHD_NET_SFU_SILENT, this association drops every race frame it receives (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], waiting: vec![], closing: vec![], orphans: vec![], slots: HashMap::new(),
             race: 0, race_open: false, me: None, started_at: None, created: Instant::now(), future_events: VecDeque::new(),
-            connected: false, announced: false, released: false, released_at: None, heard: false, silent_said: false, drop_all_in,
-            drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
+            connected: false, announced: false, released: false, released_at: None, go_at: None, heard: false, silent_said: false, drop_all_in,
+            drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(), p2p: None,
             wake, direct, turn_allowed, answered_at: None, connected_at: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
@@ -431,7 +460,7 @@ impl Sfu {
             self.started_at = Some(Instant::now());
             self.slots.clear();
             self.rates.clear();
-            self.announced = false; self.released = false; self.released_at = None;
+            self.announced = false; self.released = false; self.released_at = None; self.go_at = None;
             self.heard = false; self.silent_said = false;
             self.pending_state.clear();
             self.pending_events.clear();
@@ -451,7 +480,7 @@ impl Sfu {
         } else if message["type"] == "ended" {
             // The race is over; the association stays for the next one. Its late frames are dropped.
             self.race_open = false;
-            self.announced = false; self.released = false; self.released_at = None;
+            self.announced = false; self.released = false; self.released_at = None; self.go_at = None;
             self.pending_state.clear();
             self.pending_events.clear();
         } else if message["type"] == "left" {
@@ -660,18 +689,40 @@ impl Sfu {
     /// Every other racer's two channels and this game's own are open: the race may be released.
     fn usable(&mut self) -> bool {
         if !self.own_open() { return false; }
-        let others: Vec<u64> = self.slots.keys().copied().filter(|m| Some(*m) != self.me).collect();
+        let others: Vec<u64> = match &self.p2p {
+            Some(publishers) => publishers.clone(),
+            None => self.slots.keys().copied().filter(|m| Some(*m) != self.me).collect(),
+        };
         others.into_iter().all(|m| self.open(m, false))
     }
+    /// A P2P room's part of the race for this game: the publishers whose channels it needs (finding
+    /// 186). Set again whenever the room's routes change.
+    pub fn expect_p2p(&mut self, publishers: Vec<u64>) {
+        self.p2p = Some(publishers);
+    }
+    /// The race this association runs (its start's marker), and whether it is running.
+    pub fn race(&self) -> Option<u64> {
+        self.race_open.then_some(self.race)
+    }
+    /// The race's start moment on this PC's clock (race_moment), for this race only.
+    pub fn race_go(&mut self, race: u64, at: Instant) {
+        if self.race_open && race == self.race { self.go_at = Some(at); }
+    }
     /// The race link is silent (SILENT_AFTER, finding 187): released, others still in the race, and
-    /// not one frame of this race from any of them since. Once per association and race; logged.
+    /// not one frame of this race from any of them SILENT_AFTER after both the race's start moment
+    /// and the release; no moment yet, no report. Once per association and race; logged. In a P2P
+    /// room the others are its part of the race only (finding 186): a star racer's association
+    /// carries none and is never silent; the hub's waits for its fallback racers, theirs for the hub.
     fn silent(&mut self) -> bool {
         if !self.race_open || !self.released || self.heard || self.silent_said { return false; }
-        let others = self.slots.keys().filter(|m| Some(**m) != self.me).count();
-        let since = match (self.released_at, self.started_at) { (Some(r), Some(s)) => r.max(s + START_LEAD), _ => return false };
+        let others = match &self.p2p {
+            Some(publishers) => publishers.len(),
+            None => self.slots.keys().filter(|m| Some(**m) != self.me).count(),
+        };
+        let since = match (self.released_at, self.go_at) { (Some(r), Some(g)) => r.max(g), _ => return false };
         if others == 0 || since.elapsed() < SILENT_AFTER { return false; }
         self.silent_said = true;
-        eprintln!("net: SFU: no race frame from any of the {others} other racers {} s after the release ({} channels, association up {} s); the room is told",
+        eprintln!("net: SFU: no race frame from any of the {others} other racers {} s after the race's start moment ({} channels, association up {} s); the room is told",
             SILENT_AFTER.as_secs(), self.channels.len(), self.connected_at.map_or(0, |t| t.elapsed().as_secs()));
         true
     }
@@ -698,7 +749,7 @@ impl Sfu {
             // One newest bundle per bundle index (byte 3, port/hle/state_bundle.h); never
             // accumulate stale snapshots under congestion.
             if bytes.len() >= 4 {
-                self.pending_state.insert(bytes[3], (Instant::now(), wire));
+                self.pending_state.insert((bytes[1], bytes[3]), (Instant::now(), wire));
             }
         } else {
             if self.pending_events.len() >= 128 {
@@ -707,7 +758,10 @@ impl Sfu {
             self.pending_events.push_back((Instant::now(), wire));
         }
         Ok(())
-    }    pub fn poll(&mut self) -> Result<(Vec<Value>, Vec<Vec<u8>>)> {
+    }
+    /// Runs the association: its signaling for the room, and the race frames received, each with
+    /// its publisher's member id.
+    pub fn poll(&mut self) -> Result<(Vec<Value>, Vec<(u64, Vec<u8>)>)> {
         let mut text = vec![];
         let mut frames = vec![];
         let pending = std::mem::take(&mut self.future_events);
@@ -801,7 +855,7 @@ impl Sfu {
     /// The relay's side of a poll: what the TLS stream read goes to the TURN client, its relayed
     /// datagrams to str0m, its allocation becomes a local candidate. A relay that fails while it
     /// carries the association (or before anything connected) fails the association.
-    fn pump_relay(&mut self, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+    fn pump_relay(&mut self, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         let Some(r) = self.relay.as_mut() else { return Ok(()) };
         if r.link.failed() || r.client.failed().is_some() {
             eprintln!("net: SFU: TURN relay failed ({})", r.client.failed().unwrap_or("its TLS link"));
@@ -849,7 +903,7 @@ impl Sfu {
         Ok(())
     }
 
-    fn receive_frame(&mut self, id: ChannelId, bytes: Vec<u8>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+    fn receive_frame(&mut self, id: ChannelId, bytes: Vec<u8>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         if bytes.len() < 10 || bytes.len() > 3080 || self.drop_all_in { return Ok(()); }
         let Some(c) = self.channels.iter().find(|c| c.id == id && !c.local) else { return Ok(()); };
         if bytes[8] != if c.state { 5 } else { 6 } { return Ok(()); }
@@ -866,23 +920,27 @@ impl Sfu {
                 if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
                 // A bundle's stamp (version 6: bytes 5-12 of the frame, after the 8-byte race marker).
                 let stamp = (bytes.len() >= 21 && bytes[10] == 6).then(|| f64::from_le_bytes(bytes[13..21].try_into().unwrap()));
-                let rate = self.rates.entry(c.member).or_insert_with(SenderRate::new);
+                let rate = self.rates.entry((c.member, if self.p2p.is_some() { bytes[9] } else { 0 })).or_insert_with(SenderRate::new);
                 if !rate.accept(bytes[11], stamp, Instant::now()) {
                     if rate.dropped == 1 { eprintln!("net: SFU: member {} sent over {FLOOD_PER_SECOND} snapshot messages in a second; the excess is dropped", c.member); }
                     return Ok(());
                 }
             }
-            if let Some(slot) = self.slots.get(&c.member) {
+            if self.p2p.is_some() {
+                // The star's router checks the slot against the publisher (dhd_star sfu_frame).
+                frames.push((c.member, bytes[8..].to_vec()));
+                self.heard = true;
+            } else if let Some(slot) = self.slots.get(&c.member) {
                 let mut frame = bytes[8..].to_vec();
                 frame[1] = *slot;
-                frames.push(frame);
+                frames.push((c.member, frame));
                 self.heard = true;
             }
         }
         Ok(())
     }
 
-    fn drain(&mut self, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+    fn drain(&mut self, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         for _ in 0..512 {
             match self.rtc.poll_output()? {
                 Output::Timeout(_) => break,
@@ -1071,7 +1129,7 @@ mod tests {
         assert_eq!(client.future_events.len(), 1);
         client.signal(&json!({"type":"start","startAt":100,"players":[{"memberId":17,"slot":3}]})).unwrap();
         let (_, frames) = client.poll().unwrap();
-        assert_eq!(frames, vec![vec![6,3,7]]);
+        assert_eq!(frames, vec![(17, vec![6,3,7])]);
         client.send(&[6,0,1]).unwrap();
         assert_eq!(&client.pending_events[0].1[..8], &100u64.to_le_bytes());
         client.signal(&json!({"type":"start","startAt":200,"players":[{"memberId":17,"slot":5}]})).unwrap();
@@ -1080,16 +1138,74 @@ mod tests {
         client.receive_frame(id, wire(100, 8), &mut frames).unwrap();
         assert!(frames.is_empty());
         client.receive_frame(id, wire(200, 9), &mut frames).unwrap();
-        assert_eq!(frames, vec![vec![6,5,9]]);
+        assert_eq!(frames, vec![(17, vec![6,5,9])]);
         // Another player's flood of next-race events is capped and dropped, never an error here.
         for _ in 0..200 { client.receive_frame(id, wire(u64::MAX, 1), &mut frames).unwrap(); }
         assert_eq!(client.future_events.len(), EARLY_EVENTS_PER_SENDER);
         assert!(client.poll().is_ok());
     }
 
+    /// A P2P room's association (finding 186): frames go up with their publisher and the slot they
+    /// were sent with (the star's router checks it: the hub's publication carries every star
+    /// racer's); its readiness waits for the publishers the router names, not every racer; a hub's
+    /// queue keeps the newest bundle per sender.
+    #[test]
+    fn a_p2p_rooms_association_keeps_the_senders_slot_and_waits_for_its_part_only() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
+        client.expect_p2p(vec![17]);
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":14,"name":"events","memberId":17,"local":false}
+        ]})).unwrap();
+        let id = client.channels[0].id;
+        client.signal(&json!({"type":"start","startAt":100,"yourSlot":2,"players":[{"memberId":17,"slot":0},{"memberId":18,"slot":1},{"memberId":19,"slot":2}]})).unwrap();
+        let mut frames = vec![];
+        let mut wire = 100u64.to_le_bytes().to_vec();
+        wire.extend_from_slice(&[6, 1, 7]);  // the hub (17) forwards racer 18's event
+        client.receive_frame(id, wire, &mut frames).unwrap();
+        assert_eq!(frames, vec![(17, vec![6, 1, 7])]);
+        // Its part: member 17's channels; racer 18's (on the star) are not waited for.
+        assert!(!client.usable());  // its own channels aren't open
+        assert_eq!(client.p2p, Some(vec![17]));
+        client.released = true;
+        client.send(&[5, 0, 6, 0, 1]).unwrap();
+        client.send(&[5, 1, 6, 0, 2]).unwrap();
+        client.send(&[5, 1, 6, 0, 3]).unwrap();
+        assert_eq!(client.pending_state.len(), 2);
+        assert_eq!(client.pending_state[&(1, 0)].1[12], 3);
+    }
+
+    /// In a P2P room the association is silent only for its part of the race: a star racer's (no
+    /// publisher expected) never says so, a fallback racer's does when the hub sends nothing.
+    #[test]
+    fn a_p2p_rooms_association_is_silent_only_for_its_part() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
+        let ago = |s: u64| Instant::now().checked_sub(Duration::from_secs(s)).unwrap();
+        let said = |c: &mut Sfu| c.poll().unwrap().0.iter().filter(|t| t["type"] == "sfu_silent").count();
+        client.signal(&json!({"type":"start","startAt":100,"yourSlot":1,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1}]})).unwrap();
+        client.signal(&json!({"type":"sfu_ready","race":100})).unwrap();
+        client.released_at = Some(ago(60)); client.race_go(100, ago(60));
+        client.expect_p2p(vec![]);  // on the star
+        assert_eq!(said(&mut client), 0);
+        client.expect_p2p(vec![1]);  // on the SFU, the hub its only publisher
+        assert_eq!(said(&mut client), 1);
+        // A frame from the hub's publication is heard: the next race says nothing.
+        client.signal(&json!({"type":"sfu_channels","channels":[{"channelId":14,"name":"events","memberId":1,"local":false}]})).unwrap();
+        let id = client.channels[0].id;
+        client.signal(&json!({"type":"start","startAt":200,"yourSlot":1,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1}]})).unwrap();
+        client.signal(&json!({"type":"sfu_ready","race":200})).unwrap();
+        let mut frames = vec![];
+        let mut wire = 200u64.to_le_bytes().to_vec();
+        wire.extend_from_slice(&[6, 0, 2]);
+        client.receive_frame(id, wire, &mut frames).unwrap();
+        assert_eq!(frames.len(), 1);
+        client.released_at = Some(ago(60)); client.race_go(200, ago(60));
+        assert_eq!(said(&mut client), 0, "heard the hub");
+    }
+
     /// A released race that brings nothing from the others says sfu_silent once, SILENT_AFTER after
-    /// both the release and the race's startAt (finding 187); a frame from any other racer, or no
-    /// other racer left, says nothing; the test switch's dropped frames count as nothing.
+    /// both the race's start moment (race_go) and the release (finding 187); without the moment
+    /// nothing, however long the others take to load; a frame from any other racer, or no other
+    /// racer left, says nothing; the test switch's dropped frames count as nothing.
     #[test]
     fn a_silent_race_link_is_reported_once() {
         let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
@@ -1099,43 +1215,76 @@ mod tests {
         let said = |c: &mut Sfu| c.poll().unwrap().0.iter().filter(|t| t["type"] == "sfu_silent").count();
         let race = |c: &mut Sfu, at: u64| {
             c.signal(&json!({"type":"start","startAt":at,"yourSlot":0,"players":[{"memberId":1,"slot":0},{"memberId":17,"slot":1}]})).unwrap();
+            c.signal(&json!({"type":"sfu_ready","race":at})).unwrap();
         };
         let event = |at: u64| { let mut b = at.to_le_bytes().to_vec(); b.extend_from_slice(&[6, 9, 2]); b };
         race(&mut client, 100);
-        client.started_at = Some(ago(60));
+        client.started_at = Some(ago(60)); client.released = false;
+        client.race_go(100, ago(60));
         assert_eq!(said(&mut client), 0, "not released");
-        client.signal(&json!({"type":"sfu_ready","race":100})).unwrap();
+        client.released = true;
         client.released_at = Some(ago(SILENT_AFTER.as_secs() - 2));
         assert_eq!(said(&mut client), 0, "too soon after the release");
         client.released_at = Some(ago(SILENT_AFTER.as_secs() + 1));
         assert_eq!(said(&mut client), 1);
         assert_eq!(said(&mut client), 0, "once a race");
+        // No start moment yet: the others may still be on their way to the load screen. Started
+        // 40 s and released 35 s ago, nothing heard: no report.
+        race(&mut client, 150);
+        client.started_at = Some(ago(40)); client.released_at = Some(ago(35));
+        assert_eq!(said(&mut client), 0, "no moment, a 35 s load");
+        client.race_go(100, ago(60));
+        assert_eq!(said(&mut client), 0, "another race's moment");
+        // The moment named: still ahead (the countdown waits for it), then less than SILENT_AFTER
+        // ago, then SILENT_AFTER ago.
+        client.race_go(150, Instant::now() + Duration::from_secs(1));
+        assert_eq!(said(&mut client), 0, "the moment still ahead");
+        client.race_go(150, ago(SILENT_AFTER.as_secs() - 1));
+        assert_eq!(said(&mut client), 0, "too soon after the moment");
+        client.race_go(150, ago(SILENT_AFTER.as_secs() + 1));
+        assert_eq!(said(&mut client), 1, "SILENT_AFTER after the moment");
         // A frame from the other racer: nothing to say.
         race(&mut client, 200);
-        client.signal(&json!({"type":"sfu_ready","race":200})).unwrap();
         let mut frames = vec![];
         client.receive_frame(id, event(200), &mut frames).unwrap();
         assert_eq!(frames.len(), 1);
-        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(60)); client.race_go(200, ago(60));
         assert_eq!(said(&mut client), 0);
-        // The race's start counts too: released long ago but started just now.
+        // The release counts too: the moment long ago, released just now (a new session).
         race(&mut client, 300);
-        client.signal(&json!({"type":"sfu_ready","race":300})).unwrap();
-        client.started_at = Some(ago(START_LEAD.as_secs() + SILENT_AFTER.as_secs() - 2)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(SILENT_AFTER.as_secs() - 2)); client.race_go(300, ago(60));
         assert_eq!(said(&mut client), 0);
         // The other racer left: nobody to hear from.
         client.signal(&json!({"type":"left","slot":1,"memberId":17})).unwrap();
-        client.started_at = Some(ago(60));
+        client.released_at = Some(ago(60));
         assert_eq!(said(&mut client), 0);
-        // DHD_NET_SFU_SILENT: what comes is dropped, and reported as silence.
+        // DHD_NET_SFU_SILENT: what comes is dropped, and reported as silence. A new race has no
+        // moment until its own comes.
         race(&mut client, 400);
-        client.signal(&json!({"type":"sfu_ready","race":400})).unwrap();
         client.drop_all_in = true;
         let mut frames = vec![];
         client.receive_frame(id, event(400), &mut frames).unwrap();
         assert!(frames.is_empty());
-        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(60));
+        assert_eq!(said(&mut client), 0, "a new race: no moment yet");
+        client.race_go(400, ago(60));
         assert_eq!(said(&mut client), 1);
+    }
+
+    /// The room's start moment on this PC's clock: `at - startAt` after the instant the race's
+    /// start message put its startAt at (START_LEAD after it came); another race's moment is none.
+    #[test]
+    fn the_race_moment_is_on_the_races_own_clock() {
+        let clock = race_clock(&json!({"type":"start","startAt":5000})).unwrap();
+        assert_eq!(clock.0, 5000);
+        let lead = clock.1 - Instant::now();
+        assert!(lead <= START_LEAD && lead > START_LEAD - Duration::from_secs(1), "{lead:?}");
+        let (race, at) = race_moment(Some(clock), &json!({"type":"race_go","race":5000,"at":9500.5})).unwrap();
+        assert_eq!((race, at - clock.1), (5000, Duration::from_micros(4_500_500)));
+        assert_eq!(race_moment(Some(clock), &json!({"type":"race_go","race":4000,"at":9000})), None);
+        assert_eq!(race_moment(None, &json!({"type":"race_go","race":5000,"at":9500})), None);
+        assert_eq!(race_moment(Some(clock), &json!({"type":"race_go","race":5000,"at":4000})), None, "before its race");
+        assert_eq!(race_clock(&json!({"type":"start"})), None);
     }
 
     #[test]
@@ -1192,7 +1341,7 @@ mod tests {
         let mut b = [0u8; 65536];
         while Instant::now() < until {
             let (text, frames) = client.poll().unwrap();
-            bound_sender |= frames.iter().any(|f| f == &[6, 3, 2]);
+            bound_sender |= frames.iter().any(|(_, f)| f == &[6, 3, 2]);
             if !replied {
                 if let Some(mut c) = server.channel(server_reply) {
                     let mut reply = 1234u64.to_le_bytes().to_vec();
@@ -1346,7 +1495,7 @@ mod tests {
         let until = Instant::now() + Duration::from_secs(10);
         while Instant::now() < until && arrived.len() < 49 {
             let (_, frames) = client.poll().unwrap();
-            for f in frames { if f.len() >= 5 && f[0] == 5 { arrived.entry(f[4]).or_insert_with(Instant::now); } }
+            for (_, f) in frames { if f.len() >= 5 && f[0] == 5 { arrived.entry(f[4]).or_insert_with(Instant::now); } }
             let open = server.channel(relayed).is_some() && client.rtc.channel(client.channels[0].id).is_some();
             if open && next < 50 && sent_at.get(&next.wrapping_sub(1)).map_or(true, |t| t.elapsed() >= Duration::from_millis(5)) {
                 let mut wire = 1234u64.to_le_bytes().to_vec();
@@ -1384,7 +1533,7 @@ mod tests {
             (Self { server, socket, local }, client)
         }
         /// One round both ways; the server's channel data by channel.
-        fn pump(&mut self, client: &mut Sfu, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Vec<(ChannelId, Vec<u8>)> {
+        fn pump(&mut self, client: &mut Sfu, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Vec<(ChannelId, Vec<u8>)> {
             let (t, f) = client.poll().unwrap();
             text.extend(t);
             frames.extend(f);
@@ -1462,7 +1611,7 @@ mod tests {
                 got.extend(sfu.pump(&mut client, &mut text, &mut frames));
             }
             assert!(got.iter().any(|(id, d)| *id == own_events && d[..8] == race.to_le_bytes() && d[10] == payload), "race {race}: ours sent with its marker");
-            assert_eq!(frames[0], vec![6, 1, payload], "race {race}: theirs taken");
+            assert_eq!(frames[0].1, vec![6, 1, payload], "race {race}: theirs taken");
             client.signal(&json!({"type":"ended"})).unwrap();
             assert!(!client.race_open && !client.released);
             // After the end: nothing more goes out, an ended race's frames are dropped.
@@ -1533,7 +1682,7 @@ mod tests {
             if new.is_none() && sfu.server.direct_api().channel_id_by_sctp_stream_id(14).is_none() { new = Some(sfu.channel(14, false)); }
             if let Some(id) = new { if let Some(mut c) = sfu.server.channel(id) { let _ = c.write(true, &event(3000, 5)); } }
         }
-        assert_eq!(frames.first(), Some(&vec![6, 4, 5]), "the new subscription's frames, from member 21");
+        assert_eq!(frames.first().map(|f| &f.1), Some(&vec![6, 4, 5]), "the new subscription's frames, from member 21");
         assert!(client.orphans.is_empty());
     }
     #[test]
@@ -1585,7 +1734,7 @@ mod tests {
             }
             if let Some(id) = new[0] { if let Some(mut c) = sfu.server.channel(id) { let _ = c.write(true, &event(3000, 5)); } }
         }
-        assert_eq!(frames.first(), Some(&vec![6, 4, 5]), "the new subscription's frames reach slot 4");
+        assert_eq!(frames.first().map(|f| &f.1), Some(&vec![6, 4, 5]), "the new subscription's frames reach slot 4");
         assert!(text.iter().any(|m| m["type"] == "sfu_ready" && m["race"] == 3000), "every racer's channels open: acknowledged");
         let theirs: Vec<(u16, u64)> = client.channels.iter().filter(|c| !c.local).map(|c| (c.stream, c.member)).collect();
         assert_eq!(theirs, vec![(14, member), (16, member)]);

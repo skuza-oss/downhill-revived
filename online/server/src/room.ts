@@ -1,6 +1,7 @@
 // One lobby and its races. Lobby control is JSON on the room WebSocket; the race's frames travel
-// over the Realtime SFU, and this object owns the lobby and the SFU signaling. The only binary
-// message here is the clock's PING. Protocol: docs/online-protocol.md.
+// over the Realtime SFU or, in a P2P room, over peer connections between the games (a star around
+// one member, the hub; finding 186), and this object owns the lobby and the signaling of both. The
+// only binary message here is the clock's PING. Protocol: docs/online-protocol.md.
 import {
   CallGate, Realtime, Turn, TURN_TTL_S, clientChannels, unknownOutcome, type Allocation, type ListedChannel, type SfuSession,
   type SfuSecrets,
@@ -26,6 +27,7 @@ import {
   clientVersionOf,
   isOutdated,
   isByte,
+  logCode,
   isU32,
   measuredRtt,
   minVersionOf,
@@ -153,6 +155,42 @@ const REJOIN_GRACE_MS = 20_000;
 const REPLACED_CLOSE = 1000;
 /** A hello feature (finding 175): see Member.raceRejoin. */
 const FEATURE_RACE_REJOIN = "race_rejoin";
+/** A hello feature (finding 186): the game races in P2P rooms (the star, the hub, the fallback). A
+    P2P room takes only games that list it. */
+const FEATURE_P2P = "p2p";
+
+// ---- P2P rooms (finding 186) ----
+/** A member whose link to the hub isn't up this long after it was asked for (its join, a new hub)
+    races over the SFU instead (P2P_LINK_MS overrides it). A direct connection between two games
+    comes up in 0.1-3 s (finding 180: ICE checks and DTLS, on a LAN or across the internet). */
+const P2P_LINK_MS = 10_000;
+/** A hub replaced because its links failed or because it can't bridge its fallback racers is not
+    replaced for those reasons again this soon: each change makes every member connect anew. A
+    member whose working link to the hub died is not made the hub for as long (it may be the one
+    whose network failed, or one that reports its link down to move the hub). */
+const HUB_RETRY_MS = 60_000;
+/** Links that died are judged this long after the last of them: the others' keepalives find a dead
+    hub within 5 s of each other (dhd_star LINK_SILENT_MS). */
+const LINK_LOST_GRACE_MS = 5_000;
+/** A hub without a working SFU session while fallback racers wait for it is replaced once it has
+    been so this long: a session being renewed (a new offer between races, a replaced association,
+    TURN) is ready again within a few seconds (finding 177: UDP 0.7-1.5 s, TURN about 3 s from the
+    answer). Shorter than SFU_SETUP_MS, so the hub moves before its fallback racers would leave. */
+const UNBRIDGED_GRACE_MS = 12_000;
+/** A P2P room's text frames may be this long, for the peer connections' signaling (an SDP offer or
+    answer with its candidates: a few kB from a browser). Other messages keep MAX_TEXT_BYTES. */
+const P2P_TEXT_BYTES = 16_384;
+/** A P2P room's text caps (src/guard.ts tally): the hub signals every member at once, an offer
+    and its trickled candidates each (about 40 messages for nine members, more from a browser,
+    which gathers a candidate per network interface), and again after a new hub. */
+const P2P_TEXT_PER_WINDOW = 400;
+/** And the bytes of signaling a member may send in a caps window (src/guard.ts CAP_WINDOW_MS, 5 s):
+    a link's offer or answer and its candidates take 1-10 kB (a game's offer about 0.6 kB, a
+    browser's a few kB), so a hub signalling nine members at once, a browser's included, stays well
+    within it; 400 messages of 16 kB would be 1.3 MB/s into the room and on to the hub (review 7).
+    Signals over it are dropped (the link then fails over to the SFU); the first is answered with
+    the non-fatal too_fast warning. */
+const P2P_SIGNAL_BYTES_PER_WINDOW = 65_536;
 
 /** A member's rejoin token (finding 137): 16 random bytes in hex, sent only to that member's game
     in its welcome. Its rejoin hello sends it back and gets the member again; nothing else does. */
@@ -204,6 +242,17 @@ interface Member {
   turnUser?: string;
   /** When those credentials end by themselves (their TTL). */
   turnUntil?: number;
+  /** P2P rooms (finding 186): this member's link to the hub. Absent while it is being made (since
+      `linkFrom`, at most P2P_LINK_MS), "star" once it is up, "sfu" when it could not be made or
+      failed: the member then races over the SFU, bridged by the hub. The hub has none. */
+  link?: "star" | "sfu";
+  linkFrom?: number;
+  /** When the member went to the SFU (its setup deadlines in a race run from then). */
+  fallbackAt?: number;
+  /** It has been on a star: its network lets direct connections through (a hub candidate). */
+  direct?: boolean;
+  /** When its working link to the hub died (star, then down): not the next hub for HUB_RETRY_MS. */
+  lostLinkAt?: number;
   /** The hello listed FEATURE_RACE_GO: this game takes its race's start moment from the room
       (`race_go`) when its race link never brought the host's (finding 187). */
   raceGo?: boolean;
@@ -282,6 +331,19 @@ interface RoomState {
   /** In join order, so members[0] has been here longest. */
   members: Member[];
   race: Race | null;
+  /** "p2p": race frames travel over peer connections in a star around `hub` (finding 186), and a
+      member who can't reach the hub over the SFU. Absent: an SFU room. Set when the room is made,
+      never changed. A P2P room is never public. */
+  transport?: "p2p";
+  /** The member whose game the others connect to and which forwards their frames; null with no
+      member. When it changed last (HUB_RETRY_MS). */
+  hub?: number | null;
+  hubChangedAt?: number;
+  /** Counts the hubs: each new hub's routes and signaling carry the next number, so a late signal
+      meant for an earlier hub's peers is dropped (review 5). */
+  hubEpoch?: number;
+  /** Since when fallback racers have waited for a hub without a working SFU session. */
+  unbridgedSince?: number;
 }
 
 /** Where a room was made (src/index.ts, finding 135). */
@@ -359,6 +421,8 @@ export class Room extends DurableObject<Env> {
   private tallies = new WeakMap<WebSocket, Tally>();
   /** Sockets whose hello waits for the ban list (onHello): their other messages are dropped. */
   private helloPending = new WeakSet<WebSocket>();
+  /** Each socket's signaling bytes in the current caps window (P2P_SIGNAL_BYTES_PER_WINDOW). */
+  private signalBytes = new WeakMap<WebSocket, { since: number; bytes: number; warned: boolean }>();
   private capsFor: unknown = null;
   private capsNow: Caps = CAPS;
 
@@ -376,8 +440,9 @@ export class Room extends DurableObject<Env> {
     });
   }
 
-  /** Called by the Worker for a fresh code. False if the code is in use. */
-  async claim(code: string, origin?: RoomOrigin): Promise<boolean> {
+  /** Called by the Worker for a fresh code. False if the code is in use. `transport` "p2p": a P2P
+      room (finding 186), whose code the Worker made one character longer. */
+  async claim(code: string, origin?: RoomOrigin, transport?: "p2p"): Promise<boolean> {
     if (this.state) return false;
     const now = Date.now();
     this.state = {
@@ -396,6 +461,7 @@ export class Room extends DurableObject<Env> {
       members: [],
       race: null,
       ...(origin ? { origin } : {}),
+      ...(transport === "p2p" ? { transport, hub: null } : {}),
     };
     await this.save();
     await this.ctx.storage.setAlarm(now + PING_INTERVAL_MS);
@@ -422,7 +488,7 @@ export class Room extends DurableObject<Env> {
         await this.save();
         // One line per room for the server's logs: where hints really put rooms (finding 181).
         const o = this.state.origin;
-        if (o) console.log(`room ${this.state.code}: runs in ${colo}, made with ${o.hint || "no hint"} (${o.how ?? "country"}) from ${o.createdFrom || "?"}`);
+        if (o) console.log(`room ${logCode(this.state.code)}: runs in ${colo}, made with ${o.hint || "no hint"} (${o.how ?? "country"}) from ${o.createdFrom || "?"}`);
         this.broadcastWhere();
         this.updateListing();
       } catch {}
@@ -474,12 +540,13 @@ export class Room extends DurableObject<Env> {
     // closed.
     let t = this.tallies.get(ws);
     if (!t) this.tallies.set(ws, (t = newTally(now)));
-    const verdict = tally(t, typeof msg !== "string", now, this.caps());
+    const p2p = this.state?.transport === "p2p";
+    const verdict = tally(t, typeof msg !== "string", now, this.caps(p2p));
     if (verdict !== "ok") {
       if (verdict === "warn") this.error(ws, "too_fast", TOO_FAST_WARNING);
       if (verdict === "close") {
         const info = ws.deserializeAttachment() as SocketInfo | null;
-        console.warn(`room ${this.state?.code ?? ""}: member ${info?.memberId ?? "-"} closed: too many messages`);
+        console.warn(`room ${logCode(this.state?.code ?? "")}: member ${info?.memberId ?? "-"} closed: too many messages`);
         return this.refuse(ws, "too_fast", TOO_FAST_MESSAGE);
       }
       return;
@@ -488,7 +555,7 @@ export class Room extends DurableObject<Env> {
       this.pong(ws, msg);
       return;
     }
-    if (msg.length > MAX_TEXT_BYTES) return this.refuse(ws, "bad_message", "Message too long.");
+    if (msg.length > (p2p ? P2P_TEXT_BYTES : MAX_TEXT_BYTES)) return this.refuse(ws, "bad_message", "Message too long.");
     let m: Msg;
     try {
       m = JSON.parse(msg);
@@ -497,6 +564,8 @@ export class Room extends DurableObject<Env> {
     }
     if (typeof m !== "object" || m === null || typeof m.type !== "string")
       return this.refuse(ws, "bad_message", "Missing message type.");
+    // Only the peer connections' signaling may be longer than any other message.
+    if (msg.length > MAX_TEXT_BYTES && m.type !== "p2p_signal") return this.refuse(ws, "bad_message", "Message too long.");
 
     const info = ws.deserializeAttachment() as SocketInfo;
     if (info.gone || this.helloPending.has(ws)) return;
@@ -593,6 +662,14 @@ export class Room extends DurableObject<Env> {
           ws.close(1000, "leave");
         } catch {}
         return;
+      // A P2P room's peer connections (finding 186); in an SFU room they are unknown types.
+      case "p2p_signal":
+        if (st.transport === "p2p" && this.signalBudget(ws, msg.length, now)) return this.onSignal(st, me, m);
+        if (st.transport === "p2p") return;
+        return this.refuse(ws, "bad_message", `Unknown message type "${m.type}".`);
+      case "p2p_link":
+        if (st.transport === "p2p") return this.onLink(st, me, m);
+        return this.refuse(ws, "bad_message", `Unknown message type "${m.type}".`);
       default:
         return this.refuse(ws, "bad_message", `Unknown message type "${m.type}".`);
     }
@@ -666,8 +743,9 @@ export class Room extends DurableObject<Env> {
     await this.replacePoisoned();
     // A racer whose session was replaced in its race and isn't back in time (finding 187).
     if (race && st.race === race) {
-      const overdue = st.members.filter(x => this.inRace(st, x.id) && x.renewedRace === race.startAt && x.renewBy != null && now >= x.renewBy);
-      for (const x of overdue) console.warn(`room ${st.code}: member ${x.id}'s new session isn't up ${this.sfuRenewMs()} ms after it was asked for`);
+      const overdue = st.members.filter(x => this.inRace(st, x.id) && this.racesOnSfu(st, x.id) && x.renewedRace === race.startAt &&
+        x.renewBy != null && now >= x.renewBy);
+      for (const x of overdue) console.warn(`room ${logCode(st.code)}: member ${x.id}'s new session isn't up ${this.sfuRenewMs()} ms after it was asked for`);
       if (overdue.length) await this.retireSfu(overdue.map(x => x.id), race.startAt, false);
     }
     // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
@@ -675,7 +753,7 @@ export class Room extends DurableObject<Env> {
       race.sfuConnectBy = undefined;
       const racers = st.members.filter(x => this.inRace(st, x.id));
       const lost = racers.filter(x => !(x.sfuConnected || x.sfu?.phase === "ready") && !this.renewing(x, race, now));
-      console.log(`room ${st.code}: Realtime setup after ${now - race.startAt + START_LEAD_MS} ms: ` + racers.map(x =>
+      console.log(`room ${logCode(st.code)}: Realtime setup after ${now - race.startAt + START_LEAD_MS} ms: ` + racers.map(x =>
         `${x.id}${x.region ? "/" + x.region : ""}:${!x.sfu ? "no-session" : x.sfuReadyRace === race.startAt ? "ready" :
           x.sfuConnected || x.sfu.phase === "ready" ? "connected" : x.turnAttempt === x.sfuAttempt ? "turn" : "offered"}`).join(" "));
       if (lost.length) await this.retireSfu(lost.map(x => x.id), race.startAt, false);
@@ -683,7 +761,9 @@ export class Room extends DurableObject<Env> {
     }
     // Every racer ready but no release yet (a reconcile that never asked again, finding 175):
     // asked again each tick; releaseSfu does nothing until every racer is ready.
-    if (race && st.race === race && !race.sfuReleased) this.releaseSfu(st);
+    if (race && st.race === race && this.releaseDue(st)) this.releaseSfu(st);
+    // A P2P room's links and hub, and its fallback racers' setup (finding 186).
+    if (st.transport === "p2p") await this.p2pUpkeep(st, now);
     // Realtime setup not done in time (SFU_SETUP_MS): those racers are out, the rest go on; a
     // connected one's channels never opened, so its game starts a new session.
     if (race && st.race === race && !race.sfuReleased && race.sfuBy != null && now >= race.sfuBy) {
@@ -831,6 +911,10 @@ export class Room extends DurableObject<Env> {
     const asHost = info.create && st !== null && st.version === null && st.members.length === 0;
     if (!st || (!asHost && st.version === null))
       return this.refuse(ws, "room_not_found", "No room has this code.");
+    const features = Array.isArray(m.features) ? m.features : [];
+    // A P2P room's games race over its star (finding 186): a game that can't is refused at once.
+    if (st.transport === "p2p" && !features.includes(FEATURE_P2P))
+      return this.refuse(ws, "bad_message", "This game can't race in P2P rooms.");
     // A game back with its member's token (its connection dropped, or a restart dropped every
     // socket) gets its member again: id, host, rider, Ready and race place included (finding 137).
     const ghost = asHost ? undefined : this.rejoinOf(st, m.rejoinToken);
@@ -853,7 +937,6 @@ export class Room extends DurableObject<Env> {
       st.roomName = `${name}'s room`;
     }
 
-    const features = Array.isArray(m.features) ? m.features : [];
     const member: Member = ghost ?? {
       id: st.nextMemberId++,
       name,
@@ -869,6 +952,16 @@ export class Room extends DurableObject<Env> {
     else delete member.raceGo;
     if (!ghost) st.members.push(member);
     if (asHost) st.hostId = member.id;
+    // A P2P room's first hub is its creator; a newcomer links to the hub (finding 186). A member
+    // back whose link is still to be made gets its full time for it now: away, it could not signal
+    // (review 4).
+    if (st.transport === "p2p") {
+      if (!ghost && (asHost || st.hub == null)) {
+        st.hub = member.id;
+        st.hubChangedAt = Date.now();
+        st.hubEpoch = (st.hubEpoch ?? 0) + 1;
+      } else if (member.id !== st.hub && !member.link) member.linkFrom = Date.now();
+    }
     // A racer back in its race (finding 175): it raced on over the SFU meanwhile.
     const backInRace = !!ghost && this.inRace(st, ghost.id) && !!ghost.raceRejoin;
     if (ghost) {
@@ -897,7 +990,7 @@ export class Room extends DurableObject<Env> {
     } else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
     // The moderation log (finding 161): who entered which room, kept 14 days, for bans.
     this.ctx.waitUntil(logJoin(this.env as GuardEnv, {
-      at: Date.now(), room: st.code, member: member.id, kind: asHost ? "host" : ghost ? "rejoin" : "guest", name: member.name,
+      at: Date.now(), room: logCode(st.code), member: member.id, kind: asHost ? "host" : ghost ? "rejoin" : "guest", name: member.name,
       clientVersion, country: info.country ?? "", ipHash: info.ipHash ?? "", installId,
     }));
     this.send(ws, {
@@ -931,8 +1024,13 @@ export class Room extends DurableObject<Env> {
       // Back in a running race (finding 175): which one. A game that missed the race's start (its
       // hello names another race or none) gets the start again.
       ...(backInRace ? { race: { startAt: st.race!.startAt } } : {}),
+      // A P2P room (finding 186); its routes follow (p2p).
+      ...(st.transport === "p2p" ? { transport: "p2p" } : {}),
     });
     if (ghost) this.catchUp(ws, st, member, backInRace, m.raceStartAt);
+    // Everyone learns of the newcomer (the hub connects to it); a game back learns where its
+    // links stand.
+    this.broadcastRoutes();
     this.probeColo();
     // First ping right away so the lobby shows a delay quickly.
     this.send(ws, { type: "ping", s: Date.now() });
@@ -1017,8 +1115,9 @@ export class Room extends DurableObject<Env> {
         this.send(ws, minted.message);
       } else if (m.type === "sfu_ready") {
         // Its channels for this race are open (an older race's acknowledgement counts for nothing).
+        // A P2P room's hub bridges its fallback racers whether it races or not (finding 186).
         const race = st.race;
-        if (!race || !this.inRace(st, me.id) || me.sfu?.phase !== "ready") return false;
+        if (!race || !(this.inRace(st, me.id) || this.isHub(st, me.id)) || me.sfu?.phase !== "ready") return false;
         if (m.race !== undefined && m.race !== race.startAt) return false;
         if (me.sfuReadyRace === race.startAt) return false;
         me.sfuReadyRace = race.startAt;
@@ -1031,12 +1130,16 @@ export class Room extends DurableObject<Env> {
         // session's stream ids can be dead on Cloudflare's side with every call answered 200 and
         // every channel listed active, and only a new session clears that. Once per race; a game
         // still silent on its new session is out of the race (the race can't reach it).
+        // In a P2P room a fallback racer's and the bridging hub's: the SFU carries only their part
+        // of the race (finding 186). The hub is renewed once; still silent, nothing more: with one
+        // fallback racer its upload may be the cause, and moving the hub would make every star
+        // racer reconnect (a hub without a working session moves: checkHub). It stays in its race.
         const race = st.race;
-        if (!race || !this.inRace(st, me.id) || m.race !== race.startAt || me.releasedRace !== race.startAt ||
+        if (!race || !this.onSfuInRace(st, me) || m.race !== race.startAt || me.releasedRace !== race.startAt ||
             me.sfu?.phase !== "ready") return false;
         if (me.renewedRace === race.startAt) {
-          console.warn(`room ${st.code}: member ${me.id}'s race link is still silent on its new session`);
-          await this.retireSfu([me.id], race.startAt, true);
+          console.warn(`room ${logCode(st.code)}: member ${me.id}'s race link is still silent on its new session`);
+          if (!this.isHub(st, me.id)) await this.retireSfu([me.id], race.startAt, true);
           return false;
         }
         this.sfuRenew(me, race, "hears nothing from the other racers (sfu_silent)");
@@ -1098,6 +1201,8 @@ export class Room extends DurableObject<Env> {
     if (m.finishWindow !== undefined) st.rules!.finishWindow = m.finishWindow as number;
     if (m.then !== undefined) st.rules!.then = m.then as Rules["then"];
     if (m.nextRace !== undefined) { st.rules!.nextRace = m.nextRace as Rules["nextRace"]; st.nextExplicit = true; }
+    // A P2P room is never public: its members see each other's network addresses (finding 186).
+    if (st.transport === "p2p") delete m.public;
     if (m.public !== undefined && !st.nextExplicit) st.rules!.nextRace = m.public ? "auto" : "host";
     if (m.rotation !== undefined) {
       st.rotation = m.rotation as number[];
@@ -1163,7 +1268,7 @@ export class Room extends DurableObject<Env> {
     if (race.slots[namer] !== me.id || typeof at !== "number" || !Number.isFinite(at) ||
         at < race.startAt || at > race.startAt + RACE_GO_MAX_MS) return;
     race.goAt = at;
-    console.log(`room ${st.code}: the race's start moment, from member ${me.id}: ${Math.round(at - race.startAt)} ms after startAt`);
+    console.log(`room ${logCode(st.code)}: the race's start moment, from member ${me.id}: ${Math.round(at - race.startAt)} ms after startAt`);
     this.sendRaceGo(race);
     await this.save();
   }
@@ -1178,19 +1283,20 @@ export class Room extends DurableObject<Env> {
     }
   }
 
-  /** The caps per member (src/guard.ts CAPS), worked out once per env (every message asks, the race
-      relay's too). The tests change them through CAP_WINDOW_MS and CAP_BINARY (vitest.config.ts;
-      a test may give a room a new env). */
-  private caps(): Caps {
-    if (this.capsFor === this.env) return this.capsNow;
-    const env = this.env as unknown as Record<string, unknown>;
-    const knob = (name: string, value: number) => {
-      const v = Number(env[name]);
-      return env[name] !== undefined && Number.isFinite(v) && v > 0 ? v : value;
-    };
-    this.capsFor = this.env;
-    this.capsNow = { windowMs: knob("CAP_WINDOW_MS", CAPS.windowMs), text: CAPS.text, binary: knob("CAP_BINARY", CAPS.binary) };
-    return this.capsNow;
+  /** The caps per member (src/guard.ts CAPS), worked out once per env (every message asks). The
+      tests change them through CAP_WINDOW_MS and CAP_BINARY (vitest.config.ts; a test may give a
+      room a new env). A P2P room's members may send more text: its signaling (P2P_TEXT_PER_WINDOW). */
+  private caps(p2p: boolean): Caps {
+    if (this.capsFor !== this.env) {
+      const env = this.env as unknown as Record<string, unknown>;
+      const knob = (name: string, value: number) => {
+        const v = Number(env[name]);
+        return env[name] !== undefined && Number.isFinite(v) && v > 0 ? v : value;
+      };
+      this.capsFor = this.env;
+      this.capsNow = { windowMs: knob("CAP_WINDOW_MS", CAPS.windowMs), text: CAPS.text, binary: knob("CAP_BINARY", CAPS.binary) };
+    }
+    return p2p ? { ...this.capsNow, text: P2P_TEXT_PER_WINDOW } : this.capsNow;
   }
 
   private sfuConnectMs(): number {
@@ -1259,6 +1365,7 @@ export class Room extends DurableObject<Env> {
     // Members away after a drop (finding 137) don't race: their game isn't here to start.
     const racers = st.members.filter(x => this.sockets.has(x.id) && st.grid?.includes(x.id)).sort((a, b) => Number(b.id === st.hostId) - Number(a.id === st.hostId));
     const now = Date.now();
+    const p2p = st.transport === "p2p";
     st.race = {
       rules: {...st.gridRules!},
       results: racers.map(x => ({id:x.id, name:x.name, rider:x.rider, place:0})),
@@ -1268,14 +1375,18 @@ export class Room extends DurableObject<Env> {
       laps: st.laps,
       seed: st.seed ?? randomSeed(),
       startAt: now + START_LEAD_MS,
-      sfuBy: now + this.sfuSetupMs(),
-      sfuConnectBy: now + this.sfuConnectMs(),
+      // A P2P room's star needs no setup; its fallback racers have deadlines of their own
+      // (p2pDeadlines, finding 186).
+      ...(p2p ? {} : { sfuBy: now + this.sfuSetupMs(), sfuConnectBy: now + this.sfuConnectMs() }),
       players: racers.map((x, slot) => ({ slot, memberId: x.id, name: x.name, rider: x.rider, bike: x.bike })),
     };
     st.grid = undefined; st.gridRules = undefined;
     await this.save();
     const race = st.race;
-    this.stat(["race", "", ""], [racers.length, race.track, race.laps]);
+    this.stat(["race", p2p ? "p2p" : "", ""], [racers.length, race.track, race.laps]);
+    // A P2P room's routes first: each game knows its part of the race (the star, the SFU) when its
+    // start comes, and the hub the racers it forwards, racing or not (finding 186).
+    this.broadcastRoutes();
     racers.forEach((x, slot) => {
       const s = this.sockets.get(x.id);
       if (s) this.send(s, this.startMessage(race, slot, now));
@@ -1345,8 +1456,12 @@ export class Room extends DurableObject<Env> {
     this.rtts.delete(id);
     this.firstRtts.delete(id);
     ws.serializeAttachment({ ...info, memberId: null, gone: true });
+    // A P2P room's hub whose room connection dropped is most likely gone (its game, its network):
+    // the next hub now rather than after the rejoin's wait, while its members' links die one by one
+    // and send them to the SFU (finding 186). Back by its token it is a member like any other.
+    if (st.transport === "p2p" && st.hub === id) this.setHub(st, this.bestHub(st, Date.now(), { exclude: id }), "the hub's connection dropped");
     if (racing)
-      console.log(`room ${st.code}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
+      console.log(`room ${logCode(st.code)}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
     await this.changed();
   }
 
@@ -1356,10 +1471,19 @@ export class Room extends DurableObject<Env> {
   private sfuGroup(): Member[] | null {
     const st = this.state;
     if (!st) return null;
-    if (st.race) return st.members.filter((x) => this.inRace(st, x.id));
-    if (st.grid?.length) return st.members.filter((x) => st.grid!.includes(x.id) && this.sockets.has(x.id));
-    // A room with the old rules has no grid: its countdown runs only with everyone ready.
-    return null;
+    const entrants = st.race ? st.members.filter((x) => this.inRace(st, x.id)) :
+      st.grid?.length ? st.members.filter((x) => st.grid!.includes(x.id) && this.sockets.has(x.id)) : null;
+    return entrants && st.transport === "p2p" ? this.bridged(st, entrants) : entrants;
+  }
+
+  /** In a P2P room, who of `entrants` races over the SFU (finding 186): the fallback racers, and the
+      hub, which bridges them and the star (racing or not), when there are any. Every ordered pair of
+      them is subscribed: a fallback racer to the hub's publication (every star racer's frames) and
+      to the other fallback racers', the hub to theirs. Star racers never use the SFU. */
+  private bridged(st: RoomState, entrants: Member[]): Member[] {
+    const fallback = entrants.filter((x) => x.id !== st.hub && x.link === "sfu");
+    const hub = st.members.find((x) => x.id === st.hub);
+    return fallback.length && hub ? [hub, ...fallback] : fallback;
   }
 
   /** `sub` holds a live subscription to both channels of `pub`'s current publication: made to its
@@ -1385,9 +1509,13 @@ export class Room extends DurableObject<Env> {
 
   /** Remote channels of `sub` that no longer lead anywhere: to a member gone, or to an earlier
       session of theirs. */
-  private staleChannels(sub: Member): Allocation[] {
+  private staleChannels(sub: Member, group: Member[] | null): Allocation[] {
     const st = this.state;
-    return (sub.sfu?.channels ?? []).filter((c) => !c.local && c.closeAt == null && c.session !== st?.members.find((x) => x.id === c.memberId)?.sfu?.id);
+    // In a P2P room also those of a member of the group to one outside it (a racer back on the star,
+    // an earlier hub): its frames no longer come this way (finding 186).
+    const outside = (c: Allocation) => st?.transport === "p2p" && !!group?.includes(sub) && !group.some((x) => x.id === c.memberId);
+    return (sub.sfu?.channels ?? []).filter((c) => !c.local && c.closeAt == null &&
+      (c.session !== st?.members.find((x) => x.id === c.memberId)?.sfu?.id || outside(c)));
   }
 
   /** `sub`'s subscriptions whose close failed and is due again (finding 179): those to try again
@@ -1422,7 +1550,7 @@ export class Room extends DurableObject<Env> {
         if (s?.phase !== "ready") return false;
         if ((s.unsure != null && s.unsure <= now) || (s.recheckAt != null && s.recheckAt <= now)) return true;
         const failed = this.failedCloses(x, group, now);
-        return this.staleChannels(x).length || failed.retry.length || failed.forget.length || failed.reset;
+        return this.staleChannels(x, group).length || failed.retry.length || failed.forget.length || failed.reset;
       });
   }
 
@@ -1485,7 +1613,7 @@ export class Room extends DurableObject<Env> {
     // they free stay dead on Cloudflare's side (finding 187): the session gets no new subscription
     // and is replaced (replacePoisoned).
     if (!session.poisoned)
-      console.warn(`room ${st?.code ?? ""}: member ${sub.id}: ${extra.length} subscriptions its game never had are closed; its session is replaced when that costs no race`);
+      console.warn(`room ${logCode(st?.code ?? "")}: member ${sub.id}: ${extra.length} subscriptions its game never had are closed; its session is replaced when that costs no race`);
     session.poisoned = true;
     try {
       await this.serial(session.id, () => api.close({ ...session, channels: [...extra] }, extra));
@@ -1556,14 +1684,14 @@ export class Room extends DurableObject<Env> {
       const session = sub.sfu!;
       if (this.unsure(session, now) || !await this.inspect(api, sub, session, group, counts, failed)) return;
       const outside = prune && st.race && group && !group.includes(sub);
-      const fresh = outside ? session.channels.filter((c) => !c.local && c.closeAt == null) : this.staleChannels(sub);
+      const fresh = outside ? session.channels.filter((c) => !c.local && c.closeAt == null) : this.staleChannels(sub, group);
       const { retry, forget, reset } = this.failedCloses(sub, group, now);
       if (forget.length) {
         console.warn(`Realtime close given up for ${forget.length} subscriptions to no live publication`);
         session.channels = session.channels.filter((c) => !forget.includes(c));
       }
       if (reset) {
-        console.warn(`room ${st.code}: member ${sub.id}'s subscriptions don't close; its session is reset`);
+        console.warn(`room ${logCode(st.code)}: member ${sub.id}'s subscriptions don't close; its session is reset`);
         session.phase = "failed";
         if (!failed.some(f => f.session === session)) failed.push({ id: sub.id, session });
         return;
@@ -1656,7 +1784,7 @@ export class Room extends DurableObject<Env> {
         // Pairs subscribed, unknown (inspected later) and failed for certain; inspections, channels
         // they adopted and unrecorded ones they closed (finding 182).
         if (this.calls > before)
-          console.log(`room ${this.state?.code ?? ""}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms; ` +
+          console.log(`room ${logCode(this.state?.code ?? "")}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms; ` +
             `pairs ok ${counts.ok} unknown ${counts.unknown} failed ${counts.failed}; inspected ${counts.inspected} adopted ${counts.adopted} closed ${counts.extra}`);
         await this.save();
         // Saving yields too: a replacement completed since the failing call is healthy.
@@ -1664,7 +1792,7 @@ export class Room extends DurableObject<Env> {
         if (currentFailures.length) await this.sfuFailed(currentFailures.map(f => f.id));
         await this.replacePoisoned();
         const st = this.state;
-        if (st?.race && !st.race.sfuReleased) this.releaseSfu(st);
+        if (st?.race && this.releaseDue(st)) this.releaseSfu(st);
         called = this.calls > before;
         // Again only after a pass that made a call: one that made none (every missing pair waits
         // for an inspection) would run again at once, without yielding (finding 182, the test
@@ -1703,7 +1831,7 @@ export class Room extends DurableObject<Env> {
     const answer = await fetch(input, init);
     if (!lose) return answer;
     await answer.body?.cancel();
-    console.log(`room ${this.state?.code ?? ""}: test: a subscription call's answer is dropped (${this.lostAnswers} left)`);
+    console.log(`room ${logCode(this.state?.code ?? "")}: test: a subscription call's answer is dropped (${this.lostAnswers} left)`);
     return new Promise<Response>((_, reject) => {
       const signal = init?.signal;
       if (!signal) return reject(new Error("no answer"));
@@ -1713,12 +1841,25 @@ export class Room extends DurableObject<Env> {
   };
 
   /** Lets race traffic flow once every racer acknowledged its channels for this race and every pair
-      of racers is subscribed both ways. */
+      of racers is subscribed both ways. In a P2P room only the SFU's part of the race waits, its
+      fallback racers and the hub (bridged); the star never does, and fallback racers that come
+      later are released then (finding 186). */
   private releaseSfu(st: RoomState): void {
     const race = st.race;
     if (!race) return;
-    const racers = st.members.filter(m => this.inRace(st, m.id));
-    if (!racers.length || !racers.every(m => m.sfuReadyRace === race.startAt && m.sfu?.phase === "ready")) return;
+    const ready = (m: Member) => m.sfuReadyRace === race.startAt && m.sfu?.phase === "ready";
+    const entrants = st.members.filter(m => this.inRace(st, m.id));
+    let racers = entrants;
+    if (st.transport === "p2p") {
+      // The hub and the fallback racers that are ready: one that isn't (its session broken, its
+      // channels late) holds back nobody else; it is released with them once it is ready and its
+      // pairs are made, or leaves the race at its deadline (review 3).
+      const group = this.bridged(st, entrants);
+      if (!group.some((m) => m.id === st.hub && ready(m))) return;
+      racers = group.filter(ready);
+      if (racers.length < 2) return;
+    }
+    if (!racers.length || !racers.every(ready)) return;
     if (this.missingSubscription(racers)) {
       // A pass for a pair it can make now; one waiting for its inspection gets the alarm's.
       if (this.missingSubscription(racers, Date.now())) this.kickSubscribe();
@@ -1731,7 +1872,7 @@ export class Room extends DurableObject<Env> {
     // after the release gets it once more.
     const first = !race.sfuReleased;
     race.sfuReleased = true;
-    if (first) console.log(`room ${st.code}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
+    if (first) console.log(`room ${logCode(st.code)}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
     let sent = false;
     for (const member of racers) {
       if (member.releasedRace === race.startAt) continue;
@@ -1862,7 +2003,7 @@ export class Room extends DurableObject<Env> {
       if (!st || !race || race.startAt !== startAt || !this.inRace(st, id)) continue;
       out++;
       const member = st.members.find((x) => x.id === id);
-      console.warn(`room ${st.code}: member ${id} out of the race: no Realtime connection`);
+      console.warn(`room ${logCode(st.code)}: member ${id} out of the race: no Realtime connection`);
       const ws = this.sockets.get(id);
       if (ws) this.error(ws, "bad_value", SFU_FAILED_MESSAGE);
       this.retire(st, id, "left");
@@ -1881,7 +2022,9 @@ export class Room extends DurableObject<Env> {
     const st = this.state;
     if (!st) return;
     const race = st.race;
-    const racers = race ? ids.filter((id) => this.inRace(st, id)) : [];
+    // In a P2P room only a fallback racer races over the SFU: a star racer's (or the hub's) session
+    // failing takes nobody out of the race (finding 186).
+    const racers = race ? ids.filter((id) => this.inRace(st, id) && this.racesOnSfu(st, id)) : [];
     if (race && racers.length) await this.retireSfu(racers, race.startAt, true);
     for (const id of ids.filter((id) => !racers.includes(id))) {
       const member = st.members.find((x) => x.id === id);
@@ -1904,7 +2047,7 @@ export class Room extends DurableObject<Env> {
       race after that). The others keep racing: their subscriptions to it close and come back with
       its new publication. Once per member and race. */
   private sfuRenew(member: Member, race: Race, why: string): void {
-    console.warn(`room ${this.state?.code ?? ""}: member ${member.id} ${why}; a new session for its race`);
+    console.warn(`room ${logCode(this.state?.code ?? "")}: member ${member.id} ${why}; a new session for its race`);
     member.renewedRace = race.startAt;
     member.renewBy = Date.now() + this.sfuRenewMs();
     this.sfuReset(member);
@@ -1921,14 +2064,16 @@ export class Room extends DurableObject<Env> {
     const group = this.sfuGroup(), race = st.race, out: number[] = [];
     for (const m of [...st.members]) {
       if (!m.sfu?.poisoned || m.sfu.phase !== "ready") continue;
-      if (!race || !this.inRace(st, m.id)) {
-        console.warn(`room ${st.code}: member ${m.id}'s session has dead stream ids; a new session`);
+      // In a P2P room a star racer's session carries none of its race (finding 186): replaced at once.
+      if (!race || !this.onSfuInRace(st, m)) {
+        console.warn(`room ${logCode(st.code)}: member ${m.id}'s session has dead stream ids; a new session`);
         this.sfuReset(m);
         continue;
       }
       const lacks = !!group?.includes(m) && group.some((p) => p !== m && p.sfu?.phase === "ready" && !this.subscribed(m, p));
       if (!lacks) continue;
-      if (m.renewedRace === race.startAt) out.push(m.id);
+      // A P2P room's hub renewed once already can't bridge: checkHub moves it (bridges).
+      if (m.renewedRace === race.startAt) { if (!this.isHub(st, m.id)) out.push(m.id); }
       else this.sfuRenew(m, race, "needs a pair its session can't take (dead stream ids)");
     }
     if (out.length && race) await this.retireSfu(out, race.startAt, true);
@@ -1963,6 +2108,11 @@ export class Room extends DurableObject<Env> {
     }
     if (st.hostId === memberId) st.hostId = st.members[0]?.id ?? null;
     if (st.members.length === 0) return this.destroy();
+    // A P2P room's hub left: the next one, and everyone connects to it; a race goes on (finding 186).
+    if (st.transport === "p2p") {
+      if (st.hub === memberId) this.setHub(st, this.bestHub(st, Date.now()), "the hub left");
+      else this.broadcastRoutes();
+    }
     if (st.race && !this.anyRacing(st)) await this.closeRace(st, false);
     await this.changed();
   }
@@ -2028,6 +2178,8 @@ export class Room extends DurableObject<Env> {
     const member = st.members.find(x => x.id === id);
     if (member) member.ready = false;
     this.sendRacers(st.race, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
+    // The hub stops forwarding that racer's frames, racing or not (finding 186).
+    this.broadcastRoutes();
     // After `left`: the others hear who is gone before their traffic is released (sent once now,
     // finding 175; the repeat used to come after `left` by chance).
     this.releaseSfu(st);
@@ -2059,11 +2211,18 @@ export class Room extends DurableObject<Env> {
     }
     // Those still riding spend their Ready now; one pressed in the room during the race stays.
     for (const x of st.members) if (this.inRace(st, x.id)) x.ready = false;
+    // A P2P room's members on the SFU try the hub again between races (finding 186): a link that
+    // failed once (a network that dropped for a moment) need not keep them off the star.
+    if (st.transport === "p2p")
+      for (const x of st.members) if (x.link === "sfu") { delete x.link; delete x.fallbackAt; x.linkFrom = Date.now(); }
     st.race = null;
     st.countdownEndsAt = null;
     st.nextRaceAt = race.rules!.nextRace === "auto" ? Date.now() + 30_000 : null;
     await this.save();
+    // The results come from here to every member, the room's snapshot after this (finding 186: a
+    // P2P room's guests used to wait for the host's game to send them).
     this.broadcast({type:"ended", reason:voided ? "void" : "done"});
+    this.broadcastRoutes();
   }
 
   private async destroy(): Promise<void> {
@@ -2075,6 +2234,233 @@ export class Room extends DurableObject<Env> {
     if (this.cleanup.length) await this.saveCleanup();
     // Sockets still waiting for hello get room_not_found then; keep their timeout running.
     if (this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(Date.now() + PING_INTERVAL_MS);
+  }
+
+  // ---- P2P rooms: the hub, its links, the SFU fallback (finding 186) ----
+
+  private isHub(st: RoomState, id: number): boolean {
+    return st.transport === "p2p" && st.hub === id;
+  }
+
+  /** The member takes part in the running race's SFU side: in an SFU room every racer, in a P2P
+      room a fallback racer and the hub that bridges them, racing or not (finding 186). */
+  private onSfuInRace(st: RoomState, m: Member): boolean {
+    if (!st.race) return false;
+    const racers = st.members.filter((x) => this.inRace(st, x.id));
+    return st.transport === "p2p" ? this.bridged(st, racers).includes(m) : racers.includes(m);
+  }
+
+  /** The member's SFU session can bridge a P2P room's star and its fallback racers: up, and not one
+      whose stream ids are dead (finding 187: no subscription is made on it). */
+  private bridges(m: Member): boolean {
+    return m.sfu?.phase === "ready" && !m.sfu.poisoned;
+  }
+
+  /** The member's race runs over the SFU: in an SFU room every racer's, in a P2P room a fallback
+      racer's (the hub's own race runs on its star even when it bridges). */
+  private racesOnSfu(st: RoomState, id: number): boolean {
+    if (st.transport !== "p2p") return true;
+    return id !== st.hub && st.members.find((x) => x.id === id)?.link === "sfu";
+  }
+
+  /** A release may still be due: in an SFU room until its race is released; in a P2P room at any
+      time, as racers may fall back to the SFU during the race. */
+  private releaseDue(st: RoomState): boolean {
+    return !!st.race && (!st.race.sfuReleased || st.transport === "p2p");
+  }
+
+  private p2pLinkMs(): number {
+    const v = Number((this.env as unknown as Record<string, unknown>).P2P_LINK_MS);
+    return Number.isFinite(v) && v > 0 ? v : P2P_LINK_MS;
+  }
+
+  /** The routes, to every member: the hub, each member's link to it, and the running race's marker
+      and slots (the hub forwards its racers' frames whether it races or not). No addresses: those
+      travel only between the hub and each member, in their own signaling. */
+  private broadcastRoutes(): void {
+    const st = this.state;
+    if (!st || st.transport !== "p2p") return;
+    const race = st.race;
+    this.broadcast({
+      type: "p2p",
+      hub: st.hub ?? null,
+      epoch: st.hubEpoch ?? 0,
+      members: st.members.map((x) => ({ id: x.id, ...(x.id !== st.hub && x.link ? { link: x.link } : {}) })),
+      race: race ? { startAt: race.startAt, slots: race.slots, left: race.left } : null,
+    });
+  }
+
+  /** Signaling between the hub's game and a member's (an offer, an answer, a candidate), passed on
+      as it came with its sender and the hub's epoch: only between the hub and a member, never
+      between two members (a star). One for an earlier hub (its epoch) is dropped: it may come late
+      after a change, and the peers it was for are gone. */
+  private onSignal(st: RoomState, me: Member, m: Msg): void {
+    const to = st.members.find((x) => x.id === m.to);
+    if (!to || to === me || !m.signal || typeof m.signal !== "object" || Array.isArray(m.signal)) return;
+    if (me.id !== st.hub && to.id !== st.hub) return;
+    if (m.epoch !== (st.hubEpoch ?? 0)) return;
+    const ws = this.sockets.get(to.id);
+    if (ws) this.send(ws, { type: "p2p_signal", from: me.id, epoch: m.epoch, signal: m.signal });
+  }
+
+  /** Whether a signal of `bytes` fits its sender's budget for the window (P2P_SIGNAL_BYTES_PER_WINDOW);
+      counted when it does. */
+  private signalBudget(ws: WebSocket, bytes: number, now: number): boolean {
+    const windowMs = this.caps(true).windowMs;
+    let b = this.signalBytes.get(ws);
+    if (!b || now - b.since >= windowMs) this.signalBytes.set(ws, (b = { since: now, bytes: 0, warned: false }));
+    if (b.bytes + bytes <= P2P_SIGNAL_BYTES_PER_WINDOW) {
+      b.bytes += bytes;
+      return true;
+    }
+    if (!b.warned) {
+      b.warned = true;
+      this.error(ws, "too_fast", TOO_FAST_WARNING);
+    }
+    return false;
+  }
+
+  /** A link report: `{"type":"p2p_link","hub":H,"member":M,"up":true}` from either end of the
+      link between the hub H and the member M. One about an earlier hub counts for nothing. */
+  private async onLink(st: RoomState, me: Member, m: Msg): Promise<void> {
+    if (typeof m.up !== "boolean" || m.hub !== st.hub || (me.id !== st.hub && m.member !== me.id)) return;
+    const member = st.members.find((x) => x.id === m.member);
+    if (!member || member.id === st.hub) return;
+    await this.setLink(st, member, m.up);
+  }
+
+  /** Up: the member is on the star (and both ends have a network that lets direct links through).
+      Down, or not up in time: it races over the SFU, bridged by the hub, until the next race or the
+      next hub (closeRace, setHub). Decided once per try: a late "up" after the fallback waits. */
+  private async setLink(st: RoomState, member: Member, up: boolean): Promise<void> {
+    if (up ? !!member.link : member.link === "sfu") return;
+    if (up) {
+      member.link = "star";
+      member.direct = true;
+      const hub = st.members.find((x) => x.id === st.hub);
+      if (hub) hub.direct = true;
+    } else {
+      if (member.link === "star") member.lostLinkAt = Date.now();
+      member.link = "sfu";
+      member.fallbackAt = Date.now();
+    }
+    delete member.linkFrom;
+    console.log(`room ${logCode(st.code)}: member ${member.id} ${up ? "linked to the hub" : "races over the SFU: no link to the hub"}`);
+    this.broadcastRoutes();
+    await this.save();
+    // Its subscriptions, if it races (or is on the coming race's grid).
+    if (!up) this.kickSubscribe();
+  }
+
+  /** The alarm's P2P work: links not up in time go to the SFU, a hub that can't do its work is
+      replaced, fallback racers past their setup deadlines leave the race. */
+  private async p2pUpkeep(st: RoomState, now: number): Promise<void> {
+    for (const x of [...st.members]) {
+      if (x.id === st.hub || x.link) continue;
+      // Away (no room connection), a member can't signal: its time starts when it is back.
+      if (x.linkFrom == null || !this.sockets.has(x.id)) x.linkFrom = now;
+      else if (now >= x.linkFrom + this.p2pLinkMs()) await this.setLink(st, x, false);
+    }
+    if (st !== this.state) return;
+    this.checkHub(st, now);
+    await this.fallbackDeadlines(st, now);
+  }
+
+  /** Replaces a hub that can't do its work (a hub that left or whose room connection dropped is
+      replaced at once: leave, dropSocket). When fallback racers have waited UNBRIDGED_GRACE_MS for
+      it with no working SFU session to bridge them (a browser's game; a session being renewed is
+      back sooner), by one that has a working session. When no member links to it although direct
+      links work for some of them (two or more members, all on the SFU, some of which have been on
+      a star; links that died LINK_LOST_GRACE_MS ago at least), not within HUB_RETRY_MS of the last
+      change, by a member whose direct links work and that didn't just lose its own. One member's
+      link going down, a blip or a false report, never moves the hub by itself. */
+  private checkHub(st: RoomState, now: number): void {
+    const hub = st.members.find((x) => x.id === st.hub);
+    if (!hub) {
+      if (st.members.length) this.setHub(st, this.bestHub(st, now), "no hub");
+      return;
+    }
+    const group = this.sfuGroup();
+    if (group?.length && !this.bridges(hub)) {
+      st.unbridgedSince ??= now;
+      if (now - st.unbridgedSince >= UNBRIDGED_GRACE_MS) {
+        const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true, sfu: true });
+        if (next) return this.setHub(st, next, "it can't bridge the racers on the SFU");
+      }
+    } else delete st.unbridgedSince;
+    if (now - (st.hubChangedAt ?? 0) < HUB_RETRY_MS) return;
+    const others = st.members.filter((x) => x !== hub && this.sockets.has(x.id));
+    const settled = others.every((x) => x.lostLinkAt == null || now - x.lostLinkAt >= LINK_LOST_GRACE_MS);
+    const isolated = others.length >= 2 && others.every((x) => x.link === "sfu") && others.some((x) => x.direct) && settled;
+    if (isolated) {
+      const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true, direct: true });
+      if (next) this.setHub(st, next, "its links failed");
+    }
+  }
+
+  /** The member to become the hub: of the members present (else of all), one that has been on a
+      star (its network lets direct links through), then one with a working SFU session (it can
+      bridge fallback racers), then the lowest room ping (the server's measure of its connection),
+      then the one here longest. A member whose link to the hub died within HUB_RETRY_MS comes
+      last, and a `discretionary` change (the hub is still here) never picks one; `direct` takes
+      only members that have been on a star, `sfu` only those with a working SFU session. */
+  private bestHub(st: RoomState, now: number, o: { exclude?: number; discretionary?: boolean; direct?: boolean; sfu?: boolean } = {}): Member | undefined {
+    const lost = (x: Member) => x.lostLinkAt != null && now - x.lostLinkAt < HUB_RETRY_MS;
+    let pool = st.members.filter((x) => x.id !== o.exclude && (!o.discretionary || !lost(x)) && (!o.direct || x.direct) &&
+      (!o.sfu || this.bridges(x)));
+    const present = pool.filter((x) => this.sockets.has(x.id));
+    if (present.length) pool = present;
+    const rank = (x: Member) => [lost(x) ? 1 : 0, x.direct ? 0 : 1, x.sfu?.phase === "ready" ? 0 : 1, this.rttOf(x.id) ?? Infinity, st.members.indexOf(x)];
+    return pool.sort((a, b) => {
+      const ra = rank(a), rb = rank(b);
+      return ra.reduce((d, v, i) => d || v - rb[i], 0);
+    })[0];
+  }
+
+  /** A new hub: every member connects to it anew (links pending), the routes tell everyone, and a
+      running race goes on (its riders' frames resume once the links are up; a member that can't
+      reach the new hub falls back to the SFU as any other). */
+  private setHub(st: RoomState, next: Member | undefined, why: string): void {
+    const now = Date.now();
+    st.hub = next?.id ?? null;
+    st.hubChangedAt = now;
+    st.hubEpoch = (st.hubEpoch ?? 0) + 1;
+    delete st.unbridgedSince;
+    for (const x of st.members) {
+      delete x.link;
+      delete x.fallbackAt;
+      // Released through the earlier hub: a racer that falls back again needs the new one's pairs,
+      // and has its setup deadlines again (review 3).
+      delete x.releasedRace;
+      if (x === next) delete x.linkFrom;
+      else x.linkFrom = now;
+    }
+    console.log(`room ${logCode(st.code)}: member ${st.hub ?? "-"} is the hub now (${why})`);
+    this.broadcastRoutes();
+    this.kickSubscribe();
+    this.ctx.waitUntil(this.save());
+  }
+
+  /** A P2P room's fallback racers have an SFU room's setup deadlines from the moment they went to
+      the SFU (at the earliest the start message): their own connection by SFU_CONNECT_MS, released
+      by SFU_SETUP_MS. One not done by then is out of the race, as in an SFU room; but while the hub
+      is what is missing (no working SFU session) and another member could bridge, the hub moves
+      (checkHub, within UNBRIDGED_GRACE_MS) and they wait for it (review 3). */
+  private async fallbackDeadlines(st: RoomState, now: number): Promise<void> {
+    const race = st.race;
+    if (!race) return;
+    const from = race.startAt - START_LEAD_MS;
+    const hub = st.members.find((x) => x.id === st.hub);
+    const hubMoves = !!hub && !this.bridges(hub) && !!this.bestHub(st, now, { exclude: hub.id, discretionary: true, sfu: true });
+    const lost: number[] = [], late: number[] = [];
+    for (const x of this.bridged(st, st.members.filter((m) => this.inRace(st, m.id)))) {
+      if (x.id === st.hub || x.releasedRace === race.startAt || this.renewing(x, race, now)) continue;
+      const since = Math.max(from, x.fallbackAt ?? from);
+      if (now >= since + this.sfuSetupMs()) { if (!hubMoves) late.push(x.id); }
+      else if (now >= since + this.sfuConnectMs() && !(x.sfuConnected || x.sfu?.phase === "ready")) lost.push(x.id);
+    }
+    if (lost.length) await this.retireSfu(lost, race.startAt, false);
+    if (late.length) await this.retireSfu(late, race.startAt, true);
   }
 
   // ---- Code updates at a safe moment (src/rollout.ts, finding 184) ----
@@ -2100,7 +2486,7 @@ export class Room extends DurableObject<Env> {
     if (!last || !st || this.startedAt - last.at > 60_000) return;
     const own = this.ownVersion();
     const adopted = !!own && own.id !== last.from;
-    console.log(`room ${st.code}: back ${this.startedAt - last.at} ms after its restart for new code, ` +
+    console.log(`room ${logCode(st.code)}: back ${this.startedAt - last.at} ms after its restart for new code, ` +
       (adopted ? `now on ${own!.id}` : `still on ${last.from} (try ${last.tries})`));
     this.rejoinsSince = last.at;
   }
@@ -2108,7 +2494,7 @@ export class Room extends DurableObject<Env> {
   /** A member back by token: once every member is back after a restart, how long it took. */
   private noteRejoin(st: RoomState): void {
     if (this.rejoinsSince == null || !st.members.every((x) => this.sockets.has(x.id))) return;
-    console.log(`room ${st.code}: all ${st.members.length} members back ${Date.now() - this.rejoinsSince} ms after the restart for new code`);
+    console.log(`room ${logCode(st.code)}: all ${st.members.length} members back ${Date.now() - this.rejoinsSince} ms after the restart for new code`);
     this.rejoinsSince = null;
   }
 
@@ -2142,7 +2528,7 @@ export class Room extends DurableObject<Env> {
     await this.ctx.storage.put("update", record);
     await this.ctx.storage.sync();
     this.restarting = true;
-    console.log(`room ${st.code}: restarting for new code at a safe moment: ${own.id} -> ${target}, ` +
+    console.log(`room ${logCode(st.code)}: restarting for new code at a safe moment: ${own.id} -> ${target}, ` +
       `${st.members.length} members, try ${record.tries}`);
     const notice = JSON.stringify(UPDATE_NOTICE);
     for (const ws of this.ctx.getWebSockets()) {

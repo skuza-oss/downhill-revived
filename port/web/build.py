@@ -53,7 +53,7 @@ def main():
     renderer=build_renderer(a.renderer_profile,not a.no_opt,OUT)
     settings=OUT/'dhd_settings.wasm'
     run(sys.executable,ROOT/'port/tools/rustgs.py','build','--target','wasm32-unknown-unknown','--crate','dhd_settings','--profile',a.renderer_profile)
-    run(sys.executable,ROOT/'port/tools/rustgs.py','build','--target','wasm32-unknown-unknown','--crate','dhd_session','--profile',a.renderer_profile)
+    run(sys.executable,ROOT/'port/tools/rustgs.py','build','--target','wasm32-unknown-unknown','--crate','dhd_star','--profile',a.renderer_profile)
     if not a.no_opt:
         tmp=OUT/'dhd_settings-optimized.wasm'
         wasm_opt(BINARYEN,settings,'-Oz','--all-features','--disable-compact-imports','-o',tmp)

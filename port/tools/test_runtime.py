@@ -141,7 +141,7 @@ def main():
     guest_tests()
     host_tests()
     scripts = ['test_rider_time', 'test_rider_interaction', 'test_npc_animation', 'test_rider_input', 'test_float',
-               'test_port_headers', 'test_patch_guard']
+               'test_port_headers', 'test_patch_guard', 'test_rustgs_key']
     if os.environ.get('DHD_PCSX2_VU'):
         scripts += ['test_vu1_pcsx2', 'test_vu0_pcsx2']
     for script in scripts:
