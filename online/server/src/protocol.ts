@@ -98,6 +98,13 @@ export const CODE_LENGTH = 6;
     alone, and a room whose members see each other's addresses is harder to guess. */
 export const P2P_CODE_LENGTH = 7;
 
+/** A room's code as the server's logs and its moderation log show it (finding 186): a P2P room's
+    by its first two characters, as the game's dhd.log does (port/net/net.h net_log_code), since the
+    code lets anyone in and so see the hub's network address; an SFU room's as it is. */
+export function logCode(code: string): string {
+  return code.length === P2P_CODE_LENGTH ? code.slice(0, 2) + "*".repeat(code.length - 2) : code;
+}
+
 export function randomCode(length = CODE_LENGTH): string {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);

@@ -117,7 +117,8 @@ limit of their own.
 ### Bans and the moderation log (finding 161)
 
 When a player enters a room (a new member or a rejoin) the server writes a row to its moderation
-log: the time, the room code, the member id, the name, `hello.clientVersion`, the country
+log: the time, the room code (a P2P room's by its first two characters, as in the server's own
+logs: its code lets anyone in), the member id, the name, `hello.clientVersion`, the country
 (Cloudflare's), a keyed hash of the address (HMAC-SHA-256 with a Worker secret; the address
 itself is never stored or logged) and `hello.installId`. Rows older than 14 days are deleted
 every day. The operator bans a row's address hash and/or install id (with an expiry, or until

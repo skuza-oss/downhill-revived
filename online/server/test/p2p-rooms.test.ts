@@ -4,7 +4,7 @@
 // subscribes on the SFU only what the fallback needs (the hub bridges it to the star).
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Client } from "./helpers";
 import { fakeRealtime } from "./sfu-fake";
 
@@ -540,6 +540,26 @@ describe("P2P rooms (finding 186)", () => {
     await runDurableObjectAlarm(room(code));
     expect(linkOf(await routes(back), ids[1])).toBeUndefined();  // still trying the hub
     expect(await runInDurableObject(room(code), async (r: any) => r.state.members[1].link)).toBeUndefined();
+  });
+
+  it("the server's logs and moderation log show a P2P room's code by its first two characters (review 6)", async () => {
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((k) =>
+      vi.spyOn(console, k).mockImplementation((...a: unknown[]) => { lines.push(a.map(String).join(" ")); }));
+    try {
+      const { cs, code, ids } = await p2pRoom(2);
+      link(cs[0], ids[0], ids[1], true);
+      await routes(cs[1], (r) => linkOf(r, ids[1]) === "star");
+      cs[0].sendJson({ type: "leave" });
+      await routes(cs[1], (r) => r.hub === ids[1]);
+      expect(lines.some((l) => l.includes(`room ${code.slice(0, 2)}*****:`))).toBe(true);
+      expect(lines.filter((l) => l.includes(code))).toEqual([]);
+      const { results } = await env.MODERATION.prepare("SELECT room FROM joins WHERE room LIKE ?1").bind(code.slice(0, 2) + "%").all();
+      expect(results.length).toBeGreaterThanOrEqual(2);
+      expect(results.every((r: any) => r.room === code.slice(0, 2) + "*****")).toBe(true);
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
   });
 
   it("a member back by its token keeps the hub and its link, and hears the routes again", async () => {

@@ -27,6 +27,7 @@ import {
   clientVersionOf,
   isOutdated,
   isByte,
+  logCode,
   isU32,
   measuredRtt,
   minVersionOf,
@@ -452,7 +453,7 @@ export class Room extends DurableObject<Env> {
         await this.save();
         // One line per room for the server's logs: where hints really put rooms (finding 181).
         const o = this.state.origin;
-        if (o) console.log(`room ${this.state.code}: runs in ${colo}, made with ${o.hint || "no hint"} (${o.how ?? "country"}) from ${o.createdFrom || "?"}`);
+        if (o) console.log(`room ${logCode(this.state.code)}: runs in ${colo}, made with ${o.hint || "no hint"} (${o.how ?? "country"}) from ${o.createdFrom || "?"}`);
         this.broadcastWhere();
         this.updateListing();
       } catch {}
@@ -510,7 +511,7 @@ export class Room extends DurableObject<Env> {
       if (verdict === "warn") this.error(ws, "too_fast", TOO_FAST_WARNING);
       if (verdict === "close") {
         const info = ws.deserializeAttachment() as SocketInfo | null;
-        console.warn(`room ${this.state?.code ?? ""}: member ${info?.memberId ?? "-"} closed: too many messages`);
+        console.warn(`room ${logCode(this.state?.code ?? "")}: member ${info?.memberId ?? "-"} closed: too many messages`);
         return this.refuse(ws, "too_fast", TOO_FAST_MESSAGE);
       }
       return;
@@ -705,7 +706,7 @@ export class Room extends DurableObject<Env> {
       race.sfuConnectBy = undefined;
       const racers = st.members.filter(x => this.inRace(st, x.id));
       const lost = racers.filter(x => !(x.sfuConnected || x.sfu?.phase === "ready"));
-      console.log(`room ${st.code}: Realtime setup after ${now - race.startAt + START_LEAD_MS} ms: ` + racers.map(x =>
+      console.log(`room ${logCode(st.code)}: Realtime setup after ${now - race.startAt + START_LEAD_MS} ms: ` + racers.map(x =>
         `${x.id}${x.region ? "/" + x.region : ""}:${!x.sfu ? "no-session" : x.sfuReadyRace === race.startAt ? "ready" :
           x.sfuConnected || x.sfu.phase === "ready" ? "connected" : x.turnAttempt === x.sfuAttempt ? "turn" : "offered"}`).join(" "));
       if (lost.length) await this.retireSfu(lost.map(x => x.id), race.startAt, false);
@@ -930,7 +931,7 @@ export class Room extends DurableObject<Env> {
     } else this.stat(["join", clientVersion, info.country ?? "", nameHash(name), asHost ? "host" : "guest"], [st.members.length]);
     // The moderation log (finding 161): who entered which room, kept 14 days, for bans.
     this.ctx.waitUntil(logJoin(this.env as GuardEnv, {
-      at: Date.now(), room: st.code, member: member.id, kind: asHost ? "host" : ghost ? "rejoin" : "guest", name: member.name,
+      at: Date.now(), room: logCode(st.code), member: member.id, kind: asHost ? "host" : ghost ? "rejoin" : "guest", name: member.name,
       clientVersion, country: info.country ?? "", ipHash: info.ipHash ?? "", installId,
     }));
     this.send(ws, {
@@ -1343,7 +1344,7 @@ export class Room extends DurableObject<Env> {
     // and send them to the SFU (finding 186). Back by its token it is a member like any other.
     if (st.transport === "p2p" && st.hub === id) this.setHub(st, this.bestHub(st, Date.now(), { exclude: id }), "the hub's connection dropped");
     if (racing)
-      console.log(`room ${st.code}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
+      console.log(`room ${logCode(st.code)}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
     await this.changed();
   }
 
@@ -1568,7 +1569,7 @@ export class Room extends DurableObject<Env> {
         session.channels = session.channels.filter((c) => !forget.includes(c));
       }
       if (reset) {
-        console.warn(`room ${st.code}: member ${sub.id}'s subscriptions don't close; its session is reset`);
+        console.warn(`room ${logCode(st.code)}: member ${sub.id}'s subscriptions don't close; its session is reset`);
         session.phase = "failed";
         if (!failed.some(f => f.session === session)) failed.push({ id: sub.id, session });
         return;
@@ -1659,7 +1660,7 @@ export class Room extends DurableObject<Env> {
         // Pairs subscribed, unknown (inspected later) and failed for certain; inspections, channels
         // they adopted and unrecorded ones they closed (finding 182).
         if (this.calls > before)
-          console.log(`room ${this.state?.code ?? ""}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms; ` +
+          console.log(`room ${logCode(this.state?.code ?? "")}: Realtime subscription pass (${race ? "race" : "grid"}): ${this.calls - before} calls in ${Date.now() - started} ms; ` +
             `pairs ok ${counts.ok} unknown ${counts.unknown} failed ${counts.failed}; inspected ${counts.inspected} adopted ${counts.adopted} closed ${counts.extra}`);
         await this.save();
         // Saving yields too: a replacement completed since the failing call is healthy.
@@ -1705,7 +1706,7 @@ export class Room extends DurableObject<Env> {
     const answer = await fetch(input, init);
     if (!lose) return answer;
     await answer.body?.cancel();
-    console.log(`room ${this.state?.code ?? ""}: test: a subscription call's answer is dropped (${this.lostAnswers} left)`);
+    console.log(`room ${logCode(this.state?.code ?? "")}: test: a subscription call's answer is dropped (${this.lostAnswers} left)`);
     return new Promise<Response>((_, reject) => {
       const signal = init?.signal;
       if (!signal) return reject(new Error("no answer"));
@@ -1746,7 +1747,7 @@ export class Room extends DurableObject<Env> {
     // after the release gets it once more.
     const first = !race.sfuReleased;
     race.sfuReleased = true;
-    if (first) console.log(`room ${st.code}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
+    if (first) console.log(`room ${logCode(st.code)}: Realtime released ${Date.now() - race.startAt + START_LEAD_MS} ms after the start, ${racers.length} racers`);
     let sent = false;
     for (const member of racers) {
       if (member.releasedRace === race.startAt) continue;
@@ -1876,7 +1877,7 @@ export class Room extends DurableObject<Env> {
       if (!st || !race || race.startAt !== startAt || !this.inRace(st, id)) continue;
       out++;
       const member = st.members.find((x) => x.id === id);
-      console.warn(`room ${st.code}: member ${id} out of the race: no Realtime connection`);
+      console.warn(`room ${logCode(st.code)}: member ${id} out of the race: no Realtime connection`);
       const ws = this.sockets.get(id);
       if (ws) this.error(ws, "bad_value", SFU_FAILED_MESSAGE);
       this.retire(st, id, "left");
@@ -2149,7 +2150,7 @@ export class Room extends DurableObject<Env> {
       member.fallbackAt = Date.now();
     }
     delete member.linkFrom;
-    console.log(`room ${st.code}: member ${member.id} ${up ? "linked to the hub" : "races over the SFU: no link to the hub"}`);
+    console.log(`room ${logCode(st.code)}: member ${member.id} ${up ? "linked to the hub" : "races over the SFU: no link to the hub"}`);
     this.broadcastRoutes();
     await this.save();
     // Its subscriptions, if it races (or is on the coming race's grid).
@@ -2239,7 +2240,7 @@ export class Room extends DurableObject<Env> {
       if (x === next) delete x.linkFrom;
       else x.linkFrom = now;
     }
-    console.log(`room ${st.code}: member ${st.hub ?? "-"} is the hub now (${why})`);
+    console.log(`room ${logCode(st.code)}: member ${st.hub ?? "-"} is the hub now (${why})`);
     this.broadcastRoutes();
     this.kickSubscribe();
     this.ctx.waitUntil(this.save());
@@ -2290,7 +2291,7 @@ export class Room extends DurableObject<Env> {
     if (!last || !st || this.startedAt - last.at > 60_000) return;
     const own = this.ownVersion();
     const adopted = !!own && own.id !== last.from;
-    console.log(`room ${st.code}: back ${this.startedAt - last.at} ms after its restart for new code, ` +
+    console.log(`room ${logCode(st.code)}: back ${this.startedAt - last.at} ms after its restart for new code, ` +
       (adopted ? `now on ${own!.id}` : `still on ${last.from} (try ${last.tries})`));
     this.rejoinsSince = last.at;
   }
@@ -2298,7 +2299,7 @@ export class Room extends DurableObject<Env> {
   /** A member back by token: once every member is back after a restart, how long it took. */
   private noteRejoin(st: RoomState): void {
     if (this.rejoinsSince == null || !st.members.every((x) => this.sockets.has(x.id))) return;
-    console.log(`room ${st.code}: all ${st.members.length} members back ${Date.now() - this.rejoinsSince} ms after the restart for new code`);
+    console.log(`room ${logCode(st.code)}: all ${st.members.length} members back ${Date.now() - this.rejoinsSince} ms after the restart for new code`);
     this.rejoinsSince = null;
   }
 
@@ -2332,7 +2333,7 @@ export class Room extends DurableObject<Env> {
     await this.ctx.storage.put("update", record);
     await this.ctx.storage.sync();
     this.restarting = true;
-    console.log(`room ${st.code}: restarting for new code at a safe moment: ${own.id} -> ${target}, ` +
+    console.log(`room ${logCode(st.code)}: restarting for new code at a safe moment: ${own.id} -> ${target}, ` +
       `${st.members.length} members, try ${record.tries}`);
     const notice = JSON.stringify(UPDATE_NOTICE);
     for (const ws of this.ctx.getWebSockets()) {
