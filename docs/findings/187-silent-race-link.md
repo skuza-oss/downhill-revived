@@ -44,6 +44,8 @@ release game racing on the new server.
 - [x] 2026-11-09: runs on a local server (this branch, `wrangler dev`) with real Realtime (below)
 - [x] 2026-11-09: boot (600 fields) and race (5000) state traces of the final build equal 0.7.13's
   release `dhd.exe` (`state_diff.py`: all rows match)
+- [x] 2026-11-09 (branch `feat/p2p-transport`, finding 186): the silence counts from the race's
+  start moment, not the release (Decisions): 63c7ee8b
 
 ## Runs (local server, real Realtime, this PC)
 
@@ -54,6 +56,7 @@ and guest, the scripted `DHD_NET_CREATE` / `DHD_NET_JOIN` flow) and two nettool 
 |---|---|---|
 | 0.7.13 | both games the 0.7.13 release (`--exe`) | released 12 ms after the start; countdowns 1.5 s after loading, GOs within 0.4 ms; frames both ways (the guest 1,389 messages by race clock 661); results to both. Nothing new in the room's log |
 | repaired | this build, `DHD_NET_SFU_SILENT=1` | "no race frame from any of the 3 other racers 8 s after the release; the room is told"; room: "member 3 hears nothing ... a new session for its race"; the game's new session connected and was released 4.7 s after its report (1 s of it the game's pause); "the start moment came from the room (none over the race link)"; "countdown starts (waited 1.514 s, +0.2 ms from the agreed moment)"; 256 messages received by race clock 121; every ride "the player's choice" |
+| repaired, counted from the moment | 63c7ee8b (`feat/p2p-transport`), `DHD_NET_SFU_SILENT=1` | the guest waited out the 30 s for the others' rides (`freeze: no field for 5 s`, "goes on after about 29 s"), loaded at 69.1 s (the host at 40.5 s); the room's moment came 61.7 s after startAt (32.0 s in the run before the change); "no race frame from any of the 3 other racers 8 s after the race's start moment; the room is told"; new session released 2.7 s after it was made; nothing received until race clock 421, 89 messages by 481, 466 by 661; results on both games |
 | retired | this build, `DHD_NET_SFU_SILENT=2` | the same report and new session, silent again: "still silent on its new session", "member 3 out of the race: no Realtime connection"; the guest got "Realtime connection failed: out of the race."; the host's game: "player 3 (Guest) left at race tick 0", its rider the AI's |
 
 The scripted flow has no room to return to: a guest taken out of a race there starts its
@@ -136,10 +139,17 @@ the other racers worked); not the host change (the host left only at the race's 
   are never touched mid-race. The listing can't tell a dead id (it says `active`), so marking at the
   close is the only server-side signal.
 - **Detection in the game's transport, the report to the room.** The Rust `Sfu` sees every frame;
-  `SILENT_AFTER` (8 s) after both the release and the race's startAt (START_LEAD, 3 s after the
-  start message) with not one frame of this race from any other racer still in it, it sends
-  `sfu_silent` once per association and race. Every game sends its ride (SETUP) at its start and
-  LOADED every 0.5 s from its load, so 8 s of nothing is not a slow racer. The room renews the
+  `SILENT_AFTER` (8 s) after both the race's start moment (`race_go`, below) and the release, with
+  not one frame of this race from any other racer still in it, it sends `sfu_silent` once per
+  association and race. From the moment every racer still in the race sends its ride, so 8 s of
+  nothing is not a slow racer. Before it no game reports: a game sends nothing until it reaches its
+  race setup (its ride) and load screen (LOADED every 0.5 s), 20-35 s after the start message in
+  the scripted runs. A game whose link brings nothing still has the moment: the room sends it to
+  every racer, the namer too. The send thread puts it on the race's own clock (the start message's
+  arrival plus START_LEAD, 3 s; late by the message's way here, never early) and gives it to every
+  association in the race, a renewed one too, whose count also waits for its own release. Until
+  63c7ee8b the count ran from the release and the race's startAt: a racer whose others were still
+  loading read as silent (seen in finding 186's P2P runs). The room renews the
   racer's session once per race (`SFU_RENEW_MS` 20 s to be acknowledged again; the setup checks
   spare it meanwhile); a second report or the deadline takes it out of the race as at
   `SFU_SETUP_MS`, so its game goes back to the room instead of racing a ghost race. With only one
@@ -213,8 +223,8 @@ Merged into `main` 2026-11-09. A subscription the room closed without telling th
 dead stream ids on that Realtime session: Cloudflare reuses them for later subscriptions, answers
 200 and forwards nothing (room A2VUXN, MIOJAUM, 2026-11-09: 0 messages received, a 75 s solo
 start). The room no longer subscribes on such a session (a new one instead); a new game reports a
-silent link 8 s after the release (`sfu_silent`) and gets a new session in the race, or leaves the
-race cleanly; the start moment also travels over the room (`race_go`), and a game without one
+silent link 8 s after the race's start moment (`sfu_silent`) and gets a new session in the race,
+or leaves the race cleanly; the start moment also travels over the room (`race_go`), and a game without one
 leaves the race after 75 s instead of starting alone. 0.7.13 games get the prevention only.
 
 What is left, known now:
@@ -229,3 +239,8 @@ What is left, known now:
   reporter is out of the race; with more racers, silence from all of them is the link.
 - A game whose session was renewed misses the others' rides if they were sent before the repair
   (sent once): their default rides then, as before.
+- Counting from the moment, a silent racer is repaired only after the start: its game waits out
+  the 30 s for the others' rides (a `freeze:` line in its log), loads about 30 s late, the room's
+  moment waits for its LOADED (61.7 s after startAt instead of 32.0 s in the scripted run), and it
+  races its first 10 s or so without the others. An earlier signal that is still sure would
+  shorten this; none chosen yet.

@@ -213,6 +213,7 @@ room). Merged into this branch with a merge commit (05e4053b, conflicts kept bot
 | 56128744 | No race-frame silence rule on a star link (below) |
 | 65481c57 | `rustgs.py`'s cache key had no star sources (nor `dhd_session`'s before): a star-only change linked a stale library (`test_rustgs_key.py`) |
 | 349edca9 | The merge put 187's `heard = true` in the SFU room's branch of `receive_frame` only: in a P2P room the hub and every fallback racer reported silence 8 s after the release whatever came, and fallback racers then left the race |
+| 63c7ee8b | After the lead's note on the risk below: the SFU association's silence counts from the race's start moment (`race_go`), not the release, in every room (finding 187's Decisions) |
 
 Decisions:
 
@@ -224,7 +225,9 @@ Decisions:
   (6e326ff7) and dropped (56128744): it took a racer off the star while the hub's game was still on
   its way to the load screen, where the rides are first sent.
 - **The bridging hub reports and is renewed once** (the brief's same repair), never retired or
-  moved for silence; a fallback racer is renewed once, then out of the race, as in an SFU room.
+  moved for silence; a fallback racer is renewed once, then out of the race, as in an SFU room. A
+  hub that sits the race out gets no `race_go` (the room sends it to racers only), so since
+  63c7ee8b it has no moment and reports nothing (the server is unchanged; Open, below).
 - **`race_go`** needs nothing P2P-specific: the room's namer is the lowest slot still racing,
   whoever the hub is; server test "the start moment comes over the room in a P2P room too, from
   the next racer when the hub leaves before it". The page now sends and takes it too.
@@ -242,10 +245,18 @@ leaving mid-race) and `check_p2p.mjs` pass. Runs on local servers with real Real
 | P2P, nettool hub + star bot + fallback bot with `DHD_NET_SFU_SILENT=1` | before 349edca9: hub and fallback both "silent", the fallback out of the race; after: only the fallback reports, a new session released 2.1 s later, it races and finishes (120 frames received) |
 | P2P, the hub's game, two star bots, a fallback game (`DHD_NET_P2P_UDP=0`, `DHD_NET_SFU_SILENT=1`) | the fallback game reports, a new session (released 2.1 s after), the start moment from the room, countdown 1.5 s, 634 messages by race clock 301, results on both games; the hub's game reported silence once (its fallback game sent nothing until its load screen, about 30 s after the start in this scripted flow): one renewal, logged the second time |
 
-Risk (187's, SFU rooms included): a racer whose others reach the load screen more than about 11 s
-after the start message (the scripted test flow here: 20-35 s with three games on one PC) reads
-as a silent link: one renewal, and a fallback or SFU racer silent again leaves the race. The menu
-flow reaches the load screen sooner; production logs will tell.
+Risk found here (187's, SFU rooms included): a racer whose others reach the load screen more than
+about 11 s after the start message (the scripted test flow here: 20-35 s with three games on one PC)
+read as a silent link: one renewal, and a fallback or SFU racer silent again left the race.
+Resolved by 63c7ee8b: the game counts the silence from the race's start moment (`race_go`, which
+the room sends to every racer, a game with a dead link included), so no game reports before it.
+Runs after it (local servers, real Realtime; `check.py port` and `check.py server` OK, `dhd_net` 36
+tests, `a_silent_race_link_is_reported_once` failing on the old rule at "no moment, a 35 s load"):
+
+| Run | Result |
+|---|---|
+| 187's forced-silent guest in an SFU room | "no race frame from any of the 3 other racers 8 s after the race's start moment", a new session, frames from race clock 421 on (466 messages by 661), results on both games; the guest sat out the 30 s ride wait first (`freeze:`), so the room's moment came 61.7 s after startAt (32.0 s before the change) |
+| P2P, the hub's game, two star bots, a fallback game (`DHD_NET_P2P_UDP=0`, `DHD_NET_SFU_SILENT=1`) | the fallback game reports 8 s after the moment, a new session, 116 messages by race clock 481 and 1,630 by 1201, results on both games; the hub's game reported nothing (it did once before the change); the same 30 s ride wait (moment 61.2 s after startAt) |
 
 ## Result
 
@@ -290,8 +301,11 @@ marker + frame) or 2 (keepalive). Gone: `/v1/p2p/*`, `p2p_welcome`, `p2p_members
 | E. PC/Mac P2P race on the LAN (`cross_race.py --backend p2p --host pc --races 2`; the Mac's game built from this branch with the PC's wasm2c core, a local server through the ssh tunnel) | both races ran on both and closed with the results on both (PCHOST 0:20.03, MACGUEST 0:40.03); the link direct inside the LAN at both ends (the Mac's one refused send, as in finding 180, the answer-only candidate took over); no `freeze:` line; snapshot age while racing p50/p95 16/26 ms at the PC, 19/32 ms at the Mac; when the run stopped the PC's game the Mac's became the hub |
 
 **Open.** The browser has no SFU client (a page that can't reach the hub doesn't race; a page hub
-gives the hub away when racers fall back); Android, Linux and the internet were not run; a
-mid-race fallback's first events can be lost while its subscriptions are made (state resumes);
+gives the hub away when racers fall back), so it reports no silent link; a hub that sits the race
+out gets no `race_go` and reports none either (a dead receive side of its session goes unrepaired:
+its fallback racers hear the star through it, the star doesn't hear them); a silent racer is
+repaired only after the start (finding 187, what is left); Android, Linux and the internet were
+not run; a mid-race fallback's first events can be lost while its subscriptions are made (state resumes);
 during a deploy's 10 % canary a P2P creation that lands on an object of the previous version gives
 an SFU room with a 7-character code (the game races it as one: it takes the kind from the welcome).
 
