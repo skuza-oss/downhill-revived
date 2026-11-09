@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Client } from "./helpers";
 import { fakeRealtime } from "./sfu-fake";
 
-const FEATURES = ["session", "countdown", "race_rejoin", "p2p"];
+const FEATURES = ["session", "countdown", "race_rejoin", "race_go", "p2p"];
 const room = (code: string) => env.ROOM.get(env.ROOM.idFromName(code));
 const isType = (type: string) => (f: unknown) => typeof f === "string" && JSON.parse(f).type === type;
 const snap = async (c: Client, pred: (r: any) => boolean = () => true) =>
@@ -579,6 +579,101 @@ describe("P2P rooms (finding 186)", () => {
     await new Promise((r) => setTimeout(r, 1100));
     hub.sendJson({ type: "p2p_signal", to: ids[1], epoch, signal: { type: "candidate", candidate: "x" } });
     expect((await a.json("p2p_signal")).signal.candidate).toBe("x");
+  });
+
+  /** A P2P race with the hub (slot 0), a star racer and a fallback racer, the SFU's part released:
+      the hub and the fallback racer published and subscribed to each other (finding 187's rules). */
+  async function bridgedRace() {
+    const fake = fakeRealtime();
+    const { cs, code, ids } = await p2pRoom(3, true);
+    for (const c of cs) await connect(c);
+    const [hub, star, f] = cs;
+    link(hub, ids[0], ids[1], true);
+    link(f, ids[0], ids[2], false);
+    await routes(star, (r) => linkOf(r, ids[2]) === "sfu");
+    const starts = await race(cs, code);
+    await passDone(code);
+    const startAt = starts[0].startAt;
+    for (const c of [hub, f]) c.sendJson({ type: "sfu_ready", race: startAt });
+    for (const c of [hub, f]) await c.json("sfu_ready");
+    return { fake, cs, code, ids, startAt };
+  }
+
+  it("a fallback racer's silent link gets it a new session, then takes it out of the race (finding 187)", async () => {
+    const { fake, cs, code, ids, startAt } = await bridgedRace();
+    try {
+      const [hub, star, f] = cs;
+      f.sendJson({ type: "sfu_silent", race: startAt });
+      await f.json("sfu_reset");
+      expect(await runInDurableObject(room(code), async (r: any) => r.state.members[2].renewedRace)).toBe(startAt);
+      // Its new session, released again; still silent: out of the race.
+      await connect(f);
+      await passDone(code);
+      f.sendJson({ type: "sfu_ready", race: startAt });
+      await f.json("sfu_ready");
+      f.sendJson({ type: "sfu_silent", race: startAt });
+      expect((await star.json("left")).memberId).toBe(ids[2]);
+      expect(hub.seen.some((t) => JSON.parse(t).type === "sfu_reset")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("the bridging hub's silent link gets it a new session; still silent, the hub moves and races on (finding 187)", async () => {
+    const { fake, cs, code, ids, startAt } = await bridgedRace();
+    try {
+      const [hub, star, f] = cs;
+      // A star racer's report counts for nothing: its race runs on the star.
+      star.sendJson({ type: "sfu_silent", race: startAt });
+      hub.sendJson({ type: "sfu_silent", race: startAt });
+      await hub.json("sfu_reset");
+      expect(star.seen.some((t) => JSON.parse(t).type === "sfu_reset")).toBe(false);
+      await connect(hub);
+      await passDone(code);
+      hub.sendJson({ type: "sfu_ready", race: startAt });
+      await hub.json("sfu_ready");
+      hub.sendJson({ type: "sfu_silent", race: startAt });
+      expect((await routes(f, (r) => r.hub !== ids[0])).hub).toBe(ids[1]);
+      expect(await runInDurableObject(room(code), async (r: any) => r.state.race.left)).toEqual([]);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("a renewed hub isn't taken out of its race at the renewal deadline; a star racer's dead session is replaced at once (finding 187)", async () => {
+    const { fake, cs, code, ids, startAt } = await bridgedRace();
+    try {
+      const [hub, star] = cs;
+      await expire(code, (st) => {
+        st.members[0].renewedRace = startAt;
+        st.members[0].renewBy = Date.now() - 1;
+        st.members[1].sfu.poisoned = true;
+      });
+      expect(await runInDurableObject(room(code), async (r: any) => r.state.race.left)).toEqual([]);
+      await star.json("sfu_reset");
+      expect(hub.seen.some((t) => JSON.parse(t).type === "left")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("the start moment comes over the room in a P2P room too, from the next racer when the hub leaves before it (finding 187)", async () => {
+    const { cs, code, ids } = await p2pRoom(3);
+    const [hub, a, b] = cs;
+    link(hub, ids[0], ids[1], true);
+    link(hub, ids[0], ids[2], true);
+    await routes(b, (r) => linkOf(r, ids[2]) === "star");
+    const starts = await race(cs, code);
+    const startAt = starts[0].startAt;
+    expect(starts[0].yourSlot).toBe(0);
+    // The hub (slot 0, the race's namer) leaves during the load: the room picks the next hub, and
+    // the lowest slot still racing names the moment.
+    hub.sendJson({ type: "leave" });
+    expect((await routes(b, (r) => r.hub !== ids[0])).hub).toBe(ids[1]);
+    b.sendJson({ type: "race_go", race: startAt, at: startAt + 4000 });  // not the namer: ignored
+    a.sendJson({ type: "race_go", race: startAt, at: startAt + 5000 });
+    for (const c of [a, b]) expect(await c.json("race_go")).toEqual({ type: "race_go", race: startAt, at: startAt + 5000 });
+    expect(await runInDurableObject(room(code), async (r: any) => r.state.race.goAt)).toBe(startAt + 5000);
   });
 
   it("a member back by its token keeps the hub and its link, and hears the routes again", async () => {

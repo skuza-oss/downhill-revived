@@ -743,8 +743,9 @@ export class Room extends DurableObject<Env> {
     await this.replacePoisoned();
     // A racer whose session was replaced in its race and isn't back in time (finding 187).
     if (race && st.race === race) {
-      const overdue = st.members.filter(x => this.inRace(st, x.id) && x.renewedRace === race.startAt && x.renewBy != null && now >= x.renewBy);
-      for (const x of overdue) console.warn(`room ${st.code}: member ${x.id}'s new session isn't up ${this.sfuRenewMs()} ms after it was asked for`);
+      const overdue = st.members.filter(x => this.inRace(st, x.id) && this.racesOnSfu(st, x.id) && x.renewedRace === race.startAt &&
+        x.renewBy != null && now >= x.renewBy);
+      for (const x of overdue) console.warn(`room ${logCode(st.code)}: member ${x.id}'s new session isn't up ${this.sfuRenewMs()} ms after it was asked for`);
       if (overdue.length) await this.retireSfu(overdue.map(x => x.id), race.startAt, false);
     }
     // A racer whose own connection isn't up (SFU_CONNECT_MS) leaves alone; the others then release.
@@ -1129,12 +1130,18 @@ export class Room extends DurableObject<Env> {
         // session's stream ids can be dead on Cloudflare's side with every call answered 200 and
         // every channel listed active, and only a new session clears that. Once per race; a game
         // still silent on its new session is out of the race (the race can't reach it).
+        // In a P2P room a fallback racer's and the bridging hub's: the SFU carries only their part
+        // of the race (finding 186). The hub still silent on its new session can't bridge: the
+        // hub moves to a member that can, if one does; it stays in its race on the star.
         const race = st.race;
-        if (!race || !this.inRace(st, me.id) || m.race !== race.startAt || me.releasedRace !== race.startAt ||
+        if (!race || !this.onSfuInRace(st, me) || m.race !== race.startAt || me.releasedRace !== race.startAt ||
             me.sfu?.phase !== "ready") return false;
         if (me.renewedRace === race.startAt) {
-          console.warn(`room ${st.code}: member ${me.id}'s race link is still silent on its new session`);
-          await this.retireSfu([me.id], race.startAt, true);
+          console.warn(`room ${logCode(st.code)}: member ${me.id}'s race link is still silent on its new session`);
+          if (this.isHub(st, me.id)) {
+            const next = this.bestHub(st, Date.now(), { exclude: me.id, discretionary: true, sfu: true });
+            if (next) this.setHub(st, next, "its SFU link to the racers on the SFU is silent");
+          } else await this.retireSfu([me.id], race.startAt, true);
           return false;
         }
         this.sfuRenew(me, race, "hears nothing from the other racers (sfu_silent)");
@@ -1263,7 +1270,7 @@ export class Room extends DurableObject<Env> {
     if (race.slots[namer] !== me.id || typeof at !== "number" || !Number.isFinite(at) ||
         at < race.startAt || at > race.startAt + RACE_GO_MAX_MS) return;
     race.goAt = at;
-    console.log(`room ${st.code}: the race's start moment, from member ${me.id}: ${Math.round(at - race.startAt)} ms after startAt`);
+    console.log(`room ${logCode(st.code)}: the race's start moment, from member ${me.id}: ${Math.round(at - race.startAt)} ms after startAt`);
     this.sendRaceGo(race);
     await this.save();
   }
@@ -1608,7 +1615,7 @@ export class Room extends DurableObject<Env> {
     // they free stay dead on Cloudflare's side (finding 187): the session gets no new subscription
     // and is replaced (replacePoisoned).
     if (!session.poisoned)
-      console.warn(`room ${st?.code ?? ""}: member ${sub.id}: ${extra.length} subscriptions its game never had are closed; its session is replaced when that costs no race`);
+      console.warn(`room ${logCode(st?.code ?? "")}: member ${sub.id}: ${extra.length} subscriptions its game never had are closed; its session is replaced when that costs no race`);
     session.poisoned = true;
     try {
       await this.serial(session.id, () => api.close({ ...session, channels: [...extra] }, extra));
@@ -2042,7 +2049,7 @@ export class Room extends DurableObject<Env> {
       race after that). The others keep racing: their subscriptions to it close and come back with
       its new publication. Once per member and race. */
   private sfuRenew(member: Member, race: Race, why: string): void {
-    console.warn(`room ${this.state?.code ?? ""}: member ${member.id} ${why}; a new session for its race`);
+    console.warn(`room ${logCode(this.state?.code ?? "")}: member ${member.id} ${why}; a new session for its race`);
     member.renewedRace = race.startAt;
     member.renewBy = Date.now() + this.sfuRenewMs();
     this.sfuReset(member);
@@ -2059,14 +2066,16 @@ export class Room extends DurableObject<Env> {
     const group = this.sfuGroup(), race = st.race, out: number[] = [];
     for (const m of [...st.members]) {
       if (!m.sfu?.poisoned || m.sfu.phase !== "ready") continue;
-      if (!race || !this.inRace(st, m.id)) {
-        console.warn(`room ${st.code}: member ${m.id}'s session has dead stream ids; a new session`);
+      // In a P2P room a star racer's session carries none of its race (finding 186): replaced at once.
+      if (!race || !this.onSfuInRace(st, m)) {
+        console.warn(`room ${logCode(st.code)}: member ${m.id}'s session has dead stream ids; a new session`);
         this.sfuReset(m);
         continue;
       }
       const lacks = !!group?.includes(m) && group.some((p) => p !== m && p.sfu?.phase === "ready" && !this.subscribed(m, p));
       if (!lacks) continue;
-      if (m.renewedRace === race.startAt) out.push(m.id);
+      // A P2P room's hub renewed once already can't bridge: checkHub moves it (bridges).
+      if (m.renewedRace === race.startAt) { if (!this.isHub(st, m.id)) out.push(m.id); }
       else this.sfuRenew(m, race, "needs a pair its session can't take (dead stream ids)");
     }
     if (out.length && race) await this.retireSfu(out, race.startAt, true);
@@ -2235,6 +2244,20 @@ export class Room extends DurableObject<Env> {
     return st.transport === "p2p" && st.hub === id;
   }
 
+  /** The member takes part in the running race's SFU side: in an SFU room every racer, in a P2P
+      room a fallback racer and the hub that bridges them, racing or not (finding 186). */
+  private onSfuInRace(st: RoomState, m: Member): boolean {
+    if (!st.race) return false;
+    const racers = st.members.filter((x) => this.inRace(st, x.id));
+    return st.transport === "p2p" ? this.bridged(st, racers).includes(m) : racers.includes(m);
+  }
+
+  /** The member's SFU session can bridge a P2P room's star and its fallback racers: up, and not one
+      whose stream ids are dead (finding 187: no subscription is made on it). */
+  private bridges(m: Member): boolean {
+    return m.sfu?.phase === "ready" && !m.sfu.poisoned;
+  }
+
   /** The member's race runs over the SFU: in an SFU room every racer's, in a P2P room a fallback
       racer's (the hub's own race runs on its star even when it bridges). */
   private racesOnSfu(st: RoomState, id: number): boolean {
@@ -2360,7 +2383,7 @@ export class Room extends DurableObject<Env> {
       return;
     }
     const group = this.sfuGroup();
-    if (group?.length && hub.sfu?.phase !== "ready") {
+    if (group?.length && !this.bridges(hub)) {
       st.unbridgedSince ??= now;
       if (now - st.unbridgedSince >= UNBRIDGED_GRACE_MS) {
         const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true, sfu: true });
@@ -2386,7 +2409,7 @@ export class Room extends DurableObject<Env> {
   private bestHub(st: RoomState, now: number, o: { exclude?: number; discretionary?: boolean; direct?: boolean; sfu?: boolean } = {}): Member | undefined {
     const lost = (x: Member) => x.lostLinkAt != null && now - x.lostLinkAt < HUB_RETRY_MS;
     let pool = st.members.filter((x) => x.id !== o.exclude && (!o.discretionary || !lost(x)) && (!o.direct || x.direct) &&
-      (!o.sfu || x.sfu?.phase === "ready"));
+      (!o.sfu || this.bridges(x)));
     const present = pool.filter((x) => this.sockets.has(x.id));
     if (present.length) pool = present;
     const rank = (x: Member) => [lost(x) ? 1 : 0, x.direct ? 0 : 1, x.sfu?.phase === "ready" ? 0 : 1, this.rttOf(x.id) ?? Infinity, st.members.indexOf(x)];
@@ -2430,10 +2453,10 @@ export class Room extends DurableObject<Env> {
     if (!race) return;
     const from = race.startAt - START_LEAD_MS;
     const hub = st.members.find((x) => x.id === st.hub);
-    const hubMoves = !!hub && hub.sfu?.phase !== "ready" && !!this.bestHub(st, now, { exclude: hub.id, discretionary: true, sfu: true });
+    const hubMoves = !!hub && !this.bridges(hub) && !!this.bestHub(st, now, { exclude: hub.id, discretionary: true, sfu: true });
     const lost: number[] = [], late: number[] = [];
     for (const x of this.bridged(st, st.members.filter((m) => this.inRace(st, m.id)))) {
-      if (x.id === st.hub || x.releasedRace === race.startAt) continue;
+      if (x.id === st.hub || x.releasedRace === race.startAt || this.renewing(x, race, now)) continue;
       const since = Math.max(from, x.fallbackAt ?? from);
       if (now >= since + this.sfuSetupMs()) { if (!hubMoves) late.push(x.id); }
       else if (now >= since + this.sfuConnectMs() && !(x.sfuConnected || x.sfu?.phase === "ready")) lost.push(x.id);
