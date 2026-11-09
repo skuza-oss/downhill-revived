@@ -22,6 +22,7 @@ const schema = {  // a small one for the rules below; the launcher's own is chec
   pads: [{ id: 1, labels: ['A', 'Cross', 'B'], web: 0 }, { id: 2, labels: ['B', 'Circle', 'A'], web: 1 },
          { id: 21, labels: ['LT', 'L2', 'ZL'], web: 6 }, { id: 15, labels: ['Share', 'Mic', 'Capture'], web: -1 }],
   devices: [{ label: 'Keyboard' }, { label: 'Controller 1' }, { label: 'Controller 2' }],
+  swaps: [{ bit: 1, inputs: [9, 21] }, { bit: 2, inputs: [10, 22] }],
 };
 
 // the kind by the browser's pad name: the words the pad prints
@@ -48,6 +49,12 @@ assert.strictEqual(c.padInputPressed(schema, new Set([0]), new Set([0])), null);
 assert.strictEqual(c.padInputPressed(schema, new Set([0]), new Set([0, 1])), 2);
 assert.strictEqual(c.padInputPressed(schema, new Set(), new Set([6])), 21);
 assert.strictEqual(c.padInputPressed(schema, new Set(), new Set([16])), null, 'Guide is not bound');
+// with Swap L1/L2 (finding 189) the left trigger pressed is the left shoulder's place, as the game reads it
+assert.strictEqual(c.padInputPressed(schema, new Set(), new Set([6]), { swap_shoulders: 1 }), 9);
+assert.strictEqual(c.padInputPressed(schema, new Set(), new Set([6]), { swap_shoulders: 2 }), 21, 'Swap R1/R2 leaves the left side');
+assert.strictEqual(c.placeOf(schema, { swap_shoulders: 3 }, 10), 22);
+assert.strictEqual(c.placeOf(schema, { swap_shoulders: 3 }, 1), 1);
+assert.strictEqual(c.placeOf(schema, null, 9), 9);
 
 // the rows: a controller has the buttons only, the keyboard the stick directions too
 const layout = { inputs: [[0x20, 0x58], [0, 0], [0x0D, 0]] };
@@ -73,5 +80,8 @@ if (given) {
   assert.strictEqual(c.keyOfCode(given.schema, 'Numpad5'), 0x65);
   assert.strictEqual(c.keyOfCode(given.schema, 'Escape'), null);
   assert.strictEqual(c.padInputPressed(given.schema, new Set(), new Set([7])), 22, 'RT');
+  assert.strictEqual(pad1.swap_shoulders, 0, 'no swap by default');
+  assert.strictEqual(c.padInputPressed(given.schema, new Set(), new Set([7]), { swap_shoulders: 2 }), 10, 'RT with Swap R1/R2: RB');
+  assert.strictEqual(c.padInputPressed(given.schema, new Set(), new Set([4]), { swap_shoulders: 1 }), 21, 'LB with Swap L1/L2: LT');
 }
 console.log(`test_controls: ok${given ? " (the launcher's schema)" : ''}`);

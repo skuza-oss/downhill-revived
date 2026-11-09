@@ -10,7 +10,8 @@
    controller, else any), which then takes the main slot; Esc, or five seconds without a press, gives
    up. While it waits, and until every key and button is let go after it, the game sees no input
    at all (pads_read), so the press is only the page's. Square clears the main slot. A controller's
-   Show: D-pad and Sticks has Swap Sticks and an Invert for each of its sticks' axes.
+   Show: D-pad and Options has Swap Sticks, Swap L1/L2 and Swap R1/R2 (finding 189: a shoulder and
+   its trigger change places before the layout reads them) and an Invert for each sticks' axis.
    The rules are dhd_settings' (port/render/settings/src/controls.rs, through the host): a key or
    button another PS2 button had swaps with this button's old one (the hint says which), and a
    change that would leave this device without Cross, Triangle, START, R1 or a d-pad direction is
@@ -29,11 +30,14 @@
 enum { GROUPS = 2, CAPTURE_SECONDS = 5, NOTE_SECONDS = 4 };
 enum { CAPTURE_NONE, CAPTURE_WAIT, CAPTURE_RELEASE };  /* waiting for a press; for every input let go */
 enum { ROW_DEVICE, ROW_GROUP, ROW_TARGET, ROW_OPTION, ROW_RESET };
-enum { OPTION_SWAP, OPTION_LX, OPTION_LY, OPTION_RX, OPTION_RY, OPTIONS };
+enum { OPTION_SWAP, OPTION_SWAP_L, OPTION_SWAP_R, OPTION_LX, OPTION_LY, OPTION_RX, OPTION_RY, OPTIONS };
 
-static const char *const option_label[OPTIONS] = {"Swap Sticks:", "Invert Left X:", "Invert Left Y:", "Invert Right X:",
-                                                  "Invert Right Y:"};
-static const uint8_t option_bit[OPTIONS] = {0, CONTROL_INVERT_LX, CONTROL_INVERT_LY, CONTROL_INVERT_RX, CONTROL_INVERT_RY};
+static const char *const option_label[OPTIONS] = {"Swap Sticks:", "Swap L1/L2:", "Swap R1/R2:", "Invert Left X:",
+                                                  "Invert Left Y:", "Invert Right X:", "Invert Right Y:"};
+/* the SWAP_* bit of a shoulder swap, the INVERT_* bit of an invert */
+static const uint8_t option_bit[OPTIONS] = {0, CONTROL_SWAP_L, CONTROL_SWAP_R, CONTROL_INVERT_LX, CONTROL_INVERT_LY,
+                                            CONTROL_INVERT_RX, CONTROL_INVERT_RY};
+static int option_is_shoulder(int option) { return option == OPTION_SWAP_L || option == OPTION_SWAP_R; }
 
 static int device, group;             /* the layout and target group shown */
 static ControlsLayout layout;          /* the device's, as the host plays with it */
@@ -94,18 +98,23 @@ static void target_text(int row, char *value, size_t size)
 
 static int option_on(int option)
 {
-    return option == OPTION_SWAP ? layout.swap_sticks != 0 : (layout.invert & option_bit[option]) != 0;
+    if (option == OPTION_SWAP) return layout.swap_sticks != 0;
+    if (option_is_shoulder(option)) return (layout.swap_shoulders & option_bit[option]) != 0;
+    return (layout.invert & option_bit[option]) != 0;
 }
 
 /* Each row's text again, in place. */
 static void show(MenuPage *p)
 {
-    static const char *const group_word[GROUPS] = {"Buttons", "D-pad and Sticks"};
+    static const char *const group_word[GROUPS] = {"Buttons", "D-pad and Sticks"};  /* a controller's second: */
+    static const char options_word[] = "D-pad and Options";                     /* its stick and shoulder options */
     char value[MENU_PAGE_TEXT];
     for (int row = 0; row < menu_page_rows(p); row++) {
         switch (row_kind[row]) {
         case ROW_DEVICE: menu_page_value_set(p, row, "Device:", control_devices[device].label, 1); break;
-        case ROW_GROUP: menu_page_value_set(p, row, "Show:", group_word[group], 1); break;
+        case ROW_GROUP:
+            menu_page_value_set(p, row, "Show:", group && device != CONTROL_KEYBOARD ? options_word : group_word[group], 1);
+            break;
         case ROW_TARGET: {
             char label[32];
             snprintf(label, sizeof label, "%s:", control_targets[row_item[row]].label);
@@ -248,7 +257,10 @@ void controls_settings_update(MenuPage *p, int cursor)
     } else if (row_kind[cursor] == ROW_RESET)
         p->hint = "Restores this device to its default bindings";
     else if (row_kind[cursor] == ROW_OPTION)
-        p->hint = row_item[cursor] == OPTION_SWAP ? "The right stick steers, the left pedals" : "Reverses this axis before Swap Sticks";
+        p->hint = row_item[cursor] == OPTION_SWAP     ? "The right stick steers, the left pedals"
+                  : row_item[cursor] == OPTION_SWAP_L ? "For pads that report L1 as L2 and L2 as L1"
+                  : row_item[cursor] == OPTION_SWAP_R ? "For pads that report R1 as R2 and R2 as R1"
+                                                      : "Reverses this axis before Swap Sticks";
 }
 
 void controls_settings_change(MenuPage *p, int row, int step)
@@ -269,6 +281,7 @@ void controls_settings_change(MenuPage *p, int row, int step)
     case ROW_OPTION:
         if (locked()) return;
         if (row_item[row] == OPTION_SWAP) change(p, CONTROL_SWAP_STICKS, 0, 0, !option_on(OPTION_SWAP));
+        else if (option_is_shoulder(row_item[row])) change(p, CONTROL_SWAP_SHOULDERS, option_bit[row_item[row]], 0, !option_on(row_item[row]));
         else change(p, CONTROL_INVERT, option_bit[row_item[row]], 0, !option_on(row_item[row]));
         break;
     default: break;

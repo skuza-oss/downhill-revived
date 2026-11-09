@@ -46,7 +46,7 @@ fn defaults_are_the_old_layouts() {
         assert_eq!(p.input[t(name)], [id(input), 0], "{name}");
     }
     assert_eq!(p, default_layout(PAD2));
-    assert_eq!((p.swap_sticks, p.invert), (0, 0));
+    assert_eq!((p.swap_sticks, p.invert, p.swap_shoulders), (0, 0, 0), "every swap off by default (finding 189)");
     for d in 0..3 {
         assert_eq!(format(d, &default_layout(d)), "");
         assert_eq!(parse(d, "", &mut Vec::new()), default_layout(d));
@@ -273,4 +273,39 @@ fn stick_options() {
     assert_eq!(c.values(), [String::new(), String::new(), "sticks:swap invert:ly".to_string()]);
     assert_eq!(c.edit(PAD2, Edit::Reset, 0), Outcome::Changed(String::new()));
     assert_eq!(c.values()[PAD2], "");
+}
+
+/// Swap L1/L2 and Swap R1/R2 (finding 189, issue #69): a controller's own inputs, as Swap Sticks;
+/// off by default, per controller, `l1l2:swap` / `r1r2:swap` in its line; the bindings stay.
+#[test]
+fn shoulder_swaps() {
+    let mut problems = Vec::new();
+    let p = parse(PAD1, "r1r2:swap cross:east circle:south l1l2:swap sticks:swap", &mut problems);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(p.swap_shoulders, SWAP_L | SWAP_R);
+    assert_eq!((p.input[t("l1")], p.input[t("l2")]), ([id("lb"), 0], [id("lt"), 0]), "the bindings are left as they are");
+    assert_eq!(format(PAD1, &p), "cross:east circle:south sticks:swap l1l2:swap r1r2:swap");
+    assert_eq!(parse(PAD1, &format(PAD1, &p), &mut problems), p);
+    assert_eq!(parse(PAD2, "l1l2:swap l1l2:normal", &mut problems).swap_shoulders, 0);
+    assert!(problems.is_empty(), "{problems:?}");
+    // the keyboard has no shoulders of its own; a bad value is skipped
+    parse(KEYBOARD, "l1l2:swap", &mut problems);
+    parse(PAD1, "r1r2:yes", &mut problems);
+    assert_eq!(problems, ["keyboard: l1l2 is not a button of the keyboard", "pad1: r1r2:yes is not r1r2:swap"]);
+
+    let mut c = Controls::default();
+    assert_eq!(c.edit(KEYBOARD, Edit::SwapShoulders(SWAP_L, true), 0), Outcome::Unchanged);
+    assert_eq!(c.edit(PAD1, Edit::SwapShoulders(SWAP_L, true), 0), Outcome::Changed(String::new()));
+    assert_eq!(c.edit(PAD1, Edit::SwapShoulders(SWAP_L, true), 0), Outcome::Unchanged);
+    assert_eq!(c.edit(PAD2, Edit::SwapShoulders(SWAP_R, true), 0), Outcome::Changed(String::new()));
+    assert_eq!(c.edit(PAD2, Edit::SwapShoulders(SWAP_L | SWAP_R, true), 0), Outcome::Unchanged, "one swap at a time");
+    assert_eq!(c.values(), [String::new(), "l1l2:swap".to_string(), "r1r2:swap".to_string()], "per controller");
+    // a binding made with the swap on is kept when it goes off, and the other way round
+    assert_eq!(c.edit(PAD1, Edit::Assign { target: t("square"), slot: 1, input: id("rt") }, 0),
+               Outcome::Changed("RT moved from R2 to Square".into()));
+    assert_eq!(c.edit(PAD1, Edit::SwapShoulders(SWAP_L, false), 0), Outcome::Changed(String::new()));
+    assert_eq!(c.values()[PAD1], "square:west,rt r2:none");
+    // Reset turns the swaps off with the rest
+    assert_eq!(c.edit(PAD2, Edit::Reset, 0), Outcome::Changed(String::new()));
+    assert_eq!(c.layouts[PAD2], default_layout(PAD2));
 }

@@ -6,8 +6,8 @@
 'use strict';
 
 const bind = {
-  schema: null,     // controls_schema: targets, keys, pads, devices, buttons
-  layouts: null,    // controls_state: per device { inputs: [[main, alternate]...], swap_sticks, invert }
+  schema: null,     // controls_schema: targets, keys, pads, devices, buttons, swaps
+  layouts: null,    // controls_state: per device { inputs: [[main, alternate]...], swap_sticks, invert, swap_shoulders }
   device: 0,        // the layout shown: 0 keyboard, 1 Controller 1, 2 Controller 2
   capture: null,    // waiting: { device, target, slot, since, held: Set of pad buttons down at the start }
   taken: new Set(), // the pad buttons down when a binding took one: pad.js ignores them until let go
@@ -16,6 +16,9 @@ const bind = {
 };
 const CAPTURE_MS = 5000;
 const INVERTS = [[1, 'Invert left stick X'], [2, 'Invert left stick Y'], [4, 'Invert right stick X'], [8, 'Invert right stick Y']];
+// Swap L1/L2 and Swap R1/R2 (finding 189): schema.swaps' bits
+const SHOULDERS = [[1, 'Swap L1/L2', 'For controllers that report L1 as L2 and L2 as L1'],
+                   [2, 'Swap R1/R2', 'For controllers that report R1 as R2 and R2 as R1']];
 
 // A controller's kind by its name, as the game's PAD_KIND_* (1 PlayStation, 2 Xbox, 3 Nintendo): the
 // words its buttons print.
@@ -52,12 +55,25 @@ function padButtonsDown(pads) {
   return down;
 }
 
-// The controller input newly pressed (down now, not when the wait began), or null.
-function padInputPressed(schema, held, down) {
+// The place of a controller input with a layout's shoulder swaps (finding 189): with Swap L1/L2 the
+// left trigger counts as the left shoulder and the other way round, as the game reads it, so the
+// button pressed for a binding is the one the binding then reads.
+function placeOf(schema, layout, id) {
+  for (const w of schema.swaps ?? []) {
+    if (!((layout?.swap_shoulders ?? 0) & w.bit)) continue;
+    if (id === w.inputs[0]) return w.inputs[1];
+    if (id === w.inputs[1]) return w.inputs[0];
+  }
+  return id;
+}
+
+// The controller input newly pressed (down now, not when the wait began), by its place through
+// `layout`'s swaps, or null.
+function padInputPressed(schema, held, down, layout) {
   for (const i of down) {
     if (held.has(i)) continue;
     const p = schema.pads.find((q) => q.web === i);
-    if (p) return p.id;
+    if (p) return placeOf(schema, layout, p.id);
   }
   return null;
 }
@@ -120,7 +136,7 @@ function pollCapture() {
   if (!captureLive(c)) return endCapture();
   const down = padButtonsDown([...(navigator.getGamepads?.() ?? [])].filter(Boolean));
   for (const i of c.held) if (!down.has(i)) c.held.delete(i);
-  const input = padInputPressed(bind.schema, c.held, down);
+  const input = padInputPressed(bind.schema, c.held, down, bind.layouts[c.device]);
   if (input) {
     bind.taken = down;  // the press is the binding's, not a Start, Back or tab change as well
     bind.capture = null;
@@ -196,6 +212,12 @@ function bindingsBlock() {
       el('button', { class: 'sw', role: 'switch', 'aria-checked': String(on), 'aria-label': label,
         onclick: () => bindEdit(device, { ...edit, on: !on }) }));
     out.push(option('Swap sticks', layout.swap_sticks, { edit: 'swap' }));
+    for (const [bit, label, help] of SHOULDERS) {
+      const on = !!((layout.swap_shoulders ?? 0) & bit);
+      out.push(el('div', { class: 'row' }, el('div', { class: 'l' }, label, el('small', {}, help)),
+        el('button', { class: 'sw', role: 'switch', 'aria-checked': String(on), 'aria-label': label,
+          onclick: () => bindEdit(device, { edit: 'shoulders', input: bit, on: !on }) })));
+    }
     for (const [bit, label] of INVERTS) out.push(option(label, !!(layout.invert & bit), { edit: 'invert', input: bit }));
   }
   out.push(el('div', { class: 'row' }, el('div', { class: 'l' }, el('small', {},
@@ -210,4 +232,4 @@ async function resetBindings() {
   bind.note = '';
 }
 
-if (typeof module !== 'undefined') module.exports = { padKind, inputWord, keyOfCode, padInputPressed, bindingRows };
+if (typeof module !== 'undefined') module.exports = { padKind, inputWord, keyOfCode, padInputPressed, placeOf, bindingRows };

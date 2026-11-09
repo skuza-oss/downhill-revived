@@ -93,6 +93,55 @@ static HostPad applied(const ControlsLayout *l, const GamepadRaw *raw)
     return p;
 }
 
+/* Swap L1/L2 and Swap R1/R2 (finding 189): a pad that reports its L1 as the left trigger and its
+   L2 as the left shoulder plays as a DualShock 2 with Swap L1/L2 on; the trigger's pressure goes
+   with it, the other side and the other buttons stay; a binding names the place pressed. */
+static void run_shoulder_swaps(void)
+{
+    const ControlsLayout *def = &control_defaults[CONTROL_PAD1];
+    ControlsLayout l = *def;
+    l.swap_shoulders = CONTROL_SWAP_L;
+    GamepadRaw raw = {0};
+    raw.trigger[0] = 255;  /* the pad's L1, reported as its left trigger */
+    check(applied(def, &raw).buttons == PAD_L2, "unswapped: the left trigger is L2", applied(def, &raw).buttons, PAD_L2);
+    HostPad p = applied(&l, &raw);
+    check(p.buttons == PAD_L1 && p.pressure[8] == 255 && p.pressure[10] == 0, "Swap L1/L2: the left trigger is L1", p.buttons, PAD_L1);
+    raw.trigger[0] = 0, raw.buttons = 1u << id("lb");  /* the pad's L2, reported as its left shoulder */
+    p = applied(&l, &raw);
+    check(p.buttons == PAD_L2 && p.pressure[10] == 255, "Swap L1/L2: the left shoulder is L2", p.buttons, PAD_L2);
+    raw.buttons = 1u << id("rb"), raw.trigger[1] = 200;
+    p = applied(&l, &raw);
+    check(p.buttons == (PAD_R1 | PAD_R2) && p.pressure[11] == 200, "Swap L1/L2 leaves R1 and R2", p.buttons, PAD_R1 | PAD_R2);
+    raw.buttons = 0, raw.trigger[0] = 20;
+    p = applied(&l, &raw);
+    check(p.buttons == PAD_R2 && p.pressure[8] == 20, "a light left trigger: L1's pressure, no press", p.pressure[8], 20);
+    l.swap_shoulders = CONTROL_SWAP_L | CONTROL_SWAP_R;
+    raw.trigger[0] = 0, raw.trigger[1] = 200, raw.buttons = 1u << id("rb") | 1u << id("south");
+    p = applied(&l, &raw);
+    check(p.buttons == (PAD_R1 | PAD_R2 | PAD_CROSS) && p.pressure[9] == 200 && p.pressure[11] == 255,
+          "both swapped: R1 has the right trigger's pressure", p.pressure[9], 200);
+    raw.trigger[1] = 0, raw.buttons = 1u << id("rb");
+    check(applied(&l, &raw).buttons == PAD_R2, "both swapped: the right shoulder is R2", applied(&l, &raw).buttons, PAD_R2);
+    /* a binding with the swaps: Square on lt (the place the player presses: the pad's left
+       shoulder with Swap L1/L2), L2 left with nothing */
+    l.input[2][1] = (uint8_t)id("lt"), l.input[6][0] = 0;
+    raw.buttons = 1u << id("lb"), raw.trigger[1] = 0;
+    check(applied(&l, &raw).buttons == PAD_SQUARE, "a binding names the swapped place", applied(&l, &raw).buttons, PAD_SQUARE);
+    /* gamepad_place is its own inverse, and only moves the shoulders it swaps */
+    int bad = 0;
+    for (int swaps = 0; swaps < 4; swaps++) {
+        l.swap_shoulders = (uint8_t)swaps;
+        for (int i = 1; i <= CONTROL_PAD_INPUTS; i++) {
+            int place = gamepad_place(&l, i);
+            int moved = place != i;
+            int should = (swaps & CONTROL_SWAP_L && (i == id("lb") || i == id("lt"))) ||
+                         (swaps & CONTROL_SWAP_R && (i == id("rb") || i == id("rt")));
+            if (gamepad_place(&l, place) != i || moved != should) bad++;
+        }
+    }
+    check(bad == 0, "the swaps' places", bad, 0);
+}
+
 /* A state through layouts (finding 157): the default is the old mapping by position (south
    Cross, the triggers L2 and R2 with their pressure, the sticks as they are); another layout
    moves the buttons, swaps and inverts the sticks. */
@@ -131,6 +180,7 @@ static void run_layouts(void)
     check(applied(&l, &raw).buttons == (PAD_CIRCLE | PAD_R2), "LT is Circle's alternate", applied(&l, &raw).buttons, PAD_CIRCLE | PAD_R2);
     raw.axis[0] = 0;
     check(applied(&l, &raw).right_x == 128, "an inverted centre stays the centre", applied(&l, &raw).right_x, 128);
+    run_shoulder_swaps();
 }
 
 /* What gamepad.c does with what SDL reports: each pad's kind (the button symbols, prompts.c) and a

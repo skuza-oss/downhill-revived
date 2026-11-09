@@ -11,12 +11,13 @@
 enum { CONTROL_TARGETS = 24, CONTROL_BUTTONS = 16, CONTROL_SLOTS = 2, CONTROL_DEVICES = 3, CONTROL_KEYS = 91, CONTROL_PAD_INPUTS = 22 };
 enum { CONTROL_KEYBOARD, CONTROL_PAD1, CONTROL_PAD2 };
 enum { CONTROL_INVERT_LX = 1, CONTROL_INVERT_LY = 2, CONTROL_INVERT_RX = 4, CONTROL_INVERT_RY = 8 };
+enum { CONTROL_SWAP_L = 1, CONTROL_SWAP_R = 2 };
 /* dhd_controls_edit's edits and answers (dhd_settings.h) */
-enum { CONTROL_ASSIGN, CONTROL_CLEAR, CONTROL_RESET, CONTROL_SWAP_STICKS, CONTROL_INVERT };
+enum { CONTROL_ASSIGN, CONTROL_CLEAR, CONTROL_RESET, CONTROL_SWAP_STICKS, CONTROL_INVERT, CONTROL_SWAP_SHOULDERS };
 enum { CONTROL_REFUSED = -1, CONTROL_UNCHANGED = 0, CONTROL_CHANGED = 1 };
 
-/* A layout: each target's main and alternate input, a controller's stick options (52 bytes). */
-typedef struct ControlsLayout { uint8_t input[CONTROL_TARGETS][CONTROL_SLOTS]; uint8_t swap_sticks, invert, unused[2]; } ControlsLayout;
+/* A layout: each target's main and alternate input, a controller's stick and shoulder options (52 bytes). */
+typedef struct ControlsLayout { uint8_t input[CONTROL_TARGETS][CONTROL_SLOTS]; uint8_t swap_sticks, invert, swap_shoulders, unused; } ControlsLayout;
 
 /* The PS2 pad's buttons, then the keyboard's stick directions: dhd.ini name, the pages' word, what it
    does in a race, libpad's bit (0: a stick direction: axis 1 LX 2 LY 3 RX 4 RY, dir -1 / 1), and whether
@@ -175,9 +176,9 @@ static const ControlPadInput control_pad_inputs[CONTROL_PAD_INPUTS] = {
 
 /* The defaults: the keyboard, Controller 1, Controller 2 (the game's layouts before rebinding). */
 static const ControlsLayout control_defaults[CONTROL_DEVICES] = {
-    {{{32, 88}, {67, 0}, {90, 0}, {83, 8}, {65, 0}, {68, 0}, {81, 0}, {69, 0}, {70, 0}, {87, 0}, {13, 0}, {9, 0}, {38, 0}, {40, 0}, {37, 0}, {39, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, {0, 0}},
-    {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, {0, 0}},
-    {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, {0, 0}},
+    {{{32, 88}, {67, 0}, {90, 0}, {83, 8}, {65, 0}, {68, 0}, {81, 0}, {69, 0}, {70, 0}, {87, 0}, {13, 0}, {9, 0}, {38, 0}, {40, 0}, {37, 0}, {39, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
+    {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
+    {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
 };
 
 /* The settings: dhd.ini key and variable of the keyboard, Controller 1 and Controller 2. */

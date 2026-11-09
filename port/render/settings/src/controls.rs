@@ -7,7 +7,8 @@
 //!
 //! - What is bound are the DualShock 2's buttons (`TARGETS`): the game's own meaning of each stays
 //!   (Cross pedals in a race and confirms in the menus). The keyboard can also hold the sticks'
-//!   directions; a controller's sticks are its own, with Swap Sticks and an Invert per axis.
+//!   directions; a controller's sticks are its own, with Swap Sticks and an Invert per axis, and
+//!   Swap L1/L2 and Swap R1/R2 for pads that report a shoulder as its trigger (finding 189).
 //! - Each button has two slots, a main and an alternate (`SLOTS`).
 //! - Keys go by their place on a US keyboard (`KEYS`: scan codes, so AZERTY and QWERTZ keep the
 //!   places), controller buttons by their place on the pad (`PAD_INPUTS`: the bottom face button
@@ -23,8 +24,15 @@
 //! A line, `keyboard = cross:space,x square:z ...`: entries `button:input[,input]` (main, then
 //! alternate; `none` for nothing), apart by spaces, only the buttons that differ from the defaults.
 //! A button the line doesn't name keeps its defaults, less any the line gives another button. A
-//! controller's line may add `sticks:swap` and `invert:lx,ly,rx,ry` (the controller's own sticks:
-//! left X, left Y, right X, right Y). An empty line, or none, is the defaults.
+//! controller's line may add `sticks:swap`, `invert:lx,ly,rx,ry` (the controller's own sticks:
+//! left X, left Y, right X, right Y), `l1l2:swap` and `r1r2:swap`. An empty line, or none, is the
+//! defaults.
+//!
+//! The swaps (Swap Sticks, Swap L1/L2, Swap R1/R2) and the inverts are the controller's own inputs
+//! put right before the layout reads them: with Swap L1/L2 on, what the pad reports as its left
+//! trigger counts as `lb` and its left shoulder as `lt` (the trigger's pressure goes with it). So a
+//! binding always names the place the player presses, the binding pages' wait goes through the
+//! same swap, and turning a swap on or off leaves the bindings as they are.
 
 use std::fmt::Write;
 
@@ -230,9 +238,16 @@ pub const INVERT_RX: u8 = 4;
 pub const INVERT_RY: u8 = 8;
 const INVERT_NAMES: [(u8, &str); 4] = [(INVERT_LX, "lx"), (INVERT_LY, "ly"), (INVERT_RX, "rx"), (INVERT_RY, "ry")];
 
+/// A controller's shoulders and triggers swapped (finding 189): these bits of `Layout::swap_shoulders`.
+/// Swap L1/L2: the pad's left shoulder and left trigger change places; Swap R1/R2 the right ones.
+pub const SWAP_L: u8 = 1;
+pub const SWAP_R: u8 = 2;
+/// Each swap's bit, its dhd.ini entry name (`l1l2:swap`) and the two inputs it swaps.
+pub const SWAPS: [(u8, &str, [&str; 2]); 2] = [(SWAP_L, "l1l2", ["lb", "lt"]), (SWAP_R, "r1r2", ["rb", "rt"])];
+
 /// A layout, as the game keeps it (port/hle/controls_table.h's ControlsLayout, 52 bytes): each
 /// target's main and alternate input (the keyboard: the key's `vk`; a controller: the input's
-/// `id`; 0 nothing; an alternate only with a main), and a controller's stick options.
+/// `id`; 0 nothing; an alternate only with a main), and a controller's stick and shoulder options.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Layout {
@@ -240,7 +255,9 @@ pub struct Layout {
     pub swap_sticks: u8,
     /// INVERT_* bits.
     pub invert: u8,
-    pub unused: [u8; 2],
+    /// SWAP_* bits.
+    pub swap_shoulders: u8,
+    pub unused: u8,
 }
 
 /// The game's layouts before rebinding: the keyboard of docs/PLAYING.md (finding 059) and the pads
@@ -363,6 +380,15 @@ pub fn parse(device: usize, text: &str, problems: &mut Vec<String>) -> Layout {
                 }
                 continue;
             }
+            (name, true) if SWAPS.iter().any(|(_, n, _)| *n == name) => {
+                let bit = SWAPS.iter().find(|(_, n, _)| *n == name).unwrap().0;
+                match values {
+                    "swap" => l.swap_shoulders |= bit,
+                    "normal" => l.swap_shoulders &= !bit,
+                    _ => problem(format!("{name}:{values} is not {name}:swap")),
+                }
+                continue;
+            }
             ("invert", true) => {
                 l.invert = 0;
                 for v in values.split(',').filter(|v| !v.is_empty() && *v != "none") {
@@ -451,6 +477,11 @@ pub fn format(device: usize, l: &Layout) -> String {
             let axes: Vec<&str> = INVERT_NAMES.iter().filter(|(b, _)| l.invert & b != 0).map(|(_, n)| *n).collect();
             add(&format!("invert:{}", axes.join(",")));
         }
+        for (bit, name, _) in SWAPS {
+            if l.swap_shoulders & bit != 0 {
+                add(&format!("{name}:swap"));
+            }
+        }
     }
     out
 }
@@ -467,6 +498,8 @@ pub enum Edit {
     SwapSticks(bool),
     /// An INVERT_* bit on or off.
     Invert(u8, bool),
+    /// A SWAP_* bit (Swap L1/L2, Swap R1/R2) on or off.
+    SwapShoulders(u8, bool),
 }
 
 /// What an edit did: the new layout is in place (`Changed`, with what the page says, "" nothing
@@ -584,7 +617,10 @@ impl Controls {
             Edit::Invert(bit, on) if dev.pad && INVERT_NAMES.iter().any(|(b, _)| *b == bit) => {
                 l.invert = if on { l.invert | bit } else { l.invert & !bit };
             }
-            Edit::SwapSticks(_) | Edit::Invert(..) => return Outcome::Unchanged,
+            Edit::SwapShoulders(bit, on) if dev.pad && SWAPS.iter().any(|(b, _, _)| *b == bit) => {
+                l.swap_shoulders = if on { l.swap_shoulders | bit } else { l.swap_shoulders & !bit };
+            }
+            Edit::SwapSticks(_) | Edit::Invert(..) | Edit::SwapShoulders(..) => return Outcome::Unchanged,
         }
         if next == *self {
             return Outcome::Unchanged;
@@ -627,11 +663,12 @@ pub fn c_table() -> String {
         "enum {{ CONTROL_INVERT_LX = {INVERT_LX}, CONTROL_INVERT_LY = {INVERT_LY}, CONTROL_INVERT_RX = {INVERT_RX}, \
          CONTROL_INVERT_RY = {INVERT_RY} }};"
     );
+    let _ = writeln!(out, "enum {{ CONTROL_SWAP_L = {SWAP_L}, CONTROL_SWAP_R = {SWAP_R} }};");
     out += "/* dhd_controls_edit's edits and answers (dhd_settings.h) */\n\
-            enum { CONTROL_ASSIGN, CONTROL_CLEAR, CONTROL_RESET, CONTROL_SWAP_STICKS, CONTROL_INVERT };\n\
+            enum { CONTROL_ASSIGN, CONTROL_CLEAR, CONTROL_RESET, CONTROL_SWAP_STICKS, CONTROL_INVERT, CONTROL_SWAP_SHOULDERS };\n\
             enum { CONTROL_REFUSED = -1, CONTROL_UNCHANGED = 0, CONTROL_CHANGED = 1 };\n\n";
-    out += "/* A layout: each target's main and alternate input, a controller's stick options (52 bytes). */\n\
-            typedef struct ControlsLayout { uint8_t input[CONTROL_TARGETS][CONTROL_SLOTS]; uint8_t swap_sticks, invert, unused[2]; } ControlsLayout;\n\n";
+    out += "/* A layout: each target's main and alternate input, a controller's stick and shoulder options (52 bytes). */\n\
+            typedef struct ControlsLayout { uint8_t input[CONTROL_TARGETS][CONTROL_SLOTS]; uint8_t swap_sticks, invert, swap_shoulders, unused; } ControlsLayout;\n\n";
     out += "/* The PS2 pad's buttons, then the keyboard's stick directions: dhd.ini name, the pages' word, what it\n   \
             does in a race, libpad's bit (0: a stick direction: axis 1 LX 2 LY 3 RX 4 RY, dir -1 / 1), and whether\n   \
             the menus need it. */\n\
@@ -666,7 +703,7 @@ pub fn c_table() -> String {
     for d in 0..3 {
         let l = default_layout(d);
         let pairs: Vec<String> = l.input.iter().map(|s| format!("{{{}, {}}}", s[0], s[1])).collect();
-        let _ = writeln!(out, "    {{{{{}}}, {}, {}, {{0, 0}}}},", pairs.join(", "), l.swap_sticks, l.invert);
+        let _ = writeln!(out, "    {{{{{}}}, {}, {}, {}, 0}},", pairs.join(", "), l.swap_sticks, l.invert, l.swap_shoulders);
     }
     out += "};\n\n/* The settings: dhd.ini key and variable of the keyboard, Controller 1 and Controller 2. */\n\
             static const struct { const char *key, *env, *label; } control_devices[CONTROL_DEVICES] = {\n";
