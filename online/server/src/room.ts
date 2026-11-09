@@ -754,7 +754,7 @@ export class Room extends DurableObject<Env> {
   private async onHello(ws: WebSocket, info: SocketInfo, m: Msg): Promise<void> {
     // The version gate first: releases older than MIN_VERSION (wrangler.jsonc) may not play, and
     // client_outdated is the refusal their ONLINE screen answers with Update Now (finding 054), also
-    // when they speak an older protocol (0.7.11, protocol 2, against protocol 3: finding 158).
+    // when they speak an older protocol.
     const minVersion = minVersionOf(this.env.MIN_VERSION);
     const clientVersion = clientVersionOf(m);
     if (isOutdated(clientVersion, minVersion))

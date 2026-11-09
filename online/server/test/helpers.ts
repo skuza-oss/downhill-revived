@@ -3,7 +3,7 @@ import { PROTOCOL } from "../src/protocol";
 
 export const VERSION = "dhd-port test";
 /** The release the test clients claim (hello.clientVersion); vitest.config.ts sets MIN_VERSION to it. */
-export const CLIENT_VERSION = "0.2.0";
+export const CLIENT_VERSION = "0.7.13";
 export const ISO = "a".repeat(64);
 
 type Frame = string | ArrayBuffer | Blob;

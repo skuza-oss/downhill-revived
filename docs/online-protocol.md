@@ -8,7 +8,7 @@ Cloudflare Workers + Durable Objects). The plan behind it is `docs/ONLINE-PLAN.m
 - The server runs no game logic. Race frames use the SFU (state sync: every
   PC runs its own race and shows the others' riders from their snapshots, findings 041 and 044)
   and reports players who leave.
-- `PROTOCOL = 4` (since 0.7.13; 0.7.12 spoke 3). It is in `hello`; the endpoint URL remains `/v1/`.
+- `PROTOCOL = 4` (since 0.7.13, the oldest release the server lets in). It is in `hello`; the endpoint URL remains `/v1/`.
   Any incompatible change raises it; the server refuses clients with another number.
 
 ## Endpoints
@@ -23,7 +23,7 @@ host.
 | WebSocket | `/v1/rooms/new` | Create a room; this socket becomes its host. `?region=<hint>` picks where it runs (Region, below). |
 | WebSocket | `/v1/rooms/<CODE>` | Join the room with that join code (case-insensitive). |
 | GET | `/v1/lobbies` | Public lobby list (JSON, below). |
-| GET | `/v1/health` | `{"ok":true,"protocol":4,"minVersion":"0.1.0","online":true}` (`online` and `message`: the kill switch, below) |
+| GET | `/v1/health` | `{"ok":true,"protocol":4,"minVersion":"0.7.13","online":true}` (`online` and `message`: the kill switch, below) |
 | GET | `/v1/latest` | The newest release's `latest.json` (the launcher's backup update check; below). |
 
 Join codes are 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no `0 O 1 I L`). Clients
@@ -60,18 +60,19 @@ A refusal is one text frame followed by a close:
 ### Minimum client version
 
 The server refuses releases older than its `MIN_VERSION` (a Worker variable in
-`online/server/wrangler.jsonc`, `MAJOR.MINOR.PATCH`; default `0.1.0`, every release). Since
-0.2.0 the client sends its release in `hello.clientVersion` (`port/include/version.h`). A
-`hello` without it is 0.1.0, which did not send one; an unparseable one counts as outdated. The
-refusal carries both versions:
+`online/server/wrangler.jsonc`, `MAJOR.MINOR.PATCH`; without one, 0.7.13, the first release of
+protocol 4). The client sends its release in `hello.clientVersion` (`port/include/version.h`). A
+`hello` without one, or with one that is not a version, counts as outdated. This check comes
+before the protocol's, so an old release that speaks an older protocol is refused the same way.
+The refusal carries both versions (`clientVersion` `""` when the hello named none):
 
 ```json
 {"type":"error","code":"client_outdated","message":"A new version is out. Update to play online.",
- "minVersion":"0.2.0","clientVersion":"0.1.0"}
+ "minVersion":"0.7.13","clientVersion":"0.7.12"}
 ```
 
-0.1.0 knows no `client_outdated`: like any refusal it shows `message` on the ONLINE screen.
-0.2.0 and later show the same text and add an **Update Now** row (finding 054).
+Every release shows `message` on the ONLINE screen; since 0.2.0 the game adds an **Update Now**
+row (finding 054).
 
 ### The kill switch (finding 161)
 
@@ -92,8 +93,7 @@ The refusal is:
 ```
 
 then close 4010. The operator may give another text (`--message`, within about 45 characters, the
-ONLINE screen's footer). Every release shows a refusal's `message`, so 0.7.11 and older need
-nothing new. `/v1/health` adds `"online":false` and the `message`; `/v1/lobbies` lists no rooms
+ONLINE screen's footer). Every release shows a refusal's `message`. `/v1/health` adds `"online":false` and the `message`; `/v1/lobbies` lists no rooms
 and adds the same two fields. An open room starts no race: its countdown is dropped and `start`
 answers the non-fatal `online_off` error (so does a countdown that runs out, to the whole room). A
 race already running goes on to its finish.
@@ -148,7 +148,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
  "isoSha256":"<64 lowercase hex>","name":"Rider","features":["countdown","session","race_rejoin"]}  // features: optional
 // A rejoin (Limits, below) adds the token from this room's welcome: "rejoinToken":"<32 hex>",
 // and during a race (finding 175) the startAt of the race it knows: "raceStartAt":1734000003000
-// From the release after 0.7.11 (finding 161): "installId":"<32 lowercase hex>", optional (below)
+// "installId":"<32 lowercase hex>" (finding 161), optional (below)
 
 // Host only. Every field optional; omitted fields keep their value.
 {"type":"settings","track":3,"laps":2,"seed":12345,"public":true,"maxPlayers":10,"roomName":"Friday race"}
@@ -173,8 +173,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
   (private, join code only).
 - `installId`: a random id the game makes once and keeps in dhd.ini (`install_id`), the same in
   every hello of that copy of the game, for the server's moderation log and bans (Refusals,
-  above). Optional: releases before it send none and join as before; one that is not 32 lowercase
-  hex digits counts as none. The server sends it to nobody. The game never writes it to dhd.log.
+  above). Optional (the browser sends none); one that is not 32 lowercase hex digits counts as
+  none. The server sends it to nobody. The game never writes it to dhd.log.
 - `features`: what the client understands beyond version 1. `"countdown"`: the room may start
   the race by itself (below). `"session"`: a creator's hello asks for session-room rules (Session
   rooms, below). `"race_rejoin"` (finding 175): the game keeps racing over the SFU
@@ -488,7 +488,7 @@ The server keeps what everyone has to agree on:
 `GET /v1/lobbies` → `200 application/json`:
 
 ```json
-{"protocol":4,"minVersion":"0.1.0","region":"EU","now":1734000000000,"lobbies":[
+{"protocol":4,"minVersion":"0.7.13","region":"EU","now":1734000000000,"lobbies":[
   {"code":"K7QX2M","roomName":"Friday race","version":"dhd-port 0.2.0 1a2b3c4d5e6f7a8b","track":3,
    "players":2,"maxPlayers":10,"hostName":"Ann","region":"EU","colo":"FRA","createdIn":"EU","area":"EU EAST"}]}
 ```
@@ -534,7 +534,7 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
 - A room with no members is deleted.
 - Caps per connection (finding 161, `online/server/src/guard.ts`): at most 100 text frames and
   100 binary frames in each 5 s window (20 a second each; the game sends about 1.5 text and, in
-  a race, 2 binary PINGs a second: since protocol 3 race frames travel over the SFU, finding 158, and a
+  a race, 2 binary PINGs a second: race frames travel over the SFU, finding 158, and a
   race's Realtime setup is a few text messages). Over a cap the rest of that window's frames of
   that kind are dropped (binary ones not answered);
   the first time the sender also gets the non-fatal
@@ -578,7 +578,7 @@ that includes this UI at release time; no deployment is part of this change.
 
 A creator opts in with `"features":["countdown","session"]` in hello.
 The creator's feature selects the rules for the room's whole lifetime.
-Version and ISO matching still apply. The protocol number did not change (it was 1 then).
+Version and ISO matching still apply.
 A creator without session keeps all the old rules, including immediate host Start,
 no racing joins, and hiding racing or full rooms from the public list.
 Binary STATE and EVENT formats do not change. The server runs no game logic.
@@ -760,7 +760,7 @@ It logs each phase transition as PHASE followed by the phase and local race coun
 A late join waits for its first grid. Existing recording replay mode remains.
 
 
-## Ten racers (protocol 2)
+## Ten racers
 
 New public and private rooms default to ten members. The host can choose 2–10,
 but cannot shrink below current membership. A race still uses one local human.

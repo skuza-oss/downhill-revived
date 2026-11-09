@@ -54,19 +54,14 @@ export type ErrorCode = keyof typeof CLOSE_CODES | "not_host" | "not_ready" | "b
 // ---- The client version gate ----
 
 /**
- * The oldest release that may play, when wrangler.jsonc's MIN_VERSION is missing or not a
- * version. Keep it at the oldest release still allowed.
+ * The oldest release that may play when wrangler.jsonc's MIN_VERSION is missing or not a version:
+ * the first that speaks protocol 4.
  */
-export const DEFAULT_MIN_VERSION = "0.1.0";
+export const DEFAULT_MIN_VERSION = "0.7.13";
 /**
- * Release 0.1.0 sends no hello.clientVersion (its hello.version is "dhd-port <exe hash>"), so a
- * hello without one is taken as 0.1.0.
- */
-export const LEGACY_CLIENT_VERSION = "0.1.0";
-/**
- * The refusal text. 0.1.0 shows an error's `message` as it is, in the online menu's footer, so
- * it must fit there: 44 characters, the footer holds about 45 at 640 pixels (finding 054).
- * Newer clients recognise the code, show their own copy and offer to update.
+ * The refusal text. Every release shows an error's `message` in the online menu's footer, which
+ * holds about 45 characters at 640 pixels (finding 054); this is 44. Since 0.2.0 the game also
+ * offers Update Now for its code.
  */
 export const OUTDATED_MESSAGE = "A new version is out. Update to play online.";
 
@@ -83,9 +78,9 @@ export function compareVersions(a: number[], b: number[]): number {
   return 0;
 }
 
-/** The release a hello comes from: its clientVersion, else 0.1.0 (see LEGACY_CLIENT_VERSION). */
+/** The release a hello comes from, "" when it names none (0.1.0 did not): unreadable, so outdated. */
 export function clientVersionOf(hello: Record<string, unknown>): string {
-  return hello.clientVersion === undefined ? LEGACY_CLIENT_VERSION : String(hello.clientVersion).slice(0, 32);
+  return hello.clientVersion === undefined ? "" : String(hello.clientVersion).slice(0, 32);
 }
 
 /** The configured minimum (MIN_VERSION), or DEFAULT_MIN_VERSION when it isn't a version. */

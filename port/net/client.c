@@ -680,18 +680,19 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
         SDL_UnlockMutex(c->lock);
         return;
     }
-    if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG && hold_pong(c, 1, data, n))
+    /* A PONG: our PING's bytes (the send time after type and slot), then the server's clock */
+    if (n >= 2 + 2 * sizeof(double) && data[0] == NET_FRAME_PONG && hold_pong(c, 1, data, n))
         ;
-    else if (n >= 2 + sizeof(double) && data[0] == NET_FRAME_PONG) {
+    else if (n >= 2 + 2 * sizeof(double) && data[0] == NET_FRAME_PONG) {
         double sent, server_time, now = net_now_ms(), rtt;
         memcpy(&sent, data + 2, sizeof sent);
         rtt = now - sent;
         add_rtt(c, rtt);
-        /* Protocol 4: the server's clock after our bytes (finding 169). The race's snapshots are
-           stamped on it, so the offset follows it during the race too, from the quick round
-           trips (clock_sample), but by at most CLOCK_SLEW_MS a pong: a sudden step would move
-           every puppet of this PC on the other screens. */
-        if (n >= 2 + 2 * sizeof(double) && clock_sample(c, rtt, now)) {
+        /* The race's snapshots are stamped on the server's clock (finding 169), so the offset
+           follows it during the race too, from the quick round trips (clock_sample), but by at
+           most CLOCK_SLEW_MS a pong: a sudden step would move every puppet of this PC on the
+           other screens. */
+        if (clock_sample(c, rtt, now)) {
             memcpy(&server_time, data + n - sizeof server_time, sizeof server_time);
             if (isfinite(server_time) && server_time > 0) {
                 double offset = server_time - (sent + rtt / 2), step = offset - c->clock_offset;

@@ -65,44 +65,44 @@ describe("lobby", () => {
   });
 
   it("refuses clients older than MIN_VERSION with a readable reason, hosts and joiners alike", async () => {
-    // A 0.1.0 hello: no clientVersion, version is the exe hash. MIN_VERSION is 0.2.0 here.
+    // A 0.1.0 hello: no clientVersion, version is the exe hash, protocol 1. MIN_VERSION is 0.7.13 here.
     const old = await Client.connect("/v1/rooms/new");
-    old.sendJson({ type: "hello", protocol: 3, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
+    old.sendJson({ type: "hello", protocol: 1, version: "dhd-port 274f8c46f1af52d6", isoSha256: ISO, name: "Old" });
     const err = await old.json("error");
     expect(err).toMatchObject({
       code: "client_outdated",
       message: "A new version is out. Update to play online.",
-      minVersion: "0.2.0",
-      clientVersion: "0.1.0",
+      minVersion: "0.7.13",
+      clientVersion: "",
     });
     expect(await old.closed()).toBe(4009);
 
     const { code } = await Client.host();
     const older = await Client.connect(`/v1/rooms/${code}`);
-    older.hello("Older", { clientVersion: "0.1.5" });
+    older.hello("Older", { clientVersion: "0.7.12" });
     expect((await older.json("error")).code).toBe("client_outdated");
     expect(await older.closed()).toBe(4009);
 
     // an older release that also speaks an older protocol still gets the Update Now refusal
-    const protocol2 = await Client.connect(`/v1/rooms/${code}`);
-    protocol2.hello("Protocol2", { protocol: 2, clientVersion: "0.1.5" });
-    expect((await protocol2.json("error")).code).toBe("client_outdated");
-    expect(await protocol2.closed()).toBe(4009);
+    const protocol3 = await Client.connect(`/v1/rooms/${code}`);
+    protocol3.hello("Protocol3", { protocol: 3, clientVersion: "0.7.12" });
+    expect((await protocol3.json("error")).code).toBe("client_outdated");
+    expect(await protocol3.closed()).toBe(4009);
 
     const junk = await Client.connect(`/v1/rooms/${code}`);
     junk.hello("Junk", { clientVersion: "nightly" });
     expect(await junk.closed()).toBe(4009);
 
     const newer = await Client.connect(`/v1/rooms/${code}`);
-    newer.hello("Newer", { clientVersion: "0.3.0" });
+    newer.hello("Newer", { clientVersion: "0.7.14" });
     expect((await newer.json("welcome")).code).toBe(code);
   });
 
   it("names the minimum version in health and the lobby list", async () => {
     const health = await (await exports.default.fetch("https://dhd.test/v1/health")).json<any>();
-    expect(health).toMatchObject({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0" });
+    expect(health).toMatchObject({ ok: true, protocol: PROTOCOL, minVersion: "0.7.13" });
     const list = await (await exports.default.fetch("https://dhd.test/v1/lobbies")).json<any>();
-    expect(list.minVersion).toBe("0.2.0");
+    expect(list.minVersion).toBe("0.7.13");
   });
 
   it("refuses joins beyond maxPlayers", async () => {
@@ -332,7 +332,7 @@ describe("the race on the room socket", () => {
 
 describe("worker routes", () => {
   it("health and 404", async () => {
-    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: PROTOCOL, minVersion: "0.2.0", online: true });
+    expect(await (await exports.default.fetch("https://dhd.test/v1/health")).json()).toEqual({ ok: true, protocol: PROTOCOL, minVersion: "0.7.13", online: true });
     expect((await exports.default.fetch("https://dhd.test/nope")).status).toBe(404);
     expect((await exports.default.fetch("https://dhd.test/v1/rooms/new")).status).toBe(426);
   });
