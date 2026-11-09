@@ -20,9 +20,14 @@ struct Link {
     logged_path: bool,
 }
 
+/// Signals held for a peer the router asked for but this thread hasn't made yet (the other end's
+/// offer can come in the same read as the routes that ask for the peer).
+const HELD_SIGNALS: usize = 32;
+
 pub struct P2p {
     pub star: Star,
     peers: HashMap<u64, Link>,
+    held: HashMap<u64, Vec<Value>>,
     wake: peer::Wake,
     /// The address the peers bind to (peer::reachable_address), found with the first peer.
     local: Option<IpAddr>,
@@ -38,7 +43,7 @@ impl P2p {
         if !direct {
             eprintln!("net: P2P: DHD_NET_P2P_UDP=0, no direct links from this game (test switch): it races over the SFU");
         }
-        Self { star: Star::new(direct), peers: HashMap::new(), wake, local: None, hub: None, started: Instant::now() }
+        Self { star: Star::new(direct), peers: HashMap::new(), held: HashMap::new(), wake, local: None, hub: None, started: Instant::now() }
     }
 
     /// The router's clock: milliseconds since the room began here.
@@ -62,11 +67,19 @@ impl P2p {
         }
     }
 
-    /// The other end's signaling, as the room passed it on.
+    /// The other end's signaling, as the room passed it on; held when its peer is still to be made.
     pub fn signal(&mut self, from: u64, signal: &Value) {
-        if let Some(link) = self.peers.get_mut(&from) {
-            if let Err(e) = link.peer.signal(signal) {
-                eprintln!("net: P2P: signaling with member {from} failed ({e})");
+        match self.peers.get_mut(&from) {
+            Some(link) => {
+                if let Err(e) = link.peer.signal(signal) {
+                    eprintln!("net: P2P: signaling with member {from} failed ({e})");
+                }
+            }
+            None => {
+                let held = self.held.entry(from).or_default();
+                if held.len() < HELD_SIGNALS {
+                    held.push(signal.clone());
+                }
             }
         }
     }
@@ -124,6 +137,7 @@ impl P2p {
             match action {
                 Action::Connect { member, offerer } => self.connect(c, member, offerer),
                 Action::Close(member) => {
+                    self.held.remove(&member);
                     if self.peers.remove(&member).is_some_and(|l| l.up) {
                         eprintln!("net: P2P: the link to member {member} closed");
                     }
@@ -156,6 +170,9 @@ impl P2p {
             Ok(peer) => {
                 // The hub's offer goes out with the peer's first poll.
                 self.peers.insert(member, Link { peer, up: false, logged_path: false });
+                for signal in self.held.remove(&member).unwrap_or_default() {
+                    self.signal(member, &signal);
+                }
                 (self.wake)();
             }
             Err(e) => {

@@ -28,14 +28,14 @@ test('browser session messages and shared snapshots',()=>{
   };
   const api=createNet({span,str,online:true,openSocket:url=>new WebSocket(url)});
   api.host_service_net_init(0,put(1,'Test'),put(20,'0.7.4'),put(40,'a'.repeat(64)));
-  assert.equal(api.host_service_net_offered(),2);  // P2P rooms only (finding 180)
+  assert.equal(api.host_service_net_offered(),2);  // P2P rooms only (findings 180, 186)
   assert.equal(api.host_service_net_create_room(0),-1);
   assert.equal(api.host_service_net_join_room(put(100,'ABCDEF')),-1);  // an SFU room's code
   api.host_service_net_create_room(1);socket.onopen();
-  assert.match(socket.url,/\/v1\/p2p\/rooms\/new$/);
-  assert.deepEqual(socket.sent[0].features,['countdown','session']);
+  assert.match(socket.url,/\/v1\/rooms\/new\?transport=p2p$/);  // a server room with the P2P transport (finding 186)
+  assert.deepEqual(socket.sent[0].features,['countdown','session','p2p']);
   const recv=m=>socket.onmessage({data:JSON.stringify(m)});
-  recv({type:'welcome',memberId:7,code:'TEST22',serverTime:1000});
+  recv({type:'welcome',memberId:7,code:'TEST222',serverTime:1000,transport:'p2p'});
   recv({type:'room',phase:'intermission',hostId:7,nextRaceAt:31000,rules:{finishWindow:60,nextRace:'auto',then:'next'},
     members:[{id:7,name:'Test',ready:true,inRace:false,finishTicks:360,place:4}],
     lastRace:{id:2,track:3,entrants:[{id:7,name:'Test',ticks:360,place:4}]}});
@@ -43,6 +43,7 @@ test('browser session messages and shared snapshots',()=>{
   assert.equal(str(1024+layout.NetLobby.phase[0]),'intermission');
   assert.equal(dv.getFloat64(1024+layout.NetLobby.next_race_at[0],true),31000);
   assert.equal(dv.getInt32(1024+layout.NetLobby.state[0],true),2);
+  assert.equal(dv.getInt32(1024+layout.NetLobby.is_p2p[0],true),1);
   assert.equal(dv.getBigInt64(1024+layout.NetLobby.member[0]+layout.NetMember.finish_ticks[0],true),360n);
   // where the room runs and the members' regions (finding 135)
   recv({type:'where',region:'EU',colo:'FRA',members:[{id:7,region:'EU'}]});
