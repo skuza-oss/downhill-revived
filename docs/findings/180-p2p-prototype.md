@@ -83,8 +83,8 @@ migration, rejoin into a P2P room, automatic SFU fallback.
   thread (the delivery and socket-write code had been copied). `peer.rs` takes its STUN Binding
   from `turn.rs` (the second hand-written STUN parser went), has named limits, logs each peer's
   path once, and tests the answer-only socket and the newest-state queue.
-- **Kept**: the bench instrumentation (`DHD_NET_BENCH`, `cross_bench.py`, `analyze_netbench.py`),
-  documented in docs/TESTING.md; the browser bridge (`p2p.js`, `check_p2p.mjs`).
+- **Kept**: the bench instrumentation (`DHD_NET_BENCH`, `cross_bench.py`, `analyze_netbench.py`;
+  removed in finding 185, the per-peer counters stay as `DHD_NET_PEER_STATS`); the browser bridge (`p2p.js`, `check_p2p.mjs`).
 
 ## Decisions
 

@@ -41,7 +41,7 @@ const ICE_LOST_GRACE: Duration = Duration::from_secs(5);
 const STUN_SERVER: (&str, u16) = ("stun.cloudflare.com", 3478);
 const STUN_TRIES: u8 = 5;
 const STUN_RETRY: Duration = Duration::from_millis(500);
-/// str0m's statistics: the path's line in dhd.log (and DHD_NET_BENCH's counters each second).
+/// str0m's statistics: the path's line in dhd.log (and DHD_NET_PEER_STATS's counters each second).
 const STATS_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The race channel's header: the race's start marker (8 bytes), the frame's type, its sender's

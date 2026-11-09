@@ -12,7 +12,7 @@ Mac (DHD_REMOTE, DHD_REMOTE_APP, DHD_REMOTE_ISO) reaches the local one by an ssh
 
 Measured, in OUT/summary.json and on stdout: the setup time from the room's opening to the
 host's countdown and to every bot's race; the host's CPU time and upload while racing (its
-DHD_NET_BENCH counters per peer); each peer's path; and the snapshot age on arrival per sender,
+DHD_NET_PEER_STATS counters per peer); each peer's path; and the snapshot age on arrival per sender,
 from the host's own 30 s `net:` lines (the age is the host's clock against the sender's stamp,
 both on the server's clock). Untimed: it takes the game lock's untimed place."""
 import argparse
@@ -36,7 +36,7 @@ from hidden_game import test_iso  # noqa: E402
 from online_race import iso_files_sha256  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-NETBENCH = re.compile(r'netbench: epoch_ms=(\d+) backend=p2p path=(\w+) remote_scope=(\w+) rx=(\d+) tx=(\d+) .*?conn=(\d+)')
+NETSTATS = re.compile(r'netstats: epoch_ms=(\d+) backend=p2p path=(\w+) remote_scope=(\w+) rx=(\d+) tx=(\d+) .*?conn=(\d+)')
 AGE = re.compile(r'slot (\d+) snapshot age p50/p95/p99 (\d+)/(\d+)/(\d+) ms .*?on arrival (-?\d+) ms, gaps>100ms (\d+), messages ([\d.]+)/s')
 
 
@@ -83,7 +83,7 @@ def main():
                    DHD_RENDER='native', DHD_FPS='60', DHD_SCALE='1', DHD_WINDOW='windowed', DHD_WINDOW_WIDTH='640',
                    DHD_WINDOW_HEIGHT='480', DHD_NET_SCRIPTED='1', DHD_RACE_PAD='0:600:cross',
                    DHD_NET_CREATE='p2p', DHD_NET_PLAYERS=str(players), DHD_NET_NAME='HOST', DHD_NET_RIDER='4',
-                   DHD_NET_BENCH=str(out / 'host-bench.csv'), DHD_NET_TEST_FINISH=str(a.race_seconds + 20),
+                   DHD_NET_PEER_STATS='1', DHD_NET_TEST_FINISH=str(a.race_seconds + 20),
                    SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS='0')
         (out / 'card').mkdir(exist_ok=True)
         log = stack.enter_context(host_log.open('w'))
@@ -155,10 +155,10 @@ def wait(path, pattern, seconds):
 
 
 def peers(text):
-    """Per peer connection at the host (its netbench lines, one a second): its path and its mean
+    """Per peer connection at the host (its netstats lines, one a second): its path and its mean
     upload and download over the lines' span."""
     first, last = {}, {}
-    for m in NETBENCH.finditer(text):
+    for m in NETSTATS.finditer(text):
         epoch, path, scope, rx, tx, conn = m.groups()
         row = (int(epoch), path, scope, int(rx), int(tx))
         first.setdefault(conn, row)

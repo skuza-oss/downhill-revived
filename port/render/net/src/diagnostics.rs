@@ -1,10 +1,10 @@
-//! Opt-in native transport counters (DHD_NET_BENCH): each second, a peer connection's path, bytes and
-//! ICE round trip. Addresses are classified, never printed.
+//! Opt-in transport counters (DHD_NET_PEER_STATS=1): each second, a peer connection's path, bytes
+//! and ICE round trip, for port/tools/p2p_crowd.py. Addresses are classified, never printed.
 use std::net::SocketAddr;
 use str0m::stats::PeerStats;
 
 pub fn enabled() -> bool {
-    std::env::var_os("DHD_NET_BENCH").is_some()
+    std::env::var_os("DHD_NET_PEER_STATS").is_some_and(|v| v == "1")
 }
 
 pub fn peer(backend: &str, stats: &PeerStats, relay: Option<SocketAddr>) {
@@ -27,7 +27,7 @@ pub fn peer(backend: &str, stats: &PeerStats, relay: Option<SocketAddr>) {
             .unwrap_or_default()
             .as_millis();
         // conn: the local candidate's port, which tells a host's peer connections apart.
-        eprintln!("netbench: epoch_ms={epoch} backend={backend} path={path} remote_scope={scope} rx={} tx={} ice_rtt_ms={:.3} conn={}",
+        eprintln!("netstats: epoch_ms={epoch} backend={backend} path={path} remote_scope={scope} rx={} tx={} ice_rtt_ms={:.3} conn={}",
             stats.peer_bytes_rx, stats.peer_bytes_tx,
             pair.current_round_trip_time.map_or(-1.0, |d| d.as_secs_f64() * 1000.0), pair.local.addr.port());
     }
