@@ -1,7 +1,7 @@
 # 181: the room's region chosen by its creator, a smarter Auto, and a race ping beside the server's
 
 Status: current
-Checked: 2026-11-08
+Checked: 2026-11-09
 
 Branch `feat/sfu-region-ping` from `main` db3702d (0.7.13), started 2026-11-08. This file is the
 lane's plan while it runs and its finding when it merges.

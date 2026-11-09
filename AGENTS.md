@@ -55,7 +55,7 @@ change needs them or someone asks.
 | Our own GS renderer (Rust, wgpu) with an exact and a native front end; PCSX2 is the referee (replay the same GS stream), not the renderer | 2026-10-14 | 085 | swap in PCSX2's GS or blame the renderer before replaying the stream (025) |
 | One code path for every platform, no legacy kept beside a new path; old code is deleted when replaced | 2026-10-27 | 099 | keep a second implementation "as a fallback" (the 32-bit build, D3D11, XInput, the game's updater are gone, 088) |
 | Keep the original game's feel: no gameplay additions; QoL and online features are welcome | 2026-10-31 | | add custom music, taunts, assists or handling changes |
-| No online play on Android or in the browser yet: the host does not offer it | 2026-11-03 | 143 | enable ONLINE there without a decision |
+| No SFU rooms on Android or in the browser yet: there the host offers P2P rooms only (`host_service_net_offered`) | 2026-11-03 | 143 | offer SFU rooms (public lists, Quick Race) there without a decision |
 
 P2P rooms (180, 186) are the one exception to "race frames through Cloudflare only": the creator
 picks SFU or P2P per room; a P2P room is the same server room with a second race transport (a
@@ -63,8 +63,8 @@ star of peer connections around a hub the room picks, the room's SFU for a membe
 it), and the race's synchronization is the SFU's. The owner authorizes peer addressing for them,
 so a P2P room is private (joined by its code, never listed; the game says players see each
 other's network address), and P2P rooms on Android and in the browser (SFU rooms stay
-desktop-only there). They reach players as a test prerelease first. Native iOS app work is
-deferred.
+desktop-only there). They ship from 0.7.14 on (after the test prerelease test-p2p-1). Native iOS
+app work is deferred.
 
 A lane's plan is its finding: copy `docs/findings/TEMPLATE.md` on the lane's first commit
 (`Status: in progress`, which reserves the number) and keep its Progress, Decisions and Surprises

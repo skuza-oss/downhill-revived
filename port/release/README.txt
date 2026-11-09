@@ -14,7 +14,8 @@ What you need
   WebKitGTK 4.1 from your distribution: libwebkit2gtk-4.1-0, already there with GNOME).
   The Mac and Linux builds are experimental: they may have problems the Windows build doesn't.
   Please report them with your dhd.log.
-  There is also an experimental Android build (an .apk on the release page), without online play.
+  There is also an experimental Android build (an .apk on the release page); its online play is
+  P2P races only (below).
 - Your own dump of the Downhill Domination USA disc (SCUS-97177) as an .iso file. Other regions
   and modified images are refused.
 
@@ -102,9 +103,13 @@ Settings: OPTIONS > REVIVED SETTINGS in the game's menu, the first row, with Dis
 Controls, Online and Game tabs (L1/R1 switch them): resolution, display mode, window size,
 picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, your keys
 and buttons, the size of online riders' names (Off, Small, Medium as the original, Large),
-texture pack, font, FPS & Ping (frames a second; online the round trip to the room's server,
-"N MS PING", and in a race "RIDERS N MS", how old the other riders' positions are when they
-arrive). Changes are saved to dhd.ini.
+texture pack, font, the Performance group, FPS & Ping (frames a second; online the round trip
+to the room's server, "SERVER N MS", and to the race network, "RACE N MS"; in a race "RIDERS N
+MS", how old the other riders' positions are when they arrive). Changes are saved to dhd.ini.
+Performance (Graphics tab): Performance Mode ON turns off the riders' shadows and the sun's glow,
+the lens flare's ghosts and the particles (dust, dirt, spray), which runs faster on slower PCs and
+phones; each of the three can also be set alone (dhd.ini shadows, lens_flare, particles = 0).
+They change only the picture, at once, online too.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game
@@ -151,13 +156,23 @@ In dhd.ini:
 Online races (experimental)
 Choose ONLINE in the main menu: create a public or private race, or join one from the list or
 with its code. It works out of the box, on the project's official server
-(wss://dhd.skuza.app). Every player needs the same USA disc image,
-and the newest version of the game (0.7.13 can't race with 0.7.12 or older): an older one is
-told "A new version is out. Update to play online." and offered Update Now, which closes the game
-and lets the launcher update it.
+(wss://dhd.skuza.app). Every player in a room needs the same USA disc image and the same release
+of the game: a room of another release shows as OTHER VERSION in the list. A release the server
+no longer takes is told "A new version is out. Update to play online." and offered Update Now,
+which closes the game and lets the launcher update it.
 In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
 to you (UDP); where a network blocks UDP the game falls back to an encrypted connection on port
 443 by itself.
+Room Region (a row of the ONLINE menu, dhd.ini room_region): where the rooms you create run.
+Auto picks by the Cloudflare location you reach; or choose EU West, EU East, NA East, NA West,
+Asia NE, Asia SE or Oceania.
+P2P races (ONLINE > Create A P2P Race): a private room, joined with its 7-character code, whose
+race data goes directly between the players' games. One game, the hub (the creator first, the
+next player if it leaves), passes the others' data on; a player who can't reach it races over
+Cloudflare's network in the same room. The room, its rules and the results still run on the
+server. In a P2P room the other players can see your network (IP) address: the game says so when
+you create or join one. Play P2P races with people you trust. On Android, P2P races are the only
+online races so far.
 Running your own server is optional: put its address on the "server =" line of dhd.ini, e.g.
     server = wss://races.example.org
 A server of your own can keep an older version playing (its MIN_VERSION setting); then point
@@ -166,7 +181,8 @@ What the official server keeps, against cheaters and abuse: a log of who joined 
 time, the room, your rider name, the game's version, your country, a keyed hash of your internet
 address, never the address itself, and the game's install id, a random number kept in dhd.ini
 as install_id), deleted after 14 days; bans go by that hash or install id, until they end. No
-other player ever sees your address, its hash or your install id.
+other player ever sees your address's hash or your install id, and outside P2P rooms no other
+player sees your address.
 
 Known gaps
 - The 2-4 player split screens have not been checked in widescreen.

@@ -1,7 +1,7 @@
 # 184: server rollouts that restart rooms only at a safe moment
 
 Status: current
-Checked: 2026-11-08
+Checked: 2026-11-09
 
 Branch `feat/server-rollout` from `main` 0574b05, started 2026-11-08. 183 is taken by the
 performance settings lane; 180 (P2P) and 182 (SFU call timeouts) are other lanes on `room.ts`.

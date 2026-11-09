@@ -1,6 +1,7 @@
 # 185: online code we don't maintain, removed
 
 Status: current
+Checked: 2026-11-09
 
 Branch `chore/online-cleanup` from `main` 32d8a8cd, started 2026-11-09. This file is the lane's plan
 while it runs and its finding when it merges.

@@ -108,8 +108,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 ## Online play
 
-- Offered on Windows, macOS and Linux; not on Android or in the browser
-  (`host_service_net_offered`, finding 143).
+- SFU rooms (public, private, Quick Race) on Windows, macOS and Linux; P2P rooms there and on
+  Android and in the browser, which offer nothing else (`host_service_net_offered`, findings 143,
+  180, 186).
 - **State sync, never lockstep:** each PC runs its own one-player race at its own frame rate and
   shows the others, and on guests the host's AI riders, as puppet riders moved from snapshots
   (`port/hle/puppet.c`, findings 044, 047, 114). Hits are events; each game times its own finish.
@@ -122,8 +123,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   dhd.ini `room_region`) or, on Auto, by the Cloudflare location the creator reached, from measured
   round trips (findings 135, 181), rejoin by token
   (finding 137); a room connection lost in a race no longer ends it: the game races on over the
-  SFU and rejoins, the seat is kept 20 s (finding 175). Protocol: `docs/online-protocol.md`;
-  steps: `online/server/README.md`.
+  SFU and rejoins, the seat is kept 20 s (finding 175). A room runs at most 5 Realtime calls at
+  once and a timed-out call is an unknown outcome, not a failure (finding 182). A deploy
+  (`online/server/tools/deploy.mjs`: a watched 10 % canary, then 100 % or a rollback) restarts
+  rooms for the new code only in the lobby or at results; games rejoin in about 2 s (finding 184).
+  Protocol: `docs/online-protocol.md`; steps: `online/server/README.md`.
 - Abuse guard (finding 161): a kill switch in the moderation database (`moderate.mjs online
   off`), limits per address, caps per member, and
   bans by address hash or install id with a 14-day moderation log in D1, worked from
@@ -191,8 +195,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   it; 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149 say what is left;
   finding 156 says where a frame's time goes on the phone and the desktops, and what replacing the
   VU1 and GS emulation with native rendering would remove.
-- PowerVR GE8320 phones start since finding 170; one player's phone then closed entering the Bike
-  Shop (the driver refused a native renderer pipeline, "Out of Memory"): not fixed on `main` yet.
+- PowerVR GE8320 phones start since finding 170 and no longer close in the Bike Shop (finding 176:
+  a blend that keeps the colour is drawn unblended, a pipeline the driver refuses skips its draws);
+  not yet confirmed by the reporters (issues #56, #60).
+- The Mali-G52 (Redmi 9) at 2x: about 49.5 fields/s with every effect on (finding 174's
+  barriers), about 60 with the shadows, sun glow, lens flare and fog cut by a diagnostic build;
+  Performance Mode (finding 183) cuts those but fog. 60 at 2x with every effect on is not reached.
 - Browser speed is below 60 in races (finding 087).
 - High-rate handling differs a little from 60 by the race's own chaos, with no trend (finding
   139, after finding 067's limits).

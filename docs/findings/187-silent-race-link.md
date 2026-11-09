@@ -1,6 +1,7 @@
 # 187: a racer whose race link delivers nothing no longer races alone
 
 Status: current
+Checked: 2026-11-09
 
 Branch `fix/silent-race-link` from `main` 3518ce84, started 2026-11-09. A hotfix: the server part
 deploys first and keeps 0.7.13 games working as they do; the game part ships in the next release.

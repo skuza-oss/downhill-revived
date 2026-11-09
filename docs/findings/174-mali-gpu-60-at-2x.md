@@ -1,6 +1,7 @@
 # 174: 60 fps at 2x on a Mali-G52 phone (Redmi 9): the GPU side
 
 Status: current
+Checked: 2026-11-09
 
 Branch `perf/mali-gpu` from `main` cfe842a, started 2026-11-06. This file is the lane's plan while
 it runs and its finding when it merges.

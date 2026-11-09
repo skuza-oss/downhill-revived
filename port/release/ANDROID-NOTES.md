@@ -2,6 +2,8 @@
 
 `DownhillRevived-<version>-android-experimental.apk` is the game for Android phones and tablets.
 It is experimental: recent phones hold 60 fps at 2x resolution, slower ones (and 4x) may not.
+On a slower phone, OPTIONS > SETTINGS > Graphics tab > Performance Mode turns off the riders'
+shadows and the sun's glow, the lens flare and the particles, which helps the most.
 Play with the touch controls (Classic pad or Thumb zones, tilt steering if you like: OPTIONS >
 SETTINGS > Controls tab > Touch Controls) or a controller.
 
@@ -29,8 +31,11 @@ the file to us (a GitHub issue or Discord) and we can see what happened. Long-pr
 for **Share log** at any time, even when the game closes before anything shows. Nothing is sent
 unless you pick an app in Android's share sheet.
 
-**Not on phones yet.** Online play comes to phones later, once they run fast enough and the touch
-controls are ready; the Android build has no ONLINE menu.
+**Online: P2P races only.** ONLINE in the main menu offers Create A P2P Race and Join With A Code
+(a 7-character code from a friend's P2P race, on a phone or a PC). The race data goes directly
+between the players' games, so **the other players in a P2P room can see your network (IP)
+address**; the game says so. Play them with people you trust. Public races, Quick Race and the
+normal private races are not on phones yet.
 
 **Check the download.** `SHA256SUMS` lists the APK's SHA-256. The APK is signed with the
 Downhill Revived release key, certificate SHA-256

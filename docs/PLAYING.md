@@ -31,7 +31,8 @@ What works today:
 - **REVIVED SETTINGS in the game's own OPTIONS menu**, in tabs (L1/R1): resolution, display mode,
   window size, picture shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone,
   the button icons (PlayStation, Xbox or Nintendo, or the controller's), your keys and buttons,
-  the size of online riders' names, texture pack and font, drawn with the game's own menus and
+  the size of online riders' names, texture pack and font, and a Performance group (shadows and
+  sun glow, lens flare, particles: see [Settings](#settings)), drawn with the game's own menus and
   font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
   each picture without tearing.
 - **Unlock All** (REVIVED SETTINGS, off by default): every track, rider, bike and shop item reads as
@@ -46,7 +47,8 @@ What works today:
   the wheel scrolls a list or changes a value.
 - **EXIT GAME** in the main menu.
 - **Online races** for 2 to 10 players (experimental): an ONLINE entry in the main menu, a list of
-  public races, private races joined with a 6-character code, and a race room where the host
+  public races, private races joined with a 6-character code, P2P races (race data directly
+  between the games, 7-character codes), the room's region, and a race room where the host
   picks the track and the rules, on the project's official server (see [Online](#online)). The
   room stays open between races. Each track takes as many riders as the game gives it (10, 8
   or 6, shown in the track picker); when more players are ready than the track takes, the race
@@ -65,7 +67,7 @@ What works today:
   and Invert per stick axis, in the game or the launcher (see [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
-  or Thumb zones, tilt steering if you like), or a controller. No online races on phones yet.
+  or Thumb zones, tilt steering if you like), or a controller. Online: P2P races only.
 
 Known gaps:
 
@@ -73,7 +75,8 @@ Known gaps:
 - Online races have been tested with two games (PC and Mac) and up to nine scripted players, not
   yet with ten people on ten PCs.
 - The browser version (experimental) at <https://downhill-revived.pages.dev/play/> needs Chrome or
-  Edge 137 or later and a fast PC; online races are off there. It reads your `.iso` in place in
+  Edge 137 or later and a fast PC; its online play is P2P races only (a page that can't reach the
+  room's hub doesn't race). It reads your `.iso` in place in
   the browser and uploads nothing. Its source is `port/web`.
 - The game has only been tested on a few PCs. Please report problems.
 
@@ -273,12 +276,29 @@ back to its defaults. Players 3 and 4 use the default controller layout.
 
 Online works out of the box: choose ONLINE in the main menu to create a public or private race,
 or join one from the list or with its code. The game uses the project's official server,
-`wss://dhd.skuza.app`. Every player needs the same USA disc image and the same release of the
-game (0.7.13 can't race with 0.7.12 or older; the ONLINE menu offers the update).
+`wss://dhd.skuza.app`. Every player in a room needs the same USA disc image and the same release
+of the game: rooms of another release show as OTHER VERSION in the list, and a release the server
+no longer takes gets "A new version is out" and Update Now in the ONLINE menu.
 
 In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
 to you (UDP). Where a network blocks UDP, the game falls back to an encrypted connection on port
-443 by itself. No other player ever gets your internet address.
+443 by itself. In these rooms no other player ever gets your internet address.
+
+#### P2P races
+
+ONLINE > **Create A P2P Race** makes a private room (never listed) with a 7-character code; others
+join with Join With A Code. The room, its rules and the results run on the server as in any room,
+but the race data goes directly between the players' games over WebRTC: one game, the hub (the
+creator first; the next player when it leaves or its links fail), passes the others' data on, and
+a player whose game can't reach the hub races over Cloudflare's network in the same room, bridged
+by the hub. On a LAN or nearby this can be quicker than Cloudflare's network.
+
+**Your address:** in a P2P room the games connect directly, so the other players can see your
+network (IP) address, and the hub sees the address of everyone linked to it. The game says so on
+the menu row and when the room opens. Play P2P races with people you trust. `dhd.log` shows a P2P
+room's code only by its first two characters.
+
+On Android and in the browser, P2P races are the only online races so far.
 
 A room's server (the lobby: who is in it, the next race, the start) runs in one of Cloudflare's
 Durable Object cities, which are in North America, Europe, East and Southeast Asia and Australia
@@ -306,8 +326,8 @@ the game makes once and keeps in `dhd.ini` as `install_id`; it says nothing abou
 PC). Log entries are deleted after 14 days. A player who is banned is banned by that hash or
 install id, not by name, until the ban ends (or until it is lifted, for one without an end).
 
-No other player ever sees your internet address, its hash or your install id, and the game
-doesn't write the install id into `dhd.log`. Deleting the `install_id` line makes the game
+No other player ever sees your address's hash or your install id, outside P2P rooms (above) no
+other player sees your address, and the game doesn't write the install id into `dhd.log`. Deleting the `install_id` line makes the game
 pick a new one. Players in a room see each other's rider names, ping and region (EU, NA...).
 
 The server's operator can also turn online races off for a while; the ONLINE screen then says
@@ -328,6 +348,11 @@ Graphics, Controls, Online and Game tabs; the legend shows your bound inputs. Up
 rows and left/right change them. Cross keeps changes and closes; Triangle undoes the settings
 page's changes and closes (Android Back keeps them). Controls and Touch Controls save as you go.
 A star marks a choice that applies at the next start. A host hides tabs it cannot offer.
+
+The Graphics tab's **Performance** group makes the game lighter on slower PCs and phones:
+Performance Mode ON turns off the three effects below it (the riders' shadows and the sun's glow,
+the lens flare, the particles), OFF turns them all back on, and Custom shows a mix. Each can be
+set alone. They apply at once, online too: only the picture changes, never the race.
 
 `dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
 first start. The REVIVED SETTINGS page writes most of them for you.
@@ -358,6 +383,9 @@ first start. The REVIVED SETTINGS page writes most of them for you.
 | `perf_counter` | `0` | `1` shows FPS & Ping: frames a second and, online, `SERVER N MS` (the round trip to the room's server, which carries no race data) and `RACE N MS` (the round trip to Cloudflare's race network, where race data goes); in a race `RIDERS N MS` instead of `RACE`, how old the other riders' positions are when they arrive |
 | `unlock_all` | `0` | `1`: everything reads as unlocked, without changing the save |
 | `name` | (empty) | your rider name in online races |
+| `shadows` | `1` | Performance: `0` turns off the riders' shadows and the sun's glow |
+| `lens_flare` | `1` | Performance: `0` turns off the lens flare's ghosts (the sun's disc and halo stay) |
+| `particles` | `1` | Performance: `0` turns off the particles (dust, dirt, spray, heat haze) |
 | `room_region` | `auto` | where the rooms you create run (ONLINE's Room Region row): `auto` (the server picks by where you reach Cloudflare), `weur`, `eeur`, `enam`, `wnam`, `apac-ne`, `apac-se` or `oc` |
 
 Each key has a `DHD_*` environment variable (`scale` is `DHD_SCALE`, `server` is

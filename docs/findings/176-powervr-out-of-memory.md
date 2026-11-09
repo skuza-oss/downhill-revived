@@ -1,6 +1,7 @@
 # 176: PowerVR GE8320 phones close in the Bike Shop ("Out of Memory")
 
 Status: current
+Checked: 2026-11-09
 
 Branch `fix/powervr-oom` from `main` b0812d6, started 2026-11-07. This file is the lane's plan
 while it runs and its finding when it merges.
@@ -144,7 +145,7 @@ thread is still in its callback (the stream was never closed). The stream now cl
 handler registered when it opens, which runs before them. Likely, not proven: the log has no
 frames for that thread.
 
-Left for a phone test (the lead, with #56's player): the test build on the GE8320 phone, into the
+Ships in 0.7.14. Left for a phone test (the lead, with #56's player): the test build on the GE8320 phone, into the
 Bike Shop and a race. If it still closes, Share log; a pipeline the driver refuses is now a
 `gs native: draw pipeline ...` line naming it, and the game goes on.
 

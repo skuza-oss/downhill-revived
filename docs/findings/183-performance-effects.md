@@ -1,6 +1,7 @@
 # 183: Performance settings: shadows and sun glow, lens flare, particles
 
 Status: current
+Checked: 2026-11-09
 
 Branch `feat/performance-effects` from `main` 0574b05, started 2026-11-08. This file is the lane's
 plan while it runs and its finding when it merges.

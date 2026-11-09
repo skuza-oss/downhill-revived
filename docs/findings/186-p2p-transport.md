@@ -2,6 +2,7 @@
 
 Status: current
 Supersedes: parts of 180 (its coordinator in the host's game, its own server and Worker, TURN between games)
+Checked: 2026-11-09
 
 Branch `feat/p2p-transport` from local `main` 3518ce84, started 2026-11-09; main 10520d2e (finding
 187) merged in on 2026-11-09. This file is the lane's plan while it runs and its finding when it
@@ -327,3 +328,7 @@ an SFU room with a 7-character code (the game races it as one: it takes the kind
 5. Nothing to set on the main Worker: a fallback racer uses the Realtime and TURN secrets it has.
    P2P rooms no longer use TURN between games; a fallback racer's traffic is billed as an SFU
    racer's (finding 180's billing alert covers both).
+
+The owner's decision (2026-11-09): release 0.7.14 ships these rooms in place of a test-p2p-2, so
+step 3 is the release and step 4 follows its publishing (the Worker and the test-p2p-1
+prerelease deleted).
