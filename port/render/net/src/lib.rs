@@ -294,6 +294,8 @@ struct Assoc {
     pause: Duration,
     /// The last association went through the TURN relay: the next asks for one at once.
     turn_first: bool,
+    /// The room's welcome lists "sfu_silent": it takes a silent race link's report (finding 187).
+    silent_ok: bool,
 }
 
 impl Assoc {
@@ -334,7 +336,7 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
-    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false };
+    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, silent_ok: false };
     // A room's welcome came on this connection: an association belongs here.
     let mut welcomed = false;
     while !c.stopping.load(Ordering::Acquire) {
@@ -363,6 +365,7 @@ fn send_main(c: Arc<WsConn>) {
                     let result = match kind {
                         "welcome" => {
                             welcomed = true;
+                            a.silent_ok = message["features"].as_array().is_some_and(|f| f.iter().any(|x| x == "sfu_silent"));
                             // Back in this room (a rejoin): the room still has this game's session
                             // and the association still has its answer, so both stay, with what it
                             // said meanwhile. Otherwise a new association, and with it a new session.
@@ -389,6 +392,14 @@ fn send_main(c: Arc<WsConn>) {
                         }
                         "ended" => {
                             a.start = None;
+                            a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message))
+                        }
+                        "left" => {
+                            // A new association in this race (the room replaced the session,
+                            // finding 187) expects only the racers still in it.
+                            if let (Some(players), Some(member)) = (a.start.as_mut().and_then(|s| s["players"].as_array_mut()), message["memberId"].as_u64()) {
+                                players.retain(|p| p["memberId"].as_u64() != Some(member));
+                            }
                             a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message))
                         }
                         _ => a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message)),
@@ -423,6 +434,8 @@ fn send_main(c: Arc<WsConn>) {
             match rtc.poll() {
                 Ok((text, frames)) => {
                     if text.iter().any(|t| t["type"] == "sfu_connected") { a.pause = Duration::from_secs(1); a.turn_first = rtc.via_relay(); }
+                    // A server without it would refuse the report (finding 187): logged only.
+                    let text: Vec<_> = text.into_iter().filter(|t| a.silent_ok || t["type"] != "sfu_silent").collect();
                     // While the room connection is down its signaling waits for the rejoin.
                     if lock(&c.queue).connected {
                         for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }

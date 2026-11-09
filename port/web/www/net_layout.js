@@ -110,7 +110,7 @@ export const layout = {
     ]
   },
   "NetLobby": {
-    "size": 5144,
+    "size": 5152,
     "state": [
       0,
       4
@@ -326,6 +326,10 @@ export const layout = {
     "notice": [
       5080,
       64
+    ],
+    "race_go_at": [
+      5144,
+      8
     ]
   },
   "NetLobbyInfo": {

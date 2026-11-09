@@ -27,6 +27,8 @@ typedef struct {
     char rejoin_token[65];
     /* this game's install id (32 lowercase hex, "" none; finding 161), sent in every hello */
     char install_id[33];
+    /* the room's welcome listed "race_go": it takes the race's start moment (finding 187) */
+    int server_race_go;
     NetLobby lobby;
     int racing;
     /* In a race whose room connection dropped (finding 175): the race goes on over the SFU while
@@ -126,6 +128,8 @@ void client_finish(NetClient *c, unsigned ticks, int place);
 void client_back(NetClient *c);
 void client_rules(NetClient *c, int finish_window, int next_race, int then);
 void client_rotation(NetClient *c, const unsigned char *ids, int count);
+/* The race's start moment this game named (server ms), to a room that takes it (finding 187). */
+void client_race_go(NetClient *c, double at);
 void client_leave(NetClient *c);  /* says so before the transport closes */
 void client_lobby(NetClient *c, NetLobby *out);
 /* The public list's answer (GET /v1/lobbies) into out, fetched between local times sent and got
