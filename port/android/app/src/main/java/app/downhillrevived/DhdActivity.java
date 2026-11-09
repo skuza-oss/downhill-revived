@@ -12,7 +12,6 @@ import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Insets;
-import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.hardware.Sensor;
@@ -31,7 +30,6 @@ import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -64,11 +62,12 @@ public class DhdActivity extends SDLActivity {
             Thread.currentThread().interrupt();
         }
         super.onCreate(savedInstanceState);
+        Screen.underCutout(getWindow());  // Android 10 only (SDL asks for it itself from 11)
         // The screen's shape (its long side over its short one), for widescreen = 1:
         // host_monitor_aspect reads DHD_MONITOR_ASPECT. Set before SDL_main starts.
         try {
-            Rect bounds = getWindowManager().getMaximumWindowMetrics().getBounds();
-            int w = Math.max(bounds.width(), bounds.height()), h = Math.min(bounds.width(), bounds.height());
+            int[] size = Screen.size(this);
+            int w = Math.max(size[0], size[1]), h = Math.min(size[0], size[1]);
             if (h > 0) nativeSetenv("DHD_MONITOR_ASPECT", Double.toString((double) w / h));
         } catch (Throwable e) {  // the libraries didn't load: SDLActivity shows why
             Log.w("DownhillRevived", "no screen shape: " + e);
@@ -107,18 +106,11 @@ public class DhdActivity extends SDLActivity {
      *  is done; only while the game is full screen (SDL's own flag). */
     private void rehideBars() {
         if (!mFullscreenModeActive) return;
-        hideBars();
+        Screen.hideBars(getWindow());
         View decor = getWindow().getDecorView();
         decor.post(new Runnable() {
-            @Override public void run() { if (mFullscreenModeActive) hideBars(); }
+            @Override public void run() { if (mFullscreenModeActive) Screen.hideBars(getWindow()); }
         });
-    }
-
-    private void hideBars() {
-        WindowInsetsController c = getWindow().getInsetsController();
-        if (c == null) return;
-        c.hide(WindowInsets.Type.systemBars());
-        c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
     }
 
     /** The touch controls' screen: xdpi and ydpi times 1000, the system gesture insets (left, top,
@@ -131,7 +123,7 @@ public class DhdActivity extends SDLActivity {
         try {
             WindowInsets in = getWindow().getDecorView().getRootWindowInsets();
             if (in != null) {
-                Insets g = in.getInsets(WindowInsets.Type.systemGestures());
+                Insets g = Screen.gestureInsets(in);
                 r[2] = g.left; r[3] = g.top; r[4] = g.right; r[5] = g.bottom;
                 DisplayCutout c = in.getDisplayCutout();
                 if (c != null) {
@@ -169,7 +161,7 @@ public class DhdActivity extends SDLActivity {
                     tiltListener = new SensorEventListener() {
                         @Override public void onSensorChanged(SensorEvent e) {
                             float x = e.values[0], y = e.values[1], sx, sy;
-                            int rotation = getDisplay().getRotation();
+                            int rotation = Screen.rotation(DhdActivity.this);
                             if (rotation == Surface.ROTATION_90) { sx = -y; sy = x; }
                             else if (rotation == Surface.ROTATION_270) { sx = y; sy = -x; }
                             else if (rotation == Surface.ROTATION_180) { sx = -x; sy = -y; }
@@ -181,7 +173,7 @@ public class DhdActivity extends SDLActivity {
                     registerTilt();
                     // kept on its landscape side (LOCKED would keep a portrait screen when the game
                     // starts from a portrait home screen: the picture then stays in a strip)
-                    setRequestedOrientation(getDisplay().getRotation() == Surface.ROTATION_270
+                    setRequestedOrientation(Screen.rotation(DhdActivity.this) == Surface.ROTATION_270
                             ? ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
                 } else if (!on && tiltListener != null) {
                     sensors.unregisterListener(tiltListener);

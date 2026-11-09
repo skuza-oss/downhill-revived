@@ -115,7 +115,7 @@ as a non-Steam game from Desktop Mode. Your files go to `~/.local/share/downhill
 and needs WebKitGTK 4.1 from your distribution (`libwebkit2gtk-4.1-0`, already there with GNOME).
 Neither is signed.
 
-**Android** (experimental, arm64, Android 11 or later with Vulkan):
+**Android** (experimental, arm64, Android 10 or later with Vulkan):
 `DownhillRevived-<version>-android-experimental.apk`. Open it on the phone and allow installs
 from your browser or file manager when Android asks; the app is not on Google Play. At the first
 start choose your `.iso`; it is copied into the app once (a few GB). Install a new release's APK
@@ -399,4 +399,4 @@ Each key has a `DHD_*` environment variable (`scale` is `DHD_SCALE`, `server` is
 - A reasonably modern CPU: the PS2's vector units are run on the CPU.
 - Or, experimental: a Mac with Apple silicon (M1 or later) on macOS 11 or later; or 64-bit Linux
   with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and later), a Vulkan
-  driver and WebKitGTK 4.1 for the launcher; or an arm64 Android 11 phone or tablet with Vulkan.
+  driver and WebKitGTK 4.1 for the launcher; or an arm64 Android 10 phone or tablet with Vulkan.

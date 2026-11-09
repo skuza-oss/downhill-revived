@@ -45,7 +45,7 @@ or their zips. None of the downloads is signed by a developer certificate:
 need Windows 10/11 64-bit (or an Apple silicon Mac, or Linux with glibc 2.35+ and Vulkan) and a
 Direct3D 12 or Vulkan graphics card.
 
-Android (experimental): the `-android-experimental.apk` for arm64 phones and tablets on Android 11
+Android (experimental): the `-android-experimental.apk` for arm64 phones and tablets on Android 10
 or later, with touch controls; no online races on phones yet. The release page says how to
 install it.
 

@@ -46,7 +46,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   each step costs and what is cached: its "Build times" section (finding 151).
 - **Browser:** `port/web/build.py build/wasm/dhd_core.wasm` (findings 083, 087).
 - **Android:** `port/android/build_apk.py` (debug, `--release` with the release key named by the
-  `DHD_ANDROID_*` variables; findings 091, 143).
+  `DHD_ANDROID_*` variables; findings 091, 143). Android 10 (API 29) and later: calls from newer
+  APIs are chosen at run time (finding 191).
 - **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093;
   native window buttons on macOS, finding 150).
 - **Releases:** `port/tools/package_release.py` builds, checks and packages each platform
@@ -84,7 +85,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - dhd.log on every platform, with `perf:` lines on speed and what limits it (finding 129) and
   `net:` lines online (finding 135). What the game can detect goes in the log. Each start keeps
   the one before as dhd-previous.log; on Android the log says how the run before ended (Android's
-  exit record and tombstone), and a crash dialog and the icon's shortcut share it (finding 152).
+  exit record and tombstone; on Android 10 only the game's own crash report, finding 191), and a
+  crash dialog and the icon's shortcut share it (finding 152).
 
 ## What players get
 

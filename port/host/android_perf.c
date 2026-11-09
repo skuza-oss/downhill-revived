@@ -7,9 +7,9 @@
    - Performance hints (ADPF, APerformanceHint, API 33): one hint session holds the pipeline's
      threads; each field the game thread reports the longest CPU time any of them spent on the last
      field against a target, and a system with hint support raises their clocks until it fits. The
-     calls come from libandroid.so through dlsym (the APK's minimum is API 30); without them, or when
-     the system has no hint support (createSession answers NULL, as on the Mi 11i's MIUI 14), nothing
-     happens. DHD_PERF_HINT = 0 turns it off; DHD_PERF_TARGET_MS sets the target (default 13: under
+     calls come from libandroid.so through dlsym (the APK's minimum is API 29, finding 191);
+     without them, or when the system has no hint support (createSession answers NULL, as on the
+     Mi 11i's MIUI 14), nothing happens. DHD_PERF_HINT = 0 turns it off; DHD_PERF_TARGET_MS sets the target (default 13: under
      one 60 Hz field, with room for the hand-offs).
    - Placement: DHD_AFFINITY = name:cpus,... (cpus: 7, or 4-6, or 4+7) keeps a named thread on those
      cores. Applied from the game thread by thread ID and again every 10 fields, because the system

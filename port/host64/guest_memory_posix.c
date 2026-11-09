@@ -1,5 +1,5 @@
 /* POSIX mapping for guest_memory.c: one PROT_NONE reservation, a memfd RAM
-   section (macOS: an unlinked shared memory object) aliased with MAP_FIXED|MAP_SHARED, commit-on-demand with mprotect
+   section (macOS: an unlinked shared memory object; Android 10: ashmem) aliased with MAP_FIXED|MAP_SHARED, commit-on-demand with mprotect
    (which preserves contents, like MEM_COMMIT), and a SIGSEGV/SIGBUS handler
    on an alternate stack that reports the guest address and re-raises the
    signal. Policy (which regions are mirrors, what is committed) stays shared.
@@ -26,6 +26,26 @@ static stack_t altstack;
 static struct sigaction old_segv, old_bus;
 static int installed;
 
+#ifdef __ANDROID__
+#include <android/sharedmem.h>
+#include <dlfcn.h>
+/* The guest RAM's file (finding 191). The APK's minimum is Android 10 (API 29), whose libc has no
+   memfd_create (API 30); there the app sandbox's system call filter is not counted on either. So
+   memfd_create is looked up in libc at run time (Android 11 and later: as before), else the RAM is
+   an ashmem region (ASharedMemory_create, API 26), made at its size, which takes the same
+   MAP_SHARED mappings at any offset. */
+static int sized;
+static int android_ram_fd(void) {
+    int (*memfd)(const char *,unsigned)=(int (*)(const char *,unsigned))dlsym(RTLD_DEFAULT,"memfd_create");
+    if (memfd) return memfd("dhd-guest-ram",MFD_CLOEXEC);
+    int fd=ASharedMemory_create("dhd-guest-ram",RAM_SIZE);
+    sized=fd>=0;
+    return fd;
+}
+#else
+enum { sized=0 };
+#endif
+
 void os_fail(const char *what) {
     fprintf(stderr,"host64 memory: %s (%d: %s)\n",what,errno,strerror(errno)); abort();
 }
@@ -34,11 +54,13 @@ uintptr_t os_reserve(void) {
     char name[32]; snprintf(name,sizeof name,"/dhd-guest-ram-%d",(int)getpid());
     ram_fd=shm_open(name,O_RDWR|O_CREAT|O_EXCL,0600);
     if (ram_fd>=0) shm_unlink(name);
+#elif defined(__ANDROID__)
+    ram_fd=android_ram_fd();
 #else
     ram_fd=memfd_create("dhd-guest-ram",MFD_CLOEXEC);
 #endif
     if (ram_fd<0) return 0;
-    if (ftruncate(ram_fd,RAM_SIZE)<0) { close(ram_fd); ram_fd=-1; return 0; }
+    if (!sized && ftruncate(ram_fd,RAM_SIZE)<0) { close(ram_fd); ram_fd=-1; return 0; }
     /* MAP_NORESERVE: the 8 GiB reservation must not charge swap; committed
        pages are charged when mprotect commits them. */
     void *p=mmap(NULL,GUEST_SIZE,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);

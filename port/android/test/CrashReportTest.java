@@ -170,6 +170,25 @@ public class CrashReportTest {
             log.delete();
         }
 
+        // Android 10: the game's own crash report in the log's end (finding 191)
+        check("crash: SIGSEGV at 0000000000000018 in thread game".equals(CrashReport.logCrash(
+                "gs: frame 120\ncrash: SIGSEGV at 0000000000000018 in thread game\n  #00 libmain.so+0x1234\n")), "a crash report");
+        check("host64 memory: access of uncommitted guest address 0x006000000".equals(CrashReport.logCrash(
+                "x\nhost64 memory: access of uncommitted guest address 0x006000000\n")), "a guest memory fault");
+        check(CrashReport.logCrash("race: finished\nhost: exit 0\n") == null, "a log without a crash");
+        check(CrashReport.logCrash(null) == null, "no log");
+        File crashed = File.createTempFile("dhd", ".log");
+        try {
+            Files.write(crashed.toPath(), ("a".repeat(1000) + "\ncrash: SIGBUS at 00000000DEADBEEF in thread vu1\n").getBytes(StandardCharsets.UTF_8));
+            String end = CrashReport.tail(crashed, 100);
+            check(end.length() == 100 && end.endsWith("in thread vu1\n"), "a log's end: " + end);
+            check("crash: SIGBUS at 00000000DEADBEEF in thread vu1".equals(CrashReport.logCrash(end)), "the report in a log's end");
+            check(CrashReport.tail(crashed, 1 << 20).equals(new String(Files.readAllBytes(crashed.toPath()), StandardCharsets.UTF_8)),
+                    "a short log whole");
+        } finally {
+            crashed.delete();
+        }
+
         System.out.println(failures == 0 ? "CrashReportTest: PASS" : "CrashReportTest: " + failures + " failure(s)");
         System.exit(failures == 0 ? 0 : 1);
     }

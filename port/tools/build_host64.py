@@ -77,7 +77,7 @@ class Target:
 
 
 MAC_MIN = '11.0'  # the first macOS on Apple silicon (package_release.py's LSMinimumSystemVersion)
-ANDROID_API = 30  # sdl3.ANDROID_API: Android 11
+ANDROID_API = 29  # sdl3.ANDROID_API: Android 10 (finding 191)
 TARGETS = {t.key: t for t in (
     Target('win-x64', 'x86_64-pc-windows-msvc', 'build/host64-exe', 'dhd64.exe', 'win64'),
     Target('linux-x64', 'x86_64-unknown-linux-gnu', 'build/host64-linux', 'dhd64', 'sysv64',
@@ -134,6 +134,8 @@ def fiber_test(t, a, cc, wabt, out, env):
                'onecore.lib', '/subsystem:console']
     else:
         cmd = [cc, *t.flags, '-O2', '-pthread', *flags, *sources, '-o', exe] + (['-rdynamic'] if not t.mac else [])
+        if t.android:  # guest RAM's ashmem region on Android 10 (guest_memory_posix.c)
+            cmd.append('-landroid')
     r = subprocess.run(list(map(str, cmd)), cwd=out, env=env, capture_output=True, text=True, timeout=300)
     if r.returncode:
         raise RuntimeError(' '.join(map(str, cmd)) + '\n' + r.stdout + r.stderr)
