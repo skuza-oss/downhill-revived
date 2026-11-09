@@ -26,6 +26,8 @@ mod browser;
 pub enum Action {
     /// Make a peer connection to this member; the hub's side offers.
     Connect { member: u64, offerer: bool },
+    /// A line for the game's log (dhd.log): what the star decided, no address.
+    Log(String),
     /// Drop the peer connection to this member.
     Close(u64),
     /// A message on a peer connection: (member, reliable, bytes).
@@ -56,6 +58,12 @@ const KIND_ALIVE: u8 = 2;
 /// timeout (about 27 s, peer.rs ICE_LOST_GRACE).
 const ALIVE_MS: u64 = 1000;
 const LINK_SILENT_MS: u64 = 5000;
+/** A star racer that has had no race frame from the hub this long after the race's start message
+    (START_LEAD_MS until its start, then SILENT_AFTER_MS: the SFU association's rule, finding 187)
+    while other racers on the star exist treats its link as failed: the keepalives come, the race
+    doesn't (the hub forwards nothing to it). Its link goes down and the room puts it on the SFU. */
+const START_LEAD_MS: u64 = 3000;
+const SILENT_AFTER_MS: u64 = 8000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Link {
@@ -91,12 +99,15 @@ pub struct Star {
     direct: bool,
     /// The links reported down without a try (no direct links here), once per hub.
     reported_down: Vec<u64>,
+    /// The race this game watches for a silent hub: its marker, when this game first saw it, and
+    /// whether a race frame came from the hub since (or the silence was acted on).
+    watch: Option<(u64, u64, bool)>,
     out: Vec<Action>,
 }
 
 impl Star {
     pub fn new(direct: bool) -> Self {
-        Self { me: None, hub: None, epoch: 0, members: vec![], race: None, peers: HashMap::new(), direct, reported_down: vec![], out: vec![] }
+        Self { me: None, hub: None, epoch: 0, members: vec![], race: None, peers: HashMap::new(), direct, reported_down: vec![], watch: None, out: vec![] }
     }
 
     pub fn take(&mut self) -> Vec<Action> {
@@ -377,6 +388,9 @@ impl Star {
                 self.out.push(Action::Sfu(frame));
             }
         } else if from == hub && Self::valid(&frame) && self.slot_active(frame[1]) && self.active_slot(me).is_some_and(|s| s != frame[1]) {
+            if let Some(w) = self.watch.as_mut().filter(|w| w.0 == marker) {
+                w.2 = true;
+            }
             self.out.push(Action::Game(frame));
         }
     }
@@ -407,8 +421,10 @@ impl Star {
         }
     }
 
-    /// Keepalives on quiet links, and a link silent for LINK_SILENT_MS is down (its peer goes).
+    /// Keepalives on quiet links, and a link silent for LINK_SILENT_MS is down (its peer goes); a
+    /// star racer's link to a hub that forwards it no race frame is down too (silent_race).
     pub fn tick(&mut self, now: u64) {
+        self.silent_race(now);
         let mut silent = vec![];
         for (id, p) in self.peers.iter_mut().filter(|(_, p)| p.up) {
             if now.saturating_sub(p.heard) > LINK_SILENT_MS {
@@ -422,6 +438,35 @@ impl Star {
             self.out.push(Action::Close(id));
             self.link(id, false, now);
         }
+    }
+
+    /// The race-frame silence of a star racer's link (START_LEAD_MS + SILENT_AFTER_MS): only while
+    /// this game races on the star and some other racer is on the star too (the hub racing, or a
+    /// member linked to it), whose frames the hub would forward; once per race.
+    fn silent_race(&mut self, now: u64) {
+        let (Some(me), Some(hub)) = (self.me, self.hub) else { return };
+        let Some(marker) = self.race.as_ref().map(|r| r.marker) else { self.watch = None; return };
+        if self.watch.is_none_or(|w| w.0 != marker) {
+            self.watch = Some((marker, now, false));
+        }
+        let (_, since, done) = self.watch.unwrap();
+        if done || me == hub || !self.up(hub) || self.active_slot(me).is_none() || now.saturating_sub(since) < START_LEAD_MS + SILENT_AFTER_MS {
+            return;
+        }
+        let race = self.race.as_ref().unwrap();
+        let on_star = race.slots.iter().enumerate().filter(|(slot, id)| {
+            **id != me && !race.left.contains(&(*slot as u8)) && (**id == hub || self.link_of(**id) == Some(Link::Star))
+        }).count();
+        if on_star == 0 {
+            return;
+        }
+        self.watch = Some((marker, since, true));
+        self.out.push(Action::Log(format!(
+            "net: P2P: no race frame from the hub {} s after the race's start, {on_star} racers on the star: its link counts as failed",
+            (START_LEAD_MS + SILENT_AFTER_MS) / 1000)));
+        self.peers.remove(&hub);
+        self.out.push(Action::Close(hub));
+        self.report(hub, false);
     }
 }
 

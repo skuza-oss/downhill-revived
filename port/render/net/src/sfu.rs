@@ -684,10 +684,15 @@ impl Sfu {
         self.race_open.then_some(self.race)
     }
     /// The race link is silent (SILENT_AFTER, finding 187): released, others still in the race, and
-    /// not one frame of this race from any of them since. Once per association and race; logged.
+    /// not one frame of this race from any of them since. Once per association and race; logged. In a
+    /// P2P room the others are its part of the race only (finding 186): a star racer's association
+    /// carries none and is never silent; the hub's waits for its fallback racers, theirs for the hub.
     fn silent(&mut self) -> bool {
         if !self.race_open || !self.released || self.heard || self.silent_said { return false; }
-        let others = self.slots.keys().filter(|m| Some(**m) != self.me).count();
+        let others = match &self.p2p {
+            Some(publishers) => publishers.len(),
+            None => self.slots.keys().filter(|m| Some(**m) != self.me).count(),
+        };
         let since = match (self.released_at, self.started_at) { (Some(r), Some(s)) => r.max(s + START_LEAD), _ => return false };
         if others == 0 || since.elapsed() < SILENT_AFTER { return false; }
         self.silent_said = true;
@@ -1140,6 +1145,22 @@ mod tests {
         client.send(&[5, 1, 6, 0, 3]).unwrap();
         assert_eq!(client.pending_state.len(), 2);
         assert_eq!(client.pending_state[&(1, 0)].1[12], 3);
+    }
+
+    /// In a P2P room the association is silent only for its part of the race: a star racer's (no
+    /// publisher expected) never says so, a fallback racer's does when the hub sends nothing.
+    #[test]
+    fn a_p2p_rooms_association_is_silent_only_for_its_part() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
+        let ago = |s: u64| Instant::now().checked_sub(Duration::from_secs(s)).unwrap();
+        let said = |c: &mut Sfu| c.poll().unwrap().0.iter().filter(|t| t["type"] == "sfu_silent").count();
+        client.signal(&json!({"type":"start","startAt":100,"yourSlot":1,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1}]})).unwrap();
+        client.signal(&json!({"type":"sfu_ready","race":100})).unwrap();
+        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        client.expect_p2p(vec![]);  // on the star
+        assert_eq!(said(&mut client), 0);
+        client.expect_p2p(vec![1]);  // on the SFU, the hub its only publisher
+        assert_eq!(said(&mut client), 1);
     }
 
     /// A released race that brings nothing from the others says sfu_silent once, SILENT_AFTER after

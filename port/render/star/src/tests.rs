@@ -247,3 +247,34 @@ fn without_direct_links_a_game_goes_to_the_sfu_at_once() {
     hub.room(&routes(1, &[(1, ""), (2, ""), (3, "")], &[], &[]));
     assert_eq!(hub.take().len(), 2);  // each member's link
 }
+
+/// A star racer whose link brings keepalives but no race frame from the hub START_LEAD_MS +
+/// SILENT_AFTER_MS after the race appeared treats the link as failed (once): the room puts it on the
+/// SFU (finding 187's rule for the star). A frame from the hub, or no other racer on the star, says
+/// nothing.
+#[test]
+fn a_star_racer_whose_hub_forwards_no_race_frame_falls_back() {
+    let quiet = START_LEAD_MS + SILENT_AFTER_MS;
+    let run = |frame_at: Option<u64>, links: &[(u64, &str)], slots: &[u64]| -> Vec<Action> {
+        let mut s = linked(star(2, 1, links, &[]), &[1]);
+        s.room(&routes(1, links, slots, &[]));
+        s.take();
+        let mut out = vec![];
+        for t in (0..=quiet + 2000).step_by(500) {
+            s.peer_message(1, true, &[KIND_ALIVE], t);  // the link is alive throughout
+            if frame_at == Some(t) {
+                s.peer_message(1, false, &envelope(&state(0), MARKER), t);
+            }
+            s.tick(t);
+            out.extend(s.take().into_iter().filter(|a| !matches!(a, Action::Peer(..) | Action::Game(..))));
+        }
+        out
+    };
+    let links = &[(1, ""), (2, "star")];
+    let out = run(None, links, &[1, 2]);
+    assert!(matches!(&out[0], Action::Log(l) if l.contains("no race frame from the hub")), "{out:?}");
+    assert_eq!(out[1..], [Action::Close(1), Action::Room(json!({"type": "p2p_link", "hub": 1, "member": 2, "up": false}))]);
+    assert!(run(Some(1000), links, &[1, 2]).is_empty());
+    // The hub sits the race out and the only other racer is on the SFU: nothing the hub would forward.
+    assert!(run(None, &[(1, ""), (2, "star"), (3, "sfu")], &[2, 3]).is_empty());
+}
