@@ -19,6 +19,9 @@
    shoulders, 6/7 the triggers (fully pressed or not), 8 back, 9 start, 10/11 the sticks pressed.
    gamecontrollerdb.txt beside dhd.exe (SDL's format) adds or corrects mappings; so does
    SDL_GAMECONTROLLERCONFIG. DHD_SDL=0: no pads (the keyboard still plays).
+   A layout's Swap L1/L2 and Swap R1/R2 (finding 189) make a shoulder and its trigger change places
+   before the layout reads them (gamepad_place), for pads that report them the other way round: the
+   bindings name the places the player presses, and the CONTROLS page's wait goes through the swap.
    The sticks go through the layout's Invert and Swap Sticks, then the dead zone the player chose
    (stick.h, dhd.ini stick_dead_zone; finding 134), and each pad says which kind it is
    (PlayStation, Xbox, Nintendo) for the button icons (port/gs/button_icons.c). */
@@ -97,6 +100,25 @@ static void read_joystick(SDL_Joystick *j, GamepadRaw *raw)
     if (axes > 3) raw->axis[2] = SDL_GetJoystickAxis(j, 2), raw->axis[3] = SDL_GetJoystickAxis(j, 3);
 }
 
+/* The input whose state stands for `id`'s place with the layout's shoulder swaps (finding 189):
+   with Swap L1/L2 the left shoulder (lb) reads the left trigger (lt) and the other way round, with
+   Swap R1/R2 the right ones. A swap is its own inverse, so the same call turns a pressed input into
+   its place (the CONTROLS page's wait, host.c). */
+int gamepad_place(const struct ControlsLayout *layout, int id)
+{
+    static int lb, lt, rb, rt;
+    if (!lb) lt = input_id("lt"), rb = input_id("rb"), rt = input_id("rt"), lb = input_id("lb");
+    if (layout->swap_shoulders & CONTROL_SWAP_L) {
+        if (id == lb) return lt;
+        if (id == lt) return lb;
+    }
+    if (layout->swap_shoulders & CONTROL_SWAP_R) {
+        if (id == rb) return rt;
+        if (id == rt) return rb;
+    }
+    return id;
+}
+
 /* An input's value in a state: a button's 255 while held, a trigger's byte. */
 static int input_value(const GamepadRaw *raw, int id)
 {
@@ -113,7 +135,7 @@ void gamepad_apply(const struct ControlsLayout *layout, const GamepadRaw *raw, i
     uint8_t pressure[CONTROL_BUTTONS] = {0};
     for (int t = 0; t < CONTROL_BUTTONS; t++)
         for (int s = 0; s < CONTROL_SLOTS; s++) {
-            int value = layout->input[t][s] ? input_value(raw, layout->input[t][s]) : 0;
+            int value = layout->input[t][s] ? input_value(raw, gamepad_place(layout, layout->input[t][s])) : 0;
             if (value > pressure[t]) pressure[t] = (uint8_t)value;
             if (value > PRESSED) out->buttons |= control_targets[t].bit;
         }

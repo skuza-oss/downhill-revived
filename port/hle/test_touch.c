@@ -1,5 +1,6 @@
 /* touch.c: the touch controls' rules (finding 141): scaling, the flick lanes, the sprint and
-   resume guards, the trick stick and the pause rows' ↓ + ✕ sequences. Built and run by
+   resume guards, the trick stick and the pause rows' ↓ + ✕ sequences, and the CODES page's
+   codes through a model of the game's code reader (finding 189). Built and run by
    port/tools/test_runtime.py (a host program). */
 #include "touch.h"
 #include "hle.h"
@@ -1095,6 +1096,211 @@ static void test_layout_text(void)
                   fabsf(back.edit[p][c].size - s.edit[p][c].size) < 0.01f);
 }
 
+/* ---- the game's codes on touch (finding 189) ----
+   The game's code reader as the decomp has it (func_001E6F58 with func_001E72A8, func_001E7160,
+   func_001E72F0, func_001E73B0, func_001E7440; finding 117), once a frame from the pad's
+   buttons (its stick part is dead code: always 0), and a few rows of its code table
+   (D_00272448). It says which code the frames typed, as the game would. */
+enum { READER_FRAMES = 300, READER_GROUP_GAP = 2 /* D_0029D7D0 */, READER_QUIET = 20 /* D_0029D7D4 */,
+       READER_CLOSE_ALL = 2 /* D_0029D744 */ };
+typedef struct {
+    int buttons[READER_FRAMES], frame;
+    int x4, x8, active, in_group;
+    int groups[20], ngroups;
+    int history[20], nhistory;
+    int code;   /* the last code read (0 none) */
+} Reader;
+
+static const struct { int id; uint16_t press[8]; } CODES[] = {
+    {1, {PAD_UP, PAD_TRIANGLE, PAD_DOWN, PAD_CROSS, PAD_LEFT, PAD_CIRCLE, PAD_RIGHT, PAD_SQUARE}},  /* Codes (finding 117) */
+    {4, {PAD_UP, PAD_CROSS, PAD_LEFT, PAD_SQUARE, PAD_UP}},                                          /* Super Bunny Hop */
+    {19, {PAD_DOWN, PAD_SQUARE, PAD_SQUARE, PAD_LEFT, PAD_CIRCLE}},                                  /* Always Stoked */
+};
+
+static void reader_close(Reader *r, int all)
+{
+    if (!r->in_group || !r->active) return;
+    int mask = 0, index = r->frame - 1;
+    for (int n = all ? READER_CLOSE_ALL : r->x8; n > 0; n--, index--) mask |= r->buttons[(index + READER_FRAMES) % READER_FRAMES];
+    if (mask) {
+        r->groups[r->ngroups] = mask;
+        r->ngroups = (r->ngroups + 1) % 20;
+        r->in_group = 0;
+        r->x8 = 0;
+    }
+}
+
+static int reader_match_groups(const Reader *r)
+{
+    for (unsigned c = 0; c < sizeof CODES / sizeof *CODES && r->ngroups; c++) {
+        int ok = 1, i;
+        for (i = 0; i < r->ngroups; i++) if (i >= 8 || r->groups[i] != CODES[c].press[i]) ok = 0;
+        if (i < 8 && CODES[c].press[i]) ok = 0;
+        if (ok) return CODES[c].id;
+    }
+    return 0;
+}
+
+static int reader_match_history(const Reader *r)
+{
+    for (unsigned c = 0; c < sizeof CODES / sizeof *CODES; c++) {
+        int ok = 1, idx = r->nhistory - 1;
+        for (int i = 7; i >= 0; i--) {
+            if (r->history[(idx + 20) % 20] != CODES[c].press[i]) ok = 0;
+            idx--;
+        }
+        if (ok) return CODES[c].id;
+    }
+    return 0;
+}
+
+static void reader_frame(Reader *r, uint16_t b)
+{
+    int old = r->frame;
+    r->frame = (r->frame + 1) % READER_FRAMES;
+    r->buttons[r->frame] = b;
+    int changed = r->buttons[old] ^ b;
+    if (b && changed) {
+        r->active = 1;
+        r->x4 = 0;
+        if (changed & b) {
+            if (!r->in_group) r->in_group = 1, r->x8 = 0;
+        } else if (r->in_group) reader_close(r, 0);
+        int pressed = changed & 0xF0F0 & b;   /* func_001E72A8: the d-pad and face buttons newly down */
+        if (pressed) r->history[r->nhistory] = pressed, r->nhistory = (r->nhistory + 1) % 20;
+    } else {
+        if (b) r->active = 1;
+        if (r->in_group) r->x8++;
+        r->x4++;
+    }
+    if (r->x8 > READER_GROUP_GAP) reader_close(r, 1);
+    int code = 0;
+    if (r->active) {
+        if (r->x4 > READER_QUIET) code = reader_match_groups(r);
+        if (!code) code = reader_match_history(r);
+    }
+    if (code) r->code = code;
+    if (code || r->x4 > READER_QUIET) r->frame = 0, r->ngroups = 0, r->x8 = 0, r->x4 = 0, r->active = 0, r->in_group = 0;
+}
+
+/* The CODES page's button for a press. */
+static int code_button(uint16_t press)
+{
+    static const uint16_t order[8] = {PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT, PAD_TRIANGLE, PAD_CIRCLE, PAD_CROSS, PAD_SQUARE};
+    for (int i = 0; i < 8; i++) if (order[i] == press) return i;
+    return -1;
+}
+
+static void tap_code_button(long long id, int b)
+{
+    float x, y;
+    CHECK(touch_target(t, TOUCH_TARGET_CODES, b, &x, &y));
+    touch_down(t, id, x, y, now);
+    field();
+    touch_up(t, id, x, y, now);
+    field();
+}
+
+/* Pause, CODES, type code c, ENTER; the race resumes when the game has its ✕; then frames until
+   the presses are done and the reader's quiet time is over: the code the reader read. While the
+   race runs every touch_update is a game frame (game.vsync counts them), so the reader sees each. */
+static int type_code(unsigned c, int hold_pedal)
+{
+    uint16_t edges[32];
+    float x, y;
+    if (hold_pedal) {
+        at(touch_settings(t)->preset == TOUCH_CLASSIC ? TC_CROSS : TC_PEDAL, &x, &y);
+        touch_down(t, 50, x, y, now);
+        field();
+    }
+    touch_back(t, now);   /* pause: START (its press lasts 3 fields of VBLANKs at the game's rate) */
+    record(edges, 32, 24);
+    game.clock_moving = 0;
+    fields(3);
+    float rx, ry;
+    CHECK(touch_target(t, TOUCH_TARGET_PAUSE, 5, &rx, &ry));   /* CODES */
+    touch_down(t, 1, rx, ry, now);
+    touch_up(t, 1, rx, ry, now);
+    field();
+    for (int i = 0; i < 8 && CODES[c].press[i]; i++) tap_code_button(10 + i, code_button(CODES[c].press[i]));
+    CHECK(!buttons());   /* typing sends nothing: the game is paused */
+    tap_code_button(30, 10);   /* ENTER */
+    Reader r;
+    memset(&r, 0, sizeof r);
+    for (int i = 0; i < 400; i++) {
+        uint16_t b = buttons();
+        if (!game.clock_moving && (b & PAD_CROSS)) game.clock_moving = 1;   /* the game's menu takes ✕: the race goes on */
+        if (game.clock_moving) reader_frame(&r, b);
+        if (r.code) break;
+        field();
+    }
+    if (hold_pedal) touch_up(t, 50, x, y, now), field();
+    fields(60);
+    return r.code;
+}
+
+static void test_codes(void)
+{
+    static const int presets[2] = {TOUCH_THUMB_ZONES, TOUCH_CLASSIC};
+    static const int rates[2] = {60, 144};
+    for (int p = 0; p < 2; p++)
+        for (int f = 0; f < 2; f++)
+            for (unsigned c = 0; c < sizeof CODES / sizeof *CODES; c++) {
+                start(presets[p], TOUCH_ATTACK_FLICK);
+                game.fps = rates[f];
+                int got = type_code(c, c == 2);   /* PEDAL held through the pause for Always Stoked */
+                if (got != CODES[c].id) fprintf(stderr, "test_touch: preset %d, %d fps, code %d read as %d\n", presets[p], rates[f], CODES[c].id, got);
+                CHECK(got == CODES[c].id);
+            }
+    /* the reader itself: typed by a pad at its own pace (5 frames down, 5 up) it reads the code;
+       with ✕ held through it (pedalling) none is read: ✕ is in every group, and no ✕ press is new */
+    for (int held = 0; held < 2; held++)
+        for (unsigned c = 0; c < sizeof CODES / sizeof *CODES; c++) {
+            Reader r;
+            memset(&r, 0, sizeof r);
+            uint16_t extra = held ? PAD_CROSS : 0;
+            for (int i = 0; i < 8 && CODES[c].press[i]; i++) {
+                for (int k = 0; k < 5; k++) reader_frame(&r, (uint16_t)(CODES[c].press[i] | extra));
+                for (int k = 0; k < 5; k++) reader_frame(&r, extra);
+            }
+            for (int k = 0; k < 30 && !r.code; k++) reader_frame(&r, extra);
+            CHECK(r.code == (held ? 0 : CODES[c].id));   /* a held ✕: no new ✕ press, and ✕ in every group */
+        }
+    /* CLEAR and BACK: nothing typed goes; BACK on the page is Android's Back too */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_back(t, now);
+    record(NULL, 0, 8);
+    game.clock_moving = 0;
+    fields(3);
+    float rx, ry;
+    touch_target(t, TOUCH_TARGET_PAUSE, 5, &rx, &ry);
+    touch_down(t, 1, rx, ry, now);
+    touch_up(t, 1, rx, ry, now);
+    field();
+    tap_code_button(2, 0);
+    tap_code_button(3, 8);    /* CLEAR */
+    tap_code_button(4, 10);   /* ENTER with nothing typed: nothing */
+    CHECK(record(NULL, 0, 30) == 0);
+    tap_code_button(5, 4);
+    touch_back(t, now);       /* back to the rows; then Back resumes: ✕ alone, no △ */
+    uint16_t edges[8];
+    CHECK(record(edges, 8, 30) == 0);
+    touch_back(t, now);
+    CHECK(record(edges, 8, 60) == 1 && edges[0] == PAD_CROSS);
+    TouchShape shapes[TOUCH_SHAPES];
+    CHECK(touch_shapes(t, shapes, TOUCH_SHAPES) > 0);
+    /* the CONTROLS and CODES halves of their row don't overlap; the page's buttons fit the screen */
+    float cx, cy;
+    touch_target(t, TOUCH_TARGET_PAUSE, 3, &cx, &cy);
+    touch_target(t, TOUCH_TARGET_PAUSE, 5, &rx, &ry);
+    CHECK(cy == ry && rx - cx > 20);
+    for (int b = 0; b < 11; b++) {
+        float bx, by;
+        touch_target(t, TOUCH_TARGET_CODES, b, &bx, &by);
+        CHECK(bx - 9 > 0 && bx + 9 < 154.5f && by + 4.5f < 69.5f && by - 4.5f > 15);
+    }
+}
+
 int main(void)
 {
     test_scaling();
@@ -1116,6 +1322,7 @@ int main(void)
     test_fixed_stick();
     test_queue();
     test_tilt();
+    test_codes();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");

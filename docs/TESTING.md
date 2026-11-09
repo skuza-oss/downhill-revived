@@ -172,6 +172,11 @@ with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=nativ
   its speed at high scales. For pictures as players see them use `DHD_SCREENSHOT=<unset>` (hidden_game
   drops `<unset>` variables) with `DHD_CAPTURE_PRESENTED`. Without GS captures there are no field
   counts in the log, so `field` and `shot` in live_game don't work: drive by `DHD_AUTOPAD_FRAMES`.
+- **Posted mouse clicks on the hidden desktop land at the real cursor** (SDL's auto capture and
+  the window's mouse-leave read it): set `SDL_MOUSE_AUTO_CAPTURE=0`, post the move, down and up
+  together, and tap again when the touch trace (`DHD_TOUCH_LOG=1`) shows no `up`. Touch runs
+  (`DHD_TOUCH_MOUSE=1`) can't use `DHD_NAV` or the other pad scripts: they replace the live pad,
+  touches included; drive the menus by posted keys (finding 189).
 - **Posted keys don't reach the room under `DHD_NET_SCRIPTED`.** Use the scripted hooks
   (`DHD_NET_TEST_TRACK`, `DHD_NET_TEST_READY`) instead.
 - **`wait REGEX` matches the whole log**, earlier lines too: wait for something new.

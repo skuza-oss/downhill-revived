@@ -181,7 +181,8 @@ pub unsafe extern "C" fn dhd_controls_layouts(
 
 /// One change to `device`'s layout (0 the keyboard, 1 and 2 the controllers), with the three
 /// variables' values as they are now: `edit` 0 assign (`input` to the target's `slot`), 1 clear, 2
-/// reset, 3 swap sticks (`input` 1 on), 4 invert (`target` the INVERT_* bit, `input` 1 on); `kind`
+/// reset, 3 swap sticks (`input` 1 on), 4 invert (`target` the INVERT_* bit, `input` 1 on), 5 swap
+/// a shoulder and its trigger (`target` the SWAP_* bit, `input` 1 on); `kind`
 /// the controller's PAD_KIND_*, for the message's words. The device's new line goes to `value`
 /// and what the page says to `message`. -1 refused (`message` says why), 0 nothing to do, 1
 /// changed.
@@ -217,6 +218,7 @@ pub unsafe extern "C" fn dhd_controls_edit(
         2 => Edit::Reset,
         3 => Edit::SwapSticks(input != 0),
         4 => Edit::Invert(u8::try_from(target).unwrap_or(0), input != 0),
+        5 => Edit::SwapShoulders(u8::try_from(target).unwrap_or(0), input != 0),
         _ => return 0,
     };
     if device >= controls::DEVICES.len() {

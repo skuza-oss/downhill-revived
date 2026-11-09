@@ -90,7 +90,8 @@ buttons; the keys above stand for them.
 Your own keys and buttons: REVIVED SETTINGS > Controls in the game, or the launcher's Settings >
 Controls > Bindings. Choose the key or controller button for each PlayStation button, a main and
 an alternate, for the keyboard and for each of two controllers (player 1 and player 2), plus
-Swap Sticks and Invert per stick axis on a controller. In the game, Cross on a button's row waits
+Swap Sticks, Swap L1/L2, Swap R1/R2 (for pads that report a shoulder as its trigger) and Invert
+per stick axis on a controller. In the game, Cross on a button's row waits
 up to five seconds for the new key or button (Esc cancels), Square clears it, Triangle or Esc goes
 back; changes save at once. The dimmed "also" binding is the alternate, changed in the launcher
 (click a slot, right-click clears; the game takes it at its next start). A key or button another

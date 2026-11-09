@@ -34,6 +34,13 @@ pub struct Device {
     label: &'static str,
 }
 
+/// A shoulder swap (finding 189): its SWAP_* bit and the two inputs (ids) that change places.
+#[derive(Serialize)]
+pub struct Swap {
+    bit: u8,
+    inputs: [u8; 2],
+}
+
 #[derive(Serialize)]
 pub struct Schema {
     targets: Vec<Target>,
@@ -42,6 +49,7 @@ pub struct Schema {
     keys: Vec<Key>,
     pads: Vec<PadInput>,
     devices: Vec<Device>,
+    swaps: Vec<Swap>,
 }
 
 pub fn schema() -> Schema {
@@ -54,6 +62,10 @@ pub fn schema() -> Schema {
             .map(|p| PadInput { id: p.id, labels: [p.labels.xbox, p.labels.playstation, p.labels.nintendo], web: p.web })
             .collect(),
         devices: controls::DEVICES.iter().map(|d| Device { label: d.label }).collect(),
+        swaps: controls::SWAPS
+            .iter()
+            .map(|(bit, _, inputs)| Swap { bit: *bit, inputs: inputs.map(|n| controls::pad_named(n).unwrap().id) })
+            .collect(),
     }
 }
 
@@ -62,6 +74,8 @@ pub struct Layout {
     inputs: Vec<[u8; controls::SLOTS]>,
     swap_sticks: bool,
     invert: u8,
+    /// SWAP_* bits: Swap L1/L2, Swap R1/R2 (finding 189).
+    swap_shoulders: u8,
 }
 
 #[derive(Serialize)]
@@ -81,7 +95,7 @@ fn state_of(c: &Controls) -> State {
         layouts: c
             .layouts
             .iter()
-            .map(|l| Layout { inputs: l.input.to_vec(), swap_sticks: l.swap_sticks != 0, invert: l.invert })
+            .map(|l| Layout { inputs: l.input.to_vec(), swap_sticks: l.swap_sticks != 0, invert: l.invert, swap_shoulders: l.swap_shoulders })
             .collect(),
     }
 }
@@ -90,8 +104,8 @@ pub fn state(settings: &Path) -> State {
     state_of(&read(settings))
 }
 
-/// A change as the page asks for it: `edit` is assign, clear, reset, swap or invert (`input` the
-/// INVERT_* bit).
+/// A change as the page asks for it: `edit` is assign, clear, reset, swap, invert (`input` the
+/// INVERT_* bit) or shoulders (`input` the SWAP_* bit: Swap L1/L2, Swap R1/R2).
 #[derive(Deserialize)]
 pub struct Request {
     edit: String,
@@ -121,6 +135,7 @@ pub fn edit(settings: &Path, device: usize, r: &Request, kind: i32, save: impl F
         "reset" => Edit::Reset,
         "swap" => Edit::SwapSticks(r.on),
         "invert" => Edit::Invert(r.input, r.on),
+        "shoulders" => Edit::SwapShoulders(r.input, r.on),
         other => return Err(format!("not an edit: {other}")),
     };
     let mut c = read(settings);
@@ -148,6 +163,8 @@ mod tests {
         assert_eq!((s.targets.len(), s.buttons, s.devices.len()), (24, 16, 3));
         assert!(s.keys.iter().all(|k| !k.code.is_empty() && k.vk != 0));
         assert!(s.pads.iter().any(|p| p.web == 0 && p.labels == ["A", "Cross", "B"]));
+        let id = |n| controls::pad_named(n).unwrap().id;
+        assert!(s.swaps.iter().map(|w| (w.bit, w.inputs)).eq([(controls::SWAP_L, [id("lb"), id("lt")]), (controls::SWAP_R, [id("rb"), id("rt")])]));
         if let Some(path) = std::env::var_os("DHD_CONTROLS_SCHEMA") {
             let both = serde_json::json!({ "schema": s, "state": state_of(&Controls::default()) });
             std::fs::write(path, both.to_string()).unwrap();
@@ -178,6 +195,11 @@ mod tests {
         assert_eq!(a.outcome, "changed");
         assert!(a.layouts[2].swap_sticks);
         assert_eq!(dhd_settings::read(&ini).unwrap().written("pad2").as_deref(), Some("sticks:swap"));
+        // Swap L1/L2 and Swap R1/R2, per controller (finding 189)
+        let a = edit(&ini, 1, &Request { input: controls::SWAP_R, ..ask("shoulders", 0, 0) }, 2, save).unwrap();
+        assert_eq!((a.outcome, a.layouts[1].swap_shoulders, a.layouts[2].swap_shoulders), ("changed", controls::SWAP_R, 0));
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("pad1").as_deref(), Some("r1r2:swap"));
+        assert_eq!(edit(&ini, 0, &Request { input: controls::SWAP_L, ..ask("shoulders", 0, 0) }, 2, save).unwrap().outcome, "unchanged");
         let a = edit(&ini, 0, &ask("reset", 0, 0), 2, save).unwrap();
         assert_eq!(a.outcome, "changed");
         assert_eq!(dhd_settings::read(&ini).unwrap().written("keyboard"), None, "an empty line: the defaults");

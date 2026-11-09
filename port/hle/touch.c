@@ -19,7 +19,11 @@
      its one sending rule (settle, past the edge once the gate is open, landing).
    - Paused: race touches send nothing; the pause rows are ↓ / ↑ steps then ✕, sent as presses
      the game sees (whole fields of its VBLANKs). A controller used on the pause menu takes it
-     over (PAUSE_PAD); the race clock moving again ends any pause state. */
+     over (PAUSE_PAD); the race clock moving again ends any pause state.
+   - The game's codes (finding 189): the pause rows' CODES page has the d-pad and the four face
+     buttons the codes are made of; ENTER resumes the race and then sends the typed presses as a
+     pad player types them (each a short press, well inside the game's code-reading windows), with
+     the race touches let go while they go. */
 #include "touch.h"
 #include "hle.h"
 
@@ -38,7 +42,11 @@ enum {
     HOLD_BACK_MS = 120,
     SETTLE_MS = 70, GATE_MS = 60, TRIANGLE_DELAY_MS = 33,
     LEAVE_ARM_MS = 3000,
-    HISTORY = 24
+    HISTORY = 24,
+    /* codes (finding 189): at most 8 presses (the game's code table, D_00272448); before the
+       first, a quiet time longer than the game's 20 frames of quiet that end a code
+       (func_001E6F58, D_0029D7D4), so the Resume row's ✕ is not taken as the code's start */
+    CODE_PRESSES = 8, CODE_LEAD_FIELDS = 30
 };
 static const float SETTLE_MM = 1.0f, FIRST_LATCH_MM = 4.0f, SHIFT_PREVIEW_MM = 1.5f, SHIFT_MAX_MM = 5.0f;
 static const float HYSTERESIS_DEG = 12.0f;
@@ -141,8 +149,14 @@ enum { JOB_NONE, JOB_STICK, JOB_BUTTON, JOB_PEDAL, JOB_TRICK, JOB_AIR_WAIT, JOB_
 /* PAUSE_PAD: a controller took over the game's pause menu (or its question) from the rows: the
    overlay no longer knows where the game's menu is, so it hides and leaves the menu to the
    controller until the race goes on. */
-enum { PAUSE_NONE, PAUSE_ASKED, PAUSE_OPEN, PAUSE_CONTROLS, PAUSE_CONFIRM, PAUSE_PAD };
-enum { ROW_RESUME, ROW_RESTART, ROW_QUIT, ROW_CONTROLS, ROW_BAIL, PAUSE_ROWS, PAUSE_BUTTON = 100 };
+enum { PAUSE_NONE, PAUSE_ASKED, PAUSE_OPEN, PAUSE_CONTROLS, PAUSE_CONFIRM, PAUSE_PAD, PAUSE_CODES };
+/* ROW_CODES shares the CONTROLS row (its right half: the panel has room for five rows) */
+enum { ROW_RESUME, ROW_RESTART, ROW_QUIT, ROW_CONTROLS, ROW_BAIL, ROW_CODES, PAUSE_ROWS, PAUSE_BUTTON = 100 };
+/* the CODES page: the d-pad and the face buttons (as the codes name them), then CLEAR, BACK, ENTER */
+enum { CODE_UP, CODE_DOWN, CODE_LEFT, CODE_RIGHT, CODE_TRIANGLE, CODE_CIRCLE, CODE_CROSS, CODE_SQUARE,
+       CODE_CLEAR, CODE_BACK, CODE_ENTER, CODE_BUTTONS };
+static const uint16_t CODE_PAD[CODE_CLEAR] = {PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT,
+                                              PAD_TRIANGLE, PAD_CIRCLE, PAD_CROSS, PAD_SQUARE};
 enum { PANEL_CLOSE, PANEL_BAIL, PANEL_LEAVE, PANEL_BUTTONS };
 enum { CONFIRM_NO, CONFIRM_YES };
 enum { EDIT_GROUND, EDIT_AIR, EDIT_MINUS, EDIT_PLUS, EDIT_RESET, EDIT_DONE, EDIT_BUTTONS };
@@ -216,6 +230,9 @@ struct Touch {
     int seq_len, seq_at;
     uint32_t seq_step_until;
     int seq_started;
+    /* the CODES page: the presses typed, and whether the sequence now going is a code's */
+    uint8_t code[CODE_PRESSES];
+    int code_len, code_sending;
     /* steering */
     int stick_finger;
     float stick_cx, stick_cy, stick_dx, stick_dy;   /* deflection -1..1 */
@@ -489,6 +506,13 @@ static void seq_add(Touch *t, uint16_t buttons)
     t->seq[t->seq_len++] = (Step){0, PRESS_FIELDS};
 }
 static int seq_busy(const Touch *t) { return t->seq_at < t->seq_len; }
+/* nothing pressed for `fields` fields */
+static void seq_wait(Touch *t, int fields)
+{
+    if (t->seq_at >= t->seq_len) seq_reset(t);
+    if (t->seq_len + 1 > (int)(sizeof t->seq / sizeof *t->seq)) return;
+    t->seq[t->seq_len++] = (Step){0, fields};
+}
 
 static void seq_cursor_to(Touch *t, int row)
 {
@@ -906,8 +930,23 @@ static Box pause_row_box(const Touch *t, int row)
 {
     float W = t->screen.width, H = t->screen.height;
     float rh = fmaxf(9.0f, H * 0.124f), top = H * 0.05f + H * 0.08f + 6;
-    float y = top + rh * (row + 0.5f) + (row >= ROW_CONTROLS ? 2.0f : 0);
+    int line = row == ROW_CODES ? ROW_CONTROLS : row;
+    float y = top + rh * (line + 0.5f) + (line >= ROW_CONTROLS ? 2.0f : 0);
+    if (row == ROW_CONTROLS || row == ROW_CODES)   /* half each, CONTROLS on the left */
+        return (Box){W / 2 + (row == ROW_CODES ? 1 : -1) * W * 0.15f, y, W * 0.15f - 0.5f, rh / 2 - 0.4f};
     return (Box){W / 2, y, W * 0.30f, rh / 2 - 0.4f};
+}
+
+/* The CODES page (finding 189): ↑ ↓ ← → in one row, △ ○ ✕ □ in the next (9 mm targets, 15 mm
+   apart), CLEAR, BACK and ENTER at the bottom of the panel. */
+static Box code_box(const Touch *t, int b)
+{
+    float W = t->screen.width, H = t->screen.height;
+    if (b < CODE_CLEAR) {
+        int col = b % 4, line = b / 4;
+        return (Box){W / 2 + (col - 1.5f) * 15.0f, H * 0.40f + line * fmaxf(13.0f, H * 0.19f), 4.5f, 4.5f};
+    }
+    return (Box){W / 2 + (b - CODE_BACK) * 22.0f, H * 0.95f - 5.5f, 9.0f, 4.5f};
 }
 
 static Box confirm_box(const Touch *t, int row)
@@ -972,16 +1011,21 @@ static int in_box(Box b, float x, float y) { return fabsf(x - b.x) <= b.hw && fa
 
 int touch_target(const Touch *t, int kind, int index, float *x, float *y)
 {
-    static const int counts[4] = {PAUSE_ROWS, 2, PANEL_BUTTONS, EDIT_BUTTONS};
-    if (kind < 0 || kind > 3 || index < 0 || index >= counts[kind]) return 0;
+    static const int counts[5] = {PAUSE_ROWS, 2, PANEL_BUTTONS, EDIT_BUTTONS, CODE_BUTTONS};
+    if (kind < 0 || kind > 4 || index < 0 || index >= counts[kind]) return 0;
     Box b = kind == TOUCH_TARGET_PAUSE ? pause_row_box(t, index) : kind == TOUCH_TARGET_CONFIRM ? confirm_box(t, index)
-          : kind == TOUCH_TARGET_PANEL ? panel_box(t, index) : editor_box(t, index);
+          : kind == TOUCH_TARGET_PANEL ? panel_box(t, index) : kind == TOUCH_TARGET_CODES ? code_box(t, index)
+          : editor_box(t, index);
     *x = b.x, *y = b.y;
     return 1;
 }
 
 static int pause_row_at(const Touch *t, float x, float y)
 {
+    if (t->pause == PAUSE_CODES) {
+        for (int b = 0; b < CODE_BUTTONS; b++) if (in_box(code_box(t, b), x, y)) return b;
+        return -1;
+    }
     if (t->pause == PAUSE_CONFIRM) {
         for (int r = 0; r < 2; r++) if (in_box(confirm_box(t, r), x, y)) return r;
         return -1;
@@ -996,8 +1040,32 @@ static int panel_button_at(const Touch *t, float x, float y)
     return -1;
 }
 
+/* A tap on the CODES page: a press typed, CLEAR, BACK (to the rows), ENTER: the Resume row's
+   presses, the quiet lead, then each press typed (PRESS_FIELDS down, PRESS_FIELDS up: one press
+   each for the game's reader, func_001E6F58, at any frame rate), the race touches let go. */
+static void code_tapped(Touch *t, int b)
+{
+    if (b >= 0 && b < CODE_CLEAR) {
+        if (t->code_len < CODE_PRESSES) t->code[t->code_len++] = (uint8_t)b, buzz(t, TOUCH_BUZZ_TICK);
+        return;
+    }
+    if (b == CODE_CLEAR) t->code_len = 0;
+    else if (b == CODE_BACK) t->code_len = 0, t->pause = PAUSE_OPEN;
+    else if (b == CODE_ENTER && t->code_len > 0 && !seq_busy(t) && t->game.pause_row[ROW_RESUME] >= 0) {
+        seq_cursor_to(t, t->game.pause_row[ROW_RESUME]);
+        seq_add(t, PAD_CROSS);
+        seq_wait(t, CODE_LEAD_FIELDS);
+        for (int i = 0; i < t->code_len; i++) seq_add(t, CODE_PAD[t->code[i]]);
+        t->code_len = 0;
+        race_resumes(t);
+        drop_race_touches(t);   /* a held PEDAL would join the code's presses (the reader ORs them in) */
+        t->code_sending = 1;
+    }
+}
+
 static void pause_row_tapped(Touch *t, int row)
 {
+    if (t->pause == PAUSE_CODES) { code_tapped(t, row); return; }
     if (seq_busy(t)) return;
     if (t->pause == PAUSE_CONTROLS) { t->pause = PAUSE_OPEN; return; }
     if (t->pause == PAUSE_CONFIRM) {
@@ -1028,6 +1096,10 @@ static void pause_row_tapped(Touch *t, int row)
     }
     case ROW_CONTROLS:
         t->pause = PAUSE_CONTROLS;
+        break;
+    case ROW_CODES:
+        t->pause = PAUSE_CODES;
+        t->code_len = 0;
         break;
     case ROW_BAIL:   /* START (out of the menu), then SELECT twice */
         seq_add(t, PAD_START);
@@ -1384,6 +1456,7 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
         if (t->pause == PAUSE_OPEN && f->target < 0 && control_at(t, x, y, pause_button, 1) == TC_PAUSE) f->target = PAUSE_BUTTON;
         return;
     }
+    if (t->code_sending) { f->job = JOB_IGNORED; return; }   /* a code's presses go (about a second) */
     if (t->panel_open) {   /* the online panel's buttons win over the race areas */
         int b = panel_button_at(t, x, y);
         if (b >= 0) { f->job = JOB_PANEL; f->target = b; return; }
@@ -1495,6 +1568,7 @@ void touch_back(Touch *t, double now)
     if (t->freeze) { t->freeze = 0; return; }
     if (t->editor) { t->editor = 0; t->saved = 1; return; }
     if (t->pause == PAUSE_CONTROLS) { t->pause = PAUSE_OPEN; return; }   /* the overlay's own page */
+    if (t->pause == PAUSE_CODES) { code_tapped(t, CODE_BACK); return; }
     /* the question's No; while the presses that opened it still go, nothing (as a tap): the game
        has not shown it yet, so the overlay stays on it and the next Back answers */
     if (t->pause == PAUSE_CONFIRM) { pause_row_tapped(t, CONFIRM_NO); return; }
@@ -1508,12 +1582,13 @@ void touch_back(Touch *t, double now)
 void touch_pad_used(Touch *t, double now)
 {
     t->now = now;
-    if (t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM) {
+    if (t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM || t->pause == PAUSE_CODES) {
         /* the controller works the game's menu from here (moves its cursor, answers the question):
            the rows would no longer say where the game is, and the overlay's own presses stop */
         t->pause = PAUSE_PAD;
         seq_reset(t);
     }
+    if (t->code_sending) seq_reset(t), t->code_sending = 0;   /* a code going: the controller's now */
     if (t->set.show_with_pad || t->hidden_by_pad || t->editor) return;
     t->hidden_by_pad = 1;
     drop_race_touches(t);
@@ -1854,6 +1929,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         t->hint = 0;
     }
     seq_advance(t);
+    if (t->code_sending && (!seq_busy(t) || t->pause != PAUSE_NONE)) t->code_sending = 0;
     for (int i = 0; i < 16; i++)
         if (t->pulse_buttons[i] && !t->pulse_fields[i] && (int32_t)(game->vsync - t->pulse_until[i]) >= 0) t->pulse_buttons[i] = 0;
     if (t->freeze_at && (int32_t)(game->vsync - t->freeze_at) >= 0) {
@@ -2174,6 +2250,33 @@ static void draw_panel_rows(const Touch *t, Draw *d)
         }
         return;
     }
+    if (t->pause == PAUSE_CODES) {
+        text(d, W / 2, H * 0.05f + 5, 3.9f, 0, "CODES", green);
+        static const char arrows[4] = {'^', 'v', '<', '>'};
+        static const int symbols[4] = {TS_TRIANGLE, TS_CIRCLE, TS_CROSS, TS_SQUARE};
+        if (!t->code_len) text(d, W / 2, H * 0.05f + 11.5f, 2.2f, 0, "TYPE A CODE, THEN ENTER", off);
+        for (int i = 0; i < t->code_len; i++) {   /* what is typed, one symbol after another */
+            float x = W / 2 + (i - (t->code_len - 1) / 2.0f) * 5.0f, y = H * 0.05f + 11.5f;
+            if (t->code[i] < 4) {
+                char c[2] = {arrows[t->code[i]], 0};
+                text(d, x, y, 3.0f, 0, c, white);
+            } else put(d, symbols[t->code[i] - 4], x, y, 2.0f, 0, 0, 0, 0, white);
+        }
+        static const char *const words[CODE_BUTTONS - CODE_CLEAR] = {"CLEAR", "BACK", "ENTER"};
+        for (int b = 0; b < CODE_BUTTONS; b++) {
+            Box x = code_box(t, b);
+            int pressed = 0;
+            for (int i = 0; i < TOUCH_FINGERS; i++)
+                if (t->f[i].used && t->f[i].job == JOB_PANEL && t->f[i].target == b && pause_row_at(t, t->f[i].x, t->f[i].y) == b) pressed = 1;
+            int dim = b == CODE_ENTER && !t->code_len;
+            box_button(d, x.x, x.y, x.hw, x.hh, pressed, dim ? 0.4f : 1.0f, b >= CODE_CLEAR ? words[b - CODE_CLEAR] : "", 2.4f);
+            if (b < 4) {
+                char c[2] = {arrows[b], 0};
+                text(d, x.x, x.y, 3.4f, 0, c, white);
+            } else if (b < CODE_CLEAR) put(d, symbols[b - 4], x.x, x.y, 2.6f, 0, 0, 0, 0, white);
+        }
+        return;
+    }
     if (t->pause == PAUSE_CONFIRM) {
         text(d, W / 2, H * 0.3f, 3.6f, 0, "ARE YOU SURE?", green);
         static const char *const rows[2] = {"NO", "YES"};
@@ -2185,7 +2288,7 @@ static void draw_panel_rows(const Touch *t, Draw *d)
         return;
     }
     text(d, W / 2, H * 0.05f + 5, 3.9f, 0, "PAUSED", green);
-    static const char *const rows[PAUSE_ROWS] = {"RESUME", "RESTART RACE", "QUIT RACE", "CONTROLS", "BAIL OUT"};
+    static const char *const rows[PAUSE_ROWS] = {"RESUME", "RESTART RACE", "QUIT RACE", "CONTROLS", "BAIL OUT", "CODES"};
     for (int r = 0; r < PAUSE_ROWS; r++) {
         Box b = pause_row_box(t, r);
         int enabled = r >= ROW_CONTROLS || t->game.pause_row[r] >= 0;
@@ -2193,7 +2296,7 @@ static void draw_panel_rows(const Touch *t, Draw *d)
         for (int i = 0; i < TOUCH_FINGERS; i++)
             if (t->f[i].used && t->f[i].job == JOB_PANEL && t->f[i].target == r && pause_row_at(t, t->f[i].x, t->f[i].y) == r) pressed = 1;
         if (pressed) put(d, TS_RECT, b.x, b.y, b.hw, b.hh, 1.0f, 0, rgba(166, 227, 154, 0.17f), 0);
-        if (r == ROW_CONTROLS) put(d, TS_RECT, b.x, b.y - b.hh - 1.0f, b.hw, 0.15f, 0, 0, rgba(166, 227, 154, 0.45f), 0);
+        if (r == ROW_CONTROLS) put(d, TS_RECT, W / 2, b.y - b.hh - 1.0f, W * 0.30f, 0.15f, 0, 0, rgba(166, 227, 154, 0.45f), 0);
         text(d, b.x, b.y, 3.0f, 0, rows[r], enabled ? white : off);
     }
 }
@@ -2319,6 +2422,7 @@ int touch_shapes(const Touch *t, TouchShape *out, int max)
     }
     if (t->panel_open) draw_online_panel(t, &d);
     if (t->hint) draw_hint(t, &d);
-    if (t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM) draw_panel_rows(t, &d);
+    if (t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM || t->pause == PAUSE_CODES)
+        draw_panel_rows(t, &d);
     return d.n;
 }

@@ -63,11 +63,14 @@ What works today:
 - **Keyboard play**: a whole race on the keyboard, with gradual steering; letters go by their
   place on the keyboard, so AZERTY and QWERTZ work too (see [Controls](#controls)).
 - **Your own keys and buttons**: every PlayStation button can be put on another key or controller
-  button, a main and an alternate, for the keyboard and each of two controllers, with Swap Sticks
-  and Invert per stick axis, in the game or the launcher (see [Controls](#controls)).
+  button, a main and an alternate, for the keyboard and each of two controllers, with Swap Sticks,
+  Swap L1/L2, Swap R1/R2 and Invert per stick axis, in the game or the launcher (see
+  [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
-  or Thumb zones, tilt steering if you like), or a controller. Online: P2P races only.
+  or Thumb zones, tilt steering if you like), or a controller. Online: P2P races only. The game's
+  codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
+  buttons); **ENTER** goes back to the race and enters them.
 
 Known gaps:
 
@@ -242,6 +245,10 @@ meaning (Cross pedals in a race and confirms in menus), only the key or button f
   The keyboard can also take the sticks' directions.
 - A controller's sticks stay its own: **Swap Sticks** (the right stick steers) and an **Invert**
   for each axis of each stick.
+- **Swap L1/L2** and **Swap R1/R2** (off by default) are for controllers that report a shoulder
+  button as its trigger and the trigger as the shoulder: the two change places before anything
+  else reads them. Your bindings stay as they are, and a button you press to bind one counts as the
+  place it then has, so with a swap on you never need to rebind the four buttons by hand.
 - The button icons (Button Icons) show the controller button you chose for each PlayStation
   button.
 - **Reset Keyboard**, **Reset Controller 1** and **Reset Controller 2** (and the launcher tab's
@@ -251,7 +258,7 @@ They are saved in `dhd.ini` as one line for each layout, with only what differs 
 defaults:
 
     keyboard = cross:j,space square:x
-    pad1 = cross:east circle:south sticks:swap invert:ly
+    pad1 = cross:east circle:south sticks:swap invert:ly l1l2:swap r1r2:swap
 
 Each entry is `button:key` or `button:main,alternate` (`none` for nothing). Buttons: `cross`,
 `circle`, `square`, `triangle`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `start`, `select`, `up`,
@@ -266,7 +273,8 @@ Controller buttons by their place: `south`, `east`, `west`, `north` (the face bu
 PlayStation pad Cross, Circle, Square, Triangle; on an Xbox pad A, B, X, Y), `lb`, `rb`, `lt`,
 `rt`, `ls`, `rs` (the sticks pressed), `back`, `start`, `dpad_up`, `dpad_down`, `dpad_left`,
 `dpad_right`, `misc` (Share, Mic or Capture), `paddle_r1`, `paddle_l1`, `paddle_r2`, `paddle_l2`,
-`touchpad`. The defaults are the tables above: the keyboard's keys, and on a controller the
+`touchpad`. A controller's line may add `sticks:swap`, `invert:` with `lx`, `ly`, `rx`, `ry`, and
+`l1l2:swap` and `r1r2:swap`. The defaults are the tables above: the keyboard's keys, and on a controller the
 button in the same place as on a PlayStation pad. A line the game can't read is skipped where it
 can't be read (that button keeps its default) and dhd.log says why; a line that would leave the
 keyboard or a controller without Cross, Triangle, START, R1 or a d-pad direction puts that one layout
