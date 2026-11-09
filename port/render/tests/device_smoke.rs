@@ -39,11 +39,13 @@ fn check_device(g: &Gpu, adapter: Adapter, compiler: Compiler) {
     }
     let backend = if adapter == Adapter::Vulkan { wgpu::Backend::Vulkan } else { wgpu::Backend::Dx12 };
     assert_eq!(g.info.backend, backend);
-    // wgpu-native's settings: the adapter's own limits, dual-source blending when offered.
+    // wgpu-native's settings: the adapter's own limits, dual-source blending when offered and not
+    // an Intel GPU (device::dual_source, finding 188).
     assert_eq!(g.device.limits(), g.adapter.limits(), "the device has the adapter's own limits");
     let offered = g.adapter.features().contains(wgpu::Features::DUAL_SOURCE_BLENDING);
     let has = g.device.features().contains(wgpu::Features::DUAL_SOURCE_BLENDING);
-    assert_eq!(has, offered, "dual-source blending exactly when the adapter offers it");
+    assert_eq!(has, device::dual_source(offered, g.info.vendor, g.options.flags).used(),
+               "dual-source blending exactly as device::dual_source decides");
     assert_eq!(g.features & DHDR_FEAT_DUAL_SOURCE != 0, has, "DHDR_FEAT_DUAL_SOURCE");
 }
 

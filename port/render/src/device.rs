@@ -10,8 +10,9 @@
 //!   other DX12 option default. No memory budget thresholds.
 //! - Adapter: `DHDR_DEV_FALLBACK` = the fallback (WARP) adapter; else the enumerated adapter with
 //!   the PCI ids (not a CPU one), else high performance.
-//! - Device: the adapter's own limits; DUAL_SOURCE_BLENDING when offered and not refused
-//!   (`DHDR_DEV_NO_DUAL_SOURCE`); default memory hints; trace off.
+//! - Device: the adapter's own limits; DUAL_SOURCE_BLENDING as `dual_source` decides (offered,
+//!   not refused by `DHDR_DEV_NO_DUAL_SOURCE`, and not an Intel GPU unless `DHDR_DEV_DUAL_SOURCE`
+//!   forces it; finding 188); default memory hints; trace off.
 //! - `guard::install_error_handler` right after creation, and `lost::watch` (a lost device ends
 //!   the game with a message, finding 171); `log::set_level(log_level)`.
 //! - `DHDR_FEAT_RENDER_PIPELINES`: present.wgsl's pipeline (an RGBA8 target) built inside a
@@ -125,6 +126,67 @@ pub fn backends(o: &DeviceOptions) -> wgpu::Backends {
     }
 }
 
+/// Intel's PCI vendor id.
+pub const VENDOR_INTEL: u32 = 0x8086;
+
+/// Whether the device uses dual-source blending, and why (`dual_source`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DualSource {
+    /// The adapter does not offer it.
+    NotOffered,
+    /// Offered and used.
+    On,
+    /// `DHDR_DEV_NO_DUAL_SOURCE` (DHD_WGPU_DUAL_SOURCE=0).
+    Refused,
+    /// An Intel GPU: off by the game's own rule (finding 188).
+    IntelOff,
+    /// An Intel GPU, used anyway: `DHDR_DEV_DUAL_SOURCE` (DHD_WGPU_DUAL_SOURCE=1).
+    IntelForced,
+}
+
+impl DualSource {
+    /// Whether the device asks for DUAL_SOURCE_BLENDING.
+    pub fn used(self) -> bool {
+        matches!(self, DualSource::On | DualSource::IntelForced)
+    }
+
+    /// dhd.log's line when the game's rule decided (an Intel GPU), else None: the native
+    /// renderer's `GS blending with/without dual-source blending` line says the rest.
+    pub fn log_line(self, adapter: &str) -> Option<String> {
+        match self {
+            DualSource::IntelOff => Some(format!(
+                "gs: dual-source blending off on {adapter} (Intel GPUs hang on it, finding 188); DHD_WGPU_DUAL_SOURCE=1 turns it on")),
+            DualSource::IntelForced => Some(format!(
+                "gs: dual-source blending on for {adapter} by DHD_WGPU_DUAL_SOURCE=1 (off by default on Intel GPUs, finding 188)")),
+            _ => None,
+        }
+    }
+}
+
+/// The one place that decides dual-source blending, from the adapter (`offered`: its features
+/// have DUAL_SOURCE_BLENDING; `vendor`: its PCI vendor id, `AdapterInfo::vendor`) and the
+/// `DHDR_DEV_*` flags:
+/// - not offered: off, whatever the flags say;
+/// - `DHDR_DEV_NO_DUAL_SOURCE` (DHD_WGPU_DUAL_SOURCE=0): off;
+/// - an Intel GPU (vendor 0x8086, every generation and backend): off unless `DHDR_DEV_DUAL_SOURCE`
+///   (DHD_WGPU_DUAL_SOURCE=1). Issue #58: an Ice Lake (Gen11) GPU hung within seconds on D3D12 and
+///   on Vulkan with it and ran without it; Intel's own hardware workarounds (Mesa's
+///   Wa_14017468336: dual-source render target writes hang Gen11 and Gen12 at SIMD32, and Gen11 at
+///   SIMD16) and Dolphin's broken-dual-source entries for Intel on macOS point the same way.
+///   Without it a draw blending on As takes a second draw for its alpha (finding 084);
+/// - else on.
+pub fn dual_source(offered: bool, vendor: u32, flags: u32) -> DualSource {
+    if !offered {
+        DualSource::NotOffered
+    } else if flags & DHDR_DEV_NO_DUAL_SOURCE != 0 {
+        DualSource::Refused
+    } else if vendor == VENDOR_INTEL {
+        if flags & DHDR_DEV_DUAL_SOURCE != 0 { DualSource::IntelForced } else { DualSource::IntelOff }
+    } else {
+        DualSource::On
+    }
+}
+
 /// The probe of `DHDR_FEAT_RENDER_PIPELINES`: present.wgsl's pipeline with an RGBA8 target, built
 /// inside a Validation scope. Returns the scope; the caller pops it (None = the probe was built).
 pub fn render_probe(device: &wgpu::Device) -> wgpu::ErrorScopeGuard {
@@ -218,8 +280,11 @@ mod native {
                 has(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES)
             ));
         }
-        let dual = adapter.features().contains(wgpu::Features::DUAL_SOURCE_BLENDING)
-            && o.flags & DHDR_DEV_NO_DUAL_SOURCE == 0;
+        let choice = dual_source(adapter.features().contains(wgpu::Features::DUAL_SOURCE_BLENDING), info.vendor, o.flags);
+        if let Some(line) = choice.log_line(&info.name) {
+            crate::host::log(&line);
+        }
+        let dual = choice.used();
         let timers = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
         let timers = if std::env::var_os("DHD_GPU_TIMING").is_some() && adapter.features().contains(timers) {
             timers
@@ -412,4 +477,50 @@ pub extern "C" fn dhdr_device_max_texture() -> u32 {
 /// `DHDR_FEAT_DUAL_SOURCE` of `g`.
 pub fn has_dual_source(g: &Gpu) -> bool {
     g.features & DHDR_FEAT_DUAL_SOURCE != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NVIDIA: u32 = 0x10DE;
+    const AMD: u32 = 0x1002;
+
+    /// The rule (finding 188): Intel off unless forced; DHD_WGPU_DUAL_SOURCE=0 refuses it on every
+    /// GPU; nothing turns on what the adapter does not offer.
+    #[test]
+    fn dual_source_rule() {
+        use DualSource::*;
+        let force = DHDR_DEV_DUAL_SOURCE;
+        let refuse = DHDR_DEV_NO_DUAL_SOURCE;
+        for (offered, vendor, flags, want) in [
+            (true, NVIDIA, 0, On),
+            (true, AMD, 0, On),
+            (true, AMD, force, On),
+            (true, VENDOR_INTEL, 0, IntelOff),
+            (true, VENDOR_INTEL, DHDR_DEV_VULKAN, IntelOff),
+            (true, VENDOR_INTEL, force, IntelForced),
+            (true, VENDOR_INTEL, refuse, Refused),
+            (true, VENDOR_INTEL, refuse | force, Refused),
+            (true, NVIDIA, refuse, Refused),
+            (false, NVIDIA, 0, NotOffered),
+            (false, VENDOR_INTEL, force, NotOffered),
+        ] {
+            let got = dual_source(offered, vendor, flags);
+            assert_eq!(got, want, "offered {offered} vendor {vendor:#06x} flags {flags:#x}");
+            assert_eq!(got.used(), matches!(want, On | IntelForced));
+        }
+    }
+
+    /// One dhd.log line exactly when the Intel rule decided.
+    #[test]
+    fn dual_source_log_line() {
+        let off = DualSource::IntelOff.log_line("Intel(R) UHD Graphics").unwrap();
+        assert!(off.starts_with("gs: dual-source blending off on Intel(R) UHD Graphics"), "{off}");
+        assert!(off.contains("DHD_WGPU_DUAL_SOURCE=1"), "{off}");
+        assert!(DualSource::IntelForced.log_line("x").unwrap().contains("DHD_WGPU_DUAL_SOURCE=1"));
+        for quiet in [DualSource::On, DualSource::Refused, DualSource::NotOffered] {
+            assert_eq!(quiet.log_line("x"), None);
+        }
+    }
 }

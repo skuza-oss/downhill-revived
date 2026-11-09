@@ -323,8 +323,8 @@ static void native_scale_hold(Native *n, uint64_t memory)
     if (n->scale_setting > limit) n->scale_setting = limit;
 }
 
-/* native_init's common half: the Native over exact, the dual-source choice (DHD_WGPU_DUAL_SOURCE=0
-   turns it off), the Rust native renderer, the present options, the scale limit (native_scale_hold
+/* native_init's common half: the Native over exact, dual-source blending when the device has it
+   (the device decided: DHD_WGPU_DUAL_SOURCE, Intel GPUs; finding 188), the Rust native renderer, the present options, the scale limit (native_scale_hold
    with memory) and the replacements' device. NULL when unavailable (g keeps the exact renderer);
    *start: the time before Rust built its shaders and pipelines. */
 static Native *native_create_rust(NativeExact *exact, uint64_t memory, double *start)
@@ -336,8 +336,7 @@ static Native *native_create_rust(NativeExact *exact, uint64_t memory, double *s
        native_convert (init.rs inverse_table); C needs only color_pixel from it. */
     static uint32_t inverse[4096];
     native_inverse_table(n, inverse);
-    const char *dual = getenv("DHD_WGPU_DUAL_SOURCE");
-    n->dual = (dhdr_device_features() & DHDR_FEAT_DUAL_SOURCE) && !(dual && !atoi(dual));
+    n->dual = (dhdr_device_features() & DHDR_FEAT_DUAL_SOURCE) != 0;
     *start = host_wall_seconds();
     if (!(n->r = dhdr_native_create(n->dual ? DHDR_NATIVE_DUAL : 0)) ||
         !(n->snapshot = calloc(1, sizeof *n->snapshot))) {
