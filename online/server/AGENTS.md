@@ -3,7 +3,7 @@
 The root `AGENTS.md` rules apply. Protocol: `docs/online-protocol.md`; steps and deployment:
 `README.md` here.
 
-- Races are state sync (finding 044). Since protocol 3 the STATE and EVENT frames travel over
+- Races are state sync (finding 044). The STATE and EVENT frames travel over
   Cloudflare Realtime SFU (TURN over TLS as the fallback); the room only sets up each member's
   session (one per room stay, its subscriptions made at the grid's lock: finding 177) and
   credentials and never sends a player another's address, SDP, session id or credentials

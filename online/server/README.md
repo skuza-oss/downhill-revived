@@ -21,7 +21,7 @@ is `docs/ONLINE-PLAN.md`.
 | `tools/loadtest.mjs` | The WebSocket side of a race (binary PINGs, the caps) against a running server; reports the PING round trip. Race frames travel over the SFU (finding 158): `port/render/net/src/probe.rs` measures them. |
 
 Rooms use the WebSocket hibernation API, so an idle lobby costs little. Race frames do not go
-through the room: since protocol 3 they travel over Cloudflare Realtime SFU DataChannels, and the
+through the room: they travel over Cloudflare Realtime SFU DataChannels, and the
 room only creates each member's session (one per room stay, finding 177) and channels (finding 158).
 
 ## Develop and test
@@ -42,9 +42,9 @@ node tools/loadtest.mjs --url wss://dhd-online.<account>.workers.dev   # against
 The load test connects every player from one address: the limit per address (30 room
 connections a minute, `wrangler.jsonc` `ratelimits`) refuses runs past that (`rate_limited`).
 
-Race frames no longer pass through this server (protocol 3 and later: Cloudflare Realtime SFU,
-below); the load test measures the room's messages. `port/render/net/src/probe.rs` measures the SFU
-path (findings 158, 177).
+Race frames don't pass through this server (Cloudflare Realtime SFU, below); the load test
+measures the room's messages. `port/render/net/src/probe.rs` measures the SFU path (findings 158,
+177).
 
 ## Deploy
 
@@ -238,7 +238,7 @@ again after 2, 10 and 30 minutes, then wait for Cloudflare's 24 h.
 - The server does not check the ISO hash against the known US ISO; the client must refuse
   other regions, and the server only makes everyone match the host.
 
-## Realtime SFU (since protocol 3)
+## Realtime SFU
 
 The deploy needs four Worker secrets (values from the Cloudflare dashboard, Realtime; never in a
 tracked file, a log or a client message):
