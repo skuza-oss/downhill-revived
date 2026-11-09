@@ -509,6 +509,22 @@ describe("P2P rooms (finding 186)", () => {
     }
   });
 
+  it("a member back after a while gets its full time to link to the hub (review 4)", async () => {
+    const { cs, code, ids } = await p2pRoom(3);
+    const [hub, a] = cs;
+    link(hub, ids[0], ids[2], true);
+    const token = a.welcome.rejoinToken;
+    // A drops while its link is still being made, and is away longer than a link's time.
+    await runInDurableObject(room(code), async (r: any) => { await r.webSocketClose(r.sockets.get(ids[1]), 1006, "", false); });
+    await expire(code, (st) => { st.members[1].linkFrom = Date.now() - 60_000; });
+    const back = await Client.connect(`/v1/rooms/${code}`);
+    back.hello("P1", { features: FEATURES, rejoinToken: token });
+    await back.json("welcome");
+    await runDurableObjectAlarm(room(code));
+    expect(linkOf(await routes(back), ids[1])).toBeUndefined();  // still trying the hub
+    expect(await runInDurableObject(room(code), async (r: any) => r.state.members[1].link)).toBeUndefined();
+  });
+
   it("a member back by its token keeps the hub and its link, and hears the routes again", async () => {
     const { cs, code, ids } = await p2pRoom(2);
     const [hub, a] = cs;

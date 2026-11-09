@@ -889,12 +889,14 @@ export class Room extends DurableObject<Env> {
     member.raceRejoin = features.includes(FEATURE_RACE_REJOIN);
     if (!ghost) st.members.push(member);
     if (asHost) st.hostId = member.id;
-    // A P2P room's first hub is its creator; a newcomer links to the hub (finding 186).
-    if (st.transport === "p2p" && !ghost) {
-      if (asHost || st.hub == null) {
+    // A P2P room's first hub is its creator; a newcomer links to the hub (finding 186). A member
+    // back whose link is still to be made gets its full time for it now: away, it could not signal
+    // (review 4).
+    if (st.transport === "p2p") {
+      if (!ghost && (asHost || st.hub == null)) {
         st.hub = member.id;
         st.hubChangedAt = Date.now();
-      } else member.linkFrom = Date.now();
+      } else if (member.id !== st.hub && !member.link) member.linkFrom = Date.now();
     }
     // A racer back in its race (finding 175): it raced on over the SFU meanwhile.
     const backInRace = !!ghost && this.inRace(st, ghost.id) && !!ghost.raceRejoin;
@@ -2152,7 +2154,8 @@ export class Room extends DurableObject<Env> {
   private async p2pUpkeep(st: RoomState, now: number): Promise<void> {
     for (const x of [...st.members]) {
       if (x.id === st.hub || x.link) continue;
-      if (x.linkFrom == null) x.linkFrom = now;
+      // Away (no room connection), a member can't signal: its time starts when it is back.
+      if (x.linkFrom == null || !this.sockets.has(x.id)) x.linkFrom = now;
       else if (now >= x.linkFrom + this.p2pLinkMs()) await this.setLink(st, x, false);
     }
     if (st !== this.state) return;
