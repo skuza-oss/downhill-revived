@@ -4,7 +4,8 @@ Status: current
 
 Branch `fix/silent-race-link` from `main` 3518ce84, started 2026-11-09. A hotfix: the server part
 deploys first and keeps 0.7.13 games working as they do; the game part ships in the next release.
-No change to race synchronization, snapshots or puppets; P2P rooms untouched.
+No change to race synchronization, snapshots or puppets; P2P rooms untouched (their rooms became
+server rooms in finding 186, which applies these rules to their SFU side and their star).
 
 ## Goal and acceptance
 

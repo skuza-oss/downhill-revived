@@ -3,8 +3,9 @@
 Status: in progress
 Supersedes: parts of 180 (its coordinator in the host's game, its own server and Worker, TURN between games)
 
-Branch `feat/p2p-transport` from local `main` 3518ce84, started 2026-11-09. This file is the lane's
-plan while it runs and its finding when it merges.
+Branch `feat/p2p-transport` from local `main` 3518ce84, started 2026-11-09; main 10520d2e (finding
+187) merged in on 2026-11-09. This file is the lane's plan while it runs and its finding when it
+merges.
 
 ## Goal and acceptance
 
@@ -197,6 +198,54 @@ connection, an SFU frame from a non-hub must carry its own slot).
 After the fixes: `p2p-rooms.test.ts` 24 tests (server 227), `dhd_net` 33 and `dhd_star` 10, the
 local-server room tests (2 games, 10 games, the hub leaving mid-race) and `check_p2p.mjs` pass;
 `check.py port` and `check.py server` OK (on 41f3486e; the core is unchanged by the fixes: `build_wasm` took the cached module).
+
+## Merged with finding 187 (2026-11-09)
+
+Main moved to 10520d2e (finding 187, live as server version b1e58d0e: a race link that delivers
+nothing is reported and repaired, dead stream ids never reused, the start moment also over the
+room). Merged into this branch with a merge commit (05e4053b, conflicts kept both sides), then:
+
+| Commit | What |
+|---|---|
+| c7334257 | 187's server rules for a P2P room's SFU side: a dead session (`poisoned`) and `sfu_silent` repaired with a new session for a fallback racer and for the bridging hub (racing or not); a star racer's dead session replaced at once (its race runs on the star) and its `sfu_silent` ignored; the hub never taken out of its race for the SFU (the renewal deadline neither); a hub with a dead session can't bridge (`bridges`); fallback deadlines spare a racer being renewed; 187's log lines mask P2P codes |
+| 6e326ff7 | The SFU association's silence counts only its part of a P2P race (the publishers the star names: a star racer's never reports); the page takes and names the start moment over the room (`race_go`) |
+| 713132d3 | A bridging hub still silent after its one renewal is only logged (with one fallback racer, that racer's upload may be the cause, and moving the hub reconnects every star racer); a hub with no working session still moves (checkHub) |
+| 56128744 | No race-frame silence rule on a star link (below) |
+| 65481c57 | `rustgs.py`'s cache key had no star sources (nor `dhd_session`'s before): a star-only change linked a stale library (`test_rustgs_key.py`) |
+| 349edca9 | The merge put 187's `heard = true` in the SFU room's branch of `receive_frame` only: in a P2P room the hub and every fallback racer reported silence 8 s after the release whatever came, and fallback racers then left the race |
+
+Decisions:
+
+- **A star racer's silence is the keepalives'.** Asked what silence means for a star member: the
+  keepalives travel on the reliable channel the race's events use, and a star's two channels are
+  negotiated once and never closed or reused, so 187's dead stream ids can't happen on a star; a
+  link whose keepalives stop for 5 s is down (link failure, the SFU fallback) as before. A
+  race-frame silence rule (no race frame from the hub 3 + 8 s after the start) was tried
+  (6e326ff7) and dropped (56128744): it took a racer off the star while the hub's game was still on
+  its way to the load screen, where the rides are first sent.
+- **The bridging hub reports and is renewed once** (the brief's same repair), never retired or
+  moved for silence; a fallback racer is renewed once, then out of the race, as in an SFU room.
+- **`race_go`** needs nothing P2P-specific: the room's namer is the lowest slot still racing,
+  whoever the hub is; server test "the start moment comes over the room in a P2P room too, from
+  the next racer when the hub leaves before it". The page now sends and takes it too.
+- SFU rooms and 0.7.13 games: 187's code paths unchanged (the helpers return what they did for an
+  SFU room; `silent-link.test.ts` passes as merged).
+
+Checks on the merged branch (2026-11-09, this PC): `check.py port` and `check.py server` (238
+tests) OK on 349edca9; boot (600) and race (5000) state traces equal 0.7.13's (`state_diff.py` PASS);
+`dhd_net` 35 and `dhd_star` 10 tests; the local-server room tests (2 games, 10 games, the hub
+leaving mid-race) and `check_p2p.mjs` pass. Runs on local servers with real Realtime:
+
+| Run | Result |
+|---|---|
+| 187's forced-silent guest in an SFU room (`online_race.py --bots 2 --b DHD_NET_SFU_SILENT=1`), final build | as in 187: "no race frame from any of the 3 other racers 8 s after the release", a new session released 3.2 s after its start message, "the start moment came from the room", countdown 1.5 s, 618 messages received by race clock 301, results on both games |
+| P2P, nettool hub + star bot + fallback bot with `DHD_NET_SFU_SILENT=1` | before 349edca9: hub and fallback both "silent", the fallback out of the race; after: only the fallback reports, a new session released 2.1 s later, it races and finishes (120 frames received) |
+| P2P, the hub's game, two star bots, a fallback game (`DHD_NET_P2P_UDP=0`, `DHD_NET_SFU_SILENT=1`) | the fallback game reports, a new session (released 2.1 s after), the start moment from the room, countdown 1.5 s, 634 messages by race clock 301, results on both games; the hub's game reported silence once (its fallback game sent nothing until its load screen, about 30 s after the start in this scripted flow): one renewal, logged the second time |
+
+Risk (187's, SFU rooms included): a racer whose others reach the load screen more than about 11 s
+after the start message (the scripted test flow here: 20-35 s with three games on one PC) reads
+as a silent link: one renewal, and a fallback or SFU racer silent again leaves the race. The menu
+flow reaches the load screen sooner; production logs will tell.
 
 ## Result
 
