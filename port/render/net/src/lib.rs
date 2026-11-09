@@ -12,8 +12,9 @@
 //! send thread writes, blocking, under the same lock. It also owns the room's SFU UDP socket,
 //! str0m state machine, negotiated channels and bounded event/state queues; the SFU's reader
 //! thread wakes it for each datagram, as ws_send does for each message. Race frames never
-//! enter the TCP stream. Signaling remains on the room WebSocket. A P2P room's connection
-//! (finding 180) has its own send thread, p2p.rs: peer connections instead of the SFU.
+//! enter the TCP stream. Signaling remains on the room WebSocket. In a P2P room (finding 186) the
+//! same thread also runs the star's peer connections and its router (p2p.rs): race frames go
+//! where the router says, a peer, the SFU or the game.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 mod diagnostics;
@@ -82,16 +83,14 @@ struct Queue {
 
 /// ws.h's `WsConn` (opaque to C): shared by the two threads and the caller through an `Arc`.
 pub struct WsConn {
-    /// A P2P room (its URL's /v1/p2p/): p2p.rs runs the send thread.
-    p2p: bool,
     h: WsHandler,
     queue: Mutex<Queue>,
     wake: Condvar,
     live: Mutex<Option<Live>>,
     stopping: AtomicBool,
-    /// The send thread holds an SFU association for a race: race frames are taken while the room
-    /// connection is down (finding 175), the race goes on over it.
-    sfu_live: AtomicBool,
+    /// The send thread holds a race transport (an SFU association, or a P2P room's link): race
+    /// frames are taken while the room connection is down (finding 175), the race goes on over it.
+    race_live: AtomicBool,
     /// The race ping in ms (`Sfu::rtt_ms`, finding 181), -1 none: written by the send thread
     /// after each poll, read by `ws_race_rtt_ms`.
     race_rtt_ms: AtomicI32,
@@ -294,6 +293,9 @@ struct Assoc {
     pause: Duration,
     /// The last association went through the TURN relay: the next asks for one at once.
     turn_first: bool,
+    /// A P2P room: the publishers this game's race needs on the SFU (dhd_star sfu_expect, finding
+    /// 186), applied to every association. None: an SFU room.
+    p2p_expect: Option<Vec<u64>>,
 }
 
 impl Assoc {
@@ -303,10 +305,13 @@ impl Assoc {
         self.held.clear();
         if let Some(old) = self.sfu.take() { self.turn_first |= old.via_relay(); }
         let (mut rtc, offer) = sfu::Sfu::start(wake.clone(), self.turn_first)?;
+        if let Some(publishers) = &self.p2p_expect {
+            rtc.expect_p2p(publishers.clone());
+        }
         let result = self.start.as_ref().map_or(Ok(()), |s| rtc.signal(s));
         self.sfu = Some(rtc);
         lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
-        c.sfu_live.store(true, Ordering::Release);
+        c.race_live.store(true, Ordering::Release);
         result
     }
     /// The association failed: dropped; a new one after the pause (doubling up to a minute, back to
@@ -319,11 +324,42 @@ impl Assoc {
     }
 }
 
+/// A P2P room's routes reached the router: the SFU association learns its part of the race, and a
+/// hub that sits the race out gets the race's start for it (the room sends it no start).
+fn p2p_routes(a: &mut Assoc, star: &mut p2p::P2p) {
+    let publishers = star.star.sfu_expect();
+    a.p2p_expect = Some(publishers.clone());
+    let Some(rtc) = a.sfu.as_mut() else {
+        a.start = star.star.race_start().or(a.start.take());
+        return;
+    };
+    rtc.expect_p2p(publishers);
+    if let Some(start) = star.star.race_start() {
+        if rtc.race() != start["startAt"].as_u64() && rtc.signal(&start).is_err() {
+            eprintln!("net: SFU signaling failed");
+        }
+        a.start = Some(start);
+    }
+}
+
+/// The router's frames for the SFU and the game (p2p.rs runs the rest).
+fn p2p_actions(c: &WsConn, a: &mut Assoc, star: &mut p2p::P2p) {
+    for action in star.run(c) {
+        match action {
+            dhd_star::Action::Sfu(frame) => {
+                if a.sfu.as_mut().is_some_and(|rtc| rtc.send(&frame).is_err()) {
+                    eprintln!("net: SFU send queue full");
+                    a.failed();
+                }
+            }
+            dhd_star::Action::Game(frame) => c.deliver(true, &frame),
+            _ => {}
+        }
+    }
+}
+
 /// The send thread: drain the queue in order, tick the handler.
 fn send_main(c: Arc<WsConn>) {
-    if c.p2p {
-        return p2p::run(&c);
-    }
     // The SFU reader wakes this thread for each datagram, as ws_send does for each message.
     let weak = Arc::downgrade(&c);
     let wake: sfu::Wake = Arc::new(move || {
@@ -334,21 +370,24 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
-    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false };
+    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None };
     // A room's welcome came on this connection: an association belongs here.
     let mut welcomed = false;
+    // A P2P room (finding 186): its star, made by the first welcome that says so; it outlives a
+    // dropped room connection (the race goes on over its links) and goes with the room.
+    let mut star: Option<p2p::P2p> = None;
     while !c.stopping.load(Ordering::Acquire) {
         {
             let q = lock(&c.queue);
-            let wait = if unwritten { Duration::ZERO } else { TICK };
+            let wait = if unwritten { Duration::ZERO } else if star.as_ref().is_some_and(|s| s.polling()) { p2p::POLL } else { TICK };
             let (mut q, _) = c.wake.wait_timeout_while(q, wait, |q| q.out.is_empty() && q.incoming.is_empty() && !q.sfu_input && !c.stopping.load(Ordering::Acquire)).unwrap_or_else(|e| e.into_inner());
             q.sfu_input = false;
         }
         let connected = lock(&c.queue).connected;
         if !connected { welcomed = false; }
-        // The room connection is down: the race goes on over the SFU while the receive thread
-        // rejoins (finding 175); without an association there is nothing to do.
-        if !connected && a.sfu.is_none() { c.sfu_live.store(false, Ordering::Release); c.race_rtt_ms.store(-1, Ordering::Relaxed); continue; }
+        // The room connection is down: the race goes on over the SFU (or the star) while the
+        // receive thread rejoins (finding 175); without either there is nothing to do.
+        if !connected && a.sfu.is_none() && star.is_none() { c.race_live.store(false, Ordering::Release); c.race_rtt_ms.store(-1, Ordering::Relaxed); continue; }
         // Lobby and SFU callbacks share this thread. Apply the transport's start marker
         // before the game sees start, then deliver any early reliable race events.
         loop {
@@ -360,9 +399,27 @@ fn send_main(c: Arc<WsConn>) {
                     if matches!(kind, "start" | "ended") {
                         lock(&c.queue).out.retain(|(binary, bytes)| !*binary || !matches!(bytes.first(), Some(5 | 6)));
                     }
+                    // A P2P room's routes and its star's signaling are the send thread's, not the game's.
+                    if let (Some(s), "p2p" | "p2p_signal") = (star.as_mut(), kind) {
+                        if kind == "p2p" {
+                            s.room(&message);
+                            p2p_routes(&mut a, s);
+                        } else if let Some(from) = message["from"].as_u64() {
+                            s.signal(from, &message["signal"]);
+                        }
+                        lock(&c.queue).handled += 1;
+                        continue;
+                    }
                     let result = match kind {
                         "welcome" => {
                             welcomed = true;
+                            // The kind of room is the welcome's (a P2P room says so, finding 186).
+                            if message["transport"] == "p2p" {
+                                star.get_or_insert_with(|| p2p::P2p::new(wake.clone())).room(&message);
+                            } else {
+                                star = None;
+                                a.p2p_expect = None;
+                            }
                             // Back in this room (a rejoin): the room still has this game's session
                             // and the association still has its answer, so both stay, with what it
                             // said meanwhile. Otherwise a new association, and with it a new session.
@@ -415,9 +472,13 @@ fn send_main(c: Arc<WsConn>) {
                 if a.start(&c, &wake).is_err() { a.failed(); }
             }
         }
-        // Race frames the game queued go to the SFU before this poll, which writes them out:
-        // they never wait for the next wake (finding 158, round 3).
-        flush(&c, &mut a);
+        // Race frames the game queued go to the SFU (or the star) before this poll, which writes
+        // them out: they never wait for the next wake (finding 158, round 3).
+        flush(&c, &mut a, star.as_mut());
+        if let Some(s) = star.as_mut() {
+            s.poll(&c);
+            p2p_actions(&c, &mut a, s);
+        }
         let mut incoming = Vec::new();
         if let Some(rtc) = a.sfu.as_mut() {
             match rtc.poll() {
@@ -435,12 +496,20 @@ fn send_main(c: Arc<WsConn>) {
                 Err(e) => { eprintln!("net: SFU connection failed ({e})"); a.failed(); }
             }
         }
-        c.sfu_live.store(a.sfu.is_some(), Ordering::Release);
+        c.race_live.store(a.sfu.is_some() || star.as_ref().is_some_and(|s| s.star.any_up()), Ordering::Release);
         c.race_rtt_ms.store(a.sfu.as_ref().and_then(|s| s.rtt_ms()).map_or(-1, |ms| ms as i32), Ordering::Relaxed);
-        for data in incoming {
-            c.deliver(true, &data);
+        for (member, frame) in incoming {
+            match star.as_mut() {
+                // A P2P room: the router checks the frame's slot against its publisher, and the hub
+                // forwards a fallback racer's into the star.
+                Some(s) => s.star.sfu_frame(member, frame),
+                None => c.deliver(true, &frame),
+            }
         }
-        flush(&c, &mut a);
+        if let Some(s) = star.as_mut() {
+            p2p_actions(&c, &mut a, s);
+        }
+        flush(&c, &mut a, star.as_mut());
         // Once: frames a full SCTP buffer refuses wait for the next wake, not a busy loop.
         unwritten = !unwritten && a.sfu.as_ref().is_some_and(|s| s.unwritten());
         if let Some(f) = c.h.on_tick {
@@ -450,12 +519,18 @@ fn send_main(c: Arc<WsConn>) {
         }
     }
 }
-/// Sends what is queued, in order: race frames to the SFU association, the rest on the WebSocket.
-fn flush(c: &WsConn, a: &mut Assoc) {
+/// Sends what is queued, in order: race frames to the SFU association (in a P2P room, to the star's
+/// router, which says where each goes), the rest on the WebSocket.
+fn flush(c: &WsConn, a: &mut Assoc, mut star: Option<&mut p2p::P2p>) {
     loop {
         let item = lock(&c.queue).out.pop_front();
         let Some((binary, data)) = item else { break };
         if binary && matches!(data.first(), Some(5 | 6)) {
+            if let Some(s) = star.as_deref_mut() {
+                s.star.game_frame(&data);
+                p2p_actions(c, a, s);
+                continue;
+            }
             // A full event queue: the association is stuck; a new one replaces it.
             if a.sfu.as_mut().is_some_and(|rtc| rtc.send(&data).is_err()) {
                 eprintln!("net: SFU send queue full");
@@ -475,13 +550,12 @@ pub unsafe extern "C" fn ws_start(url: *const c_char, h: *const WsHandler) -> *m
     }
     let url = unsafe { CStr::from_ptr(url) }.to_string_lossy().into_owned();
     let c = Arc::new(WsConn {
-        p2p: url.contains("/v1/p2p/rooms/"),
         h: unsafe { *h },
         queue: Mutex::new(Queue::default()),
         wake: Condvar::new(),
         live: Mutex::new(None),
         stopping: AtomicBool::new(false),
-        sfu_live: AtomicBool::new(false),
+        race_live: AtomicBool::new(false),
         race_rtt_ms: AtomicI32::new(-1),
         running: Mutex::new(true),
         ended: Condvar::new(),
@@ -506,8 +580,9 @@ pub unsafe extern "C" fn ws_send(ws: *mut WsConn, binary: c_int, data: *const c_
     let bytes = if n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(data as *const u8, n) }.to_vec() };
     let mut q = lock(&c.queue);
     let race_frame = binary != 0 && matches!(bytes.first(), Some(5 | 6));
-    // Race frames go on over the SFU while the room connection is down (finding 175).
-    if !q.connected && !(race_frame && c.sfu_live.load(Ordering::Acquire)) {
+    // Race frames go on over the SFU (or a P2P room's star) while the room connection is down
+    // (finding 175).
+    if !q.connected && !(race_frame && c.race_live.load(Ordering::Acquire)) {
         return;
     }
     if q.out.len() >= 256 {

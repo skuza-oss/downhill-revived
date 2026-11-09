@@ -138,10 +138,11 @@ void client_connected(NetClient *c, const NetTransport *tr)
         snprintf(token + strlen(token), sizeof token - strlen(token), ",\"raceStartAt\":%.0f", c->race_at);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
     /* features: race_rejoin, it races on over the SFU while its room connection is down and
-       rejoins its race (finding 175). "countdown" and "session" asked servers before finding 185
-       for the race room rules, which every room has now; still sent while such a server runs. */
+       rejoins its race (finding 175); p2p, it races in P2P rooms (their star and fallback, finding
+       186). "countdown" and "session" asked servers before finding 185 for the race room rules,
+       which every room has now; still sent while such a server runs. */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\"]%s%s}", NET_PROTOCOL, c->version,
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\",\"p2p\"]%s%s}", NET_PROTOCOL, c->version,
         DHD_VERSION, c->iso, name, install, token);
     if (!c->racing && c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
@@ -520,6 +521,11 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         json_bool(text, "host", &c->lobby.is_host);
         if (c->lobby.is_host)
             c->lobby.host_id = c->lobby.member_id;
+        {   /* the kind of room is the welcome's (a P2P room says so, finding 186) */
+            char transport[8] = "";
+            json_string(text, "transport", transport, sizeof transport);
+            c->lobby.is_p2p = !strcmp(transport, "p2p");
+        }
         {   /* kept for a rejoin's hello; only hex goes back into JSON */
             char token[sizeof c->rejoin_token] = "";
             if (json_string(text, "rejoinToken", token, sizeof token) && token[0] &&

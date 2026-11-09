@@ -85,8 +85,6 @@ pub struct Client {
     failed: Option<String>,
     rx: Vec<u8>,
     seq: u64,
-    /// Fresh credentials for this allocation (`renew`), applied once no request is in flight.
-    renewal: Option<(String, String)>,
 }
 
 impl Client {
@@ -95,7 +93,7 @@ impl Client {
             username: username.into(), password: password.into(), realm: None, nonce: None, key: None,
             relayed: None, lifetime: Duration::from_secs(600), refresh_at: None, pending: HashMap::new(),
             by_peer: HashMap::new(), channels: HashMap::new(), queued: VecDeque::new(), out: vec![],
-            events: VecDeque::new(), failed: None, rx: vec![], seq: 0, renewal: None,
+            events: VecDeque::new(), failed: None, rx: vec![], seq: 0,
         };
         // The first Allocate goes without credentials: its 401 brings the realm and nonce.
         c.request(Kind::Allocate, now);
@@ -109,9 +107,6 @@ impl Client {
     /// The server's 401 brought a realm and nonce (the probe).
     #[cfg(test)]
     pub fn challenged(&self) -> bool { self.realm.is_some() && self.nonce.is_some() }
-    /// The credentials' username in use (peer.rs's renewal test).
-    #[cfg(test)]
-    pub fn username(&self) -> &str { &self.username }
     /// A ChannelBind is in flight (the probe).
     #[cfg(test)]
     pub fn binding(&self) -> bool { self.pending.values().any(|(k, _)| matches!(k, Kind::Bind(_))) }
@@ -166,29 +161,11 @@ impl Client {
         }
     }
 
-    /// New credentials for the same allocation, before the current ones expire: an allocation
-    /// lives as long as it is refreshed with a valid credential, so a Refresh signed with the new
-    /// ones keeps it (Cloudflare's TURN FAQ, finding 180). Applied, with that Refresh, once no
-    /// request is in flight: an answer is checked with the key of the request it answers.
-    pub fn renew(&mut self, username: &str, password: &str) {
-        if username != self.username || password != self.password {
-            self.renewal = Some((username.into(), password.into()));
-        }
-    }
-
     /// Refreshes and timeouts; call at least every second.
     pub fn tick(&mut self, now: Instant) {
         if self.failed.is_some() { return; }
         if self.pending.values().any(|(_, at)| now.duration_since(*at) > TRANSACTION_TIMEOUT) {
             return self.fail("TURN server did not answer");
-        }
-        if self.renewal.is_some() && self.pending.is_empty() && self.relayed.is_some() && !self.lifetime.is_zero() {
-            if let (Some((username, password)), Some(realm)) = (self.renewal.take(), self.realm.clone()) {
-                self.key = Some(md5(format!("{username}:{realm}:{password}").as_bytes()).to_vec());
-                (self.username, self.password) = (username, password);
-                self.refresh_at = None;
-                self.request(Kind::Refresh, now);
-            }
         }
         if self.refresh_at.is_some_and(|at| now >= at) && !self.pending.values().any(|(k, _)| *k == Kind::Refresh) {
             self.refresh_at = None;
@@ -423,7 +400,7 @@ fn unxor_address(v: &[u8], id: &[u8; 12]) -> Option<SocketAddr> {
     }
 }
 
-/// A STUN Binding request (RFC 8489): a P2P peer asks Cloudflare's STUN server for its public
+/// A STUN Binding request (RFC 8489): a P2P room's peer asks Cloudflare's STUN server for its public
 /// address, its server-reflexive candidate (port/render/net/src/peer.rs). No credentials.
 pub fn binding_request(id: [u8; 12]) -> Vec<u8> {
     let mut m = Message::new(BINDING | REQUEST, id);
@@ -629,37 +606,6 @@ mod tests {
         // Unanswered: the allocation fails after the transaction timeout.
         c.tick(now + Duration::from_secs(541) + TRANSACTION_TIMEOUT + Duration::from_secs(1));
         assert!(c.failed().is_some());
-    }
-
-    #[test]
-    fn renewed_credentials_sign_a_refresh_of_the_same_allocation() {
-        let now = Instant::now();
-        let mut server = Server { key: md5(b"u:example.org:p").to_vec(), nonce: "n", stale_bind: false };
-        let mut c = Client::new("u", "p", now);
-        let r = server.answer(&c.output(), None);
-        c.receive(&r, now);
-        // New credentials while the Allocate is in flight wait for its answer (signed with the old key).
-        c.renew("u2", "p2");
-        c.tick(now);
-        let allocate = c.output();
-        assert_eq!(u16::from_be_bytes([allocate[0], allocate[1]]), ALLOCATE);
-        assert_eq!(allocate.len(), 20 + u16::from_be_bytes([allocate[2], allocate[3]]) as usize); // nothing else
-        let r = server.answer(&allocate, None);
-        c.receive(&r, now);
-        assert!(c.relayed.is_some() && c.failed().is_none());
-        c.tick(now);
-        let refresh = c.output();
-        assert_eq!(u16::from_be_bytes([refresh[0], refresh[1]]), REFRESH);
-        let m = Parsed::new(&refresh).unwrap();
-        assert_eq!(m.get(USERNAME).unwrap(), b"u2");
-        server.key = md5(b"u2:example.org:p2").to_vec();
-        let r = server.answer(&refresh, None);
-        c.receive(&r, now);
-        assert!(c.failed().is_none());
-        // The same credentials again change nothing.
-        c.renew("u2", "p2");
-        c.tick(now);
-        assert!(c.output().is_empty());
     }
 
     #[test]

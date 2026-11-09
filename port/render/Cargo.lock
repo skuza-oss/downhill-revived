@@ -484,7 +484,7 @@ dependencies = [
 name = "dhd_net"
 version = "1.0.0"
 dependencies = [
- "dhd_session",
+ "dhd_star",
  "httparse",
  "ring",
  "rustls",
@@ -539,16 +539,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "dhd_session"
+name = "dhd_settings"
+version = "1.0.0"
+
+[[package]]
+name = "dhd_star"
 version = "1.0.0"
 dependencies = [
  "serde_json",
  "wasm-bindgen",
 ]
-
-[[package]]
-name = "dhd_settings"
-version = "1.0.0"
 
 [[package]]
 name = "digest"

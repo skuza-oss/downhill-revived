@@ -15,8 +15,9 @@
 enum { REJOIN_ATTEMPTS = 5, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
 
 /* The rooms offered (host_api.h NET_OFFER_*). SFU rooms are not offered on phones yet (finding
-   143): their speed and the touch controls come first; Android builds refuse every SFU connection
-   here, whatever asks (the menu, DHD_NET_*, a dhd.ini server). P2P rooms are (finding 180). */
+   143): their speed and the touch controls come first; Android builds refuse every SFU room here,
+   whatever asks (the menu, DHD_NET_*, a dhd.ini server). P2P rooms are (findings 180, 186), the SFU
+   fallback of their members included. */
 #ifdef __ANDROID__
 #define NET_OFFERED NET_OFFER_P2P
 #else
@@ -29,9 +30,6 @@ static WsConn *conn;
 static int inited;
 static char base[256], name[100], version[64], iso[65], next_url[300];
 static SDL_Mutex *api;  /* serialises connect, leave and the reset between rooms */
-/* This room is a P2P one: no rejoin when its connection drops (the host carries the race; a
-   guest who drops is the host's AI rider from then on). */
-static int room_p2p;
 
 static void send_text(void *ws, const char *text) { ws_send(ws, 0, text, strlen(text)); }
 static void send_binary(void *ws, const void *data, size_t n) { ws_send(ws, 1, data, n); }
@@ -57,11 +55,6 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
 {
     NetLobby lobby;
     (void)ctx;
-    if (room_p2p) {
-        client_on_closed(&client, code, reason);
-        client_rejoin_failed(&client);
-        return NULL;
-    }
     if (!client_on_closed(&client, code, reason))
         return NULL;
     if (attempt >= REJOIN_ATTEMPTS) {
@@ -127,7 +120,7 @@ static int connect_to(const char *path, int p2p)
         return -1;
     }
     client.lobby.state = NET_CONNECTING;
-    client.lobby.is_p2p = room_p2p = p2p;
+    client.lobby.is_p2p = p2p;  /* until the welcome says (client.c) */
     snprintf(url, sizeof url, "%s%s", base, path);
     conn = ws_start(url, &h);
     SDL_UnlockMutex(api);
@@ -137,16 +130,14 @@ static int connect_to(const char *path, int p2p)
 int net_create_room(int p2p)
 {
     /* the region its creator picked (finding 181): a hint's letters only, never anything else in
-       the URL; "auto", unset or anything odd lets the server pick. A P2P room has none: its
-       server only relays signaling (finding 180). */
+       the URL; "auto", unset or anything odd lets the server pick. A P2P room (finding 186) is a
+       room like any other, with another race transport: its rules and its members' SFU fallback
+       run there too. */
     const char *region = getenv("DHD_NET_ROOM_REGION");
-    char path[64];
-    if (p2p)
-        snprintf(path, sizeof path, "/v1/p2p/rooms/new");
-    else if (region && *region && strcmp(region, "auto") && strlen(region) < 16 && strspn(region, "abcdefghijklmnopqrstuvwxyz-") == strlen(region))
-        snprintf(path, sizeof path, "/v1/rooms/new?region=%s", region);
-    else
-        snprintf(path, sizeof path, "/v1/rooms/new");
+    char path[80];
+    int n = snprintf(path, sizeof path, "/v1/rooms/new%s", p2p ? "?transport=p2p" : "");
+    if (region && *region && strcmp(region, "auto") && strlen(region) < 16 && strspn(region, "abcdefghijklmnopqrstuvwxyz-") == strlen(region))
+        snprintf(path + n, sizeof path - n, "%cregion=%s", p2p ? '&' : '?', region);
     return connect_to(path, p2p);
 }
 
@@ -163,7 +154,7 @@ int net_join_room(const char *code)
         return -1;
     if (!(NET_OFFERED & (p2p ? NET_OFFER_P2P : NET_OFFER_SFU)))
         return -1;
-    snprintf(path, sizeof path, p2p ? "/v1/p2p/rooms/%s" : "/v1/rooms/%s", up);
+    snprintf(path, sizeof path, "/v1/rooms/%s", up);
     return connect_to(path, p2p);
 }
 

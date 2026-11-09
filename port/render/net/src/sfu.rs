@@ -137,8 +137,16 @@ pub struct Sfu {
     drop_in_percent: u64,
     records_in: u64,
     pending_events: VecDeque<(Instant, Vec<u8>)>,
-    pending_state: HashMap<u8, (Instant, Vec<u8>)>,
-    rates: HashMap<u64, SenderRate>,
+    /// The newest state bundle waiting per (sender's slot, bundle index): a P2P room's hub sends
+    /// its star's frames too (finding 186).
+    pending_state: HashMap<(u8, u8), (Instant, Vec<u8>)>,
+    /// Flood counters per (publisher, slot): the hub's publication carries several racers.
+    rates: HashMap<(u64, u8), SenderRate>,
+    /// A P2P room (finding 186): the publishers whose channels this game needs for the race (its
+    /// part of the race, the star's router says: dhd_star sfu_expect), and frames go up with their
+    /// publisher, their slot as sent. None: an SFU room, every racer's channels, the slot stamped
+    /// here from the publisher.
+    p2p: Option<Vec<u64>>,
     wake: Wake,
     /// False with DHD_NET_SFU_UDP=0: a test switch that drops every UDP datagram to and from the
     /// SFU, as a network that blocks UDP does, so the TURN/TLS fallback must carry the race.
@@ -370,7 +378,7 @@ impl Sfu {
         if drop_in_percent > 0 { eprintln!("net: SFU: DHD_NET_SFU_DROP_IN={drop_in_percent}, that share of the SFU's records is dropped on arrival (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], waiting: vec![], closing: vec![], orphans: vec![], slots: HashMap::new(),
             race: 0, race_open: false, me: None, started_at: None, created: Instant::now(), future_events: VecDeque::new(),
-            connected: false, announced: false, released: false, drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(),
+            connected: false, announced: false, released: false, drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(), p2p: None,
             wake, direct, turn_allowed, answered_at: None, connected_at: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
@@ -630,8 +638,20 @@ impl Sfu {
     /// Every other racer's two channels and this game's own are open: the race may be released.
     fn usable(&mut self) -> bool {
         if !self.own_open() { return false; }
-        let others: Vec<u64> = self.slots.keys().copied().filter(|m| Some(*m) != self.me).collect();
+        let others: Vec<u64> = match &self.p2p {
+            Some(publishers) => publishers.clone(),
+            None => self.slots.keys().copied().filter(|m| Some(*m) != self.me).collect(),
+        };
         others.into_iter().all(|m| self.open(m, false))
+    }
+    /// A P2P room's part of the race for this game: the publishers whose channels it needs (finding
+    /// 186). Set again whenever the room's routes change.
+    pub fn expect_p2p(&mut self, publishers: Vec<u64>) {
+        self.p2p = Some(publishers);
+    }
+    /// The race this association runs (its start's marker), and whether it is running.
+    pub fn race(&self) -> Option<u64> {
+        self.race_open.then_some(self.race)
     }
     /// Frames queued by send() that the next poll would write now.
     pub fn unwritten(&self) -> bool {
@@ -656,7 +676,7 @@ impl Sfu {
             // One newest bundle per bundle index (byte 3, port/hle/state_bundle.h); never
             // accumulate stale snapshots under congestion.
             if bytes.len() >= 4 {
-                self.pending_state.insert(bytes[3], (Instant::now(), wire));
+                self.pending_state.insert((bytes[1], bytes[3]), (Instant::now(), wire));
             }
         } else {
             if self.pending_events.len() >= 128 {
@@ -665,7 +685,10 @@ impl Sfu {
             self.pending_events.push_back((Instant::now(), wire));
         }
         Ok(())
-    }    pub fn poll(&mut self) -> Result<(Vec<Value>, Vec<Vec<u8>>)> {
+    }
+    /// Runs the association: its signaling for the room, and the race frames received, each with
+    /// its publisher's member id.
+    pub fn poll(&mut self) -> Result<(Vec<Value>, Vec<(u64, Vec<u8>)>)> {
         let mut text = vec![];
         let mut frames = vec![];
         let pending = std::mem::take(&mut self.future_events);
@@ -758,7 +781,7 @@ impl Sfu {
     /// The relay's side of a poll: what the TLS stream read goes to the TURN client, its relayed
     /// datagrams to str0m, its allocation becomes a local candidate. A relay that fails while it
     /// carries the association (or before anything connected) fails the association.
-    fn pump_relay(&mut self, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+    fn pump_relay(&mut self, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         let Some(r) = self.relay.as_mut() else { return Ok(()) };
         if r.link.failed() || r.client.failed().is_some() {
             eprintln!("net: SFU: TURN relay failed ({})", r.client.failed().unwrap_or("its TLS link"));
@@ -806,7 +829,7 @@ impl Sfu {
         Ok(())
     }
 
-    fn receive_frame(&mut self, id: ChannelId, bytes: Vec<u8>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+    fn receive_frame(&mut self, id: ChannelId, bytes: Vec<u8>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         if bytes.len() < 10 || bytes.len() > 3080 { return Ok(()); }
         let Some(c) = self.channels.iter().find(|c| c.id == id && !c.local) else { return Ok(()); };
         if bytes[8] != if c.state { 5 } else { 6 } { return Ok(()); }
@@ -823,22 +846,25 @@ impl Sfu {
                 if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
                 // A bundle's stamp (version 6: bytes 5-12 of the frame, after the 8-byte race marker).
                 let stamp = (bytes.len() >= 21 && bytes[10] == 6).then(|| f64::from_le_bytes(bytes[13..21].try_into().unwrap()));
-                let rate = self.rates.entry(c.member).or_insert_with(SenderRate::new);
+                let rate = self.rates.entry((c.member, if self.p2p.is_some() { bytes[9] } else { 0 })).or_insert_with(SenderRate::new);
                 if !rate.accept(bytes[11], stamp, Instant::now()) {
                     if rate.dropped == 1 { eprintln!("net: SFU: member {} sent over {FLOOD_PER_SECOND} snapshot messages in a second; the excess is dropped", c.member); }
                     return Ok(());
                 }
             }
-            if let Some(slot) = self.slots.get(&c.member) {
+            if self.p2p.is_some() {
+                // The star's router checks the slot against the publisher (dhd_star sfu_frame).
+                frames.push((c.member, bytes[8..].to_vec()));
+            } else if let Some(slot) = self.slots.get(&c.member) {
                 let mut frame = bytes[8..].to_vec();
                 frame[1] = *slot;
-                frames.push(frame);
+                frames.push((c.member, frame));
             }
         }
         Ok(())
     }
 
-    fn drain(&mut self, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Result<()> {
+    fn drain(&mut self, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         for _ in 0..512 {
             match self.rtc.poll_output()? {
                 Output::Timeout(_) => break,
@@ -1027,7 +1053,7 @@ mod tests {
         assert_eq!(client.future_events.len(), 1);
         client.signal(&json!({"type":"start","startAt":100,"players":[{"memberId":17,"slot":3}]})).unwrap();
         let (_, frames) = client.poll().unwrap();
-        assert_eq!(frames, vec![vec![6,3,7]]);
+        assert_eq!(frames, vec![(17, vec![6,3,7])]);
         client.send(&[6,0,1]).unwrap();
         assert_eq!(&client.pending_events[0].1[..8], &100u64.to_le_bytes());
         client.signal(&json!({"type":"start","startAt":200,"players":[{"memberId":17,"slot":5}]})).unwrap();
@@ -1036,11 +1062,40 @@ mod tests {
         client.receive_frame(id, wire(100, 8), &mut frames).unwrap();
         assert!(frames.is_empty());
         client.receive_frame(id, wire(200, 9), &mut frames).unwrap();
-        assert_eq!(frames, vec![vec![6,5,9]]);
+        assert_eq!(frames, vec![(17, vec![6,5,9])]);
         // Another player's flood of next-race events is capped and dropped, never an error here.
         for _ in 0..200 { client.receive_frame(id, wire(u64::MAX, 1), &mut frames).unwrap(); }
         assert_eq!(client.future_events.len(), EARLY_EVENTS_PER_SENDER);
         assert!(client.poll().is_ok());
+    }
+
+    /// A P2P room's association (finding 186): frames go up with their publisher and the slot they
+    /// were sent with (the star's router checks it: the hub's publication carries every star
+    /// racer's); its readiness waits for the publishers the router names, not every racer; a hub's
+    /// queue keeps the newest bundle per sender.
+    #[test]
+    fn a_p2p_rooms_association_keeps_the_senders_slot_and_waits_for_its_part_only() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
+        client.expect_p2p(vec![17]);
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":14,"name":"events","memberId":17,"local":false}
+        ]})).unwrap();
+        let id = client.channels[0].id;
+        client.signal(&json!({"type":"start","startAt":100,"yourSlot":2,"players":[{"memberId":17,"slot":0},{"memberId":18,"slot":1},{"memberId":19,"slot":2}]})).unwrap();
+        let mut frames = vec![];
+        let mut wire = 100u64.to_le_bytes().to_vec();
+        wire.extend_from_slice(&[6, 1, 7]);  // the hub (17) forwards racer 18's event
+        client.receive_frame(id, wire, &mut frames).unwrap();
+        assert_eq!(frames, vec![(17, vec![6, 1, 7])]);
+        // Its part: member 17's channels; racer 18's (on the star) are not waited for.
+        assert!(!client.usable());  // its own channels aren't open
+        assert_eq!(client.p2p, Some(vec![17]));
+        client.released = true;
+        client.send(&[5, 0, 6, 0, 1]).unwrap();
+        client.send(&[5, 1, 6, 0, 2]).unwrap();
+        client.send(&[5, 1, 6, 0, 3]).unwrap();
+        assert_eq!(client.pending_state.len(), 2);
+        assert_eq!(client.pending_state[&(1, 0)].1[12], 3);
     }
 
     #[test]
@@ -1097,7 +1152,7 @@ mod tests {
         let mut b = [0u8; 65536];
         while Instant::now() < until {
             let (text, frames) = client.poll().unwrap();
-            bound_sender |= frames.iter().any(|f| f == &[6, 3, 2]);
+            bound_sender |= frames.iter().any(|(_, f)| f == &[6, 3, 2]);
             if !replied {
                 if let Some(mut c) = server.channel(server_reply) {
                     let mut reply = 1234u64.to_le_bytes().to_vec();
@@ -1251,7 +1306,7 @@ mod tests {
         let until = Instant::now() + Duration::from_secs(10);
         while Instant::now() < until && arrived.len() < 49 {
             let (_, frames) = client.poll().unwrap();
-            for f in frames { if f.len() >= 5 && f[0] == 5 { arrived.entry(f[4]).or_insert_with(Instant::now); } }
+            for (_, f) in frames { if f.len() >= 5 && f[0] == 5 { arrived.entry(f[4]).or_insert_with(Instant::now); } }
             let open = server.channel(relayed).is_some() && client.rtc.channel(client.channels[0].id).is_some();
             if open && next < 50 && sent_at.get(&next.wrapping_sub(1)).map_or(true, |t| t.elapsed() >= Duration::from_millis(5)) {
                 let mut wire = 1234u64.to_le_bytes().to_vec();
@@ -1289,7 +1344,7 @@ mod tests {
             (Self { server, socket, local }, client)
         }
         /// One round both ways; the server's channel data by channel.
-        fn pump(&mut self, client: &mut Sfu, text: &mut Vec<Value>, frames: &mut Vec<Vec<u8>>) -> Vec<(ChannelId, Vec<u8>)> {
+        fn pump(&mut self, client: &mut Sfu, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Vec<(ChannelId, Vec<u8>)> {
             let (t, f) = client.poll().unwrap();
             text.extend(t);
             frames.extend(f);
@@ -1367,7 +1422,7 @@ mod tests {
                 got.extend(sfu.pump(&mut client, &mut text, &mut frames));
             }
             assert!(got.iter().any(|(id, d)| *id == own_events && d[..8] == race.to_le_bytes() && d[10] == payload), "race {race}: ours sent with its marker");
-            assert_eq!(frames[0], vec![6, 1, payload], "race {race}: theirs taken");
+            assert_eq!(frames[0].1, vec![6, 1, payload], "race {race}: theirs taken");
             client.signal(&json!({"type":"ended"})).unwrap();
             assert!(!client.race_open && !client.released);
             // After the end: nothing more goes out, an ended race's frames are dropped.
@@ -1438,7 +1493,7 @@ mod tests {
             if new.is_none() && sfu.server.direct_api().channel_id_by_sctp_stream_id(14).is_none() { new = Some(sfu.channel(14, false)); }
             if let Some(id) = new { if let Some(mut c) = sfu.server.channel(id) { let _ = c.write(true, &event(3000, 5)); } }
         }
-        assert_eq!(frames.first(), Some(&vec![6, 4, 5]), "the new subscription's frames, from member 21");
+        assert_eq!(frames.first().map(|f| &f.1), Some(&vec![6, 4, 5]), "the new subscription's frames, from member 21");
         assert!(client.orphans.is_empty());
     }
     #[test]
@@ -1490,7 +1545,7 @@ mod tests {
             }
             if let Some(id) = new[0] { if let Some(mut c) = sfu.server.channel(id) { let _ = c.write(true, &event(3000, 5)); } }
         }
-        assert_eq!(frames.first(), Some(&vec![6, 4, 5]), "the new subscription's frames reach slot 4");
+        assert_eq!(frames.first().map(|f| &f.1), Some(&vec![6, 4, 5]), "the new subscription's frames reach slot 4");
         assert!(text.iter().any(|m| m["type"] == "sfu_ready" && m["race"] == 3000), "every racer's channels open: acknowledged");
         let theirs: Vec<(u16, u64)> = client.channels.iter().filter(|c| !c.local).map(|c| (c.stream, c.member)).collect();
         assert_eq!(theirs, vec![(14, member), (16, member)]);

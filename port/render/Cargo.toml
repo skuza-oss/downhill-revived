@@ -10,7 +10,7 @@
 # image's online check (disc/, dhd_disc), so the game links one Rust static library (two would each
 # carry Rust's std).
 [workspace]
-members = [".", "tools", "net", "settings", "presence", "disc", "session"]
+members = [".", "tools", "net", "settings", "presence", "disc", "star"]
 resolver = "2"
 
 # Keep the pinned family; only Vulkan framebuffer ownership differs (vendor/wgpu-hal/PATCH.md).

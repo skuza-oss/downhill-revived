@@ -9,6 +9,7 @@
     python3 port/tools/rustgs.py build --target aarch64-apple-darwin [--profile ...]    # macOS, on a Mac
     python port/tools/rustgs.py build --target wasm32-unknown-unknown --crate dhd_settings  # the browser's dhd.ini module
     python port/tools/rustgs.py test  --target x86_64-pc-windows-msvc [--features ...] -- --test device_smoke [filter]
+    python port/tools/rustgs.py test  --target x86_64-pc-windows-msvc -- -p dhd_net -p dhd_star   # the network crates' own
     python port/tools/rustgs.py run   --target x86_64-pc-windows-msvc --bin optrace_replay -- <args>
     python port/tools/rustgs.py check --target aarch64-apple-darwin                    # cargo check (any target)
     python port/tools/rustgs.py tree  [--target T]      # the version gate, printed
@@ -123,8 +124,8 @@ SEED = CARGO_TARGETS / 'seed'
 WEB_OUT = ROOT / 'build' / 'web' / 'renderer'
 RENDER_CRATE = 'dhd_render'
 SETTINGS_CRATE = 'dhd_settings'   # --crate: the browser's dhd.ini module (wasm32 only)
-SESSION_CRATE = 'dhd_session'
-CRATES = (RENDER_CRATE, SETTINGS_CRATE, SESSION_CRATE)
+STAR_CRATE = 'dhd_star'
+CRATES = (RENDER_CRATE, SETTINGS_CRATE, STAR_CRATE)
 SETTINGS_WEB_OUT = ROOT / 'build' / 'web'   # dhd_settings.wasm
 X64 = 'x86_64-pc-windows-msvc'
 WASM = 'wasm32-unknown-unknown'
@@ -761,34 +762,34 @@ def build_settings(profile='release', no_cache=False):
     return rep
 
 
-def build_session(profile='release'):
-    """The portable P2P coordinator, separate from the game and renderer memories."""
+def build_star(profile='release'):
+    """The P2P rooms' star (finding 186), for the browser page, separate from the game and renderer memories."""
     env = common(WASM, profile)
-    tdir = target_dir() / SESSION_CRATE
+    tdir = target_dir() / STAR_CRATE
     env['CARGO_TARGET_DIR'] = str(tdir)
     env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(rustflags(WASM, SETTINGS_CRATE))
     include_precheck()
-    cmd = ['cargo', 'rustc', '-p', SESSION_CRATE, '--lib', '--crate-type', 'cdylib', *cargo_args(WASM, profile)]
+    cmd = ['cargo', 'rustc', '-p', STAR_CRATE, '--lib', '--crate-type', 'cdylib', *cargo_args(WASM, profile)]
     r = run_cargo(cmd, env)
     if r.returncode:
         sys.stdout.write(r.stdout)
-        raise SystemExit('rustgs: session cargo failed')
+        raise SystemExit('rustgs: star cargo failed')
     built = tdir / WASM / profile
-    inputs_gate(built / (SESSION_CRATE + '.d'))
-    out = ROOT / 'build/web/session'
+    inputs_gate(built / (STAR_CRATE + '.d'))
+    out = ROOT / 'build/web/star'
     out.mkdir(parents=True, exist_ok=True)
     r = subprocess.run(['wasm-bindgen', '--target', 'web', '--no-typescript', '--out-dir', str(out),
-                        '--out-name', SESSION_CRATE, str(built / (SESSION_CRATE + '.wasm'))], env=env, capture_output=True, text=True)
+                        '--out-name', STAR_CRATE, str(built / (STAR_CRATE + '.wasm'))], env=env, capture_output=True, text=True)
     if r.returncode:
-        refuse('session wasm-bindgen: ' + r.stderr[-1000:])
-    lib = out / (SESSION_CRATE + '_bg.wasm')
+        refuse('star wasm-bindgen: ' + r.stderr[-1000:])
+    lib = out / (STAR_CRATE + '_bg.wasm')
     sysroot = Path(tool_version(['rustc', '--print', 'sysroot'], env).strip()) / 'lib/rustlib' / WASM / 'lib'
     problems = check_rust_lib.problems(lib, trees=[ROOT], extra=[tdir], sysroot=sysroot)
     if problems:
-        refuse('session check_rust_lib: ' + '; '.join(problems[:8]))
+        refuse('star check_rust_lib: ' + '; '.join(problems[:8]))
     sha = check_rust_lib.sha256(lib)
-    return {'lib': str(lib), 'crate': SESSION_CRATE, 'sha256': sha, 'cache': 'miss', 'key': sha,
-            'glue': [str(out / (SESSION_CRATE + '.js'))]}
+    return {'lib': str(lib), 'crate': STAR_CRATE, 'sha256': sha, 'cache': 'miss', 'key': sha,
+            'glue': [str(out / (STAR_CRATE + '.js'))]}
 
 
 def build(triple, features=(), profile='release', no_cache=False, crate=RENDER_CRATE):
@@ -799,10 +800,10 @@ def build(triple, features=(), profile='release', no_cache=False, crate=RENDER_C
         refuse('--target %s builds on a Mac (ring compiles its C against the macOS SDK); `check` runs here' % MAC)
     if crate not in CRATES:
         refuse('--crate %s: one of %s' % (crate, ', '.join(CRATES)))
-    if crate == SESSION_CRATE:
+    if crate == STAR_CRATE:
         if triple != WASM or features:
-            refuse('dhd_session is the browser coordinator (--target wasm32-unknown-unknown, no features)')
-        return build_session(profile)
+            refuse('dhd_star is the browser P2P star (--target wasm32-unknown-unknown, no features)')
+        return build_star(profile)
     if crate == SETTINGS_CRATE:
         if triple != WASM or features:
             refuse('--crate %s: the browser\'s module only (--target %s, no features); the game links it '
@@ -921,7 +922,10 @@ def test(triple, features, profile, rest):
     seed(triple, profile, rustflags(triple), tool_version(['rustc', '-vV'], env))
     import dxc
     env['DHDR_TEST_DXC'] = str(dxc.dll('x64'))
-    cmd = ['cargo', 'test', *cargo_args(triple, profile), *feature_args(triple, features), *rest]
+    # `-- -p dhd_net -p dhd_star`: those crates' own tests; only the renderer has the features.
+    packages = [rest[i + 1] for i, arg in enumerate(rest[:-1]) if arg in ('-p', '--package')]
+    features = feature_args(triple, features) if not packages or RENDER_CRATE in packages else []
+    cmd = ['cargo', 'test', *cargo_args(triple, profile), *features, *rest]
     print('  + ' + ' '.join(cmd), flush=True)
     return subprocess.run(cmd, cwd=str(RENDER), env=env).returncode
 

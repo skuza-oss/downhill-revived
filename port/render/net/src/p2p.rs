@@ -1,23 +1,18 @@
-//! The send thread of a P2P room's connection (finding 180), in place of the SFU's (lib.rs
-//! send_main). The room connection carries membership and signaling only (online/server/src/
-//! p2p.ts); race frames and room commands travel over peer connections (peer.rs): the host has one
-//! per guest, a guest one to the host. The room's rules run in the host's coordinator (dhd_session),
-//! which speaks the SFU room's messages to the game, so the game's online code is the same for
-//! both kinds of room.
-use crate::{lock, peer::Peer, WsConn};
-use dhd_session::{Action, Session};
+//! A P2P room's part of the send thread (finding 186): the star's peer connections (peer.rs) and
+//! the shared router (dhd_star), beside the room's SFU association (lib.rs `Assoc`). The room is a
+//! room like any other: its messages go to the game as they come; the routes (`p2p`) and the star's
+//! signaling (`p2p_signal`) come here. Every race frame goes through the router, which says where
+//! it goes: a peer, this game's SFU publication, the game.
+use crate::{lock, peer, peer::Peer, WsConn};
+use dhd_star::{Action, Star};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{atomic::Ordering, Arc};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
-/// The longest wait for work: peers need polling even when nothing was queued (ICE and SCTP
-/// timers), and the 60 Hz race wants its frames out within a couple of milliseconds.
-const POLL: Duration = Duration::from_millis(2);
-/// The room messages that go to the server; every other text message is a room command for the
-/// host's coordinator.
-const SERVER_MESSAGES: [&str; 4] = ["hello", "ping", "pong", "leave"];
+/// The longest wait for work while peers exist: they need polling even when nothing was queued
+/// (ICE and SCTP timers), and the 60 Hz race wants its frames out within a couple of milliseconds.
+pub const POLL: std::time::Duration = std::time::Duration::from_millis(2);
 
 struct Link {
     peer: Peer,
@@ -25,199 +20,86 @@ struct Link {
     logged_path: bool,
 }
 
-struct P2pRoom<'a> {
-    c: &'a WsConn,
-    session: Option<Session>,
-    links: HashMap<u64, Link>,
-    /// This game's TURN credentials (p2p_turn), for every peer made from now on.
-    credentials: Option<Value>,
-    /// DHD_NET_P2P_UDP=0: no direct UDP, the relay carries everything (tests of the fallback).
-    direct: bool,
-    /// The server's clock minus this machine's (ms), from the welcome: the coordinator's times
-    /// (countdowns, start, finish deadlines) are on the server's clock, as an SFU room's are.
-    clock_offset: i64,
-    wake: crate::peer::Wake,
+pub struct P2p {
+    pub star: Star,
+    peers: HashMap<u64, Link>,
+    wake: peer::Wake,
+    /// The address the peers bind to (peer::reachable_address), found with the first peer.
+    local: Option<IpAddr>,
+    hub: Option<u64>,
+    started: Instant,
 }
 
-pub fn run(c: &Arc<WsConn>) {
-    let weak = Arc::downgrade(c);
-    let mut room = P2pRoom {
-        c,
-        session: None,
-        links: HashMap::new(),
-        credentials: None,
-        direct: std::env::var("DHD_NET_P2P_UDP").map_or(true, |v| v != "0"),
-        clock_offset: 0,
-        wake: Arc::new(move || {
-            if let Some(c) = weak.upgrade() {
-                c.wake.notify_all();
-            }
-        }),
-    };
-    while !c.stopping.load(Ordering::Acquire) {
-        room.from_server();
-        room.from_game();
-        room.poll_peers();
-        room.run_session();
-        if let Some(f) = c.h.on_tick {
-            if unsafe { f(c.h.ctx) } != 0 {
-                c.force_close();
-            }
+impl P2p {
+    pub fn new(wake: peer::Wake) -> Self {
+        // DHD_NET_P2P_UDP=0 (a test switch): no direct links from this game, so it races over the
+        // room's SFU (the fallback, docs/TESTING.md).
+        let direct = std::env::var("DHD_NET_P2P_UDP").map_or(true, |v| v.trim() != "0");
+        if !direct {
+            eprintln!("net: P2P: DHD_NET_P2P_UDP=0, no direct links from this game (test switch): it races over the SFU");
         }
-        let q = lock(&c.queue);
-        let _ = c.wake.wait_timeout(q, POLL).unwrap_or_else(|e| e.into_inner());
-    }
-}
-
-/// The room's code as dhd.log shows it (port/net/net.h net_log_code): only its first two
-/// characters, as the code is what lets anyone in, and so see the host's address; in full with
-/// DHD_NET_LOG_CODE (test tools).
-fn log_code(code: &str) -> String {
-    if std::env::var_os("DHD_NET_LOG_CODE").is_some() {
-        return code.to_owned();
-    }
-    let shown: String = code.chars().take(2).collect();
-    format!("{shown}{}", "*".repeat(code.chars().count().saturating_sub(2)))
-}
-
-fn epoch_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
-}
-
-impl P2pRoom<'_> {
-    fn now(&self) -> u64 {
-        (epoch_ms() + self.clock_offset).max(0) as u64
+        Self { star: Star::new(direct), peers: HashMap::new(), wake, local: None, hub: None, started: Instant::now() }
     }
 
-    /// What the server sent: membership, signaling and credentials are for this thread; the rest
-    /// (pongs, errors) goes to the game as it came.
-    fn from_server(&mut self) {
-        let incoming: Vec<_> = lock(&self.c.queue).incoming.drain(..).collect();
-        for (binary, data) in incoming {
-            let m = if binary { None } else { serde_json::from_slice::<Value>(&data).ok() };
-            match m.as_ref().and_then(|m| m["type"].as_str()) {
-                Some("p2p_welcome") => self.welcome(m.as_ref().unwrap()),
-                Some("p2p_members") => {
-                    let now = self.now();
-                    if let Some(s) = self.session.as_mut() {
-                        s.members(&m.as_ref().unwrap()["members"], now);
-                    }
-                    self.connect_members(&m.unwrap()["members"]);
+    /// The router's clock: milliseconds since the room began here.
+    pub fn now(&self) -> u64 {
+        self.started.elapsed().as_millis() as u64
+    }
+
+    /// A room message for the star: the welcome and the routes. Logs a new hub.
+    pub fn room(&mut self, m: &Value) {
+        self.star.room(m);
+        if m["type"] == "p2p" {
+            let hub = m["hub"].as_u64();
+            if hub != self.hub {
+                self.hub = hub;
+                match hub {
+                    Some(id) if self.star.is_hub() => eprintln!("net: P2P: this game is the room's hub (member {id})"),
+                    Some(id) => eprintln!("net: P2P: member {id} is the room's hub"),
+                    None => {}
                 }
-                Some("p2p_signal") => {
-                    let m = m.unwrap();
-                    let from = m["from"].as_u64().unwrap_or(0);
-                    if let Some(link) = self.links.get_mut(&from) {
-                        if let Err(e) = link.peer.signal(&m["signal"]) {
-                            eprintln!("net: P2P: signaling with member {from} failed ({e})");
-                        }
-                    }
-                }
-                Some("p2p_turn") => {
-                    let m = m.unwrap();
-                    for (id, link) in &mut self.links {
-                        if let Err(e) = link.peer.turn(&m, self.wake.clone()) {
-                            eprintln!("net: P2P: no relay for member {id} ({e})");
-                        }
-                    }
-                    self.credentials = Some(m);
-                }
-                _ => self.c.deliver(binary, &data),
-            }
-            lock(&self.c.queue).handled += 1;
-            self.c.wake.notify_all();
-        }
-    }
-
-    fn welcome(&mut self, m: &Value) {
-        self.clock_offset = m["serverTime"].as_i64().map_or(0, |t| t - epoch_ms());
-        eprintln!("net: P2P room {}, member {}, host {}", log_code(m["code"].as_str().unwrap_or("")), m["memberId"], m["hostId"]);
-        self.session = Some(Session::new(m, self.now()));
-    }
-
-    /// A peer for each member this game links to (the host: every guest; a guest: the host);
-    /// those of members gone are dropped.
-    fn connect_members(&mut self, members: &Value) {
-        let Some(s) = self.session.as_ref() else { return };
-        let ids: Vec<u64> = members.as_array().map_or(vec![], |a| a.iter().filter_map(|m| m["id"].as_u64()).collect());
-        self.links.retain(|id, _| ids.contains(id));
-        let wanted: Vec<u64> =
-            ids.into_iter().filter(|&id| id != s.me && (s.is_host() || id == s.host) && !self.links.contains_key(&id)).collect();
-        let host = s.is_host();
-        let room = lock(&self.c.live).as_ref().and_then(|l| l.tcp.local_addr().ok()).map(|a| a.ip());
-        let Some(local) = crate::peer::reachable_address(room) else { return };
-        for id in wanted {
-            match self.make_peer(local, host) {
-                Ok(peer) => {
-                    self.links.insert(id, Link { peer, up: false, logged_path: false });
-                }
-                Err(e) => eprintln!("net: P2P: no connection to member {id} ({e})"),
             }
         }
     }
 
-    fn make_peer(&self, local: IpAddr, offerer: bool) -> Result<Peer, Box<dyn std::error::Error>> {
-        let mut peer = Peer::new(local, offerer, self.direct)?;
-        if let Some(credentials) = &self.credentials {
-            peer.turn(credentials, self.wake.clone())?;
-        }
-        Ok(peer)
-    }
-
-    /// What the game sent: race frames and room commands go to the coordinator, the server's
-    /// own messages (hello, pings, leave) to the server.
-    fn from_game(&mut self) {
-        let outgoing: Vec<_> = lock(&self.c.queue).out.drain(..).collect();
-        let now = self.now();
-        for (binary, data) in outgoing {
-            if binary && matches!(data.first(), Some(5 | 6)) {
-                if let Some(s) = self.session.as_mut() {
-                    s.frame(&data);
-                }
-                continue;
-            }
-            if binary {
-                self.c.write_now(true, data); // the clock's PING
-                continue;
-            }
-            let Ok(m) = serde_json::from_slice::<Value>(&data) else { continue };
-            if SERVER_MESSAGES.contains(&m["type"].as_str().unwrap_or("")) {
-                self.c.write_now(false, data);
-            } else if let Some(s) = self.session.as_mut() {
-                s.local(m, now);
+    /// The other end's signaling, as the room passed it on.
+    pub fn signal(&mut self, from: u64, signal: &Value) {
+        if let Some(link) = self.peers.get_mut(&from) {
+            if let Err(e) = link.peer.signal(signal) {
+                eprintln!("net: P2P: signaling with member {from} failed ({e})");
             }
         }
     }
 
-    /// Runs every peer: its signals to the room, its messages to the coordinator. A peer that
-    /// failed or never connected is dropped: the coordinator turns that member's rider into the
-    /// host's AI (a guest whose host is gone leaves the room).
-    fn poll_peers(&mut self) {
+    /// The star has a peer to poll (the send thread then waits at most POLL).
+    pub fn polling(&self) -> bool {
+        !self.peers.is_empty()
+    }
+
+    /// Runs every peer: its signals go to the room, its messages and its state to the router. A peer
+    /// that failed or never connected is dropped; the router tells the room.
+    pub fn poll(&mut self, c: &WsConn) {
         let now = self.now();
         let mut failed = vec![];
-        for (&id, link) in &mut self.links {
+        for (&id, link) in &mut self.peers {
             match link.peer.poll() {
                 Ok((signals, messages)) => {
                     for signal in signals {
-                        self.c.write_now(false, json!({"type": "p2p_signal", "to": id, "signal": signal}).to_string().into_bytes());
+                        c.write_now(false, json!({"type": "p2p_signal", "to": id, "signal": signal}).to_string().into_bytes());
                     }
                     if link.peer.connected() && !link.up {
                         link.up = true;
-                        if let Some(s) = self.session.as_mut() {
-                            s.link(id, true, now);
-                        }
+                        self.star.link(id, true, now);
                     }
                     if let (false, Some(path)) = (link.logged_path, link.peer.path()) {
                         link.logged_path = true;
                         eprintln!("net: P2P: member {id} connected: {}", path.describe());
                     }
-                    if let Some(s) = self.session.as_mut() {
-                        for (reliable, bytes) in messages {
-                            s.receive(id, reliable, bytes, now);
-                        }
+                    for (reliable, bytes) in messages {
+                        self.star.peer_message(id, reliable, &bytes, now);
                     }
                     if link.peer.timed_out() {
-                        eprintln!("net: P2P: member {id} could not be reached (no direct path, no relay)");
+                        eprintln!("net: P2P: member {id} could not be reached directly");
                         failed.push(id);
                     }
                 }
@@ -228,30 +110,57 @@ impl P2pRoom<'_> {
             }
         }
         for id in failed {
-            self.links.remove(&id);
-            if let Some(s) = self.session.as_mut() {
-                s.link(id, false, now);
-            }
+            self.peers.remove(&id);
+            self.star.link(id, false, now);
         }
+        self.star.tick(now);
     }
 
-    /// The coordinator's time-driven work, then what it asked for.
-    fn run_session(&mut self) {
-        let now = self.now();
-        let Some(s) = self.session.as_mut() else { return };
-        s.tick(now);
-        for action in s.take() {
+    /// Carries out the router's actions on the peers and the room; returns those for the SFU and
+    /// the game, which the send thread owns.
+    pub fn run(&mut self, c: &WsConn) -> Vec<Action> {
+        let mut rest = vec![];
+        for action in self.star.take() {
             match action {
-                Action::Game(m) => self.c.deliver(false, m.to_string().as_bytes()),
-                Action::Frame(bytes) => self.c.deliver(true, &bytes),
-                Action::Server(m) => self.c.write_now(false, m.to_string().into_bytes()),
-                Action::Peer(id, reliable, bytes) => {
-                    if let Some(link) = self.links.get_mut(&id) {
+                Action::Connect { member, offerer } => self.connect(c, member, offerer),
+                Action::Close(member) => {
+                    if self.peers.remove(&member).is_some_and(|l| l.up) {
+                        eprintln!("net: P2P: the link to member {member} closed");
+                    }
+                }
+                Action::Peer(member, reliable, bytes) => {
+                    if let Some(link) = self.peers.get_mut(&member) {
                         if let Err(e) = link.peer.send(reliable, bytes) {
-                            eprintln!("net: P2P: a message to member {id} was dropped ({e})");
+                            eprintln!("net: P2P: a message to member {member} was dropped ({e})");
                         }
                     }
                 }
+                Action::Room(m) => c.write_now(false, m.to_string().into_bytes()),
+                other => rest.push(other),
+            }
+        }
+        rest
+    }
+
+    fn connect(&mut self, c: &WsConn, member: u64, offerer: bool) {
+        if self.local.is_none() {
+            let room = lock(&c.live).as_ref().and_then(|l| l.tcp.local_addr().ok()).map(|a| a.ip());
+            self.local = peer::reachable_address(room);
+        }
+        let now = self.now();
+        let made = match self.local {
+            Some(local) => Peer::new(local, offerer),
+            None => Err("no local address".into()),
+        };
+        match made {
+            Ok(peer) => {
+                // The hub's offer goes out with the peer's first poll.
+                self.peers.insert(member, Link { peer, up: false, logged_path: false });
+                (self.wake)();
+            }
+            Err(e) => {
+                eprintln!("net: P2P: no connection to member {member} ({e})");
+                self.star.link(member, false, now);
             }
         }
     }
@@ -259,11 +168,11 @@ impl P2pRoom<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{ws_send, ws_start, ws_stop, WsHandler};
+    use crate::{ws_send, ws_start, ws_stop, WsConn, WsHandler};
+    use serde_json::{json, Value};
     use std::ffi::{c_char, c_void, CString};
     use std::sync::Mutex;
-    use std::time::Instant;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     #[derive(Default)]
     struct Inbox {
@@ -273,7 +182,7 @@ mod tests {
 
     unsafe extern "C" fn on_open(_: *mut c_void, ws: *mut WsConn) {
         let hello = json!({"type": "hello", "protocol": 4, "version": "p2p-smoke", "clientVersion": "0.7.13",
-            "isoSha256": "a".repeat(64), "name": "TEST", "features": ["session", "countdown"]})
+            "isoSha256": "a".repeat(64), "name": "TEST", "features": ["session", "countdown", "race_rejoin", "p2p"]})
         .to_string();
         unsafe { ws_send(ws, 0, hello.as_ptr().cast(), hello.len()) };
     }
@@ -294,7 +203,7 @@ mod tests {
 
     /// A game's network side as the C client drives it: a room connection and what it received.
     struct Client {
-        conn: *mut WsConn,
+        conn: Option<*mut WsConn>,
         inbox: Box<Mutex<Inbox>>,
     }
 
@@ -311,31 +220,48 @@ mod tests {
             let url = CString::new(url).unwrap();
             let conn = unsafe { ws_start(url.as_ptr(), &h) };
             assert!(!conn.is_null());
-            Self { conn, inbox }
+            Self { conn: Some(conn), inbox }
         }
         fn send(&self, m: Value) {
             let text = m.to_string();
-            unsafe { ws_send(self.conn, 0, text.as_ptr().cast(), text.len()) };
+            unsafe { ws_send(self.conn.unwrap(), 0, text.as_ptr().cast(), text.len()) };
         }
         fn frame(&self, bytes: &[u8]) {
-            unsafe { ws_send(self.conn, 1, bytes.as_ptr().cast(), bytes.len()) };
+            unsafe { ws_send(self.conn.unwrap(), 1, bytes.as_ptr().cast(), bytes.len()) };
         }
         fn last(&self, kind: &str) -> Option<Value> {
             self.inbox.lock().unwrap().messages.iter().rev().find(|m| m["type"] == kind).cloned()
         }
-        fn senders(&self) -> std::collections::HashSet<u8> {
-            self.inbox.lock().unwrap().frames.iter().map(|f| f[1]).collect()
+        /// The slots whose frames arrived since `since` frames.
+        fn senders(&self, since: usize) -> std::collections::HashSet<u8> {
+            self.inbox.lock().unwrap().frames.iter().skip(since).map(|f| f[1]).collect()
+        }
+        fn frames(&self) -> usize {
+            self.inbox.lock().unwrap().frames.len()
+        }
+        /// The game leaves: its connection and its links end.
+        fn stop(&mut self) {
+            if let Some(conn) = self.conn.take() {
+                self.send_leave(conn);
+                unsafe { ws_stop(conn) };
+            }
+        }
+        fn send_leave(&self, conn: *mut WsConn) {
+            let text = json!({"type": "leave"}).to_string();
+            unsafe { ws_send(conn, 0, text.as_ptr().cast(), text.len()) };
         }
     }
 
     impl Drop for Client {
         fn drop(&mut self) {
-            unsafe { ws_stop(self.conn) };
+            if let Some(conn) = self.conn.take() {
+                unsafe { ws_stop(conn) };
+            }
         }
     }
 
     fn wait(what: &str, mut done: impl FnMut() -> bool) {
-        let end = Instant::now() + Duration::from_secs(25);
+        let end = Instant::now() + Duration::from_secs(30);
         while Instant::now() < end {
             if done() {
                 return;
@@ -345,26 +271,31 @@ mod tests {
         panic!("P2P room test: timed out waiting for {what}");
     }
 
+    fn epoch_ms() -> f64 {
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as f64
+    }
+
     /// A race frame as the game sends it: an event, or a minimal state bundle (version 6).
     fn race_frame(state: bool) -> Vec<u8> {
         let mut frame = vec![0u8; 24];
         frame[0] = if state { 5 } else { 6 };
         frame[2] = 6;
-        frame[5..13].copy_from_slice(&(epoch_ms() as f64).to_le_bytes());
+        frame[5..13].copy_from_slice(&epoch_ms().to_le_bytes());
         frame
     }
 
-    /// `n` games in one room: they join, ready, start, exchange race frames (each hears every
-    /// other) and get the results.
-    fn room_race(n: usize) {
+    /// `n` games in one P2P room, all ready, racing: each has heard every other racer's frames.
+    fn racing(n: usize) -> Vec<Client> {
         let base = std::env::var("DHD_NET_SERVER").expect("local_server.py supplies DHD_NET_SERVER");
-        let host = Client::new(&format!("{base}/v1/p2p/rooms/new"));
+        let host = Client::new(&format!("{base}/v1/rooms/new?transport=p2p"));
         wait("the welcome", || host.last("welcome").is_some());
-        let code = host.last("welcome").unwrap()["code"].as_str().unwrap().to_owned();
+        let welcome = host.last("welcome").unwrap();
+        assert_eq!(welcome["transport"], "p2p");
+        let code = welcome["code"].as_str().unwrap().to_owned();
         assert_eq!(code.len(), 7);
         let mut clients = vec![host];
         for _ in 1..n {
-            clients.push(Client::new(&format!("{base}/v1/p2p/rooms/{code}")));
+            clients.push(Client::new(&format!("{base}/v1/rooms/{code}")));
         }
         wait("every member in every room", || {
             clients.iter().all(|c| c.last("room").is_some_and(|m| m["members"].as_array().is_some_and(|a| a.len() == n)))
@@ -373,25 +304,34 @@ mod tests {
             c.send(json!({"type": "ready", "ready": true}));
         }
         wait("the start", || clients.iter().all(|c| c.last("start").is_some()));
+        hear_each_other(&clients, n);
+        clients
+    }
+
+    /// Every game sends frames until each has heard every other racer since now.
+    fn hear_each_other(clients: &[Client], racers: usize) {
+        let marks: Vec<usize> = clients.iter().map(Client::frames).collect();
         wait("every rider's frames", || {
-            for c in &clients {
+            for c in clients {
                 c.frame(&race_frame(false));
                 c.frame(&race_frame(true));
             }
-            clients.iter().all(|c| c.senders().len() == n - 1)
+            clients.iter().zip(&marks).all(|(c, m)| c.senders(*m).len() == racers - 1)
         });
+    }
+
+    fn finish(clients: &[Client]) {
         for (i, c) in clients.iter().enumerate() {
             c.send(json!({"type": "finish", "ticks": 100 + i, "place": i + 1}));
         }
-        wait("the results", || clients.iter().all(|c| c.last("ended").is_some()));
-        eprintln!("P2P ROOM MATCH: {n} games joined, readied, raced (each heard the other {}) and got the results", n - 1);
+        wait("the results", || clients.iter().all(|c| c.last("ended").is_some() &&
+            c.last("room").is_some_and(|r| !r["lastRace"].is_null())));
     }
 
-    #[test]
-    fn the_log_shows_a_room_code_by_its_first_two_characters() {
-        if std::env::var_os("DHD_NET_LOG_CODE").is_none() {
-            assert_eq!(log_code("ABCDEFG"), "AB*****");
-        }
+    fn room_race(n: usize) {
+        let clients = racing(n);
+        finish(&clients);
+        eprintln!("P2P ROOM MATCH: {n} games joined, readied, raced (each heard the other {}) and got the results", n - 1);
     }
 
     #[test]
@@ -404,5 +344,19 @@ mod tests {
     #[ignore = "run through local_server.py"]
     fn p2p_room_ten_games() {
         room_race(10);
+    }
+
+    /// The hub's game leaves mid-race: the room picks the next hub, the others link to it, their
+    /// riders' frames flow again and every game left gets the results.
+    #[test]
+    #[ignore = "run through local_server.py"]
+    fn p2p_room_hub_leaves_mid_race() {
+        let mut clients = racing(3);
+        clients[0].stop();
+        let rest = &clients[1..];
+        wait("the hub's departure", || rest.iter().all(|c| c.last("left").is_some_and(|l| l["slot"] == 0)));
+        hear_each_other(rest, 2);
+        finish(rest);
+        eprintln!("P2P ROOM MATCH: the hub left mid-race; the two others raced on over the next hub and got the results");
     }
 }
