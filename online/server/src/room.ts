@@ -155,6 +155,11 @@ const HUB_RETRY_MS = 60_000;
 /** Links that died are judged this long after the last of them: the others' keepalives find a dead
     hub within 5 s of each other (dhd_star LINK_SILENT_MS). */
 const LINK_LOST_GRACE_MS = 5_000;
+/** A hub without a working SFU session while fallback racers wait for it is replaced once it has
+    been so this long: a session being renewed (a new offer between races, a replaced association,
+    TURN) is ready again within a few seconds (finding 177: UDP 0.7-1.5 s, TURN about 3 s from the
+    answer). Shorter than SFU_SETUP_MS, so the hub moves before its fallback racers would leave. */
+const UNBRIDGED_GRACE_MS = 12_000;
 /** A P2P room's text frames may be this long, for the peer connections' signaling (an SDP offer or
     answer with its candidates: a few kB from a browser). Other messages keep MAX_TEXT_BYTES. */
 const P2P_TEXT_BYTES = 16_384;
@@ -300,6 +305,8 @@ interface RoomState {
       member. When it changed last (HUB_RETRY_MS). */
   hub?: number | null;
   hubChangedAt?: number;
+  /** Since when fallback racers have waited for a hub without a working SFU session. */
+  unbridgedSince?: number;
 }
 
 /** Where a room was made (src/index.ts, finding 135). */
@@ -2143,12 +2150,13 @@ export class Room extends DurableObject<Env> {
     await this.fallbackDeadlines(st, now);
   }
 
-  /** Replaces a hub that can't do its work, never within HUB_RETRY_MS of the last change (a hub that
-      left or whose room connection dropped is replaced at once: leave, dropSocket): when no member
-      links to it although direct links work for some of them (two or more members, all on the
-      SFU, some of which have been on a star; links that died LINK_LOST_GRACE_MS ago at least), for
-      a member whose direct links work and that didn't just lose its own; or when fallback racers
-      wait for it and it has no working SFU session to bridge them (a browser's game). One member's
+  /** Replaces a hub that can't do its work (a hub that left or whose room connection dropped is
+      replaced at once: leave, dropSocket). When fallback racers have waited UNBRIDGED_GRACE_MS for
+      it with no working SFU session to bridge them (a browser's game; a session being renewed is
+      back sooner), by one that has a working session. When no member links to it although direct
+      links work for some of them (two or more members, all on the SFU, some of which have been on
+      a star; links that died LINK_LOST_GRACE_MS ago at least), not within HUB_RETRY_MS of the last
+      change, by a member whose direct links work and that didn't just lose its own. One member's
       link going down, a blip or a false report, never moves the hub by itself. */
   private checkHub(st: RoomState, now: number): void {
     const hub = st.members.find((x) => x.id === st.hub);
@@ -2156,19 +2164,21 @@ export class Room extends DurableObject<Env> {
       if (st.members.length) this.setHub(st, this.bestHub(st, now), "no hub");
       return;
     }
+    const group = this.sfuGroup();
+    if (group?.length && hub.sfu?.phase !== "ready") {
+      st.unbridgedSince ??= now;
+      if (now - st.unbridgedSince >= UNBRIDGED_GRACE_MS) {
+        const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true });
+        if (next?.sfu?.phase === "ready") return this.setHub(st, next, "it can't bridge the racers on the SFU");
+      }
+    } else delete st.unbridgedSince;
     if (now - (st.hubChangedAt ?? 0) < HUB_RETRY_MS) return;
     const others = st.members.filter((x) => x !== hub && this.sockets.has(x.id));
     const settled = others.every((x) => x.lostLinkAt == null || now - x.lostLinkAt >= LINK_LOST_GRACE_MS);
     const isolated = others.length >= 2 && others.every((x) => x.link === "sfu") && others.some((x) => x.direct) && settled;
-    const group = this.sfuGroup();
-    const unbridged = !!group?.length && hub.sfu?.phase !== "ready";
     if (isolated) {
       const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true, direct: true });
-      if (next) return this.setHub(st, next, "its links failed");
-    }
-    if (unbridged) {
-      const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true });
-      if (next?.sfu?.phase === "ready") this.setHub(st, next, "it can't bridge the racers on the SFU");
+      if (next) this.setHub(st, next, "its links failed");
     }
   }
 
@@ -2197,6 +2207,7 @@ export class Room extends DurableObject<Env> {
     const now = Date.now();
     st.hub = next?.id ?? null;
     st.hubChangedAt = now;
+    delete st.unbridgedSince;
     for (const x of st.members) {
       delete x.link;
       delete x.fallbackAt;

@@ -402,8 +402,36 @@ describe("P2P rooms (finding 186)", () => {
       link(f, ids[0], ids[2], false);
       await routes(a, (r) => linkOf(r, ids[2]) === "sfu");
       await race(cs, code);
-      await expire(code, (st) => { st.hubChangedAt = Date.now() - 120_000; });
+      // Unbridged since the race's first alarm: not before its grace.
+      await runDurableObjectAlarm(room(code));
+      expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[0]);
+      await expire(code, (st) => { st.unbridgedSince = Date.now() - 60_000; });
       expect((await routes(f, (r) => r.hub !== ids[0])).hub).toBe(ids[1]);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("a hub whose SFU session is being renewed mid-race keeps the hub (review 2)", async () => {
+    const fake = fakeRealtime();
+    try {
+      const { cs, code, ids } = await p2pRoom(3, true);
+      for (const c of cs) await connect(c);
+      const [hub, a, f] = cs;
+      link(hub, ids[0], ids[1], true);
+      link(f, ids[0], ids[2], false);
+      await routes(a, (r) => linkOf(r, ids[2]) === "sfu");
+      await race(cs, code);
+      await expire(code, (st) => { st.hubChangedAt = Date.now() - 120_000; });
+      // A new session for the hub (a lost association, a TURN renewal): not ready for a moment.
+      hub.sendJson({ type: "sfu_offer", sdp: "offer" });
+      await hub.json("sfu_answer");
+      await runDurableObjectAlarm(room(code));
+      expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[0]);
+      hub.sendJson({ type: "sfu_connected" });
+      await hub.json("sfu_channels");
+      await runDurableObjectAlarm(room(code));
+      expect(await runInDurableObject(room(code), async (r: any) => [r.state.hub, r.state.unbridgedSince])).toEqual([ids[0], undefined]);
     } finally {
       fake.restore();
     }
