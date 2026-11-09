@@ -53,7 +53,7 @@ after a version change before a live check.
 | `port/tools/hidden_game.py` | the hidden-desktop game itself (Python API: keys, mouse, shots, PrintWindow captures) |
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` over the relay only |
-| `port/tools/cross_bench.py` | native PC/Mac SFU/P2P comparison: private rooms, both host roles, interleaved repeats and forced TURN controls (`--matrix`, `--rounds N` trials of each case), `--env NAME=VALUE` for both games; raw evidence under the chosen output directory |
+| `port/tools/cross_bench.py` | native PC/Mac SFU/P2P comparison: private rooms, both host roles, interleaved repeats and forced TURN controls (`--matrix`, `--rounds N` trials of each case), `--p2p-server URL` for P2P trials, `--env NAME=VALUE` for both games; raw evidence under the chosen output directory |
 | `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game hosts, `--bots N` nettool P2P bots join (`--turn-bots K` of them relay-only), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, snapshot age per sender (summary.json) |
 | `port/tools/analyze_netbench.py` | summarize a cross_bench output directory into JSON, CSV and Markdown; application RTT, delivery and native transport counters |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |

@@ -43,8 +43,13 @@ migration, rejoin into a P2P room, automatic SFU fallback.
   the 24-trial LAN matrix (0c86d38).
 - [x] Test package: Windows and macOS from 3b3920f (not published); the packaged Windows dhd.exe
   hosted a P2P room with two bots (one relayed, one direct), all raced, no freeze.
-- [ ] The internet matrix: not run (see Surprises: the Mac never left the home LAN).
-- [ ] Merge; lead: deploy the P2P Worker (README "P2P rooms"), the billing alert, publish the test
+- [x] 2026-11-09: merged with main 7fabfc9 (findings 181, 182, 184) on `merge/p2p-main` (456b974c):
+  `check.py port`, `check.py server`, boot and race traces equal to 0.7.13's, the native 2- and
+  10-game room tests.
+- [x] 2026-11-09: the internet matrix, 24 trials, Mac on a phone hotspot (below).
+- [x] 2026-11-09: test prerelease 0.7.14-p2p-test1 on `prerelease/0.7.14-p2p-test1` (never main):
+  Windows and macOS packages, not published; the packaged Windows game hosted a P2P room.
+- [ ] Lead: deploy the P2P Worker right before publishing, the billing alert, publish the
   prerelease.
 
 ## What was simplified (feat/p2p-clean)
@@ -93,8 +98,21 @@ migration, rejoin into a P2P room, automatic SFU fallback.
   connection's: with a local server or an ssh tunnel that is 127.0.0.1.
 - A guest the host can't reach in 20 s is removed with `reason: "unreachable"` (the server says
   "Your game could not connect to the host's."), its rider in a running race the host's AI.
-- The test package keeps version 0.7.13 (version.h; `package_release.py --version` must equal
-  it): it is told apart by its file name and core id. A version for the prerelease is the lead's.
+- The test prerelease is **0.7.14-p2p-test1** (owner), its version commit on its own branch.
+  The launcher's and the game's update checks, `build_launcher.py` and `package_release.py` read
+  a prerelease's "-suffix" there (a prerelease comes before its release, so a tester's launcher
+  offers 0.7.14 when it is out); the Windows installer's file version takes the numbers only.
+  Those commits suit main as well.
+- **Merge with 184 (rollouts):** P2P rooms get no restart-for-new-code hook. An SFU room restarts
+  between races and its games rejoin; a P2P game never rejoins (its host carries the race), so a
+  restart would end the room. P2P rooms take the deferred code updates instead (the main Worker's
+  `code_update_strategy`, now also in `wrangler.p2p.jsonc`: a room keeps its code until it ends,
+  24 h at most), and the P2P Worker is deployed with `wrangler deploy`, not `tools/deploy.mjs`.
+- **Merge with 182 (call gate):** a P2P room's TURN calls go through its own `CallGate` (5 at a
+  time): ten members joining at once would otherwise pass the Durable Object's six connections.
+- **Merge with 181 (Room Region):** the region row is an SFU row (a P2P room's server only relays
+  signaling, so where it runs doesn't matter), placed after Create A Private Race and before Create
+  A P2P Race.
 
 ## Surprises
 
@@ -188,17 +206,46 @@ kinds (the coalescing probe queue the prototype's run described, not loss). Each
 the SFU's own relayed path (two relay legs through Cloudflare against one). This is one LAN, not
 the internet. Evidence: build/check/netbench-lan-final (local, not tracked).
 
-## The internet test (not run)
+## The internet matrix (2026-11-09)
 
-To run once the Mac is on a separate internet connection (phone hotspot, no VPN): check first
-that the two machines report different public addresses (`curl https://www.cloudflare.com/
-cdn-cgi/trace` on each, compare without printing), then
+The merged build (456b974c) on both machines: the PC on its home connection (Ethernet), the Mac on
+a phone's hotspot (cellular, Proton VPN off; checked first: a different public address, the
+hotspot's gateway). The rooms on two temporary workers.dev Workers deployed from the merged
+server, one for the SFU rooms (with its Realtime and TURN secrets) and one for P2P rooms (the
+official P2P Worker's code), both deleted afterwards. `cross_bench.py --matrix --rounds 3
+--seconds 30 --server SFU --p2p-server P2P`: 24 trials, each case 3 times. EVENT probes; per case
+the median of the 6 endpoint medians and of their p95s, the worst p95 and the worst single echo.
 
-    python port/tools/cross_bench.py build/check/netbench-internet --matrix --rounds 3 --server local
-    python port/tools/analyze_netbench.py build/check/netbench-internet
+| Case | Path (PC / Mac) | RTT median | p95 median / worst | Max | EVENT echoed |
+|---|---|---|---|---|---|
+| SFU, PC hosts | UDP / UDP | 52.9 ms | 74.0 / 104.9 ms | 1037 ms | 875/875 |
+| SFU, Mac hosts | UDP / UDP | 52.3 ms | 74.7 / 183.1 ms | 987 ms | 878/878 |
+| P2P, PC hosts | UDP to the Mac's relay / TURN | 67.6 ms | 130.7 / 181.6 ms | 284 ms | 878/878 |
+| P2P, Mac hosts | UDP to the Mac's relay / TURN | 62.3 ms | 78.2 / 103.9 ms | 463 ms | 879/879 |
+| SFU, forced TURN, PC hosts | TURN / TURN | 54.7 ms | 70.9 / 77.0 ms | 279 ms | 876/876 |
+| SFU, forced TURN, Mac hosts | TURN / TURN | 58.7 ms | 111.7 / 183.9 ms | 376 ms | 870/870 |
+| P2P, forced TURN, PC hosts | TURN / TURN | 62.7 ms | 88.5 / 124.4 ms | 624 ms | 878/878 |
+| P2P, forced TURN, Mac hosts | TURN / TURN | 63.9 ms | 90.5 / 149.4 ms | 315 ms | 880/880 |
 
-(`--server local` until the P2P Worker runs this branch: the deployed one still makes 6-character
-codes).
+Snapshot age on arrival, the games' own 30 s lines while racing (median of the windows' p50 and
+p95, worst p95):
+
+| Case | p50 | p95 / worst | Gaps over 100 ms (all windows) |
+|---|---|---|---|
+| SFU, PC / Mac hosts | 48 / 49.5 ms | 76-80 / 209 ms | 55 / 114 |
+| P2P, PC / Mac hosts | 46.5 / 54 ms | 69-90 / 142 ms | 128 / 14 |
+| SFU forced TURN, PC / Mac hosts | 47.5 / 50 ms | 69 / 247 ms | 21 / 29 |
+| P2P forced TURN, PC / Mac hosts | 52 / 56 ms | 69-74 / 151 ms | 15 / 34 |
+
+- **No direct P2P path through the hotspot.** In every P2P trial the Mac's end was its TURN relay
+  (the phone's carrier NAT lets no direct path through); the PC reached that relay over UDP. So an
+  automatic P2P pair here is one relay leg, and P2P's RTT is about 10-15 ms above the SFU's (whose
+  two UDP legs go to a Cloudflare location near each player).
+- Every race ran at a median 60 fps; every EVENT probe was echoed; STATE echoes missing 3-8 per
+  case (the coalescing probe queue, as on the LAN).
+- 7 `freeze:` lines in 48 game runs, all on the Mac and all the load screen's rider wait
+  (`waiting for 1 player's riders`, about 5 s), SFU and P2P alike; none in a race.
+- Evidence: build/check/netbench-internet (local, not tracked).
 
 ## Billing alert (owner)
 
