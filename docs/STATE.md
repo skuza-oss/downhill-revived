@@ -70,7 +70,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the shared C front ends `gpu_exact.inc` (exact: the PS2's pixels, the reference) and
   `native_core.inc` (native, upscaled, the player default). Findings 084-086, 088, 131. A lost GPU
   device ends the game with a message box instead of a frozen picture (desktop and Android; tried on
-  Direct3D 12; finding 171).
+  Direct3D 12; finding 171). Dual-source blending is off on Intel GPUs (`device::dual_source`;
+  `DHD_WGPU_DUAL_SOURCE=0|1` overrides; finding 188): an Ice Lake GPU hung on it (issue #58).
 - **The game clock:** one delta-time clock at every frame rate, 60 included and online: each
   paced frame steps by the real time since the last, between one step at the selected rate and two
   fields (finding 139, `port/hle/fps.c`, `port/hle/kernel.c`). Deterministic runs keep the
