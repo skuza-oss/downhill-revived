@@ -278,3 +278,29 @@ fn a_star_racer_whose_hub_forwards_no_race_frame_falls_back() {
     // The hub sits the race out and the only other racer is on the SFU: nothing the hub would forward.
     assert!(run(None, &[(1, ""), (2, "star"), (3, "sfu")], &[2, 3]).is_empty());
 }
+
+/// A link to a new hub mid-race gets SILENT_AFTER_MS of its own before its silence counts, however
+/// long the race has run (a game 30 s into its race that links to the new hub isn't sent to the SFU
+/// at once).
+#[test]
+fn a_link_to_a_new_hub_mid_race_gets_its_own_time() {
+    let links = &[(1, ""), (2, "star"), (3, "")];
+    let mut s = linked(star(2, 1, links, &[1, 2, 3]), &[1]);
+    s.tick(0);
+    s.take();
+    // The hub moves to member 3 at 30 s; this game links to it at 31 s, and hears nothing yet.
+    s.room(&routes(3, &[(1, ""), (2, ""), (3, "")], &[1, 2, 3], &[0]));
+    s.take();
+    s.link(3, true, 31_000);
+    s.take();
+    let mut out = vec![];
+    for t in (31_000..31_000 + SILENT_AFTER_MS).step_by(500) {
+        s.peer_message(3, true, &[KIND_ALIVE], t);
+        s.tick(t);
+        out.extend(s.take().into_iter().filter(|a| !matches!(a, Action::Peer(..))));
+    }
+    assert!(out.is_empty(), "{out:?}");
+    s.peer_message(3, true, &[KIND_ALIVE], 31_000 + SILENT_AFTER_MS + 500);
+    s.tick(31_000 + SILENT_AFTER_MS + 500);
+    assert!(s.take().contains(&Action::Close(3)));
+}

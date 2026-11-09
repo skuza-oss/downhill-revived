@@ -1131,17 +1131,15 @@ export class Room extends DurableObject<Env> {
         // every channel listed active, and only a new session clears that. Once per race; a game
         // still silent on its new session is out of the race (the race can't reach it).
         // In a P2P room a fallback racer's and the bridging hub's: the SFU carries only their part
-        // of the race (finding 186). The hub still silent on its new session can't bridge: the
-        // hub moves to a member that can, if one does; it stays in its race on the star.
+        // of the race (finding 186). The hub is renewed once; still silent, nothing more: with one
+        // fallback racer its upload may be the cause, and moving the hub would make every star
+        // racer reconnect (a hub without a working session moves: checkHub). It stays in its race.
         const race = st.race;
         if (!race || !this.onSfuInRace(st, me) || m.race !== race.startAt || me.releasedRace !== race.startAt ||
             me.sfu?.phase !== "ready") return false;
         if (me.renewedRace === race.startAt) {
           console.warn(`room ${logCode(st.code)}: member ${me.id}'s race link is still silent on its new session`);
-          if (this.isHub(st, me.id)) {
-            const next = this.bestHub(st, Date.now(), { exclude: me.id, discretionary: true, sfu: true });
-            if (next) this.setHub(st, next, "its SFU link to the racers on the SFU is silent");
-          } else await this.retireSfu([me.id], race.startAt, true);
+          if (!this.isHub(st, me.id)) await this.retireSfu([me.id], race.startAt, true);
           return false;
         }
         this.sfuRenew(me, race, "hears nothing from the other racers (sfu_silent)");

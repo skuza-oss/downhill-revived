@@ -80,6 +80,8 @@ struct Race {
 
 struct PeerState {
     up: bool,
+    /// When the link came up: a hub's race frames are waited for from then too (silent_race).
+    up_at: u64,
     heard: u64,
     sent: u64,
 }
@@ -205,7 +207,7 @@ impl Star {
                 }
                 continue;
             }
-            self.peers.insert(id, PeerState { up: false, heard: 0, sent: 0 });
+            self.peers.insert(id, PeerState { up: false, up_at: 0, heard: 0, sent: 0 });
             self.out.push(Action::Connect { member: id, offerer: me == hub });
         }
     }
@@ -226,6 +228,7 @@ impl Star {
                 return;
             }
             peer.up = true;
+            peer.up_at = now;
             peer.heard = now;
             peer.sent = now;
         } else {
@@ -440,9 +443,10 @@ impl Star {
         }
     }
 
-    /// The race-frame silence of a star racer's link (START_LEAD_MS + SILENT_AFTER_MS): only while
-    /// this game races on the star and some other racer is on the star too (the hub racing, or a
-    /// member linked to it), whose frames the hub would forward; once per race.
+    /// The race-frame silence of a star racer's link (START_LEAD_MS + SILENT_AFTER_MS from the race's
+    /// start, and SILENT_AFTER_MS from the link's coming up: a link to a new hub mid-race gets its
+    /// time): only while this game races on the star and some other racer is on the star too (the
+    /// hub racing, or a member linked to it), whose frames the hub would forward; once per race.
     fn silent_race(&mut self, now: u64) {
         let (Some(me), Some(hub)) = (self.me, self.hub) else { return };
         let Some(marker) = self.race.as_ref().map(|r| r.marker) else { self.watch = None; return };
@@ -450,7 +454,9 @@ impl Star {
             self.watch = Some((marker, now, false));
         }
         let (_, since, done) = self.watch.unwrap();
-        if done || me == hub || !self.up(hub) || self.active_slot(me).is_none() || now.saturating_sub(since) < START_LEAD_MS + SILENT_AFTER_MS {
+        let Some(up_at) = self.peers.get(&hub).filter(|p| p.up).map(|p| p.up_at) else { return };
+        if done || me == hub || self.active_slot(me).is_none() || now.saturating_sub(since) < START_LEAD_MS + SILENT_AFTER_MS ||
+            now.saturating_sub(up_at) < SILENT_AFTER_MS {
             return;
         }
         let race = self.race.as_ref().unwrap();

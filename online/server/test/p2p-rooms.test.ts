@@ -619,7 +619,7 @@ describe("P2P rooms (finding 186)", () => {
     }
   });
 
-  it("the bridging hub's silent link gets it a new session; still silent, the hub moves and races on (finding 187)", async () => {
+  it("the bridging hub's silent link gets it a new session once; still silent, it stays the hub and races on (finding 187)", async () => {
     const { fake, cs, code, ids, startAt } = await bridgedRace();
     try {
       const [hub, star, f] = cs;
@@ -633,8 +633,11 @@ describe("P2P rooms (finding 186)", () => {
       hub.sendJson({ type: "sfu_ready", race: startAt });
       await hub.json("sfu_ready");
       hub.sendJson({ type: "sfu_silent", race: startAt });
-      expect((await routes(f, (r) => r.hub !== ids[0])).hub).toBe(ids[1]);
-      expect(await runInDurableObject(room(code), async (r: any) => r.state.race.left)).toEqual([]);
+      hub.sendJson({ type: "ping", t: 1 });
+      await hub.json("pong");
+      await runDurableObjectAlarm(room(code));
+      expect(await runInDurableObject(room(code), async (r: any) => [r.state.hub, r.state.race.left])).toEqual([ids[0], []]);
+      expect(hub.seen.filter((t) => JSON.parse(t).type === "sfu_reset")).toHaveLength(1);
     } finally {
       fake.restore();
     }
