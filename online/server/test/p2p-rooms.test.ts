@@ -437,6 +437,78 @@ describe("P2P rooms (finding 186)", () => {
     }
   });
 
+  it("one fallback racer that isn't ready holds back no other's release (review 3)", async () => {
+    const fake = fakeRealtime();
+    try {
+      const { cs, code, ids } = await p2pRoom(4, true);
+      const [hub, a, f1, f2] = cs;
+      for (const c of [hub, a, f1]) await connect(c);   // F2's SFU never comes up
+      link(hub, ids[0], ids[1], true);
+      link(f1, ids[0], ids[2], false);
+      link(f2, ids[0], ids[3], false);
+      await routes(a, (r) => linkOf(r, ids[2]) === "sfu" && linkOf(r, ids[3]) === "sfu");
+      const starts = await race(cs, code);
+      await passDone(code);
+      for (const c of [hub, f1]) c.sendJson({ type: "sfu_ready", race: starts[0].startAt });
+      for (const c of [hub, f1]) expect((await c.json("sfu_ready")).race).toBe(starts[0].startAt);
+      expect(f2.seen.some((t) => JSON.parse(t).type === "sfu_ready")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("a hub that can't bridge moves rather than its fallback racers leaving at their deadline (review 3)", async () => {
+    const fake = fakeRealtime();
+    try {
+      const { cs, code, ids } = await p2pRoom(3, true);
+      const [hub, a, f] = cs;
+      await connect(a);
+      await connect(f);   // the hub has no SFU session (a browser's game)
+      link(hub, ids[0], ids[1], true);
+      link(f, ids[0], ids[2], false);
+      await routes(a, (r) => linkOf(r, ids[2]) === "sfu");
+      await race(cs, code);
+      // F's setup deadlines have passed, the hub's grace not yet: F waits for the next hub.
+      await setEnv(code, { SFU_CONNECT_MS: "1", SFU_SETUP_MS: "1" });
+      await expire(code, (st) => { st.unbridgedSince = Date.now(); });
+      expect(await runInDurableObject(room(code), async (r: any) => r.state.race.left)).toEqual([]);
+      await expire(code, (st) => { st.unbridgedSince = Date.now() - 60_000; });
+      expect((await routes(f, (r) => r.hub !== ids[0])).hub).toBe(ids[1]);
+      expect(f.seen.some((t) => JSON.parse(t).type === "left")).toBe(false);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it("a fallback racer released through one hub has its deadlines again after a hub change (review 3)", async () => {
+    const fake = fakeRealtime();
+    try {
+      const { cs, code, ids } = await p2pRoom(3, true);
+      const [hub, f, x] = cs;
+      await connect(hub);
+      await connect(f);   // X has no SFU session
+      link(hub, ids[0], ids[1], true);
+      link(hub, ids[0], ids[2], true);
+      link(f, ids[0], ids[1], false);   // F's link died: not the next hub for a while
+      await routes(x, (r) => linkOf(r, ids[1]) === "sfu" && linkOf(r, ids[2]) === "star");
+      const starts = await race(cs, code);
+      await passDone(code);
+      for (const c of [hub, f]) c.sendJson({ type: "sfu_ready", race: starts[0].startAt });
+      await f.json("sfu_ready");
+      // The hub leaves; X (on the star, no SFU) is the next; F can't reach it either.
+      hub.sendJson({ type: "leave" });
+      expect((await routes(f, (r) => r.hub === ids[2])).hub).toBe(ids[2]);
+      link(f, ids[2], ids[1], false);
+      await routes(x, (r) => linkOf(r, ids[1]) === "sfu");
+      // Nothing can bridge F now: at its deadline it leaves the race (it no longer races unseen).
+      await setEnv(code, { SFU_CONNECT_MS: "1", SFU_SETUP_MS: "1" });
+      await runDurableObjectAlarm(room(code));
+      expect((await x.json("left")).memberId).toBe(ids[1]);
+    } finally {
+      fake.restore();
+    }
+  });
+
   it("a member back by its token keeps the hub and its link, and hears the routes again", async () => {
     const { cs, code, ids } = await p2pRoom(2);
     const [hub, a] = cs;

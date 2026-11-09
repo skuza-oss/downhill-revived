@@ -1715,9 +1715,19 @@ export class Room extends DurableObject<Env> {
   private releaseSfu(st: RoomState): void {
     const race = st.race;
     if (!race) return;
+    const ready = (m: Member) => m.sfuReadyRace === race.startAt && m.sfu?.phase === "ready";
     const entrants = st.members.filter(m => this.inRace(st, m.id));
-    const racers = st.transport === "p2p" ? this.bridged(st, entrants) : entrants;
-    if (!racers.length || !racers.every(m => m.sfuReadyRace === race.startAt && m.sfu?.phase === "ready")) return;
+    let racers = entrants;
+    if (st.transport === "p2p") {
+      // The hub and the fallback racers that are ready: one that isn't (its session broken, its
+      // channels late) holds back nobody else; it is released with them once it is ready and its
+      // pairs are made, or leaves the race at its deadline (review 3).
+      const group = this.bridged(st, entrants);
+      if (!group.some((m) => m.id === st.hub && ready(m))) return;
+      racers = group.filter(ready);
+      if (racers.length < 2) return;
+    }
+    if (!racers.length || !racers.every(ready)) return;
     if (this.missingSubscription(racers)) {
       // A pass for a pair it can make now; one waiting for its inspection gets the alarm's.
       if (this.missingSubscription(racers, Date.now())) this.kickSubscribe();
@@ -2168,8 +2178,8 @@ export class Room extends DurableObject<Env> {
     if (group?.length && hub.sfu?.phase !== "ready") {
       st.unbridgedSince ??= now;
       if (now - st.unbridgedSince >= UNBRIDGED_GRACE_MS) {
-        const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true });
-        if (next?.sfu?.phase === "ready") return this.setHub(st, next, "it can't bridge the racers on the SFU");
+        const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true, sfu: true });
+        if (next) return this.setHub(st, next, "it can't bridge the racers on the SFU");
       }
     } else delete st.unbridgedSince;
     if (now - (st.hubChangedAt ?? 0) < HUB_RETRY_MS) return;
@@ -2187,10 +2197,11 @@ export class Room extends DurableObject<Env> {
       bridge fallback racers), then the lowest room ping (the server's measure of its connection),
       then the one here longest. A member whose link to the hub died within HUB_RETRY_MS comes
       last, and a `discretionary` change (the hub is still here) never picks one; `direct` takes
-      only members that have been on a star. */
-  private bestHub(st: RoomState, now: number, o: { exclude?: number; discretionary?: boolean; direct?: boolean } = {}): Member | undefined {
+      only members that have been on a star, `sfu` only those with a working SFU session. */
+  private bestHub(st: RoomState, now: number, o: { exclude?: number; discretionary?: boolean; direct?: boolean; sfu?: boolean } = {}): Member | undefined {
     const lost = (x: Member) => x.lostLinkAt != null && now - x.lostLinkAt < HUB_RETRY_MS;
-    let pool = st.members.filter((x) => x.id !== o.exclude && (!o.discretionary || !lost(x)) && (!o.direct || x.direct));
+    let pool = st.members.filter((x) => x.id !== o.exclude && (!o.discretionary || !lost(x)) && (!o.direct || x.direct) &&
+      (!o.sfu || x.sfu?.phase === "ready"));
     const present = pool.filter((x) => this.sockets.has(x.id));
     if (present.length) pool = present;
     const rank = (x: Member) => [lost(x) ? 1 : 0, x.direct ? 0 : 1, x.sfu?.phase === "ready" ? 0 : 1, this.rttOf(x.id) ?? Infinity, st.members.indexOf(x)];
@@ -2211,6 +2222,9 @@ export class Room extends DurableObject<Env> {
     for (const x of st.members) {
       delete x.link;
       delete x.fallbackAt;
+      // Released through the earlier hub: a racer that falls back again needs the new one's pairs,
+      // and has its setup deadlines again (review 3).
+      delete x.releasedRace;
       if (x === next) delete x.linkFrom;
       else x.linkFrom = now;
     }
@@ -2222,16 +2236,20 @@ export class Room extends DurableObject<Env> {
 
   /** A P2P room's fallback racers have an SFU room's setup deadlines from the moment they went to
       the SFU (at the earliest the start message): their own connection by SFU_CONNECT_MS, released
-      by SFU_SETUP_MS. One not done by then is out of the race, as in an SFU room. */
+      by SFU_SETUP_MS. One not done by then is out of the race, as in an SFU room; but while the hub
+      is what is missing (no working SFU session) and another member could bridge, the hub moves
+      (checkHub, within UNBRIDGED_GRACE_MS) and they wait for it (review 3). */
   private async fallbackDeadlines(st: RoomState, now: number): Promise<void> {
     const race = st.race;
     if (!race) return;
     const from = race.startAt - START_LEAD_MS;
+    const hub = st.members.find((x) => x.id === st.hub);
+    const hubMoves = !!hub && hub.sfu?.phase !== "ready" && !!this.bestHub(st, now, { exclude: hub.id, discretionary: true, sfu: true });
     const lost: number[] = [], late: number[] = [];
     for (const x of this.bridged(st, st.members.filter((m) => this.inRace(st, m.id)))) {
       if (x.id === st.hub || x.releasedRace === race.startAt) continue;
       const since = Math.max(from, x.fallbackAt ?? from);
-      if (now >= since + this.sfuSetupMs()) late.push(x.id);
+      if (now >= since + this.sfuSetupMs()) { if (!hubMoves) late.push(x.id); }
       else if (now >= since + this.sfuConnectMs() && !(x.sfuConnected || x.sfu?.phase === "ready")) lost.push(x.id);
     }
     if (lost.length) await this.retireSfu(lost, race.startAt, false);
