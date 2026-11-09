@@ -58,6 +58,10 @@ Out of scope: online on phones (unchanged: P2P rooms), anything below API 29.
     in its BLE Steam Controller code, one UnspecifiedRegisterReceiverFlag, 31 ObsoleteSdkInt
     warnings), and UnusedAttribute warnings for `enableOnBackInvokedCallback` (33) and
     `preferMinimalPostProcessing` (30), which older Android ignores.
+- [x] 2026-11-09 `python tools/check.py port -j 6`: OK (docs, tree, core, runtime tests, the
+  Windows game, net tests, wgpu tests, wasm2c chunks). No state trace: nothing the game computes
+  changed (desktop guest memory compiles as before; on Android only where the RAM's file comes
+  from).
 - [x] Players' text: README, `docs/PLAYING.md`, `port/release/ANDROID-NOTES.md` (the release
   notes' Android part), `docs/STATE.md` say Android 10.
 - [ ] A real Android 10 phone (the lead): install over nothing and over 0.7.14 is not possible
