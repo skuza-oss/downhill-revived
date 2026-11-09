@@ -63,18 +63,23 @@ static const WsView *ws_view(int view)
     return view >= 0 && view < WS_VIEW_COUNT ? D_0075A9D0[view].view : NULL;
 }
 void func_0023D8D8(int view, float focal, float vertical);
-static int rebuilding_projection;
+
+/* The projection setter func_0023D8D8 (port/patches.py) scales the title's and shell menus' X
+   focal length, 688, which their callers pass unscaled. The bike shop (func_001F84A8) zooms from
+   688 to 3000 and calls through port_ws_set_focal, which scales it itself: there the setter must
+   leave it, or the zoom step whose scaled value is exactly 688 would be scaled twice. */
+static int focal_scaled;
 
 float port_ws_menu_focal(float focal)
 {
-    return !rebuilding_projection && focal == 688.0f ? focal * port_fov_x : focal;
+    return !focal_scaled && focal == 688.0f ? focal * port_fov_x : focal;
 }
 
 void port_ws_set_focal(int view, float focal, float vertical)
 {
-    rebuilding_projection = 1;
+    focal_scaled = 1;
     func_0023D8D8(view, focal * port_fov_x, vertical);
-    rebuilding_projection = 0;
+    focal_scaled = 0;
 }
 void func_0023D618(int view, int *x, int *y);   /* the view's centre in GS pixels */
 void func_0023D650(int view, int *width, int *height);

@@ -414,8 +414,9 @@ PATCHES['unsorted/0016B8C8.cpp'] = [('text', 'int func_00238F10(void);', 'int fu
                                    ('text', 'func_0023D8D8(0, 277.0f, sp4);', 'func_0023D8D8(0, 277.0f * port_fov_x, sp4);')]
 # Widescreen (DHD_WIDESCREEN, port/hle/host.c host_widescreen_init): the X field of view of the
 # 1P race, replay, bike shop and menu calls, scaled by port_fov_x (1 normally, 3/4 for 16:9) as
-# the PCSX2 widescreen patch for this disc changes them (finding 043). The view table and tree
-# widths are data, changed at boot.
+# the PCSX2 widescreen patch for this disc changes them (finding 043). The view table and the VU1
+# sprite widths are data, changed at boot (finding 192). The bike shop scales its own zoom
+# (port_ws_set_focal), so the setter's 688 check leaves it.
 PATCHES['unsorted/001A8A48.c'] = [('text', 'func_0023D8D8(0, 277.0f, y);', 'func_0023D8D8(0, 277.0f * port_fov_x, y);')]
 PATCHES['unsorted/001F84A8.c'] = [('text', 'func_0023D8D8(0, f, b);', 'port_ws_set_focal(0, f, b);')]
 # 688 is the title (func_001B6708, recompiled from asm) and shell menus' X field of view.
