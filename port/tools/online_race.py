@@ -1,13 +1,17 @@
-"""An online race through the relay with state sync (findings 044, 047): two game instances on
-this PC, the host and one that joins, each riding its own scripted line (DHD_NET_SCRIPTED), plus
-optionally nettool bots that replay a recorded rider (--bots, port/net/nettool.c --replay). Each
+"""An online race in a room with state sync (findings 044, 047): two game instances on this PC,
+the host and one that joins, each riding its own scripted line (DHD_NET_SCRIPTED), plus
+optionally nettool bots (--bots, port/net/nettool.c) that replay a recorded rider (--replay) or,
+without one, mirror a host AI rider as their own (--echo-ai) and finish after 60 s. Each
 game shows the others' riders as puppets; the host runs the AI riders. Both take screenshots at
 the given race-clock moments (DHD_RACE_CAPTURE) and the run goes on until both games have the
 host's results (or --seconds). The summary has the start (GO on the server's clock), the lag of
 each puppet, hits, finishes and results.
 
     python port/tools/online_race.py [--seconds 420] [--out DIR] [--capture g+600,g+1200]
-                                     [--bots N --replay FILE] [--kill-guest-at SECONDS] [--lag]
+                                     [--bots N [--replay FILE]] [--kill-guest-at SECONDS] [--lag]
+
+--exe can be another build than --nettool's: a release's games with this checkout's client code
+in the bots (the bots claim the host's version, as rooms take only one build).
 
 --lag: both games trace their puppets and record their own rider, and the summary ends with how
 far behind real time and how far from the real rider each shows the other (puppet_lag.py).
@@ -130,8 +134,8 @@ def main():
     ap.add_argument('--out', default=str(ROOT / 'build' / 'port' / 'online-race'))
     ap.add_argument('--track', default='0')
     ap.add_argument('--capture', default='g+300,g+900', help='DHD_RACE_CAPTURE moments for both')
-    ap.add_argument('--bots', type=int, default=0, help='nettool players replaying --replay')
-    ap.add_argument('--replay', help='a STATE/EVENT recording (DHD_NET_RECORD) for the bots')
+    ap.add_argument('--bots', type=int, default=0, help='nettool players: --replay, else echoing an AI rider')
+    ap.add_argument('--replay', help='a STATE/EVENT recording (DHD_NET_RECORD) for the bots (else they echo an AI rider)')
     ap.add_argument('--kill-guest-at', type=float, help='stop the guest this many seconds after GO')
     ap.add_argument('--stop-if', default=os.path.join(ROOT, 'build', 'port', 'BENCH.lock'),
                     help='stop everything as soon as this file exists (the benchmark lock)')
@@ -180,16 +184,22 @@ def main():
             return 1
         code = m.group(1)
         print('room', code)
-        db = game('B', GUEST_PAD, {'DHD_NET_JOIN': code, 'DHD_NET_NAME': 'Guest', 'DHD_NET_RIDER': '8',
-                                   **dict(x.split('=', 1) for x in a.b)})
+        # The bots join first and ready only once every player is in the room (nettool --players):
+        # a room locks its grid as soon as everyone in it is ready, so a bot joining after the two
+        # games would wait for the next race.
         version = wait_line([da / 'stderr.log'], r'version (dhd-port [\w.-]+(?: \w+)?)', 30, procs, a.stop_if)[0].group(1)
         for k in range(a.bots):
             d = out / f'bot{k}'
             d.mkdir(exist_ok=True)
             log = owned.enter_context(open(d / 'stdout.log', 'w'))
+            ride = ['--replay', a.replay, '--rider', str(k * 2 + 1)] if a.replay else \
+                ['--pick', str(k * 2 + 1), '--races', '1', '--ready-after', '1', '--echo-ai', '--finish-after', '60']
             procs.append(owned.enter_context(owned_process.start(
-                [a.nettool, '--bot', '--version', version, '--iso', iso_hash, '--name', f'Bot{k}', '--replay', a.replay,
-                 '--rider', str(k * 2 + 1), 'join', code], stdout=log, stderr=subprocess.STDOUT)))
+                [a.nettool, '--version', version, '--iso', iso_hash, '--name', f'Bot{k}', '--players', str(players), *ride,
+                 'join', code], stdout=log, stderr=subprocess.STDOUT)))
+        db = game('B', GUEST_PAD, {'DHD_NET_JOIN': code, 'DHD_NET_NAME': 'Guest', 'DHD_NET_RIDER': '8',
+                                   **dict(x.split('=', 1) for x in a.b)})
+        guest = procs[-1]
         go = wait_line([da / 'stderr.log', db / 'stderr.log'], r'countdown starts', 400, procs, a.stop_if)
         for p in procs if a.minimized else ():
             p.minimize()  # a window SDL showed after the start
@@ -197,7 +207,8 @@ def main():
             print('a game did not reach the countdown')
         elif a.kill_guest_at:
             time.sleep(4 + a.kill_guest_at)  # the countdown, then the race
-            procs.pop(1).stop()
+            procs.remove(guest)
+            guest.stop()
             print('guest stopped')
         logs = [da / 'stderr.log'] + ([] if a.kill_guest_at else [db / 'stderr.log'])
         done = wait_line(logs, r'online: result 1\.', a.seconds, procs, a.stop_if)
