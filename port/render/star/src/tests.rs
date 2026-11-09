@@ -238,6 +238,10 @@ fn without_direct_links_a_game_goes_to_the_sfu_at_once() {
     assert_eq!(member.take(), vec![Action::Room(json!({"type": "p2p_link", "hub": 1, "member": 2, "up": false}))]);
     member.room(&routes(1, &[(1, ""), (2, "")], &[], &[]));
     assert!(member.take().is_empty());  // once
+    // The room puts it on the SFU, then lets it try again after the race: reported again.
+    member.room(&routes(1, &[(1, ""), (2, "sfu")], &[], &[]));
+    member.room(&routes(1, &[(1, ""), (2, "")], &[], &[]));
+    assert_eq!(member.take(), vec![Action::Room(json!({"type": "p2p_link", "hub": 1, "member": 2, "up": false}))]);
     let mut hub = Star::new(false);
     hub.room(&json!({"type": "welcome", "memberId": 1}));
     hub.room(&routes(1, &[(1, ""), (2, ""), (3, "")], &[], &[]));

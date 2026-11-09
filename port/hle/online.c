@@ -430,7 +430,7 @@ static void connect_lobby(void)
     host_service_net_init(GADDR(server), GADDR(name && *name ? name : "Rider"), GADDR(version), GADDR(iso));
     if (join && *join) {
         if (host_service_net_join_room(GADDR(join)) < 0) fail("that join code can't be one (6 letters and digits).");
-    } else  /* DHD_NET_CREATE=p2p: a P2P room (finding 180) */
+    } else  /* DHD_NET_CREATE=p2p: a P2P room (findings 180, 186) */
         host_service_net_create_room(!strcmp(getenv("DHD_NET_CREATE") ? getenv("DHD_NET_CREATE") : "", "p2p"));
     fprintf(stderr, "online: %s, version %s\n", join && *join ? "joining" : "creating a room", version);
 }

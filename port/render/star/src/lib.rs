@@ -125,6 +125,7 @@ impl Star {
             self.reported_down.clear();
         }
         self.hub = hub;
+        let before = std::mem::take(&mut self.members);
         self.members = m["members"].as_array().map_or(vec![], |a| {
             a.iter().filter_map(|x| {
                 let link = match x["link"].as_str() {
@@ -135,6 +136,13 @@ impl Star {
                 Some((x["id"].as_u64()?, link))
             }).collect()
         });
+        // A member back from the SFU to a try (the room retries between races) is reported again.
+        let retried: Vec<u64> = self.members.iter()
+            .filter(|(id, link)| link.is_none() && before.iter().any(|(b, l)| b == id && *l == Some(Link::Sfu)))
+            .map(|(id, _)| *id).collect();
+        if let (Some(me), Some(hub)) = (self.me, self.hub) {
+            self.reported_down.retain(|other| !retried.contains(if me == hub { other } else { &me }));
+        }
         let race = &m["race"];
         self.race = race["startAt"].as_u64().map(|marker| Race {
             marker,

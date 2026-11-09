@@ -442,8 +442,8 @@ static char entry[16];
 static int home_row;  /* HOME's row last chosen: the cursor goes back to it */
 
 static int home_kind[HOME_KINDS], home_rows;
-/* A P2P room's members reach the host's game directly, so each sees the host's network address
-   and the host every member's (finding 180). Said on HOME's row and in the room when it opens. */
+/* A P2P room's members reach its hub's game directly, so each sees the hub's network address and
+   the hub every member's (findings 180, 186). Said on HOME's row and in the room when it opens. */
 static const char p2p_notice[] = "Players in this room can see your network address.";
 static const char p2p_row_notice[] = "Players in it can see your network address.";  /* the footer's 45 */
 static double p2p_notice_until;
@@ -549,7 +549,7 @@ static void page_build(MenuPage *p)
             home_add(p, HOME_LIST, "Public Races");
             home_add(p, HOME_PUBLIC, "Create A Public Race");
             home_add(p, HOME_PRIVATE, "Create A Private Race");
-            /* where a new SFU room runs (finding 181); a P2P room's server only relays signaling */
+            /* where a new room runs (finding 181), a P2P one too: its rules and fallback run there (186) */
             const SettingInfo *s = region_setting();
             home_kind[home_rows++] = HOME_REGION;
             menu_page_value(p, "Room Region:", s ? s->choices[region_index()].label : "Auto", MENU_VALUE_ARROWS);
