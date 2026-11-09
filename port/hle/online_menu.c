@@ -533,7 +533,7 @@ static void enter_room(int create, const char *code)
     connecting = 1;
     snprintf(status, sizeof status, "Connecting to the server...");
     hle_log("online menu: %s %s\n", create ? "creating a room" : "joining",
-            create == HOME_P2P ? "(P2P)" : create ? (public_room ? "(public)" : "(private)") : code);
+            create == HOME_P2P ? "(P2P)" : create ? (public_room ? "(public)" : "(private)") : net_log_code(code).text);
 }
 
 static void page_build(MenuPage *p)
@@ -650,7 +650,7 @@ static void room_sync(const NetLobby *l)
         }
     }
     if (!room_ready_sent) {
-        hle_log("online menu: room %s%s, version %s\n", l->code, l->is_host ? " (host)" : "", version);
+        hle_log("online menu: room %s%s, version %s\n", net_log_code(l->code).text, l->is_host ? " (host)" : "", version);
         host_service_net_set_ready(0);
         room_ready_sent = 1;
     }
@@ -679,7 +679,7 @@ static void connect_poll(MenuPage *p)
     choosing = 1;
     race = 2;
     host_service_net_pick(-1, -1, 0);  /* "Choosing..." in the room meanwhile */
-    hle_log("online menu: in room %s: choosing the rider\n", l.code);
+    hle_log("online menu: in room %s: choosing the rider\n", net_log_code(l.code).text);
     menu_page_close(p);
 }
 
@@ -1743,7 +1743,7 @@ static void room_update(MenuPage *p)
         for (int k = 0; k < COUNT(tracks); k++)
             if (tracks[k].index == l->track) room_track = k;
     if (l->started || l->state == NET_RACING) {
-        hle_log("online menu: room %s: the race starts\n", l->code);
+        hle_log("online menu: room %s: the race starts\n", net_log_code(l->code).text);
         race = 1;
         raced_track = l->track;
         snprintf(raced_code, sizeof raced_code, "%s", l->code);
@@ -1767,7 +1767,7 @@ static void room_update(MenuPage *p)
     if (in) {
         static int seen_cheats = -1;  /* every PC logs the room's cheats as it sees them */
         if (seen_cheats != (l->laps & ROOM_CHEATS))
-            hle_log("online menu: room %s: cheats %s\n", l->code, l->laps & ROOM_CHEATS ? "ON" : "OFF");
+            hle_log("online menu: room %s: cheats %s\n", net_log_code(l->code).text, l->laps & ROOM_CHEATS ? "ON" : "OFF");
         seen_cheats = l->laps & ROOM_CHEATS;
         room_options = l->laps, public_room = l->is_public;
     }

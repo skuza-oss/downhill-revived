@@ -156,6 +156,7 @@ Missing echo replies are application delivery failures, not a raw packet-loss me
 | `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
 | `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |
+| `DHD_NET_LOG_CODE=1` | dhd.log shows a P2P room's code in full (players' logs show `AB*****`: the code lets anyone in, and so see the host's address; finding 180); the tools that read the host's code from its log set it |
 | `DHD_NET_P2P_UDP=0` | a P2P room's direct UDP is off: no host or server-reflexive candidate, the TURN relay carries everything (finding 180) |
 | `DHD_NET_SFU_TURN=0` | the TURN fallback is never asked for; with `DHD_NET_SFU_UDP=0` a racer whose connection never comes up, whom the others must race without (finding 175) |
 | `DHD_PUPPET_PREDICT=0` | puppets interpolated in the past instead of predicted to the present (finding 169) |

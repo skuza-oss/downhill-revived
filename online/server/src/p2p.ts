@@ -1,14 +1,15 @@
 // P2P rooms (finding 180): the server admits members, relays host-star signaling and gives each
 // member its own TURN credentials. Nothing else: the host's game runs the room's rules and carries
-// the race (port/render/net/src/session.rs); no race frame passes through here.
+// the race (port/render/session); no race frame passes through here.
 //
 // A P2P room is private. Signaling carries each member's network addresses to the host and the
 // host's to every member, so a room is reached only by its code and never listed; the game says so
 // when it creates or joins one. The official server runs these routes as their own Worker
 // (wrangler.p2p.jsonc, src/p2p-entry.ts), so deploying them never restarts an SFU room; a local or
-// self-hosted server serves them from the main Worker (src/index.ts).
+// self-hosted server serves them from the main Worker (src/index.ts) when its config has the
+// binding (wrangler.selfhost.jsonc, tools/selfhost-config.mjs).
 import { DurableObject } from "cloudflare:workers";
-import { CallGate, Turn, type SfuSecrets } from "./sfu";
+import { CallGate, TURN_TTL_S, Turn, type SfuSecrets } from "./sfu";
 import {
   CLOSE_CODES, FRAME_PING, FRAME_PONG, HELLO_TIMEOUT_MS, MAX_MEMBERS, P2P_CODE_LENGTH, PROTOCOL,
   clientVersionOf, isOutdated, isValidCode, minVersionOf, randomCode,
@@ -39,8 +40,20 @@ const P2P_CAPS: Caps = { windowMs: CAP_WINDOW_MS, text: 400, binary: 20 };
     members joining at once would queue a 7th call in the runtime, where its timeout runs). One
     slot stays free for anything else the room fetches. */
 const TURN_CALLS = 5;
+/** A member's TURN credentials are renewed this long after they were made, well before they
+    expire (TURN_TTL_S): an allocation lives as long as a Refresh signed with a valid credential
+    keeps it, so the game signs the next one with the fresh credentials and its relay stays up
+    however long the room lasts (port/render/net/src/turn.rs renew). */
+export const TURN_RENEW_MS = TURN_TTL_S * 1000 * 3 / 4;
+/** A renewal that failed is tried again this much later (the old credentials still hold). */
+const TURN_RETRY_MS = 60_000;
 
 type Message = Record<string, unknown>;
+
+/** The P2P room binding: in the P2P Worker (wrangler.p2p.jsonc) and a local or self-hosted main
+    Worker (wrangler.selfhost.jsonc, tools/selfhost-config.mjs); not in the official main Worker
+    (wrangler.jsonc), whose generated Env therefore lacks it. */
+export type P2pEnv = Env & { P2P_ROOM?: DurableObjectNamespace<P2pRoom> };
 
 /** What the room keeps: the room's code, host and build, and how many may join. */
 interface RoomMeta {
@@ -63,14 +76,20 @@ interface Connection {
   tally: Tally;
   ipHash: string;
   country: string;
+  /** The member's TURN credentials (their username, for the revoke) and when they were made; the
+      previous ones after a renewal, still valid until they expire. */
   turnUser?: string;
+  turnAt?: number;
+  turnOld?: string;
 }
 
 /** The P2P routes: a WebSocket to /v1/p2p/rooms/new makes a room, to /v1/p2p/rooms/CODE joins one
     (seven characters: an SFU room's code has six). Returns null for any other path. */
-export async function p2pRoute(request: Request, env: Env, path: string): Promise<Response | null> {
+export async function p2pRoute(request: Request, env: P2pEnv, path: string): Promise<Response | null> {
   const m = path.match(/^\/v1\/p2p\/rooms\/([^/]+)$/);
   if (!m) return null;
+  const rooms = env.P2P_ROOM;
+  if (!rooms) return Response.json({ error: "This server has no P2P rooms" }, { status: 404 });
   const create = m[1] === "new";
   const code = create ? "" : m[1].toUpperCase();
   if (!create && !isValidCode(code, P2P_CODE_LENGTH)) return Response.json({ error: "Bad room code" }, { status: 404 });
@@ -88,10 +107,10 @@ export async function p2pRoute(request: Request, env: Env, path: string): Promis
   headers.delete("x-dhd-ip-hash");
   if (ip) headers.set("x-dhd-ip-hash", ip);
   const forward = new Request(request, { headers });
-  if (!create) return env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code)).fetch(forward);
+  if (!create) return rooms.get(rooms.idFromName(code)).fetch(forward);
   for (let attempt = 0; attempt < 8; attempt++) {
     const fresh = randomCode(P2P_CODE_LENGTH);
-    const room = env.P2P_ROOM.get(env.P2P_ROOM.idFromName(fresh));
+    const room = rooms.get(rooms.idFromName(fresh));
     if (await room.claim(fresh)) return room.fetch(forward);
   }
   return Response.json({ error: "Could not allocate a room code" }, { status: 503 });
@@ -195,19 +214,29 @@ export class P2pRoom extends DurableObject<Env> {
     await this.remove(ws);
   }
 
-  /** Drops connections that never said hello and members gone silent. */
+  /** Drops connections that never said hello and members gone silent, and renews TURN credentials
+      that are due. A room nobody is connected to any more is forgotten (a code claimed by a game
+      that never said hello). */
   async alarm(): Promise<void> {
     if (!this.meta || this.meta.closed) return;
     const now = Date.now();
+    const renewals: Promise<void>[] = [];
     for (const ws of this.ctx.getWebSockets()) {
       const info = this.info(ws);
       if (!info) continue;
       if (info.id === null ? now - info.opened > HELLO_TIMEOUT_MS : now - info.heard > IDLE_MS) {
         await this.remove(ws);
         try { ws.close(1001, "timed out"); } catch { /* already closed */ }
+      } else if (info.id !== null && info.turnUser && now - (info.turnAt ?? 0) >= TURN_RENEW_MS) {
+        info.turnAt = now; // not again at the next sweep while this one runs
+        this.attach(ws, info);
+        renewals.push(this.giveTurn(ws, info.id, true));
       }
     }
-    if (!this.meta.closed && this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    await Promise.all(renewals);
+    if (this.meta.closed) return;
+    if (this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    else await this.forget();
   }
 
   private async hello(ws: WebSocket, info: Connection, m: Message): Promise<void> {
@@ -250,13 +279,14 @@ export class P2pRoom extends DurableObject<Env> {
       at: Date.now(), room: meta.code, member: info.id, kind: asHost ? "host" : "guest", name, clientVersion,
       country: info.country, ipHash: info.ipHash, installId,
     }));
-    if (turn) await this.giveTurn(ws, info.id);
+    if (turn) await this.giveTurn(ws, info.id, false);
   }
 
-  /** The member's own TURN credentials: the fallback when no direct path between two games works. */
-  private async giveTurn(ws: WebSocket, id: number): Promise<void> {
+  /** The member's own TURN credentials: the fallback when no direct path between two games works.
+      A renewal sends the same message; the game signs its relay's next Refresh with them. */
+  private async giveTurn(ws: WebSocket, id: number, renewal: boolean): Promise<void> {
     const meta = this.meta!;
-    const turn = new Turn(this.secrets(), undefined, this.gate);
+    const turn = this.turn();
     try {
       const credentials = await turn.mint(`p2p-${meta.code}-${id}`);
       const current = this.info(ws);
@@ -264,12 +294,34 @@ export class P2pRoom extends DurableObject<Env> {
         await turn.revoke(credentials.username).catch(() => {});
         return;
       }
+      // Two renewals back: expired by now, or about to.
+      if (current.turnOld) this.revokeLater(current.turnOld);
+      current.turnOld = current.turnUser;
       current.turnUser = credentials.username;
+      current.turnAt = Date.now();
       this.attach(ws, current);
       this.send(ws, { ...(credentials.message as object), type: "p2p_turn" });
     } catch {
-      this.send(ws, { type: "error", code: "turn_unavailable", message: "Relay setup failed. Direct connections may still work." });
+      const current = this.info(ws);
+      if (!renewal) {
+        this.send(ws, { type: "error", code: "turn_unavailable", message: "Relay setup failed. Direct connections may still work." });
+      } else if (current?.id === id) {
+        // The current credentials hold for a while yet: again in a minute, and no message.
+        current.turnAt = Date.now() - TURN_RENEW_MS + TURN_RETRY_MS;
+        this.attach(ws, current);
+      }
     }
+  }
+
+  /** Cloudflare's TURN API through this room's gate (`turnFetch`: tests answer it themselves). */
+  private turn(): Turn {
+    return new Turn(this.secrets(), this.turnFetch, this.gate);
+  }
+
+  private turnFetch: typeof fetch = (input, init) => fetch(input, init);
+
+  private revokeLater(username: string): void {
+    this.ctx.waitUntil(this.turn().revoke(username).catch(() => {}));
   }
 
   /** Host-star only: a guest signals the host, the host any guest. The sender is the connection's
@@ -286,17 +338,35 @@ export class P2pRoom extends DurableObject<Env> {
     const meta = this.meta, info = this.info(ws);
     if (!meta || !info || info.id === null) return;
     const id = info.id;
-    info.id = null;
-    this.attach(ws, info);
-    if (info.turnUser) this.ctx.waitUntil(new Turn(this.secrets(), undefined, this.gate).revoke(info.turnUser).catch(() => {}));
+    this.release(ws, info);
     if (id !== meta.hostId) {
-      this.broadcastMembers();
+      if (!meta.closed) this.broadcastMembers();
       return;
     }
-    // No host migration: the room ends with its host (the host carries everyone's race).
+    // No host migration: the room ends with its host (the host carries everyone's race). Every
+    // guest's credentials go now, not when (or if) its close arrives.
     meta.closed = true;
-    await this.save();
-    for (const [other] of this.members()) this.refuse(other, "host_left", "The host left: the room has ended.");
+    for (const [other, i] of this.members()) {
+      this.release(other, i);
+      this.refuse(other, "host_left", "The host left: the room has ended.");
+    }
+    await this.forget();
+  }
+
+  /** The connection is no member any more; its TURN credentials are revoked. */
+  private release(ws: WebSocket, info: Connection): void {
+    info.id = null;
+    for (const user of [info.turnUser, info.turnOld]) if (user) this.revokeLater(user);
+    info.turnUser = info.turnOld = undefined;
+    this.attach(ws, info);
+  }
+
+  /** The room has ended (or nobody came): its storage goes. This object keeps `meta.closed` while
+      it lives, so its code stays refused; once evicted, the code is simply unknown. */
+  private async forget(): Promise<void> {
+    if (this.meta) this.meta.closed = true;
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
   }
 
   /** A binary PING answered with the server's clock; anything else binary is not for the server. */
@@ -314,8 +384,9 @@ export class P2pRoom extends DurableObject<Env> {
     return this.env as Env & SfuSecrets;
   }
 
-  private save(): Promise<void> {
-    return this.ctx.storage.put("meta", this.meta);
+  /** Nothing once the room has ended: its storage is gone for good (`forget`). */
+  private async save(): Promise<void> {
+    if (this.meta && !this.meta.closed) await this.ctx.storage.put("meta", this.meta);
   }
 
   private info(ws: WebSocket): Connection | null {

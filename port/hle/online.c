@@ -500,7 +500,7 @@ static void barrier(void)
         if (lobby.state == NET_FAILED)
             fail(lobby.error[0] ? lobby.error : "the connection to the server failed.");
         if (lobby.state == NET_LOBBY || lobby.state == NET_RACING) {
-            if (!ready_sent) fprintf(stderr, "online: room %s%s\n", lobby.code, lobby.is_host ? " (host)" : "");
+            if (!ready_sent) fprintf(stderr, "online: room %s%s\n", net_log_code(lobby.code).text, lobby.is_host ? " (host)" : "");
             if (lobby.is_host && !settings_sent) {
                 const char *track = getenv("DHD_NET_TRACK"), *room = getenv("DHD_NET_ROOM_NAME");
                 /* DHD_NET_CHEATS=1 (tests): the room's cheats on (options bit 2) */

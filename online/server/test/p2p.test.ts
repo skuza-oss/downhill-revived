@@ -1,7 +1,9 @@
 // P2P rooms (src/p2p.ts, finding 180): membership, host-star signaling and privacy. The race itself
 // runs between the games, so these tests check what the server must and must not do.
-import { exports } from "cloudflare:workers";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { TURN_RENEW_MS } from "../src/p2p";
 import { CLOSE_CODES } from "../src/protocol";
 import { Client, VERSION } from "./helpers";
 
@@ -19,6 +21,33 @@ async function p2pJoin(code: string, name: string, extra: object = {}) {
 }
 
 const get = (path: string) => exports.default.fetch(`https://dhd.test${path}`);
+
+const room = (code: string) => env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code));
+
+/** Cloudflare's TURN API as a room sees it from now on: credentials u1, u2... and revokes, recorded. */
+async function fakeTurn(code: string) {
+  const turn = { minted: [] as string[], revoked: [] as string[] };
+  await runInDurableObject(room(code), (r: any) => {
+    r.env = { ...r.env, TURN_KEY_ID: "key", TURN_KEY_API_TOKEN: "token" };
+    r.turnFetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/credentials/generate-ice-servers")) {
+        const username = `u${turn.minted.length + 1}`;
+        turn.minted.push(username);
+        return Response.json({ iceServers: [{ urls: ["turns:turn.example:443?transport=tcp"], username, credential: "secret" }] }, { status: 201 });
+      }
+      const revoke = url.match(/\/credentials\/([^/]+)\/revoke$/);
+      if (revoke) turn.revoked.push(decodeURIComponent(revoke[1]));
+      return new Response(null, { status: revoke ? 204 : 404 });
+    };
+  });
+  return turn;
+}
+
+async function until(what: string, done: () => boolean) {
+  for (let i = 0; i < 100 && !done(); i++) await new Promise((r) => setTimeout(r, 10));
+  if (!done()) throw new Error(`timed out waiting for ${what}`);
+}
 
 describe("P2P rooms", () => {
   it("are never listed: not in the lobby list, and no P2P list exists", async () => {
@@ -152,5 +181,61 @@ describe("P2P rooms", () => {
     expect(new DataView(pong.buffer, pong.byteOffset).getFloat64(2, true)).toBe(1234.5);
     expect(new DataView(pong.buffer, pong.byteOffset).getFloat64(10, true)).toBeGreaterThan(0);
     host.ws.close();
+  });
+
+  it("renew each member's TURN credentials before they expire, and revoke them all when it leaves", async () => {
+    const { host, code } = await p2pHost();
+    const turn = await fakeTurn(code);
+    const guest = await p2pJoin(code, "Guest");
+    await guest.json("p2p_welcome");
+    expect((await guest.json("p2p_turn")).username).toBe("u1");
+    // Not due yet: the sweep leaves them.
+    await runDurableObjectAlarm(room(code));
+    expect(turn.minted).toEqual(["u1"]);
+    // Made TURN_RENEW_MS ago: the next sweep sends fresh ones, once.
+    await runInDurableObject(room(code), (_r, state) => {
+      for (const ws of state.getWebSockets()) {
+        const a = ws.deserializeAttachment();
+        if (a.turnUser) ws.serializeAttachment({ ...a, turnAt: a.turnAt - TURN_RENEW_MS });
+      }
+    });
+    await runDurableObjectAlarm(room(code));
+    expect((await guest.json("p2p_turn")).username).toBe("u2");
+    await runDurableObjectAlarm(room(code));
+    expect(turn.minted).toEqual(["u1", "u2"]);
+    // Leaving revokes both: the old ones are valid until they expire.
+    guest.sendJson({ type: "leave" });
+    await until("the revokes", () => turn.revoked.length === 2);
+    expect(turn.revoked.sort()).toEqual(["u1", "u2"]);
+    host.ws.close();
+  });
+
+  it("end with the host: every guest's credentials revoked at once, and the room's storage gone", async () => {
+    const { host, code } = await p2pHost();
+    const turn = await fakeTurn(code);
+    const a = await p2pJoin(code, "A");
+    expect((await a.json("p2p_turn")).username).toBe("u1");
+    const b = await p2pJoin(code, "B");
+    expect((await b.json("p2p_turn")).username).toBe("u2");
+    // The host leaves; the guests' sockets stay open on their side (no close from them).
+    host.sendJson({ type: "leave" });
+    expect((await a.json("error")).code).toBe("host_left");
+    await until("the guests' revokes", () => turn.revoked.length === 2);
+    expect(turn.revoked.sort()).toEqual(["u1", "u2"]);
+    const kept = await runInDurableObject(room(code), async (_r, state) => ({
+      keys: (await state.storage.list()).size, alarm: await state.storage.getAlarm(),
+    }));
+    expect(kept).toEqual({ keys: 0, alarm: null });
+    expect((await (await p2pJoin(code, "Late")).json("error")).code).toBe("room_not_found");
+  });
+
+  it("forget a room whose host went silent", async () => {
+    const { code } = await p2pHost();
+    await runInDurableObject(room(code), (_r, state) => {
+      for (const ws of state.getWebSockets()) ws.serializeAttachment({ ...ws.deserializeAttachment(), heard: 0 });
+    });
+    await runDurableObjectAlarm(room(code));
+    const keys = await runInDurableObject(room(code), async (_r, state) => (await state.storage.list()).size);
+    expect(keys).toBe(0);
   });
 });

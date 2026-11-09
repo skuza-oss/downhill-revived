@@ -40,6 +40,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { withP2p } from "./selfhost-config.mjs";
 
 const SERVER = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const WRANGLER = path.join(SERVER, "node_modules", "wrangler", "bin", "wrangler.js");
@@ -253,10 +254,10 @@ export function stripJsonc(text) {
   return out.replace(/,(\s*[}\]])/g, "$1");
 }
 
-/** wrangler.guard-local.jsonc: wrangler.jsonc with the MODERATION binding to a local database, no
-    custom domain; then the migrations into that local store. */
+/** wrangler.guard-local.jsonc: wrangler.jsonc with P2P rooms (tools/selfhost-config.mjs) and the
+    MODERATION binding to a local database, no custom domain; then the migrations into that local store. */
 function localSetup() {
-  const config = JSON.parse(stripJsonc(readFileSync(path.join(SERVER, "wrangler.jsonc"), "utf8")));
+  const config = withP2p(JSON.parse(stripJsonc(readFileSync(path.join(SERVER, "wrangler.jsonc"), "utf8"))));
   delete config.routes;
   config.d1_databases = [{ binding: "MODERATION", database_name: DEFAULT_DB, database_id: "local-moderation", migrations_dir: "migrations" }];
   writeFileSync(

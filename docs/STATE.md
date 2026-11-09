@@ -127,8 +127,13 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - Abuse guard (finding 161): a kill switch in the moderation database (`moderate.mjs online
   off`), limits per address, caps per member, and
   bans by address hash or install id with a 14-day moderation log in D1, worked from
-  `online/server/tools/moderate.mjs` (no admin endpoint). No player gets another's address, its
+  `online/server/tools/moderate.mjs` (no admin endpoint). In an SFU room no player gets another's address, its
   hash or install id.
+- P2P rooms (finding 180): private, by code (7 characters), the creator's choice beside SFU rooms;
+  the host's game coordinates and forwards race frames over WebRTC data channels, Cloudflare TURN
+  on 443 as the fallback, and the game warns that the room's players can see your network
+  address. Served by its own Worker (`online/server/wrangler.p2p.jsonc`). Windows and macOS
+  tested; Android and the browser build it but were not run.
 - Race frames (findings 158, 177): over Cloudflare Realtime SFU DataChannels, STATE unordered with
   no retransmissions and EVENT reliable (Cloudflare forwards STATE ordered and reliable anyway; the
   client's vendored sctp-proto delivers it unordered, finding 173). One Realtime session per member

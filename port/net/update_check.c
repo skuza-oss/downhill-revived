@@ -13,7 +13,10 @@ static const char repository[] = "https://github.com/skuza-oss/downhill-revived/
    update.rs, takes only these too). */
 static const char release_assets[] = "https://github.com/skuza-oss/downhill-revived/releases/download/";
 
-int update_parse_version(const char *text, unsigned out[3])
+/* "X.Y.Z" (a leading "v"; a prerelease's "-suffix" of letters, digits, dots and dashes): its numbers,
+   and in *release whether it is a release. A prerelease comes before its release (the launcher's
+   rule, update.rs version_key). */
+static int parse_key(const char *text, unsigned out[3], int *release)
 {
     const char *s = text;
     if (!s)
@@ -36,20 +39,35 @@ int update_parse_version(const char *text, unsigned out[3])
         if (i < 2 && *s++ != '.')
             return 0;
     }
+    *release = *s != '-';
+    if (*s == '-') {
+        const char *suffix = ++s;
+        while ((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') || *s == '.' || *s == '-')
+            s++;
+        if (s == suffix)
+            return 0;
+    }
     while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n')
         s++;
     return *s == 0;
 }
 
+int update_parse_version(const char *text, unsigned out[3])
+{
+    int release;
+    return parse_key(text, out, &release);
+}
+
 int update_newer(const char *candidate, const char *current)
 {
     unsigned a[3], b[3];
-    if (!update_parse_version(candidate, a) || !update_parse_version(current, b))
+    int a_release, b_release;
+    if (!parse_key(candidate, a, &a_release) || !parse_key(current, b, &b_release))
         return 0;
     for (int i = 0; i < 3; i++)
         if (a[i] != b[i])
             return a[i] > b[i];
-    return 0;
+    return a_release > b_release;
 }
 
 /* An address that starts with prefix and has nothing after it that could take a browser or a

@@ -272,17 +272,29 @@ fn read_manifest(m: &serde_json::Value, base: &str, platform: &str) -> Result<Op
     }))
 }
 
+/// "X.Y.Z", with a leading "v" and a prerelease's "-suffix" ("0.7.14-p2p-test1") allowed.
 pub fn parse_version(v: &str) -> Option<[u32; 3]> {
+    version_key(v).map(|(numbers, _)| numbers)
+}
+
+/// The version's numbers and whether it is a release: a prerelease comes before its release
+/// (0.7.14-p2p-test1 < 0.7.14), so a test build's launcher offers the release when it comes.
+fn version_key(v: &str) -> Option<([u32; 3], bool)> {
+    let v = v.trim().trim_start_matches(['v', 'V']);
+    let (numbers, suffix) = v.split_once('-').map_or((v, None), |(n, s)| (n, Some(s)));
+    if suffix.is_some_and(|s| s.is_empty() || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')) {
+        return None;
+    }
     let mut out = [0u32; 3];
-    let mut parts = v.trim().trim_start_matches(['v', 'V']).split('.');
+    let mut parts = numbers.split('.');
     for slot in &mut out {
         *slot = parts.next()?.parse().ok()?;
     }
-    parts.next().is_none().then_some(out)
+    parts.next().is_none().then_some((out, suffix.is_none()))
 }
 
 pub fn newer(candidate: &str, current: &str) -> bool {
-    matches!((parse_version(candidate), parse_version(current)), (Some(a), Some(b)) if a > b)
+    matches!((version_key(candidate), version_key(current)), (Some(a), Some(b)) if a > b)
 }
 
 /// The newest release the source names for platform (platform()); None when it has no build for
@@ -967,6 +979,12 @@ mod tests {
         assert!(newer("v1.0.0", "0.9.9"));
         assert!(!newer("0.5.0", "0.5.0"));
         assert!(!newer("junk", "0.5.0"));
+        // a prerelease comes before its release, after the one before
+        assert!(newer("0.7.14", "0.7.14-p2p-test1"));
+        assert!(newer("0.7.14-p2p-test1", "0.7.13"));
+        assert!(!newer("0.7.14-p2p-test1", "0.7.14"));
+        assert_eq!(parse_version("0.7.14-p2p-test1"), Some([0, 7, 14]));
+        assert_eq!(parse_version("0.7.14-"), None);
     }
 
     #[test]

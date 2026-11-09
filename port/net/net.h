@@ -11,6 +11,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 enum { NET_MAX_SLOTS = 10 };  /* online rider slots, independent of local controllers */
 
@@ -125,6 +127,25 @@ enum { NET_OFFER_SFU = 1, NET_OFFER_P2P = 2 };
    needs none: its server only relays signaling, and the race runs between the games. */
 int net_create_room(int p2p);
 int net_join_room(const char *code);   /* -1 when the code can't be one */
+
+/* A room's code as dhd.log shows it: net_log_code(code).text. Anyone holding an open P2P room's
+   code can join it and so learn its host's network address, and players post dhd.log in public:
+   a P2P room's code (7 characters) shows only its first two ("AB*****"; finding 180). An SFU
+   room's (6) shows as it is. DHD_NET_LOG_CODE=1 shows every code in full: the test tools read the
+   host's code from the log (docs/TESTING.md). Core and host both use it, so it lives here. */
+typedef struct { char text[8]; } NetLogCode;
+static inline NetLogCode net_log_code(const char *code)
+{
+    NetLogCode c;
+    size_t n = code ? strlen(code) : 0;
+    memset(&c, 0, sizeof c);
+    if (n > sizeof c.text - 1)
+        n = sizeof c.text - 1;
+    memcpy(c.text, code, n);
+    if (n == 7 && !getenv("DHD_NET_LOG_CODE"))
+        memset(c.text + 2, '*', 5);
+    return c;
+}
 void net_leave(void);
 /* Public lobbies (blocking HTTP GET); returns how many, -1 on error. */
 int net_list_lobbies(NetLobbyInfo *out, int max);

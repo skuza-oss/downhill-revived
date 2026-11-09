@@ -97,7 +97,15 @@ export async function createP2pBridge(worker) {
           session=new P2pSession(e.data,now());drain();await reconcile();
         }else if(data.type==='p2p_members'){
           members=data.members;session?.members(JSON.stringify(members),now());drain();await reconcile();
-        }else if(data.type==='p2p_turn'){turn=data;await reconcile();}
+        }else if(data.type==='p2p_turn'){
+          // The room renews them before they expire: live connections' relays refresh with them.
+          turn=data;
+          for(const p of peers.values()){
+            try{p.pc.setConfiguration({...p.pc.getConfiguration(),iceServers:[{urls:'stun:stun.cloudflare.com:3478'},{urls:turn.urls,username:turn.username,credential:turn.credential}]});}
+            catch(e){console.error('P2P: renewed relay credentials not applied',e);}
+          }
+          await reconcile();
+        }
         else if(data.type==='p2p_signal')await signal(data.from,data.signal);
         else {
           if(data.type==='error'&&data.code==='turn_unavailable'){

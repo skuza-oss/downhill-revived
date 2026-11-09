@@ -1,9 +1,10 @@
 # 180: P2P rooms, chosen per room (host star)
 
-Status: in progress
+Status: current
 
 Branches: `feat/p2p-prototype` from `main` db3702d (the prototype, 2026-11-08), then
-`feat/p2p-clean` from its tip b592126 (the cleanup, the fixes and the tests below, 2026-11-08).
+`feat/p2p-clean` from its tip b592126 (the cleanup, the fixes and the tests below, 2026-11-08),
+then `fix/p2p-review` from local main 2634978f (the merge review's fixes, 2026-11-09).
 
 ## Goal and acceptance
 
@@ -49,6 +50,14 @@ migration, rejoin into a P2P room, automatic SFU fallback.
 - [x] 2026-11-09: the internet matrix, 24 trials, Mac on a phone hotspot (below).
 - [x] 2026-11-09: test prerelease 0.7.14-p2p-test1 on `prerelease/0.7.14-p2p-test1` (never main):
   Windows and macOS packages, not published; the packaged Windows game hosted a P2P room.
+- [x] 2026-11-09, `fix/p2p-review` (the merge review): a peer whose path stops answering fails
+  instead of freezing its rider for good; TURN credentials renewed for long rooms; the official
+  `wrangler.jsonc` back to what `tools/deploy.mjs` can upload (P2P rooms from
+  `wrangler.selfhost.jsonc` for local and self-hosted servers); P2P codes masked in dhd.log;
+  signaling errors without the text that failed; a P2P room's storage deleted when it ends, and
+  every guest's credentials revoked with the host; the prerelease version commits from
+  `prerelease/0.7.14-p2p-test1` (update checks, installer, test tools; not its version commit).
+  Checks below ("The merge review's fixes").
 - [ ] Lead: deploy the P2P Worker right before publishing, the billing alert, publish the
   prerelease.
 
@@ -110,6 +119,51 @@ migration, rejoin into a P2P room, automatic SFU fallback.
   24 h at most), and the P2P Worker is deployed with `wrangler deploy`, not `tools/deploy.mjs`.
 - **Merge with 182 (call gate):** a P2P room's TURN calls go through its own `CallGate` (5 at a
   time): ten members joining at once would otherwise pass the Durable Object's six connections.
+- **A lost path ends the peer (review, 2026-11-09).** str0m reports ICE `Disconnected` once the
+  path in use stopped answering (about 22 s with its default timing: 15 s after the other side's
+  last check, its RECENT_BINDING_REQUEST, and its own retransmissions) and never closes the
+  connection itself, so `is_alive()` stayed true and both games kept a frozen rider. A connected
+  peer whose ICE stays disconnected for 5 s (ICE_LOST_GRACE: room for a pair still being checked,
+  a late relay candidate) now fails like any other: the host's coordinator gives the rider to its
+  AI, a guest whose host is gone leaves; the browser already did this on `failed`. str0m's timing
+  is unchanged (a shorter check interval would also change how connections come up).
+- **TURN credentials renewed (review).** An allocation has no time limit but each Refresh needs a
+  valid credential, and Cloudflare documents updating credentials on a live allocation (Realtime
+  TURN FAQ; `setConfiguration` in browsers). The room mints each member fresh credentials 45 min
+  after the last (TURN_RENEW_MS, 3/4 of the 1 h TTL; a failed renewal retries a minute later,
+  silently) and sends `p2p_turn` again; the native TURN client re-keys and signs an immediate
+  Refresh of the same allocation with them (`turn::Client::renew`, once no request is in flight),
+  the browser calls `setConfiguration`. New peers use the newest credentials, so a guest joining
+  a room older than an hour gets a relay too. Both the current and the previous credentials are
+  revoked when the member leaves. The SFU path renews between races instead (finding 177), as its
+  sessions are replaced anyway.
+- **The official main Worker's config has no P2P class (review).** Cloudflare refuses `wrangler
+  versions upload` for a version with a pending Durable Object migration ("must be applied with
+  `wrangler deploy`", reproduced on a temporary Worker), and `tools/deploy.mjs` always uploads
+  versions, so the merge's `v2-p2p` migration in `wrangler.jsonc` would have stopped the next
+  official deploy. `wrangler.jsonc` is again the official main Worker's (v1 only, no P2P_ROOM);
+  `tools/selfhost-config.mjs` writes `wrangler.selfhost.jsonc` (gitignored) from it with the P2P
+  binding and `v2-p2p`, for local test servers (`local_server.py`, `npm run dev`, `dev:guard`) and
+  self-hosted servers (`wrangler deploy --config wrangler.selfhost.jsonc`); the tests add the
+  binding in vitest.config.ts. A main Worker without the binding answers `/v1/p2p/*` with "This
+  server has no P2P rooms". A generated file rather than a named environment: wrangler's
+  environments inherit neither bindings nor vars, so one would repeat the whole file.
+- **P2P codes masked in dhd.log (review).** Anyone holding an open P2P room's code can join and
+  see the host's address, and players post dhd.log: `net_log_code()` (port/net/net.h, for the core
+  and the host) and p2p.rs's `log_code` show a 7-character code as `AB*****`; SFU codes as they
+  are. `DHD_NET_LOG_CODE=1` (docs/TESTING.md) keeps them whole for the tools that read the host's
+  code from its log (cross_race, cross_bench, p2p_crowd, online_race set it).
+- **Signaling errors say which step failed, never the text** (review): str0m's parse errors quote
+  the SDP or candidate, with the other game's addresses.
+- **A P2P room forgets itself (review).** When the host leaves (or goes silent), or the last
+  connection is gone (a code claimed by a game that never said hello), the room deletes its alarm
+  and storage; the object keeps `closed` in memory while it lives, so the code stays refused, and
+  once evicted it is unknown. The guests' credentials are revoked on that path at once, not when
+  (or if) their sockets' close arrives.
+- **The P2P Worker's migrations stay as they are (review).** Its v1 creates `LobbyIndex`, which
+  `p2p-entry.ts` doesn't export, and v2 deletes it; a fresh deploy (a temporary workers.dev Worker
+  from `wrangler.p2p.jsonc`, 2026-11-09) applied both in one upload and served rooms, then
+  redeployed: Cloudflare checks the end state. No migration added, no applied tag changed.
 - **Merge with 181 (Room Region):** the region row is an SFU row (a P2P room's server only relays
   signaling, so where it runs doesn't matter), placed after Create A Private Race and before Create
   A P2P Race.
@@ -152,6 +206,13 @@ migration, rejoin into a P2P room, automatic SFU fallback.
 - **The Mac never left the home LAN**, although the plan said it was on a phone hotspot: for the
   whole session it had the PC's public address and the home router as its gateway (checked three
   times). So the internet matrix was not run; nothing in this finding measures the internet.
+- **A relay outlived its expired credentials** (2026-11-09, `cloudflare_turn_*` tests, real TURN):
+  a relay-only pair whose first credentials lasted 60 s and were never renewed kept carrying
+  events for 11 more minutes (its Refresh at about 9 minutes went through); revoking them then
+  answered 404. Cloudflare's FAQ says an expired credential's allocation is "disconnected after a
+  short delay"; when is not pinned down, so the renewal stays and no test relies on the cut. The
+  renewed pair's Refresh with the new credentials was taken at once, and it carried events 150 s
+  past the first credentials' end (`cloudflare_turn_takes_renewed_credentials_on_the_live_allocation`).
 - Cloudflare's 1,000 GB monthly free Realtime allowance is **shared between SFU and TURN**
   (developers.cloudflare.com/realtime/sfu/platform/pricing/); TURN bills the relay's egress to
   its client at $0.05/GB. A relayed guest receives about 30 kB/s in a 7-racer room (below), about
@@ -259,6 +320,37 @@ whose direct path fails.
 Windows and macOS (M1) native: built, LAN races both ways, a 7-racer room. Android: compiles as
 before (P2P only); not run on a phone. Browser: the coordinator is the same crate; `check_net.mjs`
 passes; `check_p2p.mjs` (real Chromium WebRTC) and the browser build were not rerun after the
-crate move. Linux, iOS: not run. TURN credentials last an hour: in a room kept longer, a new
-guest who needs the relay can't connect (recreate the room); a failed relay no longer ends a
-peer that runs on a direct path (it did in the prototype).
+crate move. Linux, iOS: not run. TURN credentials are renewed every 45 minutes (Decisions); a
+failed relay no longer ends a peer that runs on a direct path (it did in the prototype), and a
+peer with no working path at all ends after the ICE grace.
+
+## The merge review's fixes (2026-11-09, `fix/p2p-review`)
+
+| Check | Result |
+|---|---|
+| `a_connected_peer_whose_path_stops_answering_fails` (peer.rs) | fails without the fix (no error in 30 s), passes with it (the peer fails about 20 s after the other went silent) |
+| TURN unit test (`renewed_credentials_sign_a_refresh_of_the_same_allocation`) and the real-TURN renewal test | pass |
+| `npm test` (P2P: renewal, revoke both on leave, host-left revokes and storage, a silent host's room forgotten) and `npm run typecheck` | pass |
+| `wrangler deploy --dry-run`: `wrangler.jsonc`, `wrangler.p2p.jsonc`, `wrangler.selfhost.jsonc` | pass |
+| Temporary workers.dev Workers (deleted): the merge's config through `versions upload` | refused (the bug) |
+| The same, this branch's `wrangler.jsonc` through `tools/deploy.mjs --emergency --no-checks` | uploaded and deployed |
+| That Worker redeployed from `wrangler.selfhost.jsonc` (a self-hosted server adding P2P) | `v2-p2p` applied, P2P route served |
+| A fresh P2P Worker from `wrangler.p2p.jsonc` | deployed (v1 and v2 at once), served, redeployed |
+| `check.py port`, `check.py server` (on the branch's last commit) | OK |
+| Boot (600 fields) and race (5000) state traces against 0.7.13's | every row equal |
+| Native P2P room tests through `local_server.py` (now `wrangler.selfhost.jsonc`) | 2 and 10 games joined, raced, got the results; dhd.log showed the code as `A5*****` |
+| `p2p_crowd.py --bots 6 --turn-bots 1`, local server, PC only | 7 racers, all raced; paths 5 direct LAN, 1 relay; countdown 43 s after the room opened; host 73 % of a core, 177 kB/s up; snapshot age at the host p50 20, p95 36-37 ms; no `freeze:` line |
+
+Not done: no PC/Mac or internet run (not needed for these fixes); the browser's renewal
+(`setConfiguration`) is not exercised by a test (check_p2p.mjs was not rerun).
+
+## Result
+
+Merged into `main` 2026-11-09 (with the review's fixes). A room's creator can make a private P2P
+room (ONLINE > Create A P2P Race, a 7-character code); the guests connect to the host's game,
+with Cloudflare TURN as the fallback, and race with the SFU room's synchronization. SFU stays the
+default and is unchanged. Over the internet (Mac on a phone hotspot) P2P measured 62-68 ms
+against the SFU's 53 ms, every P2P pair relayed by the carrier's NAT; on the LAN P2P is direct and
+faster (about 16 ms against 22). The official server serves P2P rooms from its own Worker
+(`wrangler.p2p.jsonc`); the main Worker's `wrangler.jsonc` has no P2P class. P2P reaches players
+as a test prerelease first (owner, 2026-11-08).

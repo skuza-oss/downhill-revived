@@ -59,7 +59,7 @@ def rustflags():
 
 
 def version():
-    m = re.search(r'#define DHD_VERSION "([0-9.]+)"', VERSION_H.read_text(encoding='utf-8'))
+    m = re.search(r'#define DHD_VERSION "([0-9.]+(?:-[0-9A-Za-z.-]+)?)"', VERSION_H.read_text(encoding='utf-8'))
     return m.group(1)
 
 

@@ -24,6 +24,9 @@ int main(void)
         "\"members\":[{\"id\":7,\"name\":\"Test\",\"ready\":true,\"inRace\":false,\"raceState\":\"finished\",\"finishTicks\":300,\"place\":4}],"
         "\"lastRace\":{\"id\":2,\"track\":3,\"entrants\":[{\"id\":7,\"name\":\"Test\",\"rider\":5,\"ticks\":300,\"place\":4},"
         "{\"id\":8,\"name\":\"Other\",\"dnfReason\":\"time_up\",\"place\":5}]}}";
+    /* dhd.log shows a P2P room's code only by its first two characters (finding 180) */
+    if (!getenv("DHD_NET_LOG_CODE")) assert(!strcmp(net_log_code("ABCDEFG").text,"AB*****"));
+    assert(!strcmp(net_log_code("TEST22").text,"TEST22") && !strcmp(net_log_code("").text,""));
     client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     memset(&t,0,sizeof t); t.send_text=text; t.send_binary=binary;
     client_connected(&c,&t);

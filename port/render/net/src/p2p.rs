@@ -69,6 +69,17 @@ pub fn run(c: &Arc<WsConn>) {
     }
 }
 
+/// The room's code as dhd.log shows it (port/net/net.h net_log_code): only its first two
+/// characters, as the code is what lets anyone in, and so see the host's address; in full with
+/// DHD_NET_LOG_CODE (test tools).
+fn log_code(code: &str) -> String {
+    if std::env::var_os("DHD_NET_LOG_CODE").is_some() {
+        return code.to_owned();
+    }
+    let shown: String = code.chars().take(2).collect();
+    format!("{shown}{}", "*".repeat(code.chars().count().saturating_sub(2)))
+}
+
 fn epoch_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
 }
@@ -120,7 +131,7 @@ impl P2pRoom<'_> {
 
     fn welcome(&mut self, m: &Value) {
         self.clock_offset = m["serverTime"].as_i64().map_or(0, |t| t - epoch_ms());
-        eprintln!("net: P2P room {}, member {}, host {}", m["code"], m["memberId"], m["hostId"]);
+        eprintln!("net: P2P room {}, member {}, host {}", log_code(m["code"].as_str().unwrap_or("")), m["memberId"], m["hostId"]);
         self.session = Some(Session::new(m, self.now()));
     }
 
@@ -374,6 +385,13 @@ mod tests {
         }
         wait("the results", || clients.iter().all(|c| c.last("ended").is_some()));
         eprintln!("P2P ROOM MATCH: {n} games joined, readied, raced (each heard the other {}) and got the results", n - 1);
+    }
+
+    #[test]
+    fn the_log_shows_a_room_code_by_its_first_two_characters() {
+        if std::env::var_os("DHD_NET_LOG_CODE").is_none() {
+            assert_eq!(log_code("ABCDEFG"), "AB*****");
+        }
     }
 
     #[test]

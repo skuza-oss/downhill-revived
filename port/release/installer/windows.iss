@@ -1,7 +1,7 @@
 ; The Windows installer of Downhill Revived (finding 125): Inno Setup 7, compiled by
 ; port/tools/package_release.py (port/tools/innosetup.py fetches the pinned compiler), never by hand:
 ;
-;   ISCC /DAppVersion=X.Y.Z /DSourceDir=<the checked release files> /DOutputDir=<dir>
+;   ISCC /DAppVersion=X.Y.Z[-suffix] /DFileVersion=X.Y.Z /DSourceDir=<the checked release files> /DOutputDir=<dir>
 ;        /DOutputName=DownhillRevived-X.Y.Z-win-setup /DIconFile=<icon.ico> windows.iss
 ;
 ; SourceDir holds exactly the files of the -win.zip's folder, already checked by package_release, plus
@@ -23,6 +23,9 @@
 #ifndef AppVersion
   #error AppVersion must be defined (package_release.py)
 #endif
+#ifndef FileVersion
+  #define FileVersion AppVersion
+#endif
 
 [Setup]
 ; never change: Windows finds the installed copy by it (and so does the launcher, game.rs)
@@ -35,7 +38,8 @@ AppPublisherURL=https://github.com/skuza-oss/downhill-revived
 AppSupportURL=https://github.com/skuza-oss/downhill-revived/issues
 AppUpdatesURL=https://github.com/skuza-oss/downhill-revived/releases
 AppCopyright=GPL-3.0-or-later
-VersionInfoVersion={#AppVersion}
+; Windows' file version: numbers only (a prerelease's AppVersion has a suffix)
+VersionInfoVersion={#FileVersion}
 VersionInfoProductName=Downhill Revived
 VersionInfoDescription=Downhill Revived installer
 PrivilegesRequired=lowest

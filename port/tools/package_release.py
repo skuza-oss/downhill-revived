@@ -913,8 +913,10 @@ def main():
         sys.exit('--version %s, but port/include/version.h says %s (the exe reports that one); bump the header '
                  'and build again' % (a.version, version))
     a.version = version
-    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', a.version):
-        sys.exit('version %r: MAJOR.MINOR.PATCH digits only (the updater and the server compare them)' % a.version)
+    # a prerelease's "-suffix" too (0.7.14-p2p-test1): the updaters order it before its release
+    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?', a.version):
+        sys.exit("version %r: MAJOR.MINOR.PATCH, or a prerelease's MAJOR.MINOR.PATCH-suffix (the updaters and the "
+                 "server compare them)" % a.version)
     name = 'DownhillRevived-%s' % a.version
     suffix = '.apk' if platform.key == 'android' else '.zip'
     out = (a.out or ROOT / 'build' / 'release' / ('%s-%s%s' % (name, platform.zip_tag, suffix))).resolve()

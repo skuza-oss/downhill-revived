@@ -32,6 +32,11 @@ int main(void)
     CHECK(!update_parse_version("0.7", v) && !update_parse_version("0.7.8.1", v) && !update_parse_version("junk", v));
     CHECK(!update_parse_version("0.7.x", v) && !update_parse_version("", v) && !update_parse_version(NULL, v));
     CHECK(!update_parse_version("1234567890.0.0", v));
+    /* a prerelease: its numbers, and it comes before its release */
+    CHECK(update_parse_version("0.7.14-p2p-test1", v) && v[0] == 0 && v[1] == 7 && v[2] == 14);
+    CHECK(!update_parse_version("0.7.14-", v) && !update_parse_version("0.7.14-a b", v));
+    CHECK(update_newer("0.7.14", "0.7.14-p2p-test1") && update_newer("0.7.14-p2p-test1", "0.7.13"));
+    CHECK(!update_newer("0.7.14-p2p-test1", "0.7.14") && !update_newer("0.7.14-p2p-test1", "0.7.14-p2p-test1"));
 
     CHECK(update_newer("0.5.1", "0.5.0"));
     CHECK(update_newer("v1.0.0", "0.9.9"));

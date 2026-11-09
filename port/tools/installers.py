@@ -102,7 +102,9 @@ def windows_setup(version, files, extra, out_dir, servers, elf):
         (source / path.split('/', 1)[1]).write_bytes(content)
     name = 'DownhillRevived-%s-win-setup' % version
     setup = out_dir / (name + '.exe')
-    cmd = [str(innosetup.iscc()), '/Q', '/DAppVersion=%s' % version, '/DSourceDir=%s' % source,
+    # the file version is numbers only: a prerelease's (0.7.14-p2p-test1) without its suffix
+    cmd = [str(innosetup.iscc()), '/Q', '/DAppVersion=%s' % version, '/DFileVersion=%s' % version.split('-')[0],
+           '/DSourceDir=%s' % source,
            '/DOutputDir=%s' % out_dir, '/DOutputName=%s' % name, '/DIconFile=%s' % (ICONS / 'icon.ico'), str(ISS)]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     if r.returncode or not setup.exists():
