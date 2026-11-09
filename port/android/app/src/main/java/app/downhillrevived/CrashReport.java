@@ -294,6 +294,35 @@ final class CrashReport {
         return f;
     }
 
+    // ---- Android 10: the game's own crash report (finding 191) ----
+
+    /** The end of the last run's dhd.log searched for the game's own crash report. */
+    static final int LOG_TAIL = 256 << 10;
+    /** The crash report's first line: host.c's crash handler, or guest memory's fault handler. */
+    private static final Pattern LOG_CRASH = Pattern.compile(
+            "crash: SIG(?:SEGV|BUS|ILL|FPE) at [0-9A-Fa-f]+ in thread [^\\r\\n]*|host64 memory: access of uncommitted guest address 0x[0-9a-f]+");
+
+    /** Android 10 keeps no record of how a run ended that an app can read (ApplicationExitInfo is
+     *  API 30), so there a crash is known only from the report the game's crash handler wrote into
+     *  dhd.log: its first line in a log's end, null when there is none (a normal end, or a crash
+     *  the handler never saw: an ANR, a kill for memory, an abort). */
+    static String logCrash(String tail) {
+        if (tail == null) return null;
+        java.util.regex.Matcher m = LOG_CRASH.matcher(tail);
+        return m.find() ? m.group() : null;
+    }
+
+    /** A file's last max bytes as text (UTF-8, a cut character replaced). */
+    static String tail(File log, int max) throws IOException {
+        try (RandomAccessFile f = new RandomAccessFile(log, "r")) {
+            long size = f.length();
+            byte[] b = new byte[(int) Math.min(size, max)];
+            f.seek(size - b.length);
+            f.readFully(b);
+            return new String(b, StandardCharsets.UTF_8);
+        }
+    }
+
     // ---- the shared file ----
 
     /** A log for the shared file: whole up to head + tail bytes, else its first head and last tail
