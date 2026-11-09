@@ -277,8 +277,9 @@ describe("session rooms",()=>{
     for(let i=0;i<10;i++)cs[i].sendJson({type:"finish",ticks:600+i,place:i+1});
     expect((await snap(h,r=>r.lastRace)).settings.track).toBe(12);
   });
-  // Finding 166: the game's online list as a host sends it (online_menu.c tracks, limits from
-  // func_00182290), with Salt City MX (17, six riders) and Salt City TD (18, eight); MOSH pick-only.
+  // Finding 166: the game's online list as a 0.7.12-0.7.14 host sends it (online_menu.c tracks in
+  // index order, limits from func_00182290), with Salt City MX (17, six riders) and Salt City TD
+  // (18, eight); MOSH pick-only. Newer games send the same ids in Super Career order (below).
   const gameTracks=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,23,24,25];
   const gameLimits=gameTracks.map(t=>[0,1,2,3,5,11,12,19,20].includes(t)?10:[4,10,13,16,18,22,24].includes(t)?8:6);
   it("takes the game's list with both Salt City events and their rider limits",async()=>{
@@ -297,6 +298,27 @@ describe("session rooms",()=>{
     });
     for(let i=0;i<8;i++)cs[i].sendJson({type:"finish",ticks:600+i,place:i+1});
     expect((await snap(h,r=>r.lastRace)).settings.track).toBe(19);
+  });
+  // Finding 190: the same 25 ids and limits in the game's Super Career order (D_0026F150), MOSH
+  // last. Only the order differs, so NEXT and the grid-lock switch follow the career.
+  const careerTracks=[0,6,24,1,7,13,2,8,10,5,14,22,11,15,16,12,19,25,3,9,4,20,17,18,23];
+  it("takes the game's list in Super Career order",async()=>{
+    expect([...careerTracks].sort((a,b)=>a-b)).toEqual(gameTracks);
+    const careerLimits=careerTracks.map(t=>gameLimits[gameTracks.indexOf(t)]);
+    const {h,cs,code}=await setup(8);
+    h.sendJson({type:"settings",track:17,then:"next",rotation:careerTracks,trackLimits:careerLimits,pickOnly:[23]});
+    await snap(h,r=>r.rotation.length===25&&r.settings.track===17&&r.rotation[1]===6);
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)),async(room:any)=>{
+      expect([room.trackLimit(room.state,17),room.trackLimit(room.state,18)]).toEqual([6,8]);
+      expect(room.fittingRotation(room.state,8)).toEqual([18,0,24,1,13,2,10,5,22,11,16,12,19,3,4,20]);
+    });
+    // eight ready on Salt City MX: Salt City TD at grid lock; NEXT skips MOSH, back to Mt. Midoule FR
+    await start(h,cs,code);
+    await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)),async(room:any)=>{
+      expect([room.state.race.track,room.state.race.slots.length,room.state.lastEvent]).toEqual([18,8,"track_switch:17:6:18"]);
+    });
+    for(let i=0;i<8;i++)cs[i].sendJson({type:"finish",ticks:600+i,place:i+1});
+    expect((await snap(h,r=>r.lastRace)).settings.track).toBe(0);
   });
   it("races six on Salt City MX without a switch",async()=>{
     const {h,cs,code}=await setup(6);
