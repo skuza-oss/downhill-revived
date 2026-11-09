@@ -65,3 +65,11 @@ GPU memory (`kgsl_ioctl_gpuobj_alloc`, whose address search walks the process's 
 of the render thread. `destroy_texture_view` leaves such a view alone (`surface_cached`); the
 swapchain's `release_resources` destroys its images' kept views and their framebuffer entries after
 its device wait, and `DeviceShared`'s drop destroys any left.
+
+## Metal drawable timeout on mobile (finding 181)
+
+`src/metal/surface.rs`: retains `CAMetalLayer`'s default drawable timeout on iOS, tvOS and
+visionOS. The upstream wgpu-hal override disabled it (`setAllowsNextDrawableTimeout(false)`),
+allowing `nextDrawable` to wait indefinitely if presentation stops while the app becomes inactive
+or suspended. Desktop macOS retains its existing behavior. Reference:
+https://developer.apple.com/documentation/quartzcore/cametallayer/allowsnextdrawabletimeout
