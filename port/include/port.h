@@ -67,8 +67,12 @@ void ps2_asm(const char *tmpl, const char *constraints, int n, ps2_op *ops);
    DHD_WIDESCREEN (port/hle/host.c). */
 #ifdef __cplusplus
 extern "C" float port_fov_x;
+extern "C" float port_ws_menu_focal(float);
+extern "C" void port_ws_set_focal(int, float, float);
 #else
 extern float port_fov_x;
+extern float port_ws_menu_focal(float);
+extern void port_ws_set_focal(int, float, float);
 #endif
 
 #ifdef __cplusplus

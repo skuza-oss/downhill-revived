@@ -417,9 +417,9 @@ PATCHES['unsorted/0016B8C8.cpp'] = [('text', 'int func_00238F10(void);', 'int fu
 # the PCSX2 widescreen patch for this disc changes them (finding 043). The view table and tree
 # widths are data, changed at boot.
 PATCHES['unsorted/001A8A48.c'] = [('text', 'func_0023D8D8(0, 277.0f, y);', 'func_0023D8D8(0, 277.0f * port_fov_x, y);')]
-PATCHES['unsorted/001F84A8.c'] = [('text', 'func_0023D8D8(0, f, b);', 'func_0023D8D8(0, f * port_fov_x, b);')]
+PATCHES['unsorted/001F84A8.c'] = [('text', 'func_0023D8D8(0, f, b);', 'port_ws_set_focal(0, f, b);')]
 # 688 is the title (func_001B6708, recompiled from asm) and shell menus' X field of view.
-PATCHES['unsorted/0023D8D8.c'] = [('text', '    view->x0 = dist;', '    if (dist == 688.0f) dist *= port_fov_x;\n    view->x0 = dist;')]
+PATCHES['unsorted/0023D8D8.c'] = [('text', '    view->x0 = dist;', '    dist = port_ws_menu_focal(dist);\n    view->x0 = dist;')]
 # func_00202760 passes its fourth argument (a3, the callers' result buffer such as &D_0029E168)
 # through to func_00247D28, which reads it; the source names only three, which matches retail only
 # because a3 is never touched. Natively the pointer was dropped and the memory card code read stack
