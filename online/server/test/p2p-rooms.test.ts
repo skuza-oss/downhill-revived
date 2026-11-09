@@ -183,8 +183,10 @@ describe("P2P rooms (finding 186)", () => {
         `${ids[3]}<-${ids[0]}`, `${ids[3]}<-${ids[2]}`].sort());
       expect(made.some((p) => p.includes(`${ids[1]}`))).toBe(false);  // the star racer: never
       expect(fake.calls.length).toBeGreaterThanOrEqual(before);
-      // The routes give the race to everyone, the hub's forwarding included.
-      const r = await routes(star, (x) => x.race);
+      // The routes give the race to everyone, before its start (the hub's forwarding included).
+      const seen = star.seen.map((t) => JSON.parse(t));
+      const r = seen.find((x) => x.type === "p2p" && x.race);
+      expect(seen.indexOf(r)).toBeLessThan(seen.findIndex((x) => x.type === "start"));
       expect(r.race.startAt).toBe(starts[0].startAt);
       expect(r.race.slots).toEqual(ids);
       // The release waits for the SFU's part only: the hub and the fallback racers.
@@ -242,6 +244,25 @@ describe("P2P rooms (finding 186)", () => {
     expect((await f.json("error")).message).toMatch(/Realtime/);
     const s = await snap(hub, (x) => x.members.find((m: any) => m.id === ids[2])?.inRace === false);
     expect(s.phase).toBe("racing");  // the hub and A race on
+  });
+
+  it("a star racer whose SFU session fails stays in the race (only a fallback racer needs the SFU)", async () => {
+    const fake = fakeRealtime();
+    try {
+      const { cs, code, ids } = await p2pRoom(2, true);
+      const [hub, a] = cs;
+      link(hub, ids[0], ids[1], true);
+      await routes(a, (r) => linkOf(r, ids[1]) === "star");
+      await race(cs, code);
+      fake.fail = (path) => path.endsWith("sessions/new");
+      a.sendJson({ type: "sfu_offer", sdp: "offer" });
+      await a.json("sfu_reset");
+      await runDurableObjectAlarm(room(code));
+      expect(a.seen.some((t) => JSON.parse(t).type === "left")).toBe(false);
+      expect(await runInDurableObject(room(code), async (r: any) => r.state.race.left)).toEqual([]);
+    } finally {
+      fake.restore();
+    }
   });
 
   it("results reach every member when the finish window ends the race (finding 185's lost results)", async () => {

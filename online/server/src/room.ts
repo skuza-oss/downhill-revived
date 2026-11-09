@@ -1248,12 +1248,13 @@ export class Room extends DurableObject<Env> {
     await this.save();
     const race = st.race;
     this.stat(["race", p2p ? "p2p" : "", ""], [racers.length, race.track, race.laps]);
+    // A P2P room's routes first: each game knows its part of the race (the star, the SFU) when its
+    // start comes, and the hub the racers it forwards, racing or not (finding 186).
+    this.broadcastRoutes();
     racers.forEach((x, slot) => {
       const s = this.sockets.get(x.id);
       if (s) this.send(s, this.startMessage(race, slot, now));
     });
-    // The race's slots for the hub, which forwards the racers' frames, racing or not.
-    this.broadcastRoutes();
     this.broadcastRoom();
     this.updateListing();
     // Racers whose sessions were up at the grid's lock are subscribed already (finding 177): their
@@ -1859,7 +1860,9 @@ export class Room extends DurableObject<Env> {
     const st = this.state;
     if (!st) return;
     const race = st.race;
-    const racers = race ? ids.filter((id) => this.inRace(st, id)) : [];
+    // In a P2P room only a fallback racer races over the SFU: a star racer's (or the hub's) session
+    // failing takes nobody out of the race (finding 186).
+    const racers = race ? ids.filter((id) => this.inRace(st, id) && this.racesOnSfu(st, id)) : [];
     if (race && racers.length) await this.retireSfu(racers, race.startAt, true);
     for (const id of ids.filter((id) => !racers.includes(id))) {
       const member = st.members.find((x) => x.id === id);
@@ -2038,6 +2041,13 @@ export class Room extends DurableObject<Env> {
 
   private isHub(st: RoomState, id: number): boolean {
     return st.transport === "p2p" && st.hub === id;
+  }
+
+  /** The member's race runs over the SFU: in an SFU room every racer's, in a P2P room a fallback
+      racer's (the hub's own race runs on its star even when it bridges). */
+  private racesOnSfu(st: RoomState, id: number): boolean {
+    if (st.transport !== "p2p") return true;
+    return id !== st.hub && st.members.find((x) => x.id === id)?.link === "sfu";
   }
 
   /** A release may still be due: in an SFU room until its race is released; in a P2P room at any
