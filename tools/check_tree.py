@@ -25,7 +25,10 @@ DATA_NAMES = re.compile(r'(?i)(^|/)(SCUS_971\.77|SLES_522\.02|SYSTEM\.CNF|[^/]*\
 DATA_DIRS = ('asm/', 'assets/', 'iso/', 'saves/', 'build/')
 KEY_EXT = {'.keystore', '.jks', '.p12', '.pfx', '.pem', '.key'}
 BIG = 1 << 20  # binary files over 1 MiB need a reason
-BIG_OK = {'port/launcher/src-tauri/icons/icon.icns': 'the launcher icon for macOS'}
+BIG_OK = {
+    'port/launcher/src-tauri/icons/icon.icns': 'the launcher icon for macOS',
+    'port/ios/assets/AppIcon.xcassets/AppIcon.appiconset/icon-1024.png': 'the iOS app icon for port/ios',
+}
 
 SECRETS = [
     (re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----'), 'private key'),

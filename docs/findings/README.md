@@ -206,6 +206,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 180 | [dynamic display refresh rate tracking (60/120 Hz)](180-display-refresh-tracking.md) | current |  |
 | 181 | [Metal surface drawable timeout on mobile platforms](181-metal-surface-timeout.md) | current |  |
 | 182 | [widescreen sprite width table and menu focal projection](182-widescreen-sprites-focal.md) | current |  |
+| 183 | [native iOS platform port (port/ios)](183-ios-platform-port.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

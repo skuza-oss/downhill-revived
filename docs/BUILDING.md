@@ -225,6 +225,21 @@ build/host64-<macos|linux>/dhd64 --elf PATH/SCUS_971.77` (it builds the launcher
 Off Windows the object cache is used only when `DHD_OBJCACHE_DIR` names a folder; rustgs's target
 dirs go to `DHD_CARGO_DIR`, else `~/.cache/dhd-cargo`.
 
+### iOS (port/ios)
+
+Prerequisites on macOS:
+- Xcode 15 or later with iOS SDK
+- Python 3.10 or later
+- Rust (`rustup target add aarch64-apple-ios`)
+
+To build and package the native iOS application:
+
+    python port/ios/build_ios.py --release --team YOUR_TEAM_ID
+
+Or to build an unsigned development archive:
+
+    python port/ios/package_unsigned.py
+
 ### SDL3 (window, sound, controllers)
 
 `port/tools/sdl3.py`, which `package_release.py` runs, provides SDL3 as a static library, so
