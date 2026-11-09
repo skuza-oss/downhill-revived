@@ -176,9 +176,11 @@ float touch_button_scale(float s);                          /* 1.2 s - 0.2 */
 uint16_t touch_sector_buttons(int sector);
 const char *touch_trick_name(uint16_t buttons);             /* NULL: no tabled trick */
 /* Where a panel's button is (its centre, mm): the pause rows (Resume, Restart race, Quit race,
-   Controls, Bail out), the question (No, Yes), the online panel (Close, Bail out, Leave race),
-   the editor's bar (Ground, Air, -, +, Reset, Done). 0 if there is no such button. */
-enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGET_EDITOR };
+   Controls, Bail out, Codes), the question (No, Yes), the online panel (Close, Bail out, Leave race),
+   the editor's bar (Ground, Air, -, +, Reset, Done), the pause rows' CODES page (Up, Down, Left,
+   Right, Triangle, Circle, Cross, Square, Clear, Back, Enter; finding 189). 0 if there is no such
+   button. */
+enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGET_EDITOR, TOUCH_TARGET_CODES };
 int touch_target(const Touch *t, int kind, int index, float *x, float *y);
 /* Where a control sits now (centre and radius, mm); 0 if the layout has none. */
 int touch_control(const Touch *t, int control, float *x, float *y, float *r);

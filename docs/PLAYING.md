@@ -68,7 +68,9 @@ What works today:
   [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
-  or Thumb zones, tilt steering if you like), or a controller. Online: P2P races only.
+  or Thumb zones, tilt steering if you like), or a controller. Online: P2P races only. The game's
+  codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
+  buttons); **ENTER** goes back to the race and enters them.
 
 Known gaps:
 

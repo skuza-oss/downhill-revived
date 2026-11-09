@@ -26,6 +26,12 @@ Out of scope: phone runs (the lead's), the browser's own pad layout (finding 157
 - [x] 2026-11-09: Swap L1/L2 and Swap R1/R2: dhd_settings, the C table, gamepad.c and the
   CONTROLS page's wait, the game's Controls page, the launcher, docs; tests in dhd_settings
   (`shoulder_swaps`), test_gamepad (`run_shoulder_swaps`), the launcher's Rust and JS tests
+  (1c4f50e8); `check.py port` OK
+- [x] 2026-11-09: the touch pause panel's CODES page (`port/hle/touch.c`), `test_codes` in
+  test_touch with a model of the game's code reader; docs/PLAYING.md
+- [x] 2026-11-09: checks (both parts in the build): `check.py port` OK; the debug APK builds
+  (`build_apk.py --wasm build/wasm/dhd_core.wasm`); state traces against a build of ac62c78d made in
+  its own worktree: boot 600/600 and race 5000/5000 rows equal; the hidden-desktop run below
 
 ## Decisions
 
@@ -106,6 +112,52 @@ flicks), so no code could be typed.
 - **No list of codes**: the page types what the player knows, as a pad does; it doesn't name or
   offer the game's codes.
 
+- **The test reads the codes as the game does**: `test_codes` (port/hle/test_touch.c) carries a
+  model of the reader above (the decomp's functions, the constants read from the ELF, three rows
+  of the table: Codes, Super Bunny Hop, Always Stoked) and feeds it the overlay's pad output,
+  one game frame per update, for both presets at 60 and 144 fps, with PEDAL held through the
+  pause for one code. Typed by a pad at its own pace the model reads every code, with ✕ held none
+  (the reason the touches are let go). With the lead cut to 1 field 8 of the 12 runs read no code;
+  without letting go of the touches the PEDAL-held runs (4) read none: the test fails on both.
+
+### The CODES page in the game (hidden desktop, Windows)
+
+`hidden_game.Game` with `DHD_TOUCH_MOUSE=1 DHD_TOUCH_SCREEN_MM=154.5x69.5`, a 1545 x 695 window,
+`DHD_TOUCH_LOG=1`, the menus by posted keys to a race (Classic pad, then `DHD_TOUCH_PRESET=thumb`),
+then taps: Pause (START), CODES, ↑ △ ↓ ✕ ← ○ → □, ENTER; again Pause, CODES, ↓ □ □ ← ○, ENTER.
+Both presets, dhd.log: `cheats: code 1 (Codes), code entry on; on: +7BB3`, then `cheats: code 19
+(Always Stoked), code entry on; on: +7BB2 +7BB3`; the touch trace shows the Resume ✕, the quiet
+time, then each press 50 ms down and 50 ms up. Presented captures show the pause rows (CONTROLS
+and CODES sharing a row) and the page with the typed presses. The script and pictures were kept
+outside the repository.
+
 ## Surprises
+
+- **Mouse clicks posted to a hidden-desktop game don't land where they are posted** (SDL 3.4 on
+  Windows; docs/TESTING.md, Traps): SDL's mouse auto capture reads the real cursor
+  (`GetCursorPos`) after a button press, and the window's `WM_MOUSELEAVE` (the real cursor is
+  never over it) moves SDL's mouse to the real cursor and drops the focus, after which a release
+  is lost. What worked: `SDL_MOUSE_AUTO_CAPTURE=0`, the move, down and up posted together, and a
+  tap again when dhd.log's touch trace shows no `up` (a tap without its lift does nothing on the
+  overlay's panels). `DHD_NAV` (and the other pad scripts) replace the live pad, so touches are
+  not merged in such a run: the menus were driven by posted keys instead.
+
+- The reader's stick part is dead code (it tests a local that is always 0), so a code can only be
+  typed with buttons: steering the stick never counts, on a pad either.
+- A press of one frame is lost by the reader when nothing else is held: the group closes 3 frames
+  after the press and ORs only the 2 frames before, already empty (a release to no button at all
+  doesn't close a group). The overlay's 3-field presses are at least 3 frames at any rate.
+
+## Left for the lead (needs hardware)
+
+1. A real pad that reports L1/L2 the other way round (issue #69's CAPSYS GS509, or any pad with
+   a mapping that swaps them): Swap L1/L2 and Swap R1/R2 on Controller 1 in REVIVED SETTINGS >
+   Controls (D-pad and Options) make the shoulders right in a race, the button icons stay L1/R1,
+   and pressing the pad's L1 on the Buttons page's L1 row binds `lb` (the same with the launcher's
+   switches and its wait). No virtual pad reaches the game here (finding 157).
+2. On a phone, both presets: Pause, CODES, type ↑ △ ↓ ✕ ← ○ → □ and ENTER: the game says CODES
+   UNLOCKED; then another code (Always Stoked: ↓ □ □ ← ○). The targets are 9 mm and the page's
+   arrows are the 8x8 font's `^ v < >`: readable on the phone? Android Back on the page goes back
+   to the rows.
 
 ## Result
