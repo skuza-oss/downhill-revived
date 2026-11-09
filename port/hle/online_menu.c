@@ -984,13 +984,23 @@ static void activate(MenuPage *p, int f, const RoomNow *r)
     (void)p;
 }
 
+/* The next setting from f in direction d (-1 up, 1 down) that takes the cursor, or -1: a P2P
+   room's ROOM row can't (focusable), and landing on it sent the cursor back to the bar on the
+   next frame, so a pad could never reach TRACK, COMPUTER RIDERS or CHEATS there. */
+static int setting_step(int f, int d, const RoomNow *r)
+{
+    for (f += d; f >= RF_TRACK && f <= RF_RULES; f += d)
+        if (focusable(f, r)) return f;
+    return -1;
+}
+
 /* Up and down in the settings, across the bar; up from the bar to the last setting. */
 static void move(int dx, int dy, const RoomNow *r)
 {
-    int was = rf;
+    int was = rf, to = dy ? setting_step(rf, dy, r) : -1;
     if (rf <= RF_RULES) {
-        if (dy < 0 && rf > RF_TRACK && r->host) rf--;
-        else if (dy > 0 && rf < RF_RULES) rf++;
+        if (dy < 0 && to >= 0 && r->host) rf = to;
+        else if (dy > 0 && to >= 0) rf = to;
         else if (dy > 0) rf = focusable(rf_bar, r) ? rf_bar : RF_LEAVE;
     } else if (dx) {
         do rf = RF_RIDER + (rf - RF_RIDER + dx + 4) % 4; while (!focusable(rf, r));
