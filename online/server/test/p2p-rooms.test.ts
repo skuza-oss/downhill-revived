@@ -317,7 +317,7 @@ describe("P2P rooms (finding 186)", () => {
     const { code, ids } = await p2pRoom(5);
     const order = await runInDurableObject(room(code), async (r: any) => {
       const st = r.state;
-      const pick = () => r.bestHub(st, ids[0]).id;
+      const pick = () => r.bestHub(st, Date.now(), { exclude: ids[0] }).id;
       const out = [pick()];                                   // nothing known: the earliest joiner
       r.rtts.set(ids[3], [80, 80]); r.rtts.set(ids[4], [20, 20]); r.rtts.set(ids[1], [90]); r.rtts.set(ids[2], [95]);
       out.push(pick());                                       // the lowest ping
@@ -330,24 +330,46 @@ describe("P2P rooms (finding 186)", () => {
     expect(order).toEqual([ids[1], ids[4], ids[2], ids[3]]);
   });
 
-  it("a hub whose every working link died is replaced at once; one that never linked, not within a minute", async () => {
+  it("one member's link going down never moves the hub, however often (review: a blip or a false report)", async () => {
     const { cs, code, ids } = await p2pRoom(3);
     const [hub, a, b] = cs;
-    link(hub, ids[0], ids[1], true);
-    link(hub, ids[0], ids[2], true);
-    await routes(b, (r) => linkOf(r, ids[2]) === "star");
-    // The hub's network goes: both links die (each member says so).
+    link(hub, ids[0], ids[1], true);    // A on the star
+    link(b, ids[0], ids[2], false);     // B never links: on the SFU
+    await routes(hub, (r) => linkOf(r, ids[1]) === "star" && linkOf(r, ids[2]) === "sfu");
+    await race(cs, code);
+    // A blips: every member present is on the SFU now. The hub stays, now and after its minute
+    // (A just lost its link; B has never been on a star).
     link(a, ids[0], ids[1], false);
-    link(b, ids[0], ids[2], false);
-    expect((await routes(b, (r) => r.hub !== ids[0])).hub).toBe(ids[1]);
-    // The new hub never links with anyone: no second change within the minute, then one.
-    link(a, ids[1], ids[0], false);
-    link(a, ids[1], ids[2], false);
-    await routes(hub, (r) => linkOf(r, ids[0]) === "sfu" && linkOf(r, ids[2]) === "sfu");
+    await routes(hub, (r) => linkOf(r, ids[1]) === "sfu");
     await runDurableObjectAlarm(room(code));
-    expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[1]);
     await expire(code, (st) => { st.hubChangedAt = Date.now() - 120_000; });
-    expect((await routes(b, (r) => r.hub !== ids[1])).hub).not.toBe(ids[1]);
+    expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[0]);
+    expect(hub.seen.map((t) => JSON.parse(t)).filter((m) => m.type === "p2p").every((m) => m.hub === ids[0])).toBe(true);
+  });
+
+  it("a hub whose links all died moves after its minute and their grace, never to a member that just lost its link", async () => {
+    const { cs, code, ids } = await p2pRoom(4);
+    const [hub, a, b, c] = cs;
+    for (const id of [ids[1], ids[2], ids[3]]) link(hub, ids[0], id, true);
+    await routes(c, (r) => [1, 2, 3].every((k) => linkOf(r, ids[k]) === "star"));
+    // The hub's network goes: every link dies (each member says so).
+    for (const [x, k] of [[a, 1], [b, 2], [c, 3]] as const) link(x, ids[0], ids[k], false);
+    await routes(hub, (r) => [1, 2, 3].every((k) => linkOf(r, ids[k]) === "sfu"));
+    await expire(code, (st) => { st.hubChangedAt = Date.now() - 120_000; });
+    // All three just lost their link: none is picked yet.
+    expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[0]);
+    // C lost it long ago (and links work for it): the next hub, once the others' grace is over too.
+    await expire(code, (st) => {
+      for (const m of st.members) if (m.lostLinkAt) m.lostLinkAt = Date.now() - 10_000;
+      st.members[3].lostLinkAt = Date.now() - 120_000;
+    });
+    expect((await routes(a, (r) => r.hub !== ids[0])).hub).toBe(ids[3]);
+    // No second change within the minute, whatever the links do.
+    link(a, ids[3], ids[1], false);
+    link(b, ids[3], ids[2], false);
+    link(hub, ids[3], ids[0], false);
+    await runDurableObjectAlarm(room(code));
+    expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[3]);
   });
 
   it("a hub whose room connection drops hands the hub on at once, and is a member when it comes back", async () => {

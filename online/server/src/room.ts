@@ -148,8 +148,13 @@ const FEATURE_P2P = "p2p";
     comes up in 0.1-3 s (finding 180: ICE checks and DTLS, on a LAN or across the internet). */
 const P2P_LINK_MS = 10_000;
 /** A hub replaced because its links failed or because it can't bridge its fallback racers is not
-    replaced for those reasons again this soon: each change makes every member connect anew. */
+    replaced for those reasons again this soon: each change makes every member connect anew. A
+    member whose working link to the hub died is not made the hub for as long (it may be the one
+    whose network failed, or one that reports its link down to move the hub). */
 const HUB_RETRY_MS = 60_000;
+/** Links that died are judged this long after the last of them: the others' keepalives find a dead
+    hub within 5 s of each other (dhd_star LINK_SILENT_MS). */
+const LINK_LOST_GRACE_MS = 5_000;
 /** A P2P room's text frames may be this long, for the peer connections' signaling (an SDP offer or
     answer with its candidates: a few kB from a browser). Other messages keep MAX_TEXT_BYTES. */
 const P2P_TEXT_BYTES = 16_384;
@@ -217,6 +222,8 @@ interface Member {
   fallbackAt?: number;
   /** It has been on a star: its network lets direct connections through (a hub candidate). */
   direct?: boolean;
+  /** When its working link to the hub died (star, then down): not the next hub for HUB_RETRY_MS. */
+  lostLinkAt?: number;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -293,9 +300,6 @@ interface RoomState {
       member. When it changed last (HUB_RETRY_MS). */
   hub?: number | null;
   hubChangedAt?: number;
-  /** A member has been linked to the current hub: its links worked, so their all failing at once
-      means the hub's network (or its game) is gone. */
-  hubLinked?: boolean;
 }
 
 /** Where a room was made (src/index.ts, finding 135). */
@@ -1324,7 +1328,7 @@ export class Room extends DurableObject<Env> {
     // A P2P room's hub whose room connection dropped is most likely gone (its game, its network):
     // the next hub now rather than after the rejoin's wait, while its members' links die one by one
     // and send them to the SFU (finding 186). Back by its token it is a member like any other.
-    if (st.transport === "p2p" && st.hub === id) this.setHub(st, this.bestHub(st, id), "the hub's connection dropped");
+    if (st.transport === "p2p" && st.hub === id) this.setHub(st, this.bestHub(st, Date.now(), { exclude: id }), "the hub's connection dropped");
     if (racing)
       console.log(`room ${st.code}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
     await this.changed();
@@ -1918,7 +1922,7 @@ export class Room extends DurableObject<Env> {
     if (st.members.length === 0) return this.destroy();
     // A P2P room's hub left: the next one, and everyone connects to it; a race goes on (finding 186).
     if (st.transport === "p2p") {
-      if (st.hub === memberId) this.setHub(st, this.bestHub(st), "the hub left");
+      if (st.hub === memberId) this.setHub(st, this.bestHub(st, Date.now()), "the hub left");
       else this.broadcastRoutes();
     }
     if (st.race && !this.anyRacing(st)) await this.closeRace(st, false);
@@ -2111,10 +2115,10 @@ export class Room extends DurableObject<Env> {
     if (up) {
       member.link = "star";
       member.direct = true;
-      st.hubLinked = true;
       const hub = st.members.find((x) => x.id === st.hub);
       if (hub) hub.direct = true;
     } else {
+      if (member.link === "star") member.lostLinkAt = Date.now();
       member.link = "sfu";
       member.fallbackAt = Date.now();
     }
@@ -2122,11 +2126,8 @@ export class Room extends DurableObject<Env> {
     console.log(`room ${st.code}: member ${member.id} ${up ? "linked to the hub" : "races over the SFU: no link to the hub"}`);
     this.broadcastRoutes();
     await this.save();
-    if (up) return;
-    // The last link to the hub gone (checkHub), and its subscriptions, if it races (or is on the
-    // coming race's grid).
-    this.checkHub(st, Date.now());
-    this.kickSubscribe();
+    // Its subscriptions, if it races (or is on the coming race's grid).
+    if (!up) this.kickSubscribe();
   }
 
   /** The alarm's P2P work: links not up in time go to the SFU, a hub that can't do its work is
@@ -2142,41 +2143,48 @@ export class Room extends DurableObject<Env> {
     await this.fallbackDeadlines(st, now);
   }
 
-  /** Replaces a hub that can't do its work. At once when every member that was linked to it lost
-      its link (they worked, so the hub's network or its game is gone; a hub that left or whose room
-      connection dropped is replaced at once too: leave, dropSocket). Else not within HUB_RETRY_MS of
-      the last change: when no member links to it although direct links work for some of them
-      (they have been on a star), or when fallback racers wait for it and it has no working SFU
-      session to bridge them (a browser's game). */
+  /** Replaces a hub that can't do its work, never within HUB_RETRY_MS of the last change (a hub that
+      left or whose room connection dropped is replaced at once: leave, dropSocket): when no member
+      links to it although direct links work for some of them (two or more members, all on the
+      SFU, some of which have been on a star; links that died LINK_LOST_GRACE_MS ago at least), for
+      a member whose direct links work and that didn't just lose its own; or when fallback racers
+      wait for it and it has no working SFU session to bridge them (a browser's game). One member's
+      link going down, a blip or a false report, never moves the hub by itself. */
   private checkHub(st: RoomState, now: number): void {
     const hub = st.members.find((x) => x.id === st.hub);
     if (!hub) {
-      if (st.members.length) this.setHub(st, this.bestHub(st), "no hub");
+      if (st.members.length) this.setHub(st, this.bestHub(st, now), "no hub");
       return;
     }
-    const others = st.members.filter((x) => x !== hub && this.sockets.has(x.id));
-    if (st.hubLinked && others.length && others.every((x) => x.link === "sfu")) {
-      const next = this.bestHub(st, hub.id);
-      if (next) return this.setHub(st, next, "every link to it died");
-    }
     if (now - (st.hubChangedAt ?? 0) < HUB_RETRY_MS) return;
-    const isolated = others.length >= 2 && others.every((x) => x.link === "sfu") && others.some((x) => x.direct);
+    const others = st.members.filter((x) => x !== hub && this.sockets.has(x.id));
+    const settled = others.every((x) => x.lostLinkAt == null || now - x.lostLinkAt >= LINK_LOST_GRACE_MS);
+    const isolated = others.length >= 2 && others.every((x) => x.link === "sfu") && others.some((x) => x.direct) && settled;
     const group = this.sfuGroup();
     const unbridged = !!group?.length && hub.sfu?.phase !== "ready";
-    const next = this.bestHub(st, hub.id);
-    if (isolated && next) this.setHub(st, next, "its links failed");
-    else if (unbridged && next?.sfu?.phase === "ready") this.setHub(st, next, "it can't bridge the racers on the SFU");
+    if (isolated) {
+      const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true, direct: true });
+      if (next) return this.setHub(st, next, "its links failed");
+    }
+    if (unbridged) {
+      const next = this.bestHub(st, now, { exclude: hub.id, discretionary: true });
+      if (next?.sfu?.phase === "ready") this.setHub(st, next, "it can't bridge the racers on the SFU");
+    }
   }
 
   /** The member to become the hub: of the members present (else of all), one that has been on a
       star (its network lets direct links through), then one with a working SFU session (it can
       bridge fallback racers), then the lowest room ping (the server's measure of its connection),
-      then the one here longest. */
-  private bestHub(st: RoomState, exclude?: number): Member | undefined {
-    const all = st.members.filter((x) => x.id !== exclude);
-    const present = all.filter((x) => this.sockets.has(x.id));
-    const rank = (x: Member) => [x.direct ? 0 : 1, x.sfu?.phase === "ready" ? 0 : 1, this.rttOf(x.id) ?? Infinity, st.members.indexOf(x)];
-    return [...(present.length ? present : all)].sort((a, b) => {
+      then the one here longest. A member whose link to the hub died within HUB_RETRY_MS comes
+      last, and a `discretionary` change (the hub is still here) never picks one; `direct` takes
+      only members that have been on a star. */
+  private bestHub(st: RoomState, now: number, o: { exclude?: number; discretionary?: boolean; direct?: boolean } = {}): Member | undefined {
+    const lost = (x: Member) => x.lostLinkAt != null && now - x.lostLinkAt < HUB_RETRY_MS;
+    let pool = st.members.filter((x) => x.id !== o.exclude && (!o.discretionary || !lost(x)) && (!o.direct || x.direct));
+    const present = pool.filter((x) => this.sockets.has(x.id));
+    if (present.length) pool = present;
+    const rank = (x: Member) => [lost(x) ? 1 : 0, x.direct ? 0 : 1, x.sfu?.phase === "ready" ? 0 : 1, this.rttOf(x.id) ?? Infinity, st.members.indexOf(x)];
+    return pool.sort((a, b) => {
       const ra = rank(a), rb = rank(b);
       return ra.reduce((d, v, i) => d || v - rb[i], 0);
     })[0];
@@ -2189,7 +2197,6 @@ export class Room extends DurableObject<Env> {
     const now = Date.now();
     st.hub = next?.id ?? null;
     st.hubChangedAt = now;
-    st.hubLinked = false;
     for (const x of st.members) {
       delete x.link;
       delete x.fallbackAt;
