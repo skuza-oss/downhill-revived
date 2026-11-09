@@ -68,4 +68,51 @@ mod tests {
             }
         }
     }
+
+    /// No vertex shader reads a texture (or a storage texture): the vendored wgpu-hal synchronises
+    /// sampled and storage textures with the fragment and compute stages only (PATCH.md, finding
+    /// 174), so a texture read in a vertex shader could race with the texture's last write.
+    #[test]
+    fn no_vertex_texture_reads() {
+        for (name, source) in modules() {
+            let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
+            let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            let image = |ty: naga::Handle<naga::Type>| match module.types[ty].inner {
+                naga::TypeInner::Image { .. } => true,
+                naga::TypeInner::BindingArray { base, .. } => matches!(module.types[base].inner, naga::TypeInner::Image { .. }),
+                _ => false,
+            };
+            let mut vertex = 0;
+            for (i, ep) in module.entry_points.iter().enumerate() {
+                if ep.stage != naga::ShaderStage::Vertex {
+                    continue;
+                }
+                vertex += 1;
+                let uses = info.get_entry_point(i);
+                for (handle, global) in module.global_variables.iter() {
+                    assert!(!(image(global.ty) && !uses[handle].is_empty()),
+                            "{name}: vertex entry point {} reads the texture `{}`", ep.name, global.name.as_deref().unwrap_or("?"));
+                }
+            }
+            // The check sees the vertex stages it is meant for (raster.wgsl and zread have none).
+            if name.contains("touch") || name.contains("counter") || name.starts_with("native.wgsl") || name.starts_with("present") {
+                assert!(vertex > 0, "{name}: no vertex entry point found");
+            }
+        }
+    }
+
+    /// The check above catches a vertex shader that reads a texture.
+    #[test]
+    fn vertex_texture_reads_are_found() {
+        let source = "@group(0) @binding(0) var t: texture_2d<f32>;
+            @vertex fn v() -> @builtin(position) vec4<f32> { return textureLoad(t, vec2<i32>(0), 0); }";
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .unwrap();
+        let (handle, _) = module.global_variables.iter().next().unwrap();
+        assert!(!info.get_entry_point(0)[handle].is_empty());
+    }
 }
