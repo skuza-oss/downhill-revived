@@ -100,7 +100,9 @@ impl crate::Surface for super::Surface {
         render_layer.setDrawableSize(drawable_size);
         // https://developer.apple.com/documentation/quartzcore/cametallayer/allowsnextdrawabletimeout
         if available!(macos = 10.13, ios = 11.0, tvos = 11.0, visionos = 1.0) {
-            render_layer.setAllowsNextDrawableTimeout(false);
+            // Downhill Revived: a suspended compositor on mobile must not leave acquire
+            // waiting indefinitely while lifecycle handling drains and releases the surface.
+            render_layer.setAllowsNextDrawableTimeout(cfg!(any(target_os = "ios", target_os = "tvos", target_os = "visionos")));
         }
         if OsFeatures::display_sync() {
             render_layer.setDisplaySyncEnabled(display_sync);
