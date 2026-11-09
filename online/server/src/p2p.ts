@@ -8,7 +8,7 @@
 // (wrangler.p2p.jsonc, src/p2p-entry.ts), so deploying them never restarts an SFU room; a local or
 // self-hosted server serves them from the main Worker (src/index.ts).
 import { DurableObject } from "cloudflare:workers";
-import { CallGate, Turn, type SfuSecrets } from "./sfu";
+import { CallGate, TURN_TTL_S, Turn, type SfuSecrets } from "./sfu";
 import {
   CLOSE_CODES, FRAME_PING, FRAME_PONG, HELLO_TIMEOUT_MS, MAX_MEMBERS, P2P_CODE_LENGTH, PROTOCOL,
   clientVersionOf, isOutdated, isValidCode, minVersionOf, randomCode,
@@ -39,6 +39,13 @@ const P2P_CAPS: Caps = { windowMs: CAP_WINDOW_MS, text: 400, binary: 20 };
     members joining at once would queue a 7th call in the runtime, where its timeout runs). One
     slot stays free for anything else the room fetches. */
 const TURN_CALLS = 5;
+/** A member's TURN credentials are renewed this long after they were made, well before they
+    expire (TURN_TTL_S): an allocation lives as long as a Refresh signed with a valid credential
+    keeps it, so the game signs the next one with the fresh credentials and its relay stays up
+    however long the room lasts (port/render/net/src/turn.rs renew). */
+export const TURN_RENEW_MS = TURN_TTL_S * 1000 * 3 / 4;
+/** A renewal that failed is tried again this much later (the old credentials still hold). */
+const TURN_RETRY_MS = 60_000;
 
 type Message = Record<string, unknown>;
 
@@ -63,7 +70,11 @@ interface Connection {
   tally: Tally;
   ipHash: string;
   country: string;
+  /** The member's TURN credentials (their username, for the revoke) and when they were made; the
+      previous ones after a renewal, still valid until they expire. */
   turnUser?: string;
+  turnAt?: number;
+  turnOld?: string;
 }
 
 /** The P2P routes: a WebSocket to /v1/p2p/rooms/new makes a room, to /v1/p2p/rooms/CODE joins one
@@ -195,18 +206,25 @@ export class P2pRoom extends DurableObject<Env> {
     await this.remove(ws);
   }
 
-  /** Drops connections that never said hello and members gone silent. */
+  /** Drops connections that never said hello and members gone silent, and renews TURN credentials
+      that are due. */
   async alarm(): Promise<void> {
     if (!this.meta || this.meta.closed) return;
     const now = Date.now();
+    const renewals: Promise<void>[] = [];
     for (const ws of this.ctx.getWebSockets()) {
       const info = this.info(ws);
       if (!info) continue;
       if (info.id === null ? now - info.opened > HELLO_TIMEOUT_MS : now - info.heard > IDLE_MS) {
         await this.remove(ws);
         try { ws.close(1001, "timed out"); } catch { /* already closed */ }
+      } else if (info.id !== null && info.turnUser && now - (info.turnAt ?? 0) >= TURN_RENEW_MS) {
+        info.turnAt = now; // not again at the next sweep while this one runs
+        this.attach(ws, info);
+        renewals.push(this.giveTurn(ws, info.id, true));
       }
     }
+    await Promise.all(renewals);
     if (!this.meta.closed && this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(now + SWEEP_MS);
   }
 
@@ -250,13 +268,14 @@ export class P2pRoom extends DurableObject<Env> {
       at: Date.now(), room: meta.code, member: info.id, kind: asHost ? "host" : "guest", name, clientVersion,
       country: info.country, ipHash: info.ipHash, installId,
     }));
-    if (turn) await this.giveTurn(ws, info.id);
+    if (turn) await this.giveTurn(ws, info.id, false);
   }
 
-  /** The member's own TURN credentials: the fallback when no direct path between two games works. */
-  private async giveTurn(ws: WebSocket, id: number): Promise<void> {
+  /** The member's own TURN credentials: the fallback when no direct path between two games works.
+      A renewal sends the same message; the game signs its relay's next Refresh with them. */
+  private async giveTurn(ws: WebSocket, id: number, renewal: boolean): Promise<void> {
     const meta = this.meta!;
-    const turn = new Turn(this.secrets(), undefined, this.gate);
+    const turn = this.turn();
     try {
       const credentials = await turn.mint(`p2p-${meta.code}-${id}`);
       const current = this.info(ws);
@@ -264,12 +283,34 @@ export class P2pRoom extends DurableObject<Env> {
         await turn.revoke(credentials.username).catch(() => {});
         return;
       }
+      // Two renewals back: expired by now, or about to.
+      if (current.turnOld) this.revokeLater(current.turnOld);
+      current.turnOld = current.turnUser;
       current.turnUser = credentials.username;
+      current.turnAt = Date.now();
       this.attach(ws, current);
       this.send(ws, { ...(credentials.message as object), type: "p2p_turn" });
     } catch {
-      this.send(ws, { type: "error", code: "turn_unavailable", message: "Relay setup failed. Direct connections may still work." });
+      const current = this.info(ws);
+      if (!renewal) {
+        this.send(ws, { type: "error", code: "turn_unavailable", message: "Relay setup failed. Direct connections may still work." });
+      } else if (current?.id === id) {
+        // The current credentials hold for a while yet: again in a minute, and no message.
+        current.turnAt = Date.now() - TURN_RENEW_MS + TURN_RETRY_MS;
+        this.attach(ws, current);
+      }
     }
+  }
+
+  /** Cloudflare's TURN API through this room's gate (`turnFetch`: tests answer it themselves). */
+  private turn(): Turn {
+    return new Turn(this.secrets(), this.turnFetch, this.gate);
+  }
+
+  private turnFetch: typeof fetch = (input, init) => fetch(input, init);
+
+  private revokeLater(username: string): void {
+    this.ctx.waitUntil(this.turn().revoke(username).catch(() => {}));
   }
 
   /** Host-star only: a guest signals the host, the host any guest. The sender is the connection's
@@ -288,7 +329,7 @@ export class P2pRoom extends DurableObject<Env> {
     const id = info.id;
     info.id = null;
     this.attach(ws, info);
-    if (info.turnUser) this.ctx.waitUntil(new Turn(this.secrets(), undefined, this.gate).revoke(info.turnUser).catch(() => {}));
+    for (const user of [info.turnUser, info.turnOld]) if (user) this.revokeLater(user);
     if (id !== meta.hostId) {
       this.broadcastMembers();
       return;

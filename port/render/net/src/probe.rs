@@ -54,17 +54,25 @@ fn api(method: &str, path: &str, body: &Value) -> Value {
 
 /// TURN credentials for one client, as the room mints them (online/server/src/sfu.ts Turn).
 pub(crate) fn turn_credentials(tag: &str) -> (String, Value) {
+    turn_credentials_lasting(tag, 3600)
+}
+
+/// Credentials valid for `ttl` seconds (peer.rs's renewal test: one that expires during the test).
+pub(crate) fn turn_credentials_lasting(tag: &str, ttl: u32) -> (String, Value) {
     let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
-    let r = call("POST", &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"), &token, &json!({"ttl": 3600, "customIdentifier": tag}));
+    let r = call("POST", &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"), &token, &json!({"ttl": ttl, "customIdentifier": tag}));
     let server = r["iceServers"].as_array().unwrap().iter().find(|s| s["username"].is_string()).unwrap().clone();
     let urls: Vec<Value> = server["urls"].as_array().unwrap().iter().filter(|u| u.as_str().is_some_and(|u| u.starts_with("turns:"))).cloned().collect();
     let user = server["username"].as_str().unwrap().to_string();
     (user.clone(), json!({"type":"sfu_turn","urls":urls,"username":user,"credential":server["credential"]}))
 }
 
+/// Best effort: an expired credential is no longer found (a test's cleanup must not panic).
 pub(crate) fn revoke_turn(user: &str) {
     let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
-    call("POST", &format!("/v1/turn/keys/{key}/credentials/{user}/revoke"), &token, &Value::Null);
+    if let Err(e) = try_call("POST", &format!("/v1/turn/keys/{key}/credentials/{user}/revoke"), &token, &Value::Null) {
+        eprintln!("TURN revoke: {e}");
+    }
 }
 
 /// One HTTPS call to rtc.live.cloudflare.com; panics on a status outside 2xx. A 204 is Null.
