@@ -140,7 +140,7 @@ def main():
     ap.add_argument('--bots', type=int, default=0, help='nettool players: --replay, else echoing an AI rider')
     ap.add_argument('--replay', help='a STATE/EVENT recording (DHD_NET_RECORD) for the bots (else they echo an AI rider)')
     ap.add_argument('--kill-guest-at', type=float, help='stop the guest this many seconds after GO')
-    ap.add_argument('--kill-host-at', type=float, help='stop the host (a P2P room's hub) this many seconds after GO')
+    ap.add_argument('--kill-host-at', type=float, help='stop the host (in a P2P room, its hub) this many seconds after GO')
     ap.add_argument('--stop-if', default=os.path.join(ROOT, 'build', 'port', 'BENCH.lock'),
                     help='stop everything as soon as this file exists (the benchmark lock)')
     ap.add_argument('--minimized', action='store_true', help='both games start minimised (the PC stays usable)')
