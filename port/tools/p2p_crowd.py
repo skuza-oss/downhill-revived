@@ -77,7 +77,8 @@ def main():
         else:
             server = mac_server = stack.enter_context(local_server.running())
         env = {k: v for k, v in os.environ.items() if not k.startswith('DHD_')}
-        env.update(DHD_NET_SERVER=server, DHD_NET_ISO_SHA256=iso_hash, DHD_ISO=test_iso(), DHD_SKIP_MOVIES='1',
+        # DHD_NET_LOG_CODE: the room's code in full in the host's log, which is where this reads it.
+        env.update(DHD_NET_SERVER=server, DHD_NET_ISO_SHA256=iso_hash, DHD_NET_LOG_CODE='1', DHD_ISO=test_iso(), DHD_SKIP_MOVIES='1',
                    DHD_SND_OFF='1', DHD_MEMCARD='1', DHD_MEMCARD_DIR=str(out / 'card'), DHD_SETTINGS='none',
                    DHD_RENDER='native', DHD_FPS='60', DHD_SCALE='1', DHD_WINDOW='windowed', DHD_WINDOW_WIDTH='640',
                    DHD_WINDOW_HEIGHT='480', DHD_NET_SCRIPTED='1', DHD_RACE_PAD='0:600:cross',

@@ -99,7 +99,7 @@ def iso_files_sha256(iso, cache):
 
 def game_env(iso_hash, pad, extra):
     env = {k: v for k, v in os.environ.items() if not k.startswith('DHD_')}
-    env.update(DHD_ISO=os.environ['DHD_ISO'], DHD_NET_SERVER=os.environ['DHD_NET_SERVER'], DHD_NET_ISO_SHA256=iso_hash,
+    env.update(DHD_ISO=os.environ['DHD_ISO'], DHD_NET_SERVER=os.environ['DHD_NET_SERVER'], DHD_NET_ISO_SHA256=iso_hash, DHD_NET_LOG_CODE='1',
                DHD_SKIP_MOVIES='1', DHD_MEMCARD='0', DHD_SND_OFF='1', DHD_RENDER='native', DHD_RACE_SYNC='1', DHD_NET_SCRIPTED='1',
                DHD_RACE_PAD=pad, DHD_SCREENSHOT='shot', DHD_SCALE='1', DHD_SETTINGS='none')
     env.update(extra)

@@ -71,7 +71,8 @@ def main():
         result = dict(label=label, backend=backend, host=host, force_turn=force,
                       seconds=a.seconds, started_epoch=time.time(), status='running')
         here, there = (a.p2p_server, a.p2p_server) if backend == 'p2p' and a.p2p_server else servers
-        base = dict(DHD_NET_SERVER=here, DHD_NET_BENCH='bench.csv',
+        # DHD_NET_LOG_CODE: the host's P2P code in full in its log, which is where this reads it.
+        base = dict(DHD_NET_SERVER=here, DHD_NET_LOG_CODE='1', DHD_NET_BENCH='bench.csv',
                     DHD_NET_ISO_SHA256=iso_hash, DHD_SKIP_MOVIES='1', DHD_SND_OFF='1',
                     DHD_MEMCARD='1', DHD_MEMCARD_DIR='card', DHD_SETTINGS='none', DHD_RENDER='native',
                     DHD_FPS='60', DHD_SCALE='1', DHD_WINDOW='windowed', DHD_WINDOW_WIDTH='640',

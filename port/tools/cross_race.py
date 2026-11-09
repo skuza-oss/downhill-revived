@@ -79,7 +79,8 @@ def main():
         return subprocess.run(ssh_base + [a.remote, cmd], capture_output=True, text=True, timeout=30)
 
     iso_hash = iso_files_sha256(test_iso(), ROOT / 'build' / 'port' / 'iso-check.txt')
-    common = dict(DHD_NET_SERVER='ws://127.0.0.1:8787', DHD_NET_ISO_SHA256=iso_hash, DHD_SKIP_MOVIES='1',
+    # DHD_NET_LOG_CODE: the host's P2P code in full in its log, which is where this reads it.
+    common = dict(DHD_NET_SERVER='ws://127.0.0.1:8787', DHD_NET_ISO_SHA256=iso_hash, DHD_NET_LOG_CODE='1', DHD_SKIP_MOVIES='1',
                   DHD_MEMCARD='1', DHD_SND_OFF='1', DHD_RENDER='native', DHD_SETTINGS='none', DHD_NET_SCRIPTED='1',
                   DHD_NET_TEST_READY='1', DHD_FPS='60', DHD_ONLINE_MENU_TRACE='1', DHD_SCALE='1',
                   DHD_CAPTURE_AT='20', DHD_CAPTURE_INTERVAL='15')

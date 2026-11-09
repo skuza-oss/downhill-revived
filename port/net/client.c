@@ -565,7 +565,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         json_bool(text, "roomChosen", &l->room_chosen);
         {
             double now = net_now_ms();
-            int n = snprintf(line, sizeof line, "net: %s room %s%s%s: ", c->joined_at ? "back in" : "in", l->code,
+            int n = snprintf(line, sizeof line, "net: %s room %s%s%s: ", c->joined_at ? "back in" : "in", net_log_code(l->code).text,
                              l->is_host ? " (host)" : "", !c->racing ? "" : in_race ? ", back in the race" : ", the race is over");
             if (!c->joined_at) c->joined_at = now;
             c->window_n = c->window_count = 0, c->window_worst = 0, c->window_start = now;
@@ -607,7 +607,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         if (c->joined_at && l->room_colo[0] && strcmp(l->room_colo, c->logged_colo)) {
             char room[80];
             room_place(l, room, sizeof room);
-            snprintf(line, sizeof line, "net: room %s runs in %s", l->code, room);
+            snprintf(line, sizeof line, "net: room %s runs in %s", net_log_code(l->code).text, room);
             snprintf(c->logged_colo, sizeof c->logged_colo, "%s", l->room_colo);
         }
         changed(c);
@@ -636,12 +636,12 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         for (char *p = notice; *p; p++)
             if (*p < 0x20 || *p > 0x7e) *p = '?';
         memcpy(c->lobby.notice, notice, sizeof notice);
-        snprintf(line, sizeof line, "net: room %s: the server restarts the room for new code", c->lobby.code);
+        snprintf(line, sizeof line, "net: room %s: the server restarts the room for new code", net_log_code(c->lobby.code).text);
         changed(c);
     } else if (!strcmp(type, "error")) {
         json_string(text, "code", c->lobby.error_code, sizeof c->lobby.error_code);
         json_string(text, "message", c->lobby.error, sizeof c->lobby.error);
-        snprintf(line, sizeof line, "net: room %s: %s", c->lobby.code, c->lobby.error);
+        snprintf(line, sizeof line, "net: room %s: %s", net_log_code(c->lobby.code).text, c->lobby.error);
         changed(c);
     }
     SDL_UnlockMutex(c->lock);
@@ -771,7 +771,7 @@ int client_on_closed(NetClient *c, int code, const char *reason)
         snprintf(c->lobby.error, sizeof c->lobby.error, "connection closed (%d%s%s)", code,
                  reason && *reason ? ": " : "", reason ? reason : "");
     if (c->joined_at && !c->leaving) {  /* a drop: the last window, and whether it comes back */
-        int n = snprintf(line, sizeof line, "net: room %s: connection closed (%d)%s; ", c->lobby.code, code,
+        int n = snprintf(line, sizeof line, "net: room %s: connection closed (%d)%s; ", net_log_code(c->lobby.code).text, code,
                          !rejoin ? "" : c->racing ? ", rejoining (the race goes on)" : ", rejoining");
         if (c->rejoin_tries <= 1)  /* the window once, not after every failed attempt */
             window_stats(c, line + n, sizeof line - n);
@@ -790,7 +790,7 @@ void client_rejoin_failed(NetClient *c)
     char line[160] = "";
     SDL_LockMutex(c->lock);
     if (c->rejoining || c->lobby.state == NET_RECONNECTING) {
-        snprintf(line, sizeof line, "net: room %s: no way back after %u attempts%s", c->lobby.code, c->rejoin_tries,
+        snprintf(line, sizeof line, "net: room %s: no way back after %u attempts%s", net_log_code(c->lobby.code).text, c->rejoin_tries,
                  c->racing ? "; the race goes on here alone" : "");
         if (c->racing) c->lobby.offline = 1;
         c->rejoining = 0;
@@ -857,7 +857,7 @@ int client_tick(NetClient *c)
                      c->test_drop_s);
         }
         if (!line[0] && c->joined_at && (c->lobby.state == NET_LOBBY || c->lobby.state == NET_RACING) && now >= c->next_log) {
-            int n = snprintf(line, sizeof line, "net: room %s%s, ", c->lobby.code, c->racing ? " (racing)" : "");
+            int n = snprintf(line, sizeof line, "net: room %s%s, ", net_log_code(c->lobby.code).text, c->racing ? " (racing)" : "");
             window_stats(c, line + n, sizeof line - n);
             c->next_log = now + NET_LOG_MS;
         }
@@ -1019,7 +1019,7 @@ void client_leave(NetClient *c)
         say(c, "{\"type\":\"leave\"}");
     if (c->joined_at) {
         int s = (int)((net_now_ms() - c->joined_at) / 1000);
-        int n = snprintf(line, sizeof line, "net: left room %s after %d:%02d; ", c->lobby.code, s / 60, s % 60);
+        int n = snprintf(line, sizeof line, "net: left room %s after %d:%02d; ", net_log_code(c->lobby.code).text, s / 60, s % 60);
         window_stats(c, line + n, sizeof line - n);
         c->joined_at = 0;
     }
