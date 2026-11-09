@@ -280,7 +280,7 @@ def posix_build():
     return lib, include, libs
 
 
-ANDROID_API = 30  # Android 11 (memfd_create, the Mi 11i's first release); build_host64.py's android-arm64 target too
+ANDROID_API = 29  # Android 10 (finding 191; newer calls are looked up at run time); build_host64.py's android-arm64 target too
 ANDROID_DIRNAME = '%s-android-arm64' % VERSION  # build/port/sdl3/<version>-android-arm64
 
 

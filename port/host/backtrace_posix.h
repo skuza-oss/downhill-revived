@@ -1,5 +1,5 @@
 /* backtrace() and backtrace_symbols_fd() for the POSIX hosts' crash reports. glibc has them in
-   <execinfo.h>; Android's libc only from API 33, and the Android build targets API 30 (finding 091),
+   <execinfo.h>; Android's libc only from API 33, and the Android build targets API 29 (findings 091, 191),
    so there they are made here from the unwinder (_Unwind_Backtrace) and dladdr: each frame is
    printed as library+offset, which llvm-addr2line -e libmain.so turns into a source line.
    Async-signal-safe enough for a report on the way out (no malloc). */
