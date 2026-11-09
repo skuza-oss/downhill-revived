@@ -296,6 +296,8 @@ struct Assoc {
     /// A P2P room: the publishers this game's race needs on the SFU (dhd_star sfu_expect, finding
     /// 186), applied to every association. None: an SFU room.
     p2p_expect: Option<Vec<u64>>,
+    /// The room's welcome lists "sfu_silent": it takes a silent race link's report (finding 187).
+    silent_ok: bool,
 }
 
 impl Assoc {
@@ -370,7 +372,7 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
-    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None };
+    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None, silent_ok: false };
     // A room's welcome came on this connection: an association belongs here.
     let mut welcomed = false;
     // A P2P room (finding 186): its star, made by the first welcome that says so; it outlives a
@@ -413,6 +415,7 @@ fn send_main(c: Arc<WsConn>) {
                     let result = match kind {
                         "welcome" => {
                             welcomed = true;
+                            a.silent_ok = message["features"].as_array().is_some_and(|f| f.iter().any(|x| x == "sfu_silent"));
                             // The kind of room is the welcome's (a P2P room says so, finding 186).
                             if message["transport"] == "p2p" {
                                 star.get_or_insert_with(|| p2p::P2p::new(wake.clone())).room(&message);
@@ -446,6 +449,14 @@ fn send_main(c: Arc<WsConn>) {
                         }
                         "ended" => {
                             a.start = None;
+                            a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message))
+                        }
+                        "left" => {
+                            // A new association in this race (the room replaced the session,
+                            // finding 187) expects only the racers still in it.
+                            if let (Some(players), Some(member)) = (a.start.as_mut().and_then(|s| s["players"].as_array_mut()), message["memberId"].as_u64()) {
+                                players.retain(|p| p["memberId"].as_u64() != Some(member));
+                            }
                             a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message))
                         }
                         _ => a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message)),
@@ -484,6 +495,8 @@ fn send_main(c: Arc<WsConn>) {
             match rtc.poll() {
                 Ok((text, frames)) => {
                     if text.iter().any(|t| t["type"] == "sfu_connected") { a.pause = Duration::from_secs(1); a.turn_first = rtc.via_relay(); }
+                    // A server without it would refuse the report (finding 187): logged only.
+                    let text: Vec<_> = text.into_iter().filter(|t| a.silent_ok || t["type"] != "sfu_silent").collect();
                     // While the room connection is down its signaling waits for the rejoin.
                     if lock(&c.queue).connected {
                         for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }

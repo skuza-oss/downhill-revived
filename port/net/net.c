@@ -201,6 +201,7 @@ void net_finish(unsigned ticks, int place) { client_finish(&client, ticks, place
 void net_back(void) { client_back(&client); }
 void net_rules(int finish_window, int next_race, int then) { client_rules(&client, finish_window, next_race, then); }
 void net_rotation(const unsigned char *ids, int count) { client_rotation(&client, ids, count); }
+void net_race_go(double at) { client_race_go(&client, at); }
 
 void net_get_lobby(NetLobby *out)
 {
@@ -282,6 +283,7 @@ void host_service_net_back(void) { net_back(); }
 void host_service_net_rules(int finish_window, int next_race, int then) { net_rules(finish_window, next_race, then); }
 void host_service_net_rotation(uint32_t address, int count) { if (count >= 0 && count <= 64) net_rotation((const unsigned char *)GUEST(address), count); }
 void host_service_net_end_race(void) { net_end_race(); }
+void host_service_net_race_go(double at) { net_race_go(at); }
 void host_service_net_set_ready(int a0) { net_set_ready(a0); }
 void host_service_net_start_race(void) { net_start_race(); }
 int host_service_net_racing(void) { return net_racing(); }

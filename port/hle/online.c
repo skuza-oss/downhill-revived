@@ -588,6 +588,8 @@ static void send_event(const void *payload, int n)
 static void put32(uint8_t *o, int32_t v) { memcpy(o, &v, 4); }
 static int32_t get32(const uint8_t *i) { int32_t v; memcpy(&v, i, 4); return v; }
 
+#include "online_start.h"
+
 /* Pickup pool: retail allocates 150 entries in level-file order (001961D8).
    Only the index travels, never a pointer. Type, track and exact spawn xyz guard it. */
 #include "online_pickup.h"
@@ -844,7 +846,10 @@ void hle_online_riders(void *game)
    moment on the server's clock and every PC holds the countdown until then, so the GOs land
    within a frame or two of each other on every PC. Both are said again every half second: the PC
    that loads first can be here before another has set up its race, which would drop a single
-   message, and the start would wait 60 s.
+   message, and the start would wait 60 s. The moment goes to the room too, which sends it to the
+   racers (finding 187): a PC whose race link brings nothing still starts with the others. A host
+   that left before naming it hands that to the lowest slot still racing (online_start.h). With no
+   moment 75 s after it came here, a PC leaves the race: it never races alone.
    One step a field (pads_begin_field): the game goes on drawing while it waits, its countdown held
    where it is (hle_online_countdown_hold) and the wait on the screen (hle_online_hud). A PC that
    skipped the flight over the track waits so for one still watching it. The step whose field the
@@ -853,13 +858,15 @@ void hle_online_riders(void *game)
 static int start_step(void)
 {
     static const uint8_t loaded[2] = {EVENT_VERSION, EVENT_LOADED};
-    int host = on.local_slot == on.host_slot;
     if (!on.start_entered) {
         on.start_entered = host_wall_seconds(), on.start_said = -1;
         fprintf(stderr, "online: loaded at %.1f s, waiting for the others\n", on.start_entered);
     }
     NetLobby lobby;
     host_service_net_get_lobby(GADDR(&lobby));
+    int left[NET_MAX_SLOTS] = {0}, nslots = lobby.nslots < NET_MAX_SLOTS ? lobby.nslots : NET_MAX_SLOTS;
+    for (int i = 0; i < nslots; i++) left[i] = lobby.racer[i].left;
+    int host = on.local_slot == start_namer(on.host_slot, left, nslots);
     if (host_wall_seconds() - on.start_said >= 0.5) {
         on.start_said = host_wall_seconds();
         send_event(loaded, sizeof loaded);
@@ -877,16 +884,31 @@ static int start_step(void)
         }
     on.start_missing = missing;
     double waited = host_wall_seconds() - on.start_entered;
-    int go = !host_service_net_racing() || waited > 75;
-    if (!go && host && !on.start_announced && (!missing || waited > 60)) {
+    int racing = host_service_net_racing();
+    if (!on.go_at && lobby.race_go_at > 0) {
+        on.go_at = lobby.race_go_at;
+        fprintf(stderr, "online: the start moment came from the room (none over the race link), %+.1f ms from now\n",
+                on.go_at - host_service_net_server_ms());
+    }
+    /* a namer that took over from a host gone after naming it keeps that moment */
+    if (racing && host && !on.start_announced && !on.go_at && (!missing || waited > START_NAME_AFTER_S)) {
         uint8_t e[10] = {EVENT_VERSION, EVENT_START};
         on.go_at = host_service_net_server_ms() + START_LEAD_MS;
         memcpy(e + 2, &on.go_at, 8);
         send_event(e, sizeof e);
+        host_service_net_race_go(on.go_at);
         on.start_announced = 1;
         if (missing) fprintf(stderr, "online: %d player%s never said they loaded: starting without waiting\n",
                              missing, missing == 1 ? "" : "s");
     }
+    int rule = start_rule(racing, waited, on.go_at != 0);
+    if (rule == START_LEAVE) {
+        fprintf(stderr, "online: no start moment from the others %.1f s after loading: out of the race, not alone\n", waited);
+        on.leave_reason = "NO START FROM THE OTHERS";
+        host_service_net_back();  /* the room's next snapshot has this PC out; the race screen leaves */
+        rule = START_GO;
+    }
+    int go = rule == START_GO;
     if (!go && on.go_at && on.go_at - host_service_net_server_ms() < 1000 * port_frame_period() + 5) {
         while (host_service_net_server_ms() < on.go_at) host_sleep_ms(0);
         go = 1;
@@ -1371,8 +1393,9 @@ static void state_sync(void)
         const NetMember *me = self_member(&lobby);
         int out = lobby.state != NET_RACING || !me || !me->in_race;
         if (!on.leave_at && out) {
-            on.leave_reason = FINISHED(0) ? "RACE OVER" : lobby.last_race_id != on.last_race_id
-                              ? "TIME UP - DNF" : "THE HOST ENDED THE RACE";
+            if (!on.leave_reason)  /* one the start gave stays (start_step) */
+                on.leave_reason = FINISHED(0) ? "RACE OVER" : lobby.last_race_id != on.last_race_id
+                                  ? "TIME UP - DNF" : "THE HOST ENDED THE RACE";
             fprintf(stderr, "online: race closed: back to the room\n");
             on.leave_at = now + 2;
         }

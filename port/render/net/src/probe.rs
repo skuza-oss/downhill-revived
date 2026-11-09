@@ -706,6 +706,129 @@ fn probe_parallel_subscriptions() {
     assert_eq!((failed, unopened, undelivered), (0, 0, 0));
 }
 
+/// Finding 187: a subscription its game never heard of, closed. A subscription call whose answer
+/// is lost (finding 182) may still be carried out; the room's inspection then finds channels its
+/// record lacks and closes those it doesn't want, and the subscriber's game never had them.
+/// Session 0 subscribes; 1 and 2 publish. 0 is subscribed to 1 without its game hearing of it, the
+/// subscription is closed, and 0 subscribes to 1 again (Cloudflare reuses the ids) and to 2 (new
+/// ids). Then the same pair is closed and made once more with the game knowing (DHD_PROBE_REBUILD=0
+/// skips it), and last a new session for 0 (as the room's sfu_reset makes). Prints, for each
+/// step, the ids and which publishers' events reach 0; Cloudflare's listing of 0's session too.
+#[test]
+#[ignore = "needs the network and Realtime credentials"]
+fn probe_unannounced_subscription_close() {
+    let rebuild = env_or("DHD_PROBE_REBUILD", 1) != 0;
+    let mut c: Vec<Sfu> = vec![];
+    let mut sessions: Vec<String> = vec![];
+    let connect = |c: &mut Vec<Sfu>, sessions: &mut Vec<String>| {
+        let (mut sfu, offer) = Sfu::start(Arc::new(|| {}), false).unwrap();
+        let r = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
+        sessions.push(r["sessionId"].as_str().unwrap().to_string());
+        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]})).unwrap();
+        c.push(sfu);
+    };
+    let poll = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>| {
+        for (k, s) in c.iter_mut().enumerate() { let (_, f) = s.poll().expect("association"); got[k].extend(f.into_iter().map(|(_, f)| f)); }
+    };
+    let wait = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>, ms: u64| {
+        let until = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < until { poll(c, got); std::thread::sleep(Duration::from_millis(1)); }
+    };
+    let mut got: Vec<Vec<Vec<u8>>> = vec![vec![]; 3];
+    for _ in 0..3 { connect(&mut c, &mut sessions); }
+    let until = Instant::now() + Duration::from_secs(20);
+    while !c.iter().all(|s| s.connected) { assert!(Instant::now() < until, "SFU connect timed out"); poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+    for k in 0..3 { let ch = allocate(&sessions[k], k as u64 + 1, None); c[k].signal(&json!({"type":"sfu_channels","channels":ch})).unwrap(); }
+    let (app, token) = (secret("REALTIME_APP_ID"), secret("REALTIME_APP_TOKEN"));
+    let close = |session: &str, ids: &[u64]| {
+        let list: Vec<Value> = ids.iter().map(|id| json!({"id": id})).collect();
+        let r = try_call("PUT", &format!("/v1/apps/{app}/sessions/{session}/datachannels/close"), &token, &json!({"dataChannels": list}));
+        eprintln!("probe: close {ids:?}: {}", match &r { Ok(v) => v["dataChannels"].to_string(), Err(e) => e.clone() });
+    };
+    let listing = |session: &str| {
+        let r = api("GET", &format!("sessions/{session}"), &Value::Null);
+        let items: Vec<String> = r["dataChannels"].as_array().map_or(vec![], |a| a.iter().map(|x| format!("{}:{}:{}:{}",
+            x["id"], x["dataChannelName"].as_str().unwrap_or("?"), x["location"].as_str().unwrap_or("?"), x["status"].as_str().unwrap_or("-"))).collect());
+        eprintln!("probe: Cloudflare lists session 0: {items:?}");
+    };
+    let ids = |ch: &[Value]| -> Vec<u64> { ch.iter().map(|x| x["channelId"].as_u64().unwrap()).collect() };
+    let players = json!([{"memberId":1,"slot":0},{"memberId":2,"slot":1},{"memberId":3,"slot":2}]);
+    let mut race = 5_000u64;
+    // Events from 1 and 2 for 4 s: which reach 0.
+    let mut check = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>, label: &str| -> (bool, bool) {
+        race += 1;
+        for s in c.iter_mut() { s.signal(&json!({"type":"start","startAt":race,"players":players})).unwrap(); s.released = true; }
+        for g in got.iter_mut() { g.clear(); }
+        let until = Instant::now() + Duration::from_secs(4);
+        while Instant::now() < until {
+            for who in 1..3 { let _ = c[who].send(&[6, who as u8, 7]); }
+            let t = Instant::now() + Duration::from_millis(100);
+            while Instant::now() < t { poll(c, got); std::thread::sleep(Duration::from_millis(1)); }
+        }
+        let from = |p: u8| got[0].iter().filter(|f| f[0] == 6 && f[1] == p).count();
+        eprintln!("probe: {label}: 0 got {} events from 1, {} from 2 (40 sent by each)", from(1), from(2));
+        for s in c.iter_mut() { s.signal(&json!({"type":"ended"})).unwrap(); }
+        (from(1) > 0, from(2) > 0)
+    };
+    // The baseline: 0 subscribed to 1 the normal way, then closed with its game knowing.
+    let normal = allocate(&sessions[0], 2, Some(&sessions[1]));
+    c[0].signal(&json!({"type":"sfu_channels","channels":normal})).unwrap();
+    wait(&mut c, &mut got, 1000);
+    eprintln!("probe: a normal subscription of 0 to 1 on {:?}", ids(&normal));
+    let base = check(&mut c, &mut got, "normal subscription");
+    close(&sessions[0], &ids(&normal));
+    c[0].signal(&json!({"type":"sfu_closed","channelIds":ids(&normal)})).unwrap();
+    wait(&mut c, &mut got, 3000);
+    // The unannounced one: made, then closed, 0's game never told.
+    let silent = allocate(&sessions[0], 2, Some(&sessions[1]));
+    eprintln!("probe: a subscription of 0 to 1 its game never hears of, on {:?}", ids(&silent));
+    wait(&mut c, &mut got, 1000);
+    close(&sessions[0], &ids(&silent));
+    wait(&mut c, &mut got, 3000);
+    let again = allocate(&sessions[0], 2, Some(&sessions[1]));
+    let fresh = allocate(&sessions[0], 3, Some(&sessions[2]));
+    eprintln!("probe: 0 subscribed again to 1 on {:?} and to 2 on {:?}", ids(&again), ids(&fresh));
+    c[0].signal(&json!({"type":"sfu_channels","channels":again})).unwrap();
+    c[0].signal(&json!({"type":"sfu_channels","channels":fresh})).unwrap();
+    wait(&mut c, &mut got, 1000);
+    listing(&sessions[0]);
+    let after = check(&mut c, &mut got, "after the unannounced close");
+    let mut rebuilt = None;
+    if rebuild {
+        // The pair closed and made once more, the game knowing (sfu_closed, then sfu_channels).
+        close(&sessions[0], &ids(&again));
+        c[0].signal(&json!({"type":"sfu_closed","channelIds":ids(&again)})).unwrap();
+        wait(&mut c, &mut got, 3000);
+        let third = allocate(&sessions[0], 2, Some(&sessions[1]));
+        eprintln!("probe: rebuilt: 0 subscribed to 1 on {:?}", ids(&third));
+        c[0].signal(&json!({"type":"sfu_channels","channels":third})).unwrap();
+        wait(&mut c, &mut got, 1000);
+        listing(&sessions[0]);
+        rebuilt = Some(check(&mut c, &mut got, "after a rebuild on the same session"));
+    }
+    // A new session for 0 (the room's sfu_reset): its publication and both subscriptions anew.
+    c.remove(0);
+    sessions.remove(0);
+    got.remove(0);
+    connect(&mut c, &mut sessions);
+    c.rotate_right(1);
+    sessions.rotate_right(1);
+    got.insert(0, vec![]);
+    got.truncate(3);
+    let until = Instant::now() + Duration::from_secs(20);
+    while !c[0].connected { assert!(Instant::now() < until, "new session connect timed out"); poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+    let own = allocate(&sessions[0], 1, None);
+    c[0].signal(&json!({"type":"sfu_channels","channels":own})).unwrap();
+    for p in 1..3 {
+        let ch = allocate(&sessions[0], p as u64 + 1, Some(&sessions[p]));
+        c[0].signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+    }
+    wait(&mut c, &mut got, 1000);
+    let renewed = check(&mut c, &mut got, "on a new session");
+    eprintln!("probe: from 1, from 2: normal {base:?}, after the unannounced close {after:?}, rebuilt {rebuilt:?}, new session {renewed:?}");
+    assert!(base.0 && renewed == (true, true), "the baseline or the new session failed");
+}
+
 /// Finding 177: a publisher leaves the room. Sessions 0 and 1 subscribe to 2 and to each other;
 /// then, as the room does for a member who leaves, 2's own channels close, then 0's and 1's
 /// subscriptions to it (DHD_PROBE_SUBS_FIRST=1: the other way round), and 2's association is

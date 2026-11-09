@@ -218,6 +218,7 @@ void host_service_net_back(void);
 void host_service_net_rules(int finish_window, int next_race, int then);
 void host_service_net_rotation(uint32_t address, int count);
 void host_service_net_end_race(void);
+void host_service_net_race_go(double at);  /* the race's start moment, to the room too (finding 187) */
 void host_service_net_set_ready(int a0);
 void host_service_net_start_race(void);
 int host_service_net_racing(void);

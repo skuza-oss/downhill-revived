@@ -164,6 +164,9 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"pong","s":1734000000123}                   // echo of a server ping, see below
 {"type":"ping","t":12345.6}                          // optional client-side ping; the server answers "pong"
 {"type":"end"}                                       // host only: race over, back to the lobby
+// The race's start moment (server ms), from the game that names it (finding 187), only to a server
+// whose welcome lists "race_go":
+{"type":"race_go","race":1734000008000,"at":1734000021500}
 ```
 
 - `track`, `laps`, `rider`, `bike`: integers 0..255 whose meaning belongs to the game (track
@@ -178,9 +181,17 @@ use the same `error` frame **without** a close; the client just shows `message`.
   none. The server sends it to nobody. The game never writes it to dhd.log.
 - `features`: what the client can do. `"race_rejoin"` (finding 175): the game keeps racing over
   the SFU (or a P2P room's star) while its room connection is down and rejoins its race (Limits,
-  below). `"p2p"` (finding 186): it races in P2P rooms (below), which take no game without it. Games send
+  below). `"race_go"` (finding 187): the game takes its race's start moment from the room
+  (`race_go`, below). `"p2p"` (finding 186): it races in P2P rooms (below), which take no game
+  without it. Games send
   `"countdown"` and `"session"` too, which asked older servers for the race room rules; every
   room has them since finding 185, and the server ignores both.
+- `race_go` (finding 187): the moment every game holds its countdown for, the same one the host's
+  START event carries over the race link (port/hle/online.c `start_step`). The room keeps the first
+  one per race from the racer whose game names it (the race's host, or once it left, the lowest slot
+  still racing) when `at` is at or after `startAt` and at most 10 minutes later, and sends it to
+  every racer whose hello listed `"race_go"` (again in a rejoin's catch-up). Anything else is
+  dropped.
 
 ### Server → client
 
@@ -193,6 +204,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // Whether the room holds a Realtime session for this member (finding 177): "sfu":"ready" (a rejoin:
 // keep the association) or "sfu":"setup" (offer one). A rejoin into the member's running race
 // (finding 175) adds the race: "race":{"startAt":1734000003000}
+// What the server takes beyond protocol 4 (finding 187): "features":["sfu_silent","race_go"]. A
+// game sends sfu_silent and race_go only to a server that lists them; 0.7.13 ignores the field.
 
 // Where the room runs and each member's region (never their country): after every join and when
 // the room learns its colo (Region, below).
@@ -224,6 +237,9 @@ use the same `error` frame **without** a close; the client just shows `message`.
 
 // The race is over: "done" when every racer finished or is out, "void" when the host ended it.
 {"type":"ended","reason":"done"}
+
+// The race's start moment (finding 187), to racers whose hello listed "race_go" (Client → server).
+{"type":"race_go","race":1734000008000,"at":1734000021500}
 
 // The room restarts for new code (finding 184, below): sent to every member just before it closes
 // their sockets with 1012 "server_update". 0.7.13 and older ignore the type.
@@ -336,6 +352,23 @@ A member's session lives as long as its stay in the room (finding 177):
 - A session the room gives up on (an API call on it failed, or a racer whose channels did not open
   by the setup deadline) is closed, and its owner hears `{"type":"sfu_reset"}`: its client drops
   the association and offers a new session after its pause.
+- A race link that delivers nothing (finding 187). A game whose race traffic was released but that
+  has received no race frame from any other racer some seconds after (both its release and the
+  race's `startAt`) sends `{"type":"sfu_silent","race":<startAt>}`, once per association and race,
+  to a server whose welcome lists `"sfu_silent"`. The room gives that racer a new session in its
+  race (`sfu_reset`; the others hear `sfu_closed` for its old publication and get the new one in
+  `sfu_channels`), the race's setup checks wait for it, and once it is subscribed both ways and
+  acknowledges, `sfu_ready` comes again for it alone. Not up 20 s later (the room's
+  `SFU_RENEW_MS`), or silent again on its new session, it is out of the race as at the setup
+  deadline (`error` "Realtime connection failed: out of the race.", the others hear `left`).
+  Cloudflare's listing can't show this: a dead stream id is listed `active`.
+- Subscriptions a game never heard of (finding 187). A subscription closed on a session whose game
+  never had it (an aborted call's, closed by the inspection above) leaves its stream id dead on that
+  session: Cloudflare resets the stream, the game has nothing to reset back (its SCTP stack resets
+  its own outgoing stream only for a stream it has), Cloudflare's side never finishes closing, and
+  the next allocation on that id answers 200 and forwards nothing. The room makes no subscription on
+  such a session any more and replaces it (`sfu_reset`): at once for a member outside a running
+  race, in its race (as above) for a racer that needs a pair it lacks, else once its race is over.
 - Teardown goes on past a failed close or revoke. A session's channels or a TURN username that
   did not close is kept in the room's pending cleanup, stored apart from the members (it outlives
   the member and the room), and tried again by the room's alarm: after 5 s, then twice as long
@@ -396,7 +429,8 @@ running). A subscription call with no answer (a timeout, a network error, a 5xx,
 nobody: after 2 s (doubling, at most 16 s) the subscriber's session is listed (`GET
 sessions/{id}`), what the call made is adopted and sent in `sfu_channels`, the rest made again, and
 10 s later the session is listed once more to close a second subscription an aborted call made
-late (never announced: its endpoint never heard of it). An item error or another 4xx fails the
+late (never announced: its endpoint never heard of it, so the session is then replaced, finding
+187). An item error or another 4xx fails the
 session as before. A lost WebRTC connection has a 30 s session reuse window; the
 game drops a failed association and offers a new session rather than retaining a broken
 connection. A lost room WebSocket leaves the SFU session up: the race goes on over it while the

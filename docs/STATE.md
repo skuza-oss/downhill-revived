@@ -149,7 +149,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   with credentials minted for that member, renewed between races once 35 minutes old. A racer
   whose Realtime never connects leaves the race 10 s after its start message and the others race
   on (finding 175); failed subscription closes are retried and a rejoin's channel list replaces
-  recycled channel ids (finding 179).
+  recycled channel ids (finding 179). A session on which the room closed subscriptions its game
+  never had has dead stream ids on Cloudflare's side (finding 187): the room replaces it once that
+  costs no race anything. A game whose race link brings nothing from the others 8 s after its
+  release tells the room, which gives it a new session in its race or takes it out of the race;
+  the host's start moment also goes over the room, and a game with no moment 75 s after loading
+  leaves the race instead of starting alone.
 - Protocol 4 (0.7.13, finding 169): a PC's riders of one tick go out bundled in STATE messages of
   at most 1,000 bytes (one datagram), stamped with their moment on the server clock (the PONG
   carries the server's time); each player's own rider 60 times a second, AI riders 30. Puppets are
