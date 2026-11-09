@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 const MAGIC: u32 = 0x2112_A442;
 // Methods.
+const BINDING: u16 = 0x001;
 const ALLOCATE: u16 = 0x003;
 const REFRESH: u16 = 0x004;
 const DATA: u16 = 0x007;
@@ -27,6 +28,7 @@ const ERROR_CODE: u16 = 0x0009;
 const CHANNEL_NUMBER: u16 = 0x000C;
 const LIFETIME: u16 = 0x000D;
 const XOR_PEER_ADDRESS: u16 = 0x0012;
+const XOR_MAPPED_ADDRESS: u16 = 0x0020;
 const DATA_ATTR: u16 = 0x0013;
 const REALM: u16 = 0x0014;
 const NONCE: u16 = 0x0015;
@@ -398,6 +400,22 @@ fn unxor_address(v: &[u8], id: &[u8; 12]) -> Option<SocketAddr> {
     }
 }
 
+/// A STUN Binding request (RFC 8489): a P2P peer asks Cloudflare's STUN server for its public
+/// address, its server-reflexive candidate (port/render/net/src/peer.rs). No credentials.
+pub fn binding_request(id: [u8; 12]) -> Vec<u8> {
+    let mut m = Message::new(BINDING | REQUEST, id);
+    m.set_len();
+    m.bytes
+}
+
+/// The address a Binding success response for request `id` reports (XOR-MAPPED-ADDRESS); None
+/// for anything else.
+pub fn binding_address(bytes: &[u8], id: &[u8; 12]) -> Option<SocketAddr> {
+    let p = Parsed::new(bytes)?;
+    if p.kind != BINDING | SUCCESS || p.id != *id { return None; }
+    unxor_address(p.get(XOR_MAPPED_ADDRESS)?, id)
+}
+
 /// MD5 (RFC 1321), only for the long-term credential's key: MD5(username:realm:password) is what
 /// RFC 8489 9.2.2 prescribes; nothing else here uses it.
 fn md5(input: &[u8]) -> [u8; 16] {
@@ -434,6 +452,20 @@ fn md5(input: &[u8]) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn binding_round_trip() {
+        let id = [7u8; 12];
+        let request = binding_request(id);
+        assert_eq!(request.len(), 20);
+        assert_eq!(&request[..2], &[0, 1]);
+        let mapped: SocketAddr = "203.0.113.9:40000".parse().unwrap();
+        let mut response = Message::new(BINDING | SUCCESS, id);
+        response.attr(XOR_MAPPED_ADDRESS, &xor_address(mapped, &id));
+        assert_eq!(binding_address(&response.bytes, &id), Some(mapped));
+        assert_eq!(binding_address(&response.bytes, &[8u8; 12]), None);
+        assert_eq!(binding_address(&request, &id), None);
+    }
+
     use super::*;
 
     fn hex(b: &[u8]) -> String { b.iter().map(|x| format!("{x:02x}")).collect() }

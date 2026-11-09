@@ -1,5 +1,6 @@
 // Worker entry: routes lobby-list requests to the LobbyIndex and WebSockets to a Room by code.
 import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
+import { p2pRoute } from "./p2p";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { placeOf, placeRoom, regionChoice, regionOfPlace, sortForRegion } from "./region";
 import { WORKER_VERSION_HEADER, versionHeader, versionOf } from "./rollout";
@@ -9,6 +10,7 @@ import {
 
 export { Room } from "./room";
 export { LobbyIndex } from "./lobbies";
+export { P2pRoom } from "./p2p";
 
 const CORS = { "Access-Control-Allow-Origin": "*" };
 
@@ -19,6 +21,10 @@ function json(body: unknown, status = 200): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname.replace(/\/+$/, "");
+
+    // P2P rooms (src/p2p.ts, finding 180): their own objects; the SFU rooms below never see them.
+    const p2p = await p2pRoute(request, env, path);
+    if (p2p) return p2p;
 
     // minVersion: the oldest client release the server lets play (MIN_VERSION, wrangler.jsonc).
     const minVersion = minVersionOf(env.MIN_VERSION);

@@ -12,23 +12,26 @@
 #include "json.h"
 #include "ws.h"
 
-enum { REJOIN_ATTEMPTS = 5 };
+enum { REJOIN_ATTEMPTS = 5, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
 
-/* Online play is not offered on phones yet (finding 143): their speed and the touch controls come
-   first. Android builds refuse every connection here, whatever asks (the menu, DHD_NET_*, a
-   dhd.ini server), and the core hides ONLINE (host_service_net_offered). */
+/* The rooms offered (host_api.h NET_OFFER_*). SFU rooms are not offered on phones yet (finding
+   143): their speed and the touch controls come first; Android builds refuse every SFU connection
+   here, whatever asks (the menu, DHD_NET_*, a dhd.ini server). P2P rooms are (finding 180). */
 #ifdef __ANDROID__
-#define NET_OFFERED 0
+#define NET_OFFERED NET_OFFER_P2P
 #else
-#define NET_OFFERED 1
+#define NET_OFFERED (NET_OFFER_SFU | NET_OFFER_P2P)
 #endif
-#define NET_NOT_OFFERED "online play comes to phones later"
+#define NET_NOT_OFFERED "this kind of room is not offered here yet"
 
 static NetClient client;
 static WsConn *conn;
 static int inited;
 static char base[256], name[100], version[64], iso[65], next_url[300];
 static SDL_Mutex *api;  /* serialises connect, leave and the reset between rooms */
+/* This room is a P2P one: no rejoin when its connection drops (the host carries the race; a
+   guest who drops is the host's AI rider from then on). */
+static int room_p2p;
 
 static void send_text(void *ws, const char *text) { ws_send(ws, 0, text, strlen(text)); }
 static void send_binary(void *ws, const void *data, size_t n) { ws_send(ws, 1, data, n); }
@@ -54,6 +57,11 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
 {
     NetLobby lobby;
     (void)ctx;
+    if (room_p2p) {
+        client_on_closed(&client, code, reason);
+        client_rejoin_failed(&client);
+        return NULL;
+    }
     if (!client_on_closed(&client, code, reason))
         return NULL;
     if (attempt >= REJOIN_ATTEMPTS) {
@@ -93,7 +101,7 @@ void net_init(const char *base_url, const char *player_name, const char *build_v
     snprintf(iso, sizeof iso, "%s", iso_sha256);
 }
 
-static int connect_to(const char *path)
+static int connect_to(const char *path, int p2p)
 {
     char url[300];
     WsHandler h = {NULL, on_open, on_message, on_close, on_tick};
@@ -106,7 +114,7 @@ static int connect_to(const char *path)
     /* the install id (port/hle/host.c; finding 161), read here on the game's thread, the one that
        sets the environment */
     client_set_install_id(&client, getenv("DHD_NET_INSTALL_ID"));
-    if (!NET_OFFERED) {
+    if (!(NET_OFFERED & (p2p ? NET_OFFER_P2P : NET_OFFER_SFU))) {
         client.lobby.state = NET_FAILED;
         snprintf(client.lobby.error, sizeof client.lobby.error, NET_NOT_OFFERED);
         SDL_UnlockMutex(api);
@@ -119,37 +127,44 @@ static int connect_to(const char *path)
         return -1;
     }
     client.lobby.state = NET_CONNECTING;
+    client.lobby.is_p2p = room_p2p = p2p;
     snprintf(url, sizeof url, "%s%s", base, path);
     conn = ws_start(url, &h);
     SDL_UnlockMutex(api);
     return 0;
 }
 
-int net_create_room(void)
+int net_create_room(int p2p)
 {
     /* the region its creator picked (finding 181): a hint's letters only, never anything else in
-       the URL; "auto", unset or anything odd lets the server pick */
+       the URL; "auto", unset or anything odd lets the server pick. A P2P room has none: its
+       server only relays signaling (finding 180). */
     const char *region = getenv("DHD_NET_ROOM_REGION");
     char path[64];
-    if (region && *region && strcmp(region, "auto") && strlen(region) < 16 && strspn(region, "abcdefghijklmnopqrstuvwxyz-") == strlen(region))
+    if (p2p)
+        snprintf(path, sizeof path, "/v1/p2p/rooms/new");
+    else if (region && *region && strcmp(region, "auto") && strlen(region) < 16 && strspn(region, "abcdefghijklmnopqrstuvwxyz-") == strlen(region))
         snprintf(path, sizeof path, "/v1/rooms/new?region=%s", region);
     else
         snprintf(path, sizeof path, "/v1/rooms/new");
-    return connect_to(path);
+    return connect_to(path, p2p);
 }
 
 int net_join_room(const char *code)
 {
     static const char alphabet[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    char path[32], up[8];
-    int i;
-    for (i = 0; code[i] && i < 7; i++)
+    char path[32], up[P2P_CODE_LENGTH + 2];
+    int i, p2p;
+    for (i = 0; code[i] && i < P2P_CODE_LENGTH + 1; i++)
         up[i] = (char)toupper((unsigned char)code[i]);
     up[i] = 0;
-    if (i != 6 || strspn(up, alphabet) != 6)
+    p2p = i == P2P_CODE_LENGTH;
+    if ((i != SFU_CODE_LENGTH && !p2p) || strspn(up, alphabet) != (size_t)i)
         return -1;
-    snprintf(path, sizeof path, "/v1/rooms/%s", up);
-    return connect_to(path);
+    if (!(NET_OFFERED & (p2p ? NET_OFFER_P2P : NET_OFFER_SFU)))
+        return -1;
+    snprintf(path, sizeof path, p2p ? "/v1/p2p/rooms/%s" : "/v1/rooms/%s", up);
+    return connect_to(path, p2p);
 }
 
 void net_leave(void)
@@ -172,7 +187,7 @@ int net_list_lobbies(NetLobbyInfo *out, int max)
     char url[300];
     double sent, got;
     int n;
-    if (!NET_OFFERED || !base[0] || !inited)
+    if (!(NET_OFFERED & NET_OFFER_SFU) || !base[0] || !inited)  /* P2P rooms are never listed */
         return -1;
     snprintf(url, sizeof url, "%s/v1/lobbies", base);
     sent = net_now_ms();
@@ -266,7 +281,7 @@ int net_receive_frame(uint8_t *out, size_t max)
 #include "../include/guest.h"
 void host_service_net_init(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) { net_init((const char *)GUEST(a0), (const char *)GUEST(a1), (const char *)GUEST(a2), (const char *)GUEST(a3)); }
 int host_service_net_offered(void) { return NET_OFFERED; }
-int host_service_net_create_room(void) { return net_create_room(); }
+int host_service_net_create_room(int p2p) { return net_create_room(p2p); }
 int host_service_net_join_room(uint32_t a0) { return net_join_room((const char *)GUEST(a0)); }
 void host_service_net_leave(void) { net_leave(); }
 void host_service_net_get_lobby(uint32_t a0) { net_get_lobby((NetLobby *)GUEST(a0)); }

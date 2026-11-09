@@ -66,7 +66,7 @@ static int online_mode(void)
 {
     if (online < 0) {
         online = getenv("DHD_NET_CREATE") != NULL || getenv("DHD_NET_JOIN") != NULL;
-        if (online && !host_service_net_offered()) {  /* Android and the browser: no online yet */
+        if (online && !host_service_net_offered()) {  /* a build without online play */
             fprintf(stderr, "online: DHD_NET_CREATE / DHD_NET_JOIN ignored: this build offers no online play\n");
             online = 0;
         }
@@ -430,8 +430,8 @@ static void connect_lobby(void)
     host_service_net_init(GADDR(server), GADDR(name && *name ? name : "Rider"), GADDR(version), GADDR(iso));
     if (join && *join) {
         if (host_service_net_join_room(GADDR(join)) < 0) fail("that join code can't be one (6 letters and digits).");
-    } else
-        host_service_net_create_room();
+    } else  /* DHD_NET_CREATE=p2p: a P2P room (finding 180) */
+        host_service_net_create_room(!strcmp(getenv("DHD_NET_CREATE") ? getenv("DHD_NET_CREATE") : "", "p2p"));
     fprintf(stderr, "online: %s, version %s\n", join && *join ? "joining" : "creating a room", version);
 }
 
@@ -505,7 +505,7 @@ static void barrier(void)
                 const char *track = getenv("DHD_NET_TRACK"), *room = getenv("DHD_NET_ROOM_NAME");
                 /* DHD_NET_CHEATS=1 (tests): the room's cheats on (options bit 2) */
                 NetRoomSettings s = {track && *track ? atoi(track) : 0, getenv("DHD_NET_CHEATS") ? 2 : -1,
-                                     getenv("DHD_NET_PUBLIC") != NULL, 4, -1, room && *room ? room : NULL};
+                                     getenv("DHD_NET_PUBLIC") != NULL, expected > 4 ? expected : 4, -1, room && *room ? room : NULL};
                 host_service_net_set_room(GADDR(&s));
                 settings_sent = 1;
             }

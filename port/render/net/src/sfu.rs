@@ -858,6 +858,7 @@ impl Sfu {
                     }
                 }
                 Output::Event(Event::PeerStats(stats)) => {
+                    crate::diagnostics::peer("sfu", &stats, self.relay.as_ref().and_then(|r| r.relayed));
                     if let Some(rtt) = stats.selected_candidate_pair.and_then(|p| p.current_round_trip_time) { self.rtt = Some(rtt); }
                 }
                 Output::Event(Event::Connected) if !self.connected => {
@@ -893,7 +894,7 @@ impl Drop for Sfu {
 /// The TURN-over-TLS server from the room's `urls`: `turns:` on port 443 first (what networks
 /// that block UDP let through), else another `turns:` port. Only Cloudflare's TURN service: a
 /// client talks to Cloudflare only (finding 158).
-fn turns_server(urls: &Value) -> Option<(String, u16)> {
+pub(crate) fn turns_server(urls: &Value) -> Option<(String, u16)> {
     let mut found: Vec<(String, u16)> = urls.as_array()?.iter().filter_map(|u| {
         let rest = u.as_str()?.strip_prefix("turns:")?;
         let rest = rest.split('?').next()?;
@@ -908,7 +909,7 @@ fn turns_server(urls: &Value) -> Option<(String, u16)> {
 
 #[cfg(test)]
 #[path = "probe.rs"]
-mod probe;
+pub(crate) mod probe;
 
 #[cfg(test)]
 mod tests {

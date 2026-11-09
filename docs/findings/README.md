@@ -203,6 +203,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 177 | [one Realtime session per member per room, set up before the race](177-sfu-room-sessions.md) | current |  |
 | 178 | [pre-release online lifecycle review](178-pre-0713-review.md) | partly superseded | [179](179-sfu-review-risks.md) for the three risks left open, now fixed |
 | 179 | [the three SFU risks the pre-release review left open](179-sfu-review-risks.md) | current |  |
+| 180 | [P2P rooms, chosen per room (host star)](180-p2p-prototype.md) | in progress |  |
 | 181 | [the room's region chosen by its creator, a smarter Auto, and a race ping beside the ser...](181-room-region-race-ping.md) | current |  |
 | 182 | [a slow Realtime API call no longer takes a racer out of the race](182-sfu-call-timeouts.md) | current |  |
 | 183 | [Performance settings: shadows and sun glow, lens flare, particles](183-performance-effects.md) | current |  |

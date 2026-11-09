@@ -5,6 +5,11 @@ machine reaches by an ssh reverse tunnel (its 127.0.0.1:8787 is this PC's server
     python port/tools/cross_race.py OUT --host pc  --remote user@mac --remote-app '/path/Downhill Revived.app/Contents/MacOS/dhd'
     python port/tools/cross_race.py OUT --host mac ...                 # the other way round
 
+--backend p2p races in a P2P room (finding 180): the host takes CREATE A P2P RACE and the other
+joins by the room's code (a P2P room is never listed); --force-turn turns direct UDP off on both
+games, so the relay carries the race. --server names a server instead of this checkout's local
+one and its reverse tunnel (the P2P service needs no tunnel: the games connect to each other).
+
 The host side makes a public room from the ONLINE menu (CREATE A PUBLIC RACE); the other takes QUICK
 RACE into it. Both ready by DHD_NET_TEST_READY after each race, pedal by DHD_RACE_PAD; the host
 finishes at 20 s and watches (Right at 26 s), the guest finishes at 40 s, punching on the way. The
@@ -14,6 +19,7 @@ side's room, load, countdown, finish, watching and back-to-the-room lines; a fre
 side that never got its countdowns is a failure (exit 1).
 Defaults from the environment: DHD_REMOTE (user@host), DHD_REMOTE_APP, DHD_REMOTE_ISO."""
 import argparse
+import contextlib
 import os
 import re
 import shlex
@@ -33,6 +39,13 @@ ROOT = Path(__file__).resolve().parents[2]
 MENUS = '450:8:cross,1150:6:down,1170:6:down,1190:6:down,1230:8:cross'
 HOST_NAV = MENUS + ',1450:6:down,1470:6:down,1490:6:down,1530:8:cross,2130:8:cross,2530:8:cross'
 GUEST_NAV = MENUS + ',1450:6:down,1490:8:cross,2130:8:cross,2530:8:cross,2930:8:cross'
+# P2P: the host's row is CREATE A P2P RACE (row 6, after ROOM REGION); the guest takes JOIN WITH A
+# CODE (row 7), whose code DHD_NET_TEST_CODE fills, and JOIN below it
+P2P_HOST_NAV = (MENUS + ',1450:6:down,1470:6:down,1490:6:down,1510:6:down,1530:6:down,1550:6:down'
+                ',1590:8:cross,2130:8:cross,2530:8:cross')
+P2P_GUEST_NAV = (MENUS + ',1450:6:down,1470:6:down,1490:6:down,1510:6:down,1530:6:down,1550:6:down,1570:6:down'
+                 ',1610:8:cross,1670:6:down,1710:8:cross,2130:8:cross,2530:8:cross,2930:8:cross')
+ROOM = r'online menu: room (\w{6,7}) \(host\)'
 PEDAL = '0:400:cross'
 PUNCHES = ','.join(f'{1 + k * 0.5:.1f}:0.15:{"square" if k % 2 == 0 else "circle"}' for k in range(80))
 SUMMARY = re.compile(r'online menu: (room|quick race|joining|refused)|has loaded|loaded at|countdown starts|freeze:|'
@@ -45,6 +58,9 @@ def main():
     p.add_argument('out', type=Path)
     p.add_argument('--host', choices=('pc', 'mac'), required=True, help='which side makes the room')
     p.add_argument('--races', type=int, default=2)
+    p.add_argument('--backend', choices=('sfu', 'p2p'), default='sfu')
+    p.add_argument('--server', help='use an existing signaling server instead of a local server/tunnel')
+    p.add_argument('--force-turn', action='store_true', help='disable direct UDP on both games')
     p.add_argument('--exe', type=Path, default=ROOT / 'build' / 'host64-exe' / 'dhd64.exe')
     p.add_argument('--remote', default=os.environ.get('DHD_REMOTE'), help='ssh destination of the other machine')
     p.add_argument('--remote-app', default=os.environ.get('DHD_REMOTE_APP'), help="the game's executable there")
@@ -60,30 +76,43 @@ def main():
     rdir = f'{a.remote_dir}/{out.name}'
 
     def ssh(cmd):
-        return subprocess.run(ssh_base + [a.remote, cmd], capture_output=True, text=True)
+        return subprocess.run(ssh_base + [a.remote, cmd], capture_output=True, text=True, timeout=30)
 
     iso_hash = iso_files_sha256(test_iso(), ROOT / 'build' / 'port' / 'iso-check.txt')
     common = dict(DHD_NET_SERVER='ws://127.0.0.1:8787', DHD_NET_ISO_SHA256=iso_hash, DHD_SKIP_MOVIES='1',
                   DHD_MEMCARD='1', DHD_SND_OFF='1', DHD_RENDER='native', DHD_SETTINGS='none', DHD_NET_SCRIPTED='1',
                   DHD_NET_TEST_READY='1', DHD_FPS='60', DHD_ONLINE_MENU_TRACE='1', DHD_SCALE='1',
                   DHD_CAPTURE_AT='20', DHD_CAPTURE_INTERVAL='15')
+    if a.server:
+        common['DHD_NET_SERVER'] = a.server
+    if a.force_turn:
+        common['DHD_NET_P2P_UDP' if a.backend == 'p2p' else 'DHD_NET_SFU_UDP'] = '0'
     pc_name, remote_name = ('PCHOST', 'MACGUEST') if a.host == 'pc' else ('PCGUEST', 'MACHOST')
-    host_env = dict(DHD_AUTOPAD_FRAMES=HOST_NAV, DHD_RACE_PAD=PEDAL + ',26:0.15:right', DHD_NET_TEST_FINISH='20')
-    guest_env = dict(DHD_AUTOPAD_FRAMES=GUEST_NAV, DHD_RACE_PAD=PEDAL + ',' + PUNCHES, DHD_NET_TEST_FINISH='40')
+    p2p = a.backend == 'p2p'
+    host_env = dict(DHD_AUTOPAD_FRAMES=P2P_HOST_NAV if p2p else HOST_NAV, DHD_RACE_PAD=PEDAL + ',26:0.15:right',
+                    DHD_NET_TEST_FINISH='20')
+    guest_env = dict(DHD_AUTOPAD_FRAMES=P2P_GUEST_NAV if p2p else GUEST_NAV, DHD_RACE_PAD=PEDAL + ',' + PUNCHES,
+                     DHD_NET_TEST_FINISH='40')
     pc_role, remote_role = (host_env, guest_env) if a.host == 'pc' else (guest_env, host_env)
 
-    def remote_start():
-        env = dict(common, **remote_role, DHD_NET_NAME=remote_name, DHD_ISO=a.remote_iso, DHD_WINDOW='windowed',
+    def remote_start(code=None):
+        env = dict(common, **remote_role, **({'DHD_NET_TEST_CODE': code} if code else {}), DHD_NET_NAME=remote_name, DHD_ISO=a.remote_iso, DHD_WINDOW='windowed',
                    DHD_WINDOW_WIDTH='640', DHD_WINDOW_HEIGHT='480', DHD_SCREENSHOT='shot', DHD_MEMCARD_DIR='card')
         assigns = ' '.join(f'{k}={shlex.quote(v)}' for k, v in env.items())
-        r = ssh(f'rm -rf {rdir}; mkdir -p {rdir}/card; cd {rdir}; env {assigns} nohup {shlex.quote(a.remote_app)} '
+        r = ssh(f'mkdir -p {shlex.quote(rdir)}/card; cd {shlex.quote(rdir)}; env {assigns} nohup {shlex.quote(a.remote_app)} '
                 f'> stdout.log 2> stderr.log < /dev/null & echo $!')
         pid = int(r.stdout.strip().split()[-1])
         print('remote pid', pid, flush=True)
         return pid
 
     def remote_log():
-        return ssh(f'cat {rdir}/stderr.log 2>/dev/null').stdout
+        return ssh(f'cat {shlex.quote(rdir)}/stderr.log 2>/dev/null').stdout
+
+    def remote_udp(pid):
+        # Capture before either game closes its peer sockets. Addresses stay in
+        # local logs; gameplay-sized counts distinguish direct traffic from probes.
+        counters = ssh(f'nettop -m udp -p {pid} -L 1 -J bytes_in,bytes_out 2>/dev/null')
+        (out / 'remote-udp.csv').write_text(counters.stdout)
 
     pc_log_path = out / 'pc-stderr.log'
 
@@ -106,37 +135,41 @@ def main():
                   DHD_SCREENSHOT=str(out / 'shot'), SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS='0')
     done = rf'(?s)(countdown starts.*){{{a.races}}}'
     ok, remote_pid = False, None
-    with local_server.running() as url:
+    with contextlib.nullcontext(a.server) if a.server else local_server.running() as url:
         port = url.rsplit(':', 1)[1]
         pc_env['DHD_NET_SERVER'] = url
-        tunnel = owned_process.start(ssh_base + ['-N', '-o', 'ExitOnForwardFailure=yes', '-R', f'8787:127.0.0.1:{port}',
+        tunnel = None if a.server else owned_process.start(ssh_base + ['-N', '-o', 'ExitOnForwardFailure=yes', '-R', f'8787:127.0.0.1:{port}',
                                                  a.remote])
         try:
-            time.sleep(3)
-            if tunnel.poll() is not None: sys.exit('the ssh tunnel did not start')
-            print('tunnel:', ssh('curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8787/v1/lobbies').stdout, flush=True)
+            if tunnel:
+                time.sleep(3)
+                if tunnel.poll() is not None: sys.exit('the ssh tunnel did not start')
+                print('tunnel:', ssh('curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8787/v1/lobbies').stdout, flush=True)
             with open(pc_log_path, 'w') as pl:
                 if a.host == 'pc':
                     with owned_process.start([str(a.exe)], cwd=out, env=pc_env, stdout=pl, stderr=pl, minimized=True) as pc:
                         pc.minimize()
-                        m = wait(pc_log, r'online menu: room (\w{6}) \(host\)', 120)
+                        m = wait(pc_log, ROOM, 120)
                         print('room', m and m.group(1), flush=True)
-                        remote_pid = remote_start()
+                        remote_pid = remote_start(m and m.group(1))
                         ok = bool(wait(lambda: pc_log() if re.search(done, remote_log()) else '', done, 330 * a.races))
                         time.sleep(60)
+                        remote_udp(remote_pid)
                 else:
                     remote_pid = remote_start()
-                    m = wait(remote_log, r'online menu: room (\w{6}) \(host\)', 120)
+                    m = wait(remote_log, ROOM, 120)
                     print('room', m and m.group(1), flush=True)
+                    if m: pc_env['DHD_NET_TEST_CODE'] = m.group(1)
                     with owned_process.start([str(a.exe)], cwd=out, env=pc_env, stdout=pl, stderr=pl, minimized=True) as pc:
                         pc.minimize()
                         ok = bool(wait(lambda: remote_log() if re.search(done, pc_log()) else '', done, 330 * a.races))
                         time.sleep(60)
+                        remote_udp(remote_pid)
         finally:
             if remote_pid:
                 ssh(f'kill {remote_pid}; sleep 3; kill -9 {remote_pid} 2>/dev/null; true')
                 print('remote game stopped', flush=True)
-            tunnel.stop()
+            if tunnel: tunnel.stop()
     (out / 'remote-stderr.log').write_text(remote_log())
     print('all races started on both:', ok)
     freezes = 0

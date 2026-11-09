@@ -4,7 +4,8 @@
 
    usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]
                   [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]
-                  host [--players N] [--code-file PATH] [--public] | join CODE | list
+                  host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list
+   --p2p makes a P2P room (finding 180); a join goes to a P2P room when its code has 7 characters.
    The server is --server or DHD_NET_SERVER (ws://127.0.0.1:8787 for wrangler dev). With the
    game's --version and --iso hash it can join a room of real games (finding 041). */
 #include <windows.h>
@@ -144,6 +145,7 @@ int main(int argc, char **argv)
     int pick = -1;            /* --pick N: the lobby's rider number (1..16); 0 stays choosing */
     double ready_after = 0;   /* --ready-after S: Ready after S seconds; below 0 never */
     int i, slot, races = 0, public_room = 0;  /* --public: the host's room is on the public list */
+    int p2p = 0;              /* --p2p: the host's room is a P2P one */
     double finish_after = -1, back_after = -1;
     uint8_t frame[NET_FRAME_MAX];
     double until;
@@ -165,6 +167,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--races") && i + 1 < argc) races = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--echo-ai")) echo_ai = 1;
         else if (!strcmp(argv[i], "--public")) public_room = 1;
+        else if (!strcmp(argv[i], "--p2p")) p2p = 1;
         else if (!strcmp(argv[i], "--finish-after") && i + 1 < argc) finish_after = atof(argv[++i]);
         else if (!strcmp(argv[i], "--give-up-after") && i + 1 < argc) back_after = atof(argv[++i]);
         else if (!mode) mode = argv[i];
@@ -172,7 +175,7 @@ int main(int argc, char **argv)
     }
     if (!mode || (!strcmp(mode, "join") && !code)) {
         printf("usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]\n"
-               "               [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public] | join CODE | list\n");
+               "               [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
         return 2;
     }
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -187,7 +190,7 @@ int main(int argc, char **argv)
                    info[i].version, info[i].region[0] ? info[i].region : "-", info[i].colo[0] ? info[i].colo : "-");
         return n < 0;
     }
-    if (!strcmp(mode, "host") ? net_create_room() : net_join_room(code)) {
+    if (!strcmp(mode, "host") ? net_create_room(p2p) : net_join_room(code)) {
         printf("FAILED: bad code or no server (set DHD_NET_SERVER)\n");
         return 1;
     }
@@ -234,9 +237,14 @@ int main(int argc, char **argv)
                 net_send_frame(NET_FRAME_EVENT, e, sizeof e);
             }
             was_racing = l.state == NET_RACING;
-            if (l.state == NET_RACING && !acted && now - loaded_at >= 0.5) {
-                /* "loaded", as a game says it until GO: the games' start needn't wait 60 s for this one */
-                uint8_t e[2] = {EVENT_VERSION, EVENT_LOADED};
+            if (l.state == NET_RACING && !acted && now - loaded_at >= 2) {
+                /* "loaded", as a game says it until GO: the games' start needn't wait 60 s for this one;
+                   and its rider again: a game still in its menus keeps only its newest 128 frames
+                   (NET_RELAY_QUEUE), and a burst of bots' messages can push a rider's one out. Every
+                   2 s: a game sends each once, so a room of bots must not flood the slow loaders. */
+                uint8_t e[2] = {EVENT_VERSION, EVENT_LOADED}, ride[30] = {EVENT_VERSION, EVENT_SETUP};
+                put32(ride + 2, 0x20 * (rider + 1)), put32(ride + 6, rider), put32(ride + 18, 8), put32(ride + 22, 3);
+                net_send_frame(NET_FRAME_EVENT, ride, sizeof ride);
                 net_send_frame(NET_FRAME_EVENT, e, 2);
                 loaded_at = now;
                 /* the host's start, as a host game's start_step says it once the others loaded: a
@@ -283,8 +291,10 @@ int main(int argc, char **argv)
                 }
                 /* Mirror a distinct host-owned AI's live snapshots. This exercises actual
                    puppet playback with no stored game data in the test fixture. */
-                if (echo_ai && saw_go && !acted && l.state == NET_RACING && frame[0] == NET_FRAME_STATE)
-                    echoed += resend_rider(frame + 2, n - 2, l.nslots + l.local_slot - 1, l.local_slot, 2.0f * l.local_slot);
+                /* The AI riders follow the humans (ten in all): with many humans, bots share them. */
+                if (echo_ai && saw_go && !acted && l.state == NET_RACING && frame[0] == NET_FRAME_STATE && l.nslots < NET_MAX_SLOTS)
+                    echoed += resend_rider(frame + 2, n - 2, l.nslots + (l.local_slot - 1) % (NET_MAX_SLOTS - l.nslots),
+                                           l.local_slot, 2.0f * l.local_slot);
             }
             Sleep(10);
         }

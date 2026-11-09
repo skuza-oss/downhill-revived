@@ -200,15 +200,15 @@ void host_service_gs_window_close(void);
    DHD_SCALE's, or DHD_SCALE=window's match before the device's limit); 0 before the first
    picture and without the native renderer (gs/gpu_rust_native.inc; PC SETTINGS shows it). */
 int host_service_gs_scale(int asked);
-/* 1 when this build offers online play: the one switch, the host's, so the core is the same on
-   every platform (finding 143). Desktop builds: 1. Android (port/net/net.c NET_OFFERED, at compile
-   time: not until phones are fast enough and the touch controls are ready) and the browser
-   (port/web/www/net.js: its CSP blocks the race server's socket): 0, and no setting turns it on.
-   At 0 the main menu has no ONLINE row, DHD_NET_* starts no online race, and the connections
-   below refuse. */
+/* The rooms this build offers, port/net/net.h's NET_OFFER_* bits: the one switch, the host's, so
+   the core is the same on every platform (finding 143). Desktop builds: SFU and P2P rooms. Android
+   (port/net/net.c, at compile time) and the browser (port/web/www/net.js): P2P rooms only
+   (finding 180), which need no SFU session; no setting changes it. At 0 the main menu has no
+   ONLINE row, DHD_NET_* starts no online race, and the connections below refuse. */
 int host_service_net_offered(void);
 void host_service_net_init(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3);
-int host_service_net_create_room(void);
+/* p2p: a P2P room (finding 180), else an SFU one. */
+int host_service_net_create_room(int p2p);
 int host_service_net_join_room(uint32_t a0);
 void host_service_net_leave(void);
 void host_service_net_get_lobby(uint32_t a0);

@@ -53,7 +53,7 @@ fn api(method: &str, path: &str, body: &Value) -> Value {
 }
 
 /// TURN credentials for one client, as the room mints them (online/server/src/sfu.ts Turn).
-fn turn_credentials(tag: &str) -> (String, Value) {
+pub(crate) fn turn_credentials(tag: &str) -> (String, Value) {
     let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
     let r = call("POST", &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"), &token, &json!({"ttl": 3600, "customIdentifier": tag}));
     let server = r["iceServers"].as_array().unwrap().iter().find(|s| s["username"].is_string()).unwrap().clone();
@@ -62,7 +62,7 @@ fn turn_credentials(tag: &str) -> (String, Value) {
     (user.clone(), json!({"type":"sfu_turn","urls":urls,"username":user,"credential":server["credential"]}))
 }
 
-fn revoke_turn(user: &str) {
+pub(crate) fn revoke_turn(user: &str) {
     let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
     call("POST", &format!("/v1/turn/keys/{key}/credentials/{user}/revoke"), &token, &Value::Null);
 }
