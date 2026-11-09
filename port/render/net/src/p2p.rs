@@ -21,13 +21,16 @@ struct Link {
 }
 
 /// Signals held for a peer the router asked for but this thread hasn't made yet (the other end's
-/// offer can come in the same read as the routes that ask for the peer).
+/// offer can come in the same read as the routes that ask for the peer); a new hub's epoch drops
+/// them.
 const HELD_SIGNALS: usize = 32;
 
 pub struct P2p {
     pub star: Star,
     peers: HashMap<u64, Link>,
     held: HashMap<u64, Vec<Value>>,
+    /// The hub's epoch the held signals and this game's own are for.
+    epoch: u64,
     wake: peer::Wake,
     /// The address the peers bind to (peer::reachable_address), found with the first peer.
     local: Option<IpAddr>,
@@ -45,7 +48,7 @@ impl P2p {
         if !direct {
             eprintln!("net: P2P: DHD_NET_P2P_UDP=0, no direct links from this game (test switch): it races over the SFU");
         }
-        Self { star: Star::new(direct), peers: HashMap::new(), held: HashMap::new(), wake, local: None, hub: None, on_sfu: vec![], started: Instant::now() }
+        Self { star: Star::new(direct), peers: HashMap::new(), held: HashMap::new(), epoch: 0, wake, local: None, hub: None, on_sfu: vec![], started: Instant::now() }
     }
 
     /// The router's clock: milliseconds since the room began here.
@@ -59,6 +62,10 @@ impl P2p {
         self.star.room(m);
         if m["type"] != "p2p" {
             return;
+        }
+        if m["epoch"].as_u64() != Some(self.epoch) {
+            self.epoch = m["epoch"].as_u64().unwrap_or(0);
+            self.held.clear();
         }
         let hub = m["hub"].as_u64();
         if hub != self.hub {
@@ -80,7 +87,11 @@ impl P2p {
     }
 
     /// The other end's signaling, as the room passed it on; held when its peer is still to be made.
-    pub fn signal(&mut self, from: u64, signal: &Value) {
+    /// One for another hub's epoch is dropped (its peer is gone, or not yet this one).
+    pub fn signal(&mut self, from: u64, epoch: u64, signal: &Value) {
+        if epoch != self.star.epoch() {
+            return;
+        }
         match self.peers.get_mut(&from) {
             Some(link) => {
                 if let Err(e) = link.peer.signal(signal) {
@@ -110,7 +121,7 @@ impl P2p {
             match link.peer.poll() {
                 Ok((signals, messages)) => {
                     for signal in signals {
-                        c.write_now(false, json!({"type": "p2p_signal", "to": id, "signal": signal}).to_string().into_bytes());
+                        c.write_now(false, json!({"type": "p2p_signal", "to": id, "epoch": self.star.epoch(), "signal": signal}).to_string().into_bytes());
                     }
                     if link.peer.connected() && !link.up {
                         link.up = true;
@@ -182,8 +193,9 @@ impl P2p {
             Ok(peer) => {
                 // The hub's offer goes out with the peer's first poll.
                 self.peers.insert(member, Link { peer, up: false, logged_path: false });
+                let epoch = self.star.epoch();
                 for signal in self.held.remove(&member).unwrap_or_default() {
-                    self.signal(member, &signal);
+                    self.signal(member, epoch, &signal);
                 }
                 (self.wake)();
             }
@@ -361,6 +373,22 @@ mod tests {
         let clients = racing(n);
         finish(&clients);
         eprintln!("P2P ROOM MATCH: {n} games joined, readied, raced (each heard the other {}) and got the results", n - 1);
+    }
+
+    /// A signal for another hub's epoch is never applied: dropped as it comes, and those held for a
+    /// peer still to be made go with a new hub (review 5).
+    #[test]
+    fn signals_for_another_hubs_epoch_are_dropped() {
+        let mut p = super::P2p::new(std::sync::Arc::new(|| {}));
+        p.room(&json!({"type": "welcome", "memberId": 2}));
+        p.room(&json!({"type": "p2p", "hub": 1, "epoch": 1, "members": [{"id": 1}, {"id": 2}], "race": null}));
+        p.signal(1, 1, &json!({"type": "offer", "sdp": "v=0"}));  // before its peer is made: held
+        p.signal(1, 0, &json!({"type": "candidate", "candidate": "old"}));  // an earlier hub's: dropped
+        assert_eq!(p.held[&1].len(), 1);
+        p.room(&json!({"type": "p2p", "hub": 3, "epoch": 2, "members": [{"id": 1}, {"id": 2}, {"id": 3}], "race": null}));
+        assert!(p.held.is_empty());
+        p.signal(1, 1, &json!({"type": "offer", "sdp": "v=0"}));
+        assert!(p.held.is_empty());
     }
 
     #[test]

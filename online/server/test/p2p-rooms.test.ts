@@ -118,21 +118,38 @@ describe("P2P rooms (finding 186)", () => {
     expect(await old.closed()).toBe(4000);
   });
 
-  it("relay the star's signaling only between the hub and a member, with the sender's id", async () => {
+  it("relay the star's signaling only between the hub and a member, with the sender's id and the hub's epoch", async () => {
     const { cs, ids } = await p2pRoom(3);
     const [hub, a, b] = cs;
-    hub.sendJson({ type: "p2p_signal", to: ids[1], signal: { type: "offer", sdp: "v=0" } });
+    const epoch = (await routes(a)).epoch;
+    expect(epoch).toBe(1);
+    hub.sendJson({ type: "p2p_signal", to: ids[1], epoch, signal: { type: "offer", sdp: "v=0" } });
     const offer = await a.json("p2p_signal");
-    expect(offer).toEqual({ type: "p2p_signal", from: ids[0], signal: { type: "offer", sdp: "v=0" } });
-    a.sendJson({ type: "p2p_signal", to: ids[0], signal: { type: "answer", sdp: "v=0" } });
+    expect(offer).toEqual({ type: "p2p_signal", from: ids[0], epoch, signal: { type: "offer", sdp: "v=0" } });
+    a.sendJson({ type: "p2p_signal", to: ids[0], epoch, signal: { type: "answer", sdp: "v=0" } });
     expect((await hub.json("p2p_signal")).from).toBe(ids[1]);
     // Never between two members.
-    a.sendJson({ type: "p2p_signal", to: ids[2], signal: { type: "candidate", candidate: "x" } });
+    a.sendJson({ type: "p2p_signal", to: ids[2], epoch, signal: { type: "candidate", candidate: "x" } });
     a.sendJson({ type: "ping", t: 1 });
     await a.json("pong");
     b.sendJson({ type: "ping", t: 2 });
     await b.json("pong");
     expect(b.seen.some((t) => JSON.parse(t).type === "p2p_signal")).toBe(false);
+  });
+
+  it("drop a signal meant for an earlier hub's peers (review 5)", async () => {
+    const { cs, ids } = await p2pRoom(3);
+    const [hub, a, b] = cs;
+    hub.sendJson({ type: "leave" });
+    const r = await routes(b, (x) => x.hub === ids[1]);
+    expect(r.epoch).toBe(2);
+    // A's game still sends a candidate for its link to the old hub; then its first for the new one.
+    a.sendJson({ type: "p2p_signal", to: ids[2], epoch: 1, signal: { type: "candidate", candidate: "old" } });
+    a.sendJson({ type: "p2p_signal", to: ids[2], signal: { type: "candidate", candidate: "none" } });
+    a.sendJson({ type: "p2p_signal", to: ids[2], epoch: 2, signal: { type: "offer", sdp: "new" } });
+    const got = await b.json("p2p_signal");
+    expect([got.epoch, got.signal]).toEqual([2, { type: "offer", sdp: "new" }]);
+    expect(b.seen.filter((t) => JSON.parse(t).type === "p2p_signal")).toHaveLength(1);
   });
 
   it("an SFU room has no star: no routes, and P2P messages are unknown", async () => {

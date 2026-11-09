@@ -79,6 +79,9 @@ struct PeerState {
 pub struct Star {
     me: Option<u64>,
     hub: Option<u64>,
+    /// The hub's epoch (the routes' `epoch`): this game's signaling carries it, and the other end's
+    /// for another epoch is dropped (a late offer meant for an earlier hub's peers).
+    epoch: u64,
     /// Each member's link to the hub as the room says; a member absent here is being linked.
     members: Vec<(u64, Option<Link>)>,
     race: Option<Race>,
@@ -93,11 +96,16 @@ pub struct Star {
 
 impl Star {
     pub fn new(direct: bool) -> Self {
-        Self { me: None, hub: None, members: vec![], race: None, peers: HashMap::new(), direct, reported_down: vec![], out: vec![] }
+        Self { me: None, hub: None, epoch: 0, members: vec![], race: None, peers: HashMap::new(), direct, reported_down: vec![], out: vec![] }
     }
 
     pub fn take(&mut self) -> Vec<Action> {
         std::mem::take(&mut self.out)
+    }
+
+    /// The hub's epoch: signaling is for its peers only.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// This game is the hub.
@@ -117,6 +125,7 @@ impl Star {
 
     fn routes(&mut self, m: &Value) {
         let hub = m["hub"].as_u64();
+        self.epoch = m["epoch"].as_u64().unwrap_or(0);
         if hub != self.hub {
             // A new hub: every link starts over (the room says each member's is being made).
             for id in self.peers.drain().map(|(id, _)| id).collect::<Vec<_>>() {

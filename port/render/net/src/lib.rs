@@ -404,8 +404,8 @@ fn send_main(c: Arc<WsConn>) {
                         if kind == "p2p" {
                             s.room(&message);
                             p2p_routes(&mut a, s);
-                        } else if let Some(from) = message["from"].as_u64() {
-                            s.signal(from, &message["signal"]);
+                        } else if let (Some(from), Some(epoch)) = (message["from"].as_u64(), message["epoch"].as_u64()) {
+                            s.signal(from, epoch, &message["signal"]);
                         }
                         lock(&c.queue).handled += 1;
                         continue;

@@ -882,18 +882,21 @@ fallback run there); a join goes to `/v1/rooms/CODE` like any other. The hello m
 race's start, a racer leaving it, its end; the start's routes come before the start message):
 
 ```json
-{"type":"p2p","hub":2,"members":[{"id":2},{"id":5,"link":"star"},{"id":7,"link":"sfu"},{"id":8}],
+{"type":"p2p","hub":2,"epoch":1,"members":[{"id":2},{"id":5,"link":"star"},{"id":7,"link":"sfu"},{"id":8}],
  "race":{"startAt":1734000003000,"slots":[2,5,7],"left":[]}}
 ```
 
-`hub`: the member whose game the others connect to (at first the room's creator). A member's
+`hub`: the member whose game the others connect to (at first the room's creator); `epoch` counts
+the hubs (1 for the first, one more for each new one). A member's
 `link`: `star` once its link to the hub is up, `sfu` when it races over the SFU, absent while it is
 being made (the hub has none). `race`: the running race's marker and its slots (member ids by
 slot) and the slots that left, or null: the hub forwards a race's frames whether it races or not.
 
-**Signaling.** `{"type":"p2p_signal","to":5,"signal":{...}}` from the game, passed on as
-`{"type":"p2p_signal","from":2,"signal":{...}}`, only between the hub and a member; `signal` is an
-`offer`, `answer` (`sdp`) or `candidate` (`candidate`). The hub offers. Text frames in a P2P room may
+**Signaling.** `{"type":"p2p_signal","to":5,"epoch":1,"signal":{...}}` from the game, passed on as
+`{"type":"p2p_signal","from":2,"epoch":1,"signal":{...}}`, only between the hub and a member and
+only with the current `epoch` (a late signal for an earlier hub's peers is dropped by the room, and
+by a game whose routes name another epoch); `signal` is an `offer`, `answer` (`sdp`) or `candidate`
+(`candidate`). The hub offers. Text frames in a P2P room may
 be up to 16 KB for this message (4 KB for any other), and a member may send 400 text frames per
 window (finding 161's caps: 100 elsewhere).
 

@@ -305,6 +305,9 @@ interface RoomState {
       member. When it changed last (HUB_RETRY_MS). */
   hub?: number | null;
   hubChangedAt?: number;
+  /** Counts the hubs: each new hub's routes and signaling carry the next number, so a late signal
+      meant for an earlier hub's peers is dropped (review 5). */
+  hubEpoch?: number;
   /** Since when fallback racers have waited for a hub without a working SFU session. */
   unbridgedSince?: number;
 }
@@ -896,6 +899,7 @@ export class Room extends DurableObject<Env> {
       if (!ghost && (asHost || st.hub == null)) {
         st.hub = member.id;
         st.hubChangedAt = Date.now();
+        st.hubEpoch = (st.hubEpoch ?? 0) + 1;
       } else if (member.id !== st.hub && !member.link) member.linkFrom = Date.now();
     }
     // A racer back in its race (finding 175): it raced on over the SFU meanwhile.
@@ -2101,20 +2105,23 @@ export class Room extends DurableObject<Env> {
     this.broadcast({
       type: "p2p",
       hub: st.hub ?? null,
+      epoch: st.hubEpoch ?? 0,
       members: st.members.map((x) => ({ id: x.id, ...(x.id !== st.hub && x.link ? { link: x.link } : {}) })),
       race: race ? { startAt: race.startAt, slots: race.slots, left: race.left } : null,
     });
   }
 
   /** Signaling between the hub's game and a member's (an offer, an answer, a candidate), passed on
-      as it came with its sender: only between the hub and a member, never between two members (a
-      star). One about an earlier hub is dropped (it may come late after a change). */
+      as it came with its sender and the hub's epoch: only between the hub and a member, never
+      between two members (a star). One for an earlier hub (its epoch) is dropped: it may come late
+      after a change, and the peers it was for are gone. */
   private onSignal(st: RoomState, me: Member, m: Msg): void {
     const to = st.members.find((x) => x.id === m.to);
     if (!to || to === me || !m.signal || typeof m.signal !== "object" || Array.isArray(m.signal)) return;
     if (me.id !== st.hub && to.id !== st.hub) return;
+    if (m.epoch !== (st.hubEpoch ?? 0)) return;
     const ws = this.sockets.get(to.id);
-    if (ws) this.send(ws, { type: "p2p_signal", from: me.id, signal: m.signal });
+    if (ws) this.send(ws, { type: "p2p_signal", from: me.id, epoch: m.epoch, signal: m.signal });
   }
 
   /** A link report: `{"type":"p2p_link","hub":H,"member":M,"up":true}` from either end of the
@@ -2221,6 +2228,7 @@ export class Room extends DurableObject<Env> {
     const now = Date.now();
     st.hub = next?.id ?? null;
     st.hubChangedAt = now;
+    st.hubEpoch = (st.hubEpoch ?? 0) + 1;
     delete st.unbridgedSince;
     for (const x of st.members) {
       delete x.link;
