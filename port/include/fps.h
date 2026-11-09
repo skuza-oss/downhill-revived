@@ -8,6 +8,7 @@ extern "C" {
    run at 60 keeps the original NTSC path and arithmetic. */
 int port_fps(void);      /* the selected rate, 30 to port_fps_max */
 int port_fps_max(void);  /* 240, or DHD_FPS_MAX when lower */
+int port_fps_update_display(void);  /* update target rate when display refresh changes on monitor/auto mode */
 int port_delta_clock(void);           /* the delta-time clock's code paths are on */
 void port_clock_wall(int enabled);    /* paced: steps follow the wall clock (kernel_init) */
 void port_clock_rebase(void);         /* a wait that is no game time: the next step starts from now */
