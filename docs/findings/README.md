@@ -208,7 +208,6 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 180 | [P2P rooms, chosen per room (host star)](180-p2p-prototype.md) | partly superseded | [186](186-p2p-transport.md) for the host's coordinator and the P2P server and Worker, TURN between games and its renewal, host loss ending the room; P2P rooms are server rooms with a hub star and an SFU fallback now |
 | 181 | [the room's region chosen by its creator, a smarter Auto, and a race ping beside the ser...](181-room-region-race-ping.md) | current |  |
 | 182 | [a slow Realtime API call no longer takes a racer out of the race](182-sfu-call-timeouts.md) | current |  |
-| 182 | [widescreen sprite width table and menu focal projection](182-widescreen-sprites-focal.md) | current |  |
 | 183 | [Performance settings: shadows and sun glow, lens flare, particles](183-performance-effects.md) | current |  |
 | 184 | [server rollouts that restart rooms only at a safe moment](184-server-rollout.md) | current |  |
 | 185 | [online code we don't maintain, removed](185-online-cleanup.md) | current |  |
@@ -217,6 +216,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 188 | [dual-source blending off on Intel GPUs](188-intel-dual-source.md) | in progress |  |
 | 190 | [the online room's track list in Super Career order](190-room-track-order.md) | in progress |  |
 | 191 | [Android 10 (API 29) as the APK's minimum](191-android-10.md) | in progress |  |
+| 192 | [widescreen sprite width table and menu focal projection](192-widescreen-sprites-focal.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
