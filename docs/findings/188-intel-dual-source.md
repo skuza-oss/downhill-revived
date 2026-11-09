@@ -65,7 +65,12 @@ decision stands).
   `dual_source`, `DHDR_DEV_DUAL_SOURCE` (64) for `DHD_WGPU_DUAL_SOURCE=1`
 - [x] 2026-11-09: unit tests `device::tests` (2 pass); `abi_layout`, `test_dhdr_abi.py` OK;
   `device_smoke exact_hardware*` pass (RTX 3070, dual-source on as before)
-- [ ] `check.py port`, boot state trace against 0.7.14
+- [x] 2026-11-09: `python tools/check.py port -j 6` OK (build_wasm, test_runtime, build_game,
+  net_tests, test_gs_wgpu VERDICT PASS, test_wasm2c_chunks); boot state trace
+  (`state_trace_run.py boot --env DHD_LAUNCHER=1`) of this branch's dhd64.exe against the 0.7.14
+  release dhd.exe (= `main` ac62c78d): all 600 rows match
+- [ ] the lead: merge; ask #58's player to confirm a build with it starts and races on D3D12
+  without `DHD_WGPU_DUAL_SOURCE` (their log should show the `gs: dual-source blending off` line)
 
 ## How it works
 
@@ -130,3 +135,7 @@ decision stands).
   (`DHD_WGPU_DUAL_SOURCE=0`) on D3D12 and Vulkan without the freeze.
 
 ## Result
+
+Filled in at the merge. So far: the rule in `device::dual_source` (Intel off, `0|1` overrides),
+its dhd.log line, `DHDR_DEV_DUAL_SOURCE`; checks in Progress. Not run on an Intel GPU (none here);
+the two-pass path's cost on Intel not measured (Not measured).
