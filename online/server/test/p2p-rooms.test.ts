@@ -330,26 +330,43 @@ describe("P2P rooms (finding 186)", () => {
     expect(order).toEqual([ids[1], ids[4], ids[2], ids[3]]);
   });
 
-  it("a hub whose links all failed is replaced once, and not again within a minute", async () => {
+  it("a hub whose every working link died is replaced at once; one that never linked, not within a minute", async () => {
     const { cs, code, ids } = await p2pRoom(3);
     const [hub, a, b] = cs;
     link(hub, ids[0], ids[1], true);
     link(hub, ids[0], ids[2], true);
     await routes(b, (r) => linkOf(r, ids[2]) === "star");
-    // The hub's network lets no direct link through any more: both fall back.
+    // The hub's network goes: both links die (each member says so).
     link(a, ids[0], ids[1], false);
     link(b, ids[0], ids[2], false);
-    await routes(hub, (r) => linkOf(r, ids[1]) === "sfu" && linkOf(r, ids[2]) === "sfu");
-    await runDurableObjectAlarm(room(code));
-    expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[0]);  // too soon after the first hub
-    await expire(code, (st) => { st.hubChangedAt = Date.now() - 120_000; });
     expect((await routes(b, (r) => r.hub !== ids[0])).hub).toBe(ids[1]);
-    // The new hub can't link either: no second change within the minute.
+    // The new hub never links with anyone: no second change within the minute, then one.
     link(a, ids[1], ids[0], false);
     link(a, ids[1], ids[2], false);
     await routes(hub, (r) => linkOf(r, ids[0]) === "sfu" && linkOf(r, ids[2]) === "sfu");
     await runDurableObjectAlarm(room(code));
     expect(await runInDurableObject(room(code), async (r: any) => r.state.hub)).toBe(ids[1]);
+    await expire(code, (st) => { st.hubChangedAt = Date.now() - 120_000; });
+    expect((await routes(b, (r) => r.hub !== ids[1])).hub).not.toBe(ids[1]);
+  });
+
+  it("a hub whose room connection drops hands the hub on at once, and is a member when it comes back", async () => {
+    const { cs, code, ids } = await p2pRoom(3);
+    const [hub, a, b] = cs;
+    link(hub, ids[0], ids[1], true);
+    link(hub, ids[0], ids[2], true);
+    await routes(b, (r) => linkOf(r, ids[2]) === "star");
+    await race(cs, code);
+    const token = hub.welcome.rejoinToken;
+    await runInDurableObject(room(code), async (r: any) => { await r.webSocketClose(r.sockets.get(ids[0]), 1006, "", false); });
+    const r = await routes(a, (x) => x.hub !== ids[0]);
+    expect(r.hub).toBe(ids[1]);
+    expect(r.race.left).toEqual([]);  // its rider races on: its game may come back (finding 175)
+    const back = await Client.connect(`/v1/rooms/${code}`);
+    back.hello("P0", { features: FEATURES, rejoinToken: token });
+    expect((await back.json("welcome")).memberId).toBe(ids[0]);
+    const after = await routes(back);
+    expect([after.hub, linkOf(after, ids[0])]).toEqual([ids[1], undefined]);  // a member, linking to the new hub
   });
 
   it("a hub that can't bridge its racers on the SFU (no SFU session) gives way to one that can", async () => {

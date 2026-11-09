@@ -293,6 +293,9 @@ interface RoomState {
       member. When it changed last (HUB_RETRY_MS). */
   hub?: number | null;
   hubChangedAt?: number;
+  /** A member has been linked to the current hub: its links worked, so their all failing at once
+      means the hub's network (or its game) is gone. */
+  hubLinked?: boolean;
 }
 
 /** Where a room was made (src/index.ts, finding 135). */
@@ -1318,6 +1321,10 @@ export class Room extends DurableObject<Env> {
     this.rtts.delete(id);
     this.firstRtts.delete(id);
     ws.serializeAttachment({ ...info, memberId: null, gone: true });
+    // A P2P room's hub whose room connection dropped is most likely gone (its game, its network):
+    // the next hub now rather than after the rejoin's wait, while its members' links die one by one
+    // and send them to the SFU (finding 186). Back by its token it is a member like any other.
+    if (st.transport === "p2p" && st.hub === id) this.setHub(st, this.bestHub(st, id), "the hub's connection dropped");
     if (racing)
       console.log(`room ${st.code}: member ${id} lost its connection in the race; kept ${REJOIN_GRACE_MS / 1000} s for its rejoin`);
     await this.changed();
@@ -2104,6 +2111,7 @@ export class Room extends DurableObject<Env> {
     if (up) {
       member.link = "star";
       member.direct = true;
+      st.hubLinked = true;
       const hub = st.members.find((x) => x.id === st.hub);
       if (hub) hub.direct = true;
     } else {
@@ -2114,8 +2122,11 @@ export class Room extends DurableObject<Env> {
     console.log(`room ${st.code}: member ${member.id} ${up ? "linked to the hub" : "races over the SFU: no link to the hub"}`);
     this.broadcastRoutes();
     await this.save();
-    // Its subscriptions, if it races (or is on the coming race's grid).
-    if (!up) this.kickSubscribe();
+    if (up) return;
+    // The last link to the hub gone (checkHub), and its subscriptions, if it races (or is on the
+    // coming race's grid).
+    this.checkHub(st, Date.now());
+    this.kickSubscribe();
   }
 
   /** The alarm's P2P work: links not up in time go to the SFU, a hub that can't do its work is
@@ -2131,18 +2142,24 @@ export class Room extends DurableObject<Env> {
     await this.fallbackDeadlines(st, now);
   }
 
-  /** Replaces a hub that can't do its work: its links all failed (every other member races over the
-      SFU, and some of them have been on a star, so direct links work for them), or fallback racers
-      wait for it and it has no working SFU session to bridge them (a browser's game). A hub that
-      left is replaced at once (leave). Not again within HUB_RETRY_MS of the last change. */
+  /** Replaces a hub that can't do its work. At once when every member that was linked to it lost
+      its link (they worked, so the hub's network or its game is gone; a hub that left or whose room
+      connection dropped is replaced at once too: leave, dropSocket). Else not within HUB_RETRY_MS of
+      the last change: when no member links to it although direct links work for some of them
+      (they have been on a star), or when fallback racers wait for it and it has no working SFU
+      session to bridge them (a browser's game). */
   private checkHub(st: RoomState, now: number): void {
     const hub = st.members.find((x) => x.id === st.hub);
     if (!hub) {
       if (st.members.length) this.setHub(st, this.bestHub(st), "no hub");
       return;
     }
-    if (now - (st.hubChangedAt ?? 0) < HUB_RETRY_MS) return;
     const others = st.members.filter((x) => x !== hub && this.sockets.has(x.id));
+    if (st.hubLinked && others.length && others.every((x) => x.link === "sfu")) {
+      const next = this.bestHub(st, hub.id);
+      if (next) return this.setHub(st, next, "every link to it died");
+    }
+    if (now - (st.hubChangedAt ?? 0) < HUB_RETRY_MS) return;
     const isolated = others.length >= 2 && others.every((x) => x.link === "sfu") && others.some((x) => x.direct);
     const group = this.sfuGroup();
     const unbridged = !!group?.length && hub.sfu?.phase !== "ready";
@@ -2172,6 +2189,7 @@ export class Room extends DurableObject<Env> {
     const now = Date.now();
     st.hub = next?.id ?? null;
     st.hubChangedAt = now;
+    st.hubLinked = false;
     for (const x of st.members) {
       delete x.link;
       delete x.fallbackAt;
