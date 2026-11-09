@@ -151,7 +151,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   at most 1,000 bytes (one datagram), stamped with their moment on the server clock (the PONG
   carries the server's time); each player's own rider 60 times a second, AI riders 30. Puppets are
   drawn at the present: the newest snapshot carried forward by its velocity and angular velocity,
-  corrections fading in (`DHD_PUPPET_PREDICT=0` interpolates in the past instead). Hits are
+  corrections fading in. Hits are
   decided on the puppet as drawn. In a room the FPS & Ping counter shows "SERVER N MS", the round
   trip to the room's server, and "RACE N MS", the round trip to Cloudflare's race network (the SFU
   association's ICE checks); in a race the second line is "RIDERS N MS", the other riders'

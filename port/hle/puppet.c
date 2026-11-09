@@ -24,10 +24,8 @@
    stamped with the sender's server clock, which places it on this PC's race clock: its age on
    arrival is measured, not guessed. Each puppet keeps the last few and shows the remote rider at
    the present moment: its newest snapshot carried forward by its velocity and angular velocity,
-   a correction fading in when a newer one moves it (puppet_predict.h). DHD_PUPPET_PREDICT=0 shows
-   it a delay behind the present instead (interpolated between the two around that moment): the
-   snapshots' usual age plus the wait for the next one. Every PC
-   runs at its own frame rate (30-240), so the clocks here are race time in seconds, not ticks:
+   a correction fading in when a newer one moves it (puppet_predict.h). Every PC runs at its own
+   frame rate (30-240), so the clocks here are race time in seconds, not ticks:
    a tick (the race clock's field) is 1/60 s, and a step may be part of one or up to two of them
    (port_field_seconds, findings 114, 139).
 
@@ -35,9 +33,6 @@
    DHD_PUPPET_RECORD=file   each race step, a snapshot of rider DHD_PUPPET_FROM (default 0)
    DHD_PUPPET_PLAY=file     replay those snapshots onto slot DHD_PUPPET_SLOT (default 1), one in
                             DHD_PUPPET_RATE (default 2) ticks arriving as it was taken
-   DHD_PUPPET_PREDICT=0     interpolate in the past as before finding 169 (default 1: predict to now)
-   DHD_PUPPET_DELAY=ms      interpolating: the wait for the next snapshot fixed in ms (otherwise
-                            adaptive, 30-150), on top of the snapshots' usual age
    DHD_PUPPET_CAMERA=1      player 0's camera follows the puppet (slot DHD_PUPPET_SLOT, online too)
    DHD_PUPPET_TRACE=file    each race step, each puppet as shown: race time here, the sender's
                             race time it shows, slot, position (text; tests, finding 114)
@@ -107,10 +102,10 @@ typedef struct Puppet {
     int on;                  /* this slot is a puppet */
     Snapshot ring[RING];     /* by clock, oldest first */
     int count;
-    /* On arrival, how old each snapshot was on the shared clock (s): its mean and mean deviation
-       (smoothed, gain 1/16), and the interval between the sender's snapshots (finding 169) */
+    /* On arrival, how old each snapshot was on the shared clock (s), smoothed (gain 1/16; finding
+       169): the log's riders' delay */
     int have_age;
-    double age, jitter, interval;
+    double age;
     /* Prediction (finding 169): the snapshot the shown pose is carried forward from, the fading
        correction from the last change of it, and how far behind the present it was last shown */
     Snapshot basis;
@@ -129,8 +124,6 @@ extern void func_0012E940(void *self, int kind, void *direction, void *other);  
 
 static struct {
     int init, from, rate, play_slot;
-    double delay;            /* seconds */
-    int predict;             /* show the riders at the present moment (DHD_PUPPET_PREDICT, default 1) */
     int allow;               /* the puppet code itself starts this crash / applies this hit */
     FILE *record, *trace;
     Snapshot *file;          /* DHD_PUPPET_PLAY, in clock order */
@@ -155,8 +148,6 @@ static void setup(void)
     pp.init = 1;
     pp.from = (s = getenv("DHD_PUPPET_FROM")) ? atoi(s) : 0;
     pp.rate = (s = getenv("DHD_PUPPET_RATE")) && atoi(s) > 0 ? atoi(s) : 2;
-    pp.delay = (s = getenv("DHD_PUPPET_DELAY")) ? fmax(0, atoi(s)) / 1000.0 : -1;
-    pp.predict = !(s = getenv("DHD_PUPPET_PREDICT")) || atoi(s) != 0;
 
     pp.play_slot = -1;
     if ((s = getenv("DHD_PUPPET_RECORD")) && *s && !(pp.record = fopen(s, "wb")))
@@ -178,8 +169,8 @@ static void setup(void)
         fclose(f);
         pp.play_slot = (s = getenv("DHD_PUPPET_SLOT")) ? atoi(s) : 1;
         if (pp.play_slot >= 1 && pp.play_slot < NRIDERS) pp.p[pp.play_slot].on = 1;
-        fprintf(stderr, "puppet: %d snapshots onto slot %d, one in %d ticks, %.0f ms behind\n", pp.file_count,
-                pp.play_slot, pp.rate, pp.delay * 1000);
+        fprintf(stderr, "puppet: %d snapshots onto slot %d, one in %d ticks\n", pp.file_count,
+                pp.play_slot, pp.rate);
     }
 }
 
@@ -223,17 +214,10 @@ static void feed(int slot, const Snapshot *s)
         p->count = 0, p->have_age = 0, p->have_basis = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double age = RACE_TIME - s->time;
-    if (!p->have_age) {
-        p->interval = 1.0 / 30;
-        p->age = age, p->jitter = 0, p->have_age = 1;
-    } else {
-        double interval = s->time - p->ring[p->count - 1].time;
-        p->jitter += (fabs(age - p->age) - p->jitter) / 16;
+    if (!p->have_age)
+        p->age = age, p->have_age = 1;
+    else
         p->age += (age - p->age) / 16;
-        /* Lost packets must not teach the estimator a slower publication rate. */
-        if (interval > 0 && interval < 0.075)
-            p->interval += (interval - p->interval) / 16;
-    }
     if (p->count == RING) memmove(p->ring, p->ring + 1, --p->count * sizeof *p->ring);
     p->ring[p->count++] = *s;
 }
@@ -259,17 +243,8 @@ static void blend_rotation(float out[3][4], const float a[3][4], const float b[3
     }
 }
 
-/* How far behind the present a puppet is shown when it is interpolated (s): its snapshots' usual
-   age on arrival (the trip and the clocks' small disagreement, 0-300 ms) plus the wait for the
-   next one: an interval and twice the jitter, 30-150 ms (DHD_PUPPET_DELAY fixes that part). */
-static double puppet_delay(const Puppet *p)
-{
-    double wait = pp.delay >= 0 ? pp.delay : fmin(0.150, fmax(0.030, p->interval + 2 * p->jitter));
-    return fmin(0.300, fmax(0, p->age)) + wait;
-}
-
-/* The remote rider at moment t of this PC's race clock from the snapshots held: interpolated
-   between the two around t, or carried on along the velocity (up to 0.2 s) past the newest. */
+/* The remote rider at moment t of this PC's race clock, t before the newest snapshot: interpolated
+   between the two around t (the oldest as it is, if t is before it). */
 static void interpolate(const Puppet *p, double t, Snapshot *out)
 {
     int i = p->count - 1;
@@ -283,9 +258,6 @@ static void interpolate(const Puppet *p, double t, Snapshot *out)
         lerp(out->vel, a->vel, b->vel, f, 3);
         lerp(out->spin, a->spin, b->spin, f, 3);
         blend_rotation(out->rot, a->rot, b->rot, f);
-    } else if (!b && t > a->time) {  /* late: carry on along the velocity, up to 0.2 s */
-        float dt = (float)(t - a->time > 0.2 ? 0.2 : t - a->time);
-        for (int k = 0; k < 3; k++) out->pos[k] += a->vel[k] * dt;
     }
 }
 
@@ -302,20 +274,20 @@ static void carry(const Snapshot *from, double t, Snapshot *out)
     out->time = from->time + h;
 }
 
-/* What to show now (out->time: the moment shown, on this PC's race clock). Predicting: the newest
-   snapshot carried to the present, its pad, State and crash as they are. Otherwise (and when the
-   newest is still ahead of the present, a clock that is a little off): puppet_delay behind. */
+/* What to show now (out->time: the moment shown, on this PC's race clock): the newest snapshot
+   carried to the present, its pad, State and crash as they are; when the newest is still ahead of
+   the present (a clock that is a little off), the snapshots interpolated at the present. */
 static int wanted(int slot, Snapshot *out)
 {
     Puppet *p = &pp.p[slot];
     if (!p->count) return 0;
     const Snapshot *newest = &p->ring[p->count - 1];
-    if (pp.predict && RACE_TIME >= newest->time) carry(newest, RACE_TIME, out);
-    else interpolate(p, pp.predict ? RACE_TIME : RACE_TIME - puppet_delay(p), out);
+    if (RACE_TIME >= newest->time) carry(newest, RACE_TIME, out);
+    else interpolate(p, RACE_TIME, out);
     return 1;
 }
 
-/* Predicting: when a newer snapshot moves the prediction, the rider is first shown where it was and
+/* When a newer snapshot moves the prediction, the rider is first shown where it was and
    the difference fades (puppet_predict.h); a jump too large to be a misprediction (a respawn) and
    the first pose after a crash or a gap are shown at once. s: wanted()'s pose, changed in place. */
 static void smooth(Puppet *p, Snapshot *s)
@@ -380,7 +352,7 @@ int hle_puppet_physics(uint8_t *r)
         p->have_basis = 0;  /* after the crash the rider is shown where its snapshots are, at once */
         return 0;
     }
-    if (pp.predict) smooth(p, &s);
+    smooth(p, &s);
     p->behind = RACE_TIME - s.time;
     float mass = FIELD(r, MASS_AT, float), momentum[4] = {s.vel[0] * mass, s.vel[1] * mass, s.vel[2] * mass, 1};
     memcpy(r + POS_AT, s.pos, 12);
