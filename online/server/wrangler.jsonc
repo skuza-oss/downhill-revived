@@ -46,10 +46,8 @@
   },
   // The official server's main Worker, deployed by tools/deploy.mjs with `wrangler versions upload`,
   // which Cloudflare refuses for a version that creates a Durable Object class: no new class here
-  // without a plain `wrangler deploy` first. P2P rooms (src/p2p.ts, finding 180) are not in this
-  // file: the official server runs them as their own Worker (wrangler.p2p.jsonc), and a local or
-  // self-hosted server from wrangler.selfhost.jsonc, this file plus their binding and migration
-  // (tools/selfhost-config.mjs).
+  // without a plain `wrangler deploy` first. P2P rooms are Rooms too, with another race transport
+  // (src/room.ts, finding 186): no class of their own.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Room", "LobbyIndex"] }
   ]
