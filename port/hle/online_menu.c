@@ -29,9 +29,22 @@ static const char us_files_sha256[] = "c8c17bcae383daf9f2feadc7f6d7476c43d659ab8
 /* Retail's full event names (also used by its Single Event and records pages).
    Read from the player's data image; omit country, keep FR/MX/TD suffixes intact. */
 extern const char *D_0026EFE8[];
+/* In the Super Career's order, first race to last: retail's D_0026F150 (func_001821E8's career
+   type 3, SETUP+0x10C == 3), with Mosh Pit, which no career races, last as in the game's own
+   track lists (D_00296F60). Only the order is ours: the ids, limits and pick-only arena are the
+   game's, so the server and older games see the same tracks (finding 190). The picker, Left /
+   Right on TRACK and the host's rotation (NEXT, RANDOM, the grid-lock switch) all walk it. */
 static const struct { int index; } tracks[] = {
-    {0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12},
-    {13}, {14}, {15}, {16}, {17}, {18}, {19}, {20}, {22}, {23}, {24}, {25}};
+    {0}, {6}, {24},      /* Mt. Midoule FR, MX, TD */
+    {1}, {7}, {13},      /* Red Pass */
+    {2}, {8}, {10},      /* Mt. Konawaki */
+    {5}, {14}, {22},     /* Mt. Zorkovaska */
+    {11}, {15}, {16},    /* Mt. Liddellroch */
+    {12},                /* Mt. Imasaki FR */
+    {19}, {25},          /* Mt. McSchley FR, MX */
+    {3}, {9}, {4},       /* Mt. Quintanaroo */
+    {20}, {17}, {18},    /* Salt City */
+    {23}};               /* Mosh Pit (Arena) */
 static const char *track_name(int index)
 {
     static char names[26][64];
@@ -716,7 +729,9 @@ static void leave_room(MenuPage *p)
 
 enum { RF_TRACK, RF_BOTS, RF_CHEATS, RF_PUBLIC, RF_RULES, RF_RIDER, RF_READY, RF_START, RF_LEAVE, RF_COUNT };
 enum { RULE_WINDOW, RULE_NEXT, RULE_THEN, RULE_PLAYERS, RULES };
-enum { TOASTS = 3, TRACK_COLUMNS = 2 };
+/* The picker fills its columns top to bottom, so the list reads down the left column, then the
+   right (finding 190): Up / Down step through the list, Left / Right go to the other column. */
+enum { TOASTS = 3, TRACK_COLUMNS = 2, TRACK_ROWS = (COUNT(tracks) + TRACK_COLUMNS - 1) / TRACK_COLUMNS };
 /* The layout, in the popup view's 640 x 224 (menu_draw_size) */
 enum { L_X = 48, L_W = 166, TOP = 40, CARD_X = 224, CARD_W = 368, CARD_Y = 52, CARD_H = 11, CARD_GAP = 0,
        MID_H = 117, BAR_Y = 164, BAR_H = 18, BAR_X = 48, BAR_W = 544, STATUS_Y = 189, TITLE_Y = 14 };
@@ -1014,7 +1029,7 @@ static void room_input(MenuPage *p, const RoomNow *r)
         return;
     }
     if (track_list) {
-        int n = COUNT(tracks), to = track_cursor + dx + dy * TRACK_COLUMNS;
+        int n = COUNT(tracks), to = track_cursor + dx * TRACK_ROWS + dy;
         if ((dx || dy) && to >= 0 && to < n) track_cursor = to, menu_page_sound(dx > 0 || dy > 0);
         if (pressed & PAD_CROSS) close_track_list(1);
         else if (pressed & PAD_TRIANGLE) close_track_list(0);
@@ -1494,10 +1509,11 @@ static void draw_track_list(void)
     rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
     box(36, 24, 568, 176, 110);
     put(MENU_CENTRE, 320, 30, "CHOOSE A TRACK", menu_style(st_row, 115, -1, 0, 0));
-    /* Two columns of names; the rider limit goes beside the picture, so each name has room. 13 rows
-       of 10.5 units fit between the title and BACK. */
+    /* Two columns of names, filled top to bottom in the list's (career) order; the rider limit goes
+       beside the picture, so each name has room. 13 rows of 10.5 units fit between the title and
+       BACK. */
     for (int i = 0; i < COUNT(tracks); i++) {
-        int x = 44 + (i % TRACK_COLUMNS) * 192, y = 45 + (i / TRACK_COLUMNS) * 21 / 2, on = i == track_cursor;
+        int x = 44 + (i / TRACK_ROWS) * 192, y = 45 + (i % TRACK_ROWS) * 21 / 2, on = i == track_cursor;
         const char *name = track_name(tracks[i].index);
         MenuStyle s = fit(name, on || i == room_track ? st_on : st_row, 90, 178);
         if (on) bar(x + 2, y - 1, 186, 10);
