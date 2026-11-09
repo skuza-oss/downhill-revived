@@ -213,6 +213,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 185 | [online code we don't maintain, removed](185-online-cleanup.md) | current |  |
 | 186 | [P2P as a race transport of the server's rooms (hub star, SFU fallback)](186-p2p-transport.md) | current |  |
 | 187 | [a racer whose race link delivers nothing no longer races alone](187-silent-race-link.md) | current |  |
+| 189 | [Swap L1/L2 and R1/R2 per controller, and the game's codes on touch](189-shoulder-swap-touch-codes.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
