@@ -63,6 +63,33 @@ int main(void)
     client_on_text(&c,ten,strlen(ten)); client_lobby(&c,&l);
     assert(l.nslots == 10 && l.local_slot == 9 && l.racer[9].member_id == 9);
     client_free(&c);
+    {   /* the race's start moment over the room (finding 187): asked for in the hello, sent only to a
+           server that lists it, taken only for this race, once */
+        const char *older = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"GOGO22\",\"serverTime\":1000}";
+        const char *newer = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"GOGO22\",\"serverTime\":1000,"
+            "\"features\":[\"sfu_silent\",\"race_go\"]}";
+        const char *start = "{\"type\":\"start\",\"yourSlot\":0,\"startAt\":5000,\"serverTime\":2000,"
+            "\"players\":[{\"slot\":0,\"memberId\":1,\"name\":\"Test\"},{\"slot\":1,\"memberId\":2,\"name\":\"B\"}]}";
+        const char *other = "{\"type\":\"race_go\",\"race\":4000,\"at\":9000}";
+        const char *go = "{\"type\":\"race_go\",\"race\":5000,\"at\":9500.5}";
+        const char *again = "{\"type\":\"race_go\",\"race\":5000,\"at\":12000}";
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        assert(strstr(sent,"\"race_rejoin\",\"race_go\"]"));
+        client_on_text(&c,older,strlen(older));
+        client_on_text(&c,start,strlen(start));
+        sent[0] = 0;
+        client_race_go(&c,9500); assert(!sent[0]);  /* a 0.7.13 server would refuse it */
+        client_on_text(&c,newer,strlen(newer));
+        client_race_go(&c,9500.5); assert(!strcmp(sent,"{\"type\":\"race_go\",\"race\":5000,\"at\":9500.500}"));
+        client_on_text(&c,other,strlen(other)); client_lobby(&c,&l); assert(l.race_go_at == 0);
+        client_on_text(&c,go,strlen(go)); client_on_text(&c,again,strlen(again));
+        client_lobby(&c,&l); assert(l.race_go_at == 9500.5);
+        client_on_text(&c,"{\"type\":\"ended\"}",16); client_lobby(&c,&l); assert(l.race_go_at == 0);
+        sent[0] = 0; client_race_go(&c,9500); assert(!sent[0]);  /* no race */
+        client_on_text(&c,start,strlen(start)); client_lobby(&c,&l); assert(l.race_go_at == 0);
+        client_free(&c);
+    }
     {   /* where this PC and the room are (finding 135): the welcome's fields, the where message's
            regions kept across room snapshots, and the net: lines on stderr */
         const char *located = "{\"type\":\"welcome\",\"memberId\":1,\"host\":false,\"code\":\"WHERE2\",\"serverTime\":1000,"

@@ -93,6 +93,9 @@ typedef struct {
     /* The server's notice before it restarts the room for new code (finding 184): a footer line
        while this PC rejoins ("Server updated, reconnecting..."); "" none. The welcome clears it. */
     char notice[64];
+    /* The race's start moment as the room sent it (server ms; 0 none yet): the host's START over
+       the room as well as the race link, for a game whose race link brought nothing (finding 187). */
+    double race_go_at;
 } NetLobby;
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */
@@ -161,6 +164,10 @@ void net_finish(unsigned ticks, int place);
 void net_back(void);
 void net_rules(int finish_window, int next_race, int then);
 void net_rotation(const unsigned char *ids, int count);
+/* The race's start moment (server ms) this game named (finding 187): to the room too, which sends
+   it to the racers whose race link may have lost the START event. Only a server that lists
+   "race_go" in its welcome hears it. */
+void net_race_go(double at);
 void net_get_lobby(NetLobby *out);                 /* a copy, for the UI */
 double net_seconds(void);                          /* the clock start_at uses */
 /* The server's clock (ms since the Unix epoch), estimated from the lobby pings' round-trips: the

@@ -15,6 +15,12 @@ export interface SfuSession {
   /** One more inspection then, after an unsure one: an aborted call that Cloudflare still carried
       out after that inspection left a second subscription, closed then (finding 182). */
   recheckAt?: number;
+  /** The room closed a subscription on this session that its game never had (an aborted call's,
+      finding 187): Cloudflare reset the stream, the game had none to reset back, so Cloudflare's
+      side never finished closing it and the id, which Cloudflare gives to the next allocation on
+      the session, forwards nothing ever after. No subscription is made on it any more; it is
+      replaced (room.ts replacePoisoned). */
+  poisoned?: boolean;
 }
 /** One channel on a session: its own publication (local) or a subscription to `memberId`'s
     publication on that member's session `session` (remote). The session id never goes to a client

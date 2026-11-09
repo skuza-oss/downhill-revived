@@ -138,10 +138,11 @@ void client_connected(NetClient *c, const NetTransport *tr)
         snprintf(token + strlen(token), sizeof token - strlen(token), ",\"raceStartAt\":%.0f", c->race_at);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
     /* features: race_rejoin, it races on over the SFU while its room connection is down and
-       rejoins its race (finding 175). "countdown" and "session" asked servers before finding 185
-       for the race room rules, which every room has now; still sent while such a server runs. */
+       rejoins its race (finding 175); race_go, it takes its race's start moment from the room too
+       (finding 187). "countdown" and "session" asked servers before finding 185 for the race room
+       rules, which every room has now; still sent while such a server runs. */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\"]%s%s}", NET_PROTOCOL, c->version,
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\",\"race_go\"]%s%s}", NET_PROTOCOL, c->version,
         DHD_VERSION, c->iso, name, install, token);
     if (!c->racing && c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
@@ -299,6 +300,7 @@ static void read_start(NetClient *c, const char *t)
     c->relayed_head = c->relayed_count = 0;
     memset(c->snapshot, 0, sizeof c->snapshot);
     c->states_sent = 0;
+    l->race_go_at = 0;
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -530,6 +532,13 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             c->clock_offset = server_time - net_now_ms(), c->clock_known = 1;
         c->lobby.error_code[0] = c->lobby.error[0] = c->lobby.notice[0] = 0;
         c->rejoining = 0, c->rejoin_tries = 0;
+        /* what the server takes beyond the protocol (finding 187; an older server lists nothing) */
+        c->server_race_go = 0;
+        for (int k = 0, count = json_count(text, "features"); k < count; k++) {
+            char path[32], feature[24];
+            snprintf(path, sizeof path, "features[%d]", k);
+            if (json_string(text, path, feature, sizeof feature) && !strcmp(feature, "race_go")) c->server_race_go = 1;
+        }
         double race_at = 0;
         int in_race = json_number(text, "race.startAt", &race_at) && race_at > 0 && race_at == c->race_at;
         if (c->racing || c->gave_up) {
@@ -617,8 +626,19 @@ void client_on_text(NetClient *c, const char *text, size_t n)
     } else if (!strcmp(type, "left") && json_int(text, "slot", &v) && v >= 0 && v < NET_MAX_SLOTS) {
         c->lobby.racer[v].left = 1;
         changed(c);
+    } else if (!strcmp(type, "race_go")) {
+        /* the race's start moment over the room (finding 187): this race's, the first one */
+        double race = 0, at = 0;
+        if (c->racing && !c->lobby.race_go_at && json_number(text, "race", &race) && race == c->race_at &&
+            json_number(text, "at", &at) && at > 0) {
+            c->lobby.race_go_at = at;
+            snprintf(line, sizeof line, "net: room %s: the race's start moment from the room, %+.0f ms from now",
+                     net_log_code(c->lobby.code).text, at - (net_now_ms() + c->clock_offset));
+            changed(c);
+        }
     } else if (!strcmp(type, "ended")) {
         c->racing = 0;
+        c->lobby.race_go_at = 0;
         c->race_at = 0, c->gave_up = 0;
         c->lobby.started = 0;
         c->lobby.state = NET_LOBBY;
@@ -957,6 +977,14 @@ void client_rotation(NetClient *c, const unsigned char *ids, int count)
     snprintf(text + n, sizeof text - n, "]}");
     SDL_LockMutex(c->lock);
     say(c, "%s", text);
+    SDL_UnlockMutex(c->lock);
+}
+
+void client_race_go(NetClient *c, double at)
+{
+    SDL_LockMutex(c->lock);
+    if (c->server_race_go && c->racing && c->race_at > 0 && at > 0)
+        say(c, "{\"type\":\"race_go\",\"race\":%.0f,\"at\":%.3f}", c->race_at, at);
     SDL_UnlockMutex(c->lock);
 }
 

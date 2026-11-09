@@ -91,6 +91,7 @@ def guest_tests():
     run('sif', [HLE / 'sif.c', HLE / 'test_sif.c'])
     run('pad-snapshot', [HLE / 'test_pad_snapshot.c'])
     run('state-bundle', [HLE / 'test_state_bundle.c'])  # STATE bundles fit a datagram (finding 169)
+    run('online-start', [HLE / 'test_online_start.c'])  # no solo start (finding 187)
     run('puppet-predict', [HLE / 'test_puppet_predict.c'])  # puppets shown at the present (finding 169)
     run('timer', [HLE / 'timer.c', HLE / 'test_timer.c'])
     run('sound', [HLE / 'sound.c', HLE / 'test_sound.c'], defines=['SND_NO_HOST'])

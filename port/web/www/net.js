@@ -108,6 +108,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_set_ready:ready=>send({type:'ready',ready:!!ready}),
     host_service_net_start_race:()=>send({type:'start'}),
     host_service_net_end_race:()=>send({type:'end'}),
+    host_service_net_race_go:()=>{},  // the start moment over the room (finding 187): SFU rooms only, none here
     host_service_net_finish:(ticks,place)=>send({type:'finish',ticks:ticks>>>0,place}),
     host_service_net_back:()=>{send({type:'back'});state=2;frames=[];const m=me();if(m)m.inRace=false;seq++;},
     host_service_net_rules:(finishWindow,nextRace,then)=>send({type:'settings',finishWindow,nextRace:['auto','host'][nextRace],then:['same','next','random'][then]}),
