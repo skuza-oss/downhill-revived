@@ -1,6 +1,5 @@
 // Worker entry: routes lobby-list requests to the LobbyIndex and WebSockets to a Room by code.
-import { PROTOCOL, minVersionOf, randomCode } from "./protocol";
-import { p2pRoute } from "./p2p";
+import { CODE_LENGTH, P2P_CODE_LENGTH, PROTOCOL, minVersionOf, randomCode } from "./protocol";
 import { edgeStore, latestResponse, upstreamFetch } from "./latest";
 import { placeOf, placeRoom, regionChoice, regionOfPlace, sortForRegion } from "./region";
 import { WORKER_VERSION_HEADER, versionHeader, versionOf } from "./rollout";
@@ -10,7 +9,6 @@ import {
 
 export { Room } from "./room";
 export { LobbyIndex } from "./lobbies";
-export { P2pRoom } from "./p2p";
 
 const CORS = { "Access-Control-Allow-Origin": "*" };
 
@@ -21,12 +19,6 @@ function json(body: unknown, status = 200): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname.replace(/\/+$/, "");
-
-    // P2P rooms (src/p2p.ts, finding 180): their own objects; the SFU rooms below never see them.
-    // Only with the P2P_ROOM binding (wrangler.selfhost.jsonc): the official server's P2P rooms are
-    // their own Worker's (wrangler.p2p.jsonc), whose route takes these paths first.
-    const p2p = await p2pRoute(request, env, path);
-    if (p2p) return p2p;
 
     // minVersion: the oldest client release the server lets play (MIN_VERSION, wrangler.jsonc).
     const minVersion = minVersionOf(env.MIN_VERSION);
@@ -87,12 +79,16 @@ export default {
         // goes by the Cloudflare location they reached, then by their country and continent
         // (src/region.ts placeRoom). Only the first get() of an object reads a hint; joining by
         // code below needs none. Games up to 0.7.13 send no region: Auto.
+        const params = new URL(request.url).searchParams;
         const place = placeOf(request);
-        const { hint, how } = placeRoom(place, regionChoice(new URL(request.url).searchParams.get("region")));
+        const { hint, how } = placeRoom(place, regionChoice(params.get("region")));
+        // `?transport=p2p`: a P2P room (finding 186), with a code one character longer, so a game
+        // knows the kind of room from its code alone; anything else is an SFU room.
+        const transport = params.get("transport") === "p2p" ? "p2p" : undefined;
         for (let attempt = 0; attempt < 8; attempt++) {
-          const code = randomCode();
+          const code = randomCode(transport ? P2P_CODE_LENGTH : CODE_LENGTH);
           const room = env.ROOM.get(env.ROOM.idFromName(code), hint ? { locationHint: hint } : undefined);
-          if (await room.claim(code, { hint: hint ?? "", how, createdIn: regionOfPlace(place), createdFrom: place.colo ?? "" }))
+          if (await room.claim(code, { hint: hint ?? "", how, createdIn: regionOfPlace(place), createdFrom: place.colo ?? "" }, transport))
             return room.fetch(new Request(request, { headers }));
         }
         return json({ error: "Could not allocate a room code" }, 503);

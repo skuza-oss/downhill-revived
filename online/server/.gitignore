@@ -4,6 +4,4 @@ node_modules/
 src/worker-configuration.d.ts
 .wrangler-dev.log
 wrangler.guard-local.jsonc
-wrangler.selfhost.jsonc
-wrangler.selfhost.jsonc.*.tmp
 .deploy.json
