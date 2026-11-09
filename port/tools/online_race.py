@@ -182,7 +182,7 @@ def main():
         print('room', code)
         db = game('B', GUEST_PAD, {'DHD_NET_JOIN': code, 'DHD_NET_NAME': 'Guest', 'DHD_NET_RIDER': '8',
                                    **dict(x.split('=', 1) for x in a.b)})
-        version = wait_line([da / 'stderr.log'], r'version (dhd-port [\w.]+(?: \w+)?)', 30, procs, a.stop_if)[0].group(1)
+        version = wait_line([da / 'stderr.log'], r'version (dhd-port [\w.-]+(?: \w+)?)', 30, procs, a.stop_if)[0].group(1)
         for k in range(a.bots):
             d = out / f'bot{k}'
             d.mkdir(exist_ok=True)

@@ -89,7 +89,7 @@ def main():
         opened = time.time()
         host = stack.enter_context(owned_process.start([str(a.exe)], cwd=out, env=env, stdout=log, stderr=log, minimized=True))
         code = wait(host_log, r'online: room (\w{7}) \(host\)', 120).group(1)
-        version = wait(host_log, r'version (dhd-port [\w.]+(?: \w+)?)', 30).group(1)
+        version = wait(host_log, r'version (dhd-port [\w.-]+(?: \w+)?)', 30).group(1)
         summary.update(room_open_s=round(time.time() - opened, 2))
         print('room', code, 'version', version, flush=True)
         bot_logs = []
