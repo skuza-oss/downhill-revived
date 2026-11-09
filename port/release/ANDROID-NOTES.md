@@ -8,7 +8,7 @@ Play with the touch controls (Classic pad or Thumb zones, tilt steering if you l
 SETTINGS > Controls tab > Touch Controls) or a controller.
 
 **What you need**
-- Any arm64 phone or tablet with Android 11 or later and Vulkan (most phones since 2018),
+- Any arm64 phone or tablet with Android 10 or later and Vulkan (most phones since 2018),
   older arm64 cores such as the Snapdragon 680's and Mali GPUs on Arm's newer drivers included.
 - Your own disc image of Downhill Domination (USA, SCUS-97177) as an `.iso` file, like the PC
   version. No game data comes with the app.
