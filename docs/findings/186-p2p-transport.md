@@ -173,6 +173,10 @@ allowed (P2P rooms).
   when every link that worked died (9373bf4a).
 - `rustgs.py test` always passed the renderer's `native` feature, so `-p dhd_net` alone failed;
   `-- -p dhd_net -p dhd_star` now runs those crates' tests through the wrapper.
+- After the release (a player's video, 0.7.14 on Android with a pad): in a P2P room the host's pad
+  could not go above ROOM RULES. Up stepped onto the ROOM row, which a P2P room never focuses, and
+  the next frame sent the cursor back to the bar; the mouse worked. Up and down now skip settings
+  that can't take the cursor (`online_menu.c` `setting_step`).
 
 ## The lead's review (2026-11-09)
 
