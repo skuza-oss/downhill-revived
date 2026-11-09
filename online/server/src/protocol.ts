@@ -10,12 +10,10 @@ export const HELLO_TIMEOUT_MS = 10_000;
 export const PING_INTERVAL_MS = 2_000;
 export const START_LEAD_MS = 3_000;
 /**
- * The race room's countdown: once everyone is ready the race starts by itself this long after
- * (any change that unreadies someone stops it). Only rooms whose every member's hello lists
- * the "countdown" feature run it; older clients start by the host's `start` alone.
+ * The race room's countdown: once the grid locks (everyone ready, the host's Start, or an
+ * intermission's end) the race starts by itself this long after (finding 115).
  */
 export const COUNTDOWN_MS = 5_000;
-export const FEATURE_COUNTDOWN = "countdown";
 export const RTT_SAMPLES = 5;
 
 /** The one binary message on a room's WebSocket: the game's PING and the server's PONG, which adds

@@ -137,9 +137,9 @@ void client_connected(NetClient *c, const NetTransport *tr)
     if (c->rejoin_token[0] && c->race_at > 0 && (c->racing || c->gave_up))
         snprintf(token + strlen(token), sizeof token - strlen(token), ",\"raceStartAt\":%.0f", c->race_at);
     /* clientVersion: this release (port/include/version.h), for the server's version gate */
-    /* features: this client shows the race room's countdown (the server runs one only when
-       everyone's does); race_rejoin: it races on over the SFU while its room connection is down
-       and rejoins its race (finding 175) */
+    /* features: race_rejoin, it races on over the SFU while its room connection is down and
+       rejoins its race (finding 175). "countdown" and "session" asked servers before finding 185
+       for the race room rules, which every room has now; still sent while such a server runs. */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
         "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\"]%s%s}", NET_PROTOCOL, c->version,
         DHD_VERSION, c->iso, name, install, token);

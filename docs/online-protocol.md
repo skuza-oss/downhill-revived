@@ -47,7 +47,7 @@ A refusal is one text frame followed by a close:
 | `version_mismatch` | 4002 | `hello.version` differs from the host's. |
 | `iso_mismatch` | 4003 | `hello.isoSha256` (the disc image's game files hash, finding 098) differs from the host's. |
 | `room_full` | 4004 | No free slot. |
-| `room_started` | 4005 | The race is running; late joins are not supported. |
+| `room_started` | (4005) | Non-fatal only: a `start`, or a setting, pick or Ready for a rider in the running race. Joins are accepted while a race runs (the newcomer waits for the next). |
 | `room_not_found` | 4006 | No room has this code (or it was closed). |
 | `kicked` | 4007 | The host removed this player. |
 | `hello_timeout` | 4008 | No `hello` within 10 seconds. |
@@ -169,16 +169,16 @@ use the same `error` frame **without** a close; the client just shows `message`.
   table index, rider and bike table indices). `laps` 0 = the track's default.
 - `seed`: unsigned 32-bit integer. If the host never sets one, the server draws one at `start`.
 - `maxPlayers`: 2..10, default 10. It can't go below the current member count.
-- `public`: listed in `/v1/lobbies` while not started and not full. Default `false`
-  (private, join code only).
+- `public`: listed in `/v1/lobbies` (Lobby list, below). Default `false` (private, join code
+  only).
 - `installId`: a random id the game makes once and keeps in dhd.ini (`install_id`), the same in
   every hello of that copy of the game, for the server's moderation log and bans (Refusals,
   above). Optional (the browser sends none); one that is not 32 lowercase hex digits counts as
   none. The server sends it to nobody. The game never writes it to dhd.log.
-- `features`: what the client understands beyond version 1. `"countdown"`: the room may start
-  the race by itself (below). `"session"`: a creator's hello asks for session-room rules (Session
-  rooms, below). `"race_rejoin"` (finding 175): the game keeps racing over the SFU
-  while its room connection is down and rejoins its race (Limits, below).
+- `features`: what the client can do. `"race_rejoin"` (finding 175): the game keeps racing over
+  the SFU while its room connection is down and rejoins its race (Limits, below). Games send
+  `"countdown"` and `"session"` too, which asked older servers for the race room rules; every
+  room has them since finding 185, and the server ignores both.
 
 ### Server → client
 
@@ -204,8 +204,7 @@ use the same `error` frame **without** a close; the client just shows `message`.
             {"id":2,"name":"Bo","ready":false,"rider":0,"bike":0,"rttMs":null,"choosing":true}],
  "countdownEndsAt":null,"serverTime":1734000000000}
 
-// Server-timestamped ping, every 2 s (in a session room during races too; with the old rules only
-// outside a race). Echo "s" back unchanged in a "pong".
+// Server-timestamped ping, every 2 s, in a race too. Echo "s" back unchanged in a "pong".
 {"type":"ping","s":1734000000123}
 
 // Answer to a client "ping": "t" echoed, serverTime added (use it to estimate the clock offset).
@@ -218,11 +217,11 @@ use the same `error` frame **without** a close; the client just shows `message`.
  "serverTime":1734000005000,"startAt":1734000008000}
 
 // A racer left or dropped. The host's game hands their rider to its AI.
-{"type":"left","slot":1,"memberId":2,"reason":"disconnect"}   // or "leave"/"kicked"; session
-// rooms: "left", "finished", "gave_up" or "time_up" (Finishes and return, below)
+{"type":"left","slot":1,"memberId":2,"reason":"left"}   // or "finished", "gave_up", "time_up"
+// (Finishes and return, below)
 
-// Host ended the race; the room is a lobby again (ready flags cleared).
-{"type":"ended"}
+// The race is over: "done" when every racer finished or is out, "void" when the host ended it.
+{"type":"ended","reason":"done"}
 
 // The room restarts for new code (finding 184, below): sent to every member just before it closes
 // their sockets with 1012 "server_update". 0.7.13 and older ignore the type.
@@ -477,11 +476,10 @@ The server keeps what everyone has to agree on:
   (issue #17).
 - **Choosing** (`pick` with `"choosing":true`): the member is on the rider screen; it is
   unreadied and `ready` answers `not_ready` until a pick with `"choosing":false`.
-- **Countdown.** When at least two members are in the room, all ready, none choosing,
-  and every one said `"countdown"` in `hello`, the server sets `countdownEndsAt` (server ms,
-  `COUNTDOWN_MS` = 5 s on) and starts the race itself then, as `start` would. Any change that
-  breaks the rule clears it. `start` still starts at once. Clients show the time left with
-  `serverTime` as the clock offset. Older clients never get a countdown: the host starts.
+- **Countdown.** When the grid locks (at least two members, all ready and none choosing; the
+  host's `start`; an intermission's end: Race rooms, below), the server sets `countdownEndsAt`
+  (server ms, `COUNTDOWN_MS` = 5 s on) and starts the race itself then. Clients show the time left
+  with `serverTime` as the clock offset.
 
 ## Lobby list
 
@@ -499,8 +497,8 @@ The server keeps what everyone has to agree on:
 from a room's pings. It sets its offset from `now` (half the request's round-trip late at most) and
 shows no count without one (finding 135).
 
-Only public rooms that have not started and have a free slot are listed. Clients should
-show only rooms whose `version` matches their own.
+Public rooms are listed, racing and full ones too (Race rooms, below). Clients should show only
+rooms whose `version` matches their own.
 
 ## Latest release (launcher backup)
 
@@ -558,8 +556,7 @@ unreachable or HTTP error) or `502` (its `latest.json` refused),
   hello names another race or none (it missed the `start`), the `start` again for its slot. Its
   game then sends its `finish` or `back` again if it had sent one while the socket was down. Not
   back in 20 s: out of the race as a racer who leaves (`left`, the host's AI takes the rider). A
-  racer without `race_rejoin` (older releases drop their SFU with the socket) leaves its race at
-  the drop, as before. A rejoin refused with `rate_limited` is tried again by the game.
+  racer without `race_rejoin` (its SFU ends with the socket) leaves its race at the drop. A rejoin refused with `rate_limited` is tried again by the game.
 - A server restart (a deploy) drops every socket with no close event. A lobby client says hello
   again with its token and gets its member back; members not back within the hello timeout leave
   as disconnects.
@@ -574,14 +571,11 @@ clears readiness; a changed track requires guests to ready again. Exact executab
 identity in `hello.version` refuses mixed builds. Raise MIN_VERSION to the release
 that includes this UI at release time; no deployment is part of this change.
 
-## Session rooms (0.7.4)
+## Race rooms: phases, grid and results (0.7.4)
 
-A creator opts in with `"features":["countdown","session"]` in hello.
-The creator's feature selects the rules for the room's whole lifetime.
-Version and ISO matching still apply.
-A creator without session keeps all the old rules, including immediate host Start,
-no racing joins, and hiding racing or full rooms from the public list.
-Binary STATE and EVENT formats do not change. The server runs no game logic.
+Every room has these rules (since finding 185; before it a creator asked for them with the
+`"session"` feature, and rooms without it kept older rules for releases before 0.7.4).
+Version and ISO matching still apply. The server runs no game logic.
 
 ### Settings and phases
 
@@ -681,7 +675,7 @@ after host migration. Only an empty room is destroyed.
 
 ### Room snapshot and public list
 
-Session room snapshots keep all old fields and add:
+Room snapshots carry, beside the fields above:
 
 | Field | Meaning |
 | --- | --- |
@@ -707,13 +701,13 @@ LastRace entrants carry id (member id), name, rider, place and either ticks or
 dnfReason. Disconnected entrants remain in lastRace.
 All deadlines are server epoch milliseconds; absent deadlines are null.
 Text frames fit 4096 UTF-8 bytes for ten members, including prior results.
-Session member and room names replace C0 controls and unpaired UTF-16 surrogates with U+FFFD to
-bound JSON escaping. Old rooms retain their existing name handling.
+Member and room names replace C0 controls and unpaired UTF-16 surrogates with U+FFFD to bound
+JSON escaping.
 
-GET /v1/lobbies includes public session rooms while racing and when full.
+GET /v1/lobbies includes public rooms while racing and when full.
 Their entries add phase, raceStartedAt, finishEndsAt, nextRaceAt and full.
 Players counts all members. MaxPlayers is the membership limit.
-Entries sort by players descending. Old rooms retain their visibility rules.
+Entries sort by players descending.
 Screens filter by their own version before showing entries.
 
 ### Game-facing C API

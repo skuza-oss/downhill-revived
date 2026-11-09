@@ -123,9 +123,9 @@ describe("lobby", () => {
     bo.sendJson({ type: "pick", member: 0, rider: 3 });
     expect((await bo.json("error")).code).toBe("not_host");
     bo.sendJson({ type: "pick", rider: 7, bike: 2 });
-    host.sendJson({ type: "settings", track: 5, laps: 3, seed: 1234 });
     host.sendJson({ type: "settings", track: 999 });
     expect((await host.json("error")).code).toBe("bad_value");
+    host.sendJson({ type: "settings", track: 5, laps: 3, seed: 1234 });
     const r = JSON.parse(
       (await host.next((f) => typeof f === "string" && JSON.parse(f).settings?.track === 5 && JSON.parse(f).members?.[1]?.rider === 7)) as string,
     );
@@ -133,16 +133,14 @@ describe("lobby", () => {
     expect(r.members[1]).toMatchObject({ rider: 7, bike: 2 });
   });
 
-  it("starts only when everyone is ready, assigning slots host first", async () => {
+  it("starts with the ready players, assigning slots host first; a late joiner waits in the room", async () => {
     const { host, code } = await Client.host("H");
     const a = await Client.join(code, "A");
     host.sendJson({ type: "settings", track: 2, seed: 77 });
-    host.sendJson({ type: "ready", ready: true });
     host.sendJson({ type: "start" });
     expect((await host.json("error")).code).toBe("not_ready");
+    host.sendJson({ type: "ready", ready: true });
     a.sendJson({ type: "ready", ready: true });
-    await host.next((f) => typeof f === "string" && JSON.parse(f).members?.every((m: any) => m.ready));
-    host.sendJson({ type: "start" });
     const [sh, sa] = await Promise.all([host.json("start"), a.json("start")]);
     expect(sh).toMatchObject({ yourSlot: 0, track: 2, seed: 77 });
     expect(sa.yourSlot).toBe(1);
@@ -150,9 +148,10 @@ describe("lobby", () => {
     expect(sa.inputDelay).toBeUndefined();
     expect(sa.startAt).toBeGreaterThan(sa.serverTime);
 
-    const late = await Client.connect(`/v1/rooms/${code}`);
-    late.hello("Late");
-    expect((await late.json("error")).code).toBe("room_started");
+    const late = await Client.join(code, "Late");
+    const r = await late.json("room");
+    expect(r.phase).toBe("racing");
+    expect(r.members.find((m: any) => m.name === "Late").inRace).toBe(false);
   });
 
   it("hands the host role to the longest-present member", async () => {
@@ -171,7 +170,6 @@ describe("lobby", () => {
 describe("race room", () => {
   const room = (f: unknown) => typeof f === "string" && JSON.parse(f).type === "room";
   const snap = async (c: Client, pred: (r: any) => boolean) => JSON.parse((await c.next((f) => room(f) && pred(JSON.parse(f as string)))) as string);
-  const countdown = { features: ["countdown"] };
 
   it("keeps Ready across a new track, computer riders and going public; cheats unready everyone", async () => {
     const { host, code } = await Client.host("H");
@@ -218,12 +216,8 @@ describe("race room", () => {
   });
 
   it("counts down once everyone is ready and starts the race by itself", async () => {
-    const host = await Client.connect("/v1/rooms/new");
-    host.hello("H", countdown);
-    const { code } = await host.json("welcome");
-    const a = await Client.connect(`/v1/rooms/${code}`);
-    a.hello("A", countdown);
-    await a.json("welcome");
+    const { host, code } = await Client.host("H");
+    const a = await Client.join(code, "A");
     host.sendJson({ type: "ready", ready: true });
     a.sendJson({ type: "ready", ready: true });
     const r = await snap(host, (r) => r.countdownEndsAt !== null);
@@ -233,38 +227,6 @@ describe("race room", () => {
     await runDurableObjectAlarm(env.ROOM.get(env.ROOM.idFromName(code)));
     const [sh, sa] = await Promise.all([host.json("start"), a.json("start")]);
     expect([sh.yourSlot, sa.yourSlot]).toEqual([0, 1]);
-  });
-
-  it("stops the countdown when someone unreadies, and Start still starts at once", async () => {
-    const host = await Client.connect("/v1/rooms/new");
-    host.hello("H", countdown);
-    const { code } = await host.json("welcome");
-    const a = await Client.connect(`/v1/rooms/${code}`);
-    a.hello("A", countdown);
-    await a.json("welcome");
-    host.sendJson({ type: "ready", ready: true });
-    a.sendJson({ type: "ready", ready: true });
-    await snap(host, (r) => r.countdownEndsAt !== null);
-    a.sendJson({ type: "ready", ready: false });
-    await snap(host, (r) => r.countdownEndsAt === null && !r.members[1].ready);
-    await new Promise((done) => setTimeout(done, 350));
-    await runDurableObjectAlarm(env.ROOM.get(env.ROOM.idFromName(code)));
-    expect((await snap(host, () => true)).started).toBe(false);
-    a.sendJson({ type: "ready", ready: true });
-    await snap(host, (r) => r.countdownEndsAt !== null);
-    host.sendJson({ type: "start" });
-    await Promise.all([host.json("start"), a.json("start")]);
-  });
-
-  it("runs no countdown while anyone's client doesn't show one", async () => {
-    const host = await Client.connect("/v1/rooms/new");
-    host.hello("H", countdown);
-    const { code } = await host.json("welcome");
-    const old = await Client.join(code, "Old");
-    host.sendJson({ type: "ready", ready: true });
-    old.sendJson({ type: "ready", ready: true });
-    const r = await snap(host, (r) => r.members.length === 2 && r.members.every((m: any) => m.ready));
-    expect(r.countdownEndsAt).toBeNull();
   });
 });
 
@@ -317,7 +279,7 @@ describe("the race on the room socket", () => {
     clients[0].sendJson({ type: "kick", member: 1 });
     expect((await clients[1].json("error")).code).toBe("kicked");
     expect(await clients[1].closed()).toBe(4007);
-    expect(await clients[0].json("left")).toMatchObject({ slot: 1, reason: "kicked" });
+    expect(await clients[0].json("left")).toMatchObject({ slot: 1, reason: "left" });
   });
 
   it("returns to the lobby when the host ends the race", async () => {
