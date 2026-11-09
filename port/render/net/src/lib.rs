@@ -298,6 +298,11 @@ struct Assoc {
     p2p_expect: Option<Vec<u64>>,
     /// The room's welcome lists "sfu_silent": it takes a silent race link's report (finding 187).
     silent_ok: bool,
+    /// The running race's clock on this PC (sfu::race_clock, from its first start message; a rejoin
+    /// keeps it) and its start moment on it (race_go, finding 187): every association in the race
+    /// counts its silence from that moment.
+    race_clock: Option<(u64, std::time::Instant)>,
+    go: Option<(u64, std::time::Instant)>,
 }
 
 impl Assoc {
@@ -311,6 +316,7 @@ impl Assoc {
             rtc.expect_p2p(publishers.clone());
         }
         let result = self.start.as_ref().map_or(Ok(()), |s| rtc.signal(s));
+        if let Some((race, at)) = self.go { rtc.race_go(race, at); }
         self.sfu = Some(rtc);
         lock(&c.queue).out.push_back((false, offer.to_string().into_bytes()));
         c.race_live.store(true, Ordering::Release);
@@ -372,7 +378,7 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
-    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None, silent_ok: false };
+    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None, silent_ok: false, race_clock: None, go: None };
     // A room's welcome came on this connection: an association belongs here.
     let mut welcomed = false;
     // A P2P room (finding 186): its star, made by the first welcome that says so; it outlives a
@@ -427,7 +433,7 @@ fn send_main(c: Arc<WsConn>) {
                             // and the association still has its answer, so both stay, with what it
                             // said meanwhile. Otherwise a new association, and with it a new session.
                             let race_at = message["race"]["startAt"].as_u64();
-                            if a.start.as_ref().and_then(|s| s["startAt"].as_u64()) != race_at { a.start = None; }
+                            if a.start.as_ref().and_then(|s| s["startAt"].as_u64()) != race_at { a.start = None; a.race_clock = None; a.go = None; }
                             if message["sfu"] == "ready" && a.sfu.as_ref().is_some_and(|s| s.answered()) {
                                 let mut q = lock(&c.queue);
                                 for m in a.held.drain(..) { q.out.push_back((false, m.to_string().into_bytes())); }
@@ -444,12 +450,24 @@ fn send_main(c: Arc<WsConn>) {
                             Ok(())
                         }
                         "start" => {
+                            if a.race_clock.map(|(race, _)| race) != message["startAt"].as_u64() {
+                                a.race_clock = sfu::race_clock(&message);
+                                a.go = None;
+                            }
                             a.start = Some(message.clone());
                             match a.sfu.as_mut() { Some(rtc) => rtc.signal(&message), None => a.start(&c, &wake) }
                         }
                         "ended" => {
-                            a.start = None;
+                            a.start = None; a.race_clock = None; a.go = None;
                             a.sfu.as_mut().map_or(Ok(()), |rtc| rtc.signal(&message))
+                        }
+                        "race_go" => {
+                            // The race's start moment over the room (finding 187), the game's too.
+                            if let Some((race, at)) = sfu::race_moment(a.race_clock, &message) {
+                                a.go = Some((race, at));
+                                if let Some(rtc) = a.sfu.as_mut() { rtc.race_go(race, at); }
+                            }
+                            Ok(())
                         }
                         "left" => {
                             // A new association in this race (the room replaced the session,

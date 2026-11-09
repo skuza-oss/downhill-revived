@@ -49,16 +49,34 @@ pub const READY_TIMEOUT: Duration = Duration::from_millis(8_000);
 /// An offer the room never answers (it refused it: too many sessions) fails the association this
 /// long after it was made; the send thread offers again later.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
-/// A released race whose other racers sent this game nothing this long after both its release and
-/// the race's startAt has a silent race link (finding 187): every game sends its ride at the start
-/// and its LOADED every half second once loaded, and nothing came, while Cloudflare acknowledged
-/// everything this game sent. The cause seen: stream ids dead on the session's Cloudflare side,
-/// every call answered 200. The room is told (`sfu_silent`) and gives this game a new session, the
-/// only thing that clears it. Well inside the game's 30 s wait for the others' rides.
+/// A released race whose other racers sent this game nothing this long after the race's start
+/// moment (and its release) has a silent race link (finding 187). The moment is the countdown's
+/// start every game holds to: one racer names it and the room sends it to every racer (`race_go`),
+/// so a game whose link brings nothing has it too. From then every racer still in the race sends its
+/// ride, and nothing came, while Cloudflare acknowledged everything this game sent. Before it a
+/// racer may still be on its way to the load screen, sending nothing: no report without the moment.
+/// The cause seen: stream ids dead on the session's Cloudflare side, every call answered 200. The
+/// room is told (`sfu_silent`) and gives this game a new session, the only thing that clears it.
 pub const SILENT_AFTER: Duration = Duration::from_secs(8);
 /// The start message comes this long before the race's startAt (online/server/src/protocol.ts
-/// START_LEAD_MS): nobody sends a race frame before.
+/// START_LEAD_MS): the race's clock on this PC (race_clock).
 const START_LEAD: Duration = Duration::from_millis(3000);
+/// A race's clock on this PC, taken when its start message comes: its marker (startAt) and the
+/// instant here that is its startAt (the message's arrival plus START_LEAD). Late by the message's
+/// way here, never early.
+pub fn race_clock(start: &Value) -> Option<(u64, Instant)> {
+    start["startAt"].as_u64().filter(|n| *n > 0).map(|race| (race, Instant::now() + START_LEAD))
+}
+/// The race's start moment (`race_go`: its race and its time on the server's clock, finding 187) on
+/// this PC's clock, by the race's own (race_clock): `at - startAt` after the race's startAt here.
+/// None for another race's moment.
+pub fn race_moment(clock: Option<(u64, Instant)>, message: &Value) -> Option<(u64, Instant)> {
+    let (race, start) = clock?;
+    if message["race"].as_u64() != Some(race) { return None; }
+    let after = message["at"].as_f64()? - race as f64;
+    if !(after >= 0.0) { return None; }
+    Some((race, start.checked_add(Duration::from_nanos((after * 1e6).round() as u64))?))
+}
 /// DHD_NET_SFU_SILENT=N (test switch, finding 187): the first N associations this process makes
 /// drop every race frame they receive, as the dead stream ids did. 1: the new session the room
 /// gives repairs it; 2 or more: the racer is taken out of the race.
@@ -150,6 +168,9 @@ pub struct Sfu {
     announced: bool,
     released: bool,
     released_at: Option<Instant>,
+    /// This race's start moment on this PC's clock (race_go, from the send thread): its silent link
+    /// counts from it.
+    go_at: Option<Instant>,
     /// A frame of this race came from another racer; this race's link was reported silent
     /// (sfu_silent, finding 187); DHD_NET_SFU_SILENT drops every received race frame.
     heard: bool,
@@ -405,7 +426,7 @@ impl Sfu {
         if drop_all_in { eprintln!("net: SFU: DHD_NET_SFU_SILENT, this association drops every race frame it receives (test switch)"); }
         Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], waiting: vec![], closing: vec![], orphans: vec![], slots: HashMap::new(),
             race: 0, race_open: false, me: None, started_at: None, created: Instant::now(), future_events: VecDeque::new(),
-            connected: false, announced: false, released: false, released_at: None, heard: false, silent_said: false, drop_all_in,
+            connected: false, announced: false, released: false, released_at: None, go_at: None, heard: false, silent_said: false, drop_all_in,
             drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(), p2p: None,
             wake, direct, turn_allowed, answered_at: None, connected_at: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
@@ -439,7 +460,7 @@ impl Sfu {
             self.started_at = Some(Instant::now());
             self.slots.clear();
             self.rates.clear();
-            self.announced = false; self.released = false; self.released_at = None;
+            self.announced = false; self.released = false; self.released_at = None; self.go_at = None;
             self.heard = false; self.silent_said = false;
             self.pending_state.clear();
             self.pending_events.clear();
@@ -459,7 +480,7 @@ impl Sfu {
         } else if message["type"] == "ended" {
             // The race is over; the association stays for the next one. Its late frames are dropped.
             self.race_open = false;
-            self.announced = false; self.released = false; self.released_at = None;
+            self.announced = false; self.released = false; self.released_at = None; self.go_at = None;
             self.pending_state.clear();
             self.pending_events.clear();
         } else if message["type"] == "left" {
@@ -683,9 +704,14 @@ impl Sfu {
     pub fn race(&self) -> Option<u64> {
         self.race_open.then_some(self.race)
     }
+    /// The race's start moment on this PC's clock (race_moment), for this race only.
+    pub fn race_go(&mut self, race: u64, at: Instant) {
+        if self.race_open && race == self.race { self.go_at = Some(at); }
+    }
     /// The race link is silent (SILENT_AFTER, finding 187): released, others still in the race, and
-    /// not one frame of this race from any of them since. Once per association and race; logged. In a
-    /// P2P room the others are its part of the race only (finding 186): a star racer's association
+    /// not one frame of this race from any of them SILENT_AFTER after both the race's start moment
+    /// and the release; no moment yet, no report. Once per association and race; logged. In a P2P
+    /// room the others are its part of the race only (finding 186): a star racer's association
     /// carries none and is never silent; the hub's waits for its fallback racers, theirs for the hub.
     fn silent(&mut self) -> bool {
         if !self.race_open || !self.released || self.heard || self.silent_said { return false; }
@@ -693,10 +719,10 @@ impl Sfu {
             Some(publishers) => publishers.len(),
             None => self.slots.keys().filter(|m| Some(**m) != self.me).count(),
         };
-        let since = match (self.released_at, self.started_at) { (Some(r), Some(s)) => r.max(s + START_LEAD), _ => return false };
+        let since = match (self.released_at, self.go_at) { (Some(r), Some(g)) => r.max(g), _ => return false };
         if others == 0 || since.elapsed() < SILENT_AFTER { return false; }
         self.silent_said = true;
-        eprintln!("net: SFU: no race frame from any of the {others} other racers {} s after the release ({} channels, association up {} s); the room is told",
+        eprintln!("net: SFU: no race frame from any of the {others} other racers {} s after the race's start moment ({} channels, association up {} s); the room is told",
             SILENT_AFTER.as_secs(), self.channels.len(), self.connected_at.map_or(0, |t| t.elapsed().as_secs()));
         true
     }
@@ -1157,7 +1183,7 @@ mod tests {
         let said = |c: &mut Sfu| c.poll().unwrap().0.iter().filter(|t| t["type"] == "sfu_silent").count();
         client.signal(&json!({"type":"start","startAt":100,"yourSlot":1,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1}]})).unwrap();
         client.signal(&json!({"type":"sfu_ready","race":100})).unwrap();
-        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(60)); client.race_go(100, ago(60));
         client.expect_p2p(vec![]);  // on the star
         assert_eq!(said(&mut client), 0);
         client.expect_p2p(vec![1]);  // on the SFU, the hub its only publisher
@@ -1172,13 +1198,14 @@ mod tests {
         wire.extend_from_slice(&[6, 0, 2]);
         client.receive_frame(id, wire, &mut frames).unwrap();
         assert_eq!(frames.len(), 1);
-        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(60)); client.race_go(200, ago(60));
         assert_eq!(said(&mut client), 0, "heard the hub");
     }
 
     /// A released race that brings nothing from the others says sfu_silent once, SILENT_AFTER after
-    /// both the release and the race's startAt (finding 187); a frame from any other racer, or no
-    /// other racer left, says nothing; the test switch's dropped frames count as nothing.
+    /// both the race's start moment (race_go) and the release (finding 187); without the moment
+    /// nothing, however long the others take to load; a frame from any other racer, or no other
+    /// racer left, says nothing; the test switch's dropped frames count as nothing.
     #[test]
     fn a_silent_race_link_is_reported_once() {
         let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
@@ -1188,43 +1215,76 @@ mod tests {
         let said = |c: &mut Sfu| c.poll().unwrap().0.iter().filter(|t| t["type"] == "sfu_silent").count();
         let race = |c: &mut Sfu, at: u64| {
             c.signal(&json!({"type":"start","startAt":at,"yourSlot":0,"players":[{"memberId":1,"slot":0},{"memberId":17,"slot":1}]})).unwrap();
+            c.signal(&json!({"type":"sfu_ready","race":at})).unwrap();
         };
         let event = |at: u64| { let mut b = at.to_le_bytes().to_vec(); b.extend_from_slice(&[6, 9, 2]); b };
         race(&mut client, 100);
-        client.started_at = Some(ago(60));
+        client.started_at = Some(ago(60)); client.released = false;
+        client.race_go(100, ago(60));
         assert_eq!(said(&mut client), 0, "not released");
-        client.signal(&json!({"type":"sfu_ready","race":100})).unwrap();
+        client.released = true;
         client.released_at = Some(ago(SILENT_AFTER.as_secs() - 2));
         assert_eq!(said(&mut client), 0, "too soon after the release");
         client.released_at = Some(ago(SILENT_AFTER.as_secs() + 1));
         assert_eq!(said(&mut client), 1);
         assert_eq!(said(&mut client), 0, "once a race");
+        // No start moment yet: the others may still be on their way to the load screen. Started
+        // 40 s and released 35 s ago, nothing heard: no report.
+        race(&mut client, 150);
+        client.started_at = Some(ago(40)); client.released_at = Some(ago(35));
+        assert_eq!(said(&mut client), 0, "no moment, a 35 s load");
+        client.race_go(100, ago(60));
+        assert_eq!(said(&mut client), 0, "another race's moment");
+        // The moment named: still ahead (the countdown waits for it), then less than SILENT_AFTER
+        // ago, then SILENT_AFTER ago.
+        client.race_go(150, Instant::now() + Duration::from_secs(1));
+        assert_eq!(said(&mut client), 0, "the moment still ahead");
+        client.race_go(150, ago(SILENT_AFTER.as_secs() - 1));
+        assert_eq!(said(&mut client), 0, "too soon after the moment");
+        client.race_go(150, ago(SILENT_AFTER.as_secs() + 1));
+        assert_eq!(said(&mut client), 1, "SILENT_AFTER after the moment");
         // A frame from the other racer: nothing to say.
         race(&mut client, 200);
-        client.signal(&json!({"type":"sfu_ready","race":200})).unwrap();
         let mut frames = vec![];
         client.receive_frame(id, event(200), &mut frames).unwrap();
         assert_eq!(frames.len(), 1);
-        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(60)); client.race_go(200, ago(60));
         assert_eq!(said(&mut client), 0);
-        // The race's start counts too: released long ago but started just now.
+        // The release counts too: the moment long ago, released just now (a new session).
         race(&mut client, 300);
-        client.signal(&json!({"type":"sfu_ready","race":300})).unwrap();
-        client.started_at = Some(ago(START_LEAD.as_secs() + SILENT_AFTER.as_secs() - 2)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(SILENT_AFTER.as_secs() - 2)); client.race_go(300, ago(60));
         assert_eq!(said(&mut client), 0);
         // The other racer left: nobody to hear from.
         client.signal(&json!({"type":"left","slot":1,"memberId":17})).unwrap();
-        client.started_at = Some(ago(60));
+        client.released_at = Some(ago(60));
         assert_eq!(said(&mut client), 0);
-        // DHD_NET_SFU_SILENT: what comes is dropped, and reported as silence.
+        // DHD_NET_SFU_SILENT: what comes is dropped, and reported as silence. A new race has no
+        // moment until its own comes.
         race(&mut client, 400);
-        client.signal(&json!({"type":"sfu_ready","race":400})).unwrap();
         client.drop_all_in = true;
         let mut frames = vec![];
         client.receive_frame(id, event(400), &mut frames).unwrap();
         assert!(frames.is_empty());
-        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        client.released_at = Some(ago(60));
+        assert_eq!(said(&mut client), 0, "a new race: no moment yet");
+        client.race_go(400, ago(60));
         assert_eq!(said(&mut client), 1);
+    }
+
+    /// The room's start moment on this PC's clock: `at - startAt` after the instant the race's
+    /// start message put its startAt at (START_LEAD after it came); another race's moment is none.
+    #[test]
+    fn the_race_moment_is_on_the_races_own_clock() {
+        let clock = race_clock(&json!({"type":"start","startAt":5000})).unwrap();
+        assert_eq!(clock.0, 5000);
+        let lead = clock.1 - Instant::now();
+        assert!(lead <= START_LEAD && lead > START_LEAD - Duration::from_secs(1), "{lead:?}");
+        let (race, at) = race_moment(Some(clock), &json!({"type":"race_go","race":5000,"at":9500.5})).unwrap();
+        assert_eq!((race, at - clock.1), (5000, Duration::from_micros(4_500_500)));
+        assert_eq!(race_moment(Some(clock), &json!({"type":"race_go","race":4000,"at":9000})), None);
+        assert_eq!(race_moment(None, &json!({"type":"race_go","race":5000,"at":9500})), None);
+        assert_eq!(race_moment(Some(clock), &json!({"type":"race_go","race":5000,"at":4000})), None, "before its race");
+        assert_eq!(race_clock(&json!({"type":"start"})), None);
     }
 
     #[test]

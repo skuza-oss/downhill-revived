@@ -353,9 +353,12 @@ A member's session lives as long as its stay in the room (finding 177):
   by the setup deadline) is closed, and its owner hears `{"type":"sfu_reset"}`: its client drops
   the association and offers a new session after its pause.
 - A race link that delivers nothing (finding 187). A game whose race traffic was released but that
-  has received no race frame from any other racer some seconds after (both its release and the
-  race's `startAt`) sends `{"type":"sfu_silent","race":<startAt>}`, once per association and race,
-  to a server whose welcome lists `"sfu_silent"`. The room gives that racer a new session in its
+  has received no race frame from any other racer 8 s after the race's start moment (`race_go`;
+  and after its release, for a new session) sends `{"type":"sfu_silent","race":<startAt>}`, once
+  per association and race, to a server whose welcome lists `"sfu_silent"`. From the moment every
+  racer still in the race sends its ride; before it a racer may still be on its way to the load
+  screen, so no game reports without it. The moment comes over the room to every racer, so a game
+  whose link brings nothing has it too (and never starts alone). The room gives that racer a new session in its
   race (`sfu_reset`; the others hear `sfu_closed` for its old publication and get the new one in
   `sfu_channels`), the race's setup checks wait for it, and once it is subscribed both ways and
   acknowledges, `sfu_ready` comes again for it alone. Not up 20 s later (the room's
@@ -956,8 +959,9 @@ own.
 **A silent link (finding 187) in a P2P room.** The SFU side's rules hold for the members on it: a
 fallback racer's or the hub's session with dead stream ids is replaced (the hub's too when it
 doesn't race; a star racer's at once, its race runs on the star), and `sfu_silent` comes from a
-fallback racer (nothing from the hub's publication and the other fallback racers) or from the hub
-(nothing from its fallback racers): a new session; silent again, a fallback racer is out of the race
+fallback racer (nothing from the hub's publication and the other fallback racers) or from a racing
+hub (nothing from its fallback racers; a hub that sits the race out gets no `race_go`, so it has no
+moment and reports nothing): a new session; silent again, a fallback racer is out of the race
 and the hub gets nothing more (its single fallback racer's upload may be the cause; it stays the hub
 and in its race). A star racer's game reports no silence over the SFU, and none on its star link:
 its keepalives travel on the race events' own channel (a link whose keepalives stop for 5 s is
