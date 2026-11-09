@@ -91,10 +91,80 @@ allowed (P2P rooms).
 
 ## Progress
 
-- [x] 2026-11-09: finding reserved.
+- [x] 2026-11-09: finding reserved (3ab956cd).
+- [x] Server: P2P rooms are Rooms with `transport: "p2p"`; hub, links, routes, signaling relay,
+  hub choice, bridged SFU group, fallback deadlines; `src/p2p.ts`, `p2p-entry.ts`,
+  `wrangler.p2p.jsonc`, `tools/selfhost-config.mjs` and their test deleted (569f5023). A star
+  racer's failed SFU session takes nobody out of the race; routes before the start (7808a41a). A
+  hub that is gone is replaced at once (9373bf4a). `test/p2p-rooms.test.ts`: 15 tests.
+- [x] Client: `dhd_star` (`port/render/star`) replaces the `dhd_session` coordinator; `dhd_net`
+  runs the star beside the SFU association in one send thread; the SFU association's P2P mode;
+  no TURN between games (`peer.rs` direct only, `turn.rs` without the renewal); hello feature
+  `p2p`, the kind of room from the welcome; rejoin as any room (fc5786a3). Tests: `dhd_star` 10,
+  `dhd_net` 32 (one new), the local-server room tests 2, 10 games and the hub leaving (pass).
+- [x] Browser: `net.js` and `p2p.js` on server rooms and the star as wasm; `check_net.mjs`,
+  `check_p2p.mjs` (real Chrome) pass (693730e7).
+- [x] Docs and tools: the protocol's P2P section, STATE, TESTING, `p2p_crowd.py --sfu-bots`,
+  `cross_race.py`, `online_race.py --kill-host-at` (6fe476de and the next).
+- [ ] `check.py port`, `check.py server`; boot and race traces against 0.7.13.
+- [ ] Game runs (local server): 2 games + bots, the hub killed mid-race; 7+ racers with one on the
+  SFU (real Realtime); a normal SFU room; a 0.7.13 release game in a normal room.
+- [ ] One PC/Mac P2P race on the LAN.
 
 ## Decisions
 
+- **The hub bridges; star members never use the SFU.** The alternative, every member also
+  publishing and subscribing on the SFU when someone falls back, doubles each star member's upload
+  and makes every one of them depend on its own SFU session at once. Here only the fallback
+  racers and the hub take part in the race's SFU side, every ordered pair of them subscribed (that
+  is exactly a fallback racer to the hub and to the other fallback racers, the hub to them): the
+  room's existing subscription pass runs unchanged on that group (`bridged`, `sfuGroup`).
+- **Slots on a P2P room's SFU are the sender's.** Each game stamps its own slot; a receiver keeps
+  the slot of frames from the hub's publication (it carries every star racer's) and drops another
+  publisher's frame unless it carries that publisher's own slot (`dhd_star` `sfu_frame`): so no
+  "relay" flag on subscriptions, and frames from an earlier hub are dropped once the routes change.
+  SFU rooms keep stamping on receipt, unchanged.
+- **Every member still makes its SFU session on joining**, as in an SFU room: a member can fall
+  back or become the hub at any time, and an idle session costs about nothing (finding 177).
+- **Link decisions belong to the room**: a link is up when either end says so, down when either
+  end says so or after `P2P_LINK_MS` (10 s), and decided once per try; a fallback member tries the
+  hub again between races. The clients only report; the server's routes say who is where, so the
+  hub and the members never disagree about a frame's way.
+- **A peer message is the SFU's frame format** (race marker, then the frame) behind a kind byte;
+  keepalives each second, a link silent 5 s is down (the race's frames would stop for 27 s before
+  ICE says so). Room commands no longer travel over peers.
+- **Hub choice**: present members first; one that has been on a star, then a working SFU session,
+  then the lowest room ping (the server's own measure of a member's connection; the games measure
+  no link between two members), then the earliest joiner. Replaced at once when it leaves, when
+  its room connection drops, or when every link that worked died; not within a minute for having
+  no link at all (direct links work for others) or for having no SFU session to bridge with.
+- **Results come from the room** (item 7): `ended` and the room's `lastRace` go from the server to
+  every member's socket however the race ended, so the bug of finding 185 (the host's game
+  stopped before it sent them) is gone by construction; server test "results reach every member
+  when the finish window ends the race".
+- **No protocol bump.** SFU rooms see no new message; a P2P room needs the hello's `p2p` feature
+  and a 7-character code; the welcome's `transport` and the `p2p`, `p2p_signal`, `p2p_link`
+  messages exist only in P2P rooms. A game takes the kind of room from the welcome, so during a
+  canary a P2P creation that lands on a previous version's object (which ignores the transport)
+  gives an SFU room with a 7-character code, which the game then races as an SFU room.
+- **No `/v1/p2p/` path** on the new server: `dhd.skuza.app/v1/p2p/*` is test-p2p-1's own Worker's
+  route while it exists; new rooms are `/v1/rooms/new?transport=p2p`, so the two never meet.
+- **Android**: P2P rooms stay the only rooms offered there (finding 180's exception); a P2P room's
+  SFU fallback on a phone is part of that room.
+- **The browser has no SFU client yet** (it stays not offered): a page that can't reach the hub is
+  out of the race at the fallback deadline, and a page hub with fallback racers gives the hub to a
+  game with a working SFU session. Its star is the native games' code.
+
 ## Surprises
+
+- In the first room tests every racer left its race a few seconds after the start: the local server
+  has no Realtime, each game's SFU session failed, and the room retired racers whose session failed,
+  as an SFU room does. In a P2P room only a fallback racer needs the SFU (7808a41a).
+- A hub that dies would have sent every member to the SFU (each link silent, reported down)
+  before the room's 20 s rejoin wait ended; without a working SFU path they would then have left
+  the race at the fallback deadline. The room now replaces a hub when its room connection drops or
+  when every link that worked died (9373bf4a).
+- `rustgs.py test` always passed the renderer's `native` feature, so `-p dhd_net` alone failed;
+  `-- -p dhd_net -p dhd_star` now runs those crates' tests through the wrapper.
 
 ## Result
