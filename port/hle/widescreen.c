@@ -21,6 +21,7 @@
    This changes EE memory and what the game culls, so the game-state gates run without it. */
 #include "hle.h"
 #include "widescreen_flat.h"
+#include "widescreen_sprites.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -52,7 +53,22 @@ static int map_2d(void) { return widescreen && !card_2d && !card_setup; }
    length in pixels (x0, the X field of view, already times s) and the size in pixels. */
 typedef struct { float x0; unsigned short width, height; } WsView;
 typedef struct { void *camera; WsView *view; int mode; char pad[8]; } WsEntry;
-extern WsEntry D_0075A9D0[32];
+enum { WS_VIEW_COUNT = 6 };
+extern WsEntry D_0075A9D0[WS_VIEW_COUNT];
+void func_0023D8D8(int view, float focal, float vertical);
+static int rebuilding_projection;
+
+float port_ws_menu_focal(float focal)
+{
+    return !rebuilding_projection && focal == 688.0f ? focal * port_fov_x : focal;
+}
+
+void port_ws_set_focal(int view, float focal, float vertical)
+{
+    rebuilding_projection = 1;
+    func_0023D8D8(view, focal * port_fov_x, vertical);
+    rebuilding_projection = 0;
+}
 void func_0023D618(int view, int *x, int *y);   /* the view's centre in GS pixels */
 void func_0023D650(int view, int *width, int *height);
 void func_0020F9F0(int font, int view, int x, int y, const char *text);  /* centred text */
@@ -116,8 +132,6 @@ void host_widescreen_init(void)
         {0x27F200, 0x43520000, 1}, {0x27F220, 0x3EF0A3D7, 0},
         {0x27F2C0, 0x43520000, 1}, {0x27F2E0, 0x3EF0A3D7, 0},
         {0x27F380, 0x43520000, 1}, {0x27F3A0, 0x3EF0A3D7, 0},
-        {0x26C5C0, 0x438A8000, 1}, {0x26C700, 0x438A8000, 1},  /* trees */
-        {0x26C758, 0x438A8000, 1},
     };
     host_display_aware();
     double want = wanted_aspect();
@@ -139,6 +153,14 @@ void host_widescreen_init(void)
         float v = bits_float(words[i][1]);
         if (*at == words[i][1]) { *at = float_bits(words[i][2] ? v * port_fov_x : v / port_fov_x); changed++; }
         else hle_log("widescreen: %06X holds %08X, not %08X; left\n", words[i][0], *at, words[i][1]);
+    }
+    for (unsigned i = 0; i < sizeof ws_sprite_widths / sizeof *ws_sprite_widths; i++) {
+        uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + ws_sprite_widths[i].ee);
+        if (at[1] == ws_sprite_widths[i].upper) {
+            float v = bits_float(at[0]);
+            at[0] = float_bits(v * port_fov_x);
+            changed++;
+        }
     }
     hle_log("widescreen: aspect %.4f (s %.4f), %u of %u data words\n", aspect, port_fov_x, changed,
             (unsigned)(sizeof words / sizeof *words));

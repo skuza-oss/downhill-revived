@@ -208,6 +208,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 180 | [P2P rooms, chosen per room (host star)](180-p2p-prototype.md) | partly superseded | [186](186-p2p-transport.md) for the host's coordinator and the P2P server and Worker, TURN between games and its renewal, host loss ending the room; P2P rooms are server rooms with a hub star and an SFU fallback now |
 | 181 | [the room's region chosen by its creator, a smarter Auto, and a race ping beside the ser...](181-room-region-race-ping.md) | current |  |
 | 182 | [a slow Realtime API call no longer takes a racer out of the race](182-sfu-call-timeouts.md) | current |  |
+| 182 | [widescreen sprite width table and menu focal projection](182-widescreen-sprites-focal.md) | current |  |
 | 183 | [Performance settings: shadows and sun glow, lens flare, particles](183-performance-effects.md) | current |  |
 | 184 | [server rollouts that restart rooms only at a safe moment](184-server-rollout.md) | current |  |
 | 185 | [online code we don't maintain, removed](185-online-cleanup.md) | current |  |
