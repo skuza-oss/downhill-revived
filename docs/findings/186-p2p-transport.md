@@ -1,6 +1,7 @@
 # 186: P2P as a race transport of the server's rooms (hub star, SFU fallback)
 
 Status: in progress
+Supersedes: parts of 180 (its coordinator in the host's game, its own server and Worker, TURN between games)
 
 Branch `feat/p2p-transport` from local `main` 3518ce84, started 2026-11-09. This file is the lane's
 plan while it runs and its finding when it merges.
@@ -106,10 +107,11 @@ allowed (P2P rooms).
   `check_p2p.mjs` (real Chrome) pass (693730e7).
 - [x] Docs and tools: the protocol's P2P section, STATE, TESTING, `p2p_crowd.py --sfu-bots`,
   `cross_race.py`, `online_race.py --kill-host-at` (6fe476de and the next).
-- [ ] `check.py port`, `check.py server`; boot and race traces against 0.7.13.
-- [ ] Game runs (local server): 2 games + bots, the hub killed mid-race; 7+ racers with one on the
-  SFU (real Realtime); a normal SFU room; a 0.7.13 release game in a normal room.
-- [ ] One PC/Mac P2P race on the LAN.
+- [x] 2026-11-09: `check.py port`, `check.py server` (218 tests) OK on d30c8e32; boot (600) and race
+  (5000) state traces equal 0.7.13's (Result).
+- [x] Game runs on local servers: the hub killed mid-race; 7 racers with one on the SFU (real
+  Realtime); a normal SFU room; 0.7.13's release games in a normal room (Result).
+- [x] One PC/Mac P2P race on the LAN (Result).
 
 ## Decisions
 
@@ -168,3 +170,66 @@ allowed (P2P rooms).
   `-- -p dhd_net -p dhd_star` now runs those crates' tests through the wrapper.
 
 ## Result
+
+One room implementation, two race transports. A P2P room is a server Room created with
+`?transport=p2p`: the room runs every rule (ready, countdown, release, results, AI takeover, rejoin,
+region, rollout restarts) as for an SFU room; its race frames travel in a star of WebRTC data
+channels around the hub the room picks and replaces; a member who can't reach the hub races over
+the room's SFU, bridged by the hub; results always come from the room. The design: above (Design,
+Decisions); the wire: `docs/online-protocol.md`, "P2P rooms".
+
+**Deleted** (`git diff --stat main`, 55 files, +2,392 -2,537; code alone, inline Rust tests included,
++1,340 -2,106; tests +669 -254): the host's coordinator `port/render/session` (`dhd_session`, 875
+lines) and the old send thread of `p2p.rs`; the P2P server `online/server/src/p2p.ts` (426),
+`p2p-entry.ts`, `wrangler.p2p.jsonc`, `tools/selfhost-config.mjs` and the generated
+`wrangler.selfhost.jsonc` (local servers and `npm run dev` use `wrangler.jsonc`), `test/p2p.test.ts`;
+TURN between games (`peer.rs`'s relay, `p2p_turn`, the 45-minute renewal, `turn::Client::renew`,
+their tests); the `host_left` close (4014) and the P2P rooms' "no rejoin" special case in `net.c`.
+New: `port/render/star` (`dhd_star`, the router, 420 lines with its wasm glue), the Room's P2P part
+(about 330 lines of `room.ts`), the send thread's star (`p2p.rs`, `lib.rs`).
+
+**Protocol** (no version bump; nothing new in SFU rooms): `/v1/rooms/new?transport=p2p` (7-character
+code), the hello feature `p2p` (a P2P room refuses a game without it), the welcome's
+`"transport":"p2p"`, and in P2P rooms only `p2p` (routes), `p2p_signal`, `p2p_link`; text frames up
+to 16 KB for `p2p_signal` and 400 text frames per caps window there. Peer messages: kind 1 (race
+marker + frame) or 2 (keepalive). Gone: `/v1/p2p/*`, `p2p_welcome`, `p2p_members`, `p2p_turn`,
+`p2p_capacity`, `p2p_kick`, room messages over peers.
+
+**Checks** (2026-11-09, this PC; the Mac an M1 Air on the same LAN):
+
+| Check | Result |
+|---|---|
+| `python tools/check.py port` (d30c8e32) | OK |
+| `python tools/check.py server` | OK, 218 tests (15 in `p2p-rooms.test.ts`: hub choice, migration when the hub leaves, drops or loses every link, no second change within a minute, a hub that can't bridge, links up/down/timeout, bridged subscriptions only, a racer falling back mid-race, a star racer's failed SFU session, the fallback deadline, results at the finish window, rejoin) |
+| `rustgs.py test -- -p dhd_star -p dhd_net` | 10 + 32 pass (`a_mixed_room_delivers_every_racer_to_every_racer_once`, `no_game_speaks_for_another_rider`, the SFU association's P2P mode...) |
+| `local_server.py -- rustgs.py test -- -p dhd_net p2p_room -- --ignored` | 2 games, 10 games, and `p2p_room_hub_leaves_mid_race`: all joined, raced, heard every racer, got the results |
+| `check_net.mjs`; `local_server.py -- node port/web/check_p2p.mjs` (real Chrome) | pass: two pages in a P2P server room, linked directly, frames both ways, results from the room |
+| Boot (600 fields) and race (5000) state traces, this build against 0.7.13's release `dhd.exe` (`--env DHD_LAUNCHER=1`) | every row equal (`state_diff.py` PASS both) |
+| A. P2P room, 2 games + 1 bot, the hub's game killed 20 s into the race (`online_race.py --a DHD_NET_CREATE=p2p --bots 1 --kill-host-at 20`, no Realtime) | the room: "member 1 is the hub now (the hub's connection dropped)"; the guest linked to the new hub (direct, LAN) and raced on; the bot finished at 1:00; the finish window ended the race and the guest and the bot got the results (`online: result 1. Bot0 1:00.00` ... 10 lines) |
+| B. 7 racers, one bot on the SFU (`p2p_crowd.py --bots 6 --sfu-bots 1`, real Realtime) | all 7 raced and finished, no `freeze:`; the room made 2 subscriptions (hub and the bot, each way) during the countdown and released 17 ms after the start; 5 bots direct on the LAN; the SFU bot heard every racer (snapshot age p50 25-41 ms) and every racer heard it through the hub (p50 27 ms; at the hub 24 ms); host 74.5 % of a core, 139 kB/s up; countdown 42 s after the room opened |
+| C. Normal SFU room, 2 games + 1 bot of this build (real Realtime) | both games got the results; released 10 ms after the start |
+| D. Normal SFU room, 0.7.13's release games + a bot of this branch (`online_race.py --exe <0.7.13 dhd.exe> --bots 1`) | both got the results; released 10 ms after the start |
+| E. PC/Mac P2P race on the LAN (`cross_race.py --backend p2p --host pc --races 2`; the Mac's game built from this branch with the PC's wasm2c core, a local server through the ssh tunnel) | both races ran on both and closed with the results on both (PCHOST 0:20.03, MACGUEST 0:40.03); the link direct inside the LAN at both ends (the Mac's one refused send, as in finding 180, the answer-only candidate took over); no `freeze:` line; snapshot age while racing p50/p95 16/26 ms at the PC, 19/32 ms at the Mac; when the run stopped the PC's game the Mac's became the hub |
+
+**Open.** The browser has no SFU client (a page that can't reach the hub doesn't race; a page hub
+gives the hub away when racers fall back); Android, Linux and the internet were not run; a
+mid-race fallback's first events can be lost while its subscriptions are made (state resumes);
+during a deploy's 10 % canary a P2P creation that lands on an object of the previous version gives
+an SFU room with a 7-character code (the game races it as one: it takes the kind from the welcome).
+
+**The lead's steps.**
+
+1. Merge, then deploy the main Worker as usual: `node online/server/tools/deploy.mjs` (no new
+   Durable Object class: `wrangler.jsonc` is unchanged, so `versions upload` works). Busy rooms
+   take the new code between races (finding 184); 0.7.13 in SFU rooms is unaffected (run D).
+2. Leave the `dhd-revived-p2p` Worker deployed while test-p2p-1 is in testers' hands: its route
+   `dhd.skuza.app/v1/p2p/*` keeps serving those builds' rooms from the code it was deployed with
+   (the files are no longer in the tree; nothing redeploys it). The new client never uses
+   `/v1/p2p/`.
+3. Package test-p2p-2 from the merged main (P2P rooms need this client: the hello's `p2p`).
+4. Once test-p2p-2 has replaced test-p2p-1: `npx wrangler delete --name dhd-revived-p2p` (its
+   Worker, route, Durable Objects and secrets; not the shared `dhd-moderation` D1). From then on
+   test-p2p-1 can't open P2P rooms. Its TURN credentials expire within the hour by themselves.
+5. Nothing to set on the main Worker: a fallback racer uses the Realtime and TURN secrets it has.
+   P2P rooms no longer use TURN between games; a fallback racer's traffic is billed as an SFU
+   racer's (finding 180's billing alert covers both).

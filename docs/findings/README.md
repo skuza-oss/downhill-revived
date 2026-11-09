@@ -26,7 +26,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | Renderer (GS, Rust/wgpu) | 021 GS core, 084 WGSL, 085/086 Rust renderer, 088 CL2, 131 draw pass, 045/136 scale, 171 lost device | 025, 031-033, 035, 038 |
 | VU0/VU1 | 016, 019, 030, 090 (VU1R, OP3, SP1) | 027, 029, 037 |
 | Audio and movies | 022, 133, 055 | |
-| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 169 snapshots and prediction, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
+| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 186 P2P rooms (hub star, SFU fallback), 169 snapshots and prediction, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
 | Menus, settings, input | 050, 064, 092, 101/102 settings, 059/134 controllers, 141 touch, 056/140 widescreen | 065 (WM_CHAR part) |
 | Launcher, releases, installers | 093, 125, 138, 143, 098 disc check | 053, 054, 070 |
 | Speed (PC) | 089, 090, 129 perf log, 130/131 iGPU | 031, 032, 046, 048, 051, 066, 069 |
@@ -203,7 +203,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 177 | [one Realtime session per member per room, set up before the race](177-sfu-room-sessions.md) | current |  |
 | 178 | [pre-release online lifecycle review](178-pre-0713-review.md) | partly superseded | [179](179-sfu-review-risks.md) for the three risks left open, now fixed |
 | 179 | [the three SFU risks the pre-release review left open](179-sfu-review-risks.md) | current |  |
-| 180 | [P2P rooms, chosen per room (host star)](180-p2p-prototype.md) | current |  |
+| 180 | [P2P rooms, chosen per room (host star)](180-p2p-prototype.md) | partly superseded | [186](186-p2p-transport.md) for the host's coordinator and the P2P server and Worker, TURN between games and its renewal, host loss ending the room; P2P rooms are server rooms with a hub star and an SFU fallback now |
 | 181 | [the room's region chosen by its creator, a smarter Auto, and a race ping beside the ser...](181-room-region-race-ping.md) | current |  |
 | 182 | [a slow Realtime API call no longer takes a racer out of the race](182-sfu-call-timeouts.md) | current |  |
 | 183 | [Performance settings: shadows and sun glow, lens flare, particles](183-performance-effects.md) | current |  |
