@@ -127,7 +127,7 @@ void host_widescreen_init(void)
 {
     /* PS2 address, retail word, 1 for an X (times s) or 0 for a Y factor (divided by s). The view
        table D_0027ECC0 (0xC0 bytes a view: X at +0, Y at +0x20) for 1P, 2P both ways, 4P and
-       paused; the menu's Y; three tree sprite widths. */
+       paused; the menu's Y. The sprite widths are in ws_sprite_widths (widescreen_sprites.h). */
     static const uint32_t words[][3] = {
         {0x27ECC0, 0x438A8000, 1}, {0x27ECE0, 0x3F15551D, 0},  /* paused X, 1P Y */
         {0x27ED80, 0x438A8000, 1}, {0x27EDA0, 0x3F155550, 0},  /* 2P horizontal */
@@ -161,16 +161,17 @@ void host_widescreen_init(void)
         if (*at == words[i][1]) { *at = float_bits(words[i][2] ? v * port_fov_x : v / port_fov_x); changed++; }
         else hle_log("widescreen: %06X holds %08X, not %08X; left\n", words[i][0], *at, words[i][1]);
     }
-    for (unsigned i = 0; i < sizeof ws_sprite_widths / sizeof *ws_sprite_widths; i++) {
+    unsigned sprites = sizeof ws_sprite_widths / sizeof *ws_sprite_widths;
+    for (unsigned i = 0; i < sprites; i++) {
         uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + ws_sprite_widths[i].ee);
-        if (at[1] == ws_sprite_widths[i].upper) {
-            float v = bits_float(at[0]);
-            at[0] = float_bits(v * port_fov_x);
+        if (at[0] == ws_sprite_widths[i].retail && at[1] == ws_sprite_widths[i].upper) {
+            at[0] = float_bits(bits_float(ws_sprite_widths[i].retail) * port_fov_x);
             changed++;
-        }
+        } else hle_log("widescreen: %06X holds %08X %08X, not %08X %08X; left\n", ws_sprite_widths[i].ee,
+                       at[0], at[1], ws_sprite_widths[i].retail, ws_sprite_widths[i].upper);
     }
     hle_log("widescreen: aspect %.4f (s %.4f), %u of %u data words\n", aspect, port_fov_x, changed,
-            (unsigned)(sizeof words / sizeof *words));
+            (unsigned)(sizeof words / sizeof *words) + sprites);
 }
 
 /* The bike shop builds its HUD and shadow at run time: when the shop's block is set up (the
