@@ -161,9 +161,11 @@ static void relay_binary(Player *p, const uint8_t *data, size_t n)
         for (i = 0; i < PLAYERS; i++)
             if (&players[i] != p)
                 deliver(&players[i], p, 1, frame, n);
-    } else if (frame[0] == NET_FRAME_PING) {
+    } else if (frame[0] == NET_FRAME_PING && n + sizeof(double) <= sizeof frame) {
+        double clock = net_now_ms();  /* the server's clock after the ping's bytes (protocol 4) */
         frame[0] = NET_FRAME_PONG;
-        deliver(p, p, 1, frame, n);
+        memcpy(frame + n, &clock, sizeof clock);
+        deliver(p, p, 1, frame, n + sizeof clock);
     } else {
         printf("  relay: unexpected binary frame type %d\n", frame[0]);
         failures++;
