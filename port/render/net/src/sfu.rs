@@ -903,6 +903,7 @@ impl Sfu {
             if self.p2p.is_some() {
                 // The star's router checks the slot against the publisher (dhd_star sfu_frame).
                 frames.push((c.member, bytes[8..].to_vec()));
+                self.heard = true;
             } else if let Some(slot) = self.slots.get(&c.member) {
                 let mut frame = bytes[8..].to_vec();
                 frame[1] = *slot;
@@ -1161,6 +1162,18 @@ mod tests {
         assert_eq!(said(&mut client), 0);
         client.expect_p2p(vec![1]);  // on the SFU, the hub its only publisher
         assert_eq!(said(&mut client), 1);
+        // A frame from the hub's publication is heard: the next race says nothing.
+        client.signal(&json!({"type":"sfu_channels","channels":[{"channelId":14,"name":"events","memberId":1,"local":false}]})).unwrap();
+        let id = client.channels[0].id;
+        client.signal(&json!({"type":"start","startAt":200,"yourSlot":1,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1}]})).unwrap();
+        client.signal(&json!({"type":"sfu_ready","race":200})).unwrap();
+        let mut frames = vec![];
+        let mut wire = 200u64.to_le_bytes().to_vec();
+        wire.extend_from_slice(&[6, 0, 2]);
+        client.receive_frame(id, wire, &mut frames).unwrap();
+        assert_eq!(frames.len(), 1);
+        client.started_at = Some(ago(60)); client.released_at = Some(ago(60));
+        assert_eq!(said(&mut client), 0, "heard the hub");
     }
 
     /// A released race that brings nothing from the others says sfu_silent once, SILENT_AFTER after
