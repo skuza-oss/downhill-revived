@@ -183,20 +183,24 @@ impl Peer {
         })
     }
 
-    /// The other game's offer, answer or trickled candidate, as the room relays it.
+    /// The other game's offer, answer or trickled candidate, as the room relays it. A failure says
+    /// only which step failed: str0m's errors quote the text they could not take, and an offer or
+    /// a candidate holds the other game's network addresses, which must not reach dhd.log.
     pub fn signal(&mut self, m: &Value) -> Result<()> {
         let text = |key: &str, max: usize| m[key].as_str().filter(|s| s.len() <= max).ok_or("invalid peer signal");
         match m["type"].as_str() {
             Some("offer") => {
-                let answer = self.rtc.sdp_api().accept_offer(SdpOffer::from_sdp_string(text("sdp", MESSAGE_MAX)?)?)?;
+                let offer = SdpOffer::from_sdp_string(text("sdp", MESSAGE_MAX)?).map_err(|_| "unreadable peer offer")?;
+                let answer = self.rtc.sdp_api().accept_offer(offer).map_err(|_| "peer offer refused")?;
                 self.signals.push(json!({"type": "answer", "sdp": answer.to_sdp_string()}));
             }
             Some("answer") => {
                 let pending = self.pending.take().ok_or("unexpected peer answer")?;
-                self.rtc.sdp_api().accept_answer(pending, SdpAnswer::from_sdp_string(text("sdp", MESSAGE_MAX)?)?)?;
+                let answer = SdpAnswer::from_sdp_string(text("sdp", MESSAGE_MAX)?).map_err(|_| "unreadable peer answer")?;
+                self.rtc.sdp_api().accept_answer(pending, answer).map_err(|_| "peer answer refused")?;
             }
             Some("candidate") => {
-                let candidate = Candidate::from_sdp_string(text("candidate", 2048)?)?;
+                let candidate = Candidate::from_sdp_string(text("candidate", 2048)?).map_err(|_| "unreadable peer candidate")?;
                 if candidate.kind() == CandidateKind::Relayed {
                     self.remote_relays.push(candidate.addr());
                 }
@@ -596,6 +600,21 @@ mod tests {
         assert_eq!(a.outgoing_states.len(), 2);
         assert_eq!(a.outgoing_states[&(2, 0)][15], 0);
         assert!(a.send(false, vec![0; 8]).is_err());
+    }
+
+    /// What failed to parse never shows in the error (dhd.log): it can hold the other game's address.
+    #[test]
+    fn a_signal_that_fails_to_parse_names_no_address() {
+        let mut a = Peer::new("127.0.0.1".parse().unwrap(), false, true).unwrap();
+        let bad = [
+            json!({"type": "candidate", "candidate": "candidate:1 1 udp 2130706431 203.0.113.77 not-a-port typ host"}),
+            json!({"type": "offer", "sdp": "v=0\r\no=- 1 1 IN IP4 203.0.113.77\r\nc=IN IP4 203.0.113.77\r\nnonsense"}),
+        ];
+        for m in bad {
+            let e = a.signal(&m).unwrap_err().to_string();
+            assert!(e.starts_with("unreadable peer") || e.starts_with("peer offer"), "{e}");
+            assert!(!e.contains("203.0.113"), "{e}");
+        }
     }
 
     /// Revokes the test's TURN credentials when it ends, passed or not.
