@@ -239,7 +239,8 @@ static int dxgi_adapter(unsigned vendor, unsigned id, DXGI_ADAPTER_DESC1 *desc, 
 #endif
 
 /* The device's settings as DhdrDeviceDesc flags: DHD_WGPU_BACKEND=vulkan (Windows; elsewhere the
-   platform's one API), DHD_WGPU_DEBUG, DHD_WGPU_DUAL_SOURCE=0; on Windows DHD_WGPU_COMPILER=fxc
+   platform's one API), DHD_WGPU_DEBUG, DHD_WGPU_DUAL_SOURCE=0 (never) or =1 (on Intel GPUs too;
+   the rule itself is Rust's device::dual_source, finding 188); on Windows DHD_WGPU_COMPILER=fxc
    (else DXC when dxcompiler.dll is beside the exe) and the adapter: DHD_WGPU_ADAPTER=fallback
    (WARP), else DXGI's first adapter by its PCI ids (the GPU the D3D11 presentation device took
    before), WARP when that is Microsoft's Basic Render Driver (no graphics driver); with no DXGI
@@ -257,7 +258,7 @@ static int device_init(void)
     const char *choice = getenv("DHD_WGPU_ADAPTER"), *dual = getenv("DHD_WGPU_DUAL_SOURCE");
     if (backend && !strcmp(backend, "vulkan")) d.flags |= DHDR_DEV_VULKAN;
     if (getenv("DHD_WGPU_DEBUG")) d.flags |= DHDR_DEV_DEBUG | DHDR_DEV_VALIDATION;
-    if (dual && !atoi(dual)) d.flags |= DHDR_DEV_NO_DUAL_SOURCE;
+    if (dual) d.flags |= atoi(dual) ? DHDR_DEV_DUAL_SOURCE : DHDR_DEV_NO_DUAL_SOURCE;
     d.log_level = getenv("DHD_WGPU_DEBUG") ? DHDR_LOG_WARN : DHDR_LOG_ERROR;
 #ifdef _WIN32
     static char dxc[MAX_PATH + 16];

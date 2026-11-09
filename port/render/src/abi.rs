@@ -26,6 +26,8 @@ pub const DHDR_DEV_DEBUG: u32 = 4;
 pub const DHDR_DEV_VALIDATION: u32 = 8;
 pub const DHDR_DEV_FALLBACK: u32 = 16;
 pub const DHDR_DEV_NO_DUAL_SOURCE: u32 = 32;
+/// DHD_WGPU_DUAL_SOURCE=1: dual-source blending even on an Intel GPU (`device::dual_source`).
+pub const DHDR_DEV_DUAL_SOURCE: u32 = 64;
 
 pub const DHDR_LOG_ERROR: u32 = 1;
 pub const DHDR_LOG_WARN: u32 = 2;
