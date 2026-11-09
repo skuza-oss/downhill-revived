@@ -953,12 +953,27 @@ nothing. On a P2P room's SFU a frame carries its sender's slot: a receiver keeps
 frames (it publishes every star racer's) and drops another publisher's frame whose slot isn't its
 own.
 
-**The hub.** Picked by the room: at first the creator; then, when the hub leaves the room (a drop
-waits the rejoin's 20 s), when no other member is linked to it although some have been on a star, or
-when fallback racers wait and it has no working SFU session (a browser's game), the next is the
-present member that has been on a star, then one with a working SFU session, then the lowest room
-ping, then the one here longest; not again for the last two reasons within a minute. Every member
-then connects anew; a running race goes on (riders resume when the links are up; a member that
+**A silent link (finding 187) in a P2P room.** The SFU side's rules hold for the members on it: a
+fallback racer's or the hub's session with dead stream ids is replaced (the hub's too when it
+doesn't race; a star racer's at once, its race runs on the star), and `sfu_silent` comes from a
+fallback racer (nothing from the hub's publication and the other fallback racers) or from the hub
+(nothing from its fallback racers): a new session; silent again, a fallback racer is out of the race
+and the hub gets nothing more (its single fallback racer's upload may be the cause; it stays the hub
+and in its race). A star racer's game reports no silence over the SFU, and none on its star link:
+its keepalives travel on the race events' own channel (a link whose keepalives stop for 5 s is
+down: `p2p_link`, the SFU), and the star's channels are never closed or reused, so the dead stream
+ids of finding 187 can't happen there. `race_go` works as in any room: the lowest slot still racing
+names the moment, whoever the hub is.
+
+**The hub.** Picked by the room: at first the creator; at once when the hub leaves the room or its
+room connection drops; after 12 s with fallback racers waiting and no working SFU session (a
+browser's game; a session being renewed is back sooner), by a member whose session can bridge; and,
+never within a minute of the last change, when no member links to it although direct links work
+for some (two or more members, all on the SFU, their lost links 5 s old). The next is the present
+member that has been on a star, then one with a working SFU session, then the lowest room ping,
+then the one here longest; a member whose own link to the hub died in the last minute comes last,
+and isn't picked while the hub is still there. One member's link going down never moves the hub.
+Every member then connects anew; a running race goes on (riders resume when the links are up; a member that
 can't reach the new hub falls back).
 
 **Peer connections.** WebRTC data channels negotiated with fixed ids: 0 race snapshots (unordered, no

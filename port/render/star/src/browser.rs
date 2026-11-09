@@ -44,7 +44,6 @@ impl P2pStar {
     pub fn drain(&mut self) -> String {
         let actions: Vec<Value> = self.inner.take().into_iter().map(|a| match a {
             Action::Connect { member, offerer } => json!({"kind": "connect", "member": member, "offerer": offerer}),
-            Action::Log(line) => json!({"kind": "log", "line": line}),
             Action::Close(member) => json!({"kind": "close", "member": member}),
             Action::Peer(to, reliable, bytes) => json!({"kind": "peer", "to": to, "reliable": reliable, "bytes": bytes}),
             Action::Sfu(frame) => json!({"kind": "sfu", "bytes": frame}),

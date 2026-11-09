@@ -43,7 +43,6 @@ export async function createP2pBridge(worker) {
       else if(a.kind==='peer'){const p=peers.get(a.to);if(p)queue(p,a.reliable,new Uint8Array(a.bytes));}
       else if(a.kind==='game')notify('message',{data:new Uint8Array(a.bytes)});
       else if(a.kind==='room')service(a.message);
-      else if(a.kind==='log')console.log(a.line);
       // 'sfu': no SFU client in the page (above).
     }
     for(const p of peers.values())flush(p);

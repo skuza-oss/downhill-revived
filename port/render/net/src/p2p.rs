@@ -173,7 +173,6 @@ impl P2p {
                     }
                 }
                 Action::Room(m) => c.write_now(false, m.to_string().into_bytes()),
-                Action::Log(line) => eprintln!("{line}"),
                 other => rest.push(other),
             }
         }
