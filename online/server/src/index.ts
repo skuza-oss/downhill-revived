@@ -23,6 +23,8 @@ export default {
     const path = new URL(request.url).pathname.replace(/\/+$/, "");
 
     // P2P rooms (src/p2p.ts, finding 180): their own objects; the SFU rooms below never see them.
+    // Only with the P2P_ROOM binding (wrangler.selfhost.jsonc): the official server's P2P rooms are
+    // their own Worker's (wrangler.p2p.jsonc), whose route takes these paths first.
     const p2p = await p2pRoute(request, env, path);
     if (p2p) return p2p;
 

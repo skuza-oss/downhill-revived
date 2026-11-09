@@ -272,9 +272,23 @@ The server only admits members, relays host-star signaling and gives each member
 credentials (`src/p2p.ts`). P2P rooms are private, joined by code and never listed: signaling
 gives the host every member's network address and every member the host's.
 
-A self-hosted server serves `/v1/p2p/*` from its one Worker, as `npx wrangler deploy` makes it.
-The official server runs them as a Worker of their own, so deploying them never restarts an SFU
-room:
+A self-hosted server serves `/v1/p2p/*` from its one Worker. `wrangler.jsonc` is the official main
+Worker's config and has no P2P rooms (the official server's are their own Worker, below, and
+`tools/deploy.mjs` uploads versions, which Cloudflare refuses for a version that creates a Durable
+Object class), so a self-hosted server deploys `wrangler.jsonc` plus the P2P binding and its
+migration, which `tools/selfhost-config.mjs` writes as `wrangler.selfhost.jsonc` (gitignored; run it
+again after editing `wrangler.jsonc`):
+
+```sh
+node tools/selfhost-config.mjs
+npx wrangler deploy --config wrangler.selfhost.jsonc
+```
+
+Without it, `/v1/p2p/*` answers "This server has no P2P rooms". Local test servers
+(`port/tools/local_server.py`, `npm run dev`, `npm run dev:guard`) use the same config.
+
+The official server runs P2P rooms as a Worker of their own, so deploying them never restarts an
+SFU room:
 
 ```sh
 npx wrangler deploy --config wrangler.p2p.jsonc

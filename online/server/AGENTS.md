@@ -16,6 +16,11 @@ The root `AGENTS.md` rules apply. Protocol: `docs/online-protocol.md`; steps and
 - `MIN_VERSION` in `wrangler.jsonc` is the oldest game release the server lets in. Raise it only
   when a release is published and older ones should stop racing; read the value from the file,
   never copy it into docs.
+- `wrangler.jsonc` is the official main Worker's config: `tools/deploy.mjs` uploads versions, which
+  Cloudflare refuses for a version that creates a Durable Object class, so a new class needs a plain
+  `wrangler deploy` first. P2P rooms are not in it: the official server's are their own Worker
+  (`wrangler.p2p.jsonc`), a local or self-hosted server's come from `wrangler.selfhost.jsonc`
+  (`tools/selfhost-config.mjs`; finding 180).
 - Deploy with `tools/deploy.mjs` (finding 184), only from the maintainer's account after review
   (deploy notes are kept outside the repository): a 10% canary watched in Workers Logs, then 100%
   or a rollback; busy rooms adopt the new code between races (`src/rollout.ts`). `--emergency`

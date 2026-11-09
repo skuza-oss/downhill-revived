@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Downhill Domination PC port: online lobbies and race relay (Cloudflare Workers + Durable Objects)",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "node tools/selfhost-config.mjs && wrangler dev --config wrangler.selfhost.jsonc",
     "dev:guard": "node tools/moderate.mjs local-setup && wrangler dev --config wrangler.guard-local.jsonc",
     "moderate": "node tools/moderate.mjs",
     "types": "wrangler types src/worker-configuration.d.ts",

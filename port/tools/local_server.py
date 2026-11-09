@@ -59,7 +59,10 @@ def running(port=None, timeout=90, say=print):
     log_path = scratch / f'server-{port}.log'
     env = dict(os.environ, TEMP=str(run_dir / 'tmp'), TMP=str(run_dir / 'tmp'), TMPDIR=str(run_dir / 'tmp'),
                WRANGLER_SEND_METRICS='false')
-    cmd = ['node', str(WRANGLER), 'dev', '--port', str(port), '--ip', '127.0.0.1',
+    # wrangler.jsonc plus P2P rooms (finding 180): the official main Worker's config has none.
+    config = subprocess.run(['node', str(SERVER / 'tools' / 'selfhost-config.mjs')], cwd=SERVER, capture_output=True,
+                            text=True, check=True).stdout.strip()
+    cmd = ['node', str(WRANGLER), 'dev', '--config', config, '--port', str(port), '--ip', '127.0.0.1',
            '--persist-to', str(run_dir / 'state'), '--show-interactive-dev-session=false']
     with open(log_path, 'w') as log:
         with owned_process.start(cmd, cwd=SERVER, env=env, stdout=log, stderr=subprocess.STDOUT) as server:

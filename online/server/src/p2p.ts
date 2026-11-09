@@ -1,12 +1,13 @@
 // P2P rooms (finding 180): the server admits members, relays host-star signaling and gives each
 // member its own TURN credentials. Nothing else: the host's game runs the room's rules and carries
-// the race (port/render/net/src/session.rs); no race frame passes through here.
+// the race (port/render/session); no race frame passes through here.
 //
 // A P2P room is private. Signaling carries each member's network addresses to the host and the
 // host's to every member, so a room is reached only by its code and never listed; the game says so
 // when it creates or joins one. The official server runs these routes as their own Worker
 // (wrangler.p2p.jsonc, src/p2p-entry.ts), so deploying them never restarts an SFU room; a local or
-// self-hosted server serves them from the main Worker (src/index.ts).
+// self-hosted server serves them from the main Worker (src/index.ts) when its config has the
+// binding (wrangler.selfhost.jsonc, tools/selfhost-config.mjs).
 import { DurableObject } from "cloudflare:workers";
 import { CallGate, TURN_TTL_S, Turn, type SfuSecrets } from "./sfu";
 import {
@@ -49,6 +50,11 @@ const TURN_RETRY_MS = 60_000;
 
 type Message = Record<string, unknown>;
 
+/** The P2P room binding: in the P2P Worker (wrangler.p2p.jsonc) and a local or self-hosted main
+    Worker (wrangler.selfhost.jsonc, tools/selfhost-config.mjs); not in the official main Worker
+    (wrangler.jsonc), whose generated Env therefore lacks it. */
+export type P2pEnv = Env & { P2P_ROOM?: DurableObjectNamespace<P2pRoom> };
+
 /** What the room keeps: the room's code, host and build, and how many may join. */
 interface RoomMeta {
   code: string;
@@ -79,9 +85,11 @@ interface Connection {
 
 /** The P2P routes: a WebSocket to /v1/p2p/rooms/new makes a room, to /v1/p2p/rooms/CODE joins one
     (seven characters: an SFU room's code has six). Returns null for any other path. */
-export async function p2pRoute(request: Request, env: Env, path: string): Promise<Response | null> {
+export async function p2pRoute(request: Request, env: P2pEnv, path: string): Promise<Response | null> {
   const m = path.match(/^\/v1\/p2p\/rooms\/([^/]+)$/);
   if (!m) return null;
+  const rooms = env.P2P_ROOM;
+  if (!rooms) return Response.json({ error: "This server has no P2P rooms" }, { status: 404 });
   const create = m[1] === "new";
   const code = create ? "" : m[1].toUpperCase();
   if (!create && !isValidCode(code, P2P_CODE_LENGTH)) return Response.json({ error: "Bad room code" }, { status: 404 });
@@ -99,10 +107,10 @@ export async function p2pRoute(request: Request, env: Env, path: string): Promis
   headers.delete("x-dhd-ip-hash");
   if (ip) headers.set("x-dhd-ip-hash", ip);
   const forward = new Request(request, { headers });
-  if (!create) return env.P2P_ROOM.get(env.P2P_ROOM.idFromName(code)).fetch(forward);
+  if (!create) return rooms.get(rooms.idFromName(code)).fetch(forward);
   for (let attempt = 0; attempt < 8; attempt++) {
     const fresh = randomCode(P2P_CODE_LENGTH);
-    const room = env.P2P_ROOM.get(env.P2P_ROOM.idFromName(fresh));
+    const room = rooms.get(rooms.idFromName(fresh));
     if (await room.claim(fresh)) return room.fetch(forward);
   }
   return Response.json({ error: "Could not allocate a room code" }, { status: 503 });
