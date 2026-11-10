@@ -180,6 +180,36 @@ def rust_library(t, work):
     return rep
 
 
+def pgo_keys(profile, tools):
+    """Refuses a profile whose static functions are keyed by a path, as every profile recorded
+    before finding 195 is (and one recorded by another tool may be): this build looks its static
+    functions up by file name, would find none of them, and would say nothing (the compiles run
+    with -w), so most of what the profile is for would be lost unnoticed. Read once per profile (a
+    note beside its copy in the work folder); without an llvm-profdata to read it with (the NDK has
+    one) nothing is checked."""
+    note = profile.with_suffix('.keys')
+    if note.exists():
+        return
+    show = tools / 'llvm-profdata.exe' if tools else shutil.which('llvm-profdata')
+    if not show or not Path(show).exists():
+        return
+    r = subprocess.run([str(show), 'show', '--all-functions', str(profile)], capture_output=True, text=True,
+                       encoding='utf-8', errors='replace')
+    if r.returncode:
+        raise RuntimeError('--pgo-use: llvm-profdata cannot read the profile: ' + r.stderr.strip()[-300:])
+    names = [line[2:-1] for line in r.stdout.splitlines()
+             if line.startswith('  ') and not line.startswith('   ') and line.endswith(':')]
+    static = [n.rsplit(';', 1)[0] for n in names if ';' in n]
+    with_path = sum('/' in unit or chr(92) in unit for unit in static)   # chr(92): a backslash
+    if with_path:
+        raise RuntimeError("--pgo-use: %d of the profile's %d static functions are keyed by a path, not by a file "
+                           'name: it was recorded by a build without -static-func-full-module-prefix=false '
+                           '(before finding 195), and this build would find none of them. Record a new one '
+                           '(docs/BUILDING.md, "Build times").' % (with_path, len(static)))
+    note.write_text('%d functions, %d static, keyed by file name\n' % (len(names), len(static)))
+    print('pgo: %d functions in the profile, %d static, keyed by file name' % (len(names), len(static)), flush=True)
+
+
 def sdl(t, a):
     """(SDL3's library, its include directory, the libraries it needs at link time)."""
     import sdl3
@@ -403,14 +433,22 @@ def main():
         maps += [(a.llvm, 'llvm')] if t.windows else [(ndk, 'ndk')] if t.android else [(simde, 'simde')]
         prefix_maps = ['-ffile-prefix-map=%s=%s' % (spelling, new) for old, new in maps
                        for spelling in dict.fromkeys((str(old), str(old).replace('\\', '/')))]  # a set's order varies
-        pgo_flags = []
+        # A static function's key in a profile is "<its unit's path>;<name>", the path as the compiler
+        # was given it, and -ffile-prefix-map does not touch it: a profile recorded in one checkout
+        # or build folder then matches no static function of a build made in another (finding 195:
+        # the VU1 kernels and translated blocks, the GS and graphics queue's helpers and every static
+        # function of the module's C went unprofiled in every build but the recording lane's own).
+        # With this the key is "<file name>;<name>", the same wherever the build is made; the
+        # recording build and the using build must both have it (pgo_flags[0] alone goes to the link).
+        pgo_flags, pgo_names = [], ['-mllvm', '-static-func-full-module-prefix=false']
         if a.pgo_generate:
-            pgo_flags = ['-fprofile-generate']
+            pgo_flags = ['-fprofile-generate', *pgo_names]
         elif a.pgo_use:  # copied under its hash, so the object cache keys follow its content
             data = a.pgo_use.read_bytes()
             profile = work / ('pgo-%s.profdata' % hashlib.sha256(data).hexdigest()[:16])
             profile.write_bytes(data)
-            pgo_flags = ['-fprofile-use=' + str(profile)]
+            pgo_keys(profile, tools if t.android else None)
+            pgo_flags = ['-fprofile-use=' + str(profile), *pgo_names]
         if t.windows:
             common = [a.llvm/'clang-cl.exe', '--target=x86_64-pc-windows-msvc', '/nologo',
                       '/O2', '/clang:-O3', '/clang:-march=x86-64-v2', '/clang:-mtune=znver3',

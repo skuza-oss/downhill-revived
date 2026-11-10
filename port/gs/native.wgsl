@@ -50,11 +50,12 @@ struct Native {
     // (GS 12.4 units), the largest Z, the Z scale.
     mesh_offset: vec4<f32>,
 }
-// A window of draws' constants (render.rs: group 0's dynamic offset picks the window, finding
-// 172); a draw's are the one at its instance index, which its vertices pass to its pixels (flat).
-// Each draw entry point loads them into `nat` first, for the helpers below.
-@group(0) @binding(0) var<uniform> native_draws: array<Native, 256>;
-var<private> nat: Native;
+// The draw's constants: a uniform block at group 0's dynamic offset (render.rs binds it again only
+// when a draw's constants differ from the last one's). Not an array indexed per draw (finding 172's
+// step): a pixel reading its constants through a varying index cannot keep them in uniform
+// registers, which on a Mali-G52 cost the commonest scene shader 15 % more arithmetic and two
+// loads a pixel, and the vertex stage 5 loads a vertex (finding 195).
+@group(0) @binding(0) var<uniform> nat: Native;
 // A mesh draw's object records (native_core.inc's native_mesh_record): the picture's vertex buffer
 // again, as vec4s; a record is four vertices, eight vec4s: the matrix's columns, the guard band,
 // the colour scale, the fog (A, B, max). Bound for the mesh pipelines only (init.rs's mesh layout).
@@ -92,16 +93,13 @@ struct Varyings {
     @builtin(position) @invariant position: vec4<f32>,
     @location(0) @interpolate(linear) stqf: vec4<f32>,
     @location(1) @interpolate(linear) color: vec4<f32>,
-    @location(2) @interpolate(flat) draw: u32,   // the draw's constants (native_draws)
 }
 
 // nat.target_size is the attachment's size in GS pixels (its pixels / T), so GS x lands at x * T.
 @vertex
 fn native_vertex(@location(0) position_in: vec3<f32>, @location(1) stqf: vec4<f32>,
-                 @location(2) color: vec4<u32>, @builtin(instance_index) draw: u32) -> Varyings {
-    nat = native_draws[draw];
+                 @location(2) color: vec4<u32>) -> Varyings {
     var o: Varyings;
-    o.draw = draw;
     var position = position_in;
     // Upscaled sprites sampled by whole texels (copies, nearest-magnified sprites) cover whole
     // GS pixels, as at 1x; bilinear sprites keep sub-GS-pixel corners and smooth UVs, since
@@ -138,15 +136,12 @@ struct MeshVaryings {
     @location(0) stqf: vec4<f32>,
     @location(1) color: vec4<f32>,
     @location(2) w: f32,
-    @location(3) @interpolate(flat) draw: u32,   // the draw's constants (native_draws)
 }
 
 @vertex
 fn native_mesh_vertex(@location(0) position_in: vec3<f32>, @location(1) uvq: vec4<f32>,
-                      @location(2) color: vec4<u32>, @builtin(instance_index) draw: u32) -> MeshVaryings {
-    nat = native_draws[draw];
+                      @location(2) color: vec4<u32>) -> MeshVaryings {
     var o: MeshVaryings;
-    o.draw = draw;
     let r = 2u * u32(uvq.w);   // the record's first vec4: two a vertex
     let matrix = mat4x4<f32>(mesh_records[r], mesh_records[r + 1u], mesh_records[r + 2u], mesh_records[r + 3u]);
     let mesh_fog = mesh_records[r + 6u];
@@ -180,7 +175,6 @@ fn native_mesh_vertex(@location(0) position_in: vec3<f32>, @location(1) uvq: vec
 // three vertices share comes out exactly (the two interpolations round apart by an ulp or two).
 fn mesh_varyings(m: MeshVaryings) -> Varyings {
     var i: Varyings;
-    i.draw = m.draw;
     let inv = 1.0 / m.w;
     i.position = m.position;
     i.stqf = vec4<f32>(m.stqf.xyz * inv, round(m.stqf.w * inv * 65536.0) / 65536.0);
@@ -376,7 +370,6 @@ fn texture_uv(i: Varyings) -> vec2<f32> {
 // The target's colour and alpha (alpha / 255): no blending on As, or the alpha-only second draw.
 @fragment
 fn native_pixel(i: Varyings) -> @location(0) vec4<f32> {
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -387,7 +380,6 @@ fn native_pixel(i: Varyings) -> @location(0) vec4<f32> {
 // RGB blended with As / 128 as the source alpha (the alpha channel is masked off).
 @fragment
 fn native_pixel_blend(i: Varyings) -> @location(0) vec4<f32> {
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -398,7 +390,6 @@ fn native_pixel_blend(i: Varyings) -> @location(0) vec4<f32> {
 // native_pixel and native_pixel_blend for a decoded texture's texels.
 @fragment
 fn native_pixel_u(i: Varyings) -> @location(0) vec4<f32> {
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -408,7 +399,6 @@ fn native_pixel_u(i: Varyings) -> @location(0) vec4<f32> {
 
 @fragment
 fn native_pixel_blend_u(i: Varyings) -> @location(0) vec4<f32> {
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -420,7 +410,6 @@ fn native_pixel_blend_u(i: Varyings) -> @location(0) vec4<f32> {
 @fragment
 fn native_pixel_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
     let i = mesh_varyings(m);
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -431,7 +420,6 @@ fn native_pixel_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
 @fragment
 fn native_pixel_blend_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
     let i = mesh_varyings(m);
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -442,7 +430,6 @@ fn native_pixel_blend_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
 @fragment
 fn native_pixel_u_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
     let i = mesh_varyings(m);
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);
@@ -453,7 +440,6 @@ fn native_pixel_u_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
 @fragment
 fn native_pixel_blend_u_mesh(m: MeshVaryings) -> @location(0) vec4<f32> {
     let i = mesh_varyings(m);
-    nat = native_draws[i.draw];
     let uv = texture_uv(i);
     let across = dpdx(uv);
     let down = dpdy(uv);

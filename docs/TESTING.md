@@ -165,6 +165,7 @@ Pictures:
 | `DHD_NATIVE_VU1=on\|off\|LOOPS[:skip\|:shadow][:gpuclip]` | Native VU (dhd.ini `native_vu`, REVIVED SETTINGS > Graphics; findings 164, 167, 194): `on` draws every translated VU1 loop with the native renderer; for tests a list of loops (`0170,1708`, groups `prelit`, `lit`, `shadow`, `all`), `:skip` or `:shadow` forcing a mode (without them: shadow under `DHD_EXACT_PROBE`, else skip), `:gpuclip` the near-bound batches too (a measurement); `DHD_NATIVE_VU1_CHECK=1` (shadow) compares each item with the VU's packet |
 | `DHD_TEST_NO_MESHES=N` | the native renderer refuses the mesh draws at its N-th picture (0: at its start), as a driver refusing a mesh pipeline would: one dhd.log line, and the VU runs every program from the next batch (finding 194) |
 | `DHD_NATIVE_SPEC=0\|sync` | `0`: the generic draw shader only; `sync`: specialised draw pipelines built at first use, not on a worker (replays and picture checks; finding 131) |
+| `DHD_ENCODE_CUT=N` | where the native renderer cuts a large picture's command encoder, to finish its first part on a helper thread: at the first pass that begins once N percent of the picture's encoder work is behind (60 unless set; `0`: never, one encoder a picture as before, for a comparison; finding 195) |
 
 Sound evidence: `DHD_SND_WAV=path` (the final mix), `DHD_SND_VOICE_TRACE=path` (each sounding voice
 every 800 samples), `DHD_SND_GAIN_TRACE`, `DHD_SND_REPORT`, `DHD_SND_TRACE=1` (sound.h).

@@ -194,9 +194,9 @@ pub struct Objects {
     pub draw_layout: wgpu::PipelineLayout,
     /// (uniform, texels): draws from a decoded texture (`_u` entry points).
     pub texels_draw_layout: wgpu::PipelineLayout,
-    /// Group 0 of the draw pipelines (finding 172): a window of `DRAW_SLOTS` draw constants
-    /// (arenas.rs) at a dynamic offset, each draw reading its own by its instance index; and the
-    /// draw pipelines' layouts with it, (draws, texture) and (draws, texels).
+    /// Group 0 of the draw pipelines: the draw's constants (arenas.rs `DRAW_BYTES`, its minimum
+    /// size given, so no draw waits for a late size check) at a dynamic offset; and the draw
+    /// pipelines' layouts with it, (draws, texture) and (draws, texels).
     pub draws_layout: wgpu::BindGroupLayout,
     pub native_draw_layout: wgpu::PipelineLayout,
     pub native_texels_draw_layout: wgpu::PipelineLayout,
@@ -635,7 +635,7 @@ impl Objects {
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: true,
-                min_binding_size: wgpu::BufferSize::new(crate::native::arenas::DRAW_WINDOW),
+                min_binding_size: wgpu::BufferSize::new(crate::native::arenas::DRAW_BYTES),
             },
             count: None,
         }]);
