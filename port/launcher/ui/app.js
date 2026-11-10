@@ -24,6 +24,7 @@ const TABS = [
     { key: 'textures', label: 'Texture pack', hint: 'Uses the installed PCSX2 texture pack', type: 'switch',
       when: () => state.texturePack, offHint: 'No pack found. README.txt says where one goes.' },
     { key: 'font', label: 'Font', type: 'seg' },
+    { key: 'native_vu', label: 'Native VU (experimental)', hint: 'The GPU runs the PS2\'s VU1 programs: faster, still new', type: 'switch' },
   ]],
   ['Display', [
     { key: 'window', label: 'Display', type: 'seg' },

@@ -38,4 +38,22 @@ typedef struct {
     float fog[4];                  /* fog = clamp(fog[0] + fog[1] / w, 0, fog[2]) */
 } GsMeshHeader;
 
+/* The setting (REVIVED SETTINGS' Native VU, dhd.ini native_vu, DHD_NATIVE_VU1; finding 194) as one
+   word: the translated loops, a bit each in vu1_mesh.inc's mesh_programs order (GS_MESH_LOOP_NAMES),
+   and its test flags. "on" (or 1, true, yes, all) is every loop; "off" (0, false, no, empty) none;
+   otherwise the loops by address or group (prelit, lit, shadow, all), comma separated, then flags:
+   ":skip" or ":shadow" force a mode, ":gpuclip" draws the batches the VU would clip too. */
+#define GS_MESH_LOOP_NAMES "0170", "1708", "08B0", "0798", "18B0", "1110", "13A0", "1510", "3140", "0AA0", "0C30", "2DE8"
+enum {
+    GS_MESH_LOOPS = 12,
+    GS_MESH_PRELIT = 0x1F, GS_MESH_LIT = 0x6E0, GS_MESH_SHADOW_LOOPS = 0x100, GS_MESH_ALL = (1 << GS_MESH_LOOPS) - 1,
+    GS_MESH_FORCE_SKIP = 1 << 16, GS_MESH_FORCE_SHADOW = 1 << 17, GS_MESH_GPU_CLIP = 1 << 18
+};
+unsigned gs_mesh_parse(const char *value);
+/* The setting as the game thread last read it (gs_mesh_setting_read: at the native renderer's start
+   and when REVIVED SETTINGS changes a picture option, gs_present_options_apply), for the VU thread,
+   which reads no environment; -1 until it was read. Atomic loads and stores (any thread). */
+extern int gs_mesh_setting;
+void gs_mesh_setting_read(void);
+
 #endif

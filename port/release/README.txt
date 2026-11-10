@@ -104,13 +104,18 @@ Settings: OPTIONS > REVIVED SETTINGS in the game's menu, the first row, with Dis
 Controls, Online and Game tabs (L1/R1 switch them): resolution, display mode, window size,
 picture shape, scaling, widescreen, skip movies, vibration, dead zone, button icons, your keys
 and buttons, the size of online riders' names (Off, Small, Medium as the original, Large),
-texture pack, font, the Performance group, FPS & Ping (frames a second; online the round trip
+texture pack, font, the Performance group, Native VU, FPS & Ping (frames a second; online the round trip
 to the room's server, "SERVER N MS", and to the race network, "RACE N MS"; in a race "RIDERS N
 MS", how old the other riders' positions are when they arrive). Changes are saved to dhd.ini.
 Performance (Graphics tab): Performance Mode ON turns off the riders' shadows and the sun's glow,
 the lens flare's ghosts and the particles (dust, dirt, spray), which runs faster on slower PCs and
 phones; each of the three can also be set alone (dhd.ini shadows, lens_flare, particles = 0).
 They change only the picture, at once, online too.
+Native VU (Graphics tab, Experimental; the launcher's Graphics page too): the PS2's VU1 programs
+that place the world, the lit objects and the shadows run on your graphics card instead of being
+emulated, which is faster. It is new and off by default (dhd.ini native_vu = on or off); it
+changes only the picture, at once, online too. If your graphics card can't run it, the game says
+so in dhd.log and goes on without it.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game

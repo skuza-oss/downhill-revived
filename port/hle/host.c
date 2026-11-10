@@ -11,6 +11,7 @@
 #include "stick.h"
 #include "controls_table.h"  /* the bindings' tables (port/render/settings, finding 157) */
 #include "../gs/button_icons.h"
+#include "../gs/gs_mesh.h"   /* gs_mesh_setting_read: Native VU (finding 194) */
 #include "../include/version.h"
 #include "../runtime/sha256.h"
 
@@ -1168,6 +1169,7 @@ void host_settings_load(void)
         at += n + (at[n] == ',');
     }
     hle_log("settings:%s\n", *settings_seen ? settings_seen : " (none)");
+    gs_mesh_setting_read();   /* Native VU for the VU thread (vu1_mesh.inc), before its first run */
     /* The install id for the online hello (finding 161; port/net/net.c): made once and kept in
        dhd.ini. Set straight into the environment, never through settings_set: dhd.log, which
        players post, must not show it (whoever copied it could get its player banned). */

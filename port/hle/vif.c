@@ -541,7 +541,7 @@ static void run_micro(Vif *v, uint32_t addr)
     if (layout.state != 1) layout_run(addr, (v->code >> 24 & 0x7f) == MSCNT);
     uint32_t *mesh_packet = NULL;
     double mesh_start = profile_start && mesh.state == MESH_ON ? host_wall_seconds() : 0;
-    int mesh_batch = mesh.state != MESH_OFF ? mesh_before(addr, (v->code >> 24 & 0x7f) == MSCNT, &mesh_packet) : 0;
+    int mesh_batch = mesh_before(addr, (v->code >> 24 & 0x7f) == MSCNT, &mesh_packet);   /* Native VU: live (vu1_mesh.inc) */
     if (mesh_batch == 1) {
         mesh_send(mesh_packet);
         mesh_skipped();
@@ -554,7 +554,7 @@ static void run_micro(Vif *v, uint32_t addr)
         }
         graphics_provenance.shadow = 0;
         if (mesh_batch == 2) mesh_send(mesh_packet);
-        if (mesh.state != MESH_OFF) mesh_after(addr, (v->code >> 24 & 0x7f) == MSCNT);
+        if (mesh.state == MESH_ON) mesh_after(addr, (v->code >> 24 & 0x7f) == MSCNT);
     }
     layout.run = NULL;
     if (profile_start) vu_profile_end(profile_start, profile_overlay, graphics_provenance.program, addr, (v->code >> 24 & 0x7f) == MSCNT);

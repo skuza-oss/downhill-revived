@@ -1,7 +1,8 @@
-/* Native VU1 meshes (findings 164 and 167), included by vif.c: DHD_NATIVE_VU1 hands overlay B's
-   batch loops to the native renderer instead of running them. The value lists the loops (by their
-   address; "prelit", "lit", "shadow" or "all" for groups), then optional flags:
-   DHD_NATIVE_VU1=0170,1708:skip.
+/* Native VU1 meshes (findings 164, 167 and 194), included by vif.c: REVIVED SETTINGS' Native VU
+   (experimental; dhd.ini native_vu, DHD_NATIVE_VU1) hands overlay B's batch loops to the native
+   renderer instead of running them. "on" is every loop below; for tests DHD_NATIVE_VU1 also lists
+   loops (by their address; "prelit", "lit", "shadow" or "all" for groups), then optional flags:
+   DHD_NATIVE_VU1=0170,1708:skip (gs_mesh.h's gs_mesh_parse).
 
    | loop | VI13  | setup      | fog      | colour                      | ST                      | back faces | clipping |
    | 0170 | 0x011 | 0078       | computed | c vf31                      | UV + vf19 from vertex 1 | culled     | yes      |
@@ -76,7 +77,7 @@
 #include "../gs/gs_mesh.h"
 
 #if defined(DHD_WEB_VU) || defined(DHD_WEB_HOST)
-enum { MESH_OFF = 1 };
+enum { MESH_OFF = 1, MESH_ON = 2 };   /* the browser: no mesh renderer (Native VU is not offered there) */
 static struct { int state; } mesh = {MESH_OFF};
 static int mesh_before(unsigned addr, int mscnt, uint32_t **packet) { (void)addr, (void)mscnt, (void)packet; return 0; }
 static void mesh_send(uint32_t *packet) { (void)packet; }
@@ -118,8 +119,8 @@ static const MeshProgram mesh_programs[] = {
     {"0C30", 0x186, 0, MESH_COLOUR_SCALED, MESH_ST_ENVIRONMENT, 0, 1},
     {"2DE8", 0x5BD, 1, MESH_COLOUR_LIGHT_ALPHA, MESH_ST_PROJECTED, 0, 1, 0, 0x2E98},
 };
-enum { MESH_PRELIT = 0x1F, MESH_LIT = 0x6E0, MESH_SHADOW_LOOP = 0x100 };   /* the groups' bits */
 enum { MESH_PROGRAMS = sizeof mesh_programs / sizeof *mesh_programs };
+_Static_assert(MESH_PROGRAMS == GS_MESH_LOOPS, "mesh_programs: one bit each in the setting, in GS_MESH_LOOP_NAMES' order");
 
 typedef struct {
     uint64_t batches, fallbacks, vertices, triangles, joins, why[MESH_WHYS];
@@ -249,52 +250,51 @@ static void mesh_check(void)
     }
 }
 
+/* Whether this VU1 run's batch may be translated: the setting (Native VU, gs_mesh_setting: read on
+   the game thread at the start and whenever REVIVED SETTINGS changes it, so it applies live) and
+   the renderer (gs_mesh_mode: none, or one that refused the mesh draws, finding 194). Asked before
+   every run; a change takes effect at the next batch. Batches translated and batches run on the VU
+   mix freely (a skipped batch leaves the VU as its program would; the near-bound batches have
+   always run on the VU between translated ones), so the switch can turn at any batch.
+   The renderer is made at the first vsync (present.c), which can come after the first VU1 runs:
+   until then the translation waits. A forced mode (":skip", ":shadow") runs without a mesh
+   renderer too (the state trace's headless runs have none): the items are then dropped, and only
+   what the translation does to game state is seen. One log line at each change. */
 static int mesh_enabled(void)
 {
-    static const char *s;
-    static int read, forced;
-    if (mesh.state) return mesh.state == MESH_ON;
-    if (!read) {
-        read = 1;
-        s = getenv("DHD_NATIVE_VU1");
-        /* the loops before the first ':' (comma separated; "prelit" for all of them), flags after */
-        size_t list = s ? strcspn(s, ":") : 0;
-        for (const char *t = s; t && t < s + list;) {
-            size_t len = strcspn(t, ",:");
-            if (len == 6 && !strncmp(t, "prelit", 6)) mesh.enabled |= MESH_PRELIT;
-            if (len == 3 && !strncmp(t, "lit", 3)) mesh.enabled |= MESH_LIT;
-            if (len == 6 && !strncmp(t, "shadow", 6)) mesh.enabled |= MESH_SHADOW_LOOP;
-            if (len == 3 && !strncmp(t, "all", 3)) mesh.enabled |= (1u << MESH_PROGRAMS) - 1;
-            for (unsigned p = 0; p < MESH_PROGRAMS; p++)
-                if (len == 4 && !strncmp(t, mesh_programs[p].name, 4)) mesh.enabled |= 1u << p;
-            t += len + (t[len] == ',');
-            if (!len) break;
-        }
-        if (!mesh.enabled) { mesh.state = MESH_OFF; return 0; }
-        forced = strstr(s + list, ":skip") ? MESH_SKIP : strstr(s + list, ":shadow") ? MESH_SHADOW : 0;
-        mesh.gpu_clip = strstr(s + list, ":gpuclip") != NULL;
-    }
-    /* The renderer is made at the first vsync (present.c), which can come after the first VU1 runs:
-       until field 600 the translation waits for it. A forced mode runs without a mesh renderer too
-       (the state trace's headless runs have none): the items are then dropped, and only what the
-       translation does to game state is seen. */
-    if (!gs_mesh_mode && !forced) {
-        if (kernel_vsync_count < 600) return 0;
-        hle_log("native VU1: DHD_NATIVE_VU1=%s needs the native renderer with indexed fields; off\n", s);
+    static int applied = -1, applied_mode = -1, reported, no_renderer;
+    int setting = __atomic_load_n(&gs_mesh_setting, __ATOMIC_ACQUIRE);
+    int mode = __atomic_load_n(&gs_mesh_mode, __ATOMIC_RELAXED);
+    if (setting < 0) setting = 0;   /* not read yet (host_settings_load reads it before the game runs) */
+    unsigned loops = (unsigned)setting & GS_MESH_ALL;
+    int forced = setting & GS_MESH_FORCE_SKIP ? MESH_SKIP : setting & GS_MESH_FORCE_SHADOW ? MESH_SHADOW : 0;
+    int on = loops && (mode || forced);
+    if (setting == applied && (on ? mode : 0) == applied_mode) return mesh.state == MESH_ON;
+    if (loops && !on && kernel_vsync_count < 600) return 0;   /* the renderer may still come */
+    int was_on = mesh.state == MESH_ON;
+    applied = setting;
+    applied_mode = on ? mode : 0;
+    if (!on) {
         mesh.state = MESH_OFF;
+        if (loops && !no_renderer++)
+            hle_log("native VU1: Native VU needs the native renderer with indexed fields (or the GPU refused its "
+                    "draws); the VU runs every program\n");
+        else if (was_on) hle_log("native VU1: off; the VU runs every program\n");
         return 0;
     }
-    mesh.mode = forced ? forced : gs_mesh_mode == 2 ? MESH_SHADOW : MESH_SKIP;
+    mesh.enabled = loops;
+    mesh.gpu_clip = (setting & GS_MESH_GPU_CLIP) != 0;
+    mesh.mode = forced ? forced : mode == 2 ? MESH_SHADOW : MESH_SKIP;
     mesh.state = MESH_ON;
     mesh.check = mesh.mode == MESH_SHADOW && getenv("DHD_NATIVE_VU1_CHECK") != NULL;
     char names[5 * MESH_PROGRAMS + 1] = "";
     for (unsigned p = 0; p < MESH_PROGRAMS; p++)
         if (mesh.enabled >> p & 1) { strcat(names, " "); strcat(names, mesh_programs[p].name); }
-    hle_log("native VU1: loops%s drawn by the native renderer, %s (DHD_NATIVE_VU1=%s)%s\n", names,
-            mesh.mode == MESH_SHADOW ? "shadow: the VU runs them too, for the exact Z probe" : "the VU skips them", s,
-            gs_mesh_mode ? "" : "; no mesh renderer: the items are dropped");
+    hle_log("native VU1: loops%s drawn by the native renderer, %s%s\n", names,
+            mesh.mode == MESH_SHADOW ? "shadow: the VU runs them too, for the exact Z probe" : "the VU skips them",
+            mode ? "" : "; no mesh renderer: the items are dropped");
     if (mesh.gpu_clip) hle_log("native VU1: batches the VU would clip are drawn too, clipped by the GPU (:gpuclip)\n");
-    atexit(mesh_report);
+    if (!reported++) atexit(mesh_report);
     return 1;
 }
 

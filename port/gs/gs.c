@@ -737,6 +737,56 @@ void gs_feed(Gs *g, unsigned path, const uint32_t *words, size_t count)
 int gs_mesh_mode;
 void (*gs_mesh_hook)(Gs *gs, const uint32_t *words, size_t count);
 unsigned gs_vu_shadow;
+int gs_mesh_setting = -1;
+
+/* gs_mesh.h: a word of [a, a + n) without case */
+static int mesh_word(const char *a, size_t n, const char *word)
+{
+    size_t i = 0;
+    for (; i < n && word[i]; i++) {
+        char c = a[i] >= 'A' && a[i] <= 'Z' ? (char)(a[i] - 'A' + 'a') : a[i];
+        char w = word[i] >= 'A' && word[i] <= 'Z' ? (char)(word[i] - 'A' + 'a') : word[i];
+        if (c != w) return 0;
+    }
+    return i == n && !word[i];
+}
+
+unsigned gs_mesh_parse(const char *s)
+{
+    static const char *const names[GS_MESH_LOOPS] = {GS_MESH_LOOP_NAMES};
+    static const char *const on[] = {"on", "1", "true", "yes"};
+    _Static_assert(sizeof names / sizeof *names == GS_MESH_LOOPS, "GS_MESH_LOOP_NAMES");
+    if (!s) return 0;
+    while (*s == ' ' || *s == '\t') s++;
+    size_t list = strcspn(s, ":");
+    size_t end = list;
+    while (end && (s[end - 1] == ' ' || s[end - 1] == '\t')) end--;
+    for (unsigned i = 0; i < sizeof on / sizeof *on; i++)
+        if (mesh_word(s, end, on[i])) return GS_MESH_ALL;
+    unsigned loops = 0;
+    for (const char *t = s; t < s + list;) {
+        size_t len = strcspn(t, ",:");
+        if (mesh_word(t, len, "prelit")) loops |= GS_MESH_PRELIT;
+        if (mesh_word(t, len, "lit")) loops |= GS_MESH_LIT;
+        if (mesh_word(t, len, "shadow")) loops |= GS_MESH_SHADOW_LOOPS;
+        if (mesh_word(t, len, "all")) loops |= GS_MESH_ALL;
+        for (unsigned p = 0; p < GS_MESH_LOOPS; p++)
+            if (mesh_word(t, len, names[p])) loops |= 1u << p;
+        if (!len) break;
+        t += len + (t[len] == ',');
+    }
+    if (!loops) return 0;
+    const char *flags = s + list;
+    if (strstr(flags, ":skip")) loops |= GS_MESH_FORCE_SKIP;
+    else if (strstr(flags, ":shadow")) loops |= GS_MESH_FORCE_SHADOW;
+    if (strstr(flags, ":gpuclip")) loops |= GS_MESH_GPU_CLIP;
+    return loops;
+}
+
+void gs_mesh_setting_read(void)
+{
+    __atomic_store_n(&gs_mesh_setting, (int)gs_mesh_parse(getenv("DHD_NATIVE_VU1")), __ATOMIC_RELEASE);
+}
 
 void gs_mesh(Gs *g, const uint32_t *words, size_t count)
 {
