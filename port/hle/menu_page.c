@@ -91,6 +91,7 @@ static void rows(MenuPage *p)
     p->build(p);
     int n = menu_page_rows(p), y = ROW_Y, step = ROW_STEP;
     int last = p->hints ? FOOTER_Y - HINT_ABOVE - ROW_STEP : FOOTER_Y - FOOTER_GAP;
+    if (p->rows_last > 0 && last > p->rows_last) last = p->rows_last;
     int top = (p->hints ? TITLE_MIN_HINTS : TITLE_MIN) + TITLE_ABOVE;
     if (n > 0 && y + (n - 1) * step > last) y = last - (n - 1) * step;
     if (y < top) {

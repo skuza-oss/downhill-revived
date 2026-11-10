@@ -393,6 +393,9 @@ static void page_build(MenuPage *p)
 {
     p->title = page_title();
     p->title_y = screen ? 0 : 35;
+    /* the tabs' legend at y 180 (page_draw) stays under the rows' panel, which ends 13 below the
+       last row: a tab of ten rows (Graphics) moves its rows up; nine or fewer are where they were */
+    p->rows_last = screen ? 0 : 166;
     p->footer = NULL;
     if (screen == CONTROLS) { controls_settings_build(p); return; }
     if (screen) { touch_settings_build(p, screen); return; }
