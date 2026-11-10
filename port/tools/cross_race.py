@@ -5,6 +5,8 @@ machine reaches by an ssh reverse tunnel (its 127.0.0.1:8787 is this PC's server
     python port/tools/cross_race.py OUT --host pc  --remote user@mac --remote-app '/path/Downhill Revived.app/Contents/MacOS/dhd'
     python port/tools/cross_race.py OUT --host mac ...                 # the other way round
 
+--private makes the host's room a private SFU room (CREATE A PRIVATE RACE) that the other joins by its
+code, as the P2P guest does: a release check on the official server, where nobody else can join it.
 --backend p2p races in a P2P room (findings 180, 186): the host takes CREATE A P2P RACE and the
 other joins by the room's code (a P2P room is never listed); the games link to each other directly.
 --force-turn turns direct UDP off on both games: in an SFU room the TURN relay carries the race, in
@@ -46,6 +48,8 @@ P2P_HOST_NAV = (MENUS + ',1450:6:down,1470:6:down,1490:6:down,1510:6:down,1530:6
                 ',1590:8:cross,2130:8:cross,2530:8:cross')
 P2P_GUEST_NAV = (MENUS + ',1450:6:down,1470:6:down,1490:6:down,1510:6:down,1530:6:down,1550:6:down,1570:6:down'
                  ',1610:8:cross,1670:6:down,1710:8:cross,2130:8:cross,2530:8:cross,2930:8:cross')
+# A private SFU room: the host's row is CREATE A PRIVATE RACE (row 4); the guest joins by code as in P2P
+PRIVATE_HOST_NAV = MENUS + ',1450:6:down,1470:6:down,1490:6:down,1510:6:down,1550:8:cross,2130:8:cross,2530:8:cross'
 ROOM = r'online menu: room (\w{6,7}) \(host\)'
 PEDAL = '0:400:cross'
 PUNCHES = ','.join(f'{1 + k * 0.5:.1f}:0.15:{"square" if k % 2 == 0 else "circle"}' for k in range(80))
@@ -60,6 +64,7 @@ def main():
     p.add_argument('--host', choices=('pc', 'mac'), required=True, help='which side makes the room')
     p.add_argument('--races', type=int, default=2)
     p.add_argument('--backend', choices=('sfu', 'p2p'), default='sfu')
+    p.add_argument('--private', action='store_true', help='a private SFU room joined by its code (not with --backend p2p)')
     p.add_argument('--server', help='use an existing signaling server instead of a local server/tunnel')
     p.add_argument('--force-turn', action='store_true', help='direct UDP off on both games: the TURN relay (SFU room) or the SFU fallback (P2P room)')
     p.add_argument('--exe', type=Path, default=ROOT / 'build' / 'host64-exe' / 'dhd64.exe')
@@ -69,6 +74,8 @@ def main():
     p.add_argument('--remote-dir', default='dhd-cross-race', help='its run folder (relative: under its home)')
     p.add_argument('--ssh-option', action='append', default=[], help='extra ssh -o options, e.g. HostKeyAlias=...')
     a = p.parse_args()
+    if a.private and a.backend == 'p2p':
+        p.error('--private is for SFU rooms (a P2P room is private already)')
     if not (a.remote and a.remote_app and a.remote_iso):
         p.error('--remote, --remote-app and --remote-iso (or DHD_REMOTE, DHD_REMOTE_APP, DHD_REMOTE_ISO) are needed')
     ssh_base = ['ssh', '-o', 'BatchMode=yes', *[x for o in a.ssh_option for x in ('-o', o)]]
@@ -91,9 +98,9 @@ def main():
         common['DHD_NET_P2P_UDP' if a.backend == 'p2p' else 'DHD_NET_SFU_UDP'] = '0'
     pc_name, remote_name = ('PCHOST', 'MACGUEST') if a.host == 'pc' else ('PCGUEST', 'MACHOST')
     p2p = a.backend == 'p2p'
-    host_env = dict(DHD_AUTOPAD_FRAMES=P2P_HOST_NAV if p2p else HOST_NAV, DHD_RACE_PAD=PEDAL + ',26:0.15:right',
+    host_env = dict(DHD_AUTOPAD_FRAMES=P2P_HOST_NAV if p2p else PRIVATE_HOST_NAV if a.private else HOST_NAV, DHD_RACE_PAD=PEDAL + ',26:0.15:right',
                     DHD_NET_TEST_FINISH='20')
-    guest_env = dict(DHD_AUTOPAD_FRAMES=P2P_GUEST_NAV if p2p else GUEST_NAV, DHD_RACE_PAD=PEDAL + ',' + PUNCHES,
+    guest_env = dict(DHD_AUTOPAD_FRAMES=P2P_GUEST_NAV if p2p or a.private else GUEST_NAV, DHD_RACE_PAD=PEDAL + ',' + PUNCHES,
                      DHD_NET_TEST_FINISH='40')
     pc_role, remote_role = (host_env, guest_env) if a.host == 'pc' else (guest_env, host_env)
 
