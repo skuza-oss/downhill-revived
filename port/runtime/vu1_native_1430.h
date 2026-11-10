@@ -4,6 +4,8 @@
    DIV's D bit. FCAND reads the CLIP issued four pairs earlier. The closed
    clipping routine returns through VI5 to 15E0; it retains exact pipeline
    helpers. Unsupported vertex counts or a pending Q decline before writing. */
+/* The registers the loop writes (the others stay in the file as loaded). */
+enum { WRITES_1430 = 1u << 5 | 1u << 6 | 1u << 8 | 1u << 9 | 1u << 10 | 1u << 11 | 1u << 12 | 1u << 16 | 1u << 20 | 1u << 23 | 1u << 24 | 1u << 25 | 1u << 28 | 1u << 29 | 1u << 30 };
 static inline __attribute__((always_inline)) unsigned native_geometry_1430_impl(Vu *u, int sticky_complete)
 {
     unsigned begin = u->c->vi[8], end = u->c->vi[10], distance = (end - begin) & 65535;
@@ -14,20 +16,19 @@ static inline __attribute__((always_inline)) unsigned native_geometry_1430_impl(
     drain_flags(u);
     update_q(u);
     unsigned entry_status = u->status;
-    __m128 v[32], acc = _mm_loadu_ps(cpu.vacc);
-    for (unsigned i = 0; i < 32; i++)
-        v[i] = vf4(u, i);
+    __m128 v[32], c[32], acc = _mm_loadu_ps(cpu.vacc);
+    NATIVE_LOAD_FILE();
     NativeFlags flags = {_mm_setzero_si128(), _mm_setzero_si128(), _mm_setzero_si128(),
                          _mm_setzero_ps(), 0};
     flags.sticky_complete = sticky_complete;
     unsigned clip = u->clip, pairs = 0, index = begin;
     uint16_t *vi = cpu.vi;
     float q = cpu.q;
+    __m128 qv = operand4(_mm_set1_ps(q)); /* Q as an operand: the file's clamped, a divide's as it is */
     unsigned q_flags = u->status & 0x30;
 #define NATIVE_SAVE()                                                                              \
     do {                                                                                           \
-        for (unsigned i = 1; i < 32; i++)                                                          \
-            _mm_storeu_ps(cpu.vf[i].f, v[i]);                                                      \
+        NATIVE_STORE_FILE(WRITES_1430);                                                            \
         _mm_storeu_ps(cpu.vacc, acc);                                                              \
         cpu.q = q;                                                                                 \
         Upper last = {0};                                                                          \
@@ -47,11 +48,9 @@ static inline __attribute__((always_inline)) unsigned native_geometry_1430_impl(
         u->cycle += 64;                                                                            \
         u->flag_cycle = u->cycle;                                                                  \
     } while (0)
-#define NADD(a, b, d) native_add(&flags, (a), (b), (d))
-#define NMUL(a, b, d) native_mul(&flags, (a), (b), (d))
-/* Every ACC input here follows an all-lane FMAC, including after clipping. */
-#define NMADD(a, b, c, d) native_madd_clean_acc(&flags, (a), (b), (c), (d))
-#define SET(r, x, d) v[r] = native_merge(v[r], (x), (d))
+#define NADD(a, b, d) native_add_c(&flags, (a), (b), (d))
+#define NMUL(a, b, d) native_mul_c(&flags, (a), (b), (d))
+#define NMADD(a, b, c_, d) native_madd_c(&flags, (a), (b), (c_), (d))
 #define LOAD(a) _mm_loadu_ps(memory[(a) & 1023].f)
 #define STORE(a, x, d) store_fields(memory[(a) & 1023].f, _mm_castps_si128(x), (d))
     do {
@@ -61,44 +60,45 @@ static inline __attribute__((always_inline)) unsigned native_geometry_1430_impl(
         q = denominator == 0
                 ? vu_max(signbit(denominator))
                 : _mm_cvtss_f32(arithmetic4(VU_DIV_SS(_mm_set_ss(1), _mm_set_ss(denominator))));
-        SET(30, lane4(v[25], 3), 1);
-        SET(23, NMUL(v[23], lane4(v[23], 3), 1), 1);
-        SET(16, lane4(v[0], 3), 1);
-        SET(9, NADD(v[9], v[19], 12), 12);
-        SET(25, lane4(v[18], 3), 1);
-        acc = NMUL(v[0], v[22], 15);
-        v[6] = LOAD(373 + vi[9]);
-        v[10] = LOAD(20);
-        SET(23, NMUL(v[23], lane4(v[23], 3), 1), 1);
-        v[24] = NMADD(acc, v[25], _mm_set1_ps(q), 15);
+        qv = _mm_set1_ps(q);
+        NATIVE_SETLANE(30, 25, 3, 1);
+        NATIVE_SET(23, NMUL(c[23], lane4(c[23], 3), 1), 1);
+        NATIVE_SETLANE(16, 0, 3, 1);
+        NATIVE_SET(9, NADD(c[9], c[19], 12), 12);
+        NATIVE_SETLANE(25, 18, 3, 1);
+        acc = NMUL(c[0], c[22], 15);
+        NATIVE_RAW(6, LOAD(373 + vi[9]));
+        NATIVE_RAW(10, LOAD(20));
+        NATIVE_SET(23, NMUL(c[23], lane4(c[23], 3), 1), 1);
+        NATIVE_FULL(24, NMADD(acc, c[25], qv, 15));
         vi[1] = q_flags;
-        SET(20, NMUL(v[9], _mm_set1_ps(q), 14), 14);
-        v[6] = native_itof(v[6], 1.0f / 4096);
+        NATIVE_SET(20, NMUL(c[9], qv, 14), 14);
+        NATIVE_FULL(6, native_itof(v[6], 1.0f / 4096));
         if (q_flags)
-            SET(20, NADD(v[9], lane4(v[0], 0), 14), 14);
-        acc = NMUL(v[10], lane4(v[23], 3), 15);
-        v[23] = NMADD(acc, v[12], v[31], 15);
+            NATIVE_SET(20, NADD(c[9], lane4(c[0], 0), 14), 14);
+        acc = NMUL(c[10], lane4(c[23], 3), 15);
+        NATIVE_FULL(23, NMADD(acc, c[12], c[31], 15));
         cpu.i = 255.0f;
-        SET(5, NADD(v[24], v[13], 12), 12);
-        v[8] = LOAD(7);
-        SET(5, NADD(v[13], lane4(v[30], 3), 2), 2);
+        NATIVE_SET(5, NADD(c[24], c[13], 12), 12);
+        NATIVE_RAW(8, LOAD(7));
+        NATIVE_SET(5, NADD(c[13], lane4(c[30], 3), 2), 2);
         STORE(index, v[20], 14);
-        SET(24, minmax4(v[24], lane4(v[18], 1), 0), 1);
-        v[10] = LOAD(8);
-        v[23] = minmax4(v[23], _mm_set1_ps(cpu.i), 0);
-        v[11] = v[9];
-        acc = NMUL(v[14], lane4(v[6], 0), 15);
-        v[9] = LOAD(index + 5);
+        NATIVE_SETRAW(24, minmax4(v[24], lane4(v[18], 1), 0), 1);
+        NATIVE_RAW(10, LOAD(8));
+        NATIVE_RAW(23, minmax4(v[23], _mm_set1_ps(cpu.i), 0));
+        NATIVE_MOVE(11, 9);
+        acc = NMUL(c[14], lane4(c[6], 0), 15);
+        NATIVE_RAW(9, LOAD(index + 5));
         clip = ((clip << 6) | native_clip(v[5], lane4(v[13], 3))) & 0xffffff;
-        v[20] = LOAD(181 + vi[9]);
-        SET(24, minmax4(v[24], lane4(v[0], 0), 1), 1);
-        v[30] = native_ftoi(v[23], 1);
-        acc = NMADD(acc, v[8], lane4(v[6], 1), 15);
-        v[28] = v[5];
-        v[23] = NMADD(acc, v[10], lane4(v[6], 2), 15);
+        NATIVE_RAW(20, LOAD(181 + vi[9]));
+        NATIVE_SETRAW(24, minmax4(v[24], lane4(v[0], 0), 1), 1);
+        NATIVE_RAW(30, native_ftoi(v[23], 1));
+        acc = NMADD(acc, c[8], lane4(c[6], 1), 15);
+        NATIVE_MOVE(28, 5);
+        NATIVE_FULL(23, NMADD(acc, c[10], lane4(c[6], 2), 15));
         vi[1] = (clip & 0x02fbef) != 0;
-        SET(24, NADD(v[11], lane4(v[24], 3), 1), 1);
-        v[9] = native_itof(v[9], 1.0f / 4096);
+        NATIVE_SET(24, NADD(c[11], lane4(c[24], 3), 1), 1);
+        NATIVE_FULL(9, native_itof(v[9], 1.0f / 4096));
         STORE(index + 1, v[30], 15);
         native_vertices++;
         if (vi[1]) {
@@ -108,33 +108,33 @@ static inline __attribute__((always_inline)) unsigned native_geometry_1430_impl(
             if (!clipped)
                 return ~0u;
             pairs += clipped;
-            for (unsigned i = 0; i < 32; i++)
-                v[i] = vf4(u, i);
+            NATIVE_LOAD_FILE();
             acc = _mm_loadu_ps(cpu.vacc);
             q = cpu.q;
+            qv = operand4(_mm_set1_ps(q));
             clip = u->clip;
             entry_status = u->status;
             q_flags = u->status & 0x30;
             memset(&flags, 0, sizeof flags);
             flags.sticky_complete = sticky_complete;
         }
-        v[23] = minmax4(v[23], lane4(v[0], 0), 1);
-        v[12] = LOAD(index + 4);
-        acc = NMUL(v[4], lane4(v[0], 3), 15);
-        v[8] = LOAD(18);
-        acc = NMADD(acc, v[1], lane4(v[20], 0), 15);
-        v[25] = v[26];
-        v[24] = native_ftoi(v[24], 16);
+        NATIVE_RAW(23, minmax4(v[23], lane4(v[0], 0), 1));
+        NATIVE_RAW(12, LOAD(index + 4));
+        acc = NMUL(c[4], lane4(c[0], 3), 15);
+        NATIVE_RAW(8, LOAD(18));
+        acc = NMADD(acc, c[1], lane4(c[20], 0), 15);
+        NATIVE_MOVE(25, 26);
+        NATIVE_RAW(24, native_ftoi(v[24], 16));
         index = (index + 3) & 65535;
         vi[8] = (uint16_t)index;
-        SET(23, NMUL(v[23], lane4(v[23], 3), 1), 1);
-        v[29] = v[28];
-        acc = NMADD(acc, v[2], lane4(v[20], 1), 15);
-        v[10] = LOAD(19);
-        v[25] = NMADD(acc, v[3], lane4(v[20], 2), 15);
+        NATIVE_SET(23, NMUL(c[23], lane4(c[23], 3), 1), 1);
+        NATIVE_MOVE(29, 28);
+        acc = NMADD(acc, c[2], lane4(c[20], 1), 15);
+        NATIVE_RAW(10, LOAD(19));
+        NATIVE_FULL(25, NMADD(acc, c[3], lane4(c[20], 2), 15));
         vi[9] = (uint16_t)memory[(index + 3) & 1023].w[3];
-        v[12] = native_itof(v[12], 1);
-        SET(23, NMUL(v[23], lane4(v[23], 3), 1), 1);
+        NATIVE_FULL(12, native_itof(v[12], 1));
+        NATIVE_SET(23, NMUL(c[23], lane4(c[23], 3), 1), 1);
         STORE(index - 1, v[24], 15);
         pairs += issued;
     } while (index != end);
@@ -145,7 +145,6 @@ static inline __attribute__((always_inline)) unsigned native_geometry_1430_impl(
 #undef NADD
 #undef NMUL
 #undef NMADD
-#undef SET
 #undef LOAD
 #undef STORE
 }
