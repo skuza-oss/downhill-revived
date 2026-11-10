@@ -79,7 +79,7 @@ fn every_field_listed_and_no_implicit_padding() {
 #[test]
 fn pointers_come_last_and_the_prefix_is_target_independent() {
     // The pointer-free prefix of each struct with pointers, the same on every target.
-    let prefix = [("DhdrDeviceDesc", 24usize, 1usize), ("DhdrCommand", 296, 3), ("DhdrConvert", 1640, 1),
+    let prefix = [("DhdrDeviceDesc", 24usize, 1usize), ("DhdrCommand", 184, 3), ("DhdrConvert", 1640, 1),
                   ("DhdrPicture", 88, 5)];
     for (name, size, _align, fields) in all() {
         let first_ptr = fields.iter().position(|f| f.0 == "dxc_path" || f.0 == "texture" || f.0 == "base"
@@ -104,7 +104,7 @@ fn pointers_come_last_and_the_prefix_is_target_independent() {
 #[test]
 fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrVertex>(), 32);
-    assert_eq!(size_of::<DhdrNativeConstants>(), 224);
+    assert_eq!(size_of::<DhdrNativeConstants>(), 112);
     assert_eq!(size_of::<DhdrConvertConstants>(), 1632);
     assert_eq!(size_of::<DhdrSurfaceInfo>(), 40);
     assert_eq!(size_of::<DhdrWindow>(), 24);
@@ -112,7 +112,7 @@ fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrPictureResult>(), 80);
     assert_eq!(size_of::<DhdrPresentRect>(), 48);
     assert_eq!(size_of::<DhdrDeviceDesc>(), 24 + PTR);
-    assert_eq!(size_of::<DhdrCommand>(), 296 + 3 * PTR);
+    assert_eq!(size_of::<DhdrCommand>(), 184 + 3 * PTR);
     assert_eq!(size_of::<DhdrConvert>(), 1640 + PTR);
     assert_eq!(size_of::<DhdrPicture>(), 88 + 5 * PTR);
     // Opaque handles are zero-sized markers; only pointers to them cross the ABI.
@@ -122,7 +122,7 @@ fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrTexture>(), 0);
     if cfg!(target_arch = "x86_64") {
         assert_eq!((size_of::<DhdrDeviceDesc>(), size_of::<DhdrCommand>(), size_of::<DhdrConvert>(),
-                    size_of::<DhdrPicture>()), (32, 320, 1648, 128));
+                    size_of::<DhdrPicture>()), (32, 208, 1648, 128));
     }
 }
 

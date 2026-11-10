@@ -8,6 +8,10 @@
 //! lists, run in order through one set of arenas, with every constants offset, every upload's
 //! (offset, bytes per row), and the sizes and buffers after each list. The lists are rebuilt here as
 //! the generator builds them; the arenas only size (`reserve(None, ..)`), no device is needed.
+//! The recorded draw constants are 112 bytes since finding 168 (the C generator's were 96; every
+//! offset is 256-aligned, so only the byte counts changed); since finding 172 the renderer puts
+//! the draws' constants in their own arena (`draw_constants`), and this replays them through the
+//! constants arena as the generator did.
 #![cfg(feature = "native")]
 
 mod common;
