@@ -1,11 +1,11 @@
 # 192: widescreen sprite width table and menu focal projection
 
-Status: in progress
+Status: current
 Checked: 2026-11-10
 
 Contributed by ribeirogustav in pull request #75 (commit 7e537cce, numbered 182 on their branch,
 which main had already given to finding 182); finished on branch `fix/pr75-widescreen-sprites`
-from `main` 34cf1293, started 2026-11-09. The branch merges their commit unchanged (`--no-ff`, so
+from `main` 34cf1293, started 2026-11-09; merged into `main` at 11981737 on 2026-11-10, not yet released. The branch merges their commit unchanged (`--no-ff`, so
 GitHub marks #75 merged) and fixes the review's points on top.
 
 ## Goal and acceptance
