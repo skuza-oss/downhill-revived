@@ -33,6 +33,11 @@ user cap of its own until the next reboot. So `--apply` first works out what the
 (it writes the core's `cpuinfo_max_freq` and reads back: if the read value does not move, the cap was a
 kernel QoS cap and the user request is restored as `cpuinfo_max_freq`; if it moves, the cap was a user
 write and the saved value is put straight back), and `--restore` checks the effective value again.
+The thermal driver may also begin to cap a policy while the throttle is on (after an hour of runs
+MIUI held policy4 at cooling state 3 for more than ten minutes on an idle phone, finding 195): then
+`--restore` writes the user request back, and accepts a lower effective value only while that policy's
+`thermal-cpufreq-N` cooling device is engaged and the value is not the throttle's own clock; it names
+the cap in its output.
 """
 import argparse
 import json
@@ -115,6 +120,18 @@ def snapshot(phone, pols):
 
 def policy_of(pols, cpu):
     return next(p for p, cpus in pols.items() if cpu in cpus)
+
+
+def cooling_states(phone):
+    """The thermal driver's CPU clock cooling devices and their state now: {'thermal-cpufreq-4': 3, ...}."""
+    out = phone.su('for d in /sys/class/thermal/cooling_device*; do t=$(cat $d/type); case $t in '
+                   'thermal-cpufreq-*) echo "$t $(cat $d/cur_state)";; esac; done', check=False)
+    states = {}
+    for line in out.splitlines():
+        name, _, value = line.strip().partition(' ')
+        if value.isdigit():
+            states[name] = int(value)
+    return states
 
 
 def show(phone):
@@ -265,6 +282,22 @@ def restore(phone, state):
         if khz != saved[p] and now.get(p) and int(saved[p]) <= int(now[p]) <= int(khz):
             bad = [b for b in bad if b[0] != p]
             print('%s: saved %s under a thermal cap, now %s (user request %s; the cap moved)' % (p, saved[p], now[p], khz))
+    # a max the phone's thermal driver began to hold down after the save (the policy's cooling device is
+    # engaged now) is the phone's own state, not a throttle left behind: the user request was written
+    # back above and reads back lower, at a clock that is not the throttle's, and the cap lifts by
+    # itself (finding 195: MIUI kept policy4 at cooling state 3 for ten minutes after an hour of runs)
+    cool, capped = cooling_states(phone), []
+    applied = {str(policy_of(policies(phone), int(cpu))): int(khz)
+               for cpu, khz in record.get('settings', {}).get('max_khz', {}).items()}
+    for pol, khz in record['user_max'].items():
+        p = '%s/cpufreq/policy%s/scaling_max_freq' % (CPU, pol)
+        state_now = cool.get('thermal-cpufreq-%s' % pol, 0)
+        if (any(b[0] == p for b in bad) and p not in failed and now.get(p) and state_now > 0
+                and applied.get(str(pol)) != int(now[p]) and int(now[p]) < int(khz)):
+            bad = [b for b in bad if b[0] != p]
+            capped.append('policy%s' % pol)
+            print('%s: saved %s, now %s under the phone\'s own thermal cap (thermal-cpufreq-%s at state %d; '
+                  'user request %s written back)' % (p, saved[p], now[p], pol, state_now, khz))
     for p, was, got in bad:
         print('DIFFERS %s: saved %s, now %s' % (p, was, got))
     for p in ('%s/max_gpuclk' % KGSL, '%s/thermal_pwrlevel' % KGSL):
@@ -279,7 +312,8 @@ def restore(phone, state):
     phone.su('rm -f %s %s' % (PHONE_SAVED, PHONE_WD_LOG), check=False)
     if state.exists():
         state.replace(state.with_suffix('.restored.json'))
-    print('RESTORED: every saved value reads back unchanged')
+    print('RESTORED: every saved value reads back unchanged' +
+          (' but the maximum of %s, which the phone\'s thermal driver caps now' % ', '.join(capped) if capped else ''))
 
 
 def main():
