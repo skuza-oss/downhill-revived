@@ -403,14 +403,21 @@ def main():
         maps += [(a.llvm, 'llvm')] if t.windows else [(ndk, 'ndk')] if t.android else [(simde, 'simde')]
         prefix_maps = ['-ffile-prefix-map=%s=%s' % (spelling, new) for old, new in maps
                        for spelling in dict.fromkeys((str(old), str(old).replace('\\', '/')))]  # a set's order varies
-        pgo_flags = []
+        # A static function's key in a profile is "<its unit's path>;<name>", the path as the compiler
+        # was given it, and -ffile-prefix-map does not touch it: a profile recorded in one checkout
+        # or build folder then matches no static function of a build made in another (finding 195:
+        # the VU1 kernels and translated blocks, the GS and graphics queue's helpers and every static
+        # function of the module's C went unprofiled in every build but the recording lane's own).
+        # With this the key is "<file name>;<name>", the same wherever the build is made; the
+        # recording build and the using build must both have it (pgo_flags[0] alone goes to the link).
+        pgo_flags, pgo_names = [], ['-mllvm', '-static-func-full-module-prefix=false']
         if a.pgo_generate:
-            pgo_flags = ['-fprofile-generate']
+            pgo_flags = ['-fprofile-generate', *pgo_names]
         elif a.pgo_use:  # copied under its hash, so the object cache keys follow its content
             data = a.pgo_use.read_bytes()
             profile = work / ('pgo-%s.profdata' % hashlib.sha256(data).hexdigest()[:16])
             profile.write_bytes(data)
-            pgo_flags = ['-fprofile-use=' + str(profile)]
+            pgo_flags = ['-fprofile-use=' + str(profile), *pgo_names]
         if t.windows:
             common = [a.llvm/'clang-cl.exe', '--target=x86_64-pc-windows-msvc', '/nologo',
                       '/O2', '/clang:-O3', '/clang:-march=x86-64-v2', '/clang:-mtune=znver3',
