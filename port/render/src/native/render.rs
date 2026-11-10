@@ -54,9 +54,9 @@ mod gpu_timing;
 /// picture (5.7 of the render thread's 13 ms at the race start on the throttled Mi 11i, on a little
 /// core). So a large picture is recorded into two encoders (`cut_point`): the first is handed to
 /// this helper thread, which finishes it while the render thread records, uploads and finishes the
-/// second, and the picture's submit gives the queue both, in order. The cut ends the open pass and
-/// the next draw opens it again (load, store), so the commands the GPU runs are the same but for
-/// that pass boundary. Not in the browser, which has no threads: one encoder there.
+/// second, and the picture's submit gives the queue both, in order. The cut is made where a pass
+/// ends and another begins, so the GPU runs the same passes. Not in the browser, which has no
+/// threads: one encoder there.
 #[cfg(not(target_arch = "wasm32"))]
 mod finisher {
     use std::sync::mpsc::{channel, Receiver, Sender};
@@ -188,11 +188,38 @@ mod finisher {
     }
 }
 
-/// The draw command before which a picture of `draws` draw commands is cut (`Pass::cut`): after
-/// `DHD_ENCODE_CUT` percent of them, 60 unless set (the helper's part then ends about when the
-/// render thread has recorded, uploaded and finished the rest; 0: never, for a comparison). None:
-/// not cut (a small picture, 0, the browser).
-fn cut_point(draws: usize) -> Option<usize> {
+/// What a command adds to its encoder's work, in draw commands (finding 195): one for a draw, and
+/// `PASS_DRAWS` more when a pass ends and another begins with it (a draw into another target or Z
+/// surface than the draw before it; a transfer). `last`: the draw pass open before the command.
+/// An estimate from the commands alone: it places the cut, nothing else.
+fn encode_work(k: &DhdrCommand, last: &mut Option<(i32, i32)>) -> usize {
+    /// A pass's begin and end, in draws. A race picture is one scene pass of 300 to 400 draws, then
+    /// some thirty short passes with 50 draws between them, and finishing those takes wgpu and the
+    /// driver longer than the scene: on Direct3D 12 twice as long; on the throttled Mi 11i (Vulkan)
+    /// weights of 5, 12 and 27 were timed, and 27 gave the two parts the same time mid-race (2.7
+    /// and 2.8 ms) and the most fields a second in every scene.
+    const PASS_DRAWS: usize = 27;
+    if k.kind != DHDR_CMD_DRAW {
+        *last = None;
+        return PASS_DRAWS;
+    }
+    if k.count == 0 {
+        return 0;
+    }
+    let pass = Some((k.target as i32, k.depth as i32));
+    let begins = *last != pass;
+    *last = pass;
+    1 + if begins { PASS_DRAWS } else { 0 }
+}
+
+/// The work (`encode_work`) after which a picture of `draws` draw commands and `work` in all is cut
+/// (`Pass::cut`) at the next pass that begins: `DHD_ENCODE_CUT` percent of it, 60 unless set (the
+/// helper starts when the render thread is still recording, so the larger part is its; 0: never,
+/// for a comparison). Only where a pass ends anyway: a cut inside the scene pass adds a pass (the
+/// target stored and loaded again: 0.3 to 0.5 ms more of GPU a frame on the Mi 11i) and left the
+/// helper a third of the work. None: not cut (a small picture, 0, the browser); a picture without
+/// such a boundary stays in one encoder.
+fn cut_point(draws: usize, work: usize) -> Option<usize> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         /// A picture of fewer draw commands than this stays in one encoder: handing a part over
@@ -203,11 +230,11 @@ fn cut_point(draws: usize) -> Option<usize> {
                 .map_or(60, |v: usize| v.min(95));
         }
         let percent = PERCENT.with(|p| *p);
-        (percent != 0 && draws >= CUT_MIN_DRAWS).then(|| draws * percent / 100)
+        (percent != 0 && draws >= CUT_MIN_DRAWS).then(|| work * percent / 100)
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = draws;
+        let _ = (draws, work);
         None
     }
 }
@@ -569,8 +596,9 @@ impl Pass {
         }
     }
 
-    /// Ends the open pass and hands the picture's encoder so far to the helper thread to finish
-    /// (`finisher`); the next command opens a new encoder. Without a helper nothing is cut.
+    /// Hands the picture's encoder so far to the helper thread to finish (`finisher`), its open pass
+    /// ended (the caller is about to begin another); the next command opens a new encoder. Without
+    /// a helper nothing is cut.
     fn cut(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -758,10 +786,14 @@ impl Native {
         let mut versions = vec![0u64; p.surfaces.len()];
         let mut conversions: Vec<Option<([u64; 4], wgpu::BindGroup)>> = vec![None; p.converts.len()];
         // Where the picture's encoder is cut and its first part handed to the helper thread
-        // (finding 195): before this draw command, counted over the commands that draw.
-        let cut_at = cut_point(p.commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count());
-        let mut draw_command = 0usize;
+        // (finding 195): at the first pass that begins once this much of its work is behind.
+        let mut last_pass = None;
+        let all_work: usize = p.commands.iter().map(|k| encode_work(k, &mut last_pass)).sum();
+        let mut cut_at = cut_point(p.commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count(), all_work);
+        let (mut work, mut last_pass) = (0usize, None);
         for (i, k) in p.commands.iter().enumerate() {
+            let cut_due = cut_at.is_some_and(|at| work >= at);
+            work += encode_work(k, &mut last_pass);
             match k.kind {
                 DHDR_CMD_ALPHA_UPLOAD => {
                     if let Some(v) = versions.get_mut(k.target as usize) { *v += 1; }
@@ -793,10 +825,6 @@ impl Native {
             if k.count == 0 {
                 continue;
             }
-            if cut_at == Some(draw_command) {
-                self.pass.cut();
-            }
-            draw_command += 1;
             let Some(target) = surface(p, k.target).filter(|t| has_texture(Some(t)) && t.depth == 0) else { continue };
             let mut depth = if k.depth >= 0 && k.depth_key & 8 != 0 { surface(p, k.depth) } else { None };
             if depth.is_some_and(|d| !has_texture(Some(d)) || d.depth == 0 || d.size != target.size) {
@@ -902,6 +930,11 @@ impl Native {
                     },
                     None => None,
                 };
+                // The open pass ends here anyway: the place to cut, with no pass added.
+                if cut_due {
+                    self.pass.cut();
+                    cut_at = None;
+                }
                 self.pass.begin(gpu, k.target as i32, depth_index, target.size, &color, z.as_ref(), &v.vertices,
                                 v.vertex_bytes, v.indices.as_ref());
             }
