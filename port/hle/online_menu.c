@@ -30,23 +30,20 @@ static const char us_files_sha256[] = "c8c17bcae383daf9f2feadc7f6d7476c43d659ab8
    Read from the player's data image; omit country, keep FR/MX/TD suffixes intact. */
 extern const char *D_0026EFE8[];
 /* In the Super Career's order, first race to last: retail's D_0026F150 (func_001821E8's career
-   type 3, SETUP+0x10C == 3), with Mosh Pit, which no career races, last as in the game's own
-   track lists (D_00296F60). Only the order is ours: the ids, limits and pick-only arena are the
-   game's, so the server and older games see the same tracks (finding 190). The picker, Left /
-   Right on TRACK and the host's rotation (NEXT, RANDOM, the grid-lock switch) all walk it.
-   Bytes, not ints: as 32-bit words the list would be a copy of retail's .data, which
-   package_release.py's game-data check refuses in dhd.exe. */
-static const struct { unsigned char index; } tracks[] = {
-    {0}, {6}, {24},      /* Mt. Midoule FR, MX, TD */
-    {1}, {7}, {13},      /* Red Pass */
-    {2}, {8}, {10},      /* Mt. Konawaki */
-    {5}, {14}, {22},     /* Mt. Zorkovaska */
-    {11}, {15}, {16},    /* Mt. Liddellroch */
-    {12},                /* Mt. Imasaki FR */
-    {19}, {25},          /* Mt. McSchley FR, MX */
-    {3}, {9}, {4},       /* Mt. Quintanaroo */
-    {20}, {17}, {18},    /* Salt City */
-    {23}};               /* Mosh Pit (Arena) */
+   type 3, SETUP+0x10C == 3), read from the player's data image, with Mosh Pit, which no career
+   races, last as in the game's own track lists (D_00296F60). Only the order is ours: the ids,
+   limits and pick-only arena are the game's, so the server and older games see the same tracks
+   (finding 190). The picker, Left / Right on TRACK and the host's rotation (NEXT, RANDOM, the
+   grid-lock switch) all walk it. Read, not copied: any copy of the list in the port's code is a
+   copy of retail's .data that package_release.py's game-data check refuses, as ints and even as
+   bytes, which the wasm compiler widened into vector constants of the same ints for its searches
+   (the macOS build laid them out in one run). */
+extern const int D_0026F150[];
+enum { TRACK_COUNT = 25, MOSH_PIT = 23 };
+static int track_at(int k)
+{
+    return k < TRACK_COUNT - 1 ? D_0026F150[k] : MOSH_PIT;
+}
 static const char *track_name(int index)
 {
     static char names[26][64];
@@ -511,8 +508,8 @@ static void list_row(int i)
     const char *track = "?";
     char now[24];
     double t = host_service_net_server_ms();
-    for (int k = 0; k < COUNT(tracks); k++)
-        if (tracks[k].index == l->track) track = track_name(tracks[k].index);
+    for (int k = 0; k < TRACK_COUNT; k++)
+        if (track_at(k) == l->track) track = track_name(track_at(k));
     if (strcmp(l->version, version)) snprintf(now, sizeof now, "OTHER VERSION");
     else if (l->full || l->players >= l->max_players) snprintf(now, sizeof now, "FULL");
     else net_lobby_now(l, t, now, sizeof now);  /* counted only on a known server clock (finding 135) */
@@ -642,20 +639,20 @@ static void room_sync(const NetLobby *l)
         snprintf(room_name, sizeof room_name, "%s", name);
         /* tests (DHD_NET_SCRIPTED with DHD_NET_TEST_TRACK=<game track index>): the room starts there */
         const char *test_track = getenv("DHD_NET_SCRIPTED") ? getenv("DHD_NET_TEST_TRACK") : NULL;
-        for (int k = 0; test_track && k < COUNT(tracks); k++)
-            if (tracks[k].index == atoi(test_track)) room_track = k;
-        NetRoomSettings s = {tracks[room_track].index, room_options, public_room, 10, -1, room_name};
+        for (int k = 0; test_track && k < TRACK_COUNT; k++)
+            if (track_at(k) == atoi(test_track)) room_track = k;
+        NetRoomSettings s = {track_at(room_track), room_options, public_room, 10, -1, room_name};
         host_service_net_set_room(GADDR(&s));
         room_settings_sent = 1;
     }
     if (l->is_host && !rotation_sent) {
         /* the tracks in the list's order: the room's Then rule (next / random) walks them */
-        static unsigned char ids[COUNT(tracks)];
-        for (int k = 0; k < COUNT(tracks); k++)
-            ids[k] = (unsigned char)(tracks[k].index | ((10 - track_limit(tracks[k].index)) / 2 << 5) | (arena(tracks[k].index) ? 0x80 : 0));
-        host_service_net_rotation(GADDR(ids), COUNT(tracks));
+        static unsigned char ids[TRACK_COUNT];
+        for (int k = 0; k < TRACK_COUNT; k++)
+            ids[k] = (unsigned char)(track_at(k) | ((10 - track_limit(track_at(k))) / 2 << 5) | (arena(track_at(k)) ? 0x80 : 0));
+        host_service_net_rotation(GADDR(ids), TRACK_COUNT);
         rotation_sent = 1;
-        hle_log("online menu: the room's track list: %d tracks, MOSH PIT pick-only\n", COUNT(tracks));
+        hle_log("online menu: the room's track list: %d tracks, MOSH PIT pick-only\n", TRACK_COUNT);
         /* tests (DHD_NET_SCRIPTED with DHD_NET_TEST_THEN=same|next|random): the host's Then rule */
         const char *test_then = getenv("DHD_NET_SCRIPTED") ? getenv("DHD_NET_TEST_THEN") : NULL;
         if (test_then) {
@@ -685,8 +682,8 @@ static void connect_poll(MenuPage *p)
     }
     if (l.state != NET_LOBBY && l.state != NET_RACING) return;
     room_sync(&l);
-    for (int k = 0; k < COUNT(tracks); k++)
-        if (tracks[k].index == l.track) room_track = k;
+    for (int k = 0; k < TRACK_COUNT; k++)
+        if (track_at(k) == l.track) room_track = k;
     room_options = l.laps;
     connecting = 0;
     status[0] = 0;
@@ -733,7 +730,7 @@ enum { RF_TRACK, RF_BOTS, RF_CHEATS, RF_PUBLIC, RF_RULES, RF_RIDER, RF_READY, RF
 enum { RULE_WINDOW, RULE_NEXT, RULE_THEN, RULE_PLAYERS, RULES };
 /* The picker fills its columns top to bottom, so the list reads down the left column, then the
    right (finding 190): Up / Down step through the list, Left / Right go to the other column. */
-enum { TOASTS = 3, TRACK_COLUMNS = 2, TRACK_ROWS = (COUNT(tracks) + TRACK_COLUMNS - 1) / TRACK_COLUMNS };
+enum { TOASTS = 3, TRACK_COLUMNS = 2, TRACK_ROWS = (TRACK_COUNT + TRACK_COLUMNS - 1) / TRACK_COLUMNS };
 /* The layout, in the popup view's 640 x 224 (menu_draw_size) */
 enum { L_X = 48, L_W = 166, TOP = 40, CARD_X = 224, CARD_W = 368, CARD_Y = 52, CARD_H = 11, CARD_GAP = 0,
        MID_H = 117, BAR_Y = 164, BAR_H = 18, BAR_X = 48, BAR_W = 544, STATUS_Y = 189, TITLE_Y = 14 };
@@ -746,7 +743,7 @@ static int rf = RF_READY, rf_bar = RF_READY;  /* the cursor; the bar's place, ke
 static int track_list, track_cursor;          /* all the tracks, open over the room */
 static int leave_ask, leave_choice;           /* "Leave the room?": 0 Stay, 1 Leave */
 static int rules_open, rules_cursor;          /* ROOM RULES, open over the room */
-static Hit hits[RF_COUNT], code_hit, track_hits[COUNT(tracks)], track_back, leave_hits[2], rule_hits[RULES], rules_back;
+static Hit hits[RF_COUNT], code_hit, track_hits[TRACK_COUNT], track_back, leave_hits[2], rule_hits[RULES], rules_back;
 static int room_buttons, repeat_buttons, repeat_frames;
 static double copied_at;
 static int copied_ok;
@@ -901,8 +898,8 @@ static void send_settings(int track, int options, int is_public)
 static void change_setting(int f, int by)
 {
     if (f == RF_TRACK) {
-        do room_track = (room_track + by + COUNT(tracks)) % COUNT(tracks); while (arena(tracks[room_track].index));
-        send_settings(tracks[room_track].index, -1, -1);
+        do room_track = (room_track + by + TRACK_COUNT) % TRACK_COUNT; while (arena(track_at(room_track)));
+        send_settings(track_at(room_track), -1, -1);
     } else if (f == RF_BOTS)
         send_settings(-1, room_options = room.laps ^ ROOM_NO_BOTS, -1);
     else if (f == RF_CHEATS) {
@@ -953,7 +950,7 @@ static void close_track_list(int choose)
     track_list = 0;
     if (choose && track_cursor != room_track) {
         room_track = track_cursor;
-        send_settings(tracks[room_track].index, -1, -1);
+        send_settings(track_at(room_track), -1, -1);
     }
     menu_play(choose ? "S_SELECT" : "S_BACK");
 }
@@ -1041,7 +1038,7 @@ static void room_input(MenuPage *p, const RoomNow *r)
         return;
     }
     if (track_list) {
-        int n = COUNT(tracks), to = track_cursor + dx * TRACK_ROWS + dy;
+        int n = TRACK_COUNT, to = track_cursor + dx * TRACK_ROWS + dy;
         if ((dx || dy) && to >= 0 && to < n) track_cursor = to, menu_page_sound(dx > 0 || dy > 0);
         if (pressed & PAD_CROSS) close_track_list(1);
         else if (pressed & PAD_TRIANGLE) close_track_list(0);
@@ -1086,14 +1083,14 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
         return;
     }
     if (track_list) {
-        for (int i = 0; i < COUNT(tracks); i++)
+        for (int i = 0; i < TRACK_COUNT; i++)
             if (inside(&track_hits[i], x, y)) {
                 if (moved && track_cursor != i) track_cursor = i, menu_page_sound(1);
                 if (left) track_cursor = i, close_track_list(1);
             }
         if (left && inside(&track_back, x, y)) close_track_list(0);
         for (; wheel > 0 && track_cursor > 0; wheel--) track_cursor--;
-        for (; wheel < 0 && track_cursor < COUNT(tracks) - 1; wheel++) track_cursor++;
+        for (; wheel < 0 && track_cursor < TRACK_COUNT - 1; wheel++) track_cursor++;
         return;
     }
     if (left && inside(&code_hit, x, y)) {
@@ -1524,9 +1521,9 @@ static void draw_track_list(void)
     /* Two columns of names, filled top to bottom in the list's (career) order; the rider limit goes
        beside the picture, so each name has room. 13 rows of 10.5 units fit between the title and
        BACK. */
-    for (int i = 0; i < COUNT(tracks); i++) {
+    for (int i = 0; i < TRACK_COUNT; i++) {
         int x = 44 + (i / TRACK_ROWS) * 192, y = 45 + (i % TRACK_ROWS) * 21 / 2, on = i == track_cursor;
-        const char *name = track_name(tracks[i].index);
+        const char *name = track_name(track_at(i));
         MenuStyle s = fit(name, on || i == room_track ? st_on : st_row, 90, 178);
         if (on) bar(x + 2, y - 1, 186, 10);
         put(MENU_CENTRE, x + 95, y, name, s);
@@ -1536,7 +1533,7 @@ static void draw_track_list(void)
         }
         hit(&track_hits[i], x, y - 1, 190, 10);
     }
-    int at = tracks[track_cursor].index;
+    int at = track_at(track_cursor);
     char limit[32];
     snprintf(limit, sizeof limit, "UP TO %d RIDERS", track_limit(at));
     const uint16_t *picture = track_preview(at);
@@ -1768,8 +1765,8 @@ static void room_update(MenuPage *p)
     int in = l->state == NET_LOBBY || l->state == NET_RACING;
     if (in) room_sync(l);
     if (in)
-        for (int k = 0; k < COUNT(tracks); k++)
-            if (tracks[k].index == l->track) room_track = k;
+        for (int k = 0; k < TRACK_COUNT; k++)
+            if (track_at(k) == l->track) room_track = k;
     if (l->started || l->state == NET_RACING) {
         hle_log("online menu: room %s: the race starts\n", net_log_code(l->code).text);
         race = 1;
@@ -2269,7 +2266,7 @@ int port_online_single_race(void) { return choosing; }
 /* A track's name as the online launcher lists it (presence.c); NULL for a track not in the list. */
 const char *port_track_name(int index)
 {
-    for (int k = 0; k < COUNT(tracks); k++)
-        if (tracks[k].index == index) return track_name(tracks[k].index);
+    for (int k = 0; k < TRACK_COUNT; k++)
+        if (track_at(k) == index) return track_name(track_at(k));
     return NULL;
 }
