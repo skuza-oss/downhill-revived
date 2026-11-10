@@ -1,6 +1,7 @@
 # 162: Native VU1 and GS rendering, phase 0: what the game draws and how
 
-Status: in progress
+Status: current
+Checked: 2026-11-10
 
 Branch `native/vu-gs` from `main` 9ecb8e1, started 2026-11-06. **A local branch**: the owner keeps
 the native VU1/GS work off `main` until it is decided (not merged, not pushed). This file is the

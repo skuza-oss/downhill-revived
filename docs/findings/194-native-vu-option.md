@@ -1,6 +1,7 @@
 # 194: Native VU (experimental), a Graphics setting on every platform
 
-Status: in progress
+Status: current
+Checked: 2026-11-10
 
 Branch `feat/native-vu-option` from `main` cdee456, started 2026-11-10. This file is the lane's
 plan while it runs and its finding when it merges. Someone who has only this file and the git log

@@ -1,6 +1,7 @@
 # 167: Native VU1 rendering, phase 2: the remaining VU1 programs
 
-Status: in progress
+Status: current
+Checked: 2026-11-10
 
 Branch `native/vu-gs` (local only: never pushed or merged until the owner decides), after
 finding 164's phase 1 (`43d6ce2`), started 2026-11-06. This file is the lane's plan while it runs.

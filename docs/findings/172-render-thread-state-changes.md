@@ -1,6 +1,7 @@
 # 172: Fewer state changes per draw on the render thread
 
-Status: in progress
+Status: current
+Checked: 2026-11-10
 
 Branch `native/vu-gs` (local only: never pushed or merged until the owner decides), after 168's
 `22a5c2d`, started 2026-11-06. The lane was wrapped up on the lead's word the same night: one step

@@ -1,6 +1,7 @@
 # 168: Native mesh draws batched, for the render thread
 
-Status: in progress
+Status: current
+Checked: 2026-11-10
 
 Branch `native/vu-gs` (local only: never pushed or merged until the owner decides), after 167's
 `eb14849`, started 2026-11-06. This file is the lane's plan while it runs.

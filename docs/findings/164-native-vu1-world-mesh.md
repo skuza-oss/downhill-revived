@@ -1,6 +1,7 @@
 # 164: Native VU1 rendering, phase 1: the world mesh loop on the GPU
 
-Status: in progress
+Status: current
+Checked: 2026-11-10
 
 Branch `native/vu-gs` (local only: never pushed or merged until the owner decides), after 162's
 `30bb9ee`, started 2026-11-06. This file is the lane's plan while it runs.
