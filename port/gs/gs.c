@@ -3,6 +3,7 @@
    Each path keeps its tag across DMA boundaries, including partial qwords. */
 #include "gs.h"
 #include "gs_mesh.h"
+#include "gs_strip.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -561,6 +562,49 @@ static int strip_regs(uint64_t regs, unsigned nreg)
     return 1;
 }
 
+void (*gs_strip_hook)(Gs *gs, const uint32_t *words, unsigned count);
+
+/* loops whole loops of a tag in the game's own layout (gs_strip.h: ST, RGBAQ, XYZF2) into an
+   empty strip window, without a vertex list (finding 197): what packed_strip's loop leaves is
+   worked out from the packet (the counters from the ADC bits, the registers and the window from
+   the last vertices written), then gs_strip_hook draws the triangles from the packet itself. */
+static void packed_strip_game(Gs *g, GsPath *p, const uint32_t *w, size_t loops)
+{
+    const uint32_t *end = w + (loops - 1) * GS_STRIP_WORDS;   /* the last vertex */
+    size_t kicks = loops > 2 ? loops - 2 : 0;                 /* the third vertex on makes a triangle */
+    unsigned skips = 0;
+    for (const uint32_t *v = w; v <= end; v += GS_STRIP_WORDS) skips += gs_strip_adc(v);
+    g->adc_skips += skips;
+    g->kicks += kicks;
+    /* vertex_kick counts a draw for each kick without ADC: not the first two vertices' */
+    g->vram_epoch += kicks - (skips - gs_strip_adc(w) - (loops > 1 ? gs_strip_adc(w + GS_STRIP_WORDS) : 0));
+    g->strip_parity ^= (unsigned)kicks & 1;
+    /* XYZF2 and XYZF3 as the last vertex without and with ADC wrote them */
+    for (unsigned adc = 0; adc < 2; adc++) {
+        const uint32_t *v = end;
+        while (v >= w && (unsigned)gs_strip_adc(v) != adc) v -= GS_STRIP_WORDS;
+        if (v >= w)
+            g->reg[adc ? GS_XYZF3 : GS_XYZF2] = (v[8] & 65535) | (uint64_t)(v[9] & 65535) << 16 |
+                                                (uint64_t)(v[10] >> 4 & 0xFFFFFF) << 32 | (uint64_t)(v[11] >> 4 & 255) << 56;
+    }
+    GsVertex before = g->vertex;
+    gs_strip_vertex(end, &before, &g->vertex);
+    p->q = end[2];
+    g->reg[GS_RGBAQ] = g->vertex.rgba | (uint64_t)end[2] << 32;
+    g->reg[GS_ST] = end[0] | (uint64_t)end[1] << 32;
+    /* The window vertex_kick leaves: the last two after a kick (its third slot holds the last one
+       kicked), else the vertices so far. */
+    if (kicks) {
+        gs_strip_vertex(end - GS_STRIP_WORDS, &before, &g->vertices[0]);
+        g->vertices[1] = g->vertices[2] = g->vertex;
+        g->vertex_count = 2;
+        gs_strip_hook(g, w, (unsigned)loops);
+    } else {
+        for (size_t k = 0; k < loops; k++) gs_strip_vertex(w + k * GS_STRIP_WORDS, &before, &g->vertices[k]);
+        g->vertex_count = (unsigned)loops;
+    }
+}
+
 /* loops whole loops of such a tag while PRIM is a triangle strip: each register as packed()
    writes it, and each vertex kicked as vertex_kick would (the counters, ADC skips, the strip's
    parity and its last vertices), with the triangles handed to draw_strip in batches instead of
@@ -569,6 +613,10 @@ static int strip_regs(uint64_t regs, unsigned nreg)
    them. */
 static void packed_strip(Gs *g, GsPath *p, uint64_t regs, unsigned nreg, const uint32_t *w, size_t loops)
 {
+    if (gs_strip_hook && nreg == 3 && (regs & 0xFFF) == GS_STRIP_REGS && !g->vertex_count) {
+        packed_strip_game(g, p, w, loops);
+        return;
+    }
     enum { BATCH = 256 };
     /* 10 KB a call, thousands of calls a field: entries are written before they are read */
     GsVertex list[BATCH + 2] PS2_NO_AUTO_INIT;

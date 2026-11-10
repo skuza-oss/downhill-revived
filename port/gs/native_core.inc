@@ -47,6 +47,7 @@
 #include "font_sharp.h"
 #include "native_frontend.h"
 #include "gs_mesh.h"         /* translated VU1 mesh batches (native_mesh, finding 164) */
+#include "gs_strip.h"        /* the game's PACKED strips, read from the packet (native_strip, finding 197) */
 #include "perf_log.h"       /* the perf: lines' waits (finding 129; empty in the browser) */
 
 double host_wall_seconds(void); /* port/hle/host.c */
@@ -1982,6 +1983,134 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
     n->stats.draws += recorded;
 }
 
+/* A strip vertex of the game's layout (gs_strip.h) as native_set converts the vertex those three
+   qwords write (gs_strip_vertex) with its own colour, ST not FST; its pixel in *px, *py. */
+static inline __attribute__((always_inline)) void native_strip_set(NativeVertex *o, const uint32_t *w, int ofx, int ofy,
+                                                                   uint32_t zmax, float zscale, const float *fog,
+                                                                   int *px, int *py)
+{
+    float x = (float)((int)(w[8] & 65535) - ofx) * 0.0625f + 0.5f;
+    float y = (float)((int)(w[9] & 65535) - ofy) * 0.0625f + 0.5f;
+    uint32_t z = w[10] >> 4 & 0xFFFFFF;
+    if (z > zmax) z = zmax;
+    *px = (int)x; *py = (int)y;
+    o->x = x; o->y = y; o->z = (float)z * zscale;
+    memcpy(&o->s, w, 12);   /* s, t, q */
+    o->fog = fog[w[11] >> 4 & 255];
+    o->rgba = (w[4] & 255) | (w[5] & 255) << 8 | (w[6] & 255) << 16 | (w[7] & 255) << 24;
+}
+
+/* gs.c's strips in the game's own layout (gs_strip_hook, finding 197): the drawn triangles of the
+   packet's vertices, as native_draw would draw each in turn, decoded and recorded in one pass.
+   The first goes through native_draw (it may change the state); the state then holds for the rest
+   (native_draw_strip says why). A triangle right after a recorded one adds its third vertex,
+   converted where the frame keeps it, and takes the other two indices from that triangle; one
+   after a skipped triangle converts all three and goes through native_triangle_indexed's steps.
+   A vertex no drawn triangle has is never converted. Box, vertices, indices, counts and the
+   conversion cache end as native_record leaves them. What the game's strips never are (a field
+   that is not indexed, flat shading, FST), a per-primitive diagnostic and a state that draws
+   nothing go through native_draw, triangle by triangle. */
+static void native_strip(Gs *g, const uint32_t *w, unsigned count)
+{
+    NativeExact *gpu = g->backend;
+    Native *n = gpu->native;
+    unsigned end = count - 2, i = 0;   /* triangle k is vertices k..k+2, k < end */
+    while (i < end && gs_strip_adc(w + (i + 2) * GS_STRIP_WORDS)) i++;
+    if (i == end) return;
+    const GsVertex before = g->vertex;   /* its u and v: the strip writes neither */
+    GsVertex tri[3];
+#define NATIVE_STRIP_TRIANGLE(k) do { \
+    for (unsigned j_ = 0; j_ < 3; j_++) gs_strip_vertex(w + ((k) + j_) * GS_STRIP_WORDS, &before, &tri[j_]); \
+} while (0)
+#define NATIVE_STRIP_DRAW_REST(k) do { \
+    for (; (k) < end; (k)++) \
+        if (!gs_strip_adc(w + ((k) + 2) * GS_STRIP_WORDS)) { NATIVE_STRIP_TRIANGLE(k); native_draw(g, 4, tri, 3); } \
+} while (0)
+    if (gs_vu_shadow) {   /* a shadow batch's packet: the exact path only (native_draw) */
+        NATIVE_STRIP_DRAW_REST(i);
+        return;
+    }
+    NATIVE_STRIP_TRIANGLE(i);
+    native_draw(g, 4, tri, 3);
+    unsigned prim = (unsigned)((g->reg[GS_PRIM] & 7) |
+                    ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
+    unsigned ctxt = prim >> 9 & 1;
+    i++;
+    if (n->interp || n->field_trace_on || n->skip || !n->current_valid || !n->indexed ||
+        n->state_version != g->state_version || n->state_ctxt != ctxt || n->state_prim != prim ||
+        ((prim & 16) && n->written != g->pixels_written) || (prim >> 8 & 1) || !(prim >> 3 & 1)) {
+        NATIVE_STRIP_DRAW_REST(i);
+        return;
+    }
+    NativeFrame *f = n->recording;
+    uint64_t offset = native_offset(g, ctxt);
+    const int ofx = (int)(offset & 65535), ofy = (int)(offset >> 32 & 65535), exact = n->exact_probe;
+    const uint32_t zmax = n->zmax;
+    const float zscale = n->zscale, *fog = n->vertex_fog;
+    int left = n->box[0], top = n->box[1], right = n->box[2], bottom = n->box[3];
+    native_reserve(f, 3 * (end - i));
+    native_reserve_indices(f, 3 * (end - i));
+    NativeVertex *vertices = f->vertices;
+    uint32_t *o = f->indices + f->index_count, vertex_count = f->vertex_count;
+    unsigned recorded = 0, last = UINT32_MAX;   /* last: the latest triangle recorded in this loop */
+    int follows = 0;                            /* it is the one right before */
+    int px, py;
+#define NATIVE_STRIP_BOX() do { \
+    if (px - 1 < left) left = px - 1; \
+    if (py - 1 < top) top = py - 1; \
+    if (px + 1 > right) right = px + 1; \
+    if (py + 1 > bottom) bottom = py + 1; \
+} while (0)
+    for (unsigned k = i; k < end; k++) {
+        const uint32_t *p = w + (k + 2) * GS_STRIP_WORDS;   /* the triangle's third vertex */
+        if (gs_strip_adc(p)) { follows = 0; continue; }
+        if (exact) { NATIVE_STRIP_TRIANGLE(k); native_exact(n, g, 4, tri, 3, prim, ctxt); }
+        if (follows) {
+            /* Its first two vertices are the bytes of the previous triangle's last two: only the
+               third is new, and only it can move the box (the box only grows). */
+            native_strip_set(&vertices[vertex_count], p, ofx, ofy, zmax, zscale, fog, &px, &py);
+            NATIVE_STRIP_BOX();
+            o[0] = o[-2]; o[1] = o[-1]; o[2] = vertex_count++;
+        } else {
+            NativeVertex t[3];
+            for (unsigned j = 0; j < 3; j++) {
+                native_strip_set(&t[j], p - (2 - j) * GS_STRIP_WORDS, ofx, ofy, zmax, zscale, fog, &px, &py);
+                NATIVE_STRIP_BOX();
+            }
+            /* native_triangle_indexed for a strip: each of the first two is drawn from the
+               triangle before (whatever recorded it) when its bytes are the same */
+            uint32_t a = UINT32_MAX, b = UINT32_MAX;
+            if (o - f->indices >= 3) a = o[-2], b = o[-1];
+            if (a != UINT32_MAX && native_same_vertex(&vertices[a], &t[0])) o[0] = a;
+            else { vertices[vertex_count] = t[0]; o[0] = vertex_count++; }
+            if (b != UINT32_MAX && native_same_vertex(&vertices[b], &t[1])) o[1] = b;
+            else { vertices[vertex_count] = t[1]; o[1] = vertex_count++; }
+            vertices[vertex_count] = t[2]; o[2] = vertex_count++;
+        }
+        o += 3;
+        follows = 1; last = k;
+        recorded++;
+    }
+    f->vertex_count = vertex_count;
+    f->index_count = (unsigned)(o - f->indices);
+    /* native_record's conversion cache after the last triangle recorded: its second and third
+       vertex, each with its own colour */
+    if (last != UINT32_MAX) {
+        for (unsigned j = 0; j < 2; j++) {
+            const uint32_t *p = w + (last + 1 + j) * GS_STRIP_WORDS;
+            gs_strip_vertex(p, &before, &n->conv_gs[j]);
+            native_strip_set(&n->conv[j], p, ofx, ofy, zmax, zscale, fog, &px, &py);
+        }
+    }
+    n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
+    if (g->source_path == 1) f->path1 += recorded;
+    n->stats.primitives += recorded;
+    n->stats.draws += recorded;
+#undef NATIVE_STRIP_BOX
+#undef NATIVE_STRIP_DRAW_REST
+#undef NATIVE_STRIP_TRIANGLE
+}
+
 /* A translated VU1 mesh batch (gs_mesh.h; gs_mesh made the register writes its packet would make):
    draws of their own (flag NATIVE_MESH) whose vertices are the batch's object-space ones and whose
    indices are the triangles its strip draws, for native.wgsl's native_mesh_vertex. The object's
@@ -3113,6 +3242,7 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
     exact->e.upload_lazily = 1;  /* the probe's draws need only the uploaded pages they touch */
     g->draw = native_draw;
     g->draw_strip = native_draw_strip;
+    gs_strip_hook = native_strip;
     g->local_copy = native_local_copy;
     g->flush_draw = native_flush_draw;
     g->write_high = native_write_high;

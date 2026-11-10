@@ -1,4 +1,5 @@
 #include "gs.h"
+#include "gs_strip.h"
 #include "present.h"
 #include <stdio.h>
 #include <string.h>
@@ -310,13 +311,14 @@ static void upload_fuzz(void)
     upload_fast.sync_range = upload_slow.sync_range = NULL;
 }
 
-/* The strip fast path (gs_feed's packed_strip, finding 146) against the qword-at-a-time path:
-   the same triangles in the same order and the same state after, for random PACKED strip tags
-   (2 to 5 registers, ADC skips, batches over 256 vertices, any split of the input). upload_fast
-   takes the fast path (draw_strip set), upload_slow the plain one. */
+/* The strip fast paths (gs_feed's packed_strip, finding 146; the game's own layout read from the
+   packet, gs_strip.h, finding 197) against the qword-at-a-time path: the same triangles in the
+   same order and the same state after, for random PACKED strip tags (2 to 5 registers, ADC skips,
+   batches over 256 vertices, any split of the input). upload_fast takes the fast paths (draw_strip
+   and gs_strip_hook set), upload_slow the plain one. */
 enum { STRIP_LOG = 8192 };
 static GsVertex strip_log[2][STRIP_LOG * 3];
-static unsigned strip_logged[2], strip_batches;
+static unsigned strip_logged[2], strip_batches, strip_packets;
 
 static void strip_note(Gs *g, const GsVertex *v)
 {
@@ -339,6 +341,19 @@ static void strip_batch(Gs *g, unsigned prim, const GsVertex *list, unsigned cou
         if (drawn[i]) strip_note(g, list + i);
 }
 
+/* gs_strip_hook as its contract says: draw for each triangle whose third vertex has no ADC. */
+static void strip_packet(Gs *g, const uint32_t *words, unsigned count)
+{
+    CHECK(count >= 3);
+    strip_packets++;
+    GsVertex before = g->vertex, v[3];
+    for (unsigned i = 0; i + 2 < count; i++) {
+        if (gs_strip_adc(words + (i + 2) * GS_STRIP_WORDS)) continue;
+        for (unsigned j = 0; j < 3; j++) gs_strip_vertex(words + (i + j) * GS_STRIP_WORDS, &before, &v[j]);
+        strip_note(g, v);
+    }
+}
+
 static void strips(void)
 {
     static const struct { uint32_t regs; unsigned nreg; } lists[] = {
@@ -346,12 +361,15 @@ static void strips(void)
         {0xC1, 2},      /* RGBAQ, XYZF2 */
         {0xD213, 4},    /* UV, RGBAQ, ST, XYZF3 */
         {0x51321, 5},   /* RGBAQ, ST, UV, RGBAQ, XYZ2: too long for the fast path */
+        {0x412, 3},     /* ST, RGBAQ, XYZF2: the game's, read from the packet (gs_strip_hook) */
+        {0x9412, 3},    /* the same with a nibble past NREG set, as the game's tags have */
     };
     static uint32_t words[(1 + 700 * 5) * 4];
     unsigned random = 0x5EED, differing = 0;
 #define RND (random = random * 1664525u + 1013904223u, random >> 8)
-    for (unsigned trial = 0; trial < 64; trial++) {
-        unsigned which = trial % 4, nreg = lists[which].nreg, loops = 1 + RND % 700, n = 4;
+    for (unsigned trial = 0; trial < 192; trial++) {
+        /* 1 to 700 loops, and the short tags (1 to 4 loops) that never fill the window or just do */
+        unsigned which = trial % 6, nreg = lists[which].nreg, loops = trial % 5 == 4 ? 1 + RND % 4 : 1 + RND % 700, n = 4;
         words[0] = loops | 0x8000; words[1] = nreg << 28 | 1u << 14 | 4u << 15;  /* PRE, PRIM = triangle strip */
         words[2] = lists[which].regs; words[3] = 0;
         for (unsigned l = 0; l < loops; l++)
@@ -363,7 +381,9 @@ static void strips(void)
         for (int pass = 0; pass < 2; pass++) {
             Gs *g = pass ? &upload_slow : &upload_fast;
             gs_reset(g);
+            g->vertex.u = 0x123; g->vertex.v = 0x2345;   /* no list but the third writes UV: they stay */
             g->draw = strip_draw; g->draw_strip = pass ? NULL : strip_batch;
+            gs_strip_hook = pass ? NULL : strip_packet;
             unsigned split = random;
             for (unsigned done = 0; done < n;) {
                 unsigned take = trial & 1 ? n : 1 + (split = split * 1664525u + 1013904223u) % 4000;
@@ -383,10 +403,12 @@ static void strips(void)
             differing++;
     }
 #undef RND
-    CHECK(differing == 0 && strip_batches > 64);
+    CHECK(differing == 0 && strip_batches > 64 && strip_packets > 16);
     upload_fast.draw = upload_slow.draw = NULL;
     upload_fast.draw_strip = NULL;
-    printf("strip fast path: 64 tags, %u batches, %u differing\n", strip_batches, differing);
+    gs_strip_hook = NULL;
+    printf("strip fast paths: 192 tags, %u batches, %u packets read in place, %u differing\n", strip_batches,
+           strip_packets, differing);
 }
 
 int main(void)
