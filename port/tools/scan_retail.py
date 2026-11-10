@@ -23,7 +23,6 @@ ROOT = Path(__file__).resolve().parents[2]
 # before its literal: the wasm module packs literals with their terminators, so a run there can
 # begin one to three bytes early (finding 082, x64 package).
 SOURCE = [
-    (0x26F14D, 99, 'port/hle/online_menu.c: tracks, the explicit career-order ids, with three leading NULs'),
     (0x288A2F, 73, 'src/unsorted/00118898.c: getNextPoint format string, from the NUL before it'),
     (0x288B6F, 136, 'src/unsorted/0011D048.c: both AnimalHerd::addShadow messages'),
     (0x288EAF, 122, 'src/unsorted/00127F20.c: "Stealing highestPed" messages'),

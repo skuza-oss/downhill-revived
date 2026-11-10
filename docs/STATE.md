@@ -73,6 +73,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   device ends the game with a message box instead of a frozen picture (desktop and Android; tried on
   Direct3D 12; finding 171). Dual-source blending is off on Intel GPUs (`device::dual_source`;
   `DHD_WGPU_DUAL_SOURCE=0|1` overrides; finding 188): an Ice Lake GPU hung on it (issue #58).
+  Upscaled bilinear sprites interpolate at output resolution (foliage and particles); only
+  nearest-filtered sprites retain GS-pixel snapping (finding 196).
 - **The game clock:** one delta-time clock at every frame rate, 60 included and online: each
   paced frame steps by the real time since the last, between one step at the selected rate and two
   fields (finding 139, `port/hle/fps.c`, `port/hle/kernel.c`). Deterministic runs keep the

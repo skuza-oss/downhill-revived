@@ -1,70 +1,70 @@
-# 196: foliage sprites pixelated at high resolution scale (native render-target textures)
+# 196: smooth bilinear sprites at high resolution scale
 
-Status: in progress
+Status: current
 
-Branch `fix/native-rt-texture-scale` from `main` f06ffba7, started 2026-11-10. This file is the lane's plan
-while it runs and its finding when it merges. Someone who has only this file and the git log must
-be able to pick the lane up.
+Branch `fix/native-rt-texture-scale` from `main` f06ffba7, started 2026-11-10.
 
 ## Goal and acceptance
 
-Owner report (2026-11-10, 0.7.14 and current main): on Mt. Quintanaroo FR ("Peru FR") at 8x
-resolution the grass/shrub sprites beside the track look very pixelated (blocks about 20 px at
-1080p, about 6-7 PS2 pixels) until the rider is very close, while everything else is sharp. The
-dirt particles behind the bike also look low quality. PCSX2 at 8x upscaling looks clearly better
-on the same spots. The same look is on Red Pass FR tree canopies (trunk sharp, canopy blocky,
-about 3:29 race time), so it is likely every FR track's foliage sprites, not Peru only.
+At 8x the owner saw blocky grass and shrubs on Mt. Quintanaroo FR, blocky tree canopies on
+Red Pass FR, and coarse dirt particles behind the bike. Other geometry stayed sharp, and
+PCSX2's upscaled picture looked better. The owner confirmed the Windows test build fixes the
+reported visual problem on 2026-11-10 and requested merging to main.
 
-Done means:
+## Root cause and fix
 
-- the root cause is named with evidence: which draws (GS dump), which TEX0/TEX1/CLAMP, which
-  texture source (uploaded texture vs render-target conversion in
-  `port/gs/native_core.inc` `native_texture()` / `native_convert_texture()`), which filtering/LOD;
-- every other place the same mechanism applies is listed (other tracks, effects, menus);
-- if the fix is clear and contained it is implemented on this branch: `python tools/check.py port`
-  passes, boot and race state traces equal to main's (picture-only change), before/after
-  presented pictures at 8x (and 2x) for Peru FR grass and Red Pass FR canopies under
-  `F:\Temp\peru-grass\` (never committed), and no new GPU performance cliff on this PC
-  (timed race segment before/after).
+The native renderer marked GS sprites with flag 1024 and applied two adjustments at scales
+above 1x: snapping their corners to whole GS pixels in `native_vertex`, and snapping texture
+sampling to a GS pixel in `fetch` and `fetch_u` for textures at their original resolution.
+Even bilinear texture samples were consequently constant across an upscaled GS pixel. Small
+foliage and particle sprites could not gain smooth interpolation from the higher resolution.
 
-Out of scope: changing gameplay, the exact renderer, texture packs, Android/browser.
+`port/gs/native.wgsl` now applies those adjustments only when the bilinear flag (32) is clear.
+That flag comes from TEX1 MMAG in `native_texture` (`port/gs/native_core.inc`). Bilinear
+sprites retain subpixel corners and interpolate UVs at output resolution. Nearest-filtered
+sprites and copies retain the old snapping. Both float and integer texture-fetch paths use
+the same condition. The exact renderer, game readbacks and gameplay code are unchanged.
+
+The scope is all bilinear GS sprites at scales above 1x, on any track or screen using them;
+there is no FR-track special case. Triangles, nearest-filtered sprites and scale 1 are
+unchanged. An exhaustive inventory of every sprite effect and track was not completed.
 
 ## Progress
 
-- [x] 2026-11-10: branch created from main f06ffba7; worktree setup run; this finding reserved.
-- [ ] reproduce on Peru FR (--right 9) and Red Pass FR (--right 3) at scale 8 with
-  DHD_NATIVE_TEXLOG / DHD_NATIVE_WHY, presented captures at the grass (about 1:40 race time,
-  full-pedal pad) and the Red Pass canopy (about 3:29).
-- [ ] GS dump at the grass moment; find the foliage and dirt draws; compare with PCSX2 replay
-  at 8x if practical (finding 085 referee flow).
-- [ ] root cause, blast radius, fix or proposed fix, checks.
+- [x] Reserved this lane and investigated foliage/dirt captures.
+- [x] Implemented the shader fix in 74c38086 and a synthetic sprite-gradient regression check.
+- [x] Built and packaged a Windows test build; owner confirmed the visual fix.
+- [x] Incorporated main's existing track-table representation fix (1708297a).
+- [x] Merge checks: python tools/check.py port -j 6 and native-transfer regression tests passed.
+- [ ] State-trace comparisons and timed race benchmarks: not completed; the owner stopped
+  further game testing and supplied manual visual acceptance instead.
 
 ## Decisions
 
-- (recorded as made)
+- Keep snapping for nearest-filtered sprites. Removing it from every sprite initially broke
+  synthetic copy/transfer cases; the bilinear-only change preserves their existing behavior.
+- Do not redesign render-target texture conversion for this fix. Reinterpreted targets being
+  converted at their texel size was an early hypothesis, not the cause addressed here.
+- Remove the test-build packaging exception for the track-order table from `scan_retail.py`.
+  Main already stores those ids as bytes (1708297a), avoiding the retail-data match without
+  allowing another retail byte range. The final lane retains no scanner exception.
 
-## Surprises
+## Evidence and limits
 
-- (recorded as found)
+`sprite_gradient` in `port/gs/test_native_transfers.c` draws a two-GS-pixel bilinear sprite
+across a black-to-white texture at 2x. Four adjacent output samples must increase, with a
+range greater than 100. The fixed shader produced 0, 31, 95, 159. During merge preparation,
+`python port/tools/test_native_transfers.py` passed with and without dual-source blending:
+38 pictures, zero pictures with RGB differences and zero CPU VRAM differences between runs.
+
+Before/after captures were made at 2x and 8x during research; some independently timed
+captures differed in game position and cannot serve as pixel-identical state evidence.
+GS-dump replays did not provide a useful PCSX2 comparison. No claim is made that traces,
+every track or performance were validated. The owner's subsequent visual confirmation is
+the acceptance of the actual reported bug.
 
 ## Result
 
-Filled in at the merge: what changed, what was measured and how, what is left. Then set the
-Status to `current` (or `rejected`).
-
-## Test build handoff (2026-11-10)
-
-The implemented fix is commit 74c38086: native bilinear sprites retain subpixel corners and
-smooth texture-coordinate interpolation when upscaled. Nearest-filtered sprites and copies
-retain their existing snapping. The original render-target conversion hypothesis was not the
-implemented fix. The earlier native-transfer run reported smooth sprite interpolation passing
-on both backends after retaining snapping for nearest-filtered copies.
-
-At the owner's request, further game runs and testing stopped; a Windows player ZIP is being
-packaged for manual testing. Full port checks, state-trace comparisons and performance
-acceptance remain incomplete; this is a test build, not a validated release.
-
-Packaging exposed an existing explicit source table: online_menu.c tracks has the career-order
-ids also found at retail address 0x26F150. The exact 99-byte match (including three leading NULs)
-is recorded in scan_retail.py SOURCE, alongside the existing source constants. No retail bytes
-were added to the build, and the scan still checks every packaged file.
+The native sprite fix is accepted by the owner for merging. Compile/unit check results are
+recorded in the merge entry in `docs/STATE-LOG.md`. No additional game runs or benchmarks
+were made during merge preparation.
