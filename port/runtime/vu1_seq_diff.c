@@ -15,6 +15,10 @@
    ps2_cpu has the same layout. On Linux and Android the timed part also counts CPU cycles
    (perf_event_open, where the kernel allows it): they do not move with the core's clock.
 
+   Built with PS2_VU_CLEAN_CHECK (vu1_seq_diff.py --clean-check), the kernels also compare every
+   value they write as clean (vu1_native_geometry.h, native_clean) with its clamp; any that
+   differs fails the run.
+
    DHD_VU_TEST_SPECIALS=SEED: before a run's three executions, some lanes of its VF registers,
    ACC, Q and data memory are replaced with exponent-255 and denormal bit patterns (the same for
    all three): the kernels' operand clamps, and every proof that one is not needed, against the
@@ -127,6 +131,9 @@ static Result *recording;
 #ifdef PS2_VU_COVERAGE
 extern unsigned long long ps2_vu1_interpreted[2048], ps2_vu1_translated;
 static unsigned long long translated_pairs[2], fallback_pairs[2][2048];
+#endif
+#ifdef PS2_VU_CLEAN_CHECK
+extern unsigned long long ps2_vu1_unclean;
 #endif
 
 /* XGKICK: the GIF packet at `address` (tags and data, through the EOP tag's data) and where it was. */
@@ -346,6 +353,10 @@ int main(int argc, char **argv)
     if (repeat) fprintf(stderr, "; replay time exact %.3f ms, native %.3f ms (%.3fx)", exact_total * 1e3, native_total * 1e3,
                         exact_total / native_total);
     if (repeat && native_cycles > 0) fprintf(stderr, "; cycles exact %.0f, native %.0f", exact_cycles, native_cycles);
+#ifdef PS2_VU_CLEAN_CHECK
+    fprintf(stderr, "; values written as clean that were not: %llu", ps2_vu1_unclean);
+    if (ps2_vu1_unclean) differing++;
+#endif
     fprintf(stderr, "\n");
 #ifdef PS2_VU_COVERAGE
     for (unsigned mode = 0; mode < 2; mode++) {

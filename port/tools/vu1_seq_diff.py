@@ -16,6 +16,10 @@ any difference.
 data memory first (the same for all three executions): the kernels' operand clamps, and every proof
 that one is not needed, against the interpreter on values the game rarely holds.
 
+--clean-check builds the kernels with PS2_VU_CLEAN_CHECK: every value one writes as clean (its
+operands are clamped where they are written, not where they are read, finding 197) is compared with
+its clamp, and any that differs fails the run. Slower: not with --repeat.
+
 --target android-arm64 only builds the harness for a phone (OUT/vu1_seq_diff-android-arm64, the
 game build's arm64 flags): the kernels on the phone's own CPU, with its FPCR and NEON paths. Push
 it and a capture (the x64 game's serve: ps2_cpu has one layout) to the phone's /data/local/tmp and
@@ -34,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
-def build(out, negative=False, coverage=False, target=None):
+def build(out, negative=False, coverage=False, target=None, clean_check=False):
     from vu1_aot import generate
     generate(out / 'vu1_aot.inc')  # also writes vu1_native_clip.inc beside it
     runtime = ROOT / 'port/runtime'
@@ -61,6 +65,7 @@ def build(out, negative=False, coverage=False, target=None):
                '-I' + str(out), '-I' + str(ROOT / 'port/runtime'), '-I' + str(ROOT / 'port/include'),
                '-I' + str(ROOT / 'port/host'), '-I' + str(simde)]
         if coverage: cmd += ['-DPS2_VU_COVERAGE']
+        if clean_check: cmd += ['-DPS2_VU_CLEAN_CHECK']
         cmd += [str(runtime / 'vu0_interp.c'), str(ROOT / 'port/runtime/vu1_seq_diff.c'), '-o', str(exe), '-lm']
         subprocess.run(cmd, cwd=out, check=True, timeout=1200)
         return exe
@@ -75,6 +80,7 @@ def build(out, negative=False, coverage=False, target=None):
            '/I' + str(ROOT / 'port/host'), '/imsvc' + str(MSVC / 'include')]
     cmd += ['/imsvc' + str(SDK / 'Include' / VERSION / x) for x in ('ucrt', 'um', 'shared')]
     if coverage: cmd += ['-DPS2_VU_COVERAGE']
+    if clean_check: cmd += ['-DPS2_VU_CLEAN_CHECK']
     cmd += [str(runtime / 'vu0_interp.c'), str(ROOT / 'port/runtime/vu1_seq_diff.c'), '/Fe' + str(exe),
             '/link', '/libpath:' + str(MSVC / 'lib/x64'), '/libpath:' + str(SDK / 'Lib' / VERSION / 'ucrt/x64'),
             '/libpath:' + str(SDK / 'Lib' / VERSION / 'um/x64')]
@@ -92,13 +98,14 @@ def main():
     ap.add_argument('--sticky-cycle', action='store_true', help='cycle entry sticky Z/S through all four states, identically for every compared mode')
     ap.add_argument('--coverage', action='store_true', help='count AOT and interpreter fallback pairs (diagnostic instrumentation; use without --repeat for normal timings)')
     ap.add_argument('--specials', metavar='SEED', help='special float bit patterns in each run\'s registers and data memory first (DHD_VU_TEST_SPECIALS)')
+    ap.add_argument('--clean-check', action='store_true', help='count values the kernels wrote as clean that were not (PS2_VU_CLEAN_CHECK)')
     ap.add_argument('--target', choices=('android-arm64',), help='only build the harness for this target (run it there by hand)')
     args = ap.parse_args()
     out = args.out.resolve()
     if (ROOT / 'build').resolve() not in out.parents and ROOT / 'build' not in out.parents:  # build/ may be a junction
         ap.error('generated code holds game microcode: OUT must stay under build/')
     out.mkdir(parents=True, exist_ok=True)
-    exe = build(out, args.negative, args.coverage, args.target)
+    exe = build(out, args.negative, args.coverage, args.target, args.clean_check)
     if args.target:
         print('built %s' % exe)
         return
