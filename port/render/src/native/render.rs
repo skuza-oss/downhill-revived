@@ -351,6 +351,10 @@ impl Pass {
                 if self.failed.insert(key) {
                     crate::host::log(&format!("gs native: draw pipeline {key:X}: {e}"));
                 }
+                // a mesh pipeline the driver refuses: Native VU off for the session (finding 194)
+                if key as u32 & MESH != 0 {
+                    crate::native::init::refuse_meshes(Some("a mesh draw pipeline was refused"));
+                }
                 false
             }
         }
@@ -477,6 +481,8 @@ impl Native {
         let _spike = crate::native::pipelines::SpikeTimer::new("picture", 0);
         let whole = rstat::T::new();
         let gpu = self.gpu;
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::native::init::test_refusal();
         gputimes::picture_begin(gpu);
         #[cfg(not(target_arch = "wasm32"))]
         self.pass.stats.picture_begin(gpu);
@@ -738,7 +744,13 @@ impl Native {
                     for &s in c.surface.iter().filter(|&&s| s >= 0) { reads |= 1u64 << (s as u32 & 63); }
                 }
                 self.pass.state.reads |= reads;
-                if let Some([l, t, r, b]) = draw_bounds(p.vertices, indices, k.first, k.count, big_t, scissor) {
+                // a mesh draw's vertices are object-space (its shader places them): its scissor
+                let bounds = if k.constants.flags & 4096 != 0 {
+                    Some([scissor[0], scissor[1], scissor[0] + scissor[2], scissor[1] + scissor[3]])
+                } else {
+                    draw_bounds(p.vertices, indices, k.first, k.count, big_t, scissor)
+                };
+                if let Some([l, t, r, b]) = bounds {
                     let s = &mut self.pass.state;
                     s.bounds = Some(match s.bounds {
                         Some([l0, t0, r0, b0]) => [l0.min(l), t0.min(t), r0.max(r), b0.max(b)],

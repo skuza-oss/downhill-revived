@@ -62,6 +62,68 @@ pub(crate) fn scoped_pipeline<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -
     }
 }
 
+/// Native VU (finding 194): set when this device can't draw the translated VU1 meshes (no storage
+/// buffer for the vertex stage, or a mesh layout, bind group or pipeline it refused). C asks
+/// `dhdr_native_meshes` after each picture and from then on the VU runs every program; a mesh draw
+/// already recorded is skipped (`render.rs`). Once set it stays set for the session.
+static MESHES_REFUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Marks the meshes refused, with one log line saying why (None: by design, the browser: no line).
+pub(crate) fn refuse_meshes(why: Option<&str>) {
+    if !MESHES_REFUSED.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        if let Some(why) = why {
+            crate::host::log(&format!("gs native: Native VU can't run on this GPU ({why}); the VU runs every program"));
+        }
+    }
+}
+
+pub(crate) fn meshes_refused() -> bool {
+    MESHES_REFUSED.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// DHD_TEST_NO_MESHES=N (tests, finding 194): the meshes are refused at the native renderer's N-th
+/// picture (0: at its create), as a driver refusing a mesh pipeline would; the game must go on with
+/// the VU running every program. Called at each picture (`render.rs`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn test_refusal() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static AT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    static PICTURES: AtomicU64 = AtomicU64::new(0);
+    let Some(at) = *AT.get_or_init(|| std::env::var("DHD_TEST_NO_MESHES").ok().and_then(|v| v.trim().parse().ok())) else {
+        return;
+    };
+    if PICTURES.fetch_add(1, Ordering::Relaxed) + 1 >= at {
+        refuse_meshes(Some("DHD_TEST_NO_MESHES"));
+    }
+}
+
+/// `dhdr_native_meshes` (`dhd_render_ext.h`): 1 while the native renderer can draw translated VU1
+/// meshes, 0 once it can't (`refuse_meshes`). Any thread.
+#[no_mangle]
+pub extern "C" fn dhdr_native_meshes() -> i32 {
+    let _g = crate::guard::Guard::enter("dhdr_native_meshes");
+    !meshes_refused() as i32
+}
+
+/// Whether the device can read the mesh draws' object records (a read-only storage buffer in the
+/// vertex stage, native.wgsl's `mesh_records`). Err(None): the browser, which draws no meshes;
+/// Err(Some(why)): this device can't.
+fn mesh_support(gpu: &Gpu) -> Result<(), Option<String>> {
+    if cfg!(target_arch = "wasm32") {
+        return Err(None);
+    }
+    if !gpu.adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::VERTEX_STORAGE) {
+        return Err(Some("no storage buffers in vertex shaders".into()));
+    }
+    if gpu.device.limits().max_storage_buffers_per_shader_stage == 0 {
+        return Err(Some("no storage buffers".into()));
+    }
+    if std::env::var("DHD_TEST_NO_MESHES").is_ok_and(|v| v.trim() == "0") {
+        return Err(Some("DHD_TEST_NO_MESHES".into()));
+    }
+    Ok(())
+}
+
 /// wgpu-native's pipeline compilation options: no override constants, workgroup memory not
 /// zero-initialised.
 pub(crate) fn compilation_options() -> wgpu::PipelineCompilationOptions<'static> {
@@ -579,25 +641,34 @@ impl Objects {
         }]);
         let native_draw_layout = pipeline_layout(gpu, &draws_layout, &texture_layout);
         let native_texels_draw_layout = pipeline_layout(gpu, &draws_layout, &texels_layout);
-        let mesh_layout = (!cfg!(target_arch = "wasm32")).then(|| layout(gpu, &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: S::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }]));
-        let mesh_pipeline_layout = |group1: &wgpu::BindGroupLayout| mesh_layout.as_ref().map(|mesh| {
-            gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        // The mesh layouts only where the device can read a storage buffer in the vertex stage
+        // (Native VU, finding 194): otherwise none, and the VU runs every program.
+        let mesh_layouts = mesh_support(gpu).and_then(|()| scoped(gpu, "the mesh layouts", || {
+            let mesh = layout(gpu, &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: S::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }]);
+            let with = |group1: &wgpu::BindGroupLayout| gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[Some(&draws_layout), Some(group1), Some(mesh)],
+                bind_group_layouts: &[Some(&draws_layout), Some(group1), Some(&mesh)],
                 immediate_size: 0,
-            })
-        });
-        let mesh_draw_layout = mesh_pipeline_layout(&texture_layout);
-        let mesh_texels_draw_layout = mesh_pipeline_layout(&texels_layout);
+            });
+            let (draw, texels) = (with(&texture_layout), with(&texels_layout));
+            (mesh, draw, texels)
+        }).map_err(Some));
+        let (mesh_layout, mesh_draw_layout, mesh_texels_draw_layout) = match mesh_layouts {
+            Ok((mesh, draw, texels)) => (Some(mesh), Some(draw), Some(texels)),
+            Err(why) => {
+                refuse_meshes(why.as_deref());
+                (None, None, None)
+            }
+        };
         let blit_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &blit_layout);
         let scanout_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &scanout_layout);
         let convert_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &convert_layout);

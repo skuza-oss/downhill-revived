@@ -3121,7 +3121,8 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
     const char *exact_probe = getenv("DHD_EXACT_PROBE");
     n->exact_probe = exact_probe ? atoi(exact_probe) : 0;
     gs_mesh_hook = native_mesh;   /* DHD_NATIVE_VU1 (port/hle/vu1_mesh.inc, finding 164) */
-    gs_mesh_mode = !n->indexed ? 0 : n->exact_probe ? 2 : 1;
+    /* none where the GPU can't draw meshes (the renderer said why; Native VU, finding 194) */
+    __atomic_store_n(&gs_mesh_mode, !n->indexed || !dhdr_native_meshes() ? 0 : n->exact_probe ? 2 : 1, __ATOMIC_RELAXED);
     n->trace_probes = getenv("DHD_NATIVE_PROBES") != NULL;
     if (getenv("DHD_NATIVE_SURFACES") && !(n->usage = calloc(NATIVE_SURFACES, sizeof *n->usage))) native_oom("usage");
     const char *texlog = getenv("DHD_NATIVE_TEXLOG");

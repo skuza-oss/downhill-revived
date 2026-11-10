@@ -213,9 +213,9 @@ impl Arenas {
             while size < vertices {
                 size *= 2;
             }
-            // Also storage for the mesh draws' object records (native.wgsl's mesh_records; not in the
-            // browser, which draws no meshes).
-            let storage = if cfg!(target_arch = "wasm32") { wgpu::BufferUsages::empty() } else { wgpu::BufferUsages::STORAGE };
+            // Also storage for the mesh draws' object records (native.wgsl's mesh_records; not where
+            // the device draws no meshes, the browser among them: init.rs's refuse_meshes).
+            let storage = if crate::native::init::meshes_refused() { wgpu::BufferUsages::empty() } else { wgpu::BufferUsages::STORAGE };
             self.vertex_buffer = device.map(|g| g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("native vertices"),
                 size,
@@ -433,9 +433,17 @@ impl Arenas {
 
     /// The mesh draws' group 2 (`layout`: init.rs's mesh layout): the whole vertex buffer, where
     /// native_core.inc's native_mesh_record puts the objects' records (finding 168).
+    /// None (and Native VU off, finding 194) when the buffer is larger than one storage binding.
     pub fn mesh_group(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Option<wgpu::BindGroup> {
         if self.mesh_group.is_none() {
             let buffer = self.vertex_buffer.as_ref()?;
+            if !buffer.usage().contains(wgpu::BufferUsages::STORAGE) {
+                return None;   // made after the meshes were refused
+            }
+            if buffer.size() > gpu.device.limits().max_storage_buffer_binding_size {
+                crate::native::init::refuse_meshes(Some("the picture's vertices exceed one storage binding"));
+                return None;
+            }
             self.mesh_group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("native mesh records"),
                 layout,

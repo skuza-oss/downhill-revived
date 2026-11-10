@@ -137,7 +137,8 @@ int gs_xgkick(Gs *g, const uint32_t *memory, unsigned qword);
    and PRIM (unless a shadow batch's own packet made them), then the backend's mesh hook. */
 void gs_mesh(Gs *g, const uint32_t *words, size_t count);
 /* Set by the backend: 0 no mesh drawing (vu1_mesh.inc leaves VU1 as it is), 1 mesh items drawn,
-   2 drawn while the exact path answers the Z probe (the batches also run on the VU: shadow).
+   2 drawn while the exact path answers the Z probe (the batches also run on the VU: shadow); back
+   to 0 when the GPU refuses the mesh draws (native_mesh_check; atomic: the VU thread reads it).
    gs_mesh_hook: the backend's drawing of a mesh item, after gs_mesh's register writes.
    gs_vu_shadow: the packet being fed was kicked by a batch the backend draws from its mesh item
    (only the exact Z path takes it). Outside struct Gs, whose size the core's state trace holds. */
