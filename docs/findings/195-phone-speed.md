@@ -70,6 +70,12 @@ Out of scope: gameplay, the desktop builds' speed (kept equal or better), anythi
   once the debug sections, which name the build folder, are stripped), so the two APKs differ in the
   Rust library alone, and change 2's compiler option changes nothing while the shipped profile is
   used (its static keys match in neither build).
+- [x] 2026-11-10: change 1 checked on the PC against base2: boot (600) and race (5000) state traces
+  equal in every row; the picture route's eleven fields identical at 2x and 4x, Native VU off and
+  on, on Direct3D 12, and at 2x off and on on Vulkan; the renderer crate's tests pass (`rustgs.py
+  test`, every stage through Arm's compiler for the Mali-G52).
+- [x] 2026-11-10: change 1 timed at 4x, Native VU off (base2, c1, base2, c1): the route 55.5 ->
+  61.5 fields/s (+10.9 %), "Change 1" below.
 
 ## Method
 
@@ -132,6 +138,27 @@ What limits, by the busy columns:
   route on `native/vu-gs` four days ago (finding 172), 56.9 now; 4x off 61.2 over the route and 13.6 ms
   of GPU mid-race on `main` 0574b05 the day before (finding 183), 51.7 and 16.7 ms now. Both drops are
   traced below (the first two entries of Surprises).
+
+## Change 1: the draw constants a uniform block again (`140a7d2`)
+
+Finding 172's step (each draw reading its constants out of a 256-slot array by its instance index,
+handed to its pixels as a flat varying) is undone: `native.wgsl`'s `nat` is a uniform block at group
+0's dynamic offset again, bound again only when a draw's constants differ from the last one's. The
+draw constants keep their own arena (256 bytes apart) and layout (minimum size given). Why: Surprises
+1. Pictures, state and the crate's tests: Progress.
+
+Timed against base2 (`main` 959c5f4), both APKs built with the shipped profile and holding the same C
+code; interleaved base2, c1, base2, c1 (each run in brackets), 60 s cooling, the clocks at the
+profile's caps in every run. Fields/s, and the GPU's ms a frame:
+
+| stand-in | Native VU | scene | base2 | change 1 | gain | GPU base2 -> change 1 |
+|---|---|---|---:|---:|---:|---|
+| 4x | off | race start | 41.6 (41.6 / 41.5) | 47.2 (47.3 / 47.2) | +13.6 % | 21.45 -> 18.00 |
+| 4x | off | mid-race | 57.7 (57.7 / 57.7) | 64.8 (64.9 / 64.8) | +12.4 % | 16.01 -> 13.93 |
+| 4x | off | the race | 54.3 (54.3 / 54.3) | 61.0 (61.0 / 61.0) | +12.4 % | 16.86 -> 14.59 |
+| 4x | off | the route | 55.5 (55.5 / 55.4) | 61.5 (61.6 / 61.5) | +10.9 % | 15.64 -> 13.55 |
+
+So the Adreno pays for the indexed constants too: 13-16 % of its frame at 4x, where the GPU limits.
 
 ## Where to resume
 
