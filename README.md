@@ -43,11 +43,12 @@ Mac and Linux (experimental): the `-mac-experimental.dmg` (drag the app to Appli
 or their zips. None of the downloads is signed by a developer certificate:
 [docs/PLAYING.md](docs/PLAYING.md#installing) says how to allow them and where your files go. You
 need Windows 10/11 64-bit (or an Apple silicon Mac, or Linux with glibc 2.35+ and Vulkan) and a
-Direct3D 12 or Vulkan graphics card.
+Direct3D 12 or Vulkan graphics card: minimum and recommended specs for every platform are in
+[docs/PLAYING.md](docs/PLAYING.md#system-requirements).
 
 Android (experimental): the `-android-experimental.apk` for arm64 phones and tablets on Android 10
-or later, with touch controls; no online races on phones yet. The release page says how to
-install it.
+or later (minimum: a Helio G80 / Snapdragon 680 class phone with 4 GB RAM), with touch controls;
+online in P2P races. The release page says how to install it.
 
 ## Legal notice
 

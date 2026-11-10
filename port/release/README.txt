@@ -16,6 +16,10 @@ What you need
   Please report them with your dhd.log.
   There is also an experimental Android build (an .apk on the release page); its online play is
   P2P races only (below).
+- Speed: about 60 fps at 1x-2x needs a 4-thread CPU from about 2016 and integrated graphics such
+  as Intel UHD 620 or AMD Vega 8 with 4 GB RAM; 4x and up wants a 6-core CPU and a GTX 1060 /
+  RX 580 class card or better. On Android: a Helio G80 / Snapdragon 680 class phone with 4 GB RAM,
+  with Performance Mode on. The full table is in docs/PLAYING.md ("System requirements").
 - Your own dump of the Downhill Domination USA disc (SCUS-97177) as an .iso file. Other regions
   and modified images are refused.
 

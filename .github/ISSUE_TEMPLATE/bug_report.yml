@@ -6,6 +6,7 @@ body:
     attributes:
       value: |
         Thanks for reporting! The **dhd.log** file is the most useful thing you can send: it shows what the game did just before the problem.
+        **Slow game?** Check the [system requirements](https://github.com/skuza-oss/downhill-revived/blob/main/docs/PLAYING.md#system-requirements) first and try **Performance Mode** (REVIVED SETTINGS > Graphics). Speed reports from devices below the minimum are closed; crashes are fixed on any device.
         Close the game first (it writes the log while it runs), then find dhd.log:
         - **Windows:** in the folder with `dhd.exe` and `DownhillRevived.exe` (or `%APPDATA%\Downhill Revived` if that folder can't be written to).
         - **Mac:** `~/Library/Application Support/Downhill Revived` (Finder: Go > Go to Folder).
