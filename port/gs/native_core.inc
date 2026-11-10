@@ -2002,9 +2002,10 @@ static inline __attribute__((always_inline)) void native_strip_set(NativeVertex 
 
 /* native_strip's loop over triangles first..end-1 of the packet (triangle k is vertices k..k+2):
    each drawn one recorded as native_record records it. exact: the exact probe is on, and each
-   takes native_exact first, as in native_draw (a constant in both callers, so the usual loop has
-   no call in it). Returns how many it recorded; *last is the latest, or UINT32_MAX. */
-static inline __attribute__((always_inline)) unsigned native_strip_triangles(
+   takes native_exact first, as in native_draw. A constant in each of the two functions below, so
+   the usual loop has no call in it, and a function of its own, so its values have the registers
+   to themselves. Returns how many it recorded; *last is the latest, or UINT32_MAX. */
+static inline __attribute__((always_inline)) unsigned native_strip_loop(
     Native *n, Gs *g, NativeFrame *f, const uint32_t *w, const GsVertex *before, unsigned first, unsigned end,
     unsigned prim, unsigned ctxt, int ofx, int ofy, const int exact, unsigned *last)
 {
@@ -2064,6 +2065,20 @@ static inline __attribute__((always_inline)) unsigned native_strip_triangles(
     return recorded;
 }
 
+static __attribute__((noinline)) unsigned native_strip_triangles(Native *n, NativeFrame *f, const uint32_t *w,
+                                                                 unsigned first, unsigned end, int ofx, int ofy,
+                                                                 unsigned *last)
+{
+    return native_strip_loop(n, NULL, f, w, NULL, first, end, 0, 0, ofx, ofy, 0, last);
+}
+
+static __attribute__((noinline)) unsigned native_strip_triangles_exact(
+    Native *n, Gs *g, NativeFrame *f, const uint32_t *w, const GsVertex *before, unsigned first, unsigned end,
+    unsigned prim, unsigned ctxt, int ofx, int ofy, unsigned *last)
+{
+    return native_strip_loop(n, g, f, w, before, first, end, prim, ctxt, ofx, ofy, 1, last);
+}
+
 /* gs.c's strips in the game's own layout (gs_strip_hook, finding 197): the drawn triangles of the
    packet's vertices, as native_draw would draw each in turn, decoded and recorded in one pass.
    The first goes through native_draw (it may change the state); the state then holds for the rest
@@ -2113,8 +2128,8 @@ static void native_strip(Gs *g, const uint32_t *w, unsigned count)
     native_reserve(f, 3 * (end - i));
     native_reserve_indices(f, 3 * (end - i));
     unsigned last, recorded;
-    if (n->exact_probe) recorded = native_strip_triangles(n, g, f, w, &before, i, end, prim, ctxt, ofx, ofy, 1, &last);
-    else recorded = native_strip_triangles(n, g, f, w, &before, i, end, prim, ctxt, ofx, ofy, 0, &last);
+    if (n->exact_probe) recorded = native_strip_triangles_exact(n, g, f, w, &before, i, end, prim, ctxt, ofx, ofy, &last);
+    else recorded = native_strip_triangles(n, f, w, i, end, ofx, ofy, &last);
     /* native_record's conversion cache after the last triangle recorded: its second and third
        vertex, each with its own colour */
     if (last != UINT32_MAX) {
