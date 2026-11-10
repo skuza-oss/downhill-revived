@@ -160,10 +160,25 @@ Measured per platform and step in finding 151. What keeps a rebuild short:
   (`objcache.tool_output`).
 - Android compiles with half the machine's threads by default (chunks are small; wasm2c's own parts
   needed 2). With `--pgo-use`, the profile is part of every object's key, so a second build with the
-  same profile and core is all hits. A profile stays useful across core changes: clang applies a
-  function's counts only while the function is unchanged (its control-flow hash), so the changed
-  functions build as without PGO and the rest keep theirs. Record a new one when the hot code (EE,
-  VU, GS) changed, and at least once per release (finding 146).
+  same profile and core is all hits.
+- **The Android profile** (`build_apk.py --pgo-use PROFDATA`, `package_release.py --pgo-use`,
+  findings 146, 195). A function is found in a profile by its name, a static one by its unit's file
+  name and its name: `build_host64.py` passes `-static-func-full-module-prefix=false` when it
+  records and when it uses a profile, so one recorded in any checkout serves a build made in any
+  other (before finding 195 the key held the recording build's path, and no other build found its
+  static functions: the VU1 kernels, the GS recording, the graphics queue, the module's helpers).
+  `build_host64.py` refuses a profile with paths in its keys. clang applies a function's counts
+  only while the function is unchanged (its control-flow hash): a changed function builds as
+  without a profile, silently, and the rest keep theirs. So record a new one when the hot code
+  (EE, VU, GS) changed, and at least once per release:
+
+      python port/android/build_apk.py --release --pgo-generate   # refused as a release, as it must be:
+      adb install -r build/android/project/app/build/outputs/apk/release/app-release.apk
+      # run races (finding 195: finding 156's route twice, Native VU off and on); at its exit the
+      # game writes files/dhd-<pid>.profraw in the app's folder (read it by root, or build debuggable
+      # and use run-as)
+      llvm-profdata merge -o dhd.profdata dhd-*.profraw            # the NDK's llvm-profdata
+      python port/tools/package_release.py --platform android --pgo-use dhd.profdata
 
 ### Android (arm64 APK)
 
