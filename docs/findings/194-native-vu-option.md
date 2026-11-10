@@ -3,8 +3,8 @@
 Status: current
 Checked: 2026-11-10
 
-Branch `feat/native-vu-option` from `main` cdee456, started 2026-11-10. This file is the lane's
-plan while it runs and its finding when it merges. Someone who has only this file and the git log
+Branch `feat/native-vu-option` from `main` cdee456, started 2026-11-10. Merged into `main` at
+f803874a on 2026-11-10; ships in 0.7.15. Someone who has only this file and the git log
 must be able to pick the lane up.
 
 ## Goal and acceptance

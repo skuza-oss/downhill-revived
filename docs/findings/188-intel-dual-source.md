@@ -1,9 +1,9 @@
 # 188: dual-source blending off on Intel GPUs
 
 Status: current
-Checked: 2026-11-09
+Checked: 2026-11-10
 
-Branch `fix/intel-dual-source` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at a97b42d7 on 2026-11-09; not yet released.
+Branch `fix/intel-dual-source` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at a97b42d7 on 2026-11-09; ships in 0.7.15.
 
 ## Goal and acceptance
 
@@ -136,6 +136,7 @@ decision stands).
 
 ## Result
 
-Filled in at the merge. So far: the rule in `device::dual_source` (Intel off, `0|1` overrides),
-its dhd.log line, `DHDR_DEV_DUAL_SOURCE`; checks in Progress. Not run on an Intel GPU (none here);
+Merged (a97b42d7) and ships in 0.7.15: the rule in `device::dual_source` (an Intel adapter gets no
+dual-source blending; `DHD_WGPU_DUAL_SOURCE=0|1` overrides, `0` winning), its dhd.log line,
+`DHDR_DEV_DUAL_SOURCE`; checks in Progress. Not run on an Intel GPU (none here);
 the two-pass path's cost on Intel not measured (Not measured).

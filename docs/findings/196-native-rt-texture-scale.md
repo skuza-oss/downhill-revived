@@ -1,8 +1,10 @@
 # 196: smooth bilinear sprites at high resolution scale
 
 Status: current
+Checked: 2026-11-10
 
-Branch `fix/native-rt-texture-scale` from `main` f06ffba7, started 2026-11-10.
+Branch `fix/native-rt-texture-scale` from `main` f06ffba7, started 2026-11-10. Merged into `main` at
+2426a716 on 2026-11-10; ships in 0.7.15.
 
 ## Goal and acceptance
 

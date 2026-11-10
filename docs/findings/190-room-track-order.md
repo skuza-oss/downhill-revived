@@ -1,10 +1,10 @@
 # 190: the online room's track list in Super Career order
 
 Status: current
-Checked: 2026-11-09
+Checked: 2026-11-10
 
 Branch `feat/room-track-order` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at 34cf1293 on
-2026-11-09; not yet released.
+2026-11-09; ships in 0.7.15.
 
 ## Goal and acceptance
 
@@ -94,7 +94,8 @@ The room's track list follows the Super Career (above), Mosh Pit last, everywher
 from: the picker (filled by columns), Left/Right on TRACK, and the host's rotation. Changed:
 `port/hle/online_menu.c` (the list, `TRACK_ROWS`, the picker's placement and Up/Down/Left/Right);
 `online/server/test/session.test.ts` (a test with the career-order list; the index-order test
-stays, for older hosts). Server code untouched: no deploy, `MIN_VERSION` and protocol 4 stay.
+stays, for older hosts). The list is bytes, not ints (1708297a): as 32-bit words it was a copy of
+retail's .data that `package_release.py`'s game-data check refused in dhd.exe. Server code untouched: no deploy, `MIN_VERSION` and protocol 4 stay.
 
 Checks (2026-11-09, `DHD_BUILD_SLOTS=2`, `-j 6`):
 

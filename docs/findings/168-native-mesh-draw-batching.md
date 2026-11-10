@@ -3,8 +3,8 @@
 Status: current
 Checked: 2026-11-10
 
-Branch `native/vu-gs` (local only: never pushed or merged until the owner decides), after 167's
-`eb14849`, started 2026-11-06. This file is the lane's plan while it runs.
+Branch `native/vu-gs`, after 167's `eb14849`, started 2026-11-06. Merged into `main` with the rest of `native/vu-gs` at 32df819b on 2026-11-10, behind finding
+194's Native VU setting (off by default); ships in 0.7.15.
 
 ## Goal and acceptance
 

@@ -66,6 +66,10 @@ other's network address), and P2P rooms on Android and in the browser (SFU rooms
 desktop-only there). They ship from 0.7.14 on (after the test prerelease test-p2p-1). Native iOS
 app work is deferred.
 
+Native VU (194) is the one exception to "one code path" on the GPU side: while it is experimental
+(a Graphics setting, off by default, from 0.7.15), the emulated VU1 path stays beside it and is
+what players get; the emulated path goes once native is the default.
+
 A lane's plan is its finding: copy `docs/findings/TEMPLATE.md` on the lane's first commit
 (`Status: in progress`, which reserves the number) and keep its Progress, Decisions and Surprises
 current; at the merge it becomes `current`. Findings carry a `Status:` line; only `current` findings and the still-true parts of `partly

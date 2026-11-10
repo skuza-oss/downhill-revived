@@ -4,7 +4,7 @@ Status: current
 Checked: 2026-11-10
 
 Branch `fix/fast-scenery-high-fps` from `main` 9609ea6f, started 2026-11-09. Merged into `main` at ecde8cb7
-on 2026-11-10; not yet released. Open leftovers are tracked in issue #76.
+on 2026-11-10; ships in 0.7.15. Open leftovers are tracked in issue #76.
 
 ## The report
 

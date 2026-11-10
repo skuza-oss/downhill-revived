@@ -1,10 +1,10 @@
 # 191: Android 10 (API 29) as the APK's minimum
 
 Status: current
-Checked: 2026-11-09
+Checked: 2026-11-10
 
 Branch `feat/android-10` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at bd368803 on
-2026-11-09; not yet released.
+2026-11-09; ships in 0.7.15.
 
 ## Goal and acceptance
 
@@ -128,3 +128,7 @@ links nothing from the NDK beyond libc, libm, libdl and liblog
   writes a small zip with a release build's marker.
 
 ## Result
+
+Merged (bd368803) and ships in 0.7.15: the APK installs from Android 10 (minSdk 29), signed v2
+and v3; calls above API 29 behind `SDK_INT` checks; guest RAM through `ASharedMemory_create` on
+Android 10 (`port/host64/guest_memory_posix.c`). Not run on a real Android 10 phone (Progress).

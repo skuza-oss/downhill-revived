@@ -65,7 +65,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - Inline asm runs on an emulated EE/FPU/VU0 register file (`port/runtime/ps2asm.c`,
   `ps2asm_aot.py`); EE float rounding follows PCSX2's (finding 026). VU0 microprograms are native
   or compiled (`vu0_micro.c`, `vu0_aot.py`); VU1 runs compiled blocks plus native kernels
-  (`vu1_aot.py`, `vu1_native_clip.py`), checked against PCSX2's interpreter (findings 030, 090).
+  (`vu1_aot.py`, `vu1_native_clip.py`), checked against PCSX2's interpreter (findings 030, 090),
+  or, with Native VU on (experimental, off by default), its translated loops as GPU shaders
+  (findings 164, 167, 194); both paths stay while native is experimental (root AGENTS.md).
 - GS: GS memory and registers in C (`port/gs/`); the Rust renderer (`port/render`, wgpu: DX12 or
   Vulkan on Windows, Metal on Apple, Vulkan on Linux and Android, WebGPU in the browser) behind
   the shared C front ends `gpu_exact.inc` (exact: the PS2's pixels, the reference) and
@@ -79,7 +81,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   paced frame steps by the real time since the last, between one step at the selected rate and two
   fields (finding 139, `port/hle/fps.c`, `port/hle/kernel.c`). Deterministic runs keep the
   original clock, so state traces are unchanged. Replays, the attract demo and ghosts run on a
-  field grid (finding 142).
+  field grid (finding 142). The track's actors (helicopters, birds, animals, walkers, crowds) step
+  by game time too (`port/patches_fps.py`, finding 193); a few steering loops are still up to
+  25 % off at 240 (issue #76).
 - Host services: one code path on SDL3 for every platform (finding 099): `host_sdl.c` (files,
   clock, frame waits, display, threads, the error box), `sdl_host.c` (SDL's loop on the main
   thread, the game on its own thread), `present.c` (the window), `sound_out_sdl.c` (one sound
@@ -96,8 +100,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 - REVIVED SETTINGS at the top of the game's options, with Display, Graphics, Controls, Online
   and Game tabs (finding 163), saved to dhd.ini (findings 064, 101): resolution scale
-  (capped by GPU memory and said so, finding 136), window mode, widescreen with the HUD anchored
-  and no 4:3 screens left (findings 056, 140), frame rate 60-240 or Monitor (findings 067, 139),
+  (capped by GPU memory and said so, finding 136), window mode, widescreen with the HUD anchored,
+  no 4:3 screens left and VU1 sprites at their 4:3 shape (findings 056, 140, 192), frame rate 60-240 or Monitor (findings 067, 139),
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), a
   Performance group (shadows and sun glow, lens flare, particles; finding 183), Native VU
   (experimental, off by default: VU1 programs as GPU shaders, falls back to the emulated VU when
@@ -199,16 +203,19 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 ## Open
 
 - Phones: on the low-end profile (Realme RMX3930 (Unisoc T612), reproduced on a throttled Mi 11i)
-  2x races hold 60 with the profile-guided build and reach about 59.5 at the race start without
-  it; 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149 say what is left;
-  finding 156 says where a frame's time goes on the phone and the desktops, and what replacing the
-  VU1 and GS emulation with native rendering would remove.
+  2x races hold 60 with the profile-guided build; finding 195 added 5.6-17 % over the route
+  (t612 2x 64.4 -> 68.0 fields/s, 4x 55.5 -> 64.5; more with Native VU on), and the release APK
+  needs a profile recorded with its file-name keys (`docs/BUILDING.md`). 4x does not hold 60 at
+  the race start (GPU-bound). Findings 127, 146-149, 195 say what is left; finding 156 says where
+  a frame's time goes on the phone and the desktops.
 - PowerVR GE8320 phones start since finding 170 and no longer close in the Bike Shop (finding 176:
   a blend that keeps the colour is drawn unblended, a pipeline the driver refuses skips its draws);
   not yet confirmed by the reporters (issues #56, #60).
 - The Mali-G52 (Redmi 9) at 2x: about 49.5 fields/s with every effect on (finding 174's
   barriers), about 60 with the shadows, sun glow, lens flare and fog cut by a diagnostic build;
   Performance Mode (finding 183) cuts those but fog. 60 at 2x with every effect on is not reached.
+- Native VU (finding 194) is experimental: no driver that refuses it has run the option, and the
+  Redmi 9 at 2x was not timed after finding 195.
 - Browser speed is below 60 in races (finding 087).
 - High-rate handling differs a little from 60 by the race's own chaos, with no trend (finding
   139, after finding 067's limits).

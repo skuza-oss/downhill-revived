@@ -3,9 +3,9 @@
 Status: current
 Checked: 2026-11-10
 
-Branch `native/vu-gs` from `main` 9ecb8e1, started 2026-11-06. **A local branch**: the owner keeps
-the native VU1/GS work off `main` until it is decided (not merged, not pushed). This file is the
-lane's plan while it runs.
+Branch `native/vu-gs` from `main` 9ecb8e1, started 2026-11-06. At first a local branch, kept off
+`main` until the owner decided. Merged into `main` with the rest of `native/vu-gs` at 32df819b on 2026-11-10, behind finding
+194's Native VU setting (off by default); ships in 0.7.15.
 
 ## Goal and acceptance
 

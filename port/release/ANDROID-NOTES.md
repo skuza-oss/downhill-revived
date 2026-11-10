@@ -5,7 +5,8 @@ It is experimental: recent phones hold 60 fps at 2x resolution, slower ones (and
 On a slower phone, OPTIONS > SETTINGS > Graphics tab > Performance Mode turns off the riders'
 shadows and the sun's glow, the lens flare and the particles, which helps the most.
 Play with the touch controls (Classic pad or Thumb zones, tilt steering if you like: OPTIONS >
-SETTINGS > Controls tab > Touch Controls) or a controller.
+SETTINGS > Controls tab > Touch Controls) or a controller. The game's cheat codes are typed on the
+touch pause menu's **CODES** page.
 
 **What you need**
 - Any arm64 phone or tablet with Android 10 or later and Vulkan (most phones since 2018),

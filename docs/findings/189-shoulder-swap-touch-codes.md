@@ -1,10 +1,10 @@
 # 189: Swap L1/L2 and R1/R2 per controller, and the game's codes on touch
 
 Status: current
-Checked: 2026-11-09
+Checked: 2026-11-10
 
 Branch `feat/shoulder-swap-touch-codes` from `main` ac62c78d (0.7.14), started 2026-11-09. Merged into `main` at 9609ea6f on
-2026-11-09; not yet released.
+2026-11-09; ships in 0.7.15.
 
 ## Goal and acceptance
 
@@ -162,3 +162,8 @@ outside the repository.
    to the rows.
 
 ## Result
+
+Merged (9609ea6f) and ships in 0.7.15. Swap L1/L2 and Swap R1/R2 per controller in REVIVED
+SETTINGS > Controls and the launcher (`dhd_settings`'s controls, `port/hle/gamepad.c`), the button
+icons unchanged; the touch pause panel's CODES page types the game's codes (`port/hle/touch.c`).
+Checks in Progress; the two hardware checks above are left for the lead.

@@ -1,10 +1,10 @@
 # 172: Fewer state changes per draw on the render thread
 
-Status: current
+Status: partly superseded by 195 (the constants per draw by instance index: undone, the draw constants are a uniform block at a dynamic offset again)
 Checked: 2026-11-10
 
-Branch `native/vu-gs` (local only: never pushed or merged until the owner decides), after 168's
-`22a5c2d`, started 2026-11-06. The lane was wrapped up on the lead's word the same night: one step
+Branch `native/vu-gs`, after 168's `22a5c2d`, started 2026-11-06. Merged into `main` with the rest of `native/vu-gs` at 32df819b on 2026-11-10, behind finding
+194's Native VU setting (off by default); ships in 0.7.15. The lane was wrapped up on the lead's word the same night: one step
 kept (the constants), the others measured and dropped (Decisions).
 
 ## Goal and acceptance
@@ -50,6 +50,12 @@ free and no other session uses the Mac.
 - [x] race state traces; `check.py port` (every step OK, at two build slots)
 
 ## The change kept: constants per draw
+
+**Undone by finding 195** (`140a7d2`): indexing the constants per draw cost the GPU (Mali-G52: more
+cycles a pixel and a vertex, the constants out of uniform registers; the 8 % below on the Redmi 9
+at 2x). The draw constants keep this step's own arena, 256 bytes apart, but are a uniform block at
+a dynamic offset again, group 0 bound only when a draw's constants differ from the last one's. The
+rest of this section describes the step as it was.
 
 Before, each draw's constants (112 bytes since 168) sat at its own dynamic offset in the uniform
 arena, so group 0 was bound again at every draw whose constants changed: 295 group 0 binds a
@@ -210,7 +216,7 @@ The constants step on the Redmi:
 
 ## Result
 
-- **Kept:** constants per draw by instance index (`1b9e925`): group 0 binds a race-start picture
+- **Kept (undone since by finding 195):** constants per draw by instance index (`1b9e925`): group 0 binds a race-start picture
   295 -> 19 (on), 255 -> 18 (off); pictures identical, traces equal, `check.py port` OK.
 - **Mi 11i, t612, 2x:** `finish` 6.30 -> 6.02 ms (on), 5.61 -> 5.20 (off); fields a second unchanged
   (74.8 -> 74.7 on, 64.0 -> 64.0 off). Render-thread bound; texture binds are the bigger lever

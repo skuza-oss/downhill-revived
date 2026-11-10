@@ -202,7 +202,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | current |  |
 | 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | current |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
-| 172 | [Fewer state changes per draw on the render thread](172-render-thread-state-changes.md) | current |  |
+| 172 | [Fewer state changes per draw on the render thread](172-render-thread-state-changes.md) | partly superseded | [195](195-phone-speed.md) for the constants per draw by instance index: undone, the draw constants are a uniform block at a dynamic offset again |
 | 173 | [STATE snapshots that stop for seconds on the SFU, then arrive at once](173-sfu-snapshot-stalls.md) | current |  |
 | 174 | [60 fps at 2x on a Mali-G52 phone (Redmi 9): the GPU side](174-mali-gpu-60-at-2x.md) | current |  |
 | 175 | [online follow-ups after 0.7.12 (rejoin in a race, setup that never takes a race down, T...](175-online-followups.md) | partly superseded | [177](177-sfu-room-sessions.md) for the rejoin's SFU session restart: `sfu_restart` and the welcome's `race.sfu`; per-race sessions |

@@ -2,7 +2,7 @@
 
 Status: current
 Supersedes: parts of 180 (its coordinator in the host's game, its own server and Worker, TURN between games)
-Checked: 2026-11-09
+Checked: 2026-11-10
 
 Branch `feat/p2p-transport` from local `main` 3518ce84, started 2026-11-09; main 10520d2e (finding
 187) merged in on 2026-11-09. This file is the lane's plan while it runs and its finding when it
@@ -176,7 +176,7 @@ allowed (P2P rooms).
 - After the release (a player's video, 0.7.14 on Android with a pad): in a P2P room the host's pad
   could not go above ROOM RULES. Up stepped onto the ROOM row, which a P2P room never focuses, and
   the next frame sent the cursor back to the bar; the mouse worked. Up and down now skip settings
-  that can't take the cursor (`online_menu.c` `setting_step`).
+  that can't take the cursor (`online_menu.c` `setting_step`, fd0d2a10; ships in 0.7.15).
 
 ## The lead's review (2026-11-09)
 

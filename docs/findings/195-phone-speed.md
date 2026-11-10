@@ -1,11 +1,12 @@
 # 195: the phone's biggest remaining costs, measured and cut
 
 Status: current
+Supersedes: parts of 172 (its constants per draw by instance index)
 Checked: 2026-11-10
 
 Branch `perf/phone-fable` from `main` f06ffba, started 2026-11-10; `main` 959c5f4 merged into it
 (`48de78a`), which is the base every change is measured against. Merged into `main` at 5e3cf1dd on
-2026-11-10; not yet released. The release APK needs the new profile (BUILDING.md). Someone who has only this file and the git log must
+2026-11-10; ships in 0.7.15. The release APK needs the new profile (BUILDING.md). Someone who has only this file and the git log must
 be able to pick the lane up.
 
 ## Goal and acceptance
@@ -733,7 +734,7 @@ Ranked by what the measurements say it is worth:
 
 ## Result
 
-Not merged yet (the lead's step: Status, `docs/STATE-LOG.md`). What the branch holds, against `main`
+Merged into `main` at 5e3cf1dd on 2026-11-10; ships in 0.7.15. What it holds, against `main`
 959c5f4, measured on the Mi 11i (finding 156's route, fields/s over the route and at the race start):
 
 | stand-in | Native VU | the route | | the race start | |
