@@ -51,3 +51,20 @@ Out of scope: changing gameplay, the exact renderer, texture packs, Android/brow
 
 Filled in at the merge: what changed, what was measured and how, what is left. Then set the
 Status to `current` (or `rejected`).
+
+## Test build handoff (2026-11-10)
+
+The implemented fix is commit 74c38086: native bilinear sprites retain subpixel corners and
+smooth texture-coordinate interpolation when upscaled. Nearest-filtered sprites and copies
+retain their existing snapping. The original render-target conversion hypothesis was not the
+implemented fix. The earlier native-transfer run reported smooth sprite interpolation passing
+on both backends after retaining snapping for nearest-filtered copies.
+
+At the owner's request, further game runs and testing stopped; a Windows player ZIP is being
+packaged for manual testing. Full port checks, state-trace comparisons and performance
+acceptance remain incomplete; this is a test build, not a validated release.
+
+Packaging exposed an existing explicit source table: online_menu.c tracks has the career-order
+ids also found at retail address 0x26F150. The exact 99-byte match (including three leading NULs)
+is recorded in scan_retail.py SOURCE, alongside the existing source constants. No retail bytes
+were added to the build, and the scan still checks every packaged file.
