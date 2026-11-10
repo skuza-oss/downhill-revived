@@ -940,7 +940,7 @@ static void native_state(Native *n, Gs *g, unsigned prim, unsigned ctxt)
     n->zscale = zpsm == GS_PSMZ32 ? (float)(1.0 / 4294967296.0) : (zpsm & 7) == 1 ? 1.0f / 16777216 : 1.0f / 65536;
     NativeConstants *k = &c->constants;
     k->target[0] = k->target[1] = 2048;
-    if ((prim & 7) == 6) k->flags |= 1024;   /* a sprite: whole pixels when upscaled */
+    if ((prim & 7) == 6) k->flags |= 1024;   /* a sprite (kept for stats; no longer quantised, finding 196) */
     if (prim & 16) native_texture(n, g, ctxt, c);
     /* GS dimensions are powers of two (native_texture); a missing texture uses 1.
        Scaling by their reciprocal is exact, including the fixed-point UV shift. */

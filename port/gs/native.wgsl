@@ -103,8 +103,11 @@ fn native_vertex(@location(0) position_in: vec3<f32>, @location(1) stqf: vec4<f3
     var o: Varyings;
     o.draw = draw;
     var position = position_in;
-    // Upscaled sprites (flag 1024) cover whole GS pixels, as at 1x (raster.hlsl native_vertex).
-    if ((nat.flags & 1024u) != 0u && (nat.scale & 255u) > 1u) {
+    // Upscaled sprites sampled by whole texels (copies, nearest-magnified sprites) cover whole
+    // GS pixels, as at 1x; bilinear sprites keep sub-GS-pixel corners and smooth UVs, since
+    // snapping those collapses a few-pixel billboard (grass, canopies, dirt) to one flat
+    // sample per GS pixel (finding 196).
+    if ((nat.flags & 1024u) != 0u && (nat.flags & 32u) == 0u && (nat.scale & 255u) > 1u) {
         position = vec3<f32>(ceil(position.xy - 0.5), position.z);
     }
     o.position = vec4<f32>(position.xy / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), position.z, 1.0);
@@ -284,7 +287,7 @@ fn fetch(i: Varyings, uv_in: vec2<f32>, across: vec2<f32>, down: vec2<f32>) -> v
     else {
         let T = nat.scale & 255u;
         let E = select(nat.scale >> 16u & 255u, native_texel_scale, native_texel_scale != 0u);
-        if ((flags & 1024u) != 0u && T > 1u && E == 1u) {
+        if ((flags & 1024u) != 0u && (flags & 32u) == 0u && T > 1u && E == 1u) {
             let corner = floor(i.position.xy / f32(T)) * f32(T) - i.position.xy;
             uv += across * corner.x + down * corner.y;
         }
@@ -307,7 +310,7 @@ fn fetch_u(i: Varyings, uv_in: vec2<f32>, across: vec2<f32>, down: vec2<f32>) ->
     var t: vec4<f32>;
     let T = nat.scale & 255u;
     let E = select(nat.scale >> 16u & 255u, native_texel_scale, native_texel_scale != 0u);
-    if ((flags & 1024u) != 0u && T > 1u && E == 1u) {
+    if ((flags & 1024u) != 0u && (flags & 32u) == 0u && T > 1u && E == 1u) {
         let corner = floor(i.position.xy / f32(T)) * f32(T) - i.position.xy;
         uv += across * corner.x + down * corner.y;
     }
