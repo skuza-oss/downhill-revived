@@ -217,6 +217,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 189 | [Swap L1/L2 and R1/R2 per controller, and the game's codes on touch](189-shoulder-swap-touch-codes.md) | current |  |
 | 190 | [the online room's track list in Super Career order](190-room-track-order.md) | current |  |
 | 191 | [Android 10 (API 29) as the APK's minimum](191-android-10.md) | current |  |
+| 192 | [widescreen sprite width table and menu focal projection](192-widescreen-sprites-focal.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

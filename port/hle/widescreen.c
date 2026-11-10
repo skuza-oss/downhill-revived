@@ -21,6 +21,7 @@
    This changes EE memory and what the game culls, so the game-state gates run without it. */
 #include "hle.h"
 #include "widescreen_flat.h"
+#include "widescreen_sprites.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -49,10 +50,37 @@ void port_card_setup(int on) { card_setup = on; }
 static int map_2d(void) { return widescreen && !card_2d && !card_setup; }
 
 /* The game's views (func_0023D650, func_0023D8D8): an entry per view, its View first the focal
-   length in pixels (x0, the X field of view, already times s) and the size in pixels. */
+   length in pixels (x0, the X field of view, already times s) and the size in pixels. The table
+   has six 20-byte entries: func_0023D6C8 clears views 0-5 (slti 6) at boot (finding 192). */
 typedef struct { float x0; unsigned short width, height; } WsView;
 typedef struct { void *camera; WsView *view; int mode; char pad[8]; } WsEntry;
-extern WsEntry D_0075A9D0[32];
+enum { WS_VIEW_COUNT = 6 };
+extern WsEntry D_0075A9D0[WS_VIEW_COUNT];
+
+/* The view's View, or NULL for a view number outside the table or a view not set up. */
+static const WsView *ws_view(int view)
+{
+    return view >= 0 && view < WS_VIEW_COUNT ? D_0075A9D0[view].view : NULL;
+}
+void func_0023D8D8(int view, float focal, float vertical);
+
+/* The projection setter func_0023D8D8 (port/patches.py) scales the title's and shell menus' X
+   focal length, 688, which their callers pass unscaled. The bike shop (func_001F84A8) zooms from
+   688 to 3000 and calls through port_ws_set_focal, which scales it itself: there the setter must
+   leave it, or the zoom step whose scaled value is exactly 688 would be scaled twice. */
+static int focal_scaled;
+
+float port_ws_menu_focal(float focal)
+{
+    return !focal_scaled && focal == 688.0f ? focal * port_fov_x : focal;
+}
+
+void port_ws_set_focal(int view, float focal, float vertical)
+{
+    focal_scaled = 1;
+    func_0023D8D8(view, focal * port_fov_x, vertical);
+    focal_scaled = 0;
+}
 void func_0023D618(int view, int *x, int *y);   /* the view's centre in GS pixels */
 void func_0023D650(int view, int *width, int *height);
 void func_0020F9F0(int font, int view, int x, int y, const char *text);  /* centred text */
@@ -104,7 +132,7 @@ void host_widescreen_init(void)
 {
     /* PS2 address, retail word, 1 for an X (times s) or 0 for a Y factor (divided by s). The view
        table D_0027ECC0 (0xC0 bytes a view: X at +0, Y at +0x20) for 1P, 2P both ways, 4P and
-       paused; the menu's Y; three tree sprite widths. */
+       paused; the menu's Y. The sprite widths are in ws_sprite_widths (widescreen_sprites.h). */
     static const uint32_t words[][3] = {
         {0x27ECC0, 0x438A8000, 1}, {0x27ECE0, 0x3F15551D, 0},  /* paused X, 1P Y */
         {0x27ED80, 0x438A8000, 1}, {0x27EDA0, 0x3F155550, 0},  /* 2P horizontal */
@@ -116,8 +144,6 @@ void host_widescreen_init(void)
         {0x27F200, 0x43520000, 1}, {0x27F220, 0x3EF0A3D7, 0},
         {0x27F2C0, 0x43520000, 1}, {0x27F2E0, 0x3EF0A3D7, 0},
         {0x27F380, 0x43520000, 1}, {0x27F3A0, 0x3EF0A3D7, 0},
-        {0x26C5C0, 0x438A8000, 1}, {0x26C700, 0x438A8000, 1},  /* trees */
-        {0x26C758, 0x438A8000, 1},
     };
     host_display_aware();
     double want = wanted_aspect();
@@ -140,8 +166,17 @@ void host_widescreen_init(void)
         if (*at == words[i][1]) { *at = float_bits(words[i][2] ? v * port_fov_x : v / port_fov_x); changed++; }
         else hle_log("widescreen: %06X holds %08X, not %08X; left\n", words[i][0], *at, words[i][1]);
     }
+    unsigned sprites = sizeof ws_sprite_widths / sizeof *ws_sprite_widths;
+    for (unsigned i = 0; i < sprites; i++) {
+        uint32_t *at = (uint32_t *)(uintptr_t)(PS2_RAM_BASE + ws_sprite_widths[i].ee);
+        if (at[0] == ws_sprite_widths[i].retail && at[1] == ws_sprite_widths[i].upper) {
+            at[0] = float_bits(bits_float(ws_sprite_widths[i].retail) * port_fov_x);
+            changed++;
+        } else hle_log("widescreen: %06X holds %08X %08X, not %08X %08X; left\n", ws_sprite_widths[i].ee,
+                       at[0], at[1], ws_sprite_widths[i].retail, ws_sprite_widths[i].upper);
+    }
     hle_log("widescreen: aspect %.4f (s %.4f), %u of %u data words\n", aspect, port_fov_x, changed,
-            (unsigned)(sizeof words / sizeof *words));
+            (unsigned)(sizeof words / sizeof *words) + sprites);
 }
 
 /* The bike shop builds its HUD and shadow at run time: when the shop's block is set up (the
@@ -172,7 +207,7 @@ void host_widescreen_vsync(void)
 static int view_size(int view, int *cx, int *w)
 {
     int cy, h;
-    if (view < 0 || view >= 32 || !D_0075A9D0[view].view) return 0;
+    if (!ws_view(view)) return 0;
     func_0023D618(view, cx, &cy);
     func_0023D650(view, w, &h);
     return *w > 0;
@@ -254,8 +289,8 @@ static void touch_hud_move(float u, float v, float *du, float *dv)
 void port_ws_hud_offset(int view, float *local)
 {
     touch_hud_seen = 1;
-    if (view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
-    const WsView *v = D_0075A9D0[view].view;
+    const WsView *v = ws_view(view);
+    if (!v) return;
     float depth = local[1], focal = v->x0, half = v->width * 0.5f;
     if (depth <= 0 || focal <= 0 || half <= 0) return;
     if (touch_hud_place) {   /* the piece's place in the 4:3 view; its height is three quarters of its width */
@@ -309,7 +344,7 @@ static void touch_hud_text(int view, int *x, int *y)
 {
     touch_hud_seen = 1;
     int w, h;
-    if (!touch_hud_place || view < 0 || view >= 32 || !D_0075A9D0[view].view) return;
+    if (!touch_hud_place || !ws_view(view)) return;
     func_0023D650(view, &w, &h);
     if (w <= 0 || h <= 0) return;
     float du, dv;
