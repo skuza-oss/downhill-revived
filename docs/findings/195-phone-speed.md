@@ -61,6 +61,15 @@ Out of scope: gameplay, the desktop builds' speed (kept equal or better), anythi
   throttle restored (`phone_throttle.py --restore`: every saved value read back, cpus 0-7 online),
   the app's dhd.ini byte-identical to the copy taken first (md5 41477ea7...), no run files left
   in the app's folder, the phone lock removed.
+- [x] 2026-11-10 08:45: resumed on the lead's word. `main` 959c5f4 merged (`48de78a`: finding 196,
+  bilinear sprites no longer snapped when upscaled, which changes pictures and the core), so the
+  comparison base from here on is `main` 959c5f4 ("base2": its own APK, Windows build, traces and
+  pictures, built in a scratch worktree of it); the first base's numbers above stay as measured.
+- [x] 2026-11-10: base2 and change 1 ("c1": the branch at `48de78a`) built, APK and Windows, both
+  with the shipped profile. Their 62 C objects hold the same code (41 identical files, 21 identical
+  once the debug sections, which name the build folder, are stripped), so the two APKs differ in the
+  Rust library alone, and change 2's compiler option changes nothing while the shipped profile is
+  used (its static keys match in neither build).
 
 ## Method
 
@@ -230,5 +239,13 @@ with its `libmain.debug.so`, its Windows exe, state traces and pictures (2x and 
    frame on the GPU; here the layer's composition type is DEVICE (the display hardware), and the
    Redmi 9's counters in finding 174 show one full-screen pass a frame, so not there either. No
    gain to look for; dropped.
+6. **A phone run that is killed leaves the phone dirty.** The runner puts the app's dhd.ini back in
+   a `finally` and the session restores the throttle in a trap; when the session itself was cancelled
+   (2026-11-10 08:53, mid-run) neither ran to the end: the bench keys stayed in the app's dhd.ini (a
+   reinstall with `adb install -r` keeps the app's data), three recordings and a timeline stayed in
+   its folders, and `phone_throttle.py` kept its saved state ("RESTORE INCOMPLETE"). Found and put
+   right at the next start (dhd.ini back to the first copy, md5 equal; `--restore` printed RESTORED).
+   The session script now looks for a killed run's keys before it backs anything up, so they can
+   never become "the original".
 
 ## Result
