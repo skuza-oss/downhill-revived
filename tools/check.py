@@ -4,7 +4,7 @@ its full output goes to build/check/<tier>-<step>.log.
 
     python tools/check.py docs       # docs linter + never-commit check of the tree (seconds)
     python tools/check.py quick      # docs, then the game core (module cache) and the unit tests
-    python tools/check.py port       # quick, then the native game, the renderer and network tests
+    python tools/check.py port       # quick, then the native game (and its retail-data scan), the renderer and network tests
     python tools/check.py matching   # the retail image: configure, build, byte-for-byte check
     python tools/check.py server     # the online server's tests and type check (npm)
     options: -j N (parallel compiles for the build steps), --keep-going (run every step)
@@ -26,7 +26,11 @@ def steps(tier, jobs):
             ('check_tree', [PY, 'tools/check_tree.py'], ROOT)]
     quick = docs + [('build_wasm', [PY, 'port/tools/build_wasm.py'] + j, ROOT),
                     ('test_runtime', [PY, 'port/tools/test_runtime.py'], ROOT)]
+    # The retail-data scan package_release.py runs on dhd.exe (scan_retail.py: no copy of the retail
+    # ELF's code or data beyond the source's own literals), run on the game just built, so a copy
+    # shows here and not first at packaging.
     port = quick + [('build_game', [PY, 'port/tools/build.py', '--no-core'] + j, ROOT),
+                    ('scan_retail', [PY, 'port/tools/scan_retail.py', 'build/host64-exe/dhd64.exe'], ROOT),
                     ('net_tests', [PY, 'port/net/build_tests.py'], ROOT),
                     ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT),
                     ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT)]
