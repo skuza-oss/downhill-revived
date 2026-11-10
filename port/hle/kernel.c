@@ -847,6 +847,7 @@ static void vsync(void)
     /* host_pacing_wait logs this field, as jit_wait did */
     host_pacing_config(port_frame_period(),kernel_vsync_count);
     host_frame_context(kernel_vsync_count,host_seconds());
+    port_scenery_observe();  /* DHD_SCENERY_TRACE, before DHD_FPS_STOP can end the run */
     port_fps_observe();  /* DHD_FPS_TRACE */
     if (vsync_deferred && csr_exact && !vsync_flag_addr)
         host_service_graphics_vblank();  /* the CSR page turns provisional */

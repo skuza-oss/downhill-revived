@@ -365,6 +365,19 @@ int main(int argc,char **argv)
         }
         assert(timer==0 && cleared==1 && marks==1);
     }
+    /* Finding 193: a turn capped at an angle a field (a quaternion's w clamp, 0012B448 and the other
+       ground tilts) turns that angle a field at any step; a blend helper called once per event
+       (0012ACC8, 0015B460) moves by retail's rate and least step per call. */
+    {
+        double turned=0, field=2*acos((double)0.9999619f);
+        for (int i=0;i<n;i++) {
+            port_clock_wait(NULL);port_clock_step();
+            turned+=2*acos((double)port_turn_limit(0.9999619f));
+            assert(fabsf(port_blend(port_event_rate(.08f))-.08f)<1e-6f);
+            assert(fabsf(port_event_least(.1f)*port_step()-.1f)<1e-6f);
+        }
+        assert(fabs(turned/(60*field)-1)<.01);
+    }
     int scale=port_animation_scale();
     online=1;
     assert(port_fps()==n && port_delta_clock()); /* online keeps the selected rate (finding 114) */

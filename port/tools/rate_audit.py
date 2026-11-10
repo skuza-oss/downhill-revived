@@ -8,6 +8,10 @@ scene (menu id / race phase).
     python port/tools/rate_audit.py run boot  --rate 60  --name title-60  --window title
     python port/tools/rate_audit.py run boot  --rate 240 --name title-240 --window title
     python port/tools/rate_audit.py compare title-60 title-240
+    python port/tools/rate_audit.py run race --rate 240 --name red-240 --window race --row 3 --samples 3600
+
+--row picks another track of the race scenario (3: Red Pass FR), --skip/--samples change the window
+(given at 60, scaled as the window is) and --env passes a variable to the game.
 
 `run` uses the state trace's deterministic headless recipe (state_trace_run.py: virtual clock,
 no movies/sound/memcard, native renderer, no settings). The race scenario also takes the pinned
@@ -49,7 +53,7 @@ WINDOWS = {
 }
 
 
-def game_env(rate, audit_path, skip, samples, scenario, seed, menu, phase):
+def game_env(rate, audit_path, skip, samples, scenario, seed, menu, phase, track=0):
     env = {k: v for k, v in os.environ.items() if not k.startswith('DHD_')}
     env.update(
         DHD_ISO=os.environ.get('DHD_ISO', state_trace_run.DEFAULT_ISO),
@@ -67,6 +71,9 @@ def game_env(rate, audit_path, skip, samples, scenario, seed, menu, phase):
         env['DHD_RATE_AUDIT_PHASE'] = phase
     if scenario == 'boot':
         env['DHD_NAV'] = state_trace_run.BOOT_NAV
+    elif track:
+        env.update(DHD_NAV=state_trace_run.track_nav(track), DHD_RACE_SYNC='1',
+                   DHD_RACE_PAD=state_trace_run.FULL_PEDAL, DHD_RACE_SEED=str(seed))
     else:
         env.update(DHD_NAV=state_trace_run.RACE_NAV, DHD_RACE_SYNC='1',
                    DHD_RACE_PAD=state_trace_run.RACE_PAD, DHD_RACE_SEED=str(seed))
@@ -76,6 +83,10 @@ def game_env(rate, audit_path, skip, samples, scenario, seed, menu, phase):
 def run(args):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     menu, phase, skip60, samples60, scale_window = WINDOWS[args.window]
+    if args.skip is not None:
+        skip60 = args.skip
+    if args.samples is not None:
+        samples60 = args.samples
     scale = args.rate / 60.0 if scale_window else 1.0
     skip = round(skip60 * scale)
     samples = round(samples60 * scale)
@@ -85,7 +96,11 @@ def run(args):
         if stale.exists():
             stale.unlink()
     exe = Path(args.exe).resolve()
-    env = game_env(args.rate, audit_path, skip, samples, args.scenario, args.seed, menu, phase)
+    env = game_env(args.rate, audit_path, skip, samples, args.scenario, args.seed, menu, phase,
+                   args.row)
+    for item in args.env or ():
+        key, _, value = item.partition('=')
+        env[key] = value
     if args.steps:
         env['DHD_RATE_AUDIT_STEPS'] = str(OUT_DIR / (args.name + '.steps.tsv'))
     print(f'{args.scenario} at {args.rate} fps, window {args.window} '
@@ -203,6 +218,11 @@ def main():
     r.add_argument('--name', required=True)
     r.add_argument('--window', choices=tuple(WINDOWS), default='none')
     r.add_argument('--steps', action='store_true', help='write <name>.steps.tsv (scene per update)')
+    r.add_argument('--skip', type=int, help="the window's skip at 60 (scaled as the window is)")
+    r.add_argument('--samples', type=int, help="the window's samples at 60 (scaled as the window is)")
+    r.add_argument('--row', type=int, default=0,
+                   help='race: another track, by its selector row (state_trace_run.UNLOCKED_TRACKS), Cross held')
+    r.add_argument('--env', action='append', help='KEY=VALUE for the game (repeatable)')
     r.add_argument('--seed', type=int, default=state_trace_run.DEFAULT_SEED)
     r.add_argument('--exe', default=str(EXE))
     r.add_argument('--timeout', type=int, default=1800)
