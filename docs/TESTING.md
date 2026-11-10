@@ -87,8 +87,8 @@ PC don't disturb each other's runs:
 
 - **Untimed** checks (nothing measured: captures, logic, online tests): `hidden_game.py` and so
   `live_game.py`, `state_trace_run.py`, `rate_audit.py` and `test_scenery_rate.py` (virtual
-  clock, deterministic), `online_race.py` (one place for its two games). Up to `DHD_GAME_SLOTS` of them run at once
-  (default 1: one game at a time).
+  clock, deterministic), `online_race.py` (one place for its two games). Up to `DHD_GAME_SLOTS`
+  of them run at once (default 1: one game at a time).
 - **Timed** runs (fps, frame times, CPU or GPU time): `bench_race.py`, `stutter_race.py`,
   `sample_profile.py --run`, and `hidden_game.Game(..., timed=True)`. A timed run has the PC to
   itself: it waits until every untimed check is done, and no new one starts while it waits or runs.

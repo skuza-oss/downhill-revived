@@ -12,7 +12,7 @@
                +0x10), speed at +0xB8 (units a field).
      bird      the flock manager D_0036B870 (00143D20): a flock at +0x10 (00143538: state at +0,
                birds at +0x70, the count at +4), each bird 0x170 (00142508: state at +0x50, body
-               at +0xF0, velocity at +0 in units a field).
+               at +0xF0, velocity at +0 in units a field; its type column below).
      attacker  the swooping attacker's manager D_003F5460 (001918C0): elements of 0xA0 at +0x10,
                the count at +0x214; an element's state at +4, body at +8.
    Riders: as port_fps_observe reads them (0x002AF2C0 + slot * 0x7BD0, position at +0x4270). The
@@ -85,7 +85,11 @@ void port_scenery_observe(void)
             const unsigned char *b = flock + 0x70 + i * 0x170, *body = body_of(*(const uint32_t *)(b + 0xF0));
             const float *v = (const float *)b;
             int state = *(const int *)(b + 0x50);
-            if (body && state) row(out, tick, "bird", i, state, *(const int *)flock, body,
+            /* type: the flight mode x5C (00142A28's table row) * 100, its speed vote x164 + 1 (*10),
+               and 1 while the bird is outside its path's corridor (xEC < xC0.w: pushed back) */
+            int type = *(const int *)(b + 0x5C) * 100 + (*(const int *)(b + 0x164) + 1) * 10 +
+                       (*(const float *)(b + 0xEC) < *(const float *)(b + 0xCC));
+            if (body && state) row(out, tick, "bird", i, state, type, body,
                                    sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
         }
     }
