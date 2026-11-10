@@ -51,6 +51,18 @@ pub struct ConvertSource<'a> {
     pub scale: u32,
 }
 
+/// A conversion ready to run (`Converts::prepare`): one dispatch of `Converts::dispatch`.
+pub struct Ready {
+    /// Group 1 of the convert pipeline: the sources and the converted texture.
+    group: wgpu::BindGroup,
+    /// Its constants' offset in the uniform arena.
+    offset: u32,
+    /// Workgroups across and down.
+    groups: [u32; 2],
+    /// The draws' group 1: the converted texture's texels.
+    pub draw: wgpu::BindGroup,
+}
+
 /// One cached converted texture (converted[i]).
 struct Converted {
     _texture: wgpu::Texture,
@@ -91,6 +103,16 @@ impl Converts {
     pub fn run(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, arenas: &mut Arenas, o: &ConvertObjects,
                i: usize, v: &DhdrConvert, base: Option<&wgpu::TextureView>,
                sources: &[Option<ConvertSource>; 4]) -> Option<wgpu::BindGroup> {
+        let ready = self.prepare(gpu, arenas, o, i, v, base, sources)?;
+        self.dispatch(gpu, encoder, arenas, o, std::slice::from_ref(&ready));
+        Some(ready.draw)
+    }
+
+    /// `run` up to its compute pass: conversion `i`'s texture (made when its size changed), its
+    /// constants in the arena and its bind groups. None when the conversion can't run.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare(&mut self, gpu: &Gpu, arenas: &mut Arenas, o: &ConvertObjects, i: usize, v: &DhdrConvert,
+                   base: Option<&wgpu::TextureView>, sources: &[Option<ConvertSource>; 4]) -> Option<Ready> {
         let (w, h) = (v.constants.size[0], v.constants.size[1]);
         if w == 0 || h == 0 || i >= CONVERTS {
             return None;
@@ -172,18 +194,34 @@ impl Converts {
             layout: o.layout,
             entries: &entries,
         });
-        let uniforms = arenas.uniform_group()?;
-        {
-            let times = gputimes::slot(gpu, gputimes::CONVERT);
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: None, timestamp_writes: times.as_ref().map(gputimes::Slot::compute) });
-            pass.set_pipeline(o.pipeline);
-            pass.set_bind_group(0, uniforms, &[offset]);
-            pass.set_bind_group(1, &group, &[]);
-            pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
+        arenas.uniform_group()?;
+        Some(Ready { group, offset, groups: [w.div_ceil(8), h.div_ceil(8)], draw: converted.group.clone() })
+    }
+
+    /// The prepared conversions in one compute pass on `encoder` (no pass may be open on it), a
+    /// dispatch each, in order. Conversions that run one after another with nothing between them
+    /// share the pass: wgpu makes every pass command buffers of its own (the pass and the barriers
+    /// before it), and a race picture had more of them at the race start than the Adreno's kernel
+    /// queue takes (50 a context on the Mi 11i) without putting the submit to sleep: 2 ms a picture
+    /// there, gone with the ten conversions of such a picture in four passes (finding 195). A
+    /// dispatch reads surfaces and a decoded texture and writes its own converted texture, never
+    /// another's.
+    pub fn dispatch(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, arenas: &Arenas, o: &ConvertObjects,
+                    ready: &[Ready]) {
+        let Some(uniforms) = arenas.uniform_group() else { return };
+        if ready.is_empty() {
+            return;
         }
-        self.runs += 1;
-        Some(converted.group.clone())
+        let times = gputimes::slot(gpu, gputimes::CONVERT);
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None, timestamp_writes: times.as_ref().map(gputimes::Slot::compute) });
+        pass.set_pipeline(o.pipeline);
+        for r in ready {
+            pass.set_bind_group(0, uniforms, &[r.offset]);
+            pass.set_bind_group(1, &r.group, &[]);
+            pass.dispatch_workgroups(r.groups[0], r.groups[1], 1);
+        }
+        self.runs += ready.len() as u64;
     }
 }
 

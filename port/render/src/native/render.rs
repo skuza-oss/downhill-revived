@@ -837,6 +837,8 @@ impl Native {
             let wanted_depth = if depth.is_some() { k.depth as i32 } else { -1 };
             if !self.pass.open_on(k.target as i32, wanted_depth) {
                 let mut prepared = HashSet::new();
+                // ... and in one compute pass, a dispatch each (`convert_dispatch`).
+                let (mut stamps, mut ready) = (Vec::new(), Vec::new());
                 for (j, next) in p.commands.iter().enumerate().skip(i) {
                     if next.kind != DHDR_CMD_DRAW || next.target != k.target || next.depth != k.depth
                         || next.depth_key & 8 != k.depth_key & 8 { break; }
@@ -848,9 +850,14 @@ impl Native {
                     if c.surface.iter().any(|&s| s >= 0 && (s == k.target || s == k.depth)) { continue; }
                     let stamp = c.surface.map(|s| versions.get(s as usize).copied().unwrap_or(0));
                     if conversions[ci].as_ref().is_some_and(|(old, _)| *old == stamp) { continue; }
-                    if let Some(group) = self.convert(p, ci, v.shared) {
-                        conversions[ci] = Some((stamp, group));
+                    if let Some(r) = self.convert_ready(p, ci, v.shared) {
+                        stamps.push((ci, stamp));
+                        ready.push(r);
                     }
+                }
+                self.convert_dispatch(&ready, v.shared);
+                for ((ci, stamp), r) in stamps.into_iter().zip(ready) {
+                    conversions[ci] = Some((stamp, r.draw));
                 }
             }
             let (tw, th) = (target.size[0], target.size[1]);
@@ -1065,6 +1072,39 @@ impl Native {
     /// native_run_convert through convert.rs: conversion `i` with its base texture and its four
     /// source surfaces as they stand, recorded after the open pass ends; its draw bind group.
     fn convert(&mut self, p: &Picture, i: usize, shared: &NativeShared) -> Option<wgpu::BindGroup> {
+        let ready = self.convert_ready(p, i, shared)?;
+        self.convert_dispatch(std::slice::from_ref(&ready), shared);
+        Some(ready.draw)
+    }
+
+    /// The prepared conversions in one compute pass (convert.rs's `dispatch`), the open draw pass
+    /// ended first.
+    fn convert_dispatch(&mut self, ready: &[crate::native::convert::Ready], shared: &NativeShared) {
+        if ready.is_empty() {
+            return;
+        }
+        let gpu = self.gpu;
+        self.pass.end_reason("conversion");
+        if pass_trace::on() {
+            pass_trace::event(&format!("compute-convert x{}", ready.len()), -1, -1);
+        }
+        let o = ConvertObjects {
+            pipeline: &self.objects.convert_pipe,
+            layout: &self.objects.convert_layout,
+            inverse: &self.objects.inverse,
+            texels_layout: &shared.texels_layout,
+            texels_sampler: &shared.repeat,
+            dummy_view: &shared.dummy_view,
+            dummy_texels_view: &shared.dummy_texels_view,
+            dummy_depth_view: &shared.dummy_depth_view,
+        };
+        let encoder = self.pass.encoder(gpu);
+        self.converts.dispatch(gpu, encoder, &self.arenas, &o, ready);
+    }
+
+    /// Conversion `i` of the picture made ready to run (convert.rs's `prepare`): its texture, its
+    /// constants and its bind groups; nothing is recorded yet. None when it can't run.
+    fn convert_ready(&mut self, p: &Picture, i: usize, shared: &NativeShared) -> Option<crate::native::convert::Ready> {
         let gpu = self.gpu;
         let v = p.converts.get(i)?;
         let base = p.convert_base(i).map(|t| &t.view);
@@ -1093,10 +1133,7 @@ impl Native {
             dummy_texels_view: &shared.dummy_texels_view,
             dummy_depth_view: &shared.dummy_depth_view,
         };
-        self.pass.end_reason("conversion");
-        let encoder = self.pass.encoder(gpu);
-        pass_trace::event("compute-convert", -1, -1);
-        self.converts.run(gpu, encoder, &mut self.arenas, &o, i, v, base, &sources)
+        self.converts.prepare(gpu, &mut self.arenas, &o, i, v, base, &sources)
     }
 
     /// native_scanout through scanout.rs: the picture's display surface (with a texture) into the
