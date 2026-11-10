@@ -89,7 +89,7 @@ def compare(a):
         w = worst.get(scene)
         if not w or mae > w[0]:
             worst[scene] = (mae, over8, over32, top, f)
-    print('worst field per scene (MAE / >8 %% / >32 %% / max):')
+    print('worst field per scene (MAE / >8 % / >32 % / max):')
     for scene, (mae, over8, over32, top, f) in worst.items():
         print('  %-6s %d: %.3f / %.3f %% / %.3f %% / %d' % (scene, f, mae, over8, over32, top))
     print('within' if not bad else '%d field(s) out of' % bad,
