@@ -1,10 +1,11 @@
 # 195: the phone's biggest remaining costs, measured and cut
 
-Status: in progress
+Status: current
+Checked: 2026-11-10
 
 Branch `perf/phone-fable` from `main` f06ffba, started 2026-11-10; `main` 959c5f4 merged into it
-(`48de78a`), which is the base every change is measured against. This file is the lane's plan
-while it runs and its finding when it merges. Someone who has only this file and the git log must
+(`48de78a`), which is the base every change is measured against. Merged into `main` at 5e3cf1dd on
+2026-11-10; not yet released. The release APK needs the new profile (BUILDING.md). Someone who has only this file and the git log must
 be able to pick the lane up.
 
 ## Goal and acceptance
