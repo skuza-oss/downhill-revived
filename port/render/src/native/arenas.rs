@@ -30,14 +30,15 @@ use crate::device::Gpu;
 /// The uniform binding window (NATIVE_UNIFORM_WINDOW): a binding at the last offset still fits.
 pub const UNIFORM_WINDOW: u64 = 2048;
 
-/// The draws' constants (finding 172): packed `DRAW_BYTES` apart in their own arena, a draw reading
-/// its own by its instance index out of a window of `DRAW_SLOTS` (native.wgsl's `native_draws`),
-/// bound at a multiple of `DRAW_WINDOW` (256-byte aligned), so group 0 changes once per 256
-/// distinct constants instead of at every draw.
-pub const DRAW_SLOTS: u64 = 256;
+/// The draws' constants: `DRAW_BYTES` each (native.wgsl's `Native`), `DRAW_STRIDE` apart in their own
+/// arena (a dynamic offset is a multiple of the device's uniform offset alignment, at most 256); a
+/// draw binds its own at that offset (group 0 of the draw pipelines), again only when its constants
+/// differ from the last draw's. Finding 172 packed them and had each draw read its own by its
+/// instance index instead; the pixels' constants then came through a varying index, which costs a
+/// Mali-G52 more a pixel than the binds cost the render thread (finding 195).
 pub const DRAW_BYTES: u64 = std::mem::size_of::<crate::abi::DhdrNativeConstants>() as u64;
-pub const DRAW_WINDOW: u64 = DRAW_SLOTS * DRAW_BYTES;
-const _: () = assert!(DRAW_BYTES % 16 == 0 && DRAW_WINDOW % 256 == 0);
+pub const DRAW_STRIDE: u64 = 256;
+const _: () = assert!(DRAW_BYTES % 16 == 0 && DRAW_BYTES <= DRAW_STRIDE);
 
 /// sizeof(NativeVertex).
 const VERTEX_BYTES: u64 = std::mem::size_of::<DhdrVertex>() as u64;
@@ -105,7 +106,7 @@ pub struct Arenas {
     uniforms: Arena,
     uploads: Arena,
     /// The draws' constants (`reserve_draws`, `draw_constants`) and their bind group (group 0 of
-    /// the draw pipelines: `DRAW_WINDOW` bytes at a dynamic offset).
+    /// the draw pipelines: `DRAW_BYTES` at a dynamic offset).
     draws: Arena,
     draw_group: Option<wgpu::BindGroup>,
     /// The constants arena's bind group (binding 0, `UNIFORM_WINDOW` bytes at a dynamic offset).
@@ -375,7 +376,7 @@ impl Arenas {
     pub fn reserve_draws(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout, commands: &[DhdrCommand])
                          -> Result<(), String> {
         let draws = commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count() as u64;
-        if self.draws.grow(Some(gpu), (draws + 1) * DRAW_BYTES, DRAW_WINDOW, wgpu::BufferUsages::UNIFORM,
+        if self.draws.grow(Some(gpu), (draws + 1) * DRAW_STRIDE, DRAW_STRIDE, wgpu::BufferUsages::UNIFORM,
                            "native draw constants")? {
             self.draw_group = self.draws.buffer.as_ref().map(|buffer| gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("native draw constants"),
@@ -385,7 +386,7 @@ impl Arenas {
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer,
                         offset: 0,
-                        size: wgpu::BufferSize::new(DRAW_WINDOW),
+                        size: wgpu::BufferSize::new(DRAW_BYTES),
                     }),
                 }],
             }));
@@ -394,17 +395,17 @@ impl Arenas {
         Ok(())
     }
 
-    /// A draw's constants: the next slot, its index (slot / DRAW_SLOTS is its window, slot %
-    /// DRAW_SLOTS its instance index). Overflow (`reserve_draws` counted wrong) is fatal.
+    /// A draw's constants at the next `DRAW_STRIDE` offset of their arena; that offset (group 0's
+    /// dynamic offset for the draw). Overflow (`reserve_draws` counted wrong) is fatal.
     pub fn draw_constants(&mut self, data: &[u8]) -> u32 {
         let a = &mut self.draws;
         let at = a.used;
-        if data.len() as u64 != DRAW_BYTES || at + DRAW_BYTES > a.capacity {
+        if data.len() as u64 != DRAW_BYTES || at + DRAW_STRIDE > a.capacity {
             fatal("gs native: draw constants arena overflow");
         }
         a.data[at as usize..(at + DRAW_BYTES) as usize].copy_from_slice(data);
-        a.used += DRAW_BYTES;
-        (at / DRAW_BYTES) as u32
+        a.used += DRAW_STRIDE;
+        at as u32
     }
 
     /// The draw constants' bind group (`reserve_draws`).

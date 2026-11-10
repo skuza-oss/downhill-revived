@@ -77,13 +77,12 @@ pub struct Pass {
     /// call is a call out to JavaScript; the blend constant builds a JS object). WebGPU keeps
     /// all of these for the rest of the pass, across pipeline changes. Cleared with the pass.
     state: PassState,
-    /// The picture's last draw constants and their index in the draw constants arena: a draw with
-    /// the same bytes reads that slot again instead of a new copy (the arena is written once, at
+    /// The picture's last draw constants and their offset in the draw constants arena: a draw with
+    /// the same bytes binds that offset again instead of a new copy (the arena is written once, at
     /// the submit, and nothing in it is overwritten during the picture).
     constants: Option<(DhdrNativeConstants, u32)>,
-    /// A draw not issued yet (first vertex, count, its DHD_GPU_STATS kind, its constants' instance
-    /// index): see `draw`.
-    pending: Option<(u32, u32, u32, u32)>,
+    /// A draw not issued yet (first vertex, count, its DHD_GPU_STATS kind): see `draw`.
+    pending: Option<(u32, u32, u32)>,
     /// The next draw's DHD_GPU_STATS kind (`gpu_stats::class`).
     class: u32,
     #[cfg(not(target_arch = "wasm32"))]
@@ -101,7 +100,7 @@ struct PassState {
     scissor: Option<[u32; 4]>,
     /// The blend constant's GS value (blend_fix: all four channels are blend_fix / 128).
     blend: Option<u32>,
-    /// Group 0's dynamic offset (the group is the draw constants' window: arenas.rs DRAW_WINDOW).
+    /// Group 0's dynamic offset (the group is the draw constants arena's: arenas.rs `draw_group`).
     offset: Option<u32>,
     /// Group 1, the draw's texture.
     group: Option<wgpu::BindGroup>,
@@ -186,18 +185,18 @@ impl Pass {
         }
     }
 
-    /// The constants' slot in the draw constants arena: the last draw's when the bytes are the
+    /// The constants' offset in the draw constants arena: the last draw's when the bytes are the
     /// same, else a new copy (`Arenas::draw_constants`).
     fn constants(&mut self, arenas: &mut Arenas, c: &DhdrNativeConstants) -> u32 {
-        if let Some((last, slot)) = &self.constants {
+        if let Some((last, offset)) = &self.constants {
             if constant_bytes(last) == constant_bytes(c) {
-                return *slot;
+                return *offset;
             }
         }
-        let slot = arenas.draw_constants(constant_bytes(c));
+        let offset = arenas.draw_constants(constant_bytes(c));
         rstat::tally(rstat::COPIES, 1);
-        self.constants = Some((*c, slot));
-        slot
+        self.constants = Some((*c, offset));
+        offset
     }
 
     /// The viewport (0, 0, w, h, depth 0..1), the scissor and the blend constant (None: the draw's
@@ -365,35 +364,34 @@ impl Pass {
     /// them, extends it (draw(a..b) then draw(b..c) with the same state is draw(a..c): the
     /// triangles in the same order). Every call that sets state in the pass, and the pass's end,
     /// issues it first (`flush`).
-    fn draw(&mut self, first: u32, count: u32, instance: u32) {
+    fn draw(&mut self, first: u32, count: u32) {
         if self.pass.is_none() {
             return;
         }
         if first.checked_add(count).is_some() {
-            if let Some((f, c, k, i)) = self.pending.as_mut() {
+            if let Some((f, c, k)) = self.pending.as_mut() {
                 // whole triangles only, so no vertex of one draw joins a triangle of the other
-                if c.is_multiple_of(3) && f.checked_add(*c) == Some(first) && *k == self.class && *i == instance {
+                if c.is_multiple_of(3) && f.checked_add(*c) == Some(first) && *k == self.class {
                     *c += count;
                     return;
                 }
             }
         }
         self.flush();
-        self.pending = Some((first, count, self.class, instance));
+        self.pending = Some((first, count, self.class));
     }
 
     /// Issues the pending draw, if any.
     fn flush(&mut self) {
-        if let Some((first, count, _class, instance)) = self.pending.take() {
+        if let Some((first, count, _class)) = self.pending.take() {
             if let Some(pass) = self.pass.as_mut() {
                 #[cfg(not(target_arch = "wasm32"))]
                 let q = self.stats.draw_begin(pass, _class);
                 rstat::tally(rstat::DRAWS, 1);
-                // the instance index picks the draw's constants in the bound window (native.wgsl)
                 if self.indexed {
-                    pass.draw_indexed(first..first.saturating_add(count), 0, instance..instance + 1);
+                    pass.draw_indexed(first..first.saturating_add(count), 0, 0..1);
                 } else {
-                    pass.draw(first..first.saturating_add(count), instance..instance + 1);
+                    pass.draw(first..first.saturating_add(count), 0..1);
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 self.stats.draw_end(pass, q);
@@ -711,11 +709,7 @@ impl Native {
             // The attachment's size in GS pixels: native_vertex maps GS pixels onto it (D3D11 keeps
             // a 2048 x 2048 GS pixel viewport, larger than the target; WebGPU allows no such one).
             constants.target = [tw as f32 / big_t as f32, th as f32 / big_t as f32];
-            let slot = self.pass.constants(&mut self.arenas, &constants);
-            // its window (group 0's offset) and its index there (the draw's instance)
-            let window = slot / crate::native::arenas::DRAW_SLOTS as u32;
-            let offset = window * crate::native::arenas::DRAW_WINDOW as u32;
-            let instance = slot % crate::native::arenas::DRAW_SLOTS as u32;
+            let offset = self.pass.constants(&mut self.arenas, &constants);
             if self.pass.pass.is_none() {
                 continue;
             }
@@ -782,7 +776,7 @@ impl Native {
                 self.pass.set_mesh_group(mesh);
             }
             self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale | texels, spec,
-                             offset, instance, &v.uniforms, &group);
+                             offset, &v.uniforms, &group);
             self.pass.drawn.draws += 1;
             // Conservative even for masked/empty writes: a false invalidation costs
             // performance only. Depth also survives into later pictures/probes.
@@ -903,8 +897,8 @@ impl Native {
     /// an equal Z lost); without, the same test on the unchanged Z buffer.
     #[allow(clippy::too_many_arguments)]
     fn draw_passes(&mut self, k: &DhdrCommand, vertices: &[DhdrVertex], indices: Option<&[u32]>, has_depth: bool,
-                   retained_depth: bool, texel_scale: u32, spec: u32, offset: u32, instance: u32,
-                   uniforms: &wgpu::BindGroup, group: &wgpu::BindGroup) {
+                   retained_depth: bool, texel_scale: u32, spec: u32, offset: u32, uniforms: &wgpu::BindGroup,
+                   group: &wgpu::BindGroup) {
         let gpu = self.gpu;
         let (blend_key, mask) = without_kept_colour(k.blend_key, k.color_mask as u32);
         let dk = k.depth_key as u32;
@@ -931,7 +925,7 @@ impl Native {
             self.pass.class = stats_class(flags, texel_scale, variant, depth, blends, mask & 8 != 0);
             if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
                                       (base | mask << 14 | variant << 23) as u64 | special) {
-                self.pass.draw(k.first, k.count, instance);
+                self.pass.draw(k.first, k.count);
             }
             return;
         }
@@ -940,7 +934,7 @@ impl Native {
                                       (base | (mask & 7) << 14 | VARIANT_RGB_A128 << 23) as u64 | special)
         {
             self.pass.class = stats_class(flags, texel_scale, VARIANT_RGB_A128, depth, blends, false);
-            self.pass.draw(k.first, k.count, instance);
+            self.pass.draw(k.first, k.count);
         }
         if mask & 8 == 0 {
             return;
@@ -962,7 +956,7 @@ impl Native {
         if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
                                   (8 << 14 | second << 18 | VARIANT_ALPHA_ONLY << 23 | texel_key) as u64 | special) {
             self.pass.class = stats_class(flags, texel_scale, VARIANT_ALPHA_ONLY, second, false, true);
-            self.pass.draw(first, k.count, instance);
+            self.pass.draw(first, k.count);
         }
     }
 }
