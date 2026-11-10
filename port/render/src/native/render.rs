@@ -47,6 +47,171 @@ use std::collections::HashSet;
 #[path = "gpu_timing.rs"]
 mod gpu_timing;
 
+/// A picture's first encoder finished off the render thread (finding 195).
+///
+/// wgpu replays an encoder's recorded passes into the backend's commands inside `finish`, on the
+/// calling thread and under a read lock only; on a phone that replay is the largest part of a race
+/// picture (5.7 of the render thread's 13 ms at the race start on the throttled Mi 11i, on a little
+/// core). So a large picture is recorded into two encoders (`cut_point`): the first is handed to
+/// this helper thread, which finishes it while the render thread records, uploads and finishes the
+/// second, and the picture's submit gives the queue both, in order. The cut ends the open pass and
+/// the next draw opens it again (load, store), so the commands the GPU runs are the same but for
+/// that pass boundary. Not in the browser, which has no threads: one encoder there.
+#[cfg(not(target_arch = "wasm32"))]
+mod finisher {
+    use std::sync::mpsc::{channel, Receiver, Sender};
+
+    struct Helper {
+        jobs: Sender<(wgpu::CommandEncoder, cores::Mask)>,
+        done: Receiver<wgpu::CommandBuffer>,
+    }
+
+    /// The helper thread (made at the first cut) and the encoders it holds.
+    #[derive(Default)]
+    pub struct Finisher {
+        helper: Option<Helper>,
+        /// The thread could not be made (said once): pictures stay in one encoder.
+        failed: bool,
+        pending: usize,
+    }
+
+    impl Finisher {
+        /// Encoders handed over and not taken back yet.
+        pub fn pending(&self) -> usize {
+            self.pending
+        }
+
+        /// Hands `encoder` to the helper thread to finish; gives it back when there is no helper.
+        pub fn send(&mut self, encoder: wgpu::CommandEncoder) -> Result<(), wgpu::CommandEncoder> {
+            if self.helper.is_none() && !self.failed {
+                self.helper = Helper::start();
+                self.failed = self.helper.is_none();
+            }
+            let Some(helper) = self.helper.as_ref() else { return Err(encoder) };
+            match helper.jobs.send((encoder, cores::mine())) {
+                Ok(()) => {
+                    self.pending += 1;
+                    Ok(())
+                }
+                Err(back) => {
+                    self.helper = None;
+                    self.failed = true;
+                    Err(back.0 .0)
+                }
+            }
+        }
+
+        /// The command buffers of the encoders handed over since the last call, in that order
+        /// (waits for the helper), followed by `last`.
+        pub fn take(&mut self, last: wgpu::CommandBuffer) -> Vec<wgpu::CommandBuffer> {
+            let mut all = Vec::with_capacity(self.pending + 1);
+            for _ in 0..self.pending {
+                match self.helper.as_ref().map(|h| h.done.recv()) {
+                    Some(Ok(commands)) => all.push(commands),
+                    // its commands are part of the picture: never carry on without them
+                    _ => crate::guard::fatal("dhd_render: the encoder thread ended while it held a picture's encoder"),
+                }
+            }
+            self.pending = 0;
+            all.push(last);
+            all
+        }
+    }
+
+    impl Helper {
+        fn start() -> Option<Helper> {
+            let (jobs, inbox) = channel::<(wgpu::CommandEncoder, cores::Mask)>();
+            let (outbox, done) = channel();
+            let spawned = std::thread::Builder::new().name("dhd-encode".into()).spawn(move || {
+                let mut placed = cores::Mask::default();
+                // Ends when the Finisher (the sender) is dropped.
+                while let Ok((encoder, mask)) = inbox.recv() {
+                    cores::follow(&mask, &mut placed);
+                    if outbox.send(encoder.finish()).is_err() {
+                        break;
+                    }
+                }
+            });
+            match spawned {
+                Ok(_) => Some(Helper { jobs, done }),
+                Err(e) => {
+                    crate::host::log(&format!("gs native: no encoder thread ({e}); a picture stays in one encoder"));
+                    None
+                }
+            }
+        }
+    }
+
+    /// The helper runs on the cores the render thread is allowed on. On Android the host keeps the
+    /// render thread off a phone's one or two big cores, which the game and VU threads need (finding
+    /// 149, android_perf.c), and places it again every few fields; the helper has no name there, so
+    /// each encoder comes with the render thread's mask and the helper takes it when it changed.
+    #[cfg(target_os = "android")]
+    mod cores {
+        /// A cpu_set_t (1024 CPUs).
+        pub type Mask = [u64; 16];
+
+        extern "C" {
+            fn sched_getaffinity(pid: i32, size: usize, mask: *mut u64) -> i32;
+            fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32;
+        }
+
+        /// The calling thread's allowed cores (all zero when the system does not say).
+        pub fn mine() -> Mask {
+            let mut mask = Mask::default();
+            // SAFETY: the mask is `size` writable bytes; pid 0 is the calling thread.
+            if unsafe { sched_getaffinity(0, std::mem::size_of::<Mask>(), mask.as_mut_ptr()) } != 0 {
+                mask = Mask::default();
+            }
+            mask
+        }
+
+        /// Puts the calling thread on `mask`'s cores when that is not where it was put last.
+        pub fn follow(mask: &Mask, placed: &mut Mask) {
+            if mask != placed && mask.iter().any(|&w| w != 0) {
+                // SAFETY: the mask is `size` readable bytes; pid 0 is the calling thread.
+                unsafe { sched_setaffinity(0, std::mem::size_of::<Mask>(), mask.as_ptr()) };
+                *placed = *mask;
+            }
+        }
+    }
+
+    /// Elsewhere no thread is placed: nothing to follow.
+    #[cfg(not(target_os = "android"))]
+    mod cores {
+        #[derive(Clone, Copy, Default)]
+        pub struct Mask;
+        pub fn mine() -> Mask {
+            Mask
+        }
+        pub fn follow(_mask: &Mask, _placed: &mut Mask) {}
+    }
+}
+
+/// The draw command before which a picture of `draws` draw commands is cut (`Pass::cut`): after
+/// `DHD_ENCODE_CUT` percent of them, 60 unless set (the helper's part then ends about when the
+/// render thread has recorded, uploaded and finished the rest; 0: never, for a comparison). None:
+/// not cut (a small picture, 0, the browser).
+fn cut_point(draws: usize) -> Option<usize> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        /// A picture of fewer draw commands than this stays in one encoder: handing a part over
+        /// costs a wake-up, and the menus' pictures are finished in well under a millisecond.
+        const CUT_MIN_DRAWS: usize = 96;
+        thread_local! {
+            static PERCENT: usize = std::env::var("DHD_ENCODE_CUT").ok().and_then(|v| v.trim().parse().ok())
+                .map_or(60, |v: usize| v.min(95));
+        }
+        let percent = PERCENT.with(|p| *p);
+        (percent != 0 && draws >= CUT_MIN_DRAWS).then(|| draws * percent / 100)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = draws;
+        None
+    }
+}
+
 /// D3D11's SRC_ALPHA and INV_SRC_ALPHA (native_core.inc's BLEND_SA, BLEND_ISA).
 const BLEND_SA: u32 = 5;
 const BLEND_ISA: u32 = 6;
@@ -58,6 +223,9 @@ const BLEND_INV_FACTOR: u32 = 15;
 /// commands, and the picture's counts.
 pub struct Pass {
     encoder: Option<wgpu::CommandEncoder>,
+    /// The picture's encoder cut off earlier, being finished on the helper thread (`cut`).
+    #[cfg(not(target_arch = "wasm32"))]
+    finisher: finisher::Finisher,
     /// Diagnostic batching: present (or zread_take when skipped) submits the picture.
     pub deferred: bool,
     timing: gpu_timing::Timing,
@@ -143,6 +311,8 @@ impl Pass {
     pub fn new() -> Pass {
         Pass {
             encoder: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            finisher: finisher::Finisher::default(),
             deferred: crate::native::zread::switch("DHD_GPU_OVERLAP")
                 && crate::native::zread::folded(),
             pass: None,
@@ -399,6 +569,20 @@ impl Pass {
         }
     }
 
+    /// Ends the open pass and hands the picture's encoder so far to the helper thread to finish
+    /// (`finisher`); the next command opens a new encoder. Without a helper nothing is cut.
+    fn cut(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.end_reason("encoder-cut");
+            if let Some(encoder) = self.encoder.take() {
+                if let Err(encoder) = self.finisher.send(encoder) {
+                    self.encoder = Some(encoder);
+                }
+            }
+        }
+    }
+
     /// native_submit: ends the pass, writes the arenas the encoder's commands read, submits.
     fn submit(&mut self, gpu: &Gpu, arenas: &Arenas) {
         if !self.deferred { self.submit_now(gpu, arenas); }
@@ -406,7 +590,11 @@ impl Pass {
 
     pub fn submit_now(&mut self, gpu: &Gpu, arenas: &Arenas) {
         self.end();
-        if self.encoder.is_none() { return; }
+        #[cfg(not(target_arch = "wasm32"))]
+        let cut = self.finisher.pending() != 0;
+        #[cfg(target_arch = "wasm32")]
+        let cut = false;
+        if self.encoder.is_none() && !cut { return; }
         let t = rstat::T::new();
         arenas.write(&gpu.queue);
         t.add(rstat::AWRITE);
@@ -421,6 +609,11 @@ impl Pass {
         #[cfg(not(target_arch = "wasm32"))]
         self.stats.resolve(&mut encoder);
         let commands = encoder.finish();
+        // the part cut off earlier first (waiting for the helper counts as finishing), then this one
+        #[cfg(not(target_arch = "wasm32"))]
+        let commands = self.finisher.take(commands);
+        #[cfg(target_arch = "wasm32")]
+        let commands = [commands];
         t.add(rstat::FINISH);
         #[cfg(not(target_arch = "wasm32"))]
         if std::env::var_os("DHD_SUBMIT_POLL").is_some() {
@@ -429,7 +622,7 @@ impl Pass {
             t.add(rstat::PREPOLL);
         }
         let t = rstat::T::new();
-        gpu.queue.submit([commands]);
+        gpu.queue.submit(commands);
         t.add(rstat::QSUB);
         #[cfg(not(target_arch = "wasm32"))]
         self.stats.collect(gpu);
@@ -564,6 +757,10 @@ impl Native {
         // Keep the existing consecutive-run rule (last_convert) exactly as before.
         let mut versions = vec![0u64; p.surfaces.len()];
         let mut conversions: Vec<Option<([u64; 4], wgpu::BindGroup)>> = vec![None; p.converts.len()];
+        // Where the picture's encoder is cut and its first part handed to the helper thread
+        // (finding 195): before this draw command, counted over the commands that draw.
+        let cut_at = cut_point(p.commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count());
+        let mut draw_command = 0usize;
         for (i, k) in p.commands.iter().enumerate() {
             match k.kind {
                 DHDR_CMD_ALPHA_UPLOAD => {
@@ -596,6 +793,10 @@ impl Native {
             if k.count == 0 {
                 continue;
             }
+            if cut_at == Some(draw_command) {
+                self.pass.cut();
+            }
+            draw_command += 1;
             let Some(target) = surface(p, k.target).filter(|t| has_texture(Some(t)) && t.depth == 0) else { continue };
             let mut depth = if k.depth >= 0 && k.depth_key & 8 != 0 { surface(p, k.depth) } else { None };
             if depth.is_some_and(|d| !has_texture(Some(d)) || d.depth == 0 || d.size != target.size) {
