@@ -2000,6 +2000,70 @@ static inline __attribute__((always_inline)) void native_strip_set(NativeVertex 
     o->rgba = (w[4] & 255) | (w[5] & 255) << 8 | (w[6] & 255) << 16 | (w[7] & 255) << 24;
 }
 
+/* native_strip's loop over triangles first..end-1 of the packet (triangle k is vertices k..k+2):
+   each drawn one recorded as native_record records it. exact: the exact probe is on, and each
+   takes native_exact first, as in native_draw (a constant in both callers, so the usual loop has
+   no call in it). Returns how many it recorded; *last is the latest, or UINT32_MAX. */
+static inline __attribute__((always_inline)) unsigned native_strip_triangles(
+    Native *n, Gs *g, NativeFrame *f, const uint32_t *w, const GsVertex *before, unsigned first, unsigned end,
+    unsigned prim, unsigned ctxt, int ofx, int ofy, const int exact, unsigned *last)
+{
+    const uint32_t zmax = n->zmax;
+    const float zscale = n->zscale, *fog = n->vertex_fog;
+    int left = n->box[0], top = n->box[1], right = n->box[2], bottom = n->box[3];
+    NativeVertex *vertices = f->vertices;
+    uint32_t *const indices = f->indices, *o = indices + f->index_count, vertex_count = f->vertex_count;
+    unsigned recorded = 0, latest = UINT32_MAX;
+    int follows = 0;   /* the triangle right before was recorded in this loop */
+    int px, py;
+#define NATIVE_STRIP_BOX() do { \
+    if (px - 1 < left) left = px - 1; \
+    if (py - 1 < top) top = py - 1; \
+    if (px + 1 > right) right = px + 1; \
+    if (py + 1 > bottom) bottom = py + 1; \
+} while (0)
+    for (unsigned k = first; k < end; k++) {
+        const uint32_t *p = w + (k + 2) * GS_STRIP_WORDS;   /* the triangle's third vertex */
+        if (gs_strip_adc(p)) { follows = 0; continue; }
+        if (exact) {
+            GsVertex tri[3];
+            for (unsigned j = 0; j < 3; j++) gs_strip_vertex(p - (2 - j) * GS_STRIP_WORDS, before, &tri[j]);
+            native_exact(n, g, 4, tri, 3, prim, ctxt);
+        }
+        if (follows) {
+            /* Its first two vertices are the bytes of the previous triangle's last two: only the
+               third is new, and only it can move the box (the box only grows). */
+            native_strip_set(&vertices[vertex_count], p, ofx, ofy, zmax, zscale, fog, &px, &py);
+            NATIVE_STRIP_BOX();
+            o[0] = o[-2]; o[1] = o[-1]; o[2] = vertex_count++;
+        } else {
+            NativeVertex t[3];
+            for (unsigned j = 0; j < 3; j++) {
+                native_strip_set(&t[j], p - (2 - j) * GS_STRIP_WORDS, ofx, ofy, zmax, zscale, fog, &px, &py);
+                NATIVE_STRIP_BOX();
+            }
+            /* native_triangle_indexed for a strip: each of the first two is drawn from the
+               triangle before (whatever recorded it) when its bytes are the same */
+            uint32_t a = UINT32_MAX, b = UINT32_MAX;
+            if (o - indices >= 3) a = o[-2], b = o[-1];
+            if (a != UINT32_MAX && native_same_vertex(&vertices[a], &t[0])) o[0] = a;
+            else { vertices[vertex_count] = t[0]; o[0] = vertex_count++; }
+            if (b != UINT32_MAX && native_same_vertex(&vertices[b], &t[1])) o[1] = b;
+            else { vertices[vertex_count] = t[1]; o[1] = vertex_count++; }
+            vertices[vertex_count] = t[2]; o[2] = vertex_count++;
+        }
+        o += 3;
+        follows = 1; latest = k;
+        recorded++;
+    }
+#undef NATIVE_STRIP_BOX
+    f->vertex_count = vertex_count;
+    f->index_count = (unsigned)(o - indices);
+    n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
+    *last = latest;
+    return recorded;
+}
+
 /* gs.c's strips in the game's own layout (gs_strip_hook, finding 197): the drawn triangles of the
    packet's vertices, as native_draw would draw each in turn, decoded and recorded in one pass.
    The first goes through native_draw (it may change the state); the state then holds for the rest
@@ -2019,18 +2083,18 @@ static void native_strip(Gs *g, const uint32_t *w, unsigned count)
     if (i == end) return;
     const GsVertex before = g->vertex;   /* its u and v: the strip writes neither */
     GsVertex tri[3];
-#define NATIVE_STRIP_TRIANGLE(k) do { \
-    for (unsigned j_ = 0; j_ < 3; j_++) gs_strip_vertex(w + ((k) + j_) * GS_STRIP_WORDS, &before, &tri[j_]); \
-} while (0)
 #define NATIVE_STRIP_DRAW_REST(k) do { \
     for (; (k) < end; (k)++) \
-        if (!gs_strip_adc(w + ((k) + 2) * GS_STRIP_WORDS)) { NATIVE_STRIP_TRIANGLE(k); native_draw(g, 4, tri, 3); } \
+        if (!gs_strip_adc(w + ((k) + 2) * GS_STRIP_WORDS)) { \
+            for (unsigned j_ = 0; j_ < 3; j_++) gs_strip_vertex(w + ((k) + j_) * GS_STRIP_WORDS, &before, &tri[j_]); \
+            native_draw(g, 4, tri, 3); \
+        } \
 } while (0)
     if (gs_vu_shadow) {   /* a shadow batch's packet: the exact path only (native_draw) */
         NATIVE_STRIP_DRAW_REST(i);
         return;
     }
-    NATIVE_STRIP_TRIANGLE(i);
+    for (unsigned j = 0; j < 3; j++) gs_strip_vertex(w + (i + j) * GS_STRIP_WORDS, &before, &tri[j]);
     native_draw(g, 4, tri, 3);
     unsigned prim = (unsigned)((g->reg[GS_PRIM] & 7) |
                     ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
@@ -2042,73 +2106,28 @@ static void native_strip(Gs *g, const uint32_t *w, unsigned count)
         NATIVE_STRIP_DRAW_REST(i);
         return;
     }
+#undef NATIVE_STRIP_DRAW_REST
     NativeFrame *f = n->recording;
     uint64_t offset = native_offset(g, ctxt);
-    const int ofx = (int)(offset & 65535), ofy = (int)(offset >> 32 & 65535), exact = n->exact_probe;
-    const uint32_t zmax = n->zmax;
-    const float zscale = n->zscale, *fog = n->vertex_fog;
-    int left = n->box[0], top = n->box[1], right = n->box[2], bottom = n->box[3];
+    const int ofx = (int)(offset & 65535), ofy = (int)(offset >> 32 & 65535);
     native_reserve(f, 3 * (end - i));
     native_reserve_indices(f, 3 * (end - i));
-    NativeVertex *vertices = f->vertices;
-    uint32_t *o = f->indices + f->index_count, vertex_count = f->vertex_count;
-    unsigned recorded = 0, last = UINT32_MAX;   /* last: the latest triangle recorded in this loop */
-    int follows = 0;                            /* it is the one right before */
-    int px, py;
-#define NATIVE_STRIP_BOX() do { \
-    if (px - 1 < left) left = px - 1; \
-    if (py - 1 < top) top = py - 1; \
-    if (px + 1 > right) right = px + 1; \
-    if (py + 1 > bottom) bottom = py + 1; \
-} while (0)
-    for (unsigned k = i; k < end; k++) {
-        const uint32_t *p = w + (k + 2) * GS_STRIP_WORDS;   /* the triangle's third vertex */
-        if (gs_strip_adc(p)) { follows = 0; continue; }
-        if (exact) { NATIVE_STRIP_TRIANGLE(k); native_exact(n, g, 4, tri, 3, prim, ctxt); }
-        if (follows) {
-            /* Its first two vertices are the bytes of the previous triangle's last two: only the
-               third is new, and only it can move the box (the box only grows). */
-            native_strip_set(&vertices[vertex_count], p, ofx, ofy, zmax, zscale, fog, &px, &py);
-            NATIVE_STRIP_BOX();
-            o[0] = o[-2]; o[1] = o[-1]; o[2] = vertex_count++;
-        } else {
-            NativeVertex t[3];
-            for (unsigned j = 0; j < 3; j++) {
-                native_strip_set(&t[j], p - (2 - j) * GS_STRIP_WORDS, ofx, ofy, zmax, zscale, fog, &px, &py);
-                NATIVE_STRIP_BOX();
-            }
-            /* native_triangle_indexed for a strip: each of the first two is drawn from the
-               triangle before (whatever recorded it) when its bytes are the same */
-            uint32_t a = UINT32_MAX, b = UINT32_MAX;
-            if (o - f->indices >= 3) a = o[-2], b = o[-1];
-            if (a != UINT32_MAX && native_same_vertex(&vertices[a], &t[0])) o[0] = a;
-            else { vertices[vertex_count] = t[0]; o[0] = vertex_count++; }
-            if (b != UINT32_MAX && native_same_vertex(&vertices[b], &t[1])) o[1] = b;
-            else { vertices[vertex_count] = t[1]; o[1] = vertex_count++; }
-            vertices[vertex_count] = t[2]; o[2] = vertex_count++;
-        }
-        o += 3;
-        follows = 1; last = k;
-        recorded++;
-    }
-    f->vertex_count = vertex_count;
-    f->index_count = (unsigned)(o - f->indices);
+    unsigned last, recorded;
+    if (n->exact_probe) recorded = native_strip_triangles(n, g, f, w, &before, i, end, prim, ctxt, ofx, ofy, 1, &last);
+    else recorded = native_strip_triangles(n, g, f, w, &before, i, end, prim, ctxt, ofx, ofy, 0, &last);
     /* native_record's conversion cache after the last triangle recorded: its second and third
        vertex, each with its own colour */
     if (last != UINT32_MAX) {
         for (unsigned j = 0; j < 2; j++) {
             const uint32_t *p = w + (last + 1 + j) * GS_STRIP_WORDS;
+            int px, py;
             gs_strip_vertex(p, &before, &n->conv_gs[j]);
-            native_strip_set(&n->conv[j], p, ofx, ofy, zmax, zscale, fog, &px, &py);
+            native_strip_set(&n->conv[j], p, ofx, ofy, n->zmax, n->zscale, n->vertex_fog, &px, &py);
         }
     }
-    n->box[0] = left; n->box[1] = top; n->box[2] = right; n->box[3] = bottom;
     if (g->source_path == 1) f->path1 += recorded;
     n->stats.primitives += recorded;
     n->stats.draws += recorded;
-#undef NATIVE_STRIP_BOX
-#undef NATIVE_STRIP_DRAW_REST
-#undef NATIVE_STRIP_TRIANGLE
 }
 
 /* A translated VU1 mesh batch (gs_mesh.h; gs_mesh made the register writes its packet would make):
