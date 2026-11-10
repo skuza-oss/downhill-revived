@@ -62,6 +62,9 @@ after a version change before a live check.
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/route_profile.py EXE OUT [--profile]` | finding 156's route on a hidden desktop (timed lock) with the timeline: per scene (title, shop, race start, mid-race) fields/s and each thread's work and busy time; `--profile` also samples the game thread's call stacks in each scene (finding 162) |
+| `port/tools/gs_census.py DUMP.gs... [--group NAME=A-B] [--log game.log]` | what a GS stream uses, per field and group of dumps: primitives by type and path, textures and CLUTs, filters, blending, tests, render targets, render-to-texture, transfers, the display; reads the game's `DHD_GS_CAPTURE` dumps or PCSX2's uncompressed ones (finding 162) |
+| `port/tools/sample_profile.py --pid N --stacks game` | whole call stacks of one thread's samples (dbghelp's StackWalk64): the report's `stacks` and `inclusive`; slower per sample, so shares only (finding 162) |
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
 | `port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- --test native_spirv` | the native and the exact renderer's SPIR-V for every pipeline stage (raster.wgsl for every raster key too), made as wgpu-hal's Vulkan backend makes it, with no texture passed into a function (Mali's r54 compiler crashes on that, finding 153) and none of the forms LLVM 9 turns into `llvm.usub.sat`, `llvm.uadd.sat` or a funnel shift (PowerVR Rogue's driver 1.13 crashes on them, finding 170). `DHD_SPIRV_OUT=DIR` keeps the `.spv` files; with `DHD_MALIOC` every stage is also compiled by malioc for `DHD_MALIOC_CORE` (default `Mali-G57`); `DHD_NATIVE_WGSL=FILE` (`DHD_RASTER_WGSL=FILE`) compares another native.wgsl (raster.wgsl) |
@@ -155,6 +158,7 @@ Pictures:
 | `DHD_GPU_STATS=N` | every N-th picture, GPU time (and on Vulkan pixels shaded) per kind of draw in dhd.log (finding 131) |
 | `DHD_TEST_DEVICE_LOST=N` | (D3D12) at the N-th presented frame this game's GPU device is removed (`ID3D12Device5::RemoveDevice`: this process only, no GPU reset); the game must log the reason and end with the lost-device box, exit code 1 (finding 171) |
 | `DHD_GPU_DRED=1` | (D3D12) DRED's breadcrumbs and page faults: a lost device's report names the command lists the GPU had not finished and where they stopped (finding 171) |
+| `DHD_VU1_LAYOUT=path` with `DHD_VU1_LAYOUT_FIELDS=a-b[,c-d...]` | per field window and kind of VU1 run (overlay, program, entry, MSCNT, VI13): the VIF1 commands before it (UNPACK forms, addresses, counts, masks) and the GIF tags it kicks; read only (finding 162) |
 | `DHD_NATIVE_SPEC=0\|sync` | `0`: the generic draw shader only; `sync`: specialised draw pipelines built at first use, not on a worker (replays and picture checks; finding 131) |
 
 Sound evidence: `DHD_SND_WAV=path` (the final mix), `DHD_SND_VOICE_TRACE=path` (each sounding voice

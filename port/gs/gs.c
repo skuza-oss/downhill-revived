@@ -2,6 +2,7 @@
    Behaviour reference: PCSX2 GSState.cpp and GSClut.cpp (GPL-3.0+).
    Each path keeps its tag across DMA boundaries, including partial qwords. */
 #include "gs.h"
+#include "gs_mesh.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -731,6 +732,29 @@ void gs_feed(Gs *g, unsigned path, const uint32_t *words, size_t count)
             p->have = 0; gif_qword(g, path, p);
         }
     }
+}
+
+int gs_mesh_mode;
+void (*gs_mesh_hook)(Gs *gs, const uint32_t *words, size_t count);
+unsigned gs_vu_shadow;
+
+void gs_mesh(Gs *g, const uint32_t *words, size_t count)
+{
+    const GsMeshHeader *h = (const GsMeshHeader *)words;
+    if (count * 4 < sizeof *h || h->magic != GS_MESH_MAGIC) return;
+    g->source_path = 1;
+    if (!(h->flags & GS_MESH_SHADOW)) {
+        /* what the batch's packet writes before its vertices: the A+D tag's registers (packed()'s
+           A+D, gs_write for these), then the strip tag's PRIM (gif_qword with PRE) */
+        if (h->flags & GS_MESH_TEXTURE) {
+            for (unsigned i = 0; i < 4; i++) gs_write(g, h->ad[i][2] & 127, h->ad[i][0] | (uint64_t)h->ad[i][1] << 32);
+            g->packets[0]++;
+        }
+        gs_write(g, GS_PRIM, h->prim);
+        g->packets[0]++;
+    }
+    g->vram_epoch++;
+    if (gs_mesh_hook) gs_mesh_hook(g, words, count);
 }
 
 int gs_xgkick(Gs *g, const uint32_t *memory, unsigned qword)

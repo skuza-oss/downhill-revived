@@ -132,6 +132,19 @@ pub struct Objects {
     pub draw_layout: wgpu::PipelineLayout,
     /// (uniform, texels): draws from a decoded texture (`_u` entry points).
     pub texels_draw_layout: wgpu::PipelineLayout,
+    /// Group 0 of the draw pipelines (finding 172): a window of `DRAW_SLOTS` draw constants
+    /// (arenas.rs) at a dynamic offset, each draw reading its own by its instance index; and the
+    /// draw pipelines' layouts with it, (draws, texture) and (draws, texels).
+    pub draws_layout: wgpu::BindGroupLayout,
+    pub native_draw_layout: wgpu::PipelineLayout,
+    pub native_texels_draw_layout: wgpu::PipelineLayout,
+    /// A mesh draw's group 2 (finding 168): binding 0, the picture's vertex buffer as read-only
+    /// storage for the vertex stage (native.wgsl's `mesh_records`); and the draw layouts with it,
+    /// (uniform, texture, mesh) and (uniform, texels, mesh). None in the browser, which draws no
+    /// meshes.
+    pub mesh_layout: Option<wgpu::BindGroupLayout>,
+    pub mesh_draw_layout: Option<wgpu::PipelineLayout>,
+    pub mesh_texels_draw_layout: Option<wgpu::PipelineLayout>,
     /// (uniform, blit)
     pub blit_pipeline_layout: wgpu::PipelineLayout,
     /// (uniform, scanout)
@@ -554,6 +567,37 @@ impl Objects {
 
         let draw_layout = pipeline_layout(gpu, &uniform_layout, &texture_layout);
         let texels_draw_layout = pipeline_layout(gpu, &uniform_layout, &texels_layout);
+        let draws_layout = layout(gpu, &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: S::VERTEX | S::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: true,
+                min_binding_size: wgpu::BufferSize::new(crate::native::arenas::DRAW_WINDOW),
+            },
+            count: None,
+        }]);
+        let native_draw_layout = pipeline_layout(gpu, &draws_layout, &texture_layout);
+        let native_texels_draw_layout = pipeline_layout(gpu, &draws_layout, &texels_layout);
+        let mesh_layout = (!cfg!(target_arch = "wasm32")).then(|| layout(gpu, &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: S::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }]));
+        let mesh_pipeline_layout = |group1: &wgpu::BindGroupLayout| mesh_layout.as_ref().map(|mesh| {
+            gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(&draws_layout), Some(group1), Some(mesh)],
+                immediate_size: 0,
+            })
+        });
+        let mesh_draw_layout = mesh_pipeline_layout(&texture_layout);
+        let mesh_texels_draw_layout = mesh_pipeline_layout(&texels_layout);
         let blit_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &blit_layout);
         let scanout_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &scanout_layout);
         let convert_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &convert_layout);
@@ -594,6 +638,12 @@ impl Objects {
             grow_layout,
             draw_layout,
             texels_draw_layout,
+            draws_layout,
+            native_draw_layout,
+            native_texels_draw_layout,
+            mesh_layout,
+            mesh_draw_layout,
+            mesh_texels_draw_layout,
             blit_pipeline_layout,
             scanout_pipeline_layout,
             convert_pipeline_layout,

@@ -192,12 +192,17 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 159 | [Touch controls gone after loading a career save](159-touch-gone-after-save-load.md) | current |  |
 | 160 | [Garbage blocks on screen in the first seconds after start](160-boot-garbage-frames.md) | current |  |
 | 161 | [online abuse guard: kill switch, rate limits, bans and a short moderation log](161-online-abuse-guard.md) | current |  |
+| 162 | [Native VU1 and GS rendering, phase 0: what the game draws and how](162-native-vu1-gs-phase0.md) | in progress |  |
 | 163 | [REVIVED SETTINGS: tabs, a clearer Controls page, online name size](163-revived-settings.md) | current |  |
+| 164 | [Native VU1 rendering, phase 1: the world mesh loop on the GPU](164-native-vu1-world-mesh.md) | in progress |  |
 | 165 | [no port patch in code the port does not compile](165-dead-patch-guard.md) | current |  |
 | 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
+| 167 | [Native VU1 rendering, phase 2: the remaining VU1 programs](167-native-vu1-phase2.md) | in progress |  |
+| 168 | [Native mesh draws batched, for the render thread](168-native-mesh-draw-batching.md) | in progress |  |
 | 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | current |  |
 | 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | current |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
+| 172 | [Fewer state changes per draw on the render thread](172-render-thread-state-changes.md) | in progress |  |
 | 173 | [STATE snapshots that stop for seconds on the SFU, then arrive at once](173-sfu-snapshot-stalls.md) | current |  |
 | 174 | [60 fps at 2x on a Mali-G52 phone (Redmi 9): the GPU side](174-mali-gpu-60-at-2x.md) | current |  |
 | 175 | [online follow-ups after 0.7.12 (rejoin in a race, setup that never takes a race down, T...](175-online-followups.md) | partly superseded | [177](177-sfu-room-sessions.md) for the rejoin's SFU session restart: `sfu_restart` and the welcome's `race.sfu`; per-race sessions |

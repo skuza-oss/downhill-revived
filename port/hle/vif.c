@@ -81,9 +81,255 @@ static int trace_enabled(int unit)
 #if !defined(DHD_VIF0_ONLY)
 double vif_gs_seconds; /* Opt-in profiling total; owned by the graphics worker. */
 
+/* DHD_VU1_LAYOUT=path with DHD_VU1_LAYOUT_FIELDS=a-b[,c-d...] (virtual fields, up to 8 windows):
+   for each kind of VU1 run (overlay, MSCAL program, entry, MSCNT, the dispatch register VI13 at the
+   mesh continuations) its input, the VIF1 commands since the run before it (UNPACK forms and
+   addresses, cycle, mask, offsets), and its output, the GIF tags it kicks (PRE/PRIM, FLG, registers,
+   the A+D registers written). Written at the end of each window; read only (finding 162). */
+enum { LAYOUT_WINDOWS = 8, LAYOUT_KINDS = 320, LAYOUT_SIGS = 10, LAYOUT_CMDS = 40 };
+typedef struct { uint32_t hash, count, cmds, ncmd; uint32_t cmd[LAYOUT_CMDS]; uint64_t nsum[LAYOUT_CMDS];
+                 uint32_t nmin[LAYOUT_CMDS], nmax[LAYOUT_CMDS]; } LayoutIn;
+typedef struct { uint32_t hash, count, ntag; uint64_t tag[6]; uint64_t loops; } LayoutOut;
+typedef struct {
+    uint32_t used, overlay, program, entry, mscnt, vi13, runs, kicks;
+    uint64_t vertices, qwords, ad_mask[2];
+    LayoutIn in[LAYOUT_SIGS]; LayoutOut out[LAYOUT_SIGS];
+    uint32_t in_other, out_other;
+} LayoutKind;
+static struct {
+    int state;  /* 0 unread, 1 off, 2 on */
+    FILE *file;
+    unsigned windows, window;  /* the window being collected */
+    uint64_t first[LAYOUT_WINDOWS], last[LAYOUT_WINDOWS];
+    LayoutKind *kinds;          /* LAYOUT_KINDS of the current window */
+    uint32_t pending[LAYOUT_CMDS], pending_num[LAYOUT_CMDS], npending;
+    LayoutKind *run;            /* the kind of the run in progress (kicks attach to it) */
+    uint64_t runs, words, vectors, mpg_words, mpgs, direct_qwords, unpacks, fields_from;
+} layout;
+extern uint64_t kernel_vsync_count;
+
+static int layout_on(void)
+{
+    if (!layout.state) {
+        const char *path = getenv("DHD_VU1_LAYOUT"), *fields = getenv("DHD_VU1_LAYOUT_FIELDS");
+        layout.state = 1;
+        if (!path || !fields) return 0;
+        for (const char *s = fields; *s && layout.windows < LAYOUT_WINDOWS;) {
+            unsigned long long a, b; int used = 0;
+            if (sscanf(s, "%llu-%llu%n", &a, &b, &used) != 2) break;
+            layout.first[layout.windows] = a; layout.last[layout.windows++] = b;
+            s += used; if (*s == ',') s++;
+        }
+        layout.kinds = calloc(LAYOUT_KINDS, sizeof *layout.kinds);
+        layout.file = fopen(path, "w");
+        if (!layout.file || !layout.kinds || !layout.windows) return 0;
+        layout.state = 2;
+    }
+    return layout.state == 2;
+}
+
+static const char *layout_format(uint32_t f)
+{
+    static const char *names[16] = {"S-32", "S-16", "S-8", "?", "V2-32", "V2-16", "V2-8", "?",
+                                    "V3-32", "V3-16", "V3-8", "?", "V4-32", "V4-16", "V4-8", "V4-5"};
+    return names[f & 15];
+}
+
+static void layout_flush(void)
+{
+    FILE *f = layout.file;
+    uint64_t fields = layout.last[layout.window] - layout.first[layout.window] + 1;
+    fprintf(f, "window %u fields %llu-%llu: per field %.1f runs, %.0f VIF1 words, %.1f UNPACKs, %.0f vectors, "
+            "%.2f MPGs (%.0f words), %.1f DIRECT qwords\n", layout.window,
+            (unsigned long long)layout.first[layout.window], (unsigned long long)layout.last[layout.window],
+            (double)layout.runs / fields, (double)layout.words / fields, (double)layout.unpacks / fields,
+            (double)layout.vectors / fields, (double)layout.mpgs / fields, (double)layout.mpg_words / fields,
+            (double)layout.direct_qwords / fields);
+    for (unsigned i = 0; i < LAYOUT_KINDS; i++) {
+        LayoutKind *k = &layout.kinds[i];
+        if (!k->used) continue;
+        fprintf(f, "kind overlay %c program %04X entry %04X mscnt %u vi13 %03X: %.2f runs/field, %.2f kicks/run, "
+                "%.1f vertices/kick, %.1f qwords/kick, A+D regs %016llX%016llX\n",
+                "?AB"[k->overlay], k->program, k->entry, k->mscnt, k->vi13, (double)k->runs / fields,
+                k->runs ? (double)k->kicks / k->runs : 0, k->kicks ? (double)k->vertices / k->kicks : 0,
+                k->kicks ? (double)k->qwords / k->kicks : 0,
+                (unsigned long long)k->ad_mask[1], (unsigned long long)k->ad_mask[0]);
+        for (unsigned s = 0; s < LAYOUT_SIGS && k->in[s].count; s++) {
+            LayoutIn *in = &k->in[s];
+            fprintf(f, "  in %u runs:", in->count);
+            for (unsigned c = 0; c < in->ncmd; c++) {
+                uint32_t x = in->cmd[c], op = x >> 24;
+                if ((op & 0x60) == 0x60)
+                    fprintf(f, " | UNPACK %s%s%s %s%03X n=%u-%u (%.1f)", layout_format(op), op & 0x10 ? " masked" : "",
+                            x >> 14 & 1 ? " usn" : "", x >> 15 & 1 ? "top+" : "@", x & 0x3FF, in->nmin[c], in->nmax[c],
+                            (double)in->nsum[c] / in->count);
+                else if (op == STCYCL) fprintf(f, " | STCYCL cl %u wl %u", x & 0xFF, x >> 8 & 0xFF);
+                else if (op == STMASK) fprintf(f, " | STMASK %04X", x & 0xFFFF);
+                else if (op == STROW) fprintf(f, " | STROW");
+                else if (op == STCOL) fprintf(f, " | STCOL");
+                else if (op == OFFSET || op == BASE) fprintf(f, " | %s %03X", op == BASE ? "BASE" : "OFFSET", x & 0x3FF);
+                else if (op == ITOP) fprintf(f, " | ITOP");
+                else if (op == STMOD) fprintf(f, " | STMOD %u", x & 3);
+                else if (op == MPG) fprintf(f, " | MPG @%03X", x & 0xFFFF);
+                else if (op == DIRECT || op == DIRECTHL) fprintf(f, " | DIRECT");
+                else if (op == MSCAL || op == MSCALF || op == MSCNT) fprintf(f, " | MS%s", op == MSCNT ? "CNT" : "CAL");
+                else fprintf(f, " | %02X", op);
+            }
+            fprintf(f, "%s\n", in->cmds > LAYOUT_CMDS ? " | ..." : "");
+        }
+        if (k->in_other) fprintf(f, "  in %u runs: other forms\n", k->in_other);
+        for (unsigned s = 0; s < LAYOUT_SIGS && k->out[s].count; s++) {
+            LayoutOut *o = &k->out[s];
+            fprintf(f, "  out %u kicks (%.1f loops):", o->count, (double)o->loops / o->count);
+            for (unsigned t = 0; t < o->ntag; t++) {
+                uint64_t g = o->tag[t];
+                unsigned flg = g >> 58 & 3, nreg = g >> 60 & 15 ? (unsigned)(g >> 60 & 15) : 16;
+                fprintf(f, " | %s nreg %u regs %0*llX", (const char *[]){"PACKED", "REGLIST", "IMAGE", "IMAGE"}[flg],
+                        nreg, (int)nreg, (unsigned long long)(g & ((nreg == 16 ? 0 : UINT64_C(1) << (nreg * 4)) - 1)));
+                if (g >> 46 & 1) fprintf(f, " prim %03llX", (unsigned long long)(g >> 47 & 0x7FF));
+            }
+            fprintf(f, "%s\n", o->ntag == 6 ? " | ..." : "");
+        }
+        if (k->out_other) fprintf(f, "  out %u kicks: other forms\n", k->out_other);
+    }
+    fflush(f);
+    memset(layout.kinds, 0, LAYOUT_KINDS * sizeof *layout.kinds);
+    layout.runs = layout.words = layout.vectors = layout.mpg_words = layout.mpgs = layout.direct_qwords = 0;
+    layout.unpacks = 0;
+}
+
+/* The window the current field is in, flushing a finished one; -1 outside every window. */
+static int layout_window(void)
+{
+    if (!layout_on() || layout.window >= layout.windows) return -1;
+    uint64_t field = kernel_vsync_count;
+    while (layout.window < layout.windows && field > layout.last[layout.window]) {
+        if (layout.fields_from) layout_flush();
+        layout.fields_from = 0; layout.window++;
+    }
+    if (layout.window >= layout.windows) { fclose(layout.file); layout.file = NULL; layout.state = 1; return -1; }
+    if (field < layout.first[layout.window]) return -1;
+    layout.fields_from = field + 1;
+    return (int)layout.window;
+}
+
+static void layout_command(const Vif *v, uint32_t code)
+{
+    if (layout_window() < 0) { layout.npending = 0; return; }
+    uint32_t cmd = code >> 24 & 0x7F, num = code >> 16 & 0xFF, imm = code & 0xFFFF, key;
+    if ((cmd & 0x60) == 0x60) {
+        key = cmd << 24 | (imm & 0xC3FF); layout.unpacks++; layout.vectors += num ? num : 256;
+    } else if (cmd == STCYCL || cmd == OFFSET || cmd == BASE || cmd == STMOD || cmd == MPG) {
+        key = cmd << 24 | imm;
+        if (cmd == MPG) { layout.mpgs++; layout.mpg_words += (num ? num : 256) * 2u; }
+    } else if (cmd == NOP || cmd == FLUSH || cmd == FLUSHE || cmd == FLUSHA || cmd == MARK ||
+               cmd == MSCAL || cmd == MSCALF || cmd == MSCNT) {
+        return;
+    } else {
+        key = cmd << 24;
+        if (cmd == DIRECT || cmd == DIRECTHL) layout.direct_qwords += imm ? imm : 0x10000;
+    }
+    (void)v;
+    if (layout.npending < LAYOUT_CMDS) {
+        layout.pending_num[layout.npending] = num ? num : 256;
+        layout.pending[layout.npending] = key;
+    }
+    layout.npending++;
+}
+
+static void layout_mask(uint32_t mask)  /* STMASK's data word: the low half names the mask's form */
+{
+    if (layout.npending && layout.npending <= LAYOUT_CMDS && layout.pending[layout.npending - 1] >> 24 == STMASK)
+        layout.pending[layout.npending - 1] = STMASK << 24 | (mask & 0xFFFF);
+}
+
+static void layout_run(unsigned addr, unsigned mscnt)
+{
+    layout.run = NULL;
+    if (layout_window() < 0) { layout.npending = 0; return; }
+    unsigned overlay = !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x265C10), 32) ? 1 :
+                       !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
+    unsigned program = graphics_provenance.program;
+    unsigned vi13 = (addr == 0x1040 || addr == 0x1CB0 || addr == 0x12E0) ? vu1.vi[13] & 0xFFFF : 0;
+    unsigned at = (program * 7 + addr * 13 + overlay * 5 + mscnt + vi13 * 3) % LAYOUT_KINDS;
+    LayoutKind *k = NULL;
+    for (unsigned n = 0; n < LAYOUT_KINDS; n++, at = (at + 1) % LAYOUT_KINDS) {
+        LayoutKind *c = &layout.kinds[at];
+        if (!c->used || (c->overlay == overlay && c->program == program && c->entry == addr &&
+                         c->mscnt == mscnt && c->vi13 == vi13)) { k = c; break; }
+    }
+    layout.runs++;
+    if (!k) { layout.npending = 0; return; }
+    if (!k->used) { k->used = 1; k->overlay = overlay; k->program = program; k->entry = addr; k->mscnt = mscnt; k->vi13 = vi13; }
+    k->runs++;
+    unsigned n = layout.npending < LAYOUT_CMDS ? layout.npending : LAYOUT_CMDS;
+    uint32_t hash = 2166136261u ^ layout.npending;
+    for (unsigned i = 0; i < n; i++) hash = (hash ^ layout.pending[i]) * 16777619u;
+    unsigned s = 0;
+    while (s < LAYOUT_SIGS && k->in[s].count && k->in[s].hash != hash) s++;
+    if (s == LAYOUT_SIGS) k->in_other++;
+    else {
+        LayoutIn *in = &k->in[s];
+        if (!in->count) {
+            in->hash = hash; in->cmds = layout.npending; in->ncmd = n;
+            memcpy(in->cmd, layout.pending, n * sizeof *in->cmd);
+            for (unsigned i = 0; i < n; i++) in->nmin[i] = UINT32_MAX;
+        }
+        in->count++;
+        for (unsigned i = 0; i < n; i++) {
+            uint32_t m = layout.pending_num[i];
+            in->nsum[i] += m; if (m < in->nmin[i]) in->nmin[i] = m; if (m > in->nmax[i]) in->nmax[i] = m;
+        }
+    }
+    layout.npending = 0;
+    layout.run = k;
+}
+
+static void layout_kick(unsigned qword)
+{
+    LayoutKind *k = layout.run;
+    if (!k) return;
+    const uint32_t *m = data_mem(1);
+    uint64_t tags[6] = {0}, loops = 0, vertices = 0;
+    unsigned ntag = 0, q = qword, total = 0;
+    uint32_t hash = 2166136261u;
+    for (;;) {
+        const uint32_t *w = m + (q & 1023) * 4;
+        uint64_t tag = w[0] | (uint64_t)w[1] << 32, regs = w[2] | (uint64_t)w[3] << 32;
+        unsigned nloop = w[0] & 0x7FFF, eop = w[0] >> 15 & 1, flg = w[1] >> 26 & 3, nreg = w[1] >> 28 & 15;
+        if (!nreg) nreg = 16;
+        uint64_t form = (tag & ~UINT64_C(0x7FFF) & ~(UINT64_C(1) << 15)) | (regs & ((nreg == 16 ? 0 : UINT64_C(1) << (nreg * 4)) - 1));
+        if (ntag < 6) tags[ntag] = form;
+        ntag++;
+        hash = (hash ^ (uint32_t)form) * 16777619u; hash = (hash ^ (uint32_t)(form >> 32)) * 16777619u;
+        loops += nloop;
+        unsigned size = flg == 0 ? nloop * nreg : flg == 1 ? (nloop * nreg + 1) / 2 : nloop;
+        if (flg == 0)
+            for (unsigned l = 0; l < nloop && l < 1024; l++)
+                for (unsigned r = 0; r < nreg; r++) {
+                    unsigned reg = regs >> (r * 4) & 15;
+                    if (reg == 4 || reg == 5 || reg == 12 || reg == 13) vertices++;
+                    else if (reg == 14) {
+                        unsigned addr = m[((q + 1 + l * nreg + r) & 1023) * 4 + 2] & 0x7F;
+                        k->ad_mask[addr >> 6] |= UINT64_C(1) << (addr & 63);
+                    }
+                }
+        q += 1 + size; total += 1 + size;
+        if (eop || total > 0x4000) break;
+    }
+    k->kicks++; k->vertices += vertices; k->qwords += total;
+    unsigned s = 0;
+    while (s < LAYOUT_SIGS && k->out[s].count && k->out[s].hash != hash) s++;
+    if (s == LAYOUT_SIGS) { k->out_other++; return; }
+    LayoutOut *o = &k->out[s];
+    if (!o->count) { o->hash = hash; o->ntag = ntag < 6 ? ntag : 6; memcpy(o->tag, tags, sizeof tags); }
+    o->count++; o->loops += loops;
+}
+
 static int kick(void *opaque, unsigned qword)
 {
     (void)opaque;
+    if (layout.run) layout_kick(qword);
     if (!vu_profile_active) return graphics_xgkick(VU1_DATA, qword);
     double start = host_wall_seconds();
     int result = graphics_xgkick(VU1_DATA, qword);
@@ -236,6 +482,8 @@ static void capture_representative(unsigned addr, unsigned top, unsigned itop)
     count[group][continuation]++; next[group][continuation] = now + 2;
 }
 
+#include "../hle/vu1_mesh.inc"  /* DHD_NATIVE_VU1 (finding 164) */
+
 #endif
 
 static void run_micro(Vif *v, uint32_t addr)
@@ -290,10 +538,25 @@ static void run_micro(Vif *v, uint32_t addr)
     unsigned profile_overlay = 0;
     if (profile_start) profile_overlay = !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x265C10), 32) ? 1 :
                                        !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
-    if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {
-        hle_log("vif1: microprogram at 0x%X failed\n", addr);
-        if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed");
+    if (layout.state != 1) layout_run(addr, (v->code >> 24 & 0x7f) == MSCNT);
+    uint32_t *mesh_packet = NULL;
+    double mesh_start = profile_start && mesh.state == MESH_ON ? host_wall_seconds() : 0;
+    int mesh_batch = mesh.state != MESH_OFF ? mesh_before(addr, (v->code >> 24 & 0x7f) == MSCNT, &mesh_packet) : 0;
+    if (mesh_batch == 1) {
+        mesh_send(mesh_packet);
+        mesh_skipped();
+        if (mesh_start) mesh_timed(host_wall_seconds() - mesh_start);
+    } else {
+        graphics_provenance.shadow = mesh_batch == 2;
+        if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {
+            hle_log("vif1: microprogram at 0x%X failed\n", addr);
+            if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed");
+        }
+        graphics_provenance.shadow = 0;
+        if (mesh_batch == 2) mesh_send(mesh_packet);
+        if (mesh.state != MESH_OFF) mesh_after(addr, (v->code >> 24 & 0x7f) == MSCNT);
     }
+    layout.run = NULL;
     if (profile_start) vu_profile_end(profile_start, profile_overlay, graphics_provenance.program, addr, (v->code >> 24 & 0x7f) == MSCNT);
     if (watch && gs.suspect_draws != suspects) save_suspect("DHD_VU_SUSPECT", "suspect");
     v->tpc = vu1.vu0_ctrl[10] / 8;
@@ -631,7 +894,12 @@ static void command_done(Vif *v)
 {
     uint32_t cmd = v->code >> 24 & 0x7F, imm = v->code & 0xFFFF;
     switch (cmd) {
-    case STMASK: v->mask = v->data[0]; break;
+    case STMASK:
+        v->mask = v->data[0];
+#if !defined(DHD_VIF0_ONLY)
+        if (v->unit && layout.state == 2) layout_mask(v->mask);
+#endif
+        break;
     case STROW: memcpy(v->row, v->data, 16); break;
     case STCOL: memcpy(v->col, v->data, 16); break;
     default: (void)imm; break;
@@ -671,6 +939,9 @@ static uint32_t command(Vif *v, uint32_t code)
         hle_log("vif1 command %08X\n", code);
     v->code = code;
     v->have = 0;
+#if !defined(DHD_VIF0_ONLY)
+    if (v->unit && layout.state != 1) layout_command(v, code);
+#endif
     if ((cmd & 0x60) == 0x60) {  /* UNPACK */
         v->addr = imm & 0x3FF;
         if (v->unit == 1 && imm >> 15 & 1)
@@ -727,6 +998,9 @@ void vif_feed(int unit, const uint32_t *words, uint32_t n)
 #endif
     Vif *v = &vif[unit];
     uint32_t i = 0;
+#if !defined(DHD_VIF0_ONLY)
+    if (unit && layout.state == 2 && layout_window() >= 0) layout.words += n;
+#endif
     while (i < n) {
         uint32_t cmd, take;
         if (v->need == 0) {

@@ -133,5 +133,16 @@ int gs_reads_pending(const Gs *g);
 void gs_settle_reads(Gs *g);
 uint32_t gs_image_pixel(const uint32_t *vram, unsigned psm, unsigned bp, unsigned bw, unsigned x, unsigned y);
 int gs_xgkick(Gs *g, const uint32_t *memory, unsigned qword);
+/* A translated VU1 mesh batch from the GS queue (GS_PATH_MESH; gs_mesh.h): its A+D texture writes
+   and PRIM (unless a shadow batch's own packet made them), then the backend's mesh hook. */
+void gs_mesh(Gs *g, const uint32_t *words, size_t count);
+/* Set by the backend: 0 no mesh drawing (vu1_mesh.inc leaves VU1 as it is), 1 mesh items drawn,
+   2 drawn while the exact path answers the Z probe (the batches also run on the VU: shadow).
+   gs_mesh_hook: the backend's drawing of a mesh item, after gs_mesh's register writes.
+   gs_vu_shadow: the packet being fed was kicked by a batch the backend draws from its mesh item
+   (only the exact Z path takes it). Outside struct Gs, whose size the core's state trace holds. */
+extern int gs_mesh_mode;
+extern void (*gs_mesh_hook)(Gs *gs, const uint32_t *words, size_t count);
+extern unsigned gs_vu_shadow;
 
 #endif
