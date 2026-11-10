@@ -85,8 +85,19 @@ Out of scope: gameplay, the desktop builds' speed (kept equal or better), anythi
 - [x] 2026-11-10: change 3, `9e87e9d`: a large picture's encoder cut once and its first part
   finished on a helper thread. Checked on the PC against base2 (boot and race traces equal, the
   picture route identical at 2x and 4x, off and on, on Direct3D 12 and at 2x on Vulkan; the cut is
-  taken in every race picture); `check.py port` passes on it. Its APK ("p3": the branch with the
-  new profile) builds. Phone timing: running.
+  taken in every race picture); `check.py port` passes on it.
+- [x] 2026-11-10: change 3 timed on the phone: +3.6 % over the route at t612 2x on, but -4.9 % at
+  the race start; nothing off. Its two parts timed apart (temporary timers): the helper had a third
+  of the work, because the cost is in the short passes after the scene, not in the draws.
+- [x] 2026-11-10: change 3 reworked, `bf60d5e`: the cut where a pass ends, at 60 % of the picture's
+  work with a pass weighed as 27 draws. PC checks as before. Timed (off, on, off, on): +7.4 % over
+  the route at t612 2x on, +11.1 % in the race, +3.4 % at the race start.
+- [x] 2026-11-10: why the race start gains least: the render thread sleeps in `queue.submit`, in
+  the Adreno kernel driver's queue for the context (simpleperf with off-CPU time; "Change 3").
+- [x] 2026-11-10: `147ae46`: `phone_throttle.py --restore` accepts a thermal cap that came on during
+  the throttle ("Surprises", 8).
+- [ ] change 4: the conversions that run back to back in one compute pass (10 -> 4 compute passes a
+  race picture). Written; PC checks pass (traces equal, pictures identical). Phone timing: running.
 
 ## Method
 
@@ -266,6 +277,8 @@ race:
 | t612 2x | on | mid-race | 80.8 (80.3 / 81.2) | 80.1 (80.2 / 80.1) | -0.9 % |
 | t612 2x | on | the race | 76.0 (75.6 / 76.5) | 75.3 (75.0 / 75.6) | -0.9 % |
 | t612 2x | on | the route | 74.5 (73.9 / 75.0) | 74.8 (74.6 / 75.0) | **+0.4 %** |
+| 4x | off | the route | 61.6 | 62.0 | +0.6 % |
+| 4x | on | the route | 59.0 | 58.8 | -0.3 % |
 
 | Native VU | thread, work over the race | shipped | new | |
 |---|---|---:|---:|---:|
@@ -283,22 +296,75 @@ race:
   the external functions' data.
 - **On: nothing** (inside the runs' spread): the three C threads do 2-5 % less work, and the render
   thread, which limits there, is Rust and takes no profile.
+- **4x: nothing** (one run each): the GPU limits; the C threads' work falls as at 2x (game 8.78 ->
+  8.39, VU 11.55 -> 11.00, GS 11.41 -> 11.02 ms a field over the race, off).
 
-## Change 3: a large picture's encoder cut once (`9e87e9d`)
+## Change 3: a large picture's encoder cut once (`9e87e9d`, `bf60d5e`)
 
 The render thread's picture at the race start is 11-12 ms on the throttled phone, 5-6 ms of it in
 `encoder.finish` (wgpu-core replays the picture's passes into Vulkan commands there) and 2.8-3.0 in
 `queue.submit`. wgpu-core 29's `finish` takes only a read lock on the device, so two encoders can be
-finished at once. A picture with 96 draw commands or more is now cut once, at 60 % of them: the pass
-is ended there, the encoder so far goes to a helper thread ("dhd-encode") that finishes it while the
-render thread records the rest into a second encoder, and both command buffers are submitted
-together, in order. The cut ends a pass that would have gone on, so the pass after it loads what the
-one before stored: the same pixels, one more pass a picture. `DHD_ENCODE_CUT=N` sets the percentage
-(0: never, the picture as before); on Android the helper takes the render thread's affinity mask
-(the little cores on a phone with two big ones). Not in the browser (no threads there).
+finished at once. A picture with 96 draw commands or more is now cut once: its encoder so far goes to
+a helper thread ("dhd-encode") that finishes it while the render thread records the rest into a
+second encoder, and both command buffers are submitted together, in order. `DHD_ENCODE_CUT=N` sets
+where (0: never, the picture as before); on Android the helper takes the render thread's affinity
+mask (the little cores on a phone with two big ones). Not in the browser (no threads there).
 
-Checked on the PC against base2: Progress. On the phone: timed on one APK (p3: the branch with the
-new profile), `DHD_ENCODE_CUT=0` against the default. **Running; numbers follow here.**
+**Where the cut is made.** A race picture is one scene pass of 300 to 400 draws, then about thirty
+short passes (the riders' shadow and haze textures: 64 x 64 targets drawn, converted and copied in
+turn) with 50 draws between them, and finishing those short passes costs more than the scene.
+
+- First form (`9e87e9d`): inside the scene pass, after 60 % of the picture's draw commands. Timed
+  (below), it gave the helper a third of the work, added a pass (the target stored and loaded
+  again: 0.3-0.5 ms more GPU a frame) and lost at the race start. Replaced.
+- As committed (`bf60d5e`): at the first pass that begins once 60 % of the picture's encoder work is
+  behind, a pass's begin counted as 27 draws. No pass is added. The weight: on a build with
+  temporary timers (not committed), t612 2x, Native VU on, the two parts' `finish` in ms a picture:
+
+  | weight of a pass | race start: helper / render thread | mid-race: helper / render thread | the route, fields/s |
+  |---|---|---|---:|
+  | no cut | - / 6.08 | - / 4.95 | 76.0 |
+  | 5 | 2.76 / 4.04 | 2.38 / 3.04 | 79.5 |
+  | 12 | 3.10 / 3.61 | 2.36 / 3.05 | 80.2 |
+  | 27 | 4.24 / 2.58 (waits 0.25) | 2.79 / 2.71 | 81.3 |
+
+Checked on the PC against base2 (both forms): boot and race state traces equal, the picture route
+identical at 2x and 4x, Native VU off and on, on Direct3D 12 and at 2x on Vulkan.
+
+Timed on one APK (the branch with the new profile), `DHD_ENCODE_CUT=0` against the default,
+interleaved (off, on, off, on). Fields/s:
+
+| form | stand-in | Native VU | scene | no cut | cut | gain |
+|---|---|---|---|---:|---:|---:|
+| committed | t612 2x | on | race start | 61.5 (61.7 / 61.4) | 63.6 (63.6 / 63.7) | +3.4 % |
+| committed | t612 2x | on | mid-race | 81.9 (81.7 / 82.1) | 92.0 (91.8 / 92.1) | +12.3 % |
+| committed | t612 2x | on | the race | 76.8 (76.7 / 76.8) | 85.3 (85.1 / 85.4) | +11.1 % |
+| committed | t612 2x | on | the route | 75.9 (75.8 / 76.0) | 81.5 (81.3 / 81.7) | **+7.4 %** |
+| first | t612 2x | on | race start | 61.0 (61.5 / 60.5) | 58.0 (58.1 / 58.0) | -4.9 % |
+| first | t612 2x | on | mid-race | 80.5 (80.8 / 80.3) | 86.5 (86.4 / 86.5) | +7.5 % |
+| first | t612 2x | on | the route | 75.2 (75.8 / 74.5) | 77.9 (78.1 / 77.7) | +3.6 % |
+| first | t612 2x | off | race start | 61.9 (62.0 / 61.9) | 60.2 (60.3 / 60.1) | -2.7 % |
+| first | t612 2x | off | the route | 67.3 (67.3 / 67.3) | 67.2 (67.0 / 67.3) | -0.2 % |
+
+The render thread's picture with the committed form (ms; `DHD_RSTAT` on the build with the timers):
+race start 12.32 -> 11.35 (`finish` 6.09 -> 2.84, `queue.submit` 2.79 -> 4.93), mid-race 10.04 ->
+8.20 (`finish` 4.96 -> 2.73, `queue.submit` 2.46 -> 2.78).
+
+**Why the race start gains so little: the submit sleeps.** `queue.submit` takes 2.1 ms longer there
+with two command buffers, and none of it is CPU. simpleperf with off-CPU time on the render thread
+at the race start (t612 2x, Native VU on) shows where it sleeps:
+
+| | no cut | cut |
+|---|---:|---:|
+| asleep in `queue.submit`, in the Adreno kernel driver's `_wait_for_room_in_context_queue` (`adreno_dispatcher_queue_cmds`) | 64 ms a second (1.1 a picture) | 193 ms a second (3.1 a picture) |
+| asleep in the present (binder) | 20 ms a second | 22 ms a second |
+
+The kernel's queue for a GPU context has a fixed number of places (this phone:
+`context_drawqueue_size` 50, `inflight` 15, read from its sysfs), and a picture with this many
+passes fills it: the submit sleeps until the GPU has worked through enough of the picture's first
+commands. With the cut the submit comes 3 ms sooner in the field and brings two more command
+buffers, and it sleeps 2 ms longer: the picture sits at that limit. Fewer command buffers a picture
+is the thing to try against it ("Change 4").
 
 ## Where to resume
 
@@ -455,8 +521,14 @@ Ranked by what the measurements say it is worth:
    compare against a base measured in the same batch, never against a number from another day.
 8. **`phone_throttle.py --restore` can report INCOMPLETE on a warm phone**: the phone's own thermal
    cap had lowered policy7's maximum since the apply, and the tool compares every value it saved.
-   The cap comes back within seconds; the session script now tries the restore again (up to twelve
-   times, 15 s apart) instead of stopping the batch.
+   That cap came back within seconds, and the session script tries the restore again (up to twelve
+   times, 15 s apart). After the 4x batch in the afternoon it was policy4 (the A78s: cooling device
+   `thermal-cpufreq-4` at state 3, 2.11 of 2.42 GHz), and MIUI kept it there for more than ten
+   minutes on an idle phone at 30 C; the restore failed twelve times and the next batch stopped at
+   "a throttle is already applied". The user request had been written back each time: the phone was
+   in its own state, only the tool could not say so. `147ae46`: it now accepts a maximum below the
+   saved one while that policy's cooling device is engaged and the value is not the throttle's own,
+   and names the cap. The cap is above every throttled clock, so no timed run was touched by it.
 9. **A background job of the harness is killed at two hours.** A chain of phone plans longer than
    that would be killed mid-run (6); chains are kept under 100 minutes, and a `STOP` file ends one
    between two plans.
