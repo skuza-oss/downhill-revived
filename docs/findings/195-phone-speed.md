@@ -400,56 +400,104 @@ Checked on the PC against base2: boot and race state traces equal; the picture r
 and 4x, Native VU off and on, on Direct3D 12 and at 2x on Vulkan; `check.py port` and the renderer
 crate's tests pass.
 
+## Changes 3 and 4 in the other cells, and the lane's total
+
+Before (the build with changes 1 and 2, `DHD_ENCODE_CUT=0`) against after (changes 3 and 4 too), one
+run each in one batch per cell (t612 2x on: two each, in adjacent batches). Fields/s:
+
+| stand-in | Native VU | scene | before | after | gain | GPU, ms a frame |
+|---|---|---|---:|---:|---:|---|
+| t612 2x | off | race start | 62.2 | 61.9 | -0.5 % | 7.15 -> 6.97 |
+| t612 2x | off | the route | 67.8 | 68.0 | **+0.3 %** | |
+| t612 2x | on | race start | 61.5 | 74.4 | +21.0 % | 7.81 -> 7.86 |
+| t612 2x | on | the route | 75.9 | 84.0 | **+10.7 %** | |
+| 4x | off | race start | 47.2 | 51.7 | +9.5 % | 17.96 -> 17.84 |
+| 4x | off | mid-race | 65.0 | 67.4 | +3.7 % | 13.93 -> 13.72 |
+| 4x | off | the route | 61.9 | 64.5 | **+4.2 %** | |
+| 4x | on | race start | 43.1 | 49.4 | +14.6 % | 18.73 -> 18.70 |
+| 4x | on | mid-race | 61.0 | 63.2 | +3.6 % | 14.87 -> 14.70 |
+| 4x | on | the route | 58.8 | 61.6 | **+4.8 %** | |
+
+- **t612 2x off: nothing.** The VU thread limits there (busy 15.5 of a 16.2 ms field at the race
+  start); the render thread's busy time fell from 12.5 to 9.1 ms, which nothing waits for.
+- **4x: +4 to +5 %, and +10 to +15 % at the race start, with the GPU's frame unchanged.** The field
+  was longer than the GPU's frame there (21.2 against 18.0 ms at the race start, off): the render
+  thread's submit slept on the kernel queue on top of the GPU's work. Now 19.3 against 17.8.
+
+The lane against `main` 959c5f4 (base2; its runs were made earlier the same day, so these totals are
+across batches, each step above within one):
+
+| stand-in | Native VU | the route: `main` -> the branch | | the race start | |
+|---|---|---|---:|---|---:|
+| t612 2x | off | 64.4 -> 68.0 | **+5.6 %** | 59.2 -> 61.9 | +4.6 % |
+| t612 2x | on | 75.4 -> 84.0 | **+11.4 %** | 61.1 -> 74.4 | +21.8 % |
+| 4x | off | 55.5 -> 64.5 | **+16.2 %** | 41.6 -> 51.7 | +24.3 % |
+| 4x | on | 52.7 -> 61.6 | **+16.9 %** | 38.8 -> 49.4 | +27.3 % |
+
+Which change gives what: the constants (1) are the GPU's 11-12 % at 4x and cost 1.6 % at t612 2x on;
+the profile (2) is the C threads' 4 % at t612 2x off; the cut (3) and the merged conversions (4) are
+the render thread's, 7 % and 4 % at t612 2x on, and 4-5 % at 4x between them.
+
 ## Where to resume
 
-Measured: the base (base2), change 1 in all four cells, change 2 at t612 2x off and on. Open, in
-this order:
+The lane's four changes are measured in every cell and its checks are done ("Result"). What a merge
+needs to know:
 
-1. **Change 3 on the phone** (p3; `DHD_ENCODE_CUT=0` against the default, `DHD_RSTAT=1`): t612 2x
-   on (where the render thread limits), then off, then 4x (no loss allowed there). Kept only with a
-   measured gain; else reverted with a commit of its own and listed as dropped.
-2. **Change 2 at 4x** (c1 against p2; the GPU limits, so little is expected).
-3. **The ranked cost table** on p2 (changes 1 and 2): simpleperf at the race start and mid-race with
-   the stage of every sample (`stages.py`), `DHD_RSTAT`, `DHD_GPU_TIMES`, `DHD_VU1_PROFILE`; t612 2x
-   off and on, 4x off and on.
-4. Before handing back: `python tools/check.py port` on the final tree; boot and race traces against
-   `main`'s; the release APK; on the phone main's release APK (`cdee456`) back with `adb install -r`,
-   the throttle restored, the app's dhd.ini equal to the first copy, the lock removed.
+- **The release must be built with a profile recorded with the new keys**: the shipped one is
+  refused now. This lane's is in its scratch folder (`pgo/dhd-195.profdata`: 62,266 functions,
+  recorded on `48de78a`; the C code has not changed since, changes 3 and 4 are Rust). Recipe:
+  `docs/BUILDING.md`.
+- The phone was left as found: main's release APK (`cdee456`) installed with `adb install -r`, the
+  throttle restored, the app's dhd.ini equal to the copy taken first (md5 41477ea7...), no run
+  files, the lock removed.
 
 Scratch (not committed, in the lane's scratch folder): the runner `run195.py` and `session.sh` (a
 plan of `put` / `thr` / `run` lines; takes the phone lock, cleans up a killed run first
 (`phone_clean.py`, at every session's start and end), restores the throttle and frees the lock on any
-exit), `scenes.py` and `rstat.py` (the tables here), `stages.py` (a simpleperf record's samples by
-stage), `build_apk.sh`, `build_gen.sh` (the profile-collecting APK: Gradle's signed output, which
-`build_apk.py`'s release check rightly refuses), `spv/mali.sh` (SPIR-V of every stage from a WGSL
-file, then malioc's cycles for the race's stages), `pgo_applies.py` and `pgo_hot.py` (what a build
-finds in a profile; never while a build runs in the same folder). APKs with their `libmain.debug.so`:
-base2 (`main` 959c5f4, built in a scratch worktree of it), c1 (the branch at `48de78a`, shipped
-profile), p2 (the branch, new profile), p3 (the branch with change 3, new profile); the Windows
-builds, state traces and pictures of base2, c1 and c3; the profile `pgo/dhd-195.profdata`.
+exit), `scenes.py` and `rstat.py` (the tables here), `stages.py` and `costtable.py` (a simpleperf
+record's samples by stage; the cost table), `offcpu.py` (where a thread sleeps), `build_apk.sh`,
+`build_gen.sh` (the profile-collecting APK: Gradle's signed output, which `build_apk.py`'s release
+check rightly refuses), `spv/mali.sh` (SPIR-V of every stage from a WGSL file, then malioc's cycles
+for the race's stages), `pgo_applies.py` and `pgo_hot.py` (what a build finds in a profile; never
+while a build runs in the same folder). APKs with their `libmain.debug.so`: base2 (`main` 959c5f4,
+built in a scratch worktree of it), c1 (the branch at `48de78a`, shipped profile), p2 (new profile),
+p5 (with change 3), p6 and p7 (with change 4; p7 is the last commit's); the Windows builds, state
+traces and pictures of base2, c1, c5 and c6.
 
 ## What is left
 
 Ranked by what the measurements say it is worth:
 
-1. **The render thread with Native VU on** (it limits there on the CPU-bound stand-in, and change 1
-   added 0.3-0.4 ms to it). Fewer constants binds, not the array again: (a) a draw whose pipeline is
-   specialised reads neither its flags, wrap modes nor alpha test from the block, and a non-mesh
-   draw never reads `mesh_offset`; left as the last block had them, such draws share it (252 / 299
-   copies a picture at the race start would become 168 / 168 at best, with every draw specialised,
-   without touching a shader; the vertex stage's two flag bits must stay). (b) `tex_size` alone is 108 / 99 more, but asking the
-   texture for its size instead costs the pixels (finding 174's bit 19 exists because of that), so
-   only with malioc saying it is free. (c) wgpu-core flushes every group after the one that was
-   set: the texture's group is bound again with each constants bind. Constants in the last group
-   would save that second bind but make every texture bind (379 a picture) rebind the constants, so
-   no order of the two is free; one group holding both would be one bind a draw.
-2. **Rust PGO for the renderer library** (the render thread is 11-14 ms of CPU a field at the race
-   start and no profile reaches it; the C threads got 4-6 % from theirs).
-3. **The GS thread's two loops** (`packed_strip` 24 % and `native_draw_strip` 21 % of its samples at
-   the race start: a GsVertex list written by the first and read by the second), and its palette
-   path (`load_clut`, `gs_palette`, `native_palette`: 11 %; the game alternates textures with
-   different CLUTs, and the one-entry memos of finding 148 miss then). The GS thread is the second
-   limit with Native VU off.
+1. **Native VU off, the default: the VU thread, then the GS thread.** They limit the CPU-bound
+   stand-in (busy 15.5 and 14.8 of a 16.2 ms field at the race start) and nothing of this lane but
+   the profile reached them. The cost table names the parts: the VU1 kernels and translated blocks,
+   the VIF unpack; on the GS thread `packed_strip` and `native_draw_strip` (a GsVertex list written
+   by the first and read by the second: one loop could do both) and the palette path (`load_clut`,
+   `gs_palette`, `native_palette`: the game alternates textures with different CLUTs, and the
+   one-entry memos of finding 148 miss then). Native VU on is the larger answer to both threads
+   (the route 68.0 -> 84.0 at t612 2x after this lane, 61.9 -> 74.4 at the race start), where the
+   GPU does not limit.
+2. **Fewer passes a picture.** A race picture is still 18 draw passes and 4 compute passes, most of
+   them 64 x 64 targets of the shadows and the haze drawn, converted and copied in turn. Each is
+   command buffers, a framebuffer and a kernel queue place; the submit's sleep came from their
+   number, and on a tile GPU each is a load and a store. Whether two phones' queues have the same
+   50 places is not known: the limit should be looked for again on the Redmi 9 (Mali has its own
+   job queues).
+3. **The constants binds** (change 1 added 0.3-0.4 ms to the render thread, which no longer limits
+   after changes 3 and 4): (a) a draw whose pipeline is specialised reads neither its flags, wrap
+   modes nor alpha test from the block, and a non-mesh draw never reads `mesh_offset`; left as the
+   last block had them, such draws share it (252 / 299 copies a picture at the race start would
+   become 168 at best, without touching a shader; the vertex stage's two flag bits must stay).
+   (b) `tex_size` alone is 108 / 99 more, but asking the texture for its size costs the pixels
+   (finding 174's bit 19 exists because of that), so only with malioc saying it is free. (c)
+   wgpu-core flushes every group after the one that was set: the texture's group is bound again
+   with each constants bind; one group holding both would be one bind a draw.
+4. **Rust PGO for the renderer library**: the render thread and its helper are 10-13 ms of CPU a
+   field at the race start and no profile reaches them (the C threads got 4-6 % from theirs).
+5. **4x and the Redmi 9 at 2x: the GPU.** After change 1 the Adreno's frame at 4x is where finding
+   183 left it (13.7 ms mid-race, 17.8 at the race start, the draw passes nearly all of it); finding
+   174's list is the next step there, and this lane's changes should be timed on the Redmi 9 itself
+   when it is attached (change 1 is the one aimed at it).
 
 ## Decisions
 
@@ -477,11 +525,22 @@ Ranked by what the measurements say it is worth:
   which paths run and how often, not how long they take, so the phone's speed does not matter; both
   Native VU settings are in it (2 : 1 for the default).
 - **The encoder is cut once, not into three**: the helper would need a second thread to gain from
-  two cuts, each cut is one more render pass (a store and a load of the target on a tile GPU), and
-  a phone with two big cores has two spare little ones at most.
-- **The cut's place is a share of the picture's draw commands (60 %), not of its time**: known
-  before recording starts, and the first part is the one that runs beside the rest of the
-  recording, so it may be the larger.
+  two cuts, and a phone with two big cores has two spare little ones at most.
+- **The cut is made only where a pass ends**, after the first form's timing: a cut inside the scene
+  pass is one more pass (a store and a load of the target on a tile GPU), and the scene pass is
+  not where the encoder's time goes.
+- **The cut's place is an estimate from the commands (draws, and 27 for a pass's begin), not a
+  measured time**: known before recording starts, the same on every run of the same pictures, and
+  the weight was chosen by timing three (5, 12, 27) on the phone. A wrong weight on another driver
+  costs balance, never the picture.
+- **The helper only finishes its part; the render thread submits both.** Submitting the first part
+  early from the helper (so the GPU starts on the scene while the rest is encoded) was written as
+  far as the arenas' incremental uploads and dropped before it was built: the two parts end at
+  the same time by design, so the first would be submitted a fraction of a millisecond before the
+  second, and the sleep it was meant to shorten went away with change 4.
+- **Change 4 merges only the conversions the renderer already ran together** (the ones prepared at
+  a pass boundary for the coming run of draws). A conversion that runs in the middle of a run of
+  draws keeps its own pass: merging it would move it before draws it must follow.
 
 ## Surprises
 
@@ -530,7 +589,8 @@ Ranked by what the measurements say it is worth:
    unmatched statics at 64.0.
 3. **The phone is a Snapdragon 888** (SM8350, Adreno 660), as `phone_throttle.py` says, not an 870.
 4. **Native VU on is slower than off at 4x** (base2: 52.7 against 55.5 fields/s over the route;
-   with change 1: 58.9 against 61.5): GPU-bound there, and its frame costs the GPU 1 ms more.
+   with every change: 61.6 against 64.5): GPU-bound there, and its frame costs the GPU 1 ms more.
+   At t612 2x it is 24 % faster than off after this lane (84.0 against 68.0; 17 % before).
 5. **The compositor does not draw the game's layer with the GPU on the Mi 11i.** wgpu-hal asks for
    no pre-rotation (`pre_transform(IDENTITY)`), which on some phones makes the system rotate every
    frame on the GPU; here the layer's composition type is DEVICE (the display hardware), and the
@@ -566,5 +626,17 @@ Ranked by what the measurements say it is worth:
 9. **A background job of the harness is killed at two hours.** A chain of phone plans longer than
    that would be killed mid-run (6); chains are kept under 100 minutes, and a `STOP` file ends one
    between two plans.
+10. **A picture can be too many command buffers for the phone's kernel.** The Adreno driver's queue
+   for a GPU context has 50 places on the Mi 11i, and a race-start picture (18 draw passes, 10
+   compute passes, copies, the scanout, the Z probe; wgpu makes two command buffers a pass) put the
+   submit to sleep waiting for room: 1.1 ms a picture before this lane, 3.1 with the encoder cut,
+   none with the conversions in four passes ("Change 3", "Change 4"). It does not show as CPU in
+   any profile and looks like "the GPU is behind" in the timeline; simpleperf's `--trace-offcpu`
+   names it. Finding 156 read the submit's time at 4x as the GPU being behind; part of it may have
+   been this (the field at the 4x race start was 3 ms longer than the GPU's frame, and is 1.5 now).
+11. **Finishing a picture is not proportional to its draws.** A race picture's scene pass has 85 %
+   of the draws and a third of the encoder's time on Direct3D 12, about 40 % on the phone's Vulkan;
+   the rest is the thirty short passes after it. The first form of change 3 cut by draws and gave
+   the helper the small part.
 
 ## Result
