@@ -33,8 +33,10 @@ extern const char *D_0026EFE8[];
    type 3, SETUP+0x10C == 3), with Mosh Pit, which no career races, last as in the game's own
    track lists (D_00296F60). Only the order is ours: the ids, limits and pick-only arena are the
    game's, so the server and older games see the same tracks (finding 190). The picker, Left /
-   Right on TRACK and the host's rotation (NEXT, RANDOM, the grid-lock switch) all walk it. */
-static const struct { int index; } tracks[] = {
+   Right on TRACK and the host's rotation (NEXT, RANDOM, the grid-lock switch) all walk it.
+   Bytes, not ints: as 32-bit words the list would be a copy of retail's .data, which
+   package_release.py's game-data check refuses in dhd.exe. */
+static const struct { unsigned char index; } tracks[] = {
     {0}, {6}, {24},      /* Mt. Midoule FR, MX, TD */
     {1}, {7}, {13},      /* Red Pass */
     {2}, {8}, {10},      /* Mt. Konawaki */
