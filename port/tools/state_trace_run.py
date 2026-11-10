@@ -70,9 +70,10 @@ OPTIONS_NAV = '0:triangle|cross,15:down,15:down,15:cross'
 
 
 def track_nav(index):
-    """RACE_NAV with the track selector moved down `index` unlocked rows first."""
+    """RACE_NAV with the track chooser moved right `index` unlocked tracks first (down does not move
+    it: until finding 193 every raceN scenario raced Mt. Midoule FR)."""
     prefix, suffix = RACE_NAV.split('18@4C7F38=1:cross', 1)
-    return prefix + '18@4C7F38=1+240:down,' * index + '18@4C7F38=1+240:cross' + suffix
+    return prefix + '18@4C7F38=1+240:right,' * index + '18@4C7F38=1+240:cross' + suffix
 
 
 # name -> (DHD_NAV script, extra env, default fields, what it covers).

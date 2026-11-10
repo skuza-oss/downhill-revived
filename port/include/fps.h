@@ -82,6 +82,8 @@ void port_clock_observe(void);
 /* DHD_FPS_TRACE race observer (port/tools/test_fps_race.py). */
 void port_fps_race_step(void);
 void port_fps_observe(void);
+/* DHD_SCENERY_TRACE race observer: helicopters, birds, attackers (port/tools/test_scenery_rate.py). */
+void port_scenery_observe(void);
 #ifdef __cplusplus
 }
 #endif

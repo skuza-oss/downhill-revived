@@ -62,6 +62,8 @@ after a version change before a live check.
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/test_scenery_rate.py` | the same race at 60, 144 and 240 (deterministic, headless): the helicopters', birds' and swooping attacker's speed in game time must match 60's (`DHD_SCENERY_TRACE`, finding 193); `--row N` / `--right N` pick the track (the chooser moved right N times; `--right` with every track unlocked) |
+| `port/tools/rate_audit.py` | words of EE memory that move once per update instead of once per field, from a 60 and a high-rate run (finding 090, FPS1); `--row`, `--skip`, `--samples` pick the race and its window |
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
 | `port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- --test native_spirv` | the native and the exact renderer's SPIR-V for every pipeline stage (raster.wgsl for every raster key too), made as wgpu-hal's Vulkan backend makes it, with no texture passed into a function (Mali's r54 compiler crashes on that, finding 153) and none of the forms LLVM 9 turns into `llvm.usub.sat`, `llvm.uadd.sat` or a funnel shift (PowerVR Rogue's driver 1.13 crashes on them, finding 170). `DHD_SPIRV_OUT=DIR` keeps the `.spv` files; with `DHD_MALIOC` every stage is also compiled by malioc for `DHD_MALIOC_CORE` (default `Mali-G57`); `DHD_NATIVE_WGSL=FILE` (`DHD_RASTER_WGSL=FILE`) compares another native.wgsl (raster.wgsl) |
@@ -84,8 +86,8 @@ Every tool that starts the game for a check takes `port/tools/game_lock.py`'s lo
 PC don't disturb each other's runs:
 
 - **Untimed** checks (nothing measured: captures, logic, online tests): `hidden_game.py` and so
-  `live_game.py`, `state_trace_run.py` and `rate_audit.py` (virtual clock, deterministic),
-  `online_race.py` (one place for its two games). Up to `DHD_GAME_SLOTS` of them run at once
+  `live_game.py`, `state_trace_run.py`, `rate_audit.py` and `test_scenery_rate.py` (virtual
+  clock, deterministic), `online_race.py` (one place for its two games). Up to `DHD_GAME_SLOTS` of them run at once
   (default 1: one game at a time).
 - **Timed** runs (fps, frame times, CPU or GPU time): `bench_race.py`, `stutter_race.py`,
   `sample_profile.py --run`, and `hidden_game.Game(..., timed=True)`. A timed run has the PC to
