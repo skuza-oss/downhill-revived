@@ -167,6 +167,150 @@ def add(patches):
          'diff < (port_delta_clock() ? obj->x224*port_step() : obj->x224)')
     edit('0016FC00','obj->x1F0->x10.z -= obj->x224;',
          'obj->x1F0->x10.z -= port_delta_clock() ? obj->x224*port_step() : obj->x224;')
+    # Scenery that flies itself (finding 193). These objects never read the clock: retail moved
+    # them by a per-field velocity, speed step or turn once per update, which is once per field.
+    # At 240 every one of them ran four times too fast; the climb and descent above were the
+    # only steps scaled before. Each step now covers this update's part of a field.
+    # The helicopters (E_HELI_L; manager 00172758, element 00172BD0): position along x50 by the
+    # speed xB8 (001737F0), the speed's rise and fall (00173560), the yaw xA8 (001733C0, and
+    # 00173E58 while hovering) and the bank xA0 (00173688, and 00174098 while hovering). Their
+    # "go on" coin flips (00173A18) draw once a field, as retail's.
+    edit('001737F0', 'Scale(&step, &obj->x50, obj->xB8);',
+         'Scale(&step, &obj->x50, port_delta_clock() ? obj->xB8*port_step() : obj->xB8);')
+    for expression in ('obj->xB8 += obj->x10->x87C;', 'obj->xB8 -= obj->x10->x880;'):
+        value = expression.split('=')[1].strip().rstrip(';')
+        edit('00173560', expression,
+             expression.replace(value, '(port_delta_clock() ? %s*port_step() : %s)' % (value, value)))
+    edit('001733C0', 'obj->xC->xA8 += turn;', 'obj->xC->xA8 += port_delta_clock() ? turn*port_step() : turn;')
+    edit('00173E58', 'o->xC->xA8+=result;', 'o->xC->xA8+=port_delta_clock() ? result*port_step() : result;')
+    edit('00173688', 'obj->xC->xA0+=obj->x70;',
+         'obj->xC->xA0+=port_delta_clock() ? obj->x70*port_step() : obj->x70;')
+    edit('00174098', 'obj->xC->xA0 += turn;', 'obj->xC->xA0 += port_delta_clock() ? turn*port_step() : turn;')
+    patches.setdefault('unsorted/00173A18.c', []).append(('re', (r'func_00222BD8\(0,1\)', 2),
+        '((!port_delta_clock() || port_whole_step()) && func_00222BD8(0,1))'))
+    # The birds and bats (flocks of "Bird Point Tool" / "Bat Point Tool" paths; 00143D20 ->
+    # 00143538 -> 00142508): each flying bird adds its forces to its local velocity x100
+    # (00142A28: drag, gravity, steering, the flight mode's lift and thrust) and its velocity x0
+    # to its position (00142D50), whose heading then turns a sixteenth of the way to the
+    # flight direction (an angle step of 0.0625 against 0.998: the same pair for any step). Its
+    # bank is the turn the direction took since the last update times the speed: a rate measured
+    # over one update, per field again when divided by the step.
+    edit('00142D50', 'turn=planar*16.0f;', 'turn=planar*(port_delta_clock() ? 16.0f/port_step() : 16.0f);')
+    for line in ('obj->x100[0]+=obj->x150[0]+obj->x140[0];', 'obj->x100[1]+=obj->x150[1]+row->x4;',
+                 'obj->x100[2]+=obj->x150[2]+obj->x140[2]+row->x8*D_0029DD48;'):
+        target, value = line.rstrip(';').split('+=')
+        edit('00142A28', line, '%s+=port_delta_clock() ? (%s)*port_step() : %s;' % (target, value, value))
+    edit('00142D50', 'ADD(&obj->xF0->x10,&obj->xF0->x10,&obj->x0);',
+         'if (port_delta_clock()) { Vec port_move; SCALE(&port_move,&obj->x0,port_step());'
+         ' ADD(&obj->xF0->x10,&obj->xF0->x10,&port_move); }\n'
+         ' else ADD(&obj->xF0->x10,&obj->xF0->x10,&obj->x0);\n'
+         ' float port_turn=port_delta_clock() ? port_blend(0.0625f) : 0.0625f;\n'
+         ' float port_keep=port_delta_clock() ? __builtin_sqrtf(1.0f-port_turn*port_turn) : 0.9980449676513672f;')
+    for line in ('SCALE(&savedX,&matrix[0],0.0625f); MADD(&obj->xF0->x40,&savedX,&obj->xF0->x40,0.9980449676513672f);',
+                 'SCALE(&savedX,&matrix[1],0.9980449676513672f); MADD(&obj->xF0->x50,&savedX,&obj->xF0->x50,0.0625f);',
+                 'SCALE(&savedZ,&matrix[2],0.0625f); MADD(&obj->xF0->x60,&savedZ,&obj->xF0->x60,0.9980449676513672f);'):
+        edit('00142D50', line, line.replace('0.0625f', 'port_turn').replace('0.9980449676513672f', 'port_keep'))
+    # The swooping attacker (manager 001918C0, element 00191FC0): its dive at the rider moves it
+    # by its speed once per update (00192268; its climb away, 001926E0, was scaled before), and
+    # its pass beside the rider lasts a random 30-60 of a counter that counted updates
+    # (00192460: the random draw and the count once a field, as retail's). A pass within 10
+    # units knocks the rider over (001928A0 -> 0012F110, an impulse): once a field, as retail's.
+    edit('00192268', 'v.y=t;', 'v.y=port_delta_clock() ? t*port_step() : t;')
+    edit('00192460', 'timer=o->timer++;',
+         'timer=o->timer; o->timer+=port_delta_clock() ? port_whole_step() : 1;')
+    edit('00192460', 'if(timer < func_00222BD8(30,60)) {',
+         'if((port_delta_clock() && !port_whole_step()) || timer < func_00222BD8(30,60)) {')
+    for unit, expression in (('00192268', 'if(func_00222330(&o->x8->pos,&o->x14->x792C->pos)<10.0f)'),
+                             ('00192460', 'if(func_00222330(o->body->pos,o->target->body->pos)<10.0f)')):
+        edit(unit, expression, expression.replace('if(', 'if((!port_delta_clock() || port_whole_step()) && ', 1))
+    # The same per-field steps in the track's other actors (finding 193's audit of every world
+    # object manager: 001638B0's and 0016C0C8's lists).
+    # Falling stalactites and icicles (001DC548 -> 001DCB50): gravity into the fall speed and the
+    # fall speed into the position, both once per update.
+    edit('001DCB50', 'obj->pos.z -= 0.03f;\n            VecAdd(&obj->x30->pos, &obj->x30->pos, &obj->pos);',
+         'obj->pos.z -= port_delta_clock() ? 0.03f*port_step() : 0.03f;\n'
+         '            if (port_delta_clock()) { Vec port_fall __attribute__((aligned(16))) = obj->pos;'
+         ' float port_s = port_step();'
+         ' port_fall.x *= port_s; port_fall.y *= port_s; port_fall.z *= port_s;'
+         ' VecAdd(&obj->x30->pos, &obj->x30->pos, &port_fall); }\n'
+         '            else VecAdd(&obj->x30->pos, &obj->x30->pos, &obj->pos);')
+    # Animals: the big hoofed one that charges (00129330 -> 0012A3E8) and the dogs, cats and
+    # horses (0011D198 -> 0011F900) slow down by a speed step an update; their mode and kick
+    # rolls (00129FC8, 0011F4C0) draw once a field, as the 1-in-101 rolls below do.
+    edit('0012A3E8', '"f"(obj->x14C - 0.0073333336f)',
+         '"f"(obj->x14C - (port_delta_clock() ? 0.0073333336f*port_step() : 0.0073333336f))')
+    edit('0011F900', '"f"(obj->x210-0.0073333336f)',
+         '"f"(obj->x210-(port_delta_clock() ? 0.0073333336f*port_step() : 0.0073333336f))')
+    patches.setdefault('unsorted/00129FC8.c', []).append(('re', (r'func_00222BD8\(0, 13\) == 1', 2),
+        '((!port_delta_clock() || port_whole_step()) && func_00222BD8(0, 13) == 1)'))
+    edit('0011F4C0', '<30.0f && func_00222BD8(0,60)==0)',
+         '<30.0f && (!port_delta_clock() || port_whole_step()) && func_00222BD8(0,60)==0)')
+    # Their ground probe's schedule (0012AD80: a ray every 6 fields, x19C) and the deer's 10-field
+    # footfall lock (0015B538, the sibling of 0012AD60's) count fields; the footfall's speed ramp
+    # (0012ACC8, 0015B460) moves once a footfall, not once an update: the step-aware blend helper
+    # gets the rate that gives retail's step per call.
+    edit('0012AD80', 'obj->x19C++;', 'obj->x19C+=port_delta_clock() ? port_whole_step() : 1;')
+    edit('0015B538', 'int count = obj->x1E4 - 1;',
+         'int count = port_delta_clock() ? port_count_down(obj->x1E4) : obj->x1E4 - 1;')
+    edit('0012ACC8', 'func_00235EA8(obj->x154, obj->x158, 0.08f, 0.1f)',
+         'func_00235EA8(obj->x154, obj->x158, port_event_rate(0.08f), port_event_least(0.1f))')
+    edit('0015B460', 'func_00235EA8(value,goal,0.2f,0.1f)',
+         'func_00235EA8(value,goal,port_event_rate(0.2f),port_event_least(0.1f))')
+    # Ground tilt: animals, deer, dogs, peds and traffic turn to the ground's slope by at most a
+    # fixed angle an update (a quaternion's w clamp): that angle a field.
+    for unit, old in (('0012B448', 'if (q.w < 0.9999619f) {\n        q.w = 0.9999619f;'),
+                      ('0015BC20', 'if (q.w < 0.9999619f) {\n        q.w = 0.9999619f;'),
+                      ('00127458', 'if (q.w < 0.9999619f) {\n        q.w = 0.9999619f;'),
+                      ('001812F8', 'if (q.w < 0.99999f) {\n        q.w = 0.99999f;'),
+                      ('00121530', 'if (v.f[3] < 0.9999619126319885f) {\n  v.f[3] = 0.9999619126319885f;')):
+        limit = re.search(r'< (0\.\d+f)', old)[1]
+        edit(unit, old, old.replace(limit, 'port_turn_limit(%s)' % limit))
+    # Path walkers (00144AC0 -> 00145998): falling to the ground as 0016FC00's above.
+    edit('00145998', 'amount=F(obj,0x1A4)+0.02f;otherBody=P(obj,8);F(obj,0x1A4)=amount;F(otherBody,0x18)-=amount;',
+         'amount=F(obj,0x1A4)+(port_delta_clock() ? 0.02f*port_step() : 0.02f);otherBody=P(obj,8);'
+         'F(obj,0x1A4)=amount;F(otherBody,0x18)-=port_delta_clock() ? amount*port_step() : amount;')
+    # Peds and spectators (00127738): the settle onto the ground (00123F60) by a per-field speed,
+    # and the push counter (001246D0, x20, read as > 60 fields by 00123350 and 00125178).
+    edit('00123F60', '        pos.z -= obj->x30;\n    }\ndone:',
+         '        pos.z -= port_delta_clock() ? obj->x30*port_step() : obj->x30;\n    }\ndone:')
+    edit('001246D0', 'obj->x20++;', 'obj->x20+=port_delta_clock() ? port_whole_step() : 1;')
+    # Golf carts (0016CC98): the brake at the end of the cart's path (0016F710, the speed cap
+    # 0.1 below the speed each update), the wheels' spin (00170160) and the golfers' swing pause
+    # (0016D8C0, 0016DAF0: 16 fields). Traffic (0017F8B8): the wheels' spin (00181390).
+    edit('0016F710', 'slack = body->x58 - 0.1f;',
+         'slack = body->x58 - (port_delta_clock() ? 0.1f*port_step() : 0.1f);')
+    edit('00170160', 'slot->x10 -= self->x210 * 0.713998318f;',
+         'slot->x10 -= self->x210 * 0.713998318f * (port_delta_clock() ? port_step() : 1.0f);')
+    edit('00181390', 'part[0]-=angle*obj->x1A0*2.7272727f;',
+         'part[0]-=angle*obj->x1A0*2.7272727f*(port_delta_clock() ? port_step() : 1.0f);')
+    edit('0016D8C0', 'obj->x6B8++;', 'obj->x6B8+=port_delta_clock() ? port_whole_step() : 1;')
+    edit('0016DAF0', 'obj->x6B8++;', 'obj->x6B8+=port_delta_clock() ? port_whole_step() : 1;')
+    # The knock-down of an animal or ped (00165560's module, reached from 0012A9B8, 0015B100,
+    # 00120838 and 00122AA0; 00165B90's x1A8 is above): its settle timeout (00165850 x1AC, read by
+    # 001656A0 against 120-1120 fields), contact age (00165E68 x1B4, 6 or 2 fields) and the end
+    # wait (001657F8 x198, 30 fields) counted updates.
+    edit('00165850', 'o->x1ac++;', 'o->x1ac+=port_delta_clock() ? port_whole_step() : 1;')
+    edit('00165E68', 'obj->x1B4++;', 'obj->x1B4+=port_delta_clock() ? port_whole_step() : 1;')
+    edit('001657F8', 'int count = obj->x198 + 1;',
+         'int count = obj->x198 + (port_delta_clock() ? port_whole_step() : 1);')
+    # The crowd's cheers (00127738 -> 001BEE28) roll once per update: once a field, the random
+    # spectator they come from too.
+    for roll in ('func_00222B08(0,timeout)==30', 'func_00222B08(0,240)==30'):
+        edit('001BEE28', roll, '((!port_delta_clock() || port_whole_step()) && %s)' % roll)
+    edit('00127738', 'func_00222B08(0,count)*4',
+         '((!port_delta_clock() || port_whole_step()) ? func_00222B08(0,count) : 0)*4')
+    # The player's camera (00148F60): its height while the camera button is held (0014CC38), the
+    # tilt's steps in the other camera modes (00149988), the stunt camera's offsets (0014A580) and
+    # its leash after a wall push (0014A9A0: a length step that grows each update).
+    for step in ('s->x2DC + 0.03f', 's->x2DC - 0.03f'):
+        edit('00148F60', step, step.replace('0.03f', '(port_delta_clock() ? 0.03f*port_step() : 0.03f)'))
+    patches['unsorted/00148F60.cpp'].append(('re', (r'v = \(v ([-+]) step\)', 2),
+        r'v = (v \1 (port_delta_clock() ? step*port_step() : step))'))
+    edit('00148F60', 'obj->xA8-=step;', 'obj->xA8-=port_delta_clock() ? step*port_step() : step;')
+    edit('00148F60', 'obj->xA4+=step2;', 'obj->xA4+=port_delta_clock() ? step2*port_step() : step2;')
+    edit('00148F60', 'limit=obj->x30c+obj->x310;',
+         'limit=obj->x30c+(port_delta_clock() ? obj->x310*port_step() : obj->x310);')
+    edit('00148F60', 'len=obj->x310+0.002f;', 'len=obj->x310+(port_delta_clock() ? 0.002f*port_step() : 0.002f);')
     edit('00142940','w = length * 0.9992f + D_0029DD3C * 1.2f - obj->pos[2] * -0.008f / length;',
          'w = port_delta_clock() ? length*port_decay(0.9992f)+(D_0029DD3C*1.2f-obj->pos[2]*-0.008f/length)*(port_particle_sum(0.9992f)/0.9992f) : length * 0.9992f + D_0029DD3C * 1.2f - obj->pos[2] * -0.008f / length;')
     edit('001B0410','obj->x20++;','obj->x20+=port_delta_clock() ? port_whole_step() : 1;')

@@ -278,7 +278,17 @@ int port_count_down(int value) { int w = port_whole_step(); return value > 0 && 
    update with no whole field must not count it again.) */
 int port_count_reached(int value, int mark) { return value >= mark && value - port_whole_step() < mark; }
 float port_decay(float f) { return port_delta_clock() ? powf(f, port_step()) : f; }
-float port_blend(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,(wall_mode || grid ? step_fields : 60.0/port_fps()))) : r; }
+static double blend_exponent(void) { return wall_mode || grid ? step_fields : 60.0/port_fps(); }
+float port_blend(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,blend_exponent())) : r; }
+/* The blend helpers func_00235EA8/func_00235F38 take a rate and a least step per field and apply
+   this update's part (patches_fps.py). A caller that runs once per event (a footfall), not once per
+   update, passes these instead: the helper then moves by retail's rate and least step per call
+   (finding 193). */
+float port_event_rate(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,1.0/blend_exponent())) : r; }
+float port_event_least(float m) { return port_delta_clock() ? m/port_step() : m; }
+/* A turn limited to an angle a field, given as a unit quaternion's w at the limit (the cosine of
+   half that angle): the limit for this update's part of the field (finding 193). */
+float port_turn_limit(float w) { return port_delta_clock() && w > -1 && w < 1 ? (float)cos(acos((double)w)*port_step()) : w; }
 float port_particle_sum(float q) {
     /* Evaluate the geometric sum in double: float cancellation near q=1
        otherwise makes gently damped particles move systematically too far. */

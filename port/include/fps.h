@@ -22,6 +22,9 @@ float port_step_seconds(void);  /* the delta-time clock's exact 1/func_00238F30(
 float port_step_rate(void);     /* the delta-time clock's exact (float)func_00238F30() */
 float port_decay(float factor);
 float port_blend(float rate);
+float port_event_rate(float rate);   /* a blend helper's rate for a once-per-event caller */
+float port_event_least(float least); /* ... and its least step */
+float port_turn_limit(float w);      /* a quaternion's w limit for a turn of so much a field */
 float port_particle_sum(float factor);
 void port_particle_rotation(float *cosine,float *sine);
 int port_particle_dead(float age,float life_per_field);
