@@ -102,6 +102,16 @@ Out of scope: gameplay, the desktop builds' speed (kept equal or better), anythi
   route +4.0 %; the submit's sleep is gone.
 - [x] 2026-11-10: `python tools/check.py port` passes on `4dd6ee9` (every step), and the renderer
   crate's tests (`rustgs.py test`).
+- [x] 2026-11-10: changes 3 and 4 in the other cells (before, after in one batch each): nothing at
+  t612 2x off, +4.2 % and +4.8 % at 4x off and on with the GPU's frame unchanged.
+- [x] 2026-11-10: the ranked cost table on the last build: simpleperf at the race start and
+  mid-race at t612 2x, off and on; the GPU's frame by pass kind at 4x.
+- [x] 2026-11-10: the release APK builds from the last code commit (`4dd6ee9`, the new profile) and
+  passes `build_apk.py --check`.
+- [x] 2026-11-10 17:15: the phone as it was found: main's release APK (`cdee456`) back on with `adb
+  install -r` (the installed file's sha256 is the restore file's), nothing throttled (cpus 0-7
+  online, no saved state), the app's dhd.ini byte-identical to the copy taken first (md5
+  41477ea7...), no run files, the phone lock removed.
 
 ## Method
 
@@ -438,6 +448,87 @@ Which change gives what: the constants (1) are the GPU's 11-12 % at 4x and cost 
 the profile (2) is the C threads' 4 % at t612 2x off; the cut (3) and the merged conversions (4) are
 the render thread's, 7 % and 4 % at t612 2x on, and 4-5 % at 4x between them.
 
+## The ranked cost table (the branch with every change)
+
+simpleperf at 1000 Hz for 6 s at the race start and mid-race on the last build (p6), t612 2x, Native
+VU off and on; every sample put in a stage by the innermost function, inlined ones included, that
+names one (finding 156's method, `stages.py`); a stage's ms a field is its share of its thread's
+samples times that thread's work in the same scene of the timing runs. The game thread's spin on
+the graphics queue is left out of its work. The render helper's CPU is not in the timeline: it is
+taken from its samples against the render thread's.
+
+The scenes these tables are of (fields/s; work in ms a field; the thread that limits in bold):
+
+| scene | Native VU | fields/s | field | game | VU | GS | render | render helper | GPU a frame |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| race start | off | 61.9 | 16.16 | 10.88 | **13.79** | 14.16 | 10.13 | 2.77 | 6.97 |
+| race start | on | 74.4 | 13.44 | **10.51** | **10.64** | 9.54 | 10.57 | 3.60 | 7.86 |
+| mid-race | off | 76.9 | 13.01 | 9.39 | **11.12** | 11.24 | 8.53 | 1.69 | 5.59 |
+| mid-race | on | 92.3 | 10.84 | **8.89** | **8.74** | 7.74 | 8.94 | 2.30 | 6.64 |
+
+(With Native VU off the VU thread is busy 15.5 of 16.2 ms at the race start, the GS thread 14.8; on,
+the game and VU threads 12.2 each of 13.4 and the render thread 9.7.)
+
+The costs, ms a field, largest first:
+
+| thread | what | race start, off | race start, on | mid-race, off | mid-race, on | most of it in |
+|---|---|---:|---:|---:|---:|---|
+| VU | VU1 native kernels | 7.63 | 2.47 | 6.52 | 3.04 | `native_geometry_loop_impl` 16 %, `operand4` 16 %, the SIMD multiplies 9 % |
+| GS | draw recording | 6.15 | 2.80 | 4.71 | 2.29 | off: `native_draw_strip` 46 %, `native_set` 19 %; on: `native_mesh` 44 % |
+| GS | GS packet decode and registers | 4.69 | 1.66 | 4.03 | 1.76 | `packed_strip` 71 %, `gs_feed` 10 % |
+| game | the game's own code (wasm2c), other than below | 3.97 | 3.81 | 3.49 | 3.22 | spread: no function above 2 %; the memory access helpers 8 % |
+| game | VU0 (macro and micro mode) | 3.11 | 2.95 | 2.64 | 2.52 | `run_fast_program` 10 %, its loads 17 %, `f32x4_eq` 7 % |
+| render | the Vulkan driver (Adreno) | 3.00 | 2.97 | 2.34 | 2.32 | no symbols |
+| VU | Native VU: batches translated for the GPU | | 2.79 | | 1.74 | `mesh_build` 92 % |
+| VU | VU1 translated blocks | 2.36 | 1.71 | 1.46 | 1.02 | `commit_upper_lazy_proven` 12 %, `aot_find` 9 %, `read_fields` 8 % |
+| GS | textures, CLUT, palettes | 1.89 | 2.10 | 1.65 | 1.62 | `load_clut` 34 %, `gs_palette` 29 %, `native_mix` 15 % |
+| render | wgpu-core (validation, tracking, replay) | 1.90 | 2.05 | 1.81 | 1.99 | `encode_render_pass` 9 %, the trackers 7 %, `Queue::submit` 7 % |
+| VU | VIF unpack and dispatch | 1.78 | 2.01 | 1.47 | 1.65 | `stream_wl1` 27 %, `stream_form` 20 %, `vif_feed` 14 % |
+| game | the scene walk and its packets | 1.77 | 1.83 | 1.68 | 1.64 | `func_0021B8A8` 33 %, `func_002628A0` 12 % |
+| render helper | the Vulkan driver (Adreno) | 1.13 | 1.54 | 0.67 | 1.02 | no symbols |
+| render helper | wgpu-core | 1.16 | 1.40 | 0.72 | 0.96 | `encode_render_pass` 23 %, memory init tracking 9 % |
+| GS | GS VRAM transfers | 0.58 | 1.42 | 0.34 | 1.10 | `write_ct32` 52 %, `gs_mark_pages` 18 %, `native_claim` 16 % |
+| render | memcpy, memset | 1.25 | 1.35 | 0.99 | 1.11 | `memcpy` 88 % (a race picture's vertices and indices are 2.3 MB) |
+| render | kernel | 1.13 | 1.08 | 1.03 | 0.90 | spin unlocks 13 %, the GPU driver's queue 5 % |
+| render | recording the picture (`dhd_render`) | 0.82 | 0.94 | 0.67 | 0.82 | `Native::render` 44 % |
+| render | the allocator | 0.83 | 0.92 | 0.66 | 0.68 | `je_free` 28 %, `je_calloc` 15 % |
+| GS | memcpy, memset | 0.16 | 0.91 | 0.14 | 0.65 | `memcpy` 77-88 % |
+| VU | VU1 dispatch and interpreter | 0.68 | 0.38 | 0.55 | 0.32 | `run` 75 % |
+| VU | memcpy, memset | 0.66 | 0.46 | 0.52 | 0.44 | |
+| game | wasm memory translation | 0.41 | 0.39 | 0.39 | 0.44 | `address` 57 % |
+
+Everything else is under 0.5 ms in every column (kernel time of the game, VU and GS threads, the
+sound mixer at 0.26 with sound off in these runs, wgpu-hal, the Android side of the present).
+
+Read:
+
+- **Off, the three largest are the VU and GS threads' loops over the scene's vertices**: the VU1
+  kernels (7.6 ms), recording the draws (6.2) and decoding the GS packets (4.7): 18.5 of the 28 ms
+  the two threads work at the race start, and they are the two that limit. One vertex goes through
+  `native_geometry_loop_impl`, then `packed_strip`, then `native_draw_strip` and `native_set`.
+- **On, those three are 6.9 ms and `mesh_build` is 2.8**: the 9 ms saved are why Native VU on is
+  12.5 fields/s faster at the race start. What limits then is the game thread (its own code 3.8,
+  VU0 3.0, the scene walk 1.8) and the VU thread (the kernels that stay 2.5, the VIF unpack 2.0).
+- **The render thread and its helper are 12.9 / 14.2 ms of CPU a field at the race start, a third
+  of it the driver**, the rest wgpu-core, the uploads and the allocator: no profile reaches any of
+  it. After changes 3 and 4 it limits nowhere at 2x.
+- **The palette path is 1.6 to 2.1 ms on the GS thread in every column** (`load_clut`,
+  `gs_palette`): the one cost of that thread Native VU does not lower.
+
+At 4x (t612 nominal) the GPU limits; its frame by pass kind (`DHD_GPU_TIMES`, the last build; ms a
+frame, the number of passes in brackets), and the threads' work for scale:
+
+| Native VU | scene | fields/s | GPU a frame | draw passes | conversions | scanout | present | game / VU / GS / render work |
+|---|---|---:|---:|---|---|---:|---:|---|
+| off | race start | 51.1 | 17.05 | 14.95 (16.9) | 0.13 (3.4) | 1.09 | 0.87 | 10.2 / 13.1 / 13.5 / 10.5 |
+| off | mid-race | 67.0 | 13.36 | 11.24 (12.2) | 0.16 (4.0) | 1.09 | 0.87 | 8.2 / 11.0 / 9.4 / 8.8 |
+| on | race start | 48.8 | 17.89 | 15.78 (16.9) | 0.13 (3.4) | 1.09 | 0.88 | 9.8 / 9.6 / 10.0 / 11.5 |
+| on | mid-race | 62.9 | 14.39 | 12.26 (12.2) | 0.16 (4.0) | 1.09 | 0.87 | 7.9 / 8.8 / 6.8 / 9.7 |
+
+84 to 88 % of the GPU's frame is the draw passes (the scene's pixels: finding 174's subject), 6 to
+8 % the scanout, 5 to 7 % the present; the conversions are nothing. The mesh draws of Native VU cost it 0.8 to
+1.0 ms more a frame, which is why on is slower than off where the GPU limits.
+
 ## Where to resume
 
 The lane's four changes are measured in every cell and its checks are done ("Result"). What a merge
@@ -640,3 +731,43 @@ Ranked by what the measurements say it is worth:
    the helper the small part.
 
 ## Result
+
+Not merged yet (the lead's step: Status, `docs/STATE-LOG.md`). What the branch holds, against `main`
+959c5f4, measured on the Mi 11i (finding 156's route, fields/s over the route and at the race start):
+
+| stand-in | Native VU | the route | | the race start | |
+|---|---|---|---:|---|---:|
+| t612 2x (the CPU limits) | off | 64.4 -> 68.0 | +5.6 % | 59.2 -> 61.9 | +4.6 % |
+| t612 2x | on | 75.4 -> 84.0 | +11.4 % | 61.1 -> 74.4 | +21.8 % |
+| 4x (the GPU limits) | off | 55.5 -> 64.5 | +16.2 % | 41.6 -> 51.7 | +24.3 % |
+| 4x | on | 52.7 -> 61.6 | +16.9 % | 38.8 -> 49.4 | +27.3 % |
+
+Four changes, each timed alone against the build before it:
+
+1. **The draw constants a uniform block again** (`140a7d2`; undoes finding 172's step): +10.9 % and
+   +11.7 % at 4x (off, on), +0.3 % at t612 2x off, -1.6 % at t612 2x on.
+2. **The PGO profile keyed by file name** (`3ec3717`, `b3d0959`; a profile recorded with the new
+   keys): +4.2 % at t612 2x off, nothing on, nothing at 4x.
+3. **A large picture's encoder cut at a pass boundary, its first part finished on a helper
+   thread** (`9e87e9d`, `bf60d5e`): +7.4 % at t612 2x on.
+4. **Conversions that run back to back in one compute pass** (`4dd6ee9`): +4.0 % at t612 2x on,
+   +17.9 % at its race start. 3 and 4 together: +10.7 % at t612 2x on, +0.3 % off, +4.2 % and
+   +4.8 % at 4x.
+
+Also: `phone_throttle.py --restore` under a thermal cap (`147ae46`); the PGO recipe in
+`docs/BUILDING.md`; `DHD_ENCODE_CUT` in `docs/TESTING.md`.
+
+Acceptance: every change's boot (600 fields) and race (5000) state traces equal `main`'s in every
+row; the picture route's eleven fields are identical to `main`'s at 2x and 4x, Native VU off and on,
+on Direct3D 12 and at 2x on Vulkan (checked for changes 1, 3 and 4 each; change 2 changes how the
+Android build's C is optimised, not its source, and the traces are the Windows build's, which takes
+no profile: as for every profile before it, the Android build's state was not traced);
+`python tools/check.py port` passes on `4dd6ee9`, and the renderer crate's tests; the release APK
+builds from the last commit with the new profile and passes `build_apk.py --check`.
+
+Not reached: 60 fields/s at the race start with Native VU off on the CPU-bound stand-in is 61.9 (it
+was 59.2), so there is no margin; the Redmi 9 itself was not measured. Tried and dropped: the cut
+inside the scene pass (-4.9 % at the race start; replaced), the first part submitted early by the
+helper (not built: "Decisions"), a rewrite of the gather's division in the pixel stage (no cycle
+gained in malioc), pre-rotating the swapchain (the compositor does not use the GPU for the layer:
+"Surprises", 5). What is left: "What is left".
