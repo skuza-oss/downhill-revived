@@ -379,14 +379,25 @@ def emit_block(prefix, i, block, unit, lazy=(), words=None):
     """C for one straight-line block: the interpreter's steps for each pair with the words as
     constants (pair_stalls only on VU1, as in the interpreter). Pairs whose offset is in lazy
     commit their MAC update lazily (commit_upper_lazy); words names the block's word array when
-    another variant of the same block already has one."""
+    another variant of the same block already has one.
+
+    A LOI immediate (the lower word of a pair whose upper word has the I bit) is read from that
+    array, not written in as a constant: the array holds what micro memory holds whenever the
+    block runs (aot_find compares them), and on a 64-bit host it is filled from guest RAM at the
+    first VU1 program, after widescreen has changed the sprite widths there (finding 192)."""
     hint = 'VU1(u); ' if unit else 'VU0(u); '
     fused = len(block) > 1 and ends_block(*block[-2])
     fused_end = fused and bool(block[-2][1] & (1 << 30))
     name = f'{prefix}_block_{i}'
+    own_words = words is None
+    if own_words:
+        words = f'{prefix}_words_{i}'
     signature = (f'static inline __attribute__((always_inline)) int {name}_impl(Vu *u, unsigned pc, int *incoming_bad, int sticky_complete) {{'
                  if lazy else f'static int {name}(Vu *u, unsigned pc, int *incoming_bad) {{')
-    lines = [signature,
+    lines = []
+    if own_words:  # before the function: its LOI immediates are read from it
+        lines += [f'AOT_WORDS({words}, {2 * len(block)}, ' + ','.join(f'0x{w:08X}u' for pair in block for w in pair) + ')']
+    lines += [signature,
              '    int failure = *incoming_bad; int *bad = &failure;',
              '    Upper up; int next = -1, transfer = -1;', f'    u->unit = {unit};']
     finite, ready = FiniteOperands(), ReadyOperands()
@@ -398,8 +409,7 @@ def emit_block(prefix, i, block, unit, lazy=(), words=None):
         lines += [f'    {hint}apply_flags(u); update_q(u);',
                   f'    {hint}if (upper_proven(u, 0x{hi:08X}u, &up, {proof}) < 0) {{ *incoming_bad = 1; return -1; }}']
         if hi >> 31:
-            lines += [f'    const uint32_t immediate = 0x{lo:08X}u;',
-                      '    memcpy(&u->c->i, &immediate, 4);']
+            lines += [f'    memcpy(&u->c->i, &{words}[{2 * offset}], 4);  /* LOI 0x{lo:08X} in the retail code */']
         else:
             lines += [f'    if (!(up.flags == 2 && {lo >> 25} == 0x11)) {{',
                       f'        {hint}next = lower(u, 0x{lo:08X}u, pc + {offset}, bad);', '    }']
@@ -416,9 +426,6 @@ def emit_block(prefix, i, block, unit, lazy=(), words=None):
         lines += [f'static int {name}(Vu *u, unsigned pc, int *bad) {{',
                   f'    if ((u->status & 0xc0) == 0xc0) return {name}_impl(u, pc, bad, 1);',
                   f'    return {name}_impl(u, pc, bad, 0);', '}']
-    if words is None:
-        words = f'{prefix}_words_{i}'
-        lines += [f'AOT_WORDS({words}, {2 * len(block)}, ' + ','.join(f'0x{w:08X}u' for pair in block for w in pair) + ')']
     lines += [f'static const AotBlock {prefix}_info_{i} = {{{len(block)}, {2 if fused_end else 1 if fused else 0}, '
               f'{words}, {prefix}_block_{i}, {1 if lazy else 0}}};']
     return lines
