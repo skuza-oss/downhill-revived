@@ -218,6 +218,10 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
         n->display_width = r.display_width; n->display_height = r.display_height;
         shown = r.shown != 0;
     }
+    /* Native VU (finding 194): a GPU that can't draw the translated meshes (the renderer logged why)
+       sends every batch back to the VU from its next run, for the rest of the session */
+    if (__atomic_load_n(&gs_mesh_mode, __ATOMIC_RELAXED) && !dhdr_native_meshes())
+        __atomic_store_n(&gs_mesh_mode, 0, __ATOMIC_RELAXED);
     native_note_flat(n, f);
     double encoded = spikes ? host_wall_seconds() : 0;
     native_rstat_add(RSTAT_DRAW, rs);

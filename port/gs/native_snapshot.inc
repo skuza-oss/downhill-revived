@@ -49,7 +49,9 @@ _Static_assert(offsetof(DhdrNativeConstants, target) == offsetof(NativeConstants
                offsetof(DhdrNativeConstants, tex_offset) == offsetof(NativeConstants, tex_offset) &&
                offsetof(DhdrNativeConstants, tex_size) == offsetof(NativeConstants, tex_size) &&
                offsetof(DhdrNativeConstants, wrap) == offsetof(NativeConstants, wrap) &&
-               offsetof(DhdrNativeConstants, region) == offsetof(NativeConstants, region), "DhdrNativeConstants members");
+               offsetof(DhdrNativeConstants, region) == offsetof(NativeConstants, region) &&
+               offsetof(DhdrNativeConstants, mesh_offset) == offsetof(NativeConstants, mesh_offset),
+               "DhdrNativeConstants members");
 _Static_assert(sizeof(DhdrConvertConstants) == sizeof(NativeConvertConstants), "DhdrConvertConstants");
 _Static_assert(offsetof(DhdrConvertConstants, tex) == offsetof(NativeConvertConstants, tex) &&
                offsetof(DhdrConvertConstants, size) == offsetof(NativeConvertConstants, size) &&

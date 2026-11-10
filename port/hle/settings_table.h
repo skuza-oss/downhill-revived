@@ -25,6 +25,7 @@ static const SettingChoice setting_choices_font[] = {{"original", "Original"}, {
 static const SettingChoice setting_choices_shadows[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_lens_flare[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_particles[] = {{"0", "OFF"}, {"1", "ON"}};
+static const SettingChoice setting_choices_native_vu[] = {{"off", "OFF"}, {"on", "ON"}};
 static const SettingChoice setting_choices_fps[] = {{"60", "60 fps"}, {"120", "120 fps"}, {"144", "144 fps"}, {"165", "165 fps"}, {"240", "240 fps"}, {"monitor", "Monitor"}};
 static const SettingChoice setting_choices_vsync[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_perf_counter[] = {{"0", "OFF"}, {"1", "ON"}};
@@ -64,6 +65,7 @@ static const SettingInfo setting_table[] = {
     {"shadows", "DHD_SHADOWS", "1", setting_choices_shadows, 2},
     {"lens_flare", "DHD_LENS_FLARE", "1", setting_choices_lens_flare, 2},
     {"particles", "DHD_PARTICLES", "1", setting_choices_particles, 2},
+    {"native_vu", "DHD_NATIVE_VU1", "off", setting_choices_native_vu, 2},
     {"fps", "DHD_FPS", "60", setting_choices_fps, 6},
     {"vsync", "DHD_VSYNC", "0", setting_choices_vsync, 2},
     {"perf_counter", "DHD_PERF_COUNTER", "0", setting_choices_perf_counter, 2},

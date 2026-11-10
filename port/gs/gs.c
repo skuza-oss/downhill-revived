@@ -2,6 +2,7 @@
    Behaviour reference: PCSX2 GSState.cpp and GSClut.cpp (GPL-3.0+).
    Each path keeps its tag across DMA boundaries, including partial qwords. */
 #include "gs.h"
+#include "gs_mesh.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -731,6 +732,79 @@ void gs_feed(Gs *g, unsigned path, const uint32_t *words, size_t count)
             p->have = 0; gif_qword(g, path, p);
         }
     }
+}
+
+int gs_mesh_mode;
+void (*gs_mesh_hook)(Gs *gs, const uint32_t *words, size_t count);
+unsigned gs_vu_shadow;
+int gs_mesh_setting = -1;
+
+/* gs_mesh.h: a word of [a, a + n) without case */
+static int mesh_word(const char *a, size_t n, const char *word)
+{
+    size_t i = 0;
+    for (; i < n && word[i]; i++) {
+        char c = a[i] >= 'A' && a[i] <= 'Z' ? (char)(a[i] - 'A' + 'a') : a[i];
+        char w = word[i] >= 'A' && word[i] <= 'Z' ? (char)(word[i] - 'A' + 'a') : word[i];
+        if (c != w) return 0;
+    }
+    return i == n && !word[i];
+}
+
+unsigned gs_mesh_parse(const char *s)
+{
+    static const char *const names[GS_MESH_LOOPS] = {GS_MESH_LOOP_NAMES};
+    static const char *const on[] = {"on", "1", "true", "yes"};
+    _Static_assert(sizeof names / sizeof *names == GS_MESH_LOOPS, "GS_MESH_LOOP_NAMES");
+    if (!s) return 0;
+    while (*s == ' ' || *s == '\t') s++;
+    size_t list = strcspn(s, ":");
+    size_t end = list;
+    while (end && (s[end - 1] == ' ' || s[end - 1] == '\t')) end--;
+    for (unsigned i = 0; i < sizeof on / sizeof *on; i++)
+        if (mesh_word(s, end, on[i])) return GS_MESH_ALL;
+    unsigned loops = 0;
+    for (const char *t = s; t < s + list;) {
+        size_t len = strcspn(t, ",:");
+        if (mesh_word(t, len, "prelit")) loops |= GS_MESH_PRELIT;
+        if (mesh_word(t, len, "lit")) loops |= GS_MESH_LIT;
+        if (mesh_word(t, len, "shadow")) loops |= GS_MESH_SHADOW_LOOPS;
+        if (mesh_word(t, len, "all")) loops |= GS_MESH_ALL;
+        for (unsigned p = 0; p < GS_MESH_LOOPS; p++)
+            if (mesh_word(t, len, names[p])) loops |= 1u << p;
+        if (!len) break;
+        t += len + (t[len] == ',');
+    }
+    if (!loops) return 0;
+    const char *flags = s + list;
+    if (strstr(flags, ":skip")) loops |= GS_MESH_FORCE_SKIP;
+    else if (strstr(flags, ":shadow")) loops |= GS_MESH_FORCE_SHADOW;
+    if (strstr(flags, ":gpuclip")) loops |= GS_MESH_GPU_CLIP;
+    return loops;
+}
+
+void gs_mesh_setting_read(void)
+{
+    __atomic_store_n(&gs_mesh_setting, (int)gs_mesh_parse(getenv("DHD_NATIVE_VU1")), __ATOMIC_RELEASE);
+}
+
+void gs_mesh(Gs *g, const uint32_t *words, size_t count)
+{
+    const GsMeshHeader *h = (const GsMeshHeader *)words;
+    if (count * 4 < sizeof *h || h->magic != GS_MESH_MAGIC) return;
+    g->source_path = 1;
+    if (!(h->flags & GS_MESH_SHADOW)) {
+        /* what the batch's packet writes before its vertices: the A+D tag's registers (packed()'s
+           A+D, gs_write for these), then the strip tag's PRIM (gif_qword with PRE) */
+        if (h->flags & GS_MESH_TEXTURE) {
+            for (unsigned i = 0; i < 4; i++) gs_write(g, h->ad[i][2] & 127, h->ad[i][0] | (uint64_t)h->ad[i][1] << 32);
+            g->packets[0]++;
+        }
+        gs_write(g, GS_PRIM, h->prim);
+        g->packets[0]++;
+    }
+    g->vram_epoch++;
+    if (gs_mesh_hook) gs_mesh_hook(g, words, count);
 }
 
 int gs_xgkick(Gs *g, const uint32_t *memory, unsigned qword)

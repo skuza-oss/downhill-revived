@@ -137,6 +137,9 @@ struct Stage {
 const ONE: &[u32] = &[0];
 const PAIR: &[u32] = &[0, 1];
 const TWO: &[&[u32]] = &[ONE, PAIR];
+/// A mesh draw's (init.rs's mesh layouts, finding 168): the draw layout and group 2, the object
+/// records (the vertex buffer as read-only storage, `mesh_records`).
+const MESH: &[&[u32]] = &[ONE, PAIR, ONE];
 
 /// raster.wgsl's layouts (exact/pipelines.rs): main's explicit one (`MAIN_BINDINGS`), and the
 /// derived ones of scanout (VRAM, display_state, screen) and local_copy (memory, copy_state).
@@ -191,6 +194,7 @@ fn stages() -> Vec<Stage> {
         Stage::new(Native, Compute, "native_scanout_fast", TWO),
         Stage::new(Native, Compute, "native_convert", &[ONE, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]),
         Stage::new(Native, Vertex, "native_vertex", TWO),
+        Stage::new(Native, Vertex, "native_mesh_vertex", MESH),
         Stage::new(Raster, Compute, "scanout", RASTER_SCANOUT),
     ];
     // exact/pipelines.rs build_keyed: main takes the three flags of the key, local_copy the shift.
@@ -232,6 +236,12 @@ fn stages() -> Vec<Stage> {
         (Native, "native_pixel_blend_u"),
         (Dual, "native_pixel_dual"),
         (Dual, "native_pixel_dual_u"),
+        (Native, "native_pixel_mesh"),
+        (Native, "native_pixel_blend_mesh"),
+        (Native, "native_pixel_u_mesh"),
+        (Native, "native_pixel_blend_u_mesh"),
+        (Dual, "native_pixel_dual_mesh"),
+        (Dual, "native_pixel_dual_u_mesh"),
     ];
     for (source, entry) in fragments {
         for scale in [0u32, 1, 2, 4, 8] {

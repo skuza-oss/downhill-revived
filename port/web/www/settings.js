@@ -16,7 +16,9 @@ const DB = 'downhill-revived-settings', STORE = 'ini';
 //   or Window, the canvas's match), Scaling, Widescreen, Font, Frame Rate, FPS & Ping and the Performance group
 //   (shadows and sun glow, lens flare, particles: the core's own, live). Display, window size,
 //   picture shape (the canvas has one shape: 16:9 with widescreen, else 4:3, main.js), texture
-//   packs, skip movies (the browser never plays them) and vibration (no rumble here) are left out.
+//   packs, skip movies (the browser never plays them), vibration (no rumble here) and Native VU
+//   (the browser's VU worker is built without vu1_mesh.inc's translation and its renderer makes
+//   no mesh layouts; finding 194) are left out.
 // - LIVE, the rows that apply at once here besides the core's live ones: Resolution (the reactor's
 //   native_rescale, through web_env_changed). Scaling is live everywhere.
 // - RESTART, the footer of the others (Widescreen, Font, Frame Rate): the page loaded again.

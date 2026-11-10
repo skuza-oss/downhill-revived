@@ -46,7 +46,8 @@
 #include "texpack.h"
 #include "font_sharp.h"
 #include "native_frontend.h"
-#include "perf_log.h"        /* the perf: lines' waits (finding 129; empty in the browser) */
+#include "gs_mesh.h"         /* translated VU1 mesh batches (native_mesh, finding 164) */
+#include "perf_log.h"       /* the perf: lines' waits (finding 129; empty in the browser) */
 
 double host_wall_seconds(void); /* port/hle/host.c */
 
@@ -68,7 +69,13 @@ typedef struct {
     int32_t tex_offset[2]; uint32_t tex_size[2];
     uint32_t wrap[4];
     uint32_t region[4];
+    /* A mesh draw (flag 4096, native_mesh): the draw offset (GS 12.4 units), the largest Z and the
+       Z scale for native.wgsl's native_mesh_vertex; each object's own values (matrix, guard band,
+       colour scale, fog) are in its record (native_mesh_record). Zero for every other draw. */
+    float mesh_offset[4];
 } NativeConstants;
+enum { NATIVE_MESH = 4096, NATIVE_MESH_TWO_SIDED = 8192 };   /* constants.flags: a mesh draw (render.rs picks its
+                                                              pipeline), drawn without back-face culling */
 
 typedef struct {
     uint64_t key;
@@ -230,6 +237,9 @@ typedef struct Native {
        mix pairs and moves vertices by their recorded order) and with DHD_NATIVE_INDEXED=0. */
     int indexed;
     int skip;                        /* the current state draws nothing */
+    int mesh_open;                   /* the open draw is a mesh draw (native_mesh): no GS primitive joins it */
+    NativeFrame *mesh_record_frame;  /* where native_mesh_record wrote its last record, and at which vertex */
+    unsigned mesh_record_at;
     int box[4];                      /* pixels the open draw has touched */
     unsigned target_psm, depth_psm;
     int passes;                      /* AFAIL second pass needed */
@@ -1182,11 +1192,12 @@ static void native_record(Native *n, Gs *g, unsigned type, const GsVertex *v, un
     }
     n->recording->path1 += g->source_path == 1;
     if (n->state_version != g->state_version || n->state_ctxt != ctxt || n->state_prim != prim ||
-        ((prim & 16) && n->written != g->pixels_written) || !n->current_valid) {
+        ((prim & 16) && n->written != g->pixels_written) || !n->current_valid || n->mesh_open) {
         native_close(n, g);
         native_state(n, g, prim, ctxt);
         n->state_version = g->state_version; n->state_ctxt = ctxt; n->state_prim = prim;
         n->written = g->pixels_written;
+        n->mesh_open = 0;
         if (n->skip) return;
         native_open(n);
     }
@@ -1864,6 +1875,7 @@ static void native_draw(Gs *g, unsigned type, const GsVertex *v, unsigned count)
                     ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
     unsigned ctxt = prim >> 9 & 1;
     native_exact(n, g, type, v, count, prim, ctxt);
+    if (gs_vu_shadow) return;   /* a shadow batch's packet: its mesh item draws it (native_mesh) */
     native_record(n, g, type, v, count, prim, ctxt);
     n->stats.draws++;
 }
@@ -1883,6 +1895,10 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
     unsigned end = count - 2, i = 0;   /* triangle k is list[k..k+2], k < end */
     while (i < end && !drawn[i]) i++;
     if (i == end) return;
+    if (gs_vu_shadow) {   /* a shadow batch's packet: the exact path only (native_draw) */
+        for (; i < end; i++) if (drawn[i]) native_draw(g, type, &list[i], 3);
+        return;
+    }
     native_draw(g, type, &list[i], 3);
     unsigned prim = (unsigned)((g->reg[GS_PRIM] & 7) |
                     ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
@@ -1964,6 +1980,97 @@ static void native_draw_strip(Gs *g, unsigned type, const GsVertex *list, unsign
     if (g->source_path == 1) f->path1 += recorded;
     n->stats.primitives += recorded;
     n->stats.draws += recorded;
+}
+
+/* A translated VU1 mesh batch (gs_mesh.h; gs_mesh made the register writes its packet would make):
+   draws of their own (flag NATIVE_MESH) whose vertices are the batch's object-space ones and whose
+   indices are the triangles its strip draws, for native.wgsl's native_mesh_vertex. The object's
+   own values (matrix, guard band, colour scale, fog) are a record in the frame's vertices, which the
+   shader reads from the vertex buffer (bound again as storage, group 2), and each vertex names its
+   record; so consecutive batches under one draw state join one command whatever object they belong
+   to (finding 168). Where its pixels land is not known here, so the draw claims its whole scissor.
+   Nothing of it reaches the exact path: with DHD_EXACT_PROBE the batch runs on the VU too (shadow)
+   and its packet goes there. */
+_Static_assert(sizeof(GsMeshVertex) == sizeof(NativeVertex), "a mesh vertex is stored as a NativeVertex");
+enum { NATIVE_MESH_RECORD = 4 };   /* vertices a record fills: 128 bytes, eight vec4s for the shader */
+
+static void native_mesh_constants(NativeConstants *k, const GsMeshHeader *h, const float offset[2], const Native *n)
+{
+    k->flags |= NATIVE_MESH | (h->flags & GS_MESH_TWO_SIDED ? NATIVE_MESH_TWO_SIDED : 0);
+    k->mesh_offset[0] = offset[0]; k->mesh_offset[1] = offset[1];
+    k->mesh_offset[2] = (float)n->zmax; k->mesh_offset[3] = n->zscale;
+}
+
+/* The batch's object record in the frame's vertices (the matrix's columns, the guard band, the colour
+   scale, then fog A, B and max; native_mesh_vertex reads them as eight vec4s): the frame's last one
+   again when it holds the same values (the object's other batches), else a new one. Its first
+   vertex's index, which the batch's vertices carry. */
+static unsigned native_mesh_record(Native *n, NativeFrame *f, const GsMeshHeader *h)
+{
+    float r[NATIVE_MESH_RECORD * 8] = {0};
+    memcpy(r, h->matrix, sizeof h->matrix);
+    memcpy(r + 16, h->clip, sizeof h->clip);
+    memcpy(r + 20, h->color, sizeof h->color);
+    memcpy(r + 24, h->fog, sizeof h->fog);
+    if (n->mesh_record_frame == f && n->mesh_record_at + NATIVE_MESH_RECORD <= f->vertex_count &&
+        !memcmp(f->vertices + n->mesh_record_at, r, sizeof r))
+        return n->mesh_record_at;
+    native_reserve(f, NATIVE_MESH_RECORD);
+    memcpy(f->vertices + f->vertex_count, r, sizeof r);
+    n->mesh_record_frame = f;
+    n->mesh_record_at = f->vertex_count;
+    f->vertex_count += NATIVE_MESH_RECORD;
+    return n->mesh_record_at;
+}
+
+static void native_mesh(Gs *g, const uint32_t *words, size_t count)
+{
+    NativeExact *gpu = g->backend;
+    Native *n = gpu->native;
+    const GsMeshHeader *h = (const GsMeshHeader *)words;
+    if (!n->indexed || h->vertices > GS_MESH_MAX_VERTICES ||
+        count * 4 < sizeof *h + h->vertices * sizeof(GsMeshVertex) + h->indices * 2) return;
+    unsigned prim = (unsigned)((g->reg[GS_PRIM] & 7) |
+                    ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
+    unsigned ctxt = prim >> 9 & 1;
+    /* native_exact's bookkeeping of the Z buffer's width (and the band's place), with no vertices:
+       nothing of a mesh is drawn or logged exactly */
+    if (!(h->flags & GS_MESH_SHADOW)) native_exact(n, g, 4, NULL, 0, prim, ctxt);
+    uint64_t xy = native_offset(g, ctxt);
+    const float offset[2] = {(float)(xy & 65535), (float)(xy >> 32 & 65535)};
+    const NativeConstants *k = &n->current.constants;
+    int same = n->current_valid && n->mesh_open && n->state_version == g->state_version && n->state_ctxt == ctxt &&
+               n->state_prim == prim && !((prim & 16) && n->written != g->pixels_written) &&
+               k->mesh_offset[0] == offset[0] && k->mesh_offset[1] == offset[1] &&
+               !(k->flags & NATIVE_MESH_TWO_SIDED) == !(h->flags & GS_MESH_TWO_SIDED);
+    if (!same) {
+        native_close(n, g);
+        native_state(n, g, prim, ctxt);
+        n->state_version = g->state_version; n->state_ctxt = ctxt; n->state_prim = prim;
+        n->written = g->pixels_written;
+        n->mesh_open = 1;
+        if (n->skip) return;
+        native_mesh_constants(&n->current.constants, h, offset, n);
+        if (n->passes) native_mesh_constants(&n->second.constants, h, offset, n);
+        native_open(n);
+    }
+    if (n->skip || !h->indices) return;
+    NativeFrame *f = n->recording;
+    n->box[0] = n->box[1] = -4096; n->box[2] = n->box[3] = 4096;   /* native_close clips it to the scissor */
+    const float record = (float)native_mesh_record(n, f, h);   /* exact: vertex counts stay below 2^24 */
+    native_reserve(f, h->vertices);
+    native_reserve_indices(f, h->indices);
+    const GsMeshVertex *v = (const GsMeshVertex *)(h + 1);
+    const uint16_t *index = (const uint16_t *)(v + h->vertices);
+    uint32_t base = f->vertex_count, *o = f->indices + f->index_count;
+    memcpy(f->vertices + base, v, h->vertices * sizeof *v);
+    for (unsigned i = 0; i < h->vertices; i++) f->vertices[base + i].fog = record;   /* GsMeshVertex.unused */
+    f->vertex_count += h->vertices;
+    for (unsigned i = 0; i < h->indices; i++) o[i] = base + index[i];
+    f->index_count += h->indices;
+    f->path1 += h->indices / 3;
+    n->stats.primitives += h->indices / 3;
+    n->stats.draws++;
 }
 
 /* A host upload must not become the starting content of an earlier pending draw. */
@@ -3013,6 +3120,9 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
     g->fetch_pages = native_fetch_pages;
     const char *exact_probe = getenv("DHD_EXACT_PROBE");
     n->exact_probe = exact_probe ? atoi(exact_probe) : 0;
+    gs_mesh_hook = native_mesh;   /* DHD_NATIVE_VU1 (port/hle/vu1_mesh.inc, finding 164) */
+    /* none where the GPU can't draw meshes (the renderer said why; Native VU, finding 194) */
+    __atomic_store_n(&gs_mesh_mode, !n->indexed || !dhdr_native_meshes() ? 0 : n->exact_probe ? 2 : 1, __ATOMIC_RELAXED);
     n->trace_probes = getenv("DHD_NATIVE_PROBES") != NULL;
     if (getenv("DHD_NATIVE_SURFACES") && !(n->usage = calloc(NATIVE_SURFACES, sizeof *n->usage))) native_oom("usage");
     const char *texlog = getenv("DHD_NATIVE_TEXLOG");

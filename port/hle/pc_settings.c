@@ -7,8 +7,9 @@
      or △ BACK presses it (menu_page.c).
    Every change is saved to dhd.ini at once (host_setting_save keeps the other lines). Display,
    window size, picture shape, scaling, skip movies (the startup movies), vibration, the sticks'
-   dead zone, the button symbols, unlock all, FPS & Ping and the Performance group (Graphics:
-   Performance Mode, a preset for the three effects after it, finding 183) apply at once; resolution,
+   dead zone, the button symbols, unlock all, FPS & Ping, the Performance group (Graphics:
+   Performance Mode, a preset for the three effects after it, finding 183) and Native VU
+   (Experimental, above that group, finding 194) apply at once; resolution,
    widescreen, the texture pack, the font, the frame rate and V-Sync at the next start ("*" and
    the row's hint, a line above the legend, say so). A setting the environment sets (DHD_*) is
    shown but can't be changed here.
@@ -56,7 +57,7 @@ int controls_settings_accept(MenuPage *p, int row);
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 
-enum { ROWS = 21, MAX_CHOICES = 16 };
+enum { ROWS = 22, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -70,7 +71,7 @@ typedef struct {
 } Row;
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, PROMPTS, TEXTURES, FONT, RATE,
-       VSYNC, COUNTER, UNLOCK, NAMES, PERFORMANCE, SHADOWS, FLARE, PARTICLES };
+       VSYNC, COUNTER, UNLOCK, NAMES, NATIVE_VU, PERFORMANCE, SHADOWS, FLARE, PARTICLES };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 0},
     {"Display:", "window", 1},
@@ -89,6 +90,10 @@ static Row rows[ROWS] = {
     {"FPS & Ping:", "perf_counter", 1},
     {"Unlock All:", "unlock_all", 1},
     {"Player Names:", "names", 1},
+    /* right above the Performance group (finding 194): the VU1 programs' batch loops drawn by the
+       native renderer's shaders (port/hle/vu1_mesh.inc); live, read by the VU thread through
+       gs_present_options_apply */
+    {"Native VU (Experimental):", "native_vu", 1},
     /* the Performance group (finding 183): the preset is no setting of its own; ON is the three
        below off, OFF the three on, anything else Custom (perf_state) */
     {"Performance Mode:", "", 1},
@@ -213,7 +218,7 @@ static const char *const tab_labels[TABS] = {"Display", "Graphics", "Controls", 
 static const int row_tab[ROWS] = {TAB_GRAPHICS, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_CONTROLS, TAB_CONTROLS, TAB_GRAPHICS, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE, TAB_GRAPHICS, TAB_GRAPHICS, TAB_GRAPHICS,
-    TAB_GRAPHICS};
+    TAB_GRAPHICS, TAB_GRAPHICS};
 static int tab, visible[ROWS], tabs[TABS], tab_count;
 static unsigned held_before;
 static int tab_left[TABS], tab_right[TABS];
@@ -342,7 +347,8 @@ static void commit(Row *r, int apply)
     if (!apply) return;
     r->running = r->selected;
     if (r == &rows[DISPLAY] || r == &rows[SIZE]) host_service_gs_window_apply();
-    else if (r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[COUNTER]) host_service_gs_present_options_apply();
+    else if (r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[COUNTER] || r == &rows[NATIVE_VU])
+        host_service_gs_present_options_apply();
     else if (r == &rows[VIBRATION]) host_service_host_pad_vibrate(0, 0, 0);
 }
 
@@ -387,6 +393,9 @@ static void page_build(MenuPage *p)
 {
     p->title = page_title();
     p->title_y = screen ? 0 : 35;
+    /* the tabs' legend at y 180 (page_draw) stays under the rows' panel, which ends 13 below the
+       last row: a tab of ten rows (Graphics) moves its rows up; nine or fewer are where they were */
+    p->rows_last = screen ? 0 : 166;
     p->footer = NULL;
     if (screen == CONTROLS) { controls_settings_build(p); return; }
     if (screen) { touch_settings_build(p, screen); return; }
@@ -444,6 +453,11 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     else if (r == &rows[SHADOWS]) p->hint = "The riders' shadows and the glow around the sun";
     else if (r == &rows[FLARE]) p->hint = "The rings across the picture from the sun";
     else if (r == &rows[PARTICLES]) p->hint = "Dust, dirt, spray and heat haze";
+    else if (r == &rows[NATIVE_VU]) {
+        const char *renderer = host_getenv("DHD_RENDER");
+        p->hint = renderer && !strcmp(renderer, "exact") ? "Only with the native renderer"
+                                                         : "VU1 programs run on the GPU: faster, but new";
+    }
     else if (r == &rows[RESOLUTION] && scale_limit && scale_limit < 8) {
         if (scale_phone) snprintf(hint, sizeof hint, "Phones go up to %dx", scale_limit);
         else if (scale_why) snprintf(hint, sizeof hint, "This GPU's %s allows up to %dx", scale_why + 4, scale_limit);

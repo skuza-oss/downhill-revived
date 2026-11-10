@@ -67,6 +67,8 @@ struct MenuPage {
                                   frame afresh): the menu_draw_* calls */
     int (*header_mouse)(MenuPage *, int x, int y);  /* consumes a click above the rows */
     int title_y;               /* above 0: the title's y, instead of above the rows */
+    int rows_last;             /* above 0: the last row's y at most this (a page that draws a line
+                                  under its rows: the rows and their panel move up for it) */
 } __attribute__((aligned(16)));  /* the game stores a u128 at +0x490 with aligned SSE moves */
 
 void menu_page_run(MenuPage *p);       /* modally, until it closes */

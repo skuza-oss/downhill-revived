@@ -4,7 +4,8 @@
    DHDR_FN declarations of both headers.
 
    SP10 (docs/findings/090-speed.md): an indexed native picture. Finding 109: the device's largest
-   texture. Finding 129: the perf: lines' GPU counters. Finding 171: a lost device. */
+   texture. Finding 129: the perf: lines' GPU counters. Finding 171: a lost device. Finding 194:
+   whether translated VU1 meshes can be drawn. */
 #ifndef DHD_RENDER_EXT_H
 #define DHD_RENDER_EXT_H
 
@@ -41,6 +42,12 @@ DHDR_FN(dhdr_perf_read) uint32_t dhdr_perf_read(uint64_t *out, uint32_t count);
    DHD_GPU_DRED=1). C asks after a present failed and then ends the game with a message. Any
    thread; the browser's device always answers 0 (it has its own lost handling). */
 DHDR_FN(dhdr_device_lost) int dhdr_device_lost(void);
+
+/* Finding 194 (Native VU): 1 while the native renderer can draw translated VU1 meshes, 0 once it
+   can't (no storage buffer for the vertex stage, or a mesh layout or pipeline the driver refused;
+   logged once, and so for the rest of the session). C asks after each picture and sends the
+   batches back to the emulated VU. Any thread; the browser's renderer always answers 0. */
+DHDR_FN(dhdr_native_meshes) int dhdr_native_meshes(void);
 
 #ifdef __cplusplus
 }

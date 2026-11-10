@@ -24,11 +24,20 @@
 //! `write`: native_render's end and native_submit's start, :879-891).
 //!
 //! Referee: `rustgs.py test ... -- --test native_arenas`.
-use crate::abi::{DhdrCommand, DhdrVertex, DHDR_CMD_ALPHA_UPLOAD, DHDR_CMD_COPY, DHDR_CMD_IMPORT};
+use crate::abi::{DhdrCommand, DhdrVertex, DHDR_CMD_ALPHA_UPLOAD, DHDR_CMD_COPY, DHDR_CMD_DRAW, DHDR_CMD_IMPORT};
 use crate::device::Gpu;
 
 /// The uniform binding window (NATIVE_UNIFORM_WINDOW): a binding at the last offset still fits.
 pub const UNIFORM_WINDOW: u64 = 2048;
+
+/// The draws' constants (finding 172): packed `DRAW_BYTES` apart in their own arena, a draw reading
+/// its own by its instance index out of a window of `DRAW_SLOTS` (native.wgsl's `native_draws`),
+/// bound at a multiple of `DRAW_WINDOW` (256-byte aligned), so group 0 changes once per 256
+/// distinct constants instead of at every draw.
+pub const DRAW_SLOTS: u64 = 256;
+pub const DRAW_BYTES: u64 = std::mem::size_of::<crate::abi::DhdrNativeConstants>() as u64;
+pub const DRAW_WINDOW: u64 = DRAW_SLOTS * DRAW_BYTES;
+const _: () = assert!(DRAW_BYTES % 16 == 0 && DRAW_WINDOW % 256 == 0);
 
 /// sizeof(NativeVertex).
 const VERTEX_BYTES: u64 = std::mem::size_of::<DhdrVertex>() as u64;
@@ -95,9 +104,15 @@ impl Arena {
 pub struct Arenas {
     uniforms: Arena,
     uploads: Arena,
+    /// The draws' constants (`reserve_draws`, `draw_constants`) and their bind group (group 0 of
+    /// the draw pipelines: `DRAW_WINDOW` bytes at a dynamic offset).
+    draws: Arena,
+    draw_group: Option<wgpu::BindGroup>,
     /// The constants arena's bind group (binding 0, `UNIFORM_WINDOW` bytes at a dynamic offset).
     uniform_group: Option<wgpu::BindGroup>,
     vertex_buffer: Option<wgpu::Buffer>,
+    /// The mesh draws' group 2 over `vertex_buffer` (`mesh_group`), made again with a new buffer.
+    mesh_group: Option<wgpu::BindGroup>,
     /// Bytes of the vertex buffer (0 before it is made).
     vertex_capacity: u64,
     /// The picture's reversed vertices (its len is reversed_count); room for `reversed_capacity`.
@@ -123,8 +138,11 @@ impl Arenas {
         Arenas {
             uniforms: Arena::default(),
             uploads: Arena::default(),
+            draws: Arena::default(),
+            draw_group: None,
             uniform_group: None,
             vertex_buffer: None,
+            mesh_group: None,
             vertex_capacity: 0,
             reversed: Vec::new(),
             reversed_capacity: 0,
@@ -195,12 +213,16 @@ impl Arenas {
             while size < vertices {
                 size *= 2;
             }
+            // Also storage for the mesh draws' object records (native.wgsl's mesh_records; not where
+            // the device draws no meshes, the browser among them: init.rs's refuse_meshes).
+            let storage = if crate::native::init::meshes_refused() { wgpu::BufferUsages::empty() } else { wgpu::BufferUsages::STORAGE };
             self.vertex_buffer = device.map(|g| g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("native vertices"),
                 size,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | storage,
                 mapped_at_creation: false,
             }));
+            self.mesh_group = None;
             self.vertex_capacity = size;
         }
         self.uniforms.used = 0;
@@ -341,11 +363,53 @@ impl Arenas {
     /// The used constants and uploads, which the encoder's commands read (native_submit, before
     /// the submit).
     pub fn write(&self, queue: &wgpu::Queue) {
-        for a in [&self.uniforms, &self.uploads] {
+        for a in [&self.uniforms, &self.uploads, &self.draws] {
             if let Some(buffer) = a.buffer.as_ref().filter(|_| a.used != 0) {
                 queue.write_buffer(buffer, 0, &a.data[..a.used as usize]);
             }
         }
+    }
+
+    /// Room for the picture's draw constants, one per DRAW command at most (`layout`: init.rs's
+    /// draws layout); the arena grows from 1 MiB by doubling, its bind group made again with it.
+    pub fn reserve_draws(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout, commands: &[DhdrCommand])
+                         -> Result<(), String> {
+        let draws = commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count() as u64;
+        if self.draws.grow(Some(gpu), (draws + 1) * DRAW_BYTES, DRAW_WINDOW, wgpu::BufferUsages::UNIFORM,
+                           "native draw constants")? {
+            self.draw_group = self.draws.buffer.as_ref().map(|buffer| gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("native draw constants"),
+                layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(DRAW_WINDOW),
+                    }),
+                }],
+            }));
+        }
+        self.draws.used = 0;
+        Ok(())
+    }
+
+    /// A draw's constants: the next slot, its index (slot / DRAW_SLOTS is its window, slot %
+    /// DRAW_SLOTS its instance index). Overflow (`reserve_draws` counted wrong) is fatal.
+    pub fn draw_constants(&mut self, data: &[u8]) -> u32 {
+        let a = &mut self.draws;
+        let at = a.used;
+        if data.len() as u64 != DRAW_BYTES || at + DRAW_BYTES > a.capacity {
+            fatal("gs native: draw constants arena overflow");
+        }
+        a.data[at as usize..(at + DRAW_BYTES) as usize].copy_from_slice(data);
+        a.used += DRAW_BYTES;
+        (at / DRAW_BYTES) as u32
+    }
+
+    /// The draw constants' bind group (`reserve_draws`).
+    pub fn draw_group(&self) -> Option<&wgpu::BindGroup> {
+        self.draw_group.as_ref()
     }
 
     /// The constants arena's bind group (group 0, one dynamic offset from `constants`).
@@ -365,6 +429,28 @@ impl Arenas {
     /// The vertex buffer, bound whole (`vertex_capacity` bytes) at slot 0 of every draw pass.
     pub fn vertex_buffer(&self) -> Option<&wgpu::Buffer> {
         self.vertex_buffer.as_ref()
+    }
+
+    /// The mesh draws' group 2 (`layout`: init.rs's mesh layout): the whole vertex buffer, where
+    /// native_core.inc's native_mesh_record puts the objects' records (finding 168).
+    /// None (and Native VU off, finding 194) when the buffer is larger than one storage binding.
+    pub fn mesh_group(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Option<wgpu::BindGroup> {
+        if self.mesh_group.is_none() {
+            let buffer = self.vertex_buffer.as_ref()?;
+            if !buffer.usage().contains(wgpu::BufferUsages::STORAGE) {
+                return None;   // made after the meshes were refused
+            }
+            if buffer.size() > gpu.device.limits().max_storage_buffer_binding_size {
+                crate::native::init::refuse_meshes(Some("the picture's vertices exceed one storage binding"));
+                return None;
+            }
+            self.mesh_group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("native mesh records"),
+                layout,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+            }));
+        }
+        self.mesh_group.clone()
     }
 
     /// Bytes of the vertex buffer.

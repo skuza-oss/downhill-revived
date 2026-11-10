@@ -21,6 +21,7 @@
 #include "../include/guest.h"
 #include "../hle/text_input.h"
 #include "perf_log.h"
+#include "gs_mesh.h"   /* gs_mesh_setting_read (Native VU, finding 194) */
 
 static uint32_t pixels[1024 * 1024];
 static int initialized, disabled, resize_pending;
@@ -398,11 +399,14 @@ void gs_window_apply(void)
     resize_pending = 1;
 }
 
-/* The picture's filter and shape changed (DHD_PRESENT_FILTER, DHD_ASPECT): native renderer only. */
+/* The picture's filter and shape changed (DHD_PRESENT_FILTER, DHD_ASPECT): native renderer only.
+   Also the FPS & Ping counter and Native VU (gs_mesh.h: the VU thread takes it at its next batch),
+   read here on the game thread that changed them. */
 void gs_gpu_counter_apply(void);  /* port/gs/gpu_rust.c */
 void gs_present_options_apply(void)
 {
     gs_gpu_counter_apply();
+    gs_mesh_setting_read();
     if (sdl_window && gs_gpu_native(&gs)) gs_native_present_options(&gs);
 }
 

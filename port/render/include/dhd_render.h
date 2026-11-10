@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define DHDR_ABI_VERSION 1u
+#define DHDR_ABI_VERSION 3u
 
 #if defined(__wasm__)
 #define DHDR_FN(name) __attribute__((import_module("dhd_render"), import_name(#name)))
@@ -195,6 +195,7 @@ typedef struct DhdrNativeConstants { /* == NativeConstants; native.wgsl's unifor
     float fog[4];
     int32_t tex_offset[2];
     uint32_t tex_size[2], wrap[4], region[4];
+    float mesh_offset[4];            /* a mesh draw's (flag 4096; findings 164, 168): offset, largest Z, Z scale */
 } DhdrNativeConstants;
 typedef struct DhdrConvertConstants { /* == NativeConvertConstants; native_convert's uniform block */
     uint32_t tex[4], size[4];
