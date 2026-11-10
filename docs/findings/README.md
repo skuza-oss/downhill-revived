@@ -225,6 +225,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 192 | [widescreen sprite width table and menu focal projection](192-widescreen-sprites-focal.md) | current |  |
 | 193 | [helicopters, birds and other scenery at the right speed at every frame rate](193-fast-scenery-high-fps.md) | current |  |
 | 194 | [Native VU (experimental), a Graphics setting on every platform](194-native-vu-option.md) | current |  |
+| 195 | [the phone's biggest remaining costs, measured and cut](195-phone-speed.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
