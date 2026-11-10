@@ -96,8 +96,12 @@ Out of scope: gameplay, the desktop builds' speed (kept equal or better), anythi
   the Adreno kernel driver's queue for the context (simpleperf with off-CPU time; "Change 3").
 - [x] 2026-11-10: `147ae46`: `phone_throttle.py --restore` accepts a thermal cap that came on during
   the throttle ("Surprises", 8).
-- [ ] change 4: the conversions that run back to back in one compute pass (10 -> 4 compute passes a
-  race picture). Written; PC checks pass (traces equal, pictures identical). Phone timing: running.
+- [x] 2026-11-10: change 4, `4dd6ee9`: the conversions that run back to back in one compute pass
+  (10 -> 4 compute passes a race picture). PC checks pass (traces equal, pictures identical). Timed
+  at t612 2x on against the build without it: the race start 63.1 -> 74.4 fields/s (+17.9 %), the
+  route +4.0 %; the submit's sleep is gone.
+- [x] 2026-11-10: `python tools/check.py port` passes on `4dd6ee9` (every step), and the renderer
+  crate's tests (`rustgs.py test`).
 
 ## Method
 
@@ -365,6 +369,36 @@ passes fills it: the submit sleeps until the GPU has worked through enough of th
 commands. With the cut the submit comes 3 ms sooner in the field and brings two more command
 buffers, and it sleeps 2 ms longer: the picture sits at that limit. Fewer command buffers a picture
 is the thing to try against it ("Change 4").
+
+## Change 4: conversions that run back to back share one compute pass (`4dd6ee9`)
+
+A conversion (a texture rebuilt on the GPU from surfaces the native renderer drew: the riders'
+shadows and the haze) was a compute pass of its own, and wgpu makes command buffers for every pass
+(the pass, and the barriers before it). At a pass boundary the renderer already prepares the
+conversions of the coming run of draws together; now they are one compute pass with a dispatch each,
+in the same order with the same inputs (a conversion reads surfaces and a decoded texture and writes
+its own texture, never another's). A race picture has ten conversions: four passes instead of ten.
+
+Why: the sleep in the kernel's queue ("Change 3"). With the picture six passes shorter it is gone.
+Timed against the build without it (p5, both with the new profile and the cut), t612 2x, Native VU
+on, in one batch (p6, p6, p5, p5):
+
+| scene | before | conversions in one pass | gain |
+|---|---:|---:|---:|
+| race start | 63.1 (63.6 / 62.7) | 74.4 (74.1 / 74.7) | **+17.9 %** |
+| mid-race | 91.2 (91.0 / 91.4) | 92.3 (92.1 / 92.4) | +1.2 % |
+| the race | 84.5 (84.5 / 84.4) | 88.4 (88.2 / 88.7) | +4.6 % |
+| the route | 80.8 (80.3 / 81.3) | 84.0 (83.9 / 84.1) | **+4.0 %** |
+
+The render thread at the race start (`DHD_RSTAT`, ms a picture): the picture 11.39 -> 8.80,
+`queue.submit` 5.08 -> 2.80, `finish` 2.87 -> 2.56, the Z probe's start and take 1.61 -> 0.75, the
+present 1.16 -> 0.84. Mid-race: the picture 7.81 -> 7.06 (`finish` 2.62 -> 2.18, `queue.submit` 2.65
+-> 2.32). With it the render thread no longer limits the race start with Native VU on: it is busy
+9.7 ms of a 13.4 ms field (13.4 of 15.9 before), and the game and VU threads are next (12.2 each).
+
+Checked on the PC against base2: boot and race state traces equal; the picture route identical at 2x
+and 4x, Native VU off and on, on Direct3D 12 and at 2x on Vulkan; `check.py port` and the renderer
+crate's tests pass.
 
 ## Where to resume
 
