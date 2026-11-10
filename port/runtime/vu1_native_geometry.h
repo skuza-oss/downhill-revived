@@ -40,16 +40,6 @@ static __m128 native_madd(NativeFlags *f, __m128 acc, __m128 a, __m128 b, int d)
 {
     return native_result(f, VU_ADD4(operand4(acc), VU_PRODUCT4(operand4(a), operand4(b))), d);
 }
-/* acc must have all four lanes written by a preceding FMAC under the VU1
-   FTZ/DAZ, toward-zero environment. Such results are finite normals or zeros.
-   Keep the optimizer barrier even though the exceptional-value clamp is dead. */
-static __m128 native_madd_clean_acc(NativeFlags *f, __m128 acc, __m128 a, __m128 b, int d)
-{
-#ifndef PS2_VU_IEEE  /* plain IEEE ops: no host rounding mode, and the clamped results keep acc clean */
-    PS2_OPAQUE_M128(acc);
-#endif
-    return native_result(f, VU_ADD4(acc, VU_PRODUCT4(operand4(a), operand4(b))), d);
-}
 /* Clean operands (finding 197). An FMAC operand is clamped first (operand4: exponent 255 becomes
    the largest finite magnitude). Most operands are results of earlier FMAC or ITOF operations,
    which are finite already, so a kernel can keep beside each register v[r] its clamped value

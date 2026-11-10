@@ -48,9 +48,10 @@ def build(out, negative=False, coverage=False, target=None, clean_check=False):
         runtime.mkdir(exist_ok=True)
         (runtime / 'vu0_interp.c').write_bytes((ROOT / 'port/runtime/vu0_interp.c').read_bytes())
         header = (ROOT / 'port/runtime/vu1_native_geometry.h').read_text()
-        needle = 'return native_result(f, VU_ADD4(acc, VU_PRODUCT4(operand4(a), operand4(b))), d);'
+        # the kernels' MADD (native_madd_c), its result's lowest bit flipped
+        needle = '{ return native_result(f, VU_ADD4(native_clean(acc), VU_PRODUCT4(native_clean(a), native_clean(b))), d); }'
         assert header.count(needle) == 1
-        header = header.replace(needle, 'return native_result(f, _mm_xor_ps(VU_ADD4(acc, VU_PRODUCT4(operand4(a), operand4(b))), _mm_castsi128_ps(_mm_set1_epi32(1))), d);')
+        header = header.replace(needle, '{ return native_result(f, _mm_xor_ps(VU_ADD4(native_clean(acc), VU_PRODUCT4(native_clean(a), native_clean(b))), _mm_castsi128_ps(_mm_set1_epi32(1))), d); }')
         (runtime / 'vu1_native_geometry.h').write_text(header)
     if target:
         # the phone's CPU, with the game build's arm64 flags (build_host64.py's android-arm64 target)
