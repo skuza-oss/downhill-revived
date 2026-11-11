@@ -1,10 +1,13 @@
 # 199: Native VU in the browser
 
-Status: in progress
+Status: current
+Supersedes: parts of 198 (the browser left out), parts of 194 (the browser without Native VU)
+Checked: 2026-11-11
 
 Branch `feat/native-vu-browser` from `main` 6e2f7d23 (0.7.16 plus findings 200 and 201), started
-2026-11-11. This file is the lane's plan while it runs and its finding when it merges. Someone who
-has only this file and the git log must be able to pick the lane up.
+2026-11-11. Merged into `main` at 383741fe on 2026-11-11. This file is the lane's plan while it
+runs and its finding when it merges. Someone who has only this file and the git log must be able to
+pick the lane up.
 
 ## Goal and acceptance
 
@@ -44,6 +47,8 @@ Out of scope: deleting the emulated path; timing (the owner was using the PC: no
 - [x] Node state traces (boot, race), browser pictures (base, off, on in both modes, title,
   fallback), the live row, the one-worker build, `check.py port`, `rustgs.py test`, the wasm32 check
 - [x] docs: AGENTS.md, STATE.md, PLAYING.md, this finding
+- [x] 2026-11-11: merged into `main` (383741fe) and checked there once (below, "Checked on the
+  merged main")
 
 ## What changed
 
@@ -183,16 +188,20 @@ route is faster through the menus than the native one: 700 is the rider select, 
 | 9600 | mid-race | 0.005 | 0.005 % | 0.001 % | 48 |
 
   Every field within the tolerance (native Windows, finding 194: worst 0.066 / 0.087 %).
-- **Skip mode, what players get** (no exact probe: the VU skips the translated batches): the
-  pictures are identical, pixel for pixel, to the shadow-mode ones, and off without the probe is
-  identical to off with it: on this route the game's state does not move either way.
+- **Skip mode, what players get** (no exact probe: the VU skips the translated batches): against
+  off without the probe, the same numbers as the table, field for field. Corrected at the merge
+  check: off without the probe is not identical to off with it at 6400 and 6600 (MAE 3.23 and 1.33,
+  the lens flare at the race start, whose Z probe the GPU answers without `DHD_EXACT_PROBE`), with
+  Native VU on and off alike; every other field is identical, so skip and shadow differ only there,
+  and only through the probe.
 - **The title** (fields 60, 120, 170, skip mode): MAE at most 0.001, largest difference 33.
-- **The fallback**, `DHD_TEST_NO_MESHES` through the page: `=0` refuses in `dhdr_web_init`'s
-  objects (dhd.log: "gs native: Native VU can't run on this GPU (DHD_TEST_NO_MESHES); the VU runs
-  every program", then "native VU1: Native VU needs the native renderer with indexed fields (or the
-  GPU refused its draws); the VU runs every program") and every field is identical to off; `=900`
-  has field 700 drawn natively (MAE 0.001 against off, as with it on) and every field after the
-  refusal identical to off; the game ran to the route's end both times. As finding 194 natively.
+- **The fallback**, `DHD_TEST_NO_MESHES` through the page (skip mode, so against off without the
+  probe): `=0` refuses in `dhdr_web_init`'s objects (dhd.log: "gs native: Native VU can't run on
+  this GPU (DHD_TEST_NO_MESHES); the VU runs every program", then "native VU1: Native VU needs the
+  native renderer with indexed fields (or the GPU refused its draws); the VU runs every program")
+  and every field is identical to off; `=900` has field 700 drawn natively (MAE 0.001 against off,
+  as with it on) and every field after the refusal identical to off; the game ran to the route's
+  end both times. As finding 194 natively.
 - **The one-worker build** (`build.py --no-threads`: one module, the words as `gs.c`'s variables),
   fields 700-3500 in skip mode: off identical to the threaded build's off; on against off the same
   numbers as the threaded build's (worst 3500: 0.032 / 0.080 %); the loops line in its log.
@@ -202,7 +211,9 @@ route is faster through the menus than the native one: 700 is the rider select, 
 `check_browser.mjs --keys` with `?env.DHD_SETTINGS=dhd.ini` on a fresh profile (the players'
 defaults): the log starts with "native VU1: loops 0170 ... 2DE8 drawn by the native renderer, the
 VU skips them" (on by default); X, Down, Down, X, X opens REVIVED SETTINGS, D the Graphics tab
-(Resolution, Scaling, Font, **Native VU: ON**, then the Performance group), three Downs and Right:
+(Resolution, Scaling, Font, **Native VU: ON**, then the Performance group), Downs to the row (the
+first Down after the tab press can be dropped: at the merge check four Downs 50 fields apart, from
+field 830, reached it) and Right:
 "pc settings: Native VU: off", "native VU1: off; the VU runs every program"; Right again: "pc
 settings: Native VU: on" and the loops line. The browser's stored dhd.ini then holds
 `native_vu = on`.
@@ -222,6 +233,25 @@ settings: Native VU: on" and the loops line. The browser's stored dhd.ini then h
 - Untimed, PC in use: the browser's status line read about 60 fields/s at the title with it on and
   off (paced to the display: says nothing about speed). The draws counter at field 1300 was 3.8 M
   with it on against 61.7 M off (mesh draws merge, finding 168).
+
+### Checked on the merged main (383741fe, 2026-11-11)
+
+Once, on `main` with this lane merged; untimed, on a PC in use (no speed read or reported).
+
+- `python tools/check.py port`: every step OK. `rustgs.py test`: every test passes;
+  `rustgs.py check --target wasm32-unknown-unknown`: OK (its one warning, `device.rs`'s unused
+  `kind_name` on wasm, comes from finding 201's commit).
+- Windows, hidden desktop: boot (600 rows) and race (5000 rows) state traces equal to 0.7.16's
+  (f0971070, which 6e2f7d23 matched) row for row, `state_diff` PASS. `native_vu_pictures.py`: off
+  and on each identical to 0.7.16's, every pixel of the eleven fields; on against off within the
+  tolerance (worst mid-race 9300: 0.067 / 0.083 %); `DHD_TEST_NO_MESHES=0` logs the two fallback
+  lines and is identical to off.
+- Browser, headless Chrome: both builds (`--no-threads` and threaded) and `check_web_layout.py
+  --require-renderer` OK. Threaded: off identical to the base build's (6e2f7d23) eleven fields; on
+  against off the table above exactly; skip against off without the probe the same; the title
+  (60, 120, 170) at most MAE 0.001; `DHD_TEST_NO_MESHES=0` and `=900` as above, with the two lines.
+  One-worker: fields 700-3500 off identical to the lane's, on against off the lane's numbers. The
+  live row as above: on by default, off and on again from REVIVED SETTINGS with the log lines.
 
 ## Native platforms: behaviour-neutral, and why
 
@@ -273,7 +303,7 @@ settings: Native VU: on" and the loops line. The browser's stored dhd.ini then h
 
 ## Result
 
-Lane state 2026-11-11 (not merged; the lead merges and closes the finding).
+Merged into `main` at 383741fe on 2026-11-11.
 
 - **What changed**: the browser runs Native VU through the shared code: its VU worker translates,
   its renderer makes the mesh layouts and draws the items, a refused mesh pipeline turns it off at
@@ -282,15 +312,8 @@ Lane state 2026-11-11 (not merged; the lead merges and closes the finding).
 - **The emulated draw path is no longer anyone's own path**: it is only the fallback and the
   setting's off, on every platform. The deletion lane can now treat the browser like the others.
 
-At the merge (the lead): Status `current`; finding 198 `partly superseded by 199 (the browser left
-out)`, and its and 194's lines saying the browser hides the row or runs the emulated path stop
-stating that; a STATE-LOG entry.
+Still open (not run at the merge):
 
-Checks left for the lead, once, on the merged branch:
-
-- Windows: boot and race state traces against 6e2f7d23 (`state_trace_run.py`), and
-  `native_vu_pictures.py` off and on against 6e2f7d23 (expected identical; the shared changes are
-  behaviour-neutral, above).
 - A timed browser comparison, Native VU off against on (headless Chrome, `check_browser.mjs`'s
   status line or `--profile`, with `?env.DHD_FPS=144` or the display's rate so the pacing does not
   cap it), interleaved, on an idle PC.

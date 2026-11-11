@@ -1,6 +1,6 @@
 # 194: Native VU (experimental), a Graphics setting on every platform
 
-Status: partly superseded by 198 (off by default and "experimental": Native VU is the players' default; the emulated path is only the fallback, the setting's off and the browser's path)
+Status: partly superseded by 198 (off by default, "experimental" and the browser left out: Native VU is the players' default on every platform, the browser too since finding 199; the emulated path is only the fallback and the setting's off)
 Checked: 2026-11-11
 
 Branch `feat/native-vu-option` from `main` cdee456, started 2026-11-10. Merged into `main` at
@@ -106,8 +106,9 @@ repository): the shared pipeline layout, texture arrays, lazy constant reads, ge
   refused its draws); the VU runs every program"). A mesh draw already recorded when the refusal
   came is skipped (its pipeline failed), so at most a picture or two lack those objects.
 - **Test:** `DHD_TEST_NO_MESHES=N` refuses at the renderer's N-th picture (0: at its start).
-- **The browser** never makes the mesh layouts (no line: by design) and its VU is built without the
-  translation; the row is not offered there (`port/web/www/settings.js`).
+- **The browser** (until finding 199, which gives it this same path, the row and the default)
+  never made the mesh layouts (no line: by design) and its VU was built without the translation;
+  the row was not offered there (`port/web/www/settings.js`).
 - **Intel's dual-source rule (finding 188)**: mesh draws choose their blend variant in the same
   `draw_passes` as every draw, so without dual-source blending (Intel, or `DHD_WGPU_DUAL_SOURCE=0`)
   a mesh draw blending on As takes the two-draw form like any other; the mesh entry points of the
@@ -176,7 +177,7 @@ equal to Windows' in every row, off and in skip mode.
 | macOS (M1, Metal) | yes, on the owner's Mac from this branch and the Windows build's core C | the picture route off and on: within the tolerance (worst mid-race 0.058 / 0.085 %) | no | offered |
 | Linux x64 | yes (WSL Ubuntu 22.04, the release recipe) | headless boot traces | no | offered |
 | Android (Mi 11i) | release-signed APK (the release key's certificate, not debuggable) | the timed route off and on | t612, 2x (below) | offered (SETTINGS) |
-| Browser (WebGPU) | yes (`port/web/build.py`; its import check names `dhdr_native_meshes`) | no | no | hidden: its VU is built without the translation, its renderer makes no mesh layouts |
+| Browser (WebGPU) | yes (`port/web/build.py`; its import check names `dhdr_native_meshes`) | no | no | hidden here: its VU was built without the translation, its renderer made no mesh layouts (finding 199 offers it, on by default) |
 
 - **Linux, without network in WSL**: WSL's mirrored networking failed to start ("Failed to configure
   network ... falling back to networkingMode None"), so cargo there could not fetch the crates main
@@ -260,11 +261,11 @@ minus spin; busy = the field minus the thread's waits):
 
 - **Both paths are kept while native is experimental** (the owner, 2026-11-10; changed by finding
   198 on 2026-11-11: native is the default, the emulated path remains only as the fallback, the
-  setting's off and the browser's path until a later lane deletes it): the emulated VU1
-  path stays beside the native one, an explicit exception to the single-implementation rule (root
-  AGENTS.md, decision 099), as for the P2P experiment (180). The plan: once native is proven on
-  every platform (pictures, state, speed, drivers), it becomes the default and the emulated draw
-  path for the translated loops is deleted.
+  setting's off and, until finding 199, the browser's path, until a later lane deletes it): the
+  emulated VU1 path stays beside the native one, an explicit exception to the single-implementation
+  rule (root AGENTS.md, decision 099), as for the P2P experiment (180). The plan: once native is
+  proven on every platform (pictures, state, speed, drivers), it becomes the default and the
+  emulated draw path for the translated loops is deleted.
 - **Merged, not rebuilt**: the conflicts were few and side by side, so the branch's history stays
   as it was measured.
 - **The row above the Performance group, not under a heading of its own**: an "Experimental"
@@ -304,10 +305,10 @@ Lane state 2026-11-10 (not merged; the lead merges and closes the finding).
 
 - **What changed**: `native/vu-gs` merged as it was (findings 162, 164, 167, 168, 172), then the
   setting (dhd.ini `native_vu`, REVIVED SETTINGS > Graphics "Native VU (Experimental)" above the
-  Performance group, the launcher's Graphics page, Android's SETTINGS; hidden in the browser), live
-  at the next VU1 batch, off by default; the fallback to the emulated VU when the GPU can't draw
-  meshes (one dhd.log line, the game goes on); `native_vu_pictures.py`; the renderer tests the
-  native branch left stale.
+  Performance group, the launcher's Graphics page, Android's SETTINGS; hidden in the browser until
+  finding 199), live at the next VU1 batch, off by default; the fallback to the emulated VU when the
+  GPU can't draw meshes (one dhd.log line, the game goes on); `native_vu_pictures.py`; the renderer
+  tests the native branch left stale.
 - **Off is main**: pictures identical at 2x and 4x, boot and race state traces equal to `cdee456`'s
   in every row.
 - **On**: the game's state equal (shadow mode in every row; skip mode in every game-state column),
@@ -318,7 +319,7 @@ Lane state 2026-11-10 (not merged; the lead merges and closes the finding).
   on the t612 profile at 2x 57.2 -> 66.7 (+16.6 %).
 - **Platforms**: Windows built, ran, timed; macOS built and ran (pictures off and on); Linux built
   (WSL Ubuntu 22.04) with headless boot traces equal to Windows'; Android release-signed APK built,
-  timed on the phone; browser built, option hidden.
+  timed on the phone; browser built, option hidden (offered since finding 199).
 
 What is left:
 

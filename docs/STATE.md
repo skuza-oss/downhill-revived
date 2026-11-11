@@ -109,7 +109,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), a
   Performance group (shadows and sun glow, lens flare, particles; finding 183), Native VU
   (on by default: VU1 programs as GPU shaders, falls back to the emulated VU when
-  the GPU can't; findings 164, 167, 194, 198), movies,
+  the GPU can't; findings 164, 167, 194, 198, 199), movies,
   vibration, stick dead zone and button icons (finding 134; also over a texture pack's font,
   finding 200), the keys and controller buttons for
   the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &

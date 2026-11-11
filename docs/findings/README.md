@@ -224,12 +224,12 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 191 | [Android 10 (API 29) as the APK's minimum](191-android-10.md) | current |  |
 | 192 | [widescreen sprite width table and menu focal projection](192-widescreen-sprites-focal.md) | current |  |
 | 193 | [helicopters, birds and other scenery at the right speed at every frame rate](193-fast-scenery-high-fps.md) | current |  |
-| 194 | [Native VU (experimental), a Graphics setting on every platform](194-native-vu-option.md) | partly superseded | [198](198-native-vu-default.md) for off by default and "experimental": Native VU is the players' default; the emulated path is only the fallback, the setting's off and the browser's path |
+| 194 | [Native VU (experimental), a Graphics setting on every platform](194-native-vu-option.md) | partly superseded | [198](198-native-vu-default.md) for off by default, "experimental" and the browser left out: Native VU is the players' default on every platform, the browser too since finding 199; the emulated path is only the fallback and the setting's off |
 | 195 | [the phone's biggest remaining costs, measured and cut](195-phone-speed.md) | partly superseded | [198](198-native-vu-default.md) for the encoder cut on Mali GPUs: a picture stays in one encoder there, the cut lost the Mali-G52's device |
 | 196 | [smooth bilinear sprites at high resolution scale](196-native-rt-texture-scale.md) | current |  |
 | 197 | [the phone's vertex loops and palette path, Native VU off](197-phone-speed-2.md) | current |  |
-| 198 | [Native VU is the default](198-native-vu-default.md) | current |  |
-| 199 | [Native VU in the browser](199-native-vu-browser.md) | in progress |  |
+| 198 | [Native VU is the default](198-native-vu-default.md) | partly superseded | [199](199-native-vu-browser.md) for the browser left out: Native VU runs in the browser too, on by default |
+| 199 | [Native VU in the browser](199-native-vu-browser.md) | current |  |
 | 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | current |  |
 | 201 | [PowerVR GE8322 (driver 1.18) closes at the first picture's submit](201-powervr-ge8322-submit.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
