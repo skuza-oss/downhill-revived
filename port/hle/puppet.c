@@ -529,9 +529,10 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
         /* No jump on a snapshot older than SYNC_RESYNC_AGE (the first of a backlog after a stall:
            newer ones are right behind it, live a second jump of 65 units followed); it is slid
            toward like any other, and the next one decides. */
-        /* The first snapshot after the grid (late after an outage at the start) is a quick start,
-           made up by the slide with its owner's speed, unless it is far off (3x the jump) */
-        float jump = p->from_grid ? 3 * SYNC_RESYNC : SYNC_RESYNC;
+        /* The first snapshot after the grid (late after an outage at the start), and anything in
+           the start's first SYNC_START_GLIDE seconds (a puppet slower off the line than its owner),
+           is a quick start made up by the slide with its owner's speed, unless far off (3x) */
+        float jump = p->from_grid || t < SYNC_START_GLIDE ? 3 * SYNC_RESYNC : SYNC_RESYNC;
         p->from_grid = 0;
         if (!p->synced || (error > jump && t - s->time < SYNC_RESYNC_AGE) ||
             (p->after_crash && error > SYNC_RESPAWN)) {

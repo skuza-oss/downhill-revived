@@ -45,6 +45,7 @@
                                   up (up to twice, finding 139): its puppet glides after its snapshots */
 #define SYNC_CATCHUP_END 1.1f  /* ... until under this */
 #define SYNC_FOLLOW_TAU 0.05f  /* s: the glide toward its rider meanwhile */
+#define SYNC_START_GLIDE 1.5   /* s after GO: no jump under 3x SYNC_RESYNC (the pack leaves the line) */
 #define SYNC_START_WAIT 2.0   /* s after GO: a puppet whose snapshots have not begun is this game's AI */
 #define SYNC_RESYNC 12.0f      /* game units (about 0.13 s of riding): a larger error is a jump */
 #define SYNC_CARRY_MAX 0.25    /* s: a re-sync carries a snapshot at most this far */

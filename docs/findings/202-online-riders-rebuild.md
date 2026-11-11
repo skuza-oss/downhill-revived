@@ -46,6 +46,8 @@ the P2P star (unless a bug there is part of the problem).
 - [x] Live two-game races through a local server under `DHD_NET_LINK` (below).
 - [x] The final matrix (`--label final`, v8): track 0 every scenario, tracks 1-2 the main ones;
       the 4x clips; `check.py port`.
+- [x] Round 2 (the lead's review, "Round 2" below): the start, AI riders measured live, HOLD for a
+      stopped sender, what a puppet may do on its own; local main merged (ec966d03).
 
 ### The bench (how it measures)
 
@@ -177,19 +179,10 @@ second seed and `--a DHD_PUPPET_FROM=all` so the host also recorded its AI rider
 
 ### What is not fixed, and what would fix it
 
-- **A sender whose game stops (a hitch).** v8 on track 0: a 0.8 s stop, error p50/p95/p99 0.45 /
-  2.55 / 14.4 units (today 0.97 / 3.5 / 8.4; another run of the same build gave p99 16.4: the
-  bench's tails vary a little from run to run, the AI controller's state not being part of the
-  replay); 3 s behind, 0.50 / 7.8 / 114 (today 1.0 / 6.2 / 23).
-  The tail is the stop itself: the sender's rider stands still on its own screen while the
-  receiver hears nothing, and the receiver cannot tell a stopped game from lost packets. The
-  puppet rides on for up to 1 s (`SYNC_COAST`), then brakes; when the snapshots return it is put
-  back (a re-sync). Today's model froze after 0.25 s, so its error was smaller there, but it froze
-  in every loss too (outages: today p99 27.8, v8 7.9). Braking earlier traded the common case for
-  the rare one (v9, Decisions). What would fix it: the sender's network thread (it keeps running
-  while the game thread hitches) sending "no game frame since T" in place of STATE, so receivers
-  hold the rider at once; a protocol addition, not made here. The catch-up afterwards is followed
-  (the sender's clock rate, Decisions).
+- **A sender whose game stops (a hitch).** Round 1 rode on for up to 1 s and put the rider back
+  (0.8 s stop: p99 14.4; 3 s: 114, today 8.4 and 23). Round 2 added HOLD: the stopped game's
+  network thread says so and the others hold its riders, then glide after it while it catches up
+  ("Round 2"). Left: the 0.8 s stop's tail is still a little over today's on the bench.
 - **The shared clock 40 ms off** draws a rider about 4 units off either way (v8: 3.9 p50, today 4.0):
   a snapshot placed 40 ms wrong is a pose 40 ms of riding (95 units a second) off, whatever draws
   it. Not fixed: it is the clock's error, not the drawing's. Live the offset is a few ms (race 1:
@@ -304,12 +297,18 @@ another player sees it. Watch first: `mx-jumps-150ms.mp4` (before, then after) a
 - No server or protocol change, so `check.py server` was not needed.
 - Live: two two-game races through a local server under `DHD_NET_LINK` (above): equal results,
   the hit landed and was applied by its victim's PC.
+- Round 2 (after the merge of local main, ec966d03 and later): `check.py port`, `check.py server`
+  (one run failed one timing test by a millisecond under load, `session.test.ts` auto timer
+  14989 against 14990 ms, the rerun passed; this lane changes nothing on the server) and
+  `check.py docs` OK; `net_tests` with the new HOLD test; `mosh_round_check.py --link
+  "delay=80,jitter=15,loss=1"` PASS (the arena round's table equal on both games).
 
 ### Left for the lead
 
-- Boot and race state traces against 6e2f7d23 (`state_trace_run.py boot` / `race`): every change
-  is behind `pp.online` or the bench switches (`DHD_PUPPET_PLAY`, `DHD_PUPPET_RECORD`,
-  `DHD_PUPPET_TRACE`, `DHD_NET_LINK`) except the snapshot stamp, which only online races send.
+- Boot and race state traces against the merged main (`state_trace_run.py boot` / `race`): every
+  change is behind `pp.online` or the bench switches (`DHD_PUPPET_PLAY`, `DHD_PUPPET_RECORD`,
+  `DHD_PUPPET_TRACE`, `DHD_NET_LINK`, `DHD_NET_TEST_HITCH`) except the snapshot stamp (online
+  only) and the rider-pair patch in `func_0011A100`, which asks `hle_puppet_both_remote` (0 offline).
   Not run in this lane (the game lock was full of other lanes' state traces).
 - A PC <-> Mac race both ways over the internet (`cross_race.py`), and with `--force-turn`.
 - A race with a phone in a P2P room (Android: nine puppets now run physics, as ten riders do
@@ -317,7 +316,192 @@ another player sees it. Watch first: `mx-jumps-150ms.mp4` (before, then after) a
 - A 6+ player room (`p2p_crowd.py`, and an SFU room with bots).
 - For the owner when they play: other riders' wheels on the ground at landings, dips and rises;
   no jumping back and forth; a rider that crashes or respawns appears at its respawn at once
-  (that jump is real on its owner's screen too). A player whose game hitches will ride on for up
-  to a second on the others' screens, then be put back.
+  (that jump is real on its owner's screen too). A player whose game hitches stops on the others'
+  screens and then rides on fast while it catches up. Computer riders on a guest are the weakest
+  part ("Round 2": their line is this game's AI's).
 - Merge: finding 169's item 4 (the straight-line prediction) becomes partly superseded by this
   finding; 044's "Interpolation" section already points at 169.
+- Round 2's open items:
+  - The hand-over from the catch-up glide back to the steering put the whole pack 23-40 units
+    forward once in a live hitch race (`DHD_NET_TEST_HITCH=20:800`): the error measured right then
+    is far larger than the riders' real distance. Start there with the re-sync log lines (they say
+    the snapshot's age, the rate and both speeds).
+  - Computer riders on a guest follow this game's AI line: their snapshots can't steer the AI
+    controller's target. The fix is that target in the record; its state was not found.
+  - The early re-sync count did not reach zero in every live start (see the counts).
+  - The bench's stopped-sender rows got worse with the catch-up glide (jolts); live it removed the
+    pack jumps during the catch-up. Worth a second look with the hand-over fixed.
+- Clips: the "after" clips are from v17; the later changes only act at the start (first 1.5 s)
+  and while a sender catches up (none in the clip scenes), so they show the final model.
+- Release: no wire format or protocol change needs a `MIN_VERSION` raise (HOLD is a version older
+  games drop; the record's power is in the wheels' bytes, same size and version).
+
+## Round 2 (the lead's review): the start, AI riders live, a stopped sender
+
+Commits 862d4a1f (HOLD and the record's power), 8afb11bf (grid start, hits, hold, power,
+diagnostics), 407864ee (every rider scored live, re-syncs by phase), 1c7b34fe, 46331648 (speed
+guard, no puppet-to-puppet collisions, no jumps on stale snapshots), ead61d1d (a late first
+snapshot), ec966d03 (the merge of local main: lanes 199, 203, 204), 97af3a94 (the catch-up
+glide), bbcec624 (`mosh_round_check.py --link`) and the start's first 1.5 s (the last commit).
+
+### The re-syncs just after GO
+
+Measured with short live races (finish at 12 s, both games on the hidden desktop, local server,
+the real SFU, `DHD_NET_LINK` 80 ms with 15 ms jitter and 1 % loss on both games, eight host AI
+riders), each re-sync logged with what it was measured against (age, history or present, both
+speeds, the sender's rate), counted by `puppet_lag.py --riders` (first 5 s after GO, later, after
+crashes).
+
+Causes found:
+
+1. **Every start, silently: the first snapshot moved the rider.** On a guest a computer rider's
+   slot was not a puppet until its first snapshot (GO plus about 0.13-0.17 s), so this game's own
+   AI started it, at its own pace (15-24 units a second where the host's had 0-4); the first
+   snapshot then put the puppet back. Not logged as a re-sync (it was the first sync), but a jump
+   at the gate: in ten starts 48 of 100 first snapshots moved a rider more than 1 unit, up to 6.6.
+   Fix: from GO a puppet stands on the grid (no input, no physics) until its first snapshot, its
+   history the grid pose, so the first snapshot is a small correction (`grid_step`). After: no
+   first-snapshot jump. A slot with no snapshot 2 s after GO (a racer whose connection never came
+   up) is this game's AI rider as before.
+2. **A landing taken differently here.** The puppet's own physics took one from 150 to 50 units a
+   second in a step on a landing the host's rider rode through; 0.13 s later it was 25 units
+   behind. Fix: a puppet under 60 % of its owner's recent speed (snapshot under 0.4 s old, no
+   crash) takes its owner's velocity at once (`SYNC_GUARD`).
+3. **Puppets bumping each other here.** Two riders another game runs collided here as well as on
+   their owner's game. Fix: they don't collide here (`hle_puppet_both_remote`, a patch in
+   `func_0011A100`'s rider pairs); this game's rider still bumps into everyone.
+4. **An SFU stall at the start.** The SFU delivered almost nothing for about a second; with the
+   silence brake at 1 s the puppets let go and braked (50-80 units behind), and the backlog's first
+   snapshot (781 ms old) made a jump to a pose carried only 0.25 s, a second jump following with
+   the fresh ones. Fixes: the brake waits 3 s (a stopped game says so with HOLD now); a snapshot
+   older than 0.4 s never makes a jump.
+5. **A host catching up after its own hitch** (its clock rate 1.4-1.7). Following such a sender
+   kinematically was tried and dropped (worse on the bench); the rate is taken before anything
+   else in the step and scales its rider's velocity.
+6. **Different power?** The record now carries the rider's power (`+0x4214`, an AI's catch-up),
+   in place of the wheels' spin (the puppet's physics spins them). In the measured starts the host's
+   AI riders had power 1.0 throughout, so this was not the cause there; it stays (it costs nothing
+   and removes a difference whenever an AI eases its power).
+
+Counts (re-syncs of riders not after a crash, first 5 s after GO, both games of each start):
+
+| build | starts at 80 ms | games with any | re-syncs | first snapshots moving a rider > 1 unit |
+|---|---|---|---|---|
+| before (round 1's model, diagnostics) | 10 | 1 of 20 | 1 | 48 of 100 (largest 6.6) |
+| grid start only (v10) | 10 | 1 of 20 | 1 | none |
+| this round's model before the merge (v17) | 10 | 2 of 20 | 3 | none |
+| v17 on the bad link | 2 | 1 of 4 | 2 | none |
+
+| final, merged (97af3a94) | 10 | 1 of 20 | 5 | none |
+| final on the bad link | 2 | 2 of 4 | 5 | none |
+| the start's 1.5 s without jumps (last commit) | STARTS_Y |
+
+The one 80 ms start left with early re-syncs (final build): at 0.6 s four AI puppets nearly
+standing (5 units a second against their owners' 31-34, the start's push-off) were jumped 13-15
+units; the last commit makes the start's first 1.5 s a quick start instead (no jump under 36
+units: the speed guard gives the owner's speed, the slide closes the gap). On the bad link the
+rest are the AI line (below) and snapshots 215-250 ms old after an outage.
+
+**Not met:** the lead's acceptance (no re-sync in the first 5 s unless a rider respawned) is not
+reached. What is left, from the logs:
+
+- an AI rider whose line here leaves its owner's (two in one start, 18-27 units at equal speeds):
+  this game's AI controller steers by its own racing-line state (Surprises: not one rider field;
+  rider +0x4000-0x40BF holds no float that follows an AI rider's turning, best correlation 0.23);
+- this game's rider shoving the other player's puppet (the scripted test rides both humans on one
+  line, punching for 40 s: 116 against 67 units a second, 17 units);
+- a first snapshot late after an outage at the start (fixed after v17: the first snapshot after
+  the grid slides unless over 36 units).
+
+What would remove the first: the AI controller's steering target (its path point, `+0x78D4` +0x7C,
+and the line it chose) travelling in the record so a puppet's controller steers to the same point.
+Finding where that state lives is a reverse-engineering task of its own.
+
+### Computer riders on a guest, live
+
+`puppet_lag.py --riders` over whole races (70 s, both games on the hidden desktop, local server,
+real SFU, eight host AI riders, the link on both games), the guest's puppets of the host's AI
+riders against the host's own recording of them:
+
+| link | build | error p50 / p95 / p99 (units) | sunk / deep % | jolts a minute | re-syncs (first 5 s / later / after crashes) |
+|---|---|---|---|---|---|
+| 80 ms | v17 | 0.73 / 3.85 / 10.9 | 2.1 / 0.36 | 9.4 | 0 / 18 / 4 |
+| 80 ms | final | 0.70 / 3.26 / 5.32 | 1.5 / 0.09 | 1.6 | 0 / 0 / 3 |
+| 150 ms | v17 | 1.55 / 6.35 / 10.3 | 2.3 / 0.13 | 10.5 | 1 / 13 / 7 |
+| 150 ms | final | 1.50 / 6.67 / 11.8 | 1.9 / 0.15 | 22.9 | 0 / 24 / 8 |
+| bad | v17 | 2.26 / 8.77 / 13.8 | 2.8 / 0.28 | 20.5 | 2 / 36 / 12 |
+| bad | final | 1.97 / 7.97 / 11.9 | 2.4 / 0.07 | 10.9 | 1 / 21 / 4 |
+
+The other player's rider in the final races: guest's view 0.13 / 1.21 / 3.5 (80 ms), 0.47 / 3.86 /
+8.3 (150 ms), 0.24 / 2.64 / 5.2 (bad); host's view 0.18 / 1.97 / 3.0, 0.31 / 2.70 / 4.7, 0.33 /
+2.76 / 4.8. Results equal on both games in every race. Run-to-run spread is large on this PC
+(three games at once, other lanes' state traces): the 150 ms race's re-syncs come in bunches with
+the senders' catch-ups. Live the AI
+riders are clearly worse than on the bench (150 ms bench: 1.06 / 4.8 / 7.4): the bench replays the
+same world, so this game's AI controller does what the recorded one did; live the guest's own
+controller runs its own state. The error is mostly sideways (live, interpolated: along the
+rider's way p5/p95 -0.97 / 0.81, sideways p95 2.76, p99 4.42): the line, not the speed.
+
+Removing it: see "Not met" above (the controller's target in the record). Not done: the target's
+state was not found in this round; the power (the AI's catch-up) was, and travels now, but the
+host's AI riders had power 1.0 in the measured races.
+
+### A stopped sender: HOLD
+
+A game whose own thread stops (a hitch, a stall) now says so: its network thread, which runs on,
+sends HOLD (11 bytes on the STATE channel, `state_bundle.h`) every 100 ms once no bundle has gone
+out for three of its usual gaps (at least 60 ms). The receivers stop that sender's riders where
+they are; once newer snapshots come and the rider, carried to now, has reached the held spot, the
+puppet takes that pose and speed (a unit or two from where it stands) and, while the sender then
+catches up at up to twice the shared clock, glides toward its snapshots carried to now (1/e in
+50 ms) until its rate settles. A game that does not know HOLD drops it (its bundle check wants
+version 6). The record carries the rider's power in place of the wheels' spin (same size).
+
+Bench, track 0 at 60 (sender stopped 0.8 s / 3 s at race second 20):
+
+| | error p50 / p95 / p99 | jolts a minute |
+|---|---|---|
+| 0.8 s: today's model | 0.97 / 3.45 / 8.4 | 46 |
+| 0.8 s: round 1 (rides on, put back) | 0.45 / 2.55 / 14.4 | 5 |
+| 0.8 s: HOLD | 0.45 / 2.60 / 10.5 | 9 |
+| 3 s: today's model | 1.02 / 6.22 / 23.1 | 115 |
+| 3 s: round 1 | 0.50 / 7.77 / 114 | 7 |
+| 3 s: HOLD | 0.51 / 7.01 / 15.0 | 12 |
+
+The 3 s stop is much better than today at the tail; the 0.8 s stop is not quite (p99 10.5 against
+8.4): the rider stops about (detection 60-100 ms + the link) of riding ahead of the frozen one,
+where today's model stopped 250 ms ahead but only 0.25 s after its last snapshot. Live (the host's
+`DHD_NET_TEST_HITCH=20:800`, 80 ms link): the guest held all nine host riders 0.2 s after the stop
+and let them ride on 0.75 s later, each 3.5-7 units short of its rider; before the catch-up glide
+they were then put 13-23 units forward within 4 ticks (the whole pack). With the catch-up glide
+(on whenever a sender's rate rises past 1.25, announced or not; after a hold alone it ended at
+once, the rate not having risen at the release) the riders rode on 1.3-2.1 units from theirs and
+were not put anywhere during the catch-up; but when the rate fell back, 0.9 s later, the whole
+pack was put 23-40 units forward at once (final build, `z-hitch` run). Not understood yet: the
+hand-over from the glide to the steering measures far off; left for the lead (see "Left").
+On the bench the glide costs jolts (final: 0.8 s stop p99 11.1, 14 jolts a minute; 3 s 15.4, 46),
+where the glide's targets step with each 30-a-second snapshot.
+Holds also fired, correctly, for short stalls of the games under this PC's load (the other lanes'
+games, builds).
+
+What the release must do: nothing for the wire (no protocol change, no `MIN_VERSION` raise; rooms
+never mix releases). Tried and dropped: following a sender kinematically whenever its rate rose
+(without a hold: worse on the bench, 0.8 s p99 11.1 and 13 jolts a minute, 3 s 15.4 and 45).
+
+### Point B: what a puppet may do on its own
+
+Before this round a rider whose snapshots had not begun (the first ~0.15 s after GO, or a slot
+never heard from) was not a puppet: this game's own AI rode it, its hits were applied here and
+went out as this game's EVENTs (lane 204's bots dealt hits nobody controlled), and it could start
+crashes. Now:
+
+- Hits and crash starts go by whether another game runs the rider (`remote`), not by whether its
+  snapshots have begun: such a rider never deals or takes a hit here and never starts a crash by
+  itself; a hit by this game's rider on it is an EVENT for its owner (and lane 204's
+  `hle_online_hit_dealt` stays at that point).
+- Pickups were already only for riders this game runs (`hle_online_pickup_allowed`).
+- Before its first snapshot it stands on the grid (no input, no physics, so no pickup, no score);
+  while its owner is silent it rides on its owner's last pad (an AI rider on this game's AI
+  controller), still `remote`.
+- Scoring: the arena's points come from `hle_online_hit_dealt`, called only when this game's own
+  rider deals the hit.
