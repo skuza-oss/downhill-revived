@@ -116,4 +116,5 @@ A signal's padding stays upstream's `!0`. Devices without timeline semaphores ch
 before.
 
 `mod.rs` re-exports `SemaphoreList`, `SemaphoreListMode` and `SemaphoreType` (doc-hidden) for the
-renderer crate's test `tests/semaphore_values.rs`.
+renderer crate's test `tests/semaphore_values.rs`; `adapter.rs` `Adapter::timeline_semaphores` says
+which kind the device's fences are, for dhd.log (`src/device.rs` `log_vulkan`).

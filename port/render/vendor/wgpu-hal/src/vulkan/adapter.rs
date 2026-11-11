@@ -2356,6 +2356,13 @@ impl super::Adapter {
         &self.phd_capabilities
     }
 
+    /// Downhill Revived (finding 201): whether this adapter's devices signal their fences with a
+    /// timeline semaphore (so every submit chains a VkTimelineSemaphoreSubmitInfo) instead of
+    /// VkFences, for dhd.log.
+    pub fn timeline_semaphores(&self) -> bool {
+        self.private_caps.timeline_semaphores
+    }
+
     pub fn shared_instance(&self) -> &super::InstanceShared {
         &self.instance
     }
