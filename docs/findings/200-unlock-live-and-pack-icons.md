@@ -1,6 +1,8 @@
 # 200: Unlock All applies at once; button icons over a texture pack's font
 
-Status: in progress
+Status: current
+Supersedes: parts of 058, 095, 134
+Checked: 2026-11-11
 
 Branch `fix/unlock-live-and-pack-icons` from `main` f0971070 (v0.7.16), started 2026-11-11. This
 file is the lane's plan while it runs and its finding when it merges.
@@ -30,6 +32,7 @@ once on the merged branch, listed under Result).
 - [x] 2026-11-11: `python tools/check.py quick` OK on 200dabca; `port/tools/test_texpack.py` RESULT
   PASS (81 `image:` checks, 9 font-icon checks); `port/tools/test_gs_wgpu.py --skip-hardware`
   VERDICT PASS (its stubs changed)
+- [x] 2026-11-11: merged into `main` (1a01efd7) and checked there once (below, Result)
 
 ## #83: the root cause
 
@@ -127,16 +130,30 @@ folder (a fresh save: bonus and pro riders, MOSHBOWL, SUPER JUMP and all but six
 
 ## Result
 
-Filled in at the merge. For the lead, once on the merged branch:
-- Boot and race state traces with Unlock All off (never touched) against f0971070:
-  `python port/tools/state_trace_run.py boot` / `race` on both builds, `state_diff.py` equal.
-- `python tools/check.py port` (host build; `test_gs_wgpu` and `net_tests`), and the browser build
-  (`port/web/build.py`; its `texpack_image` stub and `native_decode` change compile there).
-- In game (Windows): a fresh save, REVIVED SETTINGS > Game > Unlock All on, back to the rider select:
-  every bonus and pro rider shown; off again: their statues. With a real texture pack that
-  replaces the font and an Xbox or Nintendo controller on Auto: its icons in the menus and the
-  race HUD prompts; the PlayStation choice shows the pack's own.
-- At the merge: finding 095 `partly superseded by 200` (its note that `func_001BB670` runs on each
-  rider-select entry, and "a toggle shows the next time the screen opens"); 058's "a pack entry for
-  the same texture wins" and 134's icons get the exception above (partly superseded by 200);
-  STATE.md's REVIVED SETTINGS line unchanged.
+Merged into `main` as 1a01efd7 (with finding 201's lane) and checked there once, 2026-11-11:
+- `python tools/check.py port -j 6`: every step OK (docs, tree, core, runtime tests, game build,
+  retail scan, network tests, `test_gs_wgpu --skip-hardware`, wasm2c chunks). Also
+  `rustgs.py test --target x86_64-pc-windows-msvc` (every crate test ok), `test_texpack.py` RESULT
+  PASS (81 `image:` checks and the font-icon checks, among them an unreadable pack picture and
+  another font texture with a pack), `test_gs_wgpu.py` with the hardware tests VERDICT PASS.
+- The browser build (`port/web/build.py build/wasm/dhd_core.wasm`) compiles with the `texpack_image`
+  stub and the new `native_decode`.
+- Boot (600 fields) and race (5000 fields) state traces with Unlock All off and never touched,
+  against f0971070's: `state_diff.py` PASS, every row equal.
+- In game (hidden desktop, untimed, posted keys as above, a fresh card):
+  - From a header-only dhd.ini: bonus and pro rider statues; Unlock All on in the page
+    (`pc settings: Unlock All: 1`), back to the rider select: all 14 riders shown, no restart; off
+    again (`Unlock All: 0`): the statues back, MOSHBOWL and SUPER JUMP greyed, the save's six
+    tracks. The page remembers its tab: a second visit opens on Game, so L1 is not pressed again.
+  - From `unlock_all = 1`: every rider shown; turned off in the page: the statues back.
+  - The synthetic pack with `prompts = xbox`: A and Y in the legends (main menu, OPTIONS, REVIVED
+    SETTINGS) over the pack's boxes; `nintendo`: B and X; `playstation`: the pack's own cells.
+    With no pack and `xbox`: the legend strips pixel for pixel equal to f0971070's.
+  - Unlock All on, the pack on, `xbox`: Kineticlops picked and raced on a Mountain Cross track
+    the save had not unlocked, 41 s of race, no error lines in dhd.log.
+- Not checked: a real controller on Auto, a remapped pad layout with a pack (covered by
+  `test_font_icons.c` on the copy), a players' real texture pack, the race HUD's prompts with a
+  pack (the race run showed no prompt on screen).
+- Findings 095 (when `func_001BB670` runs), 058 ("a pack entry wins") and 134 (the icons with a
+  pack) are partly superseded by this one. STATE.md's REVIVED SETTINGS line names this finding for
+  Unlock All and the button icons.

@@ -1,6 +1,6 @@
 # 095: PC SETTINGS "Unlock All" reads, never writes
 
-Status: current
+Status: partly superseded by 200 (when `func_001BB670` runs, and when a toggle shows on the rider select)
 Checked: 2026-11-04
 
 The option (dhd.ini `unlock_all`, `DHD_UNLOCK_ALL`, `port_unlock_all()` in `port/hle/pc_settings.c`,
@@ -44,8 +44,9 @@ A sweep of `build/asm` for these offsets found no asm-only (recompiled) reader; 
   none to the save (its other writes still happen, as in retail).
 - Pro riders (+0x12110) are beyond the retail cheat, which leaves the pros locked on the rider
   screen; online's "everything unlocked" (`port/hle/online_menu.c`) sets the same 0x3FFF, so the
-  option does too. `func_001BB670` caches the bits in `D_004B25A0.x3C` (not saved) and runs on each
-  rider-select entry, so a toggle shows the next time the screen opens.
+  option does too. `func_001BB670` caches the bits in `D_004B25A0.x3C` (not saved); it runs at the game's
+  start, a memory card load and the retail cheat, not on each rider-select entry. A toggle in the
+  game refreshes that cache at once (`port_unlock_refresh`, finding 200).
 - Online: it still writes and restores its own words with the memory card held; the readers' OR is
   harmless there. online.c picks riders from its own fixed `regular` list, not the save bits.
 - Left out: nothing the cheat gives. A bike picked from the port's list is copied by value to

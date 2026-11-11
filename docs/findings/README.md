@@ -97,7 +97,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 055 | [The movies play (round 40)](055-movies.md) | partly superseded | [140](140-widescreen-everywhere.md) for movies shown at 4:3 |
 | 056 | [Widescreen HUD at any shape, player defaults, EXIT GAME](056-widescreen-hud-defaults.md) | partly superseded | [101](101-one-settings-implementation.md) for player_defaults in host.c, the disc prompt, 4:3 cards; since 154 the bike shop corner past 16:9 |
 | 057 | [Round 40: texture replacement packs (upscale mods) in PCSX2's format](057-texture-packs.md) | current |  |
-| 058 | [the game's font drawn sharp at high resolutions](058-sharp-font.md) | current |  |
+| 058 | [the game's font drawn sharp at high resolutions](058-sharp-font.md) | partly superseded | [200](200-unlock-live-and-pack-icons.md) for a texture pack's entry for the menus' font with other button icons chosen |
 | 059 | [keyboard play and generic controllers (SDL3)](059-keyboard-generic-pads.md) | partly superseded | [099](099-one-code-path.md) for XInput/raw-HID fallback, the i686 SDL build |
 | 060 | [Native progressive field jitter](060-menu-jitter.md) | current |  |
 | 061 | [Pickup flare investigation (round 45)](061-pickup-flare.md) | current |  |
@@ -126,7 +126,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 092 | [online flow, centred menu layer, mouse (UI1)](092-ui.md) | partly superseded | [128](128-room-ready-bikes.md) for bike and outfit online "not done" |
 | 093 | [the player launcher (DownhillRevived.exe)](093-launcher.md) | current |  |
 | 094 | [Crash after a Super Career finish that does not advance (issue #8)](094-career-finish-crash.md) | current |  |
-| 095 | [PC SETTINGS "Unlock All" reads, never writes](095-unlock-all.md) | current |  |
+| 095 | [PC SETTINGS "Unlock All" reads, never writes](095-unlock-all.md) | partly superseded | [200](200-unlock-live-and-pack-icons.md) for when `func_001BB670` runs, and when a toggle shows on the rider select |
 | 096 | [Sky mosaic from high jumps (issue #2), native renderer](096-sky-mosaic.md) | current |  |
 | 097 | [the lens flare's Z probe caused the race stutter (issue #2)](097-lens-flare-probe-stutter.md) | current |  |
 | 098 | [a player couldn't create a public room (the disc image), and the log said nothing](098-online-disc-image-refusal.md) | current |  |
@@ -164,7 +164,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 131 | [The draw pass from first principles: where an iGPU frame's time goes, and what is left](131-gpu-first-principles.md) | current |  |
 | 132 | [Track picker names and disc previews](132-track-picker.md) | partly superseded | [166](166-online-more-tracks.md) for the 23-track list: 25 since 166 |
 | 133 | [Ambient sound too loud on Mt. Liddellroch (issue #19)](133-ambient-sound.md) | current |  |
-| 134 | [controllers: stick dead zone, button icons, starting without the launcher](134-controllers.md) | current |  |
+| 134 | [controllers: stick dead zone, button icons, starting without the launcher](134-controllers.md) | partly superseded | [200](200-unlock-live-and-pack-icons.md) for the icons when a texture pack replaces the menus' font |
 | 135 | [where the player and the room are, in dhd.log and in the room list, and rooms made near...](135-net-region.md) | current |  |
 | 136 | [The resolution scale the GPU allows, said where the player picks it](136-scale-cap.md) | current |  |
 | 137 | [rejoining players no longer clone themselves in online rooms](137-rejoin-clones.md) | current |  |
@@ -229,7 +229,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 196 | [smooth bilinear sprites at high resolution scale](196-native-rt-texture-scale.md) | current |  |
 | 197 | [the phone's vertex loops and palette path, Native VU off](197-phone-speed-2.md) | current |  |
 | 198 | [Native VU is the default](198-native-vu-default.md) | current |  |
-| 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | in progress |  |
+| 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | current |  |
 | 201 | [PowerVR GE8322 (driver 1.18) closes at the first picture's submit](201-powervr-ge8322-submit.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

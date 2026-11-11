@@ -1,6 +1,6 @@
 # 134: controllers: stick dead zone, button icons, starting without the launcher
 
-Status: current
+Status: partly superseded by 200 (the icons when a texture pack replaces the menus' font)
 Checked: 2026-11-04
 
 Branch `feat/controllers` (from `next/0.7.7`), merged for 0.7.7. Issues #20 (a dead-zone setting with a
@@ -132,6 +132,8 @@ new copy. Nothing is written to GS memory or game memory: the game and its state
 icons; the exact renderer (the reference path, `renderer = exact`) and the browser draw the PS2's
 icons. Sharpness: the copy has 64 texels a cell (the font copy's 2x, its memory cap); at 1x-4x the
 icons are drawn from mipmaps, at 8x magnified about 2x with the copy's filtering, like the text.
+With a texture pack that replaces the menus' atlas, the copy is made from the pack's picture at its
+own scale with the icons painted over it (finding 200).
 
 The first version of this lane drew letter discs as geometry in the game's text packet (a patch of
 `func_0020FDB0` calling `port/hle/prompts.c`); the drawn icons replace it, and the core is

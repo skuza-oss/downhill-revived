@@ -110,9 +110,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   Performance group (shadows and sun glow, lens flare, particles; finding 183), Native VU
   (on by default: VU1 programs as GPU shaders, falls back to the emulated VU when
   the GPU can't; findings 164, 167, 194, 198), movies,
-  vibration, stick dead zone and button icons (finding 134), the keys and controller buttons for
+  vibration, stick dead zone and button icons (finding 134; also over a texture pack's font,
+  finding 200), the keys and controller buttons for
   the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
-  Ping counter (findings 120, 169), online name size (finding 163), Unlock All (finding 095),
+  Ping counter (findings 120, 169), online name size (finding 163), Unlock All (finding 095;
+  applied at once, finding 200),
   EXIT GAME. dhd.ini has one implementation, the Rust crate `dhd_settings`
   (`port/render/settings`), used by the game, the launcher and the browser.
 - The launcher holds settings, rider name and updates on every desktop platform, decides the one

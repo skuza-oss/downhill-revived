@@ -1,6 +1,6 @@
 # 058: the game's font drawn sharp at high resolutions
 
-Status: current
+Status: partly superseded by 200 (a texture pack's entry for the menus' font with other button icons chosen)
 Checked: 2026-11-04
 
 Round 42. Code: `port/gs/font_sharp.c`, its hooks in the native front end (then
@@ -51,7 +51,9 @@ view: the pointers at `D_004F35B0[0..3]` (func_00210068), or a scene's font (fun
 3. **Drawing.** `native_replace` draws the copy as it draws a texture pack's replacement: flag
    2048, normalised texture space, the replacement samplers, mipmaps, anisotropic filtering when
    the GS filters.
-   - A pack entry for the same texture wins.
+   - A pack entry for the same texture wins, except for the menus' 512x512 atlas with other
+     button icons than the game's in their places: then the copy is made from the pack's picture
+     with the icons painted over it (finding 200).
    - For the menus' font in depth-buffer pages, `native_texture` takes the CPU copy and its
      sharp version before the GPU conversion. If there is no sharp copy, the conversion runs as
      before.
