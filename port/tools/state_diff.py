@@ -14,6 +14,13 @@ equal, or when both are code addresses of the same function (the symbol maps dec
 files of "ADDR NAME" lines; the default is the retail names in the wasm core's map,
 build/wasm/dhd.map (build_wasm.py).
 
+The regptrs column (finding 205) lists the register lanes whose value lies in the core's ranges,
+each with its raw value and its identity in that build (state_trace.c). Two lists are equal when
+they name the same lanes and each lane has the same raw value or the same identity (tag, id,
+offset; tag 0 has none): a pointer that moved with the core's layout is the same pointer, and a
+value that only looks like one is equal only when it is the same value. Every other column must be
+equal as it is.
+
 Game data: the traces and dumps hold game state. Keep them under build/."""
 import argparse
 import bisect
@@ -174,6 +181,41 @@ def check_dumps(path, prefix):
     return 1 if failures else 0
 
 
+def parse_regptrs(cell):
+    """{lane: (raw, tag, id, offset)} of a regptrs cell ('-' when empty)."""
+    out = {}
+    if cell in ('', '-'):
+        return out
+    for entry in cell.split(','):
+        lane, _, value = entry.partition('=')
+        raw, tag, ident, offset = value.split(':')
+        out[lane] = (int(raw, 16), int(tag), int(ident, 16), int(offset, 16))
+    return out
+
+
+def regptrs_differences(a, b):
+    """The lanes of two regptrs cells that differ: in one list only, or with another raw value
+    and another identity (or no identity). [] when the cells are equal."""
+    x, y = parse_regptrs(a), parse_regptrs(b)
+    bad = []
+    for lane in sorted(set(x) | set(y)):
+        if lane not in x or lane not in y:
+            bad.append(lane)
+            continue
+        (ra, ta, ia, oa), (rb, tb, ib, ob) = x[lane], y[lane]
+        if ra == rb or (ta and (ta, ia, oa) == (tb, ib, ob)):
+            continue
+        bad.append(lane)
+    return bad
+
+
+def cells_differ(column, a, b):
+    """Whether two cells of a column differ (regptrs by lane, every other column as text)."""
+    if column == 'regptrs':
+        return bool(regptrs_differences(a, b))
+    return a != b
+
+
 def section_names(columns):
     return columns[4:-1]  # ram .. sound (combined last)
 
@@ -196,7 +238,7 @@ def compare(a, b, args):
     first = None
     differing = []
     for ia, (x, y) in enumerate(zip(ra, rb)):
-        bad = [c for i, c in enumerate(ca) if i < len(x) and i < len(y) and x[i] != y[i]
+        bad = [c for i, c in enumerate(ca) if i < len(x) and i < len(y) and cells_differ(c, x[i], y[i])
                and c != 'stackwords']  # informational: a count of normalised words, not state
         if x[0] != y[0]:
             bad = ['field']
@@ -215,6 +257,12 @@ def compare(a, b, args):
     print('FIRST DIFFERENCE: field %s (row %d): %s' % (x[0], ia + 1, ', '.join(bad)))
     for c in bad:
         i = ca.index(c)
+        if c == 'regptrs':
+            xa, xb = parse_regptrs(x[i]), parse_regptrs(y[i])
+            for lane in regptrs_differences(x[i], y[i]):
+                show = lambda v: '-' if v is None else '%08X tag %d id %08X +%X' % v
+                print('  regptrs    %-6s A %s  B %s' % (lane, show(xa.get(lane)), show(xb.get(lane))))
+            continue
         print('  %-10s A %s  B %s' % (c, x[i], y[i]))
     print('rows differing: %d of %d (first 10 fields: %s)' %
           (len(differing), min(len(ra), len(rb)), ' '.join(f for f, _ in differing[:10])))

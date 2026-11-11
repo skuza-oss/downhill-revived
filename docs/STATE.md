@@ -212,10 +212,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the game runs their code (finding 104). Renderer: `test_gs_wgpu.py`, replay goldens recorded
   locally (`gs_golden.py`), `test_native_transfers.py`. Game state: per-field state traces
   (`port/hle/state_trace.c`, `state_trace_run.py`, `state_diff.py`), `test_fps_race.py`,
-  `rate_drift.py`, `slow_race.py`, `replay_check.py`. The boot and race traces are the merge gate;
-  a change that moves the core's own data can make race3-race5 differ in the cpu hash and in one
-  RAM word at the race load with no game state changed (core addresses the trace does not
-  normalise, finding 203). Server: `npm test` in `online/server`.
+  `rate_drift.py`, `slow_race.py`, `replay_check.py`. The seven recipes (`boot`, `race`, `race2`
+  to `race6`, which ones a change runs: `docs/TESTING.md`) are the merge gate again: since finding
+  205 the trace does not depend on the core's layout there (`state_trace_layout_test.py` proves
+  it), and a reference trace must be of the same format (2) and code-pointer list. `split` and
+  `memcard` still see the core's layout (finding 205's Result). Server: `npm test` in
+  `online/server`.
   Online: `port/net/build_tests.py`, `port/tools/online_race.py`. Retail comparisons with PCSX2:
   `compare_pcsx2.py`, `race_compare.py` (finding 024). Everything, with setup variables:
   `docs/TESTING.md`.

@@ -55,6 +55,8 @@ after a version change before a live check.
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` with direct UDP off (an SFU room's TURN relay, a P2P room's SFU fallback) |
 | `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game makes it (the hub), `--bots N` nettool bots join (`--sfu-bots K` of them with direct links off: they race over the SFU fallback, which needs `.dev.vars`), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, who raced over the SFU, snapshot age per sender (summary.json) |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below); `--hidden` runs both on the hidden desktop; `--link` puts the STATE each receives through a test link (`DHD_NET_LINK`) |
+| `port/tools/mosh_round_check.py OUT` | the arena's scored round online (finding 204): two games in a P2P room from the menus, on hidden desktops. The default `--scenario hit` has no computer riders, both riders braking at the gates and the guest punching and kicking: the guest must score on the host's rider, with the same finals, table and room results on both games (finding 206). `--scenario ride` pedals and attacks with computer riders (`--bots N`, `--then next`, `--no-ai`); `--offline` is the game's own Mosh Bowl |
+| `port/tools/online_riders.py` | the race pads the online tools give their riders (`rider_env`: `DHD_RACE_PAD` with `DHD_RACE_SYNC=1`) |
 | `port/tools/puppet_bench.py` | the puppet bench (finding 202, "The puppet bench" below): recorded riders replayed onto puppets through a seeded bad link, scored against the truth (distance, wheels in the ground, jumps and jolts, time frozen) |
 | `port/tools/puppet_lag.py RUN [--riders]` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169); `--riders`: every rider (the other player's and the AI riders) with the bench's scores, and the re-syncs in the first 5 s after GO, later and after crashes (finding 202; `online_race.py --lag` prints it) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot; `--rider N --bike A,B,C`: the rider and bike it says it rides) |
@@ -62,7 +64,8 @@ after a version change before a live check.
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
 | `online/server`: `npm test` | the server's own tests |
-| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour; `boot` and `race` are the merge gate and must be equal. A change that moves the core's own data can make `race3`-`race5` differ in the cpu hash and in one RAM word at the race load with no game state changed: raw GPRs equal (`DHD_STATE_GPRS=1`), the word a core address (finding 203) |
+| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour (below) |
+| `port/tools/state_trace_layout_test.py` | the state trace's own test (finding 205): `flips` (a rider word, a RAM word and a register changed in a run must be reported), `build-pad` then `layout` (a build whose core layout moved must give equal traces) |
 | `port/tools/room_tracks_check.py` | every track an online room offers loads and races: the state trace's race recipe with `DHD_RACE_SETUP=<track>` (headless, about two minutes a track); `--tracks 23,17` picks some (finding 203) |
 | `port/tools/test_scenery_rate.py` | the same race at 60, 144 and 240 (deterministic, headless): the helicopters', birds' and swooping attacker's speed in game time must match 60's (`DHD_SCENERY_TRACE`, finding 193); `--row N` / `--right N` pick the track (the chooser moved right N times; `--right` with every track unlocked) |
 | `port/tools/rate_audit.py` | words of EE memory that move once per update instead of once per field, from a 60 and a high-rate run (finding 090, FPS1); `--row`, `--skip`, `--samples` pick the race and its window |
@@ -74,6 +77,38 @@ after a version change before a live check.
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
 | `port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- --test native_spirv` | the native and the exact renderer's SPIR-V for every pipeline stage (raster.wgsl for every raster key too), made as wgpu-hal's Vulkan backend makes it, with no texture passed into a function (Mali's r54 compiler crashes on that, finding 153) and none of the forms LLVM 9 turns into `llvm.usub.sat`, `llvm.uadd.sat` or a funnel shift (PowerVR Rogue's driver 1.13 crashes on them, finding 170). `DHD_SPIRV_OUT=DIR` keeps the `.spv` files; with `DHD_MALIOC` every stage is also compiled by malioc for `DHD_MALIOC_CORE` (default `Mali-G57`); `DHD_NATIVE_WGSL=FILE` (`DHD_RASTER_WGSL=FILE`) compares another native.wgsl (raster.wgsl) |
+
+## The state trace
+
+The gate for a change that must not change the game (finding 081, the trace as it is since 205):
+the same recipe on the base build and on the changed one, headless and deterministic, then
+
+    python port/tools/state_trace_run.py race3 --name base-race3 --exe BASE/dhd64.exe
+    python port/tools/state_trace_run.py race3 --name new-race3
+    python port/tools/state_diff.py build/state-trace/base-race3.tsv build/state-trace/new-race3.tsv
+
+`state_diff.py` must print PASS: every row equal. Recipes: `boot` (the menus, 600 fields),
+`race` (the first track with the steering pad, 5000 fields), `race2` to `race6` (the other five
+unlocked tracks, the full-pedal pad, 14000 fields each; there is no `race1`, `race` is the first
+track), `split` (a two-player race) and `memcard` (save, then load). A change that can touch game
+state runs at least `boot` and `race`; a change to code every track runs (loading, riders, a track's
+own patch) runs `race2` to `race6` too. Both traces must come from the same trace format: the first
+line says `state-trace 2`; a trace of format 1 (before finding 205) does not compare with it, so
+regenerate a stored reference with its own executable. A stored reference (a release's traces kept
+outside the repository to diff against) is valid only when it is of format 2 and was made with
+the same `state_trace_codeptrs.txt` and `state_trace_mask.txt` as the run it is compared with;
+keep a note of the commit whose lists made it beside the traces, and when either list changes make
+new references (the old folder is then superseded, never mixed with the new one). `split` and
+`memcard` still compare only builds with the same core layout (finding 205's Result).
+
+The trace compares game state, not the core's layout: a register lane that holds a value in the
+core's ranges is compared by raw value or by what it points at (the `regptrs` column), and nothing
+the HLE gives the game points into the core's own data. A difference is therefore a difference
+of the game; `state_diff.py --dumps-a/--dumps-b` with `--dump FIELD` runs names the words.
+A change to the trace itself or to its lists (`state_trace_codeptrs.txt`, `state_trace_mask.txt`)
+runs `state_trace_layout_test.py flips` and `build-pad` then `layout`: a trace that misses a real
+change, or that differs only because the core's layout moved, fails there. The lists are part of
+the trace: two traces compare only when both runs used the same lists.
 
 A typical in-game check:
 
@@ -135,8 +170,8 @@ Menus and riding:
 | `DHD_NAV` | menu script by the screen shown, `field@ADDR=value:button,...` (autopad.c) |
 | `DHD_AUTOPAD_FRAMES` | button script by field count, `field:length:button,...` |
 | `DHD_AUTOPAD` | button script by seconds |
-| `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...` |
-| `DHD_RACE_SYNC=1` | race scripts run on the race clock |
+| `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...`; does nothing without `DHD_RACE_SYNC=1` and a menu script (below) |
+| `DHD_RACE_SYNC=1` | race scripts run on the race clock; without it `DHD_RACE_PAD` gives the rider no input (online tools: `online_riders.rider_env`, finding 206) |
 | `DHD_KEYS` | (race clock) keys through the keyboard's layout, `start:length:key[+key],...` with dhd.ini's key names (`space`, `j`, `kp1`, ...) or `esc` |
 | `DHD_TEST_PAD`, `DHD_TEST_PAD2` | (race clock) player 1's or 2's controller by its inputs' places, `start:length:input[+input],...` (`south`, `east`, `lt`, `dpad_up`, `lx=-50`, ...), through that player's layout (`pad1`, `pad2`) as a real pad's; logged as `test pad N` (finding 157) |
 | `DHD_REPLAY_TEST=S` | at race second S the race's replay starts, as REPLAY in the results does; `DHD_REPLAY_TRACE=path`: the riders' positions each field (finding 142) |
@@ -218,6 +253,14 @@ with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=nativ
   touches included; drive the menus by posted keys (finding 189).
 - **Posted keys don't reach the room under `DHD_NET_SCRIPTED`.** Use the scripted hooks
   (`DHD_NET_TEST_TRACK`, `DHD_NET_TEST_READY`) instead.
+- **A pad script shuts the keyboard out.** With `DHD_NAV`, `DHD_AUTOPAD` or `DHD_AUTOPAD_FRAMES`
+  set, `host_pad_read` takes the script's buttons and never reads the keyboard (autopad.c), all
+  game long: a game driven by posted keys must have none (`hidden_game.Game.key` refuses then).
+- **`DHD_RACE_PAD` without `DHD_RACE_SYNC=1` does nothing**, online too: the rider takes no input
+  and an online test's humans neither pedal nor attack (finding 206). The online tools set both
+  through `online_riders.rider_env`. An attack hits nothing before race tick 301
+  (`func_0012E230`), and riders that only roll leave the gates apart: braking (Triangle) keeps
+  two riders side by side for a hit.
 - **`wait REGEX` matches the whole log**, earlier lines too: wait for something new.
 - **A release `dhd.exe` opens the launcher** unless `DHD_LAUNCHER=1` or a script is set.
 - **`DHD_MEMCARD=0` stops a release boot at "memory card not found"** on some paths: use

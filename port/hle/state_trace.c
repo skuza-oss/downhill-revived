@@ -5,28 +5,38 @@
    serialization, field by field (never a memcpy of a host struct: padding and pointers differ
    between builds), so the same machine state gives the same hash in every build.
 
-   Host addresses are normalised by value. The game copies host values into its memory and
-   registers (uninitialised words, saved registers that held host pointers; findings 041, 081):
-   stack, heap and DLL addresses that move with Windows' ASLR. Every 32-bit word whose value
-   points into host-owned memory is replaced by 0x57AC57AC before hashing and dumping. Host-owned
-   means, from a VirtualQuery walk of the address space each field: private or mapped memory
-   (stacks, heaps, VirtualAlloc) and other modules' images, but not the PS2 memory (RAM, its
-   mirrors and low view, scratchpad, VU and register pages) and not dhd.exe's own image, which
-   is at a fixed address. The map has 64 KB granularity (Windows' allocation granularity). The
-   count of replaced words per field is the stackwords column (not part of combined). Risk: a
-   genuine game value that happens to equal a host address is hidden too; such values are rare
-   and mostly far from game data (floats near 1e-36, integers in the tens of millions).
+   The core's own addresses (finding 205). The core is one wasm32 module: its data, bss, shadow
+   stack and heap sit in its linear memory from 0x70100000 up, and a code address is an index into
+   its function table (from 0x12100). Where the linker puts them changes with any change to the
+   core, so a trace that hashed them raw would differ between builds of the same game. Guest RAM
+   holds such values only where a list says so (the code-pointer words below); the HLE gives the
+   game no pointer into the core's data (what the game must see sits at a fixed address, memory.h's
+   PS2_HLE_WINDOW). Registers are not listed: at a field boundary a register can hold a code
+   address, a pointer into the core, or plain data that only looks like one (text, floats). So a
+   register lane whose value falls in the core's ranges (CORE_* below: fixed bounds, the same in
+   every build) is hashed in cpu as a placeholder, and written to the regptrs column instead: its
+   raw value and its identity in this build (tag 1 a function, 2 a data symbol, 3 the shadow
+   stack, 4 the heap, each with an id and the offset in it; tag 0 none). state_diff.py counts two
+   lanes equal when their raw values are equal or their identities are (a pointer to the same
+   object moved with the layout); anything else is a difference. A value that is not a pointer is
+   therefore never compared as one: it is equal when it is the same value.
 
    Env (all optional):
      DHD_STATE_TRACE=<prefix>  the TSV, and the prefix of DHD_STATE_DUMP files
      DHD_STATE_DUMP=<f,f,...>  raw section files for those fields: <prefix>-f<field>-<section>.bin
      DHD_STATE_MASK=<file>     EE word addresses to hash as zero: one per line, "0xADDR reason"
      DHD_STATE_CODEPTRS=<file> EE word addresses that hold code addresses (see above)
-     DHD_STATE_NORM=host       normalise every host-owned address (the VirtualQuery map above)
-     DHD_STATE_NORM=fibers     normalise only addresses in the fixed EE thread stacks (0x06000000,
-                               16 MB), in ram, scratch, hw and cpu: the same rule in every build
-     DHD_STATE_GPRS=1          <prefix>.gprs.tsv: per field, the raw GPR lanes and cpu's lane-0
-                               classification, to prove a cpu difference is classification only
+     DHD_STATE_NORM=fibers     replace every word whose value lies in the fixed EE thread stacks
+                               (0x06000000, 16 MB) by 0x57AC57AC in ram, scratch, hw and cpu, for
+                               a comparison between two compilers (their frame layouts differ);
+                               the stackwords column counts them. No other value is accepted.
+     DHD_STATE_GPRS=1          <prefix>.gprs.tsv: per field, the raw GPR lanes and lane 0's
+                               identity, and the hash of cpu after the GPRs
+     DHD_STATE_FLIP=<list>     a test of the trace (state_trace_layout_test.py): changes real state
+                               just before the named fields are hashed, so the diff against a run
+                               without it must report them. Entries "<field>:ram:<EE address>:<xor>"
+                               (a RAM word) and "<field>:reg:<GPR>:<xor>" (lane 0 of an EE register),
+                               comma-separated
      DHD_STATE_STOP=<field>    end the process after that field's row (the run's length)
      DHD_STOP_FIELD=<field>    without DHD_STATE_TRACE: end after that field, nothing traced (timing)
      DHD_STATE_EXE=<sha256>    the executable's hash, copied into the header (the runner sets it)
@@ -40,13 +50,14 @@
    gs_feed this field, in call order), gs_regs (GS registers and path state, not the renderer's
    bookkeeping), gs_vram (the software VRAM, 4 MB, not normalised), sound (the PCM rendered this
    field and the rendered sample count), and the ids: field, menu, phase, race clock, next_vsync
-   (in combined). The combined column hashes all section values and the ids, in order.
+   (in combined). The combined column hashes all section values and the ids, in order; regptrs
+   (the register lanes in the core's ranges, above) is compared by state_diff.py on its own.
 
    Code pointers (finding 081, phase 2): some EE words hold host code addresses (function pointers
    of the data image and callbacks the game stores). Their values move with any code change, so
    they are left out of ram (hashed as zero) and hashed in the code section by identity instead:
    the function that contains the value (a stable id of its name, from the link-time table
-   port/tools/codeids.py writes into dhd.exe) and the offset inside it; a value in no function is
+   port/tools/codeids.py writes into the core) and the offset inside it; a value in no function is
    hashed raw. The words are the data image's fixups whose value lies in dhd.exe's .text, plus
    the addresses listed in DHD_STATE_CODEPTRS (one per line, "0xADDR reason"; the runner passes
    port/tools/state_trace_codeptrs.txt). A listed address in the scratchpad (0x70000000..
@@ -78,10 +89,22 @@ uint64_t snd_test_position(void); /* sound.c: samples rendered so far */
 #define HW_SIZE_A (64u << 10)  /* 0x10000000: timers, INTC, DMA */
 #define HW_SIZE_B (8u << 10)   /* 0x12000000: GS privileged registers */
 #define VU_MEMORY (64u << 10)  /* 0x11000000: VU0 micro (4 KB), VU0 data (4 KB), VU1 micro (16 KB), VU1 data (16 KB) */
-#define STACK_WORD 0x57AC57ACu  /* what a host address is replaced with */
+#define STACK_WORD 0x57AC57ACu  /* what DHD_STATE_NORM=fibers replaces a fiber stack address with */
 #define MENU_ADDR 0x0829DED8u  /* the same addresses autopad.c and fps.c read */
 #define PHASE_ADDR 0x0843F348u
 #define CLOCK_ADDR 0x0843EEC8u
+
+/* The core's ranges (finding 205): fixed bounds, the same in every build, so whether a value is
+   looked up does not depend on the layout. The function table starts at build_wasm.py's
+   TABLE_BASE; the module's own memory at HOST64_MODULE_BASE and ends below build_wasm.py's
+   MAX_MEMORY. state_trace_init checks every table row lies inside them. */
+#define CORE_TABLE_LO 0x00012100u
+#define CORE_TABLE_HI 0x00022100u   /* room for 65536 functions */
+#define CORE_MEMORY_LO 0x70100000u
+#define CORE_MEMORY_HI 0x80000000u
+/* wasm-ld's layout symbols: data and bss, then the shadow stack [__stack_low, __stack_high), then
+   the heap from __heap_base. */
+extern char __stack_low[], __stack_high[], __heap_base[];
 
 /* The link-time code table (codeids.py). */
 extern const uint32_t dhd_code_count;
@@ -107,58 +130,22 @@ static void buf_bytes(Buf *b, const void *data, size_t size)
     b->n += size;
 }
 
-/* Host-owned 64 KB granules of the 4 GB address space, rebuilt each field, and how many words
-   were replaced in this field. */
-static uint8_t host_granule[65536];
+/* DHD_STATE_NORM=fibers: words that point into the fixed EE thread stacks, replaced, and how many
+   in this field (the stackwords column). */
 static uint64_t stack_words;
-static int norm_fibers;  /* DHD_STATE_NORM=fibers: ram, scratch, hw and cpu only (no host pointer reaches VU or GS) */
-static int norm_off;     /* set around the vu0 and gs_regs serializations under norm_fibers */
+static int norm_fibers;  /* ram, scratch, hw and cpu only (no stack address reaches VU or GS) */
+static int norm_off;     /* set around the vu0 and gs_regs serializations */
 
-static int ps2_owned(uintptr_t a)
-{
-    return a < PS2_RAM_SIZE  /* the low view (PS2_LOW_VIEW up) and the null page below it */
-        || (a >= PS2_RAM_BASE && a < PS2_RAM_BASE + PS2_RAM_SIZE)
-        || (a >= (0x20000000u | PS2_RAM_BASE) && a < (0x20000000u | PS2_RAM_BASE) + PS2_RAM_SIZE)
-        || (a >= (0x30000000u | PS2_RAM_BASE) && a < (0x30000000u | PS2_RAM_BASE) + PS2_RAM_SIZE)
-        || (a >= 0x10000000u && a < 0x10010000u) || (a >= 0x11000000u && a < 0x11010000u)
-        || (a >= 0x12000000u && a < 0x12002000u)
-        || (a >= PS2_SCRATCHPAD && a < PS2_SCRATCHPAD + SCRATCH_SIZE);
-}
-
-/* Each host memory region's 64 KB granules that PS2 memory doesn't own are host addresses. */
-static void mark_host_region(uint32_t ctx, uintptr_t base, uintptr_t end, int host)
-{
-    if (!host) return;
-    for (uintptr_t g = base & ~(uintptr_t)0xFFFF; g < end && g >= (base & ~(uintptr_t)0xFFFF); g += 0x10000)
-        if (!ps2_owned(g)) host_granule[g >> 16] = 1;
-}
-
-static void map_host_memory(void)
-{
-    memset(host_granule, 0, sizeof host_granule);
-    const char *norm = getenv("DHD_STATE_NORM");
-    if (norm && !strcmp(norm, "fibers")) {
-        /* Only the fixed EE thread stacks of a state trace (host_fiber_create, 0x06000000, 16 MB),
-           at the same addresses in every build: a C local's address that the game keeps (a stale
-           pointer, a register spilled by recompiled code) depends on the compiler's frame layout. */
-        for (uint32_t g = 0x0600; g < 0x0700; g++) host_granule[g] = 1;
-        norm_fibers = 1;
-        return;
-    }
-    if (!norm || strcmp(norm, "host")) return;  /* off unless asked for */
-    host_callback_memory_regions(HOST_CALLBACK(mark_host_region), 0);
-}
-
-/* A 32-bit word, with a host address replaced (and counted). */
 static uint32_t norm32(uint32_t v)
 {
-    if (norm_off || !host_granule[v >> 16]) return v;
+    if (!norm_fibers || norm_off || (v >> 24) != 0x06u) return v;
     stack_words++;
     return STACK_WORD;
 }
 /* Replaces the normalised words of a little-endian byte range in place (size a multiple of 4). */
 static void norm_bytes(uint8_t *p, size_t size)
 {
+    if (!norm_fibers || norm_off) return;
     for (size_t i = 0; i + 4 <= size; i += 4) {
         uint32_t v;
         memcpy(&v, p + i, 4);
@@ -288,9 +275,10 @@ static void code_pointers_init(void)
             code_word_count, fixups, listed, (unsigned)dhd_code_count);
 }
 
-/* A host address by identity: tag 1 for a code symbol (dhd_code_table), tag 2 for a data or bss
-   symbol (dhd_data_table), each with the symbol's id and the offset inside it; tag 0 with the raw
-   value when no symbol contains it. */
+/* A core address by identity: tag 1 for a function (dhd_code_table), tag 2 for a data or bss
+   symbol (dhd_data_table), each with the symbol's id and the offset inside it; tag 3 for the shadow
+   stack (id 0, the offset below its top: a data change moves the stack, not the frames on it), tag
+   4 for the heap (id 0, the offset from its base); tag 0 with the raw value otherwise. */
 static int in_symbol_table(const uint32_t (*table)[3], uint32_t count, uint32_t v, uint32_t *id, uint32_t *offset)
 {
     size_t lo = 0, hi = count;  /* the last entry whose start is <= v */
@@ -311,6 +299,83 @@ static void code_identity(uint32_t v, uint32_t *tag, uint32_t *id, uint32_t *off
     *tag = 0; *id = v; *offset = 0;
     if (in_symbol_table(dhd_code_table, dhd_code_count, v, id, offset)) { *tag = 1; return; }
     if (in_symbol_table(dhd_data_table, dhd_data_count, v, id, offset)) { *tag = 2; return; }
+    uint32_t stack_low = (uint32_t)(uintptr_t)__stack_low, stack_high = (uint32_t)(uintptr_t)__stack_high;
+    if (v >= stack_low && v < stack_high) { *tag = 3; *id = 0; *offset = stack_high - v; return; }
+    if (v >= (uint32_t)(uintptr_t)__heap_base && v < CORE_MEMORY_HI) {
+        *tag = 4; *id = 0; *offset = v - (uint32_t)(uintptr_t)__heap_base;
+    }
+}
+
+/* A value the trace looks up (a register lane): in the function table's or the module memory's
+   fixed range. */
+static int in_core_range(uint32_t v)
+{
+    return (v >= CORE_TABLE_LO && v < CORE_TABLE_HI) || (v >= CORE_MEMORY_LO && v < CORE_MEMORY_HI);
+}
+
+/* Every identity table row inside the fixed ranges, else the trace would hash a real core address
+   raw. */
+static void check_core_ranges(void)
+{
+    for (uint32_t i = 0; i < dhd_code_count; i++)
+        if (dhd_code_table[i][0] < CORE_TABLE_LO || dhd_code_table[i][0] + dhd_code_table[i][1] > CORE_TABLE_HI) {
+            fprintf(stderr, "state-trace: function table row %08X outside [%08X, %08X)\n", dhd_code_table[i][0],
+                    CORE_TABLE_LO, CORE_TABLE_HI);
+            host_exit(3);
+        }
+    for (uint32_t i = 0; i < dhd_data_count; i++)
+        if (dhd_data_table[i][0] < CORE_MEMORY_LO) {
+            fprintf(stderr, "state-trace: data row %08X below %08X\n", dhd_data_table[i][0], CORE_MEMORY_LO);
+            host_exit(3);
+        }
+    if ((uint32_t)(uintptr_t)__stack_low < CORE_MEMORY_LO || (uint32_t)(uintptr_t)__heap_base < CORE_MEMORY_LO) {
+        fprintf(stderr, "state-trace: the shadow stack or the heap below %08X\n", CORE_MEMORY_LO);
+        host_exit(3);
+    }
+}
+
+/* DHD_STATE_FLIP: the changes to make, and at which field. */
+static struct { unsigned long long field; int reg; uint32_t address, xor; } flips[16];
+static unsigned flip_count;
+
+static void parse_flips(const char *list)
+{
+    while (*list && flip_count < sizeof flips / sizeof *flips) {
+        char kind[8] = {0};
+        unsigned long long field;
+        unsigned long target, xor;
+        int used = 0;
+        if (sscanf(list, "%llu:%7[a-z]:%li:%li%n", &field, kind, &target, &xor, &used) != 4
+            || (strcmp(kind, "ram") && strcmp(kind, "reg"))) {
+            fprintf(stderr, "state-trace: DHD_STATE_FLIP: bad entry at \"%s\"\n", list);
+            host_exit(3);
+        }
+        int reg = !strcmp(kind, "reg");
+        if (reg ? target >= 32 : target >= RAM_SIZE) {
+            fprintf(stderr, "state-trace: DHD_STATE_FLIP: %s %lu out of range\n", kind, target);
+            host_exit(3);
+        }
+        flips[flip_count].field = field;
+        flips[flip_count].reg = reg;
+        flips[flip_count].address = (uint32_t)target;
+        flips[flip_count].xor = (uint32_t)xor;
+        flip_count++;
+        list += used;
+        if (*list == ',') list++;
+    }
+}
+
+static void apply_flips(uint64_t field)
+{
+    for (unsigned i = 0; i < flip_count; i++) {
+        if (flips[i].field != field) continue;
+        if (flips[i].reg)
+            ps2.gpr[flips[i].address].w[0] ^= flips[i].xor;
+        else
+            *(volatile uint32_t *)PS2_PTR(flips[i].address & ~3u) ^= flips[i].xor;
+        fprintf(stderr, "state-trace: DHD_STATE_FLIP at field %llu: %s %u ^= 0x%X\n", (unsigned long long)field,
+                flips[i].reg ? "register" : "EE word", (unsigned)flips[i].address, (unsigned)flips[i].xor);
+    }
 }
 
 static void parse_dump(const char *list)
@@ -338,7 +403,7 @@ static const char *header_env[] = {
     "DHD_RACE_SEED", "DHD_NAV", "DHD_AUTOPAD", "DHD_AUTOPAD_FRAMES", "DHD_RACE_SYNC", "DHD_RACE_PAD",
     "DHD_RACE_PAD1", "DHD_RACE_PAD2", "DHD_RACE_PAD3", "DHD_PADS", "DHD_FPS", "DHD_STEP_CLOCK", "DHD_LATENCY",
     "DHD_INTERP", "DHD_KEYS", "DHD_GS_CAPTURE", "DHD_HASH_LOG", "DHD_PROFILE", "DHD_STATE_STOP",
-    "DHD_STATE_MASK", "DHD_STATE_CODEPTRS", "DHD_STATE_NORM", "DHD_STATE_NOWAIT", "DHD_SYNC_STRICT",
+    "DHD_STATE_MASK", "DHD_STATE_CODEPTRS", "DHD_STATE_NORM", "DHD_STATE_NOWAIT", "DHD_STATE_FLIP", "DHD_SYNC_STRICT",
     "DHD_KEYBOARD", "DHD_PAD1", "DHD_PAD2", "DHD_TEST_PAD", "DHD_TEST_PAD2", NULL};
 
 const char *state_trace_watch_spec(void)
@@ -352,6 +417,15 @@ void state_trace_init(void)
     const char *prefix = getenv("DHD_STATE_TRACE");
     if (!prefix || !*prefix) return;
     snprintf(st.prefix, sizeof st.prefix, "%s", prefix);
+    const char *norm = getenv("DHD_STATE_NORM");
+    if (norm && *norm) {
+        if (strcmp(norm, "fibers")) {
+            fprintf(stderr, "state-trace: DHD_STATE_NORM=%s: the only value is fibers\n", norm);
+            host_exit(3);
+        }
+        norm_fibers = 1;
+    }
+    check_core_ranges();
     char path[512];
     snprintf(path, sizeof path, "%s.tsv", prefix);
     st.tsv = fopen(path, "wb");
@@ -367,12 +441,13 @@ void state_trace_init(void)
         snprintf(path, sizeof path, "%s.gprs.tsv", prefix);
         gprs_log = fopen(path, "wb");
         if (!gprs_log) { fprintf(stderr, "state-trace: cannot write %s\n", path); host_exit(3); }
-        fprintf(gprs_log, "field\trest\tr0..r31 as lane0:tag:id:offset:lane1:lane2:lane3\n");
+        fprintf(gprs_log, "field\trest\tr0..r31 as lane0:tag:id:offset:lane1:lane2:lane3 (raw lanes, lane 0's identity)\n");
     }
     ptrs_last = malloc((code_word_count ? code_word_count : 1) * 3 * sizeof *ptrs_last);
     if (!ptrs_last) { fprintf(stderr, "state-trace: out of memory\n"); host_exit(3); }
     for (size_t i = 0; i < 3 * code_word_count; i++) ptrs_last[i] = 0xFFFFFFFFu;
     if (getenv("DHD_STATE_DUMP")) parse_dump(getenv("DHD_STATE_DUMP"));
+    if (getenv("DHD_STATE_FLIP")) parse_flips(getenv("DHD_STATE_FLIP"));
     if (getenv("DHD_STATE_STOP")) st.stop = strtoull(getenv("DHD_STATE_STOP"), NULL, 10);
     st.ram_copy = malloc(RAM_SIZE);
     if (!st.ram_copy) { fprintf(stderr, "state-trace: out of memory\n"); host_exit(3); }
@@ -382,14 +457,17 @@ void state_trace_init(void)
     st.nowait = getenv("DHD_STATE_NOWAIT") && *getenv("DHD_STATE_NOWAIT");
     if (!st.nowait) host_service_gs_trace_begin();
 
-    fprintf(st.tsv, "# state-trace 1 exe=%s prefix=%s env=", getenv("DHD_STATE_EXE") ? getenv("DHD_STATE_EXE") : "-",
-            prefix);
+    /* core=: where this build's linker put the core (the shadow stack's top, the heap's base, the
+       function table's rows), so a comparison can show the two layouts differed; not compared */
+    fprintf(st.tsv, "# state-trace 2 exe=%s core=%08X:%08X:%u prefix=%s env=",
+            getenv("DHD_STATE_EXE") ? getenv("DHD_STATE_EXE") : "-", (unsigned)(uintptr_t)__stack_high,
+            (unsigned)(uintptr_t)__heap_base, (unsigned)dhd_code_count, prefix);
     for (int i = 0; header_env[i]; i++) {
         const char *v = getenv(header_env[i]);
         if (v && *v) fprintf(st.tsv, "%s=%s ", header_env[i], v);
     }
     fprintf(st.tsv, "\n");
-    fprintf(st.tsv, "field\tmenu\tphase\tclock\tram\tscratch\thw\tcpu\tvu0\tgs_stream\tgs_regs\tgs_vram\tsound\tcode\tcombined\tstackwords\n");
+    fprintf(st.tsv, "field\tmenu\tphase\tclock\tram\tscratch\thw\tcpu\tvu0\tgs_stream\tgs_regs\tgs_vram\tsound\tcode\tregptrs\tcombined\tstackwords\n");
     fprintf(stderr, "state-trace: writing %s\n", path);
 }
 
@@ -440,26 +518,36 @@ static void put_q128(Buf *b, const ps2_q128 *q)
     for (int i = 0; i < 4; i++) put32(b, q->w[i]);  /* the four 32-bit lanes */
 }
 
-/* A MIPS register: its low lane is hashed by identity when it holds a host code address (a function
-   the game got as an argument; it moves with any code change, as the code pointers in memory do),
-   and raw otherwise. */
-static void put_gpr(Buf *b, const ps2_q128 *q)
+/* The regptrs column of this field: "<unit><register>.<lane>=<raw>:<tag>:<id>:<offset>" entries,
+   comma-separated ("-" when none); unit c is the EE (cpu), v VU1's register snapshot (vu0). */
+static Buf regptrs;
+
+/* A MIPS register, lane by lane: a lane in the core's ranges is hashed as the placeholder
+   CORE_LANE and goes to regptrs with its raw value and identity; any other lane is hashed as it is.
+   Every lane takes 4 bytes, so the serialization's size does not depend on the values. */
+#define CORE_LANE 0xC0BEC0BEu
+static void put_gpr(Buf *b, const ps2_q128 *q, char unit, int reg)
 {
-    uint32_t tag, id, offset;
-    code_identity(q->w[0], &tag, &id, &offset);
-    put32raw(b, tag);
-    if (tag) { put32raw(b, id); put32raw(b, offset); }
-    else put32(b, q->w[0]);
-    for (int i = 1; i < 4; i++) put32(b, q->w[i]);
+    for (int i = 0; i < 4; i++) {
+        uint32_t v = q->w[i];
+        if (!in_core_range(v)) { put32(b, v); continue; }
+        put32raw(b, CORE_LANE);
+        uint32_t tag, id, offset;
+        code_identity(v, &tag, &id, &offset);
+        char entry[64];
+        int n = snprintf(entry, sizeof entry, "%s%c%d.%d=%08X:%u:%08X:%X", regptrs.n ? "," : "", unit, reg, i,
+                         (unsigned)v, (unsigned)tag, (unsigned)(tag ? id : 0u), (unsigned)offset);
+        buf_bytes(&regptrs, entry, (size_t)n);
+    }
 }
 
-static void serialize_cpu(Buf *b, const ps2_cpu *c)
+static void serialize_cpu(Buf *b, const ps2_cpu *c, char unit)
 {
     buf_reset(b);
     /* gpr[0..31] are the MIPS registers. gpr[32..63] stand for the asm operands of one template
        (ps2asm.h), so they are scratch between fields, and they can hold host stack pointers.
        Not hashed. */
-    for (int i = 0; i < 32; i++) put_gpr(b, &c->gpr[i]);
+    for (int i = 0; i < 32; i++) put_gpr(b, &c->gpr[i], unit, i);
     put64(b, c->lo); put64(b, c->hi); put64(b, c->lo1); put64(b, c->hi1);
     for (int i = 0; i < 64; i++) putf(b, c->fpr[i]);
     putf(b, c->fpu_acc);
@@ -539,12 +627,11 @@ void state_trace_field(uint64_t field, uint64_t next_vsync)
             free(packet);
         }
     }
+    apply_flips(field);
     int32_t menu = *(volatile int32_t *)(uintptr_t)MENU_ADDR;
     int32_t phase = *(volatile int32_t *)(uintptr_t)PHASE_ADDR;
     int32_t clock = *(volatile int32_t *)(uintptr_t)CLOCK_ADDR;
 
-    /* the host-owned memory as it stands now */
-    map_host_memory();
     stack_words = 0;
 
     int dump_now = st.dumping && dump_wanted(field);
@@ -610,7 +697,8 @@ void state_trace_field(uint64_t field, uint64_t next_vsync)
     if (dump_now) { buf_bytes(&hw_bytes, st.vu.p, st.vu.n); }
 
     /* cpu */
-    serialize_cpu(&st.cpu, &ps2);
+    buf_reset(&regptrs);
+    serialize_cpu(&st.cpu, &ps2, 'c');
     uint64_t h_cpu = hash_buf(&st.cpu);
 
     /* vu0: VU memory (raw, 0x11000000 to 0x11010000, normalised) then VU1's register file */
@@ -622,7 +710,7 @@ void state_trace_field(uint64_t field, uint64_t next_vsync)
         Buf regs = {0, 0, 0};
         _Static_assert(offsetof(ps2_cpu,vu0_code)==1892 && offsetof(ps2_cpu,cop0)==1900,"wasm32 VU snapshot layout");
         ps2_cpu vu1_snapshot;
-        if (host_vu1_snapshot(GADDR(&vu1_snapshot))) serialize_cpu(&regs,&vu1_snapshot);
+        if (host_vu1_snapshot(GADDR(&vu1_snapshot))) serialize_cpu(&regs,&vu1_snapshot,'v');
         buf_bytes(&st.vu, regs.p, regs.n);
         free(regs.p);
     }
@@ -658,18 +746,16 @@ void state_trace_field(uint64_t field, uint64_t next_vsync)
     uint64_t h_combined = hash_buf(&all);
     free(all.p);
 
-    fprintf(st.tsv, "%llu\t%d\t%d\t%d\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%llu\n",
+    fprintf(st.tsv, "%llu\t%d\t%d\t%d\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%016llx\t%.*s\t%016llx\t%llu\n",
             (unsigned long long)field, menu, phase, clock, (unsigned long long)h_ram, (unsigned long long)h_scratch,
             (unsigned long long)h_hw, (unsigned long long)h_cpu, (unsigned long long)h_vu0,
             (unsigned long long)h_stream, (unsigned long long)h_gs_regs, (unsigned long long)h_gs_vram,
-            (unsigned long long)h_sound, (unsigned long long)h_code, (unsigned long long)h_combined,
-            (unsigned long long)stack_words);
+            (unsigned long long)h_sound, (unsigned long long)h_code, regptrs.n ? (int)regptrs.n : 1,
+            regptrs.n ? (const char *)regptrs.p : "-", (unsigned long long)h_combined, (unsigned long long)stack_words);
 
     if (gprs_log) {
-        /* put_gpr's sizes: tag, then id and offset or the value, then three lanes */
-        size_t gpr_bytes = 0;
+        size_t gpr_bytes = 32 * 16;  /* put_gpr: four 4-byte lanes per register */
         uint32_t tag, id, offset;
-        for (int r = 0; r < 32; r++) { code_identity(ps2.gpr[r].w[0], &tag, &id, &offset); gpr_bytes += tag ? 24 : 20; }
         fprintf(gprs_log, "%llu\t%016llx", (unsigned long long)field,
                 (unsigned long long)XXH64(st.cpu.p + gpr_bytes, st.cpu.n - gpr_bytes, 0));
         for (int r = 0; r < 32; r++) {

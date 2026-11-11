@@ -42,7 +42,10 @@ static const struct {
 #define NSERVERS (int)(sizeof servers / sizeof *servers)
 
 /* The SDK polls packet word 4 (allocated) and word 6 (RPC id). Synchronous
-   calls wait on a semaphore; NOWAIT retains the caller's buffers until reply. */
+   calls wait on a semaphore; NOWAIT retains the caller's buffers until reply. The client's packet
+   word points at the packet, and the game keeps the client in its RAM: the packets are in the HLE
+   window (memory.h), at the same address in every build, not in this file's .bss, which moves with
+   the core's layout (finding 205). */
 typedef struct { int count, max_count, init_count, wait_threads; uint32_t attr, option; } RpcSema;
 extern int func_0025A6E0(RpcSema *);
 extern int func_0025A6F0(int);
@@ -51,7 +54,7 @@ extern int func_0025A710(int);
 
 typedef struct {
     SifClient *client;
-    uint32_t packet[16];
+    uint32_t *packet;          /* 16 words in the HLE window */
     double due;
     int server, fno, ssize, rsize, sema;
     void *send, *recv;
@@ -60,6 +63,12 @@ typedef struct {
 } RpcPending;
 static RpcPending pending[32];
 static uint32_t rpc_id;
+_Static_assert(sizeof pending / sizeof *pending * 16 * 4 <= 0x800, "SIF packets: their part of the HLE window");
+
+static uint32_t *rpc_packet(unsigned slot)
+{
+    return (uint32_t *)(uintptr_t)PS2_HLE_WINDOW + slot * 16;
+}
 
 double sif_next_event(void)
 {
@@ -122,8 +131,9 @@ int sceSifCallRpc(SifClient *cd, int fno, int mode, void *send, int ssize, void 
         hle_log("rpc %s %d (send %d, receive %d, mode %d)\n", servers[s].name, fno, ssize, rsize, mode);
     if (cd->packet) return -1;
     RpcPending *p = NULL;
+    unsigned slot = 0;
     for (unsigned i = 0; i < sizeof pending / sizeof *pending; i++)
-        if (!pending[i].client) { p = &pending[i]; break; }
+        if (!pending[i].client) { p = &pending[i]; slot = i; break; }
     if (!p) return -1;
     int sema = -1;
     if (!(mode & 1)) {
@@ -132,6 +142,8 @@ int sceSifCallRpc(SifClient *cd, int fno, int mode, void *send, int ssize, void 
         if (sema < 0) return -1;
     }
     memset(p, 0, sizeof *p);
+    p->packet = rpc_packet(slot);
+    memset(p->packet, 0, 16 * 4);
     p->client = cd;
     p->due = host_seconds() + 0.001;  /* synthetic IOP service latency */
     p->server = s; p->fno = fno; p->ssize = ssize; p->rsize = rsize;

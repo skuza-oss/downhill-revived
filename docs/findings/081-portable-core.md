@@ -2,6 +2,8 @@
 
 Status: partly superseded by 088 (the phase status; the 32-bit description is the then-state)
 Checked: 2026-11-04
+Also partly superseded by 205: `DHD_STATE_NORM=host` is gone, and registers that hold core addresses
+compare by raw value or by identity (the `regptrs` column).
 
 Written during phase 1 (2026-10-24, branch `port/portable-core`). Every phase is done since: the
 64-bit build is the only build and shipped as 0.4.0 (finding 088).
@@ -172,8 +174,8 @@ Three sources of nondeterminism were found and removed:
    free: its stacks live in linear memory, so put them in the same range.
 3. **Normalising host addresses by value doesn't work.** Fiber stacks and the heap sit at
    0x04xxxxxx, and so do genuine game constants (VIF codes such as 0x04200E00 in D_00278044), so
-   the normalisation hid real data in some runs. It is now opt-in only (`DHD_STATE_NORM=host`)
-   and unused.
+   the normalisation hid real data in some runs. It became opt-in only (`DHD_STATE_NORM=host`),
+   unused; finding 205 removed it (a wasm32 core cannot hold the host's addresses).
 
 For the i686 vs 64-bit comparison, the remaining expected differences are words that hold host code
 addresses (function pointers: recompiled functions, callbacks). `state_diff.py` compares those by
@@ -249,7 +251,9 @@ Pick one by measuring the dispatch cost (host64_bench.py).
 ## Baseline b2 (2026-10-24 06:47)
 
 From commit 6789c48e on, the trace compares code pointers by function identity (W1). This covers the
-1,348 learned code words in RAM and the GPRs (`put_gpr`), plus a `code` column. The cdvd.c leak is
+1,348 learned code words in RAM and the GPRs (`put_gpr`), plus a `code` column. (Since finding 205
+a register lane in the core's fixed ranges is compared by raw value or by identity, in `regptrs`,
+not classified by value.) The cdvd.c leak is
 fixed: sceCdSearchFile's reply copied host stack bytes into EE 0x00760854.
 
 The new reference traces are `build/state-trace/base-boot.tsv` (600 fields) and `base-race.tsv`
@@ -263,6 +267,8 @@ VU1's register file through `serialize_cpu`, which now hashes GPRs through `put_
 From here on, a refactor or the x64 build is compared with base-* on every column, without
 `--ignore`. The exception is cpu between builds with different code layouts: derived temporaries
 (e.g. gpr[9] = code address + offset) can differ there. Those fields are checked with state_diff.py.
+(Finding 205 replaces this: register lanes holding core addresses compare in `regptrs`, and two
+builds with different core layouts give equal traces on the merge gate's recipes.)
 
 Check of the merged build d42da166 against base-*: ram, scratch, hw, vu0, gs_* and sound are
 identical in all 600 boot and 5000 race fields. cpu differs from field 150. A dump at field 150 of

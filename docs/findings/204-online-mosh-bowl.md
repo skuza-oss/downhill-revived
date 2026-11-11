@@ -217,7 +217,7 @@ itself. `func_00173A18` skips a course state machine in mode 15 (the arena has n
   nor attacked, so the human riders scored 0. With `DHD_RACE_SYNC=1` the scripted pad works
   online. An attack also hits nothing before race tick 301 (`func_0012E230`), and riders that
   only roll leave the gates apart; braking at the gates (Triangle) and attacking from 5 s landed
-  hits (the checks above).
+  hits (the checks above). Finding 206 gave the tool's online riders that switch.
 
 ## Runs
 
@@ -259,8 +259,6 @@ Open:
 
 - A real two-machine round in an SFU room (every run here was a P2P room on one PC). A human's
   points on a puppet were seen in a scripted run (Progress), not yet between two machines.
-- `mosh_round_check.py`'s online games lack `DHD_RACE_SYNC=1` (Surprises): its riders take no
-  input.
 - A round with a phone (Android: the same core) and one in the browser's P2P room (`net.js`'s
   score and layout were regenerated, `gen_net_layout.py --check`'s text part passes; its clang step
   needs a wasm32 libc on this PC and did not run).

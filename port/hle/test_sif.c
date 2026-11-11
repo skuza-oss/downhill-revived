@@ -46,6 +46,8 @@ static void completed(uint32_t arg)
 static int busy(const Client *c)
 {
     const uint32_t *p = (void *)(uintptr_t)c->words[0];
+    /* the packet is in the HLE window, at the same address in every build (finding 205) */
+    assert(!p || ((uintptr_t)p >= PS2_HLE_WINDOW && (uintptr_t)p < PS2_HLE_WINDOW + 0x800));
     return p && p[6] == c->words[1] && (p[4] & 1);
 }
 int main(void)
