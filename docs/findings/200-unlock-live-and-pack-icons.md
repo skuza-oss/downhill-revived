@@ -39,12 +39,13 @@ when its screen is built, so tracks, MOSHBOWL / SUPER JUMP, OPTIONS' PICKUP EDIT
 41 preset bikes already followed a change made in the game (seen in the runs below). The one thing
 the front end keeps is the rider select's statues: `func_001BB670` copies the 14 bonus and pro
 riders' unlock bits (`func_00193FE8`) into `D_004B25A0` +0x3C (`state[15]`, which the lobby and
-`func_001F7DE0`'s statue animations read), and it runs only at a memory card load (OPTIONS'
-LOAD GAME DATA, `func_001F0160` case 6) and in the retail cheat (`func_001F0780`); `func_001F66B0`
-(front end start `func_001F6AB8`, screen 18 `func_001F1500`) also refreshes it. A toggle in the page
+`func_001F7DE0`'s statue animations read), and it runs only at the game's start (`func_001B6708`,
+called from `_start`), at a memory card load (OPTIONS' LOAD GAME DATA, `func_001F0160` case 6) and
+in the retail cheat (`func_001F0780`); `func_001F66B0` (front end start `func_001F6AB8`, screen 18
+`func_001F1500`) also refreshes it. A toggle in the page
 calls none of these, so the BONUS RIDER / PRO RIDER statues stayed locked (or unlocked) until the
 next start. (Finding 095's note that `func_001BB670` "runs on each rider-select entry" is wrong:
-it has two callers, the load and the cheat.)
+its callers are the game's start, the load and the cheat.)
 
 Fix: `port_unlock_refresh()` (`port/patches_unlock.py`, added to `001EB1D8.cpp`) does what LOAD GAME
 DATA does after a load: `func_001BB670(&D_004B25A0)`, `func_001F66B0()`, `func_001F7DE0()`.
