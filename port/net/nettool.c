@@ -4,8 +4,11 @@
 
    usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]
                   [--replay FILE --rider N] [--bike A,B,C] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]
-                  host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list
+                  [--score N] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list
    --p2p makes a P2P room (finding 180); a join goes to a P2P room when its code has 7 characters.
+   In the arena's scored round (a race on track 23 with a server that lists "score", finding 204)
+   --finish-after's finish is the round's end: the bot sends its final score (--score N points,
+   default 0; port/hle/mosh_round.h) to the games, then its finish with that score to the room.
    The server is --server or DHD_NET_SERVER (ws://127.0.0.1:8787 for wrangler dev). With the
    game's --version and --iso hash it can join a room of real games (finding 041). */
 #include <windows.h>
@@ -16,6 +19,7 @@
 
 #include "net.h"
 #include "../hle/state_bundle.h"
+#include "../hle/mosh_round.h"
 
 static void wait_for(int (*done)(const NetLobby *), double seconds, const char *what)
 {
@@ -156,6 +160,7 @@ int main(int argc, char **argv)
     int i, slot, races = 0, public_room = 0;  /* --public: the host's room is on the public list */
     int p2p = 0;              /* --p2p: the host's room is a P2P one */
     double finish_after = -1, back_after = -1;
+    int score = 0;            /* --score N: the bot's points in the arena's scored round */
     uint8_t frame[NET_FRAME_MAX];
     double until;
     NetLobby l;
@@ -180,12 +185,14 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--p2p")) p2p = 1;
         else if (!strcmp(argv[i], "--finish-after") && i + 1 < argc) finish_after = atof(argv[++i]);
         else if (!strcmp(argv[i], "--give-up-after") && i + 1 < argc) back_after = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--score") && i + 1 < argc) score = atoi(argv[++i]);
         else if (!mode) mode = argv[i];
         else code = argv[i];
     }
     if (!mode || (!strcmp(mode, "join") && !code)) {
         printf("usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]\n"
-               "               [--replay FILE --rider N] [--bike A,B,C] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
+               "               [--replay FILE --rider N] [--bike A,B,C] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]\n"
+               "               [--score N] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
         return 2;
     }
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -277,7 +284,18 @@ int main(int argc, char **argv)
                         net_send_frame(NET_FRAME_EVENT, e, sizeof e);
                         printf("FINISH %.2f s, %u snapshots echoed\n", now - race_at, echoed);
                     }
-                    net_finish(ticks, l.local_slot + 1);
+                    if (l.race_track == MOSH_TRACK && l.server_scores) {  /* the arena's round (finding 204) */
+                        MoshScore s;
+                        uint8_t e[SCORE_EVENT_SIZE];
+                        memset(&s, 0, sizeof s);
+                        s.part[1] = (uint32_t)(score < 0 ? 0 : score > MOSH_MAX_SCORE ? MOSH_MAX_SCORE : score);
+                        s.known = s.final = 1;
+                        score_encode(e, l.local_slot, &s);
+                        net_send_frame(NET_FRAME_EVENT, e, sizeof e);
+                        printf("ROUND OVER %.2f s, score %u\n", now - race_at, mosh_points(&s));
+                        net_finish(ticks, l.local_slot + 1, (int)mosh_points(&s));
+                    } else
+                        net_finish(ticks, l.local_slot + 1, -1);
                 }
                 if (finish_after < 0 || !echo_ai) net_back();
                 acted = 1;

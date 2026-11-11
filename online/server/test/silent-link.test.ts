@@ -116,7 +116,7 @@ describe("the race's start moment over the room (finding 187)", () => {
     const host = await Client.connect("/v1/rooms/new");
     host.hello("Host", { features: ["race_rejoin", "race_go"] });
     const welcome = await host.json("welcome");
-    expect(welcome.features).toEqual(["sfu_silent", "race_go"]);
+    expect(welcome.features).toEqual(["sfu_silent", "race_go", "score"]);  // score: finding 204
     const code = welcome.code;
     const newer = await Client.connect(`/v1/rooms/${code}`);
     newer.hello("New", { features: ["race_rejoin", "race_go"] });

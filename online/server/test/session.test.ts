@@ -446,8 +446,50 @@ describe("session rooms",()=>{
     await start(h,cs,code);
     const r=await snap(h,r=>r.phase==="racing");
     expect(new TextEncoder().encode(JSON.stringify(r)).length).toBeLessThanOrEqual(4096);
+    // the largest finishes: a scored round's (finding 204), every number at its widest
     for(let i=0;i<9;i++) {cs[i].sendJson({type:"finish",ticks:0xffffffff,place:255}); await snap(h,r=>r.members[i].finishTicks===0xffffffff);}
     const largest=await snap(cs[9],r=>r.members.filter((m:any)=>m.raceState==="finished").length===9);
     expect(new TextEncoder().encode(JSON.stringify(largest)).length).toBeLessThanOrEqual(4096);
+    cs[9].sendJson({type:"back"});
+    await snap(h,r=>r.lastRace?.id===2);
+    // a scored round (finding 204) after it, every number at its widest: the round's snapshots and
+    // its results (a member's state shows the score instead of the round's length)
+    await start(h,cs,code);
+    await snap(h,r=>r.phase==="racing");
+    for(let i=0;i<9;i++) {cs[i].sendJson({type:"finish",ticks:0xffffffff,place:255,score:999999}); await snap(h,r=>r.members[i].score===999999);}
+    const scored=await snap(cs[9],r=>r.members.filter((m:any)=>m.raceState==="finished").length===9);
+    expect(scored.members[0].finishTicks).toBe(undefined);
+    expect(new TextEncoder().encode(JSON.stringify(scored)).length).toBeLessThanOrEqual(4096);
+    cs[9].sendJson({type:"finish",ticks:0xffffffff,place:255,score:999999});
+    const results=await snap(h,r=>r.lastRace?.id===3);
+    expect(results.lastRace.entrants.every((x:any)=>x.score===999999)).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(results)).length).toBeLessThanOrEqual(4096);
+  });
+  it("lists the score feature in the welcome (finding 204)",async()=>{
+    const h=await Client.connect("/v1/rooms/new"); h.hello("Host",{features:["session"]});
+    expect((await h.json("welcome")).features).toContain("score");
+  });
+  it("ranks a scored round by score, highest first, ties in grid order (finding 204)",async()=>{
+    const {h,cs,code}=await setup(4); await start(h,cs,code);
+    cs[1].sendJson({type:"finish",ticks:7200,place:3,score:300});
+    const live=await snap(h,r=>r.members[1].raceState==="finished");
+    expect(live.members[1].score).toBe(300);
+    h.sendJson({type:"finish",ticks:7201,place:2,score:500});
+    cs[3].sendJson({type:"finish",ticks:7199,place:1,score:300});
+    cs[2].sendJson({type:"back"});  // gave up: no score, last
+    const r=(await snap(h,r=>r.lastRace)).lastRace;
+    expect(r.entrants.map((x:any)=>[x.name,x.score??null,x.place])).toEqual(
+      [["Host",500,2],["P1",300,3],["P3",300,4],["P2",null,5]]);
+  });
+  it("refuses a finish whose score is not an unsigned 32-bit number; a race without scores ranks by time",async()=>{
+    const {h,cs,code}=await setup(2); await start(h,cs,code);
+    for (const score of [-1,1.5,"7",1000000]) {
+      h.sendJson({type:"finish",ticks:600,place:1,score});
+      expect((await h.json("error")).code).toBe("bad_value");
+    }
+    h.sendJson({type:"finish",ticks:900,place:2});
+    cs[1].sendJson({type:"finish",ticks:600,place:1});
+    const r=(await snap(h,r=>r.lastRace)).lastRace;
+    expect(r.entrants.map((x:any)=>[x.ticks,x.score??null])).toEqual([[600,null],[900,null]]);
   });
 });

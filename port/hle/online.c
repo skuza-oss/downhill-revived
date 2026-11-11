@@ -32,6 +32,7 @@
 #include "../include/version.h"
 #include "../include/fps.h"
 #include "state_bundle.h"
+#include "mosh_round.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -351,6 +352,13 @@ static struct {
     int cheats;                 /* the room's cheat codes on (option 2; off: hle_cheat_code) */
     double end_done_at;
     double end_held_at;
+    /* the arena's scored round (finding 204): this race is one; each rider's score by global id
+       (its owner's; this PC's own riders' as last sent); this PC's two minutes ran out; the table
+       stands; the results screen came up */
+    int mosh;
+    MoshScore score[NRIDERS];
+    int round_over, table_done;
+    double round_over_at, results_at;
 } on;
 
 static void title(const char *fmt, ...)
@@ -565,6 +573,7 @@ static void barrier(void)
     memcpy(on.code, lobby.code, sizeof on.code);
     choose_riders(&lobby);
     on.setup.track = lobby.race_track;
+    on.mosh = lobby.race_track == MOSH_TRACK && lobby.server_scores;  /* finding 204 */
     on.no_bots = lobby.race_laps & 1;
     on.cheats = (lobby.race_laps & 2) != 0;
     on.setup.rider[0] = on.pick[on.local_slot];
@@ -576,8 +585,9 @@ static void barrier(void)
     snprintf(seed, sizeof seed, "%u", lobby.race_seed ? lobby.race_seed : 1u);
     set_env("DHD_RACE_SEED", seed);  /* hle_race_seed: never 0, which falls back to the RTC */
     hle_puppet_online(on.local_slot, on.nslots, on.host_slot);
-    fprintf(stderr, "online: race starts: player %d of %d, track %d, seed %s%s, cheats %s\n", on.local_slot, on.nslots,
-            on.setup.track, seed, on.no_bots ? ", no computer riders" : "", on.cheats ? "on" : "off");
+    fprintf(stderr, "online: race starts: player %d of %d, track %d, seed %s%s, cheats %s%s\n", on.local_slot, on.nslots,
+            on.setup.track, seed, on.no_bots ? ", no computer riders" : "", on.cheats ? "on" : "off",
+            on.mosh ? ", the arena's round (Mosh Bowl, scored)" : "");
     log_pings(&lobby);
 }
 
@@ -664,6 +674,7 @@ static void go_skew(int player)
 
 static void read_finish(int global, int time);
 static void read_results(const uint8_t *in, int n);
+static void receive_score(int sender, const uint8_t *e, int n);
 
 /* The relayed frames: snapshots to the puppets, events (a hit, the start, a finish, the results). */
 static void receive_frames(void)
@@ -714,6 +725,9 @@ static void receive_frames(void)
             break;
         case EVENT_RESULTS:
             if (sender == on.host_slot) read_results(e, n - 2);
+            break;
+        case SCORE_EVENT_TYPE:
+            receive_score(sender, e, n - 2);
             break;
         default:  /* EVENT_HIT */
             hle_puppet_event(sender, e, n - 2);
@@ -1000,6 +1014,11 @@ static void race_banner(int view)
         hud_text(view, 96, 2, 128, 40, 40, on.leave_reason);
         return;
     }
+    if (on.mosh) {  /* the round's clock is the HUD's; the others end theirs within moments */
+        if (on.round_over && !on.table_done && host_wall_seconds() - on.round_over_at > 1)
+            hud_text(view, 150, 1, 128, 128, 128, "TIME UP - WAITING FOR THE OTHERS...");
+        return;
+    }
     NetLobby lobby;
     host_service_net_get_lobby(GADDR(&lobby));
     int finished = 0, first = -1;
@@ -1138,7 +1157,7 @@ static void finish_step(void)
     if (!race_running()) return;
     static double test_finish = -1;  /* DHD_NET_TEST_FINISH=seconds: tests, this PC's rider finishes then */
     if (test_finish < 0) test_finish = getenv("DHD_NET_TEST_FINISH") ? atof(getenv("DHD_NET_TEST_FINISH")) : 0;
-    if (test_finish > 0 && RACE_CLOCK > test_finish * 60 && !FINISHED(0) && !FINISH_NOW(0)) FINISH_NOW(0) = 1;
+    if (test_finish > 0 && !on.mosh && RACE_CLOCK > test_finish * 60 && !FINISHED(0) && !FINISH_NOW(0)) FINISH_NOW(0) = 1;
     int riders = hle_online_race_riders();
     for (int slot = 0; slot < riders; slot++) {
         int global = hle_puppet_global(slot);
@@ -1150,7 +1169,7 @@ static void finish_step(void)
                 on.reported[global] = 1;
                 read_finish(global, FINISH_TIME(slot));
                 /* this PC's own rider, in a room: its time and place for the room's results */
-                if (slot == 0 && from_menu) host_service_net_finish((uint32_t)FINISH_TIME(0), PLACE(0));
+                if (slot == 0 && from_menu) host_service_net_finish((uint32_t)FINISH_TIME(0), PLACE(0), -1);
             }
         } else if (on.finish[global] >= 0) {
             if (FINISHED(slot)) FINISH_TIME(slot) = on.finish[global];
@@ -1178,6 +1197,237 @@ static void finish_step(void)
     for (int i = 0; i < riders; i++) e[3 + 5 * i] = (uint8_t)order[i], put32(e + 4 + 5 * i, on.finish[order[i]]);
     send_event(e, 3 + 5 * riders);
     read_results(e, 3 + 5 * riders);
+}
+
+
+/* ---- the arena's scored round (finding 204) ----
+   An online race on the Mosh Pit arena runs by the game's own Mosh Bowl rules (mode 15, the timed
+   variant): two minutes from each game's own GO (func_001B7198 sets D_004B1F40[0] to 7200 ticks,
+   func_001B4718 counts it down in the race phases), the HUD the mode's own (func_001772B0: the
+   time left; func_00177F80: this rider's points), points for every hit dealt (func_001301E0, by
+   the attack: punch 50, kick 100, check 200, stick 300, bottle 400), every hit a crash
+   (func_0012E940), hits taken counted, and at the end the mode's COMBAT RESULTS
+   (func_00160A48: by points, with the hits taken). Each rider's score belongs to the PC that runs
+   it and travels as an EVENT (mosh_round.h); the round's table is a rule on those numbers, so it
+   is the same on every screen, and in the room, which ranks the humans' finishes by the score
+   each game reports for its own player. A room whose server does not rank by score (an older
+   one) races the arena as before (Single Event, no finish). */
+enum { MOSH_TABLE_WAIT = 15, MOSH_RESULTS_HOLD = 15 };
+#define RIDER_POINTS(slot) ((float *)(RIDER(slot) + 0x7AC8))  /* five counts, func_001301B8 sums them */
+#define RIDER_HITS(slot) (*(int32_t *)(RIDER(slot) + 0x79AC))  /* hits taken */
+void func_001301E0(void *rider, int kind);  /* the attacker's points for a hit of this kind (0-4) */
+
+static void mosh_read(int slot, MoshScore *s)
+{
+    memset(s, 0, sizeof *s);
+    for (int k = 0; k < 5; k++) {
+        float v = RIDER_POINTS(slot)[k];
+        s->part[k] = v >= MOSH_MAX_SCORE ? MOSH_MAX_SCORE : v > 0 ? (uint32_t)v : 0;
+    }
+    int hits = RIDER_HITS(slot);
+    s->hits = (uint16_t)(hits < 0 ? 0 : hits > 65535 ? 65535 : hits);
+    s->known = 1;
+}
+
+static void mosh_write(int slot, const MoshScore *s)
+{
+    for (int k = 0; k < 5; k++) RIDER_POINTS(slot)[k] = (float)s->part[k];
+    RIDER_HITS(slot) = s->hits;
+}
+
+static void mosh_send(int global, const MoshScore *s)
+{
+    uint8_t e[SCORE_EVENT_SIZE];
+    char name[48];
+    score_encode(e, global, s);
+    send_event(e, sizeof e);
+    if (s->final)
+        fprintf(stderr, "online: round: %s's final score %u, %u hits taken (sent)\n", rider_label(global, name, sizeof name),
+                mosh_points(s), s->hits);
+}
+
+/* A score EVENT: from the rider's owner, or for a player's own rider from that player's PC, whose
+   final can arrive after the room said it left (and the host took the rider over: its own final
+   then stands here too, as on every PC that got it). A final one stays. */
+static void receive_score(int sender, const uint8_t *e, int n)
+{
+    int global;
+    MoshScore s;
+    char name[48];
+    if (!on.mosh || !score_decode(e, n, &global, &s) || global >= hle_online_race_riders()) return;
+    int own_player = global < on.nslots && global == sender;
+    if (hle_puppet_owner(global) != sender && !own_player) return;
+    if (hle_puppet_owner(global) == on.local_slot && !(own_player && s.final)) return;  /* this PC's numbers */
+    if (mosh_take(&on.score[global], &s) && s.final)
+        fprintf(stderr, "online: round: %s's final score %u, %u hits taken (from player %d)\n",
+                rider_label(global, name, sizeof name), mosh_points(&s), s.hits, sender);
+}
+
+/* puppet.c hle_puppet_hit: a rider this PC runs (attacker) hit a puppet (victim) as this PC shows
+   it; the hit itself goes to the victim's PC, which applies it (func_0012E940) and counts it there.
+   The attacker's points are its own PC's: the game's own func_001301E0, as func_0012E940 gives
+   them, unless the game would not take the hit (the victim crashing, or +0x7BB6: its first
+   returns). Only for a rider this PC owns (a rider whose owner has sent no snapshot yet is no
+   puppet here, but its points are still its owner's), and only in the arena's round: elsewhere
+   online hits score as before. */
+void hle_online_hit_dealt(void *attacker, void *victim, int kind)
+{
+    if (!online_mode() || !on.mosh || !on.started || on.round_over || !race_running()) return;
+    int slot = 0, riders = hle_online_race_riders();
+    while (slot < riders && (void *)RIDER(slot) != attacker) slot++;
+    if (slot == riders || !hle_puppet_owned(slot)) return;
+    uint8_t *v = victim;
+    if ((*(uint32_t *)(v + 0x4098) >> 2 & 1) || v[0x7BB6]) return;
+    func_001301E0(attacker, kind >= 0 && kind <= 9 ? kind % 5 : 0);
+}
+
+/* The patched func_001B4718 at the round's end on this PC (its timer ran out; the game has put its
+   end message on the HUD): 1 holds the game's own end (the results 120 ticks later) until every
+   rider's final score is here (mosh_step). Offline and in other modes 0: the game's own. */
+int hle_online_round_end(void)
+{
+    if (!online_mode() || !on.started || !on.mosh) return 0;
+    if (!on.round_over) {
+        on.round_over = 1, on.round_over_at = host_wall_seconds();
+        on.end_held = 1, on.end_held_at = on.round_over_at;
+        fprintf(stderr, "online: round: time up at race tick %d; waiting for the others' scores\n", RACE_CLOCK);
+    }
+    return 1;
+}
+
+/* A human's finished score as the room has it (its own game reported it), -1 none. */
+static int room_score(const NetLobby *lobby, int global)
+{
+    if (global >= on.nslots || global >= lobby->nslots) return -1;
+    for (int i = 0; i < lobby->nmembers; i++)
+        if (lobby->member[i].id == lobby->racer[global].member_id)
+            return !strcmp(lobby->member[i].race_state, "finished") ? lobby->member_score[i] : -1;
+    return -1;
+}
+
+static void mosh_table(char *out, int size)
+{
+    int order[NRIDERS], riders = hle_online_race_riders(), n = 0;
+    char name[48];
+    mosh_order(on.score, riders, order);
+    out[0] = 0;
+    for (int i = 0; i < riders && n < size - 48; i++)
+        n += snprintf(out + n, size - n, " %d. %s %u (%u)", i + 1, rider_label(order[i], name, sizeof name),
+                      mosh_points(&on.score[order[i]]), on.score[order[i]].hits);
+}
+
+/* Each field of the round: the riders this PC runs send their scores when they change (final
+   once its round is over), the others show their owners'. When every score is final (or after
+   MOSH_TABLE_WAIT seconds) the table stands: this PC's finish goes to the room with its points
+   and place, and the game's own end runs on to the results. */
+static void mosh_step(void)
+{
+    if (!on.mosh || EE32(MENU) != LOAD_MENU) return;
+    int riders = hle_online_race_riders();
+    for (int slot = 0; slot < riders; slot++) {
+        int global = hle_puppet_global(slot);
+        MoshScore *held = &on.score[global];
+        if (hle_puppet_owner(global) == on.local_slot) {
+            if (held->final) {  /* this PC's round is over: these stay */
+                mosh_write(slot, held);
+                continue;
+            }
+            MoshScore now;
+            mosh_read(slot, &now);
+            now.final = (uint8_t)on.round_over;  /* also a rider taken over after this PC's end */
+            if (!held->known || !mosh_same(held, &now)) *held = now, mosh_send(global, held);
+        } else if (held->known)
+            mosh_write(slot, held);
+    }
+    if (!on.round_over || on.table_done) return;
+    NetLobby lobby;
+    host_service_net_get_lobby(GADDR(&lobby));
+    int missing = 0;
+    for (int global = 0; global < riders; global++) {
+        if (on.score[global].final) continue;
+        int score = room_score(&lobby, global);
+        if (score >= 0 && hle_puppet_owner(global) != on.local_slot) {
+            /* its game reported it to the room (a bot's way too): that is its final */
+            MoshScore s;
+            memset(&s, 0, sizeof s);
+            s.part[1] = (uint32_t)score, s.hits = on.score[global].hits, s.known = s.final = 1;
+            on.score[global] = s;
+            continue;
+        }
+        missing++;
+    }
+    double waited = host_wall_seconds() - on.round_over_at;
+    if (missing && waited < MOSH_TABLE_WAIT) return;
+    on.table_done = 1;
+    char table[400];
+    mosh_table(table, sizeof table);
+    fprintf(stderr, "online: round: the table%s (%.1f s after time up):%s\n",
+            missing ? " without every final score" : "", waited, table);
+    title("Downhill Revived online - round results:%s", table);
+    int place = mosh_place(on.score, riders, on.local_slot);
+    if (from_menu)
+        host_service_net_finish((uint32_t)RACE_CLOCK, place > 0 ? place : 1, (int)mosh_points(&on.score[on.local_slot]));
+    func_001B45F8(EE_PTR(0x4B1F40), 1, 90);  /* the game's own end: its COMBAT RESULTS */
+    on.end_done = 1, on.end_done_at = host_wall_seconds();
+    const char *after = getenv("DHD_NET_AFTER_RACE");
+    if (!from_menu && after && *after && getenv("DHD_NET_SCRIPTED")) {
+        char script[1200];
+        snprintf(script, sizeof script, "%s", after);
+        set_env("DHD_NAV", script);
+    }
+}
+
+/* COMBAT RESULTS (func_00160980, its rows) in a room's round: BACK TO THE ROOM, instead of the
+   game's TRY AGAIN, NEW LEVEL and QUIT. */
+void func_0018E408(void *menu, const char *text, int enabled);
+int port_online_round_rows(void *menu)
+{
+    if (!online_mode() || !on.mosh || !on.table_done) return 0;
+    on.results_at = host_wall_seconds();
+    fprintf(stderr, "online: round: the results (COMBAT RESULTS)\n");
+    if (!from_menu) return 0;
+    func_0018E408(menu, "BACK TO THE ROOM", 1);
+    return 1;
+}
+
+/* Its accept (func_00161050): back to the room as QUIT's Yes leaves the race screen. */
+void func_00190660(void *manager, void *screen);
+extern char D_003F52D0[], D_00388E90[];
+int port_online_round_accept(int index)
+{
+    (void)index;
+    if (!online_mode() || !on.mosh || !from_menu || !on.results_at) return 0;
+    fprintf(stderr, "online: round: back to the room from the results\n");
+    func_00190660(D_003F52D0, D_00388E90);
+    return 1;
+}
+
+/* Its table (func_00160A48): the i-th rider is the round's i-th (mosh_order: the same order on
+   every PC; the game's own choice, best, takes the higher rider slot on a tie, and slots differ
+   from PC to PC). */
+int port_online_round_rider(int i, int best)
+{
+    if (!online_mode() || !on.mosh || !on.table_done) return best;
+    int order[NRIDERS], riders = hle_online_race_riders();
+    if (i < 0 || i >= riders) return -1;
+    mosh_order(on.score, riders, order);
+    return hle_puppet_local(order[i]);
+}
+
+/* A player's rider shows its player's name there (two may ride the same rider), as over the riders
+   in the race; the computer riders their own. */
+const char *port_online_round_name(void *rider, const char *name)
+{
+    static char names[NRIDERS][16];
+    if (!online_mode() || !on.mosh) return name;
+    for (int slot = 0; slot < hle_online_race_riders(); slot++) {
+        int global = hle_puppet_global(slot);
+        if ((void *)RIDER(slot) != rider || global >= on.nslots || !on.name[global][0]) continue;
+        snprintf(names[global], sizeof names[global], "%.10s", on.name[global]);
+        for (char *c = names[global]; *c; c++) *c = (char)toupper((unsigned char)*c);
+        return names[global];
+    }
+    return name;
 }
 
 /* Camera 0 is the 0x380-byte view, NOT the RiderCamera at rider +0x3530.
@@ -1332,7 +1582,8 @@ static void check_left(void)
         }
         fprintf(stderr, "online: player %d (%s) left at race tick %d; host now player %d\n", j, on.name[j], RACE_CLOCK,
                 host);
-        hle_puppet_drop(j, host, on.finish[j] >= 0);
+        /* in the arena's round a player whose final score is here is done, as a finisher */
+        hle_puppet_drop(j, host, on.finish[j] >= 0 || (on.mosh && on.score[j].final));
     }
 }
 
@@ -1387,6 +1638,7 @@ static void state_sync(void)
     static double checked;
     if (host_wall_seconds() - checked >= 0.25) { checked = host_wall_seconds(); check_left(); }
     finish_step();
+    mosh_step();
     if (from_menu && !on.end_done) {
         /* Finishers stay to watch; the server closes the race for everyone. */
         double now = host_wall_seconds();
@@ -1406,7 +1658,7 @@ static void state_sync(void)
             on.end_done = 1, on.end_done_at = now;
             leave_race();
         }
-    } else if (on.end_held && !on.end_done &&
+    } else if (on.end_held && !on.end_done && !on.mosh &&
         (on.have_results || host_wall_seconds() - on.end_held_at > 120)) {
         func_001B45F8(EE_PTR(0x4B1F40), 1, 4 * 60);  /* the results screen in 4 s */
         on.end_done = 1;
@@ -1615,12 +1867,20 @@ static int test_skip_pad(HostPad *out)
     return 1;
 }
 
+/* After the arena's round the room's menus are Single Event's again (port_online_shell set 12 for
+   the room): the shop's START, for one, goes another way in Mosh Bowl (func_0013BA60). */
+static void round_mode_off(void)
+{
+    if (EE32(SETUP + 0x10C) == MOSH_MODE) EE32(SETUP + 0x10C) = 12;
+}
+
 /* Leaving the race screen and the room returns this PC to offline control. Restore the previous
    script and seed so the online boot script cannot swallow title-menu input. */
 static int connected;
 static void race_over(void)
 {
     fprintf(stderr, "online: the race is over; back to offline play\n");
+    round_mode_off();
     host_service_net_leave();
     hle_puppet_offline();
     port_online_relock();
@@ -1645,6 +1905,7 @@ static int leaving_room;  /* LEAVE THE ROOM chosen: off the race screen, out of 
 static void back_to_room(void)
 {
     fprintf(stderr, "online: this PC's race is over; back to the room\n");
+    round_mode_off();
     host_service_net_back();  /* out of the race: unless it finished, DNF (gave up) */
     hle_puppet_offline();
     kernel_pace_shared(0);
@@ -1770,6 +2031,12 @@ void pads_begin_field(void)
     }
     if (!on.setup_done && EE32(MENU) == LOAD_MENU) {
         write_setup(&on.setup);
+        /* The arena's round runs in the game's Mosh Bowl mode, its timed variant (SETUP +0x364 = 0;
+           the Mosh Bowl menu's other choice, 1, is last rider standing), as the game's own menu
+           sets it (func_001EB1D8); the room's other races in Single Event (12, port_online_shell).
+           Finding 204. */
+        if (on.mosh) EE32(SETUP + 0x10C) = MOSH_MODE, EE32(SETUP + 0x110) = 0, EE32(SETUP + 0x364) = 0;
+        else if (EE32(SETUP + 0x10C) == MOSH_MODE) EE32(SETUP + 0x10C) = 12;
         if (selected_ride) {
             EE32(SETUP + 0x290) = selected_rider;
             for (int k = 0; k < 3; k++) {
@@ -1843,6 +2110,13 @@ static void pads_read_now(int player, HostPad *out)
             if (hle_online_countdown_hold(EE32(PHASE))) out->buttons &= ~PAD_START;
         }
         else if (!on.released || !host_pad_script(player, out)) neutral(out);
+        /* the round's results go back to the room by themselves after a while (BACK TO THE
+           ROOM, their only row: Cross pressed for a quarter second each half second) */
+        if (player == 0 && from_menu && on.mosh && on.results_at &&
+            host_wall_seconds() - on.results_at > MOSH_RESULTS_HOLD) {
+            neutral(out);
+            if ((int)((host_wall_seconds() - on.results_at) * 4) % 2) out->buttons = PAD_CROSS;
+        }
         if (player == 0 && from_menu && on.end_held) {
             int direction = (out->buttons & PAD_RIGHT || out->left_x > 176) ? 1
                           : (out->buttons & PAD_LEFT || out->left_x < 80) ? -1 : 0;

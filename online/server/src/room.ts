@@ -98,8 +98,12 @@ const SFU_FAILED_MESSAGE = "Realtime connection failed: out of the race.";
 const SFU_RENEW_MS = 20_000;
 /** What this server takes from a game beyond protocol 4, listed in the welcome (finding 187): a
     game reports a race link that delivers nothing (`sfu_silent`) and names its race's start moment
-    to the room (`race_go`) only to a server that lists them; 0.7.13 ignores the list. */
-const SERVER_FEATURES = ["sfu_silent", "race_go"];
+    to the room (`race_go`) only to a server that lists them; 0.7.13 ignores the list. `score`
+    (finding 204): a finish may carry a round's score, and a race whose finishes carry one ranks
+    by it (the arena's Mosh Bowl round); a game runs that round only on a server that lists it. */
+const SERVER_FEATURES = ["sfu_silent", "race_go", "score"];
+/** A round's score is at most six digits, as the game's HUD shows it (finding 204). */
+const MAX_SCORE = 999_999;
 /** A hello feature (finding 187): see Member.raceGo. */
 const FEATURE_RACE_GO = "race_go";
 /** A race's start moment comes at most this long after its startAt (the host's game names it once
@@ -263,7 +267,8 @@ interface Member {
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
-interface Result { id: number; name: string; rider: number; ticks?: number; place: number; dnfReason?: string; }
+/** score: a scored round's points (finding 204: the Mosh Bowl round), from the entrant's own finish. */
+interface Result { id: number; name: string; rider: number; ticks?: number; place: number; dnfReason?: string; score?: number; }
 interface Race { 
   rules?: Rules;
   results?: Result[];
@@ -632,12 +637,14 @@ export class Room extends DurableObject<Env> {
         if (!isHost) return this.error(ws, "not_host", "Only the host can start the race.");
         return this.onStart(ws, st);
       case "finish":
-        if (!isU32(m.ticks) || !Number.isInteger(m.place) || (m.place as number) < 1 || (m.place as number) > 255)
+        if (!isU32(m.ticks) || !Number.isInteger(m.place) || (m.place as number) < 1 || (m.place as number) > 255 ||
+            (m.score !== undefined && !(isU32(m.score) && (m.score as number) <= MAX_SCORE)))
           return this.error(ws, "bad_value", "Invalid finish.");
         if (st.race && this.inRace(st, me.id)) {
           const result = st.race.results!.find(x => x.id === me.id)!;
           if (result.ticks === undefined && !result.dnfReason) {
             result.ticks = m.ticks; result.place = m.place as number;
+            if (m.score !== undefined) result.score = m.score as number;
             if (st.race.rules!.finishWindow && st.race.finishEndsAt == null)
               st.race.finishEndsAt = Date.now() + st.race.rules!.finishWindow * 1000;
           }
@@ -2135,7 +2142,8 @@ export class Room extends DurableObject<Env> {
     const r = st.race?.results?.find(x => x.id === id);
     return {inRace: this.inRace(st,id), ...(r ? {
       raceState: r.dnfReason ? "dnf" : r.ticks !== undefined ? "finished" : "racing",
-      ...(r.ticks !== undefined ? {finishTicks:r.ticks} : {}), place:r.place,
+      // a scored round's finish shows its score, not its length (the same for everyone: 4 KB)
+      ...(r.ticks !== undefined ? r.score !== undefined ? {score:r.score} : {finishTicks:r.ticks} : {}), place:r.place,
       ...(r.dnfReason ? {dnfReason:r.dnfReason} : {}),
     } : {})};
   }
@@ -2189,7 +2197,11 @@ export class Room extends DurableObject<Env> {
     const race = st.race;
     if (!race) return;
     if (!voided) {
-      const entrants = [...race.results!].sort((a,b) => (a.ticks ?? Infinity) - (b.ticks ?? Infinity));
+      // A scored round (finding 204) ranks its finishers by score, highest first (a tie keeps the
+      // grid order); a race by time. DNFs come last either way, in grid order.
+      const scored = race.results!.some(x => x.score !== undefined);
+      const key = (r: Result) => r.ticks === undefined ? Infinity : scored ? -(r.score ?? 0) : r.ticks;
+      const entrants = [...race.results!].sort((a,b) => key(a) - key(b));
       let place = 0;
       const limit = this.trackLimit(st, race.track);
       for (let i = 0; i < entrants.length; i++) {
