@@ -133,7 +133,7 @@ Online:
 | `DHD_NET_SCRIPTED=1` | the online flow takes its input from the scripts above, not the pad |
 | `DHD_NET_TEST_READY=1` | (with SCRIPTED) presses READY in the room after every race |
 | `DHD_NET_TEST_FINISH=S` | this PC's rider finishes at race second S |
-| `DHD_NET_NO_AI=1` | (with `DHD_NET_CREATE`) the room's computer riders off |
+| `DHD_NET_NO_AI=1` | (with `DHD_NET_CREATE`, or `DHD_NET_SCRIPTED` for a host's room from the menus) the room's computer riders off |
 | `DHD_NET_TEST_TRACK=N` | (with SCRIPTED) a host's room starts on game track N |
 | `DHD_NET_TEST_CODE=CODE` | (with SCRIPTED) JOIN WITH A CODE starts with this code typed (cross_race.py's P2P guest) |
 | `DHD_NET_TEST_THEN=same\|next\|random` | (with SCRIPTED) a host's room's Then rule (the track after each race) |
