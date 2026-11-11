@@ -16,12 +16,15 @@
 //!    `DHDR_FEAT_RENDER_PIPELINES` and the surface's present pipe.
 //! 2. raster.wgsl's pipelines for the raster key in `flags` (awaited error scopes; the pipeline
 //!    cache keeps them, so the reactor's `dhdr_exact_create` with the same key reuses them).
-//! 3. The prewarm (unless `WEB_NO_PREWARM`): a scratch exact renderer dispatches `main` over an
+//! 3. The native renderer's objects and first pipelines, and the mesh draws' pipelines inside an
+//!    awaited error scope (`native::init::web_prepare`, finding 199): a refused mesh pipeline turns
+//!    Native VU off before any mesh is drawn (`dhdr_native_meshes`), as natively.
+//! 4. The prewarm (unless `WEB_NO_PREWARM`): a scratch exact renderer dispatches `main` over an
 //!    empty batch record, `local_copy` and `scanout` over zero sizes (each returns at once, so
 //!    nothing is drawn), submits, and awaits the queue. Under FXC the first dispatch of `main`
 //!    stalls for seconds while the GPU process compiles it (finding 085, S4 question 7); this
 //!    moves the stall here, out of the game's first read. The scratch renderer is destroyed.
-//! 4. The surface on the OffscreenCanvas, when one is given (null / undefined: no surface, for
+//! 5. The surface on the OffscreenCanvas, when one is given (null / undefined: no surface, for
 //!    headless replays). Fifo, opaque, RGBA8Unorm (`present::surface`), configured to the size C
 //!    passes on the first present.
 //!
@@ -32,7 +35,7 @@
 //! `flags` (worker.js passes them; C never calls this):
 //! - bits 0-2 (`WEB_RASTER`): the `DHDR_RASTER_*` key the reactor will pass to
 //!   `dhdr_exact_create` (gpu_rust_web.c's WEB_RASTER_FLAGS: key 7, all three on);
-//! - bit 3 (`WEB_NO_PREWARM`): skip step 3;
+//! - bit 3 (`WEB_NO_PREWARM`): skip step 4;
 //! - bits 4-5 (`WEB_LOG_SHIFT`): `DHDR_LOG_*` for wgpu's diagnostics (0: errors only).
 //!
 //! `dhdr_web_surface` hands the surface to C once: C owns it after that (it may destroy it with
@@ -49,6 +52,14 @@ pub const WEB_RASTER: u32 = 7;
 pub const WEB_NO_PREWARM: u32 = 8;
 /// `flags` bits 4-5: `DHDR_LOG_*` (0: errors only).
 pub const WEB_LOG_SHIFT: u32 = 4;
+
+/// DHD_TEST_NO_MESHES (finding 194's test hook) for the browser, whose Rust has no environment: the
+/// page calls this with the variable's value before `dhdr_web_init` (graphics_common.js).
+#[cfg(feature = "web")]
+#[wasm_bindgen]
+pub fn dhdr_web_test_no_meshes(at: u32) {
+    crate::native::init::set_test_no_meshes(at);
+}
 
 /// The surface made by the init, until `dhdr_web_surface` hands it to C.
 static SURFACE: AtomicPtr<DhdrSurface> = AtomicPtr::new(std::ptr::null_mut());
@@ -161,6 +172,8 @@ mod imp {
 
         // ---- raster.wgsl's pipelines for the reactor's key (kept by the pipeline cache)
         Pipelines::create_async(gpu, key).await?;
+        // ---- the native renderer's objects; the mesh pipelines in an awaited error scope
+        crate::native::init::web_prepare(gpu).await?;
         let t_pipelines = now();
 
         // ---- the prewarm dispatch

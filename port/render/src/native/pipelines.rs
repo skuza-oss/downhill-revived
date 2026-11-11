@@ -349,8 +349,8 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         layout: Some(match (mesh, texels) {
             (false, false) => &objects.layout,
             (false, true) => &objects.texels_layout,
-            (true, false) => objects.mesh_layout.as_ref().ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
-            (true, true) => objects.mesh_texels_layout.as_ref().ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
+            (true, false) => objects.mesh_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
+            (true, true) => objects.mesh_texels_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
         }),
         vertex: wgpu::VertexState {
             module: &objects.module,
@@ -495,6 +495,13 @@ impl Pipelines {
             }
             self.built.insert(key, pipe);
         }
+    }
+
+    /// Takes `other`'s pipelines into this cache (the browser's probed mesh pipelines, init.rs
+    /// `web_prepare`).
+    #[cfg_attr(not(feature = "web"), allow(dead_code))]
+    pub fn extend(&mut self, other: Pipelines) {
+        self.built.extend(other.built);
     }
 
     /// Pipelines built (or failed) so far.
