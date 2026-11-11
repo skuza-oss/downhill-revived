@@ -61,7 +61,7 @@ after a version change before a live check.
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
 | `online/server`: `npm test` | the server's own tests |
-| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour; `boot` and `race` are the merge gate and must be equal. A change that moves the core's own data can make `race3`-`race5` differ in the cpu hash and in one RAM word at the race load with no game state changed: raw GPRs equal (`DHD_STATE_GPRS=1`), the word a core address (finding 203) |
 | `port/tools/room_tracks_check.py` | every track an online room offers loads and races: the state trace's race recipe with `DHD_RACE_SETUP=<track>` (headless, about two minutes a track); `--tracks 23,17` picks some (finding 203) |
 | `port/tools/test_scenery_rate.py` | the same race at 60, 144 and 240 (deterministic, headless): the helicopters', birds' and swooping attacker's speed in game time must match 60's (`DHD_SCENERY_TRACE`, finding 193); `--row N` / `--right N` pick the track (the chooser moved right N times; `--right` with every track unlocked) |
 | `port/tools/rate_audit.py` | words of EE memory that move once per update instead of once per field, from a 60 and a high-rate run (finding 090, FPS1); `--row`, `--skip`, `--samples` pick the race and its window |

@@ -1,6 +1,6 @@
 # 203: Online MOSH PIT closes the game at the race start (issue #84)
 
-Status: in progress
+Status: current
 
 Branch `fix/online-mosh-start` from `main` f2dd2d4b, started 2026-11-11. This file is the lane's
 plan while it runs and its finding when it merges.
@@ -46,6 +46,13 @@ Acceptance: `python port/tools/room_tracks_check.py` prints `25 of 25 tracks loa
   the real load code headless; two test switches for the online runs: `DHD_NET_NO_AI=1` (a
   scripted host's room with computer riders off) and nettool `--bike A,B,C`.
 - [x] 2026-11-11: the neighbours, online and offline (tables below).
+- [x] 2026-11-11: merged into `main` (1578b6c5) and checked there by the lead's verification:
+  `check.py port` OK; boot and race state traces equal 0.7.16's (the merge gate), race2 and race6
+  too, race3-race5 differ in the trace only (Surprises); `room_tracks_check.py` 25 of 25; the
+  offline repro (`DHD_RACE_SETUP=23`) reaches the race; an online MOSH PIT race in a local
+  server's P2P room (a hidden host game made it with `DHD_NET_CREATE=p2p`, a hidden guest game,
+  a nettool bot, computer riders on) loaded the arena on both games and raced 2.5 minutes to the
+  room's results with no fault. Not run: an SFU room (no Realtime credentials in that worktree).
 
 ## Decisions
 
@@ -86,6 +93,24 @@ Acceptance: `python port/tools/room_tracks_check.py` prints `25 of 25 tracks loa
   (`func_001B7198` sets a 7200-tick, two-minute timer, `D_004B1F40[0] = 0x1C20`, and many
   functions branch on mode 15). Racing it in that mode online, or ending the arena's race some
   other way, is a design decision for the owner and is not part of this fix.
+- **The patch moves the core's own data, and three state-trace recipes see it.** On main 1578b6c5
+  the boot, race, race2 and race6 traces equal 0.7.16's row for row; race3 (32 of 14000 rows),
+  race4 (6) and race5 (5) differ. A second run of 0.7.16's race3 equals the first, and a build of
+  f2dd2d4b (the lane's base) equals 0.7.16 in race3, so the merge brings the difference. No game
+  state differs; the core module's data and bss sit 16 bytes higher with the patch, and the trace
+  sees core addresses in two places:
+  - `ram`, at the race load (race3 field 2141, race5 field 2655): EE word `0x004C8940` holds a core
+    address, `pending` + 4 in `port/hle/sif.c` (0x7029F2B4 on f2dd2d4b, 0x7029F2C4 on main, the
+    same object in each build's map), hashed raw as RAM. The next field is equal again.
+  - `cpu`, in the race (race3's other 31 rows, race4's 6, race5's 4): the raw GPRs are identical
+    (`DHD_STATE_GPRS=1`, the field dumps); r8 holds 0x7049544E in both builds, which the trace
+    classifies as an address inside a core object, and that object's base moved, so the hashed
+    offset differs (0x19A9B6 against 0x19A9A6).
+
+  The lead accepted these rows as an artifact of the trace, not game behaviour: the merge gate is
+  the boot and race traces, and both are equal. How the trace handles core-layout addresses is an
+  open tool problem: `DHD_STATE_NORM=host` traps at its start on both builds (an out-of-bounds
+  access in linear memory), so it cannot normalise them.
 
 ## The commands
 
@@ -146,10 +171,18 @@ riders did not finish (Surprises). Not run: an SFU room (no Realtime credentials
 one game per PC beyond host and guest, 10-player tracks at 10 (nothing there changed), Android
 and the browser (the same core).
 
-Left for the lead:
+Checked on the merged main (1578b6c5): `check.py port` OK; boot and race state traces equal
+0.7.16's (race2 and race6 too; race3-race5 differ in the trace only, Surprises);
+`room_tracks_check.py`: `25 of 25 tracks load and race`; the offline repro with
+`DHD_RACE_SETUP=23` ends racing (phase 3); one online MOSH PIT race in a local server's P2P room
+(hidden host and guest games, a nettool bot, three computer riders) logged track 23 (MOSH) on both
+games, raced about 2.5 minutes at game speed x1.000, and both games got the room's results with no
+fault. Only the bot finished (Surprises).
 
-- Boot and race state traces against f2dd2d4b (`state_trace_run.py boot` and `race`, and
-  `race1`-`race5`): they must be equal. The patch changes only the arena's Single Event bar, which
-  no offline route reaches.
-- A real two-machine MOSH PIT race (an SFU room, the reporter's kind) from the room's menus.
-- The owner's decision on how an online MOSH PIT race should end (Surprises).
+Open:
+
+- **An online MOSH PIT race has no finish** (Surprises): the owner decides how it ends. Lane 204
+  (branch `feat/online-mosh-bowl`, in progress, its finding not on main yet) makes online Mosh Pit
+  run by the game's Mosh Bowl rules.
+- A real two-machine MOSH PIT race in an SFU room (the reporter's kind), from the room's menus.
+- The state trace's handling of core-layout addresses (Surprises).
