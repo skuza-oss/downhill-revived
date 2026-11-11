@@ -13,7 +13,9 @@
    build. A pointer the HLE gives the game must not depend on where the core's linker put its own
    data: the game keeps it in its RAM, and the state trace compares that RAM between builds
    (finding 205). [PS2_HLE_WINDOW, +0x800): the SIF RPC packets (sif.c). */
+#ifndef PS2_HLE_WINDOW  /* a unit test (test_sif.c) puts it inside its own small memory */
 #define PS2_HLE_WINDOW 0x70004000u
+#endif
 #define PS2_HLE_WINDOW_SIZE 0x4000u
 /* The RAM from here up is also at its own PS2 addresses (and | 0x20000000, | 0x30000000): the
    game's data files are linked for where it loads them (0xA00000 up) and hold absolute PS2
