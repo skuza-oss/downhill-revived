@@ -3,12 +3,14 @@ section, and PASS when every section outside --ignore matches in every row.
 
     python port/tools/trace_columns.py A.tsv B.tsv [--ignore ram,cpu]
 
-Between builds whose code layout differs, ram and cpu hold host code addresses that move, so a
-refactor is checked with --ignore ram,cpu until the trace compares code pointers by function;
-the dumps (state_trace_run.py --dump, state_diff.py --symbols-a/-b) then show that the
-differing words are code addresses of the same functions."""
+The regptrs column compares lane by lane, by raw value or identity (state_diff.py, finding 205);
+every other column as it is."""
 import argparse
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from state_diff import cells_differ  # noqa: E402  (regptrs compares by lane, finding 205)
 
 SKIP = {'combined', 'stackwords', 'field'}
 
@@ -37,7 +39,7 @@ def main():
     first = {}
     for x, y in zip(ra, rb):
         for c in columns:
-            if c not in first and x[c] != y[c]:
+            if c not in first and cells_differ(c, x[c], y[c]):
                 first[c] = int(x['field'])
     print(f'rows: A {len(ra)}, B {len(rb)}')
     for c in columns:

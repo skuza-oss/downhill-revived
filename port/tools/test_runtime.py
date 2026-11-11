@@ -36,7 +36,7 @@ def python_checks():
     check_scalar_guard()
     for name in ('quad_abi', 'scalar_dispatch', 'format_abi', 'shared_scalars', 'particle_packets', 'scalar_abi',
                  'particle_float', 'ready_ratio', 'tween_float', 'terrain_float', 'slab_float', 'proximity_float',
-                 'npc_distance_float', 'rider_step', 'blend_float', 'virtual_scale'):
+                 'npc_distance_float', 'rider_step', 'blend_float', 'virtual_scale', 'state_diff'):
         __import__('test_' + name).main()
 
 
@@ -88,7 +88,9 @@ def guest_tests():
     run('game-options', [HLE / 'game_options.c', HLE / 'test_game_options.c'])
     run('settings-tabs', [HLE / 'test_settings_tabs.c'])
     run('keyboard', [HLE / 'keyboard.c', HLE / 'test_keyboard.c'])  # layout and steering ramp (finding 059)
-    run('sif', [HLE / 'sif.c', HLE / 'test_sif.c'])
+    # the SIF packets live in the HLE window (memory.h): here at 15 MiB of a 16 MiB guest, not at
+    # 0x70004000, which would need the guest to be 1.8 GB
+    run('sif', [HLE / 'sif.c', HLE / 'test_sif.c'], defines=['PS2_HLE_WINDOW=0x00F00000u'], memory=0x01000000)
     run('pad-snapshot', [HLE / 'test_pad_snapshot.c'])
     run('state-bundle', [HLE / 'test_state_bundle.c'])  # STATE bundles fit a datagram (finding 169)
     run('online-start', [HLE / 'test_online_start.c'])  # no solo start (finding 187)

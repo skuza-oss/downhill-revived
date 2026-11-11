@@ -293,34 +293,6 @@ void host_code_range(uintptr_t *lo, uintptr_t *hi)
     }
 }
 
-/* The host process's memory regions (state_trace.c, opt-in: DHD_STATE_NORM=host). */
-void host_memory_regions(void (*visit)(uintptr_t base, uintptr_t end, int host_memory))
-{
-    char self[4096], line[1024];
-    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
-    FILE *maps;
-    if (n > 0) self[n] = 0;
-    else self[0] = 0;
-    maps = fopen("/proc/self/maps", "r");
-    if (!maps) return;
-    while (fgets(line, sizeof line, maps)) {
-        unsigned long lo, hi;
-        char perms[8], path[512];
-        int fields;
-        path[0] = 0;
-        fields = sscanf(line, "%lx-%lx %7s %*s %*s %*s %511[^\n]", &lo, &hi, perms, path);
-        if (fields < 3 || hi <= 0x10000) continue;
-        if (lo < 0x10000) lo = 0x10000;
-        if (hi <= lo) continue;
-        /* The program's own image is not host memory (its AllocationBase on
-           Windows); every other mapping is (anonymous, shared, special and
-           other images alike). */
-        int self_image = path[0] && !strcmp(path, self);
-        visit((uintptr_t)lo, (uintptr_t)hi, !self_image);
-    }
-    fclose(maps);
-}
-
 /* ---- the heartbeat (autopad.c): a host thread calls beat() every 30 s ---- */
 static void (*heartbeat_beat)(void);
 

@@ -56,6 +56,7 @@ REGIONS = [
     (0x30000000, 0x32000000, 'RAM uncached-accelerated view'),
     (0x38000000, 0x3A000000, 'RAM view (uncached-accelerated | PS2_RAM_BASE)'),
     (0x70000000, 0x70004000, 'scratchpad'),
+    (0x70004000, 0x70008000, 'HLE window (memory.h PS2_HLE_WINDOW: the SIF RPC packets)'),
 ]
 
 # (function, offset): hits reviewed and known harmless. Each entry needs a comment.

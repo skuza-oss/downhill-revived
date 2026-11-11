@@ -91,19 +91,6 @@ void host_code_range(uintptr_t *lo, uintptr_t *hi)
         }
 }
 
-void host_memory_regions(void (*visit)(uintptr_t base, uintptr_t end, int host_memory))
-{
-    HMODULE self = GetModuleHandleA(NULL);
-    MEMORY_BASIC_INFORMATION m;
-    uintptr_t a = 0x10000;
-    while (a < 0xFFFF0000u && VirtualQuery((void *)a, &m, sizeof m) == sizeof m) {
-        uintptr_t base = (uintptr_t)m.BaseAddress, end = base + m.RegionSize;
-        if (end <= base) break;
-        visit(base, end, m.State != MEM_FREE && (m.Type != MEM_IMAGE || (HMODULE)m.AllocationBase != self));
-        a = end;
-    }
-}
-
 /* ---- the heartbeat (autopad.c) ---- */
 static HANDLE heartbeat_thread;  /* a duplicate of the thread that started the heartbeat */
 static void (*heartbeat_beat)(void);
