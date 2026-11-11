@@ -91,7 +91,12 @@ track), `split` (a two-player race) and `memcard` (save, then load). A change th
 state runs at least `boot` and `race`; a change to code every track runs (loading, riders, a track's
 own patch) runs `race2` to `race6` too. Both traces must come from the same trace format: the first
 line says `state-trace 2`; a trace of format 1 (before finding 205) does not compare with it, so
-regenerate a stored reference with its own executable.
+regenerate a stored reference with its own executable. A stored reference (a release's traces kept
+outside the repository to diff against) is valid only when it is of format 2 and was made with
+the same `state_trace_codeptrs.txt` and `state_trace_mask.txt` as the run it is compared with;
+keep a note of the commit whose lists made it beside the traces, and when either list changes make
+new references (the old folder is then superseded, never mixed with the new one). `split` and
+`memcard` still compare only builds with the same core layout (finding 205's Result).
 
 The trace compares game state, not the core's layout: a register lane that holds a value in the
 core's ranges is compared by raw value or by what it points at (the `regptrs` column), and nothing

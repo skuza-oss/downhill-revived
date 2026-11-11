@@ -48,7 +48,8 @@ Acceptance: `python port/tools/room_tracks_check.py` prints `25 of 25 tracks loa
 - [x] 2026-11-11: the neighbours, online and offline (tables below).
 - [x] 2026-11-11: merged into `main` (1578b6c5) and checked there by the lead's verification:
   `check.py port` OK; boot and race state traces equal 0.7.16's (the merge gate), race2 and race6
-  too, race3-race5 differ in the trace only (Surprises); `room_tracks_check.py` 25 of 25; the
+  too, race3-race5 then differed in the trace only (Surprises; since finding 205 they are equal);
+  `room_tracks_check.py` 25 of 25; the
   offline repro (`DHD_RACE_SETUP=23`) reaches the race; an online MOSH PIT race in a local
   server's P2P room (a hidden host game made it with `DHD_NET_CREATE=p2p`, a hidden guest game,
   a nettool bot, computer riders on) loaded the arena on both games and raced 2.5 minutes to the
@@ -107,10 +108,11 @@ Acceptance: `python port/tools/room_tracks_check.py` prints `25 of 25 tracks loa
     classifies as an address inside a core object, and that object's base moved, so the hashed
     offset differs (0x19A9B6 against 0x19A9A6).
 
-  The lead accepted these rows as an artifact of the trace, not game behaviour: the merge gate is
-  the boot and race traces, and both are equal. How the trace handles core-layout addresses is an
-  open tool problem: `DHD_STATE_NORM=host` traps at its start on both builds (an out-of-bounds
-  access in linear memory), so it cannot normalise them.
+  The lead accepted these rows as an artifact of the trace, not game behaviour: the merge gate was
+  the boot and race traces, and both were equal. Finding 205 removed both causes (the SIF packets
+  sit at a fixed guest address; registers that hold core addresses compare by raw value or by
+  identity) and `DHD_STATE_NORM=host`: the trace no longer depends on the core's layout, and with
+  it main's race3, race4 and race5 equal 0.7.16's. All seven recipes are the gate again.
 
 ## The commands
 
@@ -172,7 +174,8 @@ one game per PC beyond host and guest, 10-player tracks at 10 (nothing there cha
 and the browser (the same core).
 
 Checked on the merged main (1578b6c5): `check.py port` OK; boot and race state traces equal
-0.7.16's (race2 and race6 too; race3-race5 differ in the trace only, Surprises);
+0.7.16's (race2 and race6 too; race3-race5 differed in the trace only, Surprises, and are equal
+since finding 205);
 `room_tracks_check.py`: `25 of 25 tracks load and race`; the offline repro with
 `DHD_RACE_SETUP=23` ends racing (phase 3); one online MOSH PIT race in a local server's P2P room
 (hidden host and guest games, a nettool bot, three computer riders) logged track 23 (MOSH) on both

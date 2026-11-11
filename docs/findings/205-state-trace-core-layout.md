@@ -1,9 +1,10 @@
 # 205: a state trace that does not depend on the core's layout
 
-Status: in progress
+Status: current
+Supersedes: parts of 081 (`DHD_STATE_NORM=host`; how registers holding core addresses compare)
 
-Branch `fix/state-trace-core-layout` from `main` 1578b6c5, started 2026-11-11. This file is the
-lane's plan while it runs and its finding when it merges.
+Branch `fix/state-trace-core-layout` from `main` 1578b6c5, started 2026-11-11, merged into `main`
+2026-11-11 (d7e6d246).
 
 ## Goal and acceptance
 
@@ -39,6 +40,9 @@ Out of scope: the online rider code (lane 202) and online Mosh Pit (lane 204).
 - [x] 2026-11-11: the layout test found 276 function-pointer words of guest RAM and one of the
   scratchpad that the code-pointer list lacked; listed (696510ad, see Surprises).
 - [x] 2026-11-11: proofs on the final list (below), references regenerated, `docs/TESTING.md`.
+- [x] 2026-11-11: merged into `main` (d7e6d246) and checked there by the lead's verification (The
+  check on main, below): `check.py port` OK, all seven recipes equal the format-2 references, the
+  trace's own test passes, the players' game runs on every build this PC makes.
 
 ## The two mechanisms
 
@@ -59,7 +63,8 @@ both builds; it fell inside a bss object whose base moved 16 bytes, so the hashe
   HLE window right above the scratchpad (`memory.h` `PS2_HLE_WINDOW`, 0x70004000, committed by
   `ps2_memory_init`), at the same address in every build. The layout test (below) moved the
   core's rodata, data and bss by 4 KB each and found no other core data address anywhere in guest
-  RAM, the scratchpad or the hardware pages, on any recipe.
+  RAM, the scratchpad or the hardware pages on `boot` and `race` to `race6`. The `split` recipe
+  does hold one, the game's own (Result): this rule is about what the HLE gives the game.
 - **Code addresses in guest memory are listed, then hashed by identity** (as before): the data
   image's fixups plus `port/tools/state_trace_codeptrs.txt`. A code address in wasm is a
   function-table index (from 0x12100); RAM and scratchpad words are not classified by value,
@@ -176,14 +181,69 @@ traces of race2 to race6 have menu, phase, clock, hw, gs_stream, gs_regs, gs_vra
 identical in all 14000 rows (`trace_columns.py`); ram, scratch, cpu, vu0 and code differ from
 field 1 because their hashed content changed (the listed words, the placeholder lanes).
 
-Not checked: `split` and `memcard` (and the tracks the recipes do not race) on the padded layout:
-they may store function pointers in words not yet listed; `state_trace_layout_test.py layout
---recipes split,memcard` finds them. Linux and the browser trace were not run (the code is
-shared). No online runs (the trace is offline).
+Not checked by the lane: `split` and `memcard` on the padded layout (done on main, below), the
+tracks the recipes do not race, Linux and the browser trace (the code is shared). No online runs
+(the trace is offline).
+
+## The check on main (2026-11-11, d7e6d246)
+
+The lead's verification of the merge (main = 9b919298 with this lane; dhd64.exe sha256
+00363ce5..., core 740d5267...):
+
+- `python tools/check.py port -j 6`: every step OK; `test_runtime` ran `test_state_diff: ok (13
+  cases)` and the SIF unit test ("SIF deferred replies, busy packets, synchronous waits and queue
+  limits passed").
+- The gate, all seven recipes against the format-2 references of release 0.7.16's game code
+  (`state_trace_run.py <recipe>` on main, then `state_diff.py`): boot, race, race2, race3,
+  race4, race5 and race6 PASS, every row equal. So main's game code (findings 199-201, 203, 204
+  on top of the release) behaves as the release's on every recipe, and race3-race5 no longer
+  differ.
+- `state_trace_layout_test.py flips`: the rider flip (EE 0x0078CA90, field 4050), the RAM flip and
+  the register flip each reported at their field and column; flips PASS. `build-pad`, then
+  `layout --recipes boot,race,race3`: the core's layout moved (shadow stack top 70C29E60 against
+  70C2D290, 2068 against 2132 table rows) and every trace equal; layout PASS.
+- `layout --recipes split,memcard`: both FAIL, with game state equal (scratch, cpu, hw and vu0
+  equal in every dumped field; only `ram` differs). The words, from dumps of both builds:
+  - `memcard`, from field 33: one word, EE 0x0075F1DC, holds func_00246780 (function-table index
+    0x12393, 0x123D3 in the padded build: moved by the 64 pad entries). A code pointer the list
+    lacks.
+  - `split`, from field 279: 38 words, EE 0x003EE180 to 0x003EE2A0 and 0x003F01C0 to 0x003F02E0,
+    every 16 bytes (inside D_0029DDD8), hold 0x70114DE1 (0x70115EE1 padded): the last byte of the
+    core's merged string literals, the game's own `""`. `func_0018B4C8`
+    (`src/unsorted/0018B3A8.cpp`, the split-screen rider pages) passes `""` to `func_0018E408`,
+    which keeps the pointer (`DHD_STATE_WATCH` on both arrays: stored at field 278 from
+    `func_0018E408`). On the PS2 the literal sits at a fixed address of the executable; in the
+    port it is in the core's rodata, which moves with the layout. A data pointer, so the
+    code-pointer list cannot cover it.
+- The players' game: on Windows a hidden-desktop game with a header-only dhd.ini, sound on and
+  the memory card on saved (OPTIONS > SAVE GAME DATA: four files written through the card RPCs)
+  and loaded (LOAD GAME DATA > YES: both files read back in full), and another went from the
+  title into an offline race and raced; RPCs to the pad, the memory card, the sound driver and
+  the disc all went through `sceSifCallRpc`, with no fault line. Both browser builds
+  (`port/web/build.py`, threaded and `--no-threads`) build and pass `check_web_layout.py
+  --require-renderer`, and in headless Chrome (`check_browser.mjs`, the race recipe's route and a
+  full pedal) each reached the title, loaded the race, passed GO and raced to field 4300 with no
+  exception (the memory card RPCs answered at the start). The Android debug APK builds;
+  `rustgs.py check` for Linux passes (the macOS target stops in `ring`'s build script on Windows,
+  as `port/render/AGENTS.md` says). The window is mapped on every native platform by the shared
+  `port/host64/guest_memory.c` (`host_mem_commit` commits [0x70004000, 0x70008000) inside the
+  guest reservation, below the module's base, `guest_memory_posix.c` on Linux, macOS and
+  Android); the browser's `host_mem_commit` accepts any range inside the linear memory, which
+  starts at 0 and holds the module from 0x70100000.
+- Two builds of the same tree (`build_host64.py` into two folders) give dhd64.exe files that
+  differ in two bytes only, the PE header's link time stamp (file offset 0x80); every section is
+  identical. The lane's relinked dhd64.exe with an identical core was that time stamp.
 
 ## Result
 
-To fill in at the merge. Every format-1 reference trace is invalid; the regenerated ones (format 2,
-release 0.7.16's game code, the list of 696510ad) are outside the repository with the lead.
-Finding 081's line "opt-in only (`DHD_STATE_NORM=host`)" and its pointer description are then
-partly superseded by this finding.
+The state trace compares the game, not the core's layout, on the merge gate: `boot`, `race` and
+`race2` to `race6` are equal across a moved core, and a real change is reported at its field.
+Every format-1 reference trace is invalid; the format-2 references (release 0.7.16's game code,
+this finding's code-pointer list) are kept outside the repository, as `docs/TESTING.md` says.
+
+Open: `split` and `memcard` are not yet independent of the core's layout (above): the memcard
+word needs a line in `state_trace_codeptrs.txt`; the split words need the game's string literal
+at a fixed address or a data-pointer rule in the trace. Until then those two recipes compare
+only builds whose core layout is the same. The `memcard` recipe also no longer saves: OPTIONS
+gained REVIVED SETTINGS (finding 163), so its five downs reach LOAD GAME DATA and its last step
+answers NO; its card stays empty.
