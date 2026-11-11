@@ -1,6 +1,6 @@
 # 198: Native VU is the default
 
-Status: current
+Status: partly superseded by 199 (the browser left out: Native VU runs in the browser too, on by default)
 Supersedes: parts of 194 (off by default, "experimental", both paths kept beside each other), parts of 195 (the encoder cut on Mali GPUs)
 Checked: 2026-11-11
 
@@ -12,15 +12,17 @@ file and the git log must be able to pick the lane up.
 
 The owner's decision (2026-11-11): Native VU (finding 194: the VU1 programs' batch loops run as GPU
 shaders; dhd.ini `native_vu`, override `DHD_NATIVE_VU1`) becomes the default on every platform
-except the browser. The emulated VU path stays only as the automatic fallback (a pipeline the
-driver refuses, `dhdr_native_meshes`) and as the browser's path; a later lane deletes it once
-players' logs show no fallbacks. This lane measures first, then flips the default.
+except the browser (which followed in finding 199). The emulated VU path stays only as the
+automatic fallback (a pipeline the driver refuses, `dhdr_native_meshes`) and as the browser's path
+(until finding 199); a later lane deletes it once players' logs show no fallbacks. This lane
+measures first, then flips the default.
 
 - Measure on the Redmi 9 (Helio G80, Mali-G52 MC2), the low-end phone: finding 156's route at 2x
   (and 1x), Native VU off against on, interleaved, one debuggable APK of `main` 652a734b. dhd.log
   with it on: no fallback line, no crash.
 - `native_vu` on by default: the settings crate, REVIVED SETTINGS, the launcher; hidden in the
-  browser as before. Players who already have a dhd.ini get the new default unless they chose off.
+  browser as before (finding 199 offers it there, on by default). Players who already have a
+  dhd.ini get the new default unless they chose off.
 - The label loses "experimental"; the switch stays while the emulated path exists.
 - Acceptance: `python tools/check.py port`; boot and race state traces equal to `main`'s; pictures
   (`port/tools/native_vu_pictures.py`): the new default identical to `main` with the option on, the
@@ -171,9 +173,10 @@ where the CPU limits it gains (the Mi 11i on the t612 profile +16.6 %, the RTX a
   state traces, benchmarks, picture checks) is unchanged, as `renderer` is `exact` there and
   `native` for players. Tools that should measure what players get pass `DHD_NATIVE_VU1=on`. The
   lane that deletes the emulated path flips it.
-- **The browser**: `DHD_NATIVE_VU1` joins `settings.js`'s `BROWSER_WITHOUT`, so the default never
-  becomes a variable there (its VU has no translation; the `settings:` line would otherwise claim
-  it on). The row stays hidden as before.
+- **The browser** (changed by finding 199: its VU translates, the variable left `BROWSER_WITHOUT`
+  and the row is offered, on by default): `DHD_NATIVE_VU1` joined `settings.js`'s
+  `BROWSER_WITHOUT`, so the default never became a variable there (its VU had no translation; the
+  `settings:` line would otherwise have claimed it on). The row stayed hidden as before.
 - **Words**: the row is "Native VU:", its hint "Faster. Turn OFF if the picture looks wrong"; the
   launcher's "Native VU" with the same advice. The switch stays as long as the emulated path does.
 - **The Mali fix is in this lane** although it is finding 195's code: the phone that shows it was
@@ -202,8 +205,8 @@ where the CPU limits it gains (the Mi 11i on the t612 profile +16.6 %, the RTX a
 Merged into `main` at b3f8496a on 2026-11-11; ships in 0.7.16.
 
 - **What changed**: `native_vu` on by default (settings crate; the tools' built-in stays off), the
-  row and the launcher's switch without "experimental", the browser leaves the variable out; on
-  Mali GPUs a picture stays in one encoder; the docs.
+  row and the launcher's switch without "experimental", the browser leaves the variable out
+  (until finding 199); on Mali GPUs a picture stays in one encoder; the docs.
 - **Measured**: the Redmi 9 at 2x 50.6 -> 48.7 fields/s with the option on (race 47.3 -> 44.8), at
   1x 57.1 -> 58.4; the integrated Radeon at 4x 122.1 -> 118.2. No fallback, no crash, the race
   looks right on the Mali-G52.

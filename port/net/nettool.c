@@ -3,9 +3,12 @@
    stays in it for --seconds, counting the others' frames; then it prints a RESULT line and leaves.
 
    usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]
-                  [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]
-                  host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list
+                  [--replay FILE --rider N] [--bike A,B,C] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]
+                  [--score N] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list
    --p2p makes a P2P room (finding 180); a join goes to a P2P room when its code has 7 characters.
+   In the arena's scored round (a race on track 23 with a server that lists "score", finding 204)
+   --finish-after's finish is the round's end: the bot sends its final score (--score N points,
+   default 0; port/hle/mosh_round.h) to the games, then its finish with that score to the room.
    The server is --server or DHD_NET_SERVER (ws://127.0.0.1:8787 for wrangler dev). With the
    game's --version and --iso hash it can join a room of real games (finding 041). */
 #include <windows.h>
@@ -16,6 +19,7 @@
 
 #include "net.h"
 #include "../hle/state_bundle.h"
+#include "../hle/mosh_round.h"
 
 static void wait_for(int (*done)(const NetLobby *), double seconds, const char *what)
 {
@@ -79,6 +83,15 @@ static int resend_rider(const uint8_t *in, int n, int rider, int as, float dx)
     return 0;
 }
 
+/* A SETUP event's rider and bike (the 30-byte form: no colour): --bike A,B,C picks the bike's three
+   words, as a shop's choice (default 8 3 0). */
+static int bike_words[3] = {8, 3, 0};
+static void put_ride(uint8_t *e, int rider)
+{
+    put32(e + 2, 0x20 * (rider + 1)), put32(e + 6, rider);
+    for (int k = 0; k < 3; k++) put32(e + 18 + 4 * k, bike_words[k]);
+}
+
 static int replay(const char *path, int slot, int rider, double seconds)
 {
     static uint8_t data[1 << 22];
@@ -95,7 +108,7 @@ static int replay(const char *path, int slot, int rider, double seconds)
     e[1] = EVENT_LOADED;
     net_send_frame(NET_FRAME_EVENT, e, 2);
     e[1] = EVENT_SETUP;
-    put32(e + 2, 0x20 * (rider + 1)), put32(e + 6, rider), put32(e + 18, 8), put32(e + 22, 3);
+    put_ride(e, rider);
     net_send_frame(NET_FRAME_EVENT, e, sizeof e);
     while (net_seconds() < until && !results) {
         while ((n = net_receive_frame(frame, sizeof frame)) > 0)
@@ -147,6 +160,7 @@ int main(int argc, char **argv)
     int i, slot, races = 0, public_room = 0;  /* --public: the host's room is on the public list */
     int p2p = 0;              /* --p2p: the host's room is a P2P one */
     double finish_after = -1, back_after = -1;
+    int score = 0;            /* --score N: the bot's points in the arena's scored round */
     uint8_t frame[NET_FRAME_MAX];
     double until;
     NetLobby l;
@@ -160,6 +174,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--follow-host")) follow_host = 1;
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc) replay_file = argv[++i];
         else if (!strcmp(argv[i], "--rider") && i + 1 < argc) rider = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--bike") && i + 1 < argc)
+            sscanf(argv[++i], "%d,%d,%d", &bike_words[0], &bike_words[1], &bike_words[2]);
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--pick") && i + 1 < argc) pick = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ready-after") && i + 1 < argc) ready_after = atof(argv[++i]);
@@ -169,12 +185,14 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--p2p")) p2p = 1;
         else if (!strcmp(argv[i], "--finish-after") && i + 1 < argc) finish_after = atof(argv[++i]);
         else if (!strcmp(argv[i], "--give-up-after") && i + 1 < argc) back_after = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--score") && i + 1 < argc) score = atoi(argv[++i]);
         else if (!mode) mode = argv[i];
         else code = argv[i];
     }
     if (!mode || (!strcmp(mode, "join") && !code)) {
         printf("usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]\n"
-               "               [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
+               "               [--replay FILE --rider N] [--bike A,B,C] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]\n"
+               "               [--score N] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
         return 2;
     }
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -232,7 +250,7 @@ int main(int argc, char **argv)
                 printf("RACE %d slot %d\n", started_count, l.local_slot);
                 /* its rider and bike, as replay() says them: the games' setup needn't wait 30 s for this one */
                 uint8_t e[30] = {EVENT_VERSION, EVENT_SETUP};
-                put32(e + 2, 0x20 * (rider + 1)), put32(e + 6, rider), put32(e + 18, 8), put32(e + 22, 3);
+                put_ride(e, rider);
                 net_send_frame(NET_FRAME_EVENT, e, sizeof e);
             }
             was_racing = l.state == NET_RACING;
@@ -242,7 +260,7 @@ int main(int argc, char **argv)
                    (NET_RELAY_QUEUE), and a burst of bots' messages can push a rider's one out. Every
                    2 s: a game sends each once, so a room of bots must not flood the slow loaders. */
                 uint8_t e[2] = {EVENT_VERSION, EVENT_LOADED}, ride[30] = {EVENT_VERSION, EVENT_SETUP};
-                put32(ride + 2, 0x20 * (rider + 1)), put32(ride + 6, rider), put32(ride + 18, 8), put32(ride + 22, 3);
+                put_ride(ride, rider);
                 net_send_frame(NET_FRAME_EVENT, ride, sizeof ride);
                 net_send_frame(NET_FRAME_EVENT, e, 2);
                 loaded_at = now;
@@ -266,7 +284,18 @@ int main(int argc, char **argv)
                         net_send_frame(NET_FRAME_EVENT, e, sizeof e);
                         printf("FINISH %.2f s, %u snapshots echoed\n", now - race_at, echoed);
                     }
-                    net_finish(ticks, l.local_slot + 1);
+                    if (l.race_track == MOSH_TRACK && l.server_scores) {  /* the arena's round (finding 204) */
+                        MoshScore s;
+                        uint8_t e[SCORE_EVENT_SIZE];
+                        memset(&s, 0, sizeof s);
+                        s.part[1] = (uint32_t)(score < 0 ? 0 : score > MOSH_MAX_SCORE ? MOSH_MAX_SCORE : score);
+                        s.known = s.final = 1;
+                        score_encode(e, l.local_slot, &s);
+                        net_send_frame(NET_FRAME_EVENT, e, sizeof e);
+                        printf("ROUND OVER %.2f s, score %u\n", now - race_at, mosh_points(&s));
+                        net_finish(ticks, l.local_slot + 1, (int)mosh_points(&s));
+                    } else
+                        net_finish(ticks, l.local_slot + 1, -1);
                 }
                 if (finish_after < 0 || !echo_ai) net_back();
                 acted = 1;

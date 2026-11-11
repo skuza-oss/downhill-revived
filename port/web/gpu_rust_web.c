@@ -122,7 +122,15 @@ __attribute__((export_name("web_gpu_enable"))) int web_gpu_enable(void)
    is live, and libc reads it again here). */
 void web_gpu_reattach(void)
 {
-    static int native_tried;
+    static int native_tried, setting_read;
+    /* Native VU for the VU worker (vu1_mesh.inc), as host.c's settings load does natively: the
+       setting at the first gs_reset with or without a renderer (a headless run's forced
+       ":skip"), then the renderer, which says whether it can draw the meshes (gs_mesh_mode) */
+    if (!setting_read) {
+        setting_read = 1;
+        __wasilibc_deinitialize_environ();
+        gs_mesh_setting_read();
+    }
     if (!web) return;
     exact_attach(&gs, &web->e);
     if (web->native) { native_reattach(&gs, web); return; }
@@ -137,9 +145,10 @@ void web_gpu_reattach(void)
 uint64_t web_gs_mmio(unsigned addr);  /* host_graphics.c */
 
 /* The page changed a variable the native renderer follows while the game runs (PC SETTINGS >
-   Resolution, Scaling: DHD_SCALE, DHD_PRESENT_FILTER, DHD_ASPECT; worker.js, or graphics.js in the
-   threaded build, calls this between the reactor's calls). The next web_display reads the
-   environment again and applies them. */
+   Resolution, Scaling, Native VU: DHD_SCALE, DHD_PRESENT_FILTER, DHD_ASPECT, DHD_NATIVE_VU1;
+   worker.js, or graphics.js in the threaded build, calls this between the reactor's calls). The
+   next web_display reads the environment again and applies them (Native VU: the VU worker sees the
+   new gs_mesh_setting at its next batch). */
 static int env_changed;
 __attribute__((export_name("web_env_changed"))) void web_env_changed(void) { env_changed = 1; }
 
@@ -156,7 +165,7 @@ __attribute__((export_name("web_display"))) uint32_t web_display(void)
     if (!web) return 0;
     int changed = env_changed;
     env_changed = 0;
-    if (changed) __wasilibc_deinitialize_environ(), counter_on = -1;
+    if (changed) __wasilibc_deinitialize_environ(), counter_on = -1, gs_mesh_setting_read();   /* Native VU: live */
     if (web->native) {
         /* the present options before this picture, a new scale after it (native_rescale) */
         if (changed) web_native_present_options(g);

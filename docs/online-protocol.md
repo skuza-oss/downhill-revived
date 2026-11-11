@@ -204,8 +204,9 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // Whether the room holds a Realtime session for this member (finding 177): "sfu":"ready" (a rejoin:
 // keep the association) or "sfu":"setup" (offer one). A rejoin into the member's running race
 // (finding 175) adds the race: "race":{"startAt":1734000003000}
-// What the server takes beyond protocol 4 (finding 187): "features":["sfu_silent","race_go"]. A
-// game sends sfu_silent and race_go only to a server that lists them; 0.7.13 ignores the field.
+// What the server takes beyond protocol 4 (findings 187, 204): "features":["sfu_silent","race_go",
+// "score"]. A game sends sfu_silent and race_go, and plays the arena's scored round (Finishes and
+// return, below), only with a server that lists them; 0.7.13 ignores the field.
 
 // Where the room runs and each member's region (never their country): after every join and when
 // the room learns its colo (Region, below).
@@ -676,6 +677,13 @@ crosses the line. N is an unsigned 32-bit race clock at 60 ticks a second.
 P is 1–255, the full-field place computed locally, including computer riders.
 Only the first finish from that entrant counts. Computer finishes send nothing.
 
+A scored round (finding 204: an online round on the Mosh Pit arena, played by the game's Mosh Bowl
+rules) adds `"score":S`, the entrant's own points, an integer 0–999999 (the six digits the game's
+HUD shows): `{"type":"finish","ticks":7200,"place":2,"score":1350}`. N is then the race clock when
+the round's two minutes ran out on that game, and P its place in the round's table (computer riders
+included), the same table on every game (the finding). A game sends a score only to a server whose
+welcome lists `"score"`; another value is `bad_value`. A rejoin's repeated finish repeats it.
+
 The first human finish sets finishEndsAt to now plus the running finishWindow.
 With finishWindow zero the deadline remains null. Later finishes do not move it.
 At the deadline all unfinished entrants become DNF time_up and leave the race's frames.
@@ -695,7 +703,8 @@ A host sends `{"type":"end"}` to void the running race.
 The server sends ended with reason void, keeps the previous lastRace and does
 not rotate. These messages do not disconnect anyone.
 
-Completed lastRace entrants sort by ticks, then DNFs in grid order.
+Completed lastRace entrants sort by ticks, then DNFs in grid order. When any finish carried a
+score, finishers sort by score instead, highest first, a tie in grid order; DNFs still last.
 Their places use reported places, raised to at least the preceding place plus
 one. DNFs follow finishers and get successive places.
 LastRace stays until another race completes. Its id increments on completion.
@@ -745,11 +754,12 @@ Room snapshots carry, beside the fields above:
 
 Each member adds inRace (still in this race's scene).
 Members with a current race entry add raceState: racing, finished, or dnf;
-place; finishTicks for finishers; dnfReason for DNFs.
+place; finishTicks for finishers (score instead for a scored round's, finding 204: the round's
+length is the same for everyone, and it keeps ten members within 4 KB); dnfReason for DNFs.
 Members waiting outside the race omit raceState and result fields.
 An entrant may be finished while inRace is true until back or race closure.
 LastRace entrants carry id (member id), name, rider, place and either ticks or
-dnfReason. Disconnected entrants remain in lastRace.
+dnfReason; a scored round's finishers add score. Disconnected entrants remain in lastRace.
 All deadlines are server epoch milliseconds; absent deadlines are null.
 Text frames fit 4096 UTF-8 bytes for ten members, including prior results.
 Member and room names replace C0 controls and unpaired UTF-16 surrogates with U+FFFD to bound

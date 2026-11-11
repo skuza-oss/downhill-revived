@@ -26,7 +26,7 @@ async function start(m) {
   let bytes, dv;
   const refresh = () => { bytes = new Uint8Array(memory.buffer); dv = new DataView(memory.buffer); };
   refresh();
-  const renderer = await startRenderer(memory, canvas, say);
+  const renderer = await startRenderer(memory, canvas, say, env);
   say(`WebGPU: ${renderer.adapter} (${renderer.version}), in the graphics worker`);
   let gx;
   const enc = new TextEncoder(), envList = () => Object.entries(env).map(([k, v]) => enc.encode(`${k}=${v}\0`));
@@ -75,7 +75,7 @@ async function start(m) {
       const text = new TextDecoder().decode(new Uint8Array(memory.buffer, q[QI.env_text] >>> 0, q[QI.env_bytes]).slice());
       const i = text.indexOf('='), name = text.slice(0, i);
       env[name] = text.slice(i + 1);
-      if (RENDERER_LIVE.has(name)) gx.web_env_changed();   // PC SETTINGS > Resolution, Scaling: at the next vsync
+      if (RENDERER_LIVE.has(name)) gx.web_env_changed();   // PC SETTINGS > Resolution, Scaling, Native VU: at the next vsync
     } else throw Error(`graphics: web_q_run answered ${r}`);
   }
 }

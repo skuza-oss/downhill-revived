@@ -858,6 +858,17 @@ PATCHES['unsorted/001B4618.c'] = PATCHES.get('unsorted/001B4618.c', []) + [
      'do { extern void hle_render_wait(void); hle_render_wait(); } while(D_0029E1C8 | D_0029E1CC | D_0029E1E4);'),
 ]
 
+# The race's loading bar (func_00182330, finding 203): a Single Event style race on the Mosh Pit
+# arena (track 23), as every online race is, loads the arena's own bar, LMOSH, as its mode (15)
+# does. The game builds a Single Event bar's name from the track's short name (L%sSE), which for
+# the arena is LMOSSE, not on the disc (LOADBAR has LMOSH, and LMOSHSE, a preview card); the load
+# then reads whatever is in the bar's buffer as a texture list, and the game faults (issue #84).
+# Only that name changes, so only loads of a missing file change: Single Event itself skips the
+# arena (func_001E3810), and every other mode keeps its bar.
+PATCHES['unsorted/00182330.c'] = [
+    ('text', 'single:\n  func_00254D68(D_003C6350,D_0029CCE8,D_0026EF60[a]);',
+     'single:\n  if(a==23) return D_0029CCD8;\n  func_00254D68(D_003C6350,D_0029CCE8,D_0026EF60[a]);')]
+
 # wasm32: size_t is unsigned long there and unsigned int on i686 (the same type as the game's).
 PATCHES['unsorted/00235488.cpp'] = [('text', 'operator new[](unsigned int size)', 'operator new[](__SIZE_TYPE__ size)')]
 

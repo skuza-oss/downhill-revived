@@ -141,8 +141,12 @@ void gs_mesh(Gs *g, const uint32_t *words, size_t count);
    to 0 when the GPU refuses the mesh draws (native_mesh_check; atomic: the VU thread reads it).
    gs_mesh_hook: the backend's drawing of a mesh item, after gs_mesh's register writes.
    gs_vu_shadow: the packet being fed was kicked by a batch the backend draws from its mesh item
-   (only the exact Z path takes it). Outside struct Gs, whose size the core's state trace holds. */
+   (only the exact Z path takes it). Outside struct Gs, whose size the core's state trace holds.
+   (The threaded browser build: gs_mesh_mode is gs_mesh.h's shared word.) */
+#include "gs_mesh.h"
+#ifndef gs_mesh_mode
 extern int gs_mesh_mode;
+#endif
 extern void (*gs_mesh_hook)(Gs *gs, const uint32_t *words, size_t count);
 extern unsigned gs_vu_shadow;
 

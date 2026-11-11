@@ -29,6 +29,8 @@ typedef struct {
     char install_id[33];
     /* the room's welcome listed "race_go": it takes the race's start moment (finding 187) */
     int server_race_go;
+    /* the room's welcome listed "score": a round's finish may carry its score (finding 204) */
+    int server_scores;
     NetLobby lobby;
     int racing;
     /* In a race whose room connection dropped (finding 175): the race goes on over the SFU while
@@ -40,6 +42,7 @@ typedef struct {
     double race_at;
     int finished, finish_place, gave_up;
     unsigned finish_ticks;
+    int finish_score;  /* a scored round's (finding 204), -1 none */
     /* what to repeat after a lobby reconnect */
     int picked, rider, bike, ready, choosing;
     double countdown_ends;  /* the server's countdown end, server ms; 0 none */
@@ -129,7 +132,7 @@ void client_ready(NetClient *c, int ready);
 void client_kick(NetClient *c, int member);
 void client_start(NetClient *c);
 void client_end(NetClient *c);
-void client_finish(NetClient *c, unsigned ticks, int place);
+void client_finish(NetClient *c, unsigned ticks, int place, int score);
 void client_back(NetClient *c);
 void client_rules(NetClient *c, int finish_window, int next_race, int then);
 void client_rotation(NetClient *c, const unsigned char *ids, int count);

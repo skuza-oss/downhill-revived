@@ -72,19 +72,12 @@
    kicked for the exact path only (the native renderer draws the mesh item instead), so game
    state is the switch-off run's. :skip or :shadow forces one. DHD_NATIVE_VU1_CHECK=1 (shadow)
    compares each item, through the shader's maths, with the packet the program wrote (mesh_check).
-   Only with the native renderer and indexed fields (gs_mesh_mode); the browser builds leave it
-   out. */
+   Only with the native renderer and indexed fields (gs_mesh_mode). The browser runs the same code
+   (finding 199): its VU worker (vu.wasm) and GS worker (graphics.wasm) share gs_mesh_setting and
+   gs_mesh_mode at a fixed place in their memory (gs_mesh.h), and its items reach the GS worker
+   through the queue's WQ_GIF packets (port/web/web_queue.c). */
 #include "../gs/gs_mesh.h"
 
-#if defined(DHD_WEB_VU) || defined(DHD_WEB_HOST)
-enum { MESH_OFF = 1, MESH_ON = 2 };   /* the browser: no mesh renderer (Native VU is not offered there) */
-static struct { int state; } mesh = {MESH_OFF};
-static int mesh_before(unsigned addr, int mscnt, uint32_t **packet) { (void)addr, (void)mscnt, (void)packet; return 0; }
-static void mesh_send(uint32_t *packet) { (void)packet; }
-static void mesh_skipped(void) {}
-static void mesh_after(unsigned addr, int mscnt) { (void)addr, (void)mscnt; }
-static void mesh_timed(double seconds) { (void)seconds; }
-#else
 enum { MESH_OFF = 1, MESH_ON = 2, MESH_SKIP = 1, MESH_SHADOW = 2 };
 enum { MESH_WHY_EOP, MESH_WHY_COUNT, MESH_WHY_TAG, MESH_WHY_PRIM, MESH_WHY_TEXTURE, MESH_WHY_COLOUR, MESH_WHY_JOIN,
        MESH_WHY_NEAR, MESH_WHY_CLIP, MESH_WHY_ORTHO, MESH_WHYS };
@@ -599,4 +592,3 @@ static void mesh_skipped(void)
 
 /* After a VU1 run that was not skipped (the constants are read at each batch). */
 static void mesh_after(unsigned addr, int mscnt) { (void)addr, (void)mscnt; }
-#endif

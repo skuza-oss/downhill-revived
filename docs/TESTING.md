@@ -57,12 +57,13 @@ after a version change before a live check.
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below); `--hidden` runs both on the hidden desktop; `--link` puts the STATE each receives through a test link (`DHD_NET_LINK`) |
 | `port/tools/puppet_bench.py` | the puppet bench (finding 202, "The puppet bench" below): recorded riders replayed onto puppets through a seeded bad link, scored against the truth (distance, wheels in the ground, jumps and jolts, time frozen) |
 | `port/tools/puppet_lag.py RUN [--riders]` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169); `--riders`: every rider (the other player's and the AI riders) with the bench's scores, and the re-syncs in the first 5 s after GO, later and after crashes (finding 202; `online_race.py --lag` prints it) |
-| `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot) |
+| `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot; `--rider N --bike A,B,C`: the rider and bike it says it rides) |
 | `port/android/test_disc_image.py [ISO]` | the Android side's plain-JVM tests: the first start's disc rules (the check, a complete copy) on synthetic images, and the update notice's page rule (finding 143) |
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
 | `online/server`: `npm test` | the server's own tests |
-| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour; `boot` and `race` are the merge gate and must be equal. A change that moves the core's own data can make `race3`-`race5` differ in the cpu hash and in one RAM word at the race load with no game state changed: raw GPRs equal (`DHD_STATE_GPRS=1`), the word a core address (finding 203) |
+| `port/tools/room_tracks_check.py` | every track an online room offers loads and races: the state trace's race recipe with `DHD_RACE_SETUP=<track>` (headless, about two minutes a track); `--tracks 23,17` picks some (finding 203) |
 | `port/tools/test_scenery_rate.py` | the same race at 60, 144 and 240 (deterministic, headless): the helicopters', birds' and swooping attacker's speed in game time must match 60's (`DHD_SCENERY_TRACE`, finding 193); `--row N` / `--right N` pick the track (the chooser moved right N times; `--right` with every track unlocked) |
 | `port/tools/rate_audit.py` | words of EE memory that move once per update instead of once per field, from a 60 and a high-rate run (finding 090, FPS1); `--row`, `--skip`, `--samples` pick the race and its window |
 | `port/tools/route_profile.py EXE OUT [--profile]` | finding 156's route on a hidden desktop (timed lock) with the timeline: per scene (title, shop, race start, mid-race) fields/s and each thread's work and busy time; `--profile` also samples the game thread's call stacks in each scene (finding 162) |
@@ -153,6 +154,7 @@ Online:
 | `DHD_NET_SCRIPTED=1` | the online flow takes its input from the scripts above, not the pad |
 | `DHD_NET_TEST_READY=1` | (with SCRIPTED) presses READY in the room after every race |
 | `DHD_NET_TEST_FINISH=S` | this PC's rider finishes at race second S |
+| `DHD_NET_NO_AI=1` | (with `DHD_NET_CREATE`, or `DHD_NET_SCRIPTED` for a host's room from the menus) the room's computer riders off |
 | `DHD_NET_TEST_TRACK=N` | (with SCRIPTED) a host's room starts on game track N |
 | `DHD_NET_TEST_CODE=CODE` | (with SCRIPTED) JOIN WITH A CODE starts with this code typed (cross_race.py's P2P guest) |
 | `DHD_NET_TEST_THEN=same\|next\|random` | (with SCRIPTED) a host's room's Then rule (the track after each race) |

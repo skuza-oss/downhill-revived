@@ -66,10 +66,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `ps2asm_aot.py`); EE float rounding follows PCSX2's (finding 026). VU0 microprograms are native
   or compiled (`vu0_micro.c`, `vu0_aot.py`); VU1 runs compiled blocks plus native kernels
   (`vu1_aot.py`, `vu1_native_clip.py`), checked against PCSX2's interpreter (findings 030, 090),
-  and, with Native VU (the players' default but in the browser, finding 198), the translated
-  batch loops as GPU shaders instead (findings 164, 167, 194). The emulated path for those loops
-  remains as the fallback, the setting's off and the browser's path until it is deleted (root
-  AGENTS.md).
+  and, with Native VU (the players' default on every platform, the browser included: findings
+  198, 199), the translated batch loops as GPU shaders instead (findings 164, 167, 194). The
+  emulated path for those loops remains as the fallback and the setting's off until it is deleted
+  (root AGENTS.md).
 - GS: GS memory and registers in C (`port/gs/`); the Rust renderer (`port/render`, wgpu: DX12 or
   Vulkan on Windows, Metal on Apple, Vulkan on Linux and Android, WebGPU in the browser) behind
   the shared C front ends `gpu_exact.inc` (exact: the PS2's pixels, the reference) and
@@ -109,7 +109,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), a
   Performance group (shadows and sun glow, lens flare, particles; finding 183), Native VU
   (on by default: VU1 programs as GPU shaders, falls back to the emulated VU when
-  the GPU can't; findings 164, 167, 194, 198), movies,
+  the GPU can't; findings 164, 167, 194, 198, 199), movies,
   vibration, stick dead zone and button icons (finding 134; also over a texture pack's font,
   finding 200), the keys and controller buttons for
   the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
@@ -194,6 +194,13 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   tungstenite over rustls for the lobby, str0m for the SFU with a vendored RustCrypto adapter,
   its own TURN client; webpki roots, no OS certificate store).
 - Online needs the USA disc's game files (a hash of every ISO 9660 file, `dhd_disc`; finding 098).
+- MOSH PIT starts online since finding 203 (it loads the arena's own loading bar, `LMOSH`), and an
+  online race there is the game's Mosh Bowl round (finding 204): two minutes on each game's own
+  clock, the game's points per hit (made by the game that runs the attacker, sent as reliable
+  events), then COMBAT RESULTS with the same table on every game and the room ranked by the same
+  scores. Only with a server whose welcome lists the `score` feature (`online/server/src/room.ts`;
+  a finish may carry `score`); with an older one the arena races as before, a race with no end of
+  its own. So a release with it must deploy the server too.
 - Releases with online or pacing changes need a real race between two different machines both
   ways (single-PC tests have hidden bugs before).
 
@@ -205,7 +212,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the game runs their code (finding 104). Renderer: `test_gs_wgpu.py`, replay goldens recorded
   locally (`gs_golden.py`), `test_native_transfers.py`. Game state: per-field state traces
   (`port/hle/state_trace.c`, `state_trace_run.py`, `state_diff.py`), `test_fps_race.py`,
-  `rate_drift.py`, `slow_race.py`, `replay_check.py`. Server: `npm test` in `online/server`.
+  `rate_drift.py`, `slow_race.py`, `replay_check.py`. The boot and race traces are the merge gate;
+  a change that moves the core's own data can make race3-race5 differ in the cpu hash and in one
+  RAM word at the race load with no game state changed (core addresses the trace does not
+  normalise, finding 203). Server: `npm test` in `online/server`.
   Online: `port/net/build_tests.py`, `port/tools/online_race.py`. Retail comparisons with PCSX2:
   `compare_pcsx2.py`, `race_compare.py` (finding 024). Everything, with setup variables:
   `docs/TESTING.md`.

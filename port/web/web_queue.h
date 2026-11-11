@@ -68,6 +68,7 @@ enum {
 #define WQ_KIND 0xffu
 #define WQ_VU_READY 0x100u   /* the VU1 image was in guest RAM when the core queued this */
 #define WQ_VU_CALL 0x200u    /* a WQ_CALL the VU worker runs (host_vu1_*), not the GS */
+#define WQ_SHADOW 0x400u     /* a WQ_GIF a shadow batch kicked (graphics_provenance.shadow; Native VU's :shadow) */
 
 typedef struct {
     uint32_t bytes;   /* the packet's size (16-byte multiple), header included */
@@ -99,6 +100,11 @@ typedef struct {
     uint32_t env_text, env_bytes;   /* each worker in its block (the VU worker the first, the GS
                                        worker the second): the last WQ_ENV's copy, for its JS loop */
     uint32_t stats[16];      /* graphics.js: the status line's numbers, for worker.js (STAT there) */
+    /* Native VU (in the first block only): gs.h's gs_mesh_mode and gs_mesh.h's gs_mesh_setting,
+       the two words natively shared by the GS and VU threads. Here the GS worker (graphics.wasm:
+       the renderer, the setting read) and the VU worker (vu.wasm: vu1_mesh.inc) are two modules,
+       so the words live at this fixed place both know (gs_mesh.h's DHD_WEB_THREADS macros). */
+    int32_t mesh_setting, mesh_mode;
 } WebQueue;
 /* The offsets www/graphics.js, www/worker.js and headless_graphics.mjs use (Int32Array indices). */
 _Static_assert(__builtin_offsetof(WebQueue, written) == 0 && __builtin_offsetof(WebQueue, sleeping) == 128 &&

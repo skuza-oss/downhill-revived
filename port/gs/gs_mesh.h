@@ -51,9 +51,19 @@ enum {
 };
 unsigned gs_mesh_parse(const char *value);
 /* The setting as the game thread last read it (gs_mesh_setting_read: at the native renderer's start
-   and when REVIVED SETTINGS changes a picture option, gs_present_options_apply), for the VU thread,
-   which reads no environment; -1 until it was read. Atomic loads and stores (any thread). */
+   and when REVIVED SETTINGS changes a picture option, gs_present_options_apply; in the browser the
+   GS worker reads it, gpu_rust_web.c), for the VU thread, which reads no environment; -1 (or 0)
+   until it was read. Atomic loads and stores (any thread).
+   The threaded browser build (DHD_WEB_THREADS) runs the GS and the VU in two wasm modules on one
+   shared memory, so this word and gs.h's gs_mesh_mode are at a fixed place both modules know
+   (port/web/web_queue.h's first control block) instead of a variable of one of them. */
+#if defined(DHD_WEB_THREADS)
+#include "web_queue.h"   /* -Iport/web */
+#define gs_mesh_setting (WQ->mesh_setting)
+#define gs_mesh_mode (WQ->mesh_mode)
+#else
 extern int gs_mesh_setting;
+#endif
 void gs_mesh_setting_read(void);
 
 #endif

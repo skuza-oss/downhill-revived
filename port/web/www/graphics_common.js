@@ -9,8 +9,9 @@ const RUST_WINDOW = [0x60000000, 0x69000000];
 const RUST_INIT_FLAGS = 7;
 
 // The Rust module, on the core's memory; dhdr_web_init on the canvas. Returns the glue and the
-// module's exports.
-export async function startRenderer(memory, canvas, say) {
+// module's exports. env: the page's environment, for what Rust can't read itself here
+// (DHD_TEST_NO_MESHES, Native VU's refusal test, finding 194).
+export async function startRenderer(memory, canvas, say, env = {}) {
   const words = new Uint32Array(memory.buffer, RUST_WINDOW[0], (RUST_WINDOW[1] - RUST_WINDOW[0]) / 4);
   let bits = 0;
   for (let i = 0; i < words.length; i++) bits |= words[i];
@@ -24,6 +25,8 @@ export async function startRenderer(memory, canvas, say) {
     const f = console[k].bind(console);
     console[k] = (...a) => { say(a.map(String).join(' ')); f(...a); };
   }
+  const noMeshes = (env.DHD_TEST_NO_MESHES ?? '').trim();
+  if (/^\d+$/.test(noMeshes)) R.dhdr_web_test_no_meshes(Number(noMeshes));
   if (!await R.dhdr_web_init(canvas, RUST_INIT_FLAGS)) throw Error('GS: the Rust renderer did not start (dhdr_web_init)');
   const text = p => { const b = new Uint8Array(memory.buffer, p >>> 0); return new TextDecoder().decode(b.subarray(0, b.indexOf(0))); };
   return { R, rx, adapter: text(rx.dhdr_adapter_name()) || 'WebGPU', version: text(rx.dhdr_version()) };

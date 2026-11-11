@@ -140,6 +140,9 @@ async function start(source) {
       $('logPanel').hidden = false; }
     else if (m.type === 'running') status.textContent = 'running';
     else if (m.type === 'exit') status.textContent = `game exited (${m.status})`;
+    // DHD_CAPTURE_FIELDS (worker.js): the game waits at this field until dhdResume (check_browser.mjs --capture)
+    else if (m.type === 'capture') { window.dhdCapture = m.field;
+      window.dhdResume = () => { window.dhdCapture = null; worker.postMessage({ type: 'resume' }); }; }
     else if (m.type === 'status') { status.textContent = `field ${m.field}  ${m.fps.toFixed(1)} fields/s  picture ${m.size}  draws ${m.draws}  batches ${m.dispatches}  readbacks ${m.reads}  sound ${m.sound} s${m.riding ? '  riding' : ''}`;
       document.title = `DHD ${m.fps.toFixed(1)} fps (field ${m.field})`; window.dhdStatus = m; (window.dhdHistory ??= []).push([m.field, +m.fps.toFixed(2), m.draws]); }
   };

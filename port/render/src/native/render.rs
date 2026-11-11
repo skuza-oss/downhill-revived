@@ -711,7 +711,6 @@ impl Native {
         let _spike = crate::native::pipelines::SpikeTimer::new("picture", 0);
         let whole = rstat::T::new();
         let gpu = self.gpu;
-        #[cfg(not(target_arch = "wasm32"))]
         crate::native::init::test_refusal();
         gputimes::picture_begin(gpu);
         #[cfg(not(target_arch = "wasm32"))]

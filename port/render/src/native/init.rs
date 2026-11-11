@@ -68,7 +68,7 @@ pub(crate) fn scoped_pipeline<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -
 /// already recorded is skipped (`render.rs`). Once set it stays set for the session.
 static MESHES_REFUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Marks the meshes refused, with one log line saying why (None: by design, the browser: no line).
+/// Marks the meshes refused, with one log line saying why (None: no line).
 pub(crate) fn refuse_meshes(why: Option<&str>) {
     if !MESHES_REFUSED.swap(true, std::sync::atomic::Ordering::AcqRel) {
         if let Some(why) = why {
@@ -81,15 +81,39 @@ pub(crate) fn meshes_refused() -> bool {
     MESHES_REFUSED.load(std::sync::atomic::Ordering::Acquire)
 }
 
+/// DHD_TEST_NO_MESHES as the browser's page gave it (`dhdr_web_test_no_meshes`; u64::MAX: unset):
+/// the browser's Rust has no environment of its own.
+#[cfg(target_arch = "wasm32")]
+static TEST_NO_MESHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// The browser's DHD_TEST_NO_MESHES (web/init.rs `dhdr_web_test_no_meshes`, before `dhdr_web_init`).
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+pub(crate) fn set_test_no_meshes(at: u32) {
+    TEST_NO_MESHES.store(at as u64, std::sync::atomic::Ordering::Release);
+}
+
+/// DHD_TEST_NO_MESHES (tests, finding 194): natively the environment's, in the browser the page's.
+fn test_no_meshes() -> Option<u64> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static AT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+        *AT.get_or_init(|| std::env::var("DHD_TEST_NO_MESHES").ok().and_then(|v| v.trim().parse().ok()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let at = TEST_NO_MESHES.load(std::sync::atomic::Ordering::Acquire);
+        (at != u64::MAX).then_some(at)
+    }
+}
+
 /// DHD_TEST_NO_MESHES=N (tests, finding 194): the meshes are refused at the native renderer's N-th
 /// picture (0: at its create), as a driver refusing a mesh pipeline would; the game must go on with
 /// the VU running every program. Called at each picture (`render.rs`).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn test_refusal() {
     use std::sync::atomic::{AtomicU64, Ordering};
-    static AT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     static PICTURES: AtomicU64 = AtomicU64::new(0);
-    let Some(at) = *AT.get_or_init(|| std::env::var("DHD_TEST_NO_MESHES").ok().and_then(|v| v.trim().parse().ok())) else {
+    let Some(at) = test_no_meshes() else {
         return;
     };
     if PICTURES.fetch_add(1, Ordering::Relaxed) + 1 >= at {
@@ -106,19 +130,19 @@ pub extern "C" fn dhdr_native_meshes() -> i32 {
 }
 
 /// Whether the device can read the mesh draws' object records (a read-only storage buffer in the
-/// vertex stage, native.wgsl's `mesh_records`). Err(None): the browser, which draws no meshes;
-/// Err(Some(why)): this device can't.
+/// vertex stage, native.wgsl's `mesh_records`). Err(Some(why)): this device can't. WebGPU itself
+/// allows a read-only storage buffer in the vertex stage (core `maxStorageBuffersPerShaderStage` is
+/// at least 8, and wgpu's WebGPU backend reports every downlevel flag; only the compatibility mode,
+/// which this renderer never asks for, may allow none), so the browser takes the same checks
+/// (finding 199).
 fn mesh_support(gpu: &Gpu) -> Result<(), Option<String>> {
-    if cfg!(target_arch = "wasm32") {
-        return Err(None);
-    }
     if !gpu.adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::VERTEX_STORAGE) {
         return Err(Some("no storage buffers in vertex shaders".into()));
     }
     if gpu.device.limits().max_storage_buffers_per_shader_stage == 0 {
         return Err(Some("no storage buffers".into()));
     }
-    if std::env::var("DHD_TEST_NO_MESHES").is_ok_and(|v| v.trim() == "0") {
+    if test_no_meshes() == Some(0) {
         return Err(Some("DHD_TEST_NO_MESHES".into()));
     }
     Ok(())
@@ -202,8 +226,8 @@ pub struct Objects {
     pub native_texels_draw_layout: wgpu::PipelineLayout,
     /// A mesh draw's group 2 (finding 168): binding 0, the picture's vertex buffer as read-only
     /// storage for the vertex stage (native.wgsl's `mesh_records`); and the draw layouts with it,
-    /// (uniform, texture, mesh) and (uniform, texels, mesh). None in the browser, which draws no
-    /// meshes.
+    /// (uniform, texture, mesh) and (uniform, texels, mesh). None where the device can't draw
+    /// meshes (`mesh_support`).
     pub mesh_layout: Option<wgpu::BindGroupLayout>,
     pub mesh_draw_layout: Option<wgpu::PipelineLayout>,
     pub mesh_texels_draw_layout: Option<wgpu::PipelineLayout>,
@@ -752,11 +776,70 @@ fn probe_keys(dual: bool) -> Vec<u32> {
     keys
 }
 
+/// The mesh draws' pipelines the browser's init builds inside an awaited error scope
+/// (`web_prepare`): each probe key's variant as a mesh draw, with a texture and with texels.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
+fn mesh_probe_keys(dual: bool) -> Vec<u32> {
+    probe_keys(dual).into_iter().flat_map(|k| [k | pipelines::MESH, k | pipelines::MESH | pipelines::TEXELS]).collect()
+}
+
+/// The browser's objects and first pipelines, made by its async init (`web_prepare`) for the
+/// native renderer's create to take.
+#[cfg(feature = "web")]
+static PREPARED: std::sync::Mutex<Option<(Objects, Pipelines)>> = std::sync::Mutex::new(None);
+
+/// The browser's half of the mesh refusal (finding 199). Natively a refused pipeline is seen at
+/// once (`scoped_pipeline` pops its error scopes synchronously), so a mesh pipeline the driver
+/// refuses turns Native VU off where it is built. The browser reports errors only to a promise,
+/// which C's synchronous calls can't await (an error nobody captured is fatal there), so its async
+/// init (`dhdr_web_init`) builds the native renderer's objects and probe pipelines as the create
+/// does, then the mesh draws' pipelines (`mesh_probe_keys`: the mesh vertex stage, its storage
+/// binding and every mesh fragment entry point the browser uses) inside error scopes it awaits:
+/// a refusal there is `refuse_meshes`, before any mesh is drawn, and the VU runs every program, as
+/// on a native GPU that refused. `Native::create` takes these objects and pipelines, so nothing is
+/// built twice.
+#[cfg(feature = "web")]
+pub async fn web_prepare(gpu: &'static Gpu) -> Result<(), String> {
+    let objects = Objects::create(gpu, false)?; // the browser asks for no dual-source blending (web/init.rs)
+    let mut pipelines = Pipelines::new();
+    for key in probe_keys(false) {
+        pipelines.get(gpu, &objects, key as u64)?;
+    }
+    if !meshes_refused() && objects.mesh_draw_layout.is_some() {
+        let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = gpu.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let mut meshes = Pipelines::new();
+        let mut built = Ok(());
+        for key in mesh_probe_keys(false) {
+            if let Err(e) = meshes.get(gpu, &objects, key as u64) {
+                built = Err(e);
+                break;
+            }
+        }
+        let i = internal.pop().await;
+        let v = validation.pop().await;
+        match built.and_then(|()| v.or(i).map_or(Ok(()), |e| Err(e.to_string()))) {
+            Ok(()) => pipelines.extend(meshes),
+            Err(e) => refuse_meshes(Some(&format!("a mesh draw pipeline was refused: {e}"))),
+        }
+    }
+    *PREPARED.lock().map_err(|_| "web_prepare: the prepared objects' lock is poisoned")? = Some((objects, pipelines));
+    Ok(())
+}
+
 impl Native {
     /// `dhdr_native_create`: `flags` `DHDR_NATIVE_*`.
     pub fn create(gpu: &'static Gpu, flags: u32) -> Result<Native, String> {
-        let objects = Objects::create(gpu, flags & DHDR_NATIVE_DUAL != 0)?;
-        let mut pipelines = Pipelines::new();
+        let dual = flags & DHDR_NATIVE_DUAL != 0;
+        // the browser: what its init made (web_prepare), when made for these flags
+        #[cfg(feature = "web")]
+        let prepared = PREPARED.lock().ok().and_then(|mut p| p.take()).filter(|(o, _)| o.dual == dual);
+        #[cfg(not(feature = "web"))]
+        let prepared: Option<(Objects, Pipelines)> = None;
+        let (objects, mut pipelines) = match prepared {
+            Some(p) => p,
+            None => (Objects::create(gpu, dual)?, Pipelines::new()),
+        };
         for key in probe_keys(objects.dual) {
             pipelines.get(gpu, &objects, key as u64)?;
         }

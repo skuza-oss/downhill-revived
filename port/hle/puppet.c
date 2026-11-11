@@ -146,6 +146,7 @@ extern void func_0012DDC0(void *rider);              /* body to scene node */
 extern void func_0012FE38(void *rider, void *state); /* Exit the current State, Enter this one */
 extern void func_00155E78(void *crash, int kind);    /* start a crash */
 extern void func_0012E940(void *self, int kind, void *direction, void *other);  /* other hits self */
+void hle_online_hit_dealt(void *attacker, void *victim, int kind);  /* online.c, finding 204 */
 
 typedef struct Delivery {
     double at;               /* on this game's race clock */
@@ -1057,6 +1058,7 @@ int hle_puppet_hit(uint8_t *self, int kind, void *direction, uint8_t *other)
     if (pp.allow || (!remote(self) && !remote(other))) return 0;
     int victim = slot_of(self), attacker = slot_of(other);
     if (pp.online && !remote(other) && owner_of(victim) >= 0 && pp.nevents < MAX_EVENTS) {
+        hle_online_hit_dealt(other, self, kind);  /* the arena's round: the attacker's points (finding 204) */
         uint8_t *e = pp.events[pp.nevents], *o = e;
         *o++ = EVENT_VERSION;
         *o++ = EVENT_HIT;

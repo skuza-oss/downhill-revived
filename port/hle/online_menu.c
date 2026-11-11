@@ -641,6 +641,8 @@ static void room_sync(const NetLobby *l)
         const char *test_track = getenv("DHD_NET_SCRIPTED") ? getenv("DHD_NET_TEST_TRACK") : NULL;
         for (int k = 0; test_track && k < TRACK_COUNT; k++)
             if (track_at(k) == atoi(test_track)) room_track = k;
+        /* tests (DHD_NET_SCRIPTED with DHD_NET_NO_AI=1): the room's computer riders off, as DHD_NET_CREATE's */
+        if (getenv("DHD_NET_SCRIPTED") && getenv("DHD_NET_NO_AI")) room_options |= ROOM_NO_BOTS;
         NetRoomSettings s = {track_at(room_track), room_options, public_room, 10, -1, room_name};
         host_service_net_set_room(GADDR(&s));
         room_settings_sent = 1;
@@ -861,6 +863,14 @@ static void change_rule(int rule, int by)
 static void race_time(char *out, int size, long long ticks)
 {
     snprintf(out, size, "%d:%02d.%02d", (int)(ticks / 3600), (int)(ticks / 60 % 60), (int)(ticks % 60 * 100 / 60));
+}
+
+/* A finish as a card shows it: a race's time, or the arena's scored round's points (finding 204;
+   score -1: a race). */
+static void finish_text(char *out, int size, long long ticks, int score)
+{
+    if (score >= 0) snprintf(out, size, "%d PTS", score);
+    else race_time(out, size, ticks);
 }
 
 static const char *ordinal(int place)
@@ -1132,6 +1142,22 @@ static void room_news(void)
     if (l->state != NET_LOBBY) return;
     double now = host_seconds();
     char line[48];
+    /* the room's results of each race, once, in the log (a scored round's points too, finding 204) */
+    static int logged_race;
+    if (l->last_race_id && l->last_race_id != logged_race) {
+        char text[600], detail[40];
+        const char *where = track_name(l->last_race_track);
+        int n = snprintf(text, sizeof text, "online menu: the room's results of race %d (%s):", l->last_race_id,
+                         where ? where : "?");
+        logged_race = l->last_race_id;
+        for (int k = 0; k < l->nresults && n < (int)sizeof text - 60; k++) {
+            const NetResult *r = &l->result[k];
+            if (r->ticks >= 0) finish_text(detail, sizeof detail, r->ticks, l->result_score[k]);
+            else snprintf(detail, sizeof detail, "DNF %s", dnf_name(r->dnf_reason));
+            n += snprintf(text + n, sizeof text - n, " %d. %.24s %s;", r->place, r->name, detail);
+        }
+        hle_log("%s\n", text);
+    }
     if (seen_count < 0) {  /* the room as it was when this page opened: nothing new yet, */
         seen_count = l->nmembers;
         /* except a track changed during this PC's race (the Then rule, the host's pick) */
@@ -1339,7 +1365,7 @@ static void draw_card(int i)
     put(MENU_RIGHT, x + w - 5, y + 2, tag, menu_style(st_on, 70, -1, 0, 0));
     detail[0] = 0;
     if (now.racing && !strcmp(m->race_state, "finished")) {
-        race_time(line, sizeof line, m->finish_ticks);
+        finish_text(line, sizeof line, m->finish_ticks, l->member_score[i]);
         snprintf(detail, sizeof detail, "%s %s", ordinal(m->place), line);
     } else if (now.racing && !strcmp(m->race_state, "dnf"))
         snprintf(detail, sizeof detail, "DNF %s", dnf_name(m->dnf_reason));
@@ -1347,7 +1373,7 @@ static void draw_card(int i)
         for (int k = 0; k < l->nresults; k++) if (l->result[k].id == m->id) {
             const NetResult *last = &l->result[k];
             if (last->ticks >= 0) {
-                race_time(line, sizeof line, last->ticks);
+                finish_text(line, sizeof line, last->ticks, l->result_score[k]);
                 snprintf(detail, sizeof detail, "%s %s", ordinal(last->place), line);
             } else snprintf(detail, sizeof detail, "DNF %s", dnf_name(last->dnf_reason));
         }
