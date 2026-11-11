@@ -54,7 +54,8 @@ after a version change before a live check.
 | `port/tools/game_lock.py` | the PC's game lock (below): prints its holders, or `free` |
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` with direct UDP off (an SFU room's TURN relay, a P2P room's SFU fallback) |
 | `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game makes it (the hub), `--bots N` nettool bots join (`--sfu-bots K` of them with direct links off: they race over the SFU fallback, which needs `.dev.vars`), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, who raced over the SFU, snapshot age per sender (summary.json) |
-| `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |
+| `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below); `--hidden` runs both on the hidden desktop; `--link` puts the STATE each receives through a test link (`DHD_NET_LINK`) |
+| `port/tools/puppet_bench.py` | the puppet bench (finding 202, "The puppet bench" below): recorded riders replayed onto puppets through a seeded bad link, scored against the truth (distance, wheels in the ground, jumps and jolts, time frozen) |
 | `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot) |
 | `port/android/test_disc_image.py [ISO]` | the Android side's plain-JVM tests: the first start's disc rules (the check, a complete copy) on synthetic images, and the update notice's page rule (finding 143) |
@@ -84,6 +85,24 @@ with check1.txt like
     wait back_to_the_room_after 400
     shot room
     quit
+
+## The puppet bench
+
+How other riders look in an online race, measured on one PC with no network (finding 202). The
+truth is a deterministic race with every rider recorded at full rate; the same race is run again
+with every AI slot a puppet of its recorded rider, sent through a seeded bad link
+(`port/hle/puppet_link.h`), and the puppets as drawn are scored against the truth.
+
+    python port/tools/puppet_bench.py record --track 1                     # rows 0-2: Italy FR, MX, TD
+    python port/tools/puppet_bench.py --label mine play build/puppet-bench/truth-t1/truth.bin \
+        --link "delay=150,jitter=30,loss=2,reorder=2,seed=3" --fps 60      # prints the scores
+    python port/tools/puppet_bench.py --label mine matrix --tracks 0,1,2   # every scenario: results.md
+    python port/tools/puppet_bench.py --label mine matrix --rescore        # score saved traces again
+
+Every game runs on the hidden desktop at the frame clock (about 7x real time), untimed: the
+numbers are positions on the race clock, not speed. `--env DHD_PUPPET_MAP=0:1` replays the
+scripted human rider instead of the AI riders; `--exe` scores another build on the same truth
+(the race is the same in every run). What each column means: `puppet_bench.py`'s docstring.
 
 ## The game lock
 
@@ -139,7 +158,11 @@ Online:
 | `DHD_NET_TEST_SKIP=S` | presses START S seconds into each flight over the track, as a player skipping it |
 | `DHD_NET_AFTER_RACE` | (with SCRIPTED) the menu script after a race |
 | `DHD_ONLINE_MENU_TRACE=1` | logs every online menu page and its rows |
-| `DHD_PUPPET_CAMERA=1` | camera 0 follows a puppet rider (the spectating camera) |
+| `DHD_PUPPET_CAMERA=1` | camera 0 follows a puppet rider (the spectating camera; `DHD_PUPPET_SLOT` picks it, offline too) |
+| `DHD_PUPPET_RECORD=file` | each race step, rider `DHD_PUPPET_FROM` (default 0; `all`: every rider) with its wheels' clearance above the ground (`port/hle/puppet.c`) |
+| `DHD_PUPPET_PLAY=file` | offline: the recorded riders onto puppets (`DHD_PUPPET_MAP=src:dst,...`; default every recorded AI rider onto its own slot), sent as online through `DHD_PUPPET_LINK` |
+| `DHD_PUPPET_TRACE=file` | each race step, each puppet as drawn: race time, slot, position, the moment it should show, each wheel's clearance, crashing, its recorded rider |
+| `DHD_NET_LINK=link` | the STATE this game receives is held as the link says first: `delay=MS,jitter=MS,loss=PCT,burst=S:A-B,reorder=PCT,skew=MS,seed=N` (`port/hle/puppet_link.h`) |
 | `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
 | `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |

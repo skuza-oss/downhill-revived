@@ -97,7 +97,7 @@ def pct(values, p):
 
 
 def measure(viewer, sender, args):
-    log = (viewer / 'stderr.log').read_text(errors='replace')
+    log = (viewer / ('stderr.log' if (viewer / 'stderr.log').exists() else 'game.log')).read_text(errors='replace')
     m = re.findall(r'online: player (\d+) went at ([+-][\d.]+) ms from us', log)
     if not m:
         return None

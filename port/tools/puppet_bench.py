@@ -40,6 +40,8 @@ import bisect
 import json
 import math
 import os
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -71,6 +73,8 @@ SCENARIOS = [
     ('skew-40', 'delay=80,jitter=15,skew=-40,seed=9'),
     ('send-hitch', 'delay=80,jitter=15,hitch=20:800,seed=10'),
     ('recv-hitch', 'delay=80,jitter=15,rhitch=20:800,seed=11'),
+    ('send-behind', 'delay=80,jitter=15,hitch=20:3000,seed=12'),   # a sender 3 s behind, catching up
+    ('recv-behind', 'delay=80,jitter=15,rhitch=20:3000,seed=13'),
 ]
 FPS = (60, 30, 144)
 
@@ -333,6 +337,79 @@ def matrix(args):
     print(text)
 
 
+def frames(folder):
+    """A race capture's frames (prefix-g+N+delta.bmp) in order."""
+    def delta(p):
+        return int(p.stem.rsplit('+', 1)[1])
+    return sorted(Path(folder).glob('*.bmp'), key=delta)
+
+
+def capture_run(exe, out, name, track, slot, at, length, extra):
+    """A race on the hidden desktop with the camera on `slot`, every field captured from race
+    second `at` for `length` seconds (the game's own GS captures)."""
+    shots = out / 'frames'
+    shutil.rmtree(shots, ignore_errors=True)
+    shots.mkdir(parents=True)
+    fields = int(length * 60)
+    env = game_env(track, at + length, {'DHD_PUPPET_CAMERA': '1', 'DHD_PUPPET_SLOT': str(slot),
+                                        'DHD_SCREENSHOT': str(shots / 'shot'), 'DHD_RACE_CAPTURE': f'g+{int(at * 60)}',
+                                        'DHD_RACE_CAPTURE_WINDOW': str((fields + 1) // 2), **extra})
+    g = hidden_game.Game(exe, out, env=env, name='puppet_bench clip ' + name, shot_window=None)
+    start = time.time()
+    try:
+        while time.time() - start < 900 and len(list(shots.glob('*.bmp'))) < fields:
+            if not g.alive():
+                raise RuntimeError(f'the game exited (see {out / "game.log"})')
+            time.sleep(2)
+        time.sleep(2)
+    finally:
+        g.stop()
+    return frames(shots)[:fields]
+
+
+def clip(args):
+    """Side by side: the recorded rider (left) and its puppet through the link (right), same
+    camera, same race moments; an mp4 by ffmpeg (else the frames and a contact sheet)."""
+    out = Path(args.out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    work = OUT / 'clips' / args.name
+    truth_dir = OUT / 'clips' / f'truth-t{args.track}-s{args.slot}-{args.at:g}-{args.length:g}'
+    truth = OUT / f'{args.truths}-t{args.track}' / 'truth.bin'
+    left = frames(truth_dir / 'frames') if (truth_dir / 'frames').exists() else []
+    if len(left) < int(args.length * 60):
+        left = capture_run(args.exe if not args.truth_exe else args.truth_exe, truth_dir, 'truth', args.track, args.slot,
+                           args.at, args.length, {})
+    right = capture_run(args.exe, work, args.name, args.track, args.slot, args.at, args.length,
+                        {'DHD_PUPPET_PLAY': str(truth.resolve()), 'DHD_PUPPET_LINK': args.link})
+    n = min(len(left), len(right))
+    lst = work / 'pairs'
+    shutil.rmtree(lst, ignore_errors=True)
+    lst.mkdir()
+    for i in range(n):  # numbered copies ffmpeg can read as two sequences
+        shutil.copy(left[i], lst / f'l{i:05d}.bmp')
+        shutil.copy(right[i], lst / f'r{i:05d}.bmp')
+    target = out / f'{args.name}.mp4'
+    ffmpeg = shutil.which('ffmpeg')
+    if ffmpeg:
+        label = args.label_text or args.link or 'perfect link'
+        draw = lambda text: (f"drawtext=text='{text}':x=10:y=10:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.6")
+        subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', '60', '-i', str(lst / 'l%05d.bmp'),
+                        '-framerate', '60', '-i', str(lst / 'r%05d.bmp'), '-filter_complex',
+                        f"[0]{draw('the rider (truth)')}[a];[1]{draw('as another player sees it - ' + label.replace(':', ' ').replace(',', ' '))}[b];[a][b]hstack",
+                        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', str(target)], check=True)
+        print('clip', target)
+    else:
+        from PIL import Image
+        picks = [lst / f'{side}{i:05d}.bmp' for i in range(0, n, max(1, n // 12)) for side in 'lr']
+        ims = [Image.open(p) for p in picks]
+        w, h = ims[0].size
+        sheet = Image.new('RGB', (w * 2, h * (len(ims) // 2)))
+        for k, im in enumerate(ims):
+            sheet.paste(im, ((k % 2) * w, (k // 2) * h))
+        sheet.save(out / f'{args.name}-sheet.png')
+        print('no ffmpeg: frames in', lst, 'sheet', out / f'{args.name}-sheet.png')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--exe', default=str(ROOT / WINDOWS_EXE))
@@ -354,6 +431,16 @@ def main():
     s.add_argument('trace')
     b = sub.add_parser('baseline')
     b.add_argument('truth')
+    c = sub.add_parser('clip')
+    c.add_argument('--track', type=int, default=0)
+    c.add_argument('--slot', type=int, default=1, help='the AI rider (and its puppet) the camera follows')
+    c.add_argument('--at', type=float, default=30, help='race second the clip starts')
+    c.add_argument('--length', type=float, default=6)
+    c.add_argument('--link', default='')
+    c.add_argument('--name', required=True)
+    c.add_argument('--out', required=True, help='folder for the mp4 (keep it outside the repository)')
+    c.add_argument('--truth-exe', help='the build that films the truth (default --exe; the race is the same)')
+    c.add_argument('--label-text', help='the caption of the right side (default the link)')
     m = sub.add_parser('matrix')
     m.add_argument('--tracks', default='0,1,2')
     m.add_argument('--fps', default='60,30,144')
@@ -371,6 +458,8 @@ def main():
         print(json.dumps(score(args.truth, args.trace), indent=1))
     elif args.cmd == 'baseline':
         print(json.dumps(truth_baseline(args.truth), indent=1))
+    elif args.cmd == 'clip':
+        clip(args)
     else:
         matrix(args)
 

@@ -19,6 +19,10 @@ in the bots (the bots claim the host's version, as rooms take only one build).
 --lag: both games trace their puppets and record their own rider, and the summary ends with how
 far behind real time and how far from the real rider each shows the other (puppet_lag.py).
 
+--hidden: both games on a desktop that is never shown (hidden_game.py), for runs on a PC someone is
+using; their logs are game.log. --link "delay=80,jitter=20,..." puts the STATE each game receives
+through a test link first (DHD_NET_LINK, port/hle/puppet_link.h; finding 202).
+
 Needs DHD_ISO, DHD_NET_SERVER (the official wss://dhd.skuza.app or
 your own; never write any other deployed address into a tracked file) and the
 x64 build (build_host64.py, default --exe build/host64-exe/dhd64.exe). At most two games of its own
@@ -28,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import game_lock
+import hidden_game
 import owned_process
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,6 +118,23 @@ def game_env(iso_hash, pad, extra):
     return {k: v for k, v in env.items() if v != ''}
 
 
+class Hidden:
+    """A hidden_game.Game with the few process calls this script makes."""
+    def __init__(self, game):
+        self.game = game
+
+    def poll(self):
+        return None if self.game and self.game.alive() else 1
+
+    def stop(self):
+        if self.game:
+            self.game.stop()
+            self.game = None
+
+    def minimize(self):
+        pass
+
+
 def wait_line(paths, pattern, seconds, procs, stop_if):
     """Until every file in paths has a line matching pattern; the matches (None where missing)."""
     until = time.time() + seconds
@@ -145,6 +167,8 @@ def main():
                     help='stop everything as soon as this file exists (the benchmark lock)')
     ap.add_argument('--minimized', action='store_true', help='both games start minimised (the PC stays usable)')
     ap.add_argument('--lag', action='store_true', help='measure how far behind each puppet is drawn (puppet_lag.py)')
+    ap.add_argument('--hidden', action='store_true', help='both games on a hidden desktop (hidden_game.py)')
+    ap.add_argument('--link', default='', help='DHD_NET_LINK for both games: the STATE they receive goes through it')
     ap.add_argument('--a', action='append', default=[], help='extra NAME=VALUE for the host game')
     ap.add_argument('--b', action='append', default=[], help='extra NAME=VALUE for the joining game')
     a = ap.parse_args()
@@ -154,6 +178,7 @@ def main():
     if a.stop_if and os.path.exists(a.stop_if):
         sys.exit(f'{a.stop_if} exists: not starting')
     out = Path(a.out).resolve()
+    log = 'game.log' if a.hidden else 'stderr.log'   # each game's log
     out.mkdir(parents=True, exist_ok=True)
     iso_hash = iso_files_sha256(os.environ['DHD_ISO'], ROOT / 'build' / 'port' / 'iso-check.txt')
     procs, dirs = [], []
@@ -165,7 +190,20 @@ def main():
         for f in d.glob('shot-*.bmp'):
             f.unlink()
         (d / 'stderr.log').unlink(missing_ok=True)
+        (d / 'game.log').unlink(missing_ok=True)
         env = game_env(iso_hash, pad, {'DHD_RACE_CAPTURE': a.capture, **extra})
+        if a.link:
+            env['DHD_NET_LINK'] = a.link
+        if a.hidden:  # the game's folder is the exe's there: this game's files by full path
+            for key in ('DHD_PUPPET_TRACE', 'DHD_PUPPET_RECORD', 'DHD_SCREENSHOT'):
+                if key in env and not os.path.isabs(env[key]):
+                    env[key] = str(d / env[key])
+            env.update(DHD_CAPTURE_AT='<unset>', DHD_CAPTURE_INTERVAL='<unset>')
+            procs.append(Hidden(hidden_game.Game(os.path.abspath(a.exe), d, env=env, name='online_race ' + name,
+                                                 shot_window=None)))
+            owned.callback(procs[-1].stop)
+            dirs.append(d)
+            return d
         stdout, stderr = owned.enter_context(open(d / 'stdout.log', 'w')), owned.enter_context(open(d / 'stderr.log', 'w'))
         procs.append(owned.enter_context(owned_process.start([os.path.abspath(a.exe)], cwd=d, env=env,
                                                              stdout=stdout, stderr=stderr, minimized=a.minimized)))
@@ -182,16 +220,16 @@ def main():
     with owned:
         da = game('A', HOST_PAD, {'DHD_NET_CREATE': '1', 'DHD_NET_NAME': 'Host', 'DHD_NET_PLAYERS': str(players),
                                   'DHD_NET_TRACK': a.track, 'DHD_NET_RIDER': '4', **dict(x.split('=', 1) for x in a.a)})
-        m = wait_line([da / 'stderr.log'], r'online: room (\w+) \(host\)', 120, procs, a.stop_if)[0]
+        m = wait_line([da / log], r'online: room (\w+) \(host\)', 120, procs, a.stop_if)[0]
         if not m:
-            print('the host never opened a room; see', da / 'stderr.log')
+            print('the host never opened a room; see', da / log)
             return 1
         code = m.group(1)
         print('room', code)
         # The bots join first and ready only once every player is in the room (nettool --players):
         # a room locks its grid as soon as everyone in it is ready, so a bot joining after the two
         # games would wait for the next race.
-        version = wait_line([da / 'stderr.log'], r'version (dhd-port [\w.-]+(?: \w+)?)', 30, procs, a.stop_if)[0].group(1)
+        version = wait_line([da / log], r'version (dhd-port [\w.-]+(?: \w+)?)', 30, procs, a.stop_if)[0].group(1)
         for k in range(a.bots):
             d = out / f'bot{k}'
             d.mkdir(exist_ok=True)
@@ -204,7 +242,7 @@ def main():
         db = game('B', GUEST_PAD, {'DHD_NET_JOIN': code, 'DHD_NET_NAME': 'Guest', 'DHD_NET_RIDER': '8',
                                    **dict(x.split('=', 1) for x in a.b)})
         guest = procs[-1]
-        go = wait_line([da / 'stderr.log', db / 'stderr.log'], r'countdown starts', 400, procs, a.stop_if)
+        go = wait_line([da / log, db / log], r'countdown starts', 400, procs, a.stop_if)
         for p in procs if a.minimized else ():
             p.minimize()  # a window SDL showed after the start
         if not all(go):
@@ -215,14 +253,14 @@ def main():
             procs.remove(gone)
             gone.stop()
             print('guest stopped' if a.kill_guest_at else 'host stopped')
-        logs = ([] if a.kill_host_at else [da / 'stderr.log']) + ([] if a.kill_guest_at else [db / 'stderr.log'])
+        logs = ([] if a.kill_host_at else [da / log]) + ([] if a.kill_guest_at else [db / log])
         done = wait_line(logs, r'online: result 1\.', a.seconds, procs, a.stop_if)
         time.sleep(6)
         if not all(done):
             print('not every game got the results')
     ok = True
     for d in dirs:
-        text = (d / 'stderr.log').read_text(errors='replace') if (d / 'stderr.log').exists() else ''
+        text = (d / log).read_text(errors='replace') if (d / log).exists() else ''
         lines = [l for l in text.splitlines() if l.startswith(('online:', 'puppet:'))]
         keep = [l for l in lines if any(k in l for k in KEEP)]
         clocks = [l for l in lines if 'race clock' in l]
