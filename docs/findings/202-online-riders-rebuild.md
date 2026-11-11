@@ -48,6 +48,10 @@ the P2P star (unless a bug there is part of the problem).
       the 4x clips; `check.py port`.
 - [x] Round 2 (the lead's review, "Round 2" below): the start, AI riders measured live, HOLD for a
       stopped sender, what a puppet may do on its own; local main merged (ec966d03).
+- [x] Round 3 ("Round 3" below): what decides a computer rider's line (the decompiled AI
+      controller), the owner's turn scale in the record, placement only on real discontinuities,
+      the hitch's hand-over, short stops ridden through; local main merged again (6c1650df).
+      Not reached: the 150 ms computer riders' error and jolts, the host stops' 1.5-unit steps.
 
 ### The bench (how it measures)
 
@@ -507,3 +511,195 @@ crashes. Now:
   controller), still `remote`.
 - Scoring: the arena's points come from `hle_online_hit_dealt`, called only when this game's own
   rider deals the hit.
+
+## Round 3 (the lead's review): computer riders on a guest, no put-in-place, the hitch's hand-over
+
+Commits e0f288e9 (the owner's turn scale; placement only on real discontinuities; the tools'
+counts), 6c1650df (the merge of local main: lanes 205, 206; `online_race.py` takes its pads from
+`online_riders.rider_env`), d1e6f0e1 (short stops ridden through).
+
+### What decides a computer rider's line
+
+Read in the decompiled source (an Explore agent's reading, checked against the files it names;
+`src/unsorted/<address>.c`). The AI controller is a 0x450-byte object at rider +0x78D4
+(`func_0010A730` initialises the nine), run each tick by `func_0012C8B0` (case `+0x7A5C == 3`)
+through `func_0010BE38` -> `func_0010C4C0` (race mode) -> `func_0010CAF0` -> `func_0010F068` ->
+`func_0010F0D8`.
+
+- **The steering is the pad.** `func_0010F0D8` writes the virtual pad's (+0xFE0) +0x1B0 / +0x1B4
+  (rider +0x1190 / +0x1194, pad words 7 and 8), 0 or 1: bang-bang, pressed when its heading error
+  `e = x27C - 2 * rider[+0x4308]` passes 3 degrees (0.05236), held while its sign stays. `x27C` is
+  the angle from the bike's forward axis to the target point `x30` (`func_0010F8E8`), or a look-ahead
+  along the node polyline (`func_0010FF38` -> `func_001101B8`: `speed * 0.3 + 5` ahead, plus air
+  and curve terms) or the landing normal in the air (`func_00111160`). Recorded: word 7 turns the
+  rider toward its side axis (rotation row 0) at about 0.6 radians a second on average, word 8 the
+  other way; the words change 2-3 times a second.
+- **The turn scale.** The same function sets the controller's +0x2B0 to `min(|e| * 9/pi, 1)`
+  (dropping at once, rising 0.07 a tick; 0.2 cap for rider id 0xA0, at least 0.5 with x440 bit
+  50), and `func_00137950` (the steering's dynamics) multiplies an AI rider's turning acceleration
+  by it. Recorded: median 0.08, p90 0.2-0.7.
+- **The target.** `func_0010BD10`: `x30 = *x74 + rider matrix * x220`, `x220` easing toward `x230`
+  (rate 0.03). `x74` is the racing-line node (graph `D_0029EA20`, 0x20 bytes a node: position,
+  width +0x10, flags +0x14, link count +0x16, links +0x18), advanced by `func_0010B2B8`; at a fork
+  the next node `x78` is chosen by `func_00118650` (a random link, `rand(0, count - 1)`, up to 7
+  retries for flag bit 8 links, allowed from 5th place or when behind schedule), toward a rival's
+  node (`func_00118BB8`, a coin flip, personality x3A0 bit 2) or preferring flag bit 12 links (x3A0
+  bit 0, a coin flip). The sideways offset `x230` is drawn at each node (`func_0010B998`):
+  `±func_00222B68(s/2, s)`, positive for odd places and negative for even, `s` from the node's width
+  and the place (1st 1, 2nd-3rd max(2, w), 4th-5th max(4, w), lower max(7, 2w); 0.5 with x3A0 bit
+  11; a fixed grid table where the node's flag bit 5 is set; the rival's line with x440 bit 53).
+- **Why two games differ.** Every draw (`func_00222BD8`, `func_00222B68`, `func_00110BF8`: libc
+  `rand`, `func_002559D8`; `func_00222B08`: the generator at `D_00663140`) is game-wide, shared
+  with attacks (`func_00112360`), air tricks (`func_001109B0`, `func_00110BF8`, `func_00110DA0`,
+  `func_00110F88`, `func_001140A0`) and personality timers (`func_001162D0`, `func_00116368`); the
+  places (+0x798C), the nearest rider (`x8`, `func_001128F0`), the schedule (`x408`,
+  `func_00111B18`, the skill `x2B8`), and the frame step (`func_00238F60` into x3B4, x414, x430,
+  x410, x418, x42C) all differ between games, and some decisions run only on the rider's turn in
+  a rotation (`func_0010FB00`, `func_00112360`, `func_0010EC80` when `+0x797C == D_002AF2C0.x501B4`).
+  Seeding cannot make two games draw alike.
+
+Not decompiled or not traced: `func_0010C5D8` (finished riders), `func_002559D8`, `func_00243198`;
++0x4308 (probably the current steer or lean), what x214/x218 are, `func_00119150` (per-node
+schedule times), `func_0010ED50`, `func_0010E9B0`, `func_0010D0C0`, `func_001FAC50`, the writer of
+x2AC.
+
+**What a puppet does with it.** A computer rider's puppet already replayed its owner's pad
+(words 7 and 8 included; this game's controller runs for it and its words are replaced), but its
+turning was scaled by *this game's* controller's +0x2B0, computed from this game's line (its own
+node choices and offset): several times too much or too little. The record now carries the
+owner's +0x2B0 (the 12 reserved bytes' first float; same size and version; 0 from an older
+sender, which leaves the guest's own) and the guest sets it after its controller ran
+(`hle_puppet_input`). Bench 150 ms (track 0, a new recording with the field): error p95 4.79 ->
+4.41, sideways p95 4.18 -> 3.75. Live it is the larger difference (the bench's guest controller
+nearly agrees with the recorded one: same world).
+
+Tried and dropped:
+- **A follower** (route b): the puppet's words 7/8 written as an analog value from its heading to
+  its owner's pose carried 0.3 s ahead, the owner's turn rate as feed-forward, the turn-rate
+  difference as damping, at full turn scale; on the ground only (in the air the words make air
+  spins). Bench 150 ms p95 4.81 (sideways 4.14) against 4.41 with the owner's words and scale: the
+  owner's words are the better input; tuning was not pursued.
+- **The turn-rate difference carried** over the snapshot's age into the heading correction (as the
+  velocity difference is): bad link 1572 jolts a minute. Reverted.
+- **Syncing the line state** (route a: x74/x78/x230/x220 and the mode flags in the record): not
+  built. With the turn scale the owner's words already steer the owner's line; what is left is
+  their age (the words arrive 80-150 ms late, a bang-bang pulse with them).
+
+### Placed only where nothing else looks right
+
+`steer()` places a rider at once only for:
+- its first snapshot;
+- a respawn (the first snapshot after a crash, more than 3 units off);
+- more than 50 units off (`SYNC_PLACE_FAR`: over half a second of riding; nothing closes that
+  unseen);
+- more than 12 units off after a second without snapshots (`SYNC_PLACE_SILENCE`: it was a guess
+  that long);
+
+and never on a snapshot older than 0.4 s. Anything else is caught up by riding: the correction
+adds or takes at most 90 units a second (`SYNC_SLIDE_MOST`, 1.5 units a step at 60) on top of
+the rider's own riding, logged as "catches up". `puppet_lag.py --riders` counts placements by
+kind (first 5 s, later, respawns) and the catch-ups; the bench's table has a `catchups` column.
+
+### A stopped sender: the hand-over and short stops
+
+The pack jump at the catch-up's end (round 2) was a measurement, not a position: the guest's
+puppets were 4-14 units from their riders against the host's wall-time path, but a debug line per
+snapshot (`DHD_PUPPET_DEBUG=slot`) showed the first snapshot after the catch-up arriving 343 ms
+late (no snapshot for a third of a second, this PC under load), measured 13.4 units against the
+glided history, and the 12-unit jump rule placed every rider. Fixes:
+- the placement rule above (13-40 units: a catch-up by riding);
+- the catch-up glide moves a rider at most 1.5 units a step beyond its riding;
+- the release from a hold moves a rider only under 1.5 units (it moved up to 12);
+- **short stops are ridden through**: a HOLD stops a sender's riders only once its last snapshot
+  is 0.25 s old (`SYNC_HOLD_AFTER`). A loaded race (round 3's first runs, a build running beside)
+  held a sender's riders 50 times, each a dead stop and a burst after; after a short stall the
+  sender's catch-up brings its riders back where riding on put them.
+
+### Live, round 3 (d1e6f0e1 on the merged tree)
+
+Whole races (70 s), two games on the hidden desktop, local server, the real SFU, eight host
+computer riders, the link on both games (80 ms: `delay=80,jitter=15,loss=1`; 150 ms:
+`delay=150,jitter=30,loss=2,reorder=2`; bad: `delay=150,jitter=60,loss=5,reorder=5,burst=4:200-500`),
+three seeds each, nothing else of this lane running on the PC (other lanes' state traces were).
+"Placed" excludes respawns and first snapshots; catch-ups are errors over 12 units caught up by
+riding.
+
+| race | AI riders on the guest: error p50 / p95 / p99 | sunk / deep % | jolts a min | placed (first 5 s / later) | respawns | catch-ups | guest sees host player p50 / p95 / p99 | host sees guest p50 / p95 / p99 |
+|---|---|---|---|---|---|---|---|---|
+| 80 ms #1 | 0.57 / 2.88 / 4.9 | 0.8 / 0.03 | 1.0 | 0 / 0 | 3 | 1 | 0.13 / 1.24 / 3.2 | 0.17 / 1.07 / 2.3 |
+| 80 ms #2 | 0.56 / 2.77 / 5.1 | 1.0 / 0.05 | 2.2 | 0 / 0 | 5 | 1 | 0.10 / 0.80 / 2.6 | 0.17 / 1.60 / 5.4 |
+| 80 ms #3 | 0.61 / 2.98 / 4.8 | 1.2 / 0.06 | 3.0 | 0 / 0 | 15 | 1 | 0.17 / 1.49 / 2.9 | 0.17 / 1.75 / 3.3 |
+| 150 ms #1 | 1.22 / 6.06 / 13.0 | 1.5 / 0.04 | 6.3 | 0 / 2 | 5 | 48 | 0.35 / 4.18 / 15.5 | 0.23 / 1.95 / 4.6 |
+| 150 ms #2 | 1.18 / 5.72 / 9.3 | 1.6 / 0.10 | 6.2 | 0 / 0 | 7 | 14 | 0.31 / 3.76 / 7.1 | 0.35 / 1.92 / 3.4 |
+| 150 ms #3 | 1.44 / 7.83 / 22.3 | 1.6 / 0.05 | 13.5 | 0 / 1 | 10 | 103 | 0.28 / 4.01 / 8.6 | 0.35 / 2.87 / 6.8 |
+| bad #1 | 1.40 / 7.78 / 14.4 | 1.5 / 0.07 | 8.3 | 0 / 0 | 8 | 60 | 0.26 / 2.68 / 5.5 | 0.34 / 3.64 / 6.8 |
+| bad #2 | 1.52 / 8.89 / 18.3 | 2.4 / 0.12 | 9.4 | 0 / 6 | 9 | 84 | 0.43 / 4.09 / 7.8 | 0.43 / 5.37 / 9.0 |
+| bad #3 | 1.63 / 9.08 / 17.5 | 2.3 / 0.11 | 8.0 | 0 / 0 | 8 | 79 | 0.34 / 3.02 / 6.2 | 0.41 / 2.99 / 6.3 |
+
+Against the acceptance (150 ms: at most 1 placement a race, jolts under 5 a minute, p95 under 4;
+bad: at most 3 placements; sunk no worse):
+- **Placements: met at 80 ms and 150 ms (0, 0, 1 and 2), bad 0, 6, 0.** The 2 at 150 ms #1 and the
+  6 of bad #2 are link outages: snapshots arriving 0.75 s old in a burst after about 0.6 s of
+  silence, riding on through it having put riders 58-75 units off (over `SYNC_PLACE_FAR`).
+- **Jolts: not met at 150 ms** (6.3, 6.2, 13.5; round 2 22.9); 80 ms 1.0-3.0.
+- **Error p95: not met at 150 ms** (5.7-7.8; round 2 6.67): what is left is the steering's age.
+  The owner's words reach the guest 150 ms late and the AI steers in pulses, so each turn starts
+  that much late (bench sideways p95 3.75 of 4.41).
+- Sunk: 1.5-1.6 % at 150 ms (round 2 1.9), 0.8-1.2 % at 80 ms, 1.5-2.4 % on the bad link.
+
+The run-to-run spread is large (150 ms #3: 103 catch-ups, 13.5 jolts): the catch-ups come in
+bursts at link outages, the races differ in where the SFU stalls. Races run beside a build on
+this PC (round 3's first runs) had 176-220 catch-ups and 57-109 jolts a minute: on a loaded PC
+the games stall and the puppets' corrections pile up.
+
+### Host stops, live
+
+Host test stops (`DHD_NET_TEST_HITCH=20:MS`, 80 ms link), three each; the guest's puppets of
+the host's nine riders from the stop to 3 s after it ends. "Largest step change" is a rider's
+largest |p[k] - 2 p[k-1] + p[k-2]| (units; it counts velocity changes too), not counting the
+step where a held rider is released, and not respawns.
+
+| stop | holds | placed (not respawns) | catch-ups | largest step change, three races |
+|---|---|---|---|---|
+| 0.3 s | 9, 9, 9 | 0, 0, 0 | 26, 29, 27 | 3.6, 3.1, 4.1 |
+| 0.8 s | 9, 9, 9 | 0, 0, 0 | 20, 16, 17 | 4.1 (two races: respawns, 41 and 120) |
+| 3 s | 27, 9, 9 | 0, 0, 0 | 0, 0, 0 | 5.6, 4.4, 4.3 |
+
+**No placements; not met: steps of 3-6 units beyond 1.5.** The largest are where the catch-up
+glide starts (velocity to the sender's rate, up to twice) and where it ends. Even a 0.3 s stop
+is held: the HOLD threshold is the last snapshot's age, which the link's delay adds to. The pack
+jump of round 2 is gone (round 2: 9-34 units in one step).
+
+### Checks
+
+- On d1e6f0e1 (the merged tree): `check.py port` OK (runtime tests, the game, net tests, GS tests),
+  `check.py server` OK, `check.py docs` OK on the last commit.
+- `mosh_round_check.py` default scenario (`hit`, lane 206) under `--link
+  "delay=80,jitter=15,loss=1,seed=41"`: PASS (the guest scored 50 on the host's rider; the same
+  finals on both games).
+- Every live race above ended with equal results on both games.
+- Not run: state traces, PC <-> Mac, a phone in a P2P room, a 6+ player room (see "Left for the
+  lead").
+
+### Left (round 3)
+
+- **150 ms computer riders:** p95 5.7-7.8 and 6-13 jolts a minute against 4 and 5. What is
+  left is the owner's words' age. A puppet's controller steering by the owner's line *now* would
+  remove it: the owner's line state (x74, x78, x230/x220 and the mode bits above, about 24 bytes)
+  in the record, written into this game's controller before it runs each tick, its own steering
+  bits kept (they are then timely) and only the turn scale and pedal taken from the owner. The
+  random node choice at a fork arrives a snapshot late and must be overwritten when it does.
+  This is the next step for whoever continues; the map above is what it needs.
+- **Host stops:** step changes of 3-6 units where the glide starts and ends. The glide should ease
+  its velocity to the sender's rate and back (now it is set at once), and a stop under the HOLD
+  threshold plus the link's delay should not hold at all (the threshold should count from the
+  HOLD's own stamp, not the receive time).
+- **The bench's stopped sender:** send-hitch 0.8 s p99 10.5 against today's model's 8.4 (r3b,
+  before the short-stop rule): the error while the puppet is held is the difference between
+  holding and the sender's frozen screen, which today's model, freezing 0.25 s after the last
+  snapshot, matches by accident. Not re-measured after d1e6f0e1.
+- **Clips:** not re-rendered this round, and the two live-view clips (a guest's view of the host's
+  computer riders at 150 ms, v0.7.16's model and now) not made. The clip tool films bench
+  replays of a deterministic race; a live view needs the guest's recording (`B/own.bin` has every
+  rider as the guest drew it) played exactly, next to the host's (`A/own.bin`), in a game on the
+  same track: a `--live RUN` mode for `puppet_bench.py clip`.
