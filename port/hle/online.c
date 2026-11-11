@@ -1267,10 +1267,15 @@ static void receive_score(int sender, const uint8_t *e, int n)
    it; the hit itself goes to the victim's PC, which applies it (func_0012E940) and counts it there.
    The attacker's points are its own PC's: the game's own func_001301E0, as func_0012E940 gives
    them, unless the game would not take the hit (the victim crashing, or +0x7BB6: its first
-   returns). Only in the arena's round: elsewhere online hits score as before. */
+   returns). Only for a rider this PC owns (a rider whose owner has sent no snapshot yet is no
+   puppet here, but its points are still its owner's), and only in the arena's round: elsewhere
+   online hits score as before. */
 void hle_online_hit_dealt(void *attacker, void *victim, int kind)
 {
     if (!online_mode() || !on.mosh || !on.started || on.round_over || !race_running()) return;
+    int slot = 0, riders = hle_online_race_riders();
+    while (slot < riders && (void *)RIDER(slot) != attacker) slot++;
+    if (slot == riders || !hle_puppet_owned(slot)) return;
     uint8_t *v = victim;
     if ((*(uint32_t *)(v + 0x4098) >> 2 & 1) || v[0x7BB6]) return;
     func_001301E0(attacker, kind >= 0 && kind <= 9 ? kind % 5 : 0);

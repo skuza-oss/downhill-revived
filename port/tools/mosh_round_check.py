@@ -39,13 +39,12 @@ from online_race import iso_files_sha256  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 PEDAL = '0:400:cross'
-# punches (square) and kicks (circle) through the whole round, steering a little either way so the
-# riders meet in the bowl
-ATTACKS = ','.join(f'{1 + k * 0.5:.1f}:0.15:{"square" if k % 2 == 0 else "circle"}' for k in range(260))
-TURNS = ','.join(f'{3 + k * 6}:1.2:{"left" if k % 2 else "right"}' for k in range(22))
+# a punch (square) or a kick (circle) every 2.5 s through the round: pressed every half second the
+# rider hardly pedals and lands nothing (the first runs: 0 points, 1 mph up the bowl's wall)
+ATTACKS = ','.join(f'{2 + k * 2.5:.1f}:0.2:{"square" if k % 2 == 0 else "circle"}' for k in range(52))
 ROOM = r'online menu: room (\w{7}) \(host\)'
 TABLE = re.compile(r'online: round: the table[^:]*\(([\d.]+) s after time up\):(.*)')
-ROOM_RESULTS = re.compile(r"online menu: the room's results of race (\d+) \(([^)]*)\):(.*)")
+ROOM_RESULTS = re.compile(r"online menu: the room's results of race (\d+) \((.+?)\):( .*)")
 # Offline: the title, SINGLE PLAYER (15), the rider (3), NEW (16), the single-player modes (1): its
 # fourth row is the Mosh Bowl (func_001ED900 row 3), whose page (21) has the last-rider-standing row
 # first and the timed row second (func_001EF5D0); then the shop (18) and the flight over the arena.
@@ -96,7 +95,8 @@ def offline(a):
     width, height = a.window.split('x')
     for f in (out / 'offline').glob('present-*.png'):
         f.unlink()
-    env = dict(DHD_NAV=OFFLINE_NAV, DHD_RACE_PAD=a.pad or PEDAL + ',' + ATTACKS + ',' + TURNS, DHD_RACE_SYNC='1', DHD_FPS='60',
+    # Mosh Bowl's row is locked on a fresh save (func_001ED900: D_004225A0 +0x1219B): Unlock All
+    env = dict(DHD_UNLOCK_ALL='1', DHD_NAV=OFFLINE_NAV, DHD_RACE_PAD=a.pad or PEDAL + ',' + ATTACKS, DHD_RACE_SYNC='1', DHD_FPS='60',
                DHD_WINDOW_WIDTH=width, DHD_WINDOW_HEIGHT=height, DHD_SCREENSHOT='<unset>')
     if a.interval != '0':
         env.update(DHD_CAPTURE_PRESENTED=str(out / 'offline' / 'present'), DHD_CAPTURE_AT='5', DHD_CAPTURE_INTERVAL=a.interval)
@@ -129,7 +129,7 @@ def main():
     ap.add_argument('--interval', default='5', help='seconds between presented pictures (0: none)')
     ap.add_argument('--minutes', type=float, default=6, help='--offline: how long the game runs')
     ap.add_argument('--offline', action='store_true', help="the game's own Mosh Bowl, one game, no server")
-    ap.add_argument('--pad', help='the race pad (DHD_RACE_PAD) instead of pedalling with punches, kicks and turns')
+    ap.add_argument('--pad', help='the race pad (DHD_RACE_PAD) instead of pedalling with a punch or kick every 2.5 s')
     a = ap.parse_args()
     if a.offline:
         return offline(a)
@@ -137,7 +137,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     iso_hash = iso_files_sha256(hidden_game.test_iso(), ROOT / 'build' / 'port' / 'iso-check.txt')
     width, height = a.window.split('x')
-    pad = a.pad or PEDAL + ',' + ATTACKS + ',' + TURNS
+    pad = a.pad or PEDAL + ',' + ATTACKS
 
     def env(name, extra):
         e = dict(DHD_NET_ISO_SHA256=iso_hash, DHD_NET_LOG_CODE='1', DHD_NET_SCRIPTED='1', DHD_NET_TEST_READY='1',
@@ -187,7 +187,10 @@ def main():
             print('a round with both started', flush=True)
             if not wait(guest.log, r'round: the table', 300, games):
                 raise Stop("the guest never had the round's table")
-            race = wait(guest.log, r"the room's results of race (\d+) \((?i:mosh)", 120, games)
+            # its round's results: logged after its table (a guest that joined between races logs
+            # the room's earlier results as it comes in)
+            seen = guest.log().index('round: the table')
+            race = wait(lambda: guest.log()[seen:], r"the room's results of race (\d+) \((?i:mosh)", 120, games)
             if not race:
                 raise Stop("the guest never got back to the room with the round's results")
             if not wait(host.log, rf"the room's results of race {race.group(1)} ", 120, games):
