@@ -1,10 +1,9 @@
 # 204: online MOSH PIT rounds run by the game's Mosh Bowl rules
 
-Status: in progress
+Status: current
 
-Branch `feat/online-mosh-bowl` from `main` 1578b6c5, started 2026-11-11. This file is the lane's
-plan while it runs and its finding when it merges. Someone who has only this file and the git log
-must be able to pick the lane up.
+Branch `feat/online-mosh-bowl` from `main` 1578b6c5, started 2026-11-11, merged into `main`
+2026-11-11 and checked there (Progress, "The checks on the merged main").
 
 ## Goal and acceptance
 
@@ -130,6 +129,36 @@ itself. `func_00173A18` skips a course state machine in mode 15 (the arena has n
   nettool `--score` (bc8e0715); Single Event again after the round (the shop, d9ec1419); points
   only for an owned rider (6f3f3d6c).
 - [x] 2026-11-11: `port/tools/mosh_round_check.py` (c9d476bc, 6f3f3d6c) and the runs below.
+- [x] 2026-11-11: merged (dd6f94bb) and checked on the merged main (below).
+
+### The checks on the merged main
+
+- `check.py port` (net tests included) and `check.py server` pass.
+- State traces against 0.7.16's: boot, race, race2 and race6 equal. race3 (32 rows), race4 (6) and
+  race5 (5) differ in the same rows as the previous main's (203), of the same two kinds: at the
+  race load one RAM word, `0x004C8940`, and r5 hold a core address (`pending`+4, now `0x7029F514`:
+  the core's data moved again), every other dump identical; in the race r8's raw value is equal and
+  only the trace's offset into the core object moved. No game state differs.
+- Offline: the game's own Mosh Bowl (HUD, NICE BATTLE, COMBAT RESULTS with TRY AGAIN, SAVE, QUIT),
+  no `online:` line; an ordinary offline race is the race trace.
+- `mosh_round_check.py`: host and guest with computer riders, and with 4 bots (the arena's 6):
+  PASS, the same table on both games and the room's results in its order.
+- **A human's points on a puppet**: the guest's rider punched the host's twice (from 5 s after GO,
+  both riders braking at the gates, `DHD_NET_NO_AI=1`): `PUNCH! 50 PTS` and 100 on the guest's
+  HUD, the guest's final 100 made by the guest's game, the host's game applied both hits and
+  counted 2 hits taken, the same table on both (`1. GUEST 100 (0) 2. HOST 0 (2)`), CONGRATULATIONS!
+  on the winner's screen and NICE BATTLE on the other's, the room `1ST 100 PTS`.
+- One room, from the menus by keys: a round, then the next track by the Then rule as an ordinary
+  race (Single Event, finished by time), then the arena picked again: a round, tables equal.
+- The guest's game stopped mid-round: the host took its rider over, the round ended on time, the
+  table had all six riders (the leaver's points kept), the room went on (`5TH 0 PTS`, the leaver
+  `DNF LEFT` as after a race: the room ranks only finishers, the game's table keeps the rider).
+- With the previous main's server (no `score` in the welcome) the arena raced as before this
+  finding: Single Event, no round, no end, no fault.
+- Pictures at 4x (HUD, end banners, COMBAT RESULTS with 2 and 6 rows, the room's cards): names
+  readable, nothing cut off. The room card's first line draws a racer's state (STARTING) over the
+  HOST or YOU tag; that line is older than this finding.
+- Not run: an SFU room, two machines, a phone, the browser.
 
 ## Decisions
 
@@ -182,11 +211,13 @@ itself. `func_00173A18` skips a course state machine in mode 15 (the arena has n
   The round's numbers stay consistent (the points of a rider are only its owner's:
   `hle_online_hit_dealt` checks ownership, and a bot's final comes from the bot), but the hits
   themselves come from a rider nobody controls. Lane 202 rewrites how remote riders run.
-- **The scripted riders land few hits.** Attacks pressed every half second keep the rider from
-  pedalling (1 mph, stuck up the bowl's wall); one every 2.5 s lets it ride. Even so the human
-  riders of the online runs scored 0 (the offline one scored 200): the computer riders hunt them
-  down. The attacker's points across games were shown by the computer riders (below); a human's
-  points on a puppet go through the same code (`hle_online_hit_dealt`), not yet seen in a run.
+- **The scripted riders of the online runs had no input.** `DHD_RACE_PAD` applies only with
+  `DHD_RACE_SYNC=1` (`autopad.c` `race_sync_vsync`), which `mosh_round_check.py` sets for
+  `--offline` only (as `cross_race.py`, unlike `online_race.py`): its online riders neither pedalled
+  nor attacked, so the human riders scored 0. With `DHD_RACE_SYNC=1` the scripted pad works
+  online. An attack also hits nothing before race tick 301 (`func_0012E230`), and riders that
+  only roll leave the gates apart; braking at the gates (Triangle) and attacking from 5 s landed
+  hits (the checks above).
 
 ## Runs
 
@@ -224,14 +255,12 @@ What the release must do:
   build), and they ignore the welcome's new feature.
 - The core changes (patches, online code): the core id changes, as with any core change.
 
-Left for the lead:
+Open:
 
-- Boot and race state traces against 1578b6c5 (`state_trace_run.py boot` and `race`,
-  `race1`-`race5`): they must be equal. Every hook is behind the online switch (`online_mode()`)
-  or returns the game's own value offline; the offline Mosh Bowl run above was seen once.
-- A real two-machine round in an SFU room (this PC's runs were P2P rooms), ideally with two humans
-  who hit each other: a human's points on a puppet (`hle_online_hit_dealt`) were not seen in a
-  scripted run.
+- A real two-machine round in an SFU room (every run here was a P2P room on one PC). A human's
+  points on a puppet were seen in a scripted run (Progress), not yet between two machines.
+- `mosh_round_check.py`'s online games lack `DHD_RACE_SYNC=1` (Surprises): its riders take no
+  input.
 - A round with a phone (Android: the same core) and one in the browser's P2P room (`net.js`'s
   score and layout were regenerated, `gen_net_layout.py --check`'s text part passes; its clang step
   needs a wasm32 libc on this PC and did not run).
@@ -239,4 +268,3 @@ Left for the lead:
   (`hle_online_hit_dealt(other, self, kind)`, in the branch that turns a local rider's hit on a
   puppet into an event) must stay in the new puppet code at the same point: where this PC's rider
   hits a remote rider and the hit is sent to the victim's PC.
-- `docs/STATE.md` "Online play" and the STATE-LOG entry at the merge.

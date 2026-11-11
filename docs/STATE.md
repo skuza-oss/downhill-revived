@@ -190,9 +190,13 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   tungstenite over rustls for the lobby, str0m for the SFU with a vendored RustCrypto adapter,
   its own TURN client; webpki roots, no OS certificate store).
 - Online needs the USA disc's game files (a hash of every ISO 9660 file, `dhd_disc`; finding 098).
-- MOSH PIT starts online since finding 203 (it loads the arena's own loading bar, `LMOSH`); an
-  online race there has no finish yet: only the room's finish window ends it, until lane 204
-  (Mosh Bowl rules online, in progress) merges.
+- MOSH PIT starts online since finding 203 (it loads the arena's own loading bar, `LMOSH`), and an
+  online race there is the game's Mosh Bowl round (finding 204): two minutes on each game's own
+  clock, the game's points per hit (made by the game that runs the attacker, sent as reliable
+  events), then COMBAT RESULTS with the same table on every game and the room ranked by the same
+  scores. Only with a server whose welcome lists the `score` feature (`online/server/src/room.ts`;
+  a finish may carry `score`); with an older one the arena races as before, a race with no end of
+  its own. So a release with it must deploy the server too.
 - Releases with online or pacing changes need a real race between two different machines both
   ways (single-PC tests have hidden bugs before).
 

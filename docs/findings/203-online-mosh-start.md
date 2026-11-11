@@ -181,8 +181,7 @@ fault. Only the bot finished (Surprises).
 
 Open:
 
-- **An online MOSH PIT race has no finish** (Surprises): the owner decides how it ends. Lane 204
-  (branch `feat/online-mosh-bowl`, in progress, its finding not on main yet) makes online Mosh Pit
-  run by the game's Mosh Bowl rules.
+- **An online MOSH PIT race has no finish** (Surprises): answered by finding 204, where an online
+  race on Mosh Pit is the game's two-minute Mosh Bowl round (with a server that ranks by score).
 - A real two-machine MOSH PIT race in an SFU room (the reporter's kind), from the room's menus.
 - The state trace's handling of core-layout addresses (Surprises).
