@@ -476,18 +476,30 @@ sent every race tick (60 a second), AI riders every second tick (30 a second).
 | 0 | u8 | version = 6 |
 | 1 | u8 | bundle index in this tick (0, 1, ...); a congested sender keeps only the newest per index |
 | 2 | u8 | riders in the bundle, 1-10 |
-| 3 | f64 | the moment the snapshots show on the server clock (ms since the Unix epoch): the sender's GO there plus its race time |
+| 3 | f64 | the moment the snapshots show on the server clock (ms since the Unix epoch): the sender's GO there plus its race time, plus what its race clock trails the wall clock beyond 50 ms (below 30 fps, catching up after a hitch; finding 202) |
 | 11 | n | the riders' records, back to back |
 
 A record: the rider's global id (u8: a human's lobby slot, an AI rider's slot), the sender's race
 time (i32 ms since its GO), position, orientation (3 rows), velocity and angular velocity (f32 x 3
-each), the wheels (4 f32), the wheel contacts (2 u8), the State (u16), crash flags and kind,
+each), the rider's power (f32: 1, an AI rider's catch-up eased, finding 202) a computer rider's turn scale (f32: its AI controller's +0x2B0, which scales its steering in `func_00137950`; 0 for a player's rider; finding 202 round 3, zero from older games, which a receiver then leaves to its own controller) and 8 reserved bytes (zero; with the turn scale, the wheels' spin until finding 202, which a puppet's physics now makes), the wheel contacts (2 u8), the State (u16), crash flags and kind,
 checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad words as index (u8)
 and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
 all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom
 share a tick); previous-action words 25-49 are rebuilt locally. Receivers check the whole bundle
 first, then reject each record older than the newest they hold for that rider before changing its
-pad mirror. EVENT remains payload version 2. The SFU reads none of the gameplay payload.
+pad mirror. A receiver places a bundle on its own race clock by the stamp less its GO, less what
+its own race clock trails beyond 50 ms; the record's race time against the stamp tells it how fast
+the sender's race clock runs (`port/hle/puppet_sync.h`). EVENT remains payload version 2. The SFU
+reads none of the gameplay payload.
+
+HOLD (finding 202) travels on the STATE channel too, 11 bytes: version 7, index 9 (the last the
+transport takes; a tick's bundles use at most 0-2), 0 riders, then the f64 stamp of the sender's last bundle. A game's network thread,
+which runs on while the game's own thread does not, sends it every 100 ms once no bundle has gone
+out for three of its usual gaps (at least 60 ms) in a race: "no snapshot of mine since this
+moment". Receivers stop that sender's riders where they are until its bundles come again and its
+rider has caught up with them (`port/hle/puppet.c` `hold`). A game that does not know HOLD drops
+it (it checks the bundle version), so it needs no protocol change; the SFU and the P2P star
+forward it as any STATE message.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
 EVENT is unaffected. `DHD_NET_SFU_DROP_IN=N` drops N percent of the DTLS records arriving from the

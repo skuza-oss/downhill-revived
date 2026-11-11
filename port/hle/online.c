@@ -271,6 +271,7 @@ int hle_puppet_hits_taken(void);
 int hle_puppet_global(int slot), hle_puppet_local(int global), hle_puppet_owned(int slot);
 void hle_puppet_start(void);
 void hle_puppet_go(double go_server_ms);
+double hle_puppet_clock_excess(void);
 extern int func_001FA7C0(int frame);                      /* a frame's own colour (the shop's first BIKE COLOR) */
 extern void func_001B45F8(void *timer, int kind, int ticks);  /* the race-end countdown */
 
@@ -1603,8 +1604,10 @@ static void send_snapshots(int ai)
     if (!count) return;
     /* The moment the snapshots show, on the server clock: our GO there plus the race time. Not
        the clock at packing: the race clock may trail the wall clock by a few ms (pacing), and the
-       pose is the race clock's (finding 169). */
-    double stamp = on.go_server ? on.go_server + port_field_seconds(RACE_CLOCK) * 1000 : host_service_net_server_ms();
+       pose is the race clock's (finding 169). When it trails by more (below 30 fps, catching up
+       after a hitch), that much more: the pose happened then (puppet_sync.h, finding 202). */
+    double stamp = on.go_server ? on.go_server + (port_field_seconds(RACE_CLOCK) + hle_puppet_clock_excess()) * 1000
+                                : host_service_net_server_ms();
     if (slots[0] == 0) {  /* DHD_NET_RECORD: this PC's rider alone, as a bundle of one */
         int one_size;
         if (state_bundle_pack(recs, size, 1, stamp, bundle, &one_size)) record(bundle[0], one_size);
@@ -1673,6 +1676,18 @@ static void state_sync(void)
         }
     }
     if (!race_running() || clock == on.last_sent) return;
+    {   /* DHD_NET_TEST_HITCH=S:MS (tests, finding 202): once, at race second S, this game's thread
+           stops MS ms (a hitch): the others must hold its riders (HOLD), not ride them on */
+        static HleEnv hitch_env;
+        static int hitched;
+        const char *hitch = hle_env(&hitch_env, "DHD_NET_TEST_HITCH");
+        double at, ms;
+        if (hitch && !hitched && sscanf(hitch, "%lf:%lf", &at, &ms) == 2 && port_field_seconds(clock) >= at) {
+            hitched = 1;
+            fprintf(stderr, "online: test hitch of %.0f ms at race tick %d\n", ms, clock);
+            for (double end = host_wall_seconds() + ms / 1000; host_wall_seconds() < end;) host_sleep_ms(5);
+        }
+    }
     int ai = clock >= on.last_ai_sent + AI_SNAPSHOT_TICKS || clock < on.last_ai_sent;
     on.last_sent = clock;
     if (ai) on.last_ai_sent = clock - clock % AI_SNAPSHOT_TICKS;
@@ -1691,7 +1706,7 @@ static void state_sync(void)
                   on.end_held ? " - finished, waiting for the others" : "");
         extern unsigned kernel_pace_late_ms;
         fprintf(stderr, "online: race clock %d (%d fps), %u snapshots sent in %u messages, %u messages received, "
-                "hits taken %d, %u ms late, puppets shown behind/snapshot age (ms):%s\n", clock, port_fps(), on.sent,
+                "hits taken %d, %u ms late, puppets off by (units)/snapshot age (ms):%s\n", clock, port_fps(), on.sent,
                 on.bundles_sent, on.received, hle_puppet_hits_taken(), kernel_pace_late_ms, lag);
         if (on.end_held) fprintf(stderr, "online: watching: %u owned AI snapshots sent, phase %d\n", on.ai_sent, EE32(PHASE));
         static double last_ping;

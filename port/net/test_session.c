@@ -1,6 +1,7 @@
 /* Session wire parsing and serializers without a server or game data. */
 #include "client.h"
 #include "lobby_row.h"
+#include "../hle/state_bundle.h"
 #include <SDL3/SDL_timer.h>
 #include <assert.h>
 #include <stdio.h>
@@ -9,7 +10,15 @@
 static char sent[4096];
 static void text(void *ctx, const char *s) { (void)ctx; snprintf(sent,sizeof sent,"%s",s); }
 static int binaries;
-static void binary(void *ctx, const void *s, size_t n) { (void)ctx; (void)s; (void)n; binaries++; }
+static unsigned char last_binary[64];
+static size_t last_binary_n;
+static void binary(void *ctx, const void *s, size_t n)
+{
+    (void)ctx;
+    binaries++;
+    last_binary_n = n < sizeof last_binary ? n : sizeof last_binary;
+    memcpy(last_binary, s, last_binary_n);
+}
 int main(void)
 {
     NetClient c;
@@ -241,6 +250,35 @@ int main(void)
         assert(client_on_closed(&c,1006,"") == 1);
         client_connected(&c,&t);
         assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"rejoinToken"));
+        client_free(&c);
+    }
+    {   /* HOLD (finding 202): the network thread says "no snapshot of mine since T" while our game's
+           thread gives no bundles, every 100 ms, and never between races */
+        unsigned char bundle[STATE_BUNDLE_HEADER] = {STATE_BUNDLE_VERSION, 0, 1};
+        double stamp = 123456.5, held;
+        memcpy(bundle + 3, &stamp, sizeof stamp);
+        client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        c.racing = 1;
+        c.next_ping = net_now_ms() + 1e9;  /* no race PING in these ticks: the last frame sent is ours */
+        assert(client_send_frame(&c, NET_FRAME_STATE, bundle, sizeof bundle));
+        int before = binaries;
+        client_tick(&c);
+        assert(c.holds_sent == 0);                    /* the game is sending: nothing */
+        c.state_sent_at = net_now_ms() - 200;           /* ... until it stops */
+        client_tick(&c);
+        assert(c.holds_sent == 1 && binaries > before && last_binary_n == 2 + STATE_HOLD_SIZE &&
+               last_binary[0] == NET_FRAME_STATE && state_hold_check(last_binary + 2, STATE_HOLD_SIZE, &held) &&
+               held == stamp);
+        client_tick(&c);
+        assert(c.holds_sent == 1);                    /* at most one every 100 ms */
+        c.hold_sent_at -= 150;
+        client_tick(&c);
+        assert(c.holds_sent == 2);
+        c.racing = 0;                                 /* after the race: none */
+        c.hold_sent_at -= 150;
+        client_tick(&c);
+        assert(c.holds_sent == 2 && !c.state_sending);
         client_free(&c);
     }
     {   /* Snapshot freshness and long gaps are per sender and sampled on network ticks. */

@@ -310,11 +310,16 @@ PATCHES = {
     'unsorted/0011A100.c': [
         ('text', 'extern void func_0011A938(Race *);',
          'extern void func_0011A938(Race *);\n'
-         'extern int hle_puppet_input(Rider *), hle_puppet_physics(Rider *);\nextern void hle_puppet_field(void);'),
+         'extern int hle_puppet_input(Rider *), hle_puppet_physics(Rider *), hle_puppet_both_remote(Rider *, Rider *);\n'
+         'extern void hle_puppet_field(void);'),
         ('text', '        func_0012C8B0(&race->riders[i]);',
          '        if (!hle_puppet_input(&race->riders[i])) func_0012C8B0(&race->riders[i]);'),
         ('text', '        func_0012D360(&race->riders[i]);',
          '        if (!hle_puppet_physics(&race->riders[i])) func_0012D360(&race->riders[i]);'),
+        # Two riders another game runs don't collide here: their bump happened there and arrives in
+        # their snapshots; this game's own rider still bumps into them (finding 202)
+        ('text', '                if (race->riders[j].x7A5C) {',
+         '                if (race->riders[j].x7A5C && !hle_puppet_both_remote(&race->riders[i], &race->riders[j])) {'),
         ('text', '    func_0011A938(race);\n}', '    func_0011A938(race);\n    hle_puppet_field();\n}')],
     # A puppet's crashes and hits come from its own PC (snapshots, events), never from here.
     'unsorted/0012E940.c': [

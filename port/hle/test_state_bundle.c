@@ -67,6 +67,17 @@ int main(void)
         out[0][0] = STATE_BUNDLE_VERSION, out[0][STATE_BUNDLE_HEADER + STATE_RECORD_FIXED - 1] = 200;
         assert(!state_bundle_check(out[0], bundle_size[0], &stamp));        /* a pad count past 146 */
     }
+    /* HOLD (finding 202): its own version and index; a game that knows only bundles drops it */
+    {
+        uint8_t hold[STATE_HOLD_SIZE];
+        double stamp = 0, last = 1762000000123.5;
+        assert(state_hold_make(hold, last) == STATE_HOLD_SIZE && state_hold_check(hold, STATE_HOLD_SIZE, &stamp) && stamp == last);
+        assert(!state_bundle_check(hold, STATE_HOLD_SIZE, &stamp));         /* not a bundle */
+        assert(!state_hold_check(hold, STATE_HOLD_SIZE - 1, &stamp));       /* cut short */
+        hold[1] = 0;
+        assert(!state_hold_check(hold, STATE_HOLD_SIZE, &stamp));           /* a bundle's index */
+        assert(STATE_HOLD_INDEX < STATE_BUNDLE_RIDERS && STATE_HOLD_INDEX >= 3);  /* taken, and past a tick's bundles */
+    }
     puts("state bundles: OK");
     return 0;
 }

@@ -180,6 +180,7 @@ def main():
     ap.add_argument('--interval', default='5', help='seconds between presented pictures (0: none)')
     ap.add_argument('--minutes', type=float, default=6, help='--offline: how long the game runs')
     ap.add_argument('--offline', action='store_true', help="the game's own Mosh Bowl, one game, no server")
+    ap.add_argument('--link', default='', help='DHD_NET_LINK for both games (port/hle/puppet_link.h), e.g. "delay=80,jitter=15"')
     ap.add_argument('--pad', help="both games' race pad (DHD_RACE_PAD) instead of the scenario's")
     ap.add_argument('--host-pad', help="the host's race pad instead of the scenario's")
     ap.add_argument('--guest-pad', help="the guest's race pad instead of the scenario's")
@@ -199,6 +200,8 @@ def main():
                  DHD_FPS='60', DHD_ONLINE_MENU_TRACE='1', DHD_MEMCARD='1', DHD_MEMCARD_DIR=str(out / name / 'card'),
                  **rider_env(pads[name]), DHD_NET_NAME=name.upper(), DHD_WINDOW_WIDTH=width, DHD_WINDOW_HEIGHT=height,
                  DHD_SCREENSHOT='<unset>')
+        if a.link:  # the STATE each game receives through a test link (finding 202)
+            e['DHD_NET_LINK'] = a.link
         if a.interval != '0':
             e.update(DHD_CAPTURE_PRESENTED=str(out / name / 'present'), DHD_CAPTURE_AT='5', DHD_CAPTURE_INTERVAL=a.interval)
         e.update(extra)

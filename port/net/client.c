@@ -10,6 +10,7 @@
 
 #include "json.h"
 #include "../include/version.h"
+#include "../hle/state_bundle.h"
 #include "../host/host_api.h"
 #include <SDL3/SDL_timer.h>
 
@@ -815,12 +816,34 @@ void client_rejoin_failed(NetClient *c)
     if (line[0]) fprintf(stderr, "%s\n", line);
 }
 
+/* Our game's thread has given no bundle for longer than it usually takes (a hitch, a stall):
+   tell the others to hold our riders (HOLD, port/hle/state_bundle.h), every HOLD_EVERY_MS while it
+   lasts. Called by the network thread, which runs on while the game's does not. */
+enum { HOLD_EVERY_MS = 100 };
+static void hold_check(NetClient *c, double now)
+{
+    if (!c->racing || !(c->connected || c->rejoining) || !c->state_sending) {
+        if (!c->racing) c->state_sending = 0, c->state_gap = 0;
+        return;
+    }
+    /* three of our usual gaps, at least 60 ms: a game at 30 fps sends every 33 ms, one at 15
+       every 67, so only a real stop holds its riders */
+    double quiet = now - c->state_sent_at, after = 3 * c->state_gap < 60 ? 60 : 3 * c->state_gap;
+    if (quiet < after || quiet > 30000 || now - c->hold_sent_at < HOLD_EVERY_MS) return;
+    uint8_t frame[2 + STATE_HOLD_SIZE] = {NET_FRAME_STATE, 0};
+    state_hold_make(frame + 2, c->state_stamp);
+    send_binary(c, frame, sizeof frame);
+    c->hold_sent_at = now;
+    c->holds_sent++;
+}
+
 int client_tick(NetClient *c)
 {
     double now = net_now_ms();
     int dead = 0;
     char line[4096] = "";
     SDL_LockMutex(c->lock);
+    hold_check(c, now);
     if (c->racing && (c->connected || c->rejoining))
         for (int slot = 0; slot < NET_MAX_SLOTS; slot++) {
             double epoch = c->snapshot[slot].epoch;
@@ -1098,6 +1121,14 @@ int client_send_frame(NetClient *c, int type, const void *payload, size_t n)
         send_binary(c, frame, n + 2);
         c->states_sent += type == NET_FRAME_STATE;
         sent = 1;
+        if (type == NET_FRAME_STATE && n >= STATE_BUNDLE_HEADER && ((const uint8_t *)payload)[0] == STATE_BUNDLE_VERSION) {
+            double now = net_now_ms(), gap = now - c->state_sent_at;
+            if (c->state_sending && gap > 0.5 && gap < 1000)  /* bundles of one tick come together */
+                c->state_gap += (gap - c->state_gap) * 0.1;
+            if (!c->state_sending) c->hold_sent_at = -1e18;  /* this race's first bundle: no HOLD yet */
+            c->state_sent_at = now, c->state_sending = 1;
+            memcpy(&c->state_stamp, (const uint8_t *)payload + 3, sizeof c->state_stamp);
+        }
     }
     SDL_UnlockMutex(c->lock);
     return sent;

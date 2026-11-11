@@ -5,6 +5,7 @@
    player's game thread sends numbered STATE frames for a while, as online.c does about 20 times
    a second, and checks that every other player's frames arrive whole and in order. */
 #include "client.h"
+#include "../hle/state_bundle.h"
 #include "json.h"
 
 #include <windows.h>
@@ -263,6 +264,10 @@ static DWORD WINAPI game(void *arg)
         }
         while ((n = client_receive_frame(&p->client, frame, sizeof frame)) > 0) {
             int from = frame[1];
+            double held;
+            /* HOLD (state_bundle.h): another game's network thread once its game stopped sending */
+            if (n == 2 + STATE_HOLD_SIZE && frame[0] == NET_FRAME_STATE && state_hold_check(frame + 2, STATE_HOLD_SIZE, &held))
+                continue;
             CHECK(n == 2 + 64 && frame[0] == NET_FRAME_STATE && from < PLAYERS && from != p->slot);
             if (n != 2 + 64 || from >= PLAYERS)
                 continue;

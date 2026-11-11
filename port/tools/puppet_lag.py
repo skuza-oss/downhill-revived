@@ -22,31 +22,43 @@ For every traced step of the other human's puppet:
               drawn more than 0.2 s behind: snapshots that stopped coming, which no way of
               drawing can hide).
 Steps where the sender is crashing or the path jumps (a respawn) are skipped. Times in ms."""
-import argparse, bisect, re, struct, sys
+import argparse, bisect, os, re, struct, sys
 
 JERK = 30.0  # units a second; riders move about 95
 from pathlib import Path
 
 SNAP = struct.Struct('<i4xdi4f12f4f4f4f')  # clock, time, state, pos[4], rot[12], vel[4], spin[4]
-SNAP_SIZE = 824
+SNAP_SIZE = 840    # port/hle/puppet.c's Snapshot
+CRASH_AT = 134     # its crash flags (bit 2: crashing)
+TAIL = struct.Struct('<i2f')  # at TAIL_AT: slot, each wheel's clearance above the ground
+TAIL_AT = 824
+
+
+def records(path):
+    """Every snapshot of a DHD_PUPPET_RECORD file: (slot, clock, time, pos, vel, crashing, ground),
+    in file order."""
+    data = Path(path).read_bytes()
+    if len(data) % SNAP_SIZE:
+        data = data[:len(data) - len(data) % SNAP_SIZE]   # a recording still being written
+    for at in range(0, len(data), SNAP_SIZE):
+        f = SNAP.unpack_from(data, at)
+        slot, g0, g1 = TAIL.unpack_from(data, at + TAIL_AT)
+        yield slot, f[0], f[1], f[3:6], f[19:22], bool(data[at + CRASH_AT] & 4), (g0, g1)
 
 
 def own_path(path):
-    data = Path(path).read_bytes()
-    if len(data) % SNAP_SIZE:
-        sys.exit(f'{path}: {len(data)} bytes is not a whole number of {SNAP_SIZE}-byte snapshots')
     times, pos, crash = [], [], []
-    for at in range(0, len(data), SNAP_SIZE):
-        f = SNAP.unpack_from(data, at)
-        t = f[1]
+    for slot, _, t, p, _, crashing, _ in records(path):
+        if slot != 0:   # a recording of every rider (DHD_PUPPET_FROM=all): this game's own is slot 0
+            continue
         if times and t <= times[-1]:
             if t < times[-1] - 1:   # a new race
                 times, pos, crash = [], [], []
             else:
                 continue
         times.append(t)
-        pos.append(f[3:6])
-        crash.append(data[at + 134] & 4)
+        pos.append(p)
+        crash.append(crashing)
     return times, pos, crash
 
 
@@ -87,7 +99,7 @@ def pct(values, p):
 
 
 def measure(viewer, sender, args):
-    log = (viewer / 'stderr.log').read_text(errors='replace')
+    log = (viewer / ('stderr.log' if (viewer / 'stderr.log').exists() else 'game.log')).read_text(errors='replace')
     m = re.findall(r'online: player (\d+) went at ([+-][\d.]+) ms from us', log)
     if not m:
         return None
@@ -147,13 +159,95 @@ def report(run, start=5, end=1e9):
               f'({stalled} stalled steps)')
 
 
+RESYNC = re.compile(r'puppet: tick (\d+) slot (\d+) put where its rider is \(([\d.]+) units off(, after a crash)?')
+PLACED = re.compile(r'puppet: tick (\d+) slot (\d+) placed \(([a-z ]+): ([\d.]+) units off')
+CATCH = re.compile(r'puppet: tick (\d+) slot (\d+) catches up \(([\d.]+) units off')
+
+
+def resyncs(log, early=5.0):
+    """Riders put where their snapshots say at once, from a game's log: 'early' (the first `early`
+    seconds after GO) and 'later' outside respawns, 'after crash' (respawns: the jump is real on the
+    rider's own screen too), 'first' (a rider's first snapshot); and the catch-ups (an error over
+    the jump size since round 3 of finding 202 caught up by riding, not placed) in the first
+    seconds and later. Reads the logs from before round 3 too ("put where its rider is")."""
+    counts = {'early': 0, 'later': 0, 'after crash': 0, 'first': 0, 'catch early': 0, 'catch later': 0}
+    for tick, slot, units, crash in RESYNC.findall(log):
+        counts['after crash' if crash else 'early' if int(tick) / 60.0 < early else 'later'] += 1
+    for tick, slot, why, units in PLACED.findall(log):
+        counts['after crash' if why == 'respawn' else 'first' if why == 'first snapshot'
+               else 'early' if int(tick) / 60.0 < early else 'later'] += 1
+    for tick, slot, units in CATCH.findall(log):
+        counts['catch early' if int(tick) / 60.0 < early else 'catch later'] += 1
+    return counts
+
+
+def riders(run, start=1.0, end=1e9):
+    """Every rider of a two-game race as each game draws it, against the other game's recording of
+    all its riders (online_race.py --lag records them, DHD_PUPPET_FROM=all): the bench's own scores
+    (puppet_bench.score) for the other player's rider and for the AI riders, and the re-syncs by
+    phase. Returns {viewer: {'human': scores, 'ai': scores, 'resyncs': counts}}."""
+    import tempfile
+    import puppet_bench
+    run, out = Path(run), {}
+    for viewer, sender in (('A', 'B'), ('B', 'A')):
+        logf = viewer + '/' + ('stderr.log' if (run / viewer / 'stderr.log').exists() else 'game.log')
+        log = (run / logf).read_text(errors='replace')
+        m = re.findall(r'online: player (\d+) went at ([+-][\d.]+) ms from us', log)
+        own = run / sender / 'own.bin'
+        if not m or not own.exists() or not (run / viewer / 'puppet.txt').exists():
+            continue
+        skew = float(m[-1][1]) / 1000
+        present = {slot for slot, *_ in records(own)}
+        result = {'resyncs': resyncs(log)}
+        for kind in ('human', 'ai'):
+            lines = []
+            for line in (run / viewer / 'puppet.txt').read_text().splitlines():
+                f = line.split()
+                if len(f) < 11:
+                    continue
+                slot = int(f[2])
+                src = 0 if slot == 1 else slot   # the other player is slot 1 here, slot 0 on its own PC
+                if (kind == 'human') != (slot == 1) or src not in present:
+                    continue
+                f[6] = '%.6f' % (float(f[0]) - skew)   # the same moment on the sender's race clock
+                f[10] = str(src)
+                lines.append(' '.join(f))
+            if not lines:
+                continue
+            with tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False) as tmp:
+                tmp.write('\n'.join(lines) + '\n')
+            try:
+                result[kind] = puppet_bench.score(own, tmp.name, start, end)
+            finally:
+                os.unlink(tmp.name)
+        out[viewer] = result
+    return out
+
+
+def riders_report(run, start=1.0, end=1e9):
+    for viewer, r in riders(run, start, end).items():
+        for kind in ('human', 'ai'):
+            s = r.get(kind)
+            if s:
+                print(f"{viewer} shows the other's {'player' if kind == 'human' else 'AI riders'}: {s['steps']} steps; "
+                      f"error p50/p95/p99 {s['error_p50']:.2f}/{s['error_p95']:.2f}/{s['error_p99']:.2f} units; sunk "
+                      f"{s['sunk_pct']:.1f} % (deep {s['deep_pct']:.2f} %); jolts {s['jolts_min']:.1f}, back "
+                      f"{s['back_min']:.1f} a minute")
+        c = r['resyncs']
+        print(f"{viewer} re-syncs: {c['early']} in the first 5 s, {c['later']} later, {c['after crash']} after crashes "
+              f"(placed: respawns); catch-ups by riding {c['catch early']} in the first 5 s, {c['catch later']} later")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('run')
     ap.add_argument('--from', dest='start', type=float, default=5)
     ap.add_argument('--to', dest='end', type=float, default=1e9)
+    ap.add_argument('--riders', action='store_true', help='every rider, from recordings of all riders (puppet_bench scores)')
     args = ap.parse_args()
     report(args.run, args.start, args.end)
+    if args.riders:
+        riders_report(args.run, args.start)
 
 
 if __name__ == '__main__':

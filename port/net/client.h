@@ -83,6 +83,11 @@ typedef struct {
         unsigned arrivals;
     } snapshot[NET_MAX_SLOTS];
     unsigned states_sent;
+    /* HOLD (port/hle/state_bundle.h, finding 202): when our game last gave a bundle (net_now_ms),
+       its stamp, the usual time between bundles (smoothed), the last HOLD sent */
+    double state_sent_at, state_stamp, state_gap, hold_sent_at;
+    int state_sending;  /* a bundle went out in this race */
+    unsigned holds_sent;
     /* DHD_NET_TEST_PONG_DELAY=N[@S] (a test switch, finding 175): from S seconds (default 60) after
        the first welcome, every pong (the room's JSON one and the race's PONG frame) is held N ms
        plus 0-N/2 ms more before it counts, a slow return path one way. Held pongs, oldest first. */

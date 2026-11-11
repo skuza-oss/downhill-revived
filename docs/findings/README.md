@@ -232,6 +232,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 199 | [Native VU in the browser](199-native-vu-browser.md) | current |  |
 | 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | current |  |
 | 201 | [PowerVR GE8322 (driver 1.18) closes at the first picture's submit](201-powervr-ge8322-submit.md) | current |  |
+| 202 | [online riders that look right: a bench of today's puppets, then a rebuild](202-online-riders-rebuild.md) | in progress |  |
 | 203 | [Online MOSH PIT closes the game at the race start (issue #84)](203-online-mosh-start.md) | current |  |
 | 204 | [online MOSH PIT rounds run by the game's Mosh Bowl rules](204-online-mosh-bowl.md) | current |  |
 | 205 | [a state trace that does not depend on the core's layout](205-state-trace-core-layout.md) | current |  |
