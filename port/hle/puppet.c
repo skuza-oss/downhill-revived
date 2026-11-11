@@ -96,7 +96,9 @@ typedef struct Snapshot {
     uint32_t pad[PAD_WORDS];
     int32_t slot;            /* tests (DHD_PUPPET_RECORD): the rider's slot */
     float ground[2];         /* tests: each wheel's clearance above the ground (ground_clearance) */
+    float race;              /* the sender's race time (s); with `time` it shows how fast its clock runs */
 } Snapshot;
+_Static_assert(sizeof(Snapshot) == 840, "the recordings' record (port/tools/puppet_lag.py SNAP_SIZE)");
 
 enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
 /* A rider's record in a STATE bundle (state_bundle.h, payload version 6, finding 169): its global
@@ -121,6 +123,8 @@ typedef struct Puppet {
        put it yet (no: the next snapshot puts it there at once) */
     PuppetSync sync;
     double used, stepped_at;
+    float race_used;         /* the used snapshot's sender race time */
+    float rate;              /* the sender's race clock against the shared one (1; 2 while it catches up) */
     int synced, after_crash, resyncs;
     float error;             /* the last snapshot's difference from this puppet (units) */
     double behind;           /* the newest snapshot's age when last used (s) */
@@ -356,6 +360,7 @@ static void take(Snapshot *s, const uint8_t *r)
     s->bottles = (uint8_t)FIELD(r, BOTTLES_AT, int32_t);
     memcpy(s->pad, r + PAD_AT, sizeof s->pad);
     s->slot = slot_of(r);
+    s->race = (float)RACE_TIME;
 }
 
 /* A snapshot arrived for slot (local rider numbering). Its time is on this PC's race clock (online:
@@ -368,7 +373,7 @@ static void feed(int slot, const Snapshot *s)
        and the ring at each race's start, and hle_puppet_receive has already applied this
        snapshot's pad words to the mirror, so nothing here may clear it. */
     if (p->count && s->time < p->ring[p->count - 1].time - 1)
-        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0;
+        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double age = RACE_TIME - s->time;
     if (!p->have_age)
@@ -450,12 +455,23 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
     p->stepped_at = t;
     body_pose(r, &now);
     if (s->time > p->used) {
-        p->used = s->time;
+        /* How fast the sender's race clock runs on the shared clock: 1, but twice that while a
+           game catches up after a hitch, less while it runs below 30 fps (finding 139). Its rider
+           moves that much faster or slower here, so its velocity is taken at that rate. */
+        if (p->rate <= 0) p->rate = 1;
+        if (p->used > 0 && s->time - p->used > 0.005 && s->race > p->race_used) {
+            float rate = (float)((s->race - p->race_used) / (s->time - p->used));
+            rate = rate < 0.5f ? 0.5f : rate > 2.5f ? 2.5f : rate;
+            p->rate += (rate - p->rate) * 0.5f;
+        }
+        p->used = s->time, p->race_used = s->race;
         snapshot_pose(s, &owner);
+        if (fabsf(p->rate - 1) > 0.05f)
+            for (int k = 0; k < 3; k++) owner.vel[k] *= p->rate;
         double carry = fmin(fmax(0, t - s->time), SYNC_CARRY_MAX);
         SyncPose carried;
         sync_carry(&owner, s->spin, (float)carry, &carried);
-        float error = sync_measure(&p->sync, s->time, &owner, &carried, &now);
+        float error = sync_measure(&p->sync, s->time, &owner, &carried, &now, t - s->time);
         p->error = error;
         if (!p->synced || error > SYNC_RESYNC || (p->after_crash && error > SYNC_RESPAWN)) {
             set_body(r, &carried, s->spin);
@@ -468,6 +484,12 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
         }
         p->after_crash = 0;
     }
+    /* Nothing heard for SYNC_COAST (a stalled game, a long loss): the rider slows to a stop
+       rather than riding on alone; the next snapshot puts it right. */
+    if (t - s->time > SYNC_COAST) {
+        float keep = expf(-dt / 0.4f);
+        for (int k = 0; k < 3; k++) now.vel[k] *= keep;
+    }
     float normal[3];
     sync_step(&p->sync, dt, ground_normal(r, normal), &now);
     set_body(r, &now, NULL);
@@ -476,12 +498,12 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
 extern void func_0012C8B0(void *rider);  /* the input pass: the pad, or the AI controller */
 static int to_global(int slot), owner_of(int slot);
 
-/* Whether the rider a puppet shows is a computer rider (run by the host online; the bench's
-   recorded AI riders). */
+/* Whether the rider a puppet shows is a computer rider: the host's AI riders, and a player's
+   rider the host's AI took over when its player left (the bench: its recorded AI riders). */
 static int ai_rider(int slot)
 {
     if (pp.play_from[slot] >= 0) return pp.play_from[slot] != 0;
-    return pp.online && to_global(slot) >= pp.nslots;
+    return pp.online && (to_global(slot) >= pp.nslots || pp.gone[to_global(slot)]);
 }
 
 static int puppet(const uint8_t *r)
@@ -506,8 +528,12 @@ int hle_puppet_input(uint8_t *r)
        it pressed. The game's input pass shifts the pad itself. */
     if (ai_rider(slot)) func_0012C8B0(r);
     else memcpy(pad + PREV_FIRST, pad, 25 * 4);
+    /* Nothing heard for SYNC_COAST: the owner's last inputs are not riding any more (a stalled
+       game, a long loss). A computer rider's puppet rides on its AI; a player's lets go. */
+    int silent = RACE_TIME - s->time > SYNC_COAST;
+    if (silent && ai_rider(slot)) return 1;
     for (int i = 0; i < PAD_WORDS; i++)
-        if (i < PREV_FIRST || i > PREV_LAST) pad[i] = s->pad[i];
+        if (i < PREV_FIRST || i > PREV_LAST) pad[i] = silent && i < PREV_FIRST ? 0 : s->pad[i];
     return 1;
 }
 
@@ -629,7 +655,7 @@ void hle_puppet_start(void)
         if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
-        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0;
+        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0;
         sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
@@ -779,6 +805,7 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
     memset(&s, 0, sizeof s);
     i = get(i, &ms, 4);
     s.clock = ms;  /* the sender's race time (ms), for the trace */
+    s.race = ms / 1000.0f;
     s.time = (stamp - pp.go_server) / 1000 - hle_puppet_clock_excess();
     /* Reject stale unordered packets before touching the pad mirror. */
     if (p->count && s.time <= p->ring[p->count - 1].time) return;
@@ -969,6 +996,7 @@ void hle_puppet_field(void)
     while (pp.delivery_next < pp.delivery_count && pp.deliveries[pp.delivery_next].at <= RACE_TIME) {
         const Delivery *d = &pp.deliveries[pp.delivery_next++];
         Snapshot s = pp.file[d->index];
+        s.race = (float)s.time;  /* the sender's race time, before the stamp's shift */
         s.time += d->shift + pp.link.skew - bench_behind();
         for (int i = 1; i < NRIDERS; i++)
             if (pp.play_from[i] == s.slot) feed(i, &s);

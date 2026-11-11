@@ -65,9 +65,21 @@ int main(void)
         SyncPose owner = {{(float)(95 * 1.92) + 0.5f, 0, 0}, {95, 0, 0}, {{0}}}, now = {{999, 999, 999}, {0, 0, 0}, {{0}}};
         heading(0, owner.rot);
         heading(1, now.rot);
-        float e = sync_measure(&s, 1.92, &owner, &owner, &now);
+        float e = sync_measure(&s, 1.92, &owner, &owner, &now, 0);
         assert(near(e, 0.5f, 1e-3f) && near(s.pending_pos[0], 0.5f, 1e-3f) && near(s.pending_vel[0], 0, 1e-4f));
         for (int k = 0; k < 3; k++) assert(near(s.pending_rot[k], 0, 1e-5f));
+    }
+
+    /* a velocity difference found 0.1 s ago has moved the puppet that much further off since */
+    {
+        ride(&s, 1 / 60.0, 2.0);
+        SyncPose owner = {{(float)(95 * 1.9), 0, 0}, {100, 0, 0}, {{0}}}, now = {{0}, {0}, {{0}}};
+        heading(0, owner.rot);
+        heading(0, now.rot);
+        sync_measure(&s, 1.9, &owner, &owner, &now, 0.1);
+        assert(near(s.pending_vel[0], 5, 1e-3f) && near(s.pending_pos[0], 0.5f, 1e-3f));
+        sync_measure(&s, 1.9, &owner, &owner, &now, 5.0);  /* never more than SYNC_PROJECT */
+        assert(near(s.pending_pos[0], 5 * (float)SYNC_PROJECT, 1e-3f));
     }
 
     /* corrections applied since the snapshot's moment are not owed again */
@@ -76,7 +88,7 @@ int main(void)
         SyncPose owner = {{95 * 0.9f + 1.0f, 0, 0}, {95, 0, 0}, {{0}}}, pose = {{95, 0, 0}, {95, 0, 0}, {{0}}};
         heading(0, owner.rot);
         heading(0, pose.rot);
-        sync_measure(&s, 0.9, &owner, &owner, &pose);
+        sync_measure(&s, 0.9, &owner, &owner, &pose, 0);
         double t = 1.0;
         float applied = 0;
         for (int i = 0; i < 6; i++) {  /* 0.1 s of steps, each recorded with what it moved */
@@ -89,7 +101,7 @@ int main(void)
         }
         assert(applied > 0.4f && applied < 1.0f);
         /* the same snapshot measured again: only what is left */
-        float left = sync_measure(&s, 0.9, &owner, &owner, &pose);
+        float left = sync_measure(&s, 0.9, &owner, &owner, &pose, 0);
         assert(near(left, 1.0f - applied, 1e-3f));
         /* a newer snapshot that agrees with where the puppet was at its moment: what was applied
            after that moment overshot, and is taken back */
@@ -98,7 +110,7 @@ int main(void)
         assert(sync_at(&s, 1.05, &then));
         memcpy(agrees.pos, then.pose.pos, sizeof agrees.pos);
         heading(0, agrees.rot);
-        sync_measure(&s, 1.05, &agrees, &agrees, &pose);
+        sync_measure(&s, 1.05, &agrees, &agrees, &pose, 0);
         assert(near(s.pending_pos[0], -(s.applied_pos[0] - then.applied_pos[0]), 1e-4f) && s.pending_pos[0] < 0);
     }
 
@@ -126,17 +138,20 @@ int main(void)
         heading(0, pose.rot);
         sync_reset(&s);
         s.pending_pos[1] = 6, s.pending_rot[2] = 0.2f;
+        float speed = 0;
         for (int i = 0; i < n; i++) {
             float before = pose.pos[1];
             sync_step(&s, 1.0f / n, NULL, &pose);
-            assert(pose.pos[1] - before <= SYNC_SLIDE / n + 1e-4f);
+            float now = (pose.pos[1] - before) * n;  /* the correction's speed: never a kick */
+            assert(now <= SYNC_SLIDE + SYNC_SLIDE_GAIN * 6 + 1e-3f && fabsf(now - speed) <= SYNC_SLIDE_ACCEL / n + 1e-2f);
+            speed = now;
         }
         assert(near(pose.pos[1], 6, 0.01f) && near(s.pending_rot[2], 0, 0.001f));
         sync_reset(&s);
         pose.pos[1] = 0;
         s.pending_pos[1] = 1;
-        for (int i = 0; i < n / 10; i++) sync_step(&s, 1.0f / n, NULL, &pose);
-        assert(pose.pos[1] > 1 - expf(-(float)(n / 10) / n / SYNC_TAU_POS));
+        for (int i = 0; i < n / 4; i++) sync_step(&s, 1.0f / n, NULL, &pose);
+        assert(pose.pos[1] > 0.6f && pose.pos[1] < 1.05f);
     }
 
     /* outside the history the snapshot carried to the present is compared with the present */
@@ -147,8 +162,8 @@ int main(void)
         heading(0, owner.rot);
         heading(0, carried.rot);
         heading(0, now.rot);
-        assert(near(sync_measure(&s, 5.0, &owner, &carried, &now), 3, 1e-4f));
-        assert(near(sync_measure(&s, -1.0, &owner, &carried, &now), 3, 1e-4f));
+        assert(near(sync_measure(&s, 5.0, &owner, &carried, &now, 0), 3, 1e-4f));
+        assert(near(sync_measure(&s, -1.0, &owner, &carried, &now, 0), 3, 1e-4f));
     }
 
     /* after a jump the snapshots still on their way (taken between the jump's snapshot and the
@@ -162,7 +177,7 @@ int main(void)
         sync_record(&s, 10.15, &pose);
         SyncPose later = {{95 * 0.05f, 0, 0}, {95, 0, 0}, {{0}}};
         heading(0, later.rot);
-        assert(near(sync_measure(&s, 10.05, &later, &later, &pose), 0, 1e-3f));
+        assert(near(sync_measure(&s, 10.05, &later, &later, &pose, 0), 0, 1e-3f));
     }
     puts("puppet sync: OK");
     return 0;

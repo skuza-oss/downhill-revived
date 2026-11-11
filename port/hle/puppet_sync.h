@@ -27,6 +27,14 @@
 #define SYNC_SLIDE 30.0f       /* units a second: a correction never moves the rider faster than this
                                   on top of its riding (0.5 units a step at 60), so it never reads as
                                   a jump; riders ride about 95 a second */
+#define SYNC_SLIDE_GAIN 6.0f   /* per second: the slide limit grows by this times the error, so a large
+                                  error (a sender catching up at twice real time) is followed */
+#define SYNC_SLIDE_ACCEL 600.0f /* units a second each second: how fast a correction's own speed may
+                                  change, so it eases in and out instead of kicking (10 a step at 60) */
+#define SYNC_PROJECT 0.3       /* s: a velocity difference found by a snapshot is carried to now (it
+                                  has been moving the puppet away since), at most this long */
+#define SYNC_COAST 1.0         /* s without a snapshot: the puppet stops riding on its owner's last
+                                  inputs (puppet.c) */
 #define SYNC_RESYNC 12.0f      /* game units (about 0.13 s of riding): a larger error is a jump */
 #define SYNC_CARRY_MAX 0.25    /* s: a re-sync carries a snapshot at most this far */
 enum { SYNC_HISTORY = 512 };   /* steps: about 2 s at 240 steps a second */
@@ -56,6 +64,7 @@ typedef struct PuppetSync {
     int head, count;                                       /* newest at head - 1 */
     float applied_pos[3], applied_vel[3], applied_rot[3];  /* running sums of applied corrections */
     float pending_pos[3], pending_vel[3], pending_rot[3];  /* still to apply */
+    float slide[3];                                        /* the position correction's speed, last step */
 } PuppetSync;
 
 static inline float sync_dot(const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
@@ -181,7 +190,7 @@ static inline int sync_at(const PuppetSync *s, double t, SyncSample *out)
    (`carried`) is compared with the present pose (`now`). Returns the distance still to correct
    (units). */
 static inline float sync_measure(PuppetSync *s, double t, const SyncPose *owner, const SyncPose *carried,
-                                 const SyncPose *now)
+                                 const SyncPose *now, double ahead)
 {
     SyncSample then;
     float rot[3];
@@ -198,6 +207,9 @@ static inline float sync_measure(PuppetSync *s, double t, const SyncPose *owner,
         s->pending_vel[k] = owner->vel[k] - then.pose.vel[k] - (s->applied_vel[k] - then.applied_vel[k]);
         s->pending_rot[k] = rot[k] - (s->applied_rot[k] - then.applied_rot[k]);
     }
+    /* the velocity difference has moved the puppet further off since t */
+    float h = (float)(ahead > SYNC_PROJECT ? SYNC_PROJECT : ahead > 0 ? ahead : 0);
+    for (int k = 0; k < 3; k++) s->pending_pos[k] += s->pending_vel[k] * h;
     return sync_len(s->pending_pos);
 }
 
@@ -222,9 +234,18 @@ static inline void sync_step(PuppetSync *s, float dt, const float *ground, SyncP
                 for (int k = 0; k < 3; k++) dv[k] -= down * u[k], s->pending_vel[k] -= down / fv * u[k];
         }
     }
-    float slide = sync_len(dp) / dt;
-    if (slide > SYNC_SLIDE)
-        for (int k = 0; k < 3; k++) dp[k] *= SYNC_SLIDE / slide;
+    float slide = sync_len(dp) / dt, most = SYNC_SLIDE + SYNC_SLIDE_GAIN * sync_len(s->pending_pos);
+    if (slide > most)
+        for (int k = 0; k < 3; k++) dp[k] *= most / slide;
+    /* the correction's speed changes at most SYNC_SLIDE_ACCEL a second */
+    float change[3], step = SYNC_SLIDE_ACCEL * dt;
+    for (int k = 0; k < 3; k++) change[k] = dp[k] / dt - s->slide[k];
+    float c = sync_len(change);
+    for (int k = 0; k < 3; k++) {
+        if (c > step) change[k] *= step / c;
+        s->slide[k] += change[k];
+        dp[k] = s->slide[k] * dt;
+    }
     for (int k = 0; k < 3; k++) {
         pose->pos[k] += dp[k], pose->vel[k] += dv[k];
         s->pending_pos[k] -= dp[k], s->pending_vel[k] -= dv[k], s->pending_rot[k] -= dr[k];
