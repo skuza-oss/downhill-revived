@@ -607,6 +607,10 @@ static void hold(int slot, double t)
 {
     Puppet *p = &pp.p[slot];
     if (!p->on || !p->synced || (p->count && p->ring[p->count - 1].time > t + 0.001)) return;
+    /* A short stop (a stall under load, often under 0.2 s) is ridden through: once its sender
+       catches up its riders are back where riding on put them, while a hold stopped them dead and
+       left them to catch up (live, 50 holds in a loaded race, each a stop and a burst). */
+    if (RACE_TIME - t < SYNC_HOLD_AFTER) return;
     if (!p->held) {
         body_pose(rider(slot), &p->pin);
         memset(p->pin.vel, 0, sizeof p->pin.vel);
@@ -741,7 +745,8 @@ int hle_puppet_input(uint8_t *r)
        controller aims at its own line (its own random node choices and offset), so with its own
        scale the owner's words turned the puppet several times too much or too little. */
     uint8_t *ai = FIELD(r, AI_AT, uint8_t *);
-    if (ai && ai_rider(slot) && s->turning > 0 && s->turning <= 1)  /* 0: an older sender */ FIELD(ai, AI_TURNING_AT, float) = s->turning;
+    if (ai && ai_rider(slot) && s->turning > 0 && s->turning <= 1)  /* 0: an older sender (its own) */
+        FIELD(ai, AI_TURNING_AT, float) = s->turning;
     return 1;
 }
 
