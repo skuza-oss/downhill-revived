@@ -229,6 +229,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 196 | [smooth bilinear sprites at high resolution scale](196-native-rt-texture-scale.md) | current |  |
 | 197 | [the phone's vertex loops and palette path, Native VU off](197-phone-speed-2.md) | current |  |
 | 198 | [Native VU is the default](198-native-vu-default.md) | current |  |
+| 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
