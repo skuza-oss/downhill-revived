@@ -128,6 +128,8 @@ pub fn backends(o: &DeviceOptions) -> wgpu::Backends {
 
 /// Intel's PCI vendor id.
 pub const VENDOR_INTEL: u32 = 0x8086;
+/// Arm (Mali), as Vulkan's vendor id: no cut picture encoders there (render.rs `cut_point`, finding 198).
+pub const VENDOR_ARM: u32 = 0x13B5;
 
 /// Whether the device uses dual-source blending, and why (`dual_source`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

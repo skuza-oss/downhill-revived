@@ -219,22 +219,33 @@ fn encode_work(k: &DhdrCommand, last: &mut Option<(i32, i32)>) -> usize {
 /// target stored and loaded again: 0.3 to 0.5 ms more of GPU a frame on the Mi 11i) and left the
 /// helper a third of the work. None: not cut (a small picture, 0, the browser); a picture without
 /// such a boundary stays in one encoder.
-fn cut_point(draws: usize, work: usize) -> Option<usize> {
+///
+/// Not on Arm's Mali GPUs unless `DHD_ENCODE_CUT` asks (finding 198): the Redmi 9's Mali-G52 (driver
+/// r26p0) loses its device within the first minute of every start whose pictures are cut (at the
+/// title or entering the Bike Shop; five of five full routes, none with one encoder), and no other
+/// Mali has run the cut.
+fn cut_point(draws: usize, work: usize, vendor: u32) -> Option<usize> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         /// A picture of fewer draw commands than this stays in one encoder: handing a part over
         /// costs a wake-up, and the menus' pictures are finished in well under a millisecond.
         const CUT_MIN_DRAWS: usize = 96;
         thread_local! {
-            static PERCENT: usize = std::env::var("DHD_ENCODE_CUT").ok().and_then(|v| v.trim().parse().ok())
-                .map_or(60, |v: usize| v.min(95));
+            static ASKED: Option<usize> = std::env::var("DHD_ENCODE_CUT").ok().and_then(|v| v.trim().parse().ok())
+                .map(|v: usize| v.min(95));
         }
-        let percent = PERCENT.with(|p| *p);
+        let asked = ASKED.with(|p| *p);
+        let mali = vendor == crate::device::VENDOR_ARM;
+        if mali && asked.is_none() {
+            static SAID: std::sync::Once = std::sync::Once::new();
+            SAID.call_once(|| crate::host::log("gs native: a picture stays in one encoder on this GPU (Mali)"));
+        }
+        let percent = asked.unwrap_or(if mali { 0 } else { 60 });
         (percent != 0 && draws >= CUT_MIN_DRAWS).then(|| work * percent / 100)
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (draws, work);
+        let _ = (draws, work, vendor);
         None
     }
 }
@@ -789,7 +800,11 @@ impl Native {
         // (finding 195): at the first pass that begins once this much of its work is behind.
         let mut last_pass = None;
         let all_work: usize = p.commands.iter().map(|k| encode_work(k, &mut last_pass)).sum();
-        let mut cut_at = cut_point(p.commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count(), all_work);
+        #[cfg(not(target_arch = "wasm32"))]
+        let vendor = gpu.info.vendor;
+        #[cfg(target_arch = "wasm32")]
+        let vendor = 0;
+        let mut cut_at = cut_point(p.commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count(), all_work, vendor);
         let (mut work, mut last_pass) = (0usize, None);
         for (i, k) in p.commands.iter().enumerate() {
             let cut_due = cut_at.is_some_and(|at| work >= at);
