@@ -130,6 +130,8 @@ typedef struct Puppet {
     /* HOLD (state_bundle.h): its sender's game stopped; the rider stands where it was until the
        snapshots come again and its rider has caught up with it */
     int held;
+    int from_grid;           /* stood on the grid until its first snapshot (grid_step) */
+    int after_hold;          /* released from a HOLD: its sender may be catching up */
     double held_at, resumed_at;   /* the sender's last snapshot's moment; when newer ones came again */
     SyncPose pin;
     float error;             /* the last snapshot's difference from this puppet (units) */
@@ -389,7 +391,7 @@ static void feed(int slot, const Snapshot *s)
        and the ring at each race's start, and hle_puppet_receive has already applied this
        snapshot's pad words to the mirror, so nothing here may clear it. */
     if (p->count && s->time < p->ring[p->count - 1].time - 1)
-        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->held = 0;
+        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->after_hold = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double age = RACE_TIME - s->time;
     if (!p->have_age)
@@ -495,13 +497,40 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
     double carry = 0;
     int fresh = s->time > p->used;
     if (fresh) carry = take_snapshot(p, s, &owner, &carried);
+    /* After a HOLD its sender catches up (its race clock runs up to twice the shared clock, finding
+       139): its rider moves faster than this game's physics rides, so the puppet glides toward its
+       newest snapshot carried to now (1/e in SYNC_FOLLOW_TAU) until the sender's clock runs normally
+       again. Live, without this the whole held pack was put 13-23 units forward 3-4 ticks after
+       riding on. Only after a hold: an unannounced rate change is followed by the steering alone. */
+    if (p->after_hold && p->rate < SYNC_CATCHUP_END) p->after_hold = 0;
+    if (p->after_hold && p->rate > SYNC_CATCHUP) {
+        snapshot_pose(s, &owner);
+        for (int k = 0; k < 3; k++) owner.vel[k] *= p->rate;
+        sync_carry(&owner, s->spin, (float)fmin(fmax(0, t - s->time), SYNC_CARRY_MAX), &carried);
+        float f = dt > 0 ? 1 - expf(-dt / SYNC_FOLLOW_TAU) : 1, w[3];
+        for (int k = 0; k < 3; k++) now.pos[k] += (carried.pos[k] - now.pos[k]) * f;
+        memcpy(now.vel, carried.vel, sizeof now.vel);
+        sync_rotation_between(now.rot, carried.rot, w);
+        for (int k = 0; k < 3; k++) w[k] *= f;
+        sync_turn(now.rot, w);
+        set_body(r, &now, NULL);
+        memset(p->sync.pending_pos, 0, sizeof p->sync.pending_pos);
+        memset(p->sync.pending_vel, 0, sizeof p->sync.pending_vel);
+        memset(p->sync.pending_rot, 0, sizeof p->sync.pending_rot);
+        memset(p->sync.slide, 0, sizeof p->sync.slide);
+        return;
+    }
     if (fresh) {
         float error = sync_measure(&p->sync, s->time, &owner, &carried, &now, t - s->time);
         p->error = error;
         /* No jump on a snapshot older than SYNC_RESYNC_AGE (the first of a backlog after a stall:
            newer ones are right behind it, live a second jump of 65 units followed); it is slid
            toward like any other, and the next one decides. */
-        if (!p->synced || (error > SYNC_RESYNC && t - s->time < SYNC_RESYNC_AGE) ||
+        /* The first snapshot after the grid (late after an outage at the start) is a quick start,
+           made up by the slide with its owner's speed, unless it is far off (3x the jump) */
+        float jump = p->from_grid ? 3 * SYNC_RESYNC : SYNC_RESYNC;
+        p->from_grid = 0;
+        if (!p->synced || (error > jump && t - s->time < SYNC_RESYNC_AGE) ||
             (p->after_crash && error > SYNC_RESPAWN)) {
             SyncSample then;
             int known = sync_at(&p->sync, s->time, &then);
@@ -573,7 +602,7 @@ static int held_step(uint8_t *r, Puppet *p, const Snapshot *s)
         if (caught || RACE_TIME - p->resumed_at > SYNC_COAST) {
             fprintf(stderr, "puppet: tick %d slot %d rides on after a hold (its rider %.1f units %s)\n", RACE_CLOCK,
                     slot_of(r), sync_len(d), along >= 0 ? "past it" : "short of it");
-            p->held = 0, p->stepped_at = 0;
+            p->held = 0, p->stepped_at = 0, p->after_hold = 1;
             if (caught && sync_len(d) < SYNC_RESYNC) {
                 set_body(r, &carried, s->spin);
                 sync_restart(&p->sync, RACE_TIME - fmin(fmax(0, RACE_TIME - s->time), SYNC_CARRY_MAX), &owner, s->spin,
@@ -634,7 +663,7 @@ static int grid_step(uint8_t *r, Puppet *p)
         body_pose(r, &p->pin);
         memset(p->pin.vel, 0, sizeof p->pin.vel);
         sync_reset(&p->sync);
-        p->synced = 1, p->stepped_at = 0;
+        p->synced = 1, p->stepped_at = 0, p->from_grid = 1;
     }
     set_body(r, &p->pin, still);
     func_0012DDC0(r);
@@ -794,7 +823,7 @@ void hle_puppet_start(void)
         if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
-        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0;
+        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->after_hold = 0;
         sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
