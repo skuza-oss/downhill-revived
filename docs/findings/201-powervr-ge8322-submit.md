@@ -1,6 +1,6 @@
 # 201: PowerVR GE8322 (driver 1.18) closes at the first picture's submit
 
-Status: in progress
+Status: current
 
 Branch `fix/powervr-ge8322-submit` from `main` f0971070 (0.7.16), started 2026-11-11. This file
 is the lane's plan while it runs and its finding when it merges.
@@ -49,8 +49,18 @@ what others found.
   `rustgs.py check --target aarch64-linux-android` OK; `check.py quick` OK on c9e4d3ae (after one
   `DHD_MODULE_CACHE=0` core build: a fresh worktree's cache hit leaves no `build/wasm/src` for
   test_runtime); `check.py docs` OK.
-- [ ] the test APK: not built by the lane, the `DHD_ANDROID_*` signing variables are not set in
-  its environment and a debug-signed APK blocks release updates. The lead builds it (Result).
+- [x] 2026-11-11: merged to `main` (20558a77) and checked there: `check.py port` OK;
+  `rustgs.py test --target x86_64-pc-windows-msvc` OK (10 test binaries, 48 tests, the four of
+  `semaphore_values.rs` included); boot (600 fields) and race (5000 fields) state traces equal the
+  base build f0971070's row for row; one untimed hidden-desktop run with `DHD_WGPU_BACKEND=vulkan`
+  and the native renderer (RTX 3070) from boot through the menus into a race: dhd.log says
+  `gs: Vulkan 1.4.357, submits signal a timeline semaphore`, no wgpu, validation or lost-device
+  line, no crash, the presented pictures (`DHD_CAPTURE_PRESENTED`) show the menus and the race.
+- [x] 2026-11-11: the test APK, built from 20558a77 with `build_apk.py --release` and no PGO
+  profile (a test build; the release keeps BUILDING.md's profile step): the release certificate
+  (the same digest as 0.7.16's APK), schemes v2 and v3, minSdk 29, versionCode 716 (0.7.16's, so
+  it installs over 0.7.16 and the next release over it), the `submits signal` text in its
+  `libmain.so`; the unstripped library with the same GNU build ID is kept beside it, unpublished.
 - [ ] the reporter's run of the test build.
 
 ## Decisions
@@ -141,15 +151,16 @@ negative control (upstream's `semaphore_list.rs` fails two of the four tests), t
 target's `rustgs.py check`; `check.py quick` and `check.py docs` green on c9e4d3ae. No game was
 run (no state trace, no picture), no phone was used.
 
-Not done by the lane (no phone, no signing key, the owner's PC in use):
-- **The test APK.** `python port/android/build_apk.py --release` with the `DHD_ANDROID_*`
-  variables set, from this branch (or the merged branch); give it to #82's reporter.
-- **The lead's checks once on the merged branch**: `rustgs.py test`; `check.py port`; a boot
-  trace against the base build on Windows with `DHD_WGPU_BACKEND=vulkan` (the hidden-desktop
-  harness, `docs/TESTING.md`) to run the changed submit in the game; the test APK on an Adreno
-  phone (the Mi 11i: timeline semaphores, so it takes the padded path every frame) to the title
-  and into a race; a Mali phone (the Redmi 9) to the title if one is at hand. No game state can
-  change (a submit's semaphore values only), so no race trace is needed beyond the boot trace.
+Checked at the merge (Progress): `check.py port`, the renderer crate's tests, boot and race state
+traces equal to f0971070's, a Vulkan game run on Windows into a race, the release-signed test APK.
+The state trace runs are headless and open no GPU device, so they show the game state, not the
+backend; the Vulkan run shows the changed submit in the game.
+
+Still open after the merge (no phone was used for the lane or its checks):
+- **The test APK to #82's reporter** (built, not published: Progress).
+- **Phones**: the test APK on an Adreno phone (the Mi 11i: timeline semaphores, so it takes the
+  padded path every frame) to the title and into a race; a Mali phone (the Redmi 9) to the title
+  if one is at hand.
 - **From the reporter**: whether the test build starts and reaches the menus; if it still closes,
   Share log from the test build: its `gs: Vulkan ...` line says which path their driver took and a
   new crash's frames map with the test build's kept `libmain.so`.
