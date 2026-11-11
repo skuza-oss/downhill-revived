@@ -44,7 +44,8 @@ the P2P star (unless a bug there is part of the problem).
       clock rate followed, a rider let go after 1 s of silence, 44583044; clips at 4x, 0d44bcf1.
 - [x] The interpolation-buffer comparison (a throwaway build, never committed): rejected.
 - [x] Live two-game races through a local server under `DHD_NET_LINK` (below).
-- [ ] The final matrix (`--label final`, v8) on three tracks; the 4x clips; `check.py port`.
+- [x] The final matrix (`--label final`, v8): track 0 every scenario, tracks 1-2 the main ones;
+      the 4x clips; `check.py port`.
 
 ### The bench (how it measures)
 
@@ -222,3 +223,89 @@ second seed and `--a DHD_PUPPET_FROM=all` so the host also recorded its AI rider
   2 s) moving its rider on its own screen: the jump is real there too.
 
 ## Result
+
+Branch `feat/online-riders-rebuild`: the bench (2e7d4c83, 91345805, 0d44bcf1), the new model
+(f4ba28c1, 44583044), the clock rule (621a40d5), docs. The model as merged is "v8" in the notes
+above (the builds v1-v9 were steps on the bench, each in this file's Decisions).
+
+### Before and after on the bench (same truth, same seeds)
+
+Track 0 (Italy FR), nine AI puppets (30 snapshots a second) unless the link says otherwise;
+"before" is v0.7.16's puppet code with the bench switches, "after" this branch. `->` reads
+before -> after.
+
+| link | fps | error p50 / p95 / p99 (units) | sunk % | deep % | jolts a minute | back a minute |
+|---|---|---|---|---|---|---|
+| perfect | 60 | 0.24 / 0.73 / 1.4 -> **0.07 / 0.41 / 0.7** | 13.1 -> **0.3** | 5.0 -> **0.02** | 6 -> **0.2** | 0.0 -> **0.0** |
+| 30ms | 60 | 0.48 / 1.59 / 2.4 -> **0.18 / 0.93 / 1.4** | 22.9 -> **0.4** | 12.1 -> **0.03** | 11 -> **0.5** | 0.0 -> **0.1** |
+| 80ms | 60 | 0.95 / 3.13 / 4.6 -> **0.44 / 2.16 / 3.0** | 33.5 -> **0.7** | 22.5 -> **0.02** | 24 -> **0.7** | 0.1 -> **0.2** |
+| 80ms | 30 | 1.19 / 3.88 / 5.6 -> **0.57 / 2.46 / 3.6** | 35.7 -> **1.0** | 25.6 -> **0.04** | 29 -> **5.1** | 0.3 -> **0.6** |
+| 80ms | 144 | 0.82 / 2.71 / 4.0 -> **0.45 / 2.13 / 3.0** | 31.5 -> **0.8** | 20.4 -> **0.02** | 23 -> **1.5** | 0.4 -> **0.0** |
+| 150ms | 60 | 2.08 / 5.85 / 8.0 -> **1.10 / 4.81 / 7.3** | 41.6 -> **1.5** | 31.2 -> **0.03** | 426 -> **3.1** | 19.4 -> **0.4** |
+| 150ms | 30 | 3.58 / 7.41 / 9.0 -> **1.31 / 5.16 / 7.7** | 43.3 -> **1.6** | 32.0 -> **0.15** | 920 -> **21.6** | 3.0 -> **1.2** |
+| 150ms | 144 | 1.69 / 5.12 / 7.2 -> **1.07 / 4.68 / 7.0** | 41.1 -> **1.7** | 30.5 -> **0.05** | 303 -> **3.1** | 7.6 -> **0.2** |
+| 250ms | 60 | 9.74 / 15.78 / 19.1 -> **2.78 / 10.15 / 15.5** | 43.6 -> **2.5** | 31.4 -> **0.20** | 1076 -> **19.0** | 1.1 -> **4.4** |
+| 80ms-60hz | 60 | 0.86 / 2.85 / 4.2 -> **0.38 / 1.86 / 2.7** | 32.4 -> **0.6** | 21.2 -> **0.03** | 20 -> **1.0** | 0.1 -> **0.2** |
+| bad | 60 | 3.15 / 13.09 / 34.7 -> **1.43 / 6.57 / 11.7** | 40.5 -> **2.2** | 30.1 -> **0.14** | 909 -> **10.0** | 17.5 -> **1.0** |
+| bad | 30 | 4.61 / 14.76 / 36.3 -> **1.70 / 7.14 / 12.9** | 41.6 -> **2.3** | 30.4 -> **0.25** | 1096 -> **38.1** | 1.6 -> **2.1** |
+| bad | 144 | 2.48 / 12.23 / 34.0 -> **1.38 / 6.61 / 11.9** | 40.0 -> **2.4** | 29.6 -> **0.07** | 847 -> **8.3** | 20.6 -> **0.7** |
+| bursts | 60 | 1.02 / 10.41 / 27.8 -> **0.52 / 3.25 / 7.9** | 32.7 -> **1.0** | 22.1 -> **0.03** | 86 -> **6.0** | 4.1 -> **1.1** |
+| skew+40 | 60 | 4.00 / 5.17 / 6.3 -> **3.89 / 4.99 / 6.1** | 28.6 -> **0.9** | 16.7 -> **0.03** | 16 -> **1.8** | 0.0 -> **0.2** |
+| skew-40 | 60 | 4.04 / 5.88 / 7.6 -> **3.89 / 5.33 / 6.6** | 35.8 -> **1.1** | 26.1 -> **0.04** | 38 -> **2.7** | 0.6 -> **1.2** |
+| send-hitch | 60 | 0.97 / 3.45 / 8.4 -> **0.45 / 2.55 / 14.4** | 33.4 -> **0.9** | 22.7 -> **0.03** | 46 -> **4.7** | 0.2 -> **1.3** |
+| recv-hitch | 60 | 0.93 / 3.06 / 4.6 -> **0.44 / 2.20 / 3.6** | 33.5 -> **0.8** | 22.3 -> **0.03** | 29 -> **3.7** | 0.7 -> **3.1** |
+| send-behind | 60 | 1.02 / 6.22 / 23.1 -> **0.50 / 7.77 / 114.4** | 33.0 -> **0.9** | 22.6 -> **0.03** | 115 -> **7.4** | 0.4 -> **1.2** |
+| recv-behind | 60 | 0.95 / 7.21 / 122.7 -> **0.48 / 2.21 / 3.4** | 31.0 -> **0.7** | 20.5 -> **0.03** | 110 -> **1.6** | 2.3 -> **0.6** |
+
+The scripted human rider (60 snapshots a second, the case of every player's own rider), track 0:
+
+| link | error p50 / p95 / p99 | sunk % | jolts a minute |
+|---|---|---|---|
+| 80 ms | 0.38 / 1.98 / 3.3 -> **0.28 / 0.75 / 1.3** | 18.8 -> **1.0** | 14 -> **4.4** |
+| 150 ms | 0.61 / 3.46 / 5.7 -> **0.28 / 1.58 / 2.9** | 22.8 -> **1.0** | 43 -> **0** |
+
+TRACKS12
+
+The interpolation buffer (rejected, Decisions), track 0 at 60: 80 ms 14.9 / 18.6 / 21.5 units,
+6.1 % sunk, 154 ms behind; 150 ms 23.4 / 29.5 / 34.8, 12.5 % sunk, 246 ms behind; bad 27.5 /
+39.7 / 61.8, 10.4 % sunk.
+
+What the numbers say for the owner's complaint: the wheels in the ground (a third to almost half
+of all steps today at any delay, a quarter to a third more than half a unit deep) are gone (0.3-2.5 % of
+steps more than 0.15 units deeper than the real rider there, deep 0.02-0.25 %); the teleports
+and back-and-forth (jolts 6-1,100 a minute today, backwards motion up to 20 a
+minute) are 0.2-10 a minute at 60 (up to 38 at 30 fps on the bad link, where corrections are
+coarser per frame); and the riders are closer to where they really are at every delay. Not better:
+a sender whose game stops (tail), and a clock that is off (unchanged): see "What is not fixed".
+
+### Clips
+
+`F:\Temp\lane-202\clips\before\` and `after\` (not in the repository), with a README: eight
+scenes each, 4x internal resolution, 1920x840, the rider as it rode beside the same rider as
+another player sees it. Watch first: `mx-jumps-150ms.mp4` (before, then after) and
+`td-twisty-bad-link.mp4`.
+
+### Checks
+
+- `python tools/check.py port -j 6` on 0d44bcf1: OK (runtime tests with `puppet-sync`,
+  `puppet-link`; the game; net tests; GS tests). `check.py docs` OK on the last commit.
+- No server or protocol change, so `check.py server` was not needed.
+- Live: two two-game races through a local server under `DHD_NET_LINK` (above): equal results,
+  the hit landed and was applied by its victim's PC.
+
+### Left for the lead
+
+- Boot and race state traces against 6e2f7d23 (`state_trace_run.py boot` / `race`): every change
+  is behind `pp.online` or the bench switches (`DHD_PUPPET_PLAY`, `DHD_PUPPET_RECORD`,
+  `DHD_PUPPET_TRACE`, `DHD_NET_LINK`) except the snapshot stamp, which only online races send.
+  Not run in this lane (the game lock was full of other lanes' state traces).
+- A PC <-> Mac race both ways over the internet (`cross_race.py`), and with `--force-turn`.
+- A race with a phone in a P2P room (Android: nine puppets now run physics, as ten riders do
+  offline; watch the phone's frame rate and the `online:` lines' "off by" figures).
+- A 6+ player room (`p2p_crowd.py`, and an SFU room with bots).
+- For the owner when they play: other riders' wheels on the ground at landings, dips and rises;
+  no jumping back and forth; a rider that crashes or respawns appears at its respawn at once
+  (that jump is real on its owner's screen too). A player whose game hitches will ride on for up
+  to a second on the others' screens, then be put back.
+- Merge: finding 169's item 4 (the straight-line prediction) becomes partly superseded by this
+  finding; 044's "Interpolation" section already points at 169.

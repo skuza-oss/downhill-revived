@@ -324,6 +324,7 @@ def matrix(args):
                     trace = OUT / label / run / 'trace.txt'
                     if trace.exists():
                         done[key] = score(truth, trace)
+                        results_path.write_text(json.dumps(done, indent=1))
                     continue
                 if key in done and not args.again:
                     continue
