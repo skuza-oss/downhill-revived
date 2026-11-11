@@ -55,9 +55,11 @@ use parking_lot::{Mutex, RwLock};
 use naga::FastHashMap;
 use wgt::InternalCounter;
 
-use semaphore_list::SemaphoreList;
-
-use crate::vulkan::semaphore_list::{SemaphoreListMode, SemaphoreType};
+// Downhill Revived (finding 201): public, hidden, for the renderer crate's test of what a submit's
+// timeline values are (tests/semaphore_values.rs); wgpu-hal's own tests need dev-dependencies
+// outside the renderer's lock.
+#[doc(hidden)]
+pub use semaphore_list::{SemaphoreList, SemaphoreListMode, SemaphoreType};
 
 const MAX_TOTAL_ATTACHMENTS: usize = crate::MAX_COLOR_ATTACHMENTS * 2 + 1;
 

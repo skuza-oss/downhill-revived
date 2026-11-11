@@ -72,6 +72,10 @@ wgpu-core-deps-windows-linux-android = { version = "=29.0.3", default-features =
 [target.'cfg(target_vendor = "apple")'.dependencies]
 wgpu-core-deps-apple = { version = "=29.0.3", default-features = false }
 
+# The Vulkan types of tests/semaphore_values.rs (finding 201): the version wgpu-hal already locks.
+[target.'cfg(any(windows, target_os = "linux", target_os = "android"))'.dev-dependencies]
+ash = { version = "=0.38.0", default-features = false }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "=0.2.129", optional = true }
 js-sys = { version = "=0.3.106", optional = true }

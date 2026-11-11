@@ -507,6 +507,7 @@ dependencies = [
 name = "dhd_render"
 version = "1.0.0"
 dependencies = [
+ "ash",
  "dhd_disc",
  "dhd_net",
  "dhd_presence",
