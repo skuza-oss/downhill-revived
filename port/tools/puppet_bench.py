@@ -26,7 +26,10 @@ puppet, or of a respawn, are left out (no model shows those the same way):
                 beyond what the truth itself shows there (its own clearance at that moment; its
                 wheels press in up to about 0.3), and the p99 depth of the drawn wheels below it
   pops          steps whose motion differs from the truth's motion over the same step by more than
-                POP units (a visible jump), per minute
+                POP units a second (a visible jump: 0.6 units in a 1/60 s step), per minute
+  jolts         steps where the drawn rider's own speed changes by more than JOLT units a second
+                from the step before while the truth's changes by less than half that, per minute
+                (a discontinuity: a snap, a hold, a correction taken at once)
   back          steps where the drawn rider moves backwards along the truth's motion while the
                 truth moves faster than 10 units a second, per minute
   frozen        share of time the drawn rider stands still while the truth moves
@@ -50,7 +53,8 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'build' / 'puppet-bench'
 SUNK = 0.15     # units below the truth's own clearance that count as sinking
 DEEP = 0.5      # and as clearly sunk (a wheel's radius is 1.25)
-POP = 0.6       # units of unexplained motion in one step that read as a jump
+JOLT = 36.0     # units a second of change in the drawn speed from one step to the next (see jolts)
+POP = 36.0      # units a second of motion the truth does not make (0.6 units in a 1/60 s step) read as a jump
 SKIP_NEAR = 0.5  # s around crashes and respawns left out
 
 # The scenarios (name, link). Delays one way; jitter is exponential with that mean.
@@ -119,7 +123,7 @@ def run_game(exe, out, name, env, watch, text, seconds, timeout=900):
 
 
 def record(args):
-    out = OUT / f'truth-t{args.track}'
+    out = OUT / f'{args.truths}-t{args.track}'
     out.mkdir(parents=True, exist_ok=True)
     truth = out / 'truth.bin'
     env = game_env(args.track, args.seconds, {'DHD_PUPPET_RECORD': str(truth), 'DHD_PUPPET_FROM': 'all',
@@ -179,7 +183,8 @@ def score(truth_path, trace_path, start=5.0):
         i = bisect.bisect_left(marks, t - SKIP_NEAR)
         return i < len(marks) and marks[i] <= t + SKIP_NEAR
     errors, lags, depth = [], [], []
-    steps = sunk = deep = pops = back = 0
+    steps = sunk = deep = pops = back = jolts = 0
+    velocity = {}
     frozen_time = total_time = 0.0
     prev = {}
     puppet_crash = {}
@@ -226,8 +231,20 @@ def score(truth_path, trace_path, start=5.0):
                 truth_moved = [now[k] - before[k] for k in range(3)]
                 diff = math.sqrt(sum((moved[k] - truth_moved[k]) ** 2 for k in range(3)))
                 speed = math.sqrt(sum(x * x for x in truth_moved)) / (truth_t - last[2])
-                if diff > POP:
+                if diff / dt > POP:
                     pops += 1
+                # a jolt: the drawn rider's own speed jumps from one step to the next while the
+                # truth's does not (a discontinuity, where pops also count motion that is only
+                # different, such as a bump taken a little differently)
+                v = [moved[k] / dt for k in range(3)]
+                tv = [truth_moved[k] / (truth_t - last[2]) for k in range(3)]
+                was = velocity.get(slot)
+                if was and was[0] == last[0]:
+                    change = math.sqrt(sum((v[k] - was[1][k]) ** 2 for k in range(3)))
+                    truth_change = math.sqrt(sum((tv[k] - was[2][k]) ** 2 for k in range(3)))
+                    if change > JOLT and truth_change < JOLT / 2:
+                        jolts += 1
+                velocity[slot] = (t, v, tv)
                 if speed > 10:
                     along = sum(moved[k] * truth_moved[k] for k in range(3)) / (speed * (truth_t - last[2]))
                     if along < -0.02:
@@ -242,7 +259,7 @@ def score(truth_path, trace_path, start=5.0):
         'error_p50': pct(errors, 50), 'error_p95': pct(errors, 95), 'error_p99': pct(errors, 99),
         'behind_p50': pct(lags, 50), 'behind_p95': pct(lags, 95),
         'sunk_pct': 100.0 * sunk / max(steps, 1), 'deep_pct': 100.0 * deep / max(steps, 1), 'depth_p99': pct(depth, 99) if depth else 0.0,
-        'pops_min': pops / span if span else float('nan'), 'back_min': back / span if span else float('nan'),
+        'pops_min': pops / span if span else float('nan'), 'jolts_min': jolts / span if span else float('nan'), 'back_min': back / span if span else float('nan'),
         'frozen_pct': 100.0 * frozen_time / total_time if total_time else float('nan'),
     }
 
@@ -267,7 +284,7 @@ def truth_baseline(truth_path, start=5.0):
 
 
 COLUMNS = (('error_p50', '{:.2f}'), ('error_p95', '{:.2f}'), ('error_p99', '{:.2f}'), ('behind_p50', '{:.0f}'),
-           ('sunk_pct', '{:.2f}'), ('deep_pct', '{:.2f}'), ('depth_p99', '{:.2f}'), ('pops_min', '{:.1f}'), ('back_min', '{:.1f}'),
+           ('sunk_pct', '{:.2f}'), ('deep_pct', '{:.2f}'), ('depth_p99', '{:.2f}'), ('pops_min', '{:.1f}'), ('jolts_min', '{:.1f}'), ('back_min', '{:.1f}'),
            ('frozen_pct', '{:.2f}'))
 
 
@@ -287,7 +304,7 @@ def matrix(args):
     results_path.parent.mkdir(parents=True, exist_ok=True)
     done = json.loads(results_path.read_text()) if results_path.exists() else {}
     for track in tracks:
-        truth = OUT / f'truth-t{track}' / 'truth.bin'
+        truth = OUT / f'{args.truths}-t{track}' / 'truth.bin'
         if not truth.exists():
             args.track = track
             record(args)
@@ -298,9 +315,14 @@ def matrix(args):
                 if fps != 60 and name not in ('80ms', '150ms', 'bad'):
                     continue  # the other rates on the scenarios that matter most
                 key = f'{name}|{fps}|{track}'
+                run = f'{name}-{fps}-t{track}'
+                if args.rescore:
+                    trace = OUT / label / run / 'trace.txt'
+                    if trace.exists():
+                        done[key] = score(truth, trace)
+                    continue
                 if key in done and not args.again:
                     continue
-                run = f'{name}-{fps}-t{track}'
                 print('play', run, flush=True)
                 trace = play(args, truth, link, fps, run)
                 done[key] = score(truth, trace)
@@ -317,6 +339,7 @@ def main():
     ap.add_argument('--seconds', type=float, default=75, help='race seconds recorded and played')
     ap.add_argument('--env', action='append', default=[], help='extra NAME=VALUE for the game')
     ap.add_argument('--label', help='a name for this build\'s results (build/puppet-bench/LABEL)')
+    ap.add_argument('--truths', default='truth', help='the recordings\' folder (build/puppet-bench/TRUTHS-tN)')
     sub = ap.add_subparsers(dest='cmd', required=True)
     r = sub.add_parser('record')
     r.add_argument('--track', type=int, default=0)
@@ -336,6 +359,7 @@ def main():
     m.add_argument('--fps', default='60,30,144')
     m.add_argument('--only', help='scenario names, comma separated')
     m.add_argument('--again', action='store_true', help='run scenarios that already have results')
+    m.add_argument('--rescore', action='store_true', help='score the traces already there again, run nothing')
     args = ap.parse_args()
     args.exe = str(Path(args.exe).resolve())
     if args.cmd == 'record':

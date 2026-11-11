@@ -1,33 +1,33 @@
-/* Puppet riders (finding 044): rider slots driven by snapshots of a rider on another PC instead
-   of their own controller and physics, the base of state-sync online races (docs/ONLINE-PLAN.md).
+/* Puppet riders (findings 044, 202): rider slots that show a rider of another PC, the base of
+   state-sync online races.
 
    The race step (func_0011A100, patched in port/patches.py) runs five passes over the riders:
    input (func_0012C8B0: the pad or the AI writes the rider's virtual pad at +0xFE0), bookkeeping
    (func_0012D248), physics (func_0012D360), the state machine (func_0012D380: the current State
    at +0x4ECC picks the animation) and the rest (func_0012D3C8: effects, track progress, sound).
-   A puppet skips the first and the third: hle_puppet_input writes the virtual pad from the
-   snapshot, hle_puppet_physics the rigid body (position, orientation, velocities, wheel contacts
-   and spin) and the State. The state machine, animation, progress and the rest then run on that,
-   as for any rider, except that the State's own switches are blocked (func_0012FE38 asks
-   hle_puppet_switch): a puppet is in the State its snapshot says.
+   A puppet's input is its owner's: hle_puppet_input writes the virtual pad from the newest
+   snapshot, and the rider keeps it until the next. Then it rides on this game's own physics like
+   any rider, so its wheels follow this game's ground, it lands, steers and bumps as a rider does,
+   and it keeps riding between snapshots. Before the physics, hle_puppet_physics steers its body
+   toward its owner's snapshots (puppet_sync.h): each one is compared with where this puppet was at
+   that snapshot's moment, and the difference is made up over about a tenth of a second, the part
+   that would push the rider into the ground left to its wheels. A difference too large to be
+   riding (a respawn, a long loss) puts it where the snapshot says at once. The State follows the
+   snapshot too: the game's own switches are blocked (func_0012FE38 asks hle_puppet_switch).
 
    Crashes and hits belong to the puppet's own PC. The puppet never starts a crash by itself
    (func_00155E78 asks hle_puppet_crash) and takes or deals no hit here (func_0012E940 asks
    hle_puppet_hit; a hit by the local rider on a puppet becomes an event for its PC). When its
    snapshot's crash bit rises it starts the same crash, which then plays out here (the bike and
    the thrown body are simulated locally until the respawn). A hit by this PC's rider is decided
-   on the puppet as this PC shows it, predicted to the present (finding 169: nearer the victim's
-   real pose than the interpolated one, 45-90 ms old), and applied by the victim's PC to its own
-   rider as it is when the event arrives.
+   on the puppet as this PC shows it, at the present, and applied by the victim's PC to its own
+   rider as it is when the event arrives (finding 169).
 
    Snapshots arrive 60 a second for a player's own rider, 30 for the AI riders (finding 169), each
    stamped with the sender's server clock, which places it on this PC's race clock: its age on
-   arrival is measured, not guessed. Each puppet keeps the last few and shows the remote rider at
-   the present moment: its newest snapshot carried forward by its velocity and angular velocity,
-   a correction fading in when a newer one moves it (puppet_predict.h). Every PC runs at its own
-   frame rate (30-240), so the clocks here are race time in seconds, not ticks:
-   a tick (the race clock's field) is 1/60 s, and a step may be part of one or up to two of them
-   (port_field_seconds, findings 114, 139).
+   arrival is measured, not guessed. Every PC runs at its own frame rate (30-240), so the clocks
+   here are race time in seconds, not ticks: a tick (the race clock's field) is 1/60 s, and a step
+   may be part of one or up to two of them (port_field_seconds, findings 114, 139).
 
    Tests, one PC (the puppet bench, port/tools/puppet_bench.py, finding 202):
    DHD_PUPPET_RECORD=file   each race step, a snapshot of rider DHD_PUPPET_FROM (default 0; "all":
@@ -70,6 +70,7 @@ static void net_link_release(void);
 #define SPIN_AT 0x4190   /* +0xD0: angular velocity */
 #define MOMENTUM_AT 0x4120  /* +0x60: linear momentum, mass (+0x150) times velocity */
 #define MASS_AT 0x4210
+#define PREV_POS_AT 0x4110  /* +0x50: the position before this step (the physics sweeps from it) */
 #define FRONT_AT 0x4414  /* +0x2E0 +0x74: front wheel contact (0 none, 1 ground, 2 air) */
 #define BACK_AT 0x4494   /* +0x360 +0x74: back wheel */
 #define STATE_AT 0x4ECC  /* State *: the states are objects inside the rider */
@@ -103,7 +104,7 @@ enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
    checkpoints passed and the attack power-ups, then the changed pad words (six repeats each, a
    full copy every PAD_REFRESH sends, finding 158). */
 #include "state_bundle.h"
-#include "puppet_predict.h"
+#include "puppet_sync.h"
 #include "puppet_link.h"
 enum { EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
 
@@ -115,12 +116,14 @@ typedef struct Puppet {
        169): the log's riders' delay */
     int have_age;
     double age;
-    /* Prediction (finding 169): the snapshot the shown pose is carried forward from, the fading
-       correction from the last change of it, and how far behind the present it was last shown */
-    Snapshot basis;
-    int have_basis;
-    PuppetCorrection fix;
-    double fixed_at, behind;
+    /* Steering (finding 202, puppet_sync.h): its own recent poses and the correction under way,
+       the newest snapshot used, the last step's moment, and whether it rides where its snapshots
+       put it yet (no: the next snapshot puts it there at once) */
+    PuppetSync sync;
+    double used, stepped_at;
+    int synced, after_crash, resyncs;
+    float error;             /* the last snapshot's difference from this puppet (units) */
+    double behind;           /* the newest snapshot's age when last used (s) */
     double shown;            /* the moment (this race clock) the pose last written shows */
     uint32_t mirror[PAD_WORDS];  /* the remote virtual pad, as the deltas built it */
     PadSender sent_pad;
@@ -188,6 +191,9 @@ extern int func_00214BA0(void *queries, int count);
 extern void func_00134D70(void *wheel, void *center, void *body);  /* a wheel's centre in the world */
 #define BODY_AT 0x40C0
 #define WHEEL_BODY_AT(w) (BODY_AT + ((w) ? 0x360 : 0x2E0))
+#define CONTACT_STATE_AT 0x74    /* a wheel body's contact: 0 none, 1 ground, 2 air */
+#define CONTACT_NORMAL_AT 0x50   /* its contact's (+0x30) surface normal (+0x20) */
+#define SYNC_RESPAWN 3.0f        /* after a crash, a larger difference is the respawn: shown at once */
 
 /* How far wheel w (0 front, 1 back) of the rider as it is now stands clear of the ground under
    it, in game units: from the wheel's centre (func_00134D70, the pose's own) to the first
@@ -360,7 +366,7 @@ static void feed(int slot, const Snapshot *s)
        and the ring at each race's start, and hle_puppet_receive has already applied this
        snapshot's pad words to the mirror, so nothing here may clear it. */
     if (p->count && s->time < p->ring[p->count - 1].time - 1)
-        p->count = 0, p->have_age = 0, p->have_basis = 0;
+        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double age = RACE_TIME - s->time;
     if (!p->have_age)
@@ -371,97 +377,109 @@ static void feed(int slot, const Snapshot *s)
     p->ring[p->count++] = *s;
 }
 
-static void lerp(float *out, const float *a, const float *b, float t, int n)
+/* The newest snapshot whose moment has come on this game's race clock. One from ahead of it (a
+   clock that is off, this game behind after a hitch) waits for its moment; NULL when none has
+   come yet. */
+static const Snapshot *current(const Puppet *p)
 {
-    for (int i = 0; i < n; i++)
-        out[i] = a[i] + (b[i] - a[i]) * t;
+    for (int i = p->count - 1; i >= 0; i--)
+        if (p->ring[i].time <= RACE_TIME) return &p->ring[i];
+    return NULL;
 }
 
-/* Rows a and b blended, then made orthonormal again (Gram-Schmidt from the first row). */
-static void blend_rotation(float out[3][4], const float a[3][4], const float b[3][4], float t)
+static void snapshot_pose(const Snapshot *s, SyncPose *out)
 {
-    for (int i = 0; i < 3; i++)
-        lerp(out[i], a[i], b[i], t, 3);
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < i; j++) {
-            float d = out[i][0] * out[j][0] + out[i][1] * out[j][1] + out[i][2] * out[j][2];
-            for (int k = 0; k < 3; k++) out[i][k] -= d * out[j][k];
+    memcpy(out->pos, s->pos, 12);
+    memcpy(out->vel, s->vel, 12);
+    for (int i = 0; i < 3; i++) memcpy(out->rot[i], s->rot[i], 12);
+}
+
+static void body_pose(const uint8_t *r, SyncPose *out)
+{
+    memcpy(out->pos, r + POS_AT, 12);
+    memcpy(out->vel, r + VEL_AT, 12);
+    for (int i = 0; i < 3; i++) memcpy(out->rot[i], r + ROT_AT + 16 * i, 12);
+}
+
+/* The rigid body to pose (velocity and momentum together: mass times velocity). The position
+   before this step (written by the bookkeeping pass, which the physics integrates from) moves
+   with it, so a correction stays made. A jump (spin given) puts the previous position there too,
+   so the physics' sweep starts there and not across the track, and takes the snapshot's angular
+   velocity. */
+static void set_body(uint8_t *r, const SyncPose *pose, const float *spin)
+{
+    float mass = FIELD(r, MASS_AT, float), momentum[3] = {pose->vel[0] * mass, pose->vel[1] * mass, pose->vel[2] * mass};
+    float *pos = (float *)(r + POS_AT), *prev = (float *)(r + PREV_POS_AT);
+    for (int k = 0; k < 3; k++) {
+        prev[k] = spin ? pose->pos[k] : prev[k] + pose->pos[k] - pos[k];
+        pos[k] = pose->pos[k];
+    }
+    for (int i = 0; i < 3; i++) memcpy(r + ROT_AT + 16 * i, pose->rot[i], 12);
+    memcpy(r + VEL_AT, pose->vel, 12);
+    memcpy(r + MOMENTUM_AT, momentum, 12);
+    if (spin) memcpy(r + SPIN_AT, spin, 12);
+}
+
+/* The ground under the wheels that touch it: their contacts' normals added (NULL: in the air). */
+static const float *ground_normal(const uint8_t *r, float out[3])
+{
+    int touching = 0;
+    out[0] = out[1] = out[2] = 0;
+    for (int w = 0; w < 2; w++) {
+        const uint8_t *wheel = r + WHEEL_BODY_AT(w);
+        if (wheel[CONTACT_STATE_AT] != 1) continue;
+        const float *n = (const float *)(wheel + CONTACT_NORMAL_AT);
+        for (int k = 0; k < 3; k++) out[k] += n[k];
+        touching = 1;
+    }
+    return touching && isfinite(out[0] + out[1] + out[2]) ? out : NULL;
+}
+
+/* A puppet's pose before this step's physics (finding 202). A snapshot newer than the last one
+   used is compared with where this puppet was at its moment (puppet_sync.h); the difference is
+   then made up a little each step. A difference too large to be riding (a respawn, a long loss,
+   the first snapshot after this game's crash of the rider) puts the rider where its snapshot
+   says, carried to now, at once. */
+static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
+{
+    SyncPose now, owner;
+    double t = RACE_TIME;
+    float dt = p->stepped_at > 0 && t > p->stepped_at ? (float)(t - p->stepped_at) : 0;
+    p->stepped_at = t;
+    body_pose(r, &now);
+    if (s->time > p->used) {
+        p->used = s->time;
+        snapshot_pose(s, &owner);
+        double carry = fmin(fmax(0, t - s->time), SYNC_CARRY_MAX);
+        SyncPose carried;
+        sync_carry(&owner, s->spin, (float)carry, &carried);
+        float error = sync_measure(&p->sync, s->time, &owner, &carried, &now);
+        p->error = error;
+        if (!p->synced || error > SYNC_RESYNC || (p->after_crash && error > SYNC_RESPAWN)) {
+            set_body(r, &carried, s->spin);
+            sync_restart(&p->sync, t - carry, &owner, s->spin, t);
+            if (p->synced)
+                fprintf(stderr, "puppet: tick %d slot %d put where its rider is (%.1f units off%s)\n", RACE_CLOCK,
+                        slot_of(r), error, p->after_crash ? ", after a crash" : "");
+            p->synced = 1, p->after_crash = 0, p->resyncs++;
+            return;
         }
-        float n = sqrtf(out[i][0] * out[i][0] + out[i][1] * out[i][1] + out[i][2] * out[i][2]);
-        for (int k = 0; k < 3; k++) out[i][k] /= n > 0 ? n : 1;
+        p->after_crash = 0;
     }
+    float normal[3];
+    sync_step(&p->sync, dt, ground_normal(r, normal), &now);
+    set_body(r, &now, NULL);
 }
 
-/* The remote rider at moment t of this PC's race clock, t before the newest snapshot: interpolated
-   between the two around t (the oldest as it is, if t is before it). */
-static void interpolate(const Puppet *p, double t, Snapshot *out)
-{
-    int i = p->count - 1;
-    while (i > 0 && p->ring[i].time > t) i--;
-    const Snapshot *a = &p->ring[i], *b = i + 1 < p->count ? &p->ring[i + 1] : NULL;
-    *out = *a;
-    out->time = t;
-    if (b && t > a->time) {
-        float f = (float)((t - a->time) / (b->time - a->time));
-        lerp(out->pos, a->pos, b->pos, f, 3);
-        lerp(out->vel, a->vel, b->vel, f, 3);
-        lerp(out->spin, a->spin, b->spin, f, 3);
-        blend_rotation(out->rot, a->rot, b->rot, f);
-    }
-}
+extern void func_0012C8B0(void *rider);  /* the input pass: the pad, or the AI controller */
+static int to_global(int slot);
 
-/* The snapshot carried forward from its moment to t (at most PREDICT_MAX_MS): position along the
-   velocity, orientation by the angular velocity (puppet_predict.h). */
-static void carry(const Snapshot *from, double t, Snapshot *out)
+/* Whether the rider a puppet shows is a computer rider (run by the host online; the bench's
+   recorded AI riders). */
+static int ai_rider(int slot)
 {
-    PuppetPose pose;
-    double h = fmin(fmax(0, t - from->time), PREDICT_MAX_MS / 1000.0);
-    *out = *from;
-    predict_pose(from->pos, from->rot, from->vel, from->spin, (float)h, &pose);
-    memcpy(out->pos, pose.pos, sizeof pose.pos);
-    memcpy(out->rot, pose.rot, sizeof pose.rot);
-    out->time = from->time + h;
-}
-
-/* What to show now (out->time: the moment shown, on this PC's race clock): the newest snapshot
-   carried to the present, its pad, State and crash as they are; when the newest is still ahead of
-   the present (a clock that is a little off), the snapshots interpolated at the present. */
-static int wanted(int slot, Snapshot *out)
-{
-    Puppet *p = &pp.p[slot];
-    if (!p->count) return 0;
-    const Snapshot *newest = &p->ring[p->count - 1];
-    if (RACE_TIME >= newest->time) carry(newest, RACE_TIME, out);
-    else interpolate(p, RACE_TIME, out);
-    return 1;
-}
-
-/* When a newer snapshot moves the prediction, the rider is first shown where it was and
-   the difference fades (puppet_predict.h); a jump too large to be a misprediction (a respawn) and
-   the first pose after a crash or a gap are shown at once. s: wanted()'s pose, changed in place. */
-static void smooth(Puppet *p, Snapshot *s)
-{
-    const Snapshot *newest = &p->ring[p->count - 1];
-    double now = RACE_TIME;
-    PuppetPose raw, was, old;
-    memcpy(raw.pos, s->pos, sizeof raw.pos);
-    memcpy(raw.rot, s->rot, sizeof raw.rot);
-    correction_decay(&p->fix, (float)(now - p->fixed_at));
-    p->fixed_at = now;
-    if (!p->have_basis || (newest->crash ^ p->basis.crash) & 4)
-        correction_clear(&p->fix);
-    else if (newest->time != p->basis.time) {
-        Snapshot before;
-        carry(&p->basis, now, &before);
-        memcpy(old.pos, before.pos, sizeof old.pos);
-        memcpy(old.rot, before.rot, sizeof old.rot);
-        correction_apply(&p->fix, &old, &was);
-        correction_start(&p->fix, &was, &raw);
-    }
-    p->basis = *newest, p->have_basis = 1;
-    correction_apply(&p->fix, &raw, &was);
-    memcpy(s->pos, was.pos, sizeof was.pos);
-    memcpy(s->rot, was.rot, sizeof was.rot);
+    if (pp.play_from[slot] >= 0) return pp.play_from[slot] != 0;
+    return pp.online && to_global(slot) >= pp.nslots;
 }
 
 static int puppet(const uint8_t *r)
@@ -471,62 +489,55 @@ static int puppet(const uint8_t *r)
     return slot >= 0 && slot < NRIDERS && pp.p[slot].on && pp.p[slot].count && RACING;
 }
 
-/* Instead of func_0012C8B0's pad or AI: the virtual pad as the remote rider had it. Last tick's
-   actions are shifted here (as func_0017DCC8 does), so a press shows its edge once. */
+/* Instead of func_0012C8B0's pad or AI: the virtual pad as the remote rider had it at the newest
+   snapshot. Last tick's actions are shifted here (as func_0017DCC8 does), so a press shows its
+   edge once. Between snapshots the rider keeps its last inputs. */
 int hle_puppet_input(uint8_t *r)
 {
-    Snapshot s;
-    if (!puppet(r) || !wanted(slot_of(r), &s)) return 0;
+    const Snapshot *s;
+    int slot = slot_of(r);
+    if (!puppet(r) || !(s = current(&pp.p[slot]))) return 0;
     uint32_t *pad = (uint32_t *)(r + PAD_AT);
-    memcpy(pad + PREV_FIRST, pad, 25 * 4);
+    /* A computer rider steers in its own States from its AI controller (+0x78D4), not from the
+       pad (its pad words change two or three times a second): this game's AI controller runs for
+       it as for any AI rider, along this track's racing line, and the owner's pad replaces what
+       it pressed. The game's input pass shifts the pad itself. */
+    if (ai_rider(slot)) func_0012C8B0(r);
+    else memcpy(pad + PREV_FIRST, pad, 25 * 4);
     for (int i = 0; i < PAD_WORDS; i++)
-        if (i < PREV_FIRST || i > PREV_LAST) pad[i] = s.pad[i];
+        if (i < PREV_FIRST || i > PREV_LAST) pad[i] = s->pad[i];
     return 1;
 }
 
-/* Instead of func_0012D360's physics: the rigid body and the State from the snapshot. */
+/* Before func_0012D360's physics, which then runs for the puppet as for any rider: the body
+   steered toward the snapshots, the State, crash, progress and power-ups as the newest says. */
 int hle_puppet_physics(uint8_t *r)
 {
-    Snapshot s;
+    const Snapshot *s;
     int32_t now;
     int slot = slot_of(r);
-    if (!puppet(r) || !wanted(slot, &s)) return 0;
+    if (!puppet(r) || !(s = current(&pp.p[slot]))) return 0;
     Puppet *p = &pp.p[slot];
+    p->shown = RACE_TIME;
+    p->behind = RACE_TIME - s->time;
 
     /* While it crashes the bike and the thrown body are their own bodies (+0x6420, +0x4EF0), run
-       here from the crash's start; writing the rider's body would fight them. The game's physics
-       runs the crash to its respawn. */
+       by the game's physics from the crash's start to its respawn; nothing is steered. While the
+       snapshots say the owner's rider is crashing, nothing is steered either: the two crashes
+       play out on their own, and the first snapshot after the owner's puts the rider there. */
     if (FIELD(r, CRASH_FLAGS_AT, uint32_t) & 4) {
-        p->remote_crash = s.crash & 4;
-        p->have_basis = 0;  /* after the crash the rider is shown where its snapshots are, at once */
+        p->remote_crash = s->crash & 4;
+        p->after_crash = 1, p->stepped_at = 0;
         return 0;
     }
-    smooth(p, &s);
-    p->behind = RACE_TIME - s.time;
-    p->shown = s.time;
-    float mass = FIELD(r, MASS_AT, float), momentum[4] = {s.vel[0] * mass, s.vel[1] * mass, s.vel[2] * mass, 1};
-    memcpy(r + POS_AT, s.pos, 12);
-    for (int k = 0; k < 3; k++) memcpy(r + ROT_AT + 16 * k, s.rot[k], 12);
-    memcpy(r + VEL_AT, s.vel, 12);
-    memcpy(r + SPIN_AT, s.spin, 12);
-    memcpy(r + MOMENTUM_AT, momentum, 12);
-    r[FRONT_AT] = s.contact[0];
-    r[BACK_AT] = s.contact[1];
-    for (int w = 0; w < 2; w++) {
-        uint8_t *m = FIELD(r, w ? BACK_WHEEL_AT : FRONT_WHEEL_AT, uint8_t *);
-        if (m && (s.wheel[w][0] || s.wheel[w][1])) {
-            FIELD(m, 0x24, float) = s.wheel[w][0];
-            FIELD(m, 0x28, float) = s.wheel[w][1];
-            FIELD(m, 0x34, float) = -s.wheel[w][1];
-            FIELD(m, 0x38, float) = s.wheel[w][0];
-        }
-    }
+    if (s->crash & 4) p->after_crash = 1, p->stepped_at = 0;
+    else steer(r, p, s);
     /* A crash: started once, as the remote rider's began; then the crash runs its course. */
-    int crashing = FIELD(r, CRASH_FLAGS_AT, uint32_t) & 4, remote = s.crash & 4;
+    int crashing = FIELD(r, CRASH_FLAGS_AT, uint32_t) & 4, remote = s->crash & 4;
     if (remote && !p->remote_crash && !crashing) {
-        fprintf(stderr, "puppet: tick %d slot %d crash kind %d\n", RACE_CLOCK, slot, s.crash_kind);
+        fprintf(stderr, "puppet: tick %d slot %d crash kind %d\n", RACE_CLOCK, slot, s->crash_kind);
         pp.allow = 1;
-        func_00155E78(r + CRASH_AT, s.crash_kind);
+        func_00155E78(r + CRASH_AT, s->crash_kind);
         pp.allow = 0;
         crashing = FIELD(r, CRASH_FLAGS_AT, uint32_t) & 4;
     }
@@ -534,19 +545,18 @@ int hle_puppet_physics(uint8_t *r)
     /* The State follows the snapshot: the game's own switches are blocked (hle_puppet_switch), as
        on an AI rider they flip back and forth against it every field. */
     now = (int32_t)(FIELD(r, STATE_AT, uint8_t *) - r);
-    if (!crashing && !remote && s.state > 0 && s.state < RIDER_SIZE && now != s.state) {
+    if (!crashing && !remote && s->state > 0 && s->state < RIDER_SIZE && now != s->state) {
         pp.allow = 1;
-        func_0012FE38(r, r + s.state);
+        func_0012FE38(r, r + s->state);
         pp.allow = 0;
     }
     /* Progress: the checkpoints passed follow the owner's (crossings here can differ by a tick
        or after a respawn), so places and the finish order agree. */
-    if (FIELD(r, CHECKPOINT_AT, int32_t) != s.checkpoint) FIELD(r, CHECKPOINT_AT, int32_t) = s.checkpoint;
+    if (FIELD(r, CHECKPOINT_AT, int32_t) != s->checkpoint) FIELD(r, CHECKPOINT_AT, int32_t) = s->checkpoint;
     /* Power-ups: the puppet attacks as its owner can (a kick shows as a kick) */
-    FIELD(r, ATTACK_AT, int32_t) = s.attack;
-    FIELD(r, BOTTLES_AT, int32_t) = s.bottles;
-    func_0012DDC0(r);
-    return 1;
+    FIELD(r, ATTACK_AT, int32_t) = s->attack;
+    FIELD(r, BOTTLES_AT, int32_t) = s->bottles;
+    return 0;
 }
 
 /* func_00155E78 (start a crash): not for a puppet, unless its snapshot says so. */
@@ -605,7 +615,9 @@ void hle_puppet_start(void)
         p->sent_pad.period = i ? 30 : 60;
         if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
-        p->count = 0, p->have_age = 0, p->have_basis = 0, p->remote_crash = 0;
+        p->count = 0, p->have_age = 0, p->remote_crash = 0;
+        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0;
+        sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
             p->on = !owned(i);
@@ -868,15 +880,15 @@ void hle_puppet_event(int sender, const uint8_t *in, int n)
     pp.allow = 0;
 }
 
-/* How far behind the present each puppet shows its rider, and its snapshots' usual age on arrival,
-   in ms (finding 169). As text, for the log. */
+/* Per puppet: how far from where its rider was its last snapshot found it (units, finding 202),
+   and its snapshots' usual age on arrival (ms, finding 169). As text, for the log. */
 int hle_puppet_lag(char *out, int size)
 {
     int n = 0;
     out[0] = 0;
     for (int i = 1; i < NRIDERS && n < size - 32; i++)
         if (pp.p[i].on && pp.p[i].have_age)
-            n += snprintf(out + n, size - n, " %d:%.0f/%.0f", to_global(i), pp.p[i].behind * 1000, pp.p[i].age * 1000);
+            n += snprintf(out + n, size - n, " %d:%.2f/%.0f", to_global(i), pp.p[i].error, pp.p[i].age * 1000);
     return n;
 }
 
@@ -901,6 +913,16 @@ void hle_puppet_field(void)
             fwrite(&s, sizeof s, 1, pp.record);
         }
         fflush(pp.record);
+    }
+    /* Each steered puppet's pose after the whole step (bumps included): what its next snapshots
+       are compared with (puppet_sync.h). */
+    for (int i = 1; i < NRIDERS; i++) {
+        Puppet *p = &pp.p[i];
+        if (p->on && p->synced && !(FIELD(rider(i), CRASH_FLAGS_AT, uint32_t) & 4)) {
+            SyncPose pose;
+            body_pose(rider(i), &pose);
+            sync_record(&p->sync, RACE_TIME, &pose);
+        }
     }
     /* Each puppet as it is drawn after the whole step (bumps included): race time here, the
        moment it shows, slot, position, the moment of its recorded rider it should show (the
