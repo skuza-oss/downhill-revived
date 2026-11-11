@@ -155,3 +155,20 @@ def add(patches):
     _sub(patches, 'unsorted/001EB1D8.cpp', [
         ('        if (world__n27.x1219D) {', '        if (world__n27.x1219D || port_unlock_all()) {'),
         ('        if(world__n27.x1219D) {', '        if(world__n27.x1219D || port_unlock_all()) {')])
+
+    # Turned on or off while the game runs (the settings page, pc_settings.c commit; finding 200).
+    # The lobby's rider statues (bonus and pro riders) are the one thing the front end keeps:
+    # func_001BB670 copies their unlock bits (func_00193FE8) into D_004B25A0 +0x3C, which the rider
+    # select reads, and only at the front end's start, a memory card load and the retail cheat. So
+    # the change is followed as those do it, as OPTIONS' LOAD GAME DATA does right after a load
+    # (func_001F0160 case 6): the bits again, the statues' "new" flags (none new: the bits were
+    # just copied), the statues' animations. None of the cheat's writes (func_001F6618 and the
+    # profile's fields); nothing runs unless the setting changes.
+    _sub(patches, 'unsorted/001EB1D8.cpp', [(
+        'extern void func_001F60C8_M(int) asm("func_001F60C8");\n',
+        'extern void func_001F60C8_M(int) asm("func_001F60C8");\n'
+        'extern "C" void port_unlock_refresh(void) {\n'
+        '    func_001BB670_M(&D_004B25A0_M);\n'
+        '    func_001F66B0_M();\n'
+        '    func_001F7DE0_M();\n'
+        '}\n')])
