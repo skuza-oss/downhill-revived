@@ -1,8 +1,8 @@
 # 197: the phone's vertex loops and palette path, Native VU off
 
-Status: in progress
+Status: current
 
-Branch `perf/phone-fable-2` from `main` 652a734b (release 0.7.15), started 2026-11-10. This file is
+Branch `perf/phone-fable-2` from `main` 652a734b (release 0.7.15), started 2026-11-10. Merged into `main` 2026-11-11 (fast-forward to `cd064781`). This file is
 the lane's plan while it runs and its finding when it merges. Someone who has only this file and the
 git log must be able to pick the lane up.
 

@@ -204,10 +204,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 - Phones: on the low-end profile (Realme RMX3930 (Unisoc T612), reproduced on a throttled Mi 11i)
   2x races hold 60 with the profile-guided build; finding 195 added 5.6-17 % over the route
-  (t612 2x 64.4 -> 68.0 fields/s, 4x 55.5 -> 64.5; more with Native VU on), and the release APK
-  needs a profile recorded with its file-name keys (`docs/BUILDING.md`). 4x does not hold 60 at
-  the race start (GPU-bound). Findings 127, 146-149, 195 say what is left; finding 156 says where
-  a frame's time goes on the phone and the desktops.
+  (t612 2x 64.4 -> 68.0 fields/s, 4x 55.5 -> 64.5; more with Native VU on) and finding 197 another
+  7 % with Native VU off (race start 61.5 -> 65.9, the route 67.7 -> 72.4; on: +1 %); the release
+  APK needs a profile recorded with its file-name keys (`docs/BUILDING.md`; finding 197's is
+  `dhd-197.profdata`). 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149,
+  195, 197 say what is left (197: the VU thread alone limits now); finding 156 says where a
+  frame's time goes on the phone and the desktops.
 - PowerVR GE8320 phones start since finding 170 and no longer close in the Bike Shop (finding 176:
   a blend that keeps the colour is drawn unblended, a pipeline the driver refuses skips its draws);
   not yet confirmed by the reporters (issues #56, #60).
