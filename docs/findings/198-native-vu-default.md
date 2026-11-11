@@ -116,8 +116,9 @@ back.
 
 ## Checks
 
-- `python tools/check.py port`: every step OK (on the default change; run again on the branch's
-  last code commit, Result).
+- `python tools/check.py port`: every step OK, on the default change and again on the branch's
+  last code commit (`67cf649d`, with the Mali rule); the browser target compiles
+  (`rustgs.py check --target wasm32-unknown-unknown`).
 - **Settings tests** (`rustgs.py test -- -p dhd_settings`): pass. `web_corpus.json` was
   regenerated on purpose (`DHD_SETTINGS_BLESS=1`): its eight cases' `DHD_NATIVE_VU1` default went
   from `off` to `on`, nothing else. `settings_table.h` is unchanged (it carries the built-in value,
