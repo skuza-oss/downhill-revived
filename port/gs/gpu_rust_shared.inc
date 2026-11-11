@@ -106,11 +106,14 @@ static void native_replace_release(void *view) { dhdr_texture_release(view); }
 
 /* ---- decoded textures (GS worker; dhdr_texture_* run on any thread) ---- */
 
+static uint8_t *native_pack_image(void *entry, unsigned *w, unsigned *h) { return texpack_image(entry, w, h); }
+
 static int native_texture_create(Native *n, NativeTexture *t, const uint32_t *pixels, unsigned w, unsigned h,
-                                 int sharp, uint64_t key)
+                                 int sharp, uint64_t key, TexPackEntry *pack)
 {
     if (!(t->gpu = dhdr_texture_create(pixels, w, h))) return 0;
-    if (sharp) t->sharp = font_sharp_view(&n->replace, pixels, w, h, key);
+    FontSharpPack replaced = {native_pack_image, pack};
+    if (sharp) t->sharp = font_sharp_view(&n->replace, pixels, w, h, key, pack ? &replaced : NULL);
     return 1;
 }
 

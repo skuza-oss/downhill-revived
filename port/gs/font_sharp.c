@@ -11,7 +11,11 @@
      pass a narrow smoothstep around their middle, about one texel of the large texture wide.
    The renderer draws it in place of the original with mipmaps (as a texture pack's replacement;
    a pack that has the font wins). Nothing is written to disk. dhd.ini font = original keeps the
-   game's texture. The renderer makes the texture (replace_texture.h). */
+   game's texture. The renderer makes the texture (replace_texture.h).
+   The menus' atlas also carries the button icons (button_icons.c, finding 134). With other icons
+   than the game's chosen and a pack that replaces the atlas, the copy is the pack's picture at its
+   own scale with the icons painted over its icon cells, drawn instead of the pack's (finding 200):
+   the pack keeps its letters, the player gets the icons they chose. */
 #include <SDL3/SDL_atomic.h>  /* SDL_SpinLock, SDL_strcasecmp; the web build swaps in its one-thread stub */
 #include <math.h>
 #include <stdio.h>
@@ -50,6 +54,7 @@ int font_sharp_icon_style(void) { return icons_style ? icons_style() : 0; }
    the paint below uses the same, so a setting changing in between can't mismatch them). */
 static int latched_style = -1;
 int font_sharp_icon_style_latch(void) { return latched_style = font_sharp_icon_style(); }
+static int icon_style_now(void) { return latched_style >= 0 ? latched_style : font_sharp_icon_style(); }
 int font_sharp_active(void) { return font_sharp_on() || font_sharp_icon_style(); }
 
 int font_sharp_match(uint64_t tex0)
@@ -175,20 +180,52 @@ static void halve(const uint8_t *src, unsigned w, unsigned h, uint8_t *dst)
             }
 }
 
-static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h)
+/* A texture pack's picture (pw x ph) as the copy (W x H): as it is when it has that size, else
+   resampled (bilinear, texel centres matched). */
+static void fit(const uint8_t *picture, unsigned pw, unsigned ph, uint8_t *big, unsigned W, unsigned H)
 {
-    unsigned f = SHARP_SCALE;
-    while (f > 1 && (w * f > SHARP_MAX_SIDE || h * f > SHARP_MAX_SIDE)) f /= 2;
-    if (f < 2) return NULL;
+    if (pw == W && ph == H) { memcpy(big, picture, (size_t)W * H * 4); return; }
+    for (unsigned Y = 0; Y < H; Y++) {
+        float v = (Y + 0.5f) * ph / H - 0.5f;
+        int y0 = (int)floorf(v);
+        float fy = v - y0;
+        int ya = y0 < 0 ? 0 : y0, yb = y0 + 1 >= (int)ph ? (int)ph - 1 : y0 + 1;
+        for (unsigned X = 0; X < W; X++) {
+            float u = (X + 0.5f) * pw / W - 0.5f;
+            int x0 = (int)floorf(u);
+            float fx = u - x0;
+            int xa = x0 < 0 ? 0 : x0, xb = x0 + 1 >= (int)pw ? (int)pw - 1 : x0 + 1;
+            const uint8_t *p00 = picture + ((size_t)ya * pw + xa) * 4, *p01 = picture + ((size_t)ya * pw + xb) * 4;
+            const uint8_t *p10 = picture + ((size_t)yb * pw + xa) * 4, *p11 = picture + ((size_t)yb * pw + xb) * 4;
+            for (int ch = 0; ch < 4; ch++) {
+                float top = p00[ch] + (p01[ch] - p00[ch]) * fx, bottom = p10[ch] + (p11[ch] - p10[ch]) * fx;
+                big[((size_t)Y * W + X) * 4 + ch] = (uint8_t)(top + (bottom - top) * fy + 0.5f);
+            }
+        }
+    }
+}
+
+static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h, const FontSharpPack *pack)
+{
     /* Solid is the highest alpha: 0x80 in the executable's font, 0x40 in the menus' (whose
        colour comes from the vertices). */
     unsigned solid = 0;
     for (unsigned i = 0; i < w * h; i++)
         if (pixels[i] >> 24 > solid) solid = pixels[i] >> 24;
     if (!solid || solid > 0x80) return NULL;  /* not a font's alpha */
-    float *src = malloc((size_t)w * h * 4 * sizeof *src);
-    if (!src) return NULL;
-    for (unsigned i = 0; i < w * h; i++) {
+    /* A pack's picture: the copy at its own scale of the texture (1x-8x). */
+    unsigned pw = 0, ph = 0, f = SHARP_SCALE;
+    uint8_t *picture = pack ? pack->load(pack->context, &pw, &ph) : NULL;
+    if (picture) {
+        f = (pw + w / 2) / w;
+        f = f < 1 ? 1 : f > 8 ? 8 : f;
+    } else {
+        while (f > 1 && (w * f > SHARP_MAX_SIDE || h * f > SHARP_MAX_SIDE)) f /= 2;
+        if (f < 2) return NULL;
+    }
+    float *src = picture ? NULL : malloc((size_t)w * h * 4 * sizeof *src);
+    if (!picture && !src) return NULL;
+    for (unsigned i = 0; src && i < w * h; i++) {
         uint32_t p = pixels[i];
         src[i * 4 + 0] = (p & 255) / 255.0f;
         src[i * 4 + 1] = (p >> 8 & 255) / 255.0f;
@@ -202,8 +239,9 @@ static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned 
         total += (size_t)lw * lh * 4;
     }
     uint8_t *big = calloc(1, total);
-    if (!big) { free(src); return NULL; }
-    if (font_sharp_on()) sharpen(src, w, h, f, solid, big);
+    if (!big) { free(src); free(picture); return NULL; }
+    if (picture) fit(picture, pw, ph, big, W, H);  /* the pack's letters, its alpha in GS units as the copy's */
+    else if (font_sharp_on()) sharpen(src, w, h, f, solid, big);
     else  /* only for the button icons: the font as it is, each texel f x f */
         for (unsigned Y = 0; Y < H; Y++)
             for (unsigned X = 0; X < W; X++) {
@@ -212,7 +250,8 @@ static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned 
                 o[0] = p & 255, o[1] = p >> 8 & 255, o[2] = p >> 16 & 255, o[3] = p >> 24 & 255;
             }
     free(src);
-    int style = latched_style >= 0 ? latched_style : font_sharp_icon_style();
+    free(picture);
+    int style = icon_style_now();
     if (style && icons_paint) icons_paint(big, f, pixels, w, h, solid, style);
     uint8_t *level = big;
     unsigned lw = W, lh = H;
@@ -227,8 +266,12 @@ static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned 
     return view;
 }
 
-void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h, uint64_t key)
+void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h, uint64_t key,
+                      const FontSharpPack *pack)
 {
+    /* With a pack's replacement only for the icons (finding 200): its letters are the player's
+       choice, our icons go over its icon cells; nothing to paint, and the pack's own is drawn. */
+    if (pack && (!icons_paint || !icon_style_now() || w != 512 || h != 512)) return NULL;
     void *view = NULL;
     SDL_LockSpinlock(&cache_lock);
     unsigned oldest = 0;
@@ -241,7 +284,7 @@ void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsig
         }
         if (!cache[i].view || (cache[oldest].view && cache[i].used < cache[oldest].used)) oldest = i;
     }
-    if (!view && (view = make(device, pixels, w, h))) {
+    if (!view && (view = make(device, pixels, w, h, pack))) {
         if (cache[oldest].view) cache_release(cache[oldest].view);
         cache[oldest].key = key; cache[oldest].view = view; cache[oldest].used = ++cache_clock;
         cache_release = device->release;

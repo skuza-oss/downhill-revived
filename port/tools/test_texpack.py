@@ -12,8 +12,12 @@ Rust library (its PNG decoder, dhdr_png_*), then:
 - load: every PNG kind (8-bit RGBA/RGB, palettes with and without tRNS, grey, grey+alpha, 16-bit,
   low bit depths, interlaced, odd sizes) decoded, with its mip levels, against the pixels this
   script made (a PNG without alpha: 128); damaged and oversized files fail and draw nothing;
+- image: texpack_image gives each loaded replacement's first level, and nothing for a damaged one;
 - budget: least recently drawn released first, none within 8 fields of use, loaded again;
-- stress: two loaders creating while the GS thread draws and evicts, as in a race.
+- stress: two loaders creating while the GS thread draws and evicts, as in a race;
+- font icons (port/gs/test_font_icons.c, finding 200): the menus' font copy over a pack's
+  replacement of it, with other button icons than the game's, at the pack's scale, the pack's other
+  cells kept texel for texel; none with the game's icons in their places.
 --wic-reference COMMIT (Windows) also builds the harness with that commit's texpack.c (the WIC
 decoder, e.g. 89bee8823) and compares what each gives the renderer, PNG kind by kind.
 Synthetic images only: nothing of a game or a real pack. Output under build/port/texpack-test.
@@ -221,6 +225,30 @@ def build(texpack, exe):
         raise SystemExit('harness build failed:\n' + r.stdout + r.stderr)
 
 
+def build_font_icons(exe):
+    """port/gs/test_font_icons.c with font_sharp.c and button_icons.c (the icons over a pack's font,
+    finding 200); button_icons.inc made as build_host64.py makes it."""
+    import rustgs
+    import sdl3
+    sdl_lib, sdl_include = sdl3.build()
+    rust = rustgs.build(rustgs.X64)
+    pngs = sorted((ROOT / 'port/res/buttons').glob('*.png'))
+    inc = [f'static const unsigned char button_png_{p.stem}[] = {{{",".join(map(str, p.read_bytes()))}}};' for p in pngs]
+    inc.append('static const struct { const char *name; const unsigned char *png; unsigned size; } button_pngs[] = {')
+    inc += [f'    {{"{p.stem}", button_png_{p.stem}, sizeof button_png_{p.stem}}},' for p in pngs]
+    (OUT / 'button_icons.inc').write_text('\n'.join(inc + ['};', '']))
+    sources = [ROOT / 'port/gs/test_font_icons.c', ROOT / 'port/gs/font_sharp.c', ROOT / 'port/gs/button_icons.c']
+    cmd = ['clang', '--target=' + TARGET, '-O1', '-w', '-fms-runtime-lib=static', '-D_CRT_SECURE_NO_WARNINGS',
+           '-I' + str(OUT), '-I' + str(ROOT / 'port/gs'), '-I' + str(ROOT / 'port/include'),
+           '-I' + str(ROOT / 'port/runtime'), '-I' + str(sdl_include),
+           *[str(s) for s in sources], '-o', str(exe), str(sdl_lib), rust['lib'],
+           *['-l' + x[:-4] for x in dict.fromkeys(sdl3.SYSTEM_LIBS + ['user32.lib', 'ole32.lib'] +
+                                                  [l for l in rust['native_static_libs'] if l.endswith('.lib')])]]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
+    if r.returncode:
+        raise SystemExit('font icons harness build failed:\n' + r.stdout + r.stderr)
+
+
 def run(exe, args, env=None):
     e = dict(os.environ)
     for k in ('DHD_TEXTURE_PACK', 'DHD_DATA_DIR', 'DHD_TEXTURES', 'DHD_TEXTURE_CACHE_MB', 'DHD_TEXTURE_PACK_LOG',
@@ -392,6 +420,7 @@ def main():
 
     code, status, got, out, err = load(exe, 'rust')
     check(code == 0, 'load: the harness ran (%d)' % code)
+    harness_lines('load', code, out, err)  # texpack_image against each loaded view
     m = re.search(r'textures: (\d+) replacements in .* \((\d+) other files skipped, (\d+) duplicates\)', err)
     print('load:', m.group(0) if m else err[-500:])
     check(m and m.group(2) == '6' and m.group(3) == '1', 'load: 6 other names skipped, 1 duplicate')
@@ -419,11 +448,19 @@ def main():
     harness_lines('stress', code, out, err)
     print('\n'.join(l for l in err.splitlines() if l.startswith('textures:')))
 
+    # ---- the button icons over a pack's menu font (font_sharp.c, finding 200) ----
+    icons = OUT / 'test_font_icons.exe'
+    build_font_icons(icons)
+    code, out, err = run(icons, [], {'DHD_FONT': 'sharp'})
+    harness_lines('font icons', code, out, err)
+
     # ---- the WIC decoder, for comparison ----
     if a.wic_reference:
         old = OUT / 'texpack_wic.c'
         text = subprocess.run(['git', 'show', '%s:port/gs/texpack.c' % a.wic_reference], cwd=ROOT,
                               capture_output=True, text=True, encoding='utf-8', check=True).stdout
+        if 'texpack_image(' not in text:  # older than finding 200: the harness's load mode asks for it
+            text += '\nuint8_t *texpack_image(TexPackEntry *e, unsigned *w, unsigned *h) { (void)e; *w = *h = 0; return NULL; }\n'
         old.write_text(text, encoding='utf-8', newline='\n')
         wic = OUT / 'test_texpack_wic.exe'
         build(old, wic)

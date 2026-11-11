@@ -279,25 +279,53 @@ static uint8_t *pack_read(const char *path, size_t *size)
     return data;
 }
 
-static int pack_load(TexPackEntry *e)
+/* The entry's picture, decoded (w x h RGBA, alpha in GS units: 0x80 opaque), in a buffer with room
+   for its mip levels after it when `levels` (their count in *levels then); NULL when the file can't
+   be read or decoded, or is too large. */
+static uint8_t *pack_decode(const TexPackEntry *e, uint32_t *w, uint32_t *h, unsigned *levels, size_t *total)
 {
     char path[PACK_PATH * 2];
     size_t size = 0;
     uint8_t *file, *pixels = NULL;
-    uint32_t w = 0, h = 0;
-    int ok = 0;
     snprintf(path, sizeof path, "%s/%s", pack.root, e->path);
-    if (!(file = pack_read(path, &size))) return 0;
-    if (!dhdr_png_size(file, size, &w, &h) || !w || !h || w > PACK_MAX_SIDE || h > PACK_MAX_SIDE) goto done;
-    /* All the levels in one buffer, down to 1x1. */
-    unsigned levels = 1;
-    size_t total = (size_t)w * h * 4;
-    for (unsigned lw = w, lh = h; lw > 1 || lh > 1; levels++) {
-        lw = lw > 1 ? lw / 2 : 1; lh = lh > 1 ? lh / 2 : 1;
-        total += (size_t)lw * lh * 4;
+    if (!(file = pack_read(path, &size))) return NULL;
+    *w = *h = 0;
+    if (dhdr_png_size(file, size, w, h) && *w && *h && *w <= PACK_MAX_SIDE && *h <= PACK_MAX_SIDE) {
+        /* All the levels in one buffer, down to 1x1. */
+        unsigned count = 1;
+        size_t bytes = (size_t)*w * *h * 4;
+        if (levels)
+            for (unsigned lw = *w, lh = *h; lw > 1 || lh > 1; count++) {
+                lw = lw > 1 ? lw / 2 : 1; lh = lh > 1 ? lh / 2 : 1;
+                bytes += (size_t)lw * lh * 4;
+            }
+        if ((pixels = malloc(bytes)) && !dhdr_png_decode(file, size, pixels, *w, *h, 0x80)) {  /* PCSX2: opaque in GS units */
+            free(pixels);
+            pixels = NULL;
+        }
+        if (levels) *levels = count;
+        if (total) *total = bytes;
     }
-    if (!(pixels = malloc(total))) goto done;
-    if (!dhdr_png_decode(file, size, pixels, w, h, 0x80)) goto done;  /* PCSX2: opaque in GS units */
+    free(file);
+    return pixels;
+}
+
+uint8_t *texpack_image(TexPackEntry *e, unsigned *w, unsigned *h)
+{
+    uint32_t pw, ph;
+    uint8_t *pixels = pack_decode(e, &pw, &ph, NULL, NULL);
+    *w = pw, *h = ph;
+    return pixels;
+}
+
+static int pack_load(TexPackEntry *e)
+{
+    uint8_t *pixels;
+    uint32_t w = 0, h = 0;
+    unsigned levels = 1;
+    size_t total = 0;
+    int ok = 0;
+    if (!(pixels = pack_decode(e, &w, &h, &levels, &total))) return 0;
     uint8_t *level = pixels;
     unsigned lw = w, lh = h;
     for (unsigned i = 0; i + 1 < levels; i++) {
@@ -311,7 +339,6 @@ static int pack_load(TexPackEntry *e)
     ok = 1;
 done:
     free(pixels);
-    free(file);
     return ok;
 }
 

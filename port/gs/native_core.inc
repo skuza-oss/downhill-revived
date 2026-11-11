@@ -81,7 +81,7 @@ enum { NATIVE_MESH = 4096, NATIVE_MESH_TWO_SIDED = 8192 };   /* constants.flags:
 
 typedef struct {
     uint64_t key;
-    NATIVE_TEXTURE_GPU    /* texture and view; sharp: the game's font made sharp (font_sharp.c), or none */
+    NATIVE_TEXTURE_GPU    /* texture and view; sharp: the game's font made sharp, or with other button icons (font_sharp.c), or none */
     uint64_t used;        /* last field that drew with it */
     TexPackEntry *pack;   /* its replacement (texpack.c), once looked up (pack_checked) */
     int pack_checked;
@@ -347,12 +347,15 @@ typedef struct Native {
 
 /* ---- backend: defined by the file that includes this one ---- */
 
-/* A decoded texture's GPU copy from w x h RGBA pixels, and its sharp font when sharp; 0 when it
-   failed (then nothing is left to release). GS worker. */
+/* A decoded texture's GPU copy from w x h RGBA pixels, and its sharp font when sharp (pack: the
+   pack's replacement of it, font_sharp_view's); 0 when it failed (then nothing is left to
+   release). GS worker. */
 static int native_texture_create(Native *n, NativeTexture *t, const uint32_t *pixels, unsigned w, unsigned h,
-                                 int sharp, uint64_t key);
+                                 int sharp, uint64_t key, TexPackEntry *pack);
 static void native_texture_release(NativeTexture *t);  /* all of it, any part may be missing */
-/* What a draw with this texture shows instead: its texture pack replacement, else its sharp font. */
+/* What a draw with this texture shows instead: its sharp font when it has one (with a pack's
+   replacement it has one only for the button icons, made from the pack's picture), else its
+   texture pack replacement. */
 static NativeView native_replacement_view(Native *n, NativeTexture *t);
 /* The surface's texture at its scale and at least want[] GS pixels, keeping what it holds. */
 static int native_surface_resources(Native *n, NativeSurface *s, const unsigned want[2]);
@@ -721,7 +724,7 @@ static uint64_t native_palette_digest(Native *n, const Gs *g, uint64_t tex0, int
     return n->palette_last.digest;
 }
 
-static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w, unsigned h, uint64_t key)
+static NativeTexture *native_decode(Native *n, Gs *g, unsigned ctxt, uint64_t tex0, unsigned w, unsigned h, uint64_t key)
 {
     unsigned slot = (unsigned)(key % NATIVE_TEXTURES);
     for (unsigned probe = 0; probe < 16; probe++) {
@@ -748,13 +751,16 @@ static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w,
             uint32_t v = gs_image_pixel(g->vram, psm, tbp, tbw, x, y);
             pixels[y * w + x] = indexed ? palette[v & 255] : gs_color(v, psm, g->reg[GS_TEXA]);
         }
-    /* The text engine's font, made sharp for high resolutions (dhd.ini font, finding 058). */
+    /* The text engine's font, made sharp for high resolutions (dhd.ini font, finding 058), or with
+       other button icons: over a pack's replacement of it when there is one (finding 200), so its
+       replacement is looked up here. */
     int sharp = indexed && n->replace_on && font_sharp_active() && font_sharp_match(tex0);
-    int made = native_texture_create(n, victim, pixels, w, h, sharp, key);
+    TexPackEntry *pack = sharp && n->texpack ? texpack_find(g, ctxt) : NULL;
+    int made = native_texture_create(n, victim, pixels, w, h, sharp, key, pack);
     free(pixels);
     if (!made) return NULL;
     victim->key = key; victim->used = n->field;
-    victim->pack = NULL; victim->pack_checked = 0;
+    victim->pack = pack; victim->pack_checked = sharp && n->texpack;
     n->stats.decoded++; n->stats.decoded_texels += (uint64_t)w * h;
     return victim;
 }
@@ -781,7 +787,7 @@ static int native_page_source(Native *n, Gs *g, unsigned page, unsigned psm)
    read as a 4-bit texture (the haze), part of a texture page drawn over (the loading screen). The
    GPU rebuilds it just before the draw: the CPU copy decoded as usual, with the drawn pages read
    from their surfaces (native.wgsl's native_convert). */
-static int native_convert_texture(Native *n, Gs *g, uint64_t tex0, unsigned w, unsigned h, const uint32_t pages[16],
+static int native_convert_texture(Native *n, Gs *g, unsigned ctxt, uint64_t tex0, unsigned w, unsigned h, const uint32_t pages[16],
                                   uint64_t key, NativeCommand *c)
 {
     unsigned psm = (unsigned)(tex0 >> 20) & 63, tbp = (unsigned)tex0 & 0x3FFF, tbw = (unsigned)(tex0 >> 14) & 63;
@@ -814,7 +820,7 @@ static int native_convert_texture(Native *n, Gs *g, uint64_t tex0, unsigned w, u
         v->constants.pages[p] = (uint8_t)(1 + slot);
     }
     if (!slots) return 0;
-    v->base = native_decode(n, g, tex0, w, h, key);
+    v->base = native_decode(n, g, ctxt, tex0, w, h, key);
     uint64_t texa = g->reg[GS_TEXA];
     v->constants.tex[0] = psm; v->constants.tex[1] = tbp; v->constants.tex[2] = tbw;
     v->constants.size[0] = w; v->constants.size[1] = h;
@@ -834,7 +840,8 @@ static int native_convert_texture(Native *n, Gs *g, uint64_t tex0, unsigned w, u
 }
 
 /* A texture pack's replacement for a decoded texture (texpack.c): looked up once per decode,
-   drawn once its loader has it. Else the sharp font (font_sharp.c), so a pack's own font wins.
+   drawn once its loader has it. Or the sharp font (font_sharp.c): a pack's own font wins, unless
+   other button icons are chosen, when the copy is the pack's font with them (finding 200).
    Region repeat (an address mask) stays the original's. */
 static void native_replace(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
 {
@@ -901,12 +908,12 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
         /* The menus' font lives in a depth buffer's top bytes; the sharp one is drawn from the
            CPU copy, which holds the font as the game uploaded it. */
         if (n->replace_on && font_sharp_active() && font_sharp_match(tex0)) {
-            c->texture = native_decode(n, g, tex0, w, h, key);
-            if (c->texture && c->texture->sharp) native_replace(n, g, ctxt, c);
+            c->texture = native_decode(n, g, ctxt, tex0, w, h, key);
+            if (c->texture && (c->texture->sharp || c->texture->pack)) native_replace(n, g, ctxt, c);
             if (c->replacement) return;
             c->texture = NULL;
         }
-        if (native_convert_texture(n, g, tex0, w, h, pages, key, c)) return;
+        if (native_convert_texture(n, g, ctxt, tex0, w, h, pages, key, c)) return;
         /* Drawn over, but the CPU copy holds it (a Z24 buffer's top byte), or out of reach. */
         if (owner >= 0) {
             const NativeSurface *s = &n->surfaces[owner];
@@ -923,7 +930,7 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
             fprintf(n->texlog, "%llu,gpu_pages,%u,%u,%u,%u,%u,%u,%u,,,\n", (unsigned long long)n->field, gpu_pages, psm, tbp,
                     tbw, w, h, gpu_page);
     }
-    c->texture = native_decode(n, g, tex0, w, h, key);
+    c->texture = native_decode(n, g, ctxt, tex0, w, h, key);
     if (c->texture && (n->texpack || c->texture->sharp)) native_replace(n, g, ctxt, c);
     if (!c->texture) {
         k->flags &= ~1u;

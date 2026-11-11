@@ -29,6 +29,7 @@ int texpack_open(const ReplaceDevice *d,uint64_t m) {(void)d; (void)m; return 0;
 int texpack_available(void) {return 0;}
 TexPackEntry *texpack_find(const Gs *g,unsigned c) {return NULL;}
 void *texpack_view(TexPackEntry *e,uint64_t f) {(void)e; (void)f; return NULL;}
+uint8_t *texpack_image(TexPackEntry *e,unsigned *w,unsigned *h) {(void)e; *w = *h = 0; return NULL;}
 void texpack_field(uint64_t f) {}
 void texpack_report(void) {}
 int font_sharp_on(void) {return 0;}
@@ -36,7 +37,8 @@ int font_sharp_active(void) {return 0;}
 int font_sharp_icon_style(void) {return 0;}
 int font_sharp_icon_style_latch(void) {return 0;}
 int font_sharp_match(uint64_t t) {return 0;}
-void *font_sharp_view(const ReplaceDevice *d,const uint32_t *p,unsigned w,unsigned h,uint64_t k) {(void)d; (void)p; (void)w; (void)h; (void)k; return NULL;}
+void *font_sharp_view(const ReplaceDevice *d,const uint32_t *p,unsigned w,unsigned h,uint64_t k,
+                      const FontSharpPack *pk) {(void)d; (void)p; (void)w; (void)h; (void)k; (void)pk; return NULL;}
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

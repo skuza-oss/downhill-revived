@@ -336,6 +336,13 @@ static int mode_load(const char *out)
         char id[8], path[4096];
         const char *name = case_at(i, id).id;
         if (!found[i]) { printf("case %s absent\n", name); continue; }
+        /* texpack_image (the button icons over a pack's font, finding 200): the view's first level */
+        unsigned iw = 0, ih = 0;
+        uint8_t *image = texpack_image(found[i], &iw, &ih);
+        if (!got[i]) CHECK(!image, "image: %s gives no picture, as it loads none", name);
+        else CHECK(image && iw == got[i]->w && ih == got[i]->h && !memcmp(image, got[i]->pixels, (size_t)iw * ih * 4),
+                   "image: %s %ux%u, the loaded view's first level", name, iw, ih);
+        free(image);
         if (!got[i]) { printf("case %s failed\n", name); continue; }
         snprintf(path, sizeof path, "%s/%s.bin", out, name);
         FILE *f = fopen(path, "wb");

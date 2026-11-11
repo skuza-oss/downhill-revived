@@ -25,6 +25,11 @@ TexPackEntry *texpack_find(const Gs *g, unsigned ctxt);
    (once). It stays valid for at least 8 fields after the last call that returned it. */
 void *texpack_view(TexPackEntry *e, uint64_t field);
 
+/* The replacement's picture, read and decoded now (any thread): w x h RGBA, alpha in GS units (0x80
+   opaque, as the view's), level 0 only; free() it. NULL when it can't be read. The button icons
+   are painted over a pack's menu font from it (font_sharp.c, finding 200). */
+uint8_t *texpack_image(TexPackEntry *e, unsigned *w, unsigned *h);
+
 /* Once a field (GS worker): replacements over the memory budget that no recent field drew are
    released. */
 void texpack_field(uint64_t field);
