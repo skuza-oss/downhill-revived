@@ -1862,12 +1862,20 @@ static int test_skip_pad(HostPad *out)
     return 1;
 }
 
+/* After the arena's round the room's menus are Single Event's again (port_online_shell set 12 for
+   the room): the shop's START, for one, goes another way in Mosh Bowl (func_0013BA60). */
+static void round_mode_off(void)
+{
+    if (EE32(SETUP + 0x10C) == MOSH_MODE) EE32(SETUP + 0x10C) = 12;
+}
+
 /* Leaving the race screen and the room returns this PC to offline control. Restore the previous
    script and seed so the online boot script cannot swallow title-menu input. */
 static int connected;
 static void race_over(void)
 {
     fprintf(stderr, "online: the race is over; back to offline play\n");
+    round_mode_off();
     host_service_net_leave();
     hle_puppet_offline();
     port_online_relock();
@@ -1892,6 +1900,7 @@ static int leaving_room;  /* LEAVE THE ROOM chosen: off the race screen, out of 
 static void back_to_room(void)
 {
     fprintf(stderr, "online: this PC's race is over; back to the room\n");
+    round_mode_off();
     host_service_net_back();  /* out of the race: unless it finished, DNF (gave up) */
     hle_puppet_offline();
     kernel_pace_shared(0);
