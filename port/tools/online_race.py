@@ -214,7 +214,7 @@ def main():
 
     if a.lag:
         for side in (a.a, a.b):
-            side[:0] = ['DHD_PUPPET_TRACE=puppet.txt', 'DHD_PUPPET_RECORD=own.bin']
+            side[:0] = ['DHD_PUPPET_TRACE=puppet.txt', 'DHD_PUPPET_RECORD=own.bin', 'DHD_PUPPET_FROM=all']
     players = 2 + a.bots
     owned.enter_context(game_lock.held('online_race'))  # untimed: one place for its two games
     with owned:
@@ -278,6 +278,7 @@ def main():
         import puppet_lag
         print('--- puppets (puppet_lag.py):')
         puppet_lag.report(out)
+        puppet_lag.riders_report(out)
     return 0 if ok else 1
 
 

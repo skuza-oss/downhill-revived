@@ -30,6 +30,8 @@ puppet, or of a respawn, are left out (no model shows those the same way):
   jolts         steps where the drawn rider's own speed changes by more than JOLT units a second
                 from the step before while the truth's changes by less than half that, per minute
                 (a discontinuity: a snap, a hold, a correction taken at once)
+  resync_*      riders put where their snapshots say at once (the game's log): in the first 5 s
+                after GO, later, and after a crash (a respawn)
   back          steps where the drawn rider moves backwards along the truth's motion while the
                 truth moves faster than 10 units a second, per minute
   frozen        share of time the drawn rider stands still while the truth moves
@@ -174,7 +176,7 @@ def pct(values, p):
     return puppet_lag.pct(values, p) if values else float('nan')
 
 
-def score(truth_path, trace_path, start=5.0):
+def score(truth_path, trace_path, start=5.0, end=1e9):
     paths = load_truth(truth_path)
     # windows to leave out per recorded rider: its crashes and respawns
     bad = {}
@@ -204,7 +206,7 @@ def score(truth_path, trace_path, start=5.0):
             puppet_crash[slot] = t
         last = prev.get(slot)
         prev[slot] = (t, p, truth_t)
-        if t < start or src not in paths or crashing or t - puppet_crash.get(slot, -99) < SKIP_NEAR or \
+        if t < start or t > end or src not in paths or crashing or t - puppet_crash.get(slot, -99) < SKIP_NEAR or \
                 near_bad(src, truth_t):
             continue
         times, pos, _, ground = paths[src]
@@ -265,7 +267,16 @@ def score(truth_path, trace_path, start=5.0):
         'sunk_pct': 100.0 * sunk / max(steps, 1), 'deep_pct': 100.0 * deep / max(steps, 1), 'depth_p99': pct(depth, 99) if depth else 0.0,
         'pops_min': pops / span if span else float('nan'), 'jolts_min': jolts / span if span else float('nan'), 'back_min': back / span if span else float('nan'),
         'frozen_pct': 100.0 * frozen_time / total_time if total_time else float('nan'),
+        **resync_counts(Path(trace_path).parent / 'game.log'),
     }
+
+
+def resync_counts(log):
+    """Re-syncs (a rider put where its snapshot says at once) in a play's log, by race phase."""
+    if not log.exists():
+        return {}
+    counts = puppet_lag.resyncs(log.read_text(errors='replace'))
+    return {'resync_early': counts['early'], 'resync_later': counts['later'], 'resync_crash': counts['after crash']}
 
 
 def truth_baseline(truth_path, start=5.0):
@@ -289,14 +300,14 @@ def truth_baseline(truth_path, start=5.0):
 
 COLUMNS = (('error_p50', '{:.2f}'), ('error_p95', '{:.2f}'), ('error_p99', '{:.2f}'), ('behind_p50', '{:.0f}'),
            ('sunk_pct', '{:.2f}'), ('deep_pct', '{:.2f}'), ('depth_p99', '{:.2f}'), ('pops_min', '{:.1f}'), ('jolts_min', '{:.1f}'), ('back_min', '{:.1f}'),
-           ('frozen_pct', '{:.2f}'))
+           ('frozen_pct', '{:.2f}'), ('resync_early', '{:.0f}'), ('resync_later', '{:.0f}'))
 
 
 def table(results):
     head = '| scenario | fps | track | ' + ' | '.join(c for c, _ in COLUMNS) + ' |'
     rows = [head, '|' + '---|' * (3 + len(COLUMNS))]
     for (name, fps, track), r in sorted(results.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
-        rows.append(f'| {name} | {fps} | {track} | ' + ' | '.join(fmt.format(r[c]) for c, fmt in COLUMNS) + ' |')
+        rows.append(f'| {name} | {fps} | {track} | ' + ' | '.join(fmt.format(r.get(c, float('nan'))) for c, fmt in COLUMNS) + ' |')
     return '\n'.join(rows)
 
 
@@ -419,6 +430,9 @@ def clip(args):
                         f"[0]{draw('the rider (truth)')}[a];[1]{draw('as another player sees it - ' + label.replace(':', ' ').replace(',', ' '))}[b];[a][b]hstack",
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', str(target)], check=True)
         print('clip', target)
+        # the frames are 1 MB each, 360 a side: gone once the clip is made (the truth's too)
+        for folder in (lst, work / 'frames', truth_dir / 'frames'):
+            shutil.rmtree(folder, ignore_errors=True)
     else:
         from PIL import Image
         picks = [lst / f'{side}{i:05d}.png' for i in range(0, n, max(1, n // 12)) for side in 'lr']
