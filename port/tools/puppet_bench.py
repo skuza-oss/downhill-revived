@@ -276,7 +276,8 @@ def resync_counts(log):
     if not log.exists():
         return {}
     counts = puppet_lag.resyncs(log.read_text(errors='replace'))
-    return {'resync_early': counts['early'], 'resync_later': counts['later'], 'resync_crash': counts['after crash']}
+    return {'resync_early': counts['early'], 'resync_later': counts['later'], 'resync_crash': counts['after crash'],
+            'catchups': counts['catch early'] + counts['catch later']}
 
 
 def truth_baseline(truth_path, start=5.0):
@@ -300,7 +301,7 @@ def truth_baseline(truth_path, start=5.0):
 
 COLUMNS = (('error_p50', '{:.2f}'), ('error_p95', '{:.2f}'), ('error_p99', '{:.2f}'), ('behind_p50', '{:.0f}'),
            ('sunk_pct', '{:.2f}'), ('deep_pct', '{:.2f}'), ('depth_p99', '{:.2f}'), ('pops_min', '{:.1f}'), ('jolts_min', '{:.1f}'), ('back_min', '{:.1f}'),
-           ('frozen_pct', '{:.2f}'), ('resync_early', '{:.0f}'), ('resync_later', '{:.0f}'))
+           ('frozen_pct', '{:.2f}'), ('resync_early', '{:.0f}'), ('resync_later', '{:.0f}'), ('catchups', '{:.0f}'))
 
 
 def table(results):

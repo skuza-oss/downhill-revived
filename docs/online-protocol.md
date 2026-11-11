@@ -481,7 +481,7 @@ sent every race tick (60 a second), AI riders every second tick (30 a second).
 
 A record: the rider's global id (u8: a human's lobby slot, an AI rider's slot), the sender's race
 time (i32 ms since its GO), position, orientation (3 rows), velocity and angular velocity (f32 x 3
-each), the rider's power (f32: 1, an AI rider's catch-up eased, finding 202) and 12 reserved bytes (zero; the wheels' spin until finding 202, which a puppet's physics now makes), the wheel contacts (2 u8), the State (u16), crash flags and kind,
+each), the rider's power (f32: 1, an AI rider's catch-up eased, finding 202) a computer rider's turn scale (f32: its AI controller's +0x2B0, which scales its steering in `func_00137950`; 0 for a player's rider; finding 202 round 3, zero from older games, which a receiver then leaves to its own controller) and 8 reserved bytes (zero; with the turn scale, the wheels' spin until finding 202, which a puppet's physics now makes), the wheel contacts (2 u8), the State (u16), crash flags and kind,
 checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad words as index (u8)
 and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
 all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom

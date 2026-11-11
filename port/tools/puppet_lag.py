@@ -160,14 +160,24 @@ def report(run, start=5, end=1e9):
 
 
 RESYNC = re.compile(r'puppet: tick (\d+) slot (\d+) put where its rider is \(([\d.]+) units off(, after a crash)?')
+PLACED = re.compile(r'puppet: tick (\d+) slot (\d+) placed \(([a-z ]+): ([\d.]+) units off')
+CATCH = re.compile(r'puppet: tick (\d+) slot (\d+) catches up \(([\d.]+) units off')
 
 
 def resyncs(log, early=5.0):
-    """Re-syncs in a game's log by race phase: in the first `early` seconds after GO, later, and
-    after a crash (a respawn: the jump is real on the rider's own screen too)."""
-    counts = {'early': 0, 'later': 0, 'after crash': 0}
+    """Riders put where their snapshots say at once, from a game's log: 'early' (the first `early`
+    seconds after GO) and 'later' outside respawns, 'after crash' (respawns: the jump is real on the
+    rider's own screen too), 'first' (a rider's first snapshot); and the catch-ups (an error over
+    the jump size since round 3 of finding 202 caught up by riding, not placed) in the first
+    seconds and later. Reads the logs from before round 3 too ("put where its rider is")."""
+    counts = {'early': 0, 'later': 0, 'after crash': 0, 'first': 0, 'catch early': 0, 'catch later': 0}
     for tick, slot, units, crash in RESYNC.findall(log):
         counts['after crash' if crash else 'early' if int(tick) / 60.0 < early else 'later'] += 1
+    for tick, slot, why, units in PLACED.findall(log):
+        counts['after crash' if why == 'respawn' else 'first' if why == 'first snapshot'
+               else 'early' if int(tick) / 60.0 < early else 'later'] += 1
+    for tick, slot, units in CATCH.findall(log):
+        counts['catch early' if int(tick) / 60.0 < early else 'catch later'] += 1
     return counts
 
 
@@ -223,8 +233,9 @@ def riders_report(run, start=1.0, end=1e9):
                       f"error p50/p95/p99 {s['error_p50']:.2f}/{s['error_p95']:.2f}/{s['error_p99']:.2f} units; sunk "
                       f"{s['sunk_pct']:.1f} % (deep {s['deep_pct']:.2f} %); jolts {s['jolts_min']:.1f}, back "
                       f"{s['back_min']:.1f} a minute")
-        print(f"{viewer} re-syncs: {r['resyncs']['early']} in the first 5 s, {r['resyncs']['later']} later, "
-              f"{r['resyncs']['after crash']} after crashes")
+        c = r['resyncs']
+        print(f"{viewer} re-syncs: {c['early']} in the first 5 s, {c['later']} later, {c['after crash']} after crashes "
+              f"(placed: respawns); catch-ups by riding {c['catch early']} in the first 5 s, {c['catch later']} later")
 
 
 def main():

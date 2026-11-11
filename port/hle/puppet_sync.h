@@ -45,9 +45,13 @@
                                   up (up to twice, finding 139): its puppet glides after its snapshots */
 #define SYNC_CATCHUP_END 1.1f  /* ... until under this */
 #define SYNC_FOLLOW_TAU 0.05f  /* s: the glide toward its rider meanwhile */
-#define SYNC_START_GLIDE 1.5   /* s after GO: no jump under 3x SYNC_RESYNC (the pack leaves the line) */
 #define SYNC_START_WAIT 2.0   /* s after GO: a puppet whose snapshots have not begun is this game's AI */
-#define SYNC_RESYNC 12.0f      /* game units (about 0.13 s of riding): a larger error is a jump */
+#define SYNC_RESYNC 12.0f      /* game units (about 0.13 s of riding): a larger error is logged as a
+                                  catch-up (puppet.c steer) */
+#define SYNC_PLACE_FAR 50.0f   /* units (over half a second of riding): a larger error is placed at once */
+#define SYNC_PLACE_SILENCE 1.0 /* s without a snapshot: then an error over SYNC_RESYNC is placed */
+#define SYNC_SLIDE_MOST 90.0f  /* units a second: the most a correction adds to or takes from the riding
+                                  (a catch-up of 40 units takes about half a second) */
 #define SYNC_CARRY_MAX 0.25    /* s: a re-sync carries a snapshot at most this far */
 enum { SYNC_HISTORY = 512 };   /* steps: about 2 s at 240 steps a second */
 #define SYNC_CLOCK_SLACK 0.05  /* s of a race clock's lag behind the wall clock that are normal */
@@ -247,6 +251,7 @@ static inline void sync_step(PuppetSync *s, float dt, const float *ground, SyncP
         }
     }
     float slide = sync_len(dp) / dt, most = SYNC_SLIDE + SYNC_SLIDE_GAIN * sync_len(s->pending_pos);
+    if (most > SYNC_SLIDE_MOST) most = SYNC_SLIDE_MOST;
     if (slide > most)
         for (int k = 0; k < 3; k++) dp[k] *= most / slide;
     /* the correction's speed changes at most SYNC_SLIDE_ACCEL a second */
