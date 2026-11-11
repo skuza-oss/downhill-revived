@@ -96,6 +96,12 @@ typedef struct {
     /* The race's start moment as the room sent it (server ms; 0 none yet): the host's START over
        the room as well as the race link, for a game whose race link brought nothing (finding 187). */
     double race_go_at;
+    /* A scored round (finding 204: the arena's Mosh Bowl round). server_scores: the welcome listed
+       "score", so finishes may carry one and the room ranks a round by it (an older server: 0, and
+       the arena races as before). member_score: the score in member[i]'s finish, result_score in
+       result[i]'s, -1 none. */
+    int server_scores;
+    int member_score[NET_MAX_SLOTS], result_score[NET_MAX_SLOTS];
 } NetLobby;
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */
@@ -160,7 +166,9 @@ void net_kick(int member);                         /* host */
 void net_start_race(void);                         /* host; session: ready entrants */
 void net_end_race(void);                           /* host: back to the lobby */
 /* Session room calls. next_race: 0 auto, 1 host; then: 0 same, 1 next, 2 random. */
-void net_finish(unsigned ticks, int place);
+/* score: a scored round's points (0-999999, finding 204), sent only to a server that lists "score";
+   -1 for a race. */
+void net_finish(unsigned ticks, int place, int score);
 void net_back(void);
 void net_rules(int finish_window, int next_race, int then);
 void net_rotation(const unsigned char *ids, int count);

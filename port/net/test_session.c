@@ -39,7 +39,7 @@ int main(void)
     assert(l.rotation_count==3 && l.rotation[2]==5 && l.member[0].finish_ticks==300);
     assert(l.last_race_id==2 && l.nresults==2 && l.result[1].ticks==-1 && !strcmp(l.result[1].dnf_reason,"time_up"));
     assert(c.ready && !c.racing && l.state==NET_LOBBY);
-    client_finish(&c,321,4); assert(strstr(sent,"\"ticks\":321,\"place\":4"));
+    client_finish(&c,321,4,-1); assert(strstr(sent,"\"ticks\":321,\"place\":4"));
     client_back(&c); assert(!strcmp(sent,"{\"type\":\"back\"}"));
     client_rules(&c,60,1,2); assert(strstr(sent,"\"nextRace\":\"host\"") && strstr(sent,"\"then\":\"random\""));
     client_rotation(&c,rotation,3); assert(strstr(sent,"[1,3,5]"));
@@ -339,6 +339,53 @@ int main(void)
         assert(!strstr(sent,"installId"));
         client_free(&c);
     }
+    {   /* The arena's scored round (finding 204): a finish carries its score only to a server that
+           lists "score" (an older one would rank the round by its length), a rejoin says it again,
+           and the room's scores reach the lobby copy (-1: none). */
+        const char *scored = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"MOSH22\",\"serverTime\":1000,"
+            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"features\":[\"sfu_silent\",\"race_go\",\"score\"]}";
+        const char *plain = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"MOSH22\",\"serverTime\":1000,"
+            "\"features\":[\"sfu_silent\",\"race_go\"]}";
+        const char *start = "{\"type\":\"start\",\"yourSlot\":1,\"track\":23,\"startAt\":5000,\"serverTime\":2000,\"players\":["
+            "{\"slot\":0,\"memberId\":0,\"name\":\"A\"},{\"slot\":1,\"memberId\":1,\"name\":\"Test\"}]}";
+        const char *back_in = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"MOSH22\",\"serverTime\":9000,"
+            "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"sfu\":\"ready\",\"race\":{\"startAt\":5000},"
+            "\"features\":[\"score\"]}";
+        const char *room = "{\"type\":\"room\",\"phase\":\"racing\",\"members\":["
+            "{\"id\":0,\"name\":\"A\",\"inRace\":true,\"raceState\":\"finished\",\"place\":1,\"score\":1350},"
+            "{\"id\":1,\"name\":\"Test\",\"inRace\":true,\"raceState\":\"racing\"},"
+            "{\"id\":2,\"name\":\"Late\",\"inRace\":false,\"raceState\":\"finished\",\"place\":2,\"score\":1000000}],"
+            "\"lastRace\":{\"id\":4,\"track\":23,\"entrants\":[{\"id\":0,\"name\":\"A\",\"rider\":1,\"place\":1,\"ticks\":7201,\"score\":900},"
+            "{\"id\":1,\"name\":\"Test\",\"rider\":2,\"place\":3,\"ticks\":7199,\"score\":0},"
+            "{\"id\":2,\"name\":\"Gone\",\"rider\":3,\"place\":4,\"dnfReason\":\"left\"}]}}";
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,plain,strlen(plain));
+        client_lobby(&c,&l);
+        assert(!l.server_scores);
+        client_on_text(&c,start,strlen(start));
+        client_finish(&c, 7200, 2, 1350);  /* a server without scores: the plain finish */
+        assert(!strcmp(sent,"{\"type\":\"finish\",\"ticks\":7200,\"place\":2}"));
+        client_free(&c);
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,scored,strlen(scored));
+        client_lobby(&c,&l);
+        assert(l.server_scores);
+        client_on_text(&c,start,strlen(start));
+        client_on_text(&c,room,strlen(room));
+        client_lobby(&c,&l);
+        assert(l.member_score[0] == 1350 && l.member_score[1] == -1 && l.member_score[2] == -1);  /* past six digits: none */
+        assert(l.member_score[3] == -1 && l.nresults == 3);
+        assert(l.result_score[0] == 900 && l.result_score[1] == 0 && l.result_score[2] == -1 && l.result_score[9] == -1);
+        client_finish(&c, 7200, 2, 1350);
+        assert(!strcmp(sent,"{\"type\":\"finish\",\"ticks\":7200,\"place\":2,\"score\":1350}"));
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_connected(&c,&t);
+        client_on_text(&c,back_in,strlen(back_in));
+        assert(!strcmp(sent,"{\"type\":\"finish\",\"ticks\":7200,\"place\":2,\"score\":1350}"));  /* said again */
+        client_free(&c);
+    }
     {   /* A drop in the race (finding 175): the race goes on (state, frames), the rejoin's hello
            names the race, the welcome keeps it racing and what the drop may have lost goes again;
            a refusal or the end of the attempts leaves it racing alone, offline. */
@@ -368,9 +415,9 @@ int main(void)
         assert(strstr(sent,"\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"raceStartAt\":5000}"));
         client_lobby(&c,&l);
         assert(l.state == NET_RACING);
-        client_finish(&c, 777, 2);
+        client_finish(&c, 777, 2, -1);
         assert(client_on_closed(&c,1006,"") == 1);
-        client_finish(&c, 777, 2);  /* said while the socket was down: lost */
+        client_finish(&c, 777, 2, -1);  /* said while the socket was down: lost */
         client_connected(&c,&t);
         client_on_text(&c,back_in,strlen(back_in));
         client_lobby(&c,&l);

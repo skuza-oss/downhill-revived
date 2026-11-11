@@ -26,7 +26,8 @@ function openP2p(url) {
 export function createNet({span, str, online = ONLINE_OFFERED, openSocket = openP2p}) {
   let base = 'wss://dhd.skuza.app', name = '', version = '', iso = '', ws;
   // goAt: the race's start moment from the room (race_go, finding 187); serverGo: the room takes ours.
-  let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {}, p2p = false, goAt = 0, serverGo = false;
+  // serverScore: the room ranks a round by score (finding 204).
+  let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {}, p2p = false, goAt = 0, serverGo = false, serverScore = false;
   let frames = [], timer;
   let error = '', errorCode = '';
   const send = m => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)); };
@@ -35,7 +36,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
   const me = () => room.members?.find(x => x.id === member);
   function connect(path) {
     if (!online || !path) { state = 5; error = 'Only P2P rooms are offered in the browser.'; seq++; return -1; }
-    ws?.close(); clearInterval(timer); state = 1; room = {}; start = {}; frames = []; welcome = {}; where = {}; p2p = false; goAt = 0; serverGo = false;
+    ws?.close(); clearInterval(timer); state = 1; room = {}; start = {}; frames = []; welcome = {}; where = {}; p2p = false; goAt = 0; serverGo = false; serverScore = false;
     ws = openSocket(base + path); ws.binaryType = 'arraybuffer';
     const socket = ws;
     ws.onopen = () => {
@@ -52,7 +53,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
       if(m.type==='ping') send({type:'pong',s:m.s});
       if(m.type==='pong' && m.t !== undefined) offset=m.serverTime-(now()+m.t)/2;
       if(m.type==='welcome') {member=m.memberId;state=2;room.code=m.code;offset=m.serverTime-now();welcome=m;p2p=m.transport==='p2p';
-        serverGo=(m.features||[]).includes('race_go');}
+        serverGo=(m.features||[]).includes('race_go');serverScore=(m.features||[]).includes('score');}
       if(m.type==='where') where=m;  // the room's region and the members' regions (finding 135)
       if(m.type==='room') {room=m;if(!me()?.inRace && m.phase)state=2;}
       if(m.type==='start') {start=m;state=3;frames=[];goAt=0;}
@@ -94,13 +95,17 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
       finish_window:rules.finishWindow??60,next_race:rules.nextRace==='host',then:rules.then==='same'?0:rules.then==='random'?2:1,
       rotation_count:room.rotation?.length||0,last_race_id:room.lastRace?.id||0,last_race_track:room.lastRace?.track||0,nresults:results.length,
       edge_colo:welcome.edgeColo||'',country:welcome.country||'',continent:welcome.continent||'',
-      room_colo:where.colo??welcome.roomColo??'',room_region:where.region??welcome.roomRegion??''});
+      room_colo:where.colo??welcome.roomColo??'',room_region:where.region??welcome.roomRegion??'',server_scores:serverScore});
     members.slice(0,10).forEach((m,i)=>write('NetMember',a+layout.NetLobby.member[0]+i*layout.NetMember.size,
       {...m,rtt_ms:m.rttMs??-1,in_race:!!m.inRace,race_state:m.raceState||'',dnf_reason:m.dnfReason||'',finish_ticks:BigInt(m.finishTicks??-1),
         region:where.members?.find(x=>x.id===m.id)?.region||''}));
     (start.players||[]).slice(0,10).forEach((m,i)=>write('NetRacer',a+layout.NetLobby.racer[0]+i*layout.NetRacer.size,{...m,member_id:m.memberId}));
     results.slice(0,10).forEach((m,i)=>write('NetResult',a+layout.NetLobby.result[0]+i*layout.NetResult.size,{...m,dnf_reason:m.dnfReason||'',ticks:BigInt(m.ticks??-1)}));
     span(a+layout.NetLobby.rotation[0],64).set((room.rotation||[]).slice(0,64));
+    // a scored round's scores (finding 204), -1 none, by member and by result
+    const scores=(at,list)=>{const b=span(a+at,40),d=new DataView(b.buffer,b.byteOffset,b.byteLength);
+      for(let i=0;i<10;i++){const v=list[i]?.score;d.setInt32(i*4,Number.isInteger(v)&&v>=0&&v<=999999?v:-1,true);}};
+    scores(layout.NetLobby.member_score[0],members); scores(layout.NetLobby.result_score[0],results);
   }
   const api = {
     host_service_net_init:(a,b,c,d)=>{base=a?str(a):base;name=str(b);version=str(c);iso=str(d);},
@@ -115,7 +120,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_start_race:()=>send({type:'start'}),
     host_service_net_end_race:()=>send({type:'end'}),
     host_service_net_race_go:at=>{if(serverGo&&state===3&&start.startAt&&at>0)send({type:'race_go',race:start.startAt,at});},  // finding 187
-    host_service_net_finish:(ticks,place)=>send({type:'finish',ticks:ticks>>>0,place}),
+    host_service_net_finish:(ticks,place,score)=>send({type:'finish',ticks:ticks>>>0,place,...(serverScore&&score>=0?{score}:{})}),
     host_service_net_back:()=>{send({type:'back'});state=2;frames=[];const m=me();if(m)m.inRace=false;seq++;},
     host_service_net_rules:(finishWindow,nextRace,then)=>send({type:'settings',finishWindow,nextRace:['auto','host'][nextRace],then:['same','next','random'][then]}),
     host_service_net_rotation:(a,n)=>{if(n>=0&&n<=64)send({type:'settings',rotation:[...span(a,n)].map(x=>x&31),trackLimits:[...span(a,n)].map(x=>10-2*(x>>5&3)),pickOnly:[...span(a,n)].filter(x=>x&128).map(x=>x&31)});},

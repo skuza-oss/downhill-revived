@@ -48,6 +48,17 @@ static void say(NetClient *c, const char *fmt, ...)
         c->tr.send_text(c->tr.ctx, text);
 }
 
+/* This game's finish (lock held): a scored round's carries its score (finding 204). Again after a
+   rejoin, in case the drop lost it. */
+static void say_finish(NetClient *c)
+{
+    if (c->finish_score >= 0)
+        say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d,\"score\":%d}", c->finish_ticks, c->finish_place,
+            c->finish_score);
+    else
+        say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d}", c->finish_ticks, c->finish_place);
+}
+
 /* dhd_net routes STATE to state and EVENT to events on the room SFU association;
    only binary PING/PONG use the WebSocket. The fake transport tests exercise the same API. */
 static void send_binary(NetClient *c, const uint8_t *data, size_t n)
@@ -203,6 +214,7 @@ static void read_room(NetClient *c, const char *t)
     l->last_race_id = json_int(t, "lastRace.id", &v) ? (int)v : 0;
     l->last_race_track = json_int(t, "lastRace.track", &v) ? (int)v : 0;
     n = json_count(t, "lastRace.entrants");
+    for (i = 0; i < NET_MAX_SLOTS; i++) l->result_score[i] = l->member_score[i] = -1;
     l->nresults = n < 0 ? 0 : n > NET_MAX_SLOTS ? NET_MAX_SLOTS : n;
     for (i = 0; i < l->nresults; i++) {
         NetResult *r = &l->result[i];
@@ -213,6 +225,7 @@ static void read_room(NetClient *c, const char *t)
         r->rider = json_int(t, RESULT("rider"), &v) ? (int)v : 0;
         r->place = json_int(t, RESULT("place"), &v) ? (int)v : 0;
         r->ticks = json_int(t, RESULT("ticks"), &v) ? v : -1;
+        l->result_score[i] = json_int(t, RESULT("score"), &v) && v >= 0 && v <= 999999 ? (int)v : -1;
         json_string(t, RESULT("name"), r->name, sizeof r->name);
         json_string(t, RESULT("dnfReason"), r->dnf_reason, sizeof r->dnf_reason);
 #undef RESULT
@@ -240,6 +253,7 @@ static void read_room(NetClient *c, const char *t)
         json_string(t, FIELD("raceState"), m->race_state, sizeof m->race_state);
         json_string(t, FIELD("dnfReason"), m->dnf_reason, sizeof m->dnf_reason);
         m->finish_ticks = json_int(t, FIELD("finishTicks"), &v) ? v : -1;
+        l->member_score[i] = json_int(t, FIELD("score"), &v) && v >= 0 && v <= 999999 ? (int)v : -1;
         m->place = json_int(t, FIELD("place"), &v) ? (int)v : 0;
         for (int k = 0; k < c->where_count; k++)
             if (c->where_id[k] == m->id) memcpy(m->region, c->where_region[k], sizeof m->region);
@@ -289,7 +303,7 @@ static void read_start(NetClient *c, const char *t)
             nslots = slot + 1;
     }
     l->nslots = nslots;
-    c->race_at = 0, c->finished = c->gave_up = 0;
+    c->race_at = 0, c->finished = c->gave_up = 0, c->finish_score = -1;
     /* the start's time on our clock */
     if (json_number(t, "startAt", &start_at)) {
         c->race_at = start_at;
@@ -539,12 +553,15 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         c->lobby.error_code[0] = c->lobby.error[0] = c->lobby.notice[0] = 0;
         c->rejoining = 0, c->rejoin_tries = 0;
         /* what the server takes beyond the protocol (finding 187; an older server lists nothing) */
-        c->server_race_go = 0;
+        c->server_race_go = c->server_scores = 0;
         for (int k = 0, count = json_count(text, "features"); k < count; k++) {
             char path[32], feature[24];
             snprintf(path, sizeof path, "features[%d]", k);
-            if (json_string(text, path, feature, sizeof feature) && !strcmp(feature, "race_go")) c->server_race_go = 1;
+            if (!json_string(text, path, feature, sizeof feature)) continue;
+            if (!strcmp(feature, "race_go")) c->server_race_go = 1;
+            if (!strcmp(feature, "score")) c->server_scores = 1;  /* finding 204 */
         }
+        c->lobby.server_scores = c->server_scores;
         double race_at = 0;
         int in_race = json_number(text, "race.startAt", &race_at) && race_at > 0 && race_at == c->race_at;
         if (c->racing || c->gave_up) {
@@ -554,7 +571,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             if (in_race && c->gave_up)
                 say(c, "{\"type\":\"back\"}");
             else if (in_race && c->finished)
-                say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d}", c->finish_ticks, c->finish_place);
+                say_finish(c);
         } else {
             c->lobby.state = NET_LOBBY;
             if (c->choosing)  /* after a reconnect: still on the rider screen */
@@ -932,11 +949,12 @@ void client_end(NetClient *c)
     SDL_UnlockMutex(c->lock);
 }
 
-void client_finish(NetClient *c, unsigned ticks, int place)
+void client_finish(NetClient *c, unsigned ticks, int place, int score)
 {
     SDL_LockMutex(c->lock);
     c->finished = 1, c->finish_ticks = ticks, c->finish_place = place;
-    say(c, "{\"type\":\"finish\",\"ticks\":%u,\"place\":%d}", ticks, place);
+    c->finish_score = c->server_scores && score >= 0 && score <= 999999 ? score : -1;
+    say_finish(c);
     SDL_UnlockMutex(c->lock);
 }
 
