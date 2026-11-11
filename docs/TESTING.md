@@ -61,7 +61,8 @@ after a version change before a live check.
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
 | `online/server`: `npm test` | the server's own tests |
-| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour |
+| `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour (below) |
+| `port/tools/state_trace_layout_test.py` | the state trace's own test (finding 205): `flips` (a rider word, a RAM word and a register changed in a run must be reported), `build-pad` then `layout` (a build whose core layout moved must give equal traces) |
 | `port/tools/room_tracks_check.py` | every track an online room offers loads and races: the state trace's race recipe with `DHD_RACE_SETUP=<track>` (headless, about two minutes a track); `--tracks 23,17` picks some (finding 203) |
 | `port/tools/test_scenery_rate.py` | the same race at 60, 144 and 240 (deterministic, headless): the helicopters', birds' and swooping attacker's speed in game time must match 60's (`DHD_SCENERY_TRACE`, finding 193); `--row N` / `--right N` pick the track (the chooser moved right N times; `--right` with every track unlocked) |
 | `port/tools/rate_audit.py` | words of EE memory that move once per update instead of once per field, from a 60 and a high-rate run (finding 090, FPS1); `--row`, `--skip`, `--samples` pick the race and its window |
@@ -73,6 +74,33 @@ after a version change before a live check.
 | `port/tools/replay_check.py` | a race and its replay, headless (`--fps N`, `--paced --slow MS,JITTER`): every rider's position each field; the replay must be the race (finding 142) |
 | `port/tools/audio_race_compare.py` | one race's sound in PCSX2 (an SPU2 capture hook) and in the port, compared by level and by voice (finding 133) |
 | `port/tools/rustgs.py test --target x86_64-pc-windows-msvc -- --test native_spirv` | the native and the exact renderer's SPIR-V for every pipeline stage (raster.wgsl for every raster key too), made as wgpu-hal's Vulkan backend makes it, with no texture passed into a function (Mali's r54 compiler crashes on that, finding 153) and none of the forms LLVM 9 turns into `llvm.usub.sat`, `llvm.uadd.sat` or a funnel shift (PowerVR Rogue's driver 1.13 crashes on them, finding 170). `DHD_SPIRV_OUT=DIR` keeps the `.spv` files; with `DHD_MALIOC` every stage is also compiled by malioc for `DHD_MALIOC_CORE` (default `Mali-G57`); `DHD_NATIVE_WGSL=FILE` (`DHD_RASTER_WGSL=FILE`) compares another native.wgsl (raster.wgsl) |
+
+## The state trace
+
+The gate for a change that must not change the game (finding 081, the trace as it is since 205):
+the same recipe on the base build and on the changed one, headless and deterministic, then
+
+    python port/tools/state_trace_run.py race3 --name base-race3 --exe BASE/dhd64.exe
+    python port/tools/state_trace_run.py race3 --name new-race3
+    python port/tools/state_diff.py build/state-trace/base-race3.tsv build/state-trace/new-race3.tsv
+
+`state_diff.py` must print PASS: every row equal. Recipes: `boot` (the menus, 600 fields),
+`race` (the first track with the steering pad, 5000 fields), `race2` to `race6` (the other five
+unlocked tracks, the full-pedal pad, 14000 fields each; there is no `race1`, `race` is the first
+track), `split` (a two-player race) and `memcard` (save, then load). A change that can touch game
+state runs at least `boot` and `race`; a change to code every track runs (loading, riders, a track's
+own patch) runs `race2` to `race6` too. Both traces must come from the same trace format: the first
+line says `state-trace 2`; a trace of format 1 (before finding 205) does not compare with it, so
+regenerate a stored reference with its own executable.
+
+The trace compares game state, not the core's layout: a register lane that holds a value in the
+core's ranges is compared by raw value or by what it points at (the `regptrs` column), and nothing
+the HLE gives the game points into the core's own data. A difference is therefore a difference
+of the game; `state_diff.py --dumps-a/--dumps-b` with `--dump FIELD` runs names the words.
+A change to the trace itself or to its lists (`state_trace_codeptrs.txt`, `state_trace_mask.txt`)
+runs `state_trace_layout_test.py flips` and `build-pad` then `layout`: a trace that misses a real
+change, or that differs only because the core's layout moved, fails there. The lists are part of
+the trace: two traces compare only when both runs used the same lists.
 
 A typical in-game check:
 
