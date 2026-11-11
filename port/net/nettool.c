@@ -3,7 +3,7 @@
    stays in it for --seconds, counting the others' frames; then it prints a RESULT line and leaves.
 
    usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]
-                  [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]
+                  [--replay FILE --rider N] [--bike A,B,C] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S]
                   host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list
    --p2p makes a P2P room (finding 180); a join goes to a P2P room when its code has 7 characters.
    The server is --server or DHD_NET_SERVER (ws://127.0.0.1:8787 for wrangler dev). With the
@@ -79,6 +79,15 @@ static int resend_rider(const uint8_t *in, int n, int rider, int as, float dx)
     return 0;
 }
 
+/* A SETUP event's rider and bike (the 30-byte form: no colour): --bike A,B,C picks the bike's three
+   words, as a shop's choice (default 8 3 0). */
+static int bike_words[3] = {8, 3, 0};
+static void put_ride(uint8_t *e, int rider)
+{
+    put32(e + 2, 0x20 * (rider + 1)), put32(e + 6, rider);
+    for (int k = 0; k < 3; k++) put32(e + 18 + 4 * k, bike_words[k]);
+}
+
 static int replay(const char *path, int slot, int rider, double seconds)
 {
     static uint8_t data[1 << 22];
@@ -95,7 +104,7 @@ static int replay(const char *path, int slot, int rider, double seconds)
     e[1] = EVENT_LOADED;
     net_send_frame(NET_FRAME_EVENT, e, 2);
     e[1] = EVENT_SETUP;
-    put32(e + 2, 0x20 * (rider + 1)), put32(e + 6, rider), put32(e + 18, 8), put32(e + 22, 3);
+    put_ride(e, rider);
     net_send_frame(NET_FRAME_EVENT, e, sizeof e);
     while (net_seconds() < until && !results) {
         while ((n = net_receive_frame(frame, sizeof frame)) > 0)
@@ -160,6 +169,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--follow-host")) follow_host = 1;
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc) replay_file = argv[++i];
         else if (!strcmp(argv[i], "--rider") && i + 1 < argc) rider = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--bike") && i + 1 < argc)
+            sscanf(argv[++i], "%d,%d,%d", &bike_words[0], &bike_words[1], &bike_words[2]);
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--pick") && i + 1 < argc) pick = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ready-after") && i + 1 < argc) ready_after = atof(argv[++i]);
@@ -174,7 +185,7 @@ int main(int argc, char **argv)
     }
     if (!mode || (!strcmp(mode, "join") && !code)) {
         printf("usage: nettool [--server URL] [--name NAME] [--seconds S] [--version V --iso SHA256]\n"
-               "               [--replay FILE --rider N] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
+               "               [--replay FILE --rider N] [--bike A,B,C] [--pick N] [--ready-after S] [--races N] [--echo-ai] [--finish-after S | --give-up-after S] host [--players N] [--code-file PATH] [--public | --p2p] | join CODE | list\n");
         return 2;
     }
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -232,7 +243,7 @@ int main(int argc, char **argv)
                 printf("RACE %d slot %d\n", started_count, l.local_slot);
                 /* its rider and bike, as replay() says them: the games' setup needn't wait 30 s for this one */
                 uint8_t e[30] = {EVENT_VERSION, EVENT_SETUP};
-                put32(e + 2, 0x20 * (rider + 1)), put32(e + 6, rider), put32(e + 18, 8), put32(e + 22, 3);
+                put_ride(e, rider);
                 net_send_frame(NET_FRAME_EVENT, e, sizeof e);
             }
             was_racing = l.state == NET_RACING;
@@ -242,7 +253,7 @@ int main(int argc, char **argv)
                    (NET_RELAY_QUEUE), and a burst of bots' messages can push a rider's one out. Every
                    2 s: a game sends each once, so a room of bots must not flood the slow loaders. */
                 uint8_t e[2] = {EVENT_VERSION, EVENT_LOADED}, ride[30] = {EVENT_VERSION, EVENT_SETUP};
-                put32(ride + 2, 0x20 * (rider + 1)), put32(ride + 6, rider), put32(ride + 18, 8), put32(ride + 22, 3);
+                put_ride(ride, rider);
                 net_send_frame(NET_FRAME_EVENT, ride, sizeof ride);
                 net_send_frame(NET_FRAME_EVENT, e, 2);
                 loaded_at = now;
