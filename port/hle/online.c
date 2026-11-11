@@ -1422,6 +1422,18 @@ static void state_sync(void)
         }
     }
     if (!race_running() || clock == on.last_sent) return;
+    {   /* DHD_NET_TEST_HITCH=S:MS (tests, finding 202): once, at race second S, this game's thread
+           stops MS ms (a hitch): the others must hold its riders (HOLD), not ride them on */
+        static HleEnv hitch_env;
+        static int hitched;
+        const char *hitch = hle_env(&hitch_env, "DHD_NET_TEST_HITCH");
+        double at, ms;
+        if (hitch && !hitched && sscanf(hitch, "%lf:%lf", &at, &ms) == 2 && port_field_seconds(clock) >= at) {
+            hitched = 1;
+            fprintf(stderr, "online: test hitch of %.0f ms at race tick %d\n", ms, clock);
+            for (double end = host_wall_seconds() + ms / 1000; host_wall_seconds() < end;) host_sleep_ms(5);
+        }
+    }
     int ai = clock >= on.last_ai_sent + AI_SNAPSHOT_TICKS || clock < on.last_ai_sent;
     on.last_sent = clock;
     if (ai) on.last_ai_sent = clock - clock % AI_SNAPSHOT_TICKS;

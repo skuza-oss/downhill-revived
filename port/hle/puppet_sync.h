@@ -35,6 +35,7 @@
                                   has been moving the puppet away since), at most this long */
 #define SYNC_COAST 1.0         /* s without a snapshot: the puppet stops riding on its owner's last
                                   inputs (puppet.c) */
+#define SYNC_START_WAIT 2.0   /* s after GO: a puppet whose snapshots have not begun is this game's AI */
 #define SYNC_RESYNC 12.0f      /* game units (about 0.13 s of riding): a larger error is a jump */
 #define SYNC_CARRY_MAX 0.25    /* s: a re-sync carries a snapshot at most this far */
 enum { SYNC_HISTORY = 512 };   /* steps: about 2 s at 240 steps a second */
