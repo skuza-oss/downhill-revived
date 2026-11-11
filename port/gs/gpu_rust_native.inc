@@ -37,7 +37,7 @@ void gs_picture_rect(int left, int top, int right, int bottom, int w, int h);  /
 
 static NativeView native_replacement_view(Native *n, NativeTexture *t)
 {
-    return t->pack ? texpack_view(t->pack, n->field) : t->sharp;
+    return t->sharp ? t->sharp : t->pack ? texpack_view(t->pack, n->field) : NULL;
 }
 
 /* ---- render thread (context lock held) ---- */

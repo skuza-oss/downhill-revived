@@ -11,11 +11,23 @@ int font_sharp_on(void);
    (D_004F35B0, func_00210068 and func_00210250). Reads EE memory, writes none. */
 int font_sharp_match(uint64_t tex0);
 
+/* A texture pack's replacement of the font (texpack.c): load reads its picture, w x h RGBA with
+   alpha in GS units, malloc'd (NULL when it can't), when the copy is made from it. */
+typedef struct FontSharpPack {
+    uint8_t *(*load)(void *context, unsigned *w, unsigned *h);
+    void *context;
+} FontSharpPack;
+
 /* A high-resolution version of a decoded font texture (w x h GS colours, alpha 0x80 opaque), made
    in memory only, by device: a new reference to it (device->release when done), or NULL. key
    names the decoded texture; the last few are kept, so decoding the same font again costs
-   nothing. One device per process. */
-void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h, uint64_t key);
+   nothing. One device per process.
+   pack: the texture pack's replacement of this texture, or NULL. With one the copy is made only
+   for the menus' atlas with other button icons than the game's: the pack's picture with the icons
+   painted over it (finding 200), drawn in place of the pack's (from the game's font as without a
+   pack if the picture can't be read); otherwise NULL, and the pack's own is drawn. */
+void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h, uint64_t key,
+                      const FontSharpPack *pack);
 
 /* The button icons (button_icons.c, finding 134; native builds only): style says which icons the
    menus' atlas gets now (0 the game's own), paint puts them into the copy. Without them (the

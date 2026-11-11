@@ -56,6 +56,7 @@ void controls_settings_change(MenuPage *p, int row, int step);
 int controls_settings_accept(MenuPage *p, int row);
 void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
+void port_unlock_refresh(void);       /* patches_unlock.py: the lobby's rider statues follow Unlock All */
 
 enum { ROWS = 22, MAX_CHOICES = 16 };
 
@@ -106,7 +107,9 @@ static char monitor_size[24];
 /* Unlock All (dhd.ini "unlock_all", DHD_UNLOCK_ALL): the game's unlock checks answer as if
    everything were unlocked, while it is on: tracks, riders and pro riders, sponsor rows, the
    shop's items and the preset bikes (patches.py's track mask, patches_unlock.py; finding 095).
-   The save's own unlocks are never written, so turning it off brings them back. */
+   The save's own unlocks are never written, so turning it off brings them back. A change here
+   applies at once: commit calls port_unlock_refresh (patches_unlock.py), which brings the lobby's
+   rider statues, the one unlock state the front end keeps, up to date (finding 200). */
 int port_unlock_all(void)
 {
     static HleEnv env;
@@ -350,6 +353,7 @@ static void commit(Row *r, int apply)
     else if (r == &rows[SHAPE] || r == &rows[SCALING] || r == &rows[COUNTER] || r == &rows[NATIVE_VU])
         host_service_gs_present_options_apply();
     else if (r == &rows[VIBRATION]) host_service_host_pad_vibrate(0, 0, 0);
+    else if (r == &rows[UNLOCK]) port_unlock_refresh();
 }
 
 static void change(int index, int step)

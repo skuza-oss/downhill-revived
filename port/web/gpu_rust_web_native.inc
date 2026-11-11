@@ -47,6 +47,7 @@ void pacing_present(double due, double began) { (void)due; (void)began; }
 typedef struct TexPackEntry TexPackEntry;
 TexPackEntry *texpack_find(const Gs *g, unsigned ctxt) { (void)g; (void)ctxt; return NULL; }
 void *texpack_view(TexPackEntry *e, uint64_t field) { (void)e; (void)field; return NULL; }
+uint8_t *texpack_image(TexPackEntry *e, unsigned *w, unsigned *h) { (void)e; *w = *h = 0; return NULL; }
 void texpack_field(uint64_t field) { (void)field; }
 void texpack_report(void) {}
 
