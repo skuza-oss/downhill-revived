@@ -270,6 +270,7 @@ int hle_puppet_hits_taken(void);
 int hle_puppet_global(int slot), hle_puppet_local(int global), hle_puppet_owned(int slot);
 void hle_puppet_start(void);
 void hle_puppet_go(double go_server_ms);
+double hle_puppet_clock_excess(void);
 extern int func_001FA7C0(int frame);                      /* a frame's own colour (the shop's first BIKE COLOR) */
 extern void func_001B45F8(void *timer, int kind, int ticks);  /* the race-end countdown */
 
@@ -1350,8 +1351,10 @@ static void send_snapshots(int ai)
     if (!count) return;
     /* The moment the snapshots show, on the server clock: our GO there plus the race time. Not
        the clock at packing: the race clock may trail the wall clock by a few ms (pacing), and the
-       pose is the race clock's (finding 169). */
-    double stamp = on.go_server ? on.go_server + port_field_seconds(RACE_CLOCK) * 1000 : host_service_net_server_ms();
+       pose is the race clock's (finding 169). When it trails by more (below 30 fps, catching up
+       after a hitch), that much more: the pose happened then (puppet_sync.h, finding 202). */
+    double stamp = on.go_server ? on.go_server + (port_field_seconds(RACE_CLOCK) + hle_puppet_clock_excess()) * 1000
+                                : host_service_net_server_ms();
     if (slots[0] == 0) {  /* DHD_NET_RECORD: this PC's rider alone, as a bundle of one */
         int one_size;
         if (state_bundle_pack(recs, size, 1, stamp, bundle, &one_size)) record(bundle[0], one_size);

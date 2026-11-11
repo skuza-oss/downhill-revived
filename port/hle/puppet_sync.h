@@ -30,6 +30,15 @@
 #define SYNC_RESYNC 12.0f      /* game units (about 0.13 s of riding): a larger error is a jump */
 #define SYNC_CARRY_MAX 0.25    /* s: a re-sync carries a snapshot at most this far */
 enum { SYNC_HISTORY = 512 };   /* steps: about 2 s at 240 steps a second */
+#define SYNC_CLOCK_SLACK 0.05  /* s of a race clock's lag behind the wall clock that are normal */
+
+/* Online the race clock keeps the time it could not step (below 30 frames a second, a hitch)
+   and catches up later (finding 139), so meanwhile it trails the wall clock by that much (owed,
+   seconds). A snapshot's stamp is the moment its pose happened on the shared clock: the sender's
+   GO there plus its race time plus what its clock trails beyond the normal pacing lag; a receiver
+   places it on its own race clock less what its own clock trails. A game that falls behind then
+   shows the others where they are, and is shown where it is, not seconds in the past or future. */
+static inline double sync_clock_excess(double owed) { return owed > SYNC_CLOCK_SLACK ? owed - SYNC_CLOCK_SLACK : 0; }
 
 typedef struct SyncPose {
     float pos[3], vel[3];
