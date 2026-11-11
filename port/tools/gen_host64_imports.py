@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Native host services that take host C function pointers or return host pointer
 # arrays. The module calls their guest-safe forms (host_callback_*, host_stack_ranges_copy).
 NATIVE_ONLY = {'host_fiber_create', 'host_thread_detach', 'host_fault_guard',
-               'host_memory_regions', 'host_heartbeat_start', 'host_stack_ranges'}
+               'host_heartbeat_start', 'host_stack_ranges'}
 
 
 def split_args(text):
@@ -186,8 +186,7 @@ def generate(header, out, api=ROOT / 'port/host/host_api.h', linux=False):
         # All callback shapes in host_api.h are declared here, and validated
         # against the actual table at invocation (including after mutation).
         # Every callback gets the guest ctx first (host_api.h, host_callback_*).
-        shapes = [('void_arg', 'void', ['u32']), ('fault', 'u32', ['u32', 'u32']),
-                  ('region', 'void', ['u32', 'u32', 'u32', 'u32'])]
+        shapes = [('void_arg', 'void', ['u32']), ('fault', 'u32', ['u32', 'u32'])]
         for label, ret, args in shapes:
             sig = ', '.join(['struct w2c_env *e', 'u32 index'] + [f'{t} a{i}' for i, t in enumerate(args)])
             types = ', '.join(['WASM_RT_I32'] * (len(args) + (ret != 'void')))
@@ -204,8 +203,8 @@ def generate(header, out, api=ROOT / 'port/host/host_api.h', linux=False):
 static void start_callback(void *p) {
     Start s=*(Start *)p; free(p); call_void_arg(s.env,s.index,s.arg);
 }
-static struct w2c_env *fault_env, *beat_env, *region_env;
-static u32 fault_index, beat_index, region_index, fault_ctx, beat_ctx, region_ctx;
+static struct w2c_env *fault_env, *beat_env;
+static u32 fault_index, beat_index, fault_ctx, beat_ctx;
 static int fault_callback(uint32_t at) { return call_fault(fault_env,fault_index,fault_ctx,at); }
 /* Producers never enter wasm, touch its stack pointer, or validate its table.
    Capture only immutable callback identity; table validation happens on drain. */
@@ -246,12 +245,6 @@ static void drain_pending(void) {
         host_fiber_switch(f); host_fiber_delete(f); free(p); p=next;
     }
     draining=0;
-}
-static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
-    /* Host process addresses have no wasm32 representation. Reject rather
-       than silently truncate diagnostic values. */
-    if (lo>UINT32_MAX || hi>UINT32_MAX) wasm_rt_trap(WASM_RT_TRAP_OOB);
-    call_region(region_env,region_index,region_ctx,(u32)lo,(u32)hi,(u32)host);
 }''']
     for _, name, ret, sym, params in imports:
         r, args = declarations[name]
@@ -330,12 +323,10 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
                      '    Start *s=malloc(sizeof *s); if (!s) return 0;',
                      '    *s=(Start){e,a0,a1};',
                      '    int id=host_fiber_create(start_callback,s); if (!id) free(s); return (u32)id;']
-        elif name in ('host_callback_fault_guard', 'host_callback_heartbeat', 'host_callback_memory_regions'):
+        elif name in ('host_callback_fault_guard', 'host_callback_heartbeat'):
             label, native, shape = {
                 'host_callback_fault_guard': ('fault', 'host_fault_guard', '2,1,WASM_RT_I32,WASM_RT_I32,WASM_RT_I32'),
-                'host_callback_heartbeat': ('beat', 'host_heartbeat_start', '1,0,WASM_RT_I32'),
-                'host_callback_memory_regions': ('region', 'host_memory_regions',
-                                                 '4,0,WASM_RT_I32,WASM_RT_I32,WASM_RT_I32,WASM_RT_I32')}[name]
+                'host_callback_heartbeat': ('beat', 'host_heartbeat_start', '1,0,WASM_RT_I32')}[name]
             # Validate now (the type, the index), and again at every invocation.
             code += [f'    (void)callback(e,a0,wasm2c_core_get_func_type({shape}));',
                      f'    {label}_env=e; {label}_index=a0; {label}_ctx=a1;',

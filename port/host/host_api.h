@@ -118,10 +118,6 @@ void host_callbacks_drain(void);
 /* ---- threads: a fire-and-forget job (online_menu.c) ---- */
 int host_thread_detach(void (*fn)(void *), void *arg);  /* 1 if the thread started */
 
-/* ---- the host process's memory regions (state_trace.c, opt-in: DHD_STATE_NORM=host) ---- */
-/* Calls visit for each region [base, end) of the address space from 0x10000 up, with host_memory set
-   for memory the host itself holds (not free, and not the program's own image). */
-void host_memory_regions(void (*visit)(uintptr_t base, uintptr_t end, int host_memory));
 /* The host executable's code section (dhd.exe's .text), for the state trace's code pointers. */
 void host_code_range(uintptr_t *lo, uintptr_t *hi);
 
@@ -130,7 +126,7 @@ void host_heartbeat_start(void (*beat)(void));  /* once: a host thread calls bea
 uintptr_t host_heartbeat_eip(void);  /* where the thread that started the heartbeat is now (a host code address); 0 if unknown */
 
 /* ---- callbacks into the module, guest-safe (finding 082, W7g) ----
-   The module calls these, never the five function-pointer services above; the generated
+   The module calls these, never the four function-pointer services above; the generated
    boundary (gen_host64_imports.py) implements them. fn is a module function as a 32-bit value
    (HOST_CALLBACK: its table index in wasm) and ctx a guest value that the host passes back
    unchanged as fn's first argument. The host runs
@@ -140,7 +136,6 @@ uintptr_t host_heartbeat_eip(void);  /* where the thread that started the heartb
 HostFiber host_callback_fiber(uint32_t fn, uint32_t ctx);          /* void fn(ctx) */
 int host_callback_detach(uint32_t fn, uint32_t ctx);               /* void fn(ctx); 1 if started */
 int host_callback_fault_guard(uint32_t fn, uint32_t ctx);          /* int fn(ctx, address) */
-void host_callback_memory_regions(uint32_t fn, uint32_t ctx);      /* void fn(ctx, base, end, host_memory) */
 void host_callback_heartbeat(uint32_t fn, uint32_t ctx);           /* void fn(ctx) */
 /* host_stack_ranges as guest data: up to max [low, high) pairs of 32-bit addresses at out. */
 int host_stack_ranges_copy(uint32_t out, int max);
