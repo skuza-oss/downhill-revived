@@ -229,6 +229,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 196 | [smooth bilinear sprites at high resolution scale](196-native-rt-texture-scale.md) | current |  |
 | 197 | [the phone's vertex loops and palette path, Native VU off](197-phone-speed-2.md) | current |  |
 | 198 | [Native VU is the default](198-native-vu-default.md) | current |  |
+| 199 | [Native VU in the browser](199-native-vu-browser.md) | in progress |  |
 | 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | current |  |
 | 201 | [PowerVR GE8322 (driver 1.18) closes at the first picture's submit](201-powervr-ge8322-submit.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
