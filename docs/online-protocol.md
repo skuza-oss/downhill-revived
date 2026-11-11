@@ -480,7 +480,7 @@ sent every race tick (60 a second), AI riders every second tick (30 a second).
 
 A record: the rider's global id (u8: a human's lobby slot, an AI rider's slot), the sender's race
 time (i32 ms since its GO), position, orientation (3 rows), velocity and angular velocity (f32 x 3
-each), the wheels (4 f32), the wheel contacts (2 u8), the State (u16), crash flags and kind,
+each), the rider's power (f32: 1, an AI rider's catch-up eased, finding 202) and 12 reserved bytes (zero; the wheels' spin until finding 202, which a puppet's physics now makes), the wheel contacts (2 u8), the State (u16), crash flags and kind,
 checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad words as index (u8)
 and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
 all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom
@@ -490,6 +490,15 @@ pad mirror. A receiver places a bundle on its own race clock by the stamp less i
 its own race clock trails beyond 50 ms; the record's race time against the stamp tells it how fast
 the sender's race clock runs (`port/hle/puppet_sync.h`). EVENT remains payload version 2. The SFU
 reads none of the gameplay payload.
+
+HOLD (finding 202) travels on the STATE channel too, 11 bytes: version 7, index 9 (the last the
+transport takes; a tick's bundles use at most 0-2), 0 riders, then the f64 stamp of the sender's last bundle. A game's network thread,
+which runs on while the game's own thread does not, sends it every 100 ms once no bundle has gone
+out for three of its usual gaps (at least 60 ms) in a race: "no snapshot of mine since this
+moment". Receivers stop that sender's riders where they are until its bundles come again and its
+rider has caught up with them (`port/hle/puppet.c` `hold`). A game that does not know HOLD drops
+it (it checks the bundle version), so it needs no protocol change; the SFU and the P2P star
+forward it as any STATE message.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
 EVENT is unaffected. `DHD_NET_SFU_DROP_IN=N` drops N percent of the DTLS records arriving from the
