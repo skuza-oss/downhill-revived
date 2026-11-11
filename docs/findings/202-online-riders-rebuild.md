@@ -394,13 +394,15 @@ Counts (re-syncs of riders not after a crash, first 5 s after GO, both games of 
 
 | final, merged (97af3a94) | 10 | 1 of 20 | 5 | none |
 | final on the bad link | 2 | 2 of 4 | 5 | none |
-| the start's 1.5 s without jumps (last commit) | STARTS_Y |
+| the start's 1.5 s without jumps (f5719524) | 5 | 0 of 10 | 0 | none |
+| f5719524 on the bad link | 2 | 1 of 4 | 2 | none |
 
 The one 80 ms start left with early re-syncs (final build): at 0.6 s four AI puppets nearly
 standing (5 units a second against their owners' 31-34, the start's push-off) were jumped 13-15
 units; the last commit makes the start's first 1.5 s a quick start instead (no jump under 36
-units: the speed guard gives the owner's speed, the slide closes the gap). On the bad link the
-rest are the AI line (below) and snapshots 215-250 ms old after an outage.
+units: the speed guard gives the owner's speed, the slide closes the gap); its five starts had
+none. On the bad link the rest are two AI riders at 3.7 s, at their owners' speeds (141/139,
+129/130) 12-20 units off on snapshots 203 ms old: the AI line (below) through an outage.
 
 **Not met:** the lead's acceptance (no re-sync in the first 5 s unless a rider respawned) is not
 reached. What is left, from the logs:
