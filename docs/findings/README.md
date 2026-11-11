@@ -233,6 +233,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | current |  |
 | 201 | [PowerVR GE8322 (driver 1.18) closes at the first picture's submit](201-powervr-ge8322-submit.md) | current |  |
 | 203 | [Online MOSH PIT closes the game at the race start (issue #84)](203-online-mosh-start.md) | in progress |  |
+| 205 | [a state trace that does not depend on the core's layout](205-state-trace-core-layout.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
