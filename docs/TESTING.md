@@ -98,6 +98,8 @@ with every AI slot a puppet of its recorded rider, sent through a seeded bad lin
         --link "delay=150,jitter=30,loss=2,reorder=2,seed=3" --fps 60      # prints the scores
     python port/tools/puppet_bench.py --label mine matrix --tracks 0,1,2   # every scenario: results.md
     python port/tools/puppet_bench.py --label mine matrix --rescore        # score saved traces again
+    python port/tools/puppet_bench.py clip --track 1 --slot 2 --at 22 --link "delay=150,jitter=30" \
+        --name mx-150 --out OUTSIDE_THE_REPO                               # truth | puppet, 4x, mp4
 
 Every game runs on the hidden desktop at the frame clock (about 7x real time), untimed: the
 numbers are positions on the race clock, not speed. `--env DHD_PUPPET_MAP=0:1` replays the

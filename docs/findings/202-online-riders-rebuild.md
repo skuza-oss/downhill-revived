@@ -92,6 +92,26 @@ owner's complaint: the straight-line carry leaves the ground at every landing, d
 grows with the time carried), and every snapshot moves the prediction, which the 80 ms fade shows
 as a jolt.
 
+### Live races (two games, local server, real SFU, `DHD_NET_LINK` on both)
+
+`python port/tools/local_server.py -- python port/tools/online_race.py --hidden --lag --link
+"delay=80,jitter=20,loss=2,reorder=2,seed=21" --a DHD_NET_TEST_FINISH=70 --b DHD_NET_TEST_FINISH=72`
+(this PC, both games on the hidden desktop at 60, eight host AI riders; v6, then the same with a
+second seed and `--a DHD_PUPPET_FROM=all` so the host also recorded its AI riders):
+
+- Results equal on both games in both races (1:10.03 / 1:12.03; 0:40.03 / 0:42.03).
+- Hits: the guest's punch landed and was applied by the host's game (`hit kind 0 ... event from
+  player 1`).
+- Snapshot age on arrival 122-161 ms (the link's 80 ms plus jitter plus the SFU).
+- Each player's rider as the other game draws it (`puppet_lag.py`): race 1 p50/p95/p99 0.29 /
+  1.60 / 2.74 and 0.20 / 0.72 / 1.43 units, race 2 0.24 / 1.09 / 2.39 and 0.09 / 1.09 / 2.97
+  units; drawn at the present (lag p50 0 ms). Finding 169's prediction measured 0.18-0.25 /
+  1.0-1.5 on a link with a quarter of this age.
+- The guest's AI puppets against the host's AI riders: 0.71 / 3.11 / 4.96 units, wheels below
+  -0.15 in 3.5 % of steps (the real riders' own: 3.3 %).
+- Re-syncs: after crashes (respawns), the host's own stuck-rider recovery (Surprises), and once
+  three AI riders 0.6 s after GO.
+
 ## Decisions
 
 - **Gate:** passed on the bench; the rebuild went ahead.
@@ -153,6 +173,33 @@ as a jolt.
   synchronisation, the receiver simulates and applies the sender's state with smoothing); Jared
   Cone, "It IS Rocket Science! The Physics of Rocket League Detailed" (GDC 2018: other cars
   simulated with their last inputs between server states). No code taken.
+
+### What is not fixed, and what would fix it
+
+- **A sender whose game stops (a hitch).** v8 on track 0: a 0.8 s stop, error p50/p95/p99 0.44 /
+  2.5 / 16.4 units (today 0.97 / 3.5 / 8.4); 3 s behind, 0.50 / 7.8 / 114 (today 1.0 / 6.2 / 23).
+  The tail is the stop itself: the sender's rider stands still on its own screen while the
+  receiver hears nothing, and the receiver cannot tell a stopped game from lost packets. The
+  puppet rides on for up to 1 s (`SYNC_COAST`), then brakes; when the snapshots return it is put
+  back (a re-sync). Today's model froze after 0.25 s, so its error was smaller there, but it froze
+  in every loss too (outages: today p99 27.8, v8 7.9). Braking earlier traded the common case for
+  the rare one (v9, Decisions). What would fix it: the sender's network thread (it keeps running
+  while the game thread hitches) sending "no game frame since T" in place of STATE, so receivers
+  hold the rider at once; a protocol addition, not made here. The catch-up afterwards is followed
+  (the sender's clock rate, Decisions).
+- **The shared clock 40 ms off** draws a rider about 4 units off either way (v8: 3.9 p50, today 4.0):
+  a snapshot placed 40 ms wrong is a pose 40 ms of riding (95 units a second) off, whatever draws
+  it. Not fixed: it is the clock's error, not the drawing's. Live the offset is a few ms (race 1:
+  the GOs 6.3 ms apart on the shared clock, the puppets 0.2-0.3 units off at p50), since finding
+  169/175's rule (only round trips near the quickest move the offset). What would fix the rest: each
+  pair of players exchanging how old they find each other's snapshots; half the difference is
+  their clocks' offset (independent of the server).
+- **150 ms: closer, not only smoother.** v5 drew riders on the ground and without jumps but no
+  closer at the tail (p95 6.1, p99 9.3 against today's 5.85 / 8.0). Carrying the velocity
+  difference to now (v6) made them closer: v8 1.07 / 4.71 / 7.2 (track 0). For a player's rider
+  (from the pad, 60 a second) v6 measured 0.28 / 1.39 / 2.43 against today's 0.61 / 3.46 / 5.72.
+  What is left is what nobody can know 150 ms early: a turn, a brake or a bump begun since the last
+  snapshot; the puppet keeps its owner's last inputs, which is the best guess.
 
 ## Surprises
 
