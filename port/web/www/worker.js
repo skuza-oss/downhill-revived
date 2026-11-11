@@ -354,7 +354,7 @@ host_service_net_get_lobby host_service_clipboard_set host_service_controls_map`
     post('exit', { status });
     return;
   }
-  const renderer = await startRenderer(memory, m.canvas, say);
+  const renderer = await startRenderer(memory, m.canvas, say, env);
   say(`WebGPU: ${renderer.adapter} (${renderer.version})`);
   // The reactor's WASI needs: its environment, stderr, nothing else. The environment is the core's
   // as it is now (the reactor reads it again when it makes the native renderer, after the core's

@@ -11,26 +11,32 @@ GraphicsProvenance graphics_provenance;
 volatile uint32_t gs_presented_frames;
 uint64_t kernel_vsync_count;
 int hle_verbose;
+/* As kernel.c's natively (dhd.log): every line, to the page's log. The reactor's callers are VIF1's
+   rare or diagnostic lines and Native VU's (vu1_mesh.inc: one line at each change of the setting). */
 void hle_log(const char *fmt, ...) {
-    if (!hle_verbose) return;
     va_list ap; va_start(ap,fmt); vfprintf(stderr,fmt,ap); va_end(ap);
 }
 double host_seconds(void) { return host_wall_seconds(); }
 #ifndef DHD_WEB_VU
 void graphics_gif_feed(unsigned path,const uint32_t *words,unsigned count) {
     if(!count)return; /* Native FIFO's while(count) never emits an empty packet. */
+    /* as gs_queue.inc's gs_execute: a shadow batch's kick (vif.c's flag; the threaded build's
+       web_queue.c sets it from the packet) and a translated mesh batch (Native VU, vu1_mesh.inc) */
+    gs_vu_shadow = graphics_provenance.shadow;
+#define WEB_GS_EXECUTE() (path == GS_PATH_MESH ? gs_mesh(&gs,words,count) : gs_feed(&gs,path,words,count))
     /* The FP mode of native's GS worker (gs_queue.inc gs_consume sets (csr|0x1f80)&~(63|0xe040):
        round to nearest, no FTZ/DAZ). XGKICK calls in here from VU1 under the VU mode (toward
        zero, FTZ, DAZ), so without this the GS front end's float math (draw setup) ran in a mode
        native never uses, through the slow round-toward-zero helpers of float.c/double.c. */
 #ifdef PS2_VU_IEEE  /* the reactor's float ops are plain IEEE ones (build_graphics.py): no mode */
-    gs_feed(&gs,path,words,count);
+    WEB_GS_EXECUTE();
 #else
     unsigned csr=host_fp_csr();
     host_fp_set_csr((csr|0x1f80u)&~(63u|0xe040u));
-    gs_feed(&gs,path,words,count);
+    WEB_GS_EXECUTE();
     host_fp_set_csr(csr);
 #endif
+#undef WEB_GS_EXECUTE
 }
 #endif
 #ifndef DHD_WEB_GS

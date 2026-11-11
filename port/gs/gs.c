@@ -803,10 +803,12 @@ void gs_feed(Gs *g, unsigned path, const uint32_t *words, size_t count)
     }
 }
 
+#ifndef gs_mesh_mode   /* the threaded browser build: gs_mesh.h's shared words */
 int gs_mesh_mode;
+int gs_mesh_setting = -1;
+#endif
 void (*gs_mesh_hook)(Gs *gs, const uint32_t *words, size_t count);
 unsigned gs_vu_shadow;
-int gs_mesh_setting = -1;
 
 /* gs_mesh.h: a word of [a, a + n) without case */
 static int mesh_word(const char *a, size_t n, const char *word)
