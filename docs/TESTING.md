@@ -56,7 +56,7 @@ after a version change before a live check.
 | `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game makes it (the hub), `--bots N` nettool bots join (`--sfu-bots K` of them with direct links off: they race over the SFU fallback, which needs `.dev.vars`), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, who raced over the SFU, snapshot age per sender (summary.json) |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below); `--hidden` runs both on the hidden desktop; `--link` puts the STATE each receives through a test link (`DHD_NET_LINK`) |
 | `port/tools/puppet_bench.py` | the puppet bench (finding 202, "The puppet bench" below): recorded riders replayed onto puppets through a seeded bad link, scored against the truth (distance, wheels in the ground, jumps and jolts, time frozen) |
-| `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
+| `port/tools/puppet_lag.py RUN [--riders]` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169); `--riders`: every rider (the other player's and the AI riders) with the bench's scores, and the re-syncs in the first 5 s after GO, later and after crashes (finding 202; `online_race.py --lag` prints it) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot) |
 | `port/android/test_disc_image.py [ISO]` | the Android side's plain-JVM tests: the first start's disc rules (the check, a complete copy) on synthetic images, and the update notice's page rule (finding 143) |
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
@@ -164,6 +164,7 @@ Online:
 | `DHD_PUPPET_RECORD=file` | each race step, rider `DHD_PUPPET_FROM` (default 0; `all`: every rider) with its wheels' clearance above the ground (`port/hle/puppet.c`) |
 | `DHD_PUPPET_PLAY=file` | offline: the recorded riders onto puppets (`DHD_PUPPET_MAP=src:dst,...`; default every recorded AI rider onto its own slot), sent as online through `DHD_PUPPET_LINK` |
 | `DHD_PUPPET_TRACE=file` | each race step, each puppet as drawn: race time, slot, position, the moment it should show, each wheel's clearance, crashing, its recorded rider |
+| `DHD_NET_TEST_HITCH=S:MS` | once, at race second S, this game's thread stops MS ms (a hitch): the others must hold its riders (HOLD, finding 202) |
 | `DHD_NET_LINK=link` | the STATE this game receives is held as the link says first: `delay=MS,jitter=MS,loss=PCT,burst=S:A-B,reorder=PCT,skew=MS,seed=N` (`port/hle/puppet_link.h`) |
 | `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |

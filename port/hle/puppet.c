@@ -491,6 +491,22 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
     float dt = p->stepped_at > 0 && t > p->stepped_at ? (float)(t - p->stepped_at) : 0;
     p->stepped_at = t;
     body_pose(r, &now);
+    /* Its sender catches up after a hitch (its race clock runs clearly faster than the shared
+       clock: up to twice): its rider moves faster than this game's physics can ride, so the puppet
+       follows its newest snapshot carried to now until the sender's clock runs normally again. */
+    if (p->rate > SYNC_CATCHUP && p->synced) {
+        SyncPose carried;
+        if (s->time > p->used) take_snapshot(p, s, &owner, &carried);
+        snapshot_pose(s, &owner);
+        for (int k = 0; k < 3; k++) owner.vel[k] *= p->rate;
+        sync_carry(&owner, s->spin, (float)fmin(fmax(0, t - s->time), SYNC_CARRY_MAX), &carried);
+        set_body(r, &carried, s->spin);
+        memset(p->sync.pending_pos, 0, sizeof p->sync.pending_pos);
+        memset(p->sync.pending_vel, 0, sizeof p->sync.pending_vel);
+        memset(p->sync.pending_rot, 0, sizeof p->sync.pending_rot);
+        memset(p->sync.slide, 0, sizeof p->sync.slide);
+        return;
+    }
     if (s->time > p->used) {
         SyncPose carried;
         double carry = take_snapshot(p, s, &owner, &carried);
