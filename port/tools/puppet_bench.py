@@ -337,11 +337,29 @@ def matrix(args):
     print(text)
 
 
+CLIP_SCALE = 4             # the clips' internal resolution (DHD_SCALE)
+CLIP_SIZE = (960, 840)     # each side of a clip (the native picture's 512:448), so two fit 1080p
+
+
 def frames(folder):
-    """A race capture's frames (prefix-g+N+delta.bmp) in order."""
+    """A race capture's frames (prefix-g+N+delta.png) in order."""
     def delta(p):
         return int(p.stem.rsplit('+', 1)[1])
-    return sorted(Path(folder).glob('*.bmp'), key=delta)
+    return sorted(Path(folder).glob('*.png'), key=delta)
+
+
+def shrink(folder, keep_newest):
+    """The captures (BMP, the renderer's own size at CLIP_SCALE) as CLIP_SIZE PNGs, the BMPs deleted
+    (a 4x capture is 11 MB); the newest kept while the game may still be writing it."""
+    from PIL import Image
+    shots = sorted(Path(folder).glob('*.bmp'), key=os.path.getmtime)
+    for bmp in shots[:-1] if keep_newest else shots:
+        try:
+            with Image.open(bmp) as im:
+                im.convert('RGB').resize(CLIP_SIZE, Image.LANCZOS).save(bmp.with_suffix('.png'))
+            bmp.unlink()
+        except OSError:
+            pass
 
 
 def capture_run(exe, out, name, track, slot, at, length, extra):
@@ -351,19 +369,21 @@ def capture_run(exe, out, name, track, slot, at, length, extra):
     shutil.rmtree(shots, ignore_errors=True)
     shots.mkdir(parents=True)
     fields = int(length * 60)
-    env = game_env(track, at + length, {'DHD_PUPPET_CAMERA': '1', 'DHD_PUPPET_SLOT': str(slot),
+    env = game_env(track, at + length, {'DHD_PUPPET_CAMERA': '1', 'DHD_PUPPET_SLOT': str(slot), 'DHD_SCALE': str(CLIP_SCALE),
                                         'DHD_SCREENSHOT': str(shots / 'shot'), 'DHD_RACE_CAPTURE': f'g+{int(at * 60)}',
                                         'DHD_RACE_CAPTURE_WINDOW': str((fields + 1) // 2), **extra})
     g = hidden_game.Game(exe, out, env=env, name='puppet_bench clip ' + name, shot_window=None)
     start = time.time()
     try:
-        while time.time() - start < 900 and len(list(shots.glob('*.bmp'))) < fields:
+        while time.time() - start < 1800 and len(list(shots.glob('*.png'))) + len(list(shots.glob('*.bmp'))) < fields:
             if not g.alive():
                 raise RuntimeError(f'the game exited (see {out / "game.log"})')
-            time.sleep(2)
-        time.sleep(2)
+            shrink(shots, True)
+            time.sleep(1)
+        time.sleep(3)
     finally:
         g.stop()
+    shrink(shots, False)
     return frames(shots)[:fields]
 
 
@@ -386,21 +406,21 @@ def clip(args):
     shutil.rmtree(lst, ignore_errors=True)
     lst.mkdir()
     for i in range(n):  # numbered copies ffmpeg can read as two sequences
-        shutil.copy(left[i], lst / f'l{i:05d}.bmp')
-        shutil.copy(right[i], lst / f'r{i:05d}.bmp')
+        shutil.copy(left[i], lst / f'l{i:05d}.png')
+        shutil.copy(right[i], lst / f'r{i:05d}.png')
     target = out / f'{args.name}.mp4'
     ffmpeg = shutil.which('ffmpeg')
     if ffmpeg:
         label = args.label_text or args.link or 'perfect link'
-        draw = lambda text: (f"drawtext=text='{text}':x=10:y=10:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.6")
-        subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', '60', '-i', str(lst / 'l%05d.bmp'),
-                        '-framerate', '60', '-i', str(lst / 'r%05d.bmp'), '-filter_complex',
+        draw = lambda text: (f"drawtext=text='{text}':x=12:y=12:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.6")
+        subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', '60', '-i', str(lst / 'l%05d.png'),
+                        '-framerate', '60', '-i', str(lst / 'r%05d.png'), '-filter_complex',
                         f"[0]{draw('the rider (truth)')}[a];[1]{draw('as another player sees it - ' + label.replace(':', ' ').replace(',', ' '))}[b];[a][b]hstack",
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', str(target)], check=True)
         print('clip', target)
     else:
         from PIL import Image
-        picks = [lst / f'{side}{i:05d}.bmp' for i in range(0, n, max(1, n // 12)) for side in 'lr']
+        picks = [lst / f'{side}{i:05d}.png' for i in range(0, n, max(1, n // 12)) for side in 'lr']
         ims = [Image.open(p) for p in picks]
         w, h = ims[0].size
         sheet = Image.new('RGB', (w * 2, h * (len(ims) // 2)))

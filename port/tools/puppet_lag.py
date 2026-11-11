@@ -48,7 +48,9 @@ def records(path):
 
 def own_path(path):
     times, pos, crash = [], [], []
-    for _, _, t, p, _, crashing, _ in records(path):
+    for slot, _, t, p, _, crashing, _ in records(path):
+        if slot != 0:   # a recording of every rider (DHD_PUPPET_FROM=all): this game's own is slot 0
+            continue
         if times and t <= times[-1]:
             if t < times[-1] - 1:   # a new race
                 times, pos, crash = [], [], []
