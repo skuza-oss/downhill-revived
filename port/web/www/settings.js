@@ -33,9 +33,11 @@ export const BROWSER_PC_SETTINGS = {
 // The variables neither a dhd.ini line nor a default sets here, since the browser has no such thing:
 // the canvas is the window (no display mode, window size or monitor: widescreen.c's shape stays
 // the page's) and has one shape (DHD_ASPECT: 16:9 with widescreen, else 4:3, main.js); the page's
-// frames pace it (no V-Sync switch); no rumble, texture packs, Discord or updater.
+// frames pace it (no V-Sync switch); no rumble, texture packs, Discord or updater; no Native VU (the
+// players' default elsewhere, finding 198: here the VU runs every program, so its variable stays unset).
 export const BROWSER_WITHOUT = new Set(['DHD_WINDOW', 'DHD_WINDOW_WIDTH', 'DHD_WINDOW_HEIGHT', 'DHD_MONITOR', 'DHD_ASPECT',
-  'DHD_VSYNC', 'DHD_VIBRATION', 'DHD_TEXTURES', 'DHD_TEXTURE_PACK', 'DHD_TEXTURE_CACHE_MB', 'DHD_DISCORD', 'DHD_UPDATE_URL']);
+  'DHD_VSYNC', 'DHD_VIBRATION', 'DHD_TEXTURES', 'DHD_TEXTURE_PACK', 'DHD_TEXTURE_CACHE_MB', 'DHD_DISCORD', 'DHD_UPDATE_URL',
+  'DHD_NATIVE_VU1']);
 // The variables the reactor follows while the game runs (gpu_rust_web.c's web_env_changed).
 export const RENDERER_LIVE = new Set(['DHD_SCALE', 'DHD_PRESENT_FILTER', 'DHD_ASPECT', 'DHD_PERF_COUNTER']);
 

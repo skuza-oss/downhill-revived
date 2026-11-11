@@ -1,5 +1,5 @@
-/* Native VU1 meshes (findings 164, 167 and 194), included by vif.c: REVIVED SETTINGS' Native VU
-   (experimental; dhd.ini native_vu, DHD_NATIVE_VU1) hands overlay B's batch loops to the native
+/* Native VU1 meshes (findings 164, 167, 194 and 198), included by vif.c: REVIVED SETTINGS' Native VU
+   (the players' default; dhd.ini native_vu, DHD_NATIVE_VU1) hands overlay B's batch loops to the native
    renderer instead of running them. "on" is every loop below; for tests DHD_NATIVE_VU1 also lists
    loops (by their address; "prelit", "lit", "shadow" or "all" for groups), then optional flags:
    DHD_NATIVE_VU1=0170,1708:skip (gs_mesh.h's gs_mesh_parse).
