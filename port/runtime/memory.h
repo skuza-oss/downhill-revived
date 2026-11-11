@@ -9,6 +9,12 @@
 #define PS2_IMAGE_START 0x263BC0u  /* .vutext, the first byte of the data image */
 #define PS2_IMAGE_END 0x29DCF0u    /* the end of .sdata: .sbss and .bss after it are zero */
 #define PS2_SCRATCHPAD 0x70000000u
+/* Guest-visible memory the HLE owns, right above the scratchpad at the same address in every
+   build. A pointer the HLE gives the game must not depend on where the core's linker put its own
+   data: the game keeps it in its RAM, and the state trace compares that RAM between builds
+   (finding 205). [PS2_HLE_WINDOW, +0x800): the SIF RPC packets (sif.c). */
+#define PS2_HLE_WINDOW 0x70004000u
+#define PS2_HLE_WINDOW_SIZE 0x4000u
 /* The RAM from here up is also at its own PS2 addresses (and | 0x20000000, | 0x30000000): the
    game's data files are linked for where it loads them (0xA00000 up) and hold absolute PS2
    pointers. Below it Windows has its own memory before the program starts. */
