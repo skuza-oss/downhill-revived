@@ -88,6 +88,14 @@ fn environment_overrides_and_defaults() {
         assert_eq!(env[name], want, "{name}");
     }
     assert!(!env.contains_key("DHD_ISO") && !env.contains_key("DHD_NET_NAME"));
+    // Native VU is the player's default (finding 198): on with a dhd.ini that has no line for it
+    // (every dhd.ini written before the default changed, unless the player moved the row: a save
+    // writes only its own line), off where the player's line says so, in either spelling.
+    assert_eq!(env["DHD_NATIVE_VU1"], "on");
+    assert_eq!(env_of("native_vu = off\n", &[])["DHD_NATIVE_VU1"], "off");
+    assert_eq!(env_of("DHD_NATIVE_VU1 = 0\n", &[])["DHD_NATIVE_VU1"], "off");
+    assert_eq!(env_of("native_vu =\n", &[])["DHD_NATIVE_VU1"], "on");
+    assert_eq!(dhd_settings::find("native_vu").unwrap().builtin, "off");
     // Without dhd.ini (the tools): nothing but the official server and the override list.
     let env: BTreeMap<_, _> = environment(None, |_| false).vars.into_iter().collect();
     assert_eq!(env.len(), 2);

@@ -115,11 +115,11 @@ Performance (Graphics tab): Performance Mode ON turns off the riders' shadows an
 the lens flare's ghosts and the particles (dust, dirt, spray), which runs faster on slower PCs and
 phones; each of the three can also be set alone (dhd.ini shadows, lens_flare, particles = 0).
 They change only the picture, at once, online too.
-Native VU (Graphics tab, Experimental; the launcher's Graphics page too): the PS2's VU1 programs
-that place the world, the lit objects and the shadows run on your graphics card instead of being
-emulated, which is faster. It is new and off by default (dhd.ini native_vu = on or off); it
-changes only the picture, at once, online too. If your graphics card can't run it, the game says
-so in dhd.log and goes on without it.
+Native VU (Graphics tab; the launcher's Graphics page too): the PS2's VU1 programs that place the
+world, the lit objects and the shadows run on your graphics card instead of being emulated, which
+is faster. It is on by default (dhd.ini native_vu = on or off); it changes only the picture, at
+once, online too. If your graphics card can't run it, the game says so in dhd.log and goes on
+without it. If something in the picture looks wrong, turn it OFF and send us your dhd.log.
 
 Font: the game's text is drawn with sharp edges at any resolution ("font = sharp", the
 default). The sharp font is made in memory from the font on your disc each time the game

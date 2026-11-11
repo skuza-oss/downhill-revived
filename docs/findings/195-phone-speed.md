@@ -1,8 +1,8 @@
 # 195: the phone's biggest remaining costs, measured and cut
 
-Status: current
+Status: partly superseded by 198 (the encoder cut on Mali GPUs: a picture stays in one encoder there, the cut lost the Mali-G52's device)
 Supersedes: parts of 172 (its constants per draw by instance index)
-Checked: 2026-11-10
+Checked: 2026-11-11
 
 Branch `perf/phone-fable` from `main` f06ffba, started 2026-11-10; `main` 959c5f4 merged into it
 (`48de78a`), which is the base every change is measured against. Merged into `main` at 5e3cf1dd on

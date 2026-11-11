@@ -123,11 +123,13 @@ pub const SETTINGS: &[Setting] = &[
     switch("shadows", "DHD_SHADOWS", SWITCH, "1", "1"),
     switch("lens_flare", "DHD_LENS_FLARE", SWITCH, "1", "1"),
     switch("particles", "DHD_PARTICLES", SWITCH, "1", "1"),
-    // Native VU (experimental; findings 164, 167, 194, port/hle/vu1_mesh.inc): the VU1 programs'
-    // batch loops drawn by the native renderer's shaders instead of run on the emulated VU. Drawing
-    // only (the game runs the same, so allowed online); live. DHD_NATIVE_VU1 also takes a list of
-    // loops with flags for tests ("0170,1708:skip").
-    switch("native_vu", "DHD_NATIVE_VU1", TOGGLE, "off", "off"),
+    // Native VU (findings 164, 167, 194, 198, port/hle/vu1_mesh.inc): the VU1 programs' batch loops
+    // drawn by the native renderer's shaders instead of run on the emulated VU. Drawing only (the
+    // game runs the same, so allowed online); live. The player's default since finding 198 (off:
+    // troubleshooting, while the emulated path exists); the tools' runs, without dhd.ini, keep the
+    // emulated VU unless they set the variable. Not in the browser (settings.js leaves the variable
+    // out). DHD_NATIVE_VU1 also takes a list of loops with flags for tests ("0170,1708:skip").
+    switch("native_vu", "DHD_NATIVE_VU1", TOGGLE, "on", "off"),
     // Simulation steps a second (findings 067, 114), offline and online.
     choice("fps", "DHD_FPS", &[c("60", "60 fps"), c("120", "120 fps"), c("144", "144 fps"), c("165", "165 fps"),
                                c("240", "240 fps"), c("monitor", "Monitor")], "60", "60"),

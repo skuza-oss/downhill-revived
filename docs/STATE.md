@@ -66,8 +66,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `ps2asm_aot.py`); EE float rounding follows PCSX2's (finding 026). VU0 microprograms are native
   or compiled (`vu0_micro.c`, `vu0_aot.py`); VU1 runs compiled blocks plus native kernels
   (`vu1_aot.py`, `vu1_native_clip.py`), checked against PCSX2's interpreter (findings 030, 090),
-  or, with Native VU on (experimental, off by default), its translated loops as GPU shaders
-  (findings 164, 167, 194); both paths stay while native is experimental (root AGENTS.md).
+  and, with Native VU (the players' default but in the browser, finding 198), the translated
+  batch loops as GPU shaders instead (findings 164, 167, 194). The emulated path for those loops
+  remains as the fallback, the setting's off and the browser's path until it is deleted (root
+  AGENTS.md).
 - GS: GS memory and registers in C (`port/gs/`); the Rust renderer (`port/render`, wgpu: DX12 or
   Vulkan on Windows, Metal on Apple, Vulkan on Linux and Android, WebGPU in the browser) behind
   the shared C front ends `gpu_exact.inc` (exact: the PS2's pixels, the reference) and
@@ -104,8 +106,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   no 4:3 screens left and VU1 sprites at their 4:3 shape (findings 056, 140, 192), frame rate 60-240 or Monitor (findings 067, 139),
   V-Sync, texture packs in PCSX2's format (finding 057), the sharp font (finding 058), a
   Performance group (shadows and sun glow, lens flare, particles; finding 183), Native VU
-  (experimental, off by default: VU1 programs as GPU shaders, falls back to the emulated VU when
-  the GPU can't; findings 164, 167, 194), movies,
+  (on by default: VU1 programs as GPU shaders, falls back to the emulated VU when
+  the GPU can't; findings 164, 167, 194, 198), movies,
   vibration, stick dead zone and button icons (finding 134), the keys and controller buttons for
   the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
   Ping counter (findings 120, 169), online name size (finding 163), Unlock All (finding 095),
@@ -216,8 +218,13 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - The Mali-G52 (Redmi 9) at 2x: about 49.5 fields/s with every effect on (finding 174's
   barriers), about 60 with the shadows, sun glow, lens flare and fog cut by a diagnostic build;
   Performance Mode (finding 183) cuts those but fog. 60 at 2x with every effect on is not reached.
-- Native VU (finding 194) is experimental: no driver that refuses it has run the option, and the
-  Redmi 9 at 2x was not timed after finding 195.
+- Native VU is the players' default (finding 198), and it is slower where the GPU limits: the
+  Redmi 9 at 2x 50.6 -> 48.7 fields/s over the route (the race 47.3 -> 44.8), the integrated
+  Radeon at 4x 122.1 -> 118.2; it gains where the CPU limits (finding 194). No driver that refuses
+  it has run it. The emulated path is deleted once players' logs show no fallbacks.
+- On Mali GPUs a picture stays in one encoder (finding 198): finding 195's encoder cut lost the
+  device on the Redmi 9's Mali-G52 in every full route, so 0.7.15 is expected to on that phone.
+  Why the driver fails, and other Malis, are not known.
 - Browser speed is below 60 in races (finding 087).
 - High-rate handling differs a little from 60 by the race's own chaos, with no trend (finding
   139, after finding 067's limits).

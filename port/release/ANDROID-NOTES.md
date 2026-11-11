@@ -3,7 +3,9 @@
 `DownhillRevived-<version>-android-experimental.apk` is the game for Android phones and tablets.
 It is experimental: recent phones hold 60 fps at 2x resolution, slower ones (and 4x) may not.
 On a slower phone, OPTIONS > SETTINGS > Graphics tab > Performance Mode turns off the riders'
-shadows and the sun's glow, the lens flare and the particles, which helps the most.
+shadows and the sun's glow, the lens flare and the particles, which helps the most. Native VU (the
+same tab, on by default) lets the phone's graphics chip run part of the PS2's work, which is
+faster; if something in the picture looks wrong, turn it OFF and send us the log.
 Play with the touch controls (Classic pad or Thumb zones, tilt steering if you like: OPTIONS >
 SETTINGS > Controls tab > Touch Controls) or a controller. The game's cheat codes are typed on the
 touch pause menu's **CODES** page.

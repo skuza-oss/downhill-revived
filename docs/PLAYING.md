@@ -32,7 +32,7 @@ What works today:
   window size, picture shape, scaling, widescreen, skip movies, vibration, the sticks' dead zone,
   the button icons (PlayStation, Xbox or Nintendo, or the controller's), your keys and buttons,
   the size of online riders' names, texture pack and font, and a Performance group (shadows and
-  sun glow, lens flare, particles: see [Settings](#settings)), Native VU (experimental), drawn with the game's own menus and
+  sun glow, lens flare, particles: see [Settings](#settings)), Native VU, drawn with the game's own menus and
   font. Changes are saved to `dhd.ini`. V-Sync (on in a new install) shows
   each picture without tearing.
 - **Unlock All** (REVIVED SETTINGS, off by default): every track, rider, bike and shop item reads as
@@ -362,11 +362,13 @@ Performance Mode ON turns off the three effects below it (the riders' shadows an
 the lens flare, the particles), OFF turns them all back on, and Custom shows a mix. Each can be
 set alone. They apply at once, online too: only the picture changes, never the race.
 
-**Native VU** (Graphics tab, experimental, off by default) runs the PS2's VU1 programs (the ones
-that place the world, the lit objects and the shadows) on your graphics card instead of emulating
-them, which gives more frames a second, most on a fast graphics card at a high resolution. It
-applies at once, online too, and changes only the picture. If your graphics card can't run it,
-`dhd.log` says so and the game goes on without it. Not in the browser version.
+**Native VU** (Graphics tab, on by default) runs the PS2's VU1 programs (the ones that place the
+world, the lit objects and the shadows) on your graphics card instead of emulating them, which
+gives more frames a second, most on a fast graphics card at a high resolution. It applies at once,
+online too, and changes only the picture. If your graphics card can't run it, `dhd.log` says so
+and the game goes on without it. If something in the picture looks wrong, turn it OFF (the game
+then emulates those programs as before) and tell us with your `dhd.log`. Not in the browser
+version.
 
 `dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
 first start. The REVIVED SETTINGS page writes most of them for you.
@@ -400,7 +402,7 @@ first start. The REVIVED SETTINGS page writes most of them for you.
 | `shadows` | `1` | Performance: `0` turns off the riders' shadows and the sun's glow |
 | `lens_flare` | `1` | Performance: `0` turns off the lens flare's ghosts (the sun's disc and halo stay) |
 | `particles` | `1` | Performance: `0` turns off the particles (dust, dirt, spray, heat haze) |
-| `native_vu` | `off` | `on` runs the VU1 programs on the graphics card (Native VU, experimental) |
+| `native_vu` | `on` | Native VU: the VU1 programs run on the graphics card; `off` emulates them (for troubleshooting) |
 | `room_region` | `auto` | where the rooms you create run (ONLINE's Room Region row): `auto` (the server picks by where you reach Cloudflare), `weur`, `eeur`, `enam`, `wnam`, `apac-ne`, `apac-se` or `oc` |
 
 Each key has a `DHD_*` environment variable (`scale` is `DHD_SCALE`, `server` is

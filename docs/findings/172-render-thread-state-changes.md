@@ -162,7 +162,9 @@ The constants step on the Redmi:
   runs cannot separate them (at a quarter of the pixels a GPU cost or a warm GPU shows less); the
   lazy-reads variant, which loads only the fields each pixel uses, did not get back what was lost,
   which speaks a little against a per-pixel load cost. **Not confirmed either way**; an
-  interleaved before/after/before run at 2x on the Redmi decides it.
+  interleaved before/after/before run at 2x on the Redmi decides it. (Finding 195 undid the step
+  before that run was made; finding 198's Redmi runs without it are back above the "before" level,
+  50.6 off / 48.7 on, with under 2 % between interleaved runs: that fits a GPU cost, not heat.)
 
 ## Tried and dropped
 

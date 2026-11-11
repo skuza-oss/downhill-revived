@@ -9,7 +9,7 @@
    window size, picture shape, scaling, skip movies (the startup movies), vibration, the sticks'
    dead zone, the button symbols, unlock all, FPS & Ping, the Performance group (Graphics:
    Performance Mode, a preset for the three effects after it, finding 183) and Native VU
-   (Experimental, above that group, finding 194) apply at once; resolution,
+   (above that group; findings 194, 198) apply at once; resolution,
    widescreen, the texture pack, the font, the frame rate and V-Sync at the next start ("*" and
    the row's hint, a line above the legend, say so). A setting the environment sets (DHD_*) is
    shown but can't be changed here.
@@ -93,7 +93,7 @@ static Row rows[ROWS] = {
     /* right above the Performance group (finding 194): the VU1 programs' batch loops drawn by the
        native renderer's shaders (port/hle/vu1_mesh.inc); live, read by the VU thread through
        gs_present_options_apply */
-    {"Native VU (Experimental):", "native_vu", 1},
+    {"Native VU:", "native_vu", 1},
     /* the Performance group (finding 183): the preset is no setting of its own; ON is the three
        below off, OFF the three on, anything else Custom (perf_state) */
     {"Performance Mode:", "", 1},
@@ -456,7 +456,7 @@ static void page_update(MenuPage *p, int cursor)  /* the hint for the row (the l
     else if (r == &rows[NATIVE_VU]) {
         const char *renderer = host_getenv("DHD_RENDER");
         p->hint = renderer && !strcmp(renderer, "exact") ? "Only with the native renderer"
-                                                         : "VU1 programs run on the GPU: faster, but new";
+                                                         : "Faster. Turn OFF if the picture looks wrong";
     }
     else if (r == &rows[RESOLUTION] && scale_limit && scale_limit < 8) {
         if (scale_phone) snprintf(hint, sizeof hint, "Phones go up to %dx", scale_limit);
