@@ -1,7 +1,7 @@
 # 194: Native VU (experimental), a Graphics setting on every platform
 
-Status: current
-Checked: 2026-11-10
+Status: partly superseded by 198 (off by default and "experimental": Native VU is the players' default; the emulated path is only the fallback, the setting's off and the browser's path)
+Checked: 2026-11-11
 
 Branch `feat/native-vu-option` from `main` cdee456, started 2026-11-10. Merged into `main` at
 f803874a on 2026-11-10; ships in 0.7.15. Someone who has only this file and the git log
@@ -258,7 +258,9 @@ minus spin; busy = the field minus the thread's waits):
 
 ## Decisions
 
-- **Both paths are kept while native is experimental** (the owner, 2026-11-10): the emulated VU1
+- **Both paths are kept while native is experimental** (the owner, 2026-11-10; changed by finding
+  198 on 2026-11-11: native is the default, the emulated path remains only as the fallback, the
+  setting's off and the browser's path until a later lane deletes it): the emulated VU1
   path stays beside the native one, an explicit exception to the single-implementation rule (root
   AGENTS.md, decision 099), as for the P2P experiment (180). The plan: once native is proven on
   every platform (pictures, state, speed, drivers), it becomes the default and the emulated draw
@@ -321,7 +323,8 @@ Lane state 2026-11-10 (not merged; the lead merges and closes the finding).
 What is left:
 
 - **Finding 172's open question**: the interleaved Redmi 9 2x run (before/after the constants step,
-  which this lane keeps in the off path too). Only the Mi 11i was attached.
+  which this lane keeps in the off path too). Only the Mi 11i was attached. (Finding 195 undid
+  the step; finding 198 ran the Redmi 9 off against on.)
 - **A main-against-off timing on the phone** (the off level is below finding 167's; not traced).
 - **Real drivers that refuse**: the fallback is shown with `DHD_TEST_NO_MESHES` and the mesh
   shaders pass the Mali and PowerVR checks and Arm's offline compiler; no PowerVR, Mali-G52 or Intel
