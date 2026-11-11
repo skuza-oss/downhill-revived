@@ -2,7 +2,7 @@
 
 This is the crates.io `wgpu-hal` **29.0.3** source, under its original MIT OR
 Apache-2.0 licence (LICENSE.MIT and LICENSE.APACHE). Other backends are unchanged.
-Local changes are marked `Downhill Revived` in the five Vulkan source files.
+Local changes are marked `Downhill Revived` in the Vulkan source files.
 
 The device shares at most 256 framebuffer lookup entries across command encoders.
 Keys retain upstream's render pass, extent, raw attachments and unique view identities.
@@ -100,3 +100,21 @@ device. The Vulkan spec leaves the device usable after a failed pipeline creatio
 Rogue's driver 1.13 returns VK_ERROR_OUT_OF_HOST_MEMORY for every shader its compilers refuse. The
 temporary shader modules are destroyed on that path too (upstream returns before destroying them).
 Other results keep upstream's mapping.
+
+## Timeline submit info: a value for every semaphore (finding 201)
+
+`semaphore_list.rs` `add_to_submit`: when a submit chains a `VkTimelineSemaphoreSubmitInfo` (the
+device has timeline semaphores, so every submit signals the fence's timeline semaphore), both its
+lists carry one value per semaphore, binary ones included; upstream left a list without a timeline
+semaphore at count 0 and a null pointer. The spec allows that, but PowerVR's proprietary driver
+(Rogue GE8322, driver 1.18@6267915, issue #82; B-Series in gfx-rs/wgpu PR #10677 and #7669) reads
+`pWaitSemaphoreValues[i]` for every wait semaphore whenever the struct is chained, so the first
+submit that waits on a binary semaphore (the swapchain's acquire or the relay semaphore) read
+through null in `vkQueueSubmit`. Vulkan ignores a binary semaphore's value; a binary wait's padding
+is 0 (`dummy_value`), so a driver that took it for a timeline wait would find it already reached.
+A signal's padding stays upstream's `!0`. Devices without timeline semaphores chain nothing, as
+before.
+
+`mod.rs` re-exports `SemaphoreList`, `SemaphoreListMode` and `SemaphoreType` (doc-hidden) for the
+renderer crate's test `tests/semaphore_values.rs`; `adapter.rs` `Adapter::timeline_semaphores` says
+which kind the device's fences are, for dhd.log (`src/device.rs` `log_vulkan`).

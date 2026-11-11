@@ -37,9 +37,10 @@ pub struct SemaphoreList {
     ///
     /// If no timeline semaphores are present in [`semaphores`], this
     /// is empty. If any timeline semaphores are present, then this
-    /// has the same length as [`semaphores`], with dummy !0 values
-    /// in the elements corresponding to binary semaphores, since
-    /// Vulkan ignores these.
+    /// has the same length as [`semaphores`], with dummy values
+    /// (`dummy_value`) in the elements corresponding to binary
+    /// semaphores, since Vulkan ignores these. `add_to_submit` pads
+    /// an empty list too when the other one has values.
     ///
     /// [`semaphores`]: Self::semaphores
     values: Vec<u64>,
@@ -69,9 +70,10 @@ impl SemaphoreList {
     /// - Set `submit_info`'s `pSignalSemaphores` list to this list's
     ///   semaphores.
     ///
-    /// - If this list contains any timeline semaphores, then initialize
-    ///   `timeline_info`, set its `pSignalSemaphoreValues` to this
-    ///   list's values, and add it to `submit_info`s extension chain.
+    /// - If either list contains any timeline semaphores, then initialize
+    ///   `timeline_info`, set its `pWaitSemaphoreValues` and
+    ///   `pSignalSemaphoreValues` to the lists' values, one per semaphore
+    ///   in both lists, and add it to `submit_info`s extension chain.
     ///
     /// Return the revised `submit_info` value.
     pub fn add_to_submit<'info, 'semaphores: 'info>(
@@ -88,16 +90,22 @@ impl SemaphoreList {
 
         let timeline_info = timeline_info.write(vk::TimelineSemaphoreSubmitInfo::default());
 
-        let mut uses_timeline = false;
+        // Downhill Revived (finding 201): when the timeline info is chained at all, both of its
+        // value lists get one value per semaphore, binary ones included (Vulkan ignores those).
+        // Upstream left a list without a timeline semaphore at count 0 and a null pointer, which
+        // the spec allows, but PowerVR's proprietary driver reads pWaitSemaphoreValues[i] for
+        // every wait semaphore whenever the struct is chained: a null read in vkQueueSubmit at
+        // the first submit that waits on a binary semaphore (the swapchain's acquire or the
+        // relay semaphore) while signalling the timeline fence. gfx-rs/wgpu PR #10677.
+        let uses_timeline =
+            !wait_semaphores.values.is_empty() || !signal_semaphores.values.is_empty();
 
-        if !wait_semaphores.values.is_empty() {
-            *timeline_info = timeline_info.wait_semaphore_values(&wait_semaphores.values);
-            uses_timeline = true;
-        }
-
-        if !signal_semaphores.values.is_empty() {
-            *timeline_info = timeline_info.signal_semaphore_values(&signal_semaphores.values);
-            uses_timeline = true;
+        if uses_timeline {
+            wait_semaphores.pad_values();
+            signal_semaphores.pad_values();
+            *timeline_info = timeline_info
+                .wait_semaphore_values(&wait_semaphores.values)
+                .signal_semaphore_values(&signal_semaphores.values);
         }
 
         let mut submit_info = submit_info
@@ -132,7 +140,7 @@ impl SemaphoreList {
                 self.semaphores.push(semaphore);
                 // Push a dummy value if necessary.
                 if !self.values.is_empty() {
-                    self.values.push(!0);
+                    self.values.push(self.dummy_value());
                 }
             }
             SemaphoreType::Timeline(semaphore, value) => {
@@ -170,7 +178,18 @@ impl SemaphoreList {
     ///
     /// This is a no-op if we already have values.
     fn pad_values(&mut self) {
-        self.values.resize(self.semaphores.len(), !0);
+        self.values.resize(self.semaphores.len(), self.dummy_value());
+    }
+
+    /// The value given to a binary semaphore's entry. Vulkan ignores it. Downhill Revived
+    /// (finding 201): a wait's is 0, not upstream's !0, so a driver that reads the entry of a
+    /// binary wait (see `add_to_submit`) and took it for a timeline wait would find it already
+    /// reached rather than never; a signal's stays !0, as upstream.
+    fn dummy_value(&self) -> u64 {
+        match self.mode {
+            SemaphoreListMode::Wait => 0,
+            SemaphoreListMode::Signal => !0,
+        }
     }
 
     #[track_caller]

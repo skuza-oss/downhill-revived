@@ -242,6 +242,19 @@ mod native {
         wgpu::Instance::new(desc)
     }
 
+    /// On Vulkan, the driver's API version and whether submits signal a timeline semaphore (a
+    /// chained VkTimelineSemaphoreSubmitInfo in every vkQueueSubmit) or a VkFence: PowerVR's
+    /// driver 1.18 crashed on the timeline form (finding 201), its 1.13 builds offer only fences.
+    #[cfg(any(windows, target_os = "linux", target_os = "android"))]
+    fn log_vulkan(adapter: &wgpu::Adapter) {
+        // SAFETY: the HAL adapter is only read; wgpu keeps it alive while borrowed.
+        let Some(hal) = (unsafe { adapter.as_hal::<wgpu_hal::api::Vulkan>() }) else { return };
+        let v = hal.physical_device_capabilities().properties().api_version;
+        let fences = if hal.timeline_semaphores() { "a timeline semaphore" } else { "VkFences" };
+        crate::host::log(&format!("gs: Vulkan {}.{}.{}, submits signal {fences}", v >> 22 & 0x7F, v >> 12 & 0x3FF,
+                                 v & 0xFFF));
+    }
+
     /// gpu_wgpu.c:122-218 with wgpu-native's settings (the module comment), except that WARP always
     /// compiles with FXC (`software_fxc`).
     pub fn create(o: &DeviceOptions) -> Result<Gpu, String> {
@@ -266,6 +279,8 @@ mod native {
         // The driver in the log, for bug reports: many draw faults are one driver's.
         crate::host::log(format!("gs: GPU {} on {:?}, driver {} {}", info.name, info.backend, info.driver,
                                  info.driver_info).trim_end());
+        #[cfg(any(windows, target_os = "linux", target_os = "android"))]
+        log_vulkan(&adapter);
         log_adapters(&instance, backends, &info);
         // DHD_RSTAT (finding 108): whether the adapter offers GPU timers at all. The 120 field/s
         // round had to estimate GPU time from the render thread's blocked submits because nothing
