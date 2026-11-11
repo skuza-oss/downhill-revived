@@ -503,8 +503,10 @@ static void barrier(void)
             if (!ready_sent) fprintf(stderr, "online: room %s%s\n", net_log_code(lobby.code).text, lobby.is_host ? " (host)" : "");
             if (lobby.is_host && !settings_sent) {
                 const char *track = getenv("DHD_NET_TRACK"), *room = getenv("DHD_NET_ROOM_NAME");
-                /* DHD_NET_CHEATS=1 (tests): the room's cheats on (options bit 2) */
-                NetRoomSettings s = {track && *track ? atoi(track) : 0, getenv("DHD_NET_CHEATS") ? 2 : -1,
+                /* tests: DHD_NET_CHEATS=1 the room's cheats on (options bit 2), DHD_NET_NO_AI=1 its
+                   computer riders off (bit 1) */
+                int options = (getenv("DHD_NET_CHEATS") ? 2 : 0) | (getenv("DHD_NET_NO_AI") ? 1 : 0);
+                NetRoomSettings s = {track && *track ? atoi(track) : 0, options ? options : -1,
                                      getenv("DHD_NET_PUBLIC") != NULL, expected > 4 ? expected : 4, -1, room && *room ? room : NULL};
                 host_service_net_set_room(GADDR(&s));
                 settings_sent = 1;
