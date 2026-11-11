@@ -28,25 +28,35 @@ JERK = 30.0  # units a second; riders move about 95
 from pathlib import Path
 
 SNAP = struct.Struct('<i4xdi4f12f4f4f4f')  # clock, time, state, pos[4], rot[12], vel[4], spin[4]
-SNAP_SIZE = 824
+SNAP_SIZE = 840    # port/hle/puppet.c's Snapshot
+CRASH_AT = 134     # its crash flags (bit 2: crashing)
+TAIL = struct.Struct('<i2f')  # at TAIL_AT: slot, each wheel's clearance above the ground
+TAIL_AT = 824
+
+
+def records(path):
+    """Every snapshot of a DHD_PUPPET_RECORD file: (slot, clock, time, pos, vel, crashing, ground),
+    in file order."""
+    data = Path(path).read_bytes()
+    if len(data) % SNAP_SIZE:
+        data = data[:len(data) - len(data) % SNAP_SIZE]   # a recording still being written
+    for at in range(0, len(data), SNAP_SIZE):
+        f = SNAP.unpack_from(data, at)
+        slot, g0, g1 = TAIL.unpack_from(data, at + TAIL_AT)
+        yield slot, f[0], f[1], f[3:6], f[19:22], bool(data[at + CRASH_AT] & 4), (g0, g1)
 
 
 def own_path(path):
-    data = Path(path).read_bytes()
-    if len(data) % SNAP_SIZE:
-        sys.exit(f'{path}: {len(data)} bytes is not a whole number of {SNAP_SIZE}-byte snapshots')
     times, pos, crash = [], [], []
-    for at in range(0, len(data), SNAP_SIZE):
-        f = SNAP.unpack_from(data, at)
-        t = f[1]
+    for _, _, t, p, _, crashing, _ in records(path):
         if times and t <= times[-1]:
             if t < times[-1] - 1:   # a new race
                 times, pos, crash = [], [], []
             else:
                 continue
         times.append(t)
-        pos.append(f[3:6])
-        crash.append(data[at + 134] & 4)
+        pos.append(p)
+        crash.append(crashing)
     return times, pos, crash
 
 

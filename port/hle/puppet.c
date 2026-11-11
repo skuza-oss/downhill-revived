@@ -29,13 +29,17 @@
    a tick (the race clock's field) is 1/60 s, and a step may be part of one or up to two of them
    (port_field_seconds, findings 114, 139).
 
-   Tests, one PC:
-   DHD_PUPPET_RECORD=file   each race step, a snapshot of rider DHD_PUPPET_FROM (default 0)
-   DHD_PUPPET_PLAY=file     replay those snapshots onto slot DHD_PUPPET_SLOT (default 1), one in
-                            DHD_PUPPET_RATE (default 2) ticks arriving as it was taken
+   Tests, one PC (the puppet bench, port/tools/puppet_bench.py, finding 202):
+   DHD_PUPPET_RECORD=file   each race step, a snapshot of rider DHD_PUPPET_FROM (default 0; "all":
+                            every rider of the race), with its wheels' clearance above the ground
+   DHD_PUPPET_PLAY=file     replay those snapshots onto puppets (DHD_PUPPET_MAP=src:dst,...;
+                            default every recorded AI rider onto its own slot, a one-rider file onto
+                            DHD_PUPPET_SLOT, default 1), sent as online (60 a second for slot 0, 30
+                            for the others) through DHD_PUPPET_LINK (puppet_link.h: delay, jitter,
+                            loss, bursts, reordering, clock errors, hitches)
    DHD_PUPPET_CAMERA=1      player 0's camera follows the puppet (slot DHD_PUPPET_SLOT, online too)
-   DHD_PUPPET_TRACE=file    each race step, each puppet as shown: race time here, the sender's
-                            race time it shows, slot, position (text; tests, finding 114)
+   DHD_PUPPET_TRACE=file    each race step, each puppet as drawn (text, hle_puppet_field)
+   DHD_NET_LINK=link        online: the STATE this game receives goes through such a link first
    Online (port/hle/online.c): hle_puppet_online, hle_puppet_pack, hle_puppet_receive. */
 #include <stdint.h>
 #include <stdio.h>
@@ -49,6 +53,8 @@
 int hle_online_race_riders(void);  /* online.c: the riders in the online race (computer riders off: fewer) */
 #define RACE_CLOCK (*(volatile int32_t *)0x0843EEC8)  /* ticks since GO in phase 2 */
 double port_field_seconds(int counter);  /* fps.c */
+double host_wall_seconds(void);
+static void net_link_release(void);
 #define RACE_TIME port_field_seconds(RACE_CLOCK)      /* seconds since GO, part of a tick too */
 #define RACE_PHASE (*(volatile int32_t *)0x0843F348)  /* on the race screen: 1 countdown, 2-4 race */
 #define MENU (*(volatile int32_t *)0x0829DED8)        /* 9: the race screen */
@@ -87,6 +93,8 @@ typedef struct Snapshot {
     uint8_t checkpoint;      /* checkpoints passed (+0x7990) */
     uint8_t attack, bottles; /* power-ups: the attack kind and bottles left */
     uint32_t pad[PAD_WORDS];
+    int32_t slot;            /* tests (DHD_PUPPET_RECORD): the rider's slot */
+    float ground[2];         /* tests: each wheel's clearance above the ground (ground_clearance) */
 } Snapshot;
 
 enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
@@ -96,6 +104,7 @@ enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
    full copy every PAD_REFRESH sends, finding 158). */
 #include "state_bundle.h"
 #include "puppet_predict.h"
+#include "puppet_link.h"
 enum { EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
 
 typedef struct Puppet {
@@ -112,6 +121,7 @@ typedef struct Puppet {
     int have_basis;
     PuppetCorrection fix;
     double fixed_at, behind;
+    double shown;            /* the moment (this race clock) the pose last written shows */
     uint32_t mirror[PAD_WORDS];  /* the remote virtual pad, as the deltas built it */
     PadSender sent_pad;
     int remote_crash;
@@ -122,12 +132,24 @@ extern void func_0012FE38(void *rider, void *state); /* Exit the current State, 
 extern void func_00155E78(void *crash, int kind);    /* start a crash */
 extern void func_0012E940(void *self, int kind, void *direction, void *other);  /* other hits self */
 
+typedef struct Delivery {
+    double at;               /* on this game's race clock */
+    int index;               /* into pp.file */
+} Delivery;
+enum { HELD_MAX = 512, HELD_BYTES = 1024 };
+
 static struct {
-    int init, from, rate, play_slot;
+    int init, from;          /* DHD_PUPPET_FROM: the recorded rider, -1 all */
     int allow;               /* the puppet code itself starts this crash / applies this hit */
     FILE *record, *trace;
-    Snapshot *file;          /* DHD_PUPPET_PLAY, in clock order */
-    int file_count, file_next, file_fed;
+    Snapshot *file;          /* DHD_PUPPET_PLAY, in recording order */
+    int file_count, playing;
+    int play_from[NRIDERS];  /* each slot's recorded rider (-1: not a replayed puppet) */
+    Delivery *deliveries;  /* the file's snapshots that get through, by arrival */
+    int delivery_count, delivery_next;
+    PuppetLink link, net_link;  /* DHD_PUPPET_LINK; DHD_NET_LINK on the online receive path */
+    struct { double at; int sender, size; uint8_t bytes[HELD_BYTES]; } held[HELD_MAX];  /* DHD_NET_LINK */
+    int held_count;
     Puppet p[NRIDERS];
     /* online */
     int online, local, nslots, host;
@@ -141,20 +163,148 @@ static struct {
 
 static int slot_of(const uint8_t *r) { return (int)((r - RIDERS) / RIDER_SIZE); }
 static uint8_t *rider(int slot) { return RIDERS + slot * RIDER_SIZE; }
+#define RACE_RIDERS (*(volatile int32_t *)(RIDERS + 0x501A8))  /* the race's riders (func_0011A100) */
+
+/* ---- tests: the ground under a rider's wheels ---- */
+
+/* The game's own world query (func_00214BA0, as the wheels' probes in func_00131998 use it): a
+   segment from `from` to `to`; up to max hits, each a point (w: where along the segment, 0-1)
+   and the surface's normal. */
+typedef struct GroundHit {
+    uint8_t header[16];
+    float pos[4], normal[4];
+} __attribute__((aligned(16))) GroundHit;
+typedef struct GroundQuery {
+    float *from, *to;
+    float t0, t1, radius;
+    void *matrix, *scale;
+    int max;
+    GroundHit *hits;
+    int found;
+} GroundQuery;
+_Static_assert(sizeof(GroundHit) == 0x30, "the game's hit record");
+_Static_assert(sizeof(GroundQuery) == 0x28, "the game's query record (32-bit pointers: the core)");
+extern int func_00214BA0(void *queries, int count);
+extern void func_00134D70(void *wheel, void *center, void *body);  /* a wheel's centre in the world */
+#define BODY_AT 0x40C0
+#define WHEEL_BODY_AT(w) (BODY_AT + ((w) ? 0x360 : 0x2E0))
+
+/* How far wheel w (0 front, 1 back) of the rider as it is now stands clear of the ground under
+   it, in game units: from the wheel's centre (func_00134D70, the pose's own) to the first
+   surface on a segment REACH units above it to REACH below it along the world's up axis, measured
+   along that surface's normal, less the wheel's radius. Below 0: the wheel is in the ground.
+   NAN: no ground within REACH (in the air). Tests only (the bench's trace and recordings). The
+   world's z axis is up (a wheel's contact lies its radius below its centre in z). */
+enum { UP = 2 };
+#define REACH 4.0f
+static float ground_clearance(uint8_t *r, int w)
+{
+    uint8_t *wheel = r + WHEEL_BODY_AT(w);
+    float center[4] __attribute__((aligned(16))), from[4] __attribute__((aligned(16))), to[4] __attribute__((aligned(16)));
+    GroundHit hits[10];
+    func_00134D70(wheel, center, r + BODY_AT);
+    float radius = ((float *)wheel)[3];
+    memcpy(from, center, sizeof from);
+    memcpy(to, center, sizeof to);
+    from[UP] += REACH, to[UP] -= REACH;
+    GroundQuery q = {from, to, 1, 1, 0, NULL, NULL, 10, hits, 0};
+    func_00214BA0(&q, 1);
+    int best = -1;
+    for (int i = 0; i < q.found && i < 10; i++)
+        if (best < 0 || hits[i].pos[3] < hits[best].pos[3]) best = i;
+    if (best < 0) return NAN;
+    const float *n = hits[best].normal, *g = hits[best].pos;
+    float len = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (!(len > 0)) return NAN;
+    return ((center[0] - g[0]) * n[0] + (center[1] - g[1]) * n[1] + (center[2] - g[2]) * n[2]) / len - radius;
+}
+
+static void take(Snapshot *s, const uint8_t *r);
+
+/* ---- tests: recorded riders replayed through a bad link (finding 202) ---- */
+
+static int by_arrival(const void *a, const void *b)
+{
+    const Delivery *x = a, *y = b;
+    return x->at < y->at ? -1 : x->at > y->at ? 1 : x->index - y->index;
+}
+
+/* DHD_PUPPET_MAP=src:dst,...: which recorded rider each puppet shows. Default: every recorded
+   rider but slot 0 onto its own slot (the AI riders of the recorded race); a file of one rider onto
+   DHD_PUPPET_SLOT (default 1). */
+static void play_map(int map[NRIDERS], const char *text, int only)
+{
+    for (int i = 0; i < NRIDERS; i++) map[i] = -1;
+    if (text && *text) {
+        for (const char *s = text; *s;) {
+            char *end;
+            int a = (int)strtol(s, &end, 10), b;
+            if (*end != ':') break;
+            b = (int)strtol(end + 1, &end, 10);
+            if (a >= 0 && a < NRIDERS && b >= 1 && b < NRIDERS) map[a] = b;
+            s = *end ? end + 1 : end;
+        }
+    } else if (only >= 0) {
+        const char *s = getenv("DHD_PUPPET_SLOT");
+        map[only] = s ? atoi(s) : 1;
+    } else {
+        for (int i = 1; i < NRIDERS; i++) map[i] = i;
+    }
+}
+
+/* The file's snapshots, as their senders would send them (60 or 30 a second: the first step of
+   each race tick, or of every second one), through the link (puppet_link.h), sorted by the moment
+   each arrives here. The sender's clock is the recorded race clock, moved by its hitch. */
+static void play_schedule(const char *link_text)
+{
+    PuppetLink link;
+    int map[NRIDERS], only = -1, last_tick[NRIDERS];
+    link_parse(&link, link_text);
+    for (int i = 0; i < pp.file_count; i++) {
+        int slot = pp.file[i].slot;
+        if (only == -1) only = slot;
+        else if (only != slot) only = -2;
+    }
+    play_map(map, getenv("DHD_PUPPET_MAP"), only >= 0 ? only : -1);
+    for (int i = 0; i < NRIDERS; i++) {
+        last_tick[i] = -1000;
+        if (map[i] > 0) pp.p[map[i]].on = 1, pp.play_from[map[i]] = i;
+    }
+    pp.deliveries = calloc(pp.file_count ? pp.file_count : 1, sizeof *pp.deliveries);
+    pp.delivery_count = 0;
+    for (int i = 0; i < pp.file_count; i++) {
+        const Snapshot *s = &pp.file[i];
+        if (s->slot < 0 || s->slot >= NRIDERS || map[s->slot] < 0) continue;
+        int rate = link.rate ? link.rate : s->slot == 0 ? 60 : 30, every = rate >= 60 ? 1 : 2;
+        if (s->clock == last_tick[s->slot] || s->clock % every) continue;
+        /* a new race in the file (the recording went on into another) */
+        if (s->clock < last_tick[s->slot]) last_tick[s->slot] = -1000;
+        last_tick[s->slot] = s->clock;
+        double sent = link_hitch_wall(link.hitch_at, link.hitch_len, s->time), arrives = sent;
+        if (link.on && !link_pass(&link, sent, &arrives)) continue;
+        /* the receiver's race clock at that wall moment */
+        pp.deliveries[pp.delivery_count++] = (Delivery){link_hitch_race(link.rhitch_at, link.rhitch_len, arrives), i};
+    }
+    qsort(pp.deliveries, pp.delivery_count, sizeof *pp.deliveries, by_arrival);
+    pp.link = link;
+    fprintf(stderr, "puppet: %d snapshots of %d recorded, %d delivered through the link (%s)\n", pp.file_count,
+            pp.file_count, pp.delivery_count, link_text && *link_text ? link_text : "perfect");
+    for (int i = 0; i < NRIDERS; i++)
+        if (map[i] > 0) fprintf(stderr, "puppet: recorded rider %d onto slot %d\n", i, map[i]);
+}
 
 static void setup(void)
 {
     const char *s;
     pp.init = 1;
-    pp.from = (s = getenv("DHD_PUPPET_FROM")) ? atoi(s) : 0;
-    pp.rate = (s = getenv("DHD_PUPPET_RATE")) && atoi(s) > 0 ? atoi(s) : 2;
-
-    pp.play_slot = -1;
+    pp.from = (s = getenv("DHD_PUPPET_FROM")) ? (!strcmp(s, "all") ? -1 : atoi(s)) : 0;
+    for (int i = 0; i < NRIDERS; i++) pp.play_from[i] = -1;
     if ((s = getenv("DHD_PUPPET_RECORD")) && *s && !(pp.record = fopen(s, "wb")))
         fprintf(stderr, "puppet: cannot write %s\n", s);
     if ((s = getenv("DHD_PUPPET_TRACE")) && *s && !(pp.trace = fopen(s, "w")))
         fprintf(stderr, "puppet: cannot write %s\n", s);
-    pp.file_fed = -1;
+    if ((s = getenv("DHD_NET_LINK")) && *s && link_parse(&pp.net_link, s))
+        fprintf(stderr, "puppet: STATE arrives through a test link: %s\n", s);
     if ((s = getenv("DHD_PUPPET_PLAY")) && *s) {
         FILE *f = fopen(s, "rb");
         Snapshot one;
@@ -167,10 +317,8 @@ static void setup(void)
             pp.file[pp.file_count++] = one;
         }
         fclose(f);
-        pp.play_slot = (s = getenv("DHD_PUPPET_SLOT")) ? atoi(s) : 1;
-        if (pp.play_slot >= 1 && pp.play_slot < NRIDERS) pp.p[pp.play_slot].on = 1;
-        fprintf(stderr, "puppet: %d snapshots onto slot %d, one in %d ticks\n", pp.file_count,
-                pp.play_slot, pp.rate);
+        pp.playing = 1;
+        play_schedule(getenv("DHD_PUPPET_LINK"));
     }
 }
 
@@ -199,6 +347,7 @@ static void take(Snapshot *s, const uint8_t *r)
     s->attack = (uint8_t)FIELD(r, ATTACK_AT, int32_t);
     s->bottles = (uint8_t)FIELD(r, BOTTLES_AT, int32_t);
     memcpy(s->pad, r + PAD_AT, sizeof s->pad);
+    s->slot = slot_of(r);
 }
 
 /* A snapshot arrived for slot (local rider numbering). Its time is on this PC's race clock (online:
@@ -354,6 +503,7 @@ int hle_puppet_physics(uint8_t *r)
     }
     smooth(p, &s);
     p->behind = RACE_TIME - s.time;
+    p->shown = s.time;
     float mass = FIELD(r, MASS_AT, float), momentum[4] = {s.vel[0] * mass, s.vel[1] * mass, s.vel[2] * mass, 1};
     memcpy(r + POS_AT, s.pos, 12);
     for (int k = 0; k < 3; k++) memcpy(r + ROT_AT + 16 * k, s.rot[k], 12);
@@ -396,7 +546,6 @@ int hle_puppet_physics(uint8_t *r)
     FIELD(r, ATTACK_AT, int32_t) = s.attack;
     FIELD(r, BOTTLES_AT, int32_t) = s.bottles;
     func_0012DDC0(r);
-    if (pp.trace) fprintf(pp.trace, "%.6f %.6f %d %.5f %.5f %.5f\n", RACE_TIME, s.time, slot, s.pos[0], s.pos[1], s.pos[2]);
     return 1;
 }
 
@@ -463,6 +612,7 @@ void hle_puppet_start(void)
         }
     }
     pp.hits_taken = 0, pp.nevents = 0, pp.go_server = 0;
+    pp.held_count = 0;
 }
 
 /* This PC's GO on the server clock (ms; online.c): from here snapshots stamped on that clock land on
@@ -475,7 +625,7 @@ void hle_puppet_offline(void)
     if (!pp.online) return;
     pp.online = 0;
     for (int i = 1; i < NRIDERS; i++)
-        if (i != pp.play_slot) memset(&pp.p[i], 0, sizeof pp.p[i]);
+        if (pp.play_from[i] < 0) memset(&pp.p[i], 0, sizeof pp.p[i]);
     memset(pp.gone, 0, sizeof pp.gone);
     memset(pp.kept, 0, sizeof pp.kept);
     pp.hits_taken = 0, pp.nevents = 0;
@@ -619,15 +769,50 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
 }
 
 /* A STATE bundle from the PC in lobby slot sender: every record, once the whole bundle checks. */
-void hle_puppet_receive(int sender, const uint8_t *in, int n)
+static void receive_bundle(int sender, const uint8_t *in, int n)
 {
     double stamp;
     if (!pp.online || sender == pp.local || !pp.go_server || !state_bundle_check(in, n, &stamp) ||
         !isfinite(stamp)) return;
+    stamp += pp.net_link.skew * 1000;  /* DHD_NET_LINK's clock error (tests; 0 otherwise) */
     for (int at = STATE_BUNDLE_HEADER; at < n;) {
         int size = state_record_size(in + at, n - at);
         receive_record(sender, in + at, size, stamp);
         at += size;
+    }
+}
+
+/* Online STATE in. Under DHD_NET_LINK (tests: a bad network on the live path) a bundle is first
+   held as the link says (lost, late, out of order) and released by net_link_release. */
+void hle_puppet_receive(int sender, const uint8_t *in, int n)
+{
+    double arrives;
+    if (!pp.init) setup();
+    if (!pp.net_link.on) {
+        receive_bundle(sender, in, n);
+        return;
+    }
+    if (n > HELD_BYTES || pp.held_count == HELD_MAX || !link_pass(&pp.net_link, host_wall_seconds(), &arrives)) return;
+    pp.held[pp.held_count].at = arrives;
+    pp.held[pp.held_count].sender = sender;
+    pp.held[pp.held_count].size = n;
+    memcpy(pp.held[pp.held_count++].bytes, in, n);
+}
+
+/* DHD_NET_LINK: the held bundles whose moment has come, in the order they arrive. */
+static void net_link_release(void)
+{
+    double now = host_wall_seconds();
+    for (;;) {
+        int next = -1;
+        for (int i = 0; i < pp.held_count; i++)
+            if (pp.held[i].at <= now && (next < 0 || pp.held[i].at < pp.held[next].at)) next = i;
+        if (next < 0) return;
+        int sender = pp.held[next].sender, size = pp.held[next].size;
+        uint8_t bytes[HELD_BYTES];
+        memcpy(bytes, pp.held[next].bytes, size);
+        pp.held[next] = pp.held[--pp.held_count];
+        receive_bundle(sender, bytes, size);
     }
 }
 
@@ -707,16 +892,40 @@ void hle_puppet_field(void)
     if (!pp.init) setup();
     if (!RACING) return;
     if (pp.record) {
-        Snapshot s;
-        take(&s, rider(pp.from));
-        fwrite(&s, sizeof s, 1, pp.record);
+        int first = pp.from < 0 ? 0 : pp.from, last = pp.from < 0 ? RACE_RIDERS : pp.from + 1;
+        for (int i = first; i < last && i < NRIDERS; i++) {
+            Snapshot s;
+            take(&s, rider(i));
+            s.ground[0] = ground_clearance(rider(i), 0);
+            s.ground[1] = ground_clearance(rider(i), 1);
+            fwrite(&s, sizeof s, 1, pp.record);
+        }
         fflush(pp.record);
     }
-    if (pp.trace) fflush(pp.trace);
-    while (pp.play_slot > 0 && pp.file_next < pp.file_count && pp.file[pp.file_next].time <= RACE_TIME) {
-        const Snapshot *s = &pp.file[pp.file_next++];
-        if (s->clock % pp.rate == 0 && s->clock != pp.file_fed) feed(pp.play_slot, s), pp.file_fed = s->clock;
+    /* Each puppet as it is drawn after the whole step (bumps included): race time here, the
+       moment it shows, slot, position, the moment of its recorded rider it should show (the
+       bench: the sender's race clock now, its hitch included), each wheel's clearance above the
+       ground (nan: none within reach), 1 while it crashes, and its recorded rider (-1 online). */
+    if (pp.trace) {
+        for (int i = 1; i < NRIDERS; i++) {
+            Puppet *p = &pp.p[i];
+            if (!p->on || !p->count) continue;
+            const float *pos = (const float *)(rider(i) + POS_AT);
+            double truth = pp.playing ? link_hitch_race(pp.link.hitch_at, pp.link.hitch_len, RACE_TIME) : RACE_TIME;
+            fprintf(pp.trace, "%.6f %.6f %d %.5f %.5f %.5f %.6f %.4f %.4f %d %d\n", RACE_TIME, p->shown, i, pos[0],
+                    pos[1], pos[2], truth, ground_clearance(rider(i), 0), ground_clearance(rider(i), 1),
+                    !!(FIELD(rider(i), CRASH_FLAGS_AT, uint32_t) & 4), pp.play_from[i]);
+        }
+        fflush(pp.trace);
     }
+    /* the replayed snapshots that have arrived, placed on this clock off by the link's skew */
+    while (pp.delivery_next < pp.delivery_count && pp.deliveries[pp.delivery_next].at <= RACE_TIME) {
+        Snapshot s = pp.file[pp.deliveries[pp.delivery_next++].index];
+        s.time += pp.link.skew;
+        for (int i = 1; i < NRIDERS; i++)
+            if (pp.play_from[i] == s.slot) feed(i, &s);
+    }
+    net_link_release();
 }
 
 int hle_puppet_owner(int global) { return global >= 0 && global < NRIDERS ? owner_of(to_local(global)) : -1; }
