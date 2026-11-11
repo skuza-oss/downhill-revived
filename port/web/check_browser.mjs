@@ -10,6 +10,10 @@
 // fields or first-last ranges, comma separated; worker.js waits at each until it is taken) as
 // DIR/raw/shot-fNNNNNN.png, the layout port/tools/native_vu_pictures.py compare reads; the run ends
 // after the last (finding 199).
+// --keys F:CODE[,F:CODE...]: once the game is at field F or later, a key press (KeyboardEvent.code,
+// e.g. KeyD, ArrowDown) through the page's own keyboard path, as a player's (DevTools input events);
+// for pages that read the controller itself, which DHD_NAV's pad does not reach (REVIVED SETTINGS'
+// tabs). Fields are checked every 250 ms, so give presses some fields apart.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,6 +34,16 @@ const captureList = option('--capture', ''), captureDir = path.resolve(option('-
 const captureLast = Math.max(0, ...captureList.split(',').filter(Boolean).map(r => Number(r.split('-').pop())));
 if (captureList) fs.mkdirSync(path.join(captureDir, 'raw'), { recursive: true });
 let captured = 0;
+const keyPresses = option('--keys', '').split(',').filter(Boolean).map(k => { const i = k.indexOf(':'); return [Number(k.slice(0, i)), k.slice(i + 1)]; });
+async function press(code) {
+  const key = code.replace(/^(Key|Digit)/, ''), vk = code.startsWith('Key') ? key.charCodeAt(0)
+    : { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Enter: 13, Escape: 27, Space: 32 }[code] ?? 0;
+  for (const type of ['keyDown', 'keyUp']) {
+    await send('Input.dispatchKeyEvent', { type, code, key, windowsVirtualKeyCode: vk }, sessionId);
+    if (type === 'keyDown') await new Promise(r => setTimeout(r, 150));
+  }
+  console.error(`pressed ${code}`);
+}
 const server = spawn(process.execPath, [path.join(root, 'port/web/serve.mjs'), '--port', String(port), '--iso', iso], { stdio: ['ignore', 'pipe', 'inherit'] });
 await new Promise(r => server.stdout.once('data', r));
 const { browser, wsUrl } = await startChrome({ chrome, profile,
@@ -54,7 +68,11 @@ const captureQuery = captureList ? `env.DHD_CAPTURE_FIELDS=${encodeURIComponent(
 await send('Page.navigate', { url: `http://localhost:${port}/?iso=test${q ? '&' + q : ''}${captureQuery ? '&' + captureQuery : ''}` }, sessionId);
 const tStage = Date.now();
 while ((Date.now() - tStage) / 1000 < seconds) {
-  await new Promise(r => setTimeout(r, captureList ? 250 : 2000));
+  await new Promise(r => setTimeout(r, captureList || keyPresses.length ? 250 : 2000));
+  if (keyPresses.length) {
+    const at = await evaluate('window.dhdStatus?.field ?? 0');
+    while (keyPresses.length && at >= keyPresses[0][0]) await press(keyPresses.shift()[1]);
+  }
   const at = captureList ? await evaluate('window.dhdCapture ?? null') : null;
   if (at !== null && at !== undefined) {
     const r = await evaluate('JSON.stringify(document.getElementById("screen").getBoundingClientRect())');
