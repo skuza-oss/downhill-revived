@@ -41,8 +41,8 @@
                                   no crash) was stopped by this game's physics: it takes its owner's */
 #define SYNC_GUARD_AGE 0.4     /* s: how recent */
 #define SYNC_RESYNC_AGE 0.4    /* s: an older snapshot never makes a jump (puppet.c steer) */
-#define SYNC_CATCHUP 1.25f     /* after a HOLD, a sender's race clock this much faster than the shared
-                                  one is catching up (up to twice): its puppet follows its snapshots */
+#define SYNC_CATCHUP 1.25f     /* a sender's race clock this much faster than the shared one is catching
+                                  up (up to twice, finding 139): its puppet glides after its snapshots */
 #define SYNC_CATCHUP_END 1.1f  /* ... until under this */
 #define SYNC_FOLLOW_TAU 0.05f  /* s: the glide toward its rider meanwhile */
 #define SYNC_START_WAIT 2.0   /* s after GO: a puppet whose snapshots have not begun is this game's AI */

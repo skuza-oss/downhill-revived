@@ -131,7 +131,7 @@ typedef struct Puppet {
        snapshots come again and its rider has caught up with it */
     int held;
     int from_grid;           /* stood on the grid until its first snapshot (grid_step) */
-    int after_hold;          /* released from a HOLD: its sender may be catching up */
+    int catching;            /* its sender catches up (its clock rate over SYNC_CATCHUP until under the end) */
     double held_at, resumed_at;   /* the sender's last snapshot's moment; when newer ones came again */
     SyncPose pin;
     float error;             /* the last snapshot's difference from this puppet (units) */
@@ -392,7 +392,7 @@ static void feed(int slot, const Snapshot *s)
        and the ring at each race's start, and hle_puppet_receive has already applied this
        snapshot's pad words to the mirror, so nothing here may clear it. */
     if (p->count && s->time < p->ring[p->count - 1].time - 1)
-        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->after_hold = 0;
+        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double age = RACE_TIME - s->time;
     if (!p->have_age)
@@ -498,13 +498,15 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
     double carry = 0;
     int fresh = s->time > p->used;
     if (fresh) carry = take_snapshot(p, s, &owner, &carried);
-    /* After a HOLD its sender catches up (its race clock runs up to twice the shared clock, finding
-       139): its rider moves faster than this game's physics rides, so the puppet glides toward its
-       newest snapshot carried to now (1/e in SYNC_FOLLOW_TAU) until the sender's clock runs normally
-       again. Live, without this the whole held pack was put 13-23 units forward 3-4 ticks after
-       riding on. Only after a hold: an unannounced rate change is followed by the steering alone. */
-    if (p->after_hold && p->rate < SYNC_CATCHUP_END) p->after_hold = 0;
-    if (p->after_hold && p->rate > SYNC_CATCHUP) {
+    /* A sender catching up after its game fell behind (a HOLD's stop, or a hitch too short or too
+       loaded to announce one: its race clock runs up to twice the shared clock, finding 139): its
+       rider moves faster than this game's physics rides, so the puppet glides toward its newest
+       snapshot carried to now (1/e in SYNC_FOLLOW_TAU) from when the rate rises past SYNC_CATCHUP
+       until it falls under SYNC_CATCHUP_END. Live, without this the whole pack was put 12-25 units
+       forward a few ticks into each catch-up. */
+    if (p->rate > SYNC_CATCHUP) p->catching = 1;
+    else if (p->rate < SYNC_CATCHUP_END) p->catching = 0;
+    if (p->catching) {
         snapshot_pose(s, &owner);
         for (int k = 0; k < 3; k++) owner.vel[k] *= p->rate;
         sync_carry(&owner, s->spin, (float)fmin(fmax(0, t - s->time), SYNC_CARRY_MAX), &carried);
@@ -603,7 +605,7 @@ static int held_step(uint8_t *r, Puppet *p, const Snapshot *s)
         if (caught || RACE_TIME - p->resumed_at > SYNC_COAST) {
             fprintf(stderr, "puppet: tick %d slot %d rides on after a hold (its rider %.1f units %s)\n", RACE_CLOCK,
                     slot_of(r), sync_len(d), along >= 0 ? "past it" : "short of it");
-            p->held = 0, p->stepped_at = 0, p->after_hold = 1;
+            p->held = 0, p->stepped_at = 0;
             if (caught && sync_len(d) < SYNC_RESYNC) {
                 set_body(r, &carried, s->spin);
                 sync_restart(&p->sync, RACE_TIME - fmin(fmax(0, RACE_TIME - s->time), SYNC_CARRY_MAX), &owner, s->spin,
@@ -824,7 +826,7 @@ void hle_puppet_start(void)
         if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
-        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->after_hold = 0;
+        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0;
         sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
