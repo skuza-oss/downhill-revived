@@ -38,8 +38,13 @@ the P2P star (unless a bug there is part of the problem).
       replay in `port/hle/puppet.c`). How it measures: below.
 - [x] Gate passed: today's model sinks and jumps on the bench at every realistic delay (below).
 - [x] The new model, f4ba28c1 (`port/hle/puppet_sync.h`; the old predictor deleted).
-- [ ] The full before/after matrix on three tracks, the interpolation-buffer comparison, clock
-      cases, clips, the live two-game race under `DHD_NET_LINK`, docs, checks.
+- [x] The clock cases: stamps follow a game whose race clock falls behind, 621a40d5; the
+      tools for live races and clips, 91345805.
+- [x] Refinements on the bench (v6-v8): corrections carried to now and eased, the sender's
+      clock rate followed, a rider let go after 1 s of silence, 44583044; clips at 4x, 0d44bcf1.
+- [x] The interpolation-buffer comparison (a throwaway build, never committed): rejected.
+- [x] Live two-game races through a local server under `DHD_NET_LINK` (below).
+- [ ] The final matrix (`--label final`, v8) on three tracks; the 4x clips; `check.py port`.
 
 ### The bench (how it measures)
 
@@ -112,6 +117,38 @@ as a jolt.
 - **Body writes keep the previous position in step:** the bookkeeping pass saves the position the
   physics integrates from before the puppet is steered, so a correction moves both, or it is
   undone the next step (first build: a 3-unit offset that never faded).
+- **Carried to now, eased, fast for large errors (44583044):** a snapshot's velocity difference
+  has been moving the puppet away since its moment, so it is added to the position still to
+  correct (`SYNC_PROJECT`, at most 0.3 s): 150 ms error p95 6.1 -> 4.7, p99 9.4 -> 7.2. The slide
+  limit grows with the error (`SYNC_SLIDE_GAIN`) and a correction's speed changes at most 600
+  units a second each second (`SYNC_SLIDE_ACCEL`): without the easing the faster slide brought
+  jolts back (150 ms: 59 a minute; eased: 3).
+- **The sender's clock rate:** a snapshot carries the sender's race time beside its stamp; two of
+  them show how fast its race clock runs on the shared clock (2 while it catches up after a hitch,
+  under 1 below 30 fps), and the owner's velocity is taken at that rate. A receiver 3 s behind:
+  p95 5.3 -> 2.2.
+- **Stamps follow a game whose race clock falls behind (621a40d5):** online the race clock keeps
+  the time it could not step and catches up later (finding 139). The stamp now adds what the
+  sender's clock trails beyond 50 ms (normal pacing lag: 6-14 ms) and a receiver takes its own off
+  when it places a snapshot (`sync_clock_excess`). In normal play both are zero; no wire change.
+  Before it, a receiver 3 s behind drew riders up to 123 units off (p99) and, on the new model,
+  snapshots seconds "old" ran past the puppet's history into re-sync loops.
+- **After 1 s without a snapshot** (`SYNC_COAST`) a player's puppet lets go of the pad and slows
+  to a stop, a computer rider's rides on its AI. Braking from 0.3 s was tried (v9): the stalled
+  sender's p99 14.4 instead of 16.4, but the bad link's p99 16.1 instead of 11.7 and outages' 10.2
+  instead of 7.9. A receiver cannot tell a stalled game from lost packets; lost packets are far
+  more common, so 1 s.
+- **Rejected: a pure interpolation buffer** (finding 169's adaptive delay: the measured age plus an
+  interval plus twice the jitter; a throwaway build on the bench commit). It draws real poses, so
+  it sinks less than today (80 ms: 6 % against 33 %), but in the past: 150-370 ms behind, so 15
+  units off at 80 ms, 23 at 150 ms, 28 on the bad link, and it still sinks 4-23 % (the delay
+  carries on through the gaps). Hits and closeness would be judged on riders that far back.
+- **Rejected: sending the AI's power (+0x4214)**: no change on the bench (Surprises).
+- **A rider whose player left after finishing** (run by no PC) stays at its last snapshot without
+  physics, as before; **a rider the host's AI took over** runs the AI controller in its puppet.
+- **No protocol change:** the STATE bundle is unchanged (version 6, protocol 4); only the stamp's
+  meaning grew for a game that falls behind (`docs/online-protocol.md`). The release need not
+  raise `MIN_VERSION`; a 0.7.16 game in the same room shows the riders the old way.
 - Sources: Glenn Fiedler, "Networked Physics" (gafferongames.com, 2014-2015: state
   synchronisation, the receiver simulates and applies the sender's state with smoothing); Jared
   Cone, "It IS Rocket Science! The Physics of Rocket League Detailed" (GDC 2018: other cars
@@ -128,5 +165,13 @@ as a jolt.
 - First new build: 1,268 re-syncs of one rider in a run at 150 ms: after a re-sync the history was
   empty, so the next snapshots (150 ms old) were compared with the present and read as 14-20
   units off: a loop. Fixed by restarting the history from the re-sync's straight carry.
+- The bench is kind to AI puppets: the replayed race is the same world, so this game's AI
+  controller steers exactly as the recorded one did. Online the guest's AI controller has its own
+  state (its catch-up against the guest's own rider); in a live race the guest's AI puppets were
+  0.71 / 3.1 / 5.0 units (p50/p95/p99) from the host's AI riders at a snapshot age of ~130 ms,
+  wheels below -0.15 in 3.5 % of steps (real riders: 3.3 %). Once, three AI riders were put back
+  13-18 units 0.6 s after GO (another run: none).
+- A live re-sync of 249 units was the host's own stuck-rider recovery (fps.c: stuck pedalling for
+  2 s) moving its rider on its own screen: the jump is real there too.
 
 ## Result
