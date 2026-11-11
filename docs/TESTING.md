@@ -55,6 +55,8 @@ after a version change before a live check.
 | `port/tools/cross_race.py` | the release check for online changes: a PC<->Mac room race, run once with each side hosting; `--backend p2p` in a P2P room (the guest joins by code), `--force-turn` with direct UDP off (an SFU room's TURN relay, a P2P room's SFU fallback) |
 | `port/tools/p2p_crowd.py OUT` | a crowded P2P room (the 6+ racer setup check for P2P): this PC's game makes it (the hub), `--bots N` nettool bots join (`--sfu-bots K` of them with direct links off: they race over the SFU fallback, which needs `.dev.vars`), the Mac too with `DHD_REMOTE*`; setup time, the host's CPU and upload per peer, each peer's path, who raced over the SFU, snapshot age per sender (summary.json) |
 | `port/tools/online_race.py` | two local games through a server, optionally with nettool bots; `--lag` measures the puppets (below) |
+| `port/tools/mosh_round_check.py OUT` | the arena's scored round online (finding 204): two games in a P2P room from the menus, on hidden desktops. The default `--scenario hit` has no computer riders, both riders braking at the gates and the guest punching and kicking: the guest must score on the host's rider, with the same finals, table and room results on both games (finding 206). `--scenario ride` pedals and attacks with computer riders (`--bots N`, `--then next`, `--no-ai`); `--offline` is the game's own Mosh Bowl |
+| `port/tools/online_riders.py` | the race pads the online tools give their riders (`rider_env`: `DHD_RACE_PAD` with `DHD_RACE_SYNC=1`) |
 | `port/tools/puppet_lag.py RUN` | from an `online_race.py --lag` run: how far behind real time and how far from the real rider each game draws the other, and how often it jerks (finding 169) |
 | `port/net/build_tests.py` | the network client's unit and loopback tests; builds nettool (`nettool --p2p host`, or `join` with a 7-character code: a P2P room's bot; `--rider N --bike A,B,C`: the rider and bike it says it rides) |
 | `port/android/test_disc_image.py [ISO]` | the Android side's plain-JVM tests: the first start's disc rules (the check, a complete copy) on synthetic images, and the update notice's page rule (finding 143) |
@@ -147,8 +149,8 @@ Menus and riding:
 | `DHD_NAV` | menu script by the screen shown, `field@ADDR=value:button,...` (autopad.c) |
 | `DHD_AUTOPAD_FRAMES` | button script by field count, `field:length:button,...` |
 | `DHD_AUTOPAD` | button script by seconds |
-| `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...` |
-| `DHD_RACE_SYNC=1` | race scripts run on the race clock |
+| `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...`; does nothing without `DHD_RACE_SYNC=1` and a menu script (below) |
+| `DHD_RACE_SYNC=1` | race scripts run on the race clock; without it `DHD_RACE_PAD` gives the rider no input (online tools: `online_riders.rider_env`, finding 206) |
 | `DHD_KEYS` | (race clock) keys through the keyboard's layout, `start:length:key[+key],...` with dhd.ini's key names (`space`, `j`, `kp1`, ...) or `esc` |
 | `DHD_TEST_PAD`, `DHD_TEST_PAD2` | (race clock) player 1's or 2's controller by its inputs' places, `start:length:input[+input],...` (`south`, `east`, `lt`, `dpad_up`, `lx=-50`, ...), through that player's layout (`pad1`, `pad2`) as a real pad's; logged as `test pad N` (finding 157) |
 | `DHD_REPLAY_TEST=S` | at race second S the race's replay starts, as REPLAY in the results does; `DHD_REPLAY_TRACE=path`: the riders' positions each field (finding 142) |
@@ -225,6 +227,14 @@ with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=nativ
   touches included; drive the menus by posted keys (finding 189).
 - **Posted keys don't reach the room under `DHD_NET_SCRIPTED`.** Use the scripted hooks
   (`DHD_NET_TEST_TRACK`, `DHD_NET_TEST_READY`) instead.
+- **A pad script shuts the keyboard out.** With `DHD_NAV`, `DHD_AUTOPAD` or `DHD_AUTOPAD_FRAMES`
+  set, `host_pad_read` takes the script's buttons and never reads the keyboard (autopad.c), all
+  game long: a game driven by posted keys must have none (`hidden_game.Game.key` refuses then).
+- **`DHD_RACE_PAD` without `DHD_RACE_SYNC=1` does nothing**, online too: the rider takes no input
+  and an online test's humans neither pedal nor attack (finding 206). The online tools set both
+  through `online_riders.rider_env`. An attack hits nothing before race tick 301
+  (`func_0012E230`), and riders that only roll leave the gates apart: braking (Triangle) keeps
+  two riders side by side for a hit.
 - **`wait REGEX` matches the whole log**, earlier lines too: wait for something new.
 - **A release `dhd.exe` opens the launcher** unless `DHD_LAUNCHER=1` or a script is set.
 - **`DHD_MEMCARD=0` stops a release boot at "memory card not found"** on some paths: use

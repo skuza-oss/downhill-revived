@@ -1358,11 +1358,20 @@ static void draw_card(int i)
     else if (now.racing && !strcmp(m->race_state, "finished")) tag = "DONE";
     else if (now.racing && !strcmp(m->race_state, "dnf")) tag = "OUT";
     else if (now.starting && m->ready) tag = "STARTING";
-    snprintf(line, sizeof line, "%d %.9s%s", i + 1, m->name, m->id == l->host_id ? " HOST" : m->id == l->member_id ? " YOU" : "");
+    /* The first line: the place, the name and the HOST or YOU tag on the left, the state on the
+       right at its own size. The left part takes what the state leaves (it used to take 112 of
+       the card's 180 whatever the state, so STARTING covered the tag; finding 206): smaller
+       down to fit's 60 %, then the name loses its last letters, never the tag. */
+    MenuStyle ts = menu_style(st_on, 70, -1, 0, 0);
+    int room_w = w - 10 - menu_text_width(tag, &ts) * 640 / vw - 6, keep = 9;
+    const char *mark = m->id == l->host_id ? " HOST" : m->id == l->member_id ? " YOU" : "";
+    if (room_w > 112) room_w = 112;
+    do snprintf(line, sizeof line, "%d %.*s%s", i + 1, keep, m->name, mark);
+    while (!fits(line, st_row, 85, room_w) && --keep > 1);
     for (char *c = line; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
     rect(x, y + 1, 2, 18, m->ready ? green : amber, 128);
-    put(MENU_LEFT, x + 5, y + 2, line, fit(line, st_row, 85, 112));
-    put(MENU_RIGHT, x + w - 5, y + 2, tag, menu_style(st_on, 70, -1, 0, 0));
+    put(MENU_LEFT, x + 5, y + 2, line, fit(line, st_row, 85, room_w));
+    put(MENU_RIGHT, x + w - 5, y + 2, tag, ts);
     detail[0] = 0;
     if (now.racing && !strcmp(m->race_state, "finished")) {
         finish_text(line, sizeof line, m->finish_ticks, l->member_score[i]);
@@ -1379,12 +1388,13 @@ static void draw_card(int i)
         }
     }
     if (!detail[0]) snprintf(detail, sizeof detail, "%s", m->choosing ? "..." : m->rider >= 1 && m->rider <= 16 ? rider_names[m->rider-1] : "NO RIDER");
-    put(MENU_LEFT, x + 5, y + 11, detail, fit(detail, st_off, 75, 115));
     if (m->rtt_ms >= 0) snprintf(ping, sizeof ping, "%d MS", m->rtt_ms);
     else snprintf(ping, sizeof ping, "-");
     MenuStyle ps = menu_style(st_row, 70, -1, 0, 0);
+    int ping_w = menu_text_width(ping, &ps) * 640 / vw, detail_w = w - 26 - ping_w;  /* left of the bars */
+    put(MENU_LEFT, x + 5, y + 11, detail, fit(detail, st_off, 75, detail_w < 115 ? detail_w : 115));
     put(MENU_RIGHT, x + w - 5, y + 11, ping, ps);
-    draw_bars(x + w - 18 - menu_text_width(ping, &ps) * 640 / vw, y + 18, m->rtt_ms);
+    draw_bars(x + w - 18 - ping_w, y + 18, m->rtt_ms);
 }
 
 static void draw_bar_cell(int f, int k, const char *label, const char *why, const RoomNow *r, int green_cell)
@@ -1697,9 +1707,15 @@ static void room_draw(MenuPage *p)
         char head[64];
         int all = l->nmembers >= 2 && r->ready == l->nmembers;
         if (r->racing) {
-            put(MENU_LEFT, CARD_X + 3, TOP + 1, "RACE RESULTS - LIVE", menu_style(st_row, 80, -1, 0, 0));
+            /* the counts on the right; on the left the longest form that fits beside them (the
+               whole title ran into "3 FINISHED - 5 RACING"; finding 206) */
+            static const char *const live[] = {"RACE RESULTS - LIVE", "RESULTS - LIVE", "LIVE", NULL};
+            MenuStyle st = menu_style(st_row, 80, -1, 0, 0);
             snprintf(head, sizeof head, "%d FINISHED - %d RACING", r->finished, r->riding);
             put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, tint(st_row, 80, blue));
+            int room_w = CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10;
+            const char *left = first_fit(live, st, 80, room_w);
+            put(MENU_LEFT, CARD_X + 3, TOP + 1, left, fit(left, st_row, 80, room_w));
         } else {
             /* the ready count on the right; on the left the longest form that fits beside it */
             MenuStyle st = menu_style(st_row, 80, -1, 0, 0);

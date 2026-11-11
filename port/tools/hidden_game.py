@@ -70,6 +70,10 @@ def test_iso():
     return iso
 
 
+# Menu scripts (autopad.c host_pad_script): with one set the game reads no keyboard.
+PAD_SCRIPTS = ('DHD_NAV', 'DHD_AUTOPAD', 'DHD_AUTOPAD_FRAMES')
+
+
 class Game:
     def __init__(self, exe, out, env=None, name='check', scale=1, shot_window='960x720', interval=0.5, timed=False, args=()):
         self.out = Path(out); self.out.mkdir(parents=True, exist_ok=True)
@@ -84,6 +88,8 @@ class Game:
         if shot_window: e['DHD_SCREENSHOT_WINDOW'] = shot_window
         e.update(env or {})
         e = {k: v for k, v in e.items() if v != '<unset>'}
+        # a menu script replaces the keyboard (autopad.c host_pad_read): key() refuses posted keys then
+        self.pad_scripts = [k for k in PAD_SCRIPTS if e.get(k)]
         game_lock.acquire(name, timed=timed)
         try:
             self.desk_name = f'{name}-{os.getpid()}'
@@ -150,6 +156,9 @@ class Game:
         u32.PostMessageW(self.hwnd, msg, wp, lp)
 
     def key(self, name, hold=0.12):
+        if self.pad_scripts:
+            raise RuntimeError(f'posted keys reach no game with {", ".join(self.pad_scripts)}: host_pad_read takes the '
+                               'script instead of the keyboard (autopad.c); drive this game by keys or by scripts, not both')
         vk = VK.get(name) or ord(name.upper())
         sc = u32.MapVirtualKeyW(vk, 0)
         ext = 1 << 24 if vk in (0x25, 0x26, 0x27, 0x28) else 0

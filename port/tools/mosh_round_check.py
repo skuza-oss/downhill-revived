@@ -1,25 +1,37 @@
 """The arena's scored round online (finding 204): two games on this PC in one room, from the real
 ONLINE menus, on hidden desktops (hidden_game.py), and nettool bots up to the arena's limit if
 asked. The host makes a P2P room on the Mosh Pit arena (DHD_NET_TEST_TRACK=23), the guest joins by
-its code, both ready; the round plays its two minutes by the game's Mosh Bowl rules (the room's
-computer riders on unless --no-ai), each game punching and kicking as it pedals; then the round's
-table, COMBAT RESULTS and back to the room. A local server per run (local_server.py, P2P rooms:
-no Realtime credentials needed).
+its code, both ready; the round plays its two minutes by the game's Mosh Bowl rules; then the
+round's table, COMBAT RESULTS and back to the room. A local server per run (local_server.py, P2P
+rooms: no Realtime credentials needed). The riders follow DHD_RACE_PAD scripts with
+DHD_RACE_SYNC=1 (online_riders.py; without the switch they took no input, finding 206).
 
-    python port/tools/mosh_round_check.py OUT [--bots 4] [--then same|next] [--no-ai]
-    python port/tools/mosh_round_check.py OUT --offline     # the game's own Mosh Bowl, no server
+    python port/tools/mosh_round_check.py OUT                  # --scenario hit: a human scores on a human
+    python port/tools/mosh_round_check.py OUT --scenario ride [--bots 4] [--then same|next] [--no-ai]
+    python port/tools/mosh_round_check.py OUT --offline        # the game's own Mosh Bowl, no server
+
+--scenario hit (the default): no computer riders; both riders hold the brake (Triangle) all round,
+so they stay side by side at the gates, and the guest punches and kicks every 0.6 s from 5.2 s
+after GO (an attack hits nothing before race tick 301, func_0012E230). Besides the checks below it
+passes when the guest has points and the host's rider hits taken, the guest first, and each
+rider's final is the same on both games (its owner's "(sent)" line, the other's "(from player N)"
+line) and in the table.
+--scenario ride: both games pedal all round with a punch or a kick every 2.5 s, the room's
+computer riders on unless --no-ai.
 
 The scripted host starts its first race before the guest is in (as in cross_race.py), so with
 --then same (the default) its first round may be its own and the next one has both. It passes when
 both games have the table of the round both played and the tables are equal, and the room's
 results of that race (the room page's log line, on each game) list the players in the table's
 order with the same points and places. --then next: the race after the host's own round is the
-next track (Single Event), a check that the room goes back to it. Pictures: OUT/<game>/present-NNN.png every --interval seconds, rendered at
---scale (default 4) in a --window sized window; untimed game lock, two places.
+next track (Single Event), a check that the room goes back to it. Pictures:
+OUT/<game>/present-NNN.png every --interval seconds, rendered at --scale (default 4) in a --window
+sized window; untimed game lock, two places.
 --offline: one game through the game's own menus (SINGLE PLAYER, the Mosh Bowl row of the
-single-player modes, its timed row) for one round, the same pad, pictures as above; it passes when
-the round ends and COMBAT RESULTS come up (its log: no online line). The offline mode must stay
-the game's own: every online hook returns at once offline.
+single-player modes, its timed row) for one round with the ride scenario's pad, pictures as above;
+it passes when the game runs its time with no online line in its log (the pictures show the
+round's end and COMBAT RESULTS). The offline mode must stay the game's own: every online hook
+returns at once offline.
 
 Needs DHD_TEST_ISO (or DHD_ISO) and the x64 build (build/host64-exe/dhd64.exe)."""
 import argparse
@@ -36,12 +48,15 @@ import local_server  # noqa: E402
 import owned_process  # noqa: E402
 from cross_race import P2P_HOST_NAV, P2P_GUEST_NAV  # noqa: E402
 from online_race import iso_files_sha256  # noqa: E402
+from online_riders import BRAKE, PEDAL, attacks, pad, rider_env  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-PEDAL = '0:400:cross'
-# a punch (square) or a kick (circle) every 2.5 s through the round: pressed every half second the
-# rider hardly pedals and lands nothing (the first runs: 0 points, 1 mph up the bowl's wall)
-ATTACKS = ','.join(f'{2 + k * 2.5:.1f}:0.2:{"square" if k % 2 == 0 else "circle"}' for k in range(52))
+# ride: a punch (square) or a kick (circle) every 2.5 s through the round: pressed every half second
+# the rider hardly pedals and lands nothing (finding 204's first runs: 0 points, 1 mph up the wall)
+RIDE = pad(PEDAL, attacks(2, 2.5, 52))
+# hit: both brake at the gates, side by side; the guest attacks from 5.2 s (race tick 312, past 301)
+SCENARIOS = {'hit': (BRAKE, pad(BRAKE, attacks(5.2, 0.6, 192))), 'ride': (RIDE, RIDE)}
+FINAL = re.compile(r"online: round: (.+?)'s final score (\d+), (\d+) hits taken \((sent|from player \d+)\)")
 ROOM = r'online menu: room (\w{7}) \(host\)'
 TABLE = re.compile(r'online: round: the table[^:]*\(([\d.]+) s after time up\):(.*)')
 ROOM_RESULTS = re.compile(r"online menu: the room's results of race (\d+) \((.+?)\):( .*)")
@@ -89,6 +104,40 @@ def room_entries(text):
     return out
 
 
+def finals(log):
+    """The finals of the last round with a table in a game's log: {name: (points, hits taken, 'sent' or
+    'from player N')}."""
+    starts = 'online: race starts: player '
+    table = log.rfind('online: round: the table')
+    start, end = log.rfind(starts, 0, max(table, 0)), log.find(starts, max(table, 0))
+    return {m.group(1): (int(m.group(2)), int(m.group(3)), m.group(4))
+            for m in FINAL.finditer(log, max(start, 0), end if end >= 0 else len(log))}
+
+
+def hit_failures(games, table):
+    """--scenario hit: the guest scored on the host's rider, and both games say the same."""
+    failures = []
+    rows = {n: (p, h) for n, p, h in table}
+    if not rows.get('GUEST', (0, 0))[0]:
+        failures.append(f"the guest scored nothing on the host's rider: {table}")
+    if not rows.get('HOST', (0, 0))[1]:
+        failures.append(f"the host's rider took no hit: {table}")
+    if table and table[0][0] != 'GUEST':
+        failures.append(f'the guest is not first: {table}')
+    seen = {g.out.name: finals(g.log()) for g in games}
+    for name, own in seen.items():
+        print(f'{name}: the finals of its last round: {own}')
+    for player, owner, other in (('HOST', 'host', 'guest'), ('GUEST', 'guest', 'host')):
+        mine, theirs = seen.get(owner, {}).get(player), seen.get(other, {}).get(player)
+        if not mine or mine[2] != 'sent':
+            failures.append(f'{owner}: no final of its own rider ({player}) sent')
+        elif not theirs or theirs[2] == 'sent' or theirs[:2] != mine[:2]:
+            failures.append(f"{other}: {player}'s final {theirs} is not its owner's {mine}")
+        elif mine[:2] != rows.get(player):
+            failures.append(f"{player}'s final {mine[:2]} is not the table's {rows.get(player)}")
+    return failures
+
+
 def offline(a):
     out = a.out.resolve()
     (out / 'offline').mkdir(parents=True, exist_ok=True)
@@ -96,7 +145,7 @@ def offline(a):
     for f in (out / 'offline').glob('present-*.png'):
         f.unlink()
     # Mosh Bowl's row is locked on a fresh save (func_001ED900: D_004225A0 +0x1219B): Unlock All
-    env = dict(DHD_UNLOCK_ALL='1', DHD_NAV=OFFLINE_NAV, DHD_RACE_PAD=a.pad or PEDAL + ',' + ATTACKS, DHD_RACE_SYNC='1', DHD_FPS='60',
+    env = dict(DHD_UNLOCK_ALL='1', DHD_NAV=OFFLINE_NAV, **rider_env(a.pad or RIDE), DHD_FPS='60',
                DHD_WINDOW_WIDTH=width, DHD_WINDOW_HEIGHT=height, DHD_SCREENSHOT='<unset>')
     if a.interval != '0':
         env.update(DHD_CAPTURE_PRESENTED=str(out / 'offline' / 'present'), DHD_CAPTURE_AT='5', DHD_CAPTURE_INTERVAL=a.interval)
@@ -121,15 +170,19 @@ def main():
     ap.add_argument('out', type=Path)
     ap.add_argument('--exe', type=Path, default=ROOT / 'build' / 'host64-exe' / 'dhd64.exe')
     ap.add_argument('--nettool', type=Path, default=ROOT / 'build' / 'port' / 'net' / 'nettool.exe')
+    ap.add_argument('--scenario', choices=sorted(SCENARIOS), default='hit',
+                    help='hit: a human scores on a human, no computer riders (default); ride: both pedal and attack')
     ap.add_argument('--bots', type=int, default=0, help='nettool players besides the two games (the arena takes 6)')
     ap.add_argument('--then', choices=('same', 'next', 'random'), default='same', help="the room's Then rule")
-    ap.add_argument('--no-ai', action='store_true', help="the room's computer riders off")
+    ap.add_argument('--no-ai', action='store_true', help="the room's computer riders off (always so with --scenario hit)")
     ap.add_argument('--scale', default='4')
     ap.add_argument('--window', default='1280x960')
     ap.add_argument('--interval', default='5', help='seconds between presented pictures (0: none)')
     ap.add_argument('--minutes', type=float, default=6, help='--offline: how long the game runs')
     ap.add_argument('--offline', action='store_true', help="the game's own Mosh Bowl, one game, no server")
-    ap.add_argument('--pad', help='the race pad (DHD_RACE_PAD) instead of pedalling with a punch or kick every 2.5 s')
+    ap.add_argument('--pad', help="both games' race pad (DHD_RACE_PAD) instead of the scenario's")
+    ap.add_argument('--host-pad', help="the host's race pad instead of the scenario's")
+    ap.add_argument('--guest-pad', help="the guest's race pad instead of the scenario's")
     a = ap.parse_args()
     if a.offline:
         return offline(a)
@@ -137,12 +190,14 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     iso_hash = iso_files_sha256(hidden_game.test_iso(), ROOT / 'build' / 'port' / 'iso-check.txt')
     width, height = a.window.split('x')
-    pad = a.pad or PEDAL + ',' + ATTACKS
+    hit = a.scenario == 'hit'
+    pads = dict(zip(('host', 'guest'), SCENARIOS[a.scenario]))
+    pads.update(host=a.host_pad or a.pad or pads['host'], guest=a.guest_pad or a.pad or pads['guest'])
 
     def env(name, extra):
         e = dict(DHD_NET_ISO_SHA256=iso_hash, DHD_NET_LOG_CODE='1', DHD_NET_SCRIPTED='1', DHD_NET_TEST_READY='1',
                  DHD_FPS='60', DHD_ONLINE_MENU_TRACE='1', DHD_MEMCARD='1', DHD_MEMCARD_DIR=str(out / name / 'card'),
-                 DHD_RACE_PAD=pad, DHD_NET_NAME=name.upper(), DHD_WINDOW_WIDTH=width, DHD_WINDOW_HEIGHT=height,
+                 **rider_env(pads[name]), DHD_NET_NAME=name.upper(), DHD_WINDOW_WIDTH=width, DHD_WINDOW_HEIGHT=height,
                  DHD_SCREENSHOT='<unset>')
         if a.interval != '0':
             e.update(DHD_CAPTURE_PRESENTED=str(out / name / 'present'), DHD_CAPTURE_AT='5', DHD_CAPTURE_INTERVAL=a.interval)
@@ -157,7 +212,7 @@ def main():
     with contextlib.ExitStack() as stack, local_server.running() as url:
         try:
             host_env = env('host', dict(DHD_NET_SERVER=url, DHD_AUTOPAD_FRAMES=P2P_HOST_NAV, DHD_NET_TEST_TRACK='23',
-                                        DHD_NET_TEST_THEN=a.then, **({'DHD_NET_NO_AI': '1'} if a.no_ai else {})))
+                                        DHD_NET_TEST_THEN=a.then, **({'DHD_NET_NO_AI': '1'} if a.no_ai or hit else {})))
             host = hidden_game.Game(a.exe, out / 'host', env=host_env, name='mosh-host', scale=a.scale, shot_window=None)
             games.append(host)
             m = wait(host.log, ROOM, 180, games)
@@ -242,6 +297,8 @@ def main():
                 failures.append(f"{name}: the room's order {got} is not the table's {want}")
             elif got != want:
                 failures.append(f"{name}: the room's places {got} are not the table's {want}")
+    if hit and ok:
+        failures += hit_failures(games, tables.get('host', []))
     for f in failures:
         print('FAIL:', f)
     print('PASS' if not failures else 'FAIL')

@@ -14,8 +14,9 @@ a P2P room the room's SFU (the fallback; the room needs Realtime then: .dev.vars
 server instead of this checkout's local one and its reverse tunnel.
 
 The host side makes a public room from the ONLINE menu (CREATE A PUBLIC RACE); the other takes QUICK
-RACE into it. Both ready by DHD_NET_TEST_READY after each race, pedal by DHD_RACE_PAD; the host
-finishes at 20 s and watches (Right at 26 s), the guest finishes at 40 s, punching on the way. The
+RACE into it. Both ready by DHD_NET_TEST_READY after each race, pedal by DHD_RACE_PAD (with
+DHD_RACE_SYNC=1, online_riders.py); the host finishes at 20 s and watches (Right at 26 s), the guest
+finishes at 40 s, punching on the way; pictures every 15 s of fields from 20 s. The
 run lasts until --races countdowns have started on both. This PC's game runs minimised
 (owned_process); the remote one by ssh, and only its PID is stopped. The summary lists each
 side's room, load, countdown, finish, watching and back-to-the-room lines; a freeze line or a
@@ -36,6 +37,7 @@ import local_server  # noqa: E402
 import owned_process  # noqa: E402
 from hidden_game import test_iso  # noqa: E402
 from online_race import iso_files_sha256  # noqa: E402
+from online_riders import PEDAL, attacks, pad, rider_env  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 # fields at 60 a second: the title, the main menu's ONLINE, then the online menu's row
@@ -51,8 +53,9 @@ P2P_GUEST_NAV = (MENUS + ',1450:6:down,1470:6:down,1490:6:down,1510:6:down,1530:
 # A private SFU room: the host's row is CREATE A PRIVATE RACE (row 4); the guest joins by code as in P2P
 PRIVATE_HOST_NAV = MENUS + ',1450:6:down,1470:6:down,1490:6:down,1510:6:down,1550:8:cross,2130:8:cross,2530:8:cross'
 ROOM = r'online menu: room (\w{6,7}) \(host\)'
-PEDAL = '0:400:cross'
-PUNCHES = ','.join(f'{1 + k * 0.5:.1f}:0.15:{"square" if k % 2 == 0 else "circle"}' for k in range(80))
+PUNCHES = attacks(1, 0.5, 80, 0.15)
+# pictures every 15 s from 20 s: with DHD_RACE_SYNC the game takes them by fields (gs/present.c)
+PICTURES = dict(DHD_RACE_CAPTURE_FROM='1200', DHD_RACE_CAPTURE_INTERVAL='900')
 SUMMARY = re.compile(r'online menu: (room|quick race|joining|refused)|has loaded|loaded at|countdown starts|freeze:|'
                      r'render wait|finished|results|left at|back to the room|TIME UP|host now|failed|error|'
                      r'watching [A-Z]|camera cut|race closed')
@@ -90,17 +93,17 @@ def main():
     # DHD_NET_LOG_CODE: the host's P2P code in full in its log, which is where this reads it.
     common = dict(DHD_NET_SERVER='ws://127.0.0.1:8787', DHD_NET_ISO_SHA256=iso_hash, DHD_NET_LOG_CODE='1', DHD_SKIP_MOVIES='1',
                   DHD_MEMCARD='1', DHD_SND_OFF='1', DHD_RENDER='native', DHD_SETTINGS='none', DHD_NET_SCRIPTED='1',
-                  DHD_NET_TEST_READY='1', DHD_FPS='60', DHD_ONLINE_MENU_TRACE='1', DHD_SCALE='1',
-                  DHD_CAPTURE_AT='20', DHD_CAPTURE_INTERVAL='15')
+                  DHD_NET_TEST_READY='1', DHD_FPS='60', DHD_ONLINE_MENU_TRACE='1', DHD_SCALE='1', **PICTURES)
     if a.server:
         common['DHD_NET_SERVER'] = a.server
     if a.force_turn:
         common['DHD_NET_P2P_UDP' if a.backend == 'p2p' else 'DHD_NET_SFU_UDP'] = '0'
     pc_name, remote_name = ('PCHOST', 'MACGUEST') if a.host == 'pc' else ('PCGUEST', 'MACHOST')
     p2p = a.backend == 'p2p'
-    host_env = dict(DHD_AUTOPAD_FRAMES=P2P_HOST_NAV if p2p else PRIVATE_HOST_NAV if a.private else HOST_NAV, DHD_RACE_PAD=PEDAL + ',26:0.15:right',
-                    DHD_NET_TEST_FINISH='20')
-    guest_env = dict(DHD_AUTOPAD_FRAMES=P2P_GUEST_NAV if p2p or a.private else GUEST_NAV, DHD_RACE_PAD=PEDAL + ',' + PUNCHES,
+    # the riders follow their pads only with DHD_RACE_SYNC (rider_env; finding 206)
+    host_env = dict(DHD_AUTOPAD_FRAMES=P2P_HOST_NAV if p2p else PRIVATE_HOST_NAV if a.private else HOST_NAV,
+                    **rider_env(pad(PEDAL, '26:0.15:right')), DHD_NET_TEST_FINISH='20')
+    guest_env = dict(DHD_AUTOPAD_FRAMES=P2P_GUEST_NAV if p2p or a.private else GUEST_NAV, **rider_env(pad(PEDAL, PUNCHES)),
                      DHD_NET_TEST_FINISH='40')
     pc_role, remote_role = (host_env, guest_env) if a.host == 'pc' else (guest_env, host_env)
 
