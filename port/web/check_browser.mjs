@@ -6,6 +6,10 @@
 // settings between runs). --then-query Q [--then-field F]: once --field is reached, load the page
 // again with ?iso=test&Q (a reload: what the first load saved must still be there) and run to F.
 // --eval EXPR: an expression evaluated in the page at the end, its value printed.
+// --capture FIELDS --capture-dir DIR: the canvas's picture at each listed field (DHD_CAPTURE_FIELDS:
+// fields or first-last ranges, comma separated; worker.js waits at each until it is taken) as
+// DIR/raw/shot-fNNNNNN.png, the layout port/tools/native_vu_pictures.py compare reads; the run ends
+// after the last (finding 199).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,6 +26,10 @@ const profileAt = Number(option('--profile', 0)), profileFor = Number(args[args.
 const chrome = option('--chrome', 'C:/Program Files/Google/Chrome/Application/chrome.exe');
 const profile = path.resolve(option('--user-data', path.join(root, 'build/web/chrome-profile')));
 const thenQuery = option('--then-query', null), thenField = Number(option('--then-field', field));
+const captureList = option('--capture', ''), captureDir = path.resolve(option('--capture-dir', path.join(root, 'build/web/captures')));
+const captureLast = Math.max(0, ...captureList.split(',').filter(Boolean).map(r => Number(r.split('-').pop())));
+if (captureList) fs.mkdirSync(path.join(captureDir, 'raw'), { recursive: true });
+let captured = 0;
 const server = spawn(process.execPath, [path.join(root, 'port/web/serve.mjs'), '--port', String(port), '--iso', iso], { stdio: ['ignore', 'pipe', 'inherit'] });
 await new Promise(r => server.stdout.once('data', r));
 const { browser, wsUrl } = await startChrome({ chrome, profile,
@@ -42,10 +50,23 @@ const t0 = Date.now(); let last = null;
 const evaluate = expr => evaluateIn(expr, { sessionId });
 for (const [q, until] of [[query, field], ...(thenQuery !== null ? [[thenQuery, thenField]] : [])]) {
 if (last) { const s = JSON.parse(last); console.log(JSON.stringify({ stage: 'first', seconds: (Date.now() - t0) / 1000, status: s.text, last: s.s, display: s.display })); console.log(s.log); }
-await send('Page.navigate', { url: `http://localhost:${port}/?iso=test${q ? '&' + q : ''}` }, sessionId);
+const captureQuery = captureList ? `env.DHD_CAPTURE_FIELDS=${encodeURIComponent(captureList)}` : '';
+await send('Page.navigate', { url: `http://localhost:${port}/?iso=test${q ? '&' + q : ''}${captureQuery ? '&' + captureQuery : ''}` }, sessionId);
 const tStage = Date.now();
 while ((Date.now() - tStage) / 1000 < seconds) {
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, captureList ? 250 : 2000));
+  const at = captureList ? await evaluate('window.dhdCapture ?? null') : null;
+  if (at !== null && at !== undefined) {
+    const r = await evaluate('JSON.stringify(document.getElementById("screen").getBoundingClientRect())');
+    const { x, y, width, height } = JSON.parse(r);
+    const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x, y, width, height, scale: 1 } }, sessionId);
+    fs.writeFileSync(path.join(captureDir, 'raw', `shot-f${String(at).padStart(6, '0')}.png`), Buffer.from(shot.result.data, 'base64'));
+    captured++;
+    console.error(`captured field ${at}`);
+    await evaluate('window.dhdResume()');
+    if (at >= captureLast) break;
+    continue;
+  }
   last = await evaluate('JSON.stringify({h: (window.dhdHistory||[]).slice(-400), s: window.dhdStatus, display: window.dhdDisplay, text: document.getElementById("status").textContent, log: document.getElementById("log").textContent.slice(-1500)})');
   const s = JSON.parse(last || '{}');
   if (/stopped|exited/.test(s.text || '') || (s.s && s.s.field >= until)) break;
@@ -66,7 +87,8 @@ if (extra) console.log('eval', JSON.stringify(await evaluateIn(extra, { sessionI
 const shot = await send('Page.captureScreenshot', { format: 'png' }, sessionId);
 fs.writeFileSync(out, Buffer.from(shot.result.data, 'base64'));
 const s = JSON.parse(last || '{}');
-console.log(JSON.stringify({ seconds: (Date.now() - t0) / 1000, status: s.text, last: s.s, display: s.display, screenshot: out }, null, 1));
+console.log(JSON.stringify({ seconds: (Date.now() - t0) / 1000, status: s.text, last: s.s, display: s.display, screenshot: out,
+  ...(captureList ? { captured, captureDir } : {}) }, null, 1));
 console.log('history', JSON.stringify(s.h));
 console.log(s.log);
 for (const e of events) if (e.method === 'Runtime.exceptionThrown') console.log('exception', JSON.stringify(e.params.exceptionDetails).slice(0, 800));
