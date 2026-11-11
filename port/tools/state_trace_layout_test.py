@@ -6,9 +6,11 @@ and it must not report a change of the core's layout alone.
     python port/tools/state_trace_layout_test.py layout [--exe EXE] [--pad-exe EXE] [--recipes boot,race]
 
 flips: one run of the recipe as it is, then three with DHD_STATE_FLIP (state_trace.c), each
-changing one thing just before a field is hashed: a word of rider 0 (its position's x, a float,
-50 fields before the end), a RAM word (50 fields before the end) and an EE register (the last
-field). state_diff.py must report each at its field, in the column it belongs to (ram, cpu).
+changing one thing just before a field is hashed: the player's rider's position (x of its body
+node, a float, 50 fields before the end; found through the pointers replay.c follows, read from
+the base run's dump of that field), a RAM word (50 fields before the end) and an EE register (the
+last field). state_diff.py must report each at its field, in the column it belongs to (ram,
+cpu); the rider flip must also change what the game does next (another column differs later).
 
 build-pad: the same checkout built again with DHD_CORE_LAYOUT_PAD=<bytes> (build_wasm.py): the core
 gets read-only data, data, bss and function-table entries in front of everything else, so every
@@ -24,6 +26,7 @@ check holds."""
 import argparse
 import os
 import re
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -35,15 +38,19 @@ EXE = ROOT / 'build' / 'host64-exe' / 'dhd64.exe'
 PAD_DIR = ROOT / 'build' / 'host64-layout-pad'
 PY = sys.executable
 
-RIDER0_X = 0x002AF2C0 + 0x4270  # rider slot 0's position, x (scenery_trace.c, port_fps_observe)
+# The player's rider (replay.c): a pointer at 0x002AF2C0 + 0x50130; its body node at +0x792C; the
+# node's position at +0x10.
+PLAYER_RIDER = 0x002AF2C0 + 0x50130
 RAM_WORD = 0x00500000            # a word of the game's heap
 REGISTER = 16                    # s0
 
 
-def trace_run(scenario, name, exe, fields=None, env=()):
+def trace_run(scenario, name, exe, fields=None, env=(), dump=None):
     cmd = [PY, str(TOOLS / 'state_trace_run.py'), scenario, '--name', name, '--exe', str(exe)]
     if fields:
         cmd += ['--fields', str(fields)]
+    if dump:
+        cmd += ['--dump', str(dump)]
     for item in env:
         cmd += ['--env', item]
     p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
@@ -58,20 +65,45 @@ def diff(a, b):
     return p.returncode, p.stdout
 
 
+def player_position(base, field):
+    """The EE address of the player's rider's body position (x) at field, from the base run's
+    ee-raw.bin dump of that field (the run is deterministic: the flip run has the same)."""
+    ram = open('%s-f%d-ee-raw.bin' % (str(base)[:-4], field), 'rb').read()
+    word = lambda address: struct.unpack_from('<I', ram, address & 0x01FFFFFC)[0]
+    rider = word(PLAYER_RIDER)
+    node = word(rider + 0x792C)
+    if not rider or not node:
+        sys.exit('flips: no player rider at field %d (rider %08X, node %08X)' % (field, rider, node))
+    return (node + 0x10) & 0x01FFFFFF
+
+
+def columns_changed(a, b):
+    """The columns trace_columns.py finds different."""
+    p = subprocess.run([PY, str(TOOLS / 'trace_columns.py'), str(a), str(b)], cwd=ROOT, capture_output=True, text=True)
+    return [line.split()[0] for line in p.stdout.splitlines() if 'differs from field' in line]
+
+
 def flips(args):
     fields = args.fields
-    base = trace_run(args.scenario, 'flip-base', args.exe, fields)
-    cases = [('rider', '%d:ram:0x%X:0x00400000' % (fields - 50, RIDER0_X), fields - 50, 'ram'),
-             ('ram', '%d:ram:0x%X:0x1' % (fields - 50, RAM_WORD), fields - 50, 'ram'),
+    early = fields - 50
+    base = trace_run(args.scenario, 'flip-base', args.exe, fields, dump=early)
+    position = player_position(base, early)
+    print('the player rider\'s position: EE 0x%08X' % position)
+    cases = [('rider', '%d:ram:0x%X:0x00400000' % (early, position), early, 'ram'),
+             ('ram', '%d:ram:0x%X:0x1' % (early, RAM_WORD), early, 'ram'),
              ('register', '%d:reg:%d:0x1' % (fields, REGISTER), fields, 'cpu')]
     failed = 0
     for label, flip, field, column in cases:
         flipped = trace_run(args.scenario, 'flip-' + label, args.exe, fields, ['DHD_STATE_FLIP=' + flip])
         code, out = diff(base, flipped)
         first = re.search(r'FIRST DIFFERENCE: field (\d+) \(row \d+\): (.*)', out)
-        ok = code == 1 and first and int(first.group(1)) == field and column in first.group(2).split(', ')
+        ok = bool(code == 1 and first and int(first.group(1)) == field and column in first.group(2).split(', '))
+        changed = columns_changed(base, flipped)
+        if label == 'rider':  # the game rode on from the changed position
+            ok = ok and any(c not in ('ram', 'combined') for c in changed)
         failed += not ok
-        print('%s flip (%s): %s' % (label, flip, 'reported' if ok else 'NOT REPORTED as expected'))
+        print('%s flip (%s): %s; columns that differ: %s' % (label, flip, 'reported' if ok else 'NOT AS EXPECTED',
+                                                              ', '.join(changed)))
         print('  ' + '\n  '.join(line for line in out.splitlines() if line.startswith(('FIRST', 'rows differing', '  '))))
     print('flips: %s' % ('PASS' if not failed else 'FAIL'))
     return 1 if failed else 0
