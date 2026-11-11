@@ -42,6 +42,24 @@ void gs_reset(Gs *g)
     g->privileged[GS_IMR / 16] = 0x7F00;
 }
 
+/* One row of a CSM1 CT32 CLUT: its 16 words (a run of the page as it lies in memory, which holds
+   the row's entries 0 1 8 9 2 3 10 11 4 5 12 13 6 7 14 15) into entries `to` to `to + 15`, low
+   halves and high halves apart as g->clut keeps them. Returns how many halves changed. */
+static unsigned clut_row32(Gs *g, const uint32_t *words, unsigned to)
+{
+    uint32_t row[16];
+    memcpy(row, words, 8); memcpy(row + 2, words + 4, 8); memcpy(row + 4, words + 8, 8); memcpy(row + 6, words + 12, 8);
+    memcpy(row + 8, words + 2, 8); memcpy(row + 10, words + 6, 8); memcpy(row + 12, words + 10, 8); memcpy(row + 14, words + 14, 8);
+    uint16_t *low = &g->clut[to], *high = &g->clut[to + 256];
+    unsigned changed = 0;
+    for (unsigned i = 0; i < 16; i++) {
+        uint16_t l = (uint16_t)row[i], h = (uint16_t)(row[i] >> 16);
+        changed += (low[i] != l) + (high[i] != h);
+        low[i] = l; high[i] = h;
+    }
+    return changed;
+}
+
 static void load_clut(Gs *g, uint64_t tex)
 {
     unsigned psm = field(tex, 20, 63), cpsm = field(tex, 51, 15), cbp = field(tex, 37, 0x3FFF);
@@ -86,9 +104,9 @@ static void load_clut(Gs *g, uint64_t tex)
         } else g->clut_memo.valid = 0;
         /* CSM1: the entries are distinct, so only the number of changed ones matters for
            state_version; counted without a branch per entry. */
-        uint16_t low[256] PS2_NO_AUTO_INIT, high[256] PS2_NO_AUTO_INIT;  /* written for every entry read */
-        unsigned first = 0, changed = 0;
+        unsigned changed = 0;
         if (cpsm & 2) {
+            uint16_t low[256] PS2_NO_AUTO_INIT;  /* written for every entry read */
             for (i = 0; i < count; i++) {
                 unsigned a = cbp * 256 + ((i & ~31u) + t16[i & 31]) * 2;
                 low[i] = (uint16_t)(g->vram[(a & (GS_VRAM_SIZE - 1)) / 4] >> ((a & 2) * 8));
@@ -99,17 +117,20 @@ static void load_clut(Gs *g, uint64_t tex)
                 *entry = low[i];
             }
         } else {
-            if (count == 256) first = start, start = 0;
-            for (i = first; i < count; i++) {
-                unsigned src = count == 256 ? (i & 0x80) | (i & 0x10) << 2 | (i & 0x60) >> 1 | t32[i & 15] : t32[i];
-                uint32_t value = g->vram[(cbp * 64 + src) & (GS_VRAM_SIZE / 4 - 1)];
-                low[i] = (uint16_t)value; high[i] = (uint16_t)(value >> 16);
+            /* CT32, a row of 16 entries at a time (clut_row32), read where the words lie unless
+               the run wraps at the end of memory. 16 entries are the run's first row, into CSA's
+               entries; of 256 the rows below CSA's stay, and row r3 r2 r1 r0 comes from the
+               run's row r3 r0 r2 r1 (the 16 x 16 pixels' block order). */
+            uint32_t wrapped[256] PS2_NO_AUTO_INIT;  /* written for every word read */
+            const uint32_t *words = g->vram + base / 4;
+            if (base + bytes > GS_VRAM_SIZE) {
+                for (i = 0; i < count; i++) wrapped[i] = g->vram[(cbp * 64 + i) & (GS_VRAM_SIZE / 4 - 1)];
+                words = wrapped;
             }
-            for (i = first; i < count; i++) {
-                uint16_t *lo = &g->clut[start + i], *hi = &g->clut[start + i + 256];
-                changed += (*lo != low[i]) + (*hi != high[i]);
-                *lo = low[i]; *hi = high[i];
-            }
+            if (count == 16) changed = clut_row32(g, words, start);
+            else
+                for (unsigned row = start / 16; row < 16; row++)
+                    changed += clut_row32(g, words + ((row & 8) | (row & 1) << 2 | (row & 6) >> 1) * 16, row * 16);
         }
         g->state_version += changed;
         g->clut_writes += changed;

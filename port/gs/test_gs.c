@@ -411,9 +411,59 @@ static void strips(void)
            strip_packets, differing);
 }
 
+/* CSM1 CLUT loads (load_clut: its CT32 rows of finding 197, its CT16 loop, the repeated load it
+   skips) against the entry-by-entry rule: every entry after each load and how many 16-bit halves
+   it changed (clut_writes, state_version), for 16 and 256 entries, every CSA and CLD, a load
+   repeated with and without new words, and a run of words that wraps at the end of memory. */
+static void clut_loads(void)
+{
+    static const unsigned t32[16] = {0,1,4,5,8,9,12,13,2,3,6,7,10,11,14,15};
+    static const unsigned t16[32] = {0,2,8,10,16,18,24,26,4,6,12,14,20,22,28,30,
+                                     1,3,9,11,17,19,25,27,5,7,13,15,21,23,29,31};
+    static const unsigned pages[] = {0, 32, 0x1234, 100, 101, 0x3FFF, 0x3FFE};  /* 0x3FFF: 256 entries wrap */
+    Gs *g = &upload_fast;
+    static uint16_t want[512];
+    unsigned want_cbp[2] = {0, 0}, random = 0xC1E7, differing = 0, loads = 0, skipped = 0, wrapped = 0;
+    gs_reset(g); memset(want, 0, sizeof want);
+#define RND (random = random * 1664525u + 1013904223u, random >> 8)
+    for (unsigned trial = 0; trial < 4000; trial++) {
+        unsigned cbp = pages[RND % 7], wide = RND % 3 == 0, ct16 = RND % 5 == 0, csa = RND % 32, cld = 1 + RND % 5;
+        unsigned count = wide ? 256 : 16, start = (csa & (ct16 ? 31u : 15u)) * 16, changed = 0;
+        if (RND % 3)   /* new words two times in three; else the last ones again */
+            for (unsigned i = 0; i < 256; i++) { unsigned low = RND; g->vram[(cbp * 64 + i) & (GS_VRAM_SIZE / 4 - 1)] = low ^ RND << 16; }
+        uint64_t tex = (uint64_t)(wide ? GS_PSMT8 : GS_PSMT4) << 20 | (uint64_t)cbp << 37 |
+                       (uint64_t)(ct16 ? GS_PSMCT16 : GS_PSMCT32) << 51 | (uint64_t)csa << 56 | (uint64_t)cld << 61;
+        if (cld >= 4 && want_cbp[cld - 4] == cbp) skipped++;
+        else {
+            if (cld >= 2) want_cbp[(cld - 2) & 1] = cbp;
+            loads++; wrapped += wide && !ct16 && cbp == 0x3FFF;
+            for (unsigned i = 0; i < count; i++)
+                if (ct16) {
+                    unsigned a = cbp * 256 + ((i & ~31u) + t16[i & 31]) * 2, to = (start + i) & 511;
+                    uint16_t value = (uint16_t)(g->vram[(a & (GS_VRAM_SIZE - 1)) / 4] >> ((a & 2) * 8));
+                    changed += want[to] != value; want[to] = value;
+                } else if (!wide || i >= start) {   /* 256 entries: those below CSA's stay */
+                    unsigned to = wide ? i : start + i;
+                    unsigned from = wide ? (i & 0x80) | (i & 0x10) << 2 | (i & 0x60) >> 1 | t32[i & 15] : t32[i];
+                    uint32_t value = g->vram[(cbp * 64 + from) & (GS_VRAM_SIZE / 4 - 1)];
+                    changed += (want[to] != (uint16_t)value) + (want[to + 256] != (uint16_t)(value >> 16));
+                    want[to] = (uint16_t)value; want[to + 256] = (uint16_t)(value >> 16);
+                }
+        }
+        uint64_t version = g->state_version + (g->reg[GS_TEX0_1] != tex), writes = g->clut_writes;
+        gs_write(g, GS_TEX0_1, tex);
+        if (memcmp(g->clut, want, sizeof want) || g->clut_writes != writes + changed || g->state_version != version + changed)
+            differing++;
+    }
+#undef RND
+    CHECK(differing == 0 && loads > 2000 && skipped > 100 && wrapped > 50);
+    printf("CLUT loads: %u loads (%u past the end of memory), %u skipped by CLD, %u differing\n", loads, wrapped, skipped,
+           differing);
+}
+
 int main(void)
 {
-    swizzles(); gif(); gif_staging(); palette(); upload_fuzz(); strips();
+    swizzles(); gif(); gif_staging(); palette(); upload_fuzz(); strips(); clut_loads();
     uint32_t pixels[16]; unsigned w = 0, h = 0;
     gs_priv_write(&gs, GS_PMODE, 2);
     gs_priv_write(&gs, GS_DISPFB2, 1 | 1 << 9 | UINT64_C(63) << 32 | UINT64_C(31) << 43);

@@ -53,6 +53,7 @@
 double host_wall_seconds(void); /* port/hle/host.c */
 
 enum { NATIVE_SURFACES = 48, NATIVE_TEXTURES = 4096, NATIVE_WATCH = 128, NATIVE_CONVERTS = 64 };
+enum { NATIVE_PALETTES = 512, NATIVE_PALETTE_PROBES = 8 };  /* a race goes round some 200 palettes a field */
 /* NATIVE_SCALE_MAX, the largest resolution scale (DHD_SCALE) the backend draws, is set by the
    backend (gpu_rust_native.inc, gpu_rust_web_native.inc) before it includes this file. */
 
@@ -229,6 +230,12 @@ typedef struct Native {
     /* native_palette: the 256 entries gs_palette converts for the last CPSM/CSA/TEXA, valid while
        the CLUT's entries stay (clut_writes); digest16/256 mix the first 16 or all of them. */
     struct { int valid, full; uint64_t writes, clut_key, texa, digest16, digest256; uint32_t entry[256]; } palette_memo;
+    /* native_palette_digest (finding 197): the digests of palettes met before, each found again by
+       the CLUT words it reads (palette_tags: a slot's tag, 0 when empty), and the last answer,
+       good while the CLUT's entries stay. */
+    uint32_t palette_tags[NATIVE_PALETTES];
+    struct { uint64_t texa, digest; uint32_t used; uint16_t count, cpsm; uint32_t words[256]; } palettes[NATIVE_PALETTES];
+    struct { int valid, full; uint64_t writes, clut_key, texa, digest; } palette_last;
     NativeVertex conv[2];
     int conv_fst;
     uint64_t conv_offset;
@@ -655,6 +662,65 @@ static const uint32_t *native_palette(Native *n, const Gs *g, uint64_t tex0, int
     return n->palette_memo.entry;
 }
 
+/* The CLUT words gs_palette reads for the first `count` entries of tex0's palette, as it reads
+   them (before gs_color). */
+static void native_palette_words(const Gs *g, uint64_t tex0, unsigned count, uint32_t *words)
+{
+    unsigned cpsm = (unsigned)(tex0 >> 51) & 15, csa = (unsigned)(tex0 >> 56) & 31;
+    if (cpsm & 2) {
+        for (unsigned i = 0; i < count; i++) words[i] = g->clut[(csa * 16 + i) & 511];
+        return;
+    }
+    for (unsigned row = 0; row < count; row += 16) {
+        unsigned group = (csa & 15) * 16 + row;
+        const uint16_t *low = &g->clut[group > 240 ? 240 : group], *high = low + 256;
+        for (unsigned i = 0; i < 16; i++) words[row + i] = low[i] | (uint32_t)high[i] << 16;
+    }
+}
+
+/* The digest native_palette gives the 16 or 256 converted entries of tex0's palette: the texture
+   key's part. The converted entries follow from the CLUT words read, CPSM and TEXA, so a palette
+   met before has its digest kept beside those words and is not converted again. (The entries'
+   memo above holds one palette; the game alternates between textures, each with its own CLUT, and
+   comes back to every one of them the next field.) A palette not met before is converted by
+   native_palette as before. */
+static uint64_t native_palette_digest(Native *n, const Gs *g, uint64_t tex0, int full)
+{
+    uint64_t clut_key = (tex0 >> 51 & 15) | (tex0 >> 56 & 31) << 4, texa = g->reg[GS_TEXA];   /* CPSM, CSA */
+    if (n->palette_last.valid && n->palette_last.writes == g->clut_writes && n->palette_last.clut_key == clut_key &&
+        n->palette_last.texa == texa && n->palette_last.full == full)
+        return n->palette_last.digest;
+    unsigned count = full ? 256 : 16, cpsm = (unsigned)clut_key & 15;
+    uint32_t words[256] PS2_NO_AUTO_INIT, tag = 0;  /* written for every entry read */
+    native_palette_words(g, tex0, count, words);
+    for (unsigned i = 0; i < count; i++) tag += words[i] * (2 * i + 1);
+    tag = ((tag ^ (uint32_t)texa ^ (uint32_t)(texa >> 32) * 31 ^ count ^ cpsm << 12) * 0x9E3779B1u) | 1;
+    unsigned first = (tag >> 16) % NATIVE_PALETTES, slot = NATIVE_PALETTES;
+    for (unsigned probe = 0; probe < NATIVE_PALETTE_PROBES && slot == NATIVE_PALETTES; probe++) {
+        unsigned at = (first + probe) % NATIVE_PALETTES;
+        if (n->palette_tags[at] == tag && n->palettes[at].count == count && n->palettes[at].cpsm == cpsm &&
+            n->palettes[at].texa == texa && !memcmp(n->palettes[at].words, words, count * 4))
+            slot = at;
+    }
+    if (slot == NATIVE_PALETTES) {
+        /* not met, or pushed out: converted, and kept in an empty slot or the one used longest ago */
+        slot = first;
+        for (unsigned probe = 0; probe < NATIVE_PALETTE_PROBES && n->palette_tags[slot]; probe++) {
+            unsigned at = (first + probe) % NATIVE_PALETTES;
+            if (!n->palette_tags[at] || (int32_t)(n->palettes[at].used - n->palettes[slot].used) < 0) slot = at;
+        }
+        native_palette(n, g, tex0, full);
+        n->palette_tags[slot] = tag;
+        n->palettes[slot].texa = texa; n->palettes[slot].count = (uint16_t)count; n->palettes[slot].cpsm = (uint16_t)cpsm;
+        n->palettes[slot].digest = full ? n->palette_memo.digest256 : n->palette_memo.digest16;
+        memcpy(n->palettes[slot].words, words, count * 4);
+    }
+    n->palettes[slot].used = (uint32_t)n->field;
+    n->palette_last.valid = 1; n->palette_last.full = full; n->palette_last.writes = g->clut_writes;
+    n->palette_last.clut_key = clut_key; n->palette_last.texa = texa; n->palette_last.digest = n->palettes[slot].digest;
+    return n->palette_last.digest;
+}
+
 static NativeTexture *native_decode(Native *n, Gs *g, uint64_t tex0, unsigned w, unsigned h, uint64_t key)
 {
     unsigned slot = (unsigned)(key % NATIVE_TEXTURES);
@@ -829,9 +895,7 @@ static void native_texture(Native *n, Gs *g, unsigned ctxt, NativeCommand *c)
         }
     if (psm == GS_PSMT8 || psm == GS_PSMT4 || psm == GS_PSMT8H || psm == GS_PSMT4HL || psm == GS_PSMT4HH) {
         /* the digest of the 16 or 256 converted entries (native_palette, finding 148) */
-        int full = psm == GS_PSMT8 || psm == GS_PSMT8H;
-        native_palette(n, g, tex0, full);
-        key = native_mix(key, full ? n->palette_memo.digest256 : n->palette_memo.digest16);
+        key = native_mix(key, native_palette_digest(n, g, tex0, psm == GS_PSMT8 || psm == GS_PSMT8H));
     }
     if (gpu_pages) {
         /* The menus' font lives in a depth buffer's top bytes; the sharp one is drawn from the
