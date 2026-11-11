@@ -1,6 +1,6 @@
 # 206: the online test tools drive their riders; the room card's state beside its tags
 
-Status: in progress
+Status: current
 
 Branch `fix/online-test-riders-and-room-card` from `main` 9b919298, started 2026-11-11. This file
 is the lane's plan while it runs and its finding when it merges.
@@ -35,6 +35,28 @@ Out of scope: the puppet code (lane 202), the state trace (lane 205), offline pl
 - [x] 2026-11-11: the room card's first line and second line (`online_menu.c` `draw_card`), and
   the live header above the cards, which had the same fault ("RACE RESULTS - LIVE" ran into
   "3 FINISHED - 5 RACING" in every build).
+- [x] 2026-11-11: merged (a354a1ee) and checked on the merged main (below).
+
+### The checks on the merged main
+
+- `check.py port` OK (core, `test_runtime`, game build, retail scan, net tests, `test_gs_wgpu`,
+  `test_wasm2c_chunks`).
+- State traces: all seven recipes (`boot`, `race`, `race2` to `race6`) equal the format-2
+  references of release 0.7.16's game code (finding 205), made with the same
+  `state_trace_codeptrs.txt`: 7 of 7 PASS. The room page is drawn only online.
+- `mosh_round_check.py` (default, `--scenario hit`) twice, one at 4:3 (1280x960) and one at
+  16:9 (1706x960): PASS both, the table `1. GUEST 50 (0) 2. HOST 0 (1)` on both games, each
+  final its owner's (`sent`) and the same on the other game, the room's results
+  `1. GUEST 50 PTS; 2. HOST 0 PTS`.
+- `--scenario ride`: PASS (the same table: the guest's attacks landed one hit). `--offline`: the
+  game's own Mosh Bowl ran its time with no `online:` line in its log.
+- The room page at `DHD_SCALE=4` in local P2P rooms: ten players (a bot's room, HOST on the bot,
+  the game YOU, names of twelve W, M and `LONGNAMEXYZW`) READY, WAIT, STARTING, RACING, DONE, OUT,
+  places with times and DNF reasons, the live header beside "5 FINISHED - 3 RACING", at 16:9; the
+  arena's results (`1ST 50 PTS`, `2ND 0 PTS`) with HOST and YOU beside STARTING at 4:3 and at
+  16:9. Names shorten (`WWWWWWW HOST`, `LONGNAMEX`), the tags and states are whole, nothing runs
+  past the card's edge or over the ping's bars. A player who is both host and this PC shows HOST
+  only, as before this finding.
 
 ## Decisions
 
@@ -121,15 +143,13 @@ and 16:9, with ten players and the longest names; the live header's title no lon
 its counts. Online room page only (`online_menu.c`, part of the core: the core id changes).
 
 Not checked here: `cross_race.py` itself (it needs the Mac; only its environment changed, and
-its pad scripts are the ones `online_race.py` already ran with `DHD_RACE_SYNC=1`), the
-`--scenario ride` and `--offline` runs after the change (their pads did not change; `ride` now
-takes input), the room page on a phone or in the browser (the same core code), and a name in
-non-Latin letters (the name rule allows only `SETTING_NAME_LETTERS`).
+its pad scripts are the ones `online_race.py` already ran with `DHD_RACE_SYNC=1`), the room page
+on a phone or in the browser (the same core code), and a name in non-Latin letters (the name rule
+allows only `SETTING_NAME_LETTERS`). The `--scenario ride` and `--offline` runs passed on the
+merged main (Progress).
 
-Left for the lead:
+Open:
 
-- The boot and race state traces against the base build (`state_trace_run.py boot`, `race`):
-  the change touches only the online room page, drawn only online, so both must be equal.
 - After lane 202 merges: `mosh_round_check.py` (default) once more, since lane 202 changes how a
   remote rider runs and so where the knocked rider lands; the check needs one hit.
 - `online_race.py` can take `online_riders.rider_env` once lane 202 is in (it sets the same two
