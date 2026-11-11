@@ -177,8 +177,10 @@ second seed and `--a DHD_PUPPET_FROM=all` so the host also recorded its AI rider
 
 ### What is not fixed, and what would fix it
 
-- **A sender whose game stops (a hitch).** v8 on track 0: a 0.8 s stop, error p50/p95/p99 0.44 /
-  2.5 / 16.4 units (today 0.97 / 3.5 / 8.4); 3 s behind, 0.50 / 7.8 / 114 (today 1.0 / 6.2 / 23).
+- **A sender whose game stops (a hitch).** v8 on track 0: a 0.8 s stop, error p50/p95/p99 0.45 /
+  2.55 / 14.4 units (today 0.97 / 3.5 / 8.4; another run of the same build gave p99 16.4: the
+  bench's tails vary a little from run to run, the AI controller's state not being part of the
+  replay); 3 s behind, 0.50 / 7.8 / 114 (today 1.0 / 6.2 / 23).
   The tail is the stop itself: the sender's rider stands still on its own screen while the
   receiver hears nothing, and the receiver cannot tell a stopped game from lost packets. The
   puppet rides on for up to 1 s (`SYNC_COAST`), then brakes; when the snapshots return it is put
