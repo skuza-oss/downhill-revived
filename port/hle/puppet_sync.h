@@ -37,9 +37,10 @@
                                   inputs (puppet.c). A stopped game says so at once (HOLD); this is
                                   for a link that has gone quiet, where riding on is the better guess
                                   (live: a one-second SFU stall at the start braked the pack) */
-#define SYNC_CATCHUP 1.25f     /* a sender's race clock this much faster than the shared one is catching
-                                  up after a hitch (finding 139: up to twice); its puppet follows its
-                                  snapshots meanwhile (puppet.c steer) */
+#define SYNC_GUARD 0.6f        /* a puppet under this share of its owner's speed (a recent snapshot,
+                                  no crash) was stopped by this game's physics: it takes its owner's */
+#define SYNC_GUARD_AGE 0.4     /* s: how recent */
+#define SYNC_RESYNC_AGE 0.4    /* s: an older snapshot never makes a jump (puppet.c steer) */
 #define SYNC_START_WAIT 2.0   /* s after GO: a puppet whose snapshots have not begun is this game's AI */
 #define SYNC_RESYNC 12.0f      /* game units (about 0.13 s of riding): a larger error is a jump */
 #define SYNC_CARRY_MAX 0.25    /* s: a re-sync carries a snapshot at most this far */

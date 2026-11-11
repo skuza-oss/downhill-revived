@@ -491,28 +491,18 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
     float dt = p->stepped_at > 0 && t > p->stepped_at ? (float)(t - p->stepped_at) : 0;
     p->stepped_at = t;
     body_pose(r, &now);
-    /* Its sender catches up after a hitch (its race clock runs clearly faster than the shared
-       clock: up to twice): its rider moves faster than this game's physics can ride, so the puppet
-       follows its newest snapshot carried to now until the sender's clock runs normally again. */
-    if (p->rate > SYNC_CATCHUP && p->synced) {
-        SyncPose carried;
-        if (s->time > p->used) take_snapshot(p, s, &owner, &carried);
-        snapshot_pose(s, &owner);
-        for (int k = 0; k < 3; k++) owner.vel[k] *= p->rate;
-        sync_carry(&owner, s->spin, (float)fmin(fmax(0, t - s->time), SYNC_CARRY_MAX), &carried);
-        set_body(r, &carried, s->spin);
-        memset(p->sync.pending_pos, 0, sizeof p->sync.pending_pos);
-        memset(p->sync.pending_vel, 0, sizeof p->sync.pending_vel);
-        memset(p->sync.pending_rot, 0, sizeof p->sync.pending_rot);
-        memset(p->sync.slide, 0, sizeof p->sync.slide);
-        return;
-    }
-    if (s->time > p->used) {
-        SyncPose carried;
-        double carry = take_snapshot(p, s, &owner, &carried);
+    SyncPose carried;
+    double carry = 0;
+    int fresh = s->time > p->used;
+    if (fresh) carry = take_snapshot(p, s, &owner, &carried);
+    if (fresh) {
         float error = sync_measure(&p->sync, s->time, &owner, &carried, &now, t - s->time);
         p->error = error;
-        if (!p->synced || error > SYNC_RESYNC || (p->after_crash && error > SYNC_RESPAWN)) {
+        /* No jump on a snapshot older than SYNC_RESYNC_AGE (the first of a backlog after a stall:
+           newer ones are right behind it, live a second jump of 65 units followed); it is slid
+           toward like any other, and the next one decides. */
+        if (!p->synced || (error > SYNC_RESYNC && t - s->time < SYNC_RESYNC_AGE) ||
+            (p->after_crash && error > SYNC_RESPAWN)) {
             SyncSample then;
             int known = sync_at(&p->sync, s->time, &then);
             /* what a jump is measured against, for the log (finding 202): the snapshot's age, whether
@@ -528,6 +518,16 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
             return;
         }
         p->after_crash = 0;
+    }
+    /* This game's physics never stops a rider its owner did not stop: after a landing or a knock
+       taken a little differently here, a puppet much slower than its owner's recent snapshot (a
+       live landing: 150 to 50 units a second in a step, the owner rode on) takes its owner's
+       velocity at once; a speed change shows far less than the jump it would come to. */
+    if (t - s->time < SYNC_GUARD_AGE && !(s->crash & 4)) {
+        float ov[3], own = 0;
+        for (int k = 0; k < 3; k++) ov[k] = s->vel[k] * (p->rate > 0 ? p->rate : 1);
+        own = sync_len(ov);
+        if (own > 30 && sync_len(now.vel) < SYNC_GUARD * own) memcpy(now.vel, ov, sizeof now.vel);
     }
     /* Nothing heard for SYNC_COAST (a stalled game, a long loss): the rider slows to a stop
        rather than riding on alone; the next snapshot puts it right. */
@@ -620,6 +620,10 @@ static int remote(const uint8_t *r)
     int slot = slot_of(r);
     return slot >= 0 && slot < NRIDERS && pp.p[slot].on && RACING;
 }
+
+/* func_0011A100's rider pairs: two riders another game runs don't collide here; their bump
+   happened there and arrives in their snapshots (doing it again here only drives them apart). */
+int hle_puppet_both_remote(uint8_t *a, uint8_t *b) { return remote(a) && remote(b); }
 
 /* Before a puppet's first snapshot (GO plus the snapshots' age): it stands where the grid put it,
    no physics, its pose its history (so the first snapshot is measured against it). */
