@@ -223,7 +223,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   Radeon at 4x 122.1 -> 118.2; it gains where the CPU limits (finding 194). No driver that refuses
   it has run it. The emulated path is deleted once players' logs show no fallbacks.
 - On Mali GPUs a picture stays in one encoder (finding 198): finding 195's encoder cut lost the
-  device on the Redmi 9's Mali-G52 in every full route, so 0.7.15 is expected to on that phone.
+  device on the Redmi 9's Mali-G52 in every full route, so 0.7.15 is expected to lose it there
+  (fixed in 0.7.16).
   Why the driver fails, and other Malis, are not known.
 - Browser speed is below 60 in races (finding 087).
 - High-rate handling differs a little from 60 by the race's own chaos, with no trend (finding

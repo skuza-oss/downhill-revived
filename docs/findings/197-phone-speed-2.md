@@ -1,8 +1,9 @@
 # 197: the phone's vertex loops and palette path, Native VU off
 
 Status: current
+Checked: 2026-11-11
 
-Branch `perf/phone-fable-2` from `main` 652a734b (release 0.7.15), started 2026-11-10. Merged into `main` 2026-11-11 (fast-forward to `cd064781`). This file is
+Branch `perf/phone-fable-2` from `main` 652a734b (release 0.7.15), started 2026-11-10. Merged into `main` 2026-11-11 (fast-forward to `cd064781`); ships in 0.7.16. This file is
 the lane's plan while it runs and its finding when it merges. Someone who has only this file and the
 git log must be able to pick the lane up.
 
@@ -605,7 +606,7 @@ fields a second there; ranked by what the measurements say:
 
 ## Result
 
-Branch `perf/phone-fable-2`, not merged. Three changes, all host code (the core is main's, core id
+Branch `perf/phone-fable-2`, merged into `main` 2026-11-11 (`cd064781`); ships in 0.7.16. Three changes, all host code (the core is main's, core id
 daa92ea5cda6b962): the game's strips decoded and recorded in one pass, eleven VU1 kernels with
 their operands kept clean where they are written, and a palette's digest found again by its CLUT
 words with the CLUT loaded a row at a time.

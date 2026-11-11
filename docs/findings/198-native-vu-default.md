@@ -2,9 +2,10 @@
 
 Status: current
 Supersedes: parts of 194 (off by default, "experimental", both paths kept beside each other), parts of 195 (the encoder cut on Mali GPUs)
+Checked: 2026-11-11
 
-Branch `feat/native-vu-default` from `main` 652a734b (release 0.7.15), started 2026-11-11. This
-file is the lane's plan while it runs and its finding when it merges. Someone who has only this
+Branch `feat/native-vu-default` from `main` 652a734b (release 0.7.15), started 2026-11-11. Merged into `main` at b3f8496a on
+2026-11-11; ships in 0.7.16. This file is the lane's plan while it runs and its finding when it merges. Someone who has only this
 file and the git log must be able to pick the lane up.
 
 ## Goal and acceptance
@@ -198,7 +199,7 @@ where the CPU limits it gains (the Mi 11i on the t612 profile +16.6 %, the RTX a
 
 ## Result
 
-Lane state 2026-11-11 (not merged; the lead merges and closes the finding).
+Merged into `main` at b3f8496a on 2026-11-11; ships in 0.7.16.
 
 - **What changed**: `native_vu` on by default (settings crate; the tools' built-in stays off), the
   row and the launcher's switch without "experimental", the browser leaves the variable out; on
@@ -215,7 +216,7 @@ What is left:
   for 60 at 2x, about 5 % in a race at 2x. Options: accept it, or start with it off where the GPU
   limits (nothing in the game measures that today).
 - **0.7.15 on Mali**: the released APK is expected to lose the device on the Mali-G52 (r26p0) as
-  the debuggable build of the same source did; the fix is `3c42021b`. Other Malis (G57 and newer
+  the debuggable build of the same source did; the fix is `3c42021b`, in 0.7.16. Other Malis (G57 and newer
   drivers) were not run with or without the cut.
 - **Why the cut loses the device** on that driver.
 - **No timing on the Mac**; the launcher's own tests were not run (one label and hint changed).
