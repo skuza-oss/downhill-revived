@@ -367,8 +367,8 @@ world, the lit objects and the shadows) on your graphics card instead of emulati
 gives more frames a second, most on a fast graphics card at a high resolution. It applies at once,
 online too, and changes only the picture. If your graphics card can't run it, `dhd.log` says so
 and the game goes on without it. If something in the picture looks wrong, turn it OFF (the game
-then emulates those programs as before) and tell us with your `dhd.log`. Not in the browser
-version.
+then emulates those programs as before) and tell us with your `dhd.log` (in the browser version:
+the lines under LOG).
 
 `dhd.ini` in your data folder holds `key = value` lines; the game writes it, with comments, at the
 first start. The REVIVED SETTINGS page writes most of them for you.

@@ -16,7 +16,8 @@ compare: per field the mean absolute difference over all channels (0-255), the s
 by more than 8 and by more than 32 in any channel, and the largest difference. The exit status says
 whether every field is within the tolerance (MAE <= --mae and at most --over percent off by more
 than 8; the native lane's: 0.1 and 0.1), or with --same identical. Game pictures stay local (never
-committed)."""
+committed). The browser's captures (port/web/check_browser.mjs --capture FIELDS --capture-dir OUT:
+the canvas at each field, OUT/raw/shot-fNNNNNN.png; finding 199) compare the same way."""
 import argparse
 import sys
 import time
@@ -58,6 +59,13 @@ def capture(a):
     return 1 if missing else 0
 
 
+def shot(out, field):
+    """A run's picture of field: the native capture's BMP, else the browser's PNG."""
+    bmp = Path(out) / 'raw' / ('shot-f%06d.bmp' % field)
+    png = bmp.with_suffix('.png')
+    return png if not bmp.exists() and png.exists() else bmp
+
+
 def compare(a):
     import numpy as np
     from PIL import Image
@@ -65,7 +73,7 @@ def compare(a):
     bad = 0
     print('field  scene   MAE     >8 %     >32 %    max')
     for f in FIELDS:
-        pa, pb = (Path(d) / 'raw' / ('shot-f%06d.bmp' % f) for d in (a.a, a.b))
+        pa, pb = (shot(d, f) for d in (a.a, a.b))
         if not pa.exists() or not pb.exists():
             print('%5d  missing (%s)' % (f, pa if not pa.exists() else pb))
             bad += 1

@@ -66,10 +66,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `ps2asm_aot.py`); EE float rounding follows PCSX2's (finding 026). VU0 microprograms are native
   or compiled (`vu0_micro.c`, `vu0_aot.py`); VU1 runs compiled blocks plus native kernels
   (`vu1_aot.py`, `vu1_native_clip.py`), checked against PCSX2's interpreter (findings 030, 090),
-  and, with Native VU (the players' default but in the browser, finding 198), the translated
-  batch loops as GPU shaders instead (findings 164, 167, 194). The emulated path for those loops
-  remains as the fallback, the setting's off and the browser's path until it is deleted (root
-  AGENTS.md).
+  and, with Native VU (the players' default on every platform, the browser included: findings
+  198, 199), the translated batch loops as GPU shaders instead (findings 164, 167, 194). The
+  emulated path for those loops remains as the fallback and the setting's off until it is deleted
+  (root AGENTS.md).
 - GS: GS memory and registers in C (`port/gs/`); the Rust renderer (`port/render`, wgpu: DX12 or
   Vulkan on Windows, Metal on Apple, Vulkan on Linux and Android, WebGPU in the browser) behind
   the shared C front ends `gpu_exact.inc` (exact: the PS2's pixels, the reference) and

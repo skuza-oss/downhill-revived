@@ -66,11 +66,11 @@ other's network address), and P2P rooms on Android and in the browser (SFU rooms
 desktop-only there). They ship from 0.7.14 on (after the test prerelease test-p2p-1). Native iOS
 app work is deferred.
 
-Native VU (194, 198) is the players' default on every platform but the browser (a Graphics
-setting, on by default; the owner, 2026-11-11). The emulated VU1 path is the one exception to "one
-code path" on the GPU side: it remains only as the automatic fallback (a GPU that refuses the mesh
-draws, one dhd.log line), as the setting's off (troubleshooting) and as the browser's path, and is
-deleted in a later lane once players' logs show no fallbacks. Do not build on the emulated draw
+Native VU (194, 198, 199) is the players' default on every platform, the browser included (a
+Graphics setting, on by default; the owner, 2026-11-11). The emulated VU1 path is the one exception
+to "one code path" on the GPU side: it remains only as the automatic fallback (a GPU that refuses
+the mesh draws, one dhd.log line) and as the setting's off (troubleshooting), and is deleted in a
+later lane once players' logs show no fallbacks. Do not build on the emulated draw
 path for the translated loops, and do not make it the default again.
 
 A lane's plan is its finding: copy `docs/findings/TEMPLATE.md` on the lane's first commit
