@@ -28,7 +28,13 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
   // goAt: the race's start moment from the room (race_go, finding 187); serverGo: the room takes ours.
   // serverScore: the room ranks a round by score (finding 204).
   let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {}, p2p = false, goAt = 0, serverGo = false, serverScore = false, ended = 0;
-  let frames = [], timer;
+  // after: until when an ended race's frames still pass both ways (performance.now ms; 0 none), as
+  // client.c's race_frames_until: the race screen shows its last seconds, until the game is back
+  // (host_service_net_back), at most RACE_FRAMES_AFTER_MS (finding 216)
+  let frames = [], timer, after = 0;
+  const RACE_FRAMES_AFTER_MS = 10000;
+  const raceOver = () => { if (state === 3) after = now() + RACE_FRAMES_AFTER_MS; state = 2; };
+  const raceFrames = () => state === 3 || now() < after;
   let error = '', errorCode = '';
   const send = m => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)); };
   const now = () => performance.now();
@@ -48,18 +54,18 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     };
     ws.onmessage = e => {
       if (socket !== ws) return;
-      if (typeof e.data !== 'string') { if (state===3) {frames.push(new Uint8Array(e.data)); if(frames.length>128)frames.shift();} return; }
+      if (typeof e.data !== 'string') { if (raceFrames()) {frames.push(new Uint8Array(e.data)); if(frames.length>128)frames.shift();} return; }
       const m = JSON.parse(e.data);
       if(m.type==='ping') send({type:'pong',s:m.s});
       if(m.type==='pong' && m.t !== undefined) offset=m.serverTime-(now()+m.t)/2;
       if(m.type==='welcome') {member=m.memberId;state=2;room.code=m.code;offset=m.serverTime-now();welcome=m;p2p=m.transport==='p2p';
         serverGo=(m.features||[]).includes('race_go');serverScore=(m.features||[]).includes('score');}
       if(m.type==='where') where=m;  // the room's region and the members' regions (finding 135)
-      if(m.type==='room') {room=m;if(!me()?.inRace && m.phase)state=2;}
-      if(m.type==='start') {start=m;state=3;frames=[];goAt=0;ended=0;}
+      if(m.type==='room') {room=m;if(!me()?.inRace && m.phase)raceOver();}
+      if(m.type==='start') {start=m;state=3;frames=[];goAt=0;ended=0;after=0;}
       if(m.type==='race_go' && state===3 && !goAt && m.race===start.startAt && m.at>0) goAt=m.at;
       if(m.type==='left' && start.players?.[m.slot])start.players[m.slot].left=1;
-      if(m.type==='ended') {state=2;frames=[];ended=m.reason==='void'?2:m.reason==='done'?1:3;}  // NET_ENDED_* (finding 211)
+      if(m.type==='ended') {raceOver();ended=m.reason==='void'?2:m.reason==='done'?1:3;}  // NET_ENDED_* (finding 211)
       if(m.type==='error') {error=m.message;errorCode=m.code;}
       seq++;
     };
@@ -121,7 +127,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_end_race:()=>send({type:'end'}),
     host_service_net_race_go:at=>{if(serverGo&&state===3&&start.startAt&&at>0)send({type:'race_go',race:start.startAt,at});},  // finding 187
     host_service_net_finish:(ticks,place,score)=>send({type:'finish',ticks:ticks>>>0,place,...(serverScore&&score>=0?{score}:{})}),
-    host_service_net_back:()=>{send({type:'back'});state=2;frames=[];const m=me();if(m)m.inRace=false;seq++;},
+    host_service_net_back:()=>{send({type:'back'});state=2;frames=[];after=0;const m=me();if(m)m.inRace=false;seq++;},
     host_service_net_rules:(finishWindow,nextRace,then)=>send({type:'settings',finishWindow,nextRace:['auto','host'][nextRace],then:['same','next','random'][then]}),
     host_service_net_rotation:(a,n)=>{if(n>=0&&n<=64)send({type:'settings',rotation:[...span(a,n)].map(x=>x&31),trackLimits:[...span(a,n)].map(x=>10-2*(x>>5&3)),pickOnly:[...span(a,n)].filter(x=>x&128).map(x=>x&31)});},
     host_service_net_set_room:a=>{
@@ -134,7 +140,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_seconds:()=>now()/1000,
     host_service_net_server_ms:serverMs,
     host_service_net_send_frame:(type,a,n)=>{
-      if(state!==3||n>3070)return 0;const f=new Uint8Array(n+2);f[0]=type;f.set(span(a,n),2);ws.send(f);return 1;},
+      if(!raceFrames()||n>3070)return 0;const f=new Uint8Array(n+2);f[0]=type;f.set(span(a,n),2);ws.send(f);return 1;},
     host_service_net_receive_frame:(a,n)=>{const f=frames.shift();if(!f||f.length>n)return 0;span(a,f.length).set(f);return f.length;},
     // P2P rooms are never listed, and the browser offers no SFU rooms: no list here.
     host_service_net_list_lobbies_start:()=>0,

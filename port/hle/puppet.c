@@ -539,19 +539,13 @@ static double take_snapshot(Puppet *p, const Snapshot *s, SyncPose *owner, SyncP
     return carry;
 }
 
-/* The owner's own rider jumped between its last two snapshots further than its speed explains (the
-   game put it back on the track without a crash, round 4: 69-351 units with the rider standing):
-   a respawn here too. */
-static int owner_jumped(const Puppet *p, const Snapshot *s)
+/* The owner's own rider jumped (puppet_sync.h sync_owner_jumped) between the last snapshot used
+   (at `used`) and s: a respawn here too. */
+static int owner_jumped(const Puppet *p, const Snapshot *s, double used)
 {
-    for (int i = p->count - 1; i > 0; i--) {
-        if (&p->ring[i] != s) continue;
-        const Snapshot *before = &p->ring[i - 1];
-        float d[3] = {s->pos[0] - before->pos[0], s->pos[1] - before->pos[1], s->pos[2] - before->pos[2]};
-        float v = fmaxf(sync_len(s->vel), sync_len(before->vel));
-        return sync_len(d) > v * (float)(s->time - before->time) * 1.5f + SYNC_RESYNC;
-    }
-    return 0;
+    SyncMark marks[RING];
+    for (int i = 0; i < p->count; i++) marks[i] = (SyncMark){p->ring[i].time, p->ring[i].pos, p->ring[i].vel};
+    return sync_owner_jumped(marks, p->count, used, s->time);
 }
 
 static void ease(float *vel, const float *to, float dt)
@@ -575,7 +569,7 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
     SyncPose carried;
     double carry = 0;
     int fresh = s->time > p->used;
-    double gap = fresh && p->used > 0 ? s->time - p->used : 0;  /* since the last snapshot used */
+    double used = p->used, gap = fresh && used > 0 ? s->time - used : 0;  /* since the last snapshot used */
     if (fresh) carry = take_snapshot(p, s, &owner, &carried);
     /* A sender catching up after its game fell behind (a HOLD's stop, or a hitch too short or too
        loaded to announce one: its race clock runs up to twice the shared clock, finding 139): its
@@ -625,7 +619,7 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
            the correction moves it at most SYNC_SLIDE_MOST faster or slower than it rides
            (puppet_sync.h), and is logged as a catch-up. */
         const char *why = !p->synced ? "first snapshot"
-                        : (p->after_crash && error > SYNC_RESPAWN) || (error > SYNC_RESYNC && owner_jumped(p, s)) ? "respawn"
+                        : (p->after_crash && error > SYNC_RESPAWN) || (error > SYNC_RESYNC && owner_jumped(p, s, used)) ? "respawn"
                         : t - s->time >= SYNC_RESYNC_AGE ? NULL
                         : error > SYNC_PLACE_FAR ? "far"
                         : gap > SYNC_PLACE_SILENCE && error > SYNC_RESYNC ? "after silence" : NULL;

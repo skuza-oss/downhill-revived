@@ -34,8 +34,10 @@ typedef struct {
     NetLobby lobby;
     int racing;
     /* After the race ends (the room's "ended", or this member out of it): race frames still pass
-       until then (net_now_ms), while the games show the race's last seconds (finding 202 round 4:
-       without them every rider was ridden on blind, 20-330 units off); 0 once the game is back */
+       both ways until then (net_now_ms), while the games show the race's last seconds (finding 202
+       round 4: without them every rider was ridden on blind, 20-330 units off); 0 once the game
+       leaves the race screen (client_back). The one rule for an ended race's frames: the
+       transports carry the latest race's until the next start (finding 216). */
     double race_frames_until;
     /* In a race whose room connection dropped (finding 175): the race goes on over the SFU while
        the transport rejoins; race frames are still sent. */

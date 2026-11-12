@@ -247,3 +247,76 @@ fn without_direct_links_a_game_goes_to_the_sfu_at_once() {
     hub.room(&routes(1, &[(1, ""), (2, ""), (3, "")], &[], &[]));
     assert_eq!(hub.take().len(), 2);  // each member's link
 }
+
+/// Finding 216: the room ends the race (routes without one), and racers' frames still travel as
+/// they did, the race's own marker, while the games show its last seconds: a finish that arrives
+/// after the routes is the guest's own, the finish window's racers (left at the end) are carried,
+/// a fallback racer stays on the SFU though the room retries its link, and the next race replaces it.
+#[test]
+fn an_ended_race_still_carries_its_last_seconds() {
+    let mut hub = linked(star(1, 1, LINKS, SLOTS_3), &[2, 4]);
+    let mut s = linked(star(2, 1, LINKS, SLOTS_3), &[1]);
+    let mut f = star(3, 1, LINKS, SLOTS_3);
+    f.take();
+    // The finish window: every racer left, then the race ended; the room retries member 3's link.
+    let retried = &[(1, ""), (2, "star"), (3, ""), (4, "star")];
+    for g in [&mut hub, &mut s, &mut f] {
+        g.room(&routes(1, LINKS, SLOTS_3, &[0, 1, 2]));
+        g.room(&routes(1, retried, &[], &[]));
+        g.take();
+    }
+    // The star member's finish event: to the hub, its game, the star and the SFU racer.
+    s.game_frame(&event(0));
+    let to_hub = peers(&s.take());
+    assert_eq!(to_hub.len(), 1);
+    assert_eq!(to_hub[0].2[..9], envelope(&[], MARKER)[..9]);
+    hub.peer_message(2, true, &to_hub[0].2, 10);
+    let out = hub.take();
+    assert_eq!(games(&out).iter().map(|f| f[1]).collect::<Vec<_>>(), vec![1]);
+    assert_eq!(sfus(&out).iter().map(|f| f[1]).collect::<Vec<_>>(), vec![1]);
+    f.sfu_frame(1, sfus(&out)[0].clone());
+    assert_eq!(games(&f.take()).iter().map(|f| f[1]).collect::<Vec<_>>(), vec![1]);
+    // The fallback racer's state still goes up on the SFU (its retried link isn't up), and the hub
+    // forwards it into the star.
+    f.game_frame(&state(0));
+    let mine = sfus(&f.take());
+    assert_eq!(mine.len(), 1);
+    hub.sfu_frame(3, mine[0].clone());
+    let out = hub.take();
+    assert_eq!(games(&out)[0][1], 2);
+    assert_eq!(peers(&out).iter().map(|(id, _, b)| (*id, b[10])).collect::<Vec<_>>(), vec![(2, 2)]);
+    s.peer_message(1, false, &peers(&out)[0].2, 20);
+    assert_eq!(games(&s.take())[0][1], 2);
+    // The hub's own: to the star racer and the SFU.
+    hub.game_frame(&state(0));
+    let out = hub.take();
+    assert_eq!(peers(&out).len(), 1);
+    assert_eq!(sfus(&out).len(), 1);
+    // Nothing of the ended race is a start, and it expects no channels.
+    assert!(hub.sfu_expect().is_empty() && f.sfu_expect().is_empty());
+    let links = &[(1, ""), (2, "star"), (3, "star")];
+    let mut sitting = linked(star(1, 1, links, &[2, 3]), &[2, 3]);
+    sitting.room(&routes(1, links, &[], &[]));
+    assert!(sitting.race_start().is_none());
+    // The next race replaces it: the ended race's frames are another race's now.
+    let next = json!({"type": "p2p", "hub": 1, "members": [{"id": 1}, {"id": 2, "link": "star"}, {"id": 3}, {"id": 4, "link": "star"}],
+                      "race": {"startAt": MARKER + 60_000, "slots": [1, 2], "left": []}});
+    hub.room(&next);
+    hub.take();
+    hub.peer_message(2, false, &envelope(&state(0), MARKER), 30);
+    assert!(hub.take().is_empty());
+    hub.peer_message(2, false, &envelope(&state(0), MARKER + 60_000), 30);
+    assert_eq!(games(&hub.take()).len(), 1);
+}
+
+/// While a race runs, a racer who left (BACK, a dropped game) is out of its frames as before.
+#[test]
+fn a_running_race_still_drops_a_racer_who_left() {
+    let mut hub = linked(star(1, 1, LINKS, SLOTS_3), &[2, 4]);
+    hub.room(&routes(1, LINKS, SLOTS_3, &[1]));
+    hub.take();
+    hub.peer_message(2, false, &envelope(&state(0), MARKER), 10);
+    assert!(hub.take().is_empty());
+    hub.game_frame(&state(0));
+    assert!(peers(&hub.take()).is_empty());
+}

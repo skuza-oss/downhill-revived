@@ -297,7 +297,11 @@ DataChannel messages add an 8-byte little-endian unsigned prefix containing that
 `start.startAt` value in ms. The original type/slot/payload follows it unchanged. This is a race
 identifier, not a game clock or tick agreement. Endpoints discard older races' messages. Early
 reliable EVENTs wait in a bounded queue until their matching WebSocket start is delivered; future
-STATEs can be dropped; a race's frames after its `ended` are dropped. WebSocket callbacks and SFU
+STATEs can be dropped. A race's frames still travel after its `ended`, both ways and every
+racer's (a racer who left at the end, the finish window's, too), while the games show its last
+seconds: each game sends and takes them until it leaves the race screen (`back`), at most 10 s, and
+the next start replaces the race (finding 216; before it they were dropped at `ended`, so the last
+seconds were drawn blind and a last finisher's finish could be lost). WebSocket callbacks and SFU
 callbacks are delivered on one network thread, so the game sees start before buffered events. At
 each start the client begins that race's own state (the racers, the acknowledgement, queued
 frames, flood counters); the association and its channels stay.
@@ -699,7 +703,8 @@ welcome lists `"score"`; another value is `bad_value`. A rejoin's repeated finis
 The first human finish sets finishEndsAt to now plus the running finishWindow.
 With finishWindow zero the deadline remains null. Later finishes do not move it.
 At the deadline all unfinished entrants become DNF time_up and leave the race's frames.
-Finished entrants retain their finish and leave them too.
+Finished entrants retain their finish and leave them too. The race ends with them, and its last
+seconds still travel (above, finding 216).
 
 A client sends `{"type":"back"}` when leaving the race scene for the room.
 An unfinished entrant becomes DNF gave_up. A finisher keeps its finish.
@@ -963,6 +968,9 @@ the hubs (1 for the first, one more for each new one). A member's
 `link`: `star` once its link to the hub is up, `sfu` when it races over the SFU, absent while it is
 being made (the hub has none). `race`: the running race's marker and its slots (member ids by
 slot) and the slots that left, or null: the hub forwards a race's frames whether it races or not.
+Routes without a race after one ran end it for the star, not its frames: every game keeps the
+ended race's routes (its slots, each member's link as it was) for its last seconds, every racer's
+frames carried, until the next race's routes replace them (finding 216).
 
 **Signaling.** `{"type":"p2p_signal","to":5,"epoch":1,"signal":{...}}` from the game, passed on as
 `{"type":"p2p_signal","from":2,"epoch":1,"signal":{...}}`, only between the hub and a member and

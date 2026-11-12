@@ -151,12 +151,17 @@ pub struct Sfu {
     closing: Vec<Closing>,
     /// Stream ids a closed channel that never got its stream still holds in str0m.
     orphans: Vec<u16>,
-    /// The racers of the latest race: member id -> slot.
+    /// The racers of the latest race still in it: member id -> slot.
     slots: HashMap<u64, u8>,
-    /// The latest race's marker (its start's startAt; 0 before the first), kept after its end so
-    /// its late frames are told apart from the next race's early ones.
+    /// Every racer of the latest race, a racer who left too: once it is over, the last frames of
+    /// each travel (finding 216).
+    racers: HashMap<u64, u8>,
+    /// The latest race's marker (its start's startAt; 0 before the first), kept after its end: its
+    /// frames still travel both ways while the games show its last seconds (each game stops its
+    /// own, port/net/client.c; finding 216), and are told apart from the next race's early ones.
     race: u64,
-    /// That race is running for this game: from its start message to its `ended`.
+    /// That race is running for this game: from its start message to its `ended` (its setup, its
+    /// release and silence; not whether its frames travel).
     race_open: bool,
     /// This game's own member id in that race (from the start's yourSlot), and when the start came.
     me: Option<u64>,
@@ -424,7 +429,7 @@ impl Sfu {
         if drop_in_percent > 0 { eprintln!("net: SFU: DHD_NET_SFU_DROP_IN={drop_in_percent}, that share of the SFU's records is dropped on arrival (test switch)"); }
         let drop_all_in = test_silent();
         if drop_all_in { eprintln!("net: SFU: DHD_NET_SFU_SILENT, this association drops every race frame it receives (test switch)"); }
-        Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], waiting: vec![], closing: vec![], orphans: vec![], slots: HashMap::new(),
+        Ok((Self { rtc, pending: Some(pending), socket, local, inbox, reader_alive, reader_failed, stats: Stats::default(), channels: vec![], waiting: vec![], closing: vec![], orphans: vec![], slots: HashMap::new(), racers: HashMap::new(),
             race: 0, race_open: false, me: None, started_at: None, created: Instant::now(), future_events: VecDeque::new(),
             connected: false, announced: false, released: false, released_at: None, go_at: None, heard: false, silent_said: false, drop_all_in,
             drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(), p2p: None,
@@ -459,6 +464,7 @@ impl Sfu {
             self.race_open = true;
             self.started_at = Some(Instant::now());
             self.slots.clear();
+            self.racers.clear();
             self.rates.clear();
             self.announced = false; self.released = false; self.released_at = None; self.go_at = None;
             self.heard = false; self.silent_said = false;
@@ -472,17 +478,17 @@ impl Sfu {
                     {
                         if slot < 10 {
                             self.slots.insert(member, slot as u8);
+                            self.racers.insert(member, slot as u8);
                             if you == Some(slot) { self.me = Some(member); }
                         }
                     }
                 }
             }
         } else if message["type"] == "ended" {
-            // The race is over; the association stays for the next one. Its late frames are dropped.
+            // The race is over; the association stays for the next one. Its frames go on both ways
+            // (released, queued) until the games leave its screen or the next start (finding 216).
             self.race_open = false;
-            self.announced = false; self.released = false; self.released_at = None; self.go_at = None;
-            self.pending_state.clear();
-            self.pending_events.clear();
+            self.announced = false; self.go_at = None;
         } else if message["type"] == "left" {
             if let Some(member) = message["memberId"].as_u64() {
                 self.slots.remove(&member);
@@ -730,9 +736,10 @@ impl Sfu {
     pub fn unwritten(&self) -> bool {
         self.released && !(self.pending_state.is_empty() && self.pending_events.is_empty())
     }
-    /// Queues a race frame. Outside a race (a frame the game sent as its race ended) it is dropped.
+    /// Queues a race frame of the latest race, running or ended (its last seconds, finding 216);
+    /// before any race it is dropped.
     pub fn send(&mut self, bytes: &[u8]) -> Result<()> {
-        if bytes.len() < 2 || bytes.len() > 3072 || !self.race_open {
+        if bytes.len() < 2 || bytes.len() > 3072 || self.race == 0 {
             return Ok(());
         }
         let state = bytes[0] == 5;
@@ -915,7 +922,7 @@ impl Sfu {
             if theirs < EARLY_EVENTS_PER_SENDER && self.future_events.len() < EARLY_EVENTS_MAX {
                 self.future_events.push_back((id, bytes));
             }
-        } else if epoch == self.race && self.race_open {
+        } else if epoch == self.race && self.race != 0 {
             if c.state {
                 if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
                 // A bundle's stamp (version 6: bytes 5-12 of the frame, after the 8-byte race marker).
@@ -930,7 +937,7 @@ impl Sfu {
                 // The star's router checks the slot against the publisher (dhd_star sfu_frame).
                 frames.push((c.member, bytes[8..].to_vec()));
                 self.heard = true;
-            } else if let Some(slot) = self.slots.get(&c.member) {
+            } else if let Some(slot) = if self.race_open { &self.slots } else { &self.racers }.get(&c.member) {
                 let mut frame = bytes[8..].to_vec();
                 frame[1] = *slot;
                 frames.push((c.member, frame));
@@ -1570,7 +1577,8 @@ mod tests {
 
     /// Finding 177: one association for the room stay. Two races on it: each race starts its own
     /// state (acknowledgement for that race, release, queued frames, flood counters) while the
-    /// connection and the channels stay; an ended race's frames are dropped both ways.
+    /// connection and the channels stay. Finding 216: an ended race's frames still travel both ways
+    /// (the games show its last seconds), a racer who left at the end too, until the next start.
     #[test]
     fn the_association_outlives_races_and_each_race_starts_its_own_state() {
         let (mut sfu, mut client) = LocalSfu::start();
@@ -1612,16 +1620,33 @@ mod tests {
             }
             assert!(got.iter().any(|(id, d)| *id == own_events && d[..8] == race.to_le_bytes() && d[10] == payload), "race {race}: ours sent with its marker");
             assert_eq!(frames[0].1, vec![6, 1, payload], "race {race}: theirs taken");
+            // The finish window: the other racer left, then the race ended. Its last seconds still
+            // travel both ways, with its marker and the leaver's slot.
+            client.signal(&json!({"type":"left","slot":1,"memberId":17,"reason":"time_up"})).unwrap();
             client.signal(&json!({"type":"ended"})).unwrap();
-            assert!(!client.race_open && !client.released);
-            // After the end: nothing more goes out, an ended race's frames are dropped.
+            assert!(!client.race_open && client.released);
             client.send(&[6, 0, 99]).unwrap();
-            assert!(client.pending_events.is_empty());
+            let mut got = vec![];
             frames.clear();
-            sfu.server.channel(their_events).unwrap().write(true, &event(race, 99)).unwrap();
-            for _ in 0..50 { sfu.pump(&mut client, &mut text, &mut frames); }
-            assert!(frames.is_empty(), "race {race}: a frame after its end");
+            let until = Instant::now() + Duration::from_secs(5);
+            // (the earlier writes' copies may still come in: the one written now is looked for)
+            let theirs = |frames: &Vec<(u64, Vec<u8>)>| frames.iter().any(|f| f.1 == [6, 1, 99]);
+            let ours = |got: &Vec<(ChannelId, Vec<u8>)>| got.iter().any(|(id, d)| *id == own_events && d[..8] == race.to_le_bytes() && d[10] == 99);
+            let mut written = false;
+            while Instant::now() < until && !(ours(&got) && theirs(&frames)) {
+                if !written { sfu.server.channel(their_events).unwrap().write(true, &event(race, 99)).unwrap(); written = true; }
+                got.extend(sfu.pump(&mut client, &mut text, &mut frames));
+            }
+            assert!(ours(&got), "race {race}: ours after its end");
+            assert!(theirs(&frames), "race {race}: theirs after its end");
+            assert!(text.iter().all(|m| m["type"] != "sfu_ready" || m["race"] == race), "no acknowledgement after the end");
         }
+        // The next race replaces the ended one: the earlier race's frames are dropped.
+        client.signal(&json!({"type":"start","startAt":3000,"yourSlot":0,"players":[{"memberId":7,"slot":0},{"memberId":17,"slot":1}]})).unwrap();
+        frames.clear();
+        sfu.server.channel(their_events).unwrap().write(true, &event(2000, 98)).unwrap();
+        for _ in 0..50 { sfu.pump(&mut client, &mut text, &mut frames); }
+        assert!(frames.is_empty(), "the ended race's frame after the next start");
         assert_eq!(client.channels.iter().map(|c| c.id).collect::<Vec<_>>(), ids, "the same channels throughout");
         assert!(client.connected && client.rtc.is_alive());
         let _ = own_state;

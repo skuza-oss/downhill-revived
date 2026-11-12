@@ -72,6 +72,13 @@ struct Race {
     /// slot -> member
     slots: Vec<u64>,
     left: Vec<u8>,
+    /// Each member's link to the hub while the race ran (the routes' members then).
+    links: Vec<(u64, Option<Link>)>,
+    /// The room ended it (routes without a race): its frames still travel as they did at its end,
+    /// every racer's, a racer who left at the end too (the finish window's), while the games show
+    /// the race's last seconds; each game stops its own (port/net/client.c, finding 216). The next
+    /// race replaces it.
+    over: bool,
 }
 
 struct PeerState {
@@ -157,16 +164,31 @@ impl Star {
             self.reported_down.retain(|other| !retried.contains(if me == hub { other } else { &me }));
         }
         let race = &m["race"];
-        self.race = race["startAt"].as_u64().map(|marker| Race {
-            marker,
-            slots: race["slots"].as_array().map_or(vec![], |a| a.iter().filter_map(Value::as_u64).take(SLOTS).collect()),
-            left: race["left"].as_array().map_or(vec![], |a| a.iter().filter_map(Value::as_u64).map(|s| s as u8).collect()),
-        });
+        match race["startAt"].as_u64() {
+            Some(marker) => self.race = Some(Race {
+                marker,
+                slots: race["slots"].as_array().map_or(vec![], |a| a.iter().filter_map(Value::as_u64).take(SLOTS).collect()),
+                left: race["left"].as_array().map_or(vec![], |a| a.iter().filter_map(Value::as_u64).map(|s| s as u8).collect()),
+                links: self.members.clone(),
+                over: false,
+            }),
+            // The race ended: its routes stay as they were for its last seconds (finding 216).
+            None => if let Some(r) = self.race.as_mut() { r.over = true; },
+        }
         self.reconcile();
     }
 
     fn link_of(&self, id: u64) -> Option<Link> {
         self.members.iter().find(|(m, _)| *m == id).and_then(|(_, l)| *l)
+    }
+
+    /// A member's link for the race's frames: as it was while the race ran (an ended race's last
+    /// frames go the way they went, though the room retries its SFU members' links between races).
+    fn race_link(&self, id: u64) -> Option<Link> {
+        match self.race.as_ref() {
+            Some(r) => r.links.iter().find(|(m, _)| *m == id).and_then(|(_, l)| *l),
+            None => self.link_of(id),
+        }
     }
 
     /// The peer connections this game should hold: the hub one to every member not on the SFU, a
@@ -237,30 +259,34 @@ impl Star {
         self.peers.values().any(|p| p.up)
     }
 
-    /// The slot of a member still in the race.
+    /// The slot of a member whose race frames travel: still in the race, or any racer of an ended
+    /// one.
     fn active_slot(&self, member: u64) -> Option<u8> {
         let race = self.race.as_ref()?;
         let slot = race.slots.iter().position(|m| *m == member)? as u8;
-        (!race.left.contains(&slot)).then_some(slot)
+        race.carries(slot).then_some(slot)
     }
 
     fn slot_active(&self, slot: u8) -> bool {
-        self.race.as_ref().is_some_and(|r| (slot as usize) < r.slots.len() && !r.left.contains(&slot))
+        self.race.as_ref().is_some_and(|r| r.carries(slot))
     }
 
     /// Racers on the SFU (the hub never is).
     fn fallback_racers(&self) -> Vec<u64> {
         let Some(race) = self.race.as_ref() else { return vec![] };
         race.slots.iter().enumerate()
-            .filter(|(slot, id)| !race.left.contains(&(*slot as u8)) && Some(**id) != self.hub && self.link_of(**id) == Some(Link::Sfu))
+            .filter(|(slot, id)| race.carries(*slot as u8) && Some(**id) != self.hub && self.race_link(**id) == Some(Link::Sfu))
             .map(|(_, id)| *id).collect()
     }
 
     /// The publishers whose SFU channels this game needs open for the race (its sfu_ready waits for
     /// them): the hub, the fallback racers; a fallback racer, the hub and the other fallback racers;
-    /// a star member, none.
+    /// a star member, none. An ended race waits for nothing.
     pub fn sfu_expect(&self) -> Vec<u64> {
         let (Some(me), Some(hub)) = (self.me, self.hub) else { return vec![] };
+        if self.race.as_ref().is_some_and(|r| r.over) {
+            return vec![];
+        }
         let fallback = self.fallback_racers();
         if me == hub {
             fallback
@@ -282,7 +308,7 @@ impl Star {
     /// The running race's start for this game's SFU association when the game itself doesn't race
     /// (a hub that bridges a race it sits out): the marker and the slots, no own slot.
     pub fn race_start(&self) -> Option<Value> {
-        let race = self.race.as_ref()?;
+        let race = self.race.as_ref().filter(|r| !r.over)?;
         let me = self.me?;
         if race.slots.contains(&me) {
             return None;
@@ -345,7 +371,7 @@ impl Star {
             if let Some(bytes) = self.envelope(&frame) {
                 self.out.push(Action::Peer(hub, frame[0] == EVENT, bytes));
             }
-        } else if self.link_of(me) == Some(Link::Sfu) {
+        } else if self.race_link(me) == Some(Link::Sfu) {
             self.out.push(Action::Sfu(frame));
         }
     }
@@ -426,6 +452,13 @@ impl Star {
             self.out.push(Action::Close(id));
             self.link(id, false, now);
         }
+    }
+}
+
+impl Race {
+    /// A slot whose frames travel: in the race and not left, or any slot once the race is over.
+    fn carries(&self, slot: u8) -> bool {
+        (slot as usize) < self.slots.len() && (self.over || !self.left.contains(&slot))
     }
 }
 

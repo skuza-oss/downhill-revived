@@ -270,6 +270,74 @@ def riders_report(run, start=1.0, end=1e9):
         print(f"{viewer} re-syncs: {c['early']} in the first 5 s, {c['later']} later, {c['after crash']} after crashes "
               f"(placed: respawns); catch-ups by riding {c['catch early']} in the first 5 s, {c['catch later']} later; "
               f"placed more than 20 units from the owner's pose {r['misplaced'][0]} (worst {r['misplaced'][1]:.0f})")
+    end_report(run)
+
+
+CLOSED = re.compile(r'online: race closed.*race tick (\d+)')
+LEAVE_AFTER = 2.0  # s the race screen stays after the room ends the race (online.c state_sync, leave_at)
+
+
+def race_end(viewer):
+    """When the room ended the race on this game's race clock (s), from online.c's "race closed" line
+    (its race tick since finding 216); a log from before that: LEAVE_AFTER before the trace's last
+    step. None without either."""
+    log = (viewer / ('stderr.log' if (viewer / 'stderr.log').exists() else 'game.log')).read_text(errors='replace')
+    m = CLOSED.findall(log)
+    if m:
+        return int(m[-1]) / 60.0
+    trace = viewer / 'puppet.txt'
+    lines = trace.read_text().splitlines() if trace.exists() else []
+    return float(lines[-1].split()[0]) - LEAVE_AFTER if lines else None
+
+
+def after_end(run):
+    """Every rider as each game draws it from the room's end of the race to its race screen's close
+    (finding 216: the transport dropped the frames then, and riders drifted 13-72 units): the bench's
+    scores (riders) of that window. {viewer: (end, shown seconds, {'human': scores, 'ai': scores})}."""
+    run, out = Path(run), {}
+    for viewer in ('A', 'B'):
+        end = race_end(run / viewer)
+        if end is None:
+            continue
+        r = riders(run, end, 1e9).get(viewer, {})
+        lines = (run / viewer / 'puppet.txt').read_text().splitlines()
+        shown = float(lines[-1].split()[0]) - end if lines else 0.0
+        out[viewer] = (end, shown, r)
+    return out
+
+
+def end_report(run):
+    for viewer, (end, shown, r) in after_end(run).items():
+        parts = []
+        for kind in ('human', 'ai'):
+            s = r.get(kind)
+            if s:
+                parts.append(f"{'the other player' if kind == 'human' else 'AI riders'} {s['steps']} steps, error p50/p95/p99 "
+                             f"{s['error_p50']:.2f}/{s['error_p95']:.2f}/{s['error_p99']:.2f}")
+        print(f"{viewer} after the race's end (race second {end:.2f}, shown {shown:.1f} s more): " + ('; '.join(parts) or 'nothing drawn'))
+
+
+def last_race(src, dst, log='game.log'):
+    """The last race of a game's files (a room's games ride several) into dst, as this tool reads a
+    game: the log, its puppet trace and its own recording from where their race time last starts over."""
+    src, dst = Path(src), Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / 'game.log').write_text((src / log).read_text(errors='replace'))
+    lines = (src / 'puppet.txt').read_text().splitlines() if (src / 'puppet.txt').exists() else []
+    cut = 0
+    for i in range(1, len(lines)):
+        if float(lines[i].split()[0]) < float(lines[i - 1].split()[0]) - 1:
+            cut = i
+    (dst / 'puppet.txt').write_text('\n'.join(lines[cut:]) + '\n')
+    data = (src / 'own.bin').read_bytes() if (src / 'own.bin').exists() else b''
+    data = data[:len(data) - len(data) % SNAP_SIZE]
+    cut, last = 0, None
+    for at in range(0, len(data), SNAP_SIZE):
+        t = SNAP.unpack_from(data, at)[1]
+        if last is not None and t < last - 1:
+            cut = at
+        last = t
+    (dst / 'own.bin').write_bytes(data[cut:])
 
 
 def main():

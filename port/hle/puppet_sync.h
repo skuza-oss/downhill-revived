@@ -275,4 +275,24 @@ static inline void sync_step(PuppetSync *s, float dt, const float *ground, SyncP
     }
     sync_turn(pose->rot, dr);
 }
+/* An owner's own jump (puppet.c owner_jumped, finding 202 round 4; finding 216): its rider moved
+   between two of its snapshots further than its speed explains (the game put it back on the track
+   without a crash: 69-365 units, the rider standing after). Any two from the one last used (at
+   `used`) to the one used now (at `now`): snapshots come in bunches over a late link, and a reset
+   whose next snapshot came in the same step lies before the newest one's predecessor (live: a
+   364.8-unit reset placed as "far"). `m`: the snapshots by time, oldest first. */
+typedef struct { double time; const float *pos, *vel; } SyncMark;
+static inline int sync_owner_jumped(const SyncMark *m, int n, double used, double now)
+{
+    for (int i = n - 1; i > 0; i--) {
+        const SyncMark *after = &m[i], *before = &m[i - 1];
+        if (after->time > now) continue;
+        if (after->time <= used) break;
+        float d[3] = {after->pos[0] - before->pos[0], after->pos[1] - before->pos[1], after->pos[2] - before->pos[2]};
+        float v = fmaxf(sync_len(after->vel), sync_len(before->vel));
+        if (sync_len(d) > v * (float)(after->time - before->time) * 1.5f + SYNC_RESYNC) return 1;
+    }
+    return 0;
+}
+
 #endif

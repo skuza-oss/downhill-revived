@@ -404,7 +404,10 @@ fn send_main(c: Arc<WsConn>) {
             if !binary {
                 if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data) {
                     let kind = message["type"].as_str().unwrap_or("");
-                    if matches!(kind, "start" | "ended") {
+                    // A new race: frames the game queued in the last one's must not go out with its
+                    // marker. The room's end keeps them: an ended race's last seconds still travel
+                    // (finding 216).
+                    if kind == "start" {
                         lock(&c.queue).out.retain(|(binary, bytes)| !*binary || !matches!(bytes.first(), Some(5 | 6)));
                     }
                     // A P2P room's routes and its star's signaling are the send thread's, not the game's.
