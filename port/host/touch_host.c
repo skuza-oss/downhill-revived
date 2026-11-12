@@ -267,13 +267,15 @@ static int env_int(const char *name, int fallback, int lo, int hi)
 
 static void settings_read(TouchSettings *s)
 {
-    static const char *const preset[] = {"thumb", "classic"}, *const hand[] = {"right", "left"}, *const steer[] = {"stick", "tilt"};
+    static const char *const preset[] = {"thumb", "classic"}, *const hand[] = {"right", "left"}, *const steer[] = {"stick", "tilt", "dpad"};
     static const char *const stick[] = {"floating", "fixed"}, *const labels[] = {"auto", "always", "off"};
     static const char *const attacks[] = {"flick", "buttons"}, *const pad[] = {"hide", "show"}, *const hud[] = {"game", "move"};
     touch_settings_default(s);
     s->preset = env_choice("DHD_TOUCH_PRESET", preset, 2, TOUCH_CLASSIC);  /* the full pad by default */
     s->left_handed = env_choice("DHD_TOUCH_HAND", hand, 2, 0);
-    s->tilt = env_choice("DHD_TOUCH_STEER", steer, 2, 0);
+    int steering = env_choice("DHD_TOUCH_STEER", steer, 3, 0);   /* stick, tilt or the D-pad (finding 214) */
+    s->tilt = steering == 1;
+    s->dpad = steering == 2;
     const char *size = getenv("DHD_TOUCH_SIZE");
     s->size = size && atoi(size) > 0 ? env_int("DHD_TOUCH_SIZE", 100, 50, 150) : 0;
     s->opacity = env_int("DHD_TOUCH_OPACITY", 60, 10, 100);
@@ -327,7 +329,7 @@ static void configure(int log)
         fprintf(stderr, "touch: %s, %s hand, %s, size %s, screen %.1f x %.1f mm (strips l %.1f t %.1f r %.1f b %.1f mm, "
                 "cutout x %.1f-%.1f mm)\n",
                 s.preset == TOUCH_CLASSIC ? "classic pad" : "thumb zones", s.left_handed ? "left" : "right",
-                s.tilt ? "tilt" : "stick", s.size ? "set" : "auto", sc.width, sc.height, sc.strip_left, sc.strip_top,
+                s.tilt ? "tilt" : s.dpad ? "d-pad" : "stick", s.size ? "set" : "auto", sc.width, sc.height, sc.strip_left, sc.strip_top,
                 sc.strip_right, sc.strip_bottom, sc.cut_x0, sc.cut_x1);
 }
 

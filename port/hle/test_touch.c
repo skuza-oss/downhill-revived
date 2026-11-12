@@ -1396,8 +1396,299 @@ static void test_codes(void)
     }
 }
 
+/* ---- the D-pad (finding 214) ---- */
+
+enum { ARM_UP, ARM_DOWN, ARM_LEFT, ARM_RIGHT };
+#define DPAD_BITS (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT)
+
+/* A race with the D-pad steering: preset, hand, the Size setting (0 auto) and the screen. */
+static void start_dpad(int preset, int left, int size, float width, float height)
+{
+    start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    TouchSettings s = *touch_settings(t);
+    s.dpad = 1;
+    s.left_handed = left;
+    s.size = size;
+    TouchScreen screen = {width, height, 0, 0, 0, 0, 0, 0, 0, 0};
+    touch_configure(t, &s, &screen);
+    field();
+}
+
+static uint16_t pad_dirs(void) { return buttons() & DPAD_BITS; }
+
+static void arm_at(int arm, float *x, float *y) { assert(touch_target(t, TOUCH_TARGET_DPAD, arm, x, y)); }
+
+/* The gap between two boxes (hw, hh half sizes), as the editor measures it. */
+static float box_gap(float ax, float ay, float ahw, float ahh, float bx, float by, float bhw, float bhh)
+{
+    return fmaxf(fabsf(ax - bx) - ahw - bhw, fabsf(ay - by) - ahh - bhh);
+}
+
+/* Both presets, both hands, the Size setting's limits and two screens: the arms are on the screen,
+   at least 9 mm square at full size, the same gap apart as the other buttons (3 mm), and clear of
+   every other control by that gap; the pad sits on the steering side. */
+static void test_dpad_layout(void)
+{
+    static const int sizes[] = {0, 70, 85, 100, 105};
+    static const float screens[2][2] = {{154.5f, 69.5f}, {132.0f, 62.0f}};
+    for (int preset = 0; preset < 2; preset++)
+        for (int left = 0; left < 2; left++)
+            for (unsigned si = 0; si < sizeof sizes / sizeof *sizes; si++)
+                for (int sc = 0; sc < 2; sc++) {
+                    float W = screens[sc][0], H = screens[sc][1];
+                    start_dpad(preset, left, sizes[si], W, H);
+                    float cx, cy, cr;
+                    CHECK(touch_control(t, TC_STICK, &cx, &cy, &cr));
+                    CHECK(left ? cx > W / 2 : cx < W / 2);
+                    float ax[4], ay[4];
+                    for (int a = 0; a < 4; a++) arm_at(a, &ax[a], &ay[a]);
+                    float off = (ay[ARM_DOWN] - ay[ARM_UP]) / 2;       /* an arm's centre from the rest point */
+                    float size = (off - 3.0f) / 2;                     /* off = 2 * half + 3: the arm's half size */
+                    CHECK(fabsf(ax[ARM_LEFT] - (cx - off)) < 0.01f && fabsf(ax[ARM_RIGHT] - (cx + off)) < 0.01f);
+                    CHECK(fabsf(ay[ARM_UP] - (cy - off)) < 0.01f && fabsf(ay[ARM_LEFT] - cy) < 0.01f);
+                    CHECK(fabsf(cr - (off + size)) < 0.01f);           /* the control's radius is the pad's half extent */
+                    if (sc == 0 && (sizes[si] == 0 || sizes[si] >= 100)) CHECK(2 * size >= 8.99f);   /* the panels' 9 mm targets */
+                    CHECK(2 * size >= 5.0f);                           /* even at Size 70 on a short screen */
+                    CHECK(cx - cr >= -0.01f && cx + cr <= W + 0.01f && cy - cr >= -0.01f && cy + cr <= H + 0.01f);
+                    for (int a = 0; a < 4; a++)
+                        for (int b = a + 1; b < 4; b++)
+                            CHECK(box_gap(ax[a], ay[a], size, size, ax[b], ay[b], size, size) >= 3.0f - 0.01f);
+                    for (int c = 0; c < TC_COUNT; c++) {
+                        if (c == TC_STICK || c == TC_TRICK) continue;
+                        float ox, oy, orr, ohw, ohh;
+                        if (!touch_control(t, c, &ox, &oy, &orr) || !touch_control_size(t, c, &ohw, &ohh)) continue;
+                        for (int a = 0; a < 4; a++) {
+                            /* the other control, round or a box: the gap stays 3 mm (the editor's measure for boxes) */
+                            float gap = ohw == ohh ? hypotf(fmaxf(fabsf(ax[a] - ox) - size, 0), fmaxf(fabsf(ay[a] - oy) - size, 0)) - orr
+                                                   : box_gap(ax[a], ay[a], size, size, ox, oy, ohw, ohh);
+                            if (gap < 3.0f - 0.01f) fprintf(stderr, "dpad layout: preset %d left %d size %d screen %d: arm %d near control %d: %.2f\n",
+                                                            preset, left, sizes[si], sc, a, c, gap);
+                            CHECK(gap >= 3.0f - 0.01f);
+                        }
+                    }
+                }
+    /* Stick: no D-pad target; D-pad: no steering area needed */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float x, y;
+    CHECK(!touch_target(t, TOUCH_TARGET_DPAD, 0, &x, &y));
+}
+
+/* The directions by where a thumb is: an arm, between two arms, the rest point, a slide. */
+static void test_dpad_press(void)
+{
+    for (int preset = 0; preset < 2; preset++)
+        for (int left = 0; left < 2; left++) {
+            start_dpad(preset, left, 0, 154.5f, 69.5f);
+            float cx, cy, cr, ax[4], ay[4];
+            touch_control(t, TC_STICK, &cx, &cy, &cr);
+            for (int a = 0; a < 4; a++) arm_at(a, &ax[a], &ay[a]);
+            float off = ax[ARM_RIGHT] - cx;
+            static const uint16_t dir[4] = {PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT};
+            /* an arm's centre: that direction alone, nothing else changes (the game gets the pad's
+               d-pad buttons, the stick stays at rest) */
+            for (int a = 0; a < 4; a++) {
+                touch_down(t, 1, ax[a], ay[a], now);
+                field();
+                CHECK(pad_dirs() == dir[a]);
+                CHECK(stick_x() == 128);
+                touch_up(t, 1, ax[a], ay[a], now);
+                field();
+                CHECK(pad_dirs() == 0);
+            }
+            /* between two arms: both neighbours, never opposite ones, whatever the angle */
+            static const int pairs[4][2] = {{ARM_UP, ARM_RIGHT}, {ARM_RIGHT, ARM_DOWN}, {ARM_DOWN, ARM_LEFT}, {ARM_LEFT, ARM_UP}};
+            for (int p = 0; p < 4; p++) {
+                float mx = (ax[pairs[p][0]] + ax[pairs[p][1]]) / 2, my = (ay[pairs[p][0]] + ay[pairs[p][1]]) / 2;
+                touch_down(t, 2, mx, my, now);
+                field();
+                CHECK(pad_dirs() == (dir[pairs[p][0]] | dir[pairs[p][1]]));
+                touch_up(t, 2, mx, my, now);
+                field();
+            }
+            for (int deg = 0; deg < 360; deg += 5) {
+                float a = deg * 3.14159265f / 180, px = cx + cosf(a) * off, py = cy - sinf(a) * off;
+                touch_down(t, 3, px, py, now);
+                field();
+                uint16_t d = pad_dirs();
+                CHECK(d != 0);
+                CHECK(!((d & PAD_UP) && (d & PAD_DOWN)) && !((d & PAD_LEFT) && (d & PAD_RIGHT)));
+                if (deg % 90 == 0) CHECK(d == dir[deg == 0 ? ARM_RIGHT : deg == 90 ? ARM_UP : deg == 180 ? ARM_LEFT : ARM_DOWN]);
+                if (deg % 90 == 45) { int n = 0; for (int i = 0; i < 4; i++) n += (d & dir[i]) != 0; CHECK(n == 2); }
+                touch_up(t, 3, px, py, now);
+                field();
+            }
+            /* the rest point: a thumb there presses nothing (down, or sliding back to it); just
+               outside the dead zone it does */
+            touch_down(t, 4, cx + 1.0f, cy, now);
+            field();
+            CHECK(pad_dirs() == 0);
+            touch_move(t, 4, cx + 7.0f, cy, now);
+            field();
+            CHECK(pad_dirs() == PAD_RIGHT);
+            touch_move(t, 4, cx + 1.0f, cy, now);
+            field();
+            CHECK(pad_dirs() == 0);
+            /* a slide from one arm to the next without a lift: right, right + up, up, up + left, left;
+               never a gap and never an opposite pair */
+            touch_move(t, 4, ax[ARM_RIGHT], ay[ARM_RIGHT], now);
+            field();
+            CHECK(pad_dirs() == PAD_RIGHT);
+            uint16_t seen[8];
+            int n = 0;
+            for (int deg = 0; deg <= 180; deg += 3) {
+                float a = deg * 3.14159265f / 180;
+                touch_move(t, 4, cx + cosf(a) * off, cy - sinf(a) * off, now);
+                field();
+                uint16_t d = pad_dirs();
+                CHECK(d != 0);
+                if (!n || seen[n - 1] != d) { if (n < 8) seen[n] = d; n++; }
+            }
+            CHECK(n == 5 && seen[0] == PAD_RIGHT && seen[1] == (PAD_RIGHT | PAD_UP) && seen[2] == PAD_UP &&
+                  seen[3] == (PAD_UP | PAD_LEFT) && seen[4] == PAD_LEFT);
+            /* far from the pad the thumb still presses by its angle (it drifted off the pad) */
+            touch_move(t, 4, cx + 45.0f, cy + 3.0f, now);
+            field();
+            CHECK(pad_dirs() == PAD_RIGHT);
+            touch_up(t, 4, cx + 45.0f, cy + 3.0f, now);
+            field();
+            CHECK(pad_dirs() == 0);
+            /* a thumb that lands far from the pad is not the pad's; neither is a second one on it */
+            touch_down(t, 5, cx + 45.0f, cy, now);
+            field();
+            CHECK(pad_dirs() == 0);
+            touch_up(t, 5, cx + 45.0f, cy, now);
+            touch_down(t, 6, ax[ARM_LEFT], ay[ARM_LEFT], now);
+            touch_down(t, 7, ax[ARM_RIGHT], ay[ARM_RIGHT], now);
+            field();
+            CHECK(pad_dirs() == PAD_LEFT);
+            touch_up(t, 6, ax[ARM_LEFT], ay[ARM_LEFT], now);
+            field();
+            CHECK(pad_dirs() == 0);
+            touch_up(t, 7, ax[ARM_RIGHT], ay[ARM_RIGHT], now);
+            field();
+        }
+}
+
+/* A band's edge is sticky: a thumb resting on the edge between "one direction" and "two" keeps what
+   it had until it is a few degrees past. Also in the air, with PEDAL and a controller. */
+static void test_dpad_rules(void)
+{
+    for (int preset = 0; preset < 2; preset++) {
+        start_dpad(preset, 0, 0, 154.5f, 69.5f);
+        float cx, cy, cr;
+        touch_control(t, TC_STICK, &cx, &cy, &cr);
+        float r = 14.0f, rad = 3.14159265f / 180;
+        /* up joins right at 26.5° from right when coming from the right, and goes at 18.5° back */
+        touch_down(t, 1, cx + r * cosf(10 * rad), cy - r * sinf(10 * rad), now);
+        field();
+        CHECK(pad_dirs() == PAD_RIGHT);
+        touch_move(t, 1, cx + r * cosf(25.5f * rad), cy - r * sinf(25.5f * rad), now);
+        field();
+        CHECK(pad_dirs() == PAD_RIGHT);
+        touch_move(t, 1, cx + r * cosf(28 * rad), cy - r * sinf(28 * rad), now);
+        field();
+        CHECK(pad_dirs() == (PAD_RIGHT | PAD_UP));
+        touch_move(t, 1, cx + r * cosf(20 * rad), cy - r * sinf(20 * rad), now);
+        field();
+        CHECK(pad_dirs() == (PAD_RIGHT | PAD_UP));   /* sticky */
+        touch_move(t, 1, cx + r * cosf(17 * rad), cy - r * sinf(17 * rad), now);
+        field();
+        CHECK(pad_dirs() == PAD_RIGHT);
+        touch_up(t, 1, cx, cy, now);
+        field();
+        /* PEDAL (Thumb zones) or ✕ (Classic) beside the D-pad; in the air the pad goes on steering */
+        float px, py;
+        at(preset ? TC_CROSS : TC_PEDAL, &px, &py);
+        touch_down(t, 2, cx + 14, cy, now);
+        touch_down(t, 3, px, py, now);
+        field();
+        CHECK((buttons() & (PAD_RIGHT | PAD_CROSS)) == (PAD_RIGHT | PAD_CROSS));
+        game.air = 1;
+        fields(15);
+        CHECK(pad_dirs() == PAD_RIGHT);
+        game.air = 0;
+        fields(2);
+        /* a controller takes over: the pad lets go; the touch that brings the overlay back is not sent */
+        touch_pad_used(t, now);
+        field();
+        CHECK(pad_dirs() == 0 && !(buttons() & PAD_CROSS));
+        touch_up(t, 2, cx + 14, cy, now);
+        touch_up(t, 3, px, py, now);
+        field();
+        /* switched back to the stick while a thumb is down: it lets go; the stick is there again */
+        TouchSettings s = *touch_settings(t);
+        touch_down(t, 9, 100, 10, now);   /* the touch that brings the overlay back sends nothing */
+        field();
+        CHECK(pad_dirs() == 0);
+        touch_up(t, 9, 100, 10, now);
+        field();
+        touch_down(t, 4, cx + 14, cy, now);
+        field();
+        CHECK(pad_dirs() == PAD_RIGHT);
+        s.dpad = 0;
+        touch_configure(t, &s, NULL);
+        field();
+        CHECK(pad_dirs() == 0);
+        touch_up(t, 4, cx + 14, cy, now);
+        field();
+        float sx, sy, sr;
+        CHECK(touch_control(t, TC_STICK, &sx, &sy, &sr) && fabsf(sr - 11.6f) < 0.3f);   /* the stick's home again */
+        touch_down(t, 5, sx, sy, now);
+        touch_move(t, 5, sx + 12, sy, now);
+        field();
+        CHECK(stick_x() > 250 && pad_dirs() == 0);
+        touch_up(t, 5, sx + 12, sy, now);
+        field();
+        /* pause: nothing is sent while the pause rows are up */
+        s.dpad = 1;
+        touch_configure(t, &s, NULL);
+        touch_control(t, TC_STICK, &cx, &cy, &cr);
+        touch_down(t, 6, cx + 14, cy, now);
+        field();
+        float qx, qy;
+        at(TC_PAUSE, &qx, &qy);
+        touch_down(t, 7, qx, qy, now);
+        touch_up(t, 7, qx, qy, now);
+        fields(10);
+        game.clock_moving = 0;   /* the game's menu is open */
+        fields(10);
+        CHECK(pad_dirs() == 0);
+        touch_up(t, 6, cx + 14, cy, now);
+        game.clock_moving = 1;
+        fields(40);
+    }
+}
+
+/* The pad's shapes: a pressed arm is drawn in the buttons' pressed colour, one box a direction. */
+static void test_dpad_shapes(void)
+{
+    static TouchShape shapes[TOUCH_SHAPES];
+    for (int preset = 0; preset < 2; preset++) {
+        start_dpad(preset, 0, 0, 154.5f, 69.5f);
+        float cx, cy, cr, ax, ay, bx, by;
+        touch_control(t, TC_STICK, &cx, &cy, &cr);
+        arm_at(ARM_UP, &ax, &ay);
+        arm_at(ARM_RIGHT, &bx, &by);
+        int n = touch_shapes(t, shapes, TOUCH_SHAPES), green = 0, boxes_near = 0;
+        for (int i = 0; i < n; i++)
+            if (shapes[i].kind == TS_RECT && fabsf(shapes[i].x - cx) < cr && fabsf(shapes[i].y - cy) < cr && shapes[i].a < 6 && shapes[i].a > 1) boxes_near++;
+        CHECK(boxes_near == 4);   /* four arms, nothing of a stick's ring */
+        touch_down(t, 1, (ax + bx) / 2, (ay + by) / 2, now);
+        field();
+        n = touch_shapes(t, shapes, TOUCH_SHAPES);
+        for (int i = 0; i < n; i++)
+            if (shapes[i].kind == TS_RECT && (shapes[i].fill >> 8) == 0xA6E39Au) green++;
+        CHECK(green == 2);   /* up and right */
+        touch_up(t, 1, 0, 0, now);
+    }
+}
+
 int main(void)
 {
+    test_dpad_layout();
+    test_dpad_press();
+    test_dpad_rules();
+    test_dpad_shapes();
     test_scaling();
     test_flick();
     test_quick_tap();
