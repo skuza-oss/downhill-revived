@@ -36,6 +36,8 @@ def steps(tier, jobs):
                     ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT),
                     # stack locals the EE frame makes one object (finding 213): unreviewed overruns fail
                     ('test_stack_escapes', [PY, 'port/tools/test_stack_escapes.py'], ROOT),
+                    # the OPTIONS walk's evidence rules on a scripted stand-in (finding 219)
+                    ('test_options_walk', [PY, 'port/tools/test_options_walk.py'], ROOT),
                     ('stack_escapes', [PY, 'port/tools/stack_escapes.py', '--check'] + j, ROOT),
                     # the gate itself: a unit that does not compile fails the check (finding 219)
                     ('test_stack_gate', [PY, 'port/tools/test_stack_escapes_gate.py', '-j', str(jobs or 6)], ROOT)]
