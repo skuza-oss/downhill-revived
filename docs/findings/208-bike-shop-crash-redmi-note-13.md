@@ -31,6 +31,8 @@ rider code.
 - [x] 2026-11-12: diagnostics (What changed): read or write in the POSIX guest fault line
   (5ffc0c17), the last disc files in the crash report (665c58e9), the disc files check at every
   start (2ef4d480). `check.py port` OK; the Android debug APK builds (`build_apk.py`, PASS).
+- [x] 2026-11-12: the owner's decision: a changed image's notice in the main menu, once per
+  image; the hash made gentle (4def7e9a), the notice (ae8bcfa5), PLAYING.md and STATE.md.
 - [ ] the reporter's answer (What to ask); the lead's checks (Left for the lead).
 
 ## The crash
@@ -176,13 +178,14 @@ No game code: nothing in the evidence is a bug in our translation, and a guard i
 `func_002195F0` would only move a damaged image's crash to the race, which reads the same files.
 Diagnostics, always on, the same on every platform:
 
-- **The disc files check at every start** (`disc_check_field`, online_menu.c, called once per
-  field from the kernel's VBLANK): about 10 s in, the Online menu's check runs once (iso-check.txt
-  when the launcher or an earlier start wrote it for this image; else the host hashes the image's
-  files once on its thread) and dhd.log says `disc check: the disc image has the USA disc's game
-  files` or which file differs first. Not with `DHD_BENCH` or a tool's `DHD_NET_ISO_SHA256`; the
-  browser has no check and its start fails quietly. The disc lines now start `disc check:` and no
-  longer print the image's path (the settings line hides it as `(a path)`).
+- **The disc files check at every start** (`disc_check_start`, online_menu.c, called by the main
+  menu's first frame; its answer polled each field by `disc_check_field` from the kernel's VBLANK,
+  on any screen): the Online menu's check runs once (iso-check.txt when the launcher or an
+  earlier start wrote it for this image; else the host hashes the image's files once) and dhd.log
+  says `disc check: the disc image has the USA disc's game files` or which file differs first.
+  The disc lines now start `disc check:` and no longer print the image's path (the settings line
+  hides it as `(a path)`).
+- **The disc notice** (below): a changed image is told once in the main menu.
 - **The disc files the game looked up last** (cdvd.c `hle_disc_lookup`): the last 8 lookups
   (path, ` (not found)` when missing) of `sceCdSearchFile`, fileio's `cdrom0:` and the game's own
   loader (`func_0020D958`, a port patch in `port/patches.py`: the first 128 KB chunk of each
@@ -195,6 +198,84 @@ Diagnostics, always on, the same on every platform:
 - **Read or write** on the POSIX guest fault line, as Windows has: ` (a read)` / ` (a write)`
   after the address, from the CPU's fault record (arm64 ESR WnR, x86-64 error code). The line's
   start is unchanged (CrashReport.java matches it on Android 10).
+
+## The disc notice (the owner's decision, 2026-11-12)
+
+When the start-of-game check finds that the image's game files are not the USA disc's, the game
+logs it and shows one dismissible notice, once per image.
+
+- **What it says** (`disc_notice.h` `disc_notice_lines`, the game's own popup, `menu_page.c`, as
+  EXIT GAME and PC SETTINGS use; title DISC IMAGE, lines wrapped at 38 characters, one OK row):
+  "This disc image's game files are not the USA disc's (SCUS-97177). First file that differs:
+  R/CNOS.RTX. / The game may close unexpectedly. A new copy of your own disc fixes it. Online
+  needs the USA disc's files." Without a named file (a cut dump, no file system) the check's own
+  reason stands in its place. OK or Triangle dismisses it.
+- **When:** only in the main menu (patched `func_001ED5B8` in `port/patches_exit.py`: if
+  `port_disc_notice_due()`, the menu's layer off, `port_disc_notice()` modally, the layer on,
+  and the menu's frame ends there, as EXIT GAME's popup does), once the check has answered. An
+  answer that comes during a race or anywhere else waits for the next main menu. Never over a
+  race or a movie. It blocks nothing: OK goes back to the main menu as it was.
+- **Where "seen" is stored:** `disc-notice.txt` in the player's data folder, next to
+  `iso-check.txt` and `dhd.ini` (`DHD_DATA_DIR`, else the game's folder, on Android the app's
+  files folder): the game files hashes of the images whose notice was dismissed, one per line,
+  newest first, at most 16. An image is its game files hash (`dhd_disc`), so another image, or
+  the same image changed, has another hash and shows the notice again; a matching image never
+  shows anything. Nothing is sent anywhere. A data folder that can't be written logs it and
+  shows the notice again at the next start.
+- **The browser:** its worker sets `DHD_FRAME_CLOCK=1` and has no disc check, so no check and no
+  notice there (one implementation; it simply never answers).
+
+### The background hash on a first start
+
+- Started only from the main menu's first frame (the menus are up), once per run.
+- Never in timed, deterministic or traced runs: `DHD_BENCH`, `DHD_FRAME_CLOCK`,
+  `DHD_STATE_TRACE`, or a tool's `DHD_NET_ISO_SHA256` (then the menu reads the given hash).
+- On the host's job thread at `SDL_THREAD_PRIORITY_LOW`, in 1 MiB pieces (the check's own
+  buffer), resting 1 ms after each (`dhd_disc_check`'s new `pause_us`).
+- Stopped at its next piece when the game exits (an `atexit` sets `dhd_disc_check`'s new `stop`
+  flag); a stopped check writes no cache and answers -3, which the poll treats as no answer.
+- Once per image: iso-check.txt answers later starts. The cache's name was wrong on Android, Mac
+  and Linux without `DHD_DATA_DIR` (the path was cut at `\` only, so the file was
+  `dhd.exeiso-check.txt`); fixed (`disc_data_path`), so a phone hashes once more after this
+  update.
+- It can still run into a race if the player starts one within the first 15-20 s; it keeps its
+  low priority and rests there.
+
+What it costs on Windows (this PC, Ryzen 5 7600 and RTX 3070; hidden desktop, untimed, scale 4,
+1920x1080, GS captures on, other lanes' games running, so the numbers are noisy). The USA image
+with an empty data folder (the hash runs: the game started 02:39:27, iso-check.txt was written
+02:40:00, so about 15-20 s of hashing after the main menu came up), then the same with the
+cache. The `perf:` menu lines as written:
+
+    hash:   perf: menus 30 s frames=1640 fps=54.1/60 low1%=13.3 over=5.7%(>20.0ms) max=152.9ms | ms/field cpu/busy game=4.78/3.90 vu=5.17/5.32 gs=2.24/1.22 render=2.37/0.98 present_wait=0.59 | gpu_ms/frame=1.48 | limit=cpu:vu
+            perf: menus 30 s frames=1697 fps=56.1/60 low1%=18.2 over=5.0%(>20.0ms) max=80.1ms | ...
+    cached: perf: menus 30 s frames=1698 fps=56.2/60 low1%=17.1 over=4.7%(>20.0ms) max=134.3ms | ms/field cpu/busy game=4.79/2.87 vu=4.80/4.75 gs=2.13/1.13 render=2.03/0.86 present_wait=0.47 | gpu_ms/frame=2.44 | limit=cpu:vu
+            perf: menus 30 s frames=1712 fps=56.7/60 low1%=20.3 over=4.6%(>20.0ms) max=65.9ms | ...
+
+The first window holds the hash: 54.1 fps and low 1 % 13.3 against 56.2 and 17.1 cached; the
+second windows (no hash in either) differ about as much (56.1/18.2 against 56.7/20.3). Within
+these runs' noise; a phone was not measured here (Left for the lead).
+
+### Tests
+
+- `port/hle/test_disc_notice.c` (`test_runtime.py`, `disc-notice`): the USA disc's hash, no
+  notice; no answer yet, no notice; a different hash, due, and the lines name the file and fit;
+  dismissed, not again for that image; another image, again, the first still seen; one line per
+  image, 16 kept, newest first; a reason without a file; a word too long for a line.
+- Hidden-desktop runs of this branch's `dhd64.exe` (untimed, each in its own `DHD_DATA_DIR`,
+  widescreen on): a scratch copy of the USA image with `R/CNOS.RTX` changed (image A), then with
+  `BIKE/MAN80.RTX` changed too (image B):
+
+| image, data folder | window | result |
+|---|---|---|
+| A, empty | 1920x1080, scale 4 | `disc notice: shown` naming R/CNOS.RTX; one Cross: `dismissed`, the main menu as before |
+| B, A seen | 2400x1080 (20:9), scale 4 | shown again, naming BIKE/MAN80.RTX (first in path order) |
+| B, A and B seen | 2400x1080 | no notice; the answer `from iso-check.txt` |
+| USA image, empty | 1920x1080 | `the disc image has the USA disc's game files (checked now)`, no notice |
+| USA image, cached | 1920x1080 | `(from iso-check.txt)`, no notice |
+
+  Pictures (PrintWindow of the hidden window) were kept outside the repository; the scratch image
+  was deleted after.
 
 ## What to ask the reporter
 
@@ -213,8 +294,16 @@ Diagnostics, always on, the same on every platform:
 - Diagnostics rather than a game patch: the evidence points to the data, not to our code; a
   bounds guard on the walk would hide a damaged image until the next screen that reads it.
 - The check reuses finding 098's check and cache, not a second one: one implementation (root
-  AGENTS.md). Started 600 fields in, after the boot's loads, on the host's thread; a phone hashes
-  its 2.5 GB image once (then iso-check.txt answers).
+  AGENTS.md). Started from the main menu (the first version started it 600 fields in, which a
+  deterministic run or a race could reach first); a phone hashes its 2.5 GB image once (then
+  iso-check.txt answers).
+- The notice in the game's own popup (`menu_page`), opened from the main menu like EXIT GAME, not
+  a host window or Android dialog: one path on every platform, drawn in the game's style, and it
+  can only appear where the player is choosing what to do next.
+- "Seen" keyed by the game files hash, not the path or the file's size and time: a copy of the
+  same files elsewhere is the same image, a changed file is another.
+- The notice's rules in a header (`disc_notice.h`) apart from the page, so a plain host test runs
+  them without the core.
 - The recent lookups live at a fixed guest address in the HLE window, so the native crash report
   can read them without asking the core; the crash report already reads guest memory (`DHD_PEEK`).
 
@@ -234,13 +323,15 @@ Diagnostics, always on, the same on every platform:
 
 - State traces, all seven recipes against the format-2 references (`docs/TESTING.md`): `boot`,
   `race`, `race2` to `race6`. Expected equal: the change writes only the HLE window, which the
-  trace does not hash, and logs.
-- On the Mi 11i, a build of this branch: the Bike Shop opens, and dhd.log has a `disc check:`
-  line about 10 s after start (the first start hashes the 2.5 GB image once on a host thread:
-  see that the menus stay smooth meanwhile; later starts answer from iso-check.txt).
+  trace does not hash, and logs; under `DHD_STATE_TRACE` and `DHD_FRAME_CLOCK` the main menu's
+  new call starts no check and shows nothing, and returns at once.
+- On the Mi 11i, a build of this branch: a first start (no iso-check.txt yet, which this build
+  also expects under its fixed name) hashes the image from the main menu on; watch the menus stay
+  smooth during it (`perf: menus` lines), then `disc check: ... (checked now)` with no notice;
+  the next start `(from iso-check.txt)`. The Bike Shop opens.
+- The notice on a phone: the same with a copy of the disc image with one file changed (as above:
+  one byte range of a shop `.RTX`; never the owner's own copy). Expect the DISC IMAGE popup in
+  the main menu at 20:9, OK by touch, no notice at the next start.
 - A test APK is not needed to decide the cause: the release's Online menu already gives the
   decisive line (question 1). Worth making only if the reporter's disc check says the USA disc's
   files: then this branch's crash line names the files the shop read.
-- If the disc differs: whether to tell players at start (a notice that the disc image is damaged
-  or changed and the game may stop) rather than only in dhd.log is a product decision, not taken
-  here.

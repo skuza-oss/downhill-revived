@@ -98,7 +98,15 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `net:` lines online (finding 135). What the game can detect goes in the log. Each start keeps
   the one before as dhd-previous.log; on Android the log says how the run before ended (Android's
   exit record and tombstone; on Android 10 only the game's own crash report, finding 191), and a
-  crash dialog and the icon's shortcut share it (finding 152).
+  crash dialog and the icon's shortcut share it (finding 152). A crash report names the disc
+  files the game looked up last, and a guest memory fault says whether it read or wrote
+  (finding 208).
+- The disc image's files are checked against the USA disc's once per image, from the main menu's
+  first frame (finding 098's `dhd_disc` check on a low-priority thread, cached in
+  `iso-check.txt`; not in timed, deterministic or traced runs): dhd.log says the answer
+  (`disc check:`), and an image that differs gets one notice in the main menu naming the first
+  file that differs, remembered per image in `disc-notice.txt` (`port/hle/disc_notice.c`,
+  finding 208).
 
 ## What players get
 
