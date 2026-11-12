@@ -1,10 +1,12 @@
 # 202: online riders that look right: a bench of today's puppets, then a rebuild
 
-Status: in progress
+Status: current
+Supersedes: part of 169 (item 4, the straight-line prediction)
 
 Branch `feat/online-riders-rebuild` from `main` 6e2f7d23, started 2026-11-11. This file is the
 lane's plan while it runs and its finding when it merges. Someone who has only this file and the
-git log must be able to pick the lane up.
+git log must be able to pick the lane up. Merged into `main` on 2026-11-11 (ad0135bd) and checked
+there on 2026-11-12 ("Checked on the merged main" at the end).
 
 ## Goal and acceptance
 
@@ -52,6 +54,10 @@ the P2P star (unless a bug there is part of the problem).
       controller), the owner's turn scale in the record, placement only on real discontinuities,
       the hitch's hand-over, short stops ridden through; local main merged again (6c1650df).
       Not reached: the 150 ms computer riders' error and jolts, the host stops' 1.5-unit steps.
+- [x] Merged into `main` (ad0135bd); the lead's checks there on 2026-11-12: `check.py port` and
+      `server`, the seven state traces, live races on one PC (80 and 150 ms, the arena's round, a
+      room of six racers) and PC <-> Mac both ways with and without TURN ("Checked on the merged
+      main").
 
 ### The bench (how it measures)
 
@@ -309,15 +315,14 @@ another player sees it. Watch first: `mx-jumps-150ms.mp4` (before, then after) a
 
 ### Left for the lead
 
-- Boot and race state traces against the merged main (`state_trace_run.py boot` / `race`): every
-  change is behind `pp.online` or the bench switches (`DHD_PUPPET_PLAY`, `DHD_PUPPET_RECORD`,
-  `DHD_PUPPET_TRACE`, `DHD_NET_LINK`, `DHD_NET_TEST_HITCH`) except the snapshot stamp (online
-  only) and the rider-pair patch in `func_0011A100`, which asks `hle_puppet_both_remote` (0 offline).
-  Not run in this lane (the game lock was full of other lanes' state traces).
-- A PC <-> Mac race both ways over the internet (`cross_race.py`), and with `--force-turn`.
-- A race with a phone in a P2P room (Android: nine puppets now run physics, as ten riders do
-  offline; watch the phone's frame rate and the `online:` lines' "off by" figures).
-- A 6+ player room (`p2p_crowd.py`, and an SFU room with bots).
+- Done on the merged main (the end of this file): the state traces (every change is behind
+  `pp.online` or the bench switches `DHD_PUPPET_PLAY`, `DHD_PUPPET_RECORD`, `DHD_PUPPET_TRACE`,
+  `DHD_NET_LINK`, `DHD_NET_TEST_HITCH`, except the snapshot stamp, online only, and the rider-pair
+  patch in `func_0011A100`, which asks `hle_puppet_both_remote`, 0 offline: all seven recipes
+  equal); PC <-> Mac both ways, with and without `--force-turn`; an SFU room of six racers.
+- Still open: a race with a phone in a P2P room (Android: nine puppets now run physics, as ten
+  riders do offline; watch the phone's frame rate and the `online:` lines' "off by" figures); a
+  P2P room of six (`p2p_crowd.py`).
 - For the owner when they play: other riders' wheels on the ground at landings, dips and rises;
   no jumping back and forth; a rider that crashes or respawns appears at its respawn at once
   (that jump is real on its owner's screen too). A player whose game hitches stops on the others'
@@ -703,3 +708,74 @@ jump of round 2 is gone (round 2: 9-34 units in one step).
   replays of a deterministic race; a live view needs the guest's recording (`B/own.bin` has every
   rider as the guest drew it) played exactly, next to the host's (`A/own.bin`), in a game on the
   same track: a `--live RUN` mode for `puppet_bench.py clip`.
+
+## Checked on the merged main (2026-11-12)
+
+On `main` ad0135bd (c8257cd5 and this lane), by the lead's verifier. Another lane built its core
+and game on this PC during the 150 ms race and the six-racer room (live numbers there are from a
+loaded PC).
+
+- `python tools/check.py port -j 6`: OK. `python tools/check.py server`: OK.
+- State traces: all seven recipes (`boot`, `race`, `race2` to `race6`) equal the format-2
+  references of 0.7.16's game code (`state_trace_codeptrs.txt` the same as theirs): 7 of 7 PASS.
+- Two games on the hidden desktop, a local server, the real SFU, eight host computer riders,
+  `online_race.py --hidden --lag` with the link on both games. Results equal on both in every race.
+
+  | race | the guest's computer riders: error p50 / p95 / p99 | sunk / deep % | jolts a min | placed (not respawns) | catch-ups | guest sees host | host sees guest | hit applied |
+  |---|---|---|---|---|---|---|---|---|
+  | 80 ms #1 | 0.61 / 3.01 / 5.1 | 0.8 / 0.06 | 2.0 | 0 | 1 | 0.13 / 1.09 / 2.1 | 0.15 / 1.60 / 3.6 | yes |
+  | 80 ms #2 | 0.60 / 2.75 / 5.3 | 0.7 / 0.02 | 2.6 | 0 | 15 | 0.20 / 1.47 / 3.5 | 0.25 / 1.85 / 4.2 | yes |
+  | 150 ms | 1.27 / 6.47 / 11.8 | 1.7 / 0.21 | 15.2 | 4 | 48 | 0.28 / 1.70 / 5.9 | 0.37 / 1.92 / 3.2 | no hit landed |
+
+  The 150 ms race's placements: 62.8 units 4.7 s after GO (the guest's game had stalled, its
+  rider was held, then it crashed), and three where a rider was reset to the track on its own
+  screen (speed 0, 222-269 units; the port's recovery, no crash flag). On one of those the guest
+  first showed the host's rider at a spot about 310 units from where it really was and put it
+  right 0.2 s later (`puppet: tick 3836` and `3849`; the host's own record has one jump only).
+  The first two tries at 150 ms never raced together: the host's first Realtime session's
+  handshake timed out, its TURN fallback was asked for, and the room took it out of the race
+  ("Realtime connection failed: out of the race"); the test link holds only STATE in `puppet.c`,
+  so this is the transport, not this lane.
+- `mosh_round_check.py` (default, `hit`): PASS (the guest scored 50 on the host's rider; the same
+  table and finals on both games).
+- A room of six racers: two hidden games and four nettool bots (`--echo-ai`), four computer riders,
+  track 0. All six connected (the SFU's channels ready for 6 racers at the start), the race started
+  for all, the ten results the same on both games, no freeze or fault line, every puppet off the
+  grid, no storm of placements (3 and 2, all of bots, whose riders echo an AI rider's pose; 29 and
+  31 catch-ups). `online_race.py --bots` fails on main (a TypeError: the bot loop reuses `log`,
+  which 91345805 made the game log's name); this room ran a copy with that variable renamed.
+- PC <-> Mac (M1, 8 GB, its game built from ad0135bd with this PC's wasm2c core) with
+  `cross_race.py`'s pads, the PC's game on the hidden desktop, both games recording
+  (`DHD_PUPPET_TRACE`, `DHD_PUPPET_RECORD`, `DHD_PUPPET_FROM=all`), races split and scored by
+  `puppet_lag.py` while both rode (the host finishes at 20 s, the guest at 40 s). Every shared race
+  ended with the same room results on both (host 0:20.03, guest 0:40.03); no freeze line.
+
+  | direction | shared races | other player as drawn: p95 (p99) | drawn behind: p50 / p95 | computer riders on the guest: p95 (p99) | placed (not respawns) | snapshot age p50 / p95 |
+  |---|---|---|---|---|---|---|
+  | PC hosts | 4 | 0.18-1.32 (at most 1.8) | 0 / 1-103 ms | 0.61-1.77 (at most 2.1) | 1 | 15-42 / 21-52 ms |
+  | Mac hosts | 4 | 0.24-3.78, 13.3 once (at most 45) | 0 / 1-488 ms | 0.59-2.21, 6.7 once (31) | 5 | 12-41 / 26-68 ms |
+  | PC hosts, TURN | 3 | 0.21-1.39 (at most 1.8) | 0 / 1-253 ms | 0.64-1.60 (20 once) | 4 | 16-33 / 40-98 ms |
+  | Mac hosts, TURN | 3 | 0.32-0.69 (at most 1.6) | 0 / 1-58 ms | 0.67-1.36 (30 once) | 4 | 19-34 / 30-56 ms |
+
+  Sunk 0-4.6 % of steps (9.1 once, in the hitched race below; a finished rider standing still,
+  90 %). Every large placement but five is a rider reset to the track on its owner's screen
+  (speed 0, 52-459 units, matched in the owner's record). The five: in the Mac-hosted race 3 the host's rider 115 units 2.2 s after GO
+  and a computer rider (60 units) after half a second without snapshots, while this PC's game had
+  frames of 482 and 730 ms; over TURN two computer riders (70 units) after a 0.76 s gap in the
+  Mac host's snapshots (its game ran smoothly: the relay), and one more (60 units) after 0.2 s
+  without snapshots in the PC-hosted TURN run. The worst tails are there too, and the
+  Mac's view of this PC's rider had up to 41 jolts a minute in that run (this PC's frames up to 730 ms).
+  In the 2 s between the last finish and the race's close the riders drift 20-330 units from their
+  records (the race is over for both then).
+
+### Open (after the merge)
+
+- **Computer riders at 150 ms** (p95 6.5 live here): the owner's line state (x74, x78, x230/x220
+  and the mode bits, "Left (round 3)") in the snapshot, so a guest's controller steers the owner's
+  line now.
+- **The hitch's glide steps** (3-6 units where the catch-up glide starts and ends; "Host stops").
+- **The live-view clips** (`puppet_bench.py clip --live`, "Left (round 3)").
+- **A phone in a P2P room**, and a P2P room of six.
+- A rider reset to the track (no crash) was once first shown about 310 units off for 0.2 s.
+- A finished rider's puppet and the computer riders drift in the last 2 s before the race closes.
+- `online_race.py --bots` (the `log` name clash above).

@@ -26,7 +26,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | Renderer (GS, Rust/wgpu) | 021 GS core, 084 WGSL, 085/086 Rust renderer, 088 CL2, 131 draw pass, 045/136 scale, 171 lost device | 025, 031-033, 035, 038 |
 | VU0/VU1 | 016, 019, 030, 090 (VU1R, OP3, SP1) | 027, 029, 037 |
 | Audio and movies | 022, 133, 055 | |
-| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 186 P2P rooms (hub star, SFU fallback), 169 snapshots and prediction, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
+| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 186 P2P rooms (hub star, SFU fallback), 169 snapshots, 202 puppets on this game's physics, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
 | Menus, settings, input | 050, 064, 092, 101/102 settings, 059/134 controllers, 141 touch, 056/140 widescreen | 065 (WM_CHAR part) |
 | Launcher, releases, installers | 093, 125, 138, 143, 098 disc check | 053, 054, 070 |
 | Speed (PC) | 089, 090, 129 perf log, 130/131 iGPU | 031, 032, 046, 048, 051, 066, 069 |
@@ -199,7 +199,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
 | 167 | [Native VU1 rendering, phase 2: the remaining VU1 programs](167-native-vu1-phase2.md) | current |  |
 | 168 | [Native mesh draws batched, for the render thread](168-native-mesh-draw-batching.md) | current |  |
-| 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | current |  |
+| 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | partly superseded | [202](202-online-riders-rebuild.md) for item 4, the straight-line prediction |
 | 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | current |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
 | 172 | [Fewer state changes per draw on the render thread](172-render-thread-state-changes.md) | partly superseded | [195](195-phone-speed.md) for the constants per draw by instance index: undone, the draw constants are a uniform block at a dynamic offset again |
@@ -232,7 +232,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 199 | [Native VU in the browser](199-native-vu-browser.md) | current |  |
 | 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | current |  |
 | 201 | [PowerVR GE8322 (driver 1.18) closes at the first picture's submit](201-powervr-ge8322-submit.md) | current |  |
-| 202 | [online riders that look right: a bench of today's puppets, then a rebuild](202-online-riders-rebuild.md) | in progress |  |
+| 202 | [online riders that look right: a bench of today's puppets, then a rebuild](202-online-riders-rebuild.md) | current |  |
 | 203 | [Online MOSH PIT closes the game at the race start (issue #84)](203-online-mosh-start.md) | current |  |
 | 204 | [online MOSH PIT rounds run by the game's Mosh Bowl rules](204-online-mosh-bowl.md) | current |  |
 | 205 | [a state trace that does not depend on the core's layout](205-state-trace-core-layout.md) | current |  |

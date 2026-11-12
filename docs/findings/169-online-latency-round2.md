@@ -1,6 +1,6 @@
 # 169: online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction
 
-Status: current
+Status: partly superseded by 202 (item 4, the straight-line prediction)
 Checked: 2026-11-07
 
 Branch `feat/online-latency` from `main` fce8a1f (0.7.12 plus the server's refusal order), started
@@ -84,8 +84,9 @@ Out of scope: TURN/TLS changes, room placement, phones and the browser.
       3 ms + 10% of a floor that rises 0.2 ms a second; first the median, see Result). Unit test in
       `test_session.c`. The game's `online:` line gives each puppet as "shown behind / snapshot
       age" in ms; `port/tools/puppet_lag.py` (and `online_race.py --lag`) measure independently.
-- [x] Item 4, prediction: by default each puppet shows its newest snapshot carried to the present
-      (`port/hle/puppet_predict.h`): position along the velocity, the orientation rows turned by the
+- [x] Item 4, prediction (replaced by finding 202: puppets ride on this game's physics, steered by
+      their owners' snapshots; `puppet_predict.h` and its test are gone): each puppet showed its
+      newest snapshot carried to the present (`port/hle/puppet_predict.h`): position along the velocity, the orientation rows turned by the
       world-space angular velocity, at most 250 ms ahead. When a newer snapshot moves the
       prediction, the rider is first shown where it was and the difference fades (1/e in 80 ms); a
       jump over 8 units (a respawn, a long loss) and the first pose after a local crash are shown
