@@ -1,9 +1,10 @@
 # 217: Android aborts when the perf log asks an ended thread for its CPU time
 
-Status: in progress
+Status: current
 
 Branch `fix/android-thread-clocks` from `main` c5f839a2, started 2026-11-12. This file is the
-lane's plan while it runs and its finding when it merges.
+lane's plan while it runs and its finding when it merges. Merged into `main` on 2026-11-12
+(3e80813e) and checked there the same day ("Checked on the merged main" below).
 
 ## Goal and acceptance
 
@@ -185,6 +186,30 @@ wait in `DhdActivity` is not involved. Nothing changed.
 - MIUI's recents kill a removed task with SIGKILL; the game gets no chance to end itself, and
   Android's record is `OTHER KILLS BY SYSTEM` (not "user requested"), which `CrashReport` already
   counts as a normal end.
+
+## Checked on the merged main (2026-11-12)
+
+On `main` 3073462c (c5f839a2, then the merges of lanes 217, 221, 220 and 219), by the lead's
+verifier.
+
+- `python tools/check.py port -j 6` (with `test_host_threads`) and `check.py server`: OK. The seven
+  state-trace recipes equal the format-2 references made from 524948ba: 7 of 7 PASS.
+- Windows, hidden desktop, pictures presented (no GS captures): EXIT GAME from the main menu
+  (`DHD_NAV`: row 4, Yes, Quit) ended by itself with exit code 0, no process left, `end: closing
+  (code 0)`, `perf: session menus 6 s ... game=1.75/1.45 vu=2.97/3.17 gs=0.85/0.95 render=2.20/1.21`
+  and `end: handlers done in 33 ms`. The window's close (WM_CLOSE) in a race after GO (the state
+  trace's race route and pad, 30 s after the race's loop began): ended 0.15 s after the close, exit
+  code 0, no process left, `perf: session race 30 s ... game=2.34/2.06 vu=2.62/2.78 gs=1.40/1.34
+  render=2.27/1.11`, then `perf: session menus 24 s ...`, `end: handlers done in 12 ms`. No
+  watchdog line in either.
+- macOS (M1, its own build of 3073462c, the app's executable started from the command line, about
+  45 s, then SIGTERM, which SDL turns into its quit event as the window's close does): exit code 0,
+  gone within a second, `end: closing (code 0)` and `end: handlers done in 12 ms`. No `perf:` line
+  at all, at the end or before: the Mac's session was locked (`CGSSessionScreenIsLocked`), so no
+  picture was presented, and the perf log counts presented pictures (its first one registers the
+  session report). The session lines on macOS were therefore not seen; the earlier PC <-> Mac runs'
+  Mac logs have none either, for the same reason.
+- Not run here: the phone (another worker had it; the lane's own phone runs above stand).
 
 ## Result
 

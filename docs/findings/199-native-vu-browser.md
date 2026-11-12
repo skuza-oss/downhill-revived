@@ -321,3 +321,10 @@ Still open (not run at the merge):
   merged branch).
 - The browser on another GPU (an integrated one; and Chrome on Mac if available): the probe line or
   the loops line in LOG.
+- A mesh pipeline first built after the start (outside review, 2026-11-12). The browser catches a
+  refused mesh pipeline only at its init (the awaited probe, `native::init::web_prepare`); a mesh
+  pipeline first built later (another blend or depth state, or a specialised variant) is built
+  unscoped like every other browser pipeline, so a GPU that refused it there would stop the game with
+  a GPU error instead of falling back to the emulated VU. Nothing has shown this happening. The fix
+  would be to build browser pipelines asynchronously between pictures and draw with the emulated
+  path until they are ready.

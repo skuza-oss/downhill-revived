@@ -72,6 +72,28 @@ before in every room it can join. Out of scope: `port/hle/puppet*.c`, `state_bun
   from the live scores: copying the table for the order alone would not have made the points stand.
   Now `mosh_step` writes the table's numbers into the riders once it is published.
 
+## Checked on the merged main (2026-11-12)
+
+On `main` 3073462c (merged at 2872444f), by the lead's verifier.
+
+- `python tools/check.py server` (`npm test`, `npm run typecheck`) and `check.py port`: OK.
+- `mosh_round_check.py` (default, `hit`): PASS.
+- A round where a player leaves: `mosh_round_check.py --scenario ride --bots 1` through a scratch
+  wrapper whose nettool bot gives up 60 s into each race (`--give-up-after 60`: the room retires it,
+  each game hears `left`, the host takes its rider over). In the round both games played, both
+  published the same table 0.0 s after time up: Mai (AI) 5450, Ajax (AI) 2050, Bot0 1500, HOST 350,
+  Jonnie (AI) 150, GUEST 50. Bot0's 1500 is the host's takeover final (`(sent)` on the host,
+  `(from player 0)` on the guest); the bot sent no final of its own, so the rule had no own final
+  to prefer. Each game's own reported finish matches its table (HOST 4th, 350 PTS). The room's
+  results list the leaver last with no points: `4. HOST 350 PTS; 5. GUEST 50 PTS; 6. Bot0 DNF GAVE
+  UP` on both games. That follows the server's rule here (a leaver is a DNF, ranked after every
+  finisher) but differs from COMBAT RESULTS, where Bot0 is 3rd and GUEST 6th, so
+  `mosh_round_check.py`'s own order check fails on such a round (it compares the room's order with
+  the table's). Not a difference between two players: both games show the same table and the same
+  room results.
+- An ordinary race on the local server ranks by time: `online_race.py` with both finishing (70 /
+  72 s) gave `1. Host 1:10.03  2. Guest 1:12.03` on both games, and so did the SFU room's race.
+
 ## Result
 
 Server (`online/server/src/room.ts`): a race on track 23 is a scored round; `score` on any other
@@ -101,6 +123,9 @@ have.
   game counts the rider with its last score at 15 s. Only when the leaver's own final also never
   arrives.
 - A rider that changes hands after a game published its table is not reflected there at all.
+- A rider whose player left mid-round: its table row is the takeover final (both games alike),
+  but the room's results rank it last as a DNF with no points, so the room page and COMBAT RESULTS
+  order differ (Checked on the merged main).
 - Different clocks: games publish at different moments (each starts its two minutes at its own
   GO), so a table published by the first game is by design its own.
 
@@ -108,6 +133,5 @@ Review notes: the review's three findings are right as described. For item 4 it 
 this lane ignores instead (above). For item 9 it offers deferring publication as the alternative;
 not done, to keep the timing.
 
-Not checked: a live Mosh Bowl round between two games on a local server (the lane's brief did not
-require a game run), an SFU room, a phone or the browser, the core's behaviour after a rider's
+Not checked: an SFU room, a phone or the browser, the core's behaviour after a rider's
 takeover final in a real round.

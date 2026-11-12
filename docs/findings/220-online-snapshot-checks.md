@@ -4,7 +4,9 @@ Status: in progress
 
 Branch `fix/online-snapshot-checks` from `main` c5f839a2, started 2026-11-12. This file is the
 lane's plan while it runs and its finding when it merges. Someone who has only this file and the
-git log must be able to pick the lane up.
+git log must be able to pick the lane up. Merged into `main` on 2026-11-12 (82a18a8a) and checked
+there the same day ("Checked on the merged main" below); it stays `in progress` for the open case
+there.
 
 ## Goal and acceptance
 
@@ -237,10 +239,82 @@ would trade a little sinking back (not tried).
   0.38-0.42/2.35-2.45/4.3-4.9), sunk 0.6 %, 8 respawn placements and nothing else placed; four hits
   applied.
 
+## Checked on the merged main (2026-11-12)
+
+On `main` 3073462c (c5f839a2, then the merges of lanes 217, 221, this one and 219), by the lead's
+verifier. Merged at 82a18a8a. The status stays `in progress` for one case below (a game's own pause
+when alone).
+
+- `python tools/check.py port -j 6` and `check.py server`: OK. The seven state-trace recipes
+  equal the format-2 references made from 524948ba: 7 of 7 PASS.
+- Two games on this PC (hidden desktop, a local server per race, computer riders on, P2P unless
+  said, the 80 ms test link `delay=80,jitter=15,loss=1`): `online_race.py --lag` both finish (70 /
+  72 s) and the finish window (host 60 s, guest DNF); all nine `race_menu_check.py` scenarios and
+  `--lag` for `finished` and `timeup`: PASS; `mosh_round_check.py`: PASS; one race in a plain SFU
+  room (`DHD_NET_CREATE=1`; the local SFU connected via UDP at the first try): no flood-limiter line
+  (`member N sent over ... snapshot messages in a second`), snapshot age p50/p95 21-37 / 33-48 ms,
+  the guest's view of the host's computer riders at error p95 2.10, results by time on both.
+- Refusal lines (`a record refused`, `records refused in the race`, `a HOLD refused`, the State
+  list's line) in every game log of those runs and of the PC <-> Mac runs below: none, except in
+  `race_menu_check.py --scenario alone` (below) and the many-player room (next).
+- The many-player room (`p2p_crowd.py --bots 7 --sfu-bots 1`: this PC's game as the hub, seven
+  nettool bots, one of them over the room's SFU): all eight raced, setup to the countdown 41.1 s,
+  every bot's result arrived, no freeze. The host logged seven refused HOLDs, one per bot, at tick
+  5862 (race second 97.7): `a HOLD refused (stamp 74.97, newest snapshot 74.97, quiet 23.79-23.82
+  s)`. The bots stop sending at their finish (75 s) and their client sends HOLD from its network
+  thread 23 s later; the rule allows a quiet of the stamp's age here plus 1 s, 22.73 + 1.0 = 23.73 s,
+  so this game's race clock stood about 1.1 s behind the server's then (a hidden-desktop game's
+  hitch adds such a lag). Finished riders, so nothing shows; a real game keeps sending after its
+  finish, so only nettool bots do this. Not zero, though.
+- A host stop (`DHD_NET_TEST_HITCH=25:800`, 80 ms link): the guest held all nine host riders at
+  tick 1523 and let all nine ride on at tick 1560 (3.7-8.1 units past them); none left held.
+- PC <-> Mac (the Mac's own build of 3073462c), P2P rooms on a local server, host finishes at
+  20 s, guest at 40 s, the host's first race alone; scored as finding 216's check was (same
+  wrappers). Error p95 in units, ranges over the shared races:
+
+| run | shared races | other player (host / guest view) | guest's computer riders | after the end: host sees guest / guest sees host / guest sees AI | drawn behind p95 | placed (not respawns) | snapshot age p50 / p95 | guest's finish in the host's log | jolts a minute | sunk % |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PC hosts | 4 | 0.34-1.11 / 0.27-0.86 | 0.48-1.96 | 0.34-0.97 / 0.01-0.38 / 0.29-1.28 | 0-6 ms, 34 once | 0 | 11-30 / 18-40 ms | 4 of 4 | 0-7.2; one race 16.7 / 24.9 / 13.6 | 0.3-1.3 |
+| Mac hosts | 4 | 0.32-0.61 / 0.28-1.14 | 0.41-1.64 | 0.38-0.71 / 0.02-0.54 / 0.27-1.57 | 0-7 ms, 18 once | 0 | 11-34 / 17-41 ms | 4 of 4 | 0-9.0 | 0.2-2.7; 9.1 once |
+| PC hosts, `--force-turn` | 2 | 0.33-0.54 / 0.32-0.40 | 0.54-0.57 | 0.43-0.73 / 0.02-0.09 / 0.54-0.82 | 1-5 ms | 0 | 21-32 / 35-45 ms | 2 of 2 | 2.3-7.9 | 0.2-1.5 |
+| Mac hosts, `--force-turn` | 2 | 0.41-1.07 / 0.27-0.41 | 0.45-0.65 | 0.54 / 0.00-0.01 / 0.48 | 1-4 ms | 0 | 23-35 / 36-50 ms | 2 of 2 | 0-8.0 | 0.2-2.7 |
+
+  Jolts and sunk are each race's three views (the host's of the guest, the guest's of the host, the
+  guest's of the computer riders). On c5f839a2 the same runs gave 0-11 jolts a minute with one race
+  at 31 (13 and 19 in its other views) and sunk at most 3.0 %. About the same: the one race with
+  more jolts here had a burst of catch-ups of the computer riders at race second 5.8 (14, 12-16
+  units, while two other test games ran on this PC), as c5f839a2's first two-game race had; the
+  9.1 % is the guest drawing the finished host parked at the finish 0.52 units into the ground
+  (none deep; mid-race 0.0 %). `--force-turn`: the guest raced over the room's SFU in both runs.
+  Results equal on both machines in every race; no `freeze:` line.
+- One placement far from the owner (two-game hitch race): a host computer rider crashed again one
+  tick after a respawn placement; the guest drew it frozen 274 units back for 0.37 s until the next
+  respawn placement. The class of finding 202's "a reset placed 312 units off for 0.2 s"; the only
+  one in these runs.
+
+**Open: a game's own pause leaves it refusing the others' records.** In `race_menu_check.py
+--scenario alone` (the guest finishes at 12 s, the host, alone, opens the game's own pause at 30 s
+for 5 s) the host logged `puppet: tick 1802 slot 1: a record refused (stamp ahead)`. The pause
+stops this game's race clock while the others' stamps (the server's clock) go on, so after it every
+record stands about as far in the future as the pause lasted, beyond `PUPPET_AHEAD_MAX` (1 s), and
+is refused for the rest of the race (`hle_puppet_clock_excess` counts only the pacing lag, not a
+pause). There it is harmless: the guest's rider is parked at the finish. With the roles swapped
+(the host finishes at 12 s, the guest pauses alone 5 s while the host's computer riders race on; a
+scratch variant of the tool), the guest refused every later record of the host and its computer
+riders (`2462 records refused` for the host's rider, `1232` for each computer rider, in both
+races), so on its screen the computer riders were never corrected again until the race ended. The
+c5f839a2 build in the same run took them as about 5.1 s in the future (snapshot age -5125 ms) and
+was no better: `puppet_lag.py` scores the computer riders after the pause as badly on both builds
+(it compares by race time, which the pause shifts by 5 s, so neither number is the drawn error). So the case is older than this
+lane, which turns it from "taken as future" into "refused"; the fix would add the time this game's
+race clock stood still (its own pause) to the excess taken off the stamps, or measure the stamp
+against the server clock's race moment instead of this game's race time.
+
 ## Result
 
 Every field of another game's record is checked before any of it is used, and a refused record
 leaves no trace; no stamp can freeze a rider or stale out honest snapshots; the SFU limiter reads
 the bundle's layout from the game's own header; a landing puppet is not pushed into the ground.
 Offline play is unchanged (state traces equal). Merge, and the review's findings 1, 2, 3, 5, 6 and
-8 are closed; this file's Status then becomes `current`.
+8 are closed. Merged; the Status becomes `current` once a game's own pause no longer leaves it
+refusing the others' records (Checked on the merged main).

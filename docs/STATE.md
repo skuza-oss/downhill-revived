@@ -104,7 +104,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
   threads and the render thread stop, the closing log lines are written, open files are flushed,
   and the process leaves without the C library's static destructors. New code that must run at the
-  end registers with `host_end_add`, not `atexit`.
+  end registers with `host_end_add`, not `atexit`. A named thread that ends keeps its CPU time and
+  is never asked for it by handle afterwards (`port/host/host_threads.c`, finding 217: the
+  Android abort at exit and after a movie), so the exit's `perf: session` lines stay whole.
 - dhd.log on every platform, with `perf:` lines on speed and what limits it (finding 129) and
   `net:` lines online (finding 135). What the game can detect goes in the log. Each start keeps
   the one before as dhd-previous.log; on Android the log says how the run before ended (Android's
@@ -215,7 +217,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   at their first snapshot, a respawn, a large error or a large one after silence
   (`SYNC_PLACE_FAR`, `SYNC_PLACE_SILENCE` in `port/hle/puppet_sync.h`), otherwise caught up by
   riding; a game whose own thread stops says so (HOLD, from its
-  network thread) and the others hold its riders. Hits are
+  network thread) and the others hold its riders, until its snapshots have come again for 3 s.
+  Every record and HOLD from another game is checked whole before any of it is used (nodes, State,
+  numbers, stamps; `port/hle/puppet_record.h`, finding 220): a refused one is dropped and logged
+  once per rider and race (after a game's own pause when alone it refuses them for the rest of the
+  race: finding 220, open). Hits are
   decided on the puppet as drawn. In a room the FPS & Ping counter shows "SERVER N MS", the round
   trip to the room's server, and "RACE N MS", the round trip to Cloudflare's race network (the SFU
   association's ICE checks); in a race the second line is "RIDERS N MS", the other riders'
@@ -230,7 +236,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   events), then COMBAT RESULTS with the same table on every game and the room ranked by the same
   scores. Only with a server whose welcome lists the `score` feature (`online/server/src/room.ts`;
   a finish may carry `score`); with an older one the arena races as before, a race with no end of
-  its own. So a release with it must deploy the server too.
+  its own. So a release with it must deploy the server too. The server ranks by score only a race
+  on the arena track and ignores `score` elsewhere; a rider's own player's final beats a takeover
+  final whatever their order; the table a game publishes is a copy that later scores do not change
+  (finding 221).
 - Releases with online or pacing changes need a real race between two different machines both
   ways (single-PC tests have hidden bugs before).
 
@@ -249,7 +258,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `memcard` still see the core's layout (finding 205's Result). Since finding 213 (main
   524948ba) the race recipes' references are of that build: it changed every race's game state on
   purpose. Stack locals: `stack_escapes.py --check` in `check.py port` (the static inventory and
-  its reviewed list); `DHD_CORE_REDZONE=1` / `redzone_walk.py` a test-only game with red zones
+  its reviewed list; it fails on a unit it could not compile and proves each reviewed fix on the
+  patched source, finding 219); `DHD_CORE_REDZONE=1` / `redzone_walk.py` a test-only game with red zones
   around every address-taken local, walked through the recipes and OPTIONS (finding 213). Server:
   `npm test` in `online/server`.
   Online: `port/net/build_tests.py`, `port/tools/online_race.py`. Retail comparisons with PCSX2:

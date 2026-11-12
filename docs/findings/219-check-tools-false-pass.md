@@ -1,9 +1,10 @@
 # 219: three checks that passed when they should fail
 
-Status: in progress
+Status: current
 
 Branch `fix/check-tools-false-pass` from `main` c5f839a2, started 2026-11-12. This file is the
-lane's plan while it runs and its finding when it merges.
+lane's plan while it runs and its finding when it merges. Merged into `main` on 2026-11-12
+(3073462c) and checked there the same day ("Checked on the merged main" below).
 
 ## Goal and acceptance
 
@@ -88,10 +89,33 @@ fails with the row's name and what should have shown.
 - Background shell jobs of this session lost their redirected output (an empty log); long runs went
   in the foreground or were waited with an until-loop.
 
+## Checked on the merged main (2026-11-12)
+
+On `main` 3073462c, by the lead's verifier.
+
+- `python tools/check.py port -j 6`: OK, with `test_options_walk` 7.4 s, `stack_escapes` (`--check`)
+  45.0 s, `test_stack_gate` 154.4 s. `check.py server` OK.
+- `options_walk.py --scenario off-fresh` on this main and on the 524948ba reference build: both walk
+  every row with no fault, and both print the same `retry:` for SAVE GAME DATA.
+
+**SAVE GAME DATA's first Cross on a fresh card is taken: it saves.** On an empty card there is
+nothing to overwrite, so the game saves at once without asking. A scratch probe (one hidden-desktop
+game per case, `DHD_LOG=1` for the memory card calls, LOAD GAME DATA opened and cancelled first as
+the walk does, then Cross on SAVE GAME DATA): right after the first Cross the card's four files
+appear (`BASCUS-97177`, `icon.sys`, `listicon.ico`, `pathfile.dat`) with 70 memory card log lines
+(the directory read finds nothing, then the writes); the OPTIONS list fades out while it saves (the
+picture 22 to 33 grey levels from the list at 0.4 s and 1.5 s) and is back by 3 s (1.3 to 2.8),
+which is when the walk looks, so it sees "no change". The second Cross then finds the save (the
+directory read returns 1) and asks "Overwrite Game Data?", the walk's evidence. The same with a
+0.5 s hold and 3 s on the row before the press, and on the 524948ba build: the game's own
+behaviour, not a dropped key, and old. So the fresh-card scenarios write a save to their scratch
+card (Decisions 3 says nothing is saved: SAVE GAME DATA's first Cross does), and the row passes on
+its retry's box. Not changed here; the walk could take the faded list or the card's new files as
+that row's evidence on a fresh card instead of a second Cross.
+
 ## Result
 
-Lane result, 2026-11-12. The status stays `in progress` until the lead merges it (then `current`, plus
-the `docs/STATE-LOG.md` entry).
+Lane result, 2026-11-12. Merged and checked (above).
 
 | Check | Before | Now | Proof |
 |---|---|---|---|
