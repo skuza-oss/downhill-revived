@@ -527,7 +527,10 @@ void host_service_touch_field(uint32_t address)
     h->hud_mode = touch_hud_mode(touch);
     h->leave_race = touch_take_ask(touch) == TOUCH_ASK_LEAVE_RACE;
     h->freeze = touch_freeze(touch);
-    SDL_SetAtomicInt(&owns, touch_owns_touches(touch));
+    int own = touch_owns_touches(touch);
+    if (own != SDL_GetAtomicInt(&owns))   /* who a tap goes to: a menu that ignores taps shows here (finding 218) */
+        fprintf(stderr, "touch: %s\n", own ? "the overlay takes the touches" : "the menus take the touches");
+    SDL_SetAtomicInt(&owns, own);
     publish();
 }
 
