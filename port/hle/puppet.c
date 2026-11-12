@@ -584,7 +584,7 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
        until it falls under SYNC_CATCHUP_END. Live, without this the whole pack was put 12-25 units
        forward a few ticks into each catch-up. */
     if (p->rate > SYNC_CATCHUP) p->catching = 1;
-    else if (p->rate < SYNC_CATCHUP_END) p->catching = 0;
+    else if (p->rate < SYNC_CATCHUP_END && p->catching) p->catching = 0, p->easing = 1;  /* its speed eases back too */
     if (p->catching) {
         if (fresh && pp.debug == slot_of(r))
             fprintf(stderr, "puppet debug: t %.3f snap %.3f race %.3f rate %.2f gliding\n", t, s->time, s->race, p->rate);
@@ -656,11 +656,16 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
         float ov[3], own = 0;
         for (int k = 0; k < 3; k++) ov[k] = s->vel[k] * (p->rate > 0 ? p->rate : 1);
         own = sync_len(ov);
-        /* eased (round 4): to within 5 % of its owner's, SYNC_EASE_ACCEL at most */
-        if (own > 30 && sync_len(now.vel) < SYNC_GUARD * own) p->easing = 1;
+        /* eased (round 4): to within 5 % of its owner's, SYNC_EASE_ACCEL at most; also down to it after
+           a catch-up's glide, whose speed the rider's own physics would otherwise drop in a step
+           (live: 4.5 to 1 unit a step at the glide's end) */
+        if ((own > 30 && sync_len(now.vel) < SYNC_GUARD * own) || (sync_len(now.vel) > 30 && own < SYNC_GUARD * sync_len(now.vel)))
+            p->easing = 1;  /* either way: an owner stuck while pedalling (the game's collision recovery
+                               follows 2 s later) stood still while its puppet rode on 105-158 units */
         if (p->easing) {
+            float d[3] = {now.vel[0] - ov[0], now.vel[1] - ov[1], now.vel[2] - ov[2]};
             ease(now.vel, ov, dt > 0 ? dt : 1 / 60.0f);
-            if (sync_len(now.vel) >= 0.95f * own) p->easing = 0;
+            if (sync_len(d) < 0.05f * own) p->easing = 0;
         }
     } else p->easing = 0;
     /* Nothing heard for SYNC_COAST (a stalled game, a long loss): the rider slows to a stop
