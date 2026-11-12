@@ -1,8 +1,8 @@
 # Downhill Revived Vulkan framebuffer cache
 
 This is the crates.io `wgpu-hal` **29.0.3** source, under its original MIT OR
-Apache-2.0 licence (LICENSE.MIT and LICENSE.APACHE). Other backends are unchanged.
-Local changes are marked `Downhill Revived` in the Vulkan source files.
+Apache-2.0 licence (LICENSE.MIT and LICENSE.APACHE). Local changes are marked
+`Downhill Revived`: the Vulkan backend's (below) and one DX12 backport (the last section).
 
 The device shares at most 256 framebuffer lookup entries across command encoders.
 Keys retain upstream's render pass, extent, raw attachments and unique view identities.
@@ -118,3 +118,16 @@ before.
 `mod.rs` re-exports `SemaphoreList`, `SemaphoreListMode` and `SemaphoreType` (doc-hidden) for the
 renderer crate's test `tests/semaphore_values.rs`; `adapter.rs` `Adapter::timeline_semaphores` says
 which kind the device's fences are, for dhd.log (`src/device.rs` `log_vulkan`).
+
+## DX12: the shader cache keeps bytecode, not FXC's blobs (finding 223)
+
+`dx12/mod.rs` `CompiledShader` is the shader's bytecode in an `Arc<[u8]>`; `shader_compilation.rs`
+copies FXC's `ID3DBlob` and DXC's `IDxcBlob` output into it and releases the blob on the compiling
+thread; `device.rs` takes DXIL passthrough bytes the same way. Upstream kept the blob itself in the
+device's shader cache and handed each pipeline a clone. d3dcompiler_47's `ID3DBlob` counts
+references without atomics, so a cache hit's AddRef (under the cache's lock) racing another
+thread's Release (outside it) lost updates: a blob the cache still held was freed, and the next
+hit's AddRef read a freed object's vtable. The renderer's background pipeline worker and its render
+thread make pipelines from the same vertex shader at once (finding 131). This is upstream's fix
+for gfx-rs/wgpu#10547, PR #10805 (merged into trunk 2026-11-11, in no release yet), applied to
+29.0.3 unchanged in substance: three hunks. `tests/dx12_shader_cache.rs` is the stress test.

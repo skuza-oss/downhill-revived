@@ -253,8 +253,9 @@ fn compile_fxc(
 
     match hr {
         Ok(()) => {
-            let shader_data = shader_data.unwrap();
-            Ok(super::CompiledShader::Fxc(shader_data))
+            // Downhill Revived (finding 223): the bytecode copied, the blob released here.
+            let shader_data = super::D3DBlob(shader_data.unwrap());
+            Ok(unsafe { shader_data.as_slice() }.into())
         }
         Err(e) => {
             let mut full_msg = format!("FXC D3DCompile error ({e})");
@@ -443,5 +444,9 @@ fn compile_dxc(
 
     let blob = get_output::<Dxc::IDxcBlob>(&compile_res, Dxc::DXC_OUT_OBJECT)?;
 
-    Ok(crate::dx12::CompiledShader::Dxc(blob))
+    // Downhill Revived (finding 223): the bytecode copied, as for FXC.
+    let bytecode = unsafe {
+        core::slice::from_raw_parts(blob.GetBufferPointer().cast::<u8>(), blob.GetBufferSize())
+    };
+    Ok(bytecode.into())
 }

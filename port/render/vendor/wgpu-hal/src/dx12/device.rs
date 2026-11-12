@@ -388,9 +388,7 @@ impl super::Device {
                 shader_model: naga_options.shader_model,
             },
             super::ShaderModuleSource::DxilPassthrough(passthrough) => {
-                return Ok(super::CompiledShader::Precompiled(
-                    passthrough.shader.clone(),
-                ))
+                return Ok(passthrough.shader.as_slice().into())
             }
         };
 
