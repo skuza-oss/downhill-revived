@@ -24,7 +24,7 @@ the room's rules about when the flight may be skipped; a phone run (the lead's).
 - [x] cause found in the decomp and the touch code (below)
 - [x] fix and unit tests: SKIP button, `test_flyover` in `port/hle/test_touch.c`
 - [x] Windows captures, both presets (Decisions, "What was run")
-- [ ] checks: `check.py port`, `check.py docs`, the debug APK (Result)
+- [x] checks on 919e355e: `check.py port` OK (`test_touch: all passed`, including `test_flyover`), `check.py docs` OK, `python port/android/build_apk.py --wasm build/wasm/dhd_core.wasm` builds the debug APK (not installed)
 
 ## Cause
 
@@ -142,3 +142,9 @@ hides the overlay, the touch that brings it back is not sent).
    141's check 22 cause), so the code-pointer words do not move.
 
 ## Result
+
+Not merged yet (the lead merges after the phone check). On `fix/touch-skip-flyover`: the flight over
+the track has a SKIP button in both presets that sends START (919e355e: `touch.c`, `touch_field.c`,
+`touch_host.c`, `host_api.h`; the test hook in `online.c`; `docs/PLAYING.md`, `docs/TESTING.md`).
+Windows runs at 20:9 and 4x show it in both presets; the checks are in Progress. At the merge:
+Status `current`, a `docs/STATE-LOG.md` entry, and the issue #89 answer (the lead's).
