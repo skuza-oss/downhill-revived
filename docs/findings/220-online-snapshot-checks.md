@@ -39,7 +39,8 @@ not worse; one live two-game race through a P2P room on a local server with no r
 - [x] 4, stamps and the hold's own release (c8f65e34)
 - [x] 6, the ground push (6858440b)
 - [x] 5, the SFU limiter's version (b99dc07c)
-- [ ] bench after, state traces, live race, check tiers
+- [x] protocol doc (0fb9cdce); `check.py port` OK on 0fb9cdce; state traces, bench and live race
+  (below)
 
 ## What each check is, and where its bound comes from
 
@@ -134,6 +135,47 @@ slide's into-ground part survived (-20 of -30 a step later at 60). Now, on the g
 slide loses its into-ground part too, and the move is the slide; that part is dropped, not owed,
 like the move's own, so what is applied is exactly what is no longer owed.
 
+## Lane 202's bench, before and after
+
+`port/tools/puppet_bench.py matrix --tracks 0,1,2 --fps 60 --only
+perfect,80ms,150ms,bad,send-hitch,send-behind`, the base build (c5f839a2) as `before` and this
+branch (0fb9cdce) as `after`, the same truths and seeds, hidden desktop, deterministic. The bench
+replays recorded riders through `feed` (not the receive path), so what can change it is item 6 (the
+ground push) and item 4's HOLD rules (the hitch scenarios). Per run, before > after:
+
+| run | error p95 | error p99 | sunk % | deep % | depth p99 | pops a min | jolts a min | catch-ups |
+|---|---|---|---|---|---|---|---|---|
+| perfect t0 | 0.29>0.29 | 0.72>0.72 | 0.29>0.29 | 0.04>0.04 | 0.28>0.28 | 1.1>1.1 | 0.9>0.9 | 0>0 |
+| perfect t1 | 0.30>0.30 | 0.73>0.73 | 0.13>0.13 | 0.07>0.07 | 0.38>0.38 | 3.1>3.1 | 1.1>1.1 | 0>0 |
+| perfect t2 | 0.25>0.26 | 0.47>0.48 | 0.14>0.14 | 0.03>0.03 | 0.19>0.20 | 0.0>0.1 | 0.2>0.5 | 0>0 |
+| 80 ms t0 | 1.37>1.43 | 2.61>2.72 | 0.62>0.56 | 0.06>0.06 | 0.31>0.30 | 11.4>16.2 | 1.9>3.1 | 0>0 |
+| 80 ms t1 | 1.65>1.64 | 3.23>3.16 | 0.36>0.42 | 0.08>0.07 | 0.38>0.47 | 36.2>36.6 | 1.5>2.2 | 0>0 |
+| 80 ms t2 | 1.47>1.44 | 2.33>2.27 | 0.55>0.46 | 0.06>0.05 | 0.25>0.23 | 12.1>13.3 | 2.0>3.1 | 0>1 |
+| 150 ms t0 | 3.04>3.08 | 5.72>6.08 | 0.80>0.74 | 0.04>0.05 | 0.30>0.32 | 94.0>100.2 | 2.9>5.3 | 4>13 |
+| 150 ms t1 | 3.70>3.58 | 5.91>5.68 | 0.73>0.69 | 0.05>0.05 | 0.34>0.33 | 141.6>142.7 | 3.8>5.1 | 0>0 |
+| 150 ms t2 | 3.19>3.39 | 5.21>5.79 | 0.66>0.52 | 0.04>0.03 | 0.25>0.23 | 110.3>127.3 | 4.7>5.4 | 10>8 |
+| bad t0 | 3.99>4.15 | 7.90>8.31 | 1.05>1.08 | 0.09>0.12 | 0.34>0.35 | 134.8>147.5 | 5.4>7.0 | 18>20 |
+| bad t1 | 4.54>4.52 | 7.35>7.31 | 0.74>0.86 | 0.03>0.03 | 0.32>0.37 | 214.2>204.6 | 5.3>4.4 | 9>7 |
+| bad t2 | 4.27>4.04 | 9.18>8.20 | 1.13>0.88 | 0.20>0.20 | 0.35>0.31 | 185.9>179.3 | 10.6>10.9 | 30>25 |
+| send-hitch t0 | 2.19>2.18 | 17.05>17.31 | 0.90>0.80 | 0.11>0.09 | 0.37>0.35 | 63.2>60.3 | 11.3>10.3 | 23>23 |
+| send-hitch t1 | 2.13>2.14 | 14.61>14.60 | 0.36>0.43 | 0.08>0.08 | 0.33>0.42 | 76.2>71.3 | 12.3>11.4 | 9>12 |
+| send-hitch t2 | 1.86>1.87 | 16.74>16.43 | 0.68>0.62 | 0.14>0.13 | 0.28>0.28 | 54.2>52.4 | 10.4>10.4 | 13>12 |
+| send-behind t0 | 12.24>11.97 | 37.68>37.54 | 0.88>0.77 | 0.19>0.16 | 0.36>0.35 | 111.6>108.9 | 21.9>19.5 | 20>20 |
+| send-behind t1 | 14.52>14.28 | 36.10>36.10 | 0.76>0.72 | 0.31>0.29 | 0.97>0.89 | 169.4>164.2 | 28.8>27.1 | 7>8 |
+| send-behind t2 | 13.57>13.56 | 34.79>34.83 | 0.63>0.75 | 0.19>0.20 | 0.26>0.30 | 78.3>81.3 | 17.2>16.6 | 13>10 |
+| sum of the 18 | 74.55>74.13 | 208.3>208.3 | 11.40>10.85 | 1.80>1.74 | 6.24>6.35 | 1498>1510 | 142.1>144.0 | 156>159 |
+
+The errors are the same (sums within 0.6 %). Sinking is less: sunk steps 5 % fewer over all runs,
+fewer in 10 of the 15 lossy runs. The cost is jolts on the plain 80 and 150 ms links: 1-2 more a
+minute (16.8 to 24.0 over those six runs), and pops up to 15 % more on some of them; the stall and
+catch-up scenarios have fewer jolts and pops. The jolts are the fix itself: at a landing the
+correction's own into-ground speed (up to 30 units a second) now ends in that step instead of
+pushing the wheels in for a few more, and the bench counts a drawn speed change over 36 units a
+second that the truth does not make as a jolt. Kept, because a rider pushed into the ground is
+the visible fault the lane was asked to remove and the review's arithmetic is right; the totals
+are otherwise even. If the jolts show, ending that speed over two or three steps instead of one
+would trade a little sinking back (not tried).
+
 ## Decisions
 
 - A record with a bad node is refused whole, not only its line part (1, above).
@@ -168,6 +210,37 @@ like the move's own, so what is applied is exactly what is no longer owed.
   clock catches up, or are put in place when far off. The page's star ticks every 10 ms on its own
   (`p2p.js`) and could send HOLD from the last bundle's stamp and the time since it; not done here.
 
+## Checks
+
+- `python tools/check.py port -j 6` on 0fb9cdce: OK (check_docs, check_tree, build_wasm,
+  test_runtime with `test_puppet_record.c` in the guest and under the address sanitizer on the
+  host, `test_rider_states.py`, build_game, scan_retail, net_tests, test_gs_wgpu, stack checks).
+  `rustgs.py test -- -p dhd_net -p dhd_star`: 38 + 12 passed (10 ignored: they need a local
+  server).
+- The fuzz: 200000 random and mutated bundles (bytes flipped, words overwritten with NaN, infinity,
+  huge and random values, cut, grown, all random, or unchanged) through `state_bundle_check`,
+  `puppet_record_read` and `puppet_record_take`: 99681 passed the bundle check, 60265 records were
+  taken (every one sane), 39416 refused (the mirror unchanged each time); no sanitizer report.
+- Each new test was seen to fail on the old code: the landing test of `test_puppet_sync.c` against
+  the old `puppet_sync.h` ("never into the ground"), the SFU backlog test against the old line (240
+  taken of 300).
+- State traces against `main-524948ba-ref-v3` (same `state_trace_codeptrs.txt` and
+  `state_trace_mask.txt`): `boot` all 600 rows match, `race` all 5000 rows match (PASS).
+- The live race: `local_server.py -- online_race.py --hidden --lag --link
+  delay=80,jitter=15,loss=1,seed=41 --a DHD_NET_CREATE=p2p --a DHD_NET_TEST_HITCH=20:800`, two
+  games on this PC in a P2P room (a direct link), eight host computer riders, the guest attacking,
+  75 s. Records refused: 0 on both games; HOLDs refused: 0; no State-list line. The host's 0.8 s
+  stop at tick 1200: the guest held all nine host riders at tick 1222 and let all nine ride on at
+  ticks 1258-1261 (2.3-11.4 units from their spots), as in finding 202's runs. `puppet_lag.py`: the
+  guest shows the host's rider at error p50/p95/p99 0.16/0.99/1.90, its computer riders at
+  0.35/2.35/15.32 (the stop's catch-up in the tail; finding 202's 80 ms races without a stop:
+  0.38-0.42/2.35-2.45/4.3-4.9), sunk 0.6 %, 8 respawn placements and nothing else placed; four hits
+  applied.
+
 ## Result
 
-Filled in at the merge.
+Every field of another game's record is checked before any of it is used, and a refused record
+leaves no trace; no stamp can freeze a rider or stale out honest snapshots; the SFU limiter reads
+the bundle's layout from the game's own header; a landing puppet is not pushed into the ground.
+Offline play is unchanged (state traces equal). Merge, and the review's findings 1, 2, 3, 5, 6 and
+8 are closed; this file's Status then becomes `current`.
