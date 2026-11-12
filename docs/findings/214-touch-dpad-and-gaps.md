@@ -30,7 +30,7 @@ skippable.
 - [x] the D-pad in `touch.c`, the TOUCH CONTROLS page, `test_touch` (3c67dbd0)
 - [x] SKIP also for the movies; `DHD_TOUCH_SCRIPT` for held and dragged fingers in checks (fefdc0f1)
 - [x] replay and attract demo: see "Part 2" below
-- [ ] checks (see "What was run")
+- [x] checks: `check.py port` OK on e15d335c (includes `test_touch: all passed`), `check.py docs` OK, the Android debug APK builds (`python port/android/build_apk.py --wasm build/wasm/dhd_core.wasm`, not installed), `dhd_settings` tests pass; the browser build was not touched (its corpus has the new case; `port/web/check_settings.mjs` was not run)
 
 ## Decisions: Part 1, the D-pad
 

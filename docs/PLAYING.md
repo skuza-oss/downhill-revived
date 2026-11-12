@@ -73,8 +73,10 @@ What works today:
   codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
   buttons); **ENTER** goes back to the race and enters them. The camera's flight over the track
   before each race, and the movies (the startup movies if Skip Movies is off, the attract movie,
-  OPTIONS > VIDEO CLIPS), have a **SKIP** button (low in the middle of the screen, the touch
-  controls' START); tap it as you would press START on a pad.
+  OPTIONS > VIDEO CLIPS) and the title's attract demo have a **SKIP** button (low in the middle of
+  the screen, the touch controls' START); tap it as you would press START on a pad. In a race's
+  replay the same button reads **MENU** (START opens the replay's menu: RESUME, QUIT, RE-START,
+  SAVE, which you then tap); the race controls are not shown, since a replay plays the recording.
   - **The D-pad** (SETTINGS > Touch Controls > Steer With > D-pad, in either layout and for either
     hand; it takes the place of the stick, so the Stick rows dim) is four arrows round a rest
     point: left, right, up and down, as on a PS2 pad (up and down lean, as the stick's up and
