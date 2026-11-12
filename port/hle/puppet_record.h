@@ -163,12 +163,15 @@ static inline int puppet_node_ok(uint16_t node, int32_t loaded)
    the AI controller's direction to its target). Every float of a record must be finite, and each
    within a bound far outside anything a race shows. Measured on the puppet bench's recordings
    (port/tools/puppet_bench.py record: every rider of three tracks each race step, 75 s; finding
-   220 has the numbers) and widened at least tenfold; the counts from the game's own code. */
-#define PUPPET_WORLD_MAX 100000.0f  /* units, each axis of a position or target point (tracks: within 6300) */
-#define PUPPET_SPEED_MAX 5000.0f    /* units a second (riders: up to 270) */
-#define PUPPET_SPIN_MAX 500.0f      /* radians a second (riders: up to 11) */
-#define PUPPET_ROW_SLACK 0.25f      /* an orientation row's length within 1 +- this, two rows' dot product under it
-                                       (riders: 0.978-1.000 and 1e-7); then the rows cannot be degenerate */
+   220 has the numbers) and widened many times (the orientation rows' length fivefold, the rest at
+   least eighteen); the counts from the game's own code. */
+#define PUPPET_WORLD_MAX 200000.0f  /* units, each axis of a position or target point (tracks: within 11300) */
+#define PUPPET_SPEED_MAX 5000.0f    /* units a second (riders: up to 263) */
+#define PUPPET_SPIN_MAX 500.0f      /* radians a second (riders: up to 23) */
+#define PUPPET_ROW_SLACK 0.5f       /* an orientation row's length within 1 +- this (riders: 0.91-1.00) */
+#define PUPPET_ROW_VOLUME_MIN 0.5f  /* the rows' determinant over their lengths' product at least this: not
+                                       degenerate (no two near parallel, not near one plane) and not mirrored
+                                       (riders: 1.0000; their rows are orthogonal to 3e-7) */
 #define PUPPET_OFFSET_MAX 1000.0f   /* units: a racing line's sideways offset (riders: within 22) */
 #define PUPPET_POWER_MAX 10.0f      /* power, either sign (riders: 0.75-1.22; puppet.c uses only 0.5-2) */
 #define PUPPET_TURNING_MAX 100.0f   /* a computer rider's turn scale, either sign (riders: 0-1.04; used only 0-1) */
@@ -211,12 +214,13 @@ static inline const char *puppet_record_check(const PuppetRecord *r, const uint3
     if (!puppet_within(r->pos, 3, PUPPET_WORLD_MAX)) return "position";
     if (!(puppet_len3(r->vel) <= PUPPET_SPEED_MAX)) return "speed";
     if (!(puppet_len3(r->spin) <= PUPPET_SPIN_MAX)) return "spin";
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++)
         if (!(fabsf(puppet_len3(r->rot[i]) - 1) <= PUPPET_ROW_SLACK)) return "orientation";
-        for (int j = 0; j < i; j++) {
-            float d = r->rot[i][0] * r->rot[j][0] + r->rot[i][1] * r->rot[j][1] + r->rot[i][2] * r->rot[j][2];
-            if (!(fabsf(d) <= PUPPET_ROW_SLACK)) return "orientation";
-        }
+    {
+        const float (*m)[3] = r->rot;
+        float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        if (!(det >= PUPPET_ROW_VOLUME_MIN * puppet_len3(m[0]) * puppet_len3(m[1]) * puppet_len3(m[2]))) return "orientation";
     }
     if (!(fabsf(r->power) <= PUPPET_POWER_MAX) || !(fabsf(r->turning) <= PUPPET_TURNING_MAX)) return "power";
     if (!puppet_node_ok(r->node, node_count) || !puppet_node_ok(r->next, node_count) ||

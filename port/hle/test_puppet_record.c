@@ -187,12 +187,15 @@ int main(void)
         REFUSED(bad.spin[0] = INFINITY, "not finite");
         REFUSED(bad.power = NAN, "not finite");
         REFUSED(bad.turning = NAN, "not finite");
-        REFUSED(bad.pos[1] = 2e5f, "position");
+        REFUSED(bad.pos[1] = 3e5f, "position");
         REFUSED((bad.vel[0] = 4000, bad.vel[1] = 4000), "speed");
         REFUSED(bad.spin[2] = 600, "spin");
         REFUSED(memset(bad.rot, 0, sizeof bad.rot), "orientation");                         /* degenerate */
         REFUSED(memcpy(bad.rot[1], bad.rot[0], sizeof bad.rot[0]), "orientation");          /* two rows alike */
         REFUSED(bad.rot[2][2] = 3, "orientation");                                           /* not a unit row */
+        REFUSED(bad.rot[2][2] = -1, "orientation");                                          /* mirrored */
+        REFUSED((bad.rot[1][0] = 0.7071f, bad.rot[1][1] = 0.7071f, bad.rot[2][0] = 0.7071f, bad.rot[2][1] = 0.7071f,
+                 bad.rot[2][2] = 0), "orientation");                                         /* two rows alike, unit */
         REFUSED(bad.power = 50, "power");
         REFUSED(bad.turning = -1e6f, "power");
         REFUSED(bad.target[0] = 1e9f, "racing line");
@@ -219,8 +222,8 @@ int main(void)
             assert(!strcmp(puppet_record_take(&bad, mirror, nodes, shown), "pad") && !memcmp(before, mirror, sizeof before));
         }
         /* what real riders send, at the edges of what the bench's recordings showed: taken */
-        bad = ok, bad.pos[2] = 6212, bad.vel[0] = 262, bad.spin[0] = 10.3f, bad.power = 0.75f, bad.turning = 1.04f;
-        bad.rot[0][0] = 0.978f, bad.offset[0] = -21, bad.checkpoint = 35, bad.attack = 4, bad.bottles = 255, bad.crash_kind = 10;
+        bad = ok, bad.pos[2] = -11240, bad.vel[0] = 262, bad.spin[0] = 22.2f, bad.power = 0.75f, bad.turning = 1.04f;
+        bad.rot[0][0] = 0.911f, bad.offset[0] = -21, bad.checkpoint = 35, bad.attack = 4, bad.bottles = 255, bad.crash_kind = 10;
         bad.node = PUPPET_LINE_NONE, bad.next = PUPPET_LINE_NONE, bad.state = 0x5FE0, bad.contact[1] = 2;
         assert(puppet_record_take(&bad, mirror, nodes, shown) == NULL);
         uint32_t steer[PAD_WORDS] = {0};
