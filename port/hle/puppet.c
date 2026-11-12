@@ -81,6 +81,21 @@ static void net_link_release(void);
 #define CHECKPOINT_AT 0x7990  /* checkpoints passed (func_0019F210) */
 #define AI_AT 0x78D4          /* a computer rider's AI controller (0: a player's rider) */
 #define AI_TURNING_AT 0x2B0   /* the controller's turn scale (func_0010F0D8 sets, func_00137950 reads) */
+#define AI_PREV_TARGET_AT 0x10  /* the controller (func_0010B2B8): the previous target point */
+#define AI_TARGET_AT 0x30     /* the target point: the node's position plus the sideways offset */
+#define AI_NODE_DATA_AT 0x40  /* the node's second 16 bytes (width, flags, links) */
+#define AI_AFTER_AT 0x50      /* the next target point */
+#define AI_AFTER_DATA_AT 0x60
+#define AI_NODE_AT 0x74       /* the racing-line node it heads for (x70 the last, x78 the chosen next) */
+#define AI_NEXT_AT 0x78
+#define AI_TO_TARGET_AT 0xF0  /* direction from the previous target to the target (x270 its length) */
+#define AI_TO_AFTER_AT 0x100  /* from the target to the next (x274) */
+#define AI_OFFSET_AT 0x220    /* the sideways offset, easing toward +0x230 (func_0010BD10) */
+#define AI_OFFSET_TO_AT 0x230
+#define NODES ((uint8_t *)0x0829EA20)  /* D_0029EA20: the racing-line nodes, 0x20 bytes each */
+#define NODE_SIZE 0x20
+#define NODE_COUNT 2117                 /* the most that fit before D_002AF2C0 */
+#define LINE_NONE 0xFFFF
 #define ATTACK_AT 0x6390      /* the attack the combat power-ups give: 0 punch, 1 kick, 2 check, 3 stick, 4 bottle */
 #define BOTTLES_AT 0x7ADC     /* bottles left to throw (func_00179A60 shows both) */
 
@@ -104,8 +119,14 @@ typedef struct Snapshot {
     int32_t slot;            /* tests (DHD_PUPPET_RECORD): the rider's slot */
     float ground[2];         /* tests: each wheel's clearance above the ground (ground_clearance) */
     float race;              /* the sender's race time (s); with `time` it shows how fast its clock runs */
+    /* A computer rider's racing line (its AI controller, finding 202 round 3's map): the racing-line
+       nodes it heads for and has chosen next (indexes into D_0029EA20; LINE_NONE: none, a player's
+       rider), its target point and the next one (with the sideways offset in them), the offset
+       (x and y) and the one it eases toward */
+    uint16_t node, next;
+    float target[3], after[3], offset[2], offset_to[2];
 } Snapshot;
-_Static_assert(sizeof(Snapshot) == 840, "the recordings' record (port/tools/puppet_lag.py SNAP_SIZE)");
+_Static_assert(sizeof(Snapshot) == 888, "the recordings' record (port/tools/puppet_lag.py SNAP_SIZE)");
 
 enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
 /* A rider's record in a STATE bundle (state_bundle.h, payload version 6, finding 169): its global
@@ -136,8 +157,10 @@ typedef struct Puppet {
     /* HOLD (state_bundle.h): its sender's game stopped; the rider stands where it was until the
        snapshots come again and its rider has caught up with it */
     int held;
+    double line_at;          /* the snapshot whose racing line this game's controller took */
+    int easing;              /* its speed eases up to its owner's (steer's guard) */
     int catching;            /* its sender catches up (its clock rate over SYNC_CATCHUP until under the end) */
-    double held_at, resumed_at;   /* the sender's last snapshot's moment; when newer ones came again */
+    double held_at, resumed_at, held_step_at;   /* the sender's last snapshot's moment; when newer ones came again */
     SyncPose pin;
     float error;             /* the last snapshot's difference from this puppet (units) */
     double behind;           /* the newest snapshot's age when last used (s) */
@@ -156,7 +179,8 @@ void hle_online_hit_dealt(void *attacker, void *victim, int kind);  /* online.c,
 typedef struct Delivery {
     double at;               /* on this game's race clock */
     double shift;            /* the sender's stamp: its race time plus this (its clock's lag) */
-    int index;               /* into pp.file */
+    int index;               /* into pp.file (-1: a HOLD) */
+    double quiet;            /* a HOLD: how long its sender had been stopped when it left (s) */
 } Delivery;
 enum { HELD_MAX = 512, HELD_BYTES = 1024 };
 
@@ -180,6 +204,10 @@ static struct {
     int kept[NET_SLOTS];     /* of those, the ones that had finished: their riders stay puppets */
     int hits_taken;
     int debug;               /* DHD_PUPPET_DEBUG=slot: each snapshot of that slot in the log (-1 none) */
+    int exact;               /* DHD_PUPPET_EXACT=1 (clips of a live run): a replayed rider takes each
+                                recorded pose as it is, no steering (its wheels still on the physics) */
+    int line;                /* DHD_PUPPET_LINE=0: computer riders' puppets do not take their owners'
+                                racing line (they replay the owners' steering words; tests) */
     uint8_t events[MAX_EVENTS][32];
     int event_size[MAX_EVENTS], nevents;
 } pp;
@@ -325,7 +353,7 @@ static void play_schedule(const char *link_text)
             double arrives;
             if (link_pass(&holds, w, &arrives))
                 pp.deliveries[pp.delivery_count++] =
-                    (Delivery){link_hitch_race(link.rhitch_at, link.rhitch_len, arrives), link.hitch_at, -1};
+                    (Delivery){link_hitch_race(link.rhitch_at, link.rhitch_len, arrives), link.hitch_at, -1, w - link.hitch_at};
         }
     }
     qsort(pp.deliveries, pp.delivery_count, sizeof *pp.deliveries, by_arrival);
@@ -347,6 +375,8 @@ static void setup(void)
     if ((s = getenv("DHD_PUPPET_TRACE")) && *s && !(pp.trace = fopen(s, "w")))
         fprintf(stderr, "puppet: cannot write %s\n", s);
     pp.debug = (s = getenv("DHD_PUPPET_DEBUG")) && *s ? atoi(s) : -1;
+    pp.line = (s = getenv("DHD_PUPPET_LINE")) && *s ? atoi(s) : 1;
+    pp.exact = (s = getenv("DHD_PUPPET_EXACT")) && *s ? atoi(s) : 0;
     if ((s = getenv("DHD_NET_LINK")) && *s && link_parse(&pp.net_link, s))
         fprintf(stderr, "puppet: STATE arrives through a test link: %s\n", s);
     if ((s = getenv("DHD_PUPPET_PLAY")) && *s) {
@@ -366,6 +396,14 @@ static void setup(void)
     }
 }
 
+/* A racing-line node's index (LINE_NONE: none or not a node) and back */
+static uint16_t node_index(const uint8_t *n)
+{
+    if (!n || n < NODES || n >= NODES + NODE_COUNT * NODE_SIZE || (n - NODES) % NODE_SIZE) return LINE_NONE;
+    return (uint16_t)((n - NODES) / NODE_SIZE);
+}
+static uint8_t *node_at(uint16_t i) { return i < NODE_COUNT ? NODES + i * NODE_SIZE : NULL; }
+
 static void take(Snapshot *s, const uint8_t *r)
 {
     memset(s, 0, sizeof *s);
@@ -377,7 +415,17 @@ static void take(Snapshot *s, const uint8_t *r)
     memcpy(s->vel, r + VEL_AT, 16);
     memcpy(s->spin, r + SPIN_AT, 16);
     s->power = FIELD(r, POWER_AT, float);
-    if (FIELD(r, AI_AT, uint8_t *)) s->turning = FIELD(FIELD(r, AI_AT, uint8_t *), AI_TURNING_AT, float);
+    s->node = s->next = LINE_NONE;
+    uint8_t *ai = FIELD(r, AI_AT, uint8_t *);
+    if (ai) {
+        s->turning = FIELD(ai, AI_TURNING_AT, float);
+        s->node = node_index(FIELD(ai, AI_NODE_AT, uint8_t *));
+        s->next = node_index(FIELD(ai, AI_NEXT_AT, uint8_t *));
+        memcpy(s->target, ai + AI_TARGET_AT, 12);
+        memcpy(s->after, ai + AI_AFTER_AT, 12);
+        memcpy(s->offset, ai + AI_OFFSET_AT, 8);
+        memcpy(s->offset_to, ai + AI_OFFSET_TO_AT, 8);
+    }
     s->contact[0] = r[FRONT_AT];
     s->contact[1] = r[BACK_AT];
     s->crash = (uint8_t)FIELD(r, CRASH_FLAGS_AT, uint32_t);
@@ -400,7 +448,8 @@ static void feed(int slot, const Snapshot *s)
        and the ring at each race's start, and hle_puppet_receive has already applied this
        snapshot's pad words to the mirror, so nothing here may clear it. */
     if (p->count && s->time < p->ring[p->count - 1].time - 1)
-        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0;
+        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0,
+        p->line_at = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double age = RACE_TIME - s->time;
     if (!p->have_age)
@@ -490,6 +539,12 @@ static double take_snapshot(Puppet *p, const Snapshot *s, SyncPose *owner, SyncP
     return carry;
 }
 
+static void ease(float *vel, const float *to, float dt)
+{
+    float d[3] = {to[0] - vel[0], to[1] - vel[1], to[2] - vel[2]}, n = sync_len(d), most = SYNC_EASE_ACCEL * dt;
+    for (int k = 0; k < 3; k++) vel[k] += n > most ? d[k] * most / n : d[k];
+}
+
 /* A puppet's pose before this step's physics (finding 202). A snapshot newer than the last one
    used is compared with where this puppet was at its moment (puppet_sync.h); the difference is
    then made up a little each step. A difference too large to be riding (a respawn, a long loss,
@@ -521,21 +576,19 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
         snapshot_pose(s, &owner);
         for (int k = 0; k < 3; k++) owner.vel[k] *= p->rate;
         sync_carry(&owner, s->spin, (float)fmin(fmax(0, t - s->time), SYNC_CARRY_MAX), &carried);
-        /* the glide itself moves the rider at most SYNC_SLIDE_MOST beyond its riding (1.5 units a step
-           at 60): the rest waits for the next steps */
-        float f = dt > 0 ? 1 - expf(-dt / SYNC_FOLLOW_TAU) : 1, w[3], move[3];
-        for (int k = 0; k < 3; k++) move[k] = (carried.pos[k] - now.pos[k]) * f;
-        float most = SYNC_SLIDE_MOST * (dt > 0 ? dt : 1 / 60.0f), m = sync_len(move);
-        for (int k = 0; k < 3; k++) now.pos[k] += (m > most ? move[k] * most / m : move[k]);
-        memcpy(now.vel, carried.vel, sizeof now.vel);
-        sync_rotation_between(now.rot, carried.rot, w);
-        for (int k = 0; k < 3; k++) w[k] *= f;
-        sync_turn(now.rot, w);
+        /* Its speed eases to its rider's (SYNC_EASE_ACCEL: up to twice its riding takes about 0.1 s),
+           and the rest is the usual correction toward its rider carried to now, made up within the
+           slide's limits (puppet_sync.h): round 3 set the speed at once and moved the position by
+           its own rule, steps of 3-6 units beyond the riding where the glide began and ended. */
+        float normal[3], rot[3];
+        ease(now.vel, carried.vel, dt > 0 ? dt : 1 / 60.0f);
+        sync_rotation_between(now.rot, carried.rot, rot);
+        for (int k = 0; k < 3; k++) {
+            p->sync.pending_pos[k] = carried.pos[k] - now.pos[k];
+            p->sync.pending_vel[k] = 0, p->sync.pending_rot[k] = rot[k];
+        }
+        sync_step(&p->sync, dt, ground_normal(r, normal), &now);
         set_body(r, &now, NULL);
-        memset(p->sync.pending_pos, 0, sizeof p->sync.pending_pos);
-        memset(p->sync.pending_vel, 0, sizeof p->sync.pending_vel);
-        memset(p->sync.pending_rot, 0, sizeof p->sync.pending_rot);
-        memset(p->sync.slide, 0, sizeof p->sync.slide);
         return;
     }
     if (fresh) {
@@ -588,8 +641,13 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
         float ov[3], own = 0;
         for (int k = 0; k < 3; k++) ov[k] = s->vel[k] * (p->rate > 0 ? p->rate : 1);
         own = sync_len(ov);
-        if (own > 30 && sync_len(now.vel) < SYNC_GUARD * own) memcpy(now.vel, ov, sizeof now.vel);
-    }
+        /* eased (round 4): to within 5 % of its owner's, SYNC_EASE_ACCEL at most */
+        if (own > 30 && sync_len(now.vel) < SYNC_GUARD * own) p->easing = 1;
+        if (p->easing) {
+            ease(now.vel, ov, dt > 0 ? dt : 1 / 60.0f);
+            if (sync_len(now.vel) >= 0.95f * own) p->easing = 0;
+        }
+    } else p->easing = 0;
     /* Nothing heard for SYNC_COAST (a stalled game, a long loss): the rider slows to a stop
        rather than riding on alone; the next snapshot puts it right. */
     if (t - s->time > SYNC_COAST) {
@@ -602,21 +660,22 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
 }
 
 /* HOLD from the puppet's sender (state_bundle.h): its game stopped after its snapshot of moment t
-   (this race clock). Unless a newer snapshot is already here, the rider stops where it is now. */
-static void hold(int slot, double t)
+   (this race clock) and had been stopped `quiet` seconds when the HOLD left. Unless a newer
+   snapshot is already here, the rider brakes to a stop where it is (held_step). */
+static void hold(int slot, double t, double quiet)
 {
     Puppet *p = &pp.p[slot];
     if (!p->on || !p->synced || (p->count && p->ring[p->count - 1].time > t + 0.001)) return;
     /* A short stop (a stall under load, often under 0.2 s) is ridden through: once its sender
        catches up its riders are back where riding on put them, while a hold stopped them dead and
-       left them to catch up (live, 50 holds in a loaded race, each a stop and a burst). */
-    if (RACE_TIME - t < SYNC_HOLD_AFTER) return;
+       left them to catch up (live, 50 holds in a loaded race, each a stop and a burst). The stop is
+       timed by its sender (round 4: timed here, the link's delay counted toward it). */
+    if (quiet < SYNC_HOLD_AFTER) return;
     if (!p->held) {
         body_pose(rider(slot), &p->pin);
-        memset(p->pin.vel, 0, sizeof p->pin.vel);
         fprintf(stderr, "puppet: tick %d slot %d held (its sender stopped)\n", RACE_CLOCK, slot);
     }
-    p->held = 1, p->held_at = t, p->resumed_at = 0;
+    p->held = 1, p->held_at = t, p->resumed_at = 0, p->held_step_at = 0;
 }
 
 /* A held rider, each step (no physics; returns 0 when it rides again): it stands where it stopped
@@ -624,6 +683,7 @@ static void hold(int slot, double t)
    (reached its spot along the way it rides, or is within 1.5 units). Then it takes its rider's
    pose and speed there, a step from where it stands, and is steered as usual. A rider that has not
    caught up SYNC_COAST after the snapshots came again is steered from where it stands. */
+
 static int held_step(uint8_t *r, Puppet *p, const Snapshot *s)
 {
     if (s->time > p->held_at + 0.001) {
@@ -643,6 +703,7 @@ static int held_step(uint8_t *r, Puppet *p, const Snapshot *s)
                it rides on from where it stands and catches up by riding (round 3: the release moved
                a rider up to 12 units in a step) */
             if (caught && sync_len(d) < SYNC_SLIDE_MOST / 60) {
+                memcpy(carried.vel, p->pin.vel, sizeof carried.vel);  /* its speed eases up from there (steer) */
                 set_body(r, &carried, s->spin);
                 sync_restart(&p->sync, RACE_TIME - fmin(fmax(0, RACE_TIME - s->time), SYNC_CARRY_MAX), &owner, s->spin,
                              RACE_TIME);
@@ -650,7 +711,12 @@ static int held_step(uint8_t *r, Puppet *p, const Snapshot *s)
             return 0;
         }
     }
-    float still[3] = {0, 0, 0};
+    /* it brakes to a stop (SYNC_EASE_ACCEL) along the way it rode, not at once */
+    float still[3] = {0, 0, 0}, zero[3] = {0, 0, 0}, dt = 1 / 60.0f;
+    if (p->held_step_at > 0 && RACE_TIME > p->held_step_at) dt = (float)(RACE_TIME - p->held_step_at);
+    p->held_step_at = RACE_TIME;
+    ease(p->pin.vel, zero, dt);
+    for (int k = 0; k < 3; k++) p->pin.pos[k] += p->pin.vel[k] * dt;
     set_body(r, &p->pin, still);
     func_0012DDC0(r);
     return 1;
@@ -709,6 +775,48 @@ static int grid_step(uint8_t *r, Puppet *p)
     return 1;
 }
 
+static int on_ground(const uint8_t *r) { return r[FRONT_AT] == 1 || r[BACK_AT] == 1; }
+
+extern void func_0010B2B8(void *ai, void *node);  /* the AI controller heads for the next node (or node) */
+
+static void unit(float *out, const float *from, const float *to, float *length)
+{
+    float d[3] = {to[0] - from[0], to[1] - from[1], to[2] - from[2]}, n = sync_len(d);
+    for (int k = 0; k < 3; k++) out[k] = n > 0 ? d[k] / n : 0;
+    *length = n;
+}
+
+/* A computer rider's racing line, its owner's (finding 202 round 4). Its owner's AI chooses the
+   line (a node at each fork at random, a random sideways offset at each node: round 3's map) and
+   steers to it with a 3-degree rule; this game's controller, run for the puppet, made its own
+   choices, so the owner's steering words, which arrive the snapshots' age late, were the only
+   way the puppet followed the owner's line, each turn that late. Now this game's controller takes
+   the owner's line before it runs: the same node (by the game's own advance, func_0010B2B8, when it
+   is a node behind or on another fork), the same next node, target points and offset. It then
+   steers the owner's line at once, from where the puppet is. A puppet a node ahead of its newest
+   snapshot (it reached the node first) keeps its own until the owner's next node shows. */
+static void take_line(uint8_t *ai, const Snapshot *s)
+{
+    uint8_t *node = node_at(s->node), *next = node_at(s->next);
+    if (!node) return;
+    uint16_t mine = node_index(FIELD(ai, AI_NODE_AT, uint8_t *)), chosen = node_index(FIELD(ai, AI_NEXT_AT, uint8_t *));
+    if (mine != s->node) {
+        if (mine == s->next) return;  /* a node ahead: the next snapshot shows its next */
+        func_0010B2B8(ai, chosen == s->node ? NULL : node);  /* a node behind: its own advance; else jump there */
+        if (node_index(FIELD(ai, AI_NODE_AT, uint8_t *)) != s->node) return;
+    }
+    memcpy(ai + AI_TARGET_AT, s->target, 12);
+    memcpy(ai + AI_OFFSET_AT, s->offset, 8);
+    memcpy(ai + AI_OFFSET_TO_AT, s->offset_to, 8);
+    if (next) {
+        FIELD(ai, AI_NEXT_AT, uint8_t *) = next;
+        memcpy(ai + AI_AFTER_AT, s->after, 12);
+        memcpy(ai + AI_AFTER_DATA_AT, next + 0x10, 16);
+    }
+    unit((float *)(ai + AI_TO_TARGET_AT), (float *)(ai + AI_PREV_TARGET_AT), s->target, (float *)(ai + 0x270));
+    unit((float *)(ai + AI_TO_AFTER_AT), s->target, (float *)(ai + AI_AFTER_AT), (float *)(ai + 0x274));
+}
+
 /* Instead of func_0012C8B0's pad or AI: the virtual pad as the remote rider had it at the newest
    snapshot. Last tick's actions are shifted here (as func_0017DCC8 does), so a press shows its
    edge once. Between snapshots the rider keeps its last inputs. */
@@ -723,18 +831,24 @@ int hle_puppet_input(uint8_t *r)
         memset(pad, 0, PREV_FIRST * 4);
         return 1;
     }
-    /* A computer rider steers in its own States from its AI controller (+0x78D4), not from the
-       pad (its pad words change two or three times a second): this game's AI controller runs for
-       it as for any AI rider, along this track's racing line, and the owner's pad replaces what
-       it pressed. The game's input pass shifts the pad itself. */
+    /* A computer rider's AI controller (+0x78D4) writes its pad: this game's controller runs for
+       it as for any AI rider, on its owner's racing line (take_line), and the owner's pad replaces
+       what it pressed except its steering on the ground. The game's input pass shifts the pad. */
+    uint8_t *ai = FIELD(r, AI_AT, uint8_t *);
+    int line = pp.line && ai && ai_rider(slot) && s->node != LINE_NONE;
+    if (line && s->time > pp.p[slot].line_at) take_line(ai, s), pp.p[slot].line_at = s->time;
     if (ai_rider(slot)) func_0012C8B0(r);
     else memcpy(pad + PREV_FIRST, pad, 25 * 4);
     /* Nothing heard for SYNC_COAST: the owner's last inputs are not riding any more (a stalled
        game, a long loss). A computer rider's puppet rides on its AI; a player's lets go. */
     int silent = RACE_TIME - s->time > SYNC_COAST || pp.p[slot].held;
     if (silent && ai_rider(slot)) return 1;
+    /* On the owner's line its own controller's steering (words 7 and 8) is timely; in the air the
+       words are tricks (air spins, func_00113EB8, func_001140A0), the owner's */
+    int own = line && !silent && on_ground(r);
     for (int i = 0; i < PAD_WORDS; i++)
-        if (i < PREV_FIRST || i > PREV_LAST) pad[i] = silent && i < PREV_FIRST ? 0 : s->pad[i];
+        if ((i < PREV_FIRST || i > PREV_LAST) && !(own && (i == 7 || i == 8 || i == 57 || i == 58)))
+            pad[i] = silent && i < PREV_FIRST ? 0 : s->pad[i];
     /* The owner's power, not this game's AI's: each game's AI eases its riders' power toward a
        catch-up target against its own player, so on another game a computer rider would ride at
        another speed (live: 143 against 99 units a second, a re-sync at 4.4 s). */
@@ -744,8 +858,7 @@ int hle_puppet_input(uint8_t *r)
        rider's heading error to its own AI's target (median 0.08, often up to 0.7). This game's
        controller aims at its own line (its own random node choices and offset), so with its own
        scale the owner's words turned the puppet several times too much or too little. */
-    uint8_t *ai = FIELD(r, AI_AT, uint8_t *);
-    if (ai && ai_rider(slot) && s->turning > 0 && s->turning <= 1)  /* 0: an older sender (its own) */
+    if (ai && ai_rider(slot) && !own && s->turning > 0 && s->turning <= 1)  /* 0: an older sender (its own) */
         FIELD(ai, AI_TURNING_AT, float) = s->turning;
     return 1;
 }
@@ -785,7 +898,11 @@ int hle_puppet_physics(uint8_t *r)
     }
     if (p->held && !(s->crash & 4) && held_step(r, p, s)) return 1;
     if (s->crash & 4) p->after_crash = 1, p->stepped_at = 0, p->held = 0;
-    else steer(r, p, s);
+    else if (pp.exact && pp.playing) {  /* the recorded pose, a jump in it a jump here */
+        SyncPose pose;
+        snapshot_pose(s, &pose);
+        set_body(r, &pose, s->spin);
+    } else steer(r, p, s);
     /* A crash: started once, as the remote rider's began; then the crash runs its course. */
     int crashing = FIELD(r, CRASH_FLAGS_AT, uint32_t) & 4, remote = s->crash & 4;
     if (remote && !p->remote_crash && !crashing) {
@@ -870,7 +987,7 @@ void hle_puppet_start(void)
         if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
-        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0;
+        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0, p->line_at = 0;
         sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
@@ -997,6 +1114,12 @@ int hle_puppet_pack(int slot, uint8_t *out, int max)
     o = put(o, &s.power, 4);
     o = put(o, &s.turning, 4);
     o = put(o, s.reserved, 8);
+    o = put(o, &s.node, 2);
+    o = put(o, &s.next, 2);
+    o = put(o, s.target, 12);
+    o = put(o, s.after, 12);
+    o = put(o, s.offset, 8);
+    o = put(o, s.offset_to, 8);
     *o++ = s.contact[0], *o++ = s.contact[1];
     o = put(o, &state, 2);
     *o++ = s.crash, *o++ = s.crash_kind;
@@ -1033,6 +1156,12 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
     i = get(i, &s.power, 4);
     i = get(i, &s.turning, 4);
     i += 8;  /* reserved */
+    i = get(i, &s.node, 2);
+    i = get(i, &s.next, 2);
+    i = get(i, s.target, 12);
+    i = get(i, s.after, 12);
+    i = get(i, s.offset, 8);
+    i = get(i, s.offset_to, 8);
     s.contact[0] = *i++, s.contact[1] = *i++;
     i = get(i, &state, 2);
     s.state = state;
@@ -1047,11 +1176,11 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
 /* A STATE bundle from the PC in lobby slot sender: every record, once the whole bundle checks. */
 static void receive_bundle(int sender, const uint8_t *in, int n)
 {
-    double stamp;
-    if (pp.online && sender != pp.local && pp.go_server && state_hold_check(in, n, &stamp) && isfinite(stamp)) {
+    double stamp, quiet;
+    if (pp.online && sender != pp.local && pp.go_server && state_hold_check(in, n, &stamp, &quiet) && isfinite(stamp)) {
         double t = (stamp + pp.net_link.skew * 1000 - pp.go_server) / 1000 - hle_puppet_clock_excess();
         for (int i = 1; i < NRIDERS; i++)
-            if (pp.p[i].on && owner_of(i) == sender) hold(i, t);
+            if (pp.p[i].on && owner_of(i) == sender) hold(i, t, quiet / 1000);
         return;
     }
     if (!pp.online || sender == pp.local || !pp.go_server || !state_bundle_check(in, n, &stamp) ||
@@ -1223,7 +1352,7 @@ void hle_puppet_field(void)
         const Delivery *d = &pp.deliveries[pp.delivery_next++];
         if (d->index < 0) {  /* a HOLD: the sender's last snapshot was at its race second d->shift */
             for (int i = 1; i < NRIDERS; i++)
-                if (pp.play_from[i] >= 0) hold(i, d->shift + pp.link.skew - bench_behind());
+                if (pp.play_from[i] >= 0) hold(i, d->shift + pp.link.skew - bench_behind(), d->quiet);
             continue;
         }
         Snapshot s = pp.file[d->index];

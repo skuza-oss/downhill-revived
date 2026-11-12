@@ -717,9 +717,9 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
             int slot = data[1];
             if (data[0] == NET_FRAME_STATE) {
                 c->snapshot[slot].messages++;
-                /* A bundle (port/hle/state_bundle.h): version 6, index, riders, the sender's server
-                   clock moment its snapshots show. */
-                if (n >= 13 && data[2] == 6) {
+                /* A bundle (port/hle/state_bundle.h): its version, index, riders, the sender's
+                   server clock moment its snapshots show. */
+                if (n >= 13 && data[2] == STATE_BUNDLE_VERSION) {
                     double epoch;
                     memcpy(&epoch, data + 5, sizeof epoch);
                     double now = net_now_ms();
@@ -831,7 +831,7 @@ static void hold_check(NetClient *c, double now)
     double quiet = now - c->state_sent_at, after = 3 * c->state_gap < 60 ? 60 : 3 * c->state_gap;
     if (quiet < after || quiet > 30000 || now - c->hold_sent_at < HOLD_EVERY_MS) return;
     uint8_t frame[2 + STATE_HOLD_SIZE] = {NET_FRAME_STATE, 0};
-    state_hold_make(frame + 2, c->state_stamp);
+    state_hold_make(frame + 2, c->state_stamp, quiet);
     send_binary(c, frame, sizeof frame);
     c->hold_sent_at = now;
     c->holds_sent++;

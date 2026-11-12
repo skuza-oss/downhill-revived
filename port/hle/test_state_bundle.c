@@ -70,12 +70,14 @@ int main(void)
     /* HOLD (finding 202): its own version and index; a game that knows only bundles drops it */
     {
         uint8_t hold[STATE_HOLD_SIZE];
-        double stamp = 0, last = 1762000000123.5;
-        assert(state_hold_make(hold, last) == STATE_HOLD_SIZE && state_hold_check(hold, STATE_HOLD_SIZE, &stamp) && stamp == last);
+        double stamp = 0, last = 1762000000123.5, quiet = 0;
+        assert(state_hold_make(hold, last, 260.4) == STATE_HOLD_SIZE && state_hold_check(hold, STATE_HOLD_SIZE, &stamp, &quiet) &&
+               stamp == last && quiet == 260);
         assert(!state_bundle_check(hold, STATE_HOLD_SIZE, &stamp));         /* not a bundle */
-        assert(!state_hold_check(hold, STATE_HOLD_SIZE - 1, &stamp));       /* cut short */
+        assert(!state_hold_check(hold, STATE_HOLD_SIZE - 1, &stamp, &quiet)); /* cut short */
+        assert(state_hold_make(hold, last, 1e9) && state_hold_check(hold, STATE_HOLD_SIZE, &stamp, &quiet) && quiet == 65535);
         hold[1] = 0;
-        assert(!state_hold_check(hold, STATE_HOLD_SIZE, &stamp));           /* a bundle's index */
+        assert(!state_hold_check(hold, STATE_HOLD_SIZE, &stamp, &quiet));   /* a bundle's index */
         assert(STATE_HOLD_INDEX < STATE_BUNDLE_RIDERS && STATE_HOLD_INDEX >= 3);  /* taken, and past a tick's bundles */
     }
     puts("state bundles: OK");

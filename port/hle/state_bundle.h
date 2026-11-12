@@ -3,8 +3,9 @@
    retransmissions; a message larger than one SCTP chunk is split, and losing any piece loses the
    whole message, so every bundle stays at or under STATE_BUNDLE_MAX bytes of payload.
 
-   Payload version 6:
-     [0]     6
+   Payload version 8 (6 until finding 202 round 4 added a computer rider's racing line, 44 bytes,
+   to the record; 7 is HOLD's):
+     [0]     8
      [1]     bundle index in this tick (0, 1, ...): the transport keeps the newest per index
      [2]     riders in the bundle (1-10)
      [3..10] f64: the moment the snapshots show on the server clock (ms since the Unix epoch): the
@@ -22,11 +23,11 @@
 #include <string.h>
 
 enum {
-    STATE_BUNDLE_VERSION = 6,
+    STATE_BUNDLE_VERSION = 8,
     STATE_BUNDLE_HEADER = 11,
     STATE_WIRE_BUDGET = 1000,                       /* marker + type + slot + payload */
     STATE_BUNDLE_MAX = STATE_WIRE_BUDGET - 8 - 2,   /* payload bytes */
-    STATE_RECORD_FIXED = 103,                       /* up to and with the pad-word count */
+    STATE_RECORD_FIXED = 147,                       /* up to and with the pad-word count */
     STATE_RECORD_MAX = STATE_RECORD_FIXED + 146 * 5,
     STATE_BUNDLE_RIDERS = 10
 };
@@ -35,25 +36,33 @@ _Static_assert(STATE_BUNDLE_HEADER + STATE_RECORD_MAX <= STATE_BUNDLE_MAX, "a fu
 /* HOLD (finding 202): sent instead of bundles by the sender's network thread, which runs on while
    its game's thread does not (a hitch, a stall): "no snapshot of mine since this moment". The
    receivers hold its riders where they are until its snapshots come again, instead of riding them
-   on alone. 11 bytes on the STATE channel:
-     [0]     7 (a bundle's version is 6: a game that does not know HOLD drops it, as before)
+   on alone. 13 bytes on the STATE channel:
+     [0]     7 (a bundle's version is 8, 6 before: a game that does not know HOLD drops it)
      [1]     STATE_HOLD_INDEX, the last index the transport takes (it keeps the newest message per
              index and drops indexes past 9, sfu.rs); a tick's bundles use at most 0-2
      [2]     0 (no riders)
-     [3..10] f64: the stamp of the sender's last bundle (its last snapshots' moment) */
-enum { STATE_HOLD_VERSION = 7, STATE_HOLD_INDEX = 9, STATE_HOLD_SIZE = 11 };
+     [3..10] f64: the stamp of the sender's last bundle (its last snapshots' moment)
+     [11..12] u16: how long its game has given no bundle when this HOLD leaves (ms, its own clock;
+             since round 4: the receivers hold only a stop of 0.25 s, and the link's delay must
+             not count toward it) */
+enum { STATE_HOLD_VERSION = 7, STATE_HOLD_INDEX = 9, STATE_HOLD_SIZE = 13 };
 
-static inline int state_hold_make(uint8_t out[STATE_HOLD_SIZE], double last_stamp)
+static inline int state_hold_make(uint8_t out[STATE_HOLD_SIZE], double last_stamp, double quiet_ms)
 {
+    uint16_t quiet = quiet_ms <= 0 ? 0 : quiet_ms >= 65535 ? 65535 : (uint16_t)(quiet_ms + 0.5);
     out[0] = STATE_HOLD_VERSION, out[1] = STATE_HOLD_INDEX, out[2] = 0;
     memcpy(out + 3, &last_stamp, 8);
+    memcpy(out + 11, &quiet, 2);
     return STATE_HOLD_SIZE;
 }
 
-static inline int state_hold_check(const uint8_t *in, int n, double *last_stamp)
+static inline int state_hold_check(const uint8_t *in, int n, double *last_stamp, double *quiet_ms)
 {
+    uint16_t quiet;
     if (n != STATE_HOLD_SIZE || in[0] != STATE_HOLD_VERSION || in[1] != STATE_HOLD_INDEX || in[2]) return 0;
     memcpy(last_stamp, in + 3, 8);
+    memcpy(&quiet, in + 11, 2);
+    *quiet_ms = quiet;
     return 1;
 }
 

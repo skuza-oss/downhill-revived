@@ -28,7 +28,7 @@ JERK = 30.0  # units a second; riders move about 95
 from pathlib import Path
 
 SNAP = struct.Struct('<i4xdi4f12f4f4f4f')  # clock, time, state, pos[4], rot[12], vel[4], spin[4]
-SNAP_SIZE = 840    # port/hle/puppet.c's Snapshot
+SNAP_SIZE = 888    # port/hle/puppet.c's Snapshot
 CRASH_AT = 134     # its crash flags (bit 2: crashing)
 TAIL = struct.Struct('<i2f')  # at TAIL_AT: slot, each wheel's clearance above the ground
 TAIL_AT = 824

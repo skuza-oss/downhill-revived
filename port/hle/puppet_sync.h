@@ -40,6 +40,9 @@
 #define SYNC_GUARD 0.6f        /* a puppet under this share of its owner's speed (a recent snapshot,
                                   no crash) was stopped by this game's physics: it takes its owner's */
 #define SYNC_GUARD_AGE 0.4     /* s: how recent */
+#define SYNC_EASE_ACCEL 900.0f /* units a second each second: how fast a puppet's speed changes where it is
+                                  set by the model (a hold's brake, its release, a sender's catch-up, the
+                                  guard): 15 a step at 60, 0.25 units of a step's travel */
 #define SYNC_HOLD_AFTER 0.25   /* s since a sender's last snapshot before a HOLD stops its riders */
 #define SYNC_RESYNC_AGE 0.4    /* s: an older snapshot never makes a jump (puppet.c steer) */
 #define SYNC_CATCHUP 1.25f     /* a sender's race clock this much faster than the shared one is catching
