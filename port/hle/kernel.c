@@ -901,6 +901,7 @@ static void vsync(void)
         host_pacing_wait();
         pad_refresh();  /* the game reads the pad after this VBLANK: the state at the end of the wait */
     }
+    disc_check_field(kernel_vsync_count);  /* host-side work only: no game state */
     state_trace_field(kernel_vsync_count, next_vsync);  /* DHD_STATE_TRACE: the end of the field */
 }
 

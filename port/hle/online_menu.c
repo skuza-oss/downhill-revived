@@ -262,13 +262,13 @@ static char iso_hash[65];  /* the game files hash, the one the server gets */
    note: what differs (the first file that isn't the USA disc's), or "". */
 static void log_iso(const char *how, const char *note)
 {
-    const char *path = getenv("DHD_ISO");
     if (!strcmp(iso_hash, us_files_sha256))
-        hle_log("online menu: the disc image has the USA disc's game files (files SHA-256 %s, %s)\n", iso_hash, how);
+        hle_log("disc check: the disc image has the USA disc's game files (files SHA-256 %s, %s)\n", iso_hash, how);
     else
-        hle_log("online menu: the disc image %s has game files different from the USA disc's (redump 30393)%s%s: "
-                "files SHA-256 %s, online needs %s (%s). A bad or modified dump: it can't be used online\n",
-                path ? path : "(none)", *note ? ": " : "", note, iso_hash, us_files_sha256, how);
+        hle_log("disc check: the disc image has game files different from the USA disc's (redump 30393)%s%s: "
+                "files SHA-256 %s, online needs %s (%s). A bad or modified dump: it can't be used online, and "
+                "the game may stop where it reads a changed file\n",
+                *note ? ": " : "", note, iso_hash, us_files_sha256, how);
 }
 
 /* iso-check.txt, the check's cache (dhd_disc, shared with the launcher). */
@@ -299,15 +299,15 @@ static void start_iso_check(void)
         return;
     }
     if (!path || !host_path_exists(path)) {
-        hle_log("online menu: the disc image %s can't be found for the online check\n", path ? path : "(none)");
+        hle_log("disc check: the disc image can't be found for the online check\n");
         set_state(&iso_state, 3);
         return;
     }
     iso_check_path(cache, sizeof cache);
-    hle_log("online menu: checking the disc image's game files\n");
+    hle_log("disc check: checking the disc image's game files\n");
     set_state(&iso_state, 1);
     if (!host_service_disc_check_start(GADDR(path), GADDR(cache))) {
-        hle_log("online menu: the disc image's check couldn't start\n");
+        hle_log("disc check: the disc image's check couldn't start\n");
         set_state(&iso_state, 3);
     }
 }
@@ -317,13 +317,12 @@ static void poll_iso(void)
 {
     static uint8_t digest[32];
     static char note[256];
-    const char *path = getenv("DHD_ISO");
     int r;
     if (iso_state != 1) return;
     r = host_service_disc_check_poll(GADDR(digest), GADDR(note), sizeof note);
     if (!r) return;
     if (r == -1) {
-        hle_log("online menu: reading the disc image %s failed during its online check: %s\n", path, note);
+        hle_log("disc check: reading the disc image failed during its check: %s\n", note);
         set_state(&iso_state, 3);
         return;
     }
@@ -331,13 +330,38 @@ static void poll_iso(void)
         /* no file system to hash, or a cut dump: no hash, and not the USA disc's files */
         memset(iso_hash, '0', 64), iso_hash[64] = 0;
         set_state(&iso_state, 2);
-        hle_log("online menu: the disc image %s can't have the USA disc's game files: %s. A bad or modified dump: "
-                "it can't be used online\n", path, note);
+        hle_log("disc check: the disc image can't have the USA disc's game files: %s. A bad or modified dump: "
+                "it can't be used online\n", note);
         return;
     }
     for (int i = 0; i < 32; i++) snprintf(iso_hash + 2 * i, 3, "%02x", digest[i]);
     set_state(&iso_state, 2);
     log_iso(r == 2 ? "from iso-check.txt" : "checked now", note);
+}
+
+/* Every start, once, about 10 s in (after the first loads): the same check, so every dhd.log says
+   whether the disc image's files are the USA disc's. A disc image that boots can still be a dump
+   with changed or damaged files, and the game then stops where it reads one: issue #78's Bike
+   Shop crash read texture records that no file of the USA disc holds (finding 208). The answer
+   comes from iso-check.txt when the launcher or an earlier start wrote it for this image; else the
+   host hashes the image's files once on its thread. Not in timed runs (DHD_BENCH), nor when a
+   tool gives the hash; a host without the check (the browser) refuses the start, quietly. The
+   Online menu takes the answer (start_iso_check does nothing once a check ran). */
+void disc_check_field(unsigned long long field)
+{
+    static int started;
+    if (iso_state == 1) {
+        poll_iso();
+        return;
+    }
+    if (started || field < 600) return;
+    started = 1;
+    const char *given = getenv("DHD_NET_ISO_SHA256"), *path = getenv("DHD_ISO");
+    char cache[HOST_PATH_MAX];
+    if (iso_state || host_getenv("DHD_BENCH") || (given && strlen(given) == 64) || !path || !host_path_exists(path))
+        return;
+    iso_check_path(cache, sizeof cache);
+    if (host_service_disc_check_start(GADDR(path), GADDR(cache))) set_state(&iso_state, 1);
 }
 
 /* ---- the public list ---- */

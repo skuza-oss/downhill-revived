@@ -84,6 +84,7 @@ enum { PAD_SELECT = 0x0001, PAD_L3 = 0x0002, PAD_R3 = 0x0004, PAD_START = 0x0008
 int autopad_read(const char *script, double seconds, uint16_t *buttons);
 int autopad_nav(const char *script, unsigned long long field, uint16_t *buttons);  /* DHD_NAV */
 void race_sync_vsync(unsigned long long field);  /* DHD_RACE_SYNC, see autopad.c */
+void disc_check_field(unsigned long long field);  /* the disc image's files, once a start (online_menu.c) */
 void hle_disc_lookup(const char *path, int found);  /* the crash report's last disc files (cdvd.c) */
 int race_sync_pad(int player, uint16_t *buttons);
 double race_sync_seconds(void);  /* race clock seconds after GO (DHD_RACE_SYNC), -1 before */
