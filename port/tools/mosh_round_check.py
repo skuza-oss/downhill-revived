@@ -184,6 +184,8 @@ def main():
     ap.add_argument('--pad', help="both games' race pad (DHD_RACE_PAD) instead of the scenario's")
     ap.add_argument('--host-pad', help="the host's race pad instead of the scenario's")
     ap.add_argument('--guest-pad', help="the guest's race pad instead of the scenario's")
+    ap.add_argument('--host-env', action='append', default=[], help='extra NAME=VALUE for the host, e.g. DHD_NET_TEST_MENU=...')
+    ap.add_argument('--guest-env', action='append', default=[], help='extra NAME=VALUE for the guest')
     a = ap.parse_args()
     if a.offline:
         return offline(a)
@@ -205,6 +207,7 @@ def main():
         if a.interval != '0':
             e.update(DHD_CAPTURE_PRESENTED=str(out / name / 'present'), DHD_CAPTURE_AT='5', DHD_CAPTURE_INTERVAL=a.interval)
         e.update(extra)
+        e.update(dict(x.split('=', 1) for x in (a.host_env if name == 'host' else a.guest_env)))
         (out / name / 'card').mkdir(parents=True, exist_ok=True)
         for f in (out / name).glob('present-*.png'):
             f.unlink()
@@ -276,7 +279,7 @@ def main():
         for n, (track, entries) in sorted(rooms[name].items()):
             print(f'{name}: the room\'s results of race {n} ({track}): {entries}')
         for line in log.splitlines():
-            if re.search(r"round: |arena's round|back to the room|race starts|race closed|freeze:|host64 memory", line):
+            if re.search(r"round: |arena's round|back to the room|race starts|race closed|race menu|freeze:|host64 memory", line):
                 print(f'  {name}: {line.strip()}')
     for b in range(a.bots):
         text = (out / f'bot{b}' / 'stdout.log').read_text(errors='replace')
