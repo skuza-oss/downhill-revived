@@ -1616,7 +1616,7 @@ static void test_dpad_press(void)
                 CHECK(pad_dirs() == dir[a]);
                 CHECK(stick_x() == 128);
                 touch_up(t, 1, ax[a], ay[a], now);
-                field();
+                fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
                 CHECK(pad_dirs() == 0);
             }
             /* between two arms: both neighbours, never opposite ones, whatever the angle */
@@ -1627,7 +1627,7 @@ static void test_dpad_press(void)
                 field();
                 CHECK(pad_dirs() == (dir[pairs[p][0]] | dir[pairs[p][1]]));
                 touch_up(t, 2, mx, my, now);
-                field();
+                fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
             }
             for (int deg = 0; deg < 360; deg += 5) {
                 float a = deg * 3.14159265f / 180, px = cx + cosf(a) * off, py = cy - sinf(a) * off;
@@ -1639,7 +1639,7 @@ static void test_dpad_press(void)
                 if (deg % 90 == 0) CHECK(d == dir[deg == 0 ? ARM_RIGHT : deg == 90 ? ARM_UP : deg == 180 ? ARM_LEFT : ARM_DOWN]);
                 if (deg % 90 == 45) { int n = 0; for (int i = 0; i < 4; i++) n += (d & dir[i]) != 0; CHECK(n == 2); }
                 touch_up(t, 3, px, py, now);
-                field();
+                fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
             }
             /* the rest point: a thumb there presses nothing (down, or sliding back to it); just
                outside the dead zone it does */
@@ -1674,7 +1674,7 @@ static void test_dpad_press(void)
             field();
             CHECK(pad_dirs() == PAD_RIGHT);
             touch_up(t, 4, cx + 45.0f, cy + 3.0f, now);
-            field();
+            fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
             CHECK(pad_dirs() == 0);
             /* a thumb that lands far from the pad is not the pad's; neither is a second one on it */
             touch_down(t, 5, cx + 45.0f, cy, now);
@@ -1686,10 +1686,10 @@ static void test_dpad_press(void)
             field();
             CHECK(pad_dirs() == PAD_LEFT);
             touch_up(t, 6, ax[ARM_LEFT], ay[ARM_LEFT], now);
-            field();
+            fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
             CHECK(pad_dirs() == 0);
             touch_up(t, 7, ax[ARM_RIGHT], ay[ARM_RIGHT], now);
-            field();
+            fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
         }
 }
 
@@ -1719,7 +1719,7 @@ static void test_dpad_rules(void)
         field();
         CHECK(pad_dirs() == PAD_RIGHT);
         touch_up(t, 1, cx, cy, now);
-        field();
+        fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
         /* PEDAL (Thumb zones) or ✕ (Classic) beside the D-pad; in the air the pad goes on steering */
         float px, py;
         at(preset ? TC_CROSS : TC_PEDAL, &px, &py);
@@ -1738,14 +1738,14 @@ static void test_dpad_rules(void)
         CHECK(pad_dirs() == 0 && !(buttons() & PAD_CROSS));
         touch_up(t, 2, cx + 14, cy, now);
         touch_up(t, 3, px, py, now);
-        field();
+        fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
         /* switched back to the stick while a thumb is down: it lets go; the stick is there again */
         TouchSettings s = *touch_settings(t);
         touch_down(t, 9, 100, 10, now);   /* the touch that brings the overlay back sends nothing */
         field();
         CHECK(pad_dirs() == 0);
         touch_up(t, 9, 100, 10, now);
-        field();
+        fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
         touch_down(t, 4, cx + 14, cy, now);
         field();
         CHECK(pad_dirs() == PAD_RIGHT);
@@ -1754,7 +1754,7 @@ static void test_dpad_rules(void)
         field();
         CHECK(pad_dirs() == 0);
         touch_up(t, 4, cx + 14, cy, now);
-        field();
+        fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
         float sx, sy, sr;
         CHECK(touch_control(t, TC_STICK, &sx, &sy, &sr) && fabsf(sr - 11.6f) < 0.3f);   /* the stick's home again */
         touch_down(t, 5, sx, sy, now);
@@ -1762,7 +1762,7 @@ static void test_dpad_rules(void)
         field();
         CHECK(stick_x() > 250 && pad_dirs() == 0);
         touch_up(t, 5, sx + 12, sy, now);
-        field();
+        fields(3);   /* a lifted press lasts PRESS_FIELDS (finding 218) */
         /* pause: nothing is sent while the pause rows are up */
         s.dpad = 1;
         touch_configure(t, &s, NULL);
@@ -1784,6 +1784,64 @@ static void test_dpad_rules(void)
 }
 
 /* The pad's shapes: a pressed arm is drawn in the buttons' pressed colour, one box a direction. */
+/* The game's double tap (func_0017EDE8, one button): a new press with the button up the field before,
+   under 30 fields after the release, the first press not held past 60 fields. Fed one field's pad. */
+typedef struct { int was, up_fields, held_fields, long_hold, fired; } GameDouble;
+static void game_double(GameDouble *g, int down)
+{
+    if (down) {
+        if (!g->was && g->up_fields < 30 && !g->long_hold) g->fired++;
+        g->up_fields = 0;
+        g->held_fields++;
+        g->long_hold = g->held_fields > 60;
+    } else {
+        g->up_fields++;
+        g->held_fields = 0;
+        if (g->long_hold && g->up_fields > 30) g->long_hold = 0;
+    }
+    g->was = down;
+}
+
+/* Finding 218: a double tap on an arm is the game's powerslide. Each tap here is down and up between
+   two pad reads (a quick thumb, or a phone's tap tool): each must still reach the game, with a field
+   up between them, inside its 30-field window; a second tap while the first still shows too. */
+static void test_dpad_double_tap(void)
+{
+    for (int gap_fields = 0; gap_fields <= 6; gap_fields += 2) {
+        start_dpad(1, 0, 0, 154.5f, 69.5f);
+        float x, y;
+        arm_at(ARM_LEFT, &x, &y);
+        GameDouble g = {0, 1000, 0, 0, 0};
+        int pressed_fields = 0;
+        /* each field: the update, then the game reads the pad */
+        #define GAME_FIELD() do { field(); int d_ = (pad_dirs() & PAD_LEFT) != 0; pressed_fields += d_; game_double(&g, d_); } while (0)
+        touch_down(t, 1, x, y, now);
+        touch_up(t, 1, x, y, now);
+        for (int i = 0; i < 1 + gap_fields; i++) GAME_FIELD();
+        touch_down(t, 2, x, y, now);
+        touch_up(t, 2, x, y, now);
+        for (int i = 0; i < 10; i++) GAME_FIELD();
+        #undef GAME_FIELD
+        if (g.fired != 1) fprintf(stderr, "dpad double tap: gap %d fields: fired %d, pressed %d fields\n", gap_fields, g.fired, pressed_fields);
+        CHECK(g.fired == 1);
+        /* each tap PRESS_FIELDS; a second tap while the first shows cuts it to a field (the up field first) */
+        CHECK(pressed_fields >= (gap_fields ? 6 : 4));
+        CHECK(pad_dirs() == 0);
+    }
+    /* a slide across the pad still never sends opposite directions together */
+    start_dpad(1, 0, 0, 154.5f, 69.5f);
+    float lx, ly, rx, ry;
+    arm_at(ARM_LEFT, &lx, &ly), arm_at(ARM_RIGHT, &rx, &ry);
+    touch_down(t, 1, lx, ly, now);
+    touch_move(t, 1, rx, ry, now);
+    field();
+    CHECK(!((pad_dirs() & PAD_LEFT) && (pad_dirs() & PAD_RIGHT)));
+    for (int i = 0; i < 4; i++) { field(); CHECK(pad_dirs() == PAD_RIGHT); }
+    touch_up(t, 1, rx, ry, now);
+    fields(4);
+    CHECK(pad_dirs() == 0);
+}
+
 static void test_dpad_shapes(void)
 {
     static TouchShape shapes[TOUCH_SHAPES];
@@ -1813,6 +1871,7 @@ int main(void)
     test_dpad_press();
     test_dpad_rules();
     test_dpad_shapes();
+    test_dpad_double_tap();
     test_scaling();
     test_flick();
     test_quick_tap();

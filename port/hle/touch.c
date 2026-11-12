@@ -254,6 +254,11 @@ struct Touch {
     float stick_cx, stick_cy, stick_dx, stick_dy;   /* deflection -1..1 */
     int dpad_finger;                                  /* the thumb on the D-pad (-1 none) */
     uint16_t dpad_buttons;                            /* the d-pad buttons it presses now */
+    /* what the game gets (finding 218, dpad_field): each new direction at least PRESS_FIELDS from the
+       first field that sends it, and a field up before a new press of a direction still showing,
+       so a quick tap and a double tap (the powerslide) reach the game as a pad's presses would */
+    uint16_t dpad_latched, dpad_gap, dpad_out;
+    uint32_t dpad_until[4];
     float tilt_deg, tilt_mix;                         /* tilt steering, and its blend in (0..1) */
     int tilt_known;                                   /* a reading has come (none: the stick steers) */
     double tilt_mix_at;
@@ -1509,9 +1514,41 @@ static uint16_t dpad_read(const Touch *t, float x, float y, uint16_t held)
 
 static void dpad_set(Touch *t, const Finger *f)
 {
-    uint16_t now = dpad_read(t, f->x, f->y, t->dpad_buttons);
-    if (now & ~t->dpad_buttons) buzz(t, TOUCH_BUZZ_TICK);   /* a direction came */
+    uint16_t now = dpad_read(t, f->x, f->y, t->dpad_buttons), fresh = now & ~t->dpad_buttons;
+    if (fresh) buzz(t, TOUCH_BUZZ_TICK);   /* a direction came */
+    for (int a = 0; a < DPAD_ARMS; a++)
+        if (fresh & DPAD_PAD[a]) {
+            if (t->dpad_out & DPAD_PAD[a]) t->dpad_gap |= DPAD_PAD[a];   /* still showing: up for a field first */
+            t->dpad_latched |= DPAD_PAD[a];
+            t->dpad_until[a] = 0;   /* counted from the first field that sends it */
+        }
     t->dpad_buttons = now;
+}
+
+/* Each update, for the pad read after it: the D-pad's directions. A thumb's press shows while it is
+   down and at least PRESS_FIELDS (a tap between two pad reads would be lost: the game's double tap,
+   func_0017EDE8, wants a press, a field up and a press inside 30 fields); a direction pressed again
+   while its last press still shows is let up for one field first. */
+static void dpad_field(Touch *t)
+{
+    uint16_t live = t->dpad_finger >= 0 ? t->dpad_buttons : 0, out = 0;
+    for (int a = 0; a < DPAD_ARMS; a++) {
+        uint16_t bit = DPAD_PAD[a];
+        if (t->dpad_gap & bit) { t->dpad_gap &= (uint16_t)~bit; continue; }
+        if (t->dpad_latched & bit) {
+            static const int opposite[DPAD_ARMS] = {DPAD_DOWN, DPAD_UP, DPAD_RIGHT, DPAD_LEFT};
+            int shown = t->dpad_until[a] != 0;
+            if (!shown) t->dpad_until[a] = t->game.vsync + press_vsyncs(t, PRESS_FIELDS);
+            /* a thumb still down that slid off it (shown once), or onto the opposite arm: no hold,
+               so a slide never sends opposite directions together */
+            int slid = t->dpad_finger >= 0 && !(live & bit) && shown;
+            if ((int32_t)(t->game.vsync - t->dpad_until[a]) >= 0 || slid || (live & DPAD_PAD[opposite[a]]))
+                t->dpad_latched &= (uint16_t)~bit;
+            else out |= bit;
+        }
+        out |= live & bit;
+    }
+    t->dpad_out = out;
 }
 
 /* The steering touch of a new finger: the D-pad when it steers (a thumb on or near the pad: its
@@ -2223,6 +2260,8 @@ void touch_update(Touch *t, const TouchGame *game, double now)
             t->pulse_until[i] = game->vsync + press_vsyncs(t, t->pulse_fields[i]);
             t->pulse_fields[i] = 0;
         }
+    if (!paused(t) && touch_visible(t) && !flyover_on(t)) dpad_field(t);
+    else t->dpad_latched = t->dpad_gap = t->dpad_out = 0;   /* not the race's controls: nothing pending */
     if (t->label[0] && now > t->label_until && t->set.labels != TOUCH_LABELS_ALWAYS) t->label[0] = 0;
 }
 
@@ -2243,7 +2282,7 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint
         if (t->hold_cross_until > 0) b |= PAD_CROSS;
         if (t->trick.on) b |= (uint16_t)(t->trick.sent | (t->trick.triangle ? PAD_TRIANGLE : 0));
         if (t->stick_finger >= 0) sx = t->stick_dx, sy = t->stick_dy;
-        if (t->dpad_finger >= 0) b |= t->dpad_buttons;   /* the d-pad's own buttons: full lock, as a PS2 d-pad */
+        b |= t->dpad_out;   /* the d-pad's own buttons: full lock, as a PS2 d-pad (dpad_field) */
         if (t->set.tilt && t->tilt_mix > 0) {   /* tilt steers left/right on the ground; the stick's left/right is ignored there */
             float full = 40.0f - 30.0f * clampf((float)t->set.tilt_strength, 0, 100) / 100.0f;
             float tilt = clampf((t->tilt_deg - t->set.tilt_centre) / full, -1, 1);
@@ -2285,6 +2324,7 @@ void touch_free(Touch *t) { free(t); }
 void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen)
 {
     int preset_changed = s->preset != t->set.preset || s->dpad != t->set.dpad;   /* the steering touch ends too */
+    if (preset_changed) t->dpad_latched = t->dpad_gap = t->dpad_out = 0;   /* no D-pad press outlives the D-pad */
     int hints = t->set.hints_shown;
     t->set = *s;
     if (t->saved) t->set.hints_shown |= hints;   /* a hint shown since the last save isn't lost */
