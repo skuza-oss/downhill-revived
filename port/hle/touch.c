@@ -920,10 +920,10 @@ static void trick_close(Touch *t)
 
 static int race_on_screen(const Touch *t) { return t->hud_seen > 0 && t->now - t->hud_seen < 250; }
 
-/* The camera's flight over the track (finding 209): the race HUD is not drawn, the race controls
-   do nothing. The one thing a pad does there is START, which skips it: the overlay shows a SKIP
-   button and nothing else. */
-static int flyover_on(const Touch *t) { return t->have_game && t->game.flyover && !t->editor; }
+/* The camera's flight over the track (finding 209) and the movies (finding 214): the race HUD is
+   not drawn, the race controls do nothing. The one thing a pad does there is START, which skips
+   it: the overlay shows a SKIP button and nothing else. */
+static int flyover_on(const Touch *t) { return t->have_game && (t->game.flyover || t->game.movie) && !t->editor; }
 
 int touch_visible(const Touch *t)
 {

@@ -68,11 +68,21 @@ What works today:
   [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
-  or Thumb zones, tilt steering if you like), or a controller. Online: P2P races only. The game's
+  or Thumb zones; **Steer With** the stick, tilt or a D-pad), or a controller. Online: P2P races
+  only. The game's
   codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
   buttons); **ENTER** goes back to the race and enters them. The camera's flight over the track
-  before each race has a **SKIP** button (low in the middle of the screen, the touch controls'
-  START); tap it as you would press START on a pad.
+  before each race, and the movies (the startup movies if Skip Movies is off, the attract movie,
+  OPTIONS > VIDEO CLIPS), have a **SKIP** button (low in the middle of the screen, the touch
+  controls' START); tap it as you would press START on a pad.
+  - **The D-pad** (SETTINGS > Touch Controls > Steer With > D-pad, in either layout and for either
+    hand; it takes the place of the stick, so the Stick rows dim) is four arrows round a rest
+    point: left, right, up and down, as on a PS2 pad (up and down lean, as the stick's up and
+    down). Put a thumb on an arrow to press it; a thumb between two neighbouring arrows presses
+    both (a diagonal), never opposite ones; slide from one arrow to the next without lifting;
+    resting at the middle presses nothing. The game sees the pad's own d-pad buttons, so steering
+    is at full lock as with a PS2 d-pad, and tapping left or right twice is the game's powerslide.
+    Size and Opacity apply to it as to the other buttons; Edit Layout moves it.
 
 Known gaps:
 

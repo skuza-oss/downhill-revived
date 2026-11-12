@@ -80,6 +80,7 @@ typedef struct {
 typedef struct {
     int race_hud;        /* the race HUD was drawn (the HUD hook): the race is on screen */
     int flyover;         /* the camera's flight over the track plays: START skips it (finding 209) */
+    int movie;           /* a movie plays: START skips it (finding 214); the SKIP button serves both */
     int air;             /* player 1's rider is in the air (rider +0x4564, finding 141) */
     int online;          /* an online race (no pause: the panel) */
     int clock_moving;    /* the race clock advanced since the last field */

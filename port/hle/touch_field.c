@@ -70,6 +70,10 @@ void touch_field(void)
        (phase 0), in a race's loop; the front end's frame ends port_in_race, so a phase 5 left over
        in the menus is not it */
     h.flyover = port_in_race() && EE32(RACE_PHASE) == FLYOVER_PHASE;
+    /* a movie plays: the startup movies, the attract movie, OPTIONS > VIDEO CLIPS. Their skip is
+       START (or Cross) on the pad (func_001EB1D8's startup loop, func_001B53C0), and no menu is up
+       for a tap to go to (finding 214) */
+    h.movie = host_service_movie_playing();
     h.air = race_screen && EE16(RIDER_AIR) != 0;
     h.online = pads_online();
     h.clock_moving = race_screen && clock != last_clock;

@@ -734,6 +734,61 @@ static void test_flyover(void)
     }
 }
 
+/* The movies (finding 214: the startup movies, the attract movie, VIDEO CLIPS): a pad skips them
+   with START (or Cross), and no menu is up for a tap, so the same SKIP button shows in both
+   presets, in every setting, sends START on the lift and is taken back when the movie ends. */
+static void test_movie_skip(void)
+{
+    for (int preset = 0; preset < 2; preset++)
+        for (int dpad = 0; dpad < 2; dpad++) {
+            float sx, sy;
+            TouchShape shapes[TOUCH_SHAPES];
+            start(preset, TOUCH_ATTACK_FLICK);
+            TouchSettings s = *touch_settings(t);
+            s.dpad = dpad;
+            touch_configure(t, &s, NULL);
+            game.race_hud = 0;
+            game.clock_moving = 0;
+            wait_ms(500);
+            CHECK(!touch_visible(t));   /* the menus: nothing */
+            game.movie = 1;
+            fields(2);
+            CHECK(touch_visible(t) && touch_owns_touches(t) && touch_shapes(t, shapes, TOUCH_SHAPES) > 0);
+            assert(touch_target(t, TOUCH_TARGET_SKIP, 0, &sx, &sy));
+            /* a finger already down is not SKIP's; a tap elsewhere does nothing */
+            touch_down(t, 1, 20, 20, now);
+            touch_move(t, 1, sx, sy, now);
+            touch_up(t, 1, sx, sy, now);
+            fields(5);
+            CHECK(!buttons());
+            touch_down(t, 2, 20, 20, now);
+            fields(2);
+            touch_up(t, 2, 20, 20, now);
+            fields(5);
+            CHECK(!buttons());
+            /* SKIP: START on the lift for three fields */
+            touch_down(t, 3, sx, sy, now);
+            fields(3);
+            CHECK(!buttons());
+            touch_up(t, 3, sx, sy, now);
+            field();
+            CHECK(buttons() == PAD_START);
+            fields(4);
+            CHECK(!buttons());
+            /* the movie ends right after: the screen after it never sees START */
+            touch_down(t, 4, sx, sy, now);
+            touch_up(t, 4, sx, sy, now);
+            field();
+            CHECK(buttons() == PAD_START);
+            game.movie = 0;
+            field();
+            CHECK(!buttons());
+            fields(5);
+            CHECK(!buttons() && !touch_visible(t));
+            game.movie = 0;
+        }
+}
+
 /* The trick-stick hint: it holds the game until a push, and when the hold ends without one (5 s)
    the hint goes too. */
 static void test_trick_hint(void)
@@ -1700,6 +1755,7 @@ int main(void)
     test_restart_clock();
     test_race_running();
     test_flyover();
+    test_movie_skip();
     test_editor_bar();
     test_trick_hint();
     test_classic_resume();

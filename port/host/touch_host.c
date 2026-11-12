@@ -144,6 +144,15 @@ static void screen_update(SDL_Window *window)
 /* ---- SDL thread ---- */
 
 static long long last_window;
+/* the mouse as a finger on a test desktop (DHD_TEST_INPUT): see the motion case below */
+static float before_x, before_y, last_x, last_y, last_px, last_py, leave_x = -1, leave_y = -1;
+static int leave_dropped;
+static int test_input(void)
+{
+    static int on = -1;
+    if (on < 0) on = getenv("DHD_TEST_INPUT") != NULL;
+    return on;
+}
 
 /* One SDL event: 1 when it is the touch controls' (the caller drops it). */
 int touch_host_event(const SDL_Event *e)
@@ -177,9 +186,25 @@ int touch_host_event(const SDL_Event *e)
             float y = (e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.y : e->button.y) / wh;
             double ms = (double)e->common.timestamp / 1e6;
             if (e->type == SDL_EVENT_MOUSE_MOTION) {
+                /* DHD_TEST_INPUT (a desktop that is never shown, driven by posted messages): Windows
+                   reports a leave after each posted move and SDL first moves its pointer to the OS
+                   cursor. That motion is no finger's: it is dropped once the leave has told where
+                   the OS cursor is (the first one is taken back at its leave), as present.c does for
+                   the menus' mouse; else a held finger would jump to the OS cursor after every move. */
+                if (test_input() && e->motion.x == leave_x && e->motion.y == leave_y) { leave_dropped = 1; return owned; }
+                leave_dropped = 0;
+                before_x = last_x, before_y = last_y;
+                last_x = x, last_y = y, last_px = e->motion.x, last_py = e->motion.y;
                 if (e->motion.state & SDL_BUTTON_LMASK) push(EV_MOVE, 0x7FFF, x, y, ms);
             } else if (e->button.button == SDL_BUTTON_LEFT) push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
             return owned;
+        }
+        return 0;
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:   /* test desktops: the motion before it was the OS cursor's (above) */
+        if (touch_on() == 2 && test_input() && !leave_dropped) {
+            leave_x = last_px, leave_y = last_py;
+            push(EV_MOVE, 0x7FFF, before_x, before_y, (double)e->common.timestamp / 1e6);
+            last_x = before_x, last_y = before_y;
         }
         return 0;
     case SDL_EVENT_KEY_DOWN:
@@ -325,6 +350,11 @@ static void configure(int log)
     SDL_UnlockMutex(lock);
     touch_configure(touch, &s, known ? &sc : NULL);
     SDL_SetAtomicInt(&tilt_wanted, s.tilt);
+    if (log && known && s.dpad) {   /* where the D-pad sits (its rest point and an arm's centre) */
+        float x = 0, y = 0, ax = 0, ay = 0;
+        if (touch_control(touch, TC_STICK, &x, &y, NULL) && touch_target(touch, TOUCH_TARGET_DPAD, 3, &ax, &ay))
+            fprintf(stderr, "touch: d-pad at %.1f,%.1f mm, arms %.1f mm from it\n", x, y, ax - x);
+    }
     if (log && known)   /* before the window's size is known there is nothing to say */
         fprintf(stderr, "touch: %s, %s hand, %s, size %s, screen %.1f x %.1f mm (strips l %.1f t %.1f r %.1f b %.1f mm, "
                 "cutout x %.1f-%.1f mm)\n",
@@ -369,6 +399,41 @@ static void tilt_sensor_note(void)
     }
 }
 
+/* DHD_TOUCH_SCRIPT (the checks only): fingers by the race clock, `S:down|move|up:ID:X:Y;...` with S
+   race seconds (during a race's HUD), ID any number and X, Y in mm: the same events as a screen
+   gives, queued like them. Posted mouse messages on a test desktop can't hold a finger or drag it
+   (SDL loses the mouse focus after each), and a mouse is one finger; this holds two, steady. */
+static void script_fire(double race_ms, int race_hud)
+{
+    static struct { double s; int kind; long long id; float x, y; } ev[256];
+    static int count = -1, next;
+    if (count < 0) {
+        const char *text = getenv("DHD_TOUCH_SCRIPT");
+        count = 0;
+        while (text && *text && count < 256) {
+            double s;
+            char kind[8];
+            long long id;
+            float x, y;
+            int n = 0;
+            if (sscanf(text, " %lf:%7[a-z]:%lld:%f:%f%n", &s, kind, &id, &x, &y, &n) != 5) break;
+            ev[count].s = s, ev[count].id = id, ev[count].x = x, ev[count].y = y;
+            ev[count].kind = !strcmp(kind, "down") ? EV_DOWN : !strcmp(kind, "up") ? EV_UP : EV_MOVE;
+            count++;
+            text += n;
+            while (*text == ';' || *text == ' ') text++;
+        }
+        if (count) fprintf(stderr, "touch: DHD_TOUCH_SCRIPT has %d events\n", count);
+    }
+    if (!race_hud || next >= count) return;
+    SDL_LockMutex(lock);
+    float w = screen.width, h = screen.height;
+    SDL_UnlockMutex(lock);
+    if (w < 10 || h < 10) return;
+    for (; next < count && ev[next].s * 1000.0 <= race_ms; next++)
+        push(ev[next].kind, ev[next].id, ev[next].x / w, ev[next].y / h, ms_now());
+}
+
 /* pad.c, once a field: the game's two reads in; the HUD's place, Leave race and the hint's hold out. */
 void host_service_touch_field(uint32_t address)
 {
@@ -397,6 +462,7 @@ void host_service_touch_field(uint32_t address)
         save("touch_tilt_centre", "DHD_TOUCH_TILT_CENTRE", v);
         configure(0);
     }
+    script_fire(h->race_ms, h->race_hud);
     /* the touches so far, in order */
     static TouchEvent events[TOUCH_QUEUE];
     int n, merged, cancelled;
@@ -424,7 +490,7 @@ void host_service_touch_field(uint32_t address)
     touch_tilt(touch, known, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
     TouchGame g;
     memset(&g, 0, sizeof g);
-    g.race_hud = h->race_hud, g.flyover = h->flyover, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
+    g.race_hud = h->race_hud, g.flyover = h->flyover, g.movie = h->movie, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
     for (int i = 0; i < 3; i++) g.pause_row[i] = h->pause_row[i];
     g.race_ms = h->race_ms, g.vsync = h->vsync, g.fps = h->fps;
     trace_race_ms = h->race_ms;
@@ -432,6 +498,11 @@ void host_service_touch_field(uint32_t address)
     if (trace_on() && h->flyover != trace_fly) {
         fprintf(stderr, "touch log: flyover %d (%.0f ms)\n", h->flyover, ms_now());
         trace_fly = h->flyover;
+    }
+    static int trace_movie = 0;
+    if (trace_on() && h->movie != trace_movie) {
+        fprintf(stderr, "touch log: movie %d (%.0f ms)\n", h->movie, ms_now());
+        trace_movie = h->movie;
     }
     if (trace_on() && !h->race_hud) trace_air = -1;   /* each race starts with a line */
     else if (trace_on() && h->air != trace_air) {
