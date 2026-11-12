@@ -1,10 +1,9 @@
 # 207: Posters in OPTIONS closes the game (issue 87)
 
-Status: in progress
+Status: current
 
-Branch `fix/posters-crash` from `main` ad0135bd, started 2026-11-12. This file is the lane's plan
-while it runs and its finding when it merges. Someone who has only this file and the git log must
-be able to pick the lane up.
+Branch `fix/posters-crash` from `main` ad0135bd, started 2026-11-12, merged into `main` the same day
+(b8c4cf88). This file was the lane's plan while it ran and is its finding now.
 
 ## Goal and acceptance
 
@@ -39,6 +38,9 @@ flyover skip with touch controls (209).
 - [x] 2026-11-12: cause found and fixed in the port's copy of `func_0019E550` (c3e2f0b5)
 - [x] 2026-11-12: `port/tools/options_walk.py`: every OPTIONS row, four scenarios
 - [x] 2026-11-12: `check.py port` and `check.py docs` (Result)
+- [x] 2026-11-12: merged into `main` (b8c4cf88); checked there by a separate verification pass: `check.py port`,
+  the seven state traces against the format-2 references, `options_walk.py` in all four scenarios,
+  Posters at `DHD_SCALE=4` (Result)
 
 ## The crash, named
 
@@ -176,22 +178,32 @@ card, and of the OPTIONS list before and after, were taken in `walk4x` of this l
 
 ## Result
 
-(Filled in at the merge.) Fixed: OPTIONS > POSTERS opens (the retail "POSTER DATA NOT FOUND" screen
-on a card without poster files) with Unlock All on and off, on a fresh card and a card whose save
-owns the flag.
+Fixed: OPTIONS > POSTERS opens (the retail "POSTER DATA NOT FOUND" screen on a card without poster
+files) with Unlock All on and off, on a fresh card and a card whose save owns the flag.
 
-Checks left for the lead, with why the game state cannot change with Unlock All off and never
-touched. The change is one patch, to the port's copy of `func_0019E550`, which only the Posters
-screen's update (`func_0019E3A0` through the virtual `func_0019E530`) calls; none of the recipes
-opens OPTIONS, let alone POSTERS, and the function writes only its own frame and the menu's
-objects on it. A core id changes, as with any core change; the trace compares game state, not the
-core's layout (finding 205). Run, against the format-2 references:
+Why the game state cannot change with Unlock All off and never touched: the change is one patch, to
+the port's copy of `func_0019E550`, which only the Posters screen's update (`func_0019E3A0` through
+the virtual `func_0019E530`) calls; none of the recipes opens OPTIONS, let alone POSTERS, and the
+function writes only its own frame and the menu's objects on it. A core id changes, as with any core
+change; the trace compares game state, not the core's layout (finding 205).
 
-    python port/tools/state_trace_run.py boot  --name new-boot
-    python port/tools/state_trace_run.py race  --name new-race
-    python port/tools/state_trace_run.py race2 ... race6   # each: --name new-raceN
-    python port/tools/state_diff.py REF.tsv build/state-trace/new-NAME.tsv   # PASS for each
+Checked on the merged `main` (b8c4cf88), 2026-11-12, on the hidden desktop, untimed:
 
-and, once on the merged branch, `python port/tools/options_walk.py` (about six minutes, four
-scenarios) and `check.py port`. At the merge: Status `current`, a `docs/STATE-LOG.md` entry, and the
-Posters row noted in `docs/STATE.md` if the lead wants it there.
+- `python tools/check.py port -j 6`: OK (check_docs, check_tree, build_wasm, test_runtime,
+  build_game, scan_retail, net_tests, test_gs_wgpu, test_wasm2c_chunks).
+- State traces, all seven recipes (`boot`, `race`, `race2` to `race6`) against the format-2
+  references of 0.7.16's game code (`state_trace_codeptrs.txt` last changed in 696510ad, the list
+  the references were made with): `state_diff.py` PASS for each, every row equal (14000 of 14000
+  for `race6`).
+- `python port/tools/options_walk.py`, the four scenarios: off-fresh (8 rows), on-fresh,
+  off-earned and on-earned (10 rows each): every row opens and closes, no fault in any log; POSTERS'
+  screen differs from the list by 58.6 to 59.0 in each scenario that offers it.
+- Posters at `DHD_SCALE=4` (`perf: render native scale=4 picture=2560x1792`; the capture window
+  stays 960x720), Unlock All on and a fresh card, and Unlock All off with an earned card: the retail
+  "POSTER DATA NOT FOUND / On memory card (8MB) (for PlayStation 2) in MEMORY CARD slot 1-A" screen
+  with RETRY and CANCEL, drawn correctly; Triangle returns to the OPTIONS list with the cursor on
+  POSTERS.
+
+Open: the listing loop that runs when poster files exist (a card with real poster files, from the
+poster maker) has not run in a game: a lane with real poster files should open it. Android and the
+browser were not run (the fix is shared code, but only Windows was walked).

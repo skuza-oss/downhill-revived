@@ -78,6 +78,7 @@ typedef struct {
 /* What the game says each field (port/hle/pad.c through HostTouch, host_api.h). */
 typedef struct {
     int race_hud;        /* the race HUD was drawn (the HUD hook): the race is on screen */
+    int flyover;         /* the camera's flight over the track plays: START skips it (finding 209) */
     int air;             /* player 1's rider is in the air (rider +0x4564, finding 141) */
     int online;          /* an online race (no pause: the panel) */
     int clock_moving;    /* the race clock advanced since the last field */
@@ -180,7 +181,8 @@ const char *touch_trick_name(uint16_t buttons);             /* NULL: no tabled t
    the editor's bar (Ground, Air, -, +, Reset, Done), the pause rows' CODES page (Up, Down, Left,
    Right, Triangle, Circle, Cross, Square, Clear, Back, Enter; finding 189). 0 if there is no such
    button. */
-enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGET_EDITOR, TOUCH_TARGET_CODES };
+enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGET_EDITOR, TOUCH_TARGET_CODES,
+       TOUCH_TARGET_SKIP /* the flight over the track's SKIP button, index 0 (finding 209) */ };
 int touch_target(const Touch *t, int kind, int index, float *x, float *y);
 /* Where a control sits now (centre and radius, mm); 0 if the layout has none. */
 int touch_control(const Touch *t, int control, float *x, float *y, float *r);

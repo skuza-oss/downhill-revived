@@ -2148,5 +2148,17 @@ static void pads_read_now(int player, HostPad *out)
     if (!host_pad_script(player, out)) {
         host_service_host_pad_device(player, GADDR(out));
         menu_mouse_merge(player, out);
+        return;
+    }
+    /* DHD_TOUCH_WITH_SCRIPT=1 (tests): the device's buttons (the touch controls, and a keyboard or
+       pad if one is used) join a menu script's, so a DHD_NAV route can take the menus to a screen and
+       the touches take it from there (finding 209) */
+    static int with_device = -1;
+    if (with_device < 0) with_device = getenv("DHD_TOUCH_WITH_SCRIPT") != NULL;
+    if (with_device && player == 0) {
+        HostPad device;
+        host_service_host_pad_device(0, GADDR(&device));
+        out->buttons |= device.buttons;
+        for (int i = 0; i < 12; i++) out->pressure[i] = out->buttons & pressure_order[i] ? 255 : 0;
     }
 }
