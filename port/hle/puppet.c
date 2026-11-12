@@ -206,6 +206,7 @@ static struct {
     int gone[NET_SLOTS];     /* lobby slots that left */
     int kept[NET_SLOTS];     /* of those, the ones that had finished: their riders stay puppets */
     int hits_taken;
+    uint8_t state_said[NRIDERS];  /* a rider of this game in a State not on the list: said (finding 220) */
     int debug;               /* DHD_PUPPET_DEBUG=slot: each snapshot of that slot in the log (-1 none) */
     int exact;               /* DHD_PUPPET_EXACT=1 (clips of a live run): a replayed rider takes each
                                 recorded pose as it is, no steering (its wheels still on the physics) */
@@ -429,6 +430,14 @@ static void take(Snapshot *s, const uint8_t *r)
     s->clock = RACE_CLOCK;
     s->time = RACE_TIME;
     s->state = (int32_t)(FIELD(r, STATE_AT, uint8_t *) - r);
+    /* Every State a rider reaches is on puppet_record.h's list, or the other games refuse its
+       records (finding 220): said in the log once per rider and race, the bench's recordings and
+       every online race check it. */
+    if (!puppet_state_known((uint32_t)s->state) && !pp.state_said[slot_of(r)]) {
+        pp.state_said[slot_of(r)] = 1;
+        fprintf(stderr, "puppet: tick %d slot %d is in State +0x%X, not on puppet_record.h's list: the others refuse its "
+                "records\n", RACE_CLOCK, slot_of(r), (unsigned)s->state);
+    }
     memcpy(s->pos, r + POS_AT, 16);
     memcpy(s->rot, r + ROT_AT, 48);
     memcpy(s->vel, r + VEL_AT, 16);
@@ -949,7 +958,7 @@ int hle_puppet_physics(uint8_t *r)
     /* The State follows the snapshot: the game's own switches are blocked (hle_puppet_switch), as
        on an AI rider they flip back and forth against it every field. */
     now = (int32_t)(FIELD(r, STATE_AT, uint8_t *) - r);
-    if (!crashing && !remote && s->state > 0 && s->state < RIDER_SIZE && now != s->state) {
+    if (!crashing && !remote && puppet_state_known((uint32_t)s->state) && now != s->state) {
         /* A State's Enter may move the rider itself: the reset to the track puts it on this game's
            idea of the nearest spot (live: 312 units from where its owner's reset put it, for 0.2 s,
            until the next placement). The snapshots say where it is: the pose before the switch
@@ -1046,6 +1055,7 @@ void hle_puppet_start(void)
     }
     pp.hits_taken = 0, pp.nevents = 0, pp.go_server = 0;
     pp.held_count = 0;
+    memset(pp.state_said, 0, sizeof pp.state_said);
 }
 
 /* How far this game's race clock trails the wall clock beyond the normal (puppet_sync.h
@@ -1185,6 +1195,10 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
     Puppet *p = &pp.p[slot];
     if (!puppet_node_ok(r.node, NODE_LOADED) || !puppet_node_ok(r.next, NODE_LOADED)) {
         refuse(slot, "racing line");  /* not one of this track's nodes: an honest game never names one */
+        return;
+    }
+    if (!puppet_state_known(r.state)) {  /* its Enter would be called on whatever is there */
+        refuse(slot, "state");
         return;
     }
     Snapshot s;

@@ -66,5 +66,15 @@ int main(void)
         assert(!puppet_node_ok(0, 0) && !puppet_node_ok(0, -3) && puppet_node_ok(PUPPET_LINE_NONE, -3));
         assert(puppet_node_count(-1) == 0 && puppet_node_count(900) == 900 && puppet_node_count(1 << 30) == 0x800);
     }
+    /* the State: only the rider's own State objects (the review's state=1: unaligned bytes inside
+       the rider taken as an object whose Enter is called); every listed one passes */
+    {
+        assert(PUPPET_STATE_COUNT == 18);
+        for (int i = 0; i < PUPPET_STATE_COUNT; i++) assert(puppet_state_known(PUPPET_STATES[i]));
+        assert(puppet_state_known(0x4ED0) && puppet_state_known(0x5FE0) && puppet_state_known(0x6330));
+        assert(!puppet_state_known(1) && !puppet_state_known(0) && !puppet_state_known(0x4ED1) &&
+               !puppet_state_known(0x4ECC) && !puppet_state_known(0x4EF0) && !puppet_state_known(0x7BCF) &&
+               !puppet_state_known(0xFFFF));
+    }
     return 0;
 }

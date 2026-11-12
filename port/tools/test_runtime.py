@@ -36,7 +36,7 @@ def python_checks():
     check_scalar_guard()
     for name in ('quad_abi', 'scalar_dispatch', 'format_abi', 'shared_scalars', 'particle_packets', 'scalar_abi',
                  'particle_float', 'ready_ratio', 'tween_float', 'terrain_float', 'slab_float', 'proximity_float',
-                 'npc_distance_float', 'rider_step', 'blend_float', 'virtual_scale', 'state_diff'):
+                 'npc_distance_float', 'rider_step', 'blend_float', 'virtual_scale', 'state_diff', 'rider_states'):
         __import__('test_' + name).main()
 
 
