@@ -316,11 +316,12 @@ mod tests {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as f64
     }
 
-    /// A race frame as the game sends it: an event, or a minimal state bundle (version 6).
+    /// A race frame as the game sends it: an event, or a minimal state bundle (the game's version,
+    /// bundle.rs; it said 6 until finding 220).
     fn race_frame(state: bool) -> Vec<u8> {
         let mut frame = vec![0u8; 24];
         frame[0] = if state { 5 } else { 6 };
-        frame[2] = 6;
+        frame[2] = crate::bundle::BUNDLE_VERSION;
         frame[5..13].copy_from_slice(&epoch_ms().to_le_bytes());
         frame
     }

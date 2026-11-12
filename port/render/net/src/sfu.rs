@@ -925,8 +925,10 @@ impl Sfu {
         } else if epoch == self.race && self.race != 0 {
             if c.state {
                 if bytes.len() < 12 || bytes[11] >= 10 { return Ok(()); }
-                // A bundle's stamp (version 6: bytes 5-12 of the frame, after the 8-byte race marker).
-                let stamp = (bytes.len() >= 21 && bytes[10] == 6).then(|| f64::from_le_bytes(bytes[13..21].try_into().unwrap()));
+                // A bundle's stamp, after the 8-byte race marker, the type and the slot: its version
+                // and place from the game's own header (bundle.rs; finding 220: this read version 6
+                // after the bundle became 8, so no snapshot's stamp counted).
+                let stamp = crate::bundle::stamp(&bytes[10..]);
                 let rate = self.rates.entry((c.member, if self.p2p.is_some() { bytes[9] } else { 0 })).or_insert_with(SenderRate::new);
                 if !rate.accept(bytes[11], stamp, Instant::now()) {
                     if rate.dropped == 1 { eprintln!("net: SFU: member {} sent over {FLOOD_PER_SECOND} snapshot messages in a second; the excess is dropped", c.member); }
@@ -1057,6 +1059,42 @@ mod tests {
         let taken = (0..10_000).filter(|k| flood.accept(3, Some(*k as f64), now)).count();
         assert_eq!(taken, 2 * FLOOD_PER_SECOND as usize);
         assert!(flood.accept(3, Some(1e9), now + Duration::from_secs(1)));
+    }
+
+    /// The receive path with the game's own bundles (finding 220): a stall's backlog of 300 real
+    /// version-8 bundles of one sender arrives at once, oldest first. Every one is taken, the newest
+    /// last: the limit's allowance for newer stamps reads the stamps where the game writes them (it
+    /// looked for version 6 and dropped the newest 60). The bundles are port/hle/state_bundle_fixture.h's
+    /// (made by the game's code); each copy is stamped 16.7 ms after the last where that real bundle
+    /// carries its stamp (bundle.rs, whose own test reads the real stamps there).
+    #[test]
+    fn a_backlog_of_real_bundles_keeps_the_newest() {
+        let (mut client, _) = Sfu::start_at("127.0.0.1:9".parse().unwrap(), Arc::new(|| {})).unwrap();
+        client.signal(&json!({"type":"sfu_channels","channels":[
+            {"channelId":16,"name":"state","memberId":17,"local":false}
+        ]})).unwrap();
+        let id = client.channels[0].id;
+        client.signal(&json!({"type":"start","startAt":100,"players":[{"memberId":17,"slot":3}]})).unwrap();
+        let [(real, first), _] = crate::bundle::fixture::bundles();
+        let frame = |k: usize| {
+            let mut bundle = real.clone();
+            let at = first + k as f64 * 16.7;
+            bundle[crate::bundle::STAMP_AT..crate::bundle::STAMP_AT + 8].copy_from_slice(&at.to_le_bytes());
+            assert_eq!(crate::bundle::stamp(&bundle), Some(at));
+            let mut wire = 100u64.to_le_bytes().to_vec();
+            wire.extend_from_slice(&[5, 0]);
+            wire.extend_from_slice(&bundle);
+            wire
+        };
+        let mut frames = vec![];
+        for k in 0..300 { client.receive_frame(id, frame(k), &mut frames).unwrap(); }
+        assert_eq!(frames.len(), 300, "the whole backlog, past the limit of {FLOOD_PER_SECOND}");
+        assert_eq!(crate::bundle::stamp(&frames[299].1[2..]), Some(first + 299.0 * 16.7), "the newest last");
+        assert_eq!(frames[299].1[1], 3, "the sender's slot");
+        // over the limit an old or repeated stamp is still dropped, and so is a HOLD (no stamp to read)
+        client.receive_frame(id, frame(10), &mut frames).unwrap();
+        client.receive_frame(id, frame(299), &mut frames).unwrap();
+        assert_eq!(frames.len(), 300);
     }
 
     /// A rejoin's whole channel list (finding 175): kept channels stay the same, missing ones are
