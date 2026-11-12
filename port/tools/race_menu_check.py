@@ -3,13 +3,17 @@ on hidden desktops, a local server per run; each scenario opens the menu over th
 with DHD_NET_TEST_MENU (START and the menu's buttons on the wall clock from a race second) and
 checks the logs.
 
-    python port/tools/race_menu_check.py OUT --scenario room|end|leave|closed|alone|resume [--sfu] [--track N]
+    python port/tools/race_menu_check.py OUT --scenario room|end|leave|closed|alone|resume|timeup|timeup-host|finished [--sfu] [--track N]
 
 - resume: the guest opens the menu at 20 s for 2 s, the host at 25 s for 10 s; both RESUME. The
   race never pauses (no HOLD on the other game), both finish, both games list the same results.
 - room: the guest's BACK TO THE ROOM (Down, Cross, Down to Yes, Cross) at 20 s: the guest is back
   in the room, the host races on and sees the guest leave.
-- end: the host's END THE RACE at 20 s: both games back in the room ("THE HOST ENDED THE RACE").
+- end: the host's END THE RACE at 20 s: both games back in the room ("THE HOST ENDED THE RACE" on the
+  guest, "YOU ENDED THE RACE" on the host).
+- timeup, timeup-host, finished (finding 211): why the race closed: one rider finishes at 20 s and the
+  other never does (the finish window ends it: "TIME UP - DNF" on the one still riding, "RACE OVER" on
+  the finisher), or both finish; the logs' "race closed: back to the room (WHY: ...)" line says it.
 - leave: the guest's LEAVE THE ROOM (Up to the last row) at 20 s: the guest leaves the room.
 - closed: the guest opens the menu at 18 s and leaves it open; the host ends the race at 22 s: the
   guest's menu closes with the race and the guest is back in the room.
@@ -48,9 +52,17 @@ SCENARIOS = {
     'leave': ('', '20:start,w500,up,cross,w300,down,cross', {}, {}),
     'closed': ('22:start,w500,down,w300,down,cross,w300,down,cross', '18:start,w60000,cross', {}, {}),
     'alone': ('30:start,w5000,cross', '', {}, {'DHD_NET_TEST_FINISH': '12'}),
+    # why the race closed (finding 211): one rider finishes at 20 s, the other never does and is DNF
+    # when the room's finish window (60 s) runs out; each screen says why for two seconds
+    'timeup': ('', '', {'DHD_NET_TEST_FINISH': '20'}, {'DHD_NET_TEST_FINISH': '99999'}),  # the guest is DNF
+    # the host is DNF: the guest finishes at 10 s, so the window ends at about 70 s, before the host's 75 s (its
+    # first race, alone, must end too, so it finishes at some time)
+    'timeup-host': ('', '', {'DHD_NET_TEST_FINISH': '75'}, {'DHD_NET_TEST_FINISH': '10'}),
+    'finished': ('', '', {'DHD_NET_TEST_FINISH': '20'}, {'DHD_NET_TEST_FINISH': '25'}),  # everyone finishes
 }
 LINES = re.compile(r'online: (race menu: .*|test menu: .*|race closed.*|this PC.s race is over.*|the race is over.*|'
-                   r'player \d .* left.*|result \d.*|.* finished in .*|race starts.*)|puppet: .*(hold|HOLD).*')
+                   r'player \d .* left.*|result \d.*|.* finished in .*|race starts.*)|puppet: .*(hold|HOLD).*|stall: .*')
+CLOSED = r'race closed: back to the room \(%s[:)]'  # online.c state_sync: the reason, then what it was worked out from
 
 
 def wait(read, pattern, seconds, games=()):
@@ -73,7 +85,11 @@ def checks(scenario, host, guest):
                    (guest, r'race menu: resume'), (host, r'online: result 1\.|race closed'), (guest, r'online: result 1\.|race closed')],
         'room': [(guest, r'race menu: back to the room'), (guest, r"this PC's race is over; back to the room"),
                  (host, r'player \d \(GUEST\) left')],
-        'end': [(host, r'race menu: the host ends the race'), (host, r"back to the room"), (guest, r'race closed: back to the room')],
+        'end': [(host, r'race menu: the host ends the race'), (host, r"back to the room"), (guest, r'race closed: back to the room'),
+                (host, CLOSED % 'YOU ENDED THE RACE'), (guest, CLOSED % 'THE HOST ENDED THE RACE')],
+        'timeup': [(host, CLOSED % 'RACE OVER'), (guest, CLOSED % 'TIME UP - DNF')],
+        'timeup-host': [(guest, CLOSED % 'RACE OVER'), (host, CLOSED % 'TIME UP - DNF')],
+        'finished': [(host, CLOSED % 'RACE OVER'), (guest, CLOSED % 'RACE OVER')],
         'leave': [(guest, r'race menu: leave the room'), (guest, r'the race is over; back to offline play'),
                   (host, r'player \d \(GUEST\) left')],
         'closed': [(guest, r'race menu: open at'), (host, r'race menu: the host ends the race'),
