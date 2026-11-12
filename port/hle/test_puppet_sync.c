@@ -129,6 +129,38 @@ int main(void)
         assert(pose.pos[2] > 0);
     }
 
+    /* a landing (finding 220): a rider corrected downward in the air (its correction's own speed
+       -30 along the ground's normal), the wheels touching the next step: no move into the ground in
+       that step or any after, at 60 and at 240 steps a second; the speed along the ground is kept,
+       and what is applied stays what is no longer owed */
+    for (int rate = 0; rate < 2; rate++) {
+        float up[3] = {0, 0.3f, 1}, dt = rate ? 1 / 240.0f : 1 / 60.0f;
+        float n = sync_len(up), u[3] = {up[0] / n, up[1] / n, up[2] / n};
+        SyncPose pose = {{0, 0, 0}, {0, 0, 0}, {{0}}};
+        heading(0, pose.rot);
+        sync_reset(&s);
+        for (int k = 0; k < 3; k++) s.slide[k] = -30 * u[k];
+        s.slide[0] += 12;                        /* and along the ground */
+        s.pending_pos[0] = 0.4f, s.pending_pos[2] = -0.6f;  /* still owed: forward, and down into the ground */
+        for (int i = 0; i < (rate ? 40 : 10); i++) {
+            float before[3], pending[3], applied[3];
+            memcpy(before, pose.pos, sizeof before);
+            memcpy(pending, s.pending_pos, sizeof pending);
+            memcpy(applied, s.applied_pos, sizeof applied);
+            sync_step(&s, dt, up, &pose);
+            float moved[3] = {pose.pos[0] - before[0], pose.pos[1] - before[1], pose.pos[2] - before[2]};
+            assert(sync_dot(moved, u) >= -1e-6f);  /* never into the ground */
+            assert(sync_dot(s.slide, u) >= -1e-4f);
+            if (!i) assert(moved[0] > 0);         /* the slide along the ground goes on (eased) */
+            for (int k = 0; k < 3; k++)
+                assert(near(s.applied_pos[k] - applied[k], moved[k], 1e-5f));
+            float into = sync_dot(pending, u);
+            /* owed afterwards: what was owed, its into-ground part dropped, less what was applied */
+            for (int k = 0; k < 3; k++)
+                assert(near(s.pending_pos[k], pending[k] - (into < 0 ? into * u[k] : 0) - moved[k], 1e-4f));
+        }
+    }
+
     /* convergence: 1 s of steps at 30, 60 or 144 a second makes up all but a trace at every rate;
        a large error slides no faster than SYNC_SLIDE, a small one goes faster than a plain
        exponential would */

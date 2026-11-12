@@ -242,12 +242,15 @@ static inline void sync_step(PuppetSync *s, float dt, const float *ground, SyncP
     if (!(dt > 0)) return;
     float speed = 1 + sync_len(s->pending_pos) / SYNC_FAST;
     float fp = 1 - expf(-dt * speed / SYNC_TAU_POS), fv = 1 - expf(-dt * speed / SYNC_TAU_VEL), fr = 1 - expf(-dt / SYNC_TAU_ROT);
-    float dp[3], dv[3], dr[3];
+    float dp[3], dv[3], dr[3], u[3] = {0, 0, 0};
+    int grounded = 0;
     for (int k = 0; k < 3; k++) dp[k] = s->pending_pos[k] * fp, dv[k] = s->pending_vel[k] * fv, dr[k] = s->pending_rot[k] * fr;
     if (ground) {
         float n = sync_len(ground);
         if (n > 0) {
-            float u[3] = {ground[0] / n, ground[1] / n, ground[2] / n}, into = sync_dot(dp, u), down = sync_dot(dv, u);
+            for (int k = 0; k < 3; k++) u[k] = ground[k] / n;
+            grounded = 1;
+            float into = sync_dot(dp, u), down = sync_dot(dv, u);
             /* into the ground: not applied and not owed (the ground holds the rider) */
             if (into < 0)
                 for (int k = 0; k < 3; k++) dp[k] -= into * u[k], s->pending_pos[k] -= into / fp * u[k];
@@ -266,8 +269,17 @@ static inline void sync_step(PuppetSync *s, float dt, const float *ground, SyncP
     for (int k = 0; k < 3; k++) {
         if (c > step) change[k] *= step / c;
         s->slide[k] += change[k];
-        dp[k] = s->slide[k] * dt;
     }
+    /* On the ground the correction's own speed keeps no part into it either (finding 220): eased
+       toward a move with none, the slide of a rider corrected downward in the air kept most of its
+       into-ground speed for some steps after the landing (-20 of -30 a step later at 60) and pushed
+       the wheels into the surface. That part is dropped, not owed: the ground holds the rider. */
+    if (grounded) {
+        float into = sync_dot(s->slide, u);
+        if (into < 0)
+            for (int k = 0; k < 3; k++) s->slide[k] -= into * u[k];
+    }
+    for (int k = 0; k < 3; k++) dp[k] = s->slide[k] * dt;
     for (int k = 0; k < 3; k++) {
         pose->pos[k] += dp[k], pose->vel[k] += dv[k];
         s->pending_pos[k] -= dp[k], s->pending_vel[k] -= dv[k], s->pending_rot[k] -= dr[k];
