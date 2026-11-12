@@ -246,6 +246,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 214 | [A D-pad as a touch steering choice, and the touch gaps beside the flyover](214-touch-dpad-and-gaps.md) | in progress |  |
 | 215 | [Online, the race menu does not pause the race](215-online-menu-no-pause.md) | current |  |
 | 216 | [an online race's last seconds, the finish on every screen, a reset as a respawn](216-online-race-end.md) | in progress |  |
+| 220 | [another game's snapshots checked before they are used](220-online-snapshot-checks.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
