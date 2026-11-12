@@ -359,7 +359,7 @@ typedef struct {
     int32_t race_hud;      /* the race HUD was drawn since the last call, on the race screen */
     int32_t air;           /* player 1's rider is in the air */
     int32_t online;        /* an online race */
-    int32_t clock_moving;  /* the race clock advanced since the last call */
+    int32_t clock_moving;  /* the race clock advanced within the last 1.5 fields' time (finding 218) */
     int32_t pause_row[3];  /* the offline pause menu's rows of RESUME, RE-START and QUIT (-1: none) */
     int32_t fps;           /* VBLANKs a second */
     uint32_t vsync;        /* VBLANKs so far */
@@ -371,7 +371,8 @@ typedef struct {
     int32_t movie;         /* a movie plays (the startup movies, the attract movie, VIDEO CLIPS; finding 214) */
     int32_t replay;        /* a race's replay is the race loop (the recorder plays; finding 214) */
     int32_t attract;       /* the title's attract demo plays (race mode 10; finding 214) */
-} HostTouch;  /* 80 bytes */
+    int32_t menu_up;       /* a game popup is up (the replay's menu; finding 218) */
+} HostTouch;  /* 88 bytes */
 void host_service_touch_field(uint32_t state);
 
 #endif

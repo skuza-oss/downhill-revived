@@ -196,7 +196,12 @@ int touch_host_event(const SDL_Event *e)
                 before_x = last_x, before_y = last_y;
                 last_x = x, last_y = y, last_px = e->motion.x, last_py = e->motion.y;
                 if (e->motion.state & SDL_BUTTON_LMASK) push(EV_MOVE, 0x7FFF, x, y, ms);
-            } else if (e->button.button == SDL_BUTTON_LEFT) push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
+            } else if (e->button.button == SDL_BUTTON_LEFT) {
+                /* a test's press is where its posted move put the finger, not SDL's idea of the
+                   pointer (the OS cursor's), as present.c does for the menus' mouse (finding 218) */
+                if (test_input()) x = last_x, y = last_y;
+                push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
+            }
             return owned;
         }
         return 0;
@@ -490,7 +495,7 @@ void host_service_touch_field(uint32_t address)
     touch_tilt(touch, known, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
     TouchGame g;
     memset(&g, 0, sizeof g);
-    g.race_hud = h->race_hud, g.flyover = h->flyover, g.movie = h->movie, g.replay = h->replay, g.attract = h->attract, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
+    g.race_hud = h->race_hud, g.flyover = h->flyover, g.movie = h->movie, g.replay = h->replay, g.attract = h->attract, g.menu_up = h->menu_up, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
     for (int i = 0; i < 3; i++) g.pause_row[i] = h->pause_row[i];
     g.race_ms = h->race_ms, g.vsync = h->vsync, g.fps = h->fps;
     trace_race_ms = h->race_ms;
@@ -498,6 +503,11 @@ void host_service_touch_field(uint32_t address)
     if (trace_on() && h->flyover != trace_fly) {
         fprintf(stderr, "touch log: flyover %d (%.0f ms)\n", h->flyover, ms_now());
         trace_fly = h->flyover;
+    }
+    static int trace_attract = 0;
+    if (trace_on() && h->attract != trace_attract) {   /* the title's attract demo (finding 218) */
+        fprintf(stderr, "touch log: attract %d (%.0f ms)\n", h->attract, ms_now());
+        trace_attract = h->attract;
     }
     static int trace_movie = 0;
     if (trace_on() && h->movie != trace_movie) {
@@ -517,7 +527,10 @@ void host_service_touch_field(uint32_t address)
     h->hud_mode = touch_hud_mode(touch);
     h->leave_race = touch_take_ask(touch) == TOUCH_ASK_LEAVE_RACE;
     h->freeze = touch_freeze(touch);
-    SDL_SetAtomicInt(&owns, touch_owns_touches(touch));
+    int own = touch_owns_touches(touch);
+    if (own != SDL_GetAtomicInt(&owns))   /* who a tap goes to: a menu that ignores taps shows here (finding 218) */
+        fprintf(stderr, "touch: %s\n", own ? "the overlay takes the touches" : "the menus take the touches");
+    SDL_SetAtomicInt(&owns, own);
     publish();
 }
 

@@ -14,7 +14,9 @@
    the game waits here, then forgets the stall (no game time is caught up after it). */
 #include "hle.h"
 #include "../include/fps.h"
+#include "menu_page.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define EE32(a) (*(volatile int32_t *)(uintptr_t)(0x08000000u + (a)))
@@ -28,8 +30,7 @@ enum {
     RIDER_AIR = 0x2AF2C0 + 0x4564,
     RACE_STATE = 0x4B25A0,     /* D_004B25A0: +0x10C the mode, +0x110, +0x288 */
     SAVE = 0x4225A0,           /* D_004225A0: the save's +0x12199, +0x1219F */
-    RECORDER = 0x43F9F0,       /* D_0043F9F0: the race recorder; +0x44 playing (a replay; func_001A8958 clears it at each race) */
-    MODE_ATTRACT = 10          /* RACE_STATE + 0x10C: the title's attract demo */
+    RECORDER = 0x43F9F0        /* D_0043F9F0: the race recorder; +0x44 playing (a replay; func_001A8958 clears it at each race) */
 };
 
 int touch_hud_place;    /* widescreen.c: 0 the game's HUD, 1 moved for the right hand, 2 for the left */
@@ -58,8 +59,29 @@ static void pause_rows(int32_t rows[3])
     rows[2] = n;                                                /* QUIT (0x1A) */
 }
 
+/* DHD_TEST_ATTRACT_AFTER=S (tests, finding 218): the title's attract demo starts after S seconds idle
+   instead of the game's 60 (001EB1D8.cpp: screen 0 starts it once func_00238F48 is more than 3600
+   ticks past D_0029DE9C, the last pad press): once per title visit, the press time is moved back. */
+extern int32_t D_0029DED8, D_0029DE9C;
+extern int func_00238F48(void);
+static void attract_test(void)
+{
+    static int after = -2, done;
+    if (after == -2) {
+        const char *s = getenv("DHD_TEST_ATTRACT_AFTER");
+        after = s && *s ? atoi(s) : -1;
+        if (after > 59) after = -1;
+    }
+    if (after < 0) return;
+    if (D_0029DED8 != 0) { done = 0; return; }
+    if (done) return;
+    D_0029DE9C = func_00238F48() - (3600 - after * 60);
+    done = 1;
+}
+
 void touch_field(void)
 {
+    attract_test();
     static int32_t last_clock;
     static double last_ms;
     HostTouch h;
@@ -78,13 +100,22 @@ void touch_field(void)
     h.movie = host_service_movie_playing();
     /* the title's attract demo (race mode 10: any button ends it) and a race's replay (the recorder
        plays: the pad is the recording's, START opens the replay's menu): neither takes the race
-       controls, and the menu popups are only the mouse layer's when the overlay stands aside */
-    h.attract = port_in_race() && EE32(RACE_STATE + 0x10C) == MODE_ATTRACT;
+       controls, and the menu popups are only the mouse layer's when the overlay stands aside.
+       port_in_race is never true in the demo (it leaves mode 10 out), so the demo has its own test
+       (finding 218: SKIP never showed on a phone) */
+    h.attract = port_attract_demo();
     h.replay = port_in_race() && !h.attract && EE8(RECORDER + 0x44) != 0;
     h.air = race_screen && EE16(RIDER_AIR) != 0;
     h.online = pads_online();
-    h.clock_moving = race_screen && clock != last_clock;
+    /* moving: the clock advanced within the last 1.5 fields' time. Above 60 updates a second most
+       updates advance no whole field; "no change since the last update" took a running replay for
+       its menu and an unpaused race for a paused one on them (finding 218) */
+    static double last_change;
+    double wall = host_wall_seconds();
+    if (clock != last_clock) last_change = wall;
+    h.clock_moving = race_screen && wall - last_change < 1.5 / 60;
     last_clock = clock;
+    h.menu_up = menu_popup_up();
     if (race_screen) last_ms = port_field_seconds(clock) * 1000.0;
     h.race_ms = last_ms;
     pause_rows(h.pause_row);

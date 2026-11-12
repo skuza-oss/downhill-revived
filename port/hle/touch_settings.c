@@ -108,10 +108,8 @@ void touch_settings_build(MenuPage *p, int page)
         if (row < 0) continue;
         row_line[row] = index * VALUES + i;
         row_action[row] = l->action;
-        if (l->key) {
-            show(p, row);
-            if (dimmed(l)) menu_page_enable(p, row, 0);
-        }
+        if (l->key) show(p, row);
+        if (dimmed(l)) menu_page_dim(p, row);   /* skipped and drawn dimmed (finding 218) */
     }
     for (int i = 0; i < 3; i++) {
         if (buttons[index][i] == ACT_NONE) continue;

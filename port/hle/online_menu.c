@@ -973,6 +973,17 @@ static void choose_rider(void)
     menu_play("S_SELECT");
 }
 
+/* READY as the room hears it (finding 218): who pressed it, and whether the room's next lobbies say
+   so. A READY the room doesn't show within READY_WAIT seconds is said on the page, never a button
+   that silently does nothing (a phone's READY was lost that way, with no word from the server). */
+enum { READY_WAIT = 4 };
+static const char *input_by = "pad";   /* "tap" while room_mouse acts */
+static int ready_wanted = -1, seen_own_ready = -1;
+static double ready_asked_at;
+static char seen_error[200];
+static int error_primed;
+static void note_for(const char *text, const int *colour, double seconds);
+
 static void toggle_ready(const RoomNow *r)
 {
     if (r->own_ready) {
@@ -980,9 +991,40 @@ static void toggle_ready(const RoomNow *r)
         menu_play("S_BACK");
     } else if (!selected) {
         choose_rider();
+        hle_log("online menu: READY by %s: no rider chosen yet, the rider screen\n", input_by);
+        return;
     } else {
         host_service_net_set_ready(1);
         menu_play("S_SELECT");
+    }
+    ready_wanted = !r->own_ready, ready_asked_at = host_seconds();
+    hle_log("online menu: READY %s by %s\n", ready_wanted ? "on" : "off", input_by);
+}
+
+/* Each room update: the room's answer to READY, and its errors on the page (they were only logged). */
+static void ready_news(const NetLobby *l, const RoomNow *r)
+{
+    static const int warn[3] = {0x80, 0x30, 0x30};
+    if (r->self >= 0 && r->own_ready != seen_own_ready) {
+        if (seen_own_ready >= 0) hle_log("online menu: the room has this player %s\n", r->own_ready ? "ready" : "not ready");
+        seen_own_ready = r->own_ready;
+    }
+    if (ready_wanted >= 0 && r->own_ready == ready_wanted)
+        ready_wanted = -1;
+    else if (ready_wanted >= 0 && host_seconds() - ready_asked_at > READY_WAIT) {
+        hle_log("online menu: the room didn't take READY %s in %d s\n", ready_wanted ? "on" : "off", READY_WAIT);
+        note_for(ready_wanted ? "READY DIDN'T REACH THE ROOM: TRY AGAIN" : "THE ROOM STILL HAS YOU READY", warn, 6.0);
+        ready_wanted = -1;
+    }
+    if (!error_primed) {   /* an error from before this page is old news */
+        snprintf(seen_error, sizeof seen_error, "%s", l->error);
+        error_primed = 1;
+    } else if (l->error[0] && strcmp(l->error, seen_error)) {
+        char text[48];
+        snprintf(seen_error, sizeof seen_error, "%s", l->error);
+        snprintf(text, sizeof text, "%s", l->error);
+        for (char *c = text; *c; c++) if (*c >= 'a' && *c <= 'z') *c = (char)(*c - 'a' + 'A');
+        note_for(text, warn, 6.0);
     }
 }
 
@@ -1160,8 +1202,10 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
             menu_page_sound(1);
         }
         if (left) {
+            input_by = "tap";
             if (f == RF_BOTS || f == RF_CHEATS || f == RF_PUBLIC) change_setting(f, 1);
             else activate(p, f, &r);
+            input_by = "pad";
         }
     }
     if (wheel && rf <= RF_PUBLIC) change_setting(rf, wheel > 0 ? -1 : 1);
@@ -1824,6 +1868,7 @@ static void room_open(void)
     seen_count = -1, countdown_shown = -1;
     memset(toast, 0, sizeof toast);
     memset(ready_heard, 0, sizeof ready_heard);
+    ready_wanted = seen_own_ready = -1, error_primed = 0;
     page.title_y = TITLE_Y;
     page.mouse = room_mouse;
     page.draw = room_draw;
@@ -1846,6 +1891,7 @@ static void room_update(MenuPage *p)
             return;
         }
         screen = HOME;
+        page.mouse = NULL, page.draw = NULL, page.title_y = 0;   /* HOME's taps and title again (not go: the reason stays) */
         menu_page_rebuild_at(p, home_row);
         return;
     }
@@ -1884,6 +1930,7 @@ static void room_update(MenuPage *p)
         room_options = l->laps, public_room = l->is_public;
     }
     room_news();
+    if (in) ready_news(l, &r);
     room_countdown_sounds();
     room_input(p, &r);
     /* tests (DHD_NET_SCRIPTED with DHD_NET_TEST_READY): ready again for the next race, as a player
@@ -2122,6 +2169,10 @@ int port_online_menu(void)
     page.right = page_right;
     page.title = "ONLINE";
     screen = HOME;
+    /* the room's own drawing and taps (room_open) are not HOME's: a room left over the rider screen
+       closes the page without go(HOME), and its tap handler took every tap on ONLINE after it
+       (finding 218: no row could be tapped; the pads still worked) */
+    page.mouse = NULL, page.draw = NULL, page.title_y = 0;
     if (!resumed) {
         home_row = 0;
         status[0] = 0;  /* a room that closed leaves its reason for HOME */

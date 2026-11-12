@@ -127,6 +127,8 @@ static void slot_build(void *menu)  /* slot 1, as func_0015F0C8, centred as func
     func_001B5AF0(D_003F52D0, 1, 1);
 }
 
+static void dim_rows(MenuPage *p);
+
 static void slot_update(void *menu)  /* slot 5, as func_0015E750: the page, then the base */
 {
     MenuPage *p = menu;
@@ -141,6 +143,7 @@ static void slot_update(void *menu)  /* slot 5, as func_0015E750: the page, then
     set_text(&MENU(p, X_TITLE, Item), 1, p->title);
     footer(p);
     func_0018DC20(menu);
+    dim_rows(p);
     if (p->hint && *p->hint) {  /* its own line above the legend, in the legend's style */
         MenuStyle s = menu_page_style(p, MENU_STYLE_OFF);
         menu_draw_text(MENU_CENTRE, MENU(p, X_FOOTER, Item).x, FOOTER_Y - HINT_ABOVE, p->hint, &s);
@@ -199,6 +202,10 @@ void menu_page_run(MenuPage *p)
 
 void menu_page_close(MenuPage *p) { (void)p; func_00190688(D_003F52D0); }
 
+/* A popup is up (the manager has a page and isn't closing it): the game's own (the replay's menu,
+   the pause menu) or one of ours. The touch overlay stands aside for it (finding 218). */
+int menu_popup_up(void) { return *(void **)(D_003F52D0 + M_MENU) && !D_003F52D0[M_CLOSING]; }
+
 /* The menus' styles where no page runs (online.c's race menu, drawn over a running race): a
    SharedMenu constructed once and never run, whose UiStyles are every menu's. */
 MenuStyle menu_game_style(int which)
@@ -232,6 +239,7 @@ static int add(MenuPage *p, const char *text, int enabled, int kind)
     int row = menu_page_rows(p);
     if (row >= MENU_PAGE_ROWS) return -1;
     p->kind[row] = (unsigned char)kind;
+    p->dim[row] = NULL;
     func_0018E408(p->menu, text, enabled);
     return row;
 }
@@ -280,6 +288,37 @@ void menu_page_suffix(MenuPage *p, int row, const char *text)
 void menu_page_enable(MenuPage *p, int row, int enabled)
 {
     if (row >= 0 && row < menu_page_rows(p)) ((Item *)((char *)p->menu + X_ITEMS))[row].enabled = (char)(enabled != 0);
+}
+
+/* The game's popup draws a disabled row as any other (only its cursor skips it), so a dimmed row's
+   text is the page's to draw (dim_rows): the game gets an empty one. */
+void menu_page_dim(MenuPage *p, int row)
+{
+    if (row < 0 || row >= menu_page_rows(p) || row >= MENU_PAGE_ROWS) return;
+    static char blank[MENU_PAGE_ROWS][MENU_PAGE_TEXT];
+    Item *item = (Item *)((char *)p->menu + X_ITEMS) + row;
+    item->enabled = 0;
+    if (!p->dim[row]) p->dim[row] = item->string;
+    /* spaces as wide as the text: the game sizes the rows' panel by its widest row, so the panel
+       keeps its width with every row dimmed */
+    MenuStyle s = menu_page_style(p, MENU_STYLE_ROW);
+    int want = p->dim[row] ? menu_text_width(p->dim[row], &s) : 0, n = 0;
+    blank[row][0] = 0;
+    while (n < MENU_PAGE_TEXT - 1 && menu_text_width(blank[row], &s) < want) blank[row][n++] = ' ', blank[row][n] = 0;
+    item->string = blank[row];
+}
+
+/* The dimmed rows, where the game would have drawn them, in the rows' style at half its colour. */
+static void dim_rows(MenuPage *p)
+{
+    MenuStyle s = menu_page_style(p, MENU_STYLE_ROW);
+    for (int i = 0; i < 3; i++) s.rgba[i] /= 2;
+    int start = MENU(p, X_START, int), visible = MENU(p, X_VISIBLE, int), n = menu_page_rows(p);
+    if (visible <= 0) visible = n;
+    for (int row = start; row < n && row < start + visible && row < MENU_PAGE_ROWS; row++)
+        if (p->dim[row])
+            menu_draw_text(MENU_CENTRE, MENU(p, X_ROW_X, int), MENU(p, X_ROW_Y, int) + (row - start) * MENU(p, X_ROW_STEP, int),
+                           p->dim[row], &s);
 }
 
 /* On the row, else on the first enabled one after it (the game skips disabled rows too). */
@@ -678,6 +717,12 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
     int value_row = p && row >= 0 && row < MENU_PAGE_ROWS && p->kind[row] == MENU_ROW_VALUE && p->arrows[row] != MENU_VALUE_ACTION;
     if (moved && row >= 0 && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row)
         AT(menu, X_CURSOR, int) = row;
+    if (left) {  /* where a tap or click landed and what it did: a phone's report says (finding 218) */
+        int mx = -1, my = -1;
+        pointer(view, &mx, &my);
+        hle_log("menu mouse: click at %d,%d: row %d%s%s\n", mx, my, row, row >= 0 && !row_enabled(menu, row) ? " (off)" : "",
+                value_row ? (left_arrow ? " value <" : " value >") : "");
+    }
     if (left && row >= 0 && row_enabled(menu, row)) {
         AT(menu, X_CURSOR, int) = row;
         press(value_row ? (left_arrow ? PAD_LEFT : PAD_RIGHT) : PAD_CROSS);

@@ -216,6 +216,7 @@ struct Touch {
     TouchScreen screen;
     Ctl ctl[TC_COUNT];
     float s, bs;               /* the cluster's scale and its buttons' */
+    float dpad_fit;            /* the D-pad's arms times this to fit between the HUD and L3 (finding 218) */
     float steer_x0, steer_x1, steer_y0, steer_y1;
     float air_x0, air_x1;
     Finger f[TOUCH_FINGERS];
@@ -253,6 +254,11 @@ struct Touch {
     float stick_cx, stick_cy, stick_dx, stick_dy;   /* deflection -1..1 */
     int dpad_finger;                                  /* the thumb on the D-pad (-1 none) */
     uint16_t dpad_buttons;                            /* the d-pad buttons it presses now */
+    /* what the game gets (finding 218, dpad_field): each new direction at least PRESS_FIELDS from the
+       first field that sends it, and a field up before a new press of a direction still showing,
+       so a quick tap and a double tap (the powerslide) reach the game as a pad's presses would */
+    uint16_t dpad_latched, dpad_gap, dpad_out;
+    uint32_t dpad_until[4];
     float tilt_deg, tilt_mix;                         /* tilt steering, and its blend in (0..1) */
     int tilt_known;                                   /* a reading has come (none: the stick steers) */
     double tilt_mix_at;
@@ -277,6 +283,7 @@ struct Touch {
     int race_new;
     int race_was_on;           /* the race was on screen at the last update */
     int fly_was;               /* the flight over the track played at the last update (finding 209) */
+    int replay_ran;            /* this replay's clock has moved (its load and countdown are over; finding 218) */
     int skip_pulse;            /* a SKIP tap's START press is going out */
     unsigned downs;            /* touch-downs so far (Finger.order) */
 };
@@ -390,24 +397,85 @@ static float dpad_half(const Touch *t, const TouchEdit *e)
 {
     float fit = (dpad_room(t) / 2 - GAP_MM) / 3;   /* the pad's half extent, 3 half + GAP_MM, is half the room */
     float half = DPAD_HALF_MM * t->bs;
-    return (half < fit ? half : fit) * e->size;
+    return (half < fit ? half : fit) * e->size * (t->dpad_fit > 0 ? t->dpad_fit : 1.0f);
 }
 static float dpad_off(const Touch *t, const TouchEdit *e) { return 2 * dpad_half(t, e) + GAP_MM; }
 static float dpad_extent(const Touch *t, const TouchEdit *e) { return dpad_off(t, e) + dpad_half(t, e); }
 
-/* Where the D-pad sits before the player's edits: where the stick's home is, kept below the Classic
-   bar (or the top buttons), above the screen's bottom and clear of the left gesture strip; Classic's
-   also clear of L3 by the buttons' gap (moved left, as far as the strip allows). Right-handed x. */
-static void dpad_home(const Touch *t, const TouchEdit *e, float *x, float *y)
+/* The game's own HUD on the steering side (finding 218): the track bar (the riders' places down the
+   track) and the place number under it sit at the screen's edge from about half its height down, the
+   bar leaning outward. Measured on the Mi 11i's 2400 x 1080 picture of a race (the HUD scales with the
+   screen's height): the bar starts 36.3 mm down, 3.2 mm in from the edge, and ends at the bottom
+   12.4 mm in; the place number is inside that line. Hand Left mirrors it, as the overlay. */
+static const float HUD_BAR_TOP = 0.522f, HUD_BAR_IN = 0.046f, HUD_BAR_LEAN = 0.297f;
+/* How far in from the steering side's edge the HUD reaches at height y (mm; 0 above the bar). */
+static float hud_reach(const Touch *t, float y)
 {
-    float half = dpad_half(t, e), off = dpad_off(t, e), span = dpad_extent(t, e);
+    float H = t->screen.height, v = (y < H ? y : H) / H;
+    return v < HUD_BAR_TOP ? 0 : H * (HUD_BAR_IN + (v - HUD_BAR_TOP) * HUD_BAR_LEAN);
+}
+
+/* The D-pad's four arms at rest point x, y (right-handed) are clear of the HUD and of L3 by GAP_MM. */
+static int dpad_clear(const Touch *t, const TouchEdit *e, float x, float y)
+{
+    float half = dpad_half(t, e), off = dpad_off(t, e);
+    const Ctl *l3 = &t->ctl[TC_L3];
+    float lx = mirror_x(t, l3->x);
+    for (int a = 0; a < DPAD_ARMS; a++) {
+        float ax = x + (a == DPAD_LEFT ? -off : a == DPAD_RIGHT ? off : 0), ay = y + (a == DPAD_UP ? -off : a == DPAD_DOWN ? off : 0);
+        float bottom = ay + half + GAP_MM;
+        if (bottom >= HUD_BAR_TOP * t->screen.height && ax - half < hud_reach(t, bottom) + GAP_MM) return 0;
+        if (t->set.preset == TOUCH_CLASSIC && l3->on &&
+            hypotf(fmaxf(fabsf(ax - lx) - half, 0), fmaxf(fabsf(ay - l3->y) - half, 0)) - l3->r < GAP_MM) return 0;
+    }
+    return 1;
+}
+
+/* Where the D-pad sits before the player's edits: the nearest place to the stick's home that keeps it
+   below the Classic bar (or the top buttons), above the screen's bottom, clear of the left gesture
+   strip, of the game's track bar and place number (hud_reach) and, in Classic, of L3 by the buttons'
+   gap. Where no place is clear at full size (Classic between the track bar and L3) the arms shrink
+   until one is, the pad's centre kept on the edge side of L3 (a pad's d-pad is beside its stick) while
+   the arms stay DPAD_ARM_MIN_MM or more; at small Sizes (the cluster shrinks into the corner, the HUD
+   doesn't) the pad may sit past L3. Past DPAD_FIT_MIN the pad keeps its size and only L3's gap holds,
+   as before finding 218. Right-handed x. */
+static const float DPAD_FIT_MIN = 0.6f, DPAD_ARM_MIN_MM = 5.0f, DPAD_STEP_MM = 0.5f;
+static void dpad_home(Touch *t, const TouchEdit *e, float *x, float *y)
+{
     const Ctl *above = t->set.preset == TOUCH_CLASSIC ? &t->ctl[TC_LBAR] : &t->ctl[TC_CAMERA];
+    const Ctl *l3 = &t->ctl[TC_L3];
+    float x0 = *x, y0 = *y;
+    t->dpad_fit = 1.0f;
+    float arm = 2 * dpad_half(t, e);
+    /* pass 0: on the edge side of L3 with arms of DPAD_ARM_MIN_MM at least; pass 1 (small Sizes, where
+       the cluster shrinks into the corner and the HUD doesn't): anywhere on the steering half */
+    for (int pass = 0; pass < 2; pass++)
+        for (float fit = 1.0f; fit >= DPAD_FIT_MIN - 0.001f; fit -= 0.02f) {
+            if (pass == 0 && fit * arm < DPAD_ARM_MIN_MM - 0.001f && fit < 1.0f) break;
+            t->dpad_fit = fit;
+            float span = dpad_extent(t, e);
+            float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
+            float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
+            float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
+            float far = t->screen.width / 2 - span;
+            if (pass == 0 && t->set.preset == TOUCH_CLASSIC && l3->on && mirror_x(t, l3->x) < far) far = mirror_x(t, l3->x);
+            if (bottom < top) top = bottom;
+            float best = 1e9f, bx = 0, by = 0;
+            for (float py = top; py <= bottom + 0.001f; py += DPAD_STEP_MM)
+                for (float px = side; px <= far; px += DPAD_STEP_MM) {
+                    float d = hypotf(px - x0, py - y0);
+                    if (d < best && dpad_clear(t, e, px, py)) best = d, bx = px, by = py;
+                }
+            if (best < 1e9f) { *x = bx, *y = by; return; }
+        }
+    /* nothing clear: full size, the old rule (L3's gap only) */
+    t->dpad_fit = 1.0f;
+    float half = dpad_half(t, e), off = dpad_off(t, e), span = dpad_extent(t, e);
     float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
     float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
     float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
     *y = bottom < top ? bottom : clampf(*y, top, bottom);
     if (*x < side) *x = side;
-    const Ctl *l3 = &t->ctl[TC_L3];
     if (t->set.preset != TOUCH_CLASSIC || !l3->on) return;
     float lx = mirror_x(t, l3->x);
     for (; *x > side; *x -= 0.5f) {
@@ -444,6 +512,7 @@ static void lay_out(Touch *t, int hud_moved)
         else x = p.px * REF_W / 100, y = p.py * REF_H / 100;
         const TouchEdit *e = &st->edit[st->preset == TOUCH_CLASSIC][c];
         int dpad = c == TC_STICK && st->dpad;
+        if (c == TC_STICK) t->dpad_fit = 1.0f;
         if (dpad) dpad_home(t, e, &x, &y);
         x += e->dx, y += e->dy;
         scale *= e->size;
@@ -925,13 +994,15 @@ static int race_on_screen(const Touch *t) { return t->hud_seen > 0 && t->now - t
    them (the pad is the game's own or the recording's) and the one thing a pad does is START (the
    demo takes any button): the overlay shows one button and nothing else, SKIP, or MENU in a replay
    (START opens its RE-START / SAVE / QUIT / CONTINUE menu). That menu is a popup like the others:
-   while it is up the replay's clock has stopped and the overlay stands aside for the menus' mouse
-   layer; CONTINUE runs the clock again and the button returns. */
+   while it is up (menu_up, the popup manager's own state: finding 218; one update's clock delta
+   said "stopped" on most updates above 60 a second, and MENU flickered, a held tap was dropped) the
+   overlay stands aside for the menus' mouse layer; CONTINUE closes it and the button returns. The
+   replay's load and countdown show nothing (replay_ran: its clock hasn't moved yet). */
 static int replay_on(const Touch *t) { return t->have_game && t->game.replay && !t->editor; }
 static int flyover_on(const Touch *t)
 {
     return t->have_game && !t->editor &&
-           (t->game.flyover || t->game.movie || t->game.attract || (t->game.replay && t->game.clock_moving));
+           (t->game.flyover || t->game.movie || t->game.attract || (t->game.replay && t->replay_ran && !t->game.menu_up));
 }
 
 int touch_visible(const Touch *t)
@@ -1446,9 +1517,41 @@ static uint16_t dpad_read(const Touch *t, float x, float y, uint16_t held)
 
 static void dpad_set(Touch *t, const Finger *f)
 {
-    uint16_t now = dpad_read(t, f->x, f->y, t->dpad_buttons);
-    if (now & ~t->dpad_buttons) buzz(t, TOUCH_BUZZ_TICK);   /* a direction came */
+    uint16_t now = dpad_read(t, f->x, f->y, t->dpad_buttons), fresh = now & ~t->dpad_buttons;
+    if (fresh) buzz(t, TOUCH_BUZZ_TICK);   /* a direction came */
+    for (int a = 0; a < DPAD_ARMS; a++)
+        if (fresh & DPAD_PAD[a]) {
+            if (t->dpad_out & DPAD_PAD[a]) t->dpad_gap |= DPAD_PAD[a];   /* still showing: up for a field first */
+            t->dpad_latched |= DPAD_PAD[a];
+            t->dpad_until[a] = 0;   /* counted from the first field that sends it */
+        }
     t->dpad_buttons = now;
+}
+
+/* Each update, for the pad read after it: the D-pad's directions. A thumb's press shows while it is
+   down and at least PRESS_FIELDS (a tap between two pad reads would be lost: the game's double tap,
+   func_0017EDE8, wants a press, a field up and a press inside 30 fields); a direction pressed again
+   while its last press still shows is let up for one field first. */
+static void dpad_field(Touch *t)
+{
+    uint16_t live = t->dpad_finger >= 0 ? t->dpad_buttons : 0, out = 0;
+    for (int a = 0; a < DPAD_ARMS; a++) {
+        uint16_t bit = DPAD_PAD[a];
+        if (t->dpad_gap & bit) { t->dpad_gap &= (uint16_t)~bit; continue; }
+        if (t->dpad_latched & bit) {
+            static const int opposite[DPAD_ARMS] = {DPAD_DOWN, DPAD_UP, DPAD_RIGHT, DPAD_LEFT};
+            int shown = t->dpad_until[a] != 0;
+            if (!shown) t->dpad_until[a] = t->game.vsync + press_vsyncs(t, PRESS_FIELDS);
+            /* a thumb still down that slid off it (shown once), or onto the opposite arm: no hold,
+               so a slide never sends opposite directions together */
+            int slid = t->dpad_finger >= 0 && !(live & bit) && shown;
+            if ((int32_t)(t->game.vsync - t->dpad_until[a]) >= 0 || slid || (live & DPAD_PAD[opposite[a]]))
+                t->dpad_latched &= (uint16_t)~bit;
+            else out |= bit;
+        }
+        out |= live & bit;
+    }
+    t->dpad_out = out;
 }
 
 /* The steering touch of a new finger: the D-pad when it steers (a thumb on or near the pad: its
@@ -2040,6 +2143,7 @@ static void hints_step(Touch *t)
    guard holds back would otherwise wait for the old race's time). */
 static void race_clock_back(Touch *t, double delta)
 {
+    t->replay_ran = 0;   /* a replay started again: its countdown first */
     #define SHIFT(v) do { if ((v) > -1e8) (v) += delta; } while (0)
     SHIFT(t->cross_released);
     SHIFT(t->select_released);
@@ -2086,6 +2190,8 @@ void touch_update(Touch *t, const TouchGame *game, double now)
     int was_on = t->race_was_on;
     t->game = *game;
     t->have_game = 1;
+    if (!game->replay) t->replay_ran = 0;
+    else if (game->clock_moving) t->replay_ran = 1;
     if (game->race_hud) {
         if (!was_on) t->race_new = 1;
         t->hud_seen = now;
@@ -2160,6 +2266,8 @@ void touch_update(Touch *t, const TouchGame *game, double now)
             t->pulse_until[i] = game->vsync + press_vsyncs(t, t->pulse_fields[i]);
             t->pulse_fields[i] = 0;
         }
+    if (!paused(t) && touch_visible(t) && !flyover_on(t)) dpad_field(t);
+    else t->dpad_latched = t->dpad_gap = t->dpad_out = 0;   /* not the race's controls: nothing pending */
     if (t->label[0] && now > t->label_until && t->set.labels != TOUCH_LABELS_ALWAYS) t->label[0] = 0;
 }
 
@@ -2180,7 +2288,7 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint
         if (t->hold_cross_until > 0) b |= PAD_CROSS;
         if (t->trick.on) b |= (uint16_t)(t->trick.sent | (t->trick.triangle ? PAD_TRIANGLE : 0));
         if (t->stick_finger >= 0) sx = t->stick_dx, sy = t->stick_dy;
-        if (t->dpad_finger >= 0) b |= t->dpad_buttons;   /* the d-pad's own buttons: full lock, as a PS2 d-pad */
+        b |= t->dpad_out;   /* the d-pad's own buttons: full lock, as a PS2 d-pad (dpad_field) */
         if (t->set.tilt && t->tilt_mix > 0) {   /* tilt steers left/right on the ground; the stick's left/right is ignored there */
             float full = 40.0f - 30.0f * clampf((float)t->set.tilt_strength, 0, 100) / 100.0f;
             float tilt = clampf((t->tilt_deg - t->set.tilt_centre) / full, -1, 1);
@@ -2222,6 +2330,7 @@ void touch_free(Touch *t) { free(t); }
 void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen)
 {
     int preset_changed = s->preset != t->set.preset || s->dpad != t->set.dpad;   /* the steering touch ends too */
+    if (preset_changed) t->dpad_latched = t->dpad_gap = t->dpad_out = 0;   /* no D-pad press outlives the D-pad */
     int hints = t->set.hints_shown;
     t->set = *s;
     if (t->saved) t->set.hints_shown |= hints;   /* a hint shown since the last save isn't lost */
