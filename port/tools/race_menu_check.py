@@ -24,7 +24,10 @@ The riders finish at 60 s (host) and 70 s (guest) of their own race clocks (DHD_
 a scenario may change it). The scripted host starts its first race before the guest is in (as in cross_race.py), so the race
 both play is the guest's first. P2P rooms by default (no Realtime credentials); --sfu a private SFU
 room (online/server/.dev.vars). Pictures: OUT/<game>/present-NNN.png every --interval seconds at
---scale. Untimed game lock (hidden_game). Needs DHD_TEST_ISO and the x64 build."""
+--scale. --lag: both games trace their puppets and record their riders, and the race both play is
+scored as `online_race.py --lag` scores one (puppet_lag.py, OUT/race/A the host, B the guest), with
+the seconds after the room ends the race as their own column (finding 216). Untimed game lock
+(hidden_game). Needs DHD_TEST_ISO and the x64 build."""
 import argparse
 import contextlib
 import re
@@ -108,6 +111,7 @@ def main():
     ap.add_argument('--track', default='0', help="the room's first track (DHD_NET_TEST_TRACK)")
     ap.add_argument('--no-ai', action='store_true', help="the room's computer riders off")
     ap.add_argument('--link', default='', help='DHD_NET_LINK for both games, e.g. "delay=80"')
+    ap.add_argument('--lag', action='store_true', help='trace and record both games and score the race both play (puppet_lag.py)')
     ap.add_argument('--scale', default='1')
     ap.add_argument('--window', default='1280x720')
     ap.add_argument('--interval', default='0', help='seconds between presented pictures (0: none)')
@@ -131,6 +135,11 @@ def main():
             e['DHD_NET_TEST_MENU'] = menu
         if a.link:
             e['DHD_NET_LINK'] = a.link
+        if a.lag:  # the hidden game's folder is the exe's: its files by full path
+            e.update(DHD_PUPPET_TRACE=str(out / name / 'puppet.txt'), DHD_PUPPET_RECORD=str(out / name / 'own.bin'),
+                     DHD_PUPPET_FROM='all')
+            for f in ('puppet.txt', 'own.bin'):
+                (out / name / f).unlink(missing_ok=True)
         if a.interval != '0':
             e.update(DHD_CAPTURE_PRESENTED=str(out / name / 'present'), DHD_CAPTURE_AT='5', DHD_CAPTURE_INTERVAL=a.interval)
         e.update(extra)
@@ -185,6 +194,16 @@ def main():
         for line in g.log().splitlines():
             if LINES.search(line):
                 print(f'  {g.out.name}: {line.strip()}')
+    if a.lag:
+        import puppet_lag
+        for g, side in zip(games, 'AB'):
+            puppet_lag.last_race(g.out, out / 'race' / side)
+        print('--- puppets of the race both play (puppet_lag.py; A the host, B the guest):', flush=True)
+        try:
+            puppet_lag.report(out / 'race')
+            puppet_lag.riders_report(out / 'race')
+        except (OSError, ValueError, IndexError) as why:
+            failures.append(f'the puppets could not be scored ({why})')
     for f in failures:
         print('FAIL:', f)
     print('PASS' if not failures else 'FAIL')
