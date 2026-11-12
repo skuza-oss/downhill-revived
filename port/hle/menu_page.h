@@ -59,6 +59,7 @@ struct MenuPage {
     unsigned char kind[MENU_PAGE_ROWS];     /* MENU_ROW_* of each row */
     unsigned char arrows[MENU_PAGE_ROWS];   /* a value row's MENU_VALUE_* */
     char text[MENU_PAGE_ROWS][MENU_PAGE_TEXT];  /* the value rows' text */
+    const char *dim[MENU_PAGE_ROWS];        /* a dimmed row's text (menu_page_dim), NULL: drawn by the game */
     /* A page that lays itself out (the race room): it has no rows and draws in update with the
        menu_draw_* calls below. mouse: once a field when the mouse did something, the pointer in
        the view's coordinates; a right click still presses Triangle. */
@@ -86,6 +87,9 @@ void menu_page_set_cursor(MenuPage *p, int row);
 int menu_page_rows(const MenuPage *p);
 void menu_page_suffix(MenuPage *p, int row, const char *text);  /* dim text after a row */
 void menu_page_enable(MenuPage *p, int row, int enabled);  /* a row's flag, without building again */
+/* An unavailable row (finding 218): the cursor skips it (as menu_page_enable 0) and it is drawn
+   dimmed, so it doesn't look like the rows that change. Until the rows are built again. */
+void menu_page_dim(MenuPage *p, int row);
 void menu_page_sound(int next);        /* S_NEXT / S_PREVIOUS, as the value rows play them */
 
 /* ---- drawing, for a page that lays itself out (in its draw) ----
