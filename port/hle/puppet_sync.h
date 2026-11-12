@@ -69,6 +69,34 @@ enum { SYNC_HISTORY = 512 };   /* steps: about 2 s at 240 steps a second */
    shows the others where they are, and is shown where it is, not seconds in the past or future. */
 static inline double sync_clock_excess(double owed) { return owed > SYNC_CLOCK_SLACK ? owed - SYNC_CLOCK_SLACK : 0; }
 
+/* A race clock that stood still (finding 220): this game's own pause (online only when no other
+   human still races, finding 215), or any other stop the clock neither stepped nor owes (a wait
+   that rebased it). The other games' race clocks went on, and each game runs its own race, so
+   this one stays behind theirs by that time for the rest of the race; nothing catches it up. The
+   stamps it sends and the ones it places map between the server clock and this race clock through
+   it, as through the owed time above: a pose another game made "now" lands at this game's "now",
+   and this game's own poses are stamped with the server moment they happened.
+   Measured on this game's own wall clock (no clock-sync error in it): trail is the wall time since
+   GO that the race clock neither stepped nor owes, `wall - base - race - owed` (seconds; owed:
+   port_fps_behind), with base = sync_clock_base at GO so that it starts at 0 (a frame's step and
+   the pacing move it a little either way). A trail more than SYNC_CLOCK_SLACK past what already
+   stood still starts a stop; while it lasts (the trail grows, or holds within one frame's calls)
+   what stood still follows the trail exactly, so the whole stop is counted, not the stop less the
+   slack. A ratchet: what stood still is never given back (the race clock does not catch a pause
+   up, finding 215), and a trail that shrinks again (a step's own jitter) ends the stop. */
+typedef struct SyncStood {
+    double stood;  /* seconds this race clock stood still since GO */
+    int stopped;   /* a stop is being counted */
+} SyncStood;
+static inline double sync_clock_base(double wall, double race, double owed) { return wall - race - owed; }
+static inline void sync_clock_stood(SyncStood *s, double wall, double base, double race, double owed)
+{
+    double trail = wall - base - race - owed;
+    if (!isfinite(trail)) return;
+    s->stopped = s->stopped ? trail >= s->stood : trail > s->stood + SYNC_CLOCK_SLACK;
+    if (s->stopped) s->stood = trail;
+}
+
 typedef struct SyncPose {
     float pos[3], vel[3];
     float rot[3][3];

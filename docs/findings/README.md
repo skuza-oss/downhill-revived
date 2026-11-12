@@ -249,7 +249,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 217 | [Android aborts when the perf log asks an ended thread for its CPU time](217-android-thread-clocks.md) | current |  |
 | 218 | [READY on a phone in an online room, the attract demo's SKIP, the D-pad's place and taps...](218-phone-room-and-touch.md) | current |  |
 | 219 | [three checks that passed when they should fail](219-check-tools-false-pass.md) | current |  |
-| 220 | [another game's snapshots checked before they are used](220-online-snapshot-checks.md) | in progress |  |
+| 220 | [another game's snapshots checked before they are used](220-online-snapshot-checks.md) | current |  |
 | 221 | [score rules: the server's mode, one final per rider, a table that stands](221-score-rules.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

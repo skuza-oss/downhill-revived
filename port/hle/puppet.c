@@ -160,6 +160,7 @@ typedef struct Puppet {
        snapshots come again and its rider has caught up with it */
     PuppetHold hold;         /* held: its sender's game stopped (puppet_record.h; finding 220) */
     int hold_refused;        /* its sender's HOLDs refused this race (finding 220) */
+    double newest_stamp;     /* the server stamp (ms) of the newest snapshot taken from its owner, 0: none */
     double line_at;          /* the snapshot whose racing line this game's controller took */
     int easing;              /* its speed eases up to its owner's (steer's guard) */
     int catching;            /* its sender catches up (its clock rate over SYNC_CATCHUP until under the end) */
@@ -204,6 +205,10 @@ static struct {
     /* online */
     int online, local, nslots, host;
     double go_server;        /* this PC's GO on the server clock (ms), 0 until known */
+    double go_base;          /* sync_clock_base at GO (seconds of this PC's wall clock) */
+    SyncStood stood;         /* what this race clock stood still since GO (sync_clock_stood) */
+    double stood_said;       /* logged up to */
+    int stood_tick;          /* the race tick when it last grew */
     int gone[NET_SLOTS];     /* lobby slots that left */
     int kept[NET_SLOTS];     /* of those, the ones that had finished: their riders stay puppets */
     int hits_taken;
@@ -710,14 +715,18 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
    snapshot is already here, the rider brakes to a stop where it is (held_step). A HOLD that is not
    about this game's newest snapshot of the rider, or from the future, is refused (finding 220:
    one stamped a day ahead held the rider for the rest of the race). */
-static void hold(int slot, double t, double quiet)
+static void hold(int slot, double t, double stamp, double quiet)
 {
     Puppet *p = &pp.p[slot];
     if (!p->on || !p->synced) return;
-    int ok = puppet_hold_ok(t, quiet, p->count > 0, p->count ? p->ring[p->count - 1].time : 0, RACE_TIME);
+    /* the newest snapshot's moment on the HOLD's own mapping, from the two stamps: a stop of this
+       race clock between them (sync_clock_stood) moves where a stamp lands, not their order */
+    double newest = p->count ? p->ring[p->count - 1].time : 0;
+    if (p->count && p->newest_stamp) newest = t - (stamp - p->newest_stamp) / 1000;
+    int ok = puppet_hold_ok(t, quiet, p->count > 0, newest, RACE_TIME);
     if (ok == PUPPET_HOLD_REFUSED && !p->hold_refused++)
         fprintf(stderr, "puppet: tick %d slot %d: a HOLD refused (stamp %.3f, newest snapshot %.3f, quiet %.3f s); more are "
-                "only counted\n", RACE_CLOCK, slot, t, p->count ? p->ring[p->count - 1].time : -1.0, quiet);
+                "only counted\n", RACE_CLOCK, slot, t, p->count ? newest : -1.0, quiet);
     if (ok != PUPPET_HOLD_TAKEN) return;
     /* A short stop (a stall under load, often under 0.2 s) is ridden through: once its sender
        catches up its riders are back where riding on put them, while a hold stopped them dead and
@@ -1061,7 +1070,7 @@ void hle_puppet_start(void)
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
         p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->hold.held = 0, p->catching = 0, p->line_at = 0;
-        p->refused = 0, p->hold_refused = 0;
+        p->refused = 0, p->hold_refused = 0, p->newest_stamp = 0;
         memset(&p->hold, 0, sizeof p->hold);
         sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
@@ -1070,18 +1079,42 @@ void hle_puppet_start(void)
         }
     }
     pp.hits_taken = 0, pp.nevents = 0, pp.go_server = 0;
+    memset(&pp.stood, 0, sizeof pp.stood), pp.stood_said = 0, pp.stood_tick = 0;
     pp.held_count = 0;
     memset(pp.state_said, 0, sizeof pp.state_said);
 }
 
-/* How far this game's race clock trails the wall clock beyond the normal (puppet_sync.h
-   sync_clock_excess), seconds: added to the stamps it sends, taken off the ones it places. */
-double port_fps_behind(void);  /* fps.c */
-double hle_puppet_clock_excess(void) { return sync_clock_excess(port_fps_behind()); }
+/* How far this game's race clock trails the wall clock beyond the normal, seconds: added to the
+   stamps it sends, taken off the ones it places. What it owes and will catch up (puppet_sync.h
+   sync_clock_excess) plus what it stood still and never will (sync_clock_stood: this game's own
+   pause; finding 220). The one place the server clock and this race clock meet, for snapshots,
+   HOLDs and this game's own stamps. */
+double port_fps_behind(void);          /* fps.c */
+double port_clock_wall_seconds(void);  /* fps.c */
+double hle_puppet_clock_excess(void)
+{
+    double owed = port_fps_behind();
+    if (pp.online && pp.go_server) {
+        sync_clock_stood(&pp.stood, port_clock_wall_seconds(), pp.go_base, RACE_TIME, owed);
+        if (pp.stood.stopped) pp.stood_tick = RACE_CLOCK;
+        /* said once the clock runs again (half a second of race after the stop) */
+        if (pp.stood.stood > pp.stood_said + 0.1 && RACE_CLOCK > pp.stood_tick + 30) {
+            fprintf(stderr, "puppet: tick %d: this race clock stood still %.2f s since GO (%.2f s more): the others' "
+                    "stamps land that much later on it\n", RACE_CLOCK, pp.stood.stood, pp.stood.stood - pp.stood_said);
+            pp.stood_said = pp.stood.stood;
+        }
+    }
+    return sync_clock_excess(owed) + pp.stood.stood;
+}
 
 /* This PC's GO on the server clock (ms; online.c): from here snapshots stamped on that clock land on
-   this PC's race clock. */
-void hle_puppet_go(double go_server_ms) { pp.go_server = go_server_ms; }
+   this PC's race clock. The race clock has stood still for nothing yet. */
+void hle_puppet_go(double go_server_ms)
+{
+    pp.go_server = go_server_ms;
+    pp.go_base = sync_clock_base(port_clock_wall_seconds(), RACE_TIME, port_fps_behind());
+    memset(&pp.stood, 0, sizeof pp.stood), pp.stood_said = 0, pp.stood_tick = RACE_CLOCK;
+}
 
 /* The online race is over (online.c, back at the menus): no puppets, the next race is the game's own. */
 void hle_puppet_offline(void)
@@ -1244,6 +1277,7 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
         return;
     }
     feed(slot, &s);
+    p->newest_stamp = stamp;
 }
 
 /* A STATE bundle from the PC in lobby slot sender: every record, once the whole bundle checks. */
@@ -1253,7 +1287,7 @@ static void receive_bundle(int sender, const uint8_t *in, int n)
     if (pp.online && sender != pp.local && pp.go_server && state_hold_check(in, n, &stamp, &quiet) && isfinite(stamp)) {
         double t = (stamp + pp.net_link.skew * 1000 - pp.go_server) / 1000 - hle_puppet_clock_excess();
         for (int i = 1; i < NRIDERS; i++)
-            if (pp.p[i].on && owner_of(i) == sender) hold(i, t, quiet / 1000);
+            if (pp.p[i].on && owner_of(i) == sender) hold(i, t, stamp + pp.net_link.skew * 1000, quiet / 1000);
         return;
     }
     if (!pp.online || sender == pp.local || !pp.go_server || !state_bundle_check(in, n, &stamp) ||
@@ -1425,7 +1459,7 @@ void hle_puppet_field(void)
         const Delivery *d = &pp.deliveries[pp.delivery_next++];
         if (d->index < 0) {  /* a HOLD: the sender's last snapshot was at its race second d->shift */
             for (int i = 1; i < NRIDERS; i++)
-                if (pp.play_from[i] >= 0) hold(i, d->shift + pp.link.skew - bench_behind(), d->quiet);
+                if (pp.play_from[i] >= 0) hold(i, d->shift + pp.link.skew - bench_behind(), 0, d->quiet);  /* no server stamps here */
             continue;
         }
         Snapshot s = pp.file[d->index];

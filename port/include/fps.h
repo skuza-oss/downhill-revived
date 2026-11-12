@@ -33,6 +33,7 @@ int port_count_reached(int value, int mark); /* an up-counter reached mark in th
 float port_counter_fields(int counter);
 double port_field_seconds(int counter);  /* a field counter as seconds, part of a field too */
 double port_fps_behind(void);            /* game time owed to wall time (online catch-up), seconds */
+double port_clock_wall_seconds(void);    /* the wall moment the game clock has counted up to (finding 220) */
 
 /* The game clock (00238A68/00238C00/00238D98) on the delta-time clock. */
 void port_clock_reset(void);

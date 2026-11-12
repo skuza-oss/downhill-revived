@@ -1,12 +1,13 @@
 # 220: another game's snapshots checked before they are used
 
-Status: in progress
+Status: current
 
 Branch `fix/online-snapshot-checks` from `main` c5f839a2, started 2026-11-12. This file is the
 lane's plan while it runs and its finding when it merges. Someone who has only this file and the
 git log must be able to pick the lane up. Merged into `main` on 2026-11-12 (82a18a8a) and checked
-there the same day ("Checked on the merged main" below); it stays `in progress` for the open case
-there.
+there the same day ("Checked on the merged main" below). The two cases that check left open (a
+game's own pause, late HOLDs) were fixed on `fix/online-pause-clock` from `main` 63a24aa9 ("Round
+2" below).
 
 ## Goal and acceptance
 
@@ -43,6 +44,9 @@ not worse; one live two-game race through a P2P room on a local server with no r
 - [x] 5, the SFU limiter's version (b99dc07c)
 - [x] protocol doc (0fb9cdce); `check.py port` OK on 0fb9cdce; state traces, bench and live race
   (below)
+- [x] round 2 (branch `fix/online-pause-clock`): the time this race clock stood still in the
+  stamps (d8811708); a HOLD's stop on the wall clock, against the newest snapshot by stamps
+  (ce68d5f1); `race_menu_check.py --scenario alone-guest` and its refusal check; docs
 
 ## What each check is, and where its bound comes from
 
@@ -193,6 +197,22 @@ would trade a little sinking back (not tried).
 - The bounds of 3 were first taken from track 0 alone (100000 units, row length 1 +- 0.25 with dot
   products); tracks 1 and 2 go to -11240 and have rows as short as 0.911, so they were widened and
   the dot products replaced by the determinant (a5f76e9b).
+- Round 2: the time a race clock stood still is measured, not announced. Every way a race clock
+  can stop (the game's own pause, a wait that rebases the clock, the end of a race, the touch hint)
+  shows as wall time the clock neither stepped nor owes, so one measurement covers them all and no
+  pause path needs a hook. It is measured on this game's own wall clock (no clock-sync error), at
+  the moment the clock has counted to (`port_clock_wall_seconds`), so a long frame still running is
+  not mistaken for a stop (it is owed time at the next step).
+- Round 2: it goes into `hle_puppet_clock_excess`, the one place where the server clock and this
+  race clock meet, not into the GO moment: the GO is also sent to the others (EVENT GO, for the log's
+  skew line) and must stay the real one.
+- Round 2: a stop is counted whole once it is past the normal lag (`SYNC_CLOCK_SLACK`), not less
+  the slack: the first version subtracted it and left every later snapshot 40-50 ms "younger"
+  than before the pause (age p50 105 ms before, 64 after, in the first live run).
+- Round 2: the HOLD rule keeps the stamp check's 1 s and adds 0.1 s (`PUPPET_HOLD_SLACK`) for what
+  this race clock may lag unseen (the slack the owed time leaves and the slack before a stop is
+  counted). The margin was never the problem: both refusals found were this game's own clock
+  standing still (below), so a wider margin alone would only have moved the edge.
 
 ## Surprises
 
@@ -201,6 +221,19 @@ would trade a little sinking back (not tried).
 - The orientation rows are not of unit length: down to 0.911 in a recorded race (still orthogonal
   and right-handed).
 - `feed`'s reset for a replayed file ran online too (Decisions).
+- Round 2: neither late-HOLD refusal was clock-sync error. In the many-player room the host's
+  race clock stood still for at least 1.1 s two seconds after its own finish (from race tick 5825
+  to 5862, 0.6 s of race, its `netstats:` lines' wall times show about 2 s), while the bots' HOLDs
+  counted on; before that its race clock had kept to the wall clock within 15 ms all race. In the lead's plain two-game race (no test
+  link) both games stopped stepping at about race second 74.7, after both finishes; each one's
+  network thread then sent HOLD (its game gave no bundle: a real stop) and each receiver, its own
+  clock stopped too, saw a stop of 1.07 s against a stamp 0.01 s old. With the test link the
+  bundles wait in `DHD_NET_LINK`'s queue, which only the race's steps release, so those HOLDs were
+  never looked at: that is why the link "decided".
+- Round 2: with a receiver's own stop in the mapping, the HOLD's stamp lands earlier than the
+  snapshot it names did when it arrived; by race times the HOLD then looked older than the newest
+  snapshot ("over", not taken). It is matched with the newest snapshot by their two server stamps
+  now (`Puppet.newest_stamp`).
 
 ## Open
 
@@ -292,7 +325,7 @@ when alone).
   respawn placement. The class of finding 202's "a reset placed 312 units off for 0.2 s"; the only
   one in these runs.
 
-**Open: a game's own pause leaves it refusing the others' records.** In `race_menu_check.py
+**Was open (fixed in round 2, below): a game's own pause left it refusing the others' records.** In `race_menu_check.py
 --scenario alone` (the guest finishes at 12 s, the host, alone, opens the game's own pause at 30 s
 for 5 s) the host logged `puppet: tick 1802 slot 1: a record refused (stamp ahead)`. The pause
 stops this game's race clock while the others' stamps (the server's clock) go on, so after it every
@@ -310,11 +343,134 @@ lane, which turns it from "taken as future" into "refused"; the fix would add th
 race clock stood still (its own pause) to the excess taken off the stamps, or measure the stamp
 against the server clock's race moment instead of this game's race time.
 
+## Round 2: a game's own pause, and late HOLDs (2026-11-12)
+
+Branch `fix/online-pause-clock` from `main` 63a24aa9. No wire change, nothing new shared.
+
+**1. After this game's own pause the others' records came from the future.** Online the race
+menu does not pause (finding 215) unless no other human still races; then the game's own pause
+stops this race clock while the server clock goes on. `receive_record` placed a record at
+`(stamp - go) / 1000 - hle_puppet_clock_excess()`, and the excess (`sync_clock_excess`) only knew
+the owed time, which a pause is not (the pause's menu frames take the clock's steps; nothing is
+owed afterwards and nothing is caught up, finding 215). So after a 5 s pause every record stood
+5 s ahead of `RACE_TIME`: taken as the future before this finding, refused after it, and this
+game's own stamps stood 5 s in the past.
+
+The rule now (`port/hle/puppet_sync.h` `sync_clock_stood`, used by `hle_puppet_clock_excess`):
+the wall time since GO that the race clock neither stepped nor owes,
+`wall - base - race - owed`, read on this game's own wall clock at the moment the clock has
+counted to (`fps.c` `port_clock_wall_seconds`; `base` set at GO, `hle_puppet_go`), is time the race
+clock stood still. A trail more than `SYNC_CLOCK_SLACK` past what already stood still starts a stop,
+which then counts whole while it lasts; it is never given back. The excess is the owed part plus
+that, so the others' snapshots, their HOLDs and this game's own stamps all follow: a pose another
+game made "now" lands at this game's "now", and this game's poses are stamped with the server
+moment they happened. Logged once a stop is over: `puppet: tick T: this race clock stood still S s
+since GO`.
+
+Every user of the server-to-race mapping, and what it needed:
+
+| user | needed it? |
+|---|---|
+| `receive_record`: another game's snapshot onto this race clock | yes: through the excess |
+| `receive_bundle`: a HOLD's stamp | yes: through the excess; and its match with the newest snapshot by stamps (item 2) |
+| `online.c` `send_snapshots`: this game's own stamps | yes: through the excess (a paused game's snapshots now carry their server moment, not the pause in the past) |
+| this game's HOLD (`port/net/client.c` `hold_check`) | nothing to do: it repeats the last bundle's stamp, which carries it |
+| GO (`on.go_server`, EVENT GO, `go_skew`) | no: GO is a moment before any stop; its log line compares two GOs |
+| the finish window, its HUD count and TIME UP (`lobby.finish_ends_at` against the server clock) | no: server time against server time; it ends on time whatever this game's pause (its race then closes from the pause through `leave_race`: read, not run) |
+| the end-of-race waits (`end_held_at`, `RESULTS_WAIT`, `first_finish`) | no: this game's wall clock |
+| hit events | no: no stamp; applied when they arrive |
+| the Mosh round's two minutes | no: each game's own race clock by design (finding 204); a game paused alone ends its round that much later in wall time, and the others, finished, have sent their final scores |
+| the spectate camera | no mapping of its own: it watches the puppets, which now land right |
+| `test_fps.c`, the bench (`bench_behind`, `Delivery`) | no: their own simulated lag, not the online path |
+
+What the others see of a paused game: when it stops, its network thread sends HOLD and they brake
+its riders to a stop where they are (`alone`: the guest held the host's rider and its four computer
+riders at tick 1823). Its first snapshots after the pause are stamped with their real server
+moment, newer than the HOLD, so they release it (ticks 2135-2137, the riders 0.5-8.2 units from
+their spots), and its riders are drawn at the present as riders that stood still for the pause.
+Before, those snapshots were stamped the pause in the past and the others drew it that far back
+for the rest of the race.
+
+Cases, from the code (unit tests in `test_puppet_record.c` where marked):
+- a pause before any record arrived (test): counted the same; the first record lands at the
+  present. A pause before GO (the countdown) is no case: the mapping starts at GO.
+- two pauses (test): both counted, each once (8 s for 5 s and 3 s).
+- a pause that ends the moment a snapshot arrives (test): the frame that steps the race again maps
+  it within a step of its age. Records arriving during the pause land at the paused moment; they
+  are taken, and the first ones after the pause place the riders that moved meanwhile.
+- a pause over the finish window's end: the window runs on the server clock, so the room closes
+  the race on time; the stamps play no part.
+- a hitch (test): owed time, caught up, not a stop; nothing is counted as stood still.
+- a phone sent to the background: not this path. `present.c` `app_background_wait` holds the game
+  thread inside a field; the next step finds the wall time owed (`clock_interval`), and online it is
+  kept and caught up (finding 139), so it is in the owed part of the excess, as before. Read, not
+  run.
+- the browser's tab hidden: the game runs in a worker paced by a MessageChannel with
+  `DHD_FPS_WALL=1`; a slower or stalled worker owes the time and catches it up, as on x64, so it is
+  the owed part too (a clock rebased meanwhile would be counted as a stop). Read, not run; the
+  browser still sends no HOLD (Open, above).
+
+**2. HOLDs refused near a race's end.** The rule takes a HOLD whose stop (`quiet`, the sender's
+wall clock) is no longer than its stamp's age on this race clock plus 1 s. Both refusals the checks
+found were this game's own race clock standing still (Surprises): a stop measured against a clock
+that stopped too. With item 1 the age is the wall clock's again. On top of the stamp check's 1 s
+the rule now allows `PUPPET_HOLD_SLACK` (`puppet_record.h`, 0.1 s: the lag `sync_clock_excess`
+leaves and the same again before `sync_clock_stood` knows a stop for one), and whether a HOLD is
+about the newest snapshot is decided by the two server stamps (`Puppet.newest_stamp`), so a stop of
+this race clock between them cannot make it look "over". Still refused: a HOLD a day ahead, a stop
+far longer than its stamp's age, one more than 0.5 s after the newest snapshot (tests).
+
+Can a real game send a HOLD long after its last snapshot? Yes: its network thread sends one every
+0.1 s from 60 ms after its last bundle, up to 30 s, whenever its game gives none while it races: a
+stall, its own pause when alone (5 s in the `alone` scenario), and the end of a race, when both
+games stop stepping a few seconds after the finishes (the lead's run). Each is a real stop, so the
+others take it and hold its riders where they are; for finished riders it changes nothing
+visible. Taking it is right: refused, the riders would coast for 3 s and then brake anyway.
+
+Checks (this branch, hidden desktop, a local server per run, P2P rooms unless said):
+- `test_puppet_record.c`: the pause arithmetic (the cases above), the HOLD's edges (the crowd
+  case), a HOLD during this game's own stop. Each new assertion fails on the code before (without
+  the stood-still time a 5 s pause's records are refused; without the slack the crowd case is
+  refused; by race times the HOLD is "over").
+- `race_menu_check.py --link delay=80`, all ten scenarios (`alone-guest` new): PASS; each now
+  fails on any refusal line in either game: none. In `alone-guest` the guest stood still 5.22 s
+  (its log). The host's computer riders on the guest, live puppet error (`puppets off by`, units,
+  p50 / p95) and snapshot age (ms, p50):
+
+| | error | age |
+|---|---|---|
+| before the pause (0-30 s) | 0.37 / 1.15 | 116 |
+| the 5 s after it (each computer rider placed once, 356-416 units off: 5 s of riding) | 0.44 / 3.86 | 124 |
+| 35-45 s, 45-55 s, 55 s to the end | 0.44 / 2.55, 0.60 / 2.28, 0.44 / 1.75 | 125 |
+| races without a pause after 35 s (`timeup`, `resume` guests) | 0.21-0.29 / 1.75-1.88 | 116 |
+
+  Before this branch the same run refused 1232 records a computer rider (none corrected after the
+  pause), and c5f839a2 took them as 5.1 s in the future. Ages after the pause are 8-9 ms over
+  before: the stop is counted up to the frame the race steps again. `alone` (the host pauses): no
+  refusal (before: from tick 1801 on); the guest held all five of the host's riders and released
+  them at the host's first snapshots after the pause.
+- The lead's plain two-game race (`online_race.py --hidden`, no test link, finishes at 70 / 72 s):
+  both games again stopped stepping at about race second 74.7 and sent HOLDs; the host held the
+  guest's rider, the guest all nine of the host's; HOLDs refused 0, records refused 0 (before: 1
+  and 9 HOLDs refused).
+- `p2p_crowd.py --bots 7 --sfu-bots 1`: eight racers, the countdown after 42.1 s, every bot's race
+  and result; the host held the seven bots at their finish and raced to its own (1:35.03) and on;
+  HOLDs refused 0 (before: 7), records refused 0.
+- `race_menu_check.py --scenario alone-guest --sfu --link delay=80`, a plain SFU room (the local
+  SFU connected over UDP): PASS, no refusal; the guest stood still 5.22 s; error p50 / p95 before
+  0.36 / 1.70, the 5 s after 1.02 / 2.46, after that 0.70 / 2.16; age 122 ms before, 132 after.
+- State traces against `main-524948ba-ref-v3`: `boot` all 600 rows and `race` all 5000 rows
+  match (every new line runs only online).
+- `python tools/check.py port -j 6` on 1470b78b (the last code commit): OK.
+
 ## Result
 
 Every field of another game's record is checked before any of it is used, and a refused record
 leaves no trace; no stamp can freeze a rider or stale out honest snapshots; the SFU limiter reads
 the bundle's layout from the game's own header; a landing puppet is not pushed into the ground.
 Offline play is unchanged (state traces equal). Merge, and the review's findings 1, 2, 3, 5, 6 and
-8 are closed. Merged; the Status becomes `current` once a game's own pause no longer leaves it
-refusing the others' records (Checked on the merged main).
+8 are closed. Round 2: the time a race clock stood still (a game's own pause when alone, a race's
+end) is in the mapping between the server clock and the race clock, so after a pause the others'
+snapshots land at this game's present and its own carry their server moment; a HOLD's stop is
+measured against the wall clock and matched with the newest snapshot by stamps. No refused record
+or HOLD in any check of this round.

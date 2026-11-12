@@ -506,6 +506,10 @@ double port_field_seconds(int counter)
 }
 /* Game time still owed to wall time (an online race catching up), in seconds. */
 double port_fps_behind(void) { return wall_mode && owed>0 ? owed/60.0 : 0; }
+/* The wall moment (host_wall_seconds) the game clock has counted up to: stepped or owed. Paced, the
+   last step's; a frame's own time is counted at the next step, so a long frame is not yet time the
+   clock missed (finding 220). Unpaced (or before the first step), now. */
+double port_clock_wall_seconds(void) { return wall_mode && previous_wall ? previous_wall : host_wall_seconds(); }
 
 /* prev comes from the preceding real animation/simulation step, including at
    crash entry (001B1C20). Its displacement already has the selected step's
