@@ -62,6 +62,13 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (989snd replaced by `sound.c`, findings 022, 133), movies (`movie.c`, libmpeg2, finding 055).
 - The game data image is read at start from the player's `SCUS_971.77` (SHA-1 checked,
   `game_data.c`); the executable holds only the words the port changes (finding 053).
+- Stack locals: the game's C code is compiled by clang, which lays out a function's locals as it
+  likes, while the retail code sometimes reads or writes past a local into what the EE frame puts
+  after it (a 16-byte store into a 4-byte float, a matrix read from four separate vectors). The
+  port's copy of each such function declares the object the EE frame really holds
+  (`port/patches_stack.py`, `port/patches.py`; `src/` keeps matching). `port/tools/stack_escapes.py`
+  finds them from the matching compiler's frames and fails `check.py port` on an unreviewed write
+  overrun (findings 094, 207, 213).
 - Inline asm runs on an emulated EE/FPU/VU0 register file (`port/runtime/ps2asm.c`,
   `ps2asm_aot.py`); EE float rounding follows PCSX2's (finding 026). VU0 microprograms are native
   or compiled (`vu0_micro.c`, `vu0_aot.py`); VU1 runs compiled blocks plus native kernels
@@ -227,8 +234,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   to `race6`, which ones a change runs: `docs/TESTING.md`) are the merge gate again: since finding
   205 the trace does not depend on the core's layout there (`state_trace_layout_test.py` proves
   it), and a reference trace must be of the same format (2) and code-pointer list. `split` and
-  `memcard` still see the core's layout (finding 205's Result). Server: `npm test` in
-  `online/server`.
+  `memcard` still see the core's layout (finding 205's Result). Since finding 213 (main
+  524948ba) the race recipes' references are of that build: it changed every race's game state on
+  purpose. Stack locals: `stack_escapes.py --check` in `check.py port` (the static inventory and
+  its reviewed list); `DHD_CORE_REDZONE=1` / `redzone_walk.py` a test-only game with red zones
+  around every address-taken local, walked through the recipes and OPTIONS (finding 213). Server:
+  `npm test` in `online/server`.
   Online: `port/net/build_tests.py`, `port/tools/online_race.py`. Retail comparisons with PCSX2:
   `compare_pcsx2.py`, `race_compare.py` (finding 024). Everything, with setup variables:
   `docs/TESTING.md`.

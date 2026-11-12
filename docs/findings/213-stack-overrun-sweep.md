@@ -1,10 +1,9 @@
 # 213: stack locals that the EE frame makes one object (the class of 094 and 207)
 
-Status: in progress
+Status: current
 
-Branch `fix/stack-overrun-sweep` from `main` b8c4cf88, started 2026-11-12. This file is the lane's
-plan while it runs and its finding when it merges. Someone who has only this file and the git log
-must be able to pick the lane up.
+Branch `fix/stack-overrun-sweep` from `main` b8c4cf88, started 2026-11-12, merged into `main` the
+same day (524948ba). This file was the lane's plan while it ran and is its finding now.
 
 ## Goal and acceptance
 
@@ -29,6 +28,9 @@ before players do and make the class hard to bring back:
 - [x] 2026-11-12: `DHD_CORE_REDZONE=1` (`port/tools/redzone.py`, `build_wasm.py`) and `redzone_walk.py` (bc908b48, 20364604)
 - [x] 2026-11-12: the seven traces: boot equal, every race differs, explained by two fixes (Result)
 - [x] 2026-11-12: the red-zone walk: recipes and OPTIONS, 0 hits (Result)
+- [x] 2026-11-12: merged (524948ba) and checked on `main`: `check.py port`, the traces with and
+  without the two fixes, PCSX2 against both builds, `options_walk.py`, pictures (Result, "Checked
+  on the merged main"); new format-2 references made from 524948ba
 
 ## The static inventory (`port/tools/stack_escapes.py`)
 
@@ -161,7 +163,7 @@ each hit once.
 
 ## Result
 
-(Lane result, 2026-11-12; the lead fills in the merge.)
+Lane result, 2026-11-12; the check on the merged `main` is at the end.
 
 ### Found and fixed
 
@@ -253,3 +255,54 @@ build is not in any check (about 15 minutes for the core, then the host); its wa
    `16(&low)`): not escapes, so not in the static tool; the red zones see them.
 3. The 26 escapes of compiler temporaries (no named local at that offset).
 4. The screens and modes above, on the red-zone game.
+
+### Checked on the merged main
+
+On `main` 524948ba, 2026-11-12, every game on the hidden desktop, untimed:
+
+- `python tools/check.py port -j 6`: OK. The new steps: `test_stack_escapes` 0.8 s,
+  `stack_escapes --check` 152 s with a cold cache on a busy PC.
+- State traces against the format-2 references of 0.7.16's game code (made with the same
+  `state_trace_codeptrs.txt` and `state_trace_mask.txt`): boot PASS; the six races differ exactly as
+  in "The state traces" above (the same row counts and first fields), and equal the lane's own
+  traces of its branch, 7 of 7.
+- The same tree with only the `func_001AE358` and `func_00155BA8` patches left out: 7 of 7 PASS
+  against those references. The other seven fixes and everything merged since are state-neutral on
+  these routes; exactly these two change the races.
+- The referee: `race_compare.py` (finding 024: the retail disc in the patched PCSX2 and the port,
+  synchronised on the race clock, seed pinned, both pads from the race recipe's pad after GO; EE
+  RAM dumps at chosen race moments on both sides), run once with each build. Read from the dumps:
+  `CameraAngles.xA0..xA8` of all ten riders (rider + 0x4890, riders at `D_002AF2C0`, stride 0x7BD0)
+  and the slide-state object (rider + 0x3FD0: `xAC` the reaction kind, flag 4 a reaction running).
+  The PCSX2 runs were identical to each other at every moment.
+
+  | Moment (race clock) | PCSX2 `xA0`, all riders | without the fixes: largest abs(port - PCSX2) | with them |
+  |---|---|---|---|
+  | countdown +30 to +200 | 0 | 0.212 to 0.262 | 0 |
+  | GO +1 to +1800 | 0 | 0.249 to 0.262 | 0 |
+
+  `xA4` and `xA8` were equal in both builds until the computer riders' own drift (GO +120, the same
+  in both builds: finding 024's limits); with the fixes every camera value agrees within 6e-8 until
+  then, the player's rider within 3e-8 through GO +600. The slide reaction: PCSX2 starts kind 2 for
+  the player's rider at race clock 220 (none at 219). With the fixes the port starts it at the same
+  game frame (the port steps the race clock by 2 a frame under the frame clock, so it has states at
+  even clocks only: none at 218, running at 220), and the rider's velocity is bit-identical to
+  PCSX2's at every even clock through GO +600. Without them the port is bit-identical up to clock
+  216, starts no reaction, and from clock 224 its velocity leaves PCSX2's (16 to 50 units off by
+  GO +240); its picture against PCSX2 goes from MAE 6 to 25-69 from GO +240, the fixed build's
+  stays at 4.4-6.9 through GO +600. The retail code agrees: `func_001AE358` passes `$sp + 0x20` to
+  `func_00221AB8`, which reads four quadwords there (c@0x20, d@0x30, e@0x40, the unwritten 0x50);
+  `func_00155BA8` passes `$sp + 0x50` to `func_00221888`, whose `sqc2` writes 0x50..0x5F, and
+  compares `lwc1 0x50($sp)`, the x lane. Limits: the comparison holds while the two simulations
+  agree (to about GO +600 for the player, GO +120 for computer riders); moments are race-clock
+  samples, not every frame; the local `angle` itself is on the stack and was not read.
+- `options_walk.py`, four scenarios: no fault in any log. In the first run `on-fresh` reported LOAD
+  REPLAY's "no replay" box still shown after Triangle (one dropped posted key while PCSX2 and a
+  trace shared the PC); `on-fresh` alone again: every row opens and closes.
+- One race with a header-only dhd.ini at `DHD_SCALE=4` (frame clock, the race recipe's route and
+  pad, GS captures at race moments), against the same race on main 4fca93d5: countdown +120 and
+  GO +60 to +180 equal (MAE 0.03 at most): the camera's `xA0` change shows nothing visible there.
+  From GO +240 the rides differ (the slide reaction); the camera stays behind the rider, nothing
+  tilted or offset.
+- New format-2 references of all seven recipes from this build, kept outside the repository
+  (`docs/TESTING.md`): the earlier ones are superseded for the race recipes.
