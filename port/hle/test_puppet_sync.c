@@ -179,6 +179,22 @@ int main(void)
         heading(0, later.rot);
         assert(near(sync_measure(&s, 10.05, &later, &later, &pose, 0), 0, 1e-3f));
     }
+    /* an owner's reset (finding 216, the live case): riding at 76 units a second, then 364.8 units
+       away standing; its next snapshot came in the same step, so the jump lies before the newest
+       one's predecessor. Riding alone, or a jump before the last one used, is none. */
+    {
+        float pos[5][3] = {{-1047.7f, 1185.5f, 2209.8f}, {-1047.4f, 1186.2f, 2208.8f}, {-935.3f, 899.3f, 2404.1f},
+                           {-935.3f, 899.2f, 2404.1f}, {-935.2f, 899.2f, 2404.1f}};
+        float vel[5][3] = {{0, 77.5f, 0}, {0, 76.4f, 0}, {0, 0, 0}, {0, 1.2f, 0}, {0, 1.3f, 0}};
+        double time[5] = {68.315, 68.332, 68.349, 68.365, 68.382};
+        SyncMark m[5];
+        for (int i = 0; i < 5; i++) m[i] = (SyncMark){time[i], pos[i], vel[i]};
+        assert(sync_owner_jumped(m, 5, 68.332, 68.365));   /* the jump, then one more, in one step */
+        assert(sync_owner_jumped(m, 4, 68.332, 68.349));   /* the jump alone */
+        assert(!sync_owner_jumped(m, 5, 68.349, 68.382));  /* after it: standing */
+        assert(!sync_owner_jumped(m, 2, 68.315, 68.332));  /* riding */
+        assert(!sync_owner_jumped(m, 5, 68.332, 68.332));  /* nothing new */
+    }
     puts("puppet sync: OK");
     return 0;
 }
