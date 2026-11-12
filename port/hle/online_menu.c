@@ -1891,6 +1891,7 @@ static void room_update(MenuPage *p)
             return;
         }
         screen = HOME;
+        page.mouse = NULL, page.draw = NULL, page.title_y = 0;   /* HOME's taps and title again (not go: the reason stays) */
         menu_page_rebuild_at(p, home_row);
         return;
     }
@@ -2168,6 +2169,10 @@ int port_online_menu(void)
     page.right = page_right;
     page.title = "ONLINE";
     screen = HOME;
+    /* the room's own drawing and taps (room_open) are not HOME's: a room left over the rider screen
+       closes the page without go(HOME), and its tap handler took every tap on ONLINE after it
+       (finding 218: no row could be tapped; the pads still worked) */
+    page.mouse = NULL, page.draw = NULL, page.title_y = 0;
     if (!resumed) {
         home_row = 0;
         status[0] = 0;  /* a room that closed leaves its reason for HOME */
