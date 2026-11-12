@@ -367,7 +367,7 @@ typedef struct {
     int32_t hud_mode;      /* out */
     int32_t leave_race;    /* out */
     int32_t freeze;        /* out */
-    int32_t reserved;
+    int32_t flyover;       /* the camera's flight over the track plays (race phase 5; finding 209) */
 } HostTouch;  /* 64 bytes */
 void host_service_touch_field(uint32_t state);
 

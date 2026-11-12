@@ -422,11 +422,15 @@ void host_service_touch_field(uint32_t address)
     touch_tilt(touch, known, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
     TouchGame g;
     memset(&g, 0, sizeof g);
-    g.race_hud = h->race_hud, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
+    g.race_hud = h->race_hud, g.flyover = h->flyover, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
     for (int i = 0; i < 3; i++) g.pause_row[i] = h->pause_row[i];
     g.race_ms = h->race_ms, g.vsync = h->vsync, g.fps = h->fps;
     trace_race_ms = h->race_ms;
-    static int trace_air = -1;
+    static int trace_air = -1, trace_fly = 0;
+    if (trace_on() && h->flyover != trace_fly) {
+        fprintf(stderr, "touch log: flyover %d (%.0f ms)\n", h->flyover, ms_now());
+        trace_fly = h->flyover;
+    }
     if (trace_on() && !h->race_hud) trace_air = -1;   /* each race starts with a line */
     else if (trace_on() && h->air != trace_air) {
         fprintf(stderr, "touch log: air %d (%.0f ms) race %.0f ms\n", h->air, ms_now(), h->race_ms);
