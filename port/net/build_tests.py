@@ -68,5 +68,20 @@ def main():
     return subprocess.run(['cmd', '/c', cmd]).returncode
 
 
+def tool_dry_runs():
+    """The online test tools' argument paths, once, starting nothing (finding 202 round 4: a name
+    clash in online_race.py --bots crashed only once games were running)."""
+    tools = os.path.join(os.path.dirname(HERE), 'tools')
+    out = os.path.join(os.path.dirname(os.path.dirname(HERE)), 'build', 'check', 'online_race_dry')
+    run = [sys.executable, os.path.join(tools, 'online_race.py'), '--dry-run', '--out', out]
+    for extra in ([], ['--hidden', '--lag', '--bots', '2', '--link', 'delay=80,jitter=15']):
+        r = subprocess.run(run + extra, capture_output=True, text=True)
+        if r.returncode or 'dry run: done' not in r.stdout:
+            print('online_race.py dry run failed:', ' '.join(extra), r.stdout[-400:], r.stderr[-800:])
+            return 1
+    print('online tools: dry runs ok')
+    return 0
+
+
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main() or ('--no-run' not in sys.argv and tool_dry_runs()))

@@ -539,6 +539,21 @@ static double take_snapshot(Puppet *p, const Snapshot *s, SyncPose *owner, SyncP
     return carry;
 }
 
+/* The owner's own rider jumped between its last two snapshots further than its speed explains (the
+   game put it back on the track without a crash, round 4: 69-351 units with the rider standing):
+   a respawn here too. */
+static int owner_jumped(const Puppet *p, const Snapshot *s)
+{
+    for (int i = p->count - 1; i > 0; i--) {
+        if (&p->ring[i] != s) continue;
+        const Snapshot *before = &p->ring[i - 1];
+        float d[3] = {s->pos[0] - before->pos[0], s->pos[1] - before->pos[1], s->pos[2] - before->pos[2]};
+        float v = fmaxf(sync_len(s->vel), sync_len(before->vel));
+        return sync_len(d) > v * (float)(s->time - before->time) * 1.5f + SYNC_RESYNC;
+    }
+    return 0;
+}
+
 static void ease(float *vel, const float *to, float dt)
 {
     float d[3] = {to[0] - vel[0], to[1] - vel[1], to[2] - vel[2]}, n = sync_len(d), most = SYNC_EASE_ACCEL * dt;
@@ -610,7 +625,7 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
            the correction moves it at most SYNC_SLIDE_MOST faster or slower than it rides
            (puppet_sync.h), and is logged as a catch-up. */
         const char *why = !p->synced ? "first snapshot"
-                        : p->after_crash && error > SYNC_RESPAWN ? "respawn"
+                        : (p->after_crash && error > SYNC_RESPAWN) || (error > SYNC_RESYNC && owner_jumped(p, s)) ? "respawn"
                         : t - s->time >= SYNC_RESYNC_AGE ? NULL
                         : error > SYNC_PLACE_FAR ? "far"
                         : gap > SYNC_PLACE_SILENCE && error > SYNC_RESYNC ? "after silence" : NULL;
@@ -917,9 +932,24 @@ int hle_puppet_physics(uint8_t *r)
        on an AI rider they flip back and forth against it every field. */
     now = (int32_t)(FIELD(r, STATE_AT, uint8_t *) - r);
     if (!crashing && !remote && s->state > 0 && s->state < RIDER_SIZE && now != s->state) {
+        /* A State's Enter may move the rider itself: the reset to the track puts it on this game's
+           idea of the nearest spot (live: 312 units from where its owner's reset put it, for 0.2 s,
+           until the next placement). The snapshots say where it is: the pose before the switch
+           stays. */
+        SyncPose before;
+        body_pose(r, &before);
         pp.allow = 1;
         func_0012FE38(r, r + s->state);
         pp.allow = 0;
+        float d[3] = {FIELD(r, POS_AT, float) - before.pos[0], FIELD(r, POS_AT + 4, float) - before.pos[1],
+                      FIELD(r, POS_AT + 8, float) - before.pos[2]};
+        if (sync_len(d) > 1) {
+            float spin[3];
+            memcpy(spin, r + SPIN_AT, sizeof spin);
+            fprintf(stderr, "puppet: tick %d slot %d kept in place at a State switch (it moved %.0f units)\n", RACE_CLOCK,
+                    slot, sync_len(d));
+            set_body(r, &before, spin);
+        }
     }
     /* Progress: the checkpoints passed follow the owner's (crossings here can differ by a tick
        or after a respawn), so places and the finish order agree. */

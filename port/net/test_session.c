@@ -96,6 +96,13 @@ int main(void)
         client_lobby(&c,&l); assert(l.race_go_at == 9500.5);
         client_on_text(&c,"{\"type\":\"ended\"}",16); client_lobby(&c,&l); assert(l.race_go_at == 0);
         sent[0] = 0; client_race_go(&c,9500); assert(!sent[0]);  /* no race */
+        /* the race's last seconds on screen: its frames still go (finding 202 round 4), not after back */
+        {
+            unsigned char frame[4] = {1, 2, 3, 4};
+            assert(c.race_frames_until > net_now_ms() && client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
+            client_back(&c);
+            assert(!client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
+        }
         client_on_text(&c,start,strlen(start)); client_lobby(&c,&l); assert(l.race_go_at == 0);
         client_free(&c);
     }

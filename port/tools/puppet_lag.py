@@ -22,7 +22,8 @@ For every traced step of the other human's puppet:
               drawn more than 0.2 s behind: snapshots that stopped coming, which no way of
               drawing can hide).
 Steps where the sender is crashing or the path jumps (a respawn) are skipped. Times in ms."""
-import argparse, bisect, os, re, struct, sys
+import argparse
+import math, bisect, os, re, struct, sys
 
 JERK = 30.0  # units a second; riders move about 95
 from pathlib import Path
@@ -181,6 +182,37 @@ def resyncs(log, early=5.0):
     return counts
 
 
+def misplaced(log, own, trace, skew, far=20.0):
+    """Placements (PLACED lines) that put a rider more than `far` units from its owner's real pose:
+    the drawn rider (trace, puppet.txt) against the owner's recording (own) 0.05-0.3 s after the
+    placement (finding 202 round 4: a reset placed 312 units off for 0.2 s). A count and the worst."""
+    import bisect
+    tracks = {}
+    for slot, _, t, p, v, c, g in records(own):
+        T, P = tracks.setdefault(slot, ([], []))
+        if not T or t > T[-1]:
+            T.append(t); P.append(p)
+    drawn = {}
+    for line in Path(trace).read_text().splitlines():
+        f = line.split()
+        if len(f) >= 6:
+            drawn.setdefault(int(f[2]), []).append((float(f[0]), tuple(map(float, f[3:6]))))
+    count, worst = 0, 0.0
+    for tick, slot, why, units in PLACED.findall(log):
+        slot, t0 = int(slot), int(tick) / 60.0
+        T, P = tracks.get(0 if slot == 1 else slot, ([], []))
+        offs = []
+        for t, p in drawn.get(slot, []):
+            if t0 + 0.05 <= t <= t0 + 0.3:
+                i = bisect.bisect_left(T, t - skew)
+                if 0 < i < len(T):
+                    offs.append(math.dist(p, P[i]))
+        if offs and max(offs) > far:
+            count += 1
+            worst = max(worst, max(offs))
+    return count, worst
+
+
 def riders(run, start=1.0, end=1e9):
     """Every rider of a two-game race as each game draws it, against the other game's recording of
     all its riders (online_race.py --lag records them, DHD_PUPPET_FROM=all): the bench's own scores
@@ -199,6 +231,7 @@ def riders(run, start=1.0, end=1e9):
         skew = float(m[-1][1]) / 1000
         present = {slot for slot, *_ in records(own)}
         result = {'resyncs': resyncs(log)}
+        result['misplaced'] = misplaced(log, own, run / viewer / 'puppet.txt', skew)
         for kind in ('human', 'ai'):
             lines = []
             for line in (run / viewer / 'puppet.txt').read_text().splitlines():
@@ -235,7 +268,8 @@ def riders_report(run, start=1.0, end=1e9):
                       f"{s['back_min']:.1f} a minute")
         c = r['resyncs']
         print(f"{viewer} re-syncs: {c['early']} in the first 5 s, {c['later']} later, {c['after crash']} after crashes "
-              f"(placed: respawns); catch-ups by riding {c['catch early']} in the first 5 s, {c['catch later']} later")
+              f"(placed: respawns); catch-ups by riding {c['catch early']} in the first 5 s, {c['catch later']} later; "
+              f"placed more than 20 units from the owner's pose {r['misplaced'][0]} (worst {r['misplaced'][1]:.0f})")
 
 
 def main():
