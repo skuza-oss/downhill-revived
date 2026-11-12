@@ -1257,7 +1257,9 @@ static void mosh_send(int global, const MoshScore *s)
 
 /* A score EVENT: from the rider's owner, or for a player's own rider from that player's PC, whose
    final can arrive after the room said it left (and the host took the rider over: its own final
-   then stands here too, as on every PC that got it). A final one stays. */
+   then is the rider's takeover final). Two finals for one rider never go by arrival order: the
+   player's own final wins over a takeover owner's, a later takeover owner's over an earlier one's
+   (mosh_take, finding 221). */
 static void receive_score(int sender, const uint8_t *e, int n)
 {
     int global;
@@ -1267,7 +1269,7 @@ static void receive_score(int sender, const uint8_t *e, int n)
     int own_player = global < on.nslots && global == sender;
     if (hle_puppet_owner(global) != sender && !own_player) return;
     if (hle_puppet_owner(global) == on.local_slot && !(own_player && s.final)) return;  /* this PC's numbers */
-    if (mosh_take(&on.score[global], &s) && s.final)
+    if (mosh_take(&on.score[global], &s, sender, own_player) && s.final)
         fprintf(stderr, "online: round: %s's final score %u, %u hits taken (from player %d)\n",
                 rider_label(global, name, sizeof name), mosh_points(&s), s.hits, sender);
 }
@@ -1344,7 +1346,11 @@ static void mosh_step(void)
             MoshScore now;
             mosh_read(slot, &now);
             now.final = (uint8_t)on.round_over;  /* also a rider taken over after this PC's end */
-            if (!held->known || !mosh_same(held, &now)) *held = now, mosh_send(global, held);
+            if (!held->known || !mosh_same(held, &now)) {
+                /* this PC's own numbers: its player's own when the rider is this PC's player's */
+                now.from = (uint8_t)on.local_slot, now.by_player = (uint8_t)(global == on.local_slot && global < on.nslots);
+                *held = now, mosh_send(global, held);
+            }
         } else if (held->known)
             mosh_write(slot, held);
     }
@@ -1360,6 +1366,7 @@ static void mosh_step(void)
             MoshScore s;
             memset(&s, 0, sizeof s);
             s.part[1] = (uint32_t)score, s.hits = on.score[global].hits, s.known = s.final = 1;
+            s.from = (uint8_t)global, s.by_player = 1;  /* the room has the player's own report */
             on.score[global] = s;
             continue;
         }

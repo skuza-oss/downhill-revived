@@ -37,9 +37,46 @@ int main(void)
     assert(score_decode(e, sizeof e, &global, &b) && mosh_points(&b) == MOSH_MAX_SCORE);
     /* a held final is never replaced; a live one is */
     MoshScore held = score(100, 1, 0), late = score(50, 0, 0), fin = score(300, 2, 1);
-    assert(mosh_take(&held, &late) && mosh_points(&held) == 50);
-    assert(mosh_take(&held, &fin) && held.final);
-    assert(!mosh_take(&held, &late) && mosh_points(&held) == 300);
+    assert(mosh_take(&held, &late, 2, 0) && mosh_points(&held) == 50);
+    assert(mosh_take(&held, &fin, 2, 0) && held.final);
+    assert(!mosh_take(&held, &late, 2, 0) && mosh_points(&held) == 300);
+    assert(!mosh_take(&held, &fin, 2, 0));  /* the same sender's final again changes nothing */
+
+    /* Two finals for one rider (finding 221): rider 3, its player (sender 3) final 500, the host
+       (sender 0) took it over and finals 400. Whichever arrives first, the table gets 500. */
+    {
+        MoshScore player = score(500, 1, 1), host = score(400, 1, 1), h1, h2;
+        memset(&h1, 0, sizeof h1);
+        memset(&h2, 0, sizeof h2);
+        assert(mosh_take(&h1, &player, 3, 1) && !mosh_take(&h1, &host, 0, 0));
+        assert(mosh_take(&h2, &host, 0, 0) && mosh_take(&h2, &player, 3, 1));
+        assert(mosh_points(&h1) == 500 && mosh_points(&h2) == 500 && h1.by_player && h2.by_player);
+        assert(mosh_points(&h1) == mosh_points(&h2) && mosh_same(&h1, &h2));
+        /* the player's final stands against a second player's final too (a repeat) */
+        assert(!mosh_take(&h1, &player, 3, 1));
+        /* a live score from the takeover owner never replaces a final of any kind */
+        MoshScore live = score(900, 0, 0);
+        assert(!mosh_take(&h1, &live, 0, 0) && !mosh_take(&h2, &live, 0, 0));
+    }
+    /* Between two takeover owners (the host changed) the later one wins, in either order. The
+       receiver takes finals only from the current owner, so the later owner is the sender that
+       differs from the one held. */
+    {
+        MoshScore first = score(300, 2, 1), later = score(350, 2, 1), h1, h2;
+        memset(&h1, 0, sizeof h1);
+        memset(&h2, 0, sizeof h2);
+        assert(mosh_take(&h1, &first, 0, 0) && mosh_take(&h1, &later, 1, 0));  /* the old owner's first */
+        assert(mosh_take(&h2, &later, 1, 0));                                  /* the new owner's only */
+        assert(mosh_points(&h1) == 350 && mosh_points(&h2) == 350 && h1.from == 1 && h2.from == 1);
+        assert(!mosh_take(&h1, &first, 1, 0));  /* the later owner's own final again */
+    }
+    /* the player's final replaces a takeover final even after a second takeover owner's */
+    {
+        MoshScore a = score(300, 0, 1), b = score(350, 0, 1), p = score(500, 0, 1), h;
+        memset(&h, 0, sizeof h);
+        assert(mosh_take(&h, &a, 0, 0) && mosh_take(&h, &b, 1, 0) && mosh_take(&h, &p, 3, 1));
+        assert(mosh_points(&h) == 500 && !mosh_take(&h, &b, 1, 0));
+    }
 
     /* the table: points first, a tie to the lower global id; the same on every PC whatever order
        the scores arrived in (the table reads only the numbers) */
