@@ -70,6 +70,16 @@
     "saved": "[x]\u000ano equals sign here\u000afoo = bar\u000aDHD_SOMETHING = 7\u000aDHD_EMPTY =\u000a= no key\u000agame_options = 1 2 3\u000ascale = 3\u000a"
   },
   {
+    "name": "touch steering: the D-pad",
+    "text": "touch_preset = thumb\u000d\u000atouch_steer = tilt\u000d\u000ascale = 3\u000d\u000a",
+    "stored": true,
+    "set": [],
+    "save": ["touch_steer", "dpad"],
+    "vars": [["DHD_ENV_OVERRIDES", ","], ["DHD_SCALE", "3"], ["DHD_WINDOW", "borderless"], ["DHD_WINDOW_WIDTH", "monitor"], ["DHD_WINDOW_HEIGHT", "monitor"], ["DHD_WIDESCREEN", "1"], ["DHD_ASPECT", "wide"], ["DHD_PRESENT_FILTER", "linear"], ["DHD_RENDER", "native"], ["DHD_SKIP_MOVIES", "1"], ["DHD_VIBRATION", "1"], ["DHD_STICK_DEAD_ZONE", "game"], ["DHD_PROMPTS", "auto"], ["DHD_TEXTURES", "on"], ["DHD_FONT", "sharp"], ["DHD_SHADOWS", "1"], ["DHD_LENS_FLARE", "1"], ["DHD_PARTICLES", "1"], ["DHD_NATIVE_VU1", "on"], ["DHD_FPS", "60"], ["DHD_VSYNC", "1"], ["DHD_PERF_COUNTER", "0"], ["DHD_UNLOCK_ALL", "0"], ["DHD_TOUCH_PRESET", "thumb"], ["DHD_TOUCH_HAND", "right"], ["DHD_TOUCH_STEER", "tilt"], ["DHD_TOUCH_SIZE", "auto"], ["DHD_TOUCH_OPACITY", "60"], ["DHD_TOUCH_STICK", "floating"], ["DHD_TOUCH_STICK_RANGE", "12"], ["DHD_TOUCH_TRICK_STICK", "31"], ["DHD_TOUCH_LABELS", "auto"], ["DHD_TOUCH_ATTACKS", "flick"], ["DHD_TOUCH_VIBRATION", "1"], ["DHD_TOUCH_WITH_PAD", "hide"], ["DHD_TOUCH_TILT_STRENGTH", "50"], ["DHD_NET_SERVER", "wss://dhd.skuza.app"], ["DHD_NAMES", "small"], ["DHD_NET_ROOM_REGION", "auto"], ["DHD_DISCORD", "on"]],
+    "unknown": [],
+    "saved": "touch_preset = thumb\u000d\u000atouch_steer = dpad\u000d\u000ascale = 3\u000d\u000a"
+  },
+  {
     "name": "the environment wins",
     "text": "fps = 144\u000ascale = 4\u000a",
     "stored": true,

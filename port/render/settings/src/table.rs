@@ -137,14 +137,15 @@ pub const SETTINGS: &[Setting] = &[
     switch("perf_counter", "DHD_PERF_COUNTER", SWITCH, "0", "0"),
     switch("unlock_all", "DHD_UNLOCK_ALL", SWITCH, "0", "0"),
     // The touch controls on phones (finding 141, port/hle/touch.c; the TOUCH CONTROLS pages): the
-    // preset, the hand (left mirrors the controls and the HUD), stick or tilt steering, the size (auto:
+    // preset, the hand (left mirrors the controls and the HUD), steering by the stick, by tilt or by
+    // a four-button D-pad (finding 214; an older dhd.ini has no line and keeps the stick), the size (auto:
     // the screen height's rule, 100% at most) and the opacity, the steering stick (floating or fixed)
     // and its range, the trick stick's size, the trick labels, the attacks (flick off PEDAL or
     // buttons), vibration, whether a controller hides the overlay, tilt's strength and centre (degrees),
     // the hints already shown (a number) and the layout editor's changes.
     choice("touch_preset", "DHD_TOUCH_PRESET", &[c("thumb", "Thumb zones"), c("classic", "Classic pad")], "classic", "classic"),  // the full pad by default
     choice("touch_hand", "DHD_TOUCH_HAND", &[c("right", "Right"), c("left", "Left")], "right", "right"),
-    choice("touch_steer", "DHD_TOUCH_STEER", &[c("stick", "Stick"), c("tilt", "Tilt")], "stick", "stick"),
+    choice("touch_steer", "DHD_TOUCH_STEER", &[c("stick", "Stick"), c("tilt", "Tilt"), c("dpad", "D-pad")], "stick", "stick"),
     choice("touch_size", "DHD_TOUCH_SIZE", &[c("auto", "Auto"), c("70", "70%"), c("75", "75%"), c("80", "80%"), c("85", "85%"),
                                              c("90", "90%"), c("95", "95%"), c("100", "100%"), c("105", "105%")], "auto", "auto"),
     choice("touch_opacity", "DHD_TOUCH_OPACITY", &[c("25", "25%"), c("30", "30%"), c("35", "35%"), c("40", "40%"), c("45", "45%"),

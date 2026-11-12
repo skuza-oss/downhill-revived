@@ -32,7 +32,7 @@ static const SettingChoice setting_choices_perf_counter[] = {{"0", "OFF"}, {"1",
 static const SettingChoice setting_choices_unlock_all[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_touch_preset[] = {{"thumb", "Thumb zones"}, {"classic", "Classic pad"}};
 static const SettingChoice setting_choices_touch_hand[] = {{"right", "Right"}, {"left", "Left"}};
-static const SettingChoice setting_choices_touch_steer[] = {{"stick", "Stick"}, {"tilt", "Tilt"}};
+static const SettingChoice setting_choices_touch_steer[] = {{"stick", "Stick"}, {"tilt", "Tilt"}, {"dpad", "D-pad"}};
 static const SettingChoice setting_choices_touch_size[] = {{"auto", "Auto"}, {"70", "70%"}, {"75", "75%"}, {"80", "80%"}, {"85", "85%"}, {"90", "90%"}, {"95", "95%"}, {"100", "100%"}, {"105", "105%"}};
 static const SettingChoice setting_choices_touch_opacity[] = {{"25", "25%"}, {"30", "30%"}, {"35", "35%"}, {"40", "40%"}, {"45", "45%"}, {"50", "50%"}, {"55", "55%"}, {"60", "60%"}, {"65", "65%"}, {"70", "70%"}, {"75", "75%"}, {"80", "80%"}, {"85", "85%"}, {"90", "90%"}, {"95", "95%"}, {"100", "100%"}};
 static const SettingChoice setting_choices_touch_stick[] = {{"floating", "Floating"}, {"fixed", "Fixed"}};
@@ -72,7 +72,7 @@ static const SettingInfo setting_table[] = {
     {"unlock_all", "DHD_UNLOCK_ALL", "0", setting_choices_unlock_all, 2},
     {"touch_preset", "DHD_TOUCH_PRESET", "classic", setting_choices_touch_preset, 2},
     {"touch_hand", "DHD_TOUCH_HAND", "right", setting_choices_touch_hand, 2},
-    {"touch_steer", "DHD_TOUCH_STEER", "stick", setting_choices_touch_steer, 2},
+    {"touch_steer", "DHD_TOUCH_STEER", "stick", setting_choices_touch_steer, 3},
     {"touch_size", "DHD_TOUCH_SIZE", "auto", setting_choices_touch_size, 9},
     {"touch_opacity", "DHD_TOUCH_OPACITY", "60", setting_choices_touch_opacity, 16},
     {"touch_stick", "DHD_TOUCH_STICK", "floating", setting_choices_touch_stick, 2},
