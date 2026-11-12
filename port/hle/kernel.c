@@ -836,8 +836,27 @@ static void slow_frame(void)
     last = host_wall_seconds();
 }
 
+/* A field that came long after the one before it, in dhd.log (finding 211: a phone's 2.9 s freeze
+   going from an online race to its room showed only as a perf: line's max=, not where it was):
+   "stall: field N came T ms after the last (menu M phase P)". The game's own loads are such
+   gaps too; the lines around it say which. At most 40 a run; host-side logging only. */
+static void stall_log(void)
+{
+    static double last;
+    static int lines;
+    double now = host_wall_seconds();
+    if (last > 0 && now - last > 0.4 && lines < 40) {
+        lines++;
+        hle_log("stall: field %llu came %.0f ms after the last (menu %d phase %d)\n", (unsigned long long)kernel_vsync_count + 1,
+                (now - last) * 1000, (int)*(volatile int32_t *)(uintptr_t)(0x08000000u + 0x29DED8),
+                (int)*(volatile int32_t *)(uintptr_t)(0x08000000u + 0x43F348));  /* the shell's menu word, the race phase */
+    }
+    last = now;
+}
+
 static void vsync(void)
 {
+    stall_log();
     slow_frame();
     port_clock_observe();
     int fresh = paced && jit_on();

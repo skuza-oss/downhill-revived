@@ -604,6 +604,7 @@ static void put32(uint8_t *o, int32_t v) { memcpy(o, &v, 4); }
 static int32_t get32(const uint8_t *i) { int32_t v; memcpy(&v, i, 4); return v; }
 
 #include "online_start.h"
+#include "online_end.h"
 
 /* Pickup pool: retail allocates 150 entries in level-file order (001961D8).
    Only the index travels, never a pointer. Type, track and exact spawn xyz guard it. */
@@ -967,8 +968,10 @@ void func_0020F9F0(int font, int view, int x, int y, const char *text);
    one until the loop runs again), so the request is made again on the loop's first frame after
    RESUME (hle_online_loop_frame): the menu opens again and leaves at once (finding 165). */
 static int quit_on_pause;
+static double left_at;  /* wall time of the request: the front end's load is the time until race_left */
 static void leave_race(void)
 {
+    left_at = host_wall_seconds();
     quit_on_pause = 1;
     EE32(0x3F52D0 + 0x130) = 0;  /* the pad that paused (D_003F52D0.x130): this PC's */
     func_001B45F8(EE_PTR(0x4B1F40), 2, 0);
@@ -1655,10 +1658,18 @@ static void state_sync(void)
         const NetMember *me = self_member(&lobby);
         int out = lobby.state != NET_RACING || !me || !me->in_race;
         if (!on.leave_at && out) {
-            if (!on.leave_reason)  /* one the start gave stays (start_step) */
-                on.leave_reason = FINISHED(0) ? "RACE OVER" : lobby.last_race_id != on.last_race_id
-                                  ? "TIME UP - DNF" : "THE HOST ENDED THE RACE";
-            fprintf(stderr, "online: race closed: back to the room\n");
+            if (!on.leave_reason) {  /* one the start gave stays (start_step) */
+                RaceEnd end = {.ended = lobby.ended,
+                               .link_lost = lobby.offline || lobby.state == NET_FAILED || lobby.state == NET_IDLE ||
+                                            lobby.state == NET_RECONNECTING,
+                               .removed = !strcmp(lobby.error_code, "kicked"), .finished = FINISHED(0),
+                               .own_dnf = me ? me->dnf_reason : "", .new_result = lobby.last_race_id != on.last_race_id};
+                on.leave_reason = race_end_reason(&end);
+                fprintf(stderr, "online: race closed: back to the room (%s: ended %d, link %d, own %s/%s, "
+                        "result %d)\n", on.leave_reason, end.ended, end.link_lost, me ? me->race_state : "-",
+                        end.own_dnf, end.new_result);
+            } else
+                fprintf(stderr, "online: race closed: back to the room\n");
             on.leave_at = now + 2;
         }
         watch_step(&lobby);
@@ -2002,7 +2013,9 @@ static void back_to_room(void)
 {
     test_menu_reset();
     race_menu_reset(&race_menu);
-    fprintf(stderr, "online: this PC's race is over; back to the room\n");
+    fprintf(stderr, "online: this PC's race is over; back to the room (%.0f ms after the race screen was asked to leave)\n",
+            left_at ? (host_wall_seconds() - left_at) * 1000 : 0.0);
+    left_at = 0;
     round_mode_off();
     host_service_net_back();  /* out of the race: unless it finished, DNF (gave up) */
     hle_puppet_offline();

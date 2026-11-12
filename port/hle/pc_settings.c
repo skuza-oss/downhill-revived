@@ -557,7 +557,13 @@ static void page_draw(MenuPage *p)
                 words[i] = control_pad_inputs[k].label[pad - 1 == PAD_KIND_PLAYSTATION ? 1 : pad - 1 == PAD_KIND_NINTENDO ? 2 : 0];
         }
     }
-    snprintf(legend, sizeof legend, "%s / %s  Tabs", words[0], words[1]);
+    /* A phone with touch controls and no pad has no A / D (nor L1 / R1) to press: what it can do
+       is tap a tab's name (page_header_mouse); the keyboard's keys are not offered there
+       (finding 211). With a pad connected the pad's own buttons are. DHD_TOUCH is set by the host
+       where touch controls are on: a phone, or a desktop whose mouse is a finger (checks only). */
+    const char *touch = host_getenv("DHD_TOUCH");
+    if (pad <= 0 && touch && *touch) snprintf(legend, sizeof legend, "Tap a tab");
+    else snprintf(legend, sizeof legend, "%s / %s  Tabs", words[0], words[1]);
     menu_draw_text(MENU_CENTRE, 256, 180, legend, &style);
 }
 

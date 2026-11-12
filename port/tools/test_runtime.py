@@ -94,6 +94,7 @@ def guest_tests():
     run('pad-snapshot', [HLE / 'test_pad_snapshot.c'])
     run('state-bundle', [HLE / 'test_state_bundle.c'])  # STATE bundles fit a datagram (finding 169)
     run('online-start', [HLE / 'test_online_start.c'])  # no solo start (finding 187)
+    run('online-end', [HLE / 'test_online_end.c'])  # why a race closes, never the wrong blame (finding 211)
     run('disc-notice', [HLE / 'test_disc_notice.c'])  # a changed disc image's notice, once per image (finding 208)
     run('puppet-sync', [HLE / 'test_puppet_sync.c'])  # puppets steered by their snapshots (finding 202)
     run('puppet-link', [HLE / 'test_puppet_link.c'])  # the test link: loss, delay, outages, hitches (finding 202)

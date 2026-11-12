@@ -26,7 +26,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | Renderer (GS, Rust/wgpu) | 021 GS core, 084 WGSL, 085/086 Rust renderer, 088 CL2, 131 draw pass, 045/136 scale, 171 lost device | 025, 031-033, 035, 038 |
 | VU0/VU1 | 016, 019, 030, 090 (VU1R, OP3, SP1) | 027, 029, 037 |
 | Audio and movies | 022, 133, 055 | |
-| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 186 P2P rooms (hub star, SFU fallback), 169 snapshots and prediction, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
+| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 186 P2P rooms (hub star, SFU fallback), 169 snapshots, 202 puppets on this game's physics, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
 | Menus, settings, input | 050, 064, 092, 101/102 settings, 059/134 controllers, 141 touch, 056/140 widescreen | 065 (WM_CHAR part) |
 | Launcher, releases, installers | 093, 125, 138, 143, 098 disc check | 053, 054, 070 |
 | Speed (PC) | 089, 090, 129 perf log, 130/131 iGPU | 031, 032, 046, 048, 051, 066, 069 |
@@ -241,6 +241,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 208 | [the Bike Shop closes the game on a Redmi Note 13 4G (issue #78)](208-bike-shop-crash-redmi-note-13.md) | current |  |
 | 209 | [Touch controls can skip the flight over the track](209-touch-skip-flyover.md) | current |  |
 | 210 | [EXIT GAME on Android aborts in the C library while the process ends](210-android-exit-abort.md) | current |  |
+| 211 | [Three small online and phone UI bugs: wrong race-end message, room stall, keyboard tab...](211-online-ui-small.md) | in progress |  |
 | 213 | [stack locals that the EE frame makes one object (the class of 094 and 207)](213-stack-overrun-sweep.md) | current |  |
 | 214 | [A D-pad as a touch steering choice, and the touch gaps beside the flyover](214-touch-dpad-and-gaps.md) | in progress |  |
 | 215 | [Online, the race menu does not pause the race](215-online-menu-no-pause.md) | current |  |

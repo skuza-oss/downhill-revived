@@ -102,7 +102,14 @@ typedef struct {
        result[i]'s, -1 none. */
     int server_scores;
     int member_score[NET_MAX_SLOTS], result_score[NET_MAX_SLOTS];
+    /* How the race this PC took part in ended, from the room's "ended" message (NET_ENDED_*; 0 until
+       it comes, cleared at each start). The message arrives before the room snapshot that carries
+       the race's results, so a game that looked at lastRace to tell the reasons apart saw "no new
+       result" for a moment and blamed the host (finding 211). */
+    int ended;
 } NetLobby;
+enum { NET_ENDED_NONE, NET_ENDED_DONE /* all finished or out, or the finish window ran out */,
+       NET_ENDED_VOID /* the host ended it */, NET_ENDED_UNKNOWN /* an older server: no reason */ };
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */
 typedef struct {

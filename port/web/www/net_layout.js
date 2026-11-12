@@ -342,6 +342,10 @@ export const layout = {
     "result_score": [
       5196,
       40
+    ],
+    "ended": [
+      5236,
+      4
     ]
   },
   "NetLobbyInfo": {
