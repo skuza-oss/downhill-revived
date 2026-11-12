@@ -54,6 +54,11 @@ the P2P star (unless a bug there is part of the problem).
       controller), the owner's turn scale in the record, placement only on real discontinuities,
       the hitch's hand-over, short stops ridden through; local main merged again (6c1650df).
       Not reached: the 150 ms computer riders' error and jolts, the host stops' 1.5-unit steps.
+- [x] Round 4 ("Round 4" below): computer riders take their owners' racing line (bench 150 ms p95
+      4.35 -> 2.75, live 3.6-3.7 in two of three races), host stops eased and timed by their
+      sender, live-view clips; the verifier's three (online_race.py --bots, a reset drawn 312
+      units off, the race's last seconds) and the phone's stuck rider; local main merged (6e8579d0).
+      Not reached: host stops' 1.5-unit steps, one 150 ms race in three.
 - [x] Merged into `main` (ad0135bd); the lead's checks there on 2026-11-12: `check.py port` and
       `server`, the seven state traces, live races on one PC (80 and 150 ms, the arena's round, a
       room of six racers) and PC <-> Mac both ways with and without TURN ("Checked on the merged
@@ -779,3 +784,231 @@ loaded PC).
 - A rider reset to the track (no crash) was once first shown about 310 units off for 0.2 s.
 - A finished rider's puppet and the computer riders drift in the last 2 s before the race closes.
 - `online_race.py --bots` (the `log` name clash above).
+
+## Round 4 (the lead's review): the owner's racing line, host stops eased, live clips
+
+Commits bd2f84e4 (the racing line in the record, eased holds and catch-ups, HOLD timed by its
+sender, the exact replay and `clip --live`), then the merge of local main and the finding.
+
+### Computer riders take their owners' racing line
+
+What the record carries (44 bytes, every record; zero and `0xFFFF` nodes for a player's rider): the
+racing-line node the owner's AI controller heads for (`+0x74`) and the one it has chosen next
+(`+0x78`), as indexes into the node array `D_0029EA20` (0x20 bytes a node, the same static array
+in every game; at most 2117 fit before `D_002AF2C0`); its target point (`+0x30`: the node's
+position plus the sideways offset) and the next (`+0x50`); the offset (`+0x220`, x and y) and the
+one it eases toward (`+0x230`). Bundle payload version 6 -> 8. A ten-rider tick still fits: a
+normal tick's records grow from about 110 to about 155 bytes (two bundles of at most 990); the
+full pad refresh (730 bytes a record, once a second) was already one bundle a rider and stays so,
+and the riders' refreshes are staggered (`hle_puppet_start`: three ticks apart).
+
+What the guest does (`take_line`, before its controller runs, once per newer snapshot):
+- same node: it takes the next node, both target points and the offsets (and the directions and
+  lengths `+0xF0`/`+0x270`, `+0x100`/`+0x274` between the targets);
+- a node behind (its chosen next is the owner's node): the game's own advance, `func_0010B2B8(ai,
+  NULL)`, which does the bookkeeping (the previous target, the distances, the next node's
+  default), then as above;
+- a node ahead (it reached the owner's next node first): nothing; the next snapshot brings the
+  owner's choice after it;
+- anything else (another fork, a re-snap): `func_0010B2B8(ai, node)` jumps there (its random offset
+  and next node are then replaced by the owner's).
+
+Its controller then steers the owner's line from where the puppet is, at once. On the ground the
+puppet keeps its own controller's steering words and turn scale; in the air the owner's words
+stay (there they are tricks, air spins, which this game's controller would choose with its own
+random draws). The owner's pedal and every other word stay the owner's.
+
+What the write must not break:
+- **The controller's own bookkeeping when the node jumps:** the jump goes through the game's own
+  advance. Only fields the advance itself sets are written after it.
+- **A puppet handed to this game's AI** (its player left, or the host migrated and this game now
+  runs the computer riders): its controller holds valid nodes from the same array and targets on
+  the line. It goes on from there like any AI rider; nothing points outside the array (indexes are
+  checked against it).
+- **Older games:** rooms refuse mixed builds (`hello.version`), and the bundle version changes, so
+  an older game would drop the bundles rather than misread them. The release needs no
+  `MIN_VERSION` raise for this.
+
+Bench (track 0, a new recording `truth5`, 888-byte records), line off against on:
+
+| link | line off: error p50 / p95 / p99 | line on | jolts a minute off / on |
+|---|---|---|---|
+| 80 ms | 0.41 / 1.89 / 3.0 | 0.26 / 1.30 / 2.5 | 1.0 / 1.0 |
+| 150 ms | 0.90 / 4.35 / 6.8 | 0.53 / 2.75 / 4.5 | 2.3 / 0.9 |
+| bad | 1.15 / 6.16 / 12.0 | 0.65 / 3.65 / 6.3 | 3.2 / 1.5 |
+
+The experiment that decided it: the puppets' own controllers' steering words on the bench (where
+this game's controller already follows nearly the same line) took 150 ms from p95 4.44 to 3.08
+and the bad link from 6.36 to 3.85. The owner's words were good, only late.
+
+### Host stops
+
+- **HOLD timed by its sender:** HOLD carries how long its sender's game has given no bundle when it
+  leaves (u16 ms; 13 bytes now). A receiver holds a stop only from 0.25 s by that, so the link's
+  delay no longer counts toward it (round 3 held even a 0.3 s stop for about 0.15 s).
+- **Eased:** a held rider brakes to a stop along its way. Its speed when released, the catch-up
+  glide's speed toward its sender's rate, and the speed guard all change at most 900 units a
+  second each second (0.25 units of a step's travel at 60). The glide's position now goes through
+  the usual slide, with its speed and acceleration limits.
+
+The record also carries nothing new for the hold: HOLD itself grew by 2 bytes (13 now).
+
+### The verifier's three (lead, after the merge of round 3)
+
+- **`online_race.py --bots` crashed with a TypeError:** in the bots' loop a bot's open log file was
+  named `log`, the name that held the games' log file name, and the next `da / log` failed. Renamed
+  (`game_log`, `bot_out`). `online_race.py --dry-run` walks every path the tool takes (both games'
+  settings, each bot's command line, every log it would watch) and starts nothing. `build_tests.py`
+  runs it with and without bots, so `check.py port` (`net_tests`) would have caught it.
+- **A reset rider drawn 312 units off for 0.2 s:** the host's player rider was reset to the track
+  (a 260-unit jump, standing, crash flags 27 then 11: not the crashing bit). The guest placed its
+  puppet at the owner's new pose, and in the same step switched it to its owner's State. That
+  State's Enter is the game's own reset to the track, which put the rider on *this* game's idea of
+  the nearest spot, 312 units from where the owner's reset had put it. The next placement (0.2 s
+  later, the State already the same) corrected it. Now a State switch on a puppet keeps the pose
+  the snapshots gave it (logged "kept in place at a State switch"). An owner's own jump between two
+  snapshots, further than its speed explains, is logged and counted as a respawn. The live scoring
+  counts placements that put a rider more than 20 units from its owner's real pose 0.05-0.3 s later
+  (`puppet_lag.misplaced`).
+- **After the last finish:** a finished rider's owner goes on sending its snapshots (and the host
+  its computer riders') while its race screen runs: the owner's rider rolls out as its game runs it,
+  and the puppet does what the snapshots say. But the network client stopped passing race frames the
+  moment the room ended the race (`"ended"`, or this member out of the race), while both games show
+  the race about 2 s longer (`online.c`: `leave_at = now + 2`). In that time every puppet rode on
+  blind: in the verifier's PC to Mac runs the host's count of sent computer-rider snapshots froze at
+  the last result (5409) with its race clock still running. The client now lets race frames pass
+  for 3 s after the race ends (`client.h` `race_frames_until`; 0 once the game is back), so the
+  last seconds are drawn from snapshots. Not measured live over the internet; the session test
+  checks the frames pass and stop at `client_back`.
+
+
+- **The phone's stuck rider** (the lead's race with a phone hosting): the PC's scripted rider stood
+  stuck while pedalling for 2 s on its own screen (its game's collision recovery then put it back),
+  and the phone's puppet of it rode on until 105-158 units ahead, placed as "far". Now the speed
+  guard eases a puppet much faster than its owner down as well as a slow one up, and the recovery's
+  jump is a respawn (the owner's own jump between two snapshots). Not measured with the phone.
+
+### What the release must do
+
+Nothing on the server. The bundle payload version is 8 (6 before; rooms already refuse mixed builds
+by `hello.version`), the record is 44 bytes longer (the racing line), HOLD is 13 bytes (its stop's
+length). No `MIN_VERSION` raise is needed for these: a mixed room cannot form. The recordings of
+the bench tools are 888 bytes a record (`puppet_lag.SNAP_SIZE`); older recordings need re-recording.
+
+### Live, round 4
+
+Whole races (70 s, two games on the hidden desktop, local server, the real SFU, eight host computer
+riders, the links of round 3), on bd2f84e4 (r4d: the racing line, the eased stops); three more on
+8a9d41c3 (r4e: plus the reset and race-end fixes), the same seeds as race 1 and 2. No other online
+runs on the PC except where noted: another worker's phone check held a game slot during the r4e
+races, and one r4e race at 150 ms (seed 73) is left out (the two games never saw each other: no GO
+skew, each won its own race).
+
+| race | AI riders on the guest: error p50 / p95 / p99 | sunk / deep % | jolts a min | placed (first 5 s / later) | respawns | misplaced | catch-ups | guest sees host player p50 / p95 / p99 | host sees guest p50 / p95 / p99 |
+|---|---|---|---|---|---|---|---|---|---|
+| 80 ms #1 | 0.37 / 2.08 / 4.6 | 0.7 / 0.04 | 1.7 | 0 / 1 | 5 | 0 | 4 | 0.20 / 1.20 / 2.4 | 0.16 / 1.05 / 1.7 |
+| 80 ms #2 | 0.44 / 2.34 / 4.3 | 0.9 / 0.06 | 2.2 | 0 / 2 | 7 | 0 | 1 | 0.21 / 1.31 / 3.7 | 0.13 / 1.27 / 4.7 |
+| 80 ms #3 | 0.36 / 2.29 / 4.4 | 0.9 / 0.08 | 1.8 | 0 / 1 | 6 | 0 | 1 | 0.13 / 0.73 / 1.5 | 0.23 / 1.91 / 4.6 |
+| 150 ms #1 | 0.68 / 3.59 / 7.2 | 0.7 / 0.01 | 2.9 | 0 / 0 | 6 | 0 | 22 | 0.35 / 2.91 / 10.1 | 0.24 / 2.05 / 4.3 |
+| 150 ms #2 | 0.70 / 3.71 / 8.4 | 1.0 / 0.11 | 1.7 | 0 / 0 | 11 | 0 | 10 | 0.54 / 3.89 / 6.6 | 0.28 / 2.15 / 5.1 |
+| 150 ms #3 | 0.71 / 4.47 / 10.3 | 0.9 / 0.06 | 5.9 | 0 / 0 | 10 | 0 | 30 | 0.41 / 3.12 / 6.1 | 0.41 / 2.88 / 8.1 |
+| bad #1 | 0.85 / 4.88 / 9.7 | 0.8 / 0.03 | 4.8 | 0 / 2 | 9 | 1 | 17 | 0.23 / 1.96 / 4.4 | 0.33 / 4.26 / 10.3 |
+| bad #2 | 1.05 / 5.83 / 13.9 | 1.5 / 0.16 | 12.1 | 0 / 0 | 12 | 0 | 55 | 0.32 / 2.06 / 5.3 | 0.32 / 2.30 / 6.3 |
+| bad #3 | 0.92 / 5.50 / 10.4 | 1.1 / 0.06 | 4.0 | 0 / 0 | 7 | 0 | 30 | 0.32 / 3.83 / 6.6 | 0.32 / 2.55 / 4.8 |
+| 150 ms, r4e #1 | 0.86 / 5.26 / 14.6 | 0.9 / 0.04 | 15.9 | 0 / 1 | 8 | 0 | 71 | 0.28 / 2.85 / 10.8 | 0.26 / 2.43 / 7.2 |
+| 150 ms, r4e #2 | 0.77 / 4.43 / 8.6 | 0.9 / 0.03 | 7.5 | 0 / 0 | 9 | 0 | 29 | 0.36 / 3.12 / 5.2 | 0.28 / 1.86 / 5.2 |
+| bad, r4e #1 | 0.86 / 5.24 / 12.1 | 1.3 / 0.09 | 8.1 | 0 / 0 | 1 | 0 | 43 | 0.33 / 4.31 / 9.0 | 0.31 / 4.29 / 8.1 |
+
+Against the targets (150 ms: p95 under 4, jolts under 5 a minute, at most 1 placement a race; bad: at
+most 3 placements; 80 ms no worse than round 3):
+- **150 ms, r4d: met in races 1 and 2** (p95 3.59, 3.71; jolts 2.9, 1.7; no placements), race 3 just
+  over (4.47, 5.9). **r4e: not met** (5.26 and 4.43; 15.9 and 7.5 jolts): race 1 had two SFU stalls
+  (71 catch-ups bunched at 9 s and 46-47 s, snapshots 200-225 ms old), not the model (no State rule
+  fired, no game late). Round 3: p95 5.7-7.8, jolts 6-13.5.
+- **Placements: met.** 150 ms 0, 0, 0 (r4d) and 1, 0 (r4e); bad 2, 0, 0 and 0. The 80 ms ones (1, 2, 1)
+  are an owner's reset (the host's player standing 69 units off, then 176-351 units: the game putting
+  a rider back on the track without the crash bit), which r4e counts as respawns. None put a rider
+  more than 20 units from its owner's pose (the new `misplaced` count).
+- **80 ms: better than round 3** (p95 2.1-2.3 against 2.8-3.0; jolts 1.7-2.2 against 1.0-3.0).
+- **Sunk: better** (0.7-1.0 % at 150 ms against 1.5-1.6 %).
+
+What the remaining error is made of (r4d, the guest's view of the computer riders, steps over 30
+units a second; a scratch script beside the runs, not in the repository):
+
+| link | along p50 / p95 | sideways | height | turns p95 | straights p95 |
+|---|---|---|---|---|---|
+| 150 ms (three races) | 0.20 / 1.65-2.16 | 0.37-0.40 / 2.12-2.41 | 0.21 / 1.66-2.29 | 3.47-3.86 | 3.25-4.51 |
+| bad (three) | 0.27-0.34 / 2.41-3.33 | 0.46-0.52 / 3.02-3.73 | 0.28-0.37 / 2.41-3.56 | 4.91-6.31 | 4.73-6.30 |
+| 80 ms (three) | 0.10-0.13 / 0.90-1.08 | 0.20-0.25 / 1.19-1.64 | 0.11-0.13 / 0.99-1.05 | 1.84-2.20 | 2.15-2.63 |
+
+The line is no longer the larger part: along, sideways and height are about equal, and turns no worse
+than straights. What is left is the 150 ms itself (a jump's flight, a landing, a bump begun since the
+last snapshot) and the link's stalls (the catch-ups come in bunches at the SFU's stalls).
+
+### Host stops, live
+
+Host test stops at race second 20 (`DHD_NET_TEST_HITCH`, 80 ms link), the guest's view of the nine
+host riders from the stop to 3 s after it ends; "largest step change" is |p[k] - 2 p[k-1] + p[k-2]|
+(units), every step but crashes (since round 4 the release step counts too).
+
+| build | stop | holds | placed (not respawns) | catch-ups | largest step change |
+|---|---|---|---|---|---|
+| r4e | 0.3 s (two races) | 0, 9 | 0, 0 | 39, 33 | 3.49, 3.15 |
+| r4e | 0.8 s (three) | 9, 9, 9 | 0, 0, 0 | 23, 26, 23 | 3.79, 3.68, 4.00 |
+| r4e | 3 s (three) | 9, 9, 9 | 0, 0, 0 | 0, 0, 0 | 3.72, 3.98, 3.83 |
+| r4f | 3 s (one) | 9 | 2 (far: 58, 50) | 28 | 54 (a placement) |
+
+**Not met: steps of 3-4 units** (target 1.5). Where they are (rider 7, r4e 0.3 s): the glide
+eases its speed up to the sender's catch-up rate (2.3 to 4.5 units a step, changes of 0.2-0.8 a
+step), then at the glide's end the rider's own physics speed takes over in one step (4.5 to 1.0:
+3.49). The game's physics keeps its own speed state, which a body velocity set each step only
+overrides for that step. r4f (70a288fa) eases the speed back down after the glide. Its one valid stop
+race (3 s) had two far placements during the catch-up, the puppet faster than its owner (167
+against 96 units a second): the ease-out (or the stronger guard) did not do what it should there,
+and was not taken further.
+The other r4f stop races were lost to an SFU outage on this PC: every attempt, both games, "SFU
+connection failed (DTLS error: timeout: handshake)" over the TURN relay, from about 02:45. The
+P2P Mosh round right after it passed.
+
+The bench's stopped sender (truth5): r4d 0.8 s p99 17.4, 3 s p99 38.7; the final code (r4f) 16.7
+and 35.5 (v0.7.16's model 8.4 and 23.1). The final code elsewhere: 150 ms 0.54 / 2.68 / 4.4 (2.3 jolts
+a minute), bad 0.66 / 3.60 / 6.5 (3.3). During the stop the bench's truth is the sender's frozen rider; a receiver learns of the stop
+a link delay plus the HOLD threshold (0.25 s by its sender's clock) late, so its riders have ridden
+0.3-0.4 s past it (35-42 units at that moment), and then lag their sender's twice-speed catch-up by
+9-26 units while their speed eases up. Holding sooner is what round 3's loaded races argued
+against (a dead stop and a burst at every short stall); this trade is deliberate, and the bench
+rows say what it costs at a long stop.
+
+### Clips
+
+`clips/live/` beside the other clips (not in the repository): live recordings replayed exactly
+(`puppet_bench.py clip --live RUN`), the host's own rider on the left and the guest's drawing of it
+on the right, 4x, 6 s. Watch first: `150ms-v0716.mp4` then `150ms-now.mp4` (computer rider 7 at
+58 s; the v0.7.16 model had 8 steps of over 4 units there). Also `bad-v0716.mp4` and
+`bad-now.mp4` (rider 7 at 30 s), and `hoststop-0.8s-now.mp4` (rider 3 from 19.5 s, the host
+stopping at 20 s). The v0.7.16 and round-4 races are different races on the same track, the same
+link seed: the riders' paths differ, the drawing is what to compare.
+
+### Checks (round 4)
+
+- On the head (the merge of local main b8c4cf88 and 70a288fa): `check.py port` OK (with the online
+  tools' dry runs in `net_tests`), `check.py server` OK (one run beside the clips timed out a guard
+  test at 5 s; the rerun on a quiet PC passed; this lane does not touch the server), `check.py
+  docs` OK.
+- `mosh_round_check.py` default scenario under `--link "delay=80,jitter=15,loss=1,seed=41"` on
+  r4f: PASS.
+- Unit tests: `test_state_bundle.c` (HOLD's 13 bytes), `test_puppet_sync.c`, `build_tests.py`
+  (`test_session`: bundle version, HOLD's stop length, race frames for 3 s after the end).
+- Not run: state traces (the change acts only online and in the bench switches), PC <-> Mac.
+
+### Left (round 4)
+
+- **Host stops' steps** (3-4 units): the rider's own physics speed state, which the glide's set
+  velocity does not change. Write the speed where the physics keeps it (the bike's forward speed,
+  `func_00137950`'s inputs; not traced) or keep easing the set velocity until the physics' own speed
+  agrees. And the far placements of r4f's 3 s stop.
+- **150 ms: race-to-race spread.** One race in three is over the line on this PC's SFU path. The
+  internet links the verifier measured (PC to Mac, snapshot age p95 21-98 ms) are kinder than the
+  150 ms test link.
+- **After the last finish:** the race frames now pass for 3 s after the end, but this was not
+  measured live (the SFU outage): a PC to Mac race should show no drift after the last finish.
