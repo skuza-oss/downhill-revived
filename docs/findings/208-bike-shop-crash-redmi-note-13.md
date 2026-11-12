@@ -1,6 +1,6 @@
 # 208: the Bike Shop closes the game on a Redmi Note 13 4G (issue #78)
 
-Status: in progress
+Status: current
 
 Branch `fix/bike-shop-android` from `main` ad0135bd, started 2026-11-12.
 
@@ -16,7 +16,7 @@ most likely cause and how sure that is; a fix if the evidence supports one, else
 that pin it from the next shared log, and the exact question for the reporter. Offline behaviour
 unchanged; `check.py port` and `check.py docs` green; the Android debug APK compiles.
 
-Out of scope: the Options > Posters crash (207), touch skipping of the flyover (209), the online
+Out of scope: the Options > Posters crash (finding 207), touch skipping of the flyover (209), the online
 rider code.
 
 ## Progress
@@ -27,13 +27,14 @@ rider code.
 - [x] 2026-11-12: every rider and bike texture file the shop can load checked against the USA
   disc, statically, and the shop's arena placed in a Windows run (What the USA disc allows).
 - [x] 2026-11-12: the crash reproduced on Windows with a damaged copy of the disc image; the
-  Posters crash's class (a stack overrun into a guard page, lane 207) ruled out.
+  Posters crash's class (a stack overrun into a guard page, finding 207) ruled out.
 - [x] 2026-11-12: diagnostics (What changed): read or write in the POSIX guest fault line
   (5ffc0c17), the last disc files in the crash report (665c58e9), the disc files check at every
   start (2ef4d480). `check.py port` OK; the Android debug APK builds (`build_apk.py`, PASS).
 - [x] 2026-11-12: the owner's decision: a changed image's notice in the main menu, once per
   image; the hash made gentle (4def7e9a), the notice (ae8bcfa5), PLAYING.md and STATE.md.
-- [ ] the reporter's answer (What to ask); the lead's checks (Left for the lead).
+- [x] 2026-11-12: merged into `main`; the lead's checks on the merged main (Result).
+- [ ] the reporter's answer (What to ask).
 
 ## The crash
 
@@ -106,7 +107,7 @@ texture record of the USA disc.
 
 ## Not the Posters crash's class (a stack local overrun into a guard page)
 
-The Options > Posters crash (lane 207, merged into main after this branch's base) is a write off
+The Options > Posters crash (finding 207) is a write off
 the top of an EE stack slot into the next slot's guard page (EE stack slot k: 256 KiB at 0x06000000 + (k - 1) * 0x40000, its lowest 16 KiB
 page the guard; `port/host64/fiber.c`), and its fault address lies in the same
 [0x02000000, 0x08000000) range as this one. Ruled out here:
@@ -319,19 +320,50 @@ these runs' noise; a phone was not measured here (Left for the lead).
   (`D_0036B730`: x94, x130, count) and the selections (`D_0036B6A0`, `D_0036B6B0`) from the dumps
   answered it directly.
 
-## Left for the lead
+## Result
 
-- State traces, all seven recipes against the format-2 references (`docs/TESTING.md`): `boot`,
-  `race`, `race2` to `race6`. Expected equal: the change writes only the HLE window, which the
-  trace does not hash, and logs; under `DHD_STATE_TRACE` and `DHD_FRAME_CLOCK` the main menu's
-  new call starts no check and shows nothing, and returns at once.
-- On the Mi 11i, a build of this branch: a first start (no iso-check.txt yet, which this build
-  also expects under its fixed name) hashes the image from the main menu on; watch the menus stay
-  smooth during it (`perf: menus` lines), then `disc check: ... (checked now)` with no notice;
-  the next start `(from iso-check.txt)`. The Bike Shop opens.
-- The notice on a phone: the same with a copy of the disc image with one file changed (as above:
-  one byte range of a shop `.RTX`; never the owner's own copy). Expect the DISC IMAGE popup in
-  the main menu at 20:9, OK by touch, no notice at the next start.
-- A test APK is not needed to decide the cause: the release's Online menu already gives the
-  decisive line (question 1). Worth making only if the reporter's disc check says the USA disc's
-  files: then this branch's crash line names the files the shop read.
+Checked on the merged main (lane merged as 0bee06dc):
+
+- `check.py port` OK.
+- All seven state traces (`boot`, `race`, `race2` to `race6`) equal the format-2 references of
+  0.7.16's game code (the code-pointer and mask lists they were made with); no trace log has a
+  `disc check:` line.
+- Windows, hidden desktop, untimed, each run with an empty data folder (`DHD_DATA_DIR`):
+  - The USA image, first start: `disc check: ... (checked now)`, no notice, `iso-check.txt`
+    written; the Bike Shop opens. The next start: `(from iso-check.txt)`, no notice, and the game
+    read about 58 MiB in all (about 2.4 GiB with the hash).
+  - The race route (`DHD_NAV`) pressed on 0.2 s after the main menu came up: the race ran with no
+    fault and its `perf: race` lines (60.0 and 59.9 fps). On this PC the hash ended about 14 s
+    after the main menu, in the menus before the race loaded (17.6 s), so it never ran beside
+    the race itself here.
+  - EXIT GAME 6 s into the hash: the game ended within half a second, no `disc check:` line, no
+    `iso-check.txt`; the next start hashed again (`checked now`).
+  - A scratch copy of the image with 32 bytes of `R/CNOS.RTX` changed (`DHD_SCALE=4`): the DISC
+    IMAGE popup names `R/CNOS.RTX`, OK closes it to the main menu, the next start shows nothing;
+    the same copy with `BIKE/MAN80.RTX` changed too shows it again, naming `BIKE/MAN80.RTX`;
+    `disc-notice.txt` lists both images. The copy was deleted.
+  - With `DHD_BENCH` or `DHD_FRAME_CLOCK=1`: no `disc check:` line, nothing written, about 58 MiB
+    read in 75 s (no hash).
+- A release-signed APK of the merged main on the Mi 11i (installed over 0.7.16, dhd.ini and the
+  memory card files unchanged before and after):
+  - First start (no `iso-check.txt` under the corrected name; the old `dhd64iso-check.txt` stays
+    beside it, unused): the main menu at 04:14:02, `iso-check.txt` written 04:14:19, so about 16 s
+    of hashing (the game had run from this image just before, so part of it may have been in the
+    phone's file cache). `disc check: ... (checked now)`, no notice. `perf: menus` as written: the
+    window with the boot and the hash's start 57.5/60 fps, over 0.4 %, max 433 ms (the last
+    check's cached start: 57.9, 0.4 %, 384 ms); the window in which the hash ended 59.9/60, over
+    0.0 %, max 17.8 ms; the windows after it the same. The menus answered every tap at once.
+    The Bike Shop opened and a bike was switched (GT to Specialized).
+  - Second start: `(from iso-check.txt)` within the first log read after the main menu, no
+    notice. A single race (Red Pass TD) from that start: `perf: session race` 59.8/60 fps, over
+    0.1 %, as the last check.
+  - No crash or fault lines; no `disc-notice.txt`.
+
+## Still open
+
+- The reporter's answer (What to ask the reporter).
+- The notice on a phone (needs a changed image on the device; never the owner's own copy): the
+  popup at 20:9 and OK by touch.
+- A slow phone's hash time: the Mi 11i's 16 s may have been helped by the file cache.
+- A test APK only if the reporter's disc check says the USA disc's files: then the crash line
+  names the files the shop read.
