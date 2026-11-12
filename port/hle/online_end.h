@@ -11,7 +11,6 @@
 
 typedef struct {
     int ended;            /* NetLobby.ended: NET_ENDED_* */
-    int is_host;          /* this PC is the room's host */
     int link_lost;        /* the connection to the room failed or dropped (offline, FAILED) */
     int removed;          /* the host removed this PC from the room (error code "kicked") */
     int finished;         /* this PC's rider finished */
@@ -21,7 +20,9 @@ typedef struct {
 
 static inline const char *race_end_reason(const RaceEnd *e)
 {
-    if (e->ended == NET_ENDED_VOID) return e->is_host ? "YOU ENDED THE RACE" : "THE HOST ENDED THE RACE";
+    /* the host that pressed END THE RACE leaves by its own menu at once (online.c race menu), so this
+       is what the others read */
+    if (e->ended == NET_ENDED_VOID) return "THE HOST ENDED THE RACE";
     if (e->link_lost) return e->removed ? "THE HOST REMOVED YOU" : "CONNECTION LOST";
     if (e->finished) return "RACE OVER";
     if (e->ended == NET_ENDED_DONE) return "TIME UP - DNF";

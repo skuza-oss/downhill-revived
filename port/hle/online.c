@@ -1657,14 +1657,14 @@ static void state_sync(void)
         int out = lobby.state != NET_RACING || !me || !me->in_race;
         if (!on.leave_at && out) {
             if (!on.leave_reason) {  /* one the start gave stays (start_step) */
-                RaceEnd end = {.ended = lobby.ended, .is_host = lobby.is_host,
+                RaceEnd end = {.ended = lobby.ended,
                                .link_lost = lobby.offline || lobby.state == NET_FAILED || lobby.state == NET_IDLE ||
                                             lobby.state == NET_RECONNECTING,
                                .removed = !strcmp(lobby.error_code, "kicked"), .finished = FINISHED(0),
                                .own_dnf = me ? me->dnf_reason : "", .new_result = lobby.last_race_id != on.last_race_id};
                 on.leave_reason = race_end_reason(&end);
-                fprintf(stderr, "online: race closed: back to the room (%s: ended %d, host %d, link %d, own %s/%s, "
-                        "result %d)\n", on.leave_reason, end.ended, end.is_host, end.link_lost, me ? me->race_state : "-",
+                fprintf(stderr, "online: race closed: back to the room (%s: ended %d, link %d, own %s/%s, "
+                        "result %d)\n", on.leave_reason, end.ended, end.link_lost, me ? me->race_state : "-",
                         end.own_dnf, end.new_result);
             } else
                 fprintf(stderr, "online: race closed: back to the room\n");

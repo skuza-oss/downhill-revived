@@ -7,13 +7,12 @@ int main(void)
 {
     /* the bug: the phone hosted, the finish window ran out with its rider still riding. The server's
        "ended" (done) came first, the result not yet: that is TIME UP, not the host */
-    assert(!strcmp(WHY(.ended = NET_ENDED_DONE, .is_host = 1, .new_result = 0), "TIME UP - DNF"));
+    assert(!strcmp(WHY(.ended = NET_ENDED_DONE, .new_result = 0), "TIME UP - DNF"));
     assert(!strcmp(WHY(.ended = NET_ENDED_DONE, .new_result = 1), "TIME UP - DNF"));
     /* everyone finished, this PC too */
     assert(!strcmp(WHY(.ended = NET_ENDED_DONE, .finished = 1), "RACE OVER"));
-    /* the host ended it: said to the guests, and to the host who pressed it */
+    /* the host ended it, also for a rider who had finished */
     assert(!strcmp(WHY(.ended = NET_ENDED_VOID), "THE HOST ENDED THE RACE"));
-    assert(!strcmp(WHY(.ended = NET_ENDED_VOID, .is_host = 1), "YOU ENDED THE RACE"));
     assert(!strcmp(WHY(.ended = NET_ENDED_VOID, .finished = 1), "THE HOST ENDED THE RACE"));
     /* the connection or the room's seat gone */
     assert(!strcmp(WHY(.link_lost = 1), "CONNECTION LOST"));

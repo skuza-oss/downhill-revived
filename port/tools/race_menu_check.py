@@ -10,7 +10,7 @@ checks the logs.
 - room: the guest's BACK TO THE ROOM (Down, Cross, Down to Yes, Cross) at 20 s: the guest is back
   in the room, the host races on and sees the guest leave.
 - end: the host's END THE RACE at 20 s: both games back in the room ("THE HOST ENDED THE RACE" on the
-  guest, "YOU ENDED THE RACE" on the host).
+  guest; the host leaves by its own menu at once and shows no reason).
 - timeup, timeup-host, finished (finding 211): why the race closed: one rider finishes at 20 s and the
   other never does (the finish window ends it: "TIME UP - DNF" on the one still riding, "RACE OVER" on
   the finisher), or both finish; the logs' "race closed: back to the room (WHY: ...)" line says it.
@@ -86,7 +86,7 @@ def checks(scenario, host, guest):
         'room': [(guest, r'race menu: back to the room'), (guest, r"this PC's race is over; back to the room"),
                  (host, r'player \d \(GUEST\) left')],
         'end': [(host, r'race menu: the host ends the race'), (host, r"back to the room"), (guest, r'race closed: back to the room'),
-                (host, CLOSED % 'YOU ENDED THE RACE'), (guest, CLOSED % 'THE HOST ENDED THE RACE')],
+                (guest, CLOSED % 'THE HOST ENDED THE RACE')],
         'timeup': [(host, CLOSED % 'RACE OVER'), (guest, CLOSED % 'TIME UP - DNF')],
         'timeup-host': [(guest, CLOSED % 'RACE OVER'), (host, CLOSED % 'TIME UP - DNF')],
         'finished': [(host, CLOSED % 'RACE OVER'), (guest, CLOSED % 'RACE OVER')],
