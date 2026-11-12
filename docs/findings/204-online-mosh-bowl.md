@@ -113,7 +113,8 @@ itself. `func_00173A18` skips a course state machine in mode 15 (the arena has n
   TO THE ROOM (`port_online_round_rows`, `port_online_round_accept`: as QUIT's Yes), which a
   player who stays on the page takes after 15 s (`MOSH_RESULTS_HOLD`).
 - **The room** (server `online/server/src/room.ts`): a finish may carry `score` (0-999999); a race
-  whose finishes carry scores ranks its finishers by score (a tie in grid order), DNFs last, and
+  on the arena track (a scored round since finding 221; before it, any race whose finishes carried
+  a score) ranks its finishers by score (a tie in grid order), DNFs last, and
   each member's race state shows its score. The room page's cards show `2ND 1350 PTS` where a race
   shows the time (`port/hle/online_menu.c` `finish_text`). Ready, the next race, a player who
   leaves becoming a computer rider and the room's results work as for a race.

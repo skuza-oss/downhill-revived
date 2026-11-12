@@ -35,7 +35,11 @@ typedef struct {
     uint32_t part[5];   /* the rider's point counts, in the game's field order */
     uint16_t hits;      /* hits taken */
     uint8_t known;      /* the owner has sent one (or this PC owns the rider) */
-    uint8_t final;      /* the owner's round is over: these numbers stay */
+    uint8_t final;      /* the owner's round is over: these numbers stay (mosh_take says how far) */
+    /* Where this PC got them (not on the wire; finding 221): the sender's slot, and whether the
+       sender is the rider's own player (not a PC that took the rider over). mosh_take reads them. */
+    uint8_t from;
+    uint8_t by_player;
 } MoshScore;
 
 static inline uint32_t mosh_points(const MoshScore *s)
@@ -106,13 +110,35 @@ static inline int mosh_place(const MoshScore *scores, int count, int global)
     return 0;
 }
 
-/* Whether a received score replaces the one held: a final one stays (a late copy of an earlier
-   send changes nothing; the owner sends nothing after its final but the same final again). */
-static inline int mosh_take(MoshScore *held, const MoshScore *got)
+/* Whether a received score replaces the one held, and takes its place if so. `sender` is the
+   sender's slot; `by_player` says the sender is the rider's own player (a rider is its player's
+   own when the sender's slot is the rider's global id), as opposed to the PC that runs it after
+   its player left (the host, or a new host).
+
+   Until a final one is held, the latest score replaces the held one. A final one is replaced only
+   by a better authority, so the table never depends on which of two senders' finals arrived first
+   (reliable order holds within one sender's channel, not between two; finding 221):
+   - the rider's own player's final stands for good, and replaces a takeover owner's final;
+   - a takeover owner's final never replaces the player's own, and a later takeover owner's
+     (another sender than the one held: the rider changed hands again) replaces the earlier one's;
+   - the same sender's final again, or any score that is not final, changes nothing. */
+static inline int mosh_take(MoshScore *held, const MoshScore *got, int sender, int by_player)
 {
-    if (held->final) return 0;
+    if (held->final) {
+        if (!got->final || held->by_player) return 0;
+        if (!by_player && held->from == (uint8_t)sender) return 0;
+    }
     *held = *got;
+    held->from = (uint8_t)sender, held->by_player = by_player ? 1 : 0;
     return 1;
+}
+
+/* The table that stands: a copy of the scores at the moment the round's table is published, which
+   later score messages do not change (finding 221). */
+static inline void mosh_publish(MoshScore *table, const MoshScore *scores, int count)
+{
+    if (count > MOSH_RIDERS) count = MOSH_RIDERS;
+    memcpy(table, scores, (size_t)count * sizeof *table);
 }
 
 #endif

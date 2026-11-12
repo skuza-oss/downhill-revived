@@ -699,6 +699,11 @@ HUD shows): `{"type":"finish","ticks":7200,"place":2,"score":1350}`. N is then t
 the round's two minutes ran out on that game, and P its place in the round's table (computer riders
 included), the same table on every game (the finding). A game sends a score only to a server whose
 welcome lists `"score"`; another value is `bad_value`. A rejoin's repeated finish repeats it.
+A race is a scored round when its track is the Mosh Pit arena (track 23); the room fixes that when
+the race starts, from its track, and no finish can change it (finding 221). On any other track a
+`score` that passes the checks above is ignored: the finish itself counts, with its ticks, and the
+race ranks by time. A finish without `score` in a scored round is valid too (a game that sends
+none): it ranks after the finishers with a score, by ticks.
 
 The first human finish sets finishEndsAt to now plus the running finishWindow.
 With finishWindow zero the deadline remains null. Later finishes do not move it.
@@ -720,8 +725,9 @@ A host sends `{"type":"end"}` to void the running race.
 The server sends ended with reason void, keeps the previous lastRace and does
 not rotate. These messages do not disconnect anyone.
 
-Completed lastRace entrants sort by ticks, then DNFs in grid order. When any finish carried a
-score, finishers sort by score instead, highest first, a tie in grid order; DNFs still last.
+Completed lastRace entrants sort by ticks, then DNFs in grid order. In a scored round (the race's
+track, above), finishers with a score sort first by score, highest first, a tie in grid order, then
+the finishers without one by ticks; DNFs still last. A race on another track always sorts by ticks.
 Their places use reported places, raised to at least the preceding place plus
 one. DNFs follow finishers and get successive places.
 LastRace stays until another race completes. Its id increments on completion.

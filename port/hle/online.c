@@ -360,6 +360,7 @@ static struct {
        stands; the results screen came up */
     int mosh;
     MoshScore score[NRIDERS];
+    MoshScore table[NRIDERS];   /* the published table: score as it was when the table stood, then fixed (221) */
     int round_over, table_done;
     double round_over_at, results_at;
 } on;
@@ -1257,7 +1258,9 @@ static void mosh_send(int global, const MoshScore *s)
 
 /* A score EVENT: from the rider's owner, or for a player's own rider from that player's PC, whose
    final can arrive after the room said it left (and the host took the rider over: its own final
-   then stands here too, as on every PC that got it). A final one stays. */
+   then is the rider's takeover final). Two finals for one rider never go by arrival order: the
+   player's own final wins over a takeover owner's, a later takeover owner's over an earlier one's
+   (mosh_take, finding 221). */
 static void receive_score(int sender, const uint8_t *e, int n)
 {
     int global;
@@ -1267,7 +1270,7 @@ static void receive_score(int sender, const uint8_t *e, int n)
     int own_player = global < on.nslots && global == sender;
     if (hle_puppet_owner(global) != sender && !own_player) return;
     if (hle_puppet_owner(global) == on.local_slot && !(own_player && s.final)) return;  /* this PC's numbers */
-    if (mosh_take(&on.score[global], &s) && s.final)
+    if (mosh_take(&on.score[global], &s, sender, own_player) && s.final)
         fprintf(stderr, "online: round: %s's final score %u, %u hits taken (from player %d)\n",
                 rider_label(global, name, sizeof name), mosh_points(&s), s.hits, sender);
 }
@@ -1318,11 +1321,11 @@ static void mosh_table(char *out, int size)
 {
     int order[NRIDERS], riders = hle_online_race_riders(), n = 0;
     char name[48];
-    mosh_order(on.score, riders, order);
+    mosh_order(on.table, riders, order);
     out[0] = 0;
     for (int i = 0; i < riders && n < size - 48; i++)
         n += snprintf(out + n, size - n, " %d. %s %u (%u)", i + 1, rider_label(order[i], name, sizeof name),
-                      mosh_points(&on.score[order[i]]), on.score[order[i]].hits);
+                      mosh_points(&on.table[order[i]]), on.table[order[i]].hits);
 }
 
 /* Each field of the round: the riders this PC runs send their scores when they change (final
@@ -1344,11 +1347,21 @@ static void mosh_step(void)
             MoshScore now;
             mosh_read(slot, &now);
             now.final = (uint8_t)on.round_over;  /* also a rider taken over after this PC's end */
-            if (!held->known || !mosh_same(held, &now)) *held = now, mosh_send(global, held);
+            if (!held->known || !mosh_same(held, &now)) {
+                /* this PC's own numbers: its player's own when the rider is this PC's player's */
+                now.from = (uint8_t)on.local_slot, now.by_player = (uint8_t)(global == on.local_slot && global < on.nslots);
+                *held = now, mosh_send(global, held);
+            }
         } else if (held->known)
             mosh_write(slot, held);
     }
-    if (!on.round_over || on.table_done) return;
+    if (on.table_done) {
+        /* The published table stands (finding 221): a score message that comes later changes
+           on.score, not what the results show or what this PC reported. */
+        for (int slot = 0; slot < riders; slot++) mosh_write(slot, &on.table[hle_puppet_global(slot)]);
+        return;
+    }
+    if (!on.round_over) return;
     NetLobby lobby;
     host_service_net_get_lobby(GADDR(&lobby));
     int missing = 0;
@@ -1360,6 +1373,7 @@ static void mosh_step(void)
             MoshScore s;
             memset(&s, 0, sizeof s);
             s.part[1] = (uint32_t)score, s.hits = on.score[global].hits, s.known = s.final = 1;
+            s.from = (uint8_t)global, s.by_player = 1;  /* the room has the player's own report */
             on.score[global] = s;
             continue;
         }
@@ -1368,14 +1382,15 @@ static void mosh_step(void)
     double waited = host_wall_seconds() - on.round_over_at;
     if (missing && waited < MOSH_TABLE_WAIT) return;
     on.table_done = 1;
+    mosh_publish(on.table, on.score, riders);  /* riders whose final never came count with their last score */
     char table[400];
     mosh_table(table, sizeof table);
     fprintf(stderr, "online: round: the table%s (%.1f s after time up):%s\n",
             missing ? " without every final score" : "", waited, table);
     title("Downhill Revived online - round results:%s", table);
-    int place = mosh_place(on.score, riders, on.local_slot);
+    int place = mosh_place(on.table, riders, on.local_slot);
     if (from_menu)
-        host_service_net_finish((uint32_t)RACE_CLOCK, place > 0 ? place : 1, (int)mosh_points(&on.score[on.local_slot]));
+        host_service_net_finish((uint32_t)RACE_CLOCK, place > 0 ? place : 1, (int)mosh_points(&on.table[on.local_slot]));
     func_001B45F8(EE_PTR(0x4B1F40), 1, 90);  /* the game's own end: its COMBAT RESULTS */
     on.end_done = 1, on.end_done_at = host_wall_seconds();
     const char *after = getenv("DHD_NET_AFTER_RACE");
@@ -1419,7 +1434,7 @@ int port_online_round_rider(int i, int best)
     if (!online_mode() || !on.mosh || !on.table_done) return best;
     int order[NRIDERS], riders = hle_online_race_riders();
     if (i < 0 || i >= riders) return -1;
-    mosh_order(on.score, riders, order);
+    mosh_order(on.table, riders, order);
     return hle_puppet_local(order[i]);
 }
 

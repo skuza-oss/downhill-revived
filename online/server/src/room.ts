@@ -104,6 +104,12 @@ const SFU_RENEW_MS = 20_000;
 const SERVER_FEATURES = ["sfu_silent", "race_go", "score"];
 /** A round's score is at most six digits, as the game's HUD shows it (finding 204). */
 const MAX_SCORE = 999_999;
+/** The one track whose race is a scored round: the Mosh Pit arena (the game's MOSH_TRACK in
+    port/hle/mosh_round.h). The race's mode follows its track, set when it starts, never the
+    finishes it receives (finding 221). */
+const SCORED_TRACK = 23;
+/** Whether a race on this track is a scored round (finding 221). */
+export function isScoredTrack(track: number): boolean { return track === SCORED_TRACK; }
 /** A hello feature (finding 187): see Member.raceGo. */
 const FEATURE_RACE_GO = "race_go";
 /** A race's start moment comes at most this long after its startAt (the host's game names it once
@@ -644,7 +650,9 @@ export class Room extends DurableObject<Env> {
           const result = st.race.results!.find(x => x.id === me.id)!;
           if (result.ticks === undefined && !result.dnfReason) {
             result.ticks = m.ticks; result.place = m.place as number;
-            if (m.score !== undefined) result.score = m.score as number;
+            // A score counts only in a scored round (finding 221); on any other race it is ignored,
+            // the finish itself counts (a 0.7.16 game never sends one).
+            if (m.score !== undefined && isScoredTrack(st.race.track)) result.score = m.score as number;
             if (st.race.rules!.finishWindow && st.race.finishEndsAt == null)
               st.race.finishEndsAt = Date.now() + st.race.rules!.finishWindow * 1000;
           }
@@ -2143,7 +2151,7 @@ export class Room extends DurableObject<Env> {
     return {inRace: this.inRace(st,id), ...(r ? {
       raceState: r.dnfReason ? "dnf" : r.ticks !== undefined ? "finished" : "racing",
       // a scored round's finish shows its score, not its length (the same for everyone: 4 KB)
-      ...(r.ticks !== undefined ? r.score !== undefined ? {score:r.score} : {finishTicks:r.ticks} : {}), place:r.place,
+      ...(r.ticks !== undefined ? st.race && isScoredTrack(st.race.track) && r.score !== undefined ? {score:r.score} : {finishTicks:r.ticks} : {}), place:r.place,
       ...(r.dnfReason ? {dnfReason:r.dnfReason} : {}),
     } : {})};
   }
@@ -2197,11 +2205,14 @@ export class Room extends DurableObject<Env> {
     const race = st.race;
     if (!race) return;
     if (!voided) {
-      // A scored round (finding 204) ranks its finishers by score, highest first (a tie keeps the
-      // grid order); a race by time. DNFs come last either way, in grid order.
-      const scored = race.results!.some(x => x.score !== undefined);
-      const key = (r: Result) => r.ticks === undefined ? Infinity : scored ? -(r.score ?? 0) : r.ticks;
-      const entrants = [...race.results!].sort((a,b) => key(a) - key(b));
+      // A scored round (finding 204; the race's track says so, finding 221) ranks its finishers by
+      // score, highest first (a tie keeps the grid order); a race by time. A finisher of a scored
+      // round without a score (a game that sends none) comes after those with one, by time. DNFs
+      // come last either way, in grid order.
+      const scored = isScoredTrack(race.track);
+      const group = (r: Result) => r.ticks === undefined ? 2 : scored && r.score !== undefined ? 0 : 1;
+      const key = (r: Result) => group(r) === 0 ? -r.score! : group(r) === 1 ? r.ticks! : 0;
+      const entrants = [...race.results!].sort((a,b) => group(a) - group(b) || key(a) - key(b));
       let place = 0;
       const limit = this.trackLimit(st, race.track);
       for (let i = 0; i < entrants.length; i++) {
