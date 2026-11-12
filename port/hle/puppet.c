@@ -94,8 +94,9 @@ static void net_link_release(void);
 #define AI_OFFSET_TO_AT 0x230
 #define NODES ((uint8_t *)0x0829EA20)  /* D_0029EA20: the racing-line nodes, 0x20 bytes each */
 #define NODE_SIZE 0x20
-#define NODE_COUNT 2117                 /* the most that fit before D_002AF2C0 */
-#define LINE_NONE 0xFFFF
+#define NODE_LOADED (*(volatile int32_t *)0x082AEA6C)  /* D_0029EA20 +0x1004C: the loaded track's nodes
+                                                          (puppet_record.h puppet_node_ok) */
+#define LINE_NONE PUPPET_LINE_NONE
 #define ATTACK_AT 0x6390      /* the attack the combat power-ups give: 0 punch, 1 kick, 2 check, 3 stick, 4 bottle */
 #define BOTTLES_AT 0x7ADC     /* bottles left to throw (func_00179A60 shows both) */
 
@@ -129,11 +130,12 @@ typedef struct Snapshot {
 _Static_assert(sizeof(Snapshot) == 888, "the recordings' record (port/tools/puppet_lag.py SNAP_SIZE)");
 
 enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
-/* A rider's record in a STATE bundle (state_bundle.h, payload version 6, finding 169): its global
-   id (a human's lobby slot, an AI rider's slot), its race time in ms (finding 114), the body, the
-   checkpoints passed and the attack power-ups, then the changed pad words (six repeats each, a
-   full copy every PAD_REFRESH sends, finding 158). */
+/* A rider's record in a STATE bundle (state_bundle.h, payload version 8, findings 169, 202; its
+   bytes: puppet_record.h): its global id (a human's lobby slot, an AI rider's slot), its race time
+   in ms (finding 114), the body, the racing line, the checkpoints passed and the attack power-ups,
+   then the changed pad words (six repeats each, a full copy every PAD_REFRESH sends, finding 158). */
 #include "state_bundle.h"
+#include "puppet_record.h"
 #include "puppet_sync.h"
 #include "puppet_link.h"
 enum { EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
@@ -156,11 +158,12 @@ typedef struct Puppet {
     int synced, after_crash, resyncs;
     /* HOLD (state_bundle.h): its sender's game stopped; the rider stands where it was until the
        snapshots come again and its rider has caught up with it */
-    int held;
+    PuppetHold hold;         /* held: its sender's game stopped (puppet_record.h; finding 220) */
+    int hold_refused;        /* its sender's HOLDs refused this race (finding 220) */
     double line_at;          /* the snapshot whose racing line this game's controller took */
     int easing;              /* its speed eases up to its owner's (steer's guard) */
     int catching;            /* its sender catches up (its clock rate over SYNC_CATCHUP until under the end) */
-    double held_at, resumed_at, held_step_at;   /* the sender's last snapshot's moment; when newer ones came again */
+    double resumed_at, held_step_at;   /* when snapshots newer than the hold came again; the last held step */
     SyncPose pin;
     float error;             /* the last snapshot's difference from this puppet (units) */
     double behind;           /* the newest snapshot's age when last used (s) */
@@ -168,6 +171,7 @@ typedef struct Puppet {
     uint32_t mirror[PAD_WORDS];  /* the remote virtual pad, as the deltas built it */
     PadSender sent_pad;
     int remote_crash;
+    int refused;             /* its owner's records refused this race (finding 220) */
 } Puppet;
 
 extern void func_0012DDC0(void *rider);              /* body to scene node */
@@ -203,6 +207,7 @@ static struct {
     int gone[NET_SLOTS];     /* lobby slots that left */
     int kept[NET_SLOTS];     /* of those, the ones that had finished: their riders stay puppets */
     int hits_taken;
+    uint8_t state_said[NRIDERS];  /* a rider of this game in a State not on the list: said (finding 220) */
     int debug;               /* DHD_PUPPET_DEBUG=slot: each snapshot of that slot in the log (-1 none) */
     int exact;               /* DHD_PUPPET_EXACT=1 (clips of a live run): a replayed rider takes each
                                 recorded pose as it is, no steering (its wheels still on the physics) */
@@ -213,6 +218,20 @@ static struct {
 } pp;
 
 static int slot_of(const uint8_t *r) { return (int)((r - RIDERS) / RIDER_SIZE); }
+
+/* A record from another game refused (finding 220): counted, and logged once per rider and race
+   (the count when the race ends: refused_count). */
+static void refuse(int slot, const char *why)
+{
+    if (!pp.p[slot].refused++)
+        fprintf(stderr, "puppet: tick %d slot %d: a record refused (%s); more are only counted\n", RACE_CLOCK, slot, why);
+}
+static void refused_count(void)
+{
+    for (int i = 1; i < NRIDERS; i++)
+        if (pp.p[i].refused) fprintf(stderr, "puppet: slot %d: %d records refused in the race\n", i, pp.p[i].refused);
+}
+
 static uint8_t *rider(int slot) { return RIDERS + slot * RIDER_SIZE; }
 #define RACE_RIDERS (*(volatile int32_t *)(RIDERS + 0x501A8))  /* the race's riders (func_0011A100) */
 
@@ -396,13 +415,15 @@ static void setup(void)
     }
 }
 
-/* A racing-line node's index (LINE_NONE: none or not a node) and back */
+/* A racing-line node's index (LINE_NONE: none or not one of the loaded track's nodes) and back
+   (NULL: not a loaded node; finding 220). The sender names only loaded nodes, so a receiver on the
+   same track refuses none of an honest game's. */
 static uint16_t node_index(const uint8_t *n)
 {
-    if (!n || n < NODES || n >= NODES + NODE_COUNT * NODE_SIZE || (n - NODES) % NODE_SIZE) return LINE_NONE;
+    if (!n || n < NODES || n >= NODES + puppet_node_count(NODE_LOADED) * NODE_SIZE || (n - NODES) % NODE_SIZE) return LINE_NONE;
     return (uint16_t)((n - NODES) / NODE_SIZE);
 }
-static uint8_t *node_at(uint16_t i) { return i < NODE_COUNT ? NODES + i * NODE_SIZE : NULL; }
+static uint8_t *node_at(uint16_t i) { return i != LINE_NONE && puppet_node_ok(i, NODE_LOADED) ? NODES + i * NODE_SIZE : NULL; }
 
 static void take(Snapshot *s, const uint8_t *r)
 {
@@ -410,6 +431,14 @@ static void take(Snapshot *s, const uint8_t *r)
     s->clock = RACE_CLOCK;
     s->time = RACE_TIME;
     s->state = (int32_t)(FIELD(r, STATE_AT, uint8_t *) - r);
+    /* Every State a rider reaches is on puppet_record.h's list, or the other games refuse its
+       records (finding 220): said in the log once per rider and race, the bench's recordings and
+       every online race check it. */
+    if (!puppet_state_known((uint32_t)s->state) && !pp.state_said[slot_of(r)]) {
+        pp.state_said[slot_of(r)] = 1;
+        fprintf(stderr, "puppet: tick %d slot %d is in State +0x%X, not on puppet_record.h's list: the others refuse its "
+                "records\n", RACE_CLOCK, slot_of(r), (unsigned)s->state);
+    }
     memcpy(s->pos, r + POS_AT, 16);
     memcpy(s->rot, r + ROT_AT, 48);
     memcpy(s->vel, r + VEL_AT, 16);
@@ -446,9 +475,11 @@ static void feed(int slot, const Snapshot *s)
     Puppet *p = &pp.p[slot];
     /* A new race (a replayed file starting over). Online, hle_puppet_start clears the pad mirror
        and the ring at each race's start, and hle_puppet_receive has already applied this
-       snapshot's pad words to the mirror, so nothing here may clear it. */
-    if (p->count && s->time < p->ring[p->count - 1].time - 1)
-        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0,
+       snapshot's pad words to the mirror, so nothing here may clear it; and a snapshot a second
+       older than the newest is a late one, dropped below (finding 220: it used to clear the ring
+       and put the rider where it said). */
+    if (!pp.online && p->count && s->time < p->ring[p->count - 1].time - 1)
+        p->count = 0, p->have_age = 0, p->synced = 0, p->used = 0, p->rate = 1, p->race_used = 0, p->hold.held = 0, p->catching = 0,
         p->line_at = 0;
     if (p->count && s->time <= p->ring[p->count - 1].time) return;
     double age = RACE_TIME - s->time;
@@ -458,6 +489,7 @@ static void feed(int slot, const Snapshot *s)
         p->age += (age - p->age) / 16;
     if (p->count == RING) memmove(p->ring, p->ring + 1, --p->count * sizeof *p->ring);
     p->ring[p->count++] = *s;
+    puppet_hold_fed(&p->hold, RACE_TIME);  /* snapshots arrive again: a hold's own release (held_step) */
 }
 
 /* The newest snapshot whose moment has come on this game's race clock. One from ahead of it (a
@@ -675,32 +707,43 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
 
 /* HOLD from the puppet's sender (state_bundle.h): its game stopped after its snapshot of moment t
    (this race clock) and had been stopped `quiet` seconds when the HOLD left. Unless a newer
-   snapshot is already here, the rider brakes to a stop where it is (held_step). */
+   snapshot is already here, the rider brakes to a stop where it is (held_step). A HOLD that is not
+   about this game's newest snapshot of the rider, or from the future, is refused (finding 220:
+   one stamped a day ahead held the rider for the rest of the race). */
 static void hold(int slot, double t, double quiet)
 {
     Puppet *p = &pp.p[slot];
-    if (!p->on || !p->synced || (p->count && p->ring[p->count - 1].time > t + 0.001)) return;
+    if (!p->on || !p->synced) return;
+    int ok = puppet_hold_ok(t, quiet, p->count > 0, p->count ? p->ring[p->count - 1].time : 0, RACE_TIME);
+    if (ok == PUPPET_HOLD_REFUSED && !p->hold_refused++)
+        fprintf(stderr, "puppet: tick %d slot %d: a HOLD refused (stamp %.3f, newest snapshot %.3f, quiet %.3f s); more are "
+                "only counted\n", RACE_CLOCK, slot, t, p->count ? p->ring[p->count - 1].time : -1.0, quiet);
+    if (ok != PUPPET_HOLD_TAKEN) return;
     /* A short stop (a stall under load, often under 0.2 s) is ridden through: once its sender
        catches up its riders are back where riding on put them, while a hold stopped them dead and
        left them to catch up (live, 50 holds in a loaded race, each a stop and a burst). The stop is
        timed by its sender (round 4: timed here, the link's delay counted toward it). */
     if (quiet < SYNC_HOLD_AFTER) return;
-    if (!p->held) {
+    if (!p->hold.held) {
         body_pose(rider(slot), &p->pin);
         fprintf(stderr, "puppet: tick %d slot %d held (its sender stopped)\n", RACE_CLOCK, slot);
     }
-    p->held = 1, p->held_at = t, p->resumed_at = 0, p->held_step_at = 0;
+    puppet_hold_start(&p->hold, t);
+    p->resumed_at = 0, p->held_step_at = 0;
 }
 
 /* A held rider, each step (no physics; returns 0 when it rides again): it stands where it stopped
    until snapshots newer than the hold come and its rider, carried to now, has caught up with it
    (reached its spot along the way it rides, or is within 1.5 units). Then it takes its rider's
    pose and speed there, a step from where it stands, and is steered as usual. A rider that has not
-   caught up SYNC_COAST after the snapshots came again is steered from where it stands. */
+   caught up SYNC_COAST after the snapshots came again is steered from where it stands; so is one
+   whose snapshots have been arriving for SYNC_COAST by this game's clock whatever their stamps
+   (finding 220: the hold's own release, which no stamp can put off). */
 
 static int held_step(uint8_t *r, Puppet *p, const Snapshot *s)
 {
-    if (s->time > p->held_at + 0.001) {
+    int fed_long = puppet_hold_fed_long(&p->hold, RACE_TIME);
+    if (puppet_hold_resumed(&p->hold, s->time) || fed_long) {
         SyncPose owner, carried;
         if (!p->resumed_at) p->resumed_at = RACE_TIME;
         if (s->time > p->used) take_snapshot(p, s, &owner, &carried);
@@ -709,10 +752,10 @@ static int held_step(uint8_t *r, Puppet *p, const Snapshot *s)
         for (int k = 0; k < 3; k++) d[k] = carried.pos[k] - p->pin.pos[k];
         float along = v > 1 ? sync_dot(d, carried.vel) / v : 0;
         int caught = along >= -0.5f || sync_len(d) < 1.5f;
-        if (caught || RACE_TIME - p->resumed_at > SYNC_COAST) {
+        if (caught || RACE_TIME - p->resumed_at > SYNC_COAST || fed_long) {
             fprintf(stderr, "puppet: tick %d slot %d rides on after a hold (its rider %.1f units %s)\n", RACE_CLOCK,
                     slot_of(r), sync_len(d), along >= 0 ? "past it" : "short of it");
-            p->held = 0, p->stepped_at = 0;
+            p->hold.held = 0, p->stepped_at = 0;
             /* within a step of its spot: it takes its rider's pose there; further (its rider is past it)
                it rides on from where it stands and catches up by riding (round 3: the release moved
                a rider up to 12 units in a step) */
@@ -855,7 +898,7 @@ int hle_puppet_input(uint8_t *r)
     else memcpy(pad + PREV_FIRST, pad, 25 * 4);
     /* Nothing heard for SYNC_COAST: the owner's last inputs are not riding any more (a stalled
        game, a long loss). A computer rider's puppet rides on its AI; a player's lets go. */
-    int silent = RACE_TIME - s->time > SYNC_COAST || pp.p[slot].held;
+    int silent = RACE_TIME - s->time > SYNC_COAST || pp.p[slot].hold.held;
     if (silent && ai_rider(slot)) return 1;
     /* On the owner's line its own controller's steering (words 7 and 8) is timely; in the air the
        words are tricks (air spins, func_00113EB8, func_001140A0), the owner's */
@@ -910,8 +953,8 @@ int hle_puppet_physics(uint8_t *r)
         p->after_crash = 1, p->stepped_at = 0;
         return 0;
     }
-    if (p->held && !(s->crash & 4) && held_step(r, p, s)) return 1;
-    if (s->crash & 4) p->after_crash = 1, p->stepped_at = 0, p->held = 0;
+    if (p->hold.held && !(s->crash & 4) && held_step(r, p, s)) return 1;
+    if (s->crash & 4) p->after_crash = 1, p->stepped_at = 0, p->hold.held = 0;
     else if (pp.exact && pp.playing) {  /* the recorded pose, a jump in it a jump here */
         SyncPose pose;
         snapshot_pose(s, &pose);
@@ -930,7 +973,7 @@ int hle_puppet_physics(uint8_t *r)
     /* The State follows the snapshot: the game's own switches are blocked (hle_puppet_switch), as
        on an AI rider they flip back and forth against it every field. */
     now = (int32_t)(FIELD(r, STATE_AT, uint8_t *) - r);
-    if (!crashing && !remote && s->state > 0 && s->state < RIDER_SIZE && now != s->state) {
+    if (!crashing && !remote && puppet_state_known((uint32_t)s->state) && now != s->state) {
         /* A State's Enter may move the rider itself: the reset to the track puts it on this game's
            idea of the nearest spot (live: 312 units from where its owner's reset put it, for 0.2 s,
            until the next placement). The snapshots say where it is: the pose before the switch
@@ -1005,6 +1048,7 @@ void hle_puppet_online(int local, int nslots, int host)
    starts now). */
 void hle_puppet_start(void)
 {
+    refused_count();
     for (int i = 0; i < NRIDERS; i++) {  /* slot 0 too: this PC's rider starts afresh on every PC */
         Puppet *p = &pp.p[i];
         memset(&p->sent_pad, 0, sizeof p->sent_pad);
@@ -1016,7 +1060,9 @@ void hle_puppet_start(void)
         if (!i) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
-        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0, p->line_at = 0;
+        p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->hold.held = 0, p->catching = 0, p->line_at = 0;
+        p->refused = 0, p->hold_refused = 0;
+        memset(&p->hold, 0, sizeof p->hold);
         sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
@@ -1025,6 +1071,7 @@ void hle_puppet_start(void)
     }
     pp.hits_taken = 0, pp.nevents = 0, pp.go_server = 0;
     pp.held_count = 0;
+    memset(pp.state_said, 0, sizeof pp.state_said);
 }
 
 /* How far this game's race clock trails the wall clock beyond the normal (puppet_sync.h
@@ -1040,6 +1087,7 @@ void hle_puppet_go(double go_server_ms) { pp.go_server = go_server_ms; }
 void hle_puppet_offline(void)
 {
     if (!pp.online) return;
+    refused_count();
     pp.online = 0;
     for (int i = 1; i < NRIDERS; i++)
         if (pp.play_from[i] < 0) memset(&pp.p[i], 0, sizeof pp.p[i]);
@@ -1120,85 +1168,81 @@ void hle_puppet_start_point(uint8_t *race, uint8_t *r)
     *index = want;
 }
 
-static uint8_t *put(uint8_t *o, const void *v, size_t n) { memcpy(o, v, n); return o + n; }
-
-/* One rider's record for a STATE bundle (state_bundle.h), for an owned slot: rider (global id),
-   race time (ms), body, power (and 12 reserved bytes), contacts, State, crash, checkpoints passed, attack kind, bottles,
-   then repeated pad changes (six sends) with a full refresh every 30 sends. Last tick's actions
-   do not travel; the full refresh bounds recovery after longer loss bursts. 0: not owned. */
+/* One rider's record for a STATE bundle (state_bundle.h, puppet_record.h), for an owned slot: rider
+   (global id), race time (ms), body, power (and 8 reserved bytes), the racing line, contacts,
+   State, crash, checkpoints passed, attack kind, bottles, then repeated pad changes (six sends)
+   with a full refresh every 30 sends. Last tick's actions do not travel; the full refresh bounds
+   recovery after longer loss bursts. 0: not owned. */
 int hle_puppet_pack(int slot, uint8_t *out, int max)
 {
     if (!pp.online || slot < 0 || slot >= hle_online_race_riders() || !owned(slot) || !RACING || max < STATE_RECORD_MAX) return 0;
     Snapshot s;
     take(&s, rider(slot));
-    uint8_t *o = out;
-    uint16_t state = (uint16_t)s.state;
-    int32_t ms = (int32_t)floor(s.time * 1000 + 0.5);
-    *o++ = (uint8_t)to_global(slot);
-    o = put(o, &ms, 4);
-    o = put(o, s.pos, 12);
-    for (int k = 0; k < 3; k++) o = put(o, s.rot[k], 12);
-    o = put(o, s.vel, 12);
-    o = put(o, s.spin, 12);
-    o = put(o, &s.power, 4);
-    o = put(o, &s.turning, 4);
-    o = put(o, s.reserved, 8);
-    o = put(o, &s.node, 2);
-    o = put(o, &s.next, 2);
-    o = put(o, s.target, 12);
-    o = put(o, s.after, 12);
-    o = put(o, s.offset, 8);
-    o = put(o, s.offset_to, 8);
-    *o++ = s.contact[0], *o++ = s.contact[1];
-    o = put(o, &state, 2);
-    *o++ = s.crash, *o++ = s.crash_kind;
-    *o++ = s.checkpoint;
-    *o++ = s.attack, *o++ = s.bottles;
+    PuppetRecord r;
+    memset(&r, 0, sizeof r);
+    r.rider = (uint8_t)to_global(slot);
+    r.ms = (int32_t)floor(s.time * 1000 + 0.5);
+    memcpy(r.pos, s.pos, 12);
+    for (int k = 0; k < 3; k++) memcpy(r.rot[k], s.rot[k], 12);
+    memcpy(r.vel, s.vel, 12);
+    memcpy(r.spin, s.spin, 12);
+    r.power = s.power, r.turning = s.turning;
+    r.node = s.node, r.next = s.next;
+    memcpy(r.target, s.target, 12);
+    memcpy(r.after, s.after, 12);
+    memcpy(r.offset, s.offset, 8);
+    memcpy(r.offset_to, s.offset_to, 8);
+    r.contact[0] = s.contact[0], r.contact[1] = s.contact[1];
+    r.state = (uint16_t)s.state;
+    r.crash = s.crash, r.crash_kind = s.crash_kind, r.checkpoint = s.checkpoint, r.attack = s.attack, r.bottles = s.bottles;
+    uint8_t *o = puppet_record_write(&r, out);
     o += pad_snapshot_pack(&pp.p[slot].sent_pad, s.pad, o);
     return (int)(o - out);
 }
 
-static const uint8_t *get(const uint8_t *in, void *v, size_t n) { memcpy(v, in, n); return in + n; }
-
 /* One rider's record (its size checked) from the PC in lobby slot sender, showing server time
-   stamp (ms). */
+   stamp (ms). Nothing of it is used until all of it checks (finding 220). */
 static void receive_record(int sender, const uint8_t *in, int n, double stamp)
 {
-    int slot = to_local(in[0]);
+    PuppetRecord r;
+    if (!puppet_record_read(in, n, &r)) return;
+    int slot = to_local(r.rider);
     if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
     Puppet *p = &pp.p[slot];
-    const uint8_t *i = in + 1, *end = in + n;
-    uint16_t state;
-    int32_t ms;
     Snapshot s;
     memset(&s, 0, sizeof s);
-    i = get(i, &ms, 4);
-    s.clock = ms;  /* the sender's race time (ms), for the trace */
-    s.race = ms / 1000.0f;
+    s.clock = r.ms;  /* the sender's race time (ms), for the trace */
+    s.race = r.ms / 1000.0f;
     s.time = (stamp - pp.go_server) / 1000 - hle_puppet_clock_excess();
-    /* Reject stale unordered packets before touching the pad mirror. */
-    if (p->count && s.time <= p->ring[p->count - 1].time) return;
-    i = get(i, s.pos, 12);
-    for (int k = 0; k < 3; k++) i = get(i, s.rot[k], 12);
-    i = get(i, s.vel, 12);
-    i = get(i, s.spin, 12);
-    i = get(i, &s.power, 4);
-    i = get(i, &s.turning, 4);
-    i += 8;  /* reserved */
-    i = get(i, &s.node, 2);
-    i = get(i, &s.next, 2);
-    i = get(i, s.target, 12);
-    i = get(i, s.after, 12);
-    i = get(i, s.offset, 8);
-    i = get(i, s.offset_to, 8);
-    s.contact[0] = *i++, s.contact[1] = *i++;
-    i = get(i, &state, 2);
-    s.state = state;
-    s.crash = *i++, s.crash_kind = *i++;
-    s.checkpoint = *i++;
-    s.attack = *i++, s.bottles = *i++;
-    if (!pad_snapshot_apply(p->mirror, i, (int)(end - i))) return;
-    memcpy(s.pad, p->mirror, sizeof s.pad);
+    /* A stamp from the future is refused (finding 220: taken, it made every honest snapshot after
+       it stale); a stale one (reordered on the way) is dropped. Both before the pad mirror. */
+    if (!puppet_stamp_ok(s.time, RACE_TIME)) {
+        refuse(slot, "stamp ahead");
+        return;
+    }
+    if (!puppet_snapshot_new(s.time, p->count > 0, p->count ? p->ring[p->count - 1].time : 0)) return;
+    memcpy(s.pos, r.pos, 12);
+    for (int k = 0; k < 3; k++) memcpy(s.rot[k], r.rot[k], 12);
+    memcpy(s.vel, r.vel, 12);
+    memcpy(s.spin, r.spin, 12);
+    s.power = r.power, s.turning = r.turning;
+    s.node = r.node, s.next = r.next;
+    memcpy(s.target, r.target, 12);
+    memcpy(s.after, r.after, 12);
+    memcpy(s.offset, r.offset, 8);
+    memcpy(s.offset_to, r.offset_to, 8);
+    s.contact[0] = r.contact[0], s.contact[1] = r.contact[1];
+    s.state = r.state;
+    s.crash = r.crash, s.crash_kind = r.crash_kind, s.checkpoint = r.checkpoint, s.attack = r.attack, s.bottles = r.bottles;
+    /* The whole record is checked before any of it is used, the pad update on a copy of the
+       mirror: a refused record leaves no trace (puppet_record.h). Its racing line must name this
+       track's nodes (an honest game names no other), its State one of the rider's own (its Enter
+       is called), and every number be finite and sane. */
+    const char *why = puppet_record_take(&r, p->mirror, NODE_LOADED, s.pad);
+    if (why) {
+        refuse(slot, why);
+        return;
+    }
     feed(slot, &s);
 }
 
@@ -1272,7 +1316,7 @@ int hle_puppet_hit(uint8_t *self, int kind, void *direction, uint8_t *other)
         *o++ = (uint8_t)to_global(victim);
         *o++ = (uint8_t)to_global(attacker);
         *o++ = (uint8_t)kind;
-        o = put(o, direction, 12);
+        o = puppet_put(o, direction, 12);
         pp.event_size[pp.nevents++] = (int)(o - e);
     }
     race_sync_hit();

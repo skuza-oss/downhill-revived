@@ -247,6 +247,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 215 | [Online, the race menu does not pause the race](215-online-menu-no-pause.md) | current |  |
 | 216 | [an online race's last seconds, the finish on every screen, a reset as a respawn](216-online-race-end.md) | current |  |
 | 217 | [Android aborts when the perf log asks an ended thread for its CPU time](217-android-thread-clocks.md) | in progress |  |
+| 220 | [another game's snapshots checked before they are used](220-online-snapshot-checks.md) | in progress |  |
 | 221 | [score rules: the server's mode, one final per rider, a table that stands](221-score-rules.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

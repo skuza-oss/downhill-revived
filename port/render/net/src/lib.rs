@@ -17,6 +17,7 @@
 //! where the router says, a peer, the SFU or the game.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+mod bundle;
 mod diagnostics;
 mod http;
 mod p2p;

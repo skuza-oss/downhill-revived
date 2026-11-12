@@ -493,19 +493,48 @@ each), the rider's power (f32: 1, an AI rider's catch-up eased, finding 202) a c
 checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad words as index (u8)
 and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
 all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom
-share a tick); previous-action words 25-49 are rebuilt locally. Receivers check the whole bundle
-first, then reject each record older than the newest they hold for that rider before changing its
-pad mirror. A receiver places a bundle on its own race clock by the stamp less its GO, less what
-its own race clock trails beyond 50 ms; the record's race time against the stamp tells it how fast
-the sender's race clock runs (`port/hle/puppet_sync.h`). EVENT remains payload version 2. The SFU
-reads none of the gameplay payload.
+share a tick); previous-action words 25-49 are rebuilt locally. A receiver places a bundle on its
+own race clock by the stamp less its GO, less what its own race clock trails beyond 50 ms; the
+record's race time against the stamp tells it how fast the sender's race clock runs
+(`port/hle/puppet_sync.h`). EVENT remains payload version 2. The SFU reads none of the gameplay
+payload but the bundle's version and stamp (its flood limit, below).
+
+What a receiver accepts (finding 220; `port/hle/puppet_record.h`, `puppet.c` `receive_record`). A
+record comes from another player's game, which can send any bytes for the riders it owns (a host
+owns every computer rider), so nothing of a record is used until all of it checks:
+
+- the whole bundle first (its header, every record's length, the count); then per record the
+  owner (only the game that runs the rider);
+- the stamp at most 1 s ahead of this game's race clock (a stamp further ahead is refused; the
+  clock sync's error is far smaller); a record not newer than the newest held for that rider is
+  dropped as late;
+- the racing-line node and next node each 0xFFFF or under the loaded track's node count (the
+  graph's own count, `D_0029EA20` +0x1004C);
+- the State one of the 18 State objects the rider's constructor builds (`PUPPET_STATES`);
+- every float finite; positions and target points within 200000 units on each axis; speed under
+  5000 and angular velocity under 500 a second; orientation rows of length 1 +- 0.5 whose
+  determinant is at least half the product of their lengths (not degenerate, not mirrored); power
+  within +-10, the turn scale within +-100, sideways offsets within
+  1000; wheel contacts 0-2, crash kind 0-10, checkpoints passed 0-35, attack 0-4, bottles 0-3 or
+  255; this tick's pad action words (0-24) at most 255 (the pad holds no floats);
+- the pad update applied to a copy of the rider's pad mirror; the mirror changes only when the
+  whole record passes.
+
+A refused record is dropped whole, counted, and logged once per rider and race (`puppet: ... a
+record refused (why)`; the count when the race ends). An honest game never sends one: the bounds
+are the bench's recorded races widened many times (finding 220 has the numbers).
 
 HOLD (finding 202) travels on the STATE channel too, 13 bytes: version 7, index 9 (the last the
 transport takes; a tick's bundles use at most 0-2), 0 riders, then the f64 stamp of the sender's last bundle and how long its game has given no bundle when the HOLD leaves (u16 ms, its own clock; round 4: receivers hold a stop only from 0.25 s, the link's delay not counted). A game's network thread,
 which runs on while the game's own thread does not, sends it every 100 ms once no bundle has gone
 out for three of its usual gaps (at least 60 ms) in a race: "no snapshot of mine since this
 moment". Receivers brake that sender's riders to a stop where they are until its bundles come again and its
-rider has caught up with them (`port/hle/puppet.c` `hold`). A game that does not know HOLD drops
+rider has caught up with them (`port/hle/puppet.c` `hold`). A receiver takes a HOLD only when it
+is about its newest snapshot of the rider (stamped at most 0.5 s after it, bundles can be lost,
+and not from the future) and its stop is no longer than its stamp is old; a newer snapshot
+already here ends it. A held rider is released once snapshots have been arriving again for 3 s
+(by the receiver's clock, whatever their stamps), so no stamp can keep it held (finding 220). The
+browser has no HOLD sender (its frames go out only from the game's worker). A game that does not know HOLD drops
 it (it checks the bundle version), so it needs no protocol change; the SFU and the P2P star
 forward it as any STATE message.
 
@@ -939,7 +968,10 @@ made for each race's racers and close on departure, on a session's replacement, 
 sitting a race out. Receiver rate protection drops a member's STATE
 messages beyond 240 in a one-second window per bundle index (normal: 60/s for index 0); it never
 silences a member for the rest of the race (protocol 3 did, and a backlog after a network stall
-froze an honest rider; finding 169).
+froze an honest rider; finding 169). Over the limit a bundle newer than the newest taken from that
+index still passes, up to 240 more a second (finding 175): the limiter reads the bundle's version
+and stamp where `state_bundle.h` puts them (the net crate reads that header when it is built,
+`port/render/net/src/bundle.rs`; until finding 220 it looked for version 6 and saw no stamp).
 
 
 ## P2P rooms (finding 186, test builds)
