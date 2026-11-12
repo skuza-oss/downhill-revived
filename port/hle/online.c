@@ -1882,6 +1882,79 @@ static int test_skip_pad(HostPad *out)
     return 1;
 }
 
+/* DHD_NET_TEST_MENU=S:step,...[;S:step,...] (tests, finding 215): from race second S (the race
+   clock), the steps on the wall clock, so they go on while a pause stops the race clock: a button
+   (start, cross, circle, square, triangle, up, down, left, right) pressed 0.1 s then let go 0.1 s,
+   or wN, N ms of nothing. While a group runs the script's own buttons are let go. "20:start,w2000,cross"
+   opens the menu at 20 s and RESUMEs 2 s later. */
+enum { TEST_GROUPS = 8, TEST_STEPS = 24 };
+typedef struct { double at; int steps; uint16_t button[TEST_STEPS]; int wait_ms[TEST_STEPS]; } TestGroup;
+static TestGroup test_group[TEST_GROUPS];
+static int test_groups = -1;
+
+static void test_menu_parse(const char *v)
+{
+    static const struct { const char *name; uint16_t button; } names[] = {
+        {"start", PAD_START}, {"cross", PAD_CROSS}, {"circle", PAD_CIRCLE}, {"square", PAD_SQUARE},
+        {"triangle", PAD_TRIANGLE}, {"up", PAD_UP}, {"down", PAD_DOWN}, {"left", PAD_LEFT}, {"right", PAD_RIGHT}};
+    test_groups = 0;
+    while (v && *v && test_groups < TEST_GROUPS) {
+        TestGroup *g = &test_group[test_groups++];
+        g->at = atof(v), g->steps = 0;
+        const char *s = strchr(v, ':'), *end = strchr(v, ';');
+        if (!end) end = v + strlen(v);
+        while (s && s < end && g->steps < TEST_STEPS) {
+            char word[16];
+            size_t len = strcspn(s + 1, ",;");
+            snprintf(word, sizeof word, "%.*s", (int)(len < sizeof word ? len : sizeof word - 1), s + 1);
+            g->button[g->steps] = 0, g->wait_ms[g->steps] = word[0] == 'w' ? atoi(word + 1) : 0;
+            for (size_t i = 0; i < sizeof names / sizeof *names; i++)
+                if (!strcmp(word, names[i].name)) g->button[g->steps] = names[i].button;
+            g->steps++;
+            s = strchr(s + 1, ',');
+        }
+        v = *end ? end + 1 : NULL;
+    }
+}
+
+static void test_menu_pad(HostPad *out)
+{
+    static HleEnv env;
+    static int group, step;
+    static double step_at = -1;
+    const char *v = hle_env(&env, "DHD_NET_TEST_MENU");
+    if (!v || !on.started) return;
+    if (test_groups < 0) test_menu_parse(v);
+    double now = host_wall_seconds();
+    static double clock_said;  /* the race clock against the wall clock, twice a second */
+    if (now - clock_said >= 0.5) {
+        clock_said = now;
+        fprintf(stderr, "online: test clock: race tick %d phase %d wall %.2f\n", RACE_CLOCK, EE32(PHASE), now);
+    }
+    if (group >= test_groups) return;
+    if (step_at < 0) {  /* the group waits for its race second */
+        if (!race_running() || port_field_seconds(RACE_CLOCK) < test_group[group].at) return;
+        step = 0, step_at = now;
+    }
+    if (step >= test_group[group].steps) { group++, step_at = -1; return; }
+    /* while a group runs the player has let go of the rider's buttons: only the steps' presses */
+    out->buttons = 0;
+    double t = now - step_at;
+    if (!test_group[group].button[step]) {
+        if (t >= test_group[group].wait_ms[step] / 1000.0) step++, step_at = now;
+        return;
+    }
+    if (t >= 0.2) { step++, step_at = now; return; }
+    if (t >= 0.1) return;
+    static double said;
+    if (said != step_at) {
+        said = step_at;
+        fprintf(stderr, "online: test menu: button %04X at race tick %d, wall %.2f\n", test_group[group].button[step],
+                RACE_CLOCK, now);
+    }
+    out->buttons = test_group[group].button[step];
+}
+
 /* After the arena's round the room's menus are Single Event's again (port_online_shell set 12 for
    the room): the shop's START, for one, goes another way in Mosh Bowl (func_0013BA60). */
 static void round_mode_off(void)
@@ -2125,6 +2198,7 @@ static void pads_read_now(int player, HostPad *out)
             if (hle_online_countdown_hold(EE32(PHASE))) out->buttons &= ~PAD_START;
         }
         else if (!on.released || !host_pad_script(player, out)) neutral(out);
+        if (player == 0 && race) test_menu_pad(out);
         /* the round's results go back to the room by themselves after a while (BACK TO THE
            ROOM, their only row: Cross pressed for a quarter second each half second) */
         if (player == 0 && from_menu && on.mosh && on.results_at &&
