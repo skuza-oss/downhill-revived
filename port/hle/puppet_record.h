@@ -156,4 +156,93 @@ static inline int puppet_node_ok(uint16_t node, int32_t loaded)
     return node == PUPPET_LINE_NONE || node < puppet_node_count(loaded);
 }
 
+/* ---- Numbers: every one finite and sane ----
+
+   One NaN in a pose poisons the rigid body and everything that reads it (the steering, set_body,
+   the AI controller's direction to its target). Every float of a record must be finite, and each
+   within a bound far outside anything a race shows. Measured on the puppet bench's recordings
+   (port/tools/puppet_bench.py record: every rider of three tracks each race step, 75 s; finding
+   220 has the numbers) and widened at least tenfold; the counts from the game's own code. */
+#define PUPPET_WORLD_MAX 100000.0f  /* units, each axis of a position or target point (tracks: within 6300) */
+#define PUPPET_SPEED_MAX 5000.0f    /* units a second (riders: up to 270) */
+#define PUPPET_SPIN_MAX 500.0f      /* radians a second (riders: up to 11) */
+#define PUPPET_ROW_SLACK 0.25f      /* an orientation row's length within 1 +- this, two rows' dot product under it
+                                       (riders: 0.978-1.000 and 1e-7); then the rows cannot be degenerate */
+#define PUPPET_OFFSET_MAX 1000.0f   /* units: a racing line's sideways offset (riders: within 22) */
+#define PUPPET_POWER_MAX 10.0f      /* power, either sign (riders: 0.75-1.22; puppet.c uses only 0.5-2) */
+#define PUPPET_TURNING_MAX 100.0f   /* a computer rider's turn scale, either sign (riders: 0-1.04; used only 0-1) */
+enum {
+    PUPPET_CONTACT_MAX = 2,      /* a wheel's contact: 0 none, 1 ground, 2 air */
+    PUPPET_CRASH_KIND_MAX = 10,  /* func_00155E78's kinds: its callers pass 1-10 */
+    PUPPET_CHECKPOINT_MAX = 35,  /* func_0019F210 reads checkpoint plane [passed + 1] of 36 (+0x220) and writes the
+                                    rider's +0x79B0[passed]: past this it would read and write outside both */
+    PUPPET_ATTACK_MAX = 4,       /* punch, kick, check, stick, bottle (finding 121) */
+    PUPPET_BOTTLES_MAX = 3,      /* bottles left (func_0012C9E0, func_00130910); the cheat's endless -1 is 255 here */
+    /* The pad (pad_snapshot.h) holds no floats: its words are integers the game compares. This
+       tick's 25 action words (the ones a puppet's pad takes) are buttons (0 or 1, func_0017EB00) and
+       analogue amounts (0-127 after func_0017E1C0's square, func_0017DFB0's 0-128): a byte at most. */
+    PUPPET_PAD_ACTION_MAX = 255
+};
+
+static inline int puppet_finite(const float *v, int n)
+{
+    for (int i = 0; i < n; i++)
+        if (!isfinite(v[i])) return 0;
+    return 1;
+}
+static inline int puppet_within(const float *v, int n, float most)
+{
+    for (int i = 0; i < n; i++)
+        if (!(fabsf(v[i]) <= most)) return 0;  /* NaN fails too */
+    return 1;
+}
+static inline float puppet_len3(const float *v) { return sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+
+/* The whole record: `pad` is the pad mirror as its update leaves it (applied to a copy first), and
+   node_count the racing-line graph's loaded count. NULL: it may be used; else why not (for the
+   log). Nothing of a refused record is used. */
+static inline const char *puppet_record_check(const PuppetRecord *r, const uint32_t *pad, int32_t node_count)
+{
+    if (!puppet_finite(r->pos, 3) || !puppet_finite(&r->rot[0][0], 9) || !puppet_finite(r->vel, 3) ||
+        !puppet_finite(r->spin, 3) || !isfinite(r->power) || !isfinite(r->turning) || !puppet_finite(r->target, 3) ||
+        !puppet_finite(r->after, 3) || !puppet_finite(r->offset, 2) || !puppet_finite(r->offset_to, 2))
+        return "not finite";
+    if (!puppet_within(r->pos, 3, PUPPET_WORLD_MAX)) return "position";
+    if (!(puppet_len3(r->vel) <= PUPPET_SPEED_MAX)) return "speed";
+    if (!(puppet_len3(r->spin) <= PUPPET_SPIN_MAX)) return "spin";
+    for (int i = 0; i < 3; i++) {
+        if (!(fabsf(puppet_len3(r->rot[i]) - 1) <= PUPPET_ROW_SLACK)) return "orientation";
+        for (int j = 0; j < i; j++) {
+            float d = r->rot[i][0] * r->rot[j][0] + r->rot[i][1] * r->rot[j][1] + r->rot[i][2] * r->rot[j][2];
+            if (!(fabsf(d) <= PUPPET_ROW_SLACK)) return "orientation";
+        }
+    }
+    if (!(fabsf(r->power) <= PUPPET_POWER_MAX) || !(fabsf(r->turning) <= PUPPET_TURNING_MAX)) return "power";
+    if (!puppet_node_ok(r->node, node_count) || !puppet_node_ok(r->next, node_count) ||
+        !puppet_within(r->target, 3, PUPPET_WORLD_MAX) || !puppet_within(r->after, 3, PUPPET_WORLD_MAX) ||
+        !puppet_within(r->offset, 2, PUPPET_OFFSET_MAX) || !puppet_within(r->offset_to, 2, PUPPET_OFFSET_MAX))
+        return "racing line";
+    if (!puppet_state_known(r->state)) return "state";
+    if (r->contact[0] > PUPPET_CONTACT_MAX || r->contact[1] > PUPPET_CONTACT_MAX || r->crash_kind > PUPPET_CRASH_KIND_MAX ||
+        r->checkpoint > PUPPET_CHECKPOINT_MAX || r->attack > PUPPET_ATTACK_MAX ||
+        (r->bottles > PUPPET_BOTTLES_MAX && r->bottles != 255))
+        return "counts";
+    for (int w = 0; w < PREV_FIRST; w++)
+        if (pad[w] > PUPPET_PAD_ACTION_MAX) return "pad";
+    return NULL;
+}
+
+/* A read record taken against a rider's pad mirror: its pad update applied to a copy (`pad`, the
+   pad the record shows), the whole record checked, and the mirror changed only when it passes.
+   NULL: taken; else why it was refused (the mirror as it was). */
+static inline const char *puppet_record_take(const PuppetRecord *r, uint32_t mirror[PAD_WORDS], int32_t node_count,
+                                             uint32_t pad[PAD_WORDS])
+{
+    memcpy(pad, mirror, PAD_WORDS * sizeof *pad);
+    if (!pad_snapshot_apply(pad, r->pad, r->pad_size)) return "pad";
+    const char *why = puppet_record_check(r, pad, node_count);
+    if (!why) memcpy(mirror, pad, PAD_WORDS * sizeof *pad);
+    return why;
+}
+
 #endif

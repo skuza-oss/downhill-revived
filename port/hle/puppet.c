@@ -1193,14 +1193,6 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
     int slot = to_local(r.rider);
     if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
     Puppet *p = &pp.p[slot];
-    if (!puppet_node_ok(r.node, NODE_LOADED) || !puppet_node_ok(r.next, NODE_LOADED)) {
-        refuse(slot, "racing line");  /* not one of this track's nodes: an honest game never names one */
-        return;
-    }
-    if (!puppet_state_known(r.state)) {  /* its Enter would be called on whatever is there */
-        refuse(slot, "state");
-        return;
-    }
     Snapshot s;
     memset(&s, 0, sizeof s);
     s.clock = r.ms;  /* the sender's race time (ms), for the trace */
@@ -1221,8 +1213,15 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
     s.contact[0] = r.contact[0], s.contact[1] = r.contact[1];
     s.state = r.state;
     s.crash = r.crash, s.crash_kind = r.crash_kind, s.checkpoint = r.checkpoint, s.attack = r.attack, s.bottles = r.bottles;
-    if (!pad_snapshot_apply(p->mirror, r.pad, r.pad_size)) return;
-    memcpy(s.pad, p->mirror, sizeof s.pad);
+    /* The whole record is checked before any of it is used, the pad update on a copy of the
+       mirror: a refused record leaves no trace (puppet_record.h). Its racing line must name this
+       track's nodes (an honest game names no other), its State one of the rider's own (its Enter
+       is called), and every number be finite and sane. */
+    const char *why = puppet_record_take(&r, p->mirror, NODE_LOADED, s.pad);
+    if (why) {
+        refuse(slot, why);
+        return;
+    }
     feed(slot, &s);
 }
 

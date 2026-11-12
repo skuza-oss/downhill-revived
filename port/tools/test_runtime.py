@@ -130,11 +130,30 @@ def end_tests():
     assert kept.read_text() == 'kept'
 
 
+def sanitized(name, sources):
+    """A test program on the host under the address sanitizer (finding 220: the receive path's
+    fuzz). On Windows its runtime DLL is copied next to it from the toolchain; a toolchain without
+    one is said and skipped."""
+    import shutil
+    flags = ['-fsanitize=address', '-fno-omit-frame-pointer', '-g']
+    if testprog.WINDOWS:
+        found = sorted(Path(testprog.CLANG).resolve().parent.parent.glob('lib/clang/*/lib/windows/clang_rt.asan_dynamic-x86_64.dll'))
+        if not found:
+            print('%s: no address sanitizer runtime in this toolchain; skipped' % name)
+            return
+        exe = testprog.host(name, sources, flags=flags)
+        shutil.copy(found[-1], Path(exe).parent)
+    else:
+        exe = testprog.host(name, sources, flags=flags)
+    testprog.run(exe)
+
+
 def host_tests():
     """The host's code: the GS, its captures, VU1 and the VIF, the graphics queue and the SDL
     devices. The GS renderer's own tests (test_gpu, test_depth, test_present) run on the Rust
     renderer: port/tools/test_gs_wgpu.py."""
     end_tests()
+    sanitized('puppet-record-asan', [HLE / 'test_puppet_record.c'])  # random and mutated records (finding 220)
     gs = [GS / 'memory.c', GS / 'gs.c']
     run = lambda name, sources, *args, env=None, **kw: testprog.run(testprog.host(name, sources, **kw), *args, env=env)
     run('gs', gs + [GS / 'display.c', GS / 'test_gs.c'], low=True)
