@@ -199,7 +199,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 166 | [Online races on the tracks without a split-screen level (Salt City MX and TD)](166-online-more-tracks.md) | current |  |
 | 167 | [Native VU1 rendering, phase 2: the remaining VU1 programs](167-native-vu1-phase2.md) | current |  |
 | 168 | [Native mesh draws batched, for the render thread](168-native-mesh-draw-batching.md) | current |  |
-| 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | current |  |
+| 169 | [online riders closer to now: bundled snapshots, 60 a second, shared clock, prediction](169-online-latency-round2.md) | partly superseded | [202](202-online-riders-rebuild.md) for item 4, the straight-line prediction |
 | 170 | [PowerVR GE8320 phones close at start](170-powervr-ge8320-crash.md) | current |  |
 | 171 | [The picture freezes when the GPU device is lost](171-gpu-device-lost.md) | current |  |
 | 172 | [Fewer state changes per draw on the render thread](172-render-thread-state-changes.md) | partly superseded | [195](195-phone-speed.md) for the constants per draw by instance index: undone, the draw constants are a uniform block at a dynamic offset again |
@@ -232,12 +232,14 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 199 | [Native VU in the browser](199-native-vu-browser.md) | current |  |
 | 200 | [Unlock All applies at once; button icons over a texture pack's font](200-unlock-live-and-pack-icons.md) | current |  |
 | 201 | [PowerVR GE8322 (driver 1.18) closes at the first picture's submit](201-powervr-ge8322-submit.md) | current |  |
-| 202 | [online riders that look right: a bench of today's puppets, then a rebuild](202-online-riders-rebuild.md) | in progress |  |
+| 202 | [online riders that look right: a bench of today's puppets, then a rebuild](202-online-riders-rebuild.md) | current |  |
 | 203 | [Online MOSH PIT closes the game at the race start (issue #84)](203-online-mosh-start.md) | current |  |
 | 204 | [online MOSH PIT rounds run by the game's Mosh Bowl rules](204-online-mosh-bowl.md) | current |  |
 | 205 | [a state trace that does not depend on the core's layout](205-state-trace-core-layout.md) | current |  |
 | 206 | [the online test tools drive their riders; the room card's state beside its tags](206-online-test-riders-room-card.md) | current |  |
+| 207 | [Posters in OPTIONS closes the game (issue 87)](207-posters-crash.md) | current |  |
 | 208 | [the Bike Shop closes the game on a Redmi Note 13 4G (issue #78)](208-bike-shop-crash-redmi-note-13.md) | in progress |  |
+| 209 | [Touch controls can skip the flight over the track](209-touch-skip-flyover.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

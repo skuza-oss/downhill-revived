@@ -23,6 +23,8 @@
 
 enum {
     RACE_CLOCK = 0x43EEC8,     /* fields since GO */
+    RACE_PHASE = 0x43F348,     /* D_0043F348: 0 load, 5 the flight over the track, 1 countdown, 2-4 the race */
+    FLYOVER_PHASE = 5,
     RIDER_AIR = 0x2AF2C0 + 0x4564,
     RACE_STATE = 0x4B25A0,     /* D_004B25A0: +0x10C the mode, +0x110, +0x288 */
     SAVE = 0x4225A0            /* D_004225A0: the save's +0x12199, +0x1219F */
@@ -64,6 +66,10 @@ void touch_field(void)
     int race_screen = port_race_running(1);
     h.race_hud = touch_hud_seen && race_screen;
     touch_hud_seen = 0;
+    /* the flight over the track: START skips it on a pad (finding 209). Phase 5 after the load
+       (phase 0), in a race's loop; the front end's frame ends port_in_race, so a phase 5 left over
+       in the menus is not it */
+    h.flyover = port_in_race() && EE32(RACE_PHASE) == FLYOVER_PHASE;
     h.air = race_screen && EE16(RIDER_AIR) != 0;
     h.online = pads_online();
     h.clock_moving = race_screen && clock != last_clock;

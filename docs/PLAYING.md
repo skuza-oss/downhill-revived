@@ -70,7 +70,9 @@ What works today:
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
   or Thumb zones, tilt steering if you like), or a controller. Online: P2P races only. The game's
   codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
-  buttons); **ENTER** goes back to the race and enters them.
+  buttons); **ENTER** goes back to the race and enters them. The camera's flight over the track
+  before each race has a **SKIP** button (low in the middle of the screen, the touch controls'
+  START); tap it as you would press START on a pad.
 
 Known gaps:
 

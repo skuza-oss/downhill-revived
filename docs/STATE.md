@@ -192,8 +192,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - Protocol 4 (0.7.13, finding 169): a PC's riders of one tick go out bundled in STATE messages of
   at most 1,000 bytes (one datagram), stamped with their moment on the server clock (the PONG
   carries the server's time); each player's own rider 60 times a second, AI riders 30. Puppets are
-  drawn at the present: the newest snapshot carried forward by its velocity and angular velocity,
-  corrections fading in. Hits are
+  drawn at the present by riding on this game's physics (finding 202, above): placed at once only
+  at their first snapshot, a respawn, a large error or a large one after silence
+  (`SYNC_PLACE_FAR`, `SYNC_PLACE_SILENCE` in `port/hle/puppet_sync.h`), otherwise caught up by
+  riding; a game whose own thread stops says so (HOLD, from its
+  network thread) and the others hold its riders. Hits are
   decided on the puppet as drawn. In a room the FPS & Ping counter shows "SERVER N MS", the round
   trip to the room's server, and "RACE N MS", the round trip to Cloudflare's race network (the SFU
   association's ICE checks); in a race the second line is "RIDERS N MS", the other riders'

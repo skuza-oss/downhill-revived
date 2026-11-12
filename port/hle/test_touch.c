@@ -639,6 +639,101 @@ static void test_race_running(void)
     CHECK(touch_visible(t));
 }
 
+/* The flight over the track (issue #89, finding 209): the race HUD is not drawn, START skips the
+   flight on a pad, so the overlay shows a SKIP button that sends START and nothing else. */
+static void test_flyover(void)
+{
+    for (int preset = 0; preset < 2; preset++) {
+        float sx, sy, x, y;
+        TouchShape shapes[TOUCH_SHAPES];
+        start(preset, TOUCH_ATTACK_FLICK);
+        game.race_hud = 0;
+        game.clock_moving = 0;
+        wait_ms(500);
+        CHECK(!touch_visible(t) && !touch_owns_touches(t) && touch_shapes(t, shapes, TOUCH_SHAPES) == 0);   /* the load */
+        /* a finger already down when the flight begins is never SKIP's, also when it slides onto it */
+        assert(touch_target(t, TOUCH_TARGET_SKIP, 0, &sx, &sy));
+        touch_down(t, 9, 20, 20, now);
+        game.flyover = 1;
+        fields(2);
+        CHECK(touch_visible(t) && touch_owns_touches(t));
+        CHECK(touch_shapes(t, shapes, TOUCH_SHAPES) > 0);
+        touch_move(t, 9, sx, sy, now);
+        touch_up(t, 9, sx, sy, now);
+        fields(5);
+        CHECK(!(buttons() & PAD_START));
+        /* a tap on the race controls' places does nothing: no PEDAL, no pause */
+        at(preset == TOUCH_CLASSIC ? TC_CROSS : TC_PEDAL, &x, &y);
+        touch_down(t, 1, x, y, now);
+        fields(3);
+        CHECK(!buttons());
+        touch_up(t, 1, x, y, now);
+        at(TC_PAUSE, &x, &y);
+        touch_down(t, 2, x, y, now);
+        fields(2);
+        touch_up(t, 2, x, y, now);
+        fields(8);
+        CHECK(!buttons());
+        /* a tap on SKIP sends START on the lift, for three fields, once */
+        touch_down(t, 3, sx, sy, now);
+        fields(3);
+        CHECK(!(buttons() & PAD_START));
+        touch_up(t, 3, sx, sy, now);
+        field();
+        CHECK(buttons() & PAD_START);
+        fields(4);
+        CHECK(!(buttons() & PAD_START));
+        /* a drag off the button cancels the tap */
+        touch_down(t, 4, sx, sy, now);
+        touch_move(t, 4, sx, sy - 30, now);
+        touch_up(t, 4, sx, sy - 30, now);
+        fields(4);
+        CHECK(!(buttons() & PAD_START));
+        /* the flight ends right after the tap: the countdown never sees START */
+        touch_down(t, 6, sx, sy, now);
+        field();
+        touch_up(t, 6, sx, sy, now);
+        field();
+        CHECK(buttons() & PAD_START);
+        game.flyover = 0;
+        game.race_hud = 1;
+        game.clock_moving = 1;
+        field();
+        CHECK(!(buttons() & PAD_START));
+        fields(5);
+        CHECK(!(buttons() & PAD_START));
+        /* a finger on SKIP when the flight ends does not skip the countdown */
+        game.flyover = 1;
+        game.race_hud = 0;
+        game.clock_moving = 0;
+        fields(3);
+        touch_down(t, 7, sx, sy, now);
+        fields(2);
+        game.flyover = 0;
+        game.race_hud = 1;
+        game.clock_moving = 1;
+        fields(2);
+        touch_up(t, 7, sx, sy, now);
+        fields(6);
+        CHECK(!(buttons() & PAD_START));
+        /* a controller: the overlay hides, the touch that brings it back sends nothing */
+        game.flyover = 1;
+        game.race_hud = 0;
+        game.clock_moving = 0;
+        fields(3);
+        touch_pad_used(t, now);
+        field();
+        CHECK(!touch_visible(t));
+        CHECK(touch_owns_touches(t));
+        touch_down(t, 8, sx, sy, now);
+        touch_up(t, 8, sx, sy, now);
+        fields(6);
+        CHECK(!(buttons() & PAD_START));
+        CHECK(touch_visible(t));
+        game.flyover = 0;
+    }
+}
+
 /* The trick-stick hint: it holds the game until a push, and when the hold ends without one (5 s)
    the hint goes too. */
 static void test_trick_hint(void)
@@ -1313,6 +1408,7 @@ int main(void)
     test_pause_controller();
     test_restart_clock();
     test_race_running();
+    test_flyover();
     test_editor_bar();
     test_trick_hint();
     test_classic_resume();

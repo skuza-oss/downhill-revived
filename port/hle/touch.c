@@ -145,7 +145,7 @@ float touch_button_scale(float s) { return 1.2f * s - 0.2f; }
 
 /* ---------------------------------------------------------------- the state */
 
-enum { JOB_NONE, JOB_STICK, JOB_BUTTON, JOB_PEDAL, JOB_TRICK, JOB_AIR_WAIT, JOB_PANEL, JOB_EDIT, JOB_IGNORED };
+enum { JOB_NONE, JOB_STICK, JOB_BUTTON, JOB_PEDAL, JOB_TRICK, JOB_AIR_WAIT, JOB_PANEL, JOB_EDIT, JOB_IGNORED, JOB_SKIP };
 /* PAUSE_PAD: a controller took over the game's pause menu (or its question) from the rows: the
    overlay no longer knows where the game's menu is, so it hides and leaves the menu to the
    controller until the race goes on. */
@@ -259,6 +259,8 @@ struct Touch {
     double freeze_since;
     int race_new;
     int race_was_on;           /* the race was on screen at the last update */
+    int fly_was;               /* the flight over the track played at the last update (finding 209) */
+    int skip_pulse;            /* a SKIP tap's START press is going out */
     unsigned downs;            /* touch-downs so far (Finger.order) */
 };
 
@@ -845,17 +847,26 @@ static void trick_close(Touch *t)
 
 static int race_on_screen(const Touch *t) { return t->hud_seen > 0 && t->now - t->hud_seen < 250; }
 
+/* The camera's flight over the track (finding 209): the race HUD is not drawn, the race controls
+   do nothing. The one thing a pad does there is START, which skips it: the overlay shows a SKIP
+   button and nothing else. */
+static int flyover_on(const Touch *t) { return t->have_game && t->game.flyover && !t->editor; }
+
 int touch_visible(const Touch *t)
 {
     if (t->editor) return 1;
     if (t->pause == PAUSE_PAD) return 0;   /* the controller has the game's menu */
     if (t->pause != PAUSE_NONE) return 1;
+    if (flyover_on(t)) return !t->hidden_by_pad;
     return race_on_screen(t) && !t->hidden_by_pad;
 }
 
 /* The overlay's touches: while it shows, and in a race it hid for a controller (the touch that
    brings it back); in the menus a touch is the menus' (their mouse). */
-int touch_owns_touches(const Touch *t) { return touch_visible(t) || (t->hidden_by_pad && race_on_screen(t)); }
+int touch_owns_touches(const Touch *t)
+{
+    return touch_visible(t) || (t->hidden_by_pad && (race_on_screen(t) || flyover_on(t)));
+}
 
 int touch_hud_mode(const Touch *t)
 {
@@ -949,6 +960,19 @@ static Box code_box(const Touch *t, int b)
     return (Box){W / 2 + (b - CODE_BACK) * 22.0f, H * 0.95f - 5.5f, 9.0f, 4.5f};
 }
 
+/* The flight's SKIP button: low in the middle, under either thumb, clear of the game's track name
+   at the top and of the places the race controls take later. */
+static Box skip_box(const Touch *t)
+{
+    return (Box){t->screen.width / 2, t->screen.height * 0.86f, 15.0f, 5.5f};
+}
+
+static int skip_hit(const Touch *t, float x, float y)
+{
+    Box b = skip_box(t);
+    return fabsf(x - b.x) <= b.hw + 3.0f && fabsf(y - b.y) <= b.hh + 3.0f;   /* a 3 mm rim of touch area */
+}
+
 static Box confirm_box(const Touch *t, int row)
 {
     float W = t->screen.width, H = t->screen.height;
@@ -1011,11 +1035,11 @@ static int in_box(Box b, float x, float y) { return fabsf(x - b.x) <= b.hw && fa
 
 int touch_target(const Touch *t, int kind, int index, float *x, float *y)
 {
-    static const int counts[5] = {PAUSE_ROWS, 2, PANEL_BUTTONS, EDIT_BUTTONS, CODE_BUTTONS};
-    if (kind < 0 || kind > 4 || index < 0 || index >= counts[kind]) return 0;
+    static const int counts[6] = {PAUSE_ROWS, 2, PANEL_BUTTONS, EDIT_BUTTONS, CODE_BUTTONS, 1};
+    if (kind < 0 || kind > 5 || index < 0 || index >= counts[kind]) return 0;
     Box b = kind == TOUCH_TARGET_PAUSE ? pause_row_box(t, index) : kind == TOUCH_TARGET_CONFIRM ? confirm_box(t, index)
           : kind == TOUCH_TARGET_PANEL ? panel_box(t, index) : kind == TOUCH_TARGET_CODES ? code_box(t, index)
-          : editor_box(t, index);
+          : kind == TOUCH_TARGET_SKIP ? skip_box(t) : editor_box(t, index);
     *x = b.x, *y = b.y;
     return 1;
 }
@@ -1445,10 +1469,14 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
     if (t->hidden_by_pad) {   /* the touch that brings the overlay back is never sent */
         t->hidden_by_pad = 0;
         f->job = JOB_IGNORED;
-        if (race_on_screen(t)) return;
+        if (race_on_screen(t) || flyover_on(t)) return;
     }
     if (t->editor) { editor_down(t, f); return; }
     if (!touch_visible(t)) { f->job = JOB_IGNORED; return; }
+    if (flyover_on(t)) {   /* only SKIP: a finger already down when the flight began never was one */
+        f->job = skip_hit(t, x, y) ? JOB_SKIP : JOB_IGNORED;
+        return;
+    }
     if (t->pause != PAUSE_NONE) {   /* only the rows (and Pause, Back) send input */
         static const int pause_button[] = {TC_PAUSE};
         f->job = JOB_PANEL;
@@ -1535,7 +1563,13 @@ void touch_up(Touch *t, long long id, float x, float y, double now)
             else if (f->target >= 0 && pause_row_at(t, x, y) == f->target) pause_row_tapped(t, f->target);
         } else if (t->panel_open && f->target >= 0 && panel_button_at(t, x, y) == f->target) panel_tapped(t, f->target);
     } else if (f->job == JOB_EDIT) editor_up(t, f);
-    else if (f->job == JOB_TRICK && t->freeze && !t->trick.held) t->freeze = 0;   /* a lift without a push */
+    else if (f->job == JOB_SKIP) {   /* fires on the lift, on the button it started on (a drag off it cancels) */
+        if (flyover_on(t) && skip_hit(t, x, y)) {
+            pulse(t, PAD_START, PRESS_FIELDS);
+            t->skip_pulse = 1;
+            buzz(t, TOUCH_BUZZ_TICK);
+        }
+    } else if (f->job == JOB_TRICK && t->freeze && !t->trick.held) t->freeze = 0;   /* a lift without a push */
     else if (f->job == JOB_AIR_WAIT && !paused(t)) {
         /* a tap that ended in the air layout's wait: the ground layout was still on screen, so it
            was that button's (the flag also comes over bumps); a short press */
@@ -1830,7 +1864,7 @@ static void tilt_step(Touch *t)
 static void hints_step(Touch *t)
 {
     const TouchGame *g = &t->game;
-    if (g->online || t->set.preset != TOUCH_THUMB_ZONES || !touch_visible(t) || t->editor) { t->hint = 0; return; }
+    if (g->online || t->set.preset != TOUCH_THUMB_ZONES || !touch_visible(t) || t->editor || flyover_on(t)) { t->hint = 0; return; }
     double race = g->race_ms;
     if (t->race_new) { t->last_hop_race = race; t->slide_far_since = 0; t->race_new = 0; }
     if (t->hint && t->hint != TOUCH_HINT_TRICK && t->now > t->hint_until) t->hint = 0;
@@ -1921,6 +1955,23 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         t->hud_seen = now;
     }
     t->race_was_on = race_on_screen(t);
+    if (flyover_on(t) != t->fly_was) {
+        t->fly_was = flyover_on(t);
+        if (t->fly_was) {   /* a pause menu is gone once the race is loading again */
+            if (t->pause != PAUSE_NONE) t->pause = PAUSE_NONE, seq_reset(t);
+            t->panel_open = 0;
+        } else {
+            /* the flight is over (skipped or played out): a SKIP finger still down never skips
+               the countdown, and a START press still going is taken back, so the countdown does
+               not see it (it would pause the race) */
+            for (int i = 0; i < TOUCH_FINGERS; i++)
+                if (t->f[i].used && t->f[i].job == JOB_SKIP) t->f[i].job = JOB_IGNORED;
+            if (t->skip_pulse)
+                for (int i = 0; i < 16; i++)
+                    if (t->pulse_buttons[i] == PAD_START) t->pulse_buttons[i] = 0, t->pulse_fields[i] = 0;
+            t->skip_pulse = 0;
+        }
+    }
     lifted_presses_step(t);
     if (was_on && !t->race_was_on && t->pause == PAUSE_NONE) {   /* the race is gone */
         drop_race_touches(t);
@@ -1985,7 +2036,7 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint
     (void)rx; (void)ry;
     for (int i = 0; i < 16; i++) b |= t->pulse_buttons[i];
     if (seq_busy(t) && t->seq_started) b |= t->seq[t->seq_at].buttons;
-    if (!paused(t) && touch_visible(t)) {
+    if (!paused(t) && touch_visible(t) && !flyover_on(t)) {   /* the flight: only SKIP's START (a pulse) */
         for (int i = 0; i < TOUCH_FINGERS; i++) {
             const Finger *f = &t->f[i];
             if (f->used && f->sent && (f->job == JOB_PEDAL || f->job == JOB_BUTTON)) b |= f->buttons;
@@ -2413,6 +2464,14 @@ int touch_shapes(const Touch *t, TouchShape *out, int max)
     Draw d = {out, 0, max, clampf(t->set.opacity / 100.0f, 0.1f, 1.0f)};
     if (!touch_visible(t)) return 0;
     if (t->editor) { draw_editor(t, &d); return d.n; }
+    if (flyover_on(t) && t->pause == PAUSE_NONE) {   /* the flight over the track: SKIP (finding 209) */
+        Box b = skip_box(t);
+        int pressed = 0;
+        for (int i = 0; i < TOUCH_FINGERS; i++)
+            if (t->f[i].used && t->f[i].job == JOB_SKIP && skip_hit(t, t->f[i].x, t->f[i].y)) pressed = 1;
+        box_button(&d, b.x, b.y, b.hw, b.hh, pressed, d.alpha, "SKIP", 3.4f);
+        return d.n;
+    }
     if (t->set.preset == TOUCH_CLASSIC) draw_classic(t, &d);
     else draw_thumb(t, &d);
     if (t->label[0] && t->set.labels != TOUCH_LABELS_OFF) {
