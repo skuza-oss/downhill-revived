@@ -369,7 +369,9 @@ typedef struct {
     int32_t freeze;        /* out */
     int32_t flyover;       /* the camera's flight over the track plays (race phase 5; finding 209) */
     int32_t movie;         /* a movie plays (the startup movies, the attract movie, VIDEO CLIPS; finding 214) */
-} HostTouch;  /* 72 bytes */
+    int32_t replay;        /* a race's replay is the race loop (the recorder plays; finding 214) */
+    int32_t attract;       /* the title's attract demo plays (race mode 10; finding 214) */
+} HostTouch;  /* 80 bytes */
 void host_service_touch_field(uint32_t state);
 
 #endif

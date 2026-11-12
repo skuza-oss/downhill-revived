@@ -920,10 +920,19 @@ static void trick_close(Touch *t)
 
 static int race_on_screen(const Touch *t) { return t->hud_seen > 0 && t->now - t->hud_seen < 250; }
 
-/* The camera's flight over the track (finding 209) and the movies (finding 214): the race HUD is
-   not drawn, the race controls do nothing. The one thing a pad does there is START, which skips
-   it: the overlay shows a SKIP button and nothing else. */
-static int flyover_on(const Touch *t) { return t->have_game && (t->game.flyover || t->game.movie) && !t->editor; }
+/* The moments with one thing to press (findings 209, 214): the camera's flight over the track, a
+   movie, the title's attract demo and a race's replay running. The race controls do nothing in
+   them (the pad is the game's own or the recording's) and the one thing a pad does is START (the
+   demo takes any button): the overlay shows one button and nothing else, SKIP, or MENU in a replay
+   (START opens its RE-START / SAVE / QUIT / CONTINUE menu). That menu is a popup like the others:
+   while it is up the replay's clock has stopped and the overlay stands aside for the menus' mouse
+   layer; CONTINUE runs the clock again and the button returns. */
+static int replay_on(const Touch *t) { return t->have_game && t->game.replay && !t->editor; }
+static int flyover_on(const Touch *t)
+{
+    return t->have_game && !t->editor &&
+           (t->game.flyover || t->game.movie || t->game.attract || (t->game.replay && t->game.clock_moving));
+}
 
 int touch_visible(const Touch *t)
 {
@@ -931,6 +940,7 @@ int touch_visible(const Touch *t)
     if (t->pause == PAUSE_PAD) return 0;   /* the controller has the game's menu */
     if (t->pause != PAUSE_NONE) return 1;
     if (flyover_on(t)) return !t->hidden_by_pad;
+    if (replay_on(t)) return 0;            /* the replay's menu, or its load: not the race's controls */
     return race_on_screen(t) && !t->hidden_by_pad;
 }
 
@@ -938,12 +948,12 @@ int touch_visible(const Touch *t)
    brings it back); in the menus a touch is the menus' (their mouse). */
 int touch_owns_touches(const Touch *t)
 {
-    return touch_visible(t) || (t->hidden_by_pad && (race_on_screen(t) || flyover_on(t)));
+    return touch_visible(t) || (t->hidden_by_pad && ((race_on_screen(t) && !replay_on(t)) || flyover_on(t)));
 }
 
 int touch_hud_mode(const Touch *t)
 {
-    if (!t->set.hud_moved || t->editor || !race_on_screen(t) || t->hidden_by_pad) return 0;
+    if (!t->set.hud_moved || t->editor || !race_on_screen(t) || t->hidden_by_pad || replay_on(t)) return 0;
     return right_handed(t) ? 1 : 2;
 }
 
@@ -2617,7 +2627,7 @@ int touch_shapes(const Touch *t, TouchShape *out, int max)
         int pressed = 0;
         for (int i = 0; i < TOUCH_FINGERS; i++)
             if (t->f[i].used && t->f[i].job == JOB_SKIP && skip_hit(t, t->f[i].x, t->f[i].y)) pressed = 1;
-        box_button(&d, b.x, b.y, b.hw, b.hh, pressed, d.alpha, "SKIP", 3.4f);
+        box_button(&d, b.x, b.y, b.hw, b.hh, pressed, d.alpha, t->game.replay ? "MENU" : "SKIP", 3.4f);
         return d.n;
     }
     if (t->set.preset == TOUCH_CLASSIC) draw_classic(t, &d);

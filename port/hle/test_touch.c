@@ -789,6 +789,61 @@ static void test_movie_skip(void)
         }
 }
 
+/* A race's replay and the title's attract demo (finding 214): the pad is the recording's or the
+   demo's, so the race controls do nothing; one button, MENU (START opens the replay's menu) or SKIP
+   (any button ends the demo). While the replay's menu is up (its clock stopped) the overlay stands
+   aside so the popup takes the taps; CONTINUE brings the button back. */
+static void test_replay_attract(void)
+{
+    for (int preset = 0; preset < 2; preset++) {
+        float sx, sy, x, y;
+        TouchShape shapes[TOUCH_SHAPES];
+        start(preset, TOUCH_ATTACK_FLICK);
+        game.replay = 1;
+        fields(3);
+        CHECK(touch_visible(t) && touch_owns_touches(t) && touch_hud_mode(t) == 0);
+        int n = touch_shapes(t, shapes, TOUCH_SHAPES);
+        CHECK(n > 0 && n < 8);   /* the one button and its label, none of the race controls */
+        assert(touch_target(t, TOUCH_TARGET_SKIP, 0, &sx, &sy));
+        at(preset == TOUCH_CLASSIC ? TC_CROSS : TC_PEDAL, &x, &y);
+        touch_down(t, 1, x, y, now);
+        fields(3);
+        CHECK(!buttons());   /* the race controls send nothing: the pad is the recording's */
+        touch_up(t, 1, x, y, now);
+        touch_down(t, 2, sx, sy, now);
+        touch_up(t, 2, sx, sy, now);
+        field();
+        CHECK(buttons() == PAD_START);
+        fields(1);
+        game.clock_moving = 0;   /* the replay's menu opened: RE-START, SAVE, QUIT, CONTINUE */
+        field();
+        CHECK(!buttons() && !touch_visible(t) && !touch_owns_touches(t));
+        touch_down(t, 3, sx, sy, now);
+        touch_up(t, 3, sx, sy, now);
+        fields(5);
+        CHECK(!buttons());   /* the tap is the menu's (the mouse layer), not START again */
+        game.clock_moving = 1;   /* CONTINUE */
+        fields(2);
+        CHECK(touch_visible(t));
+        game.replay = 0;
+        game.race_hud = 0;
+        game.clock_moving = 0;
+        wait_ms(500);
+        CHECK(!touch_visible(t));
+        /* the attract demo: SKIP, any button ends it; the demo is no race for the overlay */
+        game.attract = 1;
+        fields(3);
+        CHECK(touch_visible(t) && touch_owns_touches(t));
+        touch_down(t, 4, sx, sy, now);
+        touch_up(t, 4, sx, sy, now);
+        field();
+        CHECK(buttons() == PAD_START);
+        game.attract = 0;
+        fields(6);
+        CHECK(!buttons() && !touch_visible(t));
+    }
+}
+
 /* The trick-stick hint: it holds the game until a push, and when the hold ends without one (5 s)
    the hint goes too. */
 static void test_trick_hint(void)
@@ -1756,6 +1811,7 @@ int main(void)
     test_race_running();
     test_flyover();
     test_movie_skip();
+    test_replay_attract();
     test_editor_bar();
     test_trick_hint();
     test_classic_resume();
