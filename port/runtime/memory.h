@@ -12,11 +12,20 @@
 /* Guest-visible memory the HLE owns, right above the scratchpad at the same address in every
    build. A pointer the HLE gives the game must not depend on where the core's linker put its own
    data: the game keeps it in its RAM, and the state trace compares that RAM between builds
-   (finding 205). [PS2_HLE_WINDOW, +0x800): the SIF RPC packets (sif.c). */
+   (finding 205). [PS2_HLE_WINDOW, +0x800): the SIF RPC packets (sif.c). [PS2_DISC_RECENT,
+   +PS2_DISC_RECENT_SIZE): the disc files the game looked up last (cdvd.c), which the host's crash
+   report prints (port/hle/host.c; finding 208). The game never reads the window's other bytes,
+   and the state trace does not hash it. */
 #ifndef PS2_HLE_WINDOW  /* a unit test (test_sif.c) puts it inside its own small memory */
 #define PS2_HLE_WINDOW 0x70004000u
 #endif
 #define PS2_HLE_WINDOW_SIZE 0x4000u
+#define PS2_DISC_RECENT (PS2_HLE_WINDOW + 0x800u)
+/* A count of lookups (u32, then 4 bytes free), then PS2_DISC_RECENT_SLOTS paths of
+   PS2_DISC_RECENT_PATH bytes each (NUL-terminated); lookup n is in slot n % PS2_DISC_RECENT_SLOTS. */
+#define PS2_DISC_RECENT_SLOTS 8u
+#define PS2_DISC_RECENT_PATH 56u
+#define PS2_DISC_RECENT_SIZE (8u + PS2_DISC_RECENT_SLOTS * PS2_DISC_RECENT_PATH)
 /* The RAM from here up is also at its own PS2 addresses (and | 0x20000000, | 0x30000000): the
    game's data files are linked for where it loads them (0xA00000 up) and hold absolute PS2
    pointers. Below it Windows has its own memory before the program starts. */

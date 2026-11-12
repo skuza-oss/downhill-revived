@@ -218,6 +218,19 @@ void rpc_cd_ncmd(int fno, void *send, int ssize, void *recv, int rsize)
     }
 }
 
+/* The disc files the game looked up last, in the HLE window (memory.h PS2_DISC_RECENT), for the
+   host's crash report: a crash while a screen loads names the files it was reading, e.g. the Bike
+   Shop's rider and bike (finding 208). From the lookups here (sceCdSearchFile, fileio's cdrom0:)
+   and from the game's own loader, which finds most files in its own table of the disc
+   (func_0020D958, patched in port/patches.py). A file not on the disc ends in " (not found)". */
+void hle_disc_lookup(const char *path, int found)
+{
+    uint32_t *count = (uint32_t *)(uintptr_t)PS2_DISC_RECENT;
+    char *slot = (char *)(uintptr_t)(PS2_DISC_RECENT + 8 + *count % PS2_DISC_RECENT_SLOTS * PS2_DISC_RECENT_PATH);
+    snprintf(slot, PS2_DISC_RECENT_PATH, "%s%s", path, found ? "" : " (not found)");
+    ++*count;
+}
+
 /* sceCdSearchFile: the send buffer has the path and is also where the IOP writes the result
    (sceCdlFILE, 32 bytes, at its start); the reply word is 1 if found. */
 void rpc_cd_search(int fno, void *send, int ssize, void *recv, int rsize)
@@ -227,6 +240,7 @@ void rpc_cd_search(int fno, void *send, int ssize, void *recv, int rsize)
     const char *name = pkt + sizeof(CdFile);  /* after the result area (func_00246FA0) */
     CdFile f = {0};  /* the reply copies all of it: no host stack bytes after the name's NUL */
     int found = search_file(name, &f);
+    hle_disc_lookup(name, found);
     if (hle_verbose || !found)
         hle_log("sceCdSearchFile(%s): %s (lsn %u, %u bytes)\n", name, found ? "found" : "not found",
                 found ? f.lsn : 0, found ? f.size : 0);
@@ -241,7 +255,9 @@ void rpc_cd_search(int fno, void *send, int ssize, void *recv, int rsize)
 int cdvd_find(const char *path, uint32_t *lsn, uint32_t *size)
 {
     CdFile f;
-    if (!search_file(path, &f))
+    int found = search_file(path, &f);
+    hle_disc_lookup(path, found);
+    if (!found)
         return 0;
     *lsn = f.lsn;
     *size = f.size;
