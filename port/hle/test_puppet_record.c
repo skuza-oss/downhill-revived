@@ -115,6 +115,134 @@ static int fuzz(int rounds, int *taken_out, int *refused_out)
     return bundles_ok;
 }
 
+/* ---- A race clock that stood still (puppet_sync.h sync_clock_stood, finding 220) ----
+   This game's frames on its wall clock, its race clock stepped as fps.c steps it (half of what is
+   owed, one to two fields), standing still while paused (the pause's menu frames step no race),
+   and the stamps mapped as puppet.c and online.c map them: a record another game stamped with the
+   server moment w lands at (stamp - go) - excess on this race clock, and this game's own pose at
+   race time r is stamped go + r + excess, excess = sync_clock_excess(owed) + stood. */
+typedef struct Game {
+    double wall, race, owed, base, go;  /* go: GO on the server clock (s) */
+    SyncStood stood;
+    double clock_wall;                         /* the wall moment the clock has counted to (fps.c) */
+    int started;
+} Game;
+enum { SERVER = 5000 };  /* the server clock is this game's wall clock plus this (s) */
+
+/* owed as port_fps_behind gives it: none while the clock is ahead */
+static double behind(const Game *g) { return g->owed > 0 ? g->owed : 0; }
+static double excess(const Game *g) { return sync_clock_excess(behind(g)) + g->stood.stood; }
+static void measure(Game *g) { sync_clock_stood(&g->stood, g->clock_wall, g->base, g->race, behind(g)); }
+
+/* one frame of `frame` s; paused: menu frames, no race step. `early`: the stamps are mapped before
+   this frame's race step (the clock has counted the frame, the race not yet). */
+static void frame_step(Game *g, double frame, int paused, int early)
+{
+    g->wall += frame;
+    g->owed += frame;
+    g->clock_wall = g->wall;
+    double step = g->owed * 0.5;
+    step = step < 1 / 60.0 ? 1 / 60.0 : step > 2 / 60.0 ? 2 / 60.0 : step;
+    g->owed -= step;
+    if (g->owed < -2 / 60.0) g->owed = -2 / 60.0;
+    if (early && g->started) measure(g);
+    if (!paused) g->race += step;
+    if (!g->started && g->race >= 0) {  /* GO: online.c state_sync, puppet.c hle_puppet_go */
+        g->started = 1;
+        g->go = g->wall + SERVER - g->race;
+        g->base = sync_clock_base(g->clock_wall, g->race, behind(g));
+        memset(&g->stood, 0, sizeof g->stood);
+    }
+    if (g->started) measure(g);
+}
+
+/* where a record another game stamped `delay` s ago lands here, against this race clock */
+static double landed(const Game *g, double delay) { return (g->wall + SERVER - delay - g->go) - excess(g) - g->race; }
+/* this game's own stamp against the server's present */
+static double own_stamp(const Game *g) { return g->go + g->race + excess(g) - (g->wall + SERVER); }
+
+/* A race of `seconds`, paused over [at[k], at[k] + len[k]); every frame a record stamped 80 ms ago
+   arrives (from `records_from` s on). Checks every record is taken (not from the future), lands
+   within a frame or two of its age, and this game's own stamps are the server's present; returns
+   the time stood still. */
+static double race_with_pauses(const double *at, const double *len, int pauses, double seconds, double records_from,
+                               int early, int jitter)
+{
+    Game g = {.race = -3};  /* the countdown */
+    double worst = 0, own_worst = 0;
+    for (int f = 0; g.wall < seconds + 3; f++) {
+        double frame = jitter ? (f % 2 ? 0.0213 : 0.012) : 1 / 60.0;  /* jitter: 12 / 21.3 ms, 60 a second */
+        double t = g.wall - 3;  /* seconds since GO on the wall clock */
+        int paused = 0;
+        for (int k = 0; k < pauses; k++) paused |= t >= at[k] && t < at[k] + len[k];
+        frame_step(&g, frame, paused, early);
+        if (!g.started || t < records_from) continue;
+        double off = landed(&g, 0.080) + 0.080;  /* 0: the record's moment is this game's now */
+        assert(puppet_stamp_ok(g.race + landed(&g, 0.080), g.race));
+        if (fabs(off) > worst) worst = fabs(off);
+        if (fabs(own_stamp(&g)) > own_worst) own_worst = fabs(own_stamp(&g));
+    }
+    assert(worst < SYNC_CLOCK_SLACK + 2 / 60.0 + 1e-6);
+    assert(own_worst < SYNC_CLOCK_SLACK + 2 / 60.0 + 1e-6);
+    return g.stood.stood;
+}
+
+static void pause_tests(void)
+{
+    const double none[1] = {0}, zero[1] = {0};
+    /* no pause: nothing stood still, at a steady 60 and with frames alternating 12 / 21.3 ms */
+    assert(race_with_pauses(none, zero, 0, 60, 0, 0, 0) == 0);
+    assert(race_with_pauses(none, zero, 0, 60, 0, 1, 1) == 0);
+    /* the verifier's case: 5 s at race second 30; records all along, during the pause too */
+    double at[2] = {30, 45}, len[2] = {5, 3};
+    double s = race_with_pauses(at, len, 1, 60, 0, 0, 0);
+    assert(fabs(s - 5) < 2 / 60.0);
+    assert(fabs(race_with_pauses(at, len, 1, 60, 0, 1, 1) - 5) < 2 / 60.0);
+    /* a pause before any record arrived (the countdown's first seconds), records from second 10 */
+    double early_at[1] = {0.5}, early_len[1] = {4};
+    assert(fabs(race_with_pauses(early_at, early_len, 1, 30, 10, 0, 0) - 4) < 2 / 60.0);
+    /* two pauses in one race: both counted, each once */
+    assert(fabs(race_with_pauses(at, len, 2, 60, 0, 0, 0) - 8) < 2 / 60.0);
+    /* records only after the pause (none arrived during it: a link that held them) */
+    assert(fabs(race_with_pauses(at, len, 1, 60, 35.0 + 1 / 60.0, 0, 0) - 5) < 2 / 60.0);
+
+    /* a pause that ends the moment a snapshot arrives: the frame that steps the race again maps it */
+    Game g = {.race = -3};
+    while (g.race < 10) frame_step(&g, 1 / 60.0, 0, 0);
+    for (int f = 0; f < 300; f++) frame_step(&g, 1 / 60.0, 1, 0);
+    frame_step(&g, 1 / 60.0, 0, 1);
+    assert(puppet_stamp_ok(g.race + landed(&g, 0.0), g.race) && fabs(landed(&g, 0.0)) < SYNC_CLOCK_SLACK + 2 / 60.0);
+    assert(fabs(g.stood.stood - 5) < 2 / 60.0);
+
+    /* time owed is not time stood still: a 0.8 s hitch (one frame) is caught up through the owed
+       time and stays out of the ratchet; the stamps meanwhile carry it as before */
+    Game h = {.race = -3};
+    while (h.race < 10) frame_step(&h, 1 / 60.0, 0, 0);
+    frame_step(&h, 0.8, 0, 0);
+    assert(h.stood.stood == 0 && h.owed > 0.7);
+    assert(fabs(landed(&h, 0.0)) < SYNC_CLOCK_SLACK + 1e-6 && fabs(own_stamp(&h)) < SYNC_CLOCK_SLACK + 1e-6);
+    for (int f = 0; f < 600; f++) frame_step(&h, 1 / 60.0, 0, 0);  /* 10 s: caught up (about a frame stays owed) */
+    assert(h.owed < 1 / 30.0 && h.stood.stood == 0);
+
+    /* the ratchet: a stop is counted whole (not less the slack), a trail that shrinks again ends it
+       and changes nothing, nothing is taken from NaN, the normal lag is no stop */
+    SyncStood r = {0};
+    sync_clock_stood(&r, 100, 0, 99.97, 0);
+    assert(r.stood == 0 && !r.stopped);
+    sync_clock_stood(&r, 100, 0, 99.9, 0);  /* 0.1 s: a stop begins, counted from 0 */
+    assert(r.stopped && fabs(r.stood - 0.1) < 1e-9);
+    sync_clock_stood(&r, 105, 0, 99.9, 0);  /* it grows by 5 s: all of it */
+    sync_clock_stood(&r, 105, 0, 99.9, 0);  /* the same frame again: still the stop */
+    assert(r.stopped && fabs(r.stood - 5.1) < 1e-9);
+    sync_clock_stood(&r, 105.02, 0, 99.93, 0);  /* the race steps again (a little more than the frame) */
+    assert(!r.stopped && fabs(r.stood - 5.1) < 1e-9);
+    sync_clock_stood(&r, 105.04, 0, 99.94, 0);  /* jitter: 5.10 again, no new stop */
+    assert(!r.stopped && fabs(r.stood - 5.1) < 1e-9);
+    sync_clock_stood(&r, NAN, 0, 95, 0);
+    assert(fabs(r.stood - 5.1) < 1e-9);
+    printf("puppet record: the stood-still clock: a 5 s pause stood %.3f s\n", s);
+}
+
 int main(void)
 {
     static uint8_t rec[STATE_RECORD_MAX];
@@ -286,6 +414,8 @@ int main(void)
         assert(!puppet_hold_resumed(&g, newest) && puppet_hold_resumed(&g, newest + 1 / 30.0));
         assert(!puppet_hold_fed_long(&g, newest + 100));  /* nothing fed: no release by time alone */
     }
+
+    pause_tests();
 
     {
         enum { ROUNDS = 200000 };

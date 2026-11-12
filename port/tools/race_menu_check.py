@@ -3,7 +3,7 @@ on hidden desktops, a local server per run; each scenario opens the menu over th
 with DHD_NET_TEST_MENU (START and the menu's buttons on the wall clock from a race second) and
 checks the logs.
 
-    python port/tools/race_menu_check.py OUT --scenario room|end|leave|closed|alone|resume|timeup|timeup-host|finished [--sfu] [--track N]
+    python port/tools/race_menu_check.py OUT --scenario room|end|leave|closed|alone|alone-guest|resume|timeup|timeup-host|finished [--sfu] [--track N]
 
 - resume: the guest opens the menu at 20 s for 2 s, the host at 25 s for 10 s; both RESUME. The
   race never pauses (no HOLD on the other game), both finish, both games list the same results.
@@ -19,6 +19,13 @@ checks the logs.
   guest's menu closes with the race and the guest is back in the room.
 - alone: the guest finishes at 12 s (DHD_NET_TEST_FINISH); the host's START at 30 s is the game's
   own pause (no other human races), 5 s, RESUME; the host's race clock stands still meanwhile.
+- alone-guest (finding 220): the roles swapped: the host finishes at 12 s, the guest (who draws the
+  host's computer riders, still racing) pauses alone at 30 s for 5 s. After the pause the guest's
+  race runs 5 s behind the others' for good; the others' snapshots must still land at its "now".
+
+Every scenario fails on a refusal line in either game's log (finding 220: a record or HOLD refused,
+a State not on the list). For the alone scenarios the pausing game's live puppet error (its
+`puppets off by` lines) is printed before the pause, in the 5 s after it and after that.
 
 The riders finish at 60 s (host) and 70 s (guest) of their own race clocks (DHD_NET_TEST_FINISH;
 a scenario may change it). The scripted host starts its first race before the guest is in (as in cross_race.py), so the race
@@ -55,6 +62,7 @@ SCENARIOS = {
     'leave': ('', '20:start,w500,up,cross,w300,down,cross', {}, {}),
     'closed': ('22:start,w500,down,w300,down,cross,w300,down,cross', '18:start,w60000,cross', {}, {}),
     'alone': ('30:start,w5000,cross', '', {}, {'DHD_NET_TEST_FINISH': '12'}),
+    'alone-guest': ('', '30:start,w5000,cross', {'DHD_NET_TEST_FINISH': '12'}, {}),
     # why the race closed (finding 211): one rider finishes at 20 s, the other never does and is DNF
     # when the room's finish window (60 s) runs out; each screen says why for two seconds
     'timeup': ('', '', {'DHD_NET_TEST_FINISH': '20'}, {'DHD_NET_TEST_FINISH': '99999'}),  # the guest is DNF
@@ -65,6 +73,7 @@ SCENARIOS = {
 }
 LINES = re.compile(r'online: (race menu: .*|test menu: .*|race closed.*|this PC.s race is over.*|the race is over.*|'
                    r'player \d .* left.*|result \d.*|.* finished in .*|race starts.*)|puppet: .*(hold|HOLD).*|stall: .*')
+REFUSED = re.compile(r'record refused|records refused|HOLD refused|HOLDs refused|not on puppet_record')  # finding 220
 CLOSED = r'race closed: back to the room \(%s[:)]'  # online.c state_sync: the reason, then what it was worked out from
 
 
@@ -79,6 +88,37 @@ def wait(read, pattern, seconds, games=()):
                 raise RuntimeError(f'a game exited: see {g.out / "game.log"}')
         time.sleep(2)
     return None
+
+
+def percentile(values, q):
+    values = sorted(values)
+    return values[min(len(values) - 1, int(q * len(values)))] if values else float('nan')
+
+
+def pause_errors(log):
+    """The pausing game's live puppet error (units, its once-a-second `puppets off by` line: each rider's
+    error found by its last snapshot, finding 202) and snapshot age (ms) in the race both play: before
+    the game's own pause, in the 5 s after RESUME (the catch-up) and after that."""
+    race = log[log.rfind('race starts'):]
+    opened = re.search(r'test menu: button 0008 at race tick (\d+)', race)
+    resumed = re.search(r'test menu: button 4000 at race tick (\d+)', race)
+    if not opened or not resumed:
+        print('  no pause in the race both play')
+        return
+    at, back = int(opened.group(1)), int(resumed.group(1))
+    phases = {'before': ([], []), 'catch-up (5 s)': ([], []), 'after': ([], [])}
+    for m in re.finditer(r'online: race clock (\d+) .*?snapshot age \(ms\):(.*)', race):
+        tick = int(m.group(1))
+        name = 'before' if tick < at else 'catch-up (5 s)' if tick <= back + 300 else 'after'
+        if at <= tick <= back + 1:
+            continue  # the pause itself: nothing moves
+        for off, age in re.findall(r' \d+:([-\d.]+)/([-\d.]+)', m.group(2)):
+            phases[name][0].append(float(off))
+            phases[name][1].append(float(age))
+    print(f"--- the pausing game's puppets (pause at tick {at}, resume at {back}): error p50/p95 units, age p50/p95 ms")
+    for name, (off, age) in phases.items():
+        print(f'  {name}: {len(off)} values, error {percentile(off, .5):.2f}/{percentile(off, .95):.2f}, '
+              f'age {percentile(age, .5):.0f}/{percentile(age, .95):.0f}')
 
 
 def checks(scenario, host, guest):
@@ -98,6 +138,9 @@ def checks(scenario, host, guest):
         'closed': [(guest, r'race menu: open at'), (host, r'race menu: the host ends the race'),
                    (guest, r'race menu: closed \(the race screen ends\)'), (guest, r'race closed: back to the room')],
         'alone': [(host, r'race menu: alone in the race'), (host, r'test menu: button 4000')],
+        # and the guest races on to its finish (70 s) with the host's computer riders after its pause
+        'alone-guest': [(guest, r'race menu: alone in the race'), (guest, r'test menu: button 4000'),
+                        (guest, r'online: result 1\.|race closed')],
     }[scenario]
     return want
 
@@ -194,6 +237,13 @@ def main():
         for line in g.log().splitlines():
             if LINES.search(line):
                 print(f'  {g.out.name}: {line.strip()}')
+    for g in games:
+        refused = [line.strip() for line in g.log().splitlines() if REFUSED.search(line)]
+        if refused:
+            failures.append(f'{g.out.name}: {len(refused)} refusal lines, the first: {refused[0]}')
+    if a.scenario.startswith('alone'):
+        paused = host if a.scenario == 'alone' else guest
+        pause_errors(paused.log())
     if a.lag:
         import puppet_lag
         for g, side in zip(games, 'AB'):

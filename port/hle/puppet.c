@@ -204,6 +204,10 @@ static struct {
     /* online */
     int online, local, nslots, host;
     double go_server;        /* this PC's GO on the server clock (ms), 0 until known */
+    double go_base;          /* sync_clock_base at GO (seconds of this PC's wall clock) */
+    SyncStood stood;         /* what this race clock stood still since GO (sync_clock_stood) */
+    double stood_said;       /* logged up to */
+    int stood_tick;          /* the race tick when it last grew */
     int gone[NET_SLOTS];     /* lobby slots that left */
     int kept[NET_SLOTS];     /* of those, the ones that had finished: their riders stay puppets */
     int hits_taken;
@@ -1070,18 +1074,42 @@ void hle_puppet_start(void)
         }
     }
     pp.hits_taken = 0, pp.nevents = 0, pp.go_server = 0;
+    memset(&pp.stood, 0, sizeof pp.stood), pp.stood_said = 0, pp.stood_tick = 0;
     pp.held_count = 0;
     memset(pp.state_said, 0, sizeof pp.state_said);
 }
 
-/* How far this game's race clock trails the wall clock beyond the normal (puppet_sync.h
-   sync_clock_excess), seconds: added to the stamps it sends, taken off the ones it places. */
-double port_fps_behind(void);  /* fps.c */
-double hle_puppet_clock_excess(void) { return sync_clock_excess(port_fps_behind()); }
+/* How far this game's race clock trails the wall clock beyond the normal, seconds: added to the
+   stamps it sends, taken off the ones it places. What it owes and will catch up (puppet_sync.h
+   sync_clock_excess) plus what it stood still and never will (sync_clock_stood: this game's own
+   pause; finding 220). The one place the server clock and this race clock meet, for snapshots,
+   HOLDs and this game's own stamps. */
+double port_fps_behind(void);          /* fps.c */
+double port_clock_wall_seconds(void);  /* fps.c */
+double hle_puppet_clock_excess(void)
+{
+    double owed = port_fps_behind();
+    if (pp.online && pp.go_server) {
+        sync_clock_stood(&pp.stood, port_clock_wall_seconds(), pp.go_base, RACE_TIME, owed);
+        if (pp.stood.stopped) pp.stood_tick = RACE_CLOCK;
+        /* said once the clock runs again (half a second of race after the stop) */
+        if (pp.stood.stood > pp.stood_said + 0.1 && RACE_CLOCK > pp.stood_tick + 30) {
+            fprintf(stderr, "puppet: tick %d: this race clock stood still %.2f s since GO (%.2f s more): the others' "
+                    "stamps land that much later on it\n", RACE_CLOCK, pp.stood.stood, pp.stood.stood - pp.stood_said);
+            pp.stood_said = pp.stood.stood;
+        }
+    }
+    return sync_clock_excess(owed) + pp.stood.stood;
+}
 
 /* This PC's GO on the server clock (ms; online.c): from here snapshots stamped on that clock land on
-   this PC's race clock. */
-void hle_puppet_go(double go_server_ms) { pp.go_server = go_server_ms; }
+   this PC's race clock. The race clock has stood still for nothing yet. */
+void hle_puppet_go(double go_server_ms)
+{
+    pp.go_server = go_server_ms;
+    pp.go_base = sync_clock_base(port_clock_wall_seconds(), RACE_TIME, port_fps_behind());
+    memset(&pp.stood, 0, sizeof pp.stood), pp.stood_said = 0, pp.stood_tick = RACE_CLOCK;
+}
 
 /* The online race is over (online.c, back at the menus): no puppets, the next race is the game's own. */
 void hle_puppet_offline(void)
