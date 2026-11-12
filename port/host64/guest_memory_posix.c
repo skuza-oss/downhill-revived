@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/ucontext.h>
 #include <unistd.h>
 #include "core_host.h"  /* guest_base, for the fault bounds check */
 #include "guest_memory_os.h"
@@ -105,8 +106,39 @@ static void write_hex(int fd,unsigned long long v,int width) {
         (void)write(fd,&c,1);
     }
 }
+/* Whether the faulting access wrote: 1 a write, 0 a read, -1 not known. From the CPU's own fault
+   record, as Windows gives it in ExceptionInformation[0] (finding 208): the data abort's syndrome
+   (ESR, its WnR bit) on arm64, the page-fault error code (its W bit) on x86-64. */
+static int fault_wrote(const void *ctx) {
+    const ucontext_t *uc=ctx;
+    if (!uc) return -1;
+#if defined(__APPLE__) && defined(__aarch64__)
+    return (int)(uc->uc_mcontext->__es.__esr>>6&1);
+#elif defined(__APPLE__) && defined(__x86_64__)
+    return (int)(uc->uc_mcontext->__es.__err>>1&1);
+#elif defined(__aarch64__)
+    /* Linux and Android: the signal frame's records after the registers; ESR_MAGIC's holds it. */
+    const uint8_t *p=(const uint8_t *)uc->uc_mcontext.__reserved;
+    const uint8_t *end=p+sizeof uc->uc_mcontext.__reserved;
+    while (p+8<=end) {
+        uint32_t magic, size;
+        memcpy(&magic,p,4); memcpy(&size,p+4,4);
+        if (!magic || size<8 || size>(size_t)(end-p)) break;
+        if (magic==0x45535201u && size>=16) {  /* ESR_MAGIC: struct esr_context { head; __u64 esr; } */
+            uint64_t esr; memcpy(&esr,p+8,8);
+            uint32_t ec=(uint32_t)(esr>>26&0x3f);
+            return ec==0x24 || ec==0x25 ? (int)(esr>>6&1) : -1;  /* data aborts only */
+        }
+        p+=size;
+    }
+    return -1;
+#elif defined(__x86_64__) && defined(REG_ERR)
+    return (int)(uc->uc_mcontext.gregs[REG_ERR]>>1&1);
+#else
+    return -1;
+#endif
+}
 static void fault(int sig,siginfo_t *info,void *ctx) {
-    (void)ctx;
     uintptr_t host=(uintptr_t)info->si_addr;
     /* Not ours: restore the default and re-raise. */
     struct sigaction dfl; memset(&dfl,0,sizeof dfl);
@@ -123,10 +155,13 @@ static void fault(int sig,siginfo_t *info,void *ctx) {
 #endif
     }
     static const char head[]="host64 memory: access of uncommitted guest address 0x";
-    static const char tail[]="\n";
+    static const char tail[]="\n", read_tail[]=" (a read)\n", write_tail[]=" (a write)\n";
+    int wrote=fault_wrote(ctx);
     (void)write(STDERR_FILENO,head,sizeof head-1);
     write_hex(STDERR_FILENO,(unsigned long long)(host-guest_base),9);
-    (void)write(STDERR_FILENO,tail,sizeof tail-1);
+    if (wrote==1) (void)write(STDERR_FILENO,write_tail,sizeof write_tail-1);
+    else if (wrote==0) (void)write(STDERR_FILENO,read_tail,sizeof read_tail-1);
+    else (void)write(STDERR_FILENO,tail,sizeof tail-1);
     /* Raw frames; names need -rdynamic, which the self-test link passes. */
     void *frames[24];
     int n=backtrace(frames,24);
