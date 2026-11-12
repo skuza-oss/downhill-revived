@@ -1666,10 +1666,10 @@ static void state_sync(void)
                                .own_dnf = me ? me->dnf_reason : "", .new_result = lobby.last_race_id != on.last_race_id};
                 on.leave_reason = race_end_reason(&end);
                 fprintf(stderr, "online: race closed: back to the room (%s: ended %d, link %d, own %s/%s, "
-                        "result %d)\n", on.leave_reason, end.ended, end.link_lost, me ? me->race_state : "-",
-                        end.own_dnf, end.new_result);
+                        "result %d; race tick %d)\n", on.leave_reason, end.ended, end.link_lost, me ? me->race_state : "-",
+                        end.own_dnf, end.new_result, RACE_CLOCK);
             } else
-                fprintf(stderr, "online: race closed: back to the room\n");
+                fprintf(stderr, "online: race closed: back to the room (race tick %d)\n", RACE_CLOCK);
             on.leave_at = now + 2;
         }
         watch_step(&lobby);
