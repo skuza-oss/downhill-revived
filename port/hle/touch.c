@@ -216,6 +216,7 @@ struct Touch {
     TouchScreen screen;
     Ctl ctl[TC_COUNT];
     float s, bs;               /* the cluster's scale and its buttons' */
+    float dpad_fit;            /* the D-pad's arms times this to fit between the HUD and L3 (finding 218) */
     float steer_x0, steer_x1, steer_y0, steer_y1;
     float air_x0, air_x1;
     Finger f[TOUCH_FINGERS];
@@ -390,24 +391,85 @@ static float dpad_half(const Touch *t, const TouchEdit *e)
 {
     float fit = (dpad_room(t) / 2 - GAP_MM) / 3;   /* the pad's half extent, 3 half + GAP_MM, is half the room */
     float half = DPAD_HALF_MM * t->bs;
-    return (half < fit ? half : fit) * e->size;
+    return (half < fit ? half : fit) * e->size * (t->dpad_fit > 0 ? t->dpad_fit : 1.0f);
 }
 static float dpad_off(const Touch *t, const TouchEdit *e) { return 2 * dpad_half(t, e) + GAP_MM; }
 static float dpad_extent(const Touch *t, const TouchEdit *e) { return dpad_off(t, e) + dpad_half(t, e); }
 
-/* Where the D-pad sits before the player's edits: where the stick's home is, kept below the Classic
-   bar (or the top buttons), above the screen's bottom and clear of the left gesture strip; Classic's
-   also clear of L3 by the buttons' gap (moved left, as far as the strip allows). Right-handed x. */
-static void dpad_home(const Touch *t, const TouchEdit *e, float *x, float *y)
+/* The game's own HUD on the steering side (finding 218): the track bar (the riders' places down the
+   track) and the place number under it sit at the screen's edge from about half its height down, the
+   bar leaning outward. Measured on the Mi 11i's 2400 x 1080 picture of a race (the HUD scales with the
+   screen's height): the bar starts 36.3 mm down, 3.2 mm in from the edge, and ends at the bottom
+   12.4 mm in; the place number is inside that line. Hand Left mirrors it, as the overlay. */
+static const float HUD_BAR_TOP = 0.522f, HUD_BAR_IN = 0.046f, HUD_BAR_LEAN = 0.297f;
+/* How far in from the steering side's edge the HUD reaches at height y (mm; 0 above the bar). */
+static float hud_reach(const Touch *t, float y)
 {
-    float half = dpad_half(t, e), off = dpad_off(t, e), span = dpad_extent(t, e);
+    float H = t->screen.height, v = (y < H ? y : H) / H;
+    return v < HUD_BAR_TOP ? 0 : H * (HUD_BAR_IN + (v - HUD_BAR_TOP) * HUD_BAR_LEAN);
+}
+
+/* The D-pad's four arms at rest point x, y (right-handed) are clear of the HUD and of L3 by GAP_MM. */
+static int dpad_clear(const Touch *t, const TouchEdit *e, float x, float y)
+{
+    float half = dpad_half(t, e), off = dpad_off(t, e);
+    const Ctl *l3 = &t->ctl[TC_L3];
+    float lx = mirror_x(t, l3->x);
+    for (int a = 0; a < DPAD_ARMS; a++) {
+        float ax = x + (a == DPAD_LEFT ? -off : a == DPAD_RIGHT ? off : 0), ay = y + (a == DPAD_UP ? -off : a == DPAD_DOWN ? off : 0);
+        float bottom = ay + half + GAP_MM;
+        if (bottom >= HUD_BAR_TOP * t->screen.height && ax - half < hud_reach(t, bottom) + GAP_MM) return 0;
+        if (t->set.preset == TOUCH_CLASSIC && l3->on &&
+            hypotf(fmaxf(fabsf(ax - lx) - half, 0), fmaxf(fabsf(ay - l3->y) - half, 0)) - l3->r < GAP_MM) return 0;
+    }
+    return 1;
+}
+
+/* Where the D-pad sits before the player's edits: the nearest place to the stick's home that keeps it
+   below the Classic bar (or the top buttons), above the screen's bottom, clear of the left gesture
+   strip, of the game's track bar and place number (hud_reach) and, in Classic, of L3 by the buttons'
+   gap. Where no place is clear at full size (Classic between the track bar and L3) the arms shrink
+   until one is, the pad's centre kept on the edge side of L3 (a pad's d-pad is beside its stick) while
+   the arms stay DPAD_ARM_MIN_MM or more; at small Sizes (the cluster shrinks into the corner, the HUD
+   doesn't) the pad may sit past L3. Past DPAD_FIT_MIN the pad keeps its size and only L3's gap holds,
+   as before finding 218. Right-handed x. */
+static const float DPAD_FIT_MIN = 0.6f, DPAD_ARM_MIN_MM = 5.0f, DPAD_STEP_MM = 0.5f;
+static void dpad_home(Touch *t, const TouchEdit *e, float *x, float *y)
+{
     const Ctl *above = t->set.preset == TOUCH_CLASSIC ? &t->ctl[TC_LBAR] : &t->ctl[TC_CAMERA];
+    const Ctl *l3 = &t->ctl[TC_L3];
+    float x0 = *x, y0 = *y;
+    t->dpad_fit = 1.0f;
+    float arm = 2 * dpad_half(t, e);
+    /* pass 0: on the edge side of L3 with arms of DPAD_ARM_MIN_MM at least; pass 1 (small Sizes, where
+       the cluster shrinks into the corner and the HUD doesn't): anywhere on the steering half */
+    for (int pass = 0; pass < 2; pass++)
+        for (float fit = 1.0f; fit >= DPAD_FIT_MIN - 0.001f; fit -= 0.02f) {
+            if (pass == 0 && fit * arm < DPAD_ARM_MIN_MM - 0.001f && fit < 1.0f) break;
+            t->dpad_fit = fit;
+            float span = dpad_extent(t, e);
+            float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
+            float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
+            float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
+            float far = t->screen.width / 2 - span;
+            if (pass == 0 && t->set.preset == TOUCH_CLASSIC && l3->on && mirror_x(t, l3->x) < far) far = mirror_x(t, l3->x);
+            if (bottom < top) top = bottom;
+            float best = 1e9f, bx = 0, by = 0;
+            for (float py = top; py <= bottom + 0.001f; py += DPAD_STEP_MM)
+                for (float px = side; px <= far; px += DPAD_STEP_MM) {
+                    float d = hypotf(px - x0, py - y0);
+                    if (d < best && dpad_clear(t, e, px, py)) best = d, bx = px, by = py;
+                }
+            if (best < 1e9f) { *x = bx, *y = by; return; }
+        }
+    /* nothing clear: full size, the old rule (L3's gap only) */
+    t->dpad_fit = 1.0f;
+    float half = dpad_half(t, e), off = dpad_off(t, e), span = dpad_extent(t, e);
     float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
     float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
     float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
     *y = bottom < top ? bottom : clampf(*y, top, bottom);
     if (*x < side) *x = side;
-    const Ctl *l3 = &t->ctl[TC_L3];
     if (t->set.preset != TOUCH_CLASSIC || !l3->on) return;
     float lx = mirror_x(t, l3->x);
     for (; *x > side; *x -= 0.5f) {
@@ -444,6 +506,7 @@ static void lay_out(Touch *t, int hud_moved)
         else x = p.px * REF_W / 100, y = p.py * REF_H / 100;
         const TouchEdit *e = &st->edit[st->preset == TOUCH_CLASSIC][c];
         int dpad = c == TC_STICK && st->dpad;
+        if (c == TC_STICK) t->dpad_fit = 1.0f;
         if (dpad) dpad_home(t, e, &x, &y);
         x += e->dx, y += e->dy;
         scale *= e->size;

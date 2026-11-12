@@ -1539,7 +1539,7 @@ static float box_gap(float ax, float ay, float ahw, float ahh, float bx, float b
    every other control by that gap; the pad sits on the steering side. */
 static void test_dpad_layout(void)
 {
-    static const int sizes[] = {0, 70, 85, 100, 105};
+    static const int sizes[] = {0, 50, 70, 85, 100, 105, 150};
     static const float screens[2][2] = {{154.5f, 69.5f}, {132.0f, 62.0f}};
     for (int preset = 0; preset < 2; preset++)
         for (int left = 0; left < 2; left++)
@@ -1557,8 +1557,22 @@ static void test_dpad_layout(void)
                     CHECK(fabsf(ax[ARM_LEFT] - (cx - off)) < 0.01f && fabsf(ax[ARM_RIGHT] - (cx + off)) < 0.01f);
                     CHECK(fabsf(ay[ARM_UP] - (cy - off)) < 0.01f && fabsf(ay[ARM_LEFT] - cy) < 0.01f);
                     CHECK(fabsf(cr - (off + size)) < 0.01f);           /* the control's radius is the pad's half extent */
-                    if (sc == 0 && (sizes[si] == 0 || sizes[si] >= 100)) CHECK(2 * size >= 8.99f);   /* the panels' 9 mm targets */
-                    CHECK(2 * size >= 5.0f);                           /* even at Size 70 on a short screen */
+                    /* the panels' 9 mm targets; Classic's arms shrink to fit between the game's track bar
+                       and L3 (finding 218): 7.9 mm on the reference phone */
+                    if (sc == 0 && (sizes[si] == 0 || sizes[si] >= 100)) CHECK(2 * size >= (preset ? 7.5f : 8.99f));
+                    /* the game's track bar and place number at the steering side's edge (finding 218,
+                       measured on the reference phone: from 52.2 % of the height down, 4.6 % of the height
+                       in at its top, leaning out 0.297 mm per mm down), by the 3 mm gap */
+                    for (int a = 0; a < 4; a++) {
+                        float bottom = ay[a] + size + 3.0f, v = fminf(bottom, H) / H;
+                        float reach = v < 0.522f ? 0 : H * (0.046f + (v - 0.522f) * 0.297f);
+                        float inner = left ? W - (ax[a] + size) : ax[a] - size;
+                        if (v >= 0.522f && inner < reach + 3.0f - 0.01f)
+                            fprintf(stderr, "dpad layout: preset %d left %d size %d screen %d: arm %d on the HUD (%.1f < %.1f)\n",
+                                    preset, left, sizes[si], sc, a, inner, reach + 3.0f);
+                        CHECK(!(v >= 0.522f && inner < reach + 3.0f - 0.01f));
+                    }
+                    if (sizes[si] >= 70) CHECK(2 * size >= 5.0f);       /* even at Size 70 on a short screen (Size 50: 3.3 mm) */
                     CHECK(cx - cr >= -0.01f && cx + cr <= W + 0.01f && cy - cr >= -0.01f && cy + cr <= H + 0.01f);
                     for (int a = 0; a < 4; a++)
                         for (int b = a + 1; b < 4; b++)
