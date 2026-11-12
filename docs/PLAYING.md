@@ -53,8 +53,8 @@ What works today:
   room stays open between races. Each track takes as many riders as the game gives it (10, 8
   or 6, shown in the track picker); when more players are ready than the track takes, the race
   moves to the next track that fits. After your finish the camera follows the riders still
-  racing (Left/Right change rider) until the race closes; BACK TO THE ROOM in the pause menu
-  leaves earlier.
+  racing (Left/Right change rider) until the race closes; BACK TO THE ROOM in the race's menu
+  (START, which never pauses an online race) leaves earlier.
 - **Memory card saves**, stored as plain files in your data folder (see [Installing](#installing)).
 - **Controllers**: Xbox pads, DualSense, DualShock 4, Switch Pro, 8BitDo and most other USB or
   Bluetooth pads (through SDL3 and its controller database), with vibration where the pad has
@@ -303,6 +303,12 @@ no longer takes gets "A new version is out" and Update Now in the ONLINE menu.
 In a race the riders' data goes over Cloudflare's network, from the Cloudflare location nearest
 to you (UDP). Where a network blocks UDP, the game falls back to an encrypted connection on port
 443 by itself. In these rooms no other player ever gets your internet address.
+
+START in an online race does not pause it: the room's menu (RESUME, BACK TO THE ROOM, END THE
+RACE for the host, LEAVE THE ROOM) opens over the race, which goes on for everyone. While it is
+open your rider gets no input and rolls on by itself. When you are the only player still racing
+(everyone else finished or left), START pauses the race as offline, with OPTIONS too. On a phone
+the touch controls' Pause button opens their online panel, which never pauses either.
 
 #### P2P races
 

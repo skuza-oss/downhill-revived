@@ -33,6 +33,8 @@
 #include "../include/fps.h"
 #include "state_bundle.h"
 #include "mosh_round.h"
+#include "race_menu.h"
+#include "menu_page.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -1059,9 +1061,12 @@ static const char *rider_label(int global, char *out, int size);
    place still shows for the first seconds). */
 int hle_online_watch_hud(void) { return online_mode() && from_menu && on.end_held && on.watched; }
 
+static void race_menu_draw(int view);
+static RaceMenu race_menu;
 void hle_online_hud(int view)
 {
     if (online_mode()) race_banner(view);
+    if (online_mode() && race_menu.open && view == 0) race_menu_draw(view);
     if (online_mode() && from_menu && on.end_held && on.watch_slot) {
         char name[48], text[96];
         rider_label(hle_puppet_global(on.watch_slot), name, sizeof name);
@@ -1882,6 +1887,80 @@ static int test_skip_pad(HostPad *out)
     return 1;
 }
 
+/* DHD_NET_TEST_MENU=S:step,...[;S:step,...] (tests, finding 215): from race second S (the race
+   clock), the steps on the wall clock, so they go on while a pause stops the race clock: a button
+   (start, cross, circle, square, triangle, up, down, left, right) pressed 0.1 s then let go 0.1 s,
+   or wN, N ms of nothing. While a group runs the script's own buttons are let go. "20:start,w2000,cross"
+   opens the menu at 20 s and RESUMEs 2 s later. */
+enum { TEST_GROUPS = 8, TEST_STEPS = 24 };
+typedef struct { double at; int steps; uint16_t button[TEST_STEPS]; int wait_ms[TEST_STEPS]; } TestGroup;
+static TestGroup test_group[TEST_GROUPS];
+static int test_groups = -1;
+static int test_group_at, test_step;  /* each race runs the script from its start */
+static double test_step_at = -1;
+static void test_menu_reset(void) { test_group_at = 0, test_step = 0, test_step_at = -1; }
+
+static void test_menu_parse(const char *v)
+{
+    static const struct { const char *name; uint16_t button; } names[] = {
+        {"start", PAD_START}, {"cross", PAD_CROSS}, {"circle", PAD_CIRCLE}, {"square", PAD_SQUARE},
+        {"triangle", PAD_TRIANGLE}, {"up", PAD_UP}, {"down", PAD_DOWN}, {"left", PAD_LEFT}, {"right", PAD_RIGHT}};
+    test_groups = 0;
+    while (v && *v && test_groups < TEST_GROUPS) {
+        TestGroup *g = &test_group[test_groups++];
+        g->at = atof(v), g->steps = 0;
+        const char *s = strchr(v, ':'), *end = strchr(v, ';');
+        if (!end) end = v + strlen(v);
+        while (s && s < end && g->steps < TEST_STEPS) {
+            char word[16];
+            size_t len = strcspn(s + 1, ",;");
+            snprintf(word, sizeof word, "%.*s", (int)(len < sizeof word ? len : sizeof word - 1), s + 1);
+            g->button[g->steps] = 0, g->wait_ms[g->steps] = word[0] == 'w' ? atoi(word + 1) : 0;
+            for (size_t i = 0; i < sizeof names / sizeof *names; i++)
+                if (!strcmp(word, names[i].name)) g->button[g->steps] = names[i].button;
+            g->steps++;
+            s = strchr(s + 1, ',');
+        }
+        v = *end ? end + 1 : NULL;
+    }
+}
+
+static void test_menu_pad(HostPad *out)
+{
+    static HleEnv env;
+    const char *v = hle_env(&env, "DHD_NET_TEST_MENU");
+    if (!v || !on.started) return;
+    if (test_groups < 0) test_menu_parse(v);
+    double now = host_wall_seconds();
+    static double clock_said;  /* the race clock against the wall clock, twice a second */
+    if (now - clock_said >= 0.5) {
+        clock_said = now;
+        fprintf(stderr, "online: test clock: race tick %d phase %d wall %.2f\n", RACE_CLOCK, EE32(PHASE), now);
+    }
+    if (test_group_at >= test_groups) return;
+    if (test_step_at < 0) {  /* the group waits for its race second */
+        if (!race_running() || port_field_seconds(RACE_CLOCK) < test_group[test_group_at].at) return;
+        test_step = 0, test_step_at = now;
+    }
+    if (test_step >= test_group[test_group_at].steps) { test_group_at++, test_step_at = -1; return; }
+    /* while a group runs the player has let go of the rider's buttons: only the steps' presses */
+    out->buttons = 0;
+    double t = now - test_step_at;
+    if (!test_group[test_group_at].button[test_step]) {
+        if (t >= test_group[test_group_at].wait_ms[test_step] / 1000.0) test_step++, test_step_at = now;
+        return;
+    }
+    if (t >= 0.2) { test_step++, test_step_at = now; return; }
+    if (t >= 0.1) return;
+    static double said;
+    if (said != test_step_at) {
+        said = test_step_at;
+        fprintf(stderr, "online: test menu: button %04X at race tick %d, wall %.2f\n", test_group[test_group_at].button[test_step],
+                RACE_CLOCK, now);
+    }
+    out->buttons = test_group[test_group_at].button[test_step];
+}
+
 /* After the arena's round the room's menus are Single Event's again (port_online_shell set 12 for
    the room): the shop's START, for one, goes another way in Mosh Bowl (func_0013BA60). */
 static void round_mode_off(void)
@@ -1894,6 +1973,8 @@ static void round_mode_off(void)
 static int connected;
 static void race_over(void)
 {
+    test_menu_reset();
+    race_menu_reset(&race_menu);
     fprintf(stderr, "online: the race is over; back to offline play\n");
     round_mode_off();
     host_service_net_leave();
@@ -1919,6 +2000,8 @@ static int leaving_room;  /* LEAVE THE ROOM chosen: off the race screen, out of 
 
 static void back_to_room(void)
 {
+    test_menu_reset();
+    race_menu_reset(&race_menu);
     fprintf(stderr, "online: this PC's race is over; back to the room\n");
     round_mode_off();
     host_service_net_back();  /* out of the race: unless it finished, DNF (gave up) */
@@ -2024,6 +2107,123 @@ void port_online_question_yes(void)
     pause_asked = 0;
 }
 
+/* ---- the race menu online (finding 215, race_menu.h) ----
+   With another human still racing, START opens the room's menu drawn over the running race: the
+   race loop goes on (world, riders, clock, snapshots), this game's rider gets a neutral pad and
+   coasts, the pad drives the menu. Alone, START is the game's own pause (the rows above). The
+   rows act as the pause menu's do: BACK TO THE ROOM as the touch panel's Leave race, END THE RACE
+   sends the end first, LEAVE THE ROOM leaves the room too. */
+static int race_menu_direction;  /* the pad's left / right while the menu is open (watching) */
+
+static int race_alone(const NetLobby *l)
+{
+    unsigned char racing[NET_MAX_SLOTS] = {0};
+    int humans = on.nslots < NET_MAX_SLOTS ? on.nslots : NET_MAX_SLOTS;
+    for (int j = 0; j < humans; j++)
+        racing[j] = (unsigned char)race_menu_racing(on.finish[j] >= 0 || (on.mosh && on.score[j].final),
+                                                    l->racer[j].left, on.gone[j]);
+    return race_menu_alone(racing, humans, on.local_slot);
+}
+
+static void race_menu_shut(const char *why)
+{
+    if (race_menu.open) fprintf(stderr, "online: race menu: closed (%s)\n", why);
+    race_menu.open = 0, race_menu.asking = 0;
+}
+
+static void race_menu_chosen(int row)
+{
+    static const char *const said[] = {"", "", "back to the room", "the host ends the race", "leave the room"};
+    fprintf(stderr, "online: race menu: %s\n", said[row]);
+    if (row == RM_END) host_service_net_end_race();
+    if (row == RM_LEAVE) leaving_room = 1;
+    on.end_done = 1, on.end_done_at = host_wall_seconds();
+    leave_race();
+}
+
+/* Each field of the race (player 1's pad, after the countdown's hold took START away). */
+static void race_menu_pad(HostPad *out)
+{
+    int live = on.started && !on.end_done && EE32(PHASE) >= 1 && EE32(PHASE) <= 4;
+    if (!live) {
+        race_menu_shut("the race screen ends");
+        race_menu.last = out->buttons;
+        return;
+    }
+    uint16_t buttons = out->buttons;
+    int overlay = 1;
+    if (!race_menu.open && (buttons & PAD_START) && !(race_menu.last & PAD_START)) {
+        NetLobby lobby;
+        host_service_net_get_lobby(GADDR(&lobby));
+        race_menu_rows(&race_menu, from_menu, lobby.is_host);
+        overlay = !race_alone(&lobby);
+        if (!overlay) fprintf(stderr, "online: race menu: alone in the race: the game's own pause\n");
+    }
+    if (race_menu.open) {  /* the stick moves the menu's cursor too */
+        if (out->left_y < 64) buttons |= PAD_UP;
+        if (out->left_y > 192) buttons |= PAD_DOWN;
+        race_menu_direction = (out->buttons & PAD_RIGHT || out->left_x > 176) ? 1
+                            : (out->buttons & PAD_LEFT || out->left_x < 80) ? -1 : 0;
+    }
+    int did, chosen, was_open = race_menu.open;
+    uint16_t to_race = race_menu_field(&race_menu, buttons, overlay, &did, &chosen);
+    if (did == RM_OPENED) fprintf(stderr, "online: race menu: open at race tick %d (the race goes on)\n", RACE_CLOCK);
+    if (did == RM_CLOSED) fprintf(stderr, "online: race menu: resume at race tick %d\n", RACE_CLOCK);
+    if (did == RM_ASKED || did == RM_UNASKED || did == RM_MOVED || did == RM_OPENED)
+        menu_play(did == RM_ASKED || did == RM_OPENED ? "S_SELECT" : did == RM_UNASKED ? "S_BACK" : "S_NEXT");
+    if (race_menu.open || was_open) {
+        uint8_t connected = out->connected;
+        neutral(out);
+        out->connected = connected;
+    }
+    out->buttons = to_race;
+    if (did == RM_CHOSEN) race_menu_chosen(chosen);
+}
+
+/* Drawn with the HUD (hle_online_hud, view 0) in the pause menu's look: its panel, title, rows
+   and cursor bar, in the menus' styles, where the pause menu would be. The popup pieces draw in
+   the popup manager's view, so it is this view while they are queued. */
+static void race_menu_draw(int view)
+{
+    int *manager_view = (int *)(void *)(D_003F52D0 + 0x20), saved = *manager_view;
+    *manager_view = view;
+    menu_draw_begin();
+    int vw, vh;
+    menu_draw_size(&vw, &vh);
+    MenuStyle row = menu_game_style(MENU_STYLE_ROW), lit = menu_game_style(MENU_STYLE_SELECTED);
+    MenuStyle dim = menu_game_style(MENU_STYLE_OFF);
+    static const char *const names[] = {"", NULL, "BACK TO THE ROOM", "END THE RACE", "LEAVE THE ROOM"};
+    const char *text[RACE_MENU_ROWS + 1], *title, *line = NULL;
+    int n, cursor, y0;
+    if (race_menu.asking) {  /* the quit question's words, as port_online_question gives them */
+        int a = race_menu.asking;
+        title = a == RM_END ? "END THE RACE FOR EVERYONE?" : a == RM_LEAVE ? "LEAVE THE ROOM?" : "BACK TO THE ROOM?";
+        line = a == RM_END ? "NO RESULTS FROM THIS RACE WILL COUNT"
+             : a == RM_LEAVE ? "YOU LEAVE THE ROOM AND THIS RACE"
+             : FINISHED(0) ? "THE OTHERS ARE STILL RACING" : "YOU WON'T FINISH THIS RACE (DNF)";
+        text[0] = menu_game_text(0x13), text[1] = menu_game_text(0x12);  /* the question's No, Yes */
+        n = 2, cursor = race_menu.answer, y0 = 0x69;
+    } else {
+        title = "THE RACE GOES ON";
+        for (n = 0; n < race_menu.rows; n++)
+            text[n] = race_menu.row[n] == RM_RESUME ? menu_game_text(0x19) : names[race_menu.row[n]];
+        cursor = race_menu.cursor, y0 = 0x54;
+    }
+    int widest = menu_text_width(title, &row);
+    if (line && menu_text_width(line, &dim) > widest) widest = menu_text_width(line, &dim);
+    for (int i = 0; i < n; i++)
+        if (menu_text_width(text[i], &lit) > widest) widest = menu_text_width(text[i], &lit);
+    int cx = vw / 2, top = 0x40 - 12, bottom = y0 + (n - 1) * 10 + (line ? 24 : 12);
+    menu_draw_box(cx - widest / 2 - 24, top, widest + 48, bottom - top, 90);
+    menu_draw_text(MENU_CENTRE, cx, 0x40, title, &row);
+    for (int i = 0; i < n; i++) {
+        if (i == cursor) menu_draw_bar(cx - widest / 2 - 12, y0 + i * 10 - 1, widest + 24, 10);
+        menu_draw_text(MENU_CENTRE, cx, y0 + i * 10, text[i], i == cursor ? &lit : &row);
+    }
+    if (line) menu_draw_text(MENU_CENTRE, cx, y0 + n * 10 + 4, line, &dim);
+    *manager_view = saved;
+}
+
 void pads_begin_field(void)
 {
     choose_view();
@@ -2125,6 +2325,8 @@ static void pads_read_now(int player, HostPad *out)
             if (hle_online_countdown_hold(EE32(PHASE))) out->buttons &= ~PAD_START;
         }
         else if (!on.released || !host_pad_script(player, out)) neutral(out);
+        if (player == 0 && race) test_menu_pad(out);
+        if (player == 0 && race) race_menu_pad(out);
         /* the round's results go back to the room by themselves after a while (BACK TO THE
            ROOM, their only row: Cross pressed for a quarter second each half second) */
         if (player == 0 && from_menu && on.mosh && on.results_at &&
@@ -2135,7 +2337,8 @@ static void pads_read_now(int player, HostPad *out)
         if (player == 0 && from_menu && on.end_held) {
             int direction = (out->buttons & PAD_RIGHT || out->left_x > 176) ? 1
                           : (out->buttons & PAD_LEFT || out->left_x < 80) ? -1 : 0;
-            if (!on.watch_paused && !EE32(0x398C40 + 0x5BE4) && direction && !on.watch_direction && !(out->buttons & PAD_START)) {
+            if (race_menu.open) direction = race_menu_direction;  /* held through RESUME: no new press */
+            if (!race_menu.open && !on.watch_paused && !EE32(0x398C40 + 0x5BE4) && direction && !on.watch_direction && !(out->buttons & PAD_START)) {
                 NetLobby lobby;
                 host_service_net_get_lobby(GADDR(&lobby));
                 watch_cycle(&lobby, direction);
