@@ -94,8 +94,9 @@ static void net_link_release(void);
 #define AI_OFFSET_TO_AT 0x230
 #define NODES ((uint8_t *)0x0829EA20)  /* D_0029EA20: the racing-line nodes, 0x20 bytes each */
 #define NODE_SIZE 0x20
-#define NODE_COUNT 2117                 /* the most that fit before D_002AF2C0 */
-#define LINE_NONE 0xFFFF
+#define NODE_LOADED (*(volatile int32_t *)0x082AEA6C)  /* D_0029EA20 +0x1004C: the loaded track's nodes
+                                                          (puppet_record.h puppet_node_ok) */
+#define LINE_NONE PUPPET_LINE_NONE
 #define ATTACK_AT 0x6390      /* the attack the combat power-ups give: 0 punch, 1 kick, 2 check, 3 stick, 4 bottle */
 #define BOTTLES_AT 0x7ADC     /* bottles left to throw (func_00179A60 shows both) */
 
@@ -169,6 +170,7 @@ typedef struct Puppet {
     uint32_t mirror[PAD_WORDS];  /* the remote virtual pad, as the deltas built it */
     PadSender sent_pad;
     int remote_crash;
+    int refused;             /* its owner's records refused this race (finding 220) */
 } Puppet;
 
 extern void func_0012DDC0(void *rider);              /* body to scene node */
@@ -214,6 +216,20 @@ static struct {
 } pp;
 
 static int slot_of(const uint8_t *r) { return (int)((r - RIDERS) / RIDER_SIZE); }
+
+/* A record from another game refused (finding 220): counted, and logged once per rider and race
+   (the count when the race ends: refused_count). */
+static void refuse(int slot, const char *why)
+{
+    if (!pp.p[slot].refused++)
+        fprintf(stderr, "puppet: tick %d slot %d: a record refused (%s); more are only counted\n", RACE_CLOCK, slot, why);
+}
+static void refused_count(void)
+{
+    for (int i = 1; i < NRIDERS; i++)
+        if (pp.p[i].refused) fprintf(stderr, "puppet: slot %d: %d records refused in the race\n", i, pp.p[i].refused);
+}
+
 static uint8_t *rider(int slot) { return RIDERS + slot * RIDER_SIZE; }
 #define RACE_RIDERS (*(volatile int32_t *)(RIDERS + 0x501A8))  /* the race's riders (func_0011A100) */
 
@@ -397,13 +413,15 @@ static void setup(void)
     }
 }
 
-/* A racing-line node's index (LINE_NONE: none or not a node) and back */
+/* A racing-line node's index (LINE_NONE: none or not one of the loaded track's nodes) and back
+   (NULL: not a loaded node; finding 220). The sender names only loaded nodes, so a receiver on the
+   same track refuses none of an honest game's. */
 static uint16_t node_index(const uint8_t *n)
 {
-    if (!n || n < NODES || n >= NODES + NODE_COUNT * NODE_SIZE || (n - NODES) % NODE_SIZE) return LINE_NONE;
+    if (!n || n < NODES || n >= NODES + puppet_node_count(NODE_LOADED) * NODE_SIZE || (n - NODES) % NODE_SIZE) return LINE_NONE;
     return (uint16_t)((n - NODES) / NODE_SIZE);
 }
-static uint8_t *node_at(uint16_t i) { return i < NODE_COUNT ? NODES + i * NODE_SIZE : NULL; }
+static uint8_t *node_at(uint16_t i) { return i != LINE_NONE && puppet_node_ok(i, NODE_LOADED) ? NODES + i * NODE_SIZE : NULL; }
 
 static void take(Snapshot *s, const uint8_t *r)
 {
@@ -1006,6 +1024,7 @@ void hle_puppet_online(int local, int nslots, int host)
    starts now). */
 void hle_puppet_start(void)
 {
+    refused_count();
     for (int i = 0; i < NRIDERS; i++) {  /* slot 0 too: this PC's rider starts afresh on every PC */
         Puppet *p = &pp.p[i];
         memset(&p->sent_pad, 0, sizeof p->sent_pad);
@@ -1018,6 +1037,7 @@ void hle_puppet_start(void)
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
         p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->held = 0, p->catching = 0, p->line_at = 0;
+        p->refused = 0;
         sync_reset(&p->sync);
         if (i < pp.nslots && pp.kept[lobby_of(i)]) {  /* a new race: the host's AI rides it now */
             pp.kept[lobby_of(i)] = 0;
@@ -1041,6 +1061,7 @@ void hle_puppet_go(double go_server_ms) { pp.go_server = go_server_ms; }
 void hle_puppet_offline(void)
 {
     if (!pp.online) return;
+    refused_count();
     pp.online = 0;
     for (int i = 1; i < NRIDERS; i++)
         if (pp.play_from[i] < 0) memset(&pp.p[i], 0, sizeof pp.p[i]);
@@ -1154,7 +1175,7 @@ int hle_puppet_pack(int slot, uint8_t *out, int max)
 }
 
 /* One rider's record (its size checked) from the PC in lobby slot sender, showing server time
-   stamp (ms). */
+   stamp (ms). Nothing of it is used until all of it checks (finding 220). */
 static void receive_record(int sender, const uint8_t *in, int n, double stamp)
 {
     PuppetRecord r;
@@ -1162,6 +1183,10 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
     int slot = to_local(r.rider);
     if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
     Puppet *p = &pp.p[slot];
+    if (!puppet_node_ok(r.node, NODE_LOADED) || !puppet_node_ok(r.next, NODE_LOADED)) {
+        refuse(slot, "racing line");  /* not one of this track's nodes: an honest game never names one */
+        return;
+    }
     Snapshot s;
     memset(&s, 0, sizeof s);
     s.clock = r.ms;  /* the sender's race time (ms), for the trace */

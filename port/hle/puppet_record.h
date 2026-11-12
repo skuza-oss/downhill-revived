@@ -97,4 +97,25 @@ static inline int puppet_record_read(const uint8_t *in, int n, PuppetRecord *r)
     return 1;
 }
 
+/* ---- The racing line: only the loaded track's nodes ----
+
+   The racing-line graph (D_0029EA20) holds its nodes (0x20 bytes each) in its first 0x10000 bytes
+   and its own fields after them; its node count is at +0x1004C (func_00117658 loads it with the
+   nodes, func_00117770 sets the default graph's), and the game's accessor func_001177F8 refuses an
+   index at or past it. A record's node or next node is handed to the game's graph walker
+   (puppet.c take_line, func_0010B2B8 -> func_00118650) and installed as the AI's next node, so an
+   index past the loaded nodes (the graph's own fields, or an unused node of a shorter track) would
+   be read as links: only an index under the loaded count is a node (PUPPET_LINE_NONE: none). */
+enum { PUPPET_NODE_CAPACITY = 0x800 };  /* 0x10000 / 0x20 (func_00117658 walks 0x800) */
+
+/* The loaded count as a usable bound (0-PUPPET_NODE_CAPACITY). */
+static inline int puppet_node_count(int32_t loaded)
+{
+    return loaded < 0 ? 0 : loaded > PUPPET_NODE_CAPACITY ? PUPPET_NODE_CAPACITY : loaded;
+}
+static inline int puppet_node_ok(uint16_t node, int32_t loaded)
+{
+    return node == PUPPET_LINE_NONE || node < puppet_node_count(loaded);
+}
+
 #endif

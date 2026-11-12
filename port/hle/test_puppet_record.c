@@ -56,5 +56,15 @@ int main(void)
     assert(pad_snapshot_apply(mirror, back.pad, back.pad_size) && mirror[7] == 1 && mirror[60] == 0x3F800000u);
     assert(!puppet_record_read(rec, STATE_RECORD_FIXED - 1, &back));  /* shorter than a record */
     printf("puppet record: %d bytes both ways\n", n);
+
+    /* the racing line: only the loaded track's nodes (the review's node=2050, next=2050: the graph's
+       own fields past its 0x800 nodes; an unused node of a shorter track) */
+    {
+        assert(puppet_node_ok(120, 1300) && puppet_node_ok(1299, 1300) && puppet_node_ok(PUPPET_LINE_NONE, 1300));
+        assert(!puppet_node_ok(1300, 1300) && !puppet_node_ok(2050, 1300));
+        assert(!puppet_node_ok(2050, 5000) && !puppet_node_ok(0x800, 0x7FFFFFFF) && puppet_node_ok(0x7FF, 5000));
+        assert(!puppet_node_ok(0, 0) && !puppet_node_ok(0, -3) && puppet_node_ok(PUPPET_LINE_NONE, -3));
+        assert(puppet_node_count(-1) == 0 && puppet_node_count(900) == 900 && puppet_node_count(1 << 30) == 0x800);
+    }
     return 0;
 }
