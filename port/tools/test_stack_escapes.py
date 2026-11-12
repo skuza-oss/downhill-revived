@@ -197,11 +197,59 @@ def test_redzone():
         shutil.rmtree(d, ignore_errors=True)
 
 
+RUN_SRC = r"""
+#include <string.h>
+static void fill(void *p, int n) { memset(p, 1, n); }
+int f(int n)
+{
+    int small[4];
+    char name[8];
+    fill(small, 16 + n);
+    fill(name, 8);
+    return small[1] + name[0];
+}
+int main(void) { f(0); f(4); f(4); return 0; }
+"""
+
+
+def test_redzone_run():
+    """The rewrite and its runtime as a native program: a 20-byte write into int[4] is one hit,
+    the in-bounds call none, the second overrun no second line."""
+    clang = shutil.which('clang')
+    if not clang:
+        print('SKIP redzone run: no clang on PATH')
+        return
+    d = tempfile.mkdtemp()
+    try:
+        src = os.path.join(d, 'u.c')
+        with open(src, 'w', newline='\n') as f:
+            f.write('#line 1 "u.c"\n' + RUN_SRC)
+        p = subprocess.run([clang, '-fsyntax-only', '-w', '-Xclang', '-ast-dump=json', src],
+                           capture_output=True, text=True)
+        out, rep = redzone.instrument(open(src).read(), redzone.decode_all(p.stdout), False)
+        with open(os.path.join(d, 'u.rz.c'), 'w', newline='\n') as f:
+            f.write(out)
+        with open(os.path.join(d, 'rt.c'), 'w', newline='\n') as f:
+            f.write(redzone.RUNTIME)
+        exe = os.path.join(d, 't.exe' if os.name == 'nt' else 't')
+        p = subprocess.run([clang, '-w', os.path.join(d, 'u.rz.c'), os.path.join(d, 'rt.c'), '-o', exe],
+                           capture_output=True, text=True)
+        if p.returncode:
+            print('SKIP redzone run: clang links no native program here (%s)' % p.stderr.strip()[-120:])
+            return
+        r = subprocess.run([exe], capture_output=True, text=True)
+        expect('red zone hit', r.stderr.strip().splitlines(),
+               ['redzone: f: bytes 0..3 of the 16 after small (16 bytes) written'])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     test_types()
     test_formats()
     test_dataflow()
     test_redzone()
+    test_redzone_run()
     print('test_stack_escapes: %s' % ('FAIL (%d)' % len(FAILS) if FAILS else 'OK'))
     sys.exit(1 if FAILS else 0)
 
