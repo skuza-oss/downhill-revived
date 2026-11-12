@@ -59,6 +59,8 @@ the P2P star (unless a bug there is part of the problem).
       sender, live-view clips; the verifier's three (online_race.py --bots, a reset drawn 312
       units off, the race's last seconds) and the phone's stuck rider; local main merged (6e8579d0).
       Not reached: host stops' 1.5-unit steps, one 150 ms race in three.
+- [x] Round 4's closing A/B (the lead): 70a288fa against the tree without it, interleaved, in P2P
+      rooms (the SFU failed every handshake): kept ("70a288fa settled" below).
 - [x] Merged into `main` (ad0135bd); the lead's checks there on 2026-11-12: `check.py port` and
       `server`, the seven state traces, live races on one PC (80 and 150 ms, the arena's round, a
       room of six racers) and PC <-> Mac both ways with and without TURN ("Checked on the merged
@@ -962,13 +964,35 @@ host riders from the stop to 3 s after it ends; "largest step change" is |p[k] -
 eases its speed up to the sender's catch-up rate (2.3 to 4.5 units a step, changes of 0.2-0.8 a
 step), then at the glide's end the rider's own physics speed takes over in one step (4.5 to 1.0:
 3.49). The game's physics keeps its own speed state, which a body velocity set each step only
-overrides for that step. r4f (70a288fa) eases the speed back down after the glide. Its one valid stop
-race (3 s) had two far placements during the catch-up, the puppet faster than its owner (167
-against 96 units a second): the ease-out (or the stronger guard) did not do what it should there,
-and was not taken further.
-The other r4f stop races were lost to an SFU outage on this PC: every attempt, both games, "SFU
-connection failed (DTLS error: timeout: handshake)" over the TURN relay, from about 02:45. The
-P2P Mosh round right after it passed.
+overrides for that step. 70a288fa eases the speed back down after the glide and lets the speed
+guard work both ways (for an owner stuck while pedalling: the phone race). Its one valid stop race in
+round 4 (3 s, over the SFU) had two far placements during the catch-up (50 and 58 units, the puppet
+faster than its owner); the other stop races of that build were lost to an SFU outage on this PC
+(every attempt, both games, "SFU connection failed (DTLS error: timeout: handshake)" over the TURN
+relay).
+
+**70a288fa settled (the lead's closing round).** Build A = the head without 70a288fa's puppet
+changes, build B = the head (86c3f4a1), built from the same tree, raced in turn (A, B, A, B, ...)
+so the PC's load hit both alike. The SFU still failed every handshake from this PC (six attempts
+dropped, all "DTLS error: timeout: handshake"), so the races ran in P2P rooms (`DHD_NET_CREATE=p2p`:
+the host the hub, the guest direct inside the local network) with the same 80 ms test link on
+both games; none of those was dropped. Other lanes ran state traces, a touch-control and an
+OPTIONS walk on this PC meanwhile (races took about 5 minutes each). Host stops at race second 20,
+the guest's view from the stop to 3 s after it; steps within three ticks of a respawn's placement
+not counted:
+
+| | placements outside respawns | largest step change | catch-ups |
+|---|---|---|---|
+| A, 0.8 s stop (three races) | 1 (far: 53), 0, 0 | 33.1 (the placement), 4.07, 3.82 | 18, 22, 17 |
+| B, 0.8 s stop | 0, 0, 0 | 3.98, 4.34, 3.52 | 33, 33, 24 |
+| A, 3 s stop | 0, 0, 0 | 4.68, 3.77, 4.26 | 0, 0, 0 |
+| B, 3 s stop | 0, 0, 0 | 4.16, 3.94, 4.09 | 0, 0, 0 |
+
+Ordinary races at 150 ms, two each: A p95 4.58 and 4.24, 10.8 and 6.6 jolts a minute; B 4.48 and
+4.65, 15.2 and 6.7; no placements outside respawns in any (B's first race: 72 catch-ups in bunches).
+B is at least as good on placements and no worse on steps, so 70a288fa stays, both parts. The two far
+placements of round 4 did not recur in three 3 s stops; they came over the SFU, which could not be
+tested again. Both builds still step 3.5-4.7 units at the stops (target 1.5).
 
 The bench's stopped sender (truth5): r4d 0.8 s p99 17.4, 3 s p99 38.7; the final code (r4f) 16.7
 and 35.5 (v0.7.16's model 8.4 and 23.1). The final code elsewhere: 150 ms 0.54 / 2.68 / 4.4 (2.3 jolts
@@ -1006,7 +1030,13 @@ link seed: the riders' paths differ, the drawing is what to compare.
 - **Host stops' steps** (3-4 units): the rider's own physics speed state, which the glide's set
   velocity does not change. Write the speed where the physics keeps it (the bike's forward speed,
   `func_00137950`'s inputs; not traced) or keep easing the set velocity until the physics' own speed
-  agrees. And the far placements of r4f's 3 s stop.
+  agrees.
+- **70a288fa over the SFU:** its far placements (round 4, one 3 s stop over the SFU) did not
+  recur in P2P rooms; a host stop over the SFU (PC to Mac) should show whether they do there. One
+  thing to watch: since 70a288fa the guard's easing ends only when the puppet's velocity is within
+  5 % of its owner's snapshot velocity (a vector, 100-200 ms old on a curve), where it ended on the
+  speed alone before; the A/B showed no harm, but an easing that never ends would pull a rider along
+  a stale velocity.
 - **150 ms: race-to-race spread.** One race in three is over the line on this PC's SFU path. The
   internet links the verifier measured (PC to Mac, snapshot age p95 21-98 ms) are kinder than the
   150 ms test link.
