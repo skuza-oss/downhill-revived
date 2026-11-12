@@ -231,6 +231,59 @@ int main(void)
 #undef REFUSED
     }
 
+    /* stamps from the future (the review's finding 5) */
+    {
+        const double day = 86400;
+        double newest = 10.0, now = 10.1;
+        /* a snapshot a day ahead is refused; the next normal one is taken (it is newer than the newest) */
+        assert(!puppet_stamp_ok(now + day, now) && !puppet_stamp_ok(NAN, now) && !puppet_stamp_ok(INFINITY, now));
+        assert(puppet_stamp_ok(now + 0.9, now) && puppet_stamp_ok(now - 0.2, now));
+        double next = now - 0.08;  /* stamped 80 ms ago: on its way that long */
+        assert(puppet_stamp_ok(next, now) && puppet_snapshot_new(next, 1, newest));
+        /* (taken, the day-ahead one would have been the newest: every honest one after it stale) */
+        assert(!puppet_snapshot_new(next, 1, now + day));
+
+        /* HOLD: about the newest snapshot here, sane */
+        assert(puppet_hold_ok(newest, 0.3, 1, newest, newest + 0.35) == PUPPET_HOLD_TAKEN);
+        assert(puppet_hold_ok(newest + 0.1, 0.3, 1, newest, newest + 0.45) == PUPPET_HOLD_TAKEN);  /* its last bundles lost */
+        assert(puppet_hold_ok(newest - 0.5, 0.3, 1, newest, newest + 0.35) == PUPPET_HOLD_OVER);  /* a newer one is here */
+        assert(puppet_hold_ok(newest + day, 0.25, 1, newest, now) == PUPPET_HOLD_REFUSED);        /* the review's: a day ahead */
+        assert(puppet_hold_ok(newest + 0.6, 0.3, 1, newest, newest + 0.7) == PUPPET_HOLD_REFUSED); /* not about these snapshots */
+        assert(puppet_hold_ok(newest, 60, 1, newest, newest + 0.35) == PUPPET_HOLD_REFUSED);      /* stopped longer than it is old */
+        assert(puppet_hold_ok(newest, NAN, 1, newest, now) == PUPPET_HOLD_REFUSED &&
+               puppet_hold_ok(NAN, 0.3, 1, newest, now) == PUPPET_HOLD_REFUSED &&
+               puppet_hold_ok(newest, 0.3, 0, 0, now) == PUPPET_HOLD_REFUSED);
+
+        /* A HOLD a day ahead, then normal snapshots: it is refused, so the rider is never held. Its
+           release on its own: a HOLD taken 0.4 s ahead of the newest snapshot, then the sender's
+           snapshots come again with stamps that do not pass it for seconds (a broken clock): before,
+           held_step never saw one newer than the hold and the rider stood for the race; now it rides
+           SYNC_COAST after they began to arrive. */
+        PuppetHold h = {0};
+        assert(puppet_hold_ok(newest + day, 0.3, 1, newest, now) != PUPPET_HOLD_TAKEN);
+        assert(!h.held);
+        double t = newest + 0.4, clock = newest + 0.7;
+        assert(puppet_hold_ok(t, 0.3, 1, newest, clock) == PUPPET_HOLD_TAKEN);
+        puppet_hold_start(&h, t);
+        double fed_from = 0, released = 0;
+        for (int step = 0; step < 60 * 10 && !released; step++) {
+            clock += 1 / 60.0;
+            double stamp = newest + 0.001 * step;  /* a clock that barely runs: behind the hold for 6 s */
+            if (step >= 30 && step % 2 == 0) {  /* from 0.5 s on, 30 a second */
+                assert(puppet_stamp_ok(stamp, clock));
+                if (!fed_from) fed_from = clock;
+                puppet_hold_fed(&h, clock);
+            }
+            if (puppet_hold_resumed(&h, stamp) || puppet_hold_fed_long(&h, clock)) released = clock;
+        }
+        assert(released > 0 && fabs(released - fed_from - SYNC_COAST) < 0.05);
+        /* and with honest stamps it resumes at the first snapshot past the hold, as before */
+        PuppetHold g = {0};
+        puppet_hold_start(&g, newest);
+        assert(!puppet_hold_resumed(&g, newest) && puppet_hold_resumed(&g, newest + 1 / 30.0));
+        assert(!puppet_hold_fed_long(&g, newest + 100));  /* nothing fed: no release by time alone */
+    }
+
     {
         enum { ROUNDS = 200000 };
         int taken, refused, passed = fuzz(ROUNDS, &taken, &refused);

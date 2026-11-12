@@ -13,6 +13,7 @@
 #include <string.h>
 #include "pad_snapshot.h"
 #include "state_bundle.h"
+#include "puppet_sync.h"
 
 #define PUPPET_LINE_NONE 0xFFFF
 
@@ -244,5 +245,60 @@ static inline const char *puppet_record_take(const PuppetRecord *r, uint32_t mir
     if (!why) memcpy(mirror, pad, PAD_WORDS * sizeof *pad);
     return why;
 }
+
+/* ---- Stamps: none from the future ----
+
+   A stamp is placed on this race clock through the shared server clock (puppet.c receive_record,
+   receive_bundle). Its error there is the two games' clock offsets (each within half a trusted
+   round trip, port/net/client.c clock_sample: tens of ms, a few hundred on the worst links) plus
+   what a game's race clock trails beyond the pacing lag, which sync_clock_excess takes off. A stamp
+   further ahead of this game's race time than PUPPET_AHEAD_MAX is no clock error: refused. One
+   such snapshot taken would make every honest one after it "stale" (older than the newest) until
+   this game's clock reached it, and a HOLD so stamped kept its riders held for the race. */
+#define PUPPET_AHEAD_MAX 1.0
+/* A HOLD names its sender's last bundle's stamp. Bundles can be lost, so it may be newer than the
+   newest snapshot this game took from it, by at most this much (more: it is not about the
+   snapshots this game has; the riders then coast as on a quiet link, SYNC_COAST). */
+#define PUPPET_HOLD_MATCH 0.5
+
+static inline int puppet_stamp_ok(double t, double now) { return isfinite(t) && t <= now + PUPPET_AHEAD_MAX; }
+
+/* A snapshot stamped t arriving at now, the newest taken from its rider at `newest` (have: any):
+   taken when it is not from the future and newer than that newest (else stale, or refused). */
+static inline int puppet_snapshot_new(double t, int have, double newest) { return !have || t > newest; }
+
+/* A rider's hold (state_bundle.h HOLD): held since its sender's snapshot of moment held_at; fed_at:
+   when (this race clock) the first snapshot taken after the hold arrived (0: none yet). */
+typedef struct PuppetHold {
+    int held;
+    double held_at, fed_at;
+} PuppetHold;
+
+/* A HOLD stamped t from a sender quiet for `quiet` s (its own clock) arrives at now; `newest`: the
+   newest snapshot this game took of the rider (have: any). PUPPET_HOLD_TAKEN when it is about that
+   snapshot and sane: not from the future, not more than PUPPET_HOLD_MATCH after it, and its stop no
+   longer than its stamp is old here; PUPPET_HOLD_OVER when a newer snapshot is already here (the
+   stop is over, as before); else PUPPET_HOLD_REFUSED. */
+enum { PUPPET_HOLD_REFUSED = -1, PUPPET_HOLD_OVER = 0, PUPPET_HOLD_TAKEN = 1 };
+static inline int puppet_hold_ok(double t, double quiet, int have, double newest, double now)
+{
+    if (!puppet_stamp_ok(t, now) || !isfinite(quiet) || quiet < 0) return PUPPET_HOLD_REFUSED;
+    if (have && newest > t + 0.001) return PUPPET_HOLD_OVER;
+    if (!have || t > newest + PUPPET_HOLD_MATCH) return PUPPET_HOLD_REFUSED;
+    return quiet <= now - t + PUPPET_AHEAD_MAX ? PUPPET_HOLD_TAKEN : PUPPET_HOLD_REFUSED;  /* its stop began at its last bundle */
+}
+static inline void puppet_hold_start(PuppetHold *h, double t) { h->held = 1, h->held_at = t, h->fed_at = 0; }
+
+/* A snapshot was taken into the ring at now (whatever its stamp). */
+static inline void puppet_hold_fed(PuppetHold *h, double now)
+{
+    if (h->held && !(h->fed_at > 0)) h->fed_at = now > 0 ? now : 1e-9;
+}
+
+/* Whether the hold is over: snapshots newer than it have come (`shown`: the newest one whose
+   moment has come), or snapshots have been arriving again for SYNC_COAST by this game's clock,
+   whatever their stamps (a sender whose clock moved back, a HOLD stamped ahead of its snapshots). */
+static inline int puppet_hold_resumed(const PuppetHold *h, double shown) { return shown > h->held_at + 0.001; }
+static inline int puppet_hold_fed_long(const PuppetHold *h, double now) { return h->fed_at > 0 && now - h->fed_at > SYNC_COAST; }
 
 #endif
