@@ -453,7 +453,9 @@ describe("session rooms",()=>{
     cs[9].sendJson({type:"back"});
     await snap(h,r=>r.lastRace?.id===2);
     // a scored round (finding 204) after it, every number at its widest: the round's snapshots and
-    // its results (a member's state shows the score instead of the round's length)
+    // its results (a member's state shows the score instead of the round's length); the arena
+    // track makes it one (finding 221)
+    h.sendJson({type:"settings",track:23}); await snap(h,r=>r.settings.track===23);
     await start(h,cs,code);
     await snap(h,r=>r.phase==="racing");
     for(let i=0;i<9;i++) {cs[i].sendJson({type:"finish",ticks:0xffffffff,place:255,score:999999}); await snap(h,r=>r.members[i].score===999999);}
@@ -470,7 +472,9 @@ describe("session rooms",()=>{
     expect((await h.json("welcome")).features).toContain("score");
   });
   it("ranks a scored round by score, highest first, ties in grid order (finding 204)",async()=>{
-    const {h,cs,code}=await setup(4); await start(h,cs,code);
+    const {h,cs,code}=await setup(4);
+    h.sendJson({type:"settings",track:23}); await snap(h,r=>r.settings.track===23);  // the arena: a scored round
+    await start(h,cs,code);
     cs[1].sendJson({type:"finish",ticks:7200,place:3,score:300});
     const live=await snap(h,r=>r.members[1].raceState==="finished");
     expect(live.members[1].score).toBe(300);
@@ -480,6 +484,38 @@ describe("session rooms",()=>{
     const r=(await snap(h,r=>r.lastRace)).lastRace;
     expect(r.entrants.map((x:any)=>[x.name,x.score??null,x.place])).toEqual(
       [["Host",500,2],["P1",300,3],["P3",300,4],["P2",null,5]]);
+  });
+  it("a score on an ordinary race is ignored: one finisher cannot switch the ranking (finding 221)",async()=>{
+    const {h,cs,code}=await setup(4); await start(h,cs,code);  // the default track: not the arena
+    h.sendJson({type:"finish",ticks:600,place:1});
+    cs[1].sendJson({type:"finish",ticks:900,place:2});
+    cs[2].sendJson({type:"finish",ticks:1200,place:1,score:1});
+    const live=await snap(h,r=>r.members[2].raceState==="finished");
+    expect(live.members[2].score).toBe(undefined);
+    expect(live.members[2].finishTicks).toBe(1200);
+    cs[3].sendJson({type:"finish",ticks:1500,place:4});
+    const r=(await snap(h,r=>r.lastRace)).lastRace;
+    expect(r.entrants.map((x:any)=>[x.name,x.ticks,x.score??null,x.place])).toEqual(
+      [["Host",600,null,1],["P1",900,null,2],["P2",1200,null,3],["P3",1500,null,4]]);
+  });
+  it("a scored round: finishers without a score come after those with one, by time; no scores at all ranks by time (finding 221)",async()=>{
+    const {h,cs,code}=await setup(4);
+    h.sendJson({type:"settings",track:23}); await snap(h,r=>r.settings.track===23);
+    await start(h,cs,code);
+    h.sendJson({type:"finish",ticks:7200,place:1});              // no score (a game that sends none)
+    cs[1].sendJson({type:"finish",ticks:7100,place:2});          // none, faster
+    cs[2].sendJson({type:"finish",ticks:7300,place:3,score:0});  // 0 points is still a score
+    cs[3].sendJson({type:"finish",ticks:7300,place:4,score:50});
+    const r=(await snap(h,r=>r.lastRace)).lastRace;
+    expect(r.entrants.map((x:any)=>[x.name,x.score??null])).toEqual([["P3",50],["P2",0],["P1",null],["Host",null]]);
+    // the same room, a round whose games send no score at all (a 0.7.16 game on the arena): by time
+    await start(h,cs,code);
+    h.sendJson({type:"finish",ticks:900,place:2});
+    cs[1].sendJson({type:"finish",ticks:600,place:1});
+    cs[2].sendJson({type:"back"}); cs[3].sendJson({type:"back"});
+    const r2=(await snap(h,r=>r.lastRace?.id===2)).lastRace;
+    expect(r2.entrants.map((x:any)=>[x.name,x.ticks??null,x.score??null])).toEqual(
+      [["P1",600,null],["Host",900,null],["P2",null,null],["P3",null,null]]);
   });
   it("refuses a finish whose score is not an unsigned 32-bit number; a race without scores ranks by time",async()=>{
     const {h,cs,code}=await setup(2); await start(h,cs,code);
