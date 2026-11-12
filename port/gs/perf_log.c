@@ -49,6 +49,7 @@ static const char *const thread_labels[THREADS] = {"game", "vu", "gs", "render"}
 enum { BINS = 1000 };            /* frame times in 0.25 ms bins up to 250 ms; longer ones in a tail */
 static const double BIN_MS = 0.25;
 static const double WINDOW_SECONDS = 30, SEGMENT_SECONDS = 1, STABLE_SECONDS = 2;
+static const double LONG_FRAME_MS = 500;  /* a picture this long after the last one gets its own line */
 
 static int on = -1;
 int perf_log_on(void)
@@ -439,12 +440,14 @@ void perf_presented(void)
         SDL_UnlockSpinlock(&lock);
         return;
     }
+    double long_ms = 0;
     if ((window & 1) && window == segment.window && state == segment.state && last_present > 0) {
         int paced;
         double requested = requested_fps(&paced), ms = (now - last_present) * 1000;
         double over_ms = paced && requested > 0 ? 1.2 * 1000 / requested : 0;
         count_frame(&window_sums[state], ms, over_ms, requested, paced);
         count_frame(&session_sums[state], ms, over_ms, requested, paced);
+        if (ms >= LONG_FRAME_MS) long_ms = ms;
     }
     last_present = now;
     if (window != segment.window || state != segment.state || now - segment.start >= SEGMENT_SECONDS) {
@@ -453,4 +456,12 @@ void perf_presented(void)
         render_line(now);
     }
     SDL_UnlockSpinlock(&lock);
+    /* a picture that came this long after the one before (what a summary's max= hides: when it was;
+       finding 211): its own line, a few per run, between the game's own lines in the log */
+    static int long_lines;
+    if (long_ms > 0 && long_lines < 40) {
+        long_lines++;
+        fprintf(stderr, "perf: long frame: a picture %.0f ms after the one before (%s, field %llu)\n", long_ms,
+                state ? "race" : "menus", (unsigned long long)kernel_vsync_count);
+    }
 }
