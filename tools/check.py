@@ -33,7 +33,10 @@ def steps(tier, jobs):
                     ('scan_retail', [PY, 'port/tools/scan_retail.py', 'build/host64-exe/dhd64.exe'], ROOT),
                     ('net_tests', [PY, 'port/net/build_tests.py'], ROOT),
                     ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT),
-                    ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT)]
+                    ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT),
+                    # stack locals the EE frame makes one object (finding 213): unreviewed overruns fail
+                    ('test_stack_escapes', [PY, 'port/tools/test_stack_escapes.py'], ROOT),
+                    ('stack_escapes', [PY, 'port/tools/stack_escapes.py', '--check'] + j, ROOT)]
     matching = [('configure', [PY, 'tools/configure.py'], ROOT),
                 ('ninja', [PY, '-m', 'ninja'] + j, ROOT),
                 ('check_image', [PY, 'tools/check_image.py', 'build/dhd.elf'], ROOT)]

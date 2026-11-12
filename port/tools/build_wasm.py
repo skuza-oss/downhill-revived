@@ -37,7 +37,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, PORT)  # patches.py
 
 WASM_TARGET = 'wasm32-wasip1'  # the WASI headers need __wasi__ (wasi/version.h); no WASI import is used by the module
-import data, eefloat, objcache, port_source, recomp, transform  # noqa: E402
+import data, eefloat, objcache, port_source, recomp, redzone, transform  # noqa: E402
 from port_source import apply_patches, align_aggregate_allocas  # noqa: E402
 import vu1_aot  # noqa: E402
 import wasm_retail_names  # noqa: E402
@@ -647,6 +647,8 @@ def compile_src(job):
     front = ['clang'] + [f for f in BASE if f != '-c'] + lang + inc + ['-S', '-emit-llvm', '-Xclang', '-disable-llvm-passes',
                                                                      '-include', HEADER_SHIM[0]] + extra
     rec = {'unit': 'src/' + rel, 'status': 'ok', 'stage': '', 'errors': []}
+    if REDZONE:  # a test build: the unit's address-taken locals get red zones (redzone.py)
+        src = redzone_source(front, src, cpp, rec)
     # the shared object cache: both steps and the IR rewrites between them (this file, eefloat.py)
     cache = objcache.source_key(front + [src, '-o', '-'], '-', [' '.join(BASE + extra)] + REWRITERS)
     if cache and objcache.fetch(cache, obj):
@@ -677,6 +679,52 @@ def compile_src(job):
 
 
 HEADER_SHIM = [None]
+# DHD_CORE_REDZONE=1: a test build only (finding 213; never in players' builds, its own core cache key)
+REDZONE = os.environ.get('DHD_CORE_REDZONE', '') not in ('', '0')
+REDZONE_REPORT = []
+
+
+def redzone_source(front, src, cpp, rec):
+    """src rewritten by redzone.py (its address-taken locals in one struct with red zones), or src
+    itself when the rewrite doesn't compile (reported; the unit is then built as in players' builds)."""
+    dump = run([a for a in front if a not in ('-S', '-emit-llvm', '-Xclang', '-disable-llvm-passes')]
+               + ['-fsyntax-only', '-Xclang', '-ast-dump=json', src])
+    if dump.returncode:
+        REDZONE_REPORT.append((rec['unit'], 'no AST', 0, 0, 0))
+        return src
+    text = open(src, encoding='utf-8', errors='surrogateescape').read()
+    out, rep = redzone.instrument_bytes(text, redzone.decode_all(dump.stdout), cpp)
+    if out == text:
+        REDZONE_REPORT.append((rec['unit'], 'none', 0, 0, len(rep['skipped'])))
+        return src
+    rz = src + '.rz' + ('.cpp' if cpp else '.c')
+    write(rz, out)
+    check = run([a for a in front if a not in ('-S', '-emit-llvm', '-Xclang', '-disable-llvm-passes')]
+                + ['-fsyntax-only', rz])
+    if check.returncode:
+        REDZONE_REPORT.append((rec['unit'], 'fallback: ' + check.stderr.strip().splitlines()[0][:200], 0, 0,
+                               len(rep['skipped'])))
+        return src
+    REDZONE_REPORT.append((rec['unit'], 'ok', rep['functions'], rep['locals'], len(rep['skipped'])))
+    return rz
+
+
+def redzone_object():
+    """The red zones' checks (redzone.RUNTIME), linked only into a DHD_CORE_REDZONE build."""
+    if not REDZONE:
+        return None
+    c = os.path.join(OUT, 'redzone_runtime.c')
+    write(c, redzone.RUNTIME)
+    obj = c + '.o'
+    p = run(['clang'] + BASE + [c, '-o', obj])
+    if p.returncode:
+        sys.exit(p.stderr)
+    ok = [r for r in REDZONE_REPORT if r[1] == 'ok']
+    falls = [r for r in REDZONE_REPORT if r[1].startswith('fallback') or r[1] == 'no AST']
+    write(os.path.join(OUT, 'redzone.tsv'), ''.join('\t'.join(map(str, r)) + '\n' for r in sorted(REDZONE_REPORT)))
+    print('red zones (a test build): %d units, %d functions, %d locals; %d units built without (redzone.tsv)'
+          % (len(ok), sum(r[2] for r in ok), sum(r[3] for r in ok), len(falls)), flush=True)
+    return obj
 REWRITERS = objcache.file_hashes(os.path.abspath(__file__), eefloat.__file__, port_source.__file__)
 INTRA_THUNKS = {}  # (name, C signature) -> D signature: C++ adapters the intra-object ABI stage needs
 
@@ -1307,7 +1355,7 @@ NOT_CORE = ('docs/', 'online/', '.github/', 'port/launcher/', 'port/render/', 'p
 CORE_NEW_FILES = ('src/', 'include/', 'port/runtime/', 'port/hle/', 'port/include/', 'port/host/', 'port/gs/',
                   'port/net/', 'port/tools/', 'port/patches')
 # the environment the build reads (the tools' folders are in the key by their resolved paths)
-CORE_ENV = ('DHD_VUTEXT', 'WASI_SYSROOT', 'SIMDE_DIR', 'WABT_DIR', 'DHD_CORE_LAYOUT_PAD')
+CORE_ENV = ('DHD_VUTEXT', 'WASI_SYSROOT', 'SIMDE_DIR', 'WABT_DIR', 'DHD_CORE_LAYOUT_PAD', 'DHD_CORE_REDZONE')
 
 
 def core_inputs_key():
@@ -1611,6 +1659,9 @@ def build(a, t0, key):
     pad = layout_pad_object()
     if pad:
         all_objs = [pad] + all_objs
+    rzo = redzone_object()
+    if rzo:
+        all_objs.append(rzo)
     strict = wasm_link(all_objs, WASM, False, host_syms)
     print('strict link: %s' % ('ok' if strict.returncode == 0 else 'FAILED'), flush=True)
     link_txt = strict.stdout + strict.stderr
