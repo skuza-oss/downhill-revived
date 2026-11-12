@@ -1,9 +1,10 @@
 # 214: A D-pad as a touch steering choice, and the touch gaps beside the flyover
 
-Status: in progress
+Status: current
 
 Branch `feat/touch-dpad` from `main` dbddf61e (0.7.16 plus findings 199-207 and 209), started
-2026-11-12. This file is the lane's plan while it runs and its finding when it merges.
+2026-11-12. This file is the lane's plan while it runs and its finding when it merges. Merged
+into `main` on 2026-11-12; what has and has not been checked on a phone is in "Result".
 
 ## Goal and acceptance
 
@@ -198,4 +199,30 @@ flight skipped by a tap on SKIP, pedalling by `DHD_TEST_PAD`, the D-pad's finger
 
 ## Result
 
-(at the merge)
+The D-pad (a third value of `touch_steer`, both presets, both hands) and the one-button moments
+(movies, attract demo, replay) are in `main`. Findings 217 and 218 found what the lane missed on
+a phone and fixed it: the attract demo's SKIP never showed (its flag was never set, 218 B), the
+D-pad overlapped the HUD (218 C), quick taps never reached the game's double-tap rule (218 D), a
+replay's MENU vanished above 60 updates a second (218 E). The list above, "Left for the lead",
+against what those two findings record on the phone (Mi 11i):
+
+1. D-pad feel, diagonals, slide, double tap, full lock, Size 70 and 105: **mostly open**. Proved
+   on the phone by 218 C: the D-pad's place in a race, Classic pad, right and left hand, clear of
+   the HUD. Open, no phone run recorded: the thumb feel, the diagonals and the slide, a double
+   tap's powerslide (218 D: the touch log shows the presses, no picture of the slide), Thumb
+   zones (218: checked on Windows only; on the phone a stray tap on CAREER sent the route to CAREER's screen), Size 70
+   and 105.
+2. The settings page: **proved** for Steer With, 218 C: on the phone it stepped Stick, Tilt,
+   D-pad by taps, each logged, and was put back. Open: the Stick rows' dimming on the phone (218
+   made unavailable rows draw dimmed, checked on Windows).
+3. Results after a finish and after QUIT RACE by tap: **open**; no phone run recorded.
+4. Movies, attract demo, replay by tap: the movies **proved** by 217 (VIDEO CLIPS > INTRO ended
+   with SKIP, `movie: mov/attract.pss skipped`); the attract demo **proved** by 218 B (SKIP showed
+   after the minute on the title and one tap ended it); a replay **open** (218 E: unit test and
+   Windows only, none reached on the phone).
+5. State traces: **done** on later merged mains: all seven recipes equal the format-2 references
+   (the verifier of 217 on 3073462c, the verifier of 218 on 63a24aa9).
+
+Open for good reasons, each needs a phone session: items 1 (feel, diagonals, slide, powerslide,
+Thumb zones, Size 70 and 105), 2 (the Stick rows' dimming), 3 and 4 (a replay). Nothing here
+changes without touch controls on.

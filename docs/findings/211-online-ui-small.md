@@ -122,6 +122,14 @@ differs only with `DHD_TOUCH` set (traces run without it); the `NetLobby` field 
 code only. The core's layout did move, so `split` and `memcard` need a base built at the merge base
 (same layout rule, finding 205).
 
+**Where the phone checks stand (2026-11-12, after findings 217 and 218): none is recorded yet, so
+this finding stays `in progress`.** Findings 217 and 218 fixed what stopped the phone (the exit
+abort, a dead ONLINE page after a room, READY by tap) and record phone runs of the exit, READY by
+tap, a race as guest and as creator, the attract demo's SKIP and the D-pad's place; none of them
+shows any of the four checks below (neither the race-end text on the phone, the `stall:` and
+`perf: long frame` lines on the way back to the room, "Tap a tab" in OPTIONS > SETTINGS, nor the
+pad's words). Missing: the four phone checks.
+
 Phone checks (the lead): (1) an online P2P race on the phone as host where the phone's own rider is
 still riding when the finish window runs out: the screen must say "TIME UP - DNF" and the log
 `race closed: back to the room (TIME UP - DNF: ended 1 ...`; the finisher "RACE OVER". (2) The log's

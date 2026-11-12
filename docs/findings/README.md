@@ -243,11 +243,11 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 210 | [EXIT GAME on Android aborts in the C library while the process ends](210-android-exit-abort.md) | current |  |
 | 211 | [Three small online and phone UI bugs: wrong race-end message, room stall, keyboard tab...](211-online-ui-small.md) | in progress |  |
 | 213 | [stack locals that the EE frame makes one object (the class of 094 and 207)](213-stack-overrun-sweep.md) | current |  |
-| 214 | [A D-pad as a touch steering choice, and the touch gaps beside the flyover](214-touch-dpad-and-gaps.md) | in progress |  |
+| 214 | [A D-pad as a touch steering choice, and the touch gaps beside the flyover](214-touch-dpad-and-gaps.md) | current |  |
 | 215 | [Online, the race menu does not pause the race](215-online-menu-no-pause.md) | current |  |
 | 216 | [an online race's last seconds, the finish on every screen, a reset as a respawn](216-online-race-end.md) | current |  |
 | 217 | [Android aborts when the perf log asks an ended thread for its CPU time](217-android-thread-clocks.md) | current |  |
-| 218 | [READY on a phone in an online room, the attract demo's SKIP, the D-pad's place and taps...](218-phone-room-and-touch.md) | in progress |  |
+| 218 | [READY on a phone in an online room, the attract demo's SKIP, the D-pad's place and taps...](218-phone-room-and-touch.md) | current |  |
 | 219 | [three checks that passed when they should fail](219-check-tools-false-pass.md) | current |  |
 | 220 | [another game's snapshots checked before they are used](220-online-snapshot-checks.md) | in progress |  |
 | 221 | [score rules: the server's mode, one final per rider, a table that stands](221-score-rules.md) | current |  |

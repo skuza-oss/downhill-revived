@@ -1,9 +1,10 @@
 # 218: READY on a phone in an online room, the attract demo's SKIP, the D-pad's place and taps on settings rows
 
-Status: in progress
+Status: current
 
 Branch `fix/phone-room-and-touch` from `main` c5f839a2, started 2026-11-12. This file is the lane's
-plan while it runs and its finding when it merges.
+plan while it runs and its finding when it merges. Merged into `main` on 2026-11-12 (63a24aa9) and
+checked there the same day ("Checked on the merged main" below).
 
 ## Goal and acceptance
 
@@ -170,6 +171,38 @@ Phone (Mi 11i, release-signed APK of this branch, owner's settings): dhd.ini and
 files have the same md5 before and after; Layout, Hand and Steer With were changed by tap for the
 test and put back (Classic pad, Right, Stick).
 
-Open: the dead READY of the check not reproduced (its cause unproven; the page now says when READY
-does not reach the room); the visible slide of a D-pad double tap in a picture; MENU in a replay
-on a phone at 120; Thumb zones on the phone.
+Open:
+
+- The original dead READY on the phone was not reproduced; its cause is unproven (the stuck tap
+  handler fixed in 37e8c1a1 is the likely one; the page now says when READY does not reach the
+  room).
+- Thumb zones were not checked on the phone (Windows only).
+- A replay's MENU was not reached on the phone (unit test and Windows only; the phone runs at 60).
+- The visible slide of a D-pad double tap was not captured in a picture (the touch log shows the
+  presses).
+
+## Checked on the merged main (2026-11-12)
+
+On `main` 63a24aa9, by the lead's verifier (Windows, hidden desktops, no timing runs, the game
+lock respected).
+
+- `python tools/check.py port -j 6` (`DHD_BUILD_SLOTS=2`): OK in 16 min (`build_wasm` 218 s,
+  `test_runtime` 182 s, `build_game` 283 s, `test_gs_wgpu` 67 s, `test_stack_gate` 127 s). The
+  touch unit tests run inside `test_runtime` and show as the line `test_touch: all passed`
+  (`port/hle/test_touch.c`, with `test_dpad_double_tap` and `test_replay_high_rate`; the
+  gamepad mapping's lines before it are another test).
+- State traces: `boot`, `race` and `race2` to `race6` each equal the format-2 references made from
+  524948ba: 7 of 7 PASS (`state_diff.py`), as the lane predicted.
+- `attract_skip_check.py`: PASS, SKIP ended the attract demo (`touch log: attract 1`, then
+  `attract 0` after the tap; pictures `demo-skip.png`, `after-skip.png`).
+- `room_ready_touch_check.py --race`: PASS, READY by tap took and the race started (the guest's
+  log has `online menu: READY on by tap` and `the room has this player ready`).
+- Two games in a P2P room on a local server (`online_race.py --hidden`, the host's rider finishing
+  at 70 s and the guest's at 72 s): results equal on both games (`result 1. Host 1:10.03`,
+  `result 2. Guest 1:12.03`, then the computer riders) in two runs. With the test link of the
+  earlier checks (`--link delay=80,jitter=15,loss=1`) neither log has a `refused` line. Without a
+  link the logs hold `HOLD refused` lines (1 in the host's, 9 in the guest's) at race second
+  74.7, after both riders had finished (the other sender's last snapshot stamp, quiet 1.07 s):
+  finding 220's rule meeting a finished sender; no code of 220 differs from the build the earlier
+  link runs used, and nothing of lane 218 touches the puppets. Not looked into further here.
+- Not run: the phone, Thumb zones, a replay, PC <-> Mac.

@@ -100,7 +100,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   thread, the game on its own thread), `present.c` (the window), `sound_out_sdl.c` (one sound
   output), controllers through SDL only (findings 059, 134; Swap L1/L2 and R1/R2 per controller,
   finding 189), touch controls on phones (`port/hle/touch.c`, finding 141; the game's codes from
-  the touch pause menu, finding 189; a SKIP button in the flight over the track, finding 209).
+  the touch pause menu, finding 189; a SKIP button in the flight over the track, finding 209, and
+  in the movies and the title's attract demo, findings 214 and 218; a D-pad as a third touch
+  steering choice, finding 214, placed clear of the game's HUD, finding 218; MENU over a replay,
+  also above 60 updates a second, finding 218).
 - The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
   threads and the render thread stop, the closing log lines are written, open files are flushed,
   and the process leaves without the C library's static destructors. New code that must run at the
@@ -181,6 +184,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   rider coasts on a neutral pad (`port/hle/race_menu.h`, `online.c` `race_menu_pad`). Alone (every
   other human finished or left) it is the game's own pause. A real pause's time is never given
   back: the race clock stays behind by it.
+- The room page on a phone (finding 218): READY by tap is logged (`READY on by tap` / `by pad`) and
+  answered (`the room has this player ready`); a READY the room does not show within 4 s puts
+  `READY DIDN'T REACH THE ROOM: TRY AGAIN` on the page, and the room's errors show as a note.
+  ONLINE takes taps again after a room that was open over the rider screen. The cause of the one
+  dead READY a phone check saw is unproven.
 - P2P rooms (findings 180, 186): the creator's choice beside SFU rooms, private, by code (7
   characters). A server room like any other (its rules, results, rejoin, region) whose race frames
   travel over WebRTC data channels in a star around one member, the hub, which the room picks (the
