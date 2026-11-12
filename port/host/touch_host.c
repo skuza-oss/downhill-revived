@@ -196,7 +196,12 @@ int touch_host_event(const SDL_Event *e)
                 before_x = last_x, before_y = last_y;
                 last_x = x, last_y = y, last_px = e->motion.x, last_py = e->motion.y;
                 if (e->motion.state & SDL_BUTTON_LMASK) push(EV_MOVE, 0x7FFF, x, y, ms);
-            } else if (e->button.button == SDL_BUTTON_LEFT) push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
+            } else if (e->button.button == SDL_BUTTON_LEFT) {
+                /* a test's press is where its posted move put the finger, not SDL's idea of the
+                   pointer (the OS cursor's), as present.c does for the menus' mouse (finding 218) */
+                if (test_input()) x = last_x, y = last_y;
+                push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
+            }
             return owned;
         }
         return 0;
@@ -498,6 +503,11 @@ void host_service_touch_field(uint32_t address)
     if (trace_on() && h->flyover != trace_fly) {
         fprintf(stderr, "touch log: flyover %d (%.0f ms)\n", h->flyover, ms_now());
         trace_fly = h->flyover;
+    }
+    static int trace_attract = 0;
+    if (trace_on() && h->attract != trace_attract) {   /* the title's attract demo (finding 218) */
+        fprintf(stderr, "touch log: attract %d (%.0f ms)\n", h->attract, ms_now());
+        trace_attract = h->attract;
     }
     static int trace_movie = 0;
     if (trace_on() && h->movie != trace_movie) {

@@ -77,6 +77,7 @@ static inline int port_race_rule(int race_loop, int mode, int phase, int first_p
 }
 void port_loop_frame(int race);           /* 1 from the race world's update, 0 from the front end's frame */
 int port_in_race(void);                   /* a race's loop runs, any phase (not the attract demo) */
+int port_attract_demo(void);              /* the race's loop runs the title's attract demo (finding 218) */
 int port_race_running(int first_phase);   /* port_race_rule now: the phase first_phase (1 or 2) to 4 */
 
 /* dhd.log's clock: lines (every VBLANK; finding 139): game time against wall time in a race. */

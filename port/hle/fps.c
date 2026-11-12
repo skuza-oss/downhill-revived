@@ -27,6 +27,7 @@ void port_loop_frame(int race)
 }
 
 int port_in_race(void) { return race_loop && *(int *)GUEST(0x084B26AC) != PORT_MODE_ATTRACT; }
+int port_attract_demo(void) { return race_loop && *(int *)GUEST(0x084B26AC) == PORT_MODE_ATTRACT; }
 int port_race_running(int first_phase)
 {
     return port_race_rule(race_loop, *(int *)GUEST(0x084B26AC), *(int *)GUEST(0x0843F348), first_phase);
