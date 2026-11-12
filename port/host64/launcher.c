@@ -83,6 +83,9 @@ static int game(void *start) {
     return code;
 }
 int sdl_host_main(int (*game)(void *),void *arg);  /* port/host/sdl_host.c */
+#ifndef HOST64_FAKE_MODULE
+#include "../host/host_end.h"
+#endif
 int main(int argc,char **argv) {
 #ifdef _WIN32
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -91,6 +94,11 @@ int main(int argc,char **argv) {
 #ifdef HOST64_FAKE_MODULE
     return game(&args);  /* the boundary fixture: no window, no SDL */
 #else
-    return sdl_host_main(game,&args);
+    int code=sdl_host_main(game,&args);
+#ifdef __ANDROID__
+    return code;  /* android_main.c logs it and ends the same way */
+#else
+    host_end(code);  /* the game returned: the same end as EXIT GAME (finding 210) */
+#endif
 #endif
 }

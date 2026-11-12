@@ -42,6 +42,7 @@
 #include "dhd_render.h"   /* -Iport/render/include */
 #include "dhd_render_ext.h"   /* dhdr_device_lost */
 #include "perf_log.h"     /* the perf: lines (finding 129) */
+#include "../host/host_end.h"   /* the render thread stops first at the end (finding 210) */
 
 #ifndef DHD_GS_TEST_BUILD
 #include "../net/net.h"

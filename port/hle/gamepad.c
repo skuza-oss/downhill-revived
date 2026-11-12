@@ -28,6 +28,7 @@
 #include "hle.h"
 #include "stick.h"
 #include "controls_table.h"
+#include "../host/host_end.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -280,7 +281,7 @@ int gamepad_thread_start(void)
     SDL_free(ids);
     SDL_SetAtomicInt(&running, 1);
     gamepad_thread_update();  /* the pads there at the start have a state */
-    if (!registered++) atexit(stop_vibration);
+    if (!registered++) host_end_add(HOST_END_DEVICES, "vibration", stop_vibration);
     return 1;
 }
 

@@ -21,6 +21,7 @@
 #if !defined(DHD_VIF0_ONLY)
 #include "vu1_profile.h"
 #include "gs_queue.h"
+#include "../host/host_end.h"
 #endif
 
 typedef struct {

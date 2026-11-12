@@ -101,6 +101,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   output), controllers through SDL only (findings 059, 134; Swap L1/L2 and R1/R2 per controller,
   finding 189), touch controls on phones (`port/hle/touch.c`, finding 141; the game's codes from
   the touch pause menu, finding 189; a SKIP button in the flight over the track, finding 209).
+- The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
+  threads and the render thread stop, the closing log lines are written, open files are flushed,
+  and the process leaves without the C library's static destructors. New code that must run at the
+  end registers with `host_end_add`, not `atexit`.
 - dhd.log on every platform, with `perf:` lines on speed and what limits it (finding 129) and
   `net:` lines online (finding 135). What the game can detect goes in the log. Each start keeps
   the one before as dhd-previous.log; on Android the log says how the run before ended (Android's

@@ -54,6 +54,7 @@
 #include "ps2asm.h"
 #include "../include/guest.h"
 #include "../host/host_os.h"
+#include "../host/host_end.h"
 #include "../render/include/dhd_settings.h"  /* dhd.ini (port/render/settings) */
 #include "../render/include/dhd_presence.h"  /* Discord Rich Presence (port/render/presence) */
 
@@ -353,7 +354,7 @@ static void log_start(void)
     /* Direct handle writes (and a relaunch after an update, update.c start_again) use the file. */
     SetStdHandle(STD_ERROR_HANDLE, log_file);
     SetStdHandle(STD_OUTPUT_HANDLE, log_file);
-    atexit(log_atexit);
+    host_end_add(HOST_END_LOG, "log", log_atexit);
     signal(SIGABRT, log_aborted);
 }
 
@@ -803,7 +804,7 @@ void host_init(void)
 /* The log on Linux, macOS and Android: stdout and stderr write into a pipe and a thread copies its
    lines to dhd.log (and on Android to logcat, tag DownhillRevived), so a slow write to the disk
    holds up only that thread, as on Windows. host_log_drain: the lines still in the pipe reach the
-   file before the process ends (exit, host_exit), at most half a second. */
+   file before the process ends (host_end, exit, host_exit), at most half a second. */
 static int log_pipe[2] = {-1, -1};
 static FILE *log_file;
 static atomic_int log_busy;  /* the thread is between a read and its last line written */
@@ -872,7 +873,7 @@ static void log_start(const char *path, const char *mode)
     setvbuf(stdout, NULL, _IOLBF, 0);
     pthread_t thread;
     if (pthread_create(&thread, NULL, log_copy, NULL) == 0) pthread_detach(thread);
-    atexit(host_log_drain);
+    host_end_add(HOST_END_LOG, "log", host_log_drain);
 }
 #endif
 
@@ -1499,7 +1500,8 @@ static void presence_stop(void) { dhd_presence_stop(); }
 void host_service_presence(uint32_t a0)
 {
     static int running = -1;
-    if (running < 0 && (running = dhd_presence_start(getenv("DHD_DISCORD"), presence_log))) atexit(presence_stop);
+    if (running < 0 && (running = dhd_presence_start(getenv("DHD_DISCORD"), presence_log)))
+        host_end_add(HOST_END_DEVICES, "presence", presence_stop);
     if (!running) return;
     const HostPresence *p = GUEST(a0);
     char track[sizeof p->track + 1], room[sizeof p->room + 1];

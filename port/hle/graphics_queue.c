@@ -25,6 +25,7 @@ static inline void fp_set_control(unsigned v) { if (v != fp_control()) __asm__ v
 #endif
 #include "hle.h"
 #include "../gs/gs.h"
+#include "../host/host_end.h"
 #include "graphics_profile.h"
 
 #ifdef GRAPHICS_QUEUE_TEST
@@ -349,7 +350,7 @@ static void initialize(void)
 #endif
         hle_log("graphics: worker unavailable, using inline execution\n");
     } else {
-        atexit(graphics_shutdown);
+        host_end_add(HOST_END_WORKERS, "graphics queues", graphics_shutdown);
         hle_log("graphics: VIF1/GIF worker enabled\n");
     }
 }

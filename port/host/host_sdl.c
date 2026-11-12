@@ -11,6 +11,7 @@
    fp_mode.c, the generated imports_gen.c, port/hle/host.c). The module sees only host_api.h. */
 #include "host_api.h"
 #include "host_os.h"
+#include "host_end.h"
 #include "../hle/hle.h"
 #include "../include/guest.h"
 #include "../net/net.h"
@@ -407,7 +408,7 @@ static char disc_iso[1024], disc_cache[1024], disc_note[256];
 static uint8_t disc_digest[32];
 static int disc_answer;
 
-/* Set at exit: a hash still running stops at its next piece, writing nothing (finding 208). */
+/* Set at the end (host_end.h): a hash still running stops at its next piece, writing nothing (finding 208). */
 static int disc_stop;
 static void disc_stop_at_exit(void) { __atomic_store_n(&disc_stop, 1, __ATOMIC_RELAXED); }
 
@@ -431,7 +432,7 @@ int host_service_disc_check_start(uint32_t iso, uint32_t cache)
     snprintf(disc_iso, sizeof disc_iso, "%s", at);
     snprintf(disc_cache, sizeof disc_cache, "%s", cache_at);
     static int stop_registered;
-    if (!stop_registered++) atexit(disc_stop_at_exit);
+    if (!stop_registered++) host_end_add(HOST_END_WORKERS, "disc check", disc_stop_at_exit);
     if (!host_thread_detach(disc_run, NULL)) {
         SDL_SetAtomicInt(&disc_job, JOB_IDLE);
         return 0;

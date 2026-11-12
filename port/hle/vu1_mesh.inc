@@ -287,7 +287,7 @@ static int mesh_enabled(void)
             mesh.mode == MESH_SHADOW ? "shadow: the VU runs them too, for the exact Z probe" : "the VU skips them",
             mode ? "" : "; no mesh renderer: the items are dropped");
     if (mesh.gpu_clip) hle_log("native VU1: batches the VU would clip are drawn too, clipped by the GPU (:gpuclip)\n");
-    if (!reported++) atexit(mesh_report);
+    if (!reported++) host_end_add(HOST_END_REPORT, "native VU1 counters", mesh_report);
     return 1;
 }
 

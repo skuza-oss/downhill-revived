@@ -25,6 +25,7 @@
    renderer's missing render thread) or a value the platform cannot measure is n/a. */
 #include "perf_log.h"
 #include "../render/include/dhd_render_ext.h"   /* dhdr_perf_read */
+#include "../host/host_end.h"
 #include <SDL3/SDL_atomic.h>
 #include <math.h>
 #include <stdatomic.h>
@@ -424,7 +425,7 @@ void perf_presented(void)
         static int started;
         if (!started) {
             started = 1;
-            atexit(perf_exit);
+            host_end_add(HOST_END_REPORT, "perf summary", perf_exit);
             fputs("perf: a line every 30 s of race or menus with the window in front, and the whole session at "
                   "exit: frames shown, fps shown/requested, low1% = the slowest 1% of frames as fps, over = frames "
                   "longer than 1.2x the budget; per field, each thread's CPU ms / busy ms (not waiting), the "

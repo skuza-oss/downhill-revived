@@ -20,8 +20,10 @@
      newer release has an APK and says so over the game (android_update.c, finding 143). An APK is
      updated by installing the new one; nothing is downloaded here;
    - SDL hints: landscape only, the Back button kept from closing the game.
-   The game ends with exit() (the close of the activity, gs_pump_messages, on the game's thread);
-   SDL_main never returns to a second start in the same process. */
+   The game ends with host_end (the close of the activity, gs_pump_messages, on the game's thread:
+   the work threads and the render thread stop, then the process leaves without the C library's
+   exit handlers and static destructors, finding 210); SDL_main never returns to a second start in
+   the same process. */
 #include <SDL3/SDL.h>
 #include <android/log.h>
 #include <stdio.h>
@@ -30,6 +32,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "../render/include/dhd_settings.h"
+#include "host_end.h"
 
 #define TAG "DownhillRevived"
 #define DISC_NAME "SCUS-97177.iso"
@@ -182,7 +185,7 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
     snprintf(disc, sizeof disc, "%s" DISC_NAME, files);
     if (!disc_ready(disc)) {
         fprintf(stderr, "android: no disc image; the game ends\n");
-        exit(0);
+        host_end(0);
     }
     settings_start(disc);
     android_update_start(files);
@@ -190,5 +193,5 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
     (void)argc; (void)argv;
     int code = dhd_launcher_main(1, args);
     fprintf(stderr, "android: the game ended (%d)\n", code);
-    exit(code);
+    host_end(code);
 }

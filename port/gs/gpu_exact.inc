@@ -111,6 +111,7 @@ static int op_draw_skipped(const Gs *g);
    run twice on one adapter records the same bytes. When off, each op costs one branch. */
 #ifdef EXACT_OPTRACE
 #include <stdio.h>
+#include "../host/host_end.h"
 
 /* The header's adapter fields (OPTRACE.md), from the provider's op_adapter. */
 typedef struct {
@@ -216,7 +217,7 @@ static void trace_open(Exact *gpu)
     if (!t || !(t->file = fopen(name, "wb"))) trace_fail("cannot write the trace");
     setvbuf(t->file, NULL, _IOFBF, 1 << 20);
     t->fnv = 0xcbf29ce484222325ull;
-    if (!exit_handler) { exit_handler = 1; atexit(trace_exit); }
+    if (!exit_handler) { exit_handler = 1; host_end_add(HOST_END_REPORT, "op trace", trace_exit); }
     t->next = trace_list; trace_list = t;
 
     ExactAdapter a;

@@ -6,7 +6,8 @@
    the window, and SDL's documentation puts the video calls and the event queue on one thread),
    it pumps the events and sends them where they belong (the window, the keyboard, the text field,
    the controllers), and it runs the controllers' pass (gamepad.c) every 4 ms. The game ends the
-   process itself (exit, host_exit) or returns from its thread; main then returns its code.
+   process itself (host_end, host_exit) or returns from its thread; main then ends it the same
+   way (launcher.c, android_main.c).
 
    The game thread never waits on SDL's queue. It reads copies: the keyboard's keys
    (keyboard.c), the controllers' states (gamepad.c), and the window's size and close (present.c).
