@@ -48,8 +48,9 @@ static inline const char *hle_env(HleEnv *cache, const char *name)
 
 /* ---- host.c ---- */
 void host_init(void);         /* the crash report */
+/* port/host/host_threads.c (finding 217) */
 void host_thread_name(const char *name); /* names the calling OS thread for bench/profile reports */
-unsigned host_thread_cpu(const char **names, double *seconds, unsigned max); /* CPU time of each */
+unsigned host_thread_cpu(const char **names, double *seconds, unsigned max); /* CPU time of each; an ended one's is kept */
 void host_poll_dump(void);   /* optional watchdog request at a kernel boundary */
 void host_backtrace(void);    /* the same report, here */
 void host_settings_load(void); /* dhd.ini next to the exe into DHD_* variables (host.c) */

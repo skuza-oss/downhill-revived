@@ -129,12 +129,22 @@ def end_tests():
     assert kept.read_text() == 'kept'
 
 
+def thread_tests():
+    """The named threads' CPU times (port/host/host_threads.c, finding 217): an ended thread is
+    never asked by handle, its time is kept."""
+    exe = testprog.host('host-threads', [ROOT / 'port/host/host_threads.c', ROOT / 'port/host/test_host_threads.c'],
+                        sdl=True)
+    p = testprog.run(exe, quiet=True)
+    assert p.stdout.splitlines()[-1] == 'ok' and 'FAIL' not in p.stdout, p.stdout
+
+
 def host_tests():
     """The host's code: the GS, its captures, VU1 and the VIF, the graphics queue and the SDL
     devices. The GS renderer's own tests (test_gpu, test_depth, test_present) run on the Rust
     renderer: port/tools/test_gs_wgpu.py."""
     end_tests()
-    gs = [GS / 'memory.c', GS / 'gs.c']
+    thread_tests()
+    gs =[GS / 'memory.c', GS / 'gs.c']
     run = lambda name, sources, *args, env=None, **kw: testprog.run(testprog.host(name, sources, **kw), *args, env=env)
     run('gs', gs + [GS / 'display.c', GS / 'test_gs.c'], low=True)
     capture = testprog.host('capture', gs + [GS / 'display.c', GS / 'capture.c', GS / 'test_capture.c'], low=True)

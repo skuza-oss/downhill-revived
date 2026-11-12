@@ -36,9 +36,6 @@
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
-#ifdef __APPLE__
-#include <mach/mach.h>  /* thread_info: the bench's thread times */
-#endif
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
@@ -640,107 +637,7 @@ static int SDLCALL freeze_watch(void *unused)
     return 0;
 }
 
-/* The port's own OS threads by name (game, vu, gs, native, sound): the bench reports each one's
-   CPU time. */
-enum { NAMED_THREADS = 16 };
-#ifdef _WIN32
-static struct { const char *name; HANDLE handle; } named[NAMED_THREADS];
-#else
-static struct { const char *name; pthread_t handle; } named[NAMED_THREADS];
-#endif
-static atomic_int named_count;
-
-void host_thread_name(const char *name)
-{
-#ifdef _WIN32  /* the OS's name too, for debuggers and profilers */
-    WCHAR wide[64];
-    if (MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, 64)) SetThreadDescription(GetCurrentThread(), wide);
-#elif defined(__APPLE__)
-    pthread_setname_np(name);  /* the calling thread's own */
-#else
-    /* Linux and Android: the main thread's name is the process's own (ps, top, pgrep, a desktop's
-       system monitor), so that thread keeps "dhd" (a crash report then says thread dhd) */
-    if (gettid() != getpid()) pthread_setname_np(pthread_self(), name);
-#endif
-#ifdef __ANDROID__
-    { void android_perf_thread(const char *name); android_perf_thread(name); }  /* port/host/android_perf.c */
-#endif
-    { void perf_thread(const char *name); perf_thread(name); }  /* port/gs/perf_log.c: its waits */
-    int at = atomic_fetch_add(&named_count, 1);
-    if (at >= NAMED_THREADS) return;
-#ifdef _WIN32
-    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &named[at].handle, 0, FALSE,
-                    DUPLICATE_SAME_ACCESS);
-#else
-    named[at].handle = pthread_self();
-#endif
-    named[at].name = name;  /* published last: a reader skips a slot still being filled */
-}
-
-unsigned host_thread_cpu(const char **names, double *seconds, unsigned max)
-{
-    unsigned n = 0;
-    for (int i = 0; i < named_count && i < NAMED_THREADS && n < max; i++) {
-#ifdef _WIN32
-        FILETIME created, exited, kernel, user;
-        if (!named[i].name || !GetThreadTimes(named[i].handle, &created, &exited, &kernel, &user)) continue;
-        names[n] = named[i].name;
-        seconds[n++] = (((uint64_t)kernel.dwHighDateTime << 32 | kernel.dwLowDateTime) +
-                        ((uint64_t)user.dwHighDateTime << 32 | user.dwLowDateTime)) * 1e-7;
-#elif defined(__APPLE__)  /* no per-thread CPU clocks: Mach's thread times */
-        thread_basic_info_data_t info;
-        mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
-        if (!named[i].name || thread_info(pthread_mach_thread_np(named[i].handle), THREAD_BASIC_INFO,
-                                          (thread_info_t)&info, &count) != KERN_SUCCESS)
-            continue;
-        names[n] = named[i].name;
-        seconds[n++] = info.user_time.seconds + info.system_time.seconds +
-                       (info.user_time.microseconds + info.system_time.microseconds) / 1e6;
-#else
-        clockid_t id;
-        struct timespec t;
-        if (!named[i].name || pthread_getcpuclockid(named[i].handle, &id) != 0 ||
-            clock_gettime(id, &t) != 0)
-            continue;
-        names[n] = named[i].name;
-        seconds[n++] = (double)t.tv_sec + (double)t.tv_nsec / 1e9;
-#endif
-    }
-    return n;
-}
-
-/* Raw scheduled CPU cycles, complementary to GetThreadTimes (coarse on Windows). */
-unsigned host_thread_cycles(const char **names, uint64_t *cycles, unsigned max)
-{
-    unsigned n = 0;
-#ifdef _WIN32
-    for (int i = 0; i < named_count && i < NAMED_THREADS && n < max; i++) {
-        ULONG64 value;
-        if (!named[i].name || !QueryThreadCycleTime(named[i].handle, &value)) continue;
-        names[n] = named[i].name;
-        cycles[n++] = value;
-    }
-#else
-    (void)names; (void)cycles; (void)max;
-#endif
-    return n;
-}
-
-/* The calling thread's CPU time, and the whole process's, in seconds (the worker profiles and the
-   bench). */
-double host_current_thread_cpu(void)
-{
-#ifdef _WIN32
-    FILETIME created, exited, kernel, user;
-    if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) return 0;
-    return (((uint64_t)kernel.dwHighDateTime << 32 | kernel.dwLowDateTime) +
-            ((uint64_t)user.dwHighDateTime << 32 | user.dwLowDateTime)) * 1e-7;
-#else
-    struct timespec t;
-    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t)) return 0;
-    return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
-#endif
-}
+/* The named threads and their CPU times: port/host/host_threads.c (finding 217). */
 
 double host_process_cpu(void)
 {

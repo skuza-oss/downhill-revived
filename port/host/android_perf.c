@@ -43,7 +43,7 @@ static const char *const hot[] = {"game", "vu", "gs", "native"};
 enum { HOT = sizeof hot / sizeof hot[0] };
 static struct { int32_t tid; clockid_t clock; volatile int set; } threads[HOT];
 
-/* host_thread_name (port/hle/host.c), on the thread itself. */
+/* host_thread_name (port/host/host_threads.c), on the thread itself. */
 void android_perf_thread(const char *name)
 {
     for (int i = 0; i < HOT; i++) {
@@ -53,6 +53,15 @@ void android_perf_thread(const char *name)
             __atomic_store_n(&threads[i].set, 1, __ATOMIC_RELEASE);
         return;
     }
+}
+
+/* host_threads.c, on a named thread as it ends: its tid and clock are no longer asked (finding 217). */
+void android_perf_thread_ended(void)
+{
+    int32_t tid = gettid();
+    for (int i = 0; i < HOT; i++)
+        if (__atomic_load_n(&threads[i].set, __ATOMIC_ACQUIRE) && threads[i].tid == tid)
+            __atomic_store_n(&threads[i].set, 0, __ATOMIC_RELEASE);
 }
 
 static int64_t cpu_ns(clockid_t clock)
