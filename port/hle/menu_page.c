@@ -295,10 +295,17 @@ void menu_page_enable(MenuPage *p, int row, int enabled)
 void menu_page_dim(MenuPage *p, int row)
 {
     if (row < 0 || row >= menu_page_rows(p) || row >= MENU_PAGE_ROWS) return;
+    static char blank[MENU_PAGE_ROWS][MENU_PAGE_TEXT];
     Item *item = (Item *)((char *)p->menu + X_ITEMS) + row;
     item->enabled = 0;
     if (!p->dim[row]) p->dim[row] = item->string;
-    item->string = "";
+    /* spaces as wide as the text: the game sizes the rows' panel by its widest row, so the panel
+       keeps its width with every row dimmed */
+    MenuStyle s = menu_page_style(p, MENU_STYLE_ROW);
+    int want = p->dim[row] ? menu_text_width(p->dim[row], &s) : 0, n = 0;
+    blank[row][0] = 0;
+    while (n < MENU_PAGE_TEXT - 1 && menu_text_width(blank[row], &s) < want) blank[row][n++] = ' ', blank[row][n] = 0;
+    item->string = blank[row];
 }
 
 /* The dimmed rows, where the game would have drawn them, in the rows' style at half its colour. */
