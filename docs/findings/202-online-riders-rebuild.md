@@ -775,7 +775,36 @@ loaded PC).
   line now.
 - **The hitch's glide steps** (3-6 units where the catch-up glide starts and ends; "Host stops").
 - **The live-view clips** (`puppet_bench.py clip --live`, "Left (round 3)").
-- **A phone in a P2P room**, and a P2P room of six.
+- **A phone in a P2P room**: done once as a guest (below); a P2P room of six is still open.
+
+### A phone as the guest of a P2P room (2026-11-12, after the merge)
+
+On `main` dbddf61e (with finding 209), by finding 209's verifier: a release-signed APK on the Mi 11i
+(Android 13) joined by code a P2P room on the official server that a Windows game of the same main
+created on the hidden desktop (scripted rider, pedal only). Computer riders on, Mt. Midoule, Italy
+FR; the link direct inside the local network. The phone ran nine puppets (`puppets: 1 2 3 4 5 6 7
+8 9`): the host's rider and its eight computer riders on this game's physics.
+
+- Both games showed the same results (the PC's rider 9th in 6:22.36, the phone's 10th in 7:12.76,
+  the eight computer riders' times equal), the countdown at the room's moment on both (+0.2 and
+  +0.3 ms), no freeze, hold or fault line.
+- The phone's pictures at the start and after GO: the riders' wheels on the ground, none
+  underground, none left on the grid, the pack riding off. The phone's rider was last, so later
+  pictures have the others only far ahead; the screenshot tool takes 1-2 s a picture, too slow
+  for pairs half a second apart.
+- `perf: race` on the phone over 15 windows of 30 s: game thread 11.99 ms cpu a field, VU 9.95,
+  59.9 fps, 9.1 % of frames over 20 ms (5.1-12.3 %). The day before on the same phone, offline:
+  game 10.95, VU 6.15, 59.8 fps, 0.1 % over; online as the host with one remote rider: game 11.13,
+  VU 9.17, 9.4 % over. So nine physics puppets cost the game thread about 0.9 ms a field over the
+  one-puppet host and change little else: the share of slow frames is the online path's, not the
+  puppets'. The window with the track load had one frame of 4977 ms (the load, then the wait for
+  the PC to load).
+- `net:` lines: the host's rider's snapshot age p50 16-32 ms, p95 27-39, p99 31-63, no gap over
+  100 ms; the `online:` lines put every puppet within about 0.5 units of its snapshot at
+  5-13 ms age.
+- `puppet:` placements: 14, of them 10 respawns (4.7-77 units, all computer riders) and 4 "far"
+  (124-200 units), all four the PC's scripted rider, which rides pedal only and is reset to the
+  track often; 65 crash events (kinds 1, 2 and 10).
 - A rider reset to the track (no crash) was once first shown about 310 units off for 0.2 s.
 - A finished rider's puppet and the computer riders drift in the last 2 s before the race closes.
 - `online_race.py --bots` (the `log` name clash above).

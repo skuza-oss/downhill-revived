@@ -1,6 +1,6 @@
 # 209: Touch controls can skip the flight over the track
 
-Status: in progress
+Status: current
 
 Branch `fix/touch-skip-flyover` from `main` ad0135bd (0.7.16 plus findings 199-206), started
 2026-11-12. This file is the lane's plan while it runs and its finding when it merges.
@@ -25,6 +25,7 @@ the room's rules about when the flight may be skipped; a phone run (the lead's).
 - [x] fix and unit tests: SKIP button, `test_flyover` in `port/hle/test_touch.c`
 - [x] Windows captures, both presets (Decisions, "What was run")
 - [x] checks on 919e355e: `check.py port` OK (`test_touch: all passed`, including `test_flyover`), `check.py docs` OK, `python port/android/build_apk.py --wasm build/wasm/dhd_core.wasm` builds the debug APK (not installed)
+- [x] 2026-11-12, the lead's check on the merged `main` dbddf61e: `check.py port` OK; all seven state traces PASS; a release-signed APK on the Mi 11i, both presets, offline and online ("Checked on the merged main")
 
 ## Cause
 
@@ -128,6 +129,20 @@ hides the overlay, the touch that brings it back is not sent).
 
 ## Left for the lead
 
+Items 1, 2 (a phone as the guest of a P2P room) and 4 were done at the merge ("Checked on the
+merged main"). What is still open, for a later lane (taps there are the menus' mouse layer, not
+this button):
+
+- The attract demo on the title ("Press any button to exit") does not end on a tap, on the
+  picture or on its text; Android Back ends it.
+- The startup movies were not run: the phone's player has them off (`skip_movies`).
+- The results screens after an offline finish were not reached by tap (QUIT RACE in Single Event
+  goes straight to the title; an online finish goes back to the race room, whose rows take taps).
+- A replay: none can be reached without saving one (LOAD REPLAY says "Replay data not found").
+
+The lane's list as it was:
+
+
 1. A phone (Android, both presets): a race; the flight shows SKIP low in the middle; a tap skips
    to the countdown; a tap elsewhere does nothing; the race controls then show; no pause.
 2. Online (P2P room, phones or PC with `DHD_TOUCH_MOUSE=1`): the same, the room's countdown
@@ -141,10 +156,40 @@ hides the overlay, the touch that brings it back is not sent).
    code address was added in the table? No: no function whose address is taken was added (finding
    141's check 22 cause), so the code-pointer words do not move.
 
+## Checked on the merged main (2026-11-12)
+
+On `main` dbddf61e (9774eac3 and this lane), by the lead's verifier.
+
+- `python tools/check.py port -j 6`: OK (`test_touch: all passed`).
+- State traces: all seven recipes (`boot`, `race`, `race2` to `race6`) equal the format-2
+  references of 0.7.16's game code (made with the same `state_trace_codeptrs.txt` and
+  `state_trace_mask.txt`): 7 of 7 PASS.
+- A release-signed APK of this main (`build_apk.py --release`, no PGO profile; the release's
+  certificate, versionCode 716) installed over the release on the Mi 11i (Android 13), driven by
+  taps only, player defaults, Mt. Midoule, Italy FR:
+
+  | Moment | Classic pad | Thumb zones |
+  |---|---|---|
+  | The flight | SKIP low in the middle, nothing else of the overlay (the game's track title above) | the same, same place |
+  | A tap away from SKIP (upper left) | nothing: the flight goes on | nothing |
+  | A tap on SKIP | the countdown at once with Classic's pad; no pause panel; the race clock runs | the countdown with Thumb zones' controls and its first hint; no pause |
+  | The race after it | pedalling works (X held: 44 mph) | PEDAL held: 44 mph |
+  | No tap | the flight plays out (about 10 s at 60 fields a second), SKIP goes, the countdown shows the pad | not run |
+
+  Online, the phone as a guest in a P2P room hosted by a Windows game of the same main: the
+  flight showed the same SKIP, a tap went to the room's countdown, which started on both games
+  at the room's moment (+0.2 and +0.3 ms from it); the race ran to the finish with the same
+  results on both.
+- dhd.log on the phone: no `crash:` or fault line. There are no `touch:` lines around a skip in a
+  player's log: a tap is logged only with `DHD_TOUCH_LOG`, which a phone does not take.
+- RESTART RACE in the pause menu goes straight to the countdown (the game plays no flight there),
+  so the button is only seen after a track load.
+
 ## Result
 
-Not merged yet (the lead merges after the phone check). On `fix/touch-skip-flyover`: the flight over
-the track has a SKIP button in both presets that sends START (919e355e: `touch.c`, `touch_field.c`,
-`touch_host.c`, `host_api.h`; the test hook in `online.c`; `docs/PLAYING.md`, `docs/TESTING.md`).
-Windows runs at 20:9 and 4x show it in both presets; the checks are in Progress. At the merge:
-Status `current`, a `docs/STATE-LOG.md` entry, and the issue #89 answer (the lead's).
+Merged into `main` (dbddf61e). The flight over the track has a SKIP button in both presets that
+sends START (919e355e: `touch.c`, `touch_field.c`, `touch_host.c`, `host_api.h`; the test hook in
+`online.c`; `docs/PLAYING.md`, `docs/TESTING.md`). Windows runs at 20:9 and 4x and a phone, offline
+and as the guest of a P2P room, show it in both presets; nothing changes without touch (seven state
+traces equal). Open: the attract demo, the startup movies, the offline results screens and replays
+by tap ("Left for the lead"); the issue #89 answer is the lead's.
