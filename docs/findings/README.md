@@ -251,6 +251,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 219 | [three checks that passed when they should fail](219-check-tools-false-pass.md) | current |  |
 | 220 | [another game's snapshots checked before they are used](220-online-snapshot-checks.md) | current |  |
 | 221 | [score rules: the server's mode, one final per rider, a table that stands](221-score-rules.md) | current |  |
+| 222 | [a sound with no position (the crash on the rider screen after an online race)](222-sound-emitter-gone.md) | current |  |
 | 223 | [The pipeline worker's crash in wgpu-hal's DX12 `load_shader` (FXC blobs shared across t...](223-dx12-fxc-shader-cache-race.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

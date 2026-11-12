@@ -915,3 +915,5 @@ PATCHES['unsorted/0016C0C8.c'] = PATCHES.get('unsorted/0016C0C8.c', []) + [
      'extern void port_loop_frame(int);\nextern void hle_online_loop_frame(void);\n'
      'void func_0016C0C8(Obj *obj)\n{\n    port_loop_frame(1);\n    hle_online_loop_frame();'),
 ]
+import patches_sound  # the streamed sound slots: a positional sound with no emitter (finding 222)
+patches_sound.add(PATCHES)
