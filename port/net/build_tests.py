@@ -17,6 +17,8 @@ PROGRAMS = {  # name: (sources, libraries, run in the tests, SDL3)
     'test_update_check': (['json.c', 'update_check.c', 'test_update_check.c'], '', True, False),
     # the arena's scored round: its score event and table (port/hle/mosh_round.h, finding 204)
     'test_mosh_round': ([os.path.join('..', 'hle', 'test_mosh_round.c')], '', True, False),
+    # the race menu online: who is alone, the rows, the pad's gate (port/hle/race_menu.h, finding 215)
+    'test_race_menu': ([os.path.join('..', 'hle', 'test_race_menu.c')], '', True, False),
     'test_loopback': (CLIENT + ['test_loopback.c'], 'winmm.lib', True, True),
     'test_session': (CLIENT + ['test_session.c'], 'winmm.lib', True, True),
     'nettool': (CLIENT + ['net.c', 'nettool.c'], 'winmm.lib user32.lib ' + RUST, False, True),

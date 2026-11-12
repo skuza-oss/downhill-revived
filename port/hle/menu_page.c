@@ -198,6 +198,28 @@ void menu_page_run(MenuPage *p)
 }
 
 void menu_page_close(MenuPage *p) { (void)p; func_00190688(D_003F52D0); }
+
+/* The menus' styles where no page runs (online.c's race menu, drawn over a running race): a
+   SharedMenu constructed once and never run, whose UiStyles are every menu's. */
+MenuStyle menu_game_style(int which)
+{
+    static MenuPage styles;
+    if (!styles.constructed) {
+        memcpy(styles.vtable, D_00287218, sizeof styles.vtable);
+        func_0018D9D0(styles.menu);
+        MENU(&styles, X_VTABLE, uint32_t *) = styles.vtable;
+        styles.constructed = 1;
+    }
+    return menu_page_style(&styles, which);
+}
+
+/* The game's text of id (D_0029DE68, as func_0018D860 reads an item's): "" when there is none. */
+const char *menu_game_text(int id)
+{
+    const uint32_t *table = (const uint32_t *)(uintptr_t)*(const uint32_t *)D_0029DE68;
+    const char *text = id >= 0 && table ? (const char *)(uintptr_t)table[id] : NULL;
+    return text ? text : "";
+}
 void menu_page_cancel(MenuPage *p) { func_0018E468(p->menu); }
 void menu_page_rebuild(MenuPage *p) { menu_page_rebuild_at(p, 0); }
 void menu_page_rebuild_at(MenuPage *p, int row) { p->rebuild = 1, p->rebuild_row = row; }

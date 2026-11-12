@@ -100,6 +100,8 @@ enum { MENU_LEFT, MENU_CENTRE, MENU_RIGHT };
 #define GLYPH_SQUARE "\xA0"
 #define GLYPH_CIRCLE "\xAB"
 MenuStyle menu_page_style(const MenuPage *p, int which);
+MenuStyle menu_game_style(int which);  /* the same without a page (a menu drawn over a race) */
+const char *menu_game_text(int id);    /* the game's text of an id ("" none) */
 MenuStyle menu_style(MenuStyle s, int percent, int r, int g, int b);  /* sized; colour r < 0: kept */
 void menu_draw_size(int *width, int *height);  /* the popup view's size */
 void menu_draw_begin(void);            /* each frame, before the first box */
