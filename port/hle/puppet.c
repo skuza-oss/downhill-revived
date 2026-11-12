@@ -129,11 +129,12 @@ typedef struct Snapshot {
 _Static_assert(sizeof(Snapshot) == 888, "the recordings' record (port/tools/puppet_lag.py SNAP_SIZE)");
 
 enum { RING = 32, MAX_EVENTS = 16, NET_SLOTS = 10 };
-/* A rider's record in a STATE bundle (state_bundle.h, payload version 6, finding 169): its global
-   id (a human's lobby slot, an AI rider's slot), its race time in ms (finding 114), the body, the
-   checkpoints passed and the attack power-ups, then the changed pad words (six repeats each, a
-   full copy every PAD_REFRESH sends, finding 158). */
+/* A rider's record in a STATE bundle (state_bundle.h, payload version 8, findings 169, 202; its
+   bytes: puppet_record.h): its global id (a human's lobby slot, an AI rider's slot), its race time
+   in ms (finding 114), the body, the racing line, the checkpoints passed and the attack power-ups,
+   then the changed pad words (six repeats each, a full copy every PAD_REFRESH sends, finding 158). */
 #include "state_bundle.h"
+#include "puppet_record.h"
 #include "puppet_sync.h"
 #include "puppet_link.h"
 enum { EVENT_VERSION = 2, EVENT_HIT = 1 };  /* a hit: online.c's EVENT version */
@@ -1120,84 +1121,68 @@ void hle_puppet_start_point(uint8_t *race, uint8_t *r)
     *index = want;
 }
 
-static uint8_t *put(uint8_t *o, const void *v, size_t n) { memcpy(o, v, n); return o + n; }
-
-/* One rider's record for a STATE bundle (state_bundle.h), for an owned slot: rider (global id),
-   race time (ms), body, power (and 12 reserved bytes), contacts, State, crash, checkpoints passed, attack kind, bottles,
-   then repeated pad changes (six sends) with a full refresh every 30 sends. Last tick's actions
-   do not travel; the full refresh bounds recovery after longer loss bursts. 0: not owned. */
+/* One rider's record for a STATE bundle (state_bundle.h, puppet_record.h), for an owned slot: rider
+   (global id), race time (ms), body, power (and 8 reserved bytes), the racing line, contacts,
+   State, crash, checkpoints passed, attack kind, bottles, then repeated pad changes (six sends)
+   with a full refresh every 30 sends. Last tick's actions do not travel; the full refresh bounds
+   recovery after longer loss bursts. 0: not owned. */
 int hle_puppet_pack(int slot, uint8_t *out, int max)
 {
     if (!pp.online || slot < 0 || slot >= hle_online_race_riders() || !owned(slot) || !RACING || max < STATE_RECORD_MAX) return 0;
     Snapshot s;
     take(&s, rider(slot));
-    uint8_t *o = out;
-    uint16_t state = (uint16_t)s.state;
-    int32_t ms = (int32_t)floor(s.time * 1000 + 0.5);
-    *o++ = (uint8_t)to_global(slot);
-    o = put(o, &ms, 4);
-    o = put(o, s.pos, 12);
-    for (int k = 0; k < 3; k++) o = put(o, s.rot[k], 12);
-    o = put(o, s.vel, 12);
-    o = put(o, s.spin, 12);
-    o = put(o, &s.power, 4);
-    o = put(o, &s.turning, 4);
-    o = put(o, s.reserved, 8);
-    o = put(o, &s.node, 2);
-    o = put(o, &s.next, 2);
-    o = put(o, s.target, 12);
-    o = put(o, s.after, 12);
-    o = put(o, s.offset, 8);
-    o = put(o, s.offset_to, 8);
-    *o++ = s.contact[0], *o++ = s.contact[1];
-    o = put(o, &state, 2);
-    *o++ = s.crash, *o++ = s.crash_kind;
-    *o++ = s.checkpoint;
-    *o++ = s.attack, *o++ = s.bottles;
+    PuppetRecord r;
+    memset(&r, 0, sizeof r);
+    r.rider = (uint8_t)to_global(slot);
+    r.ms = (int32_t)floor(s.time * 1000 + 0.5);
+    memcpy(r.pos, s.pos, 12);
+    for (int k = 0; k < 3; k++) memcpy(r.rot[k], s.rot[k], 12);
+    memcpy(r.vel, s.vel, 12);
+    memcpy(r.spin, s.spin, 12);
+    r.power = s.power, r.turning = s.turning;
+    r.node = s.node, r.next = s.next;
+    memcpy(r.target, s.target, 12);
+    memcpy(r.after, s.after, 12);
+    memcpy(r.offset, s.offset, 8);
+    memcpy(r.offset_to, s.offset_to, 8);
+    r.contact[0] = s.contact[0], r.contact[1] = s.contact[1];
+    r.state = (uint16_t)s.state;
+    r.crash = s.crash, r.crash_kind = s.crash_kind, r.checkpoint = s.checkpoint, r.attack = s.attack, r.bottles = s.bottles;
+    uint8_t *o = puppet_record_write(&r, out);
     o += pad_snapshot_pack(&pp.p[slot].sent_pad, s.pad, o);
     return (int)(o - out);
 }
-
-static const uint8_t *get(const uint8_t *in, void *v, size_t n) { memcpy(v, in, n); return in + n; }
 
 /* One rider's record (its size checked) from the PC in lobby slot sender, showing server time
    stamp (ms). */
 static void receive_record(int sender, const uint8_t *in, int n, double stamp)
 {
-    int slot = to_local(in[0]);
+    PuppetRecord r;
+    if (!puppet_record_read(in, n, &r)) return;
+    int slot = to_local(r.rider);
     if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
     Puppet *p = &pp.p[slot];
-    const uint8_t *i = in + 1, *end = in + n;
-    uint16_t state;
-    int32_t ms;
     Snapshot s;
     memset(&s, 0, sizeof s);
-    i = get(i, &ms, 4);
-    s.clock = ms;  /* the sender's race time (ms), for the trace */
-    s.race = ms / 1000.0f;
+    s.clock = r.ms;  /* the sender's race time (ms), for the trace */
+    s.race = r.ms / 1000.0f;
     s.time = (stamp - pp.go_server) / 1000 - hle_puppet_clock_excess();
     /* Reject stale unordered packets before touching the pad mirror. */
     if (p->count && s.time <= p->ring[p->count - 1].time) return;
-    i = get(i, s.pos, 12);
-    for (int k = 0; k < 3; k++) i = get(i, s.rot[k], 12);
-    i = get(i, s.vel, 12);
-    i = get(i, s.spin, 12);
-    i = get(i, &s.power, 4);
-    i = get(i, &s.turning, 4);
-    i += 8;  /* reserved */
-    i = get(i, &s.node, 2);
-    i = get(i, &s.next, 2);
-    i = get(i, s.target, 12);
-    i = get(i, s.after, 12);
-    i = get(i, s.offset, 8);
-    i = get(i, s.offset_to, 8);
-    s.contact[0] = *i++, s.contact[1] = *i++;
-    i = get(i, &state, 2);
-    s.state = state;
-    s.crash = *i++, s.crash_kind = *i++;
-    s.checkpoint = *i++;
-    s.attack = *i++, s.bottles = *i++;
-    if (!pad_snapshot_apply(p->mirror, i, (int)(end - i))) return;
+    memcpy(s.pos, r.pos, 12);
+    for (int k = 0; k < 3; k++) memcpy(s.rot[k], r.rot[k], 12);
+    memcpy(s.vel, r.vel, 12);
+    memcpy(s.spin, r.spin, 12);
+    s.power = r.power, s.turning = r.turning;
+    s.node = r.node, s.next = r.next;
+    memcpy(s.target, r.target, 12);
+    memcpy(s.after, r.after, 12);
+    memcpy(s.offset, r.offset, 8);
+    memcpy(s.offset_to, r.offset_to, 8);
+    s.contact[0] = r.contact[0], s.contact[1] = r.contact[1];
+    s.state = r.state;
+    s.crash = r.crash, s.crash_kind = r.crash_kind, s.checkpoint = r.checkpoint, s.attack = r.attack, s.bottles = r.bottles;
+    if (!pad_snapshot_apply(p->mirror, r.pad, r.pad_size)) return;
     memcpy(s.pad, p->mirror, sizeof s.pad);
     feed(slot, &s);
 }
@@ -1272,7 +1257,7 @@ int hle_puppet_hit(uint8_t *self, int kind, void *direction, uint8_t *other)
         *o++ = (uint8_t)to_global(victim);
         *o++ = (uint8_t)to_global(attacker);
         *o++ = (uint8_t)kind;
-        o = put(o, direction, 12);
+        o = puppet_put(o, direction, 12);
         pp.event_size[pp.nevents++] = (int)(o - e);
     }
     race_sync_hit();

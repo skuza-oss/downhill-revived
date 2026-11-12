@@ -98,6 +98,7 @@ def guest_tests():
     run('disc-notice', [HLE / 'test_disc_notice.c'])  # a changed disc image's notice, once per image (finding 208)
     run('puppet-sync', [HLE / 'test_puppet_sync.c'])  # puppets steered by their snapshots (finding 202)
     run('puppet-link', [HLE / 'test_puppet_link.c'])  # the test link: loss, delay, outages, hitches (finding 202)
+    run('puppet-record', [HLE / 'test_puppet_record.c'])  # another game's records checked before use (finding 220)
     run('timer', [HLE / 'timer.c', HLE / 'test_timer.c'])
     run('sound', [HLE / 'sound.c', HLE / 'test_sound.c'], defines=['SND_NO_HOST'])
 
