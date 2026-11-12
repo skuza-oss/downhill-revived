@@ -238,6 +238,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 205 | [a state trace that does not depend on the core's layout](205-state-trace-core-layout.md) | current |  |
 | 206 | [the online test tools drive their riders; the room card's state beside its tags](206-online-test-riders-room-card.md) | current |  |
 | 207 | [Posters in OPTIONS closes the game (issue 87)](207-posters-crash.md) | in progress |  |
+| 213 | [stack locals that the EE frame makes one object (the class of 094 and 207)](213-stack-overrun-sweep.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
