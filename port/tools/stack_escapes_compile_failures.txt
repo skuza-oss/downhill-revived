@@ -1,0 +1,6 @@
+# port/tools/stack_escapes.py: units the matching compiler cannot build with -gstabs (finding 219).
+# One line each: UNIT REASON (the unit as under src/, then why it cannot be built)
+# A unit that does not compile is not analysed, so `--check` fails on every unit missing here, and on
+# every unit listed here that compiles now (delete the line then): the list cannot rot, and a unit
+# cannot drop out of the analysis unseen. Report-only runs still just warn.
+# Today every unit under src/ compiles (3815 of 3815): the list is empty.

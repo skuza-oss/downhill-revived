@@ -26,7 +26,10 @@ Only C functions matter (the recompiled asm functions keep their EE frame on the
 
 usage: python port/tools/stack_escapes.py [--jobs N] [--report FILE] [--check] [--json FILE]
        [--function NAME ...]
---check fails (exit 1) on a candidate that port/tools/stack_escapes_reviewed.txt doesn't list.
+--check fails (exit 1) on a candidate that port/tools/stack_escapes_reviewed.txt doesn't list, and on a
+unit the matching compiler cannot build with -gstabs (a unit that is not compiled is not analysed) unless
+port/tools/stack_escapes_compile_failures.txt lists it with the reason; a listed unit that compiles fails
+too. Report-only runs warn about both.
 """
 import argparse, collections, glob, hashlib, json, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
@@ -36,6 +39,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 CACHE = os.path.join(ROOT, 'build', 'stack_escapes')
 REVIEWED = os.path.join(HERE, 'stack_escapes_reviewed.txt')
+COMPILE_FAILURES = os.path.join(HERE, 'stack_escapes_compile_failures.txt')
 TOOL_VERSION = b'stack-escapes 1\n'
 
 GPR_NAMES = ['zero', 'at', 'v0', 'v1', 'a0', 'a1', 'a2', 'a3', 't0', 't1', 't2', 't3', 't4', 't5', 't6',
@@ -1086,6 +1090,47 @@ def check_fixed(reviewed):
     return bad
 
 
+def load_compile_failures():
+    """{unit: (reason, line)}: the units whose retail text the matching compiler cannot build with -gstabs."""
+    out = {}
+    if not os.path.exists(COMPILE_FAILURES):
+        return out
+    for n, line in enumerate(open(COMPILE_FAILURES, encoding='utf-8'), 1):
+        line = line.split('#', 1)[0].strip()
+        if line:
+            unit, _, reason = line.partition(' ')
+            if not reason.strip():
+                sys.exit('%s:%d: UNIT REASON' % (COMPILE_FAILURES, n))
+            out[unit] = (reason.strip(), n)
+    return out
+
+
+def check_compile_failures(failed, expected, check):
+    """A unit that does not compile is not analysed. In --check that fails unless the unit is listed
+    with its reason, and a listed unit that compiles now fails too (the list cannot rot). Returns the
+    number of errors."""
+    bad = 0
+    where = 'port/tools/stack_escapes_compile_failures.txt'
+    broken = {r for r, e in failed}
+    for r, e in failed:
+        if r in expected:
+            continue
+        if check:
+            print('ERROR src/%s: the matching compiler failed with -gstabs, so the unit is not analysed '
+                  '(fix the unit, or list it with the reason in %s): %s'
+                  % (r, where, e.splitlines()[-1] if e else ''))
+            bad += 1
+        else:
+            print('WARN src/%s: the matching compiler failed with -gstabs: %s' % (r, e.splitlines()[-1] if e else ''))
+    if check:
+        for unit, (reason, n) in sorted(expected.items()):
+            if unit not in broken:
+                print('ERROR %s:%d: %s is listed as not compiling, but it compiles (or is gone): remove the line'
+                      % (where, n, unit))
+                bad += 1
+    return bad
+
+
 def load_reviewed():
     out = {}
     if not os.path.exists(REVIEWED):
@@ -1111,8 +1156,7 @@ def main():
     a = ap.parse_args()
     funcs, summ, raw, failed, rounds = run(a.jobs)
     rows = classify(funcs, summ, raw) + format_rows(funcs)
-    for r, e in failed:
-        print('WARN src/%s: the matching compiler failed with -gstabs: %s' % (r, e.splitlines()[-1] if e else ''))
+    bad = check_compile_failures(failed, load_compile_failures(), a.check)
     cfuncs = [f for f in funcs.values() if f.kind == 'c']
     counts = collections.Counter(r['verdict'] for r in rows)
     with_locals = {r['function'] for r in rows}
@@ -1133,7 +1177,6 @@ def main():
     if a.json:
         json.dump(rows, open(a.json, 'w'), indent=1)
     reviewed = load_reviewed()
-    bad = 0
     if a.report or a.check:
         lines = []
         for r in rows:
@@ -1158,7 +1201,7 @@ def main():
                     fh.write(('[%s] ' % rv[0] if rv else '[new] ') + line + '\n')
     if a.check:
         bad += check_fixed(reviewed)
-        print('stack_escapes: %d unreviewed overrun candidate(s)' % bad)
+        print('stack_escapes: %d problem(s): unreviewed overrun candidates, units that do not compile' % bad)
         sys.exit(1 if bad else 0)
 
 
