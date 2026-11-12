@@ -184,6 +184,8 @@ Menus and riding:
 | `DHD_TOUCH_WITH_SCRIPT=1` | the touch controls' buttons are merged into player 1's pad also when `DHD_NAV` / `DHD_AUTOPAD*` drive it, so a `DHD_NAV` route can end at a screen and touches (`DHD_TOUCH_MOUSE=1`) take it from there (finding 209) |
 | `DHD_TOUCH_SCRIPT` | the touch controls' fingers by the race clock while the race HUD shows, `S:down\|move\|up:ID:X:Y;...` (S race seconds, X and Y in mm of the touch screen): the same events a screen gives, so a thumb can be held, dragged and two fingers can touch at once, which posted mouse messages on a hidden desktop can't (finding 214); needs `DHD_TOUCH_MOUSE=1` |
 | `DHD_TEST_ATTRACT_AFTER=S` | the title's attract demo starts after S seconds idle (under 60) instead of the game's minute (finding 218) |
+| `DHD_TEST_SOUND_EVENT=N` | the chance roll of the game's sound event N (SKAT, `func_002337C0`) always passes; the roll itself still happens (finding 222) |
+| `DHD_TEST_SHELL_VOICE=R` | the front end's start asks its rider chatter for rider R instead of the rider screen's empty place 0, so a line binds; with `DHD_TEST_SOUND_EVENT=26` every front-end start plays a positional sound with no position, the crash of finding 222 before its fix (`state_trace_run.py boot --env ...`: field 146) |
 | `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...`; does nothing without `DHD_RACE_SYNC=1` and a menu script (below) |
 | `DHD_RACE_SYNC=1` | race scripts run on the race clock; without it `DHD_RACE_PAD` gives the rider no input (online tools: `online_riders.rider_env`, finding 206) |
 | `DHD_KEYS` | (race clock) keys through the keyboard's layout, `start:length:key[+key],...` with dhd.ini's key names (`space`, `j`, `kp1`, ...) or `esc` |
