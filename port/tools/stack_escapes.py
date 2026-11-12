@@ -70,6 +70,7 @@ COPY = {'func_00254204': (0, 2), 'memcpy': (0, 2), 'memmove': (0, 2), 'memset': 
 STRING = {'strcpy': 0, 'strcat': 0, 'strncat': 0, 'sprintf': 0, 'vsprintf': 0, 'func_00254D68': 0, 'func_00254DE8': 0,
           'func_002542C4': 0, 'func_00254544': 0}
 UNBOUNDED = 1 << 30
+RETURNS = {}  # function -> (argument, offset, walks): it returns that argument + offset
 
 
 # ---- compiling the units with stabs -----------------------------------------------------------
@@ -547,6 +548,8 @@ def run_block(insns, st, en, regs, slots, records):
             key = (cur[0], kind, a[1])
         elif kind == 'access':
             key = (cur[0], kind, a[0], a[3])
+        elif kind in ('ret', 'derived'):
+            key = (cur[0], kind)
         else:
             key = (cur[0], kind)
         records[key] = (kind,) + a
@@ -567,6 +570,11 @@ def run_block(insns, st, en, regs, slots, records):
         for r in list(regs):
             if r not in CALLEE_SAVED and r not in (0, 'prologue'):
                 del regs[r]
+        ret = RETURNS.get(target)  # a callee that returns a pointer into an argument (p + 0x1C)
+        if ret and args[ret[0]] is not None and args[ret[0]][0] in ('sp', 'arg'):
+            regs[2] = add(args[ret[0]], ret[1], ret[2])
+            if args[ret[0]][0] == 'sp':
+                record('derived', target, args[ret[0]][1], ret[1])
 
     i = st
     while i < en:
@@ -585,6 +593,8 @@ def run_block(insns, st, en, regs, slots, records):
             if noreorder and i < en:
                 step(insns[i], regs, slots, val, setr, add, access, record)
                 i += 1
+            if mn == 'jr' and ops and ops[0] in ('$31', '$ra'):
+                record('ret', regs.get(2))
             if mn == 'jalr':
                 call('<indirect>', True)
             continue
@@ -736,7 +746,16 @@ def run(jobs=6, only=None):
     summ = collections.defaultdict(lambda: collections.defaultdict(Summary))
     edges = collections.defaultdict(list)  # (callee, j) -> [(caller, k, c, var)]
     raw_escapes = []
+    derived = []  # (function, $sp offset, callee, c): the callee returned that local's address + c
 
+    # what each function returns, when it is always argument k + c (first pass; one level of such
+    # callees is followed by the second)
+    RETURNS.clear()
+    for f in funcs.values():
+        rets = []
+        analyse(f, None, lambda kind, *a: rets.append(a[0]) if kind == 'ret' else None)
+        if rets and all(r is not None and r[0] == 'arg' and r[1:] == rets[0][1:] for r in rets):
+            RETURNS[f.name] = (rets[0][1], rets[0][2], rets[0][3])
     for f in funcs.values():
         def record(kind, *a, f=f):
             if kind == 'access':
@@ -748,6 +767,9 @@ def run(jobs=6, only=None):
                     s.r = widen(s.r, lo, lo + size)
                 if var:
                     s.flags.add('walk-w' if write else 'walk-r')
+            elif kind == 'derived' and f.kind == 'c':
+                target, off, c = a
+                derived.append((f.name, off, target, c))
             elif kind == 'stored':
                 v = a[0]
                 if v[0] == 'arg':
@@ -801,6 +823,9 @@ def run(jobs=6, only=None):
                     grew[(caller, k)] += 1
                     if grew[(caller, k)] > 12:  # a recursion that moves the pointer each call: open-ended
                         s.flags.add('recursive')
+    for name, off, target, c in derived:
+        # the returned pointer as an escape of its own: a local whose address + c leaves it
+        raw_escapes.append((name, off, target, 0, False, ('derived', c), False))
     return funcs, summ, raw_escapes, failed, rounds
 
 
@@ -865,6 +890,18 @@ def classify(funcs, summ, raw_escapes):
             continue
         inner = off - loc[1]
         flags, w, r = set(), None, None
+        if isinstance(consts, tuple) and consts[0] == 'derived':
+            c = consts[1]
+            row['write'] = row['read'] = None
+            row['flags'] = ['derived']
+            if not 0 <= inner + c < loc[2]:
+                row['verdict'] = 'overrun-write'
+                row['write'] = (inner + c, inner + c + 4)
+                row['after'] = after(f, loc[1] + loc[2], loc[0])
+            else:
+                row['verdict'] = 'fits'
+            rows.append(row)
+            continue
         if target == '<stored>':
             flags.add('stored')
         elif indirect:

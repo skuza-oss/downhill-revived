@@ -53,3 +53,12 @@ def add(PATCHES):
     patch('unsorted/001AE358.cpp',
           (' Vec a,b,c,d,e; char unused[16]; Vec matrix[4];',
            ' Vec a,b; Vec rows[4]; Vec &c=rows[0],&d=rows[1],&e=rows[2]; Vec matrix[4];'))
+
+    # func_00261718 returns its argument + 0x1C. func_00124B40's setRadius(&first, 0.25f) writes
+    # through it: on the EE first@0x10 and second@0x20, so the 0.25 goes to second.w, and
+    # func_002362E8 reads it back as pos[7] of the pair it is given (&first). In the port the write
+    # landed 12 bytes past first, on whatever clang put there, and pos[7] was read from there too.
+    # The pair, in order:
+    patch('unsorted/00124B40.cpp',
+          ('    Vec first __attribute__((aligned(16))), second __attribute__((aligned(16)));',
+           '    Vec pair[2] __attribute__((aligned(16))); Vec &first = pair[0], &second = pair[1];'))

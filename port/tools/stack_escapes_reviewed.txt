@@ -50,3 +50,4 @@ func_00150C58 handle func_002038E0 fixed unsorted/001508D8.cpp: reads the Animat
 func_001C7FC8 name strncmp safe strncmp stops at the NUL
 func_001C9378 name strncmp safe strncmp stops at the NUL
 func_001CFB60 name strncmp safe strncmp stops at the NUL
+func_00124B40 first func_00261718 fixed unsorted/00124B40.cpp: first and second are one pair; setRadius writes second.w (finding 213)
