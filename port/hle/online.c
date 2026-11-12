@@ -604,6 +604,7 @@ static void put32(uint8_t *o, int32_t v) { memcpy(o, &v, 4); }
 static int32_t get32(const uint8_t *i) { int32_t v; memcpy(&v, i, 4); return v; }
 
 #include "online_start.h"
+#include "online_end.h"
 
 /* Pickup pool: retail allocates 150 entries in level-file order (001961D8).
    Only the index travels, never a pointer. Type, track and exact spawn xyz guard it. */
@@ -1655,10 +1656,18 @@ static void state_sync(void)
         const NetMember *me = self_member(&lobby);
         int out = lobby.state != NET_RACING || !me || !me->in_race;
         if (!on.leave_at && out) {
-            if (!on.leave_reason)  /* one the start gave stays (start_step) */
-                on.leave_reason = FINISHED(0) ? "RACE OVER" : lobby.last_race_id != on.last_race_id
-                                  ? "TIME UP - DNF" : "THE HOST ENDED THE RACE";
-            fprintf(stderr, "online: race closed: back to the room\n");
+            if (!on.leave_reason) {  /* one the start gave stays (start_step) */
+                RaceEnd end = {.ended = lobby.ended, .is_host = lobby.is_host,
+                               .link_lost = lobby.offline || lobby.state == NET_FAILED || lobby.state == NET_IDLE ||
+                                            lobby.state == NET_RECONNECTING,
+                               .removed = !strcmp(lobby.error_code, "kicked"), .finished = FINISHED(0),
+                               .own_dnf = me ? me->dnf_reason : "", .new_result = lobby.last_race_id != on.last_race_id};
+                on.leave_reason = race_end_reason(&end);
+                fprintf(stderr, "online: race closed: back to the room (%s: ended %d, host %d, link %d, own %s/%s, "
+                        "result %d)\n", on.leave_reason, end.ended, end.is_host, end.link_lost, me ? me->race_state : "-",
+                        end.own_dnf, end.new_result);
+            } else
+                fprintf(stderr, "online: race closed: back to the room\n");
             on.leave_at = now + 2;
         }
         watch_step(&lobby);

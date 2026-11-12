@@ -27,7 +27,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
   let base = 'wss://dhd.skuza.app', name = '', version = '', iso = '', ws;
   // goAt: the race's start moment from the room (race_go, finding 187); serverGo: the room takes ours.
   // serverScore: the room ranks a round by score (finding 204).
-  let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {}, p2p = false, goAt = 0, serverGo = false, serverScore = false;
+  let room = {}, start = {}, member = -1, state = 0, seq = 0, offset = 0, welcome = {}, where = {}, p2p = false, goAt = 0, serverGo = false, serverScore = false, ended = 0;
   let frames = [], timer;
   let error = '', errorCode = '';
   const send = m => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)); };
@@ -56,10 +56,10 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
         serverGo=(m.features||[]).includes('race_go');serverScore=(m.features||[]).includes('score');}
       if(m.type==='where') where=m;  // the room's region and the members' regions (finding 135)
       if(m.type==='room') {room=m;if(!me()?.inRace && m.phase)state=2;}
-      if(m.type==='start') {start=m;state=3;frames=[];goAt=0;}
+      if(m.type==='start') {start=m;state=3;frames=[];goAt=0;ended=0;}
       if(m.type==='race_go' && state===3 && !goAt && m.race===start.startAt && m.at>0) goAt=m.at;
       if(m.type==='left' && start.players?.[m.slot])start.players[m.slot].left=1;
-      if(m.type==='ended') {state=2;frames=[];}
+      if(m.type==='ended') {state=2;frames=[];ended=m.reason==='void'?2:m.reason==='done'?1:3;}  // NET_ENDED_* (finding 211)
       if(m.type==='error') {error=m.message;errorCode=m.code;}
       seq++;
     };
@@ -95,7 +95,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
       finish_window:rules.finishWindow??60,next_race:rules.nextRace==='host',then:rules.then==='same'?0:rules.then==='random'?2:1,
       rotation_count:room.rotation?.length||0,last_race_id:room.lastRace?.id||0,last_race_track:room.lastRace?.track||0,nresults:results.length,
       edge_colo:welcome.edgeColo||'',country:welcome.country||'',continent:welcome.continent||'',
-      room_colo:where.colo??welcome.roomColo??'',room_region:where.region??welcome.roomRegion??'',server_scores:serverScore});
+      room_colo:where.colo??welcome.roomColo??'',room_region:where.region??welcome.roomRegion??'',server_scores:serverScore,ended});
     members.slice(0,10).forEach((m,i)=>write('NetMember',a+layout.NetLobby.member[0]+i*layout.NetMember.size,
       {...m,rtt_ms:m.rttMs??-1,in_race:!!m.inRace,race_state:m.raceState||'',dnf_reason:m.dnfReason||'',finish_ticks:BigInt(m.finishTicks??-1),
         region:where.members?.find(x=>x.id===m.id)?.region||''}));

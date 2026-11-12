@@ -94,7 +94,9 @@ int main(void)
         client_on_text(&c,other,strlen(other)); client_lobby(&c,&l); assert(l.race_go_at == 0);
         client_on_text(&c,go,strlen(go)); client_on_text(&c,again,strlen(again));
         client_lobby(&c,&l); assert(l.race_go_at == 9500.5);
+        assert(l.ended == NET_ENDED_NONE);
         client_on_text(&c,"{\"type\":\"ended\"}",16); client_lobby(&c,&l); assert(l.race_go_at == 0);
+        assert(l.ended == NET_ENDED_UNKNOWN);  /* an older server: no reason (finding 211) */
         sent[0] = 0; client_race_go(&c,9500); assert(!sent[0]);  /* no race */
         /* the race's last seconds on screen: its frames still go (finding 202 round 4), not after back */
         {
@@ -104,6 +106,15 @@ int main(void)
             assert(!client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
         }
         client_on_text(&c,start,strlen(start)); client_lobby(&c,&l); assert(l.race_go_at == 0);
+        /* the reason is kept from the message itself: the room snapshot with the result comes after
+           it, and the state is the lobby's already (finding 211) */
+        const char *done = "{\"type\":\"ended\",\"reason\":\"done\"}", *voided = "{\"type\":\"ended\",\"reason\":\"void\"}";
+        assert(l.ended == NET_ENDED_NONE && l.state == NET_RACING);
+        client_on_text(&c,done,strlen(done)); client_lobby(&c,&l);
+        assert(l.ended == NET_ENDED_DONE && l.state == NET_LOBBY && l.last_race_id == 0);
+        client_on_text(&c,start,strlen(start)); client_lobby(&c,&l); assert(l.ended == NET_ENDED_NONE);
+        client_on_text(&c,voided,strlen(voided)); client_lobby(&c,&l);
+        assert(l.ended == NET_ENDED_VOID && l.state == NET_LOBBY);
         client_free(&c);
     }
     {   /* where this PC and the room are (finding 135): the welcome's fields, the where message's

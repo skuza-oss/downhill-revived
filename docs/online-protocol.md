@@ -236,7 +236,11 @@ use the same `error` frame **without** a close; the client just shows `message`.
 {"type":"left","slot":1,"memberId":2,"reason":"left"}   // or "finished", "gave_up", "time_up"
 // (Finishes and return, below)
 
-// The race is over: "done" when every racer finished or is out, "void" when the host ended it.
+// The race is over: "done" when every racer finished or is out (the finish window running out
+// puts the rest out as DNF time_up first), "void" when the host ended it. The game shows why a race
+// closed from this reason (finding 211); it comes before the room snapshot that carries the
+// result, so a client must not read "no new lastRace yet" as "voided". A server too old to send a
+// reason is shown as "THE RACE ENDED", never as the host's doing.
 {"type":"ended","reason":"done"}
 
 // The race's start moment (finding 187), to racers whose hello listed "race_go" (Client → server).

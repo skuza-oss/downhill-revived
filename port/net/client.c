@@ -319,6 +319,7 @@ static void read_start(NetClient *c, const char *t)
     memset(c->snapshot, 0, sizeof c->snapshot);
     c->states_sent = 0;
     l->race_go_at = 0;
+    l->ended = NET_ENDED_NONE;
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -663,6 +664,9 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             changed(c);
         }
     } else if (!strcmp(type, "ended")) {
+        char why[16] = "";
+        json_string(text, "reason", why, sizeof why);
+        c->lobby.ended = !strcmp(why, "void") ? NET_ENDED_VOID : !strcmp(why, "done") ? NET_ENDED_DONE : NET_ENDED_UNKNOWN;
         if (c->racing) c->race_frames_until = net_now_ms() + RACE_FRAMES_AFTER_MS;
         c->racing = 0;
         c->lobby.race_go_at = 0;
