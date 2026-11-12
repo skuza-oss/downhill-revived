@@ -271,17 +271,22 @@ static void log_iso(const char *how, const char *note)
                 *note ? ": " : "", note, iso_hash, us_files_sha256, how);
 }
 
-/* iso-check.txt, the check's cache (dhd_disc, shared with the launcher). */
-static void iso_check_path(char *out, size_t size)
+/* A file of the player's data folder: the launcher's (DHD_DATA_DIR), else the game's own folder
+   (on Android the app's files folder, host_exe_path). iso-check.txt, the check's cache (dhd_disc,
+   shared with the launcher), and disc-notice.txt (disc_notice.c) live there. */
+void disc_data_path(char *out, size_t size, const char *name)
 {
     const char *data = host_getenv("DHD_DATA_DIR");  /* the launcher's folder for the player's files */
-    if (data) { snprintf(out, size, "%s/iso-check.txt", data); return; }
+    if (data) { snprintf(out, size, "%s/%s", data, name); return; }
     char exe[HOST_PATH_MAX];
     host_exe_path(exe, sizeof exe);
-    char *slash = strrchr(exe, '\\');
+    char *slash = strrchr(exe, '\\'), *posix = strrchr(exe, '/');  /* Windows, or the others' */
+    if (!slash || (posix && posix > slash)) slash = posix;
     if (slash) slash[1] = 0;
-    snprintf(out, size, "%siso-check.txt", exe);
+    snprintf(out, size, "%s%s", exe, name);
 }
+
+static void iso_check_path(char *out, size_t size) { disc_data_path(out, size, "iso-check.txt"); }
 
 /* 64-bit hosts check on a host thread (finding 082): the blocking part (the cache, else reading
    the image's files) runs on the host, and page_update picks up the answer, so the menu stays
@@ -312,17 +317,18 @@ static void start_iso_check(void)
     }
 }
 
+static char iso_note[256];  /* the check's note: what differs from the USA disc, or why no answer */
+
 /* One poll of the checking host job: the hash lands in iso_hash. */
 static void poll_iso(void)
 {
     static uint8_t digest[32];
-    static char note[256];
     int r;
     if (iso_state != 1) return;
-    r = host_service_disc_check_poll(GADDR(digest), GADDR(note), sizeof note);
+    r = host_service_disc_check_poll(GADDR(digest), GADDR(iso_note), sizeof iso_note);
     if (!r) return;
-    if (r == -1) {
-        hle_log("disc check: reading the disc image failed during its check: %s\n", note);
+    if (r == -1 || r == -3) {  /* -3: stopped (the game is ending) */
+        hle_log("disc check: reading the disc image failed during its check: %s\n", iso_note);
         set_state(&iso_state, 3);
         return;
     }
@@ -331,37 +337,52 @@ static void poll_iso(void)
         memset(iso_hash, '0', 64), iso_hash[64] = 0;
         set_state(&iso_state, 2);
         hle_log("disc check: the disc image can't have the USA disc's game files: %s. A bad or modified dump: "
-                "it can't be used online\n", note);
+                "it can't be used online\n", iso_note);
         return;
     }
     for (int i = 0; i < 32; i++) snprintf(iso_hash + 2 * i, 3, "%02x", digest[i]);
     set_state(&iso_state, 2);
-    log_iso(r == 2 ? "from iso-check.txt" : "checked now", note);
+    log_iso(r == 2 ? "from iso-check.txt" : "checked now", iso_note);
 }
 
-/* Every start, once, about 10 s in (after the first loads): the same check, so every dhd.log says
-   whether the disc image's files are the USA disc's. A disc image that boots can still be a dump
-   with changed or damaged files, and the game then stops where it reads one: issue #78's Bike
-   Shop crash read texture records that no file of the USA disc holds (finding 208). The answer
-   comes from iso-check.txt when the launcher or an earlier start wrote it for this image; else the
-   host hashes the image's files once on its thread. Not in timed runs (DHD_BENCH), nor when a
-   tool gives the hash; a host without the check (the browser) refuses the start, quietly. The
-   Online menu takes the answer (start_iso_check does nothing once a check ran). */
-void disc_check_field(unsigned long long field)
+/* Every start, once, when the main menu first shows (disc_notice.c, from the patched main menu):
+   the same check, so every dhd.log says whether the disc image's files are the USA disc's, and
+   a changed image gets its notice. A disc image that boots can still be a dump with changed or
+   damaged files, and the game then stops where it reads one: issue #78's Bike Shop crash read
+   texture records that no file of the USA disc holds (finding 208). The answer comes from
+   iso-check.txt when the launcher or an earlier start wrote it for this image; else the host
+   hashes the image's files once on a low-priority thread (host_sdl.c disc_run). Never in timed,
+   deterministic or traced runs (DHD_BENCH, DHD_FRAME_CLOCK, DHD_STATE_TRACE), nor when a tool
+   gives the hash; a host without the check (the browser) refuses the start, quietly. The Online
+   menu takes the answer (start_iso_check does nothing once a check ran). */
+void disc_check_start(void)
 {
     static int started;
-    if (iso_state == 1) {
-        poll_iso();
-        return;
-    }
-    if (started || field < 600) return;
+    if (started) return;
     started = 1;
     const char *given = getenv("DHD_NET_ISO_SHA256"), *path = getenv("DHD_ISO");
     char cache[HOST_PATH_MAX];
-    if (iso_state || host_getenv("DHD_BENCH") || (given && strlen(given) == 64) || !path || !host_path_exists(path))
+    if (iso_state || host_getenv("DHD_BENCH") || host_getenv("DHD_FRAME_CLOCK") || host_getenv("DHD_STATE_TRACE") ||
+        (given && strlen(given) == 64) || !path || !host_path_exists(path))
         return;
     iso_check_path(cache, sizeof cache);
     if (host_service_disc_check_start(GADDR(path), GADDR(cache))) set_state(&iso_state, 1);
+}
+
+/* Each field (kernel.c): a running check's answer, whenever it comes, on any screen. */
+void disc_check_field(unsigned long long field)
+{
+    (void)field;
+    if (iso_state == 1) poll_iso();
+}
+
+/* The check's answer: the image's game files hash (64 hex digits; zeros when its files can't be
+   the USA disc's), with what differs in *why; NULL while there is none. usa: the USA disc's. */
+const char *disc_check_answer(const char **why, const char **usa)
+{
+    if (why) *why = iso_note;
+    if (usa) *usa = us_files_sha256;
+    return iso_state == 2 ? iso_hash : NULL;
 }
 
 /* ---- the public list ---- */
