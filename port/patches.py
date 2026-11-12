@@ -458,6 +458,21 @@ PATCHES['unsorted/00226D08.c'] = [('text', '    obj->x2830=cursor+0x40;',
 # next slot's guard page at 0x06040000 and the 64-bit game crashed on every non-advancing finish.
 PATCHES['unsorted/0017A678.cpp'] = PATCHES.get('unsorted/0017A678.cpp', []) + [
     ('text', '    char buf[0x20];', '    char buf[0x40];')]
+# OPTIONS > POSTERS (finding 207, public issue #87): func_0019E550 builds a menu on its stack through
+# func_00184940(empty), a constructor that writes a 0x10-byte header and then the whole 0x4FC-byte
+# menu at empty+0x10. The matching source declares `empty` as `int sp60[4]` and the menu `player`
+# as `Small sp70`: on the EE the two sit back to back (sp60 + 0x10 == sp70), so the constructor
+# builds the menu in `player` itself. The wasm core's clang lays the two locals out on the shadow
+# stack as it likes, `empty` being the topmost, so the 0x4FC bytes ran off the top of the main
+# fiber's slot into the next slot's guard page (0x06040478): the game closed at once. The port's copy
+# declares them as the one object they are: a header followed by the menu.
+PATCHES['unsorted/0019E550.c'] = PATCHES.get('unsorted/0019E550.c', []) + [
+    ('text', 'struct Large {char pad0[0xC94]; unsigned char xC94; char padC95[0xB];};\n',
+     'struct Large {char pad0[0xC94]; unsigned char xC94; char padC95[0xB];};\n'
+     'struct Framed {int x0; void *x4; char pad8[8]; struct Small player;};\n'),
+    ('text', '    int sp60[4];\n    struct Small sp70;\n', '    struct Framed frame;\n'),
+    ('text', 'empty=&sp60;player=&sp70;large=&sp680;', 'empty=&frame;player=&frame.player;large=&sp680;'),
+    ('text', '        sp70.x0 = -1;\n', '        frame.player.x0 = -1;\n')]
 # Tracks at 3-4 players (public issue #1): the PS2 offered only a fixed five (mask 0x020001C2:
 # MOAB, ALPINEMX, MOABMX, JUNGLEMX, BCTDX), whatever the save had unlocked, most likely for its
 # frame rate with four views; every track loads the same "2" level files at 2-4 players (CITYMX
