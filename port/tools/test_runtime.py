@@ -122,6 +122,10 @@ def end_tests():
     p = testprog.run(exe, 'hang', env={'DHD_END_TIMEOUT_MS': '300'}, expect=5, quiet=True)
     assert 'still running' in p.stderr and 'stuck' in p.stderr and time.time() - start < 5, p.stderr
     testprog.run(exe, 'nested', expect=9, quiet=True)
+    kept = OUT / 'host_end_kept.txt'
+    kept.unlink(missing_ok=True)
+    testprog.run(exe, 'flush', kept, quiet=True)  # the open file's buffer reached the disk
+    assert kept.read_text() == 'kept'
 
 
 def host_tests():

@@ -10,6 +10,7 @@
                (an atexit handler that destroys the lock) runs under the thread, which sees it;
                the process ends with 42. That is the Android abort in miniature; it is what the
                fix prevents.
+     flush     host_end(0) with a buffered file still open: its bytes reach the disk, as exit() did
      hang      a handler that never returns: the watchdog (DHD_END_TIMEOUT_MS) ends the process
                with the code host_end was given
      nested    a handler that calls host_end itself ends the process at once with its code */
@@ -107,6 +108,12 @@ int main(int argc, char **argv)
         if (!strcmp(mode, "thread")) host_end(0);
         exit(0);
     }
+    if (!strcmp(mode, "flush") && argc > 2) {  /* a buffered file the process leaves open (a save): exit() wrote it */
+        FILE *f = fopen(argv[2], "wb");
+        if (!f) return 3;
+        fputs("kept", f);
+        host_end(0);
+    }
     if (!strcmp(mode, "hang")) {
         host_end_add(HOST_END_RENDER, "stuck", hang);
         host_end(5);
@@ -115,6 +122,6 @@ int main(int argc, char **argv)
         host_end_add(HOST_END_RENDER, "nested", nested);
         host_end(1);
     }
-    fprintf(stderr, "usage: test_host_end order|exit|thread|unjoined|hang|nested\n");
+    fprintf(stderr, "usage: test_host_end order|exit|thread|unjoined|flush FILE|hang|nested\n");
     return 2;
 }
