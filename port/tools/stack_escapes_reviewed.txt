@@ -1,7 +1,9 @@
 # port/tools/stack_escapes.py: the reviewed candidates (finding 213).
 # One line each: FUNCTION LOCAL CALLEE VERDICT REASON
-#   fixed  a port patch declares the object the EE frame holds (the patch named; --check makes sure
-#          its unit still has port patches)
+#   fixed  a port patch declares the object the EE frame holds (the unit named first in the reason).
+#          --check proves it on the patched text the port compiles: that function's escapes to the
+#          callee must show no overrun and at least one that fits, so removing the patch (or all of
+#          the unit's patches but an unrelated one) fails the line (finding 219)
 #   safe   read and proven harmless (the reason says why)
 # `python port/tools/stack_escapes.py --check` fails on a write overrun or a sprintf format overrun
 # not listed here. A new line needs the code read, not the tool's word.
