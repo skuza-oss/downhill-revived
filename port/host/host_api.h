@@ -232,8 +232,8 @@ int host_service_net_list_lobbies(uint32_t a0, int a1);
    addresses). 1 if the check began. */
 int host_service_disc_check_start(uint32_t iso, uint32_t cache);
 /* 0 working; else dhd_disc_check's answer: 1 hashed now, 2 from iso-check.txt (the game files hash
-   in digest, 32 bytes), -1 unreadable, -2 not the USA disc's files; note (size bytes) what the log
-   says. -1 when no check ran. */
+   in digest, 32 bytes), -1 unreadable, -2 not the USA disc's files, -3 stopped at exit; note (size
+   bytes) what the log says. -1 when no check ran. */
 int host_service_disc_check_poll(uint32_t digest, uint32_t note, int size);
 int host_service_net_list_lobbies_start(int max);      /* 1 if the fetch began */
 int host_service_net_list_lobbies_poll(uint32_t out, int max);  /* the lobby count, -1 failed, -2 working */

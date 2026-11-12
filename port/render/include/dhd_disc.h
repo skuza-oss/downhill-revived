@@ -18,8 +18,11 @@ extern "C" {
    digest gets the game files hash (32 bytes) and note (size bytes, cut to fit) what differs from
    the USA disc ("" for its files); else note says why there is none. 1 hashed now, 2 from
    iso-check.txt, -1 the image can't be read, -2 its game files can't be the USA disc's (no
-   ISO 9660 file system, or a cut dump). */
-int dhd_disc_check(const char *iso, const char *cache, uint8_t digest[32], char *note, size_t size);
+   ISO 9660 file system, or a cut dump), -3 stopped. After each 1 MiB piece read it rests
+   pause_us microseconds, and stops (nothing cached) once *stop is nonzero (stop NULL: never),
+   so a game can play while it hashes (finding 208). */
+int dhd_disc_check(const char *iso, const char *cache, uint8_t digest[32], char *note, size_t size,
+                   const int *stop, uint32_t pause_us);
 
 #ifdef __cplusplus
 }

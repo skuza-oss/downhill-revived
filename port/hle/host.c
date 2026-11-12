@@ -14,6 +14,7 @@
 #include "../gs/gs_mesh.h"   /* gs_mesh_setting_read: Native VU (finding 194) */
 #include "../include/version.h"
 #include "../runtime/sha256.h"
+#include "../runtime/disc_recent.h"  /* the crash report's last disc files (finding 208) */
 
 #include <math.h>
 #include <stdarg.h>
@@ -223,6 +224,16 @@ static void peek(void)
     fprintf(stderr, "\n");
 }
 
+/* The disc files the game looked up last (cdvd.c note_lookup), oldest first: a crash while a
+   screen loads names what it was reading (finding 208). */
+static void disc_recent(void)
+{
+    const uint8_t *at = GUEST(PS2_DISC_RECENT);
+    char line[PS2_DISC_RECENT_SIZE + 64];
+    if (host_readable(at, PS2_DISC_RECENT_SIZE) && disc_recent_line(at, line, sizeof line))
+        fputs(line, stderr);
+}
+
 #ifdef _WIN32
 /* The log dhd.exe opens itself (dhd.log): the C library's stdout and stderr write into a pipe and
    a thread copies it to the file, so a slow write to the disk (half a second at times on a
@@ -356,6 +367,7 @@ static LONG WINAPI crashed(EXCEPTION_POINTERS *e)
                 (unsigned long long)r->ExceptionInformation[1]);
     fprintf(stderr, "\n");
     report(e->ContextRecord);
+    disc_recent();
     peek();
     log_settle();
     return EXCEPTION_EXECUTE_HANDLER;
@@ -412,6 +424,7 @@ static void crashed(int sig, siginfo_t *info, void *ctx)
         int n = backtrace(frames, 32);
         backtrace_symbols_fd(frames, n, STDERR_FILENO);
     }
+    disc_recent();
     peek();
     fflush(stderr);
     host_log_drain();

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "guest_memory_os.h"
+#include "../runtime/disc_recent.h"
 
 static HANDLE ram;
 static PVOID reporter;
@@ -67,6 +68,15 @@ static LONG CALLBACK report_fault(EXCEPTION_POINTERS *e) {
         if (!f) break;
         void *data; DWORD64 frame;
         RtlVirtualUnwind(UNW_FLAG_NHANDLER,image,c.Rip,f,&c,&data,&frame,NULL);
+    }
+    {   /* the disc files the game looked up last (finding 208): this handler ends the process
+           before the crash report (host.c), which prints the same line on the other hosts */
+        const uint8_t *at=(const uint8_t *)(guest_base+PS2_DISC_RECENT);
+        MEMORY_BASIC_INFORMATION m; char line[PS2_DISC_RECENT_SIZE+64];
+        if (VirtualQuery(at,&m,sizeof m)==sizeof m && m.State==MEM_COMMIT &&
+            (uintptr_t)m.BaseAddress+m.RegionSize>=(uintptr_t)at+PS2_DISC_RECENT_SIZE &&
+            (n=disc_recent_line(at,line,sizeof line))>0)
+            WriteFile(GetStdHandle(STD_ERROR_HANDLE),line,(DWORD)n,&written,NULL);
     }
     TerminateProcess(GetCurrentProcess(),(UINT)EXCEPTION_ACCESS_VIOLATION);
     return EXCEPTION_CONTINUE_SEARCH;

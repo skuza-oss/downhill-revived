@@ -134,6 +134,16 @@ Then:
 2. The first time, choose your disc image: your `.iso` of the USA disc. It is checked and
    remembered in `dhd.ini`; you won't be asked again unless the file moves or changes.
 
+**A damaged or changed disc image.** The game also checks every file of your disc image against
+the USA disc's, once per image (it reads the whole image in the background the first time, on a
+phone for up to a minute or so; then `iso-check.txt` remembers the answer). If a file differs, the
+main menu says so once, names the first file that differs and offers OK: the game still plays,
+but it may close unexpectedly where it reads that file (a bad dump closed one player's game in
+the Bike Shop), and online needs the USA disc's files. A new copy of your own disc fixes it.
+`dhd.log` has the answer too (`disc check:`). The notice comes back only for another image, or
+when this one changes; `disc-notice.txt`, beside `dhd.ini`, lists the images whose notice you
+have seen. Nothing is sent anywhere.
+
 **Starting straight into the game** (a Steam shortcut, a desktop shortcut): start the launcher with
 `--play`. The game starts at once with your saved settings, without the launcher's window, and
 the launcher closes when the game does (play time is still counted). The window opens instead

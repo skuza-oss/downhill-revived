@@ -426,6 +426,15 @@ PATCHES['unsorted/001A8A48.c'] = [('text', 'func_0023D8D8(0, 277.0f, y);', 'func
 PATCHES['unsorted/001F84A8.c'] = [('text', 'func_0023D8D8(0, f, b);', 'port_ws_set_focal(0, f, b);')]
 # 688 is the title (func_001B6708, recompiled from asm) and shell menus' X field of view.
 PATCHES['unsorted/0023D8D8.c'] = [('text', '    view->x0 = dist;', '    dist = port_ws_menu_focal(dist);\n    view->x0 = dist;')]
+# The game's file loader (func_0020D958: a path in the game's own table of the disc, read 128 KB
+# at a time) notes each file it starts, found or not, for the crash report's "disc files looked
+# up last" (port/hle/cdvd.c hle_disc_lookup; finding 208). The HLE window only: no game state.
+PATCHES['unsorted/0020D958.c'] = [
+    ('text', 'extern void func_0020D028(char *,...);',
+     'extern void func_0020D028(char *,...);\nextern void hle_disc_lookup(const char *path, int found);'),
+    ('text', ' if(!func_0020E520(&info,arg0)) {func_0020D028(D_00297FA8,arg0);return 0;}',
+     ' {int found=func_0020E520(&info,arg0); if(!arg2) hle_disc_lookup(arg0,found);\n'
+     '  if(!found) {func_0020D028(D_00297FA8,arg0);return 0;}}')]
 # func_00202760 passes its fourth argument (a3, the callers' result buffer such as &D_0029E168)
 # through to func_00247D28, which reads it; the source names only three, which matches retail only
 # because a3 is never touched. Natively the pointer was dropped and the memory card code read stack

@@ -407,10 +407,18 @@ static char disc_iso[1024], disc_cache[1024], disc_note[256];
 static uint8_t disc_digest[32];
 static int disc_answer;
 
+/* Set at exit: a hash still running stops at its next piece, writing nothing (finding 208). */
+static int disc_stop;
+static void disc_stop_at_exit(void) { __atomic_store_n(&disc_stop, 1, __ATOMIC_RELAXED); }
+
+/* The check runs while the game plays (finding 208): at low priority, resting 1 ms after each
+   1 MiB piece it reads, so a first start's hash of the whole image (once; later iso-check.txt
+   answers) leaves the game's threads and its own disc reads first. */
 static void disc_run(void *unused)
 {
     (void)unused;
-    disc_answer = dhd_disc_check(disc_iso, disc_cache, disc_digest, disc_note, sizeof disc_note);
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+    disc_answer = dhd_disc_check(disc_iso, disc_cache, disc_digest, disc_note, sizeof disc_note, &disc_stop, 1000);
     SDL_SetAtomicInt(&disc_job, JOB_DONE);
 }
 
@@ -422,6 +430,8 @@ int host_service_disc_check_start(uint32_t iso, uint32_t cache)
     if (!SDL_CompareAndSwapAtomicInt(&disc_job, JOB_IDLE, JOB_WORKING)) return 0;
     snprintf(disc_iso, sizeof disc_iso, "%s", at);
     snprintf(disc_cache, sizeof disc_cache, "%s", cache_at);
+    static int stop_registered;
+    if (!stop_registered++) atexit(disc_stop_at_exit);
     if (!host_thread_detach(disc_run, NULL)) {
         SDL_SetAtomicInt(&disc_job, JOB_IDLE);
         return 0;
