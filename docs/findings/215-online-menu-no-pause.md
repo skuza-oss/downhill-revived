@@ -1,10 +1,10 @@
 # 215: Online, the race menu does not pause the race
 
-Status: in progress
+Status: current
 
 Branch `feat/online-menu-no-pause` from the online riders lane's head 86c3f4a1 (local main
-dbddf61e plus finding 202's round 4), started 2026-11-12. This file is the lane's plan while it
-runs and its finding when it merges.
+dbddf61e plus finding 202's round 4), started 2026-11-12, merged into `main` the same day
+(4bb35678). This file was the lane's plan while it ran and is its finding now.
 
 ## Goal and acceptance
 
@@ -26,6 +26,7 @@ Out of scope: the touch controls' own online panel (finding 141), which already 
 - [x] 2026-11-12: the menu over the running race, the alone rule, `race_menu.h` and its test (95145fae)
 - [x] 2026-11-12: `port/tools/race_menu_check.py` (the rows in a room from the menus), `mosh_round_check.py --host-env / --guest-env`
 - [x] 2026-11-12: the after measurement, the rows, the alone case, the Mosh Bowl round, captures (below)
+- [x] 2026-11-12: merged (4bb35678) and checked on `main` 18f5e70c ("Checked on the merged main")
 
 ## Before: what START did online (measured)
 
@@ -191,15 +192,34 @@ coasting rider looks like any slow rider. Not worth a field.
   games run without sound).
 - The touch controls' online panel in a picture (above), Android, the browser, macOS, Linux.
 
-## Checks left for the lead
+## Checked on the merged main (2026-11-12)
 
-- The seven state-trace recipes (`boot`, `race`, `race2` to `race6`) against the format-2
-  references. The change cannot alter them: every new line runs only online (`race_menu_pad` in
+On `main` 18f5e70c (with finding 202's round 4 and finding 210), by the lead's verifier:
+
+- `python tools/check.py port -j 6` and `python tools/check.py server`: OK.
+- The seven state-trace recipes (`boot`, `race`, `race2` to `race6`) equal the format-2 references
+  made from 524948ba: 7 of 7 PASS. Every new line runs only online (`race_menu_pad` in
   `pads_read_now`'s online branch, the draw behind `online_mode()`, the test hook behind
-  `DHD_NET_TEST_MENU`), and `menu_game_style` / `menu_game_text` are called only from there.
-- A PC to Mac race with the menu opened on each side; a phone with the touch panel and a
-  controller; Linux.
+  `DHD_NET_TEST_MENU`).
+- `race_menu_check.py` with `--link delay=80`, every scenario (`resume`, `room`, `end`, `leave`,
+  `closed`, `alone`), P2P rooms: PASS. `mosh_round_check.py` (default): PASS.
+- A P2P room of six racers (two games, four nettool bots, computer riders) with the host's menu
+  open at race second 30 for 5 s: the host's race clock ran on (tick 1800 to 2114 in 5.2 s), the
+  guest held nobody and caught nobody up, every racer finished, the results the same on both
+  games (finding 202, "Round 4 checked on the merged main").
+- PC <-> Mac (P2P rooms, `cross_race.py` with `DHD_NET_TEST_MENU` on the host), each way: the
+  menu opened over the running shared race (ticks 600 to 913) on Windows and on macOS, and the
+  other machine held, caught up and placed nothing; in the host's first race, alone, START was
+  the game's own pause.
 
 ## Result
 
-Filled in at the merge.
+START in an online race with another human still racing opens the port's own menu over the
+running race (RESUME, BACK TO THE ROOM, END THE RACE for the host, LEAVE THE ROOM); the race goes
+on, this game's rider coasts on a neutral pad, and the other games see no stop. Alone in the race
+it is the game's own pause, whose time stays out of the race clock as offline. Checked in every
+row from the menus, in a room of six, in the arena's round and between Windows and macOS.
+
+Open: an SFU room (the local server's SFU handshake still fails from this PC; every check ran in
+P2P rooms), the touch panel on a phone and a phone with a controller, Linux, the browser, and play
+by hand (a real controller, the keyboard, the mouse, the menu's sounds).

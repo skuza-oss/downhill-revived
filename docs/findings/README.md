@@ -240,9 +240,9 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 207 | [Posters in OPTIONS closes the game (issue 87)](207-posters-crash.md) | current |  |
 | 208 | [the Bike Shop closes the game on a Redmi Note 13 4G (issue #78)](208-bike-shop-crash-redmi-note-13.md) | current |  |
 | 209 | [Touch controls can skip the flight over the track](209-touch-skip-flyover.md) | current |  |
-| 210 | [EXIT GAME on Android aborts in the C library while the process ends](210-android-exit-abort.md) | in progress |  |
+| 210 | [EXIT GAME on Android aborts in the C library while the process ends](210-android-exit-abort.md) | current |  |
 | 213 | [stack locals that the EE frame makes one object (the class of 094 and 207)](213-stack-overrun-sweep.md) | current |  |
-| 215 | [Online, the race menu does not pause the race](215-online-menu-no-pause.md) | in progress |  |
+| 215 | [Online, the race menu does not pause the race](215-online-menu-no-pause.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

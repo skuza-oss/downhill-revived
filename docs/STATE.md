@@ -151,9 +151,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - **State sync, never lockstep:** each PC runs its own one-player race at its own frame rate and
   shows the others, and on guests the host's AI riders, as puppet riders (`port/hle/puppet.c`,
   findings 044, 047, 114): each rides on this game's own physics with its owner's pad (an AI
-  rider's on this game's AI controller too) and is steered toward its owner's snapshots, each one
-  compared with where the puppet itself was at that snapshot's moment (`port/hle/puppet_sync.h`,
-  finding 202). The puppet bench (`port/tools/puppet_bench.py`) measures how they look through a
+  rider's on this game's AI controller too, on its owner's racing line) and is steered toward its
+  owner's snapshots, each one compared with where the puppet itself was at that snapshot's moment
+  (`port/hle/puppet_sync.h`, finding 202). The puppet bench (`port/tools/puppet_bench.py`) measures how they look through a
   bad link. Hits are events; each game times its own finish.
   Track pickups are shared events (finding 144); a player who leaves becomes an AI rider.
 - Server: `online/server/` (Cloudflare Workers + Durable Objects) at `wss://dhd.skuza.app`, the

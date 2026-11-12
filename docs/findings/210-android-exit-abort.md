@@ -1,9 +1,9 @@
 # 210: EXIT GAME on Android aborts in the C library while the process ends
 
-Status: in progress
+Status: current
 
-Branch `fix/android-exit-abort` from `main` 524948ba, started 2026-11-12. This file is the lane's
-plan while it runs and its finding when it merges.
+Branch `fix/android-exit-abort` from `main` 524948ba, started 2026-11-12, merged into `main` the
+same day (18f5e70c). This file was the lane's plan while it ran and is its finding now.
 
 ## Goal and acceptance
 
@@ -27,7 +27,8 @@ scope: the phone itself (no device in the lane), the game's own `Exit()` (module
 - [x] 2026-11-12: finding reserved (003496e8)
 - [x] 2026-11-12: the exit path read, the fix written (3b6a2f6a): `port/host/host_end.c`
 - [x] 2026-11-12: Windows hidden-desktop runs, unit tests, `check.py port`, Android debug APK
-- [ ] the phone check (below), by the lead; then Status `current` and the STATE-LOG entry at the merge
+- [x] 2026-11-12: merged (18f5e70c) and checked on `main` on Windows ("Checked on the merged main")
+- [ ] the phone check (below), by the lead
 
 ## The exit path
 
@@ -156,6 +157,28 @@ by the watchdog, a handler that ends the process itself, and a buffered file rea
 - On Windows a worker thread's `_exit` races the exiting thread's `ExitProcess` (the first test
   version reported exit 0 although the violation was seen); the test now ends the process from
   the exiting thread.
+
+## Checked on the merged main (2026-11-12)
+
+On `main` 18f5e70c (with finding 202's round 4 and finding 215), by the lead's verifier, Windows,
+hidden desktop, untimed:
+
+- `python tools/check.py port -j 6` (with `test_host_end`) and `check.py server`: OK. The seven
+  state-trace recipes equal the format-2 references made from 524948ba: 7 of 7 PASS.
+- Each run below ended by itself with exit code 0, no process left, and dhd.log ending with
+  `end: closing (code 0)`, the `perf: session` line (where a session ran) and
+  `end: handlers done in N ms` (1-6 ms); no watchdog line.
+
+| run | ended | data at the next start |
+|---|---|---|
+| EXIT GAME from the main menu after DIFFICULTY changed and SAVE GAME DATA to an empty card | by its menu | dhd.ini (`game_options`, `install_id`) and the card's four files present; the next start restored the options (`options: restored`, the same values) and the card's files kept their hashes |
+| the window's close in the main menu | 0.15 s after the close | nothing saved in that run; the next start then EXIT GAME, clean |
+| the window's close in a race (GO passed) | 0.15 s | |
+| the window's close the moment the window exists | 0.30 s | |
+| a P2P room made from ONLINE (the network threads running), LEAVE in the room, then EXIT GAME | by its menu | next start then EXIT GAME, clean |
+| the launcher (`DownhillRevived.exe --play`, a packaged copy), EXIT GAME | the launcher ended with code 0, 9.8 s after its start | no process left from the package |
+
+Open: the phone check below.
 
 ## Result
 

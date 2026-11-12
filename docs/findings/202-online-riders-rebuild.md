@@ -65,6 +65,9 @@ the P2P star (unless a bug there is part of the problem).
       `server`, the seven state traces, live races on one PC (80 and 150 ms, the arena's round, a
       room of six racers) and PC <-> Mac both ways with and without TURN ("Checked on the merged
       main").
+- [x] Round 4 merged into `main` (573a5b37, with lanes 215 and 210: 18f5e70c) and checked there on
+      2026-11-12 ("Round 4 checked on the merged main" at the end): the checks pass; the race's
+      last seconds are not fixed in rooms made from the menus (race frames stop at the transport).
 
 ### The bench (how it measures)
 
@@ -1069,5 +1072,118 @@ link seed: the riders' paths differ, the drawing is what to compare.
 - **150 ms: race-to-race spread.** One race in three is over the line on this PC's SFU path. The
   internet links the verifier measured (PC to Mac, snapshot age p95 21-98 ms) are kinder than the
   150 ms test link.
-- **After the last finish:** the race frames now pass for 3 s after the end, but this was not
-  measured live (the SFU outage): a PC to Mac race should show no drift after the last finish.
+- **After the last finish:** measured on the merged main (below): not fixed in rooms made from the
+  menus. The race frames stop at the transport when the room ends the race, before the 3 s window
+  in `client.c` can let them through.
+
+## Round 4 checked on the merged main (2026-11-12)
+
+On `main` 18f5e70c (49f7367a, then the merges of this round, of finding 215 and of finding 210), by
+the lead's verifier. No other worker's build was running on this PC when the live runs started or
+after they ended (not watched in between).
+
+- `python tools/check.py port -j 6`: OK. `python tools/check.py server`: OK.
+- State traces: all seven recipes (`boot`, `race`, `race2` to `race6`) equal the format-2
+  references made from 524948ba (the same `state_trace_codeptrs.txt` and `state_trace_mask.txt`):
+  7 of 7 PASS.
+- **The SFU from this PC still fails.** Four tries of an ordinary two-game race through a local
+  server (two at about 07:25, two at about 09:20): every session gave up direct UDP after 2 s, then failed over the
+  TURN relay as well (`SFU connection failed (DTLS error: timeout: handshake)`), and the room took
+  the racer out (`Realtime connection failed: out of the race`). In a PC to Mac SFU room the Mac,
+  on the same network, failed the same way. Once it connected: in a P2P room hosted by the Mac
+  with the PC's direct links off, the PC's session came up over UDP and carried two races
+  (below). Everything else ran in P2P rooms (`DHD_NET_CREATE=p2p`, `cross_race.py --backend p2p`;
+  the guest direct inside the local network), whose race sync is the SFU's. In runs where a
+  session was failing, the race load stood 6-8 s on both games (`freeze:` at menu 9, waiting for
+  the other's riders).
+
+### Two games on this PC (P2P rooms)
+
+`online_race.py --hidden --lag`, eight host computer riders, the test link on both games,
+finishes at 70 / 72 s. Results equal on both games in every race.
+
+| race | the guest's computer riders: error p50 / p95 / p99 | sunk / deep % | jolts a min | placed (not respawns) | respawns | misplaced | catch-ups | guest sees host p50 / p95 / p99 | host sees guest p50 / p95 / p99 | hit applied |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 80 ms #1 | 0.38 / 2.45 / 4.9 | 0.7 / 0.03 | 3.1 | 1 (an owner's reset) | 7 | 0 | 2 | 0.12 / 1.65 / 2.2 | 0.13 / 1.69 / 5.7 | none landed |
+| 80 ms #2 | 0.42 / 2.35 / 4.3 | 0.8 / 0.02 | 4.1 | 0 | 6 | 0 | 4 | 0.14 / 1.38 / 3.4 | 0.15 / 1.32 / 2.1 | none landed |
+| 150 ms #1 | 0.73 / 3.95 / 7.2 | 1.0 / 0.09 | 3.8 | 0 | 5 | 0 | 13 | 0.29 / 3.33 / 6.8 | 0.23 / 2.28 / 5.2 | yes |
+| 150 ms #2 | 0.80 / 4.94 / 9.5 | 1.2 / 0.17 | 5.1 | 0 | 12 | 0 | 20 | 0.28 / 2.41 / 6.0 | 0.28 / 2.39 / 4.5 | yes |
+
+Against round 4's own table (SFU): 80 ms the same (p95 2.35-2.45 against 2.08-2.34); 150 ms within
+its spread (3.95 and 4.94 against 3.59-4.47 for r4d and 4.43-5.26 for r4e). No hit landed at
+80 ms (the scripted riders do not attack; a hit there is a computer rider's); at 150 ms both
+games applied hits (`hit kind 5`, `hit kind 0`, event and victim). The one placement: the host's
+rider was put back on the track by its own game (its record jumps 364.8 units at 68.35 s, standing)
+and the guest placed it there 0.16 s later as `far`: drawn right (misplaced 0), but the rule that
+counts an owner's own jump as a respawn missed it.
+
+Host stops (`DHD_NET_TEST_HITCH=20:MS` on the host, 80 ms link), the guest's view of the nine host
+riders from the stop to 3 s after it:
+
+| stop | holds | placed (not respawns) | catch-ups | largest step change |
+|---|---|---|---|---|
+| 0.8 s | 9, 9 | 0, 0 | 26, 20 | 4.15, 5.26 |
+| 3 s | 9, 9 | 0, 0 | 0, 0 | 3.70, 4.00 |
+
+The guest holds every host rider 0.38 s after the stop begins (the link's 80 ms and the 0.25 s
+threshold), releases them as the snapshots come back and catches up by riding. The host itself,
+after its own 3 s stop, placed the guest's rider once in each race (201 and 134 units, 0.3 s after
+it went on): its view was 3 s old, a placement after silence.
+
+- `mosh_round_check.py` (default, `hit`): PASS (the guest scored 50 on the host's rider; the same
+  table and finals on both games).
+- A P2P room of six racers (two hidden games, four nettool bots, computer riders, 80 ms link) with
+  the host's race menu open at race second 30 for 5 s: all six joined and readied, the race
+  started for all, the ten results the same on both games, no freeze line. The host's race clock
+  ran on under the menu (tick 1800 to 2114 in 5.2 s); the guest held nobody and caught nobody up
+  in that time (snapshot age 101-116 ms throughout; two respawn placements, a bot's and a computer
+  rider's). The bots stop sending at their finish (60 s), and the games then hold their riders.
+
+### PC <-> Mac
+
+The Mac (M1, 8 GB) ran its own build of 18f5e70c from this PC's wasm2c core; `cross_race.py`
+through scratch wrappers (the PC's game on the hidden desktop, both games recording), P2P rooms
+direct inside the local network unless said. Host finishes at 20 s, guest at 40 s. The room's
+results were the same on both machines in every race.
+
+| run | shared races | other player as drawn, p95 | drawn behind p50 / p95 | computer riders on the guest, p95 | placed (not respawns) | snapshot age p50 / p95 |
+|---|---|---|---|---|---|---|
+| PC hosts | 3 | 0.28-1.78 | 0 / 1-4 ms | 0.42-1.76 | 0 | 12-30 / 18-41 ms |
+| Mac hosts | 4 | 0.21-1.55 | 0 / 0-4 ms, 119 once | 0.43-1.79 | 0 | 9-32 / 18-41 ms |
+| Mac hosts, the PC over the SFU | 2 | 0.13-0.61 | 0 / 1-4 ms | 0.30-0.51 | 0 | PC 25-26 / 43-189 ms |
+| PC hosts, `--force-turn` | 0 | the Mac's session failed (DTLS), out of the race | | | | |
+
+Sunk at most 2.1 % of steps (computer riders 0.1-0.7 %); no hold or catch-up in the ordinary races; 17
+catch-ups in one SFU race. In 3 of 4 Mac-hosted shared races the Mac host's own race screen never
+showed the PC guest's finish (`PCGUEST finished` missing on the Mac; the room's results the same on
+both).
+
+- **Host stops** (0.8 s at race second 30, so the host's alone first race, which ends at about
+  22 s, never reaches it): PC host, the Mac held 5 riders, no placement, largest step change 3.58;
+  Mac host, the PC held 5, no placement, 11 catch-ups, 3.51. The Mac host placed the PC's rider
+  once right after its own stop (61.7 units, its view stale). A first PC-hosted run lost its
+  direct link (the Mac's direct sends failed `HostUnreachable`), raced over the failing SFU and
+  was run again.
+- **The race menu** (the host's, at race second 10 for 5 s): on each host it opened over the
+  running race (ticks 600 to 913) and the other machine held nothing, caught nothing up and
+  placed nothing; in the host's alone first race START was the game's own pause.
+- **After the last finish (not fixed).** In the 2.8 s after the guest's finish the host draws the
+  guest's rider off by p95 13-72 units and the guest draws the host's computer riders off by p95
+  11-64 (the host's finished rider, standing, stays right). Both games go on sending, but neither
+  receives anything once the room ends the race: the PC host's count of received messages stood at
+  2390 from race clock 2401 to 2522, the Mac's at 3607 from 2403 to 2523. The window
+  `race_frames_until` in `port/net/client.c` never sees these frames: on `ended` the Rust transport
+  drops them first (`port/render/net/src/lib.rs` purges the queued STATE and EVENT frames;
+  `sfu.rs` sets `race_open = false` and drops late ones). In `online_race.py`'s rooms
+  (`DHD_NET_CREATE`) frames did arrive in those seconds. The missing finish lines above are
+  probably the same drop (a finish event purged when `ended` comes first): not proven.
+
+### Open (after this check)
+
+- **The race's last seconds:** let race frames pass in the transport for the same 3 s after
+  `ended` (or until `client_back`), then measure PC <-> Mac again.
+- **An owner's reset counted as `far`:** one 364.8-unit reset of a standing rider was not
+  recognised as the owner's own jump (80 ms #1 above).
+- **Host stops' steps:** 3.5-5.3 units here (target 1.5), as before.
+- **The SFU from this PC:** only two races measured (one direction, P2P fallback); no host stop,
+  no TURN race over the SFU yet. 70a288fa over the SFU stays unmeasured.
