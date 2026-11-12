@@ -180,7 +180,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   TO THE ROOM, END THE RACE, LEAVE THE ROOM) is drawn over the running race and nothing stops; the
   rider coasts on a neutral pad (`port/hle/race_menu.h`, `online.c` `race_menu_pad`). Alone (every
   other human finished or left) it is the game's own pause. A real pause's time is never given
-  back: the race clock stays behind by it.
+  back: the race clock stays behind by it, and the stamps carry that (finding 220,
+  `sync_clock_stood`): the others' snapshots land at this game's present, its own at theirs.
 - P2P rooms (findings 180, 186): the creator's choice beside SFU rooms, private, by code (7
   characters). A server room like any other (its rules, results, rejoin, region) whose race frames
   travel over WebRTC data channels in a star around one member, the hub, which the room picks (the
@@ -220,8 +221,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   network thread) and the others hold its riders, until its snapshots have come again for 3 s.
   Every record and HOLD from another game is checked whole before any of it is used (nodes, State,
   numbers, stamps; `port/hle/puppet_record.h`, finding 220): a refused one is dropped and logged
-  once per rider and race (after a game's own pause when alone it refuses them for the rest of the
-  race: finding 220, open). Hits are
+  once per rider and race. Hits are
   decided on the puppet as drawn. In a room the FPS & Ping counter shows "SERVER N MS", the round
   trip to the room's server, and "RACE N MS", the round trip to Cloudflare's race network (the SFU
   association's ICE checks); in a race the second line is "RIDERS N MS", the other riders'

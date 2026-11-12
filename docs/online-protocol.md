@@ -494,7 +494,9 @@ checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad wor
 and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
 all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom
 share a tick); previous-action words 25-49 are rebuilt locally. A receiver places a bundle on its
-own race clock by the stamp less its GO, less what its own race clock trails beyond 50 ms; the
+own race clock by the stamp less its GO, less what its own race clock trails beyond 50 ms: the
+time it owes and will catch up, and the time it stood still and never will (its own pause when
+alone, finding 220: measured on its own wall clock, `sync_clock_stood`); the
 record's race time against the stamp tells it how fast the sender's race clock runs
 (`port/hle/puppet_sync.h`). EVENT remains payload version 2. The SFU reads none of the gameplay
 payload but the bundle's version and stamp (its flood limit, below).
@@ -531,7 +533,8 @@ out for three of its usual gaps (at least 60 ms) in a race: "no snapshot of mine
 moment". Receivers brake that sender's riders to a stop where they are until its bundles come again and its
 rider has caught up with them (`port/hle/puppet.c` `hold`). A receiver takes a HOLD only when it
 is about its newest snapshot of the rider (stamped at most 0.5 s after it, bundles can be lost,
-and not from the future) and its stop is no longer than its stamp is old; a newer snapshot
+and not from the future) and its stop is no longer than its stamp is old (within the stamp
+check's 1 s and 0.1 s for the receiver's own clock lag not taken off, `PUPPET_HOLD_SLACK`); a newer snapshot
 already here ends it. A held rider is released once snapshots have been arriving again for 3 s
 (by the receiver's clock, whatever their stamps), so no stamp can keep it held (finding 220). The
 browser has no HOLD sender (its frames go out only from the game's worker). A game that does not know HOLD drops
@@ -542,9 +545,14 @@ A player's START (finding 215) adds nothing to the wire. With another human stil
 the room's menu over the running race, so that game's bundles keep going (its rider coasting, a
 host's computer riders racing). Only a player alone in the race (every other human finished or
 left) pauses for real: its bundles stop, watchers see its riders held (HOLD), and its race clock
-stays behind by the pause afterwards, so its snapshots are stamped that much in the past; nobody
-racing depends on them any more. Before this every START paused for real, and a host's pause
-left every guest drawing all its riders that far in the past for the rest of the race.
+stays behind by the pause afterwards. Its stamps say so (finding 220): what its clock stood still
+is added to the stamps it sends and taken off the ones it places, so its own snapshots carry the
+server moment they happen (the watchers release the hold at the first one and draw its riders as
+riders that stood still for the pause, at the present) and the others' snapshots land at its own
+present. Before finding 220 its snapshots were stamped the pause in the past and the others'
+arrived the pause in the future (refused after finding 220's stamp check, taken as future before).
+Before finding 215 every START paused for real, and a host's pause left every guest drawing all
+its riders that far in the past for the rest of the race.
 
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
 EVENT is unaffected. `DHD_NET_SFU_DROP_IN=N` drops N percent of the DTLS records arriving from the
