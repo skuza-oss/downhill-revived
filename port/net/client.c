@@ -21,7 +21,9 @@ enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000, CLOCK_SLEW_M
 #define CLOCK_MARGIN_MS 3.0
 
 double net_now_ms(void) { return (double)SDL_GetTicksNS() / 1e6; }
-enum { RACE_FRAMES_AFTER_MS = 3000 };  /* race frames after the race ends (client.h race_frames_until) */
+/* Race frames after the race ends, until the game leaves the race screen (client_back), at most
+   this long: a race outside the room's menus never says so (client.h race_frames_until) */
+enum { RACE_FRAMES_AFTER_MS = 10000 };
 
 static void copy(char *dst, size_t cap, const char *src)
 {
@@ -265,8 +267,10 @@ static void read_room(NetClient *c, const char *t)
     }
     for (i = 0; i < l->nmembers; i++)
         if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
+            /* out of the race (the finish window, the room's end): the race screen still shows its
+               last seconds, so the frames already here stay for the game (client_back drops them) */
             if (c->racing) c->race_frames_until = net_now_ms() + RACE_FRAMES_AFTER_MS;
-            c->racing = 0; l->state = NET_LOBBY; l->started = 0; c->relayed_head = c->relayed_count = 0;
+            c->racing = 0; l->state = NET_LOBBY; l->started = 0;
             c->race_at = 0, c->gave_up = 0;
         }
 }

@@ -58,8 +58,14 @@ test('browser session messages and shared snapshots',()=>{
   recv({type:'race_go',race:5000,at:9500});api.host_service_net_get_lobby(1024);
   assert.equal(dv.getFloat64(1024+layout.NetLobby.race_go_at[0],true),9500);
   recv({type:'ended',reason:'done'});
+  // An ended race's last seconds (finding 216): its frames still go both ways until the game is back.
+  const frame=()=>socket.onmessage({data:new Uint8Array([6,1,9]).buffer});
+  frame();assert.equal(api.host_service_net_receive_frame(600,64),3);assert.deepEqual([...span(600,3)],[6,1,9]);
+  bytes.set([9,9],700);assert.equal(api.host_service_net_send_frame(6,700,2),1);assert.deepEqual([...socket.sent.at(-1)],[6,0,9,9]);
   api.host_service_net_finish(600,4);assert.deepEqual(socket.sent.at(-1),{type:'finish',ticks:600,place:4});
   api.host_service_net_back();assert.deepEqual(socket.sent.at(-1),{type:'back'});
+  assert.equal(api.host_service_net_send_frame(6,700,2),0);
+  frame();assert.equal(api.host_service_net_receive_frame(600,64),0);
   api.host_service_net_rules(60,1,2);assert.equal(socket.sent.at(-1).then,'random');
   bytes.set([1,3,5],500);api.host_service_net_rotation(500,3);assert.deepEqual(socket.sent.at(-1).rotation,[1,3,5]);
   api.host_service_net_end_race();assert.equal(socket.sent.at(-1).type,'end');

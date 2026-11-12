@@ -98,12 +98,22 @@ int main(void)
         client_on_text(&c,"{\"type\":\"ended\"}",16); client_lobby(&c,&l); assert(l.race_go_at == 0);
         assert(l.ended == NET_ENDED_UNKNOWN);  /* an older server: no reason (finding 211) */
         sent[0] = 0; client_race_go(&c,9500); assert(!sent[0]);  /* no race */
-        /* the race's last seconds on screen: its frames still go (finding 202 round 4), not after back */
+        /* the race's last seconds on screen: its frames still go both ways (finding 202 round 4), until
+           the game leaves the race screen, longer than the 2 s it stays (finding 216), not after back;
+           a room snapshot with this member out of the race keeps the frames already here */
         {
-            unsigned char frame[4] = {1, 2, 3, 4};
-            assert(c.race_frames_until > net_now_ms() && client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
+            unsigned char frame[4] = {1, 2, 3, 4}, in[4] = {NET_FRAME_EVENT, 1, 9, 9}, got[NET_FRAME_MAX];
+            const char *out = "{\"type\":\"room\",\"phase\":\"open\",\"members\":[{\"id\":1,\"name\":\"Test\",\"inRace\":false}]}";
+            assert(c.race_frames_until > net_now_ms() + 5000 && client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
+            client_on_binary(&c, in, sizeof in);
+            client_on_text(&c, out, strlen(out));
+            assert(client_receive_frame(&c, got, sizeof got) == sizeof in && got[1] == 1);
+            client_on_binary(&c, in, sizeof in);
             client_back(&c);
             assert(!client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
+            assert(!client_receive_frame(&c, got, sizeof got));
+            client_on_binary(&c, in, sizeof in);
+            assert(!client_receive_frame(&c, got, sizeof got));
         }
         client_on_text(&c,start,strlen(start)); client_lobby(&c,&l); assert(l.race_go_at == 0);
         /* the reason is kept from the message itself: the room snapshot with the result comes after
