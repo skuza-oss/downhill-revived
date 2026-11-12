@@ -1,10 +1,10 @@
 # 211: Three small online and phone UI bugs: wrong race-end message, room stall, keyboard tab hint
 
-Status: in progress
+Status: current
+Checked: 2026-11-12
 
-Branch `fix/online-ui-small` from `main` 18f5e70c, started 2026-11-12. This file is the lane's
-plan while it runs and its finding when it merges. Set `current` at the merge, after the phone
-checks below.
+Branch `fix/online-ui-small` from `main` 18f5e70c, started 2026-11-12, merged. The phone checks
+are recorded at the end ("Checked on the phone").
 
 ## Goal and acceptance
 
@@ -31,7 +31,7 @@ Windows; C captured before and after at 20:9 with a tab changed by a posted touc
   scenarios in `race_menu_check.py` (583acca6)
 - [x] C: the legend says "Tap a tab" (622b7ef1), `port/tools/settings_touch_check.py`
 - [x] B: could not be reproduced on Windows; probes added (03fc5bdb); the phone's log lines below
-- [ ] Phone checks (the lead): see Result
+- [x] Phone checks: all four shown on the Mi 11i (main 65542300), see "Checked on the phone"
 
 ## Decisions
 
@@ -122,13 +122,8 @@ differs only with `DHD_TOUCH` set (traces run without it); the `NetLobby` field 
 code only. The core's layout did move, so `split` and `memcard` need a base built at the merge base
 (same layout rule, finding 205).
 
-**Where the phone checks stand (2026-11-12, after findings 217 and 218): none is recorded yet, so
-this finding stays `in progress`.** Findings 217 and 218 fixed what stopped the phone (the exit
-abort, a dead ONLINE page after a room, READY by tap) and record phone runs of the exit, READY by
-tap, a race as guest and as creator, the attract demo's SKIP and the D-pad's place; none of them
-shows any of the four checks below (neither the race-end text on the phone, the `stall:` and
-`perf: long frame` lines on the way back to the room, "Tap a tab" in OPTIONS > SETTINGS, nor the
-pad's words). Missing: the four phone checks.
+Findings 217 and 218 fixed what stopped the phone (the exit abort, a dead ONLINE page after a room,
+READY by tap); the four phone checks below were then made on the merged main (next section).
 
 Phone checks (the lead): (1) an online P2P race on the phone as host where the phone's own rider is
 still riding when the finish window runs out: the screen must say "TIME UP - DNF" and the log
@@ -136,3 +131,35 @@ still riding when the finish window runs out: the screen must say "TIME UP - DNF
 `stall:` and `perf: long frame` lines on the way back to the room, with the line numbers or logcat
 times of `race closed` and `back to the room after the race`. (3) OPTIONS > SETTINGS with no pad:
 "Tap a tab"; a tap on a tab's name changes it. (4) With a pad connected the pad's own L1 / R1 words.
+
+## Checked on the phone (2026-11-12)
+
+Mi 11i (Android 13), the release-signed APK of `main` 65542300 built as a release is (PGO profile of
+finding 197), installed with `install -r`; the official server, P2P rooms, the other player a
+hidden Windows game of the same main (same core id). Taps by the device tool.
+
+1. **TIME UP - DNF.** The phone created the room (finish window 60 s) and kept riding; the PC's
+   rider finished at 20 s. Twice the phone's screen read "TIME UP - DNF" when the window ran out
+   and its log said `race closed: back to the room (TIME UP - DNF: ended 1, link 0, own racing/,
+   result 0; race tick 4814)` (and `4805` the second time); the PC, the finisher, logged
+   `(RACE OVER: ended 1, link 0, own finished/, ...)`. As a guest in the PC's room the phone got the
+   same `TIME UP - DNF` line and the PC `RACE OVER`. Both games listed the same results each time
+   (`1. GATEPC 0:20.03; 2. RIDER DNF TIME UP`).
+2. **stall: and long frames on the way back.** No `stall:` and no `perf: long frame` line between
+   `race closed` and `back to the room after the race` in any of the three races: race 1 `race
+   closed` at 19:07:37.091, `this PC's race is over; back to the room (1052 ms after the race screen
+   was asked to leave)` and `back to the room after the race` at 19:07:40.146; race 3 (as guest)
+   19:16:11.422 and 19:16:14.359 (934 ms). The run's only such lines were at each race's start, the
+   riders' exchange at the load (`stall: field 87245 came 2824 ms after the last (menu 9 phase 3)`
+   with `perf: long frame: a picture 2771 ms after the one before (menus, ...)`, and 2935 / 2880 ms
+   for the race as guest), the 3 s every race has on Windows too, and one at the start of the run
+   (1231 ms, field 2). The 2.9 s of the report is that start-of-race wait, not the way back.
+3. **Tap a tab.** OPTIONS > SETTINGS with no pad: the legend reads "Tap a tab"; a tap on CONTROLS'
+   name changed the tab.
+4. **The pad's words.** With a pad connected (a virtual USB gamepad, Xbox 360 ids, made through the
+   phone's `/dev/uhid` from the adb shell for 25 s; the game logged `controller: Xbox 360 Controller
+   (xbox360) is player 1`) the same page read "LB / RB  Tabs" and the footer showed the pad's
+   buttons; when the pad went away (`controller: player 1 disconnected`) it read "Tap a tab" again.
+
+The phone's dhd.ini and save files had the same md5 before and after; the touch settings changed for
+other checks were put back.
