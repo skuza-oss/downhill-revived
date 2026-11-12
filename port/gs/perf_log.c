@@ -36,7 +36,7 @@
 
 double host_wall_seconds(void);                                              /* host_sdl.c */
 void host_wait_sink(_Atomic uint64_t *nanoseconds);                          /* host_sdl.c */
-unsigned host_thread_cpu(const char **names, double *seconds, unsigned max); /* host.c */
+unsigned host_thread_cpu(const char **names, double *seconds, unsigned max); /* host_threads.c */
 double host_pacing_period(void);                                             /* host.c */
 void pacing_handed(double *due, double *began);                              /* host.c */
 extern uint64_t kernel_vsync_count;                                          /* host.c: the field */

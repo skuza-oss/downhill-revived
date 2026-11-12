@@ -8,7 +8,7 @@ static double worker_profile_after, worker_profile_until, worker_profile_start;
 static double worker_profile_busy, worker_profile_gs_start;
 static unsigned worker_profile_frame;
 static uint64_t worker_profile_cpu;
-/* The calling thread's CPU time in 100 ns ticks (host.c's host_current_thread_cpu). */
+/* The calling thread's CPU time in 100 ns ticks (host_threads.c's host_current_thread_cpu). */
 double host_current_thread_cpu(void);
 static uint64_t worker_cpu_ticks(void) { return (uint64_t)(host_current_thread_cpu() * 1e7); }
 static double worker_begin(void)

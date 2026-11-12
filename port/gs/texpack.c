@@ -55,7 +55,7 @@
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash.h"   /* xxHash 0.8.3, BSD-2-Clause (THIRD-PARTY-NOTICES.txt) */
 
-void host_thread_name(const char *name);  /* port/hle/host.c */
+void host_thread_name(const char *name);  /* port/host/host_threads.c */
 
 enum { PACK_IDLE, PACK_QUEUED, PACK_READY, PACK_FAILED };
 enum { PACK_LOADERS = 2, PACK_MAX_SIDE = 4096, PACK_WAIT_MS = 200, PACK_PATH = 4096 };

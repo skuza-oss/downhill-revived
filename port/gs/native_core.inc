@@ -2844,7 +2844,7 @@ static void native_interp_thread(Native *n)
     }
 }
 
-void host_thread_name(const char *name);  /* port/hle/host.c */
+void host_thread_name(const char *name);  /* port/host/host_threads.c */
 
 /* DHD_ZREAD_FOLD and DHD_GPU_OVERLAP (finding 111): off unless set; 0 turns one off, any other
    value on. They save Adreno CPU time but cost about 10% at 2x on Metal, and their probe timing is
