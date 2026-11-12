@@ -501,6 +501,14 @@ rider has caught up with them (`port/hle/puppet.c` `hold`). A game that does not
 it (it checks the bundle version), so it needs no protocol change; the SFU and the P2P star
 forward it as any STATE message.
 
+A player's START (finding 215) adds nothing to the wire. With another human still racing it opens
+the room's menu over the running race, so that game's bundles keep going (its rider coasting, a
+host's computer riders racing). Only a player alone in the race (every other human finished or
+left) pauses for real: its bundles stop, watchers see its riders held (HOLD), and its race clock
+stays behind by the pause afterwards, so its snapshots are stamped that much in the past; nobody
+racing depends on them any more. Before this every START paused for real, and a host's pause
+left every guest drawing all its riders that far in the past for the rest of the race.
+
 `DHD_NET_DROP_STATE=N` deterministically drops N percent of outgoing STATE messages for testing;
 EVENT is unaffected. `DHD_NET_SFU_DROP_IN=N` drops N percent of the DTLS records arriving from the
 SFU over UDP before the client's WebRTC stack, as a lossy link would (Cloudflare then retransmits).

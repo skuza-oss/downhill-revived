@@ -155,6 +155,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   bans by address hash or install id with a 14-day moderation log in D1, worked from
   `online/server/tools/moderate.mjs` (no admin endpoint). In an SFU room no player gets another's address, its
   hash or install id.
+- START in a race (finding 215): with another human still racing, the room's menu (RESUME, BACK
+  TO THE ROOM, END THE RACE, LEAVE THE ROOM) is drawn over the running race and nothing stops; the
+  rider coasts on a neutral pad (`port/hle/race_menu.h`, `online.c` `race_menu_pad`). Alone (every
+  other human finished or left) it is the game's own pause. A real pause's time is never given
+  back: the race clock stays behind by it.
 - P2P rooms (findings 180, 186): the creator's choice beside SFU rooms, private, by code (7
   characters). A server room like any other (its rules, results, rejoin, region) whose race frames
   travel over WebRTC data channels in a star around one member, the hub, which the room picks (the
