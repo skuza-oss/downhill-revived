@@ -28,7 +28,10 @@ scope: the phone itself (no device in the lane), the game's own `Exit()` (module
 - [x] 2026-11-12: the exit path read, the fix written (3b6a2f6a): `port/host/host_end.c`
 - [x] 2026-11-12: Windows hidden-desktop runs, unit tests, `check.py port`, Android debug APK
 - [x] 2026-11-12: merged (18f5e70c) and checked on `main` on Windows ("Checked on the merged main")
-- [ ] the phone check (below), by the lead
+- [x] the phone check (below), by the lead, on `main` 1140b23f: the FORTIFY abort was gone, but
+  every EXIT GAME then aborted in `perf_exit` (`invalid pthread_t ... passed to
+  pthread_getcpuclockid`): its new place in `HOST_END_REPORT`, after the joins, asked the joined
+  threads' CPU clocks. Fixed by finding 217, which also has the phone runs.
 
 ## The exit path
 
@@ -89,7 +92,8 @@ glibc and the Windows CRT do not abort on it, so it was silent there.
 - `host_end(code)` ends the game from any thread. It runs registered end handlers in stages
   (`HOST_END_WORKERS`: the VU and GS queues, the disc check's flag; `HOST_END_RENDER`: the render
   thread; `HOST_END_REPORT`: the closing log lines (`perf: session`, native VU1 counters, the
-  native report); `HOST_END_DEVICES`: audio, presence, vibration; `HOST_END_LOG`: the log's last
+  native report; they run after the threads are gone, so they may not ask a thread by its handle:
+  the named-thread list keeps an ended thread's time, finding 217); `HOST_END_DEVICES`: audio, presence, vibration; `HOST_END_LOG`: the log's last
   lines), flushes every open file (`fflush(NULL)`), and leaves with `host_exit` (`_exit` /
   `ExitProcess`): no `atexit`, no library destructors, whatever threads are still running.
 - The render thread (`native_stop` in `native_core.inc`) is told to quit (`Native.quit`, which
@@ -114,7 +118,8 @@ Nothing in them is needed: the log, the settings (`dhd_settings` writes a temp f
 at the call) and the
 memory card (`host_file_*` FILEs, flushed by `fflush(NULL)`) are written by the handlers and the
 flush. Android's exit record is unchanged: the process still ends by itself with status 0 (`exit`
-ended with the same `exit_group` call).
+ended with the same `exit_group` call). (Not so on `main` from this merge until finding 217:
+the report stage aborted, and Android recorded CRASH_NATIVE status 6.)
 
 ## What was run (Windows, hidden desktop, untimed, 2026-11-12)
 
@@ -185,7 +190,7 @@ Open: the phone check below.
 The game ends through `host_end` on every platform. State traces cannot differ: nothing runs
 before the end of the process changes; the registrations replace `atexit` calls, the render
 thread's loop is untouched until `quit` is set, and a trace run ends through `host_exit` (module
-side) or `host_end` after its last field with its files flushed. The phone check for the lead:
+side) or `host_end` after its last field with its files flushed. The phone check (done, see Progress and finding 217):
 EXIT GAME three times, offline and after an online session, with `adb logcat` free of `FORTIFY`
 and `SIGABRT`, dhd.log ending with `end: handlers done`, and the next start's `previous run:`
 lines still saying the app exited by itself.
