@@ -240,6 +240,23 @@ static void pause_tests(void)
     assert(!r.stopped && fabs(r.stood - 5.1) < 1e-9);
     sync_clock_stood(&r, NAN, 0, 95, 0);
     assert(fabs(r.stood - 5.1) < 1e-9);
+
+    /* A HOLD while this game's own race clock stands still too (a plain two-game race, the lead's
+       run: both games stopped stepping at the end; the sender's network thread said so 1.07 s
+       later, while this race clock had moved 0.01 s; the HOLDs every 0.1 s after it). Its stop is measured on the wall clock
+       through the stood-still time, and it is about the newest snapshot by their two stamps. */
+    {
+        Game r = {.race = -3};
+        while (r.race < 74.72) frame_step(&r, 1 / 60.0, 0, 0);
+        double stamp = r.wall + SERVER - 0.016;  /* the sender's last bundle, 16 ms old here */
+        double newest = (stamp - r.go) - excess(&r);   /* where it landed then */
+        for (int f = 0; f < 64; f++) frame_step(&r, 1 / 60.0, 1, 0);  /* 1.07 s stood still */
+        double t = (stamp - r.go) - excess(&r);        /* the HOLD naming that bundle, now */
+        double newest_now = t - 0;                       /* puppet.c hold: by the stamps */
+        assert(puppet_hold_ok(t, 1.2, 1, newest_now, r.race) == PUPPET_HOLD_TAKEN);
+        assert(puppet_hold_ok(t, 1.2, 1, newest, r.race) == PUPPET_HOLD_OVER);  /* by race times: wrongly "over" */
+        assert(puppet_hold_ok(newest, 1.2, 1, newest, r.race) == PUPPET_HOLD_REFUSED);  /* without the stood-still time: refused (its next HOLD, 0.1 s later) */
+    }
     printf("puppet record: the stood-still clock: a 5 s pause stood %.3f s\n", s);
 }
 
@@ -413,6 +430,18 @@ int main(void)
         puppet_hold_start(&g, newest);
         assert(!puppet_hold_resumed(&g, newest) && puppet_hold_resumed(&g, newest + 1 / 30.0));
         assert(!puppet_hold_fed_long(&g, newest + 100));  /* nothing fed: no release by time alone */
+    }
+
+    /* the HOLD's margin (PUPPET_HOLD_SLACK): the crowd test's stop timed 23.80 s against a stamp
+       22.73 s old here is taken within the stamp check's margin and the slack, and only just */
+    {
+        double t = 74.97, now = t + 22.73, edge = 22.73 + PUPPET_AHEAD_MAX + PUPPET_HOLD_SLACK;
+        assert(puppet_hold_ok(t, 23.80, 1, t, now) == PUPPET_HOLD_TAKEN);
+        assert(puppet_hold_ok(t, edge - 0.001, 1, t, now) == PUPPET_HOLD_TAKEN);
+        assert(puppet_hold_ok(t, edge + 0.001, 1, t, now) == PUPPET_HOLD_REFUSED);
+        assert(puppet_hold_ok(t, 60, 1, t, now) == PUPPET_HOLD_REFUSED);           /* far longer than it is old */
+        assert(puppet_hold_ok(t + 86400, 0.3, 1, t, now) == PUPPET_HOLD_REFUSED);  /* a day ahead */
+        assert(PUPPET_HOLD_SLACK > 0 && PUPPET_HOLD_SLACK < 0.2);                  /* a slack, not a second margin */
     }
 
     pause_tests();

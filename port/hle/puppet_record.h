@@ -264,6 +264,12 @@ static inline const char *puppet_record_take(const PuppetRecord *r, uint32_t mir
    newest snapshot this game took from it, by at most this much (more: it is not about the
    snapshots this game has; the riders then coast as on a quiet link, SYNC_COAST). */
 #define PUPPET_HOLD_MATCH 0.5
+/* A HOLD's stop is timed on its sender's wall clock (`quiet`, from when its last bundle left), the
+   age of that bundle's stamp on this race clock. The two are compared with the stamp check's
+   margin (PUPPET_AHEAD_MAX: the two games' clock offsets) plus what this race clock may trail the
+   wall clock without it being taken off the stamps: the normal lag sync_clock_excess leaves, and
+   the same again of a stop before sync_clock_stood knows it for one (SYNC_CLOCK_SLACK each, finding 220). */
+#define PUPPET_HOLD_SLACK (2 * SYNC_CLOCK_SLACK)
 
 static inline int puppet_stamp_ok(double t, double now) { return isfinite(t) && t <= now + PUPPET_AHEAD_MAX; }
 
@@ -281,7 +287,7 @@ typedef struct PuppetHold {
 /* A HOLD stamped t from a sender quiet for `quiet` s (its own clock) arrives at now; `newest`: the
    newest snapshot this game took of the rider (have: any). PUPPET_HOLD_TAKEN when it is about that
    snapshot and sane: not from the future, not more than PUPPET_HOLD_MATCH after it, and its stop no
-   longer than its stamp is old here; PUPPET_HOLD_OVER when a newer snapshot is already here (the
+   longer than its stamp is old here (within PUPPET_AHEAD_MAX + PUPPET_HOLD_SLACK); PUPPET_HOLD_OVER when a newer snapshot is already here (the
    stop is over, as before); else PUPPET_HOLD_REFUSED. */
 enum { PUPPET_HOLD_REFUSED = -1, PUPPET_HOLD_OVER = 0, PUPPET_HOLD_TAKEN = 1 };
 static inline int puppet_hold_ok(double t, double quiet, int have, double newest, double now)
@@ -289,7 +295,8 @@ static inline int puppet_hold_ok(double t, double quiet, int have, double newest
     if (!puppet_stamp_ok(t, now) || !isfinite(quiet) || quiet < 0) return PUPPET_HOLD_REFUSED;
     if (have && newest > t + 0.001) return PUPPET_HOLD_OVER;
     if (!have || t > newest + PUPPET_HOLD_MATCH) return PUPPET_HOLD_REFUSED;
-    return quiet <= now - t + PUPPET_AHEAD_MAX ? PUPPET_HOLD_TAKEN : PUPPET_HOLD_REFUSED;  /* its stop began at its last bundle */
+    /* its stop began when its last bundle left, not before that bundle's moment */
+    return quiet <= now - t + PUPPET_AHEAD_MAX + PUPPET_HOLD_SLACK ? PUPPET_HOLD_TAKEN : PUPPET_HOLD_REFUSED;
 }
 static inline void puppet_hold_start(PuppetHold *h, double t) { h->held = 1, h->held_at = t, h->fed_at = 0; }
 
