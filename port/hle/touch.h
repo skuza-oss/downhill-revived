@@ -45,6 +45,7 @@ typedef struct {
     int preset;           /* TOUCH_THUMB_ZONES / TOUCH_CLASSIC */
     int left_handed;      /* Hand: Left mirrors both presets and the HUD */
     int tilt;             /* Steer with: 0 stick, 1 tilt */
+    int dpad;             /* Steer with: the four-button D-pad (finding 214; tilt is 0 then) */
     int size;             /* percent; 0: the height rule's own (100% capped) */
     int opacity;          /* percent */
     int stick_fixed;      /* Stick: 0 floating, 1 fixed */
@@ -79,6 +80,9 @@ typedef struct {
 typedef struct {
     int race_hud;        /* the race HUD was drawn (the HUD hook): the race is on screen */
     int flyover;         /* the camera's flight over the track plays: START skips it (finding 209) */
+    int movie;           /* a movie plays: START skips it (finding 214); the SKIP button serves both */
+    int replay;          /* a race's replay: START opens its menu (RE-START, SAVE, QUIT, CONTINUE) */
+    int attract;         /* the title's attract demo: any button ends it */
     int air;             /* player 1's rider is in the air (rider +0x4564, finding 141) */
     int online;          /* an online race (no pause: the panel) */
     int clock_moving;    /* the race clock advanced since the last field */
@@ -182,9 +186,12 @@ const char *touch_trick_name(uint16_t buttons);             /* NULL: no tabled t
    Right, Triangle, Circle, Cross, Square, Clear, Back, Enter; finding 189). 0 if there is no such
    button. */
 enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGET_EDITOR, TOUCH_TARGET_CODES,
-       TOUCH_TARGET_SKIP /* the flight over the track's SKIP button, index 0 (finding 209) */ };
+       TOUCH_TARGET_SKIP /* the flight over the track's SKIP button, index 0 (finding 209) */,
+       TOUCH_TARGET_DPAD /* the D-pad's arms: up, down, left, right (finding 214); 0 unless it steers */ };
 int touch_target(const Touch *t, int kind, int index, float *x, float *y);
 /* Where a control sits now (centre and radius, mm); 0 if the layout has none. */
 int touch_control(const Touch *t, int control, float *x, float *y, float *r);
+/* The same control's half sizes (a box's width and height; a round control's radius twice). */
+int touch_control_size(const Touch *t, int control, float *half_w, float *half_h);
 
 #endif

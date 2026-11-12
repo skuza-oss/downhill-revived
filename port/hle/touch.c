@@ -20,6 +20,11 @@
    - Paused: race touches send nothing; the pause rows are ↓ / ↑ steps then ✕, sent as presses
      the game sees (whole fields of its VBLANKs). A controller used on the pause menu takes it
      over (PAUSE_PAD); the race clock moving again ends any pause state.
+   - The D-pad (finding 214, Steer With: D-pad): four arms around a rest point, where the stick
+     sat; the game gets the pad's own d-pad buttons (full lock, lean, powerslide on a double tap:
+     what a PS2 d-pad does in a race). A thumb on the pad presses the directions its angle from the
+     rest point is in, so a thumb between two arms presses both, never opposite ones, and a slide
+     from arm to arm needs no lift.
    - The game's codes (finding 189): the pause rows' CODES page has the d-pad and the four face
      buttons the codes are made of; ENTER resumes the race and then sends the typed presses as a
      pad player types them (each a short press, well inside the game's code-reading windows), with
@@ -52,6 +57,12 @@ static const float SETTLE_MM = 1.0f, FIRST_LATCH_MM = 4.0f, SHIFT_PREVIEW_MM = 1
 static const float HYSTERESIS_DEG = 12.0f;
 static const float FLICK_PAST_RIM_MM = 4.0f, FLICK_REACH_MM = 45.0f, FLICK_LANE_DEG = 30.0f, FLICK_SPEED = 150.0f;
 static const float GAP_MM = 3.0f, AREA_GROW = 1.2f;
+/* The D-pad (finding 214), at button scale 1: arms 9 mm square, GAP_MM apart (the 9 mm targets of
+   the panels), the rest point's dead zone 60 % of the way to the arms' inner edge. A thumb's angle
+   from the rest point presses a direction within 67.5° of its axis (so a diagonal thumb presses two
+   neighbours, 22.5°-wide bands either side of an axis press one); a band's edge is 4° either way
+   sticky, so a thumb resting on it doesn't flap. */
+static const float DPAD_HALF_MM = 4.5f, DPAD_DEAD = 0.6f, DPAD_REACH_DEG = 67.5f, DPAD_STICKY_DEG = 4.0f;
 static const float REF_W = 154.5f, REF_H = 69.5f;  /* the reference phone (Mi 11i), mm */
 
 /* ---------------------------------------------------------------- layout */
@@ -145,7 +156,11 @@ float touch_button_scale(float s) { return 1.2f * s - 0.2f; }
 
 /* ---------------------------------------------------------------- the state */
 
-enum { JOB_NONE, JOB_STICK, JOB_BUTTON, JOB_PEDAL, JOB_TRICK, JOB_AIR_WAIT, JOB_PANEL, JOB_EDIT, JOB_IGNORED, JOB_SKIP };
+enum { JOB_NONE, JOB_STICK, JOB_BUTTON, JOB_PEDAL, JOB_TRICK, JOB_AIR_WAIT, JOB_PANEL, JOB_EDIT, JOB_IGNORED, JOB_SKIP, JOB_DPAD };
+/* the D-pad's arms, in the order of the CODES page's d-pad (and TOUCH_TARGET_DPAD's indices) */
+enum { DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT, DPAD_ARMS };
+static const uint16_t DPAD_PAD[DPAD_ARMS] = {PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT};
+static const float DPAD_AXIS_DEG[DPAD_ARMS] = {90.0f, -90.0f, 180.0f, 0.0f};   /* y up */
 /* PAUSE_PAD: a controller took over the game's pause menu (or its question) from the rows: the
    overlay no longer knows where the game's menu is, so it hides and leaves the menu to the
    controller until the race goes on. */
@@ -236,6 +251,8 @@ struct Touch {
     /* steering */
     int stick_finger;
     float stick_cx, stick_cy, stick_dx, stick_dy;   /* deflection -1..1 */
+    int dpad_finger;                                  /* the thumb on the D-pad (-1 none) */
+    uint16_t dpad_buttons;                            /* the d-pad buttons it presses now */
     float tilt_deg, tilt_mix;                         /* tilt steering, and its blend in (0..1) */
     int tilt_known;                                   /* a reading has come (none: the stick steers) */
     double tilt_mix_at;
@@ -359,6 +376,50 @@ static int right_handed(const Touch *t) { return !t->set.left_handed; }
 /* x as the right-handed layout has it (the left hand mirrors). */
 static float mirror_x(const Touch *t, float x) { return right_handed(t) ? x : t->screen.width - x; }
 
+/* The D-pad's arms (finding 214): their half size, the distance of an arm's centre from the rest
+   point (the arms are GAP_MM apart, like the other buttons) and the pad's half extent. The size
+   follows the buttons' (touch_button_scale), kept to the room below the Classic bar (or the top
+   buttons) so the pad fits at the Size setting's low end, times the layout editor's size for the
+   stick's home. */
+static float dpad_room(const Touch *t)
+{
+    const Ctl *above = t->set.preset == TOUCH_CLASSIC ? &t->ctl[TC_LBAR] : &t->ctl[TC_CAMERA];
+    return t->screen.height - t->screen.strip_bottom - 1.0f - (above->y + above->hh * AREA_GROW + GAP_MM);
+}
+static float dpad_half(const Touch *t, const TouchEdit *e)
+{
+    float fit = (dpad_room(t) / 2 - GAP_MM) / 3;   /* the pad's half extent, 3 half + GAP_MM, is half the room */
+    float half = DPAD_HALF_MM * t->bs;
+    return (half < fit ? half : fit) * e->size;
+}
+static float dpad_off(const Touch *t, const TouchEdit *e) { return 2 * dpad_half(t, e) + GAP_MM; }
+static float dpad_extent(const Touch *t, const TouchEdit *e) { return dpad_off(t, e) + dpad_half(t, e); }
+
+/* Where the D-pad sits before the player's edits: where the stick's home is, kept below the Classic
+   bar (or the top buttons), above the screen's bottom and clear of the left gesture strip; Classic's
+   also clear of L3 by the buttons' gap (moved left, as far as the strip allows). Right-handed x. */
+static void dpad_home(const Touch *t, const TouchEdit *e, float *x, float *y)
+{
+    float half = dpad_half(t, e), off = dpad_off(t, e), span = dpad_extent(t, e);
+    const Ctl *above = t->set.preset == TOUCH_CLASSIC ? &t->ctl[TC_LBAR] : &t->ctl[TC_CAMERA];
+    float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
+    float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
+    float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
+    *y = bottom < top ? bottom : clampf(*y, top, bottom);
+    if (*x < side) *x = side;
+    const Ctl *l3 = &t->ctl[TC_L3];
+    if (t->set.preset != TOUCH_CLASSIC || !l3->on) return;
+    float lx = mirror_x(t, l3->x);
+    for (; *x > side; *x -= 0.5f) {
+        int clear = 1;
+        for (int a = 0; a < DPAD_ARMS; a++) {
+            float ax = *x + (a == DPAD_LEFT ? -off : a == DPAD_RIGHT ? off : 0), ay = *y + (a == DPAD_UP ? -off : a == DPAD_DOWN ? off : 0);
+            if (hypotf(fmaxf(fabsf(ax - lx) - half, 0), fmaxf(fabsf(ay - l3->y) - half, 0)) - l3->r < GAP_MM) clear = 0;
+        }
+        if (clear) break;
+    }
+}
+
 /* The layout for the settings and the screen. */
 static void lay_out(Touch *t, int hud_moved)
 {
@@ -382,6 +443,8 @@ static void lay_out(Touch *t, int hud_moved)
         else if (p.anchor == AT_BL) x = p.px * REF_W / 100 * s, y = H - (100 - p.py) * REF_H / 100 * s;
         else x = p.px * REF_W / 100, y = p.py * REF_H / 100;
         const TouchEdit *e = &st->edit[st->preset == TOUCH_CLASSIC][c];
+        int dpad = c == TC_STICK && st->dpad;
+        if (dpad) dpad_home(t, e, &x, &y);
         x += e->dx, y += e->dy;
         scale *= e->size;
         if (c == TC_TRICK) scale = e->size * st->trick_size / 31.0f;   /* its own setting */
@@ -393,6 +456,7 @@ static void lay_out(Touch *t, int hud_moved)
         k->r = w / 2 * scale;
         k->hw = w / 2 * scale, k->hh = h / 2 * scale;
         if (c == TC_TRICK) k->r = st->trick_size / 2.0f * e->size;
+        if (dpad) k->r = k->hw = k->hh = dpad_extent(t, e);   /* the pad's half extent: arms reach it */
     }
     /* the camera cutout (read at run time) is kept clear: a control over it moves inward */
     const TouchScreen *sc = &t->screen;
@@ -436,6 +500,15 @@ int touch_control(const Touch *t, int control, float *x, float *y, float *r)
     if (x) *x = k->x;
     if (y) *y = k->y;
     if (r) *r = k->box ? fmaxf(k->hw, k->hh) : k->r;
+    return 1;
+}
+
+int touch_control_size(const Touch *t, int control, float *half_w, float *half_h)
+{
+    if (control < 0 || control >= TC_COUNT || !t->ctl[control].on) return 0;
+    const Ctl *k = &t->ctl[control];
+    if (half_w) *half_w = k->box ? k->hw : k->r;
+    if (half_h) *half_h = k->box ? k->hh : k->r;
     return 1;
 }
 
@@ -847,10 +920,19 @@ static void trick_close(Touch *t)
 
 static int race_on_screen(const Touch *t) { return t->hud_seen > 0 && t->now - t->hud_seen < 250; }
 
-/* The camera's flight over the track (finding 209): the race HUD is not drawn, the race controls
-   do nothing. The one thing a pad does there is START, which skips it: the overlay shows a SKIP
-   button and nothing else. */
-static int flyover_on(const Touch *t) { return t->have_game && t->game.flyover && !t->editor; }
+/* The moments with one thing to press (findings 209, 214): the camera's flight over the track, a
+   movie, the title's attract demo and a race's replay running. The race controls do nothing in
+   them (the pad is the game's own or the recording's) and the one thing a pad does is START (the
+   demo takes any button): the overlay shows one button and nothing else, SKIP, or MENU in a replay
+   (START opens its RE-START / SAVE / QUIT / CONTINUE menu). That menu is a popup like the others:
+   while it is up the replay's clock has stopped and the overlay stands aside for the menus' mouse
+   layer; CONTINUE runs the clock again and the button returns. */
+static int replay_on(const Touch *t) { return t->have_game && t->game.replay && !t->editor; }
+static int flyover_on(const Touch *t)
+{
+    return t->have_game && !t->editor &&
+           (t->game.flyover || t->game.movie || t->game.attract || (t->game.replay && t->game.clock_moving));
+}
 
 int touch_visible(const Touch *t)
 {
@@ -858,6 +940,7 @@ int touch_visible(const Touch *t)
     if (t->pause == PAUSE_PAD) return 0;   /* the controller has the game's menu */
     if (t->pause != PAUSE_NONE) return 1;
     if (flyover_on(t)) return !t->hidden_by_pad;
+    if (replay_on(t)) return 0;            /* the replay's menu, or its load: not the race's controls */
     return race_on_screen(t) && !t->hidden_by_pad;
 }
 
@@ -865,12 +948,12 @@ int touch_visible(const Touch *t)
    brings it back); in the menus a touch is the menus' (their mouse). */
 int touch_owns_touches(const Touch *t)
 {
-    return touch_visible(t) || (t->hidden_by_pad && (race_on_screen(t) || flyover_on(t)));
+    return touch_visible(t) || (t->hidden_by_pad && ((race_on_screen(t) && !replay_on(t)) || flyover_on(t)));
 }
 
 int touch_hud_mode(const Touch *t)
 {
-    if (!t->set.hud_moved || t->editor || !race_on_screen(t) || t->hidden_by_pad) return 0;
+    if (!t->set.hud_moved || t->editor || !race_on_screen(t) || t->hidden_by_pad || replay_on(t)) return 0;
     return right_handed(t) ? 1 : 2;
 }
 
@@ -1035,8 +1118,15 @@ static int in_box(Box b, float x, float y) { return fabsf(x - b.x) <= b.hw && fa
 
 int touch_target(const Touch *t, int kind, int index, float *x, float *y)
 {
-    static const int counts[6] = {PAUSE_ROWS, 2, PANEL_BUTTONS, EDIT_BUTTONS, CODE_BUTTONS, 1};
-    if (kind < 0 || kind > 5 || index < 0 || index >= counts[kind]) return 0;
+    static const int counts[7] = {PAUSE_ROWS, 2, PANEL_BUTTONS, EDIT_BUTTONS, CODE_BUTTONS, 1, DPAD_ARMS};
+    if (kind < 0 || kind > 6 || index < 0 || index >= counts[kind]) return 0;
+    if (kind == TOUCH_TARGET_DPAD) {
+        if (!t->set.dpad || !t->ctl[TC_STICK].on) return 0;
+        float off = dpad_off(t, &t->set.edit[t->set.preset == TOUCH_CLASSIC][TC_STICK]);
+        *x = t->ctl[TC_STICK].x + (index == DPAD_LEFT ? -off : index == DPAD_RIGHT ? off : 0);
+        *y = t->ctl[TC_STICK].y + (index == DPAD_UP ? -off : index == DPAD_DOWN ? off : 0);
+        return 1;
+    }
     Box b = kind == TOUCH_TARGET_PAUSE ? pause_row_box(t, index) : kind == TOUCH_TARGET_CONFIRM ? confirm_box(t, index)
           : kind == TOUCH_TARGET_PANEL ? panel_box(t, index) : kind == TOUCH_TARGET_CODES ? code_box(t, index)
           : kind == TOUCH_TARGET_SKIP ? skip_box(t) : editor_box(t, index);
@@ -1291,6 +1381,9 @@ static void end_finger_job(Touch *t, Finger *f)
     case JOB_STICK:
         if (t->stick_finger == (int)(f - t->f)) t->stick_finger = -1, t->stick_dx = t->stick_dy = 0;
         break;
+    case JOB_DPAD:
+        if (t->dpad_finger == (int)(f - t->f)) t->dpad_finger = -1, t->dpad_buttons = 0;
+        break;
     case JOB_TRICK:
         if (t->trick.on && t->trick.finger == (int)(f - t->f)) {
             if (!t->cross_was_down && f->t0 >= t->cross_release_wall) t->controls_since_release = 1;
@@ -1328,6 +1421,54 @@ static void stick_begins(Touch *t, Finger *f)
     if (t->set.stick_fixed) t->stick_cx = t->ctl[TC_STICK].x, t->stick_cy = t->ctl[TC_STICK].y;
     else t->stick_cx = f->x0, t->stick_cy = f->y0;
     stick_follow(t, f);
+}
+
+/* The D-pad (finding 214): the directions a thumb at x, y presses. Nothing inside the dead zone
+   round the rest point; else every direction whose axis is within DPAD_REACH_DEG of the thumb's
+   angle, which is one direction near an axis and two neighbours between them, never opposite ones
+   (two axes 180° apart can't both be within 71.5°). `held`, the directions pressed now, keep a few
+   degrees more than the others, so a thumb on a band's edge doesn't flap. */
+static uint16_t dpad_read(const Touch *t, float x, float y, uint16_t held)
+{
+    const Ctl *k = &t->ctl[TC_STICK];
+    const TouchEdit *e = &t->set.edit[t->set.preset == TOUCH_CLASSIC][TC_STICK];
+    float dead = DPAD_DEAD * (dpad_off(t, e) - dpad_half(t, e));
+    float dx = x - k->x, dy = y - k->y;
+    if (hypotf(dx, dy) < (held ? dead * 0.8f : dead)) return 0;
+    float angle = atan2f(-dy, dx);   /* y up */
+    uint16_t out = 0;
+    for (int a = 0; a < DPAD_ARMS; a++) {
+        float off = fabsf(angle_diff(angle, DPAD_AXIS_DEG[a] * PI_F / 180)) * 180 / PI_F;
+        if (off < DPAD_REACH_DEG + ((held & DPAD_PAD[a]) ? DPAD_STICKY_DEG : -DPAD_STICKY_DEG)) out |= DPAD_PAD[a];
+    }
+    return out;
+}
+
+static void dpad_set(Touch *t, const Finger *f)
+{
+    uint16_t now = dpad_read(t, f->x, f->y, t->dpad_buttons);
+    if (now & ~t->dpad_buttons) buzz(t, TOUCH_BUZZ_TICK);   /* a direction came */
+    t->dpad_buttons = now;
+}
+
+/* The steering touch of a new finger: the D-pad when it steers (a thumb on or near the pad: its
+   touch area is the pad grown 20 %), else the stick (the steering area). 1 when taken. */
+static int steer_begins(Touch *t, Finger *f)
+{
+    float x = f->x0, y = f->y0;
+    if (in_strip(t, x, y)) return 0;
+    if (t->set.dpad) {
+        const Ctl *k = &t->ctl[TC_STICK];
+        if (t->dpad_finger >= 0 || dist(x, y, k->x, k->y) > k->r * AREA_GROW) return 0;
+        f->job = JOB_DPAD;
+        t->dpad_finger = (int)(f - t->f);
+        t->dpad_buttons = 0;
+        dpad_set(t, f);
+        return 1;
+    }
+    if (!in_rect(x, y, t->steer_x0, t->steer_y0, t->steer_x1, t->steer_y1) || t->stick_finger >= 0) return 0;
+    stick_begins(t, f);
+    return 1;
 }
 
 /* Where a new touch goes, Thumb zones. */
@@ -1375,10 +1516,7 @@ static void route_thumb(Touch *t, Finger *f)
         buzz(t, TOUCH_BUZZ_TICK);
         return;
     }
-    if (in_rect(x, y, t->steer_x0, t->steer_y0, t->steer_x1, t->steer_y1) && !in_strip(t, x, y) && t->stick_finger < 0) {
-        stick_begins(t, f);
-        return;
-    }
+    if (steer_begins(t, f)) return;
     f->job = JOB_IGNORED;
 }
 
@@ -1436,10 +1574,7 @@ static void route_classic(Touch *t, Finger *f)
         buzz(t, TOUCH_BUZZ_TICK);
         return;
     }
-    if (in_rect(x, y, t->steer_x0, t->steer_y0, t->steer_x1, t->steer_y1) && !in_strip(t, x, y) && t->stick_finger < 0) {
-        stick_begins(t, f);
-        return;
-    }
+    if (steer_begins(t, f)) return;
     f->job = JOB_IGNORED;
 }
 
@@ -1532,6 +1667,7 @@ void touch_move(Touch *t, long long id, float x, float y, double now)
     history_add(f, x, y, now);
     switch (f->job) {
     case JOB_STICK: stick_follow(t, f); break;
+    case JOB_DPAD: if (t->dpad_finger == (int)(f - t->f)) dpad_set(t, f); break;
     case JOB_PEDAL: pedal_follow(t, f); break;
     case JOB_TRICK: if (t->trick.on && t->trick.finger == (int)(f - t->f)) trick_step(t, f); break;
     case JOB_EDIT: editor_move(t, f); break;
@@ -2044,6 +2180,7 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint
         if (t->hold_cross_until > 0) b |= PAD_CROSS;
         if (t->trick.on) b |= (uint16_t)(t->trick.sent | (t->trick.triangle ? PAD_TRIANGLE : 0));
         if (t->stick_finger >= 0) sx = t->stick_dx, sy = t->stick_dy;
+        if (t->dpad_finger >= 0) b |= t->dpad_buttons;   /* the d-pad's own buttons: full lock, as a PS2 d-pad */
         if (t->set.tilt && t->tilt_mix > 0) {   /* tilt steers left/right on the ground; the stick's left/right is ignored there */
             float full = 40.0f - 30.0f * clampf((float)t->set.tilt_strength, 0, 100) / 100.0f;
             float tilt = clampf((t->tilt_deg - t->set.tilt_centre) / full, -1, 1);
@@ -2072,7 +2209,7 @@ Touch *touch_new(void)
     if (!t) return NULL;
     touch_settings_default(&t->set);
     t->screen = (TouchScreen){REF_W, REF_H, 0, 0, 0, 0, 0, 0, 0, 0};
-    t->stick_finger = -1;
+    t->stick_finger = t->dpad_finger = -1;
     t->cross_released = t->select_released = -1e9;
     t->cross_release_wall = -1e9;
     t->edit_selected = -1;
@@ -2084,7 +2221,7 @@ void touch_free(Touch *t) { free(t); }
 
 void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen)
 {
-    int preset_changed = s->preset != t->set.preset;
+    int preset_changed = s->preset != t->set.preset || s->dpad != t->set.dpad;   /* the steering touch ends too */
     int hints = t->set.hints_shown;
     t->set = *s;
     if (t->saved) t->set.hints_shown |= hints;   /* a hint shown since the last save isn't lost */
@@ -2166,8 +2303,29 @@ static void draw_top_buttons(const Touch *t, Draw *d, int classic)
     }
 }
 
+/* The D-pad: four boxes round a faint rest ring, each with an arrowhead (a wedge: the shapes have no
+   rotation, and the 8x8 font's carets sit in the top half of their cell); a pressed arm goes green
+   as the other buttons do. */
+static void draw_dpad(const Touch *t, Draw *d)
+{
+    static const float wedge_mid[DPAD_ARMS] = {-PI_F / 2, PI_F / 2, 0, PI_F};   /* the wedge opens away from the point */
+    static const float toward_x[DPAD_ARMS] = {0, 0, -1, 1}, toward_y[DPAD_ARMS] = {-1, 1, 0, 0};
+    const Ctl *k = &t->ctl[TC_STICK];
+    const TouchEdit *e = &t->set.edit[t->set.preset == TOUCH_CLASSIC][TC_STICK];
+    float half = dpad_half(t, e), off = dpad_off(t, e), len = half * 0.95f;
+    put(d, TS_RING, k->x, k->y, DPAD_DEAD * (off - half), 0.3f, 0, 0, 0, rgba(255, 255, 255, 0.35f * d->alpha));
+    for (int a = 0; a < DPAD_ARMS; a++) {
+        float x = k->x + toward_x[a] * off, y = k->y + toward_y[a] * off;
+        int pressed = t->dpad_finger >= 0 && (t->dpad_buttons & DPAD_PAD[a]);
+        box_button(d, x, y, half, half, pressed, d->alpha, "", 0);
+        put(d, TS_SECTOR, x + toward_x[a] * len * 0.5f, y + toward_y[a] * len * 0.5f, 0, len,
+            wedge_mid[a] - 0.7f, wedge_mid[a] + 0.7f, rgba(255, 255, 255, 0.95f * d->alpha), 0);
+    }
+}
+
 static void draw_stick(const Touch *t, Draw *d)
 {
+    if (t->set.dpad) { draw_dpad(t, d); return; }
     float range = (float)(t->set.stick_range > 0 ? t->set.stick_range : 12);
     float ring = fmaxf(range, t->ctl[TC_STICK].r * 0.8f);
     uint32_t line = rgba(255, 255, 255, 0.5f * d->alpha), knob = rgba(255, 255, 255, 0.3f * d->alpha);
@@ -2407,7 +2565,7 @@ static void draw_editor(const Touch *t, Draw *d)
         const Ctl *k = &t->ctl[t->edit_selected];
         char info[48];
         float size = (k->box ? fmaxf(k->hw, k->hh) : k->r) * 2;
-        snprintf(info, sizeof info, "%s %.0f MM", control_labels[t->edit_selected], size);
+        snprintf(info, sizeof info, "%s %.0f MM", t->set.dpad && t->edit_selected == TC_STICK ? "D-PAD" : control_labels[t->edit_selected], size);
         Box a = editor_box(t, EDIT_BUTTONS);
         if (a.hh > 2) a = editor_box(t, EDIT_AIR), a.x += a.hw + 15;   /* one row: beside AIR */
         text(d, a.x, a.y, 2.2f, 0, info, rgba(255, 209, 102, 1));
@@ -2469,7 +2627,7 @@ int touch_shapes(const Touch *t, TouchShape *out, int max)
         int pressed = 0;
         for (int i = 0; i < TOUCH_FINGERS; i++)
             if (t->f[i].used && t->f[i].job == JOB_SKIP && skip_hit(t, t->f[i].x, t->f[i].y)) pressed = 1;
-        box_button(&d, b.x, b.y, b.hw, b.hh, pressed, d.alpha, "SKIP", 3.4f);
+        box_button(&d, b.x, b.y, b.hw, b.hh, pressed, d.alpha, t->game.replay ? "MENU" : "SKIP", 3.4f);
         return d.n;
     }
     if (t->set.preset == TOUCH_CLASSIC) draw_classic(t, &d);

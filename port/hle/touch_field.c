@@ -27,7 +27,9 @@ enum {
     FLYOVER_PHASE = 5,
     RIDER_AIR = 0x2AF2C0 + 0x4564,
     RACE_STATE = 0x4B25A0,     /* D_004B25A0: +0x10C the mode, +0x110, +0x288 */
-    SAVE = 0x4225A0            /* D_004225A0: the save's +0x12199, +0x1219F */
+    SAVE = 0x4225A0,           /* D_004225A0: the save's +0x12199, +0x1219F */
+    RECORDER = 0x43F9F0,       /* D_0043F9F0: the race recorder; +0x44 playing (a replay; func_001A8958 clears it at each race) */
+    MODE_ATTRACT = 10          /* RACE_STATE + 0x10C: the title's attract demo */
 };
 
 int touch_hud_place;    /* widescreen.c: 0 the game's HUD, 1 moved for the right hand, 2 for the left */
@@ -70,6 +72,15 @@ void touch_field(void)
        (phase 0), in a race's loop; the front end's frame ends port_in_race, so a phase 5 left over
        in the menus is not it */
     h.flyover = port_in_race() && EE32(RACE_PHASE) == FLYOVER_PHASE;
+    /* a movie plays: the startup movies, the attract movie, OPTIONS > VIDEO CLIPS. Their skip is
+       START (or Cross) on the pad (func_001EB1D8's startup loop, func_001B53C0), and no menu is up
+       for a tap to go to (finding 214) */
+    h.movie = host_service_movie_playing();
+    /* the title's attract demo (race mode 10: any button ends it) and a race's replay (the recorder
+       plays: the pad is the recording's, START opens the replay's menu): neither takes the race
+       controls, and the menu popups are only the mouse layer's when the overlay stands aside */
+    h.attract = port_in_race() && EE32(RACE_STATE + 0x10C) == MODE_ATTRACT;
+    h.replay = port_in_race() && !h.attract && EE8(RECORDER + 0x44) != 0;
     h.air = race_screen && EE16(RIDER_AIR) != 0;
     h.online = pads_online();
     h.clock_moving = race_screen && clock != last_clock;

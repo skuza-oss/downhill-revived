@@ -62,6 +62,15 @@ const CASES: &[Case] = &[
         key: "scale",
         value: "3",
     },
+    // touch steering (finding 214): the D-pad, saved over an older file that has other touch lines
+    Case {
+        name: "touch steering: the D-pad",
+        text: b"touch_preset = thumb\r\ntouch_steer = tilt\r\nscale = 3\r\n",
+        stored: true,
+        set: &[],
+        key: "touch_steer",
+        value: "dpad",
+    },
     Case {
         name: "the environment wins",
         text: b"fps = 144\nscale = 4\n",

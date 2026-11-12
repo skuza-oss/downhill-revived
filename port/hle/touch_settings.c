@@ -3,9 +3,10 @@
    own popup style (menu_page.c). Each change is saved to dhd.ini at once (touch_* keys) and the
    host's touch controls follow it (TOUCH_COMMAND_SETTINGS); Edit Layout opens the overlay's editor
    over the page, Show Hints Again and Set Tilt Centre are commands too (touch_field.c).
-   Page 1: Layout, Hand, Steer With, Size, Opacity; Edit Layout, More, Back.
-   Page 2: Stick, Stick Range, Trick Stick, Trick Labels, Attacks (the last three dimmed under
-           Classic pad); Prev, More, Back.
+   Page 1: Layout, Hand, Steer With (Stick, Tilt or D-pad; finding 214), Size, Opacity; Edit
+           Layout, More, Back.
+   Page 2: Stick, Stick Range (both dimmed with the D-pad), Trick Stick, Trick Labels, Attacks (the
+           last three dimmed under Classic pad); Prev, More, Back.
    Page 3: Vibration, With A Controller, Show Hints Again, Tilt Strength and Set Tilt Centre (alive
            with tilt steering); Prev, Back.
    Left / right (and the mouse's or a tap's arrows) change a value; Cross steps it forward.
@@ -22,7 +23,7 @@
 #include "settings_table.h"
 
 enum { VALUES = 5, PAGES = 3 };
-enum { DIM_NEVER, DIM_CLASSIC, DIM_NO_TILT };
+enum { DIM_NEVER, DIM_CLASSIC, DIM_NO_TILT, DIM_DPAD };   /* DIM_DPAD: the stick's rows, while the D-pad steers */
 enum { ACT_NONE, ACT_EDIT, ACT_MORE, ACT_PREV, ACT_BACK, ACT_HINTS, ACT_TILT_CENTRE };
 
 typedef struct { const char *label, *key; int dim, action; } Line;   /* key NULL: a button (action) */
@@ -30,7 +31,7 @@ typedef struct { const char *label, *key; int dim, action; } Line;   /* key NULL
 static const Line lines[PAGES][VALUES] = {
     {{"Layout:", "touch_preset", DIM_NEVER, 0}, {"Hand:", "touch_hand", DIM_NEVER, 0}, {"Steer With:", "touch_steer", DIM_NEVER, 0},
      {"Size:", "touch_size", DIM_NEVER, 0}, {"Opacity:", "touch_opacity", DIM_NEVER, 0}},
-    {{"Stick:", "touch_stick", DIM_NEVER, 0}, {"Stick Range:", "touch_stick_range", DIM_NEVER, 0},
+    {{"Stick:", "touch_stick", DIM_DPAD, 0}, {"Stick Range:", "touch_stick_range", DIM_DPAD, 0},
      {"Trick Stick:", "touch_trick_stick", DIM_CLASSIC, 0}, {"Trick Labels:", "touch_labels", DIM_CLASSIC, 0},
      {"Attacks:", "touch_attacks", DIM_CLASSIC, 0}},
     {{"Vibration:", "touch_vibration", DIM_NEVER, 0}, {"With A Controller:", "touch_with_pad", DIM_NEVER, 0},
@@ -78,7 +79,8 @@ static int no_tilt_sensor(void)
 
 static int dimmed(const Line *l)
 {
-    return (l->dim == DIM_CLASSIC && is("touch_preset", "classic")) || (l->dim == DIM_NO_TILT && !is("touch_steer", "tilt"));
+    return (l->dim == DIM_CLASSIC && is("touch_preset", "classic")) || (l->dim == DIM_NO_TILT && !is("touch_steer", "tilt")) ||
+           (l->dim == DIM_DPAD && is("touch_steer", "dpad"));
 }
 
 static void show(MenuPage *p, int row)
@@ -126,6 +128,7 @@ void touch_settings_update(MenuPage *p, int page, int cursor)
     if (!note && cursor >= 0 && cursor < MENU_PAGE_ROWS && row_line[cursor] >= 0) {
         const Line *l = &lines[0][0] + row_line[cursor];
         if (l->dim == DIM_CLASSIC && dimmed(l)) p->hint = "Thumb zones only";
+        else if (l->dim == DIM_DPAD && dimmed(l)) p->hint = "Not with the D-pad";
         else if (l->dim == DIM_NO_TILT && dimmed(l)) p->hint = no_tilt_sensor() ? "No tilt sensor on this device" : "With Steer With: Tilt";
         else if (l->key && !strcmp(l->key, "touch_steer") && no_tilt_sensor()) p->hint = "No tilt sensor on this device";
     }
@@ -139,9 +142,10 @@ void touch_settings_change(MenuPage *p, int page, int row, int step)
     const Line *l = &lines[0][0] + row_line[row];
     const SettingInfo *info = l->key ? info_of(l->key) : NULL;
     if (!info || dimmed(l) || host_service_host_setting_locked(GADDR(info->env))) return;
-    int i = (current(info) + step + info->count) % info->count;
+    int i = current(info);
+    do i = (i + step + info->count) % info->count;
+    while (!strcmp(info->key, "touch_steer") && !strcmp(info->choices[i].value, "tilt") && no_tilt_sensor());   /* skipped: the row's hint says why */
     const char *value = info->choices[i].value;
-    if (!strcmp(info->key, "touch_steer") && !strcmp(value, "tilt") && no_tilt_sensor()) return;   /* the row's hint says why */
     host_service_host_setting_save(GADDR(info->key), GADDR(value));
     host_putenv_s(info->env, value);
     hle_env_changed();

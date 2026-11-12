@@ -117,6 +117,34 @@ fn environment_overrides_and_defaults() {
     assert_eq!(ini.effective("scale", var), "3");
 }
 
+// Touch steering (finding 214): Stick, Tilt and the four-button D-pad are one setting. A dhd.ini
+// written before the D-pad has no line for it and keeps the stick; the D-pad is the value `dpad`,
+// in either spelling of the key, and a save writes only its own line.
+#[test]
+fn touch_steering_choices() {
+    let steer = dhd_settings::find("touch_steer").unwrap();
+    let values: Vec<_> = steer.choices.iter().map(|c| (c.value, c.label)).collect();
+    assert_eq!(values, [("stick", "Stick"), ("tilt", "Tilt"), ("dpad", "D-pad")]);
+    assert_eq!((steer.default, steer.builtin), ("stick", "stick"));
+    assert_eq!(steer.label("dpad"), Some("D-pad"));
+    // an older dhd.ini (touch lines, none for the steering), an empty line, none at all
+    let older = "touch_preset = thumb\ntouch_hand = left\nscale = 3\n";
+    assert_eq!(env_of(older, &[])["DHD_TOUCH_STEER"], "stick");
+    assert_eq!(env_of("touch_steer =\n", &[])["DHD_TOUCH_STEER"], "stick");
+    assert_eq!(Ini::parse(older.as_bytes()).value("touch_steer"), "stick");
+    // the new value, by key and by variable name; the environment wins
+    assert_eq!(env_of("touch_steer = dpad\n", &[])["DHD_TOUCH_STEER"], "dpad");
+    assert_eq!(env_of("DHD_TOUCH_STEER = dpad\n", &[])["DHD_TOUCH_STEER"], "dpad");
+    assert_eq!(Ini::parse(b"Touch_Steer = tilt\n").value("touch_steer"), "tilt");
+    assert!(!env_of("touch_steer = dpad\n", &["DHD_TOUCH_STEER"]).contains_key("DHD_TOUCH_STEER"));
+    // saving the choice rewrites its own line and keeps every other byte; an older file gets one line
+    assert_eq!(saved(b"touch_steer = tilt\nscale = 3\n", "touch_steer", "dpad"), b"touch_steer = dpad\nscale = 3\n");
+    let after = saved(older.as_bytes(), "touch_steer", "dpad");
+    assert!(after.starts_with(older.as_bytes()), "{}", String::from_utf8_lossy(&after));
+    assert_eq!(Ini::parse(&after).value("touch_steer"), "dpad");
+    assert!(Ini::parse(&after).unknown_keys().is_empty());
+}
+
 #[test]
 fn unknown_lines() {
     let text = "[x]\nno equals sign here\nfoo = bar\nDHD_SOMETHING = 7\nDHD_EMPTY =\n= no key\ngame_options = 1 2 3\n";

@@ -179,6 +179,7 @@ Menus and riding:
 | `DHD_AUTOPAD_FRAMES` | button script by field count, `field:length:button,...` |
 | `DHD_AUTOPAD` | button script by seconds |
 | `DHD_TOUCH_WITH_SCRIPT=1` | the touch controls' buttons are merged into player 1's pad also when `DHD_NAV` / `DHD_AUTOPAD*` drive it, so a `DHD_NAV` route can end at a screen and touches (`DHD_TOUCH_MOUSE=1`) take it from there (finding 209) |
+| `DHD_TOUCH_SCRIPT` | the touch controls' fingers by the race clock while the race HUD shows, `S:down\|move\|up:ID:X:Y;...` (S race seconds, X and Y in mm of the touch screen): the same events a screen gives, so a thumb can be held, dragged and two fingers can touch at once, which posted mouse messages on a hidden desktop can't (finding 214); needs `DHD_TOUCH_MOUSE=1` |
 | `DHD_RACE_PAD` | in-race script by race clock seconds, `start:length:button,...`; does nothing without `DHD_RACE_SYNC=1` and a menu script (below) |
 | `DHD_RACE_SYNC=1` | race scripts run on the race clock; without it `DHD_RACE_PAD` gives the rider no input (online tools: `online_riders.rider_env`, finding 206) |
 | `DHD_KEYS` | (race clock) keys through the keyboard's layout, `start:length:key[+key],...` with dhd.ini's key names (`space`, `j`, `kp1`, ...) or `esc` |
@@ -261,7 +262,10 @@ with `DHD_MEMCARD_DIR`, `DHD_SCALE`, `DHD_FPS`, `DHD_WINDOW*`, `DHD_RENDER=nativ
   together, and tap again when the touch trace (`DHD_TOUCH_LOG=1`) shows no `up`. Touch runs
   (`DHD_TOUCH_MOUSE=1`) can't use `DHD_NAV` or the other pad scripts: they replace the live pad,
   touches included, unless `DHD_TOUCH_WITH_SCRIPT=1` merges them back in (finding 209); else drive
-  the menus by posted keys (finding 189).
+  the menus by posted keys (finding 189). A finger *held* or *dragged* by posted messages doesn't
+  work either (SDL loses the mouse focus after each posted move, so a later up or move is lost;
+  the OS cursor's jump after a move is dropped for the touch controls as for the menus' mouse,
+  `touch_host.c`): hold and drag with `DHD_TOUCH_SCRIPT` (finding 214), tap with posted messages.
 - **Posted keys don't reach the room under `DHD_NET_SCRIPTED`.** Use the scripted hooks
   (`DHD_NET_TEST_TRACK`, `DHD_NET_TEST_READY`) instead.
 - **A pad script shuts the keyboard out.** With `DHD_NAV`, `DHD_AUTOPAD` or `DHD_AUTOPAD_FRAMES`
