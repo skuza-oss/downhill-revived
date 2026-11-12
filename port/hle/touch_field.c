@@ -14,6 +14,7 @@
    the game waits here, then forgets the stall (no game time is caught up after it). */
 #include "hle.h"
 #include "../include/fps.h"
+#include "menu_page.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -106,8 +107,15 @@ void touch_field(void)
     h.replay = port_in_race() && !h.attract && EE8(RECORDER + 0x44) != 0;
     h.air = race_screen && EE16(RIDER_AIR) != 0;
     h.online = pads_online();
-    h.clock_moving = race_screen && clock != last_clock;
+    /* moving: the clock advanced within the last 1.5 fields' time. Above 60 updates a second most
+       updates advance no whole field; "no change since the last update" took a running replay for
+       its menu and an unpaused race for a paused one on them (finding 218) */
+    static double last_change;
+    double wall = host_wall_seconds();
+    if (clock != last_clock) last_change = wall;
+    h.clock_moving = race_screen && wall - last_change < 1.5 / 60;
     last_clock = clock;
+    h.menu_up = menu_popup_up();
     if (race_screen) last_ms = port_field_seconds(clock) * 1000.0;
     h.race_ms = last_ms;
     pause_rows(h.pause_row);

@@ -816,6 +816,7 @@ static void test_replay_attract(void)
         CHECK(buttons() == PAD_START);
         fields(1);
         game.clock_moving = 0;   /* the replay's menu opened: RE-START, SAVE, QUIT, CONTINUE */
+        game.menu_up = 1;        /* (the popup manager's page, finding 218) */
         field();
         CHECK(!buttons() && !touch_visible(t) && !touch_owns_touches(t));
         touch_down(t, 3, sx, sy, now);
@@ -823,6 +824,7 @@ static void test_replay_attract(void)
         fields(5);
         CHECK(!buttons());   /* the tap is the menu's (the mouse layer), not START again */
         game.clock_moving = 1;   /* CONTINUE */
+        game.menu_up = 0;
         fields(2);
         CHECK(touch_visible(t));
         game.replay = 0;
@@ -842,6 +844,60 @@ static void test_replay_attract(void)
         fields(6);
         CHECK(!buttons() && !touch_visible(t));
     }
+}
+
+/* Finding 218: a replay at a high rate (120 updates a second): most updates advance no whole field,
+   so one update's clock delta says "stopped" every other update while the replay plays. MENU stays,
+   a finger held on it stays its press, and its START goes once; only the popup (menu_up) puts the
+   overlay aside. */
+static void test_replay_high_rate(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    game.fps = 120;
+    game.replay = 1;
+    game.clock_moving = 0;   /* the replay's load and countdown: nothing shows yet */
+    fields(3);
+    CHECK(!touch_visible(t));
+    float sx, sy;
+    int visible = 0, updates = 0, starts = 0, was_start = 0;
+    for (int i = 0; i < 12; i++) {   /* 120 a second: half a field each update */
+        now += 1000.0 / 120;
+        game.vsync++;
+        game.clock_moving = i % 2 == 0;
+        touch_update(t, &game, now);
+    }
+    assert(touch_target(t, TOUCH_TARGET_SKIP, 0, &sx, &sy));
+    touch_down(t, 1, sx, sy, now);   /* held across the updates */
+    for (int i = 0; i < 24; i++) {
+        now += 1000.0 / 120;
+        game.vsync++;
+        game.clock_moving = i % 2 == 0;   /* what an update-by-update delta gave before this finding */
+        touch_update(t, &game, now);
+        visible += touch_visible(t) && touch_owns_touches(t);
+        updates++;
+        int start_now = (buttons() & PAD_START) != 0;
+        if (start_now && !was_start) starts++;
+        was_start = start_now;
+    }
+    touch_up(t, 1, sx, sy, now);
+    for (int i = 0; i < 12; i++) {
+        now += 1000.0 / 120;
+        game.vsync++;
+        game.clock_moving = i % 2 == 0;
+        touch_update(t, &game, now);
+        int start_now = (buttons() & PAD_START) != 0;
+        if (start_now && !was_start) starts++;
+        was_start = start_now;
+    }
+    CHECK(visible == updates);   /* MENU on every update */
+    CHECK(starts == 1);          /* the held tap went once, never withdrawn and sent again */
+    game.menu_up = 1;            /* the replay's menu: the overlay stands aside */
+    now += 1000.0 / 120, game.vsync++;
+    touch_update(t, &game, now);
+    CHECK(!touch_visible(t) && !touch_owns_touches(t));
+    game.menu_up = 0;
+    game.fps = 60;
+    game.replay = 0;
 }
 
 /* The trick-stick hint: it holds the game until a push, and when the hold ends without one (5 s)
@@ -1885,6 +1941,7 @@ int main(void)
     test_flyover();
     test_movie_skip();
     test_replay_attract();
+    test_replay_high_rate();
     test_editor_bar();
     test_trick_hint();
     test_classic_resume();

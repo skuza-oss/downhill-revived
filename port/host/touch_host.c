@@ -495,7 +495,7 @@ void host_service_touch_field(uint32_t address)
     touch_tilt(touch, known, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
     TouchGame g;
     memset(&g, 0, sizeof g);
-    g.race_hud = h->race_hud, g.flyover = h->flyover, g.movie = h->movie, g.replay = h->replay, g.attract = h->attract, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
+    g.race_hud = h->race_hud, g.flyover = h->flyover, g.movie = h->movie, g.replay = h->replay, g.attract = h->attract, g.menu_up = h->menu_up, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
     for (int i = 0; i < 3; i++) g.pause_row[i] = h->pause_row[i];
     g.race_ms = h->race_ms, g.vsync = h->vsync, g.fps = h->fps;
     trace_race_ms = h->race_ms;

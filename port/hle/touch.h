@@ -85,7 +85,9 @@ typedef struct {
     int attract;         /* the title's attract demo: any button ends it */
     int air;             /* player 1's rider is in the air (rider +0x4564, finding 141) */
     int online;          /* an online race (no pause: the panel) */
-    int clock_moving;    /* the race clock advanced since the last field */
+    int clock_moving;    /* the race clock advanced within the last 1.5 fields' time: at a high rate
+                            most updates advance no whole field (finding 218) */
+    int menu_up;         /* a game popup is up: in a replay, its menu (finding 218) */
     int pause_row[3];    /* the game's pause menu: RESUME, RE-START, QUIT's rows (-1: none) */
     double race_ms;      /* race time, ms (fields * 1000/60), stopped while paused */
     uint32_t vsync;      /* the game's VBLANKs so far */

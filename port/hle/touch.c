@@ -283,6 +283,7 @@ struct Touch {
     int race_new;
     int race_was_on;           /* the race was on screen at the last update */
     int fly_was;               /* the flight over the track played at the last update (finding 209) */
+    int replay_ran;            /* this replay's clock has moved (its load and countdown are over; finding 218) */
     int skip_pulse;            /* a SKIP tap's START press is going out */
     unsigned downs;            /* touch-downs so far (Finger.order) */
 };
@@ -993,13 +994,15 @@ static int race_on_screen(const Touch *t) { return t->hud_seen > 0 && t->now - t
    them (the pad is the game's own or the recording's) and the one thing a pad does is START (the
    demo takes any button): the overlay shows one button and nothing else, SKIP, or MENU in a replay
    (START opens its RE-START / SAVE / QUIT / CONTINUE menu). That menu is a popup like the others:
-   while it is up the replay's clock has stopped and the overlay stands aside for the menus' mouse
-   layer; CONTINUE runs the clock again and the button returns. */
+   while it is up (menu_up, the popup manager's own state: finding 218; one update's clock delta
+   said "stopped" on most updates above 60 a second, and MENU flickered, a held tap was dropped) the
+   overlay stands aside for the menus' mouse layer; CONTINUE closes it and the button returns. The
+   replay's load and countdown show nothing (replay_ran: its clock hasn't moved yet). */
 static int replay_on(const Touch *t) { return t->have_game && t->game.replay && !t->editor; }
 static int flyover_on(const Touch *t)
 {
     return t->have_game && !t->editor &&
-           (t->game.flyover || t->game.movie || t->game.attract || (t->game.replay && t->game.clock_moving));
+           (t->game.flyover || t->game.movie || t->game.attract || (t->game.replay && t->replay_ran && !t->game.menu_up));
 }
 
 int touch_visible(const Touch *t)
@@ -2140,6 +2143,7 @@ static void hints_step(Touch *t)
    guard holds back would otherwise wait for the old race's time). */
 static void race_clock_back(Touch *t, double delta)
 {
+    t->replay_ran = 0;   /* a replay started again: its countdown first */
     #define SHIFT(v) do { if ((v) > -1e8) (v) += delta; } while (0)
     SHIFT(t->cross_released);
     SHIFT(t->select_released);
@@ -2186,6 +2190,8 @@ void touch_update(Touch *t, const TouchGame *game, double now)
     int was_on = t->race_was_on;
     t->game = *game;
     t->have_game = 1;
+    if (!game->replay) t->replay_ran = 0;
+    else if (game->clock_moving) t->replay_ran = 1;
     if (game->race_hud) {
         if (!was_on) t->race_new = 1;
         t->hud_seen = now;

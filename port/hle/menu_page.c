@@ -199,6 +199,10 @@ void menu_page_run(MenuPage *p)
 
 void menu_page_close(MenuPage *p) { (void)p; func_00190688(D_003F52D0); }
 
+/* A popup is up (the manager has a page and isn't closing it): the game's own (the replay's menu,
+   the pause menu) or one of ours. The touch overlay stands aside for it (finding 218). */
+int menu_popup_up(void) { return *(void **)(D_003F52D0 + M_MENU) && !D_003F52D0[M_CLOSING]; }
+
 /* The menus' styles where no page runs (online.c's race menu, drawn over a running race): a
    SharedMenu constructed once and never run, whose UiStyles are every menu's. */
 MenuStyle menu_game_style(int which)
