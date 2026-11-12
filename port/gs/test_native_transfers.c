@@ -19,6 +19,7 @@ volatile int gs_native_view;
 double host_seconds(void) { return GetTickCount64()/1000.0; }
 double host_wall_seconds(void) { return host_seconds(); }
 void host_thread_name(const char *n) {(void)n;}
+void host_end_add(int stage, const char *name, void (*fn)(void)) { (void)stage; (void)name; atexit(fn); }  /* as atexit did */
 void host_putenv_s(const char *name, const char *value) {_putenv_s(name, value);}
 void pacing_handed(double *d,double *b) {*d=*b=0;}
 void pacing_present(double d,double b) {(void)d;(void)b;}

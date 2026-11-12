@@ -101,10 +101,34 @@ def guest_tests():
     run('sound', [HLE / 'sound.c', HLE / 'test_sound.c'], defines=['SND_NO_HOST'])
 
 
+END_STUB = ROOT / 'port/host/test_host_end_stub.c'  # host_end.h's registration for programs that never end through it
+
+
+def end_tests():
+    """How the process ends (port/host/host_end.c, finding 210)."""
+    import time
+    exe = testprog.host('host-end', [ROOT / 'port/host/host_end.c', ROOT / 'port/host/test_host_end.c'], sdl=True)
+    p = testprog.run(exe, 'order', expect=7, quiet=True)
+    # by stage, the last added first within one, and no atexit handler after host_end
+    assert p.stdout.splitlines() == ['workers', 'render', 'report', 'devices b', 'devices a', 'log'], p.stdout  # no atexit after
+    p = testprog.run(exe, 'exit', expect=4, quiet=True)  # a missed path ends in the same order
+    assert p.stdout.splitlines() == ['render', 'log', 'atexit ran'], p.stdout
+    p = testprog.run(exe, 'thread', quiet=True)  # joined first, no destructor under the thread
+    assert 'thread joined' in p.stdout and 'VIOLATION' not in p.stdout and 'destructor done' not in p.stdout, p.stdout
+    # the Android abort in miniature: without the stop handler the destructor runs under the thread
+    p = testprog.run(exe, 'unjoined', expect=42, quiet=True)
+    assert 'VIOLATION' in p.stdout, p.stdout
+    start = time.time()
+    p = testprog.run(exe, 'hang', env={'DHD_END_TIMEOUT_MS': '300'}, expect=5, quiet=True)
+    assert 'still running' in p.stderr and 'stuck' in p.stderr and time.time() - start < 5, p.stderr
+    testprog.run(exe, 'nested', expect=9, quiet=True)
+
+
 def host_tests():
     """The host's code: the GS, its captures, VU1 and the VIF, the graphics queue and the SDL
     devices. The GS renderer's own tests (test_gpu, test_depth, test_present) run on the Rust
     renderer: port/tools/test_gs_wgpu.py."""
+    end_tests()
     gs = [GS / 'memory.c', GS / 'gs.c']
     run = lambda name, sources, *args, env=None, **kw: testprog.run(testprog.host(name, sources, **kw), *args, env=env)
     run('gs', gs + [GS / 'display.c', GS / 'test_gs.c'], low=True)
@@ -114,9 +138,9 @@ def host_tests():
     testprog.run(capture, capture_dir)
     testprog.run(capture, capture_dir, 6)
     run('vu1', [RT / 'vu0_interp.c', RT / 'test_vu1.c', testprog.HOST_FP] + gs, low=True)
-    vif = [RT / 'vu0_interp.c', HLE / 'vif.c', HLE / 'graphics.c', HLE / 'test_vif.c'] + gs
+    vif = [RT / 'vu0_interp.c', HLE / 'vif.c', HLE / 'graphics.c', HLE / 'test_vif.c', END_STUB] + gs
     run('vif', vif, low=True)
-    queue = testprog.host('graphics-queue', [HLE / 'graphics_queue.c', HLE / 'test_graphics_queue.c'],
+    queue = testprog.host('graphics-queue', [HLE / 'graphics_queue.c', HLE / 'test_graphics_queue.c', END_STUB],
                           defines=['GRAPHICS_QUEUE_TEST'], sdl=True, low=True)
     testprog.run(queue)
     testprog.run(queue, 'inline')
@@ -126,7 +150,8 @@ def host_tests():
     # SDL thread (host/sdl_host.c), the keyboard and the text field it feeds (W11)
     # and gamepad.c's reading of what SDL reports: the pads' kinds and the sticks' dead zone (finding 134)
     gamepad = testprog.host('gamepad', [HLE / 'gamepad.c', HLE / 'keyboard.c', HLE / 'text_input.c',
-                                        ROOT / 'port/host/sdl_host.c', HLE / 'test_gamepad.c'], sdl=True, low=True)
+                                        ROOT / 'port/host/sdl_host.c', HLE / 'test_gamepad.c', END_STUB],
+                          sdl=True, low=True)
     testprog.run(gamepad)
     testprog.run(gamepad, 'mapping')
     # the touch controls' rules: scaling, flick lanes, sprint and resume guards, the trick stick,

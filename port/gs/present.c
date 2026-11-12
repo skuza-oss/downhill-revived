@@ -22,6 +22,7 @@
 #include "../hle/text_input.h"
 #include "perf_log.h"
 #include "gs_mesh.h"   /* gs_mesh_setting_read (Native VU, finding 194) */
+#include "../host/host_end.h"   /* how the game ends (finding 210) */
 
 static uint32_t pixels[1024 * 1024];
 static int initialized, disabled, resize_pending;
@@ -554,7 +555,8 @@ void gs_window_event(unsigned type)
 }
 
 /* EXIT GAME (port/hle/exit_menu.c): the window closes as when its close button is clicked, and
-   the game ends at the next gs_pump_messages. */
+   the game ends at the next gs_pump_messages (host_end: the work threads and the render thread
+   stop first, then the process leaves; finding 210). */
 void gs_window_close(void)
 {
     if (sdl_window) {
@@ -565,7 +567,7 @@ void gs_window_close(void)
         SDL_PushEvent(&e);  /* the SDL thread sees it: gs_window_event */
         return;
     }
-    exit(0);
+    host_end(0);
 }
 
 static void hide_window(void *unused)
@@ -589,14 +591,14 @@ static void graphics_lost(void)
                    "Update the graphics driver (from the maker of your computer or of its graphics chip) "
                    "and start the game again. If it happens again, please report it with dhd.log, which "
                    "is next to the game.");
-    exit(1);
+    host_end(1);
 }
 
 /* The window's events are the SDL thread's (sdl_host.c); here the game ends once the window closed,
    or with a message once the GPU device was lost. */
 void gs_pump_messages(void)
 {
-    if (window_closed) exit(0);
+    if (window_closed) host_end(0);
     if (gs_gpu_lost()) graphics_lost();
 }
 
@@ -889,7 +891,7 @@ static void graphics_failed(void)
                           "chips, open Windows Settings > System > Display > Graphics, add the game and choose High "
                           "performance.\n\nThe details are in dhd.log, next to the game.";
     host_error_box("Downhill Revived", message);
-    exit(1);
+    host_end(1);
 }
 
 /* Plain MMIO pages are the authoritative privileged register storage: the GS takes them at each

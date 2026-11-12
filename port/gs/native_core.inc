@@ -43,6 +43,7 @@
 #include <math.h>
 #include <limits.h>
 #include "native_thread.h"  /* locks, the render thread, sleeps (SDL3; none in the browser) */
+#include "../host/host_end.h"  /* the render thread stops at the end of the process (finding 210) */
 #include "texpack.h"
 #include "font_sharp.h"
 #include "native_frontend.h"
@@ -305,6 +306,7 @@ typedef struct Native {
     unsigned pending_count, free_count;
     uint64_t handed, rendered;
     int quit, resize;
+    int thread_exited;               /* the render thread has left its loop for good (queue_lock; native_stop) */
     NativeWindow window;
     float aspect;  /* the picture's shape in the window (DHD_ASPECT): width/height, 0 stretched, -1 its pixels */
     float wide;    /* widescreen's shape, or 0: fields of 2D only (loading screens) are shown 4:3 */
@@ -2972,9 +2974,42 @@ static int SDLCALL native_thread(void *argument)
     dhdr_exact_set_submitter(native_exact_run, n);
     fprintf(stderr, "gs: exact submits run on the render thread\n");
 #endif
-    if (n->interp) { native_interp_thread(n); return 0; }
-    while (native_render_next(n)) {}
+    if (n->interp) native_interp_thread(n);
+    else while (native_render_next(n)) {}
+    /* Left for good (native_stop): from here this thread touches nothing of the renderer's. A call
+       the exact renderer posted meanwhile is run by its poster from now on (native_call.live). */
+    native_mutex_lock(&n->queue_lock);
+#ifdef NATIVE_EXACT_ON_RENDER
+    native_call.live = 0;
+    native_serve_call(n);
+#endif
+    n->thread_exited = 1;
+    native_cond_broadcast(&n->queue_changed);
+    native_mutex_unlock(&n->queue_lock);
     return 0;
+}
+
+/* The end of the process (host_end.h, the render stage): the render thread finishes the picture it
+   is drawing and leaves; waits for it 1 s at most (a present stuck in the driver), then goes on
+   without it. Finding 210: exit() with this thread alive let the GPU driver's static destructors
+   destroy a mutex it then locked (bionic aborts on that). */
+static Native *native_reported;
+static void native_stop(void)
+{
+    Native *n = native_reported;
+    if (!n) return;
+    native_mutex_lock(&n->queue_lock);
+    if (!n->thread) { native_mutex_unlock(&n->queue_lock); return; }
+    n->quit = 1;
+    native_cond_broadcast(&n->queue_changed);
+    for (int waited = 0; !n->thread_exited && waited < 1000; waited++) {
+        native_mutex_unlock(&n->queue_lock);
+        native_sleep_ns(1000000);
+        native_mutex_lock(&n->queue_lock);
+    }
+    int exited = n->thread_exited;
+    native_mutex_unlock(&n->queue_lock);
+    if (!exited) fprintf(stderr, "gs native: the render thread did not stop within 1 s; the process leaves without it\n");
 }
 #endif
 
@@ -3268,7 +3303,9 @@ static void native_profile(Native *n)
 }
 
 static void native_exit_report(void);
+#ifdef NATIVE_INLINE
 static Native *native_reported;
+#endif
 static void native_exit_report(void) { if (native_reported) native_profile(native_reported); }
 
 /* DHD_ASPECT: 4:3 (a television's picture, the default), 16:9 or any W:H, stretch, pixels, or
@@ -3377,7 +3414,10 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
             fputs("field,t,cpu_ms,gpu_ms,draws,self_copies,self_copy_px,copies,copy_px,imports,import_px\n", n->trace_pictures);
     }
     native_reported = n;
-    atexit(native_exit_report);
+#ifndef NATIVE_INLINE
+    host_end_add(HOST_END_RENDER, "render thread", native_stop);
+#endif
+    host_end_add(HOST_END_REPORT, "native report", native_exit_report);
     fprintf(stderr, "gs: native renderer (DHD_RENDER=native); exact GS only for the Z probe\n");
     fprintf(stderr, "gs: native renderer on %s\n", api);
     /* what was asked (the scale in use: "gs native: resolution scale" at the first picture) */

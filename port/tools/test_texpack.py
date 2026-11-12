@@ -212,7 +212,7 @@ def build(texpack, exe):
     rc.write_text('1 24 "%s"\n' % (ROOT / 'port/res/dhd.manifest').as_posix(), encoding='utf-8')
     subprocess.run([str(LLVM / 'llvm-rc.exe'), '/fo', str(exe.with_suffix('.res')), str(rc)], check=True)
     sources = [exe.with_suffix('.res'), ROOT / 'port/gs/test_texpack.c', texpack, ROOT / 'port/gs/memory.c', ROOT / 'port/host/host_sdl.c',
-               ROOT / 'port/runtime/sha256.c', ROOT / 'port/net/net.c', ROOT / 'port/net/client.c',
+               ROOT / 'port/host/test_host_end_stub.c', ROOT / 'port/runtime/sha256.c', ROOT / 'port/net/net.c', ROOT / 'port/net/client.c',
                ROOT / 'port/net/json.c', ROOT / 'port/net/hash.c']
     cmd = ['clang', '--target=' + TARGET, '-O1', '-w', '-fms-runtime-lib=static', '-D_CRT_SECURE_NO_WARNINGS',
            '-I' + str(ROOT / 'port/gs'), '-I' + str(ROOT / 'port/include'), '-I' + str(ROOT / 'port/runtime'),
