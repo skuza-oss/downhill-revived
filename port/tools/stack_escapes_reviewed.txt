@@ -1,0 +1,52 @@
+# port/tools/stack_escapes.py: the reviewed candidates (finding 213).
+# One line each: FUNCTION LOCAL CALLEE VERDICT REASON
+#   fixed  a port patch declares the object the EE frame holds (the patch named; --check makes sure
+#          its unit still has port patches)
+#   safe   read and proven harmless (the reason says why)
+# `python port/tools/stack_escapes.py --check` fails on a write overrun or a sprintf format overrun
+# not listed here. A new line needs the code read, not the tool's word.
+
+# write overruns
+func_0019E550 sp60 func_00184940 fixed unsorted/0019E550.c: header + menu are one object (finding 207)
+func_00155BA8 angle func_00221888 fixed unsorted/00155BA8.c: sqc2 into a float, the EE quadword (finding 213)
+func_0017E440 value func_0017E670 fixed unsorted/0017E440.c: sqc2 into a float through func_0017E670 (finding 213)
+func_001F8CA8 tmp func_00203590 fixed unsorted/001F8CA8.c: a 16-byte AnimationHandle in 12 bytes (finding 213)
+func_0013C6A8 tmp func_00203590 fixed unsorted/0013C6A8.cpp: a 16-byte AnimationHandle in 12 bytes (finding 213)
+func_00150C58 handle func_00203590 fixed unsorted/001508D8.cpp: a 16-byte AnimationHandle in 12 bytes (finding 213)
+func_00242998 distance func_00242D08 fixed unsorted/00242998.cpp: sqc2 into float[2] (an older patch in port/patches.py)
+
+# sprintf formats (the format's shortest text is longer than the local, or its longest could be)
+func_0017A678 buf func_00254D68 fixed unsorted/0017A678.cpp: "%d MORE CREDITS REQUIRED TO ADVANCE" in 32 bytes (finding 094)
+func_0015D578 text func_00254D68 safe hours, minutes, seconds are % 60 (at most 32 with the NUL, signs included); 33+ for trick points needs an average of 10^9
+func_0015D958 buffer func_00254D68 safe "%d:%02d:%02d" of values % 60: at most 12 bytes
+func_00177DA0 buf func_00254D68 safe the value is clamped to 0..99 before "%2.0f "
+func_0019E550 sp50 func_00254D68 safe "poster%d" with the loop index 0..8
+
+# read overruns (listed by --report, not failing)
+func_001AE358 c func_00221AB8 fixed unsorted/001AE358.cpp: c, d, e, unused are the rows of one matrix (finding 213)
+func_001F8CA8 tmp func_002038E0 fixed unsorted/001F8CA8.c: reads the AnimationHandle back (with the write above)
+func_00155BA8 normalized func_00221888 safe lqc2 of a float[3]: the w lane is not used (vmul.xyz), the port aligns the array to 16
+func_00158680 zeros func_00209618 safe lqc2 of a float[3], the w lane unused
+func_00158840 args func_00209618 safe lqc2 of a float[3], the w lane unused
+func_00207E68 rot func_00222040 safe lqc2 of a float[3] into the VU0 sin/cos routine, w unused
+func_0019E550 sp50 func_00185938 safe strcmp of a NUL-terminated name
+func_00131198 list func_00211610 safe sorted[j - 1] with j >= 1: the tool's loop widening
+func_001465D8 sorted func_00211610 safe sorted[j - 1] with j >= 1: the tool's loop widening
+func_00184FB8 name func_00246960 safe a NUL-terminated path, read to its end
+func_00185730 path func_00246960 safe a NUL-terminated path, read to its end
+func_00185818 path func_00246960 safe a NUL-terminated path, read to its end
+func_00186610 path func_00246960 safe a NUL-terminated path, read to its end
+func_001866F8 path func_00246960 safe a NUL-terminated path, read to its end
+func_00185488 path func_002460F8 safe a NUL-terminated path, read to its end
+func_00185DE0 path func_002460F8 safe a NUL-terminated path, read to its end
+func_00186320 path func_002460F8 safe a NUL-terminated path, read to its end
+func_001C7D68 name strncmp safe strncmp stops at the NUL
+func_001C7E98 name strncmp safe strncmp stops at the NUL
+func_001C8F60 name strncmp safe strncmp stops at the NUL
+func_001C9128 name strncmp safe strncmp stops at the NUL
+func_0013C6A8 tmp func_00203C28 fixed unsorted/0013C6A8.cpp: reads the AnimationHandle back (with the write above)
+func_00150C58 handle func_00204230 fixed unsorted/001508D8.cpp: reads the AnimationHandle back (with the write above)
+func_00150C58 handle func_002038E0 fixed unsorted/001508D8.cpp: reads the AnimationHandle back (with the write above)
+func_001C7FC8 name strncmp safe strncmp stops at the NUL
+func_001C9378 name strncmp safe strncmp stops at the NUL
+func_001CFB60 name strncmp safe strncmp stops at the NUL
