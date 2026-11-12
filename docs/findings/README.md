@@ -239,6 +239,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 206 | [the online test tools drive their riders; the room card's state beside its tags](206-online-test-riders-room-card.md) | current |  |
 | 207 | [Posters in OPTIONS closes the game (issue 87)](207-posters-crash.md) | current |  |
 | 209 | [Touch controls can skip the flight over the track](209-touch-skip-flyover.md) | in progress |  |
+| 215 | [Online, the race menu does not pause the race](215-online-menu-no-pause.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
