@@ -78,6 +78,21 @@ int main(void)
         assert(mosh_points(&h) == 500 && !mosh_take(&h, &b, 1, 0));
     }
 
+    /* The published table stands (finding 221): a copy, so scores that change after it was taken
+       change neither its order nor a rider's place in it. */
+    {
+        MoshScore live[3] = {score(100, 0, 0), score(200, 0, 0), score(300, 0, 1)}, table[3], later = score(1000, 0, 1);
+        int o1[3], o2[3];
+        mosh_publish(table, live, 3);
+        mosh_order(table, 3, o1);
+        assert(mosh_take(&live[0], &later, 0, 1) && mosh_points(&live[0]) == 1000);  /* a late final */
+        mosh_order(table, 3, o2);
+        assert(o1[0] == 2 && o1[1] == 1 && o1[2] == 0 && !memcmp(o1, o2, sizeof o1));
+        assert(mosh_place(table, 3, 0) == 3 && mosh_points(&table[0]) == 100);
+        mosh_order(live, 3, o2);  /* the live scores would order it differently */
+        assert(o2[0] == 0);
+    }
+
     /* the table: points first, a tie to the lower global id; the same on every PC whatever order
        the scores arrived in (the table reads only the numbers) */
     MoshScore t[6] = {score(300, 2, 1), score(500, 0, 1), score(300, 1, 1), score(0, 4, 1), score(900, 1, 1),

@@ -133,4 +133,12 @@ static inline int mosh_take(MoshScore *held, const MoshScore *got, int sender, i
     return 1;
 }
 
+/* The table that stands: a copy of the scores at the moment the round's table is published, which
+   later score messages do not change (finding 221). */
+static inline void mosh_publish(MoshScore *table, const MoshScore *scores, int count)
+{
+    if (count > MOSH_RIDERS) count = MOSH_RIDERS;
+    memcpy(table, scores, (size_t)count * sizeof *table);
+}
+
 #endif
