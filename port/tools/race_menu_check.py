@@ -99,7 +99,9 @@ def pause_errors(log):
     """The pausing game's live puppet error (units, its once-a-second `puppets off by` line: each rider's
     error found by its last snapshot, finding 202) and snapshot age (ms) in the race both play: before
     the game's own pause, in the 5 s after RESUME (the catch-up) and after that."""
-    race = log[log.rfind('race starts'):]
+    pressed = log.rfind('test menu: button 0008')  # the race with the pause (a next race may follow)
+    race = log[log.rfind('race starts', 0, pressed if pressed >= 0 else len(log)):]
+    race = race[:race.find('race starts', 12)] if race.find('race starts', 12) > 0 else race
     opened = re.search(r'test menu: button 0008 at race tick (\d+)', race)
     resumed = re.search(r'test menu: button 4000 at race tick (\d+)', race)
     if not opened or not resumed:
