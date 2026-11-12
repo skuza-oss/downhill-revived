@@ -1180,10 +1180,13 @@ both).
 
 ### Open (after this check)
 
-- **The race's last seconds:** let race frames pass in the transport for the same 3 s after
-  `ended` (or until `client_back`), then measure PC <-> Mac again.
-- **An owner's reset counted as `far`:** one 364.8-unit reset of a standing rider was not
-  recognised as the owner's own jump (80 ms #1 above).
+- **The race's last seconds:** done in finding 216: an ended race's frames travel on every
+  transport until the game leaves the race screen, and the last finisher's finish shows on every
+  screen. Measured PC <-> Mac again on the merged main (finding 216, "Checked on the merged
+  main"): after the end p95 0.02-1.96 units, inside the race's own error, against 13-72 here.
+- **An owner's reset counted as `far`:** fixed in finding 216 (`sync_owner_jumped` in
+  `port/hle/puppet_sync.h` looks at every snapshot pair since the last one used; the unit test has
+  this case). In its checks on the merged main every placement was a respawn, none `far`.
 - **Host stops' steps:** 3.5-5.3 units here (target 1.5), as before.
 - **The SFU from this PC:** only two races measured (one direction, P2P fallback); no host stop,
   no TURN race over the SFU yet. 70a288fa over the SFU stays unmeasured.

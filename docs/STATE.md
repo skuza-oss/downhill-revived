@@ -205,6 +205,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   release tells the room, which gives it a new session in its race or takes it out of the race;
   the host's start moment also goes over the room, and a game with no moment 75 s after loading
   leaves the race instead of starting alone.
+- A race's frames travel after the room ends it, both ways and every racer's, until each game
+  leaves the race screen (`port/net/client.c`, `client_back`), on the SFU, the P2P star and the
+  browser alike, so the last seconds and every finish show on every screen (finding 216).
 - Protocol 4 (0.7.13, finding 169): a PC's riders of one tick go out bundled in STATE messages of
   at most 1,000 bytes (one datagram), stamped with their moment on the server clock (the PONG
   carries the server's time); each player's own rider 60 times a second, AI riders 30. Puppets are

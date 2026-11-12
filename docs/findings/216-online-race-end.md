@@ -1,9 +1,10 @@
 # 216: an online race's last seconds, the finish on every screen, a reset as a respawn
 
-Status: in progress
+Status: current
 
 Branch `fix/online-race-end` from `main` 1140b23f, started 2026-11-12. This file is the lane's plan
-while it runs and its finding when it merges.
+while it runs and its finding when it merges. Merged into `main` on 2026-11-12 (c5f839a2) and checked
+there the same day ("Checked on the merged main" below).
 
 ## Goal and acceptance
 
@@ -38,6 +39,9 @@ green. Out of scope: the SFU from this PC (failing for an unknown reason), host 
 - [x] after numbers in five races (below); Rust (`rustgs.py test -- -p dhd_star -p dhd_net`), C
   (`port/net/build_tests.py`, `test_runtime.py`'s puppet sync) and browser (`check_net.mjs`) tests
 - [x] `check.py port` OK on e3b65ec4 (the code's last commit); `check.py docs` OK on the last
+- [x] merged into `main` (c5f839a2) and checked there by the lead's verifier: `check.py port` and
+  `server`, the seven state traces, two-game races and the race menu's scenarios on this PC, PC <->
+  Mac both ways with the after-the-end column (below)
 
 ## Where the frames stopped (every place) and the one rule
 
@@ -143,21 +147,87 @@ builds (its race screen is already the watching one), so its column is short the
   all lie inside the race (none after the end) and follow where the scripted rider crashed (the
   placements are the old after-crash respawns in both builds).
 
-## Not checked, left for the lead
+## Not checked
 
-- The seven state-trace recipes against the v3 references. This lane cannot change them: offline
-  play never makes a network client (`port/net`, the transports and `net.js` are online only), the
-  puppet code runs only for puppets (online), and the online.c change is log text.
-- A PC to Mac race both ways (`cross_race.py`, P2P and `--force-turn`) on the merged branch, scored
-  with `puppet_lag.end_report` on each race's split directories (as the verifier's per-race
-  scoring; `riders_report` prints it).
-- An SFU room (and a P2P room's SFU fallback) once the SFU works from this PC again: the SFU path is
-  covered by the session test only (`sfu.rs` `the_association_outlives_races...`).
+- An SFU room (public or private) once the local server's SFU works for one from this PC: the SFU
+  association's side is covered by the session test (`sfu.rs` `the_association_outlives_races...`)
+  and, live, by a P2P room's SFU fallback (the PC <-> Mac `--force-turn` runs below).
 - The browser (net.js) by its unit test only.
-- A live owner's reset (none happened here); the unit test has the verifier's case.
+- A live owner's reset: none in the lane's runs or the merged main's (every placement there was a
+  respawn, none `far`); the unit test has the verifier's case.
 - Edge cases accepted: a TURN renewal due in the 2 s after a race (the association is replaced,
   those seconds go blind, rare: the credentials' age); a new hub in those seconds.
 
+## Checked on the merged main (2026-11-12)
+
+On `main` c5f839a2 (afd16cbb, then the merges of lanes 214, 211 and this one), by the lead's
+verifier. Other workers' builds were running on this PC during the two-game races (seen once, at
+the first race menu scenario); not watched during the PC <-> Mac runs.
+
+- `python tools/check.py port -j 6`: OK. `python tools/check.py server`: OK.
+- State traces: all seven recipes (`boot`, `race`, `race2` to `race6`) equal the format-2
+  references made from 524948ba (the same `state_trace_codeptrs.txt` and `state_trace_mask.txt`):
+  7 of 7 PASS.
+- `race_menu_check.py`, all nine scenarios (`resume`, `room`, `end`, `leave`, `closed`, `alone`,
+  `timeup`, `timeup-host`, `finished`, 80 ms link): PASS. `mosh_round_check.py` (default): PASS.
+
+### Two games on this PC (P2P rooms, a local server per race, computer riders on)
+
+Error p50 / p95 / p99 in units, A the host, B the guest. `online_race.py --hidden --lag` with the
+80 ms test link (`delay=80,jitter=15,loss=1`); `race_menu_check.py --lag` with the same link, a room
+made from the menus. `online_race.py` stops both games about 2 s after the race ends, before they
+leave the race screen, so its after-the-end column has no "race closed" line to start from (the
+trace's last 2 s); `race_menu_check.py`'s games go back to the room and log the race tick.
+
+| race | A draws the guest | B draws the host | B draws the host's AI riders | after the end: A draws the guest / B the host / B the AI riders | finishes |
+|---|---|---|---|---|---|
+| `online_race`, both finish (70 / 72 s) | 0.19 / 1.69 / 2.64 | 0.22 / 2.52 / 5.16 | 0.37 / 2.44 / 5.28 | 1.31 / 1.86 / 1.91; 2.50 / 2.89 / 2.97; 0.45 / 2.13 / 3.39 | both on both |
+| `online_race`, finish window (host 60 s, guest DNF) | 0.15 / 1.20 / 2.32 | 0.01 / 0.82 / 1.62 | 0.36 / 2.15 / 3.80 | 0.71 / 1.13 / 1.28; nothing to compare on B | the host's on both |
+| `race_menu_check finished` (20 / 25 s) | 0.50 / 1.79 / 3.05 | 0.14 / 1.51 / 2.61 | 0.45 / 2.02 / 3.45 | 0.20 / 0.67 / 0.81; 0.05 / 0.05 / 0.05; 0.32 / 1.48 / 3.39 | both on both |
+| `race_menu_check timeup` (host 20 s, guest DNF) | 0.21 / 1.49 / 2.50 | 0.08 / 0.75 / 1.57 | 0.31 / 1.81 / 3.23 | 0.76 / 1.79 / 1.89; 0.00 / 0.01 / 0.01; 0.27 / 0.38 / 0.39 | the host's on both |
+
+Results equal on both games in every race; hits applied both ways (`hit kind 5`, `hit kind 0`); no
+hold, no freeze line; every placement a respawn. The `timeup` race closed with "RACE OVER" on the
+host and "TIME UP - DNF" on the guest. In the first `online_race` race the guest caught all nine
+host riders up by riding just after GO (62 catch-ups between race ticks 253 and 272, 13-22 units,
+snapshot age 133-150 ms); none of the other races here or on the Mac had a catch-up in their first
+5 s (other workers' builds were running then).
+
+### PC <-> Mac
+
+The Mac (M1, 8 GB) ran its own build of c5f839a2 from this PC's wasm2c core; `cross_race.py`
+through the verifier's wrappers (the PC's game on the hidden desktop, both games tracing and
+recording), P2P rooms on a local server, direct inside the local network unless said. Host
+finishes at 20 s, guest at 40 s; the host's first race is alone. Each race split per seed and
+scored with `puppet_lag.riders_report` (which prints `end_report`, started from the "race closed"
+line of each game). Error p95 in units, ranges over the run's races.
+
+| run | shared races | other player as drawn (host / guest view) | computer riders on the guest | after the end: host draws the guest / guest the host / guest the AI riders | drawn behind p95 | placed (not respawns) | snapshot age p50 / p95 | guest's finish in the host's log |
+|---|---|---|---|---|---|---|---|---|
+| PC hosts | 4 | 0.30-1.48 / 0.18-1.27 | 0.53-1.40 | 0.23-1.14 / 0.05-0.58 / 0.40-0.76 | 0-7 ms | 0 | 11-29 / 16-41 ms | 4 of 4 |
+| Mac hosts | 4 | 0.31-0.41 / 0.28-0.60 | 0.44-1.46 | 0.31-0.48 / 0.02-0.42 / 0.34-1.96 | 1-5 ms, 26 once | 0 | 11-32 / 18-43 ms | 4 of 4 |
+| PC hosts, `--force-turn` | 2 | 0.38-0.58 / 0.33-0.90 | 0.58-1.25 | 0.46-0.55 / 0.02-0.08 / 0.43-0.45 | 1-3 ms | 0 | 25-34 / 38-54 ms | 2 of 2 |
+| Mac hosts, `--force-turn` | 2 | 0.35-0.50 / 0.24-0.26 | 0.43-1.35 | 0.38-0.43 / 0.05-0.07 / 0.41-1.77 | 1-7 ms | 0 | 23-35 / 35-49 ms | 2 of 2 |
+
+The room's results were the same on both machines in every race, and both games logged both
+finishes in every shared race (before: the Mac host missed the PC guest's in 3 of 4). After the end
+the riders now stay within about 2 units at p95 (before: 13-72): the other player at most 1.14,
+inside the spread of the races' own p95 (0.18-1.48), though above its own race's p95 in some
+races where that was small (0.71 against 0.30 once). In two Mac-hosted races the guest's view of
+the host's computer riders sat a little higher after the end than in the race itself (p50 1.3,
+p95 1.77 and 1.96 against the race's p95 1.35 and 1.46). Sunk at most 3.0 % of steps for the other
+player, 0.2-0.6 % for computer riders; no catch-up; one hold (the PC host, its second shared
+race), the race that also had more jolts (31 a minute on the host's view of the guest, p99 4.7);
+the rest 0-11.
+
+**`--force-turn`:** the local server's SFU connected this time (both ways, via UDP): the guest's
+direct links were off and it raced over the room's SFU, bridged by the hub, in both runs.
+
 ## Result
 
-Filled in at the merge.
+Merged and checked (above). An ended race's frames travel until each game leaves the race
+screen, on the SFU, the P2P star and the browser's client, with one rule in the game's client
+(`client_back`, backstop `RACE_FRAMES_AFTER_MS`); every finish shows on every screen; an owner's
+reset is a respawn. On the merged main, PC <-> Mac both ways, the other riders after the end are
+within about 2 units at p95 (were 13-72) and the host's log has the guest's finish in every race.
+Open: an SFU room (public or private), the browser live.
