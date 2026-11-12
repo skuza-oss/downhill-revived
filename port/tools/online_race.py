@@ -172,16 +172,29 @@ def main():
     ap.add_argument('--link', default='', help='DHD_NET_LINK for both games: the STATE they receive goes through it')
     ap.add_argument('--a', action='append', default=[], help='extra NAME=VALUE for the host game')
     ap.add_argument('--b', action='append', default=[], help='extra NAME=VALUE for the joining game')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='start nothing: print what each game and bot would get and the logs it would watch (check.py port)')
     a = ap.parse_args()
+    if a.dry_run:  # no games, no bots, no lock, no disc; every path below runs once
+        os.environ.setdefault('DHD_ISO', 'dry-run.iso')
+        os.environ.setdefault('DHD_NET_SERVER', 'ws://127.0.0.1:1')
     for v in ('DHD_ISO', 'DHD_NET_SERVER'):
         if not os.environ.get(v):
             sys.exit('set ' + v)
     if a.stop_if and os.path.exists(a.stop_if):
         sys.exit(f'{a.stop_if} exists: not starting')
     out = Path(a.out).resolve()
-    log = 'game.log' if a.hidden else 'stderr.log'   # each game's log
+    game_log = 'game.log' if a.hidden else 'stderr.log'   # each game's log
     out.mkdir(parents=True, exist_ok=True)
-    iso_hash = iso_files_sha256(os.environ['DHD_ISO'], ROOT / 'build' / 'port' / 'iso-check.txt')
+    iso_hash = '0' * 64 if a.dry_run else iso_files_sha256(os.environ['DHD_ISO'], ROOT / 'build' / 'port' / 'iso-check.txt')
+    dry_lines = {'room': 'online: room DRYRUN (host)', 'version': 'version dhd-port 0.0.0-dry', 'countdown': 'countdown starts'}
+
+    def wait(paths, pattern, seconds, what):
+        """wait_line, or in a dry run what the games would print"""
+        if a.dry_run:
+            print('would wait for', repr(pattern), 'in', ', '.join(str(p) for p in paths))
+            return [re.search(pattern, dry_lines[what]) for _ in paths]
+        return wait_line(paths, pattern, seconds, procs, a.stop_if)
     procs, dirs = [], []
     owned = contextlib.ExitStack()   # the logs and the processes, closed and ended at its end
 
@@ -195,6 +208,10 @@ def main():
         env = game_env(iso_hash, pad, {'DHD_RACE_CAPTURE': a.capture, **extra})
         if a.link:
             env['DHD_NET_LINK'] = a.link
+        if a.dry_run:
+            print('game', name, ' '.join(f'{k}={v}' for k, v in sorted(env.items()) if k.startswith('DHD_') and k != 'DHD_ISO'))
+            dirs.append(d)
+            return d
         if a.hidden:  # the game's folder is the exe's there: this game's files by full path
             for key in ('DHD_PUPPET_TRACE', 'DHD_PUPPET_RECORD', 'DHD_SCREENSHOT'):
                 if key in env and not os.path.isabs(env[key]):
@@ -217,33 +234,41 @@ def main():
         for side in (a.a, a.b):
             side[:0] = ['DHD_PUPPET_TRACE=puppet.txt', 'DHD_PUPPET_RECORD=own.bin', 'DHD_PUPPET_FROM=all']
     players = 2 + a.bots
-    owned.enter_context(game_lock.held('online_race'))  # untimed: one place for its two games
+    if not a.dry_run:
+        owned.enter_context(game_lock.held('online_race'))  # untimed: one place for its two games
     with owned:
         da = game('A', HOST_PAD, {'DHD_NET_CREATE': '1', 'DHD_NET_NAME': 'Host', 'DHD_NET_PLAYERS': str(players),
                                   'DHD_NET_TRACK': a.track, 'DHD_NET_RIDER': '4', **dict(x.split('=', 1) for x in a.a)})
-        m = wait_line([da / log], r'online: room (\w+) \(host\)', 120, procs, a.stop_if)[0]
+        m = wait([da / game_log], r'online: room (\w+) \(host\)', 120, 'room')[0]
         if not m:
-            print('the host never opened a room; see', da / log)
+            print('the host never opened a room; see', da / game_log)
             return 1
         code = m.group(1)
         print('room', code)
         # The bots join first and ready only once every player is in the room (nettool --players):
         # a room locks its grid as soon as everyone in it is ready, so a bot joining after the two
         # games would wait for the next race.
-        version = wait_line([da / log], r'version (dhd-port [\w.-]+(?: \w+)?)', 30, procs, a.stop_if)[0].group(1)
+        version = wait([da / game_log], r'version (dhd-port [\w.-]+(?: \w+)?)', 30, 'version')[0].group(1)
         for k in range(a.bots):
             d = out / f'bot{k}'
             d.mkdir(exist_ok=True)
-            log = owned.enter_context(open(d / 'stdout.log', 'w'))
             ride = ['--replay', a.replay, '--rider', str(k * 2 + 1)] if a.replay else \
                 ['--pick', str(k * 2 + 1), '--races', '1', '--ready-after', '1', '--echo-ai', '--finish-after', '60']
-            procs.append(owned.enter_context(owned_process.start(
-                [a.nettool, '--version', version, '--iso', iso_hash, '--name', f'Bot{k}', '--players', str(players), *ride,
-                 'join', code], stdout=log, stderr=subprocess.STDOUT)))
+            command = [a.nettool, '--version', version, '--iso', iso_hash, '--name', f'Bot{k}', '--players', str(players),
+                       *ride, 'join', code]
+            if a.dry_run:
+                print('bot', k, ' '.join(map(str, command)))
+                continue
+            bot_out = owned.enter_context(open(d / 'stdout.log', 'w'))  # once named `log`, which hid the games' log name
+            procs.append(owned.enter_context(owned_process.start(command, stdout=bot_out, stderr=subprocess.STDOUT)))
         db = game('B', GUEST_PAD, {'DHD_NET_JOIN': code, 'DHD_NET_NAME': 'Guest', 'DHD_NET_RIDER': '8',
                                    **dict(x.split('=', 1) for x in a.b)})
+        if a.dry_run:
+            wait([da / game_log, db / game_log], r'countdown starts', 400, 'countdown')
+            print('dry run: done')
+            return 0
         guest = procs[-1]
-        go = wait_line([da / log, db / log], r'countdown starts', 400, procs, a.stop_if)
+        go = wait([da / game_log, db / game_log], r'countdown starts', 400, 'countdown')
         for p in procs if a.minimized else ():
             p.minimize()  # a window SDL showed after the start
         if not all(go):
@@ -254,14 +279,14 @@ def main():
             procs.remove(gone)
             gone.stop()
             print('guest stopped' if a.kill_guest_at else 'host stopped')
-        logs = ([] if a.kill_host_at else [da / log]) + ([] if a.kill_guest_at else [db / log])
+        logs = ([] if a.kill_host_at else [da / game_log]) + ([] if a.kill_guest_at else [db / game_log])
         done = wait_line(logs, r'online: result 1\.', a.seconds, procs, a.stop_if)
         time.sleep(6)
         if not all(done):
             print('not every game got the results')
     ok = True
     for d in dirs:
-        text = (d / log).read_text(errors='replace') if (d / log).exists() else ''
+        text = (d / game_log).read_text(errors='replace') if (d / game_log).exists() else ''
         lines = [l for l in text.splitlines() if l.startswith(('online:', 'puppet:'))]
         keep = [l for l in lines if any(k in l for k in KEEP)]
         clocks = [l for l in lines if 'race clock' in l]

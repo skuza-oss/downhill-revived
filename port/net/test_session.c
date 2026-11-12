@@ -96,6 +96,13 @@ int main(void)
         client_lobby(&c,&l); assert(l.race_go_at == 9500.5);
         client_on_text(&c,"{\"type\":\"ended\"}",16); client_lobby(&c,&l); assert(l.race_go_at == 0);
         sent[0] = 0; client_race_go(&c,9500); assert(!sent[0]);  /* no race */
+        /* the race's last seconds on screen: its frames still go (finding 202 round 4), not after back */
+        {
+            unsigned char frame[4] = {1, 2, 3, 4};
+            assert(c.race_frames_until > net_now_ms() && client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
+            client_back(&c);
+            assert(!client_send_frame(&c, NET_FRAME_STATE, frame, sizeof frame));
+        }
         client_on_text(&c,start,strlen(start)); client_lobby(&c,&l); assert(l.race_go_at == 0);
         client_free(&c);
     }
@@ -255,7 +262,7 @@ int main(void)
     {   /* HOLD (finding 202): the network thread says "no snapshot of mine since T" while our game's
            thread gives no bundles, every 100 ms, and never between races */
         unsigned char bundle[STATE_BUNDLE_HEADER] = {STATE_BUNDLE_VERSION, 0, 1};
-        double stamp = 123456.5, held;
+        double stamp = 123456.5, held, quiet;
         memcpy(bundle + 3, &stamp, sizeof stamp);
         client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);
@@ -268,8 +275,8 @@ int main(void)
         c.state_sent_at = net_now_ms() - 200;           /* ... until it stops */
         client_tick(&c);
         assert(c.holds_sent == 1 && binaries > before && last_binary_n == 2 + STATE_HOLD_SIZE &&
-               last_binary[0] == NET_FRAME_STATE && state_hold_check(last_binary + 2, STATE_HOLD_SIZE, &held) &&
-               held == stamp);
+               last_binary[0] == NET_FRAME_STATE && state_hold_check(last_binary + 2, STATE_HOLD_SIZE, &held, &quiet) &&
+               held == stamp && quiet >= 199 && quiet < 400);
         client_tick(&c);
         assert(c.holds_sent == 1);                    /* at most one every 100 ms */
         c.hold_sent_at -= 150;
@@ -282,8 +289,8 @@ int main(void)
         client_free(&c);
     }
     {   /* Snapshot freshness and long gaps are per sender and sampled on network ticks. */
-        /* A bundle's header (port/hle/state_bundle.h): version 6, index, riders, the stamp. */
-        unsigned char state[13] = {NET_FRAME_STATE, 2, 6, 0, 1};
+        /* A bundle's header (port/hle/state_bundle.h): its version, index, riders, the stamp. */
+        unsigned char state[13] = {NET_FRAME_STATE, 2, STATE_BUNDLE_VERSION, 0, 1};
         double stamp = 100000 + net_now_ms() - 150, newer = stamp + 1;
         client_init(&c,"Test","test","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);

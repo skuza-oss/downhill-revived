@@ -464,8 +464,8 @@ never forwarded.
 | 1 | u8 | `slot` of the sender |
 | 2 | n | payload, the client's format (finding 044) |
 
-State sync: a STATE frame is one bundle of the sender's rider snapshots (payload version 6, protocol
-4, finding 169; `port/hle/state_bundle.h`), at most 990 bytes so that the frame with its 8-byte race
+State sync: a STATE frame is one bundle of the sender's rider snapshots (payload version 8 since finding 202
+round 4, 6 before; protocol 4, finding 169; `port/hle/state_bundle.h`), at most 990 bytes so that the frame with its 8-byte race
 marker stays at or under 1,000 bytes: one SCTP chunk (str0m's is 1,062 bytes), since a STATE
 message split over several datagrams is lost whole when any of them is. A PC with more riders
 than fit (a host with its AI riders) sends several bundles for one tick. A player's own rider is
@@ -481,7 +481,7 @@ sent every race tick (60 a second), AI riders every second tick (30 a second).
 
 A record: the rider's global id (u8: a human's lobby slot, an AI rider's slot), the sender's race
 time (i32 ms since its GO), position, orientation (3 rows), velocity and angular velocity (f32 x 3
-each), the rider's power (f32: 1, an AI rider's catch-up eased, finding 202) a computer rider's turn scale (f32: its AI controller's +0x2B0, which scales its steering in `func_00137950`; 0 for a player's rider; finding 202 round 3, zero from older games, which a receiver then leaves to its own controller) and 8 reserved bytes (zero; with the turn scale, the wheels' spin until finding 202, which a puppet's physics now makes), the wheel contacts (2 u8), the State (u16), crash flags and kind,
+each), the rider's power (f32: 1, an AI rider's catch-up eased, finding 202) a computer rider's turn scale (f32: its AI controller's +0x2B0, which scales its steering in `func_00137950`; 0 for a player's rider; finding 202 round 3, zero from older games, which a receiver then leaves to its own controller) and 8 reserved bytes (zero; with the turn scale, the wheels' spin until finding 202, which a puppet's physics now makes), a computer rider's racing line (finding 202 round 4: the node its AI heads for and the chosen next one, u16 indexes into the game's racing-line nodes `D_0029EA20`, 0xFFFF for a player's rider; its target point and the next one, 2 x 3 f32; its sideways offset and the one it eases toward, 2 x 2 f32: 44 bytes, a receiver's AI controller takes them for its puppet), the wheel contacts (2 u8), the State (u16), crash flags and kind,
 checkpoints passed, attack kind and bottles (u8 each), then k (u8) and k pad words as index (u8)
 and value (u32): 103 + 5k bytes. Each changed pad word is repeated in six consecutive records and
 all 146 words are sent every 30 records (60 for a player's own rider; each rider at another phase, so two full records seldom
@@ -492,11 +492,11 @@ its own race clock trails beyond 50 ms; the record's race time against the stamp
 the sender's race clock runs (`port/hle/puppet_sync.h`). EVENT remains payload version 2. The SFU
 reads none of the gameplay payload.
 
-HOLD (finding 202) travels on the STATE channel too, 11 bytes: version 7, index 9 (the last the
-transport takes; a tick's bundles use at most 0-2), 0 riders, then the f64 stamp of the sender's last bundle. A game's network thread,
+HOLD (finding 202) travels on the STATE channel too, 13 bytes: version 7, index 9 (the last the
+transport takes; a tick's bundles use at most 0-2), 0 riders, then the f64 stamp of the sender's last bundle and how long its game has given no bundle when the HOLD leaves (u16 ms, its own clock; round 4: receivers hold a stop only from 0.25 s, the link's delay not counted). A game's network thread,
 which runs on while the game's own thread does not, sends it every 100 ms once no bundle has gone
 out for three of its usual gaps (at least 60 ms) in a race: "no snapshot of mine since this
-moment". Receivers stop that sender's riders where they are until its bundles come again and its
+moment". Receivers brake that sender's riders to a stop where they are until its bundles come again and its
 rider has caught up with them (`port/hle/puppet.c` `hold`). A game that does not know HOLD drops
 it (it checks the bundle version), so it needs no protocol change; the SFU and the P2P star
 forward it as any STATE message.

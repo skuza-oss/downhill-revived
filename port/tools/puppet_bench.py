@@ -402,10 +402,22 @@ def capture_run(exe, out, name, track, slot, at, length, extra):
 
 def clip(args):
     """Side by side: the recorded rider (left) and its puppet through the link (right), same
-    camera, same race moments; an mp4 by ffmpeg (else the frames and a contact sheet)."""
+    camera, same race moments; an mp4 by ffmpeg (else the frames and a contact sheet).
+    --live RUN (an online_race.py --lag run): the host's recording of its rider (left) beside the
+    guest's recording of that rider as the guest drew it (right), both replayed exactly
+    (DHD_PUPPET_EXACT: each recorded pose as it is, a jump a jump), on the race's track."""
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     work = OUT / 'clips' / args.name
+    if args.live:
+        run = Path(args.live).resolve()
+        exact = {'DHD_PUPPET_EXACT': '1', 'DHD_PUPPET_LINK': ''}
+        left = capture_run(args.exe, OUT / 'clips' / (args.name + '-host'), args.name + ' host', args.track, args.slot,
+                           args.at, args.length, {'DHD_PUPPET_PLAY': str(run / 'A' / 'own.bin'), **exact})
+        right = capture_run(args.exe, work, args.name, args.track, args.slot, args.at, args.length,
+                            {'DHD_PUPPET_PLAY': str(run / 'B' / 'own.bin'), **exact})
+        truth_dir = OUT / 'clips' / (args.name + '-host')
+        return side_by_side(args, out, work, truth_dir, left, right, 'the rider on its own game (the host)')
     truth_dir = OUT / 'clips' / f'truth-t{args.track}-s{args.slot}-{args.at:g}-{args.length:g}'
     truth = OUT / f'{args.truths}-t{args.track}' / 'truth.bin'
     left = frames(truth_dir / 'frames') if (truth_dir / 'frames').exists() else []
@@ -414,6 +426,10 @@ def clip(args):
                            args.at, args.length, {})
     right = capture_run(args.exe, work, args.name, args.track, args.slot, args.at, args.length,
                         {'DHD_PUPPET_PLAY': str(truth.resolve()), 'DHD_PUPPET_LINK': args.link})
+    return side_by_side(args, out, work, truth_dir, left, right, 'the rider (truth)')
+
+
+def side_by_side(args, out, work, truth_dir, left, right, left_label):
     n = min(len(left), len(right))
     lst = work / 'pairs'
     shutil.rmtree(lst, ignore_errors=True)
@@ -428,7 +444,7 @@ def clip(args):
         draw = lambda text: (f"drawtext=text='{text}':x=12:y=12:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.6")
         subprocess.run([ffmpeg, '-y', '-loglevel', 'error', '-framerate', '60', '-i', str(lst / 'l%05d.png'),
                         '-framerate', '60', '-i', str(lst / 'r%05d.png'), '-filter_complex',
-                        f"[0]{draw('the rider (truth)')}[a];[1]{draw('as another player sees it - ' + label.replace(':', ' ').replace(',', ' '))}[b];[a][b]hstack",
+                        f"[0]{draw(left_label)}[a];[1]{draw('as another player sees it - ' + label.replace(':', ' ').replace(',', ' '))}[b];[a][b]hstack",
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', str(target)], check=True)
         print('clip', target)
         # the frames are 1 MB each, 360 a side: gone once the clip is made (the truth's too)
@@ -477,6 +493,7 @@ def main():
     c.add_argument('--out', required=True, help='folder for the mp4 (keep it outside the repository)')
     c.add_argument('--truth-exe', help='the build that films the truth (default --exe; the race is the same)')
     c.add_argument('--label-text', help='the caption of the right side (default the link)')
+    c.add_argument('--live', help="an online_race.py --lag run: the host's recording beside the guest's, exact")
     m = sub.add_parser('matrix')
     m.add_argument('--tracks', default='0,1,2')
     m.add_argument('--fps', default='60,30,144')

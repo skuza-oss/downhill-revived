@@ -21,6 +21,7 @@ enum { PING_LOBBY_MS = 1000, PING_RACE_MS = 500, SILENT_MS = 10000, CLOCK_SLEW_M
 #define CLOCK_MARGIN_MS 3.0
 
 double net_now_ms(void) { return (double)SDL_GetTicksNS() / 1e6; }
+enum { RACE_FRAMES_AFTER_MS = 3000 };  /* race frames after the race ends (client.h race_frames_until) */
 
 static void copy(char *dst, size_t cap, const char *src)
 {
@@ -264,6 +265,7 @@ static void read_room(NetClient *c, const char *t)
     }
     for (i = 0; i < l->nmembers; i++)
         if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
+            if (c->racing) c->race_frames_until = net_now_ms() + RACE_FRAMES_AFTER_MS;
             c->racing = 0; l->state = NET_LOBBY; l->started = 0; c->relayed_head = c->relayed_count = 0;
             c->race_at = 0, c->gave_up = 0;
         }
@@ -661,6 +663,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             changed(c);
         }
     } else if (!strcmp(type, "ended")) {
+        if (c->racing) c->race_frames_until = net_now_ms() + RACE_FRAMES_AFTER_MS;
         c->racing = 0;
         c->lobby.race_go_at = 0;
         c->race_at = 0, c->gave_up = 0;
@@ -712,14 +715,15 @@ void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
                 c->clock_offset += step, c->have_offset = c->clock_known = 1;
             }
         }
-    } else if (c->racing && n >= 2 && n <= NET_FRAME_MAX && (data[0] == NET_FRAME_STATE || data[0] == NET_FRAME_EVENT)) {
+    } else if ((c->racing || net_now_ms() < c->race_frames_until) && n >= 2 && n <= NET_FRAME_MAX &&
+               (data[0] == NET_FRAME_STATE || data[0] == NET_FRAME_EVENT)) {
         if (data[1] < NET_MAX_SLOTS) {
             int slot = data[1];
             if (data[0] == NET_FRAME_STATE) {
                 c->snapshot[slot].messages++;
-                /* A bundle (port/hle/state_bundle.h): version 6, index, riders, the sender's server
-                   clock moment its snapshots show. */
-                if (n >= 13 && data[2] == 6) {
+                /* A bundle (port/hle/state_bundle.h): its version, index, riders, the sender's
+                   server clock moment its snapshots show. */
+                if (n >= 13 && data[2] == STATE_BUNDLE_VERSION) {
                     double epoch;
                     memcpy(&epoch, data + 5, sizeof epoch);
                     double now = net_now_ms();
@@ -831,7 +835,7 @@ static void hold_check(NetClient *c, double now)
     double quiet = now - c->state_sent_at, after = 3 * c->state_gap < 60 ? 60 : 3 * c->state_gap;
     if (quiet < after || quiet > 30000 || now - c->hold_sent_at < HOLD_EVERY_MS) return;
     uint8_t frame[2 + STATE_HOLD_SIZE] = {NET_FRAME_STATE, 0};
-    state_hold_make(frame + 2, c->state_stamp);
+    state_hold_make(frame + 2, c->state_stamp, quiet);
     send_binary(c, frame, sizeof frame);
     c->hold_sent_at = now;
     c->holds_sent++;
@@ -988,7 +992,7 @@ void client_back(NetClient *c)
     SDL_LockMutex(c->lock);
     say(c, "{\"type\":\"back\"}");
     c->gave_up = c->race_at > 0;
-    c->racing = 0;
+    c->racing = 0, c->race_frames_until = 0;
     c->relayed_head = c->relayed_count = 0;
     c->lobby.started = 0;
     if (c->lobby.state == NET_RACING) c->lobby.state = NET_LOBBY;
@@ -1117,7 +1121,7 @@ int client_send_frame(NetClient *c, int type, const void *payload, size_t n)
     frame[1] = 0;
     memcpy(frame + 2, payload, n);
     SDL_LockMutex(c->lock);
-    if (c->racing && (c->connected || c->rejoining)) {
+    if ((c->racing || net_now_ms() < c->race_frames_until) && (c->connected || c->rejoining)) {
         send_binary(c, frame, n + 2);
         c->states_sent += type == NET_FRAME_STATE;
         sent = 1;
