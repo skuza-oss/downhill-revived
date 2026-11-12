@@ -30,6 +30,13 @@ usage: python port/tools/stack_escapes.py [--jobs N] [--report FILE] [--check] [
 unit the matching compiler cannot build with -gstabs (a unit that is not compiled is not analysed) unless
 port/tools/stack_escapes_compile_failures.txt lists it with the reason; a listed unit that compiles fails
 too. Report-only runs warn about both.
+
+Port patches (finding 219): a unit with port patches is also compiled as the port compiles it
+(port_source.apply_patches); its locals and the escapes of their addresses are read from that text, what
+each function does with its arguments from the retail text. A reviewed `fixed` line is true only when
+that patched text shows no overrun for the function's call and at least one escape that fits; 48 patched
+units that the matching compiler cannot build (port-only calls and attributes) are analysed unpatched,
+and cannot have a `fixed` line.
 """
 import argparse, collections, glob, hashlib, json, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +45,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 CACHE = os.path.join(ROOT, 'build', 'stack_escapes')
+PATCHED = os.path.join(CACHE, 'patched')     # the units with the port patches applied (finding 219)
 REVIEWED = os.path.join(HERE, 'stack_escapes_reviewed.txt')
 COMPILE_FAILURES = os.path.join(HERE, 'stack_escapes_compile_failures.txt')
 TOOL_VERSION = b'stack-escapes 1\n'
@@ -75,6 +83,7 @@ STRING = {'strcpy': 0, 'strcat': 0, 'strncat': 0, 'sprintf': 0, 'vsprintf': 0, '
           'func_002542C4': 0, 'func_00254544': 0}
 UNBOUNDED = 1 << 30
 RETURNS = {}  # function -> (argument, offset, walks): it returns that argument + offset
+UNITS = {}    # unit -> {'text': the file analysed, 'patched': it has the port patches, 'why': if not}
 
 
 # ---- compiling the units with stabs -----------------------------------------------------------
@@ -98,11 +107,53 @@ def file_hash(p):
         return hashlib.sha256(f.read().replace(b'\r\n', b'\n')).hexdigest()
 
 
+def port_text(rel, path):
+    """The unit as the port compiles it: src/ with the port patches applied (port_source.apply_patches,
+    the build's own step)."""
+    sys.path.insert(0, os.path.join(ROOT, 'port'))
+    import port_source
+    with open(path, encoding='utf-8', errors='replace') as f:
+        return port_source.apply_patches(rel, f.read())
+
+
+def compile_port_unit(job):
+    """(unit, retail cc1 assembly or None, error, the text the port compiles, patched cc1 assembly or None,
+    why the patched text was not used).
+
+    The retail text gives what each function does with its arguments (the EE code the game runs); a
+    unit with port patches is also compiled as the port compiles it, and its locals and the escapes of
+    their addresses are read from that, so a fix made by a patch is judged by the code that has it
+    (finding 219). When the matching compiler cannot build the patched text (port-only calls and
+    attributes), the retail text stands in for it."""
+    rel, path, flags = job
+    sys.path.insert(0, os.path.join(ROOT, 'port'))
+    import patches
+    _, s, err = compile_unit((rel, path, flags))
+    if rel not in patches.PATCHES:
+        return rel, s, err, path, None, None
+    try:
+        text = port_text(rel, path)
+    except ValueError as e:                 # DeadPatch and "patch text found 0 times"
+        return rel, s, err, path, None, 'the port patches do not apply: %s' % str(e)[:200]
+    ppath = os.path.join(PATCHED, *rel.split('/'))
+    os.makedirs(os.path.dirname(ppath), exist_ok=True)
+    old = open(ppath, 'rb').read() if os.path.exists(ppath) else None
+    if old != text.encode('utf-8'):
+        with open(ppath, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(text)
+    _, sp, perr = compile_unit((rel, ppath, flags, 'sp'))
+    if sp is None:
+        return rel, s, err, path, None, 'the matching compiler fails on the patched text: %s' % (
+            perr.splitlines()[-1] if perr else '')
+    return rel, s, err, ppath, sp, None
+
+
 def compile_unit(job):
     """The unit's cc1 assembly with stabs, from the cache when the unit and its headers are unchanged."""
     import toolchain
-    rel, path, flags = job
-    s = os.path.join(CACHE, 's', rel + '.s')
+    rel, path, flags = job[:3]
+    sub = job[3] if len(job) > 3 else 's'     # 's': src/ as it is, 'sp': with the port patches
+    s = os.path.join(CACHE, sub, rel + '.s')
     keyf = s + '.key'
     key = hashlib.sha256(TOOL_VERSION + ' '.join(flags).encode() + file_hash(path).encode()).hexdigest()
     if os.path.exists(s) and os.path.exists(keyf):
@@ -732,19 +783,28 @@ def run(jobs=6, only=None):
     """The analysis: (functions, escapes)."""
     us = units()
     with ThreadPoolExecutor(jobs) as ex:
-        compiled = list(ex.map(compile_unit, us))
-    failed = [(r, e) for r, s, e in compiled if s is None]
-    funcs = {}
-    for rel, s, err in compiled:
+        compiled = list(ex.map(compile_port_unit, us))
+    failed = [(r, e) for r, s, e, *_ in compiled if s is None]
+    retail, port = {}, {}
+    for rel, s, err, text, sp, why in compiled:
+        UNITS[rel] = {'text': text, 'patched': sp is not None, 'why': why}
         if s is None:
             continue
-        cf, _ = read_cc1(s, rel)
-        for f in cf:
-            funcs[f.name] = f
+        for f in read_cc1(s, rel)[0]:
+            retail[f.name] = f
+        if sp is not None:
+            for f in read_cc1(sp, rel)[0]:
+                port[f.name] = f
     for p in glob.glob(os.path.join(ROOT, 'asm', 'nonmatchings', '**', '*.s'), recursive=True):
         name = os.path.basename(p)[:-2]
-        if name not in funcs:
-            funcs[name] = read_splat(p)
+        if name not in retail:
+            retail[name] = read_splat(p)
+    # funcs: the functions as the port has them (locals, frames, escapes); summarised: what each does
+    # with its arguments (the retail code, plus functions that exist only in the port's patched text)
+    funcs = dict(retail)
+    funcs.update(port)
+    summarised = dict(port)
+    summarised.update(retail)
 
     # summaries to a fixed point
     summ = collections.defaultdict(lambda: collections.defaultdict(Summary))
@@ -755,14 +815,19 @@ def run(jobs=6, only=None):
     # what each function returns, when it is always argument k + c (first pass; one level of such
     # callees is followed by the second)
     RETURNS.clear()
-    for f in funcs.values():
+    for f in summarised.values():
         rets = []
         analyse(f, None, lambda kind, *a: rets.append(a[0]) if kind == 'ret' else None)
         if rets and all(r is not None and r[0] == 'arg' and r[1:] == rets[0][1:] for r in rets):
             RETURNS[f.name] = (rets[0][1], rets[0][2], rets[0][3])
-    for f in funcs.values():
-        def record(kind, *a, f=f):
+
+    def recorder(f, summaries, escapes):
+        """What an analysed function reports: its accesses through arguments and its calls with them
+        (the summaries), and the addresses of its own locals that leave it (the escapes)."""
+        def record(kind, *a):
             if kind == 'access':
+                if not summaries:
+                    return
                 k, lo, size, write, var = a
                 s = summ[f.name][k]
                 if write:
@@ -772,17 +837,21 @@ def run(jobs=6, only=None):
                 if var:
                     s.flags.add('walk-w' if write else 'walk-r')
             elif kind == 'derived' and f.kind == 'c':
-                target, off, c = a
-                derived.append((f.name, off, target, c))
+                if escapes:
+                    target, off, c = a
+                    derived.append((f.name, off, target, c))
             elif kind == 'stored':
                 v = a[0]
                 if v[0] == 'arg':
-                    summ[f.name][v[1]].flags.add('stored')
-                elif f.kind == 'c':
+                    if summaries:
+                        summ[f.name][v[1]].flags.add('stored')
+                elif f.kind == 'c' and escapes:
                     raw_escapes.append((f.name, v[1], '<stored>', None, v[2], None, False))
             elif kind == 'call':
                 target, j, v, consts, indirect = a
                 if v[0] == 'arg':
+                    if not summaries:
+                        return
                     s = summ[f.name][v[1]]
                     if indirect:
                         s.flags.add('indirect')
@@ -790,9 +859,15 @@ def run(jobs=6, only=None):
                         lib_access(s, target, j, v[2], consts, v[3])
                     else:
                         edges[(target, j)].append((f.name, v[1], v[2], v[3]))
-                elif v[0] == 'sp' and f.kind == 'c':
+                elif v[0] == 'sp' and f.kind == 'c' and escapes:
                     raw_escapes.append((f.name, v[1], target, j, v[2], consts, indirect))
-        analyse(f, summ, record)
+        return record
+
+    for f in summarised.values():
+        analyse(f, summ, recorder(f, True, funcs[f.name] is f))   # one pass when it is also the port's
+    for f in port.values():
+        if summarised[f.name] is not f:                            # the patched version of a retail function
+            analyse(f, summ, recorder(f, False, True))
 
     changed, rounds = True, 0
     grew = collections.Counter()
@@ -1021,8 +1096,9 @@ def function_body(text, name):
     return None
 
 
-def format_rows(funcs):
-    """sprintf into a C function's own local: the format's text against the local's size."""
+def format_rows(funcs, fitting=None):
+    """sprintf into a C function's own local: the format's text against the local's size. The calls
+    whose text fits are appended to `fitting` as (function, local) when it is given."""
     sys.path.insert(0, HERE)
     strings = data_strings()
     rows = []
@@ -1031,7 +1107,9 @@ def format_rows(funcs):
         if f.kind == 'c' and f.locals:
             by_unit[f.unit].append(f)
     for unit, fs in by_unit.items():
-        text = open(os.path.join(ROOT, 'src', unit), encoding='utf-8', errors='replace').read()
+        # the text the unit was compiled from: with the port patches when they could be applied
+        text = open(UNITS.get(unit, {}).get('text') or os.path.join(ROOT, 'src', unit),
+                    encoding='utf-8', errors='replace').read()
         if SPRINTF not in text:
             continue
         calls = list(sprintf_calls(text, SPRINTF))
@@ -1058,6 +1136,8 @@ def format_rows(funcs):
                 size = sizes[m.group(1)]
                 verdict = 'format-overrun' if lo + 1 > size else \
                     'format-maybe' if hi is not None and hi + 1 > size else None
+                if not verdict and fitting is not None:
+                    fitting.append((f.name, m.group(1)))
                 if verdict:
                     rows.append({'function': f.name, 'unit': unit, 'local': m.group(1), 'local_size': size,
                                  'callee': SPRINTF, 'arg': 0, 'verdict': verdict, 'format': fmt,
@@ -1072,20 +1152,55 @@ FLAGGED = ('overrun-write', 'overrun-read', 'format-overrun', 'format-maybe')
 FAILING = ('overrun-write', 'format-overrun', 'format-maybe')
 
 
-def check_fixed(reviewed):
-    """A 'fixed' line names the unit whose port patch fixes it: the unit must still have patches."""
-    sys.path.insert(0, os.path.dirname(HERE))
-    import patches
+def check_fixed(reviewed, rows, funcs, fitting):
+    """A 'fixed' line says the unit's port patch removes the overrun. The analysis ran on the patched
+    text (compile_port_unit), so the proof is in it: the function's escapes to that callee must show
+    no overrun, and at least one must be seen fitting (an escape the tool did not see proves nothing).
+    A unit whose patched text the matching compiler cannot build cannot have a fixed line."""
     bad = 0
+    where = 'port/tools/stack_escapes_reviewed.txt'
     for key, (verdict, reason, n) in sorted(reviewed.items()):
         if verdict not in ('fixed', 'safe'):
-            print('ERROR port/tools/stack_escapes_reviewed.txt:%d: verdict %r (fixed or safe)' % (n, verdict))
+            print('ERROR %s:%d: verdict %r (fixed or safe)' % (where, n, verdict))
             bad += 1
-        elif verdict == 'fixed':
-            m = re.match(r'(\S+?):', reason)
-            if not m or m.group(1) not in patches.PATCHES:
-                print('ERROR port/tools/stack_escapes_reviewed.txt:%d: fixed, but %s has no port patch'
-                      % (n, m.group(1) if m else '(no unit named)'))
+            continue
+        if verdict != 'fixed':
+            continue
+        function, local, callee = key
+        who = '%s %s %s' % key
+        m = re.match(r'(\S+?):', reason)
+        f = funcs.get(function)
+        if not m:
+            print('ERROR %s:%d: %s: fixed, but the reason names no unit (UNIT: what the patch does)' % (where, n, who))
+            bad += 1
+        elif f is None or f.kind != 'c':
+            print('ERROR %s:%d: %s: fixed, but %s is not a C function of the port' % (where, n, who, function))
+            bad += 1
+        elif m.group(1) != f.unit:
+            print('ERROR %s:%d: %s: fixed, but %s is in %s, not %s' % (where, n, who, function, f.unit, m.group(1)))
+            bad += 1
+        elif not UNITS.get(f.unit, {}).get('patched'):
+            why = UNITS.get(f.unit, {}).get('why') or 'the unit has no port patch'
+            print('ERROR %s:%d: %s: fixed, but %s was analysed unpatched, so the fix is not proven: %s'
+                  % (where, n, who, f.unit, why))
+            bad += 1
+        else:
+            mine = [r for r in rows if r['function'] == function and r['callee'] == callee]
+            # an overrun of another local that has its own 'safe' line is that line's business
+            over = [r for r in mine if r['verdict'] in FLAGGED and
+                    reviewed.get((function, r['local'], callee), ('',))[0] != 'safe']
+            for r in over:
+                print('ERROR %s:%d: %s: fixed, but the patched %s still overruns %s: %s writes %s reads %s'
+                      % (where, n, who, f.unit, r['local'], callee, r.get('write'), r.get('read')))
+            # seen fitting: the callee's measured range lies inside the local (verdict fits, or unbounded
+            # because the callee also walks or stores the pointer: the measured part still fits)
+            seen = any(r['verdict'] == 'fits' or (r['verdict'] == 'unbounded' and (r.get('write') or r.get('read')))
+                       for r in mine) or (callee == SPRINTF and (function, local) in fitting)
+            if over:
+                bad += 1
+            elif not seen:
+                print('ERROR %s:%d: %s: fixed, but the patched %s shows no escape of %s to %s that fits: the fix '
+                      'is missing, or the tool no longer sees the call' % (where, n, who, f.unit, function, callee))
                 bad += 1
     return bad
 
@@ -1146,6 +1261,14 @@ def load_reviewed():
     return out
 
 
+def analyse_all(jobs=6):
+    """The whole analysis: (funcs, summaries, rows, failed units, rounds, sprintf calls that fit)."""
+    funcs, summ, raw, failed, rounds = run(jobs)
+    fitting = []
+    rows = classify(funcs, summ, raw) + format_rows(funcs, fitting)
+    return funcs, summ, rows, failed, rounds, fitting
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--jobs', '-j', type=int, default=6)
@@ -1154,9 +1277,13 @@ def main():
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--function', action='append', default=[])
     a = ap.parse_args()
-    funcs, summ, raw, failed, rounds = run(a.jobs)
-    rows = classify(funcs, summ, raw) + format_rows(funcs)
+    funcs, summ, rows, failed, rounds, fitting = analyse_all(a.jobs)
     bad = check_compile_failures(failed, load_compile_failures(), a.check)
+    patched = sum(1 for u in UNITS.values() if u['patched'])
+    unbuilt = sum(1 for u in UNITS.values() if u['why'])
+    print('units: %d, %d failed to compile (%d expected); %d analysed with their port patches, %d patched '
+          'units not buildable by the matching compiler (their retail text is analysed)'
+          % (len(UNITS), len(failed), sum(1 for r, e in failed if r in load_compile_failures()), patched, unbuilt))
     cfuncs = [f for f in funcs.values() if f.kind == 'c']
     counts = collections.Counter(r['verdict'] for r in rows)
     with_locals = {r['function'] for r in rows}
@@ -1200,8 +1327,9 @@ def main():
                 for rv, line in lines:
                     fh.write(('[%s] ' % rv[0] if rv else '[new] ') + line + '\n')
     if a.check:
-        bad += check_fixed(reviewed)
-        print('stack_escapes: %d problem(s): unreviewed overrun candidates, units that do not compile' % bad)
+        bad += check_fixed(reviewed, rows, funcs, fitting)
+        print('stack_escapes: %d problem(s): unreviewed overrun candidates, units that do not compile, '
+              'fixes not proven' % bad)
         sys.exit(1 if bad else 0)
 
 
