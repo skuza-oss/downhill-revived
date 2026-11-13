@@ -75,9 +75,6 @@ static const char *const control_names[TC_COUNT] = {
     "pedal", "hop", "brake", "slide", "square", "circle", "camera", "pause",
     "cross", "triangle", "csquare", "ccircle", "plusleft", "plusright", "lbar", "rbar", "l3", "r3", "stick", "trick"
 };
-static const char *const control_labels[TC_COUNT] = {
-    "PEDAL", "HOP", "BRAKE", "SLIDE", "", "", "", "", "", "", "", "", "", "", "", "", "L3", "R3", "STICK", "TRICK"
-};
 
 typedef struct { int on; float x, y, r, hw, hh; int box; } Ctl;  /* r: round; hw, hh: box half sizes */
 
@@ -174,7 +171,10 @@ static const uint16_t CODE_PAD[CODE_CLEAR] = {PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RI
                                               PAD_TRIANGLE, PAD_CIRCLE, PAD_CROSS, PAD_SQUARE};
 enum { PANEL_CLOSE, PANEL_BAIL, PANEL_LEAVE, PANEL_BUTTONS };
 enum { CONFIRM_NO, CONFIRM_YES };
-enum { EDIT_GROUND, EDIT_AIR, EDIT_MINUS, EDIT_PLUS, EDIT_RESET, EDIT_DONE, EDIT_BUTTONS };
+enum { EDIT_GROUND, EDIT_AIR, EDIT_MINUS, EDIT_PLUS, EDIT_UNDO, EDIT_REDO, EDIT_RESET, EDIT_DONE, EDIT_BUTTONS };
+/* the editor's history (finding 226): the preset's edits after each gesture, -/+ run, RESET */
+enum { UNDO_STEPS = 32, REPEAT_FIRST_MS = 400, REPEAT_MS = 90 };
+typedef struct { TouchEdit e[TC_COUNT]; int legacy; } EditStep;
 
 typedef struct {
     int used;
@@ -227,7 +227,16 @@ struct Touch {
     /* visibility */
     double hud_seen;           /* wall ms the race HUD was last drawn */
     int hidden_by_pad, editor, editor_tab, edit_selected;
-    TouchEdit edit_before;
+    int editor_alone;          /* the editor alone, over a plain background (touch_open_editor_alone) */
+    TouchEdit edit_before, edit_ok;   /* a drag's control before it, and at the last place it fitted */
+    EditStep undo[UNDO_STEPS];
+    int undo_count, undo_at;   /* steps kept; the one shown */
+    int pinch_finger;          /* a second finger resizing the held control (-1 none) */
+    float pinch_d0, pinch_size0;
+    int repeat_finger;         /* a finger held on - or +: the step repeats (-1 none) */
+    double repeat_at;
+    int repeated;
+    int tablet;                /* laid out with the tablet defaults (lay_out) */
     /* air */
     int air_layout;
     double air_since;          /* race ms the air flag came */
@@ -342,29 +351,50 @@ void touch_settings_default(TouchSettings *s)
 
 void touch_layout_parse(TouchSettings *s, const char *text)
 {
+    int edited[2] = {0, 0}, current[2] = {0, 0};
     for (int p = 0; p < 2; p++)
         for (int c = 0; c < TC_COUNT; c++) s->edit[p][c] = (TouchEdit){0, 0, 1};
     while (text && *text) {
         char name[32];
         float dx, dy, size;
         int n = 0;
+        int version = 0;
         if (sscanf(text, " %31[a-z0-9.]=%f,%f,%f%n", name, &dx, &dy, &size, &n) == 4 && n > 0) {   /* digits: l3, r3 */
             int p = !strncmp(name, "classic.", 8) ? 1 : !strncmp(name, "thumb.", 6) ? 0 : -1;
             const char *control = p == 1 ? name + 8 : name + 6;
+            /* 0.8.0 wrote sizes 0.6-1.6 and read 0.5-2.0; a 13-inch tablet needs moves past 200 mm */
             for (int c = 0; p >= 0 && c < TC_COUNT; c++)
-                if (!strcmp(control, control_names[c]) && fabsf(dx) < 200 && fabsf(dy) < 200 && size >= 0.5f && size <= 2.0f)
+                if (!strcmp(control, control_names[c]) && fabsf(dx) < 1000 && fabsf(dy) < 1000 &&
+                    size >= TOUCH_SIZE_MIN - 0.001f && size <= TOUCH_SIZE_MAX + 0.001f) {
                     s->edit[p][c] = (TouchEdit){dx, dy, size};
+                    edited[p] = 1;
+                }
+        } else if (sscanf(text, " %31[a-z.]=%d", name, &version) == 2 && version >= 2) {   /* thumb.layout=2 */
+            if (!strcmp(name, "thumb.layout")) current[0] = 1;
+            if (!strcmp(name, "classic.layout")) current[1] = 1;
         }
         const char *next = strchr(text, ';');
         text = next ? next + 1 : NULL;
     }
+    /* edits without the mark were made on 0.8.0's places: they keep them (touch.h) */
+    for (int p = 0; p < 2; p++) s->legacy[p] = edited[p] && !current[p];
 }
 
 void touch_layout_format(const TouchSettings *s, char *out, int size)
 {
     int at = 0;
     out[0] = 0;
-    for (int p = 0; p < 2; p++)
+    for (int p = 0; p < 2; p++) {
+        int edited = 0;
+        for (int c = 0; c < TC_COUNT; c++) {
+            const TouchEdit *e = &s->edit[p][c];
+            if (e->dx != 0 || e->dy != 0 || e->size != 1) edited = 1;
+        }
+        if (edited && !s->legacy[p]) {   /* laid out on the current places (touch_layout_parse) */
+            int n = snprintf(out + at, (size_t)(size - at), "%s%s.layout=2", at ? ";" : "", p ? "classic" : "thumb");
+            if (n < 0 || at + n >= size) { out[at] = 0; return; }
+            at += n;
+        }
         for (int c = 0; c < TC_COUNT; c++) {
             const TouchEdit *e = &s->edit[p][c];
             if (e->dx == 0 && e->dy == 0 && e->size == 1) continue;
@@ -373,6 +403,7 @@ void touch_layout_format(const TouchSettings *s, char *out, int size)
             if (n < 0 || at + n >= size) { out[at] = 0; return; }
             at += n;
         }
+    }
 }
 
 /* ---------------------------------------------------------------- geometry */
@@ -488,17 +519,63 @@ static void dpad_home(Touch *t, const TouchEdit *e, float *x, float *y)
     }
 }
 
+/* A tablet's screen (TOUCH_TABLET_MM on its short side), whatever the layout's places. */
+static int big_screen(const Touch *t) { return fminf(t->screen.width, t->screen.height) >= TOUCH_TABLET_MM; }
+
+/* The tablet defaults (finding 226). Two hands hold a tablet by its sides, the thumbs some way up
+   from the lower corners: the bottom clusters move up by a quarter of the height past 80 mm (at
+   most 28 mm: a 13-inch iPad) and in by a tenth of the width past 160 mm (at most 12 mm). */
+static float tablet_lift(const Touch *t) { return t->tablet ? clampf(0.25f * (t->screen.height - 80.0f), 0, 28.0f) : 0; }
+static float tablet_inward(const Touch *t) { return t->tablet ? clampf(0.1f * (t->screen.width - 160.0f), 0, 12.0f) : 0; }
+
+/* A place's centre before the player's edits (right-handed). */
+static void place_xy(const Touch *t, const Place *p, float *x, float *y)
+{
+    float W = t->screen.width, H = t->screen.height, s = t->s, lift = tablet_lift(t), in = tablet_inward(t);
+    if (p->anchor == AT_BR) *x = W - (100 - p->px) * REF_W / 100 * s - in, *y = H - (100 - p->py) * REF_H / 100 * s - lift;
+    else if (p->anchor == AT_BL) *x = p->px * REF_W / 100 * s + in, *y = H - (100 - p->py) * REF_H / 100 * s - lift;
+    else *x = p->px * REF_W / 100, *y = p->py * REF_H / 100;
+}
+
+/* A tablet's top buttons (Pause / START and camera / SELECT): their phone place, the screen's
+   top-left corner, is out of a thumb's reach on a tablet, so they sit in a row just above the
+   right cluster's touch areas (its top before the player's edits), the Pause button at the edge;
+   the left hand mirrors it with everything else. */
+static void tablet_top_place(const Touch *t, int c, int hud_moved, float *x, float *y)
+{
+    const TouchSettings *st = &t->set;
+    float top = t->screen.height;
+    for (int o = 0; o < TC_COUNT; o++) {
+        Place p;
+        if (o == TC_TRICK || !place_of(st->preset, o, st->attacks, hud_moved, &p) || p.anchor != AT_BR) continue;
+        float ox, oy;
+        place_xy(t, &p, &ox, &oy);
+        float half = (p.shape == SHAPE_BOX ? p.h * REF_H / 200 : p.w * REF_W / 200) * t->bs;
+        top = fminf(top, oy - half * AREA_GROW);
+    }
+    Place me;
+    place_of(st->preset, TC_PAUSE, st->attacks, hud_moved, &me);
+    float hw = me.w * REF_W / 200 * t->bs, hh = me.h * REF_H / 200 * t->bs;
+    float pause_x = t->screen.width - t->screen.strip_right - 2.0f - hw * AREA_GROW;
+    *y = top - GAP_MM - hh * AREA_GROW;
+    *x = c == TC_PAUSE ? pause_x : pause_x - 2 * hw * AREA_GROW - GAP_MM;
+}
+
 /* The layout for the settings and the screen. */
 static void lay_out(Touch *t, int hud_moved)
 {
     const TouchSettings *st = &t->set;
     float W = t->screen.width, H = t->screen.height;
     float limit = touch_height_scale(H, st->preset);
-    float s = st->size > 0 ? st->size / 100.0f : 1.0f;
+    /* a tablet (unless its preset keeps 0.8.0's places) starts from a larger base size; the Size
+       setting is a share of that base, so its 70-105 % mean the same on every screen */
+    t->tablet = big_screen(t) && !st->legacy[st->preset == TOUCH_CLASSIC];
+    float base = t->tablet ? TOUCH_TABLET_SCALE : 1.0f;
+    float s = (st->size > 0 ? st->size / 100.0f : 1.0f) * base;
     if (s > limit) s = limit;
     if (s < 0.5f) s = 0.5f;
     t->s = s;
-    t->bs = touch_button_scale(s);
+    t->bs = touch_button_scale(s / base) * base;   /* a phone: touch_button_scale(s), as before */
     for (int c = 0; c < TC_COUNT; c++) {
         Place p;
         Ctl *k = &t->ctl[c];
@@ -507,9 +584,8 @@ static void lay_out(Touch *t, int hud_moved)
         float w = p.w * REF_W / 100, h = p.h * REF_H / 100;
         float scale = t->bs;
         float x, y;
-        if (p.anchor == AT_BR) x = W - (100 - p.px) * REF_W / 100 * s, y = H - (100 - p.py) * REF_H / 100 * s;
-        else if (p.anchor == AT_BL) x = p.px * REF_W / 100 * s, y = H - (100 - p.py) * REF_H / 100 * s;
-        else x = p.px * REF_W / 100, y = p.py * REF_H / 100;
+        if (t->tablet && (c == TC_CAMERA || c == TC_PAUSE)) tablet_top_place(t, c, hud_moved, &x, &y);
+        else place_xy(t, &p, &x, &y);
         const TouchEdit *e = &st->edit[st->preset == TOUCH_CLASSIC][c];
         int dpad = c == TC_STICK && st->dpad;
         if (c == TC_STICK) t->dpad_fit = 1.0f;
@@ -526,6 +602,13 @@ static void lay_out(Touch *t, int hud_moved)
         k->hw = w / 2 * scale, k->hh = h / 2 * scale;
         if (c == TC_TRICK) k->r = st->trick_size / 2.0f * e->size;
         if (dpad) k->r = k->hw = k->hh = dpad_extent(t, e);   /* the pad's half extent: arms reach it */
+        /* a control the player edited stays on the screen whatever the Size setting or the screen
+           did since (finding 226; the editor keeps it there itself): too large for it, centred */
+        if (e->dx != 0 || e->dy != 0 || e->size != 1) {
+            float rx = c == TC_TRICK ? 7 : k->box ? k->hw : k->r, ry = c == TC_TRICK ? 7 : k->box ? k->hh : k->r;
+            k->x = 2 * rx >= W ? W / 2 : clampf(k->x, rx, W - rx);
+            k->y = 2 * ry >= H ? H / 2 : clampf(k->y, ry, H - ry);
+        }
     }
     /* the camera cutout (read at run time) is kept clear: a control over it moves inward */
     const TouchScreen *sc = &t->screen;
@@ -539,7 +622,7 @@ static void lay_out(Touch *t, int hud_moved)
         }
     /* the steering area: 60 mm from the left strip, 3 mm short of the midline and of the right
        cluster's touch areas; Classic's to 44% of the width, below the L bar */
-    float left = t->screen.strip_left, x1 = left + 60, top = 0;
+    float left = t->screen.strip_left, x1 = left + 60 * (t->tablet ? TOUCH_TABLET_SCALE : 1) + tablet_inward(t), top = 0;
     if (st->preset == TOUCH_CLASSIC) {
         x1 = 0.44f * W;
         top = t->ctl[TC_LBAR].y + t->ctl[TC_LBAR].hh * AREA_GROW + GAP_MM;
@@ -551,7 +634,8 @@ static void lay_out(Touch *t, int hud_moved)
             float edge = mirror_x(t, k->x) - k->r * AREA_GROW - GAP_MM;
             if (edge < x1) x1 = edge;
         }
-        top = t->ctl[TC_CAMERA].y + t->ctl[TC_CAMERA].hh * AREA_GROW + GAP_MM;
+        /* a tablet's top buttons are on the other side (tablet_top_place): the whole height steers */
+        top = t->tablet ? t->screen.strip_top : t->ctl[TC_CAMERA].y + t->ctl[TC_CAMERA].hh * AREA_GROW + GAP_MM;
     }
     t->steer_x0 = left, t->steer_x1 = x1, t->steer_y0 = top, t->steer_y1 = H - t->screen.strip_bottom;
     if (!right_handed(t)) {   /* mirrored: the area measured from the right strip */
@@ -1118,6 +1202,10 @@ static Box code_box(const Touch *t, int b)
    at the top and of the places the race controls take later. */
 static Box skip_box(const Touch *t)
 {
+    /* a tablet's middle is out of both thumbs' reach (finding 226): under the right thumb (the
+       action side; Hand Left mirrors it), its edge 8 mm in, 40 % of the height up */
+    if (big_screen(t))
+        return (Box){mirror_x(t, t->screen.width - t->screen.strip_right - 8.0f - 15.0f), t->screen.height * 0.6f, 15.0f, 5.5f};
     return (Box){t->screen.width / 2, t->screen.height * 0.86f, 15.0f, 5.5f};
 }
 
@@ -1139,6 +1227,8 @@ static Box panel_box(const Touch *t, int b)
     float y = t->ctl[TC_CAMERA].y + t->ctl[TC_CAMERA].hh * AREA_GROW + GAP_MM + 4.5f + 2;
     float w[PANEL_BUTTONS] = {16, 20, 24};
     float x = mirror_x(t, t->ctl[TC_CAMERA].x) - t->ctl[TC_CAMERA].hw;
+    float total = w[0] + w[1] + w[2] + 2 * GAP_MM + 4;
+    if (x + total > t->screen.width - 2) x = t->screen.width - 2 - total;   /* a tablet's top buttons sit at the edge */
     for (int i = 0; i < b; i++) x += w[i] + GAP_MM + (i + 1 == PANEL_LEAVE ? 4 : 0);
     Box r = {x + w[b] / 2, y, w[b] / 2, 4.5f};
     r.x = mirror_x(t, r.x);
@@ -1146,12 +1236,14 @@ static Box panel_box(const Touch *t, int b)
 }
 
 /* The editor's buttons, in the top buttons' row (their default places: the editor moves them):
-   GROUND and AIR on one side of them, - + RESET DONE on the wider side (both groups there, GROUND
-   and AIR first, when the other side is too narrow); b = EDIT_BUTTONS is the
-   size readout's place, under GROUND and AIR. A screen too narrow for that gets one row below. */
+   GROUND and AIR on one side of them, - + UNDO REDO RESET DONE on the wider side (both groups
+   there, GROUND and AIR first, when the other side is too narrow); b = EDIT_BUTTONS is the size
+   readout's place, under the second group. A screen too narrow for that gets one row below. */
 static Box editor_box(const Touch *t, int b)
 {
-    static const float w[EDIT_BUTTONS] = {18, 14, 10, 10, 16, 16};
+    /* GROUND AIR | - + UNDO REDO RESET DONE: 9 mm targets at least, narrow enough for both groups
+       beside the top buttons of a 20:9 phone (finding 226) */
+    static const float w[EDIT_BUTTONS] = {14, 10, 9, 9, 12, 12, 14, 14};
     float W = t->screen.width;
     Place cam, pau;
     place_of(t->set.preset, TC_CAMERA, t->set.attacks, 1, &cam);
@@ -1159,7 +1251,8 @@ static Box editor_box(const Touch *t, int b)
     float hw = cam.w * REF_W / 200, y = cam.py * REF_H / 100, hh = cam.h * REF_H / 200;
     float a0 = mirror_x(t, cam.px * REF_W / 100), a1 = mirror_x(t, pau.px * REF_W / 100);
     float span0 = fminf(a0, a1) - hw - 2, span1 = fmaxf(a0, a1) + hw + 2;   /* the top buttons, a 2 mm margin */
-    float group_a = w[EDIT_GROUND] + 2 + w[EDIT_AIR], group_b = w[EDIT_MINUS] + w[EDIT_PLUS] + w[EDIT_RESET] + w[EDIT_DONE] + 6;
+    float group_a = w[EDIT_GROUND] + 2 + w[EDIT_AIR], group_b = -2;
+    for (int i = EDIT_MINUS; i < EDIT_BUTTONS; i++) group_b += w[i] + 2;
     float left_room = span0 - 2, right_room = W - 2 - span1;
     int b_right = right_room >= left_room;
     float wide = b_right ? right_room : left_room, narrow = b_right ? left_room : right_room;
@@ -1170,7 +1263,7 @@ static Box editor_box(const Touch *t, int b)
         if (split) ax = b_right ? span0 - group_a : span1, bx = b_right ? span1 : span0 - group_b;
         else if (b_right) ax = span1, bx = span1 + group_a + 2;
         else bx = span0 - group_b, ax = bx - 2 - group_a;
-        if (b == EDIT_BUTTONS) return (Box){ax + group_a / 2, y + hh + 3.0f, group_a / 2, 1.5f};
+        if (b == EDIT_BUTTONS) return (Box){bx + group_b / 2, y + hh + 3.0f, group_b / 2, 1.5f};   /* under - + ... */
         if (b <= EDIT_AIR) return (Box){ax + (b == EDIT_GROUND ? w[0] / 2 : w[0] + 2 + w[1] / 2), y, w[b] / 2, hh};
         float x = bx;
         for (int i = EDIT_MINUS; i < b; i++) x += w[i] + 2;
@@ -1324,54 +1417,198 @@ static int editable(const Touch *t, int c)
     return c != TC_TRICK && c != TC_PLUS_LEFT && c != TC_PLUS_RIGHT;
 }
 
-/* The Ground tab's rules: on screen, 3 mm gaps, nothing in an attack lane, nothing dragged out of a strip. */
-static int layout_valid(const Touch *t)
+static TouchEdit *edit_of(Touch *t, int c) { return &t->set.edit[t->set.preset == TOUCH_CLASSIC][c]; }
+
+/* A control's half extents for the editor's rules (the trick stick's faint spot: its 14 mm centre). */
+static void rule_half(const Touch *t, int c, float *rx, float *ry)
 {
-    float W = t->screen.width, H = t->screen.height;
-    for (int c = 0; c < TC_COUNT; c++) {
-        const Ctl *k = &t->ctl[c];
-        if (!k->on) continue;
-        float rx = k->box ? k->hw : k->r, ry = k->box ? k->hh : k->r;
-        if (c == TC_TRICK) rx = ry = 7;
-        if (k->x - rx < 0 || k->x + rx > W || k->y - ry < 0 || k->y + ry > H) return 0;
-        if ((c == TC_STICK || c == TC_TRICK) && in_strip(t, k->x, k->y)) return 0;
-        if (c == TC_STICK || c == TC_TRICK || c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) continue;
-        for (int d = c + 1; d < TC_COUNT; d++) {
-            const Ctl *m = &t->ctl[d];
-            if (!m->on || d == TC_STICK || d == TC_TRICK || d == TC_PLUS_LEFT || d == TC_PLUS_RIGHT) continue;
-            float gap;
-            if (!k->box && !m->box) gap = dist(k->x, k->y, m->x, m->y) - k->r - m->r;
-            else {
-                float ax = fabsf(k->x - m->x) - (k->box ? k->hw : k->r) - (m->box ? m->hw : m->r);
-                float ay = fabsf(k->y - m->y) - (k->box ? k->hh : k->r) - (m->box ? m->hh : m->r);
-                gap = fmaxf(ax, ay);
-            }
-            if (gap < GAP_MM) return 0;
+    const Ctl *k = &t->ctl[c];
+    *rx = k->box ? k->hw : k->r, *ry = k->box ? k->hh : k->r;
+    if (c == TC_TRICK) *rx = *ry = 7;
+}
+
+/* The gap between two controls' drawn shapes (negative: they overlap). */
+static float shape_gap(const Ctl *k, const Ctl *m)
+{
+    if (!k->box && !m->box) return dist(k->x, k->y, m->x, m->y) - k->r - m->r;
+    float ax = fabsf(k->x - m->x) - (k->box ? k->hw : k->r) - (m->box ? m->hw : m->r);
+    float ay = fabsf(k->y - m->y) - (k->box ? k->hh : k->r) - (m->box ? m->hh : m->r);
+    return fmaxf(ax, ay);
+}
+
+/* A control's touch area enters one of PEDAL's flick lanes (Thumb zones with flick attacks). */
+static int in_flick_lane(const Touch *t, int c)
+{
+    const Ctl *k = &t->ctl[c], *p = &t->ctl[TC_PEDAL];
+    float r = (k->box ? fmaxf(k->hw, k->hh) : k->r) * AREA_GROW;
+    for (int i = 0; i <= 16; i++) {
+        float a = i * PI_F / 8, qx = k->x + (i < 16 ? r * cosf(a) : 0), qy = k->y + (i < 16 ? r * sinf(a) : 0);
+        float dx = qx - p->x, dy = qy - p->y, d = hypotf(dx, dy);
+        if (d <= p->r || d > FLICK_REACH_MM) continue;
+        if (fabsf(dy) <= fabsf(dx) * tanf(FLICK_LANE_DEG * PI_F / 180)) return 1;
+    }
+    return 0;
+}
+
+static int flick_lanes(const Touch *t)
+{
+    return t->set.preset == TOUCH_THUMB_ZONES && t->set.attacks == TOUCH_ATTACK_FLICK && t->ctl[TC_PEDAL].on;
+}
+
+/* The editor's rules for the control the player moves or resizes (finding 226; finding 141 had a
+   3 mm gap between every two controls): wholly on the screen; the steering stick's home and the
+   trick stick's spot out of the gesture strips (a drag starting there is the system's); no
+   overlap with another control's drawn shape (what the player sees is what a touch presses: a
+   touch in two areas goes to the nearer, so overlapping shapes would steal each other's
+   presses); nothing in PEDAL's flick lanes (a flick would press it); and not under the editor's
+   own bar, which must stay usable. The default layouts keep their 3 mm gaps; the rules only
+   check the edited control, so a layout another rule (the cutout, the Size setting) bent does
+   not lock the editor. */
+static int control_fits(const Touch *t, int c)
+{
+    const Ctl *k = &t->ctl[c];
+    if (!k->on) return 1;
+    float W = t->screen.width, H = t->screen.height, rx, ry;
+    rule_half(t, c, &rx, &ry);
+    if (k->x - rx < -0.01f || k->x + rx > W + 0.01f || k->y - ry < -0.01f || k->y + ry > H + 0.01f) return 0;
+    if ((c == TC_STICK || c == TC_TRICK) && in_strip(t, k->x, k->y)) return 0;
+    if (t->editor)
+        for (int b = 0; b < EDIT_BUTTONS; b++) {
+            Box x = editor_box(t, b);
+            if (fabsf(k->x - x.x) < rx + x.hw && fabsf(k->y - x.y) < ry + x.hh) return 0;
         }
-        /* the flick lanes: no other control's touch area enters them */
-        if (t->set.preset == TOUCH_THUMB_ZONES && t->set.attacks == TOUCH_ATTACK_FLICK && c != TC_PEDAL && t->ctl[TC_PEDAL].on) {
-            const Ctl *p = &t->ctl[TC_PEDAL];
-            float r = (k->box ? fmaxf(k->hw, k->hh) : k->r) * AREA_GROW;
-            for (int i = 0; i <= 16; i++) {
-                float a = i * PI_F / 8, qx = k->x + (i < 16 ? r * cosf(a) : 0), qy = k->y + (i < 16 ? r * sinf(a) : 0);
-                float dx = qx - p->x, dy = qy - p->y, d = hypotf(dx, dy);
-                if (d <= p->r || d > FLICK_REACH_MM) continue;
-                if (fabsf(dy) <= fabsf(dx) * tanf(FLICK_LANE_DEG * PI_F / 180)) return 0;
-            }
-        }
+    if (c == TC_STICK || c == TC_TRICK || c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) return 1;
+    for (int d = 0; d < TC_COUNT; d++) {
+        const Ctl *m = &t->ctl[d];
+        if (d == c || !m->on || d == TC_STICK || d == TC_TRICK || d == TC_PLUS_LEFT || d == TC_PLUS_RIGHT) continue;
+        if (shape_gap(k, m) < 0) return 0;
+    }
+    if (flick_lanes(t)) {
+        if (c != TC_PEDAL) return !in_flick_lane(t, c);
+        for (int d = 0; d < TC_COUNT; d++)
+            if (d != TC_PEDAL && d != TC_STICK && d != TC_TRICK && t->ctl[d].on && in_flick_lane(t, d)) return 0;
     }
     return 1;
 }
 
-void touch_open_editor(Touch *t)
+/* The control's edit moved so it lies on the screen (a control larger than the screen: centred). */
+static void keep_on_screen(Touch *t, int c)
 {
-    t->editor = 1;
-    t->editor_tab = EDIT_GROUND;
-    t->edit_selected = t->set.preset == TOUCH_CLASSIC ? TC_CROSS : TC_PEDAL;
-    drop_race_touches(t);
+    const Ctl *k = &t->ctl[c];
+    float W = t->screen.width, H = t->screen.height, rx, ry;
+    rule_half(t, c, &rx, &ry);
+    float x = 2 * rx >= W ? W / 2 : clampf(k->x, rx, W - rx), y = 2 * ry >= H ? H / 2 : clampf(k->y, ry, H - ry);
+    if (x == k->x && y == k->y) return;
+    TouchEdit *e = edit_of(t, c);
+    e->dx += (x - k->x) * (right_handed(t) ? 1.0f : -1.0f);   /* edits are stored as the right hand has them */
+    e->dy += y - k->y;
+    lay_out(t, t->set.hud_moved);
 }
 
-static TouchEdit *edit_of(Touch *t, int c) { return &t->set.edit[t->set.preset == TOUCH_CLASSIC][c]; }
+/* The control's size, as near `want` as fits (TOUCH_SIZE_MIN to TOUCH_SIZE_MAX, kept on the
+   screen: a control grown at an edge moves inward). Returns the size it got. */
+static float size_set(Touch *t, int c, float want)
+{
+    TouchEdit *e = edit_of(t, c), start = *e;
+    want = clampf(want, TOUCH_SIZE_MIN, TOUCH_SIZE_MAX);
+    float lo = start.size, hi = want;
+    for (int i = 0; i < 14; i++) {
+        float size = i == 0 ? want : (lo + hi) / 2;
+        *e = start;
+        e->size = size;
+        lay_out(t, t->set.hud_moved);
+        keep_on_screen(t, c);
+        if (control_fits(t, c)) {
+            if (i == 0) return size;
+            lo = size;
+        } else hi = size;
+        if (i > 0 && fabsf(hi - lo) < 0.005f) break;
+    }
+    *e = start;
+    e->size = lo;
+    lay_out(t, t->set.hud_moved);
+    keep_on_screen(t, c);
+    if (!control_fits(t, c)) { *e = start; lay_out(t, t->set.hud_moved); }
+    return e->size;
+}
+
+/* - and +: 5 % steps up to 100 %, 10 % to 200 %, 25 % above (25 % to 600 % in 37 steps; a held
+   button repeats). */
+static void size_step(Touch *t, int dir)
+{
+    if (t->edit_selected < 0 || (t->edit_selected == TC_STICK && !t->set.dpad)) return;   /* the stick's home has no size */
+    float now_size = edit_of(t, t->edit_selected)->size;
+    float probe = dir > 0 ? now_size + 0.001f : now_size - 0.001f;
+    float step = probe < 1 ? 0.05f : probe < 2 ? 0.10f : 0.25f;
+    float want = dir > 0 ? floorf(now_size / step + 1.001f) * step : ceilf(now_size / step - 1.001f) * step;
+    size_set(t, t->edit_selected, want);
+}
+
+/* ---- the history: UNDO_STEPS snapshots of the preset's edits, undo_at the one shown ---- */
+
+static void history_take(Touch *t, EditStep *step)
+{
+    int p = t->set.preset == TOUCH_CLASSIC;
+    memcpy(step->e, t->set.edit[p], sizeof step->e);
+    step->legacy = t->set.legacy[p];
+}
+
+static void history_start(Touch *t)
+{
+    history_take(t, &t->undo[0]);
+    t->undo_count = 1, t->undo_at = 0;
+}
+
+/* After a finished change (a gesture, a - / + run, RESET): one step, if anything changed. */
+static void history_push(Touch *t)
+{
+    EditStep now_step;
+    history_take(t, &now_step);
+    if (t->undo_count > 0 && !memcmp(&now_step, &t->undo[t->undo_at], sizeof now_step)) return;
+    t->undo_count = t->undo_at + 1;   /* a new change drops what was undone */
+    if (t->undo_count == UNDO_STEPS) {
+        memmove(t->undo, t->undo + 1, sizeof *t->undo * (UNDO_STEPS - 1));
+        t->undo_count--;
+    }
+    t->undo[t->undo_count++] = now_step;
+    t->undo_at = t->undo_count - 1;
+}
+
+static void history_show(Touch *t, int at)
+{
+    int p = t->set.preset == TOUCH_CLASSIC;
+    t->undo_at = at;
+    memcpy(t->set.edit[p], t->undo[at].e, sizeof t->undo[at].e);
+    t->set.legacy[p] = t->undo[at].legacy;
+    lay_out(t, t->set.hud_moved);
+    if (t->edit_selected >= 0 && !editable(t, t->edit_selected)) t->edit_selected = -1;
+}
+
+static int can_undo(const Touch *t) { return t->undo_at > 0; }
+static int can_redo(const Touch *t) { return t->undo_at + 1 < t->undo_count; }
+
+static void editor_open(Touch *t, int alone)
+{
+    t->editor = 1;
+    t->editor_alone = alone;
+    t->editor_tab = EDIT_GROUND;
+    t->edit_selected = t->set.preset == TOUCH_CLASSIC ? TC_CROSS : TC_PEDAL;
+    t->pinch_finger = t->repeat_finger = -1;
+    drop_race_touches(t);
+    history_start(t);
+}
+
+void touch_open_editor(Touch *t) { editor_open(t, 0); }
+void touch_open_editor_alone(Touch *t) { editor_open(t, 1); }
+int touch_editor_open(const Touch *t) { return t->editor; }
+int touch_tablet(const Touch *t) { return t->tablet; }
+
+static void editor_close(Touch *t)
+{
+    t->editor = 0;
+    t->pinch_finger = t->repeat_finger = -1;
+    t->saved = 1;
+}
 
 static void editor_button(Touch *t, int b)
 {
@@ -1380,23 +1617,33 @@ static void editor_button(Touch *t, int b)
     case EDIT_AIR:
         if (t->set.preset == TOUCH_THUMB_ZONES) t->editor_tab = EDIT_AIR, t->edit_selected = TC_TRICK;
         break;
-    case EDIT_MINUS: case EDIT_PLUS: {
-        if (t->edit_selected < 0) break;
-        TouchEdit *e = edit_of(t, t->edit_selected), before = *e;
-        e->size = clampf(e->size + (b == EDIT_PLUS ? 0.05f : -0.05f), 0.6f, 1.6f);
-        lay_out(t, t->set.hud_moved);
-        if (!layout_valid(t)) { *e = before; lay_out(t, t->set.hud_moved); }
+    case EDIT_MINUS: case EDIT_PLUS:
+        size_step(t, b == EDIT_PLUS ? 1 : -1);
+        history_push(t);
         break;
-    }
-    case EDIT_RESET:
+    case EDIT_UNDO: if (can_undo(t)) history_show(t, t->undo_at - 1); break;
+    case EDIT_REDO: if (can_redo(t)) history_show(t, t->undo_at + 1); break;
+    case EDIT_RESET: {
+        /* every control of the preset back to its default, on the current places (a 0.8.0
+           layout's own places go with its edits); one step, so UNDO brings them back */
         for (int c = 0; c < TC_COUNT; c++) *edit_of(t, c) = (TouchEdit){0, 0, 1};
+        t->set.legacy[t->set.preset == TOUCH_CLASSIC] = 0;
         lay_out(t, t->set.hud_moved);
-        break;
-    case EDIT_DONE:
-        t->editor = 0;
-        t->saved = 1;
+        history_push(t);
         break;
     }
+    case EDIT_DONE: editor_close(t); break;
+    }
+}
+
+/* The finger holding a control in the editor (-1 none). */
+static int holding_finger(const Touch *t, const Finger *except)
+{
+    for (int i = 0; i < TOUCH_FINGERS; i++) {
+        const Finger *g = &t->f[i];
+        if (g != except && g->used && g->job == JOB_EDIT && g->control >= 0 && i != t->pinch_finger) return i;
+    }
+    return -1;
 }
 
 static void editor_down(Touch *t, Finger *f)
@@ -1405,7 +1652,21 @@ static void editor_down(Touch *t, Finger *f)
     f->control = -1;
     f->target = -1;
     for (int b = 0; b < EDIT_BUTTONS; b++)
-        if (in_box(editor_box(t, b), f->x, f->y)) { f->target = b; return; }
+        if (in_box(editor_box(t, b), f->x, f->y)) {
+            f->target = b;
+            if (b == EDIT_MINUS || b == EDIT_PLUS)   /* held: repeats (editor_tick) */
+                t->repeat_finger = (int)(f - t->f), t->repeat_at = t->now + REPEAT_FIRST_MS, t->repeated = 0;
+            return;
+        }
+    /* a second finger while one holds a control: the two pinch it larger or smaller */
+    int held = holding_finger(t, f);
+    if (held >= 0 && t->pinch_finger < 0) {
+        const Finger *g = &t->f[held];
+        t->pinch_finger = (int)(f - t->f);
+        t->pinch_d0 = fmaxf(dist(f->x, f->y, g->x, g->y), 5.0f);
+        t->pinch_size0 = edit_of(t, g->control)->size;
+        return;
+    }
     float best = 1e9f;
     for (int c = 0; c < TC_COUNT; c++) {
         if (!editable(t, c)) continue;
@@ -1414,7 +1675,7 @@ static void editor_down(Touch *t, Finger *f)
     }
     if (f->control >= 0) {
         t->edit_selected = f->control;
-        t->edit_before = *edit_of(t, f->control);
+        t->edit_before = t->edit_ok = *edit_of(t, f->control);
         f->grab_dx = t->ctl[f->control].x - f->x;
         f->grab_dy = t->ctl[f->control].y - f->y;
     }
@@ -1422,6 +1683,18 @@ static void editor_down(Touch *t, Finger *f)
 
 static void editor_move(Touch *t, Finger *f)
 {
+    int i = (int)(f - t->f);
+    if (i == t->pinch_finger || (t->pinch_finger >= 0 && f->control >= 0)) {   /* the pinch */
+        const Finger *g = &t->f[t->pinch_finger];
+        int held = holding_finger(t, NULL);
+        if (held >= 0 && g->used) {
+            const Finger *h = &t->f[held];
+            float d = dist(g->x, g->y, h->x, h->y);
+            size_set(t, h->control, t->pinch_size0 * d / t->pinch_d0);
+            t->edit_ok = *edit_of(t, h->control);
+        }
+        if (i == t->pinch_finger) return;
+    }
     if (f->control < 0) return;
     TouchEdit *e = edit_of(t, f->control);
     float want_x = f->x + f->grab_dx, want_y = f->y + f->grab_dy;
@@ -1430,17 +1703,47 @@ static void editor_move(Touch *t, Finger *f)
     e->dx += (want_x - k->x) * sx;
     e->dy += want_y - k->y;
     lay_out(t, t->set.hud_moved);
+    keep_on_screen(t, f->control);   /* dragged past an edge: it stays against it */
+    if (control_fits(t, f->control)) t->edit_ok = *e;
 }
 
 static void editor_up(Touch *t, Finger *f)
 {
+    int i = (int)(f - t->f);
+    if (i == t->repeat_finger) t->repeat_finger = -1;
     if (f->target >= 0) {
-        if (in_box(editor_box(t, f->target), f->x, f->y)) editor_button(t, f->target);
+        int ran = (f->target == EDIT_MINUS || f->target == EDIT_PLUS) && t->repeated;
+        if (ran) history_push(t);   /* the run is one step */
+        else if (in_box(editor_box(t, f->target), f->x, f->y)) editor_button(t, f->target);
         return;
     }
-    if (f->control >= 0 && !layout_valid(t)) {   /* back to where it was */
-        *edit_of(t, f->control) = t->edit_before;
-        lay_out(t, t->set.hud_moved);
+    if (i == t->pinch_finger) {
+        t->pinch_finger = -1;
+        if (holding_finger(t, f) < 0) history_push(t);
+        return;
+    }
+    if (f->control >= 0) {
+        /* a drop where it does not fit: back to the last place it fitted on the way */
+        if (!control_fits(t, f->control)) {
+            *edit_of(t, f->control) = t->edit_ok;
+            lay_out(t, t->set.hud_moved);
+        }
+        if (t->pinch_finger >= 0) t->pinch_finger = -1;
+        history_push(t);
+    }
+}
+
+/* Once a pad read while the editor shows: a held - or + repeats. */
+static void editor_tick(Touch *t)
+{
+    if (t->repeat_finger < 0) return;
+    const Finger *f = &t->f[t->repeat_finger];
+    if (!f->used || f->job != JOB_EDIT || (f->target != EDIT_MINUS && f->target != EDIT_PLUS)) { t->repeat_finger = -1; return; }
+    if (!in_box(editor_box(t, f->target), f->x, f->y)) return;   /* slid off: waits */
+    while (t->now >= t->repeat_at) {
+        size_step(t, f->target == EDIT_PLUS ? 1 : -1);
+        t->repeated = 1;
+        t->repeat_at += REPEAT_MS;
     }
 }
 
@@ -1839,7 +2142,7 @@ void touch_back(Touch *t, double now)
 {
     t->now = now;
     if (t->freeze) { t->freeze = 0; return; }
-    if (t->editor) { t->editor = 0; t->saved = 1; return; }
+    if (t->editor) { editor_close(t); return; }
     if (t->pause == PAUSE_CONTROLS) { t->pause = PAUSE_OPEN; return; }   /* the overlay's own page */
     if (t->pause == PAUSE_CODES) { code_tapped(t, CODE_BACK); return; }
     /* the question's No; while the presses that opened it still go, nothing (as a tap): the game
@@ -2197,6 +2500,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         t->hud_seen = now;
     }
     t->race_was_on = race_on_screen(t);
+    if (t->editor) editor_tick(t);
     if (flyover_on(t) != t->fly_was) {
         t->fly_was = flyover_on(t);
         if (t->fly_was) {   /* a pause menu is gone once the race is loading again */
@@ -2215,7 +2519,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
         }
     }
     lifted_presses_step(t);
-    if (was_on && !t->race_was_on && t->pause == PAUSE_NONE) {   /* the race is gone */
+    if (was_on && !t->race_was_on && t->pause == PAUSE_NONE && !t->editor) {   /* the race is gone (the editor's fingers are its own) */
         drop_race_touches(t);
         t->panel_open = 0;
         t->hold_cross_until = 0;
@@ -2317,7 +2621,7 @@ Touch *touch_new(void)
     if (!t) return NULL;
     touch_settings_default(&t->set);
     t->screen = (TouchScreen){REF_W, REF_H, 0, 0, 0, 0, 0, 0, 0, 0};
-    t->stick_finger = t->dpad_finger = -1;
+    t->stick_finger = t->dpad_finger = t->pinch_finger = t->repeat_finger = -1;
     t->cross_released = t->select_released = -1e9;
     t->cross_release_wall = -1e9;
     t->edit_selected = -1;
@@ -2639,7 +2943,13 @@ static void draw_editor(const Touch *t, Draw *d)
 {
     float W = t->screen.width, H = t->screen.height;
     const TouchScreen *s = &t->screen;
-    put(d, TS_RECT, W / 2, H / 2, W, H, 0, 0, rgba(6, 8, 12, 0.38f), 0);
+    /* alone (the launcher's entry): a plain background, the screen's outline and its middle lines,
+       instead of the game's picture under a dimmer */
+    put(d, TS_RECT, W / 2, H / 2, W, H, 0, 0, t->editor_alone ? rgba(28, 34, 42, 1) : rgba(6, 8, 12, 0.38f), 0);
+    if (t->editor_alone) {
+        put(d, TS_RECT, W / 2, H / 2, 0.12f, H / 2, 0, 0, rgba(255, 255, 255, 0.10f), 0);
+        put(d, TS_RECT, W / 2, H / 2, W / 2, 0.12f, 0, 0, rgba(255, 255, 255, 0.10f), 0);
+    }
     if (s->strip_left > 0) put(d, TS_STRIPES, s->strip_left / 2, H / 2, s->strip_left / 2, H / 2, 0, 0, rgba(255, 90, 90, 0.28f), 0);
     if (s->strip_right > 0) put(d, TS_STRIPES, W - s->strip_right / 2, H / 2, s->strip_right / 2, H / 2, 0, 0, rgba(255, 90, 90, 0.28f), 0);
     if (s->strip_bottom > 0) put(d, TS_STRIPES, W / 2, H - s->strip_bottom / 2, W / 2, s->strip_bottom / 2, 0, 0, rgba(255, 90, 90, 0.28f), 0);
@@ -2662,19 +2972,32 @@ static void draw_editor(const Touch *t, Draw *d)
         float r = k->box ? fmaxf(k->hw, k->hh) : k->r;
         put(d, TS_RING, k->x, k->y, r + 1.2f, 0.5f, 0, 0, 0, rgba(255, 209, 102, 1));
     }
-    static const char *const names[EDIT_BUTTONS] = {"GROUND", "AIR", "-", "+", "RESET", "DONE"};
+    static const char *const names[EDIT_BUTTONS] = {"GROUND", "AIR", "-", "+", "UNDO", "REDO", "RESET", "DONE"};
     for (int b = 0; b < EDIT_BUTTONS; b++) {
         Box x = editor_box(t, b);
         int on = (b == EDIT_GROUND && t->editor_tab == EDIT_GROUND) || (b == EDIT_AIR && t->editor_tab == EDIT_AIR);
+        int dim = (b == EDIT_UNDO && !can_undo(t)) || (b == EDIT_REDO && !can_redo(t)) ||
+                  (b == EDIT_AIR && t->set.preset != TOUCH_THUMB_ZONES);
         uint32_t fill = b == EDIT_DONE ? rgba(166, 227, 154, 1) : on ? rgba(255, 255, 255, 0.18f) : rgba(10, 14, 18, 0.9f);
         put(d, TS_RECT, x.x, x.y, x.hw, x.hh, 1.4f, 0, fill, rgba(255, 255, 255, 0.28f));
-        text(d, x.x, x.y, 2.4f, 0, names[b], b == EDIT_DONE ? rgba(16, 32, 16, 1) : rgba(255, 255, 255, 1));
+        text(d, x.x, x.y, b == EDIT_MINUS || b == EDIT_PLUS ? 3.0f : 2.2f, 0, names[b],
+             b == EDIT_DONE ? rgba(16, 32, 16, 1) : rgba(255, 255, 255, dim ? 0.3f : 1));
     }
     if (t->edit_selected >= 0 && t->ctl[t->edit_selected].on) {
+        /* the selected control, its drawn size and its own size in per cent (finding 226) */
+        static const char *const readout[TC_COUNT] = {
+            "PEDAL", "HOP", "BRAKE", "SLIDE", "SQUARE", "CIRCLE", "CAMERA", "PAUSE", "CROSS", "TRIANGLE", "SQUARE", "CIRCLE",
+            "+", "+", "L1 L2", "R1 R2", "L3", "R3", "STICK", "TRICK STICK"};
         const Ctl *k = &t->ctl[t->edit_selected];
-        char info[48];
+        char info[64];
         float size = (k->box ? fmaxf(k->hw, k->hh) : k->r) * 2;
-        snprintf(info, sizeof info, "%s %.0f MM", t->set.dpad && t->edit_selected == TC_STICK ? "D-PAD" : control_labels[t->edit_selected], size);
+        const char *name = t->set.dpad && t->edit_selected == TC_STICK ? "D-PAD" : readout[t->edit_selected];
+        if (t->set.preset == TOUCH_CLASSIC && t->edit_selected == TC_CAMERA) name = "SELECT";
+        if (t->set.preset == TOUCH_CLASSIC && t->edit_selected == TC_PAUSE) name = "START";
+        if (t->edit_selected == TC_STICK && !t->set.dpad)   /* the stick's home: a place, no size */
+            snprintf(info, sizeof info, "%s", name);
+        else
+            snprintf(info, sizeof info, "%s %.0f MM %.0f%%", name, size, edit_of((Touch *)t, t->edit_selected)->size * 100);
         Box a = editor_box(t, EDIT_BUTTONS);
         if (a.hh > 2) a = editor_box(t, EDIT_AIR), a.x += a.hw + 15;   /* one row: beside AIR */
         text(d, a.x, a.y, 2.2f, 0, info, rgba(255, 209, 102, 1));

@@ -951,15 +951,16 @@ static void test_editor_bar(void)
             for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
                 float cx, cy, cr;
                 CHECK(touch_control(t, c, &cx, &cy, &cr));
-                static const float half_w[6] = {9, 7, 5, 5, 8, 8};   /* GROUND AIR - + RESET DONE */
-                for (int b = 0; b < 6; b++) {
+                static const float half_w[8] = {7, 5, 4.5f, 4.5f, 6, 6, 7, 7};   /* GROUND AIR - + UNDO REDO RESET DONE */
+                for (int b = 0; b < 8; b++) {
                     float bx, by;
                     CHECK(touch_target(t, TOUCH_TARGET_EDITOR, b, &bx, &by));
                     CHECK(fabsf(bx - cx) >= half_w[b] + cr || fabsf(by - cy) >= 4.5f + cr);   /* no overlap */
                 }
             }
             /* a drop in open space stays (Thumb zones: BRAKE 6 mm up, clear of the flick lanes;
-               Classic: L3 10 mm inward); onto PEDAL / ✕ it snaps back */
+               Classic: L3 10 mm inward); onto PEDAL / ✕ it stays at the last place on the way where
+               it fitted (finding 226; before, it went back to its start): never over the target */
             int moved = preset ? TC_L3 : TC_BRAKE;
             float bx, by, br, nx, ny;
             touch_control(t, moved, &bx, &by, &br);
@@ -977,9 +978,10 @@ static void test_editor_bar(void)
             touch_up(t, 8, px, py, now);
             field();
             touch_control(t, moved, &bx, &by, &br);
-            CHECK(fabsf(bx - nx) < 0.2f && fabsf(by - ny) < 0.2f);
+            CHECK(hypotf(bx - px, by - py) >= br + pr - 0.01f);                 /* not over PEDAL / ✕ */
+            CHECK(hypotf(bx - px, by - py) <= hypotf(nx - px, ny - py) + 0.01f);   /* no further than its start */
             float dx, dy;
-            touch_target(t, TOUCH_TARGET_EDITOR, 5, &dx, &dy);   /* DONE */
+            touch_target(t, TOUCH_TARGET_EDITOR, 7, &dx, &dy);   /* DONE */
             touch_down(t, 9, dx, dy, now);
             touch_up(t, 9, dx, dy, now);
             field();
@@ -1921,6 +1923,379 @@ static void test_dpad_shapes(void)
     }
 }
 
+/* ---- finding 226: the layout's freedom, tablets, the history, the editor alone ---- */
+
+static const TouchScreen PHONE = {154.5f, 69.5f, 0, 0, 0, 0, 0, 0, 0, 0};          /* the Mi 11i */
+static const TouchScreen MINI = {176.4f, 115.9f, 0, 0, 0, 0, 0, 0, 0, 0};          /* an 8.3-inch iPad mini */
+static const TouchScreen TABLET13 = {264.8f, 198.6f, 0, 0, 0, 0, 0, 0, 0, 0};      /* a 13-inch iPad */
+
+static void on_screen(const TouchScreen *sc, float w, float h)
+{
+    TouchSettings s = *touch_settings(t);
+    TouchScreen x = *sc;
+    x.width = w, x.height = h;
+    touch_configure(t, &s, &x);
+}
+
+static void set_screen(const TouchScreen *sc) { on_screen(sc, sc->width, sc->height); }
+
+static void editor_tap(int b)
+{
+    float x, y;
+    CHECK(touch_target(t, TOUCH_TARGET_EDITOR, b, &x, &y));
+    touch_down(t, 40, x, y, now);
+    field();
+    touch_up(t, 40, x, y, now);
+    field();
+}
+
+enum { E_GROUND, E_AIR, E_MINUS, E_PLUS, E_UNDO, E_REDO, E_RESET, E_DONE };
+
+static float size_of(int preset, int c) { return touch_settings(t)->edit[preset][c].size; }
+
+/* A drag of a control's centre by (mx, my), sampled each field. */
+static void drag(int c, float mx, float my)
+{
+    float x, y, r;
+    CHECK(touch_control(t, c, &x, &y, &r));
+    touch_down(t, 41, x, y, now);
+    field();
+    slide(41, x, y, x + mx, y + my, 300);
+    touch_up(t, 41, x + mx, y + my, now);
+    field();
+}
+
+/* Every two drawn controls of the ground layout apart (gap >= min), each wholly on the screen. */
+static void check_layout_clear(float min_gap, float W, float H)
+{
+    static const int skip[] = {TC_STICK, TC_TRICK, TC_PLUS_LEFT, TC_PLUS_RIGHT};
+    for (int c = 0; c < TC_COUNT; c++) {
+        float x, y, hw, hh;
+        int skipped = 0;
+        for (unsigned i = 0; i < 4; i++) skipped |= c == skip[i];
+        if (!touch_control(t, c, &x, &y, NULL) || skipped) continue;
+        touch_control_size(t, c, &hw, &hh);
+        CHECK(x - hw >= -0.01f && x + hw <= W + 0.01f && y - hh >= -0.01f && y + hh <= H + 0.01f);
+        for (int d = c + 1; d < TC_COUNT; d++) {
+            float x2, y2, hw2, hh2;
+            int skip2 = 0;
+            for (unsigned i = 0; i < 4; i++) skip2 |= d == skip[i];
+            if (!touch_control(t, d, &x2, &y2, NULL) || skip2) continue;
+            touch_control_size(t, d, &hw2, &hh2);
+            float gap = fmaxf(fabsf(x - x2) - hw - hw2, fabsf(y - y2) - hh - hh2);   /* boxes round both: a lower bound */
+            int round = hw == hh && hw2 == hh2 && c != TC_CAMERA && c != TC_PAUSE && c != TC_LBAR && c != TC_RBAR &&
+                        d != TC_CAMERA && d != TC_PAUSE && d != TC_LBAR && d != TC_RBAR;
+            if (round) gap = hypotf(x - x2, y - y2) - hw - hw2;
+            if (gap < min_gap) fprintf(stderr, "test_touch: controls %d and %d %.2f mm apart on %.0f x %.0f\n", c, d, gap, W, H);
+            CHECK(gap >= min_gap);
+        }
+    }
+}
+
+/* The size range's ends (25 % and 600 %) and the screen holding the control. */
+static void test_size_range(void)
+{
+    /* the trick stick's spot (Air tab; only the screen and the strips bound it): 25 % to 600 % */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    set_screen(&TABLET13);
+    touch_open_editor(t);
+    field();
+    editor_tap(E_AIR);
+    for (int i = 0; i < 60; i++) editor_tap(E_MINUS);
+    CHECK(fabsf(size_of(0, TC_TRICK) - 0.25f) < 0.001f);
+    for (int i = 0; i < 60; i++) editor_tap(E_PLUS);
+    CHECK(fabsf(size_of(0, TC_TRICK) - 6.0f) < 0.001f);
+    /* PEDAL on a phone: + stops where the screen holds it (wholly on screen, clear of the others) */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_open_editor(t);
+    field();
+    for (int i = 0; i < 60; i++) editor_tap(E_PLUS);
+    float grown = size_of(0, TC_PEDAL);
+    CHECK(grown > 1.0f && grown < 6.0f);
+    check_layout_clear(0, PHONE.width, PHONE.height);
+    for (int i = 0; i < 80; i++) editor_tap(E_MINUS);
+    CHECK(fabsf(size_of(0, TC_PEDAL) - 0.25f) < 0.001f);
+    /* the steps: 5 % below 100 %, 10 % to 200 %, 25 % above */
+    for (int i = 0; i < 15; i++) editor_tap(E_PLUS);
+    CHECK(fabsf(size_of(0, TC_PEDAL) - 1.0f) < 0.001f);
+    editor_tap(E_PLUS);
+    CHECK(fabsf(size_of(0, TC_PEDAL) - 1.1f) < 0.001f);
+    /* the saved text takes the ends and refuses past them */
+    TouchSettings s, back;
+    touch_settings_default(&s);
+    touch_layout_parse(&back, "thumb.layout=2;thumb.pedal=0.0,0.0,0.25;thumb.hop=0.0,0.0,6.00;thumb.brake=0.0,0.0,0.20;thumb.slide=0.0,0.0,6.50");
+    CHECK(fabsf(back.edit[0][TC_PEDAL].size - 0.25f) < 0.001f && fabsf(back.edit[0][TC_HOP].size - 6.0f) < 0.001f);
+    CHECK(back.edit[0][TC_BRAKE].size == 1 && back.edit[0][TC_SLIDE].size == 1);
+    (void)s;
+    /* a held + repeats: more than a step a second's hold, and one undo step for the run */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    set_screen(&TABLET13);
+    touch_open_editor(t);
+    field();
+    editor_tap(E_AIR);
+    float px, py;
+    touch_target(t, TOUCH_TARGET_EDITOR, E_PLUS, &px, &py);
+    touch_down(t, 42, px, py, now);
+    wait_ms(1000);
+    touch_up(t, 42, px, py, now);
+    field();
+    CHECK(size_of(0, TC_TRICK) >= 1.5f);   /* 400 ms, then a step every 90 ms */
+    editor_tap(E_UNDO);
+    CHECK(fabsf(size_of(0, TC_TRICK) - 1.0f) < 0.001f);
+}
+
+/* A control dragged past the screen's corner stays wholly on it, against the corner, at a phone,
+   a small tablet and a 13-inch tablet; grown there, it stays on the screen. */
+static void test_screen_bounds(void)
+{
+    const TouchScreen *screens[3] = {&PHONE, &MINI, &TABLET13};
+    for (int i = 0; i < 3; i++)
+        for (int preset = 0; preset < 2; preset++) {
+            const TouchScreen *sc = screens[i];
+            start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+            set_screen(sc);
+            touch_open_editor(t);
+            field();
+            /* the camera / SELECT button into the bottom-left corner (the steering side: open) */
+            drag(TC_CAMERA, -400, 400);
+            float x, y, hw, hh;
+            touch_control(t, TC_CAMERA, &x, &y, NULL);
+            touch_control_size(t, TC_CAMERA, &hw, &hh);
+            CHECK(fabsf(x - hw) < 0.05f && fabsf(y + hh - sc->height) < 0.05f);
+            for (int k = 0; k < 6; k++) editor_tap(E_PLUS);
+            touch_control(t, TC_CAMERA, &x, &y, NULL);
+            touch_control_size(t, TC_CAMERA, &hw, &hh);
+            CHECK(size_of(preset, TC_CAMERA) > 1.0f);
+            CHECK(x - hw >= -0.05f && y + hh <= sc->height + 0.05f);
+            check_layout_clear(0, sc->width, sc->height);
+        }
+}
+
+/* The tablet threshold, both sides, and the tablet defaults: all on screen and apart, the top
+   buttons and SKIP under the right thumb, the clusters lifted. */
+static void test_tablet(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    CHECK(!touch_tablet(t));
+    on_screen(&PHONE, 160, 89.9f);
+    CHECK(!touch_tablet(t));
+    on_screen(&PHONE, 160, 90.0f);
+    CHECK(touch_tablet(t));
+    on_screen(&PHONE, 89.9f, 160);   /* the short side, whichever it is */
+    CHECK(!touch_tablet(t));
+    const TouchScreen *screens[2] = {&MINI, &TABLET13};
+    for (int i = 0; i < 2; i++)
+        for (int preset = 0; preset < 2; preset++)
+            for (int left = 0; left < 2; left++)
+                for (int attacks = 0; attacks < 2; attacks++) {
+                    const TouchScreen *sc = screens[i];
+                    start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, attacks);
+                    TouchSettings s = *touch_settings(t);
+                    s.left_handed = left;
+                    touch_configure(t, &s, sc);
+                    CHECK(touch_tablet(t));
+                    check_layout_clear(3.0f * 0.99f, sc->width, sc->height);   /* the defaults keep their 3 mm gaps */
+                    float x, y, r;
+                    for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {   /* the right thumb's side, below the top third */
+                        touch_control(t, c, &x, &y, &r);
+                        CHECK(left ? x < sc->width / 2 : x > sc->width / 2);
+                        CHECK(y > sc->height * 0.15f);
+                    }
+                    touch_control(t, preset ? TC_CROSS : TC_PEDAL, &x, &y, &r);
+                    CHECK(sc->height - y > 69.5f * 0.17f * 1.25f + 5.0f);   /* lifted from the bottom edge (Classic's ✕: 17 % up on a phone) */
+                    /* the floating stick's area reaches the screen's top (the top buttons are across) */
+                    if (!preset) {
+                        float sx = left ? sc->width - 30 : 30;
+                        touch_down(t, 3, sx, 20, now);
+                        field();
+                        touch_move(t, 3, sx + 10, 20, now);
+                        field();
+                        uint8_t lx = 128, ly = 128, rx = 128, ry = 128;
+                        uint16_t b = 0;
+                        touch_pad(t, &b, &lx, &ly, &rx, &ry);
+                        CHECK(lx > 160);
+                        touch_up(t, 3, sx, 20, now);
+                        field();
+                    }
+                    /* SKIP under the right thumb */
+                    game.flyover = 1;
+                    field();
+                    CHECK(touch_target(t, TOUCH_TARGET_SKIP, 0, &x, &y));
+                    CHECK(left ? x < sc->width / 3 : x > sc->width * 2 / 3);
+                    game.flyover = 0;
+                    field();
+                }
+    /* a phone keeps its places: SKIP in the middle */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float x, y;
+    game.flyover = 1;
+    field();
+    touch_target(t, TOUCH_TARGET_SKIP, 0, &x, &y);
+    CHECK(fabsf(x - PHONE.width / 2) < 0.01f);
+    game.flyover = 0;
+    field();
+    /* the Size setting is a share of the tablet's base: 100 % there is 125 % of a phone's */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    set_screen(&TABLET13);
+    float r_auto, r_100;
+    touch_control(t, TC_PEDAL, NULL, NULL, &r_auto);
+    TouchSettings s = *touch_settings(t);
+    s.size = 100;
+    touch_configure(t, &s, NULL);
+    touch_control(t, TC_PEDAL, NULL, NULL, &r_100);
+    CHECK(fabsf(r_auto - 11.6f * 1.25f) < 0.3f && fabsf(r_auto - r_100) < 0.01f);
+}
+
+/* touch_edits as 0.8.0 wrote them (its touch_layout_format: "%.1f,%.1f,%.2f", sizes 0.60-1.60):
+   they load as they were and lay out on 0.8.0's places, on a phone and on a tablet. */
+static void test_old_edits(void)
+{
+    static const char *const OLD = "thumb.pedal=-4.0,2.5,1.15;thumb.hop=3.0,-2.0,0.90;thumb.stick=6.0,-3.0,1.00;"
+                                   "classic.camera=10.0,4.0,1.20;classic.cross=1.5,-1.0,1.10;classic.l3=-2.0,0.0,0.85";
+    TouchSettings s;
+    touch_settings_default(&s);
+    touch_layout_parse(&s, OLD);
+    CHECK(s.legacy[0] && s.legacy[1]);
+    CHECK(fabsf(s.edit[0][TC_PEDAL].dx + 4.0f) < 0.001f && fabsf(s.edit[0][TC_PEDAL].size - 1.15f) < 0.001f);
+    char text[2048];
+    touch_layout_format(&s, text, sizeof text);
+    CHECK(!strcmp(text, OLD));   /* written back as it was: no mark, the same numbers */
+    /* the places 0.8.0 drew (test_scaling's PEDAL at 131.3, 49.3, r 11.6 on the Mi 11i) plus the edit;
+       on the 13-inch tablet the same places from the corner, 0.8.0's size: no tablet defaults */
+    for (int i = 0; i < 2; i++) {
+        start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        const TouchScreen *sc = i ? &TABLET13 : &PHONE;
+        TouchSettings set = *touch_settings(t);
+        touch_layout_parse(&set, OLD);
+        touch_configure(t, &set, sc);
+        CHECK(!touch_tablet(t));
+        float x, y, r;
+        touch_control(t, TC_PEDAL, &x, &y, &r);
+        float ex = sc->width - (154.5f - 131.3f) - 4.0f, ey = sc->height - (69.5f - 49.3f) + 2.5f;
+        CHECK(fabsf(x - ex) < 0.2f && fabsf(y - ey) < 0.2f && fabsf(r - 11.6f * 1.15f) < 0.2f);
+        float cx, cy;
+        touch_control(t, TC_CAMERA, &cx, &cy, NULL);   /* the top button where 0.8.0 had it */
+        CHECK(fabsf(cx - 0.225f * 154.5f) < 0.05f && fabsf(cy - 0.08f * 69.5f) < 0.05f);
+    }
+    /* the mark: a preset laid out on the current places; RESET in the editor puts a 0.8.0 preset there */
+    touch_settings_default(&s);
+    touch_layout_parse(&s, "thumb.layout=2;thumb.pedal=1.0,1.0,2.50;classic.l3=-2.0,0.0,0.85");
+    CHECK(!s.legacy[0] && s.legacy[1]);
+    touch_layout_format(&s, text, sizeof text);
+    CHECK(!strcmp(text, "thumb.layout=2;thumb.pedal=1.0,1.0,2.50;classic.l3=-2.0,0.0,0.85"));
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    TouchSettings set = *touch_settings(t);
+    touch_layout_parse(&set, OLD);
+    touch_configure(t, &set, &TABLET13);
+    touch_open_editor(t);
+    field();
+    editor_tap(E_RESET);
+    CHECK(touch_tablet(t) && !touch_settings(t)->legacy[0]);
+    editor_tap(E_UNDO);   /* undo brings the old layout and its places back */
+    CHECK(!touch_tablet(t) && touch_settings(t)->legacy[0] && fabsf(size_of(0, TC_PEDAL) - 1.15f) < 0.001f);
+    /* a preset without edits (none saved) takes the current places: no mark needed */
+    touch_settings_default(&s);
+    touch_layout_parse(&s, "");
+    CHECK(!s.legacy[0] && !s.legacy[1]);
+}
+
+/* Undo and redo: each gesture and each tap one step; a new change drops what was undone; the
+   history holds 31 steps back. */
+static void test_undo_redo(void)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_open_editor(t);
+    field();
+    float x0, y0, x, y;
+    touch_control(t, TC_BRAKE, &x0, &y0, NULL);
+    drag(TC_BRAKE, 0, -6);                            /* step 1: moved */
+    touch_control(t, TC_BRAKE, &x, &y, NULL);
+    CHECK(fabsf(y - (y0 - 6)) < 0.2f);
+    editor_tap(E_PLUS);                               /* step 2: BRAKE (selected) 110 % */
+    CHECK(fabsf(size_of(0, TC_BRAKE) - 1.1f) < 0.001f);
+    editor_tap(E_UNDO);
+    CHECK(fabsf(size_of(0, TC_BRAKE) - 1.0f) < 0.001f);
+    touch_control(t, TC_BRAKE, &x, &y, NULL);
+    CHECK(fabsf(y - (y0 - 6)) < 0.2f);
+    editor_tap(E_UNDO);
+    touch_control(t, TC_BRAKE, &x, &y, NULL);
+    CHECK(fabsf(y - y0) < 0.01f && fabsf(x - x0) < 0.01f);
+    editor_tap(E_UNDO);                               /* nothing more: stays */
+    CHECK(touch_settings(t)->edit[0][TC_BRAKE].dy == 0);
+    editor_tap(E_REDO);
+    touch_control(t, TC_BRAKE, &x, &y, NULL);
+    CHECK(fabsf(y - (y0 - 6)) < 0.2f);
+    editor_tap(E_MINUS);                              /* a new step: redo of 110 % is gone */
+    editor_tap(E_REDO);
+    CHECK(fabsf(size_of(0, TC_BRAKE) - 0.95f) < 0.001f);
+    /* RESET is one step */
+    editor_tap(E_RESET);
+    CHECK(touch_settings(t)->edit[0][TC_BRAKE].dy == 0 && size_of(0, TC_BRAKE) == 1);
+    editor_tap(E_UNDO);
+    CHECK(fabsf(size_of(0, TC_BRAKE) - 0.95f) < 0.001f);
+    /* 40 steps: 31 come back */
+    for (int i = 0; i < 40; i++) editor_tap(i % 2 ? E_PLUS : E_MINUS);
+    int undone = 0;
+    for (int i = 0; i < 40; i++) {
+        float before = size_of(0, TC_BRAKE);
+        editor_tap(E_UNDO);
+        if (size_of(0, TC_BRAKE) != before) undone++;
+    }
+    CHECK(undone >= 30 && undone <= 31);   /* alternate steps: a change each */
+    /* a pinch: a second finger while one holds the control, apart 1.5 times as far: 150 % */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    set_screen(&TABLET13);
+    touch_open_editor(t);
+    field();
+    editor_tap(E_AIR);
+    float tx, ty;
+    touch_control(t, TC_TRICK, &tx, &ty, NULL);
+    touch_down(t, 50, tx, ty, now);
+    field();
+    touch_down(t, 51, tx - 20, ty, now);
+    field();
+    slide(51, tx - 20, ty, tx - 30, ty, 200);
+    CHECK(fabsf(size_of(0, TC_TRICK) - 1.5f) < 0.02f);
+    touch_up(t, 51, tx - 30, ty, now);
+    touch_up(t, 50, tx, ty, now);
+    field();
+    editor_tap(E_UNDO);
+    CHECK(fabsf(size_of(0, TC_TRICK) - 1.0f) < 0.001f);
+}
+
+/* The editor alone (the launcher's entry): a plain background, Done and Back close it and save. */
+static void test_editor_alone(void)
+{
+    for (int back = 0; back < 2; back++) {
+        start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        memset(&game, 0, sizeof game);   /* no race: the game's menus or its boot behind */
+        game.fps = 60;
+        touch_open_editor_alone(t);
+        field();
+        CHECK(touch_editor_open(t) && touch_visible(t) && touch_owns_touches(t));
+        TouchShape shapes[TOUCH_SHAPES];
+        int n = touch_shapes(t, shapes, TOUCH_SHAPES);
+        CHECK(n > 10 && shapes[0].kind == TS_RECT && (shapes[0].fill & 0xFF) == 0xFF);   /* opaque */
+        drag(TC_HOP, 0, -5);
+        uint16_t b = buttons();
+        CHECK(b == 0);   /* nothing reaches the game */
+        if (back) touch_back(t, now);
+        else editor_tap(E_DONE);
+        field();
+        CHECK(!touch_editor_open(t));
+        TouchSettings saved;
+        CHECK(touch_take_saved(t, &saved));
+        CHECK(fabsf(saved.edit[0][TC_HOP].dy + 5) < 0.2f);
+    }
+    /* opened from TOUCH CONTROLS, the game's picture shows through */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    touch_open_editor(t);
+    field();
+    TouchShape shapes[TOUCH_SHAPES];
+    touch_shapes(t, shapes, TOUCH_SHAPES);
+    CHECK((shapes[0].fill & 0xFF) < 0xFF);
+}
+
 int main(void)
 {
     test_dpad_layout();
@@ -1952,6 +2327,12 @@ int main(void)
     test_queue();
     test_tilt();
     test_codes();
+    test_size_range();
+    test_screen_bounds();
+    test_tablet();
+    test_old_edits();
+    test_undo_redo();
+    test_editor_alone();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");
