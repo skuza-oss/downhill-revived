@@ -6,6 +6,7 @@ extern "C" {
 /* The game clock (port/hle/fps.c, findings 067, 114, 139): paced play steps by the real time
    since the last frame (at most two fields) at every rate, offline and online; a deterministic
    run at 60 keeps the original NTSC path and arithmetic. */
+int port_fps_update_display(void);
 int port_fps(void);      /* the selected rate, 30 to port_fps_max */
 int port_fps_max(void);  /* 240, or DHD_FPS_MAX when lower */
 int port_delta_clock(void);           /* the delta-time clock's code paths are on */

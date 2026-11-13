@@ -940,6 +940,7 @@ static int deliver(void)
         load_registers(&rpc_saved);
     }
     if (now >= next_vsync) {
+        port_fps_update_display();  /* pace_grid re-anchors on period changes */
         uint64_t cycles = port_fps() == 60 ? VSYNC_CYCLES : (uint64_t)(BUS_HZ / port_fps());
         next_vsync += cycles;
         if (next_vsync < now)  /* fell far behind (a debugger stop): don't replay the frames */
