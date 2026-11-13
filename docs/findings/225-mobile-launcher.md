@@ -45,6 +45,56 @@ lane's follow-up in `port/launcher/BRIDGE.md`), the touch layout editor's own ch
   picker removed, the layout editor hook (3d86bcf8); `LauncherActivity`, `LauncherBridge`,
   `DiscImport`, `Native`, `SetupActivity` deleted, shortcuts, `build_apk.py` packs the page
   (6084577f); docs and `port/launcher/BRIDGE.md` (7f698afb).
+- [x] 2026-11-13: fixes from the device runs: the JNI calls linked into libmain (9e2351fc,
+  `--undefined-glob`), the crash note and the iso path (fd049b14), one button on a disc problem
+  and labels for the nav buttons (7189772f), the phone's Updates hint (cd064816).
+- [x] 2026-11-13: `check.py port` OK on cd064816 (17 steps); boot state trace (600 fields) against
+  the reference build of main 524948ba: all 600 rows match, PASS.
+- [x] 2026-11-13: an Android emulator (x86_64 image with ARM translation, a fresh install of the
+  release-signed APK, synthetic ISO 9660 images, no game data) and the Mi 11i (Android 13, the
+  owner's install, `install -r`): the evidence below.
+
+## Device runs (2026-11-13)
+
+APK: `package_release.py --platform android` with the release key and the 0.8.0 release's PGO
+profile, from 7189772f (the only later change is one English string): 35.0 MB, release
+certificate, schemes v2 and v3, not debuggable, `assets/launcher/index.html` checked.
+
+Emulator (portrait, 1080x2400): the launcher's first start (no disc, free space shown); a file
+booting SLUS_123.45 picked in the system document picker: the page says "That disc is SLUS_123.45,
+not Downhill Domination (USA), SCUS-97177." (DiscImage's words); a 320 MB image booting SCUS_971.77:
+checking, copying with the progress bar and PLAY disabled, the copy checked, the online check run
+(it answered "offline only", right for a synthetic image), the offer to delete the original;
+Delete it removed the document. Not tried: "not enough space" (the emulator's storage is too small
+to make a large enough file) and a cloud provider's streamed document.
+
+Mi 11i (landscape: the phone lay flat and the launcher follows the sensor, so no portrait run was
+made there; portrait was seen on the emulator and in the headless previews):
+
+- Every page: Play (the update line answered "Up to date", the disc found), Settings (Graphics,
+  Touch, Game with the existing disc as "Downhill Domination (USA), copied into the app: 2.4 GB",
+  Online), Help (Share log, version, links, licences). Opening the launcher left dhd.ini's md5
+  unchanged.
+- Share log opened Android's share sheet with `downhill-revived-...-log-2026-11-13.txt`; cancelled.
+- FPS & Ping switched on in the launcher (`perf_counter = 1` in dhd.ini) showed "60 FPS" in the game
+  and ON in its SETTINGS; switched off there (saved at once), the launcher showed it off at the next
+  start.
+- PLAY into the game, SINGLE PLAYER > START NEW GAME > SINGLE EVENT > RACE: a race at Mt. Midoule
+  started (clock running, Classic pad); QUIT RACE back to the menus.
+- EXIT GAME four times (after the race, after the layout editor, after a plain start, after a
+  direct start): each `end: closing (code 0)`, `end: handlers done in 61-69 ms`, no FORTIFY or
+  fatal signal in logcat, the next start's record "how it ended: normally", no new tombstone (the
+  newest is still from 2026-11-04).
+- Edit layout started the game in the touch layout editor ("touch: the layout editor opens (the
+  launcher asked for it)"); DONE left `touch_edits` as it was.
+- "Open the launcher at every start" off: a cold start went straight into the game; SETTINGS >
+  Game > Launcher At Start ON in the game; the next start opened the launcher.
+- The two long-press shortcuts (Launcher, Share log) registered against LauncherActivity
+  (`dumpsys shortcut`); not pressed on the home screen.
+- After: the four save files' md5s equal to before; dhd.ini's lines equal to before plus
+  `perf_counter = 0` and `launcher = 1` (both the defaults, written by the game and the launcher).
+  The published 0.8.0 APK reinstalled (`install -r`), started once, EXIT GAME ("normally"), the phone
+  left at its home screen.
 
 ## The bridge
 
@@ -148,7 +198,26 @@ game's own menu strings (in the disc's data) replaced at run time.
   `WEBVIEW2_USER_DATA_FOLDER` per run.
 - Headless Edge doesn't make windows narrower than about 500 px: the portrait previews were made
   in a phone-sized iframe.
+- The first APK's page answered nothing: `No implementation found for ... Native.values`. libmain
+  links the host objects from an archive (`libhost64.a`), and an archive member nobody references
+  is left out however the version script exports its names; `-Wl,--undefined-glob=` pulls it in.
+- A `check.py port` and the APK build run at once in one worktree broke each other's
+  `build/wasm` (a missing object, then a module with unresolved recompiled functions) and the
+  broken module was stored in the core cache under this branch's key; the entry was removed and
+  the core rebuilt (core id 4e73e2483ad0a67d both times it was built whole). One build per worktree.
+- On Android 12 and later Back on the app's root activity only moves the task to the background:
+  the launcher stays alive, and opening the app resumes it (the "start directly" setting applies at
+  a cold start).
+- The emulator's document picker took taps on its items only with a short hold (120 ms).
+- With the window kept clear of the camera cutout the Mi 11i shows a black strip on the cutout's
+  side in landscape and the emulator one at the top in portrait (the page's ground colour would
+  need `shortEdges` and the WebView's safe-area insets).
 
 ## Result
 
-Filled in at the merge.
+To fill in at the merge. For the lead: once this finding is `current`, root AGENTS.md's decisions
+get the row (check_docs refuses a row citing a finding in progress):
+
+`| One launcher UI for desktop, Android and iOS: port/launcher/ui in Tauri or the platform's web
+view, one bridge (port/launcher/BRIDGE.md), every string from ui/lang | 2026-11-13 | 225 | write a
+second launcher UI in Java, Kotlin or Swift, or put a launcher string outside the string table |`
