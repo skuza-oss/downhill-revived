@@ -32,6 +32,7 @@ Out of scope: portrait layouts, languages (other lanes or not chosen), the launc
 - [x] tilt steering on iOS through CoreMotion (03fe2614)
 - [x] docs: PLAYING, STATE, TESTING, the Android and iOS notes (d541df81)
 - [x] the iOS tests' path check on macOS (b3cc2015)
+- [x] the phone proof, the captures, `check.py port`, the state traces, the Simulator build
 - [x] the lead's report of the first on-screen iOS run: top buttons over the HUD's PUNCH meter,
   SLIDE on HOP, SKIP over the demo's text; fixed for phones and tablets (02a5f2f7)
 
@@ -185,4 +186,50 @@ landscape side while tilt steers: iOS turns the interface only well past any ste
   alone needs it before any touch, so the tick now measures the first window (desktop and
   Android; iOS already measured each second).
 
+- On the Mi 11i, 0.8.0's editor reverted every drag and every - / + in Classic pad: its cutout
+  band (149.3-154.4 mm) pushed ○ within 3 mm of its neighbours, so 0.8.0's whole-layout check
+  failed after any change (seen on the phone with the published 0.8.0 APK in this lane). The
+  lane's build drags, sizes and saves there (the per-control check, the cluster shift).
+- `package_release.py --platform android --out X` writes the native symbols to X and the APK to
+  `build/android/DownhillRevived-<version>-android-experimental.apk`; installing X fails with
+  INSTALL_PARSE_FAILED_NOT_APK.
+- iOS: `test_explicit_module_is_used` failed on the Mac before this lane too (macOS's temporary
+  folders resolve to /private/var).
+
 ## Result
+
+What a player can now do in the layout editor (TOUCH CONTROLS > Edit Layout), on Android and iOS:
+size each control from 25 % to 600 % as far as the screen holds it (hold - / + to repeat, or
+pinch with a second finger), place it anywhere wholly on the screen (a drag past an edge stops
+against it; it may touch another control but not cover it), undo and redo the last 32 changes,
+and read the selected control's name, millimetres and per cent. Tablets (90 mm or more on the
+short side) get larger defaults nearer the thumbs; on every screen the top buttons sit above the
+action cluster, clear of the HUD's PUNCH meter, the cutout moves a whole side, and SKIP is under
+the action thumb. `touch_edits` written by 0.8.0 loads and lays out as before (unit test with
+0.8.0 strings; the phone's own empty layout stayed byte-identical in dhd.ini).
+
+Checked:
+- `port/hle/test_touch.c`: every earlier test plus `test_size_range`, `test_screen_bounds`,
+  `test_tablet`, `test_phone_defaults`, `test_old_edits`, `test_undo_redo`, `test_editor_alone`
+  (Windows and the Mac).
+- `python tools/check.py port -j 6`: OK on 1e601e82 (the last code is 02a5f2f7); `check.py docs`
+  on the last commit.
+- Boot and race state traces of 1e601e82's build against `main-524948ba-ref-v3`: boot 600 of 600
+  rows equal, race 5000 of 5000 (`state_diff.py` PASS; touch is off in them).
+- Windows captures at 4x (hidden desktop, `DHD_TOUCH_MOUSE=1`, `DHD_TOUCH_SCREEN_MM`), before
+  (5a5b0cb8's build) and after, each at a phone (154.5 x 69.5 mm), the iPhone 17 Pro Max
+  (153.6 x 70.7), an iPad mini (176.4 x 115.9) and a 13-inch iPad (264.8 x 198.6), Thumb zones
+  and Classic pad: the flight (SKIP) and the race; the editor alone after. Kept outside the
+  repository. The desktop has no cutout: the cutout's cases are the unit tests'.
+- The Mi 11i, a release-signed APK built as 0.8.0's gate APK was: the editor (✕ 25 % by a held -,
+  one UNDO back to 100 %, L3 dragged into the corner and grown to 456 % where it meets the L bar,
+  RESET), Done saving `classic.layout=2;classic.cross=0.0,0.0,1.20`, a SINGLE EVENT race with
+  that layout (pedalling at 35 mph, the HUD readable, START top right), then RESET through the
+  editor: dhd.ini and the four save files byte-identical to before; the published 0.8.0 APK back.
+- iOS: the Simulator app builds on the Mac from 1e601e82 (the Windows build's core parts, which
+  equal lane 224's); `port/ios/tests` 23 tests OK there; `test_touch` passes there. Not run on a
+  simulator's screen (the brief's on-screen worker does that).
+
+Not checked: the editor alone on a phone (the Android activity does not pass `--touch-editor`
+yet: lane 225's side), tilt on an iPhone (no device; the Simulator has no motion), a pinch with
+real fingers (the unit test drives it; the device tool's pinch is symmetric about a point).
