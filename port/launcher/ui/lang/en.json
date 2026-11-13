@@ -119,7 +119,7 @@
   "row.unlockAll.hint": "Every track, rider, bike and shop item; your save is not changed",
   "row.updates": "Updates",
   "row.updates.hint": "Online races need the newest version",
-  "row.updates.hintPhone": "Checks once a day for a new release and says so here. Nothing is downloaded.",
+  "row.updates.hintPhone": "Looks for a new release each time the launcher opens and says so here. Nothing is downloaded.",
   "row.launcher": "Open the launcher at every start",
   "row.launcher.hint": "Off: the game starts at once. SETTINGS in the game turns the launcher back on.",
   "row.language": "Language",
