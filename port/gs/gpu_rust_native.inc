@@ -61,6 +61,7 @@ static int native_waits_for_vsync(Native *n)
    present.c's window), in the rectangle that keeps its shape. */
 static void native_present(Native *n)
 {
+    if (!platform_present_active()) return;
     Rust *p = n->exact;
     if (!p->surface || !p->window.size || n->present_failed) return;
     unsigned w, h;
@@ -162,7 +163,7 @@ static int native_init(Gs *g, Rust *exact)
     snprintf(most, sizeof most, "%u", n->scale_limit);
     host_putenv_s("DHD_SCALE_MAX", most);
     /* and why it is less than 8: "memory" (graphics memory), "texture" (the largest texture) or
-       "phone" (NATIVE_PHONE_SCALE_MAX) */
+       "phone" (NATIVE_PHONE_SCALE_MAX: Android and iOS) */
     host_putenv_s("DHD_SCALE_MAX_REASON", n->scale_reason == NATIVE_SCALE_MEMORY ? "memory" :
                   n->scale_reason == NATIVE_SCALE_TEXTURE ? "texture" :
                   n->scale_reason == NATIVE_SCALE_PHONE ? "phone" : "");
