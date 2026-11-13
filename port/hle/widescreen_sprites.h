@@ -10,18 +10,19 @@
    rectangle programs at 0x2B10 and 0x2C20 (whose half height is LOI 138.0, left alone).
 
    EE address of the lower word, its retail value, and the upper word it pairs with (both are
-   checked before the lower word is changed, so a second run or another package leaves it). */
+   checked before the lower word is changed). The VU byte offset lets iOS refresh an already
+   uploaded package after a display change. */
 #ifndef DHD_WIDESCREEN_SPRITES_H
 #define DHD_WIDESCREEN_SPRITES_H
 #include <stdint.h>
 static const struct {
-    uint32_t ee, retail, upper;
+    uint32_t ee, retail, upper, vu;
 } ws_sprite_widths[] = {
-    {0x26C448, 0x438A8000, 0x81F51E8A}, /* VU 0x27C8: vf7.w, the X half width (program 0x2738) */
-    {0x26C5C0, 0x438A8000, 0x81F508BC}, /* VU 0x2938: trees (program 0x28D0; PCSX2 patch) */
-    {0x26C700, 0x438A8000, 0x81F410BD}, /* VU 0x2A78 (PCSX2 patch) */
-    {0x26C758, 0x438A8000, 0x8020965B}, /* VU 0x2AD0 (PCSX2 patch) */
-    {0x26C7D8, 0x438A8000, 0x80400218}, /* VU 0x2B50: vf8.x, the X half extent (program 0x2B10) */
-    {0x26C8E8, 0x438A8000, 0x80400218}, /* VU 0x2C60: vf8.x (program 0x2C20) */
+    {0x26C448, 0x438A8000, 0x81F51E8A, 0x27C8}, /* VU 0x27C8: vf7.w, the X half width (program 0x2738) */
+    {0x26C5C0, 0x438A8000, 0x81F508BC, 0x2938}, /* VU 0x2938: trees (program 0x28D0; PCSX2 patch) */
+    {0x26C700, 0x438A8000, 0x81F410BD, 0x2A78}, /* VU 0x2A78 (PCSX2 patch) */
+    {0x26C758, 0x438A8000, 0x8020965B, 0x2AD0}, /* VU 0x2AD0 (PCSX2 patch) */
+    {0x26C7D8, 0x438A8000, 0x80400218, 0x2B50}, /* VU 0x2B50: vf8.x, the X half extent (program 0x2B10) */
+    {0x26C8E8, 0x438A8000, 0x80400218, 0x2C60}, /* VU 0x2C60: vf8.x (program 0x2C20) */
 };
 #endif

@@ -70,6 +70,7 @@ int host_setting_locked(const char *name);  /* the environment sets this DHD_* v
 void host_pad_vibrate(int port, int light, int heavy);  /* the DualShock 2's motors to the PC pad */
 void host_widescreen_init(void);  /* DHD_WIDESCREEN: Hor+ field of view, any aspect (widescreen.c) */
 void host_widescreen_vsync(void); /* its live-memory part, once a field */
+double host_widescreen_frame_aspect(void);
 double host_widescreen_aspect(void);  /* the widescreen picture's width / height; 0 when off */
 void widescreen_card_mode(int on);   /* the next field's 2D is for a card: unmapped (widescreen.c) */
 void host_display_aware(void);    /* the process sees real pixels (DPI aware), before any window */
