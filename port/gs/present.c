@@ -371,16 +371,24 @@ static int app_away(void) { return app_background || surface_dropped; }
      (kernel.c asks host_service_host_came_back after this present and rebases fps.c's clock): the
      time away is no game time, offline or online, so nothing tries to catch it up.
    The close of the app ends the game as the close button does. */
+static SDL_AtomicInt away_stopped;   /* gs_app_stopped: the game waits, the renderer is drained, no surface */
+int gs_app_stopped(void) { return SDL_GetAtomicInt(&away_stopped); }
+
 static void app_away_wait(void)
 {
     static int waiting;   /* gs_pump_messages, from the wait below, comes back here */
     if (waiting || !surface) return;
     waiting = 1;
     double since = host_wall_seconds();
-    hle_log("gs: in the background; the game waits\n");
     host_app_away(1);
+    /* the drawing queued before this field reaches the GPU and ends first (the GS worker idle),
+       then the surface goes: nothing is submitted or presented until the return. The app's
+       lifecycle callback waits for this (gs_app_stopped; iOS: ios_main.m, finding 227). */
+    if (graphics_deferred()) graphics_wait();
     gs_gpu_surface_reset(&gs, NULL);
     target_ready = 0;
+    SDL_SetAtomicInt(&away_stopped, 1);
+    hle_log("gs: in the background; the game waits (its drawing done, no surface)\n");
     while (app_away() && !window_closed) {
         surface_dropped = 0;   /* the surface is dropped: only the app's own state is waited for */
         SDL_Delay(20);
@@ -392,6 +400,7 @@ static void app_away_wait(void)
     } else {
         resize_pending = 1;
     }
+    SDL_SetAtomicInt(&away_stopped, 0);
     host_app_away(0);   /* the core's clock starts again from now (kernel.c, host_service_host_came_back) */
     hle_log("gs: back in the foreground after %.1f s; the game clock goes on from now\n", host_wall_seconds() - since);
     waiting = 0;

@@ -158,17 +158,41 @@ int ios_start_game(int edit_touch_layout, int checked) {
 bool ios_is_game_running(void) { return atomic_load(&s_game_started); }
 bool ios_game_is_active(void) { return atomic_load(&s_game_active); }
 
+/* The game stopped for the app's absence (present.c's app_away_wait): its drawing reached the GPU
+   and ended, and the surface is gone, so nothing is submitted or presented any more. UIKit's
+   callback waits for that, bounded, before it returns and iOS suspends the app (iOS ends an app
+   that draws in the background). The game thread gets there at its next field without the main
+   thread (nothing on its way waits for it), so the wait can't deadlock; a long load that doesn't
+   reach a field in time is logged and the game stops at its next field (finding 227). */
+extern int gs_app_stopped(void);   /* present.c */
+static void wait_for_the_game(const char *why) {
+    if (!atomic_load(&s_game_started)) return;
+    enum { MOST_MS = 1500 };
+    double start = CACurrentMediaTime();
+    int ms = 0;
+    while (!gs_app_stopped() && ms < MOST_MS) {
+        usleep(2000);
+        ms = (int)((CACurrentMediaTime() - start) * 1000);
+    }
+    if (gs_app_stopped())
+        fprintf(stderr, "ios: %s: the game and its renderer stopped in %d ms\n", why, ms);
+    else
+        fprintf(stderr, "ios: %s: the game hasn't stopped after %d ms (a load); it stops at its next field\n", why, ms);
+}
+
 /* The game waits while the app is not active (present.c's app_away_wait, finding 227); the marker
    says where it was, for the next start's record. */
 void ios_lifecycle_will_resign_active(void) {
     atomic_store(&s_game_active, false);
     ios_metal_set_game_active(false);   /* also lets go of every finger (metal_bridge.m) */
     if (atomic_load(&s_game_started)) marker_write(RUN_INACTIVE, 0);
+    wait_for_the_game("off the screen");
 }
 void ios_lifecycle_did_enter_background(void) {
     atomic_store(&s_game_active, false);
     ios_metal_set_game_active(false);
     if (atomic_load(&s_game_started)) marker_write(RUN_BACKGROUND, 0);
+    wait_for_the_game("in the background");
 }
 void ios_lifecycle_will_enter_foreground(void) {}
 void ios_lifecycle_did_become_active(void) {
