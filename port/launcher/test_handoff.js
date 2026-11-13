@@ -7,9 +7,10 @@
 // - the same with slow saves over each transport the page runs on: the desktop's Tauri invoke,
 //   Android's posted MessagePort, iOS's injected bridge_ios.js: the native side sees every write
 //   before `play`, and one `play` only;
-// - app.js itself (its resetTab and play, run with stand-ins for the drawing): a reset of a tab with
-//   Performance mode followed at once by PLAY; PLAY over a save that never answers: cancelled with
-//   its message and a retry.
+// - app.js itself (its resetTab, play and discAnswer, run with stand-ins for the drawing): a reset
+//   of a tab with Performance mode followed at once by PLAY; PLAY over a save that never answers:
+//   cancelled with its message and a retry; a delete of the original disc file that the native
+//   side refuses (false) or fails (a rejected call): asked again, never said deleted.
 //     node port/launcher/test_handoff.js
 'use strict';
 const fs = require('fs');
@@ -241,6 +242,28 @@ async function appHandlers() {
     answerSave(null);
     await failure.fix.onclick();
     assert.deepStrictEqual(seen, ['save_setting', 'play']);
+  }
+  // discAnswer(true): the native side answers false, then a rejected call: the question is asked
+  // again and nothing says the file is gone; then true: kept, and the deletion is said
+  for (const [answer, why] of [[false, 'refused'], [new Error('provider threw'), 'rejected']]) {
+    const page = pageWithApp(async (name) => {
+      if (name === 'snapshot') return new Promise(() => {});
+      if (name === 'delete_original') { if (answer instanceof Error) throw answer; return answer; }
+      return null;
+    });
+    vm.runInContext(`state.disc = { stage: 'done', job: 7, deletable: true, size: 2600000000 };`, page);
+    await vm.runInContext('discAnswer(true)', page);
+    const disc = vm.runInContext('state.disc', page);
+    assert.strictEqual(disc.stage, 'done', `${why}: asked again`);
+    assert.strictEqual(disc.deleteFailed, true, `${why}: says it failed`);
+    assert.strictEqual(vm.runInContext('JSON.stringify(flashed)', page), '[]', `${why}: never "deleted"`);
+  }
+  {
+    const page = pageWithApp(async (name) => (name === 'snapshot' ? new Promise(() => {}) : name === 'delete_original' ? true : null));
+    vm.runInContext(`state.disc = { stage: 'done', job: 7, deletable: true, size: 2600000000 };`, page);
+    await vm.runInContext('discAnswer(true)', page);
+    assert.strictEqual(vm.runInContext('state.disc.stage', page), 'kept');
+    assert.strictEqual(vm.runInContext('JSON.stringify(flashed)', page), '["disc.deleted"]');
   }
 }
 
