@@ -1,0 +1,145 @@
+# The touch controls' action pictures (finding 229): what each button does, as vector shapes.
+#
+# Original work drawn for Downhill Revived, GPL-3.0-or-later like the rest of the project. No
+# third-party picture, font glyph or game art is in them: every shape below was written by hand
+# here. The idea of buttons that show their action comes from a community iOS fork (credited in
+# docs/PLAYING.md); none of its pictures was copied, traced or converted.
+#
+# port/tools/touch_icons.py turns this file into touch_icons.wgsl (the overlay's shader draws them
+# as signed distances, so they are sharp at any size) and draws preview sheets. Edit here, then run
+#     python port/tools/touch_icons.py
+# The ids are TI_* in port/hle/touch.h, in this order.
+#
+# Units: the picture's box is -1..1 on each axis, x right, y down. Shapes, unioned in order:
+#   seg  x0 y0 x1 y1 w          a stroke with round ends, w wide
+#   poly w x0 y0 x1 y1 ...       a filled polygon (any shape, no holes); w > 0 rounds it by w/2
+#   disc x y r                   a filled circle
+#   ring x y r w                 a circle's outline, w wide
+#   arc  x y r a0 a1 w           part of a circle's outline from angle a0 to a1 (degrees, 0 = right,
+#                                counting anticlockwise as seen), w wide, round ends
+#   box  x y hw hh r             a filled box, half sizes hw, hh, corners rounded by r
+# A line starting with `cut` cuts its shape out of what is above it (the gap it leaves is the
+# shape plus `gap` set by `gap g` beforehand, default 0).
+
+# PEDAL (✕ on the ground): a crank on its chainring, its pedal at the bottom.
+icon pedal
+  ring -0.22 -0.22 0.46 0.20
+  disc  0.30 -0.43 0.10
+  disc -0.01 -0.74 0.10
+  disc -0.43 -0.74 0.10
+  disc -0.74 -0.43 0.10
+  disc -0.74 -0.01 0.10
+  disc -0.43  0.30 0.10
+  disc -0.01  0.30 0.10
+  disc  0.30 -0.01 0.10
+  disc -0.22 -0.22 0.13
+  seg  -0.22 -0.22  0.45  0.52 0.22
+  box   0.45  0.62 0.50 0.16 0.07
+
+# A fist punching right (○, the right-hand attack; drawn mirrored for ◻, the left-hand one).
+icon fist
+  box   0.30 -0.02 0.52 0.56 0.30
+  box  -0.45  0.14 0.40 0.26 0.08
+  gap 0.06
+  cut seg 0.52 -0.28 0.86 -0.28 0.0
+  cut seg 0.52 -0.02 0.86 -0.02 0.0
+  cut seg 0.52  0.24 0.86  0.24 0.0
+  cut arc 0.10 0.10 0.30 -90 10 0.0
+  seg  -1.00 -0.48 -0.62 -0.48 0.13
+  seg  -1.00 -0.12 -0.75 -0.12 0.13
+  seg  -1.00  0.62 -0.62  0.62 0.13
+
+# BRAKE (△ on the ground): a brake lever under its handlebar grip.
+icon brake
+  box  -0.10 -0.40 0.90 0.17 0.15
+  box  -0.40 -0.28 0.17 0.28 0.06
+  poly 0.10 -0.36 -0.10 0.88 0.28 0.94 0.48 -0.22 0.00
+  disc  0.91  0.38 0.13
+
+# HOP (R2 on the ground): a bike lifted off the ground, an arrow up.
+icon hop
+  ring -0.50  0.38 0.32 0.15
+  ring  0.50  0.38 0.32 0.15
+  seg  -0.50  0.38 -0.05  0.38 0.13
+  seg  -0.05  0.38 -0.22  0.00 0.13
+  seg  -0.22  0.00  0.32  0.00 0.13
+  seg   0.32  0.00 -0.05  0.38 0.13
+  seg  -0.50  0.38 -0.22  0.00 0.13
+  seg   0.32  0.00  0.50  0.38 0.13
+  seg   0.32  0.00  0.26 -0.18 0.13
+  seg  -0.30 -0.42  0.00 -0.78 0.17
+  seg   0.00 -0.78  0.30 -0.42 0.17
+  seg  -0.95  0.95  0.95  0.95 0.10
+
+# SLIDE (L3, powerslide): a back wheel sliding sideways, its skid and its spray.
+icon slide
+  ring  0.40  0.18 0.42 0.20
+  disc  0.40  0.18 0.10
+  seg  -0.95  0.70  0.20  0.70 0.13
+  seg  -0.70  0.42 -0.15  0.42 0.11
+  disc -0.42 -0.10 0.09
+  disc -0.70  0.08 0.08
+  disc -0.22 -0.36 0.08
+
+# SPRINT (R3): two arrowheads forward.
+icon sprint
+  seg  -0.75 -0.62 -0.18  0.00 0.24
+  seg  -0.18  0.00 -0.75  0.62 0.24
+  seg   0.05 -0.62  0.62  0.00 0.24
+  seg   0.62  0.00  0.05  0.62 0.24
+
+# SUPERSTYLE (△ in the air): a star.
+icon star
+  poly 0.06 0.00 -0.92 0.24 -0.31 0.88 -0.29 0.38 0.12 0.54 0.75 0.00 0.38 -0.54 0.75 -0.38 0.12 -0.88 -0.29 -0.24 -0.31
+
+# ONE HANDER (L1): an open hand.
+icon hand
+  box   0.02  0.38 0.40 0.38 0.18
+  seg  -0.30  0.10 -0.52 -0.60 0.18
+  seg  -0.08  0.05 -0.15 -0.86 0.18
+  seg   0.14  0.05  0.20 -0.84 0.18
+  seg   0.32  0.12  0.52 -0.56 0.18
+  seg  -0.32  0.42 -0.82  0.02 0.20
+
+# ONE LEGGER (R1): a boot.
+icon boot
+  poly 0.10 -0.62 -0.88 -0.02 -0.88 0.02 0.10 0.55 0.24 0.86 0.42 0.86 0.66 -0.66 0.66
+  gap 0.05
+  cut seg -0.05 -0.55 -0.30 -0.55 0.0
+  cut seg -0.03 -0.27 -0.28 -0.27 0.0
+  seg  -0.80  0.86  0.88  0.86 0.12
+
+# SARAN WRAP (L2): a loop round a bar.
+icon wrap
+  disc  0.00  0.00 0.22
+  arc   0.00  0.00 0.62 110 380 0.18
+  poly 0.04 0.47 -0.53 0.83 -0.30 0.34 -0.12
+
+# CAMERA (SELECT): a camera.
+icon camera
+  box   0.00  0.10 0.82 0.54 0.16
+  box  -0.30 -0.48 0.26 0.12 0.06
+  gap 0.0
+  cut disc 0.04 0.12 0.36
+  disc  0.04  0.12 0.20
+
+# PAUSE (START): two bars.
+icon pause
+  box  -0.30  0.00 0.15 0.62 0.06
+  box   0.30  0.00 0.15 0.62 0.06
+
+# The steering stick's knob: a handlebar.
+icon bar
+  seg  -0.62 -0.08  0.62 -0.08 0.16
+  seg  -0.62 -0.08 -0.88 -0.22 0.26
+  seg   0.62 -0.08  0.88 -0.22 0.26
+  box   0.00  0.18 0.14 0.24 0.05
+
+# R2 in the air: no trick of its own (held through a whole jump it does nothing); it combines with
+# L1, L2 or R1 into another trick (R1+R2 Can Can, L2+R2 Bar Kneel, L1+R2 Nac Nac): two links.
+icon link
+  ring -0.30  0.00 0.46 0.20
+  ring  0.30  0.00 0.46 0.20
+  gap 0.07
+  cut arc 0.30 0.00 0.46 140 175 0.0
+  arc  -0.30  0.00 0.46 -20 40 0.20

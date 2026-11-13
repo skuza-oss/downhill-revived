@@ -28,6 +28,8 @@ def steps(tier, jobs):
             ('lang_check', [PY, 'tools/lang_check.py'], ROOT)]
     quick = docs + [('build_wasm', [PY, 'port/tools/build_wasm.py'] + j, ROOT),
                     ('test_runtime', [PY, 'port/tools/test_runtime.py'], ROOT),
+                    # the touch overlay's action pictures: the shader is what their shapes give (finding 229)
+                    ('touch_icons', [PY, 'port/tools/touch_icons.py', '--check'], ROOT),
                     # the iOS build and packaging rules, no Mac needed (finding 224; the Mac builds the app)
                     ('ios_tests', [PY, '-m', 'unittest', 'discover', '-s', 'port/ios/tests'], ROOT)]
     # The retail-data scan package_release.py runs on dhd.exe (scan_retail.py: no copy of the retail
