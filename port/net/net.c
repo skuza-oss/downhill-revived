@@ -11,14 +11,17 @@
 #include "client.h"
 #include "json.h"
 #include "ws.h"
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 
 enum { REJOIN_ATTEMPTS = 5, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
 
 /* The rooms offered (host_api.h NET_OFFER_*). SFU rooms are not offered on phones yet (finding
-   143): their speed and the touch controls come first; Android builds refuse every SFU room here,
-   whatever asks (the menu, DHD_NET_*, a dhd.ini server). P2P rooms are (findings 180, 186), the SFU
-   fallback of their members included. */
-#ifdef __ANDROID__
+   143): their speed and the touch controls come first; Android and iOS builds (finding 224) refuse
+   every SFU room here, whatever asks (the menu, DHD_NET_*, a dhd.ini server). P2P rooms are
+   (findings 180, 186), the SFU fallback of their members included. */
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 #define NET_OFFERED NET_OFFER_P2P
 #else
 #define NET_OFFERED (NET_OFFER_SFU | NET_OFFER_P2P)
