@@ -203,6 +203,9 @@ def host_tests():
     run('launcher-order', [ROOT / 'port/ios/host/launcher_calls.c', ROOT / 'port/net/json.c',
                            ROOT / 'port/ios/tests/test_launcher_order.c'], calls_dir, includes=[ROOT / 'port'])
     run('disc-copy', [ROOT / 'port/ios/host/disc_copy.c', ROOT / 'port/ios/tests/test_disc_copy.c'])
+    # a phone's app back from the background: the came-back flag, the touch pause offline only, the
+    # snapshot clock standing once (port/host/app_away.c, finding 227)
+    run('app-away', [ROOT / 'port/host/app_away.c', HLE / 'touch.c', ROOT / 'port/host/test_app_away.c'])
     # the disc image's own check every platform makes (port/host/disc_check.c, finding 227)
     run('disc-check', [ROOT / 'port/host/disc_check.c', ROOT / 'port/host/test_disc_check.c'])
 

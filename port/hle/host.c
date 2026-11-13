@@ -12,6 +12,7 @@
 #include "controls_table.h"  /* the bindings' tables (port/render/settings, finding 157) */
 #include "../gs/button_icons.h"
 #include "../host/disc_check.h"
+#include "../host/app_away.h"
 #include "../gs/gs_mesh.h"   /* gs_mesh_setting_read: Native VU (finding 194) */
 #include "../include/version.h"
 #include "../runtime/sha256.h"
@@ -587,16 +588,11 @@ static uint32_t freeze_word(uint32_t ee)
     return host_readable(p, 4) ? *(volatile const uint32_t *)p : 0xFFFFFFFFu;
 }
 
-static SDL_AtomicInt app_away;   /* host_app_away: the app is off the screen, no field is due */
-
-static SDL_AtomicInt came_back;  /* host_service_host_came_back: the core rebases its clock */
-
-int host_service_host_came_back(void) { return SDL_SetAtomicInt(&came_back, 0); }
+int host_service_host_came_back(void) { return app_away_came_back(); }   /* app_away.c */
 
 void host_app_away(int away)
 {
-    SDL_SetAtomicInt(&app_away, away);
-    if (!away) SDL_SetAtomicInt(&came_back, 1);
+    app_away_set(away);
     touch_host_app_away(away);
     host_sound_away(away);
 }
@@ -611,7 +607,7 @@ static int SDLCALL freeze_watch(void *unused)
     for (;;) {
         SDL_Delay(1000);
         uint64_t field = *(volatile uint64_t *)&kernel_vsync_count;
-        if (SDL_GetAtomicInt(&app_away)) {   /* a phone's app in the background waits: no freeze */
+        if (app_away_now()) {   /* a phone's app in the background waits: no freeze */
             last = field, still = 0;
             continue;
         }
