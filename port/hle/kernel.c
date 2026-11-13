@@ -903,7 +903,7 @@ static void vsync(void)
     if (!graphics_ordered) host_service_graphics_wait();
 #if defined(__wasm__)
     extern int host_widescreen_flat_limit(void);
-    widescreen_card_mode(host_frame_video(host_widescreen_aspect(),host_widescreen_flat_limit()));
+    widescreen_card_mode(host_frame_video(host_widescreen_frame_aspect(),host_widescreen_flat_limit()));
     static HleEnv screenshot_env;
     const char *capture_prefix=hle_env(&screenshot_env,"DHD_SCREENSHOT");
     if (capture_prefix && host_getenv("DHD_RACE_SYNC")) {
@@ -940,6 +940,7 @@ static int deliver(void)
         load_registers(&rpc_saved);
     }
     if (now >= next_vsync) {
+        port_fps_update_display();  /* pace_grid re-anchors on period changes */
         uint64_t cycles = port_fps() == 60 ? VSYNC_CYCLES : (uint64_t)(BUS_HZ / port_fps());
         next_vsync += cycles;
         if (next_vsync < now)  /* fell far behind (a debugger stop): don't replay the frames */

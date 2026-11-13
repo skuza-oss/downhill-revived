@@ -8,10 +8,12 @@
    shapes the game thread last published (gpu_rust.c, touch_host_overlay). Each crossing is one
    mutex.
 
-   Where touch is on: Android (a touchscreen), or any desktop with DHD_TOUCH_MOUSE=1, where the left
+   Where touch is on: Android and iOS (a touchscreen; iOS's touches come from the app's Metal view,
+   port/ios/render/metal_bridge.m, as SDL's finger events: ios_touch_finger), or any desktop with DHD_TOUCH_MOUSE=1, where the left
    mouse button is a finger (DHD_TOUCH_SCREEN_MM=WxH maps the window to a phone's size, e.g.
    154.5x69.5 for the Mi 11i; else the window's real size from its DPI). The host then sets
-   DHD_TOUCH (android / mouse) for the core's settings pages.
+   DHD_TOUCH (android, the core's word for a phone's touchscreen, iOS's too / mouse) for the core's
+   settings pages.
 
    The settings are the touch_* keys of dhd.ini (DHD_TOUCH_* variables, the TOUCH CONTROLS pages);
    for the checks only: DHD_TOUCH_HUD=game keeps the game's HUD (the fallback layout), and
@@ -29,7 +31,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The platform's part: Android's in android_touch.c; the desktop's below. */
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#define TOUCH_IOS 1
+#endif
+
+/* The platform's part: Android's in android_touch.c, iOS's in port/ios/render/metal_bridge.m; the
+   desktop's below. */
+#ifdef TOUCH_IOS
+/* the view's size in mm, the strips to keep clear (home indicator) l t r b and the cutout's band
+   x0 y0 x1 y1 (mm); 0 before the view is laid out */
+int ios_touch_screen(float *width_mm, float *height_mm, float strips[4], float cut[4]);
+void ios_touch_buzz(int kind);   /* TOUCH_BUZZ_*: the Taptic Engine */
+void gs_window_pixels(unsigned *width, unsigned *height);   /* present.c: the picture's pixels */
+#endif
 #ifdef __ANDROID__
 int android_touch_screen(float *xdpi, float *ydpi, int insets[8]);   /* gesture insets l t r b, cutout l t r b (px) */
 void android_touch_buzz(int kind);
@@ -76,10 +93,14 @@ static int touch_on(void)
 {
     if (SDL_ShouldInit(&started)) {
         lock = SDL_CreateMutex();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(TOUCH_IOS)
         available = 1;
         gs_mouse_touchscreen();   /* else the menus' first reading takes the first tap as its baseline */
+#ifdef TOUCH_IOS
+        SDL_SetAtomicInt(&tilt_sensor, 0);    /* iOS: no tilt steering yet (finding 224) */
+#else
         SDL_SetAtomicInt(&tilt_sensor, -1);   /* the first tick asks */
+#endif
 #else
         const char *mouse = getenv("DHD_TOUCH_MOUSE");
         available = mouse && atoi(mouse) ? 2 : 0;
@@ -102,12 +123,22 @@ static void push(int kind, long long id, float x, float y, double ms)
 
 static void screen_update(SDL_Window *window)
 {
+    TouchScreen s;
+    memset(&s, 0, sizeof s);
+#ifdef TOUCH_IOS
+    /* no SDL window: the app's view (window is NULL) */
+    (void)window;
+    float strips[4], cut[4];
+    if (!lock || !ios_touch_screen(&s.width, &s.height, strips, cut) || s.width < 20 || s.height < 20) return;
+    s.strip_left = strips[0], s.strip_top = strips[1], s.strip_right = strips[2], s.strip_bottom = strips[3];
+    s.cut_x0 = cut[0], s.cut_y0 = cut[1], s.cut_x1 = cut[2], s.cut_y1 = cut[3];
+#else
     if (!window) return;
     int w = 0, h = 0;
     if (!SDL_GetWindowSizeInPixels(window, &w, &h) || w <= 0 || h <= 0) return;
-    TouchScreen s;
-    memset(&s, 0, sizeof s);
-#ifdef __ANDROID__
+#endif
+#ifdef TOUCH_IOS
+#elif defined(__ANDROID__)
     float xdpi = 0, ydpi = 0;
     int in[8] = {0};
     if (!android_touch_screen(&xdpi, &ydpi, in) || xdpi < 50 || ydpi < 50) xdpi = ydpi = 160.0f * SDL_GetWindowDisplayScale(window);
@@ -130,7 +161,12 @@ static void screen_update(SDL_Window *window)
 #endif
     SDL_LockMutex(lock);
     if (!screen_known || memcmp(&s, &screen, sizeof s)) {
-#ifdef __ANDROID__
+#ifdef TOUCH_IOS
+        if (trace_on())
+            fprintf(stderr, "touch log: screen %.1f x %.1f mm, strips %.1f %.1f %.1f %.1f, cutout %.1f %.1f %.1f %.1f mm\n",
+                    s.width, s.height, s.strip_left, s.strip_top, s.strip_right, s.strip_bottom,
+                    s.cut_x0, s.cut_y0, s.cut_x1, s.cut_y1);
+#elif defined(__ANDROID__)
         if (trace_on())
             fprintf(stderr, "touch log: screen %dx%d px, dpi %.1f x %.1f, gesture insets %d %d %d %d, cutout %d %d %d %d px\n",
                     w, h, xdpi, ydpi, in[0], in[1], in[2], in[3], in[4], in[5], in[6], in[7]);
@@ -166,6 +202,9 @@ int touch_host_event(const SDL_Event *e)
     case SDL_EVENT_FINGER_CANCELED: {
         SDL_Window *w = SDL_GetWindowFromID(e->tfinger.windowID);
         if (w && (long long)e->tfinger.windowID != last_window) { last_window = e->tfinger.windowID; screen_update(w); }
+#ifdef TOUCH_IOS
+        if (!screen_known) screen_update(NULL);
+#endif
         int kind = e->type == SDL_EVENT_FINGER_DOWN ? EV_DOWN : e->type == SDL_EVENT_FINGER_MOTION ? EV_MOVE
                  : e->type == SDL_EVENT_FINGER_UP ? EV_UP : EV_CANCEL;
         push(kind, (long long)e->tfinger.fingerID, e->tfinger.x, e->tfinger.y, (double)e->common.timestamp / 1e6);
@@ -272,10 +311,72 @@ void touch_host_tick(void)
         insets_at = ms_now();
         screen_update(SDL_GetWindowFromID((SDL_WindowID)last_window));
     }
+#elif defined(TOUCH_IOS)
+    static double screen_at;
+    if (buzz) ios_touch_buzz(buzz);
+    if (ms_now() - screen_at > 1000) {   /* a turn of the device moves the cutout's side */
+        screen_at = ms_now();
+        screen_update(NULL);
+    }
 #else
     (void)buzz;
 #endif
 }
+
+#ifdef TOUCH_IOS
+/* UIKit's touches (metal_bridge.m, the main thread), x and y 0..1 of the view: SDL's finger
+   events, as Android's arrive, and for the first finger the mouse SDL makes of it there (the menus'
+   layer, finding 092), in the picture's pixels; both reach touch_host_event and present.c on the
+   SDL thread. kind: TOUCH_EV_DOWN, _MOVE, _UP or _CANCEL. */
+void ios_touch_finger(int kind, long long id, float x, float y)
+{
+    static long long primary;   /* the finger the mouse follows, 0 none (main thread only) */
+    if (!touch_on() || !SDL_WasInit(SDL_INIT_EVENTS)) return;
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = kind == EV_DOWN ? SDL_EVENT_FINGER_DOWN : kind == EV_MOVE ? SDL_EVENT_FINGER_MOTION
+           : kind == EV_UP ? SDL_EVENT_FINGER_UP : SDL_EVENT_FINGER_CANCELED;
+    e.tfinger.timestamp = SDL_GetTicksNS();
+    e.tfinger.touchID = 1;
+    e.tfinger.fingerID = (SDL_FingerID)id;
+    e.tfinger.x = x, e.tfinger.y = y;
+    e.tfinger.pressure = kind == EV_UP || kind == EV_CANCEL ? 0.0f : 1.0f;
+    SDL_PushEvent(&e);
+    if (kind == EV_DOWN && !primary) primary = id;
+    if (id != primary) return;
+    unsigned pw = 0, ph = 0;
+    gs_window_pixels(&pw, &ph);
+    SDL_Event m;
+    SDL_zero(m);
+    m.motion.timestamp = e.tfinger.timestamp;
+    m.motion.which = SDL_TOUCH_MOUSEID;
+    float px = x * (float)pw, py = y * (float)ph;
+    if (kind == EV_DOWN || kind == EV_MOVE) {
+        m.type = SDL_EVENT_MOUSE_MOTION;
+        m.motion.x = px, m.motion.y = py;
+        m.motion.state = kind == EV_MOVE ? SDL_BUTTON_LMASK : 0;
+        SDL_PushEvent(&m);
+    }
+    if (kind != EV_MOVE) {
+        SDL_zero(m);
+        m.type = kind == EV_DOWN ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+        m.button.timestamp = e.tfinger.timestamp;
+        m.button.which = SDL_TOUCH_MOUSEID;
+        m.button.button = SDL_BUTTON_LEFT;
+        m.button.down = kind == EV_DOWN;
+        m.button.clicks = 1;
+        m.button.x = px, m.button.y = py;
+        SDL_PushEvent(&m);
+        if (kind != EV_DOWN) primary = 0;
+    }
+}
+
+/* The app went inactive (metal_bridge.m): every finger is gone, as Android's DID_ENTER_BACKGROUND. */
+void ios_touch_cancel(void)
+{
+    if (touch_on()) push(EV_CANCEL, -1, 0, 0, ms_now());
+}
+#endif
 
 /* ---- the game thread ---- */
 

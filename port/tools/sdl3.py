@@ -354,8 +354,85 @@ def android_build():
     return lib, include, java
 
 
+IOS_MIN = '17.0'  # build_host64.py's ios-arm64 target too
+
+
+def ios_build(simulator=False):
+    """libSDL3.a for iPhone (arm64, iOS IOS_MIN and later; simulator: the iOS Simulator on Apple
+    silicon, finding 224), its include directory and the frameworks it
+    needs at link time. Same subsystem selection as posix_build (window, audio, controllers); the window
+    is UIKit's with Metal views. Cross-built on a Mac with Xcode's iphoneos SDK, CMake and Ninja, under
+    build/port/sdl3/<version>-ios-arm64. The app owns UIApplication (SwiftUI); SDL is used inside it
+    (SDL_SetMainReady, then SDL_Init), so SDL's own main/UIApplicationMain entry is not used."""
+    import json as _json
+    if sys.platform != 'darwin':
+        sys.exit('SDL3: the iOS build needs a Mac with Xcode')
+    sdk = 'iphonesimulator' if simulator else 'iphoneos'
+    base = OUT / ('%s-%s-arm64' % (VERSION, 'iossim' if simulator else 'ios'))
+    prefix = base / 'install'
+    lib = prefix / 'lib' / 'libSDL3.a'
+    include = prefix / 'include'
+    stamp = base / 'built.txt'
+    libs_file = base / 'link_libs.json'
+    options = {k: v for k, v in OPTIONS.items()
+               if k not in ('SDL_INSTALL', 'SDL_DISABLE_INSTALL', 'SDL_DISABLE_UNINSTALL', 'HAVE_DINPUT_H', 'HAVE_GAMEINPUT_H')}
+    options.update(SDL_INSTALL='ON', SDL_DISABLE_INSTALL='OFF', SDL_DISABLE_UNINSTALL='OFF',
+                   CMAKE_SYSTEM_NAME='iOS', CMAKE_OSX_SYSROOT=sdk, CMAKE_OSX_ARCHITECTURES='arm64',
+                   CMAKE_OSX_DEPLOYMENT_TARGET=IOS_MIN, SDL_METAL='ON')
+    options['CMAKE_C_FLAGS'] = '-ffile-prefix-map="%s"=SDL3-%s' % (base / 'src' / ('SDL3-%s' % VERSION), VERSION)
+    recipe = repr(sorted(options.items())) + sdk + '-arm64'
+    if lib.exists() and stamp.exists() and libs_file.exists() and stamp.read_text() == recipe:
+        return lib, include, _json.loads(libs_file.read_text())
+    for name in ('cmake', 'ninja'):
+        if not shutil.which(name):
+            sys.exit('SDL3: %s not found on PATH' % name)
+    tarball = fetch()
+    src_parent = base / 'src'
+    if src_parent.exists():
+        shutil.rmtree(src_parent)
+    src_parent.mkdir(parents=True)
+    with tarfile.open(tarball) as t:
+        t.extractall(src_parent, filter='data')
+    src = src_parent / ('SDL3-%s' % VERSION)
+    bld = base / 'build'
+    if bld.exists():
+        shutil.rmtree(bld)
+    if prefix.exists():
+        shutil.rmtree(prefix)
+    cmd = ['cmake', '-S', str(src), '-B', str(bld), '-G', 'Ninja',
+           '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_INSTALL_PREFIX=' + str(prefix), '-DCMAKE_INSTALL_LIBDIR=lib']
+    cmd += ['-D%s=%s' % kv for kv in sorted(options.items())]
+    jobs = os.environ.get('DHD_SDL_JOBS', '4')
+    for step in (cmd, ['cmake', '--build', str(bld), '-j', jobs], ['cmake', '--install', str(bld)]):
+        p = subprocess.run(step, capture_output=True, text=True)
+        if p.returncode:
+            sys.exit('SDL3 iOS build failed:\n' + (p.stdout + p.stderr)[-4000:])
+    if not lib.exists():
+        sys.exit('SDL3: %s missing after the build' % lib)
+    pc = (prefix / 'lib' / 'pkgconfig' / 'sdl3.pc').read_text()
+    fields = dict(re.findall(r'^([A-Za-z_.]+)\s*[:=]\s*(.*)$', pc, re.M))
+    expand = lambda s: re.sub(r'\$\{(\w+)\}', lambda m: expand(fields.get(m.group(1), '')), s)
+    words = (expand(fields.get('Libs', '')) + ' ' + expand(fields.get('Libs.private', ''))).split()
+    libs, k = [], 0
+    while k < len(words):
+        word = words[k]
+        if word in ('-framework', '-weak_framework') and k + 1 < len(words):
+            libs.append(word + ' ' + words[k + 1])
+            k += 2
+            continue
+        if not word.startswith('-L') and 'SDL3' not in word and word not in libs:
+            libs.append(word)
+        k += 1
+    libs_file.write_text(_json.dumps(libs) + '\n')
+    stamp.write_text(recipe)
+    return lib, include, libs
+
+
 if __name__ == '__main__':
-    if sys.argv[1:] == ['--android']:
+    if sys.argv[1:2] == ['--ios']:
+        lib, include, libs = ios_build(simulator=sys.argv[2:] == ['--simulator'])
+        print('%s\n%s\n%s' % (lib, include, ' '.join(libs)))
+    elif sys.argv[1:] == ['--android']:
         print(*android_build(), sep='\n')
     elif sys.argv[1:] == ['--posix']:
         lib, include, libs = posix_build()

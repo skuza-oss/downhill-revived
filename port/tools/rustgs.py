@@ -133,8 +133,12 @@ WASM = 'wasm32-unknown-unknown'
 ANDROID = 'aarch64-linux-android'  # build_host64.py --target android-arm64 (finding 091)
 LINUX = 'x86_64-unknown-linux-gnu'  # build_host64.py --target linux-x64 (here, or cross-built for WSL)
 MAC = 'aarch64-apple-darwin'      # build_host64.py --target macos-arm64, on a Mac
-TARGETS = (X64, WASM, ANDROID, LINUX, MAC)   # i686 is retired
-ARCHIVE_TARGETS = (ANDROID, LINUX, MAC)   # libdhd_render.a
+IOS = 'aarch64-apple-ios'         # build_host64.py --target ios-arm64, on a Mac with Xcode (finding 224)
+IOS_SIM = 'aarch64-apple-ios-sim' # build_host64.py --target ios-sim-arm64: the iOS Simulator on Apple silicon
+IOS_MIN = '17.0'                  # the app's floor (build_host64.IOS_MIN): the C parts' deployment target
+MAC_MIN = '11.0'                  # the game's macOS floor (build_host64.MAC_MIN), the same for macOS
+TARGETS = (X64, WASM, ANDROID, LINUX, MAC, IOS, IOS_SIM)   # i686 is retired
+ARCHIVE_TARGETS = (ANDROID, LINUX, MAC, IOS, IOS_SIM)   # libdhd_render.a
 CHECK_TARGETS = TARGETS
 PROFILES = ('release', 'fixloop')
 FEATURES = ('test-hooks',)       # what a caller may add; native / web are rustgs's own
@@ -244,8 +248,15 @@ def c_tools(triple):
                 'CFLAGS_' + var: '-g0'}
     if triple in (LINUX, MAC) and os.name != 'nt':
         # the machine's own compiler (cc finds it; Apple's through xcrun, with the SDK ring needs),
-        # without debug info: ring asks for -g3, whose DWARF names the registry and the target dir
-        return {'CFLAGS_' + var: '-g0'}
+        # without debug info: ring asks for -g3, whose DWARF names the registry and the target dir;
+        # on a Mac for macOS 11, not the SDK's own version (cc's default: the link then warns that
+        # ring's objects were built for a newer macOS than the game's floor)
+        return {'CFLAGS_' + var: '-g0', **({'MACOSX_DEPLOYMENT_TARGET': MAC_MIN} if triple == MAC else {})}
+    if triple in (IOS, IOS_SIM) and sys.platform == 'darwin':
+        # Apple's clang and ar by path: a wasi-sdk on PATH can put a wasm-only clang first; the C
+        # parts (ring) for the app's iOS 17 floor, not the SDK's own version (build_host64.IOS_MIN)
+        return {'CC_' + var: '/usr/bin/clang', 'AR_' + var: '/usr/bin/ar', 'CFLAGS_' + var: '-g0',
+                'IPHONEOS_DEPLOYMENT_TARGET': IOS_MIN}
     if triple == LINUX:
         # cross-built on Windows: LLVM's clang for the target, freestanding (no Linux headers here:
         # ring's C has a mode for that), without debug info (ring asks for -g3)
@@ -615,6 +626,10 @@ def cache_key(triple, profile, features, flags, versions, tools, crate=RENDER_CR
     part('versions', json.dumps(versions, sort_keys=True))
     if crate != RENDER_CRATE:   # the renderer's keys stay as they were
         part('crate', crate)
+    elif triple in (IOS, IOS_SIM):
+        part('deployment target', IOS_MIN)
+    elif triple == MAC:
+        part('deployment target', MAC_MIN)
     elif triple == WASM:
         part('bindgen', ' '.join(WASM_BINDGEN_ARGS))
     return h.hexdigest()
@@ -797,8 +812,8 @@ def build(triple, features=(), profile='release', no_cache=False, crate=RENDER_C
     """Builds (or fetches) the library; returns the report dict. Raises Refused or SystemExit."""
     features = list(parse_features(','.join(features)))
     check_features(features)
-    if triple == MAC and sys.platform != 'darwin':
-        refuse('--target %s builds on a Mac (ring compiles its C against the macOS SDK); `check` runs here' % MAC)
+    if triple in (MAC, IOS, IOS_SIM) and sys.platform != 'darwin':
+        refuse('--target %s builds on a Mac (ring compiles its C against the Apple SDK); `check` runs here' % triple)
     if crate not in CRATES:
         refuse('--crate %s: one of %s' % (crate, ', '.join(CRATES)))
     if crate == STAR_CRATE:

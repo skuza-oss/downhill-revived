@@ -67,6 +67,9 @@ What works today:
   Swap L1/L2, Swap R1/R2 and Invert per stick axis, in the game or the launcher (see
   [Controls](#controls)).
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
+- **iPhone and iPad** (experimental): the same game and the same touch controls and
+  settings as on Android, from an unsigned app you sideload yourself (see [Installing](#installing));
+  online: P2P races only. The iOS port was first made by Gustavo Ribeiro (`ribeirogustav`).
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
   or Thumb zones; **Steer With** the stick, tilt or a D-pad), or a controller. Online: P2P races
   only. The game's
@@ -139,6 +142,19 @@ start choose your `.iso`; it is copied into the app once (a few GB). Install a n
 over the old one: your settings and saves stay. If the game closes unexpectedly, the next start
 offers **Share log** (see below). The release page's Android section has the details and the
 signing certificate.
+
+**iPhone and iPad** (experimental, iOS 17 or later): `DownhillRevived-<version>-ios-experimental.ipa`.
+It is **unsigned**: Apple lets an app outside the App Store run only once it is signed for your
+device, which you do while installing it with a sideloading tool on your computer or phone
+(AltStore, SideStore or Sideloadly, with your own Apple ID; a free Apple ID's install runs for 7
+days and then has to be refreshed by the tool, a paid developer account's for a year). The app is
+not on the App Store. At the first start choose your `.iso` (from Files, iCloud Drive or a USB
+drive); it is copied into the app once (a few GB). You can also copy the `.iso` into Files > On My
+iPhone > Downhill Revived and start the app. Play with the touch controls or a controller (MFi,
+Xbox, PlayStation). Settings, saves, the disc copy and `dhd.log` are in that same Files folder.
+Install a new release over the old one with the same tool: your files stay; deleting the app
+deletes them. What is experimental: it is not yet measured on many devices, there is no tilt
+steering, and the game closes the app when you choose EXIT GAME.
 
 Then:
 
@@ -341,7 +357,7 @@ network (IP) address, and the hub sees the address of everyone linked to it. The
 the menu row and when the room opens. Play P2P races with people you trust. `dhd.log` shows a P2P
 room's code only by its first two characters.
 
-On Android and in the browser, P2P races are the only online races so far.
+On Android, iPhone and iPad and in the browser, P2P races are the only online races so far.
 
 A room's server (the lobby: who is in it, the next race, the start) runs in one of Cloudflare's
 Durable Object cities, which are in North America, Europe, East and Southeast Asia and Australia
@@ -456,7 +472,7 @@ means 60 fps or more at 4x and up. Lines marked *estimate* are not yet measured 
 | **Linux** (experimental) | 64-bit, glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36, Linux Mint 21 and later), a Vulkan driver (Mesa 22+, NVIDIA 470+), WebKitGTK 4.1 for the launcher's zip (the AppImage carries it); CPU and GPU as on Windows; Steam Deck works | as on Windows |
 | **Android** (experimental) | Android 10 or later, arm64 with Vulkan; a Helio G80/G85 or Snapdragon 680 class chip (Mali-G52 MC2 GPU); 4 GB RAM; 3 GB free storage; **Performance Mode on** (REVIVED SETTINGS > Graphics) | Snapdragon 778G / 870, Dimensity 1080 or better |
 | **Browser** (experimental) | desktop Chrome or Edge with WebGPU; a 6-core desktop CPU from about 2019 (the browser runs at about a third of native speed); online: P2P races only | a fast 8-core desktop |
-| **iPhone / iPad** | not available | |
+| **iPhone / iPad** (experimental) | iOS 17 or later (an A12 chip or later); 3 GB free storage; *estimate*, not yet measured | a recent Pro iPhone or an M-series iPad (*estimate*) |
 
 Measured: a Ryzen 5 7600 with an RTX 3070 runs about 250 fps at 8x; AMD integrated graphics hold
 60 fps at 5x; an M1 MacBook Air runs over 100 fps; a Redmi 9 (Helio G80) about 50 fps at 2x and

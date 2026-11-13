@@ -830,6 +830,14 @@ PATCHES['unsorted/0013BA60.cpp'] = PATCHES.get('unsorted/0013BA60.cpp', []) + [
 # rider's default: online_menu.c shop_prepare), as the career's shop does (func_0013A270), not on
 # the list's first: a pro who changes nothing keeps the pro's own bike (finding 128).
 PATCHES['unsorted/00139BF8.c'] = PATCHES.get('unsorted/00139BF8.c', []) + [
+    ('text', '    D_0029C470 = 1;', '    D_0029C470 = 1;\n    port_ws_inventory_enter();'),
+    ('text', 'extern unsigned char D_0029C470;',
+     'extern unsigned char D_0029C470;\nextern void port_ws_inventory_enter(void);\nextern int port_ws_live_aspect(void);'),
+    # With the live aspect (iOS), publish the inventory's final projection before building the
+    # combined camera matrices; every other platform keeps the game's order (finding 224).
+    ('text', 'func_0023C8D8(5,0);func_0023CB00(0);\n func_0023D898(0,&coords[0],&coords[1]);InitSize(0,coords[1]);',
+     'func_0023C8D8(5,0);if (!port_ws_live_aspect()) func_0023CB00(0);\n func_0023D898(0,&coords[0],&coords[1]);'
+     'InitSize(0,coords[1]);if (port_ws_live_aspect()) func_0023CB00(0);'),
     ('text', '        func_0013CDB0(&D_00365800);\n    }\n',
      '        func_0013CDB0(&D_00365800);\n        if (port_online_single_race()) func_0013A270();\n    }\n'),
     ('text', 'extern void func_0013A270(void);\n',

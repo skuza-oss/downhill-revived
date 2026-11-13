@@ -22,7 +22,7 @@
 #define NATIVE_SCALE_MAX 8u
 #define NATIVE_SURFACE_MAX 2048u
 /* Phones stop at 6x: on a Snapdragon 888 (Mi 11i) 0.7.7 draws the bench race at 93 fields/s at 4x
-   and 33 at 8x, so 7x and 8x only make a phone slow and hot. */
+   and 33 at 8x, so 7x and 8x only make a phone slow and hot. iPhones and iPads too (finding 224). */
 #define NATIVE_PHONE_SCALE_MAX 6u
 /* What holds a device's scale limit below NATIVE_SCALE_MAX (Native scale_reason). */
 enum { NATIVE_SCALE_FREE, NATIVE_SCALE_MEMORY, NATIVE_SCALE_TEXTURE, NATIVE_SCALE_PHONE };
@@ -124,6 +124,7 @@ static void native_texture_release(NativeTexture *t)
     t->gpu = NULL; t->sharp = NULL;
 }
 
+
 /* ---- the picture (x64: render thread, context lock held) ---- */
 
 /* The surface's texture at its scale and at least want[] GS pixels, keeping what it holds (Rust
@@ -193,6 +194,11 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
     static int spikes = -1;
     if (spikes < 0) spikes = getenv("DHD_SPIKES") != NULL;
     double start = n->trace_pictures || spikes ? host_wall_seconds() : 0;
+#ifdef DHD_IOS_RENDER
+    /* the picture's shape as the game had it at this field (iOS's live aspect, widescreen.c) */
+    n->wide = f->output_aspect > 0 ? (float)f->output_aspect : 0;
+    n->aspect = f->output_aspect < 0 ? 0 : n->wide ? n->wide : 4.0f / 3;
+#endif
     if (!n->scale) {
         unsigned wanted = n->scale_asked;
         char window[48] = "";
@@ -319,7 +325,7 @@ static void native_scale_hold(Native *n, uint64_t memory)
     unsigned limit = NATIVE_SCALE_MAX, texture = dhdr_device_max_texture() / NATIVE_SURFACE_MAX;
     n->scale_reason = NATIVE_SCALE_FREE;
     if (texture && texture < limit) limit = texture, n->scale_reason = NATIVE_SCALE_TEXTURE;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(DHD_IOS_RENDER)
     if (limit > NATIVE_PHONE_SCALE_MAX) limit = NATIVE_PHONE_SCALE_MAX, n->scale_reason = NATIVE_SCALE_PHONE;
 #endif
     while (memory && limit > 4 && (uint64_t)limit * limit * NATIVE_SCALED_BYTES > memory / 2)

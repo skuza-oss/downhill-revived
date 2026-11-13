@@ -197,8 +197,8 @@ void host_service_gs_window_close(void);
 int host_service_gs_scale(int asked);
 /* The rooms this build offers, port/net/net.h's NET_OFFER_* bits: the one switch, the host's, so
    the core is the same on every platform (finding 143). Desktop builds: SFU and P2P rooms. Android
-   (port/net/net.c, at compile time) and the browser (port/web/www/net.js): P2P rooms only
-   (finding 180), which need no SFU session; no setting changes it. At 0 the main menu has no
+   and iOS (port/net/net.c, at compile time; finding 224) and the browser (port/web/www/net.js):
+   P2P rooms only (finding 180), which need no SFU session; no setting changes it. At 0 the main menu has no
    ONLINE row, DHD_NET_* starts no online race, and the connections below refuse. */
 int host_service_net_offered(void);
 void host_service_net_init(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3);

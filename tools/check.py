@@ -25,7 +25,9 @@ def steps(tier, jobs):
     docs = [('check_docs', [PY, 'tools/check_docs.py', '--quiet'], ROOT),
             ('check_tree', [PY, 'tools/check_tree.py'], ROOT)]
     quick = docs + [('build_wasm', [PY, 'port/tools/build_wasm.py'] + j, ROOT),
-                    ('test_runtime', [PY, 'port/tools/test_runtime.py'], ROOT)]
+                    ('test_runtime', [PY, 'port/tools/test_runtime.py'], ROOT),
+                    # the iOS build and packaging rules, no Mac needed (finding 224; the Mac builds the app)
+                    ('ios_tests', [PY, '-m', 'unittest', 'discover', '-s', 'port/ios/tests'], ROOT)]
     # The retail-data scan package_release.py runs on dhd.exe (scan_retail.py: no copy of the retail
     # ELF's code or data beyond the source's own literals), run on the game just built, so a copy
     # shows here and not first at packaging.

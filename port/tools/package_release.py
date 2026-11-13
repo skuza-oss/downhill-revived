@@ -12,9 +12,11 @@ DownhillRevived-<version>-mac-experimental.zip and -linux-experimental.zip, and 
     python port/tools/package_release.py --platform mac --game PATH [--launcher PATH]
     python port/tools/package_release.py --merge OTHER/latest.json   # add another machine's platform
     python port/tools/package_release.py --platform android         # the APK (signing key: BUILDING.md)
+    python port/tools/package_release.py --platform ios --core core_*.c   # the unsigned IPA, on a Mac
     python port/tools/package_release.py --sums                     # only SHA256SUMS again
 
---platform is win, mac (Apple Silicon), linux (x64) or android (arm64); the default is the host's.
+--platform is win, mac (Apple Silicon), linux (x64), android (arm64) or ios (arm64); the default is the
+host's.
 The launcher is built for the host only (build_launcher.py), so each platform is packaged on its own machine (a
 mac or linux layout can be looked at from Windows with --launcher and --game). mac and linux take
 the game as --game PATH (build_host64's targets for them); --exe is the same option.
@@ -199,7 +201,7 @@ LINUX_SYMBOLS = {'GLIBC': LINUX_GLIBC, 'GCC': (4, 2, 0)}
 
 # The platforms whose builds are experimental (0.7.0: macOS and Linux): "-experimental" after the
 # platform in the zip's name. latest.json's key stays the platform's (update.rs PLATFORM).
-EXPERIMENTAL = ('mac', 'linux', 'android')
+EXPERIMENTAL = ('mac', 'linux', 'android', 'ios')
 
 
 class Platform:
@@ -217,6 +219,8 @@ PLATFORMS = {
     'android': Platform('android', 'aarch64-linux-android', '', 'ELF arm64', 'Android'),
 }
 PLATFORMS['android'].game, PLATFORMS['android'].launcher = 'libmain.so', None   # no launcher: the APK
+PLATFORMS['ios'] = Platform('ios', 'aarch64-apple-ios', '', 'Mach-O arm64', 'iOS')
+PLATFORMS['ios'].game, PLATFORMS['ios'].launcher = 'Downhill Revived', None   # the app's executable (finding 224)
 
 
 def binary_kind(data):
@@ -856,6 +860,95 @@ def android_release(a, platform, out, manifest_path, page):
     return 0
 
 
+def ios_release(a, platform, out, manifest_path, page):
+    """--platform ios (finding 224, experimental, on a Mac): the unsigned IPA (port/ios/build_ios.py
+    --unsigned from --core, wasm2c's core_*.c, or --wasm; or a ready one, --ipa) into out, with
+    LICENSE.txt and THIRD-PARTY-NOTICES.txt in the app; checked as the APK is (no game data, the
+    version, no other server or local path, no retail bytes but the source's own, no signature or
+    provisioning profile); latest.json's "ios" entry and SHA256SUMS. Players sign it themselves when
+    they install it (docs/PLAYING.md)."""
+    sys.path.insert(0, str(ROOT / 'port' / 'ios'))
+    import build_ios  # noqa: E402
+    if build_ios.version()[0] != a.version:
+        sys.exit('build_ios.py reads version %s, not %s' % (build_ios.version()[0], a.version))
+    notices = rust_notices(platform)
+    if a.ipa:
+        ipa = a.ipa.resolve()
+    else:
+        if sys.platform != 'darwin':
+            sys.exit('--platform ios builds on a Mac with Xcode (or pass a ready --ipa)')
+        modules = [str(m.resolve()) for m in (a.core or [a.wasm])]
+        cmd = [sys.executable, str(ROOT / 'port' / 'ios' / 'build_ios.py'), '--unsigned', '--rebuild-core',
+               '--jobs', str(a.jobs), '--wasm', *modules]
+        print('building: ' + ' '.join(cmd), flush=True)
+        if subprocess.run(cmd).returncode:
+            sys.exit('build_ios.py --unsigned failed')
+        ipa = build_ios.OUT / ('DownhillRevived-%s-unsigned.ipa' % a.version)
+    if not ipa.is_file():
+        sys.exit('%s: no such IPA' % ipa)
+    elf = a.elf.read_bytes()
+    core_lib = ROOT / 'build' / 'host64-ios' / 'libdhd_ios.a'   # the Rust library and SDL3 are inside it
+    libraries = [core_lib] if core_lib.is_file() else []
+    problems, apps = [], set()
+    work = WORK / 'ios-check'
+    work.mkdir(parents=True, exist_ok=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    staged = out.with_name(out.name + '.part')
+    with zipfile.ZipFile(ipa) as z, zipfile.ZipFile(staged, 'w', zipfile.ZIP_DEFLATED) as w:
+        for info in z.infolist():
+            path, content = info.filename, z.read(info)
+            parts = path.split('/')
+            if parts[0] != 'Payload' or len(parts) < 2 or not parts[1].endswith('.app'):
+                problems.append('%s is outside Payload/<app>.app' % path)
+                continue
+            apps.add(parts[1])
+            file_name = parts[-1]
+            if not info.is_dir() and GAME_DATA.search(file_name):
+                problems.append('%s looks like game data' % path)
+            if file_name == 'embedded.mobileprovision' or '/_CodeSignature/' in path:
+                problems.append('%s: the IPA must be unsigned' % path)
+            game = path == 'Payload/%s/%s' % (parts[1], platform.game)
+            if game:
+                if binary_kind(content) != platform.kind:
+                    problems.append('%s is not an arm64 Mach-O' % path)
+                if b'dhd-port %s ' % a.version.encode() not in content:
+                    problems.append('%s was not built with version %s' % (path, a.version))
+                (work / 'game').write_bytes(content)
+                problems += ['%s: %s' % (platform.game, p) for p in exe_problems(work / 'game', server_strings(a.settings))]
+            elif not info.is_dir() and names_server_or_path(content, a.settings):
+                problems.append('%s names a server or a local path' % path)
+            if not info.is_dir():
+                runs = game_data_runs(content, elf, libraries if game else [])
+                problems += ['%s holds game data at +0x%X: %d bytes = %s' % (path, at, n, scan_retail.elf_place(elf, e))
+                             for at, e, n in runs[:20]]
+            w.writestr(info, content)
+        if len(apps) != 1:
+            problems.append('the IPA holds %d apps, not one' % len(apps))
+        else:
+            app = 'Payload/%s/' % apps.pop()
+            texts = (('LICENSE.txt', lf(ROOT / 'LICENSE')),
+                     ('THIRD-PARTY-NOTICES.txt', lf((RELEASE / 'THIRD-PARTY-NOTICES.txt').read_bytes().rstrip()
+                                                    + b'\n\n' + notices.encode('utf-8'))))
+            for name, data in texts:
+                info = zipfile.ZipInfo(app + name)
+                info.create_system, info.external_attr = 3, 0o100644 << 16
+                w.writestr(info, data)
+    if problems:
+        staged.unlink()
+        sys.exit('%s is not fit to publish:\n  %s' % (ipa, '\n  '.join(problems[:40])))
+    os.replace(staged, out)
+    ipa_hash = hashlib.sha256(out.read_bytes()).hexdigest()
+    url = (a.base_url.rstrip('/') + '/' + out.name if a.base_url
+           else '%s/download/v%s/%s' % (RELEASES, a.version, out.name))
+    done = write_manifest(manifest_path, a.version, {'ios': {'url': url, 'sha256': ipa_hash, 'size': out.stat().st_size}},
+                          page)
+    sums = write_sums(out.parent, a.version)
+    print('%s (%d KB) sha256 %s; unsigned' % (out, out.stat().st_size // 1024, ipa_hash))
+    print('  %s: version %s, %s; platforms %s' % (manifest_path, a.version, url, ', '.join(done)))
+    print('  %s: %s' % (out.parent / 'SHA256SUMS', ', '.join(sums)))
+    return 0
+
+
 def write_manifest(path, version, entries, page):
     """latest.json with entries ({platform: {url, sha256, size}}) added to those of a latest.json of the
     same version already there. The top level's url, sha256 and size are the Windows zip's: what the
@@ -901,6 +994,9 @@ def main():
                     help="android: build libmain.so with this merged profile (build_apk.py's --pgo-use)")
     ap.add_argument('--new-signing-key', action='store_true',
                     help='android: a deliberate key change: accept a signer other than build_apk.RELEASE_CERT_SHA256')
+    ap.add_argument('--ipa', type=Path, help='ios: a ready build_ios.py --unsigned IPA (default: build it)')
+    ap.add_argument('--core', type=Path, nargs='+', metavar='CORE_C',
+                    help="ios: wasm2c's core_*.c from the Windows build (core.h, core-impl.h beside them) instead of --wasm")
     ap.add_argument('--sums', action='store_true', help='only write SHA256SUMS again in the release folder')
     a = ap.parse_args()
     platform = PLATFORMS[a.platform]
@@ -918,7 +1014,7 @@ def main():
         sys.exit("version %r: MAJOR.MINOR.PATCH, or a prerelease's MAJOR.MINOR.PATCH-suffix (the updaters and the "
                  "server compare them)" % a.version)
     name = 'DownhillRevived-%s' % a.version
-    suffix = '.apk' if platform.key == 'android' else '.zip'
+    suffix = '.apk' if platform.key == 'android' else '.ipa' if platform.key == 'ios' else '.zip'
     out = (a.out or ROOT / 'build' / 'release' / ('%s-%s%s' % (name, platform.zip_tag, suffix))).resolve()
     if (ROOT / 'build').resolve() not in out.parents or out.drive.upper() == 'C:':
         sys.exit('the zip goes under build/ (never tracked, never on C:)')
@@ -944,6 +1040,8 @@ def main():
         sys.exit('%s: the retail ELF is needed to check that no game data is packaged' % a.elf)
     if platform.key == 'android':
         return android_release(a, platform, out, manifest_path, page)
+    if platform.key == 'ios':
+        return ios_release(a, platform, out, manifest_path, page)
     notices = rust_notices(platform)  # before the build: a crate with an unusable licence stops it early
 
     if a.game:

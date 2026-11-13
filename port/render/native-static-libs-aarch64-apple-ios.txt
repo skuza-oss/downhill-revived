@@ -1,0 +1,4 @@
+# rustc --print native-static-libs for the aarch64-apple-ios static library (wgpu with Metal, dhd_net; built
+# on a Mac by rustgs.py for build_host64.py --target ios-arm64, finding 224). The allow-list for rustgs.py /
+# check_rust_lib.py.
+-lSystem -framework QuartzCore -framework Metal -framework Foundation -framework CoreFoundation -framework UIKit -framework GameController -lobjc -liconv -lc -lm

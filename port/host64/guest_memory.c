@@ -22,9 +22,20 @@
 
 uintptr_t guest_base;
 static wasm_rt_memory_t *owner;
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+/* iOS without the extended-virtual-addressing entitlement: wasm2c checks bounds
+   at each access, so the reservation covers the 2 GiB maximum memory plus one
+   64 KiB guard window. */
+#define GUEST_MAX_PAGES 32768u
+static const uint64_t edges[] = {0,0x00400000,0x02000000,0x08000000,0x0a000000,
+    0x20400000,0x22000000,0x28000000,0x2a000000,0x30400000,0x32000000,
+    0x38000000,0x3a000000,0x80000000ull,0x80010000ull};
+#else
+#define GUEST_MAX_PAGES 65536u
 static const uint64_t edges[] = {0,0x00400000,0x02000000,0x08000000,0x0a000000,
     0x20400000,0x22000000,0x28000000,0x2a000000,0x30400000,0x32000000,
     0x38000000,0x3a000000,0x100000000ull,0x200000000ull};
+#endif
 enum { REGIONS=sizeof edges/sizeof edges[0]-1 };
 static int mirror(unsigned i) { return i==1 || i==3 || i==5 || i==7 || i==9 || i==11; }
 static uint64_t section_offset(unsigned i) { return edges[i]&0x01ffffff; }
@@ -50,10 +61,10 @@ int host64_memory_commit_stack(uint32_t sp) {
 void wasm_rt_allocate_memory(wasm_rt_memory_t *m,uint64_t initial,uint64_t max,
                              bool is64,uint32_t page_size) {
     if (owner || is64 || page_size!=65536 || initial<HOST64_MIN_MEMORY_SIZE/65536 ||
-        initial>max || max>65536 || initial*65536<=HOST64_MODULE_BASE)
+        initial>max || max>GUEST_MAX_PAGES || initial*65536<=HOST64_MODULE_BASE)
         os_fail("unsupported module memory layout");
     guest_base=os_reserve();
-    if (!guest_base) os_fail("reserve 8 GiB");
+    if (!guest_base) os_fail("reserve guest memory");
     for (unsigned i=0;i<REGIONS-1;i++)
         if (!os_split(guest_base+edges[i],edges[i+1]-edges[i])) os_fail("split reservation");
     for (unsigned i=0;i<REGIONS-1;i++) {

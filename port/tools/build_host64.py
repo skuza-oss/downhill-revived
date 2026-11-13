@@ -73,11 +73,13 @@ class Target:
         self.fiber = fiber  # the fiber switch's adapter, port/host64/fiber_<fiber>.c (the CPU and its ABI)
         self.flags, self.wabt, self.simde = list(flags), Path(os.environ.get('WABT_DIR') or wabt), simde
         self.windows, self.android, self.mac = key == 'win-x64', key == 'android-arm64', key == 'macos-arm64'
+        self.ios = key.startswith('ios-')  # a static library the Xcode app links (port/ios, finding 224)
         self.posix = not self.windows
 
 
 MAC_MIN = '11.0'  # the first macOS on Apple silicon (package_release.py's LSMinimumSystemVersion)
 ANDROID_API = 29  # sdl3.ANDROID_API: Android 10 (finding 191)
+IOS_MIN = '17.0'  # sdl3.IOS_MIN and port/ios/project/Info.plist's MinimumOSVersion
 TARGETS = {t.key: t for t in (
     Target('win-x64', 'x86_64-pc-windows-msvc', 'build/host64-exe', 'dhd64.exe', 'win64'),
     Target('linux-x64', 'x86_64-unknown-linux-gnu', 'build/host64-linux', 'dhd64', 'sysv64',
@@ -85,6 +87,15 @@ TARGETS = {t.key: t for t in (
     # M1 is every Apple silicon Mac's floor
     Target('macos-arm64', 'aarch64-apple-darwin', 'build/host64-macos', 'dhd64', 'arm64', jobs=4,
            flags=['-arch', 'arm64', '-mmacosx-version-min=' + MAC_MIN, '-mcpu=apple-m1'],
+           wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
+    # iPhone and iPad (A12 and later run iOS 17; -mcpu=apple-m1 is the macOS build's floor too), built
+    # on a Mac with Xcode's iphoneos SDK into libdhd_ios.a, which port/ios/build_ios.py links into the app
+    Target('ios-arm64', 'aarch64-apple-ios', 'build/host64-ios', 'libdhd_ios.a', 'arm64', jobs=4,
+           flags=['-arch', 'arm64', '-miphoneos-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
+           wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
+    # the same for the iOS Simulator on an Apple silicon Mac (its own SDK and platform; finding 224)
+    Target('ios-sim-arm64', 'aarch64-apple-ios-sim', 'build/host64-ios-sim', 'libdhd_ios.a', 'arm64', jobs=4,
+           flags=['-arch', 'arm64', '-mios-simulator-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
            wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
     # -march=armv8-a: every arm64 phone. ARMv8.2 (finding 091's first choice) closed the game at
     # start with SIGILL on ARMv8.0 cores, which budget chips still ship (the Snapdragon 680's
@@ -216,6 +227,8 @@ def sdl(t, a):
     if t.android:
         lib, include, _java = sdl3.android_build()
         return lib, include, []
+    if t.ios:
+        return sdl3.ios_build(simulator=t.key == 'ios-sim-arm64')
     if a.sdl_lib and not a.sdl_include:
         raise ValueError('--sdl-lib needs --sdl-include')
     if t.windows:
@@ -324,6 +337,17 @@ def main():
         cc, ar = tools / 'clang.exe', tools / 'llvm-ar.exe'
         if not cc.exists():
             p.error('no NDK clang at %s' % cc)
+    elif t.ios:
+        # Apple's clang (xcrun's), not a wasm-only clang a wasi-sdk may put first on PATH; the SDK's
+        # headers and libraries through -isysroot
+        if sys.platform != 'darwin':
+            p.error('--target %s builds on a Mac with Xcode' % t.key)
+        sdk_name = 'iphonesimulator' if t.key == 'ios-sim-arm64' else 'iphoneos'
+        sdk = subprocess.run(['xcrun', '--sdk', sdk_name, '--show-sdk-path'], capture_output=True, text=True)
+        if sdk.returncode:
+            p.error('no %s SDK (xcrun): %s' % (sdk_name, sdk.stderr.strip()))
+        t.flags = ['-isysroot', sdk.stdout.strip()] + t.flags
+        ndk, tools, cc, ar = None, None, '/usr/bin/clang', '/usr/bin/ar'
     elif t.posix:
         ndk, tools, cc, ar = None, None, 'clang', 'ar'
     if a.fiber_test:
@@ -421,8 +445,13 @@ def main():
         # guest address and ends the process, as the trap did. WABT's own fault-to-trap handler stays
         # off (WASM_RT_SKIP_SIGNAL_RECOVERY): ours handle faults. Traps can come from any EE fiber:
         # report and end (launcher.c).
+        # iOS gives an app no 8 GiB reservation without an entitlement that unsigned and free-account
+        # installs lack: there the module's memory is 2 GiB plus a 64 KiB window (guest_memory.c) and
+        # wasm2c's own guard-page checks are off (prepare_wasm2c.py's MEMCHECK_SKIP; finding 224)
+        memcheck = (['-DWASM_RT_MEMCHECK_BOUNDS_CHECK=1', '-DWASM_RT_SKIP_BOUNDS_CHECKS=1'] if t.ios
+                    else ['-DWASM_RT_MEMCHECK_GUARD_PAGES=1'])
         defines = ['-DWASM_RT_STACK_DEPTH_COUNT=1', '-DWASM_RT_MAX_CALL_STACK_DEPTH=512', '-DWASM_RT_THREAD_LOCAL=',
-                   '-DWASM_RT_MEMCHECK_GUARD_PAGES=1', '-DWASM_RT_SKIP_SIGNAL_RECOVERY=1']
+                   *memcheck, '-DWASM_RT_SKIP_SIGNAL_RECOVERY=1']
         defines += ['-DHOST64_FAKE_MODULE=1'] if a.fake else ['-DWASM_RT_TRAP_HANDLER=host64_trap']
         includes = ['-I'+str(work), '-I'+str(wabt/'include'), '-I'+str(rt), '-I'+str(SOURCE),
                     '-I'+str(ROOT/'port/runtime'), '-I'+str(ROOT/'port/include'), '-I'+str(ROOT/'port/host'),
@@ -480,6 +509,8 @@ def main():
                 extra += ['-I'+str(ROOT/'port/render/include')]  # dhd_render.h
             if rel.endswith('host64/launcher.c') and t.android:
                 extra += ['-Dmain=dhd_launcher_main']  # SDL_main (android_main.c) calls it
+            if rel.endswith('host64/launcher.c') and t.ios:
+                extra += ['-Dmain=dhd_main']  # the app's game thread calls it (port/ios/host/ios_main.m)
             if 'libmpeg2/' in rel:
                 extra += ['-I'+str(ROOT/'port/third_party/libmpeg2')]
             obj = objdir/(rel.replace('/', '_') + suffix)
@@ -571,6 +602,11 @@ def main():
             run([cc, *t.flags[:3], *pgo_flags[:1], '-Wl,-dead_strip', '-Wl,-S', *objects, library, report['lib'], sdl_lib,
                  *[w for x in sdl_libs for w in x.split()], *[w for x in rust_libs for w in x.split()],
                  '-o', exe], timeout=900)
+        elif t.ios:
+            # one static archive (the module, the host, the Rust library and SDL3) for the Xcode app;
+            # Xcode's link garbage-collects and strips it
+            exe.unlink(missing_ok=True)
+            run(['/usr/bin/libtool', '-static', '-o', exe, *objects, library, report['lib'], sdl_lib], timeout=900)
         else:
             # LLVM's lld: GNU ld on a tree under /mnt (WSL's 9p) took minutes, past the timeout;
             # lld links the same objects there in about 2 s
@@ -585,7 +621,7 @@ def main():
         print(f'PASS: {imports} generated imports; {host_summary}; {exe} ({exe.stat().st_size / 1048576:.1f} MB)',
               flush=True)
         print('steps: ' + step.summary(), flush=True)
-        if a.run and not t.android:
+        if a.run and not t.android and not t.ios:
             if a.fake:
                 (work/'fixture.txt').write_bytes(b'host64-proof')
             env.update(DHD_HEADLESS='1', DHD_SND_OFF='1')

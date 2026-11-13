@@ -37,6 +37,8 @@ static volatile int target_ready;   /* window_target found it (a phone: not whil
 static SDL_AtomicInt drawable;
 typedef struct { int x, y, w, h, borderless; } WindowSpec;
 static void display_of(SDL_Window *w, SDL_Rect *full, SDL_Rect *usable);
+static void window_measure(void);
+static void graphics_failed(void);
 
 /* ---- the platform part: SDL's window as the renderer's window ---- */
 #if defined(_WIN32)
@@ -51,9 +53,21 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #define WINDOW_FLAGS 0
 #define FIXED_SCREEN 1  /* the whole screen, immersive (landscape: android_main.c's hint) */
 #elif defined(__APPLE__)
+#include <TargetConditionals.h>
 #define WINDOW_FLAGS SDL_WINDOW_METAL  /* the renderer draws into an SDL Metal view's layer */
+#if TARGET_OS_IPHONE
+#define FIXED_SCREEN 1  /* iOS: SwiftUI owns the window and provides its CAMetalLayer */
+extern void *ios_metal_get_layer(void);
+extern void ios_metal_get_drawable_size(int *out_w, int *out_h);
+extern int ios_metal_consume_resized(void);
+extern int ios_metal_consume_layer_changed(void);
+extern double ios_metal_display_hz(void);
+extern bool ios_game_is_active(void);
+extern void ios_text_input(int on);
+#else
 #define FIXED_SCREEN 0
 static SDL_MetalView metal_view;
+#endif
 #else
 #define WINDOW_FLAGS 0
 #define FIXED_SCREEN 0
@@ -64,9 +78,14 @@ static SDL_MetalView metal_view;
 static void window_target(void *unused)
 {
     (void)unused;
-    SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window);
     memset(&target, 0, sizeof target);
     target.size = gs_window_pixels;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    target.kind = GS_WINDOW_METAL_LAYER;
+    target.a = (uintptr_t)ios_metal_get_layer();
+    window_measure();
+#else
+    SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window);
 #if defined(_WIN32)
     target.kind = GS_WINDOW_WIN32;
     target.a = (uintptr_t)SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
@@ -88,6 +107,7 @@ static void window_target(void *unused)
         target.a = (uintptr_t)SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL);
         target.b = (uint64_t)SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
     }
+#endif
 #endif
     target_ready = target.a != 0;
 }
@@ -193,6 +213,11 @@ static void monitor_size(WindowSpec *s)
 static void window_measure(void)
 {
     int w = 0, h = 0;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    ios_metal_get_drawable_size(&w, &h);
+    SDL_SetAtomicInt(&drawable, (w > 0 ? w : 0) << 16 | (h > 0 ? h : 0));
+    perf_window(ios_game_is_active(), ios_metal_display_hz());
+#else
     /* Tool captures need the final presenter even while the window stays minimised. */
     if (sdl_window && (!(SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MINIMIZED) || getenv("DHD_CAPTURE_PRESENTED")))
         SDL_GetWindowSizeInPixels(sdl_window, &w, &h);
@@ -208,6 +233,7 @@ static void window_measure(void)
                 (test_input || (flags & SDL_WINDOW_INPUT_FOCUS));
     const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(sdl_window));
     perf_window(front, mode ? mode->refresh_rate : 0);
+#endif
 }
 
 /* SDL's window events as SDL sends them (on Windows inside a modal drag or resize too, which the
@@ -224,6 +250,15 @@ static bool SDLCALL window_watch(void *unused, SDL_Event *e)
 static void make_window(void *arg)
 {
     WindowSpec *s = arg;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    (void)s;
+    sdl_window = (SDL_Window *)1;
+    window_measure();
+    window_target(NULL);
+    unsigned pw = 0, ph = 0;
+    gs_window_pixels(&pw, &ph);
+    hle_log("gs: iOS Metal surface %ux%u\n", pw, ph);
+#else
     /* The app id, the launcher's (tauri.conf.json's identifier): Wayland's app_id and X11's
        WM_CLASS, by which desktops group the window and find its icon (from n0buholic, PR #13).
        Windows: the icon (port/res/dhd.rc) on SDL's window class, small and big (window_icon). */
@@ -257,6 +292,7 @@ static void make_window(void *arg)
     SDL_AddEventWatch(window_watch, NULL);
     window_target(NULL);
     hle_log("gs: SDL window %dx%d (video %s)\n", s->w, s->h, SDL_GetCurrentVideoDriver());
+#endif
 }
 
 /* A display's whole area and its usable part (without the taskbar), in pixels (host_dpi_aware). */
@@ -274,10 +310,14 @@ static void display_of(SDL_Window *w, SDL_Rect *full, SDL_Rect *usable)
 static void show_window(void *unused)
 {
     (void)unused;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    hle_log("gs: iOS Metal surface active\n");
+#else
     int minimised = start_minimised();
     hle_log("gs: window shown%s\n", minimised ? " minimised (a minimised start)" : "");
     if (minimised) show_minimised();
     else { SDL_ShowWindow(sdl_window); SDL_RaiseWindow(sdl_window); }
+#endif
 }
 
 /* The native handle, waited for up to tries x 10 ms (a phone makes its surface a little after the
@@ -549,7 +589,9 @@ void gs_window_event(unsigned type)
 {
     if (type == SDL_EVENT_WINDOW_RESIZED) resize_pending = 1;
     else if (type == SDL_EVENT_WINDOW_CLOSE_REQUESTED || type == SDL_EVENT_QUIT) {
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
         if (sdl_window) SDL_HideWindow(sdl_window);
+#endif
         window_closed = 1;
     }
 }
@@ -559,6 +601,7 @@ void gs_window_event(unsigned type)
    stop first, then the process leaves; finding 210). */
 void gs_window_close(void)
 {
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
     if (sdl_window) {
         SDL_Event e;
         SDL_zero(e);
@@ -567,6 +610,7 @@ void gs_window_close(void)
         SDL_PushEvent(&e);  /* the SDL thread sees it: gs_window_event */
         return;
     }
+#endif
     host_end(0);
 }
 
@@ -598,6 +642,18 @@ static void graphics_lost(void)
    or with a message once the GPU device was lost. */
 void gs_pump_messages(void)
 {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    /* SwiftUI owns UIApplication's lifecycle. Stop before queuing another frame; dropping
+       the surface here also drains earlier renderer work before the OS suspends the app. */
+    if (!ios_game_is_active() && surface) {
+        gs_gpu_surface_reset(&gs, NULL);
+        while (!ios_game_is_active() && !window_closed) SDL_Delay(20);
+        if (!window_closed) {
+            if (!gs_gpu_surface_reset(&gs, &target)) graphics_failed();
+            resize_pending = 1;
+        }
+    }
+#endif
     if (window_closed) host_end(0);
     if (gs_gpu_lost()) graphics_lost();
 }
@@ -645,7 +701,14 @@ static void mouse_place(void)
     int left = mouse.left, top = mouse.top, right = mouse.right, bottom = mouse.bottom;
     float px = mouse.px, py = mouse.py;
     int ww = 0, wh = 0;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    unsigned uw = 0, uh = 0;
+    gs_window_pixels(&uw, &uh);
+    ww = (int)uw; wh = (int)uh;
+    if (ww > 0 && wh > 0) {
+#else
     if (sdl_window && SDL_GetWindowSizeInPixels(sdl_window, &ww, &wh) && ww > 0 && wh > 0) {
+#endif
         if (right <= left || mouse.w <= 0) left = top = 0, right = ww, bottom = wh;
         else px *= (float)mouse.w / ww, py *= (float)mouse.h / wh;  /* a resize the picture hasn't followed yet */
     }
@@ -665,7 +728,11 @@ void gs_mouse_event(const void *event)
     static int test_input = -1;
     const SDL_Event *e = event;
     if (test_input < 0) test_input = getenv("DHD_TEST_INPUT") != NULL;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    float density = 1.0f;
+#else
     float density = sdl_window ? SDL_GetWindowPixelDensity(sdl_window) : 1.0f;
+#endif
     if (density <= 0) density = 1.0f;
     MOUSE_LOCK();
     switch (e->type) {
@@ -732,6 +799,27 @@ void gs_window_tick(void)
 {
     static int shown = -1;
     if (!sdl_window) return;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    window_measure();
+    if (ios_metal_consume_resized()) resize_pending = 1;
+    if (ios_metal_consume_layer_changed()) {
+        window_target(NULL);
+        if (surface && target_ready) {
+            gs_gpu_surface_reset(&gs, &target);
+            resize_pending = 1;
+        }
+    }
+    /* a field of the game takes typing (a name, a room's code): the system keyboard while it does,
+       its characters to text_input_character (metal_bridge.m; finding 224) */
+    static int ios_typing;
+    if (text_input_active() != ios_typing) {
+        ios_typing = !ios_typing;
+        ios_text_input(ios_typing);
+        fprintf(stderr, "text input: %s (the iOS keyboard)\n", ios_typing ? "on" : "off");
+    }
+    (void)shown;
+    return;
+#else
     if (title.changed) {
         char text[sizeof title.text];
         SDL_LockSpinlock(&title.lock);
@@ -759,6 +847,7 @@ void gs_window_tick(void)
     shown = want;
     if (want) SDL_ShowCursor();
     else SDL_HideCursor();
+#endif
 }
 
 void host_service_mouse_state(uint32_t out)
@@ -912,6 +1001,7 @@ static void present_registers(const uint64_t *mmio)
 typedef struct {
     uint64_t mmio[15];
     double due, began;  /* pacing_handed */
+    double output_aspect;
     int32_t resize, flat_limit, card_2d;
 } PresentMark;
 
@@ -923,7 +1013,7 @@ static void present_marked(const void *payload)
     memcpy(&m, payload, sizeof m);
     present_registers(m.mmio);
     gs_native_movie(&gs, NULL, 0, 0, 0);
-    gs_native_vsync_handed(&gs, &width, &height, m.resize, m.due, m.began, m.flat_limit, m.card_2d);
+    gs_native_vsync_handed(&gs, &width, &height, m.resize, m.due, m.began, m.flat_limit, m.card_2d, m.output_aspect);
 }
 
 void gs_vsync(void)
@@ -963,6 +1053,7 @@ void gs_vsync(void)
             memcpy(m.mmio, mmio, sizeof m.mmio);
             pacing_handed(&m.due, &m.began);
             m.resize = resize_pending, m.flat_limit = host_widescreen_flat_limit();
+            m.output_aspect = host_widescreen_aspect();
             m.card_2d = host_widescreen_card_drawn();
             resize_pending = 0;
             graphics_present_marked = present_marked;

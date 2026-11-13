@@ -67,6 +67,7 @@ after a version change before a live check.
 | `port/android/test_disc_image.py [ISO]` | the Android side's plain-JVM tests: the first start's disc rules (the check, a complete copy) on synthetic images, and the update notice's page rule (finding 143) |
 | `port/android/build_apk.py --check APK` | a built APK checked as a release one: one signer, the release key's certificate (finding 143) |
 | `port/android/test_build_apk.py` | that release check's rules with apksigner and aapt answers canned (no SDK or APK needed) |
+| `python -m unittest discover -s port/ios/tests` | the iOS build and packaging rules (`build_ios.py`, `package_unsigned.py`: tools canned, no Mac needed) and, where a compiler named `cc` exists (a Mac, Linux), the display-rate and live-aspect C checks; the Simulator and device builds themselves need the Mac (finding 224). `check.py quick` runs the part that needs no Mac |
 | `online/server`: `npm test` | the server's own tests |
 | `port/tools/state_trace_run.py` | the state trace, the check for changes that must not change the game's behaviour (below) |
 | `port/tools/state_trace_layout_test.py` | the state trace's own test (finding 205): `flips` (a rider word, a RAM word and a register changed in a run must be reported), `build-pad` then `layout` (a build whose core layout moved must give equal traces) |

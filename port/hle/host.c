@@ -56,6 +56,9 @@
 #include "../render/include/dhd_presence.h"  /* Discord Rich Presence (port/render/presence) */
 
 #include <SDL3/SDL.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>  /* TARGET_OS_IPHONE: the iOS app (port/ios, finding 224) */
+#endif
 
 /* The instruction pointer and stack pointer of a CONTEXT. */
 #ifdef _WIN32
@@ -1763,9 +1766,22 @@ static int card_next, card_drawn;
 int host_widescreen_card_drawn(void) { return card_drawn; }
 int host_frame_video(double aspect, int flat_limit)
 {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    /* iOS: the picture's shape follows the display while the game runs (widescreen.c's live
+       aspect); a package VU1 already holds gets its sprite widths back first. */
+    if (aspect != published_aspect) {
+        void vif1_update_widescreen_sprites(double previous);
+        graphics_wait();
+        vif1_update_widescreen_sprites(published_aspect);
+    }
+#endif
     published_aspect=aspect; published_flat_limit=flat_limit;
     card_drawn=card_next;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    card_next=aspect>0 && flat_limit>0 && gs_native_card();
+#else
     card_next=aspect>0 && gs_native_card();
+#endif
     return card_next;
 }
 
