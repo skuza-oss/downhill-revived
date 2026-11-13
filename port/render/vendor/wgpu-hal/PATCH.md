@@ -2,7 +2,8 @@
 
 This is the crates.io `wgpu-hal` **29.0.3** source, under its original MIT OR
 Apache-2.0 licence (LICENSE.MIT and LICENSE.APACHE). Local changes are marked
-`Downhill Revived`: the Vulkan backend's (below) and one DX12 backport (the last section).
+`Downhill Revived`: the Vulkan backend's (below), one DX12 backport and one Metal change on iOS
+(the last two sections).
 
 The device shares at most 256 framebuffer lookup entries across command encoders.
 Keys retain upstream's render pass, extent, raw attachments and unique view identities.
@@ -131,3 +132,15 @@ hit's AddRef read a freed object's vtable. The renderer's background pipeline wo
 thread make pipelines from the same vertex shader at once (finding 131). This is upstream's fix
 for gfx-rs/wgpu#10547, PR #10805 (merged into trunk 2026-11-11, in no release yet), applied to
 29.0.3 unchanged in substance: three hunks. `tests/dx12_shader_cache.rs` is the stress test.
+
+## iOS: the Metal drawable may time out (finding 224)
+
+`metal/surface.rs`: on iOS the surface keeps CAMetalLayer's drawable timeout
+(`setAllowsNextDrawableTimeout(true)`; upstream turns it off on every Apple target). With it
+off, `nextDrawable` can wait for ever when the app goes inactive and the compositor stops taking
+pictures, while the app's lifecycle code tries to drain and release the surface; with it on, the
+wait ends after about a second and the acquire returns `SurfaceError::Timeout`, which the
+renderer skips like any other missed picture. macOS keeps upstream's setting. From the iOS port
+(ribeirogustav, pull request #74). A bound on a wait, not proof of correct lifecycle handling:
+the device runs are the check. Reference:
+https://developer.apple.com/documentation/quartzcore/cametallayer/allowsnextdrawabletimeout
