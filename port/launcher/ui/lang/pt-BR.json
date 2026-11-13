@@ -145,6 +145,8 @@
   "row.touchSteer.hint": "O analógico, inclinar o aparelho ou um D-pad.",
   "row.touchSize": "Size",
   "row.touchSize.hint": "Auto ajusta os controles à sua tela.",
+  "row.touchStyle": "Button Style",
+  "row.touchStyle.hint": "Actions mostra o que cada botão faz, com o botão da PS2 num pequeno selo; Symbols mostra só os símbolos da PS2.",
   "row.touchEdit": "Editar o layout de toque",
   "row.touchEdit.hint": "Abre o jogo no editor de layout: arraste os controles para onde os polegares descansam.",
   "row.touchEdit.button": "Edit Layout",

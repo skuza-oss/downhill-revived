@@ -145,6 +145,8 @@
   "row.touchSteer.hint": "The stick, tilting the device, or a D-pad.",
   "row.touchSize": "Size",
   "row.touchSize.hint": "Auto fits the controls to your screen.",
+  "row.touchStyle": "Button Style",
+  "row.touchStyle.hint": "Actions shows what each button does, with its PS2 button in a small badge; Symbols shows the PS2 symbols alone.",
   "row.touchEdit": "Edit the touch layout",
   "row.touchEdit.hint": "Starts the game in its layout editor: drag the controls where your thumbs rest.",
   "row.touchEdit.button": "Edit layout",

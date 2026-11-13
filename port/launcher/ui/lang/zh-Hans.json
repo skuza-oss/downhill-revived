@@ -143,6 +143,8 @@
   "row.touchSteer.hint": "摇杆、倾斜设备或方向键。",
   "row.touchSize": "Size",
   "row.touchSize.hint": "Auto 会根据屏幕调整按键大小。",
+  "row.touchStyle": "Button Style",
+  "row.touchStyle.hint": "Actions 用图示显示每个按键的作用，并在小角标中标出对应的 PS2 按键；Symbols 只显示 PS2 符号。",
   "row.touchEdit": "编辑触控布局",
   "row.touchEdit.hint": "以游戏的布局编辑器启动：将按键拖到拇指自然放置的位置。",
   "row.touchEdit.button": "Edit Layout",
