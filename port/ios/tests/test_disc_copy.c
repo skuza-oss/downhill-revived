@@ -4,6 +4,7 @@
 #include "../host/disc_copy.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -52,6 +53,27 @@ int main(void)
     fclose(plain);
     fclose(in);
     fclose(out);
-    puts("disc_copy: volume, copy, cancel and completeness");
+
+    /* the publication: an older import finishing after a newer pick lands nowhere */
+    char older_file[64], newer_file[64], target[64];
+    snprintf(older_file, sizeof older_file, "dc-older-%d.part", (int)(uintptr_t)&older_file % 9973);
+    snprintf(newer_file, sizeof newer_file, "dc-newer-%d.part", (int)(uintptr_t)&older_file % 9973);
+    snprintf(target, sizeof target, "dc-target-%d.iso", (int)(uintptr_t)&older_file % 9973);
+    remove(target);
+    FILE *a = fopen(older_file, "w"); fputs("older", a); fclose(a);
+    FILE *b = fopen(newer_file, "w"); fputs("newer", b); fclose(b);
+    long long first = disc_publish_begin(), second = disc_publish_begin();
+    assert(!disc_publish_current(first) && disc_publish_current(second));
+    assert(disc_publish(first, older_file, target) == 1);   /* superseded: not moved */
+    FILE *t = fopen(target, "r");
+    assert(!t);
+    assert(disc_publish(second, newer_file, target) == 0);
+    char got[16] = "";
+    t = fopen(target, "r");
+    assert(t && fgets(got, sizeof got, t) && !strcmp(got, "newer"));
+    fclose(t);
+    remove(target);
+    remove(older_file);
+    puts("disc_copy: volume, copy, cancel, completeness, and a superseded import never lands");
     return 0;
 }

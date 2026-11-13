@@ -29,4 +29,13 @@ const char *disc_completeness(uint64_t copied, uint64_t size, uint64_t volume, c
 int64_t disc_copy(FILE *in, FILE *out, const volatile int *cancel,
                   void (*progress)(void *context, uint64_t done), void *context);
 
+/* The import's publication (finding 227): each pick or retry begins a generation, which makes every
+   older import superseded; an import puts its file in place (rename, or the move of a file already
+   in Documents) only while its generation is still the newest, checked and done under one lock, so a
+   superseded import can never land over a newer choice. */
+long long disc_publish_begin(void);
+int disc_publish_current(long long generation);
+/* rename(from, to) when generation is the newest: 0 done, 1 superseded (nothing done), -1 failed. */
+int disc_publish(long long generation, const char *from, const char *to);
+
 #endif
