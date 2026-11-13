@@ -11,8 +11,15 @@ iOS port by Gustavo Ribeiro (GitHub `ribeirogustav`); keep his notices and credi
   `port/tools/package_release.py --platform ios --core core_*.c` makes and checks the release IPA.
 - One code path: iOS uses the shared in-game touch controls (`port/hle/touch*.c`, fed by
   `port/host/touch_host.c`'s iOS part from `render/metal_bridge.m`), the game's own SETTINGS
-  pages and the shared mobile launcher once it exists. `app/main.m` is only the first-start disc
-  screen until then; do not grow a second launcher or settings UI here.
+  pages (Android's rows: `port/host/phone.c`) and the shared mobile launcher (finding 227): the
+  app opens into `port/launcher/ui` in a WKWebView (`app/launcher.m`, the transport
+  `app/bridge_ios.js`), whose calls `host/launcher_calls.c` answers with the shared code Android's
+  launcher calls (the settings crate, `host_disc_check`, `dhd_disc_check`, `phone_update_find`).
+  Do not grow a second launcher or settings UI, or logic the shared code has, in Objective-C here.
+- The app's lifecycle is the game's: present.c's `app_away_wait` (fingers let go, sound paused, an
+  offline race paused at the return, no game time lost or caught up) waits while
+  `ios_game_is_active` is false; `host/run_record.c` keeps how a run ended (the next start's
+  `previous run:` lines and the launcher's note).
 - Online on iOS is P2P rooms only, through the same host switch as Android
   (`port/net/net.c` `NET_OFFERED`, findings 143, 180).
 - The IPA is unsigned: no Apple ID, team, certificate or provisioning profile ever enters the
@@ -24,4 +31,7 @@ iOS port by Gustavo Ribeiro (GitHub `ribeirogustav`); keep his notices and credi
 - The game ends the process itself (`host_end`, finding 210); the app does not restart a core in
   the same process.
 - Tests: `python -m unittest discover -s port/ios/tests` (no Mac needed for most; the C checks
-  need a compiler named `cc`); the Simulator and device builds need the Mac.
+  need a compiler named `cc`; `test_launcher_ios.py` runs `test_bridge_ios.js` with node);
+  `port/tools/test_runtime.py` runs the launcher's calls, the disc copy and the run record in C;
+  the Simulator and device builds need the Mac. Simulator checks: `docs/BUILDING.md` (iOS) for
+  the test switches and the silent audio driver.

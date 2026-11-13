@@ -160,7 +160,8 @@ to its launcher).
 main's launcher still started the game with `DHD_TOUCH_EDIT_AT_START=1` (the editor over the
 game's menus). Finding 228 joined the two: the launcher's "Edit the touch layout" now starts the
 editor alone through `--touch-editor` and shows the launcher again after Done;
-`DHD_TOUCH_EDIT_AT_START` and its block are gone.
+iOS's launcher (finding 227) keeps `DHD_TOUCH_EDIT_AT_START`: its app can't come back after the
+editor alone ends the process.
 
 **Tilt on iOS.** `metal_bridge.m` gives `touch_host.c` the two calls Android's `DhdActivity`
 gives it: `ios_touch_tilt_on` (CMMotionManager device motion, else the accelerometer, started and

@@ -28,7 +28,8 @@ Out of scope: `port/ios` and the iOS side of the bridge (lane 227).
 ## Progress
 
 - [x] 2026-11-13: finding reserved (6d7e8a81)
-- [x] the launcher's row starts the editor alone and comes back; `DHD_TOUCH_EDIT_AT_START` removed;
+- [x] the launcher's row starts the editor alone and comes back; `DHD_TOUCH_EDIT_AT_START` removed
+  (put back for iOS at the merge of main b4ec64d7, below);
   BRIDGE.md, PLAYING.md, STATE.md, the Android notes (4153b2e1)
 - [x] Windows: `check.py port`, the seven traces, the launcher captures, the packaged game, the P2P
   race
@@ -57,9 +58,14 @@ Out of scope: `port/ios` and the iOS side of the bridge (lane 227).
 - **The argument, not a variable.** `DhdActivity.getArguments()` returns `--touch-editor` for the
   launcher's extra; `android_main.c` already passed only that argument on to `launcher.c`'s main
   (`touch_host_args`), as finding 226 built it. One switch, the same on every platform.
-- **`DHD_TOUCH_EDIT_AT_START` deleted**, with its block in `touch_host.c`: nothing else used it and
-  `docs/TESTING.md` never listed it as a test switch (one code path; `DHD_TOUCH_EDITOR` is the
-  test switch and is listed).
+- **`DHD_TOUCH_EDIT_AT_START` first deleted, then kept for iOS.** On 6e47e82a nothing else used it
+  (and `docs/TESTING.md` never listed it), so this lane deleted it with its block in `touch_host.c`.
+  Lane 227 (merged into main as b4ec64d7) made it iOS's "Edit the touch layout": an iOS app can't
+  start itself again, so the editor alone's end would close the app. The merge of b4ec64d7 into this
+  branch dropped the block silently (main had not touched those lines) while `ios_main.m` still set
+  the variable: the block is back, its comment naming iOS. So the one call (`play` with
+  `edit_touch_layout`) differs by phone after Done, and `BRIDGE.md` says where and why: Android
+  (proved: the launcher comes back) the editor alone, iOS the editor over the game's menus.
 - **No unit test for the return.** The logic is Android's task rule plus two lines (`play` keeps the
   activity, `onCreate` reads the saved state); it was proved on the phone below. The launcher's JS
   tests and `check.py port` still pass.
@@ -184,9 +190,9 @@ code 0, `end: handlers done`; nothing left running.
 ## Result
 
 The launcher's "Edit the touch layout" on Android opens the layout editor alone and, after DONE or
-Back, shows the launcher again at its Touch tab; `DHD_TOUCH_EDIT_AT_START` is gone. iOS does the
-same through `play`'s `edit_touch_layout` as `port/launcher/BRIDGE.md` now describes (`reopen` in the
-snapshot). The merged main of 2026-11-13 builds and works on Windows and on the Mi 11i.
+Back, shows the launcher again at its Touch tab; iOS keeps the editor over the game's menus
+(`DHD_TOUCH_EDIT_AT_START`, finding 227): one call, `play` with `edit_touch_layout`, whose ending
+differs by phone as `port/launcher/BRIDGE.md` describes (`reopen` in the snapshot on Android).
 
 Open: the race-load wait on a phone room's host while a joiner is still on its way to its rider
 (25 s of no fields with a hidden PC joiner; the 0.8.0 gate's room had 2.8 s): the online code did

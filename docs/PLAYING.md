@@ -170,13 +170,17 @@ It is **unsigned**: Apple lets an app outside the App Store run only once it is 
 device, which you do while installing it with a sideloading tool on your computer or phone
 (AltStore, SideStore or Sideloadly, with your own Apple ID; a free Apple ID's install runs for 7
 days and then has to be refreshed by the tool, a paid developer account's for a year). The app is
-not on the App Store. At the first start choose your `.iso` (from Files, iCloud Drive or a USB
-drive); it is copied into the app once (a few GB). You can also copy the `.iso` into Files > On My
-iPhone > Downhill Revived and start the app. Play with the touch controls or a controller (MFi,
-Xbox, PlayStation). Settings, saves, the disc copy and `dhd.log` are in that same Files folder.
-Install a new release over the old one with the same tool: your files stay; deleting the app
-deletes them. What is experimental: it is not yet measured on many devices, there is no tilt
-steering, and the game closes the app when you choose EXIT GAME.
+not on the App Store. The app opens into the launcher, as on Android: choose your `.iso` there
+(from Files, iCloud Drive or a USB drive); it is copied into the app once (a few GB); an `.iso` you
+copied into Files > On My iPhone > Downhill Revived is moved into place instead. Then PLAY. Play
+with the touch controls or a controller (MFi, Xbox, PlayStation); the button names follow what you
+use last (touch until a controller is used). Settings, saves, the disc copy and `dhd.log` are in
+that same Files folder. In the menus, a swipe in from the left edge is Back (iOS has no Back button);
+the keyboard's bar has Cancel and Done. Leaving the app in an offline race pauses it. If the game closes
+unexpectedly, the launcher says so at the next start and offers **Share log**. Install a new
+release over the old one with the same tool: your files stay; deleting the app deletes them. What
+is experimental: it is not yet measured on many devices, there is no tilt steering, and EXIT GAME
+closes the app (the next start opens the launcher).
 
 Then:
 

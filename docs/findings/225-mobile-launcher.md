@@ -141,7 +141,7 @@ pointer).
   notice when the launcher showed the line (`DHD_LAUNCHER_CHECKED`). Nothing is downloaded.
 - "Edit the touch layout" first started the game with `DHD_TOUCH_EDIT_AT_START=1` (the editor over
   the game's menus). Finding 228 replaced it: the row starts the layout editor alone (finding 226)
-  and the launcher shows again after its Done; the variable is gone.
+  and the launcher shows again after its Done. The variable stays for iOS's row (finding 227).
 - No new permission: the WebView needs none for local files, INTERNET was there for the update
   check.
 
@@ -265,7 +265,7 @@ the reverse, EXIT GAME four times with the next start saying the previous run en
 layout editor opened from the launcher, a direct start with the launcher off. The desktop launcher
 is pixel-equal to before. Root `AGENTS.md` has the decision row.
 
-Open: the iOS bridge (written down in `BRIDGE.md`, not built); portrait on a real phone (shown on
+Open: the iOS bridge (written down in `BRIDGE.md`, not built: built since, finding 227); portrait on a real phone (shown on
 the emulator only); the "not enough space" disc path; the long-press shortcuts pressed on a home
 screen; the strip beside the camera cutout (the WebView should draw behind it with its safe-area
 insets); translations (the table has English only).

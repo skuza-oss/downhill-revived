@@ -128,7 +128,7 @@ const impl={
   host_service_mouse_state:a=>{span(a,36).fill(0);},
   host_service_host_game_options_read:()=>0,host_service_host_setting_locked:()=>0,
   host_service_host_setting_save:()=>0,host_service_movie_update:()=>0,host_service_movie_playing:()=>0,
-  host_service_host_poll_dump:()=>0,
+  host_service_host_poll_dump:()=>0,host_service_host_came_back:()=>0,
   host_service_graphics_threaded:()=>1,host_service_texpack_available:()=>0,host_service_gs_scale:()=>0,
   host_pacing_period:()=>1/60,
 };
