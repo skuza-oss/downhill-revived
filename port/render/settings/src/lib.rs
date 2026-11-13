@@ -95,20 +95,42 @@ fn temporary(path: &Path) -> PathBuf {
     PathBuf::from(temp)
 }
 
-/// The new text takes the old file's place. Windows refuses the replace while another program
-/// holds the file without delete sharing (a scanner, a reader in another process): a few tries.
+/// How often and how long `replace` tries again: at most half a second in all.
 #[cfg(not(target_arch = "wasm32"))]
-fn replace(temp: &Path, path: &Path) -> io::Result<()> {
+const REPLACE_TRIES: u32 = 20;
+#[cfg(not(target_arch = "wasm32"))]
+const REPLACE_WAIT: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// Whether a failed replace may work a moment later: on Windows, another program holding the file
+/// (an antivirus, an editor, our own launcher or game reading it) answers access denied (5), a
+/// sharing violation (32) or a lock violation (33); Rust names only the first `PermissionDenied`,
+/// the others come as raw OS errors. Elsewhere a refused rename doesn't change by waiting.
+#[cfg(not(target_arch = "wasm32"))]
+fn retryable(kind: io::ErrorKind, raw: Option<i32>, windows: bool) -> bool {
+    windows && (kind == io::ErrorKind::PermissionDenied || matches!(raw, Some(5 | 32 | 33)))
+}
+
+/// `rename` until it works, a permanent error, or `REPLACE_TRIES` tries of a retryable one. `save`
+/// reads the old file the same way (a program holding dhd.ini with no sharing at all makes the read
+/// fail with a sharing violation too).
+#[cfg(not(target_arch = "wasm32"))]
+fn replace_with(mut rename: impl FnMut() -> io::Result<()>, windows: bool) -> io::Result<()> {
     let mut tries = 0;
     loop {
-        match fs::rename(temp, path) {
-            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && tries < 20 => {
+        match rename() {
+            Err(e) if tries < REPLACE_TRIES && retryable(e.kind(), e.raw_os_error(), windows) => {
                 tries += 1;
-                std::thread::sleep(std::time::Duration::from_millis(25));
+                std::thread::sleep(REPLACE_WAIT);
             }
             done => return done,
         }
     }
+}
+
+/// The new text takes the old file's place (`replace_with`'s tries on Windows).
+#[cfg(not(target_arch = "wasm32"))]
+fn replace(temp: &Path, path: &Path) -> io::Result<()> {
+    replace_with(|| fs::rename(temp, path), cfg!(windows))
 }
 
 /// Saves `key = value` (`edited`) into the file: read, edit and replace as one step in this
@@ -121,8 +143,10 @@ pub fn save(path: &Path, key: &str, value: &str) -> io::Result<bool> {
         return Ok(false);
     }
     let _one_at_a_time = SAVING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let old = match fs::read(path) {
-        Ok(bytes) => Some(bytes),
+    let mut bytes = Vec::new();
+    let read = replace_with(|| fs::read(path).map(|b| bytes = b), cfg!(windows));
+    let old = match read {
+        Ok(()) => Some(bytes),
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
@@ -205,4 +229,132 @@ pub fn environment(ini: Option<&Ini>, is_set: impl Fn(&str) -> bool) -> Environm
         out.unknown = ini.unknown_keys();
     }
     out
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod replace_tests {
+    use super::*;
+
+    #[test]
+    fn what_is_tried_again() {
+        use io::ErrorKind::*;
+        // Windows: access denied, a sharing violation, a lock violation
+        assert!(retryable(PermissionDenied, Some(5), true));
+        assert!(retryable(Other, Some(32), true));
+        assert!(retryable(Other, Some(33), true));
+        // permanent ones fail at once
+        assert!(!retryable(NotFound, Some(2), true));
+        assert!(!retryable(Other, Some(112), true)); // the disk is full
+        assert!(!retryable(Other, None, true));
+        // elsewhere nothing waits
+        assert!(!retryable(PermissionDenied, Some(13), false));
+        assert!(!retryable(Other, Some(32), false));
+    }
+
+    /// `replace_with` over a list of answers: Ok(()) or an OS error code. Returns the result and
+    /// how many renames were tried.
+    fn run(answers: &[Option<i32>]) -> (io::Result<()>, usize) {
+        let mut calls = 0;
+        let result = replace_with(
+            || {
+                let answer = answers[calls.min(answers.len() - 1)];
+                calls += 1;
+                answer.map_or(Ok(()), |code| Err(io::Error::from_raw_os_error(code)))
+            },
+            true,
+        );
+        (result, calls)
+    }
+
+    #[test]
+    fn injected_errors() {
+        // a sharing violation twice, then the replace works
+        let (r, calls) = run(&[Some(32), Some(32), None]);
+        assert!(r.is_ok());
+        assert_eq!(calls, 3);
+        // access denied, then it works
+        let (r, calls) = run(&[Some(5), None]);
+        assert!(r.is_ok());
+        assert_eq!(calls, 2);
+        // a lock violation, then it works
+        assert!(run(&[Some(33), None]).0.is_ok());
+        // a permanent error: once, at once
+        let (r, calls) = run(&[Some(2), None]);
+        assert_eq!(r.unwrap_err().raw_os_error(), Some(2));
+        assert_eq!(calls, 1);
+        // a holder that never lets go: the bounded tries, then its error
+        let t0 = std::time::Instant::now();
+        let (r, calls) = run(&[Some(32)]);
+        assert_eq!(r.unwrap_err().raw_os_error(), Some(32));
+        assert_eq!(calls as u32, REPLACE_TRIES + 1);
+        assert!(t0.elapsed() >= REPLACE_WAIT * REPLACE_TRIES);
+    }
+
+    /// Another thread holds `file` open with `share` (Windows' FILE_SHARE_* bits) for 200 ms, from
+    /// before `work` starts; returns what `work` returned and how long it took.
+    #[cfg(windows)]
+    fn while_held<T>(file: &Path, share: u32, work: impl FnOnce() -> T) -> (T, std::time::Duration) {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::sync::{Arc, Barrier};
+        let opened = Arc::new(Barrier::new(2));
+        let holder = {
+            let (file, opened) = (file.to_path_buf(), opened.clone());
+            std::thread::spawn(move || {
+                let f = fs::OpenOptions::new().read(true).share_mode(share).open(&file).unwrap();
+                opened.wait();
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                drop(f);
+            })
+        };
+        opened.wait();
+        let t0 = std::time::Instant::now();
+        let out = work();
+        let took = t0.elapsed();
+        holder.join().unwrap();
+        (out, took)
+    }
+
+    /// Real holders on Windows, each for 200 ms while a save or a replace runs: it waits and works.
+    /// - dhd.ini open without delete sharing (an editor, a reader in another process): the rename
+    ///   is refused with access denied (5);
+    /// - the new text's temporary file open without delete sharing (an antivirus scanning the file
+    ///   just written): the rename is refused with a sharing violation (32);
+    /// - dhd.ini open with no sharing at all: the read before the edit fails with a sharing
+    ///   violation (32).
+    #[cfg(windows)]
+    #[test]
+    fn real_holders() {
+        const READ: u32 = 1;
+        const WRITE: u32 = 2;
+        let dir = std::env::temp_dir().join(format!("dhd-settings-holder-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("dhd.ini");
+        assert!(save(&p, "fps", "60").unwrap());
+
+        let (saved, took) = while_held(&p, READ, || save(&p, "fps", "120"));
+        assert!(saved.unwrap(), "dhd.ini held without delete sharing: the save waits");
+        assert!(took >= std::time::Duration::from_millis(100), "it did wait");
+        assert_eq!(read(&p).unwrap().written("fps").as_deref(), Some("120"));
+
+        let temp = dir.join("dhd.ini.test.new");
+        fs::write(&temp, b"fps = 144\n").unwrap();
+        let held_error = {
+            use std::os::windows::fs::OpenOptionsExt;
+            let f = fs::OpenOptions::new().read(true).share_mode(READ | WRITE).open(&temp).unwrap();
+            let e = fs::rename(&temp, &p).unwrap_err().raw_os_error();
+            drop(f);
+            e
+        };
+        assert_eq!(held_error, Some(32), "a held source is a sharing violation");
+        let (replaced, took) = while_held(&temp, READ | WRITE, || replace(&temp, &p));
+        replaced.unwrap();
+        assert!(took >= std::time::Duration::from_millis(100));
+        assert_eq!(fs::read_to_string(&p).unwrap(), "fps = 144\n");
+
+        let (saved, took) = while_held(&p, 0, || save(&p, "fps", "240"));
+        assert!(saved.unwrap(), "dhd.ini held with no sharing: the read waits");
+        assert!(took >= std::time::Duration::from_millis(100));
+        assert_eq!(read(&p).unwrap().written("fps").as_deref(), Some("240"));
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
