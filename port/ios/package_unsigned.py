@@ -24,6 +24,8 @@ import tempfile
 import zipfile
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import ipa_audit  # noqa: E402  (the one audit of every release IPA)
 ROOT = HERE.parents[1]
 OUT = ROOT / 'build' / 'ios'
 DEFAULT_APP = OUT / 'DerivedData' / 'Build' / 'Products' / 'Release-iphoneos' / 'Downhill Revived.app'
@@ -49,44 +51,26 @@ def has_code_signature(executable: Path) -> bool:
 
 
 def run_privacy_audit(staged_app: Path):
-    """Scan staged app for any personal developer identifiers or local machine paths."""
+    """The staged app through ipa_audit (the audit package_release.py's ios_release runs on every
+    release IPA too, finding 227): no signature or provisioning file, no signed or unreadable Mach-O
+    (the executable, frameworks, dylibs), no home folder, device, team or DHD_IPA_PRIVATE literal in
+    any file; a file that can't be read or a symbolic link can't be verified and is refused."""
     print("audit: running privacy and identity leak audit...")
-
-    # Generic patterns only: a builder's own Team ID, Apple ID or device can be added through
-    # DHD_IPA_PRIVATE (comma-separated literal strings), which never enter the repository.
-    forbidden_patterns = [
-        (re.compile(rb'/Users/[A-Za-z0-9._-]+/'), 'Home folder path'),
-        (re.compile(rb'0000[0-9A-F]{4}-[0-9A-F]{16}'), 'Device UDID'),
-        (re.compile(rb'com\.apple\.developer\.team-identifier'), 'Team identifier entitlement'),
-    ]
-    for private in filter(None, (s.strip() for s in os.environ.get('DHD_IPA_PRIVATE', '').split(','))):
-        forbidden_patterns.append((re.compile(re.escape(private.encode()), re.IGNORECASE), 'Builder identifier'))
-
+    patterns = ipa_audit.identity_patterns()
     violations = []
-    for item in staged_app.rglob('*'):
-        if item.is_file() and not item.is_symlink():
+    for item in sorted(staged_app.rglob('*')):
+        rel_path = item.relative_to(staged_app).as_posix()
+        if item.is_symlink():
+            violations.append(f"'{rel_path}' is a symbolic link (can't be verified)")
+        elif item.is_dir() and item.name == '_CodeSignature':
+            violations.append(f"'{rel_path}': a signature folder")
+        elif item.is_file():
             try:
                 data = item.read_bytes()
-            except Exception as e:
-                print(f"audit: warning: could not read {item}: {e}")
+            except OSError as e:
+                violations.append(f"'{rel_path}' can't be read ({e})")
                 continue
-
-            for pattern, desc in forbidden_patterns:
-                m = pattern.search(data)
-                if m:
-                    rel_path = item.relative_to(staged_app)
-                    violations.append(f"Found {desc} in '{rel_path}': matched {m.group(0)[:60]}")
-
-    # Check that embedded.mobileprovision and _CodeSignature are absent
-    if (staged_app / 'embedded.mobileprovision').exists():
-        violations.append("embedded.mobileprovision exists in staged app bundle!")
-    if (staged_app / '_CodeSignature').exists():
-        violations.append("_CodeSignature directory exists in staged app bundle!")
-
-    # Check executable codesign status
-    exe_path = staged_app / 'Downhill Revived'
-    if exe_path.is_file() and has_code_signature(exe_path):
-        violations.append("Executable still has a code signature.")
+            violations += ipa_audit.member_problems(rel_path, data, patterns)
 
     if violations:
         print("audit: ERROR - Privacy audit failed with the following issues:")
