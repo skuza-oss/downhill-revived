@@ -708,9 +708,11 @@ function renderDiscFooter() {
   }
   if (d.stage === 'problem') {
     status('bad', 'i-alert', errorText(d.problem));
-    setSecondary([icon('i-retry'), t(d.problem?.code === 'disc.problem.noRoom' ? 'disc.tryAgain' : 'disc.chooseAnother')],
-      () => (d.problem?.code === 'disc.problem.noRoom' ? call('retry_import', { job: d.job }).then((r) => r && discEvent({ job: r.job, stage: 'checking' })) : chooseDisc()), true);
-    setPrimary({ text: t('footer.chooseDisc'), icon: 'i-disc', onclick: chooseDisc });
+    // not enough space: the same file again once there is room; else another file (the primary button)
+    if (d.problem?.code === 'disc.problem.noRoom')
+      setSecondary([icon('i-retry'), t('disc.tryAgain')],
+        () => call('retry_import', { job: d.job }).then((r) => r && discEvent({ job: r.job, stage: 'checking' })), true);
+    setPrimary({ text: t('disc.chooseAnother'), icon: 'i-disc', onclick: chooseDisc });
     return true;
   }
   return false;
