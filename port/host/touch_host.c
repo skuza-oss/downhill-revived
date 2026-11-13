@@ -454,6 +454,15 @@ void ios_touch_cancel(void)
 {
     if (touch_on()) push(EV_CANCEL, -1, 0, 0, ms_now());
 }
+
+/* iOS has no system Back (finding 227): a swipe in from the screen's left edge is Android's Back
+   (touch_back: in menus the page's BACK, the pause rows' way back), outside a race only, where
+   the overlay does not take the touches: in a race the left edge is the steering thumb's. */
+int ios_touch_back_allowed(void) { return touch_on() && !SDL_GetAtomicInt(&owns); }
+void ios_touch_back(void)
+{
+    if (ios_touch_back_allowed()) push(EV_BACK, 0, 0, 0, ms_now());
+}
 #endif
 
 /* ---- the game thread ---- */

@@ -18,6 +18,8 @@
 /* port/host/touch_host.c (finding 224): UIKit's touches as SDL's finger events */
 extern void ios_touch_finger(int kind, long long id, float x, float y);
 extern void ios_touch_cancel(void);
+extern int ios_touch_back_allowed(void);
+extern void ios_touch_back(void);   /* a swipe in from the left edge: Android's Back (finding 227) */
 /* port/hle/text_input.c: one character for the focused field (any thread) */
 extern void text_input_character(unsigned character);
 enum { EV_DOWN, EV_MOVE, EV_UP, EV_CANCEL };   /* touch.h's TOUCH_EV_* */
@@ -294,8 +296,11 @@ int ios_touch_tilt(float *degrees) {
     return 1;
 }
 
-/* The system keyboard while a game field takes typing (present.c): its characters to the field. */
+/* The system keyboard while a game field takes typing (present.c): its characters to the field.
+   Its bar has Cancel (the field's Esc) and Done (Enter): the keyboard covers the page's own BACK
+   and has no Esc, so a code or a name could only be sent, never given up (finding 227). */
 @interface KeyboardView : UIView <UIKeyInput>
+@property (nonatomic, strong, readwrite) UIView *inputAccessoryView;
 @property (nonatomic) UITextAutocorrectionType autocorrectionType;
 @property (nonatomic) UITextAutocapitalizationType autocapitalizationType;
 @property (nonatomic) UIKeyboardType keyboardType;
@@ -315,6 +320,8 @@ int ios_touch_tilt(float *degrees) {
     }];
 }
 - (void)deleteBackward { text_input_character(8); }
+- (void)cancelTyping { text_input_character(27); }
+- (void)doneTyping { text_input_character(13); }
 @end
 static KeyboardView *s_keyboard;
 
@@ -326,6 +333,14 @@ void ios_text_input(int on) {
             s_keyboard.autocapitalizationType = UITextAutocapitalizationTypeNone;
             s_keyboard.keyboardType = UIKeyboardTypeASCIICapable;
             s_keyboard.returnKeyType = UIReturnKeyDone;
+            UIToolbar *bar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, 320, 44)];
+            bar.items = @[[[UIBarButtonItem alloc] initWithTitle:@"Cancel" style:UIBarButtonItemStylePlain
+                                                          target:s_keyboard action:@selector(cancelTyping)],
+                          [UIBarButtonItem flexibleSpaceItem],
+                          [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone
+                                                          target:s_keyboard action:@selector(doneTyping)]];
+            [bar sizeToFit];
+            s_keyboard.inputAccessoryView = bar;
         }
         if (on) {
             UIView *host = (UIView *)s_shared_metal_view;
@@ -358,6 +373,10 @@ void ios_text_input(int on) {
         self.multipleTouchEnabled = YES;
         self.contentScaleFactor = [UIScreen mainScreen].nativeScale;
         self.metalLayer = (CAMetalLayer *)self.layer;
+        UIScreenEdgePanGestureRecognizer *back = [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self
+                                                                                                   action:@selector(edgeBack:)];
+        back.edges = UIRectEdgeLeft;
+        [self addGestureRecognizer:back];
         ios_metal_configure_layer((__bridge void *)self.metalLayer);
     }
     return self;
@@ -398,6 +417,16 @@ void ios_text_input(int on) {
             atomic_store(&s_resized, 1);
         }
     }
+}
+
+/* The menus' Back: a swipe in from the left edge, where the overlay doesn't take the touches
+   (UIView asks this of the recognizers attached to it). */
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    (void)recognizer;
+    return ios_touch_back_allowed();
+}
+- (void)edgeBack:(UIScreenEdgePanGestureRecognizer *)recognizer {
+    if (recognizer.state == UIGestureRecognizerStateEnded && [recognizer translationInView:self].x > 40) ios_touch_back();
 }
 
 - (void)fingers:(NSSet<UITouch *> *)touches kind:(int)kind {
