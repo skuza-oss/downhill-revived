@@ -25,6 +25,16 @@ allows its own files only (`default-src 'self'`, no inline script, no network).
 An error is either a string (shown as it is) or `{"code": "<string table key>", "params": {...}}`,
 which the page words in the player's language (`ui/lang/en.json`).
 
+**Order of the settings writes (finding 228).** `bridge.js` sends `play` and `install_update` only
+after every `save_setting` / `controls_edit` it sent before has answered (done or failed), so a game
+never starts on a dhd.ini the launcher is still writing. A phone's native side runs `snapshot`
+(which may save `iso`), `save_setting` and `play` one at a time in the order they arrived (Android:
+`LauncherBridge.ordered`, one single-thread queue) and keeps long calls (`check_disc`'s hashing,
+`check_update`, the picker) off that queue; the settings crate's `save` is itself one transaction at
+a time per process, with a temporary file of its own. iOS (`launcher.m`) runs every call on a
+concurrent queue: the crate's lock and the page's wait before `play` cover its saves; an ordered
+queue there as on Android would also keep a `snapshot` from reading between two saves.
+
 ## Capabilities (`snapshot().caps`)
 
 | Cap | The page then | Desktop | Phone |
@@ -41,20 +51,20 @@ which the page words in the player's language (`ui/lang/en.json`).
 | `direct-start` | shows "Open the launcher at every start" (setting `launcher`) | | yes |
 | `share-log` | offers Share log (Help page, the crash note) | | yes |
 | `help` | shows the Help page (version, links, licences) and drops the footer's links | | yes |
-| `touch-editor` | shows "Edit the touch layout" (`play` with `edit_touch_layout`) | | yes |
+| `touch-editor` | shows "Edit the touch layout" (`play` with `edit_touch_layout`; what each phone does: "`play` with `edit_touch_layout`" below) | | yes |
 
 ## Calls
 
 | Call | Args | Value | Notes |
 |---|---|---|---|
-| `snapshot` | | `{version, caps, native_window_controls, settings, game_found, running, disc_problem, texture_pack, played, scale, scale_max?, disc_size?, free_space?, last_exit?}` | `settings`: every setting's value (dhd.ini's, else its default), the settings crate's `values_json`. `disc_problem`: why the disc can't be used, else null. `scale`: the last run's resolution report or null. Phones add `scale_max`, `disc_size`, `free_space` (bytes) and `last_exit` (`{why}` once after a run that closed unexpectedly, else null). |
+| `snapshot` | | `{version, caps, native_window_controls, settings, game_found, running, disc_problem, texture_pack, played, scale, scale_max?, disc_size?, free_space?, last_exit?, reopen?}` | `settings`: every setting's value (dhd.ini's, else its default), the settings crate's `values_json`. `disc_problem`: why the disc can't be used, else null. `scale`: the last run's resolution report or null. Phones add `scale_max`, `disc_size`, `free_space` (bytes), `last_exit` (`{why}` once after a run that closed unexpectedly, else null) and `reopen` (`"touch-editor"` once when the launcher shows again after the layout editor alone, else null: the page opens Settings at the Touch tab). |
 | `settings_schema` | | `[{key, default, choices: [[value, label]], rule}]` | the settings crate's `schema_json`; `rule` is the rider name's `{letters, max, hint}` |
 | `save_setting` | `{key, value}` | null | through the settings crate (`dhd_settings::save`): the other lines kept |
 | `rider_name` | `{text}` | the name saved (`""` none) | `dhd_settings::name::normalise` |
 | `check_update` | | `{release: {version, page, notes?, published?, size?} or null, newer}` | phones: the game's own check (`update_find`, `port/net/update_check.c`); an error `footer.checkFailed` when no source answers |
 | `check_disc` | | `{path, usa}` | the online check (`dhd_disc`, with the game's `iso-check.txt`); desktop sends `disc-progress` while it hashes |
 | `pick_disc` | | desktop: the path chosen, or null; phones: `{job}`, or null when cancelled | phones then send `disc-import` events for that job |
-| `play` | phones: `{edit_touch_layout?}` | null | desktop: the launcher waits for `game-exited`; phones: the game takes the launcher's place |
+| `play` | phones: `{edit_touch_layout?}` | null | desktop: the launcher waits for `game-exited`; phones: the game takes the launcher's place. With `edit_touch_layout`: the touch layout editor, then the launcher again on Android, the game's menus on iOS ("`play` with `edit_touch_layout`" below) |
 | `open_link` | `{url}` | null | `"discord"`, `"kofi"` or a URL under the project's pages only |
 | `install_update` | `{release}` | | desktop (`install-update`) |
 | `stop_game` | | | desktop (`close-game`) |
@@ -102,8 +112,28 @@ and implements the phone calls in `launcher_calls.c`, over the code Android's la
 - `check_disc`: `dhd_disc_check` with `iso-check.txt` beside dhd.ini.
 - `check_update`: `phone_update_find` (`port/host/phone.c`, the same as Android's) with latest.json's
   `ios` key.
-- `play`: the game in the launcher's place (`DHD_TOUCH_EDIT_AT_START=1` for `edit_touch_layout`,
-  `DHD_LAUNCHER_CHECKED=1`); `open_link` (the same list as the desktop's and Android's),
+- `play`: the game in the launcher's place (`DHD_LAUNCHER_CHECKED=1` when the page showed the update
+  line). With `edit_touch_layout` iOS sets `DHD_TOUCH_EDIT_AT_START=1`: the editor opens over the
+  game's menus and the game goes on after Done, because the editor alone would end the process,
+  which closes an iOS app (it can't start itself again). This is where the phones differ: see
+  "`play` with `edit_touch_layout`" below. `open_link` (the same list as the desktop's and Android's),
   `share_log` (the share sheet with one text file: the device, dhd-exit.txt, dhd.log,
   dhd-previous.log), `licences` (the app's LICENSE.txt and THIRD-PARTY-NOTICES.txt).
 - `resumed` when the app becomes active again with the page on screen.
+
+## `play` with `edit_touch_layout` (findings 226, 227, 228)
+
+One call, one row on both phones; what follows Done differs, because only Android can bring a
+launcher back after the game's process has ended:
+
+- **Android**: the game starts as the layout editor alone (`--touch-editor` among the activity's
+  arguments, `DhdActivity.getArguments`; finding 226: muted, no movies, the editor over a plain
+  background). Its Done or Back saves `touch_edits` and ends the game as EXIT GAME does
+  (`host_end`). `LauncherActivity` stays below the game for this start only; when the game's
+  process ends, Android starts it again from its saved state, and the next snapshot's `reopen` is
+  `"touch-editor"` once, so the page opens Settings at the Touch tab.
+- **iOS**: the game starts with `DHD_TOUCH_EDIT_AT_START=1`: the editor opens over the game's menus
+  once the start's movies are over (`touch_host.c`), and the game goes on after Done. An iOS app
+  can't start itself again, so the editor alone's end would close the app; `reopen` is never set.
+- The desktop has no `touch-editor` cap; `--touch-editor` / `DHD_TOUCH_EDITOR=1` also serve the
+  tests (`docs/TESTING.md`).

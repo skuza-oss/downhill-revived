@@ -6,8 +6,9 @@
 // steering; and the update notice (finding 143, port/host/android_update.c): one line over the game
 // when a newer release has an APK, which opens the release's page in the browser (only when the
 // launcher didn't show its own update line this start: a direct start).
-// The launcher (LauncherActivity, finding 225) starts it with PLAY; its extras become variables the
-// game reads (DHD_TOUCH_EDIT_AT_START, DHD_LAUNCHER_CHECKED). Without a disc image it can play (a
+// The launcher (LauncherActivity, finding 225) starts it with PLAY; its extras become what the game
+// reads: the argument --touch-editor (the layout editor alone, findings 226, 228) and
+// DHD_LAUNCHER_CHECKED. Without a disc image it can play (a
 // start that skips the launcher: a USB controller plugged in) it opens the launcher's disc page
 // instead and ends before the game starts (discReady).
 package app.downhillrevived;
@@ -43,7 +44,8 @@ import org.libsdl.app.SDLActivity;
 public class DhdActivity extends SDLActivity {
     /** How long the update notice stays. */
     private static final int NOTICE_MS = 15000;
-    /** The launcher's extras: straight into the touch layout editor; the update line was shown. */
+    /** The launcher's extras: the touch layout editor alone (the game ends after its Done); the update
+     *  line was shown. */
     static final String EDIT_TOUCH_LAYOUT = "edit_touch_layout", LAUNCHER_CHECKED = "launcher_checked";
     /** The game started in this process (it runs once per process, SDL_main never starts twice):
      *  the launcher, opened again from the icon, goes back to it. */
@@ -88,11 +90,19 @@ public class DhdActivity extends SDLActivity {
             int w = Math.max(size[0], size[1]), h = Math.min(size[0], size[1]);
             if (h > 0) nativeSetenv("DHD_MONITOR_ASPECT", Double.toString((double) w / h));
             Intent start = getIntent();
-            if (start != null && start.getBooleanExtra(EDIT_TOUCH_LAYOUT, false)) nativeSetenv("DHD_TOUCH_EDIT_AT_START", "1");
             if (start != null && start.getBooleanExtra(LAUNCHER_CHECKED, false)) nativeSetenv("DHD_LAUNCHER_CHECKED", "1");
         } catch (Throwable e) {  // the libraries didn't load: SDLActivity shows why
             Log.w("DownhillRevived", "no screen shape: " + e);
         }
+    }
+
+    /** SDL_main's arguments after its own name (SDL asks on its thread before SDL_main): the layout
+     *  editor alone when the launcher asked for it (android_main.c passes --touch-editor on to the
+     *  game, touch_host_args). */
+    @Override
+    protected String[] getArguments() {
+        Intent start = getIntent();
+        return start != null && start.getBooleanExtra(EDIT_TOUCH_LAYOUT, false) ? new String[] { "--touch-editor" } : new String[0];
     }
 
     @Override

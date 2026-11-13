@@ -160,6 +160,8 @@
   "disc.deleteIt": "Apagar",
   "disc.keepIt": "Manter",
   "disc.deleted": "O arquivo original foi apagado.",
+  "disc.deleting": "Apagando o arquivo original…",
+  "disc.deleteFailed": "Não foi possível apagar o arquivo original, que ainda ocupa {size}. Tente de novo, ou mantenha o arquivo e apague-o depois pelo seu gerenciador de arquivos.",
   "disc.problem.noRoom": "Esta imagem precisa de {need} livres, e o aparelho tem {free}. Libere espaço e tente de novo.",
   "disc.problem.noPicker": "Este aparelho não tem seletor de arquivos.",
   "disc.problem.openFailed": "Não foi possível abrir o arquivo ({detail}).",

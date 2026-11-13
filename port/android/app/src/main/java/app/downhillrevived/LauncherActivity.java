@@ -4,7 +4,9 @@
 // the settings through the game's settings code (Native), the disc import (DiscImport), the update
 // check, Share log (LogShare), links. PLAY starts the game (DhdActivity) and this activity ends; the
 // game's EXIT GAME ends the process (host_end, finding 210), so the next start opens the launcher
-// again.
+// again. "Edit the touch layout" starts the game's layout editor alone and this activity stays below
+// it: the editor's Done ends the game's process the same way, and Android starts this activity again
+// from its saved state (play, finding 228).
 //
 // The page is the app's own and nothing else: the WebView loads only
 // https://appassets.androidplatform.net/launcher/... (a name Android reserves for an app's own
@@ -65,13 +67,23 @@ public class LauncherActivity extends Activity {
             + "font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
     static final int PICK = 1, SHARE = 2;
     private static final int GROUND = 0xFF1A1430;
+    /** The saved state's key: this activity started the layout editor alone (play). */
+    static final String BACK_FROM_EDITOR = "back_from_editor";
 
     private WebView web;
     private WebMessagePort port;
     private boolean pageLoaded, sharingOnly, paused;
+    /** The layout editor alone was started from here (saved with the state). */
+    private boolean editing;
+    /** Started again after the editor alone ended the game: the page opens at its row (snapshot's
+     *  "reopen", once). */
+    volatile boolean backFromEditor;
     private final Handler ui = new Handler(Looper.getMainLooper());
     /** The page's calls run here: some wait (the update check, the online check's hashing, a picker). */
     final ExecutorService work = Executors.newCachedThreadPool();
+    /** The calls that touch dhd.ini, and PLAY, one at a time in the page's order
+     *  (LauncherBridge.ordered, finding 228). */
+    final ExecutorService settings = Executors.newSingleThreadExecutor();
     LauncherBridge bridge;
     /** How the run before ended, when it closed unexpectedly and the page hasn't said so yet. */
     volatile String crashWhy;
@@ -97,7 +109,12 @@ public class LauncherActivity extends Activity {
         // The exit record is read off the UI thread: a native crash's trace can be megabytes and slow
         // to come, and a frozen first screen would be Android's "not responding"
         Context app = getApplicationContext();
-        boolean asked = OPEN.equals(action) || DISC.equals(action);
+        // started again by Android with its saved state (after the layout editor alone ended the game,
+        // play): the page, never a direct start
+        boolean restored = savedInstanceState != null;
+        backFromEditor = restored && savedInstanceState.getBoolean(BACK_FROM_EDITOR);
+        if (backFromEditor) Log.i(TAG, "launcher: back from the layout editor alone");
+        boolean asked = OPEN.equals(action) || DISC.equals(action) || restored;
         new Thread(() -> {
             LastExit exit = LastExit.record(app);
             String why = exit != null && exit.why != null && LastExit.firstAsk(app, exit) ? exit.why : null;
@@ -223,15 +240,27 @@ public class LauncherActivity extends Activity {
         post(m.toString());
     }
 
-    /** PLAY: the game, and this activity ends. edit: straight into the touch layout editor;
-     *  checked: the page showed the update line, so the game doesn't check again. */
+    /** PLAY: the game, and this activity ends. checked: the page showed the update line, so the game
+     *  doesn't check again.
+     *  edit: the touch layout editor alone (findings 226, 228): the game opens only the editor and
+     *  ends after Done (host_end, as EXIT GAME). This activity then stays below it, stopped, with its
+     *  state saved: when the game's process ends, Android takes the dead game's activity away and
+     *  starts the one under it again in a new process, so the player is back here (onCreate with a
+     *  saved state: BACK_FROM_EDITOR) and the next PLAY starts a new game. */
     void play(boolean edit, boolean checked) {
         Intent game = new Intent(this, DhdActivity.class);
         if (edit) game.putExtra(DhdActivity.EDIT_TOUCH_LAYOUT, true);
         if (checked) game.putExtra(DhdActivity.LAUNCHER_CHECKED, true);
+        editing = edit;
         startActivity(game);
-        finish();
+        if (!edit) finish();
         overridePendingTransition(0, 0);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putBoolean(BACK_FROM_EDITOR, editing);
     }
 
     /** Android's document picker for the disc image. */
@@ -296,6 +325,7 @@ public class LauncherActivity extends Activity {
     protected void onDestroy() {
         if (bridge != null) bridge.close();
         work.shutdownNow();
+        settings.shutdown();  // a save already queued still finishes (shutdownNow would drop it)
         if (web != null) {
             web.destroy();
             web = null;

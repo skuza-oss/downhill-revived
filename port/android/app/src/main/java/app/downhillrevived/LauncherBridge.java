@@ -58,7 +58,16 @@ final class LauncherBridge {
         }
     }
 
-    /** A message from the page. */
+    /** The calls that read or write dhd.ini, and PLAY: one at a time on the activity's settings
+     *  queue, in the order the page sent them (finding 228). A save then never overlaps another
+     *  (or the snapshot's own `iso` save), and PLAY starts the game only after every save the page
+     *  sent before it has finished, so the game never reads a file the launcher is writing. The
+     *  long calls (the online check's hashing, the update check, the picker) stay on the pool. */
+    static boolean ordered(String call) {
+        return call.equals("snapshot") || call.equals("save_setting") || call.equals("play");
+    }
+
+    /** A message from the page (the UI thread, in the page's order). */
     void receive(String text) {
         final int id;
         final String call;
@@ -76,7 +85,7 @@ final class LauncherBridge {
             @Override public void error(Object error) { answer(id, false, error); }
         };
         try {
-            activity.work.execute(() -> {
+            (ordered(call) ? activity.settings : activity.work).execute(() -> {
                 try {
                     handle(call, args, reply);
                 } catch (Throwable e) {
@@ -126,7 +135,7 @@ final class LauncherBridge {
                 reply.value(j.deleteOriginal());
                 return;
             }
-            case "play": {
+            case "play": {  // on the settings queue: every earlier save has finished (ordered)
                 boolean edit = args.optBoolean("edit_touch_layout");
                 activity.runOnUiThread(() -> activity.play(edit, true));
                 reply.value(null);
@@ -191,6 +200,9 @@ final class LauncherBridge {
         s.put("scale_max", PHONE_SCALE_MAX);
         s.put("disc_size", disc != null ? new File(disc).length() : 0);
         s.put("free_space", DiscImport.freeBytes(activity));
+        // back from the layout editor alone (LauncherActivity.play): the page opens at its row, once
+        s.put("reopen", activity.backFromEditor ? "touch-editor" : JSONObject.NULL);
+        activity.backFromEditor = false;
         String why = activity.crashWhy;
         if (why != null) {
             JSONObject exit = new JSONObject();

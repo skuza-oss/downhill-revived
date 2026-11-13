@@ -17,8 +17,11 @@ The root and `port/AGENTS.md` rules apply. Design: findings 091, 143; phones' sp
   page (`port/launcher/ui`, packed as `assets/launcher`) in a WebView, answers its calls
   (`LauncherBridge`, the list in `port/launcher/BRIDGE.md`) with the shared native code
   (`Native` -> `port/host/android_launcher.c`: dhd_settings, the disc checks, `update_find`), imports
-  the disc (`DiscImport`, on a worker thread) and starts `DhdActivity` from PLAY. No second UI in
-  Java: a launcher change goes in `port/launcher/ui`. The WebView loads only the app's own files
+  the disc (`DiscImport`, on a worker thread) and starts `DhdActivity` from PLAY (and ends). "Edit
+  the touch layout" starts the game as the layout editor alone (`--touch-editor` from
+  `DhdActivity.getArguments`) with the launcher left below it: the editor's Done ends the process
+  through `host_end`, and Android starts the launcher again from its saved state (finding 228).
+  No second UI in Java: a launcher change goes in `port/launcher/ui`. The WebView loads only the app's own files
   (no JavaScript interface; the bridge is a MessagePort posted to that origin). Nothing is
   downloaded by the app: the launcher (or, on a direct start, the game once a day) only says a
   newer release is out.

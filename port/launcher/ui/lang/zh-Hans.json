@@ -158,6 +158,8 @@
   "disc.deleteIt": "删除",
   "disc.keepIt": "保留",
   "disc.deleted": "原始文件已删除。",
+  "disc.deleting": "正在删除原始文件…",
+  "disc.deleteFailed": "无法删除原始文件，它仍占用 {size}。请重试，或保留它，稍后在文件管理器中删除。",
   "disc.problem.noRoom": "此光盘镜像需要 {need} 可用空间，而设备只有 {free}。请释放一些空间后重试。",
   "disc.problem.noPicker": "此设备没有文件选择器。",
   "disc.problem.openFailed": "无法打开该文件（{detail}）。",

@@ -28,8 +28,8 @@ game's cheat codes are typed on the touch pause menu's **CODES** page.
 
 **The launcher** opens before the game at every start: PLAY, your disc, the settings that are
 fiddly in the game (resolution, frame rate, Performance mode, Native VU, widescreen, the touch
-layout, hand, steering and size, Edit the touch layout), your rider name, updates and Help (Share
-log, links, licences). They are the same settings as SETTINGS in the game. To start the game
+layout, hand, steering and size, Edit the touch layout: the layout editor on its own, DONE brings
+you back), your rider name, updates and Help (Share log, links, licences). They are the same settings as SETTINGS in the game. To start the game
 directly, turn off Settings > Game > Open the launcher at every start; turn it back on in the
 game's SETTINGS (Game tab, Launcher At Start) or long-press the icon and pick **Launcher**.
 
