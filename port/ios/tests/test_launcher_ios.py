@@ -58,9 +58,10 @@ class LauncherIOS(unittest.TestCase):
         self.assertIn('requestGeometryUpdateWithPreferences', main)
         self.assertIn('turned a quarter in a portrait window', read('port/ios/render/metal_bridge.m'))
 
-    def test_edge_back_never_takes_a_race_finger(self):
-        # the review of lane 227: without the delegate UIKit never asked gestureRecognizerShouldBegin
-        # and a recognized edge swipe cancelled the steering finger (finding 227)
+    def test_edge_back_source_sets_delegate(self):
+        # A check of the source text only (UIKit's dispatch isn't run here; the tap check in the
+        # Simulator is the behaviour's): without the delegate UIKit never asked
+        # gestureRecognizerShouldBegin and a recognized edge swipe cancelled the steering finger
         bridge = read('port/ios/render/metal_bridge.m')
         self.assertIn('@interface MetalGameView : UIView <UIGestureRecognizerDelegate>', bridge)
         self.assertIn('back.delegate = self;', bridge)

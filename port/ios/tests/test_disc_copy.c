@@ -6,7 +6,47 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* the racing publishers: each begins a generation, pauses a moment, publishes its file */
+static const char race_target[] = "dc-race-target.iso";
+static struct { char file[32]; long long generation; int result; } racers[8];
+#ifdef _WIN32
+#include <windows.h>
+static DWORD WINAPI racer(void *arg)
+{
+    int i = (int)(intptr_t)arg;
+    racers[i].generation = disc_publish_begin();
+    Sleep(i % 3);
+    racers[i].result = disc_publish(racers[i].generation, racers[i].file, race_target);
+    return 0;
+}
+static void start_racers(int count)
+{
+    HANDLE h[8];
+    for (int i = 0; i < count; i++) h[i] = CreateThread(NULL, 0, racer, (void *)(intptr_t)i, 0, NULL);
+    WaitForMultipleObjects((DWORD)count, h, TRUE, INFINITE);
+    for (int i = 0; i < count; i++) CloseHandle(h[i]);
+}
+#else
+#include <pthread.h>
+#include <unistd.h>
+static void *racer(void *arg)
+{
+    int i = (int)(intptr_t)arg;
+    racers[i].generation = disc_publish_begin();
+    usleep((useconds_t)(i % 3) * 1000);
+    racers[i].result = disc_publish(racers[i].generation, racers[i].file, race_target);
+    return NULL;
+}
+static void start_racers(int count)
+{
+    pthread_t h[8];
+    for (int i = 0; i < count; i++) pthread_create(&h[i], NULL, racer, (void *)(intptr_t)i);
+    for (int i = 0; i < count; i++) pthread_join(h[i], NULL);
+}
+#endif
 
 static int steps;
 static void progress(void *context, uint64_t done) { (void)context; (void)done; steps++; }
@@ -74,6 +114,35 @@ int main(void)
     fclose(t);
     remove(target);
     remove(older_file);
-    puts("disc_copy: volume, copy, cancel, completeness, and a superseded import never lands");
+
+    /* racing: imports begin and publish on threads at once, 100 rounds of 6; an import that is still
+       the newest may land, but none that a newer one superseded may land after it (the check and the
+       rename under one lock): the newest one's file is in place at the end */
+    for (int round = 0; round < 100; round++) {
+        remove(race_target);
+        int count = 6;
+        for (int i = 0; i < count; i++) {
+            snprintf(racers[i].file, sizeof racers[i].file, "dc-race-%d.part", i);
+            FILE *f = fopen(racers[i].file, "w");
+            fprintf(f, "%d", i);
+            fclose(f);
+        }
+        start_racers(count);
+        long long newest = 0;
+        int winner = -1, landed = 0;
+        for (int i = 0; i < count; i++) {
+            if (racers[i].generation > newest) newest = racers[i].generation, winner = i;
+            landed += racers[i].result == 0;
+            if (racers[i].result != 0) remove(racers[i].file);
+        }
+        char content[16] = "";
+        FILE *t2 = fopen(race_target, "r");
+        assert(t2 && fgets(content, sizeof content, t2));
+        fclose(t2);
+        /* the newest generation's file is the one in place: no superseded import overwrote it */
+        assert(landed >= 1 && atoi(content) == winner && disc_publish_current(newest));
+    }
+    remove(race_target);
+    puts("disc_copy: volume, copy, cancel, completeness, and a superseded import never lands, racing too");
     return 0;
 }

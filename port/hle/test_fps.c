@@ -129,7 +129,7 @@ int main(int argc,char **argv)
             }
         }
         online=0;
-        printf("%d: the time away is no game time\n",n);
+        printf("%d: port_clock_after_away, given the return's flag: the time away is no game time\n",n);
         return 0;
     }
     assert(port_fps()==n);
