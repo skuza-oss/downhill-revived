@@ -42,6 +42,8 @@ How to play
 2. Run Downhill Revived (DownhillRevived.exe in the zip), the launcher (dhd.exe opens it too).
    It keeps the game up to date and holds the settings, your rider name for online races, the
    patch notes and a link to the Discord server. Press PLAY.
+   It speaks English, Brazilian Portuguese, Spanish, French, German, Italian, Japanese and
+   Simplified Chinese (machine-translated): Settings > Game > Language; the game stays in English.
 3. The first time, the launcher asks for your disc image (Choose disc): choose your .iso. It is
    checked and remembered in dhd.ini; you are only asked again if the file moves or changes.
    The launcher's Settings > Game can change it later. The game also checks every file of the

@@ -1,6 +1,7 @@
 # 225: one launcher for desktop, Android and iOS, translatable
 
 Status: current
+Checked: 2026-11-13
 
 Branch `feat/mobile-launcher` from `main` b9da043f, started 2026-11-13. This file is the lane's
 plan while it runs and its finding when it merges.

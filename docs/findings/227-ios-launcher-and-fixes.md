@@ -1,6 +1,7 @@
 # 227: iOS: the launcher's bridge and the first on-screen run's fixes
 
 Status: current
+Checked: 2026-11-13
 
 Branch `feat/ios-launcher-and-fixes` from `main` 0b686bf0, started 2026-11-13 (main 0b68cbf8 and
 6e47e82a, lane 226, merged in on the way). This file is the lane's plan while it runs and its

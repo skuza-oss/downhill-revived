@@ -1,6 +1,7 @@
 # 228: The launcher's layout editor alone on Android, and the merged main proved
 
 Status: current
+Checked: 2026-11-13
 Supersedes: 226 in part (the launcher's entry point on Android); finding 225's bullet on "Edit the
 touch layout" is corrected in place (its launcher decision stands)
 

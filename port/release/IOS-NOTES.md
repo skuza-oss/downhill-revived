@@ -6,7 +6,7 @@ on a slower device OPTIONS > SETTINGS > Graphics tab > Performance Mode helps th
 lower resolution scale (the same tab) helps too. Play with the touch controls (Classic pad or
 Thumb zones; steer with the stick, by tilting the device or with a D-pad: OPTIONS > SETTINGS >
 Controls tab > Touch Controls; Button Style shows the PS2 symbols (Symbols, the default)
-or the PS2 symbols (Symbols); Edit Layout moves and sizes each button, 25 % to 600 %, with undo;
+or what each button does (Actions); Edit Layout moves and sizes each button, 25 % to 600 %, with undo;
 iPads get their own larger defaults) or a controller (MFi, Xbox, PlayStation). A **SKIP** button ends
 the flight over the track before a race, the movies and the title's demo. The game's cheat codes
 are typed on the touch pause menu's **CODES** page. The iOS port was first made by Gustavo Ribeiro
@@ -37,7 +37,7 @@ signed for your device, and the sideloading tool does that with your own Apple I
 (graphics, touch, the rider name, online), the update line (a newer release is shown with a link
 to its page; you install it with your tool), Help with **Share log**. Turn off **Open the launcher
 at every start** to go straight into the game; SETTINGS in the game (Game tab, Launcher At Start)
-brings it back. EXIT GAME closes the app; the next start opens the launcher again. If the game
+brings it back. The launcher speaks English, Brazilian Portuguese, Spanish, French, German, Italian, Japanese and Simplified Chinese (machine-translated, corrections welcome): it follows the device's language, or pick one in Settings > Game > Language; the game's own menus stay in English. EXIT GAME closes the app; the next start opens the launcher again. If the game
 closed unexpectedly, the launcher says so at the next start and offers Share log.
 
 **Going back.** iOS has no Back button: in the menus swipe in from the screen's left edge (it is

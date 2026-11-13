@@ -1,6 +1,7 @@
 # 226: Touch layout freedom and tablet defaults
 
 Status: partly superseded by 228 (the launcher's entry point on Android: "The launcher's entry point, and main's")
+Checked: 2026-11-13
 
 Branch `feat/touch-layout-freedom` from `main` 5a5b0cb8 (0.8.0 plus the iOS platform), started
 2026-11-13. This file is the lane's plan while it runs and its finding when it merges.

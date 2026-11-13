@@ -33,6 +33,7 @@ layout, hand, steering and size, Edit the touch layout: the layout editor on its
 you back), your rider name, updates and Help (Share log, links, licences). They are the same settings as SETTINGS in the game. To start the game
 directly, turn off Settings > Game > Open the launcher at every start; turn it back on in the
 game's SETTINGS (Game tab, Launcher At Start) or long-press the icon and pick **Launcher**.
+The launcher speaks English, Brazilian Portuguese, Spanish, French, German, Italian, Japanese and Simplified Chinese (machine-translated, corrections welcome): it follows the device's language, or pick one in Settings > Game > Language; the game's own menus stay in English.
 
 **Updates.** The launcher checks whether a newer release is out and says so above PLAY (a game
 started directly checks once a day and says so at the top of the screen); open the release page

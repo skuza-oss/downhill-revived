@@ -9,6 +9,7 @@ What works today:
 - **A launcher**, `DownhillRevived.exe`: it opens before the game and holds the settings, your
   rider name for online races, the disc image, updates, the release notes, the public races on
   the server and a link to the [Discord server](https://discord.gg/XrSeTyzfr2). It works with a controller too.
+  The launcher speaks English, Brazilian Portuguese, Spanish, French, German, Italian, Japanese and Simplified Chinese (machine-translated, corrections welcome): it follows the device's language, or pick one in Settings > Game > Language; the game's own menus stay in English. Android and iOS open into the same launcher.
 - **Discord Rich Presence**: your Discord profile can show the menus, the race with its track and
   your place, the career or the online room (never a private room's code). Off in the launcher:
   Online > Discord status.
@@ -192,7 +193,7 @@ that same Files folder. In the menus, a swipe in from the left edge is Back (iOS
 the keyboard's bar has Cancel and Done. Leaving the app in an offline race pauses it. If the game closes
 unexpectedly, the launcher says so at the next start and offers **Share log**. Install a new
 release over the old one with the same tool: your files stay; deleting the app deletes them. What
-is experimental: it is not yet measured on many devices, there is no tilt steering, and EXIT GAME
+is experimental: it is not yet measured on many devices, tilt steering is untested on a real device, and EXIT GAME
 closes the app (the next start opens the launcher).
 
 Then:
