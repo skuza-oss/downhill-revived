@@ -558,6 +558,9 @@ def main():
                                      objects + [library, report['lib'], sdl_lib]))
             run([cc, t.flags[0], '-shared', *pgo_flags[:1], '-o', debug, '@'+str(rsp),
                  '-Wl,-soname,libmain.so', '-Wl,--version-script='+str(exports_map),
+                 # the launcher's native calls (android_launcher.c, finding 225): nothing in the
+                 # library calls them, so their member of libhost64.a is pulled in by name
+                 '-Wl,--undefined-glob=Java_app_downhillrevived_Native_*',
                  '-Wl,--gc-sections', '-Wl,--no-undefined', '-Wl,--build-id=sha1',
                  '-Wl,-z,max-page-size=16384', '-Wl,-z,noexecstack', '-Wl,-z,relro', '-Wl,-z,now',
                  '-landroid', *rust_libs, '-lm'], timeout=1800)
