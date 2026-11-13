@@ -195,7 +195,10 @@ static void screen_measure(UIView *view) {
     UIEdgeInsets in = view.safeAreaInsets;
     float strips[4] = {0, 0, 0, (float)in.bottom * mm}, cut[4] = {0};
     UIInterfaceOrientation turn = view.window.windowScene.interfaceOrientation;
-    if (turn == UIInterfaceOrientationLandscapeRight && in.left > 0) {        /* the housing on the left */
+    if (!CGAffineTransformIsIdentity(view.transform)) {   /* the game turned in a portrait window (below): */
+        strips[0] = (float)in.left * mm, strips[1] = (float)in.top * mm;   /* the insets in its own axes */
+        strips[2] = (float)in.right * mm, strips[3] = (float)in.bottom * mm;
+    } else if (turn == UIInterfaceOrientationLandscapeRight && in.left > 0) {        /* the housing on the left */
         cut[2] = (float)in.left * mm;
         cut[3] = (float)size.height * mm;
     } else if (turn == UIInterfaceOrientationLandscapeLeft && in.right > 0) { /* on the right */
@@ -381,13 +384,37 @@ static void attach_to_host(UIViewController *host) {
     [super viewWillAppear:animated];
     attach_to_host(self);
 }
+/* The game is landscape (finding 227). A window that stays portrait while it fills the screen (an
+   iPad the system keeps upright: iPadOS 26 may not turn a resizable app's window for the request,
+   main.m) shows the game a quarter turn round at the screen's whole size, so the player turns the
+   iPad and sees it upright, with its controls at the screen's edges; the view's size, safe area
+   and touches are then the turned view's own (UIKit converts them). Any other window (a Stage
+   Manager window, Split View) the game takes as it is: the picture as large as it fits, the
+   touch controls in the window. */
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    if (s_shared_metal_view.superview == self.view) {
+    if (s_shared_metal_view.superview != self.view) return;
+    CGSize size = self.view.bounds.size;
+    UIWindow *window = self.view.window;
+    BOOL whole = window && CGSizeEqualToSize(window.bounds.size, window.screen.bounds.size);
+    BOOL turned = whole && size.height > size.width;
+    s_shared_metal_view.autoresizingMask = UIViewAutoresizingNone;
+    s_shared_metal_view.transform = CGAffineTransformIdentity;
+    if (turned) {
+        s_shared_metal_view.bounds = CGRectMake(0, 0, size.height, size.width);
+        s_shared_metal_view.center = CGPointMake(size.width / 2, size.height / 2);
+        s_shared_metal_view.transform = CGAffineTransformMakeRotation(M_PI_2);
+    } else {
         s_shared_metal_view.frame = self.view.bounds;
-        [(UIView *)s_shared_metal_view setNeedsLayout];
-        [s_shared_metal_view layoutIfNeeded];
     }
+    static int logged = -1;
+    if (logged != turned) {
+        logged = turned;
+        NSLog(@"Downhill Revived: the game's view %.0f x %.0f points%s", turned ? size.height : size.width,
+              turned ? size.width : size.height, turned ? ", turned a quarter in a portrait window" : "");
+    }
+    [(UIView *)s_shared_metal_view setNeedsLayout];
+    [s_shared_metal_view layoutIfNeeded];
 }
 - (BOOL)prefersStatusBarHidden { return YES; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }

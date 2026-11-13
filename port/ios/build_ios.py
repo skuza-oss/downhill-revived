@@ -4,8 +4,8 @@
     python port/ios/build_ios.py --simulator --wasm core_*.c    # the iOS Simulator (Apple silicon)
 
 1. Rebuilds the wasm core, native ARM64 host and Rust renderer from source (macOS / iOS SDK).
-2. Generates the Xcode project structure, copying native Swift launcher files, touch control assets,
-   Metal bridge, and platform host files.
+2. Generates the Xcode project structure: the app (port/ios/app), the host and the Metal bridge, the
+   launcher's page (port/launcher/ui, as launcher/; finding 227) and the licence texts.
 3. Generates DownhillRevived.xcodeproj with xcodegen.
 4. Invokes xcodebuild to produce the native signed .app bundle.
 5. Packages DownhillRevived.ipa and optionally installs to a connected iOS device.
@@ -108,7 +108,7 @@ def prepare_project_bundle(team=None, simulator=False):
     print('ios: preparing project bundle at', PROJECT)
     PROJECT.mkdir(parents=True, exist_ok=True)
 
-    # 1. The app (until the shared mobile launcher), the host and the Metal bridge
+    # 1. The app (the launcher's web view and the game's start), the host and the Metal bridge
     for name, src in (('App', HERE / 'app'), ('Host', HERE / 'host'), ('Render', HERE / 'render')):
         dst = PROJECT / name
         if dst.exists():
@@ -120,6 +120,17 @@ def prepare_project_bundle(team=None, simulator=False):
             shutil.rmtree(path)
         elif path.exists():
             path.unlink()
+
+    # 1b. The launcher's page, the same files as the desktop's and Android's (finding 227), and the
+    # licence texts its Help page shows (the release's: LICENSE, port/release/THIRD-PARTY-NOTICES.txt)
+    page = PROJECT / 'launcher'
+    if page.exists():
+        shutil.rmtree(page)
+    shutil.copytree(ROOT / 'port' / 'launcher' / 'ui', page)
+    texts = PROJECT / 'Texts'
+    texts.mkdir(exist_ok=True)
+    shutil.copyfile(ROOT / 'LICENSE', texts / 'LICENSE.txt')
+    shutil.copyfile(ROOT / 'port' / 'release' / 'THIRD-PARTY-NOTICES.txt', texts / 'THIRD-PARTY-NOTICES.txt')
 
     # 2. The app icon
     appicon_dst = PROJECT / 'AppIcon.xcassets'
@@ -163,6 +174,8 @@ def prepare_project_bundle(team=None, simulator=False):
             '          - "-framework GameController"\n'
             '          - "-framework Metal"\n'
             '          - "-framework QuartzCore"\n'
+            '          - "-framework WebKit"\n'
+            '          - "-framework UniformTypeIdentifiers"\n'
             '          - "-weak_framework CoreHaptics"\n'
             '          - "-liconv"\n'
             '        DEAD_CODE_STRIPPING: YES\n'
@@ -187,6 +200,11 @@ def prepare_project_bundle(team=None, simulator=False):
         '      - path: Host\n'
         '      - path: Render\n'
         '      - path: AppIcon.xcassets\n'
+        '      - path: launcher\n'
+        '        type: folder\n'
+        '        buildPhase: resources\n'
+        '      - path: Texts\n'
+        '        buildPhase: resources\n'
         '      - path: LaunchScreen.storyboard\n'
         '    settings:\n'
         '      base:\n'
@@ -206,8 +224,9 @@ def prepare_project_bundle(team=None, simulator=False):
         '        ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME: ""\n'
         '        HEADER_SEARCH_PATHS:\n'
         '          - $(SRCROOT)/Host\n'
-        '          - $(SRCROOT)/Render\n'
-        + lib_settings +
+        '          - $(SRCROOT)/Render\n' +
+        ('          - "%s"\n' % (ROOT / 'port').as_posix()) +  # the shared headers (net/, host/, render/include/)
+        lib_settings +
         '    dependencies: []\n'
     )
 
