@@ -204,8 +204,10 @@ static void screen_measure(UIView *view) {
        screen's right edge, so the player holds the home side to the right) */
     atomic_store(&s_turn, (int)(turned ? UIInterfaceOrientationLandscapeRight : turn));
     if (turned) {   /* the insets in the view's own axes */
-        strips[0] = (float)in.left * mm, strips[1] = (float)in.top * mm;
-        strips[2] = (float)in.right * mm, strips[3] = (float)in.bottom * mm;
+        strips[0] = (float)in.left * mm;
+        strips[1] = (float)in.top * mm;
+        strips[2] = (float)in.right * mm;
+        strips[3] = (float)in.bottom * mm;
     } else if (turn == UIInterfaceOrientationLandscapeRight && in.left > 0) {        /* the housing on the left */
         cut[2] = (float)in.left * mm;
         cut[3] = (float)size.height * mm;

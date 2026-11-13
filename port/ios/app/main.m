@@ -7,7 +7,8 @@
    The launcher turns with the device (portrait or landscape); the game is landscape: on an iPad
    that does not turn the window (iPadOS 26 may not honour the request), the game's view lays itself
    out for the window it gets (metal_bridge.m).
-   Test switch: DHD_IOS_DIRECT=1 starts the game at once, as the setting "launcher" off does.
+   Test switch: DHD_IOS_DIRECT=1 starts the game at once, as the setting "launcher" off does (after an
+   unexpected end too: the checks kill the app between runs).
    GPL-3.0-or-later. */
 #import <UIKit/UIKit.h>
 #include <stdlib.h>
@@ -108,7 +109,7 @@ static UIWindow *app_window(void) { return ((AppDelegate *)UIApplication.sharedA
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.backgroundColor = UIColor.blackColor;
     const char *direct = getenv("DHD_IOS_DIRECT");
-    if (!why && ((direct && atoi(direct)) || launcher_should_start_game())) {
+    if ((direct && atoi(direct)) || (!why && launcher_should_start_game())) {
         [self.window makeKeyAndVisible];
         app_play(0, 0);
     } else {
