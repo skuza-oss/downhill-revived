@@ -130,11 +130,15 @@ static void import_progress(double fraction, uint64_t copied, uint64_t total) {
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     (void)application; (void)options;
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    s_disc = [DiscViewController new];
-    self.window.rootViewController = s_disc;
+    /* a disc already checked (dhd.ini's iso), or an image put in the app's folder through Files:
+       straight to the game; else the disc screen first */
+    if (ios_disc_is_ready()) {
+        start_game(self.window);
+    } else {
+        s_disc = [DiscViewController new];
+        self.window.rootViewController = s_disc;
+    }
     [self.window makeKeyAndVisible];
-    /* a disc already checked (dhd.ini's iso), or an image put in the app's folder through Files */
-    if (ios_disc_is_ready()) start_game(self.window);
     return YES;
 }
 
