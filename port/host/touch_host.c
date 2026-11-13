@@ -51,6 +51,8 @@
    x0 y0 x1 y1 (mm); 0 before the view is laid out */
 int ios_touch_screen(float *width_mm, float *height_mm, float strips[4], float cut[4]);
 void ios_touch_buzz(int kind);   /* TOUCH_BUZZ_*: the Taptic Engine */
+int ios_touch_tilt(float *degrees);   /* CoreMotion's roll, as Android's (finding 226) */
+int ios_touch_tilt_on(int on);   /* 1 the device has a tilt sensor, 0 none */
 void gs_window_pixels(unsigned *width, unsigned *height);   /* present.c: the picture's pixels */
 #endif
 #ifdef __ANDROID__
@@ -122,11 +124,7 @@ static int touch_on(void)
 #if defined(__ANDROID__) || defined(TOUCH_IOS)
         available = 1;
         gs_mouse_touchscreen();   /* else the menus' first reading takes the first tap as its baseline */
-#ifdef TOUCH_IOS
-        SDL_SetAtomicInt(&tilt_sensor, 0);    /* iOS: no tilt steering yet (finding 224) */
-#else
-        SDL_SetAtomicInt(&tilt_sensor, -1);   /* the first tick asks */
-#endif
+        SDL_SetAtomicInt(&tilt_sensor, -1);   /* the first tick asks (iOS since finding 226) */
 #else
         const char *mouse = getenv("DHD_TOUCH_MOUSE");
         available = mouse && atoi(mouse) ? 2 : 0;
@@ -328,21 +326,31 @@ void touch_host_tick(void)
 #endif
     int buzz = SDL_GetAtomicInt(&want_buzz);
     if (buzz) SDL_SetAtomicInt(&want_buzz, 0);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(TOUCH_IOS)
+#ifdef TOUCH_IOS
+#define platform_tilt_on ios_touch_tilt_on
+#define platform_tilt ios_touch_tilt
+#else
+#define platform_tilt_on android_touch_tilt_on
+#define platform_tilt android_touch_tilt
+#endif
     static int tilt_was = -1;   /* the first pass asks whether there is a sensor */
-    static double insets_at, tilt_retry_at;
+    static double tilt_retry_at;
     int tilt = SDL_GetAtomicInt(&tilt_wanted);
     if (tilt != tilt_was && ms_now() >= tilt_retry_at) {
         SDL_SetAtomicInt(&tilt_known, 0);   /* the next reading is the new sensor's */
-        int sensor = android_touch_tilt_on(tilt);
+        int sensor = platform_tilt_on(tilt);
         if (sensor >= 0) SDL_SetAtomicInt(&tilt_sensor, sensor), tilt_was = tilt;
         else tilt_retry_at = ms_now() + 250;   /* not asked (no activity yet): again in a moment, not every pass */
     }
     float deg;
-    if (tilt && android_touch_tilt(&deg)) {
+    if (tilt && platform_tilt(&deg)) {
         SDL_SetAtomicInt(&tilt_milli, (int)(deg * 1000));
         SDL_SetAtomicInt(&tilt_known, 1);
     }
+#endif
+#ifdef __ANDROID__
+    static double insets_at;
     if (buzz) android_touch_buzz(buzz);
     if (last_window && ms_now() - insets_at > 2000) {   /* the gesture insets change with the navigation mode */
         insets_at = ms_now();
