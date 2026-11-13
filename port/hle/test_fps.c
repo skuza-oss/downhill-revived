@@ -103,6 +103,33 @@ int main(int argc,char **argv)
         assert(port_fps_update_display() && port_frame_period()==replay_period);
         return 0;
     }
+    if (argc>2 && !strcmp(argv[2],"away")) {
+        /* A phone's app in the background (present.c's app_away_wait, finding 227): online the
+           clock keeps what the two-field cap left over and gives it back at up to two fields a step,
+           so 17 s away would be fast-forwarded for 17 s; the return rebases the clock instead, and
+           the first step is an ordinary one, offline and online. */
+        port_clock_wall(1);
+        port_loop_frame(1);*(int *)0x0829DED8=9;*(int *)0x0843F348=2;   /* a race's loop runs */
+        for (online=0;online<2;online++) {
+            port_clock_reset();
+            for (int i=0;i<120;i++) { fake_wall+=1.0/n; port_clock_wait(NULL); port_clock_step(); }
+            fake_wall+=17;
+            port_clock_wait(NULL); port_clock_step();
+            if (online) assert(port_fps_behind()>16);   /* without the rebase: 17 s owed */
+            else assert(port_fps_behind()<.04);        /* offline the cap drops it */
+            port_clock_rebase();                        /* app_away_wait at the return */
+            fake_wall+=1.0/n;
+            port_clock_wait(NULL); port_clock_step();
+            assert(port_step()<=2.000001 && port_fps_behind()<.04);
+            for (int i=0;i<60;i++) {
+                fake_wall+=1.0/n; port_clock_wait(NULL); port_clock_step();
+                assert(port_step()<=60.0/n+.5);   /* no catch-up: steps stay near the rate's */
+            }
+        }
+        online=0;
+        printf("%d: the time away is no game time\n",n);
+        return 0;
+    }
     assert(port_fps()==n);
     int wall=argc>2 && !strcmp(argv[2],"wall");
     if(n==60 && !wall) {

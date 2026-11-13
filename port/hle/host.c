@@ -579,11 +579,25 @@ static int SDLCALL watchdog(void *seconds)
    (port/hle/dma.c, hle_render_wait), the registers the game last published and, on Windows, the
    game thread's code addresses as RVAs for port/tools/host64_rva.py. A Mac or Linux game thread
    is not stopped (that needs a signal handler on it); the rest is logged. One line when the
-   fields go on again. */
+   fields go on again. A phone's app in the background (host_app_away) is not a freeze. */
 static uint32_t freeze_word(uint32_t ee)
 {
     const void *p = GUEST(0x08000000u + ee);
     return host_readable(p, 4) ? *(volatile const uint32_t *)p : 0xFFFFFFFFu;
+}
+
+static SDL_AtomicInt app_away;   /* host_app_away: the app is off the screen, no field is due */
+
+static SDL_AtomicInt came_back;  /* host_service_host_came_back: the core rebases its clock */
+
+int host_service_host_came_back(void) { return SDL_SetAtomicInt(&came_back, 0); }
+
+void host_app_away(int away)
+{
+    SDL_SetAtomicInt(&app_away, away);
+    if (!away) SDL_SetAtomicInt(&came_back, 1);
+    touch_host_app_away(away);
+    host_sound_away(away);
 }
 
 static int SDLCALL freeze_watch(void *unused)
@@ -596,6 +610,10 @@ static int SDLCALL freeze_watch(void *unused)
     for (;;) {
         SDL_Delay(1000);
         uint64_t field = *(volatile uint64_t *)&kernel_vsync_count;
+        if (SDL_GetAtomicInt(&app_away)) {   /* a phone's app in the background waits: no freeze */
+            last = field, still = 0;
+            continue;
+        }
         if (field != last || !armed) {
             armed |= last && field != last;
             if (still >= 5)
@@ -992,8 +1010,9 @@ void host_pad_device(int port, HostPad *out)
         /* the button icons (dhd.ini prompts, PC SETTINGS > Button Icons): auto follows player 1's pad,
            and they follow its layout while a pad is there or icons are chosen */
         const char *prompts = getenv("DHD_PROMPTS");
-        int kind = connected ? gamepad_kind(0) : PAD_KIND_NONE;
-        int follow = connected || (prompts && SDL_strcasecmp(prompts, "auto"));
+        int named = connected && touch_host_pad_prompts();  /* on a touch screen: the device in use (finding 227) */
+        int kind = named ? gamepad_kind(0) : PAD_KIND_NONE;
+        int follow = named || (prompts && SDL_strcasecmp(prompts, "auto"));
         button_icons_choose(prompts, kind == PAD_KIND_XBOX ? BUTTON_ICONS_XBOX : kind == PAD_KIND_NINTENDO ? BUTTON_ICONS_NINTENDO
                                                                                                            : BUTTON_ICONS_GAME,
                             follow ? controls_layout(CONTROL_PAD1) : NULL);
@@ -1281,11 +1300,19 @@ int host_service_controls_layout(int device, uint32_t out)
 }
 
 /* Player 1's or 2's controller: its PAD_KIND_* plus 1, 0 none connected. */
-int host_service_controls_pad(int player)
+static int controls_pad_connected(int player)
 {
     GamepadRaw raw;
     if (player < 1 || player > 2 || !gamepad_start() || !gamepad_raw(player - 1, &raw)) return 0;
     return gamepad_kind(player - 1) + 1;
+}
+
+/* The same for the pages' button names (SETTINGS' "Tabs" line, CONTROLS): on a touch screen a
+   controller counts once it has sent input since the last touch (touch_host_pad_prompts), so a
+   phone shows touch words until a real pad is used (finding 227). */
+int host_service_controls_pad(int player)
+{
+    return touch_host_pad_prompts() ? controls_pad_connected(player) : 0;
 }
 
 /* A change by dhd_settings' rules (dhd_controls_edit): saved to dhd.ini and played with at once
@@ -1346,7 +1373,7 @@ int host_service_controls_capture(int device, int command)
     static uint32_t pads_before;
     int player = device == CONTROL_PAD1 ? 1 : device == CONTROL_PAD2 ? 2 : 0;
     const ControlsLayout *layout = player ? controls_layout(device) : &control_defaults[CONTROL_PAD1];
-    if (player && !host_service_controls_pad(player)) player = 0;  /* that player's pad isn't there: any */
+    if (player && !controls_pad_connected(player)) player = 0;  /* that player's pad isn't there: any */
     if (command == 2) {
         if (pad_held(0, layout) || controls_key_held(0x1B)) return 1;
         for (int i = 0; i < CONTROL_KEYS; i++)

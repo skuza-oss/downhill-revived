@@ -9,7 +9,7 @@
    sdl_host_run. The renderer's surface takes the window's native handle (window_target, the one
    platform part): Win32's HWND, X11's or Wayland's window, Android's ANativeWindow, or on Apple
    the CAMetalLayer of an SDL Metal view. On a phone the surface is dropped while the app is in
-   the background and made again when it comes back (app_background_wait, finding 091). */
+   the background and made again when it comes back (app_away_wait, findings 091, 227). */
 #include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -334,7 +334,7 @@ static int wait_target(int tries)
 
 /* ---- the app in the background (phones: SDL sends these events on Android and iOS only) ---- */
 static volatile int app_background; /* the app is in the background (lifecycle_watch): the game waits */
-static volatile int surface_dropped; /* lifecycle_watch dropped the surface: app_background_wait makes it again */
+static volatile int surface_dropped; /* lifecycle_watch dropped the surface: app_away_wait makes it again */
 
 /* SDL's app events, from the thread that pumps SDL's events (sdl_host.c), synchronously: SDL blocks
    that thread right after the background events (SDL_HINT_ANDROID_BLOCK_ON_PAUSE), so the queued
@@ -353,24 +353,48 @@ static bool SDLCALL lifecycle_watch(void *unused, SDL_Event *e)
     return true;
 }
 
-/* The app went to the background (game thread, at a field): the surface is dropped before the OS
-   takes the window, and the game waits (SDL pauses the sound) until the app is back, then the
-   surface is made on the new window. The close of the app ends the game as the close button does. */
-static void app_background_wait(void)
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+/* iOS: SDL's app events don't come (the app owns UIApplication, port/ios); the app's delegate says
+   when the game is not active (ios_main.m's ios_game_is_active). */
+static int app_away(void) { return app_background || surface_dropped || !ios_game_is_active(); }
+#else
+static int app_away(void) { return app_background || surface_dropped; }
+#endif
+
+/* The app left the screen (game thread, at a field or an online wait's pump), on Android and iOS
+   alike (finding 227): the surface is dropped before the OS takes the window, and while the app is
+   away nothing of the game runs:
+   - host_app_away(1) lets go of every finger and asks the touch controls to open the game's own
+     pause at the return when a race is on screen offline (online the race goes on, finding 215:
+     nothing pauses there), pauses the sound, and tells the freeze watch that no field is due;
+   - on return the surface is made on the new window and the game clock starts again from now
+     (kernel.c asks host_service_host_came_back after this present and rebases fps.c's clock): the
+     time away is no game time, offline or online, so nothing tries to catch it up.
+   The close of the app ends the game as the close button does. */
+static void app_away_wait(void)
 {
+    static int waiting;   /* gs_pump_messages, from the wait below, comes back here */
+    if (waiting || !surface) return;
+    waiting = 1;
+    double since = host_wall_seconds();
     hle_log("gs: in the background; the game waits\n");
+    host_app_away(1);
     gs_gpu_surface_reset(&gs, NULL);
     target_ready = 0;
-    while (app_background && !window_closed) SDL_Delay(20);
-    surface_dropped = 0;
-    gs_pump_messages();
+    while (app_away() && !window_closed) {
+        surface_dropped = 0;   /* the surface is dropped: only the app's own state is waited for */
+        SDL_Delay(20);
+    }
+    gs_pump_messages();   /* closed meanwhile: the game ends here */
     if (!wait_target(300) || !gs_gpu_surface_reset(&gs, &target)) {
         hle_log("gs: no surface on the window after the background\n");
         target_ready = 0;
-        return;
+    } else {
+        resize_pending = 1;
     }
-    resize_pending = 1;
-    hle_log("gs: back in the foreground\n");
+    host_app_away(0);   /* the core's clock starts again from now (kernel.c, host_service_host_came_back) */
+    hle_log("gs: back in the foreground after %.1f s; the game clock goes on from now\n", host_wall_seconds() - since);
+    waiting = 0;
 }
 
 /* The window (SDL's), then the renderer (gpu_rust.c: wgpu on Direct3D 12 or Vulkan, Metal on
@@ -643,16 +667,9 @@ static void graphics_lost(void)
 void gs_pump_messages(void)
 {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    /* SwiftUI owns UIApplication's lifecycle. Stop before queuing another frame; dropping
-       the surface here also drains earlier renderer work before the OS suspends the app. */
-    if (!ios_game_is_active() && surface) {
-        gs_gpu_surface_reset(&gs, NULL);
-        while (!ios_game_is_active() && !window_closed) SDL_Delay(20);
-        if (!window_closed) {
-            if (!gs_gpu_surface_reset(&gs, &target)) graphics_failed();
-            resize_pending = 1;
-        }
-    }
+    /* The app owns UIApplication's lifecycle: stop before queuing another frame (also from an
+       online wait's pump); dropping the surface drains the renderer's work before iOS suspends it. */
+    if (!ios_game_is_active()) app_away_wait();
 #endif
     if (window_closed) host_end(0);
     if (gs_gpu_lost()) graphics_lost();
@@ -1035,7 +1052,7 @@ void gs_vsync(void)
     perf_field(*(volatile int32_t *)GUEST(0x0829E290) != 0);  /* a race ridden (D_0029E290), or the menus */
     gs_pump_messages();  /* first: the close button ends the game even with no renderer */
     if (disabled) return;
-    if (app_background || surface_dropped) app_background_wait();
+    if (app_away()) app_away_wait();
 #ifdef __ANDROID__
     { void android_perf_field(void); android_perf_field(); }  /* port/host/android_perf.c: CPU clocks */
 #endif
