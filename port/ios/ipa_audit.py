@@ -8,6 +8,7 @@ kept outside the repository). A Mach-O whose load commands can't be read can't b
 refused. Pure Python: it runs on any machine, no codesign needed."""
 import os
 import re
+import unicodedata
 
 LC_CODE_SIGNATURE = 0x1D
 THIN = (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe')     # MH_MAGIC_64, MH_MAGIC (little-endian)
@@ -69,26 +70,51 @@ def identity_patterns():
         (re.compile(rb'/Users/[A-Za-z0-9._-]+/'), 'a home folder path'),
         (re.compile(rb'/home/[A-Za-z0-9._-]+/'), 'a home folder path'),
         (re.compile(rb'[A-Z]:\\Users\\[A-Za-z0-9._ -]+', re.IGNORECASE), 'a home folder path'),
-        (re.compile(rb'0000[0-9A-F]{4}-[0-9A-F]{16}'), 'a device UDID'),
+        (re.compile(rb'0000[0-9A-F]{4}-[0-9A-F]{16}', re.IGNORECASE), 'a device UDID'),
         (re.compile(rb'(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])'), None),   # an old-style UDID is a SHA-1: too common to refuse
         (re.compile(rb'com\.apple\.developer\.team-identifier'), 'a team entitlement'),
         (re.compile(rb'<key>application-identifier</key>'), 'an application identifier entitlement'),
         (re.compile(rb'<key>ProvisionedDevices</key>'), 'a provisioning profile'),
     ]
     patterns = [(p, d) for p, d in patterns if d]
-    for private in filter(None, (s.strip() for s in os.environ.get('DHD_IPA_PRIVATE', '').split(','))):
-        patterns.append((re.compile(re.escape(private.encode()), re.IGNORECASE), 'a builder identifier'))
+    for private in private_literals():
+        # the bytes as written, composed and decomposed (a file's text may carry either)
+        for form in {private, unicodedata.normalize('NFC', private), unicodedata.normalize('NFD', private)}:
+            patterns.append((re.compile(re.escape(form.encode('utf-8')), re.IGNORECASE), 'a builder identifier'))
     return patterns
 
 
+def private_literals():
+    """The builder's own literals (DHD_IPA_PRIVATE, comma-separated, outside the repository)."""
+    return [p for p in (s.strip() for s in os.environ.get('DHD_IPA_PRIVATE', '').split(',')) if p]
+
+
+def fold(text):
+    """A name or literal as it compares: Unicode-normalised (NFKC, which also composes) and
+    case-folded, then normalised again (case folding can undo it), so a decomposed accent, a
+    compatibility form or a non-ASCII case variant is the same text."""
+    return unicodedata.normalize('NFKC', unicodedata.normalize('NFKC', text).casefold())
+
+
+UDID_TEXT = re.compile(r'0000[0-9a-f]{4}-[0-9a-f]{16}')   # on folded text (lower case)
+
+
 def name_problems(name, patterns=None):
-    """An identity in a member's path (its UTF-8 name, directories included): a file or folder named
-    after a device, a team or the builder's literals is as public as its bytes (the review of lane
-    227)."""
+    """An identity in a member's path (directories included): a file or folder named after a device,
+    a team or the builder's literals is as public as its bytes. The raw UTF-8 bytes go through the
+    content patterns; the name folded (fold) is compared with the folded literals and a UDID in any
+    case (the reviews of lane 227). Messages keep the original name."""
     encoded = name.encode('utf-8', 'surrogateescape')
-    return ['%s: %s in its name (%r)' % (name, desc, m.group(0)[:60])
-            for pattern, desc in (patterns if patterns is not None else identity_patterns())
-            for m in [pattern.search(encoded)] if m]
+    problems = ['%s: %s in its name (%r)' % (name, desc, m.group(0)[:60])
+                for pattern, desc in (patterns if patterns is not None else identity_patterns())
+                for m in [pattern.search(encoded)] if m]
+    folded = fold(name.encode('utf-8', 'surrogateescape').decode('utf-8', 'replace'))
+    if UDID_TEXT.search(folded) and not any('a device UDID' in p for p in problems):
+        problems.append('%s: a device UDID in its name' % name)
+    for literal in private_literals():
+        if fold(literal) in folded and not any('a builder identifier' in p for p in problems):
+            problems.append('%s: a builder identifier in its name' % name)
+    return problems
 
 
 def member_problems(name, data, patterns=None):

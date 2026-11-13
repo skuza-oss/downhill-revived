@@ -1,4 +1,6 @@
-/* A phone's app back from the background, through the code the return runs (finding 227):
+/* The return from the background, unit by unit (finding 227). Not the whole path: present.c's
+   lifecycle watch and app_away_wait, the render loops and the surface aren't run here (the render
+   gate's rules are test_render_gate; the rest needs a device or the Simulator). The units:
    - the host's flag (app_away.c): away, then one "came back" the core takes once (kernel.c reads it
      through host_service_host_came_back after the present that waited; fps.c's
      port_clock_after_away rebases on it: test_fps away);
@@ -94,6 +96,6 @@ int main(void)
         last_stamp = stamp;
     }
     assert(fabs(stood.stood - 17) < 0.05);   /* counted once, exactly, and not given back */
-    puts("app away: one came-back per return; offline pause, online none; the snapshot clock stands 17 s once");
+    puts("app away units: one came-back per return; offline pause, online none; the snapshot clock stands 17 s once");
     return 0;
 }

@@ -347,3 +347,14 @@ void launcher_receive_ordered(const LauncherHost *h, unsigned long ticket, const
     else launcher_receive(h, message);
     order_done();
 }
+
+static void start_refused(void *unused)
+{
+    (void)unused;
+    game_starting = 0;
+}
+
+void launcher_start_refused(void)
+{
+    launcher_settings_run(start_refused, NULL);
+}

@@ -134,6 +134,24 @@ int main(int argc, char **argv)
     assert(count_keys() == SAVES);          /* no save lost */
     assert(keys_at_play == SAVES);          /* PLAY ran after every save sent before it */
     assert(refused == 1);                   /* the save after PLAY: refused, the file is the game's */
+
+    /* the start refused before a core ran (ios_start_game's last disc check): the launcher shows
+       again and works: a snapshot, a save and a second PLAY all go through */
+    launcher_start_refused();
+    static Job again[3];
+    snprintf(again[0].message, sizeof again[0].message, "{\"id\":200,\"call\":\"snapshot\"}");
+    snprintf(again[1].message, sizeof again[1].message,
+             "{\"id\":201,\"call\":\"save_setting\",\"args\":{\"key\":\"keyZZ\",\"value\":\"1\"}}");
+    snprintf(again[2].message, sizeof again[2].message, "{\"id\":202,\"call\":\"play\",\"args\":{}}");
+    keys_at_play = -1;
+    for (int i = 0; i < 3; i++) {
+        again[i].ordered = 1;
+        again[i].ticket = launcher_order_ticket();
+        run(&again[i]);
+    }
+    assert(refused == 1);                   /* nothing refused this time */
+    assert(count_keys() == SAVES + 1);      /* the save went in */
+    assert(keys_at_play == SAVES + 1);      /* the second PLAY ran, after it */
     remove(ini_path);
     puts("launcher order: 24 saves on 26 threads, none lost; PLAY after them; a later save refused");
     return 0;

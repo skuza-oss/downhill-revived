@@ -2752,6 +2752,12 @@ static int native_drawn_surface(Native *n, const NativeFrame *f)
     return -1;
 }
 
+/* A phone's app away from the screen (finding 227; the rules: render_gate.h): every piece of GPU
+   work this thread records, submits or presents passes native_gate, under queue_lock. */
+#include "render_gate.h"
+static RenderGate native_gate;      /* queue_lock (render_gate.h) */
+static Native *native_reported;     /* (a tentative definition: it is set where the renderer starts) */
+
 /* Android: the exact renderer's submits run on the render thread (dhdr_exact_set_submitter,
    port/render/src/exact/encoder.rs). On the Adreno 660 (driver 512) exact compute work recorded
    and submitted from the GS worker while this thread recorded its passes crashed this thread
@@ -2783,9 +2789,14 @@ static void native_exact_run(void (*call)(void *), void *arg, void *context)
 static void native_serve_call(Native *n)
 {
     if (!native_call.posted || native_call.done) return;
+    /* GPU work: deferred while the app is away (the poster waits; served at the return, or at the
+       quit so no poster hangs) */
+    if (!render_gate_may_start(&native_gate, n->quit)) return;
+    render_gate_begin(&native_gate);
     native_mutex_unlock(&n->queue_lock);
     native_call.call(native_call.arg);
     native_mutex_lock(&n->queue_lock);
+    render_gate_end(&native_gate);
     native_call.done = 1;
     native_cond_broadcast(&n->queue_changed);
 }
@@ -2926,35 +2937,69 @@ static void native_zread_after(Native *n)
 
 /* The next handed field drawn and its frame recycled; 0 once told to quit. The render thread's
    loop, or with NATIVE_INLINE the field's own vsync (the field is already pending, so no wait). */
-/* A phone's app leaving the screen (finding 227): the render thread is the one that records and
-   submits the native renderer's GPU work and presents, so the lifecycle holds it between pictures
-   (gs_render_hold, set by the platform's callback itself, not when the game thread gets there): it
-   finishes the picture it is drawing, then takes no new one, and leaves the fields queued for the
-   return (dropping them would drop their uploads). gs_render_quiet says it has no picture under
-   way; with the hold set none can start, so nothing new reaches the GPU from it. Work it submitted
-   before may still run on the GPU (iOS lets that finish; what it forbids is new GPU work from the
-   background). The game thread and the GS worker may run on (a load) until the OS freezes them;
-   the GS worker blocks once two fields wait. */
-static volatile long native_hold, native_held_frames;
-static int native_in_frame;   /* queue_lock: a picture is under way */
-static Native *native_reported;   /* (a tentative definition: it is set where the renderer starts) */
-
-void gs_render_hold(int on)
+/* The platform's callback and the game's return (render_gate.h, finding 227): the render thread
+   finishes the GPU work under way, starts none while the app is away, and leaves the fields queued
+   for the return (dropping them would drop their uploads). What that guarantees: no new GPU work or
+   present from this thread after gs_render_quiet says so; work submitted before may still run on
+   the GPU (iOS lets that finish; it forbids new work from the background). Not covered: the GS
+   worker's own exact Z-probe submits on iOS (they don't come through this thread; the worker blocks
+   on the held queue within two fields). Desktops never set the hold: only a phone's background
+   event (present.c's lifecycle watch) and the iOS app's callbacks do. */
+static void gate_lock(Native *n, int on)
 {
-    native_atomic_store(&native_hold, on);
-    if (!on) {
-        long held = __atomic_exchange_n(&native_held_frames, 0, __ATOMIC_SEQ_CST);
-        if (held) fprintf(stderr, "gs: the renderer held %ld fields while the app was away; it draws them now\n", held);
+    if (!n) return;
+    if (on) native_mutex_lock(&n->queue_lock);
+    else native_mutex_unlock(&n->queue_lock);
+}
+
+unsigned gs_render_leave(void)
+{
+    Native *n = native_reported;
+    gate_lock(n, 1);
+    unsigned generation = render_gate_leave(&native_gate);
+    gate_lock(n, 0);
+    return generation;
+}
+
+unsigned gs_render_generation(void)
+{
+    Native *n = native_reported;
+    gate_lock(n, 1);
+    unsigned generation = native_gate.generation;
+    native_gate.hold = 1;   /* the game's own wait holds too (its callback may still come) */
+    gate_lock(n, 0);
+    return generation;
+}
+
+unsigned gs_render_current(void)
+{
+    Native *n = native_reported;
+    gate_lock(n, 1);
+    unsigned generation = native_gate.generation;
+    gate_lock(n, 0);
+    return generation;
+}
+
+int gs_render_release(unsigned generation)
+{
+    Native *n = native_reported;
+    gate_lock(n, 1);
+    int released = render_gate_release(&native_gate, generation), held = native_gate.held;
+    if (released) {
+        native_gate.held = 0;
+        if (n) native_cond_broadcast(&n->queue_changed);   /* a deferred call or a held field goes now */
     }
+    gate_lock(n, 0);
+    if (released && held) fprintf(stderr, "gs: the renderer held %d fields while the app was away; it draws them now\n", held);
+    return released;
 }
 
 int gs_render_quiet(void)
 {
     Native *n = native_reported;
-    if (!n) return 1;
-    native_mutex_lock(&n->queue_lock);
-    int quiet = !native_in_frame;
-    native_mutex_unlock(&n->queue_lock);
+    gate_lock(n, 1);
+    int quiet = render_gate_quiet(&native_gate);
+    gate_lock(n, 0);
     return quiet;
 }
 
@@ -2965,13 +3010,13 @@ static int native_render_next(Native *n)
     for (;;) {
         NATIVE_WAIT(n, !n->pending_count && !n->quit);
         if (n->quit) { native_mutex_unlock(&n->queue_lock); return 0; }
-        if (!__atomic_load_n(&native_hold, __ATOMIC_SEQ_CST)) break;
-        native_atomic_store(&native_held_frames, n->pending_count);   /* held: the field stays queued */
+        if (render_gate_may_start(&native_gate, n->quit)) break;
+        native_gate.held = n->pending_count;   /* held: the field stays queued */
         native_mutex_unlock(&n->queue_lock);
         native_sleep_ns(5000000);
         native_mutex_lock(&n->queue_lock);
     }
-    native_in_frame = 1;   /* with the hold checked under the same lock (gs_render_quiet) */
+    render_gate_begin(&native_gate);   /* the picture: GPU work under way (gs_render_quiet) */
     NativeFrame *f = n->pending[0];
     n->pending[0] = n->pending[1];
     n->pending_count--;
@@ -3000,7 +3045,7 @@ static int native_render_next(Native *n)
     native_rstat_end();
     native_recycle(f);
     native_mutex_lock(&n->queue_lock);
-    native_in_frame = 0;
+    render_gate_end(&native_gate);
     n->free_frames[n->free_count++] = f;
     n->rendered = f->field;
     native_cond_broadcast(&n->queue_changed);
@@ -3390,6 +3435,11 @@ static Native *native_create(NativeExact *exact)
     for (unsigned i = 1; i < NATIVE_FRAMES; i++) n->free_frames[n->free_count++] = &n->frames[i];
     const char *interp = getenv("DHD_INTERP"), *hz = getenv("DHD_INTERP_HZ");
     n->interp = interp && atoi(interp) != 0;
+#if defined(__ANDROID__) || defined(DHD_IOS_RENDER)
+    /* its own picture loop doesn't pass the render gate a phone's background needs (finding 227) */
+    if (n->interp) fprintf(stderr, "gs: DHD_INTERP is not offered on a phone; ignored\n");
+    n->interp = 0;
+#endif
 #ifdef NATIVE_INLINE
     n->interp = 0;  /* its pictures come between fields, from a thread of their own */
 #endif

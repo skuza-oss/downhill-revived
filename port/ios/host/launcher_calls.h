@@ -55,6 +55,9 @@ int launcher_starts_directly(const LauncherHost *h);
 int launcher_settings_call(const char *message);   /* 1 for a call that takes a ticket */
 unsigned long launcher_order_ticket(void);
 void launcher_receive_ordered(const LauncherHost *h, unsigned long ticket, const char *message);
+/* The game refused to start before a core took the settings (ios_start_game's last disc check, 3):
+   the launcher shows again, and its settings calls and PLAY work again (in the settings' order). */
+void launcher_start_refused(void);
 /* fn(context) in the settings' order (blocks until the calls before it are done; not from inside one) */
 void launcher_settings_run(void (*fn)(void *context), void *context);
 

@@ -76,8 +76,9 @@ def run_privacy_audit(staged_app: Path):
 
     if violations:
         print("audit: ERROR - Privacy audit failed with the following issues:")
-        for v in violations:
-            print(f"  - {v}")
+        for v in violations:   # names as they are, whatever the console's encoding can show
+            line = f"  - {v}"
+            print(line.encode(sys.stdout.encoding or 'utf-8', 'backslashreplace').decode(sys.stdout.encoding or 'utf-8'))
         raise RuntimeError("Privacy audit failed: personal data or signatures detected in package.")
 
     print("audit: PASSED - 0 personal identifiers, 0 certificates, 0 machine paths found.")

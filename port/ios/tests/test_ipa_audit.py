@@ -148,6 +148,39 @@ class ReleaseAudit(unittest.TestCase):
         members['Frameworks/two.dylib'] = fat
         self.refused(members, 'Frameworks/two.dylib: a Mach-O that still carries a code signature')
 
+    # the review of round 2: spelling variants
+    def test_lower_case_udid_as_a_name_and_in_a_plist(self):
+        members = self.clean()
+        members['launcher/00008110-001a2b3c4d5e6f70.png'] = b''
+        self.refused(members, 'a device UDID in its name')
+        members = self.clean()
+        members['Info.plist'] = b'<plist><string>00008110-001a2b3c4d5e6f70</string></plist>'
+        self.refused(members, 'a device UDID')
+
+    def test_decomposed_private_name_as_a_folder(self):
+        members = self.clean()
+        members['José/'] = b''
+        members['José/notes.txt'] = b'nothing to see'
+        self.refused(members, 'a builder identifier in its name', {'DHD_IPA_PRIVATE': 'José'})
+
+    def test_non_ascii_case_variant_name(self):
+        members = self.clean()
+        members['launcher/æsir.png'] = b''
+        self.refused(members, 'a builder identifier in its name', {'DHD_IPA_PRIVATE': 'ÆSIR'})
+
+    def test_staged_app_audit_reads_name_variants(self):
+        import package_unsigned
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td) / 'Downhill Revived.app'
+            app.mkdir(parents=True)
+            (app / 'Downhill Revived').write_bytes(macho(self.version, False))
+            for name, private in (('00008110-001a2b3c4d5e6f70.png', ''), ('José.txt', 'José'),
+                                  ('æsir.txt', 'ÆSIR')):
+                (app / name).write_bytes(b'')
+                with patch.dict(os.environ, {'DHD_IPA_PRIVATE': private}), self.assertRaises(RuntimeError):
+                    package_unsigned.run_privacy_audit(app)
+                (app / name).unlink()
+
     def test_staged_app_audit_reads_names(self):
         import package_unsigned
         with tempfile.TemporaryDirectory() as td:

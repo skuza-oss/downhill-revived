@@ -29,9 +29,15 @@ int gs_gpu_surface(Gs *g, const GsWindow *window);
 int gs_gpu_surface_reset(Gs *g, const GsWindow *window);
 /* present.c's SDL window: its drawable size in pixels (the GsWindow size it gives the renderer). */
 void gs_window_pixels(unsigned *width, unsigned *height);
-/* A phone's app away (native_core.inc, finding 227): the render thread takes no new picture while
-   held; quiet when it has none under way. gs_app_back (present.c): the app is back. */
-void gs_render_hold(int on);
+/* A phone's app away (native_core.inc, render_gate.h, finding 227): gs_render_leave starts an
+   absence (the platform's callback: no new GPU work from the render thread); gs_render_generation
+   the game's wait (holds too, returns the absence it waits through); gs_render_current the newest;
+   gs_render_release lets go only for the newest absence (1 released); gs_render_quiet: no GPU work
+   under way. gs_app_back (present.c): the app is back. */
+unsigned gs_render_leave(void);
+unsigned gs_render_generation(void);
+unsigned gs_render_current(void);
+int gs_render_release(unsigned generation);
 int gs_render_quiet(void);
 void gs_app_back(void);
 int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned height,
