@@ -13,9 +13,10 @@
    and the answers go back through it (dhdDeliver).
 
    Test switch (the Simulator's checks, finding 227): DHD_LAUNCHER_TEST names a file in the app's
-   Documents with one line each: "wait SECONDS", or a JavaScript expression run in the page (e.g.
-   bridge.call('save_setting', {key: 'perf_counter', value: '1'})); each result goes to
-   Documents/launcher-test.log. GPL-3.0-or-later. */
+   Documents with one line each: "wait SECONDS", "mark NAME" (logged, then 4 s still, for a
+   screenshot), "turn portrait" or "turn landscape" (the launcher's window asked to turn), or a
+   JavaScript expression run in the page (e.g. bridge.call('save_setting', {key: 'perf_counter',
+   value: '1'})); each result goes to Documents/launcher-test.log. GPL-3.0-or-later. */
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -126,7 +127,6 @@ static BOOL job_deletable(NSURL *url) {
 /* The job's work on its own thread: everything that may block (a provider downloading the
    document first, the reads, the copy). */
 static void job_run(DiscJob *job) {
-    char coded[600];
     NSString *docs = [NSString stringWithUTF8String:ios_documents_dir()];
     NSString *disc = [docs stringByAppendingPathComponent:@"SCUS-97177.iso"];
     BOOL scoped = [job.url startAccessingSecurityScopedResource];
@@ -135,6 +135,7 @@ static void job_run(DiscJob *job) {
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
     [coordinator coordinateReadingItemAtURL:job.url options:NSFileCoordinatorReadingWithoutChanges error:&coordination
                                  byAccessor:^(NSURL *source) {
+        char coded[600];
         const char *path = source.path.fileSystemRepresentation;
         const char *problem = host_disc_check(path);
         if (problem) { job_problem(job, problem, 0); return; }
@@ -213,6 +214,7 @@ static void job_run(DiscJob *job) {
                                  job_deletable(job.url) ? @"true" : @"false", copied]);
     }];
     if (coordination) {
+        char coded[600];
         launcher_coded(coded, sizeof coded, "disc.problem.openFailed", "detail", coordination.localizedDescription.UTF8String,
                        (const char *)NULL);
         job_problem(job, coded, 1);
@@ -398,6 +400,26 @@ static void job_run(DiscJob *job) {
     if ([line hasPrefix:@"wait "]) {
         double seconds = [line substringFromIndex:5].doubleValue;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [weak runLines:lines at:i + 1];
+        });
+        return;
+    }
+    if ([line hasPrefix:@"mark "]) {   /* a moment for the check's screenshot: logged, then 4 s still */
+        log_test(line);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            [weak runLines:lines at:i + 1];
+        });
+        return;
+    }
+    if ([line hasPrefix:@"turn "]) {   /* the launcher in portrait or landscape (no rotation in the Simulator's tools) */
+        BOOL wide = [line hasSuffix:@"landscape"];
+        UIWindowSceneGeometryPreferencesIOS *want = [[UIWindowSceneGeometryPreferencesIOS alloc]
+            initWithInterfaceOrientations:wide ? UIInterfaceOrientationMaskLandscapeRight : UIInterfaceOrientationMaskPortrait];
+        [self.view.window.windowScene requestGeometryUpdateWithPreferences:want errorHandler:^(NSError *error) {
+            log_test([NSString stringWithFormat:@"turn: %@", error.localizedDescription]);
+        }];
+        log_test(line);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             [weak runLines:lines at:i + 1];
         });
         return;
