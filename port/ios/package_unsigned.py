@@ -64,6 +64,8 @@ def run_privacy_audit(staged_app: Path):
             violations.append(f"'{rel_path}' is a symbolic link (can't be verified)")
         elif item.is_dir() and item.name == '_CodeSignature':
             violations.append(f"'{rel_path}': a signature folder")
+        elif item.is_dir():
+            violations += ipa_audit.name_problems(rel_path, patterns)   # a folder named after an identity
         elif item.is_file():
             try:
                 data = item.read_bytes()

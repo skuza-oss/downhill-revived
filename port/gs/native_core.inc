@@ -2926,12 +2926,52 @@ static void native_zread_after(Native *n)
 
 /* The next handed field drawn and its frame recycled; 0 once told to quit. The render thread's
    loop, or with NATIVE_INLINE the field's own vsync (the field is already pending, so no wait). */
+/* A phone's app leaving the screen (finding 227): the render thread is the one that records and
+   submits the native renderer's GPU work and presents, so the lifecycle holds it between pictures
+   (gs_render_hold, set by the platform's callback itself, not when the game thread gets there): it
+   finishes the picture it is drawing, then takes no new one, and leaves the fields queued for the
+   return (dropping them would drop their uploads). gs_render_quiet says it has no picture under
+   way; with the hold set none can start, so nothing new reaches the GPU from it. Work it submitted
+   before may still run on the GPU (iOS lets that finish; what it forbids is new GPU work from the
+   background). The game thread and the GS worker may run on (a load) until the OS freezes them;
+   the GS worker blocks once two fields wait. */
+static volatile long native_hold, native_held_frames;
+static int native_in_frame;   /* queue_lock: a picture is under way */
+static Native *native_reported;   /* (a tentative definition: it is set where the renderer starts) */
+
+void gs_render_hold(int on)
+{
+    native_atomic_store(&native_hold, on);
+    if (!on) {
+        long held = __atomic_exchange_n(&native_held_frames, 0, __ATOMIC_SEQ_CST);
+        if (held) fprintf(stderr, "gs: the renderer held %ld fields while the app was away; it draws them now\n", held);
+    }
+}
+
+int gs_render_quiet(void)
+{
+    Native *n = native_reported;
+    if (!n) return 1;
+    native_mutex_lock(&n->queue_lock);
+    int quiet = !native_in_frame;
+    native_mutex_unlock(&n->queue_lock);
+    return quiet;
+}
+
 static int native_render_next(Native *n)
 {
     double rs_wait = native_rstat_start(), waited = perf_log_on() ? host_wall_seconds() : 0;
     native_mutex_lock(&n->queue_lock);
-    NATIVE_WAIT(n, !n->pending_count && !n->quit);
-    if (n->quit) { native_mutex_unlock(&n->queue_lock); return 0; }
+    for (;;) {
+        NATIVE_WAIT(n, !n->pending_count && !n->quit);
+        if (n->quit) { native_mutex_unlock(&n->queue_lock); return 0; }
+        if (!__atomic_load_n(&native_hold, __ATOMIC_SEQ_CST)) break;
+        native_atomic_store(&native_held_frames, n->pending_count);   /* held: the field stays queued */
+        native_mutex_unlock(&n->queue_lock);
+        native_sleep_ns(5000000);
+        native_mutex_lock(&n->queue_lock);
+    }
+    native_in_frame = 1;   /* with the hold checked under the same lock (gs_render_quiet) */
     NativeFrame *f = n->pending[0];
     n->pending[0] = n->pending[1];
     n->pending_count--;
@@ -2960,6 +3000,7 @@ static int native_render_next(Native *n)
     native_rstat_end();
     native_recycle(f);
     native_mutex_lock(&n->queue_lock);
+    native_in_frame = 0;
     n->free_frames[n->free_count++] = f;
     n->rendered = f->field;
     native_cond_broadcast(&n->queue_changed);
@@ -3000,7 +3041,6 @@ static int SDLCALL native_thread(void *argument)
    is drawing and leaves; waits for it 1 s at most (a present stuck in the driver), then goes on
    without it. Finding 210: exit() with this thread alive let the GPU driver's static destructors
    destroy a mutex it then locked (bionic aborts on that). */
-static Native *native_reported;
 static void native_stop(void)
 {
     Native *n = native_reported;

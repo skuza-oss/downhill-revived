@@ -345,10 +345,12 @@ static bool SDLCALL lifecycle_watch(void *unused, SDL_Event *e)
     (void)unused;
     if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND && !app_background) {
         app_background = 1;
+        gs_render_hold(1);   /* no new picture from the render thread (native_core.inc, finding 227) */
         if (surface) gs_gpu_surface_reset(&gs, NULL);
         surface_dropped = 1;
     } else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
         app_background = 0;
+        gs_app_back();   /* the renderer goes again unless the game's wait does it */
     }
     return true;
 }
@@ -371,24 +373,38 @@ static int app_away(void) { return app_background || surface_dropped; }
      (kernel.c asks host_service_host_came_back after this present and rebases fps.c's clock): the
      time away is no game time, offline or online, so nothing tries to catch it up.
    The close of the app ends the game as the close button does. */
-static SDL_AtomicInt away_stopped;   /* gs_app_stopped: the game waits, the renderer is drained, no surface */
-int gs_app_stopped(void) { return SDL_GetAtomicInt(&away_stopped); }
+static SDL_AtomicInt away_waiting;   /* the game thread is in app_away_wait (gs_app_back) */
+
+/* The app is back on the screen (the platform's callback): when the game thread never got to
+   app_away_wait (a quick flip), it lets the renderer go again itself; else app_away_wait does, once
+   the new surface is made. */
+void gs_app_back(void)
+{
+    if (!SDL_GetAtomicInt(&away_waiting)) gs_render_hold(0);
+}
 
 static void app_away_wait(void)
 {
     static int waiting;   /* gs_pump_messages, from the wait below, comes back here */
     if (waiting || !surface) return;
     waiting = 1;
+    SDL_SetAtomicInt(&away_waiting, 1);
     double since = host_wall_seconds();
+    /* DHD_TEST_SLOW_AWAY=ms (checks only): the game thread late here, as in a long load, so the
+       platform's callback finds the render thread held while the game still runs */
+    const char *slow = getenv("DHD_TEST_SLOW_AWAY");
+    if (slow && atoi(slow) > 0) {
+        hle_log("gs: test: the game thread reaches the background's wait %d ms late\n", atoi(slow));
+        SDL_Delay((Uint32)atoi(slow));
+    }
     host_app_away(1);
-    /* the drawing queued before this field reaches the GPU and ends first (the GS worker idle),
-       then the surface goes: nothing is submitted or presented until the return. The app's
-       lifecycle callback waits for this (gs_app_stopped; iOS: ios_main.m, finding 227). */
-    if (graphics_deferred()) graphics_wait();
+    /* The platform's callback has held the render thread already (gs_render_hold: it records and
+       submits nothing new; the fields stay queued, so there is no drain here: the GS worker could
+       be waiting on the held thread). The surface goes; nothing is presented until the return. */
+    gs_render_hold(1);
     gs_gpu_surface_reset(&gs, NULL);
     target_ready = 0;
-    SDL_SetAtomicInt(&away_stopped, 1);
-    hle_log("gs: in the background; the game waits (its drawing done, no surface)\n");
+    hle_log("gs: in the background; the game waits (the renderer held, no surface)\n");
     while (app_away() && !window_closed) {
         surface_dropped = 0;   /* the surface is dropped: only the app's own state is waited for */
         SDL_Delay(20);
@@ -400,7 +416,8 @@ static void app_away_wait(void)
     } else {
         resize_pending = 1;
     }
-    SDL_SetAtomicInt(&away_stopped, 0);
+    SDL_SetAtomicInt(&away_waiting, 0);
+    gs_render_hold(0);   /* the held fields draw on the new surface */
     host_app_away(0);   /* the core's clock starts again from now (kernel.c, host_service_host_came_back) */
     hle_log("gs: back in the foreground after %.1f s; the game clock goes on from now\n", host_wall_seconds() - since);
     waiting = 0;

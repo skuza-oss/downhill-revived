@@ -32,11 +32,23 @@ def macho(version, signed):
     return header + commands + b'\0dhd-port %s test\0' % version.encode() + bytes(256)
 
 
+SYMLINK = object()   # a member that is a symbolic link
+
+
 def ipa(members):
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w') as z:
         for name, data in members.items():
-            z.writestr('Payload/Downhill Revived.app/' + name, data)
+            info = zipfile.ZipInfo('Payload/Downhill Revived.app/' + name)
+            info.create_system = 3
+            if data is SYMLINK:
+                info.external_attr = 0o120777 << 16
+                data = b'../../somewhere'
+            elif name.endswith('/'):
+                info.external_attr = (0o040755 << 16) | 0x10
+            else:
+                info.external_attr = 0o100644 << 16
+            z.writestr(info, data)
     return out.getvalue()
 
 
@@ -107,6 +119,50 @@ class ReleaseAudit(unittest.TestCase):
         members = self.clean()
         members['embedded.mobileprovision'] = b'<key>ProvisionedDevices</key>'
         self.refused(members, 'the IPA must be unsigned')
+
+    # the review of lane 227: names, links and fat slices
+    def test_udid_as_a_file_name(self):
+        members = self.clean()
+        members['launcher/00008110-001A2B3C4D5E6F70.txt'] = b''
+        self.refused(members, 'a device UDID in its name')
+
+    def test_private_literal_as_a_folder_name(self):
+        members = self.clean()
+        members['Somebody Example/'] = b''
+        members['Somebody Example/readme.txt'] = b'nothing to see'
+        self.refused(members, 'a builder identifier in its name', {'DHD_IPA_PRIVATE': 'somebody example'})
+
+    def test_symbolic_link(self):
+        members = self.clean()
+        members['launcher/link'] = SYMLINK
+        self.refused(members, 'a symbolic link')
+
+    def test_fat_binary_with_one_signed_slice(self):
+        members = self.clean()
+        plain, signed = macho(self.version, False), macho(self.version, True)
+        fat = b'\xca\xfe\xba\xbe' + (2).to_bytes(4, 'big')
+        offsets = [64, 64 + len(plain)]
+        for offset, part in zip(offsets, (plain, signed)):
+            fat += (0x0100000C).to_bytes(4, 'big') + bytes(4) + offset.to_bytes(4, 'big') + len(part).to_bytes(4, 'big') + bytes(4)
+        fat += bytes(64 - len(fat)) + plain + signed
+        members['Frameworks/two.dylib'] = fat
+        self.refused(members, 'Frameworks/two.dylib: a Mach-O that still carries a code signature')
+
+    def test_staged_app_audit_reads_names(self):
+        import package_unsigned
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td) / 'Downhill Revived.app'
+            (app / 'launcher').mkdir(parents=True)
+            (app / 'Downhill Revived').write_bytes(macho(self.version, False))
+            (app / 'launcher' / '00008110-001A2B3C4D5E6F70.png').write_bytes(b'')
+            with self.assertRaises(RuntimeError):
+                package_unsigned.run_privacy_audit(app)
+            (app / 'launcher' / '00008110-001A2B3C4D5E6F70.png').unlink()
+            (app / 'Somebody Example').mkdir()
+            with patch.dict(os.environ, {'DHD_IPA_PRIVATE': 'Somebody Example'}), self.assertRaises(RuntimeError):
+                package_unsigned.run_privacy_audit(app)
+            (app / 'Somebody Example').rmdir()
+            package_unsigned.run_privacy_audit(app)   # clean again: passes
 
     def test_macho_parser(self):
         self.assertIsNone(ipa_audit.macho_signed(b'plain text'))

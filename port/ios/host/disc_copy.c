@@ -55,3 +55,41 @@ int64_t disc_copy(FILE *in, FILE *out, const volatile int *cancel,
     free(block);
     return result;
 }
+
+/* ---- the import's publication (disc_copy.h) ---- */
+#ifdef _WIN32   /* the unit test on Windows */
+#include <windows.h>
+static SRWLOCK publish_lock = SRWLOCK_INIT;
+#define PUBLISH_LOCK() AcquireSRWLockExclusive(&publish_lock)
+#define PUBLISH_UNLOCK() ReleaseSRWLockExclusive(&publish_lock)
+#else
+#include <pthread.h>
+static pthread_mutex_t publish_lock = PTHREAD_MUTEX_INITIALIZER;
+#define PUBLISH_LOCK() pthread_mutex_lock(&publish_lock)
+#define PUBLISH_UNLOCK() pthread_mutex_unlock(&publish_lock)
+#endif
+static long long publish_newest;   /* under publish_lock */
+
+long long disc_publish_begin(void)
+{
+    PUBLISH_LOCK();
+    long long generation = ++publish_newest;
+    PUBLISH_UNLOCK();
+    return generation;
+}
+
+int disc_publish_current(long long generation)
+{
+    PUBLISH_LOCK();
+    int current = generation == publish_newest;
+    PUBLISH_UNLOCK();
+    return current;
+}
+
+int disc_publish(long long generation, const char *from, const char *to)
+{
+    PUBLISH_LOCK();
+    int result = generation != publish_newest ? 1 : rename(from, to) == 0 ? 0 : -1;
+    PUBLISH_UNLOCK();
+    return result;
+}

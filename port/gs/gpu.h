@@ -29,6 +29,11 @@ int gs_gpu_surface(Gs *g, const GsWindow *window);
 int gs_gpu_surface_reset(Gs *g, const GsWindow *window);
 /* present.c's SDL window: its drawable size in pixels (the GsWindow size it gives the renderer). */
 void gs_window_pixels(unsigned *width, unsigned *height);
+/* A phone's app away (native_core.inc, finding 227): the render thread takes no new picture while
+   held; quiet when it has none under way. gs_app_back (present.c): the app is back. */
+void gs_render_hold(int on);
+int gs_render_quiet(void);
+void gs_app_back(void);
 int gs_gpu_present(Gs *g, const uint32_t *pixels, unsigned width, unsigned height,
                    unsigned window_width, unsigned window_height);
 /* 1 once a present failed on a lost device (the driver reset or removed the GPU; finding 171): no
