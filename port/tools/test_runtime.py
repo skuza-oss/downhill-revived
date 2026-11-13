@@ -192,6 +192,14 @@ def host_tests():
     # the touch controls' rules: scaling, flick lanes, sprint and resume guards, the trick stick,
     # the pause rows' steps (finding 141)
     run('touch', [HLE / 'touch.c', HLE / 'test_touch.c'])
+    # how the run before ended on iOS, every way (port/ios/host/run_record.c, finding 227)
+    run('run-record', [ROOT / 'port/ios/host/run_record.c', ROOT / 'port/ios/tests/test_run_record.c'])
+    # the iOS launcher's calls with a fake page, and the disc copy's rules (finding 227)
+    calls_dir = OUT / 'launcher-calls'
+    calls_dir.mkdir(exist_ok=True)
+    run('launcher-calls', [ROOT / 'port/ios/host/launcher_calls.c', ROOT / 'port/net/json.c',
+                           ROOT / 'port/ios/tests/test_launcher_calls.c'], calls_dir, includes=[ROOT / 'port'])
+    run('disc-copy', [ROOT / 'port/ios/host/disc_copy.c', ROOT / 'port/ios/tests/test_disc_copy.c'])
 
 
 def main():
@@ -205,7 +213,7 @@ def main():
     guest_tests()
     host_tests()
     scripts = ['test_rider_time', 'test_rider_interaction', 'test_npc_animation', 'test_rider_input', 'test_float',
-               'test_port_headers', 'test_patch_guard', 'test_rustgs_key']
+               'test_port_headers', 'test_patch_guard', 'test_rustgs_key', 'test_fps']
     if os.environ.get('DHD_PCSX2_VU'):
         scripts += ['test_vu1_pcsx2', 'test_vu0_pcsx2']
     for script in scripts:

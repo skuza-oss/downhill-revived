@@ -1276,8 +1276,9 @@ int host_disc_ready(void)
 void host_service_host_init(void) { host_init(); }
 void host_service_host_console_init(void) { host_console_init(); }
 int host_service_host_disc_ready(void) { return host_disc_ready(); }
-#ifdef __ANDROID__
-/* The Android start (port/host/android_main.c) checks the copy it made of the player's disc image:
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+/* The phones' launchers and starts (port/host/android_main.c, android_launcher.c; iOS's
+   port/ios/app/launcher.m, ios_main.m; finding 227) check the player's disc image and its copy:
    NULL when it is Downhill Domination (USA), else why not. */
 const char *host_disc_check(const char *path)
 {
