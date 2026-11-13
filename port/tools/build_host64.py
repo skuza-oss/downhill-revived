@@ -100,10 +100,10 @@ TARGETS = {t.key: t for t in (
 POSIX_UNITS = {'port/host/host_win32.c': 'port/host/host_posix.c'}
 WINDOWS_ONLY = ('port/gs/replay.c',)  # Win32 calls (GS replay)
 ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c',
-                 'port/host/android_update.c', 'port/net/update_check.c']
-# Android: only SDL's entry leaves the library; everything else may be garbage-collected
-# (--gc-sections), as /opt:ref does for dhd64.exe.
-ANDROID_EXPORTS = '{\n  global: SDL_main;\n  local: *;\n};\n'
+                 'port/host/android_update.c', 'port/host/android_launcher.c', 'port/net/update_check.c']
+# Android: only SDL's entry and the launcher's native calls (android_launcher.c, finding 225) leave
+# the library; everything else may be garbage-collected (--gc-sections), as /opt:ref does for dhd64.exe.
+ANDROID_EXPORTS = '{\n  global: SDL_main; Java_app_downhillrevived_Native_*;\n  local: *;\n};\n'
 
 
 def host_units(t):

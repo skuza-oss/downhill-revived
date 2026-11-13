@@ -9,16 +9,17 @@
    - the app's files folder (internal storage, SDL_GetAndroidInternalStoragePath) stands for the
      folder of dhd.exe: host_exe_path names dhd64 there, so dhd.ini, saves, dhd.log and the disc
      image's copy live there;
-   - the disc image: SCUS-97177.iso in that folder. The first start's screen (port/android's
-     SetupActivity.java, finding 143) asks for the player's .iso, checks it and the room for it, and
+   - the disc image: SCUS-97177.iso in that folder. The launcher (port/launcher's page in
+     LauncherActivity, finding 225) asks for the player's .iso, checks it and the room for it, and
      copies it there before the game starts. Here it is checked again; when it is missing or not the
-     game (a start without that screen), the player picks it through Android's document picker
-     (SDL's file dialog) and it is copied here (the content URI is read once; Android gives no path);
+     game, the game ends (DhdActivity checks it before SDL starts and opens the launcher instead), so
+     the disc has one place to be chosen;
    - a new dhd.ini names the copy (iso); the player defaults (the native renderer at 2x,
      widescreen, movies skipped) come from host.c as on Windows;
-   - the update notice: once a day at most (not with auto_update = off) a thread asks whether a
-     newer release has an APK and says so over the game (android_update.c, finding 143). An APK is
-     updated by installing the new one; nothing is downloaded here;
+   - the update notice: when the launcher didn't show the update line this start (a direct start,
+     DHD_LAUNCHER_CHECKED unset), once a day at most (not with auto_update = off) a thread asks
+     whether a newer release has an APK and says so over the game (android_update.c, finding 143).
+     An APK is updated by installing the new one; nothing is downloaded here;
    - SDL hints: landscape only, the Back button kept from closing the game.
    The game ends with host_end (the close of the activity, gs_pump_messages, on the game's thread:
    the work threads and the render thread stop, then the process leaves without the C library's
@@ -50,81 +51,21 @@ const char *android_exe_path(void) { return exe; }
 
 /* ---- the disc image ---- */
 
-static SDL_Semaphore *picked;
-static char chosen[4096];
-
-static void SDLCALL on_pick(void *userdata, const char *const *list, int filter)
-{
-    (void)userdata; (void)filter;
-    chosen[0] = 0;
-    if (list && list[0]) snprintf(chosen, sizeof chosen, "%s", list[0]);
-    SDL_SignalSemaphore(picked);
-}
-
-/* The document the player picks (a content:// URI), or "" when cancelled. */
-static const char *pick(void)
-{
-    if (!picked) picked = SDL_CreateSemaphore(0);
-    SDL_ShowOpenFileDialog(on_pick, NULL, NULL, NULL, 0, NULL, false);  /* no filter: any file */
-    SDL_WaitSemaphore(picked);
-    return chosen;
-}
-
-/* Copies the document at uri to path (through a .part file); 1 when done. */
-static int copy_disc(const char *uri, const char *path)
-{
-    char part[1300];
-    snprintf(part, sizeof part, "%s.part", path);
-    SDL_IOStream *in = SDL_IOFromFile(uri, "rb");
-    if (!in) { fprintf(stderr, "android: %s can't be opened (%s)\n", uri, SDL_GetError()); return 0; }
-    FILE *out = fopen(part, "wb");
-    if (!out) { SDL_CloseIO(in); fprintf(stderr, "android: %s can't be written\n", part); return 0; }
-    static char block[1 << 20];
-    uint64_t total = 0, next = 0;
-    size_t n;
-    int ok = 1;
-    while ((n = SDL_ReadIO(in, block, sizeof block)) > 0) {
-        if (fwrite(block, 1, n, out) != n) { ok = 0; break; }
-        total += n;
-        if (total >= next) { fprintf(stderr, "android: copying the disc image, %llu MB\n", (unsigned long long)(total >> 20)); next += 256u << 20; }
-    }
-    if (SDL_GetIOStatus(in) == SDL_IO_STATUS_ERROR) ok = 0;
-    SDL_CloseIO(in);
-    ok &= fclose(out) == 0;
-    if (ok && total && rename(part, path) == 0) {
-        fprintf(stderr, "android: disc image copied, %llu MB\n", (unsigned long long)(total >> 20));
-        return 1;
-    }
-    unlink(part);
-    return 0;
-}
-
-/* The copy of the disc image in the files folder, made on the first start; 0 if the player gave up. */
+/* The copy of the disc image in the files folder, which the launcher made (DhdActivity checks it
+   before the game starts and opens the launcher without it); when it is missing or not the game
+   here all the same, a copy that isn't the game is removed and 0 is returned: the game ends, and the
+   next start's launcher asks for the disc. */
 static int disc_ready(const char *path)
 {
     struct stat st;
     const char *problem = stat(path, &st) == 0 ? host_disc_check(path) : "none";
     if (!problem) return 1;
-    if (strcmp(problem, "none")) unlink(path);  /* not the game: ask again */
-    char message[1024];
-    snprintf(message, sizeof message, "%s%sChoose your Downhill Domination (USA) disc image: the game plays from "
-             "your own copy of the disc, an .iso file (SCUS-97177). It is copied into the app once (a few GB "
-             "of storage; this takes a minute or two with nothing on the screen).",
-             strcmp(problem, "none") ? problem : "", strcmp(problem, "none") ? "\n\n" : "");
-    for (;;) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Downhill Revived", message, NULL);
-        const char *uri = pick();
-        if (!*uri) return 0;
-        fprintf(stderr, "android: disc image chosen: %s\n", uri);
-        if (!copy_disc(uri, path)) {
-            snprintf(message, sizeof message, "The file couldn't be copied (is there room on the phone?).\n\n"
-                     "Choose your Downhill Domination (USA) disc image (SCUS-97177).");
-            continue;
-        }
-        if (!(problem = host_disc_check(path))) return 1;
+    if (strcmp(problem, "none")) {
+        fprintf(stderr, "android: the disc image's copy isn't the game (%s); removed\n", problem);
         unlink(path);
-        snprintf(message, sizeof message, "%s\n\nChoose your Downhill Domination (USA) disc image (SCUS-97177).", problem);
     }
+    fprintf(stderr, "android: no disc image; the game ends, the launcher asks for it at the next start\n");
+    return 0;
 }
 
 /* How the run before ended, as Android recorded it (the reason, and a native crash's tombstone in
@@ -184,11 +125,10 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
     char disc[1200];
     snprintf(disc, sizeof disc, "%s" DISC_NAME, files);
     if (!disc_ready(disc)) {
-        fprintf(stderr, "android: no disc image; the game ends\n");
         host_end(0);
     }
     settings_start(disc);
-    android_update_start(files);
+    if (!getenv("DHD_LAUNCHER_CHECKED")) android_update_start(files);  /* the launcher's line said it */
     char *args[] = {exe, NULL};
     (void)argc; (void)argv;
     int code = dhd_launcher_main(1, args);
