@@ -2,8 +2,11 @@
 //! like the performance counter. C (port/hle/touch.c) lays the controls out in mm and hands over
 //! a list of shapes each picture (`dhdr_surface_touch`); here each is one instanced quad whose
 //! fragment shader draws it as a signed distance (discs with a two-tone rim, rings, rounded
-//! boxes, the trick stick's sectors, the PS2 symbols, chevrons, stripes) or as a character of the
-//! 8x8 font (`font8x8.rs`). Nothing here reads the game or the environment.
+//! boxes, the trick stick's sectors, the PS2 symbols, chevrons, stripes, the action pictures of
+//! Button Style Actions) or as a character of the 8x8 font (`font8x8.rs`). The action pictures
+//! (finding 229) are signed distances too, generated from `touch_icons.txt` into
+//! `touch_icons.wgsl` by `port/tools/touch_icons.py`: no texture, sharp at any size. Nothing here
+//! reads the game or the environment.
 
 use crate::device::Gpu;
 use super::font8x8;
@@ -150,7 +153,7 @@ impl Objects {
 
 // Kinds as port/hle/touch.h numbers them (TS_*). Shapes are in mm; `screen` is the surface's
 // size in pixels and its pixels per mm.
-pub(crate) const SHADER: &str = r#"
+pub(crate) const SHADER: &str = concat!(r#"
 struct Screen { size: vec2f, per_mm: vec2f }
 @group(0) @binding(0) var<uniform> screen: Screen;
 @group(0) @binding(1) var font: texture_2d<f32>;
@@ -170,6 +173,7 @@ const PI: f32 = 3.14159265;
 fn extent(kind: f32, a: f32, b: f32) -> vec2f {
     let k = i32(kind);
     if (k == 2 || k == 10) { return vec2f(a, b); }           // rect, stripes: half sizes
+    if (k == 11) { return vec2f(a, a); }                       // an action picture: a its half size
     if (k == 9) { return vec2f(a * 0.5, a * 0.5); }           // a character: a high
     if (k == 3) { return vec2f(b, b); }                        // sector: outer radius
     if (k == 1) { return vec2f(a + b, a + b); }                // ring
@@ -212,6 +216,32 @@ fn triangle(p0: vec2f, r: f32) -> f32 {
     if (p.x + k * p.y > 0.) { p = vec2f(p.x - k * p.y, -k * p.x - p.y) / 2.; }
     p.x = p.x - clamp(p.x, -2. * r, 0.);
     return -length(p) * sign(p.y);
+}
+
+// The action pictures' pieces (touch_icons.wgsl): a segment's distance, a rounded box's, an arc's
+// (angles in radians, 0 right, anticlockwise as seen) and one edge of a polygon (Inigo Quilez's
+// sdPolygon, MIT; https://iquilezles.org/articles/distfunctions2d/), y down.
+fn ic_seg(p: vec2f, a: vec2f, b: vec2f) -> f32 { return segment(p, a, b); }
+fn ic_box(p: vec2f, half: vec2f, r: f32) -> f32 { return box(p, half, r); }
+fn ic_arc(p: vec2f, c: vec2f, r: f32, a0: f32, a1: f32) -> f32 {
+    let q = p - c;
+    let mid = (a0 + a1) * 0.5;
+    let half = (a1 - a0) * 0.5;
+    let ang = atan2(-q.y, q.x);
+    let off = abs(atan2(sin(ang - mid), cos(ang - mid)));
+    let e0 = length(q - vec2f(r * cos(a0), -r * sin(a0)));
+    let e1 = length(q - vec2f(r * cos(a1), -r * sin(a1)));
+    return select(min(e0, e1), abs(length(q) - r), off <= half);
+}
+fn ic_edge(p: vec2f, v: vec2f, w: vec2f, e: ptr<function, f32>, s: ptr<function, f32>) {
+    let ed = w - v;
+    let pv = p - v;
+    let b = pv - ed * clamp(dot(pv, ed) / dot(ed, ed), 0., 1.);
+    *e = min(*e, dot(b, b));
+    let c1 = p.y >= v.y;
+    let c2 = p.y < w.y;
+    let c3 = ed.x * pv.y > ed.y * pv.x;
+    if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) { *s = -*s; }
 }
 
 fn over(base: vec4f, top: vec4f, cover: f32) -> vec4f {   // top over base, straight alpha
@@ -290,8 +320,14 @@ fn over(base: vec4f, top: vec4f, cover: f32) -> vec4f {   // top over base, stra
         let inside = clamp(0.5 - box(p, vec2f(a, b), 0.) / aa, 0., 1.);
         let stripe = step(0.5, fract((p.x + p.y) / 2.4));
         out = over(out, v.fill, inside * stripe);
+    } else if (k == 11) {    // an action picture: a its half size, b < 0 mirrored, c which
+        let q = vec2f(p.x * select(1.0, -1.0, b < 0.), p.y) / a;
+        let dist = icon_dist(i32(c + 0.5), q) * a;
+        let edge = max(a * 0.09, aa * 1.2);   // a dark edge keeps it readable over bright snow
+        out = over(out, vec4f(0., 0., 0., 0.6 * v.line.a), clamp(0.5 - (dist - edge) / aa, 0., 1.));
+        out = over(out, v.line, clamp(0.5 - dist / aa, 0., 1.));
     }
     if (out.a <= 0.002) { discard; }
     return out;
 }
-"#;
+"#, include_str!("touch_icons.wgsl"));

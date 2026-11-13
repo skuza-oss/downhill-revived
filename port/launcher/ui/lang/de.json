@@ -145,6 +145,8 @@
   "row.touchSteer.hint": "Per Stick, durch Kippen des Geräts oder per Steuerkreuz.",
   "row.touchSize": "Size",
   "row.touchSize.hint": "Auto passt die Steuerung an deinen Bildschirm an.",
+  "row.touchStyle": "Button Style",
+  "row.touchStyle.hint": "Actions zeigt, was jeder Button tut, mit seinem PS2-Button in einem kleinen Abzeichen; Symbols zeigt nur die PS2-Symbole.",
   "row.touchEdit": "Touch-Layout bearbeiten",
   "row.touchEdit.hint": "Startet das Spiel im Layout-Editor: Ziehe die Tasten dorthin, wo deine Daumen liegen.",
   "row.touchEdit.button": "Edit Layout",

@@ -23,6 +23,14 @@ enum { TOUCH_FINGERS = 10, TOUCH_SHAPES = 512, TOUCH_TEXT = 48 };
 enum { TOUCH_THUMB_ZONES, TOUCH_CLASSIC };
 enum { TOUCH_LABELS_AUTO, TOUCH_LABELS_ALWAYS, TOUCH_LABELS_OFF };
 enum { TOUCH_ATTACK_FLICK, TOUCH_ATTACK_BUTTONS };
+/* Button Style (finding 229): Actions shows what each button does (a pedal, fists, a brake ...) with
+   a small badge of the pad's name; Symbols shows the PS2 pad's symbols alone (the look before). */
+enum { TOUCH_STYLE_ACTIONS, TOUCH_STYLE_SYMBOLS };
+/* The names on Actions' badges: the PS2 pad's, or the Xbox or Nintendo names in the same places
+   when Button Icons (dhd.ini prompts, finding 134) chooses them, so the badges say what the game's
+   prompts say. Auto keeps the PS2 names: on a touch screen the game's prompts name a controller
+   only while one is in use (finding 227), and the overlay hides then. */
+enum { TOUCH_BADGES_PS2, TOUCH_BADGES_XBOX, TOUCH_BADGES_NINTENDO };
 
 /* The controls a layout has (also the editor's and dhd.ini touch_layout's names). */
 enum {
@@ -62,6 +70,8 @@ typedef struct {
     int trick_size;       /* mm */
     int labels;           /* TOUCH_LABELS_* */
     int attacks;          /* TOUCH_ATTACK_* */
+    int style;            /* TOUCH_STYLE_* */
+    int badges;           /* TOUCH_BADGES_* */
     int vibration;
     int show_with_pad;    /* With a controller: 0 hide, 1 show */
     int tilt_strength;    /* percent */
@@ -116,8 +126,12 @@ enum {
     TS_CROSS, TS_CIRCLE, TS_TRIANGLE, TS_SQUARE,   /* the PS2 symbols: a radius */
     TS_CHEVRON,    /* ‹ (c = pi) or › (c = 0): a size */
     TS_CHAR,       /* one character of the 8x8 font: a its height, c the character */
-    TS_STRIPES     /* the editor's no-start strips: a rectangle with stripes (a,b half sizes) */
+    TS_STRIPES,    /* the editor's no-start strips: a rectangle with stripes (a,b half sizes) */
+    TS_ICON        /* an action picture (finding 229): a half its size, b -1 mirrored, c the TI_* */
 };
+/* The action pictures, in port/render/src/present/touch_icons.txt's order (its shader's ids). */
+enum { TI_PEDAL, TI_FIST, TI_BRAKE, TI_HOP, TI_SLIDE, TI_SPRINT, TI_STAR, TI_HAND, TI_BOOT, TI_WRAP,
+       TI_CAMERA, TI_PAUSE, TI_BAR, TI_LINK, TI_COUNT };
 typedef struct {
     int kind;
     float x, y, a, b, c, d;
@@ -184,12 +198,21 @@ int touch_take_buzz(Touch *t);
 int touch_take_ask(Touch *t);
 /* Saved settings that changed (hints shown, the editor's Done): 1 and a copy in *out. */
 int touch_take_saved(Touch *t, TouchSettings *out);
+/* A line for the host's log, once (NULL: none): a loaded layout that left no room to steer and the
+   controls shown at their default places for it (finding 229). */
+const char *touch_take_note(Touch *t);
 
 /* State the host passes on. */
 int touch_visible(const Touch *t);       /* the overlay is drawn (the race HUD, or the editor) */
 int touch_hud_mode(const Touch *t);      /* 0 the game's HUD; 1 moved (right hand), 2 moved (left hand) */
 int touch_owns_touches(const Touch *t);  /* touches are the overlay's (no menu mouse from them) */
 int touch_freeze(const Touch *t);        /* the trick-stick hint holds the game */
+
+/* A control shows its air picture (Button Style Actions, finding 229): the rider has been in the air
+   for the air wait (on the ground again for TOUCH_GROUND_MS), and the control was not held down
+   when that changed (a held control keeps its picture until it is let go). */
+enum { TOUCH_GROUND_MS = 120 };
+int touch_air_picture(const Touch *t, int control);
 
 /* The overlay's shapes, mm; returns the count. */
 int touch_shapes(const Touch *t, TouchShape *out, int max);

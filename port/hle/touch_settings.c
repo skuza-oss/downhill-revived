@@ -3,8 +3,8 @@
    own popup style (menu_page.c). Each change is saved to dhd.ini at once (touch_* keys) and the
    host's touch controls follow it (TOUCH_COMMAND_SETTINGS); Edit Layout opens the overlay's editor
    over the page, Show Hints Again and Set Tilt Centre are commands too (touch_field.c).
-   Page 1: Layout, Hand, Steer With (Stick, Tilt or D-pad; finding 214), Size, Opacity; Edit
-           Layout, More, Back.
+   Page 1: Layout, Hand, Steer With (Stick, Tilt or D-pad; finding 214), Size, Opacity, Button
+           Style (Actions or Symbols; finding 229); Edit Layout, More, Back.
    Page 2: Stick, Stick Range (both dimmed with the D-pad), Trick Stick, Trick Labels, Attacks (the
            last three dimmed under Classic pad); Prev, More, Back.
    Page 3: Vibration, With A Controller, Show Hints Again, Tilt Strength and Set Tilt Centre (alive
@@ -22,21 +22,22 @@
 
 #include "settings_table.h"
 
-enum { VALUES = 5, PAGES = 3 };
+enum { VALUES = 6, PAGES = 3 };
 enum { DIM_NEVER, DIM_CLASSIC, DIM_NO_TILT, DIM_DPAD };   /* DIM_DPAD: the stick's rows, while the D-pad steers */
 enum { ACT_NONE, ACT_EDIT, ACT_MORE, ACT_PREV, ACT_BACK, ACT_HINTS, ACT_TILT_CENTRE };
 
-typedef struct { const char *label, *key; int dim, action; } Line;   /* key NULL: a button (action) */
+typedef struct { const char *label, *key; int dim, action; } Line;   /* key NULL: a button (action); label NULL: none */
 
 static const Line lines[PAGES][VALUES] = {
     {{"Layout:", "touch_preset", DIM_NEVER, 0}, {"Hand:", "touch_hand", DIM_NEVER, 0}, {"Steer With:", "touch_steer", DIM_NEVER, 0},
-     {"Size:", "touch_size", DIM_NEVER, 0}, {"Opacity:", "touch_opacity", DIM_NEVER, 0}},
+     {"Size:", "touch_size", DIM_NEVER, 0}, {"Opacity:", "touch_opacity", DIM_NEVER, 0},
+     {"Button Style:", "touch_style", DIM_NEVER, 0}},
     {{"Stick:", "touch_stick", DIM_DPAD, 0}, {"Stick Range:", "touch_stick_range", DIM_DPAD, 0},
      {"Trick Stick:", "touch_trick_stick", DIM_CLASSIC, 0}, {"Trick Labels:", "touch_labels", DIM_CLASSIC, 0},
-     {"Attacks:", "touch_attacks", DIM_CLASSIC, 0}},
+     {"Attacks:", "touch_attacks", DIM_CLASSIC, 0}, {NULL, NULL, DIM_NEVER, 0}},
     {{"Vibration:", "touch_vibration", DIM_NEVER, 0}, {"With A Controller:", "touch_with_pad", DIM_NEVER, 0},
      {"Show Hints Again", NULL, DIM_NEVER, ACT_HINTS}, {"Tilt Strength:", "touch_tilt_strength", DIM_NO_TILT, 0},
-     {"Set Tilt Centre", NULL, DIM_NO_TILT, ACT_TILT_CENTRE}},
+     {"Set Tilt Centre", NULL, DIM_NO_TILT, ACT_TILT_CENTRE}, {NULL, NULL, DIM_NEVER, 0}},
 };
 
 static const int buttons[PAGES][3] = {{ACT_EDIT, ACT_MORE, ACT_BACK}, {ACT_PREV, ACT_MORE, ACT_BACK}, {ACT_PREV, ACT_BACK, ACT_NONE}};
@@ -104,6 +105,7 @@ void touch_settings_build(MenuPage *p, int page)
     for (int i = 0; i < MENU_PAGE_ROWS; i++) row_action[i] = ACT_NONE, row_line[i] = -1;
     for (int i = 0; i < VALUES; i++) {
         const Line *l = &lines[index][i];
+        if (!l->label) continue;
         int row = l->key ? menu_page_value(p, l->label, "", 1) : menu_page_row(p, l->label, !dimmed(l));
         if (row < 0) continue;
         row_line[row] = index * VALUES + i;

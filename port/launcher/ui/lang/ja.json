@@ -143,6 +143,8 @@
   "row.touchSteer.hint": "スティック、端末を傾ける、または十字キー。",
   "row.touchSize": "Size",
   "row.touchSize.hint": "Autoは画面に合わせてコントロールの大きさを決めます。",
+  "row.touchStyle": "Button Style",
+  "row.touchStyle.hint": "Actionsは各ボタンの動作を絵で示し、小さなバッジにPS2のボタンを表示します。SymbolsはPS2の記号だけを表示します。",
   "row.touchEdit": "タッチレイアウトを編集",
   "row.touchEdit.hint": "ゲームのレイアウトエディターを起動します。親指が休む位置にコントロールをドラッグしてください。",
   "row.touchEdit.button": "Edit Layout",

@@ -7,7 +7,8 @@ shadows and the sun's glow, the lens flare and the particles, which helps the mo
 same tab, on by default) lets the phone's graphics chip run part of the PS2's work, which is
 faster; if something in the picture looks wrong, turn it OFF and send us the log.
 Play with the touch controls (Classic pad or Thumb zones; steer with the stick, by tilting the
-phone or with a D-pad: OPTIONS > SETTINGS > Controls tab > Touch Controls; Edit Layout moves and
+phone or with a D-pad: OPTIONS > SETTINGS > Controls tab > Touch Controls; Button Style shows
+what each button does (Actions, the default) or the PS2 symbols (Symbols); Edit Layout moves and
 sizes each button, 25 % to 600 %, with undo; tablets get their own larger defaults) or a controller. A
 **SKIP** button ends the flight over the track before a race, the movies and the title's demo. The
 game's cheat codes are typed on the touch pause menu's **CODES** page.

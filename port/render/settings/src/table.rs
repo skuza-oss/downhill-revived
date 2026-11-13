@@ -159,6 +159,9 @@ pub const SETTINGS: &[Setting] = &[
                                                            c("37", "37 mm")], "31", "31"),
     choice("touch_labels", "DHD_TOUCH_LABELS", &[c("auto", "Auto"), c("always", "Always"), c("off", "Off")], "auto", "auto"),
     choice("touch_attacks", "DHD_TOUCH_ATTACKS", &[c("flick", "Flick"), c("buttons", "Buttons")], "flick", "flick"),
+    // Button Style (finding 229): Actions shows what each button does with the pad's name in a badge,
+    // Symbols the PS2 pad's symbols alone (the look before; an older dhd.ini has no line).
+    choice("touch_style", "DHD_TOUCH_STYLE", &[c("actions", "Actions"), c("symbols", "Symbols")], "actions", "actions"),
     switch("touch_vibration", "DHD_TOUCH_VIBRATION", &[c("0", "Off"), c("1", "On")], "1", "1"),
     choice("touch_with_pad", "DHD_TOUCH_WITH_PAD", &[c("hide", "Hide"), c("show", "Show")], "hide", "hide"),
     choice("touch_tilt_strength", "DHD_TOUCH_TILT_STRENGTH", &[c("0", "0%"), c("10", "10%"), c("20", "20%"), c("30", "30%"),

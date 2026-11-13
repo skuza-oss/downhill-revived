@@ -76,7 +76,13 @@ static const char *const control_names[TC_COUNT] = {
     "cross", "triangle", "csquare", "ccircle", "plusleft", "plusright", "lbar", "rbar", "l3", "r3", "stick", "trick"
 };
 
-typedef struct { int on; float x, y, r, hw, hh; int box; } Ctl;  /* r: round; hw, hh: box half sizes */
+typedef struct {
+    int on;
+    float x, y, r, hw, hh;   /* r: round; hw, hh: box half sizes */
+    int box;
+    float x0, y0, r0, hh0;   /* its place and size before the player's edits (the steering area and the
+                                D-pad's room are measured from these: moving a button never moves them) */
+} Ctl;
 
 /* The places in the spec, as % of the reference screen (centre x, y; width as % of its width, a
    box's height as % of its height). */
@@ -241,6 +247,11 @@ struct Touch {
     int air_layout;
     double air_since;          /* race ms the air flag came */
     int air_was;
+    /* the action pictures' ground or air (finding 229): the flag as last seen and since when (race
+       ms), the state shown, and each control's own (kept while it is held) */
+    int pic_flag, pic_air;
+    double pic_flag_since;
+    unsigned char pic_air_ctl[TC_COUNT];
     /* ✕ and SELECT windows (race ms) */
     double cross_released, select_released;
     int cross_was_down, cross_released_by_overlay, controls_since_release;
@@ -295,6 +306,8 @@ struct Touch {
     int replay_ran;            /* this replay's clock has moved (its load and countdown are over; finding 218) */
     int skip_pulse;            /* a SKIP tap's START press is going out */
     unsigned downs;            /* touch-downs so far (Finger.order) */
+    char note[160];            /* touch_take_note's line */
+    int note_ready, rescue_noted;   /* a line waits; the steering rescue was logged (once a run) */
 };
 
 static const uint16_t SECTOR_BUTTONS[8] = {
@@ -341,6 +354,7 @@ void touch_settings_default(TouchSettings *s)
     s->trick_size = 31;
     s->labels = TOUCH_LABELS_AUTO;
     s->attacks = TOUCH_ATTACK_FLICK;
+    s->style = TOUCH_STYLE_ACTIONS;
     s->vibration = 1;
     s->tilt_strength = 50;
     s->hud_moved = 1;
@@ -419,14 +433,19 @@ static float mirror_x(const Touch *t, float x) { return right_handed(t) ? x : t-
    follows the buttons' (touch_button_scale), kept to the room below the Classic bar (or the top
    buttons) so the pad fits at the Size setting's low end, times the layout editor's size for the
    stick's home. */
+/* The room below the Classic bar (or the top buttons) as the preset places them: from their places
+   before the player's edits, so a bar dragged to the bottom never squeezes the pad to nothing (the
+   review of 2026-11-13; finding 229). */
+static const float DPAD_HALF_MIN_MM = 2.0f;
 static float dpad_room(const Touch *t)
 {
     const Ctl *above = t->set.preset == TOUCH_CLASSIC ? &t->ctl[TC_LBAR] : &t->ctl[TC_CAMERA];
-    return t->screen.height - t->screen.strip_bottom - 1.0f - (above->y + above->hh * AREA_GROW + GAP_MM);
+    return t->screen.height - t->screen.strip_bottom - 1.0f - (above->y0 + above->hh0 * AREA_GROW + GAP_MM);
 }
 static float dpad_half(const Touch *t, const TouchEdit *e)
 {
     float fit = (dpad_room(t) / 2 - GAP_MM) / 3;   /* the pad's half extent, 3 half + GAP_MM, is half the room */
+    if (fit < DPAD_HALF_MIN_MM) fit = DPAD_HALF_MIN_MM;   /* never zero or less, whatever the screen */
     float half = DPAD_HALF_MM * t->bs;
     return (half < fit ? half : fit) * e->size * (t->dpad_fit > 0 ? t->dpad_fit : 1.0f);
 }
@@ -485,7 +504,7 @@ static void dpad_home(Touch *t, const TouchEdit *e, float *x, float *y)
             if (pass == 0 && fit * arm < DPAD_ARM_MIN_MM - 0.001f && fit < 1.0f) break;
             t->dpad_fit = fit;
             float span = dpad_extent(t, e);
-            float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
+            float top = above->y0 + above->hh0 * AREA_GROW + GAP_MM + span;
             float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
             float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
             float far = t->screen.width / 2 - span;
@@ -502,7 +521,7 @@ static void dpad_home(Touch *t, const TouchEdit *e, float *x, float *y)
     /* nothing clear: full size, the old rule (L3's gap only) */
     t->dpad_fit = 1.0f;
     float half = dpad_half(t, e), off = dpad_off(t, e), span = dpad_extent(t, e);
-    float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
+    float top = above->y0 + above->hh0 * AREA_GROW + GAP_MM + span;
     float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
     float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
     *y = bottom < top ? bottom : clampf(*y, top, bottom);
@@ -640,6 +659,8 @@ static void lay_out(Touch *t, int hud_moved)
         float side_x = mirror_x(t, x);   /* which half it belongs to (cutout_shift) */
         const TouchEdit *e = &st->edit[st->preset == TOUCH_CLASSIC][c];
         int dpad = c == TC_STICK && st->dpad;
+        k->x0 = mirror_x(t, x) + (side_x < W / 2 ? shift_left : -shift_right), k->y0 = y;
+        k->r0 = w / 2 * t->bs, k->hh0 = h / 2 * t->bs;
         if (c == TC_STICK) t->dpad_fit = 1.0f;
         if (dpad) dpad_home(t, e, &x, &y);
         x += e->dx, y += e->dy;
@@ -674,21 +695,24 @@ static void lay_out(Touch *t, int hud_moved)
             else k->x = sc->cut_x0 - rx - 1;
         }
     /* the steering area: 60 mm from the left strip, 3 mm short of the midline and of the right
-       cluster's touch areas; Classic's to 44% of the width, below the L bar */
+       cluster's touch areas; Classic's to 44% of the width, below the L bar. All from the places
+       before the player's edits (x0, y0): a button dragged into it takes the touches on itself
+       (routing tries the buttons first), but moving one never moves the area's edges, so a bar
+       dragged to the bottom can't leave no steering (the review of 2026-11-13; finding 229) */
     float left = t->screen.strip_left, x1 = left + 60 * (t->tablet ? TOUCH_TABLET_SCALE : 1) + tablet_inward(t), top = 0;
     if (st->preset == TOUCH_CLASSIC) {
         x1 = 0.44f * W;
-        top = t->ctl[TC_LBAR].y + t->ctl[TC_LBAR].hh * AREA_GROW + GAP_MM;
+        top = t->ctl[TC_LBAR].y0 + t->ctl[TC_LBAR].hh0 * AREA_GROW + GAP_MM;
     } else {
         if (x1 > W / 2 - GAP_MM) x1 = W / 2 - GAP_MM;
         for (int c = 0; c < TC_COUNT; c++) {
             const Ctl *k = &t->ctl[c];
             if (!k->on || c == TC_STICK || c == TC_TRICK || c == TC_CAMERA || c == TC_PAUSE) continue;
-            float edge = mirror_x(t, k->x) - k->r * AREA_GROW - GAP_MM;
+            float edge = mirror_x(t, k->x0) - k->r0 * AREA_GROW - GAP_MM;
             if (edge < x1) x1 = edge;
         }
         /* the top buttons are on the other side (top_place): the whole height steers */
-        top = current ? t->screen.strip_top : t->ctl[TC_CAMERA].y + t->ctl[TC_CAMERA].hh * AREA_GROW + GAP_MM;
+        top = current ? t->screen.strip_top : t->ctl[TC_CAMERA].y0 + t->ctl[TC_CAMERA].hh0 * AREA_GROW + GAP_MM;
     }
     t->steer_x0 = left, t->steer_x1 = x1, t->steer_y0 = top, t->steer_y1 = H - t->screen.strip_bottom;
     if (!right_handed(t)) {   /* mirrored: the area measured from the right strip */
@@ -1526,6 +1550,8 @@ static int flick_lanes(const Touch *t)
    own bar, which must stay usable. The default layouts keep their 3 mm gaps; the rules only
    check the edited control, so a layout another rule (the cutout, the Size setting) bent does
    not lock the editor. */
+static int steering_kept(const Touch *t, int c);
+
 static int control_fits(const Touch *t, int c)
 {
     const Ctl *k = &t->ctl[c];
@@ -1539,18 +1565,84 @@ static int control_fits(const Touch *t, int c)
             Box x = editor_box(t, b);
             if (fabsf(k->x - x.x) < rx + x.hw && fabsf(k->y - x.y) < ry + x.hh) return 0;
         }
-    if (c == TC_STICK || c == TC_TRICK || c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) return 1;
+    if (c == TC_STICK) return steering_kept(t, c);   /* the D-pad's home: under no button */
+    if (c == TC_TRICK || c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) return 1;
     for (int d = 0; d < TC_COUNT; d++) {
         const Ctl *m = &t->ctl[d];
         if (d == c || !m->on || d == TC_STICK || d == TC_TRICK || d == TC_PLUS_LEFT || d == TC_PLUS_RIGHT) continue;
         if (shape_gap(k, m) < 0) return 0;
     }
     if (flick_lanes(t)) {
-        if (c != TC_PEDAL) return !in_flick_lane(t, c);
-        for (int d = 0; d < TC_COUNT; d++)
-            if (d != TC_PEDAL && d != TC_STICK && d != TC_TRICK && t->ctl[d].on && in_flick_lane(t, d)) return 0;
+        if (c != TC_PEDAL && in_flick_lane(t, c)) return 0;
+        if (c == TC_PEDAL)
+            for (int d = 0; d < TC_COUNT; d++)
+                if (d != TC_PEDAL && d != TC_STICK && d != TC_TRICK && t->ctl[d].on && in_flick_lane(t, d)) return 0;
     }
-    return 1;
+    return steering_kept(t, c);
+}
+
+/* Steering stays usable (the review of 2026-11-13; finding 229): with the stick, some square of
+   STEER_FREE_MM inside the steering area that no other control's touch area covers (routing gives a
+   touch to a button first, so a button over the area takes that part); with the D-pad, its rest
+   point and its four arms on the screen, out of the gesture strips and under no other control.
+   `skip`: a control left out (-1 none). */
+enum { STEER_FREE_MM = 10, STEER_GRID = 512 };
+static int taken_by(const Touch *t, float x, float y, int skip)
+{
+    for (int c = 0; c < TC_COUNT; c++) {
+        const Ctl *k = &t->ctl[c];
+        if (c == skip || c == TC_STICK || c == TC_TRICK || !k->on) continue;
+        if (c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) {   /* classic_face_at's 3.5 mm */
+            if (dist(x, y, k->x, k->y) <= 3.5f) return 1;
+            continue;
+        }
+        if (hit(t, c, x, y, AREA_GROW) < 1e8f) return 1;
+    }
+    return 0;
+}
+
+static int steering_ok_without(const Touch *t, int skip)
+{
+    const TouchScreen *sc = &t->screen;
+    if (t->set.dpad) {
+        const Ctl *k = &t->ctl[TC_STICK];
+        const TouchEdit *e = &t->set.edit[t->set.preset == TOUCH_CLASSIC][TC_STICK];
+        float off = dpad_off(t, e);
+        for (int a = -1; a < DPAD_ARMS; a++) {
+            float x = k->x + (a == DPAD_LEFT ? -off : a == DPAD_RIGHT ? off : 0), y = k->y + (a == DPAD_UP ? -off : a == DPAD_DOWN ? off : 0);
+            if (x < 0 || x > sc->width || y < 0 || y > sc->height || in_strip(t, x, y) || taken_by(t, x, y, skip)) return 0;
+        }
+        return 1;
+    }
+    float x0 = fmaxf(t->steer_x0, 0), x1 = fminf(t->steer_x1, sc->width);
+    float y0 = fmaxf(t->steer_y0, 0), y1 = fminf(t->steer_y1, sc->height);
+    int nx = (int)(x1 - x0), ny = (int)(y1 - y0);
+    if (nx < STEER_FREE_MM || ny < STEER_FREE_MM) return 0;
+    if (nx > STEER_GRID) nx = STEER_GRID;
+    if (ny > STEER_GRID) ny = STEER_GRID;
+    /* 1 mm cells: each column's run of free cells up to this row; a row with STEER_FREE_MM columns in
+       a row whose runs reach STEER_FREE_MM holds a free square */
+    unsigned short run[STEER_GRID];
+    memset(run, 0, sizeof run);
+    for (int j = 0; j < ny; j++) {
+        int across = 0;
+        for (int i = 0; i < nx; i++) {
+            float x = x0 + i + 0.5f, y = y0 + j + 0.5f;
+            run[i] = in_strip(t, x, y) || taken_by(t, x, y, skip) ? 0 : (unsigned short)(run[i] + 1);
+            across = run[i] >= STEER_FREE_MM ? across + 1 : 0;
+            if (across >= STEER_FREE_MM) return 1;
+        }
+    }
+    return 0;
+}
+
+static int steering_ok(const Touch *t) { return steering_ok_without(t, -1); }
+
+/* The edited control c leaves steering usable: refused only when c is what takes it away (a layout
+   another rule bent, or a screen too small, never locks the editor). */
+static int steering_kept(const Touch *t, int c)
+{
+    return steering_ok(t) || !steering_ok_without(t, c);
 }
 
 /* The control's edit moved so it lies on the screen (a control larger than the screen: centred). */
@@ -2398,6 +2490,29 @@ static void air_layout_step(Touch *t)
     t->air_layout = layout;
 }
 
+static int pressed_control(const Touch *t, int c);
+
+/* The action pictures' ground or air (finding 229). The air flag has to hold for the air wait (the
+   one Thumb zones' air layout waits) before the air pictures show, and the ground for
+   TOUCH_GROUND_MS before the ground ones come back, so a bump or a rail's edge does not flicker
+   them; a control under a finger keeps the picture it had when the finger came down. */
+static void pictures_step(Touch *t)
+{
+    const TouchGame *g = &t->game;
+    int on = race_on_screen(t), air = on && g->air;
+    if (air != t->pic_flag || g->race_ms < t->pic_flag_since) t->pic_flag = air, t->pic_flag_since = g->race_ms;
+    int wait = air ? (t->set.air_wait_ms > 0 ? t->set.air_wait_ms : 150) : TOUCH_GROUND_MS;
+    if (!on) t->pic_air = 0;
+    else if (g->race_ms - t->pic_flag_since >= wait - 0.5) t->pic_air = air;
+    for (int c = 0; c < TC_COUNT; c++)
+        if (!on || !pressed_control(t, c)) t->pic_air_ctl[c] = (unsigned char)t->pic_air;
+}
+
+int touch_air_picture(const Touch *t, int control)
+{
+    return control >= 0 && control < TC_COUNT && !t->editor && t->pic_air_ctl[control];
+}
+
 /* ✕ in the output: bookkeeping of its releases for the double-tap rules. */
 static int cross_output(const Touch *t)
 {
@@ -2609,6 +2724,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
     }
     pause_step(t);
     air_layout_step(t);
+    pictures_step(t);
     if (t->trick.on) {
         Finger *f = &t->f[t->trick.finger];
         trick_step(t, f);
@@ -2666,6 +2782,12 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint
 }
 
 int touch_take_buzz(Touch *t) { int b = t->buzz; t->buzz = 0; return b; }
+const char *touch_take_note(Touch *t)
+{
+    if (!t->note_ready) return NULL;
+    t->note_ready = 0;
+    return t->note;
+}
 int touch_take_ask(Touch *t) { int a = t->ask; t->ask = 0; return a; }
 int touch_take_saved(Touch *t, TouchSettings *out)
 {
@@ -2693,6 +2815,8 @@ Touch *touch_new(void)
 
 void touch_free(Touch *t) { free(t); }
 
+static void steer_rescue(Touch *t);
+
 void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen)
 {
     int preset_changed = s->preset != t->set.preset || s->dpad != t->set.dpad;   /* the steering touch ends too */
@@ -2703,9 +2827,47 @@ void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen
     if (screen && screen->width > 10 && screen->height > 10) t->screen = *screen;
     if (preset_changed) drop_race_touches(t);
     lay_out(t, t->set.hud_moved);
+    steer_rescue(t);
 }
 
 const TouchSettings *touch_settings(const Touch *t) { return &t->set; }
+
+/* The editor's names of the controls (its readout and the steering rescue's line). */
+static const char *const CONTROL_NAMES[TC_COUNT] = {
+    "PEDAL", "HOP", "BRAKE", "SLIDE", "SQUARE", "CIRCLE", "CAMERA", "PAUSE", "CROSS", "TRIANGLE", "SQUARE", "CIRCLE",
+    "+", "+", "L1 L2", "R1 R2", "L3", "R3", "STICK", "TRICK STICK"};
+
+/* A loaded layout (dhd.ini by a build before this check, or edited by hand) whose edited controls
+   leave no room to steer (steering_ok): it is not thrown away. The edited controls go back to their
+   default places one at a time, in the controls' order, until steering is usable, for this run only:
+   dhd.ini keeps the player's edits until the editor's Done saves the layout. The log says so once.
+   If even the default places leave no room (a screen too small), nothing changes. */
+static void steer_rescue(Touch *t)
+{
+    if (t->editor || steering_ok(t)) return;
+    TouchEdit *edits = t->set.edit[t->set.preset == TOUCH_CLASSIC], kept[TC_COUNT];
+    memcpy(kept, edits, sizeof kept);
+    for (int c = 0; c < TC_COUNT; c++) edits[c] = (TouchEdit){0, 0, 1};
+    lay_out(t, t->set.hud_moved);
+    int defaults_ok = steering_ok(t);
+    memcpy(edits, kept, sizeof kept);
+    lay_out(t, t->set.hud_moved);
+    if (!defaults_ok) return;
+    char names[120] = "";
+    for (int c = 0; c < TC_COUNT && !steering_ok(t); c++) {
+        TouchEdit *e = &edits[c];
+        if (c == TC_TRICK || (e->dx == 0 && e->dy == 0 && e->size == 1)) continue;
+        *e = (TouchEdit){0, 0, 1};
+        lay_out(t, t->set.hud_moved);
+        size_t n = strlen(names);
+        snprintf(names + n, sizeof names - n, "%s%s", n ? ", " : "", CONTROL_NAMES[c]);
+    }
+    if (!t->rescue_noted) {
+        t->rescue_noted = 1;
+        snprintf(t->note, sizeof t->note, "touch: the saved layout left no room to steer; at their default places for now: %s", names);
+        t->note_ready = 1;
+    }
+}
 
 /* ---------------------------------------------------------------- the overlay's shapes */
 
@@ -2742,6 +2904,86 @@ static void button(Draw *d, const Ctl *k, int pressed, float dim, int symbol, co
     if (label && *label) text(d, k->x, k->y + k->r * (symbol ? 0.45f : 0), fminf(k->r * 0.32f, 3.2f), 0, label, rgba(255, 255, 255, 0.95f * a));
 }
 
+/* Button Style Actions (finding 229): a control's picture (TI_*), drawn mirrored or not, and its
+   badge, the pad's own symbol (TS_*) or name, so the game's prompts ("PRESS ✕", the trick lists)
+   still map onto the touch buttons. */
+typedef struct { int icon, mirror, symbol; const char *name; } Act;
+
+static int actions(const Touch *t) { return t->set.style == TOUCH_STYLE_ACTIONS; }
+
+/* A pad button's name on a badge (TOUCH_BADGES_*): `symbol` a face button's TS_* (0 none), else
+   `name` the PS2 name (L1 ... R3). NULL: draw the PS2 symbol. */
+static const char *badge_name(const Touch *t, int symbol, const char *name)
+{
+    static const char *const ps2[] = {"L1", "L2", "R1", "R2", "L3", "R3"};
+    static const char *const xbox[] = {"LB", "LT", "RB", "RT", "LS", "RS"}, *const nintendo[] = {"L", "ZL", "R", "ZR", "LS", "RS"};
+    int b = t->set.badges;
+    if (b != TOUCH_BADGES_XBOX && b != TOUCH_BADGES_NINTENDO) return symbol ? NULL : name;
+    if (symbol) {   /* by place: bottom, right, left, top */
+        int i = symbol == TS_CROSS ? 0 : symbol == TS_CIRCLE ? 1 : symbol == TS_SQUARE ? 2 : 3;
+        static const char *const xb[] = {"A", "B", "X", "Y"}, *const ni[] = {"B", "A", "Y", "X"};
+        return b == TOUCH_BADGES_XBOX ? xb[i] : ni[i];
+    }
+    for (int i = 0; name && i < 6; i++)
+        if (!strcmp(name, ps2[i])) return b == TOUCH_BADGES_XBOX ? xbox[i] : nintendo[i];
+    return name;
+}
+
+static void icon(Draw *d, float x, float y, float half, int id, int mirror, uint32_t colour)
+{
+    put(d, TS_ICON, x, y, half, mirror ? -1.0f : 1.0f, (float)id, 0, 0, colour);
+}
+
+/* The badge: a small dark disc with the symbol or the name in white. */
+static void badge(const Touch *t, Draw *d, float x, float y, float r, int symbol, const char *name, float a)
+{
+    put(d, TS_DISC, x, y, r, 0, 0, 0, rgba(10, 14, 18, 0.92f * a), rgba(255, 255, 255, 0.8f * a));
+    uint32_t w = rgba(255, 255, 255, a);
+    name = badge_name(t, symbol, name);
+    if (name) symbol = 0;
+    if (symbol) put(d, symbol, x, y, r * 0.8f, 0, 0, 0, 0, w);
+    else if (name && *name) text(d, x, y, fminf(r * 1.2f, r * 1.85f / (0.9f * (float)strlen(name))), 0, name, w);
+}
+
+/* A badge's radius on a round control of radius r: a fixed share, kept readable on small buttons and
+   inside the control (its upper right, where neither thumb covers it and no neighbour is touched). */
+static float badge_radius(float r)
+{
+    float br = clampf(r * 0.33f, 2.0f, 3.4f);
+    return fminf(br, r * 0.48f);
+}
+
+/* A round control in Button Style Actions: the same disc, its picture (above its word, if any) and
+   the badge. */
+static void action_button(const Touch *t, Draw *d, const Ctl *k, int pressed, float dim, Act act, const char *label)
+{
+    float a = d->alpha * dim, r = k->r;
+    uint32_t fill = pressed ? rgba(166, 227, 154, 0.55f * a) : rgba(10, 14, 18, 0.45f * a);
+    put(d, TS_DISC, k->x, k->y, r, 0, 0, 0, fill, rgba(255, 255, 255, 0.88f * a));
+    int word = label && *label;
+    float g = r * (word ? 0.40f : 0.58f);
+    icon(d, k->x - r * (word ? 0.1f : 0.05f), word ? k->y - r * 0.18f : k->y + r * 0.05f, g, act.icon, act.mirror,
+         rgba(255, 255, 255, 0.95f * a));
+    if (word) text(d, k->x, k->y + r * 0.45f, fminf(r * 0.32f, 3.2f), 0, label, rgba(255, 255, 255, 0.95f * a));
+    float br = badge_radius(r), off = (r - br * 1.02f) * 0.7071f;
+    badge(t, d, k->x + off, k->y - off, br, act.symbol, act.name, a);
+}
+
+/* The smallest picture that still reads on a phone held in the hand (half its size, mm; finding
+   229's captures at real size): smaller, the control shows its pad name as in Symbols. At the
+   default Size every control is larger; at the smallest Size L3, R3 and the shoulder bars are not. */
+#define PICTURE_MIN_MM 2.1f
+
+/* A round control in the style chosen: Symbols draws the pad's symbol (and the word), Actions the
+   picture and the badge (a control too small for its picture: its symbol or name). */
+static void styled_button(const Touch *t, Draw *d, const Ctl *k, int pressed, float dim, int symbol, const char *label, Act act)
+{
+    int word = label && *label;
+    if (actions(t) && k->r * (word ? 0.40f : 0.58f) >= PICTURE_MIN_MM) action_button(t, d, k, pressed, dim, act, label);
+    else if (actions(t) && !symbol && !word && act.name) button(d, k, pressed, dim, 0, badge_name(t, 0, act.name));
+    else button(d, k, pressed, dim, symbol, label);
+}
+
 static void box_button(Draw *d, float x, float y, float hw, float hh, int pressed, float alpha, const char *label, float th)
 {
     uint32_t fill = pressed ? rgba(166, 227, 154, 0.55f * alpha) : rgba(10, 14, 18, 0.7f * alpha);
@@ -2764,10 +3006,17 @@ static void draw_top_buttons(const Touch *t, Draw *d, int classic)
     for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
         const Ctl *k = &t->ctl[c];
         if (!k->on) continue;
+        uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
+        if (classic && actions(t)) {   /* the picture (the camera, Pause), its pad name under it */
+            box_button(d, k->x, k->y, k->hw, k->hh, pressed_control(t, c), d->alpha, "", 0);
+            icon(d, k->x, k->y - k->hh * 0.2f, k->hh * 0.5f, c == TC_CAMERA ? TI_CAMERA : TI_PAUSE, 0, w);
+            const char *name = c == TC_CAMERA ? "SELECT" : "START";
+            text(d, k->x, k->y + k->hh * 0.56f, fminf(k->hh * 0.32f, (2 * k->hw - 1.6f) / (0.9f * (float)strlen(name))), 0, name, w);
+            continue;
+        }
         box_button(d, k->x, k->y, k->hw, k->hh, pressed_control(t, c), d->alpha, classic ? (c == TC_CAMERA ? "SELECT" : "START") : "",
                    fminf(k->hh * 0.5f, 2.2f));
         if (classic) continue;
-        uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
         if (c == TC_PAUSE) {
             put(d, TS_RECT, k->x - k->hw * 0.25f, k->y, k->hw * 0.12f, k->hh * 0.42f, 0.2f, 0, w, 0);
             put(d, TS_RECT, k->x + k->hw * 0.25f, k->y, k->hw * 0.12f, k->hh * 0.42f, 0.2f, 0, w, 0);
@@ -2812,6 +3061,7 @@ static void draw_stick(const Touch *t, Draw *d)
     }
     put(d, TS_DISC, cx, cy, ring, 0, 0, 0, rgba(10, 14, 18, 0.16f * d->alpha), line);
     put(d, TS_DISC, kx, ky, ring * 0.44f, 0, 0, 0, knob, rgba(255, 255, 255, 0.85f * d->alpha));
+    if (actions(t)) icon(d, kx, ky, ring * 0.44f * 0.72f, TI_BAR, 0, rgba(255, 255, 255, 0.85f * d->alpha));
 }
 
 static void draw_trick(const Touch *t, Draw *d)
@@ -2841,9 +3091,12 @@ static void draw_trick(const Touch *t, Draw *d)
     int minimal = t->tricks_sent >= 20 && t->set.labels != TOUCH_LABELS_ALWAYS;
     if (!minimal) {
         static const char *const names[4] = {"R1", "L1", "L2", "R2"};
+        /* the names only, in both styles: a picture in the ring's band would be too small to read
+           (finding 229); the shoulders' names follow Button Icons as the badges do */
         for (int i = 0; i < 4; i++) {
             float ang = PI_F / 4 + i * PI_F / 2, r = (r_in + r_out) / 2;
-            text(d, cx + cosf(ang) * r, cy - sinf(ang) * r, 2.2f * sc, 0, names[i], rgba(255, 255, 255, 0.85f * a));
+            text(d, cx + cosf(ang) * r, cy - sinf(ang) * r, 2.2f * sc, 0, actions(t) ? badge_name(t, 0, names[i]) : names[i],
+                 rgba(255, 255, 255, 0.85f * a));
         }
     }
 }
@@ -2853,23 +3106,28 @@ static void draw_thumb(const Touch *t, Draw *d)
     int air = t->air_layout;
     draw_stick(t, d);
     const Ctl *p = &t->ctl[TC_PEDAL];
-    button(d, p, pressed_control(t, TC_PEDAL), air ? 0.45f : 1.0f, TS_CROSS, "PEDAL");
+    styled_button(t, d, p, pressed_control(t, TC_PEDAL), air ? 0.45f : 1.0f, TS_CROSS, "PEDAL", (Act){TI_PEDAL, 0, TS_CROSS, NULL});
     if (!air && t->set.attacks == TOUCH_ATTACK_FLICK) {   /* the flick hints: not buttons */
         float off = 16.0f * t->bs, s = 2.6f;
         uint32_t w = rgba(255, 255, 255, 0.92f * d->alpha);
         put(d, TS_CHEVRON, p->x - off - s * 1.1f, p->y, s * 0.8f, 0, PI_F, 0, 0, w);
-        put(d, TS_SQUARE, p->x - off + s * 0.4f, p->y, s, 0, 0, 0, 0, w);
-        put(d, TS_CIRCLE, p->x + off - s * 0.4f, p->y, s, 0, 0, 0, 0, w);
         put(d, TS_CHEVRON, p->x + off + s * 1.1f, p->y, s * 0.8f, 0, 0, 0, 0, w);
+        if (actions(t)) {   /* the fists: the left-hand attack (◻) left, the right-hand one (○) right */
+            icon(d, p->x - off + s * 0.4f, p->y, s * 1.25f, TI_FIST, 1, w);
+            icon(d, p->x + off - s * 0.4f, p->y, s * 1.25f, TI_FIST, 0, w);
+        } else {
+            put(d, TS_SQUARE, p->x - off + s * 0.4f, p->y, s, 0, 0, 0, 0, w);
+            put(d, TS_CIRCLE, p->x + off - s * 0.4f, p->y, s, 0, 0, 0, 0, w);
+        }
     }
     if (t->set.attacks == TOUCH_ATTACK_BUTTONS) {
-        button(d, &t->ctl[TC_SQUARE], pressed_control(t, TC_SQUARE), 1, TS_SQUARE, "");
-        button(d, &t->ctl[TC_CIRCLE], pressed_control(t, TC_CIRCLE), 1, TS_CIRCLE, "");
+        styled_button(t, d, &t->ctl[TC_SQUARE], pressed_control(t, TC_SQUARE), 1, TS_SQUARE, "", (Act){TI_FIST, 1, TS_SQUARE, NULL});
+        styled_button(t, d, &t->ctl[TC_CIRCLE], pressed_control(t, TC_CIRCLE), 1, TS_CIRCLE, "", (Act){TI_FIST, 0, TS_CIRCLE, NULL});
     }
     if (!air) {
-        button(d, &t->ctl[TC_HOP], pressed_control(t, TC_HOP), 1, 0, "HOP");
-        button(d, &t->ctl[TC_BRAKE], pressed_control(t, TC_BRAKE), 1, TS_TRIANGLE, "BRAKE");
-        button(d, &t->ctl[TC_SLIDE], pressed_control(t, TC_SLIDE), 1, 0, "SLIDE");
+        styled_button(t, d, &t->ctl[TC_HOP], pressed_control(t, TC_HOP), 1, 0, "HOP", (Act){TI_HOP, 0, 0, "R2"});
+        styled_button(t, d, &t->ctl[TC_BRAKE], pressed_control(t, TC_BRAKE), 1, TS_TRIANGLE, "BRAKE", (Act){TI_BRAKE, 0, TS_TRIANGLE, NULL});
+        styled_button(t, d, &t->ctl[TC_SLIDE], pressed_control(t, TC_SLIDE), 1, 0, "SLIDE", (Act){TI_SLIDE, 0, 0, "L3"});
     } else draw_trick(t, d);
     draw_top_buttons(t, d, 0);
 }
@@ -2882,11 +3140,29 @@ static void draw_bar(const Touch *t, Draw *d, int bar)
     put(d, TS_RECT, k->x, k->y, k->hw, k->hh, k->hh * 0.44f, 0, pressed ? rgba(166, 227, 154, 0.5f * d->alpha) : rgba(10, 14, 18, 0.6f * d->alpha), line);
     put(d, TS_RECT, k->x, k->y, k->hw * 0.26f, k->hh, 0, 0, rgba(255, 255, 255, 0.14f * d->alpha), rgba(255, 255, 255, 0.5f * d->alpha));
     const char *a = bar == TC_LBAR ? "L2" : "R1", *m = bar == TC_LBAR ? "L1+L2" : "R1+R2", *b = bar == TC_LBAR ? "L1" : "R2";
-    if (!right_handed(t)) { const char *x = a; a = b; b = x; }
+    /* Actions: L2 Saran Wrap, L1 One Hander, R1 One Legger; R2 the bunny hop on the ground, its
+       trick in the air (finding 229) */
+    int ia = bar == TC_LBAR ? TI_WRAP : TI_BOOT, ib = bar == TC_LBAR ? TI_HAND : touch_air_picture(t, bar) ? TI_LINK : TI_HOP;
+    if (!right_handed(t)) { const char *x = a; a = b; b = x; int i = ia; ia = ib; ib = i; }
     float th = fminf(k->hh * 0.55f, 3.0f);
-    text(d, k->x - k->hw * 0.63f, k->y, th, 0, a, line);
+    float g = fminf(k->hh * 0.62f, k->hw * 0.2f);
+    if (actions(t) && g >= PICTURE_MIN_MM) {   /* smaller: the names, as in Symbols */
+        uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
+        float gap = g * 0.5f;
+        for (int side = -1; side <= 1; side += 2) {
+            float sx = k->x + side * k->hw * 0.63f;
+            const char *name = badge_name(t, 0, side < 0 ? a : b);
+            float nh = fminf(th * 0.62f, 2.4f), nw = 0.9f * nh * 2;
+            float left = sx - (2 * g + gap + nw) / 2;   /* the picture, then its pad name */
+            icon(d, left + g, k->y, g, side < 0 ? ia : ib, 0, w);
+            text(d, left + 2 * g + gap + nw / 2, k->y, nh, 0, name, line);
+        }
+    } else {
+        if (actions(t)) a = badge_name(t, 0, a), b = badge_name(t, 0, b);
+        text(d, k->x - k->hw * 0.63f, k->y, th, 0, a, line);
+        text(d, k->x + k->hw * 0.63f, k->y, th, 0, b, line);
+    }
     text(d, k->x, k->y, th * 0.6f, 0, m, line);
-    text(d, k->x + k->hw * 0.63f, k->y, th, 0, b, line);
 }
 
 static void draw_classic(const Touch *t, Draw *d)
@@ -2894,12 +3170,14 @@ static void draw_classic(const Touch *t, Draw *d)
     draw_stick(t, d);
     draw_bar(t, d, TC_LBAR);
     draw_bar(t, d, TC_RBAR);
-    button(d, &t->ctl[TC_L3], pressed_control(t, TC_L3), 1, 0, "L3");
-    button(d, &t->ctl[TC_R3], pressed_control(t, TC_R3), 1, 0, "R3");
-    button(d, &t->ctl[TC_TRIANGLE], pressed_control(t, TC_TRIANGLE), 1, TS_TRIANGLE, "");
-    button(d, &t->ctl[TC_CSQUARE], pressed_control(t, TC_CSQUARE), 1, TS_SQUARE, "");
-    button(d, &t->ctl[TC_CCIRCLE], pressed_control(t, TC_CCIRCLE), 1, TS_CIRCLE, "");
-    button(d, &t->ctl[TC_CROSS], pressed_control(t, TC_CROSS), 1, TS_CROSS, "");
+    styled_button(t, d, &t->ctl[TC_L3], pressed_control(t, TC_L3), 1, 0, actions(t) ? "" : "L3", (Act){TI_SLIDE, 0, 0, "L3"});
+    styled_button(t, d, &t->ctl[TC_R3], pressed_control(t, TC_R3), 1, 0, actions(t) ? "" : "R3", (Act){TI_SPRINT, 0, 0, "R3"});
+    /* △ brakes on the ground and superstyles a trick in the air */
+    styled_button(t, d, &t->ctl[TC_TRIANGLE], pressed_control(t, TC_TRIANGLE), 1, TS_TRIANGLE, "",
+                  (Act){touch_air_picture(t, TC_TRIANGLE) ? TI_STAR : TI_BRAKE, 0, TS_TRIANGLE, NULL});
+    styled_button(t, d, &t->ctl[TC_CSQUARE], pressed_control(t, TC_CSQUARE), 1, TS_SQUARE, "", (Act){TI_FIST, 1, TS_SQUARE, NULL});
+    styled_button(t, d, &t->ctl[TC_CCIRCLE], pressed_control(t, TC_CCIRCLE), 1, TS_CIRCLE, "", (Act){TI_FIST, 0, TS_CIRCLE, NULL});
+    styled_button(t, d, &t->ctl[TC_CROSS], pressed_control(t, TC_CROSS), 1, TS_CROSS, "", (Act){TI_PEDAL, 0, TS_CROSS, NULL});
     for (int c = TC_PLUS_LEFT; c <= TC_PLUS_RIGHT; c++) {
         const Ctl *k = &t->ctl[c];
         put(d, TS_DISC, k->x, k->y, k->r, 0, 0, 0, rgba(10, 14, 18, 0.65f * d->alpha), rgba(255, 255, 255, 0.8f * d->alpha));
@@ -3019,7 +3297,7 @@ static void draw_editor(const Touch *t, Draw *d)
     full.alpha = 1;
     if (t->editor_tab == EDIT_AIR) {
         draw_trick(t, &full);
-        button(&full, &t->ctl[TC_PEDAL], 0, 0.45f, TS_CROSS, "PEDAL");
+        styled_button(t, &full, &t->ctl[TC_PEDAL], 0, 0.45f, TS_CROSS, "PEDAL", (Act){TI_PEDAL, 0, TS_CROSS, NULL});
     } else if (t->set.preset == TOUCH_CLASSIC) draw_classic(t, &full);
     else {
         int air = t->air_layout;
@@ -3047,9 +3325,7 @@ static void draw_editor(const Touch *t, Draw *d)
     }
     if (t->edit_selected >= 0 && t->ctl[t->edit_selected].on) {
         /* the selected control, its drawn size and its own size in per cent (finding 226) */
-        static const char *const readout[TC_COUNT] = {
-            "PEDAL", "HOP", "BRAKE", "SLIDE", "SQUARE", "CIRCLE", "CAMERA", "PAUSE", "CROSS", "TRIANGLE", "SQUARE", "CIRCLE",
-            "+", "+", "L1 L2", "R1 R2", "L3", "R3", "STICK", "TRICK STICK"};
+        const char *const *readout = CONTROL_NAMES;
         const Ctl *k = &t->ctl[t->edit_selected];
         char info[64];
         float size = (k->box ? fmaxf(k->hw, k->hh) : k->r) * 2;
