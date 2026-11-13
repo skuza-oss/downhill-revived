@@ -165,26 +165,33 @@ int ios_start_game(int edit_touch_layout, int checked) {
 bool ios_is_game_running(void) { return atomic_load(&s_game_started); }
 bool ios_game_is_active(void) { return atomic_load(&s_game_active); }
 
-/* The game stopped for the app's absence (present.c's app_away_wait): its drawing reached the GPU
-   and ended, and the surface is gone, so nothing is submitted or presented any more. UIKit's
-   callback waits for that, bounded, before it returns and iOS suspends the app (iOS ends an app
-   that draws in the background). The game thread gets there at its next field without the main
-   thread (nothing on its way waits for it), so the wait can't deadlock; a long load that doesn't
-   reach a field in time is logged and the game stops at its next field (finding 227). */
-extern int gs_app_stopped(void);   /* present.c */
-static void wait_for_the_game(const char *why) {
+/* The app leaves the screen: the render thread, the one that records and submits the native
+   renderer's GPU work and presents, is held between pictures by this callback itself (gs_render_hold,
+   native_core.inc), and the callback waits until it has no picture under way (gs_render_quiet: at
+   most the one it was drawing, about a field), bounded, before it returns and iOS suspends the app.
+   It does not wait for the game thread: a long load can't delay or defeat it. What that guarantees:
+   no new GPU work or present from the render thread after the callback; work submitted before may
+   still run on the GPU, which iOS allows. Not covered: the GS worker's exact Z-probe work, which on
+   iOS it submits itself, until it blocks on the held queue (two fields) or iOS freezes it. The
+   render thread holds and is asked under its own queue lock only, never the main thread, so the
+   wait can't deadlock (finding 227). */
+extern void gs_render_hold(int on);
+extern int gs_render_quiet(void);
+extern void gs_app_back(void);
+static void hold_the_renderer(const char *why) {
     if (!atomic_load(&s_game_started)) return;
     enum { MOST_MS = 1500 };
+    gs_render_hold(1);
     double start = CACurrentMediaTime();
     int ms = 0;
-    while (!gs_app_stopped() && ms < MOST_MS) {
-        usleep(2000);
+    while (!gs_render_quiet() && ms < MOST_MS) {
+        usleep(1000);
         ms = (int)((CACurrentMediaTime() - start) * 1000);
     }
-    if (gs_app_stopped())
-        fprintf(stderr, "ios: %s: the game and its renderer stopped in %d ms\n", why, ms);
+    if (gs_render_quiet())
+        fprintf(stderr, "ios: %s: the renderer is held, no picture under way (%d ms)\n", why, ms);
     else
-        fprintf(stderr, "ios: %s: the game hasn't stopped after %d ms (a load); it stops at its next field\n", why, ms);
+        fprintf(stderr, "ios: %s: the renderer's picture is still under way after %d ms; it takes no new one\n", why, ms);
 }
 
 /* The game waits while the app is not active (present.c's app_away_wait, finding 227); the marker
@@ -193,13 +200,13 @@ void ios_lifecycle_will_resign_active(void) {
     atomic_store(&s_game_active, false);
     ios_metal_set_game_active(false);   /* also lets go of every finger (metal_bridge.m) */
     if (atomic_load(&s_game_started)) marker_write(RUN_INACTIVE, 0);
-    wait_for_the_game("off the screen");
+    hold_the_renderer("off the screen");
 }
 void ios_lifecycle_did_enter_background(void) {
     atomic_store(&s_game_active, false);
     ios_metal_set_game_active(false);
     if (atomic_load(&s_game_started)) marker_write(RUN_BACKGROUND, 0);
-    wait_for_the_game("in the background");
+    hold_the_renderer("in the background");
 }
 void ios_lifecycle_will_enter_foreground(void) {}
 void ios_lifecycle_did_become_active(void) {
@@ -207,4 +214,5 @@ void ios_lifecycle_did_become_active(void) {
     bool running = atomic_load(&s_game_started);
     ios_metal_set_game_active(running);
     if (running) marker_write(RUN_GAME, 0);
+    if (running) gs_app_back();   /* the renderer goes again unless the game's wait does it */
 }
