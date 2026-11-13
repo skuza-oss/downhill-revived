@@ -123,7 +123,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   offline race is in the game's own pause (online it goes on, finding 215) and the core's clock
   starts again from now (`host_service_host_came_back`: no game time is caught up). On a touch
   screen the button names (icons, SETTINGS' Tabs line) are a controller's only once it has sent
-  input since the last touch (`touch_host_pad_prompts`).
+  input since the last touch (`touch_host_pad_prompts`). iOS has no system Back: a swipe in from
+  the left edge outside a race is Android's Back, and our pages' own legends (Back, Undo, Keep,
+  Clear) answer a tap on every platform (finding 227).
+- The disc image's own check is one for every platform (`port/host/disc_check.c`, from host.c's
+  `disc_problem`: ISO 9660, SYSTEM.CNF booting SCUS_971.77, the whole declared volume), then the
+  game's data check in the core; phones call it through `host_disc_check` (finding 227).
 - The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
   threads and the render thread stop, the closing log lines are written, open files are flushed,
   and the process leaves without the C library's static destructors. New code that must run at the

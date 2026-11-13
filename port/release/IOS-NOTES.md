@@ -39,6 +39,10 @@ at every start** to go straight into the game; SETTINGS in the game (Game tab, L
 brings it back. EXIT GAME closes the app; the next start opens the launcher again. If the game
 closed unexpectedly, the launcher says so at the next start and offers Share log.
 
+**Going back.** iOS has no Back button: in the menus swipe in from the screen's left edge (it is
+the page's BACK), or tap BACK in the line at the bottom. When the keyboard is up for a room code or
+a name, the bar above it has Cancel and Done.
+
 **Leaving the app in a race** (the home screen, a call): the game waits and the sound stops; when
 you come back an offline race is paused (the game's own pause menu) and goes on from where it
 was. Online the race does not pause for the others: your rider stops while the app is away, and

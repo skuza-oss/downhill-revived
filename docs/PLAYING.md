@@ -173,7 +173,8 @@ not on the App Store. The app opens into the launcher, as on Android: choose you
 copied into Files > On My iPhone > Downhill Revived is moved into place instead. Then PLAY. Play
 with the touch controls or a controller (MFi, Xbox, PlayStation); the button names follow what you
 use last (touch until a controller is used). Settings, saves, the disc copy and `dhd.log` are in
-that same Files folder. Leaving the app in an offline race pauses it. If the game closes
+that same Files folder. In the menus, a swipe in from the left edge is Back (iOS has no Back button);
+the keyboard's bar has Cancel and Done. Leaving the app in an offline race pauses it. If the game closes
 unexpectedly, the launcher says so at the next start and offers **Share log**. Install a new
 release over the old one with the same tool: your files stay; deleting the app deletes them. What
 is experimental: it is not yet measured on many devices, there is no tilt steering, and EXIT GAME
