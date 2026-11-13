@@ -918,7 +918,9 @@ async function play(options) {
     state.error = null;
     renderFooter();
   } catch (e) {
-    fail(errorText(e));
+    // a save that never answered (bridge.js, the handoff gate): the game did not start; try again
+    const retry = e && e.code === 'footer.handoffStuck' ? { label: t('footer.tryAgain'), icon: 'i-play', onclick: () => play(options) } : null;
+    fail(errorText(e), retry);
   }
 }
 

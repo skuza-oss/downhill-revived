@@ -213,6 +213,7 @@
   "footer.downloading": "**{version}**をダウンロード中（{done} / {total} MB）",
   "footer.downloadingSize": "**{version}**をダウンロード中（{done} MB）",
   "footer.starting": "ゲームを起動中…",
+  "footer.handoffStuck": "設定を保存中のため、ゲームを開始できませんでした。少し待ってからもう一度お試しください。",
   "footer.handoffBusy": "ゲームを起動中です。この変更は保存されませんでした。",
   "footer.dismiss": "閉じる",
   "footer.support": "支援する",

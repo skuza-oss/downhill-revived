@@ -32,7 +32,10 @@ only when no operation is in progress and no `save_setting` / `controls_edit` is
 looked at again after every change; once a handoff has begun, a new operation is refused
 (`footer.handoffBusy`), no write is sent after the handoff went out, and a second handoff (PLAY twice,
 the editor row during the transition) is the same one. So a game never starts on a dhd.ini the
-launcher is still writing, or with only part of a change applied. A phone's native side runs `snapshot`
+launcher is still writing, or with only part of a change applied. A handoff that can't go within 5 s
+(a save that never answers: a stuck native call, a broken port) is cancelled, not performed: its
+promise rejects with `{code: "footer.handoffStuck"}`, the page says so with a Try again, and the
+outstanding save stays pending, so the next try waits for it again. A phone's native side runs `snapshot`
 (which may save `iso`), `save_setting` and `play` one at a time in the order they arrived (Android:
 `LauncherBridge.ordered`, one single-thread queue) and keeps long calls (`check_disc`'s hashing,
 `check_update`, the picker) off that queue; the settings crate's `save` is itself one transaction at

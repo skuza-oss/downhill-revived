@@ -18,19 +18,27 @@
 // operation issues its next write only after the one before answered), and only then goes to the
 // native side, which keeps its own order too (Android's settings queue, the settings crate's lock).
 // Once a handoff has begun no new operation starts, no write goes out after it was sent, and a
-// second handoff (PLAY tapped twice, the editor row during the transition) is the same one.
+// second handoff (PLAY tapped twice, the editor row during the transition) is the same one. A
+// handoff that can't go within HANDOFF_WAIT_MS (a save that never answers) is cancelled with
+// `footer.handoffStuck`, not performed: the outstanding save stays pending, and the next try
+// waits for it again.
 const WRITES = new Set(['save_setting', 'controls_edit']);
 const HANDOFFS = new Set(['play', 'install_update']);
-function orderedCalls(call) {
+const HANDOFF_WAIT_MS = 5000;
+function orderedCalls(call, waitMs = HANDOFF_WAIT_MS) {
   const pending = new Set();   // writes sent and not answered
   const changes = new Set();   // a handoff waiting for the next change
   let operations = 0, handoff = null, sent = false;
   const changed = () => { for (const wake of [...changes]) wake(); };
   const busy = () => ({ code: 'footer.handoffBusy' });
   async function handOff(name, args) {
+    const deadline = Date.now() + waitMs;
     while (operations || pending.size) {
+      const left = deadline - Date.now();
+      if (left <= 0) throw { code: 'footer.handoffStuck' };
       await new Promise((resolve) => {
-        const wake = () => { changes.delete(wake); resolve(); };
+        const wake = () => { clearTimeout(timer); changes.delete(wake); resolve(); };
+        const timer = setTimeout(wake, left);
         changes.add(wake);
       });
     }

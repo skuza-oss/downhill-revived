@@ -215,6 +215,7 @@
   "footer.downloading": "Baixando **{version}**, {done} de {total} MB",
   "footer.downloadingSize": "Baixando **{version}**, {done} MB",
   "footer.starting": "Iniciando o jogo…",
+  "footer.handoffStuck": "Uma configuração ainda está sendo salva, então o jogo não iniciou. Tente de novo em um instante.",
   "footer.handoffBusy": "O jogo está iniciando: esta alteração não foi salva.",
   "footer.dismiss": "Dispensar",
   "footer.support": "Apoiar",

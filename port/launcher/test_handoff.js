@@ -2,12 +2,14 @@
 // that use it, without a window:
 // - the gate itself (orderedCalls): a setting operation with several writes is one unit, PLAY waits
 //   for it and for every pending write, looking again after each change; a second handoff during
-//   the transition is the same one; nothing new is written once PLAY went out;
+//   the transition is the same one; nothing new is written once PLAY went out; a save that never
+//   answers cancels the handoff after the deadline instead of starting the game over it;
 // - the same with slow saves over each transport the page runs on: the desktop's Tauri invoke,
 //   Android's posted MessagePort, iOS's injected bridge_ios.js: the native side sees every write
 //   before `play`, and one `play` only;
-// - app.js itself (its resetTab, run with stand-ins for the drawing): a reset of a tab with
-//   Performance mode followed at once by PLAY.
+// - app.js itself (its resetTab and play, run with stand-ins for the drawing): a reset of a tab with
+//   Performance mode followed at once by PLAY; PLAY over a save that never answers: cancelled with
+//   its message and a retry.
 //     node port/launcher/test_handoff.js
 'use strict';
 const fs = require('fs');
@@ -32,7 +34,7 @@ async function gateAlone() {
   // a multi-write operation (Performance mode's three keys), then PLAY at once
   {
     const n = fakeNative();
-    const call = orderedCalls(n.call);
+    const call = orderedCalls(n.call, 2000);
     const op = call.operation(async () => {
       for (const k of ['shadows', 'lens_flare', 'particles']) await call('save_setting', { key: k, value: '0' });
     });
@@ -61,7 +63,7 @@ async function gateAlone() {
   // a failed write counts as answered; a read is never held back
   {
     const n = fakeNative();
-    const call = orderedCalls(n.call);
+    const call = orderedCalls(n.call, 2000);
     call('save_setting', { key: 'fps', value: '120' }).catch(() => {});
     const played = call('play', {});
     call('snapshot');
@@ -72,6 +74,29 @@ async function gateAlone() {
     assert.deepStrictEqual(n.seen, ['save_setting', 'snapshot', 'play']);
     n.open[2].resolve(null);
     await played;
+  }
+  // a save that never answers: the handoff is cancelled after the deadline, not performed; the save
+  // stays pending, and the next PLAY waits for it again
+  {
+    const n = fakeNative();
+    const call = orderedCalls(n.call, 120);
+    call('save_setting', { key: 'fps', value: '120' });
+    const t0 = Date.now();
+    await call('play', {}).then(() => assert.fail('no game over an unfinished write'), (e) => assert.strictEqual(e.code, 'footer.handoffStuck'));
+    assert.ok(Date.now() - t0 >= 110, 'cancelled at the deadline');
+    assert.deepStrictEqual(n.seen, ['save_setting'], 'play never went out');
+    const again = call('play', {});
+    await sleep(20);
+    assert.deepStrictEqual(n.seen, ['save_setting'], 'the retry waits for the same save');
+    n.open[0].resolve(null);
+    await sleep(5);
+    assert.deepStrictEqual(n.seen, ['save_setting', 'play']);
+    n.open[1].resolve(null);
+    await again;
+    // an operation stuck between two writes is waited for the same way
+    const stuck = call.operation(() => new Promise(() => {}));
+    await call('install_update', {}).then(() => assert.fail(), (e) => assert.strictEqual(e.code, 'footer.handoffStuck'));
+    assert.ok(stuck);
   }
 }
 
@@ -195,6 +220,27 @@ async function appHandlers() {
     await sleep(SLOW * 2);
     assert.deepStrictEqual(seen, ['save_setting', 'save_setting', 'save_setting', 'save_setting', 'play'], 'resetTab: its four writes, then one play');
     assert.strictEqual(vm.runInContext('JSON.stringify(failed)', page), '[]');
+  }
+  // a save that never answers: PLAY is cancelled at the gate's deadline with its message and a
+  // retry; the retry, once the save has answered, starts the game
+  {
+    const seen = [];
+    let answerSave = null;
+    const page = pageWithApp((name) => {
+      if (name === 'snapshot') return new Promise(() => {});
+      seen.push(name);
+      if (name === 'save_setting') return new Promise((resolve) => { answerSave = resolve; });
+      return Promise.resolve(null);
+    });
+    vm.runInContext(`caps = new Set(['touch-settings']); save('fps', '120', 'x');`, page);
+    await vm.runInContext('play()', page);
+    assert.deepStrictEqual(seen, ['save_setting'], 'no play over an unfinished write');
+    const failure = vm.runInContext('failed[0]', page);
+    assert.strictEqual(failure.text, 'footer.handoffStuck', 'the message is shown');
+    assert.strictEqual(failure.fix.label, 'footer.tryAgain', 'with a retry');
+    answerSave(null);
+    await failure.fix.onclick();
+    assert.deepStrictEqual(seen, ['save_setting', 'play']);
   }
 }
 

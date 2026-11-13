@@ -215,6 +215,7 @@
   "footer.downloading": "Downloading **{version}**, {done} of {total} MB",
   "footer.downloadingSize": "Downloading **{version}**, {done} MB",
   "footer.starting": "Starting the game…",
+  "footer.handoffStuck": "A setting is still being saved, so the game didn't start. Try again in a moment.",
   "footer.handoffBusy": "The game is starting: this change wasn't saved.",
   "footer.dismiss": "Dismiss",
   "footer.support": "Support",

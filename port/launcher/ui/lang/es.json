@@ -215,6 +215,7 @@
   "footer.downloading": "Descargando **{version}**, {done} de {total} MB",
   "footer.downloadingSize": "Descargando **{version}**, {done} MB",
   "footer.starting": "Arrancando el juego…",
+  "footer.handoffStuck": "Todavía se está guardando un ajuste, así que el juego no ha arrancado. Inténtalo de nuevo en un momento.",
   "footer.handoffBusy": "El juego se está iniciando: este cambio no se ha guardado.",
   "footer.dismiss": "Descartar",
   "footer.support": "Apoyar",

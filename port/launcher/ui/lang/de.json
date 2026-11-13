@@ -215,6 +215,7 @@
   "footer.downloading": "Lade **{version}** herunter, {done} von {total} MB",
   "footer.downloadingSize": "Lade **{version}** herunter, {done} MB",
   "footer.starting": "Das Spiel startet …",
+  "footer.handoffStuck": "Eine Einstellung wird noch gespeichert, deshalb ist das Spiel nicht gestartet. Versuch es gleich noch einmal.",
   "footer.handoffBusy": "Das Spiel startet gerade: Diese Änderung wurde nicht gespeichert.",
   "footer.dismiss": "Ausblenden",
   "footer.support": "Unterstützen",
