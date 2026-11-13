@@ -76,8 +76,8 @@ What works today:
   codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
   buttons); **ENTER** goes back to the race and enters them. The camera's flight over the track
   before each race, and the movies (the startup movies if Skip Movies is off, the attract movie,
-  OPTIONS > VIDEO CLIPS) and the title's attract demo have a **SKIP** button (low in the middle of
-  the screen, under the right thumb on a tablet; the touch controls' START); tap it as you would press START on a pad. In a race's
+  OPTIONS > VIDEO CLIPS) and the title's attract demo have a **SKIP** button (low under your right
+  thumb, the left one with Hand: Left; the touch controls' START); tap it as you would press START on a pad. In a race's
   replay the same button reads **MENU** (START opens the replay's menu: RESUME, QUIT, RE-START,
   SAVE, which you then tap); the race controls are not shown, since a replay plays the recording.
   - **The D-pad** (SETTINGS > Touch Controls > Steer With > D-pad, in either layout and for either
@@ -99,8 +99,9 @@ What works today:
     saves. GROUND and AIR switch between the race layout and Thumb zones' trick stick.
   - **Tablets and iPads** (a screen 90 mm or more on its short side, about 7 inches and up) get
     their own defaults: the controls a quarter larger, nearer where your thumbs are when you hold
-    the tablet by its sides, and Pause, the camera button and SKIP under your right thumb (the
-    left one with Hand: Left). The Size setting is a share of that. A layout you edited before
+    the tablet by its sides. On every screen Pause and the camera button (START and SELECT in
+    Classic pad) sit in a row above the right-hand buttons (the left-hand ones with Hand: Left),
+    clear of the race HUD's top corner and of the camera cutout. The Size setting is a share of that. A layout you edited before
     this version keeps its places on every screen; RESET moves it to the new ones.
 
 Known gaps:

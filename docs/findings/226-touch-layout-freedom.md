@@ -30,7 +30,10 @@ Out of scope: portrait layouts, languages (other lanes or not chosen), the launc
   tablet defaults, the 0.8.0 layouts kept (9a07041b)
 - [x] the editor alone for the launcher, `DHD_TOUCH_EDITOR=1` / `--touch-editor` (c003d77c)
 - [x] tilt steering on iOS through CoreMotion (03fe2614)
-- [x] docs: PLAYING, STATE, TESTING, the Android and iOS notes
+- [x] docs: PLAYING, STATE, TESTING, the Android and iOS notes (d541df81)
+- [x] the iOS tests' path check on macOS (b3cc2015)
+- [x] the lead's report of the first on-screen iOS run: top buttons over the HUD's PUNCH meter,
+  SLIDE on HOP, SKIP over the demo's text; fixed for phones and tablets (02a5f2f7)
 
 ## Decisions
 
@@ -96,14 +99,40 @@ tablet's, from the size the host reports, never the platform's name: phones end 
   past 80 mm (at most 28 mm) and in a tenth of the width past 160 mm (at most 12 mm): on a 13-inch
   iPad the stick's home sits about 58 mm up and 51 mm in (his 0.16 / 0.75 of the view: 42 mm in,
   50 mm up), PEDAL about 50 mm up and 40 mm in;
-- the top buttons (Pause / START and camera / SELECT) leave the top-left corner, out of a thumb's
-  reach on a tablet, for a row just above the right cluster's touch areas with Pause at the edge
-  (his iPad keeps START and SELECT at the top); the Thumb zones steering area then reaches the
-  screen's top;
-- SKIP (the flight, movies, the attract demo) sits under the right thumb, its edge 8 mm in, 40 %
-  up, instead of the middle of the bottom;
+- the top buttons and SKIP move as on phones (below), SKIP 40 % up instead of at the bottom;
+- the picture and the screen: the touch controls are placed in the screen's millimetres, not the
+  picture's. A 13-inch iPad's 264.8 x 198.6 mm screen is 4:3, so the game's 4:3 picture fills it
+  and the controls lie over the picture's lower corners, as on a phone over a wide picture. Where
+  the picture is narrower than the screen (a 4:3 picture on a 16:10 tablet with Widescreen off),
+  the side bands are the screen's: the clusters anchored to the screen's lower corners sit partly
+  or wholly in them, which covers less of the picture; nothing is placed relative to the
+  picture's edges;
 - Hand: Left mirrors all of it; Android tablets and iPads run the same code (`big_screen`,
   `lay_out`, `tablet_top_place`, `skip_box`).
+
+**Default places on every screen (the first on-screen iOS run, the lead's report).** The
+iPhone 17 Pro Max Simulator (153.6 x 70.7 mm, the Dynamic Island's 9.9 mm band) showed three
+faults of the default places that phones of that shape share:
+- The top buttons in the top-left corner covered the end of the moved HUD's PUNCH meter and its
+  label (finding 141's HUD hook puts the speedometer and that meter in the corner; together they
+  reach about 0.9 of the screen's height across). They now sit in a row just above the action
+  cluster's touch areas, Pause at the action side's usable edge (less the gesture strip and a
+  cutout band on that side; `top_place`, `action_edge`), on phones as on tablets; Hand: Left
+  mirrors them to the top left, where its HUD is not (it goes to the top right). The editor's bar
+  avoids the row's default place; the Thumb zones steering area takes the whole height.
+- The camera cutout pushed only the control over it, into its neighbours: Thumb zones with Hand
+  Left put SLIDE on HOP (the island on the left), and on the Mi 11i (its cutout band on the
+  right) Classic's ○ moved within 3 mm of ✕ and the + spot, which also locked 0.8.0's editor on
+  that phone (its check of the whole layout failed after any drag or size step: found when the
+  phone's 0.8.0 editor reverted every drag in this lane). Now the whole half moves away from the
+  cutout together (`cutout_shift`, from the places before edits); only an edited control still
+  over it gets the old push.
+- SKIP, low in the middle, covered the attract demo's own PRESS ANY BUTTON TO EXIT (centred,
+  about 35-65 % across): it now sits under the action thumb, 8 mm in from the usable edge, at 86 %
+  of the height (40 % up on a tablet).
+`test_phone_defaults` checks the three on the iPhone (island on either side) and the Mi 11i, every
+preset, hand and attack mode. A preset with 0.8.0's edits keeps 0.8.0's places (top buttons and
+the cutout's push included); SKIP is not part of a layout and moves for everyone.
 
 **Saved layouts.** `touch_edits` keeps its format (`preset.control=dx,dy,size;...`); the parser
 takes sizes 0.25-6.00 and moves up to 1000 mm. A preset laid out on the current places also writes
@@ -125,6 +154,17 @@ the launcher's activity starts `DhdActivity` with `--touch-editor` among `getArg
 launcher calls `ios_start_game` with it in argv (or sets `DHD_TOUCH_EDITOR=1`) and gets control back
 when the process would end (iOS: the game process is the app; lane 225 decides how the app returns
 to its launcher).
+
+**The launcher's entry point, and main's (lane 225, the mobile launcher).** Main's launcher (0b686bf0) starts the
+game with `DHD_TOUCH_EDIT_AT_START=1` (Android: `DhdActivity` sets it for the launcher's
+`edit_touch_layout` extra): the editor opens over the game's menus after the start's movies, and
+the game goes on after Done. This lane's entry point is `DHD_TOUCH_EDITOR=1` (or `--touch-editor`):
+the editor alone, and the game ends after Done. At the merge both stay: main's block in
+`host_service_touch_field` opens the editor over the menus, this lane's opens it alone; they do not
+overlap (each opens once). The launcher's "Edit the touch layout" should end up setting
+`DHD_TOUCH_EDITOR=1` instead (one line in `DhdActivity`, lane 225's file): on Android the launcher
+activity finishes when the game starts, so for Done to show the launcher again it must stay in the
+task or be started again when the game's process ends (lane 225's side).
 
 **Tilt on iOS.** `metal_bridge.m` gives `touch_host.c` the two calls Android's `DhdActivity`
 gives it: `ios_touch_tilt_on` (CMMotionManager device motion, else the accelerometer, started and
