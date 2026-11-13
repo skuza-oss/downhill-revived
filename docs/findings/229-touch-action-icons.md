@@ -173,7 +173,17 @@ top put back on the edited bar, 8 checks fail; every earlier test passes unchang
 
 ## Result
 
-**Default: Actions.** At real physical size (each capture scaled to the screen's millimetres at
+**Default: Symbols, set by the lead (832da971).** The lane's readability verdict below met the bar
+the brief set, and Actions was the default when the lane first merged. After the sheets the lead set
+the default to Symbols for this release, Actions the option: side by side at a phone's real size
+the plain symbols are cleaner and quicker to read, the fists are the weakest drawings, the pedal is
+busy, and the badges sit on the pictures' edges; "readable" is not yet "better than what players
+have today", and a new default look should be chosen by the people who play on phones. The owner
+shows both looks in the project's Discord; the default can flip in a later release with one line
+(`table.rs`, `touch_settings_default`, the host's fallback). A dhd.ini that already says
+`touch_style = actions` keeps it.
+
+**The readability verdict (the lane's).** At real physical size (each capture scaled to the screen's millimetres at
 96 px per inch, the CSS reference pixel; a phone in the hand at 30-35 cm looks larger than a monitor
 at 60 cm, so this is the hard case), the Mi 11i, the iPhone 17 Pro Max and a 5.5-inch phone at
 Size Auto: every round button is told from its neighbours at a glance (the pedal's chainring, the
@@ -202,10 +212,20 @@ Checked:
   EVENT races on Mt. Midoule in Classic pad (Actions on the ground and in jumps, then Symbols) and
   Thumb zones (Symbols, then Actions on the ground and in the air); the owner's settings put back
   through the page. The four save files are byte-identical before and after; dhd.ini differs by
-  one line, `touch_style = actions` (the default; the owner's file had no such line). The
+  one line, `touch_style = actions` (then the default, written by the game's page; the owner's
+  file had no such line, and it stays: it is the owner's file). The
   published 0.8.0 APK is back on the phone, started once and exited through EXIT GAME.
 - iOS: the Simulator app builds on the Mac from f9840650 (BUILD SUCCEEDED); not launched.
 
-Not checked: Hand Left on the phone (unit tests and captures only through the layout code),
-Button Icons set to Xbox or Nintendo on a phone (unit test only), the steering fix on a phone
-(unit tests), an iPhone or iPad screen (no device; the Simulator build only).
+Second round (the default flip, 832da971): `test_touch`, `check.py port` and `check.py docs` on
+Windows, `lang_check` clean (the hints name no default, so no language file changed), the boot
+state trace equal to the reference. No phone run: the flip changes which value a dhd.ini without
+the line gets, and both looks were run on the Mi 11i in the first round.
+
+Open:
+- What ◻ and ○ do in the air was not checked; the air pictures still show the fists there.
+- If players choose Actions, the fists and the pedal are the pictures to redraw first (and the
+  badges' place on the pictures' edges looked at again).
+- Not looked at on a device: Button Icons set to Xbox or Nintendo on a phone (unit test only),
+  Hand Left (unit tests and the layout code), an iPhone or iPad screen (the Simulator build only),
+  the steering fix on a phone (unit tests).

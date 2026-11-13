@@ -119,8 +119,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   and redo in the layout editor, tablet defaults, the editor alone for the launcher
   (`DHD_TOUCH_EDITOR`), tilt on iOS, finding 226; Android's launcher row starts the editor alone and
   shows again after its Done, iOS's opens the editor over the game's menus, finding 228; Button
-  Style: pictures of each button's action with a badge of its pad name, the default, or the PS2
-  symbols, the pictures drawn as signed distances from `port/render/src/present/touch_icons.txt`,
+  Style: the PS2 symbols, the default, or pictures of each button's action with a badge of its
+  pad name, the pictures drawn as signed distances from `port/render/src/present/touch_icons.txt`,
   and a steering area that no moved button can take away, finding 229).
 - A phone's app away from the screen (Android and iOS, `present.c`'s `app_away_wait`, finding 227):
   the game waits, fingers are let go, the sound pauses, the freeze watch is quiet; at the return an
