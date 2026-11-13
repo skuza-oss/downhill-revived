@@ -166,7 +166,7 @@ bool ios_is_game_running(void) { return atomic_load(&s_game_started); }
 bool ios_game_is_active(void) { return atomic_load(&s_game_active); }
 
 /* The app leaves the screen: the render thread, the one that records and submits the native
-   renderer's GPU work and presents, is held between pictures by this callback itself (gs_render_hold,
+   renderer's GPU work and presents, is held between pictures by this callback itself (gs_render_leave,
    native_core.inc), and the callback waits until it has no picture under way (gs_render_quiet: at
    most the one it was drawing, about a field), bounded, before it returns and iOS suspends the app.
    It does not wait for the game thread: a long load can't delay or defeat it. What that guarantees:
@@ -175,13 +175,13 @@ bool ios_game_is_active(void) { return atomic_load(&s_game_active); }
    iOS it submits itself, until it blocks on the held queue (two fields) or iOS freezes it. The
    render thread holds and is asked under its own queue lock only, never the main thread, so the
    wait can't deadlock (finding 227). */
-extern void gs_render_hold(int on);
+extern unsigned gs_render_leave(void);
 extern int gs_render_quiet(void);
 extern void gs_app_back(void);
-static void hold_the_renderer(const char *why) {
+static void hold_the_renderer(const char *why, int starts) {
     if (!atomic_load(&s_game_started)) return;
     enum { MOST_MS = 1500 };
-    gs_render_hold(1);
+    if (starts) gs_render_leave();   /* the absence starts here (render_gate.h): only its return releases it */
     double start = CACurrentMediaTime();
     int ms = 0;
     while (!gs_render_quiet() && ms < MOST_MS) {
@@ -200,13 +200,13 @@ void ios_lifecycle_will_resign_active(void) {
     atomic_store(&s_game_active, false);
     ios_metal_set_game_active(false);   /* also lets go of every finger (metal_bridge.m) */
     if (atomic_load(&s_game_started)) marker_write(RUN_INACTIVE, 0);
-    hold_the_renderer("off the screen");
+    hold_the_renderer("off the screen", 1);
 }
 void ios_lifecycle_did_enter_background(void) {
     atomic_store(&s_game_active, false);
     ios_metal_set_game_active(false);
     if (atomic_load(&s_game_started)) marker_write(RUN_BACKGROUND, 0);
-    hold_the_renderer("in the background");
+    hold_the_renderer("in the background", 0);   /* the same absence: resign-active came first */
 }
 void ios_lifecycle_will_enter_foreground(void) {}
 void ios_lifecycle_did_become_active(void) {

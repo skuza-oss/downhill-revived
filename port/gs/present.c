@@ -345,7 +345,7 @@ static bool SDLCALL lifecycle_watch(void *unused, SDL_Event *e)
     (void)unused;
     if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND && !app_background) {
         app_background = 1;
-        gs_render_hold(1);   /* no new picture from the render thread (native_core.inc, finding 227) */
+        gs_render_leave();   /* an absence: no new GPU work from the render thread (render_gate.h, finding 227) */
         if (surface) gs_gpu_surface_reset(&gs, NULL);
         surface_dropped = 1;
     } else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
@@ -380,7 +380,7 @@ static SDL_AtomicInt away_waiting;   /* the game thread is in app_away_wait (gs_
    the new surface is made. */
 void gs_app_back(void)
 {
-    if (!SDL_GetAtomicInt(&away_waiting)) gs_render_hold(0);
+    if (!SDL_GetAtomicInt(&away_waiting)) gs_render_release(gs_render_current());
 }
 
 static void app_away_wait(void)
@@ -398,26 +398,36 @@ static void app_away_wait(void)
         SDL_Delay((Uint32)atoi(slow));
     }
     host_app_away(1);
-    /* The platform's callback has held the render thread already (gs_render_hold: it records and
-       submits nothing new; the fields stay queued, so there is no drain here: the GS worker could
-       be waiting on the held thread). The surface goes; nothing is presented until the return. */
-    gs_render_hold(1);
+    /* The platform's callback has held the render thread already (render_gate.h: it starts no new
+       GPU work; the fields stay queued, so there is no drain here: the GS worker could be waiting on
+       the held thread). The surface goes; nothing is presented until the return. The hold is
+       released only for the absence this wait went through: one that began while the surface was
+       being made again (a quick second flip) keeps it, and the wait starts over. */
+    unsigned absence = gs_render_generation();
     gs_gpu_surface_reset(&gs, NULL);
     target_ready = 0;
     hle_log("gs: in the background; the game waits (the renderer held, no surface)\n");
-    while (app_away() && !window_closed) {
-        surface_dropped = 0;   /* the surface is dropped: only the app's own state is waited for */
-        SDL_Delay(20);
-    }
-    gs_pump_messages();   /* closed meanwhile: the game ends here */
-    if (!wait_target(300) || !gs_gpu_surface_reset(&gs, &target)) {
-        hle_log("gs: no surface on the window after the background\n");
+    for (;;) {
+        while (app_away() && !window_closed) {
+            surface_dropped = 0;   /* the surface is dropped: only the app's own state is waited for */
+            SDL_Delay(20);
+        }
+        gs_pump_messages();   /* closed meanwhile: the game ends here */
+        if (!wait_target(300) || !gs_gpu_surface_reset(&gs, &target)) {
+            hle_log("gs: no surface on the window after the background\n");
+            target_ready = 0;
+        } else {
+            resize_pending = 1;
+        }
+        SDL_SetAtomicInt(&away_waiting, 0);
+        if (gs_render_release(absence)) break;   /* the held fields draw on the new surface */
+        /* a newer absence began meanwhile: its hold stays; wait through it */
+        SDL_SetAtomicInt(&away_waiting, 1);
+        absence = gs_render_generation();
+        hle_log("gs: the app left again while its surface was made; the game waits again\n");
+        gs_gpu_surface_reset(&gs, NULL);
         target_ready = 0;
-    } else {
-        resize_pending = 1;
     }
-    SDL_SetAtomicInt(&away_waiting, 0);
-    gs_render_hold(0);   /* the held fields draw on the new surface */
     host_app_away(0);   /* the core's clock starts again from now (kernel.c, host_service_host_came_back) */
     hle_log("gs: back in the foreground after %.1f s; the game clock goes on from now\n", host_wall_seconds() - since);
     waiting = 0;
