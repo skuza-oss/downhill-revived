@@ -114,7 +114,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the touch pause menu, finding 189; a SKIP button in the flight over the track, finding 209, and
   in the movies and the title's attract demo, findings 214 and 218; a D-pad as a third touch
   steering choice, finding 214, placed clear of the game's HUD, finding 218; MENU over a replay,
-  also above 60 updates a second, finding 218).
+  also above 60 updates a second, finding 218; per-control sizes 25-600 %, free placement, undo
+  and redo in the layout editor, tablet defaults, the editor alone for the launcher
+  (`DHD_TOUCH_EDITOR`), tilt on iOS, finding 226).
 - The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
   threads and the render thread stop, the closing log lines are written, open files are flushed,
   and the process leaves without the C library's static destructors. New code that must run at the

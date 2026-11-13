@@ -38,6 +38,10 @@ int ios_metal_consume_layer_changed(void);
 int ios_touch_screen(float *width_mm, float *height_mm, float strips[4], float cut[4]);
 void ios_touch_buzz(int kind);
 void ios_text_input(int on);
+/* Tilt steering (finding 226): CoreMotion's gravity as the roll Android's touchTilt gives
+   (degrees, turned right positive, 0 held level in landscape); on: 1 with a sensor, 0 without. */
+int ios_touch_tilt_on(int on);
+int ios_touch_tilt(float *degrees);
 
 #ifdef __OBJC__
 @class UIViewController;

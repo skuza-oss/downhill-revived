@@ -282,7 +282,7 @@ class BuildTests(unittest.TestCase):
             with patch.object(build, 'ROOT', root), patch.object(build.subprocess, 'run') as run:
                 build.prepare_native_core(wasm)
                 self.assertEqual(run.call_count, 1)
-                self.assertIn(str(wasm), run.call_args.args[0])
+                self.assertIn(str(wasm.resolve()), run.call_args.args[0])   # macOS: /var is /private/var
                 with self.assertRaises(FileNotFoundError):
                     build.prepare_native_core(root / 'missing.wasm')
 

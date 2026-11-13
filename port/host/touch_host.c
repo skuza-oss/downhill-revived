@@ -19,7 +19,13 @@
    for the checks only: DHD_TOUCH_HUD=game keeps the game's HUD (the fallback layout), and
    DHD_TOUCH_AIR_WAIT=ms sets the air layout's wait (150, or 33 if check 6 finds the flag steady);
    DHD_TOUCH_LOG=1 logs every touch (mm), the screen's insets and each change of the buttons sent
-   (2: every move as well). */
+   (2: every move as well).
+
+   The layout editor alone (finding 226; the shared mobile launcher's "Edit the touch layout"):
+   DHD_TOUCH_EDITOR=1, or the game's argument --touch-editor (touch_host_args), starts the game
+   with its sound muted and its movies skipped, opens the overlay's editor over a plain background
+   as soon as the screen's size is known, and ends the game (as EXIT GAME does) once Done or Back
+   has saved the layout, so the launcher that started it is shown again. */
 #include "host_api.h"
 #include "../hle/hle.h"
 #include "../hle/touch.h"
@@ -45,6 +51,8 @@
    x0 y0 x1 y1 (mm); 0 before the view is laid out */
 int ios_touch_screen(float *width_mm, float *height_mm, float strips[4], float cut[4]);
 void ios_touch_buzz(int kind);   /* TOUCH_BUZZ_*: the Taptic Engine */
+int ios_touch_tilt(float *degrees);   /* CoreMotion's roll, as Android's (finding 226) */
+int ios_touch_tilt_on(int on);   /* 1 the device has a tilt sensor, 0 none */
 void gs_window_pixels(unsigned *width, unsigned *height);   /* present.c: the picture's pixels */
 #endif
 #ifdef __ANDROID__
@@ -76,6 +84,26 @@ static float published_w, published_h;
 
 static double ms_now(void) { return (double)SDL_GetTicksNS() / 1e6; }
 
+/* The editor alone (header): wanted, opened, ended. */
+static int editor_alone(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *v = getenv("DHD_TOUCH_EDITOR"); on = v && atoi(v) > 0; }
+    return on;
+}
+
+/* launcher.c's main, before anything starts: --touch-editor is DHD_TOUCH_EDITOR=1, and either
+   mutes the game and skips its movies (the editor covers them; nothing should play behind it). */
+void touch_host_args(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++)
+        if (argv[i] && !strcmp(argv[i], "--touch-editor")) host_putenv_s("DHD_TOUCH_EDITOR", "1");
+    if (!editor_alone()) return;
+    host_putenv_s("DHD_SND_MUTE", "1");
+    host_putenv_s("DHD_SKIP_MOVIES", "1");
+    fprintf(stderr, "touch: the layout editor alone (DHD_TOUCH_EDITOR): muted, no movies\n");
+}
+
 static double trace_race_ms;   /* the race clock the trace prints */
 
 /* DHD_TOUCH_LOG=1: the checks' trace in dhd.log. */
@@ -96,11 +124,7 @@ static int touch_on(void)
 #if defined(__ANDROID__) || defined(TOUCH_IOS)
         available = 1;
         gs_mouse_touchscreen();   /* else the menus' first reading takes the first tap as its baseline */
-#ifdef TOUCH_IOS
-        SDL_SetAtomicInt(&tilt_sensor, 0);    /* iOS: no tilt steering yet (finding 224) */
-#else
-        SDL_SetAtomicInt(&tilt_sensor, -1);   /* the first tick asks */
-#endif
+        SDL_SetAtomicInt(&tilt_sensor, -1);   /* the first tick asks (iOS since finding 226) */
 #else
         const char *mouse = getenv("DHD_TOUCH_MOUSE");
         available = mouse && atoi(mouse) ? 2 : 0;
@@ -289,23 +313,44 @@ int touch_host_event(const SDL_Event *e)
 void touch_host_tick(void)
 {
     if (!touch_on()) return;
+#ifndef TOUCH_IOS
+    if (!last_window && lock) {   /* the screen's size before the first touch (the editor alone needs it at once) */
+        int n = 0;
+        SDL_Window **windows = SDL_GetWindows(&n);
+        if (windows && n > 0) {
+            last_window = (long long)SDL_GetWindowID(windows[0]);
+            screen_update(windows[0]);
+        }
+        SDL_free(windows);
+    }
+#endif
     int buzz = SDL_GetAtomicInt(&want_buzz);
     if (buzz) SDL_SetAtomicInt(&want_buzz, 0);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(TOUCH_IOS)
+#ifdef TOUCH_IOS
+#define platform_tilt_on ios_touch_tilt_on
+#define platform_tilt ios_touch_tilt
+#else
+#define platform_tilt_on android_touch_tilt_on
+#define platform_tilt android_touch_tilt
+#endif
     static int tilt_was = -1;   /* the first pass asks whether there is a sensor */
-    static double insets_at, tilt_retry_at;
+    static double tilt_retry_at;
     int tilt = SDL_GetAtomicInt(&tilt_wanted);
     if (tilt != tilt_was && ms_now() >= tilt_retry_at) {
         SDL_SetAtomicInt(&tilt_known, 0);   /* the next reading is the new sensor's */
-        int sensor = android_touch_tilt_on(tilt);
+        int sensor = platform_tilt_on(tilt);
         if (sensor >= 0) SDL_SetAtomicInt(&tilt_sensor, sensor), tilt_was = tilt;
         else tilt_retry_at = ms_now() + 250;   /* not asked (no activity yet): again in a moment, not every pass */
     }
     float deg;
-    if (tilt && android_touch_tilt(&deg)) {
+    if (tilt && platform_tilt(&deg)) {
         SDL_SetAtomicInt(&tilt_milli, (int)(deg * 1000));
         SDL_SetAtomicInt(&tilt_known, 1);
     }
+#endif
+#ifdef __ANDROID__
+    static double insets_at;
     if (buzz) android_touch_buzz(buzz);
     if (last_window && ms_now() - insets_at > 2000) {   /* the gesture insets change with the navigation mode */
         insets_at = ms_now();
@@ -570,6 +615,18 @@ void host_service_touch_field(uint32_t address)
         fprintf(stderr, "touch: the layout editor opens (the launcher asked for it)\n");
         touch_open_editor(touch);
     }
+    static int alone_state;   /* the editor alone: 0 waiting for the screen, 1 open, 2 ended */
+    if (editor_alone() && alone_state == 0) {
+        SDL_LockMutex(lock);
+        int known = screen_known;
+        SDL_UnlockMutex(lock);
+        if (known) {
+            configure(1);
+            touch_open_editor_alone(touch);
+            alone_state = 1;
+            fprintf(stderr, "touch: the layout editor alone is open\n");
+        }
+    }
     if (h->command == TOUCH_COMMAND_HINTS) {
         save("touch_hints", "DHD_TOUCH_HINTS", "0");
         configure(0);
@@ -639,6 +696,11 @@ void host_service_touch_field(uint32_t address)
     if (buzz) SDL_SetAtomicInt(&want_buzz, buzz);
     TouchSettings saved;
     if (touch_take_saved(touch, &saved)) save_settings(&saved);
+    if (alone_state == 1 && !touch_editor_open(touch)) {   /* Done or Back: saved above; the game ends */
+        alone_state = 2;
+        fprintf(stderr, "touch: the layout editor alone is done; the game ends\n");
+        gs_window_close();
+    }
     h->hud_mode = touch_hud_mode(touch);
     h->leave_race = touch_take_ask(touch) == TOUCH_ASK_LEAVE_RACE;
     h->freeze = touch_freeze(touch);

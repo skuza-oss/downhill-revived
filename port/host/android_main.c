@@ -129,9 +129,13 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
     }
     settings_start(disc);
     if (!getenv("DHD_LAUNCHER_CHECKED")) android_update_start(files);  /* the launcher's line said it */
-    char *args[] = {exe, NULL};
-    (void)argc; (void)argv;
-    int code = dhd_launcher_main(1, args);
+    /* the activity's arguments (SDLActivity.getArguments; argv[0] is SDL's own): only
+       --touch-editor, the launcher's "Edit the touch layout" (finding 226), goes on to the game */
+    char *args[] = {exe, NULL, NULL};
+    int count = 1;
+    for (int i = 1; i < argc; i++)
+        if (argv[i] && !strcmp(argv[i], "--touch-editor")) args[count++] = argv[i];
+    int code = dhd_launcher_main(count, args);
     fprintf(stderr, "android: the game ended (%d)\n", code);
     host_end(code);
 }
