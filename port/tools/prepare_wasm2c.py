@@ -81,6 +81,8 @@ def specialize_dispatch(text, hot_functions=()):
 
 # One scalar/SIMD access (size 1..16): memory_access.h's cheaper inline test, same result.
 MEMOP_DEFINE = '#define MEM_ADDR_MEMOP(mem, addr, n) host64_access_address(wasm_rt_local_memory_base, (addr), (n))'
+MEMCHECK_SKIP_OLD = '#if WASM_RT_MEMCHECK_GUARD_PAGES\n#define MEMCHECK_DEFAULT32(mem, local_memory_size, a, t) \\\n  WASM_RT_CHECK_BASE(mem);'
+MEMCHECK_SKIP_NEW = '#if WASM_RT_MEMCHECK_GUARD_PAGES || WASM_RT_SKIP_BOUNDS_CHECKS\n#define MEMCHECK_DEFAULT32(mem, local_memory_size, a, t) \\\n  WASM_RT_CHECK_BASE(mem);'
 
 # WABT's scalar and SIMD access templates (DEFINE_LOAD(i32_load, u32, u32, u32, FORCE_READ_INT) ...).
 ACCESS_TEMPLATE = re.compile(r'^(DEFINE_(?:LOAD|STORE|SIMD_LOAD_FUNC|SIMD_LOAD_LANE|SIMD_STORE|SIMD_STORE_LANE))'
@@ -365,7 +367,10 @@ def prepare_units(units, out, exact_f32=False):
     for header in out.glob('*-impl.h'):
         if '#define MEM_ADDR(mem' in header.read_text():
             prepare(header)
-        header.write_text(builtin_float_tests(header.read_text()))
+        text = builtin_float_tests(header.read_text())
+        if MEMCHECK_SKIP_OLD in text:
+            text = text.replace(MEMCHECK_SKIP_OLD, MEMCHECK_SKIP_NEW)
+        header.write_text(text)
 
 
 def builtin_float_tests(text):
