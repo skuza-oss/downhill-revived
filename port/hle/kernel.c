@@ -914,6 +914,13 @@ static void vsync(void)
     }
 #endif
     host_service_gs_vsync();  /* latch the display buffer selected by the VBLANK handler */
+    /* A phone's app came back from the background during that present (port/gs/present.c's
+       app_away_wait, finding 227): the time away is no game time; the next step starts from now,
+       online too (nothing fast-forwards it), and the frames' grid starts again. */
+    if (host_service_host_came_back()) {
+        pace_grid.base = 0;
+        port_clock_rebase();
+    }
     intc_raise(INTC_VBLANK_END);
     run_handlers(intc_handlers, intc_enabled, INTC_VBLANK_END);
     if (fresh) {

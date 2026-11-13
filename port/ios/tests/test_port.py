@@ -292,10 +292,12 @@ class BuildTests(unittest.TestCase):
             lib = root / 'build/host64-ios/libdhd_ios.a'
             lib.parent.mkdir(parents=True)
             lib.write_bytes(b'test-only')
-            for name in ('port/render/include/dhd_settings.h', 'port/hle/controls_table.h', 'port/include/version.h'):
+            for name in ('port/render/include/dhd_settings.h', 'port/hle/controls_table.h', 'port/include/version.h',
+                         'LICENSE', 'port/release/THIRD-PARTY-NOTICES.txt'):
                 destination = root / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes((ROOT / name).read_bytes())
+            shutil.copytree(ROOT / 'port/launcher/ui', root / 'port/launcher/ui')
             project = root / 'project'
             with patch.object(build, 'ROOT', root), patch.object(build, 'PROJECT', project), \
                     patch.object(build.subprocess, 'run'):
@@ -310,6 +312,14 @@ class BuildTests(unittest.TestCase):
             self.assertIn('DEVELOPMENT_TEAM: "TESTTEAM01"', text)
             self.assertTrue((project / 'Render/metal_bridge.m').is_file())
             self.assertTrue((project / 'App/main.m').is_file())
+            # the launcher's page and its bridge (finding 227): the shared files, served from the bundle
+            self.assertTrue((project / 'launcher/index.html').is_file())
+            self.assertTrue((project / 'launcher/lang/en.json').is_file())
+            self.assertTrue((project / 'App/bridge_ios.js').is_file())
+            self.assertTrue((project / 'Texts/LICENSE.txt').is_file())
+            self.assertIn('- path: launcher' + chr(10) + '        type: folder', text)
+            self.assertIn('"%s"' % (root / 'port').as_posix(), text)
+            self.assertIn('"-framework WebKit"', text)
             self.assertTrue((project / 'AppIcon.xcassets/AppIcon.appiconset/Contents.json').is_file())
             self.assertEqual((project / 'Lib/libdhd_ios.a').read_bytes(), b'test-only')
 

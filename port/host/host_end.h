@@ -32,6 +32,9 @@ static inline void host_end_add(int stage, const char *name, void (*fn)(void)) {
 void host_end_add(int stage, const char *name, void (*fn)(void));
 #endif
 
+/* The code the process is ending with, for a handler (iOS's run record, finding 227). */
+int host_end_code(void);
+
 /* Runs the handlers, flushes the open files and ends the process with host_exit(code). Never
    returns. Called twice (another thread, or a handler): the second call waits for the first. */
 void host_end(int code) __attribute__((noreturn));

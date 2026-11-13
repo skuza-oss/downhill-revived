@@ -5,7 +5,7 @@
    dhd_launcher_main). Before it:
    - the log (stdout, stderr) goes to logcat (tag DownhillRevived) and to dhd.log (host.c's
      host_console_init, the log of every platform, started here before anything prints; the one
-     before becomes dhd-previous.log), which first says how the run before ended (quote_last_exit);
+     before becomes dhd-previous.log), which first says how the run before ended (phone_quote_last_exit);
    - the app's files folder (internal storage, SDL_GetAndroidInternalStoragePath) stands for the
      folder of dhd.exe: host_exe_path names dhd64 there, so dhd.ini, saves, dhd.log and the disc
      image's copy live there;
@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include "../render/include/dhd_settings.h"
 #include "host_end.h"
+#include "phone.h"
 
 #define TAG "DownhillRevived"
 #define DISC_NAME "SCUS-97177.iso"
@@ -68,24 +69,6 @@ static int disc_ready(const char *path)
     return 0;
 }
 
-/* How the run before ended, as Android recorded it (the reason, and a native crash's tombstone in
-   short): the app's Java side writes dhd-exit.txt before the game starts (LastExit.java, finding
-   152); each of its lines goes into the new dhd.log as "previous run: ...", so a log always says how
-   the one before it (now dhd-previous.log) ended. */
-static void quote_last_exit(void)
-{
-    char path[1200], line[600];
-    snprintf(path, sizeof path, "%sdhd-exit.txt", files);
-    FILE *f = fopen(path, "r");
-    if (!f) return;
-    while (fgets(line, sizeof line, f)) {
-        size_t n = strlen(line);
-        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
-        fprintf(stderr, "previous run: %s\n", line);
-    }
-    fclose(f);
-}
-
 /* dhd.ini names the copy of the disc (host_disc_ready checks it in the core; DHD_ISO would skip
    that check): a dhd.ini without a disc gets it (dhd_settings, which starts a missing file). The
    player defaults apply as soon as dhd.ini exists (host_settings_load). */
@@ -107,7 +90,7 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
     snprintf(exe, sizeof exe, "%sdhd64", files);
     host_console_init();
     fprintf(stderr, "android: Downhill Revived in %s\n", files);
-    quote_last_exit();
+    phone_quote_last_exit(files);  /* LastExit.java's dhd-exit.txt (finding 152) */
     {   /* a profile-collecting build (build_host64.py --target android-arm64 --pgo-generate): its counters go to the
            files folder (host_exit writes them; the process ends with _exit, so no atexit runs) */
         extern void __llvm_profile_set_filename(const char *) __attribute__((weak));
@@ -115,11 +98,7 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
         snprintf(profile, sizeof profile, "%sdhd-%%p.profraw", files);
         if (__llvm_profile_set_filename) __llvm_profile_set_filename(profile);
     }
-    /* SETTINGS without the window rows (a phone has one screen), which makes room for Touch
-       Controls (finding 141; the popup holds 16 rows) */
-    setenv("DHD_PC_SETTINGS_ROWS", "DHD_SCALE,DHD_ASPECT,DHD_PRESENT_FILTER,DHD_WIDESCREEN,DHD_SKIP_MOVIES,DHD_VIBRATION,"
-           "DHD_STICK_DEAD_ZONE,DHD_PROMPTS,DHD_TEXTURES,DHD_FONT,DHD_FPS,DHD_VSYNC,DHD_PERF_COUNTER,DHD_UNLOCK_ALL,"
-           "DHD_SHADOWS,DHD_LENS_FLARE,DHD_PARTICLES,DHD_NATIVE_VU1,DHD_LAUNCHER_AT_START", 0);
+    phone_settings_rows();  /* SETTINGS: a phone's rows (phone.c, the same list as iOS) */
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     char disc[1200];

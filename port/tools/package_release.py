@@ -864,11 +864,15 @@ def ios_release(a, platform, out, manifest_path, page):
     """--platform ios (finding 224, experimental, on a Mac): the unsigned IPA (port/ios/build_ios.py
     --unsigned from --core, wasm2c's core_*.c, or --wasm; or a ready one, --ipa) into out, with
     LICENSE.txt and THIRD-PARTY-NOTICES.txt in the app; checked as the APK is (no game data, the
-    version, no other server or local path, no retail bytes but the source's own, no signature or
-    provisioning profile); latest.json's "ios" entry and SHA256SUMS. Players sign it themselves when
+    version, no other server or local path, no retail bytes but the source's own; and port/ios/ipa_audit.py
+    on every member, as package_unsigned.py runs it: no signature or provisioning file, no Mach-O with a
+    code signature or one that can't be read, no home folder, device, team or DHD_IPA_PRIVATE literal;
+    finding 227); latest.json's "ios" entry and SHA256SUMS. Players sign it themselves when
     they install it (docs/PLAYING.md)."""
     sys.path.insert(0, str(ROOT / 'port' / 'ios'))
     import build_ios  # noqa: E402
+    import ipa_audit  # noqa: E402  (the same audit package_unsigned.py runs, finding 227)
+    identity = ipa_audit.identity_patterns()
     if build_ios.version()[0] != a.version:
         sys.exit('build_ios.py reads version %s, not %s' % (build_ios.version()[0], a.version))
     notices = rust_notices(platform)
@@ -905,8 +909,12 @@ def ios_release(a, platform, out, manifest_path, page):
             file_name = parts[-1]
             if not info.is_dir() and GAME_DATA.search(file_name):
                 problems.append('%s looks like game data' % path)
-            if file_name == 'embedded.mobileprovision' or '/_CodeSignature/' in path:
-                problems.append('%s: the IPA must be unsigned' % path)
+            if info.is_dir() and parts[-2:-1] == ['_CodeSignature'] or (info.external_attr >> 16) & 0o170000 == 0o120000:
+                problems.append('%s: a signature folder or a symbolic link (the IPA must be unsigned, every member verifiable)' % path)
+            if not info.is_dir():
+                # every member, the executable, frameworks and dylibs included: no signature or
+                # provisioning file, no signed or unreadable Mach-O, no builder's identity
+                problems += ipa_audit.member_problems(path, content, identity)
             game = path == 'Payload/%s/%s' % (parts[1], platform.game)
             if game:
                 if binary_kind(content) != platform.kind:
@@ -921,6 +929,8 @@ def ios_release(a, platform, out, manifest_path, page):
                 runs = game_data_runs(content, elf, libraries if game else [])
                 problems += ['%s holds game data at +0x%X: %d bytes = %s' % (path, at, n, scan_retail.elf_place(elf, e))
                              for at, e, n in runs[:20]]
+            if len(parts) == 3 and file_name in ('LICENSE.txt', 'THIRD-PARTY-NOTICES.txt'):
+                continue   # the app's own copies (build_ios.py): the release's, with the Rust crates' notices, below
             w.writestr(info, content)
         if len(apps) != 1:
             problems.append('the IPA holds %d apps, not one' % len(apps))

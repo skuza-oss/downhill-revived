@@ -74,6 +74,8 @@ static SDL_AtomicInt tilt_wanted;     /* tilt steering is on */
 static SDL_AtomicInt tilt_milli;      /* the phone's roll, millidegrees */
 static SDL_AtomicInt tilt_known;      /* tilt_milli is a reading since tilt went on */
 static SDL_AtomicInt tilt_sensor;     /* 1 a tilt sensor, 0 none, -1 not known yet */
+static SDL_AtomicInt pad_named;       /* a controller sent input since the last touch (finding 227) */
+static double pause_due;              /* game thread: the app came back; pause a race offline from then (finding 227) */
 static TouchScreen screen;            /* under lock */
 static int screen_known;
 
@@ -135,8 +137,35 @@ static int touch_on(void)
     return available;
 }
 
+/* The app left the screen or came back (host_app_away, the game thread; finding 227). Away: every
+   finger is let go. Back: a moment later (once the game has drawn the race again, so the overlay
+   knows the race is on screen) the overlay does what it does when a controller goes away
+   mid-race (touch_pad_lost): offline it opens the game's own pause; online nothing, the race goes
+   on (finding 215). */
+static void push(int kind, long long id, float x, float y, double ms);
+
+void touch_host_app_away(int away)
+{
+    if (!touch_on()) return;
+    if (away) {
+        push(EV_CANCEL, -1, 0, 0, ms_now());
+        pause_due = 0;
+    } else {
+        pause_due = ms_now() + 150;
+    }
+}
+
+/* The pad's button names apply (hle.h): no touch here (every desktop), or a controller has sent
+   input since the last touch. A phone starts with touch's words, so a controller that is only
+   there (the iOS Simulator's own, a pad in a bag) changes nothing until it is used. */
+int touch_host_pad_prompts(void)
+{
+    return !touch_on() || SDL_GetAtomicInt(&pad_named);
+}
+
 static void push(int kind, long long id, float x, float y, double ms)
 {
+    if (kind == EV_DOWN) SDL_SetAtomicInt(&pad_named, 0);   /* the prompts are touch's again */
     if (!lock) return;
     SDL_LockMutex(lock);
     touch_queue_push(&queue, kind, id, x, y, ms);   /* full: moves merge, never an up (touch.h) */
@@ -286,10 +315,14 @@ int touch_host_event(const SDL_Event *e)
         return e->key.scancode == SDL_SCANCODE_AC_BACK;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+        SDL_SetAtomicInt(&pad_named, 1);
         push(EV_PAD_USED, 0, 0, 0, (double)e->common.timestamp / 1e6);
         return 0;
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-        if (abs(e->gaxis.value) > 16000) push(EV_PAD_USED, 0, 0, 0, (double)e->common.timestamp / 1e6);
+        if (abs(e->gaxis.value) > 16000) {
+            SDL_SetAtomicInt(&pad_named, 1);
+            push(EV_PAD_USED, 0, 0, 0, (double)e->common.timestamp / 1e6);
+        }
         return 0;
     case SDL_EVENT_GAMEPAD_REMOVED:
     case SDL_EVENT_JOYSTICK_REMOVED:
@@ -420,6 +453,15 @@ void ios_touch_finger(int kind, long long id, float x, float y)
 void ios_touch_cancel(void)
 {
     if (touch_on()) push(EV_CANCEL, -1, 0, 0, ms_now());
+}
+
+/* iOS has no system Back (finding 227): a swipe in from the screen's left edge is Android's Back
+   (touch_back: in menus the page's BACK, the pause rows' way back), outside a race only, where
+   the overlay does not take the touches: in a race the left edge is the steering thumb's. */
+int ios_touch_back_allowed(void) { return touch_on() && !SDL_GetAtomicInt(&owns); }
+void ios_touch_back(void)
+{
+    if (ios_touch_back_allowed()) push(EV_BACK, 0, 0, 0, ms_now());
 }
 #endif
 
@@ -690,6 +732,13 @@ void host_service_touch_field(uint32_t address)
     else if (trace_on() && h->air != trace_air) {
         fprintf(stderr, "touch log: air %d (%.0f ms) race %.0f ms\n", h->air, ms_now(), h->race_ms);
         trace_air = h->air;
+    }
+    if (pause_due && ms_now() >= pause_due) {   /* back from the background (touch_host_app_away) */
+        pause_due = 0;
+        if (h->race_hud)
+            fprintf(stderr, "touch: back from the background in a race: %s\n",
+                    h->online ? "online, the race goes on" : "the game's pause");
+        touch_pad_lost(touch, ms_now());
     }
     touch_update(touch, &g, ms_now());
     int buzz = touch_take_buzz(touch);
