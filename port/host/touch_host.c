@@ -19,7 +19,13 @@
    for the checks only: DHD_TOUCH_HUD=game keeps the game's HUD (the fallback layout), and
    DHD_TOUCH_AIR_WAIT=ms sets the air layout's wait (150, or 33 if check 6 finds the flag steady);
    DHD_TOUCH_LOG=1 logs every touch (mm), the screen's insets and each change of the buttons sent
-   (2: every move as well). */
+   (2: every move as well).
+
+   The layout editor alone (finding 226; the shared mobile launcher's "Edit the touch layout"):
+   DHD_TOUCH_EDITOR=1, or the game's argument --touch-editor (touch_host_args), starts the game
+   with its sound muted and its movies skipped, opens the overlay's editor over a plain background
+   as soon as the screen's size is known, and ends the game (as EXIT GAME does) once Done or Back
+   has saved the layout, so the launcher that started it is shown again. */
 #include "host_api.h"
 #include "../hle/hle.h"
 #include "../hle/touch.h"
@@ -75,6 +81,26 @@ static int published_count;
 static float published_w, published_h;
 
 static double ms_now(void) { return (double)SDL_GetTicksNS() / 1e6; }
+
+/* The editor alone (header): wanted, opened, ended. */
+static int editor_alone(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *v = getenv("DHD_TOUCH_EDITOR"); on = v && atoi(v) > 0; }
+    return on;
+}
+
+/* launcher.c's main, before anything starts: --touch-editor is DHD_TOUCH_EDITOR=1, and either
+   mutes the game and skips its movies (the editor covers them; nothing should play behind it). */
+void touch_host_args(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++)
+        if (argv[i] && !strcmp(argv[i], "--touch-editor")) host_putenv_s("DHD_TOUCH_EDITOR", "1");
+    if (!editor_alone()) return;
+    host_putenv_s("DHD_SND_MUTE", "1");
+    host_putenv_s("DHD_SKIP_MOVIES", "1");
+    fprintf(stderr, "touch: the layout editor alone (DHD_TOUCH_EDITOR): muted, no movies\n");
+}
 
 static double trace_race_ms;   /* the race clock the trace prints */
 
@@ -289,6 +315,17 @@ int touch_host_event(const SDL_Event *e)
 void touch_host_tick(void)
 {
     if (!touch_on()) return;
+#ifndef TOUCH_IOS
+    if (!last_window && lock) {   /* the screen's size before the first touch (the editor alone needs it at once) */
+        int n = 0;
+        SDL_Window **windows = SDL_GetWindows(&n);
+        if (windows && n > 0) {
+            last_window = (long long)SDL_GetWindowID(windows[0]);
+            screen_update(windows[0]);
+        }
+        SDL_free(windows);
+    }
+#endif
     int buzz = SDL_GetAtomicInt(&want_buzz);
     if (buzz) SDL_SetAtomicInt(&want_buzz, 0);
 #ifdef __ANDROID__
@@ -556,6 +593,18 @@ void host_service_touch_field(uint32_t address)
     SDL_UnlockMutex(lock);
     if (!set_up || relay || h->command == TOUCH_COMMAND_SETTINGS) { configure(!set_up || relay); set_up = 1; }
     if (h->command == TOUCH_COMMAND_EDIT) touch_open_editor(touch);
+    static int alone_state;   /* the editor alone: 0 waiting for the screen, 1 open, 2 ended */
+    if (editor_alone() && alone_state == 0) {
+        SDL_LockMutex(lock);
+        int known = screen_known;
+        SDL_UnlockMutex(lock);
+        if (known) {
+            configure(1);
+            touch_open_editor_alone(touch);
+            alone_state = 1;
+            fprintf(stderr, "touch: the layout editor alone is open\n");
+        }
+    }
     if (h->command == TOUCH_COMMAND_HINTS) {
         save("touch_hints", "DHD_TOUCH_HINTS", "0");
         configure(0);
@@ -625,6 +674,11 @@ void host_service_touch_field(uint32_t address)
     if (buzz) SDL_SetAtomicInt(&want_buzz, buzz);
     TouchSettings saved;
     if (touch_take_saved(touch, &saved)) save_settings(&saved);
+    if (alone_state == 1 && !touch_editor_open(touch)) {   /* Done or Back: saved above; the game ends */
+        alone_state = 2;
+        fprintf(stderr, "touch: the layout editor alone is done; the game ends\n");
+        gs_window_close();
+    }
     h->hud_mode = touch_hud_mode(touch);
     h->leave_race = touch_take_ask(touch) == TOUCH_ASK_LEAVE_RACE;
     h->freeze = touch_freeze(touch);
