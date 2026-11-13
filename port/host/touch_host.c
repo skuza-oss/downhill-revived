@@ -504,6 +504,8 @@ static void settings_read(TouchSettings *s)
     s->labels = env_choice("DHD_TOUCH_LABELS", labels, 3, TOUCH_LABELS_AUTO);
     s->attacks = env_choice("DHD_TOUCH_ATTACKS", attacks, 2, TOUCH_ATTACK_FLICK);
     s->style = env_choice("DHD_TOUCH_STYLE", style, 2, TOUCH_STYLE_ACTIONS);   /* Button Style (finding 229) */
+    static const char *const prompts[] = {"playstation", "xbox", "nintendo"};   /* Button Icons, when chosen (finding 134) */
+    s->badges = env_choice("DHD_PROMPTS", prompts, 3, TOUCH_BADGES_PS2);
     s->vibration = env_int("DHD_TOUCH_VIBRATION", 1, 0, 1) && env_int("DHD_VIBRATION", 1, 0, 1);
     s->show_with_pad = env_choice("DHD_TOUCH_WITH_PAD", pad, 2, 0);
     s->tilt_strength = env_int("DHD_TOUCH_TILT_STRENGTH", 50, 0, 100);
@@ -643,7 +645,19 @@ void host_service_touch_field(uint32_t address)
     SDL_LockMutex(lock);
     relay = screen_known == 2;
     SDL_UnlockMutex(lock);
-    if (!set_up || relay || h->command == TOUCH_COMMAND_SETTINGS) { configure(!set_up || relay); set_up = 1; }
+    /* Button Icons changed (PC SETTINGS): the badges follow, looked at once a second */
+    static char prompts_seen[16];
+    int prompts_changed = 0;
+    if (set_up && h->vsync % 60 == 0) {
+        const char *p = getenv("DHD_PROMPTS");
+        prompts_changed = strncmp(p ? p : "", prompts_seen, sizeof prompts_seen - 1) != 0;
+    }
+    if (!set_up || relay || prompts_changed || h->command == TOUCH_COMMAND_SETTINGS) {
+        const char *p = getenv("DHD_PROMPTS");
+        snprintf(prompts_seen, sizeof prompts_seen, "%s", p ? p : "");
+        configure(!set_up || relay);
+        set_up = 1;
+    }
     if (h->command == TOUCH_COMMAND_EDIT) touch_open_editor(touch);
     /* The launcher's "Edit the touch layout" (finding 225): DhdActivity sets DHD_TOUCH_EDIT_AT_START=1,
        and the layout editor opens once, as TOUCH CONTROLS > Edit layout opens it, when the start's

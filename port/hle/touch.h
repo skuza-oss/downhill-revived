@@ -26,6 +26,11 @@ enum { TOUCH_ATTACK_FLICK, TOUCH_ATTACK_BUTTONS };
 /* Button Style (finding 229): Actions shows what each button does (a pedal, fists, a brake ...) with
    a small badge of the pad's name; Symbols shows the PS2 pad's symbols alone (the look before). */
 enum { TOUCH_STYLE_ACTIONS, TOUCH_STYLE_SYMBOLS };
+/* The names on Actions' badges: the PS2 pad's, or the Xbox or Nintendo names in the same places
+   when Button Icons (dhd.ini prompts, finding 134) chooses them, so the badges say what the game's
+   prompts say. Auto keeps the PS2 names: on a touch screen the game's prompts name a controller
+   only while one is in use (finding 227), and the overlay hides then. */
+enum { TOUCH_BADGES_PS2, TOUCH_BADGES_XBOX, TOUCH_BADGES_NINTENDO };
 
 /* The controls a layout has (also the editor's and dhd.ini touch_layout's names). */
 enum {
@@ -66,6 +71,7 @@ typedef struct {
     int labels;           /* TOUCH_LABELS_* */
     int attacks;          /* TOUCH_ATTACK_* */
     int style;            /* TOUCH_STYLE_* */
+    int badges;           /* TOUCH_BADGES_* */
     int vibration;
     int show_with_pad;    /* With a controller: 0 hide, 1 show */
     int tilt_strength;    /* percent */

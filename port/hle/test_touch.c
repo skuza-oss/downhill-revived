@@ -2552,7 +2552,32 @@ static void test_button_style(void)
         CHECK(count_shapes(TS_ICON, -1) == 0);
         set_style(TOUCH_STYLE_ACTIONS);
         CHECK(count_shapes(TS_ICON, TI_PEDAL) == 1);
+        /* Button Icons chosen as Xbox: the badges name A, B, X, Y (letters, no symbols); as before
+           with the PS2 names */
+        TouchSettings x = *touch_settings(t);
+        x.badges = TOUCH_BADGES_XBOX;
+        touch_configure(t, &x, NULL);
+        field();
+        CHECK(count_shapes(TS_CROSS, 0) == 0 && count_shapes(TS_TRIANGLE, 0) == 0);
+        CHECK(count_shapes(TS_ICON, TI_PEDAL) == 1);
+        x.badges = TOUCH_BADGES_PS2;
+        touch_configure(t, &x, NULL);
+        field();
+        CHECK(count_shapes(TS_CROSS, 0) == 1);
     }
+    /* the smallest Size on the Mi 11i: the face buttons keep their pictures; L3, R3 and the bars,
+       too small for theirs, show their names */
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    TouchSettings small = *touch_settings(t);
+    small.size = 70;
+    touch_configure(t, &small, NULL);
+    field();
+    CHECK(count_shapes(TS_ICON, TI_PEDAL) == 1 && count_shapes(TS_ICON, TI_FIST) == 2 && count_shapes(TS_ICON, TI_BRAKE) == 1);
+    CHECK(count_shapes(TS_ICON, TI_SLIDE) == 0 && count_shapes(TS_ICON, TI_SPRINT) == 0 && count_shapes(TS_ICON, TI_HAND) == 0);
+    small.size = 0;   /* auto: every picture */
+    touch_configure(t, &small, NULL);
+    field();
+    CHECK(count_shapes(TS_ICON, TI_SLIDE) == 1 && count_shapes(TS_ICON, TI_SPRINT) == 1 && count_shapes(TS_ICON, TI_HAND) == 1);
 }
 
 /* The ground and air pictures: Classic's △ (brake, superstyle) and R2 (the hop, a trick's link).

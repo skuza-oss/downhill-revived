@@ -2911,16 +2911,36 @@ typedef struct { int icon, mirror, symbol; const char *name; } Act;
 
 static int actions(const Touch *t) { return t->set.style == TOUCH_STYLE_ACTIONS; }
 
+/* A pad button's name on a badge (TOUCH_BADGES_*): `symbol` a face button's TS_* (0 none), else
+   `name` the PS2 name (L1 ... R3). NULL: draw the PS2 symbol. */
+static const char *badge_name(const Touch *t, int symbol, const char *name)
+{
+    static const char *const ps2[] = {"L1", "L2", "R1", "R2", "L3", "R3"};
+    static const char *const xbox[] = {"LB", "LT", "RB", "RT", "LS", "RS"}, *const nintendo[] = {"L", "ZL", "R", "ZR", "LS", "RS"};
+    int b = t->set.badges;
+    if (b != TOUCH_BADGES_XBOX && b != TOUCH_BADGES_NINTENDO) return symbol ? NULL : name;
+    if (symbol) {   /* by place: bottom, right, left, top */
+        int i = symbol == TS_CROSS ? 0 : symbol == TS_CIRCLE ? 1 : symbol == TS_SQUARE ? 2 : 3;
+        static const char *const xb[] = {"A", "B", "X", "Y"}, *const ni[] = {"B", "A", "Y", "X"};
+        return b == TOUCH_BADGES_XBOX ? xb[i] : ni[i];
+    }
+    for (int i = 0; name && i < 6; i++)
+        if (!strcmp(name, ps2[i])) return b == TOUCH_BADGES_XBOX ? xbox[i] : nintendo[i];
+    return name;
+}
+
 static void icon(Draw *d, float x, float y, float half, int id, int mirror, uint32_t colour)
 {
     put(d, TS_ICON, x, y, half, mirror ? -1.0f : 1.0f, (float)id, 0, 0, colour);
 }
 
 /* The badge: a small dark disc with the symbol or the name in white. */
-static void badge(Draw *d, float x, float y, float r, int symbol, const char *name, float a)
+static void badge(const Touch *t, Draw *d, float x, float y, float r, int symbol, const char *name, float a)
 {
     put(d, TS_DISC, x, y, r, 0, 0, 0, rgba(10, 14, 18, 0.92f * a), rgba(255, 255, 255, 0.8f * a));
     uint32_t w = rgba(255, 255, 255, a);
+    name = badge_name(t, symbol, name);
+    if (name) symbol = 0;
     if (symbol) put(d, symbol, x, y, r * 0.8f, 0, 0, 0, 0, w);
     else if (name && *name) text(d, x, y, fminf(r * 1.2f, r * 1.85f / (0.9f * (float)strlen(name))), 0, name, w);
 }
@@ -2935,7 +2955,7 @@ static float badge_radius(float r)
 
 /* A round control in Button Style Actions: the same disc, its picture (above its word, if any) and
    the badge. */
-static void action_button(Draw *d, const Ctl *k, int pressed, float dim, Act act, const char *label)
+static void action_button(const Touch *t, Draw *d, const Ctl *k, int pressed, float dim, Act act, const char *label)
 {
     float a = d->alpha * dim, r = k->r;
     uint32_t fill = pressed ? rgba(166, 227, 154, 0.55f * a) : rgba(10, 14, 18, 0.45f * a);
@@ -2946,14 +2966,21 @@ static void action_button(Draw *d, const Ctl *k, int pressed, float dim, Act act
          rgba(255, 255, 255, 0.95f * a));
     if (word) text(d, k->x, k->y + r * 0.45f, fminf(r * 0.32f, 3.2f), 0, label, rgba(255, 255, 255, 0.95f * a));
     float br = badge_radius(r), off = (r - br * 1.02f) * 0.7071f;
-    badge(d, k->x + off, k->y - off, br, act.symbol, act.name, a);
+    badge(t, d, k->x + off, k->y - off, br, act.symbol, act.name, a);
 }
 
+/* The smallest picture that still reads on a phone held in the hand (half its size, mm; finding
+   229's captures at real size): smaller, the control shows its pad name as in Symbols. At the
+   default Size every control is larger; at the smallest Size L3, R3 and the shoulder bars are not. */
+#define PICTURE_MIN_MM 2.1f
+
 /* A round control in the style chosen: Symbols draws the pad's symbol (and the word), Actions the
-   picture and the badge. */
+   picture and the badge (a control too small for its picture: its symbol or name). */
 static void styled_button(const Touch *t, Draw *d, const Ctl *k, int pressed, float dim, int symbol, const char *label, Act act)
 {
-    if (actions(t)) action_button(d, k, pressed, dim, act, label);
+    int word = label && *label;
+    if (actions(t) && k->r * (word ? 0.40f : 0.58f) >= PICTURE_MIN_MM) action_button(t, d, k, pressed, dim, act, label);
+    else if (actions(t) && !symbol && !word && act.name) button(d, k, pressed, dim, 0, badge_name(t, 0, act.name));
     else button(d, k, pressed, dim, symbol, label);
 }
 
@@ -3064,14 +3091,12 @@ static void draw_trick(const Touch *t, Draw *d)
     int minimal = t->tricks_sent >= 20 && t->set.labels != TOUCH_LABELS_ALWAYS;
     if (!minimal) {
         static const char *const names[4] = {"R1", "L1", "L2", "R2"};
-        static const int pictures[4] = {TI_BOOT, TI_HAND, TI_WRAP, TI_LINK};
+        /* the names only, in both styles: a picture in the ring's band would be too small to read
+           (finding 229); the shoulders' names follow Button Icons as the badges do */
         for (int i = 0; i < 4; i++) {
             float ang = PI_F / 4 + i * PI_F / 2, r = (r_in + r_out) / 2;
-            if (actions(t)) {   /* the shoulder's own trick inside, its name toward the rim */
-                float ri = r_in + (r_out - r_in) * 0.33f, rn = r_in + (r_out - r_in) * 0.76f;
-                icon(d, cx + cosf(ang) * ri, cy - sinf(ang) * ri, 1.7f * sc, pictures[i], 0, rgba(255, 255, 255, 0.85f * a));
-                text(d, cx + cosf(ang) * rn, cy - sinf(ang) * rn, 1.8f * sc, 0, names[i], rgba(255, 255, 255, 0.85f * a));
-            } else text(d, cx + cosf(ang) * r, cy - sinf(ang) * r, 2.2f * sc, 0, names[i], rgba(255, 255, 255, 0.85f * a));
+            text(d, cx + cosf(ang) * r, cy - sinf(ang) * r, 2.2f * sc, 0, actions(t) ? badge_name(t, 0, names[i]) : names[i],
+                 rgba(255, 255, 255, 0.85f * a));
         }
     }
 }
@@ -3120,18 +3145,20 @@ static void draw_bar(const Touch *t, Draw *d, int bar)
     int ia = bar == TC_LBAR ? TI_WRAP : TI_BOOT, ib = bar == TC_LBAR ? TI_HAND : touch_air_picture(t, bar) ? TI_LINK : TI_HOP;
     if (!right_handed(t)) { const char *x = a; a = b; b = x; int i = ia; ia = ib; ib = i; }
     float th = fminf(k->hh * 0.55f, 3.0f);
-    if (actions(t)) {
+    float g = fminf(k->hh * 0.62f, k->hw * 0.2f);
+    if (actions(t) && g >= PICTURE_MIN_MM) {   /* smaller: the names, as in Symbols */
         uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
-        float g = fminf(k->hh * 0.62f, k->hw * 0.2f), gap = g * 0.5f;
+        float gap = g * 0.5f;
         for (int side = -1; side <= 1; side += 2) {
             float sx = k->x + side * k->hw * 0.63f;
-            const char *name = side < 0 ? a : b;
+            const char *name = badge_name(t, 0, side < 0 ? a : b);
             float nh = fminf(th * 0.62f, 2.4f), nw = 0.9f * nh * 2;
             float left = sx - (2 * g + gap + nw) / 2;   /* the picture, then its pad name */
             icon(d, left + g, k->y, g, side < 0 ? ia : ib, 0, w);
             text(d, left + 2 * g + gap + nw / 2, k->y, nh, 0, name, line);
         }
     } else {
+        if (actions(t)) a = badge_name(t, 0, a), b = badge_name(t, 0, b);
         text(d, k->x - k->hw * 0.63f, k->y, th, 0, a, line);
         text(d, k->x + k->hw * 0.63f, k->y, th, 0, b, line);
     }
