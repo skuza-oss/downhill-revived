@@ -306,7 +306,7 @@ a sender whose game stops (tail), and a clock that is off (unchanged): see "What
 
 ### Clips
 
-`F:\Temp\lane-202\clips\before\` and `after\` (not in the repository), with a README: eight
+Folders `before` and `after` in the lead's scratch space (not in the repository), with a README: eight
 scenes each, 4x internal resolution, 1920x840, the rider as it rode beside the same rider as
 another player sees it. Watch first: `mx-jumps-150ms.mp4` (before, then after) and
 `td-twisty-bad-link.mp4`.
