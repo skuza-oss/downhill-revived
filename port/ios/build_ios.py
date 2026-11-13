@@ -108,63 +108,34 @@ def prepare_project_bundle(team=None, simulator=False):
     print('ios: preparing project bundle at', PROJECT)
     PROJECT.mkdir(parents=True, exist_ok=True)
 
-    # 1. Launcher and Swift sources
-    launcher_dst = PROJECT / 'Launcher'
-    if launcher_dst.exists():
-        shutil.rmtree(launcher_dst)
-    shutil.copytree(HERE / 'launcher', launcher_dst)
+    # 1. The app (until the shared mobile launcher), the host and the Metal bridge
+    for name, src in (('App', HERE / 'app'), ('Host', HERE / 'host'), ('Render', HERE / 'render')):
+        dst = PROJECT / name
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+    for stale in ('Launcher', 'Input', 'Assets', 'DownhillRevived-Bridging-Header.h'):   # the fork's layout
+        path = PROJECT / stale
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
 
-    # 2. Touch input and host bridge
-    input_dst = PROJECT / 'Input'
-    if input_dst.exists():
-        shutil.rmtree(input_dst)
-    shutil.copytree(HERE / 'input', input_dst)
-    shutil.copyfile(ROOT / 'port/hle/stick.h', input_dst / 'stick.h')
-
-    host_dst = PROJECT / 'Host'
-    if host_dst.exists():
-        shutil.rmtree(host_dst)
-    shutil.copytree(HERE / 'host', host_dst)
-    shutil.copyfile(ROOT / 'port/render/include/dhd_settings.h', host_dst / 'dhd_settings.h')
-    shutil.copyfile(ROOT / 'port/hle/controls_table.h', host_dst / 'controls_table.h')
-
-    render_dst = PROJECT / 'Render'
-    if render_dst.exists():
-        shutil.rmtree(render_dst)
-    shutil.copytree(HERE / 'render', render_dst)
-
-    # 3. Touch Assets & AppIcon
-    assets_dst = PROJECT / 'Assets' / 'touch-controls'
-    if assets_dst.exists():
-        shutil.rmtree(assets_dst)
-    shutil.copytree(HERE / 'assets' / 'touch-controls', assets_dst)
-
-    appicon_src = HERE / 'assets' / 'AppIcon.xcassets'
-    appicon_dst = PROJECT / 'Assets' / 'AppIcon.xcassets'
+    # 2. The app icon
+    appicon_dst = PROJECT / 'AppIcon.xcassets'
     if appicon_dst.exists():
         shutil.rmtree(appicon_dst)
-    if appicon_src.exists():
-        shutil.copytree(appicon_src, appicon_dst)
+    shutil.copytree(HERE / 'project' / 'AppIcon.xcassets', appicon_dst)
 
-    # 4. Info.plist & LaunchScreen.storyboard
+    # 3. Info.plist & LaunchScreen.storyboard
     name, code = version()
     plist = plistlib.loads((HERE / 'project' / 'Info.plist').read_bytes())
     plist['CFBundleShortVersionString'] = name
     plist['CFBundleVersion'] = str(code * 100 + 1)
     (PROJECT / 'Info.plist').write_bytes(plistlib.dumps(plist))
-    if (HERE / 'project' / 'LaunchScreen.storyboard').exists():
-        shutil.copyfile(HERE / 'project' / 'LaunchScreen.storyboard', PROJECT / 'LaunchScreen.storyboard')
+    shutil.copyfile(HERE / 'project' / 'LaunchScreen.storyboard', PROJECT / 'LaunchScreen.storyboard')
 
-    # 5. Bridging Header
-    bridging_header = PROJECT / 'DownhillRevived-Bridging-Header.h'
-    bridging_header.write_text(
-        '// DownhillRevived-Bridging-Header.h\n'
-        '#import "ios_main.h"\n'
-        '#import "touch_input.h"\n'
-        '#import "metal_bridge.h"\n'
-    )
-
-    # 6. Check for compiled real game core (libdhd_ios.a)
+    # 4. The game's static library (libdhd_ios.a)
     core_lib = core_target(simulator)[1]
     has_core = core_lib.exists()
     lib_settings = ''
@@ -197,7 +168,7 @@ def prepare_project_bundle(team=None, simulator=False):
             '        DEAD_CODE_STRIPPING: YES\n'
         )
 
-    # 7. xcodegen project specification
+    # 5. xcodegen project specification
     project_yml = PROJECT / 'project.yml'
     project_yml.write_text(
         'name: DownhillRevived\n'
@@ -212,23 +183,19 @@ def prepare_project_bundle(team=None, simulator=False):
         '    platform: iOS\n'
         '    deploymentTarget: "17.0"\n'
         '    sources:\n'
-        '      - path: Launcher\n'
-        '      - path: Input\n'
+        '      - path: App\n'
         '      - path: Host\n'
         '      - path: Render\n'
-        '      - path: Assets\n'
+        '      - path: AppIcon.xcassets\n'
         '      - path: LaunchScreen.storyboard\n'
         '    settings:\n'
         '      base:\n'
         '        PRODUCT_BUNDLE_IDENTIFIER: app.skuza.DownhillRevived\n'
         '        PRODUCT_NAME: "Downhill Revived"\n'
         '        INFOPLIST_FILE: Info.plist\n'
-        '        SWIFT_VERSION: "5.0"\n'
-        '        SWIFT_OPTIMIZATION_LEVEL: "-O"\n'
-        '        SWIFT_COMPILATION_MODE: "wholemodule"\n'
         '        GCC_OPTIMIZATION_LEVEL: "3"\n'
+        '        CLANG_ENABLE_OBJC_ARC: YES\n'
         '        MTL_ENABLE_DEBUG_INFO: "NO"\n'
-        '        SWIFT_OBJC_BRIDGING_HEADER: DownhillRevived-Bridging-Header.h\n'
         '        TARGETED_DEVICE_FAMILY: "1,2"\n' +
         ('        DEVELOPMENT_TEAM: "%s"\n' % team) +
         '        CODE_SIGN_STYLE: Automatic\n'
@@ -239,7 +206,6 @@ def prepare_project_bundle(team=None, simulator=False):
         '        ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME: ""\n'
         '        HEADER_SEARCH_PATHS:\n'
         '          - $(SRCROOT)/Host\n'
-        '          - $(SRCROOT)/Input\n'
         '          - $(SRCROOT)/Render\n'
         + lib_settings +
         '    dependencies: []\n'
@@ -320,6 +286,7 @@ def build_application(config, team, *, unsigned, derived_data, device_id=None, u
         '-scheme', 'DownhillRevived', '-configuration', config,
         '-derivedDataPath', str(derived_data),
         '-destination', destination,
+        *(['ARCHS=arm64'] if simulator else []),   # libdhd_ios.a is arm64 only (Apple silicon Macs)
         'DEVELOPMENT_TEAM=' + ('' if unsigned else team),
         'CODE_SIGN_STYLE=Automatic',
         'CODE_SIGNING_ALLOWED=' + ('NO' if unsigned else 'YES'),

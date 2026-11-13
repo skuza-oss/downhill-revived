@@ -51,6 +51,7 @@ class BuildTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '--device'):
                 build.find_connected_device()
 
+    @unittest.skipIf(os.name == 'nt', 'symbolic links need a privilege on Windows; the IPA is made on a Mac')
     def test_archive_replaces_old_entries_and_preserves_links_and_modes(self):
         with tempfile.TemporaryDirectory() as td:
             out = Path(td)
@@ -167,7 +168,7 @@ class BuildTests(unittest.TestCase):
                  patch.object(build, 'prepare_project_bundle'), patch.object(build.subprocess, 'run', side_effect=run), \
                  patch.dict(sys.modules, {'package_unsigned': pack}):
                 self.assertEqual(build.main(args), 0)
-                core.assert_called_once_with(None, 4)
+                core.assert_called_once_with(None, 4, simulator=False)
 
             self.assertEqual(len(calls), 3)
             self.assertIn('CODE_SIGNING_ALLOWED=NO', calls[0])
@@ -291,9 +292,6 @@ class BuildTests(unittest.TestCase):
             lib = root / 'build/host64-ios/libdhd_ios.a'
             lib.parent.mkdir(parents=True)
             lib.write_bytes(b'test-only')
-            stick = root / 'port/hle/stick.h'
-            stick.parent.mkdir(parents=True)
-            stick.write_bytes((ROOT / 'port/hle/stick.h').read_bytes())
             for name in ('port/render/include/dhd_settings.h', 'port/hle/controls_table.h', 'port/include/version.h'):
                 destination = root / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -310,60 +308,10 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(plist['CFBundleVersion'], str(code * 100 + 1))
             self.assertIn('GCC_OPTIMIZATION_LEVEL: "3"', text)
             self.assertIn('DEVELOPMENT_TEAM: "TESTTEAM01"', text)
-            self.assertTrue((project / 'Render/performance_stats.c').is_file())
-            self.assertEqual((project / 'Input/stick.h').read_bytes(), stick.read_bytes())
-            self.assertEqual((project / 'Host/dhd_settings.h').read_bytes(), (ROOT / 'port/render/include/dhd_settings.h').read_bytes())
-            self.assertEqual((project / 'Host/controls_table.h').read_bytes(), (ROOT / 'port/hle/controls_table.h').read_bytes())
-            self.assertTrue((project / 'Launcher/ControlsCustomizationView.swift').is_file())
+            self.assertTrue((project / 'Render/metal_bridge.m').is_file())
+            self.assertTrue((project / 'App/main.m').is_file())
+            self.assertTrue((project / 'AppIcon.xcassets/AppIcon.appiconset/Contents.json').is_file())
             self.assertEqual((project / 'Lib/libdhd_ios.a').read_bytes(), b'test-only')
-
-    def test_launcher_localizations_are_complete_and_copied_into_project(self):
-        languages = {'en', 'pt-BR', 'es', 'fr', 'de', 'it', 'ja', 'zh-Hans'}
-        with tempfile.TemporaryDirectory() as td:
-            project = Path(td) / 'project'
-            stick = Path(td) / 'port/hle/stick.h'
-            stick.parent.mkdir(parents=True)
-            stick.write_bytes((ROOT / 'port/hle/stick.h').read_bytes())
-            for name in ('port/render/include/dhd_settings.h', 'port/hle/controls_table.h', 'port/include/version.h'):
-                destination = Path(td) / name
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes((ROOT / name).read_bytes())
-            with patch.object(build, 'ROOT', Path(td)), patch.object(build, 'PROJECT', project), \
-                    patch.object(build.subprocess, 'run'):
-                build.prepare_project_bundle(team='TESTTEAM01')
-
-            launcher = project / 'Launcher'
-            tables = {}
-            for resource in launcher.glob('*.lproj/Localizable.strings'):
-                table = {}
-                for line in resource.read_text(encoding='utf-8').splitlines():
-                    if not line or line.startswith('//'):
-                        continue
-                    key, value = line.removesuffix(';').split(' = ', 1)
-                    key, value = json.loads(key), json.loads(value)
-                    self.assertTrue(line.endswith(';'))
-                    self.assertNotIn(key, table)
-                    self.assertTrue(value)
-                    table[key] = value
-                tables[resource.parent.stem] = table
-
-            self.assertEqual(set(tables), languages)
-            info = plistlib.loads((project / 'Info.plist').read_bytes())
-            self.assertEqual(info['CFBundleDevelopmentRegion'], 'en')
-            spec = (project / 'project.yml').read_text()
-            self.assertIn('developmentLanguage: en', spec)
-            self.assertIn('- path: Launcher', spec)
-            self.assertEqual(tables['pt-BR']['Graphics Settings'], 'Configurações gráficas')
-
-            english = tables['en']
-            for source in launcher.glob('*.swift'):
-                for key in re.findall(r'L10n\.(?:text|format)\("([^"]+)"', source.read_text(encoding='utf-8')):
-                    self.assertIn(key, english, source.name)
-            placeholders = re.compile(r'%(?:%|@|lld|llu|\.\d+f)')
-            for language, table in tables.items():
-                self.assertEqual(table.keys(), english.keys(), language)
-                for key, value in table.items():
-                    self.assertEqual(placeholders.findall(key), placeholders.findall(value), (language, key))
 
     def test_non_mac_compile_fails_clearly(self):
         with patch.object(build.sys, 'platform', 'linux'), \
@@ -377,74 +325,6 @@ class BuildTests(unittest.TestCase):
 
 @unittest.skipUnless(CC, 'requires a C compiler')
 class NativeChecks(unittest.TestCase):
-    def test_stick_handles_neutral_invalid_and_extreme_inputs(self):
-        code = r'''
-#include "stick_math.h"
-#include <assert.h>
-#include <float.h>
-int main(void){
-    float x,y;
-    touch_normalize_stick(0,0,0,1,&x,&y);assert(x==0 && y==0);
-    touch_normalize_stick(0,0,1,1,&x,&y);assert(x==0 && y==0);
-    touch_normalize_stick(NAN,1,0,1,&x,&y);assert(x==0 && y==0);
-    touch_normalize_stick(1,INFINITY,0,1,&x,&y);assert(x==0 && y==0);
-    touch_normalize_stick(1,0,0,1,&x,&y);assert(fabsf(x-1)<.00001f && y==0);
-    touch_normalize_stick(1,1,.15f,1,&x,&y);assert(fabsf(hypotf(x,y)-1)<.00001f);
-    touch_normalize_stick(FLT_MAX,FLT_MAX,1,NAN,&x,&y);assert(isfinite(x) && isfinite(y));
-    for(int a=-100;a<=100;a++)for(int b=-100;b<=100;b++){
-        touch_normalize_stick(a/30.f,b/30.f,(a%4)*.5f,(b%5)*1.f,&x,&y);
-        assert(isfinite(x) && isfinite(y) && hypotf(x,y)<=1.00001f);
-    }
-    return 0;
-}
-'''
-        with tempfile.TemporaryDirectory() as td:
-            src, exe = Path(td) / 'stick.c', Path(td) / 'stick'
-            src.write_text(code)
-            subprocess.run([CC, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-                '-I'+str(ROOT / 'port/ios/input'), '-I'+str(ROOT / 'port/hle'), str(src), '-lm', '-o', str(exe)], check=True)
-            subprocess.run([str(exe)], check=True, timeout=20)
-
-    def test_frame_stats_measure_rate_percentile_and_reset(self):
-        code = r'''
-#include "performance_stats.h"
-#include <assert.h>
-#include <math.h>
-#include <pthread.h>
-static void *writer(void *ignored) {
-    (void)ignored;
-    for (int i=0;i<10000;i++) ios_perf_record_present(1000+i/60.0);
-    return 0;
-}
-int main(void) {
-    double fps=99,p99=99;
-    ios_perf_reset();ios_perf_snapshot(&fps,&p99);assert(fps==0 && p99==0);
-    int rates[]={30,60,120};
-    for (int r=0;r<3;r++) {
-        ios_perf_reset();
-        for(int i=0;i<500;i++) ios_perf_record_present(1+(double)i/rates[r]);
-        ios_perf_snapshot(&fps,&p99);
-        assert(fabs(fps-rates[r])<.001);
-        assert(fabs(p99-1000.0/rates[r])<.001);
-    }
-    ios_perf_reset();double now=1;ios_perf_record_present(now);
-    for(int i=0;i<100;i++){now+=i<2 ? .1 : 1.0/60;ios_perf_record_present(now);}
-    ios_perf_snapshot(&fps,&p99);assert(fps<60 && fabs(p99-100)<.001);
-    ios_perf_record_present(NAN);ios_perf_record_present(INFINITY);
-    ios_perf_record_present(now+2);ios_perf_snapshot(&fps,&p99);assert(fps<30); /* keep real stalls */
-    ios_perf_reset();ios_perf_snapshot(&fps,&p99);assert(fps==0 && p99==0);
-    pthread_t thread;assert(!pthread_create(&thread,0,writer,0));
-    for(int i=0;i<10000;i++){ios_perf_snapshot(&fps,&p99);assert(isfinite(fps) && isfinite(p99));}
-    pthread_join(thread,0);return 0;
-}
-'''
-        with tempfile.TemporaryDirectory() as td:
-            src, exe = Path(td) / 'stats.c', Path(td) / 'stats'
-            src.write_text(code)
-            render = ROOT / 'port/ios/render'
-            subprocess.run([CC, '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-pthread',
-                            '-I', str(render), str(render / 'performance_stats.c'), str(src), '-lm', '-o', str(exe)], check=True)
-            subprocess.run([str(exe)], check=True, timeout=20)
 
     @unittest.skipUnless(sys.platform.startswith('linux'), 'supplemental Linux native clock fixture')
     def test_upstream_clock_suite_at_eleven_rates(self):

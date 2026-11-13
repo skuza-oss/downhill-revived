@@ -1,4 +1,6 @@
 /* metal_bridge.m - iOS Metal Surface & ProMotion Implementation
+   The CAMetalLayer the renderer draws into (port/gs/present.c), the display's rate, and what the
+   shared touch controls need from UIKit (touches, the screen in mm, haptics, the keyboard).
    GPL-3.0-or-later. */
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
@@ -6,15 +8,21 @@
 #import <UIKit/UIKit.h>
 #include <stdatomic.h>
 #include <math.h>
+#include <os/lock.h>
 #include "metal_bridge.h"
-#include "touch_input.h"
-#include "performance_stats.h"
 #include "display_math.h"
 
 @class MetalGameView;
 
+/* port/host/touch_host.c (finding 224): UIKit's touches as SDL's finger events */
+extern void ios_touch_finger(int kind, long long id, float x, float y);
+extern void ios_touch_cancel(void);
+/* port/hle/text_input.c: one character for the focused field (any thread) */
+extern void text_input_character(unsigned character);
+enum { EV_DOWN, EV_MOVE, EV_UP, EV_CANCEL };   /* touch.h's TOUCH_EV_* */
+
 static int s_target_fps = 60;
-static int s_output_limit = 720;
+static int s_output_limit = 0;   /* the screen's own pixels; the game's scale sets the 3D's */
 static bool s_game_active = false;
 static _Atomic(double) s_display_hz = 60;
 static void update_display_preferences(void);
@@ -25,18 +33,17 @@ static _Atomic(int) s_max_display_fps = 60;
 static _Atomic(int) s_resized = 0;
 static _Atomic(int) s_layer_changed = 0;
 static MetalGameView *s_shared_metal_view = nil;
-static _Atomic(bool) s_external = false;
 static _Atomic(int) s_effective_fps = 60;
-static _Atomic(unsigned) s_render_preferences = 1;
 static _Atomic(double) s_phone_aspect = 0;
 static __weak UIViewController *s_phone_host;
-static __weak UIViewController *s_external_host;
 static void attach_to_host(UIViewController *host);
 
-/* One layer moves between windows. Its lifetime and renderer surface stay intact. */
+/* The view in mm for touch_host.c, written on the main thread at each layout. */
+static os_unfair_lock s_screen_lock = OS_UNFAIR_LOCK_INIT;
+static float s_screen_mm[2], s_strips_mm[4], s_cut_mm[4];
+
 void ios_metal_set_phone_aspect(double aspect) { atomic_store(&s_phone_aspect, aspect); }
 double ios_metal_game_aspect(void) {
-    if (atomic_load(&s_external)) return 16.0 / 9.0;
     double phone = atomic_load(&s_phone_aspect);
     if (phone != 0) return phone;
     uint64_t size = atomic_load(&s_drawable_size);
@@ -44,22 +51,13 @@ double ios_metal_game_aspect(void) {
     return w && h ? (double)w / h : 16.0 / 9;
 }
 
-void ios_metal_set_render_preferences(int scale, bool point_filter) {
-    atomic_store(&s_render_preferences, (unsigned)MAX(1, MIN(scale, 6)) | (point_filter ? 16u : 0u));
-}
-int ios_metal_render_scale(void) {
-    unsigned prefs = atomic_load(&s_render_preferences);
-    return (int)(prefs & 15u);
-}
-bool ios_metal_point_filter(void) { return (atomic_load(&s_render_preferences) & 16u) != 0; }
 int ios_metal_effective_fps(void) { return atomic_load(&s_effective_fps); }
 
 static CGSize limited_size(CGSize size) {
     if (!isfinite(size.width) || !isfinite(size.height) || size.width <= 0 || size.height <= 0)
         return CGSizeZero;
     double w, h;
-    ios_display_limit(size.width, size.height, s_output_limit,
-                      s_external_host != nil, &w, &h);
+    ios_display_limit(size.width, size.height, s_output_limit, false, &w, &h);
     return CGSizeMake(w, h);
 }
 
@@ -76,13 +74,9 @@ void ios_metal_configure_layer(void *layer_ptr) {
     layer.opaque = YES;
     layer.maximumDrawableCount = 3;
 
-    CGSize screen_size = CGSizeMake(1280, 720);
-    int w = (int)(screen_size.width > screen_size.height ? screen_size.width : screen_size.height);
-    int h = (int)(screen_size.width > screen_size.height ? screen_size.height : screen_size.width);
-    if (w <= 0) w = 1920;
-    if (h <= 0) h = 1080;
-    CGSize output = limited_size(CGSizeMake(w, h));
-    w = (int)output.width; h = (int)output.height;
+    /* a first size until the view is laid out */
+    CGSize output = limited_size(CGSizeMake(1280, 720));
+    int w = (int)output.width, h = (int)output.height;
     layer.drawableSize = output;
     atomic_store(&s_drawable_size, ((uint64_t)(unsigned)w << 32) | (unsigned)h);
     uintptr_t old_layer = atomic_exchange(&s_active_layer, (uintptr_t)layer_ptr);
@@ -119,7 +113,7 @@ void ios_metal_set_target_fps(int fps) {
 void ios_metal_set_game_active(bool active) {
     dispatch_async(dispatch_get_main_queue(), ^{
         s_game_active = active;
-        if (!active) ios_perf_reset();
+        if (!active) ios_touch_cancel();   /* every finger is gone (touch_host.c) */
         update_display_preferences();
     });
 }
@@ -135,10 +129,6 @@ double ios_metal_display_hz(void) { return atomic_load(&s_display_hz); }
 bool ios_metal_has_promotion_support(void) {
     /* Native SDL workers call this too; only UIKit's main thread queries UIScreen. */
     return atomic_load(&s_max_display_fps) >= 120;
-}
-
-void ios_metal_get_timing(double *out_avg_fps, double *out_p99_ms) {
-    ios_perf_snapshot(out_avg_fps, out_p99_ms);
 }
 
 /* Only requests the screen cadence. The existing renderer remains the sole draw/present loop. */
@@ -158,7 +148,7 @@ static void update_display_preferences(void) {
     if (!s_refresh_driver) {
         s_refresh_driver = [MetalRefreshDriver new];
     }
-    UIScreen *screen = s_external_host.view.window.screen ?: UIScreen.mainScreen;
+    UIScreen *screen = UIScreen.mainScreen;
     if (s_refresh_driver.screen != screen || !s_refresh_driver.link) {
         [s_refresh_driver.link invalidate];
         s_refresh_driver.screen = screen;
@@ -170,15 +160,121 @@ static void update_display_preferences(void) {
     bool hot = process.thermalState >= NSProcessInfoThermalStateSerious;
     int maximum = (int)screen.maximumFramesPerSecond;
     atomic_store(&s_max_display_fps, maximum);
-    int fps = ios_display_target_fps(s_target_fps, maximum, s_external_host != nil,
-                                     process.lowPowerModeEnabled || hot);
+    int fps = ios_display_target_fps(s_target_fps, maximum, false, process.lowPowerModeEnabled || hot);
     atomic_store(&s_effective_fps, fps);
     int cadence = MIN(fps, MAX(1, maximum));
     s_refresh_driver.link.preferredFrameRateRange = CAFrameRateRangeMake(MIN(30, cadence), cadence, cadence);
     s_refresh_driver.link.paused = !s_game_active;
 }
 
-/* Native Metal View for SwiftUI Hosting - Owned by Rust GS Renderer (port/gs/present.c) */
+/* ---- the shared touch controls' side (finding 224) ---- */
+
+/* UIKit gives no physical size: points per inch by device class (iPhones 153-163, iPads 132-163;
+   the overlay sizes its buttons in mm, so a few per cent off is a few per cent larger or smaller). */
+static float points_per_mm(void) {
+    float per_inch = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad ? 132.0f : 158.0f;
+    return per_inch / 25.4f;
+}
+
+int ios_touch_screen(float *width_mm, float *height_mm, float strips[4], float cut[4]) {
+    os_unfair_lock_lock(&s_screen_lock);
+    int known = s_screen_mm[0] > 0 && s_screen_mm[1] > 0;
+    *width_mm = s_screen_mm[0];
+    *height_mm = s_screen_mm[1];
+    memcpy(strips, s_strips_mm, sizeof s_strips_mm);
+    memcpy(cut, s_cut_mm, sizeof s_cut_mm);
+    os_unfair_lock_unlock(&s_screen_lock);
+    return known;
+}
+
+/* The view's size, the home indicator's strip, and the sensor housing (notch or Dynamic Island) as
+   the band its safe-area inset covers on its side, as Android's cutout. */
+static void screen_measure(UIView *view) {
+    float mm = 1.0f / points_per_mm();
+    CGSize size = view.bounds.size;
+    UIEdgeInsets in = view.safeAreaInsets;
+    float strips[4] = {0, 0, 0, (float)in.bottom * mm}, cut[4] = {0};
+    UIInterfaceOrientation turn = view.window.windowScene.interfaceOrientation;
+    if (turn == UIInterfaceOrientationLandscapeRight && in.left > 0) {        /* the housing on the left */
+        cut[2] = (float)in.left * mm;
+        cut[3] = (float)size.height * mm;
+    } else if (turn == UIInterfaceOrientationLandscapeLeft && in.right > 0) { /* on the right */
+        cut[0] = (float)(size.width - in.right) * mm;
+        cut[2] = (float)size.width * mm;
+        cut[3] = (float)size.height * mm;
+    } else if (in.top > 0) {                                                  /* portrait: on top */
+        strips[1] = (float)in.top * mm;
+    }
+    os_unfair_lock_lock(&s_screen_lock);
+    s_screen_mm[0] = (float)size.width * mm;
+    s_screen_mm[1] = (float)size.height * mm;
+    memcpy(s_strips_mm, strips, sizeof strips);
+    memcpy(s_cut_mm, cut, sizeof cut);
+    os_unfair_lock_unlock(&s_screen_lock);
+}
+
+/* touch.h's TOUCH_BUZZ_*: 1 a tick, 2 a double tick, 3 a strong one. */
+void ios_touch_buzz(int kind) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        static UIImpactFeedbackGenerator *light, *heavy;
+        if (!light) light = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+        if (!heavy) heavy = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
+        if (kind == 3) [heavy impactOccurred];
+        else if (kind >= 1) {
+            [light impactOccurred];
+            if (kind == 2)
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+                    [light impactOccurred];
+                });
+        }
+    });
+}
+
+/* The system keyboard while a game field takes typing (present.c): its characters to the field. */
+@interface KeyboardView : UIView <UIKeyInput>
+@property (nonatomic) UITextAutocorrectionType autocorrectionType;
+@property (nonatomic) UITextAutocapitalizationType autocapitalizationType;
+@property (nonatomic) UIKeyboardType keyboardType;
+@property (nonatomic) UIReturnKeyType returnKeyType;
+@end
+@implementation KeyboardView
+- (BOOL)canBecomeFirstResponder { return YES; }
+- (BOOL)hasText { return YES; }
+- (void)insertText:(NSString *)text {
+    [text enumerateSubstringsInRange:NSMakeRange(0, text.length) options:NSStringEnumerationByComposedCharacterSequences
+                          usingBlock:^(NSString *piece, NSRange r, NSRange e, BOOL *stop) {
+        (void)r; (void)e; (void)stop;
+        UTF32Char c = 0;
+        if ([piece getBytes:&c maxLength:sizeof c usedLength:NULL encoding:NSUTF32LittleEndianStringEncoding
+                    options:0 range:NSMakeRange(0, piece.length) remainingRange:NULL])
+            text_input_character(c == '\n' ? 13 : c);
+    }];
+}
+- (void)deleteBackward { text_input_character(8); }
+@end
+static KeyboardView *s_keyboard;
+
+void ios_text_input(int on) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!s_keyboard) {
+            s_keyboard = [[KeyboardView alloc] initWithFrame:CGRectZero];
+            s_keyboard.autocorrectionType = UITextAutocorrectionTypeNo;
+            s_keyboard.autocapitalizationType = UITextAutocapitalizationTypeNone;
+            s_keyboard.keyboardType = UIKeyboardTypeASCIICapable;
+            s_keyboard.returnKeyType = UIReturnKeyDone;
+        }
+        if (on) {
+            UIView *host = (UIView *)s_shared_metal_view;
+            if (s_keyboard.superview != host) [host addSubview:s_keyboard];
+            [s_keyboard becomeFirstResponder];
+        } else {
+            [s_keyboard resignFirstResponder];
+        }
+    });
+}
+
+/* Native Metal View - Owned by Rust GS Renderer (port/gs/present.c); its touches go to the shared
+   touch controls (touch_host.c). */
 @interface MetalGameView : UIView
 @property (nonatomic, strong) CAMetalLayer *metalLayer;
 @end
@@ -194,7 +290,8 @@ static void update_display_preferences(void) {
     if (self) {
         self.backgroundColor = [UIColor blackColor];
         self.opaque = YES;
-        self.userInteractionEnabled = NO;
+        self.userInteractionEnabled = YES;
+        self.multipleTouchEnabled = YES;
         self.contentScaleFactor = [UIScreen mainScreen].nativeScale;
         self.metalLayer = (CAMetalLayer *)self.layer;
         ios_metal_configure_layer((__bridge void *)self.metalLayer);
@@ -208,9 +305,15 @@ static void update_display_preferences(void) {
     update_display_preferences();
 }
 
+- (void)safeAreaInsetsDidChange {
+    [super safeAreaInsetsDidChange];
+    screen_measure(self);
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (!self.window) return;
+    screen_measure(self);
     UIScreen *screen = self.window.screen;
     CGFloat scale = screen.scale;
     self.contentScaleFactor = scale;
@@ -233,6 +336,20 @@ static void update_display_preferences(void) {
     }
 }
 
+- (void)fingers:(NSSet<UITouch *> *)touches kind:(int)kind {
+    CGSize size = self.bounds.size;
+    if (size.width <= 0 || size.height <= 0) return;
+    for (UITouch *touch in touches) {
+        CGPoint at = [touch locationInView:self];
+        ios_touch_finger(kind, (long long)(intptr_t)(__bridge void *)touch,
+                         (float)(at.x / size.width), (float)(at.y / size.height));
+    }
+}
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { (void)event; [self fingers:touches kind:EV_DOWN]; }
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { (void)event; [self fingers:touches kind:EV_MOVE]; }
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { (void)event; [self fingers:touches kind:EV_UP]; }
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { (void)event; [self fingers:touches kind:EV_CANCEL]; }
+
 - (void)dealloc {
     uintptr_t self_ptr = (uintptr_t)(__bridge void *)self.metalLayer;
     atomic_compare_exchange_strong(&s_active_layer, &self_ptr, 0);
@@ -240,7 +357,7 @@ static void update_display_preferences(void) {
 
 @end
 
-/* Container VC that hosts the persistent singleton MetalGameView across Portrait/Landscape switches */
+/* Container VC that hosts the persistent singleton MetalGameView across orientation changes */
 @interface MetalHostViewController : UIViewController
 @end
 
@@ -262,7 +379,7 @@ static void attach_to_host(UIViewController *host) {
 @implementation MetalHostViewController
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    if (!s_external_host) attach_to_host(self);
+    attach_to_host(self);
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
@@ -272,62 +389,18 @@ static void attach_to_host(UIViewController *host) {
         [s_shared_metal_view layoutIfNeeded];
     }
 }
+- (BOOL)prefersStatusBarHidden { return YES; }
+- (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
+/* the first swipe at an edge goes to the game; a second one opens the system's (Android's gesture insets) */
+- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
 @end
 
 UIViewController *ios_metal_create_view_controller(void) {
     MetalHostViewController *vc = [MetalHostViewController new];
     vc.view.backgroundColor = UIColor.blackColor;
     vc.view.opaque = YES;
-    vc.view.userInteractionEnabled = NO;
     s_phone_host = vc;
-    if (!s_external_host) attach_to_host(vc);
+    attach_to_host(vc);
     return vc;
-}
-
-void ios_metal_attach_external_display(UIViewController *host) {
-    s_external_host = host;
-    attach_to_host(host);
-    atomic_store(&s_external, true);
-    update_display_preferences();
-}
-
-void ios_metal_detach_external_display(UIViewController *host) {
-    if (s_external_host != host) return;
-    s_external_host = nil;
-    [s_shared_metal_view removeFromSuperview];
-    attach_to_host(s_phone_host);
-    atomic_store(&s_external, false);
-    update_display_preferences();
-}
-
-/* Register the documented iOS 27 scene accessory from a persistent phone controller.
-   Public Objective-C selectors keep older Xcode SDKs usable as well. */
-@interface ExternalDisplayRegistrationController : UIViewController
-@property (nonatomic, strong) id displayRegistration;
-@end
-@implementation ExternalDisplayRegistrationController
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    if (self.displayRegistration) return;
-    Class accessoryClass = NSClassFromString(@"UISceneAccessory");
-    SEL factory = NSSelectorFromString(@"externalNonInteractiveSceneAccessoryWithConfiguration:");
-    SEL registration = NSSelectorFromString(@"registerSceneAccessory:");
-    if (![accessoryClass respondsToSelector:factory] || ![self respondsToSelector:registration]) return;
-    Class delegateClass = NSClassFromString(@"ExternalDisplaySceneDelegate");
-    if (!delegateClass) return;
-    UISceneConfiguration *config = [[UISceneConfiguration alloc] initWithName:@"TV"
-                                                          sessionRole:UIWindowSceneSessionRoleExternalDisplayNonInteractive];
-    config.delegateClass = delegateClass;
-    id (*makeAccessory)(id, SEL, UISceneConfiguration *) = (void *)[accessoryClass methodForSelector:factory];
-    id (*registerAccessory)(id, SEL, id) = (void *)[self methodForSelector:registration];
-    id accessory = makeAccessory(accessoryClass, factory, config);
-    if (accessory) self.displayRegistration = registerAccessory(self, registration, accessory);
-}
-@end
-
-UIViewController *ios_metal_create_display_registration_controller(void) {
-    ExternalDisplayRegistrationController *host = [ExternalDisplayRegistrationController new];
-    host.view.backgroundColor = UIColor.clearColor;
-    host.view.userInteractionEnabled = NO;
-    return host;
 }

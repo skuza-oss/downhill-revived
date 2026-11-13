@@ -14,7 +14,6 @@
 #include <errno.h>
 #include "ios_main.h"
 #include "metal_bridge.h"
-#include "touch_input.h"
 
 #define DISC_FILENAME "SCUS-97177.iso"
 
@@ -429,8 +428,7 @@ bool ios_game_is_active(void) { return atomic_load(&s_game_active); }
 
 void ios_lifecycle_will_resign_active(void) {
     atomic_store(&s_game_active, false);
-    touch_input_reset();
-    ios_metal_set_game_active(false);
+    ios_metal_set_game_active(false);   /* also lets go of every finger (metal_bridge.m) */
 }
 void ios_lifecycle_did_enter_background(void) { ios_lifecycle_will_resign_active(); }
 void ios_lifecycle_will_enter_foreground(void) {}

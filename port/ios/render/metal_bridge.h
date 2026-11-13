@@ -10,27 +10,22 @@
 extern "C" {
 #endif
 
-/* Initialize iOS Metal layer configuration for 2868x1320 OLED display */
+/* Initialize iOS Metal layer configuration */
 void ios_metal_configure_layer(void *layer_ptr);
 
-/* Configure ProMotion target frame rate (60 Hz or 120 Hz) */
+/* Configure ProMotion target frame rate (60 Hz or 120 Hz), from dhd.ini's fps at the start */
 void ios_metal_set_target_fps(int fps);
-/* Final presentation cap (short side), separate from the game's internal scale. */
+/* Final presentation cap (short side, pixels; 0: the screen's own), separate from the game's scale. */
 void ios_metal_set_output_limit(int pixels);
 void ios_metal_set_game_active(bool active);
+/* The picture's shape: 0 the screen's (widescreen on), 4/3 (widescreen off), -1 stretched. */
 void ios_metal_set_phone_aspect(double aspect);
 double ios_metal_game_aspect(void);
 double ios_metal_display_hz(void);
 int ios_metal_effective_fps(void);
-void ios_metal_set_render_preferences(int scale, bool point_filter);
-int ios_metal_render_scale(void);
-bool ios_metal_point_filter(void);
 
 /* Query whether ProMotion 120Hz is supported on this hardware */
 bool ios_metal_has_promotion_support(void);
-
-/* Presented-frame submission intervals, not GPU timestamps; zero before samples. */
-void ios_metal_get_timing(double *out_avg_fps, double *out_p99_ms);
 
 /* Shared CAMetalLayer and pixel size for port/gs/present.c */
 void *ios_metal_get_layer(void);
@@ -38,12 +33,15 @@ void ios_metal_get_drawable_size(int *out_w, int *out_h);
 int ios_metal_consume_resized(void);
 int ios_metal_consume_layer_changed(void);
 
+/* For the shared touch controls (port/host/touch_host.c, finding 224): the view in mm, the strips
+   to keep clear and the cutout's band (mm); the Taptic Engine; the system keyboard for a game field. */
+int ios_touch_screen(float *width_mm, float *height_mm, float strips[4], float cut[4]);
+void ios_touch_buzz(int kind);
+void ios_text_input(int on);
+
 #ifdef __OBJC__
 @class UIViewController;
 UIViewController *ios_metal_create_view_controller(void);
-UIViewController *ios_metal_create_display_registration_controller(void);
-void ios_metal_attach_external_display(UIViewController *host);
-void ios_metal_detach_external_display(UIViewController *host);
 #endif
 
 #ifdef __cplusplus
@@ -51,4 +49,3 @@ void ios_metal_detach_external_display(UIViewController *host);
 #endif
 
 #endif /* DHD_IOS_METAL_BRIDGE_H */
-

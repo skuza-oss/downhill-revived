@@ -21,13 +21,6 @@ const char *ios_settings_path(void);
 /* Save or read a setting in Documents/dhd.ini */
 int ios_setting_save(const char *key, const char *value);
 int ios_setting_read(const char *key, char *out, int out_size);
-/* Native UI adapter for upstream controller layouts. Player is 1 or 2. */
-int ios_controller_layout(int player, uint8_t *out, int size);
-int ios_controller_edit(int player, int edit, int target, int slot, int input, char *error, int size);
-int ios_controller_input_count(void);
-int ios_controller_input_id(int index);
-const char *ios_controller_input_label(int index, bool playstation);
-const char *ios_controller_target_label(int index);
 
 /* Retrieve the path to the sandboxed ISO file (Documents/SCUS-97177.iso) */
 const char *ios_iso_path(void);

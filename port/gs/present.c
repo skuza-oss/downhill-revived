@@ -63,6 +63,7 @@ extern int ios_metal_consume_resized(void);
 extern int ios_metal_consume_layer_changed(void);
 extern double ios_metal_display_hz(void);
 extern bool ios_game_is_active(void);
+extern void ios_text_input(int on);
 #else
 #define FIXED_SCREEN 0
 static SDL_MetalView metal_view;
@@ -807,6 +808,14 @@ void gs_window_tick(void)
             gs_gpu_surface_reset(&gs, &target);
             resize_pending = 1;
         }
+    }
+    /* a field of the game takes typing (a name, a room's code): the system keyboard while it does,
+       its characters to text_input_character (metal_bridge.m; finding 224) */
+    static int ios_typing;
+    if (text_input_active() != ios_typing) {
+        ios_typing = !ios_typing;
+        ios_text_input(ios_typing);
+        fprintf(stderr, "text input: %s (the iOS keyboard)\n", ios_typing ? "on" : "off");
     }
     (void)shown;
     return;
