@@ -49,13 +49,14 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `DHD_ANDROID_*` variables; findings 091, 143). Android 10 (API 29) and later: calls from newer
   APIs are chosen at run time (finding 191).
 - **iOS:** `port/ios/build_ios.py` on a Mac (`--simulator`, or `--unsigned` for the device app and
-  its unsigned IPA), from the Windows build's wasm2c parts; the shared touch controls and settings,
-  a first-start disc screen until the shared mobile launcher; P2P rooms only online (finding 224;
-  the port by Gustavo Ribeiro).
+  its unsigned IPA), from the Windows build's wasm2c parts; the shared touch controls and settings
+  (Android's rows), the shared launcher as the app's entry (finding 227); P2P rooms only online
+  (finding 224; the port by Gustavo Ribeiro).
 - **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093;
   native window buttons on macOS, finding 150). Its page (`port/launcher/ui`) is the one launcher
   UI of every platform: Android shows it in a WebView (`LauncherActivity`, the app's entry) through
-  the bridge in `port/launcher/BRIDGE.md`; strings in `ui/lang` (finding 225).
+  the bridge in `port/launcher/BRIDGE.md`, and iOS in a WKWebView (`port/ios/app/launcher.m`,
+  finding 227); strings in `ui/lang` (finding 225).
 - **Releases:** `port/tools/package_release.py` builds, checks and packages each platform
   (`docs/BUILDING.md`, "Releases"; the `release` skill).
 - Retired, do not bring back: the 32-bit i686 build, the Direct3D 11 renderer, the C wgpu-native
@@ -115,6 +116,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   in the movies and the title's attract demo, findings 214 and 218; a D-pad as a third touch
   steering choice, finding 214, placed clear of the game's HUD, finding 218; MENU over a replay,
   also above 60 updates a second, finding 218).
+- A phone's app away from the screen (Android and iOS, `present.c`'s `app_away_wait`, finding 227):
+  the game waits, fingers are let go, the sound pauses, the freeze watch is quiet; at the return an
+  offline race is in the game's own pause (online it goes on, finding 215) and the core's clock
+  starts again from now (`host_service_host_came_back`: no game time is caught up). On a touch
+  screen the button names (icons, SETTINGS' Tabs line) are a controller's only once it has sent
+  input since the last touch (`touch_host_pad_prompts`).
 - The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
   threads and the render thread stop, the closing log lines are written, open files are flushed,
   and the process leaves without the C library's static destructors. New code that must run at the
@@ -157,9 +164,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   with a backup through the server's `/v1/latest` (findings 093, 125, 138). On Android the same
   launcher page opens at every start (unless the `launcher` setting is off): the disc import, the
   settings that are hard to change in the game, the update line (the game's own check; a direct
-  start keeps the in-game notice, finding 143), Help with Share log (finding 225). On iOS a small first-start
-  screen imports the disc image until the launcher's iOS bridge exists; no update notice there
-  yet (finding 224).
+  start keeps the in-game notice, finding 143), Help with Share log (finding 225). iOS opens into the
+  same page with the same calls (finding 227); a direct start there has no in-game update notice.
 - Discord Rich Presence on the desktop (finding 106). The mouse works in the port's pages and the
   game's popups (finding 092).
 

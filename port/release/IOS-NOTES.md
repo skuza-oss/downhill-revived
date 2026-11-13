@@ -26,16 +26,32 @@ signed for your device, and the sideloading tool does that with your own Apple I
    runs for 7 days, then the tool has to refresh it (AltStore and SideStore do that by themselves);
    with a paid Apple developer account, for a year. On iOS 16 and later, turn on Developer Mode
    once (Settings > Privacy & Security) when iOS asks for it.
-3. Start Downhill Revived and choose your `.iso` (from Files, iCloud Drive or a USB drive). The
-   copy takes a minute or two. Or copy the `.iso` into Files > On My iPhone > Downhill Revived and
-   start the app: it finds it there.
+3. Start Downhill Revived: it opens into the launcher (the same one as on Android and the PC).
+   Choose your `.iso` there (from Files, iCloud Drive or a USB drive): it is checked and copied
+   into the app once, which takes a minute or two. An `.iso` you copied into Files > On My iPhone >
+   Downhill Revived can be chosen there too (it is moved into place, not copied). Then PLAY.
+
+**The launcher** opens at every start: PLAY, the settings that are hard to change in the game
+(graphics, touch, the rider name, online), the update line (a newer release is shown with a link
+to its page; you install it with your tool), Help with **Share log**. Turn off **Open the launcher
+at every start** to go straight into the game; SETTINGS in the game (Game tab, Launcher At Start)
+brings it back. EXIT GAME closes the app; the next start opens the launcher again. If the game
+closed unexpectedly, the launcher says so at the next start and offers Share log.
+
+**Leaving the app in a race** (the home screen, a call): the game waits and the sound stops; when
+you come back an offline race is paused (the game's own pause menu) and goes on from where it
+was. Online the race does not pause for the others: your rider stops while the app is away, and
+iOS may close the room's connection when the app stays away long (more than a few seconds).
 
 **Updates.** Install the new release's IPA over the old one with the same tool: your settings,
 saves and the disc copy stay. Deleting the app deletes them.
 
 **Your files** (Files > On My iPhone (or iPad) > Downhill Revived): `dhd.ini` (the settings),
-`saves`, the disc copy and `dhd.log`. If the game closes unexpectedly, send us `dhd.log` (a GitHub
-issue or Discord).
+`saves`, the disc copy and `dhd.log`. If the game closes unexpectedly, send us the log (the
+launcher's Share log, or `dhd.log` from that folder) in a GitHub issue or on Discord.
+
+**iPad**: the game is landscape. If your iPad stays upright, the game shows turned at the whole
+screen's size: turn the iPad. In a Stage Manager or Split View window the game fills the window.
 
 **Online: P2P races only.** ONLINE in the main menu offers Create A P2P Race and Join With A Code
 (a 7-character code from a friend's P2P race, on a phone or a PC). The race data goes directly

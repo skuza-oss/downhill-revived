@@ -210,9 +210,11 @@ MAJOR * 10000 + MINOR * 100 + PATCH (0.7.7: 707), so it grows with every release
 ### iOS (iPhone and iPad, unsigned IPA)
 
 Built on a Mac (finding 224; `port/ios/AGENTS.md`). The app is `port/ios`: the host side
-(`host/ios_main.m`), the Metal layer the renderer draws into (`render/metal_bridge.m`), a small
-first-start disc screen (`app/main.m`), all linked with the game's static library `libdhd_ios.a`
-(`build_host64.py --target ios-arm64`, or `ios-sim-arm64` for the Simulator).
+(`host/ios_main.m`), the Metal layer the renderer draws into (`render/metal_bridge.m`), the app's
+entry, the shared launcher's page in a web view (`app/launcher.m` with `host/launcher_calls.c`;
+the page itself is `port/launcher/ui`, packed into the app as `launcher/`; finding 227), all linked
+with the game's static library `libdhd_ios.a` (`build_host64.py --target ios-arm64`, or
+`ios-sim-arm64` for the Simulator).
 
 What you need: a Mac with Apple silicon and Xcode (iOS 17 SDK or later; tested with Xcode 26.5),
 `xcodegen`, CMake and Ninja (Homebrew), Python 3.12, rustup with the iOS targets
@@ -233,7 +235,12 @@ install it with `xcrun simctl install <device> "Downhill Revived.app"` and start
 `xcrun simctl launch <device> app.skuza.DownhillRevived` (environment for the game:
 `SIMCTL_CHILD_DHD_...`). Its files (dhd.ini, dhd.log, saves, the disc) are in the app's data
 container (`xcrun simctl get_app_container <device> app.skuza.DownhillRevived data`, then
-`Documents/`); a disc image copied there as `SCUS-97177.iso` is found at the start.
+`Documents/`); a disc image copied there as `SCUS-97177.iso` is the disc the launcher and the game
+use. The app opens into the launcher; for checks, `SIMCTL_CHILD_DHD_IOS_DIRECT=1` starts the game at
+once and `SIMCTL_CHILD_DHD_LAUNCHER_TEST=<file in Documents>` runs the file's lines in the page
+(`wait SECONDS`, or a JavaScript expression such as `bridge.call('snapshot')`), each result in
+`Documents/launcher-test.log` (finding 227). Set `SDL_AUDIO_DRIVER=dummy` in the simulator's
+launchd environment (`xcrun simctl spawn <device> launchctl setenv ...`) to keep the game silent.
 
 `--unsigned` writes `build/ios/DownhillRevived-<version>-unsigned.ipa` (`package_unsigned.py`:
 the bundle without any signature or provisioning profile, refused if it names a home folder, a
