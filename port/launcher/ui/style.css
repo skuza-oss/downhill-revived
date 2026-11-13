@@ -84,7 +84,7 @@ svg.i { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-widt
 .steps .now i { background: var(--ember); color: var(--ink-on-ember); }
 .steps small { display: block; font-size: 12.5px; font-weight: 500; color: var(--dim); margin-top: 1px; }
 .steps small.bad { color: var(--bad); }
-.facts { margin-top: auto; padding-top: 16px; display: flex; gap: 24px; font-size: 13px; color: var(--lilac); }
+.facts { margin-top: auto; padding-top: 16px; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 13px; color: var(--lilac); }  /* a long translation wraps to a second row instead of cutting its neighbours */
 .fact { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .fact > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 button.fact { border-radius: 6px; max-width: 320px; transition: color .15s; }

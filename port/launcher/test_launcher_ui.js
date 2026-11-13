@@ -84,6 +84,15 @@ for (const [k, v] of Object.entries(en)) {
   assert.strictEqual((v.match(/\*\*/g) || []).length % 2, 0, `${k}: bold spans paired`);
 }
 
+// ---- the Controls tab's stick captions: one line when they fit, else split after the colon
+const stick = load('stick.js');
+const width = (x) => x.length * 5;   // a stand-in for the measured width
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, 'Left stick: steer, lean')), '["Left stick: steer, lean"]');
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, 'Linker Stick: lenken, lehnen und noch mehr')),
+  '["Linker Stick:","lenken, lehnen und noch mehr"]');
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, '左スティック：ステアリング・傾き・もっと長い説明文です')), '["左スティック：","ステアリング・傾き・もっと長い説明文です"]');
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, 'Eine Beschriftung ohne Doppelpunkt aber sehr lang')), '["Eine Beschriftung ohne Doppelpunkt aber sehr lang"]');
+
 // ---- the phones' bridge: calls answered by id, events, messages before the port queued
 const listeners = [];
 const fakeWindow = { addEventListener: (type, f) => listeners.push(f) };
