@@ -61,6 +61,16 @@ void dhd_controls_layouts(const char *keyboard, const char *pad1, const char *pa
 int dhd_controls_edit(const char *keyboard, const char *pad1, const char *pad2, int device, int edit, int target, int slot,
                       int input, int kind, char *value, size_t value_size, char *message, size_t message_size);
 
+/* ---- the launcher's page (finding 225; port/render/settings/src/launcher.rs) ----
+   The JSON the launcher's page draws from, for a phone's bridge (port/host/android_launcher.c):
+   every setting's default, choices and rule, and every setting's value in dhd.ini at path (else its
+   default). Each writes into out (size bytes, cut to fit) and returns the text's whole length: when
+   that is size or more, call again with a larger buffer. */
+size_t dhd_settings_schema_json(char *out, size_t size);
+size_t dhd_settings_values_json(const char *path, char *out, size_t size);
+/* The rider name saved for what the player typed ("" none) into out (size bytes). */
+void dhd_settings_rider_name(const char *typed, char *out, size_t size);
+
 #ifdef __cplusplus
 }
 #endif

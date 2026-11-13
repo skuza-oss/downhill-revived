@@ -236,3 +236,46 @@ pub unsafe extern "C" fn dhd_controls_edit(
     }
     done
 }
+
+/* ---- the launcher's page (launcher.rs, finding 225): a phone's bridge returns this JSON ---- */
+
+/// Every setting's default, choices and rule as the launcher's page takes them
+/// (`launcher::schema_json`) into `out` (`size` bytes, cut to fit). Returns the text's whole length
+/// in bytes: when it is `size` or more, call again with a larger buffer.
+///
+/// # Safety
+/// `out` is NULL or has room for `size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dhd_settings_schema_json(out: *mut c_char, size: usize) -> usize {
+    let text = crate::launcher::schema_json();
+    // SAFETY: the caller's contract.
+    unsafe { put(out, size, &text) };
+    text.len()
+}
+
+/// Every setting's value in dhd.ini at `path`, else its default (`launcher::values_json`), into
+/// `out`; the length as `dhd_settings_schema_json`'s.
+///
+/// # Safety
+/// `path` is a NUL-terminated string; `out` is NULL or has room for `size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dhd_settings_values_json(path: *const c_char, out: *mut c_char, size: usize) -> usize {
+    // SAFETY: the caller's contract.
+    let ini = unsafe { text(path) }.and_then(|p| crate::read(Path::new(p))).unwrap_or_default();
+    let text = crate::launcher::values_json(&ini);
+    // SAFETY: the caller's contract.
+    unsafe { put(out, size, &text) };
+    text.len()
+}
+
+/// The rider name saved for what the player typed (`name::normalise`; "" none) into `out`.
+///
+/// # Safety
+/// `typed` is a NUL-terminated string; `out` has room for `size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dhd_settings_rider_name(typed: *const c_char, out: *mut c_char, size: usize) {
+    // SAFETY: the caller's contract.
+    let name = crate::name::normalise(unsafe { text(typed) }.unwrap_or(""));
+    // SAFETY: the caller's contract.
+    unsafe { put(out, size, &name) };
+}
