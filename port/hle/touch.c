@@ -2922,15 +2922,15 @@ static void badge(Draw *d, float x, float y, float r, int symbol, const char *na
     put(d, TS_DISC, x, y, r, 0, 0, 0, rgba(10, 14, 18, 0.92f * a), rgba(255, 255, 255, 0.8f * a));
     uint32_t w = rgba(255, 255, 255, a);
     if (symbol) put(d, symbol, x, y, r * 0.8f, 0, 0, 0, 0, w);
-    else if (name && *name) text(d, x, y, fminf(r * 1.15f, r * 1.75f / (0.9f * (float)strlen(name))), 0, name, w);
+    else if (name && *name) text(d, x, y, fminf(r * 1.2f, r * 1.85f / (0.9f * (float)strlen(name))), 0, name, w);
 }
 
 /* A badge's radius on a round control of radius r: a fixed share, kept readable on small buttons and
    inside the control (its upper right, where neither thumb covers it and no neighbour is touched). */
 static float badge_radius(float r)
 {
-    float br = clampf(r * 0.31f, 1.6f, 3.2f);
-    return fminf(br, r * 0.44f);
+    float br = clampf(r * 0.33f, 2.0f, 3.4f);
+    return fminf(br, r * 0.48f);
 }
 
 /* A round control in Button Style Actions: the same disc, its picture (above its word, if any) and
@@ -2941,7 +2941,7 @@ static void action_button(Draw *d, const Ctl *k, int pressed, float dim, Act act
     uint32_t fill = pressed ? rgba(166, 227, 154, 0.55f * a) : rgba(10, 14, 18, 0.45f * a);
     put(d, TS_DISC, k->x, k->y, r, 0, 0, 0, fill, rgba(255, 255, 255, 0.88f * a));
     int word = label && *label;
-    float g = r * (word ? 0.40f : 0.54f);
+    float g = r * (word ? 0.40f : 0.58f);
     icon(d, k->x - r * (word ? 0.1f : 0.05f), word ? k->y - r * 0.18f : k->y + r * 0.05f, g, act.icon, act.mirror,
          rgba(255, 255, 255, 0.95f * a));
     if (word) text(d, k->x, k->y + r * 0.45f, fminf(r * 0.32f, 3.2f), 0, label, rgba(255, 255, 255, 0.95f * a));
@@ -3088,8 +3088,8 @@ static void draw_thumb(const Touch *t, Draw *d)
         put(d, TS_CHEVRON, p->x - off - s * 1.1f, p->y, s * 0.8f, 0, PI_F, 0, 0, w);
         put(d, TS_CHEVRON, p->x + off + s * 1.1f, p->y, s * 0.8f, 0, 0, 0, 0, w);
         if (actions(t)) {   /* the fists: the left-hand attack (◻) left, the right-hand one (○) right */
-            icon(d, p->x - off + s * 0.4f, p->y, s * 1.1f, TI_FIST, 1, w);
-            icon(d, p->x + off - s * 0.4f, p->y, s * 1.1f, TI_FIST, 0, w);
+            icon(d, p->x - off + s * 0.4f, p->y, s * 1.25f, TI_FIST, 1, w);
+            icon(d, p->x + off - s * 0.4f, p->y, s * 1.25f, TI_FIST, 0, w);
         } else {
             put(d, TS_SQUARE, p->x - off + s * 0.4f, p->y, s, 0, 0, 0, 0, w);
             put(d, TS_CIRCLE, p->x + off - s * 0.4f, p->y, s, 0, 0, 0, 0, w);

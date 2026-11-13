@@ -21,15 +21,13 @@ fn icon_pedal(p: vec2f) -> f32 {
 
 fn icon_fist(p: vec2f) -> f32 {
     var d = 1e9;
-    d = min(d, ic_box(p - vec2f(0.3, -0.02), vec2f(0.52, 0.56), 0.3));
-    d = min(d, ic_box(p - vec2f(-0.45, 0.14), vec2f(0.4, 0.26), 0.08));
-    d = max(d, -(ic_seg(p, vec2f(0.52, -0.28), vec2f(0.86, -0.28)) - 0.0 - 0.06));
-    d = max(d, -(ic_seg(p, vec2f(0.52, -0.02), vec2f(0.86, -0.02)) - 0.0 - 0.06));
-    d = max(d, -(ic_seg(p, vec2f(0.52, 0.24), vec2f(0.86, 0.24)) - 0.0 - 0.06));
-    d = max(d, -(ic_arc(p, vec2f(0.1, 0.1), 0.3, -1.5708, 0.1745) - 0.0 - 0.06));
-    d = min(d, ic_seg(p, vec2f(-1.0, -0.48), vec2f(-0.62, -0.48)) - 0.065);
-    d = min(d, ic_seg(p, vec2f(-1.0, -0.12), vec2f(-0.75, -0.12)) - 0.065);
-    d = min(d, ic_seg(p, vec2f(-1.0, 0.62), vec2f(-0.62, 0.62)) - 0.065);
+    d = min(d, ic_box(p - vec2f(0.24, -0.02), vec2f(0.62, 0.66), 0.32));
+    d = min(d, ic_box(p - vec2f(-0.58, 0.16), vec2f(0.4, 0.3), 0.08));
+    d = max(d, -(ic_seg(p, vec2f(0.5, -0.3), vec2f(0.92, -0.3)) - 0.0 - 0.08));
+    d = max(d, -(ic_seg(p, vec2f(0.5, 0.0), vec2f(0.92, 0.0)) - 0.0 - 0.08));
+    d = max(d, -(ic_seg(p, vec2f(0.5, 0.3), vec2f(0.92, 0.3)) - 0.0 - 0.08));
+    d = min(d, ic_seg(p, vec2f(-1.0, -0.56), vec2f(-0.62, -0.56)) - 0.08);
+    d = min(d, ic_seg(p, vec2f(-1.0, 0.7), vec2f(-0.7, 0.7)) - 0.08);
     return d;
 }
 

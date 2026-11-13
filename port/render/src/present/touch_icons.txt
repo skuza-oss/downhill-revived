@@ -38,16 +38,14 @@ icon pedal
 
 # A fist punching right (○, the right-hand attack; drawn mirrored for ◻, the left-hand one).
 icon fist
-  box   0.30 -0.02 0.52 0.56 0.30
-  box  -0.45  0.14 0.40 0.26 0.08
-  gap 0.06
-  cut seg 0.52 -0.28 0.86 -0.28 0.0
-  cut seg 0.52 -0.02 0.86 -0.02 0.0
-  cut seg 0.52  0.24 0.86  0.24 0.0
-  cut arc 0.10 0.10 0.30 -90 10 0.0
-  seg  -1.00 -0.48 -0.62 -0.48 0.13
-  seg  -1.00 -0.12 -0.75 -0.12 0.13
-  seg  -1.00  0.62 -0.62  0.62 0.13
+  box   0.24 -0.02 0.62 0.66 0.32
+  box  -0.58  0.16 0.40 0.30 0.08
+  gap 0.08
+  cut seg 0.50 -0.30 0.92 -0.30 0.0
+  cut seg 0.50  0.00 0.92  0.00 0.0
+  cut seg 0.50  0.30 0.92  0.30 0.0
+  seg  -1.00 -0.56 -0.62 -0.56 0.16
+  seg  -1.00  0.70 -0.70  0.70 0.16
 
 # BRAKE (△ on the ground): a brake lever under its handlebar grip.
 icon brake
