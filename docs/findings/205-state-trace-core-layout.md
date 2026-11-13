@@ -1,6 +1,7 @@
 # 205: a state trace that does not depend on the core's layout
 
 Status: current
+Checked: 2026-11-13
 Supersedes: parts of 081 (`DHD_STATE_NORM=host`; how registers holding core addresses compare)
 
 Branch `fix/state-trace-core-layout` from `main` 1578b6c5, started 2026-11-11, merged into `main`

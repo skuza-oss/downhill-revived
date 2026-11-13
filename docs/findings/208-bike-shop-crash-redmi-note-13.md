@@ -1,6 +1,7 @@
 # 208: the Bike Shop closes the game on a Redmi Note 13 4G (issue #78)
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/bike-shop-android` from `main` ad0135bd, started 2026-11-12.
 

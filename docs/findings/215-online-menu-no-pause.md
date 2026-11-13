@@ -1,6 +1,7 @@
 # 215: Online, the race menu does not pause the race
 
 Status: current
+Checked: 2026-11-13
 
 Branch `feat/online-menu-no-pause` from the online riders lane's head 86c3f4a1 (local main
 dbddf61e plus finding 202's round 4), started 2026-11-12, merged into `main` the same day

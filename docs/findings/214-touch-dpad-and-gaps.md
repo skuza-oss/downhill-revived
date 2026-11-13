@@ -1,6 +1,7 @@
 # 214: A D-pad as a touch steering choice, and the touch gaps beside the flyover
 
 Status: current
+Checked: 2026-11-13
 
 Branch `feat/touch-dpad` from `main` dbddf61e (0.7.16 plus findings 199-207 and 209), started
 2026-11-12. This file is the lane's plan while it runs and its finding when it merges. Merged

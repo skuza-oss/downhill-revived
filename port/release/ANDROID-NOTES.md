@@ -6,9 +6,10 @@ On a slower phone, OPTIONS > SETTINGS > Graphics tab > Performance Mode turns of
 shadows and the sun's glow, the lens flare and the particles, which helps the most. Native VU (the
 same tab, on by default) lets the phone's graphics chip run part of the PS2's work, which is
 faster; if something in the picture looks wrong, turn it OFF and send us the log.
-Play with the touch controls (Classic pad or Thumb zones, tilt steering if you like: OPTIONS >
-SETTINGS > Controls tab > Touch Controls) or a controller. The game's cheat codes are typed on the
-touch pause menu's **CODES** page.
+Play with the touch controls (Classic pad or Thumb zones; steer with the stick, by tilting the
+phone or with a D-pad: OPTIONS > SETTINGS > Controls tab > Touch Controls) or a controller. A
+**SKIP** button ends the flight over the track before a race, the movies and the title's demo. The
+game's cheat codes are typed on the touch pause menu's **CODES** page.
 
 **What you need**
 - Any arm64 phone or tablet with Android 10 or later and Vulkan (most phones since 2018),
@@ -37,8 +38,9 @@ unless you pick an app in Android's share sheet.
 **Online: P2P races only.** ONLINE in the main menu offers Create A P2P Race and Join With A Code
 (a 7-character code from a friend's P2P race, on a phone or a PC). The race data goes directly
 between the players' games, so **the other players in a P2P room can see your network (IP)
-address**; the game says so. Play them with people you trust. Public races, Quick Race and the
-normal private races are not on phones yet.
+address**; the game says so. Play them with people you trust. In an online race the pause
+button opens the room's menu over the running race (the race does not stop for the others).
+Public races, Quick Race and the normal private races are not on phones yet.
 
 **Check the download.** `SHA256SUMS` lists the APK's SHA-256. The APK is signed with the
 Downhill Revived release key, certificate SHA-256

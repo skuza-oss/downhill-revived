@@ -1,8 +1,8 @@
 # 200: Unlock All applies at once; button icons over a texture pack's font
 
 Status: current
+Checked: 2026-11-13
 Supersedes: parts of 058, 095, 134
-Checked: 2026-11-11
 
 Branch `fix/unlock-live-and-pack-icons` from `main` f0971070 (v0.7.16), started 2026-11-11. This
 file is the lane's plan while it runs and its finding when it merges.

@@ -1,6 +1,7 @@
 # 213: stack locals that the EE frame makes one object (the class of 094 and 207)
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/stack-overrun-sweep` from `main` b8c4cf88, started 2026-11-12, merged into `main` the
 same day (524948ba). This file was the lane's plan while it ran and is its finding now.

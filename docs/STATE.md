@@ -60,6 +60,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - `port/hle/` replaces the PS2 system: EE kernel (threads as fibers, `port/host64/fiber.c`),
   crt0, SIF RPC, disc and file I/O, DMA, VIF0/VIF1, timers, pads, memory card, the sound driver
   (989snd replaced by `sound.c`, findings 022, 133), movies (`movie.c`, libmpeg2, finding 055).
+  A positional sound with no position (the rider screen's chatter) takes its angle from the
+  origin, as its distance already did (finding 222: it read address 0 and crashed there after a
+  race).
 - The game data image is read at start from the player's `SCUS_971.77` (SHA-1 checked,
   `game_data.c`); the executable holds only the words the port changes (finding 053).
 - Stack locals: the game's C code is compiled by clang, which lays out a function's locals as it
@@ -87,7 +90,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   Upscaled bilinear sprites interpolate at output resolution (foliage and particles); only
   nearest-filtered sprites retain GS-pixel snapping (finding 196). On Vulkan with timeline
   semaphores every submit gives each semaphore a value (binary waits 0; vendored wgpu-hal
-  `vulkan/semaphore_list.rs`, finding 201), and dhd.log says which way submits signal.
+  `vulkan/semaphore_list.rs`, finding 201), and dhd.log says which way submits signal. On
+  Direct3D 12 the shader cache keeps a copy of a compiled shader's bytecode, not FXC's blob that
+  threads shared (upstream wgpu#10547's fix backported into the vendored wgpu-hal, finding 223).
 - **The game clock:** one delta-time clock at every frame rate, 60 included and online: each
   paced frame steps by the real time since the last, between one step at the selected rate and two
   fields (finding 139, `port/hle/fps.c`, `port/hle/kernel.c`). Deterministic runs keep the
@@ -185,6 +190,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   other human finished or left) it is the game's own pause. A real pause's time is never given
   back: the race clock stays behind by it, and the stamps carry that (finding 220,
   `sync_clock_stood`): the others' snapshots land at this game's present, its own at theirs.
+- Why a race closed is said on every screen for 2 s and logged (`race closed: back to the room
+  (WHY: ...)`): RACE OVER, TIME UP - DNF, THE HOST ENDED THE RACE, CONNECTION LOST and the rest,
+  from the room's `ended` message by one rule (`port/hle/online_end.h`, finding 211).
 - The room page on a phone (finding 218): READY by tap is logged (`READY on by tap` / `by pad`) and
   answered (`the room has this player ready`); a READY the room does not show within 4 s puts
   `READY DIDN'T REACH THE ROOM: TRY AGAIN` on the page, and the room's errors show as a note.

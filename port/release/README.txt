@@ -44,7 +44,8 @@ How to play
    patch notes and a link to the Discord server. Press PLAY.
 3. The first time, the launcher asks for your disc image (Choose disc): choose your .iso. It is
    checked and remembered in dhd.ini; you are only asked again if the file moves or changes.
-   The launcher's Settings > Game can change it later.
+   The launcher's Settings > Game can change it later. The game also checks every file of the
+   image once; if one differs from the USA disc's, the main menu says so once, naming the file.
 
 Straight into the game (Steam, a shortcut): start the launcher with --play, e.g.
 DownhillRevived.exe --play, or the AppImage with --play. The game starts at once with your saved
@@ -176,6 +177,11 @@ to you (UDP); where a network blocks UDP the game falls back to an encrypted con
 Room Region (a row of the ONLINE menu, dhd.ini room_region): where the rooms you create run.
 Auto picks by the Cloudflare location you reach; or choose EU West, EU East, NA East, NA West,
 Asia NE, Asia SE or Oceania.
+START in an online race opens the room's menu over the running race (RESUME, BACK TO THE ROOM,
+END THE RACE for the host, LEAVE THE ROOM); the race goes on for everyone else. When you are the
+only one still racing it is the game's own pause.
+MOSH PIT (ARENA) online is a Mosh Bowl round with the game's own rules: two minutes, points per
+hit, then COMBAT RESULTS, and the room ranks the players by their scores.
 P2P races (ONLINE > Create A P2P Race): a private room, joined with its 7-character code, whose
 race data goes directly between the players' games. One game, the hub (the creator first, the
 next player if it leaves), passes the others' data on; a player who can't reach it races over

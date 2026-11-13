@@ -1,6 +1,7 @@
 # 207: Posters in OPTIONS closes the game (issue 87)
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/posters-crash` from `main` ad0135bd, started 2026-11-12, merged into `main` the same day
 (b8c4cf88). This file was the lane's plan while it ran and is its finding now.

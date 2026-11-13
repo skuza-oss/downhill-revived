@@ -1,6 +1,7 @@
 # 210: EXIT GAME on Android aborts in the C library while the process ends
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/android-exit-abort` from `main` 524948ba, started 2026-11-12, merged into `main` the
 same day (18f5e70c). This file was the lane's plan while it ran and is its finding now.

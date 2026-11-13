@@ -1,7 +1,7 @@
 # 211: Three small online and phone UI bugs: wrong race-end message, room stall, keyboard tab hint
 
 Status: current
-Checked: 2026-11-12
+Checked: 2026-11-13
 
 Branch `fix/online-ui-small` from `main` 18f5e70c, started 2026-11-12, merged. The phone checks
 are recorded at the end ("Checked on the phone").

@@ -1,6 +1,7 @@
 # 202: online riders that look right: a bench of today's puppets, then a rebuild
 
 Status: current
+Checked: 2026-11-13
 Supersedes: part of 169 (item 4, the straight-line prediction)
 
 Branch `feat/online-riders-rebuild` from `main` 6e2f7d23, started 2026-11-11. This file is the

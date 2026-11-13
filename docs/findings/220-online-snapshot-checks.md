@@ -1,6 +1,7 @@
 # 220: another game's snapshots checked before they are used
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/online-snapshot-checks` from `main` c5f839a2, started 2026-11-12. This file is the
 lane's plan while it runs and its finding when it merges. Someone who has only this file and the
@@ -244,6 +245,25 @@ would trade a little sinking back (not tried).
   then brake them to a stop; when its snapshots come again they catch up by riding, glide while its
   clock catches up, or are put in place when far off. The page's star ticks every 10 ms on its own
   (`p2p.js`) and could send HOLD from the last bundle's stamp and the time since it; not done here.
+- **A sender's own pose after a crash at the finish line** (gate, 2026-11-13): the host's rider had
+  crashed on the line (wheels about 2 units below the ground); 0.3 s after its finish its spin ran
+  down, the orientation rows shrank to 0 over four steps, then one step had a row of length 3.5e12
+  and a spin of 2.4e24, and the next was normal again. The guest refused that record (`a record
+  refused (orientation)`), which is the check doing its work: nothing of it was used. Seen in 1 of
+  95 own-rider recordings (both 0.8.0 gate runs and this cycle's verifications); whether the PS2 does
+  the same in that crash is not known.
+- **A HOLD more than `PUPPET_HOLD_MATCH` (0.5 s) after the newest snapshot, after a finish** (gate,
+  2026-11-13): `a HOLD refused (stamp 78.916, newest snapshot 78.148, quiet 0.116 s)`, race second
+  78.6, after both finishes (70 / 72 s): 0.77 s past the newest snapshot the host had taken of the
+  finished guest. Refused, the rider coasts and then brakes (`SYNC_COAST`). The window is to be
+  widened in the next release.
+
+## Gate, 2026-11-13
+
+The 0.8.0 gate's second run (main d5896f18) logged those two refusal lines, one each in two of four
+two-game P2P races with no test link on one PC, both after the riders' finishes, results equal on
+both games; every other log of the run (A2's 40, A3's 12) had none. The owner waived both for 0.8.0
+(2026-11-13); both stay open above.
 
 ## Checks
 

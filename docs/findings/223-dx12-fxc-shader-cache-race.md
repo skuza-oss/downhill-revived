@@ -1,6 +1,7 @@
 # 223: The pipeline worker's crash in wgpu-hal's DX12 `load_shader` (FXC blobs shared across threads)
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/pipeline-worker-crash` from `main` d9714d0a, started 2026-11-12. The 0.8.0 gate saw
 the guest game die once in seven two-game online runs, at the start of the shared race, on the

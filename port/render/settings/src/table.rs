@@ -127,8 +127,8 @@ pub const SETTINGS: &[Setting] = &[
     // drawn by the native renderer's shaders instead of run on the emulated VU. Drawing only (the
     // game runs the same, so allowed online); live. The player's default since finding 198 (off:
     // troubleshooting, while the emulated path exists); the tools' runs, without dhd.ini, keep the
-    // emulated VU unless they set the variable. Not in the browser (settings.js leaves the variable
-    // out). DHD_NATIVE_VU1 also takes a list of loops with flags for tests ("0170,1708:skip").
+    // emulated VU unless they set the variable. In the browser too since finding 199 (settings.js's
+    // rows). DHD_NATIVE_VU1 also takes a list of loops with flags for tests ("0170,1708:skip").
     switch("native_vu", "DHD_NATIVE_VU1", TOGGLE, "on", "off"),
     // Simulation steps a second (findings 067, 114), offline and online.
     choice("fps", "DHD_FPS", &[c("60", "60 fps"), c("120", "120 fps"), c("144", "144 fps"), c("165", "165 fps"),

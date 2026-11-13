@@ -1,6 +1,7 @@
 # 209: Touch controls can skip the flight over the track
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/touch-skip-flyover` from `main` ad0135bd (0.7.16 plus findings 199-206), started
 2026-11-12. This file is the lane's plan while it runs and its finding when it merges.

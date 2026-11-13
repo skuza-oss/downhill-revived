@@ -322,6 +322,11 @@ open your rider gets no input and rolls on by itself. When you are the only play
 (everyone else finished or left), START pauses the race as offline, with OPTIONS too. On a phone
 the touch controls' Pause button opens their online panel, which never pauses either.
 
+MOSH PIT (ARENA), the last track in the room's track picker, is the game's Mosh Bowl online: a
+two-minute round with the game's own rules and points per hit, then COMBAT RESULTS with the same
+table on every game, and the room ranks the players by their scores (a normal race is always
+ranked by time).
+
 #### P2P races
 
 ONLINE > **Create A P2P Race** makes a private room (never listed) with a 7-character code; others

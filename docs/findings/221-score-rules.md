@@ -1,6 +1,7 @@
 # 221: score rules: the server's mode, one final per rider, a table that stands
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/score-rules` from `main` c5f839a2, started 2026-11-12. Release-blocking fix lane for
 0.8.0, from an outside review of v0.7.16 to c5f839a2 (its findings 4, 7 and 9). Another lane (220)

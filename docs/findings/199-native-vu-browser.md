@@ -1,8 +1,8 @@
 # 199: Native VU in the browser
 
 Status: current
+Checked: 2026-11-13
 Supersedes: parts of 198 (the browser left out), parts of 194 (the browser without Native VU)
-Checked: 2026-11-11
 
 Branch `feat/native-vu-browser` from `main` 6e2f7d23 (0.7.16 plus findings 200 and 201), started
 2026-11-11. Merged into `main` at 383741fe on 2026-11-11. This file is the lane's plan while it

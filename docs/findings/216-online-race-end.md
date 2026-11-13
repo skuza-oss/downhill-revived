@@ -1,6 +1,7 @@
 # 216: an online race's last seconds, the finish on every screen, a reset as a respawn
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/online-race-end` from `main` 1140b23f, started 2026-11-12. This file is the lane's plan
 while it runs and its finding when it merges. Merged into `main` on 2026-11-12 (c5f839a2) and checked

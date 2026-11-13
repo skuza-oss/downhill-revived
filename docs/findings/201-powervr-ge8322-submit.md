@@ -1,6 +1,7 @@
 # 201: PowerVR GE8322 (driver 1.18) closes at the first picture's submit
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/powervr-ge8322-submit` from `main` f0971070 (0.7.16), started 2026-11-11. This file
 is the lane's plan while it runs and its finding when it merges.

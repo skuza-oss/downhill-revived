@@ -1,6 +1,7 @@
 # 206: the online test tools drive their riders; the room card's state beside its tags
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/online-test-riders-and-room-card` from `main` 9b919298, started 2026-11-11. This file
 is the lane's plan while it runs and its finding when it merges.

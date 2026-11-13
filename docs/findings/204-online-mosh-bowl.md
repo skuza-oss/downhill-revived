@@ -1,6 +1,7 @@
 # 204: online MOSH PIT rounds run by the game's Mosh Bowl rules
 
 Status: current
+Checked: 2026-11-13
 
 Branch `feat/online-mosh-bowl` from `main` 1578b6c5, started 2026-11-11, merged into `main`
 2026-11-11 and checked there (Progress, "The checks on the merged main").

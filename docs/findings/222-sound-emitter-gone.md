@@ -1,6 +1,7 @@
 # 222: a sound with no position (the crash on the rider screen after an online race)
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/sound-emitter-gone` from `main` d9714d0a, started 2026-11-12. This file is the lane's
 plan while it runs and its finding when it merges.

@@ -1,6 +1,7 @@
 # 218: READY on a phone in an online room, the attract demo's SKIP, the D-pad's place and taps on settings rows
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/phone-room-and-touch` from `main` c5f839a2, started 2026-11-12. This file is the lane's
 plan while it runs and its finding when it merges. Merged into `main` on 2026-11-12 (63a24aa9) and

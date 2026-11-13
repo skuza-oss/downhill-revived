@@ -1,6 +1,7 @@
 # 203: Online MOSH PIT closes the game at the race start (issue #84)
 
 Status: current
+Checked: 2026-11-13
 
 Branch `fix/online-mosh-start` from `main` f2dd2d4b, started 2026-11-11. This file is the lane's
 plan while it runs and its finding when it merges.
