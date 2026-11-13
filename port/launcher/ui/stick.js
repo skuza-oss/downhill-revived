@@ -91,10 +91,9 @@ function stickIndicator(getDeadZone) {
     const pad = [...(navigator.getGamepads?.() ?? [])].find(Boolean);
     const dead = stickDeadZone(getDeadZone());
     const a = pad ? pad.axes : [];
-    drawStick(ctx, 0, 'Left stick: steer, lean', a[0] ?? 0, a[1] ?? 0, dead, !!pad);
-    drawStick(ctx, STICK_SIZE + 28, 'Right stick: pedal, brake', a[2] ?? 0, a[3] ?? 0, dead, !!pad);
-    const text = pad ? 'Ring: your stick. Dot: what the rider gets. Shaded: no effect.'
-      : 'Connect a controller and move a stick to see the dead zone.';
+    drawStick(ctx, 0, t('stick.left'), a[0] ?? 0, a[1] ?? 0, dead, !!pad);
+    drawStick(ctx, STICK_SIZE + 28, t('stick.right'), a[2] ?? 0, a[3] ?? 0, dead, !!pad);
+    const text = t(pad ? 'stick.live' : 'stick.none');
     if (note.textContent !== text) note.textContent = text;
     stickLoop = requestAnimationFrame(frame);
   };

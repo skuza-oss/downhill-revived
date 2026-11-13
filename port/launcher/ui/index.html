@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Downhill Revived</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -25,13 +26,15 @@
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></symbol>
 </svg>
 
 <header class="titlebar" data-tauri-drag-region>
   <div class="win-ctl">
-    <button id="win-min" aria-label="Minimize"><svg class="i"><use href="#i-min"/></svg></button>
-    <button id="win-close" class="close" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    <button id="win-min" aria-label="Minimize" data-i18n-aria="window.minimize"><svg class="i"><use href="#i-min"/></svg></button>
+    <button id="win-close" class="close" aria-label="Close" data-i18n-aria="window.close"><svg class="i"><use href="#i-x"/></svg></button>
   </div>
 </header>
 
@@ -39,18 +42,19 @@
   <aside class="rail">
     <div class="word" aria-label="Downhill Revived">Downhill<b>Revived</b></div>
     <nav class="nav">
-      <button data-page="play" class="on"><svg class="i"><use href="#i-play"/></svg>Play</button>
-      <button data-page="settings"><svg class="i"><use href="#i-sliders"/></svg>Settings</button>
-      <button data-page="notes"><svg class="i"><use href="#i-notes"/></svg>Patch notes</button>
+      <button data-page="play" class="on"><svg class="i"><use href="#i-play"/></svg><span data-i18n="nav.play">Play</span></button>
+      <button data-page="settings"><svg class="i"><use href="#i-sliders"/></svg><span data-i18n="nav.settings">Settings</span></button>
+      <button data-page="notes" id="nav-notes"><svg class="i"><use href="#i-notes"/></svg><span data-i18n="nav.notes">Patch notes</span></button>
+      <button data-page="help" id="nav-help" hidden><svg class="i"><use href="#i-help"/></svg><span data-i18n="nav.help">Help</span></button>
     </nav>
     <div class="rider" id="rider">
       <div class="plate" id="rider-initial">?</div>
       <div class="who">
         <span id="rider-name">RIDER</span>
-        <input id="rider-input" spellcheck="false" autocomplete="off" aria-label="Rider name" hidden>
+        <input id="rider-input" spellcheck="false" autocomplete="off" aria-label="Rider name" data-i18n-aria="rider.label" hidden>
         <small id="rider-hint">Rider name</small>
       </div>
-      <button class="icon-btn" id="rider-edit" aria-label="Change rider name"><svg class="i"><use href="#i-pencil"/></svg></button>
+      <button class="icon-btn" id="rider-edit" aria-label="Change rider name" data-i18n-aria="rider.change"><svg class="i"><use href="#i-pencil"/></svg></button>
     </div>
   </aside>
 
@@ -58,18 +62,19 @@
     <section class="page" id="page-play">
       <div class="home">
         <div id="home-ready">
-          <h1 id="home-title">Ready to ride</h1>
+          <h1 id="home-title" data-i18n="home.ready">Ready to ride</h1>
           <p class="meta" id="home-meta"></p>
           <ul class="news" id="news" hidden></ul>
         </div>
         <div id="home-first" hidden>
           <h1 id="first-title">One step to the start gate</h1>
-          <p class="lead">Downhill Revived plays from <b>your own copy</b> of Downhill Domination (USA, SCUS-97177) as an .iso file. It is checked here and remembered; nothing leaves your PC.</p>
+          <p class="lead" id="first-lead">Downhill Revived plays from <b>your own copy</b> of Downhill Domination (USA, SCUS-97177) as an .iso file. It is checked here and remembered; nothing leaves your PC.</p>
           <ol class="steps">
-            <li class="now"><i>1</i><div>Choose your disc image<small id="first-step">Any folder; the file stays where it is</small></div></li>
-            <li><i>2</i><div>Ride<small>PLAY appears below once the disc checks out</small></div></li>
+            <li class="now"><i>1</i><div><span data-i18n="home.first.step1">Choose your disc image</span><small id="first-step">Any folder; the file stays where it is</small></div></li>
+            <li><i>2</i><div><span data-i18n="home.first.step2">Ride</span><small data-i18n="home.first.step2Hint">PLAY appears below once the disc checks out</small></div></li>
           </ol>
         </div>
+        <div id="crash-note" hidden></div>
         <div id="online-note" hidden></div>
         <div class="facts">
           <button class="fact" id="fact-disc" hidden><svg class="i"><use href="#i-disc"/></svg><span id="fact-disc-name"></span></button>
@@ -81,8 +86,8 @@
 
     <section class="page" id="page-settings" hidden>
       <div class="set">
-        <div class="head"><h1>Settings</h1><button class="link quiet" id="reset-tab"><svg class="i"><use href="#i-undo"/></svg>Reset tab</button></div>
-        <p class="sub">The same settings as REVIVED SETTINGS in the game, saved to dhd.ini. Changes apply the next time the game starts.</p>
+        <div class="head"><h1 data-i18n="settings.title">Settings</h1><button class="link quiet" id="reset-tab"><svg class="i"><use href="#i-undo"/></svg><span data-i18n="settings.resetTab">Reset tab</span></button></div>
+        <p class="sub" id="settings-sub">The same settings as REVIVED SETTINGS in the game, saved to dhd.ini. Changes apply the next time the game starts.</p>
         <div class="tabs" role="tablist" id="tabs"></div>
         <div class="rows" id="rows"></div>
       </div>
@@ -90,9 +95,16 @@
 
     <section class="page" id="page-notes" hidden>
       <div class="set notes">
-        <h1 id="notes-title">Patch notes</h1>
-        <div class="md" id="notes-body"><p class="muted">Patch notes appear here once the launcher reaches GitHub.</p></div>
-        <button class="link" id="notes-page"><svg class="i"><use href="#i-external"/></svg>All releases on GitHub</button>
+        <h1 id="notes-title" data-i18n="nav.notes">Patch notes</h1>
+        <div class="md" id="notes-body"><p class="muted" data-i18n="notes.waiting">Patch notes appear here once the launcher reaches GitHub.</p></div>
+        <button class="link" id="notes-page"><svg class="i"><use href="#i-external"/></svg><span data-i18n="notes.all">All releases on GitHub</span></button>
+      </div>
+    </section>
+
+    <section class="page" id="page-help" hidden>
+      <div class="set">
+        <h1 data-i18n="help.title">Help</h1>
+        <div class="rows" id="help-rows"></div>
       </div>
     </section>
   </main>
@@ -101,17 +113,20 @@
 <footer class="foot">
   <div class="st" id="status" role="status" aria-live="polite"></div>
   <div class="pads" aria-hidden="true">
-    <span><i class="pa" id="pad-a">A</i>Select</span><span><i class="pb" id="pad-b">B</i>Back</span>
-    <span class="tabs-hint"><i id="pad-lb">LB</i><i id="pad-rb">RB</i>Tabs</span>
+    <span><i class="pa" id="pad-a">A</i><span data-i18n="footer.select">Select</span></span><span><i class="pb" id="pad-b">B</i><span data-i18n="footer.back">Back</span></span>
+    <span class="tabs-hint"><i id="pad-lb">LB</i><i id="pad-rb">RB</i><span data-i18n="footer.tabs">Tabs</span></span>
   </div>
   <button class="btn text" id="secondary" hidden></button>
   <button class="btn danger" id="danger" hidden></button>
-  <button class="icon-btn" id="dismiss" aria-label="Dismiss" hidden><svg class="i"><use href="#i-x"/></svg></button>
-  <button class="btn text" id="kofi" title="Support the project on Ko-fi"><svg class="i"><use href="#i-heart"/></svg>Support</button>
-  <button class="btn discord" id="discord"><svg class="i fill"><use href="#i-discord"/></svg>Discord</button>
+  <button class="icon-btn" id="dismiss" aria-label="Dismiss" data-i18n-aria="footer.dismiss" hidden><svg class="i"><use href="#i-x"/></svg></button>
+  <button class="btn text" id="kofi" title="Support the project on Ko-fi" data-i18n-title="footer.supportTitle"><svg class="i"><use href="#i-heart"/></svg><span data-i18n="footer.support">Support</span></button>
+  <button class="btn discord" id="discord"><svg class="i fill"><use href="#i-discord"/></svg><span data-i18n="footer.discord">Discord</span></button>
   <button class="btn primary" id="primary"><svg class="i"><use href="#i-play"/></svg><span>Play</span></button>
 </footer>
 
+<script src="i18n.js"></script>
+<script src="bridge.js"></script>
+<script src="disc_flow.js"></script>
 <script src="stick.js"></script>
 <script src="controls.js"></script>
 <script src="app.js"></script>
