@@ -524,12 +524,18 @@ static void save(const char *key, const char *env, const char *value)
     host_putenv_s(env, value);
 }
 
-/* What the player changed through the overlay (hints shown, the editor's Done) into dhd.ini. */
-static void save_settings(const TouchSettings *s)
+/* What the player changed through the overlay into dhd.ini: the hints shown, and the layout only
+   when the layout editor saved it (TOUCH_SAVED_LAYOUT; finding 229: a rescued layout never reaches
+   the file by a hint). */
+static void save_settings(const TouchSettings *s, int what)
 {
     char text[2048];
     snprintf(text, sizeof text, "%u", s->hints_shown);
     save("touch_hints", "DHD_TOUCH_HINTS", text);
+    if (!(what & TOUCH_SAVED_LAYOUT)) {
+        fprintf(stderr, "touch: saved (hints %u)\n", s->hints_shown);
+        return;
+    }
     touch_layout_format(s, text, sizeof text);
     save("touch_edits", "DHD_TOUCH_EDITS", text);
     fprintf(stderr, "touch: saved (hints %u, layout \"%s\")\n", s->hints_shown, text);
@@ -763,7 +769,8 @@ void host_service_touch_field(uint32_t address)
     int buzz = touch_take_buzz(touch);
     if (buzz) SDL_SetAtomicInt(&want_buzz, buzz);
     TouchSettings saved;
-    if (touch_take_saved(touch, &saved)) save_settings(&saved);
+    int saved_what = touch_take_saved(touch, &saved);
+    if (saved_what) save_settings(&saved, saved_what);
     const char *note = touch_take_note(touch);
     if (note) fprintf(stderr, "%s\n", note);
     if (alone_state == 1 && !touch_editor_open(touch)) {   /* Done or Back: saved above; the game ends */

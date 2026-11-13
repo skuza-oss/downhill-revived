@@ -197,7 +197,11 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *left_x, uint8_t *left
 /* Outputs since the last call, then cleared. */
 int touch_take_buzz(Touch *t);
 int touch_take_ask(Touch *t);
-/* Saved settings that changed (hints shown, the editor's Done): 1 and a copy in *out. */
+/* Saved settings that changed since the last call: TOUCH_SAVED_* bits (0 none) and a copy in *out.
+   Hints shown change touch_hints only; the layout (touch_edits) changes only when the layout
+   editor saved (Done or Back). Until then *out carries the layout as it was loaded, never one the
+   steering rescue changed for this run (finding 229), so a host may write it back unchanged. */
+enum { TOUCH_SAVED_HINTS = 1, TOUCH_SAVED_LAYOUT = 2 };
 int touch_take_saved(Touch *t, TouchSettings *out);
 /* A line for the host's log, once (NULL: none): a loaded layout that left no room to steer and the
    controls shown at their default places for it (finding 229). */

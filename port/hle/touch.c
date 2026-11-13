@@ -82,6 +82,7 @@ typedef struct {
     int box;
     float x0, y0, r0, hh0;   /* its place and size before the player's edits (the steering area and the
                                 D-pad's room are measured from these: moving a button never moves them) */
+    int pic;                 /* Button Style Actions: large enough for its picture (picture_step) */
 } Ctl;
 
 /* The places in the spec, as % of the reference screen (centre x, y; width as % of its width, a
@@ -243,6 +244,7 @@ struct Touch {
     double repeat_at;
     int repeated;
     int tablet;                /* laid out with the tablet defaults (lay_out) */
+    int pictures_known;        /* lay_out has decided each control's picture once (Ctl.pic) */
     /* air */
     int air_layout;
     double air_since;          /* race ms the air flag came */
@@ -289,7 +291,10 @@ struct Touch {
     double leave_armed_until;
     int ask;
     int buzz;
-    int saved;
+    int saved;                 /* settings to save: the hints shown, or the editor's layout */
+    int layout_saved;          /* the editor saved the layout (Done or Back) since the last take */
+    TouchEdit loaded_edit[2][TC_COUNT];   /* the layout as loaded (touch_configure), before any rescue */
+    int loaded_legacy[2];
     /* trick labels and hints */
     char label[TOUCH_TEXT];
     double label_until;
@@ -306,7 +311,7 @@ struct Touch {
     int replay_ran;            /* this replay's clock has moved (its load and countdown are over; finding 218) */
     int skip_pulse;            /* a SKIP tap's START press is going out */
     unsigned downs;            /* touch-downs so far (Finger.order) */
-    char note[160];            /* touch_take_note's line */
+    char note[320];            /* touch_take_note's line */
     int note_ready, rescue_noted;   /* a line waits; the steering rescue was logged (once a run) */
 };
 
@@ -627,9 +632,39 @@ static void cutout_shift(const Touch *t, int hud_moved, int current, float *left
     }
 }
 
+/* Button Style Actions: the smallest picture that still reads on a phone held in the hand (half its
+   size, mm; finding 229's captures at real size). Smaller, a control shows its pad name as in Symbols:
+   at the default Size every control is larger, at the smallest Size L3, R3 and the shoulder bars are
+   not. A band round it (a picture goes below PICTURE_OFF_MM, comes back above PICTURE_ON_MM; a new
+   layout starts at PICTURE_MIN_MM) keeps a pinch at the edge from flickering between the two. */
+#define PICTURE_MIN_MM 2.1f
+#define PICTURE_OFF_MM 2.0f
+#define PICTURE_ON_MM 2.2f
+
+/* A control's picture's half size (mm), as the drawing makes it; 1e9 for the controls whose pictures
+   always show (the top buttons, the stick's knob). */
+static float picture_half(const Touch *t, int c)
+{
+    const Ctl *k = &t->ctl[c];
+    if (c == TC_LBAR || c == TC_RBAR) return fminf(k->hh * 0.62f, k->hw * 0.2f);
+    if (k->box || c == TC_STICK || c == TC_TRICK || c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) return 1e9f;
+    int word = t->set.preset == TOUCH_THUMB_ZONES && (c == TC_PEDAL || c == TC_HOP || c == TC_BRAKE || c == TC_SLIDE);
+    return k->r * (word ? 0.40f : 0.58f);
+}
+
+static void picture_step(Touch *t, const unsigned char *was, int known)
+{
+    for (int c = 0; c < TC_COUNT; c++) {
+        float g = picture_half(t, c);
+        t->ctl[c].pic = !known ? g >= PICTURE_MIN_MM : was[c] ? g >= PICTURE_OFF_MM : g >= PICTURE_ON_MM;
+    }
+}
+
 /* The layout for the settings and the screen. */
 static void lay_out(Touch *t, int hud_moved)
 {
+    unsigned char pic_was[TC_COUNT];
+    for (int c = 0; c < TC_COUNT; c++) pic_was[c] = (unsigned char)t->ctl[c].pic;
     const TouchSettings *st = &t->set;
     float W = t->screen.width, H = t->screen.height;
     float limit = touch_height_scale(H, st->preset);
@@ -721,6 +756,8 @@ static void lay_out(Touch *t, int hud_moved)
     }
     t->air_x0 = right_handed(t) ? W / 2 : t->screen.strip_left;
     t->air_x1 = right_handed(t) ? W - t->screen.strip_right : W / 2;
+    picture_step(t, pic_was, t->pictures_known);
+    t->pictures_known = 1;
 }
 
 int touch_control(const Touch *t, int control, float *x, float *y, float *r)
@@ -1762,6 +1799,7 @@ static void editor_close(Touch *t)
     t->editor = 0;
     t->pinch_finger = t->repeat_finger = -1;
     t->saved = 1;
+    t->layout_saved = 1;   /* the one way the layout reaches dhd.ini (the rescued one too, on purpose) */
 }
 
 static void editor_button(Touch *t, int b)
@@ -2792,9 +2830,19 @@ int touch_take_ask(Touch *t) { int a = t->ask; t->ask = 0; return a; }
 int touch_take_saved(Touch *t, TouchSettings *out)
 {
     if (!t->saved) return 0;
+    int what = TOUCH_SAVED_HINTS;
     t->saved = 0;
     *out = t->set;
-    return 1;
+    if (t->layout_saved) {   /* the editor's layout is now the one loaded */
+        what |= TOUCH_SAVED_LAYOUT;
+        t->layout_saved = 0;
+        memcpy(t->loaded_edit, t->set.edit, sizeof t->loaded_edit);
+        memcpy(t->loaded_legacy, t->set.legacy, sizeof t->loaded_legacy);
+    } else {                 /* hints only: the layout as loaded, never the rescue's */
+        memcpy(out->edit, t->loaded_edit, sizeof out->edit);
+        memcpy(out->legacy, t->loaded_legacy, sizeof out->legacy);
+    }
+    return what;
 }
 
 /* ---------------------------------------------------------------- set-up */
@@ -2826,6 +2874,8 @@ void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen
     if (t->saved) t->set.hints_shown |= hints;   /* a hint shown since the last save isn't lost */
     if (screen && screen->width > 10 && screen->height > 10) t->screen = *screen;
     if (preset_changed) drop_race_touches(t);
+    memcpy(t->loaded_edit, s->edit, sizeof t->loaded_edit);
+    memcpy(t->loaded_legacy, s->legacy, sizeof t->loaded_legacy);
     lay_out(t, t->set.hud_moved);
     steer_rescue(t);
 }
@@ -2837,34 +2887,60 @@ static const char *const CONTROL_NAMES[TC_COUNT] = {
     "PEDAL", "HOP", "BRAKE", "SLIDE", "SQUARE", "CIRCLE", "CAMERA", "PAUSE", "CROSS", "TRIANGLE", "SQUARE", "CIRCLE",
     "+", "+", "L1 L2", "R1 R2", "L3", "R3", "STICK", "TRICK STICK"};
 
-/* A loaded layout (dhd.ini by a build before this check, or edited by hand) whose edited controls
-   leave no room to steer (steering_ok): it is not thrown away. The edited controls go back to their
-   default places one at a time, in the controls' order, until steering is usable, for this run only:
-   dhd.ini keeps the player's edits until the editor's Done saves the layout. The log says so once.
-   If even the default places leave no room (a screen too small), nothing changes. */
+/* A loaded layout (dhd.ini by a build before this check, edited by hand, or made on another
+   screen) whose edited controls leave no room to steer (steering_ok): it is not thrown away. As few
+   edited controls as will do go back to their default places, for this run only: first any one
+   control alone, then any two, and only then one after another in the controls' order. dhd.ini
+   keeps the player's layout (touch_take_saved hands out the one loaded) until the layout editor
+   saves. The log says once which controls and why. If even the default places leave no room (a
+   screen too small), nothing changes. */
+static int edited(const TouchEdit *e) { return e->dx != 0 || e->dy != 0 || e->size != 1; }
+
 static void steer_rescue(Touch *t)
 {
     if (t->editor || steering_ok(t)) return;
     TouchEdit *edits = t->set.edit[t->set.preset == TOUCH_CLASSIC], kept[TC_COUNT];
+    static const TouchEdit none = {0, 0, 1};
     memcpy(kept, edits, sizeof kept);
-    for (int c = 0; c < TC_COUNT; c++) edits[c] = (TouchEdit){0, 0, 1};
+    for (int c = 0; c < TC_COUNT; c++) edits[c] = none;
     lay_out(t, t->set.hud_moved);
     int defaults_ok = steering_ok(t);
     memcpy(edits, kept, sizeof kept);
     lay_out(t, t->set.hud_moved);
     if (!defaults_ok) return;
-    char names[120] = "";
-    for (int c = 0; c < TC_COUNT && !steering_ok(t); c++) {
-        TouchEdit *e = &edits[c];
-        if (c == TC_TRICK || (e->dx == 0 && e->dy == 0 && e->size == 1)) continue;
-        *e = (TouchEdit){0, 0, 1};
+    int cand[TC_COUNT], n = 0;
+    for (int c = 0; c < TC_COUNT; c++)
+        if (c != TC_TRICK && edited(&kept[c])) cand[n++] = c;
+    int reset[TC_COUNT], m = 0, done = 0;
+    for (int size = 1; size <= 2 && !done; size++)   /* one control alone, then two */
+        for (int i = 0; i < n && !done; i++)
+            for (int j = size == 1 ? i : i + 1; j < (size == 1 ? i + 1 : n) && !done; j++) {
+                edits[cand[i]] = none, edits[cand[j]] = none;
+                lay_out(t, t->set.hud_moved);
+                if (steering_ok(t)) {
+                    done = 1, reset[m++] = cand[i];
+                    if (j != i) reset[m++] = cand[j];
+                } else {
+                    edits[cand[i]] = kept[cand[i]], edits[cand[j]] = kept[cand[j]];
+                }
+            }
+    for (int i = 0; i < n && !done; i++) {   /* the rest: one after another */
+        edits[cand[i]] = none;
+        reset[m++] = cand[i];
         lay_out(t, t->set.hud_moved);
-        size_t n = strlen(names);
-        snprintf(names + n, sizeof names - n, "%s%s", n ? ", " : "", CONTROL_NAMES[c]);
+        done = steering_ok(t);
     }
+    lay_out(t, t->set.hud_moved);
     if (!t->rescue_noted) {
+        char names[120] = "";
+        for (int i = 0; i < m; i++) {
+            size_t len = strlen(names);
+            snprintf(names + len, sizeof names - len, "%s%s", i ? ", " : "", CONTROL_NAMES[reset[i]]);
+        }
         t->rescue_noted = 1;
-        snprintf(t->note, sizeof t->note, "touch: the saved layout left no room to steer; at their default places for now: %s", names);
+        snprintf(t->note, sizeof t->note, "touch: the saved layout covers %s on this screen; at %s default place%s for this run "
+                 "(dhd.ini keeps the layout until the layout editor saves): %s", t->set.dpad ? "the D-pad" : "every free spot to steer",
+                 m == 1 ? "its" : "their", m == 1 ? "" : "s", names);
         t->note_ready = 1;
     }
 }
@@ -2969,17 +3045,12 @@ static void action_button(const Touch *t, Draw *d, const Ctl *k, int pressed, fl
     badge(t, d, k->x + off, k->y - off, br, act.symbol, act.name, a);
 }
 
-/* The smallest picture that still reads on a phone held in the hand (half its size, mm; finding
-   229's captures at real size): smaller, the control shows its pad name as in Symbols. At the
-   default Size every control is larger; at the smallest Size L3, R3 and the shoulder bars are not. */
-#define PICTURE_MIN_MM 2.1f
-
 /* A round control in the style chosen: Symbols draws the pad's symbol (and the word), Actions the
    picture and the badge (a control too small for its picture: its symbol or name). */
 static void styled_button(const Touch *t, Draw *d, const Ctl *k, int pressed, float dim, int symbol, const char *label, Act act)
 {
     int word = label && *label;
-    if (actions(t) && k->r * (word ? 0.40f : 0.58f) >= PICTURE_MIN_MM) action_button(t, d, k, pressed, dim, act, label);
+    if (actions(t) && k->pic) action_button(t, d, k, pressed, dim, act, label);
     else if (actions(t) && !symbol && !word && act.name) button(d, k, pressed, dim, 0, badge_name(t, 0, act.name));
     else button(d, k, pressed, dim, symbol, label);
 }
@@ -3146,7 +3217,7 @@ static void draw_bar(const Touch *t, Draw *d, int bar)
     if (!right_handed(t)) { const char *x = a; a = b; b = x; int i = ia; ia = ib; ib = i; }
     float th = fminf(k->hh * 0.55f, 3.0f);
     float g = fminf(k->hh * 0.62f, k->hw * 0.2f);
-    if (actions(t) && g >= PICTURE_MIN_MM) {   /* smaller: the names, as in Symbols */
+    if (actions(t) && k->pic) {   /* too small for the pictures (Ctl.pic): the names, as in Symbols */
         uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
         float gap = g * 0.5f;
         for (int side = -1; side <= 1; side += 2) {

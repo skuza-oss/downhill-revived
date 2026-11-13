@@ -222,6 +222,9 @@ Windows, `lang_check` clean (the hints name no default, so no language file chan
 state trace equal to the reference. No phone run: the flip changes which value a dhd.ini without
 the line gets, and both looks were run on the Mi 11i in the first round.
 
+Review round (sol-lane229-227r2): a hint's save no longer writes `touch_edits` (the layout as loaded is kept beside the rescued one;
+`touch_take_saved` returns `TOUCH_SAVED_HINTS` / `_LAYOUT`, `test_rescue_not_saved_by_hints`); the rescue resets the fewest controls.
+
 Open:
 - What ◻ and ○ do in the air was not checked; the air pictures still show the fists there.
 - If players choose Actions, the fists and the pedal are the pictures to redraw first (and the
