@@ -41,6 +41,16 @@ function gameEffect(b) {
 }
 
 const STICK_SIZE = 116;
+const STICK_LABEL_MAX = 130;   // the widest a caption goes on one line (the English ones are 108 and 127 px)
+const STICK_LABEL_FONT = (size) => `600 ${size}px Archivo, sans-serif`;
+
+// A caption's lines: one when it fits, else two split after the colon (the stick, then what it does).
+// measure(text) is the text's width in pixels.
+function stickLabelLines(measure, label) {
+  if (measure(label) <= STICK_LABEL_MAX) return [label];
+  const cut = label.search(/[:：]/);
+  return cut < 0 ? [label] : [label.slice(0, cut + 1), label.slice(cut + 1).trim()];
+}
 
 // One stick's box: the travel (-1..1 both ways) as a square, the dead band shaded.
 function drawStick(ctx, x0, label, ax, ay, dead, live) {
@@ -57,9 +67,15 @@ function drawStick(ctx, x0, label, ax, ay, dead, live) {
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(cx, 8); ctx.lineTo(cx, s); ctx.moveTo(x0 + 4, cy); ctx.lineTo(x0 + s - 4, cy); ctx.stroke();
   ctx.fillStyle = '#9d8fb8';
-  ctx.font = '600 11.5px Archivo, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(label, cx, s + 20);
+  ctx.font = STICK_LABEL_FONT(11.5);
+  stickLabelLines((x) => ctx.measureText(x).width, label).forEach((line, i) => {
+    // a word too long for the box (a language's long term) shrinks until it fits
+    let size = 11.5;
+    while (size > 8 && ctx.measureText(line).width > STICK_LABEL_MAX) ctx.font = STICK_LABEL_FONT(size -= 0.5);
+    ctx.fillText(line, cx, s + 20 + i * 13);
+    ctx.font = STICK_LABEL_FONT(11.5);
+  });
   if (!live) return;
   const toV = (a) => Math.round(Math.max(-1, Math.min(1, a)) * (a >= 0 ? 32767 : 32768));
   const rx = gameEffect(stickByte(toV(ax), dead)), ry = gameEffect(stickByte(toV(ay), dead));
@@ -75,7 +91,12 @@ let stickLoop = 0;
 // The row's picture: a canvas redrawn every frame while it is on the page.
 function stickIndicator(getDeadZone) {
   const canvas = document.createElement('canvas');
-  const w = STICK_SIZE * 2 + 28, hgt = STICK_SIZE + 30, ratio = window.devicePixelRatio || 1;
+  // room for a second caption line when a language's caption needs one
+  const scratch = document.createElement('canvas').getContext('2d');
+  scratch.font = STICK_LABEL_FONT(11.5);
+  const measure = (x) => scratch.measureText(x).width;
+  const extra = Math.max(...['stick.left', 'stick.right'].map((k) => stickLabelLines(measure, t(k)).length)) > 1 ? 14 : 0;
+  const w = STICK_SIZE * 2 + 28, hgt = STICK_SIZE + 30 + extra, ratio = window.devicePixelRatio || 1;
   canvas.width = w * ratio;
   canvas.height = hgt * ratio;
   canvas.style.width = `${w}px`;
@@ -100,3 +121,5 @@ function stickIndicator(getDeadZone) {
   stickLoop = requestAnimationFrame(frame);
   return { canvas, note };
 }
+
+if (typeof module !== 'undefined') module.exports = { stickLabelLines, STICK_LABEL_MAX };

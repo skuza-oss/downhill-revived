@@ -20,7 +20,7 @@ const TABS = [
   ['graphics', [
     { key: 'scale', label: 'row.scale', hint: () => scaleHint(), type: 'select', option: (v, t) => scaleOption(v, t), allow: (v) => scaleOffered(v) },
     { key: 'DHD_ASPECT', label: 'row.aspect', hint: () => (has('touch-settings') ? 'row.aspect.hintTouch' : 'row.aspect.hint'), type: 'seg' },
-    { key: 'DHD_PRESENT_FILTER', label: 'row.scaling', type: 'seg', needs: 'pc-settings' },
+    { key: 'DHD_PRESENT_FILTER', label: 'row.scaling', hint: 'row.scaling.hint', type: 'seg', needs: 'pc-settings' },
     { key: 'widescreen', label: 'row.widescreen', hint: 'row.widescreen.hint', type: 'switch', needs: 'touch-settings' },
     { key: 'fps', label: 'row.fps', hint: 'row.fps.hint', type: 'select' },
     { key: 'perf_counter', label: 'row.perfCounter', hint: 'row.perfCounter.hint', type: 'switch' },
@@ -356,8 +356,9 @@ function control(row, off) {
         } });
     }
     case 'language': {
-      const options = [['', t('row.language.system', { language: languageName(lang.code, lang.words) })],
-        ...LANGUAGES.map((c) => [c, c === lang.code ? languageName(c, lang.words) : c])];
+      // "System" (what the device's languages give) first, then every language under its own name
+      const options = [['', t('row.language.system', { language: languageName(systemLanguage()) })],
+        ...LANGUAGES.map((c) => [c, languageName(c)])];
       const s = el('select', { 'aria-label': name, onchange: async (e) => {
         await save('language', e.target.value, label(e.target.selectedOptions[0].textContent));
         await loadLanguage(e.target.value);
