@@ -20,7 +20,7 @@ const TABS = [
   ['graphics', [
     { key: 'scale', label: 'row.scale', hint: () => scaleHint(), type: 'select', option: (v, t) => scaleOption(v, t), allow: (v) => scaleOffered(v) },
     { key: 'DHD_ASPECT', label: 'row.aspect', hint: () => (has('touch-settings') ? 'row.aspect.hintTouch' : 'row.aspect.hint'), type: 'seg' },
-    { key: 'DHD_PRESENT_FILTER', label: 'row.scaling', type: 'seg', needs: 'pc-settings' },
+    { key: 'DHD_PRESENT_FILTER', label: 'row.scaling', hint: 'row.scaling.hint', type: 'seg', needs: 'pc-settings' },
     { key: 'widescreen', label: 'row.widescreen', hint: 'row.widescreen.hint', type: 'switch', needs: 'touch-settings' },
     { key: 'fps', label: 'row.fps', hint: 'row.fps.hint', type: 'select' },
     { key: 'perf_counter', label: 'row.perfCounter', hint: 'row.perfCounter.hint', type: 'switch' },

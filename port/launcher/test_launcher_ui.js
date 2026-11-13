@@ -69,6 +69,14 @@ i.lang.words = en;
 i.lang.code = 'en';
 assert.strictEqual(i.tn('server.races', 1), '1 public race');
 assert.strictEqual(i.tn('server.races', 3), '3 public races');
+// the launcher names a setting as the game's own SETTINGS page does (port/hle/pc_settings.c)
+const gamePage = fs.readFileSync(path.join(__dirname, '..', 'hle', 'pc_settings.c'), 'utf8');
+for (const [key, label] of [['row.scale', 'Resolution'], ['row.window', 'Display'], ['row.size', 'Window Size'], ['row.aspect', 'Picture'],
+  ['row.scaling', 'Scaling'], ['row.widescreen', 'Widescreen']]) {
+  assert.ok(gamePage.includes(`{"${label}:"`), `${label} is a row of the game's page`);
+  assert.strictEqual(en[key].toLowerCase(), label.toLowerCase(), `${key} reads as the game's ${label} (case aside)`);
+}
+assert.ok(en['row.scaling.hint'], 'the Scaling row says what it does');
 // every source string: whole, named placeholders only, bold spans paired
 for (const [k, v] of Object.entries(en)) {
   assert.strictEqual(typeof v, 'string', k);
