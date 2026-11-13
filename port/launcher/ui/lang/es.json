@@ -7,7 +7,7 @@
   "nav.notes": "Notas de versión",
   "nav.help": "Ayuda",
 
-  "rider.label": "Nombre del piloto",
+  "rider.label": "Piloto",
   "rider.change": "Cambiar nombre del piloto",
   "rider.unset": "Tu nombre",
   "rider.notSet": "Sin definir",

@@ -204,7 +204,7 @@
   "footer.readySize": "Version **{version}** ist bereit, {size} MB",
   "footer.out": "Version **{version}** ist erschienen. Installiere sie von der Release-Seite.",
   "footer.openPage": "Release-Seite",
-  "footer.playVersion": "{version} spielen",
+  "footer.playVersion": "Version {version} spielen",
   "footer.update": "Update",
   "footer.updating": "Aktualisiere",
   "footer.updateFailed": "Update fehlgeschlagen.",
