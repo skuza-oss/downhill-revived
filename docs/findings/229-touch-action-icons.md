@@ -224,6 +224,8 @@ the line gets, and both looks were run on the Mi 11i in the first round.
 
 Review round (sol-lane229-227r2): a hint's save no longer writes `touch_edits` (the layout as loaded is kept beside the rescued one;
 `touch_take_saved` returns `TOUCH_SAVED_HINTS` / `_LAYOUT`, `test_rescue_not_saved_by_hints`); the rescue resets the fewest controls.
+The overlay's shader and pipeline are made inside error scopes (`scoped_pipeline`): a refusal logs once and the game
+goes on without drawn buttons (touch areas work); no fallback pipeline, the browser unchanged.
 
 Open:
 - What ◻ and ○ do in the air was not checked; the air pictures still show the fists there.
