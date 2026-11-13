@@ -11,6 +11,7 @@
 #include "stick.h"
 #include "controls_table.h"  /* the bindings' tables (port/render/settings, finding 157) */
 #include "../gs/button_icons.h"
+#include "../host/disc_check.h"
 #include "../gs/gs_mesh.h"   /* gs_mesh_setting_read: Native VU (finding 194) */
 #include "../include/version.h"
 #include "../runtime/sha256.h"
@@ -1130,7 +1131,6 @@ int host_game_options_read(char *value, size_t size)
 
 /* ---- the disc image (first start) ---- */
 
-static uint32_t le32_at(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
 /* The game's other releases (finding 100), from the table the launcher reads too. */
 #define OTHER_RELEASE(boot, what) {boot, what},
@@ -1169,69 +1169,46 @@ static const char *other_release(const char *boot)
     return NULL;
 }
 
-/* Whether path is Downhill Domination (USA): the ISO 9660 root holds a SYSTEM.CNF whose boot
-   line names SCUS_971.77, and SCUS_971.77 is the retail one (game_data_read: the game's data
-   comes from it). NULL if it is, else why not. disc_shallow (the Android start, before the core
-   exists) leaves out game_data_read, which runs in the core; host_disc_ready checks it later. */
+/* Whether path is Downhill Domination (USA): disc_check_image (port/host/disc_check.c, finding 227:
+   the ISO 9660 root holds a SYSTEM.CNF whose boot line names SCUS_971.77, and the file holds the
+   whole volume it declares), then SCUS_971.77 is the retail one (game_data_read: the game's data
+   comes from it). NULL if it is, else why not. disc_shallow (a phone's launcher, import and start,
+   before the core exists) leaves out game_data_read, which runs in the core; host_disc_ready
+   checks it later. */
 static int disc_shallow;
+static int disc_read(void *file, uint64_t offset, void *buffer, size_t n)
+{
+    HostFile f = *(HostFile *)file;
+    return host_file_seek(f, offset) == 0 && host_file_read(f, buffer, n) == (int64_t)n;
+}
 static const char *disc_problem(const char *path, char *why, size_t size)
 {
-    enum { SECTOR = 2048 };
-    static uint8_t sector[SECTOR];
-    static char text[SECTOR + 1];
     HostFile f = host_file_open(path, HOST_FILE_READ);
     if (f == HOST_FILE_NONE) return "The file can't be opened.";
-    const char *problem = NULL;
-    uint32_t cnf = 0, cnf_size = 0;
-#define READ(lsn) (host_file_seek(f, (uint64_t)(lsn) * SECTOR) == 0 && host_file_read(f, sector, SECTOR) == SECTOR)
-    if (!READ(16) || sector[0] != 1 || memcmp(sector + 1, "CD001", 5)) {
-        problem = "It isn't a disc image (no ISO 9660 volume in it).";
-        goto done;
-    }
-    /* The primary volume descriptor's root directory record (at 156): extent at +2, size at +10. */
-    uint32_t dir = le32_at(sector + 156 + 2), dir_size = le32_at(sector + 156 + 10);
-    for (uint32_t off = 0; off < dir_size && off < 16 * SECTOR && !cnf; off += SECTOR) {
-        if (!READ(dir + off / SECTOR)) break;
-        for (unsigned i = 0; i + 33 < SECTOR && sector[i]; i += sector[i]) {
-            const uint8_t *r = sector + i;
-            if (r[32] >= 10 && i + 33 + r[32] <= SECTOR && !SDL_strncasecmp((const char *)r + 33, "SYSTEM.CNF", 10) &&
-                (r[32] == 10 || r[33 + 10] == ';')) {
-                cnf = le32_at(r + 2);
-                cnf_size = le32_at(r + 10);
-                break;
-            }
-        }
-    }
-    if (!cnf || !READ(cnf)) {
-        problem = "It has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.";
-        goto done;
-    }
-    memcpy(text, sector, SECTOR);
-    text[cnf_size < SECTOR ? cnf_size : SECTOR] = 0;
-    if (strstr(text, "SCUS_971.77")) {
-        if (!disc_shallow) problem = game_data_read(path, NULL);  /* the game's program and data, unchanged (game_data.c) */
-        goto done;
-    }
-    /* Name the game it is: BOOT2 = cdrom0:\SLUS_123.45;1 */
-    const char *boot = strstr(text, "BOOT2");
-    char id[32] = "";
-    if (boot && (boot = strpbrk(boot, "\\:"))) {
-        while (*boot == '\\' || *boot == ':') boot++;
-        size_t n = strcspn(boot, ";\r\n");
-        snprintf(id, sizeof id, "%.*s", (int)(n < 31 ? n : 31), boot);
-    }
-    const char *release = other_release(id);
-    if (release)
-        snprintf(why, size, "This is %s. Downhill Revived needs the USA disc (SCUS-97177) for now. More: %s", release,
-                 other_releases_more);
-    else
-        snprintf(why, size, "It is another PlayStation 2 disc%s%s%s, not Downhill Domination (USA), SCUS-97177.",
-                 *id ? " (" : "", id, *id ? ")" : "");
-    problem = why;
-done:
-#undef READ
+    char id[32];
+    uint64_t volume = 0, length = host_file_size(f);
+    int kind = disc_check_image(disc_read, &f, length, id, sizeof id, &volume);
     host_file_close(f);
-    return problem;
+    switch (kind) {
+    case DISC_NOT_ISO: return "It isn't a disc image (no ISO 9660 volume in it).";
+    case DISC_NO_CNF: return "It has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.";
+    case DISC_CUT:
+        snprintf(why, size, "The disc image is incomplete: it has %.1f MB of the %.1f MB its volume declares (a download or "
+                 "copy cut short). Make or copy it again.", length / 1048576.0, volume / 1048576.0);
+        return why;
+    case DISC_OTHER: {
+        const char *release = other_release(id);
+        if (release)
+            snprintf(why, size, "This is %s. Downhill Revived needs the USA disc (SCUS-97177) for now. More: %s", release,
+                     other_releases_more);
+        else
+            snprintf(why, size, "It is another PlayStation 2 disc%s%s%s, not Downhill Domination (USA), SCUS-97177.",
+                     *id ? " (" : "", id, *id ? ")" : "");
+        return why;
+    }
+    default:
+        return disc_shallow ? NULL : game_data_read(path, NULL);  /* the game's program and data, unchanged (game_data.c) */
+    }
 }
 
 /* At start: the disc image dhd.ini names (iso), if it is there and is Downhill Domination (USA).
