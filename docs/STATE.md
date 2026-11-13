@@ -115,7 +115,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the touch pause menu, finding 189; a SKIP button in the flight over the track, finding 209, and
   in the movies and the title's attract demo, findings 214 and 218; a D-pad as a third touch
   steering choice, finding 214, placed clear of the game's HUD, finding 218; MENU over a replay,
-  also above 60 updates a second, finding 218).
+  also above 60 updates a second, finding 218; per-control sizes 25-600 %, free placement, undo
+  and redo in the layout editor, tablet defaults, the editor alone for the launcher
+  (`DHD_TOUCH_EDITOR`), tilt on iOS, finding 226).
 - A phone's app away from the screen (Android and iOS, `present.c`'s `app_away_wait`, finding 227):
   the game waits, fingers are let go, the sound pauses, the freeze watch is quiet; at the return an
   offline race is in the game's own pause (online it goes on, finding 215) and the core's clock

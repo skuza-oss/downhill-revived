@@ -37,8 +37,17 @@ enum {
 
 typedef struct {
     float dx, dy;    /* mm from the preset's place */
-    float size;      /* times the preset's size (1 = as designed) */
+    float size;      /* times the preset's size (1 = as designed; TOUCH_SIZE_MIN to TOUCH_SIZE_MAX) */
 } TouchEdit;
+
+/* A control's own size in the layout editor (finding 226): 25 % to 600 %, where the screen holds it. */
+#define TOUCH_SIZE_MIN 0.25f
+#define TOUCH_SIZE_MAX 6.0f
+/* A screen whose short side is this long or longer (mm) is a tablet's: the tablet defaults
+   (finding 226: a larger base size, the clusters nearer where two thumbs hold it, Pause and SKIP
+   under the thumbs). Phones end near 78 mm, the smallest tablets start near 94 mm. */
+#define TOUCH_TABLET_MM 90.0f
+#define TOUCH_TABLET_SCALE 1.25f
 
 /* The player's settings (dhd.ini touch_*, the TOUCH CONTROLS pages). */
 typedef struct {
@@ -61,10 +70,14 @@ typedef struct {
     int hud_moved;        /* 1: the HUD moves out of the controls' way (the HUD hook); 0: the fallback layout */
     int air_wait_ms;      /* 150, or 33 when the air flag is steady (check 6) */
     TouchEdit edit[2][TC_COUNT];  /* per preset */
+    int legacy[2];        /* per preset: its edits were saved by 0.8.0 or before (no "layout=2" in
+                             touch_edits), so it keeps 0.8.0's places on every screen: an update
+                             never moves a player's layout (finding 226) */
 } TouchSettings;
 
 void touch_settings_default(TouchSettings *s);
-/* dhd.ini touch_layout: "preset.control=dx,dy,size;..." and back (out: at least 1024 bytes). */
+/* dhd.ini touch_edits: "preset.control=dx,dy,size;..." and back (out: at least 1024 bytes); a
+   preset laid out on the current places also has "preset.layout=2" (older readers skip it). */
 void touch_layout_parse(TouchSettings *s, const char *text);
 void touch_layout_format(const TouchSettings *s, char *out, int size);
 
@@ -136,6 +149,11 @@ void touch_pad_lost(Touch *t, double now);     /* the controller went away mid-r
 /* The phone's roll (tilt steering); known 0: no reading yet, or no sensor (the stick keeps steering). */
 void touch_tilt(Touch *t, int known, float degrees);
 void touch_open_editor(Touch *t);              /* TOUCH CONTROLS > Edit layout */
+/* The editor alone (the launcher's "Edit the touch layout", DHD_TOUCH_EDITOR): over a plain
+   background instead of the game's picture; Done or Back closes it as usual. */
+void touch_open_editor_alone(Touch *t);
+int touch_editor_open(const Touch *t);
+int touch_tablet(const Touch *t);              /* laid out with the tablet defaults */
 
 /* The host's queue between its input thread and the game's field (no lock here: the host holds
    its own). It never loses what ends a press: a finger's moves are merged (the latest kept) once
@@ -184,7 +202,7 @@ uint16_t touch_sector_buttons(int sector);
 const char *touch_trick_name(uint16_t buttons);             /* NULL: no tabled trick */
 /* Where a panel's button is (its centre, mm): the pause rows (Resume, Restart race, Quit race,
    Controls, Bail out, Codes), the question (No, Yes), the online panel (Close, Bail out, Leave race),
-   the editor's bar (Ground, Air, -, +, Reset, Done), the pause rows' CODES page (Up, Down, Left,
+   the editor's bar (Ground, Air, -, +, Undo, Redo, Reset, Done), the pause rows' CODES page (Up, Down, Left,
    Right, Triangle, Circle, Cross, Square, Clear, Back, Enter; finding 189). 0 if there is no such
    button. */
 enum { TOUCH_TARGET_PAUSE, TOUCH_TARGET_CONFIRM, TOUCH_TARGET_PANEL, TOUCH_TARGET_EDITOR, TOUCH_TARGET_CODES,

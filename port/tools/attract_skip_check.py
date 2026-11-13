@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hidden_game  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-SKIP = (0.5, 0.86)   # the SKIP button's centre as a fraction of the window (touch.c skip_box)
+SKIP = ((154.5 - 8 - 15) / 154.5, 0.86)   # SKIP's centre as a fraction of the window: 23 mm in from the right edge of the 154.5 mm screen (touch.c skip_box, finding 226)
 
 
 def main():

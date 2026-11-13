@@ -6,6 +6,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
 #import <UIKit/UIKit.h>
+#import <CoreMotion/CoreMotion.h>
 #include <stdatomic.h>
 #include <math.h>
 #include <os/lock.h>
@@ -41,6 +42,7 @@ static void attach_to_host(UIViewController *host);
 /* The view in mm for touch_host.c, written on the main thread at each layout. */
 static os_unfair_lock s_screen_lock = OS_UNFAIR_LOCK_INIT;
 static float s_screen_mm[2], s_strips_mm[4], s_cut_mm[4];
+static _Atomic(int) s_turn = 0;   /* the interface's UIInterfaceOrientation (screen_measure), for the tilt's axes */
 
 void ios_metal_set_phone_aspect(double aspect) { atomic_store(&s_phone_aspect, aspect); }
 double ios_metal_game_aspect(void) {
@@ -195,8 +197,12 @@ static void screen_measure(UIView *view) {
     UIEdgeInsets in = view.safeAreaInsets;
     float strips[4] = {0, 0, 0, (float)in.bottom * mm}, cut[4] = {0};
     UIInterfaceOrientation turn = view.window.windowScene.interfaceOrientation;
-    if (!CGAffineTransformIsIdentity(view.transform)) {   /* the game turned in a portrait window (below): */
-        strips[0] = (float)in.left * mm, strips[1] = (float)in.top * mm;   /* the insets in its own axes */
+    BOOL turned = !CGAffineTransformIsIdentity(view.transform);   /* the game turned in a portrait window (below) */
+    /* tilt's axes: the turned view stands as the interface would in landscape right (its top at the
+       screen's right edge, so the player holds the home side to the right) */
+    atomic_store(&s_turn, (int)(turned ? UIInterfaceOrientationLandscapeRight : turn));
+    if (turned) {   /* the insets in the view's own axes */
+        strips[0] = (float)in.left * mm, strips[1] = (float)in.top * mm;
         strips[2] = (float)in.right * mm, strips[3] = (float)in.bottom * mm;
     } else if (turn == UIInterfaceOrientationLandscapeRight && in.left > 0) {        /* the housing on the left */
         cut[2] = (float)in.left * mm;
@@ -231,6 +237,61 @@ void ios_touch_buzz(int kind) {
                 });
         }
     });
+}
+
+/* Tilt steering (finding 226): CMDeviceMotion's gravity (device axes: x right and y up in
+   portrait, z out of the screen; pointing down) turned into the screen's axes as the interface is
+   turned, then Android's roll (DhdActivity.touchTiltOn: atan2(-sx, sy) of the up vector in screen
+   axes, x right, y up). Updates come on their own queue; the roll is kept as millidegrees. The
+   screen is not locked to its side while tilt steers (Android locks it): iOS turns the interface
+   only well past a steering tilt. */
+static CMMotionManager *s_motion;
+static _Atomic(int) s_tilt_milli = 0, s_tilt_known = 0;
+
+int ios_touch_tilt_on(int on) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ s_motion = [[CMMotionManager alloc] init]; });
+    int sensor = s_motion.deviceMotionAvailable || s_motion.accelerometerAvailable;
+    if (!on) atomic_store(&s_tilt_known, 0);
+    /* started and stopped on the main thread, never waited for (the game thread asks) */
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (on && sensor && !s_motion.deviceMotionActive && !s_motion.accelerometerActive) {
+            static NSOperationQueue *queue;
+            if (!queue) { queue = [[NSOperationQueue alloc] init]; queue.maxConcurrentOperationCount = 1; }
+            void (^take)(double, double) = ^(double gx, double gy) {
+                double ux = -gx, uy = -gy, sx, sy;   /* up, device axes */
+                int turn = atomic_load(&s_turn);
+                if (turn == UIInterfaceOrientationLandscapeRight) { sx = -uy; sy = ux; }        /* Android's ROTATION_90 */
+                else if (turn == UIInterfaceOrientationLandscapeLeft) { sx = uy; sy = -ux; }    /* ROTATION_270 */
+                else if (turn == UIInterfaceOrientationPortraitUpsideDown) { sx = -ux; sy = -uy; }
+                else { sx = ux; sy = uy; }
+                atomic_store(&s_tilt_milli, (int)lround(atan2(-sx, sy) * 180.0 / M_PI * 1000.0));
+                atomic_store(&s_tilt_known, 1);
+            };
+            if (s_motion.deviceMotionAvailable) {
+                s_motion.deviceMotionUpdateInterval = 1.0 / 60.0;
+                [s_motion startDeviceMotionUpdatesToQueue:queue withHandler:^(CMDeviceMotion *m, NSError *e) {
+                    if (m) take(m.gravity.x, m.gravity.y);
+                }];
+            } else {   /* no gyroscope: the accelerometer (gravity plus the hands' motion), as Android's fallback */
+                s_motion.accelerometerUpdateInterval = 1.0 / 60.0;
+                [s_motion startAccelerometerUpdatesToQueue:queue withHandler:^(CMAccelerometerData *a, NSError *e) {
+                    if (a) take(a.acceleration.x, a.acceleration.y);
+                }];
+            }
+        } else if (!on) {
+            if (s_motion.deviceMotionActive) [s_motion stopDeviceMotionUpdates];
+            if (s_motion.accelerometerActive) [s_motion stopAccelerometerUpdates];
+            atomic_store(&s_tilt_known, 0);
+        }
+    });
+    return sensor;
+}
+
+int ios_touch_tilt(float *degrees) {
+    if (!atomic_load(&s_tilt_known)) return 0;
+    *degrees = atomic_load(&s_tilt_milli) / 1000.0f;
+    return 1;
 }
 
 /* The system keyboard while a game field takes typing (present.c): its characters to the field. */

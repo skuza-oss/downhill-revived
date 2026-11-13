@@ -4,8 +4,9 @@
 experimental: it has been run on few devices so far, so we can't yet say which ones hold 60 fps;
 on a slower device OPTIONS > SETTINGS > Graphics tab > Performance Mode helps the most, and a
 lower resolution scale (the same tab) helps too. Play with the touch controls (Classic pad or
-Thumb zones; steer with the stick or a D-pad: OPTIONS > SETTINGS > Controls tab > Touch Controls;
-tilt steering is not on iOS yet) or a controller (MFi, Xbox, PlayStation). A **SKIP** button ends
+Thumb zones; steer with the stick, by tilting the device or with a D-pad: OPTIONS > SETTINGS >
+Controls tab > Touch Controls; Edit Layout moves and sizes each button, 25 % to 600 %, with undo;
+iPads get their own larger defaults) or a controller (MFi, Xbox, PlayStation). A **SKIP** button ends
 the flight over the track before a race, the movies and the title's demo. The game's cheat codes
 are typed on the touch pause menu's **CODES** page. The iOS port was first made by Gustavo Ribeiro
 (`ribeirogustav`).

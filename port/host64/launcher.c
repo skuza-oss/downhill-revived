@@ -87,6 +87,7 @@ static int game(void *start) {
     return code;
 }
 int sdl_host_main(int (*game)(void *),void *arg);  /* port/host/sdl_host.c */
+void touch_host_args(int argc,char **argv);  /* port/host/touch_host.c: --touch-editor (finding 226) */
 #ifndef HOST64_FAKE_MODULE
 #include "../host/host_end.h"
 #endif
@@ -98,6 +99,7 @@ int main(int argc,char **argv) {
 #ifdef HOST64_FAKE_MODULE
     return game(&args);  /* the boundary fixture: no window, no SDL */
 #else
+    touch_host_args(argc,argv);
     int code=sdl_host_main(game,&args);
 #ifdef __ANDROID__
     return code;  /* android_main.c logs it and ends the same way */
