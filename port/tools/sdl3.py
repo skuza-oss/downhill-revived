@@ -357,8 +357,9 @@ def android_build():
 IOS_MIN = '17.0'  # build_host64.py's ios-arm64 target too
 
 
-def ios_build():
-    """libSDL3.a for iPhone (arm64, iOS IOS_MIN and later), its include directory and the frameworks it
+def ios_build(simulator=False):
+    """libSDL3.a for iPhone (arm64, iOS IOS_MIN and later; simulator: the iOS Simulator on Apple
+    silicon, finding 224), its include directory and the frameworks it
     needs at link time. Same subsystem selection as posix_build (window, audio, controllers); the window
     is UIKit's with Metal views. Cross-built on a Mac with Xcode's iphoneos SDK, CMake and Ninja, under
     build/port/sdl3/<version>-ios-arm64. The app owns UIApplication (SwiftUI); SDL is used inside it
@@ -366,7 +367,8 @@ def ios_build():
     import json as _json
     if sys.platform != 'darwin':
         sys.exit('SDL3: the iOS build needs a Mac with Xcode')
-    base = OUT / ('%s-ios-arm64' % VERSION)
+    sdk = 'iphonesimulator' if simulator else 'iphoneos'
+    base = OUT / ('%s-%s-arm64' % (VERSION, 'iossim' if simulator else 'ios'))
     prefix = base / 'install'
     lib = prefix / 'lib' / 'libSDL3.a'
     include = prefix / 'include'
@@ -375,10 +377,10 @@ def ios_build():
     options = {k: v for k, v in OPTIONS.items()
                if k not in ('SDL_INSTALL', 'SDL_DISABLE_INSTALL', 'SDL_DISABLE_UNINSTALL', 'HAVE_DINPUT_H', 'HAVE_GAMEINPUT_H')}
     options.update(SDL_INSTALL='ON', SDL_DISABLE_INSTALL='OFF', SDL_DISABLE_UNINSTALL='OFF',
-                   CMAKE_SYSTEM_NAME='iOS', CMAKE_OSX_SYSROOT='iphoneos', CMAKE_OSX_ARCHITECTURES='arm64',
+                   CMAKE_SYSTEM_NAME='iOS', CMAKE_OSX_SYSROOT=sdk, CMAKE_OSX_ARCHITECTURES='arm64',
                    CMAKE_OSX_DEPLOYMENT_TARGET=IOS_MIN, SDL_METAL='ON')
     options['CMAKE_C_FLAGS'] = '-ffile-prefix-map="%s"=SDL3-%s' % (base / 'src' / ('SDL3-%s' % VERSION), VERSION)
-    recipe = repr(sorted(options.items())) + 'ios-arm64'
+    recipe = repr(sorted(options.items())) + sdk + '-arm64'
     if lib.exists() and stamp.exists() and libs_file.exists() and stamp.read_text() == recipe:
         return lib, include, _json.loads(libs_file.read_text())
     for name in ('cmake', 'ninja'):
@@ -427,8 +429,8 @@ def ios_build():
 
 
 if __name__ == '__main__':
-    if sys.argv[1:] == ['--ios']:
-        lib, include, libs = ios_build()
+    if sys.argv[1:2] == ['--ios']:
+        lib, include, libs = ios_build(simulator=sys.argv[2:] == ['--simulator'])
         print('%s\n%s\n%s' % (lib, include, ' '.join(libs)))
     elif sys.argv[1:] == ['--android']:
         print(*android_build(), sep='\n')

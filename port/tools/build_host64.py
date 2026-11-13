@@ -93,6 +93,10 @@ TARGETS = {t.key: t for t in (
     Target('ios-arm64', 'aarch64-apple-ios', 'build/host64-ios', 'libdhd_ios.a', 'arm64', jobs=4,
            flags=['-arch', 'arm64', '-miphoneos-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
            wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
+    # the same for the iOS Simulator on an Apple silicon Mac (its own SDK and platform; finding 224)
+    Target('ios-sim-arm64', 'aarch64-apple-ios-sim', 'build/host64-ios-sim', 'libdhd_ios.a', 'arm64', jobs=4,
+           flags=['-arch', 'arm64', '-mios-simulator-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
+           wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
     # -march=armv8-a: every arm64 phone. ARMv8.2 (finding 091's first choice) closed the game at
     # start with SIGILL on ARMv8.0 cores, which budget chips still ship (the Snapdragon 680's
     # Cortex-A73/A53, issues #45 and #51; finding 155). -moutline-atomics keeps the ARMv8.1 atomics
@@ -224,7 +228,7 @@ def sdl(t, a):
         lib, include, _java = sdl3.android_build()
         return lib, include, []
     if t.ios:
-        return sdl3.ios_build()
+        return sdl3.ios_build(simulator=t.key == 'ios-sim-arm64')
     if a.sdl_lib and not a.sdl_include:
         raise ValueError('--sdl-lib needs --sdl-include')
     if t.windows:
@@ -338,9 +342,10 @@ def main():
         # headers and libraries through -isysroot
         if sys.platform != 'darwin':
             p.error('--target %s builds on a Mac with Xcode' % t.key)
-        sdk = subprocess.run(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], capture_output=True, text=True)
+        sdk_name = 'iphonesimulator' if t.key == 'ios-sim-arm64' else 'iphoneos'
+        sdk = subprocess.run(['xcrun', '--sdk', sdk_name, '--show-sdk-path'], capture_output=True, text=True)
         if sdk.returncode:
-            p.error('no iphoneos SDK (xcrun): ' + sdk.stderr.strip())
+            p.error('no %s SDK (xcrun): %s' % (sdk_name, sdk.stderr.strip()))
         t.flags = ['-isysroot', sdk.stdout.strip()] + t.flags
         ndk, tools, cc, ar = None, None, '/usr/bin/clang', '/usr/bin/ar'
     elif t.posix:

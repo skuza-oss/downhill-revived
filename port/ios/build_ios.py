@@ -1,6 +1,7 @@
 """Build Downhill Revived for native iOS (iPhone 17 Pro Max / ARM64).
 
-    python port/ios/build_ios.py [--wasm build/wasm/dhd_core.wasm] [--release] [--install]
+    python port/ios/build_ios.py [--wasm build/wasm/dhd_core.wasm | --wasm core_*.c] [--release] [--install]
+    python port/ios/build_ios.py --simulator --wasm core_*.c    # the iOS Simulator (Apple silicon)
 
 1. Rebuilds the wasm core, native ARM64 host and Rust renderer from source (macOS / iOS SDK).
 2. Generates the Xcode project structure, copying native Swift launcher files, touch control assets,
@@ -66,9 +67,18 @@ def version():
     return name, major * 10000 + minor * 100 + patch
 
 
-def prepare_native_core(wasm=None, jobs=4):
-    """Rebuild the module and host before copying the archive into the Xcode project."""
+def core_target(simulator=False):
+    """build_host64.py's target and its static library (finding 224: the Simulator has its own)."""
+    key = 'ios-sim-arm64' if simulator else 'ios-arm64'
+    return key, ROOT / 'build' / ('host64-ios-sim' if simulator else 'host64-ios') / 'libdhd_ios.a'
+
+
+def prepare_native_core(wasm=None, jobs=4, simulator=False):
+    """Rebuild the module and host before copying the archive into the Xcode project. wasm: a .wasm,
+    or wasm2c's parts (core.h, core-impl.h and core_*.c: give the core_*.c), as the macOS release
+    takes them from the Windows build."""
     setup_env()
+    key, core_lib = core_target(simulator)
     if wasm is None:
         default_wasm = ROOT / 'build' / 'wasm' / 'dhd_core.wasm'
         # Always rebuild: an uploaded project may contain an older cached module.
@@ -79,19 +89,21 @@ def prepare_native_core(wasm=None, jobs=4):
             print('ios: regenerating assembly and VU assets from your local game executable', flush=True)
             subprocess.run([sys.executable, str(ROOT / 'tools' / 'split.py')], cwd=ROOT, check=True)
         subprocess.run([sys.executable, str(ROOT / 'port/tools/build_wasm.py'), '-j', str(jobs)], cwd=ROOT, check=True)
-        wasm = default_wasm
+        modules = [default_wasm]
     else:
-        wasm = Path(wasm).resolve()
-        if not wasm.is_file():
-            raise FileNotFoundError('The explicitly supplied wasm module does not exist: %s' % wasm)
-        print('ios: using explicitly supplied wasm; source-clock changes must already be in it', flush=True)
-    subprocess.run([sys.executable, str(ROOT / 'port/tools/build_host64.py'), str(wasm),
-                    '--target', 'ios-arm64', '--jobs', str(jobs), '--num-outputs', '8'], cwd=ROOT, check=True)
-    if not (ROOT / 'build/host64-ios/libdhd_ios.a').is_file():
-        raise RuntimeError('The native build did not produce libdhd_ios.a')
+        modules = [Path(w).resolve() for w in (wasm if isinstance(wasm, (list, tuple)) else [wasm])]
+        for module in modules:
+            if not module.is_file():
+                raise FileNotFoundError('The explicitly supplied core does not exist: %s' % module)
+        print('ios: using the explicitly supplied core; source-clock changes must already be in it', flush=True)
+    split = ['--num-outputs', '8'] if len(modules) == 1 and modules[0].suffix == '.wasm' else []
+    subprocess.run([sys.executable, str(ROOT / 'port/tools/build_host64.py'), *map(str, modules),
+                    '--target', key, '--jobs', str(jobs), *split], cwd=ROOT, check=True)
+    if not core_lib.is_file():
+        raise RuntimeError('The native build did not produce %s' % core_lib)
 
 
-def prepare_project_bundle(team=None):
+def prepare_project_bundle(team=None, simulator=False):
     team = resolve_team(team)
     print('ios: preparing project bundle at', PROJECT)
     PROJECT.mkdir(parents=True, exist_ok=True)
@@ -153,7 +165,7 @@ def prepare_project_bundle(team=None):
     )
 
     # 6. Check for compiled real game core (libdhd_ios.a)
-    core_lib = ROOT / 'build' / 'host64-ios' / 'libdhd_ios.a'
+    core_lib = core_target(simulator)[1]
     has_core = core_lib.exists()
     lib_settings = ''
     lib_dst = PROJECT / 'Lib'
@@ -298,13 +310,16 @@ def package_ipa(app_path: Path, output: Path | None = None) -> Path:
     return ipa_path
 
 
-def build_application(config, team, *, unsigned, derived_data, device_id=None, update_profiles=False):
-    print('ios: building with xcodebuild (%s)...' % ('unsigned' if unsigned else 'signed'), flush=True)
+def build_application(config, team, *, unsigned, derived_data, device_id=None, update_profiles=False,
+                      simulator=False):
+    print('ios: building with xcodebuild (%s)...' % ('simulator' if simulator else 'unsigned' if unsigned else 'signed'),
+          flush=True)
+    destination = ('id=' + device_id) if device_id else 'generic/platform=iOS Simulator' if simulator else 'generic/platform=iOS'
     cmd = [
         'xcodebuild', '-project', str(PROJECT / 'DownhillRevived.xcodeproj'),
         '-scheme', 'DownhillRevived', '-configuration', config,
         '-derivedDataPath', str(derived_data),
-        '-destination', ('id=' + device_id) if device_id else 'generic/platform=iOS',
+        '-destination', destination,
         'DEVELOPMENT_TEAM=' + ('' if unsigned else team),
         'CODE_SIGN_STYLE=Automatic',
         'CODE_SIGNING_ALLOWED=' + ('NO' if unsigned else 'YES'),
@@ -313,7 +328,8 @@ def build_application(config, team, *, unsigned, derived_data, device_id=None, u
         'build'
     ]
     subprocess.run(cmd, check=True)
-    app_path = derived_data / 'Build' / 'Products' / ('%s-iphoneos' % config) / 'Downhill Revived.app'
+    products = '%s-%s' % (config, 'iphonesimulator' if simulator else 'iphoneos')
+    app_path = derived_data / 'Build' / 'Products' / products / 'Downhill Revived.app'
     if not app_path.is_dir():
         raise RuntimeError('The current build did not produce Downhill Revived.app')
     print('ios: built application at', app_path)
@@ -349,7 +365,8 @@ def build_both(config, team, version_name, *, device_id=None, update_profiles=Fa
 def main(argv=None, *, prompt_team=False):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--rebuild-core', action='store_true', help='force recompilation of libdhd_ios.a even if present')
-    ap.add_argument('--wasm', type=Path, help='explicit prebuilt core; otherwise rebuild from current source')
+    ap.add_argument('--wasm', type=Path, nargs='+', help='explicit prebuilt core: a .wasm, or the core_*.c of wasm2c '
+                    '(with core.h and core-impl.h beside them); otherwise rebuild from current source')
     ap.add_argument('--release', action='store_true', default=True, help='build in Release configuration (default)')
     ap.add_argument('--debug', action='store_true', help='build in Debug configuration')
     ap.add_argument('--bundle-only', action='store_true', help='prepare project bundle without compiling')
@@ -359,10 +376,13 @@ def main(argv=None, *, prompt_team=False):
     signing = ap.add_mutually_exclusive_group()
     signing.add_argument('--unsigned', action='store_true', help='compile without signing; cannot install this output')
     signing.add_argument('--both', action='store_true', help='generate separate unsigned and development-signed IPAs')
+    signing.add_argument('--simulator', action='store_true', help='build the app for the iOS Simulator (Apple silicon), unsigned')
     ap.add_argument('--allow-provisioning-updates', action='store_true', help='let Xcode update signing assets in your Apple account')
     ap.add_argument('--device', help='paired device identifier for --install or signing with --both')
     ap.add_argument('--install', action='store_true', help='install to connected iPhone via devicectl')
     args = ap.parse_args(argv)
+    if args.simulator and (args.install or args.device):
+        ap.error('--simulator installs with xcrun simctl, not --install')
     if args.unsigned and args.install:
         ap.error('--unsigned cannot be combined with --install')
     if args.device and not (args.install or args.both):
@@ -396,21 +416,25 @@ def main(argv=None, *, prompt_team=False):
     print('ios: Downhill Revived v%s (code %d) iOS Port' % (ver_name, ver_code))
 
     if not args.bundle_only:
-        core_lib = ROOT / 'build' / 'host64-ios' / 'libdhd_ios.a'
+        core_lib = core_target(args.simulator)[1]
         if args.rebuild_core or not core_lib.is_file():
-            prepare_native_core(args.wasm, args.jobs)
+            prepare_native_core(args.wasm, args.jobs, simulator=args.simulator)
         else:
             print('ios: using existing game core (libdhd_ios.a, %.1f MB)' % (core_lib.stat().st_size / (1024 * 1024)))
     if args.core_only:
         return 0
-    prepare_project_bundle(team)
+    prepare_project_bundle(team, simulator=args.simulator)
 
     if sys.platform != 'darwin' or args.bundle_only:
         print('\n[NOTE] Project bundle prepared at: build/ios/project/')
         return 0
 
     config = 'Debug' if args.debug else 'Release'
-    if args.both:
+    if args.simulator:
+        app_path = build_application(config, '', unsigned=True, derived_data=OUT / 'DerivedData-Simulator',
+                                     simulator=True)
+        print('ios: install it with: xcrun simctl install <device> "%s"' % app_path)
+    elif args.both:
         app_path = build_both(config, team, ver_name, device_id=device_id,
                              update_profiles=args.allow_provisioning_updates)
     else:
