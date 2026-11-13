@@ -446,6 +446,7 @@ static void settings_read(TouchSettings *s)
     static const char *const preset[] = {"thumb", "classic"}, *const hand[] = {"right", "left"}, *const steer[] = {"stick", "tilt", "dpad"};
     static const char *const stick[] = {"floating", "fixed"}, *const labels[] = {"auto", "always", "off"};
     static const char *const attacks[] = {"flick", "buttons"}, *const pad[] = {"hide", "show"}, *const hud[] = {"game", "move"};
+    static const char *const style[] = {"actions", "symbols"};
     touch_settings_default(s);
     s->preset = env_choice("DHD_TOUCH_PRESET", preset, 2, TOUCH_CLASSIC);  /* the full pad by default */
     s->left_handed = env_choice("DHD_TOUCH_HAND", hand, 2, 0);
@@ -460,6 +461,7 @@ static void settings_read(TouchSettings *s)
     s->trick_size = env_int("DHD_TOUCH_TRICK_STICK", 31, 20, 45);
     s->labels = env_choice("DHD_TOUCH_LABELS", labels, 3, TOUCH_LABELS_AUTO);
     s->attacks = env_choice("DHD_TOUCH_ATTACKS", attacks, 2, TOUCH_ATTACK_FLICK);
+    s->style = env_choice("DHD_TOUCH_STYLE", style, 2, TOUCH_STYLE_ACTIONS);   /* Button Style (finding 229) */
     s->vibration = env_int("DHD_TOUCH_VIBRATION", 1, 0, 1) && env_int("DHD_VIBRATION", 1, 0, 1);
     s->show_with_pad = env_choice("DHD_TOUCH_WITH_PAD", pad, 2, 0);
     s->tilt_strength = env_int("DHD_TOUCH_TILT_STRENGTH", 50, 0, 100);

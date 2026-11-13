@@ -2487,6 +2487,144 @@ static void test_saved_layout_steers(void)
     CHECK(dpad_works());
 }
 
+/* ---- finding 229: Button Style, the action pictures' ground and air ---- */
+
+/* How many shapes of a kind the overlay draws now (TS_ICON: of that picture, id < 0 any). */
+static int count_shapes(int kind, int id)
+{
+    static TouchShape shapes[TOUCH_SHAPES];
+    int n = touch_shapes(t, shapes, TOUCH_SHAPES), k = 0;
+    for (int i = 0; i < n; i++)
+        if (shapes[i].kind == kind && (kind != TS_ICON || id < 0 || (int)(shapes[i].c + 0.5f) == id)) k++;
+    return k;
+}
+
+static void set_style(int style)
+{
+    TouchSettings s = *touch_settings(t);
+    s.style = style;
+    touch_configure(t, &s, NULL);
+    field();
+}
+
+/* Actions is the default; Actions draws pictures with badges, Symbols the symbols alone (as before);
+   the style changes no place, no size and no saved layout. */
+static void test_button_style(void)
+{
+    TouchSettings d;
+    touch_settings_default(&d);
+    CHECK(d.style == TOUCH_STYLE_ACTIONS);
+    for (int preset = 0; preset < 2; preset++) {
+        start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_BUTTONS);
+        TouchSettings s = *touch_settings(t);
+        touch_layout_parse(&s, preset ? "classic.layout=2;classic.cross=1.0,-2.0,1.20" : "thumb.layout=2;thumb.hop=-3.0,1.0,0.90");
+        touch_configure(t, &s, NULL);
+        field();
+        float before[TC_COUNT][3];
+        for (int c = 0; c < TC_COUNT; c++) {
+            before[c][0] = before[c][1] = before[c][2] = -1;
+            touch_control(t, c, &before[c][0], &before[c][1], &before[c][2]);
+        }
+        char text_actions[1024], text_symbols[1024];
+        touch_layout_format(touch_settings(t), text_actions, sizeof text_actions);
+        /* Actions: the pedal, the fists, the brake (and a badge of each pad name) */
+        CHECK(count_shapes(TS_ICON, TI_PEDAL) == 1);
+        CHECK(count_shapes(TS_ICON, TI_FIST) == 2);
+        CHECK(count_shapes(TS_ICON, TI_BRAKE) == 1);
+        CHECK(count_shapes(TS_CROSS, 0) == 1 && count_shapes(TS_SQUARE, 0) == 1 && count_shapes(TS_CIRCLE, 0) == 1 &&
+              count_shapes(TS_TRIANGLE, 0) == 1);   /* the badges */
+        CHECK(count_shapes(TS_ICON, preset ? TI_SLIDE : TI_HOP) == 1);
+        if (preset) CHECK(count_shapes(TS_ICON, TI_HAND) == 1 && count_shapes(TS_ICON, TI_BOOT) == 1 && count_shapes(TS_ICON, TI_WRAP) == 1 &&
+                          count_shapes(TS_ICON, TI_SPRINT) == 1 && count_shapes(TS_ICON, TI_CAMERA) == 1);
+        set_style(TOUCH_STYLE_SYMBOLS);
+        CHECK(count_shapes(TS_ICON, -1) == 0);   /* the look before finding 229 */
+        CHECK(count_shapes(TS_CROSS, 0) == 1 && count_shapes(TS_SQUARE, 0) == 1 && count_shapes(TS_TRIANGLE, 0) == 1);
+        for (int c = 0; c < TC_COUNT; c++) {
+            float x = -1, y = -1, r = -1;
+            touch_control(t, c, &x, &y, &r);
+            CHECK(x == before[c][0] && y == before[c][1] && r == before[c][2]);
+        }
+        touch_layout_format(touch_settings(t), text_symbols, sizeof text_symbols);
+        CHECK(!strcmp(text_actions, text_symbols));
+        /* the editor shows the style that is on */
+        touch_open_editor(t);
+        field();
+        CHECK(count_shapes(TS_ICON, -1) == 0);
+        set_style(TOUCH_STYLE_ACTIONS);
+        CHECK(count_shapes(TS_ICON, TI_PEDAL) == 1);
+    }
+}
+
+/* The ground and air pictures: Classic's △ (brake, superstyle) and R2 (the hop, a trick's link).
+   The air ones come after the air wait, the ground ones after TOUCH_GROUND_MS on the ground: a bump
+   shorter than either changes nothing. A control under a finger keeps its picture until it is let
+   go. The editor always shows the ground. */
+static void test_air_pictures(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    CHECK(!touch_air_picture(t, TC_TRIANGLE) && count_shapes(TS_ICON, TI_BRAKE) == 1 && count_shapes(TS_ICON, TI_HOP) == 1);
+    game.air = 1;
+    wait_ms(100);
+    CHECK(!touch_air_picture(t, TC_TRIANGLE));   /* not yet: the air wait is 150 ms */
+    wait_ms(70);
+    CHECK(touch_air_picture(t, TC_TRIANGLE) && touch_air_picture(t, TC_RBAR));
+    CHECK(count_shapes(TS_ICON, TI_STAR) == 1 && count_shapes(TS_ICON, TI_LINK) == 1 && count_shapes(TS_ICON, TI_BRAKE) == 0);
+    /* a touch of the ground for 50 ms (a bump, a rail's edge): still the air */
+    game.air = 0;
+    wait_ms(50);
+    CHECK(touch_air_picture(t, TC_TRIANGLE));
+    game.air = 1;
+    wait_ms(50);
+    CHECK(touch_air_picture(t, TC_TRIANGLE));
+    /* landed: the ground after TOUCH_GROUND_MS */
+    game.air = 0;
+    wait_ms(TOUCH_GROUND_MS - 30);
+    CHECK(touch_air_picture(t, TC_TRIANGLE));
+    wait_ms(50);
+    CHECK(!touch_air_picture(t, TC_TRIANGLE) && count_shapes(TS_ICON, TI_BRAKE) == 1);
+    /* a hop under 150 ms in the air: no change */
+    game.air = 1;
+    wait_ms(100);
+    game.air = 0;
+    wait_ms(200);
+    CHECK(!touch_air_picture(t, TC_TRIANGLE));
+    /* a finger on △ through a take-off: △ keeps the brake while held, the rest switch; let go, it switches */
+    float x, y;
+    at(TC_TRIANGLE, &x, &y);
+    touch_down(t, 5, x, y, now);
+    field();
+    game.air = 1;
+    wait_ms(300);
+    CHECK(!touch_air_picture(t, TC_TRIANGLE) && touch_air_picture(t, TC_RBAR));
+    CHECK(count_shapes(TS_ICON, TI_BRAKE) == 1 && count_shapes(TS_ICON, TI_LINK) == 1);
+    touch_up(t, 5, x, y, now);
+    field();
+    CHECK(touch_air_picture(t, TC_TRIANGLE) && count_shapes(TS_ICON, TI_STAR) == 1);
+    /* and back: held through the landing, it keeps the star until let go */
+    touch_down(t, 6, x, y, now);
+    field();
+    game.air = 0;
+    wait_ms(300);
+    CHECK(touch_air_picture(t, TC_TRIANGLE) && !touch_air_picture(t, TC_RBAR));
+    touch_up(t, 6, x, y, now);
+    field();
+    CHECK(!touch_air_picture(t, TC_TRIANGLE));
+    /* the editor over a race in the air: the ground pictures */
+    game.air = 1;
+    wait_ms(300);
+    touch_open_editor(t);
+    field();
+    CHECK(!touch_air_picture(t, TC_TRIANGLE) && count_shapes(TS_ICON, TI_BRAKE) == 1 && count_shapes(TS_ICON, TI_STAR) == 0);
+    /* the race gone (a menu): the ground */
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    game.air = 1;
+    wait_ms(300);
+    CHECK(touch_air_picture(t, TC_TRIANGLE));
+    game.race_hud = 0;
+    wait_ms(400);
+    CHECK(!touch_air_picture(t, TC_TRIANGLE));
+}
+
 int main(void)
 {
     test_dpad_layout();
@@ -2527,6 +2665,8 @@ int main(void)
     test_editor_alone();
     test_moved_bar_steers();
     test_saved_layout_steers();
+    test_button_style();
+    test_air_pictures();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");

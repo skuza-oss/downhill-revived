@@ -247,6 +247,11 @@ struct Touch {
     int air_layout;
     double air_since;          /* race ms the air flag came */
     int air_was;
+    /* the action pictures' ground or air (finding 229): the flag as last seen and since when (race
+       ms), the state shown, and each control's own (kept while it is held) */
+    int pic_flag, pic_air;
+    double pic_flag_since;
+    unsigned char pic_air_ctl[TC_COUNT];
     /* ✕ and SELECT windows (race ms) */
     double cross_released, select_released;
     int cross_was_down, cross_released_by_overlay, controls_since_release;
@@ -349,6 +354,7 @@ void touch_settings_default(TouchSettings *s)
     s->trick_size = 31;
     s->labels = TOUCH_LABELS_AUTO;
     s->attacks = TOUCH_ATTACK_FLICK;
+    s->style = TOUCH_STYLE_ACTIONS;
     s->vibration = 1;
     s->tilt_strength = 50;
     s->hud_moved = 1;
@@ -2484,6 +2490,29 @@ static void air_layout_step(Touch *t)
     t->air_layout = layout;
 }
 
+static int pressed_control(const Touch *t, int c);
+
+/* The action pictures' ground or air (finding 229). The air flag has to hold for the air wait (the
+   one Thumb zones' air layout waits) before the air pictures show, and the ground for
+   TOUCH_GROUND_MS before the ground ones come back, so a bump or a rail's edge does not flicker
+   them; a control under a finger keeps the picture it had when the finger came down. */
+static void pictures_step(Touch *t)
+{
+    const TouchGame *g = &t->game;
+    int on = race_on_screen(t), air = on && g->air;
+    if (air != t->pic_flag || g->race_ms < t->pic_flag_since) t->pic_flag = air, t->pic_flag_since = g->race_ms;
+    int wait = air ? (t->set.air_wait_ms > 0 ? t->set.air_wait_ms : 150) : TOUCH_GROUND_MS;
+    if (!on) t->pic_air = 0;
+    else if (g->race_ms - t->pic_flag_since >= wait - 0.5) t->pic_air = air;
+    for (int c = 0; c < TC_COUNT; c++)
+        if (!on || !pressed_control(t, c)) t->pic_air_ctl[c] = (unsigned char)t->pic_air;
+}
+
+int touch_air_picture(const Touch *t, int control)
+{
+    return control >= 0 && control < TC_COUNT && !t->editor && t->pic_air_ctl[control];
+}
+
 /* ✕ in the output: bookkeeping of its releases for the double-tap rules. */
 static int cross_output(const Touch *t)
 {
@@ -2695,6 +2724,7 @@ void touch_update(Touch *t, const TouchGame *game, double now)
     }
     pause_step(t);
     air_layout_step(t);
+    pictures_step(t);
     if (t->trick.on) {
         Finger *f = &t->f[t->trick.finger];
         trick_step(t, f);
@@ -2874,6 +2904,59 @@ static void button(Draw *d, const Ctl *k, int pressed, float dim, int symbol, co
     if (label && *label) text(d, k->x, k->y + k->r * (symbol ? 0.45f : 0), fminf(k->r * 0.32f, 3.2f), 0, label, rgba(255, 255, 255, 0.95f * a));
 }
 
+/* Button Style Actions (finding 229): a control's picture (TI_*), drawn mirrored or not, and its
+   badge, the pad's own symbol (TS_*) or name, so the game's prompts ("PRESS ✕", the trick lists)
+   still map onto the touch buttons. */
+typedef struct { int icon, mirror, symbol; const char *name; } Act;
+
+static int actions(const Touch *t) { return t->set.style == TOUCH_STYLE_ACTIONS; }
+
+static void icon(Draw *d, float x, float y, float half, int id, int mirror, uint32_t colour)
+{
+    put(d, TS_ICON, x, y, half, mirror ? -1.0f : 1.0f, (float)id, 0, 0, colour);
+}
+
+/* The badge: a small dark disc with the symbol or the name in white. */
+static void badge(Draw *d, float x, float y, float r, int symbol, const char *name, float a)
+{
+    put(d, TS_DISC, x, y, r, 0, 0, 0, rgba(10, 14, 18, 0.92f * a), rgba(255, 255, 255, 0.8f * a));
+    uint32_t w = rgba(255, 255, 255, a);
+    if (symbol) put(d, symbol, x, y, r * 0.8f, 0, 0, 0, 0, w);
+    else if (name && *name) text(d, x, y, fminf(r * 1.15f, r * 1.75f / (0.9f * (float)strlen(name))), 0, name, w);
+}
+
+/* A badge's radius on a round control of radius r: a fixed share, kept readable on small buttons and
+   inside the control (its upper right, where neither thumb covers it and no neighbour is touched). */
+static float badge_radius(float r)
+{
+    float br = clampf(r * 0.31f, 1.6f, 3.2f);
+    return fminf(br, r * 0.44f);
+}
+
+/* A round control in Button Style Actions: the same disc, its picture (above its word, if any) and
+   the badge. */
+static void action_button(Draw *d, const Ctl *k, int pressed, float dim, Act act, const char *label)
+{
+    float a = d->alpha * dim, r = k->r;
+    uint32_t fill = pressed ? rgba(166, 227, 154, 0.55f * a) : rgba(10, 14, 18, 0.45f * a);
+    put(d, TS_DISC, k->x, k->y, r, 0, 0, 0, fill, rgba(255, 255, 255, 0.88f * a));
+    int word = label && *label;
+    float g = r * (word ? 0.40f : 0.54f);
+    icon(d, k->x - r * (word ? 0.1f : 0.05f), word ? k->y - r * 0.18f : k->y + r * 0.05f, g, act.icon, act.mirror,
+         rgba(255, 255, 255, 0.95f * a));
+    if (word) text(d, k->x, k->y + r * 0.45f, fminf(r * 0.32f, 3.2f), 0, label, rgba(255, 255, 255, 0.95f * a));
+    float br = badge_radius(r), off = (r - br * 1.02f) * 0.7071f;
+    badge(d, k->x + off, k->y - off, br, act.symbol, act.name, a);
+}
+
+/* A round control in the style chosen: Symbols draws the pad's symbol (and the word), Actions the
+   picture and the badge. */
+static void styled_button(const Touch *t, Draw *d, const Ctl *k, int pressed, float dim, int symbol, const char *label, Act act)
+{
+    if (actions(t)) action_button(d, k, pressed, dim, act, label);
+    else button(d, k, pressed, dim, symbol, label);
+}
+
 static void box_button(Draw *d, float x, float y, float hw, float hh, int pressed, float alpha, const char *label, float th)
 {
     uint32_t fill = pressed ? rgba(166, 227, 154, 0.55f * alpha) : rgba(10, 14, 18, 0.7f * alpha);
@@ -2896,10 +2979,17 @@ static void draw_top_buttons(const Touch *t, Draw *d, int classic)
     for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
         const Ctl *k = &t->ctl[c];
         if (!k->on) continue;
+        uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
+        if (classic && actions(t)) {   /* the picture (the camera, Pause), its pad name under it */
+            box_button(d, k->x, k->y, k->hw, k->hh, pressed_control(t, c), d->alpha, "", 0);
+            icon(d, k->x, k->y - k->hh * 0.2f, k->hh * 0.5f, c == TC_CAMERA ? TI_CAMERA : TI_PAUSE, 0, w);
+            const char *name = c == TC_CAMERA ? "SELECT" : "START";
+            text(d, k->x, k->y + k->hh * 0.56f, fminf(k->hh * 0.32f, (2 * k->hw - 1.6f) / (0.9f * (float)strlen(name))), 0, name, w);
+            continue;
+        }
         box_button(d, k->x, k->y, k->hw, k->hh, pressed_control(t, c), d->alpha, classic ? (c == TC_CAMERA ? "SELECT" : "START") : "",
                    fminf(k->hh * 0.5f, 2.2f));
         if (classic) continue;
-        uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
         if (c == TC_PAUSE) {
             put(d, TS_RECT, k->x - k->hw * 0.25f, k->y, k->hw * 0.12f, k->hh * 0.42f, 0.2f, 0, w, 0);
             put(d, TS_RECT, k->x + k->hw * 0.25f, k->y, k->hw * 0.12f, k->hh * 0.42f, 0.2f, 0, w, 0);
@@ -2944,6 +3034,7 @@ static void draw_stick(const Touch *t, Draw *d)
     }
     put(d, TS_DISC, cx, cy, ring, 0, 0, 0, rgba(10, 14, 18, 0.16f * d->alpha), line);
     put(d, TS_DISC, kx, ky, ring * 0.44f, 0, 0, 0, knob, rgba(255, 255, 255, 0.85f * d->alpha));
+    if (actions(t)) icon(d, kx, ky, ring * 0.44f * 0.72f, TI_BAR, 0, rgba(255, 255, 255, 0.85f * d->alpha));
 }
 
 static void draw_trick(const Touch *t, Draw *d)
@@ -2973,9 +3064,14 @@ static void draw_trick(const Touch *t, Draw *d)
     int minimal = t->tricks_sent >= 20 && t->set.labels != TOUCH_LABELS_ALWAYS;
     if (!minimal) {
         static const char *const names[4] = {"R1", "L1", "L2", "R2"};
+        static const int pictures[4] = {TI_BOOT, TI_HAND, TI_WRAP, TI_LINK};
         for (int i = 0; i < 4; i++) {
             float ang = PI_F / 4 + i * PI_F / 2, r = (r_in + r_out) / 2;
-            text(d, cx + cosf(ang) * r, cy - sinf(ang) * r, 2.2f * sc, 0, names[i], rgba(255, 255, 255, 0.85f * a));
+            if (actions(t)) {   /* the shoulder's own trick inside, its name toward the rim */
+                float ri = r_in + (r_out - r_in) * 0.33f, rn = r_in + (r_out - r_in) * 0.76f;
+                icon(d, cx + cosf(ang) * ri, cy - sinf(ang) * ri, 1.7f * sc, pictures[i], 0, rgba(255, 255, 255, 0.85f * a));
+                text(d, cx + cosf(ang) * rn, cy - sinf(ang) * rn, 1.8f * sc, 0, names[i], rgba(255, 255, 255, 0.85f * a));
+            } else text(d, cx + cosf(ang) * r, cy - sinf(ang) * r, 2.2f * sc, 0, names[i], rgba(255, 255, 255, 0.85f * a));
         }
     }
 }
@@ -2985,23 +3081,28 @@ static void draw_thumb(const Touch *t, Draw *d)
     int air = t->air_layout;
     draw_stick(t, d);
     const Ctl *p = &t->ctl[TC_PEDAL];
-    button(d, p, pressed_control(t, TC_PEDAL), air ? 0.45f : 1.0f, TS_CROSS, "PEDAL");
+    styled_button(t, d, p, pressed_control(t, TC_PEDAL), air ? 0.45f : 1.0f, TS_CROSS, "PEDAL", (Act){TI_PEDAL, 0, TS_CROSS, NULL});
     if (!air && t->set.attacks == TOUCH_ATTACK_FLICK) {   /* the flick hints: not buttons */
         float off = 16.0f * t->bs, s = 2.6f;
         uint32_t w = rgba(255, 255, 255, 0.92f * d->alpha);
         put(d, TS_CHEVRON, p->x - off - s * 1.1f, p->y, s * 0.8f, 0, PI_F, 0, 0, w);
-        put(d, TS_SQUARE, p->x - off + s * 0.4f, p->y, s, 0, 0, 0, 0, w);
-        put(d, TS_CIRCLE, p->x + off - s * 0.4f, p->y, s, 0, 0, 0, 0, w);
         put(d, TS_CHEVRON, p->x + off + s * 1.1f, p->y, s * 0.8f, 0, 0, 0, 0, w);
+        if (actions(t)) {   /* the fists: the left-hand attack (◻) left, the right-hand one (○) right */
+            icon(d, p->x - off + s * 0.4f, p->y, s * 1.1f, TI_FIST, 1, w);
+            icon(d, p->x + off - s * 0.4f, p->y, s * 1.1f, TI_FIST, 0, w);
+        } else {
+            put(d, TS_SQUARE, p->x - off + s * 0.4f, p->y, s, 0, 0, 0, 0, w);
+            put(d, TS_CIRCLE, p->x + off - s * 0.4f, p->y, s, 0, 0, 0, 0, w);
+        }
     }
     if (t->set.attacks == TOUCH_ATTACK_BUTTONS) {
-        button(d, &t->ctl[TC_SQUARE], pressed_control(t, TC_SQUARE), 1, TS_SQUARE, "");
-        button(d, &t->ctl[TC_CIRCLE], pressed_control(t, TC_CIRCLE), 1, TS_CIRCLE, "");
+        styled_button(t, d, &t->ctl[TC_SQUARE], pressed_control(t, TC_SQUARE), 1, TS_SQUARE, "", (Act){TI_FIST, 1, TS_SQUARE, NULL});
+        styled_button(t, d, &t->ctl[TC_CIRCLE], pressed_control(t, TC_CIRCLE), 1, TS_CIRCLE, "", (Act){TI_FIST, 0, TS_CIRCLE, NULL});
     }
     if (!air) {
-        button(d, &t->ctl[TC_HOP], pressed_control(t, TC_HOP), 1, 0, "HOP");
-        button(d, &t->ctl[TC_BRAKE], pressed_control(t, TC_BRAKE), 1, TS_TRIANGLE, "BRAKE");
-        button(d, &t->ctl[TC_SLIDE], pressed_control(t, TC_SLIDE), 1, 0, "SLIDE");
+        styled_button(t, d, &t->ctl[TC_HOP], pressed_control(t, TC_HOP), 1, 0, "HOP", (Act){TI_HOP, 0, 0, "R2"});
+        styled_button(t, d, &t->ctl[TC_BRAKE], pressed_control(t, TC_BRAKE), 1, TS_TRIANGLE, "BRAKE", (Act){TI_BRAKE, 0, TS_TRIANGLE, NULL});
+        styled_button(t, d, &t->ctl[TC_SLIDE], pressed_control(t, TC_SLIDE), 1, 0, "SLIDE", (Act){TI_SLIDE, 0, 0, "L3"});
     } else draw_trick(t, d);
     draw_top_buttons(t, d, 0);
 }
@@ -3014,11 +3115,27 @@ static void draw_bar(const Touch *t, Draw *d, int bar)
     put(d, TS_RECT, k->x, k->y, k->hw, k->hh, k->hh * 0.44f, 0, pressed ? rgba(166, 227, 154, 0.5f * d->alpha) : rgba(10, 14, 18, 0.6f * d->alpha), line);
     put(d, TS_RECT, k->x, k->y, k->hw * 0.26f, k->hh, 0, 0, rgba(255, 255, 255, 0.14f * d->alpha), rgba(255, 255, 255, 0.5f * d->alpha));
     const char *a = bar == TC_LBAR ? "L2" : "R1", *m = bar == TC_LBAR ? "L1+L2" : "R1+R2", *b = bar == TC_LBAR ? "L1" : "R2";
-    if (!right_handed(t)) { const char *x = a; a = b; b = x; }
+    /* Actions: L2 Saran Wrap, L1 One Hander, R1 One Legger; R2 the bunny hop on the ground, its
+       trick in the air (finding 229) */
+    int ia = bar == TC_LBAR ? TI_WRAP : TI_BOOT, ib = bar == TC_LBAR ? TI_HAND : touch_air_picture(t, bar) ? TI_LINK : TI_HOP;
+    if (!right_handed(t)) { const char *x = a; a = b; b = x; int i = ia; ia = ib; ib = i; }
     float th = fminf(k->hh * 0.55f, 3.0f);
-    text(d, k->x - k->hw * 0.63f, k->y, th, 0, a, line);
+    if (actions(t)) {
+        uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
+        float g = fminf(k->hh * 0.62f, k->hw * 0.2f), gap = g * 0.5f;
+        for (int side = -1; side <= 1; side += 2) {
+            float sx = k->x + side * k->hw * 0.63f;
+            const char *name = side < 0 ? a : b;
+            float nh = fminf(th * 0.62f, 2.4f), nw = 0.9f * nh * 2;
+            float left = sx - (2 * g + gap + nw) / 2;   /* the picture, then its pad name */
+            icon(d, left + g, k->y, g, side < 0 ? ia : ib, 0, w);
+            text(d, left + 2 * g + gap + nw / 2, k->y, nh, 0, name, line);
+        }
+    } else {
+        text(d, k->x - k->hw * 0.63f, k->y, th, 0, a, line);
+        text(d, k->x + k->hw * 0.63f, k->y, th, 0, b, line);
+    }
     text(d, k->x, k->y, th * 0.6f, 0, m, line);
-    text(d, k->x + k->hw * 0.63f, k->y, th, 0, b, line);
 }
 
 static void draw_classic(const Touch *t, Draw *d)
@@ -3026,12 +3143,14 @@ static void draw_classic(const Touch *t, Draw *d)
     draw_stick(t, d);
     draw_bar(t, d, TC_LBAR);
     draw_bar(t, d, TC_RBAR);
-    button(d, &t->ctl[TC_L3], pressed_control(t, TC_L3), 1, 0, "L3");
-    button(d, &t->ctl[TC_R3], pressed_control(t, TC_R3), 1, 0, "R3");
-    button(d, &t->ctl[TC_TRIANGLE], pressed_control(t, TC_TRIANGLE), 1, TS_TRIANGLE, "");
-    button(d, &t->ctl[TC_CSQUARE], pressed_control(t, TC_CSQUARE), 1, TS_SQUARE, "");
-    button(d, &t->ctl[TC_CCIRCLE], pressed_control(t, TC_CCIRCLE), 1, TS_CIRCLE, "");
-    button(d, &t->ctl[TC_CROSS], pressed_control(t, TC_CROSS), 1, TS_CROSS, "");
+    styled_button(t, d, &t->ctl[TC_L3], pressed_control(t, TC_L3), 1, 0, actions(t) ? "" : "L3", (Act){TI_SLIDE, 0, 0, "L3"});
+    styled_button(t, d, &t->ctl[TC_R3], pressed_control(t, TC_R3), 1, 0, actions(t) ? "" : "R3", (Act){TI_SPRINT, 0, 0, "R3"});
+    /* △ brakes on the ground and superstyles a trick in the air */
+    styled_button(t, d, &t->ctl[TC_TRIANGLE], pressed_control(t, TC_TRIANGLE), 1, TS_TRIANGLE, "",
+                  (Act){touch_air_picture(t, TC_TRIANGLE) ? TI_STAR : TI_BRAKE, 0, TS_TRIANGLE, NULL});
+    styled_button(t, d, &t->ctl[TC_CSQUARE], pressed_control(t, TC_CSQUARE), 1, TS_SQUARE, "", (Act){TI_FIST, 1, TS_SQUARE, NULL});
+    styled_button(t, d, &t->ctl[TC_CCIRCLE], pressed_control(t, TC_CCIRCLE), 1, TS_CIRCLE, "", (Act){TI_FIST, 0, TS_CIRCLE, NULL});
+    styled_button(t, d, &t->ctl[TC_CROSS], pressed_control(t, TC_CROSS), 1, TS_CROSS, "", (Act){TI_PEDAL, 0, TS_CROSS, NULL});
     for (int c = TC_PLUS_LEFT; c <= TC_PLUS_RIGHT; c++) {
         const Ctl *k = &t->ctl[c];
         put(d, TS_DISC, k->x, k->y, k->r, 0, 0, 0, rgba(10, 14, 18, 0.65f * d->alpha), rgba(255, 255, 255, 0.8f * d->alpha));
@@ -3151,7 +3270,7 @@ static void draw_editor(const Touch *t, Draw *d)
     full.alpha = 1;
     if (t->editor_tab == EDIT_AIR) {
         draw_trick(t, &full);
-        button(&full, &t->ctl[TC_PEDAL], 0, 0.45f, TS_CROSS, "PEDAL");
+        styled_button(t, &full, &t->ctl[TC_PEDAL], 0, 0.45f, TS_CROSS, "PEDAL", (Act){TI_PEDAL, 0, TS_CROSS, NULL});
     } else if (t->set.preset == TOUCH_CLASSIC) draw_classic(t, &full);
     else {
         int air = t->air_layout;
