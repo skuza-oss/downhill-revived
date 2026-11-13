@@ -54,13 +54,17 @@ const wait = () => new Promise((r) => setTimeout(r, 20));
   await failed.then(() => assert.fail('an error rejects'), (e) => assert.match(e, /not opening/));
   // PLAY right after saves the page didn't wait for: they reach the app in the order sent, which is
   // the order the app's settings tickets follow (launcher_calls.c), so the game starts after them
+  // (the page itself holds PLAY back until the saves have answered: finding 228's bridge.js)
   const before = toApp.length;
   bridge.call('save_setting', { key: 'scale', value: '3' });
   bridge.call('save_setting', { key: 'fps', value: '120' });
   bridge.call('play', {});
   await wait();
-  assert.deepStrictEqual(toApp.slice(before).map((m) => m.call + (m.args.key ? ':' + m.args.key : '')),
-    ['save_setting:scale', 'save_setting:fps', 'play']);
+  const sent = () => toApp.slice(before).map((m) => m.call + (m.args.key ? ':' + m.args.key : ''));
+  assert.deepStrictEqual(sent(), ['save_setting:scale', 'save_setting:fps']);   // PLAY waits for the answers
+  for (const m of toApp.slice(before)) appWorld.dhdDeliver(JSON.stringify({ id: m.id, ok: true, value: null }));
+  await wait();
+  assert.deepStrictEqual(sent(), ['save_setting:scale', 'save_setting:fps', 'play']);
   console.log('bridge_ios: the page and the app talk over the posted port');
   process.exit(0);   // the channel's ports would keep node waiting
 })().catch((e) => { console.error(e); process.exit(1); });
