@@ -996,6 +996,11 @@ async function start() {
     if (e.wants_update) checkUpdate().then(() => { if (state.check === 'available') installUpdate(); });
   });
 
+  // back from the layout editor alone (a phone: the editor's Done ended the game): at its row
+  if (snap.reopen === 'touch-editor' && tabIndex('touch') >= 0) {
+    state.tab = tabIndex('touch');
+    show('settings');
+  }
   renderTabs();
   renderAll();
   $('primary').focus();

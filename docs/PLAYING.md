@@ -156,7 +156,9 @@ from your browser or file manager when Android asks; the app is not on Google Pl
 on its launcher, the same as the PC's: choose your `.iso` there (it is copied into the app once, a
 few GB), change the settings that are fiddly in the game (resolution, frame rate, Performance mode,
 Native VU, widescreen, the touch layout, hand, steering and size, your rider name), then press PLAY.
-It works upright too; the game itself plays sideways. To skip it, turn off Settings > Game > **Open
+Its **Edit the touch layout** (Settings > Touch) opens the touch layout editor on its own; DONE
+saves your layout and brings you back to the launcher. It works upright too; the game itself plays
+sideways. To skip it, turn off Settings > Game > **Open
 the launcher at every start**; SETTINGS in the game (Game tab, Launcher At Start) or a long press on
 the icon (**Launcher**) bring it back. Install a new release's APK over the old one: your settings
 and saves stay. If the game closes unexpectedly, the launcher says so at the next start and offers

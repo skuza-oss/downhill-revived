@@ -191,6 +191,9 @@ final class LauncherBridge {
         s.put("scale_max", PHONE_SCALE_MAX);
         s.put("disc_size", disc != null ? new File(disc).length() : 0);
         s.put("free_space", DiscImport.freeBytes(activity));
+        // back from the layout editor alone (LauncherActivity.play): the page opens at its row, once
+        s.put("reopen", activity.backFromEditor ? "touch-editor" : JSONObject.NULL);
+        activity.backFromEditor = false;
         String why = activity.crashWhy;
         if (why != null) {
             JSONObject exit = new JSONObject();

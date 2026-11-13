@@ -116,7 +116,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   steering choice, finding 214, placed clear of the game's HUD, finding 218; MENU over a replay,
   also above 60 updates a second, finding 218; per-control sizes 25-600 %, free placement, undo
   and redo in the layout editor, tablet defaults, the editor alone for the launcher
-  (`DHD_TOUCH_EDITOR`), tilt on iOS, finding 226).
+  (`DHD_TOUCH_EDITOR`), tilt on iOS, finding 226; Android's launcher row starts it and shows again
+  after its Done, finding 228).
 - The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
   threads and the render thread stop, the closing log lines are written, open files are flushed,
   and the process leaves without the C library's static destructors. New code that must run at the

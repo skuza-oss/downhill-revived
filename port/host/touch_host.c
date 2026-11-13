@@ -601,20 +601,6 @@ void host_service_touch_field(uint32_t address)
     SDL_UnlockMutex(lock);
     if (!set_up || relay || h->command == TOUCH_COMMAND_SETTINGS) { configure(!set_up || relay); set_up = 1; }
     if (h->command == TOUCH_COMMAND_EDIT) touch_open_editor(touch);
-    /* The launcher's "Edit the touch layout" (finding 225): DhdActivity sets DHD_TOUCH_EDIT_AT_START=1,
-       and the layout editor opens once, as TOUCH CONTROLS > Edit layout opens it, when the start's
-       movies are over and no race is on (two seconds into the run at least). */
-    static int edit_at_start = -1;
-    if (edit_at_start < 0) {
-        const char *v = getenv("DHD_TOUCH_EDIT_AT_START");
-        edit_at_start = v && *v == '1';
-    }
-    if (edit_at_start == 1 && !h->movie && !h->attract && !h->race_hud && !h->replay &&
-        h->vsync >= 2u * (uint32_t)(h->fps > 0 ? h->fps : 60)) {
-        edit_at_start = 0;
-        fprintf(stderr, "touch: the layout editor opens (the launcher asked for it)\n");
-        touch_open_editor(touch);
-    }
     static int alone_state;   /* the editor alone: 0 waiting for the screen, 1 open, 2 ended */
     if (editor_alone() && alone_state == 0) {
         SDL_LockMutex(lock);
