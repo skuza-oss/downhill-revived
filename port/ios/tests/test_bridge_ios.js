@@ -17,7 +17,7 @@ const window = {
   postMessage: (data, origin, ports) => setImmediate(() => listeners.forEach((f) => f({ data, ports }))),
   webkit: { messageHandlers: { dhd: { postMessage: (text) => toApp.push(JSON.parse(text)) } } },
 };
-const page = { window, module: { exports: {} }, console, setTimeout, setImmediate };
+const page = { window, module: { exports: {} }, console, setTimeout, clearTimeout, setImmediate };
 vm.runInNewContext(fs.readFileSync(path.join(root, 'port/launcher/ui/bridge.js'), 'utf8'), page);
 const bridge = page.module.exports.messageBridge(window);
 const appWorld = { window, MessageChannel, console };
