@@ -81,9 +81,19 @@ def identity_patterns():
     return patterns
 
 
+def name_problems(name, patterns=None):
+    """An identity in a member's path (its UTF-8 name, directories included): a file or folder named
+    after a device, a team or the builder's literals is as public as its bytes (the review of lane
+    227)."""
+    encoded = name.encode('utf-8', 'surrogateescape')
+    return ['%s: %s in its name (%r)' % (name, desc, m.group(0)[:60])
+            for pattern, desc in (patterns if patterns is not None else identity_patterns())
+            for m in [pattern.search(encoded)] if m]
+
+
 def member_problems(name, data, patterns=None):
     """What makes one member of an app bundle (its path, its bytes) unfit for an unsigned release."""
-    problems = []
+    problems = name_problems(name, patterns)
     parts = name.replace('\\', '/').split('/')
     if parts[-1] in ('embedded.mobileprovision', 'CodeResources') or '_CodeSignature' in parts:
         problems.append('%s: a signature or provisioning file (the IPA must be unsigned)' % name)

@@ -913,8 +913,11 @@ def ios_release(a, platform, out, manifest_path, page):
                 problems.append('%s: a signature folder or a symbolic link (the IPA must be unsigned, every member verifiable)' % path)
             if not info.is_dir():
                 # every member, the executable, frameworks and dylibs included: no signature or
-                # provisioning file, no signed or unreadable Mach-O, no builder's identity
+                # provisioning file, no signed or unreadable Mach-O, no builder's identity in its
+                # name or its bytes
                 problems += ipa_audit.member_problems(path, content, identity)
+            else:
+                problems += ipa_audit.name_problems(path, identity)   # a folder's name too
             game = path == 'Payload/%s/%s' % (parts[1], platform.game)
             if game:
                 if binary_kind(content) != platform.kind:
@@ -940,6 +943,7 @@ def ios_release(a, platform, out, manifest_path, page):
                      ('THIRD-PARTY-NOTICES.txt', lf((RELEASE / 'THIRD-PARTY-NOTICES.txt').read_bytes().rstrip()
                                                     + b'\n\n' + notices.encode('utf-8'))))
             for name, data in texts:
+                problems += ipa_audit.member_problems(app + name, data, identity)   # what this tool adds, too
                 info = zipfile.ZipInfo(app + name)
                 info.create_system, info.external_attr = 3, 0o100644 << 16
                 w.writestr(info, data)
