@@ -31,6 +31,7 @@
 #endif
 #ifdef __APPLE__
 #include <mach/mach.h>
+#include <TargetConditionals.h>
 #endif
 
 void perf_thread(const char *name);  /* port/gs/perf_log.c: its waits */
@@ -103,6 +104,12 @@ void host_thread_name(const char *name)
     if (MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, 64)) SetThreadDescription(GetCurrentThread(), wide);
 #elif defined(__APPLE__)
     pthread_setname_np(name);  /* the calling thread's own */
+#if TARGET_OS_IPHONE
+    /* iOS: the game's own threads at the interactive QoS class, so the scheduler keeps them on
+       the performance cores (the iOS port, finding 224) */
+    if (!strcmp(name, "game") || !strcmp(name, "vu") || !strcmp(name, "gs") || !strcmp(name, "native"))
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
 #else
     /* Linux and Android: the main thread's name is the process's own (ps, top, pgrep, a desktop's
        system monitor), so that thread keeps "dhd" (a crash report then says thread dhd) */

@@ -27,6 +27,13 @@
 #include "../gs/present.h"
 
 #include <SDL3/SDL.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE  /* the SwiftUI app owns main and UIApplication (port/ios, finding 224) */
+#define SDL_MAIN_HANDLED
+#include <SDL3/SDL_main.h>
+#endif
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -200,6 +207,9 @@ int sdl_host_main(int (*game)(void *), void *arg)
     host_thread_name("sdl");
     main_thread = SDL_GetCurrentThreadID();
     slot_lock = SDL_CreateMutex();
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    SDL_SetMainReady();  /* SDL's own main is not used: SDL_Init would refuse without it */
+#endif
     int events = SDL_Init(SDL_INIT_EVENTS);
     if (events) wake_event = SDL_RegisterEvents(1);
     else fprintf(stderr, "sdl: no event queue (%s)\n", SDL_GetError());

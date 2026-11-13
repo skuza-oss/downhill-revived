@@ -19,6 +19,7 @@
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
 #include <sys/sysctl.h>     /* the system's names (host_os_system) */
+#include <TargetConditionals.h>  /* TARGET_OS_IPHONE: the iOS app (finding 224) */
 #else
 #include <elf.h>
 #endif
@@ -57,6 +58,14 @@ unsigned host_exe_path(char *out, unsigned size)
     int k = snprintf(out, size, "%s", android_exe_path());
     return k > 0 && (unsigned)k < size ? (unsigned)k : 0;
 #elif defined(__APPLE__)
+#if TARGET_OS_IPHONE
+    /* iOS: the app's Documents folder stands for the executable's (dhd.ini, saves, dhd.log) */
+    const char *ios_documents_dir(void) __attribute__((weak));
+    if (ios_documents_dir) {
+        int k = snprintf(out, size, "%sdhd64", ios_documents_dir());
+        return k > 0 && (unsigned)k < size ? (unsigned)k : 0;
+    }
+#endif
     char given[4096], real[PATH_MAX];
     uint32_t length = sizeof given;
     int k = _NSGetExecutablePath(given, &length) == 0 && realpath(given, real)
