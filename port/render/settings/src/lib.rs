@@ -83,16 +83,64 @@ pub fn edited(text: Option<&[u8]>, key: &str, value: &str) -> Result<Ini, String
 #[cfg(not(target_arch = "wasm32"))]
 static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// A temporary file of its own for each save: `<file>.<process>-<n>.new`, so no other save (another
-/// thread before this lock, or another process: the desktop launcher and its game) can write into
-/// the file this one is about to rename.
+/// The name of a save's temporary file: `<file>.<process>-<n>.new`. No other live process has the
+/// same process id, and n is new in this one, so no other save (another thread before the lock,
+/// another process: the desktop launcher and its game) writes into the file this one renames.
 #[cfg(not(target_arch = "wasm32"))]
-fn temporary(path: &Path) -> PathBuf {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
+fn temporary_name(path: &Path, process: u32, n: u64) -> PathBuf {
     let mut temp = path.as_os_str().to_owned();
-    temp.push(format!(".{}-{}.new", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    temp.push(format!(".{process}-{n}.new"));
     PathBuf::from(temp)
+}
+
+/// A new temporary file for a save, created only if no file has its name (`create_new`): a file of
+/// that name was left by a process that crashed and had the same id, and is never truncated; the
+/// next number is tried instead.
+#[cfg(not(target_arch = "wasm32"))]
+fn create_temporary(path: &Path, process: u32, mut next: impl FnMut() -> u64) -> io::Result<(PathBuf, fs::File)> {
+    for _ in 0..64 {
+        let temp = temporary_name(path, process, next());
+        match fs::OpenOptions::new().write(true).create_new(true).open(&temp) {
+            Ok(f) => return Ok((temp, f)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::AlreadyExists, "no free name for the temporary file"))
+}
+
+/// Removes the temporary files of `path` a crashed process with this `process` id left
+/// (`<file>.<process>-<digits>.new`). Only this process can own such a name while it runs (an id
+/// belongs to one live process), and its own saves remove theirs before they let go of the lock,
+/// so under the lock every match is a dead process's. Another process's files never match.
+/// Returns how many were removed.
+#[cfg(not(target_arch = "wasm32"))]
+fn remove_own_leftovers(path: &Path, process: u32) -> usize {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else { return 0 };
+    let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
+    let prefix = format!("{name}.{process}-");
+    let Ok(entries) = fs::read_dir(dir) else { return 0 };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let file = entry.file_name();
+        let Some(file) = file.to_str() else { continue };
+        let Some(n) = file.strip_prefix(&prefix).and_then(|rest| rest.strip_suffix(".new")) else { continue };
+        if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) && fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// `remove_own_leftovers` once per file in this process, at its first save (under the lock).
+#[cfg(not(target_arch = "wasm32"))]
+fn leftovers_once(path: &Path) {
+    static DONE: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+    let mut done = DONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !done.iter().any(|p| p == path) {
+        remove_own_leftovers(path, std::process::id());
+        done.push(path.to_path_buf());
+    }
 }
 
 /// How often and how long `replace` tries again: at most half a second in all.
@@ -134,7 +182,7 @@ fn replace(temp: &Path, path: &Path) -> io::Result<()> {
 }
 
 /// Saves `key = value` (`edited`) into the file: read, edit and replace as one step in this
-/// process (`SAVING`). The new text goes to a temporary file of its own (`temporary`) and then
+/// process (`SAVING`). The new text goes to a temporary file of its own (`create_temporary`) and then
 /// takes the old one's place, so a reader sees the old file or the new one, never a part.
 /// Ok(false): settings are off.
 #[cfg(not(target_arch = "wasm32"))]
@@ -151,9 +199,13 @@ pub fn save(path: &Path, key: &str, value: &str) -> io::Result<bool> {
         Err(e) => return Err(e),
     };
     let ini = edited(old.as_deref(), key, value).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    let temp = temporary(path);
+    leftovers_once(path);
+    let (temp, mut f) = {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        create_temporary(path, std::process::id(), || NEXT.fetch_add(1, Ordering::Relaxed))?
+    };
     let written = (|| {
-        let mut f = fs::File::create(&temp)?;
         f.write_all(ini.bytes())?;
         f.sync_all()?;
         drop(f);
@@ -355,6 +407,70 @@ mod replace_tests {
         assert!(saved.unwrap(), "dhd.ini held with no sharing: the read waits");
         assert!(took >= std::time::Duration::from_millis(100));
         assert_eq!(read(&p).unwrap().written("fps").as_deref(), Some("240"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod temporary_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dhd-settings-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A stale temporary file of the same name (a crashed process that had this id) is skipped, not
+    /// truncated: the next number is used.
+    #[test]
+    fn a_stale_name_is_never_reused() {
+        let dir = scratch("stale");
+        let p = dir.join("dhd.ini");
+        let stale = temporary_name(&p, 4242, 5);
+        fs::write(&stale, "stale").unwrap();
+        let mut n = 5;
+        let (temp, _f) = create_temporary(&p, 4242, || { n += 1; n - 1 }).unwrap();
+        assert_eq!(temp, temporary_name(&p, 4242, 6));
+        assert_eq!(fs::read_to_string(&stale).unwrap(), "stale", "never truncated");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Only this id's leftovers of this file go: not another id's (a live process's), not another
+    /// file's, not a name that only looks like one.
+    #[test]
+    fn own_leftovers_only() {
+        let dir = scratch("leftovers");
+        let p = dir.join("dhd.ini");
+        let names = ["dhd.ini.4242-1.new", "dhd.ini.4242-77.new", "dhd.ini.42421-1.new", "dhd.ini.424-1.new",
+            "dhd.ini.4242-x.new", "dhd.ini.4242-.new", "dhd.ini.4242-1.new.bak", "other.ini.4242-1.new", "dhd.ini"];
+        for n in names {
+            fs::write(dir.join(n), "x").unwrap();
+        }
+        assert_eq!(remove_own_leftovers(&p, 4242), 2);
+        let mut left: Vec<String> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        let mut want: Vec<String> = names[2..].iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(left, want);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A save's first time on a file removes this process's dead leftovers there; a save then
+    /// leaves none of its own.
+    #[test]
+    fn a_save_cleans_up_after_a_crash() {
+        let dir = scratch("crash");
+        let p = dir.join("dhd.ini");
+        let crashed = temporary_name(&p, std::process::id(), 999_999_999);
+        fs::write(&crashed, "half a file").unwrap();
+        let other = temporary_name(&p, std::process::id().wrapping_add(1), 3);
+        fs::write(&other, "a live process's").unwrap();
+        assert!(save(&p, "fps", "60").unwrap());
+        assert!(!crashed.exists(), "this id's leftover removed");
+        assert!(other.exists(), "another id's kept");
+        assert_eq!(read(&p).unwrap().written("fps").as_deref(), Some("60"));
         fs::remove_dir_all(dir).unwrap();
     }
 }
