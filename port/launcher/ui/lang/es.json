@@ -160,6 +160,8 @@
   "disc.deleteIt": "Borrarlo",
   "disc.keepIt": "Conservarlo",
   "disc.deleted": "El archivo original se ha borrado.",
+  "disc.deleting": "Borrando el archivo original…",
+  "disc.deleteFailed": "No se pudo borrar el archivo original y sigue ocupando {size}. Inténtalo de nuevo, o consérvalo y bórralo más tarde desde tu gestor de archivos.",
   "disc.problem.noRoom": "Esta imagen necesita {need} libres, y el dispositivo tiene {free}. Libera espacio e inténtalo de nuevo.",
   "disc.problem.noPicker": "Este dispositivo no tiene selector de archivos.",
   "disc.problem.openFailed": "No se puede abrir el archivo ({detail}).",

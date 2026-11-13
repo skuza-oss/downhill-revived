@@ -160,6 +160,8 @@
   "disc.deleteIt": "Delete it",
   "disc.keepIt": "Keep it",
   "disc.deleted": "The original file is deleted.",
+  "disc.deleting": "Deleting the original file…",
+  "disc.deleteFailed": "The original file couldn't be deleted and still takes {size}. Try again, or keep it and delete it later in your file manager.",
   "disc.problem.noRoom": "This disc image needs {need} of free space, and the device has {free}. Free up some space, then try again.",
   "disc.problem.noPicker": "This device has no file picker.",
   "disc.problem.openFailed": "The file can't be opened ({detail}).",

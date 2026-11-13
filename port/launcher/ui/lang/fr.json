@@ -160,6 +160,8 @@
   "disc.deleteIt": "Le supprimer",
   "disc.keepIt": "Le garder",
   "disc.deleted": "Le fichier d'origine est supprimé.",
+  "disc.deleting": "Suppression du fichier d'origine…",
+  "disc.deleteFailed": "Le fichier d'origine n'a pas pu être supprimé et occupe toujours {size}. Réessayez, ou gardez-le et supprimez-le plus tard depuis votre gestionnaire de fichiers.",
   "disc.problem.noRoom": "Cette image demande {need} d'espace libre, et l'appareil en a {free}. Libérez de la place, puis réessayez.",
   "disc.problem.noPicker": "Cet appareil n'a pas de sélecteur de fichiers.",
   "disc.problem.openFailed": "Le fichier ne peut pas être ouvert ({detail}).",

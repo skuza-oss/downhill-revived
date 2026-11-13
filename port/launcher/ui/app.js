@@ -494,15 +494,23 @@ async function discEvent(e) {
 
 async function discAnswer(remove) {
   const job = state.disc.job;
-  state.disc = discFlow(state.disc, { job, stage: 'kept' });
-  renderAll();
-  if (!remove) return;
-  try {
-    await call('delete_original', { job });
-    flash(t('disc.deleted'));
-  } catch (e) {
-    fail(errorText(e));
+  if (!remove) {
+    state.disc = discFlow(state.disc, { job, stage: 'kept' });
+    renderAll();
+    return;
   }
+  // the question stays until the native side says whether the file is gone (finding 228)
+  state.disc = discDeleteAsked(state.disc);
+  renderAll();
+  let deleted = false;
+  try {
+    deleted = (await call('delete_original', { job })) === true;
+  } catch (e) {
+    console.warn('delete_original:', e);
+  }
+  state.disc = discDeleteAnswer(state.disc, deleted);
+  renderAll();
+  if (deleted) flash(t('disc.deleted'));
 }
 
 // Online races need the USA disc's game files (finding 098): the disc image's files are hashed once
@@ -698,8 +706,14 @@ function renderDiscFooter() {
     setPrimary({ text: t('footer.play'), icon: 'i-play', disabled: true });
     return true;
   }
+  if (d.stage === 'deleting') {
+    status('busy', null, t('disc.deleting'));
+    setPrimary({ text: t('footer.play'), icon: 'i-play', disabled: true });
+    return true;
+  }
   if (d.stage === 'done' && d.deletable) {
-    status('good', 'i-check', t('disc.deleteAsk', { size: gb(d.size) }));
+    if (d.deleteFailed) status('warn', 'i-alert', t('disc.deleteFailed', { size: gb(d.size) }));
+    else status('good', 'i-check', t('disc.deleteAsk', { size: gb(d.size) }));
     setSecondary(t('disc.keepIt'), () => discAnswer(false));
     $('danger').hidden = false;
     $('danger').textContent = t('disc.deleteIt');

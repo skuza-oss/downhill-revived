@@ -184,6 +184,30 @@ assert.deepStrictEqual(sent[1], { id: 2, call: 'save_setting', args: { key: 'fps
   assert.strictEqual(d.discFlow(s, { job: 3, stage: 'kept' }), s, 'kept only answers a done job');
   s = d.discFlow(s, { job: 4, stage: 'checking' });
   assert.strictEqual(s.stage, 'checking');
+  // "Delete it" (finding 228): the question waits for the native answer; deleted ends it, a refusal
+  // asks again and says so, and the original is never reported deleted when it was not
+  {
+    let q = d.discFlow(d.discIdle(), { job: 7, stage: 'done', deletable: true, size: 2600000000 });
+    q = d.discDeleteAsked(q);
+    assert.strictEqual(q.stage, 'deleting');
+    assert.ok(d.discBusy(q), 'no other pick or PLAY while it deletes');
+    assert.strictEqual(d.discFlow(q, { job: 7, stage: 'copying', done: 1, total: 2 }), q, 'late events do nothing');
+    assert.strictEqual(d.discFlow(q, { job: 7, stage: 'deleting' }), q, 'never an event');
+    const refused = d.discDeleteAnswer(q, false);
+    assert.deepStrictEqual({ ...refused }, { stage: 'done', job: 7, deletable: true, size: 2600000000, deleteFailed: true });
+    assert.strictEqual(d.discDeleteAnswer(q, undefined).stage, 'done', 'a failed call is a refusal');
+    const again = d.discDeleteAsked(refused);
+    assert.strictEqual(again.stage, 'deleting', 'the choice is offered again');
+    assert.deepStrictEqual({ ...d.discDeleteAnswer(again, true) }, { stage: 'kept', job: 7 });
+    assert.strictEqual(d.discDeleteAnswer(d.discIdle(), true).stage, 'idle', 'an answer without a question');
+    assert.strictEqual(d.discDeleteAsked(d.discFlow(d.discIdle(), { job: 8, stage: 'done', deletable: false })).stage, 'done',
+      'nothing to delete when the provider does not allow it');
+    // the page's own check of the bridge's answer: only true means deleted
+    const page = ui('app.js');
+    assert.match(page, /deleted = \(await call\('delete_original', \{ job \}\)\) === true;/);
+    assert.match(page, /if \(deleted\) flash\(t\('disc\.deleted'\)\);/);
+  }
+
   // nonsense is ignored
   assert.strictEqual(d.discFlow(s, null), s);
   assert.strictEqual(d.discFlow(s, { job: 4, stage: 'flying' }), s);

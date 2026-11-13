@@ -160,6 +160,8 @@
   "disc.deleteIt": "Löschen",
   "disc.keepIt": "Behalten",
   "disc.deleted": "Die Originaldatei ist gelöscht.",
+  "disc.deleting": "Originaldatei wird gelöscht …",
+  "disc.deleteFailed": "Die Originaldatei konnte nicht gelöscht werden und belegt weiter {size}. Versuch es noch einmal oder behalte sie und lösche sie später in deinem Dateimanager.",
   "disc.problem.noRoom": "Dieses Disc-Abbild braucht {need} freien Speicher, das Gerät hat {free}. Gib etwas Speicher frei und versuche es erneut.",
   "disc.problem.noPicker": "Dieses Gerät hat keine Dateiauswahl.",
   "disc.problem.openFailed": "Die Datei kann nicht geöffnet werden ({detail}).",

@@ -160,6 +160,8 @@
   "disc.deleteIt": "Eliminalo",
   "disc.keepIt": "Tienilo",
   "disc.deleted": "Il file originale è eliminato.",
+  "disc.deleting": "Eliminazione del file originale…",
+  "disc.deleteFailed": "Non è stato possibile eliminare il file originale, che occupa ancora {size}. Riprova, oppure tienilo ed eliminalo più tardi dal tuo gestore file.",
   "disc.problem.noRoom": "Questa immagine richiede {need} di spazio libero, e il dispositivo ne ha {free}. Libera spazio e riprova.",
   "disc.problem.noPicker": "Questo dispositivo non ha un selettore di file.",
   "disc.problem.openFailed": "Il file non può essere aperto ({detail}).",

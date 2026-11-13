@@ -158,6 +158,8 @@
   "disc.deleteIt": "削除する",
   "disc.keepIt": "残す",
   "disc.deleted": "元のファイルを削除しました。",
+  "disc.deleting": "元のファイルを削除中…",
+  "disc.deleteFailed": "元のファイルを削除できませんでした。まだ{size}を使用しています。もう一度試すか、残しておいて後でファイルマネージャーから削除してください。",
   "disc.problem.noRoom": "このディスクイメージには{need}の空き容量が必要ですが、端末には{free}しかありません。空き容量を増やしてから再試行してください。",
   "disc.problem.noPicker": "この端末にはファイル選択機能がありません。",
   "disc.problem.openFailed": "ファイルを開けません（{detail}）。",
