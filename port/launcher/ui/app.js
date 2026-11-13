@@ -907,7 +907,7 @@ function apply(snap) {
   state.scaleMax = snap.scale_max || 0;
   state.discSize = snap.disc_size || 0;
   state.freeSpace = snap.free_space || 0;
-  if (snap.last_exit !== undefined) state.lastExit = snap.last_exit;
+  if (snap.last_exit) state.lastExit = snap.last_exit;  // said once; the note stays until dismissed
 }
 
 // ---------- start ----------

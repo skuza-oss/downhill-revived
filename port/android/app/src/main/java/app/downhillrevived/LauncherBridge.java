@@ -155,12 +155,22 @@ final class LauncherBridge {
         return disc.isFile() ? disc.getPath() : null;
     }
 
+    /** Whether two paths name one file (/data/data/<app> is /data/user/0/<app>). */
+    private static boolean sameFile(String a, String b) {
+        if (b == null || b.isEmpty()) return false;
+        try {
+            return new File(a).getCanonicalPath().equals(new File(b).getCanonicalPath());
+        } catch (IOException e) {
+            return a.equals(b);
+        }
+    }
+
     private JSONObject snapshot() throws JSONException {
         String disc = discPath();
         JSONObject settings = new JSONObject(Native.values(ini));
         // the game reads its copy (android_main.c names it in dhd.ini on its first start); a launcher
         // that made the copy names it too
-        if (disc != null && !disc.equals(settings.optString("iso"))) {
+        if (disc != null && !sameFile(disc, settings.optString("iso"))) {
             Native.save(ini, "iso", disc);
             settings.put("iso", disc);
         } else if (disc == null) {
