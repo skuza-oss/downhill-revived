@@ -82,7 +82,7 @@ static const SettingInfo setting_table[] = {
     {"touch_trick_stick", "DHD_TOUCH_TRICK_STICK", "31", setting_choices_touch_trick_stick, 5},
     {"touch_labels", "DHD_TOUCH_LABELS", "auto", setting_choices_touch_labels, 3},
     {"touch_attacks", "DHD_TOUCH_ATTACKS", "flick", setting_choices_touch_attacks, 2},
-    {"touch_style", "DHD_TOUCH_STYLE", "actions", setting_choices_touch_style, 2},
+    {"touch_style", "DHD_TOUCH_STYLE", "symbols", setting_choices_touch_style, 2},
     {"touch_vibration", "DHD_TOUCH_VIBRATION", "1", setting_choices_touch_vibration, 2},
     {"touch_with_pad", "DHD_TOUCH_WITH_PAD", "hide", setting_choices_touch_with_pad, 2},
     {"touch_tilt_strength", "DHD_TOUCH_TILT_STRENGTH", "50", setting_choices_touch_tilt_strength, 11},

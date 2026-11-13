@@ -354,7 +354,7 @@ void touch_settings_default(TouchSettings *s)
     s->trick_size = 31;
     s->labels = TOUCH_LABELS_AUTO;
     s->attacks = TOUCH_ATTACK_FLICK;
-    s->style = TOUCH_STYLE_ACTIONS;
+    s->style = TOUCH_STYLE_SYMBOLS;   /* the default until players choose (finding 229) */
     s->vibration = 1;
     s->tilt_strength = 50;
     s->hud_moved = 1;

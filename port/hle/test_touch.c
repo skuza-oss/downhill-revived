@@ -2507,16 +2507,19 @@ static void set_style(int style)
     field();
 }
 
-/* Actions is the default; Actions draws pictures with badges, Symbols the symbols alone (as before);
-   the style changes no place, no size and no saved layout. */
+/* Symbols is the default (the look before finding 229, until players choose); Actions draws pictures
+   with badges, Symbols the symbols alone; the style changes no place, no size and no saved layout. */
 static void test_button_style(void)
 {
     TouchSettings d;
     touch_settings_default(&d);
-    CHECK(d.style == TOUCH_STYLE_ACTIONS);
+    CHECK(d.style == TOUCH_STYLE_SYMBOLS);
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    CHECK(count_shapes(TS_ICON, -1) == 0 && count_shapes(TS_CROSS, 0) == 1);   /* the default draws no picture */
     for (int preset = 0; preset < 2; preset++) {
         start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_BUTTONS);
         TouchSettings s = *touch_settings(t);
+        s.style = TOUCH_STYLE_ACTIONS;
         touch_layout_parse(&s, preset ? "classic.layout=2;classic.cross=1.0,-2.0,1.20" : "thumb.layout=2;thumb.hop=-3.0,1.0,0.90");
         touch_configure(t, &s, NULL);
         field();
@@ -2569,6 +2572,7 @@ static void test_button_style(void)
        too small for theirs, show their names */
     start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
     TouchSettings small = *touch_settings(t);
+    small.style = TOUCH_STYLE_ACTIONS;
     small.size = 70;
     touch_configure(t, &small, NULL);
     field();
@@ -2587,6 +2591,7 @@ static void test_button_style(void)
 static void test_air_pictures(void)
 {
     start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    set_style(TOUCH_STYLE_ACTIONS);
     CHECK(!touch_air_picture(t, TC_TRIANGLE) && count_shapes(TS_ICON, TI_BRAKE) == 1 && count_shapes(TS_ICON, TI_HOP) == 1);
     game.air = 1;
     wait_ms(100);

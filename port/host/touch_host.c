@@ -503,7 +503,7 @@ static void settings_read(TouchSettings *s)
     s->trick_size = env_int("DHD_TOUCH_TRICK_STICK", 31, 20, 45);
     s->labels = env_choice("DHD_TOUCH_LABELS", labels, 3, TOUCH_LABELS_AUTO);
     s->attacks = env_choice("DHD_TOUCH_ATTACKS", attacks, 2, TOUCH_ATTACK_FLICK);
-    s->style = env_choice("DHD_TOUCH_STYLE", style, 2, TOUCH_STYLE_ACTIONS);   /* Button Style (finding 229) */
+    s->style = env_choice("DHD_TOUCH_STYLE", style, 2, TOUCH_STYLE_SYMBOLS);   /* Button Style (finding 229) */
     static const char *const prompts[] = {"playstation", "xbox", "nintendo"};   /* Button Icons, when chosen (finding 134) */
     s->badges = env_choice("DHD_PROMPTS", prompts, 3, TOUCH_BADGES_PS2);
     s->vibration = env_int("DHD_TOUCH_VIBRATION", 1, 0, 1) && env_int("DHD_VIBRATION", 1, 0, 1);

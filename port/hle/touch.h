@@ -24,7 +24,8 @@ enum { TOUCH_THUMB_ZONES, TOUCH_CLASSIC };
 enum { TOUCH_LABELS_AUTO, TOUCH_LABELS_ALWAYS, TOUCH_LABELS_OFF };
 enum { TOUCH_ATTACK_FLICK, TOUCH_ATTACK_BUTTONS };
 /* Button Style (finding 229): Actions shows what each button does (a pedal, fists, a brake ...) with
-   a small badge of the pad's name; Symbols shows the PS2 pad's symbols alone (the look before). */
+   a small badge of the pad's name; Symbols shows the PS2 pad's symbols alone (the look before, and
+   the default until players have chosen between them). */
 enum { TOUCH_STYLE_ACTIONS, TOUCH_STYLE_SYMBOLS };
 /* The names on Actions' badges: the PS2 pad's, or the Xbox or Nintendo names in the same places
    when Button Icons (dhd.ini prompts, finding 134) chooses them, so the badges say what the game's
