@@ -152,6 +152,9 @@ void host_sound_open(void);
 /* Hands over `frames` rendered stereo frames, in game order. Frames that don't fit in the host's
    queue are dropped and counted (the mixer's state has already advanced). */
 void host_sound_write(const int16_t *stereo, int frames);
+/* The app left the screen (1) or came back (0) (a phone's background, finding 227): the device
+   pauses, and plays on from the game's sound at the return (what it had queued is dropped). */
+void host_sound_away(int away);
 /* Forgets everything queued (test fixtures only). */
 void host_sound_reset(void);
 /* Wall-clock diagnostics: one call per sound tick. */
@@ -167,6 +170,8 @@ void host_service_host_init(void);
 void host_service_host_console_init(void);
 int host_service_host_disc_ready(void);
 int host_service_host_poll_dump(void);
+/* 1 once after a phone's app came back from the background (host_app_away, finding 227) */
+int host_service_host_came_back(void);
 void host_service_host_settings_load(void);
 int host_service_host_setting_save(uint32_t a0, uint32_t a1);
 int host_service_host_setting_locked(uint32_t a0);

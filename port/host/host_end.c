@@ -97,6 +97,8 @@ static void end_from_exit(void)
     SDL_SetAtomicInt(&finished, 2);
 }
 
+int host_end_code(void) { return end_code; }
+
 void host_end(int code)
 {
     run_handlers(code, 1);

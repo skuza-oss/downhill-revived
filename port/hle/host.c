@@ -11,6 +11,7 @@
 #include "stick.h"
 #include "controls_table.h"  /* the bindings' tables (port/render/settings, finding 157) */
 #include "../gs/button_icons.h"
+#include "../host/disc_check.h"
 #include "../gs/gs_mesh.h"   /* gs_mesh_setting_read: Native VU (finding 194) */
 #include "../include/version.h"
 #include "../runtime/sha256.h"
@@ -579,11 +580,25 @@ static int SDLCALL watchdog(void *seconds)
    (port/hle/dma.c, hle_render_wait), the registers the game last published and, on Windows, the
    game thread's code addresses as RVAs for port/tools/host64_rva.py. A Mac or Linux game thread
    is not stopped (that needs a signal handler on it); the rest is logged. One line when the
-   fields go on again. */
+   fields go on again. A phone's app in the background (host_app_away) is not a freeze. */
 static uint32_t freeze_word(uint32_t ee)
 {
     const void *p = GUEST(0x08000000u + ee);
     return host_readable(p, 4) ? *(volatile const uint32_t *)p : 0xFFFFFFFFu;
+}
+
+static SDL_AtomicInt app_away;   /* host_app_away: the app is off the screen, no field is due */
+
+static SDL_AtomicInt came_back;  /* host_service_host_came_back: the core rebases its clock */
+
+int host_service_host_came_back(void) { return SDL_SetAtomicInt(&came_back, 0); }
+
+void host_app_away(int away)
+{
+    SDL_SetAtomicInt(&app_away, away);
+    if (!away) SDL_SetAtomicInt(&came_back, 1);
+    touch_host_app_away(away);
+    host_sound_away(away);
 }
 
 static int SDLCALL freeze_watch(void *unused)
@@ -596,6 +611,10 @@ static int SDLCALL freeze_watch(void *unused)
     for (;;) {
         SDL_Delay(1000);
         uint64_t field = *(volatile uint64_t *)&kernel_vsync_count;
+        if (SDL_GetAtomicInt(&app_away)) {   /* a phone's app in the background waits: no freeze */
+            last = field, still = 0;
+            continue;
+        }
         if (field != last || !armed) {
             armed |= last && field != last;
             if (still >= 5)
@@ -992,8 +1011,9 @@ void host_pad_device(int port, HostPad *out)
         /* the button icons (dhd.ini prompts, PC SETTINGS > Button Icons): auto follows player 1's pad,
            and they follow its layout while a pad is there or icons are chosen */
         const char *prompts = getenv("DHD_PROMPTS");
-        int kind = connected ? gamepad_kind(0) : PAD_KIND_NONE;
-        int follow = connected || (prompts && SDL_strcasecmp(prompts, "auto"));
+        int named = connected && touch_host_pad_prompts();  /* on a touch screen: the device in use (finding 227) */
+        int kind = named ? gamepad_kind(0) : PAD_KIND_NONE;
+        int follow = named || (prompts && SDL_strcasecmp(prompts, "auto"));
         button_icons_choose(prompts, kind == PAD_KIND_XBOX ? BUTTON_ICONS_XBOX : kind == PAD_KIND_NINTENDO ? BUTTON_ICONS_NINTENDO
                                                                                                            : BUTTON_ICONS_GAME,
                             follow ? controls_layout(CONTROL_PAD1) : NULL);
@@ -1111,7 +1131,6 @@ int host_game_options_read(char *value, size_t size)
 
 /* ---- the disc image (first start) ---- */
 
-static uint32_t le32_at(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
 /* The game's other releases (finding 100), from the table the launcher reads too. */
 #define OTHER_RELEASE(boot, what) {boot, what},
@@ -1150,69 +1169,46 @@ static const char *other_release(const char *boot)
     return NULL;
 }
 
-/* Whether path is Downhill Domination (USA): the ISO 9660 root holds a SYSTEM.CNF whose boot
-   line names SCUS_971.77, and SCUS_971.77 is the retail one (game_data_read: the game's data
-   comes from it). NULL if it is, else why not. disc_shallow (the Android start, before the core
-   exists) leaves out game_data_read, which runs in the core; host_disc_ready checks it later. */
+/* Whether path is Downhill Domination (USA): disc_check_image (port/host/disc_check.c, finding 227:
+   the ISO 9660 root holds a SYSTEM.CNF whose boot line names SCUS_971.77, and the file holds the
+   whole volume it declares), then SCUS_971.77 is the retail one (game_data_read: the game's data
+   comes from it). NULL if it is, else why not. disc_shallow (a phone's launcher, import and start,
+   before the core exists) leaves out game_data_read, which runs in the core; host_disc_ready
+   checks it later. */
 static int disc_shallow;
+static int disc_read(void *file, uint64_t offset, void *buffer, size_t n)
+{
+    HostFile f = *(HostFile *)file;
+    return host_file_seek(f, offset) == 0 && host_file_read(f, buffer, n) == (int64_t)n;
+}
 static const char *disc_problem(const char *path, char *why, size_t size)
 {
-    enum { SECTOR = 2048 };
-    static uint8_t sector[SECTOR];
-    static char text[SECTOR + 1];
     HostFile f = host_file_open(path, HOST_FILE_READ);
     if (f == HOST_FILE_NONE) return "The file can't be opened.";
-    const char *problem = NULL;
-    uint32_t cnf = 0, cnf_size = 0;
-#define READ(lsn) (host_file_seek(f, (uint64_t)(lsn) * SECTOR) == 0 && host_file_read(f, sector, SECTOR) == SECTOR)
-    if (!READ(16) || sector[0] != 1 || memcmp(sector + 1, "CD001", 5)) {
-        problem = "It isn't a disc image (no ISO 9660 volume in it).";
-        goto done;
-    }
-    /* The primary volume descriptor's root directory record (at 156): extent at +2, size at +10. */
-    uint32_t dir = le32_at(sector + 156 + 2), dir_size = le32_at(sector + 156 + 10);
-    for (uint32_t off = 0; off < dir_size && off < 16 * SECTOR && !cnf; off += SECTOR) {
-        if (!READ(dir + off / SECTOR)) break;
-        for (unsigned i = 0; i + 33 < SECTOR && sector[i]; i += sector[i]) {
-            const uint8_t *r = sector + i;
-            if (r[32] >= 10 && i + 33 + r[32] <= SECTOR && !SDL_strncasecmp((const char *)r + 33, "SYSTEM.CNF", 10) &&
-                (r[32] == 10 || r[33 + 10] == ';')) {
-                cnf = le32_at(r + 2);
-                cnf_size = le32_at(r + 10);
-                break;
-            }
-        }
-    }
-    if (!cnf || !READ(cnf)) {
-        problem = "It has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.";
-        goto done;
-    }
-    memcpy(text, sector, SECTOR);
-    text[cnf_size < SECTOR ? cnf_size : SECTOR] = 0;
-    if (strstr(text, "SCUS_971.77")) {
-        if (!disc_shallow) problem = game_data_read(path, NULL);  /* the game's program and data, unchanged (game_data.c) */
-        goto done;
-    }
-    /* Name the game it is: BOOT2 = cdrom0:\SLUS_123.45;1 */
-    const char *boot = strstr(text, "BOOT2");
-    char id[32] = "";
-    if (boot && (boot = strpbrk(boot, "\\:"))) {
-        while (*boot == '\\' || *boot == ':') boot++;
-        size_t n = strcspn(boot, ";\r\n");
-        snprintf(id, sizeof id, "%.*s", (int)(n < 31 ? n : 31), boot);
-    }
-    const char *release = other_release(id);
-    if (release)
-        snprintf(why, size, "This is %s. Downhill Revived needs the USA disc (SCUS-97177) for now. More: %s", release,
-                 other_releases_more);
-    else
-        snprintf(why, size, "It is another PlayStation 2 disc%s%s%s, not Downhill Domination (USA), SCUS-97177.",
-                 *id ? " (" : "", id, *id ? ")" : "");
-    problem = why;
-done:
-#undef READ
+    char id[32];
+    uint64_t volume = 0, length = host_file_size(f);
+    int kind = disc_check_image(disc_read, &f, length, id, sizeof id, &volume);
     host_file_close(f);
-    return problem;
+    switch (kind) {
+    case DISC_NOT_ISO: return "It isn't a disc image (no ISO 9660 volume in it).";
+    case DISC_NO_CNF: return "It has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.";
+    case DISC_CUT:
+        snprintf(why, size, "The disc image is incomplete: it has %.1f MB of the %.1f MB its volume declares (a download or "
+                 "copy cut short). Make or copy it again.", length / 1048576.0, volume / 1048576.0);
+        return why;
+    case DISC_OTHER: {
+        const char *release = other_release(id);
+        if (release)
+            snprintf(why, size, "This is %s. Downhill Revived needs the USA disc (SCUS-97177) for now. More: %s", release,
+                     other_releases_more);
+        else
+            snprintf(why, size, "It is another PlayStation 2 disc%s%s%s, not Downhill Domination (USA), SCUS-97177.",
+                     *id ? " (" : "", id, *id ? ")" : "");
+        return why;
+    }
+    default:
+        return disc_shallow ? NULL : game_data_read(path, NULL);  /* the game's program and data, unchanged (game_data.c) */
+    }
 }
 
 /* At start: the disc image dhd.ini names (iso), if it is there and is Downhill Domination (USA).
@@ -1257,8 +1253,9 @@ int host_disc_ready(void)
 void host_service_host_init(void) { host_init(); }
 void host_service_host_console_init(void) { host_console_init(); }
 int host_service_host_disc_ready(void) { return host_disc_ready(); }
-#ifdef __ANDROID__
-/* The Android start (port/host/android_main.c) checks the copy it made of the player's disc image:
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+/* The phones' launchers and starts (port/host/android_main.c, android_launcher.c; iOS's
+   port/ios/app/launcher.m, ios_main.m; finding 227) check the player's disc image and its copy:
    NULL when it is Downhill Domination (USA), else why not. */
 const char *host_disc_check(const char *path)
 {
@@ -1281,11 +1278,19 @@ int host_service_controls_layout(int device, uint32_t out)
 }
 
 /* Player 1's or 2's controller: its PAD_KIND_* plus 1, 0 none connected. */
-int host_service_controls_pad(int player)
+static int controls_pad_connected(int player)
 {
     GamepadRaw raw;
     if (player < 1 || player > 2 || !gamepad_start() || !gamepad_raw(player - 1, &raw)) return 0;
     return gamepad_kind(player - 1) + 1;
+}
+
+/* The same for the pages' button names (SETTINGS' "Tabs" line, CONTROLS): on a touch screen a
+   controller counts once it has sent input since the last touch (touch_host_pad_prompts), so a
+   phone shows touch words until a real pad is used (finding 227). */
+int host_service_controls_pad(int player)
+{
+    return touch_host_pad_prompts() ? controls_pad_connected(player) : 0;
 }
 
 /* A change by dhd_settings' rules (dhd_controls_edit): saved to dhd.ini and played with at once
@@ -1346,7 +1351,7 @@ int host_service_controls_capture(int device, int command)
     static uint32_t pads_before;
     int player = device == CONTROL_PAD1 ? 1 : device == CONTROL_PAD2 ? 2 : 0;
     const ControlsLayout *layout = player ? controls_layout(device) : &control_defaults[CONTROL_PAD1];
-    if (player && !host_service_controls_pad(player)) player = 0;  /* that player's pad isn't there: any */
+    if (player && !controls_pad_connected(player)) player = 0;  /* that player's pad isn't there: any */
     if (command == 2) {
         if (pad_held(0, layout) || controls_key_held(0x1B)) return 1;
         for (int i = 0; i < CONTROL_KEYS; i++)

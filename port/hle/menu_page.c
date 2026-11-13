@@ -679,12 +679,31 @@ static uint16_t page_legend_button(void *menu, int view)
 {
     static const struct { const char *word; uint16_t button; } words[] = {
         {"PREV", PAD_LEFT}, {"NEXT", PAD_RIGHT}, {"BACK", PAD_TRIANGLE}, {"SELECT", PAD_CROSS}};
+    /* a page's own legend (p->footer): its button words, as the port's SETTINGS pages write them
+       ("<- Change ->  X Keep  /\ Back", "X Change  [] Clear  /\ Back"). Without them a phone with no
+       system Back (iOS) had no touch way out of SETTINGS (finding 227). */
+    static const struct { const char *word; uint16_t button; } own_words[] = {
+        {"Back", PAD_TRIANGLE}, {"Undo", PAD_TRIANGLE}, {"Keep", PAD_CROSS}, {"Clear", PAD_SQUARE}};
     Item *foot = &AT(menu, X_FOOTER, Item);
-    int mx, my;
-    if (foot->id != TEXT_PREV_NEXT || foot->string || !pointer(view, &mx, &my)) return 0;
+    MenuPage *p = page_of(menu);
+    int mx, my, own = p && p->footer && foot->string;
+    if ((!own && (foot->id != TEXT_PREV_NEXT || foot->string)) || !pointer(view, &mx, &my)) return 0;
     if (my < foot->y - 6 || my > foot->y + 16) return 0;
-    const char *text = (const char *)(uintptr_t)(uint32_t)func_0018D860(foot);
+    const char *text = own ? p->footer : (const char *)(uintptr_t)(uint32_t)func_0018D860(foot);
     if (!text) return 0;
+    if (own) {   /* the word under the pointer: from its button symbol before it to its end */
+        int length = (int)strnlen(text, MENU_PAGE_TEXT), width = measure(menu, X_STYLE + 8, text, length);
+        int start = foot->x - width / 2;
+        if (mx < start - 8 || mx > start + width + 8) return 0;
+        for (unsigned i = 0; i < sizeof own_words / sizeof *own_words; i++) {
+            const char *at = strstr(text, own_words[i].word);
+            if (!at) continue;
+            int from = start + measure(menu, X_STYLE + 8, text, at - text > 2 ? (int)(at - text) - 2 : 0);
+            int to = start + measure(menu, X_STYLE + 8, text, (int)(at - text) + (int)strlen(own_words[i].word));
+            if (mx >= from - 6 && mx <= to + 6) return own_words[i].button;
+        }
+        return 0;
+    }
     int length = (int)strnlen(text, MENU_PAGE_TEXT), width = measure(menu, X_STYLE + 8, text, length);
     int start = foot->x - width / 2;
     if (mx < start - 8 || mx > start + width + 8) return 0;

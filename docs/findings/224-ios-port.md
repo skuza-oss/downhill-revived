@@ -266,3 +266,6 @@ screen and its picker, the keyboard, a P2P room, backgrounding); a real iPhone o
 ID to sideload); tilt steering (CoreMotion); an update notice like Android's; the external
 display; the shared mobile launcher, per-button size and place, tablet defaults and languages
 (notes above); his cross-axial dead zone for physical pads (the owner's call).
+Since then: the on-screen and tap runs, backgrounding, the keyboard's cancel, the update line and the
+shared launcher (finding 227, which also deleted this lane's disc screen and its own disc check);
+tilt, per-button size and place, tablet defaults (finding 226); languages (finding 225).

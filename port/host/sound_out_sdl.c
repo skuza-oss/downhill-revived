@@ -425,6 +425,18 @@ void host_sound_write(const int16_t *stereo, int frames)
     ring_push(stereo, frames);
 }
 
+void host_sound_away(int away)
+{
+    SDL_AudioStream *stream = host_stream;
+    if (!stream) return;
+    if (away) {
+        SDL_PauseAudioStreamDevice(stream);
+    } else {
+        SDL_ClearAudioStream(stream);
+        SDL_ResumeAudioStreamDevice(stream);
+    }
+}
+
 void host_sound_reset(void)
 {
     ring_read = ring_write = 0;

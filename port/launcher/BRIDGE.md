@@ -9,7 +9,7 @@ every platform; the page learns what a platform can do only from the snapshot's 
 |---|---|---|
 | Windows, macOS, Linux | `src-tauri/src/main.rs` (Tauri commands and events) | `window.__TAURI__` |
 | Android | `port/android/.../LauncherActivity.java`, `LauncherBridge.java`, `port/host/android_launcher.c` | a `MessagePort` |
-| iOS (to do) | a `WKWebView` host with the calls below | a `WKScriptMessageHandlerWithReply`, or a `MessagePort` |
+| iOS | `port/ios/app/launcher.m` (the web view, UIKit's parts), `port/ios/host/launcher_calls.c` (the calls) | a `MessagePort` that `port/ios/app/bridge_ios.js` posts |
 
 ## Transport on a phone
 
@@ -76,28 +76,34 @@ which the page words in the player's language (`ui/lang/en.json`).
 | `disc-import` | `{job, stage: "checking"}`, `{job, stage: "copying", done, total}`, `{job, stage: "done", deletable, size}`, `{job, stage: "problem", problem}` | phones (`ui/disc_flow.js` follows them) |
 | `resumed` | | phones: the app came back to the front (the page reads the snapshot again) |
 
-## What the iOS bridge must implement
+## iOS (finding 227)
 
-The iOS app (lane 224's platform) shows `ui/` in a `WKWebView` the same way: the files from the app
-bundle under one origin of its own (a `WKURLSchemeHandler` for a custom scheme, with the content
-security policy above as a response header), no other loads, no navigation. It reports
-`["touch-settings", "disc-import", "direct-start", "share-log", "help", "touch-editor"]` (dropping a
-cap it can't do yet) and implements the phone calls:
+The iOS app shows `ui/` in a `WKWebView` the same way: the files from the app bundle's `launcher/`
+folder under one origin of its own, `dhd-launcher://app/` (a `WKURLSchemeHandler` that sends the
+content security policy above as a response header and answers 403 to anything else), no other
+loads, no navigation, a non-persistent data store. WKWebView has no call to post a port to a page,
+so the app injects `bridge_ios.js` at the document's end in a content world of its own: it makes
+the `MessageChannel`, posts one end to the page's window with `"dhd-bridge"` (the page's `bridge.js`
+is the same as on Android) and carries the page's messages to the app's `dhd` message handler of
+that world, and the app's answers and events back (`dhdDeliver`, called in that world). The page's
+scripts see neither.
 
-- `snapshot`, `settings_schema`, `save_setting`, `rider_name`: the C interface the Android side uses
-  (`dhd_settings_values_json`, `dhd_settings_schema_json`, `dhd_settings_save`,
-  `dhd_settings_rider_name` in `port/render/include/dhd_settings.h`) on the app's dhd.ini, so no
-  Swift copy of the settings exists. `scale_max` is the phones' renderer limit (6).
-- `pick_disc`, `retry_import`, `delete_original` and the `disc-import` events: a document picker for
-  any file, the copy into the app's own folder with progress, the boot check before and after
-  (`host_disc_check`, host.c) and the completeness rule of `DiscImage.java` (the copy holds the
-  whole ISO 9660 volume); this replaces the iOS lane's own first-start import.
-- `check_disc`: `dhd_disc_check` (`dhd_disc.h`) with `iso-check.txt` beside dhd.ini.
-- `check_update`: `update_find` (`port/net/update_check.h`, the sources `UPDATE_SOURCE_SERVER` and
-  `UPDATE_SOURCE_GITHUB`) with the platform's key in `latest.json` once releases have an iOS build;
-  until then `{release: null, newer: false}` (the page says no package is published).
-- `play`: start the game view; with `edit_touch_layout` set `DHD_TOUCH_EDIT_AT_START=1` for the game,
-  and `DHD_LAUNCHER_CHECKED=1` when the page showed the update line.
-- `open_link`, `share_log` (a share sheet with dhd.log and dhd-previous.log), `licences`.
-- After a run that closed unexpectedly, `last_exit` once (iOS has no exit record; the game's own crash
-  report at the end of dhd.log is the sign, as Android 10 reads it in `CrashReport.logCrash`).
+It reports `["touch-settings", "disc-import", "direct-start", "share-log", "help", "touch-editor"]`
+and implements the phone calls in `launcher_calls.c`, over the code Android's launcher calls:
+
+- `snapshot`, `settings_schema`, `save_setting`, `rider_name`: `dhd_settings_values_json`,
+  `dhd_settings_schema_json`, `dhd_settings_save`, `dhd_settings_rider_name` on the app's
+  Documents/dhd.ini; `scale_max` 6; `last_exit` once after a run that closed unexpectedly (the
+  app's own run record, `port/ios/host/run_record.c`: iOS keeps no exit record an app can read).
+- `pick_disc`, `retry_import`, `delete_original` and the `disc-import` events: the document picker
+  for any file (opened in place), the boot check before and after (`host_disc_check`), the room,
+  the copy with progress, `DiscImage`'s completeness rule (`port/ios/host/disc_copy.c`), the rename
+  over the old copy; a file already in the app's Documents is moved into place instead of copied.
+- `check_disc`: `dhd_disc_check` with `iso-check.txt` beside dhd.ini.
+- `check_update`: `phone_update_find` (`port/host/phone.c`, the same as Android's) with latest.json's
+  `ios` key.
+- `play`: the game in the launcher's place (`DHD_TOUCH_EDIT_AT_START=1` for `edit_touch_layout`,
+  `DHD_LAUNCHER_CHECKED=1`); `open_link` (the same list as the desktop's and Android's),
+  `share_log` (the share sheet with one text file: the device, dhd-exit.txt, dhd.log,
+  dhd-previous.log), `licences` (the app's LICENSE.txt and THIRD-PARTY-NOTICES.txt).
+- `resumed` when the app becomes active again with the page on screen.

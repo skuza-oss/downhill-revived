@@ -158,6 +158,14 @@ union SDL_Event;
 int touch_host_event(const union SDL_Event *e);
 void touch_host_tick(void);
 void touch_host_merge(HostPad *out);
+/* 1 when the pad's button names apply: no touch here, or a controller sent input since the last
+   touch (port/host/touch_host.c, finding 227) */
+int touch_host_pad_prompts(void);
+/* The app left the screen (1) or came back (0), a phone's background (port/gs/present.c's
+   app_away_wait, finding 227): the touch controls let go and pause a race offline at the return,
+   the sound pauses, the freeze watch expects no field meanwhile. Game thread. */
+void host_app_away(int away);
+void touch_host_app_away(int away);   /* port/host/touch_host.c */
 /* sdl_host.c's SDL thread: the pads' start (1 if up), a device change, and every pass. */
 int gamepad_thread_start(void);
 void gamepad_device(int change, unsigned id);
