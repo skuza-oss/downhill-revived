@@ -124,15 +124,18 @@ int ios_start_game(int edit_touch_layout, int checked) {
     bool expected = false;
     if (!atomic_compare_exchange_strong(&s_game_started, &expected, true)) return 4;
     const char *dir = ios_documents_dir();
-    char disc[1200], named[8];
+    char disc[1200], named[1200];
     snprintf(disc, sizeof disc, "%sSCUS-97177.iso", dir);
     struct stat st;
     if (stat(disc, &st) != 0 || host_disc_check(disc)) {   /* the launcher asks for it */
         atomic_store(&s_game_started, false);
         return 3;
     }
-    /* dhd.ini names the copy (host_disc_ready checks it in the core; DHD_ISO would skip that) */
-    if (!dhd_settings_read(s_settings_path, "iso", named, sizeof named)) dhd_settings_save(s_settings_path, "iso", disc);
+    /* dhd.ini names the copy (host_disc_ready checks it in the core; DHD_ISO would skip that). The
+       app's folder moves when iOS installs an update (a new container), so the name is the copy's
+       path of this run, written again whenever it differs (finding 227) */
+    if (!dhd_settings_read(s_settings_path, "iso", named, sizeof named) || strcmp(named, disc))
+        dhd_settings_save(s_settings_path, "iso", disc);
     setenv("DHD_SETTINGS", s_settings_path, 1);
     setenv("DHD_DATA_DIR", dir, 1);
     setenv("DHD_IOS_DISPLAY_AUTO", "1", 1);
