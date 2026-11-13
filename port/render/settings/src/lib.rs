@@ -76,28 +76,64 @@ pub fn edited(text: Option<&[u8]>, key: &str, value: &str) -> Result<Ini, String
     Ok(ini)
 }
 
-/// Saves `key = value` (`edited`) into the file. The new text goes to `<file>.new` first and then
-/// takes the old one's place. Ok(false): settings are off.
+/// One save at a time in this process (finding 228): `save` reads, edits and replaces the whole
+/// file, so two saves at once (the Android launcher's worker threads, the desktop launcher's
+/// commands, the game's own pages) could both read the old text and one change would be lost.
+/// Saves are rare and short: one lock for every path is enough.
+#[cfg(not(target_arch = "wasm32"))]
+static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// A temporary file of its own for each save: `<file>.<process>-<n>.new`, so no other save (another
+/// thread before this lock, or another process: the desktop launcher and its game) can write into
+/// the file this one is about to rename.
+#[cfg(not(target_arch = "wasm32"))]
+fn temporary(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(format!(".{}-{}.new", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    PathBuf::from(temp)
+}
+
+/// The new text takes the old file's place. Windows refuses the replace while another program
+/// holds the file without delete sharing (a scanner, a reader in another process): a few tries.
+#[cfg(not(target_arch = "wasm32"))]
+fn replace(temp: &Path, path: &Path) -> io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match fs::rename(temp, path) {
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Saves `key = value` (`edited`) into the file: read, edit and replace as one step in this
+/// process (`SAVING`). The new text goes to a temporary file of its own (`temporary`) and then
+/// takes the old one's place, so a reader sees the old file or the new one, never a part.
+/// Ok(false): settings are off.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save(path: &Path, key: &str, value: &str) -> io::Result<bool> {
     if disabled(path) {
         return Ok(false);
     }
+    let _one_at_a_time = SAVING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let old = match fs::read(path) {
         Ok(bytes) => Some(bytes),
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
     let ini = edited(old.as_deref(), key, value).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    let mut temp = path.as_os_str().to_owned();
-    temp.push(".new");
-    let temp = PathBuf::from(temp);
+    let temp = temporary(path);
     let written = (|| {
         let mut f = fs::File::create(&temp)?;
         f.write_all(ini.bytes())?;
         f.sync_all()?;
         drop(f);
-        fs::rename(&temp, path)
+        replace(&temp, path)
     })();
     if written.is_err() {
         let _ = fs::remove_file(&temp);
@@ -111,6 +147,7 @@ pub fn create(path: &Path) -> io::Result<()> {
     if disabled(path) {
         return Ok(());
     }
+    let _one_at_a_time = SAVING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     match fs::OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(mut f) => f.write_all(HEADER.as_bytes()),
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),

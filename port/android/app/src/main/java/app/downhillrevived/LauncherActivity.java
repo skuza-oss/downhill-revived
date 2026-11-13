@@ -81,6 +81,9 @@ public class LauncherActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     /** The page's calls run here: some wait (the update check, the online check's hashing, a picker). */
     final ExecutorService work = Executors.newCachedThreadPool();
+    /** The calls that touch dhd.ini, and PLAY, one at a time in the page's order
+     *  (LauncherBridge.ordered, finding 228). */
+    final ExecutorService settings = Executors.newSingleThreadExecutor();
     LauncherBridge bridge;
     /** How the run before ended, when it closed unexpectedly and the page hasn't said so yet. */
     volatile String crashWhy;
@@ -322,6 +325,7 @@ public class LauncherActivity extends Activity {
     protected void onDestroy() {
         if (bridge != null) bridge.close();
         work.shutdownNow();
+        settings.shutdown();  // a save already queued still finishes (shutdownNow would drop it)
         if (web != null) {
             web.destroy();
             web = null;

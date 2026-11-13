@@ -118,6 +118,48 @@ assert.deepStrictEqual(sent[1], { id: 2, call: 'save_setting', args: { key: 'fps
   assert.strictEqual(JSON.stringify(event), '{"job":1,"stage":"checking"}');
   await b.ready;
 
+  // ---- PLAY waits for the settings writes sent before it (finding 228): the game reads dhd.ini
+  // at once, so it may not start while the launcher is still writing it
+  {
+    const { orderedCalls } = load('bridge.js');
+    const sentCalls = [], answers = [];
+    const fake = (name, args) => new Promise((resolve, reject) => { sentCalls.push(name); answers.push({ name, resolve, reject }); });
+    const oc = orderedCalls(fake);
+    const tick = () => new Promise((r) => setImmediate(r));
+    oc('save_setting', { key: 'fps', value: '120' });
+    oc('save_setting', { key: 'scale', value: '3' }).catch(() => {});
+    const played = oc('play', { edit_touch_layout: true });
+    oc('snapshot');  // a read is not held back
+    await tick();
+    assert.deepStrictEqual(sentCalls, ['save_setting', 'save_setting', 'snapshot'], 'play waits for the saves');
+    answers[0].resolve(null);
+    await tick();
+    assert.ok(!sentCalls.includes('play'), 'one save still pending');
+    answers[1].reject({ code: 'x' });  // a failed save counts as answered
+    await tick();
+    assert.deepStrictEqual(sentCalls, ['save_setting', 'save_setting', 'snapshot', 'play']);
+    answers[3].resolve(null);
+    assert.strictEqual(await played, null);
+    // nothing pending: PLAY goes at once; a save after PLAY does not hold that PLAY back
+    const again = oc('play', {});
+    oc('save_setting', { key: 'fps', value: '60' });
+    await tick();
+    assert.deepStrictEqual(sentCalls.slice(4), ['play', 'save_setting']);
+    answers[4].resolve(null);
+    await again;
+    // the update's install waits the same way; the desktop's controls_edit is a write
+    oc('controls_edit', {});
+    oc('install_update', {});
+    await tick();
+    assert.deepStrictEqual(sentCalls.slice(6), ['controls_edit']);
+    answers[6].resolve(null);
+    await tick();
+    assert.deepStrictEqual(sentCalls.slice(6), ['controls_edit'], 'the save sent after the second PLAY is still pending');
+    answers[5].resolve(null);
+    await tick();
+    assert.deepStrictEqual(sentCalls.slice(6), ['controls_edit', 'install_update']);
+  }
+
   // ---- the disc import's states
   const d = load('disc_flow.js');
   let s = d.discIdle();

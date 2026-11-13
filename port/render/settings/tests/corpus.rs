@@ -217,7 +217,7 @@ fn files() {
     assert!(dhd_settings::read(&p).is_none());
     assert!(dhd_settings::save(&p, "scale", "3").unwrap());
     assert_eq!(fs::read_to_string(&p).unwrap(), format!("{}scale = 3\n", dhd_settings::HEADER));
-    assert!(!dir.join("dhd.ini.new").exists());
+    assert!(leftovers(&dir).is_empty());
     dhd_settings::create(&p).unwrap();
     assert_eq!(dhd_settings::read(&p).unwrap().value("scale"), "3");
     let fresh = dir.join("fresh.ini");
@@ -228,6 +228,69 @@ fn files() {
         assert!(dhd_settings::read(std::path::Path::new(off)).is_none());
         assert!(!dhd_settings::save(std::path::Path::new(off), "scale", "3").unwrap());
     }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// Temporary files a save left behind in dir (`<file>.<process>-<n>.new`).
+fn leftovers(dir: &std::path::Path) -> Vec<String> {
+    fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".new")).collect()
+}
+
+/// Many threads save different keys into one file at once (finding 228: the Android launcher's
+/// worker threads, the desktop launcher's commands): every key is there at the end, and a reader
+/// during the run only ever sees a whole file (the header first, every line `key = value`, never
+/// fewer keys than it saw before).
+#[test]
+fn saves_at_once() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let dir = std::env::temp_dir().join(format!("dhd-settings-threads-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let p = Arc::new(dir.join("dhd.ini"));
+    let _ = fs::remove_file(&*p);
+    const THREADS: usize = 12;
+    const KEYS: usize = 25;
+    let done = Arc::new(AtomicBool::new(false));
+    let reader = {
+        let (p, done) = (p.clone(), done.clone());
+        std::thread::spawn(move || {
+            let (mut reads, mut most) = (0, 0);
+            while !done.load(Ordering::Relaxed) {
+                let Ok(text) = fs::read_to_string(&*p) else { continue };
+                assert!(text.starts_with(dhd_settings::HEADER), "a part of a file: {text:?}");
+                let body = &text[dhd_settings::HEADER.len()..];
+                assert!(body.is_empty() || body.ends_with('\n'), "a cut line: {body:?}");
+                let keys = body.lines().inspect(|l| assert!(l.contains(" = "), "a broken line {l:?}")).count();
+                assert!(keys >= most, "{keys} keys after {most}: a change was lost");
+                most = keys;
+                reads += 1;
+            }
+            reads
+        })
+    };
+    let writers: Vec<_> = (0..THREADS)
+        .map(|t| {
+            let p = p.clone();
+            std::thread::spawn(move || {
+                for k in 0..KEYS {
+                    assert!(dhd_settings::save(&p, &format!("t{t}_k{k}"), &format!("{t}.{k}")).unwrap());
+                }
+            })
+        })
+        .collect();
+    for w in writers {
+        w.join().unwrap();
+    }
+    done.store(true, Ordering::Relaxed);
+    let reads = reader.join().unwrap();
+    let ini = dhd_settings::read(&p).unwrap();
+    for t in 0..THREADS {
+        for k in 0..KEYS {
+            assert_eq!(ini.written(&format!("t{t}_k{k}")).as_deref(), Some(format!("{t}.{k}").as_str()));
+        }
+    }
+    assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
+    assert!(reads > 0);
     fs::remove_dir_all(dir).unwrap();
 }
 

@@ -10,12 +10,33 @@
 // page never asks which platform it is on.
 'use strict';
 
+// The calls that write dhd.ini, and the ones that must wait for them (finding 228): PLAY starts a
+// game that reads dhd.ini at once, and an update replaces the launcher; each waits until every
+// write the page sent before it has answered (done or failed), so the game never starts on a file
+// the launcher is still writing. The native sides keep their own order too (Android's settings
+// queue, the settings crate's lock).
+const WRITES = new Set(['save_setting', 'controls_edit']);
+const AFTER_WRITES = new Set(['play', 'install_update']);
+function orderedCalls(call) {
+  const pending = new Set();
+  return (name, args) => {
+    if (AFTER_WRITES.has(name) && pending.size) return Promise.allSettled([...pending]).then(() => call(name, args));
+    const answer = call(name, args);
+    if (WRITES.has(name)) {
+      pending.add(answer);
+      const done = () => pending.delete(answer);
+      answer.then(done, done);
+    }
+    return answer;
+  };
+}
+
 const bridge = (() => {
   const tauri = typeof window !== 'undefined' ? window.__TAURI__ : undefined;
   if (tauri) {
     return {
       kind: 'tauri',
-      call: (name, args) => tauri.core.invoke(name, args),
+      call: orderedCalls((name, args) => tauri.core.invoke(name, args)),
       on: (event, handler) => tauri.event.listen(event, (e) => handler(e.payload)),
       ready: Promise.resolve(),
     };
@@ -55,13 +76,13 @@ function messageBridge(target) {
   });
   return {
     kind: 'message',
-    call(name, args = {}) {
+    call: orderedCalls((name, args = {}) => {
       const id = next++;
       return new Promise((resolve, reject) => {
         waiting.set(id, { resolve, reject });
         send(JSON.stringify({ id, call: name, args }));
       });
-    },
+    }),
     on(event, handler) {
       if (!handlers.has(event)) handlers.set(event, []);
       handlers.get(event).push(handler);
@@ -72,4 +93,4 @@ function messageBridge(target) {
   };
 }
 
-if (typeof module !== 'undefined') module.exports = { messageBridge };
+if (typeof module !== 'undefined') module.exports = { messageBridge, orderedCalls };

@@ -25,6 +25,14 @@ allows its own files only (`default-src 'self'`, no inline script, no network).
 An error is either a string (shown as it is) or `{"code": "<string table key>", "params": {...}}`,
 which the page words in the player's language (`ui/lang/en.json`).
 
+**Order of the settings writes (finding 228).** `bridge.js` sends `play` and `install_update` only
+after every `save_setting` / `controls_edit` it sent before has answered (done or failed), so a game
+never starts on a dhd.ini the launcher is still writing. A phone's native side runs `snapshot`
+(which may save `iso`), `save_setting` and `play` one at a time in the order they arrived (Android:
+`LauncherBridge.ordered`, one single-thread queue) and keeps long calls (`check_disc`'s hashing,
+`check_update`, the picker) off that queue; the settings crate's `save` is itself one transaction at
+a time per process, with a temporary file of its own.
+
 ## Capabilities (`snapshot().caps`)
 
 | Cap | The page then | Desktop | Phone |
