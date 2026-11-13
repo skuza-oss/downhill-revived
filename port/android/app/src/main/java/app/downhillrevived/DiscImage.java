@@ -1,7 +1,7 @@
-// Downhill Revived on Android: the first start's rules for the disc image (finding 143), apart from
-// SetupActivity so a plain JVM test runs them (port/android/test/DiscImageTest.java): whether a file
-// is Downhill Domination (USA), whether a copy of it is complete, and the copy loop itself. Nothing
-// here uses Android.
+// Downhill Revived on Android: the rules for the disc image (findings 143, 225), apart from the
+// launcher's import (DiscImport) so a plain JVM test runs them (port/android/test/DiscImageTest.java):
+// whether a file is Downhill Domination (USA), whether a copy of it is complete, and the copy loop
+// itself. Nothing here uses Android.
 package app.downhillrevived;
 
 import java.io.IOException;

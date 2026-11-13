@@ -137,11 +137,16 @@ Neither is signed.
 
 **Android** (experimental, arm64, Android 10 or later with Vulkan):
 `DownhillRevived-<version>-android-experimental.apk`. Open it on the phone and allow installs
-from your browser or file manager when Android asks; the app is not on Google Play. At the first
-start choose your `.iso`; it is copied into the app once (a few GB). Install a new release's APK
-over the old one: your settings and saves stay. If the game closes unexpectedly, the next start
-offers **Share log** (see below). The release page's Android section has the details and the
-signing certificate.
+from your browser or file manager when Android asks; the app is not on Google Play. The app opens
+on its launcher, the same as the PC's: choose your `.iso` there (it is copied into the app once, a
+few GB), change the settings that are fiddly in the game (resolution, frame rate, Performance mode,
+Native VU, widescreen, the touch layout, hand, steering and size, your rider name), then press PLAY.
+It works upright too; the game itself plays sideways. To skip it, turn off Settings > Game > **Open
+the launcher at every start**; SETTINGS in the game (Game tab, Launcher At Start) or a long press on
+the icon (**Launcher**) bring it back. Install a new release's APK over the old one: your settings
+and saves stay. If the game closes unexpectedly, the launcher says so at the next start and offers
+**Share log** (see below). The release page's Android section has the details and the signing
+certificate.
 
 **iPhone and iPad** (experimental, iOS 17 or later): `DownhillRevived-<version>-ios-experimental.ipa`.
 It is **unsigned**: Apple lets an app outside the App Store run only once it is signed for your
@@ -201,8 +206,8 @@ installed copy):
 | `dhd-previous.log` | The log of the run before. If you started the game again after a crash, the crash is in this one. |
 
 On Android the logs are inside the app, where no file manager reaches them: after the game closes
-unexpectedly it offers **Share log** at the next start, and a long press on its icon has
-**Share log** at any time. Both open Android's share sheet with one text file; nothing is sent
+unexpectedly the launcher offers **Share log** at the next start, its Help page has it at any time,
+and so does a long press on the icon (**Share log**). Both open Android's share sheet with one text file; nothing is sent
 unless you pick an app there.
 
 Moving from the zip to the installer: copy `dhd.ini` and `saves\` from the zip's folder into

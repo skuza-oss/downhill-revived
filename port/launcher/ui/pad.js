@@ -84,7 +84,7 @@ function back() {
 
 function changeTab(step) {
   if ($('page-settings').hidden) return;
-  state.tab = (state.tab + step + TABS.length) % TABS.length;
+  state.tab = (state.tab + step + tabs.length) % tabs.length;
   renderTabs();
   renderRows();
   document.querySelector('#tabs .on').focus();

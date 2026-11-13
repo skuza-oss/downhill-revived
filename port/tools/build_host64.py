@@ -111,10 +111,10 @@ TARGETS = {t.key: t for t in (
 POSIX_UNITS = {'port/host/host_win32.c': 'port/host/host_posix.c'}
 WINDOWS_ONLY = ('port/gs/replay.c',)  # Win32 calls (GS replay)
 ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c',
-                 'port/host/android_update.c', 'port/net/update_check.c']
-# Android: only SDL's entry leaves the library; everything else may be garbage-collected
-# (--gc-sections), as /opt:ref does for dhd64.exe.
-ANDROID_EXPORTS = '{\n  global: SDL_main;\n  local: *;\n};\n'
+                 'port/host/android_update.c', 'port/host/android_launcher.c', 'port/net/update_check.c']
+# Android: only SDL's entry and the launcher's native calls (android_launcher.c, finding 225) leave
+# the library; everything else may be garbage-collected (--gc-sections), as /opt:ref does for dhd64.exe.
+ANDROID_EXPORTS = '{\n  global: SDL_main; Java_app_downhillrevived_Native_*;\n  local: *;\n};\n'
 
 
 def host_units(t):
@@ -589,6 +589,9 @@ def main():
                                      objects + [library, report['lib'], sdl_lib]))
             run([cc, t.flags[0], '-shared', *pgo_flags[:1], '-o', debug, '@'+str(rsp),
                  '-Wl,-soname,libmain.so', '-Wl,--version-script='+str(exports_map),
+                 # the launcher's native calls (android_launcher.c, finding 225): nothing in the
+                 # library calls them, so their member of libhost64.a is pulled in by name
+                 '-Wl,--undefined-glob=Java_app_downhillrevived_Native_*',
                  '-Wl,--gc-sections', '-Wl,--no-undefined', '-Wl,--build-id=sha1',
                  '-Wl,-z,max-page-size=16384', '-Wl,-z,noexecstack', '-Wl,-z,relro', '-Wl,-z,now',
                  '-landroid', *rust_libs, '-lm'], timeout=1800)

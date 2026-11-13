@@ -58,7 +58,7 @@ public class DiscImageTest {
 
     static final String DOWNHILL = "BOOT2 = cdrom0:\\SCUS_971.77;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n";
 
-    /** What SetupActivity does with a finished copy: check, then completeness. */
+    /** What the import (DiscImport) does with a finished copy: check, then completeness. */
     static String verdict(Path dir, byte[] copied, long size, boolean exact) throws IOException {
         Path file = Files.createTempFile(dir, "copy", ".part");
         Files.write(file, copied);

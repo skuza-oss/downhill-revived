@@ -46,6 +46,7 @@ static const SettingChoice setting_choices_touch_tilt_strength[] = {{"0", "0%"},
 static const SettingChoice setting_choices_names[] = {{"off", "Off"}, {"small", "Small"}, {"medium", "Medium"}, {"large", "Large"}};
 static const SettingChoice setting_choices_room_region[] = {{"auto", "Auto"}, {"weur", "EU West"}, {"eeur", "EU East"}, {"enam", "NA East"}, {"wnam", "NA West"}, {"apac-ne", "Asia NE"}, {"apac-se", "Asia SE"}, {"oc", "Oceania"}};
 static const SettingChoice setting_choices_auto_update[] = {{"ask", "Ask"}, {"on", "Automatic"}, {"off", "Off"}};
+static const SettingChoice setting_choices_launcher[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_discord[] = {{"off", "OFF"}, {"on", "ON"}};
 
 static const SettingInfo setting_table[] = {
@@ -86,6 +87,7 @@ static const SettingInfo setting_table[] = {
     {"names", "DHD_NAMES", "small", setting_choices_names, 4},
     {"room_region", "DHD_NET_ROOM_REGION", "auto", setting_choices_room_region, 8},
     {"auto_update", "", "ask", setting_choices_auto_update, 3},
+    {"launcher", "DHD_LAUNCHER_AT_START", "1", setting_choices_launcher, 2},
     {"discord", "DHD_DISCORD", "off", setting_choices_discord, 2},
 };
 

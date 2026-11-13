@@ -29,10 +29,7 @@
 
 /* latest.json's key for the APK (package_release.py --platform android). */
 #define PLATFORM "android"
-static const char *const sources[] = {
-    "https://dhd.skuza.app/v1/latest",
-    "https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json",
-};
+static const char *const sources[] = {UPDATE_SOURCE_SERVER, UPDATE_SOURCE_GITHUB};
 
 static char ini[1200], stamp[1200];
 

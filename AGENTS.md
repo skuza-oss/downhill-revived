@@ -57,6 +57,7 @@ change needs them or someone asks.
 | Keep the original game's feel: no gameplay additions; QoL and online features are welcome | 2026-10-31 | | add custom music, taunts, assists or handling changes |
 | No SFU rooms on Android, iOS or in the browser yet: there the host offers P2P rooms only (`host_service_net_offered`) | 2026-11-03 | 143 | offer SFU rooms (public lists, Quick Race) there without a decision |
 | iOS is a platform since 2026-11-13: built and released by us as an unsigned experimental IPA (`port/ios`, from Gustavo Ribeiro's iOS port), using the shared touch controls and settings like Android; its launcher is the shared mobile launcher | 2026-11-13 | 224 | add an iOS-only launcher, touch controls or settings UI beside the shared ones, or sign the IPA with anyone's Apple account in the repository |
+| One launcher UI for desktop, Android and iOS: `port/launcher/ui` in Tauri or the platform's web view, one bridge (`port/launcher/BRIDGE.md`), every string from `ui/lang` | 2026-11-13 | 225 | write a second launcher UI in Java, Kotlin or Swift, or put a launcher string outside the string table |
 
 P2P rooms (180, 186) are the one exception to "race frames through Cloudflare only": the creator
 picks SFU or P2P per room; a P2P room is the same server room with a second race transport (a

@@ -4,7 +4,12 @@
 // the touch controls (finding 141, port/host/android_touch.c, called from SDL's thread): the
 // screen's density and its gesture and cutout insets, the vibrator, and the phone's roll for tilt
 // steering; and the update notice (finding 143, port/host/android_update.c): one line over the game
-// when a newer release has an APK, which opens the release's page in the browser.
+// when a newer release has an APK, which opens the release's page in the browser (only when the
+// launcher didn't show its own update line this start: a direct start).
+// The launcher (LauncherActivity, finding 225) starts it with PLAY; its extras become variables the
+// game reads (DHD_TOUCH_EDIT_AT_START, DHD_LAUNCHER_CHECKED). Without a disc image it can play (a
+// start that skips the launcher: a USB controller plugged in) it opens the launcher's disc page
+// instead and ends before the game starts (discReady).
 package app.downhillrevived;
 
 import android.content.Intent;
@@ -38,6 +43,11 @@ import org.libsdl.app.SDLActivity;
 public class DhdActivity extends SDLActivity {
     /** How long the update notice stays. */
     private static final int NOTICE_MS = 15000;
+    /** The launcher's extras: straight into the touch layout editor; the update line was shown. */
+    static final String EDIT_TOUCH_LAYOUT = "edit_touch_layout", LAUNCHER_CHECKED = "launcher_checked";
+    /** The game started in this process (it runs once per process, SDL_main never starts twice):
+     *  the launcher, opened again from the icon, goes back to it. */
+    static volatile boolean started;
 
     private volatile float roll = Float.NaN;
     private SensorEventListener tiltListener;
@@ -50,7 +60,7 @@ public class DhdActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // How the run before ended, before the native game starts (it quotes dhd-exit.txt into the
-        // new dhd.log): once per process, so a start that skips SetupActivity (a USB controller
+        // new dhd.log): once per process, so a start that skips the launcher (a USB controller
         // plugged in) writes it too (finding 152). On a thread, waited for 2 s at most: the record's
         // trace can be slow to come, and the UI thread must not freeze; a late record only misses
         // this run's "previous run" lines
@@ -61,6 +71,14 @@ public class DhdActivity extends SDLActivity {
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
         }
+        if (!discReady()) {
+            startActivity(new Intent(this, LauncherActivity.class).setAction(LauncherActivity.DISC)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            super.onCreate(savedInstanceState);
+            finish();  // before SDL's thread starts (onResume): no game in this process
+            return;
+        }
+        started = true;
         super.onCreate(savedInstanceState);
         Screen.underCutout(getWindow());  // Android 10 only (SDL asks for it itself from 11)
         // The screen's shape (its long side over its short one), for widescreen = 1:
@@ -69,6 +87,9 @@ public class DhdActivity extends SDLActivity {
             int[] size = Screen.size(this);
             int w = Math.max(size[0], size[1]), h = Math.min(size[0], size[1]);
             if (h > 0) nativeSetenv("DHD_MONITOR_ASPECT", Double.toString((double) w / h));
+            Intent start = getIntent();
+            if (start != null && start.getBooleanExtra(EDIT_TOUCH_LAYOUT, false)) nativeSetenv("DHD_TOUCH_EDIT_AT_START", "1");
+            if (start != null && start.getBooleanExtra(LAUNCHER_CHECKED, false)) nativeSetenv("DHD_LAUNCHER_CHECKED", "1");
         } catch (Throwable e) {  // the libraries didn't load: SDLActivity shows why
             Log.w("DownhillRevived", "no screen shape: " + e);
         }
@@ -89,7 +110,7 @@ public class DhdActivity extends SDLActivity {
     // SDL hides the system bars once, when the game goes full screen. A rotation the activity asks
     // for itself (tilt steering keeps the screen on its landscape side, touchTiltOn) can bring the
     // status bar back on some phones (MIUI on a Redmi 9): hide them again after a rotation and when
-    // the window gets its focus back, as SetupActivity does.
+    // the window gets its focus back, as the launcher does.
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -242,6 +263,23 @@ public class DhdActivity extends SDLActivity {
                 notice.postDelayed(remove, NOTICE_MS);
             }
         });
+    }
+
+    /** The copy of the disc image is there and is the game (DiscImage, the check android_main.c
+     *  makes again in C); a copy that isn't the game is removed, so the launcher asks for it. */
+    private boolean discReady() {
+        java.io.File disc = DiscImport.disc(this);
+        if (!disc.isFile()) return false;
+        try (java.io.RandomAccessFile f = new java.io.RandomAccessFile(disc, "r")) {
+            String problem = DiscImage.check(f.getChannel());
+            if (problem == null) return true;
+            Log.w("DownhillRevived", "the disc image's copy isn't the game (" + problem + "); removed");
+        } catch (java.io.IOException e) {
+            Log.w("DownhillRevived", "the disc image's copy can't be read: " + e);
+            return false;
+        }
+        disc.delete();
+        return false;
     }
 
     private int dp(int value) {

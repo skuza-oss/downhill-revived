@@ -11,6 +11,8 @@
 //! - The browser (port/web/www/settings.js) loads it as a small wasm module of its own on the page
 //!   and in the game worker (`web`, built by rustgs.py with `--crate dhd_settings`); settings.js
 //!   keeps only the text's storage (IndexedDB) and what the browser can't offer.
+//! - The launcher's page (`launcher`, finding 225): the settings' schema and values as the JSON the
+//!   page draws from, for the desktop launcher and, through the C interface, a phone's bridge.
 //! - The rider name's rule (`name`) is here too, for the launcher's rider card and, through
 //!   settings_table.h, the game's online menu.
 //! - The install id (`install`, finding 161): a random id kept in dhd.ini for the online server's
@@ -29,6 +31,7 @@ pub mod c;
 pub mod controls;
 mod ini;
 pub mod install;
+pub mod launcher;
 pub mod name;
 pub mod table;
 #[cfg(target_arch = "wasm32")]

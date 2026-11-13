@@ -22,17 +22,27 @@ game's cheat codes are typed on the touch pause menu's **CODES** page.
 1. Download the APK on the phone.
 2. Open it. Android asks once to allow installs from your browser or file manager ("Install
    unknown apps"); allow it, then install. The app is not on Google Play.
-3. Start Downhill Revived and choose your `.iso` when asked. The copy takes a minute or two.
+3. Start Downhill Revived: its launcher opens (the PC launcher's look, upright or sideways).
+   Choose your `.iso` there; the copy takes a minute or two. Then PLAY.
 
-**Updates.** The game checks once a day whether a newer release is out and says so at the top of
-the screen; tap the line to open the release page, then install the new APK over the old one. Your
+**The launcher** opens before the game at every start: PLAY, your disc, the settings that are
+fiddly in the game (resolution, frame rate, Performance mode, Native VU, widescreen, the touch
+layout, hand, steering and size, Edit the touch layout), your rider name, updates and Help (Share
+log, links, licences). They are the same settings as SETTINGS in the game. To start the game
+directly, turn off Settings > Game > Open the launcher at every start; turn it back on in the
+game's SETTINGS (Game tab, Launcher At Start) or long-press the icon and pick **Launcher**.
+
+**Updates.** The launcher checks whether a newer release is out and says so above PLAY (a game
+started directly checks once a day and says so at the top of the screen); open the release page
+from there, then install the new APK over the old one. Your
 settings and saves stay. Nothing is downloaded by the game itself. If you installed a test build
 before this release, uninstall it first: Android refuses an update signed by another key, and
 uninstalling deletes the app's files (the disc copy and your saves).
 
-**If the game closes unexpectedly**, it says so at the next start and offers **Share log**: send
-the file to us (a GitHub issue or Discord) and we can see what happened. Long-press the app's icon
-for **Share log** at any time, even when the game closes before anything shows. Nothing is sent
+**If the game closes unexpectedly**, the launcher says so at the next start and offers **Share
+log**: send the file to us (a GitHub issue or Discord) and we can see what happened. The
+launcher's Help page has Share log at any time, and so does a long press on the app's icon, even
+when the game closes before anything shows. Nothing is sent
 unless you pick an app in Android's share sheet.
 
 **Online: P2P races only.** ONLINE in the main menu offers Create A P2P Race and Join With A Code

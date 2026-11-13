@@ -2,7 +2,7 @@
 """One entry point for the checks, in tiers. Each step prints one line (OK/FAIL, seconds, log);
 its full output goes to build/check/<tier>-<step>.log.
 
-    python tools/check.py docs       # docs linter + never-commit check of the tree (seconds)
+    python tools/check.py docs       # docs linter + never-commit check of the tree + the launcher's strings (seconds)
     python tools/check.py quick      # docs, then the game core (module cache) and the unit tests
     python tools/check.py port       # quick, then the native game (and its retail-data scan), the renderer and network tests
     python tools/check.py matching   # the retail image: configure, build, byte-for-byte check
@@ -23,7 +23,9 @@ NPM = 'npm.cmd' if os.name == 'nt' else 'npm'
 def steps(tier, jobs):
     j = ['-j', str(jobs)] if jobs else []
     docs = [('check_docs', [PY, 'tools/check_docs.py', '--quiet'], ROOT),
-            ('check_tree', [PY, 'tools/check_tree.py'], ROOT)]
+            ('check_tree', [PY, 'tools/check_tree.py'], ROOT),
+            # the launcher's string table: a language file's stale keys, the page's keys (finding 225)
+            ('lang_check', [PY, 'tools/lang_check.py'], ROOT)]
     quick = docs + [('build_wasm', [PY, 'port/tools/build_wasm.py'] + j, ROOT),
                     ('test_runtime', [PY, 'port/tools/test_runtime.py'], ROOT),
                     # the iOS build and packaging rules, no Mac needed (finding 224; the Mac builds the app)
@@ -35,6 +37,10 @@ def steps(tier, jobs):
                     ('scan_retail', [PY, 'port/tools/scan_retail.py', 'build/host64-exe/dhd64.exe'], ROOT),
                     ('net_tests', [PY, 'port/net/build_tests.py'], ROOT),
                     ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT),
+                    # the launcher page's logic: strings, the phones' bridge, the disc import, bindings (finding 225)
+                    ('test_launcher_ui', ['node', 'port/launcher/test_launcher_ui.js'], ROOT),
+                    ('test_launcher_controls', ['node', 'port/launcher/test_controls.js'], ROOT),
+                    ('test_lang_check', [PY, 'tools/test_lang_check.py'], ROOT),
                     ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT),
                     # stack locals the EE frame makes one object (finding 213): unreviewed overruns fail
                     ('test_stack_escapes', [PY, 'port/tools/test_stack_escapes.py'], ROOT),

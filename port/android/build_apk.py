@@ -8,10 +8,11 @@
    port/tools/build_host64.py --target android-arm64 from the module (--wasm, default build/wasm/dhd_core.wasm,
    when given or when the libraries are missing).
 2. The Gradle project in build/android/project: this folder's files (the Gradle scripts, the
-   manifest, DhdActivity.java, the strings and theme), SDL's Java sources of the same release
+   manifest, the activities, the strings and theme), SDL's Java sources of the same release
    (org.libsdl.app, from the SDL source sdl3.py unpacked), the icon (port/res/icon.png, scaled per
-   density), the two libraries (src/main/jniLibs/arm64-v8a) and the Gradle wrapper (SDL's
-   gradle-wrapper.jar, Gradle WRAPPER_GRADLE: the version already in GRADLE_USER_HOME).
+   density), the launcher's page (port/launcher/ui, as assets/launcher; finding 225), the two
+   libraries (src/main/jniLibs/arm64-v8a) and the Gradle wrapper (SDL's gradle-wrapper.jar, Gradle
+   WRAPPER_GRADLE: the version already in GRADLE_USER_HOME).
 3. gradlew assembleDebug (no daemon), signed with the debug key ANDROID_USER_HOME holds
    (DHD_DEVCACHES\\AndroidUser\\debug.keystore, made on first use). Output:
    build/android/downhill-revived-<version>-debug.apk.
@@ -58,6 +59,7 @@ PROJECT = OUT / 'project'
 WRAPPER_GRADLE = '8.10.2'   # AGP 8.7.0 (build.gradle) needs Gradle 8.9 or later
 ICON_SIZES = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
 TEMPLATE = ('settings.gradle', 'build.gradle', 'gradle.properties', 'app/build.gradle', 'app/src/main')
+LAUNCHER_UI = ROOT / 'port' / 'launcher' / 'ui'
 
 
 RELEASE_ENV = ('DHD_ANDROID_KEYSTORE', 'DHD_ANDROID_KEYSTORE_PASS', 'DHD_ANDROID_KEY_ALIAS', 'DHD_ANDROID_KEY_PASS')
@@ -172,6 +174,8 @@ def check_release(apk, name, code, new_signing_key=False):
             problems.append('libmain.so is the profile-collecting build (--pgo-generate)')
         with zipfile.ZipFile(apk) as z:
             split = z.read('assets/dhd-split.txt').decode().strip() if 'assets/dhd-split.txt' in z.namelist() else 'unknown'
+            if 'assets/launcher/index.html' not in z.namelist():  # the entry activity's page (finding 225)
+                problems.append("no launcher page (assets/launcher/index.html)")
         if split not in ('one', 'wasm2c'):  # finding 151: the development chunks cost the game ~1.5 %
             problems.append('libmain.so was built from %s C, not a release build (build_host64.py --release)' % split)
     except (OSError, KeyError, zipfile.BadZipFile) as e:
@@ -223,6 +227,9 @@ def project(libs, assets=None):
     icons(PROJECT / 'app' / 'src' / 'main' / 'res')
     if assets:  # files the APK carries as they are (package_release.py: the licence texts)
         shutil.copytree(assets, PROJECT / 'app' / 'src' / 'main' / 'assets')
+    # the launcher's page, the desktop launcher's own (LauncherActivity serves it, finding 225)
+    shutil.copytree(LAUNCHER_UI, PROJECT / 'app' / 'src' / 'main' / 'assets' / 'launcher', dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns('*.md'))
     # which C libmain.so was built from (build_host64's split.txt: one, wasm2c, chunks), so a release
     # check of any APK can refuse the development chunks (finding 151)
     split = OUT / 'split.txt'

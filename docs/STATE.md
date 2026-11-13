@@ -53,7 +53,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   a first-start disc screen until the shared mobile launcher; P2P rooms only online (finding 224;
   the port by Gustavo Ribeiro).
 - **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093;
-  native window buttons on macOS, finding 150).
+  native window buttons on macOS, finding 150). Its page (`port/launcher/ui`) is the one launcher
+  UI of every platform: Android shows it in a WebView (`LauncherActivity`, the app's entry) through
+  the bridge in `port/launcher/BRIDGE.md`; strings in `ui/lang` (finding 225).
 - **Releases:** `port/tools/package_release.py` builds, checks and packages each platform
   (`docs/BUILDING.md`, "Releases"; the `release` skill).
 - Retired, do not bring back: the 32-bit i686 build, the Direct3D 11 renderer, the C wgpu-native
@@ -152,9 +154,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (`port/render/settings`), used by the game, the launcher and the browser.
 - The launcher holds settings, rider name and updates on every desktop platform, decides the one
   data folder (`DHD_SETTINGS`, `DHD_MEMCARD_DIR`, `DHD_DATA_DIR`), updates from `latest.json`
-  with a backup through the server's `/v1/latest` (findings 093, 125, 138). A phone has no
-  launcher: the game checks once a day and shows a notice (finding 143). On iOS a small first-start
-  screen imports the disc image; no update notice yet (finding 224).
+  with a backup through the server's `/v1/latest` (findings 093, 125, 138). On Android the same
+  launcher page opens at every start (unless the `launcher` setting is off): the disc import, the
+  settings that are hard to change in the game, the update line (the game's own check; a direct
+  start keeps the in-game notice, finding 143), Help with Share log (finding 225). On iOS a small first-start
+  screen imports the disc image until the launcher's iOS bridge exists; no update notice there
+  yet (finding 224).
 - Discord Rich Presence on the desktop (finding 106). The mouse works in the port's pages and the
   game's popups (finding 092).
 

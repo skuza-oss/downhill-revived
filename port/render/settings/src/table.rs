@@ -181,6 +181,11 @@ pub const SETTINGS: &[Setting] = &[
     // The launcher's: whether it looks for a newer release, and where (empty: the official releases).
     choice("auto_update", "", &[c("ask", "Ask"), c("on", "Automatic"), c("off", "Off")], "ask", "ask"),
     text("update_url", "DHD_UPDATE_URL"),
+    // A phone's launcher (finding 225): whether it opens at every start (off: PLAY at once, the
+    // desktop's --play); the game's SETTINGS on a phone shows it, so the launcher can come back.
+    switch("launcher", "DHD_LAUNCHER_AT_START", SWITCH, "1", "1"),
+    // The launcher's language (port/launcher/ui/lang): a language file's code; empty, the system's.
+    text("language", ""),
     // Discord Rich Presence (port/render/presence): the game shows what is played on the player's
     // Discord profile. Off without dhd.ini, so the tools' runs never reach the PC's Discord.
     switch("discord", "DHD_DISCORD", TOGGLE, "on", "off"),

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The launcher's colours (port/launcher/ui/style.css), for the first start's screen -->
+    <!-- The launcher's colours (port/launcher/ui/style.css), behind its page -->
     <color name="ground">#1A1430</color>
     <color name="ember">#F07C3A</color>
 </resources>

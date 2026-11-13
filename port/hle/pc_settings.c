@@ -58,7 +58,7 @@ void gs_present_options_apply(void);
 int texpack_available(void);          /* port/gs/texpack.c */
 void port_unlock_refresh(void);       /* patches_unlock.py: the lobby's rider statues follow Unlock All */
 
-enum { ROWS = 22, MAX_CHOICES = 16 };
+enum { ROWS = 23, MAX_CHOICES = 16 };
 
 /* A row: its label and dhd.ini key; the setting's variable, built-in value and choices come from
    setting_table (dhd_settings), the list from choices_build. */
@@ -72,7 +72,7 @@ typedef struct {
 } Row;
 
 enum { RESOLUTION, DISPLAY, SIZE, SHAPE, SCALING, WIDESCREEN, MOVIES, VIBRATION, DEAD_ZONE, PROMPTS, TEXTURES, FONT, RATE,
-       VSYNC, COUNTER, UNLOCK, NAMES, NATIVE_VU, PERFORMANCE, SHADOWS, FLARE, PARTICLES };
+       VSYNC, COUNTER, UNLOCK, NAMES, NATIVE_VU, PERFORMANCE, SHADOWS, FLARE, PARTICLES, LAUNCHER };
 static Row rows[ROWS] = {
     {"Resolution:", "scale", 0},
     {"Display:", "window", 1},
@@ -101,6 +101,9 @@ static Row rows[ROWS] = {
     {"Shadows & Sun Glow:", "shadows", 1},
     {"Lens Flare:", "lens_flare", 1},
     {"Particles:", "particles", 1},
+    /* a phone's launcher (finding 225): OFF starts the game at once next time; only where the host
+       lists DHD_LAUNCHER_AT_START (Android), the desktop's launcher has no such setting */
+    {"Launcher At Start:", "launcher", 1},
 };
 static char monitor_size[24];
 
@@ -221,7 +224,7 @@ static const char *const tab_labels[TABS] = {"Display", "Graphics", "Controls", 
 static const int row_tab[ROWS] = {TAB_GRAPHICS, TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_GAME, TAB_CONTROLS, TAB_CONTROLS, TAB_CONTROLS, TAB_GRAPHICS, TAB_GRAPHICS,
     TAB_DISPLAY, TAB_DISPLAY, TAB_DISPLAY, TAB_GAME, TAB_ONLINE, TAB_GRAPHICS, TAB_GRAPHICS, TAB_GRAPHICS,
-    TAB_GRAPHICS, TAB_GRAPHICS};
+    TAB_GRAPHICS, TAB_GRAPHICS, TAB_GAME};
 static int tab, visible[ROWS], tabs[TABS], tab_count;
 static unsigned held_before;
 static int tab_left[TABS], tab_right[TABS];
@@ -249,6 +252,7 @@ static void choose_rows(void)
         if (live && named && listed(live, rows[i].env)) rows[i].live = 1;
     }
     visible[PERFORMANCE] = visible[SHADOWS] || visible[FLARE] || visible[PARTICLES];
+    visible[LAUNCHER] = list && rows[LAUNCHER].env && listed(list, rows[LAUNCHER].env);
     const char *touch = host_getenv("DHD_TOUCH");
     int controls = !list || listed(list, "DHD_KEYBOARD") || (touch && *touch);
     tab_count = settings_tabs_choose(tabs, TABS, row_tab, visible, ROWS, TAB_CONTROLS, controls);

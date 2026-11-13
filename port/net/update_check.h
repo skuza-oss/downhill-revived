@@ -14,6 +14,10 @@
 
 /* The releases page, for an answer whose page is not this repository's. */
 #define UPDATE_RELEASES_PAGE "https://github.com/skuza-oss/downhill-revived/releases/latest"
+/* Where a phone asks, in order (android_update.c, the launcher's android_launcher.c): the online
+   server's copy of the newest latest.json (online/server/src/latest.ts), then GitHub's release asset. */
+#define UPDATE_SOURCE_SERVER "https://dhd.skuza.app/v1/latest"
+#define UPDATE_SOURCE_GITHUB "https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json"
 /* At most one check a day. */
 #define UPDATE_INTERVAL_SECONDS (24 * 60 * 60)
 

@@ -203,4 +203,71 @@ body:has(#page-settings:not([hidden])) .pads .tabs-hint { display: flex; }
 .pads i.pa.sony { color: #8fb4ff; }
 .pads i.pb.sony { color: #ff8a8a; }
 
+/* the crash note (a phone's), the Help page and the import's second line */
+#crash-note { margin-top: 18px; }
+#crash-note .note > div > b { display: block; color: var(--snow); font-weight: 700; margin-bottom: 2px; }
+.note-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.btns .btn.discord svg.i.fill { fill: currentColor; stroke: none; width: 19px; height: 19px; }
+pre.licences { margin-top: 14px; max-height: 60vh; overflow: auto; font: 500 12px/1.5 ui-monospace, monospace; color: var(--lilac);
+  background: var(--rail); border-radius: var(--r); padding: 12px; white-space: pre-wrap; user-select: text; }
+.sub-line { display: block; font-size: 12.5px; color: var(--dim); margin-top: 3px; }
+
+/* Phones and tablets (finding 225): the same page, sized for a thumb (html.touch, from the
+   touch-settings capability) and laid out for a narrow screen (portrait) or a short one (a phone in
+   landscape). The desktop window (960x600, no touch) never matches any of this. */
+.touch body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--rail); }
+.touch .body { background: var(--ground); }
+.touch .btn { height: 44px; }
+.touch .seg button { padding: 9px 13px; font-size: 13.5px; }
+.touch .select select { padding: 11px 34px 11px 12px; font-size: 14px; }
+.touch .sw { width: 48px; height: 28px; border-radius: 14px; }
+.touch .sw::after { width: 22px; height: 22px; }
+.touch .sw[aria-checked="true"]::after { transform: translateX(20px); }
+.touch .row { min-height: 60px; padding: 8px 0; }
+.touch .text-in { padding: 11px 12px; font-size: 15px; }
+.touch .home, .touch .set { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.touch .row { flex-wrap: wrap; row-gap: 10px; }
+.touch .row .l { flex: 1 1 200px; }
+.touch .seg { flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .body { flex-direction: column; }
+  .rail { width: auto; flex-direction: row; align-items: center; gap: 8px; padding: 8px 12px; }
+  .word { font-size: 16px; padding: 4px 4px; }
+  .nav { display: flex; margin-left: auto; gap: 4px; }
+  .nav button { width: auto; height: 40px; padding: 0 11px; margin: 0; gap: 8px; }
+  .nav button:not(.on) span { display: none; }
+  .rider { display: none; }
+  .home { padding: 20px 16px 16px; }
+  .home h1 { font-size: 24px; }
+  .set { padding: 18px 16px; }
+  .set h1 { font-size: 23px; }
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tabs button { padding: 10px 11px; white-space: nowrap; }
+  .tabs button.on::after { left: 11px; right: 11px; }
+  .facts { flex-wrap: wrap; gap: 8px 18px; }
+  .text-in { width: 100%; }
+  .foot { height: auto; flex-wrap: wrap; padding: 10px 16px; gap: 8px 10px; }
+  .st { flex: 1 1 100%; }
+  .btn.primary { flex: 1; height: 52px; font-size: 17px; }
+  .bar { width: 100%; }
+}
+
+@media (max-height: 500px) and (min-width: 641px) {
+  .rail { width: 176px; padding: 4px 10px 10px; }
+  .word { font-size: 18px; padding: 8px 8px 14px; }
+  .nav button { height: 40px; }
+  .rider { padding: 7px; }
+  .home { padding: 14px 24px 10px; }
+  .home h1 { font-size: 22px; }
+  .meta { margin: 4px 0 10px; }
+  .home .lead { margin: 6px 0 10px; }
+  .set { padding: 12px 22px; }
+  .set h1 { font-size: 21px; }
+  .set .sub { margin: 3px 0 10px; }
+  .foot { height: 62px; padding: 0 14px 0 18px; }
+  .btn.primary { height: 46px; min-width: 150px; }
+}
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

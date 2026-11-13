@@ -2,7 +2,8 @@
 // PS2 pad's buttons, for the keyboard (player 1's) and each player's controller. The rules and the
 // dhd.ini lines (keyboard, pad1, pad2) are dhd_settings' (port/render/settings/src/controls.rs):
 // the Rust side (src-tauri/src/controls.rs) makes every change and saves it; this file draws the
-// layouts and waits for the key or button pressed. Uses app.js's el, icon, flash and state.
+// layouts and waits for the key or button pressed. Uses app.js's call, el, icon, flash and state
+// and i18n.js's t.
 'use strict';
 
 const bind = {
@@ -15,10 +16,9 @@ const bind = {
   bad: false,
 };
 const CAPTURE_MS = 5000;
-const INVERTS = [[1, 'Invert left stick X'], [2, 'Invert left stick Y'], [4, 'Invert right stick X'], [8, 'Invert right stick Y']];
+const INVERTS = [[1, 'bind.invertLX'], [2, 'bind.invertLY'], [4, 'bind.invertRX'], [8, 'bind.invertRY']];
 // Swap L1/L2 and Swap R1/R2 (finding 189): schema.swaps' bits
-const SHOULDERS = [[1, 'Swap L1/L2', 'For controllers that report L1 as L2 and L2 as L1'],
-                   [2, 'Swap R1/R2', 'For controllers that report R1 as R2 and R2 as R1']];
+const SHOULDERS = [[1, 'bind.swapL', 'bind.swapL.hint'], [2, 'bind.swapR', 'bind.swapR.hint']];
 
 // A controller's kind by its name, as the game's PAD_KIND_* (1 PlayStation, 2 Xbox, 3 Nintendo): the
 // words its buttons print.
@@ -88,18 +88,21 @@ function bindingRows(schema, layout, device, kind) {
 }
 
 async function loadBindings() {
-  if (!bind.schema) bind.schema = await invoke('controls_schema');
-  bind.layouts = (await invoke('controls_state')).layouts;
+  if (!bind.schema) bind.schema = await call('controls_schema');
+  bind.layouts = (await call('controls_state')).layouts;
 }
 
 // A change through the launcher's Rust side (it saves dhd.ini); the note says what happened.
 async function bindEdit(device, edit) {
   try {
-    const r = await invoke('controls_edit', { device, edit: { target: 0, slot: 0, input: 0, on: false, ...edit }, kind: connectedKind() });
+    const r = await call('controls_edit', { device, edit: { target: 0, slot: 0, input: 0, on: false, ...edit }, kind: connectedKind() });
     bind.layouts = r.layouts;
     bind.note = r.message;
     bind.bad = r.outcome === 'refused';
-    if (r.outcome === 'changed') flash(`Saved. ${bind.schema.devices[device].label}${r.message ? `: ${r.message}` : ''}`);
+    if (r.outcome === 'changed') {
+      const name = bind.schema.devices[device].label;
+      flash(r.message ? t('bind.savedMessage', { device: name, message: r.message }) : t('bind.saved', { device: name }));
+    }
   } catch (e) {
     bind.note = String(e);
     bind.bad = true;
@@ -115,7 +118,7 @@ function endCapture() {
 // A wait counts only while its prompt is on screen (the settings page's Controls tab, the device
 // it began on) and for five seconds: leaving it gives up, so a key typed elsewhere is never taken.
 function captureLive(c) {
-  return c === bind.capture && state.tab === CONTROLS_TAB && !$('page-settings').hidden
+  return c === bind.capture && tabs[state.tab]?.[0] === 'controls' && !$('page-settings').hidden
     && bind.device === c.device && performance.now() - c.since <= CAPTURE_MS;
 }
 
@@ -156,7 +159,7 @@ addEventListener('keydown', (e) => {
   if (c.device > 0 || e.repeat) return;
   const input = keyOfCode(bind.schema, e.code);
   if (input === null) {
-    bind.note = 'That key can\'t be used: Esc, Alt, Ctrl and the Windows keys stay the game\'s and the system\'s';
+    bind.note = t('bind.badKey');
     bind.bad = true;
     return renderRows();
   }
@@ -182,10 +185,8 @@ function bindingsBlock() {
   }
   const s = bind.schema, device = bind.device, layout = bind.layouts[device], kind = connectedKind();
   const out = [el('div', { class: 'row' },
-    el('div', { class: 'l' }, 'Bindings', el('small', {}, device === 0
-      ? 'Keys by their place on the keyboard. Esc always goes back and pauses.'
-      : 'By the button\'s place on the controller. Every controller of this player uses this layout.')),
-    el('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Bindings' }, s.devices.map((d, i) => el('button', {
+    el('div', { class: 'l' }, t('bind.title'), el('small', {}, t(device === 0 ? 'bind.keysHint' : 'bind.padHint'))),
+    el('div', { class: 'seg', role: 'radiogroup', 'aria-label': t('bind.title') }, s.devices.map((d, i) => el('button', {
       class: i === device ? 'on' : '', role: 'radio', 'aria-checked': String(i === device),
       onclick: () => { bind.device = i; bind.note = ''; bind.capture = null; renderRows(); },
     }, d.label))))];
@@ -193,9 +194,9 @@ function bindingsBlock() {
   for (const r of bindingRows(s, layout, device, kind)) {
     const slotButton = (slot) => {
       const waiting = bind.capture && bind.capture.target === r.target && bind.capture.slot === slot;
-      const word = waiting ? (device === 0 ? 'Press a key…' : 'Press a button…') : r.words[slot] || '—';
+      const word = waiting ? t(device === 0 ? 'bind.pressKey' : 'bind.pressButton') : r.words[slot] || '—';
       return el('button', { class: `btn slot${waiting ? ' waiting' : ''}${r.words[slot] ? '' : ' empty'}`,
-        'aria-label': `${r.label} ${slot ? 'alternate' : 'main'}: ${r.words[slot] || 'none'}`,
+        'aria-label': t(slot ? 'bind.slotAlternate' : 'bind.slotMain', { button: r.label, input: r.words[slot] || t('bind.none') }),
         onclick: () => (waiting ? endCapture() : startCapture(device, r.target, slot)),
         oncontextmenu: (e) => { e.preventDefault(); bindEdit(device, { edit: 'clear', target: r.target, slot }); },
       }, word);
@@ -204,25 +205,24 @@ function bindingsBlock() {
     out.push(el('div', { class: 'row bind' },
       el('div', { class: 'l' }, r.label, r.race ? el('small', {}, r.race) : null),
       waitingHere ? el('button', { class: 'link quiet', onclick: () => { const { slot } = bind.capture; bind.capture = null;
-        bindEdit(device, { edit: 'clear', target: r.target, slot }); } }, 'Clear') : null,
+        bindEdit(device, { edit: 'clear', target: r.target, slot }); } }, t('bind.clear')) : null,
       slotButton(0), slotButton(1)));
   }
   if (device > 0) {
-    const option = (label, on, edit) => el('div', { class: 'row' }, el('div', { class: 'l' }, label),
-      el('button', { class: 'sw', role: 'switch', 'aria-checked': String(on), 'aria-label': label,
+    const option = (key, on, edit) => el('div', { class: 'row' }, el('div', { class: 'l' }, t(key)),
+      el('button', { class: 'sw', role: 'switch', 'aria-checked': String(on), 'aria-label': t(key),
         onclick: () => bindEdit(device, { ...edit, on: !on }) }));
-    out.push(option('Swap sticks', layout.swap_sticks, { edit: 'swap' }));
+    out.push(option('bind.swapSticks', layout.swap_sticks, { edit: 'swap' }));
     for (const [bit, label, help] of SHOULDERS) {
       const on = !!((layout.swap_shoulders ?? 0) & bit);
-      out.push(el('div', { class: 'row' }, el('div', { class: 'l' }, label, el('small', {}, help)),
-        el('button', { class: 'sw', role: 'switch', 'aria-checked': String(on), 'aria-label': label,
+      out.push(el('div', { class: 'row' }, el('div', { class: 'l' }, t(label), el('small', {}, t(help))),
+        el('button', { class: 'sw', role: 'switch', 'aria-checked': String(on), 'aria-label': t(label),
           onclick: () => bindEdit(device, { edit: 'shoulders', input: bit, on: !on }) })));
     }
     for (const [bit, label] of INVERTS) out.push(option(label, !!(layout.invert & bit), { edit: 'invert', input: bit }));
   }
-  out.push(el('div', { class: 'row' }, el('div', { class: 'l' }, el('small', {},
-    'Click a key or button to change it, right-click to clear it. A key or button another one had moves here.')),
-    el('button', { class: 'btn', onclick: () => bindEdit(device, { edit: 'reset' }) }, icon('i-undo'), `Reset ${s.devices[device].label}`)));
+  out.push(el('div', { class: 'row' }, el('div', { class: 'l' }, el('small', {}, t('bind.howTo'))),
+    el('button', { class: 'btn', onclick: () => bindEdit(device, { edit: 'reset' }) }, icon('i-undo'), t('bind.reset', { device: s.devices[device].label }))));
   return out;
 }
 

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Launcher shortcut's icon (finding 225): the launcher page's settings sliders in its ember on
+     its ground colour, as the Share log shortcut's icon is drawn (values/colors.xml) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="@color/ground"
+        android:pathData="M24,0A24,24 0,1 1,24 48A24,24 0,1 1,24 0Z" />
+    <path
+        android:strokeColor="@color/ember"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M16,34L16,26M16,21L16,14M24,34L24,24M24,19L24,14M32,34L32,28M32,23L32,14M12,26L20,26M20,19L28,19M28,28L36,28" />
+</vector>

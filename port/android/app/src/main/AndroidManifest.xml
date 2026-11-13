@@ -26,21 +26,24 @@
         android:enableOnBackInvokedCallback="false"
         android:hardwareAccelerated="true">
 
-        <!-- The first start: the disc image (SetupActivity.java, finding 143), then the game. Its
-             configChanges are DhdActivity's and density, mcc and mnc: a font size, language, display
-             or SIM change during the copy keeps the activity (and so the copy) instead of making it
+        <!-- The launcher (LauncherActivity.java, finding 225): the launcher's page (port/launcher/ui,
+             in the assets) at every start, the disc image's import, then the game. Portrait or
+             landscape, as the device is held (the game itself is landscape). Its configChanges are
+             DhdActivity's and density, mcc and mnc: a rotation, a font size, language, display or SIM
+             change keeps the activity (and so the page and a copy in progress) instead of making it
              again. -->
-        <activity android:name=".SetupActivity"
+        <activity android:name=".LauncherActivity"
             android:label="@string/app_name"
-            android:theme="@style/SetupTheme"
-            android:screenOrientation="sensorLandscape"
+            android:theme="@style/LauncherTheme"
+            android:screenOrientation="fullUser"
             android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|density|mcc|mnc|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- The icon's long-press shortcut: Share log, without starting the game (finding 152) -->
+            <!-- The icon's long-press shortcuts: Share log, without starting the game (finding 152), and
+                 Launcher, the page even when the game is set to start directly (finding 225) -->
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
 

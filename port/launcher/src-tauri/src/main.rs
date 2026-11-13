@@ -11,7 +11,6 @@ mod scale;
 mod update;
 
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -35,12 +34,19 @@ struct App {
     disc_check: AtomicU64,
 }
 
+/// What this launcher can do, for the page (port/launcher/BRIDGE.md, "Capabilities"; finding 225):
+/// a window with its own buttons, the PC's settings and bindings, the race server's status, updates
+/// it installs itself, patch notes, and a game it waits for (and may close).
+const CAPS: &[&str] = &["window", "pc-settings", "bindings", "server", "install-update", "patch-notes", "close-game"];
+
 #[derive(Serialize)]
 struct Snapshot {
     version: &'static str,
+    caps: &'static [&'static str],
     native_window_controls: bool,
-    /// Every setting's value: dhd.ini's, else the player's default (dhd_settings).
-    settings: BTreeMap<&'static str, String>,
+    /// Every setting's value: dhd.ini's, else the player's default (dhd_settings::launcher, the
+    /// same JSON a phone's bridge returns).
+    settings: serde_json::Value,
     game_found: bool,
     running: bool,
     /// Why dhd.ini's disc image can't be used, when it names one and the game would refuse it.
@@ -52,25 +58,6 @@ struct Snapshot {
     /// The resolution scale the last run drew at and how far its GPU goes (dhd.log); None when no
     /// run has said yet.
     scale: Option<scale::ScaleReport>,
-}
-
-/// A setting as the settings tabs offer it (dhd_settings' table): its default and its choices as
-/// [value, label] pairs (none for a text setting).
-#[derive(Serialize)]
-struct SettingInfo {
-    key: &'static str,
-    default: &'static str,
-    choices: Vec<[&'static str; 2]>,
-    /// A text setting's own rule: the rider name's (dhd_settings::name), else none.
-    rule: Option<TextRule>,
-}
-
-/// What a text field keeps while the player types, and the rule in words for its hint.
-#[derive(Serialize)]
-struct TextRule {
-    letters: &'static str,
-    max: usize,
-    hint: &'static str,
 }
 
 #[derive(Serialize)]
@@ -142,7 +129,7 @@ fn add_played(place: &game::Place, since: &mut Instant) {
 #[tauri::command]
 fn snapshot(app: State<App>) -> Snapshot {
     let ini = dhd_settings::read(&app.place.settings()).unwrap_or_default();
-    let settings: BTreeMap<_, _> = dhd_settings::SETTINGS.iter().map(|s| (s.key, ini.value(s.key))).collect();
+    let settings = serde_json::from_str(&dhd_settings::launcher::values_json(&ini)).expect("the settings' JSON");
     let iso = ini.written("iso");
     let pack = ini
         .written("texture_pack")
@@ -150,6 +137,7 @@ fn snapshot(app: State<App>) -> Snapshot {
         .unwrap_or_else(|| app.place.data.join("textures").join("SCUS-97177").join("replacements"));
     Snapshot {
         version: VERSION,
+        caps: CAPS,
         native_window_controls: cfg!(target_os = "macos"),
         disc_problem: iso.and_then(|p| disc::problem(std::path::Path::new(&p))),
         texture_pack: std::fs::read_dir(pack).is_ok_and(|mut d| d.next().is_some()),
@@ -161,22 +149,11 @@ fn snapshot(app: State<App>) -> Snapshot {
     }
 }
 
-/// Every setting's default and choices, for the settings tabs.
+/// Every setting's default, choices and (the rider name's) rule, for the settings tabs: the
+/// settings crate's JSON (dhd_settings::launcher), which a phone's bridge returns too.
 #[tauri::command]
-fn settings_schema() -> Vec<SettingInfo> {
-    dhd_settings::SETTINGS
-        .iter()
-        .map(|s| SettingInfo {
-            key: s.key,
-            default: s.default,
-            choices: s.choices.iter().map(|c| [c.value, c.label]).collect(),
-            rule: (s.key == "name").then_some(TextRule {
-                letters: dhd_settings::name::LETTERS,
-                max: dhd_settings::name::MAX,
-                hint: dhd_settings::name::RULE,
-            }),
-        })
-        .collect()
+fn settings_schema() -> serde_json::Value {
+    serde_json::from_str(&dhd_settings::launcher::schema_json()).expect("the settings' JSON")
 }
 
 /// The rider name saved for what the player typed (dhd_settings::name::normalise; "": none).
