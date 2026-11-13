@@ -2125,15 +2125,6 @@ static void test_tablet(void)
                     game.flyover = 0;
                     field();
                 }
-    /* a phone keeps its places: SKIP in the middle */
-    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
-    float x, y;
-    game.flyover = 1;
-    field();
-    touch_target(t, TOUCH_TARGET_SKIP, 0, &x, &y);
-    CHECK(fabsf(x - PHONE.width / 2) < 0.01f);
-    game.flyover = 0;
-    field();
     /* the Size setting is a share of the tablet's base: 100 % there is 125 % of a phone's */
     start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
     set_screen(&TABLET13);
@@ -2144,6 +2135,59 @@ static void test_tablet(void)
     touch_configure(t, &s, NULL);
     touch_control(t, TC_PEDAL, NULL, NULL, &r_100);
     CHECK(fabsf(r_auto - 11.6f * 1.25f) < 0.3f && fabsf(r_auto - r_100) < 0.01f);
+}
+
+/* The default places on the phones the first on-screen runs used (the lead's report, finding 226):
+   the iPhone 17 Pro Max (153.6 x 70.7 mm, home indicator 3.2 mm, the Dynamic Island's 9.9 mm band
+   on either side) and the Mi 11i (its cutout band on the right, a 5.2 mm top strip). Every preset,
+   hand and attack mode: every control on the screen, 3 mm apart (the cutout once pushed SLIDE onto
+   HOP), none over the cutout; the top buttons clear of the moved HUD (the speedometer and its
+   PUNCH meter reach about 0.9 of the height across from the HUD's corner); SKIP clear of the
+   attract demo's centred PRESS ANY BUTTON TO EXIT (35-65 % across) and under the action thumb. */
+static void test_phone_defaults(void)
+{
+    static const TouchScreen screens[3] = {
+        {153.6f, 70.7f, 0, 0, 0, 3.2f, 0, 0, 9.9f, 70.7f},             /* island on the left */
+        {153.6f, 70.7f, 0, 0, 0, 3.2f, 143.7f, 0, 153.6f, 70.7f},      /* island on the right */
+        {154.4f, 69.6f, 0, 5.2f, 0, 0, 149.3f, 0, 154.4f, 69.6f},      /* the Mi 11i */
+    };
+    for (int i = 0; i < 3; i++)
+        for (int preset = 0; preset < 2; preset++)
+            for (int left = 0; left < 2; left++)
+                for (int attacks = 0; attacks < 2; attacks++) {
+                    const TouchScreen *sc = &screens[i];
+                    start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, attacks);
+                    TouchSettings s = *touch_settings(t);
+                    s.left_handed = left;
+                    touch_configure(t, &s, sc);
+                    CHECK(!touch_tablet(t));
+                    check_layout_clear(3.0f * 0.99f, sc->width, sc->height);
+                    for (int c = 0; c < TC_COUNT; c++) {
+                        float x, y, hw, hh;
+                        if (c == TC_TRICK || !touch_control(t, c, &x, &y, NULL)) continue;
+                        touch_control_size(t, c, &hw, &hh);
+                        int over = x + hw > sc->cut_x0 && x - hw < sc->cut_x1;
+                        if (over) fprintf(stderr, "test_touch: control %d over the cutout (screen %d)\n", c, i);
+                        CHECK(!over);
+                    }
+                    float hud = 0.9f * sc->height;
+                    for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
+                        float x, y, hw, hh;
+                        touch_control(t, c, &x, &y, NULL);
+                        touch_control_size(t, c, &hw, &hh);
+                        CHECK(left ? x + hw < sc->width - hud : x - hw > hud);
+                        CHECK(y - hh >= sc->strip_top);
+                    }
+                    game.attract = 1;
+                    field();
+                    float x, y;
+                    CHECK(touch_target(t, TOUCH_TARGET_SKIP, 0, &x, &y));
+                    CHECK(x + 15 < 0.35f * sc->width || x - 15 > 0.65f * sc->width);
+                    CHECK(left ? x < sc->width / 2 : x > sc->width / 2);
+                    CHECK(x - 15 > sc->cut_x1 || x + 15 < sc->cut_x0);
+                    game.attract = 0;
+                    field();
+                }
 }
 
 /* touch_edits as 0.8.0 wrote them (its touch_layout_format: "%.1f,%.1f,%.2f", sizes 0.60-1.60):
@@ -2330,6 +2374,7 @@ int main(void)
     test_size_range();
     test_screen_bounds();
     test_tablet();
+    test_phone_defaults();
     test_old_edits();
     test_undo_redo();
     test_editor_alone();

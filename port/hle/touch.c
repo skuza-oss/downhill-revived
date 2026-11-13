@@ -537,11 +537,31 @@ static void place_xy(const Touch *t, const Place *p, float *x, float *y)
     else *x = p->px * REF_W / 100, *y = p->py * REF_H / 100;
 }
 
-/* A tablet's top buttons (Pause / START and camera / SELECT): their phone place, the screen's
-   top-left corner, is out of a thumb's reach on a tablet, so they sit in a row just above the
-   right cluster's touch areas (its top before the player's edits), the Pause button at the edge;
-   the left hand mirrors it with everything else. */
-static void tablet_top_place(const Touch *t, int c, int hud_moved, float *x, float *y)
+/* Where the action side's usable screen ends (right-handed x): the edge, less its gesture strip
+   and the camera cutout's band when the cutout is on that side. */
+static float action_edge(const Touch *t)
+{
+    const TouchScreen *s = &t->screen;
+    float W = s->width;
+    int cut = s->cut_x1 > s->cut_x0 && s->cut_y1 > s->cut_y0;
+    if (right_handed(t)) {
+        float e = W - s->strip_right;
+        return cut && s->cut_x0 > W / 2 ? fminf(e, s->cut_x0) : e;
+    }
+    float e = W - s->strip_left;
+    return cut && s->cut_x1 < W / 2 ? fminf(e, W - s->cut_x1) : e;
+}
+
+/* The top buttons (Pause / START and camera / SELECT; finding 226). 0.8.0 put them in the top-left
+   corner, on phones as on tablets, where the race HUD the touch controls move (the speedometer and
+   the PUNCH meter beside it, finding 141's HUD hook) reaches about 0.9 of the screen's height
+   across: the buttons covered the meter's end and its label (the iOS Simulator's run, finding
+   224), and on a tablet the corner is out of a thumb's reach. Now they sit in a row just above the
+   action cluster's touch areas (its top before the player's edits), Pause at the action side's
+   edge, clear of the cutout and the gesture strip; the left hand mirrors it (its HUD goes to the
+   top right, the buttons to the top left). The game's centred messages stay clear (they start
+   about 36 % across). */
+static void top_place(const Touch *t, int c, int hud_moved, float *x, float *y)
 {
     const TouchSettings *st = &t->set;
     float top = t->screen.height;
@@ -556,9 +576,36 @@ static void tablet_top_place(const Touch *t, int c, int hud_moved, float *x, flo
     Place me;
     place_of(st->preset, TC_PAUSE, st->attacks, hud_moved, &me);
     float hw = me.w * REF_W / 200 * t->bs, hh = me.h * REF_H / 200 * t->bs;
-    float pause_x = t->screen.width - t->screen.strip_right - 2.0f - hw * AREA_GROW;
-    *y = top - GAP_MM - hh * AREA_GROW;
+    float pause_x = action_edge(t) - 2.0f - hw * AREA_GROW;
+    *y = fmaxf(top - GAP_MM - hh * AREA_GROW, t->screen.strip_top + 1.0f + hh);
     *x = c == TC_PAUSE ? pause_x : pause_x - 2 * hw * AREA_GROW - GAP_MM;
+}
+
+/* The camera cutout and the default layout (finding 226): how far each half's controls move away
+   from a cutout on its side so none of them is over it. 0.8.0 moved only the control that was
+   over it, into its neighbours (the Mi 11i's Classic ○, the iPhone's Thumb zones SLIDE onto HOP
+   with Hand Left), which also locked 0.8.0's editor on such a screen; the whole half now moves
+   together, so its gaps stay. From the places before the player's edits, so a drag never moves
+   the others. */
+static void cutout_shift(const Touch *t, int hud_moved, int current, float *left, float *right)
+{
+    const TouchScreen *sc = &t->screen;
+    const TouchSettings *st = &t->set;
+    float W = sc->width;
+    *left = *right = 0;
+    if (!(sc->cut_x1 > sc->cut_x0 && sc->cut_y1 > sc->cut_y0)) return;
+    for (int c = 0; c < TC_COUNT; c++) {
+        Place p;
+        if (c == TC_TRICK || !place_of(st->preset, c, st->attacks, hud_moved, &p)) continue;
+        float x, y;
+        if (current && (c == TC_CAMERA || c == TC_PAUSE)) top_place(t, c, hud_moved, &x, &y);
+        else place_xy(t, &p, &x, &y);
+        x = mirror_x(t, x);
+        float rx = p.w * REF_W / 200 * (c == TC_STICK ? 1 : t->bs), ry = p.shape == SHAPE_BOX ? p.h * REF_H / 200 * t->bs : rx;
+        if (x + rx < sc->cut_x0 || x - rx > sc->cut_x1 || y + ry < sc->cut_y0 || y - ry > sc->cut_y1) continue;
+        if (sc->cut_x1 < W / 2) *left = fmaxf(*left, sc->cut_x1 + 1 - (x - rx));
+        else *right = fmaxf(*right, x + rx + 1 - sc->cut_x0);
+    }
 }
 
 /* The layout for the settings and the screen. */
@@ -576,6 +623,10 @@ static void lay_out(Touch *t, int hud_moved)
     if (s < 0.5f) s = 0.5f;
     t->s = s;
     t->bs = touch_button_scale(s / base) * base;   /* a phone: touch_button_scale(s), as before */
+    /* a preset with 0.8.0's edits keeps 0.8.0's places whole (the top buttons, the cutout's push) */
+    int current = !st->legacy[st->preset == TOUCH_CLASSIC];
+    float shift_left = 0, shift_right = 0;
+    if (current) cutout_shift(t, hud_moved, current, &shift_left, &shift_right);
     for (int c = 0; c < TC_COUNT; c++) {
         Place p;
         Ctl *k = &t->ctl[c];
@@ -584,8 +635,9 @@ static void lay_out(Touch *t, int hud_moved)
         float w = p.w * REF_W / 100, h = p.h * REF_H / 100;
         float scale = t->bs;
         float x, y;
-        if (t->tablet && (c == TC_CAMERA || c == TC_PAUSE)) tablet_top_place(t, c, hud_moved, &x, &y);
+        if (current && (c == TC_CAMERA || c == TC_PAUSE)) top_place(t, c, hud_moved, &x, &y);
         else place_xy(t, &p, &x, &y);
+        float side_x = mirror_x(t, x);   /* which half it belongs to (cutout_shift) */
         const TouchEdit *e = &st->edit[st->preset == TOUCH_CLASSIC][c];
         int dpad = c == TC_STICK && st->dpad;
         if (c == TC_STICK) t->dpad_fit = 1.0f;
@@ -595,7 +647,7 @@ static void lay_out(Touch *t, int hud_moved)
         if (c == TC_TRICK) scale = e->size * st->trick_size / 31.0f;   /* its own setting */
         if (c == TC_STICK) scale = 1;
         k->on = 1;
-        k->x = mirror_x(t, x);
+        k->x = mirror_x(t, x) + (side_x < W / 2 ? shift_left : -shift_right);
         k->y = y;
         k->box = p.shape == SHAPE_BOX;
         k->r = w / 2 * scale;
@@ -610,7 +662,8 @@ static void lay_out(Touch *t, int hud_moved)
             k->y = 2 * ry >= H ? H / 2 : clampf(k->y, ry, H - ry);
         }
     }
-    /* the camera cutout (read at run time) is kept clear: a control over it moves inward */
+    /* the camera cutout (read at run time) is kept clear: a control still over it (an edited one,
+       or any of a 0.8.0 layout) moves inward */
     const TouchScreen *sc = &t->screen;
     if (sc->cut_x1 > sc->cut_x0 && sc->cut_y1 > sc->cut_y0)
         for (int c = 0; c < TC_COUNT; c++) {
@@ -634,8 +687,8 @@ static void lay_out(Touch *t, int hud_moved)
             float edge = mirror_x(t, k->x) - k->r * AREA_GROW - GAP_MM;
             if (edge < x1) x1 = edge;
         }
-        /* a tablet's top buttons are on the other side (tablet_top_place): the whole height steers */
-        top = t->tablet ? t->screen.strip_top : t->ctl[TC_CAMERA].y + t->ctl[TC_CAMERA].hh * AREA_GROW + GAP_MM;
+        /* the top buttons are on the other side (top_place): the whole height steers */
+        top = current ? t->screen.strip_top : t->ctl[TC_CAMERA].y + t->ctl[TC_CAMERA].hh * AREA_GROW + GAP_MM;
     }
     t->steer_x0 = left, t->steer_x1 = x1, t->steer_y0 = top, t->steer_y1 = H - t->screen.strip_bottom;
     if (!right_handed(t)) {   /* mirrored: the area measured from the right strip */
@@ -1202,11 +1255,11 @@ static Box code_box(const Touch *t, int b)
    at the top and of the places the race controls take later. */
 static Box skip_box(const Touch *t)
 {
-    /* a tablet's middle is out of both thumbs' reach (finding 226): under the right thumb (the
-       action side; Hand Left mirrors it), its edge 8 mm in, 40 % of the height up */
-    if (big_screen(t))
-        return (Box){mirror_x(t, t->screen.width - t->screen.strip_right - 8.0f - 15.0f), t->screen.height * 0.6f, 15.0f, 5.5f};
-    return (Box){t->screen.width / 2, t->screen.height * 0.86f, 15.0f, 5.5f};
+    /* under the right thumb (the action side; Hand Left mirrors it), its edge 8 mm in from the
+       usable edge (finding 226): low in the middle (0.8.0) it covered the attract demo's own PRESS
+       ANY BUTTON TO EXIT, and a tablet's middle is out of both thumbs' reach (40 % up there) */
+    float x = mirror_x(t, action_edge(t) - 8.0f - 15.0f);
+    return (Box){x, t->screen.height * (big_screen(t) ? 0.6f : 0.86f), 15.0f, 5.5f};
 }
 
 static int skip_hit(const Touch *t, float x, float y)
@@ -1250,6 +1303,15 @@ static Box editor_box(const Touch *t, int b)
     place_of(t->set.preset, TC_PAUSE, t->set.attacks, 1, &pau);
     float hw = cam.w * REF_W / 200, y = cam.py * REF_H / 100, hh = cam.h * REF_H / 200;
     float a0 = mirror_x(t, cam.px * REF_W / 100), a1 = mirror_x(t, pau.px * REF_W / 100);
+    if (!t->set.legacy[t->set.preset == TOUCH_CLASSIC]) {   /* the top buttons' row (top_place, before edits) */
+        float cx, cy, px, py;
+        top_place(t, TC_CAMERA, t->set.hud_moved, &cx, &cy);
+        top_place(t, TC_PAUSE, t->set.hud_moved, &px, &py);
+        hw = pau.w * REF_W / 200 * t->bs;
+        a0 = mirror_x(t, cx), a1 = mirror_x(t, px);
+        if (fminf(cy, py) - pau.h * REF_H / 200 * t->bs > y + hh + 1)   /* below the bar's row: no obstacle */
+            a0 = a1 = W + hw + 2;
+    }
     float span0 = fminf(a0, a1) - hw - 2, span1 = fmaxf(a0, a1) + hw + 2;   /* the top buttons, a 2 mm margin */
     float group_a = w[EDIT_GROUND] + 2 + w[EDIT_AIR], group_b = -2;
     for (int i = EDIT_MINUS; i < EDIT_BUTTONS; i++) group_b += w[i] + 2;
