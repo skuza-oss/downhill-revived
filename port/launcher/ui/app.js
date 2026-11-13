@@ -45,6 +45,7 @@ const TABS = [
     { key: 'touch_hand', label: 'row.touchHand', hint: 'row.touchHand.hint', type: 'seg', needs: 'touch-settings' },
     { key: 'touch_steer', label: 'row.touchSteer', hint: 'row.touchSteer.hint', type: 'seg', needs: 'touch-settings' },
     { key: 'touch_size', label: 'row.touchSize', hint: 'row.touchSize.hint', type: 'select', needs: 'touch-settings' },
+    { key: 'touch_style', label: 'row.touchStyle', hint: 'row.touchStyle.hint', type: 'seg', needs: 'touch-settings' },
     { label: 'row.touchEdit', hint: 'row.touchEdit.hint', type: 'action', button: 'row.touchEdit.button', icon: 'i-pencil',
       run: () => play({ editTouchLayout: true }), needs: 'touch-editor' },
   ]],

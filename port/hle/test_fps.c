@@ -117,7 +117,9 @@ int main(int argc,char **argv)
             port_clock_wait(NULL); port_clock_step();
             if (online) assert(port_fps_behind()>16);   /* without the rebase: 17 s owed */
             else assert(port_fps_behind()<.04);        /* offline the cap drops it */
-            port_clock_rebase();                        /* app_away_wait at the return */
+            assert(!port_clock_after_away(0));          /* no return: the debt stays */
+            if (online) assert(port_fps_behind()>16);
+            assert(port_clock_after_away(1));           /* the return, as kernel.c takes it */
             fake_wall+=1.0/n;
             port_clock_wait(NULL); port_clock_step();
             assert(port_step()<=2.000001 && port_fps_behind()<.04);

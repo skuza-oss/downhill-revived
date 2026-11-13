@@ -163,8 +163,8 @@ The page is the desktop's and Android's `port/launcher/ui`, packed by `build_ios
    iPhone > Downhill Revived) and moves it into place.
 3. (medium): `port/ios/ipa_audit.py`, the one audit of every release IPA (45b8b9cd); negative tests
    through `ios_release` itself (`test_ipa_audit.py`).
-Risk: the background now waits for the game and renderer to stop (2a7e59f1); the log's order shows
-it (below).
+Risk: the background waited for the game thread to stop (2a7e59f1); replaced in round 2 (below) by a
+hold of the render thread set by the callback itself (ea901d3f).
 
 ## What was run
 
@@ -300,12 +300,69 @@ see Result.
   editor by drag (the tap tool has no held drag), the quarter turn on a screenshot.
 - Strings: none were added to `en.json` (the iOS bridge reuses Android's codes and words).
 
+## Round 2 (the review `sol-lane227`)
+
+1. **Settings saved at once, PLAY before a save ended** (d162f052). Every page message ran on a
+   concurrent queue, and `dhd_settings_save` reads, changes and writes the whole file with one fixed
+   temporary name, so two saves could lose one and PLAY could start the game mid-write. The calls
+   that touch dhd.ini (snapshot with its disc path correction, save_setting, play) take a ticket where
+   the messages arrive one by one (the main thread) and run in that order on any thread; the game's
+   own disc path correction takes one too (`launcher_settings_run`); after PLAY a settings call is
+   refused. Long calls stay off it. `test_launcher_order` (24 saves and PLAY on 26 threads with a
+   read-modify-write writer: no key lost, PLAY after every earlier save, a later save refused; it
+   fails without the order), `test_bridge_ios` (unawaited saves then PLAY reach the app in order).
+   For lane 228's crate fix: on iOS dhd.ini lives in Documents, visible in the Files app, so its
+   temporary file shows there while it exists; the game's own saves (in-game SETTINGS) and the
+   launcher never write at once on iOS now (the launcher refuses after PLAY), but the game writes
+   from its own thread and the crate should still lock per path.
+2. **The edge Back cancelled a steering finger** (9db4c6ce). The recognizer had no delegate, so
+   `gestureRecognizerShouldBegin` was never asked. MetalGameView is the delegate now; touches are
+   not delayed (begin or end); a recognized Back cancels only its own finger; a refused swipe is
+   logged. `test_launcher_ios` fails without the delegate. By tap (mobile-mcp, round 2's build): the
+   swipe's touches reached the game (`touch log: down ... up`, no cancel), but the swipe was not
+   recognized as Back on the memory card notice either, unlike round 1's build (t04); the tool was
+   failing under the Mac's memory pressure (`context deadline exceeded`) and its device
+   orientation had flipped once. Not settled: whether the delegate stops a real edge swipe from
+   being recognized in menus. The legend taps (Back) remain the menus' way back either way.
+3. **The audit ignored names** (125ee253): member and folder names through the same patterns, in
+   `ios_release` and the staged-app audit; the licence entries `ios_release` writes are audited too.
+   New negative cases: a UDID file name, a private literal as a folder name (both routes), a
+   symbolic link, a fat Mach-O with one signed slice; the name cases fail without the name scan.
+4. **The background's acknowledgement** (ea901d3f). The platform's callback (iOS's resign-active and
+   background, Android's lifecycle watch) holds the native render thread between pictures itself
+   (`gs_render_hold`): it finishes the picture under way, takes no new one, and the fields stay
+   queued with their uploads; iOS waits until it has none under way (`gs_render_quiet`, under the
+   render queue's lock, each absence afresh: no stale flag across a flip) and does not wait for the
+   game thread. The return lets it go (`app_away_wait` once the new surface is made, or
+   `gs_app_back` when the game never got to its wait). Guaranteed: no new GPU work or present from
+   the render thread after the callback returns. Not claimed: that GPU work submitted before has
+   finished (it may still run; iOS lets it), nor anything about the GS worker's own exact Z-probe
+   submits on iOS (not routed through the render thread; it blocks on the held queue within two
+   fields). Forced slow case, `DHD_TEST_SLOW_AWAY=4000` in a race (the iPhone Simulator): "ios: off the
+   screen: the renderer is held, no picture under way (0 ms)" came before "gs: test: the game thread
+   reaches the background's wait 4000 ms late", then the wait, the return, the pause.
+5. **A superseded import landing over a newer one** (73cab42e): each pick or retry begins a
+   generation; an import renames (or moves a file from Documents) only while its generation is the
+   newest, checked and done under one lock (`disc_publish`). `test_disc_copy`.
+6. **Tests that drive the real return** (857d6775): the came-back flag is `app_away.c` and the
+   kernel's reaction is fps.c's `port_clock_after_away`, which `test_fps away` now drives;
+   `test_app_away`: one came-back per return, an offline race's pause and none online at the
+   return (`touch_pad_lost`), finding 220's `sync_clock_stood` counting a 17 s absence once with
+   stamps that neither jump back nor stall.
+7. **"QUIT COWNHILL REVIVED?"**: not fixed. Ruled out: the text (exit_menu.c says DOWNHILL); the D
+   glyph or its atlas cell (the same title draws REVIVED's D right in the same draw, and the JOIN WITH
+   A CODE title draws CODE's D right); a cell clobbered by the button icons (they paint 0xA0-0xBA,
+   not letters). What remains: the D is drawn wrong only where an italic glyph follows it closely
+   (D then O), so the next glyph's quad over-drawing the D's right side (a blend or alpha-test
+   difference of the sharp font's copy against the game's font) is the likely cause; checking it
+   needs the same dialog with `font = original` and on Windows, not done in this round.
+
 ## Result
 
 The iOS app opens into the shared launcher (portrait and landscape, every page, the phone calls
 through the shared code), PLAY starts the game in landscape, EXIT GAME closes the app and the next
 start says how the run ended; leaving the app in an offline race pauses it at the return with no
-time caught up, and the background waits for the game and its renderer to stop; an iPad's game
+time caught up, and the background holds the render thread before the callback returns (round 2); an iPad's game
 fills its real window; touch prompts until a controller is used; SETTINGS shows Android's rows and
 can be left by touch; the code field can be cancelled. Shared changes: `phone.c` (Android's rows,
 quote and update check), `app_away_wait` (Android gets the same pause and clock rule), our pages'

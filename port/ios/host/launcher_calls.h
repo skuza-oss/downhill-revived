@@ -44,6 +44,20 @@ int launcher_disc_path(const LauncherHost *h, char *out, size_t size);
 /* The setting "launcher" is off and the disc is ready: the app starts the game at once. */
 int launcher_starts_directly(const LauncherHost *h);
 
+/* The settings' order (finding 227). dhd.ini is read, changed and written whole by each save
+   (dhd_settings_save), so two saves at once could lose one, and the game must not read it while a
+   save is still writing. The calls that touch it (snapshot, which may correct the disc path,
+   save_setting, and play, which hands the file to the game) take a ticket where the page's messages
+   arrive one by one (the web view's handler, the main thread) and run one at a time in that order,
+   on whatever thread; the game's own correction at its start takes one too (launcher_settings_run).
+   After PLAY a settings call is refused: the file is the game's. The long calls (the update check,
+   the online check's hashing, the copy) take none. */
+int launcher_settings_call(const char *message);   /* 1 for a call that takes a ticket */
+unsigned long launcher_order_ticket(void);
+void launcher_receive_ordered(const LauncherHost *h, unsigned long ticket, const char *message);
+/* fn(context) in the settings' order (blocks until the calls before it are done; not from inside one) */
+void launcher_settings_run(void (*fn)(void *context), void *context);
+
 /* One message from the page; may block (the update check, the online check's hashing): call it
    on a worker thread. */
 void launcher_receive(const LauncherHost *h, const char *message);

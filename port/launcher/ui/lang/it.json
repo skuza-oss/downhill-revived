@@ -145,6 +145,8 @@
   "row.touchSteer.hint": "Lo stick, inclinare il dispositivo o un D-pad.",
   "row.touchSize": "Size",
   "row.touchSize.hint": "Auto adatta i comandi al tuo schermo.",
+  "row.touchStyle": "Button Style",
+  "row.touchStyle.hint": "Actions mostra cosa fa ogni pulsante, con il suo tasto PS2 in un piccolo badge; Symbols mostra solo i simboli della PS2.",
   "row.touchEdit": "Modifica il layout touch",
   "row.touchEdit.hint": "Avvia il gioco nel suo editor: trascina i comandi dove riposano i pollici.",
   "row.touchEdit.button": "Edit Layout",

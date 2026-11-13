@@ -58,6 +58,18 @@ class LauncherIOS(unittest.TestCase):
         self.assertIn('requestGeometryUpdateWithPreferences', main)
         self.assertIn('turned a quarter in a portrait window', read('port/ios/render/metal_bridge.m'))
 
+    def test_edge_back_never_takes_a_race_finger(self):
+        # the review of lane 227: without the delegate UIKit never asked gestureRecognizerShouldBegin
+        # and a recognized edge swipe cancelled the steering finger (finding 227)
+        bridge = read('port/ios/render/metal_bridge.m')
+        self.assertIn('@interface MetalGameView : UIView <UIGestureRecognizerDelegate>', bridge)
+        self.assertIn('back.delegate = self;', bridge)
+        self.assertIn('back.delaysTouchesBegan = NO;', bridge)
+        self.assertIn('back.delaysTouchesEnded = NO;', bridge)
+        should = bridge.split('- (BOOL)gestureRecognizerShouldBegin:')[1].split('}')[0]
+        self.assertIn('ios_touch_back_allowed()', should)
+        self.assertIn('if (ios_touch_back_allowed()) push(EV_BACK', read('port/host/touch_host.c'))
+
     def test_bridge_serves_only_its_own_files(self):
         launcher = read('port/ios/app/launcher.m')
         android = read('port/android/app/src/main/java/app/downhillrevived/LauncherActivity.java')

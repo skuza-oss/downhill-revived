@@ -40,6 +40,7 @@ static const SettingChoice setting_choices_touch_stick_range[] = {{"8", "8 mm"},
 static const SettingChoice setting_choices_touch_trick_stick[] = {{"25", "25 mm"}, {"28", "28 mm"}, {"31", "31 mm"}, {"34", "34 mm"}, {"37", "37 mm"}};
 static const SettingChoice setting_choices_touch_labels[] = {{"auto", "Auto"}, {"always", "Always"}, {"off", "Off"}};
 static const SettingChoice setting_choices_touch_attacks[] = {{"flick", "Flick"}, {"buttons", "Buttons"}};
+static const SettingChoice setting_choices_touch_style[] = {{"actions", "Actions"}, {"symbols", "Symbols"}};
 static const SettingChoice setting_choices_touch_vibration[] = {{"0", "Off"}, {"1", "On"}};
 static const SettingChoice setting_choices_touch_with_pad[] = {{"hide", "Hide"}, {"show", "Show"}};
 static const SettingChoice setting_choices_touch_tilt_strength[] = {{"0", "0%"}, {"10", "10%"}, {"20", "20%"}, {"30", "30%"}, {"40", "40%"}, {"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}};
@@ -81,6 +82,7 @@ static const SettingInfo setting_table[] = {
     {"touch_trick_stick", "DHD_TOUCH_TRICK_STICK", "31", setting_choices_touch_trick_stick, 5},
     {"touch_labels", "DHD_TOUCH_LABELS", "auto", setting_choices_touch_labels, 3},
     {"touch_attacks", "DHD_TOUCH_ATTACKS", "flick", setting_choices_touch_attacks, 2},
+    {"touch_style", "DHD_TOUCH_STYLE", "actions", setting_choices_touch_style, 2},
     {"touch_vibration", "DHD_TOUCH_VIBRATION", "1", setting_choices_touch_vibration, 2},
     {"touch_with_pad", "DHD_TOUCH_WITH_PAD", "hide", setting_choices_touch_with_pad, 2},
     {"touch_tilt_strength", "DHD_TOUCH_TILT_STRENGTH", "50", setting_choices_touch_tilt_strength, 11},

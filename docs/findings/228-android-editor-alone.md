@@ -314,5 +314,5 @@ Open:
   frame): slow storage can stall a frame; no directory sync after the rename, so a power cut right
   after a save may lose that save (never the file); a replaced dhd.ini doesn't keep custom
   permissions. Not changed (the review's "can wait").
-- iOS's bridge runs its calls on a concurrent queue (`launcher.m`): the crate's lock and the page's
-  wait before `play` cover its saves; an ordered queue as on Android is lane 227's to add if wanted.
+- (Closed by lane 227's round 2: iOS's bridge now serves dhd.ini's calls and PLAY in arrival order,
+  a ticket each, `launcher_calls.h`.)

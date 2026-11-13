@@ -49,6 +49,12 @@ This project builds on the work of others:
 The full notices of the code adapted into this repository are kept with it
 (`port/hle/audio_licenses/`, file headers).
 
+The touch controls' action pictures (`port/render/src/present/touch_icons.txt`, finding 229) are
+the project's own drawings, written as vector shapes by hand and released under its licence; the
+idea of touch buttons that show what they do comes from the community iOS fork
+`bagasromadon/downhill-revived-ios-newbutton` (a fork of `ribeirogustav/downhill-revived-ios`),
+whose pictures are not used.
+
 The button icons in `port/res/buttons/` (A, B, X, Y, LB, RB, LT, RT, L, R, ZL, ZR) are the
 project's own art, made for it with an image generator: no brand logos or colours, no images from
 the game's disc. They are released with the project under its licence (GPL-3.0-or-later).

@@ -12,6 +12,7 @@ int port_fps_max(void);  /* 240, or DHD_FPS_MAX when lower */
 int port_delta_clock(void);           /* the delta-time clock's code paths are on */
 void port_clock_wall(int enabled);    /* paced: steps follow the wall clock (kernel_init) */
 void port_clock_rebase(void);         /* a wait that is no game time: the next step starts from now */
+int port_clock_after_away(int came_back);  /* a phone's app back from the background (kernel.c, finding 227): rebased; came_back */
 double port_frame_period(void);
 double port_vblank_seconds(void);  /* the mixer's time for one VBLANK on the delta-time clock */
 int port_input_stamp(int legacy_field);

@@ -90,6 +90,7 @@ static NSString *gb(uint64_t bytes) { return [NSString stringWithFormat:@"%.1f G
     volatile int cancel;   /* a newer pick replaced it: it publishes nothing and sends nothing more */
 }
 @property (nonatomic) long long number;
+@property (nonatomic) long long generation;   /* disc_publish's: it lands only while the newest */
 @property (nonatomic, strong) NSURL *url;
 @end
 @implementation DiscJob
@@ -150,7 +151,9 @@ static void job_run(DiscJob *job) {
         NSString *resolved = source.URLByResolvingSymlinksInPath.path, *home = [docs stringByResolvingSymlinksInPath];
         if ([resolved hasPrefix:[home stringByAppendingString:@"/"]]) {
             if (![resolved isEqualToString:[disc stringByResolvingSymlinksInPath]]) {
-                if (rename(path, disc.fileSystemRepresentation) != 0) {
+                int moved = disc_publish(job.generation, path, disc.fileSystemRepresentation);
+                if (moved == 1) return;   /* a newer pick replaced this one: nothing moved, nothing said */
+                if (moved != 0) {
                     launcher_coded(coded, sizeof coded, "disc.problem.copyFailed", "detail", strerror(errno), (const char *)NULL);
                     job_problem(job, coded, 1);
                     return;
@@ -203,9 +206,13 @@ static void job_run(DiscJob *job) {
             job_problem(job, bad, 0);
             return;
         }
-        if (job->cancel || rename(temp.fileSystemRepresentation, disc.fileSystemRepresentation) != 0) {
+        /* in place only while this is the newest pick, checked and renamed under one lock
+           (disc_publish): a superseded import never lands over a newer choice */
+        int published = job->cancel ? 1 : disc_publish(job.generation, temp.fileSystemRepresentation,
+                                                       disc.fileSystemRepresentation);
+        if (published != 0) {
             remove(temp.fileSystemRepresentation);
-            if (!job->cancel) job_problem(job, "The copy can't be stored.", 0);
+            if (published < 0) job_problem(job, "The copy can't be stored.", 0);
             return;
         }
         remove([docs stringByAppendingPathComponent:@"iso-check.txt"].fileSystemRepresentation);  /* the old file's answer */
@@ -300,7 +307,15 @@ static void job_run(DiscJob *job) {
     (void)controller;
     if (![message.body isKindOfClass:NSString.class] || ![message.frameInfo.request.URL.scheme isEqualToString:SCHEME]) return;
     NSString *text = message.body;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ launcher_receive(&s_host, text.UTF8String); });
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+    if (launcher_settings_call(text.UTF8String)) {
+        /* dhd.ini's calls in the order they came (launcher_calls.h): the ticket is taken here, on
+           the main thread where the page's messages arrive one by one */
+        unsigned long ticket = launcher_order_ticket();
+        dispatch_async(queue, ^{ launcher_receive_ordered(&s_host, ticket, text.UTF8String); });
+    } else {
+        dispatch_async(queue, ^{ launcher_receive(&s_host, text.UTF8String); });
+    }
 }
 
 - (void)deliver:(NSString *)text {
@@ -343,6 +358,7 @@ static void job_run(DiscJob *job) {
     if (before) before->cancel = 1;
     DiscJob *job = [DiscJob new];
     job.number = atomic_fetch_add(&s_jobs, 1) + 1;
+    job.generation = disc_publish_begin();   /* every older import is superseded from here */
     job.url = url;
     self.job = job;
     NSThread *thread = [[NSThread alloc] initWithBlock:^{ job_run(job); }];

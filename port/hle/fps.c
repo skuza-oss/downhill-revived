@@ -54,6 +54,9 @@ static double vblank_wall, vblank_debt;
 void port_clock_wall(int enabled) { wall_mode=enabled; delta=-1; port_clock_rebase(); }
 /* A wait that is no game time (a lobby, an online start): the next step starts from now. */
 void port_clock_rebase(void) { previous_wall=0; owed=0; vblank_wall=0; vblank_debt=0; }
+/* A phone's app came back from the background (the host's came-back flag, read by kernel.c after the
+   present that waited, finding 227): the time away is no game time, offline and online. */
+int port_clock_after_away(int came_back) { if (came_back) port_clock_rebase(); return came_back; }
 /* The delta-time clock's code paths (finding 067's fractional steps) are on: paced play at any
    rate, any rate but 60, or DHD_STEP_CLOCK=1 (a deterministic run of those paths at 60, for the
    rate drift check). Only a deterministic run at 60 keeps the original arithmetic, exactly. */

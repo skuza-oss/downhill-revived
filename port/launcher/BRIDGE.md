@@ -39,9 +39,8 @@ outstanding save stays pending, so the next try waits for it again. A phone's na
 (which may save `iso`), `save_setting` and `play` one at a time in the order they arrived (Android:
 `LauncherBridge.ordered`, one single-thread queue) and keeps long calls (`check_disc`'s hashing,
 `check_update`, the picker) off that queue; the settings crate's `save` is itself one transaction at
-a time per process, with a temporary file of its own. iOS (`launcher.m`) runs every call on a
-concurrent queue: the crate's lock and the page's wait before `play` cover its saves; an ordered
-queue there as on Android would also keep a `snapshot` from reading between two saves.
+a time per process, with a temporary file of its own. iOS does the same with a ticket per dhd.ini
+call, served in arrival order (`launcher_calls.h`, finding 227).
 
 ## Capabilities (`snapshot().caps`)
 
