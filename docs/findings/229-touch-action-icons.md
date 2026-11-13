@@ -34,7 +34,7 @@ Out of scope: new gameplay, a per-slot action swap (finding 226), portrait layou
 - [x] main b4ec64d7 (lane 227) merged in (13987911): only the generated findings index collided
 - [x] readability rounds at real size: a bolder fist, larger badges and pictures (252b0a43); badges
   that follow Button Icons, a size floor for pictures (f9840650)
-- [ ] captures and sheets, `check.py port`, state traces, the phone, the Simulator build: Result
+- [x] captures and sheets, `check.py port`, state traces, the phone, the Simulator build (Result)
 
 ## What each button does (the action table)
 
@@ -158,4 +158,54 @@ top put back on the edited bar, 8 checks fail; every earlier test passes unchang
 
 ## Surprises
 
+- R2 alone in the air does no trick. The spec behind finding 141 left it open ("R2 alone"); two
+  runs held R2 0.2 s and 1.2 s in jumps: no trick, no points, a normal landing, while R1 held 0.4 s
+  scored. So R2's air picture is "combines", not a trick of its own.
+- The first readability round failed at real size: a fist made of a box and grooves read as a
+  striped block, and 1.6 mm badges made "L3" and "R3" unreadable. Fixed by redrawing and by the
+  size rules (252b0a43, f9840650); the sheets in the Result are after those.
+- Continuous presented-frame captures every 0.1 or 0.25 s at 4x fall behind and then capture every
+  frame (2,000 PNGs, the game at about 4 fps); every 0.5 s on the frame clock keeps up. The capture
+  tool (outside the repository) picks pictures by the log's air and capture lines, which come in
+  order.
+- `package_release.py --platform android --out X` writes the native symbols to X (as lane 226
+  found); the APK is `build/android/DownhillRevived-<version>-android-experimental.apk`.
+
 ## Result
+
+**Default: Actions.** At real physical size (each capture scaled to the screen's millimetres at
+96 px per inch, the CSS reference pixel; a phone in the hand at 30-35 cm looks larger than a monitor
+at 60 cm, so this is the hard case), the Mi 11i, the iPhone 17 Pro Max and a 5.5-inch phone at
+Size Auto: every round button is told from its neighbours at a glance (the pedal's chainring, the
+two fists facing out, the brake lever, the slide, the arrowheads), the △ ◻ ○ ✕ badges and the L3 /
+R3 / R2 badges read, the shoulder bars' pictures and names read, and the air pictures (the star,
+the links) are clear. The two fists are told apart by their facing and their badge more than by
+their shape. At the smallest Size (70 %) the face buttons keep pictures that are just readable,
+and L3, R3 and the shoulder bars show their names as in Symbols. Tablets (iPad mini, 13-inch iPad)
+have larger buttons and read easily. Thumb zones reads in both styles because of its words.
+
+Checked:
+- `test_touch` (every earlier test, plus `test_moved_bar_steers`, `test_saved_layout_steers`,
+  `test_button_style`, `test_air_pictures`; each new test fails with its rule removed), on Windows
+  and on the Mac.
+- `python tools/check.py port -j 6`: OK on f9840650 (the last code commit), all 22 steps.
+- State traces of f9840650's build against `main-524948ba-ref-v3`: boot 600 of 600 rows equal,
+  race 5000 of 5000 (`state_diff.py` PASS; touch is off in them).
+- Captures (the PC build, hidden desktop, `DHD_TOUCH_MOUSE=1`, 4x, the frame clock and a scripted
+  pad with hops): Mi 11i, iPhone 17 Pro Max, a 5.5-inch phone (122 x 68 mm), iPad mini, 13-inch
+  iPad; Classic pad and Thumb zones; Symbols and Actions; on the ground and in a jump; Size Auto,
+  and Size 70 % on the phones (64 pictures, kept outside the repository with side-by-side and
+  real-size sheets).
+- The Mi 11i, a release-signed APK of 13987911's tree plus f9840650 (main b4ec64d7 merged), built
+  as lane 226's: the launcher's Touch tab shows Button Style (Actions | Symbols); the game's TOUCH
+  CONTROLS 1/3 shows it and changing it writes `touch_style`; the layout editor in Actions; SINGLE
+  EVENT races on Mt. Midoule in Classic pad (Actions on the ground and in jumps, then Symbols) and
+  Thumb zones (Symbols, then Actions on the ground and in the air); the owner's settings put back
+  through the page. The four save files are byte-identical before and after; dhd.ini differs by
+  one line, `touch_style = actions` (the default; the owner's file had no such line). The
+  published 0.8.0 APK is back on the phone, started once and exited through EXIT GAME.
+- iOS: the Simulator app builds on the Mac from f9840650 (BUILD SUCCEEDED); not launched.
+
+Not checked: Hand Left on the phone (unit tests and captures only through the layout code),
+Button Icons set to Xbox or Nintendo on a phone (unit test only), the steering fix on a phone
+(unit tests), an iPhone or iPad screen (no device; the Simulator build only).
