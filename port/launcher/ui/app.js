@@ -5,6 +5,9 @@
 'use strict';
 
 const call = bridge.call;
+// One setting change from its first write to its last (bridge.js, the handoff gate): PLAY and an
+// update wait for it as a whole.
+const operation = bridge.operation;
 const $ = (id) => document.getElementById(id);
 let caps = new Set();
 const has = (cap) => caps.has(cap);
@@ -109,7 +112,7 @@ async function write(key, value) {
 
 async function save(key, value, label) {
   try {
-    await write(key, value);
+    await operation(() => write(key, value));
     flash(t('settings.saved', { what: label }));
   } catch (e) {
     fail(errorText(e));
@@ -350,7 +353,7 @@ function control(row, off) {
       return el('button', { class: 'sw', role: 'switch', 'aria-checked': String(on), 'aria-label': name,
         onclick: async () => {
           try {
-            for (const k of EFFECTS) await write(k, on ? '1' : '0');
+            await operation(async () => { for (const k of EFFECTS) await write(k, on ? '1' : '0'); });
             flash(t('settings.saved', { what: label(t(on ? 'settings.off' : 'settings.on')) }));
           } catch (e) { fail(errorText(e)); }
           renderRows();
@@ -437,13 +440,15 @@ function renderRows() {
 async function resetTab() {
   const [key, rows] = tabs[state.tab];
   try {
-    // a text row is emptied (its default, the official server, stays the game's to name)
-    for (const row of rows) {
-      if (!row.key || ['disc', 'name', 'language', 'action'].includes(row.type)) continue;
-      if (row.type === 'performance') { for (const k of EFFECTS) await write(k, state.schema[k].default); continue; }
-      await write(row.key, row.type === 'text' ? '' : state.schema[row.key].default);
-    }
-    if (key === 'controls') await resetBindings();  // the keyboard's and both controllers' layouts
+    await operation(async () => {
+      // a text row is emptied (its default, the official server, stays the game's to name)
+      for (const row of rows) {
+        if (!row.key || ['disc', 'name', 'language', 'action'].includes(row.type)) continue;
+        if (row.type === 'performance') { for (const k of EFFECTS) await write(k, state.schema[k].default); continue; }
+        await write(row.key, row.type === 'text' ? '' : state.schema[row.key].default);
+      }
+      if (key === 'controls') await resetBindings();  // the keyboard's and both controllers' layouts
+    });
     flash(t('settings.tabReset', { tab: t(`tab.${key}`) }));
   } catch (e) {
     fail(errorText(e));
@@ -550,9 +555,20 @@ function renderRider() {
 }
 
 async function setName(raw) {
-  const name = await call('rider_name', { text: raw });
-  if (!name || name === get('name')) return;
-  await save('name', name, t('rider.saved', { name }));
+  // one operation from the name's check to its save: PLAY tapped while the name is being typed
+  // (the input's blur) waits for it
+  let saved = null;
+  try {
+    saved = await operation(async () => {
+      const name = await call('rider_name', { text: raw });
+      if (!name || name === get('name')) return null;
+      await write('name', name);
+      return name;
+    });
+  } catch (e) {
+    return fail(errorText(e));
+  }
+  if (saved) flash(t('rider.saved', { name: saved }));
   renderRider();
 }
 
@@ -903,7 +919,9 @@ async function play(options) {
     state.error = null;
     renderFooter();
   } catch (e) {
-    fail(errorText(e));
+    // a save that never answered (bridge.js, the handoff gate): the game did not start; try again
+    const retry = e && e.code === 'footer.handoffStuck' ? { label: t('footer.tryAgain'), icon: 'i-play', onclick: () => play(options) } : null;
+    fail(errorText(e), retry);
   }
 }
 

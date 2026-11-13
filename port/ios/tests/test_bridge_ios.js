@@ -17,7 +17,7 @@ const window = {
   postMessage: (data, origin, ports) => setImmediate(() => listeners.forEach((f) => f({ data, ports }))),
   webkit: { messageHandlers: { dhd: { postMessage: (text) => toApp.push(JSON.parse(text)) } } },
 };
-const page = { window, module: { exports: {} }, console, setTimeout, setImmediate };
+const page = { window, module: { exports: {} }, console, setTimeout, clearTimeout, setImmediate };
 vm.runInNewContext(fs.readFileSync(path.join(root, 'port/launcher/ui/bridge.js'), 'utf8'), page);
 const bridge = page.module.exports.messageBridge(window);
 const appWorld = { window, MessageChannel, console };
@@ -52,15 +52,21 @@ const wait = () => new Promise((r) => setTimeout(r, 20));
   await wait();
   appWorld.dhdDeliver(JSON.stringify({ id: 3, ok: false, error: 'not opening https://example.com/' }));
   await failed.then(() => assert.fail('an error rejects'), (e) => assert.match(e, /not opening/));
-  // PLAY right after saves the page didn't wait for: they reach the app in the order sent, which is
-  // the order the app's settings tickets follow (launcher_calls.c), so the game starts after them
+  // PLAY right after two saves: the page's gate (bridge.js, finding 228) holds PLAY until both have
+  // answered, and the saves reach the app in the order sent, which is the order the app's settings
+  // tickets follow (launcher_calls.c); so the game starts after them either way
   const before = toApp.length;
   bridge.call('save_setting', { key: 'scale', value: '3' });
   bridge.call('save_setting', { key: 'fps', value: '120' });
-  bridge.call('play', {});
+  const played = bridge.call('play', {});
   await wait();
-  assert.deepStrictEqual(toApp.slice(before).map((m) => m.call + (m.args.key ? ':' + m.args.key : '')),
-    ['save_setting:scale', 'save_setting:fps', 'play']);
+  const sent = () => toApp.slice(before).map((m) => m.call + (m.args.key ? ':' + m.args.key : ''));
+  assert.deepStrictEqual(sent(), ['save_setting:scale', 'save_setting:fps'], 'play waits for the saves');
+  for (const m of toApp.slice(before)) appWorld.dhdDeliver(JSON.stringify({ id: m.id, ok: true, value: null }));
+  await wait();
+  assert.deepStrictEqual(sent(), ['save_setting:scale', 'save_setting:fps', 'play']);
+  appWorld.dhdDeliver(JSON.stringify({ id: toApp[toApp.length - 1].id, ok: true, value: null }));
+  assert.strictEqual(await played, null);
   console.log('bridge_ios: the page and the app talk over the posted port');
   process.exit(0);   // the channel's ports would keep node waiting
 })().catch((e) => { console.error(e); process.exit(1); });

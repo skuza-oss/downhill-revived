@@ -217,6 +217,8 @@
   "footer.downloading": "Téléchargement de **{version}**, {done} sur {total} Mo",
   "footer.downloadingSize": "Téléchargement de **{version}**, {done} Mo",
   "footer.starting": "Démarrage du jeu…",
+  "footer.handoffStuck": "Un réglage est encore en cours d'enregistrement, le jeu n'a donc pas démarré. Réessayez dans un instant.",
+  "footer.handoffBusy": "Le jeu démarre : cette modification n'a pas été enregistrée.",
   "footer.dismiss": "Ignorer",
   "footer.support": "Soutenir",
   "footer.supportTitle": "Soutenez le projet sur Ko-fi",

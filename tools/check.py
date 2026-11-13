@@ -39,8 +39,11 @@ def steps(tier, jobs):
                     ('scan_retail', [PY, 'port/tools/scan_retail.py', 'build/host64-exe/dhd64.exe'], ROOT),
                     ('net_tests', [PY, 'port/net/build_tests.py'], ROOT),
                     ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT),
+                    # dhd.ini's own tests: saves at once, the Windows retries (findings 101, 228)
+                    ('settings_tests', [PY, 'port/tools/rustgs.py', 'test', '--', '-p', 'dhd_settings'], ROOT),
                     # the launcher page's logic: strings, the phones' bridge, the disc import, bindings (finding 225)
                     ('test_launcher_ui', ['node', 'port/launcher/test_launcher_ui.js'], ROOT),
+                    ('test_launcher_handoff', ['node', 'port/launcher/test_handoff.js'], ROOT),
                     ('test_launcher_controls', ['node', 'port/launcher/test_controls.js'], ROOT),
                     ('test_lang_check', [PY, 'tools/test_lang_check.py'], ROOT),
                     ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT),

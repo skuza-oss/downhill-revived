@@ -10,33 +10,79 @@
 // page never asks which platform it is on.
 'use strict';
 
-// The calls that write dhd.ini, and the ones that must wait for them (finding 228): PLAY starts a
-// game that reads dhd.ini at once, and an update replaces the launcher; each waits until every
-// write the page sent before it has answered (done or failed), so the game never starts on a file
-// the launcher is still writing. The native sides keep their own order too (Android's settings
-// queue, the settings crate's lock).
+// The handoff gate (finding 228): the calls that write dhd.ini, and the handoffs that must wait
+// for them. PLAY (the editor row's too) starts a game that reads dhd.ini at once, and an update
+// replaces the launcher. A setting operation (`operation`: one change from its first write to its
+// last, e.g. the three writes of Performance mode or a tab's reset) is one unit. A handoff waits
+// until no operation is in progress and no write is pending, looking again after every change (an
+// operation issues its next write only after the one before answered), and only then goes to the
+// native side, which keeps its own order too (Android's settings queue, the settings crate's lock).
+// Once a handoff has begun no new operation starts, no write goes out after it was sent, and a
+// second handoff (PLAY tapped twice, the editor row during the transition) is the same one. A
+// handoff that can't go within HANDOFF_WAIT_MS (a save that never answers) is cancelled with
+// `footer.handoffStuck`, not performed: the outstanding save stays pending, and the next try
+// waits for it again.
 const WRITES = new Set(['save_setting', 'controls_edit']);
-const AFTER_WRITES = new Set(['play', 'install_update']);
-function orderedCalls(call) {
-  const pending = new Set();
-  return (name, args) => {
-    if (AFTER_WRITES.has(name) && pending.size) return Promise.allSettled([...pending]).then(() => call(name, args));
-    const answer = call(name, args);
-    if (WRITES.has(name)) {
-      pending.add(answer);
-      const done = () => pending.delete(answer);
-      answer.then(done, done);
+const HANDOFFS = new Set(['play', 'install_update']);
+const HANDOFF_WAIT_MS = 5000;
+function orderedCalls(call, waitMs = HANDOFF_WAIT_MS) {
+  const pending = new Set();   // writes sent and not answered
+  const changes = new Set();   // a handoff waiting for the next change
+  let operations = 0, handoff = null, sent = false;
+  const changed = () => { for (const wake of [...changes]) wake(); };
+  const busy = () => ({ code: 'footer.handoffBusy' });
+  async function handOff(name, args) {
+    const deadline = Date.now() + waitMs;
+    while (operations || pending.size) {
+      const left = deadline - Date.now();
+      if (left <= 0) throw { code: 'footer.handoffStuck' };
+      await new Promise((resolve) => {
+        const wake = () => { clearTimeout(timer); changes.delete(wake); resolve(); };
+        const timer = setTimeout(wake, left);
+        changes.add(wake);
+      });
     }
-    return answer;
+    sent = true;
+    return call(name, args);
+  }
+  const ordered = (name, args) => {
+    if (HANDOFFS.has(name)) {
+      if (handoff) return handoff;
+      const started = handOff(name, args);
+      handoff = started.finally(() => { handoff = null; sent = false; });
+      return handoff;
+    }
+    if (WRITES.has(name)) {
+      if (sent) return Promise.reject(busy());
+      const answer = call(name, args);
+      pending.add(answer);
+      const settled = () => { pending.delete(answer); changed(); };
+      answer.then(settled, settled);
+      return answer;
+    }
+    return call(name, args);
   };
+  ordered.operation = async (fn) => {
+    if (handoff) throw busy();
+    operations++;
+    try {
+      return await fn();
+    } finally {
+      operations--;
+      changed();
+    }
+  };
+  return ordered;
 }
 
 const bridge = (() => {
   const tauri = typeof window !== 'undefined' ? window.__TAURI__ : undefined;
   if (tauri) {
+    const tauriCall = orderedCalls((name, args) => tauri.core.invoke(name, args));
     return {
       kind: 'tauri',
-      call: orderedCalls((name, args) => tauri.core.invoke(name, args)),
+      call: tauriCall,
+      operation: tauriCall.operation,
       on: (event, handler) => tauri.event.listen(event, (e) => handler(e.payload)),
       ready: Promise.resolve(),
     };
@@ -74,15 +120,17 @@ function messageBridge(target) {
     for (const text of queue.splice(0)) port.postMessage(text);
     opened();
   });
+  const call = orderedCalls((name, args = {}) => {
+    const id = next++;
+    return new Promise((resolve, reject) => {
+      waiting.set(id, { resolve, reject });
+      send(JSON.stringify({ id, call: name, args }));
+    });
+  });
   return {
     kind: 'message',
-    call: orderedCalls((name, args = {}) => {
-      const id = next++;
-      return new Promise((resolve, reject) => {
-        waiting.set(id, { resolve, reject });
-        send(JSON.stringify({ id, call: name, args }));
-      });
-    }),
+    call,
+    operation: call.operation,
     on(event, handler) {
       if (!handlers.has(event)) handlers.set(event, []);
       handlers.get(event).push(handler);

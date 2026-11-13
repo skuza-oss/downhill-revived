@@ -217,6 +217,8 @@
   "footer.downloading": "Scaricamento di **{version}**, {done} di {total} MB",
   "footer.downloadingSize": "Scaricamento di **{version}**, {done} MB",
   "footer.starting": "Avvio del gioco…",
+  "footer.handoffStuck": "Un'impostazione è ancora in fase di salvataggio, quindi il gioco non è partito. Riprova tra un attimo.",
+  "footer.handoffBusy": "Il gioco si sta avviando: questa modifica non è stata salvata.",
   "footer.dismiss": "Ignora",
   "footer.support": "Sostieni",
   "footer.supportTitle": "Sostieni il progetto su Ko-fi",

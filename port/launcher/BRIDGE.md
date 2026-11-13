@@ -25,15 +25,22 @@ allows its own files only (`default-src 'self'`, no inline script, no network).
 An error is either a string (shown as it is) or `{"code": "<string table key>", "params": {...}}`,
 which the page words in the player's language (`ui/lang/en.json`).
 
-**Order of the settings writes (finding 228).** `bridge.js` sends `play` and `install_update` only
-after every `save_setting` / `controls_edit` it sent before has answered (done or failed), so a game
-never starts on a dhd.ini the launcher is still writing. A phone's native side runs `snapshot`
+**Order of the settings writes (finding 228).** `bridge.js`'s handoff gate: a setting change the
+page makes is one operation from its first write to its last (`bridge.operation`: Performance mode's
+three keys, a tab's reset, the rider name's check and save). `play` and `install_update` are sent
+only when no operation is in progress and no `save_setting` / `controls_edit` is unanswered,
+looked at again after every change; once a handoff has begun, a new operation is refused
+(`footer.handoffBusy`), no write is sent after the handoff went out, and a second handoff (PLAY twice,
+the editor row during the transition) is the same one. So a game never starts on a dhd.ini the
+launcher is still writing, or with only part of a change applied. A handoff that can't go within 5 s
+(a save that never answers: a stuck native call, a broken port) is cancelled, not performed: its
+promise rejects with `{code: "footer.handoffStuck"}`, the page says so with a Try again, and the
+outstanding save stays pending, so the next try waits for it again. A phone's native side runs `snapshot`
 (which may save `iso`), `save_setting` and `play` one at a time in the order they arrived (Android:
 `LauncherBridge.ordered`, one single-thread queue) and keeps long calls (`check_disc`'s hashing,
 `check_update`, the picker) off that queue; the settings crate's `save` is itself one transaction at
-a time per process, with a temporary file of its own. iOS (`launcher.m`) runs every call on a
-concurrent queue: the crate's lock and the page's wait before `play` cover its saves; an ordered
-queue there as on Android would also keep a `snapshot` from reading between two saves.
+a time per process, with a temporary file of its own. iOS does the same with a ticket per dhd.ini
+call, served in arrival order (`launcher_calls.h`, finding 227).
 
 ## Capabilities (`snapshot().caps`)
 
@@ -129,9 +136,13 @@ launcher back after the game's process has ended:
 - **Android**: the game starts as the layout editor alone (`--touch-editor` among the activity's
   arguments, `DhdActivity.getArguments`; finding 226: muted, no movies, the editor over a plain
   background). Its Done or Back saves `touch_edits` and ends the game as EXIT GAME does
-  (`host_end`). `LauncherActivity` stays below the game for this start only; when the game's
-  process ends, Android starts it again from its saved state, and the next snapshot's `reopen` is
-  `"touch-editor"` once, so the page opens Settings at the Touch tab.
+  (`host_end`). `LauncherActivity` stays behind the game for this start only (the game's
+  activity is `singleInstance`, a task of its own); when the game's process ends, Android brings the
+  launcher's task back and starts it from its saved state, and the next snapshot's `reopen` is
+  `"touch-editor"` once, so the page opens Settings at the Touch tab. That return is Android's own
+  behaviour, not guaranteed on every maker's Android or when the task was removed: then the player
+  is at the home screen, and a durable mark written before the game started
+  (`LauncherActivity.editorMark`) makes the next start open the launcher at Touch all the same.
 - **iOS**: the game starts with `DHD_TOUCH_EDIT_AT_START=1`: the editor opens over the game's menus
   once the start's movies are over (`touch_host.c`), and the game goes on after Done. An iOS app
   can't start itself again, so the editor alone's end would close the app; `reopen` is never set.
