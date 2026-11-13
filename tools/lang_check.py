@@ -11,8 +11,12 @@ The source is port/launcher/ui/lang/en.json; every other lang/<code>.json is a l
   source has key.other), or a string whose {placeholders} or **bold** spans differ from the source's;
 - the languages in ui/i18n.js's LANGUAGES not being exactly the files there;
 - a key the page's code names (t('...'), tn, tNodes, data-i18n...) or Android's native side words an
-  error with (DiscImport.coded("...")) that the source lacks.
-A key the source has and a language lacks is only listed: the page shows English for it.
+  error with (DiscImport.coded("...")) that the source lacks;
+- a language in LANGUAGES without its own name in i18n.js's LANGUAGE_NAMES (the Language row's text).
+A key the source has and a language lacks is only listed: the page shows English for it. A count has
+the forms its language uses (Japanese and Chinese one, key.other; English, German and most others
+key.one and key.other; Russian, Polish and Arabic more): a form a language does not use is not
+missing, a form it uses and lacks is.
 """
 import json
 import re
@@ -22,6 +26,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 UI = ROOT / 'port' / 'launcher' / 'ui'
 PLURAL_FORMS = ('zero', 'one', 'two', 'few', 'many', 'other')
+# The count forms a language writes out (Unicode CLDR's plural rules, by its base code). Any other
+# language has one and other. CLDR also gives pt, es, fr and it a "many" for millions ("1 million of
+# races"): no count here gets that big, and the page falls back to other, so it is not asked for.
+ONLY_OTHER = ('ja', 'zh', 'ko', 'vi', 'th', 'id', 'ms', 'my', 'lo', 'km')
+PLURAL_FORMS_OF = {
+    'ru': ('one', 'few', 'many', 'other'), 'uk': ('one', 'few', 'many', 'other'), 'pl': ('one', 'few', 'many', 'other'),
+    'cs': ('one', 'few', 'many', 'other'), 'sk': ('one', 'few', 'many', 'other'), 'hr': ('one', 'few', 'other'),
+    'sr': ('one', 'few', 'other'), 'ar': ('zero', 'one', 'two', 'few', 'many', 'other'), 'sl': ('one', 'two', 'few', 'other'),
+    'lt': ('one', 'few', 'many', 'other'), 'lv': ('zero', 'one', 'other'), 'ro': ('one', 'few', 'other'),
+}
 # t('key'), tn('key', ...), tNodes('key'), and keys handed to helpers as 'row.x' / 'bind.x' strings
 CODE_KEY = re.compile(r"""\b(?:t|tn|tNodes)\(\s*'([A-Za-z0-9_.]+)'""")
 LITERAL_KEY = re.compile(r"""'((?:row|bind|tab|home|footer|disc|help|crash|settings|server|online|notes|stick|rider|nav|window|language)\.[A-Za-z0-9_.]+)'""")
@@ -57,6 +71,28 @@ def source_key(key, source):
     return None
 
 
+def forms_of(code):
+    """The count forms a language writes out (by its code's base: zh-Hans -> zh)."""
+    base = code.split('-')[0].lower()
+    if base in ONLY_OTHER:
+        return ('other',)
+    return PLURAL_FORMS_OF.get(base, ('one', 'other'))
+
+
+def plural_base(key):
+    """A count's base key (server.races for server.races.one), or None for a key that is no form."""
+    base, _, form = key.rpartition('.')
+    return base if form in PLURAL_FORMS else None
+
+
+def wanted(code, source):
+    """Every key a language is asked for: the source's plain keys, and each count in the forms the
+    language uses (the source's own forms don't matter: Japanese has no .one, Russian needs .few)."""
+    keys = [k for k in source if plural_base(k) is None]
+    counts = sorted({plural_base(k) for k in source if plural_base(k) is not None})
+    return keys + ['%s.%s' % (b, f) for b in counts for f in forms_of(code)]
+
+
 def check_language(code, table, source):
     """(errors, missing, stale) for one language."""
     errors, stale = [], []
@@ -71,14 +107,19 @@ def check_language(code, table, source):
             errors.append('%s.json: %s must keep the **bold** span of the source' % (code, key))
     for key in stale:
         errors.append('%s.json: %s is not in the source (en.json)' % (code, key))
-    missing = [k for k in source if k not in table and not (k.rpartition('.')[2] in PLURAL_FORMS
-               and any(source_key(x, source) == k for x in table))]
+    missing = [k for k in wanted(code, source) if k not in table]
     return errors, missing, stale
 
 
 def languages_listed(text):
     m = re.search(r"const LANGUAGES = \[([^\]]*)\]", text)
     return re.findall(r"'([^']+)'", m.group(1)) if m else None
+
+
+def language_names(text):
+    """The codes in i18n.js's LANGUAGE_NAMES table, or None."""
+    m = re.search(r"const LANGUAGE_NAMES = \{(.*?)\};", text, re.S)
+    return re.findall(r"""^\s*'([^']+)'\s*:\s*'[^']+'""", m.group(1), re.M) if m else None
 
 
 def code_keys(ui, native=None):
@@ -108,6 +149,11 @@ def run(ui, listing=False, out=print):
         errors.append('i18n.js: no LANGUAGES list')
     elif sorted(listed) != codes:
         errors.append('i18n.js: LANGUAGES %s, the lang folder has %s' % (listed, codes))
+    named = language_names((ui / 'i18n.js').read_text(encoding='utf-8'))
+    if named is None:
+        errors.append('i18n.js: no LANGUAGE_NAMES table')
+    elif listed is not None and sorted(named) != sorted(listed):
+        errors.append('i18n.js: LANGUAGE_NAMES has %s, LANGUAGES %s' % (named, listed))
     for key, where in code_keys(ui, NATIVE if ui == UI else None).items():
         if source_key(key, source) is None and not any(k.startswith(key + '.') for k in source):
             errors.append('%s names %s, which en.json lacks' % (where, key))
@@ -121,7 +167,8 @@ def run(ui, listing=False, out=print):
             continue
         e, missing, stale = check_language(code, table, source)
         errors += e
-        out('lang_check: %s.json, %d of %d translated, %d stale' % (code, len(source) - len(missing), len(source), len(stale)))
+        total = len(wanted(code, source))
+        out('lang_check: %s.json, %d of %d translated, %d stale' % (code, total - len(missing), total, len(stale)))
         if listing:
             for k in missing:
                 out('  missing %s' % k)
