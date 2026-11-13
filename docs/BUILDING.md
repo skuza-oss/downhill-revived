@@ -207,6 +207,51 @@ badging`: not debuggable, the version, arm64-v8a only) and written as
 `build/android/DownhillRevived-<version>-android-experimental.apk`. versionCode is
 MAJOR * 10000 + MINOR * 100 + PATCH (0.7.7: 707), so it grows with every release.
 
+### iOS (iPhone and iPad, unsigned IPA)
+
+Built on a Mac (finding 224; `port/ios/AGENTS.md`). The app is `port/ios`: the host side
+(`host/ios_main.m`), the Metal layer the renderer draws into (`render/metal_bridge.m`), a small
+first-start disc screen (`app/main.m`), all linked with the game's static library `libdhd_ios.a`
+(`build_host64.py --target ios-arm64`, or `ios-sim-arm64` for the Simulator).
+
+What you need: a Mac with Apple silicon and Xcode (iOS 17 SDK or later; tested with Xcode 26.5),
+`xcodegen`, CMake and Ninja (Homebrew), Python 3.12, rustup with the iOS targets
+(`rustup target add --toolchain 1.97.1 aarch64-apple-ios aarch64-apple-ios-sim`), WABT's
+`include/` and `share/` and SIMDe as for the macOS build (`WABT_DIR`, `SIMDE_DIR`), `DHD_VUTEXT`,
+`DHD_CARGO_DIR` and `DHD_OBJCACHE_DIR`. The game's core comes from the Windows build as wasm2c's
+parts (`wasm2c dhd_core.wasm -n core --num-outputs=8`: `core.h`, `core-impl.h`, `core_*.c`), as
+for the macOS release; SDL3 is built for iOS by `sdl3.py` on the first run.
+
+```
+python3.12 port/ios/build_ios.py --simulator --rebuild-core --wasm core/core_*.c   # the Simulator app
+python3.12 port/ios/build_ios.py --unsigned --rebuild-core --wasm core/core_*.c    # the device app and its unsigned IPA
+python3.12 port/tools/package_release.py --platform ios --core core/core_*.c --elf PATH/SCUS_971.77
+```
+
+The Simulator app lands in `build/ios/DerivedData-Simulator/Build/Products/Release-iphonesimulator/`;
+install it with `xcrun simctl install <device> "Downhill Revived.app"` and start it with
+`xcrun simctl launch <device> app.skuza.DownhillRevived` (environment for the game:
+`SIMCTL_CHILD_DHD_...`). Its files (dhd.ini, dhd.log, saves, the disc) are in the app's data
+container (`xcrun simctl get_app_container <device> app.skuza.DownhillRevived data`, then
+`Documents/`); a disc image copied there as `SCUS-97177.iso` is found at the start.
+
+`--unsigned` writes `build/ios/DownhillRevived-<version>-unsigned.ipa` (`package_unsigned.py`:
+the bundle without any signature or provisioning profile, refused if it names a home folder, a
+device or a team; `DHD_IPA_PRIVATE` adds your own strings to that check).
+`package_release.py --platform ios` adds `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` to the app,
+checks the IPA as the APK is checked (no game data, the version, no other server or local path,
+no retail bytes but the source's own, unsigned) and writes
+`build/release/DownhillRevived-<version>-ios-experimental.ipa`, latest.json's `ios` entry and
+`SHA256SUMS`. The release page gets `port/release/IOS-NOTES.md`.
+
+Without a paid Apple developer account: the Simulator, the unsigned IPA and installs by players
+with their own Apple IDs (a sideloading tool signs it for 7 days with a free Apple ID) all work;
+what does not is a signed IPA from us, TestFlight, the App Store, and entitlements that need a
+provisioning profile (so the game's memory is reserved without the extended virtual addressing
+entitlement: wasm2c's bounds-check layout, `build_host64.py`'s `ios` targets). `build_ios.py
+--team ID` (or `DHD_APPLE_TEAM`) builds a development-signed app for your own device with Xcode's
+automatic signing; keep the team out of the repository.
+
 ### macOS (Apple silicon) and Linux (x64)
 
 Each is built on its own machine with the same script, `build_host64.py --release --target
@@ -394,6 +439,9 @@ folder and update from the zips (the AppImage from its own entry). None is code-
 Android (finding 143): `package_release.py --platform android` with the release key's
 `DHD_ANDROID_*` variables builds, checks and adds the `-android-experimental.apk` (latest.json's
 `android` entry); every run writes `SHA256SUMS`. The release page gets `port/release/ANDROID-NOTES.md`.
+iOS (finding 224): `package_release.py --platform ios --core core_*.c` on the Mac builds, checks
+and adds the unsigned `-ios-experimental.ipa` (latest.json's `ios` entry); the release page gets
+`port/release/IOS-NOTES.md`.
 Crash symbols (finding 152): `build/release/` also holds files that are kept, never published (not
 in `SHA256SUMS`): the Windows link map `-win.map` (`crash_stack.py` reads dhd.log's crash stacks
 with it) and `-android-libmain.debug.so`, the APK's `libmain.so` before stripping (copied only when

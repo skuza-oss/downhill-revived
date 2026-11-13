@@ -41,13 +41,17 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   recompiled to C (`recomp.py`), the module-side runtime and HLE and the data image into one
   wasm32 module, `build/wasm/dhd_core.wasm` (findings 081, 082).
 - **One host build script:** `port/tools/build_host64.py --target win-x64|linux-x64|macos-arm64|
-  android-arm64` (wasm2c, the 64-bit host `port/host64` + `port/host`, the Rust library; finding
+  android-arm64|ios-arm64|ios-sim-arm64` (wasm2c, the 64-bit host `port/host64` + `port/host`, the Rust library; finding
   099). `port/tools/build.py` runs core + host in one command. Setup: `docs/BUILDING.md`; what
   each step costs and what is cached: its "Build times" section (finding 151).
 - **Browser:** `port/web/build.py build/wasm/dhd_core.wasm` (findings 083, 087).
 - **Android:** `port/android/build_apk.py` (debug, `--release` with the release key named by the
   `DHD_ANDROID_*` variables; findings 091, 143). Android 10 (API 29) and later: calls from newer
   APIs are chosen at run time (finding 191).
+- **iOS:** `port/ios/build_ios.py` on a Mac (`--simulator`, or `--unsigned` for the device app and
+  its unsigned IPA), from the Windows build's wasm2c parts; the shared touch controls and settings,
+  a first-start disc screen until the shared mobile launcher; P2P rooms only online (finding 224;
+  the port by Gustavo Ribeiro).
 - **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093;
   native window buttons on macOS, finding 150).
 - **Releases:** `port/tools/package_release.py` builds, checks and packages each platform
@@ -149,7 +153,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - The launcher holds settings, rider name and updates on every desktop platform, decides the one
   data folder (`DHD_SETTINGS`, `DHD_MEMCARD_DIR`, `DHD_DATA_DIR`), updates from `latest.json`
   with a backup through the server's `/v1/latest` (findings 093, 125, 138). A phone has no
-  launcher: the game checks once a day and shows a notice (finding 143).
+  launcher: the game checks once a day and shows a notice (finding 143). On iOS a small first-start
+  screen imports the disc image; no update notice yet (finding 224).
 - Discord Rich Presence on the desktop (finding 106). The mouse works in the port's pages and the
   game's popups (finding 092).
 
