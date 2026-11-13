@@ -139,10 +139,9 @@ pointer).
 - The update line: the launcher asks `update_find` at every open (not once a day: the server's
   copy of latest.json answers first) unless `auto_update` is off; the game skips its own daily
   notice when the launcher showed the line (`DHD_LAUNCHER_CHECKED`). Nothing is downloaded.
-- "Edit the touch layout" starts the game with `DHD_TOUCH_EDIT_AT_START=1`; `touch_host.c` opens
-  the layout editor once, as TOUCH CONTROLS > Edit layout does, at the first field with no movie,
-  attract demo, race HUD or replay, two seconds into the run at least. Lane 226 may move that
-  moment (the main menu) or the editor's own exit; the hook is the variable.
+- "Edit the touch layout" first started the game with `DHD_TOUCH_EDIT_AT_START=1` (the editor over
+  the game's menus). Finding 228 replaced it: the row starts the layout editor alone (finding 226)
+  and the launcher shows again after its Done; the variable is gone.
 - No new permission: the WebView needs none for local files, INTERNET was there for the update
   check.
 

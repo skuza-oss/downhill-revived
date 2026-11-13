@@ -1,6 +1,6 @@
 # 226: Touch layout freedom and tablet defaults
 
-Status: current
+Status: partly superseded by 228 (the launcher's entry point on Android: "The launcher's entry point, and main's")
 
 Branch `feat/touch-layout-freedom` from `main` 5a5b0cb8 (0.8.0 plus the iOS platform), started
 2026-11-13. This file is the lane's plan while it runs and its finding when it merges.
@@ -156,16 +156,11 @@ launcher calls `ios_start_game` with it in argv (or sets `DHD_TOUCH_EDITOR=1`) a
 when the process would end (iOS: the game process is the app; lane 225 decides how the app returns
 to its launcher).
 
-**The launcher's entry point, and main's (lane 225, the mobile launcher).** Main's launcher (0b686bf0) starts the
-game with `DHD_TOUCH_EDIT_AT_START=1` (Android: `DhdActivity` sets it for the launcher's
-`edit_touch_layout` extra): the editor opens over the game's menus after the start's movies, and
-the game goes on after Done. This lane's entry point is `DHD_TOUCH_EDITOR=1` (or `--touch-editor`):
-the editor alone, and the game ends after Done. At the merge both stay: main's block in
-`host_service_touch_field` opens the editor over the menus, this lane's opens it alone; they do not
-overlap (each opens once). The launcher's "Edit the touch layout" should end up setting
-`DHD_TOUCH_EDITOR=1` instead (one line in `DhdActivity`, lane 225's file): on Android the launcher
-activity finishes when the game starts, so for Done to show the launcher again it must stay in the
-task or be started again when the game's process ends (lane 225's side).
+**The launcher's entry point, and main's (lane 225, the mobile launcher).** At this lane's merge
+main's launcher still started the game with `DHD_TOUCH_EDIT_AT_START=1` (the editor over the
+game's menus). Finding 228 joined the two: the launcher's "Edit the touch layout" now starts the
+editor alone through `--touch-editor` and shows the launcher again after Done;
+`DHD_TOUCH_EDIT_AT_START` and its block are gone.
 
 **Tilt on iOS.** `metal_bridge.m` gives `touch_host.c` the two calls Android's `DhdActivity`
 gives it: `ios_touch_tilt_on` (CMMotionManager device motion, else the accelerometer, started and
@@ -230,6 +225,5 @@ Checked:
   equal lane 224's); `port/ios/tests` 23 tests OK there; `test_touch` passes there. Not run on a
   simulator's screen (the brief's on-screen worker does that).
 
-Not checked: the editor alone on a phone (the Android activity does not pass `--touch-editor`
-yet: lane 225's side), tilt on an iPhone (no device; the Simulator has no motion), a pinch with
+Not checked here: the editor alone on a phone (checked by finding 228 on the Mi 11i), tilt on an iPhone (no device; the Simulator has no motion), a pinch with
 real fingers (the unit test drives it; the device tool's pinch is symmetric about a point).
