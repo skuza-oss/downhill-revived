@@ -107,6 +107,15 @@ mod tests {
         assert!(v.contains("\"launcher\":\"1\""), "the launcher opens at start by default");
     }
 
+    /// DHD_LAUNCHER_SCHEMA=file: the schema written there, for a page run outside an app (a
+    /// browser with a stand-in bridge).
+    #[test]
+    fn schema_for_a_page_outside_an_app() {
+        if let Some(path) = std::env::var_os("DHD_LAUNCHER_SCHEMA") {
+            std::fs::write(path, schema_json()).expect("the schema file");
+        }
+    }
+
     #[test]
     fn control_characters_are_escaped() {
         let mut out = String::new();
