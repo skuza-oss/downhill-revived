@@ -9,8 +9,11 @@ is one more file of the same shape, named by its code: `pt-BR.json`, `es.json`, 
 
 1. Copy `en.json` to `<code>.json` (or open the existing file) and translate the words on the
    right. Never change a key (the left side).
-2. Add the code to `LANGUAGES` in `../i18n.js`, in the order the Language row should list them.
-3. Translate `language.name` as the language's own name ("Deutsch", "日本語").
+2. Add the code to `LANGUAGES` in `../i18n.js`, in the order the Language row should list them, and
+   the language's own name, as its speakers write it ("Deutsch", "日本語"), to `LANGUAGE_NAMES`
+   next to it. The Language row shows every language under its own name, whichever is active.
+3. If the language is Chinese, Portuguese or another with regional files, see `languageFile` in
+   `../i18n.js` for how a device's code reaches your file.
 4. Check it: `python tools/lang_check.py --list` lists the strings still missing (the launcher
    shows English for those) and fails on a key that `en.json` doesn't have, a placeholder renamed or
    a bold span lost. `python tools/check.py docs` runs the same check.
@@ -37,6 +40,8 @@ is one more file of the same shape, named by its code: `pt-BR.json`, `es.json`, 
 ## How the launcher picks a language
 
 The Language row (Settings > Game, shown once there is more than one language) saves the choice in
-dhd.ini (`language = de`). Without one, the launcher takes the first of the system's languages that
-has a file here (an exact code, then a code it starts with, then the same language: `pt-PT` takes
-`pt-BR`), else English.
+dhd.ini (`language = de`). The first choice, System, follows the device: the launcher takes the first
+of the device's languages that has a file here (an exact code, then a code it starts with, then the
+same language: `pt-PT` and plain `pt` take `pt-BR`; Chinese by script and region: `zh`, `zh-CN`,
+`zh-SG` and `zh-Hans-*` take `zh-Hans`, while `zh-TW`, `zh-HK` and `zh-Hant-*` show no Simplified
+Chinese and move on to the next language), else English.

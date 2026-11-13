@@ -356,8 +356,9 @@ function control(row, off) {
         } });
     }
     case 'language': {
-      const options = [['', t('row.language.system', { language: languageName(lang.code, lang.words) })],
-        ...LANGUAGES.map((c) => [c, c === lang.code ? languageName(c, lang.words) : c])];
+      // "System" (what the device's languages give) first, then every language under its own name
+      const options = [['', t('row.language.system', { language: languageName(systemLanguage()) })],
+        ...LANGUAGES.map((c) => [c, languageName(c)])];
       const s = el('select', { 'aria-label': name, onchange: async (e) => {
         await save('language', e.target.value, label(e.target.selectedOptions[0].textContent));
         await loadLanguage(e.target.value);
