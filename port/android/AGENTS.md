@@ -13,8 +13,15 @@ The root and `port/AGENTS.md` rules apply. Design: findings 091, 143; phones' sp
 - Online on phones is P2P rooms only (`host_service_net_offered`, findings 180, 186): Create A P2P
   Race and Join With A Code; SFU rooms (public lists, Quick Race) are refused. Do not offer them
   without a decision (root AGENTS.md, current decisions).
-- A phone has no launcher: the game copies the disc chosen in the document picker on first start
-  (on a worker thread), checks once a day for a newer release and only shows a notice.
+- The app's entry is the launcher (finding 225): `LauncherActivity` shows the desktop launcher's
+  page (`port/launcher/ui`, packed as `assets/launcher`) in a WebView, answers its calls
+  (`LauncherBridge`, the list in `port/launcher/BRIDGE.md`) with the shared native code
+  (`Native` -> `port/host/android_launcher.c`: dhd_settings, the disc checks, `update_find`), imports
+  the disc (`DiscImport`, on a worker thread) and starts `DhdActivity` from PLAY. No second UI in
+  Java: a launcher change goes in `port/launcher/ui`. The WebView loads only the app's own files
+  (no JavaScript interface; the bridge is a MessagePort posted to that origin). Nothing is
+  downloaded by the app: the launcher (or, on a direct start, the game once a day) only says a
+  newer release is out.
 - The surface's formats are fixed (RGBA8, no format query; finding 145).
 - Low-end phones are named by device only: the Realme RMX3930 (Unisoc T612); its profile is
   reproduced on the rooted Mi 11i with `port/tools/phone_throttle.py --apply t612`.

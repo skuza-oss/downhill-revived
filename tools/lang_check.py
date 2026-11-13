@@ -10,7 +10,8 @@ The source is port/launcher/ui/lang/en.json; every other lang/<code>.json is a l
 - a language key the source lacks (a stale key; a count's form such as key.few counts when the
   source has key.other), or a string whose {placeholders} or **bold** spans differ from the source's;
 - the languages in ui/i18n.js's LANGUAGES not being exactly the files there;
-- a key the page's code names (t('...'), tn, tNodes, data-i18n...) that the source lacks.
+- a key the page's code names (t('...'), tn, tNodes, data-i18n...) or Android's native side words an
+  error with (DiscImport.coded("...")) that the source lacks.
 A key the source has and a language lacks is only listed: the page shows English for it.
 """
 import json
@@ -25,6 +26,9 @@ PLURAL_FORMS = ('zero', 'one', 'two', 'few', 'many', 'other')
 CODE_KEY = re.compile(r"""\b(?:t|tn|tNodes)\(\s*'([A-Za-z0-9_.]+)'""")
 LITERAL_KEY = re.compile(r"""'((?:row|bind|tab|home|footer|disc|help|crash|settings|server|online|notes|stick|rider|nav|window|language)\.[A-Za-z0-9_.]+)'""")
 HTML_KEY = re.compile(r'data-i18n(?:-aria|-title)?="([A-Za-z0-9_.]+)"')
+# a phone's native side words an error by key (DiscImport.coded("disc.problem.noRoom", ...))
+NATIVE = ROOT / 'port' / 'android' / 'app' / 'src' / 'main' / 'java'
+NATIVE_KEY = re.compile(r'\bcoded\(\s*"([A-Za-z0-9_.]+)"')
 
 
 def load(path):
@@ -77,14 +81,17 @@ def languages_listed(text):
     return re.findall(r"'([^']+)'", m.group(1)) if m else None
 
 
-def code_keys(ui):
-    """Every key the page's code names literally, with the file it is in."""
+def code_keys(ui, native=None):
+    """Every key the page's code (and a phone's native side, native) names literally, with its file."""
     found = {}
     for f in sorted(ui.glob('*.js')) + sorted(ui.glob('*.html')):
         text = f.read_text(encoding='utf-8')
         for pattern in (CODE_KEY, LITERAL_KEY) if f.suffix == '.js' else (HTML_KEY,):
             for key in pattern.findall(text):
                 found.setdefault(key, f.name)
+    for f in sorted(native.rglob('*.java')) if native and native.is_dir() else []:
+        for key in NATIVE_KEY.findall(f.read_text(encoding='utf-8')):
+            found.setdefault(key, f.name)
     return found
 
 
@@ -101,7 +108,7 @@ def run(ui, listing=False, out=print):
         errors.append('i18n.js: no LANGUAGES list')
     elif sorted(listed) != codes:
         errors.append('i18n.js: LANGUAGES %s, the lang folder has %s' % (listed, codes))
-    for key, where in code_keys(ui).items():
+    for key, where in code_keys(ui, NATIVE if ui == UI else None).items():
         if source_key(key, source) is None and not any(k.startswith(key + '.') for k in source):
             errors.append('%s names %s, which en.json lacks' % (where, key))
     out('lang_check: en.json, %d strings (the source)' % len(source))

@@ -94,10 +94,10 @@ let flashTimer = 0;
 const get = (key) => state.settings[key] ?? '';
 const choices = (key) => state.schema[key]?.choices ?? [];
 
-// What the native side's error says: a phone's coded one ({ code, params }) in this language, else
-// its own words.
+// What the native side's error says: a coded one ({ code: a string table key, params }) in this
+// language, else its own words.
 function errorText(e) {
-  if (e && typeof e === 'object' && e.code) return t(`disc.problem.${e.code}`, e.params || {});
+  if (e && typeof e === 'object' && e.code) return t(e.code, e.params || {});
   return String(e);
 }
 
@@ -708,8 +708,8 @@ function renderDiscFooter() {
   }
   if (d.stage === 'problem') {
     status('bad', 'i-alert', errorText(d.problem));
-    setSecondary([icon('i-retry'), t(d.problem?.code === 'noRoom' ? 'disc.tryAgain' : 'disc.chooseAnother')],
-      () => (d.problem?.code === 'noRoom' ? call('retry_import', { job: d.job }).then((r) => r && discEvent({ job: r.job, stage: 'checking' })) : chooseDisc()), true);
+    setSecondary([icon('i-retry'), t(d.problem?.code === 'disc.problem.noRoom' ? 'disc.tryAgain' : 'disc.chooseAnother')],
+      () => (d.problem?.code === 'disc.problem.noRoom' ? call('retry_import', { job: d.job }).then((r) => r && discEvent({ job: r.job, stage: 'checking' })) : chooseDisc()), true);
     setPrimary({ text: t('footer.chooseDisc'), icon: 'i-disc', onclick: chooseDisc });
     return true;
   }

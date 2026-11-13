@@ -4,4 +4,7 @@
     <!-- The icon's long-press shortcut (res/xml/shortcuts.xml, finding 152) -->
     <string name="share_log">Share log</string>
     <string name="share_log_long">Share the game\'s log</string>
+    <!-- The launcher's shortcut (finding 225) -->
+    <string name="open_launcher">Launcher</string>
+    <string name="open_launcher_long">Open the launcher</string>
 </resources>

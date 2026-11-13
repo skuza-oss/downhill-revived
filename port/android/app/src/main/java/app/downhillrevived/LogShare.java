@@ -2,8 +2,8 @@
 // folder, which no other app and no file manager can open, so a player whose game crashes could send
 // nothing. This copies the logs into one text file (named for the version and the day) and opens
 // Android's share sheet with it, served by LogProvider; nothing leaves the phone unless the player
-// picks an app there. Reached from the dialog after a run that closed unexpectedly and from the
-// icon's long-press shortcut (SetupActivity).
+// picks an app there. Reached from the launcher's note after a run that closed unexpectedly, its Help
+// page and the icon's long-press shortcut (LauncherActivity; finding 225).
 // The file: the phone, how the last run ended (LastExit's dhd-exit.txt), the log of the run that
 // ended, then the other one. Which is which: a dhd.log written since this process started is the
 // game running now (host.c moved the one before to dhd-previous.log); otherwise dhd.log is the run

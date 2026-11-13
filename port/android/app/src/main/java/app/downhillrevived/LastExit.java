@@ -3,7 +3,7 @@
 // reason, a description, the time and, for a native crash, the system's trace (a tombstone). Android
 // 10 (API 29, the APK's minimum since finding 191) has no such record for apps: there the only sign
 // is the game's own crash report at the end of the run's dhd.log (CrashReport.logCrash). Read
-// once per process, before any native code runs (SetupActivity, and DhdActivity for a start that
+// once per process, before any native code runs (LauncherActivity, and DhdActivity for a start that
 // skips it), and written to files/dhd-exit.txt, which android_main.c quotes into the new dhd.log
 // ("previous run: ...") and LogShare puts at the top of a shared log. The words a player reads and
 // the trace's summary: CrashReport.java.

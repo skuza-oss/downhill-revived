@@ -57,6 +57,11 @@ FAKE_APK = str(Path(FAKE_DIR) / 'x.apk')
 with zipfile.ZipFile(FAKE_APK, 'w') as z:
     z.writestr('lib/arm64-v8a/libmain.so', b'\x7fELF not really')
     z.writestr('assets/dhd-split.txt', 'one\n')
+    z.writestr('assets/launcher/index.html', '<!doctype html>')  # the launcher's page (finding 225)
+NO_PAGE_APK = str(Path(FAKE_DIR) / 'no-page.apk')
+with zipfile.ZipFile(NO_PAGE_APK, 'w') as z:
+    z.writestr('lib/arm64-v8a/libmain.so', b'\x7fELF not really')
+    z.writestr('assets/dhd-split.txt', 'one\n')
 SDK = "sdkVersion:'%d'\n" % build_apk.min_sdk()
 GOOD = "package: name='app.downhillrevived' versionCode='708' versionName='0.7.8'\n" + SDK + "native-code: 'arm64-v8a'\n"
 OTHER = "package: name='com.example.other' versionCode='1' versionName='1'\n" + SDK + "native-code: 'arm64-v8a'\n"
@@ -67,6 +72,8 @@ def main():
     tools(RELEASE, GOOD)
     check(build_apk.check_release(FAKE_APK, '0.7.8', 708)[0] == [], 'the release APK passes with its version')
     check(build_apk.check_release(FAKE_APK, None, None)[0] == [], 'the release APK passes --check')
+    check(build_apk.check_release(NO_PAGE_APK, '0.7.8', 708)[0] == ['no launcher page (assets/launcher/index.html)'],
+          'an APK without the launcher page is refused')
     check(build_apk.min_sdk() == 29, 'the minimum is Android 10 (finding 191): %d' % build_apk.min_sdk())
     main_verify = [c for c in asked if '--print-certs' in c][-1:]
     check(main_verify and main_verify[0][main_verify[0].index('--min-sdk-version') + 1] == '29'
