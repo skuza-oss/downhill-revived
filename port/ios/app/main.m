@@ -76,6 +76,7 @@ void app_play(int edit_touch_layout, int checked) {
        event loop there and the game on SDL's threads; it returns only when the game cannot start. */
     NSThread *thread = [[NSThread alloc] initWithBlock:^{
         int code = ios_start_game(edit_touch_layout, checked);
+        if (code == 3) launcher_start_refused();   /* no core ran: the settings are the launcher's again */
         dispatch_async(dispatch_get_main_queue(), ^{
             s_game = NO;
             if (code == 3) {   /* no disc image the game can play: the launcher asks for it */
