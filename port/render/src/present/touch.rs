@@ -21,6 +21,9 @@ pub struct TouchOverlay {
     width_mm: f32,
     height_mm: f32,
     objects: Option<Objects>,
+    /// The device refused the overlay's shader or pipeline (once; finding 229): no overlay is drawn
+    /// from then on, the game goes on and its touch areas still work.
+    refused: bool,
     /// The shapes and the screen uniform last written to the GPU (written again only on a change).
     written: (Vec<f32>, [f32; 4]),
     /// Drawn in this picture's present pass already (`draw_in_pass`); `draw` then skips it once.
@@ -49,7 +52,20 @@ impl TouchOverlay {
     /// only when it changed); the number of shapes to draw, or None when there are none.
     fn prepare(&mut self, gpu: &Gpu, format: wgpu::TextureFormat, w: u32, h: u32) -> Option<u32> {
         if self.items.is_empty() || w == 0 || h == 0 || self.width_mm <= 0.0 || self.height_mm <= 0.0 { return None; }
-        let o = self.objects.get_or_insert_with(|| Objects::new(gpu, format));
+        if self.refused { return None; }
+        if self.objects.is_none() {
+            // inside Validation and Internal error scopes, as the native pipelines (in the browser
+            // errors come through promises: there the scopes are a no-op)
+            match crate::native::init::scoped_pipeline(gpu, "touch overlay", || Objects::new(gpu, format)) {
+                Ok(o) => self.objects = Some(o),
+                Err(e) => {
+                    crate::host::log(&format!("touch overlay: not drawn, the device refused it ({e}); the touch areas still work"));
+                    self.refused = true;
+                    return None;
+                }
+            }
+        }
+        let o = self.objects.as_mut()?;
         let count = (self.items.len() / ITEM_FLOATS) as u64;
         if count * ITEM_BYTES > o.capacity {
             o.capacity = (count * ITEM_BYTES).next_power_of_two();

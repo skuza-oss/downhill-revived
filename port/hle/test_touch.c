@@ -2507,16 +2507,19 @@ static void set_style(int style)
     field();
 }
 
-/* Actions is the default; Actions draws pictures with badges, Symbols the symbols alone (as before);
-   the style changes no place, no size and no saved layout. */
+/* Symbols is the default (the look before finding 229, until players choose); Actions draws pictures
+   with badges, Symbols the symbols alone; the style changes no place, no size and no saved layout. */
 static void test_button_style(void)
 {
     TouchSettings d;
     touch_settings_default(&d);
-    CHECK(d.style == TOUCH_STYLE_ACTIONS);
+    CHECK(d.style == TOUCH_STYLE_SYMBOLS);
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    CHECK(count_shapes(TS_ICON, -1) == 0 && count_shapes(TS_CROSS, 0) == 1);   /* the default draws no picture */
     for (int preset = 0; preset < 2; preset++) {
         start(preset ? TOUCH_CLASSIC : TOUCH_THUMB_ZONES, TOUCH_ATTACK_BUTTONS);
         TouchSettings s = *touch_settings(t);
+        s.style = TOUCH_STYLE_ACTIONS;
         touch_layout_parse(&s, preset ? "classic.layout=2;classic.cross=1.0,-2.0,1.20" : "thumb.layout=2;thumb.hop=-3.0,1.0,0.90");
         touch_configure(t, &s, NULL);
         field();
@@ -2569,6 +2572,7 @@ static void test_button_style(void)
        too small for theirs, show their names */
     start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
     TouchSettings small = *touch_settings(t);
+    small.style = TOUCH_STYLE_ACTIONS;
     small.size = 70;
     touch_configure(t, &small, NULL);
     field();
@@ -2587,6 +2591,7 @@ static void test_button_style(void)
 static void test_air_pictures(void)
 {
     start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    set_style(TOUCH_STYLE_ACTIONS);
     CHECK(!touch_air_picture(t, TC_TRIANGLE) && count_shapes(TS_ICON, TI_BRAKE) == 1 && count_shapes(TS_ICON, TI_HOP) == 1);
     game.air = 1;
     wait_ms(100);
@@ -2650,6 +2655,206 @@ static void test_air_pictures(void)
     CHECK(!touch_air_picture(t, TC_TRIANGLE));
 }
 
+/* ---- finding 229, the review of lanes 229 and 227 (round 2) ---- */
+
+/* How many characters ch the overlay draws now. */
+static int count_char(char ch)
+{
+    static TouchShape shapes[TOUCH_SHAPES];
+    int n = touch_shapes(t, shapes, TOUCH_SHAPES), k = 0;
+    for (int i = 0; i < n; i++)
+        if (shapes[i].kind == TS_CHAR && (int)(shapes[i].c + 0.5f) == (unsigned char)ch) k++;
+    return k;
+}
+
+/* Thumb zones on the Mi 11i with HOP grown to 600 % over the steering side (a layout made for a
+   tablet, or edited by hand), PEDAL moved 2 mm up (harmless), hints not yet shown. */
+static void thumb_needing_rescue(TouchSettings *s, char *loaded, int size)
+{
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float hx, hy;
+    touch_control(t, TC_HOP, &hx, &hy, NULL);
+    *s = *touch_settings(t);
+    s->hints_shown = 0;
+    s->edit[0][TC_HOP] = (TouchEdit){52.0f - hx, PHONE.height / 2 - hy, 6.0f};
+    s->edit[0][TC_PEDAL] = (TouchEdit){0, -2.0f, 1.0f};
+    touch_layout_format(s, loaded, size);
+    TouchSettings parsed;
+    touch_settings_default(&parsed);
+    parsed.preset = TOUCH_THUMB_ZONES;
+    parsed.vibration = 0;
+    parsed.hints_shown = 0;
+    touch_layout_parse(&parsed, loaded);   /* as the host loads it from dhd.ini */
+    *s = parsed;
+    touch_configure(t, s, &PHONE);
+}
+
+/* Review defect 3: a hint shown during a race saves the hints and never the rescued layout; the
+   layout reaches dhd.ini only from the layout editor (then the rescued one, on purpose). The rescue
+   resets the fewest controls (HOP, not the harmless PEDAL before it in the controls' order). */
+static void test_rescue_not_saved_by_hints(void)
+{
+    char loaded[1024], out_text[1024];
+    TouchSettings s;
+    thumb_needing_rescue(&s, loaded, sizeof loaded);
+    const char *note = touch_take_note(t);
+    CHECK(note && strstr(note, "HOP") && !strstr(note, "PEDAL"));   /* the culprit alone */
+    CHECK(touch_settings(t)->edit[0][TC_HOP].size == 1);              /* reset for the run */
+    CHECK(touch_settings(t)->edit[0][TC_PEDAL].dy == -2.0f);           /* kept: it was not in the way */
+    CHECK(steers_at(12, PHONE.height * 0.5f));
+    /* the race's first hint (PEDAL) shows: the hints are saved, the layout as loaded */
+    game.race_ms = 500;
+    field();
+    TouchSettings saved;
+    int what = touch_take_saved(t, &saved);
+    CHECK(what == TOUCH_SAVED_HINTS);
+    CHECK(saved.hints_shown & TOUCH_HINT_PEDAL);
+    touch_layout_format(&saved, out_text, sizeof out_text);
+    if (strcmp(out_text, loaded)) fprintf(stderr, "test_touch: saved \"%s\", loaded \"%s\"\n", out_text, loaded);
+    CHECK(!strcmp(out_text, loaded));   /* byte-identical to what was loaded */
+    /* a setting changed on the TOUCH CONTROLS page (the host configures again from dhd.ini's
+       string): rescued again for the run, and the next hint still saves the loaded layout */
+    TouchSettings again = s;
+    again.style = TOUCH_STYLE_ACTIONS;
+    touch_configure(t, &again, &PHONE);
+    CHECK(touch_settings(t)->edit[0][TC_HOP].size == 1);
+    game.race_ms = 18000;   /* the next hint (HOP or the attack's), once the first has gone */
+    what = 0;
+    for (int i = 0; i < 600 && !what; i++) { field(); what = touch_take_saved(t, &saved); }
+    CHECK(what == TOUCH_SAVED_HINTS);
+    touch_layout_format(&saved, out_text, sizeof out_text);
+    CHECK(!strcmp(out_text, loaded));
+    /* the layout editor's Done saves the layout shown: the rescued one, on purpose */
+    touch_open_editor(t);
+    field();
+    editor_tap(E_DONE);
+    field();
+    what = touch_take_saved(t, &saved);
+    CHECK(what & TOUCH_SAVED_LAYOUT);
+    CHECK(saved.edit[0][TC_HOP].size == 1 && saved.edit[0][TC_PEDAL].dy == -2.0f);
+    touch_layout_format(&saved, out_text, sizeof out_text);
+    CHECK(strcmp(out_text, loaded) != 0);
+    /* Back in the editor saves too */
+    thumb_needing_rescue(&s, loaded, sizeof loaded);
+    touch_open_editor(t);
+    field();
+    touch_back(t, now);
+    field();
+    what = touch_take_saved(t, &saved);
+    CHECK(what & TOUCH_SAVED_LAYOUT);
+}
+
+/* Review gap: Thumb zones has no L bar; a right-hand button dragged into the steering side, and a
+   0.8.0 layout's camera moved to the bottom (its area started under the camera), leave steering. */
+static void test_thumb_moved_buttons_steer(void)
+{
+    for (int left = 0; left < 2; left++) {
+        start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+        TouchSettings s = *touch_settings(t);
+        s.left_handed = left;
+        touch_configure(t, &s, &PHONE);
+        field();
+        touch_open_editor(t);
+        field();
+        float hx, hy;
+        touch_control(t, TC_BRAKE, &hx, &hy, NULL);   /* BRAKE, the cluster's inner button: across, then down */
+        drag(TC_BRAKE, left ? PHONE.width - 45 - hx : 45 - hx, 0);
+        touch_control(t, TC_BRAKE, &hx, &hy, NULL);
+        drag(TC_BRAKE, 0, PHONE.height - 12 - hy);
+        editor_tap(E_DONE);
+        field();
+        touch_control(t, TC_BRAKE, &hx, &hy, NULL);
+        CHECK(left ? hx > PHONE.width / 2 : hx < PHONE.width / 2);   /* it went there */
+        CHECK(steers_at(left ? PHONE.width - 20 : 12, 20));           /* the rest of the area steers */
+    }
+    /* a 0.8.0 layout (no layout=2): the camera dragged to the bottom left */
+    start(TOUCH_THUMB_ZONES, TOUCH_ATTACK_FLICK);
+    float cx, cy, chw, chh;
+    touch_control(t, TC_CAMERA, &cx, &cy, NULL);
+    TouchSettings s = *touch_settings(t);
+    char text[128];
+    snprintf(text, sizeof text, "thumb.camera=%.1f,%.1f,1.00", 40.0f - cx, PHONE.height - 6 - cy);
+    touch_layout_parse(&s, text);
+    CHECK(s.legacy[0]);
+    touch_configure(t, &s, &PHONE);
+    field();
+    touch_control(t, TC_CAMERA, &cx, &cy, NULL);
+    touch_control_size(t, TC_CAMERA, &chw, &chh);
+    CHECK(cy + chh > PHONE.height - 8);
+    CHECK(touch_take_note(t) == NULL);   /* nothing to rescue: the area is the default one */
+    CHECK(steers_at(12, 20));
+}
+
+/* Review gap: the D-pad's arms on a screen with no room under the bar: the room's floor is
+   DPAD_HALF_MIN_MM (2 mm) before the fit to the HUD and L3 (at least 0.6) and the editor's size
+   multiply it, so at the default size the arms' half is at least 1.2 mm (an editor size of 25 %
+   can make it smaller, as it makes every control smaller). */
+static void test_dpad_room_floor(void)
+{
+    start_dpad(1, 0, 0, 154.5f, 30.0f);
+    float cx, cy, extent;
+    touch_control(t, TC_STICK, &cx, &cy, &extent);
+    float half = (extent - 3.0f) / 3.0f;   /* the extent is 3 half sizes and a 3 mm gap */
+    if (half < 1.2f - 0.01f) fprintf(stderr, "test_touch: the D-pad's half %.2f mm\n", half);
+    CHECK(half >= 1.2f - 0.01f);
+    CHECK(dpad_works());
+}
+
+/* Review gap: the badges' letters themselves, Xbox and Nintendo by place. */
+static void test_badge_letters(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    TouchSettings s = *touch_settings(t);
+    s.style = TOUCH_STYLE_ACTIONS;
+    s.badges = TOUCH_BADGES_XBOX;
+    touch_configure(t, &s, NULL);
+    field();
+    /* ✕ A, ○ B, ◻ X, △ Y; the bars' L2 L1 R1 R2 as LT LB RB RT; L3 R3 as LS RS */
+    /* (SELECT and START keep their words: their S, E, L, C, T, A, R count too) */
+    CHECK(count_char('A') == 2 && count_char('Y') == 1 && count_char('X') == 1);   /* A, START's A */
+    CHECK(count_char('B') == 3);   /* B, LB, RB */
+    CHECK(count_char('T') == 5);   /* LT, RT, SELECT's T, START's two */
+    CHECK(count_char('S') == 4);   /* LS, RS, SELECT's S, START's S */
+    CHECK(count_shapes(TS_CROSS, 0) == 0 && count_shapes(TS_CIRCLE, 0) == 0 && count_shapes(TS_SQUARE, 0) == 0 &&
+          count_shapes(TS_TRIANGLE, 0) == 0);
+    s.badges = TOUCH_BADGES_NINTENDO;
+    touch_configure(t, &s, NULL);
+    field();
+    /* ✕ B, ○ A, ◻ Y, △ X; the bars ZL L R ZR; L3 R3 LS RS */
+    CHECK(count_char('Z') == 2 && count_char('T') == 3);   /* ZL, ZR; no LT or RT */
+    CHECK(count_char('Y') == 1 && count_char('X') == 1 && count_char('A') == 2);   /* A, START's A */
+    CHECK(count_char('B') == 1);
+    s.badges = TOUCH_BADGES_PS2;
+    touch_configure(t, &s, NULL);
+    field();
+    CHECK(count_char('Z') == 0 && count_shapes(TS_CROSS, 0) == 1 && count_shapes(TS_TRIANGLE, 0) == 1);
+}
+
+/* Review risk R3: the picture-or-name band. L3 on the Mi 11i (its picture's half is 0.58 of its
+   radius, 2.49 mm at 100 %): below 2.0 mm the name, back to the picture only above 2.2 mm; a size
+   that wobbles inside the band keeps what it had. */
+static void test_picture_band(void)
+{
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    TouchSettings s = *touch_settings(t);
+    s.style = TOUCH_STYLE_ACTIONS;
+    touch_configure(t, &s, NULL);
+    field();
+    float r;
+    touch_control(t, TC_L3, NULL, NULL, &r);
+    float half100 = r * 0.58f;
+    static const struct { float g; int picture; } steps[] = {
+        {2.15f, 1}, {2.05f, 1}, {1.95f, 0}, {2.05f, 0}, {2.15f, 0}, {1.98f, 0}, {2.25f, 1}, {2.05f, 1}, {2.12f, 1}};
+    for (unsigned i = 0; i < sizeof steps / sizeof *steps; i++) {
+        s.edit[1][TC_L3].size = steps[i].g / half100;
+        touch_configure(t, &s, NULL);
+        field();
+        int shown = count_shapes(TS_ICON, TI_SLIDE) == 1;
+        if (shown != steps[i].picture) fprintf(stderr, "test_touch: L3 at %.2f mm: picture %d\n", steps[i].g, shown);
+        CHECK(shown == steps[i].picture);
+    }
+}
+
 int main(void)
 {
     test_dpad_layout();
@@ -2692,6 +2897,11 @@ int main(void)
     test_saved_layout_steers();
     test_button_style();
     test_air_pictures();
+    test_rescue_not_saved_by_hints();
+    test_thumb_moved_buttons_steer();
+    test_dpad_room_floor();
+    test_badge_letters();
+    test_picture_band();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");
