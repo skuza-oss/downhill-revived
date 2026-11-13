@@ -213,6 +213,48 @@ game's own menu strings (in the disc's data) replaced at run time.
   side in landscape and the emulator one at the top in portrait (the page's ground colour would
   need `shortEdges` and the WebView's safe-area insets).
 
+## Languages, round 2
+
+Seven languages (`pt-BR`, `es`, `fr`, `de`, `it`, `ja`, `zh-Hans`) were written by a small model; this
+round fixed the code around them and edited the strings once more (branch `fix/launcher-language-polish`).
+
+- **Language row**: every language shows under its own name whatever is active (`LANGUAGE_NAMES` next
+  to `LANGUAGES` in `i18n.js`; the `language.name` key is gone from the files), and the first
+  choice, System, names the language the device alone would give.
+- **`pickLanguage`**: a tag reaches its file by script and region: `zh`, `zh-CN`, `zh-SG`,
+  `zh-Hans-*` take `zh-Hans`; `zh-TW`, `zh-HK`, `zh-Hant-*` never get the Simplified file (the next
+  language of the device is tried, else English, until a Traditional file exists); `pt-PT` and plain
+  `pt` take `pt-BR`; `de-AT`, `es-419`, `fr-CA` take their base. dhd.ini's value is read the same way.
+- **`lang_check.py`**: a count is asked in the forms its language writes (CLDR: Japanese and Chinese
+  `.other` only, most others `.one` and `.other`, Russian, Polish, Arabic more); a form a language does
+  not use is not missing, one it uses and lacks is. Stale keys, renamed placeholders, lost bold spans
+  and keys the code names that the source lacks still fail. It also needs a name for every language.
+- **Source strings**: Scaling has its hint (Smooth blends the pixels, Sharp keeps them crisp); the
+  launcher's Aspect row is the game's Picture row (a test ties the row names to `pc_settings.c`);
+  the window-matched resolution reads as a sentence; Steer With, Race server address, Close window,
+  Share log file. Game labels a player has to find in the game's page stay English in every language,
+  written as the game shows them (Skip Movies, Launcher At Start included), running text translates
+  ordinary words.
+- **Play** (button and tab) is translated: Spielen, Jouer, Jugar, Gioca, Jogar, プレイ, 开始游戏.
+- **Second pass**: 36 / 33 / 30 / 26 / 35 / 80 / 13 strings changed in de / fr / es / it / pt-BR / ja /
+  zh-Hans (the ja number is mostly Japanese-to-Latin spacing). The first pass had written *moto* for
+  the bikes in four languages: they are bicycles. One word for "patch notes" in each file, "lanceur"
+  in French, the others keep "launcher" (what players of those languages say), button and tab texts
+  shortened (they ran up to 2.4 times the English length).
+- **Fit**: pages rendered in headless Chrome (`port/web/cdp.mjs`) with a stand-in for the native side
+  (the Tauri calls answered with made-up data: a desktop's caps and a phone's, over a message port)
+  at 960x600 and 390x844, 14 views on the desktop and 12 on a phone, in all eight languages: no
+  clipped or wrapped button, tab or title. Two real problems found and fixed in code: the Controls
+  tab's stick captions (a 116 px canvas; translations ran to 218 px, now two lines after the colon)
+  and the Play page's facts row (a long translation squeezed its neighbours into ellipses, now wraps).
+  The English desktop launcher is pixel-equal to main's 0b686bf0 in 10 of 14 views (a single pixel
+  differed once in one run, none on the next); the other four differ only by the changed strings:
+  the Language row's select is wider (it holds "Português (Brasil)"), the Picture label, the new
+  Scaling hint, the longer window-matched Resolution hint and "Race server address".
+
+Open: nobody who speaks these languages has read them yet; a native speaker's pass is still worth
+asking for (Japanese and Chinese above all).
+
 ## Result
 
 Merged into `main` on 2026-11-13, after the iOS platform (finding 224). The Android app opens into

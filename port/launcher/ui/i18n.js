@@ -9,29 +9,56 @@
 // language needs them; Intl.PluralRules picks one).
 'use strict';
 
-// The languages shipped: their codes (the file names) in the Language row's order. A translator
-// adds the code here with the file.
+// The languages shipped: their codes (the file names) in the Language row's order, and each one's own
+// name as its speakers write it (the row shows every language under its own name, whichever is
+// active). A translator adds the code and the name here with the file.
 const LANGUAGES = ['en', 'pt-BR', 'es', 'fr', 'de', 'it', 'ja', 'zh-Hans'];
+const LANGUAGE_NAMES = {
+  'en': 'English',
+  'pt-BR': 'Português (Brasil)',
+  'es': 'Español',
+  'fr': 'Français',
+  'de': 'Deutsch',
+  'it': 'Italiano',
+  'ja': '日本語',
+  'zh-Hans': '简体中文',
+};
 const PLURAL_FORMS = ['zero', 'one', 'two', 'few', 'many', 'other'];
 
 const lang = { code: 'en', words: {}, english: {} };
 
+// Chinese comes in two scripts and a device names one by script (zh-Hans, zh-Hant) or by region
+// (zh-CN, zh-TW); a region alone says the script.
+const CHINESE_SCRIPT_OF_REGION = { cn: 'hans', sg: 'hans', my: 'hans', tw: 'hant', hk: 'hant', mo: 'hant' };
+
+// The file for one language tag (a device's or dhd.ini's), or '' when there is none: an exact code
+// (pt-BR), then Chinese by script and region (zh, zh-CN, zh-SG and zh-Hans-* take zh-Hans; zh-TW,
+// zh-HK and zh-Hant-* take only a Traditional file, never the Simplified one), then for any other
+// language the longest file code the tag starts with (de for de-AT), the base (pt), and last another
+// file of the same language (pt-BR for pt-PT and plain pt: the only Portuguese there is).
+function languageFile(tag, available) {
+  const low = (c) => String(c).toLowerCase().replace(/_/g, '-');
+  const has = (c) => available.find((a) => low(a) === low(c)) || '';
+  const parts = low(tag).split('-');
+  const base = parts[0];
+  if (!base) return '';
+  if (has(tag)) return has(tag);
+  if (base === 'zh') {
+    const script = parts.slice(1).find((p) => p.length === 4) || CHINESE_SCRIPT_OF_REGION[parts.slice(1).find((p) => p.length === 2)] || 'hans';
+    return has(`zh-${script}`);
+  }
+  const prefix = available.filter((a) => low(tag).startsWith(`${low(a)}-`)).sort((x, y) => y.length - x.length)[0];
+  return prefix || has(base) || available.find((a) => low(a).split('-')[0] === base) || '';
+}
+
 // The language to use: saved (dhd.ini's language, '' = the system's), else the first of wanted
-// (navigator.languages) with a file: an exact code (pt-BR), then the longest file code it starts
-// with (zh-Hans for zh-Hans-CN), then its base (pt), then another file of its language (pt-BR for
-// pt-PT; never across Chinese scripts: zh-TW doesn't take zh-Hans), else English.
+// (navigator.languages) with a file, else English.
 function pickLanguage(saved, wanted, available = LANGUAGES) {
-  const low = (c) => String(c).toLowerCase();
-  const has = (c) => available.find((a) => low(a) === low(c));
-  if (saved && has(saved)) return has(saved);
+  const own = saved && languageFile(saved, available);
+  if (own) return own;
   for (const w of wanted || []) {
-    if (has(w)) return has(w);
-    const prefix = available.filter((a) => low(w).startsWith(`${low(a)}-`)).sort((x, y) => y.length - x.length)[0];
-    if (prefix) return prefix;
-    const base = low(w).split('-')[0];
-    if (has(base)) return has(base);
-    const sibling = base !== 'zh' && available.find((a) => low(a).split('-')[0] === base);
-    if (sibling) return sibling;
+    const file = languageFile(w, available);
+    if (file) return file;
   }
   return 'en';
 }
@@ -83,9 +110,14 @@ function tNodes(key, params = {}) {
   return out;
 }
 
-// A language's own name for the Language row (its language.name key).
-function languageName(code, table) {
-  return (table && table['language.name']) || code;
+// A language's own name for the Language row (LANGUAGE_NAMES; the code when it has none).
+function languageName(code) {
+  return LANGUAGE_NAMES[code] || code;
+}
+
+// The language the device alone would give (no dhd.ini choice): the Language row's "System" entry.
+function systemLanguage() {
+  return pickLanguage('', typeof navigator !== 'undefined' ? navigator.languages : []);
 }
 
 // The language file at lang/<code>.json (from the page's own folder).
@@ -114,4 +146,4 @@ function translatePage(root) {
   root.querySelectorAll('[data-i18n-title]').forEach((e) => e.setAttribute('title', t(e.dataset.i18nTitle)));
 }
 
-if (typeof module !== 'undefined') module.exports = { LANGUAGES, PLURAL_FORMS, lang, pickLanguage, fill, t, tn, languageName };
+if (typeof module !== 'undefined') module.exports = { LANGUAGES, LANGUAGE_NAMES, PLURAL_FORMS, lang, pickLanguage, fill, t, tn, languageName, systemLanguage };

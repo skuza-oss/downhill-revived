@@ -33,6 +33,29 @@ assert.strictEqual(i.pickLanguage('', ['zh-TW', 'fr'], ['en', 'zh-Hans', 'fr']),
 assert.strictEqual(i.pickLanguage('', ['ja'], ['en']), 'en');
 assert.strictEqual(i.pickLanguage('fr', ['de'], ['en', 'fr', 'de']), 'fr', 'dhd.ini language first');
 assert.strictEqual(i.pickLanguage('xx', ['de'], ['en', 'de']), 'de', 'a saved language without a file: the system');
+// every shipped language is shown under its own name, as its speakers write it, whichever is active
+assert.strictEqual(JSON.stringify(Object.keys(i.LANGUAGE_NAMES)), JSON.stringify(i.LANGUAGES), 'a name for each language, in the row\'s order');
+assert.strictEqual(JSON.stringify(i.LANGUAGES.map((c) => i.languageName(c))),
+  JSON.stringify(['English', 'Português (Brasil)', 'Español', 'Français', 'Deutsch', 'Italiano', '日本語', '简体中文']));
+assert.strictEqual(i.languageName('xx'), 'xx', 'no name: the code');
+// the whole list: Chinese by script and region, Portuguese, and the other languages by their base
+const all = (...wanted) => i.pickLanguage('', wanted);
+for (const w of ['zh', 'zh-CN', 'zh-SG', 'zh-Hans', 'zh-Hans-CN', 'zh-Hans-SG', 'zh-cn', 'zh_CN']) assert.strictEqual(all(w), 'zh-Hans', w);
+for (const w of ['zh-TW', 'zh-HK', 'zh-MO', 'zh-Hant', 'zh-Hant-TW', 'zh-Hant-HK']) assert.strictEqual(all(w), 'en', `${w}: no Simplified for Traditional`);
+assert.strictEqual(all('zh-TW', 'de'), 'de', 'Traditional passes on to the next language');
+assert.strictEqual(i.pickLanguage('', ['zh-Hant-TW'], ['en', 'zh-Hans', 'zh-Hant']), 'zh-Hant', 'a Traditional file, when one exists');
+assert.strictEqual(i.pickLanguage('', ['zh-TW'], ['en', 'zh-Hans', 'zh-Hant']), 'zh-Hant');
+for (const w of ['pt', 'pt-PT', 'pt-BR', 'pt-AO']) assert.strictEqual(all(w), 'pt-BR', w);
+for (const [w, code] of [['es', 'es'], ['es-ES', 'es'], ['es-MX', 'es'], ['es-419', 'es'], ['fr-FR', 'fr'], ['fr-CA', 'fr'], ['de-AT', 'de'],
+  ['de-CH', 'de'], ['it-IT', 'it'], ['it-CH', 'it'], ['ja', 'ja'], ['ja-JP', 'ja'], ['en-GB', 'en'], ['en-US', 'en'], ['ko-KR', 'en']]) {
+  assert.strictEqual(all(w), code, w);
+}
+assert.strictEqual(all('ko', 'es-MX', 'de'), 'es', 'the first language with a file');
+assert.strictEqual(all('en-GB', 'de'), 'en', 'English first stays English');
+assert.strictEqual(i.pickLanguage('de-AT', ['fr']), 'de', 'dhd.ini may name a region too');
+assert.strictEqual(i.pickLanguage('zh-CN', ['fr']), 'zh-Hans');
+assert.strictEqual(i.pickLanguage('', []), 'en');
+assert.strictEqual(i.pickLanguage('', undefined), 'en');
 // words: placeholders, English for a key a language lacks, the key itself when none has it
 i.lang.english = en;
 i.lang.words = { 'home.version': 'Versión {version}' };
@@ -46,12 +69,29 @@ i.lang.words = en;
 i.lang.code = 'en';
 assert.strictEqual(i.tn('server.races', 1), '1 public race');
 assert.strictEqual(i.tn('server.races', 3), '3 public races');
+// the launcher names a setting as the game's own SETTINGS page does (port/hle/pc_settings.c)
+const gamePage = fs.readFileSync(path.join(__dirname, '..', 'hle', 'pc_settings.c'), 'utf8');
+for (const [key, label] of [['row.scale', 'Resolution'], ['row.window', 'Display'], ['row.size', 'Window Size'], ['row.aspect', 'Picture'],
+  ['row.scaling', 'Scaling'], ['row.widescreen', 'Widescreen']]) {
+  assert.ok(gamePage.includes(`{"${label}:"`), `${label} is a row of the game's page`);
+  assert.strictEqual(en[key].toLowerCase(), label.toLowerCase(), `${key} reads as the game's ${label} (case aside)`);
+}
+assert.ok(en['row.scaling.hint'], 'the Scaling row says what it does');
 // every source string: whole, named placeholders only, bold spans paired
 for (const [k, v] of Object.entries(en)) {
   assert.strictEqual(typeof v, 'string', k);
   assert.ok(!/\{\s*\}|\{\d+\}|%s|%d/.test(v), `${k}: placeholders have names`);
   assert.strictEqual((v.match(/\*\*/g) || []).length % 2, 0, `${k}: bold spans paired`);
 }
+
+// ---- the Controls tab's stick captions: one line when they fit, else split after the colon
+const stick = load('stick.js');
+const width = (x) => x.length * 5;   // a stand-in for the measured width
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, 'Left stick: steer, lean')), '["Left stick: steer, lean"]');
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, 'Linker Stick: lenken, lehnen und noch mehr')),
+  '["Linker Stick:","lenken, lehnen und noch mehr"]');
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, '左スティック：ステアリング・傾き・もっと長い説明文です')), '["左スティック：","ステアリング・傾き・もっと長い説明文です"]');
+assert.strictEqual(JSON.stringify(stick.stickLabelLines(width, 'Eine Beschriftung ohne Doppelpunkt aber sehr lang')), '["Eine Beschriftung ohne Doppelpunkt aber sehr lang"]');
 
 // ---- the phones' bridge: calls answered by id, events, messages before the port queued
 const listeners = [];
