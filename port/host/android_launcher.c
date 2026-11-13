@@ -5,8 +5,9 @@
      the rider name's rule, in the files folder's dhd.ini (the game's own);
    - the disc: host.c's host_disc_check (the boot check) and dhd_disc's online check with the game's
      iso-check.txt (port/render/disc);
-   - the update check: port/net/update_check.c's update_find over the same sources as the game's
-     own notice (android_update.c), with the HTTPS client of port/net.
+   - the update check: phone.c's phone_update_find (port/net/update_check.c's update_find over the
+     same sources as the game's own notice, android_update.c, with the HTTPS client of port/net),
+     which the iOS launcher calls too (finding 227).
    Nothing here touches SDL or starts the game: loading libmain.so runs only its constructors (the
    renderer's version line, the VU1 register pointer), and SDL_main is the game activity's. */
 #include <jni.h>
@@ -15,8 +16,7 @@
 #include <string.h>
 
 #include "../include/version.h"
-#include "../net/update_check.h"
-#include "../net/ws.h"
+#include "phone.h"
 #include "../render/include/dhd_settings.h"
 #include "../render/include/dhd_disc.h"
 
@@ -127,33 +127,19 @@ EXPORT(jstring, onlineCheck)(JNIEnv *env, jclass cls, jstring iso, jstring cache
     return (*env)->NewStringUTF(env, out);
 }
 
-/* update_find's fetch: one GET; context counts the sources that answered. */
-static const char *fetch(void *context, const char *url)
-{
-    static _Thread_local char body[64 * 1024];
-    if (http_get(url, body, sizeof body) < 0) {
-        fprintf(stderr, "launcher: %s didn't answer\n", url);
-        return NULL;
-    }
-    ++*(int *)context;
-    return body;
-}
-
 /* String update(): "<version>\n<page>" when a newer release has an Android build (update_find over
    the game's own sources and rules: android_update.c, update_check.c), "" when none does, null when
    no source answered. */
 EXPORT(jstring, update)(JNIEnv *env, jclass cls)
 {
     (void)cls;
-    static const char *const sources[] = {UPDATE_SOURCE_SERVER, UPDATE_SOURCE_GITHUB};
     char version[32], page[512], out[600];
-    int answered = 0;
-    if (update_find(fetch, &answered, sources, sizeof sources / sizeof *sources, "android", DHD_VERSION,
-                    version, sizeof version, page, sizeof page)) {
+    int found = phone_update_find("android", version, sizeof version, page, sizeof page);
+    if (found > 0) {
         snprintf(out, sizeof out, "%s\n%s", version, page);
         return (*env)->NewStringUTF(env, out);
     }
-    return answered ? (*env)->NewStringUTF(env, "") : NULL;
+    return found == 0 ? (*env)->NewStringUTF(env, "") : NULL;
 }
 
 /* String version(): this build's version (version.h). */

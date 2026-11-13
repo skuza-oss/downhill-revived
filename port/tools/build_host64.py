@@ -110,8 +110,11 @@ TARGETS = {t.key: t for t in (
 # Off Windows: the POSIX host instead of the Win32 one
 POSIX_UNITS = {'port/host/host_win32.c': 'port/host/host_posix.c'}
 WINDOWS_ONLY = ('port/gs/replay.c',)  # Win32 calls (GS replay)
+# What both phone hosts share (port/host/phone.h, finding 227): SETTINGS' rows, the previous run's
+# lines, the launcher's update check
+PHONE_UNITS = ['port/host/phone.c', 'port/net/update_check.c']
 ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c',
-                 'port/host/android_update.c', 'port/host/android_launcher.c', 'port/net/update_check.c']
+                 'port/host/android_update.c', 'port/host/android_launcher.c'] + PHONE_UNITS
 # Android: only SDL's entry and the launcher's native calls (android_launcher.c, finding 225) leave
 # the library; everything else may be garbage-collected (--gc-sections), as /opt:ref does for dhd64.exe.
 ANDROID_EXPORTS = '{\n  global: SDL_main; Java_app_downhillrevived_Native_*;\n  local: *;\n};\n'
@@ -120,7 +123,7 @@ ANDROID_EXPORTS = '{\n  global: SDL_main; Java_app_downhillrevived_Native_*;\n  
 def host_units(t):
     if t.windows:
         return list(HOST_UNITS)
-    return [POSIX_UNITS.get(u, u) for u in HOST_UNITS if u not in WINDOWS_ONLY] + (ANDROID_UNITS if t.android else [])
+    return [POSIX_UNITS.get(u, u) for u in HOST_UNITS if u not in WINDOWS_ONLY] + (ANDROID_UNITS if t.android else PHONE_UNITS if t.ios else [])
 
 
 def glue(t):
