@@ -19,8 +19,13 @@ The root and `port/AGENTS.md` rules apply. Design: findings 091, 143; phones' sp
   (`Native` -> `port/host/android_launcher.c`: dhd_settings, the disc checks, `update_find`), imports
   the disc (`DiscImport`, on a worker thread) and starts `DhdActivity` from PLAY (and ends). "Edit
   the touch layout" starts the game as the layout editor alone (`--touch-editor` from
-  `DhdActivity.getArguments`) with the launcher left below it: the editor's Done ends the process
-  through `host_end`, and Android starts the launcher again from its saved state (finding 228).
+  `DhdActivity.getArguments`) with the launcher left behind it: the editor's Done ends the process
+  through `host_end`. `DhdActivity` is `singleInstance`, in a task of its own; the launcher shows
+  again because Android brings back the launcher's task and starts it from its saved state. Nothing
+  guarantees that on every maker's Android (and not when the task was removed): then the player
+  lands on the home screen, and the durable mark `LauncherActivity.editorMark` (the app's private
+  preferences) opens the launcher at its Touch tab at the next start, even with the launcher set
+  to be skipped (finding 228).
   No second UI in Java: a launcher change goes in `port/launcher/ui`. The WebView loads only the app's own files
   (no JavaScript interface; the bridge is a MessagePort posted to that origin). Nothing is
   downloaded by the app: the launcher (or, on a direct start, the game once a day) only says a

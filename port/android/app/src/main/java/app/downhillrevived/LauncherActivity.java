@@ -24,6 +24,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -110,11 +111,14 @@ public class LauncherActivity extends Activity {
         // to come, and a frozen first screen would be Android's "not responding"
         Context app = getApplicationContext();
         // started again by Android with its saved state (after the layout editor alone ended the game,
-        // play): the page, never a direct start
+        // play): the page, never a direct start. The same after the editor alone when Android did
+        // not bring this task back (the task removed, a maker's Android that doesn't restore it): the
+        // durable mark play wrote says so at the next start, whichever way it comes
         boolean restored = savedInstanceState != null;
-        backFromEditor = restored && savedInstanceState.getBoolean(BACK_FROM_EDITOR);
-        if (backFromEditor) Log.i(TAG, "launcher: back from the layout editor alone");
-        boolean asked = OPEN.equals(action) || DISC.equals(action) || restored;
+        boolean marked = editorMark(this, false);
+        backFromEditor = (restored && savedInstanceState.getBoolean(BACK_FROM_EDITOR)) || marked;
+        if (backFromEditor) Log.i(TAG, "launcher: back from the layout editor alone" + (restored ? "" : " (a new start)"));
+        boolean asked = OPEN.equals(action) || DISC.equals(action) || restored || backFromEditor;
         new Thread(() -> {
             LastExit exit = LastExit.record(app);
             String why = exit != null && exit.why != null && LastExit.firstAsk(app, exit) ? exit.why : null;
@@ -252,6 +256,7 @@ public class LauncherActivity extends Activity {
         if (edit) game.putExtra(DhdActivity.EDIT_TOUCH_LAYOUT, true);
         if (checked) game.putExtra(DhdActivity.LAUNCHER_CHECKED, true);
         editing = edit;
+        if (edit) editorMark(this, true);  // written before the game starts: it ends with the process
         startActivity(game);
         if (!edit) finish();
         overridePendingTransition(0, 0);
@@ -261,6 +266,20 @@ public class LauncherActivity extends Activity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         out.putBoolean(BACK_FROM_EDITOR, editing);
+    }
+
+    /** The durable mark of the editor alone (finding 228): set (true) before the game starts as the
+     *  editor alone, in the app's private preferences, written to disk at once; read and cleared
+     *  (false) at the next start of this activity. Returns whether it was set before. Android's
+     *  restore of this task (its saved state) is what brings the player back right after Done; the
+     *  mark is what still opens the launcher at its Touch tab at the next start when Android
+     *  doesn't (the task was removed, a maker's Android that doesn't restore it). */
+    static boolean editorMark(Context context, boolean set) {
+        SharedPreferences p = context.getSharedPreferences("launcher", Context.MODE_PRIVATE);
+        boolean was = p.getBoolean(BACK_FROM_EDITOR, false);
+        if (set) p.edit().putBoolean(BACK_FROM_EDITOR, true).commit();
+        else if (was) p.edit().remove(BACK_FROM_EDITOR).commit();
+        return was;
     }
 
     /** Android's document picker for the disc image. */

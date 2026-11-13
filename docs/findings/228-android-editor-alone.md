@@ -48,10 +48,17 @@ Out of scope: `port/ios` and the iOS side of the bridge (lane 227).
 - **Back to the launcher by Android's own task rule, not a second process.** The game ends its
   process with `host_end` (findings 210, 217) and SDL_main runs once per process, so the editor
   alone cannot hand the screen back to a launcher in the same process, and the launcher cannot
-  start a second game there. For this one start `LauncherActivity` does not finish: it stays below
-  the game, stopped, with its state saved. When the game's process ends, Android removes the dead
-  game's activity ("app died, no saved state") and starts the activity under it again in a new
-  process from its saved state. `LauncherActivity` then shows its page (never a direct start, even
+  start a second game there. For this one start `LauncherActivity` does not finish: it stays behind
+  the game, stopped, with its state saved. `DhdActivity` is `singleInstance`, so it runs in a task
+  of its own, not above the launcher in one back stack. When the game's process ends, Android
+  removes the dead game's activity ("app died, no saved state"), brings the launcher's task back and
+  starts its activity in a new process from its saved state. That is Android's behaviour as seen on
+  the Mi 11i (MIUI, Android 13), not a guarantee: another maker's Android may not restore the task,
+  and a task the player removed is not restored. Then the player lands on the home screen; the
+  durable mark (`LauncherActivity.editorMark`, a line in the app's private preferences written
+  before the game starts, read and cleared at the launcher's next start; review round 2) makes that
+  next start open the launcher at its Touch tab all the same, even with the launcher set to be
+  skipped. `LauncherActivity` then shows its page (never a direct start, even
   with `launcher = 0`) and the snapshot's `reopen` (`"touch-editor"`, once) opens Settings at the
   Touch tab, where the row is. Dropped: the launcher in its own process (`android:process`: two
   processes, `DhdActivity.started` and the exit records per process all change for one row), a
@@ -108,6 +115,34 @@ throws). Now the question waits in a `deleting` stage (busy: no new pick, no PLA
 `false` or a failed call asks again with `disc.deleteFailed` (English and the seven languages,
 `lang_check.py` clean). Tested in `test_launcher_ui.js` (both outcomes and the page's check that
 only `true` counts).
+
+**Review of lane 228 (round 2, `review-090/sol-lane228.md`).** An outside review of this lane's
+range found:
+- PLAY could overtake a setting change that writes several keys (Performance mode's three, a tab's
+  reset): the gate waited for the writes pending at one moment. Now a setting change is one
+  operation (`bridge.operation`) from its first write to its last, a handoff (PLAY, the editor row,
+  an update's install) waits until no operation runs and no write is pending, looking again after
+  every change, and once begun refuses new operations (`footer.handoffBusy`), sends no write after
+  it went out, and is the only one (a second PLAY or the editor row during the transition gets the
+  same handoff). Tested over all three transports (Tauri, Android's port, iOS's `bridge_ios.js`)
+  with slow saves, and with app.js's own `resetTab` (`test_handoff.js`).
+- A save that never answers left PLAY waiting with nothing on screen: the handoff is now cancelled
+  after 5 s with `footer.handoffStuck` and a Try again, never performed over the unfinished write.
+- The Windows retry missed the sharing violation (32), which this toolchain gives as an
+  uncategorized raw error: `retryable` (access denied 5, 32, lock violation 33; Windows only) now
+  drives the rename and the read before the edit. A real held temporary file gives 32 (asserted in
+  `real_holders`); a held dhd.ini without delete sharing gives 5, which the old rule caught too.
+- The concurrent test skipped failed reads and had no start barrier: rewritten (below), and it
+  fails with the lock removed.
+- Smaller: the temporary file is created with `create_new` (a stale name of a crashed process with a
+  reused id is skipped, never truncated); this process's own crash leftovers
+  (`<file>.<id>-<digits>.new`) are removed at a file's first save; `discAnswer` itself is run
+  against a bridge that refuses and one that rejects.
+- The Android return's dependence on Android's task restore (above): now said, with the durable
+  mark as the fallback.
+
+What it found sound is unchanged here: the single native writer, the poisoned lock, the ordered
+Android queue, the merge of `touch_host.c` and `android_main.c`, the delete flow's results.
 
 ## Surprises
 
@@ -274,5 +309,10 @@ Open:
   first field came 16 s in). The 0.8.0 gate's PC joined from its menus, already booted, and the wait
   was 2.8 s. A harness effect; the host's field loop does stop while it waits, which a slow real
   joiner (a slow phone loading the track) would show the same way.
+- The settings writer holds one lock across the read, the write, its `sync_all` and the Windows
+  retry (at most half a second), and game-side saves are synchronous (the touch overlay's on its
+  frame): slow storage can stall a frame; no directory sync after the rename, so a power cut right
+  after a save may lose that save (never the file); a replaced dhd.ini doesn't keep custom
+  permissions. Not changed (the review's "can wait").
 - iOS's bridge runs its calls on a concurrent queue (`launcher.m`): the crate's lock and the page's
   wait before `play` cover its saves; an ordered queue as on Android is lane 227's to add if wanted.

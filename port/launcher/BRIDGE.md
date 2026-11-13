@@ -137,9 +137,13 @@ launcher back after the game's process has ended:
 - **Android**: the game starts as the layout editor alone (`--touch-editor` among the activity's
   arguments, `DhdActivity.getArguments`; finding 226: muted, no movies, the editor over a plain
   background). Its Done or Back saves `touch_edits` and ends the game as EXIT GAME does
-  (`host_end`). `LauncherActivity` stays below the game for this start only; when the game's
-  process ends, Android starts it again from its saved state, and the next snapshot's `reopen` is
-  `"touch-editor"` once, so the page opens Settings at the Touch tab.
+  (`host_end`). `LauncherActivity` stays behind the game for this start only (the game's
+  activity is `singleInstance`, a task of its own); when the game's process ends, Android brings the
+  launcher's task back and starts it from its saved state, and the next snapshot's `reopen` is
+  `"touch-editor"` once, so the page opens Settings at the Touch tab. That return is Android's own
+  behaviour, not guaranteed on every maker's Android or when the task was removed: then the player
+  is at the home screen, and a durable mark written before the game started
+  (`LauncherActivity.editorMark`) makes the next start open the launcher at Touch all the same.
 - **iOS**: the game starts with `DHD_TOUCH_EDIT_AT_START=1`: the editor opens over the game's menus
   once the start's movies are over (`touch_host.c`), and the game goes on after Done. An iOS app
   can't start itself again, so the editor alone's end would close the app; `reopen` is never set.
