@@ -11,7 +11,7 @@
 
 // The languages shipped: their codes (the file names) in the Language row's order. A translator
 // adds the code here with the file.
-const LANGUAGES = ['en', 'pt-BR', 'es', 'fr', 'de', 'it'];
+const LANGUAGES = ['en', 'pt-BR', 'es', 'fr', 'de', 'it', 'ja'];
 const PLURAL_FORMS = ['zero', 'one', 'two', 'few', 'many', 'other'];
 
 const lang = { code: 'en', words: {}, english: {} };
