@@ -213,6 +213,7 @@
   "footer.downloading": "正在下载 **{version}**，{done} / {total} MB",
   "footer.downloadingSize": "正在下载 **{version}**，{done} MB",
   "footer.starting": "正在启动游戏…",
+  "footer.handoffBusy": "游戏正在启动：此更改未保存。",
   "footer.dismiss": "忽略",
   "footer.support": "赞助",
   "footer.supportTitle": "在 Ko-fi 上支持本项目",

@@ -215,6 +215,7 @@
   "footer.downloading": "Baixando **{version}**, {done} de {total} MB",
   "footer.downloadingSize": "Baixando **{version}**, {done} MB",
   "footer.starting": "Iniciando o jogo…",
+  "footer.handoffBusy": "O jogo está iniciando: esta alteração não foi salva.",
   "footer.dismiss": "Dispensar",
   "footer.support": "Apoiar",
   "footer.supportTitle": "Apoie o projeto no Ko-fi",

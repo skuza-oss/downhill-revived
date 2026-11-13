@@ -39,6 +39,7 @@ def steps(tier, jobs):
                     ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT),
                     # the launcher page's logic: strings, the phones' bridge, the disc import, bindings (finding 225)
                     ('test_launcher_ui', ['node', 'port/launcher/test_launcher_ui.js'], ROOT),
+                    ('test_launcher_handoff', ['node', 'port/launcher/test_handoff.js'], ROOT),
                     ('test_launcher_controls', ['node', 'port/launcher/test_controls.js'], ROOT),
                     ('test_lang_check', [PY, 'tools/test_lang_check.py'], ROOT),
                     ('test_wasm2c_chunks', [PY, 'port/tools/test_wasm2c_chunks.py'], ROOT),
