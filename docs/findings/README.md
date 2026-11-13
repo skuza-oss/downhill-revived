@@ -255,6 +255,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 223 | [The pipeline worker's crash in wgpu-hal's DX12 `load_shader` (FXC blobs shared across t...](223-dx12-fxc-shader-cache-race.md) | current |  |
 | 224 | [The native iOS port on main](224-ios-port.md) | current |  |
 | 225 | [one launcher for desktop, Android and iOS, translatable](225-mobile-launcher.md) | current |  |
+| 227 | [iOS: the launcher's bridge and the first on-screen run's fixes](227-ios-launcher-and-fixes.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
