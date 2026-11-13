@@ -2,7 +2,7 @@
   "window.minimize": "Réduire la fenêtre",
   "window.close": "Fermer la fenêtre",
 
-  "nav.play": "Play",
+  "nav.play": "Jouer",
   "nav.settings": "Réglages",
   "nav.notes": "Nouveautés",
   "nav.help": "Aide",
@@ -27,7 +27,7 @@
   "home.first.step1Hint": "Un dossier quelconque ; le fichier reste à sa place",
   "home.first.step1HintImport": "Il faut environ 2,5 Go libres. Libres maintenant : {free}.",
   "home.first.step2": "Roulez",
-  "home.first.step2Hint": "PLAY apparaît ci-dessous une fois le disque vérifié",
+  "home.first.step2Hint": "Le bouton Jouer apparaît ci-dessous une fois le disque vérifié",
   "home.played.hours": "{hours} h {minutes} min de jeu",
   "home.played.minutes": "{minutes} min de jeu",
   "home.otherReleases": "À propos des autres versions",
@@ -184,7 +184,7 @@
   "help.links": "Liens",
   "help.github": "GitHub",
 
-  "footer.play": "Play",
+  "footer.play": "Jouer",
   "footer.running": "En cours",
   "footer.closeAsk": "Fermer le jeu ? La progression depuis votre dernière sauvegarde est perdue.",
   "footer.keepPlaying": "Continuer",

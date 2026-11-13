@@ -2,7 +2,7 @@
   "window.minimize": "Riduci la finestra",
   "window.close": "Chiudi la finestra",
 
-  "nav.play": "Play",
+  "nav.play": "Gioca",
   "nav.settings": "Impostazioni",
   "nav.notes": "Novità",
   "nav.help": "Aiuto",
@@ -27,7 +27,7 @@
   "home.first.step1Hint": "Una cartella qualsiasi; il file resta dov'è",
   "home.first.step1HintImport": "Servono circa 2,5 GB liberi. Liberi ora: {free}.",
   "home.first.step2": "Corri",
-  "home.first.step2Hint": "PLAY compare qui sotto quando il disco è a posto",
+  "home.first.step2Hint": "Il pulsante Gioca compare qui sotto quando il disco è stato controllato",
   "home.played.hours": "{hours} h {minutes} min giocati",
   "home.played.minutes": "{minutes} min giocati",
   "home.otherReleases": "Altre versioni",
@@ -184,7 +184,7 @@
   "help.links": "Link",
   "help.github": "GitHub",
 
-  "footer.play": "Play",
+  "footer.play": "Gioca",
   "footer.running": "In esecuzione",
   "footer.closeAsk": "Chiudere il gioco? Si perde il progresso dall'ultimo salvataggio.",
   "footer.keepPlaying": "Continua a giocare",

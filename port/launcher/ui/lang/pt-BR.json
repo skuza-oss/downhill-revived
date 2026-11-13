@@ -2,7 +2,7 @@
   "window.minimize": "Minimizar janela",
   "window.close": "Fechar janela",
 
-  "nav.play": "Play",
+  "nav.play": "Jogar",
   "nav.settings": "Ajustes",
   "nav.notes": "Novidades",
   "nav.help": "Ajuda",
@@ -27,7 +27,7 @@
   "home.first.step1Hint": "Qualquer pasta; o arquivo fica onde está",
   "home.first.step1HintImport": "Precisa de cerca de 2,5 GB livres. Livre agora: {free}.",
   "home.first.step2": "Pilote",
-  "home.first.step2Hint": "O PLAY aparece aqui quando o disco for verificado",
+  "home.first.step2Hint": "O botão Jogar aparece aqui assim que o disco for verificado",
   "home.played.hours": "{hours} h {minutes} min jogados",
   "home.played.minutes": "{minutes} min jogados",
   "home.otherReleases": "Mais sobre outras versões",
@@ -184,7 +184,7 @@
   "help.links": "Links",
   "help.github": "GitHub",
 
-  "footer.play": "Play",
+  "footer.play": "Jogar",
   "footer.running": "Rodando",
   "footer.closeAsk": "Fechar o jogo? O progresso desde o último save se perde.",
   "footer.keepPlaying": "Continuar jogando",
