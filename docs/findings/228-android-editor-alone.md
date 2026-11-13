@@ -1,6 +1,6 @@
 # 228: The launcher's layout editor alone on Android, and the merged main proved
 
-Status: in progress
+Status: current
 Supersedes: 226 in part (the launcher's entry point on Android); finding 225's bullet on "Edit the
 touch layout" is corrected in place (its launcher decision stands)
 
@@ -38,8 +38,10 @@ Out of scope: `port/ios` and the iOS side of the bridge (lane 227).
 - [x] the outside review of the merged main (review 090), its findings 1 and 3, given to this lane by
   the lead: settings saves one at a time and PLAY after them (c9fb17e3); a refused delete of the
   original disc no longer reported as done (f24502e5)
-- [ ] `check.py port` on the fixes, the Mi 11i again for the parts that touch settings and the disc
-  page
+- [x] `check.py port` on the fixes (f24502e5) and the Mi 11i for the parts that touch settings and
+  the disc page (a release-signed APK of f24502e5)
+- [x] main b4ec64d7 (lane 227, iOS) merged into this branch (6d09957f): `DHD_TOUCH_EDIT_AT_START` put
+  back for iOS; every check again on the merge ("Checked on main b4ec64d7 plus this lane")
 
 ## Decisions
 
@@ -125,6 +127,9 @@ only `true` counts).
 
 ## Checked on the merged main (2026-11-13)
 
+First on main 6e47e82a (below), then again on main b4ec64d7 with this lane merged in (the next
+section), which is the main that will be released.
+
 Branch head 4153b2e1 (main 6e47e82a plus Part 1). The two hand-merged places of the merge
 (`touch_host.c` after `TOUCH_COMMAND_EDIT`, `android_main.c`'s `DHD_LAUNCHER_CHECKED` rule and
 `--touch-editor`) compiled and worked as written; nothing from the merge needed a fix.
@@ -187,6 +192,68 @@ hoc); the packaged game, started with SDL's dummy audio driver and its own data 
 main menu and ended by EXIT GAME (`DHD_NAV`) after 10 s: `exit game: chosen in the main menu`, exit
 code 0, `end: handlers done`; nothing left running.
 
+The review fixes (f24502e5, release-signed APK on the Mi 11i): `check.py port` OK (18 steps); the
+boot and race traces of its Windows build against `main-524948ba-ref-v3`: PASS. On the phone, four
+setting changes tapped in a row (Hand, Steer With) left dhd.ini whole and equal to the page; Hand
+Left then Right then PLAY at once: the game started with `touch: classic pad, right hand` (the save
+had finished); the disc row and "Edit the touch layout" (editor alone, back at the Touch tab) worked
+through the new queue; dhd.ini, the save files and the newest tombstone equal to before; the
+published 0.8.0 back. The delete-original path needs a disc import, which the owner's phone must not
+do: it is covered by the page's tests, not run on a device.
+
+## Checked on main b4ec64d7 plus this lane (2026-11-13)
+
+Branch head 6d09957f (the merge of b4ec64d7, lane 227's iOS launcher and phone fixes, into this
+branch). The merge needed one fix of its own: the `DHD_TOUCH_EDIT_AT_START` block in
+`touch_host.c`, which this branch had deleted and main had not touched, was dropped silently although
+iOS's `ios_main.m` sets it; put back. Otherwise the merged `touch_host.c` is main's.
+
+Windows:
+- `check.py port -j 6`: OK, 18 of 18; `check.py docs` OK.
+- The seven state traces of the merged `dhd64.exe` against `main-524948ba-ref-v3`: 7 of 7 PASS.
+- The desktop launcher of the merged package: English and German draw their Play page right.
+- The packaged `dhd.exe` (hidden desktop, `DHD_LAUNCHER=1`, header-only dhd.ini): to the main menu,
+  EXIT GAME, exit code 0, `end: handlers done in 35 ms`, no problem lines.
+- Two hidden games in a P2P room on a local server (finish hooks): `1. Host 1:10.03  2. Guest 1:12.03`
+  on both; no `refused`, `freeze:` or `crash:` line.
+
+The Mi 11i, release-signed APK of 6d09957f (`install -r`):
+- The launcher in English, every page; the disc row "Downhill Domination (USA), copied into the app"
+  and the game's `game data: SCUS_971.77 from the disc image`: the owner's full image passes the new
+  whole-volume check (`disc_check.c`) in the launcher and at the start.
+- Hand Left, Right, then PLAY at once: the game started with the right hand.
+- The game's SETTINGS shows "Tap a tab"; its footer's Back closes it by tap, and the system Back too.
+- The menus, Home for 15 s and back: `gs: in the background; the game waits`, `back in the foreground
+  after 16.7 s; the game clock goes on from now`, the menu where it was, no `freeze:` line.
+- A SINGLE EVENT race (Classic pad, the new default places, SKIP ended the flight, ✕ held: 44 mph):
+  Home for 15 s and back: `touch: back from the background in a race: the game's pause`, the PAUSED
+  panel on screen, no `freeze:` line; the race clock read about 0:49 when the app left and 0:53 after
+  RESUME (no jump of the 16.7 s away); Android's player log shows the game's AAudio stream `paused`
+  when the app left and `started` at the return, both times (menus and race).
+- TOUCH CONTROLS > Edit Layout in the game; the launcher's "Edit the touch layout": the editor alone,
+  − / UNDO / DONE (`touch: saved (hints 39, layout "")`), the launcher back at the Touch tab
+  (`app died, no saved state`, then `launcher: back from the layout editor alone`).
+- EXIT GAME after a race (60 ms), after the editor alone (64 ms), from the main menu (67 ms), after
+  turning the launcher back on (63 ms), after the online room (37 ms): each start after said `previous
+  run: how it ended: normally`; no FORTIFY, fatal signal or new tombstone.
+- "Open the launcher at every start" off: a cold start to the title; SETTINGS > Game > Launcher At
+  Start on; the next start opened the launcher.
+- A P2P room on the official server (the phone the hub, a hidden PC game of 6d09957f joining by
+  `DHD_NET_JOIN`, direct inside the local network): READY by tap, START, the online flight's SKIP, a
+  race; the phone left for the home screen 7.8 s mid-race: its log `touch: back from the background
+  in a race: online, the race goes on`; the PC's log shows the phone's snapshots stopping for that
+  time (messages received flat between race clock 1202 and 1502, the phone's rider held where it
+  was), then resuming with offsets under 2 units; no `refused`, `freeze:` or `crash:` on the PC. The
+  P2P results on both (`1. L228PC 1:10.03`, the phone's rider DNF), LEAVE RACE, the room left
+  (`net: left room ... after 4:35`). The phone's log: no `refused`; one `freeze:` episode at the
+  race's load (26 s), explained under Result.
+- After: dhd.ini and the four save files byte-identical to before this run; the published 0.8.0 APK
+  back, started, EXIT GAME, the home screen.
+
+The Mac: `build_host64.py --release --target macos-arm64` of 6d09957f PASS (149 generated imports,
+42 host objects), the package with the launcher, the packaged game with SDL's dummy audio to the
+main menu and EXIT GAME (exit code 0, `end: handlers done`); nothing left running.
+
 ## Result
 
 The launcher's "Edit the touch layout" on Android opens the layout editor alone and, after DONE or
@@ -194,7 +261,18 @@ Back, shows the launcher again at its Touch tab; iOS keeps the editor over the g
 (`DHD_TOUCH_EDIT_AT_START`, finding 227): one call, `play` with `edit_touch_layout`, whose ending
 differs by phone as `port/launcher/BRIDGE.md` describes (`reopen` in the snapshot on Android).
 
-Open: the race-load wait on a phone room's host while a joiner is still on its way to its rider
-(25 s of no fields with a hidden PC joiner; the 0.8.0 gate's room had 2.8 s): the online code did
-not change in today's lanes, so this is an observation for the online area, not a regression of
-the merge; the room went on normally after it.
+The settings writer and the Android bridge are safe against two saves at once, and PLAY waits for
+pending saves; a refused delete of the original disc is reported as refused. Main b4ec64d7 with this
+lane builds and works on Windows, the Mi 11i and the Mac.
+
+Open:
+- Two processes saving dhd.ini within the same milliseconds (the desktop launcher while its game
+  runs) can still lose one change (Decisions, the writers' table).
+- The race-load wait on a phone room's host (25-26 s of no fields, a `freeze:` line, then the race
+  normally): the host waits for each player's rider choice, and the PC that joined by `DHD_NET_JOIN`
+  joined at its process start, so it was still booting and driving its menus to the race (its own
+  first field came 16 s in). The 0.8.0 gate's PC joined from its menus, already booted, and the wait
+  was 2.8 s. A harness effect; the host's field loop does stop while it waits, which a slow real
+  joiner (a slow phone loading the track) would show the same way.
+- iOS's bridge runs its calls on a concurrent queue (`launcher.m`): the crate's lock and the page's
+  wait before `play` cover its saves; an ordered queue as on Android is lane 227's to add if wanted.

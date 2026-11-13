@@ -257,7 +257,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 225 | [one launcher for desktop, Android and iOS, translatable](225-mobile-launcher.md) | current |  |
 | 226 | [Touch layout freedom and tablet defaults](226-touch-layout-freedom.md) | partly superseded | [228](228-android-editor-alone.md) for the launcher's entry point on Android: "The launcher's entry point, and main's" |
 | 227 | [iOS: the launcher's bridge and the first on-screen run's fixes](227-ios-launcher-and-fixes.md) | current |  |
-| 228 | [The launcher's layout editor alone on Android, and the merged main proved](228-android-editor-alone.md) | in progress |  |
+| 228 | [The launcher's layout editor alone on Android, and the merged main proved](228-android-editor-alone.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
