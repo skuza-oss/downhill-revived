@@ -52,6 +52,15 @@ const wait = () => new Promise((r) => setTimeout(r, 20));
   await wait();
   appWorld.dhdDeliver(JSON.stringify({ id: 3, ok: false, error: 'not opening https://example.com/' }));
   await failed.then(() => assert.fail('an error rejects'), (e) => assert.match(e, /not opening/));
+  // PLAY right after saves the page didn't wait for: they reach the app in the order sent, which is
+  // the order the app's settings tickets follow (launcher_calls.c), so the game starts after them
+  const before = toApp.length;
+  bridge.call('save_setting', { key: 'scale', value: '3' });
+  bridge.call('save_setting', { key: 'fps', value: '120' });
+  bridge.call('play', {});
+  await wait();
+  assert.deepStrictEqual(toApp.slice(before).map((m) => m.call + (m.args.key ? ':' + m.args.key : '')),
+    ['save_setting:scale', 'save_setting:fps', 'play']);
   console.log('bridge_ios: the page and the app talk over the posted port');
   process.exit(0);   // the channel's ports would keep node waiting
 })().catch((e) => { console.error(e); process.exit(1); });

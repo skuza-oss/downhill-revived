@@ -12,6 +12,7 @@
 #include "ios_main.h"
 #include "metal_bridge.h"
 #include "run_record.h"
+#include "launcher_calls.h"
 #include "host/phone.h"   /* port/, the project's header search path */
 
 /* From libdhd_ios.a */
@@ -120,11 +121,18 @@ const char *ios_run_record_start(void) {
 
 /* ---- the game ---- */
 
+/* dhd.ini names this run's disc copy (in the settings' order, after the launcher's saves). */
+static void correct_disc_path(void *disc) {
+    char named[1200];
+    if (!dhd_settings_read(s_settings_path, "iso", named, sizeof named) || strcmp(named, disc))
+        dhd_settings_save(s_settings_path, "iso", disc);
+}
+
 int ios_start_game(int edit_touch_layout, int checked) {
     bool expected = false;
     if (!atomic_compare_exchange_strong(&s_game_started, &expected, true)) return 4;
     const char *dir = ios_documents_dir();
-    char disc[1200], named[1200];
+    char disc[1200];
     snprintf(disc, sizeof disc, "%sSCUS-97177.iso", dir);
     struct stat st;
     if (stat(disc, &st) != 0 || host_disc_check(disc)) {   /* the launcher asks for it */
@@ -134,8 +142,7 @@ int ios_start_game(int edit_touch_layout, int checked) {
     /* dhd.ini names the copy (host_disc_ready checks it in the core; DHD_ISO would skip that). The
        app's folder moves when iOS installs an update (a new container), so the name is the copy's
        path of this run, written again whenever it differs (finding 227) */
-    if (!dhd_settings_read(s_settings_path, "iso", named, sizeof named) || strcmp(named, disc))
-        dhd_settings_save(s_settings_path, "iso", disc);
+    launcher_settings_run(correct_disc_path, disc);   /* after the launcher's last save (launcher_calls.h) */
     setenv("DHD_SETTINGS", s_settings_path, 1);
     setenv("DHD_DATA_DIR", dir, 1);
     setenv("DHD_IOS_DISPLAY_AUTO", "1", 1);

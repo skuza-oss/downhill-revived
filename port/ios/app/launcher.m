@@ -300,7 +300,15 @@ static void job_run(DiscJob *job) {
     (void)controller;
     if (![message.body isKindOfClass:NSString.class] || ![message.frameInfo.request.URL.scheme isEqualToString:SCHEME]) return;
     NSString *text = message.body;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ launcher_receive(&s_host, text.UTF8String); });
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+    if (launcher_settings_call(text.UTF8String)) {
+        /* dhd.ini's calls in the order they came (launcher_calls.h): the ticket is taken here, on
+           the main thread where the page's messages arrive one by one */
+        unsigned long ticket = launcher_order_ticket();
+        dispatch_async(queue, ^{ launcher_receive_ordered(&s_host, ticket, text.UTF8String); });
+    } else {
+        dispatch_async(queue, ^{ launcher_receive(&s_host, text.UTF8String); });
+    }
 }
 
 - (void)deliver:(NSString *)text {

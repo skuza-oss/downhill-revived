@@ -199,6 +199,9 @@ def host_tests():
     calls_dir.mkdir(exist_ok=True)
     run('launcher-calls', [ROOT / 'port/ios/host/launcher_calls.c', ROOT / 'port/net/json.c',
                            ROOT / 'port/ios/tests/test_launcher_calls.c'], calls_dir, includes=[ROOT / 'port'])
+    # the settings' order: saves and PLAY on several threads, none lost (finding 227)
+    run('launcher-order', [ROOT / 'port/ios/host/launcher_calls.c', ROOT / 'port/net/json.c',
+                           ROOT / 'port/ios/tests/test_launcher_order.c'], calls_dir, includes=[ROOT / 'port'])
     run('disc-copy', [ROOT / 'port/ios/host/disc_copy.c', ROOT / 'port/ios/tests/test_disc_copy.c'])
     # the disc image's own check every platform makes (port/host/disc_check.c, finding 227)
     run('disc-check', [ROOT / 'port/host/disc_check.c', ROOT / 'port/host/test_disc_check.c'])

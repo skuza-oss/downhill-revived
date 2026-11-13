@@ -30,6 +30,65 @@ static const char *const allowed[] = {"https://discord.gg/", "https://ko-fi.com/
 
 static char last_exit[256];   /* said once (launcher_set_last_exit) */
 
+/* ---- the settings' order (launcher_calls.h): a ticket each, served one at a time in order ---- */
+#ifdef _WIN32   /* the unit test on Windows */
+#include <windows.h>
+static SRWLOCK order_lock = SRWLOCK_INIT;
+static CONDITION_VARIABLE order_turn = CONDITION_VARIABLE_INIT;
+#define ORDER_LOCK() AcquireSRWLockExclusive(&order_lock)
+#define ORDER_UNLOCK() ReleaseSRWLockExclusive(&order_lock)
+#define ORDER_WAIT() SleepConditionVariableSRW(&order_turn, &order_lock, INFINITE, 0)
+#define ORDER_WAKE() WakeAllConditionVariable(&order_turn)
+#else
+#include <pthread.h>
+static pthread_mutex_t order_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t order_turn = PTHREAD_COND_INITIALIZER;
+#define ORDER_LOCK() pthread_mutex_lock(&order_lock)
+#define ORDER_UNLOCK() pthread_mutex_unlock(&order_lock)
+#define ORDER_WAIT() pthread_cond_wait(&order_turn, &order_lock)
+#define ORDER_WAKE() pthread_cond_broadcast(&order_turn)
+#endif
+static unsigned long order_next, order_serving;   /* under order_lock */
+static volatile int game_starting;                 /* PLAY ran: later settings calls are refused */
+
+unsigned long launcher_order_ticket(void)
+{
+    ORDER_LOCK();
+    unsigned long ticket = order_next++;
+    ORDER_UNLOCK();
+    return ticket;
+}
+
+static void order_wait(unsigned long ticket)
+{
+    ORDER_LOCK();
+    while (order_serving != ticket) ORDER_WAIT();
+    ORDER_UNLOCK();
+}
+
+static void order_done(void)
+{
+    ORDER_LOCK();
+    order_serving++;
+    ORDER_WAKE();
+    ORDER_UNLOCK();
+}
+
+void launcher_settings_run(void (*fn)(void *context), void *context)
+{
+    unsigned long ticket = launcher_order_ticket();
+    order_wait(ticket);
+    fn(context);
+    order_done();
+}
+
+int launcher_settings_call(const char *message)
+{
+    char call[64];
+    if (!message || !json_string(message, "call", call, sizeof call)) return 0;
+    return !strcmp(call, "snapshot") || !strcmp(call, "save_setting") || !strcmp(call, "play");
+}
+
 void launcher_set_last_exit(const char *why)
 {
     snprintf(last_exit, sizeof last_exit, "%s", why ? why : "");
@@ -258,6 +317,7 @@ void launcher_receive(const LauncherHost *h, const char *message)
         int edit = 0;
         json_bool(message, "args.edit_touch_layout", &edit);
         launcher_answer(h, id, 1, NULL);
+        game_starting = 1;   /* the settings are the game's from here (launcher_receive_ordered) */
         h->play(h->context, edit, 1);
     } else if (!strcmp(call, "open_link")) {
         char url[600] = "";
@@ -277,4 +337,13 @@ void launcher_receive(const LauncherHost *h, const char *message)
         snprintf(text, sizeof text, "no such call: %s", call);
         error_text(h, id, text);
     }
+}
+
+void launcher_receive_ordered(const LauncherHost *h, unsigned long ticket, const char *message)
+{
+    order_wait(ticket);
+    long long id;
+    if (game_starting && json_int(message, "id", &id)) error_text(h, (int)id, "the game is starting");
+    else launcher_receive(h, message);
+    order_done();
 }
