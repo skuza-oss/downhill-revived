@@ -696,6 +696,8 @@ void host_service_touch_field(uint32_t address)
     if (buzz) SDL_SetAtomicInt(&want_buzz, buzz);
     TouchSettings saved;
     if (touch_take_saved(touch, &saved)) save_settings(&saved);
+    const char *note = touch_take_note(touch);
+    if (note) fprintf(stderr, "%s\n", note);
     if (alone_state == 1 && !touch_editor_open(touch)) {   /* Done or Back: saved above; the game ends */
         alone_state = 2;
         fprintf(stderr, "touch: the layout editor alone is done; the game ends\n");

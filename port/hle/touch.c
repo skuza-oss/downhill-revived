@@ -76,7 +76,13 @@ static const char *const control_names[TC_COUNT] = {
     "cross", "triangle", "csquare", "ccircle", "plusleft", "plusright", "lbar", "rbar", "l3", "r3", "stick", "trick"
 };
 
-typedef struct { int on; float x, y, r, hw, hh; int box; } Ctl;  /* r: round; hw, hh: box half sizes */
+typedef struct {
+    int on;
+    float x, y, r, hw, hh;   /* r: round; hw, hh: box half sizes */
+    int box;
+    float x0, y0, r0, hh0;   /* its place and size before the player's edits (the steering area and the
+                                D-pad's room are measured from these: moving a button never moves them) */
+} Ctl;
 
 /* The places in the spec, as % of the reference screen (centre x, y; width as % of its width, a
    box's height as % of its height). */
@@ -295,6 +301,8 @@ struct Touch {
     int replay_ran;            /* this replay's clock has moved (its load and countdown are over; finding 218) */
     int skip_pulse;            /* a SKIP tap's START press is going out */
     unsigned downs;            /* touch-downs so far (Finger.order) */
+    char note[160];            /* touch_take_note's line */
+    int note_ready, rescue_noted;   /* a line waits; the steering rescue was logged (once a run) */
 };
 
 static const uint16_t SECTOR_BUTTONS[8] = {
@@ -419,14 +427,19 @@ static float mirror_x(const Touch *t, float x) { return right_handed(t) ? x : t-
    follows the buttons' (touch_button_scale), kept to the room below the Classic bar (or the top
    buttons) so the pad fits at the Size setting's low end, times the layout editor's size for the
    stick's home. */
+/* The room below the Classic bar (or the top buttons) as the preset places them: from their places
+   before the player's edits, so a bar dragged to the bottom never squeezes the pad to nothing (the
+   review of 2026-11-13; finding 229). */
+static const float DPAD_HALF_MIN_MM = 2.0f;
 static float dpad_room(const Touch *t)
 {
     const Ctl *above = t->set.preset == TOUCH_CLASSIC ? &t->ctl[TC_LBAR] : &t->ctl[TC_CAMERA];
-    return t->screen.height - t->screen.strip_bottom - 1.0f - (above->y + above->hh * AREA_GROW + GAP_MM);
+    return t->screen.height - t->screen.strip_bottom - 1.0f - (above->y0 + above->hh0 * AREA_GROW + GAP_MM);
 }
 static float dpad_half(const Touch *t, const TouchEdit *e)
 {
     float fit = (dpad_room(t) / 2 - GAP_MM) / 3;   /* the pad's half extent, 3 half + GAP_MM, is half the room */
+    if (fit < DPAD_HALF_MIN_MM) fit = DPAD_HALF_MIN_MM;   /* never zero or less, whatever the screen */
     float half = DPAD_HALF_MM * t->bs;
     return (half < fit ? half : fit) * e->size * (t->dpad_fit > 0 ? t->dpad_fit : 1.0f);
 }
@@ -485,7 +498,7 @@ static void dpad_home(Touch *t, const TouchEdit *e, float *x, float *y)
             if (pass == 0 && fit * arm < DPAD_ARM_MIN_MM - 0.001f && fit < 1.0f) break;
             t->dpad_fit = fit;
             float span = dpad_extent(t, e);
-            float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
+            float top = above->y0 + above->hh0 * AREA_GROW + GAP_MM + span;
             float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
             float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
             float far = t->screen.width / 2 - span;
@@ -502,7 +515,7 @@ static void dpad_home(Touch *t, const TouchEdit *e, float *x, float *y)
     /* nothing clear: full size, the old rule (L3's gap only) */
     t->dpad_fit = 1.0f;
     float half = dpad_half(t, e), off = dpad_off(t, e), span = dpad_extent(t, e);
-    float top = above->y + above->hh * AREA_GROW + GAP_MM + span;
+    float top = above->y0 + above->hh0 * AREA_GROW + GAP_MM + span;
     float bottom = t->screen.height - t->screen.strip_bottom - 1.0f - span;
     float side = (right_handed(t) ? t->screen.strip_left : t->screen.strip_right) + 1.0f + span;
     *y = bottom < top ? bottom : clampf(*y, top, bottom);
@@ -640,6 +653,8 @@ static void lay_out(Touch *t, int hud_moved)
         float side_x = mirror_x(t, x);   /* which half it belongs to (cutout_shift) */
         const TouchEdit *e = &st->edit[st->preset == TOUCH_CLASSIC][c];
         int dpad = c == TC_STICK && st->dpad;
+        k->x0 = mirror_x(t, x) + (side_x < W / 2 ? shift_left : -shift_right), k->y0 = y;
+        k->r0 = w / 2 * t->bs, k->hh0 = h / 2 * t->bs;
         if (c == TC_STICK) t->dpad_fit = 1.0f;
         if (dpad) dpad_home(t, e, &x, &y);
         x += e->dx, y += e->dy;
@@ -674,21 +689,24 @@ static void lay_out(Touch *t, int hud_moved)
             else k->x = sc->cut_x0 - rx - 1;
         }
     /* the steering area: 60 mm from the left strip, 3 mm short of the midline and of the right
-       cluster's touch areas; Classic's to 44% of the width, below the L bar */
+       cluster's touch areas; Classic's to 44% of the width, below the L bar. All from the places
+       before the player's edits (x0, y0): a button dragged into it takes the touches on itself
+       (routing tries the buttons first), but moving one never moves the area's edges, so a bar
+       dragged to the bottom can't leave no steering (the review of 2026-11-13; finding 229) */
     float left = t->screen.strip_left, x1 = left + 60 * (t->tablet ? TOUCH_TABLET_SCALE : 1) + tablet_inward(t), top = 0;
     if (st->preset == TOUCH_CLASSIC) {
         x1 = 0.44f * W;
-        top = t->ctl[TC_LBAR].y + t->ctl[TC_LBAR].hh * AREA_GROW + GAP_MM;
+        top = t->ctl[TC_LBAR].y0 + t->ctl[TC_LBAR].hh0 * AREA_GROW + GAP_MM;
     } else {
         if (x1 > W / 2 - GAP_MM) x1 = W / 2 - GAP_MM;
         for (int c = 0; c < TC_COUNT; c++) {
             const Ctl *k = &t->ctl[c];
             if (!k->on || c == TC_STICK || c == TC_TRICK || c == TC_CAMERA || c == TC_PAUSE) continue;
-            float edge = mirror_x(t, k->x) - k->r * AREA_GROW - GAP_MM;
+            float edge = mirror_x(t, k->x0) - k->r0 * AREA_GROW - GAP_MM;
             if (edge < x1) x1 = edge;
         }
         /* the top buttons are on the other side (top_place): the whole height steers */
-        top = current ? t->screen.strip_top : t->ctl[TC_CAMERA].y + t->ctl[TC_CAMERA].hh * AREA_GROW + GAP_MM;
+        top = current ? t->screen.strip_top : t->ctl[TC_CAMERA].y0 + t->ctl[TC_CAMERA].hh0 * AREA_GROW + GAP_MM;
     }
     t->steer_x0 = left, t->steer_x1 = x1, t->steer_y0 = top, t->steer_y1 = H - t->screen.strip_bottom;
     if (!right_handed(t)) {   /* mirrored: the area measured from the right strip */
@@ -1526,6 +1544,8 @@ static int flick_lanes(const Touch *t)
    own bar, which must stay usable. The default layouts keep their 3 mm gaps; the rules only
    check the edited control, so a layout another rule (the cutout, the Size setting) bent does
    not lock the editor. */
+static int steering_kept(const Touch *t, int c);
+
 static int control_fits(const Touch *t, int c)
 {
     const Ctl *k = &t->ctl[c];
@@ -1539,18 +1559,84 @@ static int control_fits(const Touch *t, int c)
             Box x = editor_box(t, b);
             if (fabsf(k->x - x.x) < rx + x.hw && fabsf(k->y - x.y) < ry + x.hh) return 0;
         }
-    if (c == TC_STICK || c == TC_TRICK || c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) return 1;
+    if (c == TC_STICK) return steering_kept(t, c);   /* the D-pad's home: under no button */
+    if (c == TC_TRICK || c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) return 1;
     for (int d = 0; d < TC_COUNT; d++) {
         const Ctl *m = &t->ctl[d];
         if (d == c || !m->on || d == TC_STICK || d == TC_TRICK || d == TC_PLUS_LEFT || d == TC_PLUS_RIGHT) continue;
         if (shape_gap(k, m) < 0) return 0;
     }
     if (flick_lanes(t)) {
-        if (c != TC_PEDAL) return !in_flick_lane(t, c);
-        for (int d = 0; d < TC_COUNT; d++)
-            if (d != TC_PEDAL && d != TC_STICK && d != TC_TRICK && t->ctl[d].on && in_flick_lane(t, d)) return 0;
+        if (c != TC_PEDAL && in_flick_lane(t, c)) return 0;
+        if (c == TC_PEDAL)
+            for (int d = 0; d < TC_COUNT; d++)
+                if (d != TC_PEDAL && d != TC_STICK && d != TC_TRICK && t->ctl[d].on && in_flick_lane(t, d)) return 0;
     }
-    return 1;
+    return steering_kept(t, c);
+}
+
+/* Steering stays usable (the review of 2026-11-13; finding 229): with the stick, some square of
+   STEER_FREE_MM inside the steering area that no other control's touch area covers (routing gives a
+   touch to a button first, so a button over the area takes that part); with the D-pad, its rest
+   point and its four arms on the screen, out of the gesture strips and under no other control.
+   `skip`: a control left out (-1 none). */
+enum { STEER_FREE_MM = 10, STEER_GRID = 512 };
+static int taken_by(const Touch *t, float x, float y, int skip)
+{
+    for (int c = 0; c < TC_COUNT; c++) {
+        const Ctl *k = &t->ctl[c];
+        if (c == skip || c == TC_STICK || c == TC_TRICK || !k->on) continue;
+        if (c == TC_PLUS_LEFT || c == TC_PLUS_RIGHT) {   /* classic_face_at's 3.5 mm */
+            if (dist(x, y, k->x, k->y) <= 3.5f) return 1;
+            continue;
+        }
+        if (hit(t, c, x, y, AREA_GROW) < 1e8f) return 1;
+    }
+    return 0;
+}
+
+static int steering_ok_without(const Touch *t, int skip)
+{
+    const TouchScreen *sc = &t->screen;
+    if (t->set.dpad) {
+        const Ctl *k = &t->ctl[TC_STICK];
+        const TouchEdit *e = &t->set.edit[t->set.preset == TOUCH_CLASSIC][TC_STICK];
+        float off = dpad_off(t, e);
+        for (int a = -1; a < DPAD_ARMS; a++) {
+            float x = k->x + (a == DPAD_LEFT ? -off : a == DPAD_RIGHT ? off : 0), y = k->y + (a == DPAD_UP ? -off : a == DPAD_DOWN ? off : 0);
+            if (x < 0 || x > sc->width || y < 0 || y > sc->height || in_strip(t, x, y) || taken_by(t, x, y, skip)) return 0;
+        }
+        return 1;
+    }
+    float x0 = fmaxf(t->steer_x0, 0), x1 = fminf(t->steer_x1, sc->width);
+    float y0 = fmaxf(t->steer_y0, 0), y1 = fminf(t->steer_y1, sc->height);
+    int nx = (int)(x1 - x0), ny = (int)(y1 - y0);
+    if (nx < STEER_FREE_MM || ny < STEER_FREE_MM) return 0;
+    if (nx > STEER_GRID) nx = STEER_GRID;
+    if (ny > STEER_GRID) ny = STEER_GRID;
+    /* 1 mm cells: each column's run of free cells up to this row; a row with STEER_FREE_MM columns in
+       a row whose runs reach STEER_FREE_MM holds a free square */
+    unsigned short run[STEER_GRID];
+    memset(run, 0, sizeof run);
+    for (int j = 0; j < ny; j++) {
+        int across = 0;
+        for (int i = 0; i < nx; i++) {
+            float x = x0 + i + 0.5f, y = y0 + j + 0.5f;
+            run[i] = in_strip(t, x, y) || taken_by(t, x, y, skip) ? 0 : (unsigned short)(run[i] + 1);
+            across = run[i] >= STEER_FREE_MM ? across + 1 : 0;
+            if (across >= STEER_FREE_MM) return 1;
+        }
+    }
+    return 0;
+}
+
+static int steering_ok(const Touch *t) { return steering_ok_without(t, -1); }
+
+/* The edited control c leaves steering usable: refused only when c is what takes it away (a layout
+   another rule bent, or a screen too small, never locks the editor). */
+static int steering_kept(const Touch *t, int c)
+{
+    return steering_ok(t) || !steering_ok_without(t, c);
 }
 
 /* The control's edit moved so it lies on the screen (a control larger than the screen: centred). */
@@ -2666,6 +2752,12 @@ void touch_pad(const Touch *t, uint16_t *buttons, uint8_t *lx, uint8_t *ly, uint
 }
 
 int touch_take_buzz(Touch *t) { int b = t->buzz; t->buzz = 0; return b; }
+const char *touch_take_note(Touch *t)
+{
+    if (!t->note_ready) return NULL;
+    t->note_ready = 0;
+    return t->note;
+}
 int touch_take_ask(Touch *t) { int a = t->ask; t->ask = 0; return a; }
 int touch_take_saved(Touch *t, TouchSettings *out)
 {
@@ -2693,6 +2785,8 @@ Touch *touch_new(void)
 
 void touch_free(Touch *t) { free(t); }
 
+static void steer_rescue(Touch *t);
+
 void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen)
 {
     int preset_changed = s->preset != t->set.preset || s->dpad != t->set.dpad;   /* the steering touch ends too */
@@ -2703,9 +2797,47 @@ void touch_configure(Touch *t, const TouchSettings *s, const TouchScreen *screen
     if (screen && screen->width > 10 && screen->height > 10) t->screen = *screen;
     if (preset_changed) drop_race_touches(t);
     lay_out(t, t->set.hud_moved);
+    steer_rescue(t);
 }
 
 const TouchSettings *touch_settings(const Touch *t) { return &t->set; }
+
+/* The editor's names of the controls (its readout and the steering rescue's line). */
+static const char *const CONTROL_NAMES[TC_COUNT] = {
+    "PEDAL", "HOP", "BRAKE", "SLIDE", "SQUARE", "CIRCLE", "CAMERA", "PAUSE", "CROSS", "TRIANGLE", "SQUARE", "CIRCLE",
+    "+", "+", "L1 L2", "R1 R2", "L3", "R3", "STICK", "TRICK STICK"};
+
+/* A loaded layout (dhd.ini by a build before this check, or edited by hand) whose edited controls
+   leave no room to steer (steering_ok): it is not thrown away. The edited controls go back to their
+   default places one at a time, in the controls' order, until steering is usable, for this run only:
+   dhd.ini keeps the player's edits until the editor's Done saves the layout. The log says so once.
+   If even the default places leave no room (a screen too small), nothing changes. */
+static void steer_rescue(Touch *t)
+{
+    if (t->editor || steering_ok(t)) return;
+    TouchEdit *edits = t->set.edit[t->set.preset == TOUCH_CLASSIC], kept[TC_COUNT];
+    memcpy(kept, edits, sizeof kept);
+    for (int c = 0; c < TC_COUNT; c++) edits[c] = (TouchEdit){0, 0, 1};
+    lay_out(t, t->set.hud_moved);
+    int defaults_ok = steering_ok(t);
+    memcpy(edits, kept, sizeof kept);
+    lay_out(t, t->set.hud_moved);
+    if (!defaults_ok) return;
+    char names[120] = "";
+    for (int c = 0; c < TC_COUNT && !steering_ok(t); c++) {
+        TouchEdit *e = &edits[c];
+        if (c == TC_TRICK || (e->dx == 0 && e->dy == 0 && e->size == 1)) continue;
+        *e = (TouchEdit){0, 0, 1};
+        lay_out(t, t->set.hud_moved);
+        size_t n = strlen(names);
+        snprintf(names + n, sizeof names - n, "%s%s", n ? ", " : "", CONTROL_NAMES[c]);
+    }
+    if (!t->rescue_noted) {
+        t->rescue_noted = 1;
+        snprintf(t->note, sizeof t->note, "touch: the saved layout left no room to steer; at their default places for now: %s", names);
+        t->note_ready = 1;
+    }
+}
 
 /* ---------------------------------------------------------------- the overlay's shapes */
 
@@ -3047,9 +3179,7 @@ static void draw_editor(const Touch *t, Draw *d)
     }
     if (t->edit_selected >= 0 && t->ctl[t->edit_selected].on) {
         /* the selected control, its drawn size and its own size in per cent (finding 226) */
-        static const char *const readout[TC_COUNT] = {
-            "PEDAL", "HOP", "BRAKE", "SLIDE", "SQUARE", "CIRCLE", "CAMERA", "PAUSE", "CROSS", "TRIANGLE", "SQUARE", "CIRCLE",
-            "+", "+", "L1 L2", "R1 R2", "L3", "R3", "STICK", "TRICK STICK"};
+        const char *const *readout = CONTROL_NAMES;
         const Ctl *k = &t->ctl[t->edit_selected];
         char info[64];
         float size = (k->box ? fmaxf(k->hw, k->hh) : k->r) * 2;

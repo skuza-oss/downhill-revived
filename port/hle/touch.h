@@ -184,6 +184,9 @@ int touch_take_buzz(Touch *t);
 int touch_take_ask(Touch *t);
 /* Saved settings that changed (hints shown, the editor's Done): 1 and a copy in *out. */
 int touch_take_saved(Touch *t, TouchSettings *out);
+/* A line for the host's log, once (NULL: none): a loaded layout that left no room to steer and the
+   controls shown at their default places for it (finding 229). */
+const char *touch_take_note(Touch *t);
 
 /* State the host passes on. */
 int touch_visible(const Touch *t);       /* the overlay is drawn (the race HUD, or the editor) */

@@ -2340,6 +2340,153 @@ static void test_editor_alone(void)
     CHECK((shapes[0].fill & 0xFF) < 0xFF);
 }
 
+/* ---- the review of 2026-11-13 (finding 229): moving a button never takes steering away ---- */
+
+/* A finger at x, y that moves 8 mm right steers (the stick's x past 150). */
+static int steers_at(float x, float y)
+{
+    touch_down(t, 60, x, y, now);
+    field();
+    touch_move(t, 60, x + 8, y, now);
+    field();
+    uint8_t lx = 128, ly = 128, rx = 128, ry = 128;
+    uint16_t b = 0;
+    touch_pad(t, &b, &lx, &ly, &rx, &ry);
+    touch_up(t, 60, x + 8, y, now);
+    fields(3);
+    return lx > 150;
+}
+
+/* The D-pad's right arm, tapped, presses right. */
+static int dpad_works(void)
+{
+    float x, y;
+    if (!touch_target(t, TOUCH_TARGET_DPAD, ARM_RIGHT, &x, &y)) return 0;
+    touch_down(t, 61, x, y, now);
+    field();
+    int ok = (pad_dirs() & PAD_RIGHT) != 0;
+    touch_up(t, 61, x, y, now);
+    fields(4);
+    return ok;
+}
+
+/* Classic, a phone and a 13-inch tablet, stick and D-pad, either hand: the L bar dragged to the
+   screen's bottom (the review's case) is saved, and the lower left still steers (the D-pad still
+   presses); the D-pad keeps a usable size. */
+static void test_moved_bar_steers(void)
+{
+    const TouchScreen *screens[2] = {&PHONE, &TABLET13};
+    for (int i = 0; i < 2; i++)
+        for (int dpad = 0; dpad < 2; dpad++)
+            for (int left = 0; left < 2; left++) {
+                const TouchScreen *sc = screens[i];
+                start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+                TouchSettings s = *touch_settings(t);
+                s.dpad = dpad, s.left_handed = left;
+                touch_configure(t, &s, sc);
+                field();
+                touch_open_editor(t);
+                field();
+                float bx, by, bhw, bhh;
+                touch_control(t, TC_LBAR, &bx, &by, NULL);
+                touch_control_size(t, TC_LBAR, &bhw, &bhh);
+                drag(TC_LBAR, sc->width / 2 - bx, 0);   /* across to the middle, then down to the bottom */
+                touch_control(t, TC_LBAR, &bx, &by, NULL);
+                drag(TC_LBAR, 0, sc->height - bhh - by + 5);
+                editor_tap(E_DONE);
+                field();
+                CHECK(!touch_editor_open(t));
+                touch_control(t, TC_LBAR, &bx, &by, NULL);
+                if (by + bhh < sc->height - 0.5f) fprintf(stderr, "test_touch: the L bar stopped at %.1f of %.1f\n", by + bhh, sc->height);
+                CHECK(by + bhh > sc->height - 0.5f);   /* the review's place: against the bottom */
+                if (dpad) {
+                    float cx, cy, cr;
+                    touch_control(t, TC_STICK, &cx, &cy, &cr);
+                    CHECK(cr > 8.0f);   /* the pad's half extent: arms of a usable size */
+                    CHECK(dpad_works());
+                } else {
+                    float x = left ? sc->width - 20 : 12, y = sc->height - 25;   /* the lower left, under the bar's default place */
+                    int ok = steers_at(x, y);
+                    if (!ok) fprintf(stderr, "test_touch: no steering at %.0f,%.0f (screen %d, left %d)\n", x, y, i, left);
+                    CHECK(ok);
+                }
+            }
+    /* the D-pad's room has a floor: a screen so short that the room under the bar is gone */
+    start_dpad(1, 0, 0, 154.5f, 30.0f);
+    float cx, cy, cr;
+    touch_control(t, TC_STICK, &cx, &cy, &cr);
+    CHECK(cr > 0);
+}
+
+/* A saved layout with the bar at the bottom (written by a build before the fix) loads and steers;
+   one whose controls cover the whole steering area loads with those controls at their default
+   places for the run (the note says so, once), and steers; the editor refuses a drag that would
+   cover it. */
+static void test_saved_layout_steers(void)
+{
+    for (int left = 0; left < 2; left++) {
+        start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+        float bx, by, bhw, bhh;
+        touch_control(t, TC_LBAR, &bx, &by, NULL);
+        touch_control_size(t, TC_LBAR, &bhw, &bhh);
+        char text[256];
+        snprintf(text, sizeof text, "classic.layout=2;classic.lbar=%.1f,%.1f,1.00", 30.0, PHONE.height - bhh - by);
+        TouchSettings s = *touch_settings(t);
+        s.left_handed = left;
+        touch_layout_parse(&s, text);
+        touch_configure(t, &s, &PHONE);
+        field();
+        CHECK(touch_take_note(t) == NULL);   /* nothing to rescue: the area is the default one */
+        touch_control(t, TC_LBAR, &bx, &by, NULL);
+        CHECK(by + bhh > PHONE.height - 0.5f);
+        CHECK(steers_at(left ? PHONE.width - 20 : 12, PHONE.height * 0.62f));
+    }
+    /* L3 grown over the whole steering area (a hand-edited dhd.ini): L3 back at its place, noted once */
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    float lx, ly;
+    touch_control(t, TC_L3, &lx, &ly, NULL);
+    TouchSettings s = *touch_settings(t);
+    char text[256];
+    snprintf(text, sizeof text, "classic.layout=2;classic.l3=%.1f,%.1f,6.00", 0.22f * PHONE.width - lx, PHONE.height * 0.62f - ly);
+    touch_layout_parse(&s, text);
+    touch_configure(t, &s, &PHONE);
+    field();
+    const char *note = touch_take_note(t);
+    CHECK(note && strstr(note, "L3"));
+    CHECK(touch_take_note(t) == NULL);
+    CHECK(touch_settings(t)->edit[1][TC_L3].size == 1);
+    CHECK(steers_at(12, PHONE.height * 0.62f));
+    touch_configure(t, &s, &PHONE);   /* configured again (a setting changed): no second line */
+    field();
+    CHECK(touch_take_note(t) == NULL);
+    /* the editor: L3 grown at the steering area's middle stops before it covers it */
+    start(TOUCH_CLASSIC, TOUCH_ATTACK_FLICK);
+    touch_open_editor(t);
+    field();
+    touch_control(t, TC_L3, &lx, &ly, NULL);
+    drag(TC_L3, 0.22f * PHONE.width - lx, PHONE.height * 0.62f - ly);
+    for (int i = 0; i < 40; i++) editor_tap(E_PLUS);
+    editor_tap(E_DONE);
+    field();
+    CHECK(size_of(1, TC_L3) > 1.0f);
+    float found = 0;
+    for (float y = 20; y < PHONE.height - 5 && !found; y += 4)
+        for (float x = 6; x < 0.44f * PHONE.width - 12 && !found; x += 4)
+            if (steers_at(x, y)) found = 1;
+    CHECK(found);
+    /* the D-pad's home dragged onto L3 stops short: the pad stays clear and presses */
+    start_dpad(1, 0, 0, 154.5f, 69.5f);
+    touch_open_editor(t);
+    field();
+    float sx, sy, l3x, l3y;
+    touch_control(t, TC_STICK, &sx, &sy, NULL);
+    touch_control(t, TC_L3, &l3x, &l3y, NULL);
+    drag(TC_STICK, l3x - sx, l3y - sy);   /* onto L3: refused, it stops short */
+    editor_tap(E_DONE);
+    field();
+    CHECK(dpad_works());
+}
+
 int main(void)
 {
     test_dpad_layout();
@@ -2378,6 +2525,8 @@ int main(void)
     test_old_edits();
     test_undo_redo();
     test_editor_alone();
+    test_moved_bar_steers();
+    test_saved_layout_steers();
     touch_free(t);
     if (failures) { fprintf(stderr, "test_touch: %d failed\n", failures); return 1; }
     printf("test_touch: all passed\n");
