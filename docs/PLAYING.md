@@ -77,7 +77,7 @@ What works today:
   buttons); **ENTER** goes back to the race and enters them. The camera's flight over the track
   before each race, and the movies (the startup movies if Skip Movies is off, the attract movie,
   OPTIONS > VIDEO CLIPS) and the title's attract demo have a **SKIP** button (low in the middle of
-  the screen, the touch controls' START); tap it as you would press START on a pad. In a race's
+  the screen, under the right thumb on a tablet; the touch controls' START); tap it as you would press START on a pad. In a race's
   replay the same button reads **MENU** (START opens the replay's menu: RESUME, QUIT, RE-START,
   SAVE, which you then tap); the race controls are not shown, since a replay plays the recording.
   - **The D-pad** (SETTINGS > Touch Controls > Steer With > D-pad, in either layout and for either
@@ -88,6 +88,20 @@ What works today:
     resting at the middle presses nothing. The game sees the pad's own d-pad buttons, so steering
     is at full lock as with a PS2 d-pad, and tapping left or right twice is the game's powerslide.
     Size and Opacity apply to it as to the other buttons; Edit Layout moves it.
+  - **Edit Layout** (SETTINGS > Touch Controls) shows the controls over the game: drag one to move
+    it, **-** and **+** (hold to repeat) or a second finger pinching beside it change its size,
+    from 25 % to 600 % as far as the screen holds it; the line under the buttons names the
+    selected control with its size in millimetres and per cent. A control stays wholly on the
+    screen (dragged past an edge it stops there), may touch another but not cover it, and stays
+    out of PEDAL's flick lanes; dropped where it does not fit, it goes back to the last place on
+    the way where it did. **UNDO** and **REDO** step through your last changes (each drag, each
+    run of - or +, RESET); **RESET** puts the layout back to its default; **DONE** (or Back)
+    saves. GROUND and AIR switch between the race layout and Thumb zones' trick stick.
+  - **Tablets and iPads** (a screen 90 mm or more on its short side, about 7 inches and up) get
+    their own defaults: the controls a quarter larger, nearer where your thumbs are when you hold
+    the tablet by its sides, and Pause, the camera button and SKIP under your right thumb (the
+    left one with Hand: Left). The Size setting is a share of that. A layout you edited before
+    this version keeps its places on every screen; RESET moves it to the new ones.
 
 Known gaps:
 

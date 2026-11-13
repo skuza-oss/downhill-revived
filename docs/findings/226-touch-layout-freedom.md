@@ -21,14 +21,128 @@ small tablet and a 13-inch tablet size; the phone shows the editor, a race with 
 and the owner's layout unchanged; the iOS Simulator app builds on the Mac from the branch.
 
 Out of scope: portrait layouts, languages (other lanes or not chosen), the launcher itself
-(lane 225), a per-slot action swap (only if nearly free).
+(lane 225), a per-slot action swap (only if nearly free: it is not, see Decisions).
 
 ## Progress
 
-- [x] 2026-11-13: finding reserved
+- [x] 2026-11-13: finding reserved (2b7e60cf)
+- [x] the overlay's rules: sizes 25-600 %, placement, undo/redo, readout, pinch, held -/+,
+  tablet defaults, the 0.8.0 layouts kept (9a07041b)
+- [x] the editor alone for the launcher, `DHD_TOUCH_EDITOR=1` / `--touch-editor` (c003d77c)
+- [x] tilt steering on iOS through CoreMotion (03fe2614)
+- [x] docs: PLAYING, STATE, TESTING, the Android and iOS notes
 
 ## Decisions
 
+**The size range.** A control's own size (`TouchEdit.size`) runs from 25 % to 600 %
+(`TOUCH_SIZE_MIN`, `TOUCH_SIZE_MAX`), as his. The limit is the screen: the edited control must lie
+wholly on it. His lets a 600 % button pass the view's edges with its centre clamped
+(`limitedCenter`); ours keeps the whole control visible, because a control partly off the glass
+loses touch area where the player cannot see it. So on a 154.5 x 69.5 mm phone PEDAL stops near
+the screen's height (about 290 %), a small button or the trick stick's spot reaches 600 %; on a
+13-inch tablet much more fits. - and + step 5 % up to 100 %, 10 % to 200 % and 25 % above (37
+steps over the range), and a held button repeats (400 ms, then every 90 ms); + at an edge moves
+the control inward instead of refusing; past what fits, + stops at the largest size that fits
+(a search, not a refusal). The Size setting (one number for all) still multiplies every control.
+
+**Overlap.** Two controls may touch but not overlap their drawn shapes (finding 141 wanted 3 mm
+between every two). His allows any overlap. Ours routes a touch in two touch areas to the nearer
+control, so overlapping shapes would make one control press another where they meet, out of
+sight under the other's symbol: what the player sees must be what a touch presses. The default
+layouts keep their 3 mm gaps (`test_tablet` checks them on the tablets).
+
+**Placement, his against ours** (read in his `TouchLayout.swift`, `ControlsCustomizationView.swift`
+and our `touch.c`):
+
+| | His | Ours before | Ours now, and why |
+|---|---|---|---|
+| Screen edges | centre clamped, a larger control may pass them | a drop off the screen went back to its start | the control stays wholly on the screen; dragged past an edge it stops against it (a corner is one drag) |
+| Margins | the editor's canvas inset by the safe area plus 16 points | none | none: every millimetre of the screen is the player's |
+| Snap | none (dashed centre guides) | none | none; the editor alone draws faint centre lines |
+| Gaps | none | 3 mm between any two | no overlap of drawn shapes (above) |
+| Gesture strips | none | the stick's home and the trick spot may not start in them | kept: a drag that starts in a strip is the system's (back gesture), it never reaches the game |
+| Camera cutout | the safe area | a control over it moves inward | kept: nothing can be seen or pressed there |
+| Flick lanes | none (no flicks) | no control in PEDAL's lanes | kept: a flick through a button would press it |
+| A drop where it does not fit | — | back to its start | to the last place on the way where it fitted |
+| The editor's bar | separate panel | not checked | the edited control may not cover the bar's buttons (they must stay usable) |
+| HUD | — | the D-pad's default clear of the track bar | unchanged: only defaults avoid the HUD; a player's own drag over it is kept |
+
+**The editor** (his against ours; taken where cheap in our overlay):
+- taken: undo and redo (32 steps; his 40) of the preset's edits, a gesture, a run of - / + or a
+  RESET being one step each, and a new change dropping what was undone;
+- taken: a readout of the selected control in per cent beside its millimetres, with its name
+  (SQUARE, CAMERA, SELECT, ...: the old one had empty names for the symbol buttons);
+- taken: hold - / + to repeat, coarser steps above 100 % (his slider has 1 % steps; a slider in
+  our 8x8-font overlay would be fiddly on a phone, the pinch does the fine sizing instead);
+- added (his has none): a two-finger pinch on the held control;
+- not taken: his control picker list (needed in his because controls can hide under others; ours
+  cannot overlap), hiding controls (not asked for), Discard Changes (UNDO covers it), separate
+  portrait layouts (not chosen).
+- **An action swap per slot is not nearly free**: each control's press is fixed in the routing
+  (`route_thumb`, `route_classic`: PEDAL is ✕ with its sprint and hold-back guards, its flick
+  attacks, Classic ✕'s slide onto ◻ / ○ and the + spots, SELECT's bail guard, HOP's air-wait
+  tap); a swap needs an `action` per `TouchEdit`, the saved format grown, a picker in the editor,
+  and every guard keyed to the action instead of the control, with their tests. About a day's
+  lane; left for the owner to ask for.
+
+**Tablet defaults.** A screen whose short side is `TOUCH_TABLET_MM` (90 mm) or more is a
+tablet's, from the size the host reports, never the platform's name: phones end near 78 mm
+(iPhone Pro Max 70.7, large Androids about 75), the smallest tablets start near 94 mm (7-inch
+16:10), an 8.3-inch iPad mini is 115.9 mm, a 13-inch iPad about 199 mm. On a tablet:
+- the base size is `TOUCH_TABLET_SCALE` (1.25, his iPad `baseScale`); the Size setting is a share
+  of it (Auto and 100 % are 125 % of a phone's), buttons by the phone's rule relative to the base,
+  so the 3 mm gaps hold at every Size;
+- the bottom clusters (anchored to the lower corners as on phones) move up a quarter of the height
+  past 80 mm (at most 28 mm) and in a tenth of the width past 160 mm (at most 12 mm): on a 13-inch
+  iPad the stick's home sits about 58 mm up and 51 mm in (his 0.16 / 0.75 of the view: 42 mm in,
+  50 mm up), PEDAL about 50 mm up and 40 mm in;
+- the top buttons (Pause / START and camera / SELECT) leave the top-left corner, out of a thumb's
+  reach on a tablet, for a row just above the right cluster's touch areas with Pause at the edge
+  (his iPad keeps START and SELECT at the top); the Thumb zones steering area then reaches the
+  screen's top;
+- SKIP (the flight, movies, the attract demo) sits under the right thumb, its edge 8 mm in, 40 %
+  up, instead of the middle of the bottom;
+- Hand: Left mirrors all of it; Android tablets and iPads run the same code (`big_screen`,
+  `lay_out`, `tablet_top_place`, `skip_box`).
+
+**Saved layouts.** `touch_edits` keeps its format (`preset.control=dx,dy,size;...`); the parser
+takes sizes 0.25-6.00 and moves up to 1000 mm. A preset laid out on the current places also writes
+`preset.layout=2`, which 0.8.0's parser skips. A preset whose edits come without it was edited on
+0.8.0's places: it keeps them on every screen (`TouchSettings.legacy`), so no update moves a
+player's layout, on a phone (nothing changed there) or on a tablet (it would have moved with the
+new defaults); RESET puts it on the current places, as one undo step. A 0.8.0 build reading a new
+string ignores the mark and any size outside 0.5-2.0 (that control shows at its default).
+
+**The editor alone (lane 225's entry point).** `DHD_TOUCH_EDITOR=1`, or the argument
+`--touch-editor` (`touch_host_args`, from `launcher.c`'s main: the desktop and iOS's `dhd_main`
+argv; Android's `SDL_main` passes it on from the activity's arguments). The game starts muted
+(`DHD_SND_MUTE`) with its movies skipped, the host measures the window before any touch, opens the
+editor over an opaque plain background with faint centre lines once the screen's size is known,
+and after Done or Back has saved `touch_edits` it closes the game as EXIT GAME does
+(`gs_window_close`, `host_end`), so the launcher that started it shows again. The game's boot runs
+behind the editor (nothing of it shows or plays); the editor needs no disc menu or race. Android:
+the launcher's activity starts `DhdActivity` with `--touch-editor` among `getArguments()`; iOS: the
+launcher calls `ios_start_game` with it in argv (or sets `DHD_TOUCH_EDITOR=1`) and gets control back
+when the process would end (iOS: the game process is the app; lane 225 decides how the app returns
+to its launcher).
+
+**Tilt on iOS.** `metal_bridge.m` gives `touch_host.c` the two calls Android's `DhdActivity`
+gives it: `ios_touch_tilt_on` (CMMotionManager device motion, else the accelerometer, started and
+stopped on the main thread without waiting) and `ios_touch_tilt` (the roll from gravity in the
+screen's axes by the interface's orientation, Android's `atan2(-sx, sy)`). The host's tick now
+drives both platforms through one block. Unlike Android, the screen is not locked to its
+landscape side while tilt steers: iOS turns the interface only well past any steering tilt.
+
 ## Surprises
+
+- The old editor test "dropped onto PEDAL it snaps back" passed only because the drop went back
+  to its start; with the new last-fit rule the control stops at PEDAL's rim. The test now checks
+  that it is never over PEDAL and no further than where it started.
+- A race leaving the screen dropped every finger, the editor's too (the editor's drag stopped
+  250 ms after the editor opened over a race that had just ended): the editor's fingers are now
+  its own.
+- The host learned the screen's size only from the first touch or a window event; the editor
+  alone needs it before any touch, so the tick now measures the first window (desktop and
+  Android; iOS already measured each second).
 
 ## Result
