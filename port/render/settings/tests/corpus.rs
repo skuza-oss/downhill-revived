@@ -237,52 +237,97 @@ fn leftovers(dir: &std::path::Path) -> Vec<String> {
 }
 
 /// Many threads save different keys into one file at once (finding 228: the Android launcher's
-/// worker threads, the desktop launcher's commands): every key is there at the end, and a reader
-/// during the run only ever sees a whole file (the header first, every line `key = value`, never
-/// fewer keys than it saw before).
+/// worker threads, the desktop launcher's commands). The file exists before anything starts; the
+/// reader and the writers start together (a barrier), so the writers overlap and the reader reads
+/// all through. Every read during the run must succeed and be a whole file: the header first, every
+/// line `key = value` of a key some save wrote (or the first one) with exactly the value that save
+/// wrote, each key once, and never a key fewer than the read before. On Windows a read that meets
+/// the replace itself (another handle in the way: access denied, a sharing or lock violation) is
+/// tried again for up to 200 ms and fails only if it lasts; any other read error fails at once.
+/// At the end every key is there with its value, and no temporary file is left.
 #[test]
 fn saves_at_once() {
+    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Barrier};
     let dir = std::env::temp_dir().join(format!("dhd-settings-threads-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let p = Arc::new(dir.join("dhd.ini"));
-    let _ = fs::remove_file(&*p);
+    assert!(dhd_settings::save(&p, "first", "1").unwrap());
     const THREADS: usize = 12;
     const KEYS: usize = 25;
+    let expected = |key: &str| -> Option<String> {
+        if key == "first" {
+            return Some("1".into());
+        }
+        let (t, k) = key.strip_prefix('t')?.split_once("_k")?;
+        let (t, k): (usize, usize) = (t.parse().ok()?, k.parse().ok()?);
+        (t < THREADS && k < KEYS).then(|| format!("{t}.{k}"))
+    };
+    let read_during_run = |p: &std::path::Path| -> String {
+        for _ in 0..100 {
+            match fs::read(p) {
+                Ok(bytes) => return String::from_utf8(bytes).expect("dhd.ini is text"),
+                Err(e) if cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33)) => {
+                    std::thread::sleep(std::time::Duration::from_millis(2))
+                }
+                Err(e) => panic!("dhd.ini unreadable during the run: {e}"),
+            }
+        }
+        panic!("dhd.ini stayed unreadable for 200 ms during the run");
+    };
+    let start = Arc::new(Barrier::new(THREADS + 1));
     let done = Arc::new(AtomicBool::new(false));
     let reader = {
-        let (p, done) = (p.clone(), done.clone());
+        let (p, start, done) = (p.clone(), start.clone(), done.clone());
         std::thread::spawn(move || {
-            let (mut reads, mut most) = (0, 0);
-            while !done.load(Ordering::Relaxed) {
-                let Ok(text) = fs::read_to_string(&*p) else { continue };
+            start.wait();
+            let mut reads = 0;
+            let mut seen: BTreeMap<String, String> = BTreeMap::new();
+            loop {
+                let last = done.load(Ordering::Acquire);
+                let text = read_during_run(&p);
                 assert!(text.starts_with(dhd_settings::HEADER), "a part of a file: {text:?}");
                 let body = &text[dhd_settings::HEADER.len()..];
                 assert!(body.is_empty() || body.ends_with('\n'), "a cut line: {body:?}");
-                let keys = body.lines().inspect(|l| assert!(l.contains(" = "), "a broken line {l:?}")).count();
-                assert!(keys >= most, "{keys} keys after {most}: a change was lost");
-                most = keys;
+                let mut now = BTreeMap::new();
+                for line in body.lines() {
+                    let (key, value) = line.split_once(" = ").unwrap_or_else(|| panic!("a broken line {line:?}"));
+                    assert_eq!(expected(key).as_deref(), Some(value), "a key or value no save wrote: {line:?}");
+                    assert!(now.insert(key.to_string(), value.to_string()).is_none(), "{key} twice");
+                }
+                for key in seen.keys() {
+                    assert!(now.contains_key(key), "{key} was there and is gone: a change was lost");
+                }
+                seen = now;
                 reads += 1;
+                if last {
+                    return (reads, seen);
+                }
             }
-            reads
         })
     };
     let writers: Vec<_> = (0..THREADS)
         .map(|t| {
-            let p = p.clone();
+            let (p, start) = (p.clone(), start.clone());
             std::thread::spawn(move || {
+                start.wait();
                 for k in 0..KEYS {
                     assert!(dhd_settings::save(&p, &format!("t{t}_k{k}"), &format!("{t}.{k}")).unwrap());
                 }
             })
         })
         .collect();
+    let mut failures = 0;
     for w in writers {
-        w.join().unwrap();
+        failures += w.join().is_err() as usize;
     }
-    done.store(true, Ordering::Relaxed);
-    let reads = reader.join().unwrap();
+    done.store(true, Ordering::Release);
+    let (reads, last_read) = reader.join().expect("the reader saw only whole files");
+    assert_eq!(failures, 0, "{failures} of {THREADS} writers failed");
+    assert!(reads > 1, "the reader read during the run");
+    assert_eq!(last_read.len(), THREADS * KEYS + 1, "the last read has every key");
     let ini = dhd_settings::read(&p).unwrap();
     for t in 0..THREADS {
         for k in 0..KEYS {
@@ -290,7 +335,6 @@ fn saves_at_once() {
         }
     }
     assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
-    assert!(reads > 0);
     fs::remove_dir_all(dir).unwrap();
 }
 
