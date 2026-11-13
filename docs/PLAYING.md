@@ -97,6 +97,19 @@ What works today:
     the way where it did. **UNDO** and **REDO** step through your last changes (each drag, each
     run of - or +, RESET); **RESET** puts the layout back to its default; **DONE** (or Back)
     saves. GROUND and AIR switch between the race layout and Thumb zones' trick stick.
+  - **Button Style** (SETTINGS > Touch Controls, or the launcher's Touch tab): **Actions** (the
+    default) shows what each button does, with the pad's own button in a small badge so the game's
+    "PRESS ✕" and trick lists still match: a pedal on ✕ (PEDAL), fists on ◻ and ○ (the left- and
+    right-hand attacks), a brake lever on △ (BRAKE), which becomes a star in the air (△ there
+    superstyles a trick), a bike hopping on R2 (HOP), which becomes two links in the air (R2 alone
+    does no trick; it combines with L1, L2 or R1), a sliding wheel on L3 (SLIDE), arrowheads on R3
+    (sprint), on the shoulders the trick each does alone (L1 One Hander: a hand, R1 One Legger: a
+    boot, L2 Saran Wrap: a loop), a camera on SELECT, Pause on START and a handlebar on the
+    stick. The pictures change with the rider in the air, never under a finger that is down.
+    With Button Icons set to Xbox or Nintendo the badges use those names. At the smallest sizes a
+    button too small for its picture shows its name. **Symbols** shows the PS2 symbols alone, as
+    before. The idea comes from a community iOS fork (`bagasromadon/downhill-revived-ios-newbutton`);
+    the pictures are our own.
   - **Tablets and iPads** (a screen 90 mm or more on its short side, about 7 inches and up) get
     their own defaults: the controls a quarter larger, nearer where your thumbs are when you hold
     the tablet by its sides. On every screen Pause and the camera button (START and SELECT in
