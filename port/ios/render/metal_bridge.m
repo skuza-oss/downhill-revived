@@ -356,7 +356,7 @@ void ios_text_input(int on) {
 
 /* Native Metal View - Owned by Rust GS Renderer (port/gs/present.c); its touches go to the shared
    touch controls (touch_host.c). */
-@interface MetalGameView : UIView
+@interface MetalGameView : UIView <UIGestureRecognizerDelegate>
 @property (nonatomic, strong) CAMetalLayer *metalLayer;
 @end
 
@@ -378,6 +378,14 @@ void ios_text_input(int on) {
         UIScreenEdgePanGestureRecognizer *back = [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self
                                                                                                    action:@selector(edgeBack:)];
         back.edges = UIRectEdgeLeft;
+        /* the delegate is asked before the swipe is recognized (gestureRecognizerShouldBegin): in a
+           race it never is, so a steering finger that starts at the edge is never cancelled; touches
+           reach the game at once and their ends are not held back. Recognized (a menu's Back), it
+           cancels its own finger, which would otherwise be a tap at the edge. */
+        back.delegate = self;
+        back.cancelsTouchesInView = YES;
+        back.delaysTouchesBegan = NO;
+        back.delaysTouchesEnded = NO;
         [self addGestureRecognizer:back];
         ios_metal_configure_layer((__bridge void *)self.metalLayer);
     }
@@ -425,7 +433,9 @@ void ios_text_input(int on) {
    (UIView asks this of the recognizers attached to it). */
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
     (void)recognizer;
-    return ios_touch_back_allowed();
+    BOOL allowed = ios_touch_back_allowed();
+    if (!allowed) NSLog(@"Downhill Revived: an edge swipe in a race: not Back, the touch stays the game's");
+    return allowed;
 }
 - (void)edgeBack:(UIScreenEdgePanGestureRecognizer *)recognizer {
     if (recognizer.state == UIGestureRecognizerStateEnded && [recognizer translationInView:self].x > 40) ios_touch_back();
