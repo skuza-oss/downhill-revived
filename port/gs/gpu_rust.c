@@ -125,7 +125,8 @@ void dhd_host_log(const char *line, size_t bytes)
     fflush(stderr);
 #ifdef __ANDROID__
     if (host_log_drain && ((bytes >= 11 && !memcmp(line, "gs startup:", 11)) ||
-        (bytes >= 22 && !memcmp(line, "previous run: startup:", 22)))) host_log_drain();
+        (bytes >= 22 && !memcmp(line, "previous run: startup:", 22)) ||
+        (bytes >= 12 && !memcmp(line, "gs pipeline:", 12)))) host_log_drain();
 #endif
 }
 
