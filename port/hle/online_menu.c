@@ -2283,7 +2283,8 @@ static void shop_prepare(void)
    - GET READY (menu 9), which the shop no longer reaches online, keeps the choice and flies the
      camera back to the rider screen, as the main menu's SINGLE PLAYER does, instead of loading a
      race before everyone is ready;
-   - the rider screen's Back (Triangle) opens the room instead of leaving for the title;
+   - before a selection is committed, the rider screen's Back returns to ONLINE;
+   - changing an existing selection, Back opens the room;
    - Change Selection closes the room on the rider screen itself;
    - leaving the room (or losing it) takes the rider screen's own Back to the title, where the
      main menu opens ONLINE again (port_online_resume). */
@@ -2291,6 +2292,15 @@ int port_online_shell(void)
 {
     if (!choosing) return 0;
     int menu = SHELL_WORD(0x29DED8);
+    if (!shop_done && menu == 11 && SHELL_WORD(0x29DEEC) == 18) {
+        /* The shop cancelled to Single Race, the page we auto-accept going
+           forward. Restore the carousel before that shortcut selects again. */
+        chosen_spot = SHELL_WORD(0x4C6910);
+        port_online_choose_begin(0);
+        hold_rider = 1;
+        hle_log("online menu: shop cancelled: choosing the rider\n");
+        return 1;
+    }
     if (menu == 16) {
         /* Single races only: bypass the career's NEW / CONTINUE and mode menus. */
         SHELL_WORD(0x29DED8) = 11;
@@ -2337,6 +2347,11 @@ int port_online_shell(void)
             hold_rider = 0;
         }
         if (!back && !lost) return 0;
+        if (back && !selected && !lost) {
+            hle_log("online menu: rider choice cancelled: ONLINE\n");
+            race = 0;
+            goto leave_selection;
+        }
     } else
         return 0;
 
@@ -2353,6 +2368,7 @@ int port_online_shell(void)
         hold_rider = 1;  /* the rider screen is here: choose on it */
         return 1;
     }
+leave_selection:
     choosing = 0;
     if (race == 1) {
         SHELL_WORD(0x29DED8) = 9;

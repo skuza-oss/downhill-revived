@@ -259,6 +259,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 227 | [iOS: the launcher's bridge and the first on-screen run's fixes](227-ios-launcher-and-fixes.md) | current |  |
 | 228 | [The launcher's layout editor alone on Android, and the merged main proved](228-android-editor-alone.md) | current |  |
 | 229 | [Touch buttons that show what they do](229-touch-action-icons.md) | current |  |
+| 230 | [Back through the Online menus](230-online-menu-back.md) | current |  |
 | 231 | [PowerVR startup black screen diagnostics](231-powervr-startup.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
