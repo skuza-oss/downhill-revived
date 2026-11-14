@@ -1,6 +1,7 @@
 # 234: One boot-disc check
 
 Status: current
+Checked: 2026-11-14
 
 Branch `cleanup/one-disc-check` from `main` 584ce03f, started 2026-11-14.
 
@@ -57,3 +58,9 @@ Lead proof after merge:
   refuse cut-off/other-release files, cancel/retry an import. No iOS source behavior changed.
 
 No device or Mac touched; no push/post/comment.
+
+Checked:
+- 0.8.3 gate on 128a743a: `check.py port -j 6`, `check.py docs` and `check.py server` OK; the seven state traces
+  (`boot`, `race`, `race2`..`race6`) equal `main-524948ba-ref-v3`.
+- The Mi 11i's launcher opened with the owner's disc accepted and PLAY started the game; the iOS Simulator's
+  launcher snapshot reported no disc problem; every PC game of the gate booted from the same check.

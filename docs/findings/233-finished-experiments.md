@@ -1,6 +1,7 @@
 # 233: Remove finished experiments and migration leftovers
 
 Status: current
+Checked: 2026-11-14
 
 Branch `cleanup/finished-experiments` from `main` 584ce03f, started 2026-11-14.
 
@@ -54,3 +55,9 @@ capture of both builds, `compare --same`: every field identical. `test_gs_wgpu` 
 tier) passed. Not run: the GS golden and `native_replay` (both above). The iOS edits (A09, the
 disc_copy.h and sdl3.py comments) are unbuilt: a Mac build and a simulator background/foreground
 cycle remain with the lead.
+
+Checked:
+- 0.8.3 gate on 128a743a: `check.py port -j 6`, `check.py docs` and `check.py server` OK; the seven state traces
+  (`boot`, `race`, `race2`..`race6`) equal `main-524948ba-ref-v3`.
+- The gate's builds and runs (Windows, Android, Mac, iOS Simulator and the unsigned IPA) built and ran with the
+  stand-ins and the old hash log gone; PC <-> Mac races in SFU and P2P rooms ended with equal results.

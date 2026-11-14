@@ -1,6 +1,7 @@
 # 235: Shared launcher rules
 
 Status: current
+Checked: 2026-11-14
 
 Branch `cleanup/shared-launcher-rules` from `main` 584ce03f, started 2026-11-14.
 
@@ -55,3 +56,9 @@ header search path (`host/...`, `render/include/...`), the same way the PC fixtu
 ## Result
 
 Filled in at the merge.
+
+Checked:
+- 0.8.3 gate on 128a743a: `check.py port -j 6`, `check.py docs` and `check.py server` OK; the seven state traces
+  (`boot`, `race`, `race2`..`race6`) equal `main-524948ba-ref-v3`.
+- The phone launcher's update line showed "Up to date, version 0.8.2" (the shared update lookup); the iOS Simulator's
+  launcher answered its snapshot. The link rule's buttons were not tapped in the gate.

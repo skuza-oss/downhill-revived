@@ -1,6 +1,7 @@
 # 237: phones get every online mode
 
 Status: current
+Checked: 2026-11-14
 
 Supersedes: 143 (no online on phones); and for Android and iOS the P2P-only rule of 180, 186 and 224 (224 stays current for the rest)
 
@@ -92,3 +93,17 @@ Not run here: TURN over TLS from a phone (Android takes no `DHD_NET_SFU_UDP=0`; 
 Rust code the desktop's tests force), a phone's reconnect after a network loss (Wi-Fi left alone),
 iOS (no Mac work in this lane: the change is the shared `net.c` constant; the iOS app has no other
 online code), 6+ racers.
+
+Checked:
+- 0.8.3 gate on 128a743a: `check.py port -j 6`, `check.py docs` and `check.py server` OK; the seven state traces
+  (`boot`, `race`, `race2`..`race6`) equal `main-524948ba-ref-v3`.
+- Mi 11i, release-signed PGO APK, official server, one hidden PC game of this build each time: ONLINE shows all
+  eight rows; a private SFU room made on the phone (the PC joined by code) and one made on the PC (the phone typed
+  the code): equal results both ways, `SFU connected via UDP`, zero `refused`, no address of the other player in
+  the phone's log; a public room made on the phone was taken by the PC's Quick Race, and the phone's Quick Race
+  took the PC's public room; a P2P room made on the phone: equal results; Back in ONLINE goes one step.
+- One room made on the phone (CDG) never got its SFU link: five sessions in 63 s failed on UDP and on the TURN
+  relay (TURN error 400). The next room connected via UDP in 717 ms, as did every later one; TURN over TLS between
+  two PC games on the same server worked the same hour. Not reproduced; TURN over TLS from a phone stays untested.
+- The iOS Simulator (iPhone test device, sound off) joined a PC game's SFU room with the test switches and both
+  games ended with equal results (`1. PCHOST 0:20.03  2. SIMIOS 0:40.03`).

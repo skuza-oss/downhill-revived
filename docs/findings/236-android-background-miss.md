@@ -1,6 +1,7 @@
 # 236: the background noticed only at the return (Android, in a race)
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/android-background-miss` from `main` f9cbce3d, started 2026-11-14. Follows finding 227
 (the render hold, `app_away_wait`).
@@ -80,3 +81,10 @@ wait for an earlier picture`), 22 `back in the foreground` (1.3-1.4 s for 2 s aw
 after each return (`dumpsys audio`), the picture back, zero `freeze:` lines, no new tombstone.
 EXIT GAME, the next start "how it ended: normally". The diagnostic build before the fix: 2 of 4
 cycles bad, as above.
+
+Checked:
+- 0.8.3 gate on 128a743a: `check.py port -j 6`, `check.py docs` and `check.py server` OK; the seven state traces
+  (`boot`, `race`, `race2`..`race6`) equal `main-524948ba-ref-v3`.
+- Mi 11i, release-signed PGO APK, a SINGLE EVENT race: 8 Home/return cycles (2 s x4, 10 s x3, 30 s x1; the log's time
+  away 3.2 to 31.4 s): 8 `gs: in the background`, 8 `back in the foreground`, 8 PAUSED
+  screens, zero `freeze:` lines.
