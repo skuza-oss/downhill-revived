@@ -17,6 +17,8 @@
 
 #include "../include/version.h"
 #include "phone.h"
+#include "launcher_link.h"
+#include "../render/include/dhd_limits.h"
 #include "../render/include/dhd_settings.h"
 #include "../render/include/dhd_disc.h"
 
@@ -147,4 +149,22 @@ EXPORT(jstring, version)(JNIEnv *env, jclass cls)
 {
     (void)cls;
     return (*env)->NewStringUTF(env, DHD_VERSION);
+}
+
+/* Native validation of the untrusted page's link, before the Java Intent. */
+EXPORT(jstring, launcherLink)(JNIEnv *env, jclass cls, jstring asked)
+{
+    (void)cls;
+    const char *input = utf(env, asked);
+    const char *url = launcher_link(input);
+    jstring result = url ? (*env)->NewStringUTF(env, url) : NULL;
+    done(env, asked, input);
+    return result;
+}
+
+/* The renderer's phone limit, passed through the existing snapshot scale_max. */
+EXPORT(jint, phoneScaleMax)(JNIEnv *env, jclass cls)
+{
+    (void)env; (void)cls;
+    return NATIVE_PHONE_SCALE_MAX;
 }

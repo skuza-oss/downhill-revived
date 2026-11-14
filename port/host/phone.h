@@ -23,4 +23,9 @@ void phone_quote_last_exit(const char *dir);
    release has a build for platform, 0 when none does, -1 when no source answered. */
 int phone_update_find(const char *platform, char *version, size_t version_size, char *page, size_t page_size);
 
+/* As above, with the winning source URL (static storage; NULL unless found) and a
+   log label for failed requests. Used by Android's direct-start notice. */
+int phone_update_find_source(const char *platform, char *version, size_t version_size,
+                             char *page, size_t page_size, const char **source, const char *log_label);
+
 #endif
