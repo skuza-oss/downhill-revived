@@ -1,6 +1,7 @@
 # 246: Phone SFU fallback and network return
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/phone-online-links` from local main 07e38743, started 2026-11-14.
 
@@ -90,3 +91,9 @@ two networks. The log should show `TURN relay's TLS link up over IPv4` if TURN i
 refusal as `TURN <request> error <code> (...)` followed by `UDP keeps trying`, no run of six
 `a new session` lines, `ICE disconnected` then a new session within about 5 s of the loss, and
 `back in the race` (or `back in room`) after the network returns.
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- Mi 11i, release-signed PGO APK, a private SFU room with a hidden PC joiner: Wi-Fi off 15 s in the lobby and
+  10 s in a race came back; 30 s and 35 s ended in a clean "Connection lost"; zero `freeze:` lines.

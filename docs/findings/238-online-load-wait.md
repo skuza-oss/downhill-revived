@@ -1,6 +1,7 @@
 # 238: the online race load: a live load screen while a game waits, and where a phone's seconds go
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/online-load-wait` from `main` b1d5e515 (0.8.3), started 2026-11-14. This file is the
 lane's plan while it runs and its finding when it merges.
@@ -102,3 +103,13 @@ frozen 30 s (`stall: field 1228 came 30005 ms`), the phone's rider on the defaul
 Open: the barrier's own wait before the load screen still shows one still picture of about 3 s
 (`stall: ... (menu 9 phase 3)`, under the freeze watch's 5 s); the flight is not skipped
 automatically online.
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- On this PC, two hidden games: a P2P room on a local server (direct link, `1. Host 1:10.03  2. Guest 1:12.03`
+  on both) and a private SFU room on the official server (SFU via UDP on both, equal results); PC <-> Mac (the
+  Mac's own build): a private SFU room on the official server and a P2P room, equal results; zero `refused`,
+  `freeze:` and `crash:` lines in every log.
+- Mi 11i, release-signed PGO APK: a private SFU room with a hidden PC joiner raced to results, zero `freeze:`
+  lines. A full room of 8 was not run again.

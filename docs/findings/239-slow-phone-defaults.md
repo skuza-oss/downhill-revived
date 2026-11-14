@@ -1,6 +1,7 @@
 # 239: Slow phones start at suitable graphics settings
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/slow-phone-defaults` from `main` b1d5e515, started 2026-11-14.
 
@@ -83,3 +84,9 @@ launcher and game: choices stay. Also test an old ini with explicit scale/effect
 (including DHD_* aliases), and scale-only/effect-only ini: written choices stay,
 only the untouched setting/group gets its default. Confirm the translated hint and
 run a race, share the log. Restore each saved ini after testing.
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- Mi 11i (not a known weak GPU): the owner's settings stayed as they were. The weak-GPU defaults were not run
+  on real hardware.

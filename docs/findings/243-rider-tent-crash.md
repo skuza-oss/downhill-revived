@@ -1,6 +1,7 @@
 # 243: Rider tent close on a Helio P35 phone
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/rider-tent-crash` from local main 65f94597, started 2026-11-14.
 
@@ -104,3 +105,8 @@ Tell us whether it happens opening the tent, choosing a rider, or cycling bikes,
 which rider/bike was selected, and whether sound/input continue. Keep 1x and Performance
 Mode on. If it still fails, set Native VU off in launcher Settings > Graphics, repeat
 the same action, and send that second complete log separately. Your saves can stay.
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- Diagnostics only; not run on a Helio P35 phone.

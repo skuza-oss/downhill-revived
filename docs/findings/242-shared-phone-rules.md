@@ -1,6 +1,7 @@
 # 242: Two test tools fixed, one Share-log builder, one phone disc-import rule set
 
 Status: current
+Checked: 2026-11-14
 
 Branch `cleanup/shared-phone-rules` from `main` 7906a93f, started 2026-11-14.
 
@@ -141,3 +142,8 @@ Lead's checks on the owner's phone after the merge (read-only: its disc must not
 3. The icon's long-press Share log shortcut: the same file, the launcher closes after the sheet.
 4. Choose disc, then Back out of the picker (no file chosen): the disc stays accepted; Share log's
    launcher.log section then has `picker: shown` and `picker: cancelled`.
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- Mi 11i, release-signed PGO APK: Share log from the launcher made one bundle; Android unit tests green.

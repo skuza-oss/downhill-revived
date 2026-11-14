@@ -1,6 +1,7 @@
 # 241: Adreno 505 device loss after the menus start
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/adreno-505-stop` from local main 92a7eb4a, started 2026-11-14.
 
@@ -118,3 +119,8 @@ and Performance Mode on for both. Tell us whether each run stays open, freezes o
 closes, and whether 0.7.14/0.7.15 previously worked. Send both complete files; don't
 start extra runs between a failure and sharing. The new `loss context` line remains
 active beyond startup and will help us narrow the failure. No adb or computer needed.
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- Diagnostics only; not run on an Adreno 505.

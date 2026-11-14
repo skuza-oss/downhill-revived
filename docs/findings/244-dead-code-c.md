@@ -1,6 +1,7 @@
 # 244: remove the dead code the C audit proved
 
 Status: current
+Checked: 2026-11-14
 
 Branch `cleanup/dead-code-c` from local main 65f94597, started 2026-11-14. This file is the
 lane's plan while it runs and its finding when it merges.
@@ -30,3 +31,8 @@ skipped and noted here.
 ## Surprises
 
 ## Result
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- `check.py server` covers the removed `isValidCode`; no server deploy needed.

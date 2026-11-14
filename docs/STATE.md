@@ -179,6 +179,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   settings that are hard to change in the game, the update line (the game's own check; a direct
   start keeps the in-game notice, finding 143), Help with Share log (finding 225). iOS opens into the
   same page with the same calls (finding 227); a direct start there has no in-game update notice.
+  On iOS the disc also comes in without the picker: any `.iso` in the app's Files folder (or its
+  Inbox) is found when the launcher opens and at each return, and "Open in" hands one over; every
+  step is in `launcher.log`, which Share log carries (finding 240).
 - Discord Rich Presence on the desktop (finding 106). The mouse works in the port's pages and the
   game's popups (finding 092).
 
@@ -187,6 +190,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - SFU rooms (public, private, Quick Race) on Windows, macOS, Linux, Android and iOS (phones since
   finding 237); P2P rooms there and in the browser, which offers nothing else
   (`host_service_net_offered`, findings 143, 180, 186).
+- A lost link comes back on its own: the race link gets a new SFU session after about 5 s dead and
+  the room connection rejoins ("Connection lost, reconnecting..."); a refused TURN leaves the UDP
+  attempt running (finding 246). An absence over about 30 s in a race ends it ("Connection lost").
 - **State sync, never lockstep:** each PC runs its own one-player race at its own frame rate and
   shows the others, and on guests the host's AI riders, as puppet riders (`port/hle/puppet.c`,
   findings 044, 047, 114): each rides on this game's own physics with its owner's pad (an AI

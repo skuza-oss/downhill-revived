@@ -1,6 +1,7 @@
 # 245: Bluetooth pad after Android room-code entry
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/pad-after-room-code` from local main bf4f5ab6, started 2026-11-14.
 
@@ -103,3 +104,8 @@ room code, join or cancel with Android Back, then test every controller button a
 stick. If anything still stops, please attach the full dhd.log and tell us the pad
 model/mode, phone, keyboard app, and whether closing the keyboard or restarting the
 game restores it.
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- Android unit tests green; no Bluetooth pad was run on a phone.

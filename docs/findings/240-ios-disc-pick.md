@@ -1,6 +1,7 @@
 # 240: iOS: the disc reachable without the picker's hand-over
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/ios-disc-pick` from `main` b1d5e515 (v0.8.3), started 2026-11-14. This file is the
 lane's plan while it runs and its finding when it merges.
@@ -109,3 +110,13 @@ in launcher.log, which Share log carries, so the next report says where it stopp
 real iPhone, a sideloaded install, an Inbox copy made by iOS itself (the Simulator's Files opened in
 place). Left for the lead: a test IPA for the player (same version 0.8.3, so name it apart when
 handing it over).
+
+Checked:
+- 0.8.4 gate on ad4b92f9: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- The Mac's "DHD Lane 224" Simulator, the app of ad4b92f9: the disc renamed `Gate Dump (USA).iso` in Documents
+  was found when the launcher opened (`folder (launcher opened): importing ...`, then `done: moved into
+  place`), the launcher said Ready to ride; the iPad Simulator opened into the launcher.
+- The unsigned IPA through `package_release.py --platform ios`: the audit passed; Info.plist carries the
+  `public.iso-image` document type; no signing files, no home-folder paths and no team id of the Mac's
+  identities in it. No real iPhone or iPad.
