@@ -26,6 +26,7 @@
   "home.first.step1": "Disc-Abbild auswählen",
   "home.first.step1Hint": "Ein beliebiger Ordner; die Datei bleibt, wo sie ist",
   "home.first.step1HintImport": "Es braucht etwa 2,5 GB freien Speicher. Jetzt frei: {free}.",
+  "home.first.filesFolder": "Oder verschiebe die .iso in Dateien > Auf meinem iPhone > Downhill Revived, unter beliebigem Namen.",
   "home.first.step2": "Fahren",
   "home.first.step2Hint": "Unten erscheint „Spielen“, sobald die Disc geprüft ist",
   "home.played.hours": "{hours} Std. {minutes} Min. gespielt",

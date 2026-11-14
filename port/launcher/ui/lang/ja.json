@@ -26,6 +26,7 @@
   "home.first.step1": "ディスクイメージを選ぶ",
   "home.first.step1Hint": "どのフォルダーでも可。ファイルは元の場所に残ります",
   "home.first.step1HintImport": "約2.5 GBの空き容量が必要です。現在の空き：{free}。",
+  "home.first.filesFolder": "または .iso を「ファイル」>「このiPhone内」>「Downhill Revived」に移動してください。ファイル名は自由です。",
   "home.first.step2": "走る",
   "home.first.step2Hint": "ディスクの確認が終わると、下に「プレイ」ボタンが表示されます",
   "home.played.hours": "プレイ時間：{hours}時間{minutes}分",

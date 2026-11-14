@@ -26,6 +26,7 @@
   "home.first.step1": "Choose your disc image",
   "home.first.step1Hint": "Any folder; the file stays where it is",
   "home.first.step1HintImport": "It needs about 2.5 GB of free space. Free now: {free}.",
+  "home.first.filesFolder": "Or move the .iso into Files > On My iPhone > Downhill Revived, under any name.",
   "home.first.step2": "Ride",
   "home.first.step2Hint": "PLAY appears below once the disc checks out",
   "home.played.hours": "{hours} h {minutes} min played",

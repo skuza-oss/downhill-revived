@@ -30,8 +30,10 @@ signed for your device, and the sideloading tool does that with your own Apple I
    once (Settings > Privacy & Security) when iOS asks for it.
 3. Start Downhill Revived: it opens into the launcher (the same one as on Android and the PC).
    Choose your `.iso` there (from Files, iCloud Drive or a USB drive): it is checked and copied
-   into the app once, which takes a minute or two. An `.iso` you copied into Files > On My iPhone >
-   Downhill Revived can be chosen there too (it is moved into place, not copied). Then PLAY.
+   into the app once, which takes a minute or two. If choosing does nothing (some signing tools
+   break the picker), move the `.iso` into Files > On My iPhone > Downhill Revived, under any name,
+   or open it with Share > Downhill Revived: the launcher finds it and moves it into place (not
+   copied). Then PLAY.
 
 **The launcher** opens at every start: PLAY, the settings that are hard to change in the game
 (graphics, touch, the rider name, online), the update line (a newer release is shown with a link
@@ -53,7 +55,7 @@ iOS may close the room's connection when the app stays away long (more than a fe
 saves and the disc copy stay. Deleting the app deletes them.
 
 **Your files** (Files > On My iPhone (or iPad) > Downhill Revived): `dhd.ini` (the settings),
-`saves`, the disc copy and `dhd.log`. If the game closes unexpectedly, send us the log (the
+`saves`, the disc copy, `dhd.log` and `launcher.log` (the disc's import). If the game closes unexpectedly, send us the log (the
 launcher's Share log, or `dhd.log` from that folder) in a GitHub issue or on Discord.
 
 **iPad**: the game is landscape. If your iPad stays upright, the game shows turned at the whole
