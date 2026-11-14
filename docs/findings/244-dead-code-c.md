@@ -16,7 +16,7 @@ traces equal to the base build.
 
 - [x] L01 `net_kick`, `client_kick`, `net_local_slot` (the server's kick handling stays)
 - [x] L02 `raster_module` in `port/render/src/exact/pipelines.rs`
-- [ ] L03 snapshot macro override scaffolding and `native_snapshot_free`
+- [x] L03 snapshot macro override scaffolding and `native_snapshot_free`
 - [ ] L04 ignored `--renderer` argument (`port/web/build.py`, `port/tools/web_gs_replay.mjs`)
 - [ ] L06 `isValidCode` in `online/server/src/protocol.ts`
 - [ ] L07 `online/server/AGENTS.md` address sentence scoped to SFU rooms
