@@ -8,8 +8,11 @@ The root `AGENTS.md` rules apply. Protocol: `docs/online-protocol.md`; steps and
   around a hub (finding 186: its members see each other's addresses; the room relays only the
   star's signaling, its fallback members use the SFU); the room only sets up each member's
   session (one per room stay, its subscriptions made at the grid's lock: finding 177) and
-  credentials and never sends a player another's address, SDP, session id or credentials
-  (finding 158). Do not add input lockstep, input delay or race hashes. Rooms, sessions and
+  credentials. In SFU rooms it never sends a player another's address, SDP, session id or
+  credentials (finding 158); the P2P star's offer, answer and candidate signaling between hub
+  and members is the one authorized exception (root `AGENTS.md`), and SFU session ids and
+  credentials stay private in P2P rooms too. Do not add input lockstep, input delay or race
+  hashes. Rooms, sessions and
   rules: findings 118, 119, 123, 128, 135, 137; the abuse guard: finding 161; the update backup
   `/v1/latest`: finding 138.
 - The official server is `wss://dhd.skuza.app`, the game's default. No other server address in a
