@@ -111,8 +111,8 @@ TARGETS = {t.key: t for t in (
 POSIX_UNITS = {'port/host/host_win32.c': 'port/host/host_posix.c'}
 WINDOWS_ONLY = ('port/gs/replay.c',)  # Win32 calls (GS replay)
 # What both phone hosts share (port/host/phone.h, finding 227): SETTINGS' rows, the previous run's
-# lines, the launcher's update check
-PHONE_UNITS = ['port/host/phone.c', 'port/net/update_check.c']
+# lines, the launcher's update check, Share log's file and launcher.log (finding 242)
+PHONE_UNITS = ['port/host/phone.c', 'port/net/update_check.c', 'port/host/log_bundle.c']
 ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c',
                  'port/host/disc_check_jni.c', 'port/host/android_update.c', 'port/host/android_launcher.c'] + PHONE_UNITS
 # Android: only SDL's entry and the launcher's native calls (android_launcher.c, finding 225) leave

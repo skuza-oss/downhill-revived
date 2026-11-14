@@ -130,8 +130,9 @@ and implements the phone calls in `launcher_calls.c`, over the code Android's la
   game's menus and the game goes on after Done, because the editor alone would end the process,
   which closes an iOS app (it can't start itself again). This is where the phones differ: see
   "`play` with `edit_touch_layout`" below. `open_link` (`launcher_link`, the desktop's and Android's rule),
-  `share_log` (the share sheet with one text file: the device, dhd-exit.txt, dhd.log,
-  dhd-previous.log), `licences` (the app's LICENSE.txt and THIRD-PARTY-NOTICES.txt).
+  `share_log` (the share sheet with one text file, written by `port/host/log_bundle.c` as on
+  Android: the device, dhd-exit.txt, launcher.log, dhd.log, dhd-previous.log), `licences` (the
+  app's LICENSE.txt and THIRD-PARTY-NOTICES.txt).
 - `resumed` when the app becomes active again with the page on screen.
 
 ## `play` with `edit_touch_layout` (findings 226, 227, 228)

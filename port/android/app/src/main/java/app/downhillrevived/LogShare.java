@@ -4,10 +4,12 @@
 // Android's share sheet with it, served by LogProvider; nothing leaves the phone unless the player
 // picks an app there. Reached from the launcher's note after a run that closed unexpectedly, its Help
 // page and the icon's long-press shortcut (LauncherActivity; finding 225).
-// The file: the phone, how the last run ended (LastExit's dhd-exit.txt), the log of the run that
-// ended, then the other one. Which is which: a dhd.log written since this process started is the
-// game running now (host.c moved the one before to dhd-previous.log); otherwise dhd.log is the run
-// that ended. A long log keeps its start and its end (CrashReport.copyLog).
+// The file is written by the shared C the iOS launcher uses too (port/host/log_bundle.c, finding
+// 242): the device, how the last run ended (LastExit's dhd-exit.txt), launcher.log (the disc
+// import's steps), the log of the run that ended, then the other one; a long log keeps its start and
+// its end. What only Android knows stays here: the phone's words, and which log is which (a dhd.log
+// written since this process started is the game running now: host.c moved the one before to
+// dhd-previous.log).
 package app.downhillrevived;
 
 import android.app.Activity;
@@ -22,20 +24,11 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.widget.Toast;
 
-import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
 
 final class LogShare {
     private static final String TAG = "DownhillRevived";
-    /** Each log's start and end kept in the shared file: some MB in all, which chat apps take. */
-    private static final long HEAD = 256 << 10, TAIL = 1536 << 10;
 
     private LogShare() {}
 
@@ -79,34 +72,25 @@ final class LogShare {
     /** The shared file written, and the chooser's Intent for it; or the message for the player. */
     private static Object prepare(Context activity) {
         File files = activity.getFilesDir();
-        File log = new File(files, "dhd.log"), previous = new File(files, "dhd-previous.log");
-        String exit = LastExit.text(activity);
+        File log = new File(files, "dhd.log");
+        LastExit.record(activity);  // dhd-exit.txt, written once by this process
         long started = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime());
         boolean running = log.isFile() && log.lastModified() >= started;
-        File ended = running ? previous : log, other = running ? log : previous;
-        if (!ended.isFile() && !other.isFile() && exit == null) return "There is no log yet.";
         String version = version(activity);
-        Date now = new Date();
         File dir = folder(activity);
         dir.mkdirs();
         File[] old = dir.listFiles();
         if (old != null) for (File f : old) f.delete();
-        File out = new File(dir, "downhill-revived-" + version + "-log-"
-                + new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now) + ".txt");
-        try (OutputStream o = new BufferedOutputStream(new FileOutputStream(out))) {
-            line(o, "Downhill Revived " + version + " log, shared " + LastExit.date(now.getTime()));
-            line(o, "phone: " + Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE
-                    + " (API " + Build.VERSION.SDK_INT + ")");
-            if (exit != null) {
-                line(o, "\n==== how the last run ended (Android's record) ====");
-                o.write(exit.getBytes(StandardCharsets.UTF_8));
-            }
-            section(o, ended, "the last run (" + ended.getName() + ")");
-            section(o, other, (running ? "this run, still going (" : "the run before it (") + other.getName() + ")");
+        String made;
+        try {
+            made = Native.logBundle(files.getPath(), dir.getPath(), version, Build.MANUFACTURER + " " + Build.MODEL
+                    + ", Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")", running);
         } catch (IOException e) {
             Log.w(TAG, "the shared log can't be written: " + e);
             return "The log couldn't be copied (" + e.getMessage() + ").";
         }
+        if (made == null) return "There is no log yet.";
+        File out = new File(made);
         Uri uri = LogProvider.uri(out);
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
@@ -115,16 +99,6 @@ final class LogShare {
         send.setClipData(ClipData.newRawUri(out.getName(), uri));  // the grant reaches the app chosen
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         return Intent.createChooser(send, "Share log");
-    }
-
-    private static void section(OutputStream o, File log, String title) throws IOException {
-        if (!log.isFile()) return;
-        line(o, "\n==== " + title + ", last written " + LastExit.date(log.lastModified()) + " ====");
-        CrashReport.copyLog(log, o, HEAD, TAIL);
-    }
-
-    private static void line(OutputStream o, String s) throws IOException {
-        o.write((s + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
     private static String version(Context context) {

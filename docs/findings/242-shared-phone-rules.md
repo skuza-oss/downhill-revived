@@ -17,7 +17,7 @@ and `port/ios/tests`. No run on the owner's phone (the lead checks it after the 
 ## Progress
 
 - [x] Part 1: the two test tools (and `replay_gs.py` in a worktree)
-- [ ] Part 2: one Share-log bundle (A08)
+- [x] Part 2: one Share-log bundle (A08)
 - [ ] Part 3: one disc-import rule set (A03)
 
 ## Decisions
@@ -39,6 +39,29 @@ and `port/ios/tests`. No run on the owner's phone (the lead checks it after the 
   local golden); `docs/TESTING.md` says when to run it.
 - **replay_gs.py**: refused every output in a worktree (`build/` is a junction, the prefix was
   resolved and the root was not); both sides are resolved now.
+
+- **Share log** (A08): `port/host/log_bundle.c` writes the file for both phones (Android:
+  `Native.logBundle` from `LogShare`; iOS: `shareLog` directly) and launcher.log's lines
+  (`launcher_log_line`, iOS's `llog`, Android's import steps from part 3). The platforms keep their
+  share sheets, the device's words, whether a game runs in this process (Android: a dhd.log written
+  since the process started; iOS: never, the launcher runs before the game) and the files they write
+  themselves (dhd-exit.txt: `LastExit.record`, `run_record.c`). The file: `Downhill Revived V log,
+  shared DATE`, `device: ...`, then dhd-exit.txt, launcher.log, the run that ended, the other run,
+  each `==== TITLE (NAME), last written DATE ====`; a log over 1792 KiB keeps its first 256 KiB and
+  last 1536 KiB with `[... N bytes left out ...]`, copied through one 64 KiB buffer.
+  `test_log_bundle.c` (test_runtime): header, order with and without a running game, missing files,
+  a long log's exact head, gap and tail, nothing to share, launcher.log's stamp and restart.
+  `CrashReport.copyLog` and its Java test went (the C test covers it).
+- **What changed in the file**, today's inputs:
+  - Android: `phone: ...` is now `device: ...`; the exit section is titled `how the last run ended
+    (dhd-exit.txt), last written DATE` (was `(Android's record)`, no date), its text read from the
+    file `LastExit.record` writes (the same text); launcher.log is new (part 3's import steps). The
+    logs' titles, order and trimming are as before.
+  - iOS: the header is the two lines above (was `Downhill Revived V on iOS X (iPhone)`); the device
+    line adds the model identifier (`uname`); sections carry titles and dates (were `==== NAME ====`);
+    a long log keeps its start too (was its last 1792 KiB only: the settings and device lines were
+    lost); logs are streamed (were read whole into memory); with no log at all an alert says "There
+    is no log yet." (was a header-only file).
 
 ## Surprises
 

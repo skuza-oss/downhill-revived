@@ -199,6 +199,12 @@ def host_tests():
                          ROOT / 'port/net/update_check.c', ROOT / 'port/net/json.c'])
     # the launcher's link rule, shared by the desktop, Android and iOS bridges (finding 235)
     run('launcher-link', [ROOT / 'port/host/test_launcher_link.c'])
+    # the phones' Share log file and launcher.log (finding 242)
+    bundle_dir = OUT / 'log-bundle'
+    for old in bundle_dir.glob('*'):
+        old.unlink()
+    bundle_dir.mkdir(exist_ok=True)
+    run('log-bundle', [ROOT / 'port/host/log_bundle.c', ROOT / 'port/host/test_log_bundle.c'], bundle_dir)
     # the iOS launcher's calls with a fake page, and the disc copy's rules (finding 227)
     calls_dir = OUT / 'launcher-calls'
     calls_dir.mkdir(exist_ok=True)

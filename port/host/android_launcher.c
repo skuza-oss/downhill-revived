@@ -7,9 +7,11 @@
      iso-check.txt (port/render/disc);
    - the update check: phone.c's phone_update_find (port/net/update_check.c's update_find over the
      same sources as the game's own notice, android_update.c, with the HTTPS client of port/net),
-     which the iOS launcher calls too (finding 227).
+     which the iOS launcher calls too (finding 227);
+   - Share log's file and launcher.log: log_bundle.c, as on iOS (finding 242).
    Nothing here touches SDL or starts the game: loading libmain.so runs only its constructors (the
    renderer's version line, the VU1 register pointer), and SDL_main is the game activity's. */
+#include <errno.h>
 #include <jni.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +21,7 @@
 #include "../include/version.h"
 #include "phone.h"
 #include "launcher_link.h"
+#include "log_bundle.h"
 #include "../render/include/dhd_limits.h"
 #include "../render/include/dhd_settings.h"
 #include "../render/include/dhd_disc.h"
@@ -184,4 +187,38 @@ EXPORT(jint, phoneScaleMax)(JNIEnv *env, jclass cls)
 {
     (void)env; (void)cls;
     return NATIVE_PHONE_SCALE_MAX;
+}
+
+/* Share log's file (log_bundle_write) written into out from the logs in files: its path, null when
+   there is no log at all; an IOException when it can't be written. */
+EXPORT(jstring, logBundle)(JNIEnv *env, jclass cls, jstring files, jstring out, jstring version, jstring device,
+                           jboolean running)
+{
+    (void)cls;
+    const char *f = utf(env, files), *o = utf(env, out), *v = utf(env, version), *d = utf(env, device);
+    jstring result = NULL;
+    if (f && o && v && d) {
+        char path[1024];
+        LogBundle b = {v, d, running ? 1 : 0};
+        int r = log_bundle_write(f, o, &b, path, sizeof path);
+        if (r == 0) {
+            result = (*env)->NewStringUTF(env, path);
+        } else if (r < 0) {
+            char why[160];
+            snprintf(why, sizeof why, "%s", strerror(errno));
+            jclass io = (*env)->FindClass(env, "java/io/IOException");
+            if (io) (*env)->ThrowNew(env, io, why);
+        }
+    }
+    done(env, files, f); done(env, out, o); done(env, version, v); done(env, device, d);
+    return result;
+}
+
+/* One line in files' launcher.log (the disc import's steps, log_bundle.h). */
+EXPORT(void, launcherLog)(JNIEnv *env, jclass cls, jstring files, jstring line)
+{
+    (void)cls;
+    const char *f = utf(env, files), *l = utf(env, line);
+    if (f && l) launcher_log_line(f, l);
+    done(env, files, f); done(env, line, l);
 }

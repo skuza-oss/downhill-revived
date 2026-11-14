@@ -1,14 +1,13 @@
 // Downhill Revived on Android: the crash report's plain rules (finding 152), without Android's
 // classes so a JVM test (port/android/test/CrashReportTest.java) runs them: which ways a run can end
 // count as "closed unexpectedly" and the few words a player reads for each, the system's trace of a
-// native crash (a tombstone: protobuf since Android 12, text before) as a short readable summary,
-// and a log copied into the shared file with its middle left out when it is long.
-// LastExit.java reads the system's record (ApplicationExitInfo) and LogShare.java builds the file.
+// native crash (a tombstone: protobuf since Android 12, text before) as a short readable summary.
+// LastExit.java reads the system's record (ApplicationExitInfo); Share log's file is the shared C's
+// (port/host/log_bundle.c, LogShare.java).
 package app.downhillrevived;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -320,34 +319,6 @@ final class CrashReport {
             f.seek(size - b.length);
             f.readFully(b);
             return new String(b, StandardCharsets.UTF_8);
-        }
-    }
-
-    // ---- the shared file ----
-
-    /** A log for the shared file: whole up to head + tail bytes, else its first head and last tail
-     *  bytes (a crash is at the end) with a line saying how much is left out. */
-    static void copyLog(File log, OutputStream out, long head, long tail) throws IOException {
-        try (RandomAccessFile f = new RandomAccessFile(log, "r")) {
-            long size = f.length();
-            if (size <= head + tail) {
-                copy(f, 0, size, out);
-                return;
-            }
-            copy(f, 0, head, out);
-            out.write(String.format(Locale.US, "\n[... %d bytes left out ...]\n", size - head - tail).getBytes(StandardCharsets.UTF_8));
-            copy(f, size - tail, tail, out);
-        }
-    }
-
-    private static void copy(RandomAccessFile f, long from, long n, OutputStream out) throws IOException {
-        byte[] buf = new byte[64 << 10];
-        f.seek(from);
-        while (n > 0) {
-            int got = f.read(buf, 0, (int) Math.min(buf.length, n));
-            if (got <= 0) break;
-            out.write(buf, 0, got);
-            n -= got;
         }
     }
 }

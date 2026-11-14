@@ -1,7 +1,7 @@
 // Downhill Revived on Android: the launcher's native calls (finding 225), in libmain.so
 // (port/host/android_launcher.c): the shared code of the settings (dhd_settings), the disc checks
-// (host.c, dhd_disc) and the update check (port/net/update_check.c), so the launcher keeps no copy of
-// them in Java. Loading the library starts no game: SDL_main is DhdActivity's.
+// (host.c, dhd_disc), the update check (port/net/update_check.c) and Share log's file
+// (port/host/log_bundle.c), so the launcher keeps no copy of them in Java. Loading the library starts no game: SDL_main is DhdActivity's.
 package app.downhillrevived;
 
 final class Native {
@@ -35,4 +35,10 @@ final class Native {
     static native int phoneScaleMax();
     /** This build's version. */
     static native String version();
+    /** Share log's file written into out from the logs in files (port/host/log_bundle.c): its path,
+     *  null when there is no log at all. running: a game runs in this process (dhd.log is its log). */
+    static native String logBundle(String files, String out, String version, String device, boolean running)
+            throws java.io.IOException;
+    /** One stamped line in files' launcher.log (the disc import's steps; Share log carries it). */
+    static native void launcherLog(String files, String line);
 }
