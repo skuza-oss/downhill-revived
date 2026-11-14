@@ -16,6 +16,9 @@ for the lead on a Mac. Matching sources and historical findings are out of scope
 - B01: removed four migration stand-ins. Verified the real inherent display accessors,
   upload and surface fill/read methods exist; Rust method resolution already chose these.
 
+- A09: removed the unread iOS release option and empty foreground forwarding trio;
+  configuration still follows `args.debug`, and other lifecycle callbacks remain. iOS unbuilt.
+
 ## Decisions
 
 Keep the real renderer methods and ordinary native probe timing. No new implementation.

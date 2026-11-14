@@ -325,7 +325,7 @@ class BuildTests(unittest.TestCase):
 
     def test_non_mac_compile_fails_clearly(self):
         with patch.object(build.sys, 'platform', 'linux'), \
-                patch.object(build.sys, 'argv', ['build_ios.py', '--release']), \
+                patch.object(build.sys, 'argv', ['build_ios.py']), \
                 patch.object(build, 'prepare_native_core') as native:
             with self.assertRaises(SystemExit) as raised:
                 build.main()

@@ -37,7 +37,6 @@ bool ios_game_is_active(void);
 /* Lifecycle notifications (the app delegate). */
 void ios_lifecycle_will_resign_active(void);
 void ios_lifecycle_did_enter_background(void);
-void ios_lifecycle_will_enter_foreground(void);
 void ios_lifecycle_did_become_active(void);
 
 #ifdef __cplusplus

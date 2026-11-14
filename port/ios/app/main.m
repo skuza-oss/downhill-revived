@@ -133,7 +133,6 @@ static UIWindow *app_window(void) { return ((AppDelegate *)UIApplication.sharedA
    each change, the memory card at each save); the next start says how it ended (run_record.h). */
 - (void)applicationWillResignActive:(UIApplication *)application { (void)application; ios_lifecycle_will_resign_active(); }
 - (void)applicationDidEnterBackground:(UIApplication *)application { (void)application; ios_lifecycle_did_enter_background(); }
-- (void)applicationWillEnterForeground:(UIApplication *)application { (void)application; ios_lifecycle_will_enter_foreground(); }
 - (void)applicationDidBecomeActive:(UIApplication *)application { (void)application; ios_lifecycle_did_become_active(); }
 
 @end
