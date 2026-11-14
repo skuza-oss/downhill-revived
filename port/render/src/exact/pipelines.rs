@@ -97,15 +97,6 @@ impl Pipelines {
     }
 }
 
-/// raster.wgsl as one module of `gpu`'s device (the cached one, or a new one; the caller checks
-/// errors). For the test hooks' `depth_probe`.
-pub fn raster_module(gpu: &Gpu) -> wgpu::ShaderModule {
-    if let Some(s) = with_entry(gpu, |e| e.shared.clone()) {
-        return s.module;
-    }
-    module(gpu)
-}
-
 // ---------------------------------------------------------------- the cache
 
 /// What one device shares across keys.

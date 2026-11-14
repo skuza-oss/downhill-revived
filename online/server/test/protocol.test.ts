@@ -6,7 +6,6 @@ import {
   isOutdated,
   minVersionOf,
   parseVersion,
-  isValidCode,
   measuredRtt,
   randomCode,
 } from "../src/protocol";
@@ -17,9 +16,8 @@ describe("join codes", () => {
     for (let i = 0; i < 200; i++) {
       const code = randomCode();
       expect(code).toHaveLength(6);
-      expect(isValidCode(code)).toBe(true);
+      for (const c of code) expect(CODE_ALPHABET).toContain(c);
     }
-    expect(isValidCode("ABC0EF")).toBe(false);
   });
 });
 

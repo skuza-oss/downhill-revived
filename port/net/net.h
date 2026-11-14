@@ -169,7 +169,6 @@ void net_set_room(const NetRoomSettings *s);       /* host */
 /* member -1: this PC. rider -1 (this PC): choosing a rider now, unready until the next pick. */
 void net_pick(int member, int rider, int bike);
 void net_set_ready(int ready);
-void net_kick(int member);                         /* host */
 void net_start_race(void);                         /* host; session: ready entrants */
 void net_end_race(void);                           /* host: back to the lobby */
 /* Session room calls. next_race: 0 auto, 1 host; then: 0 same, 1 next, 2 random. */
@@ -199,7 +198,6 @@ int net_riders_ms(void);
 /* ---- the race ---- */
 
 int net_racing(void);
-int net_local_slot(void);
 
 /* Race frames, carried by the Cloudflare Realtime SFU to every other racer (finding 158): a STATE
    bundle of riders this PC owns, an event it decided for another PC's rider. A frame is type, slot

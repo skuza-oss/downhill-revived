@@ -156,7 +156,6 @@ uint64_t web_q_call(uint32_t id, uint32_t wait, uint32_t flags, uint64_t a0, uin
     wait_until(at + 48);
     return WQ->result;
 }
-uint32_t web_q_vu_ready(void) { return vu_ready(); }
 
 /* worker.js's host_frame_context: the reactor's kernel_vsync_count (web_frame), in order. */
 __attribute__((export_name("web_q_frame"))) void web_q_frame(uint64_t field)

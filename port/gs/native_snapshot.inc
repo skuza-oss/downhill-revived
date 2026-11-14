@@ -7,13 +7,8 @@
    Rust path is given.
 
    Included after native_core.inc (it needs Native, NativeFrame and native_oom) and after
-   dhd_render.h. A texture becomes a DhdrTexture pointer through two macros the includer may
-   define first:
-     NATIVE_SNAPSHOT_TEXTURE(t)  t a NativeTexture * (never NULL); default (t)->gpu, the Rust
-                                 path's NATIVE_TEXTURE_GPU member;
-     NATIVE_SNAPSHOT_VIEW(v)     v a NativeView (never NULL); default (DhdrTexture *)(v), as the
-                                 Rust path's NativeView is a DhdrTexture *.
-   (The C path's recorder passed its own handles there and mapped them to texture contents itself.)
+   dhd_render.h. A NativeTexture becomes a DhdrTexture pointer as its `gpu` member; a NativeView
+   is a DhdrTexture * already.
 
    Render thread, under the context lock, after native_prepare_surfaces: the surface snapshot
    holds each surface's scale and texture size as the picture's commands will see them. The
@@ -21,13 +16,6 @@
    DHD_INTERP-mixed) and the frame's pixel and movie buffers: it is valid until the next
    native_snapshot on the same NativeSnapshot or until the frame is recycled, whichever comes
    first. No GPU work, no allocation once the arrays have grown to the largest field. */
-
-#ifndef NATIVE_SNAPSHOT_TEXTURE
-#define NATIVE_SNAPSHOT_TEXTURE(t) ((t)->gpu)
-#endif
-#ifndef NATIVE_SNAPSHOT_VIEW
-#define NATIVE_SNAPSHOT_VIEW(v) ((DhdrTexture *)(v))
-#endif
 
 /* The vertices go through as they are, and the uniform blocks are copied whole: their layouts
    must be the same. */
@@ -77,7 +65,7 @@ typedef struct NativeSnapshot {
 
 static DhdrTexture *native_snapshot_texture(const NativeTexture *t)
 {
-    return t ? NATIVE_SNAPSHOT_TEXTURE(t) : NULL;
+    return t ? ((t)->gpu) : NULL;
 }
 
 /* One command, field by field (the order differs and the pointers change type); pads zero. */
@@ -94,7 +82,7 @@ static void native_snapshot_command(DhdrCommand *d, const NativeCommand *k)
     d->source = k->source;
     d->x = k->x; d->y = k->y; d->w = k->w; d->h = k->h; d->sx = k->sx; d->sy = k->sy;
     d->texture = native_snapshot_texture(k->texture);
-    d->replacement = k->replacement ? NATIVE_SNAPSHOT_VIEW(k->replacement) : NULL;
+    d->replacement = k->replacement ? ((DhdrTexture *)(k->replacement)) : NULL;
     d->pixels = k->kind == NATIVE_IMPORT || k->kind == NATIVE_ALPHA_UPLOAD ? k->pixels : NULL;
 }
 
@@ -150,11 +138,4 @@ static const DhdrPicture *native_snapshot(NativeSnapshot *s, const Native *n, co
     p->surfaces = s->surfaces;
     p->movie = p->movie_on ? f->movie : NULL;
     return p;
-}
-
-static void native_snapshot_free(NativeSnapshot *s)
-{
-    free(s->commands);
-    free(s->converts);
-    memset(s, 0, sizeof *s);
 }

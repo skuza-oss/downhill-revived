@@ -179,7 +179,6 @@ int net_list_lobbies(NetLobbyInfo *out, int max)
 void net_set_room(const NetRoomSettings *s) { client_set_room(&client, s); }
 void net_pick(int member, int rider, int bike) { client_pick(&client, member, rider, bike); }
 void net_set_ready(int ready) { client_ready(&client, ready); }
-void net_kick(int member) { client_kick(&client, member); }
 void net_start_race(void) { client_start(&client); }
 void net_end_race(void) { client_end(&client); }
 void net_finish(unsigned ticks, int place, int score) { client_finish(&client, ticks, place, score); }
@@ -231,11 +230,6 @@ int net_riders_ms(void)
 int net_racing(void)
 {
     return inited && client.racing;
-}
-
-int net_local_slot(void)
-{
-    return client.lobby.local_slot;
 }
 
 

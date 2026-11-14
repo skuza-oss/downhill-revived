@@ -968,13 +968,6 @@ void client_ready(NetClient *c, int ready)
     SDL_UnlockMutex(c->lock);
 }
 
-void client_kick(NetClient *c, int member)
-{
-    SDL_LockMutex(c->lock);
-    say(c, "{\"type\":\"kick\",\"member\":%d}", member);
-    SDL_UnlockMutex(c->lock);
-}
-
 void client_start(NetClient *c)
 {
     SDL_LockMutex(c->lock);

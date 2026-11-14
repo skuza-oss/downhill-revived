@@ -273,6 +273,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 241 | [Adreno 505 device loss after the menus start](241-adreno-505-stop.md) | current |  |
 | 242 | [Two test tools fixed, one Share-log builder, one phone disc-import rule set](242-shared-phone-rules.md) | current |  |
 | 243 | [Rider tent close on a Helio P35 phone](243-rider-tent-crash.md) | current |  |
+| 244 | [remove the dead code the C audit proved](244-dead-code-c.md) | current |  |
 | 245 | [Bluetooth pad after Android room-code entry](245-pad-after-room-code.md) | current |  |
 | 246 | [Phone SFU fallback and network return](246-phone-online-links.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
