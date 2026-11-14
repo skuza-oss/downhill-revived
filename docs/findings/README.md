@@ -271,6 +271,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 239 | [Slow phones start at suitable graphics settings](239-slow-phone-defaults.md) | current |  |
 | 240 | [iOS: the disc reachable without the picker's hand-over](240-ios-disc-pick.md) | current |  |
 | 241 | [Adreno 505 device loss after the menus start](241-adreno-505-stop.md) | current |  |
+| 244 | [remove the dead code the C audit proved](244-dead-code-c.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

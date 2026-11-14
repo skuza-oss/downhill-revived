@@ -135,7 +135,6 @@ int client_tick(NetClient *c);
 void client_set_room(NetClient *c, const NetRoomSettings *s);
 void client_pick(NetClient *c, int member, int rider, int bike);
 void client_ready(NetClient *c, int ready);
-void client_kick(NetClient *c, int member);
 void client_start(NetClient *c);
 void client_end(NetClient *c);
 void client_finish(NetClient *c, unsigned ticks, int place, int score);
