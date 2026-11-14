@@ -209,6 +209,9 @@ int graphics_deferred(void);
 void graphics_vblank(void);
 void graphics_present(const void *payload, unsigned bytes);
 extern void (*graphics_present_marked)(const void *payload);
+/* present.c (finding 236): called from the game thread's waits for the drawing (graphics_queue.c),
+   so a phone's app that left the screen meanwhile waits there; `where` names the wait. */
+extern void (*graphics_away_wait)(const char *where);
 
 /* ---- sif.c: RPC servers (one per IOP module server id) ---- */
 typedef void (*RpcServer)(int fno, void *send, int ssize, void *recv, int rsize);

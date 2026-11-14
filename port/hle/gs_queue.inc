@@ -138,8 +138,10 @@ void graphics_gs_wait(void)
         return;
     uint32_t target = gs_position(&gs_written);
     uint32_t observed;
-    while ((int32_t)((observed = gs_position(&gs_consumed)) - target) < 0)
+    while ((int32_t)((observed = gs_position(&gs_consumed)) - target) < 0) {
+        away_turn("a wait for the GS");
         idle_wait(&gs_consumed, observed, &gs_waiting, gs_retired, 1, NULL);
+    }
 }
 static void gs_queue_shutdown(void)
 {
