@@ -53,10 +53,13 @@ pub const READY_TIMEOUT: Duration = Duration::from_millis(8_000);
 /// An offer the room never answers (it refused it: too many sessions) fails the association this
 /// long after it was made; the send thread offers again later.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
-/// An answered association that asked for TURN and has neither connected nor a relay in flight
-/// (the relay was refused, or the room minted no credentials) fails this long after the answer;
-/// until then its UDP attempt goes on. A phone whose UDP took over 2 s got a TURN 400 each time
-/// and lost the UDP attempt with it, six sessions in a minute (finding 246).
+/// An answered association that asked for TURN (or whose UDP failed) and has not connected fails
+/// this long after the answer, a relay still up included; until then its UDP attempt goes on. A
+/// phone whose UDP took over 2 s got a TURN 400 each time and lost the UDP attempt with it, six
+/// sessions in a minute (finding 246). A relay that allocated and bound but never carried the
+/// SFU's answer kept such an association waiting for ever, its refreshes keeping it alive, no
+/// new session tried (finding 248's review); it fails here too, and the send thread's retry with
+/// its growing pause goes on.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// A released race whose other racers sent this game nothing this long after the race's start
 /// moment (and its release) has a silent race link (finding 187). The moment is the countdown's
@@ -245,8 +248,6 @@ pub struct Sfu {
     reports: Vec<Value>,
     /// A datagram came back from the SFU through the relay (else a bound relay failed at first data).
     relay_heard: bool,
-    /// The not-connected line at CONNECT_TIMEOUT with a relay still trying was said.
-    stuck_said: bool,
     /// Tests: every direct UDP send fails with this error, as on a network that refuses UDP.
     #[cfg(test)]
     fail_udp_send: Option<ErrorKind>,
@@ -467,7 +468,7 @@ impl Sfu {
             connected: false, announced: false, released: false, released_at: None, go_at: None, heard: false, silent_said: false, drop_all_in,
             drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(), p2p: None,
             wake, direct, turn_allowed, answered_at: None, connected_at: None, lost_since: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
-            udp_failure: None, turn_failure: None, udp_reported: false, turn_reported: false, reports: vec![], relay_heard: false, stuck_said: false,
+            udp_failure: None, turn_failure: None, udp_reported: false, turn_reported: false, reports: vec![], relay_heard: false,
             #[cfg(test)] fail_udp_send: None,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
@@ -900,25 +901,17 @@ impl Sfu {
             return Err("SFU path no longer answers ICE checks".into());
         }
         if !self.connected && (self.turn_asked || self.udp_failure.is_some()) && self.answered_at.is_some_and(|t| t.elapsed() >= CONNECT_TIMEOUT) {
-            if self.relay.is_none() {
-                // Nothing left trying: each path's failure, reported if it wasn't, and one line.
-                let udp = self.udp_failure.unwrap_or(Failure::new(Path::Udp, Step::Connect, Kind::NoAnswer));
-                let turn = self.turn_failure.unwrap_or(Failure::new(Path::Turn, if self.turn_at.is_none() { Step::Credentials } else { Step::Connect }, Kind::NoAnswer));
-                self.note(udp);
-                self.note(turn);
-                return Err(self.no_path(udp, turn).into());
-            }
-            if !self.stuck_said {
-                // A relay still up that never connected: said and reported once; it keeps trying,
-                // as it did before (a new session would cost the room's session budget).
-                self.stuck_said = true;
-                let udp = self.udp_failure.unwrap_or(Failure::new(Path::Udp, Step::Connect, Kind::NoAnswer));
-                let turn = Failure::new(Path::Turn, self.relay_stage(), Kind::NoAnswer);
-                self.note(udp);
-                self.note(turn);
-                eprintln!("net: SFU: not connected {} s after the answer: {}; {}; the relay keeps trying",
-                    CONNECT_TIMEOUT.as_secs(), udp.line(), turn.line());
-            }
+            // Nothing connected in time: each path's failure, reported if it wasn't, and one line.
+            // A relay still up timed out at the stage it reached (first_data: allocated and bound,
+            // nothing back from the SFU).
+            let udp = self.udp_failure.unwrap_or(Failure::new(Path::Udp, Step::Connect, Kind::NoAnswer));
+            let turn = match self.relay {
+                Some(_) => Failure::new(Path::Turn, self.relay_stage(), Kind::Timeout),
+                None => self.turn_failure.unwrap_or(Failure::new(Path::Turn, if self.turn_at.is_none() { Step::Credentials } else { Step::Connect }, Kind::NoAnswer)),
+            };
+            self.note(udp);
+            self.note(turn);
+            return Err(self.no_path(udp, turn).into());
         }
         text.append(&mut self.reports);
         Ok((text, frames))
@@ -941,9 +934,10 @@ impl Sfu {
         format!("no path to the SFU: {}; {}", udp.line(), turn.line())
     }
 
-    /// How far a relay still up got: allocated, bound, heard from the SFU.
+    /// How far a relay still up got: its TLS link, allocated, bound, heard from the SFU.
     fn relay_stage(&self) -> Step {
         match self.relay.as_ref() {
+            Some(r) if !r.link.ready() => Step::TlsConnect,
             Some(r) if r.relayed.is_none() => Step::Allocate,
             Some(r) if !r.client.bound() => Step::ChannelBind,
             Some(_) if !self.relay_heard => Step::FirstData,
@@ -1479,31 +1473,48 @@ mod tests {
         }
     }
 
-    /// A relay that is up but never brings anything back from the SFU: at CONNECT_TIMEOUT the
-    /// stage it reached is said and reported once (first_data), and it keeps trying.
+    /// A failed UDP send and a relay that allocates and binds but never brings the SFU's answer
+    /// (finding 248's review): at CONNECT_TIMEOUT the attempt ends with one line naming both paths
+    /// (TURN at first_data, timeout), each path is reported, and the send thread's retry is set
+    /// with its growing pause, as for any failed attempt.
     #[test]
-    fn a_silent_relay_is_reported_at_its_stage() {
+    fn a_silent_relay_ends_the_attempt_and_a_retry_follows() {
         let (_sfu, mut client) = LocalSfu::start();
-        client.direct = false;
-        client.turn_asked = true;
-        client.relay = Some(LocalTurn::relay());
-        client.turn_at = Some(Instant::now());
+        client.fail_udp_send = Some(ErrorKind::PermissionDenied);
         let mut turn = LocalTurn::start();
         turn.server.drop_peer_data = true;
+        let mut text = vec![];
         let until = Instant::now() + Duration::from_secs(5);
         while Instant::now() < until && !(client.relay.as_ref().is_some_and(|r| r.client.bound())) {
-            client.poll().unwrap();
+            text.extend(client.poll().unwrap().0);
+            if client.turn_asked && client.relay.is_none() {
+                client.relay = Some(LocalTurn::relay());
+                client.turn_at = Some(Instant::now());
+            }
             turn.pump(&mut client);
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(client.relay.as_ref().is_some_and(|r| r.client.bound()), "allocated and bound");
+        // Just before the deadline it still waits; at it, the attempt ends.
+        client.answered_at = Some(Instant::now() - CONNECT_TIMEOUT + Duration::from_secs(1));
+        text.extend(client.poll().unwrap().0);
         client.answered_at = Some(Instant::now() - CONNECT_TIMEOUT);
-        let (text, _) = client.poll().unwrap();
-        let reports: Vec<&Value> = text.iter().filter(|m| m["type"] == "sfu_trouble").collect();
-        assert!(reports.iter().any(|m| m["path"] == "turn" && m["step"] == "first_data" && m["kind"] == "no_answer"), "{reports:?}");
-        let (text, _) = client.poll().unwrap();
-        assert!(text.iter().all(|m| m["type"] != "sfu_trouble"), "once");
-        assert!(client.relay.is_some(), "the relay keeps trying");
+        let error = client.poll().err().map(|e| e.to_string());
+        assert_eq!(error.as_deref(), Some("no path to the SFU: UDP failed at send (denied); TURN failed at first_data (timeout)"));
+        text.extend(client.take_reports());
+        let reports: Vec<(&str, &str, &str)> = text.iter().filter(|m| m["type"] == "sfu_trouble")
+            .map(|m| (m["path"].as_str().unwrap(), m["step"].as_str().unwrap(), m["kind"].as_str().unwrap())).collect();
+        assert_eq!(reports, vec![("udp", "send", "denied"), ("turn", "first_data", "timeout")]);
+        // What the send thread does with that error (lib.rs poll's Err): the association goes,
+        // a new one is due after the pause, and the pause after that doubles.
+        let mut assoc = crate::Assoc::new();
+        assoc.sfu = Some(client);
+        let before = Instant::now();
+        assoc.failed();
+        assert!(assoc.sfu.is_none());
+        let at = assoc.retry_at.expect("a retry is scheduled");
+        assert!(at >= before + Duration::from_secs(1) && at <= Instant::now() + Duration::from_secs(1), "after the 1 s pause");
+        assert_eq!(assoc.pause, Duration::from_secs(2));
     }
 
     #[test]

@@ -301,7 +301,7 @@ struct Assoc {
     /// The room's welcome lists "sfu_silent": it takes a silent race link's report (finding 187).
     silent_ok: bool,
     /// The room's welcome lists "sfu_trouble": it takes a failed path's report (finding 248). A
-    /// server without it closes the connection on a message type it doesn't know.
+    /// server without it answers the report with an error ("Unknown signaling message.").
     trouble_ok: bool,
     /// The running race's clock on this PC (sfu::race_clock, from its first start message; a rejoin
     /// keeps it) and its start moment on it (race_go, finding 187): every association in the race
@@ -311,6 +311,11 @@ struct Assoc {
 }
 
 impl Assoc {
+    /// No association yet: the first one starts at once, a failed one's pause starts at 1 s.
+    fn new() -> Self {
+        Self { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None,
+            silent_ok: false, trouble_ok: false, race_clock: None, go: None }
+    }
     /// A new association (its offer replaces any session the room has for this member), given the
     /// running race if there is one.
     fn start(&mut self, c: &WsConn, wake: &sfu::Wake) -> Result<(), Box<dyn std::error::Error>> {
@@ -383,7 +388,7 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
-    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None, silent_ok: false, trouble_ok: false, race_clock: None, go: None };
+    let mut a = Assoc::new();
     // A room's welcome came on this connection: an association belongs here.
     let mut welcomed = false;
     // A P2P room (finding 186): its star, made by the first welcome that says so; it outlives a
