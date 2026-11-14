@@ -188,8 +188,10 @@ device, which you do while installing it with a sideloading tool on your compute
 (AltStore, SideStore or Sideloadly, with your own Apple ID; a free Apple ID's install runs for 7
 days and then has to be refreshed by the tool, a paid developer account's for a year). The app is
 not on the App Store. The app opens into the launcher, as on Android: choose your `.iso` there
-(from Files, iCloud Drive or a USB drive); it is copied into the app once (a few GB); an `.iso` you
-copied into Files > On My iPhone > Downhill Revived is moved into place instead. Then PLAY. Play
+(from Files, iCloud Drive or a USB drive); it is copied into the app once (a few GB). If choosing
+does nothing (some signing tools break the picker), move the `.iso` into Files > On My iPhone >
+Downhill Revived under any name, or open it there with Share > Downhill Revived: the launcher finds
+it and moves it into place. Then PLAY. Play
 with the touch controls or a controller (MFi, Xbox, PlayStation); the button names follow what you
 use last (touch until a controller is used). Settings, saves, the disc copy and `dhd.log` are in
 that same Files folder. In the menus, a swipe in from the left edge is Back (iOS has no Back button);

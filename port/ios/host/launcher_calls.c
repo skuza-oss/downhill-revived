@@ -22,7 +22,7 @@
 const char *host_disc_check(const char *path);  /* host.c: NULL when path is the game */
 
 const char LAUNCHER_IOS_CAPS[] =
-    "[\"touch-settings\",\"disc-import\",\"direct-start\",\"share-log\",\"help\",\"touch-editor\"]";
+    "[\"touch-settings\",\"disc-import\",\"direct-start\",\"share-log\",\"help\",\"touch-editor\",\"files-folder\"]";
 
 static char last_exit[256];   /* said once (launcher_set_last_exit) */
 

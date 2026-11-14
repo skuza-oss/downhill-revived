@@ -104,19 +104,31 @@ static UIWindow *app_window(void) { return ((AppDelegate *)UIApplication.sharedA
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    (void)application; (void)options;
+    (void)application;
     const char *why = ios_run_record_start();   /* how the run before ended: dhd-exit.txt, the note */
     launcher_set_last_exit(why);
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.backgroundColor = UIColor.blackColor;
     const char *direct = getenv("DHD_IOS_DIRECT");
-    if ((direct && atoi(direct)) || (!why && launcher_should_start_game())) {
+    BOOL opening = options[UIApplicationLaunchOptionsURLKey] != nil;   /* started to open a document: the launcher takes it */
+    if ((direct && atoi(direct)) || (!why && !opening && launcher_should_start_game())) {
         [self.window makeKeyAndVisible];
         app_play(0, 0);
     } else {
         self.window.rootViewController = launcher_view_controller();
         [self.window makeKeyAndVisible];
     }
+    return YES;
+}
+
+/* "Open in Downhill Revived" from Files' share sheet (Info.plist's .iso document type, finding 240):
+   in place (LSSupportsOpeningDocumentsInPlace) or a copy in Documents/Inbox; the launcher imports
+   it as a picked file. While the game runs the launcher is not there: a copy in Inbox is found by
+   the launcher's look at the app's folder next time. */
+- (BOOL)application:(UIApplication *)application openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey, id> *)options {
+    (void)application; (void)options;
+    if (!url.isFileURL) return NO;
+    launcher_open_document(url);
     return YES;
 }
 

@@ -26,6 +26,7 @@
   "home.first.step1": "Elige la imagen del disco",
   "home.first.step1Hint": "Cualquier carpeta; el archivo se queda donde está",
   "home.first.step1HintImport": "Necesita unos 2,5 GB libres. Libres ahora: {free}.",
+  "home.first.filesFolder": "O mueve el .iso a Archivos > En mi iPhone > Downhill Revived, con cualquier nombre.",
   "home.first.step2": "Corre",
   "home.first.step2Hint": "El botón Jugar aparece abajo en cuanto se comprueba el disco",
   "home.played.hours": "Tiempo jugado: {hours} h {minutes} min",

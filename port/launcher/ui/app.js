@@ -188,7 +188,9 @@ function renderHome() {
     $('first-lead').replaceChildren(...tNodes(has('disc-import') ? 'home.first.leadImport' : 'home.first.lead'));
     const step = $('first-step');
     const hint = has('disc-import') ? t('home.first.step1HintImport', { free: gb(state.freeSpace) }) : t('home.first.step1Hint');
-    step.replaceChildren(...withLink(state.discProblem || hint));
+    // iOS: an .iso put in the app's folder in Files under any name is found by itself (finding 240)
+    const folder = has('files-folder') ? [el('br'), t('home.first.filesFolder')] : [];
+    step.replaceChildren(...withLink(state.discProblem || hint), ...folder);
     step.classList.toggle('bad', !!state.discProblem);
   } else {
     const r = state.update?.release;

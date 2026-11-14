@@ -26,6 +26,7 @@
   "home.first.step1": "选择光盘镜像",
   "home.first.step1Hint": "任意文件夹；文件留在原处",
   "home.first.step1HintImport": "需要约 2.5 GB 可用空间。当前可用：{free}。",
+  "home.first.filesFolder": "也可以把 .iso 移到“文件”>“我的 iPhone”>“Downhill Revived”中，文件名不限。",
   "home.first.step2": "出发",
   "home.first.step2Hint": "光盘检查通过后，下方会出现“开始游戏”按钮",
   "home.played.hours": "游戏时长：{hours} 小时 {minutes} 分钟",

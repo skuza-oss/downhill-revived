@@ -93,7 +93,8 @@ int main(int argc, char **argv)
     char text[512];
     assert(json_int(a, "id", &n) && n == 1 && json_bool(a, "ok", &b) && b);
     assert(json_string(a, "value.version", text, sizeof text) && !strcmp(text, "0.8.0"));
-    assert(json_count(a, "value.caps") == 6 && json_string(a, "value.caps[5]", text, sizeof text) && !strcmp(text, "touch-editor"));
+    assert(json_count(a, "value.caps") == 7 && json_string(a, "value.caps[5]", text, sizeof text) && !strcmp(text, "touch-editor"));
+    assert(json_string(a, "value.caps[6]", text, sizeof text) && !strcmp(text, "files-folder"));
     assert(json_is_null(a, "value.disc_problem") && json_is_null(a, "value.last_exit"));
     assert(json_int(a, "value.scale_max", &n) && n == 6 && json_int(a, "value.disc_size", &n) && n == 0);
     assert(json_string(a, "value.settings.fps", text, sizeof text) && !strcmp(text, "60"));

@@ -5,6 +5,15 @@
    view and its one origin, the bridge's transport, the document picker and the disc's copy (its
    rules: disc_copy.c, host_disc_check), the share sheet, links, and PLAY.
 
+   The disc reaches the one import (startImport:, job_run) three ways (finding 240): the picker; a
+   file opened in the app from another (Files' share sheet: "Open in", launcher_open_document); and
+   an .iso under any name the player put in the app's folder (Files > On My iPhone > Downhill
+   Revived, or its Inbox), looked for when the page has opened and each time the app comes back to
+   the front while no accepted SCUS-97177.iso is there (lookForDisc). A third-party signer or a
+   container may break the picker's hand-over (LiveContainer has a "Fix File Picker" switch for it);
+   the other two need none. Every step goes to Documents/launcher.log, which Share log includes:
+   names only, no path outside the app's folder.
+
    The page is the app's own and nothing else: the web view loads only dhd-launcher://app/..., served
    from the app's launcher/ folder with the content security policy Android's launcher sends; every
    other request gets 403 and no navigation leaves the page. The bridge: bridge_ios.js, injected at
@@ -21,6 +30,7 @@
 #import <WebKit/WebKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <time.h>
@@ -49,6 +59,40 @@ static void log_test(NSString *line) {
     FILE *f = fopen(path.fileSystemRepresentation, "a");
     if (f) { fprintf(f, "%s\n", line.UTF8String); fclose(f); }
     NSLog(@"launcher: %@", line);
+}
+
+/* launcher.log: the picker's and the import's steps (Share log includes it). One file, started
+   again past 256 KB; a file outside the app's folder is named by its last component only. */
+static void llog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
+static void llog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *line = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    NSLog(@"launcher: %@", line);
+    static dispatch_once_t once;
+    static NSString *path;
+    dispatch_once(&once, ^{
+        path = [[NSString stringWithUTF8String:ios_documents_dir()] stringByAppendingPathComponent:@"launcher.log"];
+    });
+    @synchronized (path) {
+        struct stat st;
+        FILE *f = fopen(path.fileSystemRepresentation, stat(path.fileSystemRepresentation, &st) == 0 && st.st_size > (256 << 10) ? "w" : "a");
+        if (!f) return;
+        time_t now = time(NULL);
+        char stamp[32];
+        strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", localtime(&now));
+        fprintf(f, "%s %s\n", stamp, line.UTF8String);
+        fclose(f);
+    }
+}
+
+/* A file's name for the log: its place inside the app's folder, else its last component. */
+static NSString *shown(NSURL *url) {
+    NSString *home = [[NSString stringWithUTF8String:ios_documents_dir()] stringByResolvingSymlinksInPath];
+    NSString *path = url.URLByResolvingSymlinksInPath.path;
+    if ([path hasPrefix:[home stringByAppendingString:@"/"]]) return [path substringFromIndex:home.length + 1];
+    return url.lastPathComponent ?: @"?";
 }
 
 static NSString *gb(uint64_t bytes) { return [NSString stringWithFormat:@"%.1f GB", bytes / (double)(1ull << 30)]; }
@@ -92,6 +136,7 @@ static NSString *gb(uint64_t bytes) { return [NSString stringWithFormat:@"%.1f G
 @property (nonatomic) long long number;
 @property (nonatomic) long long generation;   /* disc_publish's: it lands only while the newest */
 @property (nonatomic, strong) NSURL *url;
+@property (atomic) BOOL ended;   /* job_run returned: a new import may start without replacing it */
 @end
 @implementation DiscJob
 @end
@@ -105,6 +150,7 @@ static void job_event(DiscJob *job, NSString *stage, NSString *extra) {
 }
 
 static void job_problem(DiscJob *job, const char *coded_or_text, int coded) {
+    llog(@"import %lld: problem: %s", job.number, coded_or_text);
     if (coded) {
         job_event(job, @"problem", [NSString stringWithFormat:@",\"problem\":%s", coded_or_text]);
     } else {
@@ -131,6 +177,11 @@ static void job_run(DiscJob *job) {
     NSString *docs = [NSString stringWithUTF8String:ios_documents_dir()];
     NSString *disc = [docs stringByAppendingPathComponent:@"SCUS-97177.iso"];
     BOOL scoped = [job.url startAccessingSecurityScopedResource];
+    NSNumber *bytes = nil;
+    [job.url getResourceValue:&bytes forKey:NSURLFileSizeKey error:nil];
+    llog(@"import %lld: %@, %@, security-scoped access %@", job.number, shown(job.url),
+         bytes ? [NSString stringWithFormat:@"%llu bytes", bytes.unsignedLongLongValue] : @"size unknown",
+         scoped ? @"granted" : @"not granted");
     job_event(job, @"checking", nil);
     __block NSError *coordination = nil;
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
@@ -160,6 +211,7 @@ static void job_run(DiscJob *job) {
                 }
             }
             remove([docs stringByAppendingPathComponent:@"iso-check.txt"].fileSystemRepresentation);
+            llog(@"import %lld: done: moved into place in the app's folder (%llu bytes)", job.number, size);
             job_event(job, @"done", [NSString stringWithFormat:@",\"deletable\":false,\"size\":%llu", size]);
             return;
         }
@@ -201,7 +253,7 @@ static void job_run(DiscJob *job) {
             bad = disc_completeness((uint64_t)copied, size, volume, why, sizeof why);
         }
         if (bad) {
-            NSLog(@"launcher: the disc's copy: %s (%lld bytes)", bad, copied);
+            llog(@"import %lld: the copy: %s (%lld bytes)", job.number, bad, copied);
             remove(temp.fileSystemRepresentation);
             job_problem(job, bad, 0);
             return;
@@ -216,17 +268,61 @@ static void job_run(DiscJob *job) {
             return;
         }
         remove([docs stringByAppendingPathComponent:@"iso-check.txt"].fileSystemRepresentation);  /* the old file's answer */
-        NSLog(@"launcher: disc image copied: %lld bytes, checked", copied);
+        llog(@"import %lld: done: copied and checked (%lld bytes)", job.number, copied);
         job_event(job, @"done", [NSString stringWithFormat:@",\"deletable\":%@,\"size\":%lld",
                                  job_deletable(job.url) ? @"true" : @"false", copied]);
     }];
     if (coordination) {
+        llog(@"import %lld: the file can't be read: %@ (%@ %ld)", job.number, coordination.localizedDescription,
+             coordination.domain, (long)coordination.code);
         char coded[600];
         launcher_coded(coded, sizeof coded, "disc.problem.openFailed", "detail", coordination.localizedDescription.UTF8String,
                        (const char *)NULL);
         job_problem(job, coded, 1);
     }
     if (scoped) [job.url stopAccessingSecurityScopedResource];
+    job.ended = YES;
+}
+
+/* ---- the app's folder: an .iso the player put there under any name (finding 240) ---- */
+
+/* What failed the check, by its place in the folder: "size mtime" (not checked again unchanged). */
+static NSMutableDictionary<NSString *, NSString *> *s_failed;
+
+/* The import to start, or nil: nil when SCUS-97177.iso is there and accepted. The newest .iso
+   (any case) in Documents or Documents/Inbox that passes host_disc_check; when none passes, the
+   newest one that failed for the first time (its import says the page's problem once). */
+static NSURL *folder_disc(void) {
+    NSString *docs = [NSString stringWithUTF8String:ios_documents_dir()];
+    NSString *disc = [docs stringByAppendingPathComponent:@"SCUS-97177.iso"];
+    struct stat st;
+    if (stat(disc.fileSystemRepresentation, &st) == 0 && !host_disc_check(disc.fileSystemRepresentation)) return nil;
+    if (!s_failed) s_failed = [NSMutableDictionary dictionary];
+    NSString *good = nil, *fresh = nil;
+    time_t good_time = 0, fresh_time = 0;
+    for (NSString *folder in @[@"", @"Inbox"]) {
+        NSString *dir = [docs stringByAppendingPathComponent:folder];
+        for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil]) {
+            if ([name hasPrefix:@"."] || ![name.pathExtension.lowercaseString isEqualToString:@"iso"]) continue;
+            NSString *place = folder.length ? [folder stringByAppendingPathComponent:name] : name;
+            if ([place isEqualToString:@"SCUS-97177.iso"]) continue;   /* there and refused above */
+            NSString *path = [dir stringByAppendingPathComponent:name];
+            if (stat(path.fileSystemRepresentation, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+            NSString *stamp = [NSString stringWithFormat:@"%lld %lld", (long long)st.st_size, (long long)st.st_mtime];
+            if ([s_failed[place] isEqualToString:stamp]) continue;
+            const char *problem = host_disc_check(path.fileSystemRepresentation);
+            if (problem) {
+                llog(@"folder: %@ (%lld bytes) is not the disc: %s", place, (long long)st.st_size, problem);
+                s_failed[place] = stamp;
+                if (!fresh || st.st_mtime > fresh_time) { fresh = path; fresh_time = st.st_mtime; }
+            } else if (!good || st.st_mtime > good_time) {
+                good = path;
+                good_time = st.st_mtime;
+            }
+        }
+    }
+    if (good) return [NSURL fileURLWithPath:good];
+    return fresh ? [NSURL fileURLWithPath:fresh] : nil;
 }
 
 /* ---- the page ---- */
@@ -237,6 +333,9 @@ static void job_run(DiscJob *job) {
 @property (nonatomic, strong) DiscJob *job;
 @property (nonatomic) int picking;   /* the pick_disc call waiting for the picker, 0 none */
 @property (nonatomic) BOOL loaded;
+@property (nonatomic) BOOL ready;      /* the page listens to events (its first check_update since it loaded) */
+@property (nonatomic) BOOL looking;    /* lookForDisc's scan runs */
+@property (nonatomic, strong) NSURL *opened;   /* a document opened in the app before the page listened */
 @end
 
 @implementation LauncherViewController
@@ -278,6 +377,47 @@ static void job_run(DiscJob *job) {
 /* back from the share sheet, the picker or a browser: the page reads the settings again */
 - (void)resumed {
     if (self.loaded && self.view.window) launcher_event(&s_host, "resumed", NULL);
+    if (self.ready && self.view.window) [self lookForDisc:@"back in front"];
+}
+
+/* An import may start without replacing one: none runs, the picker is not waiting. */
+- (BOOL)importFree { return (!self.job || self.job.ended) && !self.picking; }
+
+/* The app's folder looked at (folder_disc) off the main thread; what it finds goes through the import. */
+- (void)lookForDisc:(NSString *)when {
+    if (self.looking || ![self importFree]) return;
+    self.looking = YES;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSURL *found = folder_disc();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.looking = NO;
+            if (!found || ![self importFree]) return;
+            llog(@"folder (%@): importing %@", when, shown(found));
+            [self startImport:found];
+        });
+    });
+}
+
+/* The page is ready for events: a document opened before it, else the folder. */
+- (void)pageReady {
+    if (self.ready) return;
+    self.ready = YES;
+    NSURL *opened = self.opened;
+    self.opened = nil;
+    if (opened) [self startImport:opened];
+    else [self lookForDisc:@"launcher opened"];
+}
+
+/* "Open in Downhill Revived" (main.m's openURL): in place, or a copy in Documents/Inbox (moved
+   into place by the import, not copied again). */
+- (void)openDocument:(NSURL *)url {
+    if (!self.ready) { self.opened = url; return; }
+    if (self.picking) {   /* the picker's call ends here: this document is the choice */
+        launcher_answer(&s_host, self.picking, 1, NULL);
+        self.picking = 0;
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
+    [self startImport:url];
 }
 
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action
@@ -292,6 +432,7 @@ static void job_run(DiscJob *job) {
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     (void)webView; (void)navigation;
     self.loaded = YES;
+    self.ready = NO;   /* until the page's first check_update: its handlers are set by then (app.js start) */
     const char *test = getenv("DHD_LAUNCHER_TEST");
     if (test && *test) [self runTest:[NSString stringWithUTF8String:test]];
 }
@@ -307,6 +448,10 @@ static void job_run(DiscJob *job) {
     (void)controller;
     if (![message.body isKindOfClass:NSString.class] || ![message.frameInfo.request.URL.scheme isEqualToString:SCHEME]) return;
     NSString *text = message.body;
+    if (!self.ready && [text containsString:@"\"check_update\""]) {
+        NSDictionary *m = [NSJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+        if ([m isKindOfClass:NSDictionary.class] && [m[@"call"] isEqual:@"check_update"]) [self pageReady];
+    }
     dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
     if (launcher_settings_call(text.UTF8String)) {
         /* dhd.ini's calls in the order they came (launcher_calls.h): the ticket is taken here, on
@@ -333,11 +478,14 @@ static void job_run(DiscJob *job) {
         [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:NO];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
+    picker.shouldShowFileExtensions = YES;
+    llog(@"picker: shown (call %d)", call);
     [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     (void)controller;
+    llog(@"picker: cancelled");
     if (self.picking) launcher_answer(&s_host, self.picking, 1, NULL);
     self.picking = 0;
 }
@@ -347,8 +495,8 @@ static void job_run(DiscJob *job) {
     int call = self.picking;
     self.picking = 0;
     NSURL *url = urls.firstObject;
+    llog(@"picker: %lu chosen: %@", (unsigned long)urls.count, url ? shown(url) : @"nothing");
     if (!url) { if (call) launcher_answer(&s_host, call, 1, NULL); return; }
-    NSLog(@"launcher: disc image chosen: %@", url.lastPathComponent);
     long long number = [self startImport:url];
     if (call) launcher_answer(&s_host, call, 1, [NSString stringWithFormat:@"{\"job\":%lld}", number].UTF8String);
 }
@@ -380,7 +528,7 @@ static void job_run(DiscJob *job) {
     UIDevice *device = UIDevice.currentDevice;
     [out appendData:[[NSString stringWithFormat:@"Downhill Revived %s on %@ %@ (%@)\n\n", DHD_VERSION, device.systemName,
                       device.systemVersion, device.model] dataUsingEncoding:NSUTF8StringEncoding]];
-    for (NSString *file in @[@"dhd-exit.txt", @"dhd.log", @"dhd-previous.log"]) {
+    for (NSString *file in @[@"dhd-exit.txt", @"launcher.log", @"dhd.log", @"dhd-previous.log"]) {
         NSData *data = [NSData dataWithContentsOfFile:[docs stringByAppendingPathComponent:file]];
         if (!data) continue;
         const NSUInteger most = 1792 << 10;   /* a crash is at the end */
@@ -479,7 +627,8 @@ static void host_delete_original(void *context, int id, long long job) {
             BOOL scoped = [j.url startAccessingSecurityScopedResource];
             NSError *error = nil;
             deleted = [NSFileManager.defaultManager removeItemAtURL:j.url error:&error];
-            if (!deleted) NSLog(@"launcher: the original couldn't be deleted: %@", error.localizedDescription);
+            llog(@"import %lld: the original %@ %@", job, deleted ? @"deleted" : @"not deleted:",
+                 deleted ? @"" : error.localizedDescription);
             if (scoped) [j.url stopAccessingSecurityScopedResource];
         }
         launcher_answer(&s_host, id, 1, deleted ? "true" : "false");
@@ -532,6 +681,12 @@ static void host_init(void) {
         s_host.licences = host_licences;
         s_host.free_space = host_free;
     });
+}
+
+void launcher_open_document(NSURL *url) {
+    llog(@"opened in the app: %@", shown(url));
+    if (s_launcher) [s_launcher openDocument:url];
+    else llog(@"opened while the game runs: the launcher looks for it in the app's folder next time");
 }
 
 UIViewController *launcher_view_controller(void) {
