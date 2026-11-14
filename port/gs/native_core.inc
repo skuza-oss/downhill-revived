@@ -2864,30 +2864,7 @@ static void native_interp_thread(Native *n)
 
 void host_thread_name(const char *name);  /* port/host/host_threads.c */
 
-/* DHD_ZREAD_FOLD and DHD_GPU_OVERLAP (finding 111): off unless set; 0 turns one off, any other
-   value on. They save Adreno CPU time but cost about 10% at 2x on Metal, and their probe timing is
-   not proven exact, so no platform has them on by default yet. zread.rs reads them the same way. */
-static int native_gpu_switch(const char *name)
-{
-    const char *s = getenv(name);
-    return s && strcmp(s, "0") != 0;
-}
-
-/* The experiment has no interpolation/browser publication hook. */
-static int native_fold_probe(const Native *n)
-{
-#ifdef NATIVE_INLINE
-    (void)n;
-    return 0;
-#else
-    static int on = -1;
-    if (on < 0) on = native_gpu_switch("DHD_ZREAD_FOLD");
-    return on && !n->interp;
-#endif
-}
-
-/* Experimental same-picture probe: request it before encoding, take at the old publication
-   point, and exclude the current tag in Rust. Disabled until the native-read exactness gate. */
+/* Start a copy of the probe requested by the EE from the picture just drawn. */
 static void native_zread_start_picture(Native *n)
 {
     if (n->exact_probe == 1) return;
@@ -2909,8 +2886,7 @@ static void native_zread_start_picture(Native *n)
    copy of what the EE's probe asks for now, from the Z surface just drawn (finding 097). */
 static void native_zread_after(Native *n)
 {
-    /* Even with the exact probe, a skipped batched present must flush the picture. */
-    if (n->exact_probe == 1 && !(native_fold_probe(n) && native_gpu_switch("DHD_GPU_OVERLAP"))) return;
+    if (n->exact_probe == 1) return;
     uint32_t rect[4];
     uint64_t tag;
     if (dhdr_native_zread_take(n->r, n->zread_bits, 64 * 64, rect, &tag)) {
@@ -2931,7 +2907,7 @@ static void native_zread_after(Native *n)
                     (unsigned)(tag >> 32), rect[0], rect[1], rect[2], rect[3], lo, hi);
         }
     }
-    if (!native_fold_probe(n)) native_zread_start_picture(n);
+    native_zread_start_picture(n);
 
 }
 

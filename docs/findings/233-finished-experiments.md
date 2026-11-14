@@ -21,6 +21,10 @@ for the lead on a Mac. Matching sources and historical findings are out of scope
 
 - A10: corrected the Android direct-start notice, iOS import source and UIKit comments.
 
+- B04: removed folded-Z requests, delayed mapping, deferred picture/present submission
+  and submit prepoll/statistic. Kept the default separate probe encoder, asynchronous map,
+  poll, newest-completed-copy selection and the C take-before-start publication order.
+
 ## Decisions
 
 Keep the real renderer methods and ordinary native probe timing. No new implementation.

@@ -264,8 +264,6 @@ pub struct Pass {
     /// The picture's encoder cut off earlier, being finished on the helper thread (`cut`).
     #[cfg(not(target_arch = "wasm32"))]
     finisher: finisher::Finisher,
-    /// Diagnostic batching: present (or zread_take when skipped) submits the picture.
-    pub deferred: bool,
     timing: gpu_timing::Timing,
     /// The open draw pass (`forget_lifetime`: it holds the encoder until dropped, so it is always
     /// ended before the encoder is used or finished).
@@ -351,8 +349,6 @@ impl Pass {
             encoder: None,
             #[cfg(not(target_arch = "wasm32"))]
             finisher: finisher::Finisher::default(),
-            deferred: crate::native::zread::switch("DHD_GPU_OVERLAP")
-                && crate::native::zread::folded(),
             pass: None,
             timing: gpu_timing::Timing::default(),
             target: -2,
@@ -624,10 +620,6 @@ impl Pass {
 
     /// native_submit: ends the pass, writes the arenas the encoder's commands read, submits.
     fn submit(&mut self, gpu: &Gpu, arenas: &Arenas) {
-        if !self.deferred { self.submit_now(gpu, arenas); }
-    }
-
-    pub fn submit_now(&mut self, gpu: &Gpu, arenas: &Arenas) {
         let _startup = crate::startup::step("native finish, helper wait and submit");
         self.end();
         #[cfg(not(target_arch = "wasm32"))]
@@ -655,12 +647,6 @@ impl Pass {
         #[cfg(target_arch = "wasm32")]
         let commands = [commands];
         t.add(rstat::FINISH);
-        #[cfg(not(target_arch = "wasm32"))]
-        if std::env::var_os("DHD_SUBMIT_POLL").is_some() {
-            let t = rstat::T::new();
-            let _ = gpu.device.poll(wgpu::PollType::Poll);
-            t.add(rstat::PREPOLL);
-        }
         let t = rstat::T::new();
         crate::startup::submit(&gpu.queue, commands);
         t.add(rstat::QSUB);
@@ -771,12 +757,10 @@ impl Native {
         };
         t.add(rstat::SCANOUT);
         let t = rstat::T::new();
-        self.zread_record();
         let mut timing = std::mem::take(&mut self.pass.timing);
         timing.end(self.pass.encoder(gpu));
         self.pass.timing = timing;
         self.pass.submit(gpu, &self.arenas);
-        if !self.pass.deferred { self.zread_map(); }
         t.add(rstat::SUBMIT);
         let mut r = self.pass.drawn;
         r.shown = shown as u32;
@@ -1368,11 +1352,10 @@ pub mod rstat {
     pub const AWRITE: usize = 13;
     pub const FINISH: usize = 14;
     pub const QSUB: usize = 15;
-    pub const PREPOLL: usize = 16;
-    const PARTS: usize = 17;
+    const PARTS: usize = 16;
     const NAMES: [&str; PARTS] = [
         "picture", "reserve", "surfaces", "record", "write", "scanout", "submit", "present", "acquire",
-        "precord", "psubmit", "zstart", "ztake", "awrite", "finish", "qsub", "prepoll",
+        "precord", "psubmit", "zstart", "ztake", "awrite", "finish", "qsub",
     ];
     /// Pictures per log line (about two seconds at 120 field/s).
     pub const EVERY: u32 = 240;
