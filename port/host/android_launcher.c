@@ -27,6 +27,12 @@ const char *host_disc_check(const char *path);  /* host.c: NULL when path is the
 
 #define EXPORT(type, name) JNIEXPORT type JNICALL Java_app_downhillrevived_Native_##name
 
+EXPORT(void, padMotionFocus)(JNIEnv *env, jclass cls, jint device)
+{
+    (void)env; (void)cls;
+    fprintf(stderr, "controller: Android device %d motion routed through SDL while the game surface lacks focus\n", (int)device);
+}
+
 void dhdr_android_defaults(const char *path, const char *soc);
 void android_phone_defaults(const char *path)
 {

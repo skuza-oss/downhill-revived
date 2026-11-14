@@ -259,8 +259,8 @@ static void attach(SDL_JoystickID id)
     if (s->gamepad) SDL_SetGamepadPlayerIndex(s->gamepad, i);
     SDL_PropertiesID props = s->gamepad ? SDL_GetGamepadProperties(s->gamepad) : SDL_GetJoystickProperties(s->joystick);
     int motors = SDL_GetBooleanProperty(props, SDL_PROP_JOYSTICK_CAP_RUMBLE_BOOLEAN, false);
-    fprintf(stderr, "controller: %s (%s%s) is player %d\n", name ? name : "?", how ? how : "gamepad",
-            motors ? ", vibration" : "", i + 1);
+    fprintf(stderr, "controller: %s (%s%s) is player %d [SDL id=%u]\n", name ? name : "?", how ? how : "gamepad",
+            motors ? ", vibration" : "", i + 1, (unsigned)id);
 }
 
 static void detach(SDL_JoystickID id)
@@ -274,7 +274,7 @@ static void detach(SDL_JoystickID id)
     present[i] = 0;
     SDL_SetAtomicInt(&kinds[i], PAD_KIND_NONE);
     SDL_UnlockMutex(lock);
-    fprintf(stderr, "controller: player %d disconnected\n", i + 1);
+    fprintf(stderr, "controller: player %d disconnected [SDL id=%u]\n", i + 1, (unsigned)id);
 }
 
 /* A joystick that turns out to be a gamepad (a mapping added) is opened again as one. */
@@ -349,6 +349,9 @@ void gamepad_device(int change, unsigned id)
     if (change == PADDEV_ADDED) attach(id);
     else if (change == PADDEV_REMOVED) { forget_skipped(id); detach(id); }
     else if (change == PADDEV_REMAPPED) remap(id);
+    fprintf(stderr, "controller: device %s SDL id=%u; players=%u/%u/%u/%u claimed=%d\n",
+            change == PADDEV_ADDED ? "added" : change == PADDEV_REMOVED ? "removed" : "remapped", id,
+            (unsigned)slots[0].id, (unsigned)slots[1].id, (unsigned)slots[2].id, (unsigned)slots[3].id, claimed);
 }
 
 /* Every pass of the SDL thread: the pads' states for the game, and the vibration asked for. */
@@ -371,6 +374,7 @@ void gamepad_thread_update(void)
         s->previous_buttons = buttons;
     }
     /* No controller can take over an empty player 1 slot; normal attach already fills it. */
+    int was_claimed = claimed;
     int swap = slots[0].id ? gamepad_claim_slot(pressed, !SDL_GetAtomicInt(&multiplayer), &claimed) : -1;
     SDL_LockMutex(lock);
     if (swap > 0) {
@@ -391,6 +395,8 @@ void gamepad_thread_update(void)
         present[i] = slots[i].id != 0;
     }
     SDL_UnlockMutex(lock);
+    if (!was_claimed && claimed)
+        fprintf(stderr, "controller: player 1 claimed [SDL id=%u]\n", (unsigned)slots[0].id);
     for (int i = 0; i < SLOTS; i++)
         if (slots[i].id) rumble(&slots[i], SDL_GetAtomicInt(&want_light[i]), SDL_GetAtomicInt(&want_heavy[i]));
 }

@@ -1,6 +1,7 @@
 """Run the Android side's plain-JVM tests (finding 143): the first start's disc rules
 (port/android/test/DiscImageTest.java), the update notice's page (UpdatePageTest.java) and the crash
-report's rules (CrashReportTest.java, finding 152).
+report's rules (CrashReportTest.java, finding 152), then the controller motion route
+across text-editor focus (test_pad_motion.py, finding 245).
 
     python port/android/test_disc_image.py [your.iso]
 
@@ -67,6 +68,9 @@ def main():
     r = subprocess.run([jdk_tool('java'), '-Djava.library.path=' + str(OUT), '-Djava.io.tmpdir=' + str(OUT), '-cp', str(OUT), 'app.downhillrevived.CrashReportTest'])
     failed = failed or r.returncode
     r = subprocess.run([jdk_tool('java'), '-Djava.library.path=' + str(OUT), '-Djava.io.tmpdir=' + str(OUT), '-cp', str(OUT), 'app.downhillrevived.DiscImageTest'] + sys.argv[1:2])
+    failed = failed or r.returncode
+    # The game activity's focus-independent SDL controller-motion route (245).
+    r = subprocess.run([sys.executable, str(HERE / 'test_pad_motion.py')])
     sys.exit(failed or r.returncode)
 
 

@@ -11,6 +11,7 @@
 #include "stick.h"
 #include "controls_table.h"
 #include "gamepad_device.h"
+#include "text_input.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -258,9 +259,45 @@ static void run_device_slots(void)
           "air mouse then PS4", gamepad_device_slot(&devices[2].d, 0), 0);
 }
 
+/* Synthetic event recording: a complete Bluetooth pad, an IME/keyboard device,
+   typed keys, editor close, then pad input and a removal/re-add under a new SDL id.
+   These are descriptions, not measurements of #80's unidentified controller. */
+static void run_room_code_devices(void)
+{
+    const char *automatic = "00000000000000000000000000000000,*,a:b0,";
+    GamepadDevice pad = {SDL_GAMEPAD_TYPE_STANDARD, 0, automatic, 15, 3};
+    GamepadDevice ime = {SDL_GAMEPAD_TYPE_STANDARD, 0, automatic, 1, 0, 104, 0, 0};
+    unsigned owner[4] = {0}, pressed[4] = {1u << SDL_GAMEPAD_BUTTON_SOUTH};
+    int claimed = 0, slot = gamepad_device_slot(&pad, 0);
+    check(slot == 0, "Bluetooth pad starts as player 1", slot, 0);
+    owner[slot] = 41;
+    gamepad_claim_slot(pressed, 1, &claimed);
+    text_input_begin();
+    check(gamepad_device_slot(&ime, 1) == -1, "IME cannot claim a controller slot", gamepad_device_slot(&ime, 1), -1);
+    keyboard_key('A', 'A', 1);
+    text_input_character('A');
+    keyboard_key('A', 'A', 0);
+    text_input_end();
+    pressed[0] = 1u << SDL_GAMEPAD_BUTTON_DPAD_LEFT;
+    check(gamepad_claim_slot(pressed, 1, &claimed) == -1 && owner[0] == 41,
+          "typing and closing leave the claimed pad in player 1", owner[0], 41);
+    owner[0] = 0; // disconnect; the reconnect has a new instance id
+    slot = gamepad_device_slot(&pad, 0);
+    owner[slot] = 42;
+    check(slot == 0 && claimed, "re-enumerated pad fills player 1 without a new claim", slot, 0);
+    GamepadRaw raw = {0};
+    HostPad out = {0};
+    raw.buttons = 1u << id("dpad_left") | 1u << id("south");
+    raw.axis[0] = 32767;
+    gamepad_apply(&control_defaults[CONTROL_PAD1], &raw, STICK_GAME, &out);
+    check((out.buttons & (PAD_LEFT | PAD_CROSS)) == (PAD_LEFT | PAD_CROSS) && out.left_x == 255,
+          "post-IME pad buttons and stick survive the shared layout", out.buttons, PAD_LEFT | PAD_CROSS);
+}
+
 static int run_mapping(void)
 {
     run_device_slots();
+    run_room_code_devices();
     static const struct { const char *name; int type, label, want; } kinds[] = {
         {"Xbox 360", SDL_GAMEPAD_TYPE_XBOX360, SDL_GAMEPAD_BUTTON_LABEL_A, PAD_KIND_XBOX},
         {"Xbox One", SDL_GAMEPAD_TYPE_XBOXONE, SDL_GAMEPAD_BUTTON_LABEL_A, PAD_KIND_XBOX},
