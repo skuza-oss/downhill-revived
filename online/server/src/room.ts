@@ -712,7 +712,8 @@ export class Room extends DurableObject<Env> {
     await this.dropSocket(ws, true);
   }
 
-  /** Each member's latest `sfu_trouble` reports (their times), for TROUBLE_REPORTS. */
+  /** Each member's latest `sfu_trouble` reports (their times), for TROUBLE_REPORTS; a member's
+      entry goes when it leaves (leave(), the one place a member is removed) or the room ends. */
   private troubleAt = new Map<number, number[]>();
 
   /** A cleanup pass runs (retryCleanup): the alarm starts no second one meanwhile. */
@@ -2137,6 +2138,7 @@ export class Room extends DurableObject<Env> {
     this.sockets.delete(memberId);
     this.rtts.delete(memberId);
     this.firstRtts.delete(memberId);
+    this.troubleAt.delete(memberId);
     if (ws) {
       // Forget the socket so a late close event doesn't count twice.
       ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
@@ -2271,6 +2273,7 @@ export class Room extends DurableObject<Env> {
   private async destroy(): Promise<void> {
     if (this.listedKey !== null) this.updateListing(false, true);
     this.state = null;
+    this.troubleAt.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // What didn't close outlives the room (Cleanup): stored again, with its alarm.

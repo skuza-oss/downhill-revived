@@ -1,5 +1,6 @@
 // A game's report of a failed path to the SFU (sfu_trouble, finding 248): one log line of fixed
 // words per report, a few per member, nothing sent back; a report with an unknown word is dropped.
+import { env, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect, vi } from "vitest";
 import { Client } from "./helpers";
 import { troubleOf } from "../src/protocol";
@@ -64,5 +65,26 @@ describe("sfu_trouble (finding 248)", () => {
       await host.json("pong");
     });
     expect(lines).toHaveLength(12);
+  });
+
+  it("forgets a member's reports when it leaves: members joining, reporting and leaving don't grow the room", async () => {
+    let code = "";
+    await logged(async () => {
+      const room = await Client.host();
+      code = room.code;
+      room.host.sendJson(report());
+      for (let i = 0; i < 6; i++) {
+        const guest = await Client.join(code, `G${i}`);
+        guest.sendJson(report());
+        guest.sendJson({ type: "ping", t: i });
+        await guest.json("pong");
+        guest.sendJson({ type: "leave" });
+        await room.host.next((f) => typeof f === "string" && JSON.parse(f).type === "room" && JSON.parse(f).members.length === 1);
+      }
+      room.host.sendJson({ type: "ping", t: 99 });
+      await room.host.json("pong");
+    });
+    const kept = await runInDurableObject(env.ROOM.get(env.ROOM.idFromName(code)), async (r: any) => [...r.troubleAt.keys()]);
+    expect(kept).toEqual([0]);  // the host's alone
   });
 });
