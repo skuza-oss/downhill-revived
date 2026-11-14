@@ -4,6 +4,7 @@
 //! connect within DIRECT_TIMEOUT, the room is asked for TURN credentials and a TURN allocation over
 //! TLS on 443 (`turn.rs`, `relay.rs`) adds a relayed candidate: the SFU is then reached through
 //! Cloudflare's TURN service (round 4).
+use crate::trouble::{Failure, Kind, Path, Step};
 use crate::{relay, turn};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -107,6 +108,11 @@ struct Relay {
     link: relay::Link,
     relayed: Option<SocketAddr>,
     since: Instant,
+    /// Another TURN-over-TLS server to try when this one's TCP or TLS never comes up (finding
+    /// 248): the listed port when 443 was not listed and is tried first.
+    fallback: Option<(String, u16)>,
+    /// The credentials, for a new allocation on the fallback.
+    credentials: (String, String),
 }
 struct Channel {
     id: ChannelId,
@@ -226,6 +232,24 @@ pub struct Sfu {
     /// Whether the last datagram str0m got came through the relay; at Connected, the path used.
     last_in_relayed: bool,
     via_relay: bool,
+    /// Each path's failure in this association (finding 248): UDP and TURN fail independently, so
+    /// one that fails leaves the other its attempt; each is reported to the room once.
+    udp_failure: Option<Failure>,
+    turn_failure: Option<Failure>,
+    /// Each path was reported to the room (sfu_trouble), once per association.
+    udp_reported: bool,
+    turn_reported: bool,
+    /// Reports not yet handed to the send thread: poll's text takes them, and so does the send
+    /// thread when the association fails (take_reports), so a report made by the failing poll
+    /// still reaches the room.
+    reports: Vec<Value>,
+    /// A datagram came back from the SFU through the relay (else a bound relay failed at first data).
+    relay_heard: bool,
+    /// The not-connected line at CONNECT_TIMEOUT with a relay still trying was said.
+    stuck_said: bool,
+    /// Tests: every direct UDP send fails with this error, as on a network that refuses UDP.
+    #[cfg(test)]
+    fail_udp_send: Option<ErrorKind>,
     /// The race ping (finding 181): the round trip of the latest ICE check on the selected pair,
     /// this PC to Cloudflare Realtime's nearest location (through the relay when it carries the
     /// race), from str0m's statistics; None until one is measured.
@@ -443,6 +467,8 @@ impl Sfu {
             connected: false, announced: false, released: false, released_at: None, go_at: None, heard: false, silent_said: false, drop_all_in,
             drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(), p2p: None,
             wake, direct, turn_allowed, answered_at: None, connected_at: None, lost_since: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
+            udp_failure: None, turn_failure: None, udp_reported: false, turn_reported: false, reports: vec![], relay_heard: false, stuck_said: false,
+            #[cfg(test)] fail_udp_send: None,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -461,9 +487,13 @@ impl Sfu {
             if self.relay.is_some() || !self.turn_asked { return Err("Unexpected TURN credentials".into()); }
             let field = |k: &str| message[k].as_str().filter(|v| !v.is_empty() && v.len() <= 256);
             let (user, pass) = (field("username").ok_or("Missing TURN username")?, field("credential").ok_or("Missing TURN credential")?);
-            let (host, port) = turns_server(&message["urls"]).ok_or("No TURN over TLS server")?;
-            eprintln!("net: SFU: TURN relay over TLS to {host}:{port}");
-            self.relay = Some(Relay { client: turn::Client::new(user, pass, Instant::now()), link: relay::Link::open(&host, port, self.wake.clone()), relayed: None, since: Instant::now() });
+            let mut servers = turns_servers(&message["urls"]).into_iter();
+            let (host, port) = servers.next().ok_or("No TURN over TLS server")?;
+            let fallback = servers.next();
+            let listed = turns_listed(&message["urls"], port);
+            eprintln!("net: SFU: TURN relay over TLS to {host}:{port}{}", if listed { "" } else { " (not listed; the listed port if it fails)" });
+            self.relay = Some(Relay { client: turn::Client::new(user, pass, Instant::now()), link: relay::Link::open(&host, port, self.wake.clone()), relayed: None,
+                since: Instant::now(), fallback, credentials: (user.to_owned(), pass.to_owned()) });
             self.turn_at = Some(Instant::now());
         } else if message["type"] == "start" {
             // A race on the association the room stay keeps (finding 177): its per-race state
@@ -830,7 +860,7 @@ impl Sfu {
         let via = if self.via_relay { "TURN/TLS" } else { "UDP" };
         if let Some(line) = self.stats.poll(now, datagrams.len(), self.race_open && self.released, via) { eprintln!("{line}"); }
         for (at, source, data) in datagrams {
-            if !self.direct { continue; }
+            if !self.direct || self.udp_failure.is_some() { continue; }
             self.stats.input(now.saturating_duration_since(at));
             // 23: a DTLS application record (SCTP), not ICE or the handshake.
             if self.drop_in_percent > 0 && data.first() == Some(&23) {
@@ -847,11 +877,12 @@ impl Sfu {
                 }
             }
         }
-        if self.reader_failed.load(Ordering::Acquire) {
-            return Err("SFU socket failed".into());
+        if self.reader_failed.load(Ordering::Acquire) && self.udp_failure.is_none() && self.direct {
+            self.udp_failed(Step::Receive, Kind::Other)?;
         }
         self.pump_relay(&mut text, &mut frames)?;
-        let wait = if self.turn_first { Duration::ZERO } else { DIRECT_TIMEOUT };
+        // UDP that already failed outright needs no DIRECT_TIMEOUT to know it.
+        let wait = if self.turn_first || self.udp_failure.is_some() { Duration::ZERO } else { DIRECT_TIMEOUT };
         if !self.connected && !self.turn_asked && self.turn_allowed && self.answered_at.is_some_and(|t| t.elapsed() >= wait) {
             self.turn_asked = true;
             if self.turn_first { eprintln!("net: SFU: the last association went through TURN; asking for a relay at once"); }
@@ -868,10 +899,81 @@ impl Sfu {
         if self.lost_since.is_some_and(|at| at.elapsed() >= ICE_LOST_GRACE) {
             return Err("SFU path no longer answers ICE checks".into());
         }
-        if !self.connected && self.turn_asked && self.relay.is_none() && self.answered_at.is_some_and(|t| t.elapsed() >= CONNECT_TIMEOUT) {
-            return Err(format!("no UDP connection and no TURN relay {} s after the answer", CONNECT_TIMEOUT.as_secs()).into());
+        if !self.connected && (self.turn_asked || self.udp_failure.is_some()) && self.answered_at.is_some_and(|t| t.elapsed() >= CONNECT_TIMEOUT) {
+            if self.relay.is_none() {
+                // Nothing left trying: each path's failure, reported if it wasn't, and one line.
+                let udp = self.udp_failure.unwrap_or(Failure::new(Path::Udp, Step::Connect, Kind::NoAnswer));
+                let turn = self.turn_failure.unwrap_or(Failure::new(Path::Turn, if self.turn_at.is_none() { Step::Credentials } else { Step::Connect }, Kind::NoAnswer));
+                self.note(udp);
+                self.note(turn);
+                return Err(self.no_path(udp, turn).into());
+            }
+            if !self.stuck_said {
+                // A relay still up that never connected: said and reported once; it keeps trying,
+                // as it did before (a new session would cost the room's session budget).
+                self.stuck_said = true;
+                let udp = self.udp_failure.unwrap_or(Failure::new(Path::Udp, Step::Connect, Kind::NoAnswer));
+                let turn = Failure::new(Path::Turn, self.relay_stage(), Kind::NoAnswer);
+                self.note(udp);
+                self.note(turn);
+                eprintln!("net: SFU: not connected {} s after the answer: {}; {}; the relay keeps trying",
+                    CONNECT_TIMEOUT.as_secs(), udp.line(), turn.line());
+            }
         }
+        text.append(&mut self.reports);
         Ok((text, frames))
+    }
+
+    /// A path's failure, reported to the room once per association (finding 248).
+    fn note(&mut self, f: Failure) {
+        let said = if f.path == Path::Udp { &mut self.udp_reported } else { &mut self.turn_reported };
+        if std::mem::replace(said, true) { return; }
+        self.reports.push(f.report());
+    }
+
+    /// The reports not yet taken (the send thread, when poll failed).
+    pub fn take_reports(&mut self) -> Vec<Value> { std::mem::take(&mut self.reports) }
+
+    /// The one line for an association with no path left.
+    fn no_path(&self, udp: Failure, turn: Failure) -> String {
+        if !self.direct { return format!("no path to the SFU: {} (UDP blocked by DHD_NET_SFU_UDP=0)", turn.line()); }
+        if !self.turn_allowed { return format!("no path to the SFU: {} (no TURN: DHD_NET_SFU_TURN=0)", udp.line()); }
+        format!("no path to the SFU: {}; {}", udp.line(), turn.line())
+    }
+
+    /// How far a relay still up got: allocated, bound, heard from the SFU.
+    fn relay_stage(&self) -> Step {
+        match self.relay.as_ref() {
+            Some(r) if r.relayed.is_none() => Step::Allocate,
+            Some(r) if !r.client.bound() => Step::ChannelBind,
+            Some(_) if !self.relay_heard => Step::FirstData,
+            _ => Step::Connect,
+        }
+    }
+
+    /// Direct UDP failed outright (a send or the socket's read). The association goes on through
+    /// the relay unless UDP was the path in use or no relay can come (finding 248; 246 is the
+    /// other direction).
+    fn udp_failed(&mut self, step: Step, kind: Kind) -> Result<()> {
+        if self.udp_failure.is_some() { return Ok(()); }
+        let f = Failure::new(Path::Udp, step, kind);
+        self.udp_failure = Some(f);
+        self.note(f);
+        if self.connected && !self.via_relay { return Err(format!("{} on the path in use", f.line()).into()); }
+        if self.connected { eprintln!("net: SFU: {}; the relay carries the association", f.line()); return Ok(()); }
+        if !self.turn_allowed { return Err(self.no_path(f, Failure::new(Path::Turn, Step::Credentials, Kind::NoAnswer)).into()); }
+        if let Some(turn) = self.turn_failure.filter(|_| self.relay.is_none() && self.turn_asked) {
+            return Err(self.no_path(f, turn).into());
+        }
+        eprintln!("net: SFU: {}; the TURN relay is the way left", f.line());
+        Ok(())
+    }
+
+    /// A datagram to the SFU over UDP (tests can make it fail).
+    fn send_direct(&self, data: &[u8], to: SocketAddr) -> std::io::Result<usize> {
+        #[cfg(test)]
+        if let Some(kind) = self.fail_udp_send { return Err(kind.into()); }
+        self.socket.send_to(data, to)
     }
 
     fn ice_state(&mut self, state: IceConnectionState, now: Instant) {
@@ -896,10 +998,27 @@ impl Sfu {
     fn pump_relay(&mut self, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         let Some(r) = self.relay.as_mut() else { return Ok(()) };
         if r.link.failed() || r.client.failed().is_some() {
-            eprintln!("net: SFU: TURN relay failed ({})", r.client.failed().unwrap_or("its TLS link"));
+            let (step, kind) = r.client.failure().or(r.link.failure()).unwrap_or((Step::Link, Kind::Other));
+            let f = Failure::new(Path::Turn, step, kind);
+            let detail = r.client.failed().map_or(String::new(), |why| format!(": {why}"));
+            eprintln!("net: SFU: {}{detail}", f.line());
+            // A server whose TCP or TLS never came up: the other listed one, on a new allocation.
+            if matches!(step, Step::TlsConnect | Step::TlsHandshake) && r.relayed.is_none() {
+                if let Some((host, port)) = r.fallback.take() {
+                    eprintln!("net: SFU: TURN relay over TLS to {host}:{port} instead");
+                    let (user, pass) = r.credentials.clone();
+                    r.client = turn::Client::new(&user, &pass, Instant::now());
+                    r.link = relay::Link::open(&host, port, self.wake.clone());
+                    r.since = Instant::now();
+                    return Ok(());
+                }
+            }
             self.relay = None;
-            if self.connected { return if self.via_relay { Err("TURN relay failed".into()) } else { Ok(()) }; }
-            if !self.direct { return Err("TURN relay failed".into()); }
+            self.turn_failure = Some(f);
+            self.note(f);
+            if self.connected { return if self.via_relay { Err(f.line().into()) } else { Ok(()) }; }
+            if !self.direct { return Err(self.no_path(Failure::new(Path::Udp, Step::Connect, Kind::NoAnswer), f).into()); }
+            if let Some(udp) = self.udp_failure { return Err(self.no_path(udp, f).into()); }
             eprintln!("net: SFU: UDP keeps trying until {} s after the answer", CONNECT_TIMEOUT.as_secs());
             return Ok(());
         }
@@ -930,6 +1049,7 @@ impl Sfu {
                 turn::Event::Data(source, data) => {
                     let Some(destination) = self.relay.as_ref().and_then(|r| r.relayed) else { continue };
                     self.stats.relayed_in += 1;
+                    self.relay_heard = true;
                     if let Ok(contents) = data.as_slice().try_into() {
                         let input = Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination, contents });
                         if self.rtc.accepts(&input) {
@@ -994,10 +1114,10 @@ impl Sfu {
                     if let Some(r) = self.relay.as_mut().filter(|r| r.relayed == Some(t.source)) {
                         self.stats.relayed_out += 1;
                         r.client.send_to(t.destination, &t.contents, Instant::now());
-                    } else if self.direct {
-                        if let Err(e) = self.socket.send_to(&t.contents, t.destination) {
+                    } else if self.direct && self.udp_failure.is_none() {
+                        if let Err(e) = self.send_direct(&t.contents, t.destination) {
                             if e.kind() != std::io::ErrorKind::WouldBlock {
-                                return Err(e.into());
+                                self.udp_failed(Step::Send, Kind::of_io(e.kind()))?;
                             }
                         }
                     }
@@ -1040,8 +1160,30 @@ impl Drop for Sfu {
 /// The TURN-over-TLS server from the room's `urls`: `turns:` on port 443 first (what networks
 /// that block UDP let through), else another `turns:` port. Only Cloudflare's TURN service: a
 /// client talks to Cloudflare only (finding 158).
+#[cfg(test)]
 pub(crate) fn turns_server(urls: &Value) -> Option<(String, u16)> {
-    let mut found: Vec<(String, u16)> = urls.as_array()?.iter().filter_map(|u| {
+    turns_servers(urls).into_iter().next()
+}
+
+/// The TURN-over-TLS servers to try, in order: port 443 first, the one firewalls let through,
+/// on the first listed host even when the room's credentials don't list 443 (Cloudflare documents
+/// turns on 443 and 5349; reports from other projects say a credential reply can lack 443, and
+/// restrictive networks reset 5349: finding 248), then the listed others.
+pub(crate) fn turns_servers(urls: &Value) -> Vec<(String, u16)> {
+    let mut found = turns_listed_all(urls);
+    if let Some((host, _)) = found.first().cloned().filter(|_| !found.iter().any(|(_, p)| *p == 443)) {
+        found.insert(0, (host, 443));
+    }
+    found.dedup();
+    found
+}
+
+/// Whether the room's credentials list this port.
+fn turns_listed(urls: &Value, port: u16) -> bool { turns_listed_all(urls).iter().any(|(_, p)| *p == port) }
+
+fn turns_listed_all(urls: &Value) -> Vec<(String, u16)> {
+    let Some(list) = urls.as_array() else { return vec![] };
+    let mut found: Vec<(String, u16)> = list.iter().filter_map(|u| {
         let rest = u.as_str()?.strip_prefix("turns:")?;
         let rest = rest.split('?').next()?;
         let (host, port) = rest.rsplit_once(':')?;
@@ -1050,7 +1192,7 @@ pub(crate) fn turns_server(urls: &Value) -> Option<(String, u16)> {
         (host == "turn.cloudflare.com" || host.ends_with(".turn.cloudflare.com")).then_some((host, port))
     }).collect();
     found.sort_by_key(|(_, p)| *p != 443);
-    found.into_iter().next()
+    found
 }
 
 #[cfg(test)]
@@ -1081,7 +1223,7 @@ mod tests {
     fn refused_relay() -> Relay {
         let mut client = turn::Client::new("u", "c", Instant::now());
         client.refuse();
-        Relay { client, link: relay::Link::open("127.0.0.1", 9, Arc::new(|| {})), relayed: None, since: Instant::now() }
+        Relay { client, link: relay::Link::open("127.0.0.1", 9, Arc::new(|| {})), relayed: None, since: Instant::now(), fallback: None, credentials: ("u".into(), "c".into()) }
     }
 
     #[test]
@@ -1112,7 +1254,8 @@ mod tests {
         late.relay = Some(refused_relay());
         assert!(late.poll().is_ok());
         late.answered_at = Some(Instant::now() - CONNECT_TIMEOUT);
-        assert!(late.poll().unwrap_err().to_string().contains("no TURN relay"));
+        let why = late.poll().unwrap_err().to_string();
+        assert_eq!(why, "no path to the SFU: UDP failed at connect (no_answer); TURN failed at allocate (turn_400)");
     }
 
     #[test]
@@ -1249,9 +1392,118 @@ mod tests {
         let urls = json!(["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:5349?transport=tcp",
             "turns:turn.cloudflare.com:443?transport=tcp"]);
         assert_eq!(turns_server(&urls), Some(("turn.cloudflare.com".into(), 443)));
-        assert_eq!(turns_server(&json!(["turns:turn.cloudflare.com:5349?transport=tcp"])), Some(("turn.cloudflare.com".into(), 5349)));
+        // 443 is tried even when only 5349 is listed, 5349 after it (finding 248).
+        assert_eq!(turns_servers(&json!(["turns:turn.cloudflare.com:5349?transport=tcp"])),
+            vec![("turn.cloudflare.com".into(), 443), ("turn.cloudflare.com".into(), 5349)]);
+        assert_eq!(turns_servers(&urls), vec![("turn.cloudflare.com".into(), 443), ("turn.cloudflare.com".into(), 5349)]);
         assert_eq!(turns_server(&json!(["turns:relay.example:443?transport=tcp", "turns:turn.cloudflare.com.example:443"])), None);
         assert_eq!(turns_server(&json!(["turn:turn.cloudflare.com:443?transport=udp"])), None);
+    }
+
+
+    /// A stand-in for Cloudflare's TURN service behind an in-memory TLS link: its relayed address
+    /// is a real local socket, so the LocalSfu sees the relay's datagrams and answers them there.
+    struct LocalTurn { relay_socket: UdpSocket, server: turn::FakeServer }
+    impl LocalTurn {
+        fn start() -> Self {
+            let relay_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+            relay_socket.set_nonblocking(true).unwrap();
+            let server = turn::FakeServer::new("u", "c", relay_socket.local_addr().unwrap());
+            Self { relay_socket, server }
+        }
+        /// The relay of a client whose credentials just came.
+        fn relay() -> Relay {
+            Relay { client: turn::Client::new("u", "c", Instant::now()), link: relay::Link::memory(), relayed: None, since: Instant::now(),
+                fallback: None, credentials: ("u".into(), "c".into()) }
+        }
+        /// Moves what the client wrote to the "service", its datagrams out of the relay, and the
+        /// relay's datagrams back to the client.
+        fn pump(&mut self, client: &mut Sfu) {
+            let Some(r) = client.relay.as_ref() else { return };
+            let (answer, out) = self.server.input(&r.link.written());
+            r.link.deliver(&answer);
+            for (peer, data) in out { let _ = self.relay_socket.send_to(&data, peer); }
+            let mut b = [0u8; 65536];
+            while let Ok((n, source)) = self.relay_socket.recv_from(&mut b) {
+                let bytes = self.server.from_peer(source, &b[..n]);
+                r.link.deliver(&bytes);
+            }
+        }
+    }
+
+    /// Finding 248: on a network where a UDP send fails outright, the failure leaves the TURN
+    /// attempt its time: TURN is asked at once, the association connects through the relay, the
+    /// room hears one report for the UDP path, and UDP is used no more.
+    #[test]
+    fn a_failed_udp_send_leaves_the_relay_its_attempt() {
+        let (mut sfu, mut client) = LocalSfu::start();
+        client.fail_udp_send = Some(ErrorKind::PermissionDenied);
+        let mut turn = LocalTurn::start();
+        let (mut text, mut frames) = (vec![], vec![]);
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && !client.connected {
+            sfu.pump(&mut client, &mut text, &mut frames);
+            if client.turn_asked && client.relay.is_none() && client.turn_failure.is_none() {
+                client.relay = Some(LocalTurn::relay());
+                client.turn_at = Some(Instant::now());
+            }
+            turn.pump(&mut client);
+        }
+        assert!(client.connected && client.via_relay, "connected through the relay");
+        assert!(text.iter().any(|m| m["type"] == "sfu_turn"), "TURN asked");
+        assert!(text.iter().any(|m| m["type"] == "sfu_connected"));
+        let reports: Vec<&Value> = text.iter().filter(|m| m["type"] == "sfu_trouble").collect();
+        assert_eq!(reports.len(), 1, "one report: {reports:?}");
+        assert_eq!((reports[0]["path"].as_str(), reports[0]["step"].as_str(), reports[0]["kind"].as_str()), (Some("udp"), Some("send"), Some("denied")));
+        assert_eq!(client.udp_failure.map(|f| f.step), Some(Step::Send));
+    }
+
+    /// Both paths failing: one error that names the step of each, and one report per path.
+    #[test]
+    fn both_paths_failing_name_their_steps() {
+        let (_sfu, mut client) = LocalSfu::start();
+        client.fail_udp_send = Some(ErrorKind::PermissionDenied);
+        let mut text = vec![];
+        let mut out = Ok(());
+        for _ in 0..200 {
+            match client.poll() { Ok((t, _)) => text.extend(t), Err(e) => { out = Err(e.to_string()); text.extend(client.take_reports()); break; } }
+            if client.turn_asked && client.relay.is_none() && client.turn_failure.is_none() { client.relay = Some(refused_relay()); }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(out, Err("no path to the SFU: UDP failed at send (denied); TURN failed at allocate (turn_400)".to_string()));
+        let reports: Vec<(&str, &str)> = text.iter().filter(|m| m["type"] == "sfu_trouble")
+            .map(|m| (m["path"].as_str().unwrap(), m["step"].as_str().unwrap())).collect();
+        assert_eq!(reports, vec![("udp", "send"), ("turn", "allocate")]);
+        for m in text.iter().filter(|m| m["type"] == "sfu_trouble") {
+            assert_eq!(m.as_object().unwrap().len(), 5, "type, path, step, kind, version only");
+        }
+    }
+
+    /// A relay that is up but never brings anything back from the SFU: at CONNECT_TIMEOUT the
+    /// stage it reached is said and reported once (first_data), and it keeps trying.
+    #[test]
+    fn a_silent_relay_is_reported_at_its_stage() {
+        let (_sfu, mut client) = LocalSfu::start();
+        client.direct = false;
+        client.turn_asked = true;
+        client.relay = Some(LocalTurn::relay());
+        client.turn_at = Some(Instant::now());
+        let mut turn = LocalTurn::start();
+        turn.server.drop_peer_data = true;
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until && !(client.relay.as_ref().is_some_and(|r| r.client.bound())) {
+            client.poll().unwrap();
+            turn.pump(&mut client);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(client.relay.as_ref().is_some_and(|r| r.client.bound()), "allocated and bound");
+        client.answered_at = Some(Instant::now() - CONNECT_TIMEOUT);
+        let (text, _) = client.poll().unwrap();
+        let reports: Vec<&Value> = text.iter().filter(|m| m["type"] == "sfu_trouble").collect();
+        assert!(reports.iter().any(|m| m["path"] == "turn" && m["step"] == "first_data" && m["kind"] == "no_answer"), "{reports:?}");
+        let (text, _) = client.poll().unwrap();
+        assert!(text.iter().all(|m| m["type"] != "sfu_trouble"), "once");
+        assert!(client.relay.is_some(), "the relay keeps trying");
     }
 
     #[test]
