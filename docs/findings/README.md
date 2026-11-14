@@ -173,7 +173,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 140 | [Widescreen everywhere: no 4:3 screens left](140-widescreen-everywhere.md) | current |  |
 | 141 | [touch controls for phones](141-touch-controls.md) | current |  |
 | 142 | [race replays, the attract demo and the ghost on the delta-time clock](142-delta-time-replays.md) | current |  |
-| 143 | [the Android APK as a release asset (release key, update notice, no online on phones)](143-android-release.md) | current |  |
+| 143 | [the Android APK as a release asset (release key, update notice, no online on phones)](143-android-release.md) | partly superseded | [237](237-mobile-all-online.md) for no online on phones; phones offer every room now |
 | 144 | [Shared online track pickups](144-shared-online-pickups.md) | current |  |
 | 145 | [Android black screen on an Adreno 710 (the gralloc lock in the surface format query)](145-android-gralloc-format-hang.md) | current |  |
 | 146 | [The throttled Mi 11i at 2x and 4x paced 60: where a race field goes, and what moved it](146-phone-60.md) | current |  |
@@ -266,7 +266,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 234 | [One boot-disc check](234-one-disc-check.md) | current |  |
 | 235 | [Shared launcher rules](235-shared-launcher-rules.md) | current |  |
 | 236 | [the background noticed only at the return (Android, in a race)](236-android-background-miss.md) | current |  |
-| 237 | [phones get every online mode](237-mobile-all-online.md) | in progress |  |
+| 237 | [phones get every online mode](237-mobile-all-online.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
