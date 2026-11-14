@@ -1,13 +1,13 @@
 // Replay a legacy GS capture on the browser's GS backend and write its VRAM hashes (finding 084).
 //
-//   node port/tools/web_gs_replay.mjs CAPTURE.gs PREFIX [--web TREE (default: this tree)] [--renderer rust]
+//   node port/tools/web_gs_replay.mjs CAPTURE.gs PREFIX [--web TREE (default: this tree)]
 //
 // Builds port/gs/replay_web.c with gs.c, memory.c and the web tree's port/web/gpu_rust_web.c into a
 // wasm (wasi-sdk, DHD_DEVCACHES/wasi-sdk), then loads it in headless Chromium (port/web/cdp.mjs's
 // runPage) with the Rust renderer module (port/render). Writes
 // PREFIX-web-vram.txt in replay.c's DHD_GS_REPLAY_VRAM format, to compare with replay_gs.py's
-// PREFIX-wgpu-vram.txt, and PREFIX-web.png, a screenshot of the last field's picture on the canvas. --renderer rust is
-// accepted for old callers (the JS renderer, www/gpu.js, is gone: cleanup CL5, finding 088).
+// PREFIX-wgpu-vram.txt, and PREFIX-web.png, a screenshot of the last field's picture on the canvas. Any other option
+// is refused (the JS renderer and its --renderer selector are gone: cleanup CL5, finding 088).
 // The module is built first by the web tree's port/web/build_renderer.py (rustgs' cache makes a
 // rebuild cheap) into its build/web/renderer.
 // The page wires the two modules as worker.js does (plan 3.3): one memory (made by the page, imported
@@ -29,11 +29,11 @@ const WASI = resolve(process.env.DHD_DEVCACHES || resolve(homedir(), 'DevCaches'
 const args = process.argv.slice(2);
 const webAt = args.indexOf('--web');
 const WEB = resolve(webAt >= 0 ? args.splice(webAt, 2)[1] : ROOT);
-const rendererAt = args.indexOf('--renderer');
-const RENDERER = rendererAt >= 0 ? args.splice(rendererAt, 2)[1] : 'rust';
 const [capture, prefix] = args;
-if (!capture || !prefix || RENDERER !== 'rust') {
-  console.error('usage: web_gs_replay.mjs CAPTURE.gs PREFIX [--web TREE] [--renderer rust]'); process.exit(2);
+const unknown = args.find((a) => a.startsWith('--'));
+if (unknown || !capture || !prefix || args.length !== 2) {
+  if (unknown) console.error(`web_gs_replay.mjs: unknown option ${unknown}`);
+  console.error('usage: web_gs_replay.mjs CAPTURE.gs PREFIX [--web TREE]'); process.exit(2);
 }
 
 const OUT = resolve(ROOT, 'build/web-gs-replay');
