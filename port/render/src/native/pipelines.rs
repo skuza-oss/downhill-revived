@@ -299,6 +299,23 @@ impl Sources {
     }
 }
 
+/// Runtime pipeline breadcrumbs for #68's GPU, after the startup recorder retires.
+/// A returned call can still have an error in the enclosing pipeline scope.
+fn trace_build<T>(enabled: bool, key: u64, detail: impl FnOnce() -> String,
+                  mut log: impl FnMut(&str), create: impl FnOnce() -> T) -> T {
+    if !enabled { return create(); }
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    log(&format!("gs pipeline: begin {id} key={key:X}: {}", detail()));
+    let result = create();
+    log(&format!("gs pipeline: returned {id} key={key:X} (check pipeline errors for success)"));
+    result
+}
+
+fn trace_gpu(backend: wgpu::Backend, name: &str) -> bool {
+    backend == wgpu::Backend::Vulkan && matches!(name, "PowerVR Rogue GE8320" | "PowerVR GE8320")
+}
+
 /// Builds the pipeline of `key` (no cache, no scope).
 fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wgpu::RenderPipeline, String> {
     let key = full as u32;
@@ -344,14 +361,17 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         constants: &constants,
         zero_initialize_workgroup_memory: crate::native::init::compilation_options().zero_initialize_workgroup_memory,
     };
-    Ok(gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    let layout = match (mesh, texels) {
+        (false, false) => &objects.layout,
+        (false, true) => &objects.texels_layout,
+        (true, false) => objects.mesh_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
+        (true, true) => objects.mesh_texels_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
+    };
+    Ok(trace_build(cfg!(target_os = "android") && trace_gpu(gpu.info.backend, &gpu.info.name), full,
+        || format!("vs={} fs={entry}; {}", if mesh { "native_mesh_vertex" } else { "native_vertex" }, summary(full, d)),
+        crate::host::log, || gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("native draw"),
-        layout: Some(match (mesh, texels) {
-            (false, false) => &objects.layout,
-            (false, true) => &objects.texels_layout,
-            (true, false) => objects.mesh_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
-            (true, true) => objects.mesh_texels_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
-        }),
+        layout: Some(layout),
         vertex: wgpu::VertexState {
             module: &objects.module,
             entry_point: Some(if mesh { "native_mesh_vertex" } else { "native_vertex" }),
@@ -376,7 +396,40 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         }),
         multiview_mask: None,
         cache: None,
-    }))
+    })))
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    #[test]
+    fn only_the_reported_gpu_family() {
+        assert!(trace_gpu(wgpu::Backend::Vulkan, "PowerVR Rogue GE8320"));
+        assert!(trace_gpu(wgpu::Backend::Vulkan, "PowerVR GE8320"));
+        assert!(!trace_gpu(wgpu::Backend::Gl, "PowerVR Rogue GE8320"));
+        for name in ["PowerVR Rogue GE8322", "Mali-G52 MC2", "Adreno (TM) 505", "unknown"] {
+            assert!(!trace_gpu(wgpu::Backend::Vulkan, name));
+        }
+    }
+    #[test]
+    fn begin_precedes_creation_and_error_result_is_preserved() {
+        use std::cell::RefCell;
+        let lines = RefCell::new(Vec::new());
+        let result: Result<(), &str> = trace_build(true, 0x123456789, || "test draw state".into(),
+            |line| lines.borrow_mut().push(line.to_owned()), || {
+                assert_eq!(lines.borrow().len(), 1);
+                Err("driver refused")
+            });
+        assert_eq!(result, Err("driver refused"));
+        let lines = lines.into_inner();
+        assert!(lines[0].contains("key=123456789: test draw state"));
+        let id = lines[0].split_whitespace().nth(3).unwrap();
+        assert!(lines[1].starts_with(&format!("gs pipeline: returned {id} key=123456789")));
+    }
+    #[test]
+    fn disabled_trace_neither_formats_nor_logs() {
+        assert_eq!(trace_build(false, 1, || panic!("no formatting"), |_| panic!("no log"), || 42), 42);
+    }
 }
 
 /// Built pipelines by key (failures are kept too, so a bad key is reported once, not per draw).
