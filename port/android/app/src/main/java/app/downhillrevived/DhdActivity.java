@@ -32,6 +32,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.DisplayCutout;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
@@ -53,6 +54,21 @@ public class DhdActivity extends SDLActivity {
 
     private volatile float roll = Float.NaN;
     private SensorEventListener tiltListener;
+    private boolean motionWithoutSurface;
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        // SDL's surface and its invisible text editor share key handling, but only the
+        // surface has a joystick-motion listener. Keep the same SDL route while typing.
+        View.OnGenericMotionListener listener = SDLActivity.getMotionListener();
+        if (PadMotion.dispatch(event, mSurface, listener)) {
+            boolean away = !mSurface.hasFocus();
+            if (away && !motionWithoutSurface) Native.padMotionFocus(event.getDeviceId());
+            motionWithoutSurface = away;
+            return true;
+        }
+        return super.dispatchGenericMotionEvent(event);
+    }
 
     @Override
     protected String[] getLibraries() {

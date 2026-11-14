@@ -10,6 +10,8 @@ final class Native {
     }
 
     private Native() {}
+    /** Once when controller motion is routed with the surface out of focus; dhd.log. */
+    static native void padMotionFocus(int androidDeviceId);
 
     /** Every setting's default, choices and rule: the page's settings_schema (JSON). */
     static native String schema();
