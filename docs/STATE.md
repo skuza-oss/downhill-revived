@@ -132,7 +132,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   Clear) answer a tap on every platform (finding 227).
 - The disc image's own check is one for every platform (`port/host/disc_check.c`, from host.c's
   `disc_problem`: ISO 9660, SYSTEM.CNF booting SCUS_971.77, the whole declared volume), then the
-  game's data check in the core; phones call it through `host_disc_check` (finding 227).
+  game's data check in the core. Desktop launcher uses a Rust file-reader FFI adapter; Android's
+  seekable document pre-check uses JNI and positional FileChannel reads; iOS uses `host_disc_check`
+  (findings 227, 234). Android's copy/import completeness policy is separate.
 - The game ends through `host_end` (`port/host/host_end.c`, finding 210), never `exit()`: the work
   threads and the render thread stop, the closing log lines are written, open files are flushed,
   and the process leaves without the C library's static destructors. New code that must run at the
