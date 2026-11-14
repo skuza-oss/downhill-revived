@@ -5,6 +5,7 @@ Changes to this file may only add conditions: no check is ever relaxed.
 
     python port/tools/gs_golden.py key
     python port/tools/gs_golden.py compare KIND [SOURCE] [--golden GOLD] [--capture NAME] [--backend wgpu]
+    python port/tools/gs_golden.py adopt --from OLD GROUP[=SOURCE]...
     python port/tools/gs_golden.py selftest
 
 key prints this PC's adapter key (vendor-device-driver-api) and its golden directory,
@@ -25,6 +26,21 @@ every Direct3D 11 and WebGPU result identical where both were compared):
   web/g+0/web-vram.txt          web_gs_replay.mjs on g+0 (per-field VRAM hashes in the browser)
   meta.json                     adapter PCI ids, driver, API, WARP and OS versions, commit, exe
                                 SHA-256s, and every item's SHA-256 and size per group
+
+Why a driver update orphans a golden: its directory is keyed on, and compare pins, the adapter's
+driver version (and the WARP version for the test-gpu groups), because the C renderers the goldens
+come from could differ per driver. The pins stay. A new driver gets its golden by adopt (finding 242):
+
+adopt --from OLD GROUP[=SOURCE]... makes this PC's golden ($GOLD, which must not exist yet) from the
+golden OLD (a directory or a key under DHD_DEVCACHES/dhd-gs-golden) recorded on the same adapters
+(name, PCI vendor and device) with another driver or WARP. Each GROUP's run (SOURCE as for compare;
+test-gpu and the native-transfers groups have their default) is compared with OLD's items exactly as
+compare does, the driver and WARP pins aside: they are what is being proven. Only when every named
+group is identical are those groups hard-linked (copied where links fail) into $GOLD, retired items
+included, with a meta.json naming this PC's drivers, OLD, the commit and the groups left out; the
+meta.json is written last, so a stopped adopt leaves no golden. A group that differs refuses the
+whole adopt (nothing written): then that group needs a new recording from the oracle (below). Groups
+not named are not in $GOLD, so compare refuses them there ('the golden has no group').
 
 The Direct3D 11 and C wgpu-native renderers are gone (finding 088, CL2), and with them the record
 command: a golden is re-recorded from tag gs-golden-base (or last-32bit-0.3.1), whose gs_golden.py
@@ -450,6 +466,99 @@ def compare(kind, source, golden, capture=None, backend='wgpu', out=print):
     return code
 
 
+# ---------------------------------------------------------------- adopt
+
+def git_head():
+    try:
+        return subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True,
+                              timeout=30, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def adopt(old, specs, root=GOLDEN_ROOT, system=None, out=print):
+    """0 when every named group's run equals OLD's golden and this PC's golden was written, else 1."""
+    system = system or system_info()
+    old = Path(old) if Path(old).is_dir() else Path(root) / old
+    try:
+        meta = load_meta(old)
+        if meta is None:
+            raise Refused('%s has no meta.json (not a golden)' % old)
+        if meta.get('format') != FORMAT:
+            raise Refused('golden format %r, expected %d' % (meta.get('format'), FORMAT))
+        adapters = {}
+        for role, pinned in sorted(meta['adapters'].items()):
+            now = find_adapter(pinned['name'], system)
+            if now is None or (now['vendor'], now['device']) != (pinned['vendor'], pinned['device']):
+                raise Refused('adapter %s (%s) of the golden is not on this PC' % (pinned['name'], role))
+            adapters[role] = now
+        if all(adapters[r]['driver'] == meta['adapters'][r]['driver'] for r in adapters) and                 system['warp'] == meta.get('warp'):
+            raise Refused("%s was recorded with this PC's drivers and WARP: compare it" % old)
+        key = adapter_key(adapters.get('exact') or default_adapter(system))
+        new = Path(root) / key
+        if new.resolve() == old.resolve():
+            raise Refused("%s is already this PC's golden (%s): compare it" % (old, key))
+        if (new / 'meta.json').exists():
+            raise Refused('%s already has a golden' % new)
+        if not specs:
+            raise SystemExit('adopt needs at least one GROUP[=SOURCE]')
+        groups = {}
+        for spec in specs:
+            group, _, source = spec.partition('=')
+            if group not in GROUPS:
+                raise SystemExit('unknown GROUP %s (%s)' % (group, ', '.join(GROUPS)))
+            groups[group] = source or None
+        intact = {g: golden_items(old, meta, g) for g in groups}
+    except Refused as e:
+        out('REFUSED: %s' % e)
+        out('VERDICT FAIL refused')
+        return 1
+    problems = []
+    for group, source in groups.items():
+        expected = {rel: p for rel, p in intact[group].items() if not retired(group, rel)}
+        candidates = source_items(group, source, expected)
+        compared, count, group_problems = compare_group(group, expected, candidates, out)
+        problems.extend(group_problems)
+        if compared != count or compared == 0:
+            problems.append('%s: compared %d items, the meta count is %d' % (group, compared, count))
+    if problems:
+        out('adopt: %d problems: nothing written (a group that differs needs a recording from the oracle)'
+            % len(problems))
+        stream = io.StringIO()
+        gs_verdict.verdict(problems, out=stream)
+        for line in stream.getvalue().splitlines():
+            out(line)
+        return 1
+    staging = Path(root) / (key + '.adopting')
+    shutil.rmtree(staging, ignore_errors=True)
+    for group in groups:
+        for rel, path in intact[group].items():
+            target = staging / group / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(path, target)
+            except OSError:
+                shutil.copy2(path, target)
+    new_meta = dict(meta)
+    new_meta.update(key=key, adapters={r: {f: a[f] for f in ('name', 'vendor', 'device', 'driver')}
+                                       for r, a in adapters.items()},
+                    warp=system['warp'], os=system['os'], system_adapters=system['adapters'],
+                    groups={g: meta['groups'][g] for g in groups},
+                    count=sum(meta['groups'][g]['count'] for g in groups),
+                    adopted={'from': meta.get('key', old.name), 'from_adapters': meta['adapters'],
+                             'from_warp': meta.get('warp'), 'commit': git_head(),
+                             'proven': sorted(groups), 'left_out': sorted(set(meta['groups']) - set(groups))})
+    (staging / 'meta.json').write_text(json.dumps(new_meta, indent=1), encoding='utf-8')
+    if new.exists():
+        shutil.rmtree(new)  # no meta.json (checked above): not a golden, a leftover
+    staging.rename(new)
+    out('adopt: %s from %s, %d items in %s; left out: %s'
+        % (key, new_meta['adopted']['from'], new_meta['count'], ', '.join(sorted(groups)),
+           ', '.join(new_meta['adopted']['left_out']) or 'none'))
+    out('VERDICT PASS')
+    return 0
+
+
 # ---------------------------------------------------------------- selftest
 
 def selftest():
@@ -569,6 +678,54 @@ def selftest():
         meta['count'] += 1
         (golden / 'meta.json').write_text(json.dumps(meta))
         case('count-mismatch', None, needle='meta count 7')
+
+        # adopt: a golden pinned to another driver becomes this PC's only when the run equals it
+        adopt_root = root / 'adopt'
+        old = adopt_root / 'old'
+        shutil.rmtree(golden)
+        build(golden, True)
+        shutil.copytree(golden, old)
+        m = json.loads((old / 'meta.json').read_text())
+        m['adapters']['exact'] = dict(m['adapters']['exact'], driver='0.0.0.0')
+        m['key'], m['warp'] = 'old', '0.0.0.0'  # recorded with another driver and WARP
+        (old / 'meta.json').write_text(json.dumps(m))
+        run = root / 'adopt-run'
+        build(run, False)
+        new = adopt_root / adapter_key(adapter)
+
+        def adopt_case(name, specs, expect, needle, sys_info=system):
+            lines = []
+            code = adopt(old, specs, root=adopt_root, system=sys_info, out=lines.append)
+            ok = code == expect and needle in '\n'.join(lines)
+            print('selftest %-24s exit %d (expected %d)%s' % (name, code, expect, '' if ok else '  <-- WRONG'))
+            if not ok:
+                failures.append(name)
+                print('\n'.join('    ' + line for line in lines))
+
+        def compare_case(name, kind, expect, needle):
+            lines = []
+            code = compare(kind, run, new, out=lines.append)
+            ok = code == expect and needle in '\n'.join(lines)
+            print('selftest %-24s exit %d (expected %d)%s' % (name, code, expect, '' if ok else '  <-- WRONG'))
+            if not ok:
+                failures.append(name)
+                print('\n'.join('    ' + line for line in lines))
+
+        poke('replay/g+0/wgpu/vram.bin', 3)(run)
+        adopt_case('adopt-differs', ['test-gpu=%s' % run, 'replay=%s' % run], 1, 'nothing written')
+        if new.exists():
+            failures.append('adopt-differs wrote a golden')
+        poke('replay/g+0/wgpu/vram.bin', 3)(run)
+        adopt_case('adopt-other-device', ['test-gpu=%s' % run], 1, 'REFUSED',
+                   dict(system, adapters=[dict(adapter, device='ffff')]))
+        adopt_case('adopt-same-driver', ['test-gpu=%s' % run], 1, "this PC's drivers",
+                   dict(system, adapters=[dict(adapter, driver='0.0.0.0')], warp='0.0.0.0'))
+        adopt_case('adopt', ['test-gpu=%s' % run, 'replay=%s' % run], 0, 'left out: native-transfers')
+        if not (new / 'test-gpu/vram-hardware-d3d11.bin').is_file():
+            failures.append('adopt kept no retired item')
+        compare_case('adopted-compare', 'replay', 0, 'compared 3 items (meta count 3): identical')
+        compare_case('adopted-left-out', 'native-transfers', 1, 'the golden has no group native-transfers')
+        adopt_case('adopt-exists', ['test-gpu=%s' % run], 1, 'already has a golden')
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print('selftest: %s' % ('PASS' if not failures else 'FAIL ' + ', '.join(failures)))
@@ -588,6 +745,9 @@ def main(argv=None):
     cmp_.add_argument('--capture', help='replay and web: the capture (g+0, g+3600); found by default')
     cmp_.add_argument('--backend', choices=BACKENDS, default='wgpu',
                       help='replay groups: the backend of a one-backend run (wgpu, the only one)')
+    ad = sub.add_parser('adopt', help="this PC's golden from one recorded with another driver, proven equal")
+    ad.add_argument('--from', dest='old', required=True, help='the old golden (directory or key)')
+    ad.add_argument('groups', nargs='+', metavar='GROUP[=SOURCE]')
     sub.add_parser('selftest', help='planted mutations on a synthetic golden')
     args = ap.parse_args(argv)
     if args.command == 'key':
@@ -597,6 +757,8 @@ def main(argv=None):
         return 0
     if args.command == 'selftest':
         return selftest()
+    if args.command == 'adopt':
+        return adopt(args.old, args.groups)
     golden = Path(args.golden) if args.golden else GOLDEN_ROOT / adapter_key(default_adapter())
     return compare(args.kind, args.source, golden, args.capture, args.backend)
 

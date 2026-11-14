@@ -39,6 +39,9 @@ def steps(tier, jobs):
                     ('scan_retail', [PY, 'port/tools/scan_retail.py', 'build/host64-exe/dhd64.exe'], ROOT),
                     ('net_tests', [PY, 'port/net/build_tests.py'], ROOT),
                     ('test_gs_wgpu', [PY, 'port/tools/test_gs_wgpu.py', '--skip-hardware'], ROOT),
+                    # the .ntrace replayer's own checks on synthetic traces, no GPU or window (finding 242)
+                    ('native_replay', [PY, 'port/tools/rustgs.py', 'run', '--target', 'x86_64-pc-windows-msvc',
+                                       '--bin', 'native_replay', '--', '--selftest'], ROOT),
                     # dhd.ini's own tests: saves at once, the Windows retries (findings 101, 228)
                     ('settings_tests', [PY, 'port/tools/rustgs.py', 'test', '--', '-p', 'dhd_settings'], ROOT),
                     # the launcher page's logic: strings, the phones' bridge, the disc import, bindings (finding 225)

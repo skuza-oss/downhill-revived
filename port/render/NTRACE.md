@@ -1,6 +1,14 @@
 # `.ntrace`: the native renderer's picture trace
 
-A change that breaks old traces bumps `version` and keeps the reader for the old one.
+A change that breaks old traces bumps `version` and keeps the reader for the old one while a
+recorder still writes it.
+
+**Versions.** 2 (now): a command's head is `DhdrCommand` up to its first pointer, 184 bytes; the
+replayer takes the size from the struct (`offset_of!(DhdrCommand, texture)`), so it follows the
+layout `abi.rs` pins. 1: the same with the 168-byte head of before the native mesh draws grew
+`DhdrNativeConstants` (finding 168). Version 1 traces came only from the retired recorder below and
+none is kept, so the replayer refuses them (exit 2) instead of keeping a reader nothing can feed
+(finding 242).
 
 An `.ntrace` records, picture by picture, exactly what the native renderer's GPU half is given (the
 `DhdrPicture` that `port/gs/native_snapshot.inc` builds) and what the C path drew from it on
@@ -38,7 +46,7 @@ record starts on a 4-byte boundary. `NONE` is `0xFFFFFFFF`.
 | Offset | Type | Field |
 |---|---|---|
 | 0 | `u8[8]` | magic `"DHDNTRC\0"` |
-| 8 | `u32` | `version` = 1 |
+| 8 | `u32` | `version` = 2 |
 | 12 | `u32` | `header_bytes`: total header size, a multiple of 4, padding included |
 | 16 | `u32` | `flags`: bit 0 `DUAL`, set when the recording renderer drew with dual-source blending (its `dual` and its dual module); every other bit 0 |
 | 20 | `u32` | `api`: 1 DX12, 2 Vulkan, 3 browser WebGPU |
@@ -70,7 +78,7 @@ pad members are 0).
 | 4 | `SURFACES` | `u32 count` (= `surface_count`), then per surface `i` (from 0): `DhdrSurfaceInfo` as is (40 bytes), `u32 before`: the `BLOB` id of its contents when the picture's commands start (after `native_prepare_surfaces`: grown, old texels kept, new ones zero), `NONE` exactly when its `size` is 0 x 0. The blob's size equals `size`, its format follows `depth`. |
 | 5 | `VERTICES` | `u32 count` (= `vertex_count`), then `count` `DhdrVertex` as is (32 bytes each). |
 | 6 | `CONVERTS` | `u32 count` (= `convert_count`), then per conversion: `i16 surface[4]`, `DhdrConvertConstants` as is (1632 bytes, `tex[3]` as recorded), `u32 base` (`TEXTURE` id or `NONE`). |
-| 7 | `COMMANDS` | `u32 count` (= `command_count`), then per command: the first 168 bytes of `DhdrCommand` as is (everything before its pointers), `u32 texture`, `u32 replacement` (`TEXTURE` ids or `NONE`), `u32 pixel_bytes`, then that many bytes: `IMPORT` `w * h * 4`, `ALPHA_UPLOAD` `64 * 32 * 4`, every other kind 0. |
+| 7 | `COMMANDS` | `u32 count` (= `command_count`), then per command: the first 184 bytes of `DhdrCommand` as is (everything before its pointers), `u32 texture`, `u32 replacement` (`TEXTURE` ids or `NONE`), `u32 pixel_bytes`, then that many bytes: `IMPORT` `w * h * 4`, `ALPHA_UPLOAD` `64 * 32 * 4`, every other kind 0. |
 | 8 | `MOVIE` | Only when `movie_on`: `u32 width, u32 height`, then `width * height * 4` RGBA8 bytes. |
 | 9 | `RESULT` | Ends the picture: `DhdrPictureResult` as is (80 bytes; the counters as the C path counted them for this picture alone), then, when `shown` is 1, `display_width * display_height * 4` bytes (the display texture after the picture, as `native_read_display` returns it), then `u32 count` (= `surface_count`) and per surface `u32 after`: the `BLOB` id of its contents after the picture was submitted, `NONE` when it has no texture. When `shown` is 0, `display_width` and `display_height` are 0. |
 | 15 | `END` | `u64 records` (records before END), `u64 fnv`, `u32 counts[16]` (records with tags 0-15; 0 is unused). |
@@ -86,7 +94,7 @@ output does not depend on texture identity), and so do two equal blobs (a surfac
 usually the next picture's `before`). The recorder may key on a SHA-256 of the record's payload
 after the id.
 
-Only tags 1-9 and 15 are valid in version 1. Any other tag is an error.
+Only tags 1-9 and 15 are valid in version 2. Any other tag is an error.
 
 ### END and integrity
 
