@@ -91,6 +91,25 @@ export function isOutdated(clientVersion: string, minVersion: string): boolean {
   return c === null || compareVersions(c, min) < 0;
 }
 
+/** A game's report of one failed path to the SFU (`sfu_trouble`, finding 248): fixed words only,
+    the same lists as the game's (port/render/net/src/trouble.rs). Nothing in it names a player,
+    an address, a session or a credential. */
+export const TROUBLE_PATHS = ["udp", "turn"] as const;
+export const TROUBLE_STEPS = ["send", "receive", "connect", "credentials", "tls_connect", "tls_handshake", "allocate",
+  "channel_bind", "refresh", "first_data", "link"] as const;
+export const TROUBLE_KINDS = ["timeout", "refused", "reset", "unreachable", "denied", "dns", "tls", "closed", "integrity",
+  "no_answer", "turn_400", "turn_401", "turn_403", "turn_437", "turn_438", "turn_440", "turn_441", "turn_442", "turn_486",
+  "turn_508", "turn_other", "other"] as const;
+export type Trouble = { path: string; step: string; kind: string; version: string };
+
+/** The report's fields when every one is a known word and the version a plain release, else null. */
+export function troubleOf(m: Record<string, unknown>): Trouble | null {
+  const word = (list: readonly string[], v: unknown) => typeof v === "string" && list.includes(v);
+  if (!word(TROUBLE_PATHS, m.path) || !word(TROUBLE_STEPS, m.step) || !word(TROUBLE_KINDS, m.kind)) return null;
+  if (typeof m.version !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(m.version)) return null;
+  return { path: m.path as string, step: m.step as string, kind: m.kind as string, version: m.version };
+}
+
 // Join codes: no 0/O, 1/I/L.
 export const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 export const CODE_LENGTH = 6;

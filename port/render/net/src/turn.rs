@@ -4,6 +4,7 @@
 //! long-term credential, Refresh, ChannelBind (which also installs the permission) and ChannelData.
 //! Over a stream there are no retransmissions (RFC 8489 6.2.2); a transaction unanswered within
 //! TRANSACTION_TIMEOUT fails the allocation.
+use crate::trouble::{Kind as Why, Step};
 use ring::hmac;
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -83,6 +84,8 @@ pub struct Client {
     out: Vec<u8>,
     events: VecDeque<Event>,
     failed: Option<String>,
+    /// The step that failed and the kind of error (finding 248).
+    failure: Option<(Step, Why)>,
     rx: Vec<u8>,
     seq: u64,
     created: Instant,
@@ -94,7 +97,7 @@ impl Client {
             username: username.into(), password: password.into(), realm: None, nonce: None, key: None,
             relayed: None, lifetime: Duration::from_secs(600), refresh_at: None, pending: HashMap::new(),
             by_peer: HashMap::new(), channels: HashMap::new(), queued: VecDeque::new(), out: vec![],
-            events: VecDeque::new(), failed: None, rx: vec![], seq: 0, created: now,
+            events: VecDeque::new(), failed: None, failure: None, rx: vec![], seq: 0, created: now,
         };
         // The first Allocate goes without credentials: its 401 brings the realm and nonce.
         c.request(Kind::Allocate, now);
@@ -102,9 +105,13 @@ impl Client {
     }
 
     pub fn failed(&self) -> Option<&str> { self.failed.as_deref() }
+    /// Which request failed and how (finding 248).
+    pub fn failure(&self) -> Option<(Step, Why)> { self.failure }
+    /// Allocated and with a channel bound (a relay that carries nothing past this: first data).
+    pub fn bound(&self) -> bool { self.channels.values().any(|(_, bound, _)| *bound) }
     /// The server refused the allocation (the SFU's fault injection).
     #[cfg(test)]
-    pub fn refuse(&mut self) { self.fail("TURN Allocate error 400 (test)"); }
+    pub fn refuse(&mut self) { self.fail(Step::Allocate, Why::Turn400, "TURN Allocate error 400 (test)"); }
     /// Bytes wait in `output()` (the probe).
     #[cfg(test)]
     pub fn output_pending(&self) -> bool { !self.out.is_empty() }
@@ -150,7 +157,7 @@ impl Client {
             let total = match self.rx[0] >> 6 {
                 0 => 20 + len,
                 1 => 4 + ((len + 3) & !3),
-                _ => { self.fail("garbage on the TURN stream"); return; }
+                _ => { self.fail(Step::Link, Why::Other, "garbage on the TURN stream"); return; }
             };
             if self.rx.len() < total { return; }
             let frame: Vec<u8> = self.rx.drain(..total).collect();
@@ -168,8 +175,9 @@ impl Client {
     /// Refreshes and timeouts; call at least every second.
     pub fn tick(&mut self, now: Instant) {
         if self.failed.is_some() { return; }
-        if self.pending.values().any(|(_, at)| now.duration_since(*at) > TRANSACTION_TIMEOUT) {
-            return self.fail("TURN server did not answer");
+        let late = self.pending.values().find(|(_, at)| now.duration_since(*at) > TRANSACTION_TIMEOUT).map(|(kind, _)| *kind);
+        if let Some(kind) = late {
+            return self.fail(step_of(kind), Why::Timeout, &format!("TURN server did not answer its {}", method_name(kind)));
         }
         if self.refresh_at.is_some_and(|at| now >= at) && !self.pending.values().any(|(k, _)| *k == Kind::Refresh) {
             self.refresh_at = None;
@@ -193,8 +201,8 @@ impl Client {
         }
     }
 
-    fn fail(&mut self, why: &str) {
-        if self.failed.is_none() { self.failed = Some(why.into()); }
+    fn fail(&mut self, step: Step, kind: Why, why: &str) {
+        if self.failed.is_none() { self.failed = Some(why.into()); self.failure = Some((step, kind)); }
     }
 
     fn request(&mut self, kind: Kind, now: Instant) {
@@ -240,7 +248,7 @@ impl Client {
         let Some((kind, sent)) = self.pending.remove(&m.id) else { return };
         // Answers to authenticated requests must carry a valid integrity (RFC 8489 9.2.4).
         if let Some(key) = &self.key {
-            if !m.verify(frame, key) && class == SUCCESS { return self.fail("TURN answer failed its integrity check"); }
+            if !m.verify(frame, key) && class == SUCCESS { return self.fail(step_of(kind), Why::Integrity, "TURN answer failed its integrity check"); }
         }
         if class == ERROR {
             let code = m.get(ERROR_CODE).filter(|v| v.len() >= 4).map_or(0, |v| v[2] as u16 * 100 + v[3] as u16);
@@ -256,17 +264,17 @@ impl Client {
                 return self.request(kind, now);
             }
             if kind == Kind::Refresh && self.lifetime.is_zero() { return; }
-            let method = match kind { Kind::Allocate => "Allocate", Kind::Refresh => "Refresh", Kind::Bind(_) => "ChannelBind" };
+            let method = method_name(kind);
             // The error reason and credential material can contain identifying data. Only
             // locally known request metadata: enough to distinguish the initial challenge,
             // authenticated allocation, permission and renewal failures without exposing them.
-            return self.fail(&format!("TURN {method} error {code} (authenticated={}, allocated={}, credentials held={}s, request age={}ms; relay UDP/IPv4)",
+            return self.fail(step_of(kind), Why::of_turn(code), &format!("TURN {method} error {code} (authenticated={}, allocated={}, credentials held={}s, request age={}ms; relay UDP/IPv4)",
                 self.key.is_some(), self.relayed.is_some(), now.saturating_duration_since(self.created).as_secs(), now.saturating_duration_since(sent).as_millis()));
         }
         match kind {
             Kind::Allocate => {
                 let Some(addr) = m.get(XOR_RELAYED_ADDRESS).and_then(|v| unxor_address(v, &m.id)) else {
-                    return self.fail("TURN allocation without a relayed address");
+                    return self.fail(Step::Allocate, Why::Other, "TURN allocation without a relayed address");
                 };
                 self.relayed = Some(addr);
                 self.lifetime = Duration::from_secs(m.get(LIFETIME).filter(|v| v.len() == 4)
@@ -294,6 +302,13 @@ impl Client {
         let lead = if self.lifetime > Duration::from_secs(120) { self.lifetime - Duration::from_secs(60) } else { self.lifetime / 2 };
         self.refresh_at = Some(now + lead);
     }
+}
+
+fn method_name(kind: Kind) -> &'static str {
+    match kind { Kind::Allocate => "Allocate", Kind::Refresh => "Refresh", Kind::Bind(_) => "ChannelBind" }
+}
+fn step_of(kind: Kind) -> Step {
+    match kind { Kind::Allocate => Step::Allocate, Kind::Refresh => Step::Refresh, Kind::Bind(_) => Step::ChannelBind }
 }
 
 fn channel_data(out: &mut Vec<u8>, channel: u16, data: &[u8]) {
@@ -457,6 +472,72 @@ fn md5(input: &[u8]) -> [u8; 16] {
     let mut out = [0u8; 16];
     for (i, w) in h.iter().enumerate() { out[i * 4..i * 4 + 4].copy_from_slice(&w.to_le_bytes()); }
     out
+}
+
+/// Tests: a stand-in for the TURN service over a stream, for the association tests (sfu.rs):
+/// the long-term credential's 401, Allocate, ChannelBind and ChannelData both ways, with the
+/// relayed address the test's own socket.
+#[cfg(test)]
+pub(crate) struct FakeServer {
+    key: Vec<u8>,
+    relayed: SocketAddr,
+    channels: HashMap<u16, SocketAddr>,
+    rx: Vec<u8>,
+    /// Datagrams the client sends to peers are dropped (a relay that carries nothing).
+    pub drop_peer_data: bool,
+}
+#[cfg(test)]
+impl FakeServer {
+    const REALM: &'static str = "example.org";
+    const NONCE: &'static str = "n";
+    pub fn new(user: &str, pass: &str, relayed: SocketAddr) -> Self {
+        Self { key: md5(format!("{user}:{}:{pass}", Self::REALM).as_bytes()).to_vec(), relayed, channels: HashMap::new(), rx: vec![], drop_peer_data: false }
+    }
+    /// The client's bytes: the answers to write back, and the datagrams it sends to peers.
+    pub fn input(&mut self, bytes: &[u8]) -> (Vec<u8>, Vec<(SocketAddr, Vec<u8>)>) {
+        self.rx.extend_from_slice(bytes);
+        let (mut out, mut sent) = (vec![], vec![]);
+        loop {
+            if self.rx.len() < 4 { break; }
+            let len = u16::from_be_bytes([self.rx[2], self.rx[3]]) as usize;
+            let total = if self.rx[0] >> 6 == 1 { 4 + ((len + 3) & !3) } else { 20 + len };
+            if self.rx.len() < total { break; }
+            let frame: Vec<u8> = self.rx.drain(..total).collect();
+            if frame[0] >> 6 == 1 {
+                let channel = u16::from_be_bytes([frame[0], frame[1]]);
+                if let (Some(peer), false) = (self.channels.get(&channel), self.drop_peer_data) { sent.push((*peer, frame[4..4 + len].to_vec())); }
+                continue;
+            }
+            let Some(m) = Parsed::new(&frame) else { continue };
+            let method = m.kind & 0x3EEF;
+            if m.get(MESSAGE_INTEGRITY).is_none() {
+                let mut r = Message::new(method | ERROR, m.id);
+                r.attr(ERROR_CODE, &[0, 0, 4, 1]);
+                r.attr(REALM, Self::REALM.as_bytes());
+                r.attr(NONCE, Self::NONCE.as_bytes());
+                out.extend_from_slice(&r.bytes);
+                continue;
+            }
+            assert!(m.verify(&frame, &self.key));
+            let mut r = Message::new(method | SUCCESS, m.id);
+            if method == ALLOCATE {
+                r.attr(XOR_RELAYED_ADDRESS, &xor_address(self.relayed, &m.id));
+                r.attr(LIFETIME, &600u32.to_be_bytes());
+            } else if method == CHANNEL_BIND {
+                let (Some(c), Some(peer)) = (m.get(CHANNEL_NUMBER), m.get(XOR_PEER_ADDRESS).and_then(|v| unxor_address(v, &m.id))) else { continue };
+                self.channels.insert(u16::from_be_bytes([c[0], c[1]]), peer);
+            }
+            r.integrity(&self.key);
+            out.extend_from_slice(&r.bytes);
+        }
+        (out, sent)
+    }
+    /// A datagram from a peer to the relayed address, as the client's stream gets it.
+    pub fn from_peer(&self, peer: SocketAddr, data: &[u8]) -> Vec<u8> {
+        let mut out = vec![];
+        if let Some((c, _)) = self.channels.iter().find(|(_, p)| **p == peer) { channel_data(&mut out, *c, data); }
+        out
+    }
 }
 
 #[cfg(test)]

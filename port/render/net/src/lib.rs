@@ -25,6 +25,7 @@ mod peer;
 mod relay;
 mod sfu;
 mod stream;
+mod trouble;
 mod turn;
 
 use std::collections::VecDeque;
@@ -299,6 +300,9 @@ struct Assoc {
     p2p_expect: Option<Vec<u64>>,
     /// The room's welcome lists "sfu_silent": it takes a silent race link's report (finding 187).
     silent_ok: bool,
+    /// The room's welcome lists "sfu_trouble": it takes a failed path's report (finding 248). A
+    /// server without it answers the report with an error ("Unknown signaling message.").
+    trouble_ok: bool,
     /// The running race's clock on this PC (sfu::race_clock, from its first start message; a rejoin
     /// keeps it) and its start moment on it (race_go, finding 187): every association in the race
     /// counts its silence from that moment.
@@ -307,6 +311,11 @@ struct Assoc {
 }
 
 impl Assoc {
+    /// No association yet: the first one starts at once, a failed one's pause starts at 1 s.
+    fn new() -> Self {
+        Self { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None,
+            silent_ok: false, trouble_ok: false, race_clock: None, go: None }
+    }
     /// A new association (its offer replaces any session the room has for this member), given the
     /// running race if there is one.
     fn start(&mut self, c: &WsConn, wake: &sfu::Wake) -> Result<(), Box<dyn std::error::Error>> {
@@ -379,7 +388,7 @@ fn send_main(c: Arc<WsConn>) {
     });
     // Race frames the last flush handed to the SFU after its poll: poll again before waiting.
     let mut unwritten = false;
-    let mut a = Assoc { sfu: None, start: None, held: Vec::new(), retry_at: None, pause: Duration::from_secs(1), turn_first: false, p2p_expect: None, silent_ok: false, race_clock: None, go: None };
+    let mut a = Assoc::new();
     // A room's welcome came on this connection: an association belongs here.
     let mut welcomed = false;
     // A P2P room (finding 186): its star, made by the first welcome that says so; it outlives a
@@ -426,6 +435,7 @@ fn send_main(c: Arc<WsConn>) {
                         "welcome" => {
                             welcomed = true;
                             a.silent_ok = message["features"].as_array().is_some_and(|f| f.iter().any(|x| x == "sfu_silent"));
+                            a.trouble_ok = message["features"].as_array().is_some_and(|f| f.iter().any(|x| x == "sfu_trouble"));
                             // The kind of room is the welcome's (a P2P room says so, finding 186).
                             if message["transport"] == "p2p" {
                                 star.get_or_insert_with(|| p2p::P2p::new(wake.clone())).room(&message);
@@ -517,8 +527,9 @@ fn send_main(c: Arc<WsConn>) {
             match rtc.poll() {
                 Ok((text, frames)) => {
                     if text.iter().any(|t| t["type"] == "sfu_connected") { a.pause = Duration::from_secs(1); a.turn_first = rtc.via_relay(); }
-                    // A server without it would refuse the report (finding 187): logged only.
-                    let text: Vec<_> = text.into_iter().filter(|t| a.silent_ok || t["type"] != "sfu_silent").collect();
+                    // A server without them would refuse the reports (findings 187, 248): logged only.
+                    let text: Vec<_> = text.into_iter().filter(|t| (a.silent_ok || t["type"] != "sfu_silent")
+                        && (a.trouble_ok || t["type"] != "sfu_trouble")).collect();
                     // While the room connection is down its signaling waits for the rejoin.
                     if lock(&c.queue).connected {
                         for t in text { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
@@ -528,7 +539,15 @@ fn send_main(c: Arc<WsConn>) {
                     incoming = frames;
                 }
                 // A new one after the pause; a lost room connection's welcome starts it at once.
-                Err(e) => { eprintln!("net: SFU connection failed ({e})"); a.failed(); }
+                // Its paths' reports made by this poll still go to the room (finding 248).
+                Err(e) => {
+                    eprintln!("net: SFU connection failed ({e})");
+                    let reports: Vec<_> = rtc.take_reports().into_iter().filter(|_| a.trouble_ok).collect();
+                    if lock(&c.queue).connected {
+                        for t in reports { lock(&c.queue).out.push_back((false, t.to_string().into_bytes())); }
+                    }
+                    a.failed();
+                }
             }
         }
         c.race_live.store(a.sfu.is_some() || star.as_ref().is_some_and(|s| s.star.any_up()), Ordering::Release);

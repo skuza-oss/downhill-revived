@@ -32,6 +32,7 @@ import {
   measuredRtt,
   minVersionOf,
   randomSeed,
+  troubleOf,
 } from "./protocol";
 import { placeOf, regionOfPlace, roomArea, roomRegion, traceColo, type HintSource } from "./region";
 import {
@@ -100,8 +101,14 @@ const SFU_RENEW_MS = 20_000;
     game reports a race link that delivers nothing (`sfu_silent`) and names its race's start moment
     to the room (`race_go`) only to a server that lists them; 0.7.13 ignores the list. `score`
     (finding 204): a finish may carry a round's score, and a race whose finishes carry one ranks
-    by it (the arena's Mosh Bowl round); a game runs that round only on a server that lists it. */
-const SERVER_FEATURES = ["sfu_silent", "race_go", "score"];
+    by it (the arena's Mosh Bowl round); a game runs that round only on a server that lists it.
+    `sfu_trouble` (finding 248): a game reports a failed path to the SFU only to a server that lists
+    it (an older one answers an unknown sfu_ message with an error the game shows). */
+const SERVER_FEATURES = ["sfu_silent", "race_go", "score", "sfu_trouble"];
+/** A member's `sfu_trouble` reports logged in TROUBLE_WINDOW_MS: two paths for each of its
+    SFU_OFFERS sessions; more are dropped without a word (finding 248). */
+const TROUBLE_REPORTS = 12;
+const TROUBLE_WINDOW_MS = 300_000;
 /** A round's score is at most six digits, as the game's HUD shows it (finding 204). */
 const MAX_SCORE = 999_999;
 /** The one track whose race is a scored round: the Mosh Pit arena (the game's MOSH_TRACK in
@@ -705,6 +712,10 @@ export class Room extends DurableObject<Env> {
     await this.dropSocket(ws, true);
   }
 
+  /** Each member's latest `sfu_trouble` reports (their times), for TROUBLE_REPORTS; a member's
+      entry goes when it leaves (leave(), the one place a member is removed) or the room ends. */
+  private troubleAt = new Map<number, number[]>();
+
   /** A cleanup pass runs (retryCleanup): the alarm starts no second one meanwhile. */
   private cleaning = false;
 
@@ -1159,6 +1170,16 @@ export class Room extends DurableObject<Env> {
         }
         this.sfuRenew(me, race, "hears nothing from the other racers (sfu_silent)");
         await this.save();
+      } else if (m.type === "sfu_trouble") {
+        // One failed path to the SFU (finding 248): fixed words only, one line for the Workers
+        // Logs to count causes by; nothing else changes. A report with an unknown word is dropped.
+        const trouble = troubleOf(m);
+        const now = Date.now();
+        const recent = (this.troubleAt.get(me.id) ?? []).filter((t) => now - t < TROUBLE_WINDOW_MS);
+        if (!trouble || recent.length >= TROUBLE_REPORTS) return false;
+        this.troubleAt.set(me.id, [...recent, now]);
+        console.log(`Realtime trouble: ${trouble.path}/${trouble.step}/${trouble.kind} ${trouble.version}` +
+          `${me.region ? " " + me.region : ""} (room ${logCode(st.code)}, member ${me.id})`);
       } else this.error(ws, "bad_value", "Unknown signaling message.");
       return false;
     } catch (error) {
@@ -2117,6 +2138,7 @@ export class Room extends DurableObject<Env> {
     this.sockets.delete(memberId);
     this.rtts.delete(memberId);
     this.firstRtts.delete(memberId);
+    this.troubleAt.delete(memberId);
     if (ws) {
       // Forget the socket so a late close event doesn't count twice.
       ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketInfo), memberId: null, gone: true });
@@ -2251,6 +2273,7 @@ export class Room extends DurableObject<Env> {
   private async destroy(): Promise<void> {
     if (this.listedKey !== null) this.updateListing(false, true);
     this.state = null;
+    this.troubleAt.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // What didn't close outlives the room (Cleanup): stored again, with its alarm.
