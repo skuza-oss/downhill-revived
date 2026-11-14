@@ -51,6 +51,8 @@ final class LauncherBridge {
         }
     }
 
+    void defaults() { Native.phoneDefaults(ini); }
+
     /** The calls that read or write dhd.ini, and PLAY: one at a time on the activity's settings
      *  queue, in the order the page sent them (finding 228). A save then never overlaps another
      *  (or the snapshot's own `iso` save), and PLAY starts the game only after every save the page

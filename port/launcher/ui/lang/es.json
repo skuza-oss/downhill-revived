@@ -80,7 +80,7 @@
   "row.scale.window.gpu": "La resolución ajustada a la ventana fue de {used}x la última vez; tu GPU permite hasta {limit}x",
   "row.scale.window.memory": "La resolución ajustada a la ventana fue de {used}x la última vez; la memoria de tu GPU permite hasta {limit}x",
   "row.scale.window.texture": "La resolución ajustada a la ventana fue de {used}x la última vez; la textura más grande de tu GPU permite hasta {limit}x",
-  "row.scale.hintPhone": "Qué nítido se dibuja el 3D. 1x es el de la PS2; las escalas altas piden un móvil más rápido.",
+  "row.scale.hintPhone": "Qué nítido se dibuja el 3D. 1x es el de la PS2; las escalas altas piden un móvil más rápido. Los teléfonos Android lentos reconocidos empiezan a 1x con el Modo Rendimiento. Puedes cambiar ambos aquí.",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide se ajusta a la forma de tu monitor; 16:9 siempre es 16:9",
   "row.aspect.hintTouch": "Wide se ajusta a la forma de tu pantalla; 16:9 siempre es 16:9",

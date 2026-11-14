@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/system_properties.h>
 
 #include "../include/version.h"
 #include "phone.h"
@@ -26,9 +27,25 @@ const char *host_disc_check(const char *path);  /* host.c: NULL when path is the
 
 #define EXPORT(type, name) JNIEXPORT type JNICALL Java_app_downhillrevived_Native_##name
 
+void dhdr_android_defaults(const char *path, const char *soc);
+void android_phone_defaults(const char *path)
+{
+    char soc[PROP_VALUE_MAX] = "";
+    __system_property_get("ro.soc.model", soc);
+    dhdr_android_defaults(path, soc);
+}
+
 /* A Java string's UTF-8 (released by done), or NULL. */
 static const char *utf(JNIEnv *env, jstring s) { return s ? (*env)->GetStringUTFChars(env, s, NULL) : NULL; }
 static void done(JNIEnv *env, jstring s, const char *c) { if (s && c) (*env)->ReleaseStringUTFChars(env, s, c); }
+
+EXPORT(void, phoneDefaults)(JNIEnv *env, jclass cls, jstring ini)
+{
+    (void)cls;
+    const char *path = utf(env, ini);
+    if (path) android_phone_defaults(path);
+    done(env, ini, path);
+}
 
 /* A JSON text from one of dhd_settings' calls that say their whole length. */
 static jstring json(JNIEnv *env, size_t (*make)(const char *, char *, size_t), const char *path)

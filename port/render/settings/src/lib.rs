@@ -33,6 +33,7 @@ mod ini;
 pub mod install;
 pub mod launcher;
 pub mod name;
+pub mod phone;
 pub mod table;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -187,6 +188,12 @@ fn replace(temp: &Path, path: &Path) -> io::Result<()> {
 /// Ok(false): settings are off.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save(path: &Path, key: &str, value: &str) -> io::Result<bool> {
+    update(path, |ini| ini.set(key, value).map(|()| true))
+}
+
+/// A settings transaction; automatic defaults use the same lock and atomic replace as saves.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn update(path: &Path, edit: impl FnOnce(&mut Ini) -> Result<bool, String>) -> io::Result<bool> {
     if disabled(path) {
         return Ok(false);
     }
@@ -198,7 +205,10 @@ pub fn save(path: &Path, key: &str, value: &str) -> io::Result<bool> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
-    let ini = edited(old.as_deref(), key, value).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let mut ini = Ini::parse(old.as_deref().unwrap_or(HEADER.as_bytes()));
+    if !edit(&mut ini).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))? {
+        return Ok(false);
+    }
     leftovers_once(path);
     let (temp, mut f) = {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -229,6 +239,15 @@ pub fn create(path: &Path) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(e),
     }
+}
+
+/// Fill only missing phone choices under the settings save lock.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn update_phone_defaults(path: &Path, class: phone::Class, changed: &mut u32) -> io::Result<bool> {
+    update(path, |ini| {
+        *changed = phone::defaults(ini, class)?;
+        Ok(*changed != 0)
+    })
 }
 
 /// What the game sets at its start.

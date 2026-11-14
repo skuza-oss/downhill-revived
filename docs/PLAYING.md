@@ -526,3 +526,7 @@ Below the minimum the game may still start, but runs well under 60 fps: phones w
 G35/P35/A22 (PowerVR GE8320), Snapdragon 4xx or Unisoc SC9863A, phones with 2-3 GB of RAM, and
 PCs with 2 cores and old integrated graphics. Speed reports from such devices are closed with a
 pointer here; crashes are fixed on any device.
+
+On known slow Android GPU families, missing graphics choices start at **Resolution 1x** and
+**Performance Mode on**. Change either in the launcher under **Settings > Graphics**. Existing
+resolution and effects choices are kept. Unrecognized devices and iOS keep the usual defaults.
