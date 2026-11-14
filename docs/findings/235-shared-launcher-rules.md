@@ -6,36 +6,52 @@ Branch `cleanup/shared-launcher-rules` from `main` 584ce03f, started 2026-11-14.
 
 ## Goal and acceptance
 
-Share launcher links, phone update fetch and phone scale cap. No gameplay changes.
-Run check.py quick, port, docs; desktop launcher build/tests; Android native/Java build
-and unit tests; PC iOS host tests. Device and Simulator proof belongs to the lead.
-Disc checks and deployment floors are out of scope.
+Three rules each written once instead of per platform (cleanup audit A04, A06, the phone-scale
+half of A07): which links the launcher opens, the phones' update lookup, the phones' largest
+resolution scale. No gameplay change. Done when `check.py quick`, `port` and `docs` pass, the
+desktop launcher builds and its tests pass, Android's native library, Java and unit tests pass,
+and the iOS host tests that run on a PC pass. The iOS app, phones and the Simulator are the
+lead's proof after the merge. Out of scope: the disc check (lane 234), the minimum OS versions.
 
 ## Progress
 
-- A06: shared native launcher_link.h, desktop C ABI and Android JNI adapters; C fixtures.
-- A04: notice uses phone_update_find_source; retains winning source and log label,
-  daily stamp, auto_update, SDL thread and JNI notice.
-- A07: dhd_limits.h owns the phone cap; renderer and snapshots consume it.
-  No scale or deployment-floor change.
+- [x] A06: `port/host/launcher_link.h` (`launcher_link`) decides `open_link` for the desktop
+  (`src-tauri/launcher_link.c`, C ABI), Android (`Native.launcherLink`, JNI) and iOS
+  (`launcher_calls.c`); one fixture set, `port/host/test_launcher_link.c` (test_runtime host tests).
+- [x] A04: Android's direct-start notice (`android_update.c`) calls `phone_update_find_source`
+  (`phone.c`), which also names the winning source for its log line; daily stamp, `auto_update`,
+  SDL thread and JNI notice stay in `android_update.c`. Header comment rewritten.
+  Test: `port/host/test_phone_update.c`.
+- [x] A07 (scale): `NATIVE_PHONE_SCALE_MAX` lives in `port/render/include/dhd_limits.h`; the
+  renderer clamp (`gpu_rust_shared.inc`) and both phone snapshots (`scale_max`) read it.
+  `LauncherBridge.PHONE_SCALE_MAX` and `LAUNCHER_PHONE_SCALE_MAX` are gone. Still 6.
 
 ## Decisions
 
-The page uses discord/kofi aliases (ui/app.js:975), repository home (:648), release
-pages (:810, :980), and disc help (:244; disc.rs:163). All remain accepted.
-Keep the four prefix contracts; combine iOS character rejection with Android's
-repository traversal/control rejection, applied consistently to all project links.
-Desktop now refuses quotes, spaces, backslashes, controls and traversal; iOS also
-refuses controls and traversal; Android rejects malformed repository links instead
-of substituting releases/latest, and filters other links identically. No normal UI
-link changes. The update manifest URL rule remains separate.
-Research: https://url.spec.whatwg.org/ (dot segments include percent-encoded dots).
-No external code copied.
+- Links: the strictest rule that opens every link the page sends. The page sends the aliases
+  `discord` and `kofi` (`ui/app.js` footer), the repository home (Help), the releases page (notes
+  fallback), release pages from validated update results, and the disc problem's More link
+  (`blob/main/docs/findings/100-other-releases.md`, desktop `disc.rs`). So the rule is
+  the two aliases plus `https://github.com/skuza-oss/downhill-revived` followed by end, `/`, `?`
+  or `#`. Differences resolved:
+  - all three took any URL under `https://discord.gg/`, `https://ko-fi.com/skuza*`,
+    `https://github.com/skuza-oss/` and `https://downhill-revived.pages.dev/`; none of these is
+    sent by the page except through the aliases, so they are refused now;
+  - the desktop refused nothing inside an allowed prefix; iOS refused space, quotes, `<>` and
+    `\`; Android refused nothing outside the repository and rewrote a bad repository link to
+    releases/latest (`UpdatePage.safe`). Now all refuse whitespace, controls, quotes, `<>`, `\`
+    and dot segments (`..`, `%2e`, WHATWG URL: percent-encoded dots are dot segments), and
+    Android refuses a bad link instead of opening another page.
+- The update's URL rules (`net/update_check.c`, `update.rs`, `UpdatePage.safe` for the release
+  page) stay separate: they are a narrower contract.
+- Android's notice and the launcher kept slightly different failure log prefixes (`update:` /
+  `launcher:`); `phone_update_find_source` takes the prefix so both logs read as before.
 
 ## Surprises
 
-None so far.
+The iOS build copies the host sources; shared headers are found through the existing port-root
+header search path (`host/...`, `render/include/...`), the same way the PC fixture compiles them.
 
 ## Result
 
-Pending gates and lead device proof.
+Filled in at the merge.
