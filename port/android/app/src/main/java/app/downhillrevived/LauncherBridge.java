@@ -23,11 +23,6 @@ final class LauncherBridge {
     static final String[] CAPS = { "touch-settings", "disc-import", "direct-start", "share-log", "help", "touch-editor" };
     /** The largest resolution scale a phone's renderer draws (gpu_rust_shared.inc NATIVE_PHONE_SCALE_MAX). */
     static final int PHONE_SCALE_MAX = 6;
-    /** The project's pages, the only ones a link opens (the desktop launcher's list, main.rs open_link). */
-    static final String DISCORD = "https://discord.gg/XrSeTyzfr2", KOFI = "https://ko-fi.com/skuza";
-    static final String[] ALLOWED = { "https://discord.gg/", "https://ko-fi.com/skuza", "https://github.com/skuza-oss/",
-            "https://downhill-revived.pages.dev/" };
-
     private final LauncherActivity activity;
     private final String ini;
     /** The page's pick_disc waiting for the picker, and the import jobs by number. */
@@ -143,11 +138,8 @@ final class LauncherBridge {
             }
             case "open_link": {
                 String url = args.optString("url");
-                url = url.equals("discord") ? DISCORD : url.equals("kofi") ? KOFI : url;
-                boolean allowed = false;
-                for (String a : ALLOWED) allowed |= url.startsWith(a);
-                if (!allowed) { reply.error("not opening " + url); return; }
-                final String page = url.startsWith(UpdatePage.REPOSITORY) ? UpdatePage.safe(url) : url;
+                final String page = Native.launcherLink(url);
+                if (page == null) { reply.error("not opening " + url); return; }
                 activity.runOnUiThread(() -> activity.open(page));
                 reply.value(null);
                 return;

@@ -21,8 +21,9 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 const VERSION: &str = env!("DHD_VERSION");
-const DISCORD: &str = "https://discord.gg/XrSeTyzfr2";
-const KOFI: &str = "https://ko-fi.com/skuza";
+unsafe extern "C" {
+    fn dhd_launcher_link(url: *const std::ffi::c_char) -> *const std::ffi::c_char;
+}
 
 struct App {
     place: game::Place,
@@ -380,11 +381,10 @@ async fn check_disc(handle: AppHandle) -> Result<OnlineCheck, String> {
 /// Only the project's own pages open from the launcher.
 #[tauri::command]
 fn open_link(handle: AppHandle, url: String) -> Result<(), String> {
-    let url = match url.as_str() { "discord" => DISCORD.to_string(), "kofi" => KOFI.to_string(), _ => url };
-    let allowed = ["https://discord.gg/", "https://ko-fi.com/skuza", "https://github.com/skuza-oss/", "https://downhill-revived.pages.dev/"];
-    if !allowed.iter().any(|a| url.starts_with(a)) {
-        return Err(format!("not opening {url}"));
-    }
+    let input = std::ffi::CString::new(url.as_str()).map_err(|_| "invalid link")?;
+    let resolved = unsafe { dhd_launcher_link(input.as_ptr()) };
+    if resolved.is_null() { return Err(format!("not opening {url}")); }
+    let url = unsafe { std::ffi::CStr::from_ptr(resolved) }.to_str().map_err(|_| "invalid link")?;
     handle.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 

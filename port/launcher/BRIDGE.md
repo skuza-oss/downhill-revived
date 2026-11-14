@@ -148,3 +148,9 @@ launcher back after the game's process has ended:
   can't start itself again, so the editor alone's end would close the app; `reopen` is never set.
 - The desktop has no `touch-editor` cap; `--touch-editor` / `DHD_TOUCH_EDITOR=1` also serve the
   tests (`docs/TESTING.md`).
+
+The native bridges share link aliases and acceptance in `port/host/launcher_link.h`.
+`open_link` resolves Discord/Ko-fi and accepts only the four project URL prefixes,
+refusing whitespace/controls, quotes, angle brackets, backslashes and plain or
+percent-encoded dot traversal. The OS opener remains per platform. Release manifest
+URLs retain their separate, narrower update policy.

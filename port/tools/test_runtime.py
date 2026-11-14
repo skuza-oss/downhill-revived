@@ -195,6 +195,7 @@ def host_tests():
     # how the run before ended on iOS, every way (port/ios/host/run_record.c, finding 227)
     run('run-record', [ROOT / 'port/ios/host/run_record.c', ROOT / 'port/ios/tests/test_run_record.c'])
     # the iOS launcher's calls with a fake page, and the disc copy's rules (finding 227)
+    run('launcher-link', [ROOT / 'port/host/test_launcher_link.c'])
     calls_dir = OUT / 'launcher-calls'
     calls_dir.mkdir(exist_ok=True)
     run('launcher-calls', [ROOT / 'port/ios/host/launcher_calls.c', ROOT / 'port/net/json.c',

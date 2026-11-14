@@ -27,6 +27,8 @@ final class Native {
     static native String onlineCheck(String iso, String cache);
     /** "version\npage" when a newer release has an Android build, "" when none does, null offline. */
     static native String update();
+    /** Resolved project link, or null when refused by native policy. */
+    static native String launcherLink(String url);
     /** This build's version. */
     static native String version();
 }
