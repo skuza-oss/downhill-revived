@@ -39,6 +39,7 @@ pub mod guard;
 pub mod host;
 pub mod log;
 pub mod lost;
+mod loss_context;
 pub mod shaders;
 pub mod startup;
 #[cfg(target_os = "android")]
