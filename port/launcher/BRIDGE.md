@@ -58,6 +58,7 @@ call, served in arrival order (`launcher_calls.h`, finding 227).
 | `direct-start` | shows "Open the launcher at every start" (setting `launcher`) | | yes |
 | `share-log` | offers Share log (Help page, the crash note) | | yes |
 | `help` | shows the Help page (version, links, licences) and drops the footer's links | | yes |
+| `files-folder` | says on the first-start page that an .iso moved into the app's folder in Files is found under any name | | iOS |
 | `touch-editor` | shows "Edit the touch layout" (`play` with `edit_touch_layout`; what each phone does: "`play` with `edit_touch_layout`" below) | | yes |
 
 ## Calls
@@ -105,7 +106,7 @@ is the same as on Android) and carries the page's messages to the app's `dhd` me
 that world, and the app's answers and events back (`dhdDeliver`, called in that world). The page's
 scripts see neither.
 
-It reports `["touch-settings", "disc-import", "direct-start", "share-log", "help", "touch-editor"]`
+It reports `["touch-settings", "disc-import", "direct-start", "share-log", "help", "touch-editor", "files-folder"]`
 and implements the phone calls in `launcher_calls.c`, over the code Android's launcher calls:
 
 - `snapshot`, `settings_schema`, `save_setting`, `rider_name`: `dhd_settings_values_json`,
@@ -116,6 +117,11 @@ and implements the phone calls in `launcher_calls.c`, over the code Android's la
   for any file (opened in place), the boot check before and after (`host_disc_check`), the room,
   the copy with progress, `DiscImage`'s completeness rule (`port/ios/host/disc_copy.c`), the rename
   over the old copy; a file already in the app's Documents is moved into place instead of copied.
+  The same import, with its `disc-import` events, also starts without `pick_disc` (finding 240): for a
+  document opened in the app ("Open in Downhill Revived", Info.plist's `.iso` type), and for an
+  `.iso` under any name in Documents or Documents/Inbox that passes the boot check, looked for once
+  the page listens (its first `check_update`) and at each return to the front while no accepted
+  `SCUS-97177.iso` is there. Each step is logged to Documents/launcher.log, which Share log includes.
 - `check_disc`: `dhd_disc_check` with `iso-check.txt` beside dhd.ini.
 - `check_update`: `phone_update_find` (`port/host/phone.c`, the same as Android's) with latest.json's
   `ios` key.

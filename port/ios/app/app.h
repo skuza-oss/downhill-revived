@@ -7,6 +7,8 @@
 #import <UIKit/UIKit.h>
 /* The launcher's page (the note after a run that closed unexpectedly: launcher_set_last_exit). */
 UIViewController *launcher_view_controller(void);
+/* A document opened in the app ("Open in Downhill Revived", finding 240): the disc's import. */
+void launcher_open_document(NSURL *url);
 #endif
 
 /* The setting "launcher" is off and the disc is ready: the app starts the game at once. */
