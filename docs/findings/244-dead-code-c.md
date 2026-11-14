@@ -18,7 +18,7 @@ traces equal to the base build.
 - [x] L02 `raster_module` in `port/render/src/exact/pipelines.rs`
 - [x] L03 snapshot macro override scaffolding and `native_snapshot_free`
 - [x] L04 ignored `--renderer` argument (`port/web/build.py`, `port/tools/web_gs_replay.mjs`)
-- [ ] L06 `isValidCode` in `online/server/src/protocol.ts`
+- [x] L06 `isValidCode` in `online/server/src/protocol.ts`
 - [ ] L07 `online/server/AGENTS.md` address sentence scoped to SFU rooms
 - [ ] L08 `put8`, `dvalue`, `web_q_vu_ready`
 

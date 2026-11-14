@@ -113,12 +113,6 @@ export function randomCode(length = CODE_LENGTH): string {
   return code;
 }
 
-export function isValidCode(code: string, length = CODE_LENGTH): boolean {
-  if (code.length !== length) return false;
-  for (const c of code) if (!CODE_ALPHABET.includes(c)) return false;
-  return true;
-}
-
 export function randomSeed(): number {
   return crypto.getRandomValues(new Uint32Array(1))[0];
 }
