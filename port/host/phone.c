@@ -33,24 +33,36 @@ void phone_quote_last_exit(const char *dir)
     fclose(f);
 }
 
+typedef struct { int answered; const char *log_label; } Fetch;
+
 /* update_find's fetch: one GET; context counts the sources that answered. */
 static const char *fetch(void *context, const char *url)
 {
     static _Thread_local char body[64 * 1024];
     if (http_get(url, body, sizeof body) < 0) {
-        fprintf(stderr, "launcher: %s didn't answer\n", url);
+        fprintf(stderr, "%s: %s didn't answer\n", ((Fetch *)context)->log_label, url);
         return NULL;
     }
-    ++*(int *)context;
+    ++((Fetch *)context)->answered;
     return body;
 }
 
 int phone_update_find(const char *platform, char *version, size_t version_size, char *page, size_t page_size)
 {
+    return phone_update_find_source(platform, version, version_size, page, page_size, NULL, "launcher");
+}
+
+int phone_update_find_source(const char *platform, char *version, size_t version_size,
+                             char *page, size_t page_size, const char **source, const char *log_label)
+{
     static const char *const sources[] = {UPDATE_SOURCE_SERVER, UPDATE_SOURCE_GITHUB};
-    int answered = 0;
-    if (update_find(fetch, &answered, sources, sizeof sources / sizeof *sources, platform, DHD_VERSION,
-                    version, version_size, page, page_size))
+    Fetch context = {0, log_label};
+    if (source) *source = NULL;
+    int from = update_find(fetch, &context, sources, sizeof sources / sizeof *sources, platform, DHD_VERSION,
+                           version, version_size, page, page_size);
+    if (from) {
+        if (source) *source = sources[from - 1];
         return 1;
-    return answered ? 0 : -1;
+    }
+    return context.answered ? 0 : -1;
 }

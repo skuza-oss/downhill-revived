@@ -154,3 +154,6 @@ The native bridges share link aliases and acceptance in `port/host/launcher_link
 refusing whitespace/controls, quotes, angle brackets, backslashes and plain or
 percent-encoded dot traversal. The OS opener remains per platform. Release manifest
 URLs retain their separate, narrower update policy.
+
+Phone launcher checks and Android direct-start notices use the same fetch/find
+operation in `port/host/phone.c`; the notice keeps its daily policy and source log.

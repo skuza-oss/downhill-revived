@@ -1,20 +1,7 @@
-/* The update notice on Android (finding 143). A phone has no launcher to update the game, so at
-   start the game itself asks whether a newer release with an Android build is out, and says so in
-   one line over the game (DhdActivity.updateNotice) that opens the release's page in the browser
-   when tapped. Nothing is downloaded or installed: the player installs the new APK as the first.
-
-   - At most once a day (update-check.txt in the app's files folder holds when the last check
-     started), never when dhd.ini says auto_update = off.
-   - On a thread of its own, so the start never waits: the online server's copy of the newest
-     latest.json first (GET /v1/latest, online/server/src/latest.ts), then GitHub's release asset
-     (latest.json, through its redirect) whenever the server names no newer release: when it
-     doesn't answer, and also when its answer is older or stale (it keeps its last good copy
-     while it can't reach GitHub), so a stale copy never hides a release (update_find). The
-     launcher asks GitHub's API first (update.rs); a phone network shares one address among many,
-     and the API allows an address 60 checks an hour, so the phone starts with the server; the
-     second request is once a day at most. Each GET gives up after
-     the HTTPS client's timeouts (5 s to connect, 10 s without data); offline, the game just plays.
-   - The rules (the version compare, the manifest, the day) are port/net/update_check.c's. */
+/* Android's direct-start update notice (finding 143). The shared launcher checks
+   before PLAY; direct starts reach this daily worker when DHD_LAUNCHER_CHECKED is
+   absent. phone_update_find_source owns fetching and finding a release. Keep the
+   daily stamp, auto_update policy and JNI notice here; nothing is installed. */
 #include <SDL3/SDL.h>
 #include <jni.h>
 #include <stdio.h>
@@ -24,12 +11,11 @@
 
 #include "../include/version.h"
 #include "../net/update_check.h"
-#include "../net/ws.h"
+#include "phone.h"
 #include "../render/include/dhd_settings.h"
 
 /* latest.json's key for the APK (package_release.py --platform android). */
 #define PLATFORM "android"
-static const char *const sources[] = {UPDATE_SOURCE_SERVER, UPDATE_SOURCE_GITHUB};
 
 static char ini[1200], stamp[1200];
 
@@ -73,26 +59,14 @@ static void show_notice(const char *version, const char *page)
     (*env)->DeleteLocalRef(env, activity);
 }
 
-/* update_find's fetch: one GET, logged when it fails. */
-static const char *fetch(void *context, const char *url)
-{
-    static char body[64 * 1024];
-    (void)context;
-    if (http_get(url, body, sizeof body) < 0) {
-        fprintf(stderr, "update: %s didn't answer\n", url);
-        return NULL;
-    }
-    return body;
-}
-
 static int SDLCALL check(void *unused)
 {
     char version[32], page[512];
     (void)unused;
-    int from = update_find(fetch, NULL, sources, sizeof sources / sizeof *sources, PLATFORM, DHD_VERSION,
-                           version, sizeof version, page, sizeof page);
-    if (from) {
-        fprintf(stderr, "update: %s is out (this is %s, said %s): %s\n", version, DHD_VERSION, sources[from - 1], page);
+    const char *source = NULL;
+    int from = phone_update_find_source(PLATFORM, version, sizeof version, page, sizeof page, &source, "update");
+    if (from > 0) {
+        fprintf(stderr, "update: %s is out (this is %s, said %s): %s\n", version, DHD_VERSION, source, page);
         show_notice(version, page);
     } else {
         fprintf(stderr, "update: no newer Android release than %s\n", DHD_VERSION);

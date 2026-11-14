@@ -194,8 +194,12 @@ def host_tests():
     run('touch', [HLE / 'touch.c', HLE / 'test_touch.c'])
     # how the run before ended on iOS, every way (port/ios/host/run_record.c, finding 227)
     run('run-record', [ROOT / 'port/ios/host/run_record.c', ROOT / 'port/ios/tests/test_run_record.c'])
-    # the iOS launcher's calls with a fake page, and the disc copy's rules (finding 227)
+    # the phones' update lookup, with the source Android's notice logs (finding 235)
+    run('phone-update', [ROOT / 'port/host/test_phone_update.c',
+                         ROOT / 'port/net/update_check.c', ROOT / 'port/net/json.c'])
+    # the launcher's link rule, shared by the desktop, Android and iOS bridges (finding 235)
     run('launcher-link', [ROOT / 'port/host/test_launcher_link.c'])
+    # the iOS launcher's calls with a fake page, and the disc copy's rules (finding 227)
     calls_dir = OUT / 'launcher-calls'
     calls_dir.mkdir(exist_ok=True)
     run('launcher-calls', [ROOT / 'port/ios/host/launcher_calls.c', ROOT / 'port/net/json.c',

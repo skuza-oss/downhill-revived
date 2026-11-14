@@ -14,7 +14,8 @@ Disc checks and deployment floors are out of scope.
 ## Progress
 
 - A06: shared native launcher_link.h, desktop C ABI and Android JNI adapters; C fixtures.
-- A04 and A07 pending.
+- A04: notice uses phone_update_find_source; retains winning source and log label,
+  daily stamp, auto_update, SDL thread and JNI notice. A07 pending.
 
 ## Decisions
 
