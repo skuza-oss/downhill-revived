@@ -374,6 +374,8 @@ static int app_away(void) { return app_background || surface_dropped; }
      time away is no game time, offline or online, so nothing tries to catch it up.
    The close of the app ends the game as the close button does. */
 static SDL_AtomicInt away_waiting;   /* the game thread is in app_away_wait (gs_app_back) */
+static SDL_ThreadID game_thread;     /* init's: the game thread (away_in_a_wait) */
+static const char *away_where;       /* the wait for the drawing the game thread was in (away_in_a_wait) */
 
 /* The app is back on the screen (the platform's callback): when the game thread never got to
    app_away_wait (a quick flip), it lets the renderer go again itself; else app_away_wait does, once
@@ -406,7 +408,9 @@ static void app_away_wait(void)
     unsigned absence = gs_render_generation();
     gs_gpu_surface_reset(&gs, NULL);
     target_ready = 0;
-    hle_log("gs: in the background; the game waits (the renderer held, no surface)\n");
+    hle_log("gs: in the background; the game waits (the renderer held, no surface)%s%s\n", away_where ? ", from " : "",
+            away_where ? away_where : "");
+    away_where = NULL;
     for (;;) {
         while (app_away() && !window_closed) {
             surface_dropped = 0;   /* the surface is dropped: only the app's own state is waited for */
@@ -433,6 +437,17 @@ static void app_away_wait(void)
     waiting = 0;
 }
 
+/* graphics_queue.c's waits for the drawing, on any thread (finding 236). The callback holds the
+   render thread, so the GS worker soon waits at its handoff with a field queued, and the game
+   thread's next wait for the drawing (the VBLANK's wait for an earlier picture, a fence, a full
+   queue) would last the whole absence: it waits out the absence there instead, as at a field. */
+static void away_in_a_wait(const char *where)
+{
+    if (!app_away() || SDL_GetCurrentThreadID() != game_thread) return;
+    away_where = where;
+    app_away_wait();
+}
+
 /* The window (SDL's), then the renderer (gpu_rust.c: wgpu on Direct3D 12 or Vulkan, Metal on
    Apple; WARP when Windows has no graphics driver) and its surface on the window, which is shown
    once both run. */
@@ -456,6 +471,8 @@ static int init(void)
         return 0;
     }
     surface = 1;
+    game_thread = SDL_GetCurrentThreadID();
+    graphics_away_wait = away_in_a_wait;
     SDL_AddEventWatch(lifecycle_watch, NULL);
     hle_log("gs: WebGPU presentation (%s, window kind %u)\n", gs_gpu_backend_name(&gs), target.kind);
     sdl_host_run(show_window, NULL);
