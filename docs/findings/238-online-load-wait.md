@@ -47,10 +47,11 @@ scripted game walking its menus (findings 180, the `DHD_NET_JOIN` note); A is th
 ## Progress
 
 - [x] 2026-11-14: the logs read (above).
-- [ ] the hold and the per-field exchange, the ride said again, load timing lines
-- [ ] phone measurements offline and online (2, 4, 8 members) on a release-signed build
-- [ ] PC check: two hidden games on a local server, one slow
-- [ ] proof: the 8-member room with the phone; a 2-member room; an offline race
+- [x] the hold and the per-field exchange, the ride said again, load timing lines (eb1a1972)
+- [x] phone measurements offline and online (2, 4, 8 members) on a release-signed PGO build of
+  this branch (core aed3e9a7c1df695d)
+- [x] PC check: two hidden games on a local server, one slow
+- [x] proof: the 8-member room with the phone; a 2-member room; an offline race
 
 ## Decisions
 
@@ -60,6 +61,44 @@ scripted game walking its menus (findings 180, the `DHD_NET_JOIN` note); A is th
 - The ride is said every half second while waiting, and again with LOADED at the start, as LOADED
   already was (finding 187's reason): a message sent once is lost when it comes early.
 
+- The load timing lines (`load: the race's loop ... after the load screen came`, `load: the
+  countdown ... after the race's loop`) are logged offline and online: they only read state.
+
 ## Surprises
 
+- The phone loads a track as fast as it does offline: about 4 s from the load screen to the race's
+  loop in every room size. The "29 s late" of 0.8.3 was never loading work.
+- The flight over the track is about 25 s and belongs to the player: a room player who does not
+  tap SKIP watches all of it, and the others wait at their countdown meanwhile (drawing, since
+  this lane). Whether online should skip it for everyone is a feel decision, not taken here.
+- In 0.8.3 the host's 30 s freeze also cost the phone's rider its bike: the ride, sent once, was
+  lost, so the host raced a default rider for the phone. Saying it every half second fixes both.
+
 ## Result
+
+Mi 11i, release-signed PGO APK of this branch; private SFU rooms on the official server with a
+hidden PC host game of this branch and bots; Mt. Midoule FR in every run.
+
+| Run | Rides exchanged (phone) | Load screen to the race's loop (phone) | Flight (phone) | PC host | `freeze:` |
+|---|---|---|---|---|---|
+| Offline SINGLE EVENT | - | 3.9 s, 3.8 s | 25.5 s (unskipped); 7.7 s (SKIP) | - | 0 |
+| 2 members | 25.6 s, drawn | 3.8 s | 25.0 s | rides at once; 26.5 s at its countdown, drawn | 0 / 0 |
+| 4 members (2 bots) | 26.7 s, drawn | 4.0 s | 25.0 s | 26.6 s at its countdown, drawn | 0 / 0 |
+| 8 members (6 bots) | 27.9 s, drawn | 3.8 s | 25.0 s | rides at once; 26.4 s at its countdown, drawn | 0 / 0 |
+
+The phone's rides wait is the scripted host walking its menus (the harness effect above); a room
+player who is host would be on its load screen with the others. In the 8-member room the PC host
+got the phone's own ride ("the player's choice"), where 0.8.3 gave it the default. Every room ran
+its race and showed the results on the phone and the PC; the offline race ran to its finish and
+results at 60 fps.
+
+PC check (two hidden games of this branch, a local server, a P2P room; game B scripted, so about
+20 s slower): game A held its load screen, drawn, 26.6 s until B's ride came; 0 `freeze:` lines in
+both logs; both finished (0:20.03 each) with results.
+
+Before (0.8.3, the production check): the phone frozen 21.6 s on its load screen, the PC host
+frozen 30 s (`stall: field 1228 came 30005 ms`), the phone's rider on the default bike.
+
+Open: the barrier's own wait before the load screen still shows one still picture of about 3 s
+(`stall: ... (menu 9 phase 3)`, under the freeze watch's 5 s); the flight is not skipped
+automatically online.
