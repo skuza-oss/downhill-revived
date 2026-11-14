@@ -49,7 +49,7 @@ race, and the log's SFU link kind with no address of the other player.
 ## Surprises
 
 - `check.py port` sat 35 min in `stack_escapes`: one `cc1.exe` of the old EE compiler hung at 0 CPU
-  on a temp file in `F:\Temp`; killed by PID, the step rerun alone passed. Not this lane's code.
+  on a temp file in the scratch folder; killed by PID, the step rerun alone passed. Not this lane's code.
 - Home during the track's load (before GO) only delays the start: the others wait at "waiting for
   the others" (the PC waited 13.5 s) and both count down together.
 - A room just left can stay in the public list for a few seconds; Look Again drops it.
