@@ -252,7 +252,10 @@ final class LauncherBridge {
         activity.runOnUiThread(() -> {
             if (!activity.pick()) {
                 picking = null;
+                DiscImport.log(activity, "picker: none on this phone");
                 reply.error(DiscImport.coded("disc.problem.noPicker"));
+            } else {
+                DiscImport.log(activity, "picker: shown");
             }
         });
     }
@@ -262,6 +265,7 @@ final class LauncherBridge {
         Reply reply = picking;
         picking = null;
         if (reply == null) return;
+        DiscImport.log(activity, uri == null ? "picker: cancelled" : "picker: chosen");
         if (uri == null) { reply.value(null); return; }
         Log.i(LauncherActivity.TAG, "disc image chosen: " + uri);
         try {

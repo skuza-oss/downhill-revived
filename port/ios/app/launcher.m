@@ -3,7 +3,7 @@
    answered by launcher_calls.c, the same shared code Android's launcher calls (the settings crate,
    host.c's disc check, the online check, the update check). Here only what UIKit has to do: the web
    view and its one origin, the bridge's transport, the document picker and the disc's copy (its
-   rules: disc_copy.c, host_disc_check), the share sheet, links, and PLAY.
+   rules: port/host/disc_import.c, host_disc_check), the share sheet, links, and PLAY.
 
    The disc reaches the one import (startImport:, job_run) three ways (finding 240): the picker; a
    file opened in the app from another (Files' share sheet: "Open in", launcher_open_document); and
@@ -40,7 +40,8 @@
 #include "app.h"
 #include "ios_main.h"
 #include "launcher_calls.h"
-#include "disc_copy.h"
+#include "host/disc_check.h"
+#include "host/disc_import.h"
 #include "host/log_bundle.h"
 #include "include/version.h"   /* port/, the project's header search path */
 #include <sys/utsname.h>
@@ -203,9 +204,9 @@ static void job_run(DiscJob *job) {
             job_event(job, @"done", [NSString stringWithFormat:@",\"deletable\":false,\"size\":%llu", size]);
             return;
         }
-        uint64_t free_bytes = ios_available_disk_space();
-        if (size + DISC_COPY_MARGIN > free_bytes) {
-            launcher_coded(coded, sizeof coded, "disc.problem.noRoom", "need", gb(size + DISC_COPY_MARGIN).UTF8String,
+        uint64_t free_bytes = ios_available_disk_space(), need = disc_room_needed(size, free_bytes);
+        if (need) {
+            launcher_coded(coded, sizeof coded, "disc.problem.noRoom", "need", gb(need).UTF8String,
                            "free", gb(free_bytes).UTF8String, (const char *)NULL);
             job_problem(job, coded, 1);
             return;
@@ -226,20 +227,20 @@ static void job_run(DiscJob *job) {
         if (job->cancel) { remove(temp.fileSystemRepresentation); return; }
         if (copied < 0 || !synced) {
             remove(temp.fileSystemRepresentation);
-            if (ios_available_disk_space() < (64ull << 20)) launcher_coded(coded, sizeof coded, "disc.problem.outOfSpace", (const char *)NULL);
+            if (ios_available_disk_space() < DISC_COPY_LOW) launcher_coded(coded, sizeof coded, "disc.problem.outOfSpace", (const char *)NULL);
             else launcher_coded(coded, sizeof coded, "disc.problem.copyFailed", "detail", "a read or write failed", (const char *)NULL);
             job_problem(job, coded, 1);
             return;
         }
-        /* the copy itself: the same disc, and complete */
+        /* the copy itself: complete (its own reason first when cut short, disc_copy_verdict), then the
+           same disc */
         char why[400];
-        const char *bad = host_disc_check(temp.fileSystemRepresentation);
-        if (!bad) {
-            FILE *f = fopen(temp.fileSystemRepresentation, "rb");
-            uint64_t volume = f ? disc_volume_bytes(f) : 0;
-            if (f) fclose(f);
-            bad = disc_completeness((uint64_t)copied, size, volume, why, sizeof why);
-        }
+        uint64_t volume = 0;
+        FILE *f = fopen(temp.fileSystemRepresentation, "rb");
+        int kind = f ? disc_check_file(f, &volume) : DISC_NOT_ISO;
+        if (f) fclose(f);
+        const char *bad = disc_copy_verdict(kind, (uint64_t)copied, size, 1, volume, why, sizeof why);
+        if (!bad) bad = host_disc_check(temp.fileSystemRepresentation);
         if (bad) {
             llog(@"import %lld: the copy: %s (%lld bytes)", job.number, bad, copied);
             remove(temp.fileSystemRepresentation);

@@ -3,7 +3,7 @@
 - SETTINGS on iOS shows exactly Android's rows: both hosts take phone.c's one list;
 - the launcher replaced lane 224's first-start disc screen (one code path);
 - the launcher turns with the device, the game asks for landscape, an iPad declares every orientation.
-The C parts (launcher_calls.c, run_record.c, disc_copy.c) run in port/tools/test_runtime.py."""
+The C parts (launcher_calls.c, run_record.c, port/host/disc_import.c) run in port/tools/test_runtime.py."""
 from pathlib import Path
 import plistlib
 import re

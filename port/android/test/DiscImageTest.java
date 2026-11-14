@@ -30,18 +30,14 @@ public class DiscImageTest {
         return Files.readAllBytes(Path.of(System.getenv("DHD_DISC_FIXTURES"), name + ".iso"));
     }
 
-    /** What the import (DiscImport) does with a finished copy: check, then completeness (first
-     *  for a copy cut short, so it says the copy stopped). */
+    /** What the import (DiscImport) does with a finished copy: DiscImage.checkCopy, the shared
+     *  verdict (port/host/disc_import.c: completeness first for a copy cut short, so it says the
+     *  copy stopped), then the check's own words. */
     static String verdict(Path dir, byte[] copied, long size, boolean exact) throws IOException {
         Path file = Files.createTempFile(dir, "copy", ".part");
         Files.write(file, copied);
         try (RandomAccessFile f = new RandomAccessFile(file.toFile(), "r")) {
-            String problem = DiscImage.check(f.getChannel());
-            if (problem == null || problem.equals(DiscImage.CUT)) {
-                String whole = DiscImage.completeness(copied.length, size, exact, DiscImage.volumeBytes(f.getChannel()));
-                if (whole != null) problem = whole;
-            }
-            return problem;
+            return DiscImage.checkCopy(f.getChannel(), copied.length, size, exact);
         }
     }
 
@@ -110,6 +106,25 @@ public class DiscImageTest {
         try (RandomAccessFile f = new RandomAccessFile(none.toFile(), "r")) {
             check(DiscImage.volumeBytes(f.getChannel()) == 0, "volumeBytes without a descriptor");
         }
+
+        // the shared rules' constants and the room (disc_import.h)
+        check(DiscImage.BLOCK == 1 << 20 && DiscImage.PROGRESS_STEP == 16L << 20 && DiscImage.MARGIN == 128L << 20
+                && DiscImage.LOW == 64L << 20, "the shared constants");
+        check(DiscImage.roomNeeded(1000, 1000 + DiscImage.MARGIN) == 0, "room: the source and the margin fit");
+        check(DiscImage.roomNeeded(1001, 1000 + DiscImage.MARGIN) == 1001 + DiscImage.MARGIN, "room: one byte short");
+        check(DiscImage.roomNeeded(0, 0) == 0, "room: an unknown size asks nothing");
+
+        // the publication: an older pick's copy lands nowhere once a newer pick began
+        Path older = dir.resolve("older.part"), newer = dir.resolve("newer.part"), target = dir.resolve("target.iso");
+        Files.write(older, new byte[] { 1 });
+        Files.write(newer, new byte[] { 2 });
+        long first = DiscImage.publishBegin(), second = DiscImage.publishBegin();
+        check(DiscImage.publish(first, older.toString(), target.toString()) == 1 && !Files.exists(target),
+                "a superseded pick lands nowhere");
+        check(DiscImage.publish(second, newer.toString(), target.toString()) == 0 && Files.readAllBytes(target)[0] == 2,
+                "the newest pick lands");
+        Files.delete(older);
+        Files.delete(target);
 
         // the copy loop: all of a stream, the count it returns, a cut stream's count, cancelling
         ByteArrayOutputStream out = new ByteArrayOutputStream();
