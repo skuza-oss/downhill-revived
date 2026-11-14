@@ -10,9 +10,9 @@ The root and `port/AGENTS.md` rules apply. Design: findings 091, 143; phones' sp
 - The release key never enters the repository: the `DHD_ANDROID_*` variables name the keystore
   outside the checkout and its passwords. The release check pins the release certificate;
   changing the key needs `--new-signing-key` on purpose (finding 143).
-- Online on phones is P2P rooms only (`host_service_net_offered`, findings 180, 186): Create A P2P
-  Race and Join With A Code; SFU rooms (public lists, Quick Race) are refused. Do not offer them
-  without a decision (root AGENTS.md, current decisions).
+- Online on phones is the desktop's (`host_service_net_offered`, finding 237): every room, SFU and
+  P2P, through the shared menu and net code; no phone-only online path or limit (root AGENTS.md,
+  current decisions).
 - The app's entry is the launcher (finding 225): `LauncherActivity` shows the desktop launcher's
   page (`port/launcher/ui`, packed as `assets/launcher`) in a WebView, answers its calls
   (`LauncherBridge`, the list in `port/launcher/BRIDGE.md`) with the shared native code

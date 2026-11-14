@@ -1,6 +1,6 @@
 # 143: the Android APK as a release asset (release key, update notice, no online on phones)
 
-Status: current
+Status: partly superseded by 237 (no online on phones; phones offer every room now)
 Supersedes: parts of 091
 Checked: 2026-11-04
 

@@ -11,22 +11,12 @@
 #include "client.h"
 #include "json.h"
 #include "ws.h"
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
 
 enum { REJOIN_ATTEMPTS = 5, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
 
-/* The rooms offered (host_api.h NET_OFFER_*). SFU rooms are not offered on phones yet (finding
-   143): their speed and the touch controls come first; Android and iOS builds (finding 224) refuse
-   every SFU room here, whatever asks (the menu, DHD_NET_*, a dhd.ini server). P2P rooms are
-   (findings 180, 186), the SFU fallback of their members included. */
-#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
-#define NET_OFFERED NET_OFFER_P2P
-#else
+/* The rooms offered (host_api.h NET_OFFER_*): every native build, Android and iOS included, offers
+   SFU and P2P rooms (finding 237); only the browser offers P2P rooms alone (port/web/www/net.js). */
 #define NET_OFFERED (NET_OFFER_SFU | NET_OFFER_P2P)
-#endif
-#define NET_NOT_OFFERED "this kind of room is not offered here yet"
 
 static NetClient client;
 static WsConn *conn;
@@ -110,12 +100,6 @@ static int connect_to(const char *path, int p2p)
     /* the install id (port/hle/host.c; finding 161), read here on the game's thread, the one that
        sets the environment */
     client_set_install_id(&client, getenv("DHD_NET_INSTALL_ID"));
-    if (!(NET_OFFERED & (p2p ? NET_OFFER_P2P : NET_OFFER_SFU))) {
-        client.lobby.state = NET_FAILED;
-        snprintf(client.lobby.error, sizeof client.lobby.error, NET_NOT_OFFERED);
-        SDL_UnlockMutex(api);
-        return -1;
-    }
     if (!base[0]) {
         client.lobby.state = NET_FAILED;
         snprintf(client.lobby.error, sizeof client.lobby.error, "no server: set DHD_NET_SERVER");
@@ -155,8 +139,6 @@ int net_join_room(const char *code)
     p2p = i == P2P_CODE_LENGTH;
     if ((i != SFU_CODE_LENGTH && !p2p) || strspn(up, alphabet) != (size_t)i)
         return -1;
-    if (!(NET_OFFERED & (p2p ? NET_OFFER_P2P : NET_OFFER_SFU)))
-        return -1;
     snprintf(path, sizeof path, "/v1/rooms/%s", up);
     return connect_to(path, p2p);
 }
@@ -181,7 +163,7 @@ int net_list_lobbies(NetLobbyInfo *out, int max)
     char url[300];
     double sent, got;
     int n;
-    if (!(NET_OFFERED & NET_OFFER_SFU) || !base[0] || !inited)  /* P2P rooms are never listed */
+    if (!base[0] || !inited)  /* P2P rooms are never listed (the server's list has none) */
         return -1;
     snprintf(url, sizeof url, "%s/v1/lobbies", base);
     sent = net_now_ms();

@@ -73,10 +73,10 @@ What works today:
 - **Sound**: the game's sound driver is replaced by a native mixer, with music, effects and reverb.
 - **iPhone and iPad** (experimental): the same game and the same touch controls and
   settings as on Android, from an unsigned app you sideload yourself (see [Installing](#installing));
-  online: P2P races only. The iOS port was first made by Gustavo Ribeiro (`ribeirogustav`).
+  every online race, as on the PC. The iOS port was first made by Gustavo Ribeiro (`ribeirogustav`).
 - **Android phones and tablets** (experimental): the same game with touch controls (Classic pad
-  or Thumb zones; **Steer With** the stick, tilt or a D-pad), or a controller. Online: P2P races
-  only. The game's
+  or Thumb zones; **Steer With** the stick, tilt or a D-pad), or a controller. Online: every kind of race, as on the PC
+  (Quick Race, public, private and P2P races). The game's
   codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
   buttons); **ENTER** goes back to the race and enters them. The camera's flight over the track
   before each race, and the movies (the startup movies if Skip Movies is off, the attract movie,
@@ -400,7 +400,8 @@ network (IP) address, and the hub sees the address of everyone linked to it. The
 the menu row and when the room opens. Play P2P races with people you trust. `dhd.log` shows a P2P
 room's code only by its first two characters.
 
-On Android, iPhone and iPad and in the browser, P2P races are the only online races so far.
+In the browser P2P races are the only online races so far; Android, iPhone and iPad have every
+kind, as the PC.
 
 A room's server (the lobby: who is in it, the next race, the start) runs in one of Cloudflare's
 Durable Object cities, which are in North America, Europe, East and Southeast Asia and Australia

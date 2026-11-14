@@ -55,7 +55,7 @@ change needs them or someone asks.
 | Our own GS renderer (Rust, wgpu) with an exact and a native front end; PCSX2 is the referee (replay the same GS stream), not the renderer | 2026-10-14 | 085 | swap in PCSX2's GS or blame the renderer before replaying the stream (025) |
 | One code path for every platform, no legacy kept beside a new path; old code is deleted when replaced | 2026-10-27 | 099 | keep a second implementation "as a fallback" (the 32-bit build, D3D11, XInput, the game's updater are gone, 088) |
 | Keep the original game's feel: no gameplay additions; QoL and online features are welcome | 2026-10-31 | | add custom music, taunts, assists or handling changes |
-| No SFU rooms on Android, iOS or in the browser yet: there the host offers P2P rooms only (`host_service_net_offered`) | 2026-11-03 | 143 | offer SFU rooms (public lists, Quick Race) there without a decision |
+| Phones offer every online mode: Android and iOS have the desktop's ONLINE menu (Quick Race, public and private SFU rooms, P2P rooms) through the same code; the browser offers P2P rooms only (`host_service_net_offered`) | 2026-11-14 | 237 | add a phone-only online path or limit, or offer SFU rooms in the browser without a decision |
 | iOS is a platform since 2026-11-13: built and released by us as an unsigned experimental IPA (`port/ios`, from Gustavo Ribeiro's iOS port), using the shared touch controls and settings like Android; its launcher is the shared mobile launcher | 2026-11-13 | 224 | add an iOS-only launcher, touch controls or settings UI beside the shared ones, or sign the IPA with anyone's Apple account in the repository |
 | One launcher UI for desktop, Android and iOS: `port/launcher/ui` in Tauri or the platform's web view, one bridge (`port/launcher/BRIDGE.md`), every string from `ui/lang` | 2026-11-13 | 225 | write a second launcher UI in Java, Kotlin or Swift, or put a launcher string outside the string table |
 
@@ -64,8 +64,9 @@ picks SFU or P2P per room; a P2P room is the same server room with a second race
 star of peer connections around a hub the room picks, the room's SFU for a member who can't reach
 it), and the race's synchronization is the SFU's. The owner authorizes peer addressing for them,
 so a P2P room is private (joined by its code, never listed; the game says players see each
-other's network address), and P2P rooms on Android, iOS and in the browser (SFU rooms stay
-desktop-only there). They ship from 0.7.14 on (after the test prerelease test-p2p-1).
+other's network address), and P2P rooms in the browser too (the browser's only rooms). They ship
+from 0.7.14 on (after the test prerelease test-p2p-1). In SFU rooms, phones included (237), no
+player ever receives another's address.
 
 Native VU (194, 198, 199) is the players' default on every platform, the browser included (a
 Graphics setting, on by default; the owner, 2026-11-11). The emulated VU1 path is the one exception
