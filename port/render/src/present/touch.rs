@@ -120,12 +120,14 @@ impl TouchOverlay {
             });
             self.record(&mut pass, count);
         }
-        gpu.queue.submit([encoder.finish()]);
+        let command = encoder.finish();
+        crate::startup::submit(&gpu.queue, [command]);
     }
 }
 
 impl Objects {
     fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
+        let _startup = crate::startup::step("touch overlay shader and pipeline");
         let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("touch overlay"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
         let attributes = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];

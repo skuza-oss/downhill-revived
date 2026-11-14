@@ -22,6 +22,7 @@ use crate::native::Native;
 /// the scope is popped at once (wgpu-core reports synchronously); in the browser a scope could
 /// only be awaited, which a C call can't, so errors go to the uncaptured-error handler (fatal).
 pub(crate) fn scoped<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<R, String> {
+    let _startup = crate::startup::step(what);
     #[cfg(feature = "native")]
     {
         let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -43,6 +44,7 @@ pub(crate) fn scoped<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<
 /// `map_pipeline_creation_err`; PowerVR Rogue reports a shader its compilers refuse as out of
 /// memory, finding 176): Err, so that draw is not drawn and the game goes on.
 pub(crate) fn scoped_pipeline<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<R, String> {
+    let _startup = crate::startup::step(what);
     #[cfg(feature = "native")]
     {
         let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -265,6 +267,7 @@ pub struct Objects {
 }
 
 fn module(gpu: &Gpu, source: &str, label: &str) -> wgpu::ShaderModule {
+    let _startup = crate::startup::step(label);
     // The browser compiles WGSL itself (Tint), which wants the shifts in parentheses (below).
     #[cfg(target_arch = "wasm32")]
     let source = &match parenthesize_shifts(source) {
@@ -528,6 +531,7 @@ fn pipeline_layout(gpu: &Gpu, uniform: &wgpu::BindGroupLayout, group1: &wgpu::Bi
 /// written with Always.
 fn fullscreen_pipeline(gpu: &Gpu, module: &wgpu::ShaderModule, layout: &wgpu::PipelineLayout, entry: &str,
                        target: Option<wgpu::TextureFormat>) -> wgpu::RenderPipeline {
+    let _startup = crate::startup::step(entry);
     let depth = target.is_none();
     let target = [target.map(|format| wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })];
     gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -559,6 +563,7 @@ fn fullscreen_pipeline(gpu: &Gpu, module: &wgpu::ShaderModule, layout: &wgpu::Pi
 
 fn compute_pipeline(gpu: &Gpu, module: &wgpu::ShaderModule, layout: &wgpu::PipelineLayout, entry: &str)
                     -> wgpu::ComputePipeline {
+    let _startup = crate::startup::step(entry);
     gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some(entry),
         layout: Some(layout),
@@ -830,6 +835,7 @@ pub async fn web_prepare(gpu: &'static Gpu) -> Result<(), String> {
 impl Native {
     /// `dhdr_native_create`: `flags` `DHDR_NATIVE_*`.
     pub fn create(gpu: &'static Gpu, flags: u32) -> Result<Native, String> {
+        let _startup = crate::startup::step("native creation");
         let dual = flags & DHDR_NATIVE_DUAL != 0;
         // the browser: what its init made (web_prepare), when made for these flags
         #[cfg(feature = "web")]

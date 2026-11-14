@@ -142,6 +142,7 @@ impl Surface {
 
     /// `dhdr_surface_create`: a surface on the window, then present.wgsl's pipeline into its format.
     pub fn create(gpu: &'static Gpu, window: &DhdrWindow, present_flags: u32) -> Result<Surface, String> {
+        let _startup = crate::startup::step("surface creation and capabilities");
         if !Self::supports(window.kind) {
             return Err(format!("window kind {} is not supported", window.kind));
         }
@@ -262,6 +263,7 @@ impl Surface {
 
     /// The frame latency: pictures the swapchain may hold (`frame_latency`).
     fn configure(&mut self, width: u32, height: u32) {
+        let _startup = crate::startup::step("surface configure");
         let max = self.gpu.device.limits().max_texture_dimension_2d;
         let (width, height) = (width.min(max), height.min(max));
         self.surface.configure(&self.gpu.device, &wgpu::SurfaceConfiguration {
@@ -282,12 +284,14 @@ impl Surface {
     /// frame: Ok(Some(view)) acquired and kept until `present`; Ok(None) skipped (0 x 0, Timeout,
     /// Occluded); Err failed. The native present pass (native/present.rs) draws through this too.
     pub fn acquire(&mut self, window_w: u32, window_h: u32, reconfigure: bool) -> Result<Option<wgpu::TextureView>, String> {
+        let _startup = crate::startup::step("surface acquire and error scope");
         self.frame = None; // a frame drawn but never presented is dropped
         if crate::lost::lost() {
             // every call is a no-op on a lost device; C asks dhdr_device_lost and ends the game
             return Err("the GPU device was lost".into());
         }
         if window_w == 0 || window_h == 0 {
+            crate::startup::note("acquire skipped: zero window size");
             return Ok(None);
         }
         // Android destroys the window's surface on its own thread when the app leaves the screen;
@@ -314,7 +318,19 @@ impl Surface {
             self.configure(window_w, window_h);
         }
         for attempt in 0..2 {
-            match self.surface.get_current_texture() {
+            let _startup = crate::startup::step("get_current_texture");
+            let acquired = self.surface.get_current_texture();
+            // Only while startup is active; capped to avoid flooding on repeated skips.
+            crate::startup::note(match &acquired {
+                wgpu::CurrentSurfaceTexture::Success(_) => "acquire success",
+                wgpu::CurrentSurfaceTexture::Suboptimal(_) => "acquire suboptimal",
+                wgpu::CurrentSurfaceTexture::Timeout => "acquire timeout",
+                wgpu::CurrentSurfaceTexture::Occluded => "acquire occluded",
+                wgpu::CurrentSurfaceTexture::Outdated => "acquire outdated",
+                wgpu::CurrentSurfaceTexture::Lost => "acquire lost",
+                wgpu::CurrentSurfaceTexture::Validation => "acquire validation error",
+            });
+            match acquired {
                 wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
                     let view = t.texture.create_view(&wgpu::TextureViewDescriptor::default());
                     self.frame = Some(t);
@@ -364,6 +380,7 @@ impl Surface {
     /// of the surface's own. No display texture yet (no scanout, no pixels) skips.
     pub fn present_exact(&mut self, exact: Option<&mut Exact>, pixels: Option<&[u32]>, w: u32, h: u32,
                          window_w: u32, window_h: u32) -> i32 {
+        let _startup = crate::startup::step("exact present drawing");
         let gpu = self.gpu;
         let log = |e: &str| crate::host::log(&format!("dhd_render: present: {e}"));
         // The picture: (view, width, height).
@@ -401,12 +418,14 @@ impl Surface {
         };
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("present") });
         self.pipe.draw(gpu, &mut encoder, &source.0, &target, [source.1, source.2, self.width, self.height]);
-        gpu.queue.submit([encoder.finish()]);
+        let command = encoder.finish();
+        crate::startup::submit(&gpu.queue, [command]);
         1
     }
 
     /// The host overlays over the picture: the touch controls, then the performance counter.
     pub fn draw_overlays(&mut self) {
+        let _startup = crate::startup::step("present overlays");
         if let Some(frame) = self.frame.as_ref() {
             let target = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
             self.touch.draw(self.gpu, &target, self.format, self.width, self.height);
@@ -419,7 +438,11 @@ impl Surface {
     /// `dhdr_surface_present`: presents the frame the last call that returned 1 drew.
     pub fn present(&mut self) {
         if let Some(frame) = self.frame.take() {
-            frame.present();
+            {
+                let _startup = crate::startup::step("surface present");
+                frame.present();
+            }
+            crate::startup::presented();
         }
     }
 }

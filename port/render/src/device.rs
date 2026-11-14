@@ -60,6 +60,8 @@ impl Gpu {
     /// Makes a device as `o` asks (natively; blocks). Not for wasm: there `web/init.rs` makes the
     /// device asynchronously and `install`s it.
     pub fn create(o: &DeviceOptions) -> Result<Gpu, String> {
+        crate::startup::start();
+        let _startup = crate::startup::step("device creation");
         #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
         {
             native::create(o)
@@ -192,6 +194,7 @@ pub fn dual_source(offered: bool, vendor: u32, flags: u32) -> DualSource {
 /// The probe of `DHDR_FEAT_RENDER_PIPELINES`: present.wgsl's pipeline with an RGBA8 target, built
 /// inside a Validation scope. Returns the scope; the caller pops it (None = the probe was built).
 pub fn render_probe(device: &wgpu::Device) -> wgpu::ErrorScopeGuard {
+    let _startup = crate::startup::step("render probe shader and pipeline");
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("present.wgsl (probe)"),

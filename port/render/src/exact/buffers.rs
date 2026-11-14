@@ -73,6 +73,7 @@ pub struct Buffers {
 
 impl Buffers {
     pub fn create(gpu: &Gpu, pipelines: &Pipelines) -> Result<Buffers, String> {
+        let _startup = crate::startup::step("exact buffers and error scopes");
         // pollster comes with the `native` feature (as native/init.rs's scoped).
         #[cfg(feature = "native")]
         {
@@ -92,6 +93,7 @@ impl Buffers {
 
     fn make(gpu: &Gpu, pipelines: &Pipelines) -> Buffers {
         let list: [wgpu::Buffer; 11] = std::array::from_fn(|i| {
+            let _startup = crate::startup::step(LABELS[i]);
             gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(LABELS[i]),
                 size: SIZES[i],

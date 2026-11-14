@@ -249,7 +249,7 @@ impl Native {
             },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
-        gpu.queue.submit([e.finish()]);
+        crate::startup::submit(&gpu.queue, [e.finish()]);
         let bytes = stride as u64 * h as u64;
         let status = Arc::new(Mutex::new(None));
         let s = status.clone();

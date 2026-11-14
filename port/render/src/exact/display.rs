@@ -164,7 +164,7 @@ impl Display {
             },
             wgpu::Extent3d { width: t.width, height: t.height, depth_or_array_layers: 1 },
         );
-        gpu.queue.submit([encoder.finish()]);
+        crate::startup::submit(&gpu.queue, [encoder.finish()]);
         let status: MapStatus = Arc::new(Mutex::new(None));
         let s = status.clone();
         let bytes = t.stride as u64 * t.height as u64;

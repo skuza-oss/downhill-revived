@@ -40,6 +40,7 @@ pub mod host;
 pub mod log;
 pub mod lost;
 pub mod shaders;
+pub mod startup;
 
 /// The texture packs' PNG decoder (port/gs/texpack.c), on every native platform.
 #[cfg(feature = "native")]

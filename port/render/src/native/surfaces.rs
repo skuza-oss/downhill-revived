@@ -761,7 +761,7 @@ impl Surfaces {
                 pass.set_scissor_rect(0, 0, w, h);
                 pass.draw(0..3, 0..1);
             }
-            gpu.queue.submit([encoder.finish()]);
+            crate::startup::submit(&gpu.queue, [encoder.finish()]);
         }
         self.grows.retain(|g| g.index != index);
         Ok(())
@@ -791,7 +791,7 @@ impl Surfaces {
             from.aspect = wgpu::TextureAspect::DepthOnly;
         }
         encoder.copy_texture_to_buffer(from, upload_source(&buffer, 0, stride, h), extent(w, h));
-        gpu.queue.submit([encoder.finish()]);
+        crate::startup::submit(&gpu.queue, [encoder.finish()]);
         let status = std::sync::Arc::new(std::sync::Mutex::new(None));
         let done = status.clone();
         buffer.map_async(wgpu::MapMode::Read, .., move |r| *done.lock().unwrap_or_else(|p| p.into_inner()) = Some(r));
