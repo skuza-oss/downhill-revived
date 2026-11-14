@@ -267,6 +267,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 235 | [Shared launcher rules](235-shared-launcher-rules.md) | current |  |
 | 236 | [the background noticed only at the return (Android, in a race)](236-android-background-miss.md) | current |  |
 | 237 | [phones get every online mode](237-mobile-all-online.md) | current |  |
+| 238 | [the online race load: a live load screen while a game waits, and where a phone's second...](238-online-load-wait.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

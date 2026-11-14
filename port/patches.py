@@ -872,6 +872,18 @@ PATCHES['unsorted/001EB1D8.cpp'] += [
         ('void func_001F5EE8__c34(int index,int row,int col,int x,int y,int z,int target)', 2, 'index', '(unsigned long)(unsigned)z'))
 ]
 
+# Online, the load screen (menu 9, func_001F43C0) holds its count, and the shell stays on it, until
+# the rides are exchanged (port/hle/online.c exchange_step, hle_online_load_hold; finding 238): the
+# screen goes on being drawn while a game waits for a slower one. Offline the hold is never on.
+PATCHES['unsorted/001EB1D8.cpp'] += [
+    ('text', 'extern void func_001F43C0__c17(void) asm("func_001F43C0");\nvoid func_001F43C0__c17(void) {',
+     'extern "C" int hle_online_load_hold(void);\n'
+     'extern void func_001F43C0__c17(void) asm("func_001F43C0");\nvoid func_001F43C0__c17(void) {'),
+    ('text', '    if (index < D_0029DF40__c17) {\n        D_0029DF44__c17 = ++index;\n',
+     '    if (index < D_0029DF40__c17 || hle_online_load_hold()) {\n'
+     '        if (!hle_online_load_hold()) D_0029DF44__c17 = ++index;\n'),
+]
+
 # Online, the countdown's timer holds until every PC may start (port/hle/online.c, start_step), the
 # game drawing meanwhile, and the HUD says who it waits for.
 PATCHES['unsorted/0019EE98.c'] = PATCHES.get('unsorted/0019EE98.c', []) + [
