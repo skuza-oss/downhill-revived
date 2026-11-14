@@ -3,9 +3,10 @@ ONLINE that asks "Quit Downhill Revived?" in the game's popup and ends the game 
 after port/patches.py's ONLINE patch, on its text. Leaving the main menu by the game's rows still
 puts its last row back to 2 (the ONLINE patch), so the gates' route is unchanged.
 
-A build without online play (Android, finding 143) has no ONLINE row: port_main_rows() is 4 there
-and port_main_choice() turns the shown fourth row into EXIT GAME's (online_menu.c); with online
-(every other build) they are 5 and the row itself, as before.
+A build without online play (a browser page without its online part; Android until finding 237)
+has no ONLINE row: port_main_rows() is 4 there and port_main_choice() turns the shown fourth row
+into EXIT GAME's (online_menu.c); with online (every other build) they are 5 and the row itself,
+as before.
 """
 
 UNIT = 'unsorted/001EB1D8.cpp'
