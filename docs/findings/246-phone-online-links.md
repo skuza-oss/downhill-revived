@@ -15,7 +15,8 @@ and comes back. Gates: quick, port, docs, the Android native build. No protocol 
 - [x] Reserve lane and read area rules.
 - [x] The 400 from the phone's logs and the client and server code.
 - [x] Fixes with unit tests (Rust `dhd_net`, C `test_session`); relay-only race on the PC.
-- [ ] Gates; the lead's phone check.
+- [x] Gates: quick, port, docs, Android arm64 native build (all OK).
+- [ ] The lead's phone check (below).
 
 ## What the 400 was
 
@@ -79,4 +80,13 @@ through `--a` / `--b`.
 
 ## Result
 
-Pending the gates.
+`check.py quick`, `port` and `docs` OK; `dhd_net` 42 tests and `test_session` pass; the Android
+arm64 `libmain.so` builds. The core module is unchanged (no state trace needed): every change is
+in the host's net code. No server deploy.
+
+Left for the phone (Mi 11i, the lead): an SFU room made on the phone over Wi-Fi, then Wi-Fi off
+for 10-40 s in the lobby and once mid-race, back on; then the same with the phone moving between
+two networks. The log should show `TURN relay's TLS link up over IPv4` if TURN is asked, a TURN
+refusal as `TURN <request> error <code> (...)` followed by `UDP keeps trying`, no run of six
+`a new session` lines, `ICE disconnected` then a new session within about 5 s of the loss, and
+`back in the race` (or `back in room`) after the network returns.
