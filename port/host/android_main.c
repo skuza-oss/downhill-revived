@@ -41,6 +41,7 @@
 
 int dhd_launcher_main(int argc, char **argv);   /* launcher.c's main */
 void host_console_init(void);                   /* host.c: the log */
+void dhdr_startup_files(const char *files);      /* Rust copies the absolute files folder */
 void android_update_start(const char *files);   /* android_update.c: the update notice */
 const char *host_disc_check(const char *path);  /* host.c: NULL when path is the game */
 
@@ -91,6 +92,7 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
     host_console_init();
     fprintf(stderr, "android: Downhill Revived in %s\n", files);
     phone_quote_last_exit(files);  /* LastExit.java's dhd-exit.txt (finding 152) */
+    dhdr_startup_files(files);
     {   /* a profile-collecting build (build_host64.py --target android-arm64 --pgo-generate): its counters go to the
            files folder (host_exit writes them; the process ends with _exit, so no atexit runs) */
         extern void __llvm_profile_set_filename(const char *) __attribute__((weak));
