@@ -276,6 +276,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 244 | [remove the dead code the C audit proved](244-dead-code-c.md) | current |  |
 | 245 | [Bluetooth pad after Android room-code entry](245-pad-after-room-code.md) | current |  |
 | 246 | [Phone SFU fallback and network return](246-phone-online-links.md) | current |  |
+| 247 | [more race frames a second on weak Android phones](247-low-end-android-speed.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
