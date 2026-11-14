@@ -40,6 +40,7 @@ pub fn note(reason: wgpu::DeviceLostReason, message: &str) {
         return;
     }
     if !LOST.swap(true, Ordering::AcqRel) {
+        crate::loss_context::report();
         crate::host::log(&format!("gs: the GPU device was lost ({reason:?}): {}",
                                   if message.is_empty() { "no message" } else { message }));
     }

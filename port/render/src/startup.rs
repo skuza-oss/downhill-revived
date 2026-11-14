@@ -48,6 +48,7 @@ pub fn submit(
     commands: impl IntoIterator<Item = wgpu::CommandBuffer>,
 ) -> wgpu::SubmissionIndex {
     let _startup = step("queue submit");
+    let _loss = crate::loss_context::operation(crate::loss_context::Call::Submit);
     queue.submit(commands)
 }
 

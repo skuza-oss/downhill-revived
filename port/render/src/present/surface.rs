@@ -291,7 +291,10 @@ impl Surface {
         }
         for attempt in 0..2 {
             let _startup = crate::startup::step("get_current_texture");
-            let acquired = self.surface.get_current_texture();
+            let acquired = {
+                let _loss = crate::loss_context::operation(crate::loss_context::Call::Acquire);
+                self.surface.get_current_texture()
+            };
             // Only while startup is active; capped to avoid flooding on repeated skips.
             crate::startup::note(match &acquired {
                 wgpu::CurrentSurfaceTexture::Success(_) => "acquire success",
@@ -412,6 +415,7 @@ impl Surface {
         if let Some(frame) = self.frame.take() {
             {
                 let _startup = crate::startup::step("surface present");
+                let _loss = crate::loss_context::operation(crate::loss_context::Call::Present);
                 frame.present();
             }
             crate::startup::presented();

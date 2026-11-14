@@ -330,6 +330,7 @@ mod native {
         }))
         .map_err(|e| format!("request_device on {} ({:?}): {e}", info.name, info.backend))?;
         crate::guard::install_error_handler(&device);
+        crate::loss_context::init(&info);
         crate::lost::watch(&device);
         let render_pipelines = pollster::block_on(render_probe(&device).pop()).is_none();
         Ok(Gpu::from_parts(instance, adapter, device, queue, o.clone(), render_pipelines))
