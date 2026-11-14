@@ -634,7 +634,7 @@ def main():
             env.update(DHD_HEADLESS='1', DHD_SND_OFF='1')
             result = run([exe], timeout=60)
             if a.fake:
-                for test in range(1,12):
+                for test in (1,2,3,4,5,7,8,9,10,11):
                     result += run([exe,'--negative',test],timeout=30)
             (work/'run.log').write_text(result)
             print(result, end='')

@@ -34,23 +34,8 @@
 use crate::abi::{DhdrPresentRect, DHDR_NATIVE_POINT_FILTER};
 use crate::device::Gpu;
 use crate::native::pipelines::gputimes;
-use crate::native::scanout::Display;
 use crate::native::Native;
 use crate::present::surface::Surface;
-
-/// Stand-in for `scanout.rs`'s accessor (N5: `Display::view`, the display texture's view, None
-/// before the first scanout), while render/rust still has the skeleton's `Display`. Inherent
-/// methods take precedence over trait methods, so once N5's scanout.rs (with a
-/// `pub fn view(&self) -> Option<&wgpu::TextureView>`) is merged the call below reaches it and this
-/// default goes unused: delete the trait then. Until then there is no picture and present skips (0).
-#[allow(dead_code)]
-trait SkeletonDisplay {
-    fn view(&self) -> Option<&wgpu::TextureView> {
-        None
-    }
-}
-
-impl SkeletonDisplay for Display {}
 
 /// The present uniform (C: present_uniform, present_uniform_group).
 struct Uniform {
@@ -269,12 +254,8 @@ impl Native {
             gpu.queue.write_buffer(&uniform.buffer, 0, &bytes);
             uniform.written = Some(bytes);
         }
-        let mut separate = (!self.pass.deferred).then(|| gpu.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("native present") }));
-        let encoder = match separate.as_mut() {
-            Some(encoder) => encoder,
-            None => self.pass.encoder(gpu),
-        };
+        let mut encoder = gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor { label: Some("native present") });
         let t = crate::native::render::rstat::T::new();
         let fill_pipes = fill.then(|| objects.fill_pipes(gpu, surface.format()));
         if let (Some((shrink, _)), Some(f)) = (fill_pipes, p.fill.as_ref()) {
@@ -338,16 +319,9 @@ impl Native {
         let _spike = crate::native::pipelines::SpikeTimer::new("present_submit", 0);
         t.add(crate::native::render::rstat::PRESENT_RECORD);
         let t = crate::native::render::rstat::T::new();
-        if let Some(encoder) = separate {
-            let mut encoder = encoder;
-            gputimes::end_frame(gpu, &mut encoder);
-            let command = encoder.finish();
-            crate::startup::submit(&gpu.queue, [command]);
-        } else {
-            gputimes::end_frame(gpu, self.pass.encoder(gpu));
-            self.pass.submit_now(gpu, &self.arenas);
-            self.zread_map();
-        }
+        gputimes::end_frame(gpu, &mut encoder);
+        let command = encoder.finish();
+        crate::startup::submit(&gpu.queue, [command]);
         t.add(crate::native::render::rstat::PRESENT_SUBMIT);
         whole.add(crate::native::render::rstat::PRESENT);
         gputimes::submitted(gpu);

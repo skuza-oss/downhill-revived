@@ -1,5 +1,5 @@
 /* SHA-256 (FIPS 180-4), portable C. The online lobby hashes the disc image and the executable with
-   it (hle/online_menu.c, hle/online.c); the state hashes of the lobby use XXH64 (net/hash.c). */
+   it (hle/online_menu.c, hle/online.c). */
 #ifndef DHD_SHA256_H
 #define DHD_SHA256_H
 

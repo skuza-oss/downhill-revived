@@ -21,36 +21,8 @@
 //! Referee: `test_gs_wgpu.py --impl rust --arch x86_64 --only present` (A5).
 use crate::abi::*;
 use crate::device::Gpu;
-use crate::exact::display::Display;
 use crate::exact::Exact;
 use crate::present::pipe::PresentPipe;
-
-/// Stand-ins for `exact/display.rs`'s accessors (A4: `Display::view`, `Display::size`,
-/// `Exact::display_upload`, same signatures) while render/rust still has the skeleton's
-/// `Display`. Inherent methods take precedence over trait methods, so once A4's display.rs is
-/// merged the calls below reach A4's methods and these defaults go unused: delete both traits
-/// then. Until then an exact frame has no display texture and is skipped (0).
-#[allow(dead_code)]
-trait SkeletonDisplay {
-    fn view(&self) -> Option<&wgpu::TextureView> {
-        None
-    }
-    fn size(&self) -> (u32, u32) {
-        (0, 0)
-    }
-}
-
-impl SkeletonDisplay for Display {}
-
-#[allow(dead_code)]
-trait SkeletonExact {
-    fn display_upload(&mut self, pixels: &[u32], width: u32, height: u32) -> Result<(), String> {
-        let _ = pixels;
-        Err(format!("no display texture for a {width} x {height} frame (exact/display.rs not merged)"))
-    }
-}
-
-impl SkeletonExact for Exact {}
 
 /// The picture texture of a surface used without an exact renderer (pixels only).
 struct Own {

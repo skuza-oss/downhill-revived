@@ -216,17 +216,4 @@ int net_send_frame(int type, const void *payload, size_t n);
 /* The oldest frame received, whole (out[0] type, out[1] sender's slot); its size, 0 if none. */
 int net_receive_frame(uint8_t *out, size_t max);
 
-/* ---- state hashes ---- */
-
-typedef struct {
-    const void *base;
-    size_t size;
-} NetRange;
-
-/* A 64-bit hash (XXH64 per range, chained through the seed) of memory ranges: online.c's
-   DHD_HASH_LOG of the race state, every NET_HASH_PERIOD fields. */
-enum { NET_HASH_PERIOD = 60 };
-uint64_t net_hash_ranges(const NetRange *ranges, int n);
-uint64_t net_hash64(const void *data, size_t size, uint64_t seed);  /* XXH64 */
-
 #endif

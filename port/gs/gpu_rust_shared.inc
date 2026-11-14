@@ -215,7 +215,6 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
     double snapped = spikes ? host_wall_seconds() : 0;
     native_rstat_add(RSTAT_SNAPSHOT, rs);
     rs = native_rstat_start();
-    if (native_fold_probe(n)) native_zread_start_picture(n);
     DhdrPictureResult r;
     memset(&r, 0, sizeof r);
     int shown = 0;

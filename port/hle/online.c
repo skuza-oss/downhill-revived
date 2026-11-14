@@ -178,87 +178,6 @@ static void parse_setup(const char *text, RaceSetup *s)
     for (int i = 0; i < 4 && *end == ','; i++) s->rider[i] = (int)strtol(end + 1, &end, 0);
 }
 
-/* ---- state hashes ---- */
-
-/* The game's writable static area (.data, .sdata, .sbss, .bss: 0x0026DD00-0x008A0400, which
-   holds the rider world D_002AF2C0, the setup block, the RNG states and the pads), finding 040.
-   Words that point into the EE threads' host stacks count as 0: the game keeps pointers to stack
-   locals, whose values depend on where Windows placed the stacks (finding 041). */
-static uint32_t *copy;
-static const void *state_hash_copy(void) { return copy; }
-
-static uint64_t state_hash(int whole)
-{
-    static uint32_t stacks[64][2];
-    uint32_t start = whole ? 0 : 0x26DD00, end = whole ? 32u << 20 : 0x8A0400, n = (end - start) / 4;
-    const uint32_t *ee = EE_PTR(start);
-    int nstacks = host_stack_ranges_copy(GADDR(stacks), 64);
-    uint32_t low = UINT32_MAX, high = 0;
-    for (int k = 0; k < nstacks; k++) {
-        if (stacks[k][0] < low) low = stacks[k][0];
-        if (stacks[k][1] > high) high = stacks[k][1];
-    }
-    if (!copy && !(copy = malloc(32u << 20))) return 0;
-    for (uint32_t i = 0; i < n; i++) {
-        uint32_t v = ee[i];
-        if (v >= low && v < high)
-            for (int k = 0; k < nstacks; k++)
-            if (v >= stacks[k][0] && v < stacks[k][1]) { v = 0; break; }
-        copy[i] = v;
-    }
-    NetRange r = {copy, (size_t)n * 4};
-    return host_service_net_hash_ranges(GADDR(&r), 1);
-}
-
-/* The state that decides the race, hashed every NET_HASH_PERIOD fields for DHD_HASH_LOG: the
-   rider world D_002AF2C0 (10 riders, the AI and human controllers), the four random generators
-   (libc rand's state behind D_0028191C, the twister D_00663140, the particle and weather LCGs,
-   D_0029E2C0), the menu, race phase and race clock, and the pads as the game read them. The rest
-   of the static area isn't comparable across PCs: the game copies uninitialised host stack
-   (stale host pointers, which ASLR moves) into some of it (finding 041). */
-static uint64_t game_hash(void)
-{
-    NetRange r[] = {
-        {EE_PTR(0x2AF2C0), 0x501C8},  /* rider world */
-        {EE_PTR(0x663140), 0x9C8},    /* twister */
-        {(const char *)*(void **)EE_PTR(0x28191C) + 0x58, 8},  /* rand */
-        {EE_PTR(0x29E2C0), 4}, {EE_PTR(0x29DAF8), 4}, {EE_PTR(0x29D6D0), 4},
-        {EE_PTR(MENU), 4}, {EE_PTR(PHASE), 4}, {EE_PTR(0x43EEC8), 4},
-        {EE_PTR(0x660B80), 8 * 32},   /* pads */
-    };
-    return host_service_net_hash_ranges(GADDR(r), (int)(sizeof r / sizeof *r));
-}
-
-/* DHD_HASH_LOG=file: offline, the hashes of every NET_HASH_PERIOD-th vsync from boot, for
-   comparing two runs (E4). */
-static void log_hash(uint64_t field)
-{
-    static FILE *f;
-    static int tried;
-    if (!tried++) {
-        const char *path = getenv("DHD_HASH_LOG");
-        if (path) f = fopen(path, "w");
-    }
-    if (!f || field % NET_HASH_PERIOD) return;
-    fprintf(f, "%llu menu=%d phase=%d game=%016llx static=%016llx all=%016llx\n", (unsigned long long)field,
-            EE32(MENU), EE32(PHASE), (unsigned long long)game_hash(), (unsigned long long)state_hash(0),
-            (unsigned long long)state_hash(1));
-    /* DHD_HASH_DUMP=field: the hashed (masked) 32 MB at that field, and the stacks masked */
-    const char *dump = getenv("DHD_HASH_DUMP");
-    if (dump && strtoull(dump, NULL, 10) == field) {
-        static uint32_t stacks[64][2];
-        int n = host_stack_ranges_copy(GADDR(stacks), 64);
-        char name[64];
-        snprintf(name, sizeof name, "hashdump-%llu.bin", (unsigned long long)field);
-        FILE *d = fopen(name, "wb");
-        if (d) fwrite(state_hash_copy(), 32u << 20, 1, d), fclose(d);
-        snprintf(name, sizeof name, "rawdump-%llu.bin", (unsigned long long)field);
-        if ((d = fopen(name, "wb"))) fwrite(EE_PTR(0), 32u << 20, 1, d), fclose(d);
-        for (int i = 0; i < n; i++) fprintf(f, "stack %08lx-%08lx\n", (unsigned long)stacks[i][0], (unsigned long)stacks[i][1]);
-    }
-    fflush(f);
-}
-
 /* ---- online ---- */
 
 void hle_puppet_online(int local, int nslots, int host);
@@ -2264,7 +2183,6 @@ void pads_begin_field(void)
             parse_setup(getenv("DHD_RACE_SETUP"), &offline_setup);
         }
         if (setup == 1 && EE32(MENU) == LOAD_MENU) write_setup(&offline_setup), setup = 2;
-        log_hash(kernel_vsync_count);
         return;
     }
     if (!connected++ && !from_menu) connect_lobby();

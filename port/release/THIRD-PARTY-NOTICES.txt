@@ -40,8 +40,7 @@ PCSX2 widescreen patch for this game, by Aced14 (https://github.com/PCSX2/pcsx2_
   The 16:9 mode changes the values that patch lists; the changes are applied by our own code.
 
 xxHash (https://github.com/Cyan4973/xxHash), BSD-2-Clause
-  port/net/hash.c is written from the XXH64 specification. port/gs/xxhash.h is xxHash 0.8.3
-  itself (XXH3-64, the hash in texture pack names), unchanged:
+  port/gs/xxhash.h is xxHash 0.8.3 (XXH3-64, the hash in texture pack names), unchanged:
 
   Copyright (C) 2012-2023 Yann Collet
 

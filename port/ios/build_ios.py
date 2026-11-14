@@ -1,6 +1,6 @@
 """Build Downhill Revived for native iOS (iPhone 17 Pro Max / ARM64).
 
-    python port/ios/build_ios.py [--wasm build/wasm/dhd_core.wasm | --wasm core_*.c] [--release] [--install]
+    python port/ios/build_ios.py [--wasm build/wasm/dhd_core.wasm | --wasm core_*.c] [--install]
     python port/ios/build_ios.py --simulator --wasm core_*.c    # the iOS Simulator (Apple silicon)
 
 1. Rebuilds the wasm core, native ARM64 host and Rust renderer from source (macOS / iOS SDK).
@@ -353,7 +353,6 @@ def main(argv=None, *, prompt_team=False):
     ap.add_argument('--rebuild-core', action='store_true', help='force recompilation of libdhd_ios.a even if present')
     ap.add_argument('--wasm', type=Path, nargs='+', help='explicit prebuilt core: a .wasm, or the core_*.c of wasm2c '
                     '(with core.h and core-impl.h beside them); otherwise rebuild from current source')
-    ap.add_argument('--release', action='store_true', default=True, help='build in Release configuration (default)')
     ap.add_argument('--debug', action='store_true', help='build in Debug configuration')
     ap.add_argument('--bundle-only', action='store_true', help='prepare project bundle without compiling')
     ap.add_argument('--core-only', action='store_true', help='rebuild the core and renderer without Xcode packaging')

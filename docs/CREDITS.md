@@ -26,9 +26,8 @@ This project builds on the work of others:
   [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) (MIT/Apache-2.0): the browser build.
 - [libmpeg2](https://libmpeg2.sourceforge.io) 0.5.1 (GPL-2.0-or-later): the movie decoder,
   `port/third_party/libmpeg2`, unchanged.
-- [xxHash](https://github.com/Cyan4973/xxHash) (BSD-2-Clause): the XXH64 specification, from
-  which `port/net/hash.c` is written, and `port/gs/xxhash.h` (XXH3, unchanged) for texture pack
-  names.
+- [xxHash](https://github.com/Cyan4973/xxHash) (BSD-2-Clause): `port/gs/xxhash.h` (XXH3,
+  unchanged) for texture pack names.
 - PCSX2's texture replacement names (its GSTextureCache / GSTextureReplacements hash scheme),
   reimplemented in `port/gs/texpack.c` so PCSX2 packs load unchanged.
 - [splat](https://github.com/ethteck/splat), [spimdisasm](https://github.com/Decompollaborate/spimdisasm)

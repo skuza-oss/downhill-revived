@@ -208,7 +208,6 @@ void ios_lifecycle_did_enter_background(void) {
     if (atomic_load(&s_game_started)) marker_write(RUN_BACKGROUND, 0);
     hold_the_renderer("in the background", 0);   /* the same absence: resign-active came first */
 }
-void ios_lifecycle_will_enter_foreground(void) {}
 void ios_lifecycle_did_become_active(void) {
     atomic_store(&s_game_active, true);
     bool running = atomic_load(&s_game_started);

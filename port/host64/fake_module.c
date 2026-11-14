@@ -29,10 +29,6 @@ EXPORT("boundary_negative") int boundary_negative(unsigned test) {
     if (test==3) { host_callback_fiber(0,0); return 1; }
     if (test==4) { host_callback_fiber(HOST_CALLBACK(wrong_callback),0); return 1; }
     if (test==5) { host_console_write(0x7fffffff,2); return 1; }
-    if (test==6) {
-        uint32_t ranges[2]={0x7fffffff,2};
-        host_service_net_hash_ranges((uint32_t)(uintptr_t)ranges,1); return 1;
-    }
     if (test==7) { host_callback_detach(HOST_CALLBACK(wrong_callback),0); return 1; }
     if (test==8) { host_service_text_input_edit(0x7fffffff,2,(uint32_t)(uintptr_t)"AB"); return 1; }
     if (test==9) { host_service_disc_check_start(0x80000010,0x80000010); return 1; }
@@ -82,10 +78,6 @@ EXPORT("main") int fake_main(void) {
     host_sleep_ms(10); if (async_done) return 17;
     for (unsigned i=0;i<1000 && !async_done;i++) { host_callbacks_drain(); host_sleep_ms(1); }
     if (async_done!=1 || host_fiber_current()!=root) return 18;
-    uint32_t hash_ranges[2]={0x08001000,4};
-    uint64_t hash=host_service_net_hash_ranges((uint32_t)(uintptr_t)hash_ranges,1);
-    hash_ranges[0]=0x28001000;
-    if (!hash || hash!=host_service_net_hash_ranges((uint32_t)(uintptr_t)hash_ranges,1)) return 19;
     host_service_gs_reset();
     host_service_gs_priv_write(GS_PMODE,0x1234);
     Gs *snapshot=(Gs *)(uintptr_t)0x13000000;

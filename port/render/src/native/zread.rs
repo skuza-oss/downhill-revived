@@ -16,18 +16,6 @@ pub const ZREAD_MAX: u32 = 64;
 const SLOTS: usize = 3;
 const BYTES: u64 = (ZREAD_MAX * ZREAD_MAX * 4) as u64;
 
-/// DHD_ZREAD_FOLD / DHD_GPU_OVERLAP (finding 111): off unless set, `0` turns one off, any other
-/// value on; native_core.inc's native_gpu_switch reads them the same way.
-pub fn switch(name: &str) -> bool {
-    std::env::var_os(name).is_some_and(|v| v != "0")
-}
-
-/// The ordinary native render loop only; interpolation does not use its publication hook.
-pub fn folded() -> bool {
-    switch("DHD_ZREAD_FOLD")
-        && std::env::var("DHD_INTERP").ok().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0) == 0
-}
-
 pub(crate) const ZREAD_WGSL: &str = r#"
 struct Params { origin: vec2<u32>, size: vec2<u32>, scale: u32, pad0: u32, pad1: u32, pad2: u32 }
 @group(0) @binding(0) var zread_source: texture_depth_2d;
@@ -51,23 +39,17 @@ struct Slot {
     /// GS pixels: x, y, w, h.
     rect: [u32; 4],
     tag: u64,
-    needs_map: bool,
 }
 
 pub struct ZRead {
     pipe: Option<(wgpu::BindGroupLayout, wgpu::ComputePipeline)>,
     slots: Vec<Slot>,
-    folded: bool,
-    request: Option<(u32, [u32; 4], u64)>,
-    recording: bool,
-    current: Option<u64>,
 
 }
 
 impl ZRead {
     pub fn new() -> ZRead {
-        ZRead { pipe: None, slots: Vec::new(), folded: folded(),
-                request: None, recording: false, current: None }
+        ZRead { pipe: None, slots: Vec::new() }
     }
 }
 
@@ -114,11 +96,6 @@ impl Native {
     /// clipped to the texture and to ZREAD_MAX) of Z surface `index` into a free buffer and starts
     /// mapping it, tagged `tag`. 1 started; 0 not (no such surface, nothing inside, no free buffer).
     pub fn zread_start(&mut self, index: u32, rect: [u32; 4], tag: u64) -> i32 {
-        if self.zread.folded && !self.zread.recording {
-            self.zread.request = Some((index, rect, tag));
-            self.zread.current = Some(tag);
-            return 1;
-        }
         let whole = crate::native::render::rstat::T::new();
         let gpu = self.gpu;
         let Some(s) = self.surfaces.get(index as usize) else { return 0 };
@@ -143,7 +120,6 @@ impl Native {
                 status: None,
                 rect: [0; 4],
                 tag: 0,
-                needs_map: false,
             });
         }
         let Some((layout, pipeline)) = self.zread.pipe.as_ref() else { return 0 };
@@ -163,12 +139,8 @@ impl Native {
                 wgpu::BindGroupEntry { binding: 2, resource: slot.params.as_entire_binding() },
             ],
         });
-        let mut separate = (!self.zread.folded).then(|| gpu.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("native zread") }));
-        let encoder = match separate.as_mut() {
-            Some(encoder) => encoder,
-            None => self.pass.encoder(gpu),
-        };
+        let mut encoder = gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor { label: Some("native zread") });
         {
             crate::native::render::pass_trace::event("compute-zprobe", -1, -1);
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("native zread"), timestamp_writes: None });
@@ -178,38 +150,12 @@ impl Native {
         }
         let used = (w * h * 4) as u64;
         encoder.copy_buffer_to_buffer(&slot.storage, 0, &slot.read, 0, used);
-        if self.zread.folded {
-            // Reserve the slot until the picture is submitted; mapping starts only afterwards.
-            slot.status = Some(std::sync::Arc::new(std::sync::Mutex::new(None)));
-            slot.needs_map = true;
-
-        } else {
-            crate::startup::submit(&gpu.queue, [separate.expect("separate probe encoder").finish()]);
-            slot.status = Some(map_start(&slot.read, 0..used));
-        }
+        crate::startup::submit(&gpu.queue, [encoder.finish()]);
+        slot.status = Some(map_start(&slot.read, 0..used));
         slot.rect = [x, y, w, h];
         slot.tag = tag;
         whole.add(crate::native::render::rstat::ZREAD_START);
         1
-    }
-
-    /// Append this field's requested probe after the picture's draws, before its submit.
-    pub fn zread_record(&mut self) {
-        if let Some((index, rect, tag)) = self.zread.request.take() {
-            self.zread.recording = true;
-            self.zread_start(index, rect, tag);
-            self.zread.recording = false;
-        }
-    }
-
-    /// Start the asynchronous maps once the picture's buffer copies have been submitted.
-    pub fn zread_map(&mut self) {
-        for slot in &mut self.zread.slots {
-            if slot.needs_map {
-                slot.status = Some(map_start(&slot.read, 0..(slot.rect[2] * slot.rect[3] * 4) as u64));
-                slot.needs_map = false;
-            }
-        }
     }
 
     /// `dhdr_native_zread_take`: the newest finished copy (never waits): its rect and tag, and
@@ -217,19 +163,10 @@ impl Native {
     /// Older finished copies are dropped.
     pub fn zread_take(&mut self, out: &mut [u32], rect: &mut [u32; 4], tag: &mut u64) -> i32 {
         let whole = crate::native::render::rstat::T::new();
-        // A minimised/missing window skips present; the picture must still reach the queue.
-        if self.pass.deferred {
-            self.pass.submit_now(self.gpu, &self.arenas);
-            self.zread_map();
-        }
         #[cfg(not(target_arch = "wasm32"))]
         let _ = self.gpu.device.poll(wgpu::PollType::Poll);
-        // The old take runs before starting the current field's probe. Folding must never
-        // publish that current copy early, even when the GPU has already finished it.
-        let current = self.zread.current;
-        let folded = self.zread.folded;
         let done = |s: &Slot| {
-            (!folded || current != Some(s.tag)) && s.status.as_ref().is_some_and(|m| m.lock().unwrap_or_else(|p| p.into_inner()).is_some())
+            s.status.as_ref().is_some_and(|m| m.lock().unwrap_or_else(|p| p.into_inner()).is_some())
         };
         let newest = self.zread.slots.iter().filter(|s| done(s)).map(|s| s.tag).max();
         let Some(newest) = newest else { return 0 };
