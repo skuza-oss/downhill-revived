@@ -28,6 +28,9 @@ fix it only if the cause is proven and the fix small. Out of scope: the subscrip
 - [x] 2026-11-14: `sfu_trouble`, the game's report of a failed path, and the room's log line.
 - [x] 2026-11-15: commits cd22e607 (game) and b670ffc5 (room); `check.py quick`, `port`,
   `server` and `docs` pass. No state trace: nothing here touches game state.
+- [x] 2026-11-15: review fixes: a relay that never connects ends the attempt at the deadline
+  (0a381914), the listed port follows 443 on any failure before data (dcb425d2), the room forgets
+  a member's report times when it leaves (1a60f862).
 - [ ] After a deploy and a release: count the `Realtime trouble:` lines by path, step and kind,
   then fix the cause.
 
@@ -107,7 +110,8 @@ UDP switch does not imitate.
 - Other projects' threads (WebRTC apps on Cloudflare's TURN) report restrictive networks that
   reset TLS on 5349 but pass 443, and replies that list no `turns:` on 443. Our game took
   `turns:...:443` only when the reply listed it, else the first `turns:` entry. It now always
-  tries 443 first (on the listed host) and the listed port after a failed TCP or TLS connect.
+  tries 443 first (on the listed host), and the listed port after any failure on 443 before the
+  relay carried data, or after 5 s without it (review fix, below).
 
 ## Changes
 
@@ -123,26 +127,49 @@ UDP switch does not imitate.
   (`turn_400`... `turn_508`). The log reads `net: SFU: TURN failed at allocate (turn_400)`, and
   with both paths gone `no path to the SFU: UDP failed at send (denied); TURN failed at
   allocate (turn_400)`. No address, credential or id in any of them; a TLS failure adds the TLS
-  library's own words. A relay that is up but carries nothing 20 s after the answer is named by
-  its stage (`allocate`, `channel_bind`, `first_data`, or `connect` with `no_answer`).
+  library's own words. A relay still up but not connected 20 s after the answer (`CONNECT_TIMEOUT`) ends the
+  attempt, named by its stage with `timeout` (`tls_connect`, `allocate`, `channel_bind`,
+  `first_data`, or `connect` once the SFU answered through it): `no path to the SFU: UDP failed
+  at send (denied); TURN failed at first_data (timeout)`, and the send thread's retry with its
+  growing pause (1 s, doubling to a minute) goes on. The first version kept such a relay waiting
+  for ever, its refreshes keeping the association alive and no new session tried (review fix).
+- 443 first, the listed port next (`RELAY_TRY`, review fix). Before the relay carried anything,
+  a server that fails at any step (TCP or TLS, allocate, channel bind, the link) or carries
+  nothing within 5 s of its credentials gives way to the listed port on a new allocation; the
+  listed port has the rest of the 20 s. The first version fell back only on a failed TCP or TLS
+  connect, so a network that passes TLS on 443 and drops what follows lost 5349, which 0.8.4
+  used directly when it was the only one listed. Worst cases from the room's answer: UDP silent,
+  TURN asked at 2 s, credentials at about 2.5 s, the listed port from about 7.5 s; a UDP send
+  that fails outright asks for TURN at once, the listed port from about 5.5 s. A link is given up
+  20 s after the answer at the latest (15 s after an offer never answered, `ANSWER_TIMEOUT`).
+  The room's race deadline is 10 s from the race's start message (`SFU_CONNECT_MS`): a racer
+  whose 443 is dead and whose session starts with the race makes it on the listed port only just
+  (about 8.5-9.5 s with the offer and answer), one connected in the lobby is not affected.
 - `sfu_trouble` (docs/online-protocol.md): once per path and association the game sends
   `{path, step, kind, version}` to a room whose welcome lists `sfu_trouble`; the room logs
   `Realtime trouble: turn/allocate/turn_400 0.8.5 EU (room CODE, member 2)`, 12 a member in
-  5 minutes at most, and drops a report with any other word. Today's server answers an unknown
+  5 minutes at most, and drops a report with any other word. A member's report times go when it
+  leaves (`leave()`, the one place a member is removed) and when the room ends (review fix: they
+  stayed for the room's life, and member ids only go up). Today's server answers an unknown
   `sfu_` type with an error and keeps the connection (an unknown type outside `sfu_` closes it);
   today's game ignores a message type it does not know. A game sends the report only to a server
   that lists the feature, so neither side needs the other first.
 - Tests: the net crate's fake TURN server (`turn.rs` `FakeServer`) and an in-memory relay link
   run a UDP send error with a healthy relay (connects via TURN), both paths failing (one line,
-  both steps named, two reports), and a silent relay (reported at its stage); the server's
-  `trouble.test.ts` checks the word lists, the line, the rate limit, and that an unknown `sfu_`
-  type keeps the connection.
+  both steps named, two reports), a silent relay (the attempt ends at the deadline, both paths
+  reported, the retry set after its pause), and 443 whose allocation is never answered or is
+  refused (the listed port connects); the server's `trouble.test.ts` checks the word lists, the
+  line, the rate limit, members joining, reporting and leaving (the map keeps the host's entry
+  alone), and that an unknown `sfu_` type keeps the connection.
 
 ## Decisions
 
 - No guess at the cause: the change makes the failing step visible and removes the one path in
   our code (a UDP send error ending the TURN attempt) that could take a relay racer out without
   the relay failing. The lead decides the deploy and the release.
+- A relay that never connects now costs a session and a retry, as a failed attempt did before
+  this lane (the room's limit is 6 sessions in 5 minutes): waiting on it for ever kept a player
+  out of every race with nothing tried.
 - The report carries fixed words and the release only, never the error's own text: an OS or
   library message can hold an address.
 

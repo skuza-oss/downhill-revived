@@ -386,8 +386,9 @@ A member's session lives as long as its stay in the room (finding 177):
   `turn_438`, `turn_440`, `turn_441`, `turn_442`, `turn_486`, `turn_508`, `turn_other` or `other`
   (the game's `port/render/net/src/trouble.rs`, the server's `TROUBLE_*` lists in `protocol.ts`);
   `version` is the game's release (`x.y.z`). Nothing else: no address, SDP, session id, TURN
-  credential, address hash or install id. `connect` with `no_answer` is a relay that is up and
-  allocated but carried nothing in 20 s. The server answers nothing and changes nothing: it logs
+  credential, address hash or install id. A relay still up at the game's 20 s connect deadline is
+  reported at the stage it reached with `timeout` (`first_data`: allocated and bound, nothing back
+  from the SFU), and the game tries a new session after its pause. The server answers nothing and changes nothing: it logs
   one line, `Realtime trouble: turn/allocate/turn_400 0.8.5 EU (room CODE, member 2)`, at most 12
   per member in 5 minutes (two paths for each of `SFU_OFFERS` sessions), and drops a report with
   any other word or version without a word. A server without the feature answers an unknown
