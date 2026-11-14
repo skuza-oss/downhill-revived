@@ -964,33 +964,6 @@ trait Backend {
     fn draw(&mut self, p: &PictureInput, dual: bool, inputs: &mut dyn Inputs) -> Result<Drawn, String>;
 }
 
-/// The surface contents a replay sets and reads back. The native renderer's surface module (task
-/// N4, `src/native/surfaces.rs`) provides them as inherent methods of `Native` with these
-/// signatures, and method resolution then picks those over this trait's. Until it does, the
-/// trait's versions fail, so no picture can pass without them.
-///
-/// - `surface_fill(index, texels)`: surface `index`'s whole texture replaced by `texels`
-///   (`size[0] * size[1] * 4` bytes, rows unpadded: RGBA8, or depth32float bit patterns).
-/// - `surface_read(index)`: its whole texture read back in the same layout, after the work
-///   submitted so far (blocks).
-#[allow(dead_code)]
-trait SurfaceContents {
-    fn surface_fill(&mut self, index: u32, texels: &[u8]) -> Result<(), String>;
-    fn surface_read(&mut self, index: u32) -> Result<Vec<u8>, String>;
-}
-
-#[allow(dead_code)]
-impl SurfaceContents for dhd_render::native::Native {
-    fn surface_fill(&mut self, index: u32, texels: &[u8]) -> Result<(), String> {
-        let _ = (index, texels);
-        Err("native::Native::surface_fill is not in the native API yet (task N4)".into())
-    }
-    fn surface_read(&mut self, index: u32) -> Result<Vec<u8>, String> {
-        let _ = index;
-        Err("native::Native::surface_read is not in the native API yet (task N4)".into())
-    }
-}
-
 /// dhd_render's native renderer on the process's device.
 struct DeviceBackend {
     gpu: &'static dhd_render::device::Gpu,

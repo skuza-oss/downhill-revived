@@ -34,23 +34,8 @@
 use crate::abi::{DhdrPresentRect, DHDR_NATIVE_POINT_FILTER};
 use crate::device::Gpu;
 use crate::native::pipelines::gputimes;
-use crate::native::scanout::Display;
 use crate::native::Native;
 use crate::present::surface::Surface;
-
-/// Stand-in for `scanout.rs`'s accessor (N5: `Display::view`, the display texture's view, None
-/// before the first scanout), while render/rust still has the skeleton's `Display`. Inherent
-/// methods take precedence over trait methods, so once N5's scanout.rs (with a
-/// `pub fn view(&self) -> Option<&wgpu::TextureView>`) is merged the call below reaches it and this
-/// default goes unused: delete the trait then. Until then there is no picture and present skips (0).
-#[allow(dead_code)]
-trait SkeletonDisplay {
-    fn view(&self) -> Option<&wgpu::TextureView> {
-        None
-    }
-}
-
-impl SkeletonDisplay for Display {}
 
 /// The present uniform (C: present_uniform, present_uniform_group).
 struct Uniform {
