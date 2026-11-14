@@ -60,7 +60,10 @@ What works today:
 - **Controllers**: Xbox pads, DualSense, DualShock 4, Switch Pro, 8BitDo and most other USB or
   Bluetooth pads (through SDL3 and its controller database), with vibration where the pad has
   motors. Buttons go by position, as on a PlayStation pad. The 2-4 player modes use every
-  connected controller.
+  connected controller. Only real gamepads take a player's place: a tablet's media keys, an air
+  mouse or a keyboard cover are left out (the log says which device was skipped). When one player
+  plays and player 1's pad has not been touched, the first pad you press a button on becomes
+  player 1; this does not apply in split-screen once the players are chosen.
 - **Keyboard play**: a whole race on the keyboard, with gradual steering; letters go by their
   place on the keyboard, so AZERTY and QWERTZ work too (see [Controls](#controls)).
 - **Your own keys and buttons**: every PlayStation button can be put on another key or controller

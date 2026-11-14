@@ -1,6 +1,7 @@
 # 232: Keep non-gamepads out of controller slots
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/pad-slot-filter` from `main` 6d9d51d1, started 2026-11-14.
 
@@ -77,3 +78,11 @@ Boot 600/600 and race 5000/5000 fields equal to the locally built 6d9d51d1 base,
 `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=0`; no test depends on a connected controller.
 No code/build acceptance work remains; phone validation is listed above. The lead closes this
 finding at merge.
+
+Checked:
+- 0.8.2 gate on a55c3aee: `check.py port -j 6` and `check.py docs` OK; all seven state traces
+  equal `main-524948ba-ref-v3` (the one differing race field of the lane's last run did not
+  appear; none of the seven runs differed).
+- On the Mi 11i with no controller attached: no `controller:` line, so no phantom device took a
+  player's place. Not checked here: a real tablet with media keys, two pads' first press,
+  hotplug and split-screen order (unit tests only).

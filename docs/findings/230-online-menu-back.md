@@ -1,6 +1,7 @@
 # 230: Back through the Online menus
 
 Status: current
+Checked: 2026-11-14
 
 Branch `fix/online-menu-back` from `main` a99bf961, started 2026-11-14.
 
@@ -55,3 +56,12 @@ build: `b05627efa2d996e3`. The base is a99bf961.
 
 Quick, port and docs gates pass. Both state traces match the base. No open
 implementation work; the lead closes this finding at merge.
+
+Checked:
+- 0.8.2 gate on a55c3aee: `check.py port -j 6` and `check.py docs` OK; the seven state traces
+  (`boot`, `race`, `race2`..`race6`) equal `main-524948ba-ref-v3`.
+- `port/tools/online_back_check.py`: private room with Esc, P2P room with Triangle, public room
+  with Backspace, each PASS (shop -> rider choice -> ONLINE).
+- On the Mi 11i (release-signed PGO APK): in ONLINE > CREATE A P2P RACE, rider selected, shop
+  open, Back returned to the rider choice and the second Back to ONLINE, no loop; then the room
+  was made, a race run and left properly.
