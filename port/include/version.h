@@ -9,6 +9,6 @@
 #ifndef DHD_VERSION_H
 #define DHD_VERSION_H
 
-#define DHD_VERSION "0.8.3"
+#define DHD_VERSION "0.8.4"
 
 #endif
