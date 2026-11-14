@@ -1,4 +1,4 @@
-/* The disc image's copy into the iOS app (the launcher's pick_disc, port/ios/app/disc_import.m;
+/* The disc image's copy into the iOS app (the launcher's pick_disc, port/ios/app/launcher.m;
    finding 227): the copy loop and the completeness rule of Android's DiscImage.java, in plain C so
    port/ios/tests/test_disc_copy.c runs them anywhere. Whether a file is the game is host.c's
    host_disc_check, as on Android. GPL-3.0-or-later. */

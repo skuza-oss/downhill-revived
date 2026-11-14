@@ -19,6 +19,8 @@ for the lead on a Mac. Matching sources and historical findings are out of scope
 - A09: removed the unread iOS release option and empty foreground forwarding trio;
   configuration still follows `args.debug`, and other lifecycle callbacks remain. iOS unbuilt.
 
+- A10: corrected the Android direct-start notice, iOS import source and UIKit comments.
+
 ## Decisions
 
 Keep the real renderer methods and ordinary native probe timing. No new implementation.

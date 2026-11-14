@@ -1,5 +1,5 @@
-/* The update notice on Android (finding 143). A phone has no launcher to update the game, so at
-   start the game itself asks whether a newer release with an Android build is out, and says so in
+/* The update notice on Android (finding 143). On direct starts that bypass the launcher,
+   the game asks whether a newer release with an Android build is out, and says so in
    one line over the game (DhdActivity.updateNotice) that opens the release's page in the browser
    when tapped. Nothing is downloaded or installed: the player installs the new APK as the first.
 

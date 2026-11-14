@@ -362,7 +362,7 @@ def ios_build(simulator=False):
     silicon, finding 224), its include directory and the frameworks it
     needs at link time. Same subsystem selection as posix_build (window, audio, controllers); the window
     is UIKit's with Metal views. Cross-built on a Mac with Xcode's iphoneos SDK, CMake and Ninja, under
-    build/port/sdl3/<version>-ios-arm64. The app owns UIApplication (SwiftUI); SDL is used inside it
+    build/port/sdl3/<version>-ios-arm64. The app owns UIApplication (UIKit); SDL is used inside it
     (SDL_SetMainReady, then SDL_Init), so SDL's own main/UIApplicationMain entry is not used."""
     import json as _json
     if sys.platform != 'darwin':
