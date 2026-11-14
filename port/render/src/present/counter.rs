@@ -86,7 +86,8 @@ impl Counter {
             pass.set_scissor_rect(w - margin - vw, margin, vw, vh);
             pass.draw(0..3, 0..1);
         }
-        gpu.queue.submit([encoder.finish()]);
+        let command = encoder.finish();
+        crate::startup::submit(&gpu.queue, [command]);
     }
 }
 /// The counter's text (finding 181): frames a second, then online two numbers, each named for what
@@ -133,6 +134,7 @@ impl Objects {
     }
 
     fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
+        let _startup = crate::startup::step("performance counter shader and pipeline");
         let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("performance counter"),
                                                                                   source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
         let pipe = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -188,7 +190,7 @@ fn capture_png(gpu: &Gpu, frame: &wgpu::Texture, path: &str) -> Result<(), Strin
     encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo { texture: frame, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
         wgpu::TexelCopyBufferInfo { buffer: &read, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride as u32), rows_per_image: Some(h) } },
         wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 });
-    gpu.queue.submit([encoder.finish()]);
+    crate::startup::submit(&gpu.queue, [encoder.finish()]);
     let status = std::sync::Arc::new(std::sync::Mutex::new(None));
     let result = status.clone();
     read.map_async(wgpu::MapMode::Read, .., move |r| *result.lock().unwrap() = Some(r));

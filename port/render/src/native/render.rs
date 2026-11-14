@@ -628,6 +628,7 @@ impl Pass {
     }
 
     pub fn submit_now(&mut self, gpu: &Gpu, arenas: &Arenas) {
+        let _startup = crate::startup::step("native finish, helper wait and submit");
         self.end();
         #[cfg(not(target_arch = "wasm32"))]
         let cut = self.finisher.pending() != 0;
@@ -661,7 +662,7 @@ impl Pass {
             t.add(rstat::PREPOLL);
         }
         let t = rstat::T::new();
-        gpu.queue.submit(commands);
+        crate::startup::submit(&gpu.queue, commands);
         t.add(rstat::QSUB);
         #[cfg(not(target_arch = "wasm32"))]
         self.stats.collect(gpu);
@@ -707,6 +708,7 @@ impl Native {
     /// DRAW's first and count are a range of `indices`, which index `p.vertices`. The triangles,
     /// their order and their vertices' bytes are those of the expanded picture.
     pub fn picture_indexed(&mut self, p: &Picture, indices: Option<&[u32]>) -> Result<DhdrPictureResult, String> {
+        let _startup = crate::startup::step("native picture");
         #[cfg(not(target_arch = "wasm32"))]
         let _spike = crate::native::pipelines::SpikeTimer::new("picture", 0);
         let whole = rstat::T::new();

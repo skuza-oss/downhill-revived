@@ -72,6 +72,7 @@ impl Pipelines {
     /// As `create`, awaiting the error scopes (the browser's async init; natively `create` blocks
     /// on this).
     pub async fn create_async(gpu: &Gpu, raster_flags: u32) -> Result<Pipelines, String> {
+        let _startup = crate::startup::step("exact pipelines and error scopes");
         check_key(raster_flags)?;
         if let Some(p) = cached(gpu, raster_flags) {
             return Ok(p);
@@ -206,6 +207,7 @@ fn build(gpu: &Gpu, key: u32) -> (Shared, Keyed) {
 }
 
 fn module(gpu: &Gpu) -> wgpu::ShaderModule {
+    let _startup = crate::startup::step("shader raster.wgsl");
     gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("raster.wgsl"),
         source: wgpu::ShaderSource::Wgsl(crate::shaders::RASTER.into()),
@@ -223,6 +225,7 @@ fn buffer_entry(binding: u32, ty: wgpu::BufferBindingType, dynamic: bool, min: u
 
 fn compute(gpu: &Gpu, module: &wgpu::ShaderModule, layout: Option<&wgpu::PipelineLayout>, entry: &str,
            constants: &[(&str, f64)]) -> wgpu::ComputePipeline {
+    let _startup = crate::startup::step(entry);
     gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some(entry),
         layout,
@@ -262,6 +265,7 @@ fn build_shared(gpu: &Gpu) -> Shared {
 
 /// gpu_wgpu.c:264-283: the DHD_GS_* shader options as raster.wgsl's override constants.
 fn build_keyed(gpu: &Gpu, s: &Shared, key: u32) -> Keyed {
+    let _startup = crate::startup::step(&format!("raster key {key}"));
     use crate::abi::{DHDR_RASTER_ADDRESS_SHIFT, DHDR_RASTER_EARLY_DEPTH, DHDR_RASTER_EXCLUSIVE_WORD_STORE};
     let bit = |b: u32| if key & b != 0 { 1.0 } else { 0.0 };
     let c = [

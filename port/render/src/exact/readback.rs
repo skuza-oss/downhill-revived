@@ -82,6 +82,7 @@ pub fn map_start(buffer: &wgpu::Buffer, range: std::ops::Range<u64>) -> MapStatu
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wait(gpu: &Gpu) -> Result<(), String> {
     let _spike = crate::native::pipelines::SpikeTimer::new("readback", 0);
+    let _startup = crate::startup::step("exact readback fence wait");
     gpu.device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ()).map_err(|e| format!("poll: {e}"))
 }
 

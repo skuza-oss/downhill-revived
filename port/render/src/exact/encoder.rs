@@ -129,6 +129,7 @@ impl Encoder {
 
     /// Ends the pass and submits the open encoder. False when nothing was recorded (no submit).
     pub fn submit(&mut self, gpu: &Gpu) -> bool {
+        let _startup = crate::startup::step("exact finish and submitter wait");
         self.end_pass();
         match self.encoder.take() {
             Some(e) => {
@@ -136,7 +137,8 @@ impl Encoder {
                 let mut index = None;
                 let mut job = || {
                     if let Some(e) = e.take() {
-                        index = Some(gpu.queue.submit([e.finish()]));
+                        let command = e.finish();
+                        index = Some(crate::startup::submit(&gpu.queue, [command]));
                     }
                 };
                 #[cfg(target_os = "android")]
@@ -155,6 +157,7 @@ impl Encoder {
 impl Exact {
     /// Buffers (zeroed) and every exact pipeline, eagerly (`dhdr_exact_create`).
     pub fn create(gpu: &'static Gpu, raster_flags: u32) -> Result<Exact, String> {
+        let _startup = crate::startup::step("exact creation: pipelines, buffers, display");
         let pipelines = crate::exact::pipelines::Pipelines::create(gpu, raster_flags)?;
         let buffers = crate::exact::buffers::Buffers::create(gpu, &pipelines)?;
         Ok(Exact {

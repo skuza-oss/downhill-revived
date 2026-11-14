@@ -26,6 +26,7 @@ pub struct PresentPipe {
 /// The pipeline's descriptor parts: as gpu_wgpu.c's present_pipeline (automatic layout), into a
 /// `format` target.
 fn build(gpu: &Gpu, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+    let _startup = crate::startup::step("present shader and pipeline");
     let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("present.wgsl"),
         source: wgpu::ShaderSource::Wgsl(crate::shaders::PRESENT.into()),

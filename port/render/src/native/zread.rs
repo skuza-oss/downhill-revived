@@ -184,7 +184,7 @@ impl Native {
             slot.needs_map = true;
 
         } else {
-            gpu.queue.submit([separate.expect("separate probe encoder").finish()]);
+            crate::startup::submit(&gpu.queue, [separate.expect("separate probe encoder").finish()]);
             slot.status = Some(map_start(&slot.read, 0..used));
         }
         slot.rect = [x, y, w, h];

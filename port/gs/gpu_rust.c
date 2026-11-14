@@ -30,6 +30,13 @@
    phone's app goes to the background and back (finding 091). */
 #define COBJMACROS
 #include "gpu.h"
+#ifdef __ANDROID__
+#include "../host/host_end.h"
+extern void dhdr_startup_end(int code);
+static void startup_end(void) { dhdr_startup_end(host_end_code()); }
+/* GS tools have no HLE log pipe. The game drains it before entering a driver call. */
+extern void host_log_drain(void) __attribute__((weak));
+#endif
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
@@ -116,6 +123,10 @@ void dhd_host_log(const char *line, size_t bytes)
 {
     fprintf(stderr, "%.*s\n", (int)bytes, line);
     fflush(stderr);
+#ifdef __ANDROID__
+    if (host_log_drain && ((bytes >= 11 && !memcmp(line, "gs startup:", 11)) ||
+        (bytes >= 22 && !memcmp(line, "previous run: startup:", 22)))) host_log_drain();
+#endif
 }
 
 /* "gs: renderer <dhdr_version()>" once at start, so every run of a program with dhd_render linked
@@ -308,6 +319,9 @@ static int device_init(void)
         fprintf(stderr, "gs: WebGPU shader compiler %s\n", d.dxc_path ? d.dxc_path : "FXC");
 #else
     (void)compiler; (void)choice;
+#endif
+#ifdef __ANDROID__
+    host_end_add(HOST_END_REPORT, "startup record", startup_end);
 #endif
     if (!dhdr_device_init(&d)) return 0;
     device.made = 1;

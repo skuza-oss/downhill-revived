@@ -58,6 +58,14 @@ final class LastExit {
         File out = new File(context.getFilesDir(), FILE);
         try {
             known = find(context);
+            File startup = new File(context.getFilesDir(), "dhd-startup.txt");
+            if (startup.isFile()) {
+                String stage = CrashReport.tail(startup, 8192).trim();
+                String detail = "startup: " + stage
+                        + " (hung: >=5s observed; died: unexpected exit, including a kill)\n";
+                known = known == null ? new LastExit(startup.lastModified(), null, detail)
+                        : new LastExit(known.time, known.why, known.text + detail);
+            }
         } catch (Throwable e) {  // never in the way of the game's start
             Log.w(TAG, "no exit record: " + e);
             known = null;

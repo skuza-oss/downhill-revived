@@ -168,7 +168,7 @@ fn read_level(gpu: &Gpu, texture: &wgpu::Texture, level: u32, w: u32, h: u32) ->
             },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
-        gpu.queue.submit([e.finish()]);
+        crate::startup::submit(&gpu.queue, [e.finish()]);
         buffer
     })?;
     let status = Arc::new(Mutex::new(None));

@@ -213,6 +213,7 @@ impl Native {
     /// native_present. 1 drawn (C paces, then calls `dhdr_surface_present`), 0 skipped, -1 failed
     /// (logged).
     pub fn present(&mut self, surface: &mut Surface, r: &DhdrPresentRect) -> i32 {
+        let _startup = crate::startup::step("native present drawing");
         let whole = crate::native::render::rstat::T::new();
         let gpu = self.gpu;
         let log = |e: &str| crate::host::log(&format!("dhd_render: dhdr_native_present: {e}"));
@@ -340,7 +341,8 @@ impl Native {
         if let Some(encoder) = separate {
             let mut encoder = encoder;
             gputimes::end_frame(gpu, &mut encoder);
-            gpu.queue.submit([encoder.finish()]);
+            let command = encoder.finish();
+            crate::startup::submit(&gpu.queue, [command]);
         } else {
             gputimes::end_frame(gpu, self.pass.encoder(gpu));
             self.pass.submit_now(gpu, &self.arenas);
