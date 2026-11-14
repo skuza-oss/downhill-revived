@@ -2,8 +2,10 @@
 
 Status: in progress
 
-Branch `fix/turn-players-out-248` from `main` 02a8bb3e (0.8.4), started 2026-11-14. Diagnosis
-only so far: the cause is not proven, nothing in the code is changed.
+Branch `fix/turn-players-out-248` from `main` 02a8bb3e (0.8.4), started 2026-11-14. The cause is
+not proven. The branch hardens the game's two paths to the SFU and adds a report of the failing
+step (`sfu_trouble`), so that the next days' logs can name the cause; neither is released or
+deployed.
 
 ## Goal and acceptance
 
@@ -20,8 +22,14 @@ fix it only if the cause is proven and the fix small. Out of scope: the subscrip
 - [x] 2026-11-14: one affected room followed through its server lines; server and client code read.
 - [x] 2026-11-14: reproduction on the official server (published 0.8.4 PC build, private rooms,
   hidden desktop): not reproduced (below).
-- [ ] A player's `dhd.log` from an affected room (0.8.4 logs name the refused TURN request and the
-  TLS family, finding 246), or a diagnostic that reports the failing phase to the room.
+- [x] 2026-11-14: outside causes (Cloudflare's status, changelog, community, TURN docs): none
+  found that our code misses (below).
+- [x] 2026-11-14: the game's paths fail independently, and every failure names its step and kind.
+- [x] 2026-11-14: `sfu_trouble`, the game's report of a failed path, and the room's log line.
+- [x] 2026-11-15: commits cd22e607 (game) and b670ffc5 (room); `check.py quick`, `port`,
+  `server` and `docs` pass. No state trace: nothing here touches game state.
+- [ ] After a deploy and a release: count the `Realtime trouble:` lines by path, step and kind,
+  then fix the cause.
 
 ## What the logs say
 
@@ -82,13 +90,61 @@ UDP switch does not imitate.
   once: the SFU's answer, the TURN service, or players' networks. The rooms all failing together
   point at the network or the device that the members share, not at the room.
 
+## Outside causes (searched 2026-11-14)
+
+- [Cloudflare's status page](https://www.cloudflarestatus.com/history) shows no Realtime TURN
+  incident around 11-12; the [Realtime changelog](https://developers.cloudflare.com/changelog/product/realtime/)
+  has no TURN change then (its last entry before is the WebSocket adapter going GA, 09-30).
+- One [community report](https://community.cloudflare.com/t/turn-over-udp-gets-no-response-from-turn-cloudflare-com-in-the-philippines/980005)
+  from 11-12: TURN over UDP to Cloudflare's TURN address got no answer on 3478, 443 and 53 from
+  one machine in the Philippines. The same date, but UDP, and our relay is TLS; no reply from
+  Cloudflare.
+- [Cloudflare's TURN credentials](https://developers.cloudflare.com/realtime/turn/generate-credentials/):
+  the API returns `turn:` on UDP 3478 and 53, TCP 3478 and 80, and `turns:` on 5349 and 443;
+  the docs ask browsers to drop port 53 (they block it), and the caller sets the credentials'
+  TTL. Our room asks for one hour (`TURN_TTL_S`), and the game renews its session (new
+  credentials) before they end; it uses only `turns:` (TLS), 443 first. Nothing in the docs that our code does not do.
+- Other projects' threads (WebRTC apps on Cloudflare's TURN) report restrictive networks that
+  reset TLS on 5349 but pass 443, and replies that list no `turns:` on 443. Our game took
+  `turns:...:443` only when the reply listed it, else the first `turns:` entry. It now always
+  tries 443 first (on the listed host) and the listed port after a failed TCP or TLS connect.
+
+## Changes
+
+- Two paths, independent failures (`sfu.rs`). A UDP send that fails outright (not `WouldBlock`)
+  used to fail the whole association, the TURN attempt included, and the next session did the
+  same. Now it fails the UDP path only: the relay is asked at once and the association lives on
+  it; only when UDP was the path in use, or TURN is off, or TURN failed too, is the association
+  failed. Direct input is ignored once UDP has failed.
+- Every failure names its path, step and kind (`trouble.rs`): steps `send`, `receive`,
+  `connect`, `credentials`, `tls_connect`, `tls_handshake`, `allocate`, `channel_bind`,
+  `refresh`, `first_data`, `link`; kinds from the I/O error (`timeout`, `refused`, `reset`,
+  `unreachable`, `denied`, `dns`...), the TLS library (`tls`), or the TURN error code
+  (`turn_400`... `turn_508`). The log reads `net: SFU: TURN failed at allocate (turn_400)`, and
+  with both paths gone `no path to the SFU: UDP failed at send (denied); TURN failed at
+  allocate (turn_400)`. No address, credential or id in any of them; a TLS failure adds the TLS
+  library's own words. A relay that is up but carries nothing 20 s after the answer is named by
+  its stage (`allocate`, `channel_bind`, `first_data`, or `connect` with `no_answer`).
+- `sfu_trouble` (docs/online-protocol.md): once per path and association the game sends
+  `{path, step, kind, version}` to a room whose welcome lists `sfu_trouble`; the room logs
+  `Realtime trouble: turn/allocate/turn_400 0.8.5 EU (room CODE, member 2)`, 12 a member in
+  5 minutes at most, and drops a report with any other word. Today's server answers an unknown
+  `sfu_` type with an error and keeps the connection (an unknown type outside `sfu_` closes it);
+  today's game ignores a message type it does not know. A game sends the report only to a server
+  that lists the feature, so neither side needs the other first.
+- Tests: the net crate's fake TURN server (`turn.rs` `FakeServer`) and an in-memory relay link
+  run a UDP send error with a healthy relay (connects via TURN), both paths failing (one line,
+  both steps named, two reports), and a silent relay (reported at its stage); the server's
+  `trouble.test.ts` checks the word lists, the line, the rate limit, and that an unknown `sfu_`
+  type keeps the connection.
+
 ## Decisions
 
-No code change: the cause is not proven, and the brief says not to guess. The next step is
-evidence from a failing client: a player's 0.8.4 `dhd.log`, or a small client report (a
-`sfu_trouble` message with the failing phase and error kind only: UDP send error, TURN TLS,
-TURN refusal and its request, ICE, DTLS; no address, SDP, credential or id) that the room logs.
-That one needs a server deploy and a release; the lead decides.
+- No guess at the cause: the change makes the failing step visible and removes the one path in
+  our code (a UDP send error ending the TURN attempt) that could take a relay racer out without
+  the relay failing. The lead decides the deploy and the release.
+- The report carries fixed words and the release only, never the error's own text: an OS or
+  library message can hold an address.
 
 ## Surprises
 
@@ -97,4 +153,5 @@ calculations view reports `sampleInterval`). Count with windows of an hour or le
 
 ## Result
 
-Open.
+Open: waiting for the deploy (the log line and the feature) and a release (the report, the
+hardening, 443 first).
