@@ -187,6 +187,7 @@ fn stages() -> Vec<Stage> {
         Stage::new(Native, Fragment, "native_blit", TWO),
         Stage::new(Native, Fragment, "native_upload_alpha", TWO),
         Stage::new(Native, Fragment, "present_pixel", TWO),
+        Stage::new(Native, Fragment, "present_direct", TWO),
         Stage::new(Native, Fragment, "present_shrink", TWO),
         Stage::new(Native, Fragment, "present_fill", TWO),
         Stage::new(Native, Fragment, "native_grow_depth", &[ONE, ONE]),

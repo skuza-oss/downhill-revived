@@ -730,6 +730,15 @@ impl Native {
         timing.begin(gpu, self.pass.encoder(gpu));
         self.pass.timing = timing;
         self.pass.constants = None; // reserve emptied the arena
+        // A picture that is shown from its surface only (finding 247) is copied to the display
+        // texture before this one draws into that surface, unless this one shows a picture of its
+        // own (a scanout, a movie, black), which replaces it.
+        if self.display.uncopied() && !self.will_show(p) {
+            let o = ScanoutObjects { pipeline: &self.objects.scanout_pipe,
+                fast_pipeline: &self.objects.scanout_fast_pipe, layout: &self.objects.scanout_layout };
+            let encoder = self.pass.encoder(gpu);
+            self.display.materialize(gpu, encoder, &o, &self.objects.uniform_layout);
+        }
         let t = rstat::T::new();
         {
             // native_prepare_surfaces: grown surfaces' old contents first, in the picture's encoder.
@@ -1134,6 +1143,17 @@ impl Native {
             dummy_depth_view: &shared.dummy_depth_view,
         };
         self.converts.prepare(gpu, &mut self.arenas, &o, i, v, base, &sources)
+    }
+
+    /// Whether the picture will show a picture of its own at its end (`scan_out`'s tests, or a
+    /// movie frame), asked before it draws.
+    fn will_show(&self, p: &Picture) -> bool {
+        if p.movie.is_some() || p.display_surface == DISPLAY_OFF {
+            return true;
+        }
+        p.display_surface >= 0
+            && p.surfaces.get(p.display_surface as usize).is_some_and(|s| has_texture(Some(s)))
+            && self.surface_view(p.display_surface as usize).is_some()
     }
 
     /// native_scanout through scanout.rs: the picture's display surface (with a texture) into the

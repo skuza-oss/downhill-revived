@@ -8,6 +8,11 @@
 //! triangle) with `rect` as its viewport constants, scissored to `cut` clamped to the frame.
 //! `DHDR_NATIVE_POINT_FILTER` samples the picture with a nearest sampler, else linear.
 //!
+//! A picture that lies as one rectangle in its display surface (`scanout.rs`'s `Direct`, finding
+//! 247) is drawn by `present_direct` from that surface instead, with the same sampler: the scanout
+//! made no copy of it. With `fill` the copy is made first (`Display::materialize`) and the picture
+//! comes from the display texture as before.
+//!
 //! `fill` (widescreen's 4:3 pictures: loading cards and movies, finding 140): first a small pass
 //! boils the picture's part inside `cut` down to `FILL_SIZE` texels (`present_shrink`), then the
 //! present pass draws that over the whole frame, the cut's rectangle scaled to cover the frame,
@@ -39,16 +44,17 @@ use crate::present::surface::Surface;
 
 /// The present uniform (C: present_uniform, present_uniform_group).
 struct Uniform {
-    /// native.wgsl's `Present`: rect, cover, source (48 bytes used of 256; uniform, copy dst).
+    /// native.wgsl's `Present`: rect, cover, source, map, mode (80 bytes used of 256; uniform, copy
+    /// dst).
     buffer: wgpu::Buffer,
-    /// On `init.rs`'s uniform layout, 48 bytes at dynamic offset 0.
+    /// On `init.rs`'s uniform layout, 80 bytes at dynamic offset 0.
     group: wgpu::BindGroup,
     /// The bytes last written to `buffer` (None: nothing yet); the same rectangles are not written
     /// again.
     written: Option<[u8; UNIFORM_BYTES]>,
 }
 
-const UNIFORM_BYTES: usize = 48;
+const UNIFORM_BYTES: usize = 80;
 
 /// The fill's small texture, texels (native.wgsl FILL_SIZE).
 const FILL_SIZE: (u32, u32) = (64, 48);
@@ -74,12 +80,15 @@ pub struct Presenter {
     /// The bind group of the display view it was made for (C's present_group): remade when the
     /// display texture is remade (a new size) or the sampler changes.
     group: Option<(wgpu::TextureView, wgpu::BindGroup)>,
+    /// The bind groups of the display surfaces `present_direct` sampled last (a game that draws
+    /// into two frame buffers in turn shows two), newest first; emptied when the sampler changes.
+    direct: Vec<(wgpu::TextureView, wgpu::BindGroup)>,
     fill: Option<Fill>,
 }
 
 impl Presenter {
     pub fn new() -> Presenter {
-        Presenter { uniform: None, sampler: None, group: None, fill: None }
+        Presenter { uniform: None, sampler: None, group: None, direct: Vec::new(), fill: None }
     }
 }
 
@@ -139,8 +148,9 @@ fn scissor(cut: [i32; 4], w: u32, h: u32) -> Option<(u32, u32, u32, u32)> {
     (right > left && bottom > top).then(|| (left as u32, top as u32, (right - left) as u32, (bottom - top) as u32))
 }
 
-/// native.wgsl's `Present` (rect, cover, source; each x, y, width, height), little-endian f32.
-fn uniform_bytes(rects: [[f32; 4]; 3]) -> [u8; UNIFORM_BYTES] {
+/// native.wgsl's `Present` (rect, cover, source: each x, y, width, height; then map and mode),
+/// little-endian f32.
+fn uniform_bytes(rects: [[f32; 4]; 5]) -> [u8; UNIFORM_BYTES] {
     let mut bytes = [0u8; UNIFORM_BYTES];
     for (i, v) in rects.iter().flatten().enumerate() {
         bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
@@ -205,6 +215,12 @@ impl Native {
         // No picture scanned out yet: nothing to show.
         let Some(display) = self.display.view().cloned() else { return 0 };
         let objects = &self.objects;
+        // The fill reads the display texture: a picture that is on its surface only is copied
+        // there first (below), and drawn from it.
+        let direct = if r.fill != 0 { None } else {
+            self.display.direct().map(|d| (d.view.clone(), d.map, d.doubled))
+        };
+        let copy_first = r.fill != 0 && self.display.uncopied();
         let p = &mut self.presenter;
         let Some(uniform) = p.uniform.as_mut() else {
             log("no present uniform (options was not called)");
@@ -247,15 +263,39 @@ impl Native {
             let group = texture_group(gpu, &objects.texture_layout, &display, sampler, "native present");
             p.group = Some((display, group));
         }
-        let group = &p.group.as_ref().expect("present bind group").1;
+        let (map, mode) = match &direct {
+            Some((view, map, doubled)) => {
+                let texture = view.texture();
+                if p.direct.first().is_none_or(|(v, _)| v != view) {
+                    let found = p.direct.iter().position(|(v, _)| v == view);
+                    let entry = match found {
+                        Some(i) => p.direct.remove(i),
+                        None => (view.clone(), texture_group(gpu, &objects.texture_layout, view, sampler, "native present direct")),
+                    };
+                    p.direct.insert(0, entry);
+                    p.direct.truncate(4);
+                }
+                (*map, [*doubled as u32 as f32, 0.0, 1.0 / texture.width() as f32, 1.0 / texture.height() as f32])
+            }
+            None => ([0.0; 4], [0.0; 4]),
+        };
+        let group = match &direct {
+            Some(_) => &p.direct[0].1,
+            None => &p.group.as_ref().expect("present bind group").1,
+        };
         let (cover, source) = if fill { fill_rects(r.rect, r.cut, w, h) } else { ([0.0; 4], [0.0; 4]) };
-        let bytes = uniform_bytes([r.rect, cover, source]);
+        let bytes = uniform_bytes([r.rect, cover, source, map, mode]);
         if uniform.written != Some(bytes) {
             gpu.queue.write_buffer(&uniform.buffer, 0, &bytes);
             uniform.written = Some(bytes);
         }
         let mut encoder = gpu.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor { label: Some("native present") });
+        if copy_first {
+            let o = crate::native::scanout::ScanoutObjects { pipeline: &objects.scanout_pipe,
+                fast_pipeline: &objects.scanout_fast_pipe, layout: &objects.scanout_layout };
+            self.display.materialize(gpu, &mut encoder, &o, &objects.uniform_layout);
+        }
         let t = crate::native::render::rstat::T::new();
         let fill_pipes = fill.then(|| objects.fill_pipes(gpu, surface.format()));
         if let (Some((shrink, _)), Some(f)) = (fill_pipes, p.fill.as_ref()) {
@@ -304,7 +344,10 @@ impl Native {
                 pass.draw(0..3, 0..1);
             }
             if let Some((x, y, sw, sh)) = cut {
-                pass.set_pipeline(objects.present_pipe(gpu, surface.format()));
+                pass.set_pipeline(match direct {
+                    Some(_) => objects.direct_pipe(gpu, surface.format()),
+                    None => objects.present_pipe(gpu, surface.format()),
+                });
                 pass.set_bind_group(0, &uniform.group, &[0]);
                 pass.set_bind_group(1, group, &[]);
                 pass.set_scissor_rect(x, y, sw, sh);
@@ -340,6 +383,7 @@ impl Native {
         let filter = if flags & DHDR_NATIVE_POINT_FILTER != 0 { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
         p.sampler = Some(sampler(gpu, filter));
         p.group = None;
+        p.direct.clear();
     }
 }
 
@@ -357,11 +401,14 @@ mod tests {
 
     #[test]
     fn uniform_is_little_endian_f32() {
-        let b = uniform_bytes([[1.0, 2.0, 640.0, 480.0], [0.0, -60.0, 1280.0, 960.0], [0.0, 0.25, 1.0, 0.5]]);
+        let b = uniform_bytes([[1.0, 2.0, 640.0, 480.0], [0.0, -60.0, 1280.0, 960.0], [0.0, 0.25, 1.0, 0.5],
+                               [2048.0, 1792.0, 0.0, 64.0], [1.0, 0.0, 0.5, 0.25]]);
         assert_eq!(&b[0..4], &1.0f32.to_le_bytes());
         assert_eq!(&b[12..16], &480.0f32.to_le_bytes());
         assert_eq!(&b[20..24], &(-60.0f32).to_le_bytes());
         assert_eq!(&b[44..48], &0.5f32.to_le_bytes());
+        assert_eq!(&b[52..56], &1792.0f32.to_le_bytes());
+        assert_eq!(&b[76..80], &0.25f32.to_le_bytes());
     }
 
     #[test]

@@ -727,7 +727,10 @@ fn native_convert(@builtin(global_invocation_id) tid: vec3<u32>) {
 // (source: its uv rectangle, a movie's rows only) down to a small texture, then present_fill draws
 // that over the whole window, the content's rectangle scaled to cover it (cover, window pixels),
 // before present_pixel draws the sharp picture in the middle.
-struct Present { rect: vec4<f32>, cover: vec4<f32>, source: vec4<f32>, }
+// present_direct's (finding 247): map is the picture's size in display pixels, then its origin in
+// present_source, its display surface (texels); mode.x is 1 when the display doubles the
+// surface's rows, mode.zw one over the surface texture's size.
+struct Present { rect: vec4<f32>, cover: vec4<f32>, source: vec4<f32>, map: vec4<f32>, mode: vec4<f32>, }
 @group(0) @binding(0) var<uniform> present: Present;
 @group(1) @binding(0) var present_source: texture_2d<f32>;
 @group(1) @binding(1) var present_sampler: sampler;
@@ -739,6 +742,29 @@ const FILL_SHADE: f32 = 0.45;
 @fragment
 fn present_pixel(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = (position.xy - present.rect.xy) / present.rect.zw;
+    return vec4<f32>(textureSampleLevel(present_source, present_sampler, uv, 0.0).rgb, 1.0);
+}
+
+// present_pixel for a picture that lies as one rectangle in its display surface (scanout.rs's
+// plain_rect): the same filtered sample, taken from the surface, so the scanout's copy of the
+// picture into the display texture is not made (finding 247). p is the pixel's place in the
+// picture in display pixels, held to the outer texels' centres as the display texture's clamped
+// edges hold it. An interlaced display shows each surface row twice: display rows 2k and 2k + 1
+// are surface row k. A sample between display rows 2k and 2k + 1 is that row itself (its centre:
+// weight 0), one between rows 2k + 1 and 2k + 2 mixes surface rows k and k + 1 with the same
+// weight, so the sampler filters the surface as it filtered the doubled picture.
+@fragment
+fn present_direct(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let size = present.map.xy;
+    let p = clamp((position.xy - present.rect.xy) / present.rect.zw * size, vec2<f32>(0.5), size - 0.5);
+    var y = p.y;
+    if (present.mode.x != 0.0) {
+        let t = p.y - 0.5;
+        let row = floor(t);
+        let pair = floor(row * 0.5);
+        y = pair + 0.5 + select(0.0, t - row, row - pair * 2.0 == 1.0);
+    }
+    let uv = (present.map.zw + vec2<f32>(p.x, y)) * present.mode.zw;
     return vec4<f32>(textureSampleLevel(present_source, present_sampler, uv, 0.0).rgb, 1.0);
 }
 
