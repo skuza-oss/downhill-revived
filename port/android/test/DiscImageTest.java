@@ -1,5 +1,5 @@
 // Tests of DiscImage (the first start's disc rules, finding 143) on a plain JVM, with synthetic
-// ISO 9660 images (no game data):
+// ISO 9660 images from port/host/disc_fixtures.py and the production JNI adapter (no game data):
 //
 //     python port/android/test_disc_image.py [your.iso]
 //
@@ -10,13 +10,9 @@ package app.downhillrevived;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -30,41 +26,22 @@ public class DiscImageTest {
         }
     }
 
-    /** An ISO 9660 image of fileBlocks sectors whose primary volume descriptor declares
-     *  volumeBlocks, with SYSTEM.CNF (cnf) in the root directory; pvd false: no descriptor. */
-    static byte[] image(int volumeBlocks, int fileBlocks, String cnf, boolean pvd) {
-        int sector = DiscImage.SECTOR;
-        ByteBuffer b = ByteBuffer.allocate(fileBlocks * sector).order(ByteOrder.LITTLE_ENDIAN);
-        if (pvd) {
-            int at = 16 * sector;
-            b.put(at, (byte) 1);
-            b.put(at + 1, "CD001".getBytes(StandardCharsets.US_ASCII), 0, 5);
-            b.putInt(at + 80, volumeBlocks);
-            b.putShort(at + 128, (short) sector);
-            b.putInt(at + 156 + 2, 20);         // the root directory: sector 20, one sector
-            b.putInt(at + 156 + 10, sector);
-        }
-        byte[] name = "SYSTEM.CNF;1".getBytes(StandardCharsets.US_ASCII);
-        byte[] text = cnf.getBytes(StandardCharsets.US_ASCII);
-        int dir = 20 * sector;
-        b.put(dir, (byte) (33 + name.length + 1));  // the record's length (even)
-        b.putInt(dir + 2, 21);                     // SYSTEM.CNF at sector 21
-        b.putInt(dir + 10, text.length);
-        b.put(dir + 32, (byte) name.length);
-        b.put(dir + 33, name, 0, name.length);
-        b.put(21 * sector, text, 0, text.length);
-        return b.array();
+    static byte[] fixture(String name) throws IOException {
+        return Files.readAllBytes(Path.of(System.getenv("DHD_DISC_FIXTURES"), name + ".iso"));
     }
 
-    static final String DOWNHILL = "BOOT2 = cdrom0:\\SCUS_971.77;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n";
-
-    /** What the import (DiscImport) does with a finished copy: check, then completeness. */
+    /** What the import (DiscImport) does with a finished copy: check, then completeness (first
+     *  for a copy cut short, so it says the copy stopped). */
     static String verdict(Path dir, byte[] copied, long size, boolean exact) throws IOException {
         Path file = Files.createTempFile(dir, "copy", ".part");
         Files.write(file, copied);
         try (RandomAccessFile f = new RandomAccessFile(file.toFile(), "r")) {
             String problem = DiscImage.check(f.getChannel());
-            return problem != null ? problem : DiscImage.completeness(copied.length, size, exact, DiscImage.volumeBytes(f.getChannel()));
+            if (problem == null || problem.equals(DiscImage.CUT)) {
+                String whole = DiscImage.completeness(copied.length, size, exact, DiscImage.volumeBytes(f.getChannel()));
+                if (whole != null) problem = whole;
+            }
+            return problem;
         }
     }
 
@@ -75,20 +52,33 @@ public class DiscImageTest {
     }
 
     public static void main(String[] args) throws Exception {
-        Path dir = Files.createTempDirectory("dhd-disc-image-test");
-        byte[] good = image(64, 64, DOWNHILL, true);
+        Path dir = Files.createTempDirectory(Path.of(System.getProperty("java.io.tmpdir")), "dhd-disc-image-test");
+        byte[] good = fixture("good");
         long goodSize = good.length;
 
+        // JNI must leave the provider's sequential-copy position alone.
+        Path seek = dir.resolve("seek.iso");
+        Files.write(seek, good);
+        try (RandomAccessFile f = new RandomAccessFile(seek.toFile(), "r")) {
+            f.getChannel().position(123);
+            check(DiscImage.check(f.getChannel()) == null && f.getChannel().position() == 123,
+                    "JNI positional reads preserve the copy position");
+        }
         // the right disc, complete, whether its size was known or not
         check(verdict(dir, good, goodSize, true) == null, "a complete image of the right disc passes");
         check(verdict(dir, good, 0, false) == null, "a complete copy of a stream with no size passes");
         check(verdict(dir, good, goodSize - 4096, false) == null, "a provider SIZE below the copy (its word) still passes");
 
+        for (String name : new String[]{"no-volume", "no-cnf", "other", "europe", "japan", "cut", "tiny", "zero-volume", "empty-boot"}) {
+            check(verdict(dir, fixture(name), 0, false) != null, "shared rejection: " + name);
+        }
+        check(DiscImage.completeness(49152, goodSize, true, goodSize).contains("stopped early"), "copy size rule");
+        check(DiscImage.completeness(49152, goodSize, false, goodSize).contains("stopped early"), "provider size rule");
         // other files
-        check(verdict(dir, new byte[64 * 2048], 0, false).contains("isn't a disc image"), "no ISO 9660 volume");
-        check(verdict(dir, image(64, 64, "BOOT2 = cdrom0:\\SLUS_203.12;1\r\n", true), 0, false).contains("SLUS_203.12"),
+        check(verdict(dir, fixture("no-volume"), 0, false).contains("isn't a disc image"), "no ISO 9660 volume");
+        check(verdict(dir, fixture("other"), 0, false).contains("SLUS_203.12"),
                 "another PS2 disc is named by its serial");
-        check(verdict(dir, image(64, 64, "nothing here", true), 0, false).contains("isn't Downhill Domination"),
+        check(verdict(dir, fixture("no-boot"), 0, false).contains("isn't Downhill Domination"),
                 "a SYSTEM.CNF without BOOT2");
 
         // a short copy never passes (the review's case: 49,152 of 131,072 bytes, metadata intact)
@@ -97,11 +87,15 @@ public class DiscImageTest {
         check(known != null && known.contains("stopped early"), "a short copy of a file of known size: " + known);
         String provider = verdict(dir, head, goodSize, false);
         check(provider != null && provider.contains("stopped early"), "a short copy below the provider's SIZE: " + provider);
+        try (RandomAccessFile f = new RandomAccessFile(dir.resolve("head.iso").toFile(), "rw")) {
+            f.write(head);
+            check(DiscImage.CUT.equals(DiscImage.check(f.getChannel())), "the shared check refuses a cut image itself");
+        }
         String unknown = verdict(dir, head, 0, false);
         check(unknown != null && unknown.contains("incomplete"), "a short copy of a stream with no size: " + unknown);
         check(verdict(dir, good, goodSize + 2048, true) != null, "an exact size the copy doesn't match");
         // a source whose own size is short of its volume (a truncated dump) fails too
-        byte[] truncated = java.util.Arrays.copyOf(image(64, 64, DOWNHILL, true), 40 * 2048);
+        byte[] truncated = java.util.Arrays.copyOf(fixture("good"), 40 * 2048);
         check(verdict(dir, truncated, truncated.length, true) != null, "a truncated dump of known size");
         check(DiscImage.completeness(goodSize, goodSize, true, 0) != null, "no volume size: can't be shown complete");
 
@@ -112,7 +106,7 @@ public class DiscImageTest {
             check(DiscImage.volumeBytes(f.getChannel()) == 64L * 2048, "volumeBytes");
         }
         Path none = dir.resolve("none.iso");
-        Files.write(none, image(64, 64, DOWNHILL, false));
+        Files.write(none, fixture("no-volume"));
         try (RandomAccessFile f = new RandomAccessFile(none.toFile(), "r")) {
             check(DiscImage.volumeBytes(f.getChannel()) == 0, "volumeBytes without a descriptor");
         }

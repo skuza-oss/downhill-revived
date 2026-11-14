@@ -703,6 +703,7 @@ dependencies = [
 name = "dhd_launcher"
 version = "1.0.0"
 dependencies = [
+ "cc",
  "dhd_disc",
  "dhd_settings",
  "libc",

@@ -15,6 +15,7 @@ profile). Tools read them; the game reads none of them.
 | `DHD_BUILD_SLOTS` | at most this many core or host builds at once on the machine (several worktrees); unset: no limit |
 | `DHD_SCRATCH` | scratch folder for test runs, server state and temporary files (default the system temp) |
 | `DHD_GAME_SLOTS` | at most this many untimed game checks at once on the PC (the game lock, below); default 1 |
+| `DHD_JNI_HEADERS` | optional JDK JNI include directory for Android JVM/JNI tests when JAVA_HOME lacks headers |
 | `DHD_TEST_ISO` | your Downhill Domination (USA) disc image, for the test tools |
 | `DHD_MALIOC` | optional: Arm's Mali Offline Compiler (`malioc.exe` from Arm Performance Studio, free; keep it off the system drive), for the `native_spirv` test below |
 

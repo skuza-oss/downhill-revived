@@ -210,7 +210,11 @@ def host_tests():
     # snapshot clock standing once (port/host/app_away.c, finding 227)
     run('app-away', [ROOT / 'port/host/app_away.c', HLE / 'touch.c', ROOT / 'port/host/test_app_away.c'])
     # the disc image's own check every platform makes (port/host/disc_check.c, finding 227)
-    run('disc-check', [ROOT / 'port/host/disc_check.c', ROOT / 'port/host/test_disc_check.c'])
+    sys.path.insert(0, str(ROOT / 'port/host'))
+    from disc_fixtures import write as write_disc_fixtures
+    fixtures = OUT / 'disc-fixtures'
+    write_disc_fixtures(fixtures)
+    run('disc-check', [ROOT / 'port/host/disc_check.c', ROOT / 'port/host/test_disc_check.c'], str(fixtures))
 
 
 def main():
