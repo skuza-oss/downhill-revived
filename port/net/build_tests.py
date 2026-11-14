@@ -63,9 +63,10 @@ def main():
                 flags += ' /I"%s"' % sdl_include
                 libs += ' "%s" %s' % (sdl_lib, ' '.join(sdl3.SYSTEM_LIBS))
             f.write('clang-cl %s /Fo"%s\\\\" %s /Fe:"%s" /link %s\n' % (flags, OUT, files, exe, libs))
-            f.write('@if errorlevel 1 exit /b 1\n')
+            f.write('@if not "%errorlevel%"=="0" exit /b 1\n')
             if run and '--no-run' not in sys.argv:
-                f.write('"%s"\n@if errorlevel 1 exit /b 1\n' % exe)
+                # An assertion abort can return a negative Windows status; ERRORLEVEL 1 misses it.
+                f.write('"%s"\n@if not "%%errorlevel%%"=="0" exit /b 1\n' % exe)
     return subprocess.run(['cmd', '/c', cmd]).returncode
 
 

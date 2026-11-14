@@ -268,8 +268,11 @@ int main(void)
         assert(strstr(sent,"\"type\":\"hello\"") && !strstr(sent,"rejoinToken"));
         client_on_text(&c,tokened,strlen(tokened));
         assert(client_on_closed(&c,1006,"") == 1);  /* a drop in the room: rejoin */
+        assert(c.lobby.state == NET_RECONNECTING && !strcmp(c.lobby.notice,"Connection lost, reconnecting..."));
         client_connected(&c,&t);
         assert(strstr(sent,"\"type\":\"hello\"") && strstr(sent,",\"rejoinToken\":\"0123456789abcdef0123456789abcdef\"}"));
+        client_on_text(&c,tokened,strlen(tokened));
+        assert(c.lobby.state == NET_LOBBY && !c.lobby.notice[0]);
         client_free(&c);
         client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);  /* the next room: no token from the last one */
@@ -555,6 +558,33 @@ int main(void)
         client_on_text(&c,odd,strlen(odd));  /* only what the game's font can draw */
         client_lobby(&c,&l);
         for (const char *q = l.notice; *q; q++) assert(*q >= 0x20 && *q <= 0x7e);
+        client_free(&c);
+    }
+    {   /* The race link can stay up while only the room socket blackholes. Its STATE/EVENT
+           traffic must not postpone the room's 10 s timeout and token rejoin (246). */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,welcome,strlen(welcome));
+        c.racing = 1;
+        c.lobby.state = NET_RACING;
+        c.last_rx = net_now_ms() - 11000;
+        double quiet_since = c.last_rx;
+        unsigned char frame[] = {NET_FRAME_STATE, 0, 0};
+        client_on_binary(&c, frame, sizeof frame);
+        frame[0] = NET_FRAME_EVENT;
+        client_on_binary(&c, frame, sizeof frame);
+        assert(c.last_rx == quiet_since);
+        assert(client_tick(&c) == 1);
+        assert(client_on_closed(&c,1006,"") == 1 && c.rejoining && !c.lobby.offline);
+        client_connected(&c,&t);
+        client_on_text(&c,welcome,strlen(welcome));
+        c.last_rx = net_now_ms() - 11000;
+        unsigned char pong[2 + 2 * sizeof(double)] = {NET_FRAME_PONG, 0};
+        double now = net_now_ms(), server = now + 1000;
+        memcpy(pong + 2, &now, sizeof now);
+        memcpy(pong + 2 + sizeof now, &server, sizeof server);
+        client_on_binary(&c, pong, sizeof pong);
+        assert(c.last_rx > quiet_since && client_tick(&c) == 0);
         client_free(&c);
     }
     puts("test_session: session and ten-player checks passed");

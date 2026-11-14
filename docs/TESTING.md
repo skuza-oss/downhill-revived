@@ -236,6 +236,16 @@ Online:
 | `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |
 | `DHD_NET_TEST_PONG_DELAY=N[@S]` | from S seconds (default 60) after joining a room, every pong this PC gets (the room's and the race's PONG) is held N ms plus 0-N/2 ms more before it counts: a slow return path one way, for the shared clock (finding 175) |
 
+Relay-only SFU race on one PC (finding 246): with `DHD_ISO` set,
+`python port/tools/local_server.py -- python port/tools/online_race.py --hidden --capture "" --a DHD_NET_SFU_UDP=0 --b DHD_NET_SFU_UDP=0 --a DHD_NET_PEER_STATS=1 --b DHD_NET_PEER_STATS=1 --a DHD_NET_TEST_FINISH=45 --b DHD_NET_TEST_FINISH=50 --b DHD_NET_TEST_DROP=20`.
+The local server mints TURN credentials only with the Realtime and TURN keys in
+`online/server/.dev.vars` (wrangler loads it; a worktree has none: give wrangler the main
+checkout's file with `--env-file`; never copy or print it). Against the official server, run
+`online_race.py` alone with `DHD_NET_SERVER=wss://dhd.skuza.app`. Both logs must show
+`TURN relay's TLS link up`, `SFU connected via TURN/TLS`, relayed datagrams both ways in the
+`net: SFU 30 s` lines and the same results; `netstats:` gives the ICE round trip. The drop cuts
+the guest's room connection after GO: `back in the race` with no new SFU session.
+
 Pictures:
 
 | Variable | What |

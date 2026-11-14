@@ -15,9 +15,12 @@ use std::time::{Duration, Instant};
 use str0m::change::{SdpAnswer, SdpPendingOffer};
 use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::net::{Protocol, Receive};
-use str0m::{Candidate, Event, Input, Output, Rtc};
+use str0m::{Candidate, Event, IceConnectionState, Input, Output, Rtc};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+/// str0m leaves a disconnected ICE agent alive. Give another checked pair a chance,
+/// then replace the association, as the peer transport does (peer.rs ICE_LOST_GRACE).
+const ICE_LOST_GRACE: Duration = Duration::from_secs(5);
 /// Called by the socket reader when a datagram waits: the owner's thread polls next.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 /// Datagrams the reader took off the socket and their arrival times; at most INBOX.
@@ -49,6 +52,11 @@ pub const READY_TIMEOUT: Duration = Duration::from_millis(8_000);
 /// An offer the room never answers (it refused it: too many sessions) fails the association this
 /// long after it was made; the send thread offers again later.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
+/// An answered association that asked for TURN and has neither connected nor a relay in flight
+/// (the relay was refused, or the room minted no credentials) fails this long after the answer;
+/// until then its UDP attempt goes on. A phone whose UDP took over 2 s got a TURN 400 each time
+/// and lost the UDP attempt with it, six sessions in a minute (finding 246).
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// A released race whose other racers sent this game nothing this long after the race's start
 /// moment (and its release) has a silent race link (finding 187). The moment is the countdown's
 /// start every game holds to: one racer names it and the room sends it to every racer (`race_go`),
@@ -207,6 +215,7 @@ pub struct Sfu {
     turn_allowed: bool,
     answered_at: Option<Instant>,
     connected_at: Option<Instant>,
+    lost_since: Option<Instant>,
     turn_asked: bool,
     /// Ask for TURN at once, not DIRECT_TIMEOUT after the answer: the association this one
     /// replaces had connected through the relay (UDP to the SFU is blocked here).
@@ -433,7 +442,7 @@ impl Sfu {
             race: 0, race_open: false, me: None, started_at: None, created: Instant::now(), future_events: VecDeque::new(),
             connected: false, announced: false, released: false, released_at: None, go_at: None, heard: false, silent_said: false, drop_all_in,
             drop_percent, sent: 0, drop_in_percent, records_in: 0, pending_events: VecDeque::new(), pending_state: HashMap::new(), rates: HashMap::new(), p2p: None,
-            wake, direct, turn_allowed, answered_at: None, connected_at: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
+            wake, direct, turn_allowed, answered_at: None, connected_at: None, lost_since: None, turn_asked: false, turn_first: false, turn_at: None, relay: None, last_in_relayed: false, via_relay: false, rtt: None,
             #[cfg(test)] probe: ProbeTimes::default() }, message))
     }
     pub fn signal(&mut self, message: &Value) -> Result<()> {
@@ -856,18 +865,43 @@ impl Sfu {
         if !self.rtc.is_alive() {
             return Err("SFU disconnected".into());
         }
+        if self.lost_since.is_some_and(|at| at.elapsed() >= ICE_LOST_GRACE) {
+            return Err("SFU path no longer answers ICE checks".into());
+        }
+        if !self.connected && self.turn_asked && self.relay.is_none() && self.answered_at.is_some_and(|t| t.elapsed() >= CONNECT_TIMEOUT) {
+            return Err(format!("no UDP connection and no TURN relay {} s after the answer", CONNECT_TIMEOUT.as_secs()).into());
+        }
         Ok((text, frames))
+    }
+
+    fn ice_state(&mut self, state: IceConnectionState, now: Instant) {
+        match state {
+            IceConnectionState::Disconnected if self.connected => {
+                if self.lost_since.is_none() {
+                    eprintln!("net: SFU: ICE disconnected; allowing {} s for the path to return", ICE_LOST_GRACE.as_secs());
+                    self.lost_since = Some(now);
+                }
+            }
+            IceConnectionState::Connected | IceConnectionState::Completed => {
+                if self.lost_since.take().is_some() { eprintln!("net: SFU: ICE path recovered"); }
+            }
+            _ => {}
+        }
     }
 
     /// The relay's side of a poll: what the TLS stream read goes to the TURN client, its relayed
     /// datagrams to str0m, its allocation becomes a local candidate. A relay that fails while it
-    /// carries the association (or before anything connected) fails the association.
+    /// carries the association fails the association; one that fails before anything connected
+    /// leaves the UDP attempt its time (CONNECT_TIMEOUT, finding 246).
     fn pump_relay(&mut self, text: &mut Vec<Value>, frames: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
         let Some(r) = self.relay.as_mut() else { return Ok(()) };
         if r.link.failed() || r.client.failed().is_some() {
             eprintln!("net: SFU: TURN relay failed ({})", r.client.failed().unwrap_or("its TLS link"));
             self.relay = None;
-            return if self.connected && !self.via_relay { Ok(()) } else { Err("TURN relay failed".into()) };
+            if self.connected { return if self.via_relay { Err("TURN relay failed".into()) } else { Ok(()) }; }
+            if !self.direct { return Err("TURN relay failed".into()); }
+            eprintln!("net: SFU: UDP keeps trying until {} s after the answer", CONNECT_TIMEOUT.as_secs());
+            return Ok(());
         }
         if !r.link.ready() { return Ok(()); }
         let now = Instant::now();
@@ -980,6 +1014,7 @@ impl Sfu {
                     eprintln!("net: SFU connected via {} {after} ms after the answer", if self.via_relay { "TURN/TLS" } else { "UDP" });
                     text.push(json!({"type":"sfu_connected"}));
                 }
+                Output::Event(Event::IceConnectionStateChange(state)) => self.ice_state(state, Instant::now()),
                 Output::Event(Event::ChannelData(data)) => {
                     if data.binary { self.receive_frame(data.id, data.data, frames)?; }
                 }
@@ -1026,6 +1061,85 @@ pub(crate) mod probe;
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn unanswered_turn_request_does_not_wait_forever() {
+        for racing in [false, true] {
+            let (_server, mut client) = LocalSfu::start();
+            client.direct = false;
+            client.race_open = racing;
+            client.turn_asked = true; // room's credential mint failed: no response, no relay
+            client.answered_at = Some(Instant::now() - Duration::from_secs(31));
+            assert!(client.rtc.is_alive());
+            assert!(client.poll().is_err(), "a missing relay response must reach the normal association retry");
+            client.connected = true;
+            assert!(client.poll().is_ok(), "the deadline never expires a working room-stay association");
+        }
+    }
+
+    /// A relay the TURN server refuses as it did the phone's (finding 246).
+    fn refused_relay() -> Relay {
+        let mut client = turn::Client::new("u", "c", Instant::now());
+        client.refuse();
+        Relay { client, link: relay::Link::open("127.0.0.1", 9, Arc::new(|| {})), relayed: None, since: Instant::now() }
+    }
+
+    #[test]
+    fn a_refused_relay_leaves_a_slow_udp_attempt_its_time() {
+        let (mut sfu, mut client) = LocalSfu::start();
+        client.answered_at = Some(Instant::now() - DIRECT_TIMEOUT);
+        let (text, _) = client.poll().unwrap(); // UDP not answered yet: TURN asked
+        assert!(text.iter().any(|m| m["type"] == "sfu_turn"));
+        client.relay = Some(refused_relay());
+        assert!(client.poll().is_ok(), "a refused relay must not end the UDP attempt");
+        assert!(client.relay.is_none() && client.turn_asked);
+        let (mut text, mut frames) = (vec![], vec![]);
+        for _ in 0..400 {
+            sfu.pump(&mut client, &mut text, &mut frames);
+            if client.connected { break; }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(client.connected && !client.via_relay, "UDP connected after the relay's refusal");
+        // Without direct UDP (the test switch) nothing else can connect: the refusal ends it.
+        let (_sfu, mut blocked) = LocalSfu::start();
+        blocked.direct = false;
+        blocked.turn_asked = true;
+        blocked.relay = Some(refused_relay());
+        assert!(blocked.poll().is_err());
+        // A refusal that leaves UDP still unconnected at CONNECT_TIMEOUT ends it then.
+        let (_sfu, mut late) = LocalSfu::start();
+        late.turn_asked = true;
+        late.relay = Some(refused_relay());
+        assert!(late.poll().is_ok());
+        late.answered_at = Some(Instant::now() - CONNECT_TIMEOUT);
+        assert!(late.poll().unwrap_err().to_string().contains("no TURN relay"));
+    }
+
+    #[test]
+    fn lost_ice_recovers_or_fails_in_lobby_and_race() {
+        for racing in [false, true] {
+            let (_server, mut client) = LocalSfu::start();
+            client.direct = false; // existing fault injection: no direct datagrams delivered
+            client.turn_allowed = false;
+            client.race_open = racing;
+            let now = Instant::now();
+            client.ice_state(IceConnectionState::Disconnected, now);
+            assert!(client.lost_since.is_none(), "initial checks are not a lost working path");
+            client.connected = true;
+            client.connected_at = Some(now);
+            client.ice_state(IceConnectionState::Disconnected, now - Duration::from_secs(4));
+            assert!(client.poll().is_ok(), "a short absence has a recovery grace");
+            client.ice_state(IceConnectionState::Connected, now);
+            assert!(client.lost_since.is_none());
+            assert!(client.poll().is_ok(), "recovered before the deadline");
+            let lost = now - ICE_LOST_GRACE - Duration::from_secs(1);
+            client.ice_state(IceConnectionState::Disconnected, lost);
+            client.ice_state(IceConnectionState::Disconnected, now);
+            assert_eq!(client.lost_since, Some(lost), "repeated events cannot postpone retry forever");
+            assert!(client.rtc.is_alive(), "str0m alone doesn't retire the association");
+            assert!(client.poll().unwrap_err().to_string().contains("ICE checks"), "the owner's normal failed-association retry can now run");
+        }
+    }
 
     #[test]
     fn snapshot_flood_drops_the_excess_and_never_silences() {
