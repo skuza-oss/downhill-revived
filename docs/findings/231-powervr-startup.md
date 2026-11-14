@@ -34,7 +34,27 @@ and returned presents with a black picture. No PowerVR phone is available. Requi
   net, renderer WARP tests, settings, launcher, stack analysis and its negative-control gate.
   Android's first compile caught a missing diagnostic re-export; corrected before the successful
   final library build. The first core build did not need a cache-disabled retry.
-- [ ] Tester confirmation: still open; this lane does not claim a graphics fix.
+- [x] Round 2: the lead's Mi 11i run of main d325a769 (including 9e022e91) exposed a
+  diagnostic defect: Android cwd is the root directory, not the files folder. The relative record
+  writes failed with EROFS 332 times; a force-stop at stage 10 left no record. In-run stages and
+  retirement after three presents worked. This lane did not access the phone.
+- [x] Round 2 implementation: android_main.c passes its existing absolute files folder by a
+  copied UTF-8 C string into the existing Rust startup state. Reads, temporary writes, replacement
+  and retirement use that folder; relative or missing host paths are rejected, never used as cwd.
+  Record I/O failures log once per run, while later writes can still recover.
+- [x] Round 2 startup unit tests: all four pass (`rustgs.py test --target
+  x86_64-pc-windows-msvc -- --lib startup::`, exit 0). They cover an absolute folder away from
+  cwd, replacement and kill/restart persistence, terminal markers, retirement, relative-path
+  rejection and the once-only failure log with successful write recovery.
+- [x] A standalone host harness compiled the actual Android diagnostic module (queue types
+  stubbed, no GPU/phone) and passed a copied CString folder different from cwd. A simulated
+  unexpected exit at stage 10 left that stage; the next process printed it and removed the
+  record at three presents. A subsequent process printed no prior startup diagnosis; simulated
+  background/return entry points did not recreate it. Repeated write failures logged once.
+- [x] Round 2 Android native library build passed, exit 0, with the C-to-Rust path handoff linked.
+- [x] Round 2 `python tools/check.py quick -j 6` passed; core build and runtime tests succeeded.
+- [x] Round 2 `python tools/check.py docs` passed.
+- [ ] PowerVR tester confirmation: still open; this lane does not claim a graphics fix.
 
 ## Candidate causes, ranked
 
@@ -85,7 +105,7 @@ and returned presents with a black picture. No PowerVR phone is available. Requi
 - A five-second watchdog means slow/unreturned, not a proven permanent hang. It records `hung at
   <stage>` when that duration was observed. Otherwise the durable active scope reads `died at
   <stage>` on the next start: unexpected termination, including a kill, not necessarily a crash.
-  A later returned call clears its timeout state. Normal host shutdown is recorded separately.
+  A later returned call clears its timeout state. Known host shutdown retires the pending record.
 - The record is included by LastExit in dhd-exit.txt (thus the next log's previous-run lines and
   Share log header), including Android 10. It contains operation names, no user or device data.
 
@@ -102,11 +122,42 @@ that thread names the operation interrupted. `queue submit` separates the driver
 `gs startup: watchdog: ...; N presents returned` repeats at most every five seconds while startup
 is delayed. With no active renderer call it says waiting for picture N: investigate the host/game
 or an acquire repeatedly skipping frames, rather than inventing a driver crash.
-`gs startup: picture N present returned` for N=1,2,3 means present returned. The record becomes
-`complete: three presents returned` and startup diagnostics retire. This does not prove nonblack
+`gs startup: picture N present returned` for N=1,2,3 means present returned. The record is
+removed from the files folder and startup diagnostics retire. This does not prove nonblack
 pixels or scanout completion. `previous run: startup: ...` carries the prior record on next play.
 
+## Round 2: record lifecycle checked in code
+
+The original standalone harness ran in a writable cwd, masking the Android root-cwd defect.
+The new path tests use an absolute folder different from cwd and reject relative paths.
+
+1. Before SDL starts, LastExit.java reads the last process's record from getFilesDir(), if present,
+   and writes its startup diagnosis into dhd-exit.txt. android_main.c quotes that file into dhd.log.
+   SDL_GetAndroidInternalStoragePath wraps that same getFilesDir() (SDL source below), so the C
+   host's existing files buffer and Java agree on the directory. No chdir or new C global is used.
+2. android_main.c passes that buffer after log setup, before launching the game. Rust copies it
+   into the existing STATE's Record. The renderer's STARTED once guard reads a pending previous
+   stage there, then syncs/replaces the new initial record; each startup scope updates it.
+3. After a kill during startup there is no host end callback, so the pending stage remains.
+   On the next launch Java's previous-run header and Rust's start can both name that stage.
+   The next run replaces it with its own stages. Old terminal markers are ignored by Rust.
+4. The third returned present sets ACTIVE false under the state lock and removes the record.
+   Outstanding scope drops and the watchdog then see inactive and cannot save again. After a
+   normal start and normal exit, the next launch has no startup hung-at/died-at line from that
+   run: Java finds no record, and Rust finds none. The normal end callback sees inactive and
+   does not recreate it. A known host shutdown before retirement also attempts removal.
+5. A background/return reuses the process and its device. Neither STARTED nor STATE is reset;
+   all stage, submit and present entry points stay inactive after retirement. Even another path
+   handoff uses get_or_init and cannot rearm the recorder. A return cannot recreate the file.
+
+Round 2 changes only path handling and diagnostic record lifecycle; no renderer operation or game
+state changes. The requested gates are quick, the Android native library and docs, plus focused
+startup unit tests; no new traces or phone runs.
+
 ## Research and sources
+
+- [SDL internal storage API](https://wiki.libsdl.org/SDL3/SDL_GetAndroidInternalStoragePath):
+  its C API wraps Android Context.getFilesDir(); reused for the Round 2 path handoff.
 
 - [wgpu timeline submit fix discussion](https://github.com/gfx-rs/wgpu/pull/10677): unchecked
   timeline wait-value reads on PowerVR, already handled by 201. Not the VkFences path in #92.
