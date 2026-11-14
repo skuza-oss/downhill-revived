@@ -21,9 +21,8 @@
    with a log line, keeping the old texture. */
 #define NATIVE_SCALE_MAX 8u
 #define NATIVE_SURFACE_MAX 2048u
-/* Phones stop at 6x: on a Snapdragon 888 (Mi 11i) 0.7.7 draws the bench race at 93 fields/s at 4x
-   and 33 at 8x, so 7x and 8x only make a phone slow and hot. iPhones and iPads too (finding 224). */
-#define NATIVE_PHONE_SCALE_MAX 6u
+/* NATIVE_PHONE_SCALE_MAX, the phones' limit (6x), shared with the phone launchers */
+#include "../render/include/dhd_limits.h"
 /* What holds a device's scale limit below NATIVE_SCALE_MAX (Native scale_reason). */
 enum { NATIVE_SCALE_FREE, NATIVE_SCALE_MEMORY, NATIVE_SCALE_TEXTURE, NATIVE_SCALE_PHONE };
 

@@ -14,6 +14,8 @@
 #include "net/json.h"
 #include "net/update_check.h"
 #include "host/phone.h"
+#include "host/launcher_link.h"
+#include "render/include/dhd_limits.h"
 #include "render/include/dhd_settings.h"
 #include "render/include/dhd_disc.h"
 
@@ -21,8 +23,6 @@ const char *host_disc_check(const char *path);  /* host.c: NULL when path is the
 
 const char LAUNCHER_IOS_CAPS[] =
     "[\"touch-settings\",\"disc-import\",\"direct-start\",\"share-log\",\"help\",\"touch-editor\"]";
-
-#include "host/launcher_link.h"
 
 static char last_exit[256];   /* said once (launcher_set_last_exit) */
 
@@ -210,7 +210,7 @@ static void snapshot(const LauncherHost *h, int id)
              "\"running\":false,\"disc_problem\":%s,\"texture_pack\":false,\"played\":0,\"scale\":null,"
              "\"scale_max\":%d,\"disc_size\":%lld,\"free_space\":%llu,\"last_exit\":%s%s%s}",
              h->version, LAUNCHER_IOS_CAPS, settings ? settings : "{}", problem_json ? problem_json : "null",
-             LAUNCHER_PHONE_SCALE_MAX, disc_size, (unsigned long long)(h->free_space ? h->free_space(h->context) : 0),
+             (int)NATIVE_PHONE_SCALE_MAX, disc_size, (unsigned long long)(h->free_space ? h->free_space(h->context) : 0),
              why ? "{\"why\":" : "null", why ? why : "", why ? "}" : "");
     last_exit[0] = 0;   /* said once */
     launcher_answer(h, id, 1, out);

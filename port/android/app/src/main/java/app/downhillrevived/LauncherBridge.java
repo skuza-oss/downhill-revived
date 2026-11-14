@@ -21,8 +21,6 @@ import java.nio.charset.StandardCharsets;
 final class LauncherBridge {
     /** What this launcher can do (BRIDGE.md, "Capabilities"). */
     static final String[] CAPS = { "touch-settings", "disc-import", "direct-start", "share-log", "help", "touch-editor" };
-    /** The largest resolution scale a phone's renderer draws (gpu_rust_shared.inc NATIVE_PHONE_SCALE_MAX). */
-    static final int PHONE_SCALE_MAX = 6;
     private final LauncherActivity activity;
     private final String ini;
     /** The page's pick_disc waiting for the picker, and the import jobs by number. */
@@ -189,7 +187,7 @@ final class LauncherBridge {
         s.put("texture_pack", false);
         s.put("played", 0);
         s.put("scale", JSONObject.NULL);
-        s.put("scale_max", PHONE_SCALE_MAX);
+        s.put("scale_max", Native.phoneScaleMax());
         s.put("disc_size", disc != null ? new File(disc).length() : 0);
         s.put("free_space", DiscImport.freeBytes(activity));
         // back from the layout editor alone (LauncherActivity.play): the page opens at its row, once

@@ -157,3 +157,6 @@ URLs retain their separate, narrower update policy.
 
 Phone launcher checks and Android direct-start notices use the same fetch/find
 operation in `port/host/phone.c`; the notice keeps its daily policy and source log.
+
+Phone `snapshot.scale_max` comes from the renderer/settings limit in
+`port/render/include/dhd_limits.h`, also used by the renderer clamp.

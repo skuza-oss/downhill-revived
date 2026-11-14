@@ -29,6 +29,8 @@ final class Native {
     static native String update();
     /** Resolved project link, or null when refused by native policy. */
     static native String launcherLink(String url);
+    /** The renderer/settings phone limit for snapshot.scale_max. */
+    static native int phoneScaleMax();
     /** This build's version. */
     static native String version();
 }

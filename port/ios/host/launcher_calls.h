@@ -34,9 +34,6 @@ typedef struct LauncherHost {
 
 /* The caps an iOS launcher reports (BRIDGE.md, "Capabilities"). */
 extern const char LAUNCHER_IOS_CAPS[];
-/* The largest resolution scale a phone's renderer draws (gpu_rust_shared.inc NATIVE_PHONE_SCALE_MAX). */
-enum { LAUNCHER_PHONE_SCALE_MAX = 6 };
-
 /* The run before closed unexpectedly: why, said once by the next snapshot (NULL: nothing). */
 void launcher_set_last_exit(const char *why);
 /* dir's disc image copy (SCUS-97177.iso) into out; 1 when it is there. */
