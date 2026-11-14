@@ -204,9 +204,10 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // Whether the room holds a Realtime session for this member (finding 177): "sfu":"ready" (a rejoin:
 // keep the association) or "sfu":"setup" (offer one). A rejoin into the member's running race
 // (finding 175) adds the race: "race":{"startAt":1734000003000}
-// What the server takes beyond protocol 4 (findings 187, 204): "features":["sfu_silent","race_go",
-// "score"]. A game sends sfu_silent and race_go, and plays the arena's scored round (Finishes and
-// return, below), only with a server that lists them; 0.7.13 ignores the field.
+// What the server takes beyond protocol 4 (findings 187, 204, 248): "features":["sfu_silent","race_go",
+// "score","sfu_trouble"]. A game sends sfu_silent, race_go and sfu_trouble, and plays the arena's
+// scored round (Finishes and return, below), only with a server that lists them; 0.7.13 ignores
+// the field.
 
 // Where the room runs and each member's region (never their country): after every join and when
 // the room learns its colo (Region, below).
@@ -374,6 +375,26 @@ A member's session lives as long as its stay in the room (finding 177):
   `SFU_RENEW_MS`), or silent again on its new session, it is out of the race as at the setup
   deadline (`error` "Realtime connection failed: out of the race.", the others hear `left`).
   Cloudflare's listing can't show this: a dead stream id is listed `active`.
+- A failed path to the SFU (finding 248). A game whose UDP path or TURN relay to its Realtime
+  session fails sends, once per path and association, to a server whose welcome lists
+  `"sfu_trouble"`:
+  `{"type":"sfu_trouble","path":"turn","step":"allocate","kind":"turn_400","version":"0.8.5"}`.
+  Fixed words only: `path` is `udp` or `turn`; `step` is `send`, `receive`, `connect`,
+  `credentials`, `tls_connect`, `tls_handshake`, `allocate`, `channel_bind`, `refresh`,
+  `first_data` or `link`; `kind` is `timeout`, `refused`, `reset`, `unreachable`, `denied`, `dns`,
+  `tls`, `closed`, `integrity`, `no_answer`, `turn_400`, `turn_401`, `turn_403`, `turn_437`,
+  `turn_438`, `turn_440`, `turn_441`, `turn_442`, `turn_486`, `turn_508`, `turn_other` or `other`
+  (the game's `port/render/net/src/trouble.rs`, the server's `TROUBLE_*` lists in `protocol.ts`);
+  `version` is the game's release (`x.y.z`). Nothing else: no address, SDP, session id, TURN
+  credential, address hash or install id. `connect` with `no_answer` is a relay that is up and
+  allocated but carried nothing in 20 s. The server answers nothing and changes nothing: it logs
+  one line, `Realtime trouble: turn/allocate/turn_400 0.8.5 EU (room CODE, member 2)`, at most 12
+  per member in 5 minutes (two paths for each of `SFU_OFFERS` sessions), and drops a report with
+  any other word or version without a word. A server without the feature answers an unknown
+  `sfu_` type with `error` `bad_value` "Unknown signaling message." and keeps the connection (only
+  an unknown type outside `sfu_` closes it, `bad_message`); a game sends the report only to a server
+  that lists it, and 0.8.4 and older never send it. A game ignores a server message type it does
+  not know.
 - Subscriptions a game never heard of (finding 187). A subscription closed on a session whose game
   never had it (an aborted call's, closed by the inspection above) leaves its stream id dead on that
   session: Cloudflare resets the stream, the game has nothing to reset back (its SCTP stack resets
