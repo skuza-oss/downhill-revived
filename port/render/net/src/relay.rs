@@ -3,12 +3,12 @@
 //! owner thread writes. One rustls connection sits behind a lock that only the TLS bookkeeping
 //! holds: the reader waits for bytes on its own handle of the socket without it.
 use crate::sfu::Wake;
-use crate::stream::{dial, tls_config};
+use crate::stream::{tls_config, TIMEOUT};
 use rustls::pki_types::ServerName;
 use rustls::ClientConnection;
 use std::collections::VecDeque;
-use std::io::{ErrorKind, Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::io::{self, ErrorKind, Read, Write};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -91,6 +91,23 @@ impl Drop for Link {
     }
 }
 
+/// The TURN server over IPv4 first: the relay is an IPv4 allocation and the SFU's candidates are
+/// IPv4 only (sfu.rs keeps IPv4 candidates), as the SFU's own address lookup, and the relayed
+/// candidate's base (this socket's address) should be IPv4 too; IPv6 only when no IPv4 address
+/// answers. A phone on a dual-stack network could otherwise take the IPv6 address first (246).
+fn dial_ipv4_first(host: &str, port: u16) -> io::Result<TcpStream> {
+    let mut addrs: Vec<SocketAddr> = (host, port).to_socket_addrs()?.collect();
+    addrs.sort_by_key(|a| !a.is_ipv4());
+    let mut last = io::Error::new(ErrorKind::NotFound, "no address");
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, TIMEOUT) {
+            Ok(s) => return Ok(s),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
 fn flush_tls(conn: &mut ClientConnection, tcp: &mut TcpStream) -> bool {
     while conn.wants_write() {
         if conn.write_tls(tcp).is_err() { return false; }
@@ -99,7 +116,7 @@ fn flush_tls(conn: &mut ClientConnection, tcp: &mut TcpStream) -> bool {
 }
 
 fn run(s: &Shared, host: &str, port: u16, wake: &Wake) -> Result<(), String> {
-    let mut tcp = dial(host, port).map_err(|e| format!("can't connect to {host}: {e}"))?;
+    let mut tcp = dial_ipv4_first(host, port).map_err(|e| format!("can't connect to {host}: {e}"))?;
     let _ = tcp.set_nodelay(true);
     tcp.set_read_timeout(Some(crate::stream::TIMEOUT)).map_err(|e| e.to_string())?;
     tcp.set_write_timeout(Some(WRITE_TIMEOUT)).map_err(|e| e.to_string())?;
@@ -108,6 +125,8 @@ fn run(s: &Shared, host: &str, port: u16, wake: &Wake) -> Result<(), String> {
     while conn.is_handshaking() {
         conn.complete_io(&mut tcp).map_err(|e| format!("TLS handshake: {e}"))?;
     }
+    let family = if tcp.peer_addr().is_ok_and(|a| a.is_ipv4()) { "IPv4" } else { "IPv6" };
+    eprintln!("net: SFU: TURN relay's TLS link up over {family} (the relay asked for: UDP over IPv4)");
     *lock(&s.local) = tcp.local_addr().ok();
     let mut reader = tcp.try_clone().map_err(|e| e.to_string())?;
     reader.set_read_timeout(Some(READER_CHECK)).map_err(|e| e.to_string())?;

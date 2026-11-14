@@ -702,7 +702,10 @@ void client_on_text(NetClient *c, const char *text, size_t n)
 void client_on_binary(NetClient *c, const uint8_t *data, size_t n)
 {
     SDL_LockMutex(c->lock);
-    c->last_rx = net_now_ms();
+    /* Only PONG uses the room socket. Race frames on the independent SFU/star link must
+       not hide a room socket that stopped answering, or its token rejoin never fires. */
+    if (n >= 2 + 2 * sizeof(double) && data[0] == NET_FRAME_PONG)
+        c->last_rx = net_now_ms();
     /* A PONG: our PING's bytes (the send time after type and slot), then the server's clock */
     if (n >= 2 + 2 * sizeof(double) && data[0] == NET_FRAME_PONG && hold_pong(c, 1, data, n))
         ;
@@ -788,6 +791,8 @@ int client_on_closed(NetClient *c, int code, const char *reason)
         c->lobby.state = NET_FAILED;
     else if (c->lobby.code[0] && c->lobby.state != NET_CONNECTING) {
         c->lobby.state = NET_RECONNECTING;
+        if (!c->lobby.notice[0])
+            copy(c->lobby.notice, sizeof c->lobby.notice, "Connection lost, reconnecting...");
         c->rejoin_tries++;
         rejoin = 1;
     } else

@@ -85,6 +85,7 @@ pub struct Client {
     failed: Option<String>,
     rx: Vec<u8>,
     seq: u64,
+    created: Instant,
 }
 
 impl Client {
@@ -93,7 +94,7 @@ impl Client {
             username: username.into(), password: password.into(), realm: None, nonce: None, key: None,
             relayed: None, lifetime: Duration::from_secs(600), refresh_at: None, pending: HashMap::new(),
             by_peer: HashMap::new(), channels: HashMap::new(), queued: VecDeque::new(), out: vec![],
-            events: VecDeque::new(), failed: None, rx: vec![], seq: 0,
+            events: VecDeque::new(), failed: None, rx: vec![], seq: 0, created: now,
         };
         // The first Allocate goes without credentials: its 401 brings the realm and nonce.
         c.request(Kind::Allocate, now);
@@ -101,6 +102,9 @@ impl Client {
     }
 
     pub fn failed(&self) -> Option<&str> { self.failed.as_deref() }
+    /// The server refused the allocation (the SFU's fault injection).
+    #[cfg(test)]
+    pub fn refuse(&mut self) { self.fail("TURN Allocate error 400 (test)"); }
     /// Bytes wait in `output()` (the probe).
     #[cfg(test)]
     pub fn output_pending(&self) -> bool { !self.out.is_empty() }
@@ -233,7 +237,7 @@ impl Client {
             return;
         }
         if class != SUCCESS && class != ERROR { return; }
-        let Some((kind, _)) = self.pending.remove(&m.id) else { return };
+        let Some((kind, sent)) = self.pending.remove(&m.id) else { return };
         // Answers to authenticated requests must carry a valid integrity (RFC 8489 9.2.4).
         if let Some(key) = &self.key {
             if !m.verify(frame, key) && class == SUCCESS { return self.fail("TURN answer failed its integrity check"); }
@@ -252,7 +256,12 @@ impl Client {
                 return self.request(kind, now);
             }
             if kind == Kind::Refresh && self.lifetime.is_zero() { return; }
-            return self.fail(&format!("TURN error {code}"));
+            let method = match kind { Kind::Allocate => "Allocate", Kind::Refresh => "Refresh", Kind::Bind(_) => "ChannelBind" };
+            // The error reason and credential material can contain identifying data. Only
+            // locally known request metadata: enough to distinguish the initial challenge,
+            // authenticated allocation, permission and renewal failures without exposing them.
+            return self.fail(&format!("TURN {method} error {code} (authenticated={}, allocated={}, credentials held={}s, request age={}ms; relay UDP/IPv4)",
+                self.key.is_some(), self.relayed.is_some(), now.saturating_duration_since(self.created).as_secs(), now.saturating_duration_since(sent).as_millis()));
         }
         match kind {
             Kind::Allocate => {
@@ -549,6 +558,40 @@ mod tests {
             }
             if let Some(data) = peer_data { channel_data(&mut out, 0x4000, data); }
             out
+        }
+    }
+
+    #[test]
+    fn refusal_identifies_request_and_phase_without_secrets_or_blind_retry() {
+        let now = Instant::now();
+        for phase in 0..4 {
+            let mut server = Server { key: md5(b"private-user:example.org:private-pass").to_vec(), nonce: "private-nonce", stale_bind: false };
+            let mut c = Client::new("private-user", "private-pass", now);
+            if phase > 0 {
+                let reply = server.answer(&c.output(), None);
+                c.receive(&reply, now); // authenticated Allocate now waits
+            }
+            if phase > 1 {
+                let reply = server.answer(&c.output(), None);
+                c.receive(&reply, now); // allocation ready
+                if phase == 2 { c.send_to("203.0.113.9:4000".parse().unwrap(), b"x", now); }
+                else { c.tick(now + Duration::from_secs(541)); }
+            }
+            let request = c.output();
+            let parsed = Parsed::new(&request).unwrap();
+            let method = parsed.kind & 0x3EEF;
+            let mut refused = Message::new(method | ERROR, parsed.id);
+            refused.attr(ERROR_CODE, &[0, 0, 4, 0]);
+            c.receive(&refused.bytes, now + Duration::from_secs(542));
+            let why = c.failed().unwrap();
+            let name = match phase { 0 | 1 => "Allocate", 2 => "ChannelBind", _ => "Refresh" };
+            assert!(why.contains(&format!("{name} error 400")));
+            assert!(why.contains(&format!("authenticated={}", phase > 0)));
+            assert!(why.contains(&format!("allocated={}", phase > 1)));
+            for secret in ["private-user", "private-pass", "private-nonce", "example.org", "203.0.113.9"] {
+                assert!(!why.contains(secret), "diagnostic must not expose credential or peer material");
+            }
+            assert!(c.output().is_empty(), "RFC 8656: a malformed request is not blindly retried");
         }
     }
 
