@@ -18,8 +18,9 @@ picture and sound back; `check.py quick`, `port`, `docs`; the boot state trace e
 
 - [x] 2026-11-14: cause established on the phone (temporary `diag236:` lines, not committed)
 - [x] the fix (`graphics_away_wait`), unit test in `test_graphics_queue.c`
-- [ ] checks
-- [ ] 20 cycles on the phone
+- [x] `check.py quick`, `port`, `docs` OK; the boot state trace equals `main-524948ba-ref-v3`
+  (600 rows)
+- [x] 22 cycles on the phone (release-signed APK of a18319e3, Mi 11i), below
 
 ## The cause
 
@@ -62,4 +63,20 @@ quiet), so the same miss is possible there while the app is inactive but not yet
 
 ## Surprises
 
+- The miss is common, not rare: 16 of the 22 fixed cycles entered the background from the VBLANK's
+  wait for an earlier picture, the path that used to block. A cycle was clean before only when the
+  game thread reached `gs_vsync` first.
+- `test_graphics_queue.c` now models it: a consumer stuck in its packet (the held renderer) until
+  the away hook lets it go, behind a fence and behind a queue filled past its size; without the
+  hook the wait never reaches it and the consumer gives up after 3 s (a failure).
+
 ## Result
+
+The Mi 11i, a SINGLE EVENT race, one process: 22 Home/return cycles (2 s x9, 10 s x8, 30 s x3,
+two quick Home presses once, the recents screen once): 22 `gs: in the background` (16 `from a
+wait for an earlier picture`), 22 `back in the foreground` (1.3-1.4 s for 2 s away, 9.4-9.5 s for
+10 s, 29.4-29.5 s for 30 s: the wait began within about 0.5 s of the Home command being sent),
+22 `touch: back from the background in a race: the game's pause`, the media stream started again
+after each return (`dumpsys audio`), the picture back, zero `freeze:` lines, no new tombstone.
+EXIT GAME, the next start "how it ended: normally". The diagnostic build before the fix: 2 of 4
+cycles bad, as above.
