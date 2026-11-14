@@ -50,8 +50,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   APIs are chosen at run time (finding 191).
 - **iOS:** `port/ios/build_ios.py` on a Mac (`--simulator`, or `--unsigned` for the device app and
   its unsigned IPA), from the Windows build's wasm2c parts; the shared touch controls and settings
-  (Android's rows), the shared launcher as the app's entry (finding 227); P2P rooms only online
-  (finding 224; the port by Gustavo Ribeiro).
+  (Android's rows), the shared launcher as the app's entry (finding 227); every online mode, as Android
+  (finding 237; the port by Gustavo Ribeiro, finding 224).
 - **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093;
   native window buttons on macOS, finding 150). Its page (`port/launcher/ui`) is the one launcher
   UI of every platform: Android shows it in a WebView (`LauncherActivity`, the app's entry) through
@@ -184,9 +184,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 
 ## Online play
 
-- SFU rooms (public, private, Quick Race) on Windows, macOS and Linux; P2P rooms there and on
-  Android and in the browser, which offer nothing else (`host_service_net_offered`, findings 143,
-  180, 186).
+- SFU rooms (public, private, Quick Race) on Windows, macOS, Linux, Android and iOS (phones since
+  finding 237); P2P rooms there and in the browser, which offers nothing else
+  (`host_service_net_offered`, findings 143, 180, 186).
 - **State sync, never lockstep:** each PC runs its own one-player race at its own frame rate and
   shows the others, and on guests the host's AI riders, as puppet riders (`port/hle/puppet.c`,
   findings 044, 047, 114): each rides on this game's own physics with its owner's pad (an AI

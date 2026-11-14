@@ -48,7 +48,7 @@ Direct3D 12 or Vulkan graphics card: minimum and recommended specs for every pla
 
 Android (experimental): the `-android-experimental.apk` for arm64 phones and tablets on Android 10
 or later (minimum: a Helio G80 / Snapdragon 680 class phone with 4 GB RAM), with touch controls;
-online in P2P races. The release page says how to install it.
+every online race, as on the PC. The release page says how to install it.
 
 ## Legal notice
 

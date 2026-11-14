@@ -420,8 +420,9 @@ tools set `DHD_SETTINGS=none`) none of them apply. Tools that drive the game (`D
 `DHD_RACE_SYNC`, ...) never run the updater.
 
 Online play is not a setting: the host decides whether it is offered (`host_service_net_offered`,
-finding 143). The Windows, macOS and Linux builds offer it; the Android build and the browser
-don't (no ONLINE row, and `server`, `DHD_NET_*` or anything else can't start a session there).
+finding 143). The Windows, macOS, Linux, Android and iOS builds offer every room (finding 237);
+the browser offers P2P rooms only, and a browser page without its online part offers none (no
+ONLINE row, and `server`, `DHD_NET_*` or anything else can't start a session there).
 On Android `auto_update = off` also turns off the once-a-day update notice.
 
 ## Releases

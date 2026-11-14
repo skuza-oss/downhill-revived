@@ -59,11 +59,11 @@ launcher's Share log, or `dhd.log` from that folder) in a GitHub issue or on Dis
 **iPad**: the game is landscape. If your iPad stays upright, the game shows turned at the whole
 screen's size: turn the iPad. In a Stage Manager or Split View window the game fills the window.
 
-**Online: P2P races only.** ONLINE in the main menu offers Create A P2P Race and Join With A Code
-(a 7-character code from a friend's P2P race, on a phone or a PC). The race data goes directly
-between the players' games, so **the other players in a P2P room can see your network (IP)
-address**; the game says so. Play them with people you trust. Public races, Quick Race and the
-normal private races are not on phones yet.
+**Online: every race, as on the PC.** ONLINE in the main menu offers Quick Race, the list of public
+races, public and private races and P2P races, and Join With A Code (a code from a friend's room,
+on a phone or a PC). In a P2P race the race data goes directly between the players' games, so
+**the other players in a P2P room can see your network (IP) address**; the game says so. Play them
+with people you trust; the other races never show anyone your address.
 
 **Check the download.** `SHA256SUMS` lists the IPA's SHA-256. The IPA carries no signature of ours;
 the signature your tool adds is your own.

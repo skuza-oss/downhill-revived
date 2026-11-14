@@ -14,8 +14,8 @@ What you need
   WebKitGTK 4.1 from your distribution: libwebkit2gtk-4.1-0, already there with GNOME).
   The Mac and Linux builds are experimental: they may have problems the Windows build doesn't.
   Please report them with your dhd.log.
-  There is also an experimental Android build (an .apk on the release page); its online play is
-  P2P races only (below).
+  There is also an experimental Android build (an .apk on the release page) with every online
+  race, as here.
 - Speed: about 60 fps at 1x-2x needs a 4-thread CPU from about 2016 and integrated graphics such
   as Intel UHD 620 or AMD Vega 8 with 4 GB RAM; 4x and up wants a 6-core CPU and a GTX 1060 /
   RX 580 class card or better. On Android: a Helio G80 / Snapdragon 680 class phone with 4 GB RAM,
@@ -189,8 +189,7 @@ race data goes directly between the players' games. One game, the hub (the creat
 next player if it leaves), passes the others' data on; a player who can't reach it races over
 Cloudflare's network in the same room. The room, its rules and the results still run on the
 server. In a P2P room the other players can see your network (IP) address: the game says so when
-you create or join one. Play P2P races with people you trust. On Android, P2P races are the only
-online races so far.
+you create or join one. Play P2P races with people you trust.
 Running your own server is optional: put its address on the "server =" line of dhd.ini, e.g.
     server = wss://races.example.org
 A server of your own can keep an older version playing (its MIN_VERSION setting); then point

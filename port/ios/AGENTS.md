@@ -20,8 +20,8 @@ iOS port by Gustavo Ribeiro (GitHub `ribeirogustav`); keep his notices and credi
   offline race paused at the return, no game time lost or caught up) waits while
   `ios_game_is_active` is false; `host/run_record.c` keeps how a run ended (the next start's
   `previous run:` lines and the launcher's note).
-- Online on iOS is P2P rooms only, through the same host switch as Android
-  (`port/net/net.c` `NET_OFFERED`, findings 143, 180).
+- Online on iOS is every room, SFU and P2P, as on Android and the desktop: the shared menu and net
+  code (`port/net/net.c` `NET_OFFERED`, finding 237).
 - The IPA is unsigned: no Apple ID, team, certificate or provisioning profile ever enters the
   repository or the build; players sign it when they sideload it (`docs/PLAYING.md`).
   `package_unsigned.py` refuses a bundle that names a home folder, a device or a team;
