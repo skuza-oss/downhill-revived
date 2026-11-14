@@ -10,6 +10,7 @@
 #include "hle.h"
 #include "stick.h"
 #include "controls_table.h"
+#include "gamepad_device.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -186,8 +187,80 @@ static void run_layouts(void)
 /* What gamepad.c does with what SDL reports: each pad's kind (the button symbols, prompts.c) and a
    stick value through the dead zone (stick.h). The SDL build has no virtual joysticks (sdl3.py),
    so the values are given here, as SDL hands them to gamepad.c. */
+/* Synthetic descriptions: the player's log has no capability dump, so the two reported
+   non-pads model sparse Android automatic mappings, not captured hardware descriptors. */
+static void run_device_slots(void)
+{
+    unsigned presses[4] = {0};
+    int claimed = 0, got = gamepad_claim_slot(presses, 1, &claimed);
+    check(got == -1 && !claimed, "axis and trigger noise cannot claim", got, -1);
+    presses[2] = 1u << SDL_GAMEPAD_BUTTON_SOUTH;
+    got = gamepad_claim_slot(presses, 0, &claimed);
+    check(got == -1 && !claimed, "split screen preserves order", got, -1);
+    got = gamepad_claim_slot(presses, 1, &claimed);
+    check(got == 2 && claimed, "first pressed pad swaps", got, 2);
+    got = gamepad_claim_slot(presses, 1, &claimed);
+    check(got == -1, "order fixed after claim", got, -1);
+    claimed = 0, presses[0] = 1u << SDL_GAMEPAD_BUTTON_START;
+    got = gamepad_claim_slot(presses, 1, &claimed);
+    check(got == -1 && claimed, "player 1 presses first", got, -1);
+    presses[0] = 0;
+    got = gamepad_claim_slot(presses, 1, &claimed);
+    check(got == -1, "no swap after player 1 pressed", got, -1);
+    claimed = 0, presses[2] = 1u << SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+    got = gamepad_claim_slot(presses, 1, &claimed);
+    check(got == -1 && !claimed, "other buttons do not claim", got, -1);
+    const char *automatic = "00000000000000000000000000000000,*,a:b0,";
+    const char *explicit_mapping = "00000000000000000000000000000000,Accessible pad,a:b0,";
+    unsigned face = 15, dpad = (1u << SDL_GAMEPAD_BUTTON_DPAD_UP) |
+        (1u << SDL_GAMEPAD_BUTTON_DPAD_DOWN) | (1u << SDL_GAMEPAD_BUTTON_DPAD_LEFT) |
+        (1u << SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    const struct { const char *name; GamepadDevice d; int slot; } devices[] = {
+        {"Xiaomi Consumer", {SDL_GAMEPAD_TYPE_STANDARD, 0, automatic, 1, 0, 15, 0, 0}, -1},
+        {"S5 Aviator Mouse", {SDL_GAMEPAD_TYPE_STANDARD, 0, automatic, 3, 3, 15, 2, 0}, -1},
+        {"Wireless Controller", {SDL_GAMEPAD_TYPE_PS4}, 0},
+        {"DualSense", {0, SDL_GAMEPAD_TYPE_PS5}, 1},
+        {"Xbox", {SDL_GAMEPAD_TYPE_XBOXONE}, 2},
+        {"generic Bluetooth", {SDL_GAMEPAD_TYPE_STANDARD, 0, automatic, face | dpad, 0}, 3},
+        {"keyboard joystick", {0, 0, NULL, 0, 0, 104, 0, 0}, -1},
+        {"mouse axes", {0, 0, NULL, 0, 0, 3, 2, 0}, -1},
+    };
+    unsigned occupied = 0;
+    for (size_t i = 0; i < sizeof devices / sizeof *devices; i++) {
+        int admitted = gamepad_device_slot(&devices[i].d, 0);
+        check((admitted >= 0) == (devices[i].slot >= 0), devices[i].name, admitted, devices[i].slot >= 0 ? 0 : -1);
+        int slot = gamepad_device_slot(&devices[i].d, occupied);
+        check(slot == devices[i].slot, devices[i].name, slot, devices[i].slot);
+        if (slot >= 0) occupied |= 1u << slot;
+    }
+    GamepadDevice generic = {SDL_GAMEPAD_TYPE_STANDARD, 0, automatic, face, 3};
+    check(gamepad_device_slot(&generic, 0) == 0, "generic left stick", gamepad_device_slot(&generic, 0), 0);
+    generic.axes = 1;
+    check(gamepad_device_slot(&generic, 0) == -1, "half a stick", gamepad_device_slot(&generic, 0), -1);
+    generic.buttons = face | dpad;
+    check(gamepad_device_slot(&generic, 5) == 1, "first vacant slot", gamepad_device_slot(&generic, 5), 1);
+    check(gamepad_device_slot(&generic, 15) == -1, "four pads already there", gamepad_device_slot(&generic, 15), -1);
+    generic.buttons = 1, generic.axes = 0, generic.mapping = explicit_mapping;
+    check(gamepad_device_slot(&generic, 0) == 0, "explicit mapping", gamepad_device_slot(&generic, 0), 0);
+    generic.mapping = NULL, generic.raw_buttons = 4, generic.hats = 1;
+    check(gamepad_device_slot(&generic, 0) == 0, "unmapped hat pad", gamepad_device_slot(&generic, 0), 0);
+    generic.hats = 0, generic.raw_axes = 2;
+    check(gamepad_device_slot(&generic, 0) == 0, "unmapped stick pad", gamepad_device_slot(&generic, 0), 0);
+    generic.joystick_type = SDL_JOYSTICK_TYPE_WHEEL;
+    check(gamepad_device_slot(&generic, 0) == -1, "wheel is not a pad", gamepad_device_slot(&generic, 0), -1);
+    generic.joystick_type = SDL_JOYSTICK_TYPE_UNKNOWN;
+    generic.raw_axes = 0;
+    check(gamepad_device_slot(&generic, 0) == -1, "buttons alone", gamepad_device_slot(&generic, 0), -1);
+    check(!gamepad_named_mapping(NULL) && !gamepad_named_mapping("bad") &&
+          !gamepad_named_mapping("guid,,") && !gamepad_named_mapping(automatic), "mapping parsing", 0, 0);
+    /* Earlier report: air mouse first, PS4 second still takes player 1. */
+    check(gamepad_device_slot(&devices[1].d, 0) == -1 && gamepad_device_slot(&devices[2].d, 0) == 0,
+          "air mouse then PS4", gamepad_device_slot(&devices[2].d, 0), 0);
+}
+
 static int run_mapping(void)
 {
+    run_device_slots();
     static const struct { const char *name; int type, label, want; } kinds[] = {
         {"Xbox 360", SDL_GAMEPAD_TYPE_XBOX360, SDL_GAMEPAD_BUTTON_LABEL_A, PAD_KIND_XBOX},
         {"Xbox One", SDL_GAMEPAD_TYPE_XBOXONE, SDL_GAMEPAD_BUTTON_LABEL_A, PAD_KIND_XBOX},

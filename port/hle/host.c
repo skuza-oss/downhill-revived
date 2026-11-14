@@ -1000,6 +1000,9 @@ void host_pad_device(int port, HostPad *out)
     GamepadRaw raw;
     memset(out, 0, sizeof *out);
     out->right_x = out->right_y = out->left_x = out->left_y = 128;
+    /* D_004B25A0 + 0x288: local human count, set by the player-count screen and
+       kept through split-screen setup/racing. Online races use one local human. */
+    gamepad_set_multiplayer(*(volatile int32_t *)GUEST(0x084B2828) > 1);
     int connected = gamepad_start() && gamepad_raw(port, &raw);
     /* the sticks' dead zone (stick.h), followed here on the game thread, where PC SETTINGS sets it */
     if (connected) gamepad_apply(pad_layout(port), &raw, stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")), out);

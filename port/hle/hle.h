@@ -142,6 +142,7 @@ typedef struct {
     int16_t axis[4];
 } GamepadRaw;  /* 16 bytes */
 int gamepad_start(void);
+void gamepad_set_multiplayer(int local_multiplayer); /* game thread publishes setup before reading pads */
 int gamepad_raw(int player, GamepadRaw *out);  /* 0: no controller for that player */
 void gamepad_apply(const struct ControlsLayout *layout, const GamepadRaw *raw, int dead_zone, HostPad *out);
 int gamepad_place(const struct ControlsLayout *layout, int id);  /* id's place with the layout's Swap L1/L2, R1/R2 */

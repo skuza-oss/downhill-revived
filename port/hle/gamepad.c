@@ -6,7 +6,8 @@
    events and calls in here to keep each player's latest state and to send the vibration the
    game asks for. The game thread only copies states (gamepad_raw) and turns them into the PS2
    pad's with the player's layout (gamepad_apply). Players are slots: a pad that connects takes
-   the first free one and keeps it until it disconnects.
+   the first free one. Before player 1 presses, a later pad can claim its slot with a
+   deliberate press in a single-player context (finding 232); after that order stays fixed.
 
    A state is the pad's inputs by their place (GamepadRaw: port/hle/controls_table.h's ids, the
    triggers' and the sticks' values), as SDL's gamepad API names them: the bottom face button is
@@ -28,6 +29,7 @@
 #include "hle.h"
 #include "stick.h"
 #include "controls_table.h"
+#include "gamepad_device.h"
 #include "../host/host_end.h"
 
 #include <SDL3/SDL.h>
@@ -42,8 +44,31 @@ typedef struct {
     SDL_Gamepad *gamepad;        /* or, without a mapping, */
     SDL_Joystick *joystick;
     int light, heavy;            /* vibration sent last */
+    unsigned previous_buttons; /* SDL button places: rising edges for the first-press claim */
     Uint64 sent;                 /* when (it is sent again before SDL's duration runs out) */
 } Slot;
+
+/* IDs already named as skipped: startup enumeration and SDL's added/remapped events may
+   describe the same device several times. Retried on remapping, logged once per connection. */
+static SDL_JoystickID *skipped;
+static int skipped_count;
+
+static void forget_skipped(SDL_JoystickID id)
+{
+    for (int n = 0; n < skipped_count; n++)
+        if (skipped[n] == id) { skipped[n] = skipped[--skipped_count]; break; }
+}
+
+static void log_skipped(SDL_JoystickID id, const char *name, const GamepadDevice *d)
+{
+    for (int n = 0; n < skipped_count; n++) if (skipped[n] == id) return;
+    SDL_JoystickID *ids = SDL_realloc(skipped, (skipped_count + 1) * sizeof *ids);
+    if (!ids) return;
+    skipped = ids;
+    skipped[skipped_count++] = id;
+    fprintf(stderr, "controller: %s skipped: not a gamepad (type %d, real %d, buttons %08X, axes %02X, raw %d/%d/%d)\n",
+            name ? name : "?", d->type, d->real_type, d->buttons, d->axes, d->raw_buttons, d->raw_axes, d->hats);
+}
 
 static Slot slots[SLOTS];       /* SDL thread only */
 static GamepadRaw latest[SLOTS];  /* under lock */
@@ -51,6 +76,8 @@ static int present[SLOTS];      /* under lock */
 static SDL_AtomicInt kinds[SLOTS];  /* each slot's PAD_KIND_* (gamepad_kind) */
 static SDL_Mutex *lock;         /* made by gamepad_thread_start */
 static SDL_AtomicInt want_light[SLOTS], want_heavy[SLOTS];
+static SDL_AtomicInt multiplayer; /* published by the game thread, never read game memory on SDL */
+static int claimed;             /* player 1 has pressed; fixed order for the rest of this run */
 static SDL_AtomicInt running;   /* 1 once the pads are up, -1 if they couldn't start */
 
 static const uint16_t pressure_order[12] = {PAD_RIGHT, PAD_LEFT, PAD_UP, PAD_DOWN, PAD_TRIANGLE, PAD_CIRCLE,
@@ -183,21 +210,50 @@ static int slot_of(SDL_JoystickID id)
 
 static void attach(SDL_JoystickID id)
 {
-    int i = slot_of(id);
-    if (i >= 0 || (i = slot_of(0)) < 0) return;  /* already there, or four are */
-    Slot *s = &slots[i];
+    if (slot_of(id) >= 0) return;
+    Slot candidate = {0};
+    Slot *s = &candidate;
+    GamepadDevice device = {0};
+    char *mapping = NULL;
     const char *name, *how;
     if (SDL_IsGamepad(id)) {
         if (!(s->gamepad = SDL_OpenGamepad(id))) return;
         name = SDL_GetGamepadName(s->gamepad);
-        how = SDL_GetGamepadStringForType(SDL_GetGamepadType(s->gamepad));
-        SDL_SetAtomicInt(&kinds[i], gamepad_kind_of(SDL_GetGamepadType(s->gamepad),
-                                                    SDL_GetGamepadButtonLabel(s->gamepad, SDL_GAMEPAD_BUTTON_SOUTH)));
+        device.type = SDL_GetGamepadType(s->gamepad);
+        device.real_type = SDL_GetRealGamepadType(s->gamepad);
+        device.mapping = mapping = SDL_GetGamepadMapping(s->gamepad);
+        /* Even an allocation failure must use mapped capabilities, never raw button counts. */
+        if (!device.mapping) device.mapping = "";
+        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++)
+            if (SDL_GamepadHasButton(s->gamepad, (SDL_GamepadButton)b)) device.buttons |= 1u << b;
+        for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; a++)
+            if (SDL_GamepadHasAxis(s->gamepad, (SDL_GamepadAxis)a)) device.axes |= 1u << a;
+        how = SDL_GetGamepadStringForType(device.type);
     } else {
         if (!(s->joystick = SDL_OpenJoystick(id))) return;
         name = SDL_GetJoystickName(s->joystick);
         how = "no mapping: default layout";
     }
+    SDL_Joystick *j = s->gamepad ? SDL_GetGamepadJoystick(s->gamepad) : s->joystick;
+    device.joystick_type = SDL_GetJoystickType(j);
+    device.raw_buttons = SDL_GetNumJoystickButtons(j);
+    device.raw_axes = SDL_GetNumJoystickAxes(j);
+    device.hats = SDL_GetNumJoystickHats(j);
+    unsigned occupied = 0;
+    for (int n = 0; n < SLOTS; n++) if (slots[n].id) occupied |= 1u << n;
+    int i = gamepad_device_slot(&device, occupied);
+    if (i < 0) {
+        if (gamepad_device_slot(&device, 0) < 0) log_skipped(id, name, &device);
+        SDL_free(mapping);
+        if (s->gamepad) SDL_CloseGamepad(s->gamepad);
+        if (s->joystick) SDL_CloseJoystick(s->joystick);
+        return;
+    }
+    SDL_free(mapping);
+    slots[i] = candidate;
+    s = &slots[i];
+    if (s->gamepad) SDL_SetAtomicInt(&kinds[i], gamepad_kind_of(device.type,
+                                      SDL_GetGamepadButtonLabel(s->gamepad, SDL_GAMEPAD_BUTTON_SOUTH)));
     s->id = id;
     s->light = s->heavy = 0;
     if (s->gamepad) SDL_SetGamepadPlayerIndex(s->gamepad, i);
@@ -225,7 +281,8 @@ static void detach(SDL_JoystickID id)
 static void remap(SDL_JoystickID id)
 {
     int i = slot_of(id);
-    if (i >= 0 && slots[i].joystick && SDL_IsGamepad(id)) {
+    if (i < 0) { attach(id); return; }  /* a skipped device may gain an explicit mapping */
+    if (slots[i].joystick && SDL_IsGamepad(id)) {
         detach(id);
         attach(id);
     }
@@ -290,7 +347,7 @@ void gamepad_device(int change, unsigned id)
 {
     if (SDL_GetAtomicInt(&running) != 1) return;
     if (change == PADDEV_ADDED) attach(id);
-    else if (change == PADDEV_REMOVED) detach(id);
+    else if (change == PADDEV_REMOVED) { forget_skipped(id); detach(id); }
     else if (change == PADDEV_REMAPPED) remap(id);
 }
 
@@ -298,19 +355,44 @@ void gamepad_device(int change, unsigned id)
 void gamepad_thread_update(void)
 {
     if (SDL_GetAtomicInt(&running) != 1) return;
+    GamepadRaw raw[SLOTS] = {0};
+    unsigned pressed[SLOTS] = {0};
     for (int i = 0; i < SLOTS; i++) {
         Slot *s = &slots[i];
-        GamepadRaw raw;
         if (!s->id) continue;
-        memset(&raw, 0, sizeof raw);
-        if (s->gamepad) read_gamepad(s->gamepad, &raw);
-        else read_joystick(s->joystick, &raw);
-        SDL_LockMutex(lock);
-        latest[i] = raw;
-        present[i] = 1;
-        SDL_UnlockMutex(lock);
-        rumble(s, SDL_GetAtomicInt(&want_light[i]), SDL_GetAtomicInt(&want_heavy[i]));
+        if (s->gamepad) read_gamepad(s->gamepad, &raw[i]);
+        else read_joystick(s->joystick, &raw[i]);
+        unsigned buttons = 0;
+        for (int b = 0; b < CONTROL_PAD_INPUTS; b++) {
+            const ControlPadInput *in = &control_pad_inputs[b];
+            if (in->sdl >= 0 && (raw[i].buttons & (1u << in->id))) buttons |= 1u << in->sdl;
+        }
+        pressed[i] = buttons & ~s->previous_buttons;
+        s->previous_buttons = buttons;
     }
+    /* No controller can take over an empty player 1 slot; normal attach already fills it. */
+    int swap = slots[0].id ? gamepad_claim_slot(pressed, !SDL_GetAtomicInt(&multiplayer), &claimed) : -1;
+    SDL_LockMutex(lock);
+    if (swap > 0) {
+        Slot old = slots[0]; slots[0] = slots[swap]; slots[swap] = old;
+        GamepadRaw old_raw = raw[0]; raw[0] = raw[swap]; raw[swap] = old_raw;
+        int kind = SDL_GetAtomicInt(&kinds[0]);
+        SDL_SetAtomicInt(&kinds[0], SDL_GetAtomicInt(&kinds[swap]));
+        SDL_SetAtomicInt(&kinds[swap], kind);
+        if (slots[0].gamepad) SDL_SetGamepadPlayerIndex(slots[0].gamepad, 0);
+        if (slots[swap].gamepad) SDL_SetGamepadPlayerIndex(slots[swap].gamepad, swap);
+        const char *name = slots[0].gamepad ? SDL_GetGamepadName(slots[0].gamepad) : SDL_GetJoystickName(slots[0].joystick);
+        const char *other = slots[swap].gamepad ? SDL_GetGamepadName(slots[swap].gamepad) : SDL_GetJoystickName(slots[swap].joystick);
+        fprintf(stderr, "controller: %s pressed first: now player 1 (%s is player %d)\n",
+                name ? name : "?", other ? other : "?", swap + 1);
+    }
+    for (int i = 0; i < SLOTS; i++) {
+        latest[i] = raw[i];
+        present[i] = slots[i].id != 0;
+    }
+    SDL_UnlockMutex(lock);
+    for (int i = 0; i < SLOTS; i++)
+        if (slots[i].id) rumble(&slots[i], SDL_GetAtomicInt(&want_light[i]), SDL_GetAtomicInt(&want_heavy[i]));
 }
 
 /* At exit: no pad left vibrating (the motors keep the last command when the game ends mid-rumble). */
@@ -332,6 +414,11 @@ int gamepad_start(void)
     if (!enabled()) return 0;
     sdl_host_start();  /* the SDL thread, once; it returns when the pads are up or failed */
     return SDL_GetAtomicInt(&running) > 0;
+}
+
+void gamepad_set_multiplayer(int local_multiplayer)
+{
+    SDL_SetAtomicInt(&multiplayer, local_multiplayer != 0);
 }
 
 int gamepad_raw(int player, GamepadRaw *out)
