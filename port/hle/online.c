@@ -233,7 +233,8 @@ typedef struct {
 
 static struct {
     int released;               /* past the barrier */
-    int setup_done, started;    /* the setup block written; past the start wait */
+    int setup_done, started;    /* the rides exchanged (the load screen may go on); past the start wait */
+    double rides_entered, rides_said; /* the ride exchange (exchange_step): began, last said */
     RaceSetup setup;
     int nslots, local_slot, host_slot;
     char code[8];
@@ -622,8 +623,8 @@ static void receive_frames(void)
             if (!on.loaded[sender]++) fprintf(stderr, "online: player %d has loaded (at %.1f s)\n", sender, host_wall_seconds());
             break;
         case EVENT_SETUP:
-            if (n - 2 >= 30) {
-                Ride *r = &on.ride[sender];
+            if (n - 2 >= 30) {  /* said again every half second (send_ride): logged when new or changed */
+                Ride *r = &on.ride[sender], was = *r;
                 r->rider = get32(e + 2);
                 for (int k = 0; k < 3; k++) r->outfit[k] = get32(e + 6 + 4 * k), r->bike[k] = get32(e + 18 + 4 * k);
                 r->colour = n - 2 >= 34 ? (int32_t)get32(e + 30) : -1;
@@ -631,8 +632,9 @@ static void receive_frames(void)
                    takes the frame's own (-1), so a bad value can't index the game's tables */
                 if (r->colour < -1 || r->colour > 15) r->colour = -1;
                 r->have = 1;
-                fprintf(stderr, "online: player %d rides %X (%d %d %d), bike %d %d %d, colour %d\n", sender, r->rider,
-                        r->outfit[0], r->outfit[1], r->outfit[2], r->bike[0], r->bike[1], r->bike[2], r->colour);
+                if (memcmp(&was, r, sizeof was))
+                    fprintf(stderr, "online: player %d rides %X (%d %d %d), bike %d %d %d, colour %d\n", sender, r->rider,
+                            r->outfit[0], r->outfit[1], r->outfit[2], r->bike[0], r->bike[1], r->bike[2], r->colour);
             }
             break;
         case EVENT_START:
@@ -681,36 +683,59 @@ static void default_bike(int rider, int32_t bike[3])
     }
 }
 
-/* On the load screen, before the race build: the setup block as this PC's menus left it, with
-   the lobby's track and this player's rider; then every PC tells the others what its player
-   rides, and waits for theirs (at most 30 s). */
-static void exchange_rides(void)
+/* This PC's ride, as its setup block has it on the load screen (exchange_step). */
+static void send_ride(void)
 {
     uint8_t e[34] = {EVENT_VERSION, EVENT_SETUP};  /* 34 since finding 128: the colour last */
-    Ride *own = &on.ride[on.local_slot];
-    double entered = host_wall_seconds();
-    own->rider = EE32(SETUP + 0x290);
-    for (int k = 0; k < 3; k++) own->outfit[k] = EE32(SETUP + 0x1B8 + 4 * k), own->bike[k] = EE32(SETUP + 0x11C + 4 * k);
-    own->colour = EE32(SETUP + 0x254);
-    own->have = 1;
+    const Ride *own = &on.ride[on.local_slot];
     put32(e + 2, own->rider);
     for (int k = 0; k < 3; k++) put32(e + 6 + 4 * k, own->outfit[k]), put32(e + 18 + 4 * k, own->bike[k]);
     put32(e + 30, own->colour);
     send_event(e, sizeof e);
-    for (;;) {
-        NetLobby lobby;
-        host_service_net_get_lobby(GADDR(&lobby));
-        receive_frames();
-        int missing = 0;
-        for (int i = 0; i < on.nslots; i++)
-            if (!lobby.racer[i].left && !on.ride[i].have) missing++;
-        if (!missing || !host_service_net_racing() || host_wall_seconds() - entered > 30) break;
+}
+
+/* On the load screen, before the race build: the setup block as this PC's menus left it, with
+   the lobby's track and this player's rider; then every PC tells the others what its player
+   rides, and waits for theirs (at most 30 s). One step a field (pads_begin_field): the load
+   screen stays on the screen, held where it is (hle_online_load_hold), so a game that waits for a
+   slower one goes on drawing (finding 238; before, a loop here stopped the game's fields, and the
+   freeze watch saw a hang). The ride is said again every half second, here and at the start
+   (start_step), as LOADED is: a message sent once is lost when it comes before the other game
+   reads its frames (the 0.8.3 room check lost one, and its host waited out the 30 s). 1: done. */
+static int exchange_step(void)
+{
+    double now = host_wall_seconds();
+    if (!on.rides_entered) {
+        Ride *own = &on.ride[on.local_slot];
+        own->rider = EE32(SETUP + 0x290);
+        for (int k = 0; k < 3; k++) own->outfit[k] = EE32(SETUP + 0x1B8 + 4 * k), own->bike[k] = EE32(SETUP + 0x11C + 4 * k);
+        own->colour = EE32(SETUP + 0x254);
+        own->have = 1;
+        on.rides_entered = now, on.rides_said = -1;
+    }
+    if (now - on.rides_said >= 0.5) on.rides_said = now, send_ride();
+    NetLobby lobby;
+    host_service_net_get_lobby(GADDR(&lobby));
+    receive_frames();
+    int missing = 0;
+    for (int i = 0; i < on.nslots; i++)
+        if (!lobby.racer[i].left && !on.ride[i].have) missing++;
+    if (missing && host_service_net_racing() && now - on.rides_entered <= 30) {
         title("Downhill Revived online - room %s - waiting for %d player%s riders", on.code, missing,
               missing == 1 ? "'s" : "s'");
-        host_service_gs_pump_messages();
-        host_sleep_ms(5);
+        return 0;
     }
-    kernel_pace_slip(host_wall_seconds() - entered);
+    if (missing) fprintf(stderr, "online: %d player%s ride never came: default riders for them\n", missing,
+                         missing == 1 ? "'s" : "s'");
+    fprintf(stderr, "online: the rides exchanged %.1f s after the load screen came\n", now - on.rides_entered);
+    return 1;
+}
+
+/* func_001F43C0 (the load screen, menu 9), each field: 1 holds its count where it is, and the
+   shell on it, so the race build waits for the rides (exchange_step) with the screen drawn. */
+int hle_online_load_hold(void)
+{
+    return online_mode() && !on.setup_done && EE32(MENU) == LOAD_MENU;
 }
 
 /* func_001B89C8's AI count for this PC's one-player race (patched there): online the other
@@ -809,6 +834,7 @@ static int start_step(void)
     int host = on.local_slot == start_namer(on.host_slot, left, nslots);
     if (host_wall_seconds() - on.start_said >= 0.5) {
         on.start_said = host_wall_seconds();
+        send_ride();  /* for a game still at its load screen that missed it (exchange_step) */
         send_event(loaded, sizeof loaded);
         if (on.start_announced) {
             uint8_t e[10] = {EVENT_VERSION, EVENT_START};
@@ -2171,8 +2197,31 @@ static void race_menu_draw(int view)
     *manager_view = saved;
 }
 
+/* The race load's steps in the log, offline and online (finding 238): from the load screen
+   (menu 9 in the front end) to the race's loop, then the flight over the track (race phase 5)
+   to the countdown (phase 1). Reads only. */
+static void load_timing(void)
+{
+    static double screen_at, loop_at;
+    static int was_screen, was_loop;
+    double now = host_wall_seconds();
+    int loop = port_in_race(), screen = !loop && EE32(MENU) == LOAD_MENU;
+    if (screen && !was_screen) screen_at = now, loop_at = 0;
+    if (loop && !was_loop && screen_at) {
+        loop_at = now;
+        hle_log("load: the race's loop %.1f s after the load screen came\n", now - screen_at);
+    }
+    if (loop && loop_at && EE32(PHASE) == 1) {
+        hle_log("load: the countdown %.1f s after the race's loop (the flight over the track)\n", now - loop_at);
+        loop_at = 0, screen_at = 0;
+    }
+    if (!loop) loop_at = 0;
+    was_screen = screen, was_loop = loop;
+}
+
 void pads_begin_field(void)
 {
+    load_timing();
     choose_view();
     extern uint64_t kernel_vsync_count;
     if (!online_mode()) {
@@ -2190,7 +2239,7 @@ void pads_begin_field(void)
         barrier();
         on.released = 1;
     }
-    if (!on.setup_done && EE32(MENU) == LOAD_MENU) {
+    if (!on.setup_done && !on.rides_entered && EE32(MENU) == LOAD_MENU) {
         write_setup(&on.setup);
         /* The arena's round runs in the game's Mosh Bowl mode, its timed variant (SETUP +0x364 = 0;
            the Mosh Bowl menu's other choice, 1, is last rider standing), as the game's own menu
@@ -2217,7 +2266,8 @@ void pads_begin_field(void)
             for (int k = 0; k < 3; k++) EE32(SETUP + 0x11C + 4 * k) = bike[k];
             EE32(SETUP + 0x254) = func_001FA7C0(bike[0]);  /* the frame's own colour, as the puppets get */
         }
-        exchange_rides();
+    }
+    if (!on.setup_done && EE32(MENU) == LOAD_MENU && exchange_step()) {
         on.setup_done = 1;
         /* the room's last race now, before loading: a race that closes later (TIME UP) changes
            it, a voided one (the host ended it) doesn't. Not at GO: a late GO can come after. */
