@@ -179,8 +179,9 @@ static void job_run(DiscJob *job) {
     BOOL scoped = [job.url startAccessingSecurityScopedResource];
     NSNumber *bytes = nil;
     [job.url getResourceValue:&bytes forKey:NSURLFileSizeKey error:nil];
-    llog(@"import %lld: %@, %@, access %@", job.number, shown(job.url), bytes ? gb(bytes.unsignedLongLongValue) : @"size unknown",
-         scoped ? @"granted" : @"not asked (no security scope)");
+    llog(@"import %lld: %@, %@, security-scoped access %@", job.number, shown(job.url),
+         bytes ? [NSString stringWithFormat:@"%llu bytes", bytes.unsignedLongLongValue] : @"size unknown",
+         scoped ? @"granted" : @"not granted");
     job_event(job, @"checking", nil);
     __block NSError *coordination = nil;
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
@@ -210,7 +211,7 @@ static void job_run(DiscJob *job) {
                 }
             }
             remove([docs stringByAppendingPathComponent:@"iso-check.txt"].fileSystemRepresentation);
-            llog(@"import %lld: done: moved into place in the app's folder (%@)", job.number, gb(size));
+            llog(@"import %lld: done: moved into place in the app's folder (%llu bytes)", job.number, size);
             job_event(job, @"done", [NSString stringWithFormat:@",\"deletable\":false,\"size\":%llu", size]);
             return;
         }
@@ -311,7 +312,7 @@ static NSURL *folder_disc(void) {
             if ([s_failed[place] isEqualToString:stamp]) continue;
             const char *problem = host_disc_check(path.fileSystemRepresentation);
             if (problem) {
-                llog(@"folder: %@ (%@) is not the disc: %s", place, gb((uint64_t)st.st_size), problem);
+                llog(@"folder: %@ (%lld bytes) is not the disc: %s", place, (long long)st.st_size, problem);
                 s_failed[place] = stamp;
                 if (!fresh || st.st_mtime > fresh_time) { fresh = path; fresh_time = st.st_mtime; }
             } else if (!good || st.st_mtime > good_time) {
