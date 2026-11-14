@@ -259,7 +259,6 @@ uint32_t host_service_gs_store_image(uint32_t packet, uint32_t destination, uint
 void host_service_gs_store_settle(void);
 uint64_t host_service_gs_register(unsigned reg);
 void host_service_net_set_room(uint32_t address);
-uint64_t host_service_net_hash_ranges(uint32_t address, int count);
 
 /* Graphics worker -> module mailbox. Only consume after graphics_wait. Packet
    output is {u32 path,u32 word_count,u32 words[word_count]}; snapshot is the

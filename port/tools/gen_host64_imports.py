@@ -287,7 +287,6 @@ static void drain_pending(void) {
             'host_service_net_list_lobbies': [(0,'host64_bridge_array_bytes((int32_t)a1,sizeof(NetLobbyInfo))')],
             'host_service_disc_check_poll': [(0,'32'),(1,'a2')],
             'host_service_net_list_lobbies_poll': [(0,'host64_bridge_array_bytes((int32_t)a1,sizeof(NetLobbyInfo))')],
-            'host_service_net_hash_ranges': [(0,'host64_bridge_array_bytes((int32_t)a1,8)')],
             'host_service_gs_read_image': [(0,'a1')],
             'host_service_gs_defer_read_image': [(0,'a1')],
             'host_service_gs_store_image': [(0,'112'),(1,'a2')],
@@ -308,9 +307,6 @@ static void drain_pending(void) {
         if name == 'host_service_net_set_room':
             code += ['    u32 room=*((u32 *)host64_bridge_pointer(a0,28)+6);',
                      '    if (room) (void)host64_bridge_string(room);']
-        if name == 'host_service_net_hash_ranges':
-            code += ['    const u32 *ranges=host64_bridge_pointer(a0,host64_bridge_array_bytes((int32_t)a1,8));',
-                     '    for (u32 i=0;i<a1;i++) (void)host64_bridge_pointer(ranges[i*2],ranges[i*2+1]);']
         if name == 'host_callbacks_drain':
             code += ['    drain_pending();' if callbacks else '    /* no posted callbacks */']
         elif name == 'host_callback_detach':

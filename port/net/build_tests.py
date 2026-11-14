@@ -9,10 +9,9 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, 'port', 'tools'))
 OUT = os.path.join(ROOT, 'build', 'port', 'net')
 FLAGS = '/nologo /O2 /W4 -Wno-deprecated-declarations /D_CRT_SECURE_NO_WARNINGS /MT'
-CLIENT = ['hash.c', 'json.c', 'client.c', 'test_guest.c']  # client.c locks with SDL3 (sdl3.py's x64 build)
+CLIENT = ['json.c', 'client.c', 'test_guest.c']  # client.c locks with SDL3 (sdl3.py's x64 build)
 RUST = '<rust>'  # the Rust library and the system libraries rustc lists for it
 PROGRAMS = {  # name: (sources, libraries, run in the tests, SDL3)
-    'test_hash': (['hash.c', 'test_hash.c', 'test_guest.c'], '', True, False),
     'test_json': (['json.c', 'test_json.c'], '', True, False),
     'test_update_check': (['json.c', 'update_check.c', 'test_update_check.c'], '', True, False),
     # the arena's scored round: its score event and table (port/hle/mosh_round.h, finding 204)

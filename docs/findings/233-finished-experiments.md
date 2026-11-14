@@ -25,6 +25,11 @@ for the lead on a Mac. Matching sources and historical findings are out of scope
   and submit prepoll/statistic. Kept the default separate probe encoder, asynchronous map,
   poll, newest-completed-copy selection and the C take-before-start publication order.
 
+- B02: removed the offline whole-memory hash diagnostic, exclusive network XXH64 API,
+  fixtures and build wiring. Repository-wide references verified before removal. Kept
+  state_trace.c's comparator hashes, GS texture/CLUT hashes (including xxhash.h), SHA-256
+  for disc/executable identity and Rust hashes: these have independent live consumers.
+
 ## Decisions
 
 Keep the real renderer methods and ordinary native probe timing. No new implementation.
