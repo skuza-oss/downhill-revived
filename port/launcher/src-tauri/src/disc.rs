@@ -1,7 +1,8 @@
 //! The disc image, checked twice:
 //! - to boot, as the game checks it before it starts (port/hle/host.c disc_problem), without its
 //!   last step (the game's program and data hashed, game_data.c): an ISO 9660 volume whose
-//!   SYSTEM.CNF boots SCUS_971.77. The launcher only refuses what the game would refuse; the game
+//!   SYSTEM.CNF boots SCUS_971.77, with the whole declared volume (shared disc_check.c).
+//!   The launcher only refuses what the game would refuse; the game
 //!   still checks the data itself. The game's other releases are named (finding 100).
 //! - for online races, which need the USA disc's game files (finding 098): the game's own check,
 //!   dhd_disc (port/render/disc), with the game's iso-check.txt, so the game doesn't hash the
@@ -11,7 +12,24 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-const SECTOR: usize = 2048;
+use std::ffi::{c_char, c_int, c_void, CStr};
+
+// disc_check.h's answers
+const DISC_GAME: c_int = 0;
+const DISC_NOT_ISO: c_int = 1;
+const DISC_NO_CNF: c_int = 2;
+const DISC_CUT: c_int = 4;
+
+extern "C" {
+    fn disc_check_image(read: unsafe extern "C" fn(*mut c_void, u64, *mut c_void, usize) -> c_int,
+        context: *mut c_void, size: u64, id: *mut c_char, id_size: usize, volume: *mut u64) -> c_int;
+}
+
+unsafe extern "C" fn read_at(context: *mut c_void, offset: u64, buffer: *mut c_void, n: usize) -> c_int {
+    let file = &mut *(context as *mut File);
+    let bytes = std::slice::from_raw_parts_mut(buffer as *mut u8, n);
+    (file.seek(SeekFrom::Start(offset)).is_ok() && file.read_exact(bytes).is_ok()) as c_int
+}
 
 /// The game's other releases (finding 100): the table the game reads too (host.c).
 const OTHER_RELEASES: &str = include_str!("../../../hle/other_releases.inc");
@@ -38,57 +56,27 @@ fn other_release(boot: &str) -> Option<&'static str> {
     table("OTHER_RELEASE").find(|a| a.len() == 2 && serial_key(a[0]) == key).map(|a| a[1])
 }
 
-fn le32(b: &[u8]) -> u32 {
-    u32::from_le_bytes([b[0], b[1], b[2], b[3]])
-}
-
-fn read(f: &mut File, lsn: u32, buf: &mut [u8; SECTOR]) -> bool {
-    f.seek(SeekFrom::Start(lsn as u64 * SECTOR as u64)).is_ok() && f.read_exact(buf).is_ok()
-}
-
 /// None when the file is Downhill Domination (USA); else why not, in the game's words.
 pub fn problem(path: &Path) -> Option<String> {
     let Ok(mut f) = File::open(path) else {
         return Some(if path.exists() { "The file can't be opened." } else { "The file isn't there any more." }.into());
     };
-    let mut s = [0u8; SECTOR];
-    if !read(&mut f, 16, &mut s) || s[0] != 1 || &s[1..6] != b"CD001" {
-        return Some("It isn't a disc image (no ISO 9660 volume in it).".into());
-    }
-    // the primary volume descriptor's root directory record (at 156): extent at +2, size at +10
-    let (dir, dir_size) = (le32(&s[158..]), le32(&s[166..]));
-    let mut cnf = None;
-    let mut off = 0;
-    while off < dir_size && off < 16 * SECTOR as u32 && cnf.is_none() {
-        if !read(&mut f, dir + off / SECTOR as u32, &mut s) {
-            break;
-        }
-        let mut i = 0;
-        while i + 33 < SECTOR && s[i] != 0 {
-            let len = s[i + 32] as usize;
-            let name = &s[i + 33..(i + 33 + len).min(SECTOR)];
-            if len >= 10 && name.len() == len && name[..10].eq_ignore_ascii_case(b"SYSTEM.CNF") && (len == 10 || name[10] == b';') {
-                cnf = Some((le32(&s[i + 2..]), le32(&s[i + 10..])));
-                break;
-            }
-            i += s[i] as usize;
-        }
-        off += SECTOR as u32;
-    }
-    let Some((_, size)) = cnf.filter(|&(at, _)| read(&mut f, at, &mut s)) else {
-        return Some("It has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.".into());
+    let size = match f.metadata() {
+        Ok(m) => m.len(),
+        Err(_) => return Some("The file can't be read.".into()),
     };
-    let text = String::from_utf8_lossy(&s[..(size as usize).min(SECTOR)]).into_owned();
-    if text.contains("SCUS_971.77") {
-        return None;
+    let mut id = [0 as c_char; 32];
+    let code = unsafe { disc_check_image(read_at, &mut f as *mut File as *mut c_void,
+        size, id.as_mut_ptr(), id.len(), std::ptr::null_mut()) };
+    match code {
+        DISC_GAME => return None,
+        DISC_NOT_ISO => return Some("It isn't a disc image (no ISO 9660 volume in it).".into()),
+        DISC_NO_CNF => return Some("It has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.".into()),
+        DISC_CUT => return Some("The disc image is incomplete: it does not hold its whole declared volume.".into()),
+        _ => {}
     }
-    // name the game it is: BOOT2 = cdrom0:\SLUS_123.45;1
-    let id = text
-        .find("BOOT2")
-        .and_then(|b| text[b..].find(['\\', ':']).map(|i| b + i))
-        .map(|i| text[i..].trim_start_matches(['\\', ':']))
-        .map(|t| t[..t.find([';', '\r', '\n']).unwrap_or(t.len())].chars().take(31).collect::<String>())
-        .filter(|id| !id.is_empty());
+    let boot = unsafe { CStr::from_ptr(id.as_ptr()) }.to_string_lossy().into_owned();
+    let id = if boot.is_empty() { None } else { Some(boot) };
     if let Some(what) = id.as_deref().and_then(other_release) {
         let more = table("OTHER_RELEASES_MORE").next().and_then(|a| a.first().copied()).unwrap_or_default();
         return Some(format!("This is {what}. Downhill Revived needs the USA disc (SCUS-97177) for now. More: {more}"));
@@ -123,36 +111,31 @@ mod tests {
     use std::fs;
 
     fn temp(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("dhd-launcher-disc-{}-{name}", std::process::id()))
+        std::env::temp_dir().join(format!("dhd-launcher-disc-{}-{:?}-{name}", std::process::id(), std::thread::current().id()))
     }
 
-    /// A minimal ISO: the volume descriptor at 16, the root directory at 20, SYSTEM.CNF at 21.
-    fn iso(name: &str, cnf: &str) -> PathBuf {
-        let mut img = vec![0u8; 22 * SECTOR];
-        let pvd = 16 * SECTOR;
-        img[pvd] = 1;
-        img[pvd + 1..pvd + 6].copy_from_slice(b"CD001");
-        img[pvd + 158..pvd + 162].copy_from_slice(&20u32.to_le_bytes());
-        img[pvd + 166..pvd + 170].copy_from_slice(&(SECTOR as u32).to_le_bytes());
-        let r = 20 * SECTOR;
-        let file = b"SYSTEM.CNF;1";
-        img[r] = (33 + file.len()) as u8;
-        img[r + 2..r + 6].copy_from_slice(&21u32.to_le_bytes());
-        img[r + 10..r + 14].copy_from_slice(&(cnf.len() as u32).to_le_bytes());
-        img[r + 32] = file.len() as u8;
-        img[r + 33..r + 33 + file.len()].copy_from_slice(file);
-        img[21 * SECTOR..21 * SECTOR + cnf.len()].copy_from_slice(cnf.as_bytes());
-        let path = temp(&format!("{name}.iso"));
-        fs::write(&path, img).unwrap();
-        path
+    fn fixture(name: &str) -> PathBuf {
+        let dir = temp("fixtures");
+        // the one synthetic set the C and Java tests use too (python3 on macOS and Linux)
+        let made = ["python3", "python"].iter().any(|python| {
+            std::process::Command::new(python)
+                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../host/disc_fixtures.py"))
+                .arg(&dir).status().is_ok_and(|s| s.success())
+        });
+        assert!(made, "port/host/disc_fixtures.py needs python");
+        dir.join(format!("{name}.iso"))
     }
 
     #[test]
     fn checks_the_boot_file() {
-        let good = iso("usa", "BOOT2 = cdrom0:\\SCUS_971.77;1\r\nVER = 1.00\r\n");
+        let good = fixture("good");
+        for (name, message) in [("no-volume", "no ISO"), ("no-cnf", "no SYSTEM.CNF"),
+            ("cut", "incomplete"), ("tiny", "no ISO")] {
+            assert!(problem(&fixture(name)).unwrap().contains(message));
+        }
         assert_eq!(problem(&good), None);
-        let other = iso("other", "BOOT2 = cdrom0:\\SLUS_200.02;1\r\n");
-        assert!(problem(&other).unwrap().contains("(SLUS_200.02)"));
+        let other = fixture("other");
+        assert!(problem(&other).unwrap().contains("(SLUS_203.12)"));
         assert!(problem(Path::new("no-such.iso")).unwrap().contains("isn't there"));
         let _ = fs::remove_file(good);
         let _ = fs::remove_file(other);
@@ -161,12 +144,12 @@ mod tests {
     #[test]
     fn names_the_other_releases() {
         let more = "More: https://github.com/skuza-oss/downhill-revived/blob/main/docs/findings/100-other-releases.md";
-        let eu = iso("eu", "BOOT2 = cdrom0:\\SLES_522.02;1\r\nVER = 1.01\r\nVMODE = PAL\r\n\r\n");
+        let eu = fixture("europe");
         assert_eq!(
             problem(&eu).unwrap(),
             format!("This is the European disc (SLES-52202). Downhill Revived needs the USA disc (SCUS-97177) for now. {more}")
         );
-        let jp = iso("jp", "BOOT2 = cdrom0:\\SCPS_150.62;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n");
+        let jp = fixture("japan");
         assert_eq!(
             problem(&jp).unwrap(),
             format!(
@@ -188,7 +171,7 @@ mod tests {
         let data = temp("data");
         std::fs::create_dir_all(&data).unwrap();
         // an image that boots, but whose files aren't the USA disc's
-        let img = iso("online", "BOOT2 = cdrom0:\\SCUS_971.77;1\r\n");
+        let img = fixture("good");
         assert_eq!(online_check(&data, &img, |_, _| true), Ok(false));
         // the answer is in the game's iso-check.txt now: not hashed again
         assert!(std::fs::read_to_string(cache_path(&data)).unwrap().starts_with("files:"));

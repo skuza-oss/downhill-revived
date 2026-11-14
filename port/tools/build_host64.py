@@ -114,10 +114,10 @@ WINDOWS_ONLY = ('port/gs/replay.c',)  # Win32 calls (GS replay)
 # lines, the launcher's update check
 PHONE_UNITS = ['port/host/phone.c', 'port/net/update_check.c']
 ANDROID_UNITS = ['port/host/android_main.c', 'port/host/android_perf.c', 'port/host/android_touch.c',
-                 'port/host/android_update.c', 'port/host/android_launcher.c'] + PHONE_UNITS
+                 'port/host/disc_check_jni.c', 'port/host/android_update.c', 'port/host/android_launcher.c'] + PHONE_UNITS
 # Android: only SDL's entry and the launcher's native calls (android_launcher.c, finding 225) leave
 # the library; everything else may be garbage-collected (--gc-sections), as /opt:ref does for dhd64.exe.
-ANDROID_EXPORTS = '{\n  global: SDL_main; Java_app_downhillrevived_Native_*;\n  local: *;\n};\n'
+ANDROID_EXPORTS = '{\n  global: SDL_main; Java_app_downhillrevived_Native_*; Java_app_downhillrevived_DiscImage_checkNative;\n  local: *;\n};\n'
 
 
 def host_units(t):
@@ -595,6 +595,7 @@ def main():
                  # the launcher's native calls (android_launcher.c, finding 225): nothing in the
                  # library calls them, so their member of libhost64.a is pulled in by name
                  '-Wl,--undefined-glob=Java_app_downhillrevived_Native_*',
+                 '-Wl,--undefined=Java_app_downhillrevived_DiscImage_checkNative',
                  '-Wl,--gc-sections', '-Wl,--no-undefined', '-Wl,--build-id=sha1',
                  '-Wl,-z,max-page-size=16384', '-Wl,-z,noexecstack', '-Wl,-z,relro', '-Wl,-z,now',
                  '-landroid', *rust_libs, '-lm'], timeout=1800)

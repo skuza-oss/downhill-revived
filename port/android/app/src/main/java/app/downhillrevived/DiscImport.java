@@ -171,7 +171,11 @@ final class DiscImport {
                 String problem;  // the copy itself: the same disc, and complete
                 try (RandomAccessFile f = new RandomAccessFile(temp, "r")) {
                     problem = DiscImage.check(f.getChannel());
-                    if (problem == null) problem = DiscImage.completeness(done, size, exact, DiscImage.volumeBytes(f.getChannel()));
+                    // a copy cut short says why (the copy stopped: try again) before the image's own word
+                    if (problem == null || problem.equals(DiscImage.CUT)) {
+                        String whole = DiscImage.completeness(done, size, exact, DiscImage.volumeBytes(f.getChannel()));
+                        if (whole != null) problem = whole;
+                    }
                 } catch (Throwable e) {
                     problem = "The copy can't be read (" + e.getMessage() + ").";
                 }

@@ -23,41 +23,40 @@ final class DiscImage {
 
     private DiscImage() {}
 
+    /** check's answer for the right disc in a file shorter than its volume (DISC_CUT). */
+    static final String CUT = "The disc image is incomplete: it does not hold its whole declared volume.";
+
     /** Whether file is Downhill Domination (USA): null if it is, else why not (host.c's
      *  disc_problem without the game-data check, which the core makes). Positional reads only:
      *  file must be seekable (a local copy, or a document that is a regular file). */
     static String check(FileChannel file) throws IOException {
-        ByteBuffer sector = ByteBuffer.allocate(SECTOR).order(ByteOrder.LITTLE_ENDIAN);
-        if (!read(file, 16, sector) || sector.get(0) != 1 || !ascii(sector, 1, 5).equals("CD001"))
-            return "That file isn't a disc image (no ISO 9660 volume in it).";
-        // the primary volume descriptor's root directory record (at 156): extent at +2, size at +10
-        long dir = sector.getInt(156 + 2) & 0xFFFFFFFFL, dirSize = sector.getInt(156 + 10) & 0xFFFFFFFFL;
-        long cnf = 0, cnfSize = 0;
-        for (long off = 0; off < dirSize && off < 16 * SECTOR && cnf == 0; off += SECTOR) {
-            if (!read(file, dir + off / SECTOR, sector)) break;
-            for (int i = 0; i + 33 < SECTOR && sector.get(i) != 0; i += sector.get(i) & 0xFF) {
-                int nameLength = sector.get(i + 32) & 0xFF;
-                if (nameLength >= 10 && i + 33 + nameLength <= SECTOR
-                        && ascii(sector, i + 33, 10).equalsIgnoreCase("SYSTEM.CNF")
-                        && (nameLength == 10 || sector.get(i + 33 + 10) == ';')) {
-                    cnf = sector.getInt(i + 2) & 0xFFFFFFFFL;
-                    cnfSize = sector.getInt(i + 10) & 0xFFFFFFFFL;
-                    break;
-                }
-            }
+        Loader.load();
+        String[] answer = checkNative(file, file.size()).split("\n", 2);
+        int code = Integer.parseInt(answer[0]);
+        switch (code) {  // disc_check.h: DISC_GAME, DISC_NOT_ISO, DISC_NO_CNF, DISC_OTHER, DISC_CUT
+            case 0: return null;
+            case 1: return "That file isn't a disc image (no ISO 9660 volume in it).";
+            case 2: return "That file has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.";
+            case 4: return CUT;
+            default:
+                String id = answer.length > 1 ? answer[1] : "";
+                return id.isEmpty() ? "That PlayStation 2 disc isn't Downhill Domination (USA), SCUS-97177."
+                        : "That disc is " + id + ", not Downhill Domination (USA), SCUS-97177.";
         }
-        if (cnf == 0 || !read(file, cnf, sector)) return "That file has no SYSTEM.CNF, so it isn't a PlayStation 2 game disc.";
-        String text = ascii(sector, 0, (int) Math.min(cnfSize, SECTOR));
-        if (text.contains("SCUS_971.77")) return null;
-        int boot = text.indexOf("BOOT2");
-        String id = "";
-        if (boot >= 0) {
-            String line = text.substring(boot).split("[\r\n]")[0];
-            int start = Math.max(line.lastIndexOf('\\'), line.lastIndexOf(':')) + 1, end = line.indexOf(';', start);
-            id = line.substring(start, end > start ? end : line.length()).trim();
+    }
+
+    private static final class Loader {
+        static { System.loadLibrary("main"); }
+        static void load() {}
+    }
+    private static native String checkNative(FileChannel file, long size) throws IOException;
+
+    /** JNI's reader: positional reads keep a document provider's copy stream at zero. */
+    private static boolean readAt(FileChannel file, long offset, ByteBuffer bytes) throws IOException {
+        while (bytes.hasRemaining()) {
+            if (file.read(bytes, offset + bytes.position()) <= 0) return false;
         }
-        return id.isEmpty() ? "That PlayStation 2 disc isn't Downhill Domination (USA), SCUS-97177."
-                : "That disc is " + id + ", not Downhill Domination (USA), SCUS-97177.";
+        return true;
     }
 
     /** The bytes the ISO 9660 volume declares: the primary volume descriptor's volume space size

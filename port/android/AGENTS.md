@@ -36,4 +36,9 @@ The root and `port/AGENTS.md` rules apply. Design: findings 091, 143; phones' sp
 - Phone measurements: screen on, other apps closed, unlocked fps for speed runs
   (`DHD_FPS=240 DHD_VSYNC=0 DHD_FRAME_CLOCK=1`), and the window must reach the race itself
   (finding 147). One phone run at a time.
-- Tests: `python port/android/test_build_apk.py`, `test_disc_image.py` (JVM tests).
+- Boot-disc parsing lives only in `port/host/disc_check.c`; `DiscImage.check` supplies positional
+  FileChannel reads through `disc_check_jni.c`. Keep `volumeBytes` and copy/import completeness
+  rules separate (finding 234).
+- Tests: `python port/android/test_build_apk.py`, `test_disc_image.py` (JVM + production JNI adapter).
+  The latter needs a host C compiler and JDK JNI headers (`DHD_JNI_HEADERS` overrides the JDK's
+  include folder when using a runtime-only JDK).

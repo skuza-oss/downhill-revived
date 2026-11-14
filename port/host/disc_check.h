@@ -1,6 +1,7 @@
 /* The disc image's own check, before the game's data (finding 227): host.c's disc_problem asks it
    on every platform (the desktop's start, Android's and iOS's launchers, imports and starts through
-   host_disc_check), so a phone checks a disc with the same code as the desktop. Plain C over a
+   host_disc_check), so a phone checks a disc with the same code as the desktop. The desktop launcher uses Rust FFI and Android seekable
+   documents use JNI. Plain C over a
    reader: port/host/test_disc_check.c runs it on small made-up images (no game data).
    GPL-3.0-or-later. */
 #ifndef PORT_HOST_DISC_CHECK_H
