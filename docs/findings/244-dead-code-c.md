@@ -15,7 +15,7 @@ traces equal to the base build.
 ## Progress
 
 - [x] L01 `net_kick`, `client_kick`, `net_local_slot` (the server's kick handling stays)
-- [ ] L02 `raster_module` in `port/render/src/exact/pipelines.rs`
+- [x] L02 `raster_module` in `port/render/src/exact/pipelines.rs`
 - [ ] L03 snapshot macro override scaffolding and `native_snapshot_free`
 - [ ] L04 ignored `--renderer` argument (`port/web/build.py`, `port/tools/web_gs_replay.mjs`)
 - [ ] L06 `isValidCode` in `online/server/src/protocol.ts`
