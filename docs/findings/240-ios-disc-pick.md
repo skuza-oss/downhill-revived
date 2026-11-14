@@ -22,9 +22,12 @@ Out of scope: a real iPhone (none here).
 
 ## Progress
 
-- [x] 2026-11-14: the folder look, Open in, the launcher log, the page line, the notes
-- [ ] the Simulator: the picker by taps, the folder look, Open in, a wrong file, the shared log
-- [ ] `check.py quick`, the unsigned IPA and its audit
+- [x] 2026-11-14: the folder look, Open in, the launcher log (7148fe4b, 086ef09e), the page line and
+  the notes (42592e71)
+- [x] the Simulator: the picker by taps, the folder look, Open in, a wrong file, the shared log ("What
+  was run")
+- [x] `check.py quick` (Windows) OK; the unsigned IPA from 086ef09e with 0.8.3's release core: `package_release.py
+  --platform ios` passed every check (unsigned, the audit, the version), 14.2 MB
 
 ## Decisions
 
@@ -50,8 +53,46 @@ Out of scope: a real iPhone (none here).
 - **The page**: an iOS-only capability `files-folder` adds one line under the first-start step
   (`home.first.filesFolder`, 8 languages).
 
+## What was run
+
+The Mac's "DHD Lane 224" Simulator (iPhone 17 Pro Max, iOS 26.5), the app built from 42592e71 with
+0.8.3's core parts, taps by mobile-mcp, the disc fixtures of `port/host/disc_fixtures.py` (`good`,
+`other`), the device's own disc set aside under a name that is not `.iso` and put back after.
+Screenshots t01-t15 stayed outside the repository.
+
+- **The picker by taps (the player's steps)**: Choose disc, On My iPhone > Downloads, tap
+  `Downhill Domination (USA).iso`: the picker closed, `documentPicker:didPickDocumentsAtURLs:` was
+  called, the import ran (security-scoped access granted, copied, checked) and the page said Ready
+  to ride with the delete question. **Our path works in the Simulator; the device's failure is on
+  the device's side** (the picker never handed the file over: the picker stayed open, so the
+  delegate was not called). With 0.8.x nothing said so; now launcher.log shows "picker: shown" and
+  no "chosen" line in that case.
+- **A file that is not the disc** by the picker (`Not The Disc.iso`): the page's normal problem
+  ("It is another PlayStation 2 disc (SLUS_203.12) ...") and "Choose another file".
+- **The folder look**: with the app in the background, `random dump.ISO` (not the disc) put in
+  Documents; back in front: the same problem on the page; back in front again: nothing new (not
+  checked again). Then `My Dump (USA).iso` (the disc fixture): back in front, moved into place as
+  SCUS-97177.iso, Ready to ride. At the launcher's start, `Inbox/Downhill Domination (USA)-1.iso`
+  was moved into place (Inbox left empty).
+- **Open in** from the Files app, the app not running: long press on the file, Open With >
+  Downhill Revived (offered by the new document type): the app started into the launcher, the
+  file came in place (outside the app: copied and checked), Ready to ride with the delete question.
+  An Inbox copy did not occur in the Simulator (Files opens in place); the folder look covers it.
+- **Share log** (the page's `share_log` through the test switch): the shared file lists
+  `dhd-exit.txt`, `launcher.log`, `dhd.log`, `dhd-previous.log`; launcher.log has every step above.
+
+Windows: `check.py quick` OK (docs, the core, `test_runtime`, the iOS tests). The device IPA: Info.plist carries the
+document type and the imported `public.iso-image`, the executable is not signed, the page has the
+new line and the snapshot's caps end with `files-folder`.
+
 ## Surprises
 
+- The first core parts used on the Mac (a gate copy from before 0.8.3's version commit) stamped
+  `dhd-port 0.8.2`; `package_release.py` refused the IPA for it, rightly. The release's own core
+  parts fixed it. The Simulator runs above used the first parts: no difference for the launcher.
+- In the Simulator the Files app's "On My iPhone" lists only what its file provider knows: a file
+  copied into the wrong app group (the Photos provider's "File Provider Storage") never shows; the
+  right one is the `group.com.apple.FileProvider.LocalStorage` container.
 - LiveContainer, a common way to run unsigned IPAs without signing them, breaks guest apps' file
   pickers and offers a per-app "Fix File Picker" switch (its README; Locus's README describes the
   symptom: the picker doesn't import). The player's tool is not known; the folder look and Open in
@@ -59,4 +100,12 @@ Out of scope: a real iPhone (none here).
 
 ## Result
 
-(at the merge)
+Our picker works in the Simulator by real taps; the player's failure is the device's picker not
+handing the file over (the tool that signed or runs the app; LiveContainer is a known case). The
+disc no longer depends on it: an `.iso` under any name moved into Files > On My iPhone > Downhill
+Revived (or its Inbox) is found when the launcher opens and at each return to the front, and Files'
+Open With > Downhill Revived hands it over directly; both go through the one import. Every step is
+in launcher.log, which Share log carries, so the next report says where it stopped. Not proven: a
+real iPhone, a sideloaded install, an Inbox copy made by iOS itself (the Simulator's Files opened in
+place). Left for the lead: a test IPA for the player (same version 0.8.3, so name it apart when
+handing it over).
