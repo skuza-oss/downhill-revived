@@ -4,7 +4,6 @@ typedef float v4f __attribute__((vector_size(16)));
 static uint32_t bits(float x){uint32_t u;__builtin_memcpy(&u,&x,4);return u;}
 static float value(uint32_t u){float x;__builtin_memcpy(&x,&u,4);return x;}
 static uint64_t dbits(double x){uint64_t u;__builtin_memcpy(&u,&x,8);return u;}
-static double dvalue(uint64_t u){double x;__builtin_memcpy(&x,&u,8);return x;}
 /* The FP control word: the core's at 0x07800000; the threaded build's graphics reactor has its own
    (build_graphics.py --threads builds these helpers with WEB_CSR_AT=web_queue.h's WEB_Q_REACTOR_CSR). */
 #ifndef WEB_CSR_AT

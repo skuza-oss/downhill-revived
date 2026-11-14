@@ -497,7 +497,6 @@ void state_trace_gs_packet(struct Gs *g, unsigned path, const uint32_t *words, s
 
 /* ---- section serializations: every 32-bit value goes through norm32 ---- */
 
-static void put8(Buf *b, uint8_t v) { buf_bytes(b, &v, 1); }
 static void put16(Buf *b, uint16_t v) { uint8_t t[2] = {(uint8_t)v, (uint8_t)(v >> 8)}; buf_bytes(b, t, 2); }
 static void put32raw(Buf *b, uint32_t v)
 {
