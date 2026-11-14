@@ -70,8 +70,9 @@ static const char code_letters[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";  /* the se
 static const char name_letters[] = SETTING_NAME_LETTERS;
 /* CODE_LENGTH: an SFU room's code; a P2P room's has one more (port/net/net.h, finding 180). */
 enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, P2P_CODE_LENGTH = 7, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 10 };
-/* HOME's rows, in this order, those the platform offers (host_service_net_offered: SFU rooms on
-   the desktop, P2P rooms everywhere, finding 180); home_kind[] says what each shown row does. */
+/* HOME's rows, in this order, those the platform offers (host_service_net_offered: SFU rooms in
+   every native build, phones included (finding 237), P2P rooms everywhere, finding 180);
+   home_kind[] says what each shown row does. */
 enum { HOME_NAME, HOME_QUICK, HOME_LIST, HOME_PUBLIC, HOME_PRIVATE, HOME_REGION, HOME_P2P, HOME_JOIN, HOME_UPDATE, HOME_KINDS };
 
 enum { HOME, LIST, NAME, CODE, ROOM, QUICK };
@@ -2203,7 +2204,7 @@ int port_main_label(const int *table, int index)
 }
 
 /* The main menu's rows as shown: the game's three, ONLINE, EXIT GAME (exit_menu.c). A build
-   without online play (Android and the browser: host_service_net_offered, finding 143) shows no
+   without online play (a browser page without its online part: host_service_net_offered, finding 143) shows no
    ONLINE row, so its fourth row is EXIT GAME; port_main_choice turns a shown row into the row the
    patched menu acts on. */
 int port_main_rows(void)

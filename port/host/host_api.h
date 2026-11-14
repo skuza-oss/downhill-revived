@@ -201,8 +201,8 @@ void host_service_gs_window_close(void);
    picture and without the native renderer (gs/gpu_rust_native.inc; PC SETTINGS shows it). */
 int host_service_gs_scale(int asked);
 /* The rooms this build offers, port/net/net.h's NET_OFFER_* bits: the one switch, the host's, so
-   the core is the same on every platform (finding 143). Desktop builds: SFU and P2P rooms. Android
-   and iOS (port/net/net.c, at compile time; finding 224) and the browser (port/web/www/net.js):
+   the core is the same on every platform (finding 143). Native builds (port/net/net.c), the
+   desktop, Android and iOS: SFU and P2P rooms (finding 237). The browser (port/web/www/net.js):
    P2P rooms only (finding 180), which need no SFU session; no setting changes it. At 0 the main menu has no
    ONLINE row, DHD_NET_* starts no online race, and the connections below refuse. */
 int host_service_net_offered(void);
