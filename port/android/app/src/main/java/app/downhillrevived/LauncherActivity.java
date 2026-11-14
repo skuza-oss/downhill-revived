@@ -121,6 +121,7 @@ public class LauncherActivity extends Activity {
         boolean asked = OPEN.equals(action) || DISC.equals(action) || restored || backFromEditor;
         new Thread(() -> {
             LastExit exit = LastExit.record(app);
+            bridge.defaults();
             String why = exit != null && exit.why != null && LastExit.firstAsk(app, exit) ? exit.why : null;
             boolean direct = !asked && why == null && bridge.startsDirectly();
             runOnUiThread(() -> {

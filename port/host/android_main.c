@@ -77,6 +77,16 @@ static void settings_start(const char *disc)
 {
     char path[1200], iso[8];
     snprintf(path, sizeof path, "%sdhd.ini", files);
+    extern void android_phone_defaults(const char *path);
+    android_phone_defaults(path);
+    char report[1200], line[2048];
+    snprintf(report, sizeof report, "%sdhd-start-settings.txt", files);
+    FILE *note = fopen(report, "r");
+    if (note) {
+        while (fgets(line, sizeof line, note)) fputs(line, stderr);
+        fclose(note);
+        unlink(report);
+    }
     if (!dhd_settings_read(path, "iso", iso, sizeof iso)) dhd_settings_save(path, "iso", disc);
 }
 

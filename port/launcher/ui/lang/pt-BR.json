@@ -80,7 +80,7 @@
   "row.scale.window.gpu": "A resolução ajustada à janela ficou em {used}x na última vez; sua placa de vídeo permite até {limit}x",
   "row.scale.window.memory": "A resolução ajustada à janela ficou em {used}x na última vez; a memória da sua placa de vídeo permite até {limit}x",
   "row.scale.window.texture": "A resolução ajustada à janela ficou em {used}x na última vez; a maior textura da sua placa de vídeo permite até {limit}x",
-  "row.scale.hintPhone": "Nitidez da imagem 3D. 1x é a da PS2; escalas maiores pedem um celular mais rápido.",
+  "row.scale.hintPhone": "Nitidez da imagem 3D. 1x é a da PS2; escalas maiores pedem um celular mais rápido. Celulares Android lentos reconhecidos começam em 1x com o Modo Desempenho. Você pode mudar ambos aqui.",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide acompanha a forma do seu monitor; 16:9 é sempre 16:9",
   "row.aspect.hintTouch": "Wide acompanha a forma da sua tela; 16:9 é sempre 16:9",

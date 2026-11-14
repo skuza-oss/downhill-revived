@@ -80,7 +80,7 @@
   "row.scale.window.gpu": "Die ans Fenster angepasste Auflösung lag zuletzt bei {used}x; deine Grafikkarte erlaubt bis zu {limit}x",
   "row.scale.window.memory": "Die ans Fenster angepasste Auflösung lag zuletzt bei {used}x; der Speicher deiner Grafikkarte erlaubt bis zu {limit}x",
   "row.scale.window.texture": "Die ans Fenster angepasste Auflösung lag zuletzt bei {used}x; die größte Textur deiner Grafikkarte erlaubt bis zu {limit}x",
-  "row.scale.hintPhone": "Wie scharf das 3D-Bild gezeichnet wird. 1x ist die Auflösung der PS2; höhere Stufen brauchen ein schnelleres Handy.",
+  "row.scale.hintPhone": "Wie scharf das 3D-Bild gezeichnet wird. 1x ist die Auflösung der PS2; höhere Stufen brauchen ein schnelleres Handy. Erkannte langsame Android-Handys starten mit 1x und Performance-Modus. Beides lässt sich hier ändern.",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide passt zur Form deines Monitors; 16:9 bleibt immer 16:9",
   "row.aspect.hintTouch": "Wide passt zur Form deines Bildschirms; 16:9 bleibt immer 16:9",

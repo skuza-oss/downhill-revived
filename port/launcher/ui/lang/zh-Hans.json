@@ -78,7 +78,7 @@
   "row.scale.window.gpu": "按窗口匹配的分辨率上次为 {used}x; 你的显卡最高支持 {limit}x",
   "row.scale.window.memory": "按窗口匹配的分辨率上次为 {used}x; 受你的显卡显存限制，最高支持 {limit}x",
   "row.scale.window.texture": "按窗口匹配的分辨率上次为 {used}x; 受你的显卡最大纹理尺寸限制，最高支持 {limit}x",
-  "row.scale.hintPhone": "3D 画面的清晰程度。1x 与 PS2 相同；更高的倍数需要更快的手机。",
+  "row.scale.hintPhone": "3D 画面的清晰程度。1x 与 PS2 相同；更高的倍数需要更快的手机。 已识别的低性能 Android 手机默认使用 1x 分辨率和性能模式。两项设置均可在此更改。",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide 适配显示器的形状；16:9 始终为 16:9",
   "row.aspect.hintTouch": "Wide 适配屏幕的形状；16:9 始终为 16:9",

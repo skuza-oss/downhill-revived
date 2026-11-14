@@ -80,7 +80,7 @@
   "row.scale.window.gpu": "La résolution adaptée à la fenêtre était de {used}x la dernière fois; votre GPU permet jusqu'à {limit}x",
   "row.scale.window.memory": "La résolution adaptée à la fenêtre était de {used}x la dernière fois; la mémoire de votre GPU permet jusqu'à {limit}x",
   "row.scale.window.texture": "La résolution adaptée à la fenêtre était de {used}x la dernière fois; la plus grande texture de votre GPU permet jusqu'à {limit}x",
-  "row.scale.hintPhone": "Netteté de l'image 3D. 1x est celle de la PS2 ; les échelles plus hautes demandent un téléphone plus rapide.",
+  "row.scale.hintPhone": "Netteté de l'image 3D. 1x est celle de la PS2 ; les échelles plus hautes demandent un téléphone plus rapide. Les téléphones Android lents reconnus démarrent en 1x avec le mode Performance. Vous pouvez modifier les deux ici.",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide suit la forme de votre écran ; 16:9 reste toujours 16:9",
   "row.aspect.hintTouch": "Wide suit la forme de votre écran ; 16:9 reste toujours 16:9",
