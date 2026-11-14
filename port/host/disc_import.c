@@ -1,26 +1,47 @@
-/* The disc image's copy into the iOS app: disc_copy.h. GPL-3.0-or-later. */
-#include "disc_copy.h"
+/* The phones' disc import rules: disc_import.h. GPL-3.0-or-later. */
+#include "disc_import.h"
+#include "disc_check.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-uint64_t disc_volume_bytes(FILE *f)
+uint64_t disc_room_needed(uint64_t size, uint64_t free_bytes)
 {
-    unsigned char s[2048];
-    if (fseek(f, 16L * 2048, SEEK_SET) || fread(s, 1, sizeof s, f) != sizeof s) return 0;
-    if (s[0] != 1 || memcmp(s + 1, "CD001", 5)) return 0;
-    uint64_t blocks = (uint64_t)s[80] | (uint64_t)s[81] << 8 | (uint64_t)s[82] << 16 | (uint64_t)s[83] << 24;
-    unsigned block = (unsigned)s[128] | (unsigned)s[129] << 8;
-    return blocks * block;
+    return size && size + DISC_COPY_MARGIN > free_bytes ? size + DISC_COPY_MARGIN : 0;
+}
+
+static int file_read(void *context, uint64_t offset, void *buffer, size_t n)
+{
+    FILE *f = context;
+#ifdef _WIN32
+    if (_fseeki64(f, (long long)offset, SEEK_SET)) return 0;
+#else
+    if (fseeko(f, (off_t)offset, SEEK_SET)) return 0;
+#endif
+    return fread(buffer, 1, n, f) == n;
+}
+
+int disc_check_file(FILE *f, uint64_t *volume)
+{
+    char id[32];
+    *volume = 0;
+#ifdef _WIN32
+    if (_fseeki64(f, 0, SEEK_END)) return DISC_NOT_ISO;
+    long long size = _ftelli64(f);
+#else
+    if (fseeko(f, 0, SEEK_END)) return DISC_NOT_ISO;
+    long long size = (long long)ftello(f);
+#endif
+    return size < 0 ? DISC_NOT_ISO : disc_check_image(file_read, f, (uint64_t)size, id, sizeof id, volume);
 }
 
 static double mb(uint64_t bytes) { return bytes / (double)(1 << 20); }
 
-const char *disc_completeness(uint64_t copied, uint64_t size, uint64_t volume, char *why, size_t why_size)
+const char *disc_completeness(uint64_t copied, uint64_t size, int exact, uint64_t volume, char *why, size_t why_size)
 {
     if (size && copied < size)
         snprintf(why, why_size, "The copy stopped early: %.1f MB of %.1f MB arrived. Try again.", mb(copied), mb(size));
-    else if (size && copied != size)
+    else if (size && exact && copied != size)
         snprintf(why, why_size, "The copy doesn't match the file: %.1f MB copied, the file has %.1f MB. Try again.",
                  mb(copied), mb(size));
     else if (!volume)
@@ -33,16 +54,22 @@ const char *disc_completeness(uint64_t copied, uint64_t size, uint64_t volume, c
     return why;
 }
 
+const char *disc_copy_verdict(int kind, uint64_t copied, uint64_t size, int exact, uint64_t volume,
+                              char *why, size_t why_size)
+{
+    if (kind != DISC_GAME && kind != DISC_CUT) return NULL;
+    return disc_completeness(copied, size, exact, volume, why, why_size);
+}
+
 int64_t disc_copy(FILE *in, FILE *out, const volatile int *cancel,
                   void (*progress)(void *context, uint64_t done), void *context)
 {
-    enum { BLOCK = 1 << 20 };
-    char *block = malloc(BLOCK);
+    char *block = malloc(DISC_COPY_BLOCK);
     if (!block) return -1;
     uint64_t done = 0, shown = 0;
     int64_t result = -1;
     for (;;) {
-        size_t n = fread(block, 1, BLOCK, in);
+        size_t n = fread(block, 1, DISC_COPY_BLOCK, in);
         if (!n) {
             if (!ferror(in)) result = (int64_t)done;
             break;
@@ -56,8 +83,8 @@ int64_t disc_copy(FILE *in, FILE *out, const volatile int *cancel,
     return result;
 }
 
-/* ---- the import's publication (disc_copy.h) ---- */
-#ifdef _WIN32   /* the unit test on Windows */
+/* ---- the import's publication (disc_import.h) ---- */
+#ifdef _WIN32   /* the unit tests on Windows */
 #include <windows.h>
 static SRWLOCK publish_lock = SRWLOCK_INIT;
 #define PUBLISH_LOCK() AcquireSRWLockExclusive(&publish_lock)
@@ -92,7 +119,7 @@ int disc_publish(long long generation, const char *from, const char *to)
     PUBLISH_LOCK();
     int result = 1;
     if (generation == publish_newest) {
-#ifdef DISC_PUBLISH_TEST_PAUSE   /* test_disc_copy: a pause between the check and the rename, so that
+#ifdef DISC_PUBLISH_TEST_PAUSE   /* test_disc_import: a pause between the check and the rename, so that
                                     without the lock a newer import would slip in */
 #ifdef _WIN32
         Sleep(1);
@@ -100,7 +127,7 @@ int disc_publish(long long generation, const char *from, const char *to)
         usleep(1000);
 #endif
 #endif
-#ifdef _WIN32   /* the unit test on Windows: rename over the target as POSIX does */
+#ifdef _WIN32   /* the unit tests on Windows: rename over the target as POSIX does */
         result = MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
 #else
         result = rename(from, to) == 0 ? 0 : -1;

@@ -45,6 +45,7 @@ Source-reference audit only; no external code adapted.
   unchanged by this lane); it needs its own fix before the replay can serve as a check again.
 - The GS golden for this PC's current driver (`10de-2484-32.0.16.2114-dx12`) has no `meta.json`,
   so `gs_golden.py` refuses; no golden exists for this driver yet.
+- Both fixed by finding 242 (the command head from the struct; `gs_golden.py adopt`).
 
 ## Result
 

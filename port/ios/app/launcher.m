@@ -3,7 +3,7 @@
    answered by launcher_calls.c, the same shared code Android's launcher calls (the settings crate,
    host.c's disc check, the online check, the update check). Here only what UIKit has to do: the web
    view and its one origin, the bridge's transport, the document picker and the disc's copy (its
-   rules: disc_copy.c, host_disc_check), the share sheet, links, and PLAY.
+   rules: port/host/disc_import.c, host_disc_check), the share sheet, links, and PLAY.
 
    The disc reaches the one import (startImport:, job_run) three ways (finding 240): the picker; a
    file opened in the app from another (Files' share sheet: "Open in", launcher_open_document); and
@@ -40,8 +40,11 @@
 #include "app.h"
 #include "ios_main.h"
 #include "launcher_calls.h"
-#include "disc_copy.h"
+#include "host/disc_check.h"
+#include "host/disc_import.h"
+#include "host/log_bundle.h"
 #include "include/version.h"   /* port/, the project's header search path */
+#include <sys/utsname.h>
 
 extern const char *host_disc_check(const char *path);
 
@@ -61,8 +64,8 @@ static void log_test(NSString *line) {
     NSLog(@"launcher: %@", line);
 }
 
-/* launcher.log: the picker's and the import's steps (Share log includes it). One file, started
-   again past 256 KB; a file outside the app's folder is named by its last component only. */
+/* launcher.log: the picker's and the import's steps (Share log includes it; log_bundle.c writes it,
+   as on Android); a file outside the app's folder is named by its last component only. */
 static void llog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 static void llog(NSString *format, ...) {
     va_list args;
@@ -70,21 +73,7 @@ static void llog(NSString *format, ...) {
     NSString *line = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
     NSLog(@"launcher: %@", line);
-    static dispatch_once_t once;
-    static NSString *path;
-    dispatch_once(&once, ^{
-        path = [[NSString stringWithUTF8String:ios_documents_dir()] stringByAppendingPathComponent:@"launcher.log"];
-    });
-    @synchronized (path) {
-        struct stat st;
-        FILE *f = fopen(path.fileSystemRepresentation, stat(path.fileSystemRepresentation, &st) == 0 && st.st_size > (256 << 10) ? "w" : "a");
-        if (!f) return;
-        time_t now = time(NULL);
-        char stamp[32];
-        strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", localtime(&now));
-        fprintf(f, "%s %s\n", stamp, line.UTF8String);
-        fclose(f);
-    }
+    launcher_log_line(ios_documents_dir(), line.UTF8String);
 }
 
 /* A file's name for the log: its place inside the app's folder, else its last component. */
@@ -215,9 +204,9 @@ static void job_run(DiscJob *job) {
             job_event(job, @"done", [NSString stringWithFormat:@",\"deletable\":false,\"size\":%llu", size]);
             return;
         }
-        uint64_t free_bytes = ios_available_disk_space();
-        if (size + DISC_COPY_MARGIN > free_bytes) {
-            launcher_coded(coded, sizeof coded, "disc.problem.noRoom", "need", gb(size + DISC_COPY_MARGIN).UTF8String,
+        uint64_t free_bytes = ios_available_disk_space(), need = disc_room_needed(size, free_bytes);
+        if (need) {
+            launcher_coded(coded, sizeof coded, "disc.problem.noRoom", "need", gb(need).UTF8String,
                            "free", gb(free_bytes).UTF8String, (const char *)NULL);
             job_problem(job, coded, 1);
             return;
@@ -238,20 +227,20 @@ static void job_run(DiscJob *job) {
         if (job->cancel) { remove(temp.fileSystemRepresentation); return; }
         if (copied < 0 || !synced) {
             remove(temp.fileSystemRepresentation);
-            if (ios_available_disk_space() < (64ull << 20)) launcher_coded(coded, sizeof coded, "disc.problem.outOfSpace", (const char *)NULL);
+            if (ios_available_disk_space() < DISC_COPY_LOW) launcher_coded(coded, sizeof coded, "disc.problem.outOfSpace", (const char *)NULL);
             else launcher_coded(coded, sizeof coded, "disc.problem.copyFailed", "detail", "a read or write failed", (const char *)NULL);
             job_problem(job, coded, 1);
             return;
         }
-        /* the copy itself: the same disc, and complete */
+        /* the copy itself: complete (its own reason first when cut short, disc_copy_verdict), then the
+           same disc */
         char why[400];
-        const char *bad = host_disc_check(temp.fileSystemRepresentation);
-        if (!bad) {
-            FILE *f = fopen(temp.fileSystemRepresentation, "rb");
-            uint64_t volume = f ? disc_volume_bytes(f) : 0;
-            if (f) fclose(f);
-            bad = disc_completeness((uint64_t)copied, size, volume, why, sizeof why);
-        }
+        uint64_t volume = 0;
+        FILE *f = fopen(temp.fileSystemRepresentation, "rb");
+        int kind = f ? disc_check_file(f, &volume) : DISC_NOT_ISO;
+        if (f) fclose(f);
+        const char *bad = disc_copy_verdict(kind, (uint64_t)copied, size, 1, volume, why, sizeof why);
+        if (!bad) bad = host_disc_check(temp.fileSystemRepresentation);
         if (bad) {
             llog(@"import %lld: the copy: %s (%lld bytes)", job.number, bad, copied);
             remove(temp.fileSystemRepresentation);
@@ -516,28 +505,29 @@ static NSURL *folder_disc(void) {
     return job.number;
 }
 
-/* ---- Share log: the device, how the last run ended, the logs (Android's LogShare) ---- */
+/* ---- Share log: the file is log_bundle.c's (Android's too); here the device's words and the sheet ---- */
 
 - (void)shareLog {
-    NSString *docs = [NSString stringWithUTF8String:ios_documents_dir()];
-    NSDateFormatter *day = [NSDateFormatter new];
-    day.dateFormat = @"yyyy-MM-dd";
-    NSString *name = [NSString stringWithFormat:@"downhill-revived-%s-log-%@.txt", DHD_VERSION, [day stringFromDate:NSDate.date]];
-    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
-    NSMutableData *out = [NSMutableData data];
     UIDevice *device = UIDevice.currentDevice;
-    [out appendData:[[NSString stringWithFormat:@"Downhill Revived %s on %@ %@ (%@)\n\n", DHD_VERSION, device.systemName,
-                      device.systemVersion, device.model] dataUsingEncoding:NSUTF8StringEncoding]];
-    for (NSString *file in @[@"dhd-exit.txt", @"launcher.log", @"dhd.log", @"dhd-previous.log"]) {
-        NSData *data = [NSData dataWithContentsOfFile:[docs stringByAppendingPathComponent:file]];
-        if (!data) continue;
-        const NSUInteger most = 1792 << 10;   /* a crash is at the end */
-        if (data.length > most) data = [data subdataWithRange:NSMakeRange(data.length - most, most)];
-        [out appendData:[[NSString stringWithFormat:@"==== %@ ====\n", file] dataUsingEncoding:NSUTF8StringEncoding]];
-        [out appendData:data];
-        [out appendData:[@"\n\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    struct utsname machine;
+    uname(&machine);
+    NSString *words = [NSString stringWithFormat:@"Apple %@ (%s), %@ %@", device.model, machine.machine,
+                       device.systemName, device.systemVersion];
+    char made[1024];
+    LogBundle bundle = {DHD_VERSION, words.UTF8String, 0};   /* the game never runs beside the launcher */
+    int r = log_bundle_write(ios_documents_dir(), NSTemporaryDirectory().fileSystemRepresentation, &bundle,
+                             made, sizeof made);
+    if (r != 0) {
+        NSString *say = r > 0 ? @"There is no log yet."
+                              : [NSString stringWithFormat:@"The log couldn't be copied (%s).", strerror(errno)];
+        llog(@"share log: %@", say);
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil message:say
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
     }
-    [out writeToFile:path atomically:YES];
+    NSString *path = [NSString stringWithUTF8String:made];
     UIActivityViewController *share = [[UIActivityViewController alloc]
         initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];
     share.popoverPresentationController.sourceView = self.view;   /* an iPad shows it as a popover */

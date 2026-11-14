@@ -8,7 +8,13 @@
 // problem {problem}.
 // Everything that may block (opening the document, which a cloud provider may download first, its
 // reads, the copy) runs on the job's own thread. Each job writes its own temporary file and only it
-// renames or deletes that file; a newer job cancels the one before.
+// renames or deletes that file; a newer job cancels the one before, and only the newest pick's copy
+// may land (its generation, disc_publish). The rules are the iOS launcher's too (DiscImage ->
+// port/host/disc_import.c, finding 242): here only Android's part, the document's stream and its
+// provider. Each step goes to launcher.log, which Share log carries (log_bundle.c).
+// The iOS launcher also finds an .iso the player put in the app's own folder (finding 240); Android
+// has no such folder a player can reach (its files folder is private, Android/data closed to file
+// managers since Android 11), so the picker is the one way in here (finding 242).
 package app.downhillrevived;
 
 import android.content.ContentResolver;
@@ -37,8 +43,6 @@ final class DiscImport {
     private static final String TAG = "DownhillRevived";
     /** The copy's name in the files folder (android_main.c's DISC_NAME). */
     static final String DISC_NAME = "SCUS-97177.iso";
-    /** Room kept free besides the copy (saves, dhd.log, the texture cache). */
-    static final long MARGIN = 128L << 20;
     /** The temporary files of the jobs running in this process: a clean-up leaves them alone.
      *  Guarded by JOBS, as each job's last steps are. */
     private static final Object JOBS = new Object();
@@ -60,6 +64,16 @@ final class DiscImport {
         return new StatFs(context.getFilesDir().getPath()).getAvailableBytes();
     }
 
+    /** One line in launcher.log (Share log carries it): names only, never a content URI. */
+    static void log(Context context, String line) {
+        Log.i(TAG, "launcher: " + line);
+        try {
+            Native.launcherLog(context.getFilesDir().getPath(), line);
+        } catch (Throwable e) {  // never in the way of the import
+            Log.w(TAG, "launcher.log: " + e);
+        }
+    }
+
     /** Deletes the temporary files of copies cut short (the app closed or killed during one, the
      *  name of an older version's, SCUS-97177.iso.part, too), but none a running job writes. */
     static void removeStaleCopies(Context context) {
@@ -78,6 +92,8 @@ final class DiscImport {
      *  replaced it) it neither publishes the copy nor sends anything, and removes temp. */
     static final class Job implements Runnable {
         final int number = numbers.incrementAndGet();
+        /** Every older pick is superseded from here: only the newest may put its copy in place. */
+        private final long generation = DiscImage.publishBegin();
         final Uri uri;
         private final Context context;
         private final Events events;
@@ -137,6 +153,8 @@ final class DiscImport {
                 long stat = fd.getStatSize();
                 boolean exact = stat > 0;
                 long size = exact ? stat : documentSize();
+                log(context, "import " + number + ": " + documentName() + ", " + (exact ? size + " bytes"
+                        : size > 0 ? size + " bytes by its provider (a stream)" : "size unknown (a stream)"));
                 if (exact) {
                     String problem = null;
                     try {
@@ -150,9 +168,9 @@ final class DiscImport {
                     }
                 }
                 if (cancelled) return;
-                long free = freeBytes(context);
-                if (size > 0 && size + MARGIN > free) {
-                    problem(coded("disc.problem.noRoom", "need", gb(size + MARGIN), "free", gb(free)));
+                long free = freeBytes(context), need = DiscImage.roomNeeded(size, free);
+                if (need > 0) {
+                    problem(coded("disc.problem.noRoom", "need", gb(need), "free", gb(free)));
                     return;
                 }
                 final long total = size;
@@ -163,19 +181,14 @@ final class DiscImport {
                     out.getFD().sync();
                 } catch (Throwable e) {
                     if (!cancelled)
-                        problem(freeBytes(context) < (64L << 20) ? coded("disc.problem.outOfSpace")
+                        problem(freeBytes(context) < DiscImage.LOW ? coded("disc.problem.outOfSpace")
                                 : coded("disc.problem.copyFailed", "detail", String.valueOf(e.getMessage())));
                     return;
                 }
                 if (cancelled) return;
-                String problem;  // the copy itself: the same disc, and complete
+                String problem;  // the copy itself: complete (its own reason first when cut short), the same disc
                 try (RandomAccessFile f = new RandomAccessFile(temp, "r")) {
-                    problem = DiscImage.check(f.getChannel());
-                    // a copy cut short says why (the copy stopped: try again) before the image's own word
-                    if (problem == null || problem.equals(DiscImage.CUT)) {
-                        String whole = DiscImage.completeness(done, size, exact, DiscImage.volumeBytes(f.getChannel()));
-                        if (whole != null) problem = whole;
-                    }
+                    problem = DiscImage.checkCopy(f.getChannel(), done, size, exact);
                 } catch (Throwable e) {
                     problem = "The copy can't be read (" + e.getMessage() + ").";
                 }
@@ -188,14 +201,16 @@ final class DiscImport {
                 synchronized (JOBS) {  // cancel() can't slip in between this check and the rename
                     if (cancelled) return;
                     // a replaced disc: rename(2) puts the new copy over the old one in one step, so
-                    // there is always a whole copy in place
-                    if (!temp.renameTo(disc)) problem = "The copy can't be stored.";
+                    // there is always a whole copy in place; a newer pick's generation makes this one land nowhere
+                    int put = DiscImage.publish(generation, temp.getPath(), disc.getPath());
+                    if (put == 1) return;
+                    if (put != 0) problem = "The copy can't be stored.";
                 }
                 if (problem != null) {
                     problem(problem);
                     return;
                 }
-                Log.i(TAG, "disc image copied: " + done + " bytes, checked");
+                log(context, "import " + number + ": done: copied and checked (" + done + " bytes)");
                 new File(context.getFilesDir(), "iso-check.txt").delete();  // the online check's answer was the old file's
                 JSONObject e = event("done");
                 put(e, "deletable", deletable());
@@ -211,6 +226,15 @@ final class DiscImport {
             } catch (Throwable e) {
                 Log.w(TAG, "the original couldn't be deleted: " + e);
                 return false;
+            }
+        }
+
+        /** The document's name as its provider gives it (OpenableColumns.DISPLAY_NAME), for the log. */
+        private String documentName() {
+            try (Cursor c = context.getContentResolver().query(uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null)) {
+                return c != null && c.moveToFirst() && !c.isNull(0) ? c.getString(0) : "a document with no name";
+            } catch (Throwable e) {
+                return "a document with no name";
             }
         }
 
@@ -255,6 +279,7 @@ final class DiscImport {
         /** problem: the player's words (DiscImage's), or a coded one (coded). */
         private void problem(Object problem) {
             if (cancelled) return;
+            log(context, "import " + number + ": problem: " + problem);
             JSONObject e = event("problem");
             put(e, "problem", problem);
             events.send(e);

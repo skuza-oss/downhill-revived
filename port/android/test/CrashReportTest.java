@@ -152,24 +152,6 @@ public class CrashReportTest {
         String big = CrashReport.text("line\n".repeat(20000).getBytes(StandardCharsets.UTF_8));
         check(big.length() < CrashReport.TRACE_MAX + 100 && big.endsWith("(the rest of the trace left out)"), "a long trace is clipped");
 
-        // the shared file's copy of a log
-        File log = File.createTempFile("dhd", ".log");
-        try {
-            byte[] content = new byte[100];
-            for (int i = 0; i < content.length; i++) content[i] = (byte) ('a' + i % 26);
-            Files.write(log.toPath(), content);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            CrashReport.copyLog(log, out, 200, 200);
-            check(Arrays.equals(out.toByteArray(), content), "a short log whole");
-            out.reset();
-            CrashReport.copyLog(log, out, 10, 20);
-            String cut = out.toString(StandardCharsets.UTF_8);
-            check(cut.startsWith(new String(content, 0, 10, StandardCharsets.US_ASCII) + "\n[... 70 bytes left out ...]\n")
-                    && cut.endsWith(new String(content, 80, 20, StandardCharsets.US_ASCII)), "a long log's start and end: " + cut);
-        } finally {
-            log.delete();
-        }
-
         // Android 10: the game's own crash report in the log's end (finding 191)
         check("crash: SIGSEGV at 0000000000000018 in thread game".equals(CrashReport.logCrash(
                 "gs: frame 120\ncrash: SIGSEGV at 0000000000000018 in thread game\n  #00 libmain.so+0x1234\n")), "a crash report");

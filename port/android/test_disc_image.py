@@ -51,7 +51,8 @@ def main():
     library = OUT / ('main.dll' if os.name == 'nt' else ('libmain.dylib' if sys.platform == 'darwin' else 'libmain.so'))
     headers = Path(os.environ.get('DHD_JNI_HEADERS', jdk / 'include'))
     cmd = [testprog.CLANG, '-shared', '-I', str(headers), '-I', str(headers / suffix),
-           str(ROOT / 'port/host/disc_check.c'), str(ROOT / 'port/host/disc_check_jni.c'), '-o', str(library)]
+           str(ROOT / 'port/host/disc_check.c'), str(ROOT / 'port/host/disc_import.c'),
+           str(ROOT / 'port/host/disc_check_jni.c'), '-o', str(library)]
     env = os.environ.copy()
     if os.name != 'nt':
         cmd += ['-fPIC']

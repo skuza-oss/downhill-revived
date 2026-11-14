@@ -1,7 +1,8 @@
-/* The iOS disc copy's rules (port/ios/host/disc_copy.c, finding 227), on a small made-up ISO 9660
-   volume: the volume's size, the copy loop, cancelling, the completeness rule (Android's
-   DiscImage.completeness). GPL-3.0-or-later. */
-#include "../host/disc_copy.h"
+/* The phones' disc import rules (port/host/disc_import.c, findings 227, 242), on a small made-up
+   ISO 9660 volume: the volume's size, the room rule, the copy loop, cancelling, the completeness
+   rule and the copy's verdict (Android's and iOS's), and the publication. GPL-3.0-or-later. */
+#include "disc_import.h"
+#include "disc_check.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -70,18 +71,34 @@ int main(void)
         }
         assert(fwrite(block, 1, sizeof block, in) == sizeof block);
     }
-    assert(disc_volume_bytes(in) == 9000ull * 2048);
+    uint64_t volume = 1;
+    assert(disc_check_file(in, &volume) == DISC_NO_CNF && volume == 9000ull * 2048);
     rewind(in);
     int cancel = 0;
     int64_t copied = disc_copy(in, out, &cancel, progress, NULL);
     assert(copied == 10240ll * 2048 && steps == 1);
-    assert(disc_volume_bytes(out) == 9000ull * 2048);
-    assert(!disc_completeness((uint64_t)copied, (uint64_t)copied, disc_volume_bytes(out), why, sizeof why));
+    fflush(out);
+    assert(disc_check_file(out, &volume) == DISC_NO_CNF && volume == 9000ull * 2048);
+    assert(!disc_completeness((uint64_t)copied, (uint64_t)copied, 1, volume, why, sizeof why));
     /* a source that ended early, a size that changed, a volume larger than the copy */
-    assert(disc_completeness(100, 200, 50, why, sizeof why) && strstr(why, "stopped early"));
-    assert(disc_completeness(300, 200, 50, why, sizeof why) && strstr(why, "doesn't match"));
-    assert(disc_completeness(100, 0, 0, why, sizeof why) && strstr(why, "no disc volume size"));
-    assert(disc_completeness(100, 100, 200, why, sizeof why) && strstr(why, "incomplete"));
+    assert(disc_completeness(100, 200, 1, 50, why, sizeof why) && strstr(why, "stopped early"));
+    assert(disc_completeness(100, 200, 0, 50, why, sizeof why) && strstr(why, "stopped early"));
+    assert(disc_completeness(300, 200, 1, 50, why, sizeof why) && strstr(why, "doesn't match"));
+    /* a provider's SIZE (not exact) is its word: a copy may run past it */
+    assert(!disc_completeness(300, 200, 0, 50, why, sizeof why));
+    assert(disc_completeness(100, 0, 0, 0, why, sizeof why) && strstr(why, "no disc volume size"));
+    assert(disc_completeness(100, 100, 1, 200, why, sizeof why) && strstr(why, "incomplete"));
+    assert(disc_completeness(100, 0, 0, 200, why, sizeof why) && strstr(why, "incomplete"));
+    /* the copy's verdict: completeness first for the game or a cut copy, the caller's word otherwise */
+    assert(disc_copy_verdict(DISC_CUT, 100, 200, 1, 300, why, sizeof why) && strstr(why, "stopped early"));
+    assert(!disc_copy_verdict(DISC_GAME, 300, 300, 1, 300, why, sizeof why));
+    assert(disc_copy_verdict(DISC_GAME, 300, 0, 0, 400, why, sizeof why) && strstr(why, "incomplete"));
+    assert(!disc_copy_verdict(DISC_OTHER, 100, 200, 1, 300, why, sizeof why));
+    assert(!disc_copy_verdict(DISC_NOT_ISO, 100, 200, 1, 0, why, sizeof why));
+    /* the room: the source and the margin, nothing asked of an unknown size */
+    assert(disc_room_needed(1000, 1000 + DISC_COPY_MARGIN) == 0);
+    assert(disc_room_needed(1001, 1000 + DISC_COPY_MARGIN) == 1001 + DISC_COPY_MARGIN);
+    assert(disc_room_needed(0, 0) == 0);
     /* cancelled before the first block */
     rewind(in);
     cancel = 1;
@@ -89,7 +106,7 @@ int main(void)
     /* not a disc image */
     FILE *plain = tmpfile();
     fputs("hello", plain);
-    assert(disc_volume_bytes(plain) == 0);
+    assert(disc_check_file(plain, &volume) == DISC_NOT_ISO && volume == 0);
     fclose(plain);
     fclose(in);
     fclose(out);
@@ -143,6 +160,6 @@ int main(void)
         assert(landed >= 1 && atoi(content) == winner && disc_publish_current(newest));
     }
     remove(race_target);
-    puts("disc_copy: volume, copy, cancel, completeness, and a superseded import never lands, racing too");
+    puts("disc_import: volume, room, copy, cancel, completeness, verdict, and a superseded import never lands, racing too");
     return 0;
 }

@@ -86,8 +86,9 @@ def main():
         sys.exit('replay_gs: DHD_INTERP is set but does not reach the replay (the harness forwards no DHD_INTERP); '
                  'pass --interp')
     capture = Path(args.capture).resolve()
-    prefix = Path(args.prefix).resolve() if args.prefix else OUT / capture.stem
-    if not prefix.is_relative_to(ROOT / 'build'):
+    prefix = (Path(args.prefix) if args.prefix else OUT / capture.stem).resolve()
+    # build/ may be a junction (a worktree's, tools/worktree_setup.py): resolve it as the prefix is
+    if not prefix.is_relative_to((ROOT / 'build').resolve()):
         sys.exit('Replay output must be under build/')
     prefix.parent.mkdir(parents=True, exist_ok=True)
     clear_outputs(prefix)
