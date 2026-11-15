@@ -150,7 +150,21 @@ static int whole;
 static uint64_t race_steps;  /* real race updates, for DHD_FPS_TRACE */
 
 static void reset_body_clocks(void);
-void port_fps_race_step(void) { race_steps++; }
+/* Every race update (0011A100). DHD_TEST_FINISH=S (test switch, port/tools/rate_sweep.py's
+   results scene, finding 255): offline, the player's rider finishes at race second S, through the
+   flag online.c's DHD_NET_TEST_FINISH sets (FINISH_NOW, 0x43EF22; FINISHED is 0x43EF18). */
+void port_fps_race_step(void)
+{
+    static double finish_at = -1;
+    race_steps++;
+    if (finish_at < 0) {
+        const char *s = host_getenv("DHD_TEST_FINISH");
+        finish_at = s && *s ? atof(s) : 0;
+    }
+    if (finish_at > 0 && port_race_running(2) && *(int *)GUEST(0x0843EEC8) > finish_at * 60 &&
+        !*(uint8_t *)GUEST(0x0843EF18) && !*(uint8_t *)GUEST(0x0843EF22))
+        *(uint8_t *)GUEST(0x0843EF22) = 1;
+}
 
 /* The field grid of an offline race (finding 142; port/hle/replay.c says why). The race asks for
    it every update (port_clock_grid), and the next step follows it:

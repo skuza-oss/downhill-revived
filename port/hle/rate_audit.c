@@ -24,6 +24,11 @@
      DHD_RATE_AUDIT_MIN=<x>      smallest travel written (default 0.01)
      DHD_RATE_AUDIT_MAX=<n>      give up after n updates without the gates holding (default 200000)
      DHD_RATE_AUDIT_STEPS=<file> one line per sampled update: index, menu, phase, field
+     DHD_RATE_AUDIT_FIELDS=1     compare RAM only at updates that end a field, with RAM at the
+                                 previous field's end (port/tools/rate_sweep.py, finding 255): both
+                                 rates then see the same instants, so a curve sampled four times
+                                 as finely does not gain travel, and a word flipped each update
+                                 and back within a field shows as no travel at all
    The gates only choose where the window starts; once it has started, sampling runs to its end
    and counts how often the gates stopped holding (the header's gate_fail), so a flapping menu id
    cannot silently cut a run short. Skip and samples are update counts at this run's rate.
@@ -73,6 +78,8 @@ static struct {
     int menu0, menu1, phase0, phase1;
     int gate_menu, gate_phase_lo, gate_phase_hi;
     int rate;
+    int fields_only;         /* DHD_RATE_AUDIT_FIELDS: scan at field ends only */
+    int32_t last_field;
 } ra = { .on = -1, .gate_menu = -1, .gate_phase_lo = -1, .gate_phase_hi = -1 };
 
 static unsigned long long env_ull(const char *name, unsigned long long fallback)
@@ -142,9 +149,9 @@ static void audit_finish(const char *why)
     const uint32_t *ram = (const uint32_t *)(uintptr_t)PS2_RAM_BASE;
     if (!ra.out) return;
     /* The header holds no game state; the rows below do, as a state trace's would. */
-    fprintf(ra.out, "# rate-audit 1 rate=%d skip=%llu samples=%llu updates=%llu field0=%llu "
+    fprintf(ra.out, "# rate-audit 1 fields_only=%d rate=%d skip=%llu samples=%llu updates=%llu field0=%llu "
                     "field1=%llu menu0=%d menu1=%d phase0=%d phase1=%d gate_fail=%llu end=%s\n",
-            ra.rate, ra.skip, ra.want, ra.samples, ra.field0, ra.field1, ra.menu0, ra.menu1,
+            ra.fields_only, ra.rate, ra.skip, ra.want, ra.samples, ra.field0, ra.field1, ra.menu0, ra.menu1,
             ra.phase0, ra.phase1, ra.gate_fail, why);
     for (size_t word = 0; word < WORDS; word++) {
         if (!(ra.travel[word] >= ra.min_travel)) continue;
@@ -194,6 +201,7 @@ static void audit_init(void)
     ra.skip = env_ull("DHD_RATE_AUDIT_SKIP", 0);
     ra.want = env_ull("DHD_RATE_AUDIT_SAMPLES", 300);
     ra.max_ticks = env_ull("DHD_RATE_AUDIT_MAX", 200000);
+    ra.fields_only = env_ull("DHD_RATE_AUDIT_FIELDS", 0) != 0;
     ra.min_travel = getenv("DHD_RATE_AUDIT_MIN") ? atof(getenv("DHD_RATE_AUDIT_MIN")) : 0.01;
     if (getenv("DHD_RATE_AUDIT_MENU") && *getenv("DHD_RATE_AUDIT_MENU"))
         ra.gate_menu = atoi(getenv("DHD_RATE_AUDIT_MENU"));
@@ -239,12 +247,14 @@ void rate_audit_update(void)
         memcpy(ra.prev, (const void *)(uintptr_t)PS2_RAM_BASE, PS2_RAM_SIZE);
         ra.armed = 1;
         ra.field0 = (unsigned long long)(uint32_t)D_0029E3D8;
+        ra.last_field = D_0029E3D8;
         ra.menu0 = menu_now();
         ra.phase0 = phase_now();
         return;  /* the first armed update is the baseline */
     }
     if (!gate_holds()) ra.gate_fail++;
-    audit_scan();
+    if (!ra.fields_only || D_0029E3D8 != ra.last_field) audit_scan();
+    ra.last_field = D_0029E3D8;
     ra.samples++;
     ra.field1 = (unsigned long long)(uint32_t)D_0029E3D8;
     ra.menu1 = menu_now();
