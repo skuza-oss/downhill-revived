@@ -167,7 +167,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the GPU can't; findings 164, 167, 194, 198, 199), movies,
   vibration, stick dead zone and button icons (finding 134; also over a texture pack's font,
   finding 200), the keys and controller buttons for
-  the PS2 pad's buttons, per player, in the game and the launcher (Controls, finding 157), FPS &
+  the PS2 pad's buttons, per player (four controllers, finding 251), in the game and the launcher (Controls, finding 157), FPS &
   Ping counter (findings 120, 169), online name size (finding 163), Unlock All (finding 095;
   applied at once, finding 200),
   EXIT GAME. dhd.ini has one implementation, the Rust crate `dhd_settings`

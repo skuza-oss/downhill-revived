@@ -1,9 +1,10 @@
 # 251: Bindings for controllers 3 and 4
 
-Status: in progress
+Status: current
+Checked: 2026-11-15
+Supersedes: 157 in part (players 3 and 4 kept the default controller layout)
 
-Branch `feat/controls-pads-3-4-251` from `main` cae6f05c, started 2026-11-15. GitHub #99. This
-file is the lane's plan while it runs and its finding when it merges.
+Branch `feat/controls-pads-3-4-251` from `main` cae6f05c, started 2026-11-15. GitHub #99.
 
 ## Goal and acceptance
 
@@ -27,8 +28,9 @@ Out of scope: issue #94's gamepad picture, new actions, any change to how 1 and 
 ## Progress
 
 - [x] 2026-11-15: finding reserved (a1025c96)
-- [ ] 2026-11-15: four controllers in dhd_settings, the C interface, the host, the in-game page,
-  the launcher, the test pads and the docs
+- [x] 2026-11-15: four controllers in dhd_settings, the C interface, the host, the in-game page,
+  the launcher, the test pads and the docs (5bd5345a)
+- [x] 2026-11-15: the checks below; finding 157 marked partly superseded, STATE and STATE-LOG
 
 ## Decisions
 
@@ -67,3 +69,45 @@ Out of scope: issue #94's gamepad picture, new actions, any change to how 1 and 
   instead.
 
 ## Result
+
+What changed: see Decisions. New dhd.ini keys `pad3` and `pad4` (variables `DHD_PAD3`,
+`DHD_PAD4`), in the same form as `pad1` and `pad2` (docs/PLAYING.md, Controls); new test variables
+`DHD_TEST_PAD3`, `DHD_TEST_PAD4` (docs/TESTING.md). Checks, 2026-11-15, Windows:
+
+- Unit tests: `dhd_settings`' bindings tests, with two new ones: `four_controllers` (the five
+  devices, a change on Controller 3 or 4 leaves the others as they were, the same rules and
+  messages, the five lines read back to the same layouts, a broken `pad4` line resets Controller 4
+  alone, Reset per controller) and `an_old_dhd_ini` (a file with `keyboard`, `pad1`, `pad2` and no
+  `pad3`, `pad4`: those two are the defaults, the others as written; a change on Controller 3 adds
+  its line and leaves the others' lines as they were). The launcher's `cargo test` (30 passed; the
+  schema has five devices, edits on Controllers 3 and 4 write `pad3` and `pad4`, Reset of 3 leaves
+  4), `node port/launcher/test_controls.js` with and without the launcher's schema (five devices
+  with the same defaults; the tab's Reset resets each of the five).
+- `python tools/check.py quick`, `port` and `docs`: OK. Android: `port/android/test_build_apk.py`
+  and `test_disc_image.py` pass (the latter with `DHD_JNI_HEADERS`, Surprises).
+- State traces with the defaults against the base build (cae6f05c built in its own worktree):
+  boot 600/600 and race 5000/5000 rows equal.
+- Players 3 and 4's layouts reach the game (`state_trace_run.py split` with `DHD_PADS=4` and the
+  four-player route, `0:triangle|cross,15:down,15:cross,10:down,10:down,10:cross,16:cross,24:cross,
+  11:cross,34+240:cross,9/5:cross`, 6000 fields): a race where players 3 and 4 get no race pad and
+  press `east` and `north` through `DHD_TEST_PAD3`/`DHD_TEST_PAD4` with `DHD_PAD3=cross:east
+  circle:south` and `DHD_PAD4=cross:north triangle:south` equals the race where all four pedal with
+  Cross by `DHD_RACE_PAD2`/`DHD_RACE_PAD3`: 6000/6000 rows. The same presses without the layouts
+  differ from field 1236 (east is Circle, north Triangle), and so does the run with the two
+  layouts swapped between pads 3 and 4 (each pad reads its own). dhd.log: `test pad 3 ...
+  inputs=00000004 buttons=4000` (Cross) with the layout, `buttons=2000` (Circle) without, and
+  `controls: keyboard (defaults), pad1 (defaults), pad2 (defaults), pad3 cross:east circle:south,
+  pad4 cross:north triangle:south`.
+- The launcher's Controls tab with Controller 3 chosen, drawn headless (Edge, a stand-in Tauri
+  answering from the launcher's own schema dumps, over the real ui files) at its 960x600 window:
+  the five device choices on one line, Controller 3's rows, its stick and shoulder options and
+  "Reset Controller 3". Pictures kept outside the repository.
+
+Left open:
+- No real controller was pressed: four pads on one PC (SDL slots 3 and 4, a multitap's players in
+  a split-screen race, Controller 3's page waiting for that pad's press) are unproven on hardware.
+  The page's wait for Controller 3 or 4 takes that player's pad when it is connected, else any
+  pad, as for 1 and 2.
+- The in-game page with Controller 3 or 4 chosen was not driven in a hidden-desktop run in this
+  lane; its Device row cycles `CONTROL_DEVICES`, unchanged code, and every change it makes goes
+  through `dhd_controls_edit`, whose rules the unit tests cover for Controllers 3 and 4.

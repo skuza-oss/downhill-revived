@@ -187,7 +187,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 154 | [The rider missing from the inventory screen on phones](154-menu-rider-missing-on-phones.md) | current |  |
 | 155 | [The Android build for every arm64 core (ARMv8.0)](155-android-armv8-baseline.md) | current |  |
 | 156 | [Where a frame's time goes, before replacing the VU1 and GS emulation](156-profile-vu1-gs.md) | current |  |
-| 157 | [Keyboard and controller rebinding, in the launcher and in the game](157-control-rebinding.md) | current |  |
+| 157 | [Keyboard and controller rebinding, in the launcher and in the game](157-control-rebinding.md) | partly superseded | [251](251-controls-pads-3-4.md) for players 3 and 4: they have layouts of their own, `pad3`, `pad4` |
 | 158 | [race frames over Cloudflare Realtime SFU, and puppets with less delay](158-online-sfu-transport.md) | partly superseded | [177](177-sfu-room-sessions.md) for the per-race Realtime sessions set up at the race's start, and TURN credentials per racer per race |
 | 159 | [Touch controls gone after loading a career save](159-touch-gone-after-save-load.md) | current |  |
 | 160 | [Garbage blocks on screen in the first seconds after start](160-boot-garbage-frames.md) | current |  |
@@ -278,7 +278,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 246 | [Phone SFU fallback and network return](246-phone-online-links.md) | current |  |
 | 247 | [more race frames a second on weak Android phones](247-low-end-android-speed.md) | current |  |
 | 248 | [Racers on the TURN fallback left out of every race](248-turn-players-left-out.md) | current |  |
-| 251 | [Bindings for controllers 3 and 4](251-controls-pads-3-4.md) | in progress |  |
+| 251 | [Bindings for controllers 3 and 4](251-controls-pads-3-4.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
