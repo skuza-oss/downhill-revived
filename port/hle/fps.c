@@ -18,6 +18,29 @@ static int display_auto;
 static double phase, anim_phase;
 static double step_fields, previous_wall, owed;
 static int wall_mode, delta = -1;
+/* DHD_STEP_PATTERN=f1,f2,... (test switch, finding 255): a deterministic run whose updates step
+   these fields in turn (each between a step at the selected rate and two fields), so uneven
+   frames and steps of more than one field repeat exactly. Unset: nothing changes. */
+#define PATTERN_MOST 64
+static double pattern[PATTERN_MOST];
+static int pattern_n = -1, pattern_at;
+static int step_pattern(void)
+{
+    if (pattern_n < 0) {
+        const char *s = host_getenv("DHD_STEP_PATTERN");
+        pattern_n = 0;
+        while (s && *s && pattern_n < PATTERN_MOST) {
+            char *end;
+            double v = strtod(s, &end);
+            if (end == s) break;
+            pattern[pattern_n++] = v;
+            s = *end == ',' ? end + 1 : end;
+        }
+    }
+    return pattern_n;
+}
+/* This update's step is its own (the wall clock's or the pattern's), not 60/N. */
+static int own_step(void) { return wall_mode || step_pattern() > 0; }
 static unsigned clock_serial;
 static int race_loop;   /* the race's loop ran since the front end's last frame (fps.h, finding 159) */
 
@@ -64,7 +87,7 @@ int port_delta_clock(void)
 {
     if (delta < 0) {
         const char *s = host_getenv("DHD_STEP_CLOCK");
-        delta = wall_mode || port_fps() != 60 || (s && atoi(s) == 1);
+        delta = wall_mode || port_fps() != 60 || (s && atoi(s) == 1) || step_pattern() > 0;
     }
     return delta;
 }
@@ -88,6 +111,10 @@ static void clock_spend(double step, double keep)
 static double clock_interval(void)
 {
     const double least=60.0/port_fps();
+    if (!wall_mode && step_pattern() > 0) {
+        double step = pattern[pattern_at++ % pattern_n];
+        return step < least ? least : step > MOST_FIELDS ? MOST_FIELDS : step;
+    }
     if (!wall_mode) return least;
     double now=host_wall_seconds();
     if (!previous_wall) {
@@ -317,7 +344,7 @@ int port_count_down(int value) { int w = port_whole_step(); return value > 0 && 
    update with no whole field must not count it again.) */
 int port_count_reached(int value, int mark) { return value >= mark && value - port_whole_step() < mark; }
 float port_decay(float f) { return port_delta_clock() ? powf(f, port_step()) : f; }
-static double blend_exponent(void) { return wall_mode || grid ? step_fields : 60.0/port_fps(); }
+static double blend_exponent(void) { return own_step() || grid ? step_fields : 60.0/port_fps(); }
 float port_blend(float r) { return port_delta_clock() && r > 0 && r < 1 ? (float)(1.0-pow(1.0-(double)r,blend_exponent())) : r; }
 /* The blend helpers func_00235EA8/func_00235F38 take a rate and a least step per field and apply
    this update's part (patches_fps.py). A caller that runs once per event (a footfall), not once per
@@ -331,7 +358,7 @@ float port_turn_limit(float w) { return port_delta_clock() && w > -1 && w < 1 ? 
 float port_particle_sum(float q) {
     /* Evaluate the geometric sum in double: float cancellation near q=1
        otherwise makes gently damped particles move systematically too far. */
-    return q == 1.0f ? port_step() : (float)((double)q*(1.0-pow((double)q,(wall_mode || grid ? step_fields : 60.0/port_fps())))/(1.0-q));
+    return q == 1.0f ? port_step() : (float)((double)q*(1.0-pow((double)q,(own_step() || grid ? step_fields : 60.0/port_fps())))/(1.0-q));
 }
 void port_particle_rotation(float *c,float *s)
 {
@@ -388,7 +415,7 @@ void port_clock_wait(int *out)
         grid_wait();
     } else {
         step_fields=clock_interval();
-        phase += wall_mode ? step_fields*port_fps() : 60;
+        phase += own_step() ? step_fields*port_fps() : 60;
         whole = (int)(phase / port_fps());
         phase -= whole*port_fps();
     }
@@ -397,7 +424,7 @@ void port_clock_wait(int *out)
 void port_clock_step(void)
 {
     D_0029E3D0 = whole;
-    int stepped = wall_mode || grid;  /* the step is this update's own, not 60/N */
+    int stepped = own_step() || grid;  /* the step is this update's own, not 60/N */
     /* The integer rate is rounded: truncated, the 1.001-field steps of paced 60 made it 59. Its
        readers that take a time step read the exact one (port_step_seconds, port_step_rate). */
     D_0029E3D4 = stepped ? (int)lround(60.0/step_fields) : port_fps();
@@ -429,7 +456,7 @@ int port_animation_step(void)
         grid_anim -= ticks*CODE_FIELD;
         return ticks;
     }
-    anim_phase += wall_mode ? step_fields*1024*port_fps() : 60 * 1024;
+    anim_phase += own_step() ? step_fields*1024*port_fps() : 60 * 1024;
     int ticks = (int)(anim_phase / port_fps());
     anim_phase -= ticks*port_fps();
     return ticks;

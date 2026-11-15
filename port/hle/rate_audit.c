@@ -35,6 +35,10 @@
                                  rates then see the same instants, so a curve sampled four times
                                  as finely does not gain travel, and a word flipped each update
                                  and back within a field shows as no travel at all
+     DHD_RATE_WATCH=<file>       separately, every update: the field counter, the step just run
+                                 (port_step(), fields) and the words of DHD_RATE_WATCH_WORDS
+                                 (hex EE addresses, comma-separated) in hex (test_menu_rate.py);
+                                 DHD_RATE_WATCH_STOP=<n> ends the process at game field n
    The gates only choose where the window starts; once it has started, sampling runs to its end
    and counts how often the gates stopped holding (the header's gate_fail), so a flapping menu id
    cannot silently cut a run short. Skip and samples are update counts at this run's rate.
@@ -246,8 +250,40 @@ static void audit_init(void)
             path, ra.rate, ra.gate_menu, ra.gate_phase_lo, ra.gate_phase_hi, ra.skip, ra.want);
 }
 
+/* DHD_RATE_WATCH: a few words every update, with the field counter and the step. */
+static void watch_update(void)
+{
+    static int on = -1, count;
+    static unsigned stop;
+    static uint32_t words[64];
+    static FILE *out;
+    if (on < 0) {
+        const char *path = getenv("DHD_RATE_WATCH"), *list = getenv("DHD_RATE_WATCH_WORDS");
+        on = 0;
+        if (!path || !*path || !list) return;
+        while (*list && count < 64) {
+            char *end;
+            unsigned long a = strtoul(list, &end, 16);
+            if (end == list) break;
+            words[count++] = (uint32_t)a;
+            list = *end == ',' ? end + 1 : end;
+        }
+        stop = (unsigned)env_ull("DHD_RATE_WATCH_STOP", 0);
+        out = fopen(path, "wb");
+        if (!out) { fprintf(stderr, "rate-watch: cannot write %s\n", path); host_exit(3); }
+        on = 1;
+    }
+    if (!on) return;
+    fprintf(out, "%u %.9g", (unsigned)(uint32_t)D_0029E3D8, (double)port_step());
+    for (int i = 0; i < count; i++)
+        fprintf(out, " %08x", (unsigned)*(volatile uint32_t *)(uintptr_t)(PS2_RAM_BASE + (words[i] & 0x01FFFFFCu)));
+    fputc('\n', out);
+    if (stop && (unsigned)(uint32_t)D_0029E3D8 >= stop) { fclose(out); out = NULL; on = 0; host_exit(0); }
+}
+
 void rate_audit_update(void)
 {
+    watch_update();
     if (ra.on < 0) audit_init();
     if (!ra.on || ra.done) return;
     if (!ra.armed) {
