@@ -78,7 +78,9 @@ after a version change before a live check.
 | `port/tools/redzone_walk.py` | the run-time side of finding 213: `--build` makes a game with red zones around every address-taken local of the game's C code (`DHD_CORE_REDZONE=1`, `port/tools/redzone.py`: 16 bytes of 0xCD before, between and after them, checked when the function returns; a hit is a `redzone: FUNCTION: bytes a..b of the 16 after LOCAL (N bytes) written` line in dhd.log) into build/redzone/ and the players' build again; without it, the walk: the state-trace recipes and the OPTIONS walk on that game, then every hit once (about 40 minutes; `--recipes`, `--no-options`) |
 | `port/tools/room_tracks_check.py` | every track an online room offers loads and races: the state trace's race recipe with `DHD_RACE_SETUP=<track>` (headless, about two minutes a track); `--tracks 23,17` picks some (finding 203) |
 | `port/tools/test_scenery_rate.py` | the same race at 60, 144 and 240 (deterministic, headless): the helicopters', birds' and swooping attacker's speed in game time must match 60's (`DHD_SCENERY_TRACE`, finding 193); `--row N` / `--right N` pick the track (the chooser moved right N times; `--right` with every track unlocked) |
+| `port/tools/test_menu_rate.py --out build/menu-rate/x [--configs 30,240,uneven]` | the title's PRESS X TO START pulse and the menus' age, update by update, at 60, 60 on the delta-time paths, 30 (20 runs the same two-field steps), 45, 240 and an uneven frame pattern (deterministic, headless, `DHD_RATE_WATCH`): the box's edge must follow retail's 42-field triangle in game time, and every screen's menu block must be counted after the screen's first update, as retail's (finding 255) |
 | `port/tools/rate_audit.py` | words of EE memory that move once per update instead of once per field, from a 60 and a high-rate run (finding 090, FPS1); `--row`, `--skip`, `--samples` pick the race and its window |
+| `port/tools/rate_sweep.py --out build/rate-sweep/x [--scenes title,track7]` | every scene at 60 and 240 for the same fields (deterministic, headless): each EE word's travel from one field's end to the next, oscillators included, so a pulse, blink or wobble stepped once per update shows (x3.6-4) as well as a steering loop that lands elsewhere; the title, the menus to a race, every track's first minute, the countdown, the results (`DHD_TEST_FINISH=S`: the player finishes at race second S) and a replay; known per-picture bookkeeping listed apart; `--list` the scenes, `--compare-only` again on kept audits (finding 255) |
 | `port/tools/route_profile.py EXE OUT [--profile]` | finding 156's route on a hidden desktop (timed lock) with the timeline: per scene (title, shop, race start, mid-race) fields/s and each thread's work and busy time; `--profile` also samples the game thread's call stacks in each scene (finding 162) |
 | `port/tools/native_vu_pictures.py capture EXE OUT [--scale N] [--env DHD_NATIVE_VU1=on]`, `compare A B [--same]` | Native VU's picture check (finding 194): finding 156's route with the native pictures of eleven fields (exact Z probe, so every run's game state is the same), then two runs field by field against the native lane's tolerance (MAE <= 0.1, <= 0.1 % of pixels off by more than 8) or identical |
 | `port/tools/gs_golden.py compare KIND [SOURCE]` | the renderer's goldens (recorded locally under `DHD_DEVCACHES/dhd-gs-golden/<adapter-driver key>`, never committed; `key` prints this PC's): run after a change to the exact renderer or its shaders, with the outputs of `test_gs_wgpu.py --only gpu` (`test-gpu`; `DHD_TEST_EE_MXCSR=1` for `test-gpu-ee`), `test_native_transfers.py --stress`, `replay_gs.py`. Not in `check.py`: it needs a GPU run and a golden only some PCs have. After a GPU driver or Windows (WARP) update the golden is refused until `adopt --from OLDKEY GROUP[=SOURCE]...` proves the groups identical on the new driver and hard-links them under the new key (finding 242); a group that differs needs a recording from the oracle (`gs_golden.py`'s docstring) |
@@ -164,9 +166,9 @@ Every tool that starts the game for a check takes `port/tools/game_lock.py`'s lo
 PC don't disturb each other's runs:
 
 - **Untimed** checks (nothing measured: captures, logic, online tests): `hidden_game.py` and so
-  `live_game.py`, `state_trace_run.py`, `rate_audit.py` and `test_scenery_rate.py` (virtual
-  clock, deterministic), `online_race.py` (one place for its two games). Up to `DHD_GAME_SLOTS`
-  of them run at once (default 1: one game at a time).
+  `live_game.py`, `state_trace_run.py`, `rate_audit.py`, `test_scenery_rate.py` and
+  `test_menu_rate.py` (virtual clock, deterministic), `online_race.py` (one place for its two
+  games). Up to `DHD_GAME_SLOTS` of them run at once (default 1: one game at a time).
 - **Timed** runs (fps, frame times, CPU or GPU time): `bench_race.py`, `stutter_race.py`,
   `sample_profile.py --run`, and `hidden_game.Game(..., timed=True)`. A timed run has the PC to
   itself: it waits until every untimed check is done, and no new one starts while it waits or runs.
@@ -198,6 +200,9 @@ Menus and riding:
 | `DHD_TEST_PAD`, `DHD_TEST_PAD2`, `DHD_TEST_PAD3`, `DHD_TEST_PAD4` | (race clock) player 1's to 4's controller by its inputs' places, `start:length:input[+input],...` (`south`, `east`, `lt`, `dpad_up`, `lx=-50`, ...), through that player's layout (`pad1` to `pad4`) as a real pad's; logged as `test pad N` (findings 157, 251) |
 | `DHD_REPLAY_TEST=S` | at race second S the race's replay starts, as REPLAY in the results does; `DHD_REPLAY_TRACE=path`: the riders' positions each field (finding 142) |
 | `DHD_FRAME_CLOCK=1` | the game clock from field counts, not the wall clock (repeatable runs) |
+| `DHD_TEST_FINISH=S` | offline, the player's rider finishes at race second S (`rate_sweep.py`'s results scene, finding 255) |
+| `DHD_STEP_PATTERN=a,b,...` | the delta-time clock's steps in fields, in this repeating order (each at least 60/`DHD_FPS` and at most 2), instead of one 60/`DHD_FPS` step an update: uneven frame times on the deterministic clock (`test_menu_rate.py`, finding 255) |
+| `DHD_RATE_WATCH=path`, `DHD_RATE_WATCH_WORDS=ADDR,...`, `DHD_RATE_WATCH_STOP=F` | after every update a line of the game's field counter, the update's step and up to 64 EE words (hex addresses); the game quits at field F (`port/hle/rate_audit.c`, finding 255) |
 | `DHD_HEADLESS=1` | no message boxes (a bad disc only logs), and no launcher (Linux smoke runs) |
 
 Online:

@@ -46,6 +46,7 @@ void port_clock_step(void);
 enum { GRID_OFF, GRID_WHOLE, GRID_RECORD, GRID_PLAY };
 void port_clock_grid(int mode);     /* the race asks for the next step's grid, every update */
 int port_clock_recording(void);     /* the step is a recorded race's (GRID_RECORD) */
+int port_clock_playing(void);       /* the step is a replay's (GRID_PLAY) */
 int port_clock_code(void);          /* this update's step in 1/120 field */
 void port_clock_force(int code);    /* a replay: this update's step is the recorded code */
 void port_replay_race_phase(int phase);
