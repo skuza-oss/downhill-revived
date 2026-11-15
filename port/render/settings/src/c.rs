@@ -141,33 +141,39 @@ unsafe fn put(out: *mut c_char, size: usize, text: &str) {
     }
 }
 
-/// # Safety
-/// Each of `values` is NULL or a NUL-terminated string.
-unsafe fn control_values<'a>(values: [*const c_char; 3]) -> [&'a str; 3] {
-    // SAFETY: the caller's contract.
-    values.map(|p| unsafe { text(p) }.unwrap_or(""))
-}
-
-/// The three layouts (the keyboard, Controller 1, Controller 2: controls.rs) the variables' values
-/// give (NULL or "": the defaults) into `out` (three, 52 bytes each); each problem with a line
-/// through `problem` (may be NULL).
+/// The devices' values, "" where `values` or one of them is NULL (the defaults).
 ///
 /// # Safety
-/// The values are NULL or NUL-terminated strings; `out` has room for three layouts.
+/// `values` is NULL or points to `DEVICE_COUNT` pointers, each NULL or a NUL-terminated string.
+unsafe fn control_values<'a>(values: *const *const c_char) -> [&'a str; controls::DEVICE_COUNT] {
+    std::array::from_fn(|d| {
+        if values.is_null() {
+            return "";
+        }
+        // SAFETY: the caller's contract.
+        unsafe { text(*values.add(d)) }.unwrap_or("")
+    })
+}
+
+/// The layouts (the keyboard, Controllers 1 to 4: controls.rs's DEVICES) the variables' values
+/// give (`values`: one per device, NULL or "": the defaults) into `out` (one per device, 52 bytes
+/// each); each problem with a line through `problem` (may be NULL).
+///
+/// # Safety
+/// `values` is NULL or holds `DEVICE_COUNT` pointers, each NULL or a NUL-terminated string; `out` is
+/// NULL or has room for `DEVICE_COUNT` layouts.
 #[no_mangle]
 pub unsafe extern "C" fn dhd_controls_layouts(
-    keyboard: *const c_char,
-    pad1: *const c_char,
-    pad2: *const c_char,
+    values: *const *const c_char,
     out: *mut controls::Layout,
     problem: Option<DhdSettingsUnknown>,
 ) {
     let mut problems = Vec::new();
     // SAFETY: the caller's contract.
-    let c = Controls::from_values(unsafe { control_values([keyboard, pad1, pad2]) }, &mut problems);
+    let c = Controls::from_values(unsafe { control_values(values) }, &mut problems);
     if !out.is_null() {
-        // SAFETY: out has room for three.
-        unsafe { std::ptr::copy_nonoverlapping(c.layouts.as_ptr(), out, 3) };
+        // SAFETY: out has room for every device's.
+        unsafe { std::ptr::copy_nonoverlapping(c.layouts.as_ptr(), out, controls::DEVICE_COUNT) };
     }
     if let Some(report) = problem {
         for p in problems {
@@ -179,22 +185,20 @@ pub unsafe extern "C" fn dhd_controls_layouts(
     }
 }
 
-/// One change to `device`'s layout (0 the keyboard, 1 and 2 the controllers), with the three
-/// variables' values as they are now: `edit` 0 assign (`input` to the target's `slot`), 1 clear, 2
-/// reset, 3 swap sticks (`input` 1 on), 4 invert (`target` the INVERT_* bit, `input` 1 on), 5 swap
+/// One change to `device`'s layout (0 the keyboard, 1 to 4 the controllers), with the devices'
+/// values as they are now (`values`, as `dhd_controls_layouts`'): `edit` 0 assign (`input` to the
+/// target's `slot`), 1 clear, 2 reset, 3 swap sticks (`input` 1 on), 4 invert (`target` the INVERT_* bit, `input` 1 on), 5 swap
 /// a shoulder and its trigger (`target` the SWAP_* bit, `input` 1 on); `kind`
 /// the controller's PAD_KIND_*, for the message's words. The device's new line goes to `value`
 /// and what the page says to `message`. -1 refused (`message` says why), 0 nothing to do, 1
 /// changed.
 ///
 /// # Safety
-/// The values are NULL or NUL-terminated strings; `value` and `message` are NULL or have room for
-/// their sizes.
+/// `values` as `dhd_controls_layouts`'; `value` and `message` are NULL or have room for their
+/// sizes.
 #[no_mangle]
 pub unsafe extern "C" fn dhd_controls_edit(
-    keyboard: *const c_char,
-    pad1: *const c_char,
-    pad2: *const c_char,
+    values: *const *const c_char,
     device: c_int,
     edit: c_int,
     target: c_int,
@@ -207,7 +211,7 @@ pub unsafe extern "C" fn dhd_controls_edit(
     message_size: usize,
 ) -> c_int {
     // SAFETY: the caller's contract.
-    let mut c = Controls::from_values(unsafe { control_values([keyboard, pad1, pad2]) }, &mut Vec::new());
+    let mut c = Controls::from_values(unsafe { control_values(values) }, &mut Vec::new());
     let (Ok(device), Ok(target), Ok(slot)) = (usize::try_from(device), usize::try_from(target), usize::try_from(slot)) else {
         return 0;
     };

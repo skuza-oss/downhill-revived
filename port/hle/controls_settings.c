@@ -1,7 +1,7 @@
 /* CONTROLS (finding 157): a screen of the settings page (pc_settings.c's page, which PC SETTINGS
    opens with its Controls row), in the game's own popup style (menu_page.c), where the player
    presses the key or controller button that stands for each of the PS2 pad's buttons.
-     Device:  < Keyboard >     the keyboard (player 1's), Controller 1, Controller 2
+     Device:  < Keyboard >     the keyboard (player 1's), Controller 1 ... Controller 4
      Show:    < Buttons >      Cross to SELECT, or the d-pad and the sticks
      Cross:   Space   (also X)    the main; the dimmed alternate is launcher-only
      ...
@@ -16,8 +16,8 @@
    button another PS2 button had swaps with this button's old one (the hint says which), and a
    change that would leave this device without Cross, Triangle, START, R1 or a d-pad direction is
    refused (the hint says why: "Cross needs a button").
-   Every change is saved to dhd.ini at once (keyboard, pad1, pad2) and the host plays with it at
-   once. A layout the environment sets (DHD_KEYBOARD, DHD_PAD1, DHD_PAD2) is shown, not changed.
+   Every change is saved to dhd.ini at once (keyboard, pad1 to pad4) and the host plays with it at
+   once. A layout the environment sets (DHD_KEYBOARD, DHD_PAD1 to DHD_PAD4) is shown, not changed.
    Nothing here writes game state: the layouts live in the host and dhd.ini. */
 #include "hle.h"
 #include "menu_page.h"
@@ -165,12 +165,12 @@ void controls_settings_build(MenuPage *p)
     show(p);
 }
 
-/* The PS2 buttons players 1 and 2 hold now (their keyboard and controllers through their layouts):
-   Square on the page. */
+/* The PS2 buttons the four players hold now (the keyboard and their controllers through their
+   layouts): Square on the page. */
 static uint16_t buttons_now(void)
 {
     uint16_t held = 0;
-    for (int player = 0; player < 2; player++) {
+    for (int player = 0; player < 4; player++) {
         HostPad pad;
         memset(&pad, 0, sizeof pad);
         host_service_host_pad_device(player, GADDR(&pad));

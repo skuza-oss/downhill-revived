@@ -106,10 +106,13 @@ pub const SETTINGS: &[Setting] = &[
     choice("prompts", "DHD_PROMPTS", &[c("auto", "Auto"), c("playstation", "PlayStation"), c("xbox", "Xbox"),
                                        c("nintendo", "Nintendo")], "auto", "playstation"),
     // The keys and controller buttons for the PS2 pad's buttons (finding 157, controls.rs): the
-    // keyboard's layout and each player's controller's; empty, the game's own layouts.
+    // keyboard's layout and each of the four players' controllers' (finding 251); empty, the game's
+    // own layouts.
     text("keyboard", "DHD_KEYBOARD"),
     text("pad1", "DHD_PAD1"),
     text("pad2", "DHD_PAD2"),
+    text("pad3", "DHD_PAD3"),
+    text("pad4", "DHD_PAD4"),
     // A PCSX2 texture pack: texture_pack its folder (empty: textures/SCUS-97177/replacements in the
     // folder of dhd.ini and the saves, else beside the game), textures = off the game's own textures.
     switch("textures", "DHD_TEXTURES", TOGGLE, "on", "on"),

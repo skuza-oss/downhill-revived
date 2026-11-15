@@ -309,8 +309,8 @@ keys above stand for them.
 
 **Your own keys and buttons** (REVIVED SETTINGS > Controls in the game, the launcher's Settings >
 Controls > Bindings): choose which key or controller button stands for each PlayStation button,
-for the keyboard and for each player's controller (player 1 and player 2; every controller of a
-player uses that player's layout). Each button has a main and an alternate. In the game, Cross on
+for the keyboard and for each player's controller (players 1 to 4, each with a layout of its own;
+every controller of a player uses that player's layout). Each button has a main and an alternate. In the game, Cross on
 a button's row waits up to five seconds for the main key or button (Esc cancels), Square clears
 the main, and Triangle or Esc goes back. Changes are saved as you make them. The dimmed
 'also' binding is the alternate, changed in the launcher. In the launcher, click a button's key to
@@ -321,8 +321,8 @@ meaning (Cross pedals in a race and confirms in menus), only the key or button f
   other one gets the new button's old key or button ("Swapped Cross and Square"). Given to an empty
   alternate, it just moves there.
 - Cross, Triangle, START, R1 (it switches the REVIVED SETTINGS tabs) and the d-pad always keep a
-  key or a button on each of the keyboard,
-  Controller 1 and Controller 2, each on its own (the keyboard's keys don't count for a controller):
+  key or a button on each of the keyboard and
+  Controllers 1 to 4, each on its own (the keyboard's keys don't count for a controller):
   a clear or a move that would take the last one away is refused ("Cross needs a button").
 - Esc can't be changed: it always goes back in menus and pauses a race. Alt, Ctrl and the Windows
   keys stay your system's.
@@ -336,7 +336,7 @@ meaning (Cross pedals in a race and confirms in menus), only the key or button f
   place it then has, so with a swap on you never need to rebind the four buttons by hand.
 - The button icons (Button Icons) show the controller button you chose for each PlayStation
   button.
-- **Reset Keyboard**, **Reset Controller 1** and **Reset Controller 2** (and the launcher tab's
+- **Reset Keyboard** and **Reset Controller 1** to **Reset Controller 4** (and the launcher tab's
   Reset) bring back the layouts above.
 
 They are saved in `dhd.ini` as one line for each layout, with only what differs from the
@@ -344,6 +344,11 @@ defaults:
 
     keyboard = cross:j,space square:x
     pad1 = cross:east circle:south sticks:swap invert:ly l1l2:swap r1r2:swap
+    pad3 = cross:west square:south
+
+The lines are `keyboard`, then `pad1`, `pad2`, `pad3` and `pad4` for players 1 to 4's
+controllers; a missing line is that layout's defaults, so a `dhd.ini` from before `pad3` and `pad4`
+works as it did.
 
 Each entry is `button:key` or `button:main,alternate` (`none` for nothing). Buttons: `cross`,
 `circle`, `square`, `triangle`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `start`, `select`, `up`,
@@ -363,7 +368,7 @@ PlayStation pad Cross, Circle, Square, Triangle; on an Xbox pad A, B, X, Y), `lb
 button in the same place as on a PlayStation pad. A line the game can't read is skipped where it
 can't be read (that button keeps its default) and dhd.log says why; a line that would leave the
 keyboard or a controller without Cross, Triangle, START, R1 or a d-pad direction puts that one layout
-back to its defaults. Players 3 and 4 use the default controller layout.
+back to its defaults.
 
 ### Online
 
@@ -484,7 +489,7 @@ first start. The REVIVED SETTINGS page writes most of them for you.
 | `prompts` | `auto` | the button icons: `auto` (the controller's), `playstation`, `xbox` or `nintendo` |
 | `names` | `small` | names above online riders: `off`, `small`, `medium` (original size), `large`; drawing only |
 | `keyboard` | (empty) | your keys for the PlayStation buttons, see [Controls](#controls); empty: the table there |
-| `pad1`, `pad2` | (empty) | player 1's and player 2's controller buttons and stick options, see [Controls](#controls); empty: by position |
+| `pad1`, `pad2`, `pad3`, `pad4` | (empty) | players 1 to 4's controller buttons and stick options, see [Controls](#controls); empty: by position |
 | `texture_pack` | (empty) | a texture pack's folder; empty: `textures\SCUS-97177\replacements` beside `dhd.ini` |
 | `textures` | `on` | `off` draws the game's own textures |
 | `texture_cache_mb` | half the card's memory, at most 2048 | graphics memory for replacements |

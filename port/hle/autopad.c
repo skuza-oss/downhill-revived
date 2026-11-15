@@ -381,17 +381,19 @@ static void keys_script(HostPad *out)
     }
 }
 
-/* DHD_TEST_PAD (player 1) and DHD_TEST_PAD2 (player 2) (tests, finding 157): a controller's
-   inputs by their place from the race's GO on, "start:duration:input[+input],..." with the inputs
-   by their dhd.ini names (south, east, lt, dpad_up, ...; lx=P, ly=P, rx=P, ry=P a stick's travel in
-   percent, -100..100), through that player's layout (dhd.ini pad1, pad2) as a real controller's
-   are (host_service_controls_map: gamepad_apply); each change is logged with what the game got. */
+/* DHD_TEST_PAD (player 1), DHD_TEST_PAD2, DHD_TEST_PAD3 and DHD_TEST_PAD4 (players 2 to 4) (tests,
+   findings 157 and 251): a controller's inputs by their place from the race's GO on,
+   "start:duration:input[+input],..." with the inputs by their dhd.ini names (south, east, lt,
+   dpad_up, ...; lx=P, ly=P, rx=P, ry=P a stick's travel in percent, -100..100), through that
+   player's layout (dhd.ini pad1 to pad4) as a real controller's are (host_service_controls_map:
+   gamepad_apply); each change is logged with what the game got. */
 static void test_pad_script(int player, HostPad *out)
 {
-    static HleEnv envs[2];
-    static int last[2][3] = {{-1}, {-1}};
-    if (player < 0 || player > 1) return;
-    const char *script = hle_env(&envs[player], player ? "DHD_TEST_PAD2" : "DHD_TEST_PAD");
+    static const char *const names[4] = {"DHD_TEST_PAD", "DHD_TEST_PAD2", "DHD_TEST_PAD3", "DHD_TEST_PAD4"};
+    static HleEnv envs[4];
+    static int last[4][3] = {{-1}, {-1}, {-1}, {-1}};
+    if (player < 0 || player > 3) return;
+    const char *script = hle_env(&envs[player], names[player]);
     double seconds = race_sync_seconds();
     if (!script || seconds < 0) return;
     GamepadRaw raw;
@@ -424,8 +426,7 @@ static void test_pad_script(int player, HostPad *out)
         if (*at == ',') at++;
         else if (*at) bad = 1;
         if (bad) {
-            fprintf(stderr, "Invalid DHD_TEST_PAD%s: expected start:duration:input[+input],... (south, east, lt, lx=P...)\n",
-                    player ? "2" : "");
+            fprintf(stderr, "Invalid %s: expected start:duration:input[+input],... (south, east, lt, lx=P...)\n", names[player]);
             exit(1);
         }
     }

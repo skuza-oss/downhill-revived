@@ -1,6 +1,6 @@
 //! The bindings' rules (controls.rs, finding 157): the defaults are the game's old layouts, lines
 //! read and written, a swapped or moved input, the rule that keeps the menus reachable on each
-//! device on its own.
+//! device on its own; four controllers, each its own, and a dhd.ini from before them (finding 251).
 
 use dhd_settings::controls::*;
 
@@ -16,10 +16,16 @@ fn t(name: &str) -> usize {
     target(name).unwrap()
 }
 
-fn layouts(keyboard: &str, pad1: &str, pad2: &str) -> (Controls, Vec<String>) {
+/// The layouts of the lines given, in DEVICES' order (the keyboard, pad1, ...); the rest "".
+fn layouts(lines: &[&str]) -> (Controls, Vec<String>) {
     let mut problems = Vec::new();
-    let c = Controls::from_values([keyboard, pad1, pad2], &mut problems);
+    let c = Controls::from_values(std::array::from_fn(|d| lines.get(d).copied().unwrap_or("")), &mut problems);
     (c, problems)
+}
+
+/// The devices' lines as `Controls::values` gives them: these, the rest "".
+fn lines(given: &[&str]) -> [String; DEVICE_COUNT] {
+    std::array::from_fn(|d| given.get(d).copied().unwrap_or("").to_string())
 }
 
 #[test]
@@ -45,9 +51,11 @@ fn defaults_are_the_old_layouts() {
                           ("up", "dpad_up"), ("down", "dpad_down"), ("left", "dpad_left"), ("right", "dpad_right")] {
         assert_eq!(p.input[t(name)], [id(input), 0], "{name}");
     }
-    assert_eq!(p, default_layout(PAD2));
+    for pad in [PAD2, PAD3, PAD4] {
+        assert_eq!(p, default_layout(pad), "every controller has the same defaults (finding 251)");
+    }
     assert_eq!((p.swap_sticks, p.invert, p.swap_shoulders), (0, 0, 0), "every swap off by default (finding 189)");
-    for d in 0..3 {
+    for d in 0..DEVICE_COUNT {
         assert_eq!(format(d, &default_layout(d)), "");
         assert_eq!(parse(d, "", &mut Vec::new()), default_layout(d));
     }
@@ -125,15 +133,15 @@ fn broken_lines_fall_back() {
     assert_eq!(p.input[t("cross")], [0, 0], "south went to circle");
     assert_eq!(problems.len(), 1, "{problems:?}");
     // ...which leaves Controller 2 without Cross: it goes back to its defaults
-    let (c, problems) = layouts("", "", "square:east circle:south");
+    let (c, problems) = layouts(&["", "", "square:east circle:south"]);
     assert_eq!(c.layouts[PAD2], default_layout(PAD2));
     assert!(problems.last().unwrap().contains("Controller 2 is back to its defaults"), "{problems:?}");
     // each device on its own: the keyboard's Cross doesn't count for Controller 1, nor its for the keyboard
-    let (c, problems) = layouts("cross:none", "", "");
+    let (c, problems) = layouts(&["cross:none"]);
     assert_eq!(c, Controls::default());
     assert_eq!(problems, ["keyboard: Cross has no key: Keyboard is back to its defaults"]);
-    let (c, problems) = layouts("square:x", "cross:none square:none", "up:none");
-    assert_eq!(c.values(), ["cross:space square:x".to_string(), String::new(), String::new()], "only the broken devices");
+    let (c, problems) = layouts(&["square:x", "cross:none square:none", "up:none"]);
+    assert_eq!(c.values(), lines(&["cross:space square:x"]), "only the broken devices");
     assert_eq!(problems, ["pad1: Cross has no button: Controller 1 is back to its defaults",
                           "pad2: Up has no button: Controller 2 is back to its defaults"]);
 }
@@ -256,7 +264,7 @@ fn the_owners_sequence() {
     assert_eq!(c.edit(KEYBOARD, Edit::Clear { target: t("cross"), slot: 0 }, 0), Outcome::Refused("Cross needs a key".into()));
     assert_eq!(c.values()[KEYBOARD], "cross:x square:space");
     // the line the old rule wrote: Controller 1 alone goes back to its defaults at the next start
-    let (c, problems) = layouts("", "cross:none square:none", "");
+    let (c, problems) = layouts(&["", "cross:none square:none"]);
     assert_eq!(c, Controls::default());
     assert_eq!(problems, ["pad1: Cross has no button: Controller 1 is back to its defaults"]);
 }
@@ -270,7 +278,7 @@ fn stick_options() {
     assert_eq!(c.edit(PAD2, Edit::Invert(INVERT_RX, true), 0), Outcome::Changed(String::new()));
     assert_eq!(c.edit(PAD2, Edit::Invert(INVERT_RX, false), 0), Outcome::Changed(String::new()));
     assert_eq!(c.edit(PAD2, Edit::Invert(3, true), 0), Outcome::Unchanged, "one axis at a time");
-    assert_eq!(c.values(), [String::new(), String::new(), "sticks:swap invert:ly".to_string()]);
+    assert_eq!(c.values(), lines(&["", "", "sticks:swap invert:ly"]));
     assert_eq!(c.edit(PAD2, Edit::Reset, 0), Outcome::Changed(String::new()));
     assert_eq!(c.values()[PAD2], "");
 }
@@ -299,7 +307,7 @@ fn shoulder_swaps() {
     assert_eq!(c.edit(PAD1, Edit::SwapShoulders(SWAP_L, true), 0), Outcome::Unchanged);
     assert_eq!(c.edit(PAD2, Edit::SwapShoulders(SWAP_R, true), 0), Outcome::Changed(String::new()));
     assert_eq!(c.edit(PAD2, Edit::SwapShoulders(SWAP_L | SWAP_R, true), 0), Outcome::Unchanged, "one swap at a time");
-    assert_eq!(c.values(), [String::new(), "l1l2:swap".to_string(), "r1r2:swap".to_string()], "per controller");
+    assert_eq!(c.values(), lines(&["", "l1l2:swap", "r1r2:swap"]), "per controller");
     // a binding made with the swap on is kept when it goes off, and the other way round
     assert_eq!(c.edit(PAD1, Edit::Assign { target: t("square"), slot: 1, input: id("rt") }, 0),
                Outcome::Changed("RT moved from R2 to Square".into()));
@@ -308,4 +316,83 @@ fn shoulder_swaps() {
     // Reset turns the swaps off with the rest
     assert_eq!(c.edit(PAD2, Edit::Reset, 0), Outcome::Changed(String::new()));
     assert_eq!(c.layouts[PAD2], default_layout(PAD2));
+}
+
+/// Controllers 3 and 4 (finding 251, issue #99): layouts of their own, like 1 and 2, each
+/// independent of the others; the same rules; dhd.ini's `pad3` and `pad4`.
+#[test]
+fn four_controllers() {
+    assert_eq!(DEVICES.map(|d| d.key), ["keyboard", "pad1", "pad2", "pad3", "pad4"]);
+    assert_eq!(DEVICES.map(|d| d.env), ["DHD_KEYBOARD", "DHD_PAD1", "DHD_PAD2", "DHD_PAD3", "DHD_PAD4"]);
+    assert_eq!(DEVICES.map(|d| d.player), [1, 1, 2, 3, 4]);
+    assert_eq!((PAD3, PAD4), (PAD1 + 2, PAD1 + 3), "player N's controller at PAD1 + N - 1");
+
+    // a change on one controller leaves every other layout as it was
+    let mut c = Controls::default();
+    assert_eq!(c.edit(PAD3, Edit::Assign { target: t("cross"), slot: 0, input: id("east") }, 2),
+               Outcome::Changed("Swapped Cross and Circle".into()));
+    assert_eq!(c.edit(PAD4, Edit::SwapSticks(true), 2), Outcome::Changed(String::new()));
+    assert_eq!(c.edit(PAD4, Edit::Invert(INVERT_RY, true), 2), Outcome::Changed(String::new()));
+    assert_eq!(c.edit(PAD4, Edit::SwapShoulders(SWAP_L, true), 2), Outcome::Changed(String::new()));
+    assert_eq!(c.values(), lines(&["", "", "", "cross:east circle:south", "sticks:swap invert:ry l1l2:swap"]));
+    for d in [KEYBOARD, PAD1, PAD2] {
+        assert_eq!(c.layouts[d], default_layout(d), "{}", DEVICES[d].key);
+    }
+    // the same rules: each controller keeps the menus on its own
+    assert_eq!(c.edit(PAD3, Edit::Clear { target: t("circle"), slot: 0 }, 2), Outcome::Changed(String::new()));
+    assert_eq!(c.edit(PAD3, Edit::Clear { target: t("cross"), slot: 0 }, 2), Outcome::Refused("Cross needs a button".into()));
+    assert_eq!(c.edit(PAD4, Edit::Clear { target: t("start"), slot: 0 }, 2), Outcome::Refused("START needs a button".into()));
+    // a controller binds the PS2's buttons only, as 1 and 2
+    assert!(matches!(c.edit(PAD4, Edit::Assign { target: t("lstick_up"), slot: 0, input: id("south") }, 2), Outcome::Refused(_)));
+
+    // the round trip: the five lines read back to the same layouts
+    let mut problems = Vec::new();
+    let again = Controls::from_values(c.values().each_ref().map(|s| s.as_str()), &mut problems);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(again, c);
+
+    // a broken hand-made pad4 line: Controller 4 alone goes back to its defaults
+    let (b, problems) = layouts(&["", "cross:east circle:south", "", "", "cross:none"]);
+    assert_eq!(b.values(), lines(&["", "cross:east circle:south"]));
+    assert_eq!(problems, ["pad4: Cross has no button: Controller 4 is back to its defaults"]);
+
+    // Reset: one controller, then each
+    assert_eq!(c.edit(PAD3, Edit::Reset, 2), Outcome::Changed(String::new()));
+    assert_eq!(c.layouts[PAD3], default_layout(PAD3));
+    assert_ne!(c.layouts[PAD4], default_layout(PAD4), "Reset Controller 3 leaves Controller 4 as it is");
+    assert_eq!(c.edit(PAD4, Edit::Reset, 2), Outcome::Changed(String::new()));
+    assert_eq!(c, Controls::default());
+}
+
+/// A dhd.ini from before controllers 3 and 4 (finding 251): no `pad3`, `pad4` lines; they get the
+/// defaults and what the file sets for the keyboard, 1 and 2 stays. A change to Controller 3 adds its
+/// line and leaves the others as they were written.
+#[test]
+fn an_old_dhd_ini() {
+    let dir = std::env::temp_dir().join(format!("dhd_controls_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("dhd.ini");
+    let old = "keyboard = cross:j\npad1 = cross:east circle:south sticks:swap\npad2 = r1r2:swap\n";
+    std::fs::write(&path, old).unwrap();
+    let ini = dhd_settings::read(&path).unwrap();
+    let values = DEVICES.map(|d| ini.value(d.key));
+    assert_eq!(values[PAD3], "", "no line: the setting's default");
+    assert_eq!(values[PAD4], "");
+    let mut problems = Vec::new();
+    let mut c = Controls::from_values(values.each_ref().map(|v| v.as_str()), &mut problems);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(c.values(), lines(&["cross:j", "cross:east circle:south sticks:swap", "r1r2:swap"]));
+    assert_eq!((c.layouts[PAD3], c.layouts[PAD4]), (default_layout(PAD3), default_layout(PAD4)));
+
+    assert_eq!(c.edit(PAD3, Edit::Assign { target: t("square"), slot: 0, input: id("north") }, 2),
+               Outcome::Changed("Swapped Square and Triangle".into()));
+    dhd_settings::save(&path, DEVICES[PAD3].key, &c.values()[PAD3]).unwrap();
+    let ini = dhd_settings::read(&path).unwrap();
+    for (d, want) in lines(&["cross:j", "cross:east circle:south sticks:swap", "r1r2:swap", "square:north triangle:west", ""])
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(&ini.value(DEVICES[d].key), want, "{}", DEVICES[d].key);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

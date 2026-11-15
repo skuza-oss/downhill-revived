@@ -1,6 +1,7 @@
 // The Controls tab's bindings (finding 157): which key or controller button stands for each of the
-// PS2 pad's buttons, for the keyboard (player 1's) and each player's controller. The rules and the
-// dhd.ini lines (keyboard, pad1, pad2) are dhd_settings' (port/render/settings/src/controls.rs):
+// PS2 pad's buttons, for the keyboard (player 1's) and each of the four players' controllers
+// (finding 251). The rules and the dhd.ini lines (keyboard, pad1 to pad4) are dhd_settings'
+// (port/render/settings/src/controls.rs; schema.devices lists the layouts):
 // the Rust side (src-tauri/src/controls.rs) makes every change and saves it; this file draws the
 // layouts and waits for the key or button pressed. Uses app.js's call, el, icon, flash and state
 // and i18n.js's t.
@@ -9,7 +10,7 @@
 const bind = {
   schema: null,     // controls_schema: targets, keys, pads, devices, buttons, swaps
   layouts: null,    // controls_state: per device { inputs: [[main, alternate]...], swap_sticks, invert, swap_shoulders }
-  device: 0,        // the layout shown: 0 keyboard, 1 Controller 1, 2 Controller 2
+  device: 0,        // the layout shown: 0 keyboard, 1 to 4 Controller 1 to 4 (schema.devices)
   capture: null,    // waiting: { device, target, slot, since, held: Set of pad buttons down at the start }
   taken: new Set(), // the pad buttons down when a binding took one: pad.js ignores them until let go
   note: '',         // what the last change did (moved from, or why not)
@@ -228,8 +229,9 @@ function bindingsBlock() {
 
 // The tab's Reset: every layout back to the defaults.
 async function resetBindings() {
-  for (let d = 0; d < 3; d++) await bindEdit(d, { edit: 'reset' });
+  if (!bind.schema) await loadBindings();
+  for (let d = 0; d < bind.schema.devices.length; d++) await bindEdit(d, { edit: 'reset' });
   bind.note = '';
 }
 
-if (typeof module !== 'undefined') module.exports = { padKind, inputWord, keyOfCode, padInputPressed, placeOf, bindingRows };
+if (typeof module !== 'undefined') module.exports = { padKind, inputWord, keyOfCode, padInputPressed, placeOf, bindingRows, resetBindings, bind };

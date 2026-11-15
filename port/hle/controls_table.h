@@ -8,8 +8,9 @@
 
 #include <stdint.h>
 
-enum { CONTROL_TARGETS = 24, CONTROL_BUTTONS = 16, CONTROL_SLOTS = 2, CONTROL_DEVICES = 3, CONTROL_KEYS = 91, CONTROL_PAD_INPUTS = 22 };
-enum { CONTROL_KEYBOARD, CONTROL_PAD1, CONTROL_PAD2 };
+enum { CONTROL_TARGETS = 24, CONTROL_BUTTONS = 16, CONTROL_SLOTS = 2, CONTROL_DEVICES = 5, CONTROL_KEYS = 91, CONTROL_PAD_INPUTS = 22 };
+/* the keyboard, then player N's controller at CONTROL_PAD1 + N - 1 */
+enum { CONTROL_KEYBOARD, CONTROL_PAD1, CONTROL_PAD2, CONTROL_PAD3, CONTROL_PAD4 };
 enum { CONTROL_INVERT_LX = 1, CONTROL_INVERT_LY = 2, CONTROL_INVERT_RX = 4, CONTROL_INVERT_RY = 8 };
 enum { CONTROL_SWAP_L = 1, CONTROL_SWAP_R = 2 };
 /* dhd_controls_edit's edits and answers (dhd_settings.h) */
@@ -174,18 +175,22 @@ static const ControlPadInput control_pad_inputs[CONTROL_PAD_INPUTS] = {
     {22, "rt", {"RT", "R2", "ZR"}, -1, 2},
 };
 
-/* The defaults: the keyboard, Controller 1, Controller 2 (the game's layouts before rebinding). */
+/* The defaults: the keyboard, Controllers 1 to 4 (the game's layouts before rebinding). */
 static const ControlsLayout control_defaults[CONTROL_DEVICES] = {
     {{{32, 88}, {67, 0}, {90, 0}, {83, 8}, {65, 0}, {68, 0}, {81, 0}, {69, 0}, {70, 0}, {87, 0}, {13, 0}, {9, 0}, {38, 0}, {40, 0}, {37, 0}, {39, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
     {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
     {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
+    {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
+    {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {9, 0}, {10, 0}, {21, 0}, {22, 0}, {7, 0}, {8, 0}, {6, 0}, {5, 0}, {11, 0}, {12, 0}, {13, 0}, {14, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}, 0, 0, 0, 0},
 };
 
-/* The settings: dhd.ini key and variable of the keyboard, Controller 1 and Controller 2. */
+/* The settings: dhd.ini key and variable of the keyboard and Controllers 1 to 4. */
 static const struct { const char *key, *env, *label; } control_devices[CONTROL_DEVICES] = {
     {"keyboard", "DHD_KEYBOARD", "Keyboard"},
     {"pad1", "DHD_PAD1", "Controller 1"},
     {"pad2", "DHD_PAD2", "Controller 2"},
+    {"pad3", "DHD_PAD3", "Controller 3"},
+    {"pad4", "DHD_PAD4", "Controller 4"},
 };
 
 #endif

@@ -1,6 +1,6 @@
 # 157: Keyboard and controller rebinding, in the launcher and in the game
 
-Status: current
+Status: partly superseded by 251 (players 3 and 4: they have layouts of their own, `pad3`, `pad4`)
 Checked: 2026-11-06
 
 Branch `feat/rebinding` from `main` 113f76f, started 2026-11-05, merged 2026-11-06 (released in
