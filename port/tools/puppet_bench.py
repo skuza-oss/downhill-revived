@@ -466,6 +466,8 @@ def profiles(args):
             if wanted and name not in wanted:
                 continue
             for kind, env in KINDS:
+                if args.kinds and kind not in args.kinds.split(','):
+                    continue
                 key = f'{name}|{kind}|{track}'
                 run = f'p-{name}-{kind}-t{track}'
                 trace = OUT / label / run / 'trace.txt'
@@ -641,6 +643,7 @@ def main():
     q = sub.add_parser('profiles')
     q.add_argument('--tracks', default='0,1')
     q.add_argument('--only', help='profile names, comma separated')
+    q.add_argument('--kinds', help='ai, player or both (default)')
     q.add_argument('--again', action='store_true', help='run profiles that already have results')
     q.add_argument('--rescore', action='store_true', help='score the traces already there again, run nothing')
     a = sub.add_parser('axis')

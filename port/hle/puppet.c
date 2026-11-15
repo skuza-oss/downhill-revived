@@ -699,6 +699,22 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
             ease(now.vel, ov, dt > 0 ? dt : 1 / 60.0f);
             if (sync_len(d) < 0.05f * own) p->easing = 0;
         }
+    } else if (t - s->time <= SYNC_COAST && !(s->crash & 4) && ground_normal(r, (float[3]){0})) {
+        /* An outage (finding 254: nothing heard for longer than the guard's age, up to SYNC_COAST): the
+           same rule on the speed alone, the way the puppet itself rides. Its owner's last velocity is
+           seconds old on a curve, so only its size is kept: a puppet that lost its speed at a bump
+           taken differently here stood or fell over through a second or two of nothing (95 to 5 units
+           a second, 50 units behind) and was put back at once when the snapshots came. */
+        float own = sync_len(s->vel) * (p->rate > 0 ? p->rate : 1), here = sync_len(now.vel);
+        if (own > 30 && here < SYNC_GUARD * own) p->easing = 1;
+        if (p->easing) {
+            float to[3];
+            const float *way = here > 1 ? now.vel : s->vel;
+            float n = here > 1 ? here : sync_len(s->vel);
+            for (int k = 0; k < 3; k++) to[k] = way[k] * own / n;
+            ease(now.vel, to, dt > 0 ? dt : 1 / 60.0f);
+            if (fabsf(sync_len(now.vel) - own) < 0.05f * own) p->easing = 0;
+        }
     } else p->easing = 0;
     /* Nothing heard for SYNC_COAST (a stalled game, a long loss): the rider slows to a stop
        rather than riding on alone; the next snapshot puts it right. */
