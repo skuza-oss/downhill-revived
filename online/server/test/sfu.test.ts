@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { env, runInDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { Client, startedRace } from "./helpers";
 import { fakeRealtime, publishedSession } from "./sfu-fake";
-import { Realtime, Turn, TURN_TTL_S, clientChannels } from "../src/sfu";
+import { Realtime, Turn, TURN_TTL_S, clientChannels, plainCandidates } from "../src/sfu";
 
 describe("Realtime control plane", () => {
   it("releases race traffic only after every subscriber acknowledges this race", async () => {
@@ -108,6 +108,24 @@ describe("Realtime control plane", () => {
     };
     const result = await new Realtime({ REALTIME_APP_ID: "fake", REALTIME_APP_TOKEN: "fake" }, request).open("private");
     expect(result.message).toEqual({ type: "sfu_answer", sdp: "SFU" });
+  });
+  it("passes the SFU's candidates on in their plain form (finding 252)", async () => {
+    const answer = ["v=0", "a=ice-lite", "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
+      "a=candidate:513273236 1 udp 2130648831 203.0.113.5 1473 typ host ufrag XZSlxzwk generation 0",
+      "a=candidate:513273236 2 udp 2130648831 203.0.113.5 1473 typ host ufrag XZSlxzwk generation 0",
+      "a=candidate:9 1 udp 1694498815 198.51.100.2 40000 typ srflx raddr 192.0.2.2 rport 40000 generation 0 network-id 1",
+      "a=candidate:7 1 tcp 1518280447 203.0.113.5 443 typ host tcptype passive generation 0",
+      "a=candidate:broken", "a=end-of-candidates", ""].join("\r\n");
+    const api = new Realtime({ REALTIME_APP_ID: "fake", REALTIME_APP_TOKEN: "fake" },
+      async () => Response.json({ sessionId: "plain", sessionDescription: { type: "answer", sdp: answer } }));
+    const sdp = (await api.open("offer")).message.sdp;
+    expect(sdp).toBe(["v=0", "a=ice-lite", "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
+      "a=candidate:513273236 1 udp 2130648831 203.0.113.5 1473 typ host",
+      "a=candidate:513273236 2 udp 2130648831 203.0.113.5 1473 typ host",
+      "a=candidate:9 1 udp 1694498815 198.51.100.2 40000 typ srflx raddr 192.0.2.2 rport 40000",
+      "a=candidate:7 1 tcp 1518280447 203.0.113.5 443 typ host tcptype passive",
+      "a=candidate:broken", "a=end-of-candidates", ""].join("\r\n"));
+    expect(plainCandidates(sdp)).toBe(sdp);
   });
   it("fails closed without credentials or with per-channel errors", async () => {
     await expect(new Realtime({}).open("test-offer")).rejects.toThrow("not configured");

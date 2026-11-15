@@ -87,6 +87,27 @@ export class Turn {
   }
 }
 
+/** The SFU's answer with each ICE candidate in its plain form (finding 252): the fields up to its
+    type, then only `raddr`, `rport` and `tcptype`. Cloudflare's answers carry `ufrag <ufrag>
+    generation 0` after the type (seen 2026-11-15, likely since 2026-11-12 in some places), and the
+    games' WebRTC library (str0m 0.25) drops such a candidate without a word: no candidate, no ICE
+    check over UDP or through the TURN relay, so every racer whose answer had them stayed
+    unconnected (`udp/connect/no_answer`, `turn/channel_bind/timeout`). Rewriting them here fixes
+    every released game; the games rewrite them themselves too since finding 252. */
+export function plainCandidates(sdp: string): string {
+  return sdp.split("\n").map((raw) => {
+    const cr = raw.endsWith("\r") ? "\r" : "";
+    const line = cr ? raw.slice(0, -1) : raw;
+    if (!line.startsWith("a=candidate:")) return raw;
+    const p = line.split(" ").filter(Boolean);
+    if (p.length < 8 || p[6] !== "typ") return raw;
+    const out = p.slice(0, 8);
+    for (let i = 8; i + 1 < p.length; i += 2)
+      if (p[i] === "raddr" || p[i] === "rport" || p[i] === "tcptype") out.push(p[i], p[i + 1]);
+    return out.join(" ") + cr;
+  }).join("\n");
+}
+
 /** A Realtime API answer that wasn't OK, with its HTTP status (410: the session is gone). */
 export class RealtimeError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -207,7 +228,7 @@ export class Realtime {
     const description = r.sessionDescription as Json | undefined;
     if (description?.type !== "answer" || typeof description.sdp !== "string") throw new Error("Invalid SFU answer");
     // Only this session's SFU answer escapes. Never echo the supplied client offer.
-    return { session, message: { type: "sfu_answer", sdp: description.sdp } };
+    return { session, message: { type: "sfu_answer", sdp: plainCandidates(description.sdp) } };
   }
   async close(session: SfuSession, channels = session.channels): Promise<void> {
     if (!channels.length) return;
