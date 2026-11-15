@@ -87,7 +87,7 @@ static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", 
                                                      "join value", "a vertex below the near bound",
                                                      "a vertex off the guard band in x or y",
                                                      "w other than 1 (no divide)",
-                                                     "a vertex of the clipper's fan below the near bound",
+                                                     "a vertex of the clipper's fan behind the eye",
                                                      "the clipper's fog is not the loop's",
                                                      "the clipper's polygon outgrows its buffer"};
 
@@ -782,14 +782,19 @@ static int mesh_build(void)
                 }
                 if (got < 3 || !draw) continue;
                 /* what the shader makes of the item's vertex must be the kicked one: in front of the
-                   near bound, and the fog of the item's constants */
+                   eye, and the fog of the item's constants. The clipper's near plane is its own
+                   space's (data 176-179), not the loop's CLIP: a fan vertex the shader finds below
+                   the loop's near bound goes out as the plain projection, with the Z the clipper
+                   clamped. */
                 float item_fog = h->fog[0] + h->fog[1] * q;
                 item_fog = item_fog < h->fog[2] ? item_fog : h->fog[2];
                 item_fog = item_fog > 0 ? item_fog : 0;
-                if (!(cp[3] > 0) || h->clip[2] + cp[3] < -bound) return mesh_fail(MESH_WHY_FAN_NEAR);
+                if (!(cp[3] > 0)) return mesh_fail(MESH_WHY_FAN_NEAR);
                 if ((int)item_fog != (int)fog) return mesh_fail(MESH_WHY_FAN_FOG);
                 GsMeshVertex *o = &out[total + j];
-                o->x = cp[0]; o->y = cp[1]; o->z = cp[2] * z_scale; o->w = cp[3];
+                o->x = cp[0]; o->y = cp[1]; o->w = cp[3];
+                o->z = cp[2] * z_scale;
+                if (!(o->z < 16777215.0f * cp[3])) o->z = 16777215.0f * cp[3];
                 o->u = st[0]; o->v = st[1]; o->uz = st[2];
                 o->rgba = 0;
                 for (unsigned a = 0; a < 4; a++) o->rgba |= ((uint32_t)mesh_ftoi(poly[j].c[a], 1.0f) & 255) << (a * 8);
