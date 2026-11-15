@@ -59,7 +59,9 @@ initial size ending at 0x70E00000 (`build_wasm.py`). So the guest spans at least
 shared cache only if the base is in `[0x100000000, 0x10F1F0000]` and the guest's two used parts,
 `[0, 0x3a000000)` (the RAM views and mirrors, stack slots, bridge arena, hardware windows) and
 `[0x70000000, end)`, are both free. Nothing is ever committed in `[0x3a000000, 0x70000000)`, so
-that gap may hold other mappings.
+that gap may hold other mappings. The high part reaches 0x72010000 at least (the core's access
+test needs its first 32 MiB, below), so the guest needs 928 MiB free at the base and 33 MiB free
+1792 MiB above it.
 
 ## Progress
 
@@ -84,8 +86,20 @@ that gap may hold other mappings.
 - [x] the unsigned test IPA (`package_release.py --platform ios`, its audit and the release's
       Mac-side audit: no signing file, no home folder, no team of the Mac's identities) for the
       player; the real iPhone XR is unproven
+- [x] the review's must-fix: a wild guest access into the gap or above the high part reached
+      whatever the process had mapped there (iOS builds skip wasm2c's checks, finding 224), where
+      0.8.5's single reservation made it fault. Now it ends as that fault did (f3ef0f1e), proven
+      by `guest-access` (`test_runtime.py`, every path around every 4 MiB edge, with negative
+      controls) and `test_guest_space.py` (a readable, writable mapping in the gap and one above
+      the high part, a child per path: each ends by SIGSEGV with the fault's line, the mapping
+      untouched) (16bd33ce). Checks on the final tree: `check.py port` OK on the PC (`guest-access`
+      in it); boot (600 fields) and race (5000) state traces equal 0.8.6's; on the Mac
+      `test_guest_space.py` (start, late, none: OK, twelve wild accesses ended in each of start
+      and late) and the iOS tests OK. The Simulator build was stopped: the shared Mac's load passed
+      50 (other sessions)
 
-What the player's next dhd.log must show: `system: iOS 18.7.11, ... (iPhone11,8)`, then
+What the player's next dhd.log must show (the test IPA, built before the guard, writes the same
+lines): `system: iOS 18.7.11, ... (iPhone11,8)`, then
 `host64 memory: guest memory at 0x..., reserved at the start: [0, 0x3a000000) and [0x70000000,
 0x...), room to grow to N MiB` and the game running. If it shows `host64 memory: no room for the
 guest's memory ...` instead, its `host64 memory: free 0x...-0x...` lines are the phone's address
@@ -107,6 +121,33 @@ space, and the fold below is the next step.
 - Not done here: folding the guest's high part down next to the views on iOS (a compare and a
   subtract on every guest access and in `GUEST()`). It would make the span about 1 GiB and fit
   anywhere; it is the next step if the player's log still shows "no room".
+- What lies in the gap and above the high part is kept out of the guest's reach without a new
+  test on the common path (2026-11-15, the review's must-fix). `memory_access.h` already decides
+  per access, by one bit of a 64-bit mask indexed by the address's 32 MiB window, whether the plain
+  address may be used; on iOS the gap's windows (29..55) and the high part's windows above its
+  first (57..63) are set in that mask too, and the out-of-line path ends the process for a span
+  outside both parts (`host64_memory_wild`: the fault reporter's own line, `host64 memory: access
+  of uncommitted guest address 0x...`, which `run_record.c` reads, then SIGSEGV). `GUEST()` tests
+  the address against the gap and the end (host code, a compare per conversion), the bridge tests
+  a span against the gap. Window 56 (the scratchpad and the module's first 31 MiB) stays plain, so
+  the high part must reach 0x72010000. The cost, not measured (no timing runs in this lane):
+  accesses with a small offset and the plain accesses run the same test as before; the 62,574 of
+  the core's 205,774 split access sites whose offset is the module's data (30 %, before free)
+  compare their base with 16 MiB, one compare and branch shared by every access through that base;
+  604 sites (0.3 %) with an offset of 64 KiB to 32 MiB test their own address; module memory grown
+  above 0x72000000 (it starts at 0x70E00000) is reached out of line. Weighed and not taken: a
+  compare and subtract on every access (the same protection at a cost on every access, on the
+  phones that are slowest per thread); filling the free gap and tail with inaccessible mappings at
+  the start (it takes about 860 MiB of the 2 GiB below the shared cache from the launcher, WebKit
+  and Metal, and the gap holds the main thread's stack, which iOS places just below 0x170000000
+  and which would stay reachable and writable); the fold above (the same cost class as the
+  compare, and more change, while the player's log is pending).
+- What stays reachable, as before this lane: a wild address of 2 GiB or more (0x80010000 and up,
+  where 0.8.5's reservation ended too) whose window, taken mod 64, is a plain one, and a host span
+  that starts inside a part and runs past its end (`GUEST()` checks where a span starts; the
+  bridge checks the whole span against the gap). Acceptable because both were reachable in every
+  iOS build since finding 224 and need a wild address the game has never produced; everything the
+  two-part placement newly left to others (the gap, the high part's shortened tail) is covered.
 - `host_error_box` shows on iOS now (an alert the game thread waits for), for every error box,
   not only this one: before, iOS players saw nothing.
 
@@ -122,6 +163,9 @@ space, and the fold below is the next step.
 - macOS ignores RLIMIT_AS, so the Mac test fills the address space with inaccessible mappings
   (every free range of 16 MiB or more) instead, in a constructor linked before guest_memory.c's
   for the modes that must fail at the start.
+- The Linux variant of `host64_selftest.py` (`--linux`, a manual tool no check runs) builds with
+  `WASM_RT_MEMCHECK_BOUNDS_CHECK=1` and so gets the two-part layout: its lists of unchanged and
+  reserved addresses include 0x3a000000, in the gap, and fail there now. Not changed here.
 - The Mac (8 GB) reached a load of about 750 with four booted simulators' `locationd` spinning and
   restarted itself once during the IPA build; the builds were redone after it.
 
