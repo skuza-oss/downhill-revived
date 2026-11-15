@@ -46,6 +46,9 @@ typedef struct {
     /* the race this game is in, its start's startAt (server ms; 0 none), sent in a rejoin's hello;
        its finish or BACK, said again after a rejoin in case the drop lost it */
     double race_at;
+    int race_member;  /* this game's member id in that race (a rejoin after the seat went gets a new one) */
+    int seat_check;   /* a rejoin's welcome named no race: the room's next snapshot says whether the seat
+                         went or the race ended (finding 254) */
     int finished, finish_place, gave_up;
     unsigned finish_ticks;
     int finish_score;  /* a scored round's (finding 204), -1 none */

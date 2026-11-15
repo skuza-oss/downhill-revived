@@ -466,7 +466,17 @@ int main(void)
             "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\",\"sfu\":\"ready\",\"race\":{\"startAt\":5000}}";
         const char *no_race = "{\"type\":\"welcome\",\"memberId\":1,\"code\":\"RACE22\",\"serverTime\":9000,"
             "\"rejoinToken\":\"0123456789abcdef0123456789abcdef\"}";
-        const char *out = "{\"type\":\"room\",\"phase\":\"racing\",\"members\":[{\"id\":1,\"name\":\"Test\",\"inRace\":false}]}";
+        const char *out = "{\"type\":\"room\",\"phase\":\"racing\",\"raceStartedAt\":5000,\"members\":[{\"id\":1,\"name\":\"Test\",\"inRace\":false}]}";
+        /* the race over while away (finding 254 review): its results list this member, left (the seat
+           let go) or with its finish (the seat kept) */
+        const char *no_race_new = "{\"type\":\"welcome\",\"memberId\":2,\"code\":\"RACE22\",\"serverTime\":9000,"
+            "\"rejoinToken\":\"fedcba9876543210fedcba9876543210\"}";  /* the seat gone: a new member */
+        const char *over_left = "{\"type\":\"room\",\"phase\":\"open\",\"lastRace\":{\"id\":2,\"track\":0,\"entrants\":["
+            "{\"id\":0,\"name\":\"A\",\"place\":1,\"ticks\":3600},{\"id\":1,\"name\":\"Test\",\"place\":2,\"dnfReason\":\"left\"}]},"
+            "\"members\":[{\"id\":0,\"name\":\"A\",\"inRace\":false},{\"id\":2,\"name\":\"Test\",\"inRace\":false}]}";
+        const char *over_kept = "{\"type\":\"room\",\"phase\":\"open\",\"lastRace\":{\"id\":2,\"track\":0,\"entrants\":["
+            "{\"id\":0,\"name\":\"A\",\"place\":1,\"ticks\":3600},{\"id\":1,\"name\":\"Test\",\"place\":2,\"ticks\":3720}]},"
+            "\"members\":[{\"id\":0,\"name\":\"A\",\"inRace\":false},{\"id\":1,\"name\":\"Test\",\"inRace\":false}]}";
         unsigned char payload[4] = {1, 2, 3, 4};
         client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);
@@ -515,6 +525,32 @@ int main(void)
         client_on_text(&c,start,strlen(start));
         client_lobby(&c,&l);
         assert(c.racing && !l.seat_lost);
+        client_free(&c);
+        /* the race ended while away and the room had let the seat go: CONNECTION LOST */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,tokened,strlen(tokened));
+        client_on_text(&c,start,strlen(start));
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_connected(&c,&t);
+        client_on_text(&c,no_race_new,strlen(no_race_new));
+        client_on_text(&c,over_left,strlen(over_left));
+        client_lobby(&c,&l);
+        assert(!c.racing && l.state == NET_LOBBY && l.seat_lost);
+        client_free(&c);
+        /* the race ended normally while away, the seat kept: the normal words, not CONNECTION LOST */
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,tokened,strlen(tokened));
+        client_on_text(&c,start,strlen(start));
+        assert(client_on_closed(&c,1006,"") == 1);
+        client_connected(&c,&t);
+        client_on_text(&c,no_race,strlen(no_race));
+        client_lobby(&c,&l);
+        assert(!l.seat_lost);  /* nothing said yet: the room's snapshot decides */
+        client_on_text(&c,over_kept,strlen(over_kept));
+        client_lobby(&c,&l);
+        assert(!c.racing && l.state == NET_LOBBY && !l.seat_lost);
         client_free(&c);
         /* a refusal in the race, or the attempts' end: racing alone, offline, as before */
         client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
