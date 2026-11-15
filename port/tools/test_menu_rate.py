@@ -12,7 +12,9 @@ at 60 run), 30 (two-field steps; 20 fps runs the same, the clock's steps stop at
 
 - The title (menu 0): the PRESS X TO START box's edge D_0029E008. Retail moves it 2.4 a field from
   401.6 down to 351.2 and back up, a 42-field triangle; after every update the edge must be that
-  triangle's value at the game time reached since the title's first call (within --pulse-error).
+  triangle's value at the game time reached since the title's first call (within --pulse-error,
+  0.1 units, a 24th of a field: at 240 the float sum of 0.6-unit steps drifts about 0.004 units
+  per 100 fields, 0.055 over the run; a wrong step or turning point is off by tens of units).
 - The menus on the route to a race: every menu block (D_004C6B88 + 0x30 * i, its age at +4;
   func_001F7420 initializes a block whose age is 0, func_001F74F0 counts it). A screen's block
   must have a nonzero age after the screen's first update, as retail's (the update after the
@@ -131,7 +133,7 @@ def main():
     ap.add_argument('--exe', default=str(EXE))
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--configs', default=','.join(CONFIGS))
-    ap.add_argument('--pulse-error', type=float, default=0.05, help='box edge against retail\'s triangle, units')
+    ap.add_argument('--pulse-error', type=float, default=0.1, help='box edge against retail\'s triangle, units')
     ap.add_argument('--jobs', type=int, default=2)
     ap.add_argument('--timeout', type=int, default=1800)
     ap.add_argument('--external-out', action='store_true', help='allow an output folder outside the checkout')
