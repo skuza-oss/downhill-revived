@@ -83,3 +83,19 @@ over a running race (`online.c`, its own stick reading), other OPTIONS pages.
   nothing: with the default Z probe the exact device draws nothing).
 
 ## Result
+
+Both fixed on Windows (dd6c7c8c #103, 4cc760ef #102).
+
+- **Checked:** `check.py quick`, `check.py port` and `check.py docs` green. The boot (600 rows) and race
+  (5000 rows) state traces equal the base build's (cae6f05c). `test_menu_pads.py` (in
+  `test_runtime`): its source guard fails on the old `online_menu.c`, which reads `func_00220230`
+  itself, and its guest test checks the d-pad, each stick edge at the game's 120 (7 and 249 count,
+  8 and 248 do not), pad 1's stick, digital mode and a missing pad. `test_native_transfers.py`'s
+  colour read (two 512 x 112 CT32 reads of a cleared surface) passes; with `DHD_EXACT_PROBE=1`,
+  where the hook is off, it fails with every pixel 0, the bug's picture. On the hidden desktop,
+  Poster Maker's "Save Poster?" preview shows the scene, the card gets `poster0`, and after a fresh
+  start OPTIONS > POSTERS shows the thumbnail and the full poster.
+- **Unproven on real hardware:** a real pad in the room (the reporter's generic USB pad in digital
+  mode, an Xbox pad's stick); the reporter's Intel UHD on Dx12; the browser and phones (the code is
+  shared, only Windows was run; the browser's read waits through `native_read_wait`, as
+  screenshots do); PCSX2 as referee (not run, the exact front end stood in).
