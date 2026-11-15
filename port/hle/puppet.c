@@ -79,6 +79,7 @@ static void net_link_release(void);
 #define CRASH_KIND_AT 0x407C  /* its +0xAC: what started the crash */
 #define CRASH_FLAGS_AT 0x4098 /* its +0xC8: bit 2 = crashing */
 #define CHECKPOINT_AT 0x7990  /* checkpoints passed (func_0019F210) */
+#define FINISHED(slot) (*(volatile uint8_t *)(uintptr_t)(0x0843EF18u + (slot)))  /* a rider over the line (online.c FINISHED) */
 #define AI_AT 0x78D4          /* a computer rider's AI controller (0: a player's rider) */
 #define AI_TURNING_AT 0x2B0   /* the controller's turn scale (func_0010F0D8 sets, func_00137950 reads) */
 #define AI_PREV_TARGET_AT 0x10  /* the controller (func_0010B2B8): the previous target point */
@@ -705,13 +706,11 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
            seconds old on a curve, so only its size is kept: a puppet that lost its speed at a bump
            taken differently here stood or fell over through a second or two of nothing (95 to 5 units
            a second, 50 units behind) and was put back at once when the snapshots came. */
-        float own = sync_len(s->vel) * (p->rate > 0 ? p->rate : 1), here = sync_len(now.vel);
-        if (own > 30 && here < SYNC_GUARD * own) p->easing = 1;
-        if (p->easing) {
-            float to[3];
-            const float *way = here > 1 ? now.vel : s->vel;
-            float n = here > 1 ? here : sync_len(s->vel);
-            for (int k = 0; k < 3; k++) to[k] = way[k] * own / n;
+        float ov[3], to[3];
+        for (int k = 0; k < 3; k++) ov[k] = s->vel[k] * (p->rate > 0 ? p->rate : 1);
+        int still = (FIELD(r, CRASH_FLAGS_AT, uint32_t) & 4) || FINISHED(slot_of(r));
+        if (sync_outage_target(now.vel, ov, still, &p->easing, to)) {
+            float own = sync_len(ov);
             ease(now.vel, to, dt > 0 ? dt : 1 / 60.0f);
             if (fabsf(sync_len(now.vel) - own) < 0.05f * own) p->easing = 0;
         }

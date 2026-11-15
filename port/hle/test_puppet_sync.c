@@ -227,6 +227,41 @@ int main(void)
         assert(!sync_owner_jumped(m, 2, 68.315, 68.332));  /* riding */
         assert(!sync_owner_jumped(m, 5, 68.332, 68.332));  /* nothing new */
     }
+    {   /* through an outage (finding 254): the owner's speed in the puppet's direction, never a push
+           for an owner that stopped, never a NaN */
+        float to[3], stand[3] = {0, 0, 0}, slow[3] = {0.5f, 0, 0}, fast[3] = {95, 0, 0}, side[3] = {0, 20, 0};
+        int easing;
+        /* the bug: braking left the easing on, the owner stopped (speed 0), the puppet under 1: 0/0 */
+        easing = 1;
+        int r = sync_outage_target(slow, stand, 0, &easing, to);
+        assert(!r && !easing);
+        if (r) for (int k = 0; k < 3; k++) assert(to[k] == to[k]);
+        easing = 1;
+        assert(!sync_outage_target(stand, stand, 0, &easing, to) && !easing);    /* both standing */
+        /* an owner that really stopped is never pushed on: the start grid, standing after a wreck,
+           braking to a stop (slow, the easing on from before) */
+        easing = 0;
+        assert(!sync_outage_target(stand, stand, 0, &easing, to) && !easing);    /* the start grid */
+        float wreck[3] = {4, 3, 0};
+        assert(!sync_outage_target(stand, wreck, 0, &easing, to) && !easing);    /* standing after a wreck */
+        easing = 1;
+        float braking[3] = {20, 0, 0}, rolling[3] = {60, 0, 0};
+        assert(!sync_outage_target(rolling, braking, 0, &easing, to) && !easing); /* braking to a stop */
+        /* a crash or its respawn wait, or a finish, here or at the owner's: never pushed, the easing off */
+        easing = 1;
+        assert(!sync_outage_target(slow, fast, 1, &easing, to) && !easing);
+        /* riding: a puppet slowed at a bump gets its owner's speed in its own direction */
+        easing = 0;
+        assert(sync_outage_target(side, fast, 0, &easing, to) && easing);
+        assert(near(to[0], 0, 1e-4f) && near(to[1], 95, 1e-3f) && near(to[2], 0, 1e-4f));
+        /* standing still itself: the owner's direction */
+        assert(sync_outage_target(slow, fast, 0, &easing, to) && near(to[0], 95, 1e-3f));
+        assert(sync_outage_target(stand, fast, 0, &easing, to) && near(to[0], 95, 1e-3f));
+        /* near its owner's speed: no easing starts */
+        float close[3] = {90, 0, 0};
+        easing = 0;
+        assert(!sync_outage_target(close, fast, 0, &easing, to) && !easing);
+    }
     puts("puppet sync: OK");
     return 0;
 }
