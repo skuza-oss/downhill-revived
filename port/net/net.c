@@ -12,7 +12,10 @@
 #include "json.h"
 #include "ws.h"
 
-enum { REJOIN_ATTEMPTS = 5, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
+/* Rejoins after a drop go on for REJOIN_WINDOW_MS from it, every 2 s (ws io_main): the room keeps a
+   seat 20 s after it last heard from a member (online/server REJOIN_GRACE_MS), so an outage shorter
+   than that ends in the room again within 2 s of the network's return (finding 254). */
+enum { REJOIN_WINDOW_MS = 30000, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
 
 /* The rooms offered (host_api.h NET_OFFER_*): every native build, Android and iOS included, offers
    SFU and P2P rooms (finding 237); only the browser offers P2P rooms alone (port/web/www/net.js). */
@@ -22,6 +25,7 @@ static NetClient client;
 static WsConn *conn;
 static int inited;
 static char base[256], name[100], version[64], iso[65], next_url[300];
+static double dropped_at;  /* the drop the rejoins are for */
 static SDL_Mutex *api;  /* serialises connect, leave and the reset between rooms */
 
 static void send_text(void *ws, const char *text) { ws_send(ws, 0, text, strlen(text)); }
@@ -50,7 +54,8 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
     (void)ctx;
     if (!client_on_closed(&client, code, reason))
         return NULL;
-    if (attempt >= REJOIN_ATTEMPTS) {
+    if (attempt == 0) dropped_at = net_now_ms();
+    if (net_now_ms() - dropped_at >= REJOIN_WINDOW_MS) {
         client_rejoin_failed(&client);
         return NULL;
     }

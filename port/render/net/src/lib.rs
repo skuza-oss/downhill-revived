@@ -210,7 +210,7 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                 c.wait_handled(Duration::from_secs(1));
                 c.force_close();
                 // A refusal (a rate limit) or a connection that ends at once counts as a failed
-                // attempt, so the backoff grows and the attempts end (finding 175).
+                // attempt, so the attempts end (finding 175).
                 if opened.elapsed() >= LASTING { attempt = 0; }
                 end
             }
@@ -226,7 +226,9 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
             break;
         }
         url = unsafe { CStr::from_ptr(next) }.to_string_lossy().into_owned();
-        c.backoff(if attempt < 4 { 500 << attempt } else { 8000 });
+        // 1 s, then every 2 s: back in the room soon after the network is (the handler ends the
+        // attempts, net.c REJOIN_WINDOW_MS; finding 254)
+        c.backoff(if attempt < 2 { 1000 } else { 2000 });
     }
     *lock(&c.running) = false;
     c.ended.notify_all();
