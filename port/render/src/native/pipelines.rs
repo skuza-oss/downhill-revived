@@ -431,29 +431,56 @@ pub struct Pipelines {
     worker: Option<Worker>,
 }
 
-/// The thread that builds specialised pipelines, and the keys it has not answered yet.
+/// What the worker thread is asked.
+#[cfg(not(target_arch = "wasm32"))]
+enum Job {
+    /// Build this key's pipeline and answer with it.
+    Build(u64, PipelineDesc),
+    /// The render thread built this key itself: it goes into the pipeline list.
+    Learned(u64),
+}
+
+/// The thread that builds pipelines off the frame (the specialised ones, and the listed ones of
+/// earlier runs), and the keys it has not answered yet.
 #[cfg(not(target_arch = "wasm32"))]
 struct Worker {
-    jobs: std::sync::mpsc::Sender<(u64, PipelineDesc)>,
+    jobs: std::sync::mpsc::Sender<Job>,
     done: std::sync::mpsc::Receiver<(u64, Result<wgpu::RenderPipeline, String>)>,
+    /// Specialised keys a draw asked for.
     waiting: std::collections::HashSet<u64>,
+    /// Listed keys sent at the start (`Pipelines::build_ahead`).
+    ahead: std::collections::HashSet<u64>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Worker {
-    fn start(gpu: &'static Gpu, sources: Sources) -> Worker {
-        let (jobs, inbox) = std::sync::mpsc::channel::<(u64, PipelineDesc)>();
+    /// `list`: the pipeline list, to which the thread adds every key that builds (it alone writes
+    /// the file, so no write is ever on the render thread).
+    fn start(gpu: &'static Gpu, sources: Sources, mut list: Option<list::File>) -> Worker {
+        let (jobs, inbox) = std::sync::mpsc::channel::<Job>();
         let (outbox, done) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new().name("dhd-pipelines".into()).spawn(move || {
             // Ends when the Pipelines (the sender) is dropped.
-            while let Ok((key, d)) = inbox.recv() {
+            while let Ok(job) = inbox.recv() {
+                let (key, d) = match job {
+                    Job::Build(key, d) => (key, d),
+                    Job::Learned(key) => {
+                        if let Some(list) = list.as_mut() {
+                            list.learn(key);
+                        }
+                        continue;
+                    }
+                };
                 let start = std::time::Instant::now();
                 let pipe = scoped_pipeline(gpu, &format!("native pipeline {key:X}"), || build(gpu, &sources, key, &d))
                     .and_then(|r| r)
                     .map_err(|e| format!("{e} ({})", summary(key, &d)));
                 let took = start.elapsed().as_secs_f64();
                 if took > 0.25 {
-                    crate::host::log(&format!("gs native: specialised pipeline {key:X} built in {took:.2} s (worker)"));
+                    crate::host::log(&format!("gs native: pipeline {key:X} built in {took:.2} s (worker)"));
+                }
+                if let (Ok(_), Some(list)) = (&pipe, list.as_mut()) {
+                    list.learn(key);
                 }
                 if outbox.send((key, pipe)).is_err() {
                     break;
@@ -461,10 +488,172 @@ impl Worker {
             }
         });
         if let Err(e) = spawned {
-            crate::host::log(&format!("gs native: no pipeline worker ({e}); specialised pipelines are built at first use"));
+            crate::host::log(&format!("gs native: no pipeline worker ({e}); pipelines are built at first use"));
         }
-        Worker { jobs, done, waiting: std::collections::HashSet::new() }
+        Worker { jobs, done, waiting: std::collections::HashSet::new(), ahead: std::collections::HashSet::new() }
     }
+}
+
+/// The pipeline list (finding 256): the keys of the draw pipelines this device built in earlier
+/// runs, `pipelines.txt` in the player's data folder. A draw state the game uses for the first
+/// time needs its generic pipeline at once, and the render thread stops for the driver's compile
+/// (about 150 ms each on a weak phone: the title's first pictures, the flight over the track, four
+/// times in a race). The keys are the same in every run, so each one that builds is written down,
+/// and the next start builds them all on the worker thread while the game boots and shows its
+/// menus (`Pipelines::build_ahead`); a draw then finds its pipeline made. Only keys this device
+/// built itself are listed, so nothing is compiled ahead that it would not compile anyway, and a
+/// listed key that no longer builds is left to its first draw. The first line names the list's
+/// format and the GPU with its driver: another GPU or driver starts a new list.
+/// `DHD_PIPELINE_LIST=0` turns it off (comparisons).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod list {
+    use std::collections::HashSet;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    /// The keys' format: a change of a key's meaning (the module's first comment) takes a new number.
+    const FORMAT: u32 = 1;
+    /// More keys than any session builds; a list this long is not added to.
+    const MOST: usize = 4096;
+
+    static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+    /// `dhdr_native_pipeline_list`: where the list is (None: no list).
+    pub fn set_path(path: Option<PathBuf>) {
+        *PATH.lock().unwrap_or_else(|p| p.into_inner()) = path;
+    }
+
+    /// The list's file, unless there is none or `DHD_PIPELINE_LIST=0`.
+    pub fn path() -> Option<PathBuf> {
+        if std::env::var("DHD_PIPELINE_LIST").is_ok_and(|v| v == "0") {
+            return None;
+        }
+        PATH.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// The first line for this GPU and driver.
+    pub fn header(info: &wgpu::AdapterInfo) -> String {
+        let text = format!("dhd-pipelines {FORMAT} {:?} {:04X}:{:04X} {} | {} | {}", info.backend, info.vendor,
+                           info.device, info.name, info.driver, info.driver_info);
+        text.replace(['\n', '\r'], " ")
+    }
+
+    /// The keys of a list's text in the order to build them: the generic ones first (a draw
+    /// cannot wait for those), then the specialised ones (their draws run the generic pipeline
+    /// meanwhile), each in the order it was first used. None when the first line is not `header`.
+    pub fn parse(text: &str, header: &str) -> Option<Vec<u64>> {
+        let mut lines = text.lines();
+        if lines.next() != Some(header) {
+            return None;
+        }
+        let mut seen = HashSet::new();
+        let mut keys: Vec<u64> = lines
+            .filter_map(|l| u64::from_str_radix(l.trim(), 16).ok())
+            .filter(|&k| seen.insert(k))
+            .take(MOST)
+            .collect();
+        keys.sort_by_key(|&k| k >> super::SPEC_SHIFT != 0); // stable: first-use order within each
+        Some(keys)
+    }
+
+    /// The list's file as the worker thread keeps it.
+    pub struct File {
+        path: PathBuf,
+        header: String,
+        known: HashSet<u64>,
+        /// The file starts with `header` (else the first key writes a new file).
+        valid: bool,
+        failed: bool,
+    }
+
+    impl File {
+        /// The file at `path` and its keys to build (none when it is absent or another GPU's).
+        pub fn open(path: PathBuf, header: String) -> (File, Vec<u64>) {
+            let keys = std::fs::read_to_string(&path).ok().and_then(|text| parse(&text, &header));
+            let valid = keys.is_some();
+            let keys = keys.unwrap_or_default();
+            (File { path, header, known: keys.iter().copied().collect(), valid, failed: false }, keys)
+        }
+
+        /// A key that built: one more line, once.
+        pub fn learn(&mut self, key: u64) {
+            if self.failed || self.known.len() >= MOST || !self.known.insert(key) {
+                return;
+            }
+            let written = if self.valid {
+                std::fs::OpenOptions::new().append(true).open(&self.path).and_then(|mut f| writeln!(f, "{key:X}"))
+            } else {
+                std::fs::write(&self.path, format!("{}\n{key:X}\n", self.header))
+            };
+            match written {
+                Ok(()) => self.valid = true,
+                Err(e) => {
+                    self.failed = true;
+                    crate::host::log(&format!("gs native: the pipeline list can't be written ({e}); pipelines are built at first use next time too"));
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn generic_keys_first_each_in_first_use_order() {
+            let text = "H\nE0180033E26BC000\n3C000\n\nE9C98B\nnot a key\n3C000\nE000000000E9C98B\n";
+            assert_eq!(parse(text, "H"), Some(vec![0x3C000, 0xE9C98B, 0xE0180033E26BC000, 0xE000000000E9C98B]));
+        }
+
+        #[test]
+        fn another_gpus_list_is_not_used() {
+            assert_eq!(parse("H\n3C000\n", "other"), None);
+            assert_eq!(parse("", "H"), None);
+            assert_eq!(parse("H\n", "H"), Some(vec![]));
+        }
+
+        #[test]
+        fn a_key_is_written_once_and_read_back() {
+            let path = std::env::temp_dir().join(format!("dhd-pipelines-test-{}.txt", std::process::id()));
+            let _ = std::fs::remove_file(&path);
+            let (mut file, keys) = File::open(path.clone(), "H 1".into());
+            assert!(keys.is_empty());
+            file.learn(0x3C000);
+            file.learn(0xE0180033E26BC000);
+            file.learn(0x3C000);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "H 1\n3C000\nE0180033E26BC000\n");
+            let (mut again, keys) = File::open(path.clone(), "H 1".into());
+            assert_eq!(keys, vec![0x3C000, 0xE0180033E26BC000]);
+            again.learn(0x3C000);
+            again.learn(0x1C000);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "H 1\n3C000\nE0180033E26BC000\n1C000\n");
+            // another driver: the old keys are not built, and the first new key starts the file again
+            let (mut other, keys) = File::open(path.clone(), "H 2".into());
+            assert!(keys.is_empty());
+            other.learn(0x5);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "H 2\n5\n");
+            std::fs::remove_file(&path).unwrap();
+        }
+    }
+}
+
+/// `dhdr_native_pipeline_list` (`dhd_render_ext.h`): the pipeline list's file (finding 256), a
+/// UTF-8 path, or NULL for none; before `dhdr_native_create`. The browser has no list.
+///
+/// # Safety
+/// `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn dhdr_native_pipeline_list(path: *const std::ffi::c_char) {
+    let _g = crate::guard::Guard::enter("dhdr_native_pipeline_list");
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // SAFETY: NULL or a NUL-terminated string (the caller's contract).
+        let path = (!path.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(path) });
+        list::set_path(path.and_then(|p| p.to_str().ok()).filter(|p| !p.is_empty()).map(std::path::PathBuf::from));
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = path;
 }
 
 impl Pipelines {
@@ -483,19 +672,21 @@ impl Pipelines {
     pub fn get_special(&mut self, gpu: &'static Gpu, objects: &Objects, key: u64)
                        -> Result<(u64, &wgpu::RenderPipeline), String> {
         let generic = key & 0xFFFF_FFFF;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.receive();
         if key != generic {
             #[cfg(not(target_arch = "wasm32"))]
             {
                 if spec_mode() == SpecMode::Background {
-                    self.receive();
                     let (mut here, mut failed) = (false, None);
                     if !self.built.contains_key(&key) {
-                        let worker = self.worker.get_or_insert_with(|| Worker::start(gpu, Sources::of(objects)));
-                        if worker.waiting.insert(key) {
+                        let worker = self.worker.get_or_insert_with(|| Worker::start(gpu, Sources::of(objects), None));
+                        // a listed key is on its way already
+                        if !worker.ahead.contains(&key) && worker.waiting.insert(key) {
                             match describe(key as u32) {
                                 Ok(d) => {
                                     // No worker thread: build it here, as SpecMode::Sync does.
-                                    if worker.jobs.send((key, d)).is_err() {
+                                    if worker.jobs.send(Job::Build(key, d)).is_err() {
                                         worker.waiting.remove(&key);
                                         here = true;
                                     }
@@ -532,13 +723,47 @@ impl Pipelines {
     #[cfg(not(target_arch = "wasm32"))]
     fn receive(&mut self) {
         let Some(worker) = self.worker.as_mut() else { return };
+        if worker.waiting.is_empty() && worker.ahead.is_empty() {
+            return;
+        }
         while let Ok((key, pipe)) = worker.done.try_recv() {
-            worker.waiting.remove(&key);
+            let asked = worker.waiting.remove(&key);
+            let ahead = worker.ahead.remove(&key);
+            if self.built.get(&key).is_some_and(|r| r.is_ok()) {
+                continue; // a draw needed it before the worker came to it, and built it
+            }
             if let Err(e) = &pipe {
+                if ahead && !asked {
+                    continue; // a listed key that no longer builds: its first draw decides and reports
+                }
                 crate::host::log(&format!("gs native: specialised pipeline {key:X}: {e}; the generic one draws"));
             }
             self.built.insert(key, pipe);
         }
+    }
+
+    /// The pipeline list's keys (`list`, finding 256) go to the worker thread, which builds them
+    /// while the game starts; at the native renderer's create. Without a list: nothing.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn build_ahead(&mut self, gpu: &'static Gpu, objects: &Objects) {
+        let Some(path) = list::path() else { return };
+        let (file, keys) = list::File::open(path, list::header(&gpu.info));
+        let worker = self.worker.get_or_insert_with(|| Worker::start(gpu, Sources::of(objects), Some(file)));
+        let special = spec_mode() == SpecMode::Background;
+        let meshes = !crate::native::init::meshes_refused();
+        for &key in &keys {
+            let wanted = (key >> SPEC_SHIFT == 0 || special) && (key as u32 & MESH == 0 || meshes);
+            if !wanted || self.built.contains_key(&key) {
+                continue;
+            }
+            if let Ok(d) = describe(key as u32) {
+                if worker.jobs.send(Job::Build(key, d)).is_ok() {
+                    worker.ahead.insert(key);
+                }
+            }
+        }
+        crate::host::log(&format!("gs native: pipelines.txt lists {} draw pipelines of earlier runs; {} are built ahead on a worker thread",
+                                  keys.len(), worker.ahead.len()));
     }
 
     /// Takes `other`'s pipelines into this cache (the browser's probed mesh pipelines, init.rs
@@ -560,6 +785,8 @@ impl Pipelines {
     /// The pipeline for `key` (a cache key: `SPEC_SHIFT`), built on first use (Err: the key has
     /// none, or it failed).
     pub fn get(&mut self, gpu: &Gpu, objects: &Objects, key: u64) -> Result<&wgpu::RenderPipeline, String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let worker = &self.worker;
         let built = self.built.entry(key).or_insert_with(|| {
             #[cfg(not(target_arch = "wasm32"))]
             let _spike = SpikeTimer::new("pipeline", key as u32);
@@ -574,6 +801,10 @@ impl Pipelines {
                 let took = start.elapsed().as_secs_f64();
                 if took > 0.25 {
                     crate::host::log(&format!("gs native: draw pipeline {key:X} built in {took:.2} s"));
+                }
+                // built at its first use, on this thread: the next start builds it ahead
+                if let Some(worker) = worker {
+                    let _ = worker.jobs.send(Job::Learned(key));
                 }
             }
             Ok(pipe)

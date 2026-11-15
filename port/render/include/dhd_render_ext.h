@@ -5,7 +5,7 @@
 
    SP10 (docs/findings/090-speed.md): an indexed native picture. Finding 109: the device's largest
    texture. Finding 129: the perf: lines' GPU counters. Finding 171: a lost device. Finding 194:
-   whether translated VU1 meshes can be drawn. */
+   whether translated VU1 meshes can be drawn. Finding 256: the pipeline list. */
 #ifndef DHD_RENDER_EXT_H
 #define DHD_RENDER_EXT_H
 
@@ -48,6 +48,14 @@ DHDR_FN(dhdr_device_lost) int dhdr_device_lost(void);
    logged once, and so for the rest of the session). C asks after each picture and sends the
    batches back to the emulated VU. Any thread; the browser's renderer always answers 0. */
 DHDR_FN(dhdr_native_meshes) int dhdr_native_meshes(void);
+
+/* Finding 256: the file that lists the draw pipelines this device built in earlier runs (a UTF-8
+   path; NULL: none). Before dhdr_native_create, which sends the listed pipelines to a worker thread
+   to build while the game starts, so a draw state's first use in a race no longer stops the
+   render thread for the driver's compile; that thread adds every pipeline that builds. The file
+   is only a cache: without it, or for another GPU or driver, pipelines are built at first use as
+   before. DHD_PIPELINE_LIST=0: no list. The browser's renderer ignores the call. */
+DHDR_FN(dhdr_native_pipeline_list) void dhdr_native_pipeline_list(const char *path);
 
 /* Finding 250: a colour surface's pixels for a local-to-host transfer (the native renderer draws
    only on the GPU; Poster Maker reads its frame back). begin copies GS pixels rect (x, y, w, h,

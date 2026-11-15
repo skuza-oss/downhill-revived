@@ -808,6 +808,8 @@ impl Native {
         for key in probe_keys(objects.dual) {
             pipelines.get(gpu, &objects, key as u64)?;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        pipelines.build_ahead(gpu, &objects);
         let mut n = Native {
             gpu,
             flags,
