@@ -148,7 +148,9 @@ static struct {
     /* and each fan of the batch as the clipper kicks it (count, then per vertex STQ, RGBA, XYZF2), against
        the program's own kicks (mesh_kicked) */
     unsigned fans, fans_seen;
-    uint32_t words_2de8[GS_MESH_MAX_VERTICES][4];   /* 2DE8's colour words as its loop stores them (floats) */
+    /* the colour words as the loop stores them, for its clipper: 2DE8's (floats) and the lit loops'
+       (1110, 13A0: integers, negative where the light takes more than the vertex has) */
+    uint32_t words_stored[GS_MESH_MAX_VERTICES][4];
     struct { unsigned count; uint32_t q[GS_MESH_FAN_VERTICES][3][4]; } fan[GS_MESH_MAX_VERTICES];
 } mesh = {.object = -1};
 
@@ -245,7 +247,9 @@ static void mesh_check(void)
         const uint8_t *rgba = (const uint8_t *)&v[k].rgba;
         for (unsigned i = 0; i < 4; i++) {
             int ref = rgba[i];
-            int got = prog->colour == MESH_COLOUR_LIGHT_ALPHA ? (int)(o[1].w[i] & 255) : o[1].sw[i];   /* 2DE8: floats */
+            /* the GS takes the low byte: of 2DE8's floats, of a lit loop's negative word */
+            const int low = prog->colour == MESH_COLOUR_LIGHT_ALPHA || o[1].sw[i] < 0;
+            int got = low ? (int)(o[1].w[i] & 255) : o[1].sw[i];
             if (got - ref > 1 || ref - got > 1) { count->bad_colour++; break; }
         }
         const float st[3] = {v[k].u * q, v[k].v * q, v[k].uz * q};
@@ -440,6 +444,15 @@ static inline int32_t mesh_ftoi(float f, float scale)
     return (int32_t)scaled;
 }
 
+/* A float as the VU reads or leaves it: exponent 255 (a PC's NaN or infinity) is the largest
+   number of its sign. */
+static inline float mesh_vu(float f)
+{
+    const uint32_t b = mesh_bits(f);
+    if ((b & 0x7F800000u) != 0x7F800000u) return f;
+    return (int32_t)b < 0 ? -3.4028234663852886e38f : 3.4028234663852886e38f;
+}
+
 /* ((c0 x + c1 y) + c2 z) + c3: MULAx, MADDAy, MADDAz, MADDw */
 static inline void mesh_transform(float o[4], const ps2_q128 *c, const float *p)
 {
@@ -602,7 +615,8 @@ static int mesh_build(void)
     uint16_t pool[GS_MESH_MAX_VERTICES];
     uint8_t below[GS_MESH_MAX_VERTICES];   /* the loop's CLIP: below the near bound */
     uint8_t aside[GS_MESH_MAX_VERTICES];   /* off the guard band in x or y (near batches and the check) */
-    uint32_t (*words)[4] = prog->colour == MESH_COLOUR_LIGHT_ALPHA ? mesh.words_2de8 : NULL;
+    const int lit = prog->colour == MESH_COLOUR_LIT_D5 || prog->colour == MESH_COLOUR_LIT;
+    uint32_t (*words)[4] = prog->colour == MESH_COLOUR_LIGHT_ALPHA || lit ? mesh.words_stored : NULL;
     unsigned any_below = 0, any_aside = 0;
     for (unsigned k = 0; k < n; k++) {
         const ps2_q128 *r = &m[base + 1 + 3 * k];
@@ -625,7 +639,8 @@ static int mesh_build(void)
             if (!(x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
         }
         const uint32_t *c = r[1].w;   /* (3140 and 2DE8 overwrite it) */
-        if (prog->colour != MESH_COLOUR_CONSTANT && prog->colour != MESH_COLOUR_LIGHT_ALPHA &&
+        /* (the lit loops take any word: ITOF0, the light, then their own clamp) */
+        if (prog->colour != MESH_COLOUR_CONSTANT && prog->colour != MESH_COLOUR_LIGHT_ALPHA && !lit &&
             (c[0] | c[1] | c[2] | c[3]) > 255)
             return mesh_fail(MESH_WHY_COLOUR);
         int32_t w = r[2].sw[3];
@@ -669,14 +684,24 @@ static int mesh_build(void)
                 rgba |= (uint32_t)(int)(sum > 255 ? 255.0f : sum) << (i * 8);
             }
             o->rgba = rgba;
-        } else if (prog->colour == MESH_COLOUR_LIT_D5 || prog->colour == MESH_COLOUR_LIT) {   /* 1110 / 13A0: the lit pool entry */
+        } else if (lit) {   /* 1110 / 13A0: the lit pool entry */
             const float *L = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].f, l2 = L[3] * L[3];
             uint32_t rgba = 0;
             for (unsigned i = 0; i < 4; i++) {
-                float f = (float)c[i] * (prog->colour == MESH_COLOUR_LIT_D5 ? d5[i] : 1.0f);
+                float f = (float)(int32_t)c[i] * (prog->colour == MESH_COLOUR_LIT_D5 ? d5[i] : 1.0f);
                 float sum = d20[i] * l2 + (i < 3 ? d1015[i] : 0.0f) + f * (i < 3 ? L[i] : 1.0f);
-                if (!(sum > -1.0f)) return mesh_fail(MESH_WHY_COLOUR);   /* FTOI0 of a negative: the GS wraps it */
-                rgba |= (uint32_t)(int)(sum > 255 ? 255.0f : sum) << (i * 8);   /* (-1, 0) truncates to 0 */
+                /* A pool entry the lighting pass left alone holds integers: as floats, tiny numbers
+                   and, for a negative one, exponent 255, which the VU reads as a huge number (it has
+                   no NaN and no infinity; a result past the range saturates). */
+                if (!(sum - sum == 0))
+                    sum = mesh_vu(mesh_vu(mesh_vu(d20[i] * mesh_vu(mesh_vu(L[3]) * mesh_vu(L[3]))) +
+                                          (i < 3 ? d1015[i] : 0.0f)) +
+                                  mesh_vu(f * (i < 3 ? mesh_vu(L[i]) : 1.0f)));
+                if (!(sum - sum == 0)) return mesh_fail(MESH_WHY_COLOUR);
+                /* FTOI0 of min(sum, 255): a sum of -1 or less is stored as a negative word, of which
+                   the GS takes the low byte (and the clipper the word) */
+                words[k][i] = (uint32_t)mesh_ftoi(sum > 255 ? 255.0f : sum, 1.0f);
+                rgba |= (words[k][i] & 255) << (i * 8);
             }
             o->rgba = rgba;
         } else if (prog->colour == MESH_COLOUR_SCALED) {   /* min(c scale, 255), truncated */
