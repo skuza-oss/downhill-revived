@@ -44,7 +44,7 @@ DHDR_FN(dhdr_perf_read) uint32_t dhdr_perf_read(uint64_t *out, uint32_t count);
 DHDR_FN(dhdr_device_lost) int dhdr_device_lost(void);
 
 /* Finding 194 (Native VU): 1 while the native renderer can draw translated VU1 meshes, 0 once it
-   can't (no storage buffer for the vertex stage, or a mesh layout or pipeline the driver refused;
+   can't (a mesh pipeline the driver refused;
    logged once, and so for the rest of the session). C asks after each picture and sends the
    batches back to the emulated VU. Any thread; the browser's renderer always answers 0. */
 DHDR_FN(dhdr_native_meshes) int dhdr_native_meshes(void);
