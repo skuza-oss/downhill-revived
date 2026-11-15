@@ -362,6 +362,34 @@ static void upload(unsigned page, uint32_t color)
     for (unsigned i = 0; i < WIDTH * HEIGHT / 2; i++) gs_write(&gs, GS_HWREG, color | (uint64_t)color << 32);
 }
 
+/* A local-to-host read of a frame the native renderer drew (finding 250: Poster Maker reads its
+   512 x 224 frame back in two 512 x 112 reads, func_0019C220; before the fix the CPU's memory,
+   which never held the picture, came back black). Last, so no dumped VRAM above changes: the read
+   writes the surface's pixels into the CPU's memory. */
+static void colour_read(void)
+{
+    enum { ROWS = 112 };
+    static uint32_t read[WIDTH * ROWS];
+    clear(232, 0x80336699);
+    unsigned w = 0, h = 0;
+    ++kernel_vsync_count;
+    gs_native_vsync(&gs, &w, &h, 0);  /* the picture handed over: the read waits until it is drawn */
+    for (unsigned half = 0; half < 2; half++) {
+        memset(read, 0, sizeof read);
+        gs_write(&gs, GS_BITBLTBUF, 232ULL * 32 | 8ULL << 16);
+        gs_write(&gs, GS_TRXPOS, (uint64_t)(half * ROWS) << 16);
+        gs_write(&gs, GS_TRXREG, WIDTH | (uint64_t)ROWS << 32);
+        gs_write(&gs, GS_TRXDIR, 1);
+        size_t got = gs_read_image(&gs, read, sizeof read);
+        unsigned wrong = 0;
+        for (unsigned i = 0; i < WIDTH * ROWS; i++) wrong += read[i] != 0x80336699u;
+        int ok = got == sizeof read && !wrong;
+        if (!ok) failures++;
+        printf("colour read of a drawn frame, rows %u-%u: %s (%u of %u pixels not the drawn colour, first %08X)\n",
+               half * ROWS, half * ROWS + ROWS - 1, ok ? "PASS" : "FAIL", wrong, WIDTH * ROWS, read[0]);
+    }
+}
+
 int main(void)
 {
     gs_reset(&gs);
@@ -462,6 +490,7 @@ int main(void)
     show(400, 0x80336699, "no draw: font alpha over a copied surface");
     held(56, 0x80204060, "a held picture survives a draw into its surface");
     blend_scenes();
+    colour_read();
 
     if (presented_on) {
         printf("presented: %u pictures checked against the window\n", presented_checks);

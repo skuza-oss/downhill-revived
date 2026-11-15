@@ -26,8 +26,10 @@ over a running race (`online.c`, its own stick reading), other OPTIONS pages.
 ## Progress
 
 - [x] 2026-11-15: #103 read and fixed: `port/hle/menu_pads.c`, test `port/tools/test_menu_pads.py`
-- [ ] 2026-11-15: #102 reproduced on the hidden desktop
-- [ ] #102 fixed
+- [x] 2026-11-15: #102 reproduced on the hidden desktop (below), cause found: the native front end
+- [x] 2026-11-15: #102 fixed: `native_colour_read` (`port/gs/native_core.inc`) and
+  `dhdr_native_surface_read_begin` / `_finish` (`port/render/src/native/surface_read.rs`); test in
+  `port/gs/test_native_transfers.c`
 
 ## Decisions
 
@@ -45,7 +47,39 @@ over a running race (`online.c`, its own stick reading), other OPTIONS pages.
   the stick as to the d-pad: the stick is the d-pad there. The game's popup menus do not repeat a
   held direction at all (their latch `D_00660D80` holds until the pad is let go), so the room
   keeps its own rule for both.
+- **#102, read the picture from the GPU, not draw it twice.** The native renderer draws only on the
+  GPU; GS memory never holds its colour (by design: only the Z probe is answered, finding 097). A
+  local-to-host read of colour pages a native colour surface owns now waits until the handed
+  pictures are drawn (as `native_picture_read` does for screenshots), reads the read's rectangle
+  of that surface (each GS pixel the mean of its scale x scale texels; the bytes the CT32 import
+  puts in a surface, so a read gives back what an upload gave), and writes it into GS memory, which
+  `gs_read_image` packs as before. One hook for every colour read (`Gs.read_image`, called by
+  `gs_read_image` and `gs_defer_read_image`), not a Poster Maker case. Turning on exact colour
+  drawing for the frame instead would cost the exact renderer a whole frame for every read and
+  still miss the first one.
+- **What is not read.** A read in another layout than the surface's (width, 16 against 32 bits),
+  pages no colour surface owns, and runs with `DHD_EXACT_PROBE` (the deterministic checks: the exact
+  device answers there, unchanged) keep GS memory as it was. Draws recorded in the same field
+  before the read are not on the GPU yet, so not in it; dhd.log says so on its `gs native: colour
+  read` line (the first eight reads are logged). Poster Maker reads while the paused scene stands
+  still, so the field before is the same picture.
+- **Game state.** Only a colour read changes anything, and the game reads colour only in Poster
+  Maker (the reporter's log: `color_reads=0` over a session with a race). The state-trace recipes
+  never read colour, and they run with `DHD_EXACT_PROBE=1`, where the hook does nothing.
 
 ## Surprises
+
+- **#102 is every PC's, not the reporter's GPU.** Reproduced here first try on the hidden desktop
+  (`DHD_UNLOCK_ALL=1`, Single Player, Single Event, Race, Mt. Midoule FR, pause, POSTER MAKER, Cross,
+  Cross): the "Save Poster?" screen's preview is black with the native renderer, Native VU on and
+  with `DHD_NATIVE_VU1=off`; with the exact front end (`DHD_RENDER=exact`, the PS2's pixels) the same
+  route shows the scene. So no HLE piece is missing and the GS stream is right: the exact renderer,
+  which keeps GS memory as the PS2 does, answers the read. PCSX2 was not run (it opens a window);
+  the exact front end stands in for the referee here.
+- The poster comes from `func_0019C358`: two `sceGsExecStoreImage` reads of 512 x 112 CT32 at block
+  0x700 (`func_0019C220`), scaled 4 to 3 columns into a 384 x 224 RGB555 picture, which the preview
+  draws and the card saves (`BASCUS-97177PS/poster0`). Each read is over the deferred reads' 4096
+  pixels, so it runs as a plain `gs_read_image`, after the exact device's `sync_range` (which has
+  nothing: with the default Z probe the exact device draws nothing).
 
 ## Result

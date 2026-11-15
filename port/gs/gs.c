@@ -265,6 +265,7 @@ size_t gs_read_image(Gs *g, void *destination, size_t bytes)
         }
         g->sync_range(g, low * 8192, (high - low + 1) * 8192);
     }
+    if (g->read_image && !g->transfer_count && !g->transfer_have) g->read_image(g);
     Transfer t = {g->transfer_bits, g->transfer_count, g->transfer_have};
     size_t written = pack_pixels(g->vram, blt, pos, size, &t, destination, bytes);
     g->transfer_bits = t.bits; g->transfer_count = t.count; g->transfer_have = t.have;
@@ -313,6 +314,7 @@ size_t gs_defer_read_image(Gs *g, void *destination, size_t bytes)
             stale = 1;
     if (stale) return 0;  /* the caller settles the earlier reads and tries again */
     for (unsigned i = 0; i < 16; i++) want[i] &= ~deferred.captured[i];
+    if (g->read_image) g->read_image(g);  /* before the CPU image's pages are copied below */
     g->stage_pages(g, want, staged);
     for (unsigned page = 0; page < 512; page++) {
         uint32_t bit = 1u << (page & 31);

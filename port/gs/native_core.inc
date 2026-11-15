@@ -367,6 +367,9 @@ static void native_picture(Native *n, NativeFrame *f, const NativeVertex *vertic
 static void native_present(Native *n);  /* the last scanned-out picture again */
 /* The displayed picture (display_width x display_height) into pixels; 0 when there is none. */
 static int native_read_display(Native *n, uint32_t *pixels);
+/* GS pixels rect (x, y, w, h) of colour surface index into pixels (RGBA8, the mean of each pixel's
+   scaled texels), clipped to the texture: the clipped size in size; 0 when nothing was read. */
+static int native_read_surface(Native *n, int index, const uint32_t rect[4], uint32_t *pixels, uint32_t size[2]);
 static void native_present_options(Native *n);  /* the present filter; then native_aspect_options */
 
 /* ---- DHD_RSTAT: the render thread's per-picture budget (finding 108) ----
@@ -1940,6 +1943,64 @@ static void native_stage_pages(Gs *g, const uint32_t want[16], uint32_t staged[1
     stage_pages(g, want, staged);
 }
 
+/* gs.c's read_image: a local-to-host read of colour pages a native surface drew (finding 250;
+   Poster Maker reads its 512 x 224 frame back, func_0019C220, and its preview and saved poster are
+   that picture). The native renderer draws only on the GPU, so GS memory never held those pixels
+   (issue #102: a black poster). The pictures handed so far are drawn first (as native_picture_read
+   waits for them), then the surface's pixels (each the mean of its scaled texels) are written into
+   GS memory, which the transfer packs: so the read sees what the screen showed. Reads in another
+   layout than the surface's, pages no colour surface owns, and DHD_EXACT_PROBE runs (the exact
+   device answers there) keep GS memory as it is. */
+static void native_colour_read(Gs *g)
+{
+    NativeExact *gpu = g->backend;
+    Native *n = gpu->native;
+    uint64_t blt = g->reg[GS_BITBLTBUF], pos = g->reg[GS_TRXPOS], size = g->reg[GS_TRXREG];
+    unsigned psm = (unsigned)(blt >> 24) & 63, sbp = (unsigned)blt & 0x3FFF, sbw = (unsigned)(blt >> 16) & 63;
+    unsigned x0 = (unsigned)pos & 2047, y0 = (unsigned)(pos >> 16) & 2047;
+    unsigned w = (unsigned)size & 4095, h = (unsigned)(size >> 32) & 4095;
+    if (n->exact_probe || !psm_color(psm) || sbp % 32 || !w || !h) return;
+    n->stats.color_reads++;
+    int index = native_owner(n, g, sbp / 32), ox, oy;
+    const NativeSurface *s = index >= 0 ? &n->surfaces[index] : NULL;
+    if (!s || s->depth || s->bw != (sbw ? sbw : 1) || s->wide != psm_wide(psm) || !native_page_origin(s, sbp / 32, &ox, &oy))
+        return;
+    native_close(n, g);  /* the pending draw into the recording */
+    unsigned drawn = 0;  /* this field's commands into the surface: not on the GPU yet, so not read */
+    for (unsigned i = 0; i < n->recording->command_count; i++)
+        drawn += n->recording->commands[i].target == index;
+    uint32_t *pixels = malloc((size_t)w * h * 4), got[2] = {0, 0};
+    if (!pixels) native_oom("colour read");
+    native_mutex_lock(&n->queue_lock);
+    while (n->rendered < n->handed) native_cond_wait(&n->queue_changed, &n->queue_lock);
+    native_mutex_unlock(&n->queue_lock);
+    const uint32_t rect[4] = {(uint32_t)ox + x0, (uint32_t)oy + y0, w, h};
+    native_mutex_lock(&n->context_lock);
+    int ok = native_read_surface(n, index, rect, pixels, got);
+    native_mutex_unlock(&n->context_lock);
+    static unsigned logged;
+    if (logged < 8) {
+        logged++;
+        fprintf(stderr, "gs native: colour read field %llu psm %#x bp %#x bw %u %u,%u %ux%u from surface %d: %s %ux%u"
+                "%s\n", (unsigned long long)n->field, psm, sbp, sbw, x0, y0, w, h, index, ok ? "read" : "nothing read",
+                got[0], got[1], drawn ? " (this field's draws into it are not in it)" : "");
+    }
+    for (unsigned y = 0; ok && y < got[1]; y++)
+        for (unsigned x = 0; x < got[0]; x++) {
+            uint32_t v = pixels[y * got[0] + x];
+            uint32_t at = gs_pixel_address(psm, sbp, sbw, (x0 + x) & 2047, (y0 + y) & 2047);
+            uint32_t *word = &g->vram[(at / 32) & (GS_VRAM_SIZE / 4 - 1)];
+            if (psm == GS_PSMCT32) *word = v;
+            else if (psm == GS_PSMCT24) *word = (*word & 0xFF000000u) | (v & 0xFFFFFFu);
+            else {  /* 16 bits: 5:5:5 and the alpha bit, as a 16-bit draw leaves it (native_import_page's TEXA) */
+                uint32_t c = (v >> 3 & 0x1F) | (v >> 11 & 0x1F) << 5 | (v >> 19 & 0x1F) << 10 | (v >> 24 >= 0x40) << 15;
+                unsigned shift = at & 16;
+                *word = (*word & ~(0xFFFFu << shift)) | c << shift;
+            }
+        }
+    free(pixels);
+}
+
 /* ---- GS hooks ---- */
 
 static void native_draw(Gs *g, unsigned type, const GsVertex *v, unsigned count)
@@ -3466,6 +3527,7 @@ static void native_install(Gs *g, NativeExact *exact, Native *n, const char *api
     g->write_high = native_write_high;
     g->stage_pages = native_stage_pages;
     g->fetch_pages = native_fetch_pages;
+    g->read_image = native_colour_read;
     const char *exact_probe = getenv("DHD_EXACT_PROBE");
     n->exact_probe = exact_probe ? atoi(exact_probe) : 0;
     gs_mesh_hook = native_mesh;   /* DHD_NATIVE_VU1 (port/hle/vu1_mesh.inc, finding 164) */

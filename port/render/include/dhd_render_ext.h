@@ -49,6 +49,18 @@ DHDR_FN(dhdr_device_lost) int dhdr_device_lost(void);
    batches back to the emulated VU. Any thread; the browser's renderer always answers 0. */
 DHDR_FN(dhdr_native_meshes) int dhdr_native_meshes(void);
 
+/* Finding 250: a colour surface's pixels for a local-to-host transfer (the native renderer draws
+   only on the GPU; Poster Maker reads its frame back). begin copies GS pixels rect (x, y, w, h,
+   clipped to the texture) of colour surface index and starts mapping it (natively it blocks until
+   mapped; the browser waits in web_gpu_await before finish): 1 started, the clipped size in
+   size[2]; 0 nothing to read. finish writes size[0] * size[1] RGBA8 words, row-major, each the
+   mean of the pixel's scale x scale texels, in the bytes the CT32 import gives a surface (R G B A,
+   the GS alpha as it is): 1 ok, 0 the map failed (logged). Native render thread rules (under
+   context_lock); nothing else between begin and finish. */
+DHDR_FN(dhdr_native_surface_read_begin) int dhdr_native_surface_read_begin(DhdrNative *n, uint32_t index,
+                                                                           const uint32_t rect[4], uint32_t size[2]);
+DHDR_FN(dhdr_native_surface_read_finish) int dhdr_native_surface_read_finish(DhdrNative *n, uint32_t *pixels);
+
 #ifdef __cplusplus
 }
 #endif

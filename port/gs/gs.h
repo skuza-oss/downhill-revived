@@ -104,6 +104,10 @@ struct Gs {
     struct { uint32_t valid, cbp, cpsm, count, start, bytes; uint32_t source[256]; } clut_memo;
     uint64_t clut_writes;
     uint64_t resets;  /* CSR.RESET writes so far (the presenter's movie hold, finding 160). Not PS2 state. */
+    /* Optional: a local-to-host transfer starts (TRXDIR 1, the registers set): the backend puts
+       pixels it drew elsewhere (the native renderer's GPU surfaces, finding 250) into GS memory,
+       which the transfer packs. After sync_range. */
+    void (*read_image)(Gs *gs);
 };
 extern Gs gs;
 
