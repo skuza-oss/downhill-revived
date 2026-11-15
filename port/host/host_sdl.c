@@ -37,7 +37,9 @@ static void show_error_box(void *box)
 {
     const ErrorBox *b = box;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    (void)b;
+    /* SDL has no message box on iOS: the app's alert, waited for (port/ios/app/main.m) */
+    void ios_error_box(const char *title, const char *message) __attribute__((weak));
+    if (ios_error_box) ios_error_box(b->title, b->message);
 #else
     if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, b->title, b->message, NULL))
         fprintf(stderr, "(no error box: %s)\n", SDL_GetError());

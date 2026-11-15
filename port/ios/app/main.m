@@ -149,6 +149,28 @@ static UIWindow *app_window(void) { return ((AppDelegate *)UIApplication.sharedA
 
 @end
 
+/* host_error_box on iOS (host_sdl.c; SDL has none here): an alert over whatever is on the screen,
+   and the asking thread waits for its OK, as a desktop's box waits, before the game goes on to
+   end (finding 258: the guest memory's failure says why instead of closing silently). From the
+   main thread itself nothing can wait for the alert: the log has the line. */
+void ios_error_box(const char *title, const char *message) {
+    if (NSThread.isMainThread) return;
+    NSString *head = [NSString stringWithUTF8String:title ? title : ""];
+    NSString *text = [NSString stringWithUTF8String:message ? message : ""];
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *top = app_window().rootViewController;
+        while (top.presentedViewController) top = top.presentedViewController;
+        if (!top) { dispatch_semaphore_signal(done); return; }
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:head message:text
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction *action) { (void)action; dispatch_semaphore_signal(done); }]];
+        [top presentViewController:alert animated:YES completion:nil];
+    });
+    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+}
+
 int main(int argc, char *argv[]) {
     @autoreleasepool {
         return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class]));
