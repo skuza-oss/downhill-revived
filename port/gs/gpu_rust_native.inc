@@ -155,7 +155,9 @@ static int native_init(Gs *g, Rust *exact)
     }
     /* The draw pipelines of earlier runs are built ahead (finding 256): pipelines.txt in
        DHD_DATA_DIR (the launcher's folder for the player's files), else beside the game (on
-       Android the app's files folder), as dhd.log. */
+       Android the app's files folder), as dhd.log. The GS test programs link without the host
+       and keep no list. */
+#ifndef DHD_GS_TEST_BUILD
     {
         const char *host_getenv(const char *name);          /* port/host (host_api.h) */
         unsigned host_exe_path(char *out, unsigned size);
@@ -167,6 +169,7 @@ static int native_init(Gs *g, Rust *exact)
         else snprintf(list + at, sizeof list - at, "pipelines.txt");
         dhdr_native_pipeline_list(list);
     }
+#endif
     Native *n = native_create_rust(exact, scale_memory, &start);
     if (!n) return 0;
     /* A texture pack (dhd.ini texture_pack, textures): its default budget is half the card's memory. */
