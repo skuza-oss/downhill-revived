@@ -322,18 +322,12 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
     let spec = (full >> SPEC_SHIFT) as u32;
     let texels = key & TEXELS != 0;
     let mesh = key & MESH != 0;
-    let entry = match (d.entry, texels, mesh) {
-        ("native_pixel", true, false) => "native_pixel_u",
-        ("native_pixel_blend", true, false) => "native_pixel_blend_u",
-        ("native_pixel_dual", true, false) => "native_pixel_dual_u",
-        // a mesh draw's MeshVaryings (native.wgsl's native_pixel*_mesh)
-        ("native_pixel", false, true) => "native_pixel_mesh",
-        ("native_pixel_blend", false, true) => "native_pixel_blend_mesh",
-        ("native_pixel_dual", false, true) => "native_pixel_dual_mesh",
-        ("native_pixel", true, true) => "native_pixel_u_mesh",
-        ("native_pixel_blend", true, true) => "native_pixel_blend_u_mesh",
-        ("native_pixel_dual", true, true) => "native_pixel_dual_u_mesh",
-        (e, _, _) => e,
+    // A mesh draw's fragment stage is the GS draws' (native.wgsl's native_mesh_vertex gives Varyings).
+    let entry = match (d.entry, texels) {
+        ("native_pixel", true) => "native_pixel_u",
+        ("native_pixel_blend", true) => "native_pixel_blend_u",
+        ("native_pixel_dual", true) => "native_pixel_dual_u",
+        (e, _) => e,
     };
     let fragment_module = if d.dual_module {
         objects

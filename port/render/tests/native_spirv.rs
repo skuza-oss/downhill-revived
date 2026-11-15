@@ -237,12 +237,6 @@ fn stages() -> Vec<Stage> {
         (Native, "native_pixel_blend_u"),
         (Dual, "native_pixel_dual"),
         (Dual, "native_pixel_dual_u"),
-        (Native, "native_pixel_mesh"),
-        (Native, "native_pixel_blend_mesh"),
-        (Native, "native_pixel_u_mesh"),
-        (Native, "native_pixel_blend_u_mesh"),
-        (Dual, "native_pixel_dual_mesh"),
-        (Dual, "native_pixel_dual_u_mesh"),
     ];
     for (source, entry) in fragments {
         for scale in [0u32, 1, 2, 4, 8] {
