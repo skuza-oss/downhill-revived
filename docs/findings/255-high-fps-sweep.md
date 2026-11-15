@@ -59,7 +59,7 @@ on every one); the indices of "Still open" are x3.3-4.5 on every track.
 |---|---|---|
 | Title PRESS X TO START pulse | `001ED3E0`: the box's edges `D_0029E008`/`D_0029E00C` += `D_0029E018` (2.4) per call | x3.62 -> x0.977 at field ends, x1.000 read every update (2159.9 / 2159.9 units over 900 fields) |
 | Effects' rotating matrix | `0022E3D0`: `D_0027BF00` turned by the fixed rotation `D_0027BF40` per call (every menu and race) | x3.72 -> x1.002 |
-| Every menu's age | `001F74F0`: `count++` up to 1000 per call | x4 until the cap (seen as x1.27 in a 10 s window) -> x1.00 (whole fields) |
+| Every menu's age | `001F74F0`: `count++` up to 1000 per call | x4 until the cap (seen as x1.27 in a 10 s window) -> x1.00 (whole fields, never left at 0) |
 
 - **The title pulse.** Retail moved the edges 2.4 a field and flipped the direction at >= 400 or
   <= 352: from its start at 401.6 it turns at 351.2 and 401.6, a 42-field pulse. On the
@@ -67,16 +67,44 @@ on every one); the indices of "Still open" are x3.3-4.5 on every track.
   alone held the box still: from 401.6 a quarter step (0.6) stays above 400, so the flip ran on
   every update. The delta path moves the edges by `port_step()` and turns the direction only
   when it points out of the range, at retail's own turning points (351.2, 401.6): finer steps
-  turning at 352/400 made a 40.5-field pulse (3.6 % quicker). The field-end reading's 2.3 % is
-  the corner cut where a turn falls inside a field.
+  turning at 352/400 made a 40.5-field pulse (3.6 % quicker). A step that passes a turning point
+  is reflected back inside it (the review's find: at 30 fps a 4.8-unit step went to 348.8, a
+  44-field cycle; uneven slow frames changed range and cadence). One-field steps land on the
+  turning points, so 60 takes no reflection: retail's arithmetic. The field-end reading's 2.3 %
+  is the corner cut where a turn falls inside a field.
 - **The effect matrix.** Finding 090 put the matrix's wobble phase (`D_0029DBAC`) on whole fields,
   but the turn itself (`func_00221A60` by `D_0027BF40`, then the axis reset and `func_00222800`)
   ran per call. It now turns once per whole field (0-2 an update), each turn retail's.
 - **Menu age.** The counter every menu block keeps at +4 (`func_001F74F0`); it counts whole
-  fields, as finding 139's counters.
+  fields, as finding 139's counters, and is never left at 0: `func_001F7420` takes 0 as
+  "initialize" (selection and fades reset, a press lost), and above 60 a menu's first update often
+  has no whole field (the review's find). Retail's age counts calls (at boot the field counter
+  stands still while it counts), and no code reads it but that `== 0` and the `< 1000` cap
+  (assembly searched; `menu_page.c` names the field `frames` and never reads it), so steps of two
+  fields below 60 skip no value anything tests.
 
 All three keep retail's arithmetic on the original clock: boot and race state traces equal the
 base build's.
+
+### The pulse and the menu age at 30, 45, 60, 240 and uneven steps
+
+`port/tools/test_menu_rate.py` (`docs/TESTING.md`): every update, the box's edge against retail's
+42-field triangle in game time, and per screen opened the updates until its menu block is counted
+(retail: 1). 20 fps plays the same steps as 30 (the clock caps a step at two fields). Uneven:
+`DHD_STEP_PATTERN=0.25,0.5,0.25,1.75,0.25,0.5,2,0.25,0.75,0.25,1.25,0.5` at 240.
+
+| Run | Before (3c6c6cae + the test): pulse | menus | After: pulse | menus |
+|---|---|---|---|---|
+| 60 (original clock) | 351.20..401.60, error 0.000 | 1, 1, 1, 1 | the same | the same |
+| 60 delta paths | 351.20..401.60, 0.000 | 1, 1, 1, 1 | the same | the same |
+| 30 | 348.80..401.60, 52.8 (44-field cycle) | 1, 1, 1, 1 | 353.60..401.60, 0.000 | 1, 1, 1, 1 |
+| 45 | 350.38..404.80, 52.8 | 1, 1, 1, 1 | 352.00..401.60, 0.001 | 1, 1, 1, 1 |
+| 240 | 351.11..402.20, 41.9 | 1, 1, 2, 3 | 351.20..401.60, 0.055 | 1, 1, 1, 1 |
+| uneven | 347.00..404.60, 51.6 | 2, 2, 2, 1 | 351.20..401.60, 0.009 | 1, 1, 1, 1 |
+
+The range is read at update ends (at 30 the turn at 351.2 falls inside an update). 240's 0.055 is
+float rounding of 0.6-unit steps, growing about 0.004 units per 100 fields: a cycle of 42.0006
+fields. The test's tolerance is 0.1 units.
 
 ## Confirmed, not changed
 
@@ -131,6 +159,8 @@ across tracks, which is how the rows above were picked.
 - [x] Sweep tool (6241cc77), gates and bookkeeping list (75445c86).
 - [x] Title pulse (ab138042), effect matrix (ea88d52a), menu age (3f744af9).
 - [x] Checks (below).
+- [x] Review fixes: the test (aa03fc38, f64c0e04), menu age never 0 (ecd7fef1), pulse
+  reflection (287adb8a).
 
 ## Checks
 
@@ -138,9 +168,13 @@ across tracks, which is how the rows above were picked.
   base build 34d6273d: boot 600/600, race 5000/5000 rows, `state_diff.py` PASS.
 - `python tools/check.py docs`, `quick`, `port`: OK (on the branch head 3f744af9 plus these docs).
 - `rate_sweep.py` on the base-with-tools build and the branch build, all scenes (numbers above).
+- Review fixes: `test_menu_rate.py` fails on the build before them and passes after (table
+  above); boot 600/600 and race 5000/5000 rows equal the base build's (`state_diff.py` PASS);
+  `check.py quick`, `port`, `docs` OK.
 
 ## Result
 
 What changed: `port/patches_fps.py` (the three fixes), `port/hle/rate_audit.c` (field-end
-sampling, race and replay gates), `port/hle/fps.c` (`DHD_TEST_FINISH`, `port_clock_playing`),
-`port/tools/rate_sweep.py` (new), `docs/TESTING.md`.
+sampling, race and replay gates, `DHD_RATE_WATCH`), `port/hle/fps.c` (`DHD_TEST_FINISH`,
+`port_clock_playing`, `DHD_STEP_PATTERN`), `port/tools/rate_sweep.py` and
+`port/tools/test_menu_rate.py` (new), `docs/TESTING.md`.
