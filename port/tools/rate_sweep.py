@@ -26,7 +26,10 @@ pointers) show too, at rate/60: read each against its code before calling it a b
 Scenes (--list): the boot title (menu 0), each menu on the route to a race (the route stops
 before the step that leaves it), every track's first minute of race (every track unlocked, the
 chooser moved right N times, Cross held), the race's results (DHD_TEST_FINISH: the player's rider
-finishes at race second 20) and a replay (DHD_REPLAY_TEST: the replay starts at race second 20).
+finishes at race second 20) and a replay (DHD_REPLAY_TEST: the replay starts at race second 20;
+its 60 run takes the delta-time paths at one field a step, DHD_STEP_CLOCK=1, as replays exist
+only there). Race scenes start once a race's loop runs (DHD_RATE_AUDIT_RACE): the phase and race clock words
+hold stale values before the first race.
 
 The audits hold game-derived state: --out must be below build/ (or outside the checkout with
 --external-out). Exit status 0 when every scene ran and nothing differs (or --report-only).
@@ -50,6 +53,31 @@ import state_trace_run  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 EXE = ROOT / 'build' / 'host64-exe' / 'dhd64.exe'
 TRACKS = 26  # track chooser positions with every track unlocked (finding 193: 0..25)
+# Words the game counts once per picture or per update by design, with no game-time meaning
+# (finding 255 read each): listed apart, not a difference.
+BOOKKEEPING = {
+    'D_0029E10C': 'picture counter (001B4DD0: its parity picks the double buffer)',
+    'D_0029E110': 'picture double-buffer flag (001B4DD0)',
+    'D_0029E160': 'animation clock, 1/1024 field on the delta-time clock (finding 090)',
+    'D_0029E218': 'texture cache use stamp (00218C28)',
+    'D_0029E224': 'texture cache bank flip (00219EC8)',
+    'D_00625190': 'texture cache slots: use stamps (00218C28)',
+    'D_004C8940': 'SIF RPC client, calls per picture (00201180)',
+    'D_00660380': 'pad read buffers, read each update (0021F400)',
+    'D_0027ECC0': 'GS frame descriptors, set per picture (0023C8D8)',
+    'D_00528380': 'GS frame descriptors, set per picture (0023D098)',
+    'D_0029E284': 'particle packet buffer flag (0021D250)',
+    'D_0029E3E0': "the original clock's timer count (00238C00; the port's clock replaces it)",
+    'D_0029E3E8': "the original clock's timer count (00238C00)",
+    'D_0029E3EC': "the original clock's timer count (00238C00)",
+    'D_00513B00': 'draw list double buffer (001517D0)',
+    'D_00660200': 'DMA packet buffer, uncached (0021F0A0)',
+    'D_0062F980': 'DMA packet buffer',
+    'D_0062E850': 'texture cache (00218C28)',
+    'D_0062E890': 'texture cache (00218C28)',
+    'D_00279450': 'SIF RPC buffers (00201180)',
+    'D_00279468': 'SIF RPC buffers (00201180)',
+}
 
 
 def route_until(index):
@@ -74,16 +102,21 @@ def scenes():
                                      what=f'menu {menu} on the race route, idle')
     race_env = dict(DHD_RACE_SYNC='1', DHD_RACE_PAD=state_trace_run.FULL_PEDAL)
     for n in range(TRACKS):
-        result[f'track{n}'] = dict(nav=state_trace_run.track_nav(n), menu=9, phase='2-4', skip=10, fields=3600,
+        result[f'track{n}'] = dict(nav=state_trace_run.track_nav(n), menu=9, phase='2', race=1, skip=10, fields=3600,
                                    env=dict(race_env, DHD_UNLOCK_ALL='1'),
                                    what=f'race, the chooser moved right {n} (every track unlocked), first minute')
-    result['countdown'] = dict(nav=state_trace_run.RACE_NAV, menu=9, phase='1', skip=0, fields=150, env=race_env,
+    # from the load to GO the race runs on the field grid (finding 142): one field a step at every
+    # rate, so the window counts the same updates (grid)
+    result['countdown'] = dict(nav=state_trace_run.RACE_NAV, menu=9, phase='1', skip=0, fields=150, env=race_env, grid=True,
                                what='Mt. Midoule FR, the countdown before GO')
-    result['results'] = dict(nav=state_trace_run.RACE_NAV, menu=9, phase='4', skip=60, fields=900,
+    # after the finish the race stays in phase 3 with its clock stopped near the finish
+    result['results'] = dict(nav=state_trace_run.RACE_NAV, menu=9, phase='3', race=1, skip=60, fields=900,
                              env=dict(race_env, DHD_TEST_FINISH='20'),
                              what='Mt. Midoule FR, the results after a finish at race second 20')
-    result['replay'] = dict(nav=state_trace_run.RACE_NAV, menu=9, phase='2-4', skip=20 * 60 + 300, fields=900,
-                            env=dict(race_env, DHD_REPLAY_TEST='20'),
+    # from 5 s into the replay (race=2: the clock plays a replay's steps); replays exist on the
+    # delta-time clock only, so its 60 run takes those paths at one field a step
+    result['replay'] = dict(nav=state_trace_run.RACE_NAV, menu=9, phase=None, race=2, skip=300, fields=900,
+                            env=dict(race_env, DHD_REPLAY_TEST='20'), env60=dict(DHD_STEP_CLOCK='1'),
                             what='Mt. Midoule FR, a replay of the first 20 s, from 5 s into it')
     return result
 
@@ -91,7 +124,7 @@ def scenes():
 def run_one(args, scene, spec, rate, out):
     out.mkdir(parents=True, exist_ok=True)
     audit = out / f'{scene}-{rate}.txt'
-    scale = rate / 60
+    scale = 1 if spec.get('grid') else rate / 60
     env = rate_audit.game_env(rate, audit, round(spec['skip'] * scale), round(spec['fields'] * scale), 'boot',
                               args.seed, spec['menu'], spec['phase'])
     env['DHD_NAV'] = spec['nav']
@@ -99,6 +132,10 @@ def run_one(args, scene, spec, rate, out):
     if 'DHD_RACE_SYNC' in spec['env']:
         env['DHD_RACE_SEED'] = str(args.seed)
     env.update(spec['env'])
+    if rate == 60:
+        env.update(spec.get('env60', {}))
+    if spec.get('race'):
+        env['DHD_RATE_AUDIT_RACE'] = str(spec['race'])
     for item in args.env or ():
         key, _, value = item.partition('=')
         env[key] = value
@@ -141,11 +178,14 @@ def compare(low_path, high_path, args, addresses):
         high = rhi.get(addr, (0.0,))[0]
         ratio = (high / max(fhi, 1)) / (travel / f60)
         if abs(ratio - 1) > args.tolerance:
-            rows.append(dict(addr=f'0x{addr:08X}', symbol=symbol_of(addresses, addr), kind=kind, ratio=ratio,
+            symbol = symbol_of(addresses, addr)
+            rows.append(dict(addr=f'0x{addr:08X}', symbol=symbol, kind=kind, ratio=ratio,
                              per_field_60=travel / f60, per_field_high=high / max(fhi, 1), changes_60=changes,
                              changes_high=rhi.get(addr, (0, '', '', 0))[3], value_60=value))
     rows.sort(key=lambda r: -abs(r['ratio'] - 1))
-    return dict(fields_60=f60, fields_high=fhi, samples_60=n60, samples_high=int(hhi.get('samples', 0)),
+    known = [r for r in rows if r['symbol'].split('+')[0] in BOOKKEEPING]
+    rows = [r for r in rows if r['symbol'].split('+')[0] not in BOOKKEEPING]
+    return dict(bookkeeping=sorted({r['symbol'].split('+')[0] for r in known}),fields_60=f60, fields_high=fhi, samples_60=n60, samples_high=int(hhi.get('samples', 0)),
                 gate_fail=(h60.get('gate_fail'), hhi.get('gate_fail')), menus=(h60.get('menu1'), hhi.get('menu1')),
                 phases=(h60.get('phase1'), hhi.get('phase1')), words=rows)
 
@@ -215,6 +255,8 @@ def main():
         print(f'\n{name}: {table[name]["what"]}; fields {result["fields_60"]} / {result["fields_high"]}, '
               f'end menu {result["menus"]} phase {result["phases"]}, '
               f'{len(result["words"])} words outside +-{args.tolerance:.0%}')
+        if result['bookkeeping']:
+            print('  bookkeeping (not counted): ' + ', '.join(result['bookkeeping']))
         for symbol, words in grouped(result['words'])[:args.top]:
             words.sort(key=lambda w: -abs(w['ratio'] - 1))
             w = words[0]

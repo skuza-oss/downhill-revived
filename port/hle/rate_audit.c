@@ -24,6 +24,12 @@
      DHD_RATE_AUDIT_MIN=<x>      smallest travel written (default 0.01)
      DHD_RATE_AUDIT_MAX=<n>      give up after n updates without the gates holding (default 200000)
      DHD_RATE_AUDIT_STEPS=<file> one line per sampled update: index, menu, phase, field
+     DHD_RATE_AUDIT_CLOCK=<n>    ... and the race clock (0x0843EEC8, fields since GO) to be at least n:
+                                 the race phase word keeps a stale value from the menus and the
+                                 race load (rate_sweep.py's race scenes)
+     DHD_RATE_AUDIT_RACE=1|2     ... and a race's loop running (port_in_race(): before the first
+                                 race the phase and clock words hold stale values); 2: a replay
+                                 playing (the clock's replay grid, finding 142)
      DHD_RATE_AUDIT_FIELDS=1     compare RAM only at updates that end a field, with RAM at the
                                  previous field's end (port/tools/rate_sweep.py, finding 255): both
                                  rates then see the same instants, so a curve sampled four times
@@ -59,6 +65,7 @@
 #define BLOCKS (WORDS / 2u)   /* the scan compares two 32-bit words per load */
 #define MENU_ADDR 0x0829DED8u   /* the same words fps.c and the state trace read */
 #define PHASE_ADDR 0x0843F348u
+#define CLOCK_ADDR 0x0843EEC8u
 
 extern int D_0029E3D8;  /* the game's 60 Hz field counter (patch of func_00238C00, fps.c) */
 
@@ -76,11 +83,11 @@ static struct {
     unsigned long long skip, want, skip_left, samples, ticks, max_ticks, rows;
     unsigned long long field0, field1, gate_fail;
     int menu0, menu1, phase0, phase1;
-    int gate_menu, gate_phase_lo, gate_phase_hi;
+    int gate_menu, gate_phase_lo, gate_phase_hi, gate_clock, gate_race;
     int rate;
     int fields_only;         /* DHD_RATE_AUDIT_FIELDS: scan at field ends only */
     int32_t last_field;
-} ra = { .on = -1, .gate_menu = -1, .gate_phase_lo = -1, .gate_phase_hi = -1 };
+} ra = { .on = -1, .gate_menu = -1, .gate_clock = -1, .gate_phase_lo = -1, .gate_phase_hi = -1 };
 
 static unsigned long long env_ull(const char *name, unsigned long long fallback)
 {
@@ -183,6 +190,8 @@ static void audit_finish(const char *why)
 static int gate_holds(void)
 {
     if (ra.gate_menu >= 0 && *(volatile int32_t *)(uintptr_t)MENU_ADDR != ra.gate_menu) return 0;
+    if (ra.gate_race && (!port_in_race() || (ra.gate_race == 2 && !port_clock_playing()))) return 0;
+    if (ra.gate_clock >= 0 && *(volatile int32_t *)(uintptr_t)CLOCK_ADDR < ra.gate_clock) return 0;
     if (ra.gate_phase_lo >= 0) {
         int32_t phase = *(volatile int32_t *)(uintptr_t)PHASE_ADDR;
         if (phase < ra.gate_phase_lo || phase > ra.gate_phase_hi) return 0;
@@ -205,6 +214,9 @@ static void audit_init(void)
     ra.min_travel = getenv("DHD_RATE_AUDIT_MIN") ? atof(getenv("DHD_RATE_AUDIT_MIN")) : 0.01;
     if (getenv("DHD_RATE_AUDIT_MENU") && *getenv("DHD_RATE_AUDIT_MENU"))
         ra.gate_menu = atoi(getenv("DHD_RATE_AUDIT_MENU"));
+    ra.gate_race = (int)env_ull("DHD_RATE_AUDIT_RACE", 0);
+    if (getenv("DHD_RATE_AUDIT_CLOCK") && *getenv("DHD_RATE_AUDIT_CLOCK"))
+        ra.gate_clock = atoi(getenv("DHD_RATE_AUDIT_CLOCK"));
     const char *phase = getenv("DHD_RATE_AUDIT_PHASE");
     if (phase && *phase) {
         ra.gate_phase_lo = atoi(phase);

@@ -183,6 +183,7 @@ static int grid_code=CODE_FIELD, grid_phase, grid_phase_before, grid_anim, grid_
 
 void port_clock_grid(int mode) { grid_asked=mode; grid_seen=1; }
 int port_clock_recording(void) { return grid==GRID_RECORD; }
+int port_clock_playing(void) { return grid==GRID_PLAY; }
 int port_clock_code(void) { return grid_code; }
 
 /* A step in fields as a code: the nearest 1/120 field, no shorter than a step at the selected
