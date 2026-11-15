@@ -110,7 +110,7 @@ export const layout = {
     ]
   },
   "NetLobby": {
-    "size": 5240,
+    "size": 5248,
     "state": [
       0,
       4
@@ -345,6 +345,10 @@ export const layout = {
     ],
     "ended": [
       5236,
+      4
+    ],
+    "seat_lost": [
+      5240,
       4
     ]
   },
