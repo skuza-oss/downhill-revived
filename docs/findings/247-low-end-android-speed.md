@@ -34,6 +34,11 @@ Out of scope: gameplay, the picture's content, players' settings, anything findi
   (`DHD_TIMELINE`, `DHD_RSTAT`, `DHD_GPU_TIMES`, `DHD_GPU_STATS`): the GPU limits the race.
 - [x] 2026-11-15: change 1, `de0c0f00`: the present samples the picture from its display surface,
   the scanout's copy is not made. Kept: the race +7.9 %, the race start +6.5 %.
+- [x] 2026-11-15: review fix on change 1: once the copy is made (`materialize`) the picture is
+  the display texture's and the present no longer samples the surface, which may have been drawn
+  into since (a field that scans nothing out, then the held picture presented again);
+  `test_native_transfers.py --presented` has that sequence. No copy is made in a race field, so
+  the measured gain is untouched.
 - [x] 2026-11-15: change 2 (the frame in one pass): +1.1 % over the race, +2.2 % at the race
   start. Under the bar, not on the branch (kept aside, see "Tried and dropped").
 - [x] 2026-11-15: hypothesis 3 (a swapchain of three buffers with V-Sync off): nothing.

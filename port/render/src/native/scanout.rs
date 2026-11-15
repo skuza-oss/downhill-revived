@@ -59,8 +59,6 @@ pub struct Direct {
     pub doubled: bool,
     /// The scanout's 12 words, for `materialize`.
     words: [u32; 12],
-    /// Whether the display texture holds this picture too (`materialize` ran).
-    copied: bool,
 }
 
 /// `materialize`'s own display words (the scanout outside a picture, where the picture's arena is
@@ -92,8 +90,9 @@ fn plain_rect(d: &[u32; 12], s: u32, tw: u32, th: u32) -> Option<[u32; 2]> {
 }
 
 pub struct Display {
-    /// The last picture when it is shown straight from its surface; None when the display texture
-    /// alone holds it (a copied scanout, a movie, black).
+    /// The last picture while it is shown straight from its surface; None when the display texture
+    /// holds it (a copied scanout, a movie, black, and from `materialize` on: the surface may be
+    /// drawn into again after it, so the present must not read it any more).
     direct: Option<Direct>,
     words: Option<Words>,
     target: Option<Target>,
@@ -135,24 +134,26 @@ impl Display {
         self.target.as_ref().map(|t| &t.texture)
     }
 
-    /// The last picture when the present can sample it straight from its display surface.
+    /// The last picture while the present samples it straight from its display surface: the
+    /// display texture holds an older one until `materialize` copies it.
     pub fn direct(&self) -> Option<&Direct> {
         self.direct.as_ref()
     }
 
-    /// Whether the last picture is on its display surface only: the display texture holds an
-    /// older one until `materialize` copies it.
+    /// Whether the last picture is on its display surface only (`direct`).
     pub fn uncopied(&self) -> bool {
-        self.direct.as_ref().is_some_and(|d| !d.copied)
+        self.direct.is_some()
     }
 
     /// The scanout that a direct picture skipped, now: its surface into the display texture (the
     /// surface still holds what the picture showed: the caller runs this before anything draws into
     /// it again), recorded into `encoder`. For what reads the display texture itself: a read-back,
-    /// the widescreen fill, and a picture that will show nothing new.
+    /// the widescreen fill, and a picture that will show nothing new. The picture is the display
+    /// texture's from here on: `direct` is None, so a later present of the same picture samples
+    /// the copy and not a surface that has been drawn into since.
     pub fn materialize(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, o: &ScanoutObjects,
                        uniform_layout: &wgpu::BindGroupLayout) {
-        let Some(direct) = self.direct.as_mut().filter(|d| !d.copied) else { return };
+        let Some(direct) = self.direct.take() else { return };
         let Some(t) = &self.target else { return };
         let words = self.words.get_or_insert_with(|| {
             let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -191,7 +192,6 @@ impl Display {
         pass.set_bind_group(1, &group, &[]);
         let rows = if d[7] == 1 { d[6].div_ceil(2) } else { d[6] };
         pass.dispatch_workgroups(d[5].div_ceil(8), rows.div_ceil(8), 1);
-        direct.copied = true;
     }
 
     /// Changes whenever the display texture is remade (a bind group on `view` is then stale).
@@ -318,7 +318,6 @@ impl Display {
                     map: [d[5] as f32, d[6] as f32, origin[0] as f32, origin[1] as f32],
                     doubled: d[7] == 1,
                     words: d,
-                    copied: false,
                 });
                 return true;
             }

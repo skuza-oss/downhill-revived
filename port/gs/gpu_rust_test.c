@@ -1,5 +1,5 @@
 /* The test build's hooks of the Rust renderer (DHD_GS_TEST_BUILD; task HK):
-   gs_wgpu_depth_probe, gs_wgpu_adapter and gs_wgpu_presented, over dhd_render's dhdr_test_*
+   gs_wgpu_depth_probe, gs_wgpu_adapter, gs_wgpu_presented and gs_wgpu_present_again, over dhd_render's dhdr_test_*
    exports (cargo feature test-hooks), for test_depth.c, test_present.c and test_native_transfers.c.
 
    Not a translation unit of its own: gpu_rust.c includes it at its end, in the test build only
@@ -32,5 +32,15 @@ const uint32_t *gs_wgpu_presented(unsigned *width, unsigned *height)
     const uint32_t *pixels = dhdr_test_presented(&w, &h);
     *width = w; *height = h;
     return pixels;
+}
+
+/* test_native_transfers.c: the last scanned-out picture presented again (native_present), as a
+   repeated refresh presents it (DHD_INTERP_MODE=once, the browser's frames between two fields). */
+void gs_wgpu_present_again(Gs *g)
+{
+    Native *n = ((NativeExact *)g->backend)->native;
+    native_mutex_lock(&n->context_lock);
+    native_present(n);
+    native_mutex_unlock(&n->context_lock);
 }
 #endif
