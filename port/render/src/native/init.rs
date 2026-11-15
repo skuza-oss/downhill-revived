@@ -251,6 +251,9 @@ pub struct Objects {
     present_bgra: std::sync::OnceLock<wgpu::RenderPipeline>,
     /// Widescreen's fill beside a 4:3 picture (present.rs): `present_shrink` (draw layout) into
     /// the small RGBA8 texture, and `present_fill` into RGBA8 or BGRA8; made at the first filled picture
+    /// `present_direct` (finding 247) per surface format, each made on its first use.
+    direct_rgba: std::sync::OnceLock<wgpu::RenderPipeline>,
+    direct_bgra: std::sync::OnceLock<wgpu::RenderPipeline>,
     fill_shrink: std::sync::OnceLock<wgpu::RenderPipeline>,
     fill_rgba: std::sync::OnceLock<wgpu::RenderPipeline>,
     fill_bgra: std::sync::OnceLock<wgpu::RenderPipeline>,
@@ -591,6 +594,13 @@ impl Objects {
         self.present_bgra.get_or_init(|| fullscreen_pipeline(gpu, &self.module, &self.draw_layout, "present_pixel", Some(format)))
     }
 
+    /// `present_direct` into a target of `format` (as `present_pipe`): the picture sampled from
+    /// its display surface.
+    pub fn direct_pipe(&self, gpu: &Gpu, format: wgpu::TextureFormat) -> &wgpu::RenderPipeline {
+        let pipe = if format == wgpu::TextureFormat::Rgba8Unorm { &self.direct_rgba } else { &self.direct_bgra };
+        pipe.get_or_init(|| fullscreen_pipeline(gpu, &self.module, &self.draw_layout, "present_direct", Some(format)))
+    }
+
     /// The fill's pipelines (present.rs): `present_shrink` into the small RGBA8 texture, and
     /// `present_fill` into a target of `format` (as `present_pipe`).
     pub fn fill_pipes(&self, gpu: &Gpu, format: wgpu::TextureFormat) -> (&wgpu::RenderPipeline, &wgpu::RenderPipeline) {
@@ -752,6 +762,8 @@ impl Objects {
             upload_pipe,
             present_rgba,
             present_bgra: std::sync::OnceLock::new(),
+            direct_rgba: std::sync::OnceLock::new(),
+            direct_bgra: std::sync::OnceLock::new(),
             fill_shrink: std::sync::OnceLock::new(),
             fill_rgba: std::sync::OnceLock::new(),
             fill_bgra: std::sync::OnceLock::new(),

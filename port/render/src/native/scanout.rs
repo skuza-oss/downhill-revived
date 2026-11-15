@@ -47,7 +47,54 @@ struct Read {
     status: Arc<Mutex<Option<Result<(), wgpu::BufferAsyncError>>>>,
 }
 
+/// A picture shown straight from its display surface (finding 247): what the scanout would have
+/// copied, for the present to sample where it lies.
+pub struct Direct {
+    /// The display surface's texture view.
+    pub view: wgpu::TextureView,
+    /// native.wgsl's `Present::map`: the displayed picture's width and height (display texture
+    /// pixels), then its origin in the surface (surface pixels).
+    pub map: [f32; 4],
+    /// The interlaced display: each surface row is two rows of the picture.
+    pub doubled: bool,
+    /// The scanout's 12 words, for `materialize`.
+    words: [u32; 12],
+}
+
+/// `materialize`'s own display words (the scanout outside a picture, where the picture's arena is
+/// not written): native.wgsl's `Display`, 48 bytes, on init.rs's uniform layout at offset 0.
+struct Words {
+    buffer: wgpu::Buffer,
+    group: wgpu::BindGroup,
+}
+
+/// DHD_DIRECT_PRESENT=0 (tests, comparisons): every picture is copied to the display texture, as
+/// before finding 247.
+fn direct_allowed() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("DHD_DIRECT_PRESENT").map_or(true, |v| v != "0"))
+}
+
+/// Whether the scanout of `d` (the 12 words, sizes already times the scale `s`) from a surface
+/// texture of `tw` x `th` pixels is a plain copy of one rectangle of that texture: no wrap at the
+/// 2048 pixels of the GS and nothing read outside the texture (the scanout shows black there). Its
+/// origin in the texture then.
+fn plain_rect(d: &[u32; 12], s: u32, tw: u32, th: u32) -> Option<[u32; 2]> {
+    let (ox, oy) = (d[3] & 2047, d[4] & 2047);
+    let (w, h) = (d[5], if d[7] == 1 { d[6].div_ceil(2) } else { d[6] });
+    if s == 0 || d[7] > 1 || w == 0 || h == 0 {
+        return None;
+    }
+    let (x1, y1) = (ox.checked_mul(s)?.checked_add(w)?, oy.checked_mul(s)?.checked_add(h)?);
+    (x1 <= 2048 * s && y1 <= 2048 * s && x1 <= tw && y1 <= th).then_some([ox * s, oy * s])
+}
+
 pub struct Display {
+    /// The last picture while it is shown straight from its surface; None when the display texture
+    /// holds it (a copied scanout, a movie, black, and from `materialize` on: the surface may be
+    /// drawn into again after it, so the present must not read it any more).
+    direct: Option<Direct>,
+    words: Option<Words>,
     target: Option<Target>,
     /// display_width, display_height: 0, 0 while there is no display texture.
     width: u32,
@@ -68,7 +115,8 @@ impl Default for Display {
 
 impl Display {
     pub fn new() -> Display {
-        Display { target: None, width: 0, height: 0, generation: 0, reading: None, group: None }
+        Display { direct: None, words: None, target: None, width: 0, height: 0, generation: 0, reading: None,
+                  group: None }
     }
 
     /// (display_width, display_height): the displayed picture's size; 0, 0 when none.
@@ -84,6 +132,66 @@ impl Display {
     /// The display texture, or None.
     pub fn texture(&self) -> Option<&wgpu::Texture> {
         self.target.as_ref().map(|t| &t.texture)
+    }
+
+    /// The last picture while the present samples it straight from its display surface: the
+    /// display texture holds an older one until `materialize` copies it.
+    pub fn direct(&self) -> Option<&Direct> {
+        self.direct.as_ref()
+    }
+
+    /// Whether the last picture is on its display surface only (`direct`).
+    pub fn uncopied(&self) -> bool {
+        self.direct.is_some()
+    }
+
+    /// The scanout that a direct picture skipped, now: its surface into the display texture (the
+    /// surface still holds what the picture showed: the caller runs this before anything draws into
+    /// it again), recorded into `encoder`. For what reads the display texture itself: a read-back,
+    /// the widescreen fill, and a picture that will show nothing new. The picture is the display
+    /// texture's from here on: `direct` is None, so a later present of the same picture samples
+    /// the copy and not a surface that has been drawn into since.
+    pub fn materialize(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, o: &ScanoutObjects,
+                       uniform_layout: &wgpu::BindGroupLayout) {
+        let Some(direct) = self.direct.take() else { return };
+        let Some(t) = &self.target else { return };
+        let words = self.words.get_or_insert_with(|| {
+            let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("native scanout words"),
+                size: 256,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("native scanout words"),
+                layout: uniform_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(48),
+                    }),
+                }],
+            });
+            Words { buffer, group }
+        });
+        let d = direct.words;
+        gpu.queue.write_buffer(&words.buffer, 0, struct_bytes(&d));
+        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("native scanout"),
+            layout: o.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&direct.view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&t.view) },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
+        pass.set_pipeline(o.fast_pipeline);
+        pass.set_bind_group(0, &words.group, &[0]);
+        pass.set_bind_group(1, &group, &[]);
+        let rows = if d[7] == 1 { d[6].div_ceil(2) } else { d[6] };
+        pass.dispatch_workgroups(d[5].div_ceil(8), rows.div_ceil(8), 1);
     }
 
     /// Changes whenever the display texture is remade (a bind group on `view` is then stale).
@@ -137,6 +245,7 @@ impl Display {
         if pixels.len() < w as usize * h as usize || !self.display_size(gpu, w, h) {
             return false;
         }
+        self.direct = None;
         let Some(t) = &self.target else { return false };
         gpu.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -156,6 +265,7 @@ impl Display {
     /// black, at the size it had, cleared in `encoder` (no pass may be open on it). False before the
     /// first picture: nothing to show yet.
     pub fn black(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        self.direct = None;
         let Some(t) = &self.target else { return false };
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("native display off"),
@@ -197,6 +307,21 @@ impl Display {
             d[9] = 2048 * scale;
             d[10] = 65536u32.div_ceil(d[9]);
         }
+        // A plain rectangle of the surface is not copied: the present samples it where it lies
+        // (finding 247). The display texture keeps its size for what reads it (`materialize`).
+        self.direct = None;
+        if fast && direct_allowed() {
+            let texture = source.texture();
+            if let Some(origin) = plain_rect(&d, scale, texture.width(), texture.height()) {
+                self.direct = Some(Direct {
+                    view: source.clone(),
+                    map: [d[5] as f32, d[6] as f32, origin[0] as f32, origin[1] as f32],
+                    doubled: d[7] == 1,
+                    words: d,
+                });
+                return true;
+            }
+        }
         let Some(t) = &self.target else { return false };
         let offset = arenas.constants(struct_bytes(&d));
         if self.group.as_ref().is_none_or(|(view, generation, _)| view != source || *generation != self.generation) {
@@ -233,9 +358,12 @@ impl Native {
         let gpu = self.gpu;
         let d = &mut self.display;
         d.reading = None;
+        let mut e = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("native read display") });
+        let o = ScanoutObjects { pipeline: &self.objects.scanout_pipe,
+            fast_pipeline: &self.objects.scanout_fast_pipe, layout: &self.objects.scanout_layout };
+        d.materialize(gpu, &mut e, &o, &self.objects.uniform_layout);
         let t = d.target.as_ref()?;
         let (w, h, stride) = (d.width, d.height, t.stride);
-        let mut e = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("native read display") });
         e.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &t.texture,
@@ -310,6 +438,36 @@ impl Native {
         } // the mapped view drops before unmap
         t.readback.unmap();
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plain_rect;
+
+    fn words(ox: u32, oy: u32, w: u32, h: u32, doubled: u32) -> [u32; 12] {
+        [0, 0, 8, ox, oy, w, h, doubled, 0, 0, 0, 0]
+    }
+
+    #[test]
+    fn a_rectangle_inside_the_surface_is_plain() {
+        // the race at 4x: 2048 x 1792 shown from 896 rows of a 2048 x 1024 surface
+        assert_eq!(plain_rect(&words(0, 0, 2048, 1792, 1), 4, 2048, 1024), Some([0, 0]));
+        assert_eq!(plain_rect(&words(0, 16, 1280, 448, 0), 2, 1280, 1024), Some([0, 32]));
+        // an odd number of doubled rows reads one more surface row
+        assert_eq!(plain_rect(&words(0, 0, 640, 449, 1), 1, 640, 225), Some([0, 0]));
+        assert_eq!(plain_rect(&words(0, 0, 640, 449, 1), 1, 640, 224), None);
+    }
+
+    #[test]
+    fn a_wrap_or_a_read_outside_is_not() {
+        // past the 2048 pixels of the GS the scanout wraps
+        assert_eq!(plain_rect(&words(1800, 0, 640, 448, 0), 1, 4096, 4096), None);
+        assert_eq!(plain_rect(&words(0, 2000, 640, 448, 0), 2, 8192, 8192), None);
+        // outside the texture the scanout shows black
+        assert_eq!(plain_rect(&words(0, 0, 640, 448, 0), 1, 640, 256), None);
+        assert_eq!(plain_rect(&words(8, 0, 640, 448, 0), 1, 640, 448), None);
+        assert_eq!(plain_rect(&words(0, 0, 0, 448, 0), 1, 640, 448), None);
     }
 }
 

@@ -256,6 +256,7 @@ Pictures:
 | `DHD_PERF_COUNTER=1` | the FPS & PING counter |
 | `DHD_PERF_LOG=0` | no `perf:` lines in dhd.log (on by default, finding 129) and none of their counting |
 | `DHD_GPU_STATS=N` | every N-th picture, GPU time (and on Vulkan pixels shaded) per kind of draw in dhd.log (finding 131) |
+| `DHD_DIRECT_PRESENT=0` | the scanout copies every picture to the display texture again instead of the present sampling it from its display surface (finding 247); for comparisons |
 | `DHD_TEST_DEVICE_LOST=N` | (D3D12) at the N-th presented frame this game's GPU device is removed (`ID3D12Device5::RemoveDevice`: this process only, no GPU reset); the game must log the reason and end with the lost-device box, exit code 1 (finding 171) |
 | `DHD_GPU_DRED=1` | (D3D12) DRED's breadcrumbs and page faults: a lost device's report names the command lists the GPU had not finished and where they stopped (finding 171) |
 | `DHD_VU1_LAYOUT=path` with `DHD_VU1_LAYOUT_FIELDS=a-b[,c-d...]` | per field window and kind of VU1 run (overlay, program, entry, MSCNT, VI13): the VIF1 commands before it (UNPACK forms, addresses, counts, masks) and the GIF tags it kicks; read only (finding 162) |

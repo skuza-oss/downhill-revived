@@ -46,6 +46,7 @@ void *font_sharp_view(const ReplaceDevice *d,const uint32_t *p,unsigned w,unsign
 #include <xmmintrin.h>
 
 const uint32_t *gs_wgpu_presented(unsigned *width, unsigned *height);  /* gpu_rust_test.c */
+void gs_wgpu_present_again(Gs *g);                                      /* gpu_rust_test.c */
 
 enum { WIDTH = 512, HEIGHT = 224 };
 enum { PRESENTED_W = 1280, PRESENTED_H = 720 };  /* DHD_NATIVE_TEST_PRESENTED's window: 4:3 with bars */
@@ -211,6 +212,45 @@ static void sprite_gradient(void)
     if (!ok) failures++;
     printf("upscaled sprite interpolates smoothly: %s (%u %u %u %u)\n", ok ? "PASS" : "FAIL",
            r[0], r[1], r[2], r[3]);
+}
+
+/* A field that stays on screen while its surface is drawn into again (finding 247): the page is
+   shown in `color`, then a field with no display (DISPFB2's width 0: nothing is scanned out, the
+   last picture stays) draws another colour into the same page and presents nothing. The picture
+   presented again after it (a repeated refresh: gs_wgpu_present_again) must still be the first,
+   although the first present sampled it from the surface that now holds the other colour:
+   checked on the presented surface (DHD_NATIVE_TEST_PRESENTED), and on the picture read back. No
+   dump: these fields are not in the goldens. */
+static void held(unsigned page, uint32_t color, const char *name)
+{
+    static uint32_t want[WIDTH * 2 * HEIGHT * 2];
+    unsigned w = 0, h = 0;
+    clear(page, color);
+    gs_priv_write(&gs, GS_PMODE, 2);
+    gs_priv_write(&gs, GS_SMODE2, 0);
+    gs_priv_write(&gs, GS_DISPFB2, page | 8ULL << 9);
+    gs_priv_write(&gs, GS_DISPLAY2, (WIDTH - 1ULL) << 32 | (HEIGHT - 1ULL) << 44);
+    ++kernel_vsync_count;
+    gs_native_vsync(&gs, &w, &h, 0);
+    clear(page, color ^ 0x00FFFFFF);
+    gs_priv_write(&gs, GS_DISPFB2, page);
+    ++kernel_vsync_count;
+    gs_native_vsync(&gs, &w, &h, 0);
+    if (presented_on) gs_wgpu_present_again(&gs);
+    for (unsigned i = 0; i < WIDTH * 2 * HEIGHT * 2; i++) want[i] = color;
+    unsigned before = failures;
+    check_presented(name, want, WIDTH * 2, HEIGHT * 2);
+    uint32_t *pixels = gs_native_picture(&gs, &w, &h);
+    unsigned changed = 0;
+    if (pixels)
+        for (unsigned i = 0; i < w * h; i++)
+            changed += (pixels[i] & 0xFFFFFF) != (color & 0xFFFFFF);
+    int ok = pixels && w == WIDTH * 2 && h == HEIGHT * 2 && !changed;
+    if (!ok) failures++;
+    printf("%s: %s (%ux%u, %u incorrect pixels%s)\n", name, ok && failures == before ? "PASS" : "FAIL", w, h,
+           changed, failures != before && ok ? ", the window differs" : "");
+    /* the page is displayed again for what follows */
+    gs_priv_write(&gs, GS_DISPFB2, page | 8ULL << 9);
 }
 
 /* A blend scene's picture: no expected colour, compared across backends (dump). */
@@ -420,6 +460,7 @@ int main(void)
     gs_write(&gs, GS_TRXDIR, 0);
     for (unsigned i = 0; i < WIDTH * HEIGHT / 16; i++) gs_write(&gs, GS_HWREG, 0x5A5A5A5A5A5A5A5AULL);
     show(400, 0x80336699, "no draw: font alpha over a copied surface");
+    held(56, 0x80204060, "a held picture survives a draw into its surface");
     blend_scenes();
 
     if (presented_on) {
