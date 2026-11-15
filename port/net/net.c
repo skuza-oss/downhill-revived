@@ -12,7 +12,9 @@
 #include "json.h"
 #include "ws.h"
 
-enum { REJOIN_ATTEMPTS = 5, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
+/* Rejoins after a drop go on as ws.h's backoff says, for up to 30 s (WS_ATTEMPTS_OVER): the room
+   keeps a seat 20 s after it last heard from a member (online/server REJOIN_GRACE_MS, finding 254). */
+enum { SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
 
 /* The rooms offered (host_api.h NET_OFFER_*): every native build, Android and iOS included, offers
    SFU and P2P rooms (finding 237); only the browser offers P2P rooms alone (port/web/www/net.js). */
@@ -50,7 +52,7 @@ static const char *on_close(void *ctx, int code, const char *reason, int attempt
     (void)ctx;
     if (!client_on_closed(&client, code, reason))
         return NULL;
-    if (attempt >= REJOIN_ATTEMPTS) {
+    if (attempt >= WS_ATTEMPTS_OVER) {
         client_rejoin_failed(&client);
         return NULL;
     }
@@ -66,7 +68,9 @@ static int on_tick(void *ctx)
     WsConn *ws = conn;
     (void)ctx;
     client_race_rtt(&client, ws ? ws_race_rtt_ms(ws) : -1);
-    return client_tick(&client);
+    int dead = client_tick(&client);
+    if (client.cut_ms) ws_test_cut(client.cut_ms), client.cut_ms = 0;  /* DHD_NET_TEST_CUT (tests) */
+    return dead;
 }
 
 void net_init(const char *base_url, const char *player_name, const char *build_version, const char *iso_sha256)

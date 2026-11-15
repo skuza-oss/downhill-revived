@@ -211,7 +211,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   dhd.ini `room_region`) or, on Auto, by the Cloudflare location the creator reached, from measured
   round trips (findings 135, 181), rejoin by token
   (finding 137); a room connection lost in a race no longer ends it: the game races on over the
-  SFU and rejoins, the seat is kept 20 s (finding 175). A room runs at most 5 Realtime calls at
+  SFU and rejoins, the seat is kept 20 s (finding 175); a game tries again every 2 s while nothing reaches the
+  server and backs off when the server answers (finding 254), and one back too late for its seat
+  says CONNECTION LOST. A room runs at most 5 Realtime calls at
   once and a timed-out call is an unknown outcome, not a failure (finding 182). A deploy
   (`online/server/tools/deploy.mjs`: a watched 10 % canary, then 100 % or a rollback) restarts
   rooms for the new code only in the lobby or at results; games rejoin in about 2 s (finding 184).
@@ -270,7 +272,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   drawn at the present by riding on this game's physics (finding 202, above): placed at once only
   at their first snapshot, a respawn, a large error or a large one after silence
   (`SYNC_PLACE_FAR`, `SYNC_PLACE_SILENCE` in `port/hle/puppet_sync.h`), otherwise caught up by
-  riding; a game whose own thread stops says so (HOLD, from its
+  riding; through an outage (no snapshot for up to 3 s) a puppet that falls well below its owner's
+  last speed is eased back to it (finding 254); a game whose own thread stops says so (HOLD, from its
   network thread) and the others hold its riders, until its snapshots have come again for 3 s.
   Every record and HOLD from another game is checked whole before any of it is used (nodes, State,
   numbers, stamps; `port/hle/puppet_record.h`, finding 220): a refused one is dropped and logged

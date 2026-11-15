@@ -100,6 +100,11 @@ void client_init(NetClient *c, const char *name, const char *version, const char
         }
         const char *drop = getenv("DHD_NET_TEST_DROP");
         if (drop && *drop) c->test_drop = 1, c->test_drop_s = atof(drop);
+        const char *cut = getenv("DHD_NET_TEST_CUT");
+        if (cut && *cut && strchr(cut, ':')) {
+            c->test_cut_room = !strncmp(cut, "room+", 5);
+            c->test_cut = 1, c->test_cut_s = atof(cut + (c->test_cut_room ? 5 : 0)), c->test_cut_len_ms = atof(strchr(cut, ':') + 1);
+        }
     }
 }
 
@@ -265,6 +270,15 @@ static void read_room(NetClient *c, const char *t)
 
 #undef FIELD
     }
+    /* After a rejoin's welcome without our race (finding 254): the room let the seat go (20 s without
+       a word) when our race goes on without us or its results list our member as left; otherwise
+       the race ended while we were away (a finish, the window): its own words, not CONNECTION LOST. */
+    if (c->seat_check) {
+        int lost = !strcmp(l->phase, "racing") && l->race_started_at == c->race_at;
+        for (i = 0; !lost && i < l->nresults; i++)
+            lost = l->result[i].id == c->race_member && !strcmp(l->result[i].dnf_reason, "left");
+        l->seat_lost = lost, c->seat_check = 0;
+    }
     for (i = 0; i < l->nmembers; i++)
         if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
             /* out of the race (the finish window, the room's end): the race screen still shows its
@@ -324,6 +338,8 @@ static void read_start(NetClient *c, const char *t)
     c->states_sent = 0;
     l->race_go_at = 0;
     l->ended = NET_ENDED_NONE;
+    l->seat_lost = 0;
+    c->seat_check = 0, c->race_member = l->member_id;
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -576,6 +592,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             /* back in a race (finding 175): its state stays; what the drop may have lost goes again.
                A welcome without this race: the room's snapshot that follows takes it back to the room. */
             c->lobby.state = c->racing ? NET_RACING : NET_LOBBY;
+            c->seat_check = !in_race && c->racing;
             if (in_race && c->gave_up)
                 say(c, "{\"type\":\"back\"}");
             else if (in_race && c->finished)
@@ -889,6 +906,14 @@ int client_tick(NetClient *c)
             c->test_dropped = dead = 1;
             snprintf(line, sizeof line, "net: DHD_NET_TEST_DROP: the room connection is cut %.1f s after the race's start (test switch)",
                      c->test_drop_s);
+        }
+        if (c->test_cut && !c->test_cut_done && !line[0] &&
+            (c->test_cut_room ? c->joined_at && now >= c->joined_at + c->test_cut_s * 1000
+                              : c->racing && c->lobby.race_go_at > 0 && now + c->clock_offset >= c->lobby.race_go_at + c->test_cut_s * 1000)) {
+            c->test_cut_done = dead = 1;
+            c->cut_ms = (int)c->test_cut_len_ms;
+            snprintf(line, sizeof line, "net: DHD_NET_TEST_CUT: no network for %.1f s from %.1f s after %s (test switch)",
+                     c->test_cut_len_ms / 1000, c->test_cut_s, c->test_cut_room ? "joining the room" : "the race's GO");
         }
         if (!line[0] && c->joined_at && (c->lobby.state == NET_LOBBY || c->lobby.state == NET_RACING) && now >= c->next_log) {
             int n = snprintf(line, sizeof line, "net: room %s%s, ", net_log_code(c->lobby.code).text, c->racing ? " (racing)" : "");

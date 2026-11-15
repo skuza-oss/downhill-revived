@@ -35,7 +35,7 @@ use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tungstenite::{Bytes, Message, Utf8Bytes, WebSocket};
 
@@ -62,6 +62,54 @@ const PEEK: Duration = Duration::from_millis(50);
 const TICK: Duration = Duration::from_millis(10);
 /// A connection that lasted this long starts the attempts' count again.
 const LASTING: Duration = Duration::from_secs(5);
+/// The attempts after a drop end when the next would start later than this after it (ws.h
+/// WS_ATTEMPTS_OVER); the room keeps a seat 20 s (online/server REJOIN_GRACE_MS, finding 254).
+const RETRY_WINDOW: Duration = Duration::from_secs(30);
+
+/// The wait before the next connection attempt (finding 254). `fails`: attempts failed in a row,
+/// the drop included (1 after the drop); `answered`: of those, the ones the server answered (a socket
+/// that opened, an HTTP answer): each costs one of the 30 connects a minute the server allows an
+/// address (online/server RL_CONNECT), shared by everyone behind it (a household, a LAN, a
+/// carrier's NAT); `limited`: the last was refused by that limit (4011). `jitter` in 0..1 spreads a
+/// room dropped at once (a server update). Unanswered attempts (no network here) cost the server
+/// nothing: every 2 s, so a game is back within about 2 s of its network. Answered failures back
+/// off (4 s, then 12 s: at most 3 connects before RETRY_WINDOW ends the attempts); a 4011 waits
+/// 20-30 s.
+fn retry_delay(fails: c_int, answered: u32, limited: bool, jitter: f64) -> Duration {
+    let jitter = jitter.clamp(0.0, 1.0);
+    let ms = if limited {
+        20_000.0 * (1.0 + 0.5 * jitter)
+    } else {
+        let base = if fails <= 1 { 1000.0 } else if answered == 0 { 2000.0 } else { 4000.0 * 3f64.powi(answered as i32 - 1) };
+        base * (0.8 + 0.4 * jitter)
+    };
+    Duration::from_millis(ms as u64)
+}
+
+/// A number in 0..1 for retry_delay's jitter.
+fn jitter() -> f64 {
+    let mut b = [0u8; 2];
+    let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b);
+    u16::from_le_bytes(b) as f64 / 65535.0
+}
+
+/// ws.h WS_ATTEMPTS_OVER: on_close's attempt when no attempt follows (RETRY_WINDOW).
+const WS_ATTEMPTS_OVER: c_int = 1000;
+
+/// DHD_NET_TEST_CUT (a test switch, port/net/client.c; finding 254): until this moment this game
+/// has no network, as a phone that lost its signal: no room connection opens and no SFU datagram
+/// goes out or comes in (the TURN relay's TLS stream is not cut).
+static TEST_CUT_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+
+pub(crate) fn test_cut() -> bool {
+    lock(&TEST_CUT_UNTIL).is_some_and(|until| Instant::now() < until)
+}
+
+/// ws.h: the test cut, from now for ms milliseconds.
+#[no_mangle]
+pub extern "C" fn ws_test_cut(ms: c_int) {
+    *lock(&TEST_CUT_UNTIL) = Some(Instant::now() + Duration::from_millis(ms.max(0) as u64));
+}
 
 /// The open connection: the WebSocket and the socket's handle for shutting it down.
 struct Live {
@@ -176,8 +224,11 @@ fn cstring(text: &str) -> CString {
 /// The receive thread: connect, read until the connection ends, ask the handler where next.
 fn io_main(c: Arc<WsConn>, mut url: String) {
     let mut attempt: c_int = 0;
+    let (mut answered, mut since) = (0u32, Instant::now());
     while !c.stopping.load(Ordering::Acquire) {
-        let (code, reason) = match stream::connect_ws(&url) {
+        let tried = if test_cut() { Err((false, "no network (DHD_NET_TEST_CUT)".into())) } else { stream::connect_ws(&url) };
+        if attempt > 0 && !matches!(tried, Err((false, _))) { answered += 1; }
+        let (code, reason) = match tried {
             Ok((ws, tcp, peek)) => {
                 let opened = std::time::Instant::now();
                 {
@@ -195,23 +246,26 @@ fn io_main(c: Arc<WsConn>, mut url: String) {
                 c.wait_handled(Duration::from_secs(1));
                 c.force_close();
                 // A refusal (a rate limit) or a connection that ends at once counts as a failed
-                // attempt, so the backoff grows and the attempts end (finding 175).
+                // attempt, so the attempts end (finding 175).
                 if opened.elapsed() >= LASTING { attempt = 0; }
                 end
             }
-            Err(why) => (-1, why),
+            Err((_, why)) => (-1, why),
         };
+        if attempt == 0 { answered = 0; since = Instant::now(); }  // a drop: its attempts start
         let reason = cstring(&reason);
+        let wait = retry_delay(attempt + 1, answered, code == 4011, jitter());
+        let over = since.elapsed() + wait > RETRY_WINDOW;
         let next = match c.h.on_close {
-            Some(f) => unsafe { f(c.h.ctx, code, reason.as_ptr(), attempt) },
+            Some(f) => unsafe { f(c.h.ctx, code, reason.as_ptr(), if over { WS_ATTEMPTS_OVER } else { attempt }) },
             None => std::ptr::null(),
         };
         attempt += 1;
-        if next.is_null() || c.stopping.load(Ordering::Acquire) {
+        if next.is_null() || over || c.stopping.load(Ordering::Acquire) {
             break;
         }
         url = unsafe { CStr::from_ptr(next) }.to_string_lossy().into_owned();
-        c.backoff(if attempt < 4 { 500 << attempt } else { 8000 });
+        c.backoff(wait.as_millis() as u64);
     }
     *lock(&c.running) = false;
     c.ended.notify_all();
@@ -708,5 +762,61 @@ pub unsafe extern "C" fn http_get(url: *const c_char, out: *mut c_char, cap: usi
             n as c_int
         }
         Err(_) => -1,
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    /// The tries after a drop at 0 s, each failing (answered: the server answered it), until
+    /// RETRY_WINDOW ends them: their moments (s).
+    fn tries(answered: bool, limited_at: Option<usize>, jitter: f64) -> Vec<f64> {
+        let (mut at, mut fails, mut got, mut out) = (Duration::ZERO, 1, 0u32, vec![]);
+        loop {
+            let wait = retry_delay(fails, got, limited_at == Some(out.len()), jitter);
+            if at + wait > RETRY_WINDOW { return out; }
+            at += wait;
+            out.push(at.as_secs_f64());
+            fails += 1;
+            if answered { got += 1; }
+        }
+    }
+
+    #[test]
+    fn no_network_here_is_tried_every_2_s() {
+        // nothing reaches the server: back within about 2 s of the network (1, 3, 5 ... s)
+        let t = tries(false, None, 0.5);
+        assert_eq!(&t[..3], &[1.0, 3.0, 5.0]);
+        assert!(t.windows(2).all(|w| w[1] - w[0] <= 2.4 + 1e-9));
+    }
+
+    #[test]
+    fn answered_failures_stay_far_under_the_limit() {
+        // the server answers and the attempt still fails (its storage, a deploy): at most 3 connects
+        // per player in a drop's attempts, at any jitter; 6 players behind one address: 18 of the 30
+        // a minute (online/server RL_CONNECT)
+        for j in [0.0, 0.5, 1.0] {
+            let t = tries(true, None, j);
+            assert!(t.len() <= 3, "{t:?}");
+            assert!(6 * t.len() <= 18);
+            assert!(t[0] <= 1.2);  // the quick first try stays
+        }
+    }
+
+    #[test]
+    fn a_rate_limit_cools_down() {
+        assert!(retry_delay(3, 2, true, 0.0) >= Duration::from_secs(20));
+        assert!(retry_delay(3, 2, true, 1.0) <= Duration::from_secs(30));
+        // refused at the first try: one more at most, 20 s or more later
+        let t = tries(true, Some(1), 0.0);
+        assert!(t.len() <= 2 && (t.len() < 2 || t[1] - t[0] >= 20.0), "{t:?}");
+    }
+
+    #[test]
+    fn jitter_spreads_a_room() {
+        assert_ne!(retry_delay(1, 0, false, 0.0), retry_delay(1, 0, false, 1.0));
+        assert!(retry_delay(1, 0, false, 0.0) >= Duration::from_millis(800));
+        assert!(retry_delay(1, 0, false, 1.0) <= Duration::from_millis(1200));
     }
 }

@@ -18,6 +18,8 @@ int main(void)
     assert(!strcmp(WHY(.link_lost = 1), "CONNECTION LOST"));
     assert(!strcmp(WHY(.link_lost = 1, .finished = 1), "CONNECTION LOST"));
     assert(!strcmp(WHY(.link_lost = 1, .removed = 1), "THE HOST REMOVED YOU"));
+    /* back in the room too late for the race seat (finding 254): online.c reads seat_lost as link_lost */
+    assert(!strcmp(WHY(.link_lost = 1, .ended = NET_ENDED_NONE), "CONNECTION LOST"));
     assert(!strcmp(WHY(.removed = 1, .ended = NET_ENDED_DONE), "TIME UP - DNF"));  /* a stale error code alone says nothing */
     /* out of the race while it goes on for the others, by this PC's own entry */
     assert(!strcmp(WHY(.own_dnf = "time_up"), "TIME UP - DNF"));

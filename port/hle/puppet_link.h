@@ -8,6 +8,11 @@
      jitter=MS       extra delay, exponential with this mean (capped at 6x), so a few arrive late
      loss=PCT        each message lost with this chance
      burst=S:A-B     about every S seconds (exponential), nothing gets through for A-B ms
+     stall=S:A-B     about every S seconds, nothing arrives for A-B ms, then everything sent
+                     meanwhile arrives at once (finding 254: Cloudflare's SFU forwards STATE
+                     reliably and TURN over TLS is TCP, so a dead spell of the link ends in a flood)
+     cut=T:MS        once, from the sender's wall second T, nothing gets through for MS ms (a
+                     short disconnect)
      reorder=PCT     this share of messages are held one to three 60 Hz intervals more
      rate=N          snapshots a second the sender sends (60 or 30; default: the online rule,
                      a player's own rider 60, an AI rider 30; the bench only)
@@ -34,6 +39,11 @@ typedef struct PuppetLink {
     int rate;                                 /* 0: the online rule */
     uint64_t state;                           /* the random sequence */
     double burst_from, burst_to;              /* the current or next outage, sender wall s */
+    double stall_every, stall_min, stall_max; /* s (stall=) */
+    double stall_from, stall_to;              /* the current or next stall, sender wall s */
+    double stall_flood;                       /* the last held message's arrival (later ones come after it) */
+    uint64_t stall_state;                     /* the stalls' own random sequence (the others' unchanged) */
+    double cut_at, cut_len;                   /* s (cut=) */
     int on;
 } PuppetLink;
 
@@ -55,11 +65,23 @@ static inline void link_next_burst(PuppetLink *l, double t)
     l->burst_to = l->burst_from + l->burst_min + (l->burst_max - l->burst_min) * link_random(l);
 }
 
+/* The next stall after time t (sender wall seconds), from the stalls' own sequence. */
+static inline void link_next_stall(PuppetLink *l, double t)
+{
+    if (!(l->stall_every > 0)) { l->stall_from = l->stall_to = INFINITY; return; }
+    uint64_t keep = l->state;
+    l->state = l->stall_state;
+    double gap = -log(1 - link_random(l)) * l->stall_every;
+    l->stall_from = t + gap;
+    l->stall_to = l->stall_from + l->stall_min + (l->stall_max - l->stall_min) * link_random(l);
+    l->stall_state = l->state, l->state = keep;
+}
+
 /* Parses a link description (see above). 0: none given (an empty or missing text). */
 static inline int link_parse(PuppetLink *l, const char *text)
 {
     memset(l, 0, sizeof *l);
-    l->hitch_at = l->rhitch_at = -1;
+    l->hitch_at = l->rhitch_at = l->cut_at = -1;
     l->state = 1;
     if (!text || !*text) return 0;
     const char *s = text;
@@ -85,12 +107,16 @@ static inline int link_parse(PuppetLink *l, const char *text)
         else if (!strcmp(name, "skew")) l->skew = a / 1000;
         else if (!strcmp(name, "seed")) l->state = (uint64_t)a;
         else if (!strcmp(name, "burst")) l->burst_every = a, l->burst_min = b / 1000, l->burst_max = (c > b ? c : b) / 1000;
+        else if (!strcmp(name, "stall")) l->stall_every = a, l->stall_min = b / 1000, l->stall_max = (c > b ? c : b) / 1000;
+        else if (!strcmp(name, "cut")) l->cut_at = a, l->cut_len = b / 1000;
         else if (!strcmp(name, "hitch")) l->hitch_at = a, l->hitch_len = b / 1000;
         else if (!strcmp(name, "rhitch")) l->rhitch_at = a, l->rhitch_len = b / 1000;
         while (*s && *s != ',' && *s != ' ' && *s != ';') s++;
     }
     l->on = 1;
     l->burst_from = l->burst_to = -INFINITY;
+    l->stall_from = l->stall_to = l->stall_flood = -INFINITY;
+    l->stall_state = l->state ^ 0x2545F4914F6CDD1Dull;
     return 1;
 }
 
@@ -119,11 +145,19 @@ static inline int link_pass(PuppetLink *l, double sent, double *arrives)
     while (sent >= l->burst_to) link_next_burst(l, l->burst_to);
     double lost = link_random(l), extra = link_random(l), order = link_random(l), late = link_random(l);
     if (sent >= l->burst_from && sent < l->burst_to) return 0;
+    if (l->cut_at >= 0 && sent >= l->cut_at && sent < l->cut_at + l->cut_len) return 0;
     if (lost < l->loss) return 0;
     double d = l->delay;
     if (l->jitter > 0) d += fmin(-log(1 - extra) * l->jitter, 6 * l->jitter);
     if (order < l->reorder) d += (1 + (int)(late * 3)) / 60.0;
     *arrives = sent + d;
+    if (l->stall_every > 0) {
+        if (l->stall_to == -INFINITY) link_next_stall(l, sent);
+        while (*arrives >= l->stall_to) link_next_stall(l, l->stall_to);
+        /* held to the stall's end, in the order sent (spread over a sixtieth of the time they waited) */
+        if (*arrives >= l->stall_from) *arrives = l->stall_to + (sent - l->stall_from) / 60.0, l->stall_flood = *arrives;
+        else if (*arrives < l->stall_flood) *arrives = l->stall_flood;
+    }
     return 1;
 }
 #endif

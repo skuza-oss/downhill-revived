@@ -903,7 +903,7 @@ impl Sfu {
         let via = if self.via_relay { "TURN/TLS" } else { "UDP" };
         if let Some(line) = self.stats.poll(now, datagrams.len(), self.race_open && self.released, via) { eprintln!("{line}"); }
         for (at, source, data) in datagrams {
-            if !self.direct || self.udp_failure.is_some() { continue; }
+            if !self.direct || self.udp_failure.is_some() || crate::test_cut() { continue; }
             self.stats.input(now.saturating_duration_since(at));
             // 23: a DTLS application record (SCTP), not ICE or the handshake.
             if self.drop_in_percent > 0 && data.first() == Some(&23) {
@@ -1003,6 +1003,7 @@ impl Sfu {
     fn send_direct(&self, data: &[u8], to: SocketAddr) -> std::io::Result<usize> {
         #[cfg(test)]
         if let Some(kind) = self.fail_udp_send { return Err(kind.into()); }
+        if crate::test_cut() { return Ok(data.len()); }  // lost on the way (DHD_NET_TEST_CUT)
         self.socket.send_to(data, to)
     }
 

@@ -3,13 +3,15 @@ length of a test: started, waited for, and stopped with everything it started (w
 
     python port/tools/local_server.py -- python port/tools/live_game.py ...   # DHD_NET_SERVER is set for it
     python port/tools/local_server.py --port 8787 -- COMMAND ...             # a fixed port
+    python port/tools/local_server.py --env-file FILE -- COMMAND ...         # wrangler's secrets from FILE
 
     with local_server.running() as url:      # 'ws://127.0.0.1:<port>'
         ...
     with local_server.tunnelled('user@mac') as (here, there):   # the same server for another
         ...                                                     # machine too, by an ssh tunnel
 
-Each run gets fresh server state (its own --persist-to folder) and a scratch TEMP, both under
+--env-file (or DHD_SERVER_ENV_FILE) hands wrangler another checkout's .dev.vars (the Realtime and
+TURN keys a worktree lacks: never copy or print that file). Each run gets fresh server state (its own --persist-to folder) and a scratch TEMP, both under
 DHD_SCRATCH (else the system temp) and deleted afterwards; the server's log stays at
 <scratch>/server-<port>.log (printed). Needs online/server's node_modules (`npm ci` there).
 The process tree is owned_process's: nothing is found or stopped by name, and a crash or Ctrl+C
@@ -45,7 +47,7 @@ def busy(port):
 
 
 @contextlib.contextmanager
-def running(port=None, timeout=90, say=print):
+def running(port=None, timeout=90, say=print, env_file=None):
     """Yields the server's ws:// address; the server ends with the block."""
     if not WRANGLER.exists():
         raise RuntimeError(f'no wrangler in {SERVER / "node_modules"}: run `npm ci` in online/server')
@@ -61,6 +63,9 @@ def running(port=None, timeout=90, say=print):
                WRANGLER_SEND_METRICS='false')
     cmd = ['node', str(WRANGLER), 'dev', '--port', str(port), '--ip', '127.0.0.1',
            '--persist-to', str(run_dir / 'state'), '--show-interactive-dev-session=false']
+    env_file = env_file or os.environ.get('DHD_SERVER_ENV_FILE')
+    if env_file:
+        cmd += ['--env-file', str(Path(env_file).resolve())]
     with open(log_path, 'w') as log:
         with owned_process.start(cmd, cwd=SERVER, env=env, stdout=log, stderr=subprocess.STDOUT) as server:
             until = time.time() + timeout
@@ -102,9 +107,10 @@ def main():
     i = argv.index('--')
     p = argparse.ArgumentParser()
     p.add_argument('--port', type=int)
+    p.add_argument('--env-file', help="wrangler's secrets (another checkout's online/server/.dev.vars)")
     a = p.parse_args(argv[:i])
     command = argv[i + 1:]
-    with running(a.port) as url:
+    with running(a.port, env_file=a.env_file) as url:
         code = subprocess.run(command, env=dict(os.environ, DHD_NET_SERVER=url)).returncode
     sys.exit(code)
 

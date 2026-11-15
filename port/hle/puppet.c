@@ -79,6 +79,7 @@ static void net_link_release(void);
 #define CRASH_KIND_AT 0x407C  /* its +0xAC: what started the crash */
 #define CRASH_FLAGS_AT 0x4098 /* its +0xC8: bit 2 = crashing */
 #define CHECKPOINT_AT 0x7990  /* checkpoints passed (func_0019F210) */
+#define FINISHED(slot) (*(volatile uint8_t *)(uintptr_t)(0x0843EF18u + (slot)))  /* a rider over the line (online.c FINISHED) */
 #define AI_AT 0x78D4          /* a computer rider's AI controller (0: a player's rider) */
 #define AI_TURNING_AT 0x2B0   /* the controller's turn scale (func_0010F0D8 sets, func_00137950 reads) */
 #define AI_PREV_TARGET_AT 0x10  /* the controller (func_0010B2B8): the previous target point */
@@ -371,6 +372,7 @@ static void play_schedule(const char *link_text)
         PuppetLink holds = link;
         holds.state ^= 0x5DEECE66Dull;
         holds.burst_from = holds.burst_to = -INFINITY;
+        holds.stall_from = holds.stall_to = holds.stall_flood = -INFINITY;
         int room = (int)(link.hitch_len / 0.1) + 2;
         pp.deliveries = realloc(pp.deliveries, (pp.delivery_count + room) * sizeof *pp.deliveries);
         for (double w = link.hitch_at + 0.06; w < link.hitch_at + link.hitch_len && room-- > 0; w += 0.1) {
@@ -697,6 +699,20 @@ static void steer(uint8_t *r, Puppet *p, const Snapshot *s)
             float d[3] = {now.vel[0] - ov[0], now.vel[1] - ov[1], now.vel[2] - ov[2]};
             ease(now.vel, ov, dt > 0 ? dt : 1 / 60.0f);
             if (sync_len(d) < 0.05f * own) p->easing = 0;
+        }
+    } else if (t - s->time <= SYNC_COAST && !(s->crash & 4) && ground_normal(r, (float[3]){0})) {
+        /* An outage (finding 254: nothing heard for longer than the guard's age, up to SYNC_COAST): the
+           same rule on the speed alone, the way the puppet itself rides. Its owner's last velocity is
+           seconds old on a curve, so only its size is kept: a puppet that lost its speed at a bump
+           taken differently here stood or fell over through a second or two of nothing (95 to 5 units
+           a second, 50 units behind) and was put back at once when the snapshots came. */
+        float ov[3], to[3];
+        for (int k = 0; k < 3; k++) ov[k] = s->vel[k] * (p->rate > 0 ? p->rate : 1);
+        int still = (FIELD(r, CRASH_FLAGS_AT, uint32_t) & 4) || FINISHED(slot_of(r));
+        if (sync_outage_target(now.vel, ov, still, &p->easing, to)) {
+            float own = sync_len(ov);
+            ease(now.vel, to, dt > 0 ? dt : 1 / 60.0f);
+            if (fabsf(sync_len(now.vel) - own) < 0.05f * own) p->easing = 0;
         }
     } else p->easing = 0;
     /* Nothing heard for SYNC_COAST (a stalled game, a long loss): the rider slows to a stop
@@ -1441,16 +1457,18 @@ void hle_puppet_field(void)
     /* Each puppet as it is drawn after the whole step (bumps included): race time here, the
        moment it shows, slot, position, the moment of its recorded rider it should show (the
        bench: the sender's race clock now, its hitch included), each wheel's clearance above the
-       ground (nan: none within reach), 1 while it crashes, and its recorded rider (-1 online). */
+       ground (nan: none within reach), 1 while it crashes, its recorded rider (-1 online), and its
+       orientation's three rows (finding 254: heading flips). */
     if (pp.trace) {
         for (int i = 1; i < NRIDERS; i++) {
             Puppet *p = &pp.p[i];
             if (!p->on || !p->count) continue;
-            const float *pos = (const float *)(rider(i) + POS_AT);
+            const float *pos = (const float *)(rider(i) + POS_AT), *rot = (const float *)(rider(i) + ROT_AT);
             double truth = pp.playing ? link_hitch_race(pp.link.hitch_at, pp.link.hitch_len, RACE_TIME + bench_behind()) : RACE_TIME;
-            fprintf(pp.trace, "%.6f %.6f %d %.5f %.5f %.5f %.6f %.4f %.4f %d %d\n", RACE_TIME, p->shown, i, pos[0],
-                    pos[1], pos[2], truth, ground_clearance(rider(i), 0), ground_clearance(rider(i), 1),
-                    !!(FIELD(rider(i), CRASH_FLAGS_AT, uint32_t) & 4), pp.play_from[i]);
+            fprintf(pp.trace, "%.6f %.6f %d %.5f %.5f %.5f %.6f %.4f %.4f %d %d %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f\n",
+                    RACE_TIME, p->shown, i, pos[0], pos[1], pos[2], truth, ground_clearance(rider(i), 0),
+                    ground_clearance(rider(i), 1), !!(FIELD(rider(i), CRASH_FLAGS_AT, uint32_t) & 4), pp.play_from[i],
+                    rot[0], rot[1], rot[2], rot[4], rot[5], rot[6], rot[8], rot[9], rot[10]);
         }
         fflush(pp.trace);
     }

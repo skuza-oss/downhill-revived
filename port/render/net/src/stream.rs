@@ -91,14 +91,26 @@ pub fn open(uri: &Uri, secure: bool) -> Result<(Stream, TcpStream), String> {
 }
 
 /// The WebSocket at url (ws:// or wss://), its socket's handle and a third for peeking. On failure,
-/// why (the close reason ws.h passes for code -1).
-pub fn connect_ws(url: &str) -> Result<(WebSocket<Stream>, TcpStream, TcpStream), String> {
+/// whether the server answered (an HTTP status: the attempt counted against its limits, finding
+/// 254) and why (the close reason ws.h passes for code -1).
+pub fn connect_ws(url: &str) -> Result<(WebSocket<Stream>, TcpStream, TcpStream), (bool, String)> {
+    connect(url).map_err(|e| match e {
+        Failed::Answered(why) => (true, why),
+        Failed::Unanswered(why) => (false, why),
+    })
+}
+
+enum Failed { Answered(String), Unanswered(String) }
+impl From<String> for Failed { fn from(why: String) -> Self { Failed::Unanswered(why) } }
+impl From<&str> for Failed { fn from(why: &str) -> Self { Failed::Unanswered(why.into()) } }
+
+fn connect(url: &str) -> Result<(WebSocket<Stream>, TcpStream, TcpStream), Failed> {
     let mut request = url.into_client_request().map_err(|_| format!("bad URL {url}"))?;
     request.headers_mut().insert(USER_AGENT, HeaderValue::from_static(AGENT));
     let secure = match request.uri().scheme_str() {
         Some("wss") => true,
         Some("ws") => false,
-        _ => return Err(format!("bad URL {url}")),
+        _ => return Err(format!("bad URL {url}").into()),
     };
     let (stream, tcp) = open(request.uri(), secure)?;
     let peek = tcp.try_clone().map_err(|e| format!("socket error ({e})"))?;
@@ -108,8 +120,8 @@ pub fn connect_ws(url: &str) -> Result<(WebSocket<Stream>, TcpStream, TcpStream)
             let _ = tcp.set_read_timeout(Some(crate::PEEK));
             Ok((ws, tcp, peek))
         }
-        Err(HandshakeError::Failure(tungstenite::Error::Http(r))) => Err(format!("HTTP {} from {url}", r.status().as_u16())),
-        Err(HandshakeError::Failure(e)) => Err(format!("can't connect to {url} ({e})")),
-        Err(HandshakeError::Interrupted(_)) => Err(format!("can't connect to {url} (timed out)")),
+        Err(HandshakeError::Failure(tungstenite::Error::Http(r))) => Err(Failed::Answered(format!("HTTP {} from {url}", r.status().as_u16()))),
+        Err(HandshakeError::Failure(e)) => Err(format!("can't connect to {url} ({e})").into()),
+        Err(HandshakeError::Interrupted(_)) => Err(format!("can't connect to {url} (timed out)").into()),
     }
 }

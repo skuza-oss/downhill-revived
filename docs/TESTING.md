@@ -152,6 +152,7 @@ with every AI slot a puppet of its recorded rider, sent through a seeded bad lin
         --link "delay=150,jitter=30,loss=2,reorder=2,seed=3" --fps 60      # prints the scores
     python port/tools/puppet_bench.py --label mine matrix --tracks 0,1,2   # every scenario: results.md
     python port/tools/puppet_bench.py --label mine matrix --rescore        # score saved traces again
+    python port/tools/puppet_bench.py --label mine profiles --tracks 0,1   # finding 254's networks: profiles.md
     python port/tools/puppet_bench.py clip --track 1 --slot 2 --at 22 --link "delay=150,jitter=30" \
         --name mx-150 --out OUTSIDE_THE_REPO                               # truth | puppet, 4x, mp4
 
@@ -230,7 +231,7 @@ Online:
 | `DHD_PUPPET_TRACE=file` | each race step, each puppet as drawn: race time, slot, position, the moment it should show, each wheel's clearance, crashing, its recorded rider |
 | `DHD_NET_TEST_HITCH=S:MS` | once, at race second S, this game's thread stops MS ms (a hitch): the others must hold its riders (HOLD, finding 202) |
 | `DHD_NET_TEST_MENU=S:step,...[;S:step,...]` | from race second S, presses on the wall clock (so they go on through a pause): `start`, `cross`, `circle`, `square`, `triangle`, `up`, `down`, `left`, `right` (0.1 s down, 0.1 s up) or `wN` (N ms); the script's own buttons are let go while a group runs; each race runs it again; also logs the race clock against the wall clock twice a second (finding 215) |
-| `DHD_NET_LINK=link` | the STATE this game receives is held as the link says first: `delay=MS,jitter=MS,loss=PCT,burst=S:A-B,reorder=PCT,skew=MS,seed=N` (`port/hle/puppet_link.h`) |
+| `DHD_NET_LINK=link` | the STATE this game receives is held as the link says first: `delay=MS,jitter=MS,loss=PCT,burst=S:A-B,stall=S:A-B,cut=T:MS,reorder=PCT,skew=MS,seed=N` (`port/hle/puppet_link.h`; `burst` loses what is sent in an outage, `stall` holds it and delivers it at once at the outage's end, as the SFU's reliable relay and TURN over TLS do; `cut` is one outage at sender second T, finding 254) |
 | `DHD_NET_DROP_STATE=N` | N percent of this PC's outgoing STATE messages are dropped before they are sent |
 | `DHD_NET_SFU_DROP_IN=N` | N percent of the DTLS records arriving from the SFU over UDP are dropped on arrival, a lossy link that makes Cloudflare retransmit (finding 173) |
 | `DHD_NET_SFU_UDP=0` | every UDP datagram to and from the SFU is dropped: the TURN-over-TLS fallback must carry the race |
@@ -239,6 +240,7 @@ Online:
 | `DHD_NET_P2P_UDP=0` | in a P2P room this game makes no direct link and says so at once, so it races over the room's SFU (the fallback, finding 186) |
 | `DHD_NET_SFU_TURN=0` | the TURN fallback is never asked for; with `DHD_NET_SFU_UDP=0` a racer whose connection never comes up, whom the others must race without (finding 175) |
 | `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |
+| `DHD_NET_TEST_CUT=S:MS`, `room+S:MS` | once, S seconds after a race's GO (`room+`: after joining the room), this game has no network for MS ms: the room connection drops and cannot open again, and no SFU datagram goes out or comes in (a phone losing its signal; the TURN relay's TLS stream is not cut; finding 254) |
 | `DHD_NET_TEST_PONG_DELAY=N[@S]` | from S seconds (default 60) after joining a room, every pong this PC gets (the room's and the race's PONG) is held N ms plus 0-N/2 ms more before it counts: a slow return path one way, for the shared clock (finding 175) |
 
 Relay-only SFU race on one PC (finding 246): with `DHD_ISO` set,

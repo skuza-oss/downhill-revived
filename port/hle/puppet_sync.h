@@ -335,4 +335,24 @@ static inline int sync_owner_jumped(const SyncMark *m, int n, double used, doubl
     return 0;
 }
 
+/* Through an outage (finding 254; puppet.c steer): what a puppet's velocity eases toward, from its
+   own (here) and its owner's last (owner, its clock's rate in it): the owner's speed in the puppet's
+   own direction (the owner's while the puppet stands), so a puppet slowed at a bump taken
+   differently here rides on. 0, the easing off: nothing to ease. An owner that had stopped or was
+   slow at its last snapshot (the start grid, standing after a wreck, braking to a stop) and a
+   `still` rider (crashing here or at its owner's, waiting for its respawn, finished) are never
+   pushed on; an owner at speed 0 once gave 0/0 here, NaNs in the puppet's velocity. */
+#define SYNC_OUTAGE_MOVING 30.0f /* units a second: a slower owner is not ridden on through an outage */
+static inline int sync_outage_target(const float here_vel[3], const float owner[3], int still, int *easing, float to[3])
+{
+    float own = sync_len(owner), here = sync_len(here_vel);
+    if (still || !(own > SYNC_OUTAGE_MOVING)) return *easing = 0;
+    if (here < SYNC_GUARD * own) *easing = 1;
+    if (!*easing) return 0;
+    const float *way = here > 1 ? here_vel : owner;
+    float n = here > 1 ? here : own;  /* over 1 or over SYNC_OUTAGE_MOVING: never 0 */
+    for (int k = 0; k < 3; k++) to[k] = way[k] * own / n;
+    return 1;
+}
+
 #endif
