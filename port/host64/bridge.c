@@ -10,6 +10,10 @@ static uint32_t next;
 void host64_bridge_bind(wasm_rt_memory_t *m) { memory=m; next=0x07000000; }
 void *host64_bridge_pointer(uint32_t at,uint32_t bytes) {
     if (!memory || (!at && bytes) || (uint64_t)at+bytes>memory->size) wasm_rt_trap(WASM_RT_TRAP_OOB);
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+    /* iOS: the gap between the guest's two parts is not the guest's (guest_memory.c, finding 258) */
+    if (bytes && (uint64_t)at+bytes>0x3a000000u && at<0x70000000u) wasm_rt_trap(WASM_RT_TRAP_OOB);
+#endif
     return at ? GUEST(at) : NULL;
 }
 const char *host64_bridge_string(uint32_t at) {
@@ -45,9 +49,10 @@ int host_ram_view(uint32_t at,uint32_t offset,uint32_t size,int over) {
 int host_mem_commit(uint32_t at,uint32_t size) {
     return memory && host64_memory_commit(at,size);
 }
-/* The allocator reserves the whole space: every in-range span qualifies. */
+/* The allocator reserves the whole space but, on iOS, the gap between its two parts
+   (guest_memory.c, finding 258): every other in-range span qualifies. */
 int host_mem_reserved(uint32_t at,uint32_t size) {
-    return memory && (uint64_t)at+size<=memory->size;
+    return memory && host64_memory_reserved(at,size);
 }
 /* host.c arms DHD_STATE_WATCH; the i686 definition (state_trace.c) is module code here.
    Same rule: only under DHD_STATE_TRACE, NULL when unset. */

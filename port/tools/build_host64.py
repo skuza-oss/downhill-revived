@@ -129,16 +129,16 @@ def host_units(t):
 
 def glue(t):
     return [SOURCE / n for n in ('guest_memory.c', 'guest_memory_%s.c' % ('win32' if t.windows else 'posix'),
-                                 'fiber.c', 'fiber_%s.c' % t.fiber, 'fp_mode.c', 'bridge.c', 'diagnostics.c',
-                                 'launcher.c')]
+                                 'fiber.c', 'fiber_%s.c' % t.fiber, 'fp_mode.c', 'guest_place.c', 'bridge.c',
+                                 'diagnostics.c', 'launcher.c')]
 
 
 def fiber_test(t, a, cc, wabt, out, env):
     """--fiber-test: port/host64/selftest_fiber.c with the target's compiler, guest memory and fiber
-    adapter (glue's first five units). Run here with its two guard-fault children (android-arm64:
+    adapter (glue's first six units). Run here with its two guard-fault children (android-arm64:
     built only)."""
     import signal
-    sources = [SOURCE/'selftest_fiber.c'] + glue(t)[:5]
+    sources = [SOURCE/'selftest_fiber.c'] + glue(t)[:6]
     flags = ['-DWASM_RT_STACK_DEPTH_COUNT=1', '-I'+str(wabt/'include'), '-I'+str(SOURCE)]
     exe = out/('selftest_fiber.exe' if t.windows else 'selftest_fiber')
     if t.windows:
@@ -450,7 +450,8 @@ def main():
         # off (WASM_RT_SKIP_SIGNAL_RECOVERY): ours handle faults. Traps can come from any EE fiber:
         # report and end (launcher.c).
         # iOS gives an app no 8 GiB reservation without an entitlement that unsigned and free-account
-        # installs lack: there the module's memory is 2 GiB plus a 64 KiB window (guest_memory.c) and
+        # installs lack: there the module's memory is at most 2 GiB, the guest reserved in two parts with
+        # a 64 KiB window above (guest_memory.c, finding 258), and
         # wasm2c's own guard-page checks are off (prepare_wasm2c.py's MEMCHECK_SKIP; finding 224)
         memcheck = (['-DWASM_RT_MEMCHECK_BOUNDS_CHECK=1', '-DWASM_RT_SKIP_BOUNDS_CHECKS=1'] if t.ios
                     else ['-DWASM_RT_MEMCHECK_GUARD_PAGES=1'])

@@ -287,6 +287,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 255 | [menus, HUD and world at the same speed at 60 and 240 (issue #76)](255-high-fps-sweep.md) | current |  |
 | 256 | [the slow frames on weak phones](256-phone-stutter.md) | current |  |
 | 257 | [where a frame goes now on the throttled phone (0.8.6)](257-frame-budget.md) | current |  |
+| 258 | [the game starts on iPhones with 3 GB of memory (guest memory in two pieces)](258-ios-guest-memory.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

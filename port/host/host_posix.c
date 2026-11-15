@@ -375,7 +375,7 @@ static void text_value(const char *path, const char *key, char sep, char *out, s
 }
 #endif
 
-/* macOS: its product version and the CPU's brand string by sysctl; Android: the release, the
+/* macOS and iOS: the product version and the CPU's brand string by sysctl; Android: the release, the
    phone and its chip from the system properties; Linux: os-release's name, the kernel and
    /proc/cpuinfo's model name. */
 void host_os_system(char *out, unsigned size)
@@ -387,7 +387,13 @@ void host_os_system(char *out, unsigned size)
     char version[32] = "";
     size_t n = sizeof version;
     sysctlbyname("kern.osproductversion", version, &n, NULL, 0);
+#if TARGET_OS_SIMULATOR
+    snprintf(os, sizeof os, "iOS Simulator %s", version);
+#elif TARGET_OS_IPHONE  /* the product version is the iPhone's or iPad's own (finding 258) */
+    snprintf(os, sizeof os, "%s %s", strncmp(u.machine, "iPad", 4) ? "iOS" : "iPadOS", version);
+#else
     snprintf(os, sizeof os, "macOS %s", version);
+#endif
     n = sizeof cpu;
     if (sysctlbyname("machdep.cpu.brand_string", cpu, &n, NULL, 0)) cpu[0] = 0;
 #elif defined(__ANDROID__)

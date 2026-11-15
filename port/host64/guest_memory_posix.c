@@ -1,4 +1,5 @@
-/* POSIX mapping for guest_memory.c: one PROT_NONE reservation, a memfd RAM
+/* POSIX mapping for guest_memory.c: one PROT_NONE reservation (iOS: two, placed by the shared
+   file from os_free_ranges, finding 258), a memfd RAM
    section (macOS: an unlinked shared memory object; Android 10: ashmem) aliased with MAP_FIXED|MAP_SHARED, commit-on-demand with mprotect
    (which preserves contents, like MEM_COMMIT), and a SIGSEGV/SIGBUS handler
    on an alternate stack that reports the guest address and re-raises the
@@ -20,11 +21,7 @@
 #include "core_host.h"  /* guest_base, for the fault bounds check */
 #include "guest_memory_os.h"
 
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
-#define GUEST_SIZE 0x80010000ull
-#else
-#define GUEST_SIZE 0x200000000ull
-#endif
+#define GUEST_SIZE 0x200000000ull  /* the 8 GiB layout's reservation */
 #define RAM_SIZE 0x2000000ull
 
 static int ram_fd=-1;
@@ -60,7 +57,7 @@ void os_fail(const char *what) {
     }
     abort();
 }
-uintptr_t os_reserve(void) {
+int os_backing_open(void) {
 #ifdef __APPLE__  /* no memfd: a POSIX shared memory object, unlinked at once */
     char name[32]; snprintf(name,sizeof name,"/dhd-guest-ram-%d",(int)getpid());
     ram_fd=shm_open(name,O_RDWR|O_CREAT|O_EXCL,0600);
@@ -82,12 +79,90 @@ uintptr_t os_reserve(void) {
 #endif
     if (ram_fd<0) return 0;
     if (!sized && ftruncate(ram_fd,RAM_SIZE)<0) { close(ram_fd); ram_fd=-1; return 0; }
+    return 1;
+}
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+static int add_range(GuestRange **r,unsigned *n,unsigned *cap,uint64_t lo,uint64_t hi) {
+    if (hi<=lo) return 1;
+    if (*n==*cap) {
+        unsigned grown=*cap ? *cap*2 : 256;
+        GuestRange *bigger=realloc(*r,grown*sizeof **r);
+        if (!bigger) return 0;
+        *r=bigger; *cap=grown;
+    }
+    (*r)[(*n)++]=(GuestRange){lo,hi};
+    return 1;
+}
+#ifdef __APPLE__
+#include <mach/mach.h>
+/* The gaps between the task's regions (vm_region_64: the shared cache is one region) from the
+   task's own bottom to its own top (TASK_VM_INFO's min_address and max_address: the 4 GiB page
+   zero is no region but is not free either; on an iPhone with 3 GB the top is 0x358000000). */
+unsigned os_free_ranges(GuestRange **out) {
+    GuestRange *r=NULL; unsigned n=0, cap=0;
+    uint64_t prev=0x100000000ull, top=MACH_VM_MAX_ADDRESS;  /* arm64's hard page zero, if the task can't say */
+    task_vm_info_data_t vm; mach_msg_type_number_t vm_count=TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(),TASK_VM_INFO,(task_info_t)&vm,&vm_count)==KERN_SUCCESS &&
+        vm_count>=TASK_VM_INFO_REV2_COUNT && vm.max_address>vm.min_address) {
+        prev=vm.min_address>vm_page_size ? vm.min_address : vm_page_size;
+        top=vm.max_address;
+    }
+    for (vm_address_t at=0;;) {
+        vm_address_t a=at; vm_size_t size=0;
+        vm_region_basic_info_data_64_t info; mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object=MACH_PORT_NULL;
+        if (vm_region_64(mach_task_self(),&a,&size,VM_REGION_BASIC_INFO_64,(vm_region_info_t)&info,
+                         &count,&object)!=KERN_SUCCESS) break;
+        if (object!=MACH_PORT_NULL) mach_port_deallocate(mach_task_self(),object);
+        if (a>=top) break;
+        if (!add_range(&r,&n,&cap,prev,a)) break;
+        if (a+size>prev) prev=a+size;
+        if (a+size<=at) break;
+        at=a+size;
+    }
+    if (prev<top) add_range(&r,&n,&cap,prev,top);
+    *out=r;
+    return n;
+}
+#else
+/* /proc/self/maps's gaps, up to the 47-bit user space every Linux host gives without asking. */
+unsigned os_free_ranges(GuestRange **out) {
+    GuestRange *r=NULL; unsigned n=0, cap=0;
+    uint64_t prev=0x10000, top=0x800000000000ull;
+    FILE *maps=fopen("/proc/self/maps","r");
+    if (maps) {
+        char line[512];
+        unsigned long long lo, hi;
+        while (fgets(line,sizeof line,maps))
+            if (sscanf(line,"%llx-%llx",&lo,&hi)==2 && lo<top) {
+                if (!add_range(&r,&n,&cap,prev,lo)) break;
+                if (hi>prev) prev=hi;
+            }
+        fclose(maps);
+        if (prev<top) add_range(&r,&n,&cap,prev,top);
+    }
+    *out=r;
+    return n;
+}
+#endif
+/* A hint without MAP_FIXED takes the address only when it is free (Darwin and Linux both), so
+   nothing of the process is ever replaced. */
+int os_reserve_at(uintptr_t at,uint64_t size) {
+    void *p=mmap((void *)at,(size_t)size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
+    if (p==MAP_FAILED) return 0;
+    if ((uintptr_t)p!=at) { munmap(p,(size_t)size); errno=EEXIST; return 0; }
+    return 1;
+}
+#else
+uintptr_t os_reserve(void) {
+    if (!os_backing_open()) return 0;
     /* MAP_NORESERVE: the 8 GiB reservation must not charge swap; committed
        pages are charged when mprotect commits them. */
     void *p=mmap(NULL,GUEST_SIZE,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
     if (p==MAP_FAILED) { close(ram_fd); ram_fd=-1; return 0; }
     return (uintptr_t)p;
 }
+#endif
 /* No placeholder splitting on POSIX: MAP_FIXED overlays the reservation. */
 int os_split(uintptr_t at,uint64_t size) {
     (void)at; (void)size; return 1;
@@ -158,12 +233,43 @@ static int fault_wrote(const void *ctx) {
     return -1;
 #endif
 }
+/* The fault's report: the guest address, how it was used (1 a write, 0 a read, -1 not known) and
+   the raw frames (names need -rdynamic, which the self-test link passes), then dhd.log (and
+   logcat) gets it: host.c's log, absent in the self-test. Safe in a signal handler. */
+static void report(unsigned long long at,int wrote) {
+    static const char head[]="host64 memory: access of uncommitted guest address 0x";
+    static const char tail[]="\n", read_tail[]=" (a read)\n", write_tail[]=" (a write)\n";
+    (void)write(STDERR_FILENO,head,sizeof head-1);
+    write_hex(STDERR_FILENO,at,9);
+    if (wrote==1) (void)write(STDERR_FILENO,write_tail,sizeof write_tail-1);
+    else if (wrote==0) (void)write(STDERR_FILENO,read_tail,sizeof read_tail-1);
+    else (void)write(STDERR_FILENO,tail,sizeof tail-1);
+    void *frames[24];
+    int n=backtrace(frames,24);
+    backtrace_symbols_fd(frames,n,STDERR_FILENO);
+    void host_log_drain(void) __attribute__((weak));
+    if (host_log_drain) host_log_drain();
+}
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+/* An access outside the guest's two parts (memory_access.h, GUEST(), the bridge; finding 258):
+   what lies there is not the guest's, so it is never touched. The report and the end are the
+   fault's, as when the reservation covered the gap: the same dhd.log line (run_record.c reads
+   it) and the end by SIGSEGV. */
+void host64_memory_wild(uint64_t address) {
+    report(address,-1);
+    struct sigaction dfl; memset(&dfl,0,sizeof dfl);
+    dfl.sa_handler=SIG_DFL; sigemptyset(&dfl.sa_mask);
+    sigaction(SIGSEGV,&dfl,NULL);
+    raise(SIGSEGV);
+    abort();
+}
+#endif
 static void fault(int sig,siginfo_t *info,void *ctx) {
     uintptr_t host=(uintptr_t)info->si_addr;
     /* Not ours: restore the default and re-raise. */
     struct sigaction dfl; memset(&dfl,0,sizeof dfl);
     dfl.sa_handler=SIG_DFL; sigemptyset(&dfl.sa_mask);
-    if (!guest_base || host<guest_base || host-guest_base>=GUEST_SIZE) {
+    if (!host64_memory_owns(host)) {
 #ifdef __ANDROID__
         /* Not ours: the handler before ours (the system's crash dump) gets it, as below, so the
            crash still ends in a tombstone (finding 152). */
@@ -174,24 +280,9 @@ static void fault(int sig,siginfo_t *info,void *ctx) {
         sigaction(sig,&dfl,NULL); raise(sig); return;
 #endif
     }
-    static const char head[]="host64 memory: access of uncommitted guest address 0x";
-    static const char tail[]="\n", read_tail[]=" (a read)\n", write_tail[]=" (a write)\n";
-    int wrote=fault_wrote(ctx);
-    (void)write(STDERR_FILENO,head,sizeof head-1);
-    write_hex(STDERR_FILENO,(unsigned long long)(host-guest_base),9);
-    if (wrote==1) (void)write(STDERR_FILENO,write_tail,sizeof write_tail-1);
-    else if (wrote==0) (void)write(STDERR_FILENO,read_tail,sizeof read_tail-1);
-    else (void)write(STDERR_FILENO,tail,sizeof tail-1);
-    /* Raw frames; names need -rdynamic, which the self-test link passes. */
-    void *frames[24];
-    int n=backtrace(frames,24);
-    backtrace_symbols_fd(frames,n,STDERR_FILENO);
+    report(host-guest_base,fault_wrote(ctx));
     /* Report and exit with the signal, as an unhandled fault would. Android: the handler that
        was there (the system's crash dump, debuggerd) gets the fault when it happens again. */
-    {   /* the report reaches dhd.log (and logcat) first: host.c's log, absent in the self-test */
-        void host_log_drain(void) __attribute__((weak));
-        if (host_log_drain) host_log_drain();
-    }
 #ifdef __ANDROID__
     sigaction(sig,sig==SIGBUS ? &old_bus : &old_segv,NULL);
     return;

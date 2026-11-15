@@ -258,7 +258,8 @@ Without a paid Apple developer account: the Simulator, the unsigned IPA and inst
 with their own Apple IDs (a sideloading tool signs it for 7 days with a free Apple ID) all work;
 what does not is a signed IPA from us, TestFlight, the App Store, and entitlements that need a
 provisioning profile (so the game's memory is reserved without the extended virtual addressing
-entitlement: wasm2c's bounds-check layout, `build_host64.py`'s `ios` targets). `build_ios.py
+entitlement: wasm2c's bounds-check layout, `build_host64.py`'s `ios` targets, reserved in two
+parts at the process's start so it fits an iPhone with 3 GB, finding 258). `build_ios.py
 --team ID` (or `DHD_APPLE_TEAM`) builds a development-signed app for your own device with Xcode's
 automatic signing; keep the team out of the repository.
 

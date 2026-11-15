@@ -11,6 +11,10 @@ uint32_t host64_fiber_stack_top(HostFiber fiber);
 int host64_fiber_id(void);  /* the running EE fiber, unchecked (diagnostics) */
 /* Commits guest [at, at + size) (guest_memory.c); everything else stays reserved. */
 int host64_memory_commit(uint64_t at, uint64_t size);
+/* Whether guest [at, at + size) is inside the memory's size and its reservation. */
+int host64_memory_reserved(uint64_t at, uint64_t size);
+/* iOS (finding 258): ends the process as a fault of the guest at address does (guest_memory_posix.c). */
+void host64_memory_wild(uint64_t address) __attribute__((noreturn, cold));
 /* After instantiation: the root shadow stack below the initial stack pointer,
    when the module keeps it below HOST64_MODULE_BASE. 1 on success. */
 int host64_memory_commit_stack(uint32_t stack_pointer);

@@ -59,6 +59,15 @@ int main(void)
     /* gone while on the screen with no report: memory or the watchdog */
     why = judge(RUN_GAME, 0, "gs: frame\n", text);
     assert(why && strstr(why, "without a crash report") && strstr(text, "closed unexpectedly"));
+    /* the guest memory's reservation failed (finding 258): said as such, whatever the marker */
+    why = judge(RUN_GAME, 0, "host64 memory: no room for the guest's memory: it needs 928 MiB\n"
+                "host64 memory: reserve guest memory (12: Cannot allocate memory)\n", text);
+    assert(why && strstr(why, "couldn't get the memory"));
+    assert(strstr(text, "could not get its memory") &&
+           strstr(text, "the game's report: host64 memory: reserve guest memory (12: Cannot allocate memory)\n"));
+    assert(judge(RUN_BACKGROUND, 0, "host64 memory: reserve guest memory (12: x)\n", text) &&
+           strstr(text, "could not get its memory"));
+    assert(!judge(RUN_ENDED, 0, "host64 memory: reserve guest memory (12: x)\n", text));
     /* a SIGABRT line is not one of the crash handler's reports (Android's rule) */
     assert(!run_crash_line("crash: SIGABRT at 1\n", buffer, sizeof buffer));
     puts("run_record: every end worded");

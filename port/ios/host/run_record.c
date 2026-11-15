@@ -77,6 +77,7 @@ static void date(long long seconds, char *out, size_t size)
 const char *run_judge(const RunMarker *m, const char *log_tail, long long log_time, char *text, size_t size)
 {
     static const char crashed[] = "It crashed.";
+    static const char no_room[] = "It couldn't get the memory it needs on this device. Please share the log with us.";
     static const char stopped[] = "It stopped while on the screen without a crash report (iOS closes an app "
                                   "that runs out of memory or stops responding).";
     char when[64], crash[400], record[160];
@@ -89,6 +90,16 @@ const char *run_judge(const RunMarker *m, const char *log_tail, long long log_ti
     date(m->since, when, sizeof when);
     snprintf(record, sizeof record, "system record: none (iOS keeps none an app can read); the app's own: %s since %s\n",
              names[state], when);
+    /* the guest memory found no room in the address space and ended the game (guest_memory.c,
+       finding 258): said as such, not as a crash or iOS closing the app */
+    const char *room = log_tail ? strstr(log_tail, "host64 memory: reserve guest memory") : NULL;
+    if (state != RUN_ENDED && state != RUN_LAUNCHER && room) {
+        char line[400];
+        line_at(room, line, sizeof line);
+        snprintf(text, size, "how it ended: the game could not get its memory on this device (the address space "
+                 "iOS gives the app is too small)\n%sthe game's report: %s\n", record, line);
+        return no_room;
+    }
     /* the game's crash handler wrote its report and ended the process: no host_end, so the marker
        says where the game was */
     if (state != RUN_ENDED && state != RUN_LAUNCHER && run_crash_line(log_tail, crash, sizeof crash)) {
