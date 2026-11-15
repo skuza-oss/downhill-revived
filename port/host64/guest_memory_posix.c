@@ -95,15 +95,18 @@ static int add_range(GuestRange **r,unsigned *n,unsigned *cap,uint64_t lo,uint64
 }
 #ifdef __APPLE__
 #include <mach/mach.h>
-/* The gaps between the task's regions (vm_region_64: the shared cache is one region), up to the
-   task's own top (TASK_VM_INFO's max_address: on an iPhone with 3 GB, 0x358000000). */
+/* The gaps between the task's regions (vm_region_64: the shared cache is one region) from the
+   task's own bottom to its own top (TASK_VM_INFO's min_address and max_address: the 4 GiB page
+   zero is no region but is not free either; on an iPhone with 3 GB the top is 0x358000000). */
 unsigned os_free_ranges(GuestRange **out) {
     GuestRange *r=NULL; unsigned n=0, cap=0;
-    uint64_t prev=vm_page_size, top=MACH_VM_MAX_ADDRESS;
+    uint64_t prev=0x100000000ull, top=MACH_VM_MAX_ADDRESS;  /* arm64's hard page zero, if the task can't say */
     task_vm_info_data_t vm; mach_msg_type_number_t vm_count=TASK_VM_INFO_COUNT;
     if (task_info(mach_task_self(),TASK_VM_INFO,(task_info_t)&vm,&vm_count)==KERN_SUCCESS &&
-        vm_count>=TASK_VM_INFO_REV4_COUNT && vm.max_address>prev)
+        vm_count>=TASK_VM_INFO_REV2_COUNT && vm.max_address>vm.min_address) {
+        prev=vm.min_address>vm_page_size ? vm.min_address : vm_page_size;
         top=vm.max_address;
+    }
     for (vm_address_t at=0;;) {
         vm_address_t a=at; vm_size_t size=0;
         vm_region_basic_info_data_64_t info; mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;

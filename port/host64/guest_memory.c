@@ -112,7 +112,7 @@ static int place(uint64_t need,uintptr_t *base,uint64_t *end,int say) {
                 GuestRange big=guest_largest_free(free_ranges,n);
                 fprintf(stderr,"host64 memory: no room for the guest's memory: it needs %llu MiB free at one "
                         "address and %llu MiB more 1792 MiB above it (finding 258); the largest free range is "
-                        "%llu MiB at 0x%llx, of %u\n",(unsigned long long)(p.low>>20),
+                        "%llu MiB at 0x%llx (%u free ranges)\n",(unsigned long long)(p.low>>20),
                         (unsigned long long)((need-p.high+0xfffff)>>20),(unsigned long long)((big.hi-big.lo)>>20),
                         (unsigned long long)big.lo,n);
                 for (unsigned i=0;i<n;i++)  /* the address space's shape, for the next fix */

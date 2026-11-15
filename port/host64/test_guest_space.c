@@ -27,6 +27,10 @@
 
 static uintptr_t carve_at;   /* the block the holes are opened in */
 
+/* The game's (host_sdl.c, port/hle/host.c): Darwin's linker wants a weak reference resolved. */
+void host_error_box(const char *title, const char *message) { fprintf(stderr, "error box: %s: %s\n", title, message); }
+void host_log_drain(void) { fflush(stderr); }
+
 /* Fills every free range of 16 MiB or more (smaller ones stay for malloc). Returns the lowest
    filled block of 4 GiB or more. */
 static uintptr_t fill(void)

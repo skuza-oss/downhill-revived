@@ -61,6 +61,7 @@ class GuestSpace(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("host64 memory: no room for the guest's memory: it needs 928 MiB free at one address", r.stderr)
         self.assertIn('host64 memory: reserve guest memory (12: ', r.stderr)   # run_record.c's line
+        self.assertIn("error box: Downhill Revived: The game can't get the memory it needs on this device", r.stderr)
         self.assertNotIn('PASS', r.stdout)
 
 
