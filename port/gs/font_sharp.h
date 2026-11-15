@@ -19,9 +19,9 @@ typedef struct FontSharpPack {
 } FontSharpPack;
 
 /* A high-resolution version of a decoded font texture (w x h GS colours, alpha 0x80 opaque), made
-   in memory only, by device: a new reference to it (device->release when done), or NULL. key
-   names the decoded texture; the last few are kept, so decoding the same font again costs
-   nothing. One device per process.
+   in memory only, by device: a new reference to it (device->release when done), or NULL. The
+   last few are kept, by the font's pixels (finding 256; with a pack by key, which names the
+   decoded texture), so decoding the same font again costs nothing. One device per process.
    pack: the texture pack's replacement of this texture, or NULL. With one the copy is made only
    for the menus' atlas with other button icons than the game's: the pack's picture with the icons
    painted over it (finding 200), drawn in place of the pack's (from the game's font as without a
