@@ -358,10 +358,14 @@ static void layout_kick(unsigned qword)
     o->count++; o->loops += loops;
 }
 
+static int mesh_kick_watch;   /* DHD_NATIVE_VU1_CHECK: a shadow batch runs (vu1_mesh.inc) */
+static void mesh_kicked(unsigned qword);
+
 static int kick(void *opaque, unsigned qword)
 {
     (void)opaque;
     if (layout.run) layout_kick(qword);
+    if (mesh_kick_watch) mesh_kicked(qword);
     if (!vu_profile_active) return graphics_xgkick(VU1_DATA, qword);
     double start = host_wall_seconds();
     int result = graphics_xgkick(VU1_DATA, qword);

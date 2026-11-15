@@ -37,8 +37,8 @@
    1AE0 (world objects: 0078, 1638, 07F0, 06F0, 17E0; the lit setups 1050, 12F0, 1430, 0A90, 0C20;
    2DC8 after its own 2FD8), 30A0's 3190, and for lit or skinned objects a pass over the object's
    pool (MSCAL 0040's lighting, 0010/0020's skinning and lighting) that writes positions at 181 +
-   index and lighting at 373 + index. Those stay on the VU (the near-bound test below needs the
-   pool's positions on the CPU).
+   index and lighting at 373 + index. Those stay on the VU (the item's maths needs the pool's
+   positions on the CPU).
    Each batch (MSCNT at 1CB0, 1040, 12E0 or 0590, VI13 a translated loop's) is read from VU1 data
    memory and the registers as they are and goes to the GS queue as one mesh item (gs_mesh.h): the
    pool positions, colours and texture coordinates of its strip vertices, the triangles the strip
@@ -63,9 +63,9 @@
    vertex is off the guard band in x or y or below the near bound; the loops without clipping
    kick such a vertex as it comes. A GPU clips the sideways ones as the clipper does, but not those
    that cross the near bound (w 1: the clipper's fans differ over the near ground in fast race
-   frames; finding 164), and the GS wraps the unclipped loops' ones: a batch with such a vertex
-   runs on the VU, by the same test on the CPU, in homogeneous form, before it is translated.
-   :gpuclip draws the near ones too and leaves them to the GPU's clipping (a measurement).
+   frames; finding 164): a batch with such a vertex has its flagged triangles clipped here as the
+   clipper clips them and the item carries their fans (mesh_clip_triangle, finding 253). The GS wraps the unclipped loops' ones: a
+   batch of such a loop with a vertex off the guard band runs on the VU.
 
    Modes: skip (the batch's program does not run), or shadow, the default while DHD_EXACT_PROBE
    answers the lens flare's Z probe from the GS stream: the program runs too and its packet is
@@ -81,11 +81,15 @@
 
 enum { MESH_OFF = 1, MESH_ON = 2, MESH_SKIP = 1, MESH_SHADOW = 2 };
 enum { MESH_WHY_EOP, MESH_WHY_COUNT, MESH_WHY_TAG, MESH_WHY_PRIM, MESH_WHY_TEXTURE, MESH_WHY_COLOUR, MESH_WHY_JOIN,
-       MESH_WHY_NEAR, MESH_WHY_CLIP, MESH_WHY_ORTHO, MESH_WHYS };
+       MESH_WHY_NEAR, MESH_WHY_CLIP, MESH_WHY_ORTHO, MESH_WHY_FAN_NEAR, MESH_WHY_FAN_FOG, MESH_WHY_FAN_MANY,
+       MESH_WHYS };
 static const char *const mesh_why_names[MESH_WHYS] = {"no EOP", "count", "tag", "prim", "texture tag", "colour",
                                                      "join value", "a vertex below the near bound",
                                                      "a vertex off the guard band in x or y",
-                                                     "w other than 1 (no divide)"};
+                                                     "w other than 1 (no divide)",
+                                                     "a vertex of the clipper's fan below the near bound",
+                                                     "the clipper's fog is not the loop's",
+                                                     "the clipper's polygon outgrows its buffer"};
 
 /* The translated loops (the table above). colour: c vf31, c, lit with d5, lit, the highlight, d1013,
    2DE8's; st: UV, UV + vf19 from vertex 1, UV + vf19, the environment map, 2DE8's projection. */
@@ -118,10 +122,12 @@ _Static_assert(MESH_PROGRAMS == GS_MESH_LOOPS, "mesh_programs: one bit each in t
 
 typedef struct {
     uint64_t batches, fallbacks, vertices, triangles, joins, why[MESH_WHYS];
+    uint64_t near_batches, clip_triangles, fans, fan_vertices;   /* the near bound's batches, clipped here (mesh_clip) */
     double timed_seconds; uint64_t timed_batches, timed_vertices;   /* DHD_VU1_PROFILE (mesh_timed) */
     /* DHD_NATIVE_VU1_CHECK=1 (shadow mode): the items against what the program wrote (mesh_check) */
     uint64_t checked, inside, bad_xy, bad_z, bad_fog, bad_colour, bad_stq, triangles_checked, clipped, bad_adc,
              backfaces;
+    uint64_t fans_checked, fans_bad_count, fans_missing, fan_checked, fan_bad_xyzf, fan_near_xyzf, fan_bad_rgba, fan_bad_stq, fan_far_stq;
 } MeshCounts;
 
 static struct {
@@ -129,16 +135,21 @@ static struct {
     int mode;                  /* MESH_SKIP or MESH_SHADOW */
     unsigned enabled;          /* the translated loops, a bit each (mesh_programs) */
     int object;                /* the batch's loop (mesh_programs), or -1 */
-    int gpu_clip;              /* :gpuclip: batches the VU would clip are drawn too (the GPU clips them) */
     uint64_t code_version; int overlay_b;
     MeshCounts count[MESH_PROGRAMS];
     /* the queue item: header, vertices, indices */
-    uint32_t packet[(sizeof(GsMeshHeader) + GS_MESH_MAX_VERTICES * sizeof(GsMeshVertex) +
-                     GS_MESH_MAX_VERTICES * 3 * 2 + 4) / 4];
+    uint32_t packet[(sizeof(GsMeshHeader) + GS_MESH_MAX_ITEM_VERTICES * sizeof(GsMeshVertex) +
+                     GS_MESH_MAX_VERTICES * (GS_MESH_FAN_VERTICES - 1) * 3 * 2 + 4) / 4];
     unsigned words;
+    unsigned strip;            /* the item's strip vertices (the fans' follow) */
     /* DHD_NATIVE_VU1_CHECK=1 (shadow mode): each item against what the program wrote (mesh_check) */
     int check;
     unsigned check_base; float check_parity; uint8_t join[GS_MESH_MAX_VERTICES];
+    /* and each fan of the batch as the clipper kicks it (count, then per vertex STQ, RGBA, XYZF2), against
+       the program's own kicks (mesh_kicked) */
+    unsigned fans, fans_seen;
+    uint32_t words_2de8[GS_MESH_MAX_VERTICES][4];   /* 2DE8's colour words as its loop stores them (floats) */
+    struct { unsigned count; uint32_t q[GS_MESH_FAN_VERTICES][3][4]; } fan[GS_MESH_MAX_VERTICES];
 } mesh = {.object = -1};
 
 /* A skipped batch's time on the VU thread, from the run's start to the item queued (profiled runs). */
@@ -148,7 +159,7 @@ static void mesh_timed(double seconds)
     MeshCounts *c = &mesh.count[mesh.object];
     c->timed_seconds += seconds;
     c->timed_batches++;
-    c->timed_vertices += ((const GsMeshHeader *)mesh.packet)->vertices;
+    c->timed_vertices += mesh.strip;
 }
 
 static void mesh_report(void)
@@ -160,6 +171,10 @@ static void mesh_report(void)
                 "%llu triangles, %llu join vertices\n", mesh_programs[p].name, mesh.mode == MESH_SHADOW ? "shadow" : "skip",
                 (unsigned long long)c->batches, (unsigned long long)c->fallbacks,
                 (unsigned long long)c->vertices, (unsigned long long)c->triangles, (unsigned long long)c->joins);
+        if (c->near_batches)
+            hle_log("native VU1 %s: %llu batches cross the near bound: %llu triangles through the clipper, %llu fans, "
+                    "%llu fan vertices\n", mesh_programs[p].name, (unsigned long long)c->near_batches,
+                    (unsigned long long)c->clip_triangles, (unsigned long long)c->fans, (unsigned long long)c->fan_vertices);
         for (unsigned i = 0; i < MESH_WHYS; i++)
             if (c->why[i])
                 hle_log("native VU1 %s: %llu batches on the VU: %s\n", mesh_programs[p].name, (unsigned long long)c->why[i],
@@ -177,6 +192,15 @@ static void mesh_report(void)
                     (unsigned long long)c->bad_z, (unsigned long long)c->bad_fog, (unsigned long long)c->bad_colour,
                     (unsigned long long)c->bad_stq, (unsigned long long)c->triangles_checked,
                     (unsigned long long)c->backfaces, (unsigned long long)c->bad_adc, (unsigned long long)c->clipped);
+        if (mesh.check && (c->fans_checked || c->fans_missing))
+            hle_log("native VU1 %s check: %llu fans the clipper kicked: %llu not made here or not kicked, %llu with "
+                    "another count; %llu fan vertices: XYZF2 differs %llu (%llu by one step), RGBA %llu, STQ %llu (%llu by "
+                    "more than 1e-4)\n",
+                    mesh_programs[p].name, (unsigned long long)c->fans_checked, (unsigned long long)c->fans_missing,
+                    (unsigned long long)c->fans_bad_count, (unsigned long long)c->fan_checked,
+                    (unsigned long long)c->fan_bad_xyzf, (unsigned long long)c->fan_near_xyzf,
+                    (unsigned long long)c->fan_bad_rgba, (unsigned long long)c->fan_bad_stq,
+                    (unsigned long long)c->fan_far_stq);
     }
 }
 
@@ -192,7 +216,7 @@ static void mesh_check(void)
     const GsMeshHeader *h = (const GsMeshHeader *)mesh.packet;
     const GsMeshVertex *v = (const GsMeshVertex *)(h + 1);
     const ps2_q128 *m = vu1.vu0_mem;
-    unsigned n = h->vertices;
+    unsigned n = mesh.strip;
     float sx[GS_MESH_MAX_VERTICES], sy[GS_MESH_MAX_VERTICES];
     int in[GS_MESH_MAX_VERTICES];
     for (unsigned k = 0; k < n; k++) {
@@ -241,6 +265,48 @@ static void mesh_check(void)
     }
 }
 
+/* DHD_NATIVE_VU1_CHECK: a kick of the program while a shadow batch runs. The clipper kicks each
+   fan from data 0x6D (after the texture's A+D qwords when the batch has them): its count and its
+   vertices' STQ, RGBA and XYZF2 words against the fan mesh_build made, bit for bit. */
+static void mesh_kicked(unsigned qword)
+{
+    if (mesh.object < 0 || qword != 0x6D) return;
+    MeshCounts *count = &mesh.count[mesh.object];
+    const ps2_q128 *m = vu1.vu0_mem;
+    unsigned at = qword;
+    if (!(m[at].w[0] & 0x8000)) at += (m[at].w[0] & 0x7FFF) + 1;
+    unsigned n = m[at].w[0] & 0x7FFF;
+    count->fans_checked++;
+    if (mesh.fans_seen >= mesh.fans) { mesh.fans_seen++; count->fans_missing++; return; }
+    unsigned f = mesh.fans_seen++;
+    if (mesh.fan[f].count != n || n > GS_MESH_FAN_VERTICES) { count->fans_bad_count++; return; }
+    for (unsigned j = 0; j < n; j++) {
+        const ps2_q128 *q = &m[(at + 1 + 3 * j) & 1023];
+        uint32_t (*e)[4] = mesh.fan[f].q[j];
+        count->fan_checked++;
+        if (memcmp(q[0].w, e[0], 12)) {
+            count->fan_bad_stq++;
+            for (unsigned a = 0; a < 3; a++) {
+                float mine, d, scale;
+                memcpy(&mine, &e[0][a], 4);
+                d = q[0].f[a] - mine;
+                scale = 1e-4f * ((mine < 0 ? -mine : mine) + 1e-3f);
+                if (!(d <= scale && d >= -scale)) { count->fan_far_stq++; break; }
+            }
+        }
+        if (memcmp(q[1].w, e[1], 16)) count->fan_bad_rgba++;
+        if (memcmp(q[2].w, e[2], 16)) {
+            int nearly = 1;
+            for (unsigned a = 0; a < 4; a++) {
+                int64_t d = (int64_t)q[2].sw[a] - (int32_t)e[2][a];
+                nearly &= d >= -1 && d <= 1;
+            }
+            count->fan_bad_xyzf++;
+            count->fan_near_xyzf += (unsigned)nearly;
+        }
+    }
+}
+
 /* Whether this VU1 run's batch may be translated: the setting (Native VU, gs_mesh_setting: read on
    the game thread at the start and whenever REVIVED SETTINGS changes it, so it applies live) and
    the renderer (gs_mesh_mode: none, or one that refused the mesh draws, finding 194). Asked before
@@ -274,7 +340,6 @@ static int mesh_enabled(void)
         return 0;
     }
     mesh.enabled = loops;
-    mesh.gpu_clip = (setting & GS_MESH_GPU_CLIP) != 0;
     mesh.mode = forced ? forced : mode == 2 ? MESH_SHADOW : MESH_SKIP;
     mesh.state = MESH_ON;
     mesh.check = mesh.mode == MESH_SHADOW && getenv("DHD_NATIVE_VU1_CHECK") != NULL;
@@ -284,7 +349,6 @@ static int mesh_enabled(void)
     hle_log("native VU1: loops%s drawn by the native renderer, %s%s\n", names,
             mesh.mode == MESH_SHADOW ? "shadow: the VU runs them too, for the exact Z probe" : "the VU skips them",
             mode ? "" : "; no mesh renderer: the items are dropped");
-    if (mesh.gpu_clip) hle_log("native VU1: batches the VU would clip are drawn too, clipped by the GPU (:gpuclip)\n");
     if (!reported++) host_end_add(HOST_END_REPORT, "native VU1 counters", mesh_report);
     return 1;
 }
@@ -313,6 +377,148 @@ static void mesh_environment(float env[3][2])
     for (unsigned j = 0; j < 3; j++)
         for (unsigned a = 0; a < 2; a++)
             env[j][a] = m[997].f[a] * m[j].f[0] + m[998].f[a] * m[j].f[1] + m[999].f[a] * m[j].f[2];
+}
+
+/* The loops' clipper (1948, 1CC0-2738), for the triangles that cross the near bound (finding 253).
+   A loop with CLIP sends a triangle whose three vertices carry any flag (off the guard band in x or
+   y, below the near bound) to 1948 and sets its ADC in the strip; the sideways ones are left to the
+   GPU's clipping, which draws what the clipper draws, but not the near ones (finding 164): a batch
+   with a vertex below the near bound has all its flagged triangles clipped here, by the program's
+   own steps, and the item carries the fans.
+
+   1948 (k >= 2, no join): the three pool positions through the clip matrix data 27-30 (the setup's
+   d22-25 times the object's; vertex a summed from the fourth column, b and c toward it), CLIP
+   against their own w, and nothing is drawn when all three are off one plane (near, then y, then
+   x). The stored STQ go back to (u, v, 1) by a divide by their own Q. 1CC0 then clips the
+   triangle (positions in object space, colours as floats, u and v) plane by plane, in a second
+   clip space, data 176-179 (d13-16 times the object's): the near plane first, then +y, -y, +x, -x.
+   A vertex is in or out by its CLIP flag (z < -|w| for the near plane), but where an edge crosses
+   is taken from other distances, w - 1 for the near plane and w -+ y, w -+ x for the sides
+   (t = d0 / (d0 - d1)): the near cut therefore lands on w = 1 of that space, not on the plane
+   the flags test, and may lie outside the edge. That is the game's look over the near ground and
+   why a GPU's clipping draws something else there.
+   The polygon left is projected again through the loop's own matrix (vf1..vf4, summed toward the
+   fourth column), fogged by data 4 and 21, its Z scaled by d4.z^4 and held under 2^24, and kicked
+   as a fan (the strip's tag with PRIM's fan bit and its own count) before the strip.
+
+   Each value is made in the VU's order and rounding (mesh_before sets the mode), so the fans are
+   the program's own: DHD_NATIVE_VU1_CHECK compares them bit for bit with its kicks. */
+typedef struct { float p[4], c[4], t[4]; } MeshClipVertex;   /* pool position, colour, (u, v, 1) or the normal */
+
+static inline uint32_t mesh_bits(float f) { uint32_t b; memcpy(&b, &f, 4); return b; }
+
+/* DIV: a zero divisor gives the largest float with the operands' sign */
+static inline float mesh_div(float s, float t)
+{
+    if (t != 0.0f) return s / t;
+    uint32_t b = ((mesh_bits(s) ^ mesh_bits(t)) & 0x80000000u) | 0x7F7FFFFFu;
+    float r;
+    memcpy(&r, &b, 4);
+    return r;
+}
+
+/* CLIP v.xyz against |v.w|, as VU1 compares them (by their bits): +x 1, -x 2, +y 4, -y 8, +z 16, -z 32 */
+static inline unsigned mesh_clip_flags(const float v[3], float w)
+{
+    uint32_t bound = mesh_bits(w);
+    bound = bound & 0x7F800000u ? bound & 0x7FFFFFFFu : 0x007FFFFFu;
+    unsigned flags = 0;
+    for (unsigned i = 0; i < 3; i++) {
+        uint32_t value = mesh_bits(v[i]);
+        if ((int32_t)value > (int32_t)bound) flags |= 1u << (i * 2);
+        if ((int32_t)(value ^ 0x80000000u) > (int32_t)bound) flags |= 2u << (i * 2);
+    }
+    return flags;
+}
+
+/* FTOI0 / FTOI4: toward zero, saturated by the sign */
+static inline int32_t mesh_ftoi(float f, float scale)
+{
+    float scaled = f * scale;
+    uint32_t b = mesh_bits(scaled);
+    if ((b & 0x7F800000u) > 0x4EFFFFFFu) return (int32_t)b < 0 ? INT32_MIN : INT32_MAX;
+    return (int32_t)scaled;
+}
+
+/* ((c0 x + c1 y) + c2 z) + c3: MULAx, MADDAy, MADDAz, MADDw */
+static inline void mesh_transform(float o[4], const ps2_q128 *c, const float *p)
+{
+    for (unsigned i = 0; i < 4; i++) o[i] = ((c[0].f[i] * p[0] + c[1].f[i] * p[1]) + c[2].f[i] * p[2]) + c[3].f[i];
+}
+
+/* One plane of 1CC0 (0 the near plane, 1 +y, 2 -y, 3 +x, 4 -x) over the closed polygon in[0..n):
+   the vertices left, in out; -1 when they outgrow the program's buffer of ten. */
+static int mesh_clip_plane(const MeshClipVertex *in, unsigned n, MeshClipVertex *out, const ps2_q128 *space, unsigned plane)
+{
+    static const unsigned flag[5] = {0x20, 0x04, 0x08, 0x01, 0x02};
+    float cp[4], d0 = 0, d1 = 0;
+    unsigned out0 = 0, out1 = 0, count = 0;
+    for (unsigned i = 0; i <= n; i++, d0 = d1, out0 = out1) {
+        const MeshClipVertex *now = &in[i == n ? 0 : i];
+        mesh_transform(cp, space, now->p);
+        d1 = plane == 0 ? cp[3] - 1.0f : plane == 1 ? cp[3] - cp[1] : plane == 2 ? cp[3] + cp[1] :
+             plane == 3 ? cp[3] - cp[0] : cp[3] + cp[0];
+        out1 = mesh_clip_flags(cp, cp[3]) & flag[plane];
+        if (!i) continue;
+        const MeshClipVertex *before = &in[i - 1];
+        if (!out0) {
+            if (count == GS_MESH_FAN_VERTICES) return -1;
+            out[count++] = *before;
+        }
+        if (!out0 != !out1) {
+            if (count == GS_MESH_FAN_VERTICES) return -1;
+            const float q = mesh_div(d0, d0 - d1);
+            MeshClipVertex *o = &out[count++];
+            for (unsigned a = 0; a < 4; a++) {
+                o->p[a] = (now->p[a] - before->p[a]) * q + before->p[a];
+                o->c[a] = (now->c[a] - before->c[a]) * q + before->c[a];
+                o->t[a] = (now->t[a] - before->t[a]) * q + before->t[a];
+            }
+        }
+    }
+    return (int)count;
+}
+
+/* The triangle of strip vertices a, b, c (the item's vertices out[], their pool entries' indices
+   pool[], the colour words the loop stored words[][4] or NULL for the item's bytes): the clipper's
+   polygon in poly; its vertices, 0 when nothing is drawn, -1 for the buffer. What it carries
+   beside the position and the colour: (u, v, 1) from the stored STQ, or for the environment map
+   (0C30, which has its own copy of 1948 at 0E18) the pool normal. */
+static int mesh_clip_triangle(const MeshProgram *prog, const GsMeshVertex *out, const uint16_t *pool,
+                              const uint32_t (*words)[4], unsigned a, unsigned b, unsigned c, MeshClipVertex *poly)
+{
+    const ps2_q128 *m = vu1.vu0_mem;
+    const unsigned at[3] = {a, b, c};
+    const float *pa = m[(181 + pool[a]) & 1023].f, *pb = m[(181 + pool[b]) & 1023].f, *pc = m[(181 + pool[c]) & 1023].f;
+    const float *corner[3] = {pa, pb, pc};
+    float cp[3][4];
+    for (unsigned i = 0; i < 4; i++)   /* a: MULAw the fourth column first */
+        cp[0][i] = ((m[30].f[i] + m[27].f[i] * pa[0]) + m[28].f[i] * pa[1]) + m[29].f[i] * pa[2];
+    mesh_transform(cp[1], &m[27], pb);
+    mesh_transform(cp[2], &m[27], pc);
+    if (mesh_clip_flags(cp[0], cp[0][3]) & mesh_clip_flags(cp[1], cp[1][3]) & mesh_clip_flags(cp[2], cp[2][3]) & 0x2F)
+        return 0;
+    MeshClipVertex work[2][GS_MESH_FAN_VERTICES];
+    for (unsigned i = 0; i < 3; i++) {
+        const GsMeshVertex *v = &out[at[i]];
+        MeshClipVertex *o = &work[0][i];
+        memcpy(o->p, corner[i], 16);
+        /* ITOF0 of the stored colour words (2DE8 stores floats: their bits as integers) */
+        for (unsigned j = 0; j < 4; j++) o->c[j] = words ? (float)(int32_t)words[at[i]][j] : (float)(v->rgba >> (j * 8) & 255);
+        if (prog->st == MESH_ST_ENVIRONMENT) {
+            const int32_t *normal = m[(373 + pool[at[i]]) & 1023].sw;
+            for (unsigned j = 0; j < 4; j++) o->t[j] = (float)normal[j] * (1.0f / 4096.0f);
+        } else {
+            /* the stored STQ, (u, v, uz) q, divided by its Q again (2DE8 projects the fan's positions instead) */
+            const float q = mesh_div(1.0f, v->w), stq[3] = {v->u * q, v->v * q, v->uz * q}, back = mesh_div(1.0f, stq[2]);
+            o->t[0] = stq[0] * back; o->t[1] = stq[1] * back; o->t[2] = 1.0f; o->t[3] = 0;
+        }
+    }
+    int n = 3;
+    for (unsigned plane = 0; plane < 5 && n > 0; plane++)
+        n = mesh_clip_plane(work[plane & 1], (unsigned)n, work[~plane & 1], &m[176], plane);
+    if (n > 0) memcpy(poly, work[1], (unsigned)n * sizeof *poly);   /* five planes: the second buffer */
+    return n;
 }
 
 /* The batch at VI2 as a mesh item in mesh.packet; 0 (and nothing built) for a form the
@@ -384,14 +590,20 @@ static int mesh_build(void)
        and projection, z scaled) times its pool entry, summed as the loop sums it (0170's 0088-00B8:
        MULAw the fourth column, MADDAx, MADDAy, MADDz), each step rounded (the build has no fused
        multiply-add): the item's position, which the shader divides (finding 249).
-       And the guard band test of the loop's CLIP (vf13, data 996) on it, in homogeneous form: a batch with a
-       vertex below the near bound goes to the VU (the clipper's fans there are not what a GPU's
-       clipping draws), and so does one with a vertex off it in x or y in a loop without CLIP (the
-       loop kicks it as it comes, which the GS wraps); the CLIP loops' sideways ones are drawn and
-       the GPU clips them. */
+       And the guard band test of the loop's CLIP (vf13, data 996) on it: a vertex below the near
+       bound sends its batch's flagged triangles through the clipper below (its fans there are not
+       what a GPU's clipping draws); the other batches' sideways ones are drawn and the GPU clips
+       them. In a loop
+       without CLIP a vertex off the guard band sends the batch to the VU (the loop kicks it as it
+       comes, which the GS wraps). */
     const __m128 c0 = _mm_loadu_ps(vu1.vf[1].f), c1 = _mm_loadu_ps(vu1.vf[2].f);
     const __m128 c2 = _mm_loadu_ps(vu1.vf[3].f), c3 = _mm_loadu_ps(vu1.vf[4].f);
-    const float bound = h->clip[3] < 0 ? -h->clip[3] : h->clip[3], near = -bound - h->clip[2];
+    const float bound = h->clip[3] < 0 ? -h->clip[3] : h->clip[3];
+    uint16_t pool[GS_MESH_MAX_VERTICES];
+    uint8_t below[GS_MESH_MAX_VERTICES];   /* the loop's CLIP: below the near bound */
+    uint8_t aside[GS_MESH_MAX_VERTICES];   /* off the guard band in x or y (near batches and the check) */
+    uint32_t (*words)[4] = prog->colour == MESH_COLOUR_LIGHT_ALPHA ? mesh.words_2de8 : NULL;
+    unsigned any_below = 0, any_aside = 0;
     for (unsigned k = 0; k < n; k++) {
         const ps2_q128 *r = &m[base + 1 + 3 * k];
         const float *p = m[(181 + (r[0].w[3] & 0xFFFF)) & 1023].f;
@@ -400,13 +612,17 @@ static int mesh_build(void)
         _mm_storeu_ps(cp, _mm_add_ps(_mm_add_ps(_mm_add_ps(c3, _mm_mul_ps(c0, _mm_set1_ps(p[0]))),
                                                 _mm_mul_ps(c1, _mm_set1_ps(p[1]))),
                                      _mm_mul_ps(c2, _mm_set1_ps(p[2]))));
-        if (!mesh.gpu_clip || !prog->clip) {
+        pool[k] = (uint16_t)r[0].w[3];
+        below[k] = aside[k] = 0;
+        if (prog->ortho && cp[3] != 1.0f) return mesh_fail(MESH_WHY_ORTHO);   /* the shader's divide by 1 */
+        /* the loop's CLIP of w + vf13.z against |vf13.w|: the vertex's triangles go through the
+           clipper here (mesh_clip_triangle) */
+        below[k] = h->clip[2] + cp[3] < -bound;
+        if (below[k] ? !prog->clip : !(cp[3] > 0)) return mesh_fail(MESH_WHY_NEAR);
+        any_below |= below[k];
+        if (!prog->clip) {   /* off the guard band sideways (in homogeneous form) */
             float x = cp[0] + h->clip[0] * cp[3], y = cp[1] + h->clip[1] * cp[3], b = bound * cp[3];
-            if (prog->ortho && cp[3] != 1.0f) return mesh_fail(MESH_WHY_ORTHO);   /* the shader's divide by 1 */
-            if (!(cp[3] > 0 && cp[3] >= near)) return mesh_fail(MESH_WHY_NEAR);
-            /* off the guard band sideways: the loops with clipping cut it as a GPU does (finding 164,
-               :gpuside), those without kick it as it comes */
-            if (!prog->clip && !(x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
+            if (!(x <= b && x >= -b && y <= b && y >= -b)) return mesh_fail(MESH_WHY_CLIP);
         }
         const uint32_t *c = r[1].w;   /* (3140 and 2DE8 overwrite it) */
         if (prog->colour != MESH_COLOUR_CONSTANT && prog->colour != MESH_COLOUR_LIGHT_ALPHA &&
@@ -438,6 +654,9 @@ static int mesh_build(void)
         else if (prog->colour == MESH_COLOUR_LIGHT_ALPHA) {   /* 2DE8 (2F08, 2F10): (z + y) + nudge x */
             float d = (nz * light[2] + ny * light[1]) + nudge * (nx * light[0]);
             o->rgba = 0x808080u | (d > 0 ? lit_alpha : 0) << 24;
+            /* as stored: the nudge's bits, and the light's w or 1.0 (2F48) */
+            words[k][0] = words[k][1] = words[k][2] = mesh_bits(nudge);
+            words[k][3] = d > 0 ? m[1013].w[3] : 0x3F800000u;
         } else if (prog->colour == MESH_COLOUR_HIGHLIGHT) {   /* 1510: the pool normal against d6-d8's w */
             float d = highlight[0] * nx + highlight[1] * ny + highlight[2] * nz;
             d = d > 0 ? d : 0;
@@ -471,21 +690,119 @@ static int mesh_build(void)
         } else
             o->rgba = c[0] | c[1] << 8 | c[2] << 16 | c[3] << 24;
     }
+    /* The program clips the triangles off the guard band sideways too. In a batch that crosses the
+       near bound those are drawn as its fans as well: the batch then is what the VU kicked (the
+       near ground, cut by the GPU beside a fan, shows a seam); in the others the GPU clips them
+       (finding 164) and the check compares the fans. */
+    if (prog->clip && (any_below || mesh.check))
+        for (unsigned k = 0; k < n; k++) {
+            const GsMeshVertex *o = &out[k];
+            const float q = mesh_div(1.0f, o->w), at[3] = {o->x * q + h->clip[0], o->y * q + h->clip[1], 0};
+            any_aside |= aside[k] = (mesh_clip_flags(at, h->clip[3]) & 15) != 0;
+        }
+    /* The triangles that cross the near bound, as the fans the loop's clipper kicks while the loop
+       runs (so before the strip): their vertices after the strip's, in clip space through the loop's
+       matrix as the clipper projects them, with the colour it interpolated and its texture
+       coordinates: (u, v, 1), the environment map's from the interpolated normal and the screen
+       position, or 2DE8's projection of the interpolated position. A fan is drawn from both sides:
+       in a culled item (0170) each triangle is ordered by its own area. */
+    uint16_t list[(GS_MESH_MAX_VERTICES - 2) * (GS_MESH_FAN_VERTICES - 1) * 3];
+    unsigned total = n, triangles = 0, clipped = 0, fans = 0;
+    mesh.fans = mesh.fans_seen = 0;
+    if (any_below | any_aside) {
+        const float fog_base = m[4].f[3] + m[21].f[0], fog_q = m[21].f[3], fog_max = m[21].f[1];
+        float z_scale = m[4].f[2] * m[4].f[2];
+        z_scale *= z_scale;
+        for (unsigned k = 2; k < n; k++) {
+            const int cut = below[k] | below[k - 1] | below[k - 2] | aside[k] | aside[k - 1] | aside[k - 2];
+            const int draw = any_below && cut;   /* else (the check) one the GPU clips */
+            if (join[k] || !cut) continue;
+            MeshClipVertex poly[GS_MESH_FAN_VERTICES];
+            int got = mesh_clip_triangle(prog, out, pool, (const uint32_t (*)[4])words, k - 2, k - 1, k, poly);
+            clipped += (unsigned)draw;
+            if (got < 0 && draw) return mesh_fail(MESH_WHY_FAN_MANY);
+            if (got <= 0) continue;
+            float sx[GS_MESH_FAN_VERTICES], sy[GS_MESH_FAN_VERTICES];
+            for (unsigned j = 0; j < (unsigned)got; j++) {
+                float cp[4], st[3], kicked[3];   /* st: the item's u, v, uz; kicked: the STQ the clipper stores */
+                mesh_transform(cp, &vu1.vf[1], poly[j].p);
+                const float q = mesh_div(1.0f, cp[3]);
+                float fog = fog_base + fog_q * q, z = cp[2] * q * z_scale;
+                fog = fog > 0 ? fog : 0;
+                fog = fog < fog_max ? fog : fog_max;
+                z = z < 16777215.0f ? z : 16777215.0f;
+                sx[j] = cp[0] * q; sy[j] = cp[1] * q;
+                if (prog->st == MESH_ST_ENVIRONMENT) {   /* 2338: E N + (X + d997.zw) d998.zw, Q = 1 */
+                    const float *normal = poly[j].t, at[2] = {sx[j], sy[j]};
+                    for (unsigned a = 0; a < 2; a++) {
+                        kicked[a] = ((env[0][a] * normal[0] + env[1][a] * normal[1]) + env[2][a] * normal[2]) +
+                                    (at[a] + env_add[a]) * env_scale[a];
+                        st[a] = kicked[a] * cp[3];
+                    }
+                    kicked[2] = 1.0f; st[2] = cp[3];
+                } else if (prog->st == MESH_ST_PROJECTED) {   /* 2388: (d5-d8) (x y z 1), times Q */
+                    const float *at = poly[j].p;
+                    for (unsigned a = 0; a < 3; a++) {
+                        st[a] = ((m[8].f[a] + m[5].f[a] * at[0]) + m[6].f[a] * at[1]) + m[7].f[a] * at[2];
+                        kicked[a] = st[a] * q;
+                    }
+                } else
+                    for (unsigned a = 0; a < 3; a++) { st[a] = poly[j].t[a]; kicked[a] = st[a] * q; }
+                if (mesh.check) {
+                    uint32_t (*e)[4] = mesh.fan[mesh.fans].q[j];
+                    for (unsigned a = 0; a < 3; a++) e[0][a] = mesh_bits(kicked[a]);
+                    for (unsigned a = 0; a < 4; a++) e[1][a] = (uint32_t)mesh_ftoi(poly[j].c[a], 1.0f);
+                    e[2][0] = (uint32_t)mesh_ftoi(sx[j], 16.0f); e[2][1] = (uint32_t)mesh_ftoi(sy[j], 16.0f);
+                    e[2][2] = (uint32_t)mesh_ftoi(z, 16.0f); e[2][3] = (uint32_t)mesh_ftoi(fog, 16.0f);
+                }
+                if (got < 3 || !draw) continue;
+                /* what the shader makes of the item's vertex must be the kicked one: in front of the
+                   near bound, and the fog of the item's constants */
+                float item_fog = h->fog[0] + h->fog[1] * q;
+                item_fog = item_fog < h->fog[2] ? item_fog : h->fog[2];
+                item_fog = item_fog > 0 ? item_fog : 0;
+                if (!(cp[3] > 0) || h->clip[2] + cp[3] < -bound) return mesh_fail(MESH_WHY_FAN_NEAR);
+                if ((int)item_fog != (int)fog) return mesh_fail(MESH_WHY_FAN_FOG);
+                GsMeshVertex *o = &out[total + j];
+                o->x = cp[0]; o->y = cp[1]; o->z = cp[2] * z_scale; o->w = cp[3];
+                o->u = st[0]; o->v = st[1]; o->uz = st[2];
+                o->rgba = 0;
+                for (unsigned a = 0; a < 4; a++) o->rgba |= ((uint32_t)mesh_ftoi(poly[j].c[a], 1.0f) & 255) << (a * 8);
+            }
+            if (mesh.check) mesh.fan[mesh.fans].count = (unsigned)got;
+            mesh.fans++;
+            if (got < 3 || !draw) continue;
+            for (unsigned j = 1; j + 1 < (unsigned)got; j++) {
+                float area = (sx[j] - sx[0]) * (sy[j + 1] - sy[j]) - (sy[j] - sy[0]) * (sx[j + 1] - sx[j]);
+                int swap = prog->backface && area > 0;   /* the cull drops a positive area (y down) */
+                list[triangles++] = (uint16_t)total;
+                list[triangles++] = (uint16_t)(total + j + (swap ? 1 : 0));
+                list[triangles++] = (uint16_t)(total + j + (swap ? 0 : 1));
+            }
+            total += (unsigned)got;
+            fans++;
+        }
+    }
     /* the strip's triangles: k-2, k-1, k for each vertex k >= 2 without the join's ADC; with 0170's
        culling each ordered so that the cull (positive screen area, y down) drops what its back-face
        test would */
-    uint16_t *index = (uint16_t *)(out + n);
-    unsigned triangles = 0;
+    unsigned joins = 0;
     for (unsigned k = 2; k < n; k++) {
-        if (join[k]) { count->joins++; continue; }
+        if (join[k]) { joins++; continue; }
+        if (any_below && (below[k] | below[k - 1] | below[k - 2] | aside[k] | aside[k - 1] | aside[k - 2]))
+            continue;   /* the clipper's, above */
         int keep_order = !prog->backface || (parity > 0) == !(k & 1);
-        index[triangles++] = (uint16_t)(keep_order ? k - 2 : k - 1);
-        index[triangles++] = (uint16_t)(keep_order ? k - 1 : k - 2);
-        index[triangles++] = (uint16_t)k;
+        list[triangles++] = (uint16_t)(keep_order ? k - 2 : k - 1);
+        list[triangles++] = (uint16_t)(keep_order ? k - 1 : k - 2);
+        list[triangles++] = (uint16_t)k;
     }
-    h->vertices = n; h->indices = triangles;
-    mesh.words = (unsigned)((sizeof *h + n * sizeof *out + triangles * 2 + 3) / 4);
-    count->batches++; count->vertices += n; count->triangles += triangles / 3;
+    memcpy(out + total, list, triangles * sizeof *list);
+    h->vertices = total; h->indices = triangles;
+    mesh.strip = n;
+    mesh.words = (unsigned)((sizeof *h + total * sizeof *out + triangles * 2 + 3) / 4);
+    count->batches++; count->vertices += n; count->triangles += triangles / 3; count->joins += joins;
+    count->near_batches += any_below != 0; count->clip_triangles += clipped; count->fans += fans;
+    count->fan_vertices += total - n;
     /* the parity 0170 leaves: one flip a vertex */
     if (prog->backface) vu1.vf[6].f[0] = n & 1 ? -parity : parity;
     return 1;
@@ -515,6 +832,7 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
     if (!built) return 0;
     *packet = mesh.packet;
     if (mesh.mode == MESH_SHADOW) {
+        mesh_kick_watch = mesh.check;
         vu1.vf[6].f[0] = parity;   /* the VU runs the batch itself (0170 flips it there) */
         return 2;
     }
@@ -524,7 +842,11 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
 static void mesh_send(uint32_t *packet)
 {
     static uint64_t report_at = 3000;
-    if (mesh.check && mesh.mode == MESH_SHADOW) mesh_check();
+    if (mesh.check && mesh.mode == MESH_SHADOW) {
+        mesh_kick_watch = 0;
+        if (mesh.fans_seen < mesh.fans) mesh.count[mesh.object].fans_missing += mesh.fans - mesh.fans_seen;
+        mesh_check();
+    }
     if (kernel_vsync_count >= report_at) {   /* the counts so far, every 3000 fields (and at exit) */
         mesh_report();
         report_at = kernel_vsync_count + 3000;

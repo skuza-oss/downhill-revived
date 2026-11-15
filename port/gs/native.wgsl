@@ -121,17 +121,15 @@ fn native_vertex(@location(0) position_in: vec3<f32>, @location(1) stqf: vec4<f3
 // q = 1 / w; XYZ = clip.xyz q; fog = clamp(A + B q, 0, max); STQ = (u, v, uz) q. A vertex inside
 // the program's guard band (its CLIP against the draw's guard band: x, y and the near bound on w)
 // is placed as the GS would place the kicked one, at FTOI4's 1/16 pixel and Z's integer, through
-// native_vertex's mapping. A vertex off the guard band sideways (and with :gpuclip one below the
-// near bound; batches with those otherwise run on the VU, vu1_mesh.inc) goes out as the plain
-// projection; both forms homogeneous (times w), so the GPU clips the triangles where the VU's
-// clipper would cut them into fans.
+// native_vertex's mapping. A vertex off the guard band sideways goes out as the plain projection;
+// both forms homogeneous (times w), so the GPU clips the triangles where the VU's clipper would
+// cut them into fans. No triangle has a vertex below the near bound: the VU thread clips those as
+// the program's clipper does and sends the fans' vertices (vu1_mesh.inc, finding 253).
 //
 // The GS interpolates STQ, colour and fog linearly in screen space, and so does the GPU: the mesh's
 // varyings are native_vertex's (Varyings, no perspective), so its pixels run the same fragment
-// stages as a draw the VU kicked. That needs w > 0 at every vertex, which vu1_mesh.inc's near-bound
-// test gives (a batch with a vertex below the near bound runs on the VU). With :gpuclip a triangle
-// may cross w = 0: its cut vertices' values are then the driver's clipping of no-perspective
-// varyings (the Vulkan and D3D rule gives the screen-linear value there too; finding 249).
+// stages as a draw the VU kicked. That needs w > 0 at every vertex a triangle uses, which
+// vu1_mesh.inc's near-bound test gives.
 @vertex
 fn native_mesh_vertex(@location(0) clip: vec4<f32>, @location(1) uvq: vec3<f32>,
                       @location(2) color: vec4<u32>) -> Varyings {

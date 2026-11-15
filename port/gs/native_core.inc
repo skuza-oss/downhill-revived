@@ -2245,7 +2245,7 @@ static void native_mesh(Gs *g, const uint32_t *words, size_t count)
     NativeExact *gpu = g->backend;
     Native *n = gpu->native;
     const GsMeshHeader *h = (const GsMeshHeader *)words;
-    if (!n->indexed || h->vertices > GS_MESH_MAX_VERTICES ||
+    if (!n->indexed || h->vertices > GS_MESH_MAX_ITEM_VERTICES ||
         count * 4 < sizeof *h + h->vertices * sizeof(GsMeshVertex) + h->indices * 2) return;
     unsigned prim = (unsigned)((g->reg[GS_PRIM] & 7) |
                     ((g->reg[GS_PRMODECONT] & 1 ? g->reg[GS_PRIM] : g->reg[GS_PRMODE]) & 0x7F8));
