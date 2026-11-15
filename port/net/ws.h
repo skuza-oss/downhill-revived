@@ -11,13 +11,19 @@
 
 typedef struct WsConn WsConn;
 
+enum { WS_ATTEMPTS_OVER = 1000 };  /* on_close's attempt when no attempt follows */
+
 typedef struct {
     void *ctx;
     void (*on_open)(void *ctx, WsConn *ws);  /* receive thread; the queue is empty */
     void (*on_message)(void *ctx, int binary, const uint8_t *data, size_t n);  /* send thread; text data[n] is 0 */
     /* Receive thread: the connection ended or failed (code -1: connecting failed). Returns the URL
-       to connect to next, after a backoff (1, 2, 4, then 8 s), or NULL to stop. attempt counts
-       failures since the last open. Also called for the close ws_stop makes. */
+       to connect to next, after a backoff, or NULL to stop. attempt counts failures since the last
+       open, or is WS_ATTEMPTS_OVER: no attempt follows (the next would start over 30 s after the
+       drop). The backoff (port/render/net lib.rs retry_delay, finding 254): about 1 s, then 2 s
+       while nothing reaches the server; failures the server answered 4 s, then 12 s; a refusal by
+       its rate limit (4011) 20-30 s; each with a little jitter. Also called for the close ws_stop
+       makes. */
     const char *(*on_close)(void *ctx, int code, const char *reason, int attempt);
     int (*on_tick)(void *ctx);  /* send thread, may be NULL. 1: drop the connection (the server went silent) */
 } WsHandler;
