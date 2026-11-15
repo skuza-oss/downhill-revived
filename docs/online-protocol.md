@@ -380,7 +380,8 @@ A member's session lives as long as its stay in the room (finding 177):
   `"sfu_trouble"`:
   `{"type":"sfu_trouble","path":"turn","step":"allocate","kind":"turn_400","version":"0.8.5"}`.
   Fixed words only: `path` is `udp` or `turn`; `step` is `send`, `receive`, `connect`,
-  `credentials`, `tls_connect`, `tls_handshake`, `allocate`, `channel_bind`, `refresh`,
+  `credentials`, `tls_connect`, `tls_handshake`, `challenge` (the first Allocate, sent without
+  credentials; finding 252), `allocate` (the authenticated one), `channel_bind`, `refresh`,
   `first_data` or `link`; `kind` is `timeout`, `refused`, `reset`, `unreachable`, `denied`, `dns`,
   `tls`, `closed`, `integrity`, `no_answer`, `turn_400`, `turn_401`, `turn_403`, `turn_437`,
   `turn_438`, `turn_440`, `turn_441`, `turn_442`, `turn_486`, `turn_508`, `turn_other` or `other`

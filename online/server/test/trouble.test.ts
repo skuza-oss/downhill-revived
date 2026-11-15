@@ -22,6 +22,8 @@ async function logged(run: () => Promise<void>): Promise<string[]> {
 describe("sfu_trouble (finding 248)", () => {
   it("takes fixed words and a plain version only", () => {
     expect(troubleOf(report())).toEqual({ path: "turn", step: "allocate", kind: "turn_400", version: "0.8.5" });
+    // The first Allocate, without credentials, is its own step (finding 252).
+    expect(troubleOf(report({ step: "challenge" }))?.step).toBe("challenge");
     expect(troubleOf(report({ path: "tcp" }))).toBeNull();
     expect(troubleOf(report({ step: "1.2.3.4:3478" }))).toBeNull();
     expect(troubleOf(report({ kind: "turn_400 user=x" }))).toBeNull();

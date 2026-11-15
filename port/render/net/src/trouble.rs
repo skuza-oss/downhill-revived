@@ -29,7 +29,10 @@ pub enum Step {
     TlsConnect,
     /// TURN: the TLS handshake.
     TlsHandshake,
-    /// TURN: the Allocate request.
+    /// TURN: the first Allocate, sent without credentials: its 401 brings the realm and nonce
+    /// (finding 252: a 400 here and one to the authenticated Allocate mean different things).
+    Challenge,
+    /// TURN: the authenticated Allocate request.
     Allocate,
     /// TURN: the ChannelBind request, which also installs the permission (the client sends no
     /// separate CreatePermission).
@@ -82,7 +85,7 @@ impl Step {
     pub fn word(self) -> &'static str {
         match self {
             Step::Send => "send", Step::Receive => "receive", Step::Connect => "connect", Step::Credentials => "credentials",
-            Step::TlsConnect => "tls_connect", Step::TlsHandshake => "tls_handshake", Step::Allocate => "allocate",
+            Step::TlsConnect => "tls_connect", Step::TlsHandshake => "tls_handshake", Step::Challenge => "challenge", Step::Allocate => "allocate",
             Step::ChannelBind => "channel_bind", Step::Refresh => "refresh", Step::FirstData => "first_data", Step::Link => "link",
         }
     }
