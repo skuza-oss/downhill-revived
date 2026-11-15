@@ -17,8 +17,8 @@
 //!   settings_table.h, the game's online menu.
 //! - The install id (`install`, finding 161): a random id kept in dhd.ini for the online server's
 //!   bans; not a setting, never a variable or a log line.
-//! - The keyboard and controller bindings (`controls`, finding 157): the `keyboard`, `pad1` and
-//!   `pad2` lines' layouts and the rules of a change, for the game (through port/hle/
+//! - The keyboard and controller bindings (`controls`, finding 157): the `keyboard` and `pad1`
+//!   to `pad4` lines' layouts and the rules of a change, for the game (through port/hle/
 //!   controls_table.h and the C interface) and the launcher's Controls tab.
 //!
 //! Precedence: a DHD_* variable set in the environment overrides dhd.ini (the game's tools set

@@ -46,20 +46,24 @@ typedef struct DhdControlsLayout {
     unsigned char swap_sticks, invert, swap_shoulders, unused;
 } DhdControlsLayout;
 
-/* The keyboard's, Controller 1's and Controller 2's layouts the three values give (dhd.ini
-   keyboard, pad1, pad2; NULL or "": the defaults) into out[3]; problem (may be NULL) hears of each
-   line that couldn't be read as written, with what the game did instead. */
-void dhd_controls_layouts(const char *keyboard, const char *pad1, const char *pad2, DhdControlsLayout out[3],
+/* The layouts: the keyboard, then Controllers 1 to 4 (finding 251), as port/hle/controls_table.h's
+   CONTROL_KEYBOARD, CONTROL_PAD1 ... */
+#define DHD_CONTROLS_DEVICES 5
+
+/* Each device's layout its value gives (values[d]: dhd.ini keyboard, pad1 ... pad4; NULL or "": the
+   defaults) into out; problem (may be NULL) hears of each line that couldn't be read as written,
+   with what the game did instead. */
+void dhd_controls_layouts(const char *const values[DHD_CONTROLS_DEVICES], DhdControlsLayout out[DHD_CONTROLS_DEVICES],
                           DhdSettingsUnknown problem);
 
-/* One change to device's layout (0 the keyboard, 1 and 2 the controllers) by the bindings' rules
+/* One change to device's layout (0 the keyboard, 1 to 4 the controllers) by the bindings' rules
    (an input another button had moves; no player is left without Cross, Triangle, START or a d-pad
    direction): edit 0 assign input to target's slot, 1 clear, 2 reset, 3 swap sticks (input 1 on),
    4 invert (target the bit, input 1 on), 5 swap a shoulder and its trigger (target the SWAP_* bit,
    input 1 on); kind the controller's PAD_KIND_* (the words). The device's new value into value,
    the player's message into message (cut to fit). -1 refused, 0 nothing to do, 1 changed. */
-int dhd_controls_edit(const char *keyboard, const char *pad1, const char *pad2, int device, int edit, int target, int slot,
-                      int input, int kind, char *value, size_t value_size, char *message, size_t message_size);
+int dhd_controls_edit(const char *const values[DHD_CONTROLS_DEVICES], int device, int edit, int target, int slot, int input,
+                      int kind, char *value, size_t value_size, char *message, size_t message_size);
 
 /* ---- the launcher's page (finding 225; port/render/settings/src/launcher.rs) ----
    The JSON the launcher's page draws from, for a phone's bridge (port/host/android_launcher.c):

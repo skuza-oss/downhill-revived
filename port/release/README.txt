@@ -105,7 +105,8 @@ back; changes save at once. The dimmed "also" binding is the alternate, changed 
 PlayStation button had swaps between the two. Cross, Triangle, START, R1 and the d-pad always keep
 a key or button on the keyboard and on each controller, so you can't lock yourself out of the
 menus; Esc always goes back and pauses. Reset brings the layouts above back. dhd.ini keeps them
-as the lines keyboard, pad1 and pad2 (docs/PLAYING.md in the repository explains them).
+as the lines keyboard and pad1 to pad4, one for each player's controller (docs/PLAYING.md in the
+repository explains them).
 
 Settings: OPTIONS > REVIVED SETTINGS in the game's menu, the first row, with Display, Graphics,
 Controls, Online and Game tabs (L1/R1 switch them): resolution, display mode, window size,

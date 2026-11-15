@@ -1,9 +1,9 @@
 //! Which keys and controller buttons stand for the PS2 pad's buttons (finding 157): dhd.ini's
-//! `keyboard`, `pad1` and `pad2` lines, their defaults (the layout the game always had), how a line
-//! is read and written, and the rules of a change: an input another button had swaps with the
-//! button's old one (no duplicates), and no device is left without a way through the menus (each
-//! of the keyboard, Controller 1 and Controller 2 on its own keeps Cross, Triangle, START, R1 (the
-//! settings tabs) and the d-pad).
+//! `keyboard` and `pad1` to `pad4` lines (finding 251: a layout for each of the four players'
+//! controllers), their defaults (the layout the game always had), how a line is read and written,
+//! and the rules of a change: an input another button had swaps with the button's old one (no
+//! duplicates), and no device is left without a way through the menus (each of the keyboard and the
+//! four controllers on its own keeps Cross, Triangle, START, R1 (the settings tabs) and the d-pad).
 //!
 //! - What is bound are the DualShock 2's buttons (`TARGETS`): the game's own meaning of each stays
 //!   (Cross pedals in a race and confirms in the menus). The keyboard can also hold the sticks'
@@ -210,7 +210,7 @@ pub const PAD_INPUTS: &[PadInput] = &[
     trigger(22, "rt", ["RT", "R2", "ZR"], 2, 7),
 ];
 
-/// One of the three layouts: the keyboard (player 1's) and the two players' controllers.
+/// One of the layouts: the keyboard (player 1's) and each of the four players' controllers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Device {
     /// The dhd.ini key, and the DHD_* variable the game reads (table.rs).
@@ -218,18 +218,25 @@ pub struct Device {
     pub env: &'static str,
     pub label: &'static str,
     pub pad: bool,
-    /// 1 or 2.
+    /// 1 to 4.
     pub player: u8,
 }
 
 pub const KEYBOARD: usize = 0;
 pub const PAD1: usize = 1;
 pub const PAD2: usize = 2;
-pub const DEVICES: [Device; 3] = [
+pub const PAD3: usize = 3;
+pub const PAD4: usize = 4;
+/// The keyboard, then player N's controller at PAD1 + N - 1.
+pub const DEVICES: [Device; 5] = [
     Device { key: "keyboard", env: "DHD_KEYBOARD", label: "Keyboard", pad: false, player: 1 },
     Device { key: "pad1", env: "DHD_PAD1", label: "Controller 1", pad: true, player: 1 },
     Device { key: "pad2", env: "DHD_PAD2", label: "Controller 2", pad: true, player: 2 },
+    Device { key: "pad3", env: "DHD_PAD3", label: "Controller 3", pad: true, player: 3 },
+    Device { key: "pad4", env: "DHD_PAD4", label: "Controller 4", pad: true, player: 4 },
 ];
+/// How many layouts there are (`DEVICES`).
+pub const DEVICE_COUNT: usize = DEVICES.len();
 
 /// A controller's own sticks, inverted: these bits of `Layout::invert`.
 pub const INVERT_LX: u8 = 1;
@@ -511,15 +518,16 @@ pub enum Outcome {
     Refused(String),
 }
 
-/// The three layouts together (the dhd.ini lines are read and written as one).
+/// Every device's layout together, in `DEVICES`' order (the dhd.ini lines are read and written as
+/// one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Controls {
-    pub layouts: [Layout; 3],
+    pub layouts: [Layout; DEVICE_COUNT],
 }
 
 impl Default for Controls {
     fn default() -> Self {
-        Controls { layouts: [default_layout(KEYBOARD), default_layout(PAD1), default_layout(PAD2)] }
+        Controls { layouts: std::array::from_fn(default_layout) }
     }
 }
 
@@ -529,11 +537,11 @@ fn an_input(device: usize) -> &'static str {
 }
 
 impl Controls {
-    /// The layouts the three lines give (`parse`). A hand-made line that leaves an essential button
-    /// with nothing on its device puts that device alone back to its defaults, with a line in
-    /// `problems`.
-    pub fn from_values(values: [&str; 3], problems: &mut Vec<String>) -> Controls {
-        let mut c = Controls { layouts: [0, 1, 2].map(|d| parse(d, values[d], problems)) };
+    /// The layouts the devices' lines give (`parse`; "" a missing line: the defaults). A hand-made
+    /// line that leaves an essential button with nothing on its device puts that device alone back
+    /// to its defaults, with a line in `problems`.
+    pub fn from_values(values: [&str; DEVICE_COUNT], problems: &mut Vec<String>) -> Controls {
+        let mut c = Controls { layouts: std::array::from_fn(|d| parse(d, values[d], problems)) };
         for device in 0..DEVICES.len() {
             if let Some(t) = c.missing(device) {
                 problems.push(format!(
@@ -549,9 +557,9 @@ impl Controls {
         c
     }
 
-    /// The three dhd.ini lines.
-    pub fn values(&self) -> [String; 3] {
-        [0, 1, 2].map(|d| format(d, &self.layouts[d]))
+    /// The devices' dhd.ini lines.
+    pub fn values(&self) -> [String; DEVICE_COUNT] {
+        std::array::from_fn(|d| format(d, &self.layouts[d]))
     }
 
     /// The first essential target `device`'s layout has nothing on.
@@ -651,13 +659,14 @@ pub fn c_table() -> String {
     );
     let _ = writeln!(
         out,
-        "enum {{ CONTROL_TARGETS = {}, CONTROL_BUTTONS = {BUTTONS}, CONTROL_SLOTS = {SLOTS}, CONTROL_DEVICES = 3, \
+        "enum {{ CONTROL_TARGETS = {}, CONTROL_BUTTONS = {BUTTONS}, CONTROL_SLOTS = {SLOTS}, CONTROL_DEVICES = {DEVICE_COUNT}, \
          CONTROL_KEYS = {}, CONTROL_PAD_INPUTS = {} }};",
         TARGETS.len(),
         KEYS.len(),
         PAD_INPUTS.len()
     );
-    out += "enum { CONTROL_KEYBOARD, CONTROL_PAD1, CONTROL_PAD2 };\n";
+    let names: Vec<String> = DEVICES.iter().map(|d| format!("CONTROL_{}", d.key.to_uppercase())).collect();
+    let _ = writeln!(out, "/* the keyboard, then player N's controller at CONTROL_PAD1 + N - 1 */\nenum {{ {} }};", names.join(", "));
     let _ = writeln!(
         out,
         "enum {{ CONTROL_INVERT_LX = {INVERT_LX}, CONTROL_INVERT_LY = {INVERT_LY}, CONTROL_INVERT_RX = {INVERT_RX}, \
@@ -698,14 +707,14 @@ pub fn c_table() -> String {
             p.id, p.name, p.labels.xbox, p.labels.playstation, p.labels.nintendo, p.sdl, p.trigger
         );
     }
-    out += "};\n\n/* The defaults: the keyboard, Controller 1, Controller 2 (the game's layouts before rebinding). */\n\
+    out += "};\n\n/* The defaults: the keyboard, Controllers 1 to 4 (the game's layouts before rebinding). */\n\
             static const ControlsLayout control_defaults[CONTROL_DEVICES] = {\n";
-    for d in 0..3 {
+    for d in 0..DEVICE_COUNT {
         let l = default_layout(d);
         let pairs: Vec<String> = l.input.iter().map(|s| format!("{{{}, {}}}", s[0], s[1])).collect();
         let _ = writeln!(out, "    {{{{{}}}, {}, {}, {}, 0}},", pairs.join(", "), l.swap_sticks, l.invert, l.swap_shoulders);
     }
-    out += "};\n\n/* The settings: dhd.ini key and variable of the keyboard, Controller 1 and Controller 2. */\n\
+    out += "};\n\n/* The settings: dhd.ini key and variable of the keyboard and Controllers 1 to 4. */\n\
             static const struct { const char *key, *env, *label; } control_devices[CONTROL_DEVICES] = {\n";
     for d in &DEVICES {
         let _ = writeln!(out, "    {{\"{}\", \"{}\", \"{}\"}},", d.key, d.env, d.label);

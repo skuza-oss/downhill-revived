@@ -1,5 +1,5 @@
-//! The Controls tab's bindings (finding 157): the tables, the three layouts dhd.ini holds
-//! (keyboard, pad1, pad2) and each change, made by dhd_settings::controls (the game's own rules)
+//! The Controls tab's bindings (finding 157): the tables, the layouts dhd.ini holds (keyboard,
+//! pad1 to pad4: each of the four players' controllers, finding 251) and each change, made by dhd_settings::controls (the game's own rules)
 //! and saved at once. The game takes them at its next start, as the launcher's other settings.
 
 use dhd_settings::controls::{self, Controls, Edit, Outcome};
@@ -83,7 +83,7 @@ pub struct State {
     layouts: Vec<Layout>,
 }
 
-/// The three layouts dhd.ini gives (the game's reading of its lines: a broken one falls back).
+/// The layouts dhd.ini gives (the game's reading of its lines: a broken one falls back).
 fn read(settings: &Path) -> Controls {
     let ini = dhd_settings::read(settings).unwrap_or_default();
     let values = controls::DEVICES.map(|d| ini.value(d.key));
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn schema_for_the_page() {
         let s = schema();
-        assert_eq!((s.targets.len(), s.buttons, s.devices.len()), (24, 16, 3));
+        assert_eq!((s.targets.len(), s.buttons, s.devices.len()), (24, 16, 5));
         assert!(s.keys.iter().all(|k| !k.code.is_empty() && k.vk != 0));
         assert!(s.pads.iter().any(|p| p.web == 0 && p.labels == ["A", "Cross", "B"]));
         let id = |n| controls::pad_named(n).unwrap().id;
@@ -203,7 +203,20 @@ mod tests {
         let a = edit(&ini, 0, &ask("reset", 0, 0), 2, save).unwrap();
         assert_eq!(a.outcome, "changed");
         assert_eq!(dhd_settings::read(&ini).unwrap().written("keyboard"), None, "an empty line: the defaults");
-        assert!(edit(&ini, 3, &ask("reset", 0, 0), 2, save).is_err());
+        // Controllers 3 and 4 (finding 251): their own lines, the others left as they are
+        let east = controls::pad_named("east").unwrap().id;
+        let a = edit(&ini, 3, &ask("assign", cross, east), 1, save).unwrap();
+        assert_eq!((a.outcome, a.message.as_str()), ("changed", "Swapped Cross and Circle"));
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("pad3").as_deref(), Some("cross:east circle:south"));
+        let a = edit(&ini, 4, &Request { input: controls::INVERT_LY, ..ask("invert", 0, 0) }, 1, save).unwrap();
+        assert_eq!((a.outcome, a.layouts[4].invert, a.layouts[3].invert), ("changed", controls::INVERT_LY, 0));
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("pad4").as_deref(), Some("invert:ly"));
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("pad2").as_deref(), Some("sticks:swap"));
+        assert_eq!(state(&ini).layouts.len(), 5);
+        assert_eq!(edit(&ini, 3, &ask("reset", 0, 0), 2, save).unwrap().outcome, "changed");
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("pad3"), None);
+        assert_eq!(dhd_settings::read(&ini).unwrap().written("pad4").as_deref(), Some("invert:ly"));
+        assert!(edit(&ini, 5, &ask("reset", 0, 0), 2, save).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

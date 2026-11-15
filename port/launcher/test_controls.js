@@ -1,5 +1,6 @@
 // The Controls tab's page logic (ui/controls.js, finding 157) without a window: a pad's kind, the
-// words for a layout's inputs, a key and a controller button pressed while a binding waits.
+// words for a layout's inputs, a key and a controller button pressed while a binding waits, the
+// tab's Reset of every layout (four controllers, finding 251).
 //     node port/launcher/test_controls.js [schema.json]
 // schema.json: the launcher's controls_schema and the default layouts, as its test writes them
 // (DHD_CONTROLS_SCHEMA=schema.json cargo test schema_for_the_page in port/launcher/src-tauri);
@@ -10,7 +11,12 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const sandbox = { module: { exports: {} }, addEventListener: () => {}, navigator: {}, performance: { now: () => 0 }, console };
+const calls = [];  // the launcher's commands the page sent (app.js's call, mocked)
+const sandbox = {
+  module: { exports: {} }, addEventListener: () => {}, navigator: {}, performance: { now: () => 0 }, console,
+  call: async (name, args) => { calls.push([name, args]); return { outcome: 'changed', message: '', layouts: [] }; },
+  flash: () => {}, renderRows: () => {}, t: (key) => key,
+};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'ui', 'controls.js'), 'utf8'), sandbox);
 const c = sandbox.module.exports;
 
@@ -21,7 +27,8 @@ const schema = {  // a small one for the rules below; the launcher's own is chec
   keys: [{ vk: 0x20, label: 'Space', code: 'Space' }, { vk: 0x58, label: 'X', code: 'KeyX' }, { vk: 0x0D, label: 'Enter', code: 'Enter' }],
   pads: [{ id: 1, labels: ['A', 'Cross', 'B'], web: 0 }, { id: 2, labels: ['B', 'Circle', 'A'], web: 1 },
          { id: 21, labels: ['LT', 'L2', 'ZL'], web: 6 }, { id: 15, labels: ['Share', 'Mic', 'Capture'], web: -1 }],
-  devices: [{ label: 'Keyboard' }, { label: 'Controller 1' }, { label: 'Controller 2' }],
+  devices: [{ label: 'Keyboard' }, { label: 'Controller 1' }, { label: 'Controller 2' }, { label: 'Controller 3' },
+            { label: 'Controller 4' }],
   swaps: [{ bit: 1, inputs: [9, 21] }, { bit: 2, inputs: [10, 22] }],
 };
 
@@ -83,5 +90,16 @@ if (given) {
   assert.strictEqual(pad1.swap_shoulders, 0, 'no swap by default');
   assert.strictEqual(c.padInputPressed(given.schema, new Set(), new Set([7]), { swap_shoulders: 2 }), 10, 'RT with Swap R1/R2: RB');
   assert.strictEqual(c.padInputPressed(given.schema, new Set(), new Set([4]), { swap_shoulders: 1 }), 21, 'LB with Swap L1/L2: LT');
+  // four controllers (finding 251): the keyboard, then Controller 1 to 4, each with the same defaults
+  assert.deepStrictEqual(given.schema.devices.map((d) => d.label), ['Keyboard', 'Controller 1', 'Controller 2', 'Controller 3', 'Controller 4']);
+  for (const pad of given.state.layouts.slice(2)) assert.deepStrictEqual(pad, pad1);
 }
-console.log(`test_controls: ok${given ? " (the launcher's schema)" : ''}`);
+
+// the tab's Reset: one reset per layout the schema lists, the keyboard and each controller
+(async () => {
+  c.bind.schema = given ? given.schema : schema;
+  await c.resetBindings();
+  const devices = calls.filter(([name]) => name === 'controls_edit').map(([, a]) => [a.device, a.edit.edit]);
+  assert.deepStrictEqual(devices, [[0, 'reset'], [1, 'reset'], [2, 'reset'], [3, 'reset'], [4, 'reset']]);
+  console.log(`test_controls: ok${given ? " (the launcher's schema)" : ''}`);
+})().catch((e) => { console.error(e); process.exit(1); });

@@ -917,13 +917,14 @@ void host_pad_vibrate(int port, int light, int heavy)
 }
 
 /* ---- keyboard and controller bindings (finding 157) ----
-   The layouts the game plays with: DHD_KEYBOARD, DHD_PAD1 and DHD_PAD2 (dhd.ini keyboard, pad1,
-   pad2) as dhd_settings reads them (port/render/settings/src/controls.rs: unset, the defaults),
-   read again whenever one of them changes (PC SETTINGS > Controls sets them as it saves), and
+   The layouts the game plays with: DHD_KEYBOARD and DHD_PAD1 to DHD_PAD4 (dhd.ini keyboard, pad1 to
+   pad4: each of the four players' controllers has its own, finding 251) as dhd_settings reads them
+   (port/render/settings/src/controls.rs: unset, the defaults), read again whenever one of them changes (PC SETTINGS > Controls sets them as it saves), and
    logged then. The CONTROLS page's services below make every change through dhd_settings too. */
 
 static ControlsLayout controls[CONTROL_DEVICES];
 typedef char controls_layout_size[sizeof(ControlsLayout) == sizeof(DhdControlsLayout) && sizeof(ControlsLayout) == 52 ? 1 : -1];
+typedef char controls_device_count[CONTROL_DEVICES == DHD_CONTROLS_DEVICES ? 1 : -1];
 static char controls_seen[CONTROL_DEVICES][512];
 static int controls_ready;
 
@@ -940,24 +941,32 @@ static void controls_follow(void)
     int changed = !controls_ready;
     for (int d = 0; d < CONTROL_DEVICES; d++) changed |= strncmp(controls_value(d), controls_seen[d], sizeof controls_seen[d]) != 0;
     if (!changed) return;
-    for (int d = 0; d < CONTROL_DEVICES; d++) snprintf(controls_seen[d], sizeof controls_seen[d], "%s", controls_value(d));
-    dhd_controls_layouts(controls_seen[0], controls_seen[1], controls_seen[2], (DhdControlsLayout *)controls, controls_problem);
-    hle_log("controls: keyboard %s, controller 1 %s, controller 2 %s\n", *controls_seen[0] ? controls_seen[0] : "(defaults)",
-            *controls_seen[1] ? controls_seen[1] : "(defaults)", *controls_seen[2] ? controls_seen[2] : "(defaults)");
+    const char *values[CONTROL_DEVICES];
+    for (int d = 0; d < CONTROL_DEVICES; d++) {
+        snprintf(controls_seen[d], sizeof controls_seen[d], "%s", controls_value(d));
+        values[d] = controls_seen[d];
+    }
+    dhd_controls_layouts(values, (DhdControlsLayout *)controls, controls_problem);
+    char line[CONTROL_DEVICES * (sizeof controls_seen[0] + 16)];  /* every line whole, as written */
+    int n = snprintf(line, sizeof line, "controls:");
+    for (int d = 0; d < CONTROL_DEVICES && n > 0 && (size_t)n < sizeof line; d++)
+        n += snprintf(line + n, sizeof line - (size_t)n, "%s %s %s", d ? "," : "", control_devices[d].key,
+                      *controls_seen[d] ? controls_seen[d] : "(defaults)");
+    hle_log("%s\n", line);
     controls_ready = 1;
 }
 
-/* A device's layout (CONTROL_KEYBOARD, CONTROL_PAD1, CONTROL_PAD2). */
+/* A device's layout (CONTROL_KEYBOARD, CONTROL_PAD1 ... CONTROL_PAD4). */
 static const ControlsLayout *controls_layout(int device)
 {
     controls_follow();
     return &controls[device];
 }
 
-/* Player `port`'s controller layout: players 1 and 2 have their own, 3 and 4 the default. */
+/* Player `port`'s controller layout (0-3: each player's own, finding 251). */
 static const ControlsLayout *pad_layout(int port)
 {
-    return port < 2 ? controls_layout(CONTROL_PAD1 + port) : &control_defaults[CONTROL_PAD1];
+    return port >= 0 && port < 4 ? controls_layout(CONTROL_PAD1 + port) : &control_defaults[CONTROL_PAD1];
 }
 
 /* The game's controls are in riding mode (D_0029E290, func_00220550): keyboard.c moves the left
@@ -1276,11 +1285,11 @@ int host_service_controls_layout(int device, uint32_t out)
     return 1;
 }
 
-/* Player 1's or 2's controller: its PAD_KIND_* plus 1, 0 none connected. */
+/* Player 1's to 4's controller: its PAD_KIND_* plus 1, 0 none connected. */
 static int controls_pad_connected(int player)
 {
     GamepadRaw raw;
-    if (player < 1 || player > 2 || !gamepad_start() || !gamepad_raw(player - 1, &raw)) return 0;
+    if (player < 1 || player > 4 || !gamepad_start() || !gamepad_raw(player - 1, &raw)) return 0;
     return gamepad_kind(player - 1) + 1;
 }
 
@@ -1304,9 +1313,11 @@ int host_service_controls_change(int device, int edit, int target, int slot, int
         return CONTROL_REFUSED;
     }
     controls_follow();
-    int kind = device == CONTROL_KEYBOARD ? PAD_KIND_NONE : gamepad_start() ? gamepad_kind(device - 1) : PAD_KIND_NONE;
-    int done = dhd_controls_edit(controls_seen[0], controls_seen[1], controls_seen[2], device, edit, target, slot, input, kind,
-                                 value, sizeof value, said, size > 0 ? (size_t)size : 0);
+    const char *values[CONTROL_DEVICES];
+    for (int d = 0; d < CONTROL_DEVICES; d++) values[d] = controls_seen[d];
+    int kind = device == CONTROL_KEYBOARD ? PAD_KIND_NONE : gamepad_start() ? gamepad_kind(device - CONTROL_PAD1) : PAD_KIND_NONE;
+    int done = dhd_controls_edit(values, device, edit, target, slot, input, kind, value, sizeof value, said,
+                                 size > 0 ? (size_t)size : 0);
     if (done == CONTROL_CHANGED) {
         if (!host_setting_save(control_devices[device].key, value)) hle_log("controls: dhd.ini not saved\n");
         host_putenv_s(control_devices[device].env, value);
@@ -1317,7 +1328,7 @@ int host_service_controls_change(int device, int edit, int target, int slot, int
 /* What is held for a wait: the bindable keys and Esc, and each input of a controller (a trigger
    past half way) as a bit of its place through `layout`'s shoulder swaps (the layout the wait
    binds for, so the input it gets reads back as the button pressed; finding 189); one player's
-   controller (1 or 2), or every one (0). */
+   controller (1 to 4), or every one (0). */
 static int controls_key_held(int vk) { return keyboard_focused() && keyboard_position_down((unsigned)vk); }
 
 static uint32_t pad_held(int player, const ControlsLayout *layout)
@@ -1348,7 +1359,7 @@ int host_service_controls_capture(int device, int command)
 {
     static uint8_t keys_before[256];
     static uint32_t pads_before;
-    int player = device == CONTROL_PAD1 ? 1 : device == CONTROL_PAD2 ? 2 : 0;
+    int player = device >= CONTROL_PAD1 && device < CONTROL_DEVICES ? device - CONTROL_PAD1 + 1 : 0;
     const ControlsLayout *layout = player ? controls_layout(device) : &control_defaults[CONTROL_PAD1];
     if (player && !controls_pad_connected(player)) player = 0;  /* that player's pad isn't there: any */
     if (command == 2) {
