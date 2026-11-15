@@ -518,11 +518,10 @@ impl Sfu {
     pub fn signal(&mut self, message: &Value) -> Result<()> {
         if message["type"] == "sfu_answer" {
             let sdp = message["sdp"].as_str().ok_or("Missing SFU answer")?;
-            let filtered = sdp.lines().filter(|line| {
-                if !line.starts_with("a=candidate:") { return true; }
-                let p: Vec<_> = line.split_whitespace().collect();
-                p.len() >= 6 && p[2].eq_ignore_ascii_case("udp") && p[4].parse::<std::net::Ipv4Addr>().is_ok()
-            }).collect::<Vec<_>>().join("\r\n") + "\r\n";
+            let filtered = answer_candidates(sdp);
+            if !filtered.lines().any(|l| l.starts_with("a=candidate:")) {
+                eprintln!("net: SFU: the answer has no UDP IPv4 candidate this game can use");
+            }
             let pending = self.pending.take().ok_or("Unexpected answer")?;
             self.rtc.sdp_api().accept_answer(pending, SdpAnswer::from_sdp_string(&filtered)?)?;
             self.answered_at = Some(Instant::now());
@@ -1008,6 +1007,11 @@ impl Sfu {
     }
 
     fn ice_state(&mut self, state: IceConnectionState, now: Instant) {
+        // Before the association is up, ICE's own progress (finding 252: an answer whose candidates
+        // were all dropped stayed at Checking with nothing sent).
+        if !self.connected {
+            eprintln!("net: SFU: ICE {state:?} {} ms after the answer", self.answered_at.map_or(0, |t| t.elapsed().as_millis()));
+        }
         match state {
             IceConnectionState::Disconnected if self.connected => {
                 if self.lost_since.is_none() {
@@ -1141,6 +1145,7 @@ impl Sfu {
                 Output::Timeout(_) => break,
                 Output::Transmit(t) => {
                     self.stats.datagrams_out += 1;
+
                     #[cfg(test)]
                     if let Some(w) = self.probe.wrote_at.take() { self.probe.tx_lag.push(w.elapsed().as_secs_f64() * 1e3); }
                     if let Some(r) = self.relay.as_mut().filter(|r| r.relayed == Some(t.source)) {
@@ -1189,6 +1194,28 @@ impl Drop for Sfu {
             r.link.write(&r.client.output());
         }
     }
+}
+
+/// The SFU's answer with only the candidates this game uses, each in its plain form (finding 252).
+/// Kept: UDP over IPv4, component 1 (one data channel transport: no RTCP component). Each is
+/// written again as `a=candidate:<foundation> 1 udp <priority> <address> <port> typ <type>` (with
+/// `raddr`/`rport` when given): Cloudflare's answers carry `ufrag <ufrag> generation 0` after the
+/// type (seen 2026-11-15, likely since 2026-11-12 in some places), and str0m 0.25 drops a candidate
+/// with that tail without a word, so the game had no candidate at all: no ICE check went out over
+/// UDP, none from the TURN relay either, and the relay timed out at its channel bind.
+fn answer_candidates(sdp: &str) -> String {
+    sdp.lines().filter_map(|line| {
+        if !line.starts_with("a=candidate:") { return Some(line.to_owned()); }
+        let p: Vec<&str> = line.split_whitespace().collect();
+        let usable = p.len() >= 8 && p[1] == "1" && p[2].eq_ignore_ascii_case("udp") && p[3].parse::<u32>().is_ok()
+            && p[4].parse::<std::net::Ipv4Addr>().is_ok() && p[5].parse::<u16>().is_ok() && p[6] == "typ";
+        if !usable { return None; }
+        let mut out = p[..8].join(" ");
+        for pair in p[8..].chunks(2) {
+            if let [key @ ("raddr" | "rport"), value] = pair { out.push_str(&format!(" {key} {value}")); }
+        }
+        Some(out)
+    }).collect::<Vec<_>>().join("\r\n") + "\r\n"
 }
 
 /// The TURN-over-TLS server from the room's `urls`: `turns:` on port 443 first (what networks
@@ -1489,6 +1516,70 @@ mod tests {
         assert_eq!(reports.len(), 1, "one report: {reports:?}");
         assert_eq!((reports[0]["path"].as_str(), reports[0]["step"].as_str(), reports[0]["kind"].as_str()), (Some("udp"), Some("send"), Some("denied")));
         assert_eq!(client.udp_failure.map(|f| f.step), Some(Step::Send));
+    }
+
+    /// Cloudflare's answers since 2026-11-12 or so (finding 252): each candidate with `ufrag <ufrag>
+    /// generation 0` after its type, and once more as component 2. str0m drops such a candidate, so
+    /// nothing was ever sent; written plainly, it connects over UDP, and through the relay when
+    /// UDP fails.
+    fn cloudflare_answer(sdp: &str) -> String {
+        let out: Vec<String> = sdp.lines().flat_map(|line| match line.strip_prefix("a=candidate:") {
+            Some(_) => {
+                let tail = format!("{line} ufrag XZSlxzwksGJzzABh generation 0");
+                vec![tail.clone(), tail.replacen(" 1 udp ", " 2 udp ", 1)]
+            }
+            None => vec![line.to_owned()],
+        }).collect();
+        assert!(out.iter().any(|l| l.ends_with(" generation 0")), "the test's answer has candidates");
+        out.join("\r\n") + "\r\n"
+    }
+    #[test]
+    fn candidates_in_cloudflares_form_are_written_plainly() {
+        let sdp = [
+            "v=0",
+            "a=candidate:513273236 1 udp 2130648831 203.0.113.5 1473 typ host ufrag XZSl generation 0",
+            "a=candidate:513273236 2 udp 2130648831 203.0.113.5 1473 typ host ufrag XZSl generation 0",
+            "a=candidate:9 1 udp 1694498815 198.51.100.2 40000 typ srflx raddr 192.0.2.2 rport 40000 generation 0",
+            "a=candidate:7 1 tcp 1518280447 203.0.113.5 443 typ host tcptype passive",
+            "a=candidate:6 1 udp 2130648831 2001:db8::5 1473 typ host",
+            "a=candidate:5 1 udp",
+            "a=end-of-candidates",
+        ].join("\r\n") + "\r\n";
+        let plain = [
+            "v=0",
+            "a=candidate:513273236 1 udp 2130648831 203.0.113.5 1473 typ host",
+            "a=candidate:9 1 udp 1694498815 198.51.100.2 40000 typ srflx raddr 192.0.2.2 rport 40000",
+            "a=end-of-candidates",
+        ].join("\r\n") + "\r\n";
+        assert_eq!(answer_candidates(&sdp), plain);
+        assert_eq!(answer_candidates(&plain), plain);
+    }
+    #[test]
+    fn an_answer_in_cloudflares_form_connects_over_udp() {
+        let (mut sfu, mut client) = LocalSfu::start_answer(cloudflare_answer, true);
+        let (mut text, mut frames) = (vec![], vec![]);
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until && !client.connected { sfu.pump(&mut client, &mut text, &mut frames); }
+        assert!(client.connected && !client.via_relay, "connected over UDP");
+        assert!(!client.turn_asked);
+    }
+    #[test]
+    fn an_answer_in_cloudflares_form_connects_through_the_relay() {
+        let (mut sfu, mut client) = LocalSfu::start_answer(cloudflare_answer, true);
+        client.direct = false; // DHD_NET_SFU_UDP=0
+        let mut turn = LocalTurn::start();
+        let (mut text, mut frames) = (vec![], vec![]);
+        let until = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < until && !client.connected {
+            sfu.pump(&mut client, &mut text, &mut frames);
+            if client.turn_asked && client.relay.is_none() && client.turn_failure.is_none() {
+                client.relay = Some(LocalTurn::relay());
+                client.turn_at = Some(Instant::now());
+            }
+            turn.pump(&mut client);
+        }
+        assert!(client.connected && client.via_relay, "connected through the relay");
+        assert!(!text.iter().any(|m| m["type"] == "sfu_trouble"), "no failure reported");
     }
 
     /// The relay's first server (443) completes TLS but its allocation is never answered (a network
@@ -2030,15 +2121,19 @@ mod tests {
     /// A local str0m "SFU" for the room-stay tests: one socket, the client's datagrams in, its out.
     struct LocalSfu { server: Rtc, socket: UdpSocket, local: SocketAddr }
     impl LocalSfu {
-        fn start() -> (Self, Sfu) {
+        fn start() -> (Self, Sfu) { Self::start_answer(|sdp| sdp.to_owned(), false) }
+        /// The same with the answer rewritten on its way to the client (as Cloudflare writes it);
+        /// `lite`: an ICE-lite server, as Cloudflare's is, which sends no checks of its own (so the
+        /// client cannot learn the server's address from them).
+        fn start_answer(rewrite: impl Fn(&str) -> String, lite: bool) -> (Self, Sfu) {
             let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
             socket.set_nonblocking(true).unwrap();
             let local = socket.local_addr().unwrap();
-            let mut server = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).build(Instant::now());
+            let mut server = Rtc::builder().set_crypto_provider(str0m::crypto::from_feature_flags().into()).set_ice_lite(lite).build(Instant::now());
             server.add_local_candidate(Candidate::host(local, "udp").unwrap());
             let (mut client, offer) = Sfu::start_at(local, Arc::new(|| {})).unwrap();
             let answer = server.sdp_api().accept_offer(str0m::change::SdpOffer::from_sdp_string(offer["sdp"].as_str().unwrap()).unwrap()).unwrap();
-            client.signal(&json!({"type":"sfu_answer","sdp":answer.to_sdp_string()})).unwrap();
+            client.signal(&json!({"type":"sfu_answer","sdp":rewrite(&answer.to_sdp_string())})).unwrap();
             (Self { server, socket, local }, client)
         }
         /// One round both ways; the server's channel data by channel.
@@ -2332,3 +2427,4 @@ mod tests {
     #[test]
     fn a_rejoin_takes_a_recycled_stream_id_reset_meanwhile() { rejoin_over_recycled_stream_ids(false); }
 }
+
