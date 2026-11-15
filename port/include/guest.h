@@ -27,7 +27,22 @@ extern uintptr_t guest_base;
 #endif
 
 /* Host pointer of a 32-bit guest address. */
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK && defined(__aarch64__)
+/* iOS (finding 258): the guest's memory is two parts with other mappings of the process between
+   and above them; an address there ends the process as the guest's own fault does
+   (guest_memory_posix.c), never reaching what lies there. */
+extern uint64_t host64_guest_end;
+void host64_memory_wild(uint64_t address) __attribute__((noreturn, cold));
+static inline void *guest_pointer(uint32_t addr)
+{
+    if (__builtin_expect(addr - 0x3a000000u < 0x36000000u || addr >= host64_guest_end, 0))
+        host64_memory_wild(addr);
+    return (void *)(GUEST_BASE + (uintptr_t)addr);
+}
+#define GUEST(addr) guest_pointer((uint32_t)(addr))
+#else
 #define GUEST(addr) ((void *)(GUEST_BASE + (uintptr_t)(uint32_t)(addr)))
+#endif
 
 /* Guest address of a host pointer (or of a host address held in an integer). The result is
    32 bits: on a 64-bit host it is only meaningful for pointers that point into guest memory. */

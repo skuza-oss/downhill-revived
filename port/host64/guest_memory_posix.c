@@ -233,6 +233,37 @@ static int fault_wrote(const void *ctx) {
     return -1;
 #endif
 }
+/* The fault's report: the guest address, how it was used (1 a write, 0 a read, -1 not known) and
+   the raw frames (names need -rdynamic, which the self-test link passes), then dhd.log (and
+   logcat) gets it: host.c's log, absent in the self-test. Safe in a signal handler. */
+static void report(unsigned long long at,int wrote) {
+    static const char head[]="host64 memory: access of uncommitted guest address 0x";
+    static const char tail[]="\n", read_tail[]=" (a read)\n", write_tail[]=" (a write)\n";
+    (void)write(STDERR_FILENO,head,sizeof head-1);
+    write_hex(STDERR_FILENO,at,9);
+    if (wrote==1) (void)write(STDERR_FILENO,write_tail,sizeof write_tail-1);
+    else if (wrote==0) (void)write(STDERR_FILENO,read_tail,sizeof read_tail-1);
+    else (void)write(STDERR_FILENO,tail,sizeof tail-1);
+    void *frames[24];
+    int n=backtrace(frames,24);
+    backtrace_symbols_fd(frames,n,STDERR_FILENO);
+    void host_log_drain(void) __attribute__((weak));
+    if (host_log_drain) host_log_drain();
+}
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+/* An access outside the guest's two parts (memory_access.h, GUEST(), the bridge; finding 258):
+   what lies there is not the guest's, so it is never touched. The report and the end are the
+   fault's, as when the reservation covered the gap: the same dhd.log line (run_record.c reads
+   it) and the end by SIGSEGV. */
+void host64_memory_wild(uint64_t address) {
+    report(address,-1);
+    struct sigaction dfl; memset(&dfl,0,sizeof dfl);
+    dfl.sa_handler=SIG_DFL; sigemptyset(&dfl.sa_mask);
+    sigaction(SIGSEGV,&dfl,NULL);
+    raise(SIGSEGV);
+    abort();
+}
+#endif
 static void fault(int sig,siginfo_t *info,void *ctx) {
     uintptr_t host=(uintptr_t)info->si_addr;
     /* Not ours: restore the default and re-raise. */
@@ -249,24 +280,9 @@ static void fault(int sig,siginfo_t *info,void *ctx) {
         sigaction(sig,&dfl,NULL); raise(sig); return;
 #endif
     }
-    static const char head[]="host64 memory: access of uncommitted guest address 0x";
-    static const char tail[]="\n", read_tail[]=" (a read)\n", write_tail[]=" (a write)\n";
-    int wrote=fault_wrote(ctx);
-    (void)write(STDERR_FILENO,head,sizeof head-1);
-    write_hex(STDERR_FILENO,(unsigned long long)(host-guest_base),9);
-    if (wrote==1) (void)write(STDERR_FILENO,write_tail,sizeof write_tail-1);
-    else if (wrote==0) (void)write(STDERR_FILENO,read_tail,sizeof read_tail-1);
-    else (void)write(STDERR_FILENO,tail,sizeof tail-1);
-    /* Raw frames; names need -rdynamic, which the self-test link passes. */
-    void *frames[24];
-    int n=backtrace(frames,24);
-    backtrace_symbols_fd(frames,n,STDERR_FILENO);
+    report(host-guest_base,fault_wrote(ctx));
     /* Report and exit with the signal, as an unhandled fault would. Android: the handler that
        was there (the system's crash dump, debuggerd) gets the fault when it happens again. */
-    {   /* the report reaches dhd.log (and logcat) first: host.c's log, absent in the self-test */
-        void host_log_drain(void) __attribute__((weak));
-        if (host_log_drain) host_log_drain();
-    }
 #ifdef __ANDROID__
     sigaction(sig,sig==SIGBUS ? &old_bus : &old_segv,NULL);
     return;

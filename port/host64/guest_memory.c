@@ -35,14 +35,17 @@ static wasm_rt_memory_t *owner;
    a 64 KiB window above. Region GAP, [0x3a000000, 0x70000000), is not the guest's: nothing is ever
    committed there and other mappings may lie in it. The parts are placed at the process's start
    (reserve_early), before the launcher, WebKit and Metal take the low addresses; limit is as high
-   as the free ranges allow (at most the 2 GiB maximum) and the memory grows up to it. */
+   as the free ranges allow (at most the 2 GiB maximum) and the memory grows up to it.
+   memory_access.h's adapters, GUEST() and the bridge end the process for an access outside both
+   parts (host64_memory_wild), so nothing of the guest reaches what lies in the gap or above. */
 #include "guest_place.h"
 #define GUEST_MAX_PAGES 32768u
 #define GAP 12u
 #define WINDOW 0x10000ull
 static uint64_t edges[] = {0,0x00400000,0x02000000,0x08000000,0x0a000000,
     0x20400000,0x22000000,0x28000000,0x2a000000,0x30400000,0x32000000,
-    0x38000000,0x3a000000,0x70000000,0x80000000ull,0x80000000ull+WINDOW};
+    0x38000000,0x3a000000,HOST64_HIGH_BASE,0x80000000ull,0x80000000ull+WINDOW};
+uint64_t host64_guest_end = UINT64_MAX;   /* the high part's end once reserved (memory_access.h) */
 #else
 #define GUEST_MAX_PAGES 65536u
 #define GAP (~0u)
@@ -91,10 +94,11 @@ int host64_memory_commit_stack(uint32_t sp) {
         host64_memory_commit(HOST64_NULL_GUARD,sp-HOST64_NULL_GUARD);
 }
 #if WASM_RT_MEMCHECK_BOUNDS_CHECK
-/* The core's initial memory ends at 0x70E00000 (build_wasm.py's INITIAL_MEMORY): the early
-   reservation asks for that and 16 MiB more at least. A module that needs more (the self-test's)
-   is placed again at its instantiation. */
-#define EARLY_NEED (0x71000000ull+WINDOW)
+/* The core's initial memory ends at 0x70E00000 (build_wasm.py's INITIAL_MEMORY): every
+   reservation's high part reaches HOST64_HIGH_END_MIN at least, which memory_access.h's plain
+   window 56 needs. A module that needs more (the self-test's) is placed again at its
+   instantiation. */
+#define EARLY_NEED HOST64_HIGH_END_MIN
 static uintptr_t early_base;
 static uint64_t early_end;
 static int early_errno;
@@ -146,6 +150,7 @@ __attribute__((constructor)) static void reserve_early(void) {
 }
 static uintptr_t reserve(uint64_t initial) {
     uint64_t need=initial*65536+WINDOW, end=early_end;
+    if (need<HOST64_HIGH_END_MIN) need=HOST64_HIGH_END_MIN;
     uintptr_t base=early_base;
     const char *when="at the start";
     early_base=0;
@@ -169,7 +174,7 @@ static uintptr_t reserve(uint64_t initial) {
         }
     }
     if (!os_backing_open()) os_fail("guest RAM backing");
-    edges[REGIONS-1]=end-WINDOW; edges[REGIONS]=end;
+    edges[REGIONS-1]=end-WINDOW; edges[REGIONS]=end; host64_guest_end=end;
     fprintf(stderr,"host64 memory: guest memory at 0x%llx, reserved %s: [0, 0x%llx) and [0x%llx, 0x%llx), "
             "room to grow to %llu MiB\n",(unsigned long long)base,when,(unsigned long long)edges[GAP],
             (unsigned long long)edges[GAP+1],(unsigned long long)end,
@@ -223,6 +228,9 @@ void wasm_rt_free_memory(wasm_rt_memory_t *m) {
     }
     os_backing_close();
     guest_base=0; owner=NULL;
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+    host64_guest_end=UINT64_MAX;
+#endif
     os_fault_remove();
     m->data=m->data_end=NULL; m->size=m->pages=0;
 }
