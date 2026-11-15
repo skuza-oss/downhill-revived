@@ -37,7 +37,7 @@ class GuestSpace(unittest.TestCase):
         cls.dir.cleanup()
 
     def run_mode(self, mode):
-        return subprocess.run([str(self.exe), mode], capture_output=True, text=True, timeout=120)
+        return subprocess.run([str(self.exe), mode], capture_output=True, text=True, timeout=600)   # filling the space takes seconds, minutes on a busy Mac
 
     def test_reserved_at_the_start(self):
         r = self.run_mode('start')
