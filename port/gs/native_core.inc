@@ -72,10 +72,12 @@ typedef struct {
     int32_t tex_offset[2]; uint32_t tex_size[2];
     uint32_t wrap[4];
     uint32_t region[4];
-    /* A mesh draw (flag 4096, native_mesh): the draw offset (GS 12.4 units), the largest Z and the
-       Z scale for native.wgsl's native_mesh_vertex; each object's own values (matrix, guard band,
-       colour scale, fog) are in its record (native_mesh_record). Zero for every other draw. */
+    /* A mesh draw (flag 4096, native_mesh), for native.wgsl's native_mesh_vertex: the draw offset
+       (GS 12.4 units), the largest Z and the Z scale; the loop's guard band (x, y and w offsets,
+       bound) and its fog (A, B, max). Zero for every other draw. */
     float mesh_offset[4];
+    float mesh_clip[4];
+    float mesh_fog[4];
 } NativeConstants;
 enum { NATIVE_MESH = 4096, NATIVE_MESH_TWO_SIDED = 8192 };   /* constants.flags: a mesh draw (render.rs picks its
                                                               pipeline), drawn without back-face culling */
@@ -248,8 +250,6 @@ typedef struct Native {
     int indexed;
     int skip;                        /* the current state draws nothing */
     int mesh_open;                   /* the open draw is a mesh draw (native_mesh): no GS primitive joins it */
-    NativeFrame *mesh_record_frame;  /* where native_mesh_record wrote its last record, and at which vertex */
-    unsigned mesh_record_at;
     int box[4];                      /* pixels the open draw has touched */
     unsigned target_psm, depth_psm;
     int passes;                      /* AFAIL second pass needed */
@@ -2220,44 +2220,24 @@ static void native_strip(Gs *g, const uint32_t *w, unsigned count)
 }
 
 /* A translated VU1 mesh batch (gs_mesh.h; gs_mesh made the register writes its packet would make):
-   draws of their own (flag NATIVE_MESH) whose vertices are the batch's object-space ones and whose
-   indices are the triangles its strip draws, for native.wgsl's native_mesh_vertex. The object's
-   own values (matrix, guard band, colour scale, fog) are a record in the frame's vertices, which the
-   shader reads from the vertex buffer (bound again as storage, group 2), and each vertex names its
-   record; so consecutive batches under one draw state join one command whatever object they belong
-   to (finding 168). Where its pixels land is not known here, so the draw claims its whole scissor.
+   draws of their own (flag NATIVE_MESH) whose vertices are the batch's clip-space ones and whose
+   indices are the triangles its strip draws, for native.wgsl's native_mesh_vertex. The vertices
+   carry everything of their object (its matrix is in their positions, its colour scale in their
+   colours), so consecutive batches under one draw state join one command whatever object they
+   belong to (finding 168); the loop's guard band and fog are the draw's constants (the guard band
+   is one for a whole race, the fog changes within a draw state about twice a field: finding 249).
+   Where its pixels land is not known here, so the draw claims its whole scissor.
    Nothing of it reaches the exact path: with DHD_EXACT_PROBE the batch runs on the VU too (shadow)
    and its packet goes there. */
 _Static_assert(sizeof(GsMeshVertex) == sizeof(NativeVertex), "a mesh vertex is stored as a NativeVertex");
-enum { NATIVE_MESH_RECORD = 4 };   /* vertices a record fills: 128 bytes, eight vec4s for the shader */
 
 static void native_mesh_constants(NativeConstants *k, const GsMeshHeader *h, const float offset[2], const Native *n)
 {
     k->flags |= NATIVE_MESH | (h->flags & GS_MESH_TWO_SIDED ? NATIVE_MESH_TWO_SIDED : 0);
     k->mesh_offset[0] = offset[0]; k->mesh_offset[1] = offset[1];
     k->mesh_offset[2] = (float)n->zmax; k->mesh_offset[3] = n->zscale;
-}
-
-/* The batch's object record in the frame's vertices (the matrix's columns, the guard band, the colour
-   scale, then fog A, B and max; native_mesh_vertex reads them as eight vec4s): the frame's last one
-   again when it holds the same values (the object's other batches), else a new one. Its first
-   vertex's index, which the batch's vertices carry. */
-static unsigned native_mesh_record(Native *n, NativeFrame *f, const GsMeshHeader *h)
-{
-    float r[NATIVE_MESH_RECORD * 8] = {0};
-    memcpy(r, h->matrix, sizeof h->matrix);
-    memcpy(r + 16, h->clip, sizeof h->clip);
-    memcpy(r + 20, h->color, sizeof h->color);
-    memcpy(r + 24, h->fog, sizeof h->fog);
-    if (n->mesh_record_frame == f && n->mesh_record_at + NATIVE_MESH_RECORD <= f->vertex_count &&
-        !memcmp(f->vertices + n->mesh_record_at, r, sizeof r))
-        return n->mesh_record_at;
-    native_reserve(f, NATIVE_MESH_RECORD);
-    memcpy(f->vertices + f->vertex_count, r, sizeof r);
-    n->mesh_record_frame = f;
-    n->mesh_record_at = f->vertex_count;
-    f->vertex_count += NATIVE_MESH_RECORD;
-    return n->mesh_record_at;
+    memcpy(k->mesh_clip, h->clip, sizeof k->mesh_clip);
+    memcpy(k->mesh_fog, h->fog, sizeof k->mesh_fog);
 }
 
 static void native_mesh(Gs *g, const uint32_t *words, size_t count)
@@ -2279,7 +2259,8 @@ static void native_mesh(Gs *g, const uint32_t *words, size_t count)
     int same = n->current_valid && n->mesh_open && n->state_version == g->state_version && n->state_ctxt == ctxt &&
                n->state_prim == prim && !((prim & 16) && n->written != g->pixels_written) &&
                k->mesh_offset[0] == offset[0] && k->mesh_offset[1] == offset[1] &&
-               !(k->flags & NATIVE_MESH_TWO_SIDED) == !(h->flags & GS_MESH_TWO_SIDED);
+               !(k->flags & NATIVE_MESH_TWO_SIDED) == !(h->flags & GS_MESH_TWO_SIDED) &&
+               !memcmp(k->mesh_clip, h->clip, sizeof k->mesh_clip) && !memcmp(k->mesh_fog, h->fog, sizeof k->mesh_fog);
     if (!same) {
         native_close(n, g);
         native_state(n, g, prim, ctxt);
@@ -2294,14 +2275,12 @@ static void native_mesh(Gs *g, const uint32_t *words, size_t count)
     if (n->skip || !h->indices) return;
     NativeFrame *f = n->recording;
     n->box[0] = n->box[1] = -4096; n->box[2] = n->box[3] = 4096;   /* native_close clips it to the scissor */
-    const float record = (float)native_mesh_record(n, f, h);   /* exact: vertex counts stay below 2^24 */
     native_reserve(f, h->vertices);
     native_reserve_indices(f, h->indices);
     const GsMeshVertex *v = (const GsMeshVertex *)(h + 1);
     const uint16_t *index = (const uint16_t *)(v + h->vertices);
     uint32_t base = f->vertex_count, *o = f->indices + f->index_count;
     memcpy(f->vertices + base, v, h->vertices * sizeof *v);
-    for (unsigned i = 0; i < h->vertices; i++) f->vertices[base + i].fog = record;   /* GsMeshVertex.unused */
     f->vertex_count += h->vertices;
     for (unsigned i = 0; i < h->indices; i++) o[i] = base + index[i];
     f->index_count += h->indices;

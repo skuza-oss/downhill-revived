@@ -64,8 +64,8 @@ pub(crate) fn scoped_pipeline<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -
     }
 }
 
-/// Native VU (finding 194): set when this device can't draw the translated VU1 meshes (no storage
-/// buffer for the vertex stage, or a mesh layout, bind group or pipeline it refused). C asks
+/// Native VU (finding 194): set when this device can't draw the translated VU1 meshes (a mesh
+/// draw pipeline it refused). C asks
 /// `dhdr_native_meshes` after each picture and from then on the VU runs every program; a mesh draw
 /// already recorded is skipped (`render.rs`). Once set it stays set for the session.
 static MESHES_REFUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -129,25 +129,6 @@ pub(crate) fn test_refusal() {
 pub extern "C" fn dhdr_native_meshes() -> i32 {
     let _g = crate::guard::Guard::enter("dhdr_native_meshes");
     !meshes_refused() as i32
-}
-
-/// Whether the device can read the mesh draws' object records (a read-only storage buffer in the
-/// vertex stage, native.wgsl's `mesh_records`). Err(Some(why)): this device can't. WebGPU itself
-/// allows a read-only storage buffer in the vertex stage (core `maxStorageBuffersPerShaderStage` is
-/// at least 8, and wgpu's WebGPU backend reports every downlevel flag; only the compatibility mode,
-/// which this renderer never asks for, may allow none), so the browser takes the same checks
-/// (finding 199).
-fn mesh_support(gpu: &Gpu) -> Result<(), Option<String>> {
-    if !gpu.adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::VERTEX_STORAGE) {
-        return Err(Some("no storage buffers in vertex shaders".into()));
-    }
-    if gpu.device.limits().max_storage_buffers_per_shader_stage == 0 {
-        return Err(Some("no storage buffers".into()));
-    }
-    if test_no_meshes() == Some(0) {
-        return Err(Some("DHD_TEST_NO_MESHES".into()));
-    }
-    Ok(())
 }
 
 /// wgpu-native's pipeline compilation options: no override constants, workgroup memory not
@@ -226,13 +207,6 @@ pub struct Objects {
     pub draws_layout: wgpu::BindGroupLayout,
     pub native_draw_layout: wgpu::PipelineLayout,
     pub native_texels_draw_layout: wgpu::PipelineLayout,
-    /// A mesh draw's group 2 (finding 168): binding 0, the picture's vertex buffer as read-only
-    /// storage for the vertex stage (native.wgsl's `mesh_records`); and the draw layouts with it,
-    /// (uniform, texture, mesh) and (uniform, texels, mesh). None where the device can't draw
-    /// meshes (`mesh_support`).
-    pub mesh_layout: Option<wgpu::BindGroupLayout>,
-    pub mesh_draw_layout: Option<wgpu::PipelineLayout>,
-    pub mesh_texels_draw_layout: Option<wgpu::PipelineLayout>,
     /// (uniform, blit)
     pub blit_pipeline_layout: wgpu::PipelineLayout,
     /// (uniform, scanout)
@@ -680,34 +654,10 @@ impl Objects {
         }]);
         let native_draw_layout = pipeline_layout(gpu, &draws_layout, &texture_layout);
         let native_texels_draw_layout = pipeline_layout(gpu, &draws_layout, &texels_layout);
-        // The mesh layouts only where the device can read a storage buffer in the vertex stage
-        // (Native VU, finding 194): otherwise none, and the VU runs every program.
-        let mesh_layouts = mesh_support(gpu).and_then(|()| scoped(gpu, "the mesh layouts", || {
-            let mesh = layout(gpu, &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: S::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }]);
-            let with = |group1: &wgpu::BindGroupLayout| gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[Some(&draws_layout), Some(group1), Some(&mesh)],
-                immediate_size: 0,
-            });
-            let (draw, texels) = (with(&texture_layout), with(&texels_layout));
-            (mesh, draw, texels)
-        }).map_err(Some));
-        let (mesh_layout, mesh_draw_layout, mesh_texels_draw_layout) = match mesh_layouts {
-            Ok((mesh, draw, texels)) => (Some(mesh), Some(draw), Some(texels)),
-            Err(why) => {
-                refuse_meshes(why.as_deref());
-                (None, None, None)
-            }
-        };
+        // DHD_TEST_NO_MESHES=0: Native VU refused from the start (finding 194's test).
+        if test_no_meshes() == Some(0) {
+            refuse_meshes(Some("DHD_TEST_NO_MESHES"));
+        }
         let blit_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &blit_layout);
         let scanout_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &scanout_layout);
         let convert_pipeline_layout = pipeline_layout(gpu, &uniform_layout, &convert_layout);
@@ -751,9 +701,6 @@ impl Objects {
             draws_layout,
             native_draw_layout,
             native_texels_draw_layout,
-            mesh_layout,
-            mesh_draw_layout,
-            mesh_texels_draw_layout,
             blit_pipeline_layout,
             scanout_pipeline_layout,
             convert_pipeline_layout,
@@ -810,8 +757,8 @@ static PREPARED: std::sync::Mutex<Option<(Objects, Pipelines)>> = std::sync::Mut
 /// refuses turns Native VU off where it is built. The browser reports errors only to a promise,
 /// which C's synchronous calls can't await (an error nobody captured is fatal there), so its async
 /// init (`dhdr_web_init`) builds the native renderer's objects and probe pipelines as the create
-/// does, then the mesh draws' pipelines (`mesh_probe_keys`: the mesh vertex stage, its storage
-/// binding and every mesh fragment entry point the browser uses) inside error scopes it awaits:
+/// does, then the mesh draws' pipelines (`mesh_probe_keys`: the mesh vertex stage with every
+/// fragment entry point the browser uses) inside error scopes it awaits:
 /// a refusal there is `refuse_meshes`, before any mesh is drawn, and the VU runs every program, as
 /// on a native GPU that refused. `Native::create` takes these objects and pipelines, so nothing is
 /// built twice.
@@ -822,7 +769,7 @@ pub async fn web_prepare(gpu: &'static Gpu) -> Result<(), String> {
     for key in probe_keys(false) {
         pipelines.get(gpu, &objects, key as u64)?;
     }
-    if !meshes_refused() && objects.mesh_draw_layout.is_some() {
+    if !meshes_refused() {
         let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let internal = gpu.device.push_error_scope(wgpu::ErrorFilter::Internal);
         let mut meshes = Pipelines::new();

@@ -77,6 +77,7 @@
    gs_mesh_mode at a fixed place in their memory (gs_mesh.h), and its items reach the GS worker
    through the queue's WQ_GIF packets (port/web/web_queue.c). */
 #include "../gs/gs_mesh.h"
+#include "../host/host_api.h"
 
 enum { MESH_OFF = 1, MESH_ON = 2, MESH_SKIP = 1, MESH_SHADOW = 2 };
 enum { MESH_WHY_EOP, MESH_WHY_COUNT, MESH_WHY_TAG, MESH_WHY_PRIM, MESH_WHY_TEXTURE, MESH_WHY_COLOUR, MESH_WHY_JOIN,
@@ -191,14 +192,12 @@ static void mesh_check(void)
     const GsMeshHeader *h = (const GsMeshHeader *)mesh.packet;
     const GsMeshVertex *v = (const GsMeshVertex *)(h + 1);
     const ps2_q128 *m = vu1.vu0_mem;
-    const float *M = h->matrix;
     unsigned n = h->vertices;
     float sx[GS_MESH_MAX_VERTICES], sy[GS_MESH_MAX_VERTICES];
     int in[GS_MESH_MAX_VERTICES];
     for (unsigned k = 0; k < n; k++) {
         const ps2_q128 *o = &m[(mesh.check_base + 1 + 3 * k) & 1023];
-        float c[4];
-        for (unsigned r = 0; r < 4; r++) c[r] = M[r] * v[k].x + M[4 + r] * v[k].y + M[8 + r] * v[k].z + M[12 + r];
+        const float c[4] = {v[k].x, v[k].y, v[k].z, v[k].w};
         float q = 1.0f / c[3], x = c[0] * q, y = c[1] * q, z = c[2] * q;
         float fog = h->fog[0] + h->fog[1] * q;
         fog = fog > h->fog[2] ? h->fog[2] : fog;
@@ -221,8 +220,7 @@ static void mesh_check(void)
         if (df > 1 || df < -1) count->bad_fog++;
         const uint8_t *rgba = (const uint8_t *)&v[k].rgba;
         for (unsigned i = 0; i < 4; i++) {
-            float want = (float)rgba[i] * h->color[i];
-            int ref = (int)(want > 255 ? 255 : want);
+            int ref = rgba[i];
             int got = prog->colour == MESH_COLOUR_LIGHT_ALPHA ? (int)(o[1].w[i] & 255) : o[1].sw[i];   /* 2DE8: floats */
             if (got - ref > 1 || ref - got > 1) { count->bad_colour++; break; }
         }
@@ -354,11 +352,9 @@ static int mesh_build(void)
         h->flags |= GS_MESH_TEXTURE;
     }
     /* the registers the loop reads, as the setup (and any pass since) left them */
-    for (unsigned col = 0; col < 4; col++) memcpy(&h->matrix[col * 4], vu1.vf[1 + col].f, 16);
     memcpy(h->clip, prog->clip ? vu1.vf[13].f : m[996].f, sizeof h->clip);   /* the loops without CLIP: data 996 */
     const float *v18 = vu1.vf[18].f, *v19 = vu1.vf[19].f;   /* the setup's data 21 and 4 */
-    if (prog->colour == MESH_COLOUR_SCALED) memcpy(h->color, vu1.vf[31].f, sizeof h->color);
-    else h->color[0] = h->color[1] = h->color[2] = h->color[3] = 1;                 /* min(c, 255) = c */
+    const float *scale = vu1.vf[31].f;   /* MESH_COLOUR_SCALED: the colour scale (the setup's data 5) */
     if (prog->fog_max) { h->fog[0] = h->fog[2] = v18[1]; h->fog[1] = 0; }          /* clamp(max) = max */
     else { h->fog[0] = v19[3] + v18[0]; h->fog[1] = v18[3]; h->fog[2] = v18[1]; }
     const float uv[2] = {v19[0], v19[1]};
@@ -384,22 +380,26 @@ static int mesh_build(void)
     GsMeshVertex *out = (GsMeshVertex *)(h + 1);
     uint8_t join[GS_MESH_MAX_VERTICES];
     const float fixed = 1.0f / 4096.0f;   /* ITOF12: exact for these integers */
-    /* The guard band test of the loop's CLIP (vf13, data 996) in homogeneous form: a batch with a
+    /* The vertex's clip-space position, the loop's matrix (vf1..vf4: the object's times the view
+       and projection, z scaled) times its pool entry, summed as the loop sums it (0170's 0088-00B8:
+       MULAw the fourth column, MADDAx, MADDAy, MADDz), each step rounded (the build has no fused
+       multiply-add): the item's position, which the shader divides (finding 249).
+       And the guard band test of the loop's CLIP (vf13, data 996) on it, in homogeneous form: a batch with a
        vertex below the near bound goes to the VU (the clipper's fans there are not what a GPU's
        clipping draws), and so does one with a vertex off it in x or y in a loop without CLIP (the
        loop kicks it as it comes, which the GS wraps); the CLIP loops' sideways ones are drawn and
        the GPU clips them. */
-    const __m128 c0 = _mm_loadu_ps(&h->matrix[0]), c1 = _mm_loadu_ps(&h->matrix[4]);
-    const __m128 c2 = _mm_loadu_ps(&h->matrix[8]), c3 = _mm_loadu_ps(&h->matrix[12]);
+    const __m128 c0 = _mm_loadu_ps(vu1.vf[1].f), c1 = _mm_loadu_ps(vu1.vf[2].f);
+    const __m128 c2 = _mm_loadu_ps(vu1.vf[3].f), c3 = _mm_loadu_ps(vu1.vf[4].f);
     const float bound = h->clip[3] < 0 ? -h->clip[3] : h->clip[3], near = -bound - h->clip[2];
     for (unsigned k = 0; k < n; k++) {
         const ps2_q128 *r = &m[base + 1 + 3 * k];
         const float *p = m[(181 + (r[0].w[3] & 0xFFFF)) & 1023].f;
         const int32_t *normal = m[(373 + (r[0].w[3] & 0xFFFF)) & 1023].sw;
         float cp[4];
-        if (!mesh.gpu_clip || !prog->clip || prog->st == MESH_ST_ENVIRONMENT)
-            _mm_storeu_ps(cp, _mm_add_ps(_mm_add_ps(_mm_mul_ps(c0, _mm_set1_ps(p[0])), _mm_mul_ps(c1, _mm_set1_ps(p[1]))),
-                                        _mm_add_ps(_mm_mul_ps(c2, _mm_set1_ps(p[2])), c3)));
+        _mm_storeu_ps(cp, _mm_add_ps(_mm_add_ps(_mm_add_ps(c3, _mm_mul_ps(c0, _mm_set1_ps(p[0]))),
+                                                _mm_mul_ps(c1, _mm_set1_ps(p[1]))),
+                                     _mm_mul_ps(c2, _mm_set1_ps(p[2]))));
         if (!mesh.gpu_clip || !prog->clip) {
             float x = cp[0] + h->clip[0] * cp[3], y = cp[1] + h->clip[1] * cp[3], b = bound * cp[3];
             if (prog->ortho && cp[3] != 1.0f) return mesh_fail(MESH_WHY_ORTHO);   /* the shader's divide by 1 */
@@ -416,7 +416,7 @@ static int mesh_build(void)
         if (w != 0 && w != 0x800000) return mesh_fail(MESH_WHY_JOIN);   /* 2048.0: ADC through the fog's FTOI4 */
         join[k] = mesh.join[k] = w != 0;
         GsMeshVertex *o = &out[k];
-        o->x = p[0]; o->y = p[1]; o->z = p[2];
+        o->x = cp[0]; o->y = cp[1]; o->z = cp[2]; o->w = cp[3];
         const float nx = (float)normal[0] * fixed, ny = (float)normal[1] * fixed, nz = (float)normal[2] * fixed;
         if (prog->st == MESH_ST_ENVIRONMENT) {   /* screen-linear S, T and Q = 1: times w (the shader divides) */
             float q = 1.0f / cp[3], st[2];
@@ -433,7 +433,6 @@ static int mesh_build(void)
                 o->u += uv[0]; o->v += uv[1];
             }
         }
-        o->unused = 0;
         if (prog->colour == MESH_COLOUR_CONSTANT)
             o->rgba = constant;
         else if (prog->colour == MESH_COLOUR_LIGHT_ALPHA) {   /* 2DE8 (2F08, 2F10): (z + y) + nudge x */
@@ -459,6 +458,14 @@ static int mesh_build(void)
                 float sum = d20[i] * l2 + (i < 3 ? d1015[i] : 0.0f) + f * (i < 3 ? L[i] : 1.0f);
                 if (!(sum > -1.0f)) return mesh_fail(MESH_WHY_COLOUR);   /* FTOI0 of a negative: the GS wraps it */
                 rgba |= (uint32_t)(int)(sum > 255 ? 255.0f : sum) << (i * 8);   /* (-1, 0) truncates to 0 */
+            }
+            o->rgba = rgba;
+        } else if (prog->colour == MESH_COLOUR_SCALED) {   /* min(c scale, 255), truncated */
+            uint32_t rgba = 0;
+            for (unsigned i = 0; i < 4; i++) {
+                float f = (float)c[i] * scale[i];
+                if (!(f > -1.0f)) return mesh_fail(MESH_WHY_COLOUR);
+                rgba |= (uint32_t)(int)(f > 255 ? 255.0f : f) << (i * 8);
             }
             o->rgba = rgba;
         } else
@@ -498,7 +505,14 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
        -2(vi8)); the VU repeats it in shadow mode */
     if (addr == 0x0590) memcpy(vu1.vu0_mem[(vu1.vi[8] - 2) & 1023].f, vu1.vf[20].f, 16);
     float parity = vu1.vf[6].f[0];
-    if (!mesh_build()) return 0;
+    /* The item's maths is the loop's, so it rounds as the VU does (toward zero, FTZ/DAZ; as
+       ps2_vu1_run sets it): the positions it makes are then the VU's own bits (finding 249). */
+    unsigned control = host_fp_csr();
+    const int set_mode = (control & ~0x3Fu) != 0xFFC0u;
+    if (set_mode) host_fp_set_csr((control & ~0x603Fu) | 0xFFC0u);
+    int built = mesh_build();
+    if (set_mode) host_fp_set_csr(control);
+    if (!built) return 0;
     *packet = mesh.packet;
     if (mesh.mode == MESH_SHADOW) {
         vu1.vf[6].f[0] = parity;   /* the VU runs the batch itself (0170 flips it there) */

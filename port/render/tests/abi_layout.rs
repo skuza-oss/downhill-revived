@@ -39,7 +39,7 @@ fn all() -> Vec<(&'static str, usize, usize, Vec<Field>)> {
         fields!(DhdrNativeConstants { target: [f32; 2], flags: u32, atst: u32, aref: u32, alpha_scale: f32,
                                       texa_alpha: f32, scale: u32, fog: [f32; 4], tex_offset: [i32; 2],
                                       tex_size: [u32; 2], wrap: [u32; 4], region: [u32; 4],
-                                      mesh_offset: [f32; 4] }),
+                                      mesh_offset: [f32; 4], mesh_clip: [f32; 4], mesh_fog: [f32; 4] }),
         fields!(DhdrConvertConstants { tex: [u32; 4], size: [u32; 4], slot: [[u32; 4]; 4], pages: [u8; 512],
                                        palette: [u32; 256] }),
         fields!(DhdrCommand { kind: u8, depth_key: u8, color_mask: u8, pad: u8, target: i16, depth: i16,
@@ -79,7 +79,7 @@ fn every_field_listed_and_no_implicit_padding() {
 #[test]
 fn pointers_come_last_and_the_prefix_is_target_independent() {
     // The pointer-free prefix of each struct with pointers, the same on every target.
-    let prefix = [("DhdrDeviceDesc", 24usize, 1usize), ("DhdrCommand", 184, 3), ("DhdrConvert", 1640, 1),
+    let prefix = [("DhdrDeviceDesc", 24usize, 1usize), ("DhdrCommand", 216, 3), ("DhdrConvert", 1640, 1),
                   ("DhdrPicture", 88, 5)];
     for (name, size, _align, fields) in all() {
         let first_ptr = fields.iter().position(|f| f.0 == "dxc_path" || f.0 == "texture" || f.0 == "base"
@@ -104,7 +104,7 @@ fn pointers_come_last_and_the_prefix_is_target_independent() {
 #[test]
 fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrVertex>(), 32);
-    assert_eq!(size_of::<DhdrNativeConstants>(), 112);
+    assert_eq!(size_of::<DhdrNativeConstants>(), 144);
     assert_eq!(size_of::<DhdrConvertConstants>(), 1632);
     assert_eq!(size_of::<DhdrSurfaceInfo>(), 40);
     assert_eq!(size_of::<DhdrWindow>(), 24);
@@ -112,7 +112,7 @@ fn sizes_the_header_documents() {
     assert_eq!(size_of::<DhdrPictureResult>(), 80);
     assert_eq!(size_of::<DhdrPresentRect>(), 48);
     assert_eq!(size_of::<DhdrDeviceDesc>(), 24 + PTR);
-    assert_eq!(size_of::<DhdrCommand>(), 184 + 3 * PTR);
+    assert_eq!(size_of::<DhdrCommand>(), 216 + 3 * PTR);
     assert_eq!(size_of::<DhdrConvert>(), 1640 + PTR);
     assert_eq!(size_of::<DhdrPicture>(), 88 + 5 * PTR);
     // Opaque handles are zero-sized markers; only pointers to them cross the ABI.
@@ -128,7 +128,7 @@ fn sizes_the_header_documents() {
 
 #[test]
 fn constants() {
-    assert_eq!(DHDR_ABI_VERSION, 3);
+    assert_eq!(DHDR_ABI_VERSION, 4);
     assert_eq!([DHDR_DEV_VULKAN, DHDR_DEV_FXC, DHDR_DEV_DEBUG, DHDR_DEV_VALIDATION, DHDR_DEV_FALLBACK,
                 DHDR_DEV_NO_DUAL_SOURCE, DHDR_DEV_DUAL_SOURCE], [1, 2, 4, 8, 16, 32, 64]);
     assert_eq!([DHDR_LOG_ERROR, DHDR_LOG_WARN, DHDR_LOG_INFO], [1, 2, 3]);

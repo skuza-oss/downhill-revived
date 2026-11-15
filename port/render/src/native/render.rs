@@ -318,8 +318,6 @@ struct PassState {
     zdraws: u32,
     /// The surfaces the pass's draws read (as textures, or through conversions), one bit each.
     reads: u64,
-    /// Group 2, the mesh draws' object records (set once a pass, at its first mesh draw).
-    mesh: bool,
 }
 
 /// The pixels draw `first..first + count` of `vertices` (through `indices` when given) can touch: its
@@ -446,18 +444,6 @@ impl Pass {
             pass.set_bind_group(1, group, &[]);
             rstat::tally(rstat::BIND1, 1);
             s.group = Some(group.clone());
-        }
-    }
-
-    /// Group 2 (the mesh records, `Views::mesh`) in the open pass, set at its first mesh draw.
-    fn set_mesh_group(&mut self, mesh: &wgpu::BindGroup) {
-        if self.state.mesh {
-            return;
-        }
-        self.flush();
-        if let Some(pass) = self.pass.as_mut() {
-            pass.set_bind_group(2, mesh, &[]);
-            self.state.mesh = true;
         }
     }
 
@@ -747,8 +733,7 @@ impl Native {
             self.surfaces.prepare(&mut kit)?;
         }
         t.add(rstat::SURFACES);
-        let mesh = self.objects.mesh_layout.clone().and_then(|layout| self.arenas.mesh_group(gpu, &layout));
-        let views = Views { shared, uniforms, vertices, vertex_bytes, indices: index_buffer, mesh };
+        let views = Views { shared, uniforms, vertices, vertex_bytes, indices: index_buffer };
         let t = rstat::T::new();
         self.render(p, indices, &views);
         t.add(rstat::RECORD);
@@ -988,7 +973,7 @@ impl Native {
                     for &s in c.surface.iter().filter(|&&s| s >= 0) { reads |= 1u64 << (s as u32 & 63); }
                 }
                 self.pass.state.reads |= reads;
-                // a mesh draw's vertices are object-space (its shader places them): its scissor
+                // a mesh draw's vertices are clip-space (its shader places them): its scissor
                 let bounds = if k.constants.flags & 4096 != 0 {
                     Some([scissor[0], scissor[1], scissor[0] + scissor[2], scissor[1] + scissor[3]])
                 } else {
@@ -1020,11 +1005,6 @@ impl Native {
             // Decoded and converted textures are R32Uint texels: the `_u` entry points read them
             // (pipelines.rs TEXELS).
             let texels = if decoded.is_some() { TEXELS } else { 0 };
-            if k.constants.flags & 4096 != 0 {
-                // a mesh draw reads its objects' records (group 2)
-                let Some(mesh) = v.mesh.as_ref() else { continue };
-                self.pass.set_mesh_group(mesh);
-            }
             self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale | texels, spec,
                              offset, &v.uniforms, &group);
             self.pass.drawn.draws += 1;
@@ -1272,8 +1252,6 @@ struct Views {
     vertex_bytes: u64,
     /// An indexed picture's index buffer and its bytes.
     indices: Option<(wgpu::Buffer, u64)>,
-    /// The mesh draws' group 2 (`Arenas::mesh_group`); None in the browser.
-    mesh: Option<wgpu::BindGroup>,
 }
 
 /// `len` elements at `p` (NULL only for 0; else fatal), as `ffi.rs`'s slice.
