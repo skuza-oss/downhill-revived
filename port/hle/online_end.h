@@ -11,7 +11,8 @@
 
 typedef struct {
     int ended;            /* NetLobby.ended: NET_ENDED_* */
-    int link_lost;        /* the connection to the room failed or dropped (offline, FAILED) */
+    int link_lost;        /* the connection to the room failed or dropped (offline, FAILED), or a rejoin came
+                             too late for this PC's seat (seat_lost) */
     int removed;          /* the host removed this PC from the room (error code "kicked") */
     int finished;         /* this PC's rider finished */
     const char *own_dnf;  /* this PC's DNF reason in the running race ("time_up", "gave_up", "left"), or "" / NULL */

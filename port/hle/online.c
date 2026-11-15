@@ -1620,8 +1620,8 @@ static void state_sync(void)
         if (!on.leave_at && out) {
             if (!on.leave_reason) {  /* one the start gave stays (start_step) */
                 RaceEnd end = {.ended = lobby.ended,
-                               .link_lost = lobby.offline || lobby.state == NET_FAILED || lobby.state == NET_IDLE ||
-                                            lobby.state == NET_RECONNECTING,
+                               .link_lost = lobby.offline || lobby.seat_lost || lobby.state == NET_FAILED ||
+                                            lobby.state == NET_IDLE || lobby.state == NET_RECONNECTING,
                                .removed = !strcmp(lobby.error_code, "kicked"), .finished = FINISHED(0),
                                .own_dnf = me ? me->dnf_reason : "", .new_result = lobby.last_race_id != on.last_race_id};
                 on.leave_reason = race_end_reason(&end);

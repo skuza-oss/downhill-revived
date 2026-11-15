@@ -107,6 +107,10 @@ typedef struct {
        the race's results, so a game that looked at lastRace to tell the reasons apart saw "no new
        result" for a moment and blamed the host (finding 211). */
     int ended;
+    /* A rejoin found the race gone on without this PC (the room let its seat go after 20 s without
+       a word from it): the race screen says CONNECTION LOST, not that the race ended (finding 254).
+       Cleared at each start. */
+    int seat_lost;
 } NetLobby;
 enum { NET_ENDED_NONE, NET_ENDED_DONE /* all finished or out, or the finish window ran out */,
        NET_ENDED_VOID /* the host ended it */, NET_ENDED_UNKNOWN /* an older server: no reason */ };

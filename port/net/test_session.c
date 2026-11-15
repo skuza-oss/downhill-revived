@@ -490,7 +490,7 @@ int main(void)
         client_connected(&c,&t);
         client_on_text(&c,back_in,strlen(back_in));
         client_lobby(&c,&l);
-        assert(l.state == NET_RACING && c.racing && !c.rejoining && c.rejoin_tries == 0);
+        assert(l.state == NET_RACING && c.racing && !c.rejoining && c.rejoin_tries == 0 && !l.seat_lost);
         assert(!strcmp(sent,"{\"type\":\"finish\",\"ticks\":777,\"place\":2}"));  /* said again */
         /* gave up while the socket was down: BACK again after the rejoin */
         assert(client_on_closed(&c,1006,"") == 1);
@@ -500,7 +500,8 @@ int main(void)
         client_on_text(&c,back_in,strlen(back_in));
         assert(!strcmp(sent,"{\"type\":\"back\"}"));
         client_free(&c);
-        /* back, but the race is over for us: the room's snapshot takes the game back to the room */
+        /* back, but the race is over for us: the room's snapshot takes the game back to the room, and
+           the race screen says the connection was lost (finding 254); the next start clears that */
         client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         client_connected(&c,&t);
         client_on_text(&c,tokened,strlen(tokened));
@@ -510,7 +511,10 @@ int main(void)
         client_on_text(&c,no_race,strlen(no_race));
         client_on_text(&c,out,strlen(out));
         client_lobby(&c,&l);
-        assert(!c.racing && l.state == NET_LOBBY && c.race_at == 0);
+        assert(!c.racing && l.state == NET_LOBBY && c.race_at == 0 && l.seat_lost);
+        client_on_text(&c,start,strlen(start));
+        client_lobby(&c,&l);
+        assert(c.racing && !l.seat_lost);
         client_free(&c);
         /* a refusal in the race, or the attempts' end: racing alone, offline, as before */
         client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");

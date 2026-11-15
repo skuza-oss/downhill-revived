@@ -329,6 +329,7 @@ static void read_start(NetClient *c, const char *t)
     c->states_sent = 0;
     l->race_go_at = 0;
     l->ended = NET_ENDED_NONE;
+    l->seat_lost = 0;
     c->racing = 1;
     l->offline = 0;
     l->started = 1;
@@ -581,6 +582,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             /* back in a race (finding 175): its state stays; what the drop may have lost goes again.
                A welcome without this race: the room's snapshot that follows takes it back to the room. */
             c->lobby.state = c->racing ? NET_RACING : NET_LOBBY;
+            if (!in_race && c->racing) c->lobby.seat_lost = 1;
             if (in_race && c->gave_up)
                 say(c, "{\"type\":\"back\"}");
             else if (in_race && c->finished)
