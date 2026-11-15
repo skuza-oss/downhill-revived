@@ -19,9 +19,13 @@ and `docs`, and an SFU race and a relay-only race on the official server with eq
 - [x] 2026-11-15: our TURN client read against RFC 8656; Cloudflare's TURN service probed from
   this PC with our own credentials (scratch script, nothing tracked).
 - [x] 2026-11-15: `channel_bind/timeout` and `udp/connect/no_answer` reproduced on this PC with
-  the real SFU and TURN service, cause proven, fixed in the game and in the room.
-- [x] 2026-11-15: the `0.8.4` word explained: a stale cache entry of the Rust library.
-- [ ] `turn_400`: what is known is below; not reproduced.
+  the real SFU and TURN service, cause proven, fixed in the game (c3c8bfce) and in the room
+  (49b7f341).
+- [x] 2026-11-15: the `0.8.4` word explained: a stale cache entry of the Rust library (a13abddb).
+- [x] 2026-11-15: `turn_400` not reproduced; the report now tells the two Allocates apart
+  (eb04b53f).
+- [x] 2026-11-15: `check.py quick`, `port`, `server` and `docs` OK; two races on the official
+  server (below). No state trace: nothing here touches game state.
 
 ## What the SFU answers now
 
@@ -115,6 +119,19 @@ route) and the phones' own networks. Finding 246 saw the same 400 on a phone on 
 (0.8.2, its TLS link took the first address the phone's resolver gave, maybe IPv6) while the PC on
 the same network allocated.
 
+One room followed through its log (it ran in Singapore, made from Jakarta, three members on
+0.8.5, so phones or Linux): every attempt of every member ended `turn/allocate/turn_400`, about
+5 s after its credentials (443 first, then the listed port), for four minutes. Cloudflare's TURN
+usage has no line for these members: no allocation ever succeeded.
+
+The report could not say which Allocate got the 400: the first, sent without credentials (whose
+answer should be 401 with the realm and nonce), or the authenticated one. It now can: the first
+is its own step, `challenge` (game `trouble.rs` and `turn.rs`, room `TROUBLE_STEPS`,
+`docs/online-protocol.md`). `turn/challenge/turn_400` would mean the TURN server refuses our
+Allocate itself where these players connect; `turn/allocate/turn_400` that it does not take their
+credentials there. A room before this change drops a report with the new word (it logs nothing),
+so the room goes first.
+
 ## Decisions
 
 - Fix the candidates on both sides: the room's rewrite reaches every released game at once; the
@@ -131,4 +148,22 @@ the same network allocated.
 
 ## Result
 
-Open until the lead's deploy and the next release.
+Proven and fixed: the SFU's new candidate form left every game without a candidate
+(`udp/connect/no_answer` plus `turn/channel_bind/timeout`); the stale `0.8.4` word. Not proven:
+why phones get `turn_400`.
+
+Checked:
+- `check.py quick`, `port`, `server` and `docs` OK on eb04b53f; `dhd_net` 50 tests.
+- This PC, two hidden games of this branch, rooms by code on the official server (not yet
+  rewriting the answer, so the game's own fix carried them): an SFU room, both `connected via UDP`
+  590-618 ms after the answer, and the same with the guest relay-only (`DHD_NET_SFU_UDP=0`): TURN
+  over TLS on 443, allocation 43 ms after the credentials, `connected via TURN/TLS` 2921 ms after
+  the answer, relayed datagrams both ways. `1. Host 0:20.03  2. Guest 0:40.03` on both games each
+  time; no `failed at`, `freeze:` or `crash:` line.
+- The room's rewrite only by its unit test (`sfu.test.ts`): a released game against the rewritten
+  answer was not run (no local server with the keys in this worktree). After the deploy the
+  `Realtime trouble:` lines with `channel_bind/timeout` and the `out of the race: no Realtime
+  connection` lines should stop for every version; that is the check.
+
+Left: deploy the room (the rewrite and the `challenge` word), then release the game. If phones
+still report, `turn/challenge/turn_400` or `turn/allocate/turn_400` says which Allocate fails.
