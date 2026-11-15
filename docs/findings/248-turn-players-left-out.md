@@ -1,6 +1,7 @@
 # 248: Racers on the TURN fallback left out of every race
 
 Status: current
+Checked: 2026-11-15
 
 Branch `fix/turn-players-out-248` from `main` 02a8bb3e (0.8.4), started 2026-11-14. The cause is
 not proven. The branch hardens the game's two paths to the SFU and adds a report of the failing
@@ -182,3 +183,15 @@ calculations view reports `sampleInterval`). Count with windows of an hour or le
 
 Open: waiting for the deploy (the log line and the feature) and a release (the report, the
 hardening, 443 first).
+
+Checked:
+- 0.8.5 gate on cffb5e7b: `check.py port`, `check.py server` and `check.py docs` OK; boot and race state
+  traces equal the reference build.
+- This PC, two hidden games, private rooms on the official server after the server's `sfu_trouble`
+  deploy: an SFU room (UDP on both), the same with the guest relay-only (`DHD_NET_SFU_UDP=0`: TURN over
+  TLS on port 443, connected 2.8 s after the answer, allocation 52 ms after the credentials) and a P2P
+  room; `1. Host 1:10.03  2. Guest 1:12.03` on both games each time; no `failed at` line, so no report
+  was sent; zero `refused`, `freeze:` and `crash:` lines, no other player's address in the SFU logs.
+- PC <-> Mac (the Mac's own build): a private SFU room on the official server, `1. PCHOST 0:20.03
+  2. MACGUEST 0:40.03` on both. A real UDP block (a failing send) and a dead 443 were run only by the net
+  crate's tests, not on a real network.
