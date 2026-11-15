@@ -115,6 +115,7 @@ impl P2p {
     /// Runs every peer: its signals go to the room, its messages and its state to the router. A peer
     /// that failed or never connected is dropped; the router tells the room.
     pub fn poll(&mut self, c: &WsConn) {
+        if crate::test_cut() { return; }  // no network: nothing in or out (DHD_NET_TEST_CUT)
         let now = self.now();
         let mut failed = vec![];
         for (&id, link) in &mut self.peers {
@@ -166,6 +167,7 @@ impl P2p {
                     }
                 }
                 Action::Peer(member, reliable, bytes) => {
+                    if crate::test_cut() { continue; }  // lost on the way (DHD_NET_TEST_CUT)
                     if let Some(link) = self.peers.get_mut(&member) {
                         if let Err(e) = link.peer.send(reliable, bytes) {
                             eprintln!("net: P2P: a message to member {member} was dropped ({e})");
