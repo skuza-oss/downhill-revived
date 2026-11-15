@@ -47,7 +47,7 @@ the script and its before -> after table here.
 - [x] Before: the profiles on the base model, tracks 0 and 1, computer riders and a player's.
 - [x] Fixes, one at a time (below): one kept, f98e8575; two dropped.
 - [x] Reconnects: 1 s, 5 s, 20 s in a race (the test games and the real ONLINE menus), 5 s and
-      20 s in the room. Two fixes: rejoins every 2 s for 30 s, and CONNECTION LOST for a game back
+      20 s in the room. Two fixes: quick rejoins while nothing reaches the server (below), and CONNECTION LOST for a game back
       too late for its seat.
 - [x] Checks.
 
@@ -94,17 +94,38 @@ Reconnects: `DHD_NET_TEST_CUT` on the guest of a two-game race, with the room on
   not crashing, and less than SYNC_COAST (3 s) since the last snapshot; its direction is the
   puppet's own (it never turns a rider), its speed the owner's. It is the guard of finding 202
   (`SYNC_GUARD`) carried on past `SYNC_GUARD_AGE`: the owner's pad still rides the puppet, the
-  guard only stops it standing or falling behind on a bump while nothing comes.
-- Rejoins: 1 s, then every 2 s, for 30 s from the drop (it was 1, 2, 4, 8, 8 s: five attempts).
-  The room keeps a seat 20 s after it last heard from a member (`online/server` REJOIN_GRACE_MS),
-  so an outage under about 18 s now ends with the game back in its race within 2 s of the
-  network's return; the old schedule could wait 8 s, and a 15-20 s outage missed the seat. Attempts
-  that fail on this PC (no network) never reach the server; one that reaches it and is refused by
-  the per-address limit is retried as before (finding 175). A time window, not a count, so a slow
-  failure (a connect that hangs) cannot stretch it.
-- A game back in the room after its seat went (the welcome names no race) says CONNECTION LOST
-  for its two seconds, not THE RACE ENDED: the race went on for the others. A new `NetLobby`
-  field, `seat_lost`, cleared at each start; no protocol change.
+  guard only stops it standing or falling behind on a bump while nothing comes. The review
+  (14b782ea): the rule is `sync_outage_target` in `puppet_sync.h`, tested in
+  `test_puppet_sync.c`. An owner that was under 30 units a second at its last snapshot (the start
+  grid, standing after a wreck, braking to a stop) or a rider crashing here or at its owner's,
+  waiting for its respawn or finished is never pushed on, and the easing ends; before, an owner at
+  speed 0 with the easing still on from braking gave 0/0, NaNs in the puppet's velocity.
+- Rejoins (`port/render/net/src/lib.rs` retry_delay, 12055856 after the review; it was 1, 2, 4, 8,
+  8 s, five attempts). The server allows an address 30 connects a minute (`online/server`
+  RL_CONNECT), shared by everyone behind it, and keeps a seat 20 s after it last heard from a
+  member (REJOIN_GRACE_MS). So the schedule tells apart what reaches the server:
+
+  | after | wait (each with 0.8-1.2x jitter) |
+  |---|---|
+  | the drop | 1 s |
+  | an attempt the server never answered (no network here: connecting or TLS failed) | 2 s |
+  | an attempt the server answered and that still failed (an HTTP answer, a socket closed at once), the 1st, 2nd | 4 s, 12 s |
+  | a refusal by the rate limit (4011) | 20-30 s |
+
+  The attempts end when the next would start more than 30 s after the drop (ws.h
+  WS_ATTEMPTS_OVER). No network here: tries at about 1, 3, 5 ... 29 s, none of them reaching the
+  server, and the game is back within about 2 s of its network's return. The server answering and
+  failing (its trouble, not the player's): tries at about 1, 5 and 17 s, then no more: at most 3
+  connects per player in a 60 s outage, 18 for 6 players behind one address, of the 30 allowed
+  (the tests in lib.rs `retry_tests`; the first schedule of this lane, every 2 s for 30 s, made 15
+  and failed them). The jitter keeps a room dropped by a server update from retrying in step.
+- A game back in the room after its seat went says CONNECTION LOST for its two seconds, not THE
+  RACE ENDED: the race went on for the others. A new `NetLobby` field, `seat_lost`, cleared at each
+  start; no protocol change. A welcome without the race also comes when the race ended normally
+  while the game was away with its seat kept (the review), so `client.c` read_room decides from
+  the room's snapshot after the welcome (0f552033): the seat went when the race still runs without
+  this game or the race's results list this game's member (its id in the race) as left; otherwise
+  the race's own words (RACE OVER, TIME UP). `test_session.c` has both.
 - No server change: the 20 s seat is the server's and stays.
 
 ## Surprises
@@ -138,8 +159,8 @@ Reconnects: `DHD_NET_TEST_CUT` on the guest of a two-game race, with the room on
 
 ## Result
 
-Kept: the outage guard (f98e8575), rejoins every 2 s for 30 s (f8cd61ab), CONNECTION LOST for a
-game back too late for its seat (f6486ff4, db59be7e), and the test tools. No protocol or server
+Kept: the outage guard (f98e8575, 14b782ea), quick rejoins (f8cd61ab, 12055856), CONNECTION LOST
+for a game back too late for its seat (f6486ff4, db59be7e, 0f552033), and the test tools. No protocol or server
 change: nothing to deploy.
 
 **Puppets**, before (local `main` 34d6273d's model, the tools alone) -> after (this branch), the
@@ -181,7 +202,9 @@ everything gained: a player's rider in bursts on track 1 has more small teleport
 minute) and heading flips (3 -> 9), and held bursts on track 0 have a slightly higher p95 (4.6 ->
 5.1): the guard keeps a rider going at its owner's speed where it would have slowed, so the
 correction when the snapshots come is sometimes a little different. The cut5 player row on
-track 1 is the crash before the cut (Surprises): the same before and after.
+track 1 is the crash before the cut (Surprises): the same before and after. The review's change to the outage
+rule (14b782ea) moved the burst, held-burst and cut rows by at most 0.4 units at p95 and 0.3 at
+p99 (largest step 61.6 -> 63.3 in held bursts on track 0); the table is the build before it.
 
 **Reconnects**, on the local server (a private SFU room, `--env-file`), two games on this PC, the
 guest without network (`DHD_NET_TEST_CUT`) from 20 s after GO, or 5 s after joining the room;

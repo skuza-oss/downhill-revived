@@ -209,8 +209,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   dhd.ini `room_region`) or, on Auto, by the Cloudflare location the creator reached, from measured
   round trips (findings 135, 181), rejoin by token
   (finding 137); a room connection lost in a race no longer ends it: the game races on over the
-  SFU and rejoins, the seat is kept 20 s (finding 175); a game tries again every 2 s for 30 s, and
-  one back too late for its seat says CONNECTION LOST (finding 254). A room runs at most 5 Realtime calls at
+  SFU and rejoins, the seat is kept 20 s (finding 175); a game tries again every 2 s while nothing reaches the
+  server and backs off when the server answers (finding 254), and one back too late for its seat
+  says CONNECTION LOST. A room runs at most 5 Realtime calls at
   once and a timed-out call is an unknown outcome, not a failure (finding 182). A deploy
   (`online/server/tools/deploy.mjs`: a watched 10 % canary, then 100 % or a rollback) restarts
   rooms for the new code only in the lobby or at results; games rejoin in about 2 s (finding 184).
