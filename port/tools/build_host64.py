@@ -129,16 +129,16 @@ def host_units(t):
 
 def glue(t):
     return [SOURCE / n for n in ('guest_memory.c', 'guest_memory_%s.c' % ('win32' if t.windows else 'posix'),
-                                 'fiber.c', 'fiber_%s.c' % t.fiber, 'fp_mode.c', 'bridge.c', 'diagnostics.c',
-                                 'launcher.c')]
+                                 'fiber.c', 'fiber_%s.c' % t.fiber, 'fp_mode.c', 'guest_place.c', 'bridge.c',
+                                 'diagnostics.c', 'launcher.c')]
 
 
 def fiber_test(t, a, cc, wabt, out, env):
     """--fiber-test: port/host64/selftest_fiber.c with the target's compiler, guest memory and fiber
-    adapter (glue's first five units). Run here with its two guard-fault children (android-arm64:
+    adapter (glue's first six units). Run here with its two guard-fault children (android-arm64:
     built only)."""
     import signal
-    sources = [SOURCE/'selftest_fiber.c'] + glue(t)[:5]
+    sources = [SOURCE/'selftest_fiber.c'] + glue(t)[:6]
     flags = ['-DWASM_RT_STACK_DEPTH_COUNT=1', '-I'+str(wabt/'include'), '-I'+str(SOURCE)]
     exe = out/('selftest_fiber.exe' if t.windows else 'selftest_fiber')
     if t.windows:

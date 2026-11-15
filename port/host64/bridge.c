@@ -45,9 +45,10 @@ int host_ram_view(uint32_t at,uint32_t offset,uint32_t size,int over) {
 int host_mem_commit(uint32_t at,uint32_t size) {
     return memory && host64_memory_commit(at,size);
 }
-/* The allocator reserves the whole space: every in-range span qualifies. */
+/* The allocator reserves the whole space but, on iOS, the gap between its two parts
+   (guest_memory.c, finding 258): every other in-range span qualifies. */
 int host_mem_reserved(uint32_t at,uint32_t size) {
-    return memory && (uint64_t)at+size<=memory->size;
+    return memory && host64_memory_reserved(at,size);
 }
 /* host.c arms DHD_STATE_WATCH; the i686 definition (state_trace.c) is module code here.
    Same rule: only under DHD_STATE_TRACE, NULL when unset. */

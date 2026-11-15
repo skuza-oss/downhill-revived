@@ -194,6 +194,8 @@ def host_tests():
     run('touch', [HLE / 'touch.c', HLE / 'test_touch.c'])
     # how the run before ended on iOS, every way (port/ios/host/run_record.c, finding 227)
     run('run-record', [ROOT / 'port/ios/host/run_record.c', ROOT / 'port/ios/tests/test_run_record.c'])
+    # where iOS's guest memory goes in an address space shaped like an iPhone's (finding 258)
+    run('guest-place', [ROOT / 'port/host64/guest_place.c', ROOT / 'port/host64/test_guest_place.c'])
     # the phones' update lookup, with the source Android's notice logs (finding 235)
     run('phone-update', [ROOT / 'port/host/test_phone_update.c',
                          ROOT / 'port/net/update_check.c', ROOT / 'port/net/json.c'])

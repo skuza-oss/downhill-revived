@@ -1,4 +1,5 @@
-/* POSIX mapping for guest_memory.c: one PROT_NONE reservation, a memfd RAM
+/* POSIX mapping for guest_memory.c: one PROT_NONE reservation (iOS: two, placed by the shared
+   file from os_free_ranges, finding 258), a memfd RAM
    section (macOS: an unlinked shared memory object; Android 10: ashmem) aliased with MAP_FIXED|MAP_SHARED, commit-on-demand with mprotect
    (which preserves contents, like MEM_COMMIT), and a SIGSEGV/SIGBUS handler
    on an alternate stack that reports the guest address and re-raises the
@@ -20,11 +21,7 @@
 #include "core_host.h"  /* guest_base, for the fault bounds check */
 #include "guest_memory_os.h"
 
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
-#define GUEST_SIZE 0x80010000ull
-#else
-#define GUEST_SIZE 0x200000000ull
-#endif
+#define GUEST_SIZE 0x200000000ull  /* the 8 GiB layout's reservation */
 #define RAM_SIZE 0x2000000ull
 
 static int ram_fd=-1;
@@ -60,7 +57,7 @@ void os_fail(const char *what) {
     }
     abort();
 }
-uintptr_t os_reserve(void) {
+int os_backing_open(void) {
 #ifdef __APPLE__  /* no memfd: a POSIX shared memory object, unlinked at once */
     char name[32]; snprintf(name,sizeof name,"/dhd-guest-ram-%d",(int)getpid());
     ram_fd=shm_open(name,O_RDWR|O_CREAT|O_EXCL,0600);
@@ -82,12 +79,87 @@ uintptr_t os_reserve(void) {
 #endif
     if (ram_fd<0) return 0;
     if (!sized && ftruncate(ram_fd,RAM_SIZE)<0) { close(ram_fd); ram_fd=-1; return 0; }
+    return 1;
+}
+#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+static int add_range(GuestRange **r,unsigned *n,unsigned *cap,uint64_t lo,uint64_t hi) {
+    if (hi<=lo) return 1;
+    if (*n==*cap) {
+        unsigned grown=*cap ? *cap*2 : 256;
+        GuestRange *bigger=realloc(*r,grown*sizeof **r);
+        if (!bigger) return 0;
+        *r=bigger; *cap=grown;
+    }
+    (*r)[(*n)++]=(GuestRange){lo,hi};
+    return 1;
+}
+#ifdef __APPLE__
+#include <mach/mach.h>
+/* The gaps between the task's regions (vm_region_64: the shared cache is one region), up to the
+   task's own top (TASK_VM_INFO's max_address: on an iPhone with 3 GB, 0x358000000). */
+unsigned os_free_ranges(GuestRange **out) {
+    GuestRange *r=NULL; unsigned n=0, cap=0;
+    uint64_t prev=vm_page_size, top=MACH_VM_MAX_ADDRESS;
+    task_vm_info_data_t vm; mach_msg_type_number_t vm_count=TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(),TASK_VM_INFO,(task_info_t)&vm,&vm_count)==KERN_SUCCESS &&
+        vm_count>=TASK_VM_INFO_REV4_COUNT && vm.max_address>prev)
+        top=vm.max_address;
+    for (vm_address_t at=0;;) {
+        vm_address_t a=at; vm_size_t size=0;
+        vm_region_basic_info_data_64_t info; mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object=MACH_PORT_NULL;
+        if (vm_region_64(mach_task_self(),&a,&size,VM_REGION_BASIC_INFO_64,(vm_region_info_t)&info,
+                         &count,&object)!=KERN_SUCCESS) break;
+        if (object!=MACH_PORT_NULL) mach_port_deallocate(mach_task_self(),object);
+        if (a>=top) break;
+        if (!add_range(&r,&n,&cap,prev,a)) break;
+        if (a+size>prev) prev=a+size;
+        if (a+size<=at) break;
+        at=a+size;
+    }
+    if (prev<top) add_range(&r,&n,&cap,prev,top);
+    *out=r;
+    return n;
+}
+#else
+/* /proc/self/maps's gaps, up to the 47-bit user space every Linux host gives without asking. */
+unsigned os_free_ranges(GuestRange **out) {
+    GuestRange *r=NULL; unsigned n=0, cap=0;
+    uint64_t prev=0x10000, top=0x800000000000ull;
+    FILE *maps=fopen("/proc/self/maps","r");
+    if (maps) {
+        char line[512];
+        unsigned long long lo, hi;
+        while (fgets(line,sizeof line,maps))
+            if (sscanf(line,"%llx-%llx",&lo,&hi)==2 && lo<top) {
+                if (!add_range(&r,&n,&cap,prev,lo)) break;
+                if (hi>prev) prev=hi;
+            }
+        fclose(maps);
+        if (prev<top) add_range(&r,&n,&cap,prev,top);
+    }
+    *out=r;
+    return n;
+}
+#endif
+/* A hint without MAP_FIXED takes the address only when it is free (Darwin and Linux both), so
+   nothing of the process is ever replaced. */
+int os_reserve_at(uintptr_t at,uint64_t size) {
+    void *p=mmap((void *)at,(size_t)size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
+    if (p==MAP_FAILED) return 0;
+    if ((uintptr_t)p!=at) { munmap(p,(size_t)size); errno=EEXIST; return 0; }
+    return 1;
+}
+#else
+uintptr_t os_reserve(void) {
+    if (!os_backing_open()) return 0;
     /* MAP_NORESERVE: the 8 GiB reservation must not charge swap; committed
        pages are charged when mprotect commits them. */
     void *p=mmap(NULL,GUEST_SIZE,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
     if (p==MAP_FAILED) { close(ram_fd); ram_fd=-1; return 0; }
     return (uintptr_t)p;
 }
+#endif
 /* No placeholder splitting on POSIX: MAP_FIXED overlays the reservation. */
 int os_split(uintptr_t at,uint64_t size) {
     (void)at; (void)size; return 1;
@@ -163,7 +235,7 @@ static void fault(int sig,siginfo_t *info,void *ctx) {
     /* Not ours: restore the default and re-raise. */
     struct sigaction dfl; memset(&dfl,0,sizeof dfl);
     dfl.sa_handler=SIG_DFL; sigemptyset(&dfl.sa_mask);
-    if (!guest_base || host<guest_base || host-guest_base>=GUEST_SIZE) {
+    if (!host64_memory_owns(host)) {
 #ifdef __ANDROID__
         /* Not ours: the handler before ours (the system's crash dump) gets it, as below, so the
            crash still ends in a tombstone (finding 152). */
