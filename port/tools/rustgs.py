@@ -81,8 +81,8 @@ Cache
 The built library (and the wasm glue) is kept in the shared object cache (objcache.DIR, default
 DHD_DEVCACHES/dhd-objcache). The key is sha256 over rustc -vV, cargo -V (and wasm-bindgen -V for wasm),
 Cargo.lock, every Cargo.toml, rust-toolchain.toml, the crate's .cargo/config.toml, every file under
-port/render/src, the four WGSL files, the encoded flags, triple, features, profile and the resolved
-versions; paths in it are relative to the tree, so every worktree has the same key. A hit copies the
+port/render/src, the four WGSL files, the files the crates include from elsewhere (INCLUDED), the
+encoded flags, triple, features, profile and the resolved versions; paths in it are relative to the tree, so every worktree has the same key. A hit copies the
 files out instead of running cargo. `--no-cache` builds with cargo and stores nothing.
 DHD_OBJCACHE=0 turns the cache off (every build a miss).
 
@@ -118,6 +118,11 @@ STAR = RENDER / 'star'   # dhd_star, a P2P room's star (finding 186), linked int
 MEMBERS = (NET, SETTINGS, PRESENCE, DISC, STAR)
 GS = ROOT / 'port' / 'gs'
 WGSL = ('raster.wgsl', 'present.wgsl', 'native.wgsl', 'native_dual.wgsl')
+# Files outside port/render the crates include (include_str!), in the cache key like the sources. The
+# key once missed port/include/version.h, so the 0.8.5 Windows and Mac libraries came from a cache
+# entry built before the version bump and reported "0.8.4" (finding 252); inputs_gate refuses a
+# build that read a file of the tree the key does not cover.
+INCLUDED = ('port/include/version.h', 'port/hle/state_bundle.h', 'port/hle/state_bundle_fixture.h')
 DEVCACHES = Path(os.environ.get('DHD_DEVCACHES') or Path.home() / 'DevCaches')  # downloaded tools and caches
 CARGO_TARGETS = Path(os.environ.get('DHD_CARGO_DIR') or
                      (DEVCACHES / 'dhd-cargo' if os.name == 'nt' else Path.home() / '.cache' / 'dhd-cargo'))
@@ -346,6 +351,8 @@ def source_files():
                 files.append(('port/render/%s/%s' % (member.name, rel.as_posix()), p))
     for name in WGSL:
         files.append(('port/gs/' + name, GS / name))
+    for rel in INCLUDED:
+        files.append((rel, ROOT / rel))
     return sorted(files)
 
 
@@ -377,13 +384,24 @@ def dep_info_paths(d_file):
 def inputs_gate(d_file):
     if not Path(d_file).is_file():
         refuse('dep-info %s is missing: the compiled inputs cannot be checked' % d_file)
-    allowed = [os.path.normcase(os.path.normpath(str(p))) for p in
-               (ROOT, home('CARGO_HOME'), home('RUSTUP_HOME'), target_dir())]
+    def norm(p):
+        return os.path.normcase(os.path.normpath(str(p)))
+
+    def inside(full, d):
+        return full == d or full.startswith(d.rstrip('\\/') + os.sep)
+    root = norm(ROOT)
+    unkeyed = [norm(p) for p in (home('CARGO_HOME'), home('RUSTUP_HOME'), target_dir())]
+    keyed = {norm(p) for _, p in source_files()}
     for path in dep_info_paths(d_file):
-        full = os.path.normcase(os.path.normpath(os.path.join(str(RENDER), path)))
-        if not any(full == a or full.startswith(a.rstrip('\\/') + os.sep) for a in allowed):
+        full = norm(os.path.join(str(RENDER), path))
+        if any(inside(full, d) for d in unkeyed):
+            continue
+        if not inside(full, root):
             refuse('the build read %s, outside the tree, CARGO_HOME, RUSTUP_HOME and the target dir (an include of '
                    'a file outside the tree?)' % path)
+        if full not in keyed:
+            refuse('the build read %s, which the cache key does not cover: a change to it would not rebuild the '
+                   'library (add it to INCLUDED in port/tools/rustgs.py)' % path)
 
 
 # ---------------------------------------------------------------------------------------------------

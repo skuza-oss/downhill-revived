@@ -177,7 +177,7 @@ impl Client {
         if self.failed.is_some() { return; }
         let late = self.pending.values().find(|(_, at)| now.duration_since(*at) > TRANSACTION_TIMEOUT).map(|(kind, _)| *kind);
         if let Some(kind) = late {
-            return self.fail(step_of(kind), Why::Timeout, &format!("TURN server did not answer its {}", method_name(kind)));
+            return self.fail(self.step_of(kind), Why::Timeout, &format!("TURN server did not answer its {}", method_name(kind)));
         }
         if self.refresh_at.is_some_and(|at| now >= at) && !self.pending.values().any(|(k, _)| *k == Kind::Refresh) {
             self.refresh_at = None;
@@ -248,7 +248,7 @@ impl Client {
         let Some((kind, sent)) = self.pending.remove(&m.id) else { return };
         // Answers to authenticated requests must carry a valid integrity (RFC 8489 9.2.4).
         if let Some(key) = &self.key {
-            if !m.verify(frame, key) && class == SUCCESS { return self.fail(step_of(kind), Why::Integrity, "TURN answer failed its integrity check"); }
+            if !m.verify(frame, key) && class == SUCCESS { return self.fail(self.step_of(kind), Why::Integrity, "TURN answer failed its integrity check"); }
         }
         if class == ERROR {
             let code = m.get(ERROR_CODE).filter(|v| v.len() >= 4).map_or(0, |v| v[2] as u16 * 100 + v[3] as u16);
@@ -268,7 +268,7 @@ impl Client {
             // The error reason and credential material can contain identifying data. Only
             // locally known request metadata: enough to distinguish the initial challenge,
             // authenticated allocation, permission and renewal failures without exposing them.
-            return self.fail(step_of(kind), Why::of_turn(code), &format!("TURN {method} error {code} (authenticated={}, allocated={}, credentials held={}s, request age={}ms; relay UDP/IPv4)",
+            return self.fail(self.step_of(kind), Why::of_turn(code), &format!("TURN {method} error {code} (authenticated={}, allocated={}, credentials held={}s, request age={}ms; relay UDP/IPv4)",
                 self.key.is_some(), self.relayed.is_some(), now.saturating_duration_since(self.created).as_secs(), now.saturating_duration_since(sent).as_millis()));
         }
         match kind {
@@ -297,6 +297,16 @@ impl Client {
         }
     }
 
+    /// The step a request is (finding 248), the unauthenticated first Allocate on its own (252).
+    fn step_of(&self, kind: Kind) -> Step {
+        match kind {
+            Kind::Allocate if self.key.is_none() => Step::Challenge,
+            Kind::Allocate => Step::Allocate,
+            Kind::Refresh => Step::Refresh,
+            Kind::Bind(_) => Step::ChannelBind,
+        }
+    }
+
     /// The next Refresh a minute before the allocation would end (at half of a short lifetime).
     fn schedule_refresh(&mut self, now: Instant) {
         let lead = if self.lifetime > Duration::from_secs(120) { self.lifetime - Duration::from_secs(60) } else { self.lifetime / 2 };
@@ -306,9 +316,6 @@ impl Client {
 
 fn method_name(kind: Kind) -> &'static str {
     match kind { Kind::Allocate => "Allocate", Kind::Refresh => "Refresh", Kind::Bind(_) => "ChannelBind" }
-}
-fn step_of(kind: Kind) -> Step {
-    match kind { Kind::Allocate => Step::Allocate, Kind::Refresh => Step::Refresh, Kind::Bind(_) => Step::ChannelBind }
 }
 
 fn channel_data(out: &mut Vec<u8>, channel: u16, data: &[u8]) {
@@ -666,6 +673,8 @@ mod tests {
             c.receive(&refused.bytes, now + Duration::from_secs(542));
             let why = c.failed().unwrap();
             let name = match phase { 0 | 1 => "Allocate", 2 => "ChannelBind", _ => "Refresh" };
+            let step = match phase { 0 => Step::Challenge, 1 => Step::Allocate, 2 => Step::ChannelBind, _ => Step::Refresh };
+            assert_eq!(c.failure(), Some((step, Why::Turn400)), "phase {phase}");
             assert!(why.contains(&format!("{name} error 400")));
             assert!(why.contains(&format!("authenticated={}", phase > 0)));
             assert!(why.contains(&format!("allocated={}", phase > 1)));

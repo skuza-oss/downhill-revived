@@ -95,7 +95,7 @@ export function isOutdated(clientVersion: string, minVersion: string): boolean {
     the same lists as the game's (port/render/net/src/trouble.rs). Nothing in it names a player,
     an address, a session or a credential. */
 export const TROUBLE_PATHS = ["udp", "turn"] as const;
-export const TROUBLE_STEPS = ["send", "receive", "connect", "credentials", "tls_connect", "tls_handshake", "allocate",
+export const TROUBLE_STEPS = ["send", "receive", "connect", "credentials", "tls_connect", "tls_handshake", "challenge", "allocate",
   "channel_bind", "refresh", "first_data", "link"] as const;
 export const TROUBLE_KINDS = ["timeout", "refused", "reset", "unreachable", "denied", "dns", "tls", "closed", "integrity",
   "no_answer", "turn_400", "turn_401", "turn_403", "turn_437", "turn_438", "turn_440", "turn_441", "turn_442", "turn_486",
