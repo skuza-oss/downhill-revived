@@ -106,7 +106,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   original clock, so state traces are unchanged. Replays, the attract demo and ghosts run on a
   field grid (finding 142). The track's actors (helicopters, birds, animals, walkers, crowds) step
   by game time too (`port/patches_fps.py`, finding 193); a few steering loops are still up to
-  25 % off at 240 (issue #76).
+  25 % off at 240 (issue #76). `port/tools/rate_sweep.py` compares every scene's state at 60 and
+  240 (finding 255: the title's pulse, the effects' matrix and the menus' age fixed there).
 - Host services: one code path on SDL3 for every platform (finding 099): `host_sdl.c` (files,
   clock, frame waits, display, threads, the error box), `sdl_host.c` (SDL's loop on the main
   thread, the game on its own thread), `present.c` (the window), `sound_out_sdl.c` (one sound
