@@ -338,8 +338,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   Performance Mode (finding 183) cuts those but fog. 60 at 2x with every effect on is not reached.
 - Native VU is the players' default (finding 198), and it is slower where the GPU limits: the
   Redmi 9 at 2x 50.6 -> 48.7 fields/s over the route (the race 47.3 -> 44.8), the integrated
-  Radeon at 4x 122.1 -> 118.2; it gains where the CPU limits (finding 194). No driver that refuses
-  it has run it. The emulated path is deleted once players' logs show no fallbacks.
+  Radeon at 4x 122.1 -> 118.2; it gains where the CPU limits (finding 194). Finding 249 cut that cost on the
+  throttled Mi 11i at 4x from 6.2 % to 1.6 % of the race (61.3 -> 64.3 fields/s, off 65.4); the
+  Redmi 9 has not rerun. No driver that refuses it has run it. The emulated path is deleted once players' logs show no fallbacks.
 - On Mali GPUs a picture stays in one encoder (finding 198): finding 195's encoder cut lost the
   device on the Redmi 9's Mali-G52 in every full route, so 0.7.15 is expected to lose it there
   (fixed in 0.7.16).
