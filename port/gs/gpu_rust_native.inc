@@ -153,6 +153,23 @@ static int native_init(Gs *g, Rust *exact)
             fprintf(stderr, "gs: scale memory budget override %llu MiB (DHD_SCALE_MEMORY_MB)\n", mb);
         } else fprintf(stderr, "gs: invalid DHD_SCALE_MEMORY_MB; using adapter memory\n");
     }
+    /* The draw pipelines of earlier runs are built ahead (finding 256): pipelines.txt in
+       DHD_DATA_DIR (the launcher's folder for the player's files), else beside the game (on
+       Android the app's files folder), as dhd.log. The GS test programs link without the host
+       and keep no list. */
+#ifndef DHD_GS_TEST_BUILD
+    {
+        const char *host_getenv(const char *name);          /* port/host (host_api.h) */
+        unsigned host_exe_path(char *out, unsigned size);
+        char list[1024];
+        const char *data = host_getenv("DHD_DATA_DIR");
+        unsigned at = data && *data ? 0 : host_exe_path(list, sizeof list - 16);
+        while (at && list[at - 1] != '\\' && list[at - 1] != '/') at--;
+        if (data && *data) snprintf(list, sizeof list, "%s/pipelines.txt", data);
+        else snprintf(list + at, sizeof list - at, "pipelines.txt");
+        dhdr_native_pipeline_list(list);
+    }
+#endif
     Native *n = native_create_rust(exact, scale_memory, &start);
     if (!n) return 0;
     /* A texture pack (dhd.ini texture_pack, textures): its default budget is half the card's memory. */

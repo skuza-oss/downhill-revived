@@ -328,6 +328,12 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   `dhd-197.profdata`). 4x does not hold 60 at the race start (GPU-bound). Findings 127, 146-149,
   195, 197 say what is left (197: the VU thread alone limits now); finding 156 says where a
   frame's time goes on the phone and the desktops.
+- Slow frames on weak phones (finding 256, throttled Mi 11i at 4x): the draw pipelines a device
+  built are listed in `pipelines.txt` beside dhd.log and built ahead on a worker thread at the
+  next start, the sharp font is made once a session and the touch controls' pipeline ahead. From
+  the second run on a race has no frame over 100 ms (4 before; worst 1 % 39 -> 32 ms) and the
+  route loses 0.9-1.0 s over 50 ms instead of 8.3-8.6 s. A first run still compiles at first use.
+  Not yet run on the Redmi 9.
 - PowerVR GE8320 phones start since finding 170 and no longer close in the Bike Shop (finding 176:
   a blend that keeps the colour is drawn unblended, a pipeline the driver refuses skips its draws);
   not yet confirmed by the reporters (issues #56, #60).

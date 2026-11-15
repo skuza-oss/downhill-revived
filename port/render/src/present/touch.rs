@@ -28,6 +28,10 @@ pub struct TouchOverlay {
     written: (Vec<f32>, [f32; 4]),
     /// Drawn in this picture's present pass already (`draw_in_pass`); `draw` then skips it once.
     drawn: bool,
+    /// The objects being made on a thread of their own (finding 256): started at the first
+    /// picture of a touch screen, taken when the controls are first shown.
+    #[cfg(not(target_arch = "wasm32"))]
+    building: Option<std::sync::mpsc::Receiver<Result<Objects, String>>>,
 }
 
 struct Objects {
@@ -50,13 +54,38 @@ impl TouchOverlay {
 
     /// The shapes' instances and the screen uniform on the GPU for a w x h frame (each written
     /// only when it changed); the number of shapes to draw, or None when there are none.
-    fn prepare(&mut self, gpu: &Gpu, format: wgpu::TextureFormat, w: u32, h: u32) -> Option<u32> {
-        if self.items.is_empty() || w == 0 || h == 0 || self.width_mm <= 0.0 || self.height_mm <= 0.0 { return None; }
+    fn prepare(&mut self, gpu: &'static Gpu, format: wgpu::TextureFormat, w: u32, h: u32) -> Option<u32> {
+        if w == 0 || h == 0 || self.width_mm <= 0.0 || self.height_mm <= 0.0 { return None; }
         if self.refused { return None; }
         if self.objects.is_none() {
             // inside Validation and Internal error scopes, as the native pipelines (in the browser
             // errors come through promises: there the scopes are a no-op)
-            match crate::native::init::scoped_pipeline(gpu, "touch overlay", || Objects::new(gpu, format)) {
+            let make = move || crate::native::init::scoped_pipeline(gpu, "touch overlay", || Objects::new(gpu, format));
+            // Its shader and pipeline take the driver 0.4 s on a weak phone. They are made on a
+            // thread of their own from the first picture of a touch screen on (the menus show no
+            // controls), so the first picture with the controls no longer waits for them
+            // (finding 256); it still waits when they are shown before the thread is done.
+            #[cfg(not(target_arch = "wasm32"))]
+            let made = {
+                if self.building.is_none() {
+                    let (out, made) = std::sync::mpsc::channel();
+                    let spawned = std::thread::Builder::new().name("dhd-touch".into()).spawn(move || { let _ = out.send(make()); });
+                    if spawned.is_ok() { self.building = Some(made); }
+                }
+                match self.building.as_ref() {
+                    Some(made) if self.items.is_empty() => match made.try_recv() {
+                        Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+                        r => r.unwrap_or_else(|_| Err("its thread ended".into())),
+                    },
+                    Some(made) => made.recv().unwrap_or_else(|_| Err("its thread ended".into())),
+                    None => make(),  // no thread: here, as before
+                }
+            };
+            #[cfg(target_arch = "wasm32")]
+            let made = { if self.items.is_empty() { return None; } make() };
+            #[cfg(not(target_arch = "wasm32"))]
+            { self.building = None; }
+            match made {
                 Ok(o) => self.objects = Some(o),
                 Err(e) => {
                     crate::host::log(&format!("touch overlay: not drawn, the device refused it ({e}); the touch areas still work"));
@@ -65,6 +94,7 @@ impl TouchOverlay {
                 }
             }
         }
+        if self.items.is_empty() { return None; }
         let o = self.objects.as_mut()?;
         let count = (self.items.len() / ITEM_FLOATS) as u64;
         if count * ITEM_BYTES > o.capacity {
@@ -99,7 +129,7 @@ impl TouchOverlay {
     /// renderer's present pass, finding 146): the same pixels as `draw`'s pass of its own after
     /// it, without a second command buffer, submission and load and store of the whole frame.
     /// The next `draw` (dhdr_surface_present's) skips it.
-    pub fn draw_in_pass(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass<'_>, format: wgpu::TextureFormat, w: u32, h: u32) {
+    pub fn draw_in_pass(&mut self, gpu: &'static Gpu, pass: &mut wgpu::RenderPass<'_>, format: wgpu::TextureFormat, w: u32, h: u32) {
         if let Some(count) = self.prepare(gpu, format, w, h) {
             pass.set_scissor_rect(0, 0, w, h);
             self.record(pass, count);
@@ -107,7 +137,7 @@ impl TouchOverlay {
         }
     }
 
-    pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, format: wgpu::TextureFormat, w: u32, h: u32) {
+    pub fn draw(&mut self, gpu: &'static Gpu, target: &wgpu::TextureView, format: wgpu::TextureFormat, w: u32, h: u32) {
         if std::mem::take(&mut self.drawn) { return; }
         let Some(count) = self.prepare(gpu, format, w, h) else { return };
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("touch overlay") });

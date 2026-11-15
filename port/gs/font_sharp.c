@@ -266,6 +266,20 @@ static void *make(const ReplaceDevice *device, const uint32_t *pixels, unsigned 
     return view;
 }
 
+/* What a copy without a pack is made from: the font's pixels, its size and the icons painted
+   (finding 256). The decoded texture's key also counts what else lies in the font's memory pages
+   (the menus' font is the top bytes of a depth buffer), so the same font came with a new key at
+   each screen change and was made again: about 0.3 s on a weak phone, in the middle of a frame. */
+static uint64_t content_key(const uint32_t *pixels, unsigned w, unsigned h, int style)
+{
+    uint64_t k = ((uint64_t)w << 32 | h) ^ (uint64_t)(unsigned)style * 0x9E3779B97F4A7C15ull;
+    for (size_t i = 0, n = (size_t)w * h; i < n; i++) {
+        k = (k ^ pixels[i]) * 0x100000001B3ull;
+        k ^= k >> 29;
+    }
+    return k;
+}
+
 void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsigned w, unsigned h, uint64_t key,
                       const FontSharpPack *pack)
 {
@@ -273,6 +287,8 @@ void *font_sharp_view(const ReplaceDevice *device, const uint32_t *pixels, unsig
        choice, our icons go over its icon cells; nothing to paint, and the pack's own is drawn. */
     if (pack && (!icons_paint || !icon_style_now() || w != 512 || h != 512)) return NULL;
     void *view = NULL;
+    /* a pack's copy keeps the texture's key: its picture is the pack's */
+    if (!pack) key = content_key(pixels, w, h, icon_style_now());
     SDL_LockSpinlock(&cache_lock);
     unsigned oldest = 0;
     for (unsigned i = 0; i < SHARP_CACHE; i++) {
