@@ -6,6 +6,7 @@ puppets as drawn are compared with them.
     python port/tools/puppet_bench.py play TRUTH --link "delay=80,jitter=20" [--fps F] [--name X]
     python port/tools/puppet_bench.py score TRUTH TRACE                    # numbers of one play
     python port/tools/puppet_bench.py matrix [--tracks 0,1,2] [--label before]  # every scenario
+    python port/tools/puppet_bench.py --label before profiles [--tracks 0,1]   # finding 254's networks
 
 record: a deterministic race (DHD_FRAME_CLOCK=1, seed 81257) on unlocked track N of the chooser
 (state_trace_run.UNLOCKED_TRACKS), this PC's rider pedalling and steering (state_trace_run's
@@ -35,6 +36,18 @@ puppet, or of a respawn, are left out (no model shows those the same way):
   back          steps where the drawn rider moves backwards along the truth's motion while the
                 truth moves faster than 10 units a second, per minute
   frozen        share of time the drawn rider stands still while the truth moves
+  stuck_s       the longest such stretch of one rider (s)
+  teleports     steps whose motion differs from the truth's over the same step by more than
+                TELEPORT units (a rider seen to jump, not a twitch), per minute; step_max the
+                largest such difference (units)
+  heading_p95   the drawn rider's heading (its forward axis on the ground plane) off the truth's
+                at the same moment (degrees)
+  flips         steps where the drawn heading turns more than FLIP degrees beyond what the
+                truth's turns over the same step, per minute (a rider seen to snap round)
+
+profiles: finding 254's networks (PROFILES: an ordinary good link, mobile data, a bad link, outages
+of 0.5-2 s lost or held and then delivered at once, a 5 s disconnect), each for the computer riders
+(30 a second) and for a player's rider (the scripted human replayed onto slot 1, 60 a second).
 Everything runs on the hidden desktop (hidden_game.py), untimed: positions on the race clock, not
 speed. Outputs go under build/puppet-bench/ (game data and recordings are never committed)."""
 import argparse
@@ -60,6 +73,9 @@ DEEP = 0.5      # and as clearly sunk (a wheel's radius is 1.25)
 JOLT = 36.0     # units a second of change in the drawn speed from one step to the next (see jolts)
 POP = 36.0      # units a second of motion the truth does not make (0.6 units in a 1/60 s step) read as a jump
 SKIP_NEAR = 0.5  # s around crashes and respawns left out
+TELEPORT = 3.0  # units of motion in one step the truth does not make: a rider seen to jump
+FLIP = 8.0      # degrees of turn in one step beyond the truth's: a rider seen to snap round
+FORWARD = 1     # the orientation row that is the rider's forward axis (puppet_bench.py axis TRUTH)
 
 # The scenarios (name, link). Delays one way; jitter is exponential with that mean.
 SCENARIOS = [
@@ -79,6 +95,20 @@ SCENARIOS = [
     ('recv-behind', 'delay=80,jitter=15,rhitch=20:3000,seed=13'),
 ]
 FPS = (60, 30, 144)
+
+# Finding 254's networks: what players on mobile data or weak Wi-Fi have (round trips 100-400 ms,
+# jitter, 2-8 % loss), outages of 0.5-2 s about every 6 s (lost, as on a P2P link or the sender's own
+# unordered leg; held, as the SFU's reliable relay to the receiver and TURN over TLS deliver them:
+# nothing, then everything at once), and one 5 s disconnect.
+PROFILES = [
+    ('good', 'delay=25,jitter=5,loss=0.5,seed=21'),
+    ('mobile', 'delay=60,jitter=30,loss=2,reorder=2,seed=22'),
+    ('bad', 'delay=120,jitter=50,loss=8,reorder=5,seed=23'),
+    ('burst', 'delay=60,jitter=20,loss=2,burst=6:500-2000,seed=24'),
+    ('burst-held', 'delay=60,jitter=20,loss=2,stall=6:500-2000,seed=25'),
+    ('cut5', 'delay=60,jitter=20,loss=2,cut=30:5000,seed=26'),
+]
+KINDS = (('ai', {}), ('player', {'DHD_PUPPET_MAP': '0:1'}))
 
 
 def game_env(track, seconds, extra):
@@ -153,14 +183,58 @@ def play(args, truth, link, fps, name):
 
 
 def load_truth(path):
-    """Each recorded rider's path: slot -> (times, positions, crashing, clearance)."""
+    """Each recorded rider's path: slot -> (times, positions, crashing, clearance, headings)."""
     paths = {}
-    for slot, _, t, pos, _, crashing, ground in puppet_lag.records(path):
-        times, ps, cs, gs = paths.setdefault(slot, ([], [], [], []))
+    rows = rotations(path)
+    for n, (slot, _, t, pos, _, crashing, ground) in enumerate(puppet_lag.records(path)):
+        times, ps, cs, gs, hs = paths.setdefault(slot, ([], [], [], [], []))
         if times and t <= times[-1]:
             continue
-        times.append(t), ps.append(pos), cs.append(crashing), gs.append(ground)
+        times.append(t), ps.append(pos), cs.append(crashing), gs.append(ground), hs.append(heading(rows[n][FORWARD]))
     return paths
+
+
+def rotations(path):
+    """Each record's orientation rows (three world-space axes), in file order."""
+    data = Path(path).read_bytes()
+    out = []
+    for at in range(0, len(data) - len(data) % puppet_lag.SNAP_SIZE, puppet_lag.SNAP_SIZE):
+        f = puppet_lag.SNAP.unpack_from(data, at)
+        out.append((f[7:10], f[11:14], f[15:18]))
+    return out
+
+
+def heading(row):
+    """An axis's direction on the ground plane (world z is up), radians; nan when it points up."""
+    return math.atan2(row[1], row[0]) if math.hypot(row[0], row[1]) > 0.2 else float('nan')
+
+
+def turn(a, b):
+    """b - a as an angle in (-pi, pi]."""
+    d = (b - a) % (2 * math.pi)
+    return d - 2 * math.pi if d > math.pi else d
+
+
+def interp_angle(times, values, t):
+    i = bisect.bisect_right(times, t)
+    if i <= 0 or i >= len(times) or math.isnan(values[i - 1]) or math.isnan(values[i]):
+        return float('nan')
+    a, b = times[i - 1], times[i]
+    f = (t - a) / (b - a) if b > a else 0
+    return values[i - 1] + turn(values[i - 1], values[i]) * f
+
+
+def axis(truth_path):
+    """Which orientation row is a rider's forward axis: votes for the row most along its motion."""
+    hits = [0, 0, 0]
+    rows = rotations(truth_path)
+    for n, (slot, _, t, pos, vel, crashing, _) in enumerate(puppet_lag.records(truth_path)):
+        v = math.hypot(vel[0], vel[1])
+        if crashing or v < 30:
+            continue
+        cos = [(r[0] * vel[0] + r[1] * vel[1]) / (v * max(math.hypot(r[0], r[1]), 1e-6)) for r in rows[n]]
+        hits[max(range(3), key=lambda k: cos[k])] += 1
+    return hits
 
 
 def interp(times, values, t):
@@ -180,7 +254,7 @@ def score(truth_path, trace_path, start=5.0, end=1e9):
     paths = load_truth(truth_path)
     # windows to leave out per recorded rider: its crashes and respawns
     bad = {}
-    for slot, (times, pos, crash, _) in paths.items():
+    for slot, (times, pos, crash, *_) in paths.items():
         marks = [times[i] for i in range(len(times)) if crash[i] or
                  (i and puppet_lag.dist(pos[i], pos[i - 1]) > 8)]
         bad[slot] = marks
@@ -188,10 +262,12 @@ def score(truth_path, trace_path, start=5.0, end=1e9):
         marks = bad.get(slot, [])
         i = bisect.bisect_left(marks, t - SKIP_NEAR)
         return i < len(marks) and marks[i] <= t + SKIP_NEAR
-    errors, lags, depth = [], [], []
-    steps = sunk = deep = pops = back = jolts = 0
+    errors, lags, depth, heading_errors = [], [], [], []
+    steps = sunk = deep = pops = back = jolts = teleports = flips = 0
+    step_max = 0.0
     velocity = {}
     frozen_time = total_time = 0.0
+    frozen_run, stuck = {}, 0.0
     prev = {}
     puppet_crash = {}
     for line in Path(trace_path).read_text().splitlines():
@@ -202,14 +278,15 @@ def score(truth_path, trace_path, start=5.0, end=1e9):
         p, truth_t = tuple(map(float, f[3:6])), float(f[6])
         g = [float(x) for x in f[7:9]]
         crashing = f[9] == '1'
+        drawn_heading = heading(tuple(map(float, f[11 + 3 * FORWARD:14 + 3 * FORWARD]))) if len(f) >= 20 else float('nan')
         if crashing:
             puppet_crash[slot] = t
         last = prev.get(slot)
-        prev[slot] = (t, p, truth_t)
+        prev[slot] = (t, p, truth_t, drawn_heading)
         if t < start or t > end or src not in paths or crashing or t - puppet_crash.get(slot, -99) < SKIP_NEAR or \
                 near_bad(src, truth_t):
             continue
-        times, pos, _, ground = paths[src]
+        times, pos, _, ground, headings = paths[src]
         now = interp(times, pos, truth_t)
         if now is None:
             continue
@@ -229,9 +306,16 @@ def score(truth_path, trace_path, start=5.0, end=1e9):
                 sunk += 1
             if shown < min(own, 0.0) - DEEP:
                 deep += 1
+        true_heading = interp_angle(times, headings, truth_t)
+        if not math.isnan(drawn_heading) and not math.isnan(true_heading):
+            heading_errors.append(abs(math.degrees(turn(true_heading, drawn_heading))))
         if last and 0 < t - last[0] < 0.1 and last[2] < truth_t:
             dt = t - last[0]
             before = interp(times, pos, last[2])
+            was_heading = interp_angle(times, headings, last[2])
+            if not any(map(math.isnan, (drawn_heading, last[3], true_heading, was_heading))):
+                if abs(math.degrees(turn(last[3], drawn_heading) - turn(was_heading, true_heading))) > FLIP:
+                    flips += 1
             if before is not None:
                 moved = [p[k] - last[1][k] for k in range(3)]
                 truth_moved = [now[k] - before[k] for k in range(3)]
@@ -239,6 +323,9 @@ def score(truth_path, trace_path, start=5.0, end=1e9):
                 speed = math.sqrt(sum(x * x for x in truth_moved)) / (truth_t - last[2])
                 if diff / dt > POP:
                     pops += 1
+                if diff > TELEPORT:
+                    teleports += 1
+                step_max = max(step_max, diff)
                 # a jolt: the drawn rider's own speed jumps from one step to the next while the
                 # truth's does not (a discontinuity, where pops also count motion that is only
                 # different, such as a bump taken a little differently)
@@ -258,6 +345,10 @@ def score(truth_path, trace_path, start=5.0, end=1e9):
                     total_time += dt
                     if math.sqrt(sum(x * x for x in moved)) < 0.02 * speed * dt:
                         frozen_time += dt
+                        frozen_run[slot] = frozen_run.get(slot, 0.0) + dt
+                        stuck = max(stuck, frozen_run[slot])
+                    else:
+                        frozen_run[slot] = 0.0
     minutes = max(steps, 1) / 60.0 / 60.0  # steps are per drawn frame; normalised below by time
     span = total_time / 60.0 if total_time else minutes
     return {
@@ -266,7 +357,9 @@ def score(truth_path, trace_path, start=5.0, end=1e9):
         'behind_p50': pct(lags, 50), 'behind_p95': pct(lags, 95),
         'sunk_pct': 100.0 * sunk / max(steps, 1), 'deep_pct': 100.0 * deep / max(steps, 1), 'depth_p99': pct(depth, 99) if depth else 0.0,
         'pops_min': pops / span if span else float('nan'), 'jolts_min': jolts / span if span else float('nan'), 'back_min': back / span if span else float('nan'),
-        'frozen_pct': 100.0 * frozen_time / total_time if total_time else float('nan'),
+        'frozen_pct': 100.0 * frozen_time / total_time if total_time else float('nan'), 'stuck_s': stuck,
+        'teleports_min': teleports / span if span else float('nan'), 'step_max': step_max,
+        'heading_p95': pct(heading_errors, 95), 'flips_min': flips / span if span else float('nan'),
         **resync_counts(Path(trace_path).parent / 'game.log'),
     }
 
@@ -347,6 +440,57 @@ def matrix(args):
     results = {tuple(k.split('|')[:1]) + (int(k.split('|')[1]), int(k.split('|')[2])): v for k, v in done.items()}
     text = table(results)
     (OUT / label / 'results.md').write_text(text + '\n')
+    print(text)
+
+
+PROFILE_COLUMNS = (('error_p50', '{:.2f}'), ('error_p95', '{:.2f}'), ('error_p99', '{:.1f}'), ('teleports_min', '{:.1f}'),
+                   ('step_max', '{:.1f}'), ('jolts_min', '{:.1f}'), ('frozen_pct', '{:.2f}'), ('stuck_s', '{:.2f}'),
+                   ('sunk_pct', '{:.2f}'), ('heading_p95', '{:.1f}'), ('flips_min', '{:.1f}'), ('resync_later', '{:.0f}'))
+
+
+def profiles(args):
+    """Finding 254's networks for computer riders and a player's rider: profiles.md under the label."""
+    tracks = [int(x) for x in args.tracks.split(',')]
+    wanted = set(args.only.split(',')) if args.only else None
+    label = args.label or 'play'
+    results_path = OUT / label / 'profiles.json'
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    done = json.loads(results_path.read_text()) if results_path.exists() else {}
+    base_env = list(args.env)
+    for track in tracks:
+        truth = OUT / f'{args.truths}-t{track}' / 'truth.bin'
+        if not truth.exists():
+            args.track = track
+            record(args)
+        for name, link in PROFILES:
+            if wanted and name not in wanted:
+                continue
+            for kind, env in KINDS:
+                key = f'{name}|{kind}|{track}'
+                run = f'p-{name}-{kind}-t{track}'
+                trace = OUT / label / run / 'trace.txt'
+                if args.rescore:
+                    if trace.exists():
+                        done[key] = score(truth, trace)
+                        results_path.write_text(json.dumps(done, indent=1))
+                    continue
+                if key in done and not args.again:
+                    continue
+                print('play', run, flush=True)
+                args.env = base_env + [f'{k}={v}' for k, v in env.items()]
+                trace = play(args, truth, link, 60, run)
+                done[key] = score(truth, trace)
+                results_path.write_text(json.dumps(done, indent=1))
+    args.env = base_env
+    order = {n: i for i, (n, _) in enumerate(PROFILES)}
+    head = '| network | rider | track | ' + ' | '.join(c for c, _ in PROFILE_COLUMNS) + ' |'
+    rows = [head, '|' + '---|' * (3 + len(PROFILE_COLUMNS))]
+    for key in sorted(done, key=lambda k: (order.get(k.split('|')[0], 99), k.split('|')[1], int(k.split('|')[2]))):
+        name, kind, track = key.split('|')
+        r = done[key]
+        rows.append(f'| {name} | {kind} | {track} | ' + ' | '.join(fmt.format(r.get(c, float('nan'))) for c, fmt in PROFILE_COLUMNS) + ' |')
+    text = '\n'.join(rows)
+    (OUT / label / 'profiles.md').write_text(text + '\n')
     print(text)
 
 
@@ -494,6 +638,13 @@ def main():
     c.add_argument('--truth-exe', help='the build that films the truth (default --exe; the race is the same)')
     c.add_argument('--label-text', help='the caption of the right side (default the link)')
     c.add_argument('--live', help="an online_race.py --lag run: the host's recording beside the guest's, exact")
+    q = sub.add_parser('profiles')
+    q.add_argument('--tracks', default='0,1')
+    q.add_argument('--only', help='profile names, comma separated')
+    q.add_argument('--again', action='store_true', help='run profiles that already have results')
+    q.add_argument('--rescore', action='store_true', help='score the traces already there again, run nothing')
+    a = sub.add_parser('axis')
+    a.add_argument('truth')
     m = sub.add_parser('matrix')
     m.add_argument('--tracks', default='0,1,2')
     m.add_argument('--fps', default='60,30,144')
@@ -513,6 +664,10 @@ def main():
         print(json.dumps(truth_baseline(args.truth), indent=1))
     elif args.cmd == 'clip':
         clip(args)
+    elif args.cmd == 'profiles':
+        profiles(args)
+    elif args.cmd == 'axis':
+        print('forward-axis votes by orientation row:', axis(args.truth))
     else:
         matrix(args)
 

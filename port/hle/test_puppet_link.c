@@ -60,6 +60,33 @@ int main(void)
         assert(link_pass(&a, i / 60.0, &x) == link_pass(&b, i / 60.0, &y) && x == y);
     }
 
+    /* stalls (finding 254): nothing is lost, what is sent during one arrives at its end, in order;
+       the other draws (loss here) keep their own sequence, as without stalls */
+    PuppetLink plain;
+    link_parse(&plain, "delay=40,loss=3,seed=5");
+    link_parse(&l, "delay=40,loss=3,stall=6:500-2000,seed=5");
+    assert(near(l.stall_every, 6, 1e-12) && near(l.stall_min, 0.5, 1e-12) && near(l.stall_max, 2, 1e-12));
+    int stalls = 0, kept = 1;
+    double last = -1, wait_most = 0;
+    for (int i = 0; i < 60 * 600; i++) {
+        double x = -1, y = -1;
+        int pa = link_pass(&plain, i / 60.0, &x), pb = link_pass(&l, i / 60.0, &y);
+        kept &= pa == pb;
+        if (!pb) continue;
+        assert(y >= x - 1e-12 && y >= last);          /* never earlier, never out of order */
+        if (y - x > 0.4 && y - x > wait_most + 0.3) stalls++;
+        if (y - x > wait_most) wait_most = y - x;
+        last = y;
+    }
+    assert(kept && wait_most <= 2.0 + 0.05 && wait_most > 1.0 && stalls > 0);
+
+    /* a cut: from second 20, 5 s of nothing, everything else as without it */
+    link_parse(&l, "delay=40,cut=20:5000");
+    for (int i = 0; i < 60 * 40; i++) {
+        double t = i / 60.0;
+        assert(link_pass(&l, t, &at) == !(t >= 20 && t < 25));
+    }
+
     /* a hitch: stopped 0.6 s at race second 10, then twice real time until caught up at 11.2 */
     assert(link_hitch_wall(-1, 0.6, 5) == 5 && link_hitch_race(-1, 0.6, 5) == 5);
     assert(near(link_hitch_wall(10, 0.6, 9.5), 9.5, 1e-12));

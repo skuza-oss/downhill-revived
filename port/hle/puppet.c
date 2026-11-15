@@ -371,6 +371,7 @@ static void play_schedule(const char *link_text)
         PuppetLink holds = link;
         holds.state ^= 0x5DEECE66Dull;
         holds.burst_from = holds.burst_to = -INFINITY;
+        holds.stall_from = holds.stall_to = holds.stall_flood = -INFINITY;
         int room = (int)(link.hitch_len / 0.1) + 2;
         pp.deliveries = realloc(pp.deliveries, (pp.delivery_count + room) * sizeof *pp.deliveries);
         for (double w = link.hitch_at + 0.06; w < link.hitch_at + link.hitch_len && room-- > 0; w += 0.1) {
@@ -1441,16 +1442,18 @@ void hle_puppet_field(void)
     /* Each puppet as it is drawn after the whole step (bumps included): race time here, the
        moment it shows, slot, position, the moment of its recorded rider it should show (the
        bench: the sender's race clock now, its hitch included), each wheel's clearance above the
-       ground (nan: none within reach), 1 while it crashes, and its recorded rider (-1 online). */
+       ground (nan: none within reach), 1 while it crashes, its recorded rider (-1 online), and its
+       orientation's three rows (finding 254: heading flips). */
     if (pp.trace) {
         for (int i = 1; i < NRIDERS; i++) {
             Puppet *p = &pp.p[i];
             if (!p->on || !p->count) continue;
-            const float *pos = (const float *)(rider(i) + POS_AT);
+            const float *pos = (const float *)(rider(i) + POS_AT), *rot = (const float *)(rider(i) + ROT_AT);
             double truth = pp.playing ? link_hitch_race(pp.link.hitch_at, pp.link.hitch_len, RACE_TIME + bench_behind()) : RACE_TIME;
-            fprintf(pp.trace, "%.6f %.6f %d %.5f %.5f %.5f %.6f %.4f %.4f %d %d\n", RACE_TIME, p->shown, i, pos[0],
-                    pos[1], pos[2], truth, ground_clearance(rider(i), 0), ground_clearance(rider(i), 1),
-                    !!(FIELD(rider(i), CRASH_FLAGS_AT, uint32_t) & 4), pp.play_from[i]);
+            fprintf(pp.trace, "%.6f %.6f %d %.5f %.5f %.5f %.6f %.4f %.4f %d %d %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f\n",
+                    RACE_TIME, p->shown, i, pos[0], pos[1], pos[2], truth, ground_clearance(rider(i), 0),
+                    ground_clearance(rider(i), 1), !!(FIELD(rider(i), CRASH_FLAGS_AT, uint32_t) & 4), pp.play_from[i],
+                    rot[0], rot[1], rot[2], rot[4], rot[5], rot[6], rot[8], rot[9], rot[10]);
         }
         fflush(pp.trace);
     }
