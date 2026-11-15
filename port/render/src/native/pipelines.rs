@@ -519,6 +519,8 @@ pub(crate) mod list {
     const FORMAT: u32 = 1;
     /// More keys than any session builds; a list this long is not added to.
     const MOST: usize = 4096;
+    /// The largest list file read, in bytes: MOST keys of 17 bytes and a header, with room.
+    const LARGEST: u64 = 256 * 1024;
 
     static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -573,7 +575,10 @@ pub(crate) mod list {
     impl File {
         /// The file at `path` and its keys to build (none when it is absent or another GPU's).
         pub fn open(path: PathBuf, header: String) -> (File, Vec<u64>) {
-            let keys = std::fs::read_to_string(&path).ok().and_then(|text| parse(&text, &header));
+            // A file far larger than MOST keys can be is not ours: it is not read (and the first
+            // key writes a new one).
+            let small = std::fs::metadata(&path).is_ok_and(|m| m.len() <= LARGEST);
+            let keys = if small { std::fs::read_to_string(&path).ok().and_then(|text| parse(&text, &header)) } else { None };
             let valid = keys.is_some();
             let keys = keys.unwrap_or_default();
             (File { path, header, known: keys.iter().copied().collect(), valid, failed: false }, keys)
