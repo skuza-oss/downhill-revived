@@ -112,8 +112,6 @@ pub struct Arenas {
     /// The constants arena's bind group (binding 0, `UNIFORM_WINDOW` bytes at a dynamic offset).
     uniform_group: Option<wgpu::BindGroup>,
     vertex_buffer: Option<wgpu::Buffer>,
-    /// The mesh draws' group 2 over `vertex_buffer` (`mesh_group`), made again with a new buffer.
-    mesh_group: Option<wgpu::BindGroup>,
     /// Bytes of the vertex buffer (0 before it is made).
     vertex_capacity: u64,
     /// The picture's reversed vertices (its len is reversed_count); room for `reversed_capacity`.
@@ -143,7 +141,6 @@ impl Arenas {
             draw_group: None,
             uniform_group: None,
             vertex_buffer: None,
-            mesh_group: None,
             vertex_capacity: 0,
             reversed: Vec::new(),
             reversed_capacity: 0,
@@ -214,16 +211,12 @@ impl Arenas {
             while size < vertices {
                 size *= 2;
             }
-            // Also storage for the mesh draws' object records (native.wgsl's mesh_records; not where
-            // the device draws no meshes, the browser among them: init.rs's refuse_meshes).
-            let storage = if crate::native::init::meshes_refused() { wgpu::BufferUsages::empty() } else { wgpu::BufferUsages::STORAGE };
             self.vertex_buffer = device.map(|g| g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("native vertices"),
                 size,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | storage,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            self.mesh_group = None;
             self.vertex_capacity = size;
         }
         self.uniforms.used = 0;
@@ -430,28 +423,6 @@ impl Arenas {
     /// The vertex buffer, bound whole (`vertex_capacity` bytes) at slot 0 of every draw pass.
     pub fn vertex_buffer(&self) -> Option<&wgpu::Buffer> {
         self.vertex_buffer.as_ref()
-    }
-
-    /// The mesh draws' group 2 (`layout`: init.rs's mesh layout): the whole vertex buffer, where
-    /// native_core.inc's native_mesh_record puts the objects' records (finding 168).
-    /// None (and Native VU off, finding 194) when the buffer is larger than one storage binding.
-    pub fn mesh_group(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Option<wgpu::BindGroup> {
-        if self.mesh_group.is_none() {
-            let buffer = self.vertex_buffer.as_ref()?;
-            if !buffer.usage().contains(wgpu::BufferUsages::STORAGE) {
-                return None;   // made after the meshes were refused
-            }
-            if buffer.size() > gpu.device.limits().max_storage_buffer_binding_size {
-                crate::native::init::refuse_meshes(Some("the picture's vertices exceed one storage binding"));
-                return None;
-            }
-            self.mesh_group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("native mesh records"),
-                layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
-            }));
-        }
-        self.mesh_group.clone()
     }
 
     /// Bytes of the vertex buffer.

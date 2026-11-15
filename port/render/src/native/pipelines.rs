@@ -12,7 +12,7 @@
 //! Bits 25..28 are private: a power-of-two source scale (S=E), or zero for generic. Bit 29
 //! (`TEXELS`): the draw reads a decoded texture's R32Uint texels (the `_u` entry points and the
 //! texels layout). Bit 30 (`MESH`): a translated VU1 mesh draw (flag 4096, finding 164): the vertex
-//! stage is `native_mesh_vertex`, the layout has group 2 (the objects' records, finding 168) and
+//! stage is `native_mesh_vertex`, which reads the vertex as a mesh item's (`MESH_ATTRIBUTES`), and
 //! back faces are culled; bit 31 (`MESH_TWO_SIDED`) with it: no culling (finding 167).
 //! The GS key's blend, depth and variant fields remain unchanged. The cache's key is 64 bits: this
 //! key, and above it (`SPEC_SHIFT`) the fragment stage's specialisation, `spec` (native.wgsl's
@@ -277,6 +277,13 @@ const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] = [
     wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint8x4, offset: 28, shader_location: 2 },
 ];
 const _: () = assert!(std::mem::size_of::<crate::abi::DhdrVertex>() == 32);
+/// The same 32 bytes as a mesh item's vertex (gs_mesh.h's GsMeshVertex, finding 249): the
+/// clip-space position, the texture coordinates with the Q factor, the colour's bytes.
+const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 3] = [
+    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 0, shader_location: 0 },
+    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 16, shader_location: 1 },
+    wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint8x4, offset: 28, shader_location: 2 },
+];
 
 /// What a draw pipeline is built from (cloned handles, so a worker thread can build one).
 #[derive(Clone)]
@@ -285,17 +292,12 @@ struct Sources {
     dual_module: Option<wgpu::ShaderModule>,
     layout: wgpu::PipelineLayout,
     texels_layout: wgpu::PipelineLayout,
-    /// The mesh draws' (group 2: their object records; finding 168).
-    mesh_layout: Option<wgpu::PipelineLayout>,
-    mesh_texels_layout: Option<wgpu::PipelineLayout>,
 }
 
 impl Sources {
     fn of(objects: &Objects) -> Sources {
         Sources { module: objects.module.clone(), dual_module: objects.dual_module.clone(),
-                  layout: objects.native_draw_layout.clone(), texels_layout: objects.native_texels_draw_layout.clone(),
-                  mesh_layout: objects.mesh_draw_layout.clone(),
-                  mesh_texels_layout: objects.mesh_texels_draw_layout.clone() }
+                  layout: objects.native_draw_layout.clone(), texels_layout: objects.native_texels_draw_layout.clone() }
     }
 }
 
@@ -322,18 +324,12 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
     let spec = (full >> SPEC_SHIFT) as u32;
     let texels = key & TEXELS != 0;
     let mesh = key & MESH != 0;
-    let entry = match (d.entry, texels, mesh) {
-        ("native_pixel", true, false) => "native_pixel_u",
-        ("native_pixel_blend", true, false) => "native_pixel_blend_u",
-        ("native_pixel_dual", true, false) => "native_pixel_dual_u",
-        // a mesh draw's MeshVaryings (native.wgsl's native_pixel*_mesh)
-        ("native_pixel", false, true) => "native_pixel_mesh",
-        ("native_pixel_blend", false, true) => "native_pixel_blend_mesh",
-        ("native_pixel_dual", false, true) => "native_pixel_dual_mesh",
-        ("native_pixel", true, true) => "native_pixel_u_mesh",
-        ("native_pixel_blend", true, true) => "native_pixel_blend_u_mesh",
-        ("native_pixel_dual", true, true) => "native_pixel_dual_u_mesh",
-        (e, _, _) => e,
+    // A mesh draw's fragment stage is the GS draws' (native.wgsl's native_mesh_vertex gives Varyings).
+    let entry = match (d.entry, texels) {
+        ("native_pixel", true) => "native_pixel_u",
+        ("native_pixel_blend", true) => "native_pixel_blend_u",
+        ("native_pixel_dual", true) => "native_pixel_dual_u",
+        (e, _) => e,
     };
     let fragment_module = if d.dual_module {
         objects
@@ -346,7 +342,7 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
     let vertex = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<crate::abi::DhdrVertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &VERTEX_ATTRIBUTES,
+        attributes: if mesh { &MESH_ATTRIBUTES } else { &VERTEX_ATTRIBUTES },
     };
     let targets = [Some(d.color.clone())];
     let texel_scale = key >> TEXEL_SCALE_SHIFT & 15;
@@ -361,12 +357,7 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         constants: &constants,
         zero_initialize_workgroup_memory: crate::native::init::compilation_options().zero_initialize_workgroup_memory,
     };
-    let layout = match (mesh, texels) {
-        (false, false) => &objects.layout,
-        (false, true) => &objects.texels_layout,
-        (true, false) => objects.mesh_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
-        (true, true) => objects.mesh_texels_layout.as_ref().ok_or_else(|| "gs native: no mesh layout on this device".to_string())?,
-    };
+    let layout = if texels { &objects.texels_layout } else { &objects.layout };
     Ok(trace_build(cfg!(target_os = "android") && trace_gpu(gpu.info.backend, &gpu.info.name), full,
         || format!("vs={} fs={entry}; {}", if mesh { "native_mesh_vertex" } else { "native_vertex" }, summary(full, d)),
         crate::host::log, || gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
