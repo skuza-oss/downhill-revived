@@ -66,7 +66,9 @@ static int on_tick(void *ctx)
     WsConn *ws = conn;
     (void)ctx;
     client_race_rtt(&client, ws ? ws_race_rtt_ms(ws) : -1);
-    return client_tick(&client);
+    int dead = client_tick(&client);
+    if (client.cut_ms) ws_test_cut(client.cut_ms), client.cut_ms = 0;  /* DHD_NET_TEST_CUT (tests) */
+    return dead;
 }
 
 void net_init(const char *base_url, const char *player_name, const char *build_version, const char *iso_sha256)

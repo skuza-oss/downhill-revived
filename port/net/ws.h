@@ -33,6 +33,10 @@ void ws_stop(WsConn *ws);
    (its selected ICE pair's latest check), -1 while it has none (finding 181). Any thread. */
 int ws_race_rtt_ms(WsConn *ws);
 
+/* DHD_NET_TEST_CUT (a test switch, finding 254): from now for ms milliseconds this game has no
+   network: no room connection opens, no SFU datagram goes out or comes in. */
+void ws_test_cut(int ms);
+
 /* A blocking HTTP(S) GET; ws:// and wss:// URLs work too. Returns the body length after a 200
    (at most cap - 1, NUL-terminated), -1 on error. */
 int http_get(const char *url, char *out, size_t cap);

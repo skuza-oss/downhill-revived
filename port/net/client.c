@@ -100,6 +100,11 @@ void client_init(NetClient *c, const char *name, const char *version, const char
         }
         const char *drop = getenv("DHD_NET_TEST_DROP");
         if (drop && *drop) c->test_drop = 1, c->test_drop_s = atof(drop);
+        const char *cut = getenv("DHD_NET_TEST_CUT");
+        if (cut && *cut && strchr(cut, ':')) {
+            c->test_cut_room = !strncmp(cut, "room+", 5);
+            c->test_cut = 1, c->test_cut_s = atof(cut + (c->test_cut_room ? 5 : 0)), c->test_cut_len_ms = atof(strchr(cut, ':') + 1);
+        }
     }
 }
 
@@ -889,6 +894,14 @@ int client_tick(NetClient *c)
             c->test_dropped = dead = 1;
             snprintf(line, sizeof line, "net: DHD_NET_TEST_DROP: the room connection is cut %.1f s after the race's start (test switch)",
                      c->test_drop_s);
+        }
+        if (c->test_cut && !c->test_cut_done && !line[0] &&
+            (c->test_cut_room ? c->joined_at && now >= c->joined_at + c->test_cut_s * 1000
+                              : c->racing && c->race_at > 0 && now + c->clock_offset >= c->race_at + c->test_cut_s * 1000)) {
+            c->test_cut_done = dead = 1;
+            c->cut_ms = (int)c->test_cut_len_ms;
+            snprintf(line, sizeof line, "net: DHD_NET_TEST_CUT: no network for %.1f s from %.1f s after %s (test switch)",
+                     c->test_cut_len_ms / 1000, c->test_cut_s, c->test_cut_room ? "joining the room" : "the race's start");
         }
         if (!line[0] && c->joined_at && (c->lobby.state == NET_LOBBY || c->lobby.state == NET_RACING) && now >= c->next_log) {
             int n = snprintf(line, sizeof line, "net: room %s%s, ", net_log_code(c->lobby.code).text, c->racing ? " (racing)" : "");

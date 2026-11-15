@@ -35,7 +35,7 @@ use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tungstenite::{Bytes, Message, Utf8Bytes, WebSocket};
 
@@ -62,6 +62,21 @@ const PEEK: Duration = Duration::from_millis(50);
 const TICK: Duration = Duration::from_millis(10);
 /// A connection that lasted this long starts the attempts' count again.
 const LASTING: Duration = Duration::from_secs(5);
+
+/// DHD_NET_TEST_CUT (a test switch, port/net/client.c; finding 254): until this moment this game
+/// has no network, as a phone that lost its signal: no room connection opens and no SFU datagram
+/// goes out or comes in (the TURN relay's TLS stream is not cut).
+static TEST_CUT_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+
+pub(crate) fn test_cut() -> bool {
+    lock(&TEST_CUT_UNTIL).is_some_and(|until| Instant::now() < until)
+}
+
+/// ws.h: the test cut, from now for ms milliseconds.
+#[no_mangle]
+pub extern "C" fn ws_test_cut(ms: c_int) {
+    *lock(&TEST_CUT_UNTIL) = Some(Instant::now() + Duration::from_millis(ms.max(0) as u64));
+}
 
 /// The open connection: the WebSocket and the socket's handle for shutting it down.
 struct Live {
@@ -177,7 +192,7 @@ fn cstring(text: &str) -> CString {
 fn io_main(c: Arc<WsConn>, mut url: String) {
     let mut attempt: c_int = 0;
     while !c.stopping.load(Ordering::Acquire) {
-        let (code, reason) = match stream::connect_ws(&url) {
+        let (code, reason) = match if test_cut() { Err("no network (DHD_NET_TEST_CUT)".into()) } else { stream::connect_ws(&url) } {
             Ok((ws, tcp, peek)) => {
                 let opened = std::time::Instant::now();
                 {

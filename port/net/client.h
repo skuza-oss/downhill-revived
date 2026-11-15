@@ -107,6 +107,12 @@ typedef struct {
        3 s before startAt), as a network drop is (no close frame) */
     double test_drop_s;
     int test_drop, test_dropped;
+    /* DHD_NET_TEST_CUT=S:MS or room+S:MS (a test switch, finding 254): once, S seconds after a
+       race's startAt (room+: after the first welcome), this game loses its network for MS ms: the
+       room connection drops and cannot open again, and no SFU datagram goes out or comes in
+       (ws_test_cut). cut_ms: set by client_tick at that moment for net.c's tick to pass on. */
+    double test_cut_s, test_cut_len_ms;
+    int test_cut, test_cut_room, test_cut_done, cut_ms;
     /* STATE and EVENT frames received, oldest first (a full queue drops the oldest) */
     uint8_t relayed[NET_RELAY_QUEUE][NET_FRAME_MAX];
     uint16_t relayed_size[NET_RELAY_QUEUE];
