@@ -669,14 +669,16 @@ def add(patches):
             patches.setdefault('unsorted/'+path.name, []).append(('re',(pattern,count),
                 '( (!port_delta_clock() || port_whole_step()) && func_00222BD8(0,100)==42 )'))
     # Finding 255: the title's PRESS X TO START box (001ED3E0) pulses between edges 352 and 400,
-    # moved by D_0029E018 (2.4) once per call: retail called it once a field (a 40-field pulse),
+    # moved by D_0029E018 (2.4) once per call: retail called it once a field (a 42-field pulse),
     # the delta-time clock once per update (four times as fast at 240). The edges move by
     # this update's part of a field. The bounce turns the direction at an edge instead of
     # flipping it (from 401.6, its start, a quarter step stays above 400, and a flip on every
     # update held the box there), and at retail's own turning points: its 2.4 steps from 401.6
     # turn at 351.2 and 401.6, a 42-field pulse, where finer steps would turn just past 352 and
-    # 400 (40.5 fields). With a whole field a step it is retail's. The colour follows the
-    # direction's sign, as before.
+    # 400 (40.5 fields). A step that passes a turning point (above one field: 4.8 at 30 fps
+    # went to 348.8, a 44-field cycle) is reflected back inside it, the turn falling inside the
+    # update. With a whole field a step it is retail's arithmetic exactly (its steps land on the
+    # turning points: no reflection). The colour follows the direction's sign, as before.
     edit('001EB1D8', '    if (D_0029E008__c4 >= 400.0f || D_0029E008__c4 <= 352.0f)\n'
                      '        D_0029E018__c4 = -D_0029E018__c4;',
          '    if (port_delta_clock()) {\n'
@@ -687,8 +689,14 @@ def add(patches):
          '        D_0029E018__c4 = -D_0029E018__c4;')
     edit('001EB1D8', '    D_0029E008__c4 += D_0029E018__c4;\n    D_0029E00C__c4 += D_0029E018__c4;',
          '    if (port_delta_clock()) {\n'
-         '        float pulse = D_0029E018__c4 * port_step();\n'
+         '        float pulse = D_0029E018__c4 * port_step(), back = 0.0f;\n'
          '        D_0029E008__c4 += pulse;\n        D_0029E00C__c4 += pulse;\n'
+         '        if (D_0029E008__c4 > 401.601f) back = 2.0f * (401.6f - D_0029E008__c4);\n'
+         '        else if (D_0029E008__c4 < 351.199f) back = 2.0f * (351.2f - D_0029E008__c4);\n'
+         '        if (back != 0.0f) {\n'
+         '            D_0029E008__c4 += back;\n            D_0029E00C__c4 += back;\n'
+         '            D_0029E018__c4 = -D_0029E018__c4;\n'
+         '        }\n'
          '    } else {\n'
          '    D_0029E008__c4 += D_0029E018__c4;\n    D_0029E00C__c4 += D_0029E018__c4;\n    }')
     # Finding 255: the effect matrix D_0027BF00 (0022E3D0, the effects' frame update) turns by
