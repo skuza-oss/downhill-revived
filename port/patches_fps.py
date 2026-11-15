@@ -691,3 +691,14 @@ def add(patches):
          '        D_0029E008__c4 += pulse;\n        D_0029E00C__c4 += pulse;\n'
          '    } else {\n'
          '    D_0029E008__c4 += D_0029E018__c4;\n    D_0029E00C__c4 += D_0029E018__c4;\n    }')
+    # Finding 255: the effect matrix D_0027BF00 (0022E3D0, the effects' frame update) turns by
+    # the fixed rotation D_0027BF40 once per call, then is set back on its axis; retail called it
+    # once a field. It turns once per whole field now (0-2 an update), each turn retail's.
+    edit('00228BE8', '        func_00221A60(D_0027BF00, D_0027BF00, D_0027BF40);\n'
+                     '        D_0027BF00[0] = 0.0f;\n        D_0027BF00[4] = -0.96f;\n'
+                     '        D_0027BF00[8] = 0.28f;\n        func_00222800(D_0027BF00);',
+         '        int turns = port_delta_clock() ? port_whole_step() : 1;\n'
+         '        while (turns-- > 0) {\n'
+         '        func_00221A60(D_0027BF00, D_0027BF00, D_0027BF40);\n'
+         '        D_0027BF00[0] = 0.0f;\n        D_0027BF00[4] = -0.96f;\n'
+         '        D_0027BF00[8] = 0.28f;\n        func_00222800(D_0027BF00);\n        }')
