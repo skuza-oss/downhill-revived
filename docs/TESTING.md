@@ -235,7 +235,7 @@ Online:
 | `DHD_NET_P2P_UDP=0` | in a P2P room this game makes no direct link and says so at once, so it races over the room's SFU (the fallback, finding 186) |
 | `DHD_NET_SFU_TURN=0` | the TURN fallback is never asked for; with `DHD_NET_SFU_UDP=0` a racer whose connection never comes up, whom the others must race without (finding 175) |
 | `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |
-| `DHD_NET_TEST_CUT=S:MS`, `room+S:MS` | once, S seconds after a race's start moment (`room+`: after joining the room), this game has no network for MS ms: the room connection drops and cannot open again, and no SFU datagram goes out or comes in (a phone losing its signal; the TURN relay's TLS stream is not cut; finding 254) |
+| `DHD_NET_TEST_CUT=S:MS`, `room+S:MS` | once, S seconds after a race's GO (`room+`: after joining the room), this game has no network for MS ms: the room connection drops and cannot open again, and no SFU datagram goes out or comes in (a phone losing its signal; the TURN relay's TLS stream is not cut; finding 254) |
 | `DHD_NET_TEST_PONG_DELAY=N[@S]` | from S seconds (default 60) after joining a room, every pong this PC gets (the room's and the race's PONG) is held N ms plus 0-N/2 ms more before it counts: a slow return path one way, for the shared clock (finding 175) |
 
 Relay-only SFU race on one PC (finding 246): with `DHD_ISO` set,

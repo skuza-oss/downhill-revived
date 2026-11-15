@@ -108,7 +108,7 @@ typedef struct {
     double test_drop_s;
     int test_drop, test_dropped;
     /* DHD_NET_TEST_CUT=S:MS or room+S:MS (a test switch, finding 254): once, S seconds after a
-       race's startAt (room+: after the first welcome), this game loses its network for MS ms: the
+       race's GO (the room's race_go moment; room+: after the first welcome), this game loses its network for MS ms: the
        room connection drops and cannot open again, and no SFU datagram goes out or comes in
        (ws_test_cut). cut_ms: set by client_tick at that moment for net.c's tick to pass on. */
     double test_cut_s, test_cut_len_ms;
