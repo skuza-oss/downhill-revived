@@ -835,6 +835,58 @@ static int mesh_build(void)
 
 /* Before a VU1 run: 1 when the run is a translated batch (skip mode: do not run it), 2 when it is
    one in shadow mode (run it, its kicks marked shadow, then mesh_send), else 0. *packet: the item. */
+/* DHD_VU1_EMULATED=1 (with Native VU on): every VU1 run that still goes through the emulated VU,
+   counted per kind (overlay, MSCAL program, entry, MSCNT, the dispatch register VI13 at the mesh
+   continuations: DHD_VU1_LAYOUT's kinds) and listed every 3000 fields and at the end, the work list for the emulated
+   path's deletion (finding 253). The translated loops' own batches are in it with their reasons
+   in the counters above. */
+enum { MESH_EMULATED_KINDS = 256 };
+static struct { uint32_t used, overlay, program, entry, mscnt, vi13; uint64_t runs, kicks; } mesh_emulated_kinds[MESH_EMULATED_KINDS];
+static uint64_t mesh_emulated_other;
+static int mesh_emulated_on = -1;
+
+static void mesh_emulated_report(void)
+{
+    uint64_t runs = mesh_emulated_other;
+    for (unsigned i = 0; i < MESH_EMULATED_KINDS; i++) runs += mesh_emulated_kinds[i].runs;
+    hle_log("emulated VU1: %llu runs with Native VU on (%llu of kinds past the table)\n",
+            (unsigned long long)runs, (unsigned long long)mesh_emulated_other);
+    for (unsigned i = 0; i < MESH_EMULATED_KINDS; i++)
+        if (mesh_emulated_kinds[i].used)
+            hle_log("emulated VU1: overlay %c program %04X entry %04X mscnt %u vi13 %03X: %llu runs, %llu kicks\n",
+                    "?AB"[mesh_emulated_kinds[i].overlay], mesh_emulated_kinds[i].program, mesh_emulated_kinds[i].entry,
+                    mesh_emulated_kinds[i].mscnt, mesh_emulated_kinds[i].vi13,
+                    (unsigned long long)mesh_emulated_kinds[i].runs, (unsigned long long)mesh_emulated_kinds[i].kicks);
+}
+
+static void mesh_emulated(unsigned addr, unsigned mscnt)
+{
+    if (mesh_emulated_on < 0 && (mesh_emulated_on = getenv("DHD_VU1_EMULATED") != NULL))
+        host_end_add(HOST_END_REPORT, "emulated VU1 runs", mesh_emulated_report);
+    mesh_emulated_kicks = NULL;
+    if (!mesh_emulated_on) return;
+    unsigned overlay = !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x265C10), 32) ? 1 :
+                       !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
+    unsigned program = graphics_provenance.program;
+    unsigned vi13 = (addr == 0x1040 || addr == 0x1CB0 || addr == 0x12E0) ? vu1.vi[13] & 0xFFFF : 0;
+    unsigned at = (program * 7 + addr * 13 + overlay * 5 + mscnt + vi13 * 3) % MESH_EMULATED_KINDS;
+    for (unsigned n = 0; n < MESH_EMULATED_KINDS; n++, at = (at + 1) % MESH_EMULATED_KINDS) {
+        if (!mesh_emulated_kinds[at].used) {
+            mesh_emulated_kinds[at].used = 1; mesh_emulated_kinds[at].overlay = overlay;
+            mesh_emulated_kinds[at].program = program; mesh_emulated_kinds[at].entry = addr;
+            mesh_emulated_kinds[at].mscnt = mscnt; mesh_emulated_kinds[at].vi13 = vi13;
+        }
+        if (mesh_emulated_kinds[at].overlay == overlay && mesh_emulated_kinds[at].program == program &&
+            mesh_emulated_kinds[at].entry == addr && mesh_emulated_kinds[at].mscnt == mscnt &&
+            mesh_emulated_kinds[at].vi13 == vi13) {
+            mesh_emulated_kinds[at].runs++;
+            mesh_emulated_kicks = &mesh_emulated_kinds[at].kicks;
+            return;
+        }
+    }
+    mesh_emulated_other++;
+}
+
 static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
 {
     if (!mesh_enabled()) return 0;
@@ -874,6 +926,7 @@ static void mesh_send(uint32_t *packet)
     }
     if (kernel_vsync_count >= report_at) {   /* the counts so far, every 3000 fields (and at exit) */
         mesh_report();
+        if (mesh_emulated_on > 0) mesh_emulated_report();
         report_at = kernel_vsync_count + 3000;
     }
     graphics_gif_feed(GS_PATH_MESH, packet, mesh.words);

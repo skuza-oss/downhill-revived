@@ -359,6 +359,7 @@ static void layout_kick(unsigned qword)
 }
 
 static int mesh_kick_watch;   /* DHD_NATIVE_VU1_CHECK: a shadow batch runs (vu1_mesh.inc) */
+static uint64_t *mesh_emulated_kicks;   /* DHD_VU1_EMULATED: the running kind's kicks (vu1_mesh.inc) */
 static void mesh_kicked(unsigned qword);
 
 static int kick(void *opaque, unsigned qword)
@@ -366,6 +367,7 @@ static int kick(void *opaque, unsigned qword)
     (void)opaque;
     if (layout.run) layout_kick(qword);
     if (mesh_kick_watch) mesh_kicked(qword);
+    if (mesh_emulated_kicks) ++*mesh_emulated_kicks;
     if (!vu_profile_active) return graphics_xgkick(VU1_DATA, qword);
     double start = host_wall_seconds();
     int result = graphics_xgkick(VU1_DATA, qword);
@@ -584,11 +586,13 @@ static void run_micro(Vif *v, uint32_t addr)
         if (mesh_start) mesh_timed(host_wall_seconds() - mesh_start);
     } else {
         graphics_provenance.shadow = mesh_batch == 2;
+        if (mesh.state == MESH_ON && !mesh_batch) mesh_emulated(addr, (v->code >> 24 & 0x7f) == MSCNT);
         if (ps2_vu1_run(&vu1, addr, v->top, v->itop, kick, NULL)) {
             hle_log("vif1: microprogram at 0x%X failed\n", addr);
             if (capture_failure) save_suspect("DHD_VU_CAPTURE_FAILURE", "failed");
         }
         graphics_provenance.shadow = 0;
+        mesh_emulated_kicks = NULL;
         if (mesh_batch == 2) mesh_send(mesh_packet);
         if (mesh.state == MESH_ON) mesh_after(addr, (v->code >> 24 & 0x7f) == MSCNT);
     }
