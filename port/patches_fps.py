@@ -703,8 +703,12 @@ def add(patches):
          '        D_0027BF00[0] = 0.0f;\n        D_0027BF00[4] = -0.96f;\n'
          '        D_0027BF00[8] = 0.28f;\n        func_00222800(D_0027BF00);\n        }')
     # Finding 255: every menu's age (001F74F0, the menu block's +4, up to 1000) counted one an
-    # update; retail's update ran once a field. It counts whole fields.
+    # update; retail's update ran once a field. It counts whole fields (0-2 an update), and is
+    # never left at 0: func_001F7420 takes 0 as "initialize" (the selection and fades reset, a
+    # press lost), so a menu's first update sets 1 even when no whole field passed (above 60).
+    # Nothing else reads it (the < 1000 cap here only), so steps of 2 below 60 skip no value.
     edit('001EB1D8', '    if (p->count < 1000) p->count++;',
          '    if (p->count < 1000) {\n'
          '        p->count += port_delta_clock() ? port_whole_step() : 1;\n'
+         '        if (p->count < 1) p->count = 1;\n'
          '        if (p->count > 1000) p->count = 1000;\n    }')
