@@ -852,7 +852,6 @@ unsigned gs_mesh_parse(const char *s)
     const char *flags = s + list;
     if (strstr(flags, ":skip")) loops |= GS_MESH_FORCE_SKIP;
     else if (strstr(flags, ":shadow")) loops |= GS_MESH_FORCE_SHADOW;
-    if (strstr(flags, ":gpuclip")) loops |= GS_MESH_GPU_CLIP;
     return loops;
 }
 

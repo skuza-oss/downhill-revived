@@ -84,7 +84,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   or compiled (`vu0_micro.c`, `vu0_aot.py`); VU1 runs compiled blocks plus native kernels
   (`vu1_aot.py`, `vu1_native_clip.py`), checked against PCSX2's interpreter (findings 030, 090),
   and, with Native VU (the players' default on every platform, the browser included: findings
-  198, 199), the translated batch loops as GPU shaders instead (findings 164, 167, 194). The
+  198, 199), the translated batch loops as GPU shaders instead (findings 164, 167, 194), their
+  near-bound triangles clipped on the VU thread as the loops' clipper does (finding 253). The
   emulated path for those loops remains as the fallback and the setting's off until it is deleted
   (root AGENTS.md).
 - GS: GS memory and registers in C (`port/gs/`); the Rust renderer (`port/render`, wgpu: DX12 or
@@ -340,7 +341,8 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   Redmi 9 at 2x 50.6 -> 48.7 fields/s over the route (the race 47.3 -> 44.8), the integrated
   Radeon at 4x 122.1 -> 118.2; it gains where the CPU limits (finding 194). Finding 249 cut that cost on the
   throttled Mi 11i at 4x from 6.2 % to 1.6 % of the race (61.3 -> 64.3 fields/s, off 65.4); the
-  Redmi 9 has not rerun. No driver that refuses it has run it. The emulated path is deleted once players' logs show no fallbacks.
+  Redmi 9 has not rerun. Finding 253 took the last batches of the translated loops off the emulated VU
+  (11 % of the route's; race 64.5 -> 65.0, off 65.3) and lists what else still runs there. No driver that refuses it has run it. The emulated path is deleted once players' logs show no fallbacks.
 - On Mali GPUs a picture stays in one encoder (finding 198): finding 195's encoder cut lost the
   device on the Redmi 9's Mali-G52 in every full route, so 0.7.15 is expected to lose it there
   (fixed in 0.7.16).
