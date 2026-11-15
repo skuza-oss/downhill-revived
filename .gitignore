@@ -64,6 +64,7 @@ tools/ext/
 dhd.ini
 online-settings.txt
 iso-check.txt
+pipelines.txt
 saves/
 *.log
 *.dmp

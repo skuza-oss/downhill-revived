@@ -450,6 +450,8 @@ struct Worker {
     waiting: std::collections::HashSet<u64>,
     /// Listed keys sent at the start (`Pipelines::build_ahead`).
     ahead: std::collections::HashSet<u64>,
+    /// When they were sent and how many, until the last one is back (one log line then).
+    ahead_sent: Option<(std::time::Instant, usize)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -490,7 +492,8 @@ impl Worker {
         if let Err(e) = spawned {
             crate::host::log(&format!("gs native: no pipeline worker ({e}); pipelines are built at first use"));
         }
-        Worker { jobs, done, waiting: std::collections::HashSet::new(), ahead: std::collections::HashSet::new() }
+        Worker { jobs, done, waiting: std::collections::HashSet::new(), ahead: std::collections::HashSet::new(),
+                 ahead_sent: None }
     }
 }
 
@@ -740,6 +743,12 @@ impl Pipelines {
             }
             self.built.insert(key, pipe);
         }
+        if worker.ahead.is_empty() {
+            if let Some((sent, count)) = worker.ahead_sent.take() {
+                crate::host::log(&format!("gs native: the {count} listed pipelines were built {:.1} s after the renderer's start",
+                                          sent.elapsed().as_secs_f64()));
+            }
+        }
     }
 
     /// The pipeline list's keys (`list`, finding 256) go to the worker thread, which builds them
@@ -761,6 +770,9 @@ impl Pipelines {
                     worker.ahead.insert(key);
                 }
             }
+        }
+        if !worker.ahead.is_empty() {
+            worker.ahead_sent = Some((std::time::Instant::now(), worker.ahead.len()));
         }
         crate::host::log(&format!("gs native: pipelines.txt lists {} draw pipelines of earlier runs; {} are built ahead on a worker thread",
                                   keys.len(), worker.ahead.len()));
