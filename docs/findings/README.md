@@ -282,7 +282,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 250 | [the online room takes the stick; Poster Maker's picture](250-room-stick-and-poster-maker.md) | current |  |
 | 251 | [Bindings for controllers 3 and 4](251-controls-pads-3-4.md) | current |  |
 | 252 | [Why the TURN fallback fails (channel bind timeout, allocate 400)](252-turn-fallback-fails.md) | current |  |
-| 254 | [online riders and reconnects on bad networks (late or lost snapshots, outages, drops)](254-online-feel-bad-networks.md) | in progress |  |
+| 254 | [online riders and reconnects on bad networks (late or lost snapshots, outages, drops)](254-online-feel-bad-networks.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
