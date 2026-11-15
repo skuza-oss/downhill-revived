@@ -279,6 +279,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 247 | [more race frames a second on weak Android phones](247-low-end-android-speed.md) | current |  |
 | 248 | [Racers on the TURN fallback left out of every race](248-turn-players-left-out.md) | current |  |
 | 249 | [Native VU must not cost speed where the GPU limits](249-native-vu-speed.md) | current |  |
+| 250 | [the online room takes the stick; Poster Maker's picture](250-room-stick-and-poster-maker.md) | current |  |
 | 251 | [Bindings for controllers 3 and 4](251-controls-pads-3-4.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

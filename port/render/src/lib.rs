@@ -125,6 +125,7 @@ pub mod native {
     pub mod render;
     pub mod scanout;
     pub mod shared;
+    pub mod surface_read;
     pub mod surfaces;
     pub mod textures;
     pub mod zread;
@@ -150,6 +151,8 @@ pub mod native {
         pub pass: render::Pass,
         pub presenter: present::Presenter,
         pub zread: zread::ZRead,
+        /// A colour surface's read for the EE in flight (`surface_read.rs`, finding 250).
+        pub surface_read: Option<surface_read::Reading>,
     }
 
     /// One picture as C handed it over (`DhdrPicture`), with its arrays as slices. Built by

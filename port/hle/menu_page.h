@@ -91,6 +91,10 @@ void menu_page_enable(MenuPage *p, int row, int enabled);  /* a row's flag, with
    dimmed, so it doesn't look like the rows that change. Until the rows are built again. */
 void menu_page_dim(MenuPage *p, int row);
 void menu_page_sound(int next);        /* S_NEXT / S_PREVIOUS, as the value rows play them */
+/* Both pads' buttons held, the left stick at its edge as the d-pad, as the game's menus take it
+   (func_002209A8); -1 for a field whose word reads all ones (an edge the popup manager just
+   took clears the pad's entry). For a page that reads the pads itself (menu_pads.c). */
+int menu_pads_held(void);
 
 /* ---- drawing, for a page that lays itself out (in its draw) ----
    In the popup's view, x across 0..640 and y down 0..224 as the rows are (menu_draw_size),

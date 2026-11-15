@@ -127,7 +127,6 @@ void func_0023C8D8(int mode, int view);
 void func_0023D898(int view, float *distance, float *aspect);
 void func_0023D8D8(int view, float distance, float aspect);
 float func_00203C28(void *animation);
-int func_00220230(int port);  /* the buttons held on a pad */
 static float shell_distance, shell_aspect;
 static int offline_mode, offline_submode, offline_players;
 void hle_online_selected_ride(int rider, const int32_t *outfit, const int32_t *bike, int colour);
@@ -808,13 +807,10 @@ static char raced_code[8];                    /* back from it, a change made mea
 static char seen_event[32];                   /* the server's last notice seen (start_cancelled) */
 static char title_text[32], footer_text[96];
 
-/* The buttons held on both pads. A pad's word can read all ones for one field as a press starts
-   (its entry is 0 before the next read, func_00220230): -1 then, so that field changes nothing. */
-static int pads_held(void)
-{
-    int a = func_00220230(0) & 0xFFFF, b = func_00220230(1) & 0xFFFF;
-    return a == 0xFFFF || b == 0xFFFF ? -1 : a | b;
-}
+/* The buttons held on both pads, the left stick at its edge as the d-pad (menu_pads_held, as the
+   game's menus: issue #103). -1 for a field whose word reads all ones as a press starts: that
+   field changes nothing. */
+static int pads_held(void) { return menu_pads_held(); }
 
 /* ---- what the room is now ---- */
 

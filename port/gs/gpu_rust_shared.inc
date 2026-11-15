@@ -301,6 +301,14 @@ static int native_read_display(Native *n, uint32_t *pixels)
     return 0;
 }
 
+/* A colour surface's GS pixels (finding 250), the same begin, wait and finish as the display's. */
+static int native_read_surface(Native *n, int index, const uint32_t rect[4], uint32_t *pixels, uint32_t size[2])
+{
+    if (index < 0 || !dhdr_native_surface_read_begin(n->r, (uint32_t)index, rect, size)) return 0;
+    int mapped = native_read_wait();
+    return dhdr_native_surface_read_finish(n->r, pixels) && mapped;
+}
+
 /* DHD_PRESENT_FILTER=point keeps the picture's pixels sharp; linear by default. Then DHD_ASPECT. */
 static void native_present_options(Native *n)
 {

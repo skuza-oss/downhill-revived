@@ -72,7 +72,7 @@ MODULE_UNITS = [
     'runtime/ps2asm.c', 'runtime/vu0_micro.c', 'runtime/vu0_interp.c', 'runtime/recomp.c',
     'runtime/libc_shims.c', 'runtime/memory.c',
     'runtime/sha256.c', 'hle/kernel.c', 'hle/timer.c', 'hle/boot.c', 'hle/sif.c', 'hle/cdvd.c', 'hle/game_data.c',
-    'hle/iop.c', 'hle/mc.c', 'hle/dma.c', 'hle/graphics.c', 'hle/pad.c', 'hle/menu_page.c',
+    'hle/iop.c', 'hle/mc.c', 'hle/dma.c', 'hle/graphics.c', 'hle/pad.c', 'hle/menu_page.c', 'hle/menu_pads.c',
     'hle/pc_settings.c', 'hle/widescreen.c', 'hle/exit_menu.c', 'hle/disc_notice.c', 'hle/puppet.c', 'hle/online.c',
     'hle/online_menu.c', 'hle/autopad.c', 'hle/state_trace.c', 'hle/rate_audit.c', 'hle/scenery_trace.c', 'hle/sound.c', 'hle/game_options.c',
     'hle/fps.c', 'hle/replay.c', 'hle/keyboard.c', 'hle/vif0.c', 'hle/presence.c', 'hle/touch_field.c',
