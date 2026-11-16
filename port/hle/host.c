@@ -56,6 +56,44 @@
 #include "../host/host_end.h"
 #include "../render/include/dhd_settings.h"  /* dhd.ini (port/render/settings) */
 #include "../render/include/dhd_presence.h"  /* Discord Rich Presence (port/render/presence) */
+#include "../render/include/dhd_render_ext.h"  /* dhdr_native_pipeline_crash (finding 260) */
+#ifndef _WIN32
+#include <fcntl.h>  /* open: the pipeline crash note */
+#endif
+
+/* The crash handlers' first step (finding 260): the crash note beside the pipeline list names the
+   draw pipeline this thread was in the driver's build of ("crash KEY"), or says a crash happened
+   elsewhere ("crash"). Only a pipeline so named is refused for good at the next start; a run that
+   ended any other way during a build only makes it a suspect. Async-signal-safe: atomics in the
+   renderer, a stack buffer, open and write. */
+static void pipeline_crash_note(void)
+{
+    uint64_t key = 0;
+    const char *path = dhdr_native_pipeline_crash(&key);
+    if (!path) return;
+    char line[32] = "crash";
+    int n = 5;
+    if (key) {
+        line[n++] = ' ';
+        for (int shift = 60; shift >= 0; shift -= 4) line[n++] = "0123456789ABCDEF"[key >> shift & 15];
+    }
+    line[n++] = '\n';
+#ifdef _WIN32
+    WCHAR wide[1024];
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, 1024)) return;
+    HANDLE file = CreateFileW(wide, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD wrote;
+    WriteFile(file, line, (DWORD)n, &wrote, NULL);
+    CloseHandle(file);
+#else
+    int file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (file < 0) return;
+    ssize_t wrote = write(file, line, (size_t)n);
+    (void)wrote;
+    close(file);
+#endif
+}
 
 #include <SDL3/SDL.h>
 #ifdef __APPLE__
@@ -363,6 +401,7 @@ static void log_start(void)
 static LONG WINAPI crashed(EXCEPTION_POINTERS *e)
 {
     EXCEPTION_RECORD *r = e->ExceptionRecord;
+    pipeline_crash_note();
     fprintf(stderr, "crash: exception %08lX at %08llX", r->ExceptionCode,
             (unsigned long long)(uintptr_t)r->ExceptionAddress);
     if (r->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
@@ -404,6 +443,7 @@ static void crashed(int sig, siginfo_t *info, void *ctx)
         _exit(3);
 #endif
     }
+    pipeline_crash_note();
     const char *name = sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGILL ? "SIGILL" : "SIGFPE";
     char thread[17] = "?";
     pthread_getname_np(pthread_self(), thread, sizeof thread);  /* which of the port's threads (host_thread_name) */
