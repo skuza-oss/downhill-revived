@@ -579,8 +579,10 @@ static void run_micro(Vif *v, uint32_t addr)
     if (layout.state != 1) layout_run(addr, (v->code >> 24 & 0x7f) == MSCNT);
     uint32_t *mesh_packet = NULL;
     double mesh_start = profile_start && mesh.state == MESH_ON ? host_wall_seconds() : 0;
-    int mesh_batch = mesh_before(addr, (v->code >> 24 & 0x7f) == MSCNT, &mesh_packet);   /* Native VU: live (vu1_mesh.inc) */
-    if (mesh_batch == 1) {
+    int mesh_batch = 0;
+    if (packet_program(addr, (v->code >> 24 & 0x7f) == MSCNT, v->top, v->itop, traced)) {
+        /* 0030/0050: the EE's packet kicked in C, every renderer (vu1_mesh.inc) */
+    } else if ((mesh_batch = mesh_before(addr, (v->code >> 24 & 0x7f) == MSCNT, &mesh_packet)) == 1) {   /* Native VU: live */
         mesh_send(mesh_packet);
         mesh_skipped();
         if (mesh_start) mesh_timed(host_wall_seconds() - mesh_start);

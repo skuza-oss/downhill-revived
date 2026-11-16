@@ -39,7 +39,7 @@
    pool (MSCAL 0040's lighting, 0010/0020's skinning and lighting) that writes positions at 181 +
    index and lighting at 373 + index. Those stay on the VU (the item's maths needs the pool's
    positions on the CPU).
-   Each batch (MSCNT at 1CB0, 1040, 12E0 or 0590, VI13 a translated loop's) is read from VU1 data
+   Each batch (MSCNT at 1CB0, 1040, 12E0, 0590, 06E0 or 3258, VI13 a translated loop's) is read from VU1 data
    memory and the registers as they are and goes to the GS queue as one mesh item (gs_mesh.h): the
    pool positions, colours and texture coordinates of its strip vertices, the triangles the strip
    draws (the input's ADC joins left out; with back-face culling each in the winding the program's
@@ -873,7 +873,10 @@ static void mesh_emulated(unsigned addr, unsigned mscnt)
     unsigned overlay = !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x265C10), 32) ? 1 :
                        !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
     unsigned program = graphics_provenance.program;
-    unsigned vi13 = (addr == 0x1040 || addr == 0x1CB0 || addr == 0x12E0) ? vu1.vi[13] & 0xFFFF : 0;
+    /* VI13 at every continuation that jumps through it: 1040, 1CB0, 12E0 and the first batches
+       after a pool pass or 30A0's setup (0590, 06E0, 3258: JR vi13) */
+    unsigned vi13 = (addr == 0x1040 || addr == 0x1CB0 || addr == 0x12E0 || addr == 0x0590 || addr == 0x06E0 ||
+                     addr == 0x3258) ? vu1.vi[13] & 0xFFFF : 0;
     unsigned at = (program * 7 + addr * 13 + overlay * 5 + mscnt + vi13 * 3) % MESH_EMULATED_KINDS;
     for (unsigned n = 0; n < MESH_EMULATED_KINDS; n++, at = (at + 1) % MESH_EMULATED_KINDS) {
         if (!mesh_emulated_kinds[at].used) {
@@ -896,13 +899,18 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
 {
     if (!mesh_enabled()) return 0;
     mesh.object = -1;
-    if (!mscnt || (addr != 0x1040 && addr != 0x1CB0 && addr != 0x12E0 && addr != 0x0590)) return 0;
+    if (!mscnt || (addr != 0x1040 && addr != 0x1CB0 && addr != 0x12E0 && addr != 0x0590 && addr != 0x06E0 &&
+                   addr != 0x3258))
+        return 0;
     for (unsigned p = 0; p < MESH_PROGRAMS; p++)
         if (vu1.vi[13] == mesh_programs[p].vi13 && (mesh.enabled >> p & 1)) mesh.object = (int)p;
     if (mesh.object < 0 || !mesh_overlay_b()) return mesh.object = -1, 0;
     /* 0590 (after the skinning pass): its JR's delay slot stores the pass's last vertex (SQ vf20,
        -2(vi8)); the VU repeats it in shadow mode */
     if (addr == 0x0590) memcpy(vu1.vu0_mem[(vu1.vi[8] - 2) & 1023].f, vu1.vf[20].f, 16);
+    /* 06E0 (after program 0000's pool pass, 05A0): its delay slot stores the pass's last entry (SQ vf25,
+       190(vi8)); 3258 (after 30A0's setup, 3190) has none (finding 264) */
+    if (addr == 0x06E0) memcpy(vu1.vu0_mem[(vu1.vi[8] + 190) & 1023].f, vu1.vf[25].f, 16);
     float parity = vu1.vf[6].f[0];
     /* The item's maths is the loop's, so it rounds as the VU does (toward zero, FTZ/DAZ; as
        ps2_vu1_run sets it): the positions it makes are then the VU's own bits (finding 249). */
@@ -921,6 +929,8 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
     return 1;
 }
 
+static void packet_report(void);
+
 static void mesh_send(uint32_t *packet)
 {
     static uint64_t report_at = 3000;
@@ -932,6 +942,7 @@ static void mesh_send(uint32_t *packet)
     if (kernel_vsync_count >= report_at) {   /* the counts so far, every 3000 fields (and at exit) */
         mesh_report();
         if (mesh_emulated_on > 0) mesh_emulated_report();
+        packet_report();
         report_at = kernel_vsync_count + 3000;
     }
     graphics_gif_feed(GS_PATH_MESH, packet, mesh.words);
@@ -1011,3 +1022,66 @@ static void mesh_skipped(void)
 
 /* After a VU1 run that was not skipped (the constants are read at each batch). */
 static void mesh_after(unsigned addr, int mscnt) { (void)addr, (void)mscnt; }
+
+/* Overlay B's programs 0030 and 0050 (0030 is B 0050) kick the GIF packet the EE wrote at data
+   0x6C and end: 0050 IADDIU vi8, vi0, 0x6C; XGKICK vi8; NOP; NOP[E]; NOP. In C, for every
+   renderer, as the VU leaves it (finding 264): the same kick, VI8, TPC 0078 and the flag registers
+   written back as ps2_vu1_run writes them (status 12 bits, MAC 16, clip 24); nothing else changes.
+   DHD_NATIVE_VU1_CHECK=1 also runs each one on the VU from the same state and compares the
+   registers, the data memory and the kicked qword (packet_check). */
+static struct { int check; uint64_t runs, checked, bad_state, bad_kick; } packet = {-1};
+static unsigned packet_kicks, packet_kicked;
+
+static int packet_kick_record(void *opaque, unsigned qword)
+{
+    (void)opaque;
+    packet_kicks++; packet_kicked = qword;
+    return 0;
+}
+
+static void packet_report(void)
+{
+    hle_log("native VU1 0030/0050: %llu runs in C; checked %llu: state differs %llu, kick differs %llu\n",
+            (unsigned long long)packet.runs, (unsigned long long)packet.checked,
+            (unsigned long long)packet.bad_state, (unsigned long long)packet.bad_kick);
+}
+
+static void packet_end(void)
+{
+    vu1.vi[8] = 0x6C;
+    vu1.vu0_ctrl[0] &= 0xFFF; vu1.vu0_ctrl[1] &= 0xFFFF; vu1.vu0_ctrl[2] &= 0xFFFFFF;
+    vu1.vu0_ctrl[10] = 0x78;
+}
+
+static void packet_check(unsigned addr, unsigned top, unsigned itop)
+{
+    static ps2_cpu before, after;
+    static ps2_q128 memory[1024];
+    before = vu1;
+    memcpy(memory, vu1.vu0_mem, sizeof memory);
+    packet_end();
+    after = vu1;
+    vu1 = before;
+    packet_kicks = 0;
+    int failed = ps2_vu1_run(&vu1, addr, top, itop, packet_kick_record, NULL);
+    packet.checked++;
+    if (failed || memcmp(&vu1, &after, sizeof vu1) || memcmp(memory, vu1.vu0_mem, sizeof memory)) packet.bad_state++;
+    if (packet_kicks != 1 || packet_kicked != 0x6C) packet.bad_kick++;
+    vu1 = after;
+}
+
+/* 1 when the run was one of these (kicked here), else 0. */
+static int packet_program(unsigned addr, int mscnt, unsigned top, unsigned itop, int traced)
+{
+    if (mscnt || (addr != 0x30 && addr != 0x50) || !mesh_overlay_b()) return 0;
+    if (packet.check < 0) {
+        packet.check = getenv("DHD_NATIVE_VU1_CHECK") != NULL;
+        host_end_add(HOST_END_REPORT, "native VU1 0030/0050", packet_report);
+    }
+    packet.runs++;
+    if (packet.check) packet_check(addr, top, itop);
+    else packet_end();
+    if (traced) kick_trace(0x58, vu1.vu0_ctrl[2], 0x6C);
+    if (kick(NULL, 0x6C)) hle_log("vif1: microprogram at 0x%X failed\n", addr);
+    return 1;
+}
