@@ -36,24 +36,32 @@ EXPORT(void, padMotionFocus)(JNIEnv *env, jclass cls, jint device)
     fprintf(stderr, "controller: Android device %d motion routed through SDL while the game surface lacks focus\n", (int)device);
 }
 
-void dhdr_android_defaults(const char *path, const char *soc);
-void android_phone_defaults(const char *path)
+unsigned dhdr_android_defaults(const char *path, const char *soc);
+/* The SoC for the weak-chip rules (port/render/settings/src/phone.rs): ro.soc.model, which
+   Android 12 added; before it the board platform (the Redmi 9 on Android 11: mt6768). */
+static void android_soc(char soc[PROP_VALUE_MAX])
 {
-    char soc[PROP_VALUE_MAX] = "";
-    __system_property_get("ro.soc.model", soc);
-    dhdr_android_defaults(path, soc);
+    soc[0] = 0;
+    if (__system_property_get("ro.soc.model", soc) <= 0) __system_property_get("ro.board.platform", soc);
+}
+unsigned android_phone_defaults(const char *path)
+{
+    char soc[PROP_VALUE_MAX];
+    android_soc(soc);
+    return dhdr_android_defaults(path, soc);
 }
 
 /* A Java string's UTF-8 (released by done), or NULL. */
 static const char *utf(JNIEnv *env, jstring s) { return s ? (*env)->GetStringUTFChars(env, s, NULL) : NULL; }
 static void done(JNIEnv *env, jstring s, const char *c) { if (s && c) (*env)->ReleaseStringUTFChars(env, s, c); }
 
-EXPORT(void, phoneDefaults)(JNIEnv *env, jclass cls, jstring ini)
+EXPORT(jint, phoneDefaults)(JNIEnv *env, jclass cls, jstring ini)
 {
     (void)cls;
     const char *path = utf(env, ini);
-    if (path) android_phone_defaults(path);
+    unsigned changed = path ? android_phone_defaults(path) : 0;
     done(env, ini, path);
+    return (jint)changed;
 }
 
 /* A JSON text from one of dhd_settings' calls that say their whole length. */

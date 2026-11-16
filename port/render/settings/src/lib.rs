@@ -243,9 +243,9 @@ pub fn create(path: &Path) -> io::Result<()> {
 
 /// Fill only missing phone choices under the settings save lock.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn update_phone_defaults(path: &Path, class: phone::Class, changed: &mut u32) -> io::Result<bool> {
+pub fn update_phone_defaults(path: &Path, rule: Option<&phone::Rule>, changed: &mut u32) -> io::Result<bool> {
     update(path, |ini| {
-        *changed = phone::defaults(ini, class)?;
+        *changed = phone::defaults(ini, rule)?;
         Ok(*changed != 0)
     })
 }
