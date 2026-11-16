@@ -702,6 +702,7 @@ def layout(platform, version, launcher, game, notices):
     folder = 'DownhillRevived-%s/' % version
     files = {folder + platform.launcher: launcher, folder + platform.game: game}
     files.update({folder + n: t for n, t in texts.items()})
+    files[folder + 'recomplauncher.json'] = (ROOT / 'recomplauncher.json').read_bytes()
     if platform.key == 'win':
         files[folder + 'dxcompiler.dll'] = dxc.dll('x64').read_bytes()
     return files, folder + platform.game, folder + platform.launcher
