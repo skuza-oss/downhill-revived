@@ -90,7 +90,8 @@ Out of scope: new settings, new UI pages, a benchmark at the first start, any ga
 
 - [x] 2026-11-16: read 183, 239, 257, 259, 174, 195; found that 239's rule misses the Redmi 9
 - [x] 2026-11-16: the rule as data, the board-platform fallback, 2x for Mali-G52 MC2, the note
-- [ ] checks, the Android build, the phone proof
+- [x] 2026-11-16: the rule (`c52f5db2`), the launcher's note (`6f51c59f`); checks below
+- [ ] the phone proof on the Redmi 9 (owed: the phone was not attached)
 
 ## Surprises
 
@@ -99,4 +100,23 @@ Out of scope: new settings, new UI pages, a benchmark at the first start, any ga
 
 ## Result
 
-To be filled at the merge.
+To be filled at the merge. So far:
+
+- Settings crate tests pass (`rustgs.py test -- -p dhd_settings`; the phone tests: names in and
+  the decision out, the Mi 11i's `Adreno (TM) 660`, desktop and Apple names unchanged, every rule
+  with a source, an existing dhd.ini with written effects unchanged under every rule, the player's
+  OFF never turned back on).
+- `check.py quick`, `check.py port`, `check.py docs` OK; `lang_check` 0 errors; the launcher UI
+  and handoff tests OK.
+- The Android library (`build.py --target android-arm64`), the debug APK and
+  `test_build_apk.py` pass.
+- Boot (600 fields) and race (5000 fields) state traces equal the 0.8.7 release's `dhd.exe`.
+- **Mi 11i** (not touched): its 0.8.7 release check logs `gs: GPU Adreno (TM) 660`, which matches
+  no rule (a unit test feeds that name): nothing changes there.
+- **Redmi 9: owed.** `adb devices` listed only the Mi 11i. Owed on it, with its dhd.ini put aside
+  and restored (run-as, md5 `29bc64ce4be02af381b176f144f7eb79` as found): the startup log's CPU
+  field shows `mt6768`; a first start logs the rule "Mali-G52 in a Helio P65/G70/G80/G85/G88" and
+  writes the three effects `0` and no `scale`; the launcher shows the note once; one 2x timing
+  run on lane 259's route with those settings (expected near 259's 61.1 fields/s in the race).
+  If the phone's `ro.board.platform` is not `mt6768`, the rule does not match and nothing
+  changes (the safe side); then add the value it reports.
