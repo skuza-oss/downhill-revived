@@ -197,7 +197,30 @@ int main(void)
     pad(0, 14.1);
     assert(keyboard_keys(&mine, keys) == 17);
     layout = NULL;
-    puts("test_keyboard: ok (60 and 144 Hz ramps, a player's layout)");
+
+    /* a tap shorter than a field (finding 262): pressed and let go between two reads, it is gone
+       from the held keys but the next read still takes it, once; losing the window drops it */
+    uint8_t taps[256];
+    keyboard_focus(1);
+    keyboard_taps_take(taps);
+    keyboard_key('X', 'X', 1);
+    keyboard_key('X', 'X', 0);
+    assert(!keyboard_position_down('X'));
+    keyboard_taps_take(taps);
+    assert(taps['X'] == 1 && taps[' '] == 0);
+    keyboard_taps_take(taps);
+    assert(taps['X'] == 0);
+    keyboard_key(' ', ' ', 1);   /* held across reads: down, and a tap only on the read after the press */
+    keyboard_taps_take(taps);
+    assert(taps[' '] == 1 && keyboard_position_down(' '));
+    keyboard_taps_take(taps);
+    assert(taps[' '] == 0 && keyboard_position_down(' '));
+    keyboard_key(' ', ' ', 0);
+    keyboard_key(0x0D, 0x0D, 1);
+    keyboard_focus(0);
+    keyboard_taps_take(taps);
+    assert(taps[0x0D] == 0 && !keyboard_position_down(0x0D));
+    puts("test_keyboard: ok (60 and 144 Hz ramps, a player's layout, a tap between two reads)");
     return 0;
 }
 /* Standalone keyboard tests retain the original 60-Hz input interval. */

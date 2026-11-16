@@ -82,6 +82,10 @@ void keyboard_reset(void) { memset(&state, 0, sizeof state); }
    each, as GetAsyncKeyState's state was read. typed[] starts as the identity: a key that was never
    pressed types its own code. */
 static volatile uint8_t position_down[256], position_typed[256], typed_down[256];
+/* A key pressed since the game's last read (keyboard_taps_take): a tap shorter than one field, on a
+   PC that runs a few fields a second (a software renderer), is still seen by one read (finding
+   262). Set here, taken and cleared by the read, an atomic exchange each. */
+static uint8_t position_tap[256];
 static volatile int has_focus;
 static volatile int typed_ready;
 
@@ -97,6 +101,7 @@ void keyboard_key(unsigned position, unsigned typed, int down)
     if (position >= 256 || typed >= 256) return;
     typed_init();
     if (down) position_typed[position] = (uint8_t)typed;
+    if (down) __atomic_store_n(&position_tap[position], 1, __ATOMIC_RELEASE);
     position_down[position] = down != 0;
     typed_down[position_typed[position]] = down != 0;
 }
@@ -110,13 +115,18 @@ unsigned keyboard_typed_of(unsigned position)
 
 int keyboard_position_down(unsigned position) { return position < 256 && position_down[position]; }
 
+void keyboard_taps_take(uint8_t taps[256])
+{
+    for (unsigned i = 0; i < 256; i++) taps[i] = __atomic_exchange_n(&position_tap[i], 0, __ATOMIC_ACQ_REL);
+}
+
 int keyboard_is_down(unsigned typed) { return typed < 256 && typed_down[typed]; }
 
 void keyboard_focus(int focused)
 {
     has_focus = focused != 0;
     if (!has_focus)  /* a key let go while the window was away is let go here too */
-        for (unsigned i = 0; i < 256; i++) position_down[i] = typed_down[i] = 0;
+        for (unsigned i = 0; i < 256; i++) position_down[i] = typed_down[i] = 0, __atomic_store_n(&position_tap[i], 0, __ATOMIC_RELEASE);
 }
 
 int keyboard_focused(void) { return has_focus; }

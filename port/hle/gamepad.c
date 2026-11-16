@@ -72,6 +72,10 @@ static void log_skipped(SDL_JoystickID id, const char *name, const GamepadDevice
 
 static Slot slots[SLOTS];       /* SDL thread only */
 static GamepadRaw latest[SLOTS];  /* under lock */
+/* Each slot's buttons held at any state since the game's last read (gamepad_raw_take), under lock: a
+   press shorter than one field, on a PC that runs a few fields a second, still counts for one
+   (finding 262). */
+static uint32_t held_since[SLOTS];
 static int present[SLOTS];      /* under lock */
 static SDL_AtomicInt kinds[SLOTS];  /* each slot's PAD_KIND_* (gamepad_kind) */
 static SDL_Mutex *lock;         /* made by gamepad_thread_start */
@@ -380,6 +384,7 @@ void gamepad_thread_update(void)
     if (swap > 0) {
         Slot old = slots[0]; slots[0] = slots[swap]; slots[swap] = old;
         GamepadRaw old_raw = raw[0]; raw[0] = raw[swap]; raw[swap] = old_raw;
+        uint32_t old_held = held_since[0]; held_since[0] = held_since[swap]; held_since[swap] = old_held;
         int kind = SDL_GetAtomicInt(&kinds[0]);
         SDL_SetAtomicInt(&kinds[0], SDL_GetAtomicInt(&kinds[swap]));
         SDL_SetAtomicInt(&kinds[swap], kind);
@@ -392,6 +397,7 @@ void gamepad_thread_update(void)
     }
     for (int i = 0; i < SLOTS; i++) {
         latest[i] = raw[i];
+        held_since[i] |= raw[i].buttons;
         present[i] = slots[i].id != 0;
     }
     SDL_UnlockMutex(lock);
@@ -427,15 +433,21 @@ void gamepad_set_multiplayer(int local_multiplayer)
     SDL_SetAtomicInt(&multiplayer, local_multiplayer != 0);
 }
 
-int gamepad_raw(int player, GamepadRaw *out)
+static int read_raw(int player, GamepadRaw *out, int take)
 {
     if (player < 0 || player >= SLOTS || !gamepad_start()) return 0;
     SDL_LockMutex(lock);
     int ok = present[player];
     if (ok) *out = latest[player];
+    if (ok && take) out->buttons |= held_since[player];
+    if (take) held_since[player] = 0;
     SDL_UnlockMutex(lock);
     return ok;
 }
+
+int gamepad_raw(int player, GamepadRaw *out) { return read_raw(player, out, 0); }
+
+int gamepad_raw_take(int player, GamepadRaw *out) { return read_raw(player, out, 1); }
 
 int gamepad_kind(int player)
 {
