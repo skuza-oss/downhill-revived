@@ -48,6 +48,7 @@ enum { X_CURSOR = 0x0, X_STYLE = 0xC, X_STYLE_ON = 0x10, X_ITEMS = 0x18, X_COUNT
        X_START = 0x420, X_TITLE = 0x438, X_FOOTER = 0x448, X_ROW_Y = 0x460, X_ROW_X = 0x464, X_ROW_STEP = 0x468,
        X_46C = 0x46C, X_470 = 0x470, X_PREFIXED = 0x478, X_BACK_BUTTON = 0x4A8, X_LEFT_ALIGNED = 0x4BB,
        X_RIGHT_ALIGNED = 0x4BC, X_4C4 = 0x4C4, X_VTABLE = 0x4F8 };
+enum { X_FOOTER_STYLE = 0x8 };        /* the style func_0018E5A8 draws the footer in */
 enum { M_VIEW = 0x20, M_CLOSING = 0x12D, M_MENU = 0x150 };  /* the popup manager's */
 enum { TEXT_PREV_NEXT = 0xA6 };       /* "<- PREV -> NEXT /\ BACK X SELECT" */
 
@@ -557,7 +558,8 @@ void menu_play(const char *sound)
    - a left click on a row puts the cursor there and presses Cross; on one of our value rows its
      left arrow presses Left, the rest of it Right;
    - a left click anywhere on a game's popup with no row to choose (a message: "PRESS X TO
-     CONTINUE") presses Cross, on a word of its legend that word's button (finding 266);
+     CONTINUE") presses Cross; on its legend's row only a word of the legend presses, its
+     button (finding 266);
    - a right click presses Triangle (back), anywhere;
    - the wheel presses Up/Down, or Left/Right on one of our value rows.
    Presses go to player 1's pad like a controller's (menu_mouse_merge), so the menus play their own
@@ -728,34 +730,36 @@ static const char *item_text(const Item *item)
     return (const char *)(uintptr_t)(uint32_t)func_0018D860((void *)item);
 }
 
-/* The button of a game popup's legend under the pointer, 0 none: the legend is its footer, each
-   button a glyph and its word ("✕ RETRY  △ CANCEL" under the memory card's notice), measured as
-   drawn (centred at its x, in the footer's style). A message's legend can offer a second button
-   that a tap anywhere else would never reach (finding 266). */
-static uint16_t glyph_legend_button(void *menu, int view)
+/* A game popup's legend: its footer (+0x448), drawn centred at its x in the footer's own style
+   (+0x08, func_0018E5A8), each button a glyph and its word ("✕ RETRY  △ CANCEL" under the memory
+   card's notice). Its buttons' tap ranges in view x (menu_legend_ranges); 0 when it has none. */
+static int legend_ranges(void *menu, MenuLegendRange *ranges)
 {
-    static const struct { char glyph; uint16_t button; } glyphs[] = {
-        {GLYPH_CROSS[0], PAD_CROSS}, {GLYPH_TRIANGLE[0], PAD_TRIANGLE}, {GLYPH_CIRCLE[0], PAD_CIRCLE}, {GLYPH_SQUARE[0], PAD_SQUARE}};
-    Item *foot = &AT(menu, X_FOOTER, Item);
-    int mx, my;
-    if (!pointer(view, &mx, &my) || my < foot->y - 6 || my > foot->y + 16) return 0;
+    const Item *foot = &AT(menu, X_FOOTER, Item);
     const char *text = item_text(foot);
     if (!text) return 0;
-    int length = (int)strnlen(text, MENU_PAGE_TEXT), start = foot->x - measure(menu, X_STYLE + 8, text, length) / 2;
-    uint16_t button = 0;
-    int from = 0;
-    for (int i = 0; i <= length; i++) {  /* each button: from its glyph to the next glyph or the end */
-        uint16_t next = 0;
-        for (unsigned g = 0; i < length && g < sizeof glyphs / sizeof *glyphs; g++)
-            if (text[i] == glyphs[g].glyph) next = glyphs[g].button;
-        if (!next && i < length) continue;
-        if (button) {
-            int left = start + measure(menu, X_STYLE + 8, text, from), right = start + measure(menu, X_STYLE + 8, text, i);
-            if (mx >= left - 6 && mx < right + 6) return button;
-        }
-        button = next, from = i;
+    int length = (int)strnlen(text, MENU_PAGE_TEXT), prefix[MENU_PAGE_TEXT + 1];
+    for (int i = 0; i <= length; i++) prefix[i] = measure(menu, X_FOOTER_STYLE, text, i);
+    int n = menu_legend_ranges(text, length, prefix, ranges, MENU_LEGEND_BUTTONS), start = foot->x - prefix[length] / 2;
+    for (int k = 0; k < n; k++) {
+        ranges[k].left += start, ranges[k].glyph_right += start, ranges[k].right += start;
+        ranges[k].from += start, ranges[k].to += start;
     }
-    return 0;
+    return n;
+}
+
+/* What a tap on a message presses by its legend (finding 266): on the legend's row, only a
+   button's own range presses it and the rest nothing (0); off that row, or without buttons in
+   the legend, -1: the message's Cross. A message's legend can offer a second button that a tap
+   anywhere else would never reach. */
+static int legend_tap(void *menu, int view)
+{
+    MenuLegendRange ranges[MENU_LEGEND_BUTTONS];
+    const Item *foot = &AT(menu, X_FOOTER, Item);
+    int mx, my;
+    if (!pointer(view, &mx, &my) || my < foot->y - 6 || my > foot->y + 16) return -1;
+    int n = legend_ranges(menu, ranges);
+    return n ? menu_legend_hit(ranges, n, mx) : -1;
 }
 
 /* The open popup and the mouse's news this field: hover, clicks, wheel. */
@@ -786,10 +790,11 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
                 value_row ? (left_arrow ? " value <" : " value >") : "", message ? ": a message" : "");
     }
     if (left && message) {  /* Cross, or the button of its legend the tap is on */
-        uint16_t b = glyph_legend_button(menu, view);
-        hle_log("menu mouse: the message takes %s\n",
-                b == PAD_TRIANGLE ? "Triangle" : b == PAD_CIRCLE ? "Circle" : b == PAD_SQUARE ? "Square" : "Cross");
-        press(b ? b : PAD_CROSS);
+        int b = legend_tap(menu, view);
+        if (b < 0) b = PAD_CROSS;
+        hle_log("menu mouse: the message takes %s\n", b == PAD_CROSS ? "Cross" : b == PAD_TRIANGLE ? "Triangle"
+                : b == PAD_CIRCLE ? "Circle" : b == PAD_SQUARE ? "Square" : "nothing (the legend's row, off its words)");
+        if (b) press((uint16_t)b);
     } else if (left && row >= 0 && row_enabled(menu, row)) {
         AT(menu, X_CURSOR, int) = row;
         press(value_row ? (left_arrow ? PAD_LEFT : PAD_RIGHT) : PAD_CROSS);
@@ -1111,7 +1116,14 @@ static void trace_screens(void)
             trace_rows(m);
             const Item *foot = &AT(m, X_FOOTER, Item);
             const char *legend = item_text(foot);
-            if (legend && *legend) hle_log("  legend at %d,%d: %s\n", foot->x, foot->y, legend);
+            if (legend && *legend) {
+                MenuLegendRange ranges[MENU_LEGEND_BUTTONS];
+                int n = legend_ranges(m, ranges);
+                hle_log("  legend at %d,%d: %s\n", foot->x, foot->y, legend);
+                for (int k = 0; k < n; k++)
+                    hle_log("  legend button %04x: glyph %d-%d, word to %d, taps %d-%d\n", ranges[k].button, ranges[k].left,
+                            ranges[k].glyph_right, ranges[k].right, ranges[k].from, ranges[k].to);
+            }
             uint32_t child = AT(m, 0x500, uint32_t);  /* the shop's pages keep a list there */
             if (child >= 0x08000000u && child < 0x0A000000u && AT(m, X_VTABLE, uint32_t) == 0x08284190u) {
                 void *c = (void *)(uintptr_t)child;

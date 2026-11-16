@@ -8,8 +8,10 @@ touch controls on at a phone's 20:9 (DHD_TOUCH_MOUSE=1, no controller seen) and 
   CONTINUE". One tap in the middle must close it, and the shop behind it must take nothing from
   the same tap (no other popup, its list not moved).
 - card: no memory card (DHD_MEMCARD=0): the boot stops at "memory card not found" (✕ RETRY,
-  △ CANCEL). A tap on its CANCEL must close it (Triangle), then the title's PRESS ✕ TO START must
-  still wait (one tap answers one box), and a second tap must open the main menu.
+  △ CANCEL), four times, one tap each: on CANCEL's left edge, its glyph, the word's middle and its
+  right edge, aimed from the legend's ranges in the trace (RETRY's range must end before CANCEL's).
+  Each must press Triangle and close the notice; after the middle one the title's PRESS ✕ TO START
+  must still wait (one tap answers one box), and a second tap must open the main menu.
 
 The menus' mouse trace (DHD_MOUSE_TRACE=1) says which popup is up. Pictures in OUT/<scenario>.
 Exit 0 when every scenario passes."""
@@ -92,26 +94,57 @@ def shop(exe, out):
         g.stop()
 
 
-def card(exe, out):
+# A popup's view x from a tap's place across this 1600x720 window: popups in widescreen are drawn
+# wider than the 4:3 shell (measured: 0.5 of the width is x 320, 0.6125 is 519, 0.5678 is 439).
+POPUP_X_PER_WIDTH = 1760
+
+
+def popup_tap_fraction(x):
+    return 0.5 + (x - 320) / POPUP_X_PER_WIDTH
+
+
+# CANCEL's places a tap must take as Triangle, from its range in the trace (glyph left-right, word
+# right end): 2 pixels inside its left and right edges, the glyph's middle, the word's middle.
+CANCEL_SPOTS = {
+    'left-edge': lambda left, glyph, right: left + 2,
+    'glyph': lambda left, glyph, right: (left + glyph) // 2,
+    'middle': lambda left, glyph, right: (glyph + right) // 2,
+    'right-edge': lambda left, glyph, right: right - 2,
+}
+
+
+def card(exe, out, spot='middle', title=True):
     g = hidden_game.Game(exe, out, env=env_for(out, dict(DHD_MEMCARD='0')), name='touch-continue-card', shot_window=None)
     try:
         g.window()
         g.wait_log(CARD, 120)
         time.sleep(3)
         picture(g, 'card-notice')
-        legend = re.search(r'legend at (-?\d+),(-?\d+): (.*)', g.log().split(CARD)[-1])
-        print('card: legend', legend.groups() if legend else None, flush=True)
+        notice = g.log().split(CARD)[-1]
+        cancel = re.search(r'legend button 1000: glyph (-?\d+)-(-?\d+), word to (-?\d+), taps (-?\d+)-(-?\d+)', notice)
+        retry = re.search(r'legend button 4000: glyph (-?\d+)-(-?\d+), word to (-?\d+), taps (-?\d+)-(-?\d+)', notice)
+        if not cancel or not retry:
+            return 'the trace gave no RETRY and CANCEL ranges'
+        left, glyph, right, tap_from, tap_to = map(int, cancel.groups())
+        if int(retry.group(5)) > tap_from:
+            return 'RETRY\'s range reaches into CANCEL\'s: %s %s' % (retry.groups(), cancel.groups())
+        x = CANCEL_SPOTS[spot](left, glyph, right)
+        print('card: CANCEL glyph %d-%d, word to %d; tap %s at x %d' % (left, glyph, right, spot, x), flush=True)
         mark = len(g.log())
-        # CANCEL in the legend: view x ~440 of 640, y 210 of 224. In widescreen the popups are drawn
-        # wider than the 4:3 shell (measured on this window: 0.5 -> x 320, 0.6125 -> x 519)
-        tap(g, 0.5 + (440 - 320) / 1769, 0.94)
+        tap(g, popup_tap_fraction(x), 0.94)   # the legend's row (y 210 of 224)
         time.sleep(5)
         after = since(g, mark)
         print('card: after the tap', re.findall(r'menu mouse: .*|mouse trace: .*', after), flush=True)
+        landed = re.search(r'menu mouse: click at (-?\d+),', after)
+        if not landed or not left <= int(landed.group(1)) < right:
+            return 'the tap landed at %s, off CANCEL (%d-%d): the window-to-popup scale moved' % (
+                landed.group(1) if landed else None, left, right)
         if 'the message takes Triangle' not in after:
-            return 'the tap on CANCEL was not Triangle'
+            return 'the tap on CANCEL (%s) was not Triangle' % spot
         if 'popup closed' not in after:
             return 'the notice did not close'
+        if not title:
+            return None
         picture(g, 'title')
         if 'mouse trace: screen 15' in after:
             return 'the same tap also passed the title'
@@ -133,10 +166,13 @@ def main():
     ap.add_argument('--scenario', choices=('shop', 'card', 'all'), default='all')
     a = ap.parse_args()
     failed = 0
-    for name, run in (('shop', shop), ('card', card)):
-        if a.scenario not in (name, 'all'):
+    runs = [('shop', lambda out: shop(a.exe.resolve(), out))]
+    runs += [('card-' + spot, lambda out, spot=spot: card(a.exe.resolve(), out, spot, title=spot == 'middle'))
+             for spot in CANCEL_SPOTS]
+    for name, run in runs:
+        if a.scenario not in (name.split('-')[0], 'all'):
             continue
-        problem = run(a.exe.resolve(), a.out.resolve() / name)
+        problem = run(a.out.resolve() / name)
         print(('FAIL %s: %s' % (name, problem)) if problem else 'PASS %s' % name, flush=True)
         failed += problem is not None
     return 1 if failed else 0

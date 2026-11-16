@@ -49,11 +49,18 @@ the menus (finding 141), so nothing else on the screen could be tapped either.
 
 `popup_mouse` (`port/hle/menu_page.c`), the code every tap on a game popup goes through: a popup
 of the game with no row to choose (`menu_is_message` in `menu_pads.c`: no rows, or none enabled)
-is a message that waits for one button, so a tap anywhere on the screen presses ✕. When its legend
-(the popup's footer: a button glyph before each word, "✕ RETRY  △ CANCEL") offers another button,
-a tap on that word presses that button (`glyph_legend_button`, measured as drawn, like our pages'
-legend in `page_legend_button`). The log says what a tap did (`menu mouse: click at X,Y: row -1:
-a message`, `menu mouse: the message takes Triangle`); the mouse trace prints each popup's legend.
+is a message that waits for one button, so a tap anywhere on the screen presses ✕, except on the
+row of its legend. The legend is the popup's footer (+0x448), a button glyph before each word
+("✕ RETRY  △ CANCEL"), drawn centred at its x in the footer's style (+0x08, `func_0018E5A8`). On
+that row (y from 6 above the footer's y to 16 below) a tap presses only the button whose range it
+is in, and nothing between or beside the words (`legend_tap`). A button's range
+(`menu_legend_ranges` in `menu_pads.c`) runs from its glyph to the last letter of its word,
+measured in the footer's style, 6 pixels more on each side but never past the middle of the gap to
+its neighbour, so two ranges never overlap. A legend without glyphs has no buttons: a tap on its row
+is ✕ like anywhere else. The log says what a tap did (`menu mouse: click at X,Y: row -1: a
+message`, `menu mouse: the message takes Triangle`, `... nothing (the legend's row, off its
+words)`); the mouse trace prints each popup's legend and its buttons' ranges (`legend button 1000:
+glyph 373-386, word to 482, taps 367-488`).
 
 How a touch player answers each kind of prompt now:
 
@@ -85,6 +92,9 @@ message the shop's list stayed on its header.
 - **Anywhere, not the box**: the message's box is not a row, and a phone player expects a tap on
   the screen to go on; the box's legend words are the exception, so a second button stays
   reachable without Back (iOS has none).
+- **The legend's row presses only its words** (review, the lead's call): the fallback is ✕, so a
+  tap that just misses CANCEL would otherwise retry or accept. On the legend's row a miss presses
+  nothing and the player taps again; above and below it a tap is still ✕.
 - **Shop and track chooser keep their own rules**: their roots have no rows either, but
   `game_popup_mouse` takes their taps first.
 - `DHD_TOUCH_WITH_SCRIPT=1` (tests only) now also merges the menus' taps, so a `DHD_NAV` route can
@@ -100,22 +110,36 @@ message the shop's list stayed on its header.
   at 0.6125 of the width is x 519 in a popup but about 379 in a shell list. The pointer mapping is
   right for each (a player taps what they see); a test that aims at a popup's word must use the
   popup's scale.
+- **Two defects in the first legend test, found in review** (fixed): it measured the legend with
+  the style at +0x14 (the disabled rows'), not the footer's +0x08, whose spacing differs, so the
+  visible right end of CANCEL could fall outside its range and give ✕; and each range took 6
+  pixels past the next glyph's start with the first match winning, so a tap on the left of
+  CANCEL's glyph gave ✕. Our own pages' legend (`page_legend_button`, finding 227) still measures
+  with +0x14; not changed here.
 - A `DHD_NAV` route's last step is pressed again every 30 fields while the screen stays the same
   (a ↓ on OPTIONS walks the cursor on and on); end a route with a step that never matches.
 
 ## Result
 
-Commits on `fix/touch-continue-266`: the lane plan, then the fix with its test and check tool.
+Commits on `fix/touch-continue-266`: the lane plan, the fix with its test and check tool, then
+the legend's ranges after the review.
 
 - Unit test: `port/tools/test_menu_pads.py` (in `check.py port` through `test_runtime.py`):
   `menu_is_message` on four text rows (the Mountain Cross message), no rows (the card notices),
-  a question with an enabled row, and counts out of range.
+  a question with an enabled row, and counts out of range; `menu_legend_ranges` on legends of two
+  and three buttons (wide gaps and gaps narrower than two paddings): each glyph's left edge and
+  middle, each word's middle and right edge give its own button, a wide gap's middle nothing, a
+  narrow gap split at its middle, ranges never overlap, padding only outside the legend; on the card
+  notice's legend every pixel of CANCEL is △ and every pixel of RETRY ✕.
 - Hidden runs (`touch_continue_check.py`, 1600x720 at 20:9, `DHD_TOUCH_MOUSE=1`, no controller):
   `shop` PASS (one tap closed the Mountain Cross message on a fresh Career; the shop behind it
-  untouched); `card` PASS (a tap on CANCEL pressed △ and closed "memory card not found"; the
-  title still waited; a second tap opened the main menu). The base build (3746e414) fails `shop`:
+  untouched); `card-left-edge`, `card-glyph`, `card-middle`, `card-right-edge` PASS: four boots,
+  one tap each at view x 375, 378, 434 and 481 of CANCEL's 373-482 (glyph 373-386; RETRY's taps
+  end at 258), each pressed △ and closed "memory card not found"; after the middle one the title
+  still waited and a second tap opened the main menu. The base build (3746e414) fails `shop`:
   `click at 320,100: row 3 (off)`, the message stays.
-- State traces: boot (600 fields) and race (5000) of this branch equal to 3746e414's.
-- `check.py port` (quick and docs in it).
+- State traces: boot (600 fields) and race (5000) of this branch equal to 3746e414's (before the
+  review fix; it changes only what a tap on a message's legend row presses).
+- `check.py quick`, `check.py port`, `check.py docs` after the review fix.
 - Not run: a phone (the Mi 11i was not connected: the phone proof is owed), results after a
   finish, iOS.

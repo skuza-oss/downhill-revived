@@ -99,6 +99,13 @@ int menu_pads_held(void);
    which a tap anywhere answers with Cross (finding 266). `enabled`: the first row's flag, the rows
    `stride` bytes apart. */
 int menu_is_message(const char *enabled, int count, int stride);
+/* A legend's buttons where a tap takes them (menu_pads.c, finding 266): left / glyph_right / right
+   the drawn glyph and word, [from, to) the tap range, padded outside but never overlapping a
+   neighbour. prefix[i]: the drawn width of the first i characters. */
+enum { MENU_LEGEND_BUTTONS = 8 };
+typedef struct { int left, glyph_right, right, from, to; uint16_t button; } MenuLegendRange;
+int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLegendRange *out, int max);
+uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x);
 
 /* ---- drawing, for a page that lays itself out (in its draw) ----
    In the popup's view, x across 0..640 and y down 0..224 as the rows are (menu_draw_size),
