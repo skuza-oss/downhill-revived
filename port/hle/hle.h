@@ -125,6 +125,9 @@ int keyboard_script(const char *script, double seconds, uint8_t down[256]);  /* 
 void keyboard_key(unsigned position, unsigned typed, int down);
 unsigned keyboard_typed_of(unsigned position);  /* what that key types on the current layout */
 int keyboard_position_down(unsigned position);
+/* The keys pressed since the last call, held or already let go (taps[position] != 0), then none:
+   once a field, so a tap shorter than a field still counts for one (finding 262). */
+void keyboard_taps_take(uint8_t taps[256]);
 int keyboard_is_down(unsigned typed);           /* a key that types `typed` is held */
 void keyboard_focus(int focused);               /* the game's window has the keyboard */
 int keyboard_focused(void);
@@ -144,6 +147,9 @@ typedef struct {
 int gamepad_start(void);
 void gamepad_set_multiplayer(int local_multiplayer); /* game thread publishes setup before reading pads */
 int gamepad_raw(int player, GamepadRaw *out);  /* 0: no controller for that player */
+/* The game's read once a field (host_pad_device): the same, with every button held at any moment
+   since the last such read, so a press shorter than a field still counts for one (finding 262). */
+int gamepad_raw_take(int player, GamepadRaw *out);
 void gamepad_apply(const struct ControlsLayout *layout, const GamepadRaw *raw, int dead_zone, HostPad *out);
 int gamepad_place(const struct ControlsLayout *layout, int id);  /* id's place with the layout's Swap L1/L2, R1/R2 */
 void gamepad_vibrate(int player, int light, int heavy);

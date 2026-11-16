@@ -32,6 +32,7 @@
   "home.played.hours": "プレイ時間：{hours}時間{minutes}分",
   "home.played.minutes": "プレイ時間：{minutes}分",
   "home.otherReleases": "他のリリースについて",
+  "home.softwareGpu": "このPCのグラフィックチップはDirect3D 12にもVulkanにも対応していません。グラフィックアクセラレーションなしで動いているため、ゲームはとても遅くなります。",
 
   "crash.title": "Downhill Revivedは前回、予期せず終了しました",
   "crash.body": "{why} ログを共有すると修正に役立ちます。何が起きたかが記録されています。",

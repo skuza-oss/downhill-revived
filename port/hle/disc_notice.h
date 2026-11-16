@@ -114,4 +114,23 @@ static inline int disc_notice_lines(const char *note, char lines[][DISC_NOTICE_W
     return at;
 }
 
+/* The graphics notice (finding 262). software: host_service_gs_scale(2), 0 on a real GPU (and
+   before the device, and in the browser), else the platform of a software adapter: 1 Windows, 2
+   macOS or iOS, 3 another (Linux, Android). The core is one module for every platform, so the
+   host says which. */
+static inline int graphics_notice_due(int software) { return software >= 1 && software <= 3; }
+
+/* The graphics notice's lines for software (graphics_notice_due). Returns how many. */
+static inline int graphics_notice_lines(int software, char lines[][DISC_NOTICE_WIDTH + 1], int max)
+{
+    static const char *const chip[3] = {
+        "This PC's graphics chip does not support Direct3D 12 or Vulkan.",
+        "This device's graphics chip does not support Metal.",
+        "This device's graphics chip does not support Vulkan.",
+    };
+    int at = disc_notice_wrap(lines, 0, max, chip[(software >= 1 && software <= 3 ? software : 3) - 1]);
+    if (at < max) lines[at++][0] = 0;
+    return disc_notice_wrap(lines, at, max, "The game is running without graphics acceleration and will be very slow.");
+}
+
 #endif

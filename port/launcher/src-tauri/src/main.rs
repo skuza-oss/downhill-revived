@@ -59,6 +59,8 @@ struct Snapshot {
     /// The resolution scale the last run drew at and how far its GPU goes (dhd.log); None when no
     /// run has said yet.
     scale: Option<scale::ScaleReport>,
+    /// The last run had no graphics acceleration: a software adapter (dhd.log, finding 262).
+    software_gpu: bool,
 }
 
 #[derive(Serialize)]
@@ -146,6 +148,7 @@ fn snapshot(app: State<App>) -> Snapshot {
         running: app.game.lock().unwrap().is_some(),
         played: played(&app.place),
         scale: scale::last_run(&app.place.data.join("dhd.log")),
+        software_gpu: scale::software_last_run(&app.place.data.join("dhd.log")),
         settings,
     }
 }

@@ -74,6 +74,19 @@ int main(void)
     memset(long_note, 'A', 120), long_note[120] = 0;
     n = disc_notice_lines(long_note, lines, DISC_NOTICE_LINES);
     for (int i = 0; i < n; i++) assert(strlen(lines[i]) <= DISC_NOTICE_WIDTH);
+
+    /* the graphics notice (finding 262): only on a software adapter, in its platform's words */
+    assert(!graphics_notice_due(0) && !graphics_notice_due(4) && !graphics_notice_due(-1));
+    for (int platform = 1; platform <= 3; platform++) {
+        assert(graphics_notice_due(platform));
+        n = graphics_notice_lines(platform, lines, DISC_NOTICE_LINES);
+        assert(n >= 4 && n <= DISC_NOTICE_LINES);
+        for (int i = 0; i < n; i++) assert(strlen(lines[i]) <= DISC_NOTICE_WIDTH);
+        assert(mentions(lines, n, "The game is running without") && mentions(lines, n, "very slow."));
+        assert(mentions(lines, n, platform == 1 ? "Direct3D 12 or Vulkan." : platform == 2 ? "Metal." : "support Vulkan."));
+    }
+    n = graphics_notice_lines(1, lines, DISC_NOTICE_LINES);
+    assert(mentions(lines, n, "This PC's graphics chip"));
     printf("PASS: disc notice\n");
     return 0;
 }

@@ -5,8 +5,9 @@
 #ifndef DHD_HOST64_GUEST_MEMORY_OS_H
 #define DHD_HOST64_GUEST_MEMORY_OS_H
 #include <stdint.h>
+#include "memory_layout.h"
 
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#if HOST64_TWO_PARTS
 #include "guest_place.h"
 /* The bounds-checked layout (iOS, finding 258; POSIX only): guest_memory.c places the guest's two
    parts itself. The process's free address ranges, in a malloc'd array (*out; the caller frees

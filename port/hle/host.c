@@ -1021,14 +1021,16 @@ static int riding_controls(void) { return *(volatile int32_t *)GUEST(0x0829E290)
    text_input_key_allowed takes the character the key types. */
 static void keyboard_merge(HostPad *out)
 {
-    uint8_t down[256] = {0}, keys[CONTROL_TARGETS * CONTROL_SLOTS + 1];
+    uint8_t down[256] = {0}, keys[CONTROL_TARGETS * CONTROL_SLOTS + 1], taps[256];
     const ControlsLayout *layout = controls_layout(CONTROL_KEYBOARD);
+    keyboard_taps_take(taps);  /* a key tapped and let go since the last field counts for this one */
     if (keyboard_focused() && !keyboard_is_down(VKEY_MENU) && !keyboard_is_down(VKEY_CONTROL) &&
         !keyboard_is_down(VKEY_LWIN) && !keyboard_is_down(VKEY_RWIN)) {
         int count = keyboard_keys(layout, keys);
         for (int i = 0; i < count; i++) {
             unsigned place = keys[i];
-            if (text_input_key_allowed(keyboard_typed_of(place)) && keyboard_position_down(place)) down[keys[i]] = 1;
+            if (text_input_key_allowed(keyboard_typed_of(place)) && (keyboard_position_down(place) || taps[place]))
+                down[keys[i]] = 1;
         }
     }
     keyboard_pad(layout, down, riding_controls(), host_seconds(), out);
@@ -1038,7 +1040,7 @@ static void keyboard_merge(HostPad *out)
         {0x27, PAD_RIGHT, 0}, {0x25, PAD_LEFT, 1}, {0x26, PAD_UP, 2}, {0x28, PAD_DOWN, 3}};
     if (keyboard_focused() && text_input_active())
         for (unsigned i = 0; i < sizeof arrows / sizeof *arrows; i++)
-            if (keyboard_position_down(arrows[i].vk) && text_input_key_allowed(arrows[i].vk))
+            if ((keyboard_position_down(arrows[i].vk) || taps[arrows[i].vk]) && text_input_key_allowed(arrows[i].vk))
                 out->buttons |= arrows[i].bit, out->pressure[arrows[i].pressure] = 255;
 }
 
@@ -1052,7 +1054,7 @@ void host_pad_device(int port, HostPad *out)
     /* D_004B25A0 + 0x288: local human count, set by the player-count screen and
        kept through split-screen setup/racing. Online races use one local human. */
     gamepad_set_multiplayer(*(volatile int32_t *)GUEST(0x084B2828) > 1);
-    int connected = gamepad_start() && gamepad_raw(port, &raw);
+    int connected = gamepad_start() && gamepad_raw_take(port, &raw);
     /* the sticks' dead zone (stick.h), followed here on the game thread, where PC SETTINGS sets it */
     if (connected) gamepad_apply(pad_layout(port), &raw, stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")), out);
     if (port == 0) {

@@ -4,13 +4,14 @@
 #include <string.h>
 #include "bridge.h"
 #include "core_host.h"
+#include "memory_layout.h"  /* HOST64_TWO_PARTS */
 #include "../include/guest.h"
 static wasm_rt_memory_t *memory;
 static uint32_t next;
 void host64_bridge_bind(wasm_rt_memory_t *m) { memory=m; next=0x07000000; }
 void *host64_bridge_pointer(uint32_t at,uint32_t bytes) {
     if (!memory || (!at && bytes) || (uint64_t)at+bytes>memory->size) wasm_rt_trap(WASM_RT_TRAP_OOB);
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#if HOST64_TWO_PARTS
     /* iOS: the gap between the guest's two parts is not the guest's (guest_memory.c, finding 258) */
     if (bytes && (uint64_t)at+bytes>0x3a000000u && at<0x70000000u) wasm_rt_trap(WASM_RT_TRAP_OOB);
 #endif

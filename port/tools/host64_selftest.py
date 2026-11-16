@@ -21,6 +21,10 @@ ON_WINDOWS = sys.platform == 'win32'
 WIN_WABT = (DEVCACHES / 'wabt/wabt-1.0.42')
 WIN_WASI = (DEVCACHES / 'wasi-sdk/wasi-sdk-34.0-x86_64-windows')
 WIN_LLVM = (Path.home() / 'scoop/apps/llvm/current/bin')
+# Both builds check bounds in the code (explicit checks; clang-cl takes them by default), which
+# alone would give the guest iOS's two-part layout (memory_layout.h, finding 258); the address
+# lists here are the 8 GiB layout's, every other platform's, so the test asks for that one.
+TWO_PARTS_OFF = '-DHOST64_TWO_PARTS=0'
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
@@ -74,7 +78,7 @@ def main():
         common = [cc, '-O2', '-ffp-model=strict', '-ffp-contract=off',
                   '-ftrivial-auto-var-init=zero', '-fno-strict-aliasing', '-fwrapv',
                   '-DWASM_RT_STACK_DEPTH_COUNT=1', '-DWASM_RT_MAX_CALL_STACK_DEPTH=512',
-                  '-DWASM_RT_MEMCHECK_BOUNDS_CHECK=1',
+                  '-DWASM_RT_MEMCHECK_BOUNDS_CHECK=1', TWO_PARTS_OFF,
                   '-I'+str(wabt/'include'), '-I'+str(rt), '-I'+str(source), '-I'+str(out)]
         if a.optimized:
             common += ['-O3', '-march=x86-64-v2', '-mtune=znver3']
@@ -87,7 +91,7 @@ def main():
         version = '10.0.26100.0'
         common = [a.llvm/'clang-cl.exe', '--target=x86_64-pc-windows-msvc', '/O2',
                   '/clang:-ffp-model=strict', '/clang:-ffp-contract=off',
-                  '-DWASM_RT_STACK_DEPTH_COUNT=1', '-DWASM_RT_MAX_CALL_STACK_DEPTH=512',
+                  '-DWASM_RT_STACK_DEPTH_COUNT=1', '-DWASM_RT_MAX_CALL_STACK_DEPTH=512', TWO_PARTS_OFF,
                   '-I'+str(wabt/'include'), '-I'+str(rt), '-I'+str(source), '-I'+str(out),
                   '/imsvc'+str(msvc/'include')]
         common += ['/imsvc'+str(sdk/'Include'/version/x) for x in ('ucrt','um','shared')]

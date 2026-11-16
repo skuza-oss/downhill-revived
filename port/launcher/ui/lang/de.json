@@ -32,6 +32,7 @@
   "home.played.hours": "{hours} Std. {minutes} Min. gespielt",
   "home.played.minutes": "{minutes} Min. gespielt",
   "home.otherReleases": "Mehr zu anderen Versionen",
+  "home.softwareGpu": "Der Grafikchip dieses PCs unterstützt weder Direct3D 12 noch Vulkan. Das Spiel läuft ohne Grafikbeschleunigung und wird sehr langsam sein.",
 
   "crash.title": "Downhill Revived wurde beim letzten Mal unerwartet beendet",
   "crash.body": "{why} Das Protokoll zu teilen hilft, den Fehler zu beheben: Es zeigt, was passiert ist.",

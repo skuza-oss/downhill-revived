@@ -290,6 +290,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 258 | [the game starts on iPhones with 3 GB of memory (guest memory in two pieces)](258-ios-guest-memory.md) | current |  |
 | 259 | [the Redmi 9 on 0.8.6: Native VU crashes the Mali driver; speed, limits, stutter, picture](259-redmi9-086.md) | current |  |
 | 260 | [the Redmi 9 dies at the title in 0.8.6: the Mali-G52 compiler and the mesh vertex stage](260-mali-mesh-shader.md) | current |  |
+| 262 | [three small fixes after 0.8.7: the guard in a shared folder, 258's Result, software GPUs](262-small-fixes.md) | current |  |
 | 263 | [weak phones start with Performance Mode, at 2x where it reaches 60](263-weak-phone-settings.md) | current |  |
 | 264 | [Native VU only: nothing left on the emulated VU1, then the emulated path deleted](264-native-vu-only.md) | current |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |

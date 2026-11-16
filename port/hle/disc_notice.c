@@ -4,7 +4,12 @@
    that a new copy of the player's own disc fixes it, and that online needs the USA disc's files.
    OK (or Triangle) dismisses it, and disc-notice.txt in the player's data folder remembers the
    image (its game files hash; disc_notice.h has the rules). The main menu only: never over a race
-   or a movie; a check that finishes elsewhere waits for it. Offline play goes on; nothing is sent. */
+   or a movie; a check that finishes elsewhere waits for it. Offline play goes on; nothing is sent.
+
+   The graphics notice (finding 262) comes the same way, once a run: when the renderer runs on a
+   software adapter (WARP, Microsoft Basic Render Driver, llvmpipe, SwiftShader: the host's
+   host_service_gs_scale(2), from dhd_render's device.rs `software`), the player is told why the
+   game is so slow. */
 #include "hle.h"
 #include "menu_page.h"
 #include "disc_notice.h"
@@ -21,6 +26,9 @@ static MenuPage page;
 static char lines[DISC_NOTICE_LINES][DISC_NOTICE_WIDTH + 1];
 static int line_count;
 static int settled;  /* shown, or not due, this run: nothing more to do */
+static int gpu_settled;  /* the graphics notice: shown, or not due, this run */
+
+static int software;      /* host_service_gs_scale(2): 0, or the software adapter's platform (host_api.h) */
 
 static void seen_path(char *out, size_t size) { disc_data_path(out, size, "disc-notice.txt"); }
 
@@ -63,6 +71,7 @@ int port_disc_notice_due(void)
 {
     const char *why, *usa, *hash;
     static char seen[DISC_NOTICE_SEEN];
+    if (!gpu_settled && !(gpu_settled = !graphics_notice_due(software = host_service_gs_scale(2)))) return 1;
     disc_check_start();
     if (settled || !(hash = disc_check_answer(&why, &usa))) return 0;
     seen_read(seen, sizeof seen);
@@ -73,9 +82,22 @@ int port_disc_notice_due(void)
     return 1;
 }
 
-/* The notice, modally in the main menu; then remembered. */
+/* The notice, modally in the main menu; then remembered. The graphics notice first, when due:
+   once a run, not remembered (the next start on that adapter says it again). */
 void port_disc_notice(void)
 {
+    if (!gpu_settled) {
+        gpu_settled = 1;
+        line_count = graphics_notice_lines(software, lines, DISC_NOTICE_LINES);
+        page.title = "GRAPHICS";
+        page.build = page_build;
+        page.accept = NULL;
+        page.back = NULL;
+        hle_log("graphics notice: shown (a software adapter: no graphics acceleration)\n");
+        menu_page_run(&page);
+        hle_log("graphics notice: closed\n");
+        return;
+    }
     const char *why, *usa, *hash = disc_check_answer(&why, &usa);
     static char seen[DISC_NOTICE_SEEN], next[DISC_NOTICE_SEEN];
     settled = 1;

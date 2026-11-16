@@ -729,19 +729,84 @@ pub(crate) mod list {
             }
         }
         let (marker, crash) = (list.with_file_name("pipelines-building.txt"), list.with_file_name("pipelines-crash.txt"));
-        recover_files(&list, &marker, &crash, &header(info), crate::host::log)
+        let owner = take_guard(&list.with_file_name("pipelines-guard.lock"), crate::host::log);
+        recover_files(&list, &marker, &crash, &header(info), owner, crate::host::log)
     }
 
-    /// `recover` on these files (the tests use their own).
+    /// The lock held for a run's whole life by the game that owns the guard's files in its data
+    /// folder (`claim`). The system frees it when the process ends in any way (a crash, a kill), so
+    /// a marker is judged only when the run that wrote it is over.
+    static OWNER: Mutex<Option<std::fs::File>> = Mutex::new(None);
+
+    /// The guard's lock file, taken without waiting: Some(file) to keep while the game runs, None when
+    /// another live game holds it; an error when the lock can't be used here at all.
+    pub fn claim(path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+        let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(file)),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => Err(e),
+        }
+    }
+
+    /// Whether this game owns the guard's files: it holds the lock (kept in `OWNER` until the process
+    /// ends), or the lock can't be used here (a file system without locks, a folder where the lock
+    /// file can't be made): then this game is assumed alone, as before the lock (0.8.7), so a
+    /// pipeline the driver dies on is still refused. Only a lock another live game holds makes it a
+    /// non-owner.
+    pub fn take_guard(path: &std::path::Path, mut log: impl FnMut(&str)) -> bool {
+        match claim(path) {
+            Ok(Some(lock)) => {
+                *OWNER.lock().unwrap_or_else(|p| p.into_inner()) = Some(lock);
+                true
+            }
+            Ok(None) => {
+                log("gs native: another game runs from this data folder (pipelines-guard.lock is held); its \
+                     pipelines-building.txt is not judged and this game writes none");
+                false
+            }
+            Err(e) => {
+                log(&format!("gs native: pipelines-guard.lock can't be used ({e}); this game is taken to be the \
+                              only one in its data folder and keeps the pipeline guard"));
+                true
+            }
+        }
+    }
+
+    /// `recover` on these files (the tests use their own). `owner`: this game holds the guard's lock
+    /// (`claim`); else another live game in the same folder owns the marker and the crash note, and
+    /// this one only reads the refused keys and writes neither.
     pub fn recover_files(list: &std::path::Path, marker: &std::path::Path, crash: &std::path::Path, header: &str,
-                         mut log: impl FnMut(&str)) -> Vec<u64> {
+                         owner: bool, mut log: impl FnMut(&str)) -> Vec<u64> {
         let read = |path: &std::path::Path| {
             std::fs::metadata(path).is_ok_and(|m| m.len() <= LARGEST).then(|| std::fs::read_to_string(path).ok()).flatten()
         };
         let mut text = read(list).unwrap_or_default();
+        if !owner {
+            let refused = refused_in(&text, header, &mut log);
+            let mut g = guard();
+            g.header = Some(header.to_string());
+            g.marker = None; // nothing is written (write_marker)
+            g.refused = Some(refused.iter().copied().collect());
+            g.suspects = Vec::new();
+            g.failed = false;
+            return refused;
+        }
         let note = read(crash).unwrap_or_default();
         let mut suspects = Vec::new();
-        if let Some(dead) = read(marker) {
+        let mut failed = false;
+        // a marker is judged only when it can be taken away: one that stays (a folder this game can't
+        // write) would be judged again at every start, and a stale one must never become a refusal
+        let dead = read(marker).filter(|_| match std::fs::remove_file(marker) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                log(&format!("gs native: pipelines-building.txt can't be removed ({e}); it is not judged, and \
+                              the guard is off in this run"));
+                failed = true;
+                false
+            }
+            _ => true,
+        });
+        if let Some(dead) = dead {
             let j = judge(&dead, &note, &text, header);
             for key in &j.again {
                 log(&format!("gs native: the run before ended while pipeline {key:X} was built, not in its build \
@@ -773,17 +838,9 @@ pub(crate) mod list {
                 }
             }
             suspects = j.suspects;
-            let _ = std::fs::remove_file(marker);
         }
         let _ = std::fs::remove_file(crash);
-        let mut refused = parse_refused(&text, header);
-        refused.sort_unstable();
-        refused.dedup();
-        if !refused.is_empty() {
-            let keys: Vec<String> = refused.iter().map(|k| format!("{k:X}")).collect();
-            log(&format!("gs native: pipelines refused on this GPU, driver and shaders (the driver died building them \
-                          in an earlier run; pipelines.txt): {}", keys.join(" ")));
-        }
+        let refused = refused_in(&text, header, &mut log);
         if let Some(path) = crash.to_str().and_then(|p| std::ffi::CString::new(p).ok()) {
             CRASH_PATH.store(path.into_raw(), Ordering::Release); // an earlier one is left (a handler may read it)
         }
@@ -792,8 +849,21 @@ pub(crate) mod list {
         g.marker = Some(marker.to_path_buf());
         g.refused = Some(refused.iter().copied().collect());
         g.suspects = suspects;
-        g.failed = false;
+        g.failed = failed;
         write_marker(&mut g); // the suspects stay suspects until they build
+        refused
+    }
+
+    /// The refused keys of a list's text, sorted, and their log line.
+    fn refused_in(text: &str, header: &str, log: &mut impl FnMut(&str)) -> Vec<u64> {
+        let mut refused = parse_refused(text, header);
+        refused.sort_unstable();
+        refused.dedup();
+        if !refused.is_empty() {
+            let keys: Vec<String> = refused.iter().map(|k| format!("{k:X}")).collect();
+            log(&format!("gs native: pipelines refused on this GPU, driver and shaders (the driver died building them \
+                          in an earlier run; pipelines.txt): {}", keys.join(" ")));
+        }
         refused
     }
 
@@ -826,7 +896,10 @@ pub(crate) mod list {
             std::fs::write(marker, text)
         };
         if let Err(e) = written {
+            // once a run; what an earlier write left would be stale, so it goes (when it can: a
+            // marker the next start can't remove is not judged there)
             g.failed = true;
+            let _ = std::fs::remove_file(marker);
             crate::host::log(&format!("gs native: pipelines-building.txt can't be written ({e}); a pipeline the driver \
                                        dies on is not refused next time"));
         }
@@ -1043,7 +1116,7 @@ pub(crate) mod list {
             let mut lines = Vec::new();
             let start = |header: &str, lines: &mut Vec<String>| {
                 guard().header = None; // a new process
-                recover_files(&list, &marker, &crash, header, |l| lines.push(l.to_owned()))
+                recover_files(&list, &marker, &crash, header, true, |l| lines.push(l.to_owned()))
             };
             assert!(start("H", &mut lines).is_empty());
             {
@@ -1095,8 +1168,64 @@ pub(crate) mod list {
             assert!(start("H2", &mut lines).is_empty());
             die_in_build(&marker, &crash, 0x77, false);
             assert_eq!(start("H2", &mut lines), vec![0x77]);
+
+            // a second game in the same folder while the first runs (it holds the lock): the first's
+            // live marker is neither judged nor written, twice in a row; the refusals still hold
+            let live = "H2\n?5\n99\n"; // the first game's: a suspect, and a build now
+            std::fs::write(&marker, live).unwrap();
+            let listed = std::fs::read_to_string(&list).unwrap();
+            for _ in 0..2 {
+                guard().header = None; // a new process, without the lock
+                assert_eq!(recover_files(&list, &marker, &crash, "H2", false, |l| lines.push(l.to_owned())), vec![0x77]);
+                assert!(refused(0x77) && !refused(0x99));
+                {
+                    let _second = building(0x99);
+                    assert_eq!(std::fs::read_to_string(&marker).unwrap(), live, "the second game writes no marker");
+                }
+                assert_eq!(std::fs::read_to_string(&marker).unwrap(), live);
+                assert_eq!(std::fs::read_to_string(&list).unwrap(), listed);
+            }
+            // the first run over (its lock freed): its marker is judged at last, a kill's way
+            assert_eq!(start("H2", &mut lines), vec![0x77]);
+            assert_eq!(std::fs::read_to_string(&marker).unwrap(), "H2\n?99\n?5\n");
+            assert_eq!(std::fs::read_to_string(&list).unwrap(), listed);
             guard().header = None;
             std::fs::remove_dir_all(&dir).unwrap();
+        }
+
+        /// The guard's lock: one live holder per folder; free again once it is dropped (the
+        /// system does the same when a process ends).
+        #[test]
+        fn one_game_a_folder_holds_the_guard() {
+            let path = std::env::temp_dir().join(format!("dhd-pipelines-guard-{}.lock", std::process::id()));
+            let first = claim(&path).unwrap().expect("a free lock is taken");
+            assert!(claim(&path).unwrap().is_none(), "a second holder is refused");
+            drop(first);
+            let again = claim(&path).unwrap();
+            assert!(again.is_some(), "a dropped lock is free");
+            drop(again);
+            std::fs::remove_file(&path).unwrap();
+        }
+
+        /// Only a lock another game holds makes a non-owner; a lock that can't be used keeps the
+        /// guard (one game assumed, 0.8.7's way), with one line saying why.
+        #[test]
+        fn only_a_held_lock_gives_up_the_guard() {
+            let path = std::env::temp_dir().join(format!("dhd-pipelines-held-{}.lock", std::process::id()));
+            let other = claim(&path).unwrap().expect("a free lock is taken"); // another live game
+            let mut lines = Vec::new();
+            assert!(!take_guard(&path, |l| lines.push(l.to_owned())), "held by another game: not the owner");
+            assert!(lines.last().unwrap().contains("another game runs from this data folder"));
+            drop(other);
+            std::fs::remove_file(&path).unwrap();
+            // the lock file can't even be made (its folder is missing): an error, not contention
+            let missing = std::env::temp_dir().join(format!("dhd-no-such-folder-{}", std::process::id())).join("x.lock");
+            let mut lines = Vec::new();
+            assert!(take_guard(&missing, |l| lines.push(l.to_owned())), "a lock that can't be used keeps the guard");
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].contains("can't be used") && lines[0].contains("keeps the pipeline guard"), "{}", lines[0]);
+            // a direct claim's error is told apart from contention
+            assert!(claim(&missing).is_err());
         }
     }
 }
