@@ -37,6 +37,8 @@ Out of scope: speed work, other phones (the Mi 11i and the Mac are not touched).
 - [x] 2026-11-16: the phone: the guard with the bad shader, 5 starts of 5 with the defaults, the
   race picture, Native VU on against off at 2x
 - [x] 2026-11-16: `check.py quick`, `check.py port`, state traces, picture tests (Result)
+- [x] 2026-11-16: review: a refusal for good needs the crash handler's note; a kill or a close
+  makes a suspect, built alone, refused only when left again (unit tests; phone not attached)
 - [ ] the lead: the merge, a release
 
 ## The construct
@@ -92,37 +94,64 @@ perspective mesh varyings.
   does not depend on the branch (its gain was the fragment stages and the clip-space vertices,
   both kept).
 
-## The guard (78203e78)
+## The guard (78203e78, crash evidence after review)
 
 In `pipelines.rs`'s `list` module, on every native platform:
 
 - While the driver builds a draw pipeline, its key is in `pipelines-building.txt` beside
-  `pipelines.txt` (under the list's first line); it is taken out when the build returns, and the
-  file is removed when nothing builds. Two small writes a build, no sync: a process that dies
-  leaves its written file to the system.
+  `pipelines.txt` (under the list's first line), and in one of eight lock-free slots with the
+  building thread's id; both are cleared when the build returns, and the file is removed when
+  nothing builds and nothing is suspected. Two small writes a build under the guard's mutex, no
+  sync: a build is a driver compile of tens to hundreds of ms, the listed keys are built ahead by
+  the worker thread, and a dying process leaves its written file to the system.
+- **The crash note is the evidence.** The game's crash handler (`port/hle/host.c` `crashed`, the
+  POSIX signal handler on Android, iOS, Linux and macOS and the unhandled-exception filter on
+  Windows) first asks `dhdr_native_pipeline_crash` (atomics only: async-signal-safe) for the key
+  its own thread is building and writes `pipelines-crash.txt`: `crash KEY`, or `crash` when that
+  thread built nothing (open/write, a stack buffer).
 - At the next native renderer's create (`list::recover`, once a process, before any draw
-  pipeline), a key left there died inside the driver's build. If this device built it before
-  (listed in `pipelines.txt`), the death was not the compiler's (the game killed while it built
-  its list ahead): one log line, it is built again. Otherwise it becomes `!KEY` in `pipelines.txt`
-  and `build` refuses it from then on (`refused`): its draws are skipped, a specialised one falls
-  back to the generic, and a refused mesh key turns Native VU off at the create (`refuse_meshes`:
-  the VU runs every program, the picture is the emulated path's).
-- The list's first line now carries an FNV-1a hash of `native.wgsl` and `native_dual.wgsl`
-  (format 2). A new shader or a new driver starts a new list, so a refused key is tried again
-  after either changes. Every player's list starts again once with this change (one start that
-  builds at first use).
+  pipeline) each key left in the marker is judged (`judge`):
+  - named by the crash note: `!KEY` in `pipelines.txt`, refused from then on (`refused`): its
+    draws are skipped, a specialised one falls back to the generic, and a refused mesh key turns
+    Native VU off at the create (`refuse_meshes`: the VU runs every program);
+  - no crash note (the player closed the game, Android killed it, or a death the handler did not
+    see, such as an abort): not refused. It becomes a suspect, `?KEY` in the marker: built again,
+    but alone (a suspect's build takes `TURNS` for writing, every other build for reading), and
+    cleared when its build returns. A suspect left behind again with no build of it returning in
+    between is refused (the "two runs in a row" rule, for deaths without a note);
+  - another key in the build at the time of a named crash (two builds at once: render thread and
+    pipeline worker): built again, not refused; a crash on a thread that built nothing makes every
+    key left a suspect;
+  - listed in `pipelines.txt` (built here before with this driver and shaders): logged, never
+    refused.
+- The list's first line carries an FNV-1a hash of `native.wgsl` and `native_dual.wgsl` (format 2).
+  **The way back needs no file editing**: a driver update or a release whose native shaders differ
+  is a new first line, and every refused key is tried again. Every player's list starts again once
+  with this change (one start that builds at first use). There is no other reset: the launcher's
+  Graphics reset writes dhd.ini only.
 - Nothing is hidden: the crash stays in the run before's log (`dhd-previous.log`, with the
-  startup record's `died at native pipeline ...`), and each start says
-  `gs native: the run before died inside the driver's build of pipeline KEY; ...`,
+  startup record's `died at native pipeline ...`), and each start says which rule applied
+  (`gs native: the run before crashed inside the driver's build of pipeline KEY; ...`,
+  `... with no crash in its build on record (closed, killed, or not seen); it is built again,
+  alone, ...`, `... not in its build (built before, or another thread's crash); ...`), then
   `gs native: pipelines refused on this GPU, driver and shaders (...): KEY ...` and
   `gs native: Native VU can't run on this GPU (the driver died building mesh pipeline KEY in an
   earlier run); the VU runs every program`. The phone launcher already shows "it crashed, share
   the log" after the dead start.
+- Unit tests (`only_a_crash_note_refuses_at_once`, `a_run_that_died_building_is_judged_on_evidence`):
+  a kill without a note (a suspect, no refusal, built alone, cleared after its build), a note
+  (refusal), two keys in building on two threads with the crash in one (only that one refused),
+  a crash on a thread that built nothing (suspects only), a suspect left again (refused), a listed
+  key, another driver's marker, and a new header trying a refused key again.
 
-On the phone (this branch with the test hook, 0.8.6's shader pushed through it): start g1 died (`SIGSEGV in thread
+On the phone, with the first form of the guard (78203e78, which refused every key left in the
+marker; this branch with the test hook, 0.8.6's shader pushed through it): start g1 died (`SIGSEGV in thread
 dhd-pipelines`, two mesh keys building at once, `E26BC000` on the render thread and
 `E0180033E26BC000` on the worker); g2 logged both as refused, turned Native VU off and reached the
-title; g3 the same from the list alone. The phone's `pipelines.txt` was put back afterwards.
+title; g3 the same from the list alone. The phone's `pipelines.txt` was put back afterwards. With
+the crash note, the same death names `E0180033E26BC000` (the worker's): it is refused, which turns
+Native VU off, so `E26BC000` is not built at the next start. The crash-note form was not run on the
+phone: the Redmi 9 was not attached when it was done (unit tests only).
 
 ## The phone (the fixed build)
 
@@ -167,6 +196,13 @@ compare only within one table.
 - **Refuse the key, not Native VU for one start**: a start with Native VU off would be followed
   by one that builds the mesh pipeline again and dies (every other start lost). The refusal lasts
   as long as the driver and the shaders do.
+- **Evidence, not a leftover key**: a key left in the marker only says the run ended during its
+  build. A player closing the game or Android killing it while a new list is built (the first
+  start after an update) must not turn Native VU off for good, so only the crash handler's note
+  refuses at once. The note is written by the crashing thread about its own build, so two builds
+  at once cannot condemn the innocent one.
+- **Suspects are built alone** rather than refused: one more death names one key, and a healthy
+  phone loses nothing (a build is already the slow part; the lock only orders builds).
 - **A listed key is never refused**: it built here before with the same driver and shaders, so a
   death in its build is a kill (the game closed while it built ahead at the boot), and refusing a
   good key would hide draws or turn Native VU off for nothing.
@@ -181,7 +217,7 @@ compare only within one table.
 - **After a crash the phone launcher shows its "it crashed" page once** (`LastExit.firstAsk`), even
   with `launcher = 0`: a script that starts the game after a crashed run must start it twice.
 - Two mesh pipelines were in the compiler at once when the bad shader died (render thread and
-  pipeline worker): the guard refuses both.
+  pipeline worker): the first guard refused both; the crash note names the worker's one.
 
 ## Result
 
@@ -190,15 +226,18 @@ compare only within one table.
   malioc does not reproduce it. Only 0.8.6 shipped it (48962741).
 - The fix (b87cc9c6): `select` in both vertex stages, `&` for their tests; the pictures are
   identical to 0.8.6's, and `native_spirv` refuses the form in any vertex stage.
-- The guard (78203e78): a draw pipeline the driver died building is refused from the next start
-  on that GPU, driver and shaders; a refused mesh pipeline turns Native VU off; every step logged.
+- The guard (78203e78 and the crash-note commit): a draw pipeline the game's crash handler names
+  as its thread's build is refused from the next start on that GPU, driver and shaders; a run that
+  ended any other way during a build makes the key a suspect, built again alone and refused only
+  if left again; a refused mesh pipeline turns Native VU off; every step logged.
 - Checked: `check.py quick` and `check.py port` (with `test_gs_wgpu --skip-hardware` and the
   native replay); `native_spirv` with malioc for Mali-G52 (3192 of 3192 stages compile); the
-  list's unit tests (`a_run_that_died_building_is_not_repeated` and the judge's cases); boot (600
+  list's unit tests (`a_run_that_died_building_is_judged_on_evidence` and the judge's cases); boot (600
   fields) and race (5000) state traces of this branch's `dhd64.exe` equal to 2760f372's (the base
   built from the same tree with the four changed files at 2760f372); `native_vu_pictures.py` at 4x
   with Native VU on, base against this branch: identical in all 11 fields.
-- On the Redmi 9: the guard with the bad shader (one death, then the title with Native VU off);
+- On the Redmi 9: the first guard with the bad shader (one death, then the title with Native VU
+  off; the crash-note form not run there, the phone was not attached);
   5 starts of 5 with the defaults through the race start; Native VU on 1.6 % faster than off in
   the race at 2x.
 - Cost elsewhere: the mesh vertex stage computes both positions (malioc: +0.09 arithmetic cycles

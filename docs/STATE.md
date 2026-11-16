@@ -339,8 +339,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the second run on a race has no frame over 100 ms (4 before; worst 1 % 39 -> 32 ms) and the
   route loses 0.9-1.0 s over 50 ms instead of 8.3-8.6 s. A first run still compiles at first use.
   The Redmi 9: no race frame over 100 ms from the second run (finding 259). The list also holds
-  the pipelines the driver died building in an earlier run, which are not built again on that GPU,
-  driver and shaders (`pipelines-building.txt`, finding 260).
+  the pipelines the game's crash handler saw the driver die building in an earlier run, which are
+  not built again on that GPU, driver and shaders; a run closed or killed during a build only
+  makes the key a suspect, built again alone (`pipelines-building.txt`, finding 260).
 - PowerVR GE8320 phones start since finding 170 and no longer close in the Bike Shop (finding 176:
   a blend that keeps the colour is drawn unblended, a pipeline the driver refuses skips its draws);
   not yet confirmed by the reporters (issues #56, #60).
