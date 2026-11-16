@@ -25,7 +25,7 @@
 
 uintptr_t guest_base;
 static wasm_rt_memory_t *owner;
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#if HOST64_TWO_PARTS
 /* iOS without the extended-virtual-addressing entitlement (finding 224): wasm2c's bounds-checked
    layout, memory at most 2 GiB. iOS caps such an app's address space, and on a device with 3 GB or
    less there is no 2 GiB hole at all (finding 258): the system's shared cache takes
@@ -93,7 +93,7 @@ int host64_memory_commit_stack(uint32_t sp) {
     return sp>HOST64_NULL_GUARD && sp<=0x00400000 &&
         host64_memory_commit(HOST64_NULL_GUARD,sp-HOST64_NULL_GUARD);
 }
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#if HOST64_TWO_PARTS
 /* The core's initial memory ends at 0x70E00000 (build_wasm.py's INITIAL_MEMORY): every
    reservation's high part reaches HOST64_HIGH_END_MIN at least, which memory_access.h's plain
    window 56 needs. A module that needs more (the self-test's) is placed again at its
@@ -228,7 +228,7 @@ void wasm_rt_free_memory(wasm_rt_memory_t *m) {
     }
     os_backing_close();
     guest_base=0; owner=NULL;
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#if HOST64_TWO_PARTS
     host64_guest_end=UINT64_MAX;
 #endif
     os_fault_remove();

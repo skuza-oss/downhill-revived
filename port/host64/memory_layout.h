@@ -20,11 +20,15 @@
 /* iOS, wasm2c's bounds-checked layout (finding 258): the guest's memory is two parts at one base,
    [0, 0x3a000000) and [HOST64_HIGH_BASE, end), end at least HOST64_HIGH_END_MIN (the module's
    first 31 MiB above the scratchpad and the 64 KiB window above them); guest_memory.c places
-   them, memory_access.h keeps accesses out of what lies between and above. */
+   them, memory_access.h keeps accesses out of what lies between and above. Every layout switch
+   tests HOST64_TWO_PARTS, which follows the memory-check mode; host64_selftest.py sets it to 0 to
+   run its bounds-checked module on the 8 GiB layout its address lists describe (finding 262). */
+#ifndef HOST64_TWO_PARTS
 #if WASM_RT_MEMCHECK_BOUNDS_CHECK
 #define HOST64_TWO_PARTS 1
 #else
 #define HOST64_TWO_PARTS 0
+#endif
 #endif
 #define HOST64_HIGH_BASE 0x70000000ull
 #define HOST64_HIGH_END_MIN 0x72010000ull

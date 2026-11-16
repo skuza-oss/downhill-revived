@@ -81,7 +81,7 @@ int os_backing_open(void) {
     if (!sized && ftruncate(ram_fd,RAM_SIZE)<0) { close(ram_fd); ram_fd=-1; return 0; }
     return 1;
 }
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#if HOST64_TWO_PARTS
 static int add_range(GuestRange **r,unsigned *n,unsigned *cap,uint64_t lo,uint64_t hi) {
     if (hi<=lo) return 1;
     if (*n==*cap) {
@@ -250,7 +250,7 @@ static void report(unsigned long long at,int wrote) {
     void host_log_drain(void) __attribute__((weak));
     if (host_log_drain) host_log_drain();
 }
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK
+#if HOST64_TWO_PARTS
 /* An access outside the guest's two parts (memory_access.h, GUEST(), the bridge; finding 258):
    what lies there is not the guest's, so it is never touched. The report and the end are the
    fault's, as when the reservation covered the gap: the same dhd.log line (run_record.c reads

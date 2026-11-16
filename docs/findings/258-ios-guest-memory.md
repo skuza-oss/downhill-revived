@@ -165,11 +165,35 @@ space, and the fold below is the next step.
   for the modes that must fail at the start.
 - The Linux variant of `host64_selftest.py` (`--linux`, a manual tool no check runs) builds with
   `WASM_RT_MEMCHECK_BOUNDS_CHECK=1` and so gets the two-part layout: its lists of unchanged and
-  reserved addresses include 0x3a000000, in the gap, and fail there now. Not changed here.
+  reserved addresses include 0x3a000000, in the gap, and fail there now. Not changed here; finding
+  262 repaired it (and the Windows variant, which takes the same checks by default with clang-cl
+  and no longer linked).
 - The Mac (8 GB) reached a load of about 750 with four booted simulators' `locationd` spinning and
   restarted itself once during the IPA build; the builds were redone after it.
 
 ## Result
 
-Filled in at the merge. The fix is proven on the Mac (an address space with no 2 GiB range) and in
-the iOS Simulator, not on a phone with 3 GB: the player's log decides.
+- **The cause** (from XNU's source, not seen on the phone): iOS gives an app on a device with 3 GB
+  or less an address space capped just above its shared cache, so no free range of 2 GiB +
+  64 KiB (0.8.5's single reservation) can exist there; it is the cap, not fragmentation.
+- **The fix**: on iOS (wasm2c's bounds-checked layout) the guest is reserved in two parts at one
+  base found from the process's free ranges, `[0, 0x3a000000)` and `[0x70000000, end)`, at the
+  process's start and again at the game's start if that failed (`guest_place.c`,
+  `guest_memory.c`); the gap between them is left to others and kept out of the guest's reach
+  (`memory_access.h`'s window mask, `GUEST()`, the bridge, `host64_memory_wild`). Windows, Linux,
+  macOS and Android keep their 8 GiB layout, unchanged. A failure says in dhd.log what was asked
+  and every free range of 16 MiB or more, the player gets an alert and the launcher a note; the
+  `system:` line says iOS or iPadOS.
+- **Proven**: `guest-place` and `guest-access` in `test_runtime.py` (`check.py port`);
+  `test_guest_space.py` on the Mac (start, late, none, and twelve wild accesses that end by
+  SIGSEGV); boot (600 fields) and race (5000) state traces on the PC equal to 0.8.6's; the iOS
+  Simulator from the launcher to a race (`host64 memory: guest memory at 0x7000000000, reserved
+  at the start: [0, 0x3a000000) and [0x70000000, 0x80010000), room to grow to 2048 MiB`). The
+  0.8.7 release job proved it again on the release's tree: `test_guest_space.py` OK (3 tests),
+  and the Simulator app went from the launcher (`bridge.call("play")`) through the menus to a race
+  67 s after launch with the same reservation line, 59.8/60 fps, no `freeze:` or `crash:` line.
+- **Unproven**: a real phone with 3 GB. The player's next dhd.log decides: the reservation line
+  above means it works; `host64 memory: no room for the guest's memory ...` with its free-range
+  lines means the fold (Decisions) is the next step.
+- **Left**: the player's log; the fold of the high part down next to the views if that log still
+  shows no room.
