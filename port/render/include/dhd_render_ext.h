@@ -57,6 +57,13 @@ DHDR_FN(dhdr_native_meshes) int dhdr_native_meshes(void);
    before. DHD_PIPELINE_LIST=0: no list. The browser's renderer ignores the call. */
 DHDR_FN(dhdr_native_pipeline_list) void dhdr_native_pipeline_list(const char *path);
 
+/* Finding 260: for the game's crash handler (port/hle/host.c crashed). Returns the crash note's
+   path beside the pipeline list (NULL: no list, or the native renderer not made yet) and sets *key
+   to the draw pipeline the calling thread is in the driver's build of (0: none). The handler
+   writes "crash KEY" (16 hex digits) or "crash" there; only a pipeline so named is refused for good
+   at the next start. Atomics only, no lock and no allocation: async-signal-safe. Native only. */
+DHDR_FN(dhdr_native_pipeline_crash) const char *dhdr_native_pipeline_crash(uint64_t *key);
+
 /* Finding 250: a colour surface's pixels for a local-to-host transfer (the native renderer draws
    only on the GPU; Poster Maker reads its frame back). begin copies GS pixels rect (x, y, w, h,
    clipped to the texture) of colour surface index and starts mapping it (natively it blocks until

@@ -338,7 +338,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   next start, the sharp font is made once a session and the touch controls' pipeline ahead. From
   the second run on a race has no frame over 100 ms (4 before; worst 1 % 39 -> 32 ms) and the
   route loses 0.9-1.0 s over 50 ms instead of 8.3-8.6 s. A first run still compiles at first use.
-  Not yet run on the Redmi 9.
+  The Redmi 9: no race frame over 100 ms from the second run (finding 259). The list also holds
+  the pipelines the game's crash handler saw the driver die building in an earlier run, which are
+  not built again on that GPU, driver and shaders; a run closed or killed during a build only
+  makes the key a suspect, built again alone (`pipelines-building.txt`, finding 260).
 - PowerVR GE8320 phones start since finding 170 and no longer close in the Bike Shop (finding 176:
   a blend that keeps the colour is drawn unblended, a pipeline the driver refuses skips its draws);
   not yet confirmed by the reporters (issues #56, #60).
@@ -351,8 +354,10 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - Native VU is the players' default (finding 198), and it is slower where the GPU limits: the
   Redmi 9 at 2x 50.6 -> 48.7 fields/s over the route (the race 47.3 -> 44.8), the integrated
   Radeon at 4x 122.1 -> 118.2; it gains where the CPU limits (finding 194). Finding 249 cut that cost on the
-  throttled Mi 11i at 4x from 6.2 % to 1.6 % of the race (61.3 -> 64.3 fields/s, off 65.4); the
-  Redmi 9 has not rerun. Finding 253 took the last batches of the translated loops off the emulated VU
+  throttled Mi 11i at 4x from 6.2 % to 1.6 % of the race (61.3 -> 64.3 fields/s, off 65.4). On
+  the Redmi 9 at 2x Native VU on is now the faster one (finding 260: race 50.9 against 50.2 fields/s,
+  route 55.1 against 54.3); 0.8.6 crashed there at the title (its mesh vertex stage, fixed in
+  finding 260, and a draw pipeline the driver died building is no longer built again). Finding 253 took the last batches of the translated loops off the emulated VU
   (11 % of the route's; race 64.5 -> 65.0, off 65.3) and lists what else still runs there. No driver that refuses it has run it. The emulated path is deleted once players' logs show no fallbacks.
 - On Mali GPUs a picture stays in one encoder (finding 198): finding 195's encoder cut lost the
   device on the Redmi 9's Mali-G52 in every full route, so 0.7.15 is expected to lose it there

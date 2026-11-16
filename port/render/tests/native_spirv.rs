@@ -11,8 +11,10 @@
 //! exact/pipelines.rs), for present.wgsl's render probe (the pipeline that compiles on the Mali
 //! phones) and raster.wgsl's stages for every raster key, and checks that each stage writes, passes
 //! no image or sampler into a function (the construct Mali's r54 compiler crashes on, finding 153;
-//! `shaders.rs` checks the WGSL of every module for it) and has none of the forms LLVM 9 turns into
-//! an intrinsic PowerVR Rogue's driver 1.13 cannot lower (`llvm_saturating_forms`, finding 170).
+//! `shaders.rs` checks the WGSL of every module for it), has none of the forms LLVM 9 turns into
+//! an intrinsic PowerVR Rogue's driver 1.13 cannot lower (`llvm_saturating_forms`, finding 170),
+//! and, in a vertex stage with no-perspective outputs, no conditional branch (Mali-G52's r26
+//! compiler crashes on that, finding 260; `noperspective_branches`).
 //!
 //! Environment:
 //! - `DHD_SPIRV_OUT`: a folder to keep each stage's SPIR-V in, `<device>/<entry>[-<constants>].<stage>.spv`.
@@ -404,6 +406,61 @@ fn llvm_saturating_forms(words: &[u32]) -> Vec<String> {
     found
 }
 
+/// The conditional branches (OpBranchConditional, OpSwitch) of a vertex stage that writes a
+/// no-perspective output; 0 for any other stage. Mali-G52's r26p0 compiler crashes building a
+/// pipeline whose vertex stage has both, when an output is computed (finding 260: 0.8.6's
+/// `native_mesh_vertex`, an `if` placing the position and STQ divided by w); a stage that passes
+/// its inputs through built, but the rule is kept simple: no branch at all in such a stage.
+fn noperspective_branches(words: &[u32]) -> usize {
+    const ENTRY_POINT: u32 = 15;
+    const DECORATE: u32 = 71;
+    const MEMBER_DECORATE: u32 = 72;
+    const BRANCH_CONDITIONAL: u32 = 250;
+    const SWITCH: u32 = 251;
+    const VERTEX: u32 = 0;
+    const NO_PERSPECTIVE: u32 = 13;
+    let (mut vertex, mut no_perspective, mut branches) = (false, false, 0);
+    let mut i = 5;
+    while i < words.len() {
+        let (op, len) = (words[i] & 0xFFFF, (words[i] >> 16) as usize);
+        assert!(len > 0 && i + len <= words.len(), "SPIR-V instruction at word {i}: length {len}");
+        match op {
+            ENTRY_POINT => vertex |= words[i + 1] == VERTEX,
+            DECORATE => no_perspective |= words[i + 2] == NO_PERSPECTIVE,
+            MEMBER_DECORATE => no_perspective |= words[i + 3] == NO_PERSPECTIVE,
+            BRANCH_CONDITIONAL | SWITCH => branches += 1,
+            _ => {}
+        }
+        i += len;
+    }
+    if vertex && no_perspective { branches } else { 0 }
+}
+
+/// noperspective_branches finds 0.8.6's form (an `if` placing the position, an output divided by w)
+/// and not the same stage with a select.
+#[test]
+fn noperspective_branches_scan() {
+    let stage = |body: &str| {
+        let source = format!("
+            struct V {{ @builtin(position) p: vec4<f32>, @location(0) @interpolate(linear) t: vec4<f32>, }}
+            @vertex
+            fn main(@location(0) c: vec4<f32>) -> V {{
+                var o: V;
+                o.t = c * (1.0 / c.w);
+                {body}
+                return o;
+            }}");
+        let (module, info) = parse(&source);
+        let s = Stage { source: Source::Native, stage: naga::ShaderStage::Vertex, entry: "main", constants: Vec::new(),
+                        groups: &[] };
+        noperspective_branches(&spirv(&module, &info, &s, DEVICES[2]))
+    };
+    assert_eq!(stage("if ((c.w > 0.0) & (c.x < c.w)) { o.p = c; } else { o.p = c * 2.0; }"), 1);
+    // naga writes the short-circuit && as a branch too
+    assert_eq!(stage("o.p = select(c * 2.0, c, c.w > 0.0 && c.x < c.w);"), 1);
+    assert_eq!(stage("o.p = select(c * 2.0, c, (c.w > 0.0) & (c.x < c.w));"), 0);
+}
+
 fn words_to_bytes(words: &[u32]) -> Vec<u8> {
     words.iter().flat_map(|w| w.to_le_bytes()).collect()
 }
@@ -477,6 +534,7 @@ fn native_spirv() {
     let mut files = Vec::new();
     let mut with_handles = Vec::new();
     let mut llvm_forms = Vec::new();
+    let mut branching = Vec::new();
     let mut written = 0;
     for device in DEVICES {
         for s in stages() {
@@ -502,6 +560,10 @@ fn native_spirv() {
             }
             for form in llvm_saturating_forms(&words) {
                 llvm_forms.push(format!("{}/{}: {form}", device.folder(), s.file_name()));
+            }
+            let branches = noperspective_branches(&words);
+            if branches != 0 {
+                branching.push(format!("{}/{}: {branches}", device.folder(), s.file_name()));
             }
             if let Some(dir) = &dir {
                 let dir = dir.join(device.folder());
@@ -543,6 +605,10 @@ fn native_spirv() {
             "stages with a form LLVM 9 turns into an intrinsic PowerVR Rogue's driver 1.13 crashes on (finding 170; \
              raster.wgsl's keep_u hides the arithmetic):\n{}",
             llvm_forms.join("\n"));
+    assert!(branching.is_empty(),
+            "vertex stages with no-perspective outputs and a conditional branch (Mali-G52 r26 crashes on them, \
+             finding 260; write a select):\n{}",
+            branching.join("\n"));
     assert!(failures.is_empty(), "{} of {} stages do not compile for {core}:\n{}", failures.len(), files.len(),
             failures.join("\n"));
 }

@@ -99,14 +99,13 @@ struct Varyings {
 fn native_vertex(@location(0) position_in: vec3<f32>, @location(1) stqf: vec4<f32>,
                  @location(2) color: vec4<u32>) -> Varyings {
     var o: Varyings;
-    var position = position_in;
     // Upscaled sprites sampled by whole texels (copies, nearest-magnified sprites) cover whole
     // GS pixels, as at 1x; bilinear sprites keep sub-GS-pixel corners and smooth UVs, since
     // snapping those collapses a few-pixel billboard (grass, canopies, dirt) to one flat
-    // sample per GS pixel (finding 196).
-    if ((nat.flags & 1024u) != 0u && (nat.flags & 32u) == 0u && (nat.scale & 255u) > 1u) {
-        position = vec3<f32>(ceil(position.xy - 0.5), position.z);
-    }
+    // sample per GS pixel (finding 196). A select and `&`, not a branch: a vertex stage with
+    // no-perspective outputs has none (finding 260, native_spirv checks it).
+    let snap = ((nat.flags & 1024u) != 0u) & ((nat.flags & 32u) == 0u) & ((nat.scale & 255u) > 1u);
+    let position = select(position_in, vec3<f32>(ceil(position_in.xy - 0.5), position_in.z), snap);
     o.position = vec4<f32>(position.xy / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), position.z, 1.0);
     o.stqf = stqf;
     o.color = vec4<f32>(color);
@@ -141,19 +140,20 @@ fn native_mesh_vertex(@location(0) clip: vec4<f32>, @location(1) uvq: vec3<f32>,
     o.color = vec4<f32>(color);
     let k = nat.mesh_clip;
     let bound = abs(k.w);
-    let inside = clip.w > 0.0 && abs(screen.x + k.x) <= bound && abs(screen.y + k.y) <= bound && clip.w + k.z >= -bound;
-    if (inside) {
-        let gs_xy = trunc(screen.xy * 16.0);
-        let xy = (gs_xy - nat.mesh_offset.xy) * 0.0625 + 0.5;
-        let z = min(max(trunc(screen.z), 0.0), nat.mesh_offset.z);
-        o.position = vec4<f32>(xy / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), z * nat.mesh_offset.w, 1.0)
-                     * clip.w;
-    } else {
-        // (x / w - offset / 16 + 0.5) / size * 2 - 1, times w; y likewise, flipped; z / w * scale, times w
-        let at = clip.xy - (nat.mesh_offset.xy * 0.0625 - 0.5) * clip.w;
-        o.position = vec4<f32>(at / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-clip.w, clip.w),
-                               clip.z * nat.mesh_offset.w, clip.w);
-    }
+    let inside = (clip.w > 0.0) & (abs(screen.x + k.x) <= bound) & (abs(screen.y + k.y) <= bound) & (clip.w + k.z >= -bound);
+    // Both forms are made and one is chosen, and the tests above are `&`, not the short-circuit
+    // `&&` (naga writes that as branches): no branch in this stage. Mali-G52's r26 compiler crashes
+    // on a branch placing the position in a vertex stage with no-perspective outputs (finding 260).
+    let gs_xy = trunc(screen.xy * 16.0);
+    let xy = (gs_xy - nat.mesh_offset.xy) * 0.0625 + 0.5;
+    let z = min(max(trunc(screen.z), 0.0), nat.mesh_offset.z);
+    let placed = vec4<f32>(xy / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), z * nat.mesh_offset.w, 1.0)
+                 * clip.w;
+    // (x / w - offset / 16 + 0.5) / size * 2 - 1, times w; y likewise, flipped; z / w * scale, times w
+    let at = clip.xy - (nat.mesh_offset.xy * 0.0625 - 0.5) * clip.w;
+    let projected = vec4<f32>(at / nat.target_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-clip.w, clip.w),
+                              clip.z * nat.mesh_offset.w, clip.w);
+    o.position = select(projected, placed, inside);
     return o;
 }
 
