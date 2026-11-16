@@ -32,6 +32,7 @@
   "home.played.hours": "Tiempo jugado: {hours} h {minutes} min",
   "home.played.minutes": "Tiempo jugado: {minutes} min",
   "home.otherReleases": "Más sobre otras versiones",
+  "home.softwareGpu": "El chip gráfico de este PC no admite Direct3D 12 ni Vulkan. El juego funciona sin aceleración gráfica e irá muy lento.",
 
   "crash.title": "Downhill Revived se cerró de forma inesperada la última vez",
   "crash.body": "{why} Compartir el registro ayuda a arreglarlo: dice qué pasó.",

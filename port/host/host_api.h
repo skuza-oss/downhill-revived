@@ -198,7 +198,10 @@ void host_service_gs_present_options_apply(void);
 void host_service_gs_window_close(void);
 /* The resolution scale the pictures are drawn at (asked 0), or the one asked for (asked 1:
    DHD_SCALE's, or DHD_SCALE=window's match before the device's limit); 0 before the first
-   picture and without the native renderer (gs/gpu_rust_native.inc; PC SETTINGS shows it). */
+   picture and without the native renderer (gs/gpu_rust_native.inc; PC SETTINGS shows it).
+   asked 2: when the device is a software adapter (no graphics acceleration: the main menu's
+   graphics notice, hle/disc_notice.h, finding 262), the platform: 1 Windows, 2 macOS or iOS, 3
+   another; else 0 (the browser: always 0). */
 int host_service_gs_scale(int asked);
 /* The rooms this build offers, port/net/net.h's NET_OFFER_* bits: the one switch, the host's, so
    the core is the same on every platform (finding 143). Native builds (port/net/net.c), the

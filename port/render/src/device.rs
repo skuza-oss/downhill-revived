@@ -354,6 +354,11 @@ mod native {
         };
         crate::host::log(&format!("gs: GPUs: {}; the game runs on {} ({}){hint}", list.join(", "), picked.name,
                                   kind_name(picked.device_type)));
+        if software(picked) {
+            // the main menu's notice tells the player (port/hle/disc_notice.c, finding 262)
+            crate::host::log(&format!("gs: software adapter: the game runs on {} without graphics acceleration and \
+                                       will be very slow (no {backends:?} GPU found)", picked.name));
+        }
     }
 
     /// Whether DXC was asked for and the adapter is WARP (a software DX12 adapter: CPU type, or
@@ -362,9 +367,7 @@ mod native {
     /// F1), so the device is made again with FXC. Exact pictures are the same with either
     /// compiler (gate J1). The options kept (`Gpu::options`) stay what C asked for.
     fn software_fxc(compiler: &wgpu::Dx12Compiler, info: &wgpu::AdapterInfo) -> bool {
-        matches!(compiler, wgpu::Dx12Compiler::DynamicDxc { .. })
-            && info.backend == wgpu::Backend::Dx12
-            && (info.device_type == wgpu::DeviceType::Cpu || (info.vendor == 0x1414 && info.device == 0x8C))
+        matches!(compiler, wgpu::Dx12Compiler::DynamicDxc { .. }) && info.backend == wgpu::Backend::Dx12 && software(info)
     }
 
     /// gpu_wgpu.c:163-189: the fallback (WARP) adapter for `DHDR_DEV_FALLBACK`; else the
@@ -438,6 +441,18 @@ pub fn adapter_name() -> &'static CStr {
     GPU.get().map_or(c"", |g| g.name.as_c_str())
 }
 
+/// Whether an adapter draws in software on the CPU (WARP, Microsoft Basic Render Driver, llvmpipe,
+/// SwiftShader): wgpu's `Cpu` type, or Microsoft's 0x1414:0x8C (WARP, whatever type it reports).
+/// The game is then very slow, and the main menu says why (finding 262).
+pub fn software(info: &wgpu::AdapterInfo) -> bool {
+    software_kind(info.device_type, info.vendor, info.device)
+}
+
+/// `software` on an adapter's type and PCI ids.
+fn software_kind(t: wgpu::DeviceType, vendor: u32, device: u32) -> bool {
+    t == wgpu::DeviceType::Cpu || (vendor == 0x1414 && device == 0x8C)
+}
+
 /// An adapter's kind as the perf: lines say it.
 fn kind_name(t: wgpu::DeviceType) -> &'static str {
     match t {
@@ -446,6 +461,20 @@ fn kind_name(t: wgpu::DeviceType) -> &'static str {
         wgpu::DeviceType::VirtualGpu => "virtual",
         wgpu::DeviceType::Cpu => "cpu (software)",
         wgpu::DeviceType::Other => "other",
+    }
+}
+
+/// `dhdr_perf_read`'s adapter kind: 4 (cpu) for every software adapter (`software`).
+fn kind_code(info: &wgpu::AdapterInfo) -> u64 {
+    if software(info) {
+        return 4;
+    }
+    match info.device_type {
+        wgpu::DeviceType::Other => 0,
+        wgpu::DeviceType::IntegratedGpu => 1,
+        wgpu::DeviceType::DiscreteGpu => 2,
+        wgpu::DeviceType::VirtualGpu => 3,
+        wgpu::DeviceType::Cpu => 4,
     }
 }
 
@@ -461,13 +490,7 @@ pub extern "C" fn dhdr_perf_read(out: *mut u64, count: u32) -> u32 {
         return 0;
     }
     let (frames, ns, span) = crate::native::pipelines::gputimes::totals();
-    let kind = GPU.get().map_or(0, |g| match g.info.device_type {
-        wgpu::DeviceType::Other => 0,
-        wgpu::DeviceType::IntegratedGpu => 1,
-        wgpu::DeviceType::DiscreteGpu => 2,
-        wgpu::DeviceType::VirtualGpu => 3,
-        wgpu::DeviceType::Cpu => 4,
-    });
+    let kind = GPU.get().map_or(0, |g| kind_code(&g.info));
     let values = [
         crate::native::pipelines::gputimes::STATE.load(Ordering::Relaxed) as u64,
         frames,
@@ -543,5 +566,22 @@ mod tests {
         for quiet in [DualSource::On, DualSource::Refused, DualSource::NotOffered] {
             assert_eq!(quiet.log_line("x"), None);
         }
+    }
+
+    /// The software adapters (finding 262): the main menu's notice and the launcher's line show on
+    /// these only, never on a real GPU.
+    #[test]
+    fn software_adapters() {
+        use wgpu::DeviceType::*;
+        // WARP / Microsoft Basic Render Driver (CPU type, or its ids), llvmpipe and SwiftShader (CPU type)
+        assert!(software_kind(Cpu, 0x1414, 0x8C));
+        assert!(software_kind(Other, 0x1414, 0x8C));
+        assert!(software_kind(Cpu, 0x10005, 0)); // llvmpipe (Mesa's vendor id)
+        assert!(software_kind(Cpu, 0x1AE0, 0xC0DE)); // SwiftShader
+        for t in [IntegratedGpu, DiscreteGpu, VirtualGpu, Other] {
+            assert!(!software_kind(t, NVIDIA, 0x2484), "{t:?}");
+            assert!(!software_kind(t, VENDOR_INTEL, 0x0166), "{t:?}");
+        }
+        assert!(!software_kind(VirtualGpu, 0x1414, 0x8E)); // another Microsoft adapter (Hyper-V)
     }
 }

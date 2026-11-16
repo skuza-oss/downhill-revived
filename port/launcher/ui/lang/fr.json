@@ -32,6 +32,7 @@
   "home.played.hours": "{hours} h {minutes} min de jeu",
   "home.played.minutes": "{minutes} min de jeu",
   "home.otherReleases": "À propos des autres versions",
+  "home.softwareGpu": "La puce graphique de ce PC ne prend en charge ni Direct3D 12 ni Vulkan. Le jeu tourne sans accélération graphique et sera très lent.",
 
   "crash.title": "Downhill Revived s'est fermé de façon inattendue la dernière fois",
   "crash.body": "{why} Partager le journal aide à corriger le problème : il indique ce qui s'est passé.",

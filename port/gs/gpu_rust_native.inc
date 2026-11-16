@@ -119,7 +119,21 @@ static void native_device_lost(void) { device_lost_check(); }
 /* PC SETTINGS' Resolution row (port/hle/pc_settings.c): the scale the pictures are drawn at
    (asked 0) or the one asked for (asked 1: DHD_SCALE's, or the window's match before the limit),
    native_scale_now's; 0 before the first picture and without this renderer. */
-int host_service_gs_scale(int asked) { return (int)native_scale_now[asked ? 1 : 0]; }
+int host_service_gs_scale(int asked)
+{
+    if (asked == 2) {  /* a software adapter (finding 262): dhdr_perf_read's adapter kind 4 */
+        uint64_t perf[6] = {0};
+        if (dhdr_perf_read(perf, 6) != 6 || perf[5] != 4) return 0;
+#if defined(_WIN32)
+        return 1;
+#elif defined(__APPLE__)
+        return 2;
+#else
+        return 3;
+#endif
+    }
+    return (int)native_scale_now[asked ? 1 : 0];
+}
 
 /* ---- creation (EE thread, from rust_init) ---- */
 

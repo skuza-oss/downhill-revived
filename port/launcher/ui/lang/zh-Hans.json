@@ -32,6 +32,7 @@
   "home.played.hours": "游戏时长：{hours} 小时 {minutes} 分钟",
   "home.played.minutes": "游戏时长：{minutes} 分钟",
   "home.otherReleases": "关于其他版本",
+  "home.softwareGpu": "这台电脑的显卡芯片不支持 Direct3D 12 或 Vulkan。游戏正在没有图形加速的情况下运行，会非常慢。",
 
   "crash.title": "Downhill Revived 上次意外关闭了",
   "crash.body": "{why} 分享日志有助于修复问题：日志会记录发生了什么。",

@@ -56,10 +56,30 @@ pub fn parse(line: &str) -> Option<ScaleReport> {
     Some(ScaleReport { used, asked, limit, reason })
 }
 
+/// The line the renderer writes when the game runs on a software adapter (port/render/src/device.rs,
+/// finding 262): no graphics acceleration, so the game is very slow.
+const SOFTWARE: &str = "gs: software adapter: ";
+
+/// Whether the last run's dhd.log says the game ran on a software adapter (in its first MAX_READ
+/// bytes, where the device's lines are).
+pub fn software_last_run(log: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(log) else { return false };
+    let mut reader = BufReader::new(file.take(MAX_READ));
+    let mut line = Vec::new();
+    while reader.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+        if line.starts_with(SOFTWARE.as_bytes()) {
+            return true;
+        }
+        line.clear();
+    }
+    false
+}
+
+const MAX_READ: u64 = 4 << 20;
+
 /// The last run's report: the last such line in the first MAX_READ bytes of dhd.log (the line comes
 /// with the first picture, near the start; a long run's log can be large).
 pub fn last_run(log: &Path) -> Option<ScaleReport> {
-    const MAX_READ: u64 = 4 << 20;
     let file = std::fs::File::open(log).ok()?;
     let mut found = None;
     let mut reader = BufReader::new(file.take(MAX_READ));
@@ -122,6 +142,12 @@ mod tests {
             gs native: resolution scale 4x, capped: 8x asked, this GPU allows up to 4x (graphics memory: 8x needs 1024 MiB)\n\
             perf: render native scale=4\n").unwrap();
         assert_eq!(last_run(&log), report(4, "8", 4, Some("memory")));
-        std::fs::remove_dir_all(dir).unwrap();
+        assert!(!software_last_run(&log), "a run on a real GPU");
+        std::fs::write(&log, "dhd 0.8.7\ngs: GPUs: Microsoft Basic Render Driver (cpu (software)); the game runs on \
+            Microsoft Basic Render Driver (cpu (software))\ngs: software adapter: the game runs on Microsoft Basic Render \
+            Driver without graphics acceleration and will be very slow (no Backends(DX12) GPU found)\n").unwrap();
+        assert!(software_last_run(&log));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!software_last_run(&log), "no log");
     }
 }

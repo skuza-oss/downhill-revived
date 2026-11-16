@@ -82,6 +82,7 @@ const state = {
   discProblem: null, texturePack: false,
   scale: null,        // the last run's resolution scale (dhd.log): { used, asked, limit, reason }; null: no run said yet
   scaleMax: 0,        // the most a platform offers (a phone's renderer's limit), 0: no such limit
+  softwareGpu: false, // the last run had no graphics acceleration (a software adapter, dhd.log; finding 262)
   online: null,       // the disc's online check: { path, checking, done, total }, { path, usa } or { path, error }
   server: null,       // null: not asked yet; 'down'; or { races, riders, min_version }
   error: null,        // { text, fix: { label, icon, onclick } }: stays in the footer until dismissed
@@ -213,6 +214,7 @@ function renderHome() {
   $('fact-disc').title = iso;
   $('fact-disc-name').textContent = baseName(iso);
   renderCrash();
+  renderGpu();
   renderOnline();
   renderServer();
   renderPlayed();
@@ -229,6 +231,13 @@ function renderCrash() {
     el('div', { class: 'note-actions' },
       el('button', { class: 'btn', onclick: shareLog }, icon('i-share'), t('crash.share')),
       el('button', { class: 'btn text', onclick: () => { state.lastExit = null; renderCrash(); } }, t('crash.dismiss'))))));
+}
+
+// The last run had no graphics acceleration (finding 262): why the game was so slow.
+function renderGpu() {
+  const box = $('gpu-note');
+  box.hidden = !state.softwareGpu;
+  box.replaceChildren(...(state.softwareGpu ? [el('div', { class: 'note' }, icon('i-alert'), el('div', {}, t('home.softwareGpu')))] : []));
 }
 
 // Time played in all (saves/playtime.txt, counted by the launcher while the game runs).
@@ -943,6 +952,7 @@ function apply(snap) {
   state.played = snap.played;
   state.scale = snap.scale;
   state.scaleMax = snap.scale_max || 0;
+  state.softwareGpu = !!snap.software_gpu;
   state.discSize = snap.disc_size || 0;
   state.freeSpace = snap.free_space || 0;
   if (snap.last_exit) state.lastExit = snap.last_exit;  // said once; the note stays until dismissed
@@ -1025,7 +1035,12 @@ async function start() {
     // what this run's dhd.log says about the resolution scale (the GPU may have changed), and the
     // bindings REVIVED SETTINGS > Controls may have changed (controls.js reads them again)
     bind.layouts = null;
-    call('snapshot').then((s) => { state.scale = s.scale; if (!$('page-settings').hidden) renderRows(); });
+    call('snapshot').then((s) => {
+      state.scale = s.scale;
+      state.softwareGpu = !!s.software_gpu;
+      renderGpu();
+      if (!$('page-settings').hidden) renderRows();
+    });
     renderFooter();
     checkServer();
     if (e.wants_update) checkUpdate().then(() => { if (state.check === 'available') installUpdate(); });

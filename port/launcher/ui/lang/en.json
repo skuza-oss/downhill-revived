@@ -32,6 +32,7 @@
   "home.played.hours": "{hours} h {minutes} min played",
   "home.played.minutes": "{minutes} min played",
   "home.otherReleases": "More about other releases",
+  "home.softwareGpu": "This PC's graphics chip does not support Direct3D 12 or Vulkan. The game is running without graphics acceleration and will be very slow.",
 
   "crash.title": "Downhill Revived closed unexpectedly last time",
   "crash.body": "{why} Sharing the log helps get it fixed: it says what happened.",
