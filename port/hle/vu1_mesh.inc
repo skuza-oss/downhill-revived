@@ -39,7 +39,7 @@
    pool (MSCAL 0040's lighting, 0010/0020's skinning and lighting) that writes positions at 181 +
    index and lighting at 373 + index. Those stay on the VU (the item's maths needs the pool's
    positions on the CPU).
-   Each batch (MSCNT at 1CB0, 1040, 12E0 or 0590, VI13 a translated loop's) is read from VU1 data
+   Each batch (MSCNT at 1CB0, 1040, 12E0, 0590, 06E0 or 3258, VI13 a translated loop's) is read from VU1 data
    memory and the registers as they are and goes to the GS queue as one mesh item (gs_mesh.h): the
    pool positions, colours and texture coordinates of its strip vertices, the triangles the strip
    draws (the input's ADC joins left out; with back-face culling each in the winding the program's
@@ -899,13 +899,18 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
 {
     if (!mesh_enabled()) return 0;
     mesh.object = -1;
-    if (!mscnt || (addr != 0x1040 && addr != 0x1CB0 && addr != 0x12E0 && addr != 0x0590)) return 0;
+    if (!mscnt || (addr != 0x1040 && addr != 0x1CB0 && addr != 0x12E0 && addr != 0x0590 && addr != 0x06E0 &&
+                   addr != 0x3258))
+        return 0;
     for (unsigned p = 0; p < MESH_PROGRAMS; p++)
         if (vu1.vi[13] == mesh_programs[p].vi13 && (mesh.enabled >> p & 1)) mesh.object = (int)p;
     if (mesh.object < 0 || !mesh_overlay_b()) return mesh.object = -1, 0;
     /* 0590 (after the skinning pass): its JR's delay slot stores the pass's last vertex (SQ vf20,
        -2(vi8)); the VU repeats it in shadow mode */
     if (addr == 0x0590) memcpy(vu1.vu0_mem[(vu1.vi[8] - 2) & 1023].f, vu1.vf[20].f, 16);
+    /* 06E0 (after program 0000's pool pass, 05A0): its delay slot stores the pass's last entry (SQ vf25,
+       190(vi8)); 3258 (after 30A0's setup, 3190) has none (finding 264) */
+    if (addr == 0x06E0) memcpy(vu1.vu0_mem[(vu1.vi[8] + 190) & 1023].f, vu1.vf[25].f, 16);
     float parity = vu1.vf[6].f[0];
     /* The item's maths is the loop's, so it rounds as the VU does (toward zero, FTZ/DAZ; as
        ps2_vu1_run sets it): the positions it makes are then the VU's own bits (finding 249). */
