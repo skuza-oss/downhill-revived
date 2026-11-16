@@ -95,6 +95,10 @@ void menu_page_sound(int next);        /* S_NEXT / S_PREVIOUS, as the value rows
    (func_002209A8); -1 for a field whose word reads all ones (an edge the popup manager just
    took clears the pad's entry). For a page that reads the pads itself (menu_pads.c). */
 int menu_pads_held(void);
+/* A game popup with no row to choose (all disabled, or none): a message waiting for one button,
+   which a tap anywhere answers with Cross (finding 266). `enabled`: the first row's flag, the rows
+   `stride` bytes apart. */
+int menu_is_message(const char *enabled, int count, int stride);
 
 /* ---- drawing, for a page that lays itself out (in its draw) ----
    In the popup's view, x across 0..640 and y down 0..224 as the rows are (menu_draw_size),

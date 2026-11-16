@@ -1,6 +1,7 @@
 /* menu_pads_held (menu_pads.c) on the game's own stick test (func_002209A8, compiled from src/):
    the d-pad, the left stick at the menus' edge on either pad, nothing short of it, a pad in its
-   digital mode, and the field after an edge (issue #103, finding 250). */
+   digital mode, and the field after an edge (issue #103, finding 250). And menu_is_message: a
+   popup with no row to choose is a message a tap answers (issue #105, finding 266). */
 #include <assert.h>
 #include <stdio.h>
 #include "hle.h"
@@ -50,5 +51,17 @@ int main(void)
     pad(1, 0xFFFF, 0, 0);
     assert(menu_pads_held() == -1);
     printf("menu pads: the d-pad and the stick at the game's edge\n");
+
+    /* rows as the popup keeps them: 16 bytes each, the enabled flag at +6 (menu_page.c Item) */
+    static char rows[64 * 16];
+    assert(menu_is_message(rows + 6, 4, 16) == 1);   /* the shop's "MOUNTAIN CROSS / ENTRY BIKES ACQUIRED /
+                                                        PRESS X TO CONTINUE": four text rows, none enabled */
+    assert(menu_is_message(rows + 6, 0, 16) == 1);   /* the memory card's notices: no rows */
+    rows[1 * 16 + 6] = 1;
+    assert(menu_is_message(rows + 6, 2, 16) == 0);   /* a question: its YES / NO rows take taps themselves */
+    assert(menu_is_message(rows + 6, 1, 16) == 1);   /* the enabled row is past the count */
+    assert(menu_is_message(rows + 6, 65, 16) == 0);  /* not a popup's count */
+    assert(menu_is_message(rows + 6, -1, 16) == 0);
+    printf("menu pads: a popup with no row to choose is a message\n");
     return 0;
 }

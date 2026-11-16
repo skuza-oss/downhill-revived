@@ -26,3 +26,16 @@ int menu_pads_held(void)
     int a = pad_held(0), b = pad_held(1);
     return a < 0 || b < 0 ? -1 : a | b;
 }
+
+/* A popup of the game whose rows are all text, none to choose (or no rows at all), is a message
+   that waits for one button: "MOUNTAIN CROSS / ENTRY BIKES ACQUIRED / PRESS X TO CONTINUE" in the
+   shop, the memory card's notices (issue #105, finding 266). A tap anywhere answers it with Cross
+   (menu_page.c popup_mouse). `enabled` is the first row's flag, the rows `stride` bytes apart;
+   a count out of the popup's 64 rows is not a popup's. */
+int menu_is_message(const char *enabled, int count, int stride)
+{
+    if (count < 0 || count > 64) return 0;
+    for (int i = 0; i < count; i++)
+        if (enabled[i * stride]) return 0;
+    return 1;
+}
