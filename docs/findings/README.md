@@ -286,7 +286,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 254 | [online riders and reconnects on bad networks (late or lost snapshots, outages, drops)](254-online-feel-bad-networks.md) | current |  |
 | 255 | [menus, HUD and world at the same speed at 60 and 240 (issue #76)](255-high-fps-sweep.md) | current |  |
 | 256 | [the slow frames on weak phones](256-phone-stutter.md) | current |  |
-| 259 | [the Redmi 9 on 0.8.6: speed, what limits it, stutter and picture](259-redmi9-086.md) | in progress |  |
+| 259 | [the Redmi 9 on 0.8.6: Native VU crashes the Mali driver; speed, limits, stutter, picture](259-redmi9-086.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
