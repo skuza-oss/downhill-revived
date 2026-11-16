@@ -929,6 +929,8 @@ static int mesh_before(unsigned addr, int mscnt, uint32_t **packet)
     return 1;
 }
 
+static void packet_report(void);
+
 static void mesh_send(uint32_t *packet)
 {
     static uint64_t report_at = 3000;
@@ -940,6 +942,7 @@ static void mesh_send(uint32_t *packet)
     if (kernel_vsync_count >= report_at) {   /* the counts so far, every 3000 fields (and at exit) */
         mesh_report();
         if (mesh_emulated_on > 0) mesh_emulated_report();
+        packet_report();
         report_at = kernel_vsync_count + 3000;
     }
     graphics_gif_feed(GS_PATH_MESH, packet, mesh.words);
@@ -1019,3 +1022,66 @@ static void mesh_skipped(void)
 
 /* After a VU1 run that was not skipped (the constants are read at each batch). */
 static void mesh_after(unsigned addr, int mscnt) { (void)addr, (void)mscnt; }
+
+/* Overlay B's programs 0030 and 0050 (0030 is B 0050) kick the GIF packet the EE wrote at data
+   0x6C and end: 0050 IADDIU vi8, vi0, 0x6C; XGKICK vi8; NOP; NOP[E]; NOP. In C, for every
+   renderer, as the VU leaves it (finding 264): the same kick, VI8, TPC 0078 and the flag registers
+   written back as ps2_vu1_run writes them (status 12 bits, MAC 16, clip 24); nothing else changes.
+   DHD_NATIVE_VU1_CHECK=1 also runs each one on the VU from the same state and compares the
+   registers, the data memory and the kicked qword (packet_check). */
+static struct { int check; uint64_t runs, checked, bad_state, bad_kick; } packet = {-1};
+static unsigned packet_kicks, packet_kicked;
+
+static int packet_kick_record(void *opaque, unsigned qword)
+{
+    (void)opaque;
+    packet_kicks++; packet_kicked = qword;
+    return 0;
+}
+
+static void packet_report(void)
+{
+    hle_log("native VU1 0030/0050: %llu runs in C; checked %llu: state differs %llu, kick differs %llu\n",
+            (unsigned long long)packet.runs, (unsigned long long)packet.checked,
+            (unsigned long long)packet.bad_state, (unsigned long long)packet.bad_kick);
+}
+
+static void packet_end(void)
+{
+    vu1.vi[8] = 0x6C;
+    vu1.vu0_ctrl[0] &= 0xFFF; vu1.vu0_ctrl[1] &= 0xFFFF; vu1.vu0_ctrl[2] &= 0xFFFFFF;
+    vu1.vu0_ctrl[10] = 0x78;
+}
+
+static void packet_check(unsigned addr, unsigned top, unsigned itop)
+{
+    static ps2_cpu before, after;
+    static ps2_q128 memory[1024];
+    before = vu1;
+    memcpy(memory, vu1.vu0_mem, sizeof memory);
+    packet_end();
+    after = vu1;
+    vu1 = before;
+    packet_kicks = 0;
+    int failed = ps2_vu1_run(&vu1, addr, top, itop, packet_kick_record, NULL);
+    packet.checked++;
+    if (failed || memcmp(&vu1, &after, sizeof vu1) || memcmp(memory, vu1.vu0_mem, sizeof memory)) packet.bad_state++;
+    if (packet_kicks != 1 || packet_kicked != 0x6C) packet.bad_kick++;
+    vu1 = after;
+}
+
+/* 1 when the run was one of these (kicked here), else 0. */
+static int packet_program(unsigned addr, int mscnt, unsigned top, unsigned itop, int traced)
+{
+    if (mscnt || (addr != 0x30 && addr != 0x50) || !mesh_overlay_b()) return 0;
+    if (packet.check < 0) {
+        packet.check = getenv("DHD_NATIVE_VU1_CHECK") != NULL;
+        host_end_add(HOST_END_REPORT, "native VU1 0030/0050", packet_report);
+    }
+    packet.runs++;
+    if (packet.check) packet_check(addr, top, itop);
+    else packet_end();
+    if (traced) kick_trace(0x58, vu1.vu0_ctrl[2], 0x6C);
+    if (kick(NULL, 0x6C)) hle_log("vif1: microprogram at 0x%X failed\n", addr);
+    return 1;
+}
