@@ -873,7 +873,10 @@ static void mesh_emulated(unsigned addr, unsigned mscnt)
     unsigned overlay = !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x265C10), 32) ? 1 :
                        !memcmp(micro(1), GUEST(PS2_RAM_BASE + 0x269C60), 32) ? 2 : 0;
     unsigned program = graphics_provenance.program;
-    unsigned vi13 = (addr == 0x1040 || addr == 0x1CB0 || addr == 0x12E0) ? vu1.vi[13] & 0xFFFF : 0;
+    /* VI13 at every continuation that jumps through it: 1040, 1CB0, 12E0 and the first batches
+       after a pool pass or 30A0's setup (0590, 06E0, 3258: JR vi13) */
+    unsigned vi13 = (addr == 0x1040 || addr == 0x1CB0 || addr == 0x12E0 || addr == 0x0590 || addr == 0x06E0 ||
+                     addr == 0x3258) ? vu1.vi[13] & 0xFFFF : 0;
     unsigned at = (program * 7 + addr * 13 + overlay * 5 + mscnt + vi13 * 3) % MESH_EMULATED_KINDS;
     for (unsigned n = 0; n < MESH_EMULATED_KINDS; n++, at = (at + 1) % MESH_EMULATED_KINDS) {
         if (!mesh_emulated_kinds[at].used) {
