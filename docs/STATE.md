@@ -86,9 +86,11 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (`vu1_aot.py`, `vu1_native_clip.py`), checked against PCSX2's interpreter (findings 030, 090),
   and, with Native VU (the players' default on every platform, the browser included: findings
   198, 199), the translated batch loops as GPU shaders instead (findings 164, 167, 194), their
-  near-bound triangles clipped on the VU thread as the loops' clipper does (finding 253). The
-  emulated path for those loops remains as the fallback and the setting's off until it is deleted
-  (root AGENTS.md).
+  near-bound triangles clipped on the VU thread as the loops' clipper does (finding 253), their
+  first batches through 06E0 and 3258 too, and programs 0030/0050 (kick the EE's packet) in C for
+  every renderer (finding 264). The emulated VU1 stays: the setup programs, overlay B's four quad
+  loops and overlay A run there, and the exact renderer, the state traces and the referee's GS
+  captures need its kicks (finding 264 lists what blocks the deletion).
 - GS: GS memory and registers in C (`port/gs/`); the Rust renderer (`port/render`, wgpu: DX12 or
   Vulkan on Windows, Metal on Apple, Vulkan on Linux and Android, WebGPU in the browser) behind
   the shared C front ends `gpu_exact.inc` (exact: the PS2's pixels, the reference) and
@@ -358,7 +360,7 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   the Redmi 9 at 2x Native VU on is now the faster one (finding 260: race 50.9 against 50.2 fields/s,
   route 55.1 against 54.3); 0.8.6 crashed there at the title (its mesh vertex stage, fixed in
   finding 260, and a draw pipeline the driver died building is no longer built again). Finding 253 took the last batches of the translated loops off the emulated VU
-  (11 % of the route's; race 64.5 -> 65.0, off 65.3) and lists what else still runs there. No driver that refuses it has run it. The emulated path is deleted once players' logs show no fallbacks.
+  (11 % of the route's; race 64.5 -> 65.0, off 65.3) and lists what else still runs there. No driver that refuses it has run it. Finding 264's census of nine scenes cut the drawing runs left on the emulated VU by 52-95 % (0.9-3.8 million setup runs a scene remain) and says why the emulated path cannot be deleted yet.
 - On Mali GPUs a picture stays in one encoder (finding 198): finding 195's encoder cut lost the
   device on the Redmi 9's Mali-G52 in every full route, so 0.7.15 is expected to lose it there
   (fixed in 0.7.16).
