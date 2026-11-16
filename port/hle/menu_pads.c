@@ -26,3 +26,60 @@ int menu_pads_held(void)
     int a = pad_held(0), b = pad_held(1);
     return a < 0 || b < 0 ? -1 : a | b;
 }
+
+/* A popup of the game whose rows are all text, none to choose (or no rows at all), is a message
+   that waits for one button: "MOUNTAIN CROSS / ENTRY BIKES ACQUIRED / PRESS X TO CONTINUE" in the
+   shop, the memory card's notices (issue #105, finding 266). A tap anywhere answers it with Cross
+   (menu_page.c popup_mouse). `enabled` is the first row's flag, the rows `stride` bytes apart;
+   a count out of the popup's 64 rows is not a popup's. */
+int menu_is_message(const char *enabled, int count, int stride)
+{
+    if (count < 0 || count > 64) return 0;
+    for (int i = 0; i < count; i++)
+        if (enabled[i * stride]) return 0;
+    return 1;
+}
+
+/* Where each button of a legend can be tapped (finding 266): a button is its glyph and its word,
+   up to the next glyph without the spaces before it; prefix[i] is the drawn width of the legend's
+   first i characters (i = 0..length), from its left edge. Each range takes LEGEND_PAD pixels more
+   on both sides, but never past the middle of the gap to its neighbour, so two ranges never
+   overlap and the rest of a wide gap belongs to no button. Returns the number of buttons. */
+enum { LEGEND_PAD = 6 };
+int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLegendRange *out, int max)
+{
+    static const struct { char glyph; uint16_t button; } glyphs[] = {
+        {GLYPH_CROSS[0], PAD_CROSS}, {GLYPH_TRIANGLE[0], PAD_TRIANGLE}, {GLYPH_CIRCLE[0], PAD_CIRCLE}, {GLYPH_SQUARE[0], PAD_SQUARE}};
+    int at[MENU_LEGEND_BUTTONS], n = 0;
+    uint16_t button[MENU_LEGEND_BUTTONS];
+    for (int i = 0; i < length && n < max && n < MENU_LEGEND_BUTTONS; i++)
+        for (unsigned g = 0; g < sizeof glyphs / sizeof *glyphs; g++)
+            if (text[i] == glyphs[g].glyph) at[n] = i, button[n++] = glyphs[g].button;
+    for (int k = 0; k < n; k++) {
+        int end = k + 1 < n ? at[k + 1] : length;
+        while (end > at[k] + 1 && text[end - 1] == ' ') end--;
+        out[k].button = button[k];
+        out[k].left = prefix[at[k]], out[k].glyph_right = prefix[at[k] + 1], out[k].right = prefix[end];
+    }
+    for (int k = 0; k < n; k++) {
+        int lo = out[k].left - LEGEND_PAD, hi = out[k].right + LEGEND_PAD;
+        if (k > 0) {
+            int middle = (out[k - 1].right + out[k].left) / 2;
+            if (lo < middle) lo = middle;
+        }
+        if (k + 1 < n) {
+            int middle = (out[k].right + out[k + 1].left) / 2;
+            if (hi > middle) hi = middle;
+        }
+        out[k].from = lo, out[k].to = hi;
+    }
+    return n;
+}
+
+/* The button whose range [from, to) holds x, 0 none. */
+uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x)
+{
+    for (int k = 0; k < n; k++)
+        if (x >= ranges[k].from && x < ranges[k].to) return ranges[k].button;
+    return 0;
+}
