@@ -805,6 +805,11 @@ impl Native {
             Some(p) => p,
             None => (Objects::create(gpu, dual)?, Pipelines::new()),
         };
+        // the pipelines an earlier run died building (finding 260): a mesh one turns Native VU off
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(key) = pipelines::list::recover(&gpu.info).into_iter().find(|&k| k as u32 & pipelines::MESH != 0) {
+            refuse_meshes(Some(&format!("the driver died building mesh pipeline {key:X} in an earlier run")));
+        }
         for key in probe_keys(objects.dual) {
             pipelines.get(gpu, &objects, key as u64)?;
         }
