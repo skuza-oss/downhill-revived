@@ -17,8 +17,10 @@ final class Native {
     static native String schema();
     /** Every setting's value in dhd.ini at ini, else its default (JSON object). */
     static native String values(String ini);
-    /** Conservative defaults for missing graphics choices, before any values reach the page. */
-    static native void phoneDefaults(String ini);
+    /** Conservative defaults for missing graphics choices on a known weak GPU, before any values
+     *  reach the page (findings 239, 263). The settings filled now: 1 the resolution, 2
+     *  Performance Mode; 0 nothing. */
+    static native int phoneDefaults(String ini);
     /** The value dhd.ini at ini gives key, as written; null when it has none. */
     static native String read(String ini, String key);
     /** key = value saved in dhd.ini at ini, every other line kept. */

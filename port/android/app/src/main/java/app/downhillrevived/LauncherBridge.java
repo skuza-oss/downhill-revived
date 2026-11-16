@@ -51,7 +51,7 @@ final class LauncherBridge {
         }
     }
 
-    void defaults() { Native.phoneDefaults(ini); }
+    int defaults() { return Native.phoneDefaults(ini); }
 
     /** The calls that read or write dhd.ini, and PLAY: one at a time on the activity's settings
      *  queue, in the order the page sent them (finding 228). A save then never overlaps another
@@ -195,6 +195,8 @@ final class LauncherBridge {
         // back from the layout editor alone (LauncherActivity.play): the page opens at its row, once
         s.put("reopen", activity.backFromEditor ? "touch-editor" : JSONObject.NULL);
         activity.backFromEditor = false;
+        s.put("start_note", activity.performanceNote ? "performance" : JSONObject.NULL);
+        activity.performanceNote = false;  // said once
         String why = activity.crashWhy;
         if (why != null) {
             JSONObject exit = new JSONObject();

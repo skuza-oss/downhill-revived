@@ -37,6 +37,7 @@
   "crash.body": "{why} Partager le journal aide à corriger le problème : il indique ce qui s'est passé.",
   "crash.share": "Partager le journal",
   "crash.dismiss": "Ignorer",
+  "start.performance": "Le mode Performance est activé pour ce téléphone. Vous pouvez le désactiver dans Réglages > Graphics.",
 
   "online.checking": "Vérification de l'image disque pour les courses en ligne… {percent} %",
   "online.offlineOnly": "Hors ligne seulement : les fichiers du jeu de cette image diffèrent de ceux du disque USA (SCUS-97177). C'est une copie défectueuse ou modifiée. Faites une nouvelle copie ou choisissez une autre image.",
@@ -81,7 +82,7 @@
   "row.scale.window.gpu": "La résolution adaptée à la fenêtre était de {used}x la dernière fois; votre GPU permet jusqu'à {limit}x",
   "row.scale.window.memory": "La résolution adaptée à la fenêtre était de {used}x la dernière fois; la mémoire de votre GPU permet jusqu'à {limit}x",
   "row.scale.window.texture": "La résolution adaptée à la fenêtre était de {used}x la dernière fois; la plus grande texture de votre GPU permet jusqu'à {limit}x",
-  "row.scale.hintPhone": "Netteté de l'image 3D. 1x est celle de la PS2 ; les échelles plus hautes demandent un téléphone plus rapide. Les téléphones Android lents reconnus démarrent en 1x avec le mode Performance. Vous pouvez modifier les deux ici.",
+  "row.scale.hintPhone": "Netteté de l'image 3D. 1x est celle de la PS2 ; les échelles plus hautes demandent un téléphone plus rapide. Les téléphones Android lents reconnus démarrent avec le mode Performance, les plus lents en 1x. Vous pouvez modifier les deux ici.",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide suit la forme de votre écran ; 16:9 reste toujours 16:9",
   "row.aspect.hintTouch": "Wide suit la forme de votre écran ; 16:9 reste toujours 16:9",

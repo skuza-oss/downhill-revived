@@ -88,6 +88,9 @@ public class LauncherActivity extends Activity {
     LauncherBridge bridge;
     /** How the run before ended, when it closed unexpectedly and the page hasn't said so yet. */
     volatile String crashWhy;
+    /** Performance Mode was turned on for this phone's GPU at this start and the page hasn't
+     *  said so yet (snapshot's "start_note", once; finding 263). */
+    volatile boolean performanceNote;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -121,12 +124,13 @@ public class LauncherActivity extends Activity {
         boolean asked = OPEN.equals(action) || DISC.equals(action) || restored || backFromEditor;
         new Thread(() -> {
             LastExit exit = LastExit.record(app);
-            bridge.defaults();
+            boolean performance = (bridge.defaults() & 2) != 0;
             String why = exit != null && exit.why != null && LastExit.firstAsk(app, exit) ? exit.why : null;
             boolean direct = !asked && why == null && bridge.startsDirectly();
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 crashWhy = why;
+                performanceNote = performance;
                 if (direct) play(false, false);  // the game at once (the setting "launcher", off)
                 else showPage();
             });

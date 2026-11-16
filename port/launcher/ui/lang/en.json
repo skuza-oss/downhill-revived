@@ -37,6 +37,7 @@
   "crash.body": "{why} Sharing the log helps get it fixed: it says what happened.",
   "crash.share": "Share log file",
   "crash.dismiss": "Dismiss",
+  "start.performance": "Performance Mode is on for this phone. You can turn it off in Settings > Graphics.",
 
   "online.checking": "Checking the disc image for online races… {percent}%",
   "online.offlineOnly": "Offline only: this disc image's game files are different from the USA disc's (SCUS-97177): a bad or modified dump. Make a new dump or choose another image.",
@@ -81,7 +82,7 @@
   "row.scale.window.gpu": "The resolution matched to the window came out at {used}x last time; your GPU allows up to {limit}x",
   "row.scale.window.memory": "The resolution matched to the window came out at {used}x last time; your GPU's memory allows up to {limit}x",
   "row.scale.window.texture": "The resolution matched to the window came out at {used}x last time; your GPU's largest texture allows up to {limit}x",
-  "row.scale.hintPhone": "How sharp the 3D picture is drawn. 1x is the PS2's own; higher scales need a faster phone. Known slow Android phones start at 1x with Performance Mode. You can change both here.",
+  "row.scale.hintPhone": "How sharp the 3D picture is drawn. 1x is the PS2's own; higher scales need a faster phone. Known slow Android phones start with Performance Mode, the slowest at 1x. You can change both here.",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide fits your monitor's shape; 16:9 is always 16:9",
   "row.aspect.hintTouch": "Wide fits your screen's shape; 16:9 is always 16:9",

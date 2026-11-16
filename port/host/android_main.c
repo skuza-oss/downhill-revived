@@ -77,7 +77,7 @@ static void settings_start(const char *disc)
 {
     char path[1200], iso[8];
     snprintf(path, sizeof path, "%sdhd.ini", files);
-    extern void android_phone_defaults(const char *path);
+    extern unsigned android_phone_defaults(const char *path);
     android_phone_defaults(path);
     char report[1200], line[2048];
     snprintf(report, sizeof report, "%sdhd-start-settings.txt", files);

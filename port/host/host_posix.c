@@ -401,7 +401,8 @@ void host_os_system(char *out, unsigned size)
     __system_property_get("ro.build.version.release", release);
     __system_property_get("ro.product.manufacturer", maker);
     __system_property_get("ro.product.model", model);
-    __system_property_get("ro.soc.model", cpu);
+    if (__system_property_get("ro.soc.model", cpu) <= 0)  /* Android 12+; before: the board platform */
+        __system_property_get("ro.board.platform", cpu);
     snprintf(os, sizeof os, "Android %s, %s %s", release, maker, model);
 #else
     char name[96];

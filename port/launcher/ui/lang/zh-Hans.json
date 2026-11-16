@@ -37,6 +37,7 @@
   "crash.body": "{why} 分享日志有助于修复问题：日志会记录发生了什么。",
   "crash.share": "分享日志",
   "crash.dismiss": "忽略",
+  "start.performance": "此手机已开启性能模式。可在 设置 > Graphics 中关闭。",
 
   "online.checking": "正在检查光盘镜像是否可用于在线比赛… {percent}%",
   "online.offlineOnly": "仅限离线：此光盘镜像的游戏文件与美版光盘（SCUS-97177）不同，是损坏或被修改的镜像。请重新制作镜像，或选择其他镜像。",
@@ -79,7 +80,7 @@
   "row.scale.window.gpu": "按窗口匹配的分辨率上次为 {used}x; 你的显卡最高支持 {limit}x",
   "row.scale.window.memory": "按窗口匹配的分辨率上次为 {used}x; 受你的显卡显存限制，最高支持 {limit}x",
   "row.scale.window.texture": "按窗口匹配的分辨率上次为 {used}x; 受你的显卡最大纹理尺寸限制，最高支持 {limit}x",
-  "row.scale.hintPhone": "3D 画面的清晰程度。1x 与 PS2 相同；更高的倍数需要更快的手机。 已识别的低性能 Android 手机默认使用 1x 分辨率和性能模式。两项设置均可在此更改。",
+  "row.scale.hintPhone": "3D 画面的清晰程度。1x 与 PS2 相同；更高的倍数需要更快的手机。 已识别的低性能 Android 手机默认开启性能模式，最慢的机型使用 1x 分辨率。两项设置均可在此更改。",
   "row.aspect": "Picture",
   "row.aspect.hint": "Wide 适配显示器的形状；16:9 始终为 16:9",
   "row.aspect.hintTouch": "Wide 适配屏幕的形状；16:9 始终为 16:9",

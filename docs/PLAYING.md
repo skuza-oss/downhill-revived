@@ -534,6 +534,10 @@ G35/P35/A22 (PowerVR GE8320), Snapdragon 4xx or Unisoc SC9863A, phones with 2-3 
 PCs with 2 cores and old integrated graphics. Speed reports from such devices are closed with a
 pointer here; crashes are fixed on any device.
 
-On known slow Android GPU families, missing graphics choices start at **Resolution 1x** and
-**Performance Mode on**. Change either in the launcher under **Settings > Graphics**. Existing
-resolution and effects choices are kept. Unrecognized devices and iOS keep the usual defaults.
+On a phone with a known slow graphics chip, a new install starts with **Performance Mode on**,
+and the launcher says so once ("Performance Mode is on for this phone"). Phones with a Mali-G52 MC2
+(Helio G80/G85 class, the minimum above) keep **Resolution 2x**: that reaches 60 fps there with
+Performance Mode. Slower chips (Adreno 610 and the ones below the minimum) also start at
+**Resolution 1x**. Change either in the launcher under **Settings > Graphics**; dhd.log names the
+chip and the rule. Settings you have set are never changed. Unrecognized devices, PCs, Macs and
+iOS keep the usual defaults.
