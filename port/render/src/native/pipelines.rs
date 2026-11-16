@@ -729,22 +729,7 @@ pub(crate) mod list {
             }
         }
         let (marker, crash) = (list.with_file_name("pipelines-building.txt"), list.with_file_name("pipelines-crash.txt"));
-        let owner = match claim(&list.with_file_name("pipelines-guard.lock")) {
-            Ok(Some(lock)) => {
-                *OWNER.lock().unwrap_or_else(|p| p.into_inner()) = Some(lock); // held until the process ends
-                true
-            }
-            Ok(None) => {
-                crate::host::log("gs native: another game runs from this data folder (pipelines-guard.lock is \
-                                  held); its pipelines-building.txt is not judged and this game writes none");
-                false
-            }
-            Err(e) => {
-                crate::host::log(&format!("gs native: pipelines-guard.lock can't be taken ({e}); \
-                                           pipelines-building.txt is not judged or written in this run"));
-                false
-            }
-        };
+        let owner = take_guard(&list.with_file_name("pipelines-guard.lock"), crate::host::log);
         recover_files(&list, &marker, &crash, &header(info), owner, crate::host::log)
     }
 
@@ -754,13 +739,37 @@ pub(crate) mod list {
     static OWNER: Mutex<Option<std::fs::File>> = Mutex::new(None);
 
     /// The guard's lock file, taken without waiting: Some(file) to keep while the game runs, None when
-    /// another live game holds it.
+    /// another live game holds it; an error when the lock can't be used here at all.
     pub fn claim(path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
         let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
         match file.try_lock() {
             Ok(()) => Ok(Some(file)),
             Err(std::fs::TryLockError::WouldBlock) => Ok(None),
             Err(std::fs::TryLockError::Error(e)) => Err(e),
+        }
+    }
+
+    /// Whether this game owns the guard's files: it holds the lock (kept in `OWNER` until the process
+    /// ends), or the lock can't be used here (a file system without locks, a folder where the lock
+    /// file can't be made): then this game is assumed alone, as before the lock (0.8.7), so a
+    /// pipeline the driver dies on is still refused. Only a lock another live game holds makes it a
+    /// non-owner.
+    pub fn take_guard(path: &std::path::Path, mut log: impl FnMut(&str)) -> bool {
+        match claim(path) {
+            Ok(Some(lock)) => {
+                *OWNER.lock().unwrap_or_else(|p| p.into_inner()) = Some(lock);
+                true
+            }
+            Ok(None) => {
+                log("gs native: another game runs from this data folder (pipelines-guard.lock is held); its \
+                     pipelines-building.txt is not judged and this game writes none");
+                false
+            }
+            Err(e) => {
+                log(&format!("gs native: pipelines-guard.lock can't be used ({e}); this game is taken to be the \
+                              only one in its data folder and keeps the pipeline guard"));
+                true
+            }
         }
     }
 
@@ -1196,6 +1205,27 @@ pub(crate) mod list {
             assert!(again.is_some(), "a dropped lock is free");
             drop(again);
             std::fs::remove_file(&path).unwrap();
+        }
+
+        /// Only a lock another game holds makes a non-owner; a lock that can't be used keeps the
+        /// guard (one game assumed, 0.8.7's way), with one line saying why.
+        #[test]
+        fn only_a_held_lock_gives_up_the_guard() {
+            let path = std::env::temp_dir().join(format!("dhd-pipelines-held-{}.lock", std::process::id()));
+            let other = claim(&path).unwrap().expect("a free lock is taken"); // another live game
+            let mut lines = Vec::new();
+            assert!(!take_guard(&path, |l| lines.push(l.to_owned())), "held by another game: not the owner");
+            assert!(lines.last().unwrap().contains("another game runs from this data folder"));
+            drop(other);
+            std::fs::remove_file(&path).unwrap();
+            // the lock file can't even be made (its folder is missing): an error, not contention
+            let missing = std::env::temp_dir().join(format!("dhd-no-such-folder-{}", std::process::id())).join("x.lock");
+            let mut lines = Vec::new();
+            assert!(take_guard(&missing, |l| lines.push(l.to_owned())), "a lock that can't be used keeps the guard");
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].contains("can't be used") && lines[0].contains("keeps the pipeline guard"), "{}", lines[0]);
+            // a direct claim's error is told apart from contention
+            assert!(claim(&missing).is_err());
         }
     }
 }
