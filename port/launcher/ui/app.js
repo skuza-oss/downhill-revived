@@ -89,6 +89,7 @@ const state = {
   disc: discIdle(),   // a phone's disc import (disc_flow.js)
   discSize: 0, freeSpace: 0,
   lastExit: null,     // the run before closed unexpectedly: { why }
+  startNote: null,    // "performance": this start turned Performance Mode on for a weak phone GPU
   starting: false,    // PLAY pressed on a platform where the game takes the launcher's place
   licences: null,
 };
@@ -213,6 +214,7 @@ function renderHome() {
   $('fact-disc').title = iso;
   $('fact-disc-name').textContent = baseName(iso);
   renderCrash();
+  renderStartNote();
   renderOnline();
   renderServer();
   renderPlayed();
@@ -229,6 +231,17 @@ function renderCrash() {
     el('div', { class: 'note-actions' },
       el('button', { class: 'btn', onclick: shareLog }, icon('i-share'), t('crash.share')),
       el('button', { class: 'btn text', onclick: () => { state.lastExit = null; renderCrash(); } }, t('crash.dismiss'))))));
+}
+
+// A weak phone GPU's first start turned Performance Mode on (finding 263): said once, dismissable.
+function renderStartNote() {
+  const box = $('start-note');
+  box.hidden = state.startNote !== 'performance';
+  if (box.hidden) return;
+  box.replaceChildren(el('div', { class: 'note' }, icon('i-sliders'), el('div', {},
+    el('div', {}, t('start.performance')),
+    el('div', { class: 'note-actions' },
+      el('button', { class: 'btn text', onclick: () => { state.startNote = null; renderStartNote(); } }, t('crash.dismiss'))))));
 }
 
 // Time played in all (saves/playtime.txt, counted by the launcher while the game runs).
@@ -946,6 +959,7 @@ function apply(snap) {
   state.discSize = snap.disc_size || 0;
   state.freeSpace = snap.free_space || 0;
   if (snap.last_exit) state.lastExit = snap.last_exit;  // said once; the note stays until dismissed
+  if (snap.start_note) state.startNote = snap.start_note;  // the same
 }
 
 // ---------- start ----------
