@@ -1,5 +1,7 @@
 # Downhill Revived
 
+<a href="https://recomplauncher.com/game/downhill-revived"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 A PC port of Downhill Domination.
 
 Downhill Revived is a native 64-bit Windows port of *Downhill Domination* (PlayStation 2, Incognito
