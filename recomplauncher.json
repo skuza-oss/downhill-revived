@@ -1,0 +1,239 @@
+{
+    "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+    "format": 1,
+    "repo": "skuza-oss/downhill-revived",
+    "game": {
+        "kind": "iso",
+        "label": "Your disc image (.iso) of the USA PlayStation 2 release, serial SCUS-97177.",
+        "check": {
+            "iso9660": "SCUS_971.77"
+        }
+    },
+    "start": {
+        "program": [
+            "DownhillRevived.exe"
+        ],
+        "args": [
+            "--play"
+        ]
+    },
+    "config": [
+        {
+            "id": "main",
+            "format": "ini",
+            "file": [
+                {
+                    "path": "{install}/dhd.ini"
+                }
+            ],
+            "game_path": "iso"
+        }
+    ],
+    "saves": [
+        "{install}/saves"
+    ],
+    "folders": {
+        "saves": [
+            {
+                "path": "{install}/saves"
+            }
+        ],
+        "logs": [
+            {
+                "path": "{install}"
+            }
+        ]
+    },
+    "settings": [
+        {
+            "id": "resolution",
+            "label": "Resolution",
+            "help": "How sharp the 3D picture is, in times the PS2's own.",
+            "choices": [
+                {
+                    "label": "1x (original)",
+                    "set": {
+                        "scale": "1"
+                    }
+                },
+                {
+                    "label": "2x",
+                    "set": {
+                        "scale": "2"
+                    }
+                },
+                {
+                    "label": "3x",
+                    "set": {
+                        "scale": "3"
+                    }
+                },
+                {
+                    "label": "4x",
+                    "set": {
+                        "scale": "4"
+                    }
+                },
+                {
+                    "label": "Match window",
+                    "set": {
+                        "scale": "window"
+                    }
+                }
+            ],
+            "defaults": {
+                "scale": "2"
+            }
+        },
+        {
+            "id": "window",
+            "label": "Window mode",
+            "choices": [
+                {
+                    "label": "Windowed",
+                    "set": {
+                        "window": "windowed"
+                    }
+                },
+                {
+                    "label": "Borderless",
+                    "set": {
+                        "window": "borderless"
+                    }
+                },
+                {
+                    "label": "Full screen",
+                    "set": {
+                        "window": "fullscreen"
+                    }
+                }
+            ],
+            "defaults": {
+                "window": "borderless"
+            }
+        },
+        {
+            "id": "widescreen",
+            "label": "Widescreen",
+            "help": "A wider view that fits your monitor's shape.",
+            "choices": [
+                {
+                    "label": "Off (original 4:3)",
+                    "set": {
+                        "widescreen": "0"
+                    }
+                },
+                {
+                    "label": "On",
+                    "set": {
+                        "widescreen": "1"
+                    }
+                }
+            ],
+            "defaults": {
+                "widescreen": "1"
+            }
+        },
+        {
+            "id": "fps",
+            "label": "Frame rate",
+            "choices": [
+                {
+                    "label": "60 fps",
+                    "set": {
+                        "fps": "60"
+                    }
+                },
+                {
+                    "label": "120 fps",
+                    "set": {
+                        "fps": "120"
+                    }
+                },
+                {
+                    "label": "144 fps",
+                    "set": {
+                        "fps": "144"
+                    }
+                },
+                {
+                    "label": "165 fps",
+                    "set": {
+                        "fps": "165"
+                    }
+                },
+                {
+                    "label": "240 fps",
+                    "set": {
+                        "fps": "240"
+                    }
+                },
+                {
+                    "label": "Match monitor",
+                    "set": {
+                        "fps": "monitor"
+                    }
+                }
+            ],
+            "defaults": {
+                "fps": "60"
+            }
+        },
+        {
+            "id": "vsync",
+            "label": "V-Sync",
+            "help": "Stops tearing.",
+            "choices": [
+                {
+                    "label": "Off",
+                    "set": {
+                        "vsync": "0"
+                    }
+                },
+                {
+                    "label": "On",
+                    "set": {
+                        "vsync": "1"
+                    }
+                }
+            ],
+            "defaults": {
+                "vsync": "1"
+            }
+        },
+        {
+            "id": "skip_movies",
+            "label": "Skip intro movies",
+            "choices": [
+                {
+                    "label": "Off",
+                    "set": {
+                        "skip_movies": "0"
+                    }
+                },
+                {
+                    "label": "On",
+                    "set": {
+                        "skip_movies": "1"
+                    }
+                }
+            ],
+            "defaults": {
+                "skip_movies": "1"
+            }
+        }
+    ],
+    "actions": [
+        {
+            "id": "saves",
+            "label": "Saves",
+            "help": "Your memory card saves.",
+            "open": "saves"
+        }
+    ],
+    "requires": [
+        "start",
+        "settings.ini",
+        "settings.choices"
+    ]
+}
