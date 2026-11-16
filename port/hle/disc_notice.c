@@ -95,6 +95,7 @@ void port_disc_notice(void)
         page.back = NULL;
         hle_log("graphics notice: shown (a software adapter: no graphics acceleration)\n");
         menu_page_run(&page);
+        hle_log("graphics notice: closed\n");
         return;
     }
     const char *why, *usa, *hash = disc_check_answer(&why, &usa);
