@@ -26,8 +26,10 @@ extern uintptr_t guest_base;
 #define GUEST_BASE ((uintptr_t)0)
 #endif
 
-/* Host pointer of a 32-bit guest address. */
-#if WASM_RT_MEMCHECK_BOUNDS_CHECK && defined(__aarch64__)
+/* Host pointer of a 32-bit guest address. The layout's one switch, HOST64_TWO_PARTS
+   (memory_layout.h), decides it here as in guest memory and the access checks (finding 262). */
+#include "../host64/memory_layout.h"
+#if HOST64_TWO_PARTS
 /* iOS (finding 258): the guest's memory is two parts with other mappings of the process between
    and above them; an address there ends the process as the guest's own fault does
    (guest_memory_posix.c), never reaching what lies there. */
