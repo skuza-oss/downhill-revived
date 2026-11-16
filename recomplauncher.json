@@ -11,7 +11,8 @@
     },
     "start": {
         "program": [
-            "DownhillRevived.exe"
+            "DownhillRevived.exe",
+            "DownhillRevived"
         ],
         "args": [
             "--play"
