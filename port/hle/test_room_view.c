@@ -37,7 +37,9 @@ int main(void)
     room_name("ABCDEFGHIJKLMNOPQRSTUVWX", out), assert(!strcmp(out, "ABCDEFGHIJ.."));
     room_name("J\xc3\xbcrgen", out), assert(!strcmp(out, "J-RGEN"));     /* a UTF-8 letter: one '-' */
     room_name("QUENTIN-MWMW", out), assert(!strcmp(out, "QUENTIN-MWMW"));
-    room_name(NULL, out), assert(!strcmp(out, ""));
+    room_name(NULL, out), assert(!strcmp(out, "-"));
+    room_name("", out), assert(!strcmp(out, "-"));
+    room_name("   ", out), assert(!strcmp(out, "-"));
     assert(strlen("WWWWWWWWWW..") + 1 <= ROOM_NAME_SIZE);
     /* one time format: 1804 ticks is 0:30.06 (the game's CONGRATULATIONS prints 0:30:04, sixtieths) */
     char t[16];

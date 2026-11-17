@@ -388,6 +388,12 @@ MenuStyle menu_style(MenuStyle s, int percent, int r, int g, int b)
     return s;
 }
 
+MenuStyle menu_solid(MenuStyle s)
+{
+    s.rgba[3] = 0xFF;
+    return s;
+}
+
 void menu_draw_size(int *width, int *height) { func_0023D650(draw_view(), width, height); }
 
 void menu_draw_begin(void)

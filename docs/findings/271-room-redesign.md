@@ -99,6 +99,15 @@ The room page before this lane (8d956bff) and where each piece is now:
 - `fit()` and `first_fit()` take sizes from 100 %: three callers passed a style already at 55-90 %
   and got text twice as small.
 - A cheats change unreadies everyone (the server's rule, finding 128): the function test saw it.
+- The font's glyphs are white at alpha 0x40 in its texture, and the GS multiplies both by the
+  style's colour and alpha (0x80 = 1.0): at the game's alpha every glyph covers half. On the dark
+  room a 0x76 white name came out 118 of 255 and READY on the yellow button half yellow (olive).
+  The room and the results screen draw solid (`menu_solid`, alpha 0xFF): names 233, the secondary
+  texts 136,142,190 (the mock-up's #8a8fc0), READY 13,13,15 on yellow (the follow-up round after
+  the merge). The large title and the button legend are drawn by the game's page and keep its
+  look.
+- The host's panel rows (COMPUTER RIDERS, CHEATS, ROOM) are 8 units tall as tap targets, the base's
+  were 13: the rows are 8 apart, so taller targets would overlap; they cover each row's full pitch.
 - The room's places come from the server and count computer riders: a player behind three of
   them is 4TH in the room, as on the results screen.
 - A member who joins during the 5 s start can see one frame of "RACE STARTS IN 1" with "YOU'RE IN

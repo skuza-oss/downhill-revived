@@ -2382,10 +2382,10 @@ static void results_draw(int view)
 #define RY(y) ((y) * vh / 224)
     NetLobby lobby;
     host_service_net_get_lobby(GADDR(&lobby));
-    MenuStyle row = menu_game_style(MENU_STYLE_ROW), lit = menu_game_style(MENU_STYLE_SELECTED);
-    static const int white[3] = {0x76, 0x75, 0x7A}, dim[3] = {0x3E, 0x3F, 0x53}, yellow[3] = {0x7A, 0x72, 0x00},
+    MenuStyle row = menu_solid(menu_game_style(MENU_STYLE_ROW)), lit = menu_solid(menu_game_style(MENU_STYLE_SELECTED));
+    static const int white[3] = {0x76, 0x75, 0x7A}, dim[3] = {0x45, 0x48, 0x60}, yellow[3] = {0x7A, 0x72, 0x00},
                      amber[3] = {0x70, 0x58, 0x17}, green[3] = {0x2C, 0x68, 0x2E};
-#define TINT(s, pct, c) menu_style(s, pct, (c)[0], (c)[1], (c)[2])
+#define TINT(s, pct, c) menu_style(s, pct, (c)[0], (c)[1], (c)[2])  /* row and lit are solid (menu_solid) */
     menu_draw_rect(0, 0, vw, vh, 0, 0, 0, 108);  /* the race behind, darkened */
     int fresh = lobby.last_race_id != on.last_race_id;  /* the results came (they follow "ended") */
     char line[64], head[48];
@@ -2424,17 +2424,17 @@ static void results_draw(int view)
                         : k == 0 ? (const int[]){0xF4, 0xD0, 0x3F} : (const int[]){0x59, 0xD0, 0x5C};
         menu_draw_rect(RX(x0), RY(y), RX(x0 + 3) - RX(x0), RY(y + h) - RY(y), edge[0], edge[1], edge[2], 128);
         const int *c = w->own ? yellow : !w->finished ? dim : k == 0 ? white : NULL;
-        MenuStyle rs = c ? TINT(row, pct, c) : menu_style(row, pct, -1, 0, 0);
-        menu_draw_text(MENU_LEFT, RX(x0 + 10), RY(ty), w->place, &rs);
+        MenuStyle rs = c ? TINT(row, pct, c) : menu_style(row, pct, -1, 0, 0), vs = c ? rs : TINT(row, pct, white);
+        menu_draw_text(MENU_LEFT, RX(x0 + 10), RY(ty), w->place, &rs);  /* the place in the row's lilac, name and time white */
         /* the name up to the time (or the DNF's words): a wide one at the large size shrinks */
         MenuStyle gs = c == yellow ? TINT(row, pct * 70 / 100, yellow) : TINT(row, pct * 70 / 100, dim);
-        MenuStyle ds = TINT(row, pct * 70 / 100, amber), ns = rs;
-        int name_end = w->finished ? RX(x0 + wide - 100) - menu_text_width(w->time, &rs)
+        MenuStyle ds = TINT(row, pct * 70 / 100, amber), ns = vs;
+        int name_end = w->finished ? RX(x0 + wide - 100) - menu_text_width(w->time, &vs)
                                    : RX(x0 + wide - 12) - menu_text_width(w->time, &ds);
         while (ns.size[0] > 0 && menu_text_width(w->name, &ns) > name_end - RX(x0 + 80)) ns = menu_style(ns, 92, -1, 0, 0);
         menu_draw_text(MENU_LEFT, RX(x0 + 72), RY(ty), w->name, &ns);
         if (w->finished) {
-            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 100), RY(ty), w->time, &rs);
+            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 100), RY(ty), w->time, &vs);
             if (w->gap[0]) menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->gap, &gs);
         } else
             menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->time, &ds);

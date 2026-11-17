@@ -798,7 +798,7 @@ enum { PAGE_X = 45, PAGE_W = 550, PANEL_W = 147, LIST_X = 205, LIST_W = 390,
 /* Text colours (the font's 0-128) and rectangle colours (0-255) */
 static const int green[3] = {0x30, 0x80, 0x28}, amber[3] = {0x80, 0x60, 0x10}, red[3] = {0x80, 0x30, 0x30},
                  blue[3] = {0x38, 0x60, 0x98}, lilac[3] = {0x70, 0x68, 0x98};
-static const int t_white[3] = {0x76, 0x75, 0x7A}, t_dim[3] = {0x3E, 0x3F, 0x53}, t_amber[3] = {0x70, 0x58, 0x17},
+static const int t_white[3] = {0x76, 0x75, 0x7A}, t_dim[3] = {0x45, 0x48, 0x60}, t_amber[3] = {0x70, 0x58, 0x17},
                  t_green[3] = {0x2C, 0x68, 0x2E}, t_blue[3] = {0x37, 0x51, 0x75},
                  t_dark[3] = {0x06, 0x06, 0x08}, t_red[3] = {0x78, 0x2C, 0x2C};
 static const int r_green[3] = {0x59, 0xD0, 0x5C}, r_chip[3] = {0x2E, 0x9A, 0x38}, r_amber[3] = {0xE0, 0xB1, 0x2E},
@@ -1390,7 +1390,11 @@ static MenuStyle st_row, st_on, st_off;
 static int vw = 640, vh = 224;
 static int X(int x) { return x * vw / 640; }
 static int Y(int y) { return y * vh / 224; }
-static MenuStyle tint(MenuStyle s, int percent, const int *c) { return menu_style(s, percent, c ? c[0] : -1, c ? c[1] : 0, c ? c[2] : 0); }
+/* every text of the room is solid: at the game's alpha its glyphs cover half (menu_solid) */
+static MenuStyle tint(MenuStyle s, int percent, const int *c)
+{
+    return menu_solid(menu_style(s, percent, c ? c[0] : -1, c ? c[1] : 0, c ? c[2] : 0));
+}
 static void put(int align, int x, int y, const char *t, MenuStyle s) { menu_draw_text(align, X(x), Y(y), t, &s); }
 static void box(int x, int y, int w, int h, int level) { menu_draw_box(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), level); }
 static void rect(int x, int y, int w, int h, const int *c, int a) { menu_draw_rect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), c[0], c[1], c[2], a); }
@@ -1695,7 +1699,6 @@ static void draw_button(int f, int x, int w, const char *label, const char *why,
         if (on || kind == 2) outline(x - 1, BTN_Y - 1, w + 2, BTN_H + 2, 1, kind == 2 ? r_yellow : r_white);
         if (on && kind == 1) outline(x + 1, BTN_Y + 1, w - 2, BTN_H - 2, 1, r_black);
         MenuStyle s = fit(label, tint(st_on, 125, kind == 1 ? t_dark : t_white), 125, w - 30);
-        s.rgba[3] = 0x80;  /* dark words on yellow: fully drawn */
         int tw = width_of(label, s);
         if (kind == 2) tick(x + w / 2 - tw / 2 - 13, BTN_Y + 5, 2, r_white);  /* 21 wide, 6 before the words */
         put_in("main button", MENU_CENTRE, x + w / 2 + (kind == 2 ? 14 : 0), BTN_Y + 2, w - 30, label, s);
