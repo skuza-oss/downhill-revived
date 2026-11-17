@@ -21,7 +21,7 @@ Each run prints the racers' results of the second race; the racers' results with
 those of `none` (their finishes are scripted, so equal means the watcher changed nothing). Every
 scenario fails on a refusal, `freeze:` or `crash:` line in any log, and on a log line with a network
 address or a session id. Pictures of the watcher's view: OUT/watcher/present-NNN.png every --interval
-seconds. Untimed game lock (hidden_game). Needs DHD_TEST_ISO and the x64 build."""
+seconds (its window --watcher-window, its scale --watcher-scale). Untimed game lock (hidden_game). Needs DHD_TEST_ISO and the x64 build."""
 import argparse
 import contextlib
 import os
@@ -83,6 +83,8 @@ def main():
     ap.add_argument('--track', default='0', help="the room's first track (DHD_NET_TEST_TRACK)")
     ap.add_argument('--scale', default='1')
     ap.add_argument('--interval', default='0', help="seconds between the watcher's presented pictures (0: none)")
+    ap.add_argument('--watcher-window', default='1280x720', help="the watcher's window, WxH (its pictures' size)")
+    ap.add_argument('--watcher-scale', help="the watcher's resolution scale (default --scale)")
     a = ap.parse_args()
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -125,7 +127,10 @@ def main():
                 extra['DHD_NET_TEST_MENU'] = {'watch': '6:right,w3000,right,w3000,left', 'watcher-leaves': '12:start,w500,down,cross,w300,down,cross'}.get(a.scenario, '')
                 if a.interval != '0':
                     extra.update(DHD_CAPTURE_PRESENTED=str(out / 'watcher' / 'present'), DHD_CAPTURE_AT='5', DHD_CAPTURE_INTERVAL=a.interval)
-                watcher = hidden_game.Game(a.exe, out / 'watcher', name='watch-watcher', scale=a.scale, shot_window=None, env=env('watcher', extra))
+                width, height = a.watcher_window.split('x')
+                extra.update(DHD_WINDOW_WIDTH=width, DHD_WINDOW_HEIGHT=height)
+                watcher = hidden_game.Game(a.exe, out / 'watcher', name='watch-watcher', scale=a.watcher_scale or a.scale,
+                                           shot_window=None, env=env('watcher', extra))
                 games.append(watcher)
                 mark[watcher] = 0
                 if not wait(watcher.log, r'online: watching the room.s race', 600, games):

@@ -361,8 +361,10 @@ extern char D_004B2A90[];                      /* the front end's sound bank */
    heap (func_001FD430, its operator new) the first time, and stay for the run.
    A packet's DMA tag counts its own qword (as func_00190E48 writes it), so the DMA sends one
    qword past the end: each packet is zeroed first, and that spare goes to the GIF as an empty
-   tag (in the game's own buffers it is zero too). A box is 14 qwords, a rectangle 6. */
-enum { DRAW_BOXES = 32, BOX_QWORDS = 16, DRAW_RECTS = 96, RECT_QWORDS = 8 };
+   tag (in the game's own buffers it is zero too). A box is 14 qwords, a rectangle 6, a blended one
+   8 (its ALPHA_1 first): so a slot of 10, the spare zero included. The race room draws about 90
+   rectangles a frame (finding 271: ten rows with their chips and bars, the buttons). */
+enum { DRAW_BOXES = 32, BOX_QWORDS = 16, DRAW_RECTS = 128, RECT_QWORDS = 10 };
 void *func_001FD430(unsigned int size);
 static uint64_t (*box_packets)[BOX_QWORDS * 2], (*rect_packets)[RECT_QWORDS * 2];
 static int boxes_used, rects_used;
@@ -411,13 +413,25 @@ void menu_draw_box(int x, int y, int w, int h, int level)
 /* As func_0018F9C0 draws the cursor's bar: one sprite, its colour at both corners. */
 void menu_draw_rect(int x, int y, int w, int h, int r, int g, int b, int a)
 {
-    if (!rect_packets || rects_used >= DRAW_RECTS || w <= 0 || h <= 0) return;
+    if (!rect_packets || w <= 0 || h <= 0) return;
+    if (rects_used >= DRAW_RECTS) {
+        static int said;
+        if (!said++) hle_log("menu: more than %d rectangles in a frame: the rest not drawn\n", DRAW_RECTS);
+        return;
+    }
     uint64_t *start = rect_packets[rects_used++], *q = start + 2;
     memset(start, 0, sizeof *rect_packets);
     int view = draw_view(), cx, cy, vw, vh;
     func_0023D618(view, &cx, &cy);
     func_0023D650(view, &vw, &vh);
     int left = cx - (vw >> 1) + x, top = cy - (vh >> 1) + y;
+    /* A blended one sets ALPHA_1 first, (Cs - Cd) * As + Cd, as the game's own boxes do
+       (func_00190E48): over a race view (the results, finding 271) another mode was left set and
+       a darkening drew nothing. A+D tag, then the register. */
+    if (a < 128) {
+        q[0] = 0x1000000000008001ull, q[1] = 0xE, q += 2;  /* the game's own tag: NREG 1, EOP, NLOOP 1 */
+        q[0] = 0x5000000044ull, q[1] = 0x42, q += 2;
+    }
     /* GIF tag: one loop of RGBAQ, XYZ2, RGBAQ, XYZ2; PRIM a sprite, alpha-blended (0x46) when a < 128 */
     q[0] = a < 128 ? 0x4023400000008001ull : 0x4003400000008001ull, q[1] = 0x5151, q += 2;
     func_002105A0(D_00513B00, q, r, g, b, a), q += 2;
@@ -492,8 +506,16 @@ void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture)
     /* Two triangles (a strip), not a sprite: the native renderer draws upscaled sprites (flag 1024)
        sampling each GS pixel once, as at 1x, so a sprite's picture stays blocky at 2x-8x; a
        triangle's UV runs across every rendered pixel, so bilinear works at any scale. Same
-       rectangle and texels at 1x. UV half a texel inside so bilinear stays in the 160 lines. */
-    const uint64_t u0 = 8, v0 = 8, u1 = MENU_PICTURE_W * 16 - 8, v1 = MENU_PICTURE_H * 16 - 8;
+       rectangle and texels at 1x. UV half a texel inside so bilinear stays in the 160 lines.
+       A box wider than the picture (the room's panel, finding 271) shows its middle lines, not the
+       picture squashed: the picture is 512 x 340 of the disc's, shown on the 4:3 page (the view's
+       w x h is 4 x 3 of it). The picker's box is narrower: all of it, as before. */
+    uint64_t u0 = 8, v0 = 8, u1 = MENU_PICTURE_W * 16 - 8, v1 = MENU_PICTURE_H * 16 - 8;
+    double shown = (double)h * 512 * 3 / vh / 340 * vw / 4 / w;  /* the picture's height that fits, of 1 */
+    if (shown > 0 && shown < 1) {
+        uint64_t cut = (uint64_t)(MENU_PICTURE_H * 16 * (1 - shown) / 2);
+        v0 += cut, v1 -= cut;
+    }
     q = b + 2;  /* top left, top right */
     q[0] = 1 | 1ull << 46 | 0x114ull << 47 | 5ull << 60, q[1] = 0x53531, q += 2;
     func_002105A0(D_00513B00, q, 128, 128, 128, 128), q += 2;
@@ -576,6 +598,16 @@ static int queued, press_field;  /* press_field: fields into the first press (he
 static void press(uint16_t button)
 {
     if (queued < QUEUE) queue[queued++] = button;
+}
+
+/* The left presses so far (a running count: a new one is a click or a tap) and the pointer in the
+   view's coordinates (-1 off the picture): for a screen outside the menus, the race's results
+   (online.c, finding 271), where the mouse otherwise does nothing. */
+static int pointer(int view, int *x, int *y);
+unsigned menu_mouse_clicks(int view, int *x, int *y)
+{
+    if (!pointer(view, x, y)) *x = *y = -1;
+    return seen_mouse.presses[0];
 }
 
 /* The buttons the mouse holds on player 1's pad this field. */

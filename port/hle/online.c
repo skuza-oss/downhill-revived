@@ -40,6 +40,7 @@
 #include "mosh_round.h"
 #include "race_menu.h"
 #include "menu_page.h"
+#include "room_view.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -290,6 +291,12 @@ static struct {
     MoshScore table[NRIDERS];   /* the published table: score as it was when the table stood, then fixed (221) */
     int round_over, table_done;
     double round_over_at, results_at;
+    /* the room race's results screen (finding 271): since when, the pad's buttons and the mouse's
+       presses it has seen, and READY pressed on it */
+    double results_from;
+    uint16_t results_buttons;
+    unsigned results_clicks;
+    int results_ready, results_ended, results_watcher;
 } on;
 
 static void title(const char *fmt, ...)
@@ -1024,7 +1031,7 @@ static const NetMember *self_member(const NetLobby *l)
    finishEndsAt), its last 10 s large; then why this PC's race ends (on.leave_reason). */
 static void race_banner(int view)
 {
-    if (!on.started || !from_menu) return;
+    if (!on.started || !from_menu || on.results_from) return;
     if (on.leave_reason) {
         hud_text(view, 96, 2, 128, 40, 40, on.leave_reason);
         return;
@@ -1071,15 +1078,18 @@ static const char *rider_label(int global, char *out, int size);
 
 /* The view-0 HUD describes this PC's rider: hidden once the camera watches another (its finish
    place still shows for the first seconds). */
-int hle_online_watch_hud(void) { return online_mode() && from_menu && on.end_held && on.watched; }
+int hle_online_watch_hud(void) { return online_mode() && from_menu && ((on.end_held && on.watched) || on.results_from); }
 
 static void race_menu_draw(int view);
+static void results_draw(int view);
 static RaceMenu race_menu;
 void hle_online_hud(int view)
 {
     if (online_mode()) race_banner(view);
     if (online_mode() && race_menu.open && view == 0) race_menu_draw(view);
-    if (online_mode() && from_menu && on.end_held && (on.watch_slot > 0 || (on.spectator && on.watch_slot == 0))) {
+    if (online_mode() && from_menu && on.results_from && view == 0) results_draw(view);
+    if (online_mode() && from_menu && on.end_held && (on.watch_slot > 0 || (on.spectator && on.watch_slot == 0)) &&
+        !on.results_from) {
         char name[48], text[96];
         rider_label(hle_puppet_global(on.watch_slot), name, sizeof name);
         snprintf(text, sizeof text, "WATCHING %s", name);
@@ -1672,6 +1682,9 @@ static void send_snapshots(int ai)
     for (int i = 0; i < count; i++) on.ai_sent += slots[i] != 0;
 }
 
+enum { RESULTS_SECONDS = 8 };
+static void results_open(int ended, double now);
+
 /* Each vsync of the race: the snapshots and events in, ours out. */
 static void state_sync(void)
 {
@@ -1721,9 +1734,19 @@ static void state_sync(void)
                 fprintf(stderr, "online: race closed: back to the room (%s: ended %d, link %d, own %s/%s, "
                         "result %d; race tick %d)\n", on.leave_reason, end.ended, end.link_lost, me ? me->race_state : "-",
                         end.own_dnf, end.new_result, RACE_CLOCK);
+                /* the room closed the race (not the link, not the host's removal): its results over
+                   the race, instead of the reason's card (finding 271) */
+                if (!end.link_lost && !end.removed && end.ended != NET_ENDED_NONE && !on.mosh)
+                    results_open(end.ended, now);
             } else
                 fprintf(stderr, "online: race closed: back to the room (race tick %d)\n", RACE_CLOCK);
-            on.leave_at = now + 2;
+            on.leave_at = now + (on.results_from ? RESULTS_SECONDS : 2);
+        }
+        /* a countdown to the next race while the results show (this PC is ready: on them, or
+           since before the race as a watcher): to the room at once, so the start finds it there */
+        if (on.results_from && on.leave_at > now && lobby.countdown_ms >= 0 && (on.results_ready || (me && me->ready))) {
+            fprintf(stderr, "online: results: the next race counts down: to the room now\n");
+            on.leave_at = now;
         }
         watch_step(&lobby);
         if (on.leave_at && now >= on.leave_at) {
@@ -2210,7 +2233,7 @@ static void race_menu_chosen(int row)
 /* Each field of the race (player 1's pad, after the countdown's hold took START away). */
 static void race_menu_pad(HostPad *out)
 {
-    int live = on.started && !on.end_done && EE32(PHASE) >= 1 && EE32(PHASE) <= 4;
+    int live = on.started && !on.end_done && !on.results_from && EE32(PHASE) >= 1 && EE32(PHASE) <= 4;
     if (!live) {
         race_menu_shut("the race screen ends");
         race_menu.last = out->buttons;
@@ -2287,6 +2310,167 @@ static void race_menu_draw(int view)
         menu_draw_text(MENU_CENTRE, cx, y0 + i * 10, text[i], i == cursor ? &lit : &row);
     }
     if (line) menu_draw_text(MENU_CENTRE, cx, y0 + n * 10 + 4, line, &dim);
+    *manager_view = saved;
+}
+
+/* ---- the room race's results (finding 271) ----
+   When the room closes a race (everyone finished or out, the finish window ran out, the host ended
+   it), this PC's race screen shows its results for RESULTS_SECONDS over the race, darkened, instead
+   of the reason's card: how it went for this PC large ("YOU FINISHED 4TH", "TIME UP - DNF", the
+   winner for a watcher), the track small, every racer in the room's order with the time and the
+   gap to the winner, a DNF with its reason; then the race screen goes, as before, and the room
+   opens. Cross, a click or a tap goes at once. The room's next race counts from the close (30 s,
+   the server's intermission): this screen took 6 s more of it than the old card, so READY works
+   here too (Square, or a tap on its words) and the room has it when this PC comes back. */
+unsigned menu_mouse_clicks(int view, int *x, int *y);  /* menu_page.c */
+const char *port_track_name(int index);                /* online_menu.c */
+static int results_ready_x0, results_ready_x1, results_ready_y;  /* READY's words, view pixels */
+
+static void results_open(int ended, double now)
+{
+    NetLobby lobby;
+    host_service_net_get_lobby(GADDR(&lobby));
+    int x, y;
+    on.results_from = now;
+    on.results_ended = ended;
+    on.results_buttons = 0xFFFF;  /* a button already held is not a press */
+    on.results_clicks = menu_mouse_clicks(0, &x, &y);
+    on.results_ready = 0;
+    on.results_watcher = on.spectator;  /* a watcher reads the winner large (finding 269) */
+    fprintf(stderr, "online: results: shown for %d s (%s)\n", RESULTS_SECONDS, on.leave_reason);
+}
+
+static void results_set_ready(const char *by)
+{
+    if (on.results_ready) return;
+    on.results_ready = 1;
+    host_service_net_set_ready(1);
+    menu_play("S_SELECT");
+    fprintf(stderr, "online: results: READY by %s\n", by);
+}
+
+static void results_pad(HostPad *out)
+{
+    uint16_t held = out->buttons, pressed = held & ~on.results_buttons;
+    int x, y;
+    unsigned clicks = menu_mouse_clicks(0, &x, &y);
+    int click = clicks != on.results_clicks;
+    on.results_buttons = held, on.results_clicks = clicks;
+    if (pressed & (PAD_SQUARE | PAD_START)) results_set_ready("pad");
+    else if (click && results_ready_x1 > results_ready_x0 && x >= results_ready_x0 - 8 && x <= results_ready_x1 + 8 &&
+             y >= results_ready_y - 8 && y <= results_ready_y + 16)
+        results_set_ready("tap");
+    else if ((pressed & PAD_CROSS) || click) {
+        fprintf(stderr, "online: results: continue by %s after %.1f s\n", click ? "tap" : "pad", host_wall_seconds() - on.results_from);
+        menu_play("S_SELECT");
+        on.leave_at = host_wall_seconds();
+    }
+    uint8_t connected = out->connected;
+    neutral(out);
+    out->connected = connected;
+}
+
+static void results_draw(int view)
+{
+    int *manager_view = (int *)(void *)(D_003F52D0 + 0x20), saved = *manager_view;
+    *manager_view = view;
+    menu_draw_begin();
+    int vw, vh;
+    menu_draw_size(&vw, &vh);
+    if (vw <= 0 || vh <= 0) vw = 640, vh = 224;
+#define RX(x) ((x) * vw / 640)
+#define RY(y) ((y) * vh / 224)
+    NetLobby lobby;
+    host_service_net_get_lobby(GADDR(&lobby));
+    MenuStyle row = menu_game_style(MENU_STYLE_ROW), lit = menu_game_style(MENU_STYLE_SELECTED);
+    static const int white[3] = {0x76, 0x75, 0x7A}, dim[3] = {0x3E, 0x3F, 0x53}, yellow[3] = {0x7A, 0x72, 0x00},
+                     amber[3] = {0x70, 0x58, 0x17}, green[3] = {0x2C, 0x68, 0x2E};
+#define TINT(s, pct, c) menu_style(s, pct, (c)[0], (c)[1], (c)[2])
+    menu_draw_rect(0, 0, vw, vh, 0, 0, 0, 108);  /* the race behind, darkened */
+    int fresh = lobby.last_race_id != on.last_race_id;  /* the results came (they follow "ended") */
+    char line[64], head[48];
+    const char *where = port_track_name(fresh ? lobby.last_race_track : lobby.race_track);
+    snprintf(line, sizeof line, "RACE RESULTS - %s", where ? where : "");
+    for (char *c = line; *c; c++) *c = (char)toupper((unsigned char)*c);
+    MenuStyle s = TINT(row, 70, dim);
+    menu_draw_text(MENU_CENTRE, RX(320), RY(4), line, &s);
+    if (fresh || on.results_ended == NET_ENDED_VOID) room_results_headline(&lobby, on.results_ended, on.results_watcher, head, sizeof head);
+    else snprintf(head, sizeof head, "%s", on.leave_reason ? on.leave_reason : "RACE OVER");
+    s = TINT(lit, 190, yellow);
+    while (s.size[0] > 0 && menu_text_width(head, &s) > RX(600)) s = menu_style(s, 92, -1, 0, 0);
+    menu_draw_text(MENU_CENTRE, RX(320), RY(13), head, &s);
+    /* the rows: the winner's larger, this PC's yellow */
+    ResultRow rows[NET_MAX_SLOTS];
+    int n = fresh ? room_results(&lobby, rows) : 0, y = 38;
+    if (on.results_ended == NET_ENDED_VOID) {
+        s = TINT(row, 90, white);
+        menu_draw_text(MENU_CENTRE, RX(320), RY(70), "NO RESULTS FROM THIS RACE COUNT", &s);
+        n = 0;
+    }
+    for (int k = 0; k < n; k++) {
+        const ResultRow *w = &rows[k];
+        int h = k == 0 ? 17 : k < 4 ? 14 : 12, pct = k == 0 ? 120 : k < 4 ? 100 : 85, x0 = 77, wide = 486;
+        /* the font's glyphs centre about 5.4 units (at 100 %) below the y they are drawn at */
+        int ty = y + h / 2 - pct * 54 / 1000, gy = y + h / 2 - pct * 70 / 100 * 54 / 1000;
+        menu_draw_rect(RX(x0), RY(y), RX(x0 + wide) - RX(x0), RY(y + h) - RY(y), 0x0C, 0x0C, 0x16, 104);
+        if (w->own) {
+            menu_draw_rect(RX(x0), RY(y), RX(x0 + wide) - RX(x0), RY(y + h) - RY(y), 0x3C, 0x38, 0, 60);
+            menu_draw_rect(RX(x0 - 1), RY(y - 1), RX(wide + 2), RY(1) > 0 ? RY(1) : 1, 0xF4, 0xE4, 0, 128);
+            menu_draw_rect(RX(x0 - 1), RY(y + h), RX(wide + 2), RY(1) > 0 ? RY(1) : 1, 0xF4, 0xE4, 0, 128);
+            menu_draw_rect(RX(x0 - 1), RY(y), RX(1) > 0 ? RX(1) : 1, RY(y + h) - RY(y), 0xF4, 0xE4, 0, 128);
+            menu_draw_rect(RX(x0 + wide), RY(y), RX(1) > 0 ? RX(1) : 1, RY(y + h) - RY(y), 0xF4, 0xE4, 0, 128);
+        }
+        const int *edge = w->own ? (const int[]){0xF4, 0xE4, 0x00} : !w->finished ? (const int[]){0x3A, 0x3C, 0x5C}
+                        : k == 0 ? (const int[]){0xF4, 0xD0, 0x3F} : (const int[]){0x59, 0xD0, 0x5C};
+        menu_draw_rect(RX(x0), RY(y), RX(x0 + 3) - RX(x0), RY(y + h) - RY(y), edge[0], edge[1], edge[2], 128);
+        const int *c = w->own ? yellow : !w->finished ? dim : k == 0 ? white : NULL;
+        MenuStyle rs = c ? TINT(row, pct, c) : menu_style(row, pct, -1, 0, 0);
+        menu_draw_text(MENU_LEFT, RX(x0 + 10), RY(ty), w->place, &rs);
+        /* the name up to the time (or the DNF's words): a wide one at the large size shrinks */
+        MenuStyle gs = c == yellow ? TINT(row, pct * 70 / 100, yellow) : TINT(row, pct * 70 / 100, dim);
+        MenuStyle ds = TINT(row, pct * 70 / 100, amber), ns = rs;
+        int name_end = w->finished ? RX(x0 + wide - 100) - menu_text_width(w->time, &rs)
+                                   : RX(x0 + wide - 12) - menu_text_width(w->time, &ds);
+        while (ns.size[0] > 0 && menu_text_width(w->name, &ns) > name_end - RX(x0 + 80)) ns = menu_style(ns, 92, -1, 0, 0);
+        menu_draw_text(MENU_LEFT, RX(x0 + 72), RY(ty), w->name, &ns);
+        if (w->finished) {
+            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 100), RY(ty), w->time, &rs);
+            if (w->gap[0]) menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->gap, &gs);
+        } else
+            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->time, &ds);
+        y += h + 2;
+    }
+    if (fresh && !n && on.results_ended != NET_ENDED_VOID) {
+        s = TINT(row, 90, white);
+        menu_draw_text(MENU_CENTRE, RX(320), RY(70), "NOBODY RACED TO THE END", &s);
+    }
+    /* back to the room: a bar running out, the time, and what the buttons do */
+    double left = on.leave_at - host_wall_seconds();
+    if (left < 0) left = 0;
+    menu_draw_rect(RX(77), RY(194), RX(563) - RX(77), RY(196) - RY(194), 0, 0, 0, 128);
+    menu_draw_rect(RX(77), RY(194), (int)((RX(563) - RX(77)) * (left > RESULTS_SECONDS ? 1 : left / RESULTS_SECONDS)),
+                   RY(196) - RY(194), 0xA3, 0xA5, 0xF2, 128);
+    snprintf(line, sizeof line, "BACK TO THE ROOM IN %d", (int)(left + 0.999));
+    /* three words on one line: the time left, READY (Square, or a tap on it), Cross; one size
+       that fits all three with their gaps */
+    const char *ready = on.results_ready ? "YOU'RE READY" : GLYPH_SQUARE " READY NEXT", *go = GLYPH_CROSS " CONTINUE";
+    MenuStyle ls, rs, cs;
+    int pct = 80, lw, rw, cw;
+    for (;; pct -= 5) {
+        ls = menu_style(row, pct, -1, 0, 0);
+        rs = on.results_ready ? TINT(row, pct, green) : TINT(row, pct, white);
+        cs = TINT(row, pct, white);
+        lw = menu_text_width(line, &ls), rw = menu_text_width(ready, &rs), cw = menu_text_width(go, &cs);
+        if (lw + rw + cw + RX(24) <= RX(486) || pct <= 50) break;
+    }
+    int fy = RY(203 - pct * 54 / 1000), cx = (RX(77) + lw + RX(563) - cw) / 2;
+    menu_draw_text(MENU_LEFT, RX(77), fy, line, &ls);
+    menu_draw_text(MENU_CENTRE, cx, fy, ready, &rs);
+    menu_draw_text(MENU_RIGHT, RX(563), fy, go, &cs);
+    results_ready_x0 = cx - rw / 2, results_ready_x1 = cx + rw / 2, results_ready_y = fy;
+#undef TINT
+#undef RX
+#undef RY
     *manager_view = saved;
 }
 
@@ -2416,6 +2600,7 @@ static void pads_read_now(int player, HostPad *out)
         else if (!on.released || !host_pad_script(player, out)) neutral(out);
         if (player == 0 && race) test_menu_pad(out);
         if (player == 0 && race) race_menu_pad(out);
+        if (player == 0 && race && from_menu && on.results_from && !on.end_done) results_pad(out);
         /* the round's results go back to the room by themselves after a while (BACK TO THE
            ROOM, their only row: Cross pressed for a quarter second each half second) */
         if (player == 0 && from_menu && on.mosh && on.results_at &&

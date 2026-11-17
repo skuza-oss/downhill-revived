@@ -7,6 +7,8 @@
    when everyone is ready. The existing online.c setup event carries each complete choice. */
 #include "hle.h"
 #include "menu_page.h"
+#include "room_view.h"
+#include <ctype.h>
 #include "text_input.h"
 #include "settings_table.h"  /* the rider name's rule (dhd_settings, port/render/settings) */
 #include "../net/net.h"
@@ -773,16 +775,36 @@ static void leave_room(MenuPage *p)
    ready its countdown starts the race by itself (countdown_ms); Start starts it at once. Two or
    more players may ride the same rider (issue #17). */
 
-enum { RF_TRACK, RF_BOTS, RF_CHEATS, RF_PUBLIC, RF_RULES, RF_RIDER, RF_READY, RF_START, RF_LEAVE, RF_COUNT };
+/* The fields in the order the cursor meets them: the left panel's top to bottom (the track, the
+   rules, computer riders, cheats, the room's kind), then the buttons. RF_READY is the main button
+   (READY, or WATCH THE RACE), RF_START the third (the host's START NOW, or READY NEXT beside WATCH):
+   what they do this frame is bar_now's (finding 271). */
+enum { RF_TRACK, RF_RULES, RF_BOTS, RF_CHEATS, RF_PUBLIC, RF_RIDER, RF_READY, RF_START, RF_LEAVE, RF_COUNT };
+enum { RF_LAST_SETTING = RF_PUBLIC };
 enum { RULE_WINDOW, RULE_NEXT, RULE_THEN, RULE_PLAYERS, RULES };
 /* The picker fills its columns top to bottom, so the list reads down the left column, then the
    right (finding 190): Up / Down step through the list, Left / Right go to the other column. */
 enum { TOASTS = 3, TRACK_COLUMNS = 2, TRACK_ROWS = (TRACK_COUNT + TRACK_COLUMNS - 1) / TRACK_COLUMNS };
-/* The layout, in the popup view's 640 x 224 (menu_draw_size) */
-enum { L_X = 48, L_W = 166, TOP = 40, CARD_X = 224, CARD_W = 368, CARD_Y = 52, CARD_H = 11, CARD_GAP = 0,
-       MID_H = 117, BAR_Y = 164, BAR_H = 18, BAR_X = 48, BAR_W = 544, STATUS_Y = 189, TITLE_Y = 14 };
+/* The layout, in the popup view's 640 x 224 (menu_draw_size), as the owner's pictures have it
+   (finding 271; their units of 1/100 of the 4:3 page are 6.4 across and about 3 down here):
+   the header (a small line, the game's title, the countdown bar), the information panel and the
+   room code on the left, the list on the right, the buttons, the sentence, the game's legend. */
+enum { PAGE_X = 45, PAGE_W = 550, PANEL_W = 147, LIST_X = 205, LIST_W = 390,
+       SMALL_Y = 2, TITLE_Y = 13, COUNT_Y = 31,
+       INFO_Y = 37, INFO_H = 100, CODE_Y = 140, CODE_H = 27,
+       HEAD_Y = 38, ROW_Y = 48, ROW_STEP = 12, ROW_H = 11,
+       BTN_Y = 171, BTN_H = 18, MAIN_X = 205, MAIN_W = 192, THIRD_X = 407, THIRD_W = 105, LEAVE_X = 522, LEAVE_W = 73,
+       SENTENCE_Y = 192 };
+/* Text colours (the font's 0-128) and rectangle colours (0-255) */
 static const int green[3] = {0x30, 0x80, 0x28}, amber[3] = {0x80, 0x60, 0x10}, red[3] = {0x80, 0x30, 0x30},
                  blue[3] = {0x38, 0x60, 0x98}, lilac[3] = {0x70, 0x68, 0x98};
+static const int t_white[3] = {0x76, 0x75, 0x7A}, t_dim[3] = {0x3E, 0x3F, 0x53}, t_amber[3] = {0x70, 0x58, 0x17},
+                 t_green[3] = {0x2C, 0x68, 0x2E}, t_blue[3] = {0x37, 0x51, 0x75},
+                 t_dark[3] = {0x06, 0x06, 0x08}, t_red[3] = {0x78, 0x2C, 0x2C};
+static const int r_green[3] = {0x59, 0xD0, 0x5C}, r_chip[3] = {0x2E, 0x9A, 0x38}, r_amber[3] = {0xE0, 0xB1, 0x2E},
+                 r_grey[3] = {0x3A, 0x3C, 0x5C}, r_yellow[3] = {0xF4, 0xE4, 0x00}, r_lilac[3] = {0xA3, 0xA5, 0xF2},
+                 r_blue[3] = {0x6F, 0xA3, 0xEA}, r_black[3] = {0, 0, 0}, r_wait[3] = {0x7D, 0x7F, 0xA6},
+                 r_dark[3] = {0x0C, 0x0C, 0x16}, r_white[3] = {0xEC, 0xEB, 0xF5};
 
 typedef struct { short x, y, w, h; } Hit;
 static NetLobby room;                       /* this frame's snapshot */
@@ -796,7 +818,7 @@ static double copied_at;
 static int copied_ok;
 static struct { char text[48]; const int *colour; double until; } toast[TOASTS];
 static int seen_id[NET_MAX_SLOTS], seen_ready[NET_MAX_SLOTS], seen_count = -1;
-static char seen_name[NET_MAX_SLOTS][16];
+static char seen_name[NET_MAX_SLOTS][32];
 static double ready_heard[NET_MAX_SLOTS];     /* per card: the last ready sound (no spam) */
 static int countdown_shown = -1;
 static char seen_race[NET_MAX_SLOTS][12];     /* per card: its race state last seen (news) */
@@ -860,15 +882,37 @@ static RoomNow room_now(void)
     return r;
 }
 
+/* What the main and the third button do now (finding 271): READY, and the host's START NOW beside
+   it (shown with why it can't while it can't: today's rules, finding 118); while a race runs that
+   this PC may watch, WATCH THE RACE with READY NEXT beside it. A guest has no third button: the
+   header says the host starts. */
+enum { ACT_NONE, ACT_READY, ACT_START, ACT_WATCH };
+typedef struct { int main, third; } BarNow;
+
+static BarNow bar_now(const RoomNow *r)
+{
+    BarNow b = {ACT_READY, ACT_NONE};
+    if (r->can_watch) b.main = ACT_WATCH, b.third = ACT_READY;
+    else if (r->host) b.third = ACT_START;
+    return b;
+}
+
+static int action_possible(int act, const RoomNow *r)
+{
+    return act == ACT_READY ? r->in && strcmp(r->own_race, "racing") != 0 : act == ACT_START ? r->can_start
+         : act == ACT_WATCH ? r->can_watch : 0;
+}
+
 static int focusable(int f, const RoomNow *r)
 {
+    BarNow b = bar_now(r);
     switch (f) {
     case RF_TRACK: case RF_BOTS: case RF_CHEATS: return r->host && r->in;
     case RF_PUBLIC: return r->host && r->in && !room.is_p2p;  /* a P2P room is never listed */
     case RF_RULES: return r->in;  /* everyone reads them; the host changes them */
     case RF_RIDER: return r->in;
-    case RF_READY: return r->in && strcmp(r->own_race, "racing") != 0;
-    case RF_START: return r->can_start || r->can_watch;
+    case RF_READY: return action_possible(b.main, r);
+    case RF_START: return action_possible(b.third, r);
     default: return 1;  /* Leave */
     }
 }
@@ -908,31 +952,11 @@ static void change_rule(int rule, int by)
     menu_page_sound(by > 0);
 }
 
-/* A time in race ticks (60 a second) as M:SS.CC */
-static void race_time(char *out, int size, long long ticks)
-{
-    snprintf(out, size, "%d:%02d.%02d", (int)(ticks / 3600), (int)(ticks / 60 % 60), (int)(ticks % 60 * 100 / 60));
-}
-
-/* A finish as a card shows it: a race's time, or the arena's scored round's points (finding 204;
-   score -1: a race). */
-static void finish_text(char *out, int size, long long ticks, int score)
-{
-    if (score >= 0) snprintf(out, size, "%d PTS", score);
-    else race_time(out, size, ticks);
-}
-
+/* A place as the notes say it ("3RD"): room_view.h's, in a buffer of its own */
 static const char *ordinal(int place)
 {
     static char text[8];
-    snprintf(text, sizeof text, "%d%s", place, place % 100 / 10 == 1 ? "TH" : place % 10 == 1 ? "ST" : place % 10 == 2 ? "ND"
-             : place % 10 == 3 ? "RD" : "TH");
-    return text;
-}
-
-static const char *dnf_name(const char *reason)
-{
-    return !strcmp(reason, "time_up") ? "TIME UP" : !strcmp(reason, "gave_up") ? "GAVE UP" : !strcmp(reason, "left") ? "LEFT" : "";
+    return room_ordinal(place, text, sizeof text);
 }
 
 /* The seconds from now to a server time (0 when absent or past). */
@@ -954,8 +978,12 @@ static void send_settings(int track, int options, int is_public)
     host_service_net_set_room(GADDR(&s));
 }
 
+static const char *input_by;  /* defined with the buttons below */
+
 static void change_setting(int f, int by)
 {
+    static const char *const what[] = {"track", "rules", "computer riders", "cheats", "public"};
+    hle_log("online menu: the room's %s changed by %s\n", what[f], input_by);
     if (f == RF_TRACK) {
         do room_track = (room_track + by + TRACK_COUNT) % TRACK_COUNT; while (arena(track_at(room_track)));
         send_settings(track_at(room_track), -1, -1);
@@ -1036,6 +1064,7 @@ static void copy_code(void)
 {
     copied_ok = room.code[0] && host_service_clipboard_set(GADDR(room.code));
     copied_at = host_seconds();
+    hle_log("online menu: the code copied by %s: %s\n", input_by, copied_ok ? "ok" : "failed");
     menu_play(copied_ok ? "S_SELECT" : "S_CANCEL");
 }
 
@@ -1066,25 +1095,34 @@ static void open_leave(const RoomNow *r, const char *by)
 
 static void leave_room(MenuPage *p);
 
+static void act(int what, const RoomNow *r)
+{
+    if (what == ACT_READY) toggle_ready(r);
+    else if (what == ACT_START) {
+        hle_log("online menu: START NOW by %s\n", input_by);
+        host_service_net_start_race();
+        menu_play("S_ENTER_GAME");
+    } else if (what == ACT_WATCH) {  /* finding 269: the room's answer (the race's start, "watch") opens the race */
+        hle_log("online menu: WATCH by %s\n", input_by);
+        host_service_net_watch();
+        menu_play("S_ENTER_GAME");
+    }
+}
+
 static void activate(MenuPage *p, int f, const RoomNow *r)
 {
     if (!focusable(f, r)) {
         menu_play("S_CANCEL");
         return;
     }
+    BarNow b = bar_now(r);
     switch (f) {
     case RF_TRACK: open_track_list(r); break;
     case RF_BOTS: case RF_CHEATS: case RF_PUBLIC: change_setting(f, 1); break;
     case RF_RULES: rules_open = 1, rules_cursor = 0, menu_play("S_SELECT"); break;
     case RF_RIDER: choose_rider(); break;
-    case RF_READY: toggle_ready(r); break;
-    case RF_START:
-        if (r->can_watch) {
-            hle_log("online menu: WATCH by %s\n", input_by);
-            host_service_net_watch();  /* the room's answer (the race's start, "watch") opens the race */
-        } else host_service_net_start_race();
-        menu_play("S_ENTER_GAME");
-        break;
+    case RF_READY: act(b.main, r); break;
+    case RF_START: act(b.third, r); break;
     case RF_LEAVE: open_leave(r, "Leave"); break;
     }
     (void)p;
@@ -1095,7 +1133,7 @@ static void activate(MenuPage *p, int f, const RoomNow *r)
    next frame, so a pad could never reach TRACK, COMPUTER RIDERS or CHEATS there. */
 static int setting_step(int f, int d, const RoomNow *r)
 {
-    for (f += d; f >= RF_TRACK && f <= RF_RULES; f += d)
+    for (f += d; f >= RF_TRACK && f <= RF_LAST_SETTING; f += d)
         if (focusable(f, r)) return f;
     return -1;
 }
@@ -1104,14 +1142,13 @@ static int setting_step(int f, int d, const RoomNow *r)
 static void move(int dx, int dy, const RoomNow *r)
 {
     int was = rf, to = dy ? setting_step(rf, dy, r) : -1;
-    if (rf <= RF_RULES) {
-        if (dy < 0 && to >= 0 && r->host) rf = to;
-        else if (dy > 0 && to >= 0) rf = to;
+    if (rf <= RF_LAST_SETTING) {
+        if (to >= 0) rf = to;
         else if (dy > 0) rf = focusable(rf_bar, r) ? rf_bar : RF_LEAVE;
     } else if (dx) {
         do rf = RF_RIDER + (rf - RF_RIDER + dx + 4) % 4; while (!focusable(rf, r));
-    } else if (dy < 0 && r->in)
-        rf = RF_RULES;
+    } else if (dy < 0 && r->in && (to = setting_step(RF_LAST_SETTING + 1, -1, r)) >= 0)
+        rf = to;  /* up from the buttons: the panel's last row this PC can use */
     if (rf >= RF_RIDER) rf_bar = rf;
     if (rf != was) menu_page_sound(dx > 0 || dy > 0);
 }
@@ -1152,8 +1189,8 @@ static void room_input(MenuPage *p, const RoomNow *r)
         return;
     }
     if (!focusable(rf, r)) rf = focusable(rf_bar, r) ? rf_bar : focusable(RF_READY, r) ? RF_READY : RF_LEAVE;
-    if (dx && rf <= RF_PUBLIC) change_setting(rf, dx);
-    else if (dx || dy) move(dx, dy, r);
+    if (dx && rf <= RF_LAST_SETTING && rf != RF_RULES) change_setting(rf, dx);
+    else if (dy || (dx && rf > RF_LAST_SETTING)) move(dx, dy, r);
     if (pressed & PAD_CROSS) activate(p, rf, r);
     else if (pressed & (PAD_SQUARE | PAD_START)) toggle_ready(r);
     else if (pressed & PAD_CIRCLE) copy_code();
@@ -1201,7 +1238,9 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
         return;
     }
     if (left && inside(&code_hit, x, y)) {
+        input_by = "tap";
         copy_code();
+        input_by = "pad";
         return;
     }
     for (int f = 0; f < RF_COUNT; f++) {
@@ -1218,8 +1257,10 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
             input_by = "pad";
         }
     }
-    if (wheel && rf <= RF_PUBLIC) change_setting(rf, wheel > 0 ? -1 : 1);
+    input_by = "wheel";
+    if (wheel && rf <= RF_LAST_SETTING && rf != RF_RULES) change_setting(rf, wheel > 0 ? -1 : 1);
     else if (wheel) move(wheel > 0 ? -1 : 1, 0, &r);
+    input_by = "pad";
 }
 
 /* ---- news: who came, went or got ready, with a sound (each card's ready sound at most every
@@ -1251,8 +1292,8 @@ static void room_news(void)
         logged_race = l->last_race_id;
         for (int k = 0; k < l->nresults && n < (int)sizeof text - 60; k++) {
             const NetResult *r = &l->result[k];
-            if (r->ticks >= 0) finish_text(detail, sizeof detail, r->ticks, l->result_score[k]);
-            else snprintf(detail, sizeof detail, "DNF %s", dnf_name(r->dnf_reason));
+            if (r->ticks >= 0) room_finish(detail, sizeof detail, r->ticks, l->result_score[k]);
+            else snprintf(detail, sizeof detail, "DNF %s", room_dnf_name(r->dnf_reason));
             n += snprintf(text + n, sizeof text - n, " %d. %.24s %s;", r->place, r->name, detail);
         }
         hle_log("%s\n", text);
@@ -1272,21 +1313,23 @@ static void room_news(void)
     for (int i = 0; i < l->nmembers; i++) {
         const NetMember *m = &l->member[i];
         int k = 0;
+        char who[ROOM_NAME_SIZE];
+        room_name(m->name, who);
         while (k < seen_count && seen_id[k] != m->id) k++;
         if (k == seen_count) {
-            snprintf(line, sizeof line, "%.12s JOINED", m->name);
+            snprintf(line, sizeof line, "%s JOINED", who);
             note(line, NULL);
             menu_play("S_SELECT");
         } else if (strcmp(m->race_state, seen_race[k]) && !strcmp(m->race_state, "finished")) {
-            snprintf(line, sizeof line, "%.12s FINISHED %s", m->name, ordinal(m->place));
+            snprintf(line, sizeof line, "%s FINISHED %s", who, ordinal(m->place));
             note(line, green);
             menu_play("S_NEXT");
         } else if (strcmp(m->race_state, seen_race[k]) && !strcmp(m->race_state, "dnf") && m->id != l->member_id) {
-            snprintf(line, sizeof line, "%.12s IS OUT (%s)", m->name, dnf_name(m->dnf_reason));
+            snprintf(line, sizeof line, "%s IS OUT (%s)", who, room_dnf_name(m->dnf_reason));
             note(line, red);
         } else if (m->ready && !seen_ready[k] && m->id != l->member_id && now - ready_heard[i] >= 3.0) {
             ready_heard[i] = now;
-            snprintf(line, sizeof line, "%.12s IS READY", m->name);
+            snprintf(line, sizeof line, "%s IS READY", who);
             note(line, green);
             menu_play("S_NEXT");
         }
@@ -1294,8 +1337,9 @@ static void room_news(void)
     if (seen_host >= 0 && l->host_id != seen_host)
         for (int i = 0; i < l->nmembers; i++)
             if (l->member[i].id == l->host_id) {
-                snprintf(line, sizeof line, l->host_id == l->member_id ? "YOU ARE THE HOST NOW" : "%.12s IS THE HOST NOW",
-                         l->member[i].name);
+                char who[ROOM_NAME_SIZE];
+                room_name(l->member[i].name, who);
+                snprintf(line, sizeof line, l->host_id == l->member_id ? "YOU ARE THE HOST NOW" : "%s IS THE HOST NOW", who);
                 note(line, NULL);
             }
     int from, limit, to, switched = 0;
@@ -1319,7 +1363,9 @@ static void room_news(void)
         int here = 0;
         for (int i = 0; i < l->nmembers; i++) here |= l->member[i].id == seen_id[k];
         if (!here) {
-            snprintf(line, sizeof line, "%.12s LEFT", seen_name[k]);
+            char who[ROOM_NAME_SIZE];
+            room_name(seen_name[k], who);
+            snprintf(line, sizeof line, "%s LEFT", who);
             note(line, red);
             menu_play("S_BACK");
         }
@@ -1336,6 +1382,8 @@ keep:
     }
 }
 
+static const uint16_t *track_preview(int track);
+
 /* ---- drawing ---- */
 
 static MenuStyle st_row, st_on, st_off;
@@ -1348,6 +1396,8 @@ static void box(int x, int y, int w, int h, int level) { menu_draw_box(X(x), Y(y
 static void rect(int x, int y, int w, int h, const int *c, int a) { menu_draw_rect(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y), c[0], c[1], c[2], a); }
 static void bar(int x, int y, int w, int h) { menu_draw_bar(X(x), Y(y), X(x + w) - X(x), Y(y + h) - Y(y)); }
 static void hit(Hit *h, int x, int y, int w, int h_) { h->x = (short)X(x), h->y = (short)Y(y), h->w = (short)(X(x + w) - X(x)), h->h = (short)(Y(y + h_) - Y(y)); }
+/* A text's width in the layout's units (menu_text_width measures as capitals: an upper bound) */
+static int width_of(const char *t, MenuStyle s) { return menu_text_width(t, &s) * 640 / (vw > 0 ? vw : 640); }
 
 /* A style whose text fits w: smaller steps down to 60 %. */
 static MenuStyle fit(const char *t, MenuStyle s, int percent, int w)
@@ -1372,235 +1422,407 @@ static const char *first_fit(const char *const *texts, MenuStyle s, int percent,
     return texts[i];
 }
 
-static void draw_setting(int f, int y, const char *label, const char *value, const RoomNow *r)
+/* The layout's own check (finding 271): every text the room draws into a box of its own is
+   measured against it, and one that is wider says so in dhd.log, once per text (a capture run
+   with the widest names must log none). */
+static void layout_check(const char *what, const char *t, MenuStyle s, int w)
 {
-    char line[64];
-    int on = rf == f && !track_list && !leave_ask;
-    snprintf(line, sizeof line, r->host ? "%s  < %s >" : "%s  %s", label, value);
-    if (on) bar(L_X + 6, y - 1, L_W - 12, 11);
-    put(MENU_CENTRE, L_X + L_W / 2, y, line, fit(line, on ? st_on : st_row, 90, L_W - 16));
-    hit(&hits[f], L_X, y - 2, L_W, 13);
+    static char said[24][40];
+    static int nsaid;
+    int width = width_of(t, s);
+    if (width <= w) return;
+    for (int i = 0; i < nsaid; i++) if (!strncmp(said[i], t, sizeof said[i] - 1)) return;
+    if (nsaid < 24) snprintf(said[nsaid++], sizeof said[0], "%s", t);
+    hle_log("online menu: layout: %s \"%s\" is %d wide in %d\n", what, t, width, w);
 }
 
-static void draw_left(const RoomNow *r)
+/* Text into a box w wide (align as put's), checked */
+static void put_in(const char *what, int align, int x, int y, int w, const char *t, MenuStyle s)
+{
+    layout_check(what, t, s, w);
+    put(align, x, y, t, s);
+}
+
+/* An outline of t units round the inside of a rectangle */
+static void outline(int x, int y, int w, int h, int t, const int *c)
+{
+    rect(x, y, w, t, c, 128);
+    rect(x, y + h - t, w, t, c, 128);
+    rect(x, y + t, t, h - 2 * t, c, 128);
+    rect(x + w - t, y + t, t, h - 2 * t, c, 128);
+}
+
+/* A check mark in blocks (the font has none): its corner at x, y, s units a step. A unit of the
+   popup view is about twice as tall as wide on the page, so a block is 2s wide for s high. */
+static void tick(int x, int y, int s, const int *c)
+{
+    static const signed char at[][2] = {{0, 2}, {1, 3}, {2, 2}, {3, 1}, {4, 0}};
+    for (int i = 0; i < 5; i++) rect(x + at[i][0] * 2 * s, y + at[i][1] * s, 2 * s + 1, s + 1, c, 128);
+}
+
+/* ---- the left: what the next race is, and the room's code ---- */
+
+/* A track's name in capitals, as the room writes every heading (finding 271) */
+static const char *track_caps(int index)
+{
+    static char caps[2][64];
+    static int k;
+    char *out = caps[k ^= 1];
+    snprintf(out, sizeof caps[0], "%s", track_name(index));
+    for (char *c = out; *c; c++) *c = (char)toupper((unsigned char)*c);
+    return out;
+}
+
+static const char *next_short(int n) { return n ? "HOST" : "AUTO"; }
+static const char *then_short(int t) { return t == 0 ? "SAME" : t == 2 ? "RANDOM" : "NEXT"; }
+
+/* One label / value row of the panel; the host's cursor shows its arrows on the value. */
+static void info_row(int f, int k, const char *label, const char *value, const char *value_short, const RoomNow *r)
+{
+    int x = PAGE_X + 6, w = PANEL_W - 12, y = INFO_Y + 51 + k * 8, on = rf == f && r->host && f != RF_RULES;
+    /* on the cursor's bar: the game's selected style, as its menus draw a focused row */
+    MenuStyle ls = rf == f ? tint(st_on, 62, NULL) : tint(st_row, 62, t_dim), vs = rf == f ? tint(st_on, 62, NULL) : tint(st_row, 62, t_white);
+    char v[40];
+    /* a long label with a long value ("COMPUTER RIDERS" "OFF") steps both down together */
+    for (int pct = 58; pct >= 50 && width_of(label, ls) + 6 + width_of(value_short ? value_short : value, vs) > w; pct -= 4)
+        ls = rf == f ? tint(st_on, pct, NULL) : tint(st_row, pct, t_dim), vs = rf == f ? tint(st_on, pct, NULL) : tint(st_row, pct, t_white);
+    int room_w = w - width_of(label, ls) - 6;
+    /* the host's arrows when they fit (beside COMPUTER RIDERS they don't: the yellow says it) */
+    snprintf(v, sizeof v, on ? "< %s >" : "%s", value);
+    if (width_of(v, vs) > room_w && value_short) snprintf(v, sizeof v, on ? "< %s >" : "%s", value_short);
+    if (width_of(v, vs) > room_w && on) snprintf(v, sizeof v, "%s", value_short && width_of(value, vs) > room_w ? value_short : value);
+    put_in("info label", MENU_LEFT, x, y, w, label, ls);
+    put_in("info value", MENU_RIGHT, x + w, y, room_w, v, vs);
+    if (f != RF_RULES) hit(&hits[f], PAGE_X, y - 1, PANEL_W, 8);
+}
+
+static void draw_info(const RoomNow *r)
 {
     const NetLobby *l = &room;
-    box(L_X, TOP, L_W, MID_H, 90);
-    /* the track: a big name; the host changes it here (left/right) or from the list (Cross) */
-    int cx = L_X + L_W / 2, on = rf == RF_TRACK && !track_list && !leave_ask;
-    put(MENU_CENTRE, cx, TOP + 6, "TRACK", menu_style(st_off, 80, -1, 0, 0));
-    if (on) bar(L_X + 6, TOP + 17, L_W - 12, 14);
-    /* the host's arrows at the highlight's ends; the name fitted between them with a gap (mixed
-       case draws up to a tenth wider than the capitals measure) */
-    const char *track = track_name(l->track);
-    MenuStyle ts = fit(track, on ? st_on : st_row, 125, r->host ? L_W - 62 : L_W - 24);
-    put(MENU_CENTRE, cx, TOP + 18, track, ts);
-    if (r->host) {
-        put(MENU_LEFT, L_X + 10, TOP + 18, "<", ts);
-        put(MENU_RIGHT, L_X + L_W - 10, TOP + 18, ">", ts);
-    }
-    hit(&hits[RF_TRACK], L_X, TOP + 14, L_W, 20);
-    draw_setting(RF_BOTS, TOP + 39, "COMPUTER RIDERS", l->laps & ROOM_NO_BOTS ? "OFF" : "ON", r);
-    draw_setting(RF_CHEATS, TOP + 52, "CHEATS", l->laps & ROOM_CHEATS ? "ON" : "OFF", r);
-    draw_setting(RF_PUBLIC, TOP + 65, "ROOM", l->is_p2p ? "P2P, PRIVATE" : l->is_public ? "PUBLIC" : "PRIVATE", r);
-    /* the room's rules in one line; Cross opens them (everyone reads them, the host changes them) */
-    on = rf == RF_RULES && !track_list && !leave_ask && !rules_open;
-    if (on) bar(L_X + 6, TOP + 77, L_W - 12, 11);
-    put(MENU_CENTRE, cx, TOP + 78, "ROOM RULES", on ? st_on : st_row);
-    /* short: the left column is narrow beside two columns of cards (AUTO is always 30 s) */
-    /* the longest form that fits the panel: "HOST STARTS" -> "HOST", then "NEXT TRACK" -> "NEXT" */
-    char forms[3][48];
-    const char *pending = l->rules_pending ? " *" : "", *then_short = l->then == 0 ? "SAME" : l->then == 2 ? "RANDOM" : "NEXT";
-    snprintf(forms[0], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST STARTS" : "AUTO",
-             then_name(l->then), pending);
-    snprintf(forms[1], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST" : "AUTO",
-             then_name(l->then), pending);
-    snprintf(forms[2], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST" : "AUTO", then_short, pending);
-    const char *const texts[] = {forms[0], forms[1], forms[2], NULL};
-    const char *rules = first_fit(texts, st_off, 70, L_W - 16);
-    put(MENU_CENTRE, cx, TOP + 89, rules, fit(rules, st_off, 70, L_W - 16));
-    hit(&hits[RF_RULES], L_X, TOP + 75, L_W, 24);
-    rect(L_X + 8, TOP + 99, L_W - 16, 1, (const int[]){0, 0, 0}, 128);
-    /* the join code; Circle (or a click) copies it */
+    int x = PAGE_X + 6, w = PANEL_W - 12, live = r->racing;
+    box(PAGE_X, INFO_Y, PANEL_W, INFO_H, 90);
+    box(PAGE_X, CODE_Y, PANEL_W, CODE_H, 90);
+    put(MENU_LEFT, x, INFO_Y + 3, live ? "THIS RACE" : "NEXT RACE", tint(st_row, 60, t_dim));
+    /* the cursor's bar (one a frame) behind the focused row */
+    if (rf == RF_TRACK && r->host) bar(PAGE_X + 3, INFO_Y + 38, PANEL_W - 6, 11);
+    else if (rf == RF_RULES) bar(PAGE_X + 3, INFO_Y + 50, PANEL_W - 6, 24);
+    else if (rf >= RF_BOTS && rf <= RF_PUBLIC) bar(PAGE_X + 3, INFO_Y + 50 + (rf - RF_BOTS + 3) * 8, PANEL_W - 6, 8);
+    /* the track's picture, as the picker shows it (finding 132), and its name */
+    const uint16_t *picture = track_preview(l->track);
+    rect(x - 1, INFO_Y + 10, w + 2, 28, r_black, 128);
+    if (picture) menu_draw_picture(X(x), Y(INFO_Y + 11), X(x + w) - X(x), Y(INFO_Y + 37) - Y(INFO_Y + 11), picture);
+    const char *track = track_caps(l->track);
+    int on = rf == RF_TRACK && r->host;
+    MenuStyle ts = fit(track, on ? st_on : tint(st_row, 100, t_white), 100, on ? w - 24 : w);
+    if (on) {
+        put(MENU_LEFT, x, INFO_Y + 38, "<", ts);
+        put(MENU_RIGHT, x + w, INFO_Y + 38, ">", ts);
+        put_in("track", MENU_CENTRE, x + w / 2, INFO_Y + 38, w - 24, track, ts);
+    } else
+        put_in("track", MENU_LEFT, x, INFO_Y + 38, w, track, ts);
+    hit(&hits[RF_TRACK], PAGE_X, INFO_Y + 9, PANEL_W, 41);
+    /* the rules (everyone reads them, Cross opens them; a change made during a race counts from the
+       next one: *), then the room's own settings */
+    const char *pending = l->rules_pending ? " *" : "";
+    char window[24], next[24], then[24], next_s[16], then_s[16];
+    snprintf(window, sizeof window, "%s%s", window_name(l->finish_window), pending);
+    snprintf(next, sizeof next, "%s%s", l->next_race ? "HOST STARTS" : "AUTO, 30 S", pending);
+    snprintf(next_s, sizeof next_s, "%s%s", next_short(l->next_race), pending);
+    snprintf(then, sizeof then, "%s%s", then_name(l->then), pending);
+    snprintf(then_s, sizeof then_s, "%s%s", then_short(l->then), pending);
+    info_row(RF_RULES, 0, "FINISH WINDOW", window, NULL, r);
+    info_row(RF_RULES, 1, "NEXT RACE", next, next_s, r);
+    info_row(RF_RULES, 2, "THEN", then, then_s, r);
+    hit(&hits[RF_RULES], PAGE_X, INFO_Y + 50, PANEL_W, 24);
+    info_row(RF_BOTS, 3, "COMPUTER RIDERS", l->laps & ROOM_NO_BOTS ? "OFF" : "ON", NULL, r);
+    info_row(RF_CHEATS, 4, "CHEATS", l->laps & ROOM_CHEATS ? "ON" : "OFF", NULL, r);
+    info_row(RF_PUBLIC, 5, "ROOM", l->is_p2p ? "P2P, PRIVATE" : l->is_public ? "PUBLIC" : "PRIVATE", l->is_p2p ? "P2P" : NULL, r);
+    /* the join code, large; Circle (or a click on it) copies it */
     int copied = copied_at > 0 && host_seconds() - copied_at < 1.5;
-    put(MENU_LEFT, L_X + 10, TOP + 105, copied ? (copied_ok ? "COPIED" : "FAILED") : "CODE",
-         !copied ? menu_style(st_off, 80, -1, 0, 0) : copied_ok ? tint(st_row, 80, green) : tint(st_row, 80, red));
-    put(MENU_RIGHT, L_X + L_W - 10, TOP + 102, l->code[0] ? l->code : "------", menu_style(st_on, 120, -1, 0, 0));
-    hit(&code_hit, L_X, TOP + 100, L_W, 17);
+    {
+        static const char *const labels[] = {"ROOM CODE - INVITE FRIENDS", "ROOM CODE - INVITE", "ROOM CODE", NULL};
+        MenuStyle cs = tint(st_row, 100, t_dim);  /* fit and first_fit take the size from 100 % */
+        const char *label = first_fit(labels, cs, 55, w);
+        put_in("code label", MENU_LEFT, x, CODE_Y + 3, w, label, fit(label, cs, 55, w));
+    }
+    put_in("code", MENU_LEFT, x, CODE_Y + 9, w, l->code[0] ? l->code : "------", tint(st_on, 125, t_white));
+    put_in("copy", MENU_LEFT, x, CODE_Y + 20, w, copied ? (copied_ok ? "COPIED" : "COULDN'T COPY") : GLYPH_CIRCLE " COPY CODE",
+           tint(st_row, 60, !copied ? t_dim : copied_ok ? t_green : t_red));
+    hit(&code_hit, PAGE_X, CODE_Y, PANEL_W, CODE_H);
 }
+
+/* ---- the list ---- */
 
 static void draw_bars(int x, int y, int rtt)
 {
-    static const int lilac[3] = {0x70, 0x68, 0x98}, unlit[3] = {0x30, 0x30, 0x30};
+    static const int unlit[3] = {0x30, 0x30, 0x40};
     int level = rtt < 0 ? 0 : rtt < 80 ? 3 : rtt < 150 ? 2 : 1;
     for (int i = 0; i < 3; i++) {
-        int h = 3 + 2 * i;
-        rect(x + i * 3, y - h, 2, h, i >= level ? unlit : level == 1 ? red : lilac, 128);
+        int h = 2 + 2 * i;
+        rect(x + i * 3, y - h, 2, h, i >= level ? unlit : level == 1 ? r_amber : r_lilac, 128);
     }
 }
 
-static void draw_card(int i)
+/* The list's columns (units from the row's left): the place, the name, the middle column, the
+   state's right edge and the bars. Sized for "10TH", "WWWWWWWWWW.." with HOST, and "TARA LLANES";
+   the layout check measures them (finding 271). */
+enum { COL_PLACE = 8, COL_NAME = 46, COL_MIDDLE = 222, COL_STATE = 22, COL_BARS = 13, ROW_PERCENT = 80 };
+static const int POOR_MS = 150;  /* draw_bars' one red bar: the ping's number shows too */
+
+static void draw_row(int k, const RoomRow *w)
 {
     const NetLobby *l = &room;
-    int x = CARD_X + (i / 5) * 188, y = CARD_Y + (i % 5) * 22, w = 180;
-    char line[64], detail[40], ping[20];
-    box(x, y, w, 20, i < l->nmembers ? 90 : 60);
-    if (i >= l->nmembers) {
-        snprintf(line, sizeof line, "%d  %s", i + 1, i < l->max_players ? "OPEN" : "");
-        put(MENU_LEFT, x + 6, y + 6, line, st_off);
+    int x = LIST_X, y = ROW_Y + k * ROW_STEP, right = LIST_X + LIST_W;
+    MenuStyle rs = tint(st_row, ROW_PERCENT, NULL);
+    box(x, y, LIST_W, ROW_H, w->member < 0 ? 60 : 90);
+    if (w->member < 0) {
+        put(MENU_LEFT, x + COL_PLACE, y + 1, w->place, tint(rs, 100, t_dim));
+        put(MENU_LEFT, x + COL_NAME, y + 1, "OPEN", tint(rs, 100, t_dim));
         return;
     }
-    const NetMember *m = &l->member[i];
-    RoomNow now = room_now();
-    const char *tag = m->choosing ? "CHOOSING" : m->ready ? "READY" : "WAIT";
-    if (now.racing && !strcmp(m->race_state, "racing")) tag = "RACING";
-    else if (now.racing && !strcmp(m->race_state, "finished")) tag = "DONE";
-    else if (now.racing && !strcmp(m->race_state, "dnf")) tag = "OUT";
-    else if (now.starting && m->ready) tag = "STARTING";
-    /* The first line: the place, the name and the HOST or YOU tag on the left, the state on the
-       right at its own size. The left part takes what the state leaves (it used to take 112 of
-       the card's 180 whatever the state, so STARTING covered the tag; finding 206): smaller
-       down to fit's 60 %, then the name loses its last letters, never the tag. */
-    MenuStyle ts = menu_style(st_on, 70, -1, 0, 0);
-    int room_w = w - 10 - menu_text_width(tag, &ts) * 640 / vw - 6, keep = 9;
-    const char *mark = m->id == l->host_id ? " HOST" : m->id == l->member_id ? " YOU" : "";
-    if (room_w > 112) room_w = 112;
-    do snprintf(line, sizeof line, "%d %.*s%s", i + 1, keep, m->name, mark);
-    while (!fits(line, st_row, 85, room_w) && --keep > 1);
-    for (char *c = line; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
-    rect(x, y + 1, 2, 18, m->ready ? green : amber, 128);
-    put(MENU_LEFT, x + 5, y + 2, line, fit(line, st_row, 85, room_w));
-    put(MENU_RIGHT, x + w - 5, y + 2, tag, ts);
-    detail[0] = 0;
-    if (now.racing && !strcmp(m->race_state, "finished")) {
-        finish_text(line, sizeof line, m->finish_ticks, l->member_score[i]);
-        snprintf(detail, sizeof detail, "%s %s", ordinal(m->place), line);
-    } else if (now.racing && !strcmp(m->race_state, "dnf"))
-        snprintf(detail, sizeof detail, "DNF %s", dnf_name(m->dnf_reason));
-    else if (!now.racing) {
-        for (int k = 0; k < l->nresults; k++) if (l->result[k].id == m->id) {
-            const NetResult *last = &l->result[k];
-            if (last->ticks >= 0) {
-                finish_text(line, sizeof line, last->ticks, l->result_score[k]);
-                snprintf(detail, sizeof detail, "%s %s", ordinal(last->place), line);
-            } else snprintf(detail, sizeof detail, "DNF %s", dnf_name(last->dnf_reason));
+    const NetMember *m = &l->member[w->member];
+    if (w->own) {
+        rect(x, y, LIST_W, ROW_H, (const int[]){0x3C, 0x38, 0x00}, 60);
+        outline(x - 1, y - 1, LIST_W + 2, ROW_H + 2, 1, r_yellow);
+    }
+    rect(x, y, 2, ROW_H, w->own ? r_yellow : w->edge == EDGE_GREEN ? r_green : w->edge == EDGE_AMBER ? r_amber : r_grey, 128);
+    const int *place_c = w->dim ? t_dim : w->state_kind == RS_DONE ? t_amber : NULL;
+    put_in("place", MENU_LEFT, x + COL_PLACE, y + 1, COL_NAME - COL_PLACE - 3, w->place, tint(rs, 100, place_c));
+    MenuStyle ns = tint(rs, 100, w->dim ? t_dim : t_white);
+    int name_w = width_of(w->name, ns), mark_x = x + COL_NAME + name_w + 5;
+    put(MENU_LEFT, x + COL_NAME, y + 1, w->name, ns);
+    const char *mark = w->host ? "HOST" : w->own ? "YOU" : NULL;
+    int name_end = mark_x;
+    if (mark) {
+        MenuStyle bs = tint(st_row, 50, t_dark);
+        int bw = width_of(mark, bs) + 10;
+        rect(mark_x, y + 2, bw, 7, w->host ? r_lilac : r_yellow, 128);
+        put(MENU_CENTRE, mark_x + bw / 2, y + 3, mark, bs);
+        name_end = mark_x + bw;
+        if (w->host && w->own) {  /* the host is this PC: both */
+            int yw = width_of("YOU", bs) + 10;
+            rect(name_end + 3, y + 2, yw, 7, r_yellow, 128);
+            put(MENU_CENTRE, name_end + 3 + yw / 2, y + 3, "YOU", bs);
+            name_end += 3 + yw;
         }
     }
-    if (!detail[0]) snprintf(detail, sizeof detail, "%s", m->choosing ? "..." : m->rider >= 1 && m->rider <= 16 ? rider_names[m->rider-1] : "NO RIDER");
-    if (m->rtt_ms >= 0) snprintf(ping, sizeof ping, "%d MS", m->rtt_ms);
-    else snprintf(ping, sizeof ping, "-");
-    MenuStyle ps = menu_style(st_row, 70, -1, 0, 0);
-    int ping_w = menu_text_width(ping, &ps) * 640 / vw, detail_w = w - 26 - ping_w;  /* left of the bars */
-    put(MENU_LEFT, x + 5, y + 11, detail, fit(detail, st_off, 75, detail_w < 115 ? detail_w : 115));
-    put(MENU_RIGHT, x + w - 5, y + 11, ping, ps);
-    draw_bars(x + w - 18 - ping_w, y + 18, m->rtt_ms);
+    /* the ping: bars; its number too when it is poor */
+    char ping[16] = "";
+    int state_right = right - COL_STATE;
+    draw_bars(right - COL_BARS, y + 9, m->rtt_ms);
+    if (m->rtt_ms >= POOR_MS) {
+        MenuStyle ps = tint(rs, 75, t_amber);
+        snprintf(ping, sizeof ping, "%d MS", m->rtt_ms);
+        put(MENU_RIGHT, right - COL_BARS - 3, y + 2, ping, ps);
+        state_right = right - COL_BARS - 3 - width_of(ping, ps) - 6;
+    }
+    /* the state at the right: a chip (READY, WAIT, CHOOSING) or words */
+    int state_left;
+    if (w->state_kind == RS_READY || w->state_kind == RS_WAIT || w->state_kind == RS_CHOOSING) {
+        MenuStyle cs = tint(st_row, 65, w->state_kind == RS_READY ? t_white : t_dim);
+        int cw = width_of(w->state, cs) + 12;
+        if (cw < 44) cw = 44;
+        state_left = state_right - cw;
+        if (w->state_kind == RS_READY) rect(state_left, y + 2, cw, 7, r_chip, 128);
+        else rect(state_left, y + 2, cw, 7, r_wait, 128), rect(state_left + 1, y + 3, cw - 2, 5, r_dark, 128);
+        put(MENU_CENTRE, state_left + cw / 2, y + 2, w->state, cs);
+    } else {
+        const int *c = w->state_kind == RS_DONE ? t_amber : w->state_kind == RS_RACING || w->state_kind == RS_READY_NEXT ? t_green
+                     : t_dim;
+        MenuStyle ss = tint(rs, w->state_kind == RS_DONE ? 100 : 85, c);
+        state_left = state_right - width_of(w->state, ss);
+        put(MENU_RIGHT, state_right, y + 2, w->state, ss);
+        if (w->state_kind == RS_RACING) rect(state_left - 6, y + 4, 3, 3, r_green, 128);
+    }
+    /* the middle: the rider, or the last race's time / DNF */
+    if (w->middle[0]) {
+        MenuStyle ms = w->middle_kind == MID_RESULT ? tint(rs, 90, t_amber) : tint(rs, 72, t_dim);
+        int mx = x + COL_MIDDLE > name_end + 6 ? x + COL_MIDDLE : name_end + 6;
+        put_in("middle", MENU_LEFT, mx, y + 2, state_left - 8 - mx, w->middle, ms);
+    }
+    layout_check("name", w->name, ns, COL_MIDDLE - COL_NAME - 6 - (mark ? width_of(mark, tint(st_row, 50, NULL)) + 15 : 0));
+    if (name_end > state_left - 8) hle_log("online menu: layout: row %d's name runs into its state\n", k);
 }
 
-static void draw_bar_cell(int f, int k, const char *label, const char *why, const RoomNow *r, int green_cell)
-{
-    int w = BAR_W / 4, x = BAR_X + k * w, on = rf == f && !track_list && !leave_ask, can = focusable(f, r);
-    if (k) rect(x, BAR_Y + 1, 1, BAR_H - 2, (const int[]){0, 0, 0}, 128);
-    if (on) bar(x + 3, BAR_Y + 3, w - 6, BAR_H - 6);
-    if (green_cell) rect(x + (on ? 6 : 3), BAR_Y + (on ? 5 : 3), w - (on ? 12 : 6), BAR_H - (on ? 10 : 6), green, 128);
-    MenuStyle s = on && !green_cell ? st_on : can ? st_row : st_off;
-    if (why) {
-        put(MENU_CENTRE, x + w / 2, BAR_Y + 2, label, s);
-        put(MENU_CENTRE, x + w / 2, BAR_Y + 11, why, tint(st_row, 65, amber));
-    } else
-        put(MENU_CENTRE, x + w / 2, BAR_Y + 5, label, fit(label, s, 100, w - 10));
-    hit(&hits[f], x, BAR_Y, w, BAR_H);
-}
-
-static void draw_bar(const RoomNow *r)
+static void draw_list(const RoomNow *r)
 {
     const NetLobby *l = &room;
+    RoomRow rows[NET_MAX_SLOTS];
+    int n = room_rows(l, rider_names, rows);
+    char left[64], right[32];
+    const int *rc = t_dim;
+    MenuStyle hs = tint(st_row, 65, t_dim);
+    if (r->racing) {
+        snprintf(left, sizeof left, "LIVE RESULTS");
+        if (r->riding) snprintf(right, sizeof right, "%d STILL RACING", r->riding);
+        else snprintf(right, sizeof right, "ALL IN");
+        rc = t_blue;
+    } else if (l->last_race_id) {
+        snprintf(left, sizeof left, "LAST RACE - %s", track_caps(l->last_race_track));
+        snprintf(right, sizeof right, "%d READY", r->ready);
+        rc = r->ready ? t_green : t_dim;
+    } else {
+        /* where the room runs (findings 135, 181): its area, else its region */
+        const char *area = l->room_area[0] ? l->room_area : l->room_region;
+        snprintf(left, sizeof left, "PLAYERS %d/%d", l->nmembers, l->max_players);
+        snprintf(right, sizeof right, "%s", area);
+    }
+    MenuStyle rs = tint(st_row, 70, rc);
+    int right_w = width_of(right, rs);
+    put_in("list head", MENU_RIGHT, LIST_X + LIST_W, HEAD_Y, LIST_W / 2, right, rs);
+    if (!fits(left, hs, 65, LIST_W - right_w - 10) && l->last_race_id && !r->racing) snprintf(left, sizeof left, "LAST RACE");
+    put_in("list head", MENU_LEFT, LIST_X, HEAD_Y, LIST_W - right_w - 10, left, hs);
+    for (int k = 0; k < n && k < MEMBER_ROWS; k++) draw_row(k, &rows[k]);
+}
+
+/* ---- the buttons ---- */
+
+/* kind: 0 a plain button, 1 the main one (yellow), 2 the main one pressed (green, a check) */
+static void draw_button(int f, int x, int w, const char *label, const char *why, int kind, const RoomNow *r)
+{
+    int on = rf == f && !track_list && !leave_ask && !rules_open, can = focusable(f, r);
+    if (kind == 0) {
+        box(x, BTN_Y, w, BTN_H, 90);
+        if (on) bar(x + 3, BTN_Y + 3, w - 6, BTN_H - 6);
+        MenuStyle s = on ? st_on : tint(st_row, 100, can ? NULL : t_dim);
+        if (why) {
+            put_in("button", MENU_CENTRE, x + w / 2, BTN_Y + 2, w - 8, label, fit(label, s, 90, w - 8));
+            put_in("button why", MENU_CENTRE, x + w / 2, BTN_Y + 10, w - 8, why, tint(st_row, 55, t_amber));
+        } else
+            put_in("button", MENU_CENTRE, x + w / 2, BTN_Y + 4, w - 8, label, fit(label, s, 100, w - 8));
+    } else {
+        rect(x, BTN_Y, w, BTN_H, kind == 1 ? r_yellow : r_chip, 128);
+        if (on || kind == 2) outline(x - 1, BTN_Y - 1, w + 2, BTN_H + 2, 1, kind == 2 ? r_yellow : r_white);
+        if (on && kind == 1) outline(x + 1, BTN_Y + 1, w - 2, BTN_H - 2, 1, r_black);
+        MenuStyle s = fit(label, tint(st_on, 125, kind == 1 ? t_dark : t_white), 125, w - 30);
+        s.rgba[3] = 0x80;  /* dark words on yellow: fully drawn */
+        int tw = width_of(label, s);
+        if (kind == 2) tick(x + w / 2 - tw / 2 - 13, BTN_Y + 5, 2, r_white);  /* 21 wide, 6 before the words */
+        put_in("main button", MENU_CENTRE, x + w / 2 + (kind == 2 ? 14 : 0), BTN_Y + 2, w - 30, label, s);
+    }
+    hit(&hits[f], x, BTN_Y, w, BTN_H);
+}
+
+static void draw_buttons(const RoomNow *r)
+{
+    const NetLobby *l = &room;
+    BarNow b = bar_now(r);
     char why[24];
-    box(BAR_X, BAR_Y, BAR_W, BAR_H, 90);
-    draw_bar_cell(RF_RIDER, 0, selected ? "CHANGE RIDER" : "CHOOSE RIDER", NULL, r, 0);
-    draw_bar_cell(RF_READY, 1, "READY", NULL, r, r->own_ready);
-    if (r->can_watch) draw_bar_cell(RF_START, 2, "WATCH", "RACE LIVE", r, 0);
-    else if (!r->host) draw_bar_cell(RF_START, 2, "HOST STARTS", NULL, r, 0);
-    else if (r->racing) draw_bar_cell(RF_START, 2, "START", "RACE LIVE", r, 0);
-    else if (r->starting) draw_bar_cell(RF_START, 2, "STARTING", NULL, r, 0);
-    else if (r->ready == 0) draw_bar_cell(RF_START, 2, "START", "NOBODY READY", r, 0);
-    else if (r->ready < l->nmembers) {
-        snprintf(why, sizeof why, "%d NOT READY", l->nmembers - r->ready);
-        draw_bar_cell(RF_START, 2, "START NOW", why, r, 0);
-    } else
-        draw_bar_cell(RF_START, 2, l->last_race_id ? "START NOW" : "START THE RACE", NULL, r, 0);
-    draw_bar_cell(RF_LEAVE, 3, "LEAVE", NULL, r, 0);
+    draw_button(RF_RIDER, PAGE_X, PANEL_W, selected ? "CHANGE RIDER" : "CHOOSE RIDER", NULL, 0, r);
+    if (b.main == ACT_WATCH) draw_button(RF_READY, MAIN_X, MAIN_W, "WATCH THE RACE", NULL, 1, r);
+    else draw_button(RF_READY, MAIN_X, MAIN_W, "READY", NULL, r->own_ready ? 2 : 1, r);
+    int third_x = THIRD_X, third_w = THIRD_W;
+    if (b.third == ACT_READY)
+        draw_button(RF_START, third_x, third_w, r->own_ready ? "READY NEXT" : "READY NEXT", r->own_ready ? "YOU'RE IN" : NULL, 0, r);
+    else if (b.third == ACT_START) {  /* the host's: why it can't start now, as before (finding 118) */
+        const char *reason = NULL;
+        if (r->racing) reason = "RACE LIVE";
+        else if (r->starting) reason = "STARTING";
+        else if (r->ready == 0) reason = "NOBODY READY";
+        else if (r->ready < l->nmembers) snprintf(why, sizeof why, "%d NOT READY", l->nmembers - r->ready), reason = why;
+        draw_button(RF_START, third_x, third_w, "START NOW", reason, 0, r);
+    }
+    draw_button(RF_LEAVE, LEAVE_X, LEAVE_W, "LEAVE", NULL, 0, r);
 }
 
-/* One line: what happens now and what you can do. */
-static void draw_status(const RoomNow *r)
+/* ---- the words: the header's small line, the sentence under the buttons ---- */
+
+/* The newest note still showing (who came, went, got ready, finished...): one at a time, in the
+   header's small line (finding 271: three stacked ones covered the header). NULL none. */
+static const char *note_now(const int **colour)
+{
+    double now = host_seconds();
+    for (int i = TOASTS - 1; i >= 0; i--)
+        if (toast[i].until > now) {
+            *colour = toast[i].colour;
+            return toast[i].text;
+        }
+    return NULL;
+}
+
+/* What is happening, small, over the title. */
+static void small_line(const RoomNow *r, char *out, int size)
 {
     const NetLobby *l = &room;
-    char line[96];
-    const int *c = NULL;
-    int waiting = 0, choosing_n = 0, who = -1;
+    if (l->state == NET_RECONNECTING && l->notice[0]) snprintf(out, size, "%s", l->notice);
+    else if (!r->in) snprintf(out, size, "CONNECTING...");
+    else if (r->racing) snprintf(out, size, "RACE LIVE - %d FINISHED, %d RACING", r->finished, r->riding);
+    else if (r->starting || r->intermission) snprintf(out, size, "%d OF %d READY", r->ready, l->nmembers);
+    else if (l->nmembers < 2) snprintf(out, size, "WAITING FOR PLAYERS");
+    else if (l->waiting_for_rider) snprintf(out, size, "WAITING FOR A RIDER");
+    else if (l->next_race && !r->host) snprintf(out, size, "WAITING FOR THE HOST TO START");
+    else if (l->next_race) snprintf(out, size, "YOU START THE RACE");
+    else snprintf(out, size, "THE RACE STARTS WHEN EVERYONE IS READY");
+}
+
+/* One sentence under the buttons: what happens next and what this player can do. */
+static void sentence(const RoomNow *r, char *line, int size, const int **colour)
+{
+    const NetLobby *l = &room;
+    int waiting = 0, choosing_n = 0, who = -1, riding = -1;
+    *colour = NULL;
     for (int i = 0; i < l->nmembers; i++) {
         if (l->member[i].choosing) choosing_n++, who = who < 0 ? i : who;
         else if (!l->member[i].ready) waiting++, who = who < 0 ? i : who;
-    }
-    int riding = -1;  /* one rider still in the race: who */
-    for (int i = 0; i < l->nmembers; i++)
         if (r->riding == 1 && !strcmp(l->member[i].race_state, "racing")) riding = i;
-    if (status[0]) snprintf(line, sizeof line, "%s", status);
-    else if (!r->in) snprintf(line, sizeof line, "CONNECTING TO THE SERVER...");
-    else if (l->is_p2p && host_seconds() < p2p_notice_until) snprintf(line, sizeof line, "%s", p2p_notice);
-    else if (r->starting && r->own_ready) snprintf(line, sizeof line, "YOU'RE IN THIS RACE: UNREADY TO STAY OUT"), c = green;
-    else if (r->starting) snprintf(line, sizeof line, "YOU WEREN'T READY: READY NOW TO RACE THE ONE AFTER");
+    }
+    char name[ROOM_NAME_SIZE] = "";
+    if (status[0]) snprintf(line, size, "%s", status);
+    else if (!r->in) snprintf(line, size, "CONNECTING TO THE SERVER...");
+    else if (l->is_p2p && host_seconds() < p2p_notice_until) snprintf(line, size, "%s", p2p_notice), *colour = t_amber;
+    else if (r->starting && r->own_ready) snprintf(line, size, "YOU'RE IN THIS RACE. PRESS READY AGAIN TO STAY OUT."), *colour = t_green;
+    else if (r->starting) snprintf(line, size, "YOU WEREN'T READY: READY NOW TO RACE THE ONE AFTER.");
     else if (r->racing && r->own_race[0]) {
-        char wait[48];
+        char wait[40];
         int most = seconds_to(l->finish_ends_at);
-        if (riding >= 0) snprintf(wait, sizeof wait, "WAITING FOR %.12s", l->member[riding].name);
+        if (riding >= 0) room_name(l->member[riding].name, name), snprintf(wait, sizeof wait, "WAITING FOR %s", name);
         else snprintf(wait, sizeof wait, "WAITING FOR %d RIDERS", r->riding);
-        if (!strcmp(r->own_race, "finished"))
-            snprintf(line, sizeof line, most ? "YOU FINISHED %s: %s, %d S AT MOST" : "YOU FINISHED %s: %s",
-                     ordinal(l->member[r->self].place), wait, most), c = green;
-        else snprintf(line, sizeof line, "YOU'RE OUT OF THIS RACE: %s", wait);
-    } else if (r->racing && r->own_ready) snprintf(line, sizeof line, "RACE LIVE: YOU'RE READY FOR THE NEXT ONE"), c = green;
-    else if (r->racing) snprintf(line, sizeof line, selected ? "RACE LIVE: PRESS READY TO RACE THE NEXT ONE"
-                                                             : "RACE LIVE: CHOOSE YOUR RIDER FOR THE NEXT ONE");
-    else if (!selected) snprintf(line, sizeof line, "CHOOSE YOUR RIDER FIRST");
-    else if (r->intermission)
-        snprintf(line, sizeof line, r->own_ready ? "NEXT RACE ON %s: ONLY READY RIDERS START" : "NEXT RACE ON %s: PRESS READY TO RACE IT",
-                 track_name(l->track)), c = r->own_ready ? green : NULL;
-    else if (l->waiting_for_rider) snprintf(line, sizeof line, "WAITING FOR A RIDER: THE FIRST READY STARTS A NEW 30 S");
-    else if (l->last_race_id && l->next_race && !r->host)
-        snprintf(line, sizeof line, r->own_ready ? "WAITING FOR THE HOST TO START THE NEXT RACE" : "PRESS READY TO RACE THE NEXT ONE");
-    else if (l->last_race_id && l->next_race && r->ready)
-        snprintf(line, sizeof line, "START NOW WHEN YOU LIKE: ONLY READY RIDERS RACE");
-    else if (l->nmembers < 2) snprintf(line, sizeof line, "WAITING FOR PLAYERS: SHARE THE CODE %s", l->code);
-    else if (!r->own_ready) snprintf(line, sizeof line, "PRESS READY WHEN YOU LIKE YOUR RIDER");
-    else if (waiting + choosing_n == 1 && who >= 0)
-        snprintf(line, sizeof line, l->member[who].choosing ? "%.12s IS CHOOSING A RIDER" : "WAITING FOR %.12s", l->member[who].name);
-    else snprintf(line, sizeof line, "WAITING FOR %d PLAYERS TO GET READY", waiting + choosing_n);
+        if (!strcmp(r->own_race, "finished")) {
+            char place[8];
+            room_ordinal(l->member[r->self].place, place, sizeof place);
+            snprintf(line, size, most ? "YOU FINISHED %s. %s, %d S AT MOST." : "YOU FINISHED %s. %s.", place, wait, most);
+            *colour = t_green;
+        } else snprintf(line, size, "YOU'RE OUT OF THIS RACE. %s.", wait);
+    } else if (r->racing && r->can_watch) snprintf(line, size, "THE RACE IS ON. WATCH IT, OR GET READY FOR THE NEXT ONE.");
+    else if (r->racing && r->own_ready) snprintf(line, size, "YOU'RE IN THE NEXT RACE. PRESS AGAIN TO SIT IT OUT."), *colour = t_green;
+    else if (r->racing) snprintf(line, size, selected ? "A RACE IS ON. PRESS READY TO RACE THE NEXT ONE."
+                                                      : "A RACE IS ON. CHOOSE YOUR RIDER FOR THE NEXT ONE.");
+    else if (!selected) snprintf(line, size, "CHOOSE YOUR RIDER FIRST.");
+    else if (r->own_ready && (r->intermission || l->last_race_id))
+        snprintf(line, size, l->next_race && !r->intermission ? "YOU ARE IN THE NEXT RACE. THE HOST STARTS IT."
+                                                               : "YOU ARE IN THE NEXT RACE. PRESS AGAIN TO SIT IT OUT."), *colour = t_green;
+    else if (r->intermission) snprintf(line, size, "PRESS READY TO RACE THE NEXT ONE. ONLY READY RIDERS START.");
+    else if (l->waiting_for_rider) snprintf(line, size, "WAITING FOR A RIDER: THE FIRST READY STARTS A NEW 30 S.");
+    else if (l->last_race_id && l->next_race && r->host && r->ready)
+        snprintf(line, size, "START NOW WHEN YOU LIKE: ONLY READY RIDERS RACE.");
+    else if (l->nmembers < 2) snprintf(line, size, "WAITING FOR PLAYERS: SHARE THE CODE %s.", l->code);
+    else if (!r->own_ready)
+        snprintf(line, size, l->next_race && !r->host ? "PRESS READY TO RACE. THE HOST STARTS THE RACE."
+                           : r->host ? "PRESS READY TO RACE. START IT WHEN YOU LIKE." : "PRESS READY TO RACE. IT STARTS WHEN ALL ARE READY.");
+    else if (waiting + choosing_n == 1 && who >= 0) {
+        room_name(l->member[who].name, name);
+        snprintf(line, size, l->member[who].choosing ? "YOU'RE READY. %s IS CHOOSING A RIDER." : "YOU'RE READY. WAITING FOR %s.", name);
+    } else if (waiting + choosing_n) snprintf(line, size, "YOU'RE READY. WAITING FOR %d PLAYERS.", waiting + choosing_n);
+    else snprintf(line, size, l->next_race && !r->host ? "EVERYONE IS READY. THE HOST STARTS THE RACE." : "EVERYONE IS READY.");
     for (char *k = line; *k; k++) if (*k >= 'a' && *k <= 'z') *k -= 32;
-    put(MENU_CENTRE, 320, STATUS_Y, line, fit(line, c ? tint(st_row, 100, c) : st_row, 100, 600));
 }
 
-/* The notes, newest first, top right in three rows. The middle row is beside the title (the
-   game draws it, centred at TITLE_Y: about 17.5 units a letter, so 9 each side plus a gap), so a
-   note goes there only if it fits beside it; otherwise into the next free row. */
-static void draw_toasts(void)
+static void draw_words(const RoomNow *r)
 {
-    double now = host_seconds();
-    static const int row_y[3] = {3, 16, 29};
-    int used[3] = {0, 0, 0};
-    int beside = 632 - 14 - (320 + (int)strlen(title_text) * 9 + 6);
-    for (int i = TOASTS - 1; i >= 0; i--) {
-        if (toast[i].until <= now) continue;
-        MenuStyle s = toast[i].colour ? tint(st_row, 75, toast[i].colour) : menu_style(st_on, 75, -1, 0, 0);
-        int row = 0;
-        while (row < 3 && (used[row] || (row == 1 && !fits(toast[i].text, s, 100, beside)))) row++;
-        if (row == 3) continue;  /* no room now: it shows when a row is free, while it lasts */
-        used[row] = 1;
-        s = fit(toast[i].text, s, 100, row == 1 ? beside : 610);
-        int w = menu_text_width(toast[i].text, &s) * 640 / vw + 14;
-        box(632 - w, row_y[row], w, 11, 90);
-        put(MENU_RIGHT, 625, row_y[row] + 2, toast[i].text, s);
-    }
+    char line[120];
+    const int *c;
+    small_line(r, line, sizeof line);
+    const int *note_c = NULL;
+    const char *note_text = note_now(&note_c);
+    if (note_text) {
+        MenuStyle s = tint(st_row, 100, note_c ? (note_c == green ? t_green : note_c == red ? t_red : note_c == amber ? t_amber : NULL)
+                                                : t_white);
+        put_in("note", MENU_CENTRE, 320, SMALL_Y, PAGE_W, note_text, fit(note_text, s, 62, PAGE_W));
+    } else
+        put_in("small line", MENU_CENTRE, 320, SMALL_Y, PAGE_W, line, fit(line, tint(st_row, 100, t_dim), 62, PAGE_W));
+    sentence(r, line, sizeof line, &c);
+    MenuStyle s = fit(line, tint(st_row, 100, c ? c : t_white), 80, PAGE_W);
+    put_in("sentence", MENU_CENTRE, 320, SENTENCE_Y, PAGE_W, line, s);
 }
 
 /* Loading-page landscape from the player's disc, not a repository asset. TEX has
@@ -1730,7 +1952,7 @@ static void draw_leave(const RoomNow *r)
     }
 }
 
-/* The title and the footer, which the game draws: before its update. */
+/* The title (the header's large line) and the footer, which the game draws: before its update. */
 static void room_texts(MenuPage *p)
 {
     const NetLobby *l = &room;
@@ -1747,7 +1969,9 @@ static void room_texts(MenuPage *p)
     } else if (r.intermission) {
         int left = seconds_to(l->next_race_at);
         snprintf(title_text, sizeof title_text, "NEXT RACE IN  %d:%02d", left / 60, left % 60);
-    } else
+    } else if (r.in && l->nmembers >= 1)
+        snprintf(title_text, sizeof title_text, "%d OF %d READY", r.ready, l->nmembers);
+    else
         snprintf(title_text, sizeof title_text, "RACE ROOM");
     p->title = title_text;
     if (l->state == NET_RECONNECTING && l->notice[0])  /* the server restarts the room (finding 184) */
@@ -1781,18 +2005,20 @@ static void room_draw(MenuPage *p)
     st_off = menu_page_style(p, MENU_STYLE_OFF);
     menu_draw_begin();
     memset(hits, 0, sizeof hits);
-    /* the countdown: under the title counting, a bar runs out */
+    /* the rider screen behind, darker: its 3D rider read through the header and the list */
+    rect(0, 0, 640, 224, r_black, 112);
+    /* the header's bar: the countdown running out (green to the start, lilac to the next race, blue
+       to the race's end), else before a race how many are ready (green) */
     {
         double left = 0, whole = 1;
-        const int *c = green;
+        const int *c = r_green;
         if (l->countdown_ms >= 0) left = l->countdown_ms, whole = 5000;
-        else if (r->intermission) left = l->next_race_at - host_service_net_server_ms(), whole = 30000, c = lilac;
+        else if (r->intermission) left = l->next_race_at - host_service_net_server_ms(), whole = 30000, c = r_lilac;
         else if (r->racing && l->finish_ends_at && l->finish_window)
-            left = l->finish_ends_at - host_service_net_server_ms(), whole = l->finish_window * 1000.0, c = blue;
-        if (left > 0) {
-            rect(L_X, 33, BAR_W, 2, (const int[]){0, 0, 0}, 128);
-            rect(L_X, 33, (int)(BAR_W * (left > whole ? 1 : left / whole)), 2, c, 128);
-        }
+            left = l->finish_ends_at - host_service_net_server_ms(), whole = l->finish_window * 1000.0, c = r_blue;
+        else if (!r->racing && r->in && l->nmembers > 0) left = r->ready, whole = l->nmembers;
+        rect(PAGE_X, COUNT_Y, PAGE_W, 2, r_black, 128);
+        if (left > 0) rect(PAGE_X, COUNT_Y, (int)(PAGE_W * (left > whole ? 1 : left / whole)), 2, c, 128);
     }
     /* The game draws all text over every box: a list or a question over the room would show the
        room's text through it, so it is drawn alone. */
@@ -1802,61 +2028,10 @@ static void room_draw(MenuPage *p)
         else draw_leave(r);
         return;
     }
-    draw_left(r);
-    {
-        char head[64];
-        int all = l->nmembers >= 2 && r->ready == l->nmembers;
-        if (r->racing) {
-            /* the counts on the right; on the left the longest form that fits beside them (the
-               whole title ran into "3 FINISHED - 5 RACING"; finding 206) */
-            static const char *const live[] = {"RACE RESULTS - LIVE", "RESULTS - LIVE", "LIVE", NULL};
-            MenuStyle st = menu_style(st_row, 80, -1, 0, 0);
-            snprintf(head, sizeof head, "%d FINISHED - %d RACING", r->finished, r->riding);
-            put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, tint(st_row, 80, blue));
-            int room_w = CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10;
-            const char *left = first_fit(live, st, 80, room_w);
-            put(MENU_LEFT, CARD_X + 3, TOP + 1, left, fit(left, st_row, 80, room_w));
-        } else {
-            /* the ready count on the right; on the left the longest form that fits beside it */
-            MenuStyle st = menu_style(st_row, 80, -1, 0, 0);
-            snprintf(head, sizeof head, "%d/%d READY", r->ready, l->nmembers);
-            put(MENU_RIGHT, CARD_X + CARD_W - 3, TOP + 1, head, all ? tint(st_row, 80, green) : st);
-            /* the left text's room, less a quarter: mixed-case track names draw wider than
-               menu_text_width measures them (as capitals); a tenth was not enough (finding 132) */
-            int room_w = (CARD_W - 6 - menu_text_width(head, &st) * 640 / vw - 10) * 3 / 4;
-            char forms[5][64];
-            const char *what = l->last_race_id ? track_name(l->last_race_track) : NULL, *region = l->room_region;
-            const char *area = l->room_area[0] ? l->room_area : region;  /* finding 181 */
-            char players[16];
-            snprintf(players, sizeof players, "PLAYERS %d/%d", l->nmembers, l->max_players);
-            /* before a race: the players and where the room runs (findings 135, 181), "- EU WEST
-               SERVER", then "- EU WEST", then "- EU", then left out; after a race: the last race's
-               track only (the region is in the list and was in this header before the race) */
-            if (what) {
-                snprintf(forms[0], 64, "LAST RACE - %s", what);
-                snprintf(forms[1], 64, "%s", what);
-                forms[2][0] = forms[3][0] = forms[4][0] = 0;
-            } else {
-                snprintf(forms[0], 64, "%s%s%s%s", players, area[0] ? " - " : "", area, area[0] ? " SERVER" : "");
-                snprintf(forms[1], 64, "%s%s%s", players, area[0] ? " - " : "", area);
-                if (strcmp(area, region) && region[0]) snprintf(forms[2], 64, "%s - %s", players, region);
-                else forms[2][0] = 0;
-                snprintf(forms[3], 64, "%s", players);
-                forms[4][0] = 0;
-            }
-            const char *texts[6];
-            int k = 0;
-            for (int f = 0; f < 5; f++)
-                if (forms[f][0]) texts[k++] = forms[f];
-            texts[k] = NULL;
-            const char *left = first_fit(texts, st, 80, room_w);
-            put(MENU_LEFT, CARD_X + 3, TOP + 1, left, fit(left, st_row, 80, room_w));
-        }
-    }
-    for (int i = 0; i < MEMBER_ROWS; i++) draw_card(i);
-    draw_bar(r);
-    draw_status(r);
-    draw_toasts();
+    draw_info(r);
+    draw_list(r);
+    draw_buttons(r);
+    draw_words(r);
 }
 
 static void room_countdown_sounds(void)
@@ -1869,8 +2044,11 @@ static void room_countdown_sounds(void)
     }
 }
 
+static double room_opened_at;  /* host_seconds when the room page last opened */
+
 static void room_open(void)
 {
+    room_opened_at = host_seconds();
     rf = rf_bar = selected ? RF_READY : RF_RIDER;
     track_list = leave_ask = rules_open = room_closed = 0;
     seen_host = seen_track = -1;
@@ -1945,12 +2123,17 @@ static void room_update(MenuPage *p)
     room_countdown_sounds();
     room_input(p, &r);
     /* tests (DHD_NET_SCRIPTED with DHD_NET_TEST_READY): ready again for the next race, as a player
-       who presses READY in the room after each one, so a scripted run races on (at most 1 a second) */
+       who presses READY in the room after each one, so a scripted run races on (at most 1 a second);
+       a number of seconds above 1: that long after the room opens each time (pictures of a player
+       not ready yet, finding 271) */
     static int test_ready = -1;
-    static double test_ready_at;
-    if (test_ready < 0) test_ready = getenv("DHD_NET_TEST_READY") && getenv("DHD_NET_SCRIPTED");
+    static double test_ready_at, test_ready_after;
+    if (test_ready < 0) {
+        test_ready = getenv("DHD_NET_TEST_READY") && getenv("DHD_NET_SCRIPTED");
+        test_ready_after = test_ready ? atof(getenv("DHD_NET_TEST_READY")) : 0;
+    }
     if (test_ready && in && selected && !r.own_ready && !r.riding && !leave_ask && !room_closed &&
-        host_seconds() - test_ready_at > 1) {
+        host_seconds() - test_ready_at > 1 && (test_ready_after <= 1 || host_seconds() - room_opened_at > test_ready_after)) {
         test_ready_at = host_seconds();
         host_service_net_set_ready(1);
     }
