@@ -1594,12 +1594,12 @@ static void draw_row(int k, const RoomRow *w)
     int name_end = mark_x;
     if (mark) {
         MenuStyle bs = tint(st_row, 50, t_dark);
-        int bw = width_of(mark, bs) + 6;
+        int bw = width_of(mark, bs) + 10;
         rect(mark_x, y + 2, bw, 7, w->host ? r_lilac : r_yellow, 128);
         put(MENU_CENTRE, mark_x + bw / 2, y + 3, mark, bs);
         name_end = mark_x + bw;
         if (w->host && w->own) {  /* the host is this PC: both */
-            int yw = width_of("YOU", bs) + 6;
+            int yw = width_of("YOU", bs) + 10;
             rect(name_end + 3, y + 2, yw, 7, r_yellow, 128);
             put(MENU_CENTRE, name_end + 3 + yw / 2, y + 3, "YOU", bs);
             name_end += 3 + yw;
@@ -1639,7 +1639,7 @@ static void draw_row(int k, const RoomRow *w)
         int mx = x + COL_MIDDLE > name_end + 6 ? x + COL_MIDDLE : name_end + 6;
         put_in("middle", MENU_LEFT, mx, y + 2, state_left - 8 - mx, w->middle, ms);
     }
-    layout_check("name", w->name, ns, COL_MIDDLE - COL_NAME - 6 - (mark ? width_of(mark, tint(st_row, 50, NULL)) + 11 : 0));
+    layout_check("name", w->name, ns, COL_MIDDLE - COL_NAME - 6 - (mark ? width_of(mark, tint(st_row, 50, NULL)) + 15 : 0));
     if (name_end > state_left - 8) hle_log("online menu: layout: row %d's name runs into its state\n", k);
 }
 
@@ -2005,7 +2005,7 @@ static void room_draw(MenuPage *p)
     menu_draw_begin();
     memset(hits, 0, sizeof hits);
     /* the rider screen behind, darker: its 3D rider read through the header and the list */
-    rect(0, 0, 640, 224, r_black, 100);
+    rect(0, 0, 640, 224, r_black, 112);
     /* the header's bar: the countdown running out (green to the start, lilac to the next race, blue
        to the race's end), else before a race how many are ready (green) */
     {
