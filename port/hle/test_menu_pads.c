@@ -109,5 +109,12 @@ int main(void)
     }
     assert(menu_legend_ranges("RETRY", 5, (const int[6]){0, 10, 20, 30, 40, 50}, NULL, 0) == 0);  /* no glyph: no buttons */
     printf("menu pads: a legend's buttons, each word its own, never overlapping\n");
+    /* beside a line (finding 268): left of its words Left, right of them Right, on them its own button;
+       a heading's halves (the middle passed as both ends): one of the two, never none */
+    assert(menu_side_button(99, 100, 200) == PAD_LEFT && menu_side_button(0, 100, 200) == PAD_LEFT);
+    assert(menu_side_button(100, 100, 200) == 0 && menu_side_button(199, 100, 200) == 0);
+    assert(menu_side_button(200, 100, 200) == PAD_RIGHT && menu_side_button(639, 100, 200) == PAD_RIGHT);
+    for (int x = -10; x < 650; x++) assert(menu_side_button(x, 110, 110) == (x < 110 ? PAD_LEFT : PAD_RIGHT));
+    printf("menu pads: a tap beside a line is its Left or Right, a heading's halves its two\n");
     return 0;
 }

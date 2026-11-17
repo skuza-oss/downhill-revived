@@ -47,7 +47,8 @@ enum { VTABLE_SLOTS = 17, ITEM_SIZE = 16 };
 enum { X_CURSOR = 0x0, X_STYLE = 0xC, X_STYLE_ON = 0x10, X_ITEMS = 0x18, X_COUNT = 0x418, X_VISIBLE = 0x41C,
        X_START = 0x420, X_TITLE = 0x438, X_FOOTER = 0x448, X_ROW_Y = 0x460, X_ROW_X = 0x464, X_ROW_STEP = 0x468,
        X_46C = 0x46C, X_470 = 0x470, X_PREFIXED = 0x478, X_BACK_BUTTON = 0x4A8, X_LEFT_ALIGNED = 0x4BB,
-       X_RIGHT_ALIGNED = 0x4BC, X_4C4 = 0x4C4, X_VTABLE = 0x4F8 };
+       X_RIGHT_ALIGNED = 0x4BC, X_4C4 = 0x4C4, X_VTABLE = 0x4F8, X_LINKS = 0x434 };  /* X_LINKS: the page's links to
+       other pages (+0x424, at most 4; func_0018E4F8 adds one, func_0018E518 follows them) */
 enum { X_FOOTER_STYLE = 0x8 };        /* the style func_0018E5A8 draws the footer in */
 enum { M_VIEW = 0x20, M_CLOSING = 0x12D, M_MENU = 0x150 };  /* the popup manager's */
 enum { TEXT_PREV_NEXT = 0xA6 };       /* "<- PREV -> NEXT /\ BACK X SELECT" */
@@ -628,11 +629,14 @@ static MenuPage *page_of(void *menu)
     return AT(menu, X_VTABLE, uint32_t *) == p->vtable ? p : NULL;
 }
 
-/* The row of the open popup under the pointer, -1 none; *left_arrow: on a value row's "<". */
-static int row_at(void *menu, int view, int *left_arrow)
+/* The row of the open popup under the pointer, -1 none; *left_arrow: on a value row's "<".
+   *beside: -1 or 1 when the pointer is on the row's line but left or right of the panel behind
+   the rows (*side_left, *side_right: the words' extent, for the sides of the row; finding 268), 0
+   on it. */
+static int row_at(void *menu, int view, int *left_arrow, int *beside, int *side_left, int *side_right)
 {
     int mx, my;
-    *left_arrow = 0;
+    *left_arrow = 0, *beside = 0;
     if (!pointer(view, &mx, &my)) return -1;
     int count = AT(menu, X_COUNT, int), visible = AT(menu, X_VISIBLE, int), start = AT(menu, X_START, int);
     int x = AT(menu, X_ROW_X, int), y = AT(menu, X_ROW_Y, int), step = AT(menu, X_ROW_STEP, int);
@@ -655,7 +659,11 @@ static int row_at(void *menu, int view, int *left_arrow)
     if (row < 0) return -1;
     /* across: the panel the menu draws behind its rows (func_0018F458), with its margin */
     int left = AT(menu, X_LEFT_ALIGNED, char) ? x - 6 : AT(menu, X_RIGHT_ALIGNED, char) ? x - widest - 6 : x - widest / 2 - 6;
-    if (mx < left || mx >= left + widest + 12) return -1;
+    *side_left = left, *side_right = left + widest + 12;
+    if (mx < left || mx >= left + widest + 12) {
+        *beside = mx < left ? -1 : 1;
+        return row;
+    }
     MenuPage *p = page_of(menu);
     if (p && row < MENU_PAGE_ROWS && p->kind[row] == MENU_ROW_VALUE) {
         const char *text = p->text[row], *arrow = strchr(text, '<');
@@ -776,9 +784,18 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
         if (right) press(PAD_TRIANGLE);
         return;
     }
-    int left_arrow, row = row_at(menu, view, &left_arrow);
+    int left_arrow, beside, side_left = 0, side_right = 0, row = row_at(menu, view, &left_arrow, &beside, &side_left, &side_right);
+    /* beside a row of a game popup, on its line: the row's Left or Right, what a pad's left/right does
+       there (AUDIO's volumes and switches, any value the game changes so; finding 268). Our pages'
+       rows are their panel only: their values take taps on themselves (value_row). */
+    uint16_t side = 0;
+    if (row >= 0 && beside) {
+        int mx = 0, my = 0;
+        if (!p && row_enabled(menu, row) && pointer(view, &mx, &my)) side = menu_side_button(mx, side_left, side_right);
+        if (!side) row = -1;
+    }
     int value_row = p && row >= 0 && row < MENU_PAGE_ROWS && p->kind[row] == MENU_ROW_VALUE && p->arrows[row] != MENU_VALUE_ACTION;
-    if (moved && row >= 0 && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row)
+    if (moved && row >= 0 && !side && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row)
         AT(menu, X_CURSOR, int) = row;
     /* a game's popup with no row to choose is a message waiting for Cross ("PRESS X TO CONTINUE",
        the unlocks, the memory card's notices): a tap anywhere answers it (issue #105, finding 266) */
@@ -786,8 +803,9 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
     if (left) {  /* where a tap or click landed and what it did: a phone's report says (finding 218) */
         int mx = -1, my = -1;
         pointer(view, &mx, &my);
-        hle_log("menu mouse: click at %d,%d: row %d%s%s%s\n", mx, my, row, row >= 0 && !row_enabled(menu, row) ? " (off)" : "",
-                value_row ? (left_arrow ? " value <" : " value >") : "", message ? ": a message" : "");
+        hle_log("menu mouse: click at %d,%d: row %d%s%s%s%s\n", mx, my, row, row >= 0 && !row_enabled(menu, row) ? " (off)" : "",
+                value_row ? (left_arrow ? " value <" : " value >") : "", message ? ": a message" : "",
+                side == PAD_LEFT ? ", left of it: Left" : side == PAD_RIGHT ? ", right of it: Right" : "");
     }
     if (left && message) {  /* Cross, or the button of its legend the tap is on */
         int b = legend_tap(menu, view);
@@ -795,6 +813,9 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
         hle_log("menu mouse: the message takes %s\n", b == PAD_CROSS ? "Cross" : b == PAD_TRIANGLE ? "Triangle"
                 : b == PAD_CIRCLE ? "Circle" : b == PAD_SQUARE ? "Square" : "nothing (the legend's row, off its words)");
         if (b) press((uint16_t)b);
+    } else if (left && side) {
+        AT(menu, X_CURSOR, int) = row;
+        press(side);
     } else if (left && row >= 0 && row_enabled(menu, row)) {
         AT(menu, X_CURSOR, int) = row;
         press(value_row ? (left_arrow ? PAD_LEFT : PAD_RIGHT) : PAD_CROSS);
@@ -819,7 +840,8 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
      Left (previous track), on its right part Right, in the middle Cross; the wheel is Left/Right.
    Both have a legend at the bottom whose buttons a click presses. */
 static int shell_trace = -1;           /* DHD_MOUSE_TRACE */
-enum { SHOP_ROOT = 0x08284190u, SHOP_LIST = 0x500, TRACK_CHOOSER = 0x08288650u };
+enum { SHOP_ROOT = 0x08284190u, SHOP_LIST = 0x500, SHOP_HEADING = 0x504, TRACK_CHOOSER = 0x08288650u,
+       SHOP_LIST_PLAIN = 0x08287190u, SHOP_ITEMS = 0x08283F50u };
 static void *list_target_menu;          /* the shop's list while the mouse drives its cursor */
 static int list_target = -1, list_steps;
 
@@ -828,6 +850,39 @@ static uint16_t legend_at(const LegendButton *b, int n, int mx)
 {
     for (int i = 0; i < n; i++)
         if (mx >= b[i].left && mx < b[i].right) return b[i].button;
+    return 0;
+}
+
+/* The shop page's heading: its title (+0x504) between the arrow glyphs, "\x8D%s\x8F", drawn from
+   (13, 12) in the style D_00362468 (func_0013BA60). Its right end in view x, 0 without a title. */
+enum { SHOP_HEADING_X = 13, SHOP_HEADING_Y = 12 };
+extern char D_00362468[];
+static int shop_heading_right(void *menu)
+{
+    const char *title = item_text(&AT(menu, SHOP_HEADING, Item));
+    if (!title || !*title) return 0;
+    char line[MENU_PAGE_TEXT + 4], saved[0x20];
+    snprintf(line, sizeof line, "\x8D%.*s\x8F", MENU_PAGE_TEXT, title);
+    const int *style = (const int *)D_00362468;  /* its glyph size pulses (func_0013C838): measured at rest */
+    memcpy(saved, D_004F3570, sizeof saved);
+    func_0020FB80(0, 0x15A, 0xC0, style[2], style[3]);
+    *(int *)(D_004F3570 + 0x1C) = 0;
+    int width = func_0020F860(0, line) >> 4;
+    memcpy(D_004F3570, saved, sizeof saved);
+    return SHOP_HEADING_X + width;
+}
+
+/* A list too long for its place draws "MORE..." on the line under its last row shown, and above its
+   first when scrolled (func_0018F458): a tap there is the row past it, so the cursor walks on and the
+   list scrolls (finding 268). 1 and *row when y is on such a line. */
+static int list_more(void *list, int y, int *row)
+{
+    int count = AT(list, X_COUNT, int), visible = AT(list, X_VISIBLE, int), start = AT(list, X_START, int);
+    int step = AT(list, X_ROW_STEP, int), top = AT(list, X_ROW_Y, int) - 1;
+    if (count <= 0 || count > 64 || visible <= 0 || step <= 0 || start < 0) return 0;
+    int shown = visible < count - start ? visible : count - start;
+    if (start + shown < count && y >= top + shown * step && y < top + (shown + 1) * step) return *row = start + shown, 1;
+    if (start > 0 && y >= top - step && y < top) return *row = start - 1, 1;
     return 0;
 }
 
@@ -855,19 +910,50 @@ static int game_popup_mouse(void *menu, int view, int moved, int left, int right
     void *list = at >= 0x08000000u && at < 0x0A000000u ? (void *)(uintptr_t)at : NULL;
     if (!list) return 1;
     static const LegendButton legend[] = {{20, 88, PAD_TRIANGLE}, {88, 180, PAD_CROSS}, {180, 265, PAD_START}};
+    /* BONUS PURCHASES' items (list vtable D_00283F50) draw their own legend while the cursor is in them,
+       "◂ PREV ▸ NEXT ✕ SELECT △ BACK" (measured in a picture; finding 268) */
+    static const LegendButton items_legend[] = {{85, 146, PAD_LEFT}, {146, 206, PAD_RIGHT}, {206, 286, PAD_CROSS}, {286, 350, PAD_TRIANGLE}};
+    int items = AT(list, X_VTABLE, uint32_t) == SHOP_ITEMS && AT(list, X_CURSOR, int) >= 0;
     if (on && left && bottom) {
-        uint16_t b = legend_at(legend, 3, x640);
+        uint16_t b = items ? legend_at(items_legend, 4, x640) : legend_at(legend, 3, x640);
         if (b) press(b), list_target = -1;
         if (shell_trace > 0) hle_log("shell mouse: shop legend click at %d,%d: %04x\n", mx, my, b);
         return 1;
     }
-    int arrow, row = on ? row_at(list, view, &arrow) : -1, cursor = AT(list, X_CURSOR, int);
+    /* the page's heading ("◄ INVENTORY ►"), the line above its list's first row and up to the top of
+       the picture: its left half is Left and its right half Right, the previous and next page by the
+       page's links (+0x424, func_0013DC20 takes them on the heading only). Out of the list first:
+       its Triangle takes the page back to its heading (func_0013C970). Issue #108, finding 268. */
+    int links = AT(menu, X_LINKS, int), heading_right = shop_heading_right(menu);
+    if (on && left && links > 0 && links <= 4 && heading_right > 0 && my < SHOP_HEADING_Y + 12 && mx < heading_right + 16) {
+        int cursor = AT(list, X_CURSOR, int);
+        uint16_t b = menu_side_button(mx, (SHOP_HEADING_X + heading_right) / 2, (SHOP_HEADING_X + heading_right) / 2);
+        if (cursor >= 0) press(PAD_TRIANGLE);
+        press(b), list_target = -1;
+        hle_log("menu mouse: the shop's heading at %d,%d: %s%s\n", mx, my, cursor >= 0 ? "Triangle, then " : "",
+                b == PAD_LEFT ? "Left" : "Right");
+        return 1;
+    }
+    int arrow, beside, side_left, side_right, cursor = AT(list, X_CURSOR, int);
+    int row = on ? row_at(list, view, &arrow, &beside, &side_left, &side_right) : -1;
+    /* the pages' plain lists (vtable D_00287190: BIKES / JERSEYS / BIKE COLOR, WHEELS / FRAMES / FORKS)
+       take left/right on a row (the previous / next bike, jersey, colour, part); a list that draws its
+       rows itself (BONUS PURCHASES' numbered items, whose item text is the price) is a row per line,
+       and its left/right are on its legend */
+    const char *text = row >= 0 && AT(list, X_VTABLE, uint32_t) == SHOP_LIST_PLAIN ? item_text((const Item *)((char *)list + X_ITEMS) + row) : NULL;
+    int width = text ? measure(list, X_STYLE_ON, text, MENU_PAGE_TEXT) : 0, x = AT(list, X_ROW_X, int);
+    if (width == 0) beside = 0;
+    if (beside && (!left || row != cursor)) row = -1;  /* beside the focused row only, and by a tap, not a hover */
+    if (row < 0 && on && left && list_more(list, my, &row)) {  /* "MORE...": on past the last row shown */
+        if (list_target != row) list_steps = 0;
+        list_target = row, list_target_menu = list;
+        hle_log("menu mouse: the shop's list, more: row %d\n", row);
+        return 1;
+    }
     if (shell_trace > 0 && (left || wheel)) hle_log("shell mouse: shop at %d,%d row %d cursor %d%s\n", mx, my, row, cursor, left ? " click" : "");
     if (row >= 0 && row_enabled(list, row) && (moved || left)) {
         if (row == cursor && left) {
-            const char *text = (const char *)(uintptr_t)(uint32_t)func_0018D860((char *)list + X_ITEMS + row * ITEM_SIZE);
-            int width = text ? measure(list, X_STYLE_ON, text, MENU_PAGE_TEXT) : 0, x = AT(list, X_ROW_X, int);
-            press(mx < x - width / 2 ? PAD_LEFT : mx >= x + width / 2 ? PAD_RIGHT : PAD_CROSS);
+            press(width == 0 ? PAD_CROSS : mx < x - width / 2 ? PAD_LEFT : mx >= x + width / 2 ? PAD_RIGHT : PAD_CROSS);
             list_target = -1;
         } else if (row != cursor) {
             if (list_target != row) list_steps = 0;
@@ -948,11 +1034,13 @@ typedef struct {
     uint32_t menu;                    /* its address */
     short y, y_other, step;           /* row i at y + i * step (y_other: another layout of the screen) */
     char packed;                      /* disabled rows are not drawn and the rest close up (func_001EF0E0) */
+    short value_from, value_middle;   /* a row's value, changed by left/right: from this x a tap is Left, from
+                                         the middle Right (finding 268); 0: the rows take Cross only */
 } ShellList;
 static const ShellList shell_lists[] = {
     {15, 0x4C6CA8, 95, 0, 15, 0},     /* main menu (func_001ED5B8) */
     {2, 0x4C6D98, 90, 0, 10, 0},      /* OPTIONS (func_001F0160) */
-    {13, 0x4C6BE8, 25, 0, 9, 0},      /* controls (func_001F0A28) */
+    {13, 0x4C6BE8, 25, 0, 9, 0, 180, 375},  /* controls (func_001F0A28): CONFIG n at 180-422, VIBRATION at 430-570 */
     {19, 0x4C6DC8, 95, 0, 15, 0},     /* difficulty (func_001F1168) */
     {10, 0x4C6D68, 95, 0, 15, 0},     /* number of players (func_001EED78) */
     {24, 0x4C6D08, 85, 0, 15, 0},     /* multiplayer game mode (func_001EDD28) */
@@ -1021,7 +1109,8 @@ static int shell_row_at(const ShellList *l, int mx, int my)
     return -1;
 }
 
-static int shell_target = -1, shell_click, shell_screen = -1, shell_steps;
+static int shell_target = -1, shell_screen = -1, shell_steps;
+static uint16_t shell_click;  /* what a click presses once the cursor is on its row: Cross, or a value's Left / Right */
 
 static const ShellList *shell_list(int screen)
 {
@@ -1054,7 +1143,7 @@ static void shell_mouse(int news, int moved, int left, int right, int wheel)
         if ((moved || left) && row >= 0) {
             if (shell_target != row || left) shell_steps = 0;
             shell_target = row;
-            shell_click |= left;
+            if (left) shell_click = list->value_from && mx >= list->value_from ? menu_side_button(mx, list->value_middle, list->value_middle) : PAD_CROSS;
         }
         if (shell_trace > 0) hle_log("shell mouse: screen %d at %d,%d row %d cursor %d%s\n", screen, mx, my, row,
                                      shell_menu(list)->cursor, left ? " click" : "");
@@ -1074,7 +1163,7 @@ static void shell_mouse(int news, int moved, int left, int right, int wheel)
     if (list && shell_target >= 0 && !queued) {
         const ShellMenu *m = shell_menu(list);
         if (m->cursor == shell_target) {
-            if (shell_click) press(PAD_CROSS);
+            if (shell_click) press(shell_click);
             shell_target = -1, shell_click = 0;
         } else if (++shell_steps > 2 * 16)  /* it doesn't get there (a row the menu skips): give up */
             shell_target = -1, shell_click = 0;
@@ -1095,6 +1184,19 @@ static void trace_rows(void *m)
     }
 }
 
+static void trace_legend(void *m)
+{
+    const Item *foot = &AT(m, X_FOOTER, Item);
+    const char *legend = item_text(foot);
+    if (!legend || !*legend) return;
+    MenuLegendRange ranges[MENU_LEGEND_BUTTONS];
+    int n = legend_ranges(m, ranges);
+    hle_log("  legend at %d,%d: %s\n", foot->x, foot->y, legend);
+    for (int k = 0; k < n; k++)
+        hle_log("  legend button %04x: glyph %d-%d, word to %d, taps %d-%d\n", ranges[k].button, ranges[k].left,
+                ranges[k].glyph_right, ranges[k].right, ranges[k].from, ranges[k].to);
+}
+
 static void trace_screens(void)
 {
     static int last_screen = -1;
@@ -1105,6 +1207,13 @@ static void trace_screens(void)
     int rows = popup ? AT(open, X_COUNT, int) : -1, cursor = popup ? AT(open, X_CURSOR, int) : -1;
     if (popup && AT(open, X_VTABLE, uint32_t) == 0x08284190u && AT(open, 0x500, uint32_t))  /* the shop's list's cursor too */
         cursor = cursor * 64 + AT((void *)(uintptr_t)AT(open, 0x500, uint32_t), X_CURSOR, int);
+    /* the cursor row's text when it changes on the same row: a value left/right changed ("MUSIC  50") */
+    static char last_text[MENU_PAGE_TEXT];
+    int at = popup ? AT(open, X_CURSOR, int) : -1;
+    const char *now = at >= 0 && at < rows && rows <= 64 ? item_text((const Item *)((char *)open + X_ITEMS) + at) : NULL;
+    if (popup == last_popup && cursor == last_cursor && now && strncmp(now, last_text, sizeof last_text - 1))
+        hle_log("mouse trace: row %d now: %s\n", at, now);
+    snprintf(last_text, sizeof last_text, "%s", now ? now : "");
     if (popup != last_popup || rows != last_rows || cursor != last_cursor) {
         last_popup = popup, last_rows = rows, last_cursor = cursor;
         if (popup) {
@@ -1114,22 +1223,17 @@ static void trace_screens(void)
                     AT(m, X_ROW_X, int), AT(m, X_ROW_Y, int), AT(m, X_ROW_STEP, int), AT(m, X_LEFT_ALIGNED, char),
                     AT(m, X_RIGHT_ALIGNED, char));
             trace_rows(m);
-            const Item *foot = &AT(m, X_FOOTER, Item);
-            const char *legend = item_text(foot);
-            if (legend && *legend) {
-                MenuLegendRange ranges[MENU_LEGEND_BUTTONS];
-                int n = legend_ranges(m, ranges);
-                hle_log("  legend at %d,%d: %s\n", foot->x, foot->y, legend);
-                for (int k = 0; k < n; k++)
-                    hle_log("  legend button %04x: glyph %d-%d, word to %d, taps %d-%d\n", ranges[k].button, ranges[k].left,
-                            ranges[k].glyph_right, ranges[k].right, ranges[k].from, ranges[k].to);
-            }
+            trace_legend(m);
             uint32_t child = AT(m, 0x500, uint32_t);  /* the shop's pages keep a list there */
             if (child >= 0x08000000u && child < 0x0A000000u && AT(m, X_VTABLE, uint32_t) == 0x08284190u) {
                 void *c = (void *)(uintptr_t)child;
+                const char *heading = item_text(&AT(m, SHOP_HEADING, Item));
+                hle_log("  heading %s: x %d to %d, links %d\n", heading ? heading : "", SHOP_HEADING_X, shop_heading_right(m),
+                        AT(m, X_LINKS, int));
                 hle_log("  list %08x vtable %08x rows %d cursor %d at %d,%d step %d\n", child, AT(c, X_VTABLE, uint32_t),
                         AT(c, X_COUNT, int), AT(c, X_CURSOR, int), AT(c, X_ROW_X, int), AT(c, X_ROW_Y, int), AT(c, X_ROW_STEP, int));
                 trace_rows(c);
+                trace_legend(c);
             }
         } else
             hle_log("mouse trace: popup closed\n");

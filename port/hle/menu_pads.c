@@ -83,3 +83,12 @@ uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x)
         if (x >= ranges[k].from && x < ranges[k].to) return ranges[k].button;
     return 0;
 }
+
+/* What a tap beside a line of a menu presses (finding 268): left of its words [left, right) Left, right
+   of them Right, on them 0 (the line's own button: Cross, as before). A line whose two sides are its
+   only buttons (the shop's heading "◄ INVENTORY ►") passes its middle as both: its left half is Left
+   and its right half Right. */
+uint16_t menu_side_button(int x, int left, int right)
+{
+    return x < left ? PAD_LEFT : x >= right ? PAD_RIGHT : 0;
+}
