@@ -17,7 +17,8 @@ enum { ROOM_NAME_LETTERS = 12, ROOM_NAME_SIZE = ROOM_NAME_LETTERS + 3 };
 
 /* A member's name for the room's font: the letters the game lets a player type (A-Z, 0-9, space,
    '-') and '.', lower case as capitals; any other character, or a UTF-8 sequence, one '-'. At most
-   12; a longer name (another client's: the server takes 24 of anything) its first 10 and "..". */
+   12; a longer name (another client's: the server takes 24 of anything) its first 10 and "..";
+   an empty or blank one "-". */
 static inline void room_name(const char *in, char *out)
 {
     char all[100];
@@ -29,7 +30,8 @@ static inline void room_name(const char *in, char *out)
         all[n++] = (char)((k >= 'A' && k <= 'Z') || (k >= '0' && k <= '9') || k == ' ' || k == '-' || k == '.' ? k : '-');
     }
     all[n] = 0;
-    if (n > ROOM_NAME_LETTERS) snprintf(out, ROOM_NAME_SIZE, "%.10s..", all);
+    if (strspn(all, " ") == (size_t)n) snprintf(out, ROOM_NAME_SIZE, "-");  /* none or blanks only: a '-', never an empty row */
+    else if (n > ROOM_NAME_LETTERS) snprintf(out, ROOM_NAME_SIZE, "%.10s..", all);
     else snprintf(out, ROOM_NAME_SIZE, "%s", all);
 }
 
