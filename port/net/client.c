@@ -241,6 +241,8 @@ static void read_room(NetClient *c, const char *t)
     }
     n = json_count(t, "members");
     l->nmembers = n < 0 ? 0 : n > NET_MAX_SLOTS ? NET_MAX_SLOTS : n;
+    int own_watching = 0;
+    l->watchers = 0;
     for (i = 0; i < l->nmembers; i++) {
         NetMember *m = &l->member[i];
         char path[32];
@@ -267,6 +269,12 @@ static void read_room(NetClient *c, const char *t)
         for (int k = 0; k < c->where_count; k++)
             if (c->where_id[k] == m->id) memcpy(m->region, c->where_region[k], sizeof m->region);
         if (m->id == l->member_id) c->ready = m->ready;
+        {   /* watching the running race (finding 269) */
+            int watching = 0;
+            json_bool(t, FIELD("watching"), &watching);
+            l->watchers += watching;
+            if (m->id == l->member_id) own_watching = watching;
+        }
 
 #undef FIELD
     }
@@ -280,12 +288,12 @@ static void read_room(NetClient *c, const char *t)
         l->seat_lost = lost, c->seat_check = 0;
     }
     for (i = 0; i < l->nmembers; i++)
-        if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race) {
+        if (l->member[i].id == l->member_id && l->phase[0] && !l->member[i].in_race && !(l->watching && own_watching)) {
             /* out of the race (the finish window, the room's end): the race screen still shows its
                last seconds, so the frames already here stay for the game (client_back drops them) */
             if (c->racing) c->race_frames_until = net_now_ms() + RACE_FRAMES_AFTER_MS;
             c->racing = 0; l->state = NET_LOBBY; l->started = 0;
-            c->race_at = 0, c->gave_up = 0;
+            c->race_at = 0, c->gave_up = 0, l->watching = 0;
         }
 }
 
@@ -296,6 +304,10 @@ static void read_start(NetClient *c, const char *t)
     double server_time, start_at;
     int i, n, nslots = 0;
     l->local_slot = json_int(t, "yourSlot", &v) ? (int)v : 0;
+    /* a watcher's start (finding 269): the race without a slot of this PC's own */
+    l->watching = 0;
+    json_bool(t, "watch", &l->watching);
+    if (l->watching) l->local_slot = -1;
     l->race_track = json_int(t, "track", &v) ? (int)v : 0;
     l->race_laps = json_int(t, "laps", &v) ? (int)v : 0;
     l->race_seed = json_int(t, "seed", &v) ? (uint32_t)v : 0;
@@ -577,13 +589,14 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         c->lobby.error_code[0] = c->lobby.error[0] = c->lobby.notice[0] = 0;
         c->rejoining = 0, c->rejoin_tries = 0;
         /* what the server takes beyond the protocol (finding 187; an older server lists nothing) */
-        c->server_race_go = c->server_scores = 0;
+        c->server_race_go = c->server_scores = c->lobby.server_watch = 0;
         for (int k = 0, count = json_count(text, "features"); k < count; k++) {
             char path[32], feature[24];
             snprintf(path, sizeof path, "features[%d]", k);
             if (!json_string(text, path, feature, sizeof feature)) continue;
             if (!strcmp(feature, "race_go")) c->server_race_go = 1;
             if (!strcmp(feature, "score")) c->server_scores = 1;  /* finding 204 */
+            if (!strcmp(feature, "watch")) c->lobby.server_watch = 1;  /* finding 269 */
         }
         c->lobby.server_scores = c->server_scores;
         double race_at = 0;
@@ -692,7 +705,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         c->racing = 0;
         c->lobby.race_go_at = 0;
         c->race_at = 0, c->gave_up = 0;
-        c->lobby.started = 0;
+        c->lobby.started = 0, c->lobby.watching = 0;
         c->lobby.state = NET_LOBBY;
         changed(c);
     } else if (!strcmp(type, "notice")) {
@@ -1022,12 +1035,21 @@ void client_back(NetClient *c)
 {
     SDL_LockMutex(c->lock);
     say(c, "{\"type\":\"back\"}");
-    c->gave_up = c->race_at > 0;
+    c->gave_up = c->race_at > 0 && !c->lobby.watching;
+    c->lobby.watching = 0;
     c->racing = 0, c->race_frames_until = 0;
     c->relayed_head = c->relayed_count = 0;
     c->lobby.started = 0;
     if (c->lobby.state == NET_RACING) c->lobby.state = NET_LOBBY;
     changed(c);
+    SDL_UnlockMutex(c->lock);
+}
+
+/* Watch the room's running race (finding 269): the room answers with the race's start, "watch". */
+void client_watch(NetClient *c)
+{
+    SDL_LockMutex(c->lock);
+    if (c->lobby.server_watch && !c->racing) say(c, "{\"type\":\"watch\"}");
     SDL_UnlockMutex(c->lock);
 }
 

@@ -148,6 +148,7 @@ void client_start(NetClient *c);
 void client_end(NetClient *c);
 void client_finish(NetClient *c, unsigned ticks, int place, int score);
 void client_back(NetClient *c);
+void client_watch(NetClient *c);  /* finding 269 */
 void client_rules(NetClient *c, int finish_window, int next_race, int then);
 void client_rotation(NetClient *c, const unsigned char *ids, int count);
 /* The race's start moment this game named (server ms), to a room that takes it (finding 187). */

@@ -205,6 +205,9 @@ static struct {
     Puppet p[NRIDERS];
     /* online */
     int online, local, nslots, host;
+    int watch;               /* this PC watches the race (finding 269): no rider of its own; slot 0 is
+                                the puppet of the racer in lobby slot 0 (local 0 for the mapping), and
+                                it runs no rider, sends nothing and takes no hit */
     double go_server;        /* this PC's GO on the server clock (ms), 0 until known */
     double go_base;          /* sync_clock_base at GO (seconds of this PC's wall clock) */
     SyncStood stood;         /* what this race clock stood still since GO (sync_clock_stood) */
@@ -234,7 +237,7 @@ static void refuse(int slot, const char *why)
 }
 static void refused_count(void)
 {
-    for (int i = 1; i < NRIDERS; i++)
+    for (int i = pp.watch ? 0 : 1; i < NRIDERS; i++)
         if (pp.p[i].refused) fprintf(stderr, "puppet: slot %d: %d records refused in the race\n", i, pp.p[i].refused);
 }
 
@@ -823,7 +826,9 @@ static int puppet(const uint8_t *r)
 {
     if (!pp.init) setup();
     int slot = slot_of(r);
-    return slot >= 0 && slot < NRIDERS && pp.p[slot].on && RACING && (pp.p[slot].count || RACE_TIME < SYNC_START_WAIT);
+    /* a watcher's slot 0 never rides on this PC's pad: before its first snapshot it stands on the grid */
+    return slot >= 0 && slot < NRIDERS && pp.p[slot].on && RACING &&
+           (pp.p[slot].count || RACE_TIME < SYNC_START_WAIT || (pp.watch && slot == 0));
 }
 
 /* A rider another game runs (its owner's), in the race, whether its snapshots have begun or not:
@@ -1056,15 +1061,20 @@ static int owner_of(int slot)
     if (slot >= pp.nslots || !pp.gone[lobby_of(slot)]) return slot < pp.nslots ? lobby_of(slot) : pp.host;
     return pp.kept[lobby_of(slot)] ? -1 : pp.host;
 }
-static int owned(int slot) { return owner_of(slot) == pp.local; }
+static int owned(int slot) { return !pp.watch && owner_of(slot) == pp.local; }
+
+/* This PC watches the coming online race (finding 269), set before hle_puppet_online; off again with
+   hle_puppet_offline. */
+void hle_puppet_watch(int on) { pp.watch = on; }
 
 void hle_puppet_online(int local, int nslots, int host)
 {
     if (!pp.init) setup();
-    pp.online = 1, pp.local = local, pp.nslots = nslots, pp.host = host;
-    for (int i = 1; i < NRIDERS; i++) pp.p[i].on = !owned(i);
-    fprintf(stderr, "puppet: online, player %d of %d (host %d); puppets:", local, nslots, host);
-    for (int i = 1; i < NRIDERS; i++)
+    pp.online = 1, pp.local = pp.watch ? 0 : local, pp.nslots = nslots, pp.host = host;
+    for (int i = pp.watch ? 0 : 1; i < NRIDERS; i++) pp.p[i].on = !owned(i);
+    fprintf(stderr, "puppet: online, %s %d of %d (host %d); puppets:", pp.watch ? "watching, slot 0 shows player" : "player",
+            pp.local, nslots, host);
+    for (int i = pp.watch ? 0 : 1; i < NRIDERS; i++)
         if (pp.p[i].on) fprintf(stderr, " %d", i);
     fprintf(stderr, "\n");
 }
@@ -1082,7 +1092,7 @@ void hle_puppet_start(void)
            at its first send and then once a second (it sends 60 a second, the AI 30). */
         p->sent_pad.count = (unsigned)(30 - 3 * i) % 30;
         p->sent_pad.period = i ? 30 : 60;
-        if (!i) continue;
+        if (!i && !pp.watch) continue;
         memset(p->mirror, 0, sizeof p->mirror);
         p->count = 0, p->have_age = 0, p->remote_crash = 0;
         p->synced = 0, p->used = 0, p->stepped_at = 0, p->after_crash = 0, p->rate = 1, p->race_used = 0, p->hold.held = 0, p->catching = 0, p->line_at = 0;
@@ -1138,6 +1148,8 @@ void hle_puppet_offline(void)
     if (!pp.online) return;
     refused_count();
     pp.online = 0;
+    if (pp.watch) memset(&pp.p[0], 0, sizeof pp.p[0]);
+    pp.watch = 0;
     for (int i = 1; i < NRIDERS; i++)
         if (pp.play_from[i] < 0) memset(&pp.p[i], 0, sizeof pp.p[i]);
     memset(pp.gone, 0, sizeof pp.gone);
@@ -1157,7 +1169,7 @@ void hle_puppet_drop(int lobby, int host, int finished)
     pp.gone[lobby] = 1;
     pp.kept[lobby] = finished;
     pp.host = host;
-    if (finished && lobby != pp.local)
+    if (finished && (pp.watch || lobby != pp.local))
         fprintf(stderr, "puppet: tick %d slot %d (player %d) had finished: it stays where its player left it\n",
                 RACE_CLOCK, human_slot(lobby), lobby);
     for (int i = 1; i < NRIDERS; i++) {
@@ -1256,7 +1268,7 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
     PuppetRecord r;
     if (!puppet_record_read(in, n, &r)) return;
     int slot = to_local(r.rider);
-    if (slot <= 0 || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
+    if (slot < (pp.watch ? 0 : 1) || slot >= hle_online_race_riders() || !pp.p[slot].on || owner_of(slot) != sender) return;
     Puppet *p = &pp.p[slot];
     Snapshot s;
     memset(&s, 0, sizeof s);
@@ -1300,13 +1312,14 @@ static void receive_record(int sender, const uint8_t *in, int n, double stamp)
 static void receive_bundle(int sender, const uint8_t *in, int n)
 {
     double stamp, quiet;
-    if (pp.online && sender != pp.local && pp.go_server && state_hold_check(in, n, &stamp, &quiet) && isfinite(stamp)) {
+    int own = !pp.watch && sender == pp.local;  /* a watcher has no frames of its own */
+    if (pp.online && !own && pp.go_server && state_hold_check(in, n, &stamp, &quiet) && isfinite(stamp)) {
         double t = (stamp + pp.net_link.skew * 1000 - pp.go_server) / 1000 - hle_puppet_clock_excess();
-        for (int i = 1; i < NRIDERS; i++)
+        for (int i = pp.watch ? 0 : 1; i < NRIDERS; i++)
             if (pp.p[i].on && owner_of(i) == sender) hold(i, t, stamp + pp.net_link.skew * 1000, quiet / 1000);
         return;
     }
-    if (!pp.online || sender == pp.local || !pp.go_server || !state_bundle_check(in, n, &stamp) ||
+    if (!pp.online || own || !pp.go_server || !state_bundle_check(in, n, &stamp) ||
         !isfinite(stamp)) return;
     stamp += pp.net_link.skew * 1000;  /* DHD_NET_LINK's clock error (tests; 0 otherwise) */
     for (int at = STATE_BUNDLE_HEADER; at < n;) {
@@ -1389,7 +1402,7 @@ int hle_puppet_take_event(uint8_t *out, int max)
 /* A hit EVENT payload from the PC in lobby slot sender, on a rider this PC runs. */
 void hle_puppet_event(int sender, const uint8_t *in, int n)
 {
-    if (!pp.online || n < 18 || in[0] != EVENT_VERSION || in[1] != EVENT_HIT || in[2] != pp.local || !RACING) return;
+    if (!pp.online || pp.watch || n < 18 || in[0] != EVENT_VERSION || in[1] != EVENT_HIT || in[2] != pp.local || !RACING) return;
     int victim = to_local(in[3]), attacker = to_local(in[4]);
     float direction[4] __attribute__((aligned(16))) = {0, 0, 0, 0};
     if (victim < 0 || victim >= NRIDERS || attacker <= 0 || attacker >= NRIDERS || !owned(victim)) return;
@@ -1409,7 +1422,7 @@ int hle_puppet_lag(char *out, int size)
 {
     int n = 0;
     out[0] = 0;
-    for (int i = 1; i < NRIDERS && n < size - 32; i++)
+    for (int i = pp.watch ? 0 : 1; i < NRIDERS && n < size - 32; i++)
         if (pp.p[i].on && pp.p[i].have_age)
             n += snprintf(out + n, size - n, " %d:%.2f/%.0f", to_global(i), pp.p[i].error, pp.p[i].age * 1000);
     return n;

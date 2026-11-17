@@ -295,6 +295,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 264 | [Native VU only: nothing left on the emulated VU1, then the emulated path deleted](264-native-vu-only.md) | current |  |
 | 266 | [touch players stuck on "PRESS X TO CONTINUE" messages (issue #105)](266-touch-continue.md) | current |  |
 | 267 | [the game runs on the iPhone XR (A12, 3 GB): the CPU floor and the guest memory's second...](267-ios-a12.md) | current |  |
+| 269 | [watch a running room race from the room (issue #109)](269-room-spectate.md) | current |  |
 | 271 | [the online room redesigned, and a results screen at the race end](271-room-redesign.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |

@@ -112,6 +112,11 @@ typedef struct {
        the room's snapshot after the welcome): the race screen says CONNECTION LOST, not that the
        race ended (finding 254). Cleared at each start. */
     int seat_lost;
+    /* Watching a running race (finding 269): server_watch, the welcome listed "watch" (the room page
+       offers WATCH); watching, this PC watches the race it has (its start came with "watch": no slot
+       of its own, local_slot -1; cleared by ended and back); watchers, the members the room's
+       snapshot shows watching (the racers then say their rides again, port/hle/online.c). */
+    int server_watch, watching, watchers;
 } NetLobby;
 enum { NET_ENDED_NONE, NET_ENDED_DONE /* all finished or out, or the finish window ran out */,
        NET_ENDED_VOID /* the host ended it */, NET_ENDED_UNKNOWN /* an older server: no reason */ };
@@ -181,6 +186,8 @@ void net_end_race(void);                           /* host: back to the lobby */
    -1 for a race. */
 void net_finish(unsigned ticks, int place, int score);
 void net_back(void);
+/* Watch the room's running race (finding 269): only with server_watch, outside the race. */
+void net_watch(void);
 void net_rules(int finish_window, int next_race, int then);
 void net_rotation(const unsigned char *ids, int count);
 /* The race's start moment (server ms) this game named (finding 187): to the room too, which sends

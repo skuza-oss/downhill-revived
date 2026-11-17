@@ -847,8 +847,7 @@ typedef struct {
     int racing, starting, intermission;  /* the phase */
     int riding, finished;  /* in the running race: still riding, finished */
     const char *own_race;  /* this PC's state in the running race: "" not in it */
-    int can_watch;         /* outside the running race, which this PC may watch (lane 269's WATCH;
-                              0 until it is on this branch) */
+    int can_watch;         /* outside the running race, which this PC may watch (finding 269) */
 } RoomNow;
 
 static RoomNow room_now(void)
@@ -862,6 +861,7 @@ static RoomNow room_now(void)
     r.starting = l->countdown_ms >= 0;
     r.intermission = !strcmp(l->phase, "intermission");
     r.own_race = "";
+    int own_in_race = 0;
     for (int i = 0; i < l->nmembers; i++) {
         const NetMember *m = &l->member[i];
         r.ready += m->ready;
@@ -870,7 +870,12 @@ static RoomNow room_now(void)
         if (m->id != l->member_id) continue;
         r.self = i, r.own_ready = m->ready, r.own_choosing = m->choosing;
         if (r.racing) r.own_race = m->race_state;
+        own_in_race = m->in_race;
     }
+    /* WATCH (finding 269): a race runs that this PC is not in (joined during it, sat it out, left it),
+       on a server that takes it, in an SFU room, not the arena's scored round (finding 204) */
+    r.can_watch = r.in && r.racing && r.self >= 0 && !own_in_race && l->server_watch && !l->is_p2p && !arena(l->track) &&
+                  l->state == NET_LOBBY;
     /* the host starts the next race with whoever is ready (the others wait here) */
     r.can_start = r.host && !r.racing && !r.starting && r.ready > 0;
     return r;
@@ -1091,9 +1096,10 @@ static void act(int what, const RoomNow *r)
         hle_log("online menu: START NOW by %s\n", input_by);
         host_service_net_start_race();
         menu_play("S_ENTER_GAME");
-    } else if (what == ACT_WATCH) {  /* lane 269 wires it; can_watch is 0 until then */
-        hle_log("online menu: WATCH by %s: not offered here yet\n", input_by);
-        menu_play("S_CANCEL");
+    } else if (what == ACT_WATCH) {  /* finding 269: the room's answer (the race's start, "watch") opens the race */
+        hle_log("online menu: WATCH by %s\n", input_by);
+        host_service_net_watch();
+        menu_play("S_ENTER_GAME");
     }
 }
 
@@ -2050,7 +2056,7 @@ static void room_update(MenuPage *p)
         for (int k = 0; k < TRACK_COUNT; k++)
             if (track_at(k) == l->track) room_track = k;
     if (l->started || l->state == NET_RACING) {
-        hle_log("online menu: room %s: the race starts\n", net_log_code(l->code).text);
+        hle_log("online menu: room %s: %s\n", net_log_code(l->code).text, l->watching ? "watching the race" : "the race starts");
         race = 1;
         raced_track = l->track;
         snprintf(raced_code, sizeof raced_code, "%s", l->code);
@@ -2096,6 +2102,19 @@ static void room_update(MenuPage *p)
         host_seconds() - test_ready_at > 1 && (test_ready_after <= 1 || host_seconds() - room_opened_at > test_ready_after)) {
         test_ready_at = host_seconds();
         host_service_net_set_ready(1);
+    }
+    /* tests (DHD_NET_SCRIPTED with DHD_NET_TEST_WATCH=1): WATCH each race this PC is outside of, once,
+       two seconds after the room shows it (finding 269) */
+    static int test_watch = -1;
+    static double test_watch_seen, test_watch_race;
+    if (test_watch < 0) test_watch = getenv("DHD_NET_TEST_WATCH") && getenv("DHD_NET_SCRIPTED");
+    if (test_watch && r.can_watch && !leave_ask && !room_closed && test_watch_race != l->race_started_at) {
+        if (!test_watch_seen) test_watch_seen = host_seconds();
+        if (host_seconds() - test_watch_seen > 2) {
+            test_watch_race = l->race_started_at, test_watch_seen = 0;
+            hle_log("online menu: WATCH by test\n");
+            host_service_net_watch();
+        }
     }
     if (!room_closed) room_texts(p);
 }

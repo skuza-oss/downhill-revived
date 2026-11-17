@@ -125,6 +125,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_set_ready:ready=>send({type:'ready',ready:!!ready}),
     host_service_net_start_race:()=>send({type:'start'}),
     host_service_net_end_race:()=>send({type:'end'}),
+    host_service_net_watch:()=>{},  // finding 269: SFU rooms only, which the browser does not offer
     host_service_net_race_go:at=>{if(serverGo&&state===3&&start.startAt&&at>0)send({type:'race_go',race:start.startAt,at});},  // finding 187
     host_service_net_finish:(ticks,place,score)=>send({type:'finish',ticks:ticks>>>0,place,...(serverScore&&score>=0?{score}:{})}),
     host_service_net_back:()=>{send({type:'back'});state=2;frames=[];after=0;const m=me();if(m)m.inRace=false;seq++;},

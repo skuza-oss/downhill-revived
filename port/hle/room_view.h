@@ -225,7 +225,7 @@ static inline int room_results(const NetLobby *l, ResultRow *out)
 }
 
 /* The results screen's large line: how the race went for this PC. ended: NetLobby.ended;
-   watcher: this PC watched the race (lane 269). */
+   watcher: this PC watched the race (finding 269). */
 static inline void room_results_headline(const NetLobby *l, int ended, int watcher, char *out, int size)
 {
     if (ended == NET_ENDED_VOID) {
