@@ -1452,11 +1452,12 @@ static void outline(int x, int y, int w, int h, int t, const int *c)
     rect(x + w - t, y + t, t, h - 2 * t, c, 128);
 }
 
-/* A check mark in squares (the font has none): its corner at x, y, s units a square */
+/* A check mark in blocks (the font has none): its corner at x, y, s units a step. A unit of the
+   popup view is about twice as tall as wide on the page, so a block is 2s wide for s high. */
 static void tick(int x, int y, int s, const int *c)
 {
     static const signed char at[][2] = {{0, 2}, {1, 3}, {2, 2}, {3, 1}, {4, 0}};
-    for (int i = 0; i < 5; i++) rect(x + at[i][0] * s, y + at[i][1] * s, s + 1, s + 1, c, 128);
+    for (int i = 0; i < 5; i++) rect(x + at[i][0] * 2 * s, y + at[i][1] * s, 2 * s + 1, s + 1, c, 128);
 }
 
 /* ---- the left: what the next race is, and the room's code ---- */
@@ -1696,8 +1697,8 @@ static void draw_button(int f, int x, int w, const char *label, const char *why,
         MenuStyle s = fit(label, tint(st_on, 125, kind == 1 ? t_dark : t_white), 125, w - 30);
         s.rgba[3] = 0x80;  /* dark words on yellow: fully drawn */
         int tw = width_of(label, s);
-        if (kind == 2) tick(x + w / 2 - tw / 2 - 16, BTN_Y + 4, 2, r_white);
-        put_in("main button", MENU_CENTRE, x + w / 2 + (kind == 2 ? 6 : 0), BTN_Y + 2, w - 30, label, s);
+        if (kind == 2) tick(x + w / 2 - tw / 2 - 13, BTN_Y + 5, 2, r_white);  /* 21 wide, 6 before the words */
+        put_in("main button", MENU_CENTRE, x + w / 2 + (kind == 2 ? 14 : 0), BTN_Y + 2, w - 30, label, s);
     }
     hit(&hits[f], x, BTN_Y, w, BTN_H);
 }

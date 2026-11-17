@@ -58,7 +58,7 @@ int main(void)
     assert(n == 10);
     assert(!strcmp(rows[0].place, "1") && rows[0].host && rows[0].state_kind == RS_READY && !strcmp(rows[0].middle, "T-BAG"));
     assert(rows[1].state_kind == RS_WAIT && rows[1].edge == EDGE_GREY && !strcmp(rows[1].middle, "DRUD"));
-    assert(rows[2].own && rows[2].state_kind == RS_CHOOSING && !strcmp(rows[2].middle, "CHOOSING..."));
+    assert(rows[2].own && rows[2].state_kind == RS_CHOOSING && !rows[2].middle[0]);
     assert(rows[3].member == -1 && rows[3].state_kind == RS_OPEN && !strcmp(rows[3].place, "4"));
     l.max_players = 2;
     assert(room_rows(&l, riders, rows) == 3);  /* never fewer rows than members */

@@ -164,8 +164,9 @@ static inline int room_rows(const NetLobby *l, const char *const *riders, RoomRo
             }
         } else
             snprintf(w->place, sizeof w->place, "%d", r + 1);
-        if (w->middle_kind == MID_NONE) {  /* before a race, or not in the last one: the rider */
-            snprintf(w->middle, sizeof w->middle, "%s", m->choosing ? "CHOOSING..." : m->rider >= 1 && m->rider <= 16 && riders
+        if (w->middle_kind == MID_NONE) {  /* before a race, or not in the last one: the rider (none
+                                              while choosing: the CHOOSING chip says it) */
+            snprintf(w->middle, sizeof w->middle, "%s", m->choosing ? "" : m->rider >= 1 && m->rider <= 16 && riders
                      ? riders[m->rider - 1] : "NO RIDER");
             w->middle_kind = MID_RIDER;
         }
