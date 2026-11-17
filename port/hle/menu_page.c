@@ -360,9 +360,10 @@ extern char D_004B2A90[];                      /* the front end's sound bank */
    heap (func_001FD430, its operator new) the first time, and stay for the run.
    A packet's DMA tag counts its own qword (as func_00190E48 writes it), so the DMA sends one
    qword past the end: each packet is zeroed first, and that spare goes to the GIF as an empty
-   tag (in the game's own buffers it is zero too). A box is 14 qwords, a rectangle 6. The race room
-   draws about 90 rectangles a frame (finding 271: ten rows with their chips and bars, the buttons). */
-enum { DRAW_BOXES = 32, BOX_QWORDS = 16, DRAW_RECTS = 128, RECT_QWORDS = 8 };
+   tag (in the game's own buffers it is zero too). A box is 14 qwords, a rectangle 6, a blended one
+   8 (its ALPHA_1 first): so a slot of 10, the spare zero included. The race room draws about 90
+   rectangles a frame (finding 271: ten rows with their chips and bars, the buttons). */
+enum { DRAW_BOXES = 32, BOX_QWORDS = 16, DRAW_RECTS = 128, RECT_QWORDS = 10 };
 void *func_001FD430(unsigned int size);
 static uint64_t (*box_packets)[BOX_QWORDS * 2], (*rect_packets)[RECT_QWORDS * 2];
 static int boxes_used, rects_used;
@@ -423,6 +424,13 @@ void menu_draw_rect(int x, int y, int w, int h, int r, int g, int b, int a)
     func_0023D618(view, &cx, &cy);
     func_0023D650(view, &vw, &vh);
     int left = cx - (vw >> 1) + x, top = cy - (vh >> 1) + y;
+    /* A blended one sets ALPHA_1 first, (Cs - Cd) * As + Cd, as the game's own boxes do
+       (func_00190E48): over a race view (the results, finding 271) another mode was left set and
+       a darkening drew nothing. A+D tag, then the register. */
+    if (a < 128) {
+        q[0] = 0x1000000000008001ull, q[1] = 0xE, q += 2;  /* the game's own tag: NREG 1, EOP, NLOOP 1 */
+        q[0] = 0x5000000044ull, q[1] = 0x42, q += 2;
+    }
     /* GIF tag: one loop of RGBAQ, XYZ2, RGBAQ, XYZ2; PRIM a sprite, alpha-blended (0x46) when a < 128 */
     q[0] = a < 128 ? 0x4023400000008001ull : 0x4003400000008001ull, q[1] = 0x5151, q += 2;
     func_002105A0(D_00513B00, q, r, g, b, a), q += 2;
