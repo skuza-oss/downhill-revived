@@ -249,7 +249,8 @@ device or a team; `DHD_IPA_PRIVATE` adds your own strings to that check).
 checks the IPA as the APK is checked (no game data, the version, no other server or local path,
 no retail bytes but the source's own; and `port/ios/ipa_audit.py` on every member, as
 `package_unsigned.py` runs it: no signature or provisioning file, no Mach-O with a code signature or
-one that can't be read, no home folder, device, team or `DHD_IPA_PRIVATE` literal; a supplied
+one that can't be read, no home folder, device, team or `DHD_IPA_PRIVATE` literal, no instruction above
+the A12, the iOS CPU floor (`port/ios/cpu_floor.py`, finding 267); a supplied
 `--ipa` too, finding 227) and writes
 `build/release/DownhillRevived-<version>-ios-experimental.ipa`, latest.json's `ios` entry and
 `SHA256SUMS`. The release page gets `port/release/IOS-NOTES.md`.
