@@ -2424,17 +2424,17 @@ static void results_draw(int view)
                         : k == 0 ? (const int[]){0xF4, 0xD0, 0x3F} : (const int[]){0x59, 0xD0, 0x5C};
         menu_draw_rect(RX(x0), RY(y), RX(x0 + 3) - RX(x0), RY(y + h) - RY(y), edge[0], edge[1], edge[2], 128);
         const int *c = w->own ? yellow : !w->finished ? dim : k == 0 ? white : NULL;
-        MenuStyle rs = c ? TINT(row, pct, c) : menu_style(row, pct, -1, 0, 0);
-        menu_draw_text(MENU_LEFT, RX(x0 + 10), RY(ty), w->place, &rs);
+        MenuStyle rs = c ? TINT(row, pct, c) : menu_style(row, pct, -1, 0, 0), vs = c ? rs : TINT(row, pct, white);
+        menu_draw_text(MENU_LEFT, RX(x0 + 10), RY(ty), w->place, &rs);  /* the place in the row's lilac, name and time white */
         /* the name up to the time (or the DNF's words): a wide one at the large size shrinks */
         MenuStyle gs = c == yellow ? TINT(row, pct * 70 / 100, yellow) : TINT(row, pct * 70 / 100, dim);
-        MenuStyle ds = TINT(row, pct * 70 / 100, amber), ns = rs;
-        int name_end = w->finished ? RX(x0 + wide - 100) - menu_text_width(w->time, &rs)
+        MenuStyle ds = TINT(row, pct * 70 / 100, amber), ns = vs;
+        int name_end = w->finished ? RX(x0 + wide - 100) - menu_text_width(w->time, &vs)
                                    : RX(x0 + wide - 12) - menu_text_width(w->time, &ds);
         while (ns.size[0] > 0 && menu_text_width(w->name, &ns) > name_end - RX(x0 + 80)) ns = menu_style(ns, 92, -1, 0, 0);
         menu_draw_text(MENU_LEFT, RX(x0 + 72), RY(ty), w->name, &ns);
         if (w->finished) {
-            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 100), RY(ty), w->time, &rs);
+            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 100), RY(ty), w->time, &vs);
             if (w->gap[0]) menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->gap, &gs);
         } else
             menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->time, &ds);
