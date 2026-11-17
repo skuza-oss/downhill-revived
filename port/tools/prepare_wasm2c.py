@@ -110,6 +110,20 @@ def access_families(text):
     return ACCESS_TEMPLATE.sub(add, text)
 
 
+MEMORY_BASE = 'wasm_rt_local_memory_base'
+MEMORY_HIGH = 'wasm_rt_local_memory_high'
+BASE_LOCAL = '  uint8_t* const wasm_rt_local_memory_base = (&instance->w2c_memory)->data;\n'
+HIGH_LOCAL = ('  uint8_t* const wasm_rt_local_memory_high = HOST64_HIGH_LOCAL(wasm_rt_local_memory_base);\n'
+              '  (void)wasm_rt_local_memory_high;\n')
+
+
+def high_locals(text):
+    """Beside each function's memory base (wasm2c reads it once, at the function's start), the high
+    part's base the split sites' hot arms use (memory_access.h HOST64_HIGH_LOCAL: the same base but
+    on iOS, finding 267). Idempotent."""
+    return text.replace(HIGH_LOCAL, '').replace(BASE_LOCAL, BASE_LOCAL + HIGH_LOCAL)
+
+
 def split_accesses(text, path='unit'):
     """Every access site NAME_default32(..., (u64)(base) + offset, ...) becomes
     (host64_base_ok(base, offset) ? NAME_hot_default32(...) : NAME_cold_default32(...)), the
@@ -132,7 +146,9 @@ def split_accesses(text, path='unit'):
                 raise ValueError(f'{path}: access call across lines: {m[0]}')
             i += 1
         args = text[m.start() + len(m[1]) + len('_default32'):i + 1]
-        out += [text[last:m.start()], f'(host64_base_ok({m[2]}, {m[3] or 0}u) ? {m[1]}_hot_default32{args} : '
+        # the hot arm's memory base is the site's part's (HOST64_SITE_BASE: one base but on iOS)
+        hot = f'(HOST64_SITE_BASE({MEMORY_BASE}, {MEMORY_HIGH}, {m[2]}, {m[3] or 0}u),' + args[len(MEMORY_BASE) + 2:]
+        out += [text[last:m.start()], f'(host64_base_ok({m[2]}, {m[3] or 0}u) ? {m[1]}_hot_default32{hot} : '
                 f'{m[1]}_cold_default32{args})']
         last = i + 1
     text = ''.join(out) + text[last:]
@@ -150,7 +166,7 @@ def prepare(path, *, minimum_size=True, dispatch=True, hot_functions=()):
     if minimum_size:
         text = re.sub(r'(\bwasm_rt_local_memory_size = )(?!host64_memory_size\()([^;\n]+);',
                       r'\1host64_memory_size(\2);', text)
-    text = split_accesses(text, path)
+    text = high_locals(split_accesses(text, path))
     marker = '#include "memory_access.h"'
     copy_old = 'memmove(MEM_ADDR(dest, dest_addr, n), MEM_ADDR(src, src_addr, n), n);'
     copy_new = 'host64_memory_copy(dest->data, dest_addr, src->data, src_addr, n);'
@@ -363,7 +379,7 @@ def prepare_units(units, out, exact_f32=False):
         if '#define MEM_ADDR(mem' in source.read_text():
             prepare(source)
         else:
-            source.write_text(split_accesses(specialize_dispatch(source.read_text()), source))
+            source.write_text(high_locals(split_accesses(specialize_dispatch(source.read_text()), source)))
     for header in out.glob('*-impl.h'):
         if '#define MEM_ADDR(mem' in header.read_text():
             prepare(header)

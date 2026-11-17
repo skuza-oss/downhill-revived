@@ -52,7 +52,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   its unsigned IPA), from the Windows build's wasm2c parts; the shared touch controls and settings
   (Android's rows), the shared launcher as the app's entry (finding 227); every online mode, as Android
   (finding 237; the port by Gustavo Ribeiro, finding 224). Its guest memory is reserved in two
-  parts at the process's start, so it fits the address space of a device with 3 GB (finding 258).
+  parts, each at its own host address, so it fits the address space of a device with 3 GB
+  (findings 258, 267); the code is built for the A12 and the IPA audit refuses any instruction
+  above it (finding 267).
 - **Launcher:** `port/launcher` (Tauri; settings, rider name, updates, disc choice; finding 093;
   native window buttons on macOS, finding 150). Its page (`port/launcher/ui`) is the one launcher
   UI of every platform: Android shows it in a WebView (`LauncherActivity`, the app's entry) through

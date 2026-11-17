@@ -3,8 +3,9 @@
    between and above them is not the guest's. Around every 4 MiB edge up to 8 GiB, for high parts
    of the shortest, a middle and the longest end, every path the generated code has (the call-site
    split's hot and cold arms, the plain access, the bulk span) either gives the address inside a
-   part or ends in host64_memory_wild; a hot arm is only ever taken inside a part. No memory is
-   touched: the base is a number. test_runtime.py builds it with the iOS defines.
+   part or ends in host64_memory_wild; a hot arm is only ever taken inside a part, and every path
+   addresses the high part through its own base (finding 267), the low one through the memory's.
+   No memory is touched: the bases are numbers. test_runtime.py builds it with the iOS defines.
    GPL-3.0-or-later. */
 #include <setjmp.h>
 #include <stdint.h>
@@ -19,6 +20,7 @@
     __LINE__, #x, (unsigned long long)a, (unsigned long long)size, (unsigned long long)host64_guest_end); exit(1); } } while (0)
 
 uint64_t host64_guest_end;
+uint8_t *host64_high_base = (uint8_t *)(uintptr_t)(0x200000000000ull - 0x70000000ull);   /* never dereferenced */
 static jmp_buf caught;
 static uint64_t wild_seen;
 void host64_memory_wild(uint64_t address) { wild_seen = address; longjmp(caught, 1); }
@@ -55,6 +57,7 @@ int main(void)
                     if (inside(a, size)) {
                         CHECK(!TRY(host64_memory_address_full(base, a, size), q));
                         CHECK(p == q);
+                        CHECK(a >= HOST64_HIGH_BASE ? p == host64_high_base + a : p >= base && p < base + HOST64_VIEWS_END);
                     }
                 }
                 for (unsigned k = 0; k < sizeof bulk / sizeof bulk[0]; k++) {
@@ -72,6 +75,10 @@ int main(void)
                         a = v + offsets[k];
                         if (host64_base_ok((uint32_t)v, offsets[k])) {
                             CHECK(inside(a, size) || a >= 0x80010000ull);   /* 2 GiB and up: as before */
+                            if (inside(a, size)) {   /* the hot arm's address is the adapter's */
+                                CHECK(!TRY(host64_memory_address_full(base, a, size), q));
+                                CHECK(HOST64_SITE_BASE(base, host64_high_base, (uint32_t)v, offsets[k]) + a == q);
+                            }
                             hot++;
                             continue;
                         }

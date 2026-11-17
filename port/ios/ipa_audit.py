@@ -5,10 +5,15 @@ An unsigned release carries nothing of the builder: no signature or provisioning
 (the executable, a framework or a dylib) with a code signature in any of its slices, nothing that
 names a home folder, a device, a team or the builder's own literals (DHD_IPA_PRIVATE, comma-separated,
 kept outside the repository). A Mach-O whose load commands can't be read can't be verified and is
-refused. Pure Python: it runs on any machine, no codesign needed."""
+refused. No arm64 code may use an instruction above the A12, the iOS CPU floor (cpu_floor.py,
+finding 267). Pure Python: it runs on any machine, no codesign needed."""
 import os
 import re
+import sys
 import unicodedata
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cpu_floor  # noqa: E402
 
 LC_CODE_SIGNATURE = 0x1D
 THIN = (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe')     # MH_MAGIC_64, MH_MAGIC (little-endian)
@@ -128,6 +133,7 @@ def member_problems(name, data, patterns=None):
             problems.append('%s: a Mach-O that still carries a code signature' % name)
     except ValueError as e:
         problems.append("%s: a Mach-O that can't be verified (%s)" % (name, e))
+    problems += cpu_floor.problems(name, data)
     for pattern, desc in patterns if patterns is not None else identity_patterns():
         m = pattern.search(data)
         if m:

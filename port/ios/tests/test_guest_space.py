@@ -1,8 +1,9 @@
-"""iOS's guest memory (finding 258) in an address space with no 2 GiB range left, on a Mac or Linux:
+"""iOS's guest memory (findings 258, 267) in an address space with no 2 GiB range left, on a Mac or Linux:
 port/host64/test_guest_space.c with guest_memory.c's bounds-checked layout, as the iOS builds have
 it. The reservation 0.8.5 made fails there in every mode; the two parts start when they are
 reserved at the start or when two holes are free at the game's start, and the game's start says
-why when there is no room at all. With the guest in place, accesses outside its two parts (into a
+why when there is no room at all; in the player's iPhone XR address space (finding 267) 0.8.9's one
+base fits nowhere and the two parts at their own addresses start. With the guest in place, accesses outside its two parts (into a
 readable, writable mapping in the gap and one above the high part, through the core's access
 paths and GUEST()) end their process by SIGSEGV with the fault reporter's line and leave the
 mapping untouched. Needs a C compiler named cc and WABT's wasm-rt.h (WABT_DIR, as
@@ -45,7 +46,8 @@ class GuestSpace(unittest.TestCase):
     WILD = 12   # test_guest_space.c's wild_accesses
 
     def assert_wild(self, r):
-        self.assertEqual(r.stdout.count('ended by SIGSEGV, the mapping there untouched'), self.WILD, r.stdout)
+        self.assertEqual(r.stdout.count(': ended by SIGSEGV'), self.WILD, r.stdout)
+        self.assertGreaterEqual(r.stdout.count('ended by SIGSEGV, the mapping there untouched'), self.WILD - 1, r.stdout)
         self.assertIn('wild plain access in the gap at 0x50000000', r.stdout)
         self.assertIn('host64 memory: access of uncommitted guest address 0x050000000\n', r.stderr)   # run_record.c's line
         self.assertIn('host64 memory: access of uncommitted guest address 0x039ffffe0\n', r.stderr)
@@ -68,6 +70,16 @@ class GuestSpace(unittest.TestCase):
         self.assert_wild(r)
         largest = int(r.stdout.split('largest free range: ')[1].split(' ')[0])
         self.assertLess(largest, 1024)   # the 960 MiB hole: no 2 GiB range anywhere
+
+    def test_the_players_iphone_xr(self):
+        r = self.run_mode('phone')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('the one base with the high part 1792 MiB above (0.8.9): fails', r.stdout)
+        self.assertIn("the start's reservation failed", r.stderr)
+        self.assertIn('reserved now', r.stderr)
+        self.assertIn('room to grow to 2048 MiB', r.stderr)   # the high part in the 384 MiB at the top
+        self.assertIn('PASS guest space phone', r.stdout)
+        self.assert_wild(r)
 
     def test_no_room_says_why(self):
         r = self.run_mode('none')
