@@ -106,6 +106,9 @@ enum { MENU_LEGEND_BUTTONS = 8 };
 typedef struct { int left, glyph_right, right, from, to; uint16_t button; } MenuLegendRange;
 int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLegendRange *out, int max);
 uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x);
+/* A tap at x beside a line whose words span [left, right): Left left of them, Right right of them, 0 on
+   them (menu_pads.c, finding 268). left == right: the line's two halves. */
+uint16_t menu_side_button(int x, int left, int right);
 
 /* ---- drawing, for a page that lays itself out (in its draw) ----
    In the popup's view, x across 0..640 and y down 0..224 as the rows are (menu_draw_size),
