@@ -184,6 +184,9 @@ int host_mem_protect(uint32_t at, uint32_t size, int protection)
    address). Only the installing thread is guarded. The module guards 4 KiB
    pages; where the OS page is larger, a fault anywhere in it is offered for
    each 4 KiB page it holds. */
+/* port/host64/guest_memory.c: the guest address of a host address in its reservation (each part's
+   own base on iOS, finding 267) */
+int host64_memory_guest(uintptr_t host, uint64_t *at);
 static _Thread_local int (*guard_on_fault)(uint32_t address);
 static _Thread_local int guard_armed;
 static struct sigaction guard_old_segv, guard_old_bus;
@@ -194,8 +197,9 @@ static void guard_fault(int sig, siginfo_t *info, void *ctx)
 {
     uintptr_t host = (uintptr_t)info->si_addr;
     (void)ctx;
-    if (guard_armed && guard_on_fault && host >= guest_base && host - guest_base < 0x100000000ull) {
-        uint32_t at = (uint32_t)(host - guest_base), page = (uint32_t)os_page();
+    uint64_t guest = 0;
+    if (guard_armed && guard_on_fault && host64_memory_guest(host, &guest) && guest < 0x100000000ull) {
+        uint32_t at = (uint32_t)guest, page = (uint32_t)os_page();
         if (guard_on_fault(at)) return; /* retry the access */
         for (uint32_t sub = at & ~(page - 1); page > 4096 && sub < (at & ~(page - 1)) + page; sub += 4096)
             if (sub != (at & ~4095u) && guard_on_fault(sub)) return;

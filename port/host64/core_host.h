@@ -13,6 +13,10 @@ int host64_fiber_id(void);  /* the running EE fiber, unchecked (diagnostics) */
 int host64_memory_commit(uint64_t at, uint64_t size);
 /* Whether guest [at, at + size) is inside the memory's size and its reservation. */
 int host64_memory_reserved(uint64_t at, uint64_t size);
+/* Whether a host address lies in the guest's reservation; *at its guest address (either part's
+   base on iOS, finding 267). Plain arithmetic, safe in a signal handler. */
+int host64_memory_owns(uintptr_t host);
+int host64_memory_guest(uintptr_t host, uint64_t *at);
 /* iOS (finding 258): ends the process as a fault of the guest at address does (guest_memory_posix.c). */
 void host64_memory_wild(uint64_t address) __attribute__((noreturn, cold));
 /* After instantiation: the root shadow stack below the initial stack pointer,

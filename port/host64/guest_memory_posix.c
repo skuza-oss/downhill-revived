@@ -280,7 +280,9 @@ static void fault(int sig,siginfo_t *info,void *ctx) {
         sigaction(sig,&dfl,NULL); raise(sig); return;
 #endif
     }
-    report(host-guest_base,fault_wrote(ctx));
+    uint64_t at=0;
+    host64_memory_guest(host,&at);   /* the part's base (finding 267); owned, so it is the guest's */
+    report(at,fault_wrote(ctx));
     /* Report and exit with the signal, as an unhandled fault would. Android: the handler that
        was there (the system's crash dump, debuggerd) gets the fault when it happens again. */
 #ifdef __ANDROID__

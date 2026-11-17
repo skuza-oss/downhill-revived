@@ -11,6 +11,9 @@
             one at the game's start finds the holes
      none   filled before the start, no holes: the game's start fails, with the free ranges and
             the message in the log (exits by abort)
+     phone  filled before the start, then the free ranges of the player's iPhone XR log on 0.8.9
+            (finding 267) opened at the same distances: 0.8.9's one base (the high part 1792 MiB
+            above the low one) fits nowhere, the two parts at their own addresses do
    In start and late, wild accesses follow: a readable, writable mapping in the gap and one above
    the high part, and a child process that accesses them through every path the game has (the
    core's split, plain and bulk accesses, GUEST()); each child must end by SIGSEGV with the fault
@@ -68,6 +71,43 @@ static void carve(uintptr_t x)
     CHECK(munmap((void *)(x + 0x6e000000), 0x0e000000) == 0);
 }
 
+/* The player's iPhone XR on 0.8.9 (finding 267): every free range of 16 MiB or more its log listed,
+   opened in a filled block of fill()'s at the same distances from each other. */
+static void carve_phone(void)
+{
+    static const GuestRange xr[] = {
+        {0x11860c000ull, 0x11a000000ull}, {0x123654000ull, 0x16b720000ull},
+        {0x170754000ull, 0x180000000ull}, {0x340000000ull, 0x358000000ull}};
+    const uint64_t span = 0x358000000ull - 0x100000000ull;
+    uintptr_t x = 0;
+    for (unsigned i = 0; i < fillers; i++) {   /* the lowest filled block that holds the span, 4 GiB aligned */
+        uintptr_t at = (filler[i].at + 0xffffffffull) & ~(uintptr_t)0xffffffffull;
+        if (at + span <= filler[i].at + filler[i].size && (!x || at < x)) x = at;
+    }
+    CHECK(x);
+    for (unsigned i = 0; i < sizeof xr / sizeof xr[0]; i++)
+        CHECK(munmap((void *)(x + (xr[i].lo - 0x100000000ull)), xr[i].hi - xr[i].lo) == 0);
+}
+
+/* 0.8.9's placement (finding 258): one base, the high part 1792 MiB above the low part. */
+static int one_base_fits(void)
+{
+    GuestRange *r = NULL;
+    unsigned n = os_free_ranges(&r);
+    int fits = 0;
+    for (unsigned i = 0; i < n && !fits; i++)
+        for (unsigned j = 0; j < n && !fits; j++) {
+            if (r[i].hi - r[i].lo < 0x3a000000 || r[j].hi < HOST64_HIGH_END_MIN) continue;
+            uint64_t lo = r[i].lo, hi = r[i].hi - 0x3a000000;
+            if (r[j].lo > HOST64_HIGH_BASE && r[j].lo - HOST64_HIGH_BASE > lo) lo = r[j].lo - HOST64_HIGH_BASE;
+            if (r[j].hi - HOST64_HIGH_END_MIN < hi) hi = r[j].hi - HOST64_HIGH_END_MIN;
+            lo = (lo + 0xffff) & ~0xffffull;
+            fits = lo <= hi;
+        }
+    free(r);
+    return fits;
+}
+
 static int old_reservation_fails(void)
 {
     void *p = mmap(NULL, 0x80010000ull, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -87,7 +127,7 @@ static uint64_t largest_free(void)
 
 __attribute__((constructor)) static void before_start(int argc, char **argv)
 {
-    if (argc > 1 && (!strcmp(argv[1], "late") || !strcmp(argv[1], "none"))) {
+    if (argc > 1 && (!strcmp(argv[1], "late") || !strcmp(argv[1], "none") || !strcmp(argv[1], "phone"))) {
         carve_at = fill();
         CHECK(carve_at);
     }
@@ -99,7 +139,7 @@ static volatile uint64_t wild_at;
 static void by_access(void) { *(volatile uint32_t *)host64_access_address((uint8_t *)guest_base, wild_at, 4) = 0xdeadbeef; }
 #define SPLIT(name, OFFSET) static void name(void) { \
     uint32_t b = (uint32_t)(wild_at - (OFFSET)); \
-    uint8_t *p = host64_base_ok(b, OFFSET) ? (uint8_t *)guest_base + (uint64_t)b + (OFFSET) \
+    uint8_t *p = host64_base_ok(b, OFFSET) ? HOST64_SITE_BASE((uint8_t *)guest_base, host64_high_base, b, OFFSET) + (uint64_t)b + (OFFSET) \
                                            : host64_cold_address((uint8_t *)guest_base, (uint64_t)b + (OFFSET), 4); \
     *(volatile uint32_t *)p = 0xdeadbeef; }
 SPLIT(by_split_near, 8u)              /* a field of a struct */
@@ -113,7 +153,8 @@ static void by_host(void) { *(volatile uint32_t *)GUEST(wild_at) = 0xdeadbeef; }
    and nothing reached the mapping. */
 static void expect_wild(const char *what, void (*access)(void), uint64_t at, uint64_t map_at)
 {
-    uintptr_t page = (guest_base + map_at) & ~(uintptr_t)0x3fff;
+    /* where the access would land unchecked: the address on its part's base */
+    uintptr_t page = ((map_at >= HOST64_HIGH_BASE ? (uintptr_t)host64_high_base : guest_base) + map_at) & ~(uintptr_t)0x3fff;
     CHECK(!host64_memory_owns(page) && !host64_memory_owns(page + 0x7fff));
     int filled = 1;   /* every 16 KiB page of it in one of fill()'s mappings */
     for (uintptr_t at = page; at < page + 0x8000; at += 0x4000) {
@@ -147,7 +188,7 @@ static void wild_accesses(void)
     for (unsigned i = 0; i < sizeof fine / sizeof fine[0]; i++) {
         wild_at = fine[i].at;
         fine[i].access();
-        CHECK(*(volatile uint8_t *)(guest_base + fine[i].at) == (fine[i].access == by_bulk ? 0xab : 0xef));
+        CHECK(*(volatile uint8_t *)GUEST(fine[i].at) == (fine[i].access == by_bulk ? 0xab : 0xef));
     }
     const uint64_t gap = 0x50000000, end = host64_guest_end;
     CHECK(end >= HOST64_HIGH_END_MIN && end <= 0x80010000ull);
@@ -174,8 +215,12 @@ int main(int argc, char **argv)
         carve(x);
     } else if (!strcmp(mode, "late")) {
         carve(carve_at);
+    } else if (!strcmp(mode, "phone")) {
+        carve_phone();
+        CHECK(!one_base_fits());
+        puts("the one base with the high part 1792 MiB above (0.8.9): fails");
     } else if (strcmp(mode, "none")) {
-        fprintf(stderr, "usage: test_guest_space start|late|none\n");
+        fprintf(stderr, "usage: test_guest_space start|late|none|phone\n");
         return 2;
     }
     uint64_t big = largest_free();
@@ -196,10 +241,12 @@ int main(int argc, char **argv)
     *(volatile uint32_t *)(guest_base + 0x00400100) = 0x9abcdef0;   /* the low view: RAM at its own addresses */
     CHECK(*(volatile uint32_t *)(guest_base + 0x08400100) == 0x9abcdef0);
     /* the module's own memory, the scratchpad and the stack slots commit; the gap never does */
-    *(volatile uint32_t *)(guest_base + 0x70100000) = 7;
-    *(volatile uint32_t *)(guest_base + 0x70DFFFFC) = 8;
+    *(volatile uint32_t *)GUEST(0x70100000) = 7;
+    *(volatile uint32_t *)GUEST(0x70DFFFFC) = 8;
     CHECK(host64_memory_commit(0x70000000, 0x8000));
-    *(volatile uint32_t *)(guest_base + 0x70000000) = 9;
+    *(volatile uint32_t *)GUEST(0x70000000) = 9;
+    CHECK((uint8_t *)GUEST(0x70000000) == host64_high_base + 0x70000000 && GADDR(GUEST(0x70100000)) == 0x70100000 &&
+          GADDR(GUEST(0x08000100)) == 0x08000100);
     CHECK(host64_memory_commit(0x06004000, 0x3c000));
     *(volatile uint32_t *)(guest_base + 0x06004000) = 10;
     CHECK(host64_memory_commit(0x11000000, 0x10000));
@@ -208,13 +255,14 @@ int main(int argc, char **argv)
     CHECK(host64_memory_reserved(0x70000000, 0x4000) && host64_memory_reserved(0x10000000, 0x10000));
     CHECK(!host64_memory_reserved(0x39fff000, 0x2000) && !host64_memory_reserved(0x60000000, 0x10));
     CHECK(host64_memory_owns(guest_base + 0x39ffffff) && !host64_memory_owns(guest_base + 0x3a000000) &&
-          !host64_memory_owns(guest_base + 0x6fffffff) && host64_memory_owns(guest_base + 0x70000000));
+          !host64_memory_owns(guest_base + 0x6fffffff) && host64_memory_owns((uintptr_t)host64_high_base + 0x70000000) &&
+          !host64_memory_owns((uintptr_t)host64_high_base + 0x6fffffff));
     /* growth up to the reservation's limit, never past it */
     uint64_t pages = m.pages, grown = 0;
     while (wasm_rt_grow_memory(&m, 16) != UINT32_MAX) grown += 16;
     CHECK(m.pages == pages + grown && grown >= 16);
-    *(volatile uint32_t *)(m.data + m.size - 4) = 11;
-    CHECK(host64_memory_owns(guest_base + m.size + 0xffff));   /* the window above */
+    *(volatile uint32_t *)GUEST(m.size - 4) = 11;
+    CHECK(host64_memory_owns((uintptr_t)host64_high_base + m.size + 0xffff));   /* the window above */
     wild_accesses();
     printf("PASS guest space %s: guest memory at 0x%llx, grew to %llu MiB\n", mode,
            (unsigned long long)guest_base, (unsigned long long)(m.size >> 20));

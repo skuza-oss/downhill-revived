@@ -44,6 +44,23 @@ static inline int host64_alias_crossing(uint64_t address,uint64_t size) {
 #define HOST64_SLOW_WINDOWS (HOST64_ALIAS_SLOW | ((1ull << 56) - (1ull << 29)) | (~0ull << 57))
 #define HOST64_PLAIN_WINDOW(window) ((window) < 64 && !((HOST64_SLOW_WINDOWS >> (window)) & 1))
 extern uint64_t host64_guest_end;   /* guest_memory.c: the high part's end, its 64 KiB window included */
+/* The high part has a host address of its own (finding 267): guest address a >= HOST64_HIGH_BASE is
+   at host64_high_base + a, every other at base + a (base: the memory's data, guest_base). */
+/* A pointer, not an integer: LLVM shares the constants of large offsets only from a pointer base. */
+extern uint8_t *host64_high_base;
+#define HOST64_HOST(base, address) (((address) >= HOST64_HIGH_BASE ? host64_high_base : (base)) + (address))
+/* An access site's base (prepare_wasm2c.py split_accesses), for its hot arm, where host64_base_ok
+   holds: lo the function's memory base, hi its high one (HOST64_HIGH_LOCAL, read once per function
+   as the memory base is), b the site's 32-bit base value, off its constant offset. The part follows
+   from what host64_base_ok allows: an offset in the module's data (b below 16 MiB) is the high part;
+   with an offset below 64 KiB, b's own window decides, and a larger offset b + off's, as in
+   host64_base_ok. Of a plain window's addresses, those below the gap (below 0x36000000) have bit 30
+   clear and window 56's (the high part) set: one bit test and select per base value (an immediate
+   compare with 0x70000000 would need the constant in a register), none for the module's data. */
+#define HOST64_SITE_BASE(lo, hi, b, off) \
+    ((off) >= HOST64_HIGH_BASE ? (hi) : \
+     ((((off) + 16 <= 0x10000 ? (uint64_t)(b) : (uint64_t)(b) + (off)) >> 30) & 1) ? (hi) : (lo))
+#define HOST64_HIGH_LOCAL(lo) (host64_high_base)
 void host64_memory_wild(uint64_t address) __attribute__((noreturn, cold));
 /* Whether a span touches neither part's inside: the gap, or at or above the high part's end
    (any address of 2 GiB or more). A zero-size span touches nothing. */
@@ -55,6 +72,10 @@ static inline __attribute__((always_inline)) int host64_outside(uint64_t address
 #else
 #define HOST64_SLOW_WINDOWS HOST64_ALIAS_SLOW
 #define HOST64_PLAIN_WINDOW(window) ((window) >= 32 || !((HOST64_ALIAS_WINDOWS >> (window)) & 1))
+/* One reservation: one base (finding 267's second base is iOS's). */
+#define HOST64_HOST(base, address) ((base) + (address))
+#define HOST64_SITE_BASE(lo, hi, b, off) (lo)
+#define HOST64_HIGH_LOCAL(lo) (lo)
 #endif
 /* The full adapter: any address, any size. Callers below inline it only for constant spans
    (it folds away at compile time) and otherwise call it out of line, on the rare paths. */
@@ -71,13 +92,13 @@ host64_memory_address_full(uint8_t *base, uint64_t address, uint64_t size) {
        window is one of HOST64_SLOW_WINDOWS' clear bits below 64 (the parts' inside). */
     uint64_t window = address >> 25;
     if (__builtin_expect(window == (address + size - 1) >> 25 && HOST64_PLAIN_WINDOW(window), 1))
-        return base + address;
+        return HOST64_HOST(base, address);
     /* A span crossing a 32 MiB boundary may leave/enter an alias window.
        Preserve its exact virtual-byte sequence using the OS views. Such rare
        spans retain the original full barrier; never fold only their first byte.
        Bounds checks remain in wasm2c, against the ORIGINAL guest address. */
     if (host64_alias_crossing(address,size)) {
-        uint8_t *p = base + address;
+        uint8_t *p = HOST64_HOST(base, address);
 #if defined(__clang__) || defined(__GNUC__)
         __asm__ volatile("" : "+r"(p) : : "memory");
         return p;
@@ -93,7 +114,7 @@ host64_memory_address_full(uint8_t *base, uint64_t address, uint64_t size) {
         (address<0x02000000 || (address>=0x20400000 && address<0x22000000) ||
          (address>=0x30400000 && address<0x32000000)))
         address=0x08000000+(address&0x1ffffffull);
-    return base + address;
+    return HOST64_HOST(base, address);
 }
 /* Out of line: the inlined fold was half of the executable and about 13% of the EE thread
    (finding 089). Its memory barrier (crossing spans) still acts at the call: the call is opaque
@@ -117,7 +138,7 @@ static inline uint8_t *host64_memory_address(uint8_t *base, uint64_t address,
         return host64_memory_address_full(base, address, size);
     uint64_t window = address >> 25;
     if (__builtin_expect(window == (address + size - 1) >> 25 && HOST64_PLAIN_WINDOW(window), 1))
-        return base + address;
+        return HOST64_HOST(base, address);
     return host64_memory_address_slow(base, address, size);
 }
 /* One scalar or SIMD access (wasm2c's MEM_ADDR_MEMOP: size 1..16). Same result as
@@ -143,7 +164,7 @@ host64_access_address(uint8_t *base, uint64_t address, uint64_t size) {
         return base + address;
 #endif
     if (__builtin_expect(!((HOST64_SLOW_WINDOWS >> ((address >> 25) & 63)) & 1), 1))
-        return base + address;
+        return HOST64_HOST(base, address);
     return host64_memory_address_slow(base, address, size);
 }
 /* Accesses split at the call site (prepare_wasm2c.py split_accesses). wasm2c writes every access
@@ -161,7 +182,8 @@ host64_access_address(uint8_t *base, uint64_t address, uint64_t size) {
    below 16 MiB ends below 0x72000000, inside the high part (one compare, the same for every such
    access through one base); any other offset of 64 KiB or more tests the address itself, so a
    plain base in window 56 reaches at most 64 KiB past it, still inside HOST64_HIGH_END_MIN.
-   The cold access gives the same result as host64_access_address, out of line. */
+   The cold access gives the same result as host64_access_address, out of line. The hot one
+   addresses HOST64_SITE_BASE(...) + address: base on one reservation, the part's base on iOS. */
 static inline __attribute__((always_inline)) int host64_base_ok(uint32_t base, uint64_t offset) {
 #if HOST64_TWO_PARTS
     if (offset >= HOST64_HIGH_BASE && offset + 16 <= HOST64_HIGH_BASE + 0x1000000)
