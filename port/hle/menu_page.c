@@ -448,6 +448,32 @@ void menu_draw_rect(int x, int y, int w, int h, int r, int g, int b, int a)
     func_002103D8(D_00513B00, view, start);
 }
 
+/* As a rectangle, a triangle strip: XYZ2 to 1/16 pixel, so a slant keeps its line at any scale.
+   func_00210578 maps whole pixels for widescreen (linearly): the sixteenths go between two of them. */
+void menu_draw_strip(const int *xy16, int n, int r, int g, int b)
+{
+    if (!rect_packets || n < 3 || n > 4 || rects_used >= DRAW_RECTS) return;
+    uint64_t *start = rect_packets[rects_used++], *q = start + 2;
+    memset(start, 0, sizeof *rect_packets);
+    int view = draw_view(), cx, cy, vw, vh;
+    func_0023D618(view, &cx, &cy);
+    func_0023D650(view, &vw, &vh);
+    int left = cx - (vw >> 1), top = cy - (vh >> 1);
+    /* GIF tag: PRIM a triangle strip, flat, one loop of RGBAQ and n XYZ2 */
+    q[0] = 0x8001 | 1ull << 46 | 4ull << 47 | (uint64_t)(n + 1) << 60, q[1] = 0x55551 & ((1u << 4 * (n + 1)) - 1), q += 2;
+    func_002105A0(D_00513B00, q, r, g, b, 128), q += 2;
+    for (int i = 0; i < n; i++, q += 2) {
+        int px = left + (xy16[2 * i] >> 4), frac = xy16[2 * i] & 15, a[4], c[4];
+        func_00210578(D_00513B00, a, px, top);
+        func_00210578(D_00513B00, c, px + 1, top);
+        func_00210578(D_00513B00, q, px, top);
+        ((int *)q)[0] = a[0] + (c[0] - a[0]) * frac / 16;
+        ((int *)q)[1] = (top << 4) + xy16[2 * i + 1];
+    }
+    start[0] = (uint64_t)(((q - start) / 2) | 0x60000000), start[1] = 0;
+    func_002103D8(D_00513B00, view, start);
+}
+
 /* The track picker's picture (finding 132): one bilinear sprite of a 256 x 160 PSMCT16 texture
    at GS blocks 0x3C00-0x3E00 (TBW 4; its 256-line footprint is 16 pages). A census of every TEX0,
    CLUT, FRAME, ZBUF and upload address the GS saw from boot through the main and online menus,
@@ -551,6 +577,44 @@ void menu_draw_text(int align, int x, int y, const char *text, const MenuStyle *
     if (align == MENU_LEFT) func_0020F9A8(0, view, x, y, text);
     else if (align == MENU_RIGHT) func_0020FA98(0, view, x, y, text);
     else func_0020F9F0(0, view, x, y, text);
+}
+
+/* The font's text batch (func_0020F420, func_0020FDB0, func_0020F2A8): a view's glyphs go into
+   its buffer, state 1 after a colour (PRIM + RGBAQ, its GIF tag closed), 2 in a run of glyphs
+   whose tag's NLOOP (the count, kept across the colour's p-- path) is written when the run ends.
+   text_alpha closes a run, zeroes the count, puts an ALPHA_1 there (A+D) and a fresh colour, and
+   leaves state 1, as a colour leaves it: the next colour overwrites that colour's qword, never the
+   ALPHA_1. The batch's own setup packet sets 0x44, FIX 0x80
+   (func_00210068), which is put back after an ink text. */
+extern char *D_00513AC0[];
+extern unsigned short *D_00513AD0[];
+extern int D_00513AE0[], D_00513AF0[];
+
+static void text_alpha(int view, uint64_t alpha)
+{
+    if (D_00513AF0[view] == 2) *D_00513AD0[view] = (unsigned short)D_00513AE0[view];
+    uint64_t *p = (uint64_t *)D_00513AC0[view];
+    p[0] = 1ull << 60 | 1, p[1] = 0xE;                 /* A+D, NLOOP 1 */
+    p[2] = alpha, p[3] = 0x42;                         /* ALPHA_1 */
+    p[4] = 0x2400000000000001ull, p[5] = 0x10;         /* PRIM, RGBAQ (the colour's own tag) */
+    p[6] = 0x156, p[7] = 0x3F80000080808080ull;        /* a textured blended sprite; white, Q 1 */
+    D_00513AC0[view] = (char *)(p + 8);
+    D_00513AF0[view] = 1;
+    D_00513AE0[view] = 0;  /* the next run's glyphs count from 0 (a colour after glyphs does this) */
+}
+
+void menu_draw_text_ink(int align, int x, int y, const char *text, const MenuStyle *s, int ink)
+{
+    int view = draw_view();
+    if (D_00513AF0[view] == 0) {  /* no batch open: the plain way */
+        menu_draw_text(align, x, y, text, s);
+        return;
+    }
+    /* LIGHT (Cs - 0) * As + Cd, DARK (0 - Cs) * As + Cd: the black edge adds or takes nothing */
+    MenuStyle full = menu_solid(*s);
+    text_alpha(view, ink == MENU_INK_DARK ? 0x42 : 0x48);
+    menu_draw_text(align, x, y, text, &full);
+    text_alpha(view, 0x8000000044ull);
 }
 
 /* Retail's width routine knows the capitals only (its menus write in capitals); lowercase draws

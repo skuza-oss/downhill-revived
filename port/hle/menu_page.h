@@ -142,7 +142,15 @@ enum { MENU_PICTURE_W = 256, MENU_PICTURE_H = 160 };
 uint16_t *menu_picture_new(void);
 void menu_draw_picture(int x, int y, int w, int h, const uint16_t *picture);  /* bilinear, one sprite */
 void menu_draw_bar(int x, int y, int w, int h);  /* the cursor's bar */
+/* A triangle strip of n (3 or 4) points in one flat colour (0-255), each x, y in 1/16 of the
+   view's pixels from its top left: a slanted shape with clean edges at every resolution scale. */
+void menu_draw_strip(const int *xy16, int n, int r, int g, int b);
 void menu_draw_text(int align, int x, int y, const char *text, const MenuStyle *s);
+/* The font's glyphs carry a dark edge (black in its texture) round a white body: dark text on a
+   light box ran into one blob with it (lane 272). Ink text leaves the edge out: LIGHT adds the
+   style's colour to what is under the body, DARK takes it away (0x80 each: white, or black). */
+enum { MENU_INK_LIGHT, MENU_INK_DARK };
+void menu_draw_text_ink(int align, int x, int y, const char *text, const MenuStyle *s, int ink);
 int menu_text_width(const char *text, const MenuStyle *s);
 void menu_play(const char *sound);     /* a front-end sound by name: "S_SELECT", "S_BACK"... */
 
