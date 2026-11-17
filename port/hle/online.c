@@ -2382,10 +2382,10 @@ static void results_draw(int view)
 #define RY(y) ((y) * vh / 224)
     NetLobby lobby;
     host_service_net_get_lobby(GADDR(&lobby));
-    MenuStyle row = menu_game_style(MENU_STYLE_ROW), lit = menu_game_style(MENU_STYLE_SELECTED);
-    static const int white[3] = {0x76, 0x75, 0x7A}, dim[3] = {0x3E, 0x3F, 0x53}, yellow[3] = {0x7A, 0x72, 0x00},
+    MenuStyle row = menu_solid(menu_game_style(MENU_STYLE_ROW)), lit = menu_solid(menu_game_style(MENU_STYLE_SELECTED));
+    static const int white[3] = {0x76, 0x75, 0x7A}, dim[3] = {0x45, 0x48, 0x60}, yellow[3] = {0x7A, 0x72, 0x00},
                      amber[3] = {0x70, 0x58, 0x17}, green[3] = {0x2C, 0x68, 0x2E};
-#define TINT(s, pct, c) menu_style(s, pct, (c)[0], (c)[1], (c)[2])
+#define TINT(s, pct, c) menu_style(s, pct, (c)[0], (c)[1], (c)[2])  /* row and lit are solid (menu_solid) */
     menu_draw_rect(0, 0, vw, vh, 0, 0, 0, 108);  /* the race behind, darkened */
     int fresh = lobby.last_race_id != on.last_race_id;  /* the results came (they follow "ended") */
     char line[64], head[48];

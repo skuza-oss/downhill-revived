@@ -126,6 +126,12 @@ MenuStyle menu_game_style(int which);  /* the same without a page (a menu drawn 
 int menu_popup_up(void);               /* a popup is up (the game's or ours) */
 const char *menu_game_text(int id);    /* the game's text of an id ("" none) */
 MenuStyle menu_style(MenuStyle s, int percent, int r, int g, int b);  /* sized; colour r < 0: kept */
+/* The font's glyphs are white (0xFF) at alpha 0x40 in its texture, and the GS multiplies both by
+   the style's colour and alpha (0x80 = 1.0): at the game's alpha 0x80 a glyph is drawn at half
+   cover, its colour twice the style's. Over the game's lit menus that is their soft look; over a
+   dark page it halves every colour (finding 271). A solid style (alpha 0xFF) covers fully: its
+   colour then shows as given on a 0..0x80 scale (0x80 = full). */
+MenuStyle menu_solid(MenuStyle s);
 void menu_draw_size(int *width, int *height);  /* the popup view's size */
 void menu_draw_begin(void);            /* each frame, before the first box */
 void menu_draw_box(int x, int y, int w, int h, int level);  /* level 90: the popups' own */
