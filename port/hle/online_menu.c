@@ -1709,8 +1709,8 @@ static void draw_button(int f, int x, int w, const char *label, const char *why,
         /* on the cursor's yellow bar the words are dark: in ink, as the main button's (lane 272) */
         MenuStyle s = on ? tint(st_row, 100, ink_full) : tint(st_row, 100, can ? NULL : t_dim);
         int ly = why ? BTN_Y + 2 : BTN_Y + 4;
-        MenuStyle f = fit(label, s, why ? 90 : 100, w - 8);
-        layout_check("button", label, f, w - 8);
+        MenuStyle f = fit(label, s, why ? 90 : 100, w - 14);
+        layout_check("button", label, f, w - 14);
         if (on) menu_draw_text_ink(MENU_CENTRE, X(x + w / 2), Y(ly), label, &f, MENU_INK_DARK);
         else put(MENU_CENTRE, x + w / 2, ly, label, f);
         if (why) put_in("button why", MENU_CENTRE, x + w / 2, BTN_Y + 10, w - 8, why, tint(st_row, 55, t_amber));
