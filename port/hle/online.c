@@ -2386,7 +2386,7 @@ static void results_draw(int view)
     static const int white[3] = {0x76, 0x75, 0x7A}, dim[3] = {0x3E, 0x3F, 0x53}, yellow[3] = {0x7A, 0x72, 0x00},
                      amber[3] = {0x70, 0x58, 0x17}, green[3] = {0x2C, 0x68, 0x2E};
 #define TINT(s, pct, c) menu_style(s, pct, (c)[0], (c)[1], (c)[2])
-    menu_draw_rect(0, 0, vw, vh, 0, 0, 0, 92);  /* the race behind, darkened */
+    menu_draw_rect(0, 0, vw, vh, 0, 0, 0, 108);  /* the race behind, darkened */
     int fresh = lobby.last_race_id != on.last_race_id;  /* the results came (they follow "ended") */
     char line[64], head[48];
     const char *where = port_track_name(fresh ? lobby.last_race_track : lobby.race_track);
@@ -2410,8 +2410,9 @@ static void results_draw(int view)
     for (int k = 0; k < n; k++) {
         const ResultRow *w = &rows[k];
         int h = k == 0 ? 17 : k < 4 ? 14 : 12, pct = k == 0 ? 120 : k < 4 ? 100 : 85, x0 = 77, wide = 486;
-        int ty = y + (h - pct * 5 / 100) / 2 - 2;
-        menu_draw_box(RX(x0), RY(y), RX(x0 + wide) - RX(x0), RY(y + h) - RY(y), 90);
+        /* the font's glyphs centre about 5.4 units (at 100 %) below the y they are drawn at */
+        int ty = y + h / 2 - pct * 54 / 1000, gy = y + h / 2 - pct * 70 / 100 * 54 / 1000;
+        menu_draw_rect(RX(x0), RY(y), RX(x0 + wide) - RX(x0), RY(y + h) - RY(y), 0x0C, 0x0C, 0x16, 104);
         if (w->own) {
             menu_draw_rect(RX(x0), RY(y), RX(x0 + wide) - RX(x0), RY(y + h) - RY(y), 0x3C, 0x38, 0, 60);
             menu_draw_rect(RX(x0 - 1), RY(y - 1), RX(wide + 2), RY(1) > 0 ? RY(1) : 1, 0xF4, 0xE4, 0, 128);
@@ -2425,15 +2426,18 @@ static void results_draw(int view)
         const int *c = w->own ? yellow : !w->finished ? dim : k == 0 ? white : NULL;
         MenuStyle rs = c ? TINT(row, pct, c) : menu_style(row, pct, -1, 0, 0);
         menu_draw_text(MENU_LEFT, RX(x0 + 10), RY(ty), w->place, &rs);
-        menu_draw_text(MENU_LEFT, RX(x0 + 72), RY(ty), w->name, &rs);
+        /* the name up to the time (or the DNF's words): a wide one at the large size shrinks */
+        MenuStyle gs = c == yellow ? TINT(row, pct * 70 / 100, yellow) : TINT(row, pct * 70 / 100, dim);
+        MenuStyle ds = TINT(row, pct * 70 / 100, amber), ns = rs;
+        int name_end = w->finished ? RX(x0 + wide - 100) - menu_text_width(w->time, &rs)
+                                   : RX(x0 + wide - 12) - menu_text_width(w->time, &ds);
+        while (ns.size[0] > 0 && menu_text_width(w->name, &ns) > name_end - RX(x0 + 80)) ns = menu_style(ns, 92, -1, 0, 0);
+        menu_draw_text(MENU_LEFT, RX(x0 + 72), RY(ty), w->name, &ns);
         if (w->finished) {
             menu_draw_text(MENU_RIGHT, RX(x0 + wide - 100), RY(ty), w->time, &rs);
-            MenuStyle gs = c == yellow ? TINT(row, pct * 70 / 100, yellow) : TINT(row, pct * 70 / 100, dim);
-            if (w->gap[0]) menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(ty + 1), w->gap, &gs);
-        } else {
-            MenuStyle ds = TINT(row, 70, amber);
-            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(ty + 1), w->time, &ds);
-        }
+            if (w->gap[0]) menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->gap, &gs);
+        } else
+            menu_draw_text(MENU_RIGHT, RX(x0 + wide - 12), RY(gy), w->time, &ds);
         y += h + 2;
     }
     if (fresh && !n && on.results_ended != NET_ENDED_VOID) {
@@ -2447,16 +2451,23 @@ static void results_draw(int view)
     menu_draw_rect(RX(77), RY(194), (int)((RX(563) - RX(77)) * (left > RESULTS_SECONDS ? 1 : left / RESULTS_SECONDS)),
                    RY(196) - RY(194), 0xA3, 0xA5, 0xF2, 128);
     snprintf(line, sizeof line, "BACK TO THE ROOM IN %d", (int)(left + 0.999));
-    s = TINT(row, 85, white);
-    s = menu_style(row, 85, -1, 0, 0);
-    menu_draw_text(MENU_LEFT, RX(77), RY(199), line, &s);
-    MenuStyle w = TINT(row, 85, white);
-    menu_draw_text(MENU_RIGHT, RX(563), RY(199), GLYPH_CROSS " CONTINUE", &w);
-    const char *ready = on.results_ready ? "READY FOR THE NEXT RACE" : GLYPH_SQUARE " READY NEXT";
-    MenuStyle rs = on.results_ready ? TINT(row, 85, green) : menu_style(row, 85, -1, 0, 0);
-    int rw = menu_text_width(ready, &rs), cx = (RX(77) + menu_text_width(line, &s) + RX(563) - menu_text_width(GLYPH_CROSS " CONTINUE", &w)) / 2;
-    menu_draw_text(MENU_CENTRE, cx, RY(199), ready, &rs);
-    results_ready_x0 = cx - rw / 2, results_ready_x1 = cx + rw / 2, results_ready_y = RY(199);
+    /* three words on one line: the time left, READY (Square, or a tap on it), Cross; one size
+       that fits all three with their gaps */
+    const char *ready = on.results_ready ? "YOU'RE READY" : GLYPH_SQUARE " READY NEXT", *go = GLYPH_CROSS " CONTINUE";
+    MenuStyle ls, rs, cs;
+    int pct = 80, lw, rw, cw;
+    for (;; pct -= 5) {
+        ls = menu_style(row, pct, -1, 0, 0);
+        rs = on.results_ready ? TINT(row, pct, green) : TINT(row, pct, white);
+        cs = TINT(row, pct, white);
+        lw = menu_text_width(line, &ls), rw = menu_text_width(ready, &rs), cw = menu_text_width(go, &cs);
+        if (lw + rw + cw + RX(24) <= RX(486) || pct <= 50) break;
+    }
+    int fy = RY(203 - pct * 54 / 1000), cx = (RX(77) + lw + RX(563) - cw) / 2;
+    menu_draw_text(MENU_LEFT, RX(77), fy, line, &ls);
+    menu_draw_text(MENU_CENTRE, cx, fy, ready, &rs);
+    menu_draw_text(MENU_RIGHT, RX(563), fy, go, &cs);
+    results_ready_x0 = cx - rw / 2, results_ready_x1 = cx + rw / 2, results_ready_y = fy;
 #undef TINT
 #undef RX
 #undef RY
