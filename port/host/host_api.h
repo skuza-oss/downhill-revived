@@ -219,6 +219,7 @@ void host_service_net_pick(int a0, int a1, int a2);
 /* score: a scored round's points (finding 204), -1 for a race */
 void host_service_net_finish(uint32_t ticks, int place, int score);
 void host_service_net_back(void);
+void host_service_net_watch(void);  /* watch the room's running race (finding 269) */
 void host_service_net_rules(int finish_window, int next_race, int then);
 void host_service_net_rotation(uint32_t address, int count);
 void host_service_net_end_race(void);
