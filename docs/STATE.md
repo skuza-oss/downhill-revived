@@ -208,6 +208,9 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
   (`port/hle/puppet_sync.h`, finding 202). The puppet bench (`port/tools/puppet_bench.py`) measures how they look through a
   bad link. Hits are events; each game times its own finish.
   Track pickups are shared events (finding 144); a player who leaves becomes an AI rider.
+- A member in the room while a race runs can WATCH it (SFU rooms, not a scored arena round):
+  every rider is a puppet, finding 122's camera from the countdown, no rider of its own, back to
+  the room with the results (finding 269).
 - Server: `online/server/` (Cloudflare Workers + Durable Objects) at `wss://dhd.skuza.app`, the
   game's default (dhd.ini `server =` or `DHD_NET_SERVER` override it). Rooms of up to 10
   (finding 123) that live across races (findings 118, 119), 25 tracks with Salt City MX and TD

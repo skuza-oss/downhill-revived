@@ -627,6 +627,47 @@ int main(void)
         assert(c.last_rx > quiet_since && client_tick(&c) == 0);
         client_free(&c);
     }
+    {   /* Watching a running race (finding 269): only with a server that lists "watch"; the start with
+           "watch" has no slot of this PC's; the room's "watching" keeps it in the race (a member outside
+           it goes back to the room); ended and back end it. */
+        const char *plain = "{\"type\":\"welcome\",\"memberId\":3,\"code\":\"WATCH2\",\"serverTime\":1000}";
+        const char *watch_ok = "{\"type\":\"welcome\",\"memberId\":3,\"code\":\"WATCH2\",\"serverTime\":1000,\"features\":[\"race_go\",\"watch\"]}";
+        const char *start = "{\"type\":\"start\",\"yourSlot\":-1,\"watch\":true,\"startAt\":5000,\"serverTime\":2000,\"players\":["
+            "{\"slot\":0,\"memberId\":0,\"name\":\"A\"},{\"slot\":1,\"memberId\":1,\"name\":\"B\"}]}";
+        const char *watching = "{\"type\":\"room\",\"phase\":\"racing\",\"raceStartedAt\":5000,\"members\":["
+            "{\"id\":0,\"name\":\"A\",\"inRace\":true,\"raceState\":\"racing\"},{\"id\":1,\"name\":\"B\",\"inRace\":true,\"raceState\":\"racing\"},"
+            "{\"id\":3,\"name\":\"W\",\"inRace\":false,\"watching\":true}]}";
+        const char *not_watching = "{\"type\":\"room\",\"phase\":\"racing\",\"raceStartedAt\":5000,\"members\":["
+            "{\"id\":0,\"name\":\"A\",\"inRace\":true,\"raceState\":\"racing\"},{\"id\":3,\"name\":\"W\",\"inRace\":false}]}";
+        const char *ended = "{\"type\":\"ended\",\"reason\":\"done\"}";
+        client_init(&c,"Test","0.7.4","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        client_connected(&c,&t);
+        client_on_text(&c,plain,strlen(plain));
+        sent[0] = 0;
+        client_watch(&c);
+        client_lobby(&c,&l);
+        assert(!l.server_watch && !sent[0]);  /* an older server: nothing said */
+        client_on_text(&c,watch_ok,strlen(watch_ok));
+        client_watch(&c);
+        client_lobby(&c,&l);
+        assert(l.server_watch && !strcmp(sent,"{\"type\":\"watch\"}"));
+        client_on_text(&c,start,strlen(start));
+        client_on_text(&c,watching,strlen(watching));
+        client_lobby(&c,&l);
+        assert(l.watching && l.local_slot == -1 && l.nslots == 2 && l.state == NET_RACING && c.racing && l.watchers == 1);
+        client_on_text(&c,not_watching,strlen(not_watching));  /* the room let the watching go */
+        client_lobby(&c,&l);
+        assert(l.state == NET_LOBBY && !c.racing && !l.watching && l.watchers == 0);
+        client_on_text(&c,start,strlen(start));
+        client_on_text(&c,ended,strlen(ended));
+        client_lobby(&c,&l);
+        assert(l.state == NET_LOBBY && !l.watching && l.ended == NET_ENDED_DONE);
+        client_on_text(&c,start,strlen(start));
+        client_back(&c);
+        client_lobby(&c,&l);
+        assert(l.state == NET_LOBBY && !l.watching && !c.gave_up && !strcmp(sent,"{\"type\":\"back\"}"));
+        client_free(&c);
+    }
     puts("test_session: session and ten-player checks passed");
     return 0;
 }

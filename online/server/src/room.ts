@@ -103,8 +103,10 @@ const SFU_RENEW_MS = 20_000;
     (finding 204): a finish may carry a round's score, and a race whose finishes carry one ranks
     by it (the arena's Mosh Bowl round); a game runs that round only on a server that lists it.
     `sfu_trouble` (finding 248): a game reports a failed path to the SFU only to a server that lists
-    it (an older one answers an unknown sfu_ message with an error the game shows). */
-const SERVER_FEATURES = ["sfu_silent", "race_go", "score", "sfu_trouble"];
+    it (an older one answers an unknown sfu_ message with an error the game shows). `watch`
+    (finding 269): a member outside the running race may watch it (`watch`); a game offers WATCH
+    only on a server that lists it. */
+const SERVER_FEATURES = ["sfu_silent", "race_go", "score", "sfu_trouble", "watch"];
 /** A member's `sfu_trouble` reports logged in TROUBLE_WINDOW_MS: two paths for each of its
     SFU_OFFERS sessions; more are dropped without a word (finding 248). */
 const TROUBLE_REPORTS = 12;
@@ -277,6 +279,9 @@ interface Member {
       once per race, and the time its new session must be acknowledged by (SFU_RENEW_MS). */
   renewedRace?: number;
   renewBy?: number;
+  /** The race (startAt) this member watches (finding 269): it is outside the race (no slot, no
+      result, nothing it sends reaches a racer) and subscribed to the racers' channels, one way. */
+  watching?: number;
 }
 
 interface Rules { finishWindow: number; nextRace: "auto" | "host"; then: "same" | "next" | "random"; }
@@ -667,7 +672,10 @@ export class Room extends DurableObject<Env> {
           await this.changed();
         }
         return;
+      case "watch":
+        return this.onWatch(ws, st, me);
       case "back":
+        if (me.watching != null) { delete me.watching; this.kickSubscribe(); }
         this.retire(st, me.id, "gave_up");
         if (st.race && !this.anyRacing(st)) await this.closeRace(st, false);
         return this.changed();
@@ -1319,6 +1327,45 @@ export class Room extends DurableObject<Env> {
     }
   }
 
+  /** A member outside the running race watches it (finding 269): the race's start without a slot of
+      its own (`yourSlot` -1, `watch` true), who left it so far, its start moment; then the room
+      subscribes the member's session to every racer's channels (subscribeGroup), never a racer to
+      the watcher's. The watcher is no entrant: no result, no place, the race closes without it. Not
+      in a P2P room (the star carries its frames) nor the arena's scored round (finding 204). */
+  private async onWatch(ws: WebSocket, st: RoomState, me: Member): Promise<void> {
+    const race = st.race;
+    if (!race) return this.error(ws, "bad_value", "No race is running.");
+    if (this.inRace(st, me.id)) return this.error(ws, "room_started", "You are in this race.");
+    if (st.transport === "p2p" || isScoredTrack(race.track)) return this.error(ws, "bad_value", "This race can't be watched.");
+    if (me.watching === race.startAt) return;
+    me.watching = race.startAt;
+    console.log(`room ${logCode(st.code)}: member ${me.id} watches the race`);
+    this.send(ws, { ...this.startMessage(race, -1, Date.now()), watch: true });
+    for (const left of race.left) {
+      const id = race.slots[left], r = race.results?.find((x) => x.id === id);
+      this.send(ws, { type: "left", slot: left, memberId: id, reason: r?.ticks !== undefined ? "finished" : r?.dnfReason ?? "left" });
+    }
+    if (race.goAt != null && me.raceGo) this.send(ws, { type: "race_go", race: race.startAt, at: race.goAt });
+    this.kickSubscribe();
+    await this.changed();
+  }
+
+  /** The members watching the running race (finding 269) whose sockets are here. */
+  private watchers(): Member[] {
+    const st = this.state;
+    const race = st?.race;
+    return race ? st!.members.filter((x) => x.watching === race.startAt && this.sockets.has(x.id) && !this.inRace(st!, x.id)) : [];
+  }
+
+  /** A watcher and a racer whose channels it has no subscription to yet (`now`: only one a pass can
+      make now, as missingSubscription). */
+  private missingWatch(group: Member[] | null, now?: number): boolean {
+    if (!group) return false;
+    const published = group.filter((x) => x.sfu?.phase === "ready");
+    return this.watchers().some((w) => w.sfu?.phase === "ready" && !(now != null && (this.unsure(w.sfu, now) || w.sfu.poisoned)) &&
+      published.some((p) => p !== w && !this.subscribed(w, p)));
+  }
+
   /** The caps per member (src/guard.ts CAPS), worked out once per env (every message asks). The
       tests change them through CAP_WINDOW_MS and CAP_BINARY (vitest.config.ts; a test may give a
       room a new env). A P2P room's members may send more text: its signaling (P2P_TEXT_PER_WINDOW). */
@@ -1488,6 +1535,7 @@ export class Room extends DurableObject<Env> {
     if (!dropped || !st || !member || (racing && !member.raceRejoin) || this.sockets.get(id) !== ws)
       return this.leave(id);
     member.awaySince = Date.now();
+    delete member.watching;  // its game goes back to the room (finding 269)
     this.sockets.delete(id);
     this.rtts.delete(id);
     this.firstRtts.delete(id);
@@ -1580,7 +1628,7 @@ export class Room extends DurableObject<Env> {
       close due again, or an inspection due (finding 182). */
   private sfuWork(): boolean {
     const group = this.sfuGroup(), now = Date.now();
-    return (!!group && !!this.missingSubscription(group, now)) ||
+    return (!!group && !!this.missingSubscription(group, now)) || this.missingWatch(group, now) ||
       !!this.state?.members.some((x) => {
         const s = x.sfu;
         if (s?.phase !== "ready") return false;
@@ -1719,7 +1767,7 @@ export class Room extends DurableObject<Env> {
     await Promise.all(st.members.filter((x) => x.sfu?.phase === "ready").map(async (sub) => {
       const session = sub.sfu!;
       if (this.unsure(session, now) || !await this.inspect(api, sub, session, group, counts, failed)) return;
-      const outside = prune && st.race && group && !group.includes(sub);
+      const outside = prune && st.race && group && !group.includes(sub) && !this.watchers().includes(sub);
       const fresh = outside ? session.channels.filter((c) => !c.local && c.closeAt == null) : this.staleChannels(sub, group);
       const { retry, forget, reset } = this.failedCloses(sub, group, now);
       if (forget.length) {
@@ -1748,6 +1796,9 @@ export class Room extends DurableObject<Env> {
       // Not on a poisoned session (finding 187): Cloudflare would give the pair a dead id.
       for (const a of published) for (const b of published)
         if (a !== b && !this.subscribed(a, b) && !this.unsure(a.sfu!, now) && !a.sfu!.poisoned) work.set(a, [...(work.get(a) ?? []), b]);
+      // A watcher (finding 269) to every racer, one way: no racer is subscribed to a watcher.
+      for (const w of this.watchers()) if (w.sfu?.phase === "ready" && !group.includes(w) && !this.unsure(w.sfu, now) && !w.sfu.poisoned)
+        for (const b of published) if (!this.subscribed(w, b)) work.set(w, [...(work.get(w) ?? []), b]);
       if (!work.size) break;
       let progress = false;
       await Promise.all([...work].map(async ([sub, pubs]) => {
@@ -1759,7 +1810,7 @@ export class Room extends DurableObject<Env> {
             // Read again when the call starts: who left, who is published, what an earlier change
             // or the inspection gave it meanwhile.
             const now = this.sfuGroup() ?? [];
-            if (!now.includes(sub) || sub.sfu !== session || session.phase !== "ready" || session.poisoned ||
+            if (!(now.includes(sub) || this.watchers().includes(sub)) || sub.sfu !== session || session.phase !== "ready" || session.poisoned ||
                 this.unsure(session, Date.now())) return null;
             return api.subscribeAll(session, pubs.filter((p) => now.includes(p) && p.sfu?.phase === "ready" && !this.subscribed(sub, p))
               .map((p) => ({ memberId: p.id, session: p.sfu! })));
@@ -2215,7 +2266,10 @@ export class Room extends DurableObject<Env> {
     // Back in the room: the Ready that put them in this race is spent; a new one is for the next.
     const member = st.members.find(x => x.id === id);
     if (member) member.ready = false;
-    this.sendRacers(st.race, {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason});
+    const left = {type:"left", slot, memberId:id, reason:r.ticks !== undefined ? "finished" : reason};
+    this.sendRacers(st.race, left);
+    // The watchers too (finding 269): their game hands the rider to the host's AI as the racers' do.
+    for (const w of this.watchers()) { const ws = this.sockets.get(w.id); if (ws) this.send(ws, left); }
     // The hub stops forwarding that racer's frames, racing or not (finding 186).
     this.broadcastRoutes();
     // After `left`: the others hear who is gone before their traffic is released (sent once now,
@@ -2256,6 +2310,7 @@ export class Room extends DurableObject<Env> {
     }
     // Those still riding spend their Ready now; one pressed in the room during the race stays.
     for (const x of st.members) if (this.inRace(st, x.id)) x.ready = false;
+    for (const x of st.members) delete x.watching;  // watchers go back to the room with everyone (finding 269)
     // A P2P room's members on the SFU try the hub again between races (finding 186): a link that
     // failed once (a network that dropped for a moment) need not keep them off the star.
     if (st.transport === "p2p")
@@ -2639,6 +2694,8 @@ export class Room extends DurableObject<Env> {
         ...(x.bike ? {bike: x.bike} : {}),
         rttMs: this.rttOf(x.id),
         ...(x.choosing ? {choosing: true} : {}),
+        // Watching the running race (finding 269); older games ignore it.
+        ...(st.race && x.watching === st.race.startAt && !this.inRace(st, x.id) ? {watching: true} : {}),
       })),
     };
   }

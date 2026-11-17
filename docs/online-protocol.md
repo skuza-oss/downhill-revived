@@ -167,6 +167,9 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // The race's start moment (server ms), from the game that names it (finding 187), only to a server
 // whose welcome lists "race_go":
 {"type":"race_go","race":1734000008000,"at":1734000021500}
+// A member outside the running race watches it (finding 269), only to a server whose welcome lists
+// "watch" (Watching a race, below):
+{"type":"watch"}
 ```
 
 - `track`, `laps`, `rider`, `bike`: integers 0..255 whose meaning belongs to the game (track
@@ -204,8 +207,8 @@ use the same `error` frame **without** a close; the client just shows `message`.
 // Whether the room holds a Realtime session for this member (finding 177): "sfu":"ready" (a rejoin:
 // keep the association) or "sfu":"setup" (offer one). A rejoin into the member's running race
 // (finding 175) adds the race: "race":{"startAt":1734000003000}
-// What the server takes beyond protocol 4 (findings 187, 204, 248): "features":["sfu_silent","race_go",
-// "score","sfu_trouble"]. A game sends sfu_silent, race_go and sfu_trouble, and plays the arena's
+// What the server takes beyond protocol 4 (findings 187, 204, 248, 269): "features":["sfu_silent","race_go",
+// "score","sfu_trouble","watch"]. A game sends sfu_silent, race_go and sfu_trouble, and plays the arena's
 // scored round (Finishes and return, below), only with a server that lists them; 0.7.13 ignores
 // the field.
 
@@ -853,6 +856,31 @@ Their entries add phase, raceStartedAt, finishEndsAt, nextRaceAt and full.
 Players counts all members. MaxPlayers is the membership limit.
 Entries sort by players descending.
 Screens filter by their own version before showing entries.
+
+### Watching a race (finding 269)
+
+A member outside the running race (it joined during it, sat it out, or left it with BACK) sends
+`{"type":"watch"}`, only to a server whose welcome lists `"watch"`. The room answers with the race's
+`start` as the racers got it, but `"yourSlot":-1` and `"watch":true`, then a `left` for each racer
+gone so far and, to a game that takes it, `race_go`. Its Realtime session is subscribed to every
+racer's two channels; the room makes no subscription to the watcher's for this (a racer who left
+with BACK keeps the subscriptions of the race start until the next start; its game sends nothing).
+The watcher has no slot, no result and no place; its `sfu_ready` and `finish` count for nothing; the
+race's release, finish window and close never wait for it (a race closes when no entrant races). It
+gets every later `left`, and `ended` with everyone. Its member in the room snapshot adds
+`"watching":true` (older games ignore it). `back` ends the watching (the race goes on), and so do a
+dropped room connection and the race's close. Refused with a non-fatal error: no race running
+(`bad_value`), a racer of the race (`room_started`), a P2P room or the arena's scored round
+(`bad_value`). A watcher is a normal member for the next race.
+
+The game loads the race's track and shows every rider as a puppet: its own rider slot 0 is the
+puppet of the racer in slot 0 (port/hle/puppet.c `hle_puppet_watch`), so it has no rider of its own.
+While the snapshot lists a watcher, each racer's game says its ride (EVENT type 3) once a second, so a
+watcher that came after the race's ride exchange dresses the puppets as the racers see them.
+
+Released games (0.8.9 and older) never send `watch` and ignore `watching`; they race with watchers
+of a newer version only if the versions match, which they never do, so a deploy of this server
+changes nothing for them but the feature in the welcome.
 
 ### Game-facing C API
 
