@@ -151,3 +151,40 @@ MOSH PIT (ARENA)". The points in the rows ("1000 PTS", the gap "-90 PTS") are te
 
 Proven where: the PC (Windows, these runs). Owed: a phone (Android, iOS) and the Mac look at the
 room and the results screen; the layout is the same code, the phone shape held at 20:9 here.
+
+## 2026-11-17, lane 272: the main button's words and check mark
+
+The owner's two notes on the room's main button: READY on yellow read as one dark blob, and the
+pressed state's check mark was blocks that did not suit the font.
+
+- **The blob was the font's own edge.** Each glyph in the font's texture is a white body inside a
+  dark (black) edge; the GS multiplies the texture by the style's colour, so the edge stays black
+  whatever the colour. Round white words on a dark page that is the game's look; round black words
+  on yellow it doubled every stroke, and the letters' edges met. Not a second pass and not the
+  style: the selected and the row style are the same size (glyph 288 x 160, spacing -100, -32 at
+  100 %). The main button now draws its words in ink (`menu_draw_text_ink`, `menu_page.c`):
+  READY and WATCH THE RACE with ALPHA_1 (0 - Cs) * As + Cd, so the white body takes the yellow
+  away (black words) and the black edge takes nothing; the pressed READY with Cs * As + Cd, white
+  on green, no edge either. ALPHA_1 goes into the font's own batch (an A+D packet between two runs
+  of glyphs) and is put back to the batch's 0x44, FIX 0x80 after the words. Trap: a run's glyph
+  count (`D_00513AE0`) survives a colour change in state 1, so the inserted packet must zero it, or
+  the next run's NLOOP counts the old glyphs too and the GS reads garbage (the first try drew the
+  room as giant glyph-shaped holes and left the rider screen's foliage blended wrong).
+- **The check mark is two slanted strokes** (`check_mark`, `online_menu.c`): each a strip of two
+  triangles through the rectangle packets (`menu_draw_strip`, XYZ2 to 1/16 pixel, the widescreen
+  map applied linearly between whole pixels), 4.2 units wide across their direction like the
+  letters at 125 %, pure white as the words, 8 units tall, 6 before the words; the check and the
+  words are centred together.
+- The plain buttons (CHANGE RIDER, START NOW, READY NEXT, LEAVE) had the same smear only with the
+  cursor on them (the selected style's olive words on the cursor's yellow bar): their words are
+  dark ink there now, light words on the dark box as before. The results screen (light words on
+  dark, where the edge does not smear) is unchanged; so are the host's panel rows and the track
+  and rules lists under the cursor, which keep the game's selected look (not this lane's buttons).
+- The main button's words sit on its middle at the size `fit` chose (WATCH THE RACE is smaller
+  than READY and was drawn high).
+
+Proof: hidden captures at 8x, 16:9 and 4:3, and at 1x (READY not pressed with and without the
+cursor, pressed, WATCH THE RACE in an SFU room, CHANGE RIDER and LEAVE under the cursor),
+`before-*` from this finding's pictures beside `after-*` in the lane's scratch folder; no
+"layout:" line. At 1x the check is as stepped as the letters (the 640 x 224 view), still a check.
+Drawing only: no game state changes, no state trace run.

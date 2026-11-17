@@ -1456,12 +1456,27 @@ static void outline(int x, int y, int w, int h, int t, const int *c)
     rect(x + w - t, y + t, t, h - 2 * t, c, 128);
 }
 
-/* A check mark in blocks (the font has none): its corner at x, y, s units a step. A unit of the
-   popup view is about twice as tall as wide on the page, so a block is 2s wide for s high. */
-static void tick(int x, int y, int s, const int *c)
+/* A check mark (the font has none): two slanted strokes of the font's weight, each a strip of two
+   triangles (menu_draw_strip), so the edges stay clean at every scale (lane 272). Its points in
+   square units (one x unit both ways; a y unit of the popup view is 480 / 224 of them tall on the
+   4:3 page): the short stroke p0 p1 down to the crotch p2 and the point p5, the long one up to
+   p3 p4; both 4.2 wide across their own direction (the letters' strokes at 125 %). Drawn h units
+   tall, its top left at x, y. */
+static int check_width(int h) { return h * 480 * 1872 / 224 / 1692; }
+static void check_mark(int x, int y, int h, const int *c)
 {
-    static const signed char at[][2] = {{0, 2}, {1, 3}, {2, 2}, {3, 1}, {4, 0}};
-    for (int i = 0; i < 5; i++) rect(x + at[i][0] * 2 * s, y + at[i][1] * s, 2 * s + 1, s + 1, c, 128);
+    static const short p[6][2] = {{0, 950}, {310, 666}, {667, 1055}, {1550, 0}, {1872, 270}, {681, 1692}};
+    static const char strips[2][4] = {{1, 0, 2, 5}, {3, 2, 4, 5}};
+    for (int s = 0; s < 2; s++) {
+        int xy[8];
+        for (int i = 0; i < 4; i++) {
+            const short *v = p[(int)strips[s][i]];
+            /* square units (1/100) to layout units, then to 1/16 of the view's pixels */
+            double lx = x + v[0] / 100.0 * h * 480 / 224 / 16.92, ly = y + v[1] / 100.0 * h / 16.92;
+            xy[2 * i] = (int)(lx * vw * 16 / 640 + 0.5), xy[2 * i + 1] = (int)(ly * vh * 16 / 224 + 0.5);
+        }
+        menu_draw_strip(xy, 4, c[0], c[1], c[2]);
+    }
 }
 
 /* ---- the left: what the next race is, and the room's code ---- */
@@ -1681,6 +1696,9 @@ static void draw_list(const RoomNow *r)
 
 /* ---- the buttons ---- */
 
+/* ink colours (menu_draw_text_ink): all of what is under taken away (black), white added */
+static const int ink_full[3] = {0x80, 0x80, 0x80}, ink_white[3] = {0xFF, 0xFF, 0xFF};
+
 /* kind: 0 a plain button, 1 the main one (yellow), 2 the main one pressed (green, a check) */
 static void draw_button(int f, int x, int w, const char *label, const char *why, int kind, const RoomNow *r)
 {
@@ -1688,20 +1706,28 @@ static void draw_button(int f, int x, int w, const char *label, const char *why,
     if (kind == 0) {
         box(x, BTN_Y, w, BTN_H, 90);
         if (on) bar(x + 3, BTN_Y + 3, w - 6, BTN_H - 6);
-        MenuStyle s = on ? st_on : tint(st_row, 100, can ? NULL : t_dim);
-        if (why) {
-            put_in("button", MENU_CENTRE, x + w / 2, BTN_Y + 2, w - 8, label, fit(label, s, 90, w - 8));
-            put_in("button why", MENU_CENTRE, x + w / 2, BTN_Y + 10, w - 8, why, tint(st_row, 55, t_amber));
-        } else
-            put_in("button", MENU_CENTRE, x + w / 2, BTN_Y + 4, w - 8, label, fit(label, s, 100, w - 8));
+        /* on the cursor's yellow bar the words are dark: in ink, as the main button's (lane 272) */
+        MenuStyle s = on ? tint(st_row, 100, ink_full) : tint(st_row, 100, can ? NULL : t_dim);
+        int ly = why ? BTN_Y + 2 : BTN_Y + 4;
+        MenuStyle f = fit(label, s, why ? 90 : 100, w - 8);
+        layout_check("button", label, f, w - 8);
+        if (on) menu_draw_text_ink(MENU_CENTRE, X(x + w / 2), Y(ly), label, &f, MENU_INK_DARK);
+        else put(MENU_CENTRE, x + w / 2, ly, label, f);
+        if (why) put_in("button why", MENU_CENTRE, x + w / 2, BTN_Y + 10, w - 8, why, tint(st_row, 55, t_amber));
     } else {
         rect(x, BTN_Y, w, BTN_H, kind == 1 ? r_yellow : r_chip, 128);
         if (on || kind == 2) outline(x - 1, BTN_Y - 1, w + 2, BTN_H + 2, 1, kind == 2 ? r_yellow : r_white);
         if (on && kind == 1) outline(x + 1, BTN_Y + 1, w - 2, BTN_H - 2, 1, r_black);
-        MenuStyle s = fit(label, tint(st_on, 125, kind == 1 ? t_dark : t_white), 125, w - 30);
-        int tw = width_of(label, s);
-        if (kind == 2) tick(x + w / 2 - tw / 2 - 13, BTN_Y + 5, 2, r_white);  /* 21 wide, 6 before the words */
-        put_in("main button", MENU_CENTRE, x + w / 2 + (kind == 2 ? 14 : 0), BTN_Y + 2, w - 30, label, s);
+        /* the list's names' style at 125 %, in ink (lane 272): the font's dark edge round each glyph
+           ran with the dark words on yellow into one blob (the selected style is the same size) */
+        int ch = 8, cw = kind == 2 ? check_width(ch) + 6 : 0;  /* the check, 6 before the words */
+        MenuStyle s = fit(label, tint(st_row, 125, kind == 1 ? ink_full : t_white), 125, w - 30 - cw);
+        int left = x + w / 2 - (width_of(label, s) + cw) / 2;
+        if (kind == 2) check_mark(left, BTN_Y + 5, ch, ink_white);
+        layout_check("main button", label, s, w - 30 - cw);
+        /* the words' middle (5.4 units under y at 100 %) on the button's, at the size fit chose */
+        int mid10 = (BTN_Y + BTN_H / 2) * 10 - 54 * s.size[1] / (st_row.size[1] ? st_row.size[1] : 1);
+        menu_draw_text_ink(MENU_LEFT, X(left + cw), mid10 * vh / 2240, label, &s, kind == 1 ? MENU_INK_DARK : MENU_INK_LIGHT);
     }
     hit(&hits[f], x, BTN_Y, w, BTN_H);
 }
