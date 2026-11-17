@@ -150,22 +150,28 @@ static void by_host(void) { *(volatile uint32_t *)GUEST(wild_at) = 0xdeadbeef; }
 
 /* Maps 32 KiB readable and writable at guest address map_at (over fill()'s own mapping, or where
    nothing is), runs access at guest address at in a child, and checks the child ended by SIGSEGV
-   and nothing reached the mapping. */
+   and nothing reached the mapping. Where the address on its part's base is the other part's own
+   memory (the parts may lie side by side, finding 267), nothing is mapped: the child must still end
+   by SIGSEGV. */
 static void expect_wild(const char *what, void (*access)(void), uint64_t at, uint64_t map_at)
 {
     /* where the access would land unchecked: the address on its part's base */
     uintptr_t page = ((map_at >= HOST64_HIGH_BASE ? (uintptr_t)host64_high_base : guest_base) + map_at) & ~(uintptr_t)0x3fff;
-    CHECK(!host64_memory_owns(page) && !host64_memory_owns(page + 0x7fff));
+    int owned = host64_memory_owns(page);
+    CHECK(owned == host64_memory_owns(page + 0x7fff));
     int filled = 1;   /* every 16 KiB page of it in one of fill()'s mappings */
     for (uintptr_t at = page; at < page + 0x8000; at += 0x4000) {
         int in = 0;
         for (unsigned i = 0; i < fillers && !in; i++) in = at >= filler[i].at && at - filler[i].at < filler[i].size;
         filled &= in;
     }
-    int flags = MAP_SHARED | MAP_ANONYMOUS | (filled ? MAP_FIXED : 0);
-    uint8_t *shared = mmap((void *)page, 0x8000, PROT_READ | PROT_WRITE, flags, -1, 0);
-    CHECK(shared == (uint8_t *)page);   /* else something of the process's is there: never touched */
-    memset(shared, 0, 0x8000);
+    uint8_t *shared = NULL;
+    if (!owned) {
+        int flags = MAP_SHARED | MAP_ANONYMOUS | (filled ? MAP_FIXED : 0);
+        shared = mmap((void *)page, 0x8000, PROT_READ | PROT_WRITE, flags, -1, 0);
+        CHECK(shared == (uint8_t *)page);   /* else something of the process's is there: never touched */
+        memset(shared, 0, 0x8000);
+    }
     fflush(stdout); fflush(stderr);
     pid_t child = fork();
     CHECK(child >= 0);
@@ -173,9 +179,13 @@ static void expect_wild(const char *what, void (*access)(void), uint64_t at, uin
     int status = 0;
     CHECK(waitpid(child, &status, 0) == child);
     CHECK(WIFSIGNALED(status) && WTERMSIG(status) == SIGSEGV);
-    for (unsigned i = 0; i < 0x8000; i++) CHECK(!shared[i]);
-    CHECK(munmap(shared, 0x8000) == 0);
-    printf("wild %s at 0x%llx: ended by SIGSEGV, the mapping there untouched\n", what, (unsigned long long)at);
+    if (shared) {
+        for (unsigned i = 0; i < 0x8000; i++) CHECK(!shared[i]);
+        CHECK(munmap(shared, 0x8000) == 0);
+        printf("wild %s at 0x%llx: ended by SIGSEGV, the mapping there untouched\n", what, (unsigned long long)at);
+    } else {
+        printf("wild %s at 0x%llx: ended by SIGSEGV (the other part lies there)\n", what, (unsigned long long)at);
+    }
 }
 
 static void wild_accesses(void)
@@ -254,9 +264,16 @@ int main(int argc, char **argv)
     CHECK(!host64_memory_commit(0x50000000, 0x1000));
     CHECK(host64_memory_reserved(0x70000000, 0x4000) && host64_memory_reserved(0x10000000, 0x10000));
     CHECK(!host64_memory_reserved(0x39fff000, 0x2000) && !host64_memory_reserved(0x60000000, 0x10));
-    CHECK(host64_memory_owns(guest_base + 0x39ffffff) && !host64_memory_owns(guest_base + 0x3a000000) &&
-          !host64_memory_owns(guest_base + 0x6fffffff) && host64_memory_owns((uintptr_t)host64_high_base + 0x70000000) &&
-          !host64_memory_owns((uintptr_t)host64_high_base + 0x6fffffff));
+    /* each part's host addresses map back to its guest addresses; right past the low part is free or
+       the high part's start (they may lie side by side), right before the high part free or the low
+       part's end */
+    uint64_t g = 0;
+    uintptr_t high_start = (uintptr_t)host64_high_base + 0x70000000;
+    CHECK(host64_memory_guest(guest_base + 0x39ffffff, &g) && g == 0x39ffffff);
+    CHECK(host64_memory_guest(high_start + 0x10, &g) && g == 0x70000010);
+    CHECK(!host64_memory_owns(guest_base + 0x3a000000) || guest_base + 0x3a000000 == high_start);
+    CHECK(!host64_memory_owns(high_start - 1) || high_start - 1 == guest_base + 0x39ffffff);
+    CHECK(!host64_memory_owns(guest_base - 1));
     /* growth up to the reservation's limit, never past it */
     uint64_t pages = m.pages, grown = 0;
     while (wasm_rt_grow_memory(&m, 16) != UINT32_MAX) grown += 16;

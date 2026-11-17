@@ -46,7 +46,8 @@ class GuestSpace(unittest.TestCase):
     WILD = 12   # test_guest_space.c's wild_accesses
 
     def assert_wild(self, r):
-        self.assertEqual(r.stdout.count('ended by SIGSEGV, the mapping there untouched'), self.WILD, r.stdout)
+        self.assertEqual(r.stdout.count(': ended by SIGSEGV'), self.WILD, r.stdout)
+        self.assertGreaterEqual(r.stdout.count('ended by SIGSEGV, the mapping there untouched'), self.WILD - 1, r.stdout)
         self.assertIn('wild plain access in the gap at 0x50000000', r.stdout)
         self.assertIn('host64 memory: access of uncommitted guest address 0x050000000\n', r.stderr)   # run_record.c's line
         self.assertIn('host64 memory: access of uncommitted guest address 0x039ffffe0\n', r.stderr)
