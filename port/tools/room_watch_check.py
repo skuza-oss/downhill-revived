@@ -61,11 +61,12 @@ def wait(read, pattern, seconds, games=()):
 
 
 def second_race(log):
-    """The log of the second race this racer rode (its first race with the other racer)."""
+    """The log of the host's and guest's race (the first one of two racers)."""
     starts = [m.start() for m in re.finditer(r'online: race starts', log)]
-    if len(starts) < 2:
-        return ''
-    return log[starts[1]:starts[2] if len(starts) > 2 else len(log)]
+    for i, at in enumerate(starts):
+        if log.startswith('online: race starts: player ', at) and re.match(r'online: race starts: player \d of 2,', log[at:]):
+            return log[at:starts[i + 1] if i + 1 < len(starts) else len(log)]
+    return ''
 
 
 def results(log):
@@ -158,7 +159,8 @@ def main():
         bad = [line.strip() for line in log.splitlines() if REFUSED.search(line)]
         if bad:
             failures.append(f'{g.out.name}: {len(bad)} refusal/freeze/crash lines, the first: {bad[0]}')
-        leaks = [line.strip() for line in log.splitlines() if LEAK.search(line) and 'net: SFU: TURN relay' not in line]
+        # its own settings line names the server it was given (a local one): not another member's
+        leaks = [line.strip() for line in log.splitlines() if LEAK.search(line) and 'from the environment:' not in line]
         if leaks:
             print(f'  {g.out.name}: lines with an address or id to look at ({len(leaks)}), the first: {leaks[0][:160]}')
     if a.scenario == 'watch' and len(games) == 3:
