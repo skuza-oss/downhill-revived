@@ -80,6 +80,7 @@ class Target:
 MAC_MIN = '11.0'  # the first macOS on Apple silicon (package_release.py's LSMinimumSystemVersion)
 ANDROID_API = 29  # sdl3.ANDROID_API: Android 10 (finding 191)
 IOS_MIN = '17.0'  # sdl3.IOS_MIN and port/ios/project/Info.plist's MinimumOSVersion
+IOS_CPU = 'apple-a12'  # docs/PLAYING.md's minimum chip (iPhone XS/XR, iPad 8th gen); port/ios/cpu_floor.py checks it
 TARGETS = {t.key: t for t in (
     Target('win-x64', 'x86_64-pc-windows-msvc', 'build/host64-exe', 'dhd64.exe', 'win64'),
     Target('linux-x64', 'x86_64-unknown-linux-gnu', 'build/host64-linux', 'dhd64', 'sysv64',
@@ -88,14 +89,17 @@ TARGETS = {t.key: t for t in (
     Target('macos-arm64', 'aarch64-apple-darwin', 'build/host64-macos', 'dhd64', 'arm64', jobs=4,
            flags=['-arch', 'arm64', '-mmacosx-version-min=' + MAC_MIN, '-mcpu=apple-m1'],
            wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
-    # iPhone and iPad (A12 and later run iOS 17; -mcpu=apple-m1 is the macOS build's floor too), built
-    # on a Mac with Xcode's iphoneos SDK into libdhd_ios.a, which port/ios/build_ios.py links into the app
+    # iPhone and iPad: IOS_CPU, the oldest chip we support (docs/PLAYING.md's minimum), built on a
+    # Mac with Xcode's iphoneos SDK into libdhd_ios.a, which port/ios/build_ios.py links into the app.
+    # Never apple-m1 (A14): its SHA3 EOR3 closed the game on an A12 with SIGILL (finding 267);
+    # port/ios/cpu_floor.py refuses an IPA with an instruction above the A12.
     Target('ios-arm64', 'aarch64-apple-ios', 'build/host64-ios', 'libdhd_ios.a', 'arm64', jobs=4,
-           flags=['-arch', 'arm64', '-miphoneos-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
+           flags=['-arch', 'arm64', '-miphoneos-version-min=' + IOS_MIN, '-mcpu=' + IOS_CPU, '-fPIC'],
            wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
-    # the same for the iOS Simulator on an Apple silicon Mac (its own SDK and platform; finding 224)
+    # the same for the iOS Simulator on an Apple silicon Mac (its own SDK and platform; finding 224),
+    # with the phones' code selection, so the simulator runs what the phones run
     Target('ios-sim-arm64', 'aarch64-apple-ios-sim', 'build/host64-ios-sim', 'libdhd_ios.a', 'arm64', jobs=4,
-           flags=['-arch', 'arm64', '-mios-simulator-version-min=' + IOS_MIN, '-mcpu=apple-m1', '-fPIC'],
+           flags=['-arch', 'arm64', '-mios-simulator-version-min=' + IOS_MIN, '-mcpu=' + IOS_CPU, '-fPIC'],
            wabt='/opt/homebrew/opt/wabt', simde=Path.home() / 'DevCaches/simde-src'),
     # -march=armv8-a: every arm64 phone. ARMv8.2 (finding 091's first choice) closed the game at
     # start with SIGILL on ARMv8.0 cores, which budget chips still ship (the Snapdragon 680's
