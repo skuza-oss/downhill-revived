@@ -298,6 +298,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 268 | [touch players cannot change what the game's menus change with left/right (issue #108)](268-touch-left-right.md) | current |  |
 | 269 | [watch a running room race from the room (issue #109)](269-room-spectate.md) | current |  |
 | 271 | [the online room redesigned, and a results screen at the race end](271-room-redesign.md) | current |  |
+| 273 | [the phone launcher on old WebViews, and a clear message on a too-old iPad/iPhone](273-launcher-old-webview-ios-chip.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->
