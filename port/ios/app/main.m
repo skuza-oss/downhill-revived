@@ -9,16 +9,23 @@
    out for the window it gets (metal_bridge.m).
    Test switch: DHD_IOS_DIRECT=1 starts the game at once, as the setting "launcher" off does (after an
    unexpected end too: the checks kill the app between runs).
+   DHD_IOS_CHIP_TOO_OLD=1 shows the page a too-old chip gets (chip.h, finding 273), which no
+   Simulator can show otherwise.
    GPL-3.0-or-later. */
 #import <UIKit/UIKit.h>
 #include <stdlib.h>
 #include <string.h>
 #include "app.h"
+#include "chip.h"
 #include "ios_main.h"
 #include "launcher_calls.h"
 #include "metal_bridge.h"
 
 static BOOL s_game;   /* the game has the window (its orientations: landscape) */
+/* The chip lacks what the game's A12 build uses (chip.h, finding 273): only the plain page, and
+   nothing that reaches the game's library (launcher_calls.c and the code it calls, the run
+   record, the lifecycle's renderer calls). */
+static const char *s_chip_missing;
 
 /* dhd.ini's frame rate and picture shape for the Metal bridge, before the game reads the rest. */
 static void display_settings(void) {
@@ -105,10 +112,21 @@ static UIWindow *app_window(void) { return ((AppDelegate *)UIApplication.sharedA
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     (void)application;
-    const char *why = ios_run_record_start();   /* how the run before ended: dhd-exit.txt, the note */
-    launcher_set_last_exit(why);
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.backgroundColor = UIColor.blackColor;
+    if (s_chip_missing) {
+        NSLog(@"Downhill Revived: this chip lacks %s, which the game's code needs (an A12 or later)", s_chip_missing);
+        BOOL pad = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad;
+        self.window.rootViewController = message_view([NSString stringWithFormat:
+            @"This %@'s chip is too old for the game.
+
+It needs an A12 or later: iPhone XS / XR, "
+            "iPad Air 3, iPad mini 5, iPad 8 and newer.", pad ? @"iPad" : @"iPhone"]);
+        [self.window makeKeyAndVisible];
+        return YES;
+    }
+    const char *why = ios_run_record_start();   /* how the run before ended: dhd-exit.txt, the note */
+    launcher_set_last_exit(why);
     const char *direct = getenv("DHD_IOS_DIRECT");
     BOOL opening = options[UIApplicationLaunchOptionsURLKey] != nil;   /* started to open a document: the launcher takes it */
     if ((direct && atoi(direct)) || (!why && !opening && launcher_should_start_game())) {
@@ -127,7 +145,7 @@ static UIWindow *app_window(void) { return ((AppDelegate *)UIApplication.sharedA
    the launcher's look at the app's folder next time. */
 - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey, id> *)options {
     (void)application; (void)options;
-    if (!url.isFileURL) return NO;
+    if (s_chip_missing || !url.isFileURL) return NO;
     launcher_open_document(url);
     return YES;
 }
@@ -143,9 +161,9 @@ static UIWindow *app_window(void) { return ((AppDelegate *)UIApplication.sharedA
    let go, a race paused offline at the return, the sound paused, no game time lost or caught up.
    iOS may end a suspended app at any time, which loses nothing the game has written (dhd.ini at
    each change, the memory card at each save); the next start says how it ended (run_record.h). */
-- (void)applicationWillResignActive:(UIApplication *)application { (void)application; ios_lifecycle_will_resign_active(); }
-- (void)applicationDidEnterBackground:(UIApplication *)application { (void)application; ios_lifecycle_did_enter_background(); }
-- (void)applicationDidBecomeActive:(UIApplication *)application { (void)application; ios_lifecycle_did_become_active(); }
+- (void)applicationWillResignActive:(UIApplication *)application { (void)application; if (!s_chip_missing) ios_lifecycle_will_resign_active(); }
+- (void)applicationDidEnterBackground:(UIApplication *)application { (void)application; if (!s_chip_missing) ios_lifecycle_did_enter_background(); }
+- (void)applicationDidBecomeActive:(UIApplication *)application { (void)application; if (!s_chip_missing) ios_lifecycle_did_become_active(); }
 
 @end
 
@@ -172,6 +190,7 @@ void ios_error_box(const char *title, const char *message) {
 }
 
 int main(int argc, char *argv[]) {
+    s_chip_missing = ios_chip_missing();   /* first: before anything built for the A12 is called */
     @autoreleasepool {
         return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class]));
     }

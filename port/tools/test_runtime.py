@@ -195,6 +195,8 @@ def host_tests():
     run('touch', [HLE / 'touch.c', HLE / 'test_touch.c'])
     # how the run before ended on iOS, every way (port/ios/host/run_record.c, finding 227)
     run('run-record', [ROOT / 'port/ios/host/run_record.c', ROOT / 'port/ios/tests/test_run_record.c'])
+    # whether an iPhone's or iPad's chip has what the A12 build uses (port/ios/app/chip.c, finding 273)
+    run('ios-chip', [ROOT / 'port/ios/app/chip.c', ROOT / 'port/ios/tests/test_chip.c'])
     # where iOS's guest memory goes in an address space shaped like an iPhone's (finding 258)
     run('guest-place', [ROOT / 'port/host64/guest_place.c', ROOT / 'port/host64/test_guest_place.c'])
     # and that no access of the core reaches what lies between and above its two parts (finding 258)
