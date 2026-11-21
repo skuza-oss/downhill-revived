@@ -49,7 +49,8 @@ enum { LEGEND_PAD = 6 };
 int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLegendRange *out, int max)
 {
     static const struct { char glyph; uint16_t button; } glyphs[] = {
-        {GLYPH_CROSS[0], PAD_CROSS}, {GLYPH_TRIANGLE[0], PAD_TRIANGLE}, {GLYPH_CIRCLE[0], PAD_CIRCLE}, {GLYPH_SQUARE[0], PAD_SQUARE}};
+        {GLYPH_CROSS[0], PAD_CROSS}, {GLYPH_TRIANGLE[0], PAD_TRIANGLE}, {GLYPH_CIRCLE[0], PAD_CIRCLE}, {GLYPH_SQUARE[0], PAD_SQUARE},
+        {GLYPH_LEFT[0], PAD_LEFT}, {GLYPH_RIGHT[0], PAD_RIGHT}, {GLYPH_R1[0], PAD_R1}};   /* PREV / NEXT, R1 (finding 274) */
     int at[MENU_LEGEND_BUTTONS], n = 0;
     uint16_t button[MENU_LEGEND_BUTTONS];
     for (int i = 0; i < length && n < max && n < MENU_LEGEND_BUTTONS; i++)

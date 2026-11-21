@@ -34,7 +34,8 @@ did not take a touch player's taps as well as they do since findings 092, 266 an
 ## Progress
 
 - [x] 2026-11-21: cause checked (above), design (Decisions), the code and `test_pause_more`
-- [ ] the hidden run, captures, state traces, checks
+- [x] 2026-11-21: the hidden run (`touch_pause_check.py`) found MUSIC PLAYLIST's custom lists out of
+  reach (Surprises); fixed in `menu_page.c` / `menu_pads.c`; the run passes; state traces; checks
 
 ## Decisions
 
@@ -57,6 +58,64 @@ did not take a touch player's taps as well as they do since findings 092, 266 an
   controller used takes the menu over (`PAUSE_PAD`).
 - **Not in online races**: the online pause is the room's own panel (finding 215), unchanged.
 
+- **MUSIC PLAYLIST, fixed where taps could not go** (`menu_page.c`, `menu_pads.c`). The page
+  picks SET 1-4, RANDOM, CUSTOM or NO LIST (rows: taps already worked). Songs are on and off only
+  in a custom list: CUSTOM (USER 1-4) > MODIFY > the playlist editor, whose songs come from the
+  song list (ADD). Three gaps, each fixed by the rule the other menus follow:
+  - CUSTOM draws its own legend lines ("✕ USE", "△ BACK", "○ MODIFY" from view x 30, y 160 / 170 /
+    180, `func_0019A850`); MODIFY is the popup manager's button 6 (+0x45C, ○) and no tap reached
+    it. A tap on a line now presses its button (`music_custom_legend`, as 268's measured BONUS
+    PURCHASES legend).
+  - The editor's legend "○ ADD □ CHANGE R1 DELETE △ BACK ✕ SELECT" is a footer, but finding 266's
+    legend taps acted on messages only. They now act on every game popup's footer (a tap on a
+    legend word presses its button; between words nothing), and the legend reader knows R1
+    (byte 0xB9, `GLYPH_R1`) and ◂ / ▸ (PREV / NEXT, LESS / MORE): before, DELETE fell into CHANGE's range. So
+    the song list's □ PREVIEW (268's open "jukebox" Square) and OPTIONS' LESS / MORE take taps too.
+  - In the editor ✕ saves the list and leaves (`func_0019B638`), while CHANGE and DELETE act on the
+    cursor's song: a tap (hover, then ✕) on a song left the editor. There, and only there, a tap on
+    another row now just moves the cursor and a tap on the cursor's row is ✕ (hover moves nothing),
+    as in 268's BONUS PURCHASES.
+- **Which glyph is R1**: from the retail text of that legend, the bytes before its words: 0xAB ADD,
+  0xA0 CHANGE, 0xB9 DELETE, 0xA7 BACK, 0xAD SELECT (the others are the glyphs 266 knew).
+
 ## Surprises
 
+- The issue's "turn a song off" is the custom lists' DELETE: the playlist page itself has no song
+  switches (SET 1-4 are fixed sets).
+- Over a race the popups are laid out in a 512-wide view (the pause menu centred at x 256), not the
+  640 of the shell: the check measures taps from the trace, 846 view pixels across a 1600-wide
+  window.
+- On a hidden desktop SDL reports a posted click where the OS cursor is (finding 189's trap), so
+  the kept Pause spot is tested at the posted move's place in the desktop-mouse path; on a phone
+  the touch's own mouse event has the place.
+- `RACE_NAV`'s last step (Cross in the flight) repeats every 30 fields while the screen stays: in a
+  pause menu it would choose rows. The check leaves it out and waits for the flight to end.
+
 ## Result
+
+Commits on `feat/touch-pause-pages`: MORE and the game's menu by taps (with `test_pause_more`);
+MUSIC PLAYLIST's custom lists by taps, the check tool and this result.
+
+- What a touch player reaches now, by taps only: every row of the offline pause menu (RESUME,
+  OPTIONS, TRICK LIST, NEW LEVEL, RE-START, MUSIC PLAYLIST, QUIT, the mode's others), OPTIONS'
+  values (beside a row, finding 268, or the legend's LESS / MORE), MUSIC PLAYLIST's sets, CUSTOM's
+  USE / MODIFY, the editor's ADD / CHANGE / DELETE / SELECT and the song list's PREVIEW. Pause and
+  Back are △ on every page. Out of scope and unchanged: split-screen, online (finding 215's panel).
+- Unit tests: `test_touch` `test_pause_more` (both presets: MORE sends nothing, the overlay keeps
+  only Pause and its spot, the race controls' places and MORE's place send nothing, Pause and Back
+  are one △ each, the race going on gives the race back with the resume guard, a controller takes
+  over as `PAUSE_PAD`, a new track's flight ends it); `test_menu_pads`: the editor's legend, each
+  word its own button (DELETE R1's), and LESS / MORE as Left / Right.
+- Hidden run (`port/tools/touch_pause_check.py`, 1600x720 at 20:9, picture scale 2, Classic pad,
+  no controller): PASS. Pause, MORE; MUSIC PLAYLIST, CUSTOM, USER 1, MODIFY, ADD, the first song
+  (added: the editor lists it), a tap on it (the cursor only), DELETE (gone), Pause back three
+  pages to the pause menu (no click reached the menu under Pause); OPTIONS, a tap right of Music
+  Volume 50 → 51, Pause back; TRICK LIST, Pause back; Pause on the pause menu: the race goes on;
+  again Pause, MORE, RESUME tapped in the game's menu: the race goes on. The base build has no MORE
+  (the panel's five rows only).
+- State traces: boot (600 fields) and race (5000) equal to the reference of main 524948ba
+  (the shared reference traces `main-524948ba-ref-v3`, format 2).
+- `check.py quick`, `check.py docs`.
+- Not run: a phone (the lead's), iOS's edge swipe, NEW LEVEL and QUIT through MORE (their rows are
+  the same taps; the overlay's exit rules are `PAUSE_PAD`'s and unit-tested), career and freeride
+  pause menus (the same popup with other rows).

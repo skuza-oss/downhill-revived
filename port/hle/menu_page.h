@@ -121,6 +121,7 @@ enum { MENU_STYLE_ROW, MENU_STYLE_SELECTED, MENU_STYLE_OFF };
 enum { MENU_LEFT, MENU_CENTRE, MENU_RIGHT };
 #define GLYPH_SQUARE "\xA0"
 #define GLYPH_CIRCLE "\xAB"
+#define GLYPH_R1 "\xB9"   /* the playlist editor's "R1 DELETE" (finding 274) */
 MenuStyle menu_page_style(const MenuPage *p, int which);
 MenuStyle menu_game_style(int which);  /* the same without a page (a menu drawn over a race) */
 int menu_popup_up(void);               /* a popup is up (the game's or ours) */

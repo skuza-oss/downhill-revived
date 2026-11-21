@@ -248,13 +248,21 @@ static int test_input(void)
 /* A mouse event over the spot the overlay keeps while the game's pause menu has the taps (its
    Pause button, finding 274): a press that starts there, its moves and its release are the overlay's,
    so the game's menu under it never takes them (a click beside a row's line is Left / Right there,
-   finding 268). Hovers over the spot are dropped too. */
-static int kept_mouse(const SDL_Event *e)
+   finding 268). Hovers over the spot are dropped too. fx, fy: where it is, 0..1 of the window (the
+   desktop's mouse as a finger: a test's press is where its posted move was), or -1: the event's. */
+static int kept_mouse(const SDL_Event *e, float fx, float fy)
 {
     static int pressed;   /* a press started on the spot (SDL thread) */
     int down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN, up = e->type == SDL_EVENT_MOUSE_BUTTON_UP;
     if (up && pressed) { pressed = 0; return 1; }
     if (pressed) return 1;
+    if (fx >= 0) {
+        SDL_LockMutex(lock);
+        int in = kept[2] > kept[0] && fx >= kept[0] && fx <= kept[2] && fy >= kept[1] && fy <= kept[3];
+        SDL_UnlockMutex(lock);
+        if (in && down) pressed = 1;
+        return in && !up;
+    }
     float x = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.x : e->button.x;
     float y = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.y : e->button.y;
     float w = 0, h = 0;
@@ -299,7 +307,7 @@ int touch_host_event(const SDL_Event *e)
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if (e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.which == SDL_TOUCH_MOUSEID : e->button.which == SDL_TOUCH_MOUSEID)
-            return owned || kept_mouse(e);   /* a touch's mouse: the menus' only while the overlay is away */
+            return owned || kept_mouse(e, -1, -1);   /* a touch's mouse: the menus' only while the overlay is away */
         if (touch_on() == 2) {   /* the desktop's mouse as a finger */
             SDL_WindowID id = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.windowID : e->button.windowID;
             SDL_Window *w = SDL_GetWindowFromID(id);
@@ -315,7 +323,7 @@ int touch_host_event(const SDL_Event *e)
                    cursor. That motion is no finger's: it is dropped once the leave has told where
                    the OS cursor is (the first one is taken back at its leave), as present.c does for
                    the menus' mouse; else a held finger would jump to the OS cursor after every move. */
-                if (test_input() && e->motion.x == leave_x && e->motion.y == leave_y) { leave_dropped = 1; return owned || kept_mouse(e); }
+                if (test_input() && e->motion.x == leave_x && e->motion.y == leave_y) { leave_dropped = 1; return owned || kept_mouse(e, x, y); }
                 leave_dropped = 0;
                 before_x = last_x, before_y = last_y;
                 last_x = x, last_y = y, last_px = e->motion.x, last_py = e->motion.y;
@@ -326,7 +334,7 @@ int touch_host_event(const SDL_Event *e)
                 if (test_input()) x = last_x, y = last_y;
                 push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
             }
-            return owned || kept_mouse(e);
+            return owned || kept_mouse(e, x, y);
         }
         return 0;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:   /* test desktops: the motion before it was the OS cursor's (above) */
@@ -824,6 +832,8 @@ void host_service_touch_field(uint32_t address)
         float kx = 0, ky = 0, khw = 0, khh = 0;
         if (!own && touch_menu_keeps(touch, &kx, &ky, &khw, &khh))   /* MORE: the game's pause menu (finding 274) */
             fprintf(stderr, "touch: the game's pause menu takes the touches; Pause stays at %.1f,%.1f mm\n", kx, ky);
+        else if (own && touch_control(touch, TC_PAUSE, &kx, &ky, NULL))   /* where Pause is (the checks tap it) */
+            fprintf(stderr, "touch: the overlay takes the touches (Pause at %.1f,%.1f mm)\n", kx, ky);
         else fprintf(stderr, "touch: %s\n", own ? "the overlay takes the touches" : "the menus take the touches");
     }
     SDL_SetAtomicInt(&owns, own);

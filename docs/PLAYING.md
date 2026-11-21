@@ -78,7 +78,13 @@ What works today:
   or Thumb zones; **Steer With** the stick, tilt or a D-pad), or a controller. Online: every kind of race, as on the PC
   (Quick Race, public, private and P2P races). The game's
   codes are typed on the touch pause panel's **CODES** page (the d-pad and the four face
-  buttons); **ENTER** goes back to the race and enters them. The camera's flight over the track
+  buttons); **ENTER** goes back to the race and enters them. The rest of the game's own pause menu
+  (OPTIONS, TRICK LIST, NEW LEVEL, MUSIC PLAYLIST, as the mode offers them) is behind the panel's
+  **MORE**: the touch controls step aside and you tap the game's rows, the words of its legend
+  (BACK, SELECT, MUSIC PLAYLIST > CUSTOM's MODIFY, the playlist editor's ADD, CHANGE, DELETE) and
+  beside a row for left/right (a volume). Pause (or Back) goes back one page, and on the pause
+  menu itself goes on with the race; RESUME in the game's menu does too. In the playlist editor a
+  tap on a song puts the cursor there and a second tap is SELECT (it saves and leaves). The camera's flight over the track
   before each race, and the movies (the startup movies if Skip Movies is off, the attract movie,
   OPTIONS > VIDEO CLIPS) and the title's attract demo have a **SKIP** button (low under your right
   thumb, the left one with Hand: Left; the touch controls' START); tap it as you would press START on a pad. In a race's
