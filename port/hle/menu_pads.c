@@ -85,6 +85,21 @@ uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x)
     return 0;
 }
 
+/* MUSIC PLAYLIST > CUSTOM's own legend (func_0019A850, finding 274): "✕ USE", "△ BACK", "○ MODIFY",
+   one line each from view x 30 at y 160, 170, 180; widths[k] its drawn width, 0 when not drawn. The
+   button of the line whose words (LEGEND_PAD more on each side, its 10-pixel line high) hold (x, y),
+   0 none: the track list right of it (its numbers from x 112, a 12th track at y 157) is no legend. */
+uint16_t menu_custom_legend_hit(const int widths[3], int x, int y)
+{
+    static const uint16_t buttons[3] = {PAD_CROSS, PAD_TRIANGLE, PAD_CIRCLE};
+    for (int k = 0; k < 3; k++) {
+        int top = 159 + 10 * k;
+        if (widths[k] > 0 && y >= top && y < top + 10 && x >= 30 - LEGEND_PAD && x < 30 + widths[k] + LEGEND_PAD)
+            return buttons[k];
+    }
+    return 0;
+}
+
 /* What a tap beside a line of a menu presses (finding 268): left of its words [left, right) Left, right
    of them Right, on them 0 (the line's own button: Cross, as before). A line whose two sides are its
    only buttons (the shop's heading "◄ INVENTORY ►") passes its middle as both: its left half is Left

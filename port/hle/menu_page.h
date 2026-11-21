@@ -106,6 +106,9 @@ enum { MENU_LEGEND_BUTTONS = 8 };
 typedef struct { int left, glyph_right, right, from, to; uint16_t button; } MenuLegendRange;
 int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLegendRange *out, int max);
 uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x);
+/* MUSIC PLAYLIST > CUSTOM's legend lines (✕ USE, △ BACK, ○ MODIFY from view x 30, y 160 / 170 / 180):
+   the button of the line under (x, y), widths[k] each line's drawn width, 0 not drawn (finding 274). */
+uint16_t menu_custom_legend_hit(const int widths[3], int x, int y);
 /* A tap at x beside a line whose words span [left, right): Left left of them, Right right of them, 0 on
    them (menu_pads.c, finding 268). left == right: the line's two halves. */
 uint16_t menu_side_button(int x, int left, int right);

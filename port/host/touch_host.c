@@ -249,19 +249,24 @@ static int test_input(void)
    Pause button, finding 274): a press that starts there, its moves and its release are the overlay's,
    so the game's menu under it never takes them (a click beside a row's line is Left / Right there,
    finding 268). Hovers over the spot are dropped too. fx, fy: where it is, 0..1 of the window (the
-   desktop's mouse as a finger: a test's press is where its posted move was), or -1: the event's. */
-static int kept_mouse(const SDL_Event *e, float fx, float fy)
+   desktop's mouse as a finger: a test's press is where its posted move was), or -1: the event's.
+   1 when the event is dropped: the overlay owns the touches (owned) or keeps it (touch_kept_mouse,
+   which sees every event, so a release after the overlay took the touches back still ends a press). */
+static int kept_pressed;   /* a press started on the spot (SDL thread) */
+static int kept_in(const SDL_Event *e, float fx, float fy);
+static int kept_mouse(const SDL_Event *e, float fx, float fy, int owned)
 {
-    static int pressed;   /* a press started on the spot (SDL thread) */
-    int down = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN, up = e->type == SDL_EVENT_MOUSE_BUTTON_UP;
-    if (up && pressed) { pressed = 0; return 1; }
-    if (pressed) return 1;
+    int kind = e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ? TOUCH_MOUSE_DOWN : e->type == SDL_EVENT_MOUSE_BUTTON_UP ? TOUCH_MOUSE_UP
+             : TOUCH_MOUSE_MOVE;
+    return touch_kept_mouse(&kept_pressed, kind, kept_in(e, fx, fy), owned);
+}
+static int kept_in(const SDL_Event *e, float fx, float fy)
+{
     if (fx >= 0) {
         SDL_LockMutex(lock);
         int in = kept[2] > kept[0] && fx >= kept[0] && fx <= kept[2] && fy >= kept[1] && fy <= kept[3];
         SDL_UnlockMutex(lock);
-        if (in && down) pressed = 1;
-        return in && !up;
+        return in;
     }
     float x = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.x : e->button.x;
     float y = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.y : e->button.y;
@@ -279,8 +284,7 @@ static int kept_mouse(const SDL_Event *e, float fx, float fy)
     SDL_LockMutex(lock);
     int in = kept[2] > kept[0] && x / w >= kept[0] && x / w <= kept[2] && y / h >= kept[1] && y / h <= kept[3];
     SDL_UnlockMutex(lock);
-    if (in && down) pressed = 1;
-    return in && !up;
+    return in;
 }
 
 /* One SDL event: 1 when it is the touch controls' (the caller drops it). */
@@ -301,13 +305,14 @@ int touch_host_event(const SDL_Event *e)
         int kind = e->type == SDL_EVENT_FINGER_DOWN ? EV_DOWN : e->type == SDL_EVENT_FINGER_MOTION ? EV_MOVE
                  : e->type == SDL_EVENT_FINGER_UP ? EV_UP : EV_CANCEL;
         push(kind, (long long)e->tfinger.fingerID, e->tfinger.x, e->tfinger.y, (double)e->common.timestamp / 1e6);
+        if (kind == EV_CANCEL) touch_kept_mouse(&kept_pressed, TOUCH_MOUSE_CANCEL, 0, owned);   /* no release follows */
         return 0;   /* the window's touch list is SDL's; the synthesized mouse is dropped below */
     }
     case SDL_EVENT_MOUSE_MOTION:
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if (e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.which == SDL_TOUCH_MOUSEID : e->button.which == SDL_TOUCH_MOUSEID)
-            return owned || kept_mouse(e, -1, -1);   /* a touch's mouse: the menus' only while the overlay is away */
+            return kept_mouse(e, -1, -1, owned);   /* a touch's mouse: the menus' only while the overlay is away */
         if (touch_on() == 2) {   /* the desktop's mouse as a finger */
             SDL_WindowID id = e->type == SDL_EVENT_MOUSE_MOTION ? e->motion.windowID : e->button.windowID;
             SDL_Window *w = SDL_GetWindowFromID(id);
@@ -323,7 +328,7 @@ int touch_host_event(const SDL_Event *e)
                    cursor. That motion is no finger's: it is dropped once the leave has told where
                    the OS cursor is (the first one is taken back at its leave), as present.c does for
                    the menus' mouse; else a held finger would jump to the OS cursor after every move. */
-                if (test_input() && e->motion.x == leave_x && e->motion.y == leave_y) { leave_dropped = 1; return owned || kept_mouse(e, x, y); }
+                if (test_input() && e->motion.x == leave_x && e->motion.y == leave_y) { leave_dropped = 1; return kept_mouse(e, x, y, owned); }
                 leave_dropped = 0;
                 before_x = last_x, before_y = last_y;
                 last_x = x, last_y = y, last_px = e->motion.x, last_py = e->motion.y;
@@ -334,7 +339,7 @@ int touch_host_event(const SDL_Event *e)
                 if (test_input()) x = last_x, y = last_y;
                 push(e->button.down ? EV_DOWN : EV_UP, 0x7FFF, x, y, ms);
             }
-            return owned || kept_mouse(e, x, y);
+            return kept_mouse(e, x, y, owned);
         }
         return 0;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:   /* test desktops: the motion before it was the OS cursor's (above) */
@@ -780,7 +785,7 @@ void host_service_touch_field(uint32_t address)
     touch_tilt(touch, known, SDL_GetAtomicInt(&tilt_milli) / 1000.0f);
     TouchGame g;
     memset(&g, 0, sizeof g);
-    g.race_hud = h->race_hud, g.flyover = h->flyover, g.movie = h->movie, g.replay = h->replay, g.attract = h->attract, g.menu_up = h->menu_up, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving;
+    g.race_hud = h->race_hud, g.flyover = h->flyover, g.movie = h->movie, g.replay = h->replay, g.attract = h->attract, g.menu_up = h->menu_up, g.air = h->air, g.online = h->online, g.clock_moving = h->clock_moving, g.front_end = h->front_end;
     for (int i = 0; i < 3; i++) g.pause_row[i] = h->pause_row[i];
     g.race_ms = h->race_ms, g.vsync = h->vsync, g.fps = h->fps;
     trace_race_ms = h->race_ms;

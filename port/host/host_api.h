@@ -380,7 +380,8 @@ typedef struct {
     int32_t replay;        /* a race's replay is the race loop (the recorder plays; finding 214) */
     int32_t attract;       /* the title's attract demo plays (race mode 10; finding 214) */
     int32_t menu_up;       /* a game popup is up (the replay's menu; finding 218) */
-} HostTouch;  /* 88 bytes */
+    int32_t front_end;     /* no race's loop runs (port_in_race 0): a pause menu is gone (finding 274) */
+} HostTouch;  /* 96 bytes */
 void host_service_touch_field(uint32_t state);
 
 #endif

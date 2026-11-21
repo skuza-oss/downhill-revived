@@ -8,7 +8,8 @@ race; from the race on only taps: the touch Pause button opens the overlay's PAU
 game's own pause menu to the taps. Then MUSIC PLAYLIST: CUSTOM, a song off; Pause (the menu's Triangle)
 back to the pause menu. OPTIONS: a tap right of Music Volume's row raises it a step; Pause back. TRICK
 LIST opens; Pause back. Pause on the pause menu itself resumes the race (the overlay takes the touches
-again). Then Pause, MORE, RESUME tapped in the game's menu resumes too.
+again). Then Pause, MORE, RESUME tapped in the game's menu resumes too. Last Pause, MORE, QUIT and YES:
+the front end, the overlay keeps nothing, and a tap where Pause was is the menus' own.
 
 The menus' mouse trace (DHD_MOUSE_TRACE=1) says which popup is up and what each tap did. Pictures in OUT.
 Exit 0 when it all passes."""
@@ -212,9 +213,45 @@ def check(exe, out, scale):
         log = r.tap(row_tap(menu, find_row(menu, 'RESUME')), 4)
         if 'the overlay takes the touches' not in log:
             return 'RESUME tapped in the game\'s menu did not resume: %r' % re.findall(r'touch: .*|menu mouse: .*', log)
-        return None
+        return quit_to_front_end(r)
     finally:
         g.stop()
+
+
+def quit_to_front_end(r):
+    """Pause, MORE, QUIT and its YES in the game's menu: the front end, where the overlay keeps nothing (no
+    Pause spot, no △ left over) and a tap where Pause was is the menus' own click."""
+    time.sleep(3)
+    r.tap_pause(4)
+    menu = r.popup()
+    log = r.tap(more_row())
+    if "the game's pause menu takes the touches" not in log:
+        return 'the third MORE did not hand the menu over'
+    log = r.tap(row_tap(menu, find_row(menu, 'QUIT')), 4)
+    question = r.popup(log)
+    print('quit: %r' % ((question['vtable'], question['rows']) if question else None,), flush=True)
+    yes = find_row(question, 'YES') if question else None
+    if yes is None:
+        return 'QUIT tapped in the game\'s menu asked nothing'
+    mark = len(r.g.log())
+    r.tap(row_tap(question, yes), 2)
+    end = time.time() + 60   # the boot's own front-end line is before mark
+    while 'game: the front end runs' not in r.g.log()[mark:]:
+        if time.time() > end:
+            return 'YES on QUIT did not leave the race: %r' % re.findall(r'touch: .*|menu mouse: .*', r.g.log()[mark:])
+        time.sleep(1)
+    time.sleep(6)
+    after = r.g.log()[mark:]
+    print('quit: %s' % re.findall(r'touch: .*|game: .*', after), flush=True)
+    if "the game's pause menu takes the touches" in after.split('game: the front end runs')[-1]:
+        return 'the front end still hands the touches to a pause menu'
+    touch.picture(r.g, 'front-end')
+    r.g.print_window('front-end-window')
+    log = r.tap(r.pause, 4)   # where Pause was: the menus' tap now (QUIT ends on the title: its ✕, the main menu)
+    print('front end tap where Pause was: %s' % re.findall(r'(?:shell|menu) mouse: .*|mouse trace: screen.*', log), flush=True)
+    if not re.search(r'(?:shell|menu) mouse: .*click|mouse trace: screen', log):
+        return 'a tap in the front end where Pause was did not reach the menus: %r' % re.findall(r'touch: .*|\w+ mouse: .*', log)
+    return None
 
 
 def music_song_off(r, page):
@@ -226,7 +263,7 @@ def music_song_off(r, page):
     if not songs:
         return 'CUSTOM opened nothing'
     r.tap(row_tap(songs, 0), 4)   # USER 1: the cursor there
-    log = r.tap((view_x(70), 185 / 224), 4)   # the page's own legend line: MODIFY
+    log = r.tap((view_x(40), 185 / 224), 4)   # the page's own legend line: MODIFY (its glyph, from x 30)
     print('music: MODIFY:\n%s' % traced(log), flush=True)
     editor = r.popup(log)
     if 'CUSTOM legend: MODIFY' not in log or not editor or editor['vtable'] != EDITOR:

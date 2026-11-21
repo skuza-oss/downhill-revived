@@ -1008,14 +1008,27 @@ static int list_more(void *list, int y, int *row)
 /* MUSIC PLAYLIST > CUSTOM (vtable D_00287A98: USER 1-4) draws its own legend under its rows, one
    line each from view x 30 (func_0019A850): "✕ USE" at y 160 (a list with tracks), "△ BACK" at 170,
    "○ MODIFY" at 180. MODIFY (the track list, D_0043D2A0) is the popup manager's button 6 (+0x45C),
-   Circle, which no tap pressed (finding 274). A tap on a line presses its button; 0: not on one. */
+   Circle, which no tap pressed (finding 274). A tap on a line's words presses its button; 0: not on
+   one (the track list beside the lines is not: each line is measured as drawn, in its font). */
+extern char D_0029D168[], D_0029D170[], D_0028E558[];  /* "✕ USE", "△ BACK", "○ MODIFY" */
+static int custom_legend_width(const char *text)
+{
+    char saved[0x20];
+    memcpy(saved, D_004F3570, sizeof saved);
+    func_0020FB80(0, 0x15D, 0xA7, -0x86, -0x7E);  /* func_0019A850's size for these lines */
+    *(int *)(D_004F3570 + 0x1C) = 0;
+    int width = func_0020F860(0, text) >> 4;
+    memcpy(D_004F3570, saved, sizeof saved);
+    return width;
+}
 static uint16_t music_custom_legend(void *menu, int view)
 {
-    static const uint16_t buttons[3] = {PAD_CROSS, PAD_TRIANGLE, PAD_CIRCLE};
     int mx, my;
     if (AT(menu, X_VTABLE, uint32_t) != MUSIC_CUSTOM || !pointer(view, &mx, &my)) return 0;
-    if (mx < 20 || mx >= 140 || my < 159 || my >= 189) return 0;
-    return buttons[(my - 159) / 10];
+    int user = AT(menu, 0, int), list = user >= 0 && user < 4;  /* +0: the cursor's USER, +0x540: its tracks */
+    int widths[3] = {list && AT(menu, 0x540 + user, signed char) > 0 ? custom_legend_width(D_0029D168) : 0,
+                     custom_legend_width(D_0029D170), list ? custom_legend_width(D_0028E558) : 0};
+    return menu_custom_legend_hit(widths, mx, my);
 }
 
 static int game_popup_mouse(void *menu, int view, int moved, int left, int right, int wheel)

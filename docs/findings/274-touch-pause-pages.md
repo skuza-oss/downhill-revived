@@ -36,6 +36,7 @@ did not take a touch player's taps as well as they do since findings 092, 266 an
 - [x] 2026-11-21: cause checked (above), design (Decisions), the code and `test_pause_more`
 - [x] 2026-11-21: the hidden run (`touch_pause_check.py`) found MUSIC PLAYLIST's custom lists out of
   reach (Surprises); fixed in `menu_page.c` / `menu_pads.c`; the run passes; state traces; checks
+- [x] 2026-11-21: review round, four fixes (Decisions, "Review fixes"); the run gained QUIT
 
 ## Decisions
 
@@ -75,6 +76,20 @@ did not take a touch player's taps as well as they do since findings 092, 266 an
     cursor's song: a tap (hover, then ✕) on a song left the editor. There, and only there, a tap on
     another row now just moves the cursor and a tap on the cursor's row is ✕ (hover moves nothing),
     as in 268's BONUS PURCHASES.
+- **Review fixes** (each with a `test_touch` / `test_menu_pads` case that failed before it):
+  - QUIT (and any end of the race's loop) left `PAUSE_MENU` on in the front end: the race loop stays on
+    while paused and the race HUD is not drawn then, so neither the clock rule nor the HUD-loss rule
+    ever saw it, and Pause stayed drawn and kept, sending △ to the menus. The game now says when no
+    race's loop runs (`front_end`, HostTouch / TouchGame, from `port_in_race`); then any pause ends with
+    what it had to send (`test_pause_more_exits`).
+  - A PEDAL finger held into the pause could still flick: its ◻ / ○ pulses go out paused or not (they
+    carry SKIP), so they reached the menu (the editor's CHANGE / ADD). No flick while paused.
+  - CUSTOM's legend was a fixed box (x 20-140) over the track list: a 12th track's number at (112, 157)
+    was USE. Each line is now its words as drawn, measured in its font (`menu_custom_legend_hit`); a
+    line not drawn (USE with no tracks, MODIFY on NO LIST's row) takes nothing.
+  - The host's latch on the kept spot ran after the ownership test, so a Pause held in MORE and
+    released after Back resumed stayed latched and swallowed the next menu tap. The latch
+    (`touch_kept_mouse`) now sees every event first; a cancelled touch clears it.
 - **Which glyph is R1**: from the retail text of that legend, the bytes before its words: 0xAB ADD,
   0xA0 CHANGE, 0xB9 DELETE, 0xA7 BACK, 0xAD SELECT (the others are the glyphs 266 knew).
 
@@ -111,11 +126,12 @@ MUSIC PLAYLIST's custom lists by taps, the check tool and this result.
   (added: the editor lists it), a tap on it (the cursor only), DELETE (gone), Pause back three
   pages to the pause menu (no click reached the menu under Pause); OPTIONS, a tap right of Music
   Volume 50 → 51, Pause back; TRICK LIST, Pause back; Pause on the pause menu: the race goes on;
-  again Pause, MORE, RESUME tapped in the game's menu: the race goes on. The base build has no MORE
-  (the panel's five rows only).
+  again Pause, MORE, RESUME tapped in the game's menu: the race goes on; last Pause, MORE, QUIT, Yes:
+  the title, the overlay hidden, and a tap where Pause was is the title's ✕ (the main menu). The base
+  build has no MORE (the panel's five rows only).
 - State traces: boot (600 fields) and race (5000) equal to the reference of main 524948ba
   (the shared reference traces `main-524948ba-ref-v3`, format 2).
 - `check.py quick`, `check.py docs`.
-- Not run: a phone (the lead's), iOS's edge swipe, NEW LEVEL and QUIT through MORE (their rows are
-  the same taps; the overlay's exit rules are `PAUSE_PAD`'s and unit-tested), career and freeride
+- Not run: a phone (the lead's), iOS's edge swipe, NEW LEVEL and RE-START through MORE (their rows are
+  the same taps; the exits are unit-tested: the next flight, the clock, the race's loop), career and freeride
   pause menus (the same popup with other rows).

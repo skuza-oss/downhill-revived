@@ -783,6 +783,20 @@ int touch_menu_keeps(const Touch *t, float *x, float *y, float *half_w, float *h
     return 1;
 }
 
+/* The latch goes before ownership: Pause held in MORE, Back resumes the race (the overlay owns the
+   touches), then the release: it must still end the latch, or the next menu tap is swallowed (274). */
+int touch_kept_mouse(int *pressed, int kind, int in, int owned)
+{
+    if (kind == TOUCH_MOUSE_CANCEL) { *pressed = 0; return owned; }
+    if (*pressed) {
+        if (kind == TOUCH_MOUSE_UP) *pressed = 0;
+        return 1;
+    }
+    if (owned) return 1;
+    if (in && kind == TOUCH_MOUSE_DOWN) *pressed = 1;
+    return in && kind != TOUCH_MOUSE_UP;
+}
+
 int touch_control_size(const Touch *t, int control, float *half_w, float *half_h)
 {
     if (control < 0 || control >= TC_COUNT || !t->ctl[control].on) return 0;
@@ -2267,6 +2281,7 @@ static void stick_follow(Touch *t, Finger *f)
 
 static void pedal_follow(Touch *t, Finger *f)
 {
+    if (paused(t)) return;   /* a pedal finger held into a pause flicks nothing: its ◻ / ○ would reach the menu (274) */
     const Ctl *p = &t->ctl[TC_PEDAL];
     float dx = f->x - p->x, dy = f->y - p->y, d = hypotf(dx, dy);
     if (d <= p->r) { f->flick_armed = 1; return; }   /* re-arms back inside the rim */
@@ -2766,6 +2781,14 @@ void touch_update(Touch *t, const TouchGame *game, double now)
                     if (t->pulse_buttons[i] == PAD_START) t->pulse_buttons[i] = 0, t->pulse_fields[i] = 0;
             t->skip_pulse = 0;
         }
+    }
+    if (game->front_end && t->pause != PAUSE_NONE) {
+        /* the race's loop is over (QUIT, a restart's load): so is its pause, and what it had to send
+           (a menu's △, the panel's steps); fingers still down are the menus' from now (274) */
+        t->pause = PAUSE_NONE, seq_reset(t);
+        t->panel_open = 0;
+        drop_race_touches(t);
+        for (int i = 0; i < 16; i++) t->pulse_buttons[i] = 0, t->pulse_fields[i] = 0;
     }
     lifted_presses_step(t);
     if (was_on && !t->race_was_on && t->pause == PAUSE_NONE && !t->editor) {   /* the race is gone (the editor's fingers are its own) */
