@@ -84,7 +84,8 @@ final class LogShare {
         String made;
         try {
             made = Native.logBundle(files.getPath(), dir.getPath(), version, Build.MANUFACTURER + " " + Build.MODEL
-                    + ", Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")", running);
+                    + ", Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + "), "
+                    + LauncherActivity.webViewVersion(), running);
         } catch (IOException e) {
             Log.w(TAG, "the shared log can't be written: " + e);
             return "The log couldn't be copied (" + e.getMessage() + ").";

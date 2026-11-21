@@ -27,6 +27,13 @@ const PLURAL_FORMS = ['zero', 'one', 'two', 'few', 'many', 'other'];
 
 const lang = { code: 'en', words: {}, english: {} };
 
+// An element's children replaced by these nodes and strings. Not Element.replaceChildren: that
+// needs Chromium 86, and the page runs on Android System WebView 80 (finding 273).
+function replaceKids(e, ...kids) {
+  e.textContent = '';
+  e.append(...kids);
+}
+
 // Chinese comes in two scripts and a device names one by script (zh-Hans, zh-Hant) or by region
 // (zh-CN, zh-TW); a region alone says the script.
 const CHINESE_SCRIPT_OF_REGION = { cn: 'hans', sg: 'hans', my: 'hans', tw: 'hant', hk: 'hant', mo: 'hant' };
@@ -141,7 +148,7 @@ async function loadLanguage(saved) {
 // data-i18n="key" sets an element's words (with **bold**), data-i18n-aria its aria-label,
 // data-i18n-title its title.
 function translatePage(root) {
-  root.querySelectorAll('[data-i18n]').forEach((e) => e.replaceChildren(...tNodes(e.dataset.i18n)));
+  root.querySelectorAll('[data-i18n]').forEach((e) => replaceKids(e, ...tNodes(e.dataset.i18n)));
   root.querySelectorAll('[data-i18n-aria]').forEach((e) => e.setAttribute('aria-label', t(e.dataset.i18nAria)));
   root.querySelectorAll('[data-i18n-title]').forEach((e) => e.setAttribute('title', t(e.dataset.i18nTitle)));
 }

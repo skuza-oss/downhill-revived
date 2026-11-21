@@ -6,7 +6,7 @@
 int main(void)
 {
     /* every link the page sends (port/launcher/ui/app.js, disc.rs's More link, update results) */
-    const char *yes[] = {"discord", "kofi",
+    const char *yes[] = {"discord", "kofi", "webview",
         "https://github.com/skuza-oss/downhill-revived",
         "https://github.com/skuza-oss/downhill-revived/releases",
         "https://github.com/skuza-oss/downhill-revived/releases/latest",
@@ -15,7 +15,7 @@ int main(void)
         "https://github.com/skuza-oss/downhill-revived#readme"};
     const char *no[] = {"", "Discord", "KOFI", "javascript:alert(1)", "https://example.com/",
         "https://discord.gg/XrSeTyzfr2", "https://discord.gg/other", "https://ko-fi.com/skuza",
-        "https://ko-fi.com/skuzaevil", "https://downhill-revived.pages.dev/",
+        "https://ko-fi.com/skuzaevil", "WebView", "https://play.google.com/store/apps/details?id=com.google.android.webview", "https://downhill-revived.pages.dev/",
         "http://github.com/skuza-oss/downhill-revived", "https://github.com/skuza-oss/",
         "https://github.com/skuza-oss/other", "https://github.com/skuza-oss/downhill-revived.evil/",
         "https://github.com/skuza-oss/downhill-revived-other", "https://github.com/skuza-oss.evil/downhill-revived",
@@ -32,7 +32,8 @@ int main(void)
     assert(!launcher_link(NULL));
     assert(!strcmp(launcher_link("discord"), "https://discord.gg/XrSeTyzfr2"));
     assert(!strcmp(launcher_link("kofi"), "https://ko-fi.com/skuza"));
-    assert(launcher_link(yes[2]) == yes[2]);
+    assert(!strcmp(launcher_link("webview"), "https://play.google.com/store/apps/details?id=com.google.android.webview"));
+    assert(launcher_link(yes[3]) == yes[3]);
     puts("launcher links: PASS");
     return 0;
 }

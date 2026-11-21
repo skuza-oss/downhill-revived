@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Downhill Revived</title>
 <link rel="stylesheet" href="style.css">
+<script src="boot.js"></script>
 </head>
-<body>
+<body data-page="play">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
@@ -31,7 +32,7 @@
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></symbol>
 </svg>
 
-<header class="titlebar" data-tauri-drag-region>
+<header class="titlebar" data-tauri-drag-region hidden>
   <div class="win-ctl">
     <button id="win-min" aria-label="Minimize" data-i18n-aria="window.minimize"><svg class="i"><use href="#i-min"/></svg></button>
     <button id="win-close" class="close" aria-label="Close" data-i18n-aria="window.close"><svg class="i"><use href="#i-x"/></svg></button>
@@ -44,7 +45,7 @@
     <nav class="nav">
       <button data-page="play" class="on" aria-label="Play" data-i18n-aria="nav.play"><svg class="i"><use href="#i-play"/></svg><span data-i18n="nav.play">Play</span></button>
       <button data-page="settings" aria-label="Settings" data-i18n-aria="nav.settings"><svg class="i"><use href="#i-sliders"/></svg><span data-i18n="nav.settings">Settings</span></button>
-      <button data-page="notes" id="nav-notes" aria-label="Patch notes" data-i18n-aria="nav.notes"><svg class="i"><use href="#i-notes"/></svg><span data-i18n="nav.notes">Patch notes</span></button>
+      <button data-page="notes" id="nav-notes" aria-label="Patch notes" data-i18n-aria="nav.notes" hidden><svg class="i"><use href="#i-notes"/></svg><span data-i18n="nav.notes">Patch notes</span></button>
       <button data-page="help" id="nav-help" aria-label="Help" data-i18n-aria="nav.help" hidden><svg class="i"><use href="#i-help"/></svg><span data-i18n="nav.help">Help</span></button>
     </nav>
     <div class="rider" id="rider">

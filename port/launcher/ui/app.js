@@ -128,6 +128,7 @@ const needsDisc = () => !get('iso') || !!state.discProblem;
 function show(page) {
   for (const p of ['play', 'settings', 'notes', 'help']) $(`page-${p}`).hidden = p !== page;
   document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
+  document.body.dataset.page = page;  // style.css: the pad's Tabs hint on Settings
   if (page === 'help') renderHelp();
 }
 
@@ -167,7 +168,7 @@ function newsItems(notes) {
     const title = line.match(/^\*\*([^*]+)\*\*$/)?.[1];
     const bullet = line.match(/^\s*[-*]\s+(.*)/)?.[1];
     if (title) items.push({ title: plain(title), text: '' });
-    else if (bullet && items.length && !items.at(-1).text) items.at(-1).text = plain(bullet).split(/(?<=[.!?])\s/)[0];
+    else if (bullet && items.length && !items[items.length - 1].text) items[items.length - 1].text = plain(bullet).split(/(?<=[.!?])\s/)[0];
   }
   if (items.length) return items;
   return notes.split('\n').map((l) => l.match(/^\s*[-*]\s+(.*)/)?.[1]).filter(Boolean).map((b) => ({ title: plain(b), text: '' }));
@@ -187,26 +188,26 @@ function renderHome() {
   $('home-first').hidden = !first;
   if (first) {
     $('first-title').textContent = t(state.discProblem ? 'home.first.again' : 'home.first.title');
-    $('first-lead').replaceChildren(...tNodes(has('disc-import') ? 'home.first.leadImport' : 'home.first.lead'));
+    replaceKids($('first-lead'), ...tNodes(has('disc-import') ? 'home.first.leadImport' : 'home.first.lead'));
     const step = $('first-step');
     const hint = has('disc-import') ? t('home.first.step1HintImport', { free: gb(state.freeSpace) }) : t('home.first.step1Hint');
     // iOS: an .iso put in the app's folder in Files under any name is found by itself (finding 240)
     const folder = has('files-folder') ? [el('br'), t('home.first.filesFolder')] : [];
-    step.replaceChildren(...withLink(state.discProblem || hint), ...folder);
+    replaceKids(step, ...withLink(state.discProblem || hint), ...folder);
     step.classList.toggle('bad', !!state.discProblem);
   } else {
     const r = state.update?.release;
     const notes = r?.notes ? playerNotes(r.notes) : '';
     const items = notes ? newsItems(notes).slice(0, 4) : [];
     if (items.length) {
-      $('home-title').replaceChildren(...tNodes('home.newIn', { version: r.version }));
+      replaceKids($('home-title'), ...tNodes('home.newIn', { version: r.version }));
       const date = released(r.published);
-      $('home-meta').replaceChildren(...(date ? [date, el('span', { class: 'sep' }, '·')] : []),
+      replaceKids($('home-meta'), ...(date ? [date, el('span', { class: 'sep' }, '·')] : []),
         el('button', { class: 'link', onclick: () => show('notes') }, t('home.readNotes')));
-      $('news').replaceChildren(...items.map((i) => el('li', {}, el('b', {}, i.title), i.text)));
+      replaceKids($('news'), ...items.map((i) => el('li', {}, el('b', {}, i.title), i.text)));
     } else {
       $('home-title').textContent = t('home.ready');
-      $('home-meta').replaceChildren(t('home.version', { version: state.version }));
+      replaceKids($('home-meta'), t('home.version', { version: state.version }));
     }
     $('news').hidden = !items.length;
   }
@@ -228,7 +229,7 @@ function renderCrash() {
   const x = state.lastExit;
   box.hidden = !x;
   if (!x) return;
-  box.replaceChildren(el('div', { class: 'note' }, icon('i-alert'), el('div', {},
+  replaceKids(box, el('div', { class: 'note' }, icon('i-alert'), el('div', {},
     el('b', {}, t('crash.title')), el('div', {}, t('crash.body', { why: x.why })),
     el('div', { class: 'note-actions' },
       el('button', { class: 'btn', onclick: shareLog }, icon('i-share'), t('crash.share')),
@@ -240,7 +241,7 @@ function renderStartNote() {
   const box = $('start-note');
   box.hidden = state.startNote !== 'performance';
   if (box.hidden) return;
-  box.replaceChildren(el('div', { class: 'note' }, icon('i-sliders'), el('div', {},
+  replaceKids(box, el('div', { class: 'note' }, icon('i-sliders'), el('div', {},
     el('div', {}, t('start.performance')),
     el('div', { class: 'note-actions' },
       el('button', { class: 'btn text', onclick: () => { state.startNote = null; renderStartNote(); } }, t('crash.dismiss'))))));
@@ -250,7 +251,7 @@ function renderStartNote() {
 function renderGpu() {
   const box = $('gpu-note');
   box.hidden = !state.softwareGpu;
-  box.replaceChildren(...(state.softwareGpu ? [el('div', { class: 'note' }, icon('i-alert'), el('div', {}, t('home.softwareGpu')))] : []));
+  replaceKids(box, ...(state.softwareGpu ? [el('div', { class: 'note' }, icon('i-alert'), el('div', {}, t('home.softwareGpu')))] : []));
 }
 
 // Time played in all (saves/playtime.txt, counted by the launcher while the game runs).
@@ -287,7 +288,7 @@ function onlineNote() {
 function renderOnline() {
   const note = onlineNote();
   $('online-note').hidden = !note;
-  $('online-note').replaceChildren(...(note ? [note] : []));
+  replaceKids($('online-note'), ...(note ? [note] : []));
   if (tabs[state.tab]?.[0] === 'online' && !$('page-settings').hidden) renderRows();
 }
 
@@ -296,11 +297,11 @@ function renderServer() {
   const s = state.server;
   f.hidden = !s;
   if (!s) return;
-  if (s === 'down') return f.replaceChildren(el('span', { class: 'dot' }), t('server.down'));
+  if (s === 'down') return replaceKids(f, el('span', { class: 'dot' }), t('server.down'));
   if (newer(s.min_version, state.version))
-    return f.replaceChildren(el('span', { class: 'dot warn' }), t('server.needsVersion', { version: s.min_version }));
+    return replaceKids(f, el('span', { class: 'dot warn' }), t('server.needsVersion', { version: s.min_version }));
   const open = s.races ? t('server.up', { races: tn('server.races', s.races), riders: tn('server.riders', s.riders) }) : t('server.upEmpty');
-  f.replaceChildren(el('span', { class: 'dot ok' }), open);
+  replaceKids(f, el('span', { class: 'dot ok' }), open);
 }
 
 function newer(a, b) {
@@ -420,7 +421,7 @@ function keepFocus(box, draw) {
 }
 
 function renderTabs() {
-  keepFocus($('tabs'), () => $('tabs').replaceChildren(...tabs.map(([key], i) => el('button', {
+  keepFocus($('tabs'), () => replaceKids($('tabs'), ...tabs.map(([key], i) => el('button', {
     class: i === state.tab ? 'on' : '', role: 'tab', 'aria-selected': String(i === state.tab),
     onclick: () => { state.tab = i; renderTabs(); renderRows(); },
   }, t(`tab.${key}`)))));
@@ -457,7 +458,7 @@ function renderRows() {
       control(row, off));
   });
   const note = tabs[state.tab][0] === 'online' || (tabs[state.tab][0] === 'game' && has('disc-import')) ? onlineNote() : null;
-  keepFocus($('rows'), () => $('rows').replaceChildren(...(note ? [note] : []), ...rows));
+  keepFocus($('rows'), () => replaceKids($('rows'), ...(note ? [note] : []), ...rows));
 }
 
 // Back to the game's player defaults; the disc image, the rider name and the language stay.
@@ -652,7 +653,7 @@ function renderNotes() {
     $('notes-body').innerHTML = markdown(playerNotes(r.notes));
   } else {
     // the answer came from the backup server, which has no notes (finding 138)
-    $('notes-body').replaceChildren(el('p', { class: 'muted' }, t('notes.missing', { version: r.version })));
+    replaceKids($('notes-body'), el('p', { class: 'muted' }, t('notes.missing', { version: r.version })));
   }
 }
 
@@ -676,7 +677,7 @@ function renderHelp() {
     el('button', { class: 'btn', onclick: toggleLicences }, icon('i-notes'), t('help.licences.button'))));
   const out = [...rows];
   if (state.licences) out.push(el('pre', { class: 'licences' }, state.licences));
-  keepFocus($('help-rows'), () => $('help-rows').replaceChildren(...out));
+  keepFocus($('help-rows'), () => replaceKids($('help-rows'), ...out));
 }
 
 async function toggleLicences() {
@@ -700,7 +701,7 @@ async function shareLog() {
 
 function status(kind, iconId, ...parts) {
   const lead = iconId ? icon(iconId, kind) : el('span', { class: `dot ${kind}` });
-  $('status').replaceChildren(lead, el('span', {}, ...parts));
+  replaceKids($('status'), lead, el('span', {}, ...parts));
 }
 
 // A confirmation fades back to the footer's state; an error stays (fail).
@@ -719,7 +720,7 @@ function fail(text, fix = null) {
 function setPrimary({ text, icon: iconId = null, disabled = false, onclick }) {
   const b = $('primary');
   b.disabled = disabled;
-  b.replaceChildren(...(iconId ? [icon(iconId, iconId === 'i-play' ? 'fill' : '')] : []), el('span', {}, text));
+  replaceKids(b, ...(iconId ? [icon(iconId, iconId === 'i-play' ? 'fill' : '')] : []), el('span', {}, text));
   b.onclick = onclick;
 }
 
@@ -728,7 +729,7 @@ function setSecondary(text, onclick, solid = false) {
   const b = $('secondary');
   b.hidden = !text;
   b.className = solid ? 'btn' : 'btn text';
-  if (text) { b.replaceChildren(...(typeof text === 'string' ? [text] : text)); b.onclick = onclick; }
+  if (text) { replaceKids(b, ...(typeof text === 'string' ? [text] : text)); b.onclick = onclick; }
 }
 
 // A phone's disc import in the footer: its progress, its question or its problem. True when drawn.
@@ -742,7 +743,7 @@ function renderDiscFooter() {
   if (d.stage === 'copying') {
     const pct = d.total ? Math.min(100, (d.done / d.total) * 100) : 0;
     const line = d.total ? t('disc.copying', { done: gb(d.done), total: gb(d.total) }) : t('disc.copyingUnknown', { done: gb(d.done) });
-    $('status').replaceChildren(el('div', {}, line, el('div', { class: 'bar' }, el('i', { style: `width:${pct}%` })),
+    replaceKids($('status'), el('div', {}, line, el('div', { class: 'bar' }, el('i', { style: `width:${pct}%` })),
       el('small', { class: 'sub-line' }, t('disc.keepOpen'))));
     setPrimary({ text: t('footer.play'), icon: 'i-play', disabled: true });
     return true;
@@ -867,7 +868,7 @@ function renderProgress(done, total) {
   const mb = (n) => (n / 1048576).toFixed(0);
   const bar = el('div', { class: 'bar' }, el('i', { style: `width:${pct}%` }));
   const version = state.update.release.version;
-  $('status').replaceChildren(el('div', {},
+  replaceKids($('status'), el('div', {},
     ...(total ? tNodes('footer.downloading', { version, done: mb(done), total: mb(total) }) : tNodes('footer.downloadingSize', { version, done: mb(done) })), bar));
 }
 
@@ -975,6 +976,7 @@ function apply(snap) {
 // ---------- start ----------
 
 async function start() {
+  if (dhdBoot.stopped) return;  // boot.js says why the launcher can't run here
   await bridge.ready;
   const snap = await call('snapshot');
   apply(snap);
@@ -1071,6 +1073,7 @@ async function start() {
   checkUpdate();
   checkServer();
   checkDisc();
+  dhdBoot.started = true;
 }
 
-start();
+start().catch(dhdBoot.failed);  // boot.js shows what stopped the start

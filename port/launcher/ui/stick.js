@@ -56,7 +56,15 @@ function stickLabelLines(measure, label) {
 function drawStick(ctx, x0, label, ax, ay, dead, live) {
   const s = STICK_SIZE, h = s / 2, cx = x0 + h, cy = h + 4;
   ctx.fillStyle = '#130e25';
-  ctx.beginPath(); ctx.roundRect(x0, 4, s, s, 8); ctx.fill();
+  // the rounded square by arcs: canvas's roundRect needs Chromium 99 / Safari 16 (finding 273)
+  ctx.beginPath();
+  ctx.moveTo(x0 + 8, 4);
+  ctx.arcTo(x0 + s, 4, x0 + s, 4 + s, 8);
+  ctx.arcTo(x0 + s, 4 + s, x0, 4 + s, 8);
+  ctx.arcTo(x0, 4 + s, x0, 4, 8);
+  ctx.arcTo(x0, 4, x0 + s, 4, 8);
+  ctx.closePath();
+  ctx.fill();
   // the travel that does nothing: the first byte that moves anything, as a fraction of the travel
   let zone = 0;
   for (let i = 0; i <= 200; i++) if (gameEffect(stickByte(Math.round((i / 200) * 32767), dead)) === 0) zone = i / 200; else break;
