@@ -663,8 +663,10 @@ fn native_convert(@builtin(global_invocation_id) tid: vec3<u32>) {
 // before present_pixel draws the sharp picture in the middle.
 // present_direct's (finding 247): map is the picture's size in display pixels, then its origin in
 // present_source, its display surface (texels); mode.x is 1 when the display doubles the
-// surface's rows, mode.zw one over the surface texture's size.
-struct Present { rect: vec4<f32>, cover: vec4<f32>, source: vec4<f32>, map: vec4<f32>, mode: vec4<f32>, }
+// surface's rows, mode.zw one over the surface texture's size. adjust: the player's picture
+// settings (picture.wgsl, appended to this file; zeros leave the colour as it is), on the picture
+// and the fill, not on the small texture (the fill would get them twice).
+struct Present { rect: vec4<f32>, cover: vec4<f32>, source: vec4<f32>, map: vec4<f32>, mode: vec4<f32>, adjust: vec4<f32>, }
 @group(0) @binding(0) var<uniform> present: Present;
 @group(1) @binding(0) var present_source: texture_2d<f32>;
 @group(1) @binding(1) var present_sampler: sampler;
@@ -676,7 +678,7 @@ const FILL_SHADE: f32 = 0.45;
 @fragment
 fn present_pixel(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = (position.xy - present.rect.xy) / present.rect.zw;
-    return vec4<f32>(textureSampleLevel(present_source, present_sampler, uv, 0.0).rgb, 1.0);
+    return vec4<f32>(picture_adjust(textureSampleLevel(present_source, present_sampler, uv, 0.0).rgb, present.adjust), 1.0);
 }
 
 // present_pixel for a picture that lies as one rectangle in its display surface (scanout.rs's
@@ -699,7 +701,7 @@ fn present_direct(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f
         y = pair + 0.5 + select(0.0, t - row, row - pair * 2.0 == 1.0);
     }
     let uv = (present.map.zw + vec2<f32>(p.x, y)) * present.mode.zw;
-    return vec4<f32>(textureSampleLevel(present_source, present_sampler, uv, 0.0).rgb, 1.0);
+    return vec4<f32>(picture_adjust(textureSampleLevel(present_source, present_sampler, uv, 0.0).rgb, present.adjust), 1.0);
 }
 
 // A texel of the small texture: the mean of 4 x 4 filtered samples spread over its part of the
@@ -727,5 +729,5 @@ fn present_fill(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32
             sum += weight * textureSampleLevel(present_source, present_sampler, uv + vec2<f32>(f32(i), f32(j)) * 1.5 / FILL_SIZE, 0.0).rgb;
         }
     }
-    return vec4<f32>(sum / 16.0 * FILL_SHADE, 1.0);
+    return vec4<f32>(picture_adjust(sum / 16.0, present.adjust) * FILL_SHADE, 1.0);
 }

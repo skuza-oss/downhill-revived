@@ -50,11 +50,12 @@ extern void host_log_drain(void) __attribute__((weak));
 #endif
 #include <SDL3/SDL_atomic.h>
 #include <SDL3/SDL_timer.h>  /* the performance counter */
+#include <math.h>    /* NAN */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "dhd_render.h"   /* -Iport/render/include */
-#include "dhd_render_ext.h"   /* dhdr_device_lost */
+#include "dhd_render_ext.h"   /* dhdr_device_lost, dhdr_picture */
 #include "perf_log.h"     /* the perf: lines (finding 129) */
 #include "../host/host_end.h"   /* the render thread stops first at the end (finding 210) */
 
@@ -78,10 +79,24 @@ static int platform_present_active(void)
 #endif
 }
 
+/* A picture setting's number (finding 275), NaN when it is unset or no number: Rust's
+   dhdr_picture holds it to its range and takes NaN as neutral. */
+static float picture_setting(const char *name)
+{
+    const char *v = getenv(name);
+    char *end = NULL;
+    double d = v ? strtod(v, &end) : 0;
+    return v && end != v ? (float)d : NAN;
+}
+
+/* Also the picture settings (Brightness, Contrast, Saturation, Gamma; finding 275): read with the
+   counter, at the first picture and when the page changes one, never per picture. */
 void gs_gpu_counter_apply(void)
 {
     const char *v = getenv("DHD_PERF_COUNTER");
     SDL_SetAtomicInt(&counter_on, v && atoi(v) != 0);
+    dhdr_picture(picture_setting("DHD_BRIGHTNESS"), picture_setting("DHD_CONTRAST"), picture_setting("DHD_SATURATION"),
+                 picture_setting("DHD_GAMMA"));
 }
 
 /* The touch controls over the picture (port/host/touch_host.c, finding 141): their shapes for the

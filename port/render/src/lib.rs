@@ -106,6 +106,7 @@ pub mod exact {
 pub mod present {
     pub mod counter;
     pub mod font8x8;
+    pub mod picture;
     pub mod pipe;
     pub mod surface;
     pub mod touch;

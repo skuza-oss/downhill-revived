@@ -29,7 +29,7 @@
 
 mod common;
 use dhd_render::native::pipelines;
-use dhd_render::shaders::{NATIVE, NATIVE_DUAL, PRESENT, RASTER};
+use dhd_render::shaders::{NATIVE, NATIVE_DUAL, PICTURE, PRESENT, RASTER};
 use naga::back::spv;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -514,7 +514,8 @@ fn native_spirv() {
         None => default.to_string(),
     };
     let other = std::env::var_os("DHD_NATIVE_WGSL").is_some();
-    let native = read("DHD_NATIVE_WGSL", NATIVE);
+    // another native.wgsl gets picture.wgsl after it, as NATIVE has it
+    let native = if other { read("DHD_NATIVE_WGSL", NATIVE) + PICTURE } else { NATIVE.to_string() };
     let dual_source = format!("enable dual_source_blending;\n{native}{}", read("DHD_NATIVE_DUAL_WGSL", NATIVE_DUAL));
     let plain = parse(&native);
     let dual = parse(&dual_source);

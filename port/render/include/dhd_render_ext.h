@@ -5,7 +5,7 @@
 
    SP10 (docs/findings/090-speed.md): an indexed native picture. Finding 109: the device's largest
    texture. Finding 129: the perf: lines' GPU counters. Finding 171: a lost device. Finding 194:
-   whether translated VU1 meshes can be drawn. Finding 256: the pipeline list. */
+   whether translated VU1 meshes can be drawn. Finding 256: the pipeline list. Finding 275: the picture settings. */
 #ifndef DHD_RENDER_EXT_H
 #define DHD_RENDER_EXT_H
 
@@ -56,6 +56,12 @@ DHDR_FN(dhdr_native_meshes) int dhdr_native_meshes(void);
    is only a cache: without it, or for another GPU or driver, pipelines are built at first use as
    before. DHD_PIPELINE_LIST=0: no list. The browser's renderer ignores the call. */
 DHDR_FN(dhdr_native_pipeline_list) void dhdr_native_pipeline_list(const char *path);
+
+/* Finding 275: the player's picture settings for the next pictures (dhd.ini brightness, contrast,
+   saturation: percentages 50-150; gamma 0.6-1.4; held to those), NaN for one that is not set (it
+   is then neutral). Both present passes apply them to the game's picture; all neutral leaves the
+   picture's bytes as they are. Any thread; numbers, so the browser's renderer takes them too. */
+DHDR_FN(dhdr_picture) void dhdr_picture(float brightness, float contrast, float saturation, float gamma);
 
 /* Finding 260: for the game's crash handler (port/hle/host.c crashed). Returns the crash note's
    path beside the pipeline list (NULL: no list, or the native renderer not made yet) and sets *key

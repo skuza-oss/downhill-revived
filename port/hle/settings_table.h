@@ -15,6 +15,10 @@ static const SettingChoice setting_choices_size[] = {{"monitor", "Monitor size"}
 static const SettingChoice setting_choices_widescreen[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_dhd_aspect[] = {{"4:3", "4:3"}, {"wide", "Wide"}, {"16:9", "16:9"}, {"stretch", "Stretch"}, {"pixels", "Pixels"}};
 static const SettingChoice setting_choices_dhd_present_filter[] = {{"linear", "Smooth"}, {"point", "Sharp"}};
+static const SettingChoice setting_choices_brightness[] = {{"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}, {"110", "110%"}, {"120", "120%"}, {"130", "130%"}, {"140", "140%"}, {"150", "150%"}};
+static const SettingChoice setting_choices_contrast[] = {{"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}, {"110", "110%"}, {"120", "120%"}, {"130", "130%"}, {"140", "140%"}, {"150", "150%"}};
+static const SettingChoice setting_choices_saturation[] = {{"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}, {"110", "110%"}, {"120", "120%"}, {"130", "130%"}, {"140", "140%"}, {"150", "150%"}};
+static const SettingChoice setting_choices_gamma[] = {{"0.6", "0.6"}, {"0.7", "0.7"}, {"0.8", "0.8"}, {"0.9", "0.9"}, {"1.0", "1.0"}, {"1.1", "1.1"}, {"1.2", "1.2"}, {"1.3", "1.3"}, {"1.4", "1.4"}};
 static const SettingChoice setting_choices_renderer[] = {{"native", "Native"}, {"exact", "Exact"}};
 static const SettingChoice setting_choices_skip_movies[] = {{"0", "OFF"}, {"1", "ON"}};
 static const SettingChoice setting_choices_vibration[] = {{"0", "OFF"}, {"1", "ON"}};
@@ -57,6 +61,10 @@ static const SettingInfo setting_table[] = {
     {"widescreen", "DHD_WIDESCREEN", "0", setting_choices_widescreen, 2},
     {"DHD_ASPECT", "DHD_ASPECT", "4:3", setting_choices_dhd_aspect, 5},
     {"DHD_PRESENT_FILTER", "DHD_PRESENT_FILTER", "linear", setting_choices_dhd_present_filter, 2},
+    {"brightness", "DHD_BRIGHTNESS", "100", setting_choices_brightness, 11},
+    {"contrast", "DHD_CONTRAST", "100", setting_choices_contrast, 11},
+    {"saturation", "DHD_SATURATION", "100", setting_choices_saturation, 11},
+    {"gamma", "DHD_GAMMA", "1.0", setting_choices_gamma, 9},
     {"renderer", "DHD_RENDER", "exact", setting_choices_renderer, 2},
     {"skip_movies", "DHD_SKIP_MOVIES", "0", setting_choices_skip_movies, 2},
     {"vibration", "DHD_VIBRATION", "1", setting_choices_vibration, 2},

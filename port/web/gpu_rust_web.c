@@ -32,7 +32,9 @@
 #include <string.h>
 #include <wasi/libc-environ.h>
 #include <time.h>
+#include <math.h>   /* NAN */
 #include "dhd_render.h"   /* -Iport/render/include */
+#include "dhd_render_ext.h"   /* dhdr_picture */
 #include "../gs/gpu_exact.inc"
 
 /* The reactor's own JSPI import: suspends until the read in flight has mapped. 1 = mapped, 0 = failed
@@ -43,12 +45,24 @@ __attribute__((import_module("env"), import_name("web_gpu_await"))) int32_t web_
    it (web_env_changed), not for every picture. The browser shows no ping yet. -1: not read. */
 static int counter_on = -1;
 
+/* A picture setting's number (finding 275; as gpu_rust.c's), NaN when unset or no number. */
+static float picture_setting(const char *name)
+{
+    const char *v = getenv(name);
+    char *end = NULL;
+    double d = v ? strtod(v, &end) : 0;
+    return v && end != v ? (float)d : NAN;
+}
+
+/* The picture settings (Brightness, Contrast, Saturation, Gamma) are read with the counter. */
 static void counter_present(DhdrSurface *surface)
 {
     struct timespec now;
     if (counter_on < 0) {
         const char *v = getenv("DHD_PERF_COUNTER");
         counter_on = v && atoi(v) != 0;
+        dhdr_picture(picture_setting("DHD_BRIGHTNESS"), picture_setting("DHD_CONTRAST"), picture_setting("DHD_SATURATION"),
+                     picture_setting("DHD_GAMMA"));
     }
     clock_gettime(CLOCK_MONOTONIC, &now);
     dhdr_surface_counter(surface, counter_on, -1, -1, -1, now.tv_sec + now.tv_nsec * 1e-9);

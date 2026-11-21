@@ -5,10 +5,13 @@
 
 /// raster.wgsl: the exact renderer (`main`, `local_copy`, `scanout`, `depth_probe`).
 pub const RASTER: &str = include_str!("../../gs/raster.wgsl");
-/// present.wgsl: the exact present pass (`present_vertex`, `present_fragment`).
-pub const PRESENT: &str = include_str!("../../gs/present.wgsl");
-/// native.wgsl: the native renderer.
-pub const NATIVE: &str = include_str!("../../gs/native.wgsl");
+/// present.wgsl: the exact present pass (`present_vertex`, `present_fragment`), with `PICTURE`.
+pub const PRESENT: &str = concat!(include_str!("../../gs/present.wgsl"), include_str!("present/picture.wgsl"));
+/// native.wgsl: the native renderer, with `PICTURE` (its present pass's).
+pub const NATIVE: &str = concat!(include_str!("../../gs/native.wgsl"), include_str!("present/picture.wgsl"));
+/// present/picture.wgsl: `picture_adjust`, the player's picture settings in both present passes
+/// (`present/picture.rs`, finding 275).
+pub const PICTURE: &str = include_str!("present/picture.wgsl");
 /// native_dual.wgsl: the dual-source blending entry points, appended to native.wgsl for the dual
 /// module (`native/init.rs`).
 pub const NATIVE_DUAL: &str = include_str!("../../gs/native_dual.wgsl");
@@ -28,6 +31,7 @@ const fn has_cr(s: &str) -> bool {
 const _: () = assert!(!has_cr(RASTER), "port/gs/raster.wgsl has CR line endings (it must be LF)");
 const _: () = assert!(!has_cr(PRESENT), "port/gs/present.wgsl has CR line endings (it must be LF)");
 const _: () = assert!(!has_cr(NATIVE), "port/gs/native.wgsl has CR line endings (it must be LF)");
+const _: () = assert!(!has_cr(PICTURE), "port/render/src/present/picture.wgsl has CR line endings (it must be LF)");
 const _: () = assert!(!has_cr(NATIVE_DUAL), "port/gs/native_dual.wgsl has CR line endings (it must be LF)");
 
 #[cfg(all(test, feature = "native"))]

@@ -57,6 +57,13 @@ const fn c(value: &'static str, label: &'static str) -> Choice {
 const SWITCH: &[Choice] = &[c("0", "OFF"), c("1", "ON")];
 const TOGGLE: &[Choice] = &[c("off", "OFF"), c("on", "ON")];
 
+/// Brightness, Contrast and Saturation (finding 275): 50% to 150% in steps of 10.
+const PERCENTS: &[Choice] = &[c("50", "50%"), c("60", "60%"), c("70", "70%"), c("80", "80%"), c("90", "90%"), c("100", "100%"),
+                              c("110", "110%"), c("120", "120%"), c("130", "130%"), c("140", "140%"), c("150", "150%")];
+/// Gamma (finding 275): 0.6 to 1.4 in steps of 0.1; above 1 lifts the mid-tones.
+const GAMMAS: &[Choice] = &[c("0.6", "0.6"), c("0.7", "0.7"), c("0.8", "0.8"), c("0.9", "0.9"), c("1.0", "1.0"), c("1.1", "1.1"),
+                            c("1.2", "1.2"), c("1.3", "1.3"), c("1.4", "1.4")];
+
 const fn text(key: &'static str, env: &'static str) -> Setting {
     Setting { key, env, kind: Kind::Text, default: "", builtin: "", choices: &[], other: "", always: false }
 }
@@ -92,6 +99,13 @@ pub const SETTINGS: &[Setting] = &[
     choice("DHD_ASPECT", "DHD_ASPECT", &[c("4:3", "4:3"), c("wide", "Wide"), c("16:9", "16:9"), c("stretch", "Stretch"),
                                          c("pixels", "Pixels")], "wide", "4:3"),
     choice("DHD_PRESENT_FILTER", "DHD_PRESENT_FILTER", &[c("linear", "Smooth"), c("point", "Sharp")], "linear", "linear"),
+    // The picture settings (finding 275, port/render/src/present/picture.rs): applied to the game's
+    // picture in the present pass, the touch controls and the counter left as they are. 100% and
+    // 1.0 are today's picture, byte for byte. Another number (dhd.ini) is held to the range.
+    choice("brightness", "DHD_BRIGHTNESS", PERCENTS, "100", "100"),
+    choice("contrast", "DHD_CONTRAST", PERCENTS, "100", "100"),
+    choice("saturation", "DHD_SATURATION", PERCENTS, "100", "100"),
+    choice("gamma", "DHD_GAMMA", GAMMAS, "1.0", "1.0"),
     Setting { other: "exact", ..choice("renderer", "DHD_RENDER", &[c("native", "Native"), c("exact", "Exact")], "native", "exact") },
     switch("skip_movies", "DHD_SKIP_MOVIES", SWITCH, "1", "0"),
     switch("vibration", "DHD_VIBRATION", SWITCH, "1", "1"),
