@@ -113,7 +113,8 @@ typedef struct {
                             most updates advance no whole field (finding 218) */
     int menu_up;         /* a game popup is up: in a replay, its menu (finding 218) */
     int pause_row[3];    /* the game's pause menu: RESUME, RE-START, QUIT's rows (-1: none) */
-    double race_ms;      /* race time, ms (fields * 1000/60), stopped while paused */
+    int front_end;       /* no race's loop runs: a pause (and its menu) is over, QUIT taken (finding 274) */
+    double race_ms;     /* race time, ms (fields * 1000/60), stopped while paused */
     uint32_t vsync;      /* the game's VBLANKs so far */
     int fps;             /* the game's VBLANKs a second (60, or the high rate) */
 } TouchGame;
@@ -241,5 +242,15 @@ int touch_target(const Touch *t, int kind, int index, float *x, float *y);
 int touch_control(const Touch *t, int control, float *x, float *y, float *r);
 /* The same control's half sizes (a box's width and height; a round control's radius twice). */
 int touch_control_size(const Touch *t, int control, float *half_w, float *half_h);
+/* While the game's own pause menu has the taps (the rows' MORE, finding 274): the spot the overlay
+   keeps (its Pause button's touch area, mm, centre and half sizes); the host keeps that spot's
+   mouse from the menus. 0: none. */
+int touch_menu_keeps(const Touch *t, float *x, float *y, float *half_w, float *half_h);
+/* The host's mouse events and that spot: 1 when the event is the overlay's (the menus never see it).
+   in: the event is on the spot; owned: the overlay takes every touch now; *pressed: the host's latch,
+   a press that began on the spot (its moves and release are the overlay's too). A release or a
+   cancelled touch (TOUCH_MOUSE_CANCEL) ends the latch whoever owns the touches by then. */
+enum { TOUCH_MOUSE_MOVE, TOUCH_MOUSE_DOWN, TOUCH_MOUSE_UP, TOUCH_MOUSE_CANCEL };
+int touch_kept_mouse(int *pressed, int kind, int in, int owned);
 
 #endif

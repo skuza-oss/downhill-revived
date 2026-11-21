@@ -167,10 +167,15 @@ static const uint16_t DPAD_PAD[DPAD_ARMS] = {PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIG
 static const float DPAD_AXIS_DEG[DPAD_ARMS] = {90.0f, -90.0f, 180.0f, 0.0f};   /* y up */
 /* PAUSE_PAD: a controller took over the game's pause menu (or its question) from the rows: the
    overlay no longer knows where the game's menu is, so it hides and leaves the menu to the
-   controller until the race goes on. */
-enum { PAUSE_NONE, PAUSE_ASKED, PAUSE_OPEN, PAUSE_CONTROLS, PAUSE_CONFIRM, PAUSE_PAD, PAUSE_CODES };
-/* ROW_CODES shares the CONTROLS row (its right half: the panel has room for five rows) */
-enum { ROW_RESUME, ROW_RESTART, ROW_QUIT, ROW_CONTROLS, ROW_BAIL, ROW_CODES, PAUSE_ROWS, PAUSE_BUTTON = 100 };
+   controller until the race goes on.
+   PAUSE_MENU: the rows' MORE (finding 274): the game's own pause menu (OPTIONS, TRICK LIST, NEW
+   LEVEL, MUSIC PLAYLIST, ...) takes the taps (the menus' mouse, findings 092, 266, 268); the
+   overlay keeps only its Pause button, which is the menu's △ as Back is (back one page, from the
+   top the game's own resume), until the race goes on. */
+enum { PAUSE_NONE, PAUSE_ASKED, PAUSE_OPEN, PAUSE_CONTROLS, PAUSE_CONFIRM, PAUSE_PAD, PAUSE_CODES, PAUSE_MENU };
+/* ROW_CODES shares the CONTROLS row, ROW_MORE the BAIL OUT row (their right halves: the panel has
+   room for five rows) */
+enum { ROW_RESUME, ROW_RESTART, ROW_QUIT, ROW_CONTROLS, ROW_BAIL, ROW_CODES, ROW_MORE, PAUSE_ROWS, PAUSE_BUTTON = 100 };
 /* the CODES page: the d-pad and the face buttons (as the codes name them), then CLEAR, BACK, ENTER */
 enum { CODE_UP, CODE_DOWN, CODE_LEFT, CODE_RIGHT, CODE_TRIANGLE, CODE_CIRCLE, CODE_CROSS, CODE_SQUARE,
        CODE_CLEAR, CODE_BACK, CODE_ENTER, CODE_BUTTONS };
@@ -770,6 +775,28 @@ int touch_control(const Touch *t, int control, float *x, float *y, float *r)
     return 1;
 }
 
+int touch_menu_keeps(const Touch *t, float *x, float *y, float *half_w, float *half_h)
+{
+    if (t->pause != PAUSE_MENU || !t->ctl[TC_PAUSE].on || !t->ctl[TC_PAUSE].box) return 0;
+    const Ctl *k = &t->ctl[TC_PAUSE];
+    *x = k->x, *y = k->y, *half_w = k->hw * AREA_GROW, *half_h = k->hh * AREA_GROW;
+    return 1;
+}
+
+/* The latch goes before ownership: Pause held in MORE, Back resumes the race (the overlay owns the
+   touches), then the release: it must still end the latch, or the next menu tap is swallowed (274). */
+int touch_kept_mouse(int *pressed, int kind, int in, int owned)
+{
+    if (kind == TOUCH_MOUSE_CANCEL) { *pressed = 0; return owned; }
+    if (*pressed) {
+        if (kind == TOUCH_MOUSE_UP) *pressed = 0;
+        return 1;
+    }
+    if (owned) return 1;
+    if (in && kind == TOUCH_MOUSE_DOWN) *pressed = 1;
+    return in && kind != TOUCH_MOUSE_UP;
+}
+
 int touch_control_size(const Touch *t, int control, float *half_w, float *half_h)
 {
     if (control < 0 || control >= TC_COUNT || !t->ctl[control].on) return 0;
@@ -1217,6 +1244,7 @@ int touch_visible(const Touch *t)
    brings it back); in the menus a touch is the menus' (their mouse). */
 int touch_owns_touches(const Touch *t)
 {
+    if (t->pause == PAUSE_MENU) return 0;   /* the game's pause menu takes them; the Pause button: touch_menu_keeps */
     return touch_visible(t) || (t->hidden_by_pad && ((race_on_screen(t) && !replay_on(t)) || flyover_on(t)));
 }
 
@@ -1231,6 +1259,7 @@ int touch_freeze(const Touch *t) { return t->freeze; }
 static int paused(const Touch *t) { return t->pause != PAUSE_NONE || t->editor; }
 
 static void end_finger_job(Touch *t, Finger *f);
+static void menu_back(Touch *t);
 
 /* Every race touch lets go (the overlay hid, or the touches were taken away). */
 static void drop_race_touches(Touch *t)
@@ -1293,10 +1322,10 @@ static Box pause_row_box(const Touch *t, int row)
 {
     float W = t->screen.width, H = t->screen.height;
     float rh = fmaxf(9.0f, H * 0.124f), top = H * 0.05f + H * 0.08f + 6;
-    int line = row == ROW_CODES ? ROW_CONTROLS : row;
+    int line = row == ROW_CODES ? ROW_CONTROLS : row == ROW_MORE ? ROW_BAIL : row;
     float y = top + rh * (line + 0.5f) + (line >= ROW_CONTROLS ? 2.0f : 0);
-    if (row == ROW_CONTROLS || row == ROW_CODES)   /* half each, CONTROLS on the left */
-        return (Box){W / 2 + (row == ROW_CODES ? 1 : -1) * W * 0.15f, y, W * 0.15f - 0.5f, rh / 2 - 0.4f};
+    if (line == ROW_CONTROLS || line == ROW_BAIL)   /* half each, CONTROLS and BAIL OUT on the left */
+        return (Box){W / 2 + (row == ROW_CODES || row == ROW_MORE ? 1 : -1) * W * 0.15f, y, W * 0.15f - 0.5f, rh / 2 - 0.4f};
     return (Box){W / 2, y, W * 0.30f, rh / 2 - 0.4f};
 }
 
@@ -1501,6 +1530,9 @@ static void pause_row_tapped(Touch *t, int row)
     case ROW_CODES:
         t->pause = PAUSE_CODES;
         t->code_len = 0;
+        break;
+    case ROW_MORE:   /* the game's own menu, already open under the panel (no press: its cursor stays) */
+        t->pause = PAUSE_MENU;
         break;
     case ROW_BAIL:   /* START (out of the menu), then SELECT twice */
         seq_add(t, PAD_START);
@@ -2206,6 +2238,12 @@ void touch_down(Touch *t, long long id, float x, float y, double now)
     }
     if (t->editor) { editor_down(t, f); return; }
     if (!touch_visible(t)) { f->job = JOB_IGNORED; return; }
+    if (t->pause == PAUSE_MENU) {   /* the game's menu has the taps (its mouse); the overlay only Pause */
+        int on = hit(t, TC_PAUSE, x, y, AREA_GROW) < 1e8f;   /* its touch area, as in the race */
+        f->job = on ? JOB_PANEL : JOB_IGNORED;
+        f->target = on ? PAUSE_BUTTON : -1;
+        return;
+    }
     if (flyover_on(t)) {   /* only SKIP: a finger already down when the flight began never was one */
         f->job = skip_hit(t, x, y) ? JOB_SKIP : JOB_IGNORED;
         return;
@@ -2243,6 +2281,7 @@ static void stick_follow(Touch *t, Finger *f)
 
 static void pedal_follow(Touch *t, Finger *f)
 {
+    if (paused(t)) return;   /* a pedal finger held into a pause flicks nothing: its ◻ / ○ would reach the menu (274) */
     const Ctl *p = &t->ctl[TC_PEDAL];
     float dx = f->x - p->x, dy = f->y - p->y, d = hypotf(dx, dy);
     if (d <= p->r) { f->flick_armed = 1; return; }   /* re-arms back inside the rim */
@@ -2293,6 +2332,7 @@ void touch_up(Touch *t, long long id, float x, float y, double now)
     if (f->job == JOB_PANEL) {
         if (t->pause != PAUSE_NONE) {   /* row taps fire on lift, on the row they started on */
             if (t->pause == PAUSE_CONTROLS) pause_row_tapped(t, 0);
+            else if (t->pause == PAUSE_MENU) { if (f->target == PAUSE_BUTTON) menu_back(t); }
             else if (f->target == PAUSE_BUTTON) pause_row_tapped(t, ROW_RESUME);   /* Pause again: Resume */
             else if (f->target >= 0 && pause_row_at(t, x, y) == f->target) pause_row_tapped(t, f->target);
         } else if (t->panel_open && f->target >= 0 && panel_button_at(t, x, y) == f->target) panel_tapped(t, f->target);
@@ -2330,6 +2370,14 @@ void touch_cancel_all(Touch *t, double now)
     t->hold_cross_until = 0;
 }
 
+/* The game's pause menu and its pages (a controller's or MORE's): △, the game's own back, one page
+   at a time; on the top page it closes the menu and the race goes on (func_0015E630), which
+   pause_step then sees. */
+static void menu_back(Touch *t)
+{
+    if (!seq_busy(t)) seq_add(t, PAD_TRIANGLE);
+}
+
 void touch_back(Touch *t, double now)
 {
     t->now = now;
@@ -2342,7 +2390,7 @@ void touch_back(Touch *t, double now)
     if (t->pause == PAUSE_CONFIRM) { pause_row_tapped(t, CONFIRM_NO); return; }
     if (t->pause == PAUSE_OPEN) { pause_row_tapped(t, ROW_RESUME); return; }
     if (t->pause == PAUSE_ASKED) return;
-    if (t->pause == PAUSE_PAD) { if (!seq_busy(t)) seq_add(t, PAD_TRIANGLE); return; }   /* the menu's back, as in menus */
+    if (t->pause == PAUSE_PAD || t->pause == PAUSE_MENU) { menu_back(t); return; }   /* the menu's back, as in menus */
     if (race_on_screen(t)) { pause_pressed(t); return; }
     if (!seq_busy(t)) seq_add(t, PAD_TRIANGLE);   /* in menus Back is △ */
 }
@@ -2350,7 +2398,8 @@ void touch_back(Touch *t, double now)
 void touch_pad_used(Touch *t, double now)
 {
     t->now = now;
-    if (t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM || t->pause == PAUSE_CODES) {
+    if (t->pause == PAUSE_OPEN || t->pause == PAUSE_CONTROLS || t->pause == PAUSE_CONFIRM || t->pause == PAUSE_CODES ||
+        t->pause == PAUSE_MENU) {
         /* the controller works the game's menu from here (moves its cursor, answers the question):
            the rows would no longer say where the game is, and the overlay's own presses stop */
         t->pause = PAUSE_PAD;
@@ -2733,6 +2782,14 @@ void touch_update(Touch *t, const TouchGame *game, double now)
             t->skip_pulse = 0;
         }
     }
+    if (game->front_end && t->pause != PAUSE_NONE) {
+        /* the race's loop is over (QUIT, a restart's load): so is its pause, and what it had to send
+           (a menu's △, the panel's steps); fingers still down are the menus' from now (274) */
+        t->pause = PAUSE_NONE, seq_reset(t);
+        t->panel_open = 0;
+        drop_race_touches(t);
+        for (int i = 0; i < 16; i++) t->pulse_buttons[i] = 0, t->pulse_fields[i] = 0;
+    }
     lifted_presses_step(t);
     if (was_on && !t->race_was_on && t->pause == PAUSE_NONE && !t->editor) {   /* the race is gone (the editor's fingers are its own) */
         drop_race_touches(t);
@@ -3074,7 +3131,7 @@ static int pressed_control(const Touch *t, int c)
 
 static void draw_top_buttons(const Touch *t, Draw *d, int classic)
 {
-    for (int c = TC_CAMERA; c <= TC_PAUSE; c++) {
+    for (int c = t->pause == PAUSE_MENU ? TC_PAUSE : TC_CAMERA; c <= TC_PAUSE; c++) {   /* the game's menu: Pause alone */
         const Ctl *k = &t->ctl[c];
         if (!k->on) continue;
         uint32_t w = rgba(255, 255, 255, 0.95f * d->alpha);
@@ -3321,7 +3378,7 @@ static void draw_panel_rows(const Touch *t, Draw *d)
         return;
     }
     text(d, W / 2, H * 0.05f + 5, 3.9f, 0, "PAUSED", green);
-    static const char *const rows[PAUSE_ROWS] = {"RESUME", "RESTART RACE", "QUIT RACE", "CONTROLS", "BAIL OUT", "CODES"};
+    static const char *const rows[PAUSE_ROWS] = {"RESUME", "RESTART RACE", "QUIT RACE", "CONTROLS", "BAIL OUT", "CODES", "MORE"};
     for (int r = 0; r < PAUSE_ROWS; r++) {
         Box b = pause_row_box(t, r);
         int enabled = r >= ROW_CONTROLS || t->game.pause_row[r] >= 0;
@@ -3330,6 +3387,8 @@ static void draw_panel_rows(const Touch *t, Draw *d)
             if (t->f[i].used && t->f[i].job == JOB_PANEL && t->f[i].target == r && pause_row_at(t, t->f[i].x, t->f[i].y) == r) pressed = 1;
         if (pressed) put(d, TS_RECT, b.x, b.y, b.hw, b.hh, 1.0f, 0, rgba(166, 227, 154, 0.17f), 0);
         if (r == ROW_CONTROLS) put(d, TS_RECT, W / 2, b.y - b.hh - 1.0f, W * 0.30f, 0.15f, 0, 0, rgba(166, 227, 154, 0.45f), 0);
+        if (r == ROW_CODES || r == ROW_MORE)   /* the line between the halves */
+            put(d, TS_RECT, W / 2, b.y, 0.15f, b.hh * 0.6f, 0, 0, rgba(166, 227, 154, 0.45f), 0);
         text(d, b.x, b.y, 3.0f, 0, rows[r], enabled ? white : off);
     }
 }
@@ -3463,6 +3522,10 @@ int touch_shapes(const Touch *t, TouchShape *out, int max)
     Draw d = {out, 0, max, clampf(t->set.opacity / 100.0f, 0.1f, 1.0f)};
     if (!touch_visible(t)) return 0;
     if (t->editor) { draw_editor(t, &d); return d.n; }
+    if (t->pause == PAUSE_MENU) {   /* the game's own menu shows; the Pause button stays (its △) */
+        draw_top_buttons(t, &d, t->set.preset == TOUCH_CLASSIC);
+        return d.n;
+    }
     if (flyover_on(t) && t->pause == PAUSE_NONE) {   /* the flight over the track: SKIP (finding 209) */
         Box b = skip_box(t);
         int pressed = 0;

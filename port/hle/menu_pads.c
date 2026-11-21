@@ -49,7 +49,8 @@ enum { LEGEND_PAD = 6 };
 int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLegendRange *out, int max)
 {
     static const struct { char glyph; uint16_t button; } glyphs[] = {
-        {GLYPH_CROSS[0], PAD_CROSS}, {GLYPH_TRIANGLE[0], PAD_TRIANGLE}, {GLYPH_CIRCLE[0], PAD_CIRCLE}, {GLYPH_SQUARE[0], PAD_SQUARE}};
+        {GLYPH_CROSS[0], PAD_CROSS}, {GLYPH_TRIANGLE[0], PAD_TRIANGLE}, {GLYPH_CIRCLE[0], PAD_CIRCLE}, {GLYPH_SQUARE[0], PAD_SQUARE},
+        {GLYPH_LEFT[0], PAD_LEFT}, {GLYPH_RIGHT[0], PAD_RIGHT}, {GLYPH_R1[0], PAD_R1}};   /* PREV / NEXT, R1 (finding 274) */
     int at[MENU_LEGEND_BUTTONS], n = 0;
     uint16_t button[MENU_LEGEND_BUTTONS];
     for (int i = 0; i < length && n < max && n < MENU_LEGEND_BUTTONS; i++)
@@ -81,6 +82,21 @@ uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x)
 {
     for (int k = 0; k < n; k++)
         if (x >= ranges[k].from && x < ranges[k].to) return ranges[k].button;
+    return 0;
+}
+
+/* MUSIC PLAYLIST > CUSTOM's own legend (func_0019A850, finding 274): "✕ USE", "△ BACK", "○ MODIFY",
+   one line each from view x 30 at y 160, 170, 180; widths[k] its drawn width, 0 when not drawn. The
+   button of the line whose words (LEGEND_PAD more on each side, its 10-pixel line high) hold (x, y),
+   0 none: the track list right of it (its numbers from x 112, a 12th track at y 157) is no legend. */
+uint16_t menu_custom_legend_hit(const int widths[3], int x, int y)
+{
+    static const uint16_t buttons[3] = {PAD_CROSS, PAD_TRIANGLE, PAD_CIRCLE};
+    for (int k = 0; k < 3; k++) {
+        int top = 159 + 10 * k;
+        if (widths[k] > 0 && y >= top && y < top + 10 && x >= 30 - LEGEND_PAD && x < 30 + widths[k] + LEGEND_PAD)
+            return buttons[k];
+    }
     return 0;
 }
 

@@ -107,8 +107,44 @@ int main(void)
         for (int x = r[1].left; x < r[1].right; x++) assert(menu_legend_hit(r, n, x) == PAD_TRIANGLE);
         for (int x = r[0].left; x < r[0].right; x++) assert(menu_legend_hit(r, n, x) == PAD_CROSS);
     }
+    /* the playlist editor (finding 274): "○ ADD □ CHANGE R1 DELETE △ BACK ✕ SELECT", each word its own
+       button, DELETE R1's (it ran into CHANGE's range before R1 was a glyph); OPTIONS' "◂ LESS ▸ MORE" */
+    {
+        static const char editor[] = GLYPH_CIRCLE " ADD " GLYPH_SQUARE " CHANGE " GLYPH_R1 " DELETE " GLYPH_TRIANGLE
+                                     " BACK " GLYPH_CROSS " SELECT";
+        static const uint16_t want[5] = {PAD_CIRCLE, PAD_SQUARE, PAD_R1, PAD_TRIANGLE, PAD_CROSS};
+        static const char *const words[5] = {"ADD", "CHANGE", "DELETE", "BACK", "SELECT"};
+        int length = (int)strlen(editor), prefix[MENU_PAGE_TEXT + 1];
+        for (int i = 0; i <= length; i++) prefix[i] = 10 * i;
+        MenuLegendRange r[MENU_LEGEND_BUTTONS];
+        assert(menu_legend_ranges(editor, length, prefix, r, MENU_LEGEND_BUTTONS) == 5);
+        for (int k = 0; k < 5; k++) {
+            int at = (int)(strstr(editor, words[k]) - editor);
+            assert(r[k].button == want[k]);
+            for (int i = at; i < at + (int)strlen(words[k]); i++) assert(menu_legend_hit(r, 5, 10 * i + 5) == want[k]);
+        }
+        static const char options[] = GLYPH_LEFT " LESS " GLYPH_RIGHT " MORE " GLYPH_TRIANGLE " BACK " GLYPH_CROSS " SELECT";
+        length = (int)strlen(options);
+        for (int i = 0; i <= length; i++) prefix[i] = 10 * i;
+        assert(menu_legend_ranges(options, length, prefix, r, MENU_LEGEND_BUTTONS) == 4);
+        assert(r[0].button == PAD_LEFT && r[1].button == PAD_RIGHT && menu_legend_hit(r, 4, 35) == PAD_LEFT &&
+               menu_legend_hit(r, 4, 95) == PAD_RIGHT);
+    }
     assert(menu_legend_ranges("RETRY", 5, (const int[6]){0, 10, 20, 30, 40, 50}, NULL, 0) == 0);  /* no glyph: no buttons */
     printf("menu pads: a legend's buttons, each word its own, never overlapping\n");
+    /* MUSIC PLAYLIST > CUSTOM's legend lines (finding 274): each line's words take its button, the
+       track list beside them never (a 12th track's number at (112, 157): a tap at (115, 162) is no USE) */
+    {
+        const int widths[3] = {40, 46, 62}, none[3] = {0, 46, 0};
+        assert(menu_custom_legend_hit(widths, 115, 162) == 0 && menu_custom_legend_hit(widths, 112, 160) == 0);
+        assert(menu_custom_legend_hit(widths, 35, 164) == PAD_CROSS && menu_custom_legend_hit(widths, 69, 160) == PAD_CROSS);
+        assert(menu_custom_legend_hit(widths, 76, 164) == 0);  /* past USE's word */
+        assert(menu_custom_legend_hit(widths, 60, 174) == PAD_TRIANGLE && menu_custom_legend_hit(widths, 70, 185) == PAD_CIRCLE);
+        assert(menu_custom_legend_hit(widths, 70, 189) == 0 && menu_custom_legend_hit(widths, 70, 158) == 0);
+        assert(menu_custom_legend_hit(none, 35, 164) == 0 && menu_custom_legend_hit(none, 35, 185) == 0);  /* not drawn */
+        assert(menu_custom_legend_hit(none, 35, 174) == PAD_TRIANGLE);
+    }
+    printf("menu pads: MUSIC PLAYLIST's CUSTOM legend lines by their words, not the tracks beside\n");
     /* beside a line (finding 268): left of its words Left, right of them Right, on them its own button;
        a heading's halves (the middle passed as both ends): one of the two, never none */
     assert(menu_side_button(99, 100, 200) == PAD_LEFT && menu_side_button(0, 100, 200) == PAD_LEFT);

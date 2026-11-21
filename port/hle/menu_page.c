@@ -872,6 +872,9 @@ static int legend_tap(void *menu, int view)
     return n ? menu_legend_hit(ranges, n, mx) : -1;
 }
 
+/* MUSIC PLAYLIST > CUSTOM > MODIFY: the playlist editor (D_0043D2A0, finding 274) */
+enum { MUSIC_EDITOR = 0x08287A10u };
+
 /* The open popup and the mouse's news this field: hover, clicks, wheel. */
 static void popup_mouse(void *menu, int view, int moved, int left, int right, int wheel)
 {
@@ -897,7 +900,8 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
         if (!side) row = -1;
     }
     int value_row = p && row >= 0 && row < MENU_PAGE_ROWS && p->kind[row] == MENU_ROW_VALUE && p->arrows[row] != MENU_VALUE_ACTION;
-    if (moved && row >= 0 && !side && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row)
+    int editor = AT(menu, X_VTABLE, uint32_t) == MUSIC_EDITOR;   /* its cursor moves by taps only (below) */
+    if (moved && !editor && row >= 0 && !side && row_enabled(menu, row) && AT(menu, X_CURSOR, int) != row)
         AT(menu, X_CURSOR, int) = row;
     /* a game's popup with no row to choose is a message waiting for Cross ("PRESS X TO CONTINUE",
        the unlocks, the memory card's notices): a tap anywhere answers it (issue #105, finding 266) */
@@ -918,12 +922,25 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
     } else if (left && side) {
         AT(menu, X_CURSOR, int) = row;
         press(side);
+    } else if (left && row >= 0 && row_enabled(menu, row) && editor && AT(menu, X_CURSOR, int) != row) {
+        /* the playlist editor: Cross saves the list and leaves (func_0019B638), and its CHANGE and
+           DELETE act on the cursor's song, so a tap on another row only takes the cursor there; a
+           tap on the cursor's row is Cross (finding 274; a phone has no hover) */
+        AT(menu, X_CURSOR, int) = row;
+        hle_log("menu mouse: the playlist editor's cursor to row %d\n", row);
     } else if (left && row >= 0 && row_enabled(menu, row)) {
         AT(menu, X_CURSOR, int) = row;
         press(value_row ? (left_arrow ? PAD_LEFT : PAD_RIGHT) : PAD_CROSS);
     } else if (left && row < 0 && p) {  /* our pages' legend */
         uint16_t b = page_legend_button(menu, view);
         if (b) press(b);
+    } else if (left && row < 0) {  /* a game popup's legend words press their buttons, as on a message
+                                      (finding 274: the playlist editor's ADD / CHANGE / DELETE, any BACK) */
+        int b = legend_tap(menu, view);
+        if (b > 0) {
+            hle_log("menu mouse: the legend's %04x\n", b);
+            press((uint16_t)b);
+        }
     }
     if (right) press(PAD_TRIANGLE);
     int cursor = AT(menu, X_CURSOR, int);
@@ -943,7 +960,7 @@ static void popup_mouse(void *menu, int view, int moved, int left, int right, in
    Both have a legend at the bottom whose buttons a click presses. */
 static int shell_trace = -1;           /* DHD_MOUSE_TRACE */
 enum { SHOP_ROOT = 0x08284190u, SHOP_LIST = 0x500, SHOP_HEADING = 0x504, TRACK_CHOOSER = 0x08288650u,
-       SHOP_LIST_PLAIN = 0x08287190u, SHOP_ITEMS = 0x08283F50u };
+       SHOP_LIST_PLAIN = 0x08287190u, SHOP_ITEMS = 0x08283F50u, MUSIC_CUSTOM = 0x08287A98u };
 static void *list_target_menu;          /* the shop's list while the mouse drives its cursor */
 static int list_target = -1, list_steps;
 
@@ -988,9 +1005,41 @@ static int list_more(void *list, int y, int *row)
     return 0;
 }
 
+/* MUSIC PLAYLIST > CUSTOM (vtable D_00287A98: USER 1-4) draws its own legend under its rows, one
+   line each from view x 30 (func_0019A850): "✕ USE" at y 160 (a list with tracks), "△ BACK" at 170,
+   "○ MODIFY" at 180. MODIFY (the track list, D_0043D2A0) is the popup manager's button 6 (+0x45C),
+   Circle, which no tap pressed (finding 274). A tap on a line's words presses its button; 0: not on
+   one (the track list beside the lines is not: each line is measured as drawn, in its font). */
+extern char D_0029D168[], D_0029D170[], D_0028E558[];  /* "✕ USE", "△ BACK", "○ MODIFY" */
+static int custom_legend_width(const char *text)
+{
+    char saved[0x20];
+    memcpy(saved, D_004F3570, sizeof saved);
+    func_0020FB80(0, 0x15D, 0xA7, -0x86, -0x7E);  /* func_0019A850's size for these lines */
+    *(int *)(D_004F3570 + 0x1C) = 0;
+    int width = func_0020F860(0, text) >> 4;
+    memcpy(D_004F3570, saved, sizeof saved);
+    return width;
+}
+static uint16_t music_custom_legend(void *menu, int view)
+{
+    int mx, my;
+    if (AT(menu, X_VTABLE, uint32_t) != MUSIC_CUSTOM || !pointer(view, &mx, &my)) return 0;
+    int user = AT(menu, 0, int), list = user >= 0 && user < 4;  /* +0: the cursor's USER, +0x540: its tracks */
+    int widths[3] = {list && AT(menu, 0x540 + user, signed char) > 0 ? custom_legend_width(D_0029D168) : 0,
+                     custom_legend_width(D_0029D170), list ? custom_legend_width(D_0028E558) : 0};
+    return menu_custom_legend_hit(widths, mx, my);
+}
+
 static int game_popup_mouse(void *menu, int view, int moved, int left, int right, int wheel)
 {
     uint32_t vtable = AT(menu, X_VTABLE, uint32_t);
+    uint16_t own = left ? music_custom_legend(menu, view) : 0;
+    if (own) {
+        hle_log("menu mouse: MUSIC PLAYLIST's CUSTOM legend: %s\n", own == PAD_CROSS ? "USE" : own == PAD_TRIANGLE ? "BACK" : "MODIFY");
+        press(own);
+        return 1;
+    }
     if (vtable != SHOP_ROOT && vtable != TRACK_CHOOSER) return 0;
     int w = 0, h = 0, mx = 0, my = 0;
     func_0023D650(view, &w, &h);

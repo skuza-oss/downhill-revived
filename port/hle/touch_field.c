@@ -116,6 +116,7 @@ void touch_field(void)
     h.clock_moving = race_screen && wall - last_change < 1.5 / 60;
     last_clock = clock;
     h.menu_up = menu_popup_up();
+    h.front_end = !port_in_race() && !h.attract;
     if (race_screen) last_ms = port_field_seconds(clock) * 1000.0;
     h.race_ms = last_ms;
     pause_rows(h.pause_row);

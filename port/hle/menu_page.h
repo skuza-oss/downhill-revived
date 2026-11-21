@@ -106,6 +106,9 @@ enum { MENU_LEGEND_BUTTONS = 8 };
 typedef struct { int left, glyph_right, right, from, to; uint16_t button; } MenuLegendRange;
 int menu_legend_ranges(const char *text, int length, const int *prefix, MenuLegendRange *out, int max);
 uint16_t menu_legend_hit(const MenuLegendRange *ranges, int n, int x);
+/* MUSIC PLAYLIST > CUSTOM's legend lines (✕ USE, △ BACK, ○ MODIFY from view x 30, y 160 / 170 / 180):
+   the button of the line under (x, y), widths[k] each line's drawn width, 0 not drawn (finding 274). */
+uint16_t menu_custom_legend_hit(const int widths[3], int x, int y);
 /* A tap at x beside a line whose words span [left, right): Left left of them, Right right of them, 0 on
    them (menu_pads.c, finding 268). left == right: the line's two halves. */
 uint16_t menu_side_button(int x, int left, int right);
@@ -121,6 +124,7 @@ enum { MENU_STYLE_ROW, MENU_STYLE_SELECTED, MENU_STYLE_OFF };
 enum { MENU_LEFT, MENU_CENTRE, MENU_RIGHT };
 #define GLYPH_SQUARE "\xA0"
 #define GLYPH_CIRCLE "\xAB"
+#define GLYPH_R1 "\xB9"   /* the playlist editor's "R1 DELETE" (finding 274) */
 MenuStyle menu_page_style(const MenuPage *p, int which);
 MenuStyle menu_game_style(int which);  /* the same without a page (a menu drawn over a race) */
 int menu_popup_up(void);               /* a popup is up (the game's or ours) */
